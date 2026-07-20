@@ -2,47 +2,44 @@
 
 ### Bug Fixes
 
-- **Exponential blowup evaluating float-carrying symbolic bodies inside
-  function applications.** The "inexact operand numericizes a closed-constant
-  sum/product" rule (`0.5 + π` → `3.64…`) decided "closed constant" by
-  resolving symbols through the *dynamic* scope chain, so inside a function
-  application a bound-but-symbolic parameter counted as known: a body term
-  like `z² + 0.3` fired a full-subtree `N()` walk that could make no
-  progress, at every nested level, mutually recursive with `evaluate` —
-  ~×7.5 work per nesting level. The canonical victim was interpreted
-  evaluation of a recursive function over a symbolic argument
-  (`Q(n, z) = Q(n-1, z)² + 0.3`, the iterated-map shape): depth 7 took ~8 s
-  and depth 8+ hit the time limit, where the same recursion with an exact
-  constant (`3/10`) unwound in milliseconds. The gate is now the lexical
-  `isConstant` (every symbol a constant binding) — depth 7 drops ~500× to
-  ~15 ms, float and exact now cost the same, and `0.5 + π`, `0.5 + √2`, and
+- **Exponential blowup evaluating float-carrying symbolic bodies inside function
+  applications.** The "inexact operand numericizes a closed-constant
+  sum/product" rule (`0.5 + π` → `3.64…`) decided "closed constant" by resolving
+  symbols through the _dynamic_ scope chain, so inside a function application a
+  bound-but-symbolic parameter counted as known: a body term like `z² + 0.3`
+  fired a full-subtree `N()` walk that could make no progress, at every nested
+  level, mutually recursive with `evaluate` — ~×7.5 work per nesting level. The
+  canonical victim was interpreted evaluation of a recursive function over a
+  symbolic argument (`Q(n, z) = Q(n-1, z)² + 0.3`, the iterated-map shape):
+  depth 7 took ~8 s and depth 8+ hit the time limit, where the same recursion
+  with an exact constant (`3/10`) unwound in milliseconds. The gate is now the
+  lexical `isConstant` (every symbol a constant binding) — depth 7 drops ~500×
+  to ~15 ms, float and exact now cost the same, and `0.5 + π`, `0.5 + √2`, and
   `0.5 + x` all behave exactly as before. Two neighboring sites sharing the
-  wrong predicate returned flat-wrong *values* inside applications and are
-  fixed the same way: `KroneckerDelta(w)` over a bound symbolic parameter
-  returned `0` (now stays symbolic), and `Degree(w²)` returned `0`
-  (now `2`).
+  wrong predicate returned flat-wrong _values_ inside applications and are fixed
+  the same way: `KroneckerDelta(w)` over a bound symbolic parameter returned `0`
+  (now stays symbolic), and `Degree(w²)` returned `0` (now `2`).
 
   Relatedly, many **non-lazy** evaluate handlers re-evaluated operands the
-  evaluation driver had already evaluated. Each such call re-descends the
-  whole operand subtree, so under nesting the waste compounded — a residual
-  ×2-per-level re-walk on top of the bug above. All library handlers now
-  follow the handler contract (a `lazy` operator's handler owns its
-  operands' single evaluation; a non-lazy handler receives them already
-  evaluated and must not re-evaluate): `Power`, `Sqrt`, `Root`, `Divide`,
-  `Ln`, `Log`, `Negate` in arithmetic; the linear-algebra operators
-  (`Transpose`, `Determinant`, `Inverse`, `MatrixMultiply`, `Norm`, the
-  eigen/decomposition family, matrix constructors and predicates, ~30
-  sites); the statistics reducers (`Mean`/`Median`/`Variance`/… — 11
-  sites); and `Text`. Symbolic recursive unwinding is now linear: depth 80
-  unwinds in ~95 ms where depth ~20 previously hit the time limit.
+  evaluation driver had already evaluated. Each such call re-descends the whole
+  operand subtree, so under nesting the waste compounded — a residual
+  ×2-per-level re-walk on top of the bug above. All library handlers now follow
+  the handler contract (a `lazy` operator's handler owns its operands' single
+  evaluation; a non-lazy handler receives them already evaluated and must not
+  re-evaluate): `Power`, `Sqrt`, `Root`, `Divide`, `Ln`, `Log`, `Negate` in
+  arithmetic; the linear-algebra operators (`Transpose`, `Determinant`,
+  `Inverse`, `MatrixMultiply`, `Norm`, the eigen/decomposition family, matrix
+  constructors and predicates, ~30 sites); the statistics reducers
+  (`Mean`/`Median`/`Variance`/… — 11 sites); and `Text`. Symbolic recursive
+  unwinding is now linear: depth 80 unwinds in ~95 ms where depth ~20 previously
+  hit the time limit.
 
 - **`Timing` now measures the actual evaluation.** `Timing` was a non-lazy
-  operator, so the engine evaluated its argument *before* the handler ran
-  and the handler then timed a redundant second walk of the
-  already-evaluated result — reported times measured cache-warm re-walks,
-  not the computation. `Timing` is now `lazy`: the handler receives the raw
-  argument, canonicalizes it outside the timed region, and times the real
-  evaluation.
+  operator, so the engine evaluated its argument _before_ the handler ran and
+  the handler then timed a redundant second walk of the already-evaluated result
+  — reported times measured cache-warm re-walks, not the computation. `Timing`
+  is now `lazy`: the handler receives the raw argument, canonicalizes it outside
+  the timed region, and times the real evaluation.
 
 - **One-time cache builds are no longer charged against the time limit.** The
   engine builds some internal tables lazily on first use (constructible trig
@@ -50,12 +47,12 @@
   rule set, etc.). Previously this warm-up ran inside the caller's
   `timeLimit`/`withTimeLimit()` budget, so a tight deadline on a fresh engine
   could lose a large fraction of its budget — or fire mid-build — on the very
-  first call. The deadline is now suspended while a cache builds and then
-  pushed back by the build's duration, so a time budget measures only the
-  caller's own evaluation. Relatedly, a timeout that did fire during a cache
-  build was swallowed and resurfaced as an unrelated `TypeError`; an
-  interruption now propagates as the `CancellationError` it is, leaving the
-  cache unbuilt so a later call retries.
+  first call. The deadline is now suspended while a cache builds and then pushed
+  back by the build's duration, so a time budget measures only the caller's own
+  evaluation. Relatedly, a timeout that did fire during a cache build was
+  swallowed and resurfaced as an unrelated `TypeError`; an interruption now
+  propagates as the `CancellationError` it is, leaving the cache unbuilt so a
+  later call retries.
 
 - **Compiled real/complex convention mismatch in branch arms** (js target). A
   provably-real branch arm (`If`/`Which`/`When`) alongside a complex-valued arm
@@ -65,13 +62,13 @@
   point, including points that never left the base clause. Real arms are now
   coerced to the complex convention when any arm is complex (the no-match
   default likewise emits `{ re: NaN, im: NaN }`); wide-typed pass-through arms
-  (a `z` slot declared `number` carrying a complex value at run time) stay
-  bare. The same coercion now applies at the two sibling seams: a `Typed`
-  complex ascription over a provably-real operand (previously silently inert
-  in compiled code — an all-real body under a declared `-> complex` return),
-  and a provably-real call-site argument bound to a complex-typed parameter of
-  a user-defined function (`M(10, 0)` — `Complex(0, 0)` canonicalizes to the
-  real literal `0`).
+  (a `z` slot declared `number` carrying a complex value at run time) stay bare.
+  The same coercion now applies at the two sibling seams: a `Typed` complex
+  ascription over a provably-real operand (previously silently inert in compiled
+  code — an all-real body under a declared `-> complex` return), and a
+  provably-real call-site argument bound to a complex-typed parameter of a
+  user-defined function (`M(10, 0)` — `Complex(0, 0)` canonicalizes to the real
+  literal `0`).
 
 ### New Features
 
@@ -107,6 +104,65 @@
   silent and exact: non-numeric rows, NaN results (re-checked through the
   interpreter so `√x` over a sign-crossing source still yields complex values),
   and ineligible bodies (e.g. containing `Random`) behave exactly as before.
+
+### Benchmarks
+
+#### Numeric performance (200-digit precision)
+
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
+
+| Expression         | CE (current) | CE 0.86.1 | SymPy | math.js | Mathematica |
+| ------------------ | -----------: | --------: | ----: | ------: | ----------: |
+| $\pi^2$            |          7.2 |       8.1 |   179 |     102 |         3.9 |
+| $\sin 1$           |           23 |        24 |   224 |     442 |         5.2 |
+| $\cos 1$           |           23 |        23 |   224 |     571 |         7.0 |
+| $\ln 2$            |           15 |        15 |   344 |   4,392 |         3.7 |
+| $e^{\pi}$          |           13 |        13 |   212 |   4,930 |         4.5 |
+| $\zeta(3)$         |        1,732 |     1,733 |   265 |       — |          48 |
+| $\Gamma(\tfrac13)$ |          928 |       942 |   347 |       — |         219 |
+| $\psi(\tfrac13)$   |          777 |       814 | 2,967 |       — |         196 |
+
+#### Symbolic capability & performance
+
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE (current)** and **CE 0.86.1** columns to see
+what is _new this release_ (a `—` under `0.86.1` next to a number under the
+current build). The **CE + R/F** column is the current build with the opt-in
+Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
+
+| Operation                              | CE (current) | CE + R/F | CE 0.86.1 | SymPy  | math.js | Mathematica |
+| -------------------------------------- | :----------: | :------: | :-------: | :----: | :-----: | :---------: |
+| **Antiderivatives**                    |              |          |           |        |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |     5.4×     |   2.4×   |   4.3×    |  0.5×  |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |     8.2×     |   1.1×   |   7.0×    | 0.09×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |     4.3×     |   0.5×   |   3.3×    |  0.3×  |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |      —       |   1.4×   |     —     |  0.1×  |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |      —       |   1.1×   |     —     | 0.01×  |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |      —       |   1.1×   |     —     | 0.007× |    —    |     1×      |
+| **Derivatives**                        |              |          |           |        |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |    0.03×     |  0.03×   |   0.02×   | 0.001× | 0.003×  |     1×      |
+| **Simplification**                     |              |          |           |        |         |             |
+| $\sqrt{3+2\sqrt2}$                     |     33×      |   19×    |    25×    |   —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |     88×      |   48×    |    63×    |  3.4×  |   16×   |     1×      |
+| **Evaluation**                         |              |          |           |        |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |     64×      |   31×    |    60×    |  3.3×  |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |     8.5×     |   5.1×   |   8.0×    |  1.9×  |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |    6388×     |  6536×   |   6482×   |  75×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |     375×     |   144×   |   356×    |  2.2×  |    —    |     1×      |
+| **Solving**                            |              |          |           |        |         |             |
+| $x^4+x^2-1=0$                          |     0.4×     |   0.3×   |   0.3×    | 0.08×  |    —    |     1×      |
+| $x^3-x-1=0$                            |     1.6×     |   1.7×   |   1.6×    | 0.04×  |    —    |     1×      |
+
+Across the cases both solve, Compute Engine is a **median 5.4× faster than
+Mathematica** (up to 6388×) — in the browser, not a proprietary kernel.
+
+<sub>
+Measured 2026-07-20 · Compute Engine `0.87.0` @ `0158397a` (current build) · published `0.86.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+</sub>
 
 ## 0.86.3 _2026-07-19_
 
@@ -150,14 +206,14 @@
 ### Bug Fixes
 
 - **Degree-mode compilation now reaches user-defined function bodies.** The
-  angular-unit rewrite (scaling trig arguments/results so radian-based
-  compiled math reproduces `angularUnit` semantics) was applied only to the
-  top-level expression: compiling `t ↦ f(t)` where `f(x) := sin(x)` under
-  `angularUnit: 'deg'` emitted radian-based trig inside `f`'s definition,
-  while the inlined `t ↦ sin(t)` correctly scaled. The rewrite is now applied
-  to each emitted user-function body. (Compiled-vs-interpreted agreement for
-  unit-scaled trig is ~1 ulp, not digit-exact — the two routes round the unit
-  conversion in different orders.)
+  angular-unit rewrite (scaling trig arguments/results so radian-based compiled
+  math reproduces `angularUnit` semantics) was applied only to the top-level
+  expression: compiling `t ↦ f(t)` where `f(x) := sin(x)` under
+  `angularUnit: 'deg'` emitted radian-based trig inside `f`'s definition, while
+  the inlined `t ↦ sin(t)` correctly scaled. The rewrite is now applied to each
+  emitted user-function body. (Compiled-vs-interpreted agreement for unit-scaled
+  trig is ~1 ulp, not digit-exact — the two routes round the unit conversion in
+  different orders.)
 
 - **`ce.assign(name, fn)` ties the recursion knot for pre-boxed function
   literals.** A `Function` literal canonicalized _before_ `ce.assign(name, …)`

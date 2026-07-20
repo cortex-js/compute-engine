@@ -315,7 +315,10 @@ Still open from its ranked list:
   cache). Still open, measurement-gated: cold-start bundle size, and the
   post-drift-fix residual tail — 6 benchmark cases still < 0.95× vs 0.73.0,
   worst CE4 erf-integral 0.62× (case-specific integrate/simplify machinery
-  growth, not box tax) — a candidate future perf item.
+  growth, not box tax) — a candidate future perf item. **Also
+  measured-unprofitable: both P1 differentiation levers and the `.mul()`
+  fast-path pivot** (2026-07-19) — see "Symbolic-evaluation performance → P1"
+  below before touching `derivative.ts` or `sortProductOperands` for speed.
 - **Loose-parsing low items:** infix calculator notation `5 nPr 2` is
   unsupported (a new-notation design item, not a map gap); explicit `_a`
   wildcards in arrow-string rules are a silent no-op (redundant there —
@@ -791,78 +794,81 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 
 ### Symbolic-evaluation performance
 
-#### P1. Differentiation performance (~1.8–3× available) — DEFERRED
+#### P1. Differentiation performance — CLOSED, measured-unprofitable (2026-07-19)
 
-**Status (2026-06-16): deferred.** Verified, scoped, and a direction chosen, but
-not worth the churn right now. Picked up below for whoever resumes it.
+**Do not re-attempt either lever without a new profile.** Both were re-measured
+on 0.87.0 and neither pays. The section is kept — rather than deleted — because
+the superseded 2026-06-16 write-up promised a **~5× ceiling** that does not
+exist, and that number will otherwise invite this dead end to be re-walked.
 
-The cross-library benchmark (`benchmarks/REPORT.md`) puts CE's differentiation
-**~38× slower than Wolfram** (median 0.17 ms vs 0.0044 ms), and the gap **widens
-with expression size** (`d/dx sin x` ~6×, `d/dx x²·sin x` ~80×, `d/dx √(1−x²)`
-~114×); Wolfram's `D` is essentially flat (~4 µs regardless of structure).
-(`simplifyDerivative` is already a no-op, so simplification is _not_ the cost.)
+**What the 2026-06-16 profile said, and what is actually true.** Re-measured on
+the same 9 benchmark cases (`benchmarks/cases.json` D01–D09), same path
+(`ce.box(['D', f, 'x']).evaluate()`, warm, 300 iters/case; baseline median
+**0.162 ms**, consistent with the 0.17 ms the cross-library benchmark reports):
 
-**Profiled 2026-06-16 (verified — `.perf-explore/profile-diff*.mjs`).** The
-original hypothesis (the cost is per-node canonicalization, and deferring it
-"closes most of the gap") is **only partly right**. Decomposing the per-call path
-(`ce.box(['D', …]).evaluate()`, warm; D09 √(1−x²) ≈ 0.35 ms) gives three cost
-centers:
+| cost center          | 2026-06-16 | measured 2026-07-19 |
+| -------------------- | ---------- | ------------------- |
+| final `f.evaluate()` | ~60%       | **~27%**            |
+| `differentiate()`    | ~20%       | **~44%**            |
+| box/bind/alloc       | ~20%       | ~29%                |
 
-- **final `f.evaluate()` ≈ 60% — the largest, and largely redundant.** The
-  canonical derivative already equals the evaluated form for **8 of 9** benchmark
-  cases (only D09 changes, trivially: `-(x·1/√(1−x²))` → `-x/√(1−x²)`). Skipping
-  it is the single biggest lever.
-- **per-node canonicalization ≈ 20%** — real (it _is_ ~70–100% of
-  `differentiate()`'s own time), but a minority of the call. This is the helper
-  tax: `symbolic/derivative.ts` builds every node through `.mul()/.add()/.div()/
-  .pow()/.neg()`, each of which reorders/flattens/folds.
-- **recursion + node allocation/binding + box ≈ 20%** — fixed `BoxedExpression`
-  overhead deferral can't touch.
+The evaluate share collapsed. The likely cause is the
+**2026-07-19 evaluate-handler contract fix** (non-lazy handlers now trust
+pre-evaluated operands instead of re-descending them — see the interpreter-perf
+item above): it already harvested most of what "drop the redundant final
+evaluate" was written to claim.
 
-**Measured ceilings** (true structural-diff spike, end-to-end, output checked):
+- **Lever A — drop the final `f.evaluate()`** (`library/calculus.ts`, the
+  `return f?.evaluate()` at the end of the `D` evaluate handler; the old "~213"
+  line reference was stale): measures **1.36×** (0.162 → 0.119 ms), not the
+  ~2–3.5× claimed. Still carries its documented 12-snapshot blast radius and the
+  `ln(e)`-no-longer-folds regressions. **Not worth a semantic change to `D`.**
+- **Lever B — defer per-node canonicalization** in `derivative.ts`: unchanged in
+  principle (the helper tax is real — see below), but with `differentiate()` at
+  44% of the call, its ceiling is ~1.3–1.5× for a rewrite of every rule path in
+  a 980-line file. It also optimizes _around_ `.mul()` rather than fixing it,
+  leaving every other `.mul()` caller slow.
+- **Combined ceiling is ~2×, not ~5×.** The 2026-06-16 conclusion — that the
+  residual is intrinsic to the boxed/bound representation and not closable by
+  deferral — still holds and is now the whole story.
 
-- Defer canonicalization, **keep** the final evaluate (output byte-identical to
-  today, all 9 cases): **~1.8× median** (1.0–3.3×). Much of what per-node canon
-  saved is paid back by the one mandatory top-level canonical pass.
-- Additionally **drop** the redundant final evaluate (return `f.canonical`):
-  **~5× median** (2.7–9.5×); output identical for 7/9, two differ only in
-  factoring (`(ln x+1)·xˣ` vs `xˣ+ln(x)·xˣ`).
+**The helper tax is real but is not a differentiation problem.** `derivative.ts`
+builds every node through `.mul()/.add()/.div()/.pow()/.neg()`, and those
+helpers are genuinely expensive (measured over 400 distinct operand pairs, so
+not a memoization artifact):
 
-**Conclusion: this is a ~2–3× win, not Wolfram parity.** Even the most aggressive
-variant leaves CE ~8–20× slower than Wolfram — the residual is intrinsic to the
-boxed/bound representation (one canonical pass + node allocation/binding) and is
-not closable by deferral. Wolfram's flat profile is lightweight term-rewriting,
-not a canonicalization strategy CE can adopt without changing its representation.
+| construction                        | `.mul()` | `ce.function('Multiply', …)` |
+| ----------------------------------- | -------- | ---------------------------- |
+| `sin(nx) · xⁿ` (byte-identical out) | 33.9 µs  | 2.8 µs                       |
+| symbol · number                     | 14.8 µs  | 2.1 µs                       |
+| `.div()`                            | 17.4 µs  | 5.3 µs                       |
 
-**Two levers, with the drop-evaluate one prototyped and measured:**
+Some of the gap is real capability (`mul()` distributes over sums — `2·(x+1)` →
+`2x+2` where canonical `Multiply` gives `2(x+1)`), but for non-sum operands the
+outputs are identical and the cost is not. **This is engine-wide, not specific
+to `D`.**
 
-- **Drop the redundant final `f.evaluate()`** (`library/calculus.ts` ~213, return
-  the canonical derivative) — the bigger win (~2–3.5×), but **it changes what `D`
-  returns** (canonical form, not fully-evaluated), so it is a semantic change, not
-  a pure optimization. Prototyped 2026-06-16; full `derivatives`+`calculus` suites
-  give a **12-snapshot blast radius**: _2 regressions_ — `ln(e)` no longer folds
-  to 1 (`d/dx eˣ → ln(e)·eˣ`, `d/dx log_e x → 1/(x·ln(e))`); these are
-  special-value folds `canonical` doesn't do and would need a source-level
-  `ln(e)→1` fix in the Power/Log rules. _2 improvements_ — the unknown-function
-  chain rule stops collapsing to a wrong `0` (`d/dx f(x²) → 2x·f′(x²)`). _8
-  cosmetic_ — factored/reordered but mathematically identical (Bessel ×7,
-  LambertW ×1). Notably the fraction-combining cases (`2(x+1)/(x²+2x)`) still pass,
-  so `evaluate`'s genuine work is narrower than feared — mostly `ln(e)`-style
-  special values. **Risk:** other untested derivatives may carry unfolded special
-  values; needs a full-suite run before adopting.
+**Attempted and reverted (2026-07-19): `isTensorProductOperand` fast path.**
+`sortProductOperands` (`order.ts`) maps that predicate — two `type.matches()`
+walks per operand — over every product, to decide whether ≥2 operands are
+tensors. A conservative scalar-primitive early-out measured **null** (mul 34.6
+vs 33.9 µs; diff median within noise): the predicate runs only **4 times per
+`mul()`**, ≈5% of its cost. Reverted — it is not worth a correctness-sensitive
+early-out around the P0-26 non-commutativity guard for no gain. (Trap for anyone
+who retries: the bottom type `never` **is** a subtype of `matrix`/`vector`, so it
+must stay off any such allowlist; `nothing` is safe.)
 
-- **Defer per-node canonicalization** (build the tree **structurally** in
-  `differentiate()` — `{ form: 'structural' }` — and canonicalize **once** at the
-  outermost call, keeping the final evaluate). **Chosen direction when resumed:**
-  output stays byte-identical (all snapshots pass), ~1.3–1.8× win, at the cost of
-  a careful rewrite of every rule path in `derivative.ts`. The spike confirmed the
-  `.mul()`-distributes-over-sums hazard (`k·(a+b)→ka+kb`) is real — it produced
-  factored result shapes — so the value returned must be the final canonical form,
-  not a raw structural tree. `differentiate()` recurses, so defer through the
-  recursion and canonicalize only at the top. (Could be combined with the
-  drop-evaluate lever later for the ~5× ceiling, in a separate reviewed step.)
-
-Scratch profiling/spike scripts: `.perf-explore/profile-diff*.mjs` (untracked).
+**Why `.mul()` has no cheap fix: the cost is diffuse.** A clean long-run CPU
+profile of `.mul()` alone (tsx startup amortized out) puts the largest single
+self-time frame at `isSubtype`, **6.7%**. Clusters: type system
+(`isSubtype`/`matches`/`get type`/`isPrimitiveSubtype`) ≈ 18%, definition lookup
+(`lookup`/`lookupApplicable`) ≈ 6%, numeric conversion
+(`ExactNumericValue`/`toNumericValue`) ≈ 6%, `mul` itself 5.2%, `Product` 1.7%,
+`sortProductOperands` 1.4%. Closing the 34 µs → 2.8 µs gap needs ~92% removed;
+no incremental patch reaches that. Reducing `.mul()` cost is a
+**representation-level** project (adjacent to Strategic item 9 — the same
+per-node type-query/binding tax), not a perf item. Recorded here so it is not
+mistaken for a contained optimization.
 
 ### Strategic
 
