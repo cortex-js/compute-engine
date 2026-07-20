@@ -20,6 +20,8 @@ import {
 } from './type-guards.js';
 import {
   isLinearAlgebraCollection,
+  isFixedShapeCollection,
+  isBroadcastCollectionType,
   couldBeNumericTuple,
   isNumericTuple,
   isTuple,
@@ -303,8 +305,29 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // (this is why `X-Y`/`3X+2Y` used to mis-type once their scaled terms
   // became collection-typed). The final `widen` still produces the honest
   // `finite_integer | matrix` union for a scalar-plus-matrix mix like `X+1`.
-  if (args.some((x) => isLinearAlgebraCollection(x)))
+  if (args.some((x) => isLinearAlgebraCollection(x))) {
+    // A BROADCAST-shaped collection operand (list-kind: `vector<n>`, `matrix`,
+    // `list<E>`) absorbs scalar operands elementwise — `V+1`, `matrix+1`,
+    // `2·[1,2,3]+a` all evaluate to the collection, never to a scalar. Widen
+    // over the collection operands ONLY, so no unreachable scalar arm enters
+    // the result. This matters beyond tidiness: union matching is all-members,
+    // so a `finite_integer | vector<3>` makes `type.matches('collection')`
+    // answer a confident `false` on a value that is always a collection
+    // (Tycho item 67 — consumers route on exactly that query; it also made
+    // `MatrixMultiply(row, aM₁+M₂)` reject a valid matrix operand).
+    // Generic `collection`/`indexed_collection`-kind operands are NOT included
+    // in the trigger: they may be a non-indexed `set` at runtime, which the
+    // value path never broadcasts, so those keep the honest widen.
+    const isBroadcastShaped = (x: Expression) =>
+      isFixedShapeCollection(x) || isBroadcastCollectionType(x);
+    const shaped = args.filter(isBroadcastShaped);
+    if (
+      shaped.length > 0 &&
+      args.every((x) => isBroadcastShaped(x) || isSubtype(x.type.type, 'number'))
+    )
+      return widen(...shaped.map((x) => x.type.type));
     return widen(...args.map((x) => x.type.type));
+  }
   // An operand whose collection-ness is not statically visible (a top
   // `unknown`/`any`/`value` leaf such as an undeclared `h(x)`, or an already-
   // `broadcastable<…>` inner node) makes the sum `broadcastable<T>`: it might

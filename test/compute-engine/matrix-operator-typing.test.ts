@@ -86,8 +86,30 @@ describe('Matrix-operator typing (declared symbols)', () => {
     expect(e.type.toString()).toBe('number');
   });
 
-  test('matrix + scalar keeps the honest union (leave as-is)', () => {
-    expect(engine().parse('X+1').type.toString()).toBe('finite_integer | matrix');
+  // Was pinned as `finite_integer | matrix` ("the honest union"). Reversed:
+  // the scalar arm is UNREACHABLE — `matrix + scalar` broadcasts elementwise
+  // and always evaluates to a matrix (`[[1,2],[3,4]]+1` → `[[2,3],[4,5]]`).
+  // Keeping it cost real consumers: union matching is all-members, so
+  // `type.matches('collection')` answered a confident `false` on a value that
+  // is always a collection (Tycho item 67), and it made `MatrixMultiply` reject
+  // a valid `aM₁+M₂` operand (see `wester.test.ts`, row-vector · matrix-sum).
+  test('matrix + scalar → matrix (no unreachable scalar arm)', () => {
+    expect(engine().parse('X+1').type.toString()).toBe('matrix');
+  });
+
+  test('vector + scalar → vector, shape preserved', () => {
+    const ce = engine();
+    ce.declare('V', 'vector<3>');
+    expect(ce.parse('V+1').type.toString()).toBe('vector<3>');
+    expect(ce.parse('2V+1').type.toString()).toBe('vector<3>');
+  });
+
+  // A generic `collection`/`set` operand may be non-indexed at runtime, which
+  // the value path never broadcasts — those keep the honest widen.
+  test('set/collection + scalar keeps the honest union', () => {
+    const ce = engine();
+    ce.declare('S', 'set<number>');
+    expect(ce.parse('S+1').type.toString()).toContain('|');
   });
 
   test('vector + vector → list<number> (acceptable)', () => {

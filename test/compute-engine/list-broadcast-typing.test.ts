@@ -71,6 +71,22 @@ describe('LIST-BROADCAST TYPING — tensor Add/Multiply (exact vector<n>)', () =
     expect(expr.type.toString()).not.toContain('|');
     expect(expr.type.toString()).toBe('vector<2>');
   });
+
+  // Tycho item 67: the bare-list path was already precise, but wrapping the
+  // list in a `Multiply`/`Divide` moved it off the single-tensor branch of
+  // `addType` and onto a `widen(…)` that unioned the scalar sibling back in.
+  // Nothing here is unbound and no symbol is involved in the last two rows —
+  // the scalar arm was unreachable, and it broke consumers routing on
+  // `type.matches('collection')` (union matching is all-members).
+  test.each([
+    ['2·[1,2,3] + a', ['Add', ['Multiply', 2, ['List', 1, 2, 3]], 'a']],
+    ['1/10·[1,2,3] + 1', ['Add', ['Divide', ['List', 1, 2, 3], 10], 1]],
+    ['[1,2,3]/10 + a', ['Add', ['Divide', ['List', 1, 2, 3], 10], 'a']],
+  ])('%s → vector<3>, no scalar arm', (_label, mathjson) => {
+    const expr = ce.box(mathjson as any);
+    expect(expr.type.toString()).toBe('vector<3>');
+    expect(expr.type.matches('collection')).toBe(true);
+  });
 });
 
 describe('LIST-BROADCAST TYPING — wrapper-lifted families (sound list<R>)', () => {

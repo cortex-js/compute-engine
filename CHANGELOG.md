@@ -1,5 +1,30 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`Add` no longer widens an unreachable scalar arm into a broadcast
+  collection type.** A sum mixing a scalar with a list-shaped operand typed as
+  a union — `matrix + 1` was `finite_integer | matrix`, `2·[1,2,3] + a` was
+  `number | vector<3>` — even though the value ALWAYS broadcasts elementwise
+  and can never be a scalar (`[[1,2],[3,4]] + 1` → `[[2,3],[4,5]]`). These now
+  type as the collection: `matrix`, `vector<3>`. The behavior was inconsistent
+  as well as imprecise — a dimensionless `list<number> + 1` was already
+  repaired to `list<number>` downstream, so only *dimensioned* shapes carried
+  the artifact.
+
+  This is a **type-surface change**: code pinning the union spelling will see
+  the narrowed type instead. It is a strict improvement for consumers that
+  *dispatch* on the type, and that is the motivation — union matching is
+  all-members, so `type.matches('collection')` returned a confident `false` on
+  a value that is always a collection, silently routing list-valued rows down
+  scalar paths (reported by Tycho as item 67). It also unblocks expressions
+  CE itself rejected: `MatrixMultiply([[x, y]], aM₁ + M₂)` failed signature
+  validation on the union operand and now evaluates.
+
+  Generic `collection`/`set`-typed operands are deliberately unchanged and keep
+  the honest union — a non-indexed collection is never broadcast by the value
+  path, so a scalar outcome stays reachable there.
+
 ## 0.87.1 _2026-07-20_
 
 ### Breaking Changes

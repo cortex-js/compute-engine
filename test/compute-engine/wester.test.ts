@@ -689,10 +689,12 @@ describe('Matrix theory', () => {
   });
 
   test(`row-vector . (a M1 + M2) in fused form`, () => {
-    // The natural single-expression form errors: the matrix-valued Add operand
-    // is assigned the union type `finite_number | matrix<2x3>` during
-    // canonicalization and rejected by MatrixMultiply's signature. CURRENT:
-    // returns MatrixMultiply(..., Error(incompatible-type)).
+    // The natural single-expression form used to error: the matrix-valued Add
+    // operand was assigned the union type `finite_number | matrix<2x3>` during
+    // canonicalization and rejected by MatrixMultiply's signature. FIXED —
+    // `addType` no longer widens an unreachable scalar arm into a broadcast
+    // collection, so the operand types `matrix<2x3>` and the product evaluates
+    // symbolically (`[[a·x + 2a·y + 7x − 8y, …]]`).
     const M1 = ['List', ['List', 1, 3, 5], ['List', 2, 4, 6]];
     const M2 = ['List', ['List', 7, -9, 11], ['List', -8, 10, -12]];
     expect(

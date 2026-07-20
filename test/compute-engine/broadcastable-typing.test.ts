@@ -212,8 +212,8 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     // `Remainder` has no collection-aware handler — its naive `widen(…)` over
     // a collection operand produced `finite_integer | vector<3>` while the
     // value ALWAYS broadcasts to a list. Only `Add`/`Multiply`/`Negate`
-    // (handlers that genuinely compute collection results, incl. the
-    // deliberate `matrix + scalar` union) defer; everyone else lifts.
+    // (handlers that genuinely compute collection results, and now type
+    // `matrix + scalar` as `matrix` themselves) defer; everyone else lifts.
     const ce = new ComputeEngine();
     const v1 = ['Multiply', 10000, ['List', 1, 2, 3]];
     const rem = ce.box(['Remainder', v1, 7]);

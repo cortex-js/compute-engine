@@ -2308,8 +2308,9 @@ function type(expr: BoxedFunction): Type {
         //
         // The fixed-shape trigger DEFERS to a handler that GENUINELY computes
         // collection results — an ALLOWLIST, not a shape test: only
-        // `Add`/`Multiply` (their own matrix/vector/union branches, incl. the
-        // deliberate honest `finite_integer | matrix` for `matrix + scalar`)
+        // `Add`/`Multiply` (their own matrix/vector branches, which type
+        // `matrix + scalar` as `matrix` and keep the honest widen only for
+        // possibly-non-indexed `collection`/`set` operands — see `addType`)
         // and `Negate` (passes `x.type` through). Re-wrapping those would
         // collapse an honest `matrix` to an unbounded `list<…>` (it broke
         // `-M → matrix` and `det(M+N)`). Every OTHER handler that produces a
