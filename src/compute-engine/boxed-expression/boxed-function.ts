@@ -1247,6 +1247,20 @@ export class BoxedFunction
     return def.isCollection?.(this) ?? true;
   }
 
+  /**
+   * True if this instance explicitly opted out of being a collection via an
+   * `isCollection` handler returning false (e.g. a `Tuple`-valued `When`).
+   * Its remaining collection handlers are inert and must not be consulted.
+   *
+   * Note this is deliberately narrower than `!isCollection`: an *eager*
+   * collection operator (e.g. `UnicodeScalars`) has no collection handlers at
+   * all until it is evaluated, and must still go through the
+   * materialize-then-iterate path in `each()`.
+   */
+  private get _optedOutOfCollection(): boolean {
+    return this.baseDefinition?.collection?.isCollection?.(this) === false;
+  }
+
   get isIndexedCollection(): boolean {
     if (!this.isValid) return false;
     const def = this.baseDefinition?.collection;
@@ -1258,7 +1272,7 @@ export class BoxedFunction
     // not an indexed collection either — the handlers are present but inert,
     // and reporting otherwise contradicts `isCollection` (e.g. a `Tuple`-
     // valued `When`, which is deliberately not broadcast over).
-    if (def.isCollection?.(this) === false) return false;
+    if (this._optedOutOfCollection) return false;
 
     // If there is an `at` handler, it _may_ be indexed.
     // We check the actual result type, e.g. Map has an at handler
@@ -1270,16 +1284,17 @@ export class BoxedFunction
 
   get isLazyCollection(): boolean {
     if (!this.isValid) return false;
-    const def = this.baseDefinition?.collection;
-    if (!def) return false;
-    return def?.isLazy?.(this) ?? false;
+    if (this._optedOutOfCollection) return false;
+    return this.baseDefinition?.collection?.isLazy?.(this) ?? false;
   }
 
   contains(rhs: Expression): boolean | undefined {
+    if (this._optedOutOfCollection) return undefined;
     return this.baseDefinition?.collection?.contains?.(this, rhs);
   }
 
   get count(): number | undefined {
+    if (this._optedOutOfCollection) return undefined;
     return this.operatorDefinition?.collection?.count?.(this);
   }
 
@@ -1294,6 +1309,10 @@ export class BoxedFunction
   }
 
   each(): Generator<Expression> {
+    // An operator that opted out of being a collection for THIS instance has
+    // inert handlers: enumerate nothing rather than iterate a scalar.
+    if (this._optedOutOfCollection) return (function* () {})();
+
     let iter = this.operatorDefinition?.collection?.iterator?.(this);
 
     if (!iter) {
@@ -1327,6 +1346,7 @@ export class BoxedFunction
   }
 
   at(index: number): Expression | undefined {
+    if (this._optedOutOfCollection) return undefined;
     const handler = this.operatorDefinition?.collection?.at;
     if (!handler) return undefined;
 
@@ -1352,6 +1372,7 @@ export class BoxedFunction
   }
 
   get(index: Expression | string): Expression | undefined {
+    if (this._optedOutOfCollection) return undefined;
     if (typeof index === 'string')
       return this.operatorDefinition?.collection?.at?.(this, index);
 
@@ -1360,6 +1381,7 @@ export class BoxedFunction
   }
 
   indexWhere(predicate: (element: Expression) => boolean): number | undefined {
+    if (this._optedOutOfCollection) return undefined;
     if (this.operatorDefinition?.collection?.indexWhere)
       return this.operatorDefinition.collection.indexWhere(this, predicate);
     if (!this.isIndexedCollection) return undefined;
@@ -1374,6 +1396,7 @@ export class BoxedFunction
   }
 
   subsetOf(rhs: Expression, strict: boolean): boolean {
+    if (this._optedOutOfCollection) return false;
     return (
       this.operatorDefinition?.collection?.subsetOf?.(this, rhs, strict) ??
       false

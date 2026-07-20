@@ -11,13 +11,10 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 
+import { checkDeadline } from '../../common/interruptible.js';
 import { MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
-import {
-  fromRange,
-  reduceCollection,
-  enumerationDeclined,
-} from './collections.js';
+import { reduceCollection, enumerationDeclined } from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 
 /**
@@ -1121,55 +1118,92 @@ export function normalizeIndexingSets(
   return ops.map((op) => normalizeIndexingSet(op));
 }
 
-export function indexingSetCartesianProduct(
+/**
+ * Return the first indexing set whose bounds cannot be faithfully enumerated
+ * at `number` precision, or `undefined` if they all can.
+ *
+ * Above `Number.MAX_SAFE_INTEGER` the spacing between representable values is
+ * greater than 1, so `current + 1` rounds back to `current` and the odometer
+ * wheel can never walk the range: the reduction would silently yield a single
+ * term for bounds that nominally describe many. A DEGENERATE range
+ * (`lower === upper`) is not affected — it has exactly one term and needs no
+ * increment — and neither is an empty one (`upper < lower`).
+ *
+ * Only the magnitude of the bounds is considered, not their integrality: a
+ * fractional bound (`Σ_{n=1}^{10.5}`) enumerates fine and must keep doing so.
+ */
+export function nonEnumerableIndexingSet(
   indexingSets: IndexingSet[]
-): number[][] {
-  console.assert(indexingSets.length > 0, 'Indexing sets must not be empty');
-
-  //
-  // Start with the first index
-  //
-  const { index: _index, lower, upper: upper0, isFinite } = indexingSets[0];
-  const upper = !isFinite ? lower + MAX_ITERATION : upper0;
-  let result = fromRange(lower, upper).map((x) => [x]);
-
-  // We had a single index, we're done
-  if (indexingSets.length === 1) return result;
-
-  //
-  // We have multiple indexes
-  //
-  for (let i = 1; i < indexingSets.length; i++) {
-    const { index: _index2, lower, upper: upperI, isFinite } = indexingSets[i];
-    const upper = !isFinite ? lower + MAX_ITERATION : upperI;
-
-    result = cartesianProduct(
-      result.map((x) => x[0]),
-      fromRange(lower, upper)
+): IndexingSet | undefined {
+  return indexingSets.find(({ lower, upper, isFinite }) => {
+    const hi = !isFinite ? lower + MAX_ITERATION : upper;
+    if (hi <= lower) return false;
+    return (
+      Math.abs(lower) > Number.MAX_SAFE_INTEGER ||
+      Math.abs(hi) > Number.MAX_SAFE_INTEGER
     );
-  }
-  return result;
+  });
 }
 
 /**
- * Calculates the cartesian product of two arrays.
- * ```ts
- * // Example usage
- * const array1 = [1, 2, 3];
- * const array2 = ['a', 'b', 'c'];
- * const result = cartesianProduct(array1, array2);
- * console.log(result);
- * // Output: [[1, 'a'], [1, 'b'], [1, 'c'], [2, 'a'], [2, 'b'], [2, 'c'], [3, 'a'], [3, 'b'], [3, 'c']]
- * ```
- * @param array1 - The first array.
- * @param array2 - The second array.
- * @returns The cartesian product as a 2D array.
+ * Stream the cartesian product of the indexing sets, one index tuple at a
+ * time, instead of materializing it.
+ *
+ * A big-op with a large *finite* bound (`Σ_{i=1}^{10⁸}`) used to allocate one
+ * one-element array per index value *before* the reducer ran a single step,
+ * so the process died of heap exhaustion before any deadline could be
+ * consulted. Streaming keeps allocation O(number of indexes) and lets the
+ * caller check the deadline between terms.
+ *
+ * The yielded array is REUSED between iterations: consumers must read the
+ * values out (as `reduceBigOp` does when assigning the loop indexes) and must
+ * not retain it.
+ *
+ * Yields the full n-dimensional product: for `k` indexing sets every tuple has
+ * length `k`, and the last index varies fastest (odometer order). (A previous
+ * fold-based implementation collapsed every tuple to length 2 for three or
+ * more indexing sets, dropping all but the last two dimensions.)
+ *
+ * Callers are expected to have rejected bounds that cannot be walked at
+ * `number` precision — see `nonEnumerableIndexingSet`.
  */
-export function cartesianProduct(
-  array1: number[],
-  array2: number[]
-): number[][] {
-  return array1.flatMap((item1) => array2.map((item2) => [item1, item2]));
+export function* indexingSetCartesianProductIterator(
+  indexingSets: IndexingSet[]
+): Generator<number[]> {
+  console.assert(indexingSets.length > 0, 'Indexing sets must not be empty');
+
+  const bounds = indexingSets.map(({ lower, upper, isFinite }) => ({
+    lower,
+    upper: !isFinite ? lower + MAX_ITERATION : upper,
+  }));
+
+  // An empty range in any dimension makes the whole product empty.
+  if (bounds.some(({ lower, upper }) => upper < lower)) return;
+
+  const n = bounds.length;
+  const current = bounds.map((x) => x.lower);
+  const tuple = new Array<number>(n);
+
+  while (true) {
+    for (let i = 0; i < n; i++) tuple[i] = current[i];
+    yield tuple;
+
+    // Odometer increment: the last index varies fastest.
+    let i = n - 1;
+    while (i >= 0) {
+      // Above `Number.MAX_SAFE_INTEGER`, `+ 1` rounds back to the same value:
+      // the wheel can never reach its upper bound, so treat a non-advancing
+      // increment as an exhausted wheel instead of spinning forever.
+      const next = current[i] + 1;
+      if (next <= bounds[i].upper && next !== current[i]) {
+        current[i] = next;
+        break;
+      }
+      current[i] = bounds[i].lower;
+      i -= 1;
+    }
+    if (i < 0) return; // All the odometer wheels wrapped: we're done.
+  }
 }
 
 /** Given a sequence of arguments, return an array of Limits:
@@ -1513,6 +1547,33 @@ export function canonicalBigop(
 export const NON_ENUMERABLE_DOMAIN = Symbol('non-enumerable-domain');
 
 /**
+ * A special symbol used to signal that a BigOp has bounds that cannot be
+ * enumerated at `number` precision (see `nonEnumerableIndexingSet`). Unlike
+ * `NON_ENUMERABLE_DOMAIN` this is NOT a "stay symbolic" outcome: the bounds
+ * describe a definite, finite range that the engine simply cannot walk, so
+ * the caller must surface an error rather than silently returning a
+ * truncated result. Use `bigOpBoundsError()` to build it.
+ */
+export const NON_ENUMERABLE_BOUNDS = Symbol('non-enumerable-bounds');
+
+/**
+ * Build the error expression a Sum/Product returns when `reduceBigOp` reports
+ * `NON_ENUMERABLE_BOUNDS`. `indexes` are the raw (un-normalized) indexing set
+ * operands, as the evaluate handlers have them.
+ */
+export function bigOpBoundsError(
+  ce: ComputeEngine,
+  indexes: ReadonlyArray<Expression>
+): Expression {
+  const set = nonEnumerableIndexingSet(normalizeIndexingSets(indexes));
+  return ce.error([
+    'out-of-range',
+    `a bound with magnitude at most ${Number.MAX_SAFE_INTEGER}`,
+    set ? `${set.lower}..${set.upper}` : 'unknown',
+  ]);
+}
+
+/**
  * Result type for reduceBigOp that includes reason for failure
  */
 export type BigOpResult<T> =
@@ -1562,7 +1623,9 @@ export function* reduceBigOp<T>(
   indexes: ReadonlyArray<Expression>,
   fn: (acc: T, x: Expression) => T | null,
   initial: T
-): Generator<T | typeof NON_ENUMERABLE_DOMAIN | undefined> {
+): Generator<
+  T | typeof NON_ENUMERABLE_DOMAIN | typeof NON_ENUMERABLE_BOUNDS | undefined
+> {
   // If the body is a collection, reduce it
   // i.e. Sum({1, 2, 3}) = 6
   if (body.isCollection) {
@@ -1643,15 +1706,31 @@ export function* reduceBigOp<T>(
   //
   const indexingSets = normalizeIndexingSets(indexes);
 
+  // Bounds beyond the safe-integer range cannot be walked by the odometer
+  // below: it would terminate the wheel after a single term, silently
+  // truncating a result the caller asked for. Report it so the caller can
+  // surface an error instead.
+  if (nonEnumerableIndexingSet(indexingSets)) return NON_ENUMERABLE_BOUNDS;
+
   // @todo: special case when there is only one index
 
-  const cartesianArray = indexingSetCartesianProduct(indexingSets);
+  // Stream the index tuples rather than materializing the whole product: a
+  // large *finite* bound (`Σ_{i=1}^{10⁸}`) otherwise exhausted the heap
+  // before the first `yield`, so neither `run()`/`runAsync()` nor the
+  // deadline below ever got a chance to cancel it.
+  const cartesianArray = indexingSetCartesianProductIterator(indexingSets);
 
   //
   // Iterate over the cartesian product and evaluate the body
   //
   let result: T | undefined = initial;
+  let count = 0;
   for (const element of cartesianArray) {
+    // `run()`/`runAsync()` enforce the deadline between yields, but
+    // `reduceBigOp` is also driven directly (and a single body evaluation can
+    // be slow), so check the engine deadline here too. Amortize `Date.now()`
+    // with a stride.
+    if ((++count & 0xff) === 0) checkDeadline(ce._deadline);
     // An index-less bounds pair (`Limits(Nothing, 1, 9)`) iterates a constant
     // body: there is no index variable to assign.
     indexingSets.forEach((x, i) => {

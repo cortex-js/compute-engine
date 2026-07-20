@@ -1,5 +1,6 @@
 import { Expression } from '../../src/math-json/types.ts';
 import { ComputeEngine } from '../../src/compute-engine';
+import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards';
 import { engine, exprToString } from '../utils';
 
 function evaluate(expr: Expression): string {
@@ -54,6 +55,101 @@ const dict: Expression = [
 const dictShorthand: Expression = { dict: { x: 1, y: 2, z: 3 } };
 
 const tuple: Expression = ['Tuple', 7, 10, 13];
+
+describe('LIST TENSOR ELIGIBILITY', () => {
+  test('tuple-valued elements remain a list of tuples', () => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'boolean');
+
+    const expressions = [
+      ce.parse('[(1,2),(3,4)]'),
+      ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]),
+      ce.box([
+        'List',
+        ['Hold', ['Tuple', 1, 2]],
+        ['Hold', ['Tuple', 3, 4]],
+      ]),
+      ce.box([
+        'List',
+        ['If', 'c', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+        ['If', 'c', ['Tuple', 5, 6], ['Tuple', 7, 8]],
+      ]),
+      ce.box([
+        'List',
+        ['Which', 'c', ['Tuple', 1, 2]],
+        ['Which', 'c', ['Tuple', 3, 4]],
+      ]),
+      ce.box([
+        'List',
+        ['When', ['Tuple', 1, 2], 'c'],
+        ['When', ['Tuple', 3, 4], 'c'],
+      ]),
+    ];
+
+    for (const expr of expressions) {
+      expect(isTensor(expr)).toBe(false);
+      expect(expr.type.matches('list')).toBe(true);
+    }
+    for (const expr of expressions.filter((x) => x.ops[0].operator !== 'Hold'))
+      expect(expr.type.matches('list<tuple<number, number>>')).toBe(true);
+  });
+
+  test('wrapped container elements (Set/Dictionary) remain a list', () => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'boolean');
+
+    const expressions = [
+      ce.box(['List', ['Hold', ['Set', 1, 2]], ['Hold', ['Set', 3, 4]]]),
+      ce.box([
+        'List',
+        ['If', 'c', ['Set', 1, 2], ['Set', 3, 4]],
+        ['If', 'c', ['Set', 5, 6], ['Set', 7, 8]],
+      ]),
+      ce.box([
+        'List',
+        ['Hold', ['Dictionary', ['KeyValuePair', { str: 'a' }, 1]]],
+        ['Hold', ['Dictionary', ['KeyValuePair', { str: 'b' }, 2]]],
+      ]),
+      ce.box([
+        'List',
+        ['Hold', ['KeyValuePair', { str: 'a' }, 1]],
+        ['Hold', ['KeyValuePair', { str: 'b' }, 2]],
+      ]),
+    ];
+
+    for (const expr of expressions) {
+      expect(isTensor(expr)).toBe(false);
+      expect(expr.operator).toBe('List');
+      expect(expr.type.matches('list')).toBe(true);
+    }
+  });
+
+  test('elements typed with the primitive `tuple` type remain a list', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p1', 'tuple');
+    ce.declare('p2', 'tuple');
+
+    const expr = ce.box(['List', 'p1', 'p2']);
+    expect(isTensor(expr)).toBe(false);
+    expect(expr.operator).toBe('List');
+    expect(expr.type.toString()).toBe('list<tuple>');
+  });
+
+  test('genuine numeric vectors and matrices remain tensors', () => {
+    const ce = new ComputeEngine();
+    const vector = ce.box(['List', 1, 2, 3]);
+    const matrix = ce.box([
+      'List',
+      ['List', 1, 2],
+      ['List', 3, 4],
+    ]);
+
+    expect(isTensor(vector)).toBe(true);
+    expect(vector.type.toString()).toBe('vector<3>');
+    expect(isTensor(matrix)).toBe(true);
+    expect(matrix.type.toString()).toBe('matrix<2x2>');
+  });
+});
 
 describe('COUNT', () => {
   test('Count empty list', () =>

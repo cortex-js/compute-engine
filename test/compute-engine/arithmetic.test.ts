@@ -1,6 +1,7 @@
 import { check, checkJson, engine } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
+import { indexingSetCartesianProductIterator } from '../../src/compute-engine/library/utils';
 
 const ce = engine;
 
@@ -1140,6 +1141,123 @@ describe('SUM', () => {
         .evaluate()
         .toString()
     ).toMatchInlineSnapshot(`4840`));
+
+  // A `Limits`-based big-op over three or more indexing sets used to lose
+  // every dimension but the last two: the fold-based
+  // `indexingSetCartesianProduct` returned length-2 tuples (a 2×2×2 product
+  // came back as 8 *pairs*), so `reduceBigOp`'s positional `element[i]`
+  // handed `undefined` to the third-and-later loop index. The streaming
+  // odometer (`indexingSetCartesianProductIterator`) yields the full
+  // n-dimensional product, last index varying fastest.
+  it('should compute the sum of a function over three indices', () => {
+    // Base-10 digit encoding: the result pins each (i, j, k) triple.
+    // Σ 100i + 10j + k over 1..2³ = 4·100·(1+2) + 4·10·(1+2) + 4·(1+2) = 1332
+    expect(
+      ce
+        .expr([
+          'Sum',
+          ['Add', ['Multiply', 100, 'i'], ['Multiply', 10, 'j'], 'k'],
+          ['Limits', 'i', 1, 2],
+          ['Limits', 'j', 1, 2],
+          ['Limits', 'k', 1, 2],
+        ])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`1332`);
+
+    // Products are order-insensitive too, but a non-symmetric body catches a
+    // dropped or duplicated dimension: (11·12·21·22)² = 3719048256.
+    expect(
+      ce
+        .expr([
+          'Product',
+          ['Add', ['Multiply', 10, 'i'], 'j'],
+          ['Limits', 'i', 1, 2],
+          ['Limits', 'j', 1, 2],
+          ['Limits', 'k', 1, 2],
+        ])
+        .evaluate()
+        .toString()
+    ).toMatchInlineSnapshot(`3719048256`);
+  });
+
+  // The ordering the two big-ops above rely on (both are order-insensitive,
+  // so it has to be pinned directly). Note the yielded array is reused
+  // between iterations, hence the copy.
+  it('streams the full n-dimensional index product, last index fastest', () => {
+    const tuples = (
+      sets: { lower: number; upper: number }[]
+    ): number[][] => {
+      const out: number[][] = [];
+      for (const t of indexingSetCartesianProductIterator(
+        sets.map(({ lower, upper }) => ({
+          index: 'x',
+          lower,
+          upper,
+          isFinite: true,
+        }))
+      ))
+        out.push([...t]);
+      return out;
+    };
+
+    expect(
+      tuples([
+        { lower: 1, upper: 2 },
+        { lower: 1, upper: 2 },
+        { lower: 1, upper: 2 },
+      ])
+    ).toEqual([
+      [1, 1, 1],
+      [1, 1, 2],
+      [1, 2, 1],
+      [1, 2, 2],
+      [2, 1, 1],
+      [2, 1, 2],
+      [2, 2, 1],
+      [2, 2, 2],
+    ]);
+
+    // A singleton range whose bound is above `Number.MAX_SAFE_INTEGER`:
+    // `current + 1` rounds back to the same value, so the odometer wheel has
+    // to be detected as exhausted rather than spun forever.
+    expect(tuples([{ lower: 1e16, upper: 1e16 }])).toEqual([[1e16]]);
+  });
+
+  // A NON-degenerate range above `Number.MAX_SAFE_INTEGER` cannot be walked
+  // at `number` precision (`current + 1` rounds back to `current`). It used
+  // to yield a single term, silently truncating a ~11-term sum; it now
+  // surfaces as an error instead.
+  it('reports non-enumerable (unsafe-integer) bounds as an error', () => {
+    // A genuine singleton is NOT an error: exactly one term.
+    expect(
+      ce.expr(['Sum', 1, ['Limits', 'n', 1e16, 1e16]]).evaluate().toString()
+    ).toMatchInlineSnapshot(`1`);
+
+    const unsafe = ce
+      .expr(['Sum', 1, ['Limits', 'n', 1e16, 1e16 + 10]])
+      .evaluate();
+    expect(unsafe.operator).toBe('Error');
+    expect(unsafe.toString()).toMatchInlineSnapshot(
+      `Error(ErrorCode("out-of-range", "a bound with magnitude at most 9007199254740991", "10000000000000000..10000000000000010"))`
+    );
+
+    // Products go through the same seam.
+    expect(
+      ce
+        .expr(['Product', 2, ['Limits', 'n', 1e16, 1e16 + 10]])
+        .evaluate().operator
+    ).toBe('Error');
+
+    // Bounds that ARE enumerable keep working: a fractional upper bound
+    // truncates by design, and an empty range is still empty.
+    expect(
+      ce.expr(['Sum', 1, ['Limits', 'n', 1, 10.5]]).evaluate().toString()
+    ).toMatchInlineSnapshot(`10`);
+    expect(
+      ce.expr(['Sum', 1, ['Limits', 'n', 5, 1]]).evaluate().toString()
+    ).toMatchInlineSnapshot(`0`);
+  });
 
   // Regression tests for issue #252: Sum with free variables
   it('should handle sum with free variable (issue #252)', () =>

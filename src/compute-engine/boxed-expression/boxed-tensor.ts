@@ -478,6 +478,24 @@ export function isTensor(val: unknown): val is BoxedTensor<TensorDataType> {
   return val instanceof BoxedTensor;
 }
 
+/**
+ * Operators whose result is an atomic container value (a tuple, a set, a
+ * dictionary, ...). A List element headed by one of these is never a scalar
+ * tensor component. Also used by `box.ts` to detect such elements behind a
+ * wrapper (`Hold`, `If`, `Which`, `When`, a parsed `Delimiter`, ...).
+ */
+export const CONTAINER_OPERATORS = [
+  'Tuple',
+  'Pair',
+  'Single',
+  'Triple',
+  'Quadruple',
+  'KeyValuePair',
+  'Dictionary',
+  'Set',
+  'Record',
+];
+
 export function expressionTensorInfo(
   operator: string,
   rows: ReadonlyArray<Expression>
@@ -536,17 +554,7 @@ export function expressionTensorInfo(
         // Operator-name check: tensor detection runs on raw boxed ops where
         // item.type may still be 'unknown', so we can't rely on type inspection.
         const op = item.operator;
-        if (
-          op === 'Tuple' ||
-          op === 'Pair' ||
-          op === 'Single' ||
-          op === 'Triple' ||
-          op === 'Quadruple' ||
-          op === 'KeyValuePair' ||
-          op === 'Dictionary' ||
-          op === 'Set' ||
-          op === 'Record'
-        ) {
+        if (CONTAINER_OPERATORS.includes(op)) {
           valid = false;
           return;
         }

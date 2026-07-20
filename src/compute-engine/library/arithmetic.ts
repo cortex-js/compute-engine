@@ -89,6 +89,8 @@ import {
   canonicalBigop,
   reduceBigOp,
   NON_ENUMERABLE_DOMAIN,
+  NON_ENUMERABLE_BOUNDS,
+  bigOpBoundsError,
   classifyBigopDomain,
   symbolicSumClosedForm,
   symbolicProductClosedForm,
@@ -3052,6 +3054,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_DOMAIN) {
           return undefined; // Return undefined to keep expression symbolic
         }
+        // Bounds we cannot walk: surface an error rather than truncate.
+        if (result === NON_ENUMERABLE_BOUNDS)
+          return bigOpBoundsError(ce, bounds);
         // Evaluate the accumulated result to combine numeric factors
         return result?.evaluate({ numericApproximation: numeric }) ?? ce.NaN;
       },
@@ -3094,6 +3099,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_DOMAIN) {
           return undefined; // Return undefined to keep expression symbolic
         }
+        if (result === NON_ENUMERABLE_BOUNDS)
+          return bigOpBoundsError(ce, bounds);
         return result?.evaluate({ numericApproximation: numeric }) ?? ce.NaN;
       },
     },
@@ -3185,6 +3192,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         );
         // Non-enumerable domain: keep the expression symbolic.
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
+        // Bounds we cannot walk: surface an error rather than truncate.
+        if (result === NON_ENUMERABLE_BOUNDS)
+          return bigOpBoundsError(engine, rest);
         // Re-evaluate to combine numeric terms (e.g., 3x + 1 + 2 + 3 → 3x + 6).
         return (
           result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN
@@ -3247,6 +3257,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           signal
         );
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
+        if (result === NON_ENUMERABLE_BOUNDS)
+          return bigOpBoundsError(engine, rest);
         return (
           result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN
         );

@@ -44,7 +44,11 @@ import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { BoxedFunction } from './boxed-function.js';
 import { BoxedString } from './boxed-string.js';
-import { BoxedTensor, expressionTensorInfo } from './boxed-tensor.js';
+import {
+  BoxedTensor,
+  CONTAINER_OPERATORS,
+  expressionTensorInfo,
+} from './boxed-tensor.js';
 import { BoxedDictionary } from './boxed-dictionary.js';
 import { canonicalForm } from './canonical.js';
 import { sortOperands } from './order.js';
@@ -618,6 +622,42 @@ function allParamsNumeric(signature: Type): boolean {
   return params.every((t) => isSubtype(t, 'number'));
 }
 
+/**
+ * A List element that represents an atomic container value (a tuple, a set, a
+ * dictionary, ...) must remain an atomic list value, not a scalar tensor
+ * component.
+ */
+function isContainerValuedListElement(expr: Expression): boolean {
+  if (isFunction(expr) && CONTAINER_OPERATORS.includes(expr.operator))
+    return true;
+
+  // The container kinds are also valid primitive type names, so a type may
+  // designate a container either as a plain string or as a structured type.
+  // `list`/`collection` are deliberately excluded: nested lists are what make
+  // a matrix tensor-eligible.
+  const isContainerType = (t: Type): boolean => {
+    const kind = typeof t === 'string' ? t : t.kind;
+    return (
+      kind === 'tuple' ||
+      kind === 'set' ||
+      kind === 'dictionary' ||
+      kind === 'record'
+    );
+  };
+
+  const type = expr.type.type;
+  if (isContainerType(type)) return true;
+  if (typeof type !== 'string' && type.kind === 'union') {
+    if (type.types.some(isContainerType)) return true;
+  }
+
+  // Hold deliberately reports an unknown type for function operands. Inspect
+  // its held value only for tensor eligibility; do not canonicalize it.
+  if (isFunction(expr, 'Hold')) return isContainerValuedListElement(expr.op1);
+
+  return false;
+}
+
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
@@ -636,13 +676,26 @@ function makeCanonicalFunction(
   if (name === 'List') {
     // We don't canonicalize it, in case it's a List (we want to detect lists of lists)
     const boxedOps = ops.map((x) => ce.expr(x, { form: 'raw' }));
+    const canonicalOps = canonical(ce, boxedOps, scope);
+
+    // Tensor detection runs on raw operands so nested Lists remain visible.
+    // Container-valued wrappers, however, may reveal their container type only
+    // after canonicalization (for example a parsed Delimiter, If, Which or
+    // When). Tuples, sets and dictionaries are atomic values in a List, not
+    // scalar tensor components.
+    if (canonicalOps.some(isContainerValuedListElement)) {
+      return new BoxedFunction(ce, 'List', canonicalOps, {
+        canonical: true,
+      });
+    }
+
     const tensorInfo = expressionTensorInfo('List', boxedOps);
 
     if (tensorInfo && tensorInfo.dtype) {
       return new BoxedTensor(
         ce,
         {
-          ops: canonical(ce, boxedOps, scope),
+          ops: canonicalOps,
           shape: tensorInfo.shape,
           dtype: tensorInfo.dtype,
         },
@@ -650,7 +703,7 @@ function makeCanonicalFunction(
       );
     }
 
-    return new BoxedFunction(ce, 'List', canonical(ce, boxedOps, scope), {
+    return new BoxedFunction(ce, 'List', canonicalOps, {
       canonical: true,
     });
   }

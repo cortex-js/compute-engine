@@ -140,6 +140,8 @@ describe('When: collection-valued restriction', () => {
       expect(r.operator).toEqual('When');
       expect(r.isCollection).toBe(false);
       expect(r.isIndexedCollection).toBe(false);
+      expect(r.isLazyCollection).toBe(false);
+      expect(r.contains(ce.number(5))).toBeUndefined();
       expect(r.count).toBeUndefined();
       expect(Array.from(r.each()).length).toEqual(0);
     });
@@ -196,5 +198,48 @@ describe('When collection predicate is consistent (review follow-up)', () => {
     expect(r.operator).toEqual('When');
     expect(r.count).toBeUndefined();
     expect(Array.from(r.each()).length).toEqual(0);
+  });
+
+  test('an opted-out collection cannot expose lazy or membership handlers', () => {
+    const ce = new ComputeEngine({
+      libraries: [
+        'core',
+        {
+          name: 'collection-opt-out-test',
+          requires: ['core'],
+          definitions: {
+            OptOutCollection: {
+              signature: '() -> integer',
+              collection: {
+                isCollection: () => false,
+                isLazy: () => true,
+                contains: () => true,
+                count: () => 3,
+                isEmpty: () => false,
+                isFinite: () => true,
+                subsetOf: () => true,
+                indexWhere: () => 1,
+                at: () => ce.One,
+                iterator: () => [ce.One, ce.One, ce.One][Symbol.iterator](),
+              },
+            },
+          },
+        },
+      ],
+    });
+    const r = ce.box(['OptOutCollection']);
+
+    expect(r.isCollection).toBe(false);
+    expect(r.isIndexedCollection).toBe(false);
+    expect(r.isLazyCollection).toBe(false);
+    expect(r.contains(ce.One)).toBeUndefined();
+    expect(r.count).toBeUndefined();
+    expect(r.isEmptyCollection).toBeUndefined();
+    expect(r.isFiniteCollection).toBeUndefined();
+    expect(Array.from(r.each()).length).toBe(0);
+    expect(r.at(1)).toBeUndefined();
+    expect(r.get('key')).toBeUndefined();
+    expect(r.indexWhere(() => true)).toBeUndefined();
+    expect(r.subsetOf(ce.box(['List', 1]), false)).toBe(false);
   });
 });

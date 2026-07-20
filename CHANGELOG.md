@@ -8,79 +8,116 @@
   caller in a number slot — `(t, i t)` compiled successfully and returned
   `[0.5, { re: 0, im: 0.5 }]`. A complex component now fails the compile with a
   diagnostic naming the component, matching what the GPU targets already do and
-  the existing `Sqrt(-1)` "no real value" error. The component's *type* cannot
+  the existing `Sqrt(-1)` "no real value" error. The component's _type_ cannot
   decide this — with `t` undeclared, `(t, i t)` and `(t, t²)` both infer
   `finite_number` — so the check uses the same `isComplexValued` analysis the
   GPU targets fail closed on, and every target now rejects the same shapes.
   Real-valued tuples are unaffected, and the runtime `realOnly` coercion now
   also recurses into array results for values that only become complex when
-  called (`(t, √t)` at `t = -4` → `[-4, NaN]`). The check follows only
-  positions that can produce the compiled result, so a complex value consumed
-  by an operation with a real result still compiles (`At([i, 2], 2)` → `2`).
+  called (`(t, √t)` at `t = -4` → `[-4, NaN]`). The check follows only positions
+  that can produce the compiled result, so a complex value consumed by an
+  operation with a real result still compiles (`At([i, 2], 2)` → `2`).
 
 ### Bug Fixes
 
 - **A `When` (restriction) whose value was a COLLECTION did not expose the
   collection interface.** `isCollection` was `false`, `count` `undefined` and
-  `each()` yielded nothing, even though `.type` already reported
-  `vector<N>` / `list<tuple<…>>` — the type system and the collection
-  interface disagreed about the same value. Only a LIST-valued condition
-  broadcast; the common case of one scalar restriction over a whole list left
-  an opaque wrapper in place. A collection-valued `When` now behaves as
-  `[When(L₁,c), …, When(Lₙ,c)]`: at or below `MAX_SIZE_EAGER_COLLECTION` it
-  distributes into a `List`, and above the threshold it stays a held `When`
-  that is nonetheless fully enumerable (`count`/`each()`/`at()`), following
-  the same hybrid-lazy convention as `PointList`. A scalar `When` still
-  reports as a scalar, and a `Tuple`-valued one is not split into its
-  components so a restricted point stays a point. Operators whose
-  collection-ness depends on their operands can now declare it with the new
-  optional `BaseCollectionHandlers.isCollection` predicate; `isIndexedCollection`
-  honors the same opt-out, so the two can no longer disagree.
+  `each()` yielded nothing, even though `.type` already reported `vector<N>` /
+  `list<tuple<…>>` — the type system and the collection interface disagreed
+  about the same value. Only a LIST-valued condition broadcast; the common case
+  of one scalar restriction over a whole list left an opaque wrapper in place. A
+  collection-valued `When` now behaves as `[When(L₁,c), …, When(Lₙ,c)]`: at or
+  below `MAX_SIZE_EAGER_COLLECTION` it distributes into a `List`, and above the
+  threshold it stays a held `When` that is nonetheless fully enumerable
+  (`count`/`each()`/`at()`), following the same hybrid-lazy convention as
+  `PointList`. A scalar `When` still reports as a scalar, and a `Tuple`-valued
+  one is not split into its components so a restricted point stays a point.
+  Operators whose collection-ness depends on their operands can now declare it
+  with the new optional `BaseCollectionHandlers.isCollection` predicate. Every
+  handler-backed collection API honors that opt-out — `count`, `each()`, `at()`,
+  `get()`, `indexWhere()`, `subsetOf()`, `contains()`, `isLazyCollection` and
+  `isIndexedCollection` — so none of them can report a collection answer for a
+  value that says it is not one. The opt-out is deliberately narrower than
+  `isCollection === false`: an _eager_ collection operator such as
+  `UnicodeScalars` has no collection handlers at all until it is evaluated, and
+  still goes through the materialize-then-iterate path.
+
+- **A `Sum`/`Product` over three or more indexing sets silently dropped every
+  index after the second.** The cartesian product of the indexing sets was built
+  by a fold that returned tuples of the wrong length — for a 2×2×2 product,
+  eight tuples of length 2, with pairs duplicated — and since the reducer reads
+  the tuple positionally, the third and later loop indexes were assigned
+  `undefined`. Any triple sum or product was therefore wrong, without a
+  diagnostic. The full n-dimensional product is now iterated, with the last
+  index varying fastest. One and two-index big-ops are unaffected.
+
+- **A `Sum`/`Product` with a large finite bound exhausted the heap before it
+  could be interrupted.** The whole index product was materialized up front, so
+  `Σ_{i=1}^{10⁸}` allocated 10⁸ one-element arrays _before_ the reducer ran a
+  single step — the process died before `run()`/`runAsync()` or any deadline
+  could cancel it. Index tuples are now streamed one at a time, keeping
+  allocation proportional to the number of indexes, and the engine deadline is
+  checked between terms. Bounds whose magnitude exceeds
+  `Number.MAX_SAFE_INTEGER` over a non-degenerate range can no longer be
+  enumerated faithfully at `number` precision — adding one to such a value does
+  not change it — and now evaluate to an `["Error", "out-of-range"]` rather than
+  silently truncating to a single term. A degenerate range (`lower === upper`)
+  still yields exactly one term.
+
+- **A `List` element whose container type was revealed only by canonicalization
+  was flattened into a numeric tensor.** Tensor eligibility is decided on raw
+  operands so nested `List`s stay visible, but a wrapper such as a parsed
+  `Delimiter`, `If`, `Which`, `When` or `Hold` reports its `tuple`/`set`/
+  `dictionary`/`record` type only after it is canonicalized. Such elements were
+  taken for scalar tensor components, so a list of tuples collapsed into a
+  `vector<N>` and lost its structure. Container-valued elements are now
+  recognized both by operator name and by type — primitive and structured alike,
+  including as a member of a union — and keep the expression a `List`.
 
 - **A `Sum`/`Product` index named `i` was read as `ImaginaryUnit` by the
   compiler's complex-valuedness analysis, silently corrupting the enclosing
-  arithmetic on every target.** The binder's bound name reached the
-  engine-value fallback as if it were a free symbol, so the analysis
-  complex-tainted the *sibling* operand of any enclosing arithmetic — the
-  `Sum` itself emitted correctly. `\sum_{i=0}^{2}\cos(it)+2.5` compiled
-  (`success: true`) to `NaN`, and `\sin(\sum_{i=0}^{2}\cos(it))+2.5` to a
-  silently wrong `2.5`; the interpreter was correct throughout. The index need
-  not appear in the body, and `\prod` was affected identically. A binder's
-  bound names are no longer analyzed as free symbols; loop/summation indices
-  are treated as the integer counters they are, while function parameters keep
-  their declared types (a complex parameter stays complex).
+  arithmetic on every target.** The binder's bound name reached the engine-value
+  fallback as if it were a free symbol, so the analysis complex-tainted the
+  _sibling_ operand of any enclosing arithmetic — the `Sum` itself emitted
+  correctly. `\sum_{i=0}^{2}\cos(it)+2.5` compiled (`success: true`) to `NaN`,
+  and `\sin(\sum_{i=0}^{2}\cos(it))+2.5` to a silently wrong `2.5`; the
+  interpreter was correct throughout. The index need not appear in the body, and
+  `\prod` was affected identically. A binder's bound names are no longer
+  analyzed as free symbols; loop/summation indices are treated as the integer
+  counters they are, while function parameters keep their declared types (a
+  complex parameter stays complex).
 
 - **A per-evaluate `ce.timeLimit` was silently inert inside a
   `ce.withTimeLimit(ms, fn)` span.** The span deadline replaced, rather than
-  min-ed with, every inner clamp, so a pipeline wrapped in a span lost its
-  inner bounds — a 500 ms clamp ran the full 60 s span. The effective deadline
-  is now `min(ambient, now + timeLimit)`. Plain nested evaluations are
-  unaffected. Note this applies to synchronous `evaluate()`: a span's deadline
-  is still restored when its callback returns, so `evaluateAsync()` under a
-  span remains unbounded.
+  min-ed with, every inner clamp, so a pipeline wrapped in a span lost its inner
+  bounds — a 500 ms clamp ran the full 60 s span. The effective deadline is now
+  `min(ambient, now + timeLimit)`. Plain nested evaluations are unaffected. Note
+  this applies to synchronous `evaluate()`: a span's deadline is still restored
+  when its callback returns, so `evaluateAsync()` under a span remains
+  unbounded.
 
-- **GPU targets emitted invalid shader source for vector-valued block locals
-  and over-wide `vecN` constructors.** A tuple/point-valued block local was
-  declared `float` while being assigned a `vecN`/array, vector width did not
-  propagate through an aliased local (`q := p`), and `vecN` constructor arity
-  was chosen from the *argument* count when it is a *component* count — so a
-  complex or nested-tuple element overflowed the constructor. Locals now
-  declare the matching type, width propagates through aliases, and an
-  aggregate-valued component fails closed with a diagnostic instead of
-  emitting source no driver accepts. Failing closed now also covers a
-  matrix-valued component, an empty tuple/list (neither language has a
-  zero-length array type), and a block local bound to values of disagreeing
-  shapes within one block (a shader local has a single declared type, and
-  there is no declaration a scalar and a `vecN` assignment both satisfy).
+- **GPU targets emitted invalid shader source for vector-valued block locals and
+  over-wide `vecN` constructors.** A tuple/point-valued block local was declared
+  `float` while being assigned a `vecN`/array, vector width did not propagate
+  through an aliased local (`q := p`), and `vecN` constructor arity was chosen
+  from the _argument_ count when it is a _component_ count — so a complex or
+  nested-tuple element overflowed the constructor. Locals now declare the
+  matching type, width propagates through aliases, and an aggregate-valued
+  component fails closed with a diagnostic instead of emitting source no driver
+  accepts. Failing closed now also covers a matrix-valued component, an empty
+  tuple/list (neither language has a zero-length array type), and a block local
+  bound to values of disagreeing shapes within one block (a shader local has a
+  single declared type, and there is no declaration a scalar and a `vecN`
+  assignment both satisfy).
 
 - **A delimited `\mapsto` body was read as a statement `Block` rather than a
   `Tuple`, so a point-valued lambda silently dropped all but its last
   component.** `t \mapsto (\cos t, \sin t)` applied at `t = 0.5` returned
   `0.479…` — just `sin 0.5` — on every target, `js` included; the equivalent
-  `g(t) := (\cos t, \sin t)` was already correct. A delimited lambda body is
-  now data (a `Tuple`) whatever its separator; a genuine statement block is
-  built by the `;` infix parser when the sequence contains an `Assign` and
-  reaches the lambda parser already formed, so `(x := 1; x+1)` is unchanged.
+  `g(t) := (\cos t, \sin t)` was already correct. A delimited lambda body is now
+  data (a `Tuple`) whatever its separator; a genuine statement block is built by
+  the `;` infix parser when the sequence contains an `Assign` and reaches the
+  lambda parser already formed, so `(x := 1; x+1)` is unchanged.
 
 ## 0.87.0 _2026-07-19_
 
