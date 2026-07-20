@@ -564,7 +564,7 @@ export function mapAutoCompileRunner(
   let ticks = 0;
 
   return (items) => {
-    if ((++ticks & 0xff) === 0) checkDeadline(ce._deadline);
+    if ((++ticks & 0xff) === 0) checkDeadline(ce._deadlineFrame);
 
     const cache = ensure();
     if (cache?.state !== 'compiled' || cache.fn === undefined) return undefined;

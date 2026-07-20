@@ -1166,7 +1166,8 @@ export class BoxedFunction
     // simplify main loop checks `engine._deadline`.
     return withDeadline(
       this.engine,
-      () => simplify(this, options).at(-1)?.value ?? this
+      () => simplify(this, options).at(-1)?.value ?? this,
+      this.operator
     )();
   }
 
@@ -1175,11 +1176,19 @@ export class BoxedFunction
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {
-    return withDeadline(this.engine, this._computeValue(options))();
+    return withDeadline(
+      this.engine,
+      this._computeValue(options),
+      this.operator
+    )();
   }
 
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
-    return withDeadlineAsync(this.engine, this._computeValueAsync(options))();
+    return withDeadlineAsync(
+      this.engine,
+      this._computeValueAsync(options),
+      this.operator
+    )();
   }
 
   N(): Expression {
@@ -1338,7 +1347,7 @@ export class BoxedFunction
       while (!result.done) {
         // Enumeration can be unbounded (infinite or very large lazy
         // collections): respect the engine evaluation deadline.
-        if ((++i & 0xff) === 0) checkDeadline(engine._deadline);
+        if ((++i & 0xff) === 0) checkDeadline(engine._deadlineFrame);
         yield result.value;
         result = iter.next();
       }
@@ -1412,7 +1421,7 @@ export class BoxedFunction
       // the tree at every nesting level — never reaches them: without this
       // check such an evaluation exhausts the heap instead of honoring
       // `ce.timeLimit`.
-      if ((++_evalTick & 0x3ff) === 0) checkDeadline(this.engine._deadline);
+      if ((++_evalTick & 0x3ff) === 0) checkDeadline(this.engine._deadlineFrame);
 
       if (!this.isValid || !this._def) return this;
 
@@ -1711,7 +1720,7 @@ export class BoxedFunction
   ): () => Promise<Expression> {
     return async () => {
       // Cooperative deadline checkpoint — see `_computeValue`.
-      if ((++_evalTick & 0x3ff) === 0) checkDeadline(this.engine._deadline);
+      if ((++_evalTick & 0x3ff) === 0) checkDeadline(this.engine._deadlineFrame);
 
       if (!this.isValid || !this._def) return this;
 
@@ -2459,14 +2468,18 @@ function type(expr: BoxedFunction): Type {
   return 'unknown';
 }
 
-function withDeadline<T>(engine: ComputeEngine, fn: () => T): () => T {
+function withDeadline<T>(
+  engine: ComputeEngine,
+  fn: () => T,
+  operator?: string
+): () => T {
   return () => {
-    const prev = engine._deadline;
+    const prevFrame = engine._deadlineFrame;
     const limit = engine.timeLimit;
 
     // A `timeLimit` of 0 or less reads as "no limit" (normalized to
     // +Infinity): it can never tighten an ambient deadline.
-    if (prev !== undefined && !Number.isFinite(limit)) return fn();
+    if (prevFrame !== undefined && !Number.isFinite(limit)) return fn();
 
     // The effective deadline is the EARLIEST of this evaluation's own
     // `timeLimit` budget and any ambient deadline (a `withTimeLimit()` span,
@@ -2475,20 +2488,34 @@ function withDeadline<T>(engine: ComputeEngine, fn: () => T): () => T {
     // For a plain nested evaluation the ambient deadline was armed earlier
     // with the same budget, so it always wins and nothing changes.
     const own = Date.now() + limit;
-    if (prev !== undefined && own >= prev) return fn();
+    if (prevFrame !== undefined && own >= prevFrame.at) return fn();
 
-    engine._deadline = own;
+    // This ambient deadline wins. Synthesize an attribution label so the
+    // (deprecated) `ce.timeLimit` is still traceable while it exists. Preserve
+    // any enclosing spans and append this frame's own label (spans lists ALL
+    // active span labels, outermost-first).
+    const owner =
+      operator !== undefined ? `engine.timeLimit:${operator}` : undefined;
+    engine._deadlineFrame = {
+      at: own,
+      owner,
+      spans: [
+        ...(prevFrame?.spans ?? []),
+        ...(owner !== undefined ? [owner] : []),
+      ],
+    };
     try {
       return fn();
     } finally {
-      engine._deadline = prev;
+      engine._deadlineFrame = prevFrame;
     }
   };
 }
 
 function withDeadlineAsync<T>(
   engine: ComputeEngine,
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
+  operator?: string
 ): () => Promise<T> {
   return async () => {
     // Unlike the synchronous `withDeadline`, this helper must NOT install a
@@ -2499,13 +2526,19 @@ function withDeadlineAsync<T>(
     // can spuriously expire later, unrelated evaluations. Async work under a
     // span is therefore bounded by neither — a known limitation that needs
     // promise-aware spans to fix properly, not a tighter clamp here.
-    if (engine._deadline !== undefined) return fn();
+    if (engine._deadlineFrame !== undefined) return fn();
 
-    engine._deadline = Date.now() + engine.timeLimit;
+    const owner =
+      operator !== undefined ? `engine.timeLimit:${operator}` : undefined;
+    engine._deadlineFrame = {
+      at: Date.now() + engine.timeLimit,
+      owner,
+      spans: owner !== undefined ? [owner] : [],
+    };
     try {
       return await fn();
     } finally {
-      engine._deadline = undefined;
+      engine._deadlineFrame = undefined;
     }
   };
 }

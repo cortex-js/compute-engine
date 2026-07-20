@@ -172,13 +172,16 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     // (Tycho item 8, 2026-07-15.)
     test('high-power integrand degrades to quadrature at the deadline', () => {
       const engine = new ComputeEngine();
-      engine.timeLimit = 500;
       const start = Date.now();
-      const r = compile(
-        engine.parse(
-          '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
-        ),
-        { realOnly: true }
+      const r = engine.withTimeLimit(
+        { ms: 500, label: 'test:high-power-integrand' },
+        () =>
+          compile(
+            engine.parse(
+              '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
+            ),
+            { realOnly: true }
+          )
       );
       const elapsed = Date.now() - start;
       expect(r.success).toBe(true);

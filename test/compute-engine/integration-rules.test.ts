@@ -2,6 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { loadIntegrationRules } from '../../src/integration-rules';
 import { compileRuleDocs } from '../../src/compute-engine/rubi/compile';
 import { RubiDriver } from '../../src/compute-engine/rubi/driver';
+import { CancellationError } from '../../src/common/interruptible';
 
 describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   test('loads the bundled Chapter-1 corpus', () => {
@@ -160,6 +161,68 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       driver.int(ce.symbol('x'), 'x');
       expect(d.memo.has('x§stale')).toBe(false);
       expect(d.activeCalls).toBe(0); // balanced on the way out
+    });
+  });
+
+  // ── Finding 3: the native-rational fallback's catch must swallow ONLY a
+  // cancellation that belongs to Rubi's own bounded work window (its own
+  // `rubi:native-fallback` sub-budget, the deprecated ambient `engine.timeLimit`
+  // which re-arms per-evaluate INSIDE the span, or an unattributed numeric
+  // deadline). A CancellationError attributed to an ENCLOSING caller span (e.g.
+  // a user `withTimeLimit({label:'caller'})`) must propagate — Rubi must not eat
+  // the caller's deadline and continue past it. Simulated deterministically by
+  // stubbing the fallback's `Integrate.evaluate()` seam to throw an error with a
+  // chosen `attribution`, so no real timer race is needed. ──
+  describe('native-fallback swallows only Rubi-owned cancellations (Finding 3)', () => {
+    // Run the private native-rational fallback with the inner Integrate.evaluate()
+    // stubbed to throw a CancellationError carrying `attribution`. Returns the
+    // fallback's result on a swallow, or the propagated error on a rethrow.
+    const runFallback = (
+      attribution: string | undefined
+    ): { result: unknown } | { thrown: unknown } => {
+      const ce = new ComputeEngine();
+      const driver = new RubiDriver(ce, [], { timeLimitMs: 10_000 });
+      const d = driver as any;
+      d.deadline = Date.now() + 10_000; // a live Rubi work window
+      const integrand = ce.parse('\\frac{1}{1+x^2}').canonical; // numeric rational
+      const err = new CancellationError({ cause: 'timeout', attribution });
+      const original = ce.function.bind(ce);
+      const spy = jest
+        .spyOn(ce, 'function')
+        .mockImplementation((op: any, ...rest: any[]) => {
+          if (op === 'Integrate')
+            return { evaluate: () => { throw err; } } as any;
+          return original(op, ...rest);
+        });
+      try {
+        return { result: d.nativeRationalFallback(integrand, 'x') };
+      } catch (e) {
+        return { thrown: e };
+      } finally {
+        spy.mockRestore();
+      }
+    };
+
+    test('RETHROWS a caller-owned cancellation (does not eat the caller deadline)', () => {
+      const outcome = runFallback('caller');
+      expect('thrown' in outcome).toBe(true);
+      const thrown = (outcome as { thrown: unknown }).thrown;
+      expect(thrown).toBeInstanceOf(CancellationError);
+      expect((thrown as CancellationError).attribution).toBe('caller');
+    });
+
+    test("swallows Rubi's own sub-budget → null degrade", () => {
+      expect(runFallback('rubi:native-fallback')).toEqual({ result: null });
+    });
+
+    test('swallows the deprecated ambient engine.timeLimit deadline → null', () => {
+      expect(runFallback('engine.timeLimit:Integrate')).toEqual({
+        result: null,
+      });
+    });
+
+    test('swallows an unattributed deadline → null', () => {
+      expect(runFallback(undefined)).toEqual({ result: null });
     });
   });
 

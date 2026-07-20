@@ -1,4 +1,25 @@
 import { bigint } from './bigint.js';
+import {
+  CancellationError,
+  checkDeadline,
+  type DeadlineFrame,
+} from '../../common/interruptible.js';
+
+/**
+ * Iteration budget for a single Pollard-rho invocation, a backstop for the
+ * no-deadline case (`ce.timeLimit = 0`, or a caller with no span armed): the
+ * rho inner loop is otherwise bounded only by the evaluation deadline, so a
+ * hard semiprime with no deadline armed would spin forever.
+ *
+ * Sized empirically: a legitimate 18–20-digit composite splits in at most
+ * ~2.2·10⁵ rho iterations (measured over random 20-digit semiprimes), so 10⁷
+ * leaves a ~45× margin while still firing in single-digit seconds (~2.8s at
+ * the measured ~3.6M iter/s) on a hard 37-digit semiprime like (2⁶¹−1)². This
+ * is deliberately a dedicated constant and NOT `engine.iterationLimit` (which
+ * governs collection/iterator length) — same convention as
+ * `MAX_VALUE_SCALED_ITERATIONS` in `library/number-theory.ts`.
+ */
+const POLLARD_RHO_MAX_ITERATIONS = 10_000_000;
 
 // prettier-ignore
 const SMALL_PRIMES = new Set<number>([
@@ -81,7 +102,10 @@ const SMALL_PRIMES = new Set<number>([
 
 export const LARGEST_SMALL_PRIME = 7919;
 
-export function primeFactors(n: number): { [factor: number]: number } {
+export function primeFactors(
+  n: number,
+  deadline?: number | DeadlineFrame
+): { [factor: number]: number } {
   console.assert(
     Number.isInteger(n) && n >= 0 && n < Number.MAX_SAFE_INTEGER,
     n
@@ -110,7 +134,7 @@ export function primeFactors(n: number): { [factor: number]: number } {
     // for a 2^53 input): switch to Miller–Rabin + Pollard rho.
     if (n >= 2 ** 32) {
       const sub = new Map<bigint, number>();
-      factorWithRho(BigInt(n), sub);
+      factorWithRho(BigInt(n), sub, deadline);
       for (const [p, e] of sub) {
         const pn = Number(p);
         result[pn] = (result[pn] ?? 0) + e;
@@ -240,8 +264,23 @@ function bigGcd(a: bigint, b: bigint): bigint {
  * prime factor — a 20-digit semiprime splits in milliseconds where trial
  * division needs ~10⁹ candidates.
  */
-function pollardRho(n: bigint): bigint {
+function pollardRho(n: bigint, deadline?: number | DeadlineFrame): bigint {
   const m = 128n;
+  // Guard the inner loops against both an evaluation deadline and — for the
+  // no-deadline case — a hard iteration budget. Checked on a stride so the
+  // `Date.now()` cost (and the budget comparison) are amortized; the budget
+  // may overshoot by up to one stride, which is negligible.
+  let iter = 0;
+  const guard = () => {
+    if ((++iter & 0x3ff) === 0) {
+      checkDeadline(deadline);
+      if (iter > POLLARD_RHO_MAX_ITERATIONS)
+        throw new CancellationError({
+          cause: 'iteration-limit-exceeded',
+          message: `Pollard rho: exceeded ${POLLARD_RHO_MAX_ITERATIONS} iterations`,
+        });
+    }
+  };
   for (let c = 1n; ; c++) {
     let x = 2n;
     let y = 2n;
@@ -251,13 +290,17 @@ function pollardRho(n: bigint): bigint {
     let r = 1n;
     while (g === 1n) {
       x = y;
-      for (let i = 0n; i < r; i++) y = (y * y + c) % n;
+      for (let i = 0n; i < r; i++) {
+        y = (y * y + c) % n;
+        guard();
+      }
       for (let k = 0n; k < r && g === 1n; k += m) {
         ys = y;
         const lim = r - k < m ? r - k : m;
         for (let i = 0n; i < lim; i++) {
           y = (y * y + c) % n;
           q = (q * (x > y ? x - y : y - x)) % n;
+          guard();
         }
         g = bigGcd(q, n);
       }
@@ -270,6 +313,7 @@ function pollardRho(n: bigint): bigint {
       while (g === 1n) {
         ys = (ys * ys + c) % n;
         g = bigGcd(x > ys ? x - ys : ys - x, n);
+        guard();
       }
     }
     if (g !== n) return g;
@@ -283,15 +327,19 @@ function pollardRho(n: bigint): bigint {
  * composite ones. Callers strip the small factors first (rho is only
  * economical past the trial-division range).
  */
-function factorWithRho(n: bigint, result: Map<bigint, number>): void {
+function factorWithRho(
+  n: bigint,
+  result: Map<bigint, number>,
+  deadline?: number | DeadlineFrame
+): void {
   while (n !== 1n) {
     if (isPrimeBigint(n)) {
       result.set(n, (result.get(n) ?? 0) + 1);
       return;
     }
-    const d = pollardRho(n);
+    const d = pollardRho(n, deadline);
     // The factor rho returns may itself be composite.
-    factorWithRho(d, result);
+    factorWithRho(d, result, deadline);
     n /= d;
   }
 }
@@ -308,9 +356,12 @@ const PRIME_WHEEL_INC = [
   BigInt(6),
 ];
 
-export function bigPrimeFactors(d: bigint): Map<bigint, number> {
+export function bigPrimeFactors(
+  d: bigint,
+  deadline?: number | DeadlineFrame
+): Map<bigint, number> {
   if (d < Number.MAX_SAFE_INTEGER) {
-    const factors = primeFactors(Number(d));
+    const factors = primeFactors(Number(d), deadline);
     const result = new Map<bigint, number>();
     for (const f of Object.keys(factors))
       result.set(bigint(f)!, factors[Number(f)]);
@@ -366,7 +417,9 @@ export function bigPrimeFactors(d: bigint): Map<bigint, number> {
   // the cap, a large prime or semiprime cofactor would be trial-divided all
   // the way to √n — minutes for a 20-digit cofactor.
   const TRIAL_DIVISION_BOUND = BigInt(65536);
+  let steps = 0;
   while (k * k <= n && k <= TRIAL_DIVISION_BOUND) {
+    if ((++steps & 0x3ff) === 0) checkDeadline(deadline);
     if (n % k === BigInt(0)) {
       if (!kIndex) kIndex = k.toString();
       result.set(kIndex, (result.get(kIndex) ?? 0) + 1);
@@ -382,7 +435,7 @@ export function bigPrimeFactors(d: bigint): Map<bigint, number> {
   for (const [k, v] of result) r.set(bigint(k)!, v);
 
   // The remaining cofactor is 1, prime, or a product of primes > 2^16.
-  if (n !== BigInt(1)) factorWithRho(n, r);
+  if (n !== BigInt(1)) factorWithRho(n, r, deadline);
 
   return r;
 }

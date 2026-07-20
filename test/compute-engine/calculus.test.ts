@@ -1,4 +1,5 @@
 import { engine } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 
 function evaluate(expr: string): string {
   return engine.parse(expr).evaluate().toString();
@@ -1468,6 +1469,29 @@ describe('LIMIT', () => {
     expect(r.re).toBeCloseTo(0.5772156649015329, 9); // Euler–Mascheroni γ
     expect(Date.now() - start).toBeLessThan(5000);
   });
+
+  test('variable-bound Sum in a limit at ∞ is bounded by the probe budget with NO deadline (γ)', () => {
+    // Deadline-free sibling of the test above. The Richardson ladder cannot
+    // interrupt a single compiled `Sum` sample from the outside, so the
+    // LIMIT_PROBE_ITERATION_BUDGET compiled into that sample is the SOLE
+    // protection once `ce.timeLimit` is removed: with the deadline disabled
+    // (`ce.timeLimit = 0` normalizes to Infinity), an unbudgeted Sum whose
+    // bound is 8^k would run an ever-longer uninterruptible loop and hang.
+    // The budget makes the over-budget rungs read as NaN, the ladder stops at
+    // its clean prefix, and extrapolation still converges to γ — in ms. A
+    // regression in the budget would hang here rather than hide behind a
+    // deadline.
+    const ce = new ComputeEngine();
+    ce.timeLimit = 0;
+    const start = Date.now();
+    const r = ce
+      .parse(
+        '\\lim_{n\\to\\infty} \\left(\\sum_{k=1}^{n} \\frac{1}{k} - \\ln n\\right)'
+      )
+      .N();
+    expect(r.re).toBeCloseTo(0.5772156649015329, 9); // Euler–Mascheroni γ
+    expect(Date.now() - start).toBeLessThan(5000);
+  }, 15_000);
 
   test('variable-bound Sum in a limit at ∞ honors the deadline (π)', () => {
     // Stage-2 corpus-audit P1, second corpus entry (pi/dea83d):

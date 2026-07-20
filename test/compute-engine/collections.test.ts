@@ -1910,6 +1910,49 @@ describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
       ])
     ).toBe('5');
   });
+
+  it('bounds an infinite Filter walk via the iteration limit with NO deadline', () => {
+    // Guard: the Filter iterator (collections.ts) caps its walk at
+    // `ce.iterationLimit` and throws `iteration-limit-exceeded`; the
+    // `isEmpty` handler swallows that cause and reports `undefined`. Here the
+    // source Range is infinite and the predicate (`x < 0`) is NEVER true, so
+    // the filtered stream yields nothing and the walk is unbounded — the
+    // iteration-limit guard is the ONLY thing that can stop it once
+    // `ce.timeLimit` is removed. With the deadline disabled
+    // (`timeLimit = 0` normalizes to Infinity) a regression in the guard would
+    // hang forever here rather than hide behind a deadline. A fresh engine is
+    // used so the default `iterationLimit` (1024) applies.
+    const ce = new ComputeEngine();
+    ce.timeLimit = 0;
+    const neverTrue: Expression = ['Function', ['Less', 'x', 0], 'x'];
+    const filter: Expression = ['Filter', ['Range', 1, 'Infinity'], neverTrue];
+    const start = Date.now();
+    // The guarded walk trips iteration-limit-exceeded, which isEmpty swallows,
+    // so the observable result is `undefined` (unknown) rather than a hang.
+    expect(ce.box(filter).isEmptyCollection).toBeUndefined();
+    expect(Date.now() - start).toBeLessThan(5000);
+  }, 15_000);
+
+  it('bounds First over an infinite never-matching Filter via the iteration limit with NO deadline', () => {
+    // Companion to the `isEmpty` guard above, for the `at` walk that `First`
+    // uses. `First(Filter(...))` calls the Filter `at` handler, whose
+    // positive-index path must route through the guarded iterator (capping the
+    // source walk at `ce.iterationLimit`) rather than the raw `expr.op1.each()`
+    // — otherwise, with the deadline disabled (`timeLimit = 0`), a never-true
+    // predicate over an infinite source would walk forever. The guarded walk
+    // trips iteration-limit-exceeded, which the `at` handler swallows (returns
+    // undefined), so `First` yields `Nothing`.
+    const ce = new ComputeEngine();
+    ce.timeLimit = 0;
+    const neverTrue: Expression = ['Function', ['Less', 'x', 0], 'x'];
+    const first: Expression = [
+      'First',
+      ['Filter', ['Range', 1, 'Infinity'], neverTrue],
+    ];
+    const start = Date.now();
+    expect(ce.box(first).evaluate().symbol).toBe('Nothing');
+    expect(Date.now() - start).toBeLessThan(5000);
+  }, 15_000);
 });
 
 describe('ISEMPTY / CONTAINS ARE THREE-VALUED (regression)', () => {
@@ -2828,6 +2871,25 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     expect(str(['At', ['Dedup', src], 3])).toEqual('2');
     expect(str(['Count', ['Dedup', src]])).toEqual('6');
   });
+
+  test('Dedup bounds an infinite one-value source via the iteration limit with NO deadline', () => {
+    // Guard: the Dedup iterator (collections.ts) advances only on DISTINCT
+    // elements, so a source that repeats one value forever (`Cycle([1,1])`)
+    // yields a single deduped element and then spins consuming the source
+    // without ever emitting. The iterator caps that source walk at
+    // `ce.iterationLimit` and throws `iteration-limit-exceeded`, which the `at`
+    // handler swallows (returns undefined), so `Second` yields `Nothing`. With
+    // the deadline disabled (`timeLimit = 0` normalizes to Infinity) the
+    // iteration-limit guard is the ONLY thing that can stop it — a regression
+    // would hang forever here rather than hide behind a deadline. A fresh
+    // engine is used so the default `iterationLimit` (1024) applies.
+    const ce = new ComputeEngine();
+    ce.timeLimit = 0;
+    const second: Expression = ['Second', ['Dedup', ['Cycle', ['List', 1, 1]]]];
+    const start = Date.now();
+    expect(ce.box(second).evaluate().symbol).toBe('Nothing');
+    expect(Date.now() - start).toBeLessThan(5000);
+  }, 15_000);
 
   // --- Insert ------------------------------------------------------------
   test('Insert at 1 prepends', () =>

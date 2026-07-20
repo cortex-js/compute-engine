@@ -242,11 +242,15 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
-##### ExpressionComputeEngine.timeLimit
+##### ExpressionComputeEngine.~~timeLimit~~
 
 ```ts
 timeLimit: number;
 ```
+
+###### Deprecated
+
+Use [`withTimeLimit`](#withtimelimit) instead.
 
 </MemberCard>
 
@@ -437,6 +441,35 @@ A list of the function calls to the current evaluation context
 get precision(): number
 set precision(p: number | "auto" | "machine"): void
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.withTimeLimit()
+
+```ts
+withTimeLimit<T>(limit, fn): T
+```
+
+Run `fn` with at most `ms` milliseconds (numeric form) or `limit.ms`
+(object form, which also accepts an attribution `label`). A tighter
+enclosing span preempts this limit; use the label and
+`CancellationError.attribution`/`spans` to tell which limit fired.
+
+• T
+
+####### limit
+
+  \| `number`
+  \| \{
+  `ms`: `number`;
+  `label`: `string`;
+ \}
+
+####### fn
+
+() => `T`
 
 </MemberCard>
 
@@ -7485,11 +7518,15 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
-##### IComputeEngine.timeLimit
+##### IComputeEngine.~~timeLimit~~
 
 ```ts
 timeLimit: number;
 ```
+
+###### Deprecated
+
+Use [`withTimeLimit`](#withtimelimit) instead.
 
 </MemberCard>
 
@@ -7680,6 +7717,35 @@ A list of the function calls to the current evaluation context
 get precision(): number
 set precision(p: number | "auto" | "machine"): void
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.withTimeLimit()
+
+```ts
+withTimeLimit<T>(limit, fn): T
+```
+
+Run `fn` with at most `ms` milliseconds (numeric form) or `limit.ms`
+(object form, which also accepts an attribution `label`). A tighter
+enclosing span preempts this limit; use the label and
+`CancellationError.attribution`/`spans` to tell which limit fired.
+
+• T
+
+####### limit
+
+  \| `number`
+  \| \{
+  `ms`: `number`;
+  `label`: `string`;
+ \}
+
+####### fn
+
+() => `T`
 
 </MemberCard>
 

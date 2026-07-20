@@ -352,15 +352,18 @@ describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => 
     // s(k) = (3/2)·s(k−1) − s(k−2): 0, 2, 3, 5/2, 3/4, −11/8, … (bounded,
     // oscillating). Anchor 100 is never reached, so the search would grind.
     const fast = new ComputeEngine();
-    fast.timeLimit = 1000;
     const t0 = Date.now();
     let threw: string | null = null;
     try {
-      fast
-        .function('Interpret', [
-          fast.parse('0 + 2 + 3 + \\frac{5}{2} + \\frac{3}{4} - \\frac{11}{8} + \\dots + 100'),
-        ])
-        .evaluate();
+      fast.withTimeLimit(
+        { ms: 1000, label: 'test:recurrence-anchor-search' },
+        () =>
+          fast
+            .function('Interpret', [
+              fast.parse('0 + 2 + 3 + \\frac{5}{2} + \\frac{3}{4} - \\frac{11}{8} + \\dots + 100'),
+            ])
+            .evaluate()
+      );
     } catch (e) {
       threw = (e as Error).name;
     }

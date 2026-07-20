@@ -17,6 +17,25 @@ export type CancellationCause =
   | 'iteration-limit-exceeded'
   | 'recursion-depth-exceeded';
 
+/**
+ * The engine's deadline state.
+ *
+ * A deadline is armed only by entering a span (`ce.withTimeLimit(...)`) or the
+ * (deprecated) ambient `ce.timeLimit`. The frame is immutable: entering a span
+ * creates a new frame; exiting restores the saved previous frame object.
+ *
+ *  - `at`: absolute ms timestamp beyond which execution should not proceed.
+ *  - `owner`: label of the span whose deadline is the EFFECTIVE one (i.e. the
+ *    span that owns `at`). `undefined` for an unlabelled span.
+ *  - `spans`: labels of all active spans, outermost first. Unlabelled spans
+ *    contribute nothing.
+ */
+export interface DeadlineFrame {
+  at: number;
+  owner?: string;
+  spans: string[];
+}
+
 export class CancellationError<T = unknown> extends Error {
   /**
    * Machine-readable reason for the cancellation. Engine cap breaches set one
@@ -26,37 +45,69 @@ export class CancellationError<T = unknown> extends Error {
   cause: CancellationCause | unknown;
   value?: T;
 
+  /**
+   * The label (`owner`) of the span whose deadline fired. Answers "was this my
+   * budget or my caller's?" — compare directly against the label passed to
+   * `withTimeLimit`. `undefined` for an unlabelled span.
+   */
+  attribution?: string;
+
+  /** All active span labels when the deadline fired, outermost first. */
+  spans?: string[];
+
   constructor({
     message,
     value,
     cause,
+    attribution,
+    spans,
   }: {
     message?: string;
     value?: T;
     cause?: CancellationCause | unknown;
+    attribution?: string;
+    spans?: string[];
   } = {}) {
     super(message ?? 'Operation canceled');
     if (value) this.value = value;
     this.cause = cause;
+    if (attribution !== undefined) this.attribution = attribution;
+    if (spans !== undefined) this.spans = spans;
     this.name = 'CancellationError';
   }
 }
 
 /**
  * Throw a `CancellationError` if `deadline` (an absolute timestamp in
- * milliseconds, i.e. `engine._deadline`) has passed.
+ * milliseconds, or a `DeadlineFrame`, i.e. `engine._deadline` /
+ * `engine._deadlineFrame`) has passed.
+ *
+ * When passed a `DeadlineFrame`, the thrown error carries `attribution`
+ * (the frame's `owner`) and `spans` so the catching code can tell which
+ * budget fired.
  *
  * Call this periodically from long-running loops that cannot be expressed
  * as generators (where `run()`/`runAsync()` would apply). In tight loops,
  * amortize the `Date.now()` cost with a stride counter:
  *
- *    if ((++count & 0x3ff) === 0) checkDeadline(ce._deadline);
+ *    if ((++count & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
  */
-export function checkDeadline(deadline: number | undefined): void {
-  if (deadline !== undefined && Date.now() >= deadline) {
+export function checkDeadline(
+  deadline: number | DeadlineFrame | undefined
+): void {
+  if (deadline === undefined) return;
+  const at = typeof deadline === 'number' ? deadline : deadline.at;
+  if (Date.now() >= at) {
+    if (typeof deadline === 'number')
+      throw new CancellationError({
+        cause: 'timeout',
+        message: 'Timeout exceeded',
+      });
     throw new CancellationError({
       cause: 'timeout',
       message: 'Timeout exceeded',
+      attribution: deadline.owner,
+      spans: deadline.spans,
     });
   }
 }
@@ -103,7 +154,8 @@ export function withAmbientDeadline<T>(
 export async function runAsync<T>(
   gen: Generator<T>,
   timeLimitMs: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  attribution?: DeadlineFrame | { owner?: string; spans?: string[] }
 ): Promise<T> {
   // eslint-disable-next-line no-restricted-globals
   const startTime = performance.now();
@@ -131,6 +183,8 @@ export async function runAsync<T>(
           value,
           cause: 'timeout',
           message: `Timeout exceeded (${timeLimitMs}ms)`,
+          attribution: attribution?.owner,
+          spans: attribution?.spans,
         });
     }
 
@@ -139,7 +193,11 @@ export async function runAsync<T>(
   }
 }
 
-export function run<T>(gen: Generator<T>, timeLimitMs: number): T {
+export function run<T>(
+  gen: Generator<T>,
+  timeLimitMs: number,
+  attribution?: DeadlineFrame | { owner?: string; spans?: string[] }
+): T {
   const startTime = Date.now();
 
   while (true) {
@@ -154,6 +212,8 @@ export function run<T>(gen: Generator<T>, timeLimitMs: number): T {
         value,
         cause: 'timeout',
         message: `Timeout exceeded (${timeLimitMs}ms)`,
+        attribution: attribution?.owner,
+        spans: attribution?.spans,
       });
     }
   }

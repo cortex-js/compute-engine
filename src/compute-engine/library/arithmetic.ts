@@ -648,7 +648,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return ce.number(
             run(
               bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
-              ce._timeRemaining
+              ce._timeRemaining,
+              ce._deadlineFrame
             )
           );
         } catch (e) {
@@ -684,7 +685,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             await runAsync(
               bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
               (ce._deadline ?? Infinity) - Date.now(),
-              signal
+              signal,
+              ce._deadlineFrame
             )
           );
         } catch (e) {
@@ -732,7 +734,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (n === null) return undefined;
         const ce = x.engine;
         if (bignumPreferred(ce))
-          return ce.number(run(bigFactorial2(ce.bignum(n)), ce._timeRemaining));
+          return ce.number(
+            run(bigFactorial2(ce.bignum(n)), ce._timeRemaining, ce._deadlineFrame)
+          );
 
         return ce.number(factorial2(n));
       },
@@ -3048,7 +3052,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             },
             ce.One
           ),
-          ce._timeRemaining
+          ce._timeRemaining,
+          ce._deadlineFrame
         );
         // If domain is non-enumerable, keep expression unevaluated (symbolic)
         if (result === NON_ENUMERABLE_DOMAIN) {
@@ -3093,7 +3098,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ce.One
           ),
           ce._timeRemaining,
-          options.signal
+          options.signal,
+          ce._deadlineFrame
         );
         // If domain is non-enumerable, keep expression unevaluated (symbolic)
         if (result === NON_ENUMERABLE_DOMAIN) {
@@ -3146,7 +3152,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 numericApproximation
               )
             ),
-            engine._timeRemaining
+            engine._timeRemaining,
+            engine._deadlineFrame
           );
           return result?.evaluate({ numericApproximation }) ?? engine.NaN;
         }
@@ -3188,7 +3195,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ),
             engine.Zero
           ),
-          engine._timeRemaining
+          engine._timeRemaining,
+          engine._deadlineFrame
         );
         // Non-enumerable domain: keep the expression symbolic.
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
@@ -3218,7 +3226,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               )
             ),
             engine._timeRemaining,
-            signal
+            signal,
+            engine._deadlineFrame
           );
           return result?.evaluate({ numericApproximation }) ?? engine.NaN;
         }
@@ -3254,7 +3263,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             engine.Zero
           ),
           engine._timeRemaining,
-          signal
+          signal,
+          engine._deadlineFrame
         );
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
         if (result === NON_ENUMERABLE_BOUNDS)

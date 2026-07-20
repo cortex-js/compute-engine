@@ -227,6 +227,37 @@ export type DriverStats = {
   trace: { id: string; stage: string; depth: number }[];
 };
 
+/** Decide whether a caught error at a Rubi span (labelled `localLabel`) is a
+ * cancellation Rubi may swallow and degrade gracefully — because the deadline
+ * that fired belongs to Rubi's own bounded work window — versus an enclosing
+ * caller's deadline (e.g. a user `withTimeLimit({label:'caller'})`), which
+ * Rubi must NOT eat and must rethrow past.
+ *
+ * `e` is name-checked, not `instanceof CancellationError` (cross-bundle-safe),
+ * so `attribution` is read via a safe cast. Swallow iff:
+ * - the attribution is the local span label — Rubi's own sub-budget fired; or
+ * - the attribution starts with `engine.timeLimit:` — the deprecated ambient
+ *   limit re-arms per-evaluate INSIDE Rubi's span (withDeadline computes
+ *   min(prev, now+timeLimit)), so an ambient-owned timeout in Rubi's window is
+ *   part of Rubi's bounded attempt, not a caller signal; or
+ * - the attribution is undefined — unattributed numeric-deadline sites inside
+ *   Rubi's work (and pre-attribution error paths) are Rubi's own.
+ * Any other defined attribution means a caller's span owns it → rethrow.
+ *
+ * Exported for unit testing (the decision table is tested deterministically
+ * in rubi-utils.test.ts rather than via timer races). */
+export function isRubiOwnedCancellation(
+  e: unknown,
+  localLabel: string
+): boolean {
+  if (!(e instanceof Error && e.name === 'CancellationError')) return false;
+  const attribution = (e as { attribution?: string }).attribution;
+  if (attribution === undefined) return true;
+  if (attribution === localLabel) return true;
+  if (attribution.startsWith('engine.timeLimit:')) return true;
+  return false;
+}
+
 export class RubiDriver {
   private readonly memo = new Map<string, Expression | null>();
   private deadline = Infinity;
@@ -485,28 +516,28 @@ export class RubiDriver {
     const remainingMs = this.deadline - Date.now();
     if (remainingMs <= 0) return null;
     const x = ce.symbol(variable);
-    const savedLimit = ce.timeLimit;
-    // bound the native evaluation — N()/evaluate() self-arm a
-    // CancellationError from ce.timeLimit. A native success on a rational
-    // is sub-second; the long runs are failures (high-degree numeric
+    // bound the native evaluation — evaluations inside the span throw a
+    // CancellationError once its deadline passes. A native success on a
+    // rational is sub-second; the long runs are failures (high-degree numeric
     // denominators it can't factor), so cap well under the driver budget
     // to avoid burning the full window on a dead end.
-    ce.timeLimit = Math.max(1, Math.min(remainingMs, 5000));
+    const budgetMs = Math.max(1, Math.min(remainingMs, 5000));
     this.inNativeFallback = true;
     try {
-      const F = ce.function('Integrate', [integrand, x]).evaluate();
-      if (containsIntegrate(F)) return null;
-      // An antiderivative of a nonzero rational function always contains
-      // the variable; a constant result is a native miscomputation (e.g.
-      // the repeated-irreducible-quadratic partial-fraction bug that
-      // returns 0). Reject it rather than emit a wrong answer.
-      if (!F.has(variable)) return null;
-      return F;
+      return ce.withTimeLimit({ ms: budgetMs, label: 'rubi:native-fallback' }, () => {
+        const F = ce.function('Integrate', [integrand, x]).evaluate();
+        if (containsIntegrate(F)) return null;
+        // An antiderivative of a nonzero rational function always contains
+        // the variable; a constant result is a native miscomputation (e.g.
+        // the repeated-irreducible-quadratic partial-fraction bug that
+        // returns 0). Reject it rather than emit a wrong answer.
+        if (!F.has(variable)) return null;
+        return F;
+      });
     } catch (e) {
-      if (e instanceof Error && e.name === 'CancellationError') return null;
+      if (isRubiOwnedCancellation(e, 'rubi:native-fallback')) return null;
       throw e;
     } finally {
-      ce.timeLimit = savedLimit;
       this.inNativeFallback = false;
     }
   }
@@ -1801,15 +1832,15 @@ export class RubiDriver {
     const remainingMs = this.deadline - Date.now();
     let simplified = F;
     if (remainingMs > 0) {
-      const savedLimit = ce.timeLimit;
-      ce.timeLimit = Math.max(1, Math.min(remainingMs, 5000));
+      const budgetMs = Math.max(1, Math.min(remainingMs, 5000));
       try {
-        simplified = F.simplify();
+        simplified = ce.withTimeLimit(
+          { ms: budgetMs, label: 'rubi:clean-expansion' },
+          () => F.simplify()
+        );
       } catch (e) {
-        if (!(e instanceof Error && e.name === 'CancellationError')) throw e;
+        if (!isRubiOwnedCancellation(e, 'rubi:clean-expansion')) throw e;
         // deadline hit — keep the unsimplified form
-      } finally {
-        ce.timeLimit = savedLimit;
       }
     }
     return foldLnExponentialE(ce, simplified);

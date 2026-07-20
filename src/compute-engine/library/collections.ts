@@ -1916,10 +1916,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return undefined;
         if (!isFunction(expr)) return undefined;
 
-        // Resolve the predicate
-        const predicate = applicable(expr.op2);
-        if (!predicate) return undefined;
-
         // Handle negative indexes by materialising the filtered sequence
         if (index < 0) {
           // Need a definite end to count from the back
@@ -1931,20 +1927,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return data[i - 1];
         }
 
-        // Positive index: stream through until we reach the desired element
-        let count = 0;
-        for (const item of expr.op1.each()) {
-          const pred = sym(predicate([item]));
-          if (pred === 'True') {
+        // Positive index: stream through the guarded filter iterator until we
+        // reach the desired element. `expr.each()` applies the predicate AND
+        // caps the source walk at `ce.iterationLimit`, throwing
+        // `iteration-limit-exceeded` — unlike a raw `expr.op1.each()` walk,
+        // which has no guard and would run unbounded once the deadline is
+        // removed. Swallow that cause and report `undefined` (unknown),
+        // mirroring `count`/`isEmpty`; any other cancellation
+        // (deadline/timeout) propagates.
+        try {
+          let count = 0;
+          for (const item of expr.each()) {
             count += 1;
             if (count === index) return item;
-          } else if (pred !== 'False') {
-            throw new Error(
-              `Filter predicate must return "True" or "False". ${spellCheckMessage(
-                expr.op2
-              )}`
-            );
           }
+        } catch (e) {
+          if (
+            e instanceof CancellationError &&
+            e.cause === 'iteration-limit-exceeded'
+          )
+            return undefined;
+          throw e;
         }
         return undefined; // Not enough matching elements
       },
@@ -2023,7 +2026,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               }
               return ce.expr(accumulator);
             })(),
-            ce._timeRemaining
+            ce._timeRemaining,
+            ce._deadlineFrame
           );
         }
       }
@@ -2036,7 +2040,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           (acc, x) => f([acc, x]) ?? ce.Nothing,
           initial
         ) as Generator<Expression | undefined, Expression | undefined>,
-        ce._timeRemaining
+        ce._timeRemaining,
+        ce._deadlineFrame
       );
     },
   },
@@ -2297,18 +2302,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           },
         };
       },
-      // The k-th taken element: iterate the source, checking the predicate,
-      // until the k-th element is reached or the prefix ends.
+      // The k-th taken element: iterate the guarded TakeWhile iterator (which
+      // applies the predicate, stops at the first non-True, and caps the walk
+      // at `ce.iterationLimit`) until the k-th element is reached or the prefix
+      // ends. Iterating the raw `expr.op1.each()` instead would bypass the
+      // guard and run unbounded on an infinite source once the deadline is
+      // removed. Swallow `iteration-limit-exceeded` and report `undefined`
+      // (unknown), mirroring `count`/`isEmpty`; any other cancellation
+      // (deadline/timeout) propagates.
       at: (expr, index) => {
         if (typeof index !== 'number' || index < 1) return undefined;
         if (!isFunction(expr)) return undefined;
-        const f = applicable(expr.op2);
-        if (!f) return undefined;
-        let i = 0;
-        for (const item of expr.op1.each()) {
-          if (sym(f([item])) !== 'True') return undefined;
-          i += 1;
-          if (i === index) return item;
+        try {
+          let i = 0;
+          for (const item of expr.each()) {
+            i += 1;
+            if (i === index) return item;
+          }
+        } catch (e) {
+          if (
+            e instanceof CancellationError &&
+            e.cause === 'iteration-limit-exceeded'
+          )
+            return undefined;
+          throw e;
         }
         return undefined;
       },
@@ -3831,7 +3848,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = applicable(fn);
-      return run(extremumBy(xs, f, ce, 'max', 'element'), ce._timeRemaining);
+      return run(
+        extremumBy(xs, f, ce, 'max', 'element'),
+        ce._timeRemaining,
+        ce._deadlineFrame
+      );
     },
   },
 
@@ -3851,7 +3872,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = applicable(fn);
-      return run(extremumBy(xs, f, ce, 'min', 'element'), ce._timeRemaining);
+      return run(
+        extremumBy(xs, f, ce, 'min', 'element'),
+        ce._timeRemaining,
+        ce._deadlineFrame
+      );
     },
   },
 
@@ -3892,7 +3917,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = fn ? applicable(fn) : undefined;
-      return run(extremumBy(xs, f, ce, 'max', 'index'), ce._timeRemaining);
+      return run(
+        extremumBy(xs, f, ce, 'max', 'index'),
+        ce._timeRemaining,
+        ce._deadlineFrame
+      );
     },
   },
 
@@ -3924,7 +3953,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = fn ? applicable(fn) : undefined;
-      return run(extremumBy(xs, f, ce, 'min', 'index'), ce._timeRemaining);
+      return run(
+        extremumBy(xs, f, ce, 'min', 'index'),
+        ce._timeRemaining,
+        ce._deadlineFrame
+      );
     },
   },
 
@@ -4174,9 +4207,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.op1.isFiniteCollection !== true) return undefined;
-        let n = 0;
-        for (const _ of expr.each()) n++;
-        return n;
+        // The guarded iterator caps the walk at `ce.iterationLimit`; if that
+        // trips, report the count as unknown rather than letting the
+        // cancellation escape (mirrors Filter's `count`). Any other
+        // cancellation (deadline/timeout) must propagate.
+        try {
+          let n = 0;
+          for (const _ of expr.each()) n++;
+          return n;
+        } catch (e) {
+          if (
+            e instanceof CancellationError &&
+            e.cause === 'iteration-limit-exceeded'
+          )
+            return undefined;
+          throw e;
+        }
       },
       // Finite source ⇒ deduped result is finite; otherwise unknown.
       isFinite: (expr) =>
@@ -4194,10 +4240,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // `.isSame()`: exact structural/symbolic equality (see ChunkBy note).
         let prev: Expression | undefined = undefined;
         let hasPrev = false;
+        // Cap the SOURCE walk at `ce.iterationLimit`: the loop advances only on
+        // DISTINCT elements, so a source that repeats one value forever (e.g.
+        // `Cycle([1,1])`) would spin here without ever emitting. Mirror the
+        // Filter/TakeWhile guard — throw `iteration-limit-exceeded`, which the
+        // terminal consumers (`count`, `at`) swallow to `undefined`; any other
+        // cancellation (deadline/timeout) propagates.
+        let count = 0;
+        const limit = expr.engine.iterationLimit;
         return {
           next: () => {
             while (true) {
               const { value, done } = source.next();
+              count += 1;
+              if (count > limit) {
+                throw new CancellationError({
+                  cause: 'iteration-limit-exceeded',
+                  message: `Iteration limit of ${limit} exceeded while evaluating Dedup()`,
+                });
+              }
               if (done) return { value: undefined, done: true };
               if (hasPrev && prev!.isSame(value as Expression)) continue;
               prev = value as Expression;
@@ -4207,19 +4268,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           },
         };
       },
-      // The k-th deduped element: walk the source collapsing adjacent equals.
+      // The k-th deduped element: iterate the guarded Dedup iterator (which
+      // collapses adjacent equals AND caps the source walk at
+      // `ce.iterationLimit`) until the k-th element is reached. Iterating the
+      // raw `expr.op1.each()` would bypass the guard and run unbounded on a
+      // source that repeats one value forever (e.g. `Cycle([1,1])`) once the
+      // deadline is removed. Swallow `iteration-limit-exceeded` and report
+      // `undefined` (→ `Nothing` for `Second`/`Third`); any other cancellation
+      // (deadline/timeout) propagates.
       at: (expr, index) => {
         if (typeof index !== 'number' || index < 1) return undefined;
         if (!isFunction(expr)) return undefined;
-        let i = 0;
-        let prev: Expression | undefined = undefined;
-        let hasPrev = false;
-        for (const item of expr.op1.each()) {
-          if (hasPrev && prev!.isSame(item)) continue;
-          prev = item;
-          hasPrev = true;
-          i += 1;
-          if (i === index) return item;
+        try {
+          let i = 0;
+          for (const item of expr.each()) {
+            i += 1;
+            if (i === index) return item;
+          }
+        } catch (e) {
+          if (
+            e instanceof CancellationError &&
+            e.cause === 'iteration-limit-exceeded'
+          )
+            return undefined;
+          throw e;
         }
         return undefined;
       },
@@ -5134,7 +5206,8 @@ function evaluateQuantifier(
       }
       return sawUndetermined ? undefined : defaultValue;
     })(),
-    ce._timeRemaining
+    ce._timeRemaining,
+    ce._deadlineFrame
   );
 }
 

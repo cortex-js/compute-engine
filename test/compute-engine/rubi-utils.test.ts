@@ -41,6 +41,7 @@ import {
   RuleFail,
 } from '../../src/compute-engine/rubi/rubi-utils';
 import { toTimesPower } from '../../src/compute-engine/rubi/normal-form';
+import { isRubiOwnedCancellation } from '../../src/compute-engine/rubi/driver';
 import { loadIntegrationRules } from '../../src/integration-rules';
 import type { Ctx } from '../../src/compute-engine/rubi/rubi-utils';
 import type { Json } from '../../scripts/rubi/wl-parser';
@@ -1917,3 +1918,64 @@ function hyperbolicSubstituted(
   };
   return walk(integrand).div(X);
 }
+
+describe('isRubiOwnedCancellation (caller-owned timeout rethrow)', () => {
+  // Deterministic decision-table test — no timer races. Errors are built as
+  // plain Error with name/attribution set, matching the cross-bundle reality
+  // the predicate is designed for (`e.name` check, not `instanceof`).
+  const cancellation = (attribution?: string): Error => {
+    const e = new Error('Timeout exceeded');
+    e.name = 'CancellationError';
+    if (attribution !== undefined)
+      (e as unknown as { attribution: string }).attribution = attribution;
+    return e;
+  };
+
+  test('swallows its own sub-budget timeout', () => {
+    expect(
+      isRubiOwnedCancellation(
+        cancellation('rubi:native-fallback'),
+        'rubi:native-fallback'
+      )
+    ).toBe(true);
+  });
+
+  test('swallows an ambient-owned timeout inside its window', () => {
+    // At release N the deprecated ambient limit still re-arms per-evaluate
+    // inside Rubi's span; those timeouts are part of Rubi's bounded attempt.
+    expect(
+      isRubiOwnedCancellation(
+        cancellation('engine.timeLimit:Integrate'),
+        'rubi:native-fallback'
+      )
+    ).toBe(true);
+  });
+
+  test('swallows an unattributed timeout (numeric-deadline sites)', () => {
+    expect(
+      isRubiOwnedCancellation(cancellation(), 'rubi:native-fallback')
+    ).toBe(true);
+  });
+
+  test('rethrows a caller-owned timeout', () => {
+    expect(
+      isRubiOwnedCancellation(cancellation('caller'), 'rubi:native-fallback')
+    ).toBe(false);
+    // A different rubi label is still not THIS site's budget.
+    expect(
+      isRubiOwnedCancellation(
+        cancellation('rubi:clean-expansion'),
+        'rubi:native-fallback'
+      )
+    ).toBe(false);
+  });
+
+  test('never claims a non-cancellation error', () => {
+    expect(
+      isRubiOwnedCancellation(new Error('boom'), 'rubi:native-fallback')
+    ).toBe(false);
+    expect(isRubiOwnedCancellation(undefined, 'rubi:native-fallback')).toBe(
+      false
+    );
+  });
+});

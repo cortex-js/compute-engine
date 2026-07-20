@@ -75,11 +75,14 @@ export function explainExpression(
     ...simplifyOptions
   } = options ?? {};
 
-  const raw = withDeadline(expr.engine, () =>
-    simplify(expr, {
-      ...simplifyOptions,
-      collectSubsteps: true,
-    } as Partial<SimplifyOptions>)
+  const raw = withDeadline(
+    expr.engine,
+    () =>
+      simplify(expr, {
+        ...simplifyOptions,
+        collectSubsteps: true,
+      } as Partial<SimplifyOptions>),
+    expr.operator
   )();
 
   return explanationFromRuleSteps('simplify', raw, verbosity ?? 'default');
@@ -421,8 +424,10 @@ function explainIntegrate(
   const integrand = isFunction(canonical) ? canonical.ops[0] : canonical;
 
   const trace: RuleSteps = [];
-  const anti = withDeadline(ce, () =>
-    ce._integrationProvider!(integrand, variable, trace)
+  const anti = withDeadline(
+    ce,
+    () => ce._integrationProvider!(integrand, variable, trace),
+    canonical.operator
   )();
   if (anti === null || anti === undefined)
     throw new Error(
@@ -433,7 +438,11 @@ function explainIntegrate(
   // deterministic second run of the same provider plus the calculus.ts
   // shaping — for a definite integral this includes applying the bounds), so
   // the explanation's result equals what `.evaluate()` returns.
-  const result = withDeadline(ce, () => canonical.evaluate())();
+  const result = withDeadline(
+    ce,
+    () => canonical.evaluate(),
+    canonical.operator
+  )();
   if (result.operator === 'Integrate')
     throw new Error(
       'explain("Integrate"): the integration rules could not integrate this expression'
@@ -646,24 +655,40 @@ function toExplainStep(s: RuleStep): ExplainStep {
 /** Arm the evaluation deadline (`ce.timeLimit`), like the public
  * `simplify()`/`evaluate()` do. (Mirrors the private helper in
  * boxed-function.ts.) */
-function withDeadline<T>(engine: ComputeEngine, fn: () => T): () => T {
+function withDeadline<T>(
+  engine: ComputeEngine,
+  fn: () => T,
+  operator?: string
+): () => T {
   return () => {
-    const prev = engine._deadline;
+    const prevFrame = engine._deadlineFrame;
     const limit = engine.timeLimit;
 
     // The effective deadline is the earliest of this evaluation's own
     // `timeLimit` budget and any ambient deadline (e.g. a `withTimeLimit()`
     // span). See the matching helper in boxed-function.ts.
-    if (prev !== undefined && !Number.isFinite(limit)) return fn();
+    if (prevFrame !== undefined && !Number.isFinite(limit)) return fn();
 
     const own = Date.now() + limit;
-    if (prev !== undefined && own >= prev) return fn();
+    if (prevFrame !== undefined && own >= prevFrame.at) return fn();
 
-    engine._deadline = own;
+    // Synthesize an attribution label for the (deprecated) ambient
+    // `ce.timeLimit`; preserve any enclosing spans and append this frame's own
+    // label (spans lists ALL active span labels, outermost-first).
+    const owner =
+      operator !== undefined ? `engine.timeLimit:${operator}` : undefined;
+    engine._deadlineFrame = {
+      at: own,
+      owner,
+      spans: [
+        ...(prevFrame?.spans ?? []),
+        ...(owner !== undefined ? [owner] : []),
+      ],
+    };
     try {
       return fn();
     } finally {
-      engine._deadline = prev;
+      engine._deadlineFrame = prevFrame;
     }
   };
 }

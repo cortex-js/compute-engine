@@ -165,9 +165,11 @@ describe('WP-2.11 / EX-14: combinatorics magnitude guards', () => {
   // loop is what catches this one. Outcome: thrown CancellationError.
   it('BellNumber(20000) throws CancellationError instead of hanging', () => {
     const start = Date.now();
-    expect(() => ce.box(['BellNumber', 20_000]).evaluate()).toThrow(
-      CancellationError
-    );
+    expect(() =>
+      ce.withTimeLimit({ ms: 2000, label: 'test:bellnumber-deadline' }, () =>
+        ce.box(['BellNumber', 20_000]).evaluate()
+      )
+    ).toThrow(CancellationError);
     expect(Date.now() - start).toBeLessThan(4000);
   });
 
@@ -317,9 +319,11 @@ describe('WP-2.18: huge-exponent BigDecimal serialization (src/big-decimal/big-d
 describe('WP-2.11 / EX-14: controls (must remain correct/fast, unaffected)', () => {
   it('LucasL(1e9) still cancels via its existing deadline check (~2s)', () => {
     const start = Date.now();
-    expect(() => ce.box(['LucasL', 1_000_000_000]).evaluate()).toThrow(
-      CancellationError
-    );
+    expect(() =>
+      ce.withTimeLimit({ ms: 2000, label: 'test:lucasl-deadline' }, () =>
+        ce.box(['LucasL', 1_000_000_000]).evaluate()
+      )
+    ).toThrow(CancellationError);
     expect(Date.now() - start).toBeLessThan(4000);
   });
 

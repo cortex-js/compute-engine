@@ -224,7 +224,7 @@ function unaryTaylor(
   let g: Expression = ce.function(op, [ce.symbol(v)]).canonical;
   const coeffs: Coeffs = [];
   for (let k = 0; k <= W; k++) {
-    checkDeadline(ce._deadline);
+    checkDeadline(ce._deadlineFrame);
     let val = g.subs({ [v]: b0 }).evaluate();
     // The engine leaves e.g. `cosh(0)` unreduced; force it through the
     // exponential form so the coefficient is a clean number.
@@ -315,7 +315,7 @@ function expandViaSeeds(
   ce: ComputeEngine,
   W: number
 ): Coeffs | null {
-  checkDeadline(ce._deadline);
+  checkDeadline(ce._deadlineFrame);
 
   if (isNumber(expr)) return constCoeffs(ce, expr, W);
 
@@ -470,7 +470,7 @@ function expandByDerivative(
   let g = expr.canonical;
   const coeffs: Coeffs = [];
   for (let k = 0; k <= W; k++) {
-    checkDeadline(ce._deadline);
+    checkDeadline(ce._deadlineFrame);
     let val: Expression | undefined = g.subs({ [varName]: at }).evaluate();
     if (
       !val ||
@@ -1337,7 +1337,7 @@ function expandLaurent(
   ce: ComputeEngine,
   W: number
 ): Laurent | null {
-  checkDeadline(ce._deadline);
+  checkDeadline(ce._deadlineFrame);
   if (W < 0) return null;
 
   if (isNumber(expr)) return lConst(ce, expr, W);

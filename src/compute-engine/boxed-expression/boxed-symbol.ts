@@ -957,7 +957,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         let i = 0;
         while (!result.done) {
           // Enumeration can be unbounded: respect the evaluation deadline.
-          if ((++i & 0xff) === 0) checkDeadline(engine._deadline);
+          if ((++i & 0xff) === 0) checkDeadline(engine._deadlineFrame);
           yield result.value;
           result = iter.next();
         }

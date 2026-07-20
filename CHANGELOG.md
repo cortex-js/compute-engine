@@ -1,3 +1,73 @@
+## [Unreleased]
+
+### Deprecations
+
+- **`ComputeEngine.timeLimit` is deprecated** in favor of
+  `ComputeEngine.withTimeLimit()`. `timeLimit` arms a hard-to-scope implicit
+  deadline around each `evaluate()`/`simplify()`; wrap the work you want
+  bounded in a span instead:
+
+  ```ts
+  // Before
+  ce.timeLimit = 500;
+  const r = expr.evaluate();
+
+  // After
+  const r = ce.withTimeLimit({ ms: 500, label: 'my-app:eval' }, () =>
+    expr.evaluate()
+  );
+  ```
+
+  `timeLimit` still functions exactly as before in this release; it will be
+  removed in a future minor version.
+
+### Improvements
+
+- **`ComputeEngine.withTimeLimit()` accepts an attribution label.** In addition
+  to the numeric form `withTimeLimit(ms, fn)`, an object form
+  `withTimeLimit({ ms, label }, fn)` (preferred for new code) records a label
+  on the span. Nesting still composes as `min()` — a labelled inner span can
+  only shorten the effective deadline, never extend it past an enclosing one.
+
+- **`CancellationError` now carries `attribution` and `spans`.** When a timeout
+  fires, `attribution` is the label of the span that owns the deadline that
+  fired (so a caller can compare it against the label it passed to distinguish
+  "my sub-budget expired" from "my caller's budget expired"), and `spans` lists
+  all active span labels, outermost first. Timeouts armed by the deprecated
+  ambient `ce.timeLimit` are attributed as `engine.timeLimit:<operator>` (e.g.
+  `engine.timeLimit:Integrate`).
+
+- **Divisor functions are now O(√n) instead of O(n).** `Sigma0`, `Sigma1`,
+  `SigmaMinus1`, `IsPerfect`, and `Totient` compute from the prime
+  factorization rather than trial iteration: `Sigma1(1000000007)` went from
+  ~14s to ~1ms, and 11+-digit inputs that previously ran essentially forever
+  return instantly.
+
+- **Integer factorization is interruptible.** The Pollard-rho factorizer now
+  honors the active deadline (a `withTimeLimit` span interrupts a hard
+  semiprime factorization on time, with attribution) and is backstopped by an
+  iteration budget (`cause: 'iteration-limit-exceeded'`) so it terminates even
+  with no time limit set.
+
+- **Symbolic integration no longer swallows a caller's timeout.** If a
+  `withTimeLimit` span enclosing an integration expires mid-attempt, the
+  `CancellationError` now propagates to the caller (identified via
+  `attribution`) instead of being silently converted into "no antiderivative
+  found". Rubi's own internal sub-budgets still degrade gracefully.
+
+### Fixes
+
+- **Unbounded collection walks over infinite lazy sources.** `First`/`At` on a
+  `Filter` or `TakeWhile` whose predicate never (or eventually never) matches,
+  and any walk over a `Dedup` of a source with infinitely repeating duplicates
+  (e.g. `Dedup(Cycle([1,1]))`), could previously spin until the ambient time
+  limit fired — or forever with `timeLimit = 0`. These walks are now bounded
+  by `iterationLimit` and degrade gracefully (`Nothing`/`undefined`),
+  consistent with the documented lazy-collection contract. Note: as a
+  consequence, `Count(Dedup(...))` over a finite source **larger than
+  `iterationLimit`** now returns `undefined` (unknown) instead of walking the
+  whole source, matching `Filter`'s existing `count` behavior.
+
 ## 0.87.2 _2026-07-20_
 
 ### Breaking Changes

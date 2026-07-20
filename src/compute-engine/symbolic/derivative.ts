@@ -443,7 +443,7 @@ export function differentiate(
 
   // Guard against runaway expression growth (see differentiateCallCount)
   if ((++differentiateCallCount & 0xff) === 0)
-    checkDeadline(expr.engine._deadline);
+    checkDeadline(expr.engine._deadlineFrame);
 
   const ce = expr.engine;
 

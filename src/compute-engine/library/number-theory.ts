@@ -8,7 +8,29 @@ import {
   modularInverse,
 } from '../numerics/numeric-bigint.js';
 import { bigPrimeFactors, isPrimeBigint, modPow } from '../numerics/primes.js';
-import { checkDeadline } from '../../common/interruptible.js';
+import {
+  CancellationError,
+  checkDeadline,
+  type DeadlineFrame,
+} from '../../common/interruptible.js';
+
+/**
+ * Iteration budget for the number-theory loops whose length scales with the
+ * *value* of their operand rather than its size (`PrimePi`, which has no
+ * closed form to fall back on, and `PrimitiveRoot`'s search loop, bounded by
+ * the smallest primitive root — small in practice but unbounded worst-case;
+ * the divisor/totient functions are computed from the prime factorization
+ * instead, in ~O(√n)).
+ *
+ * Without it such a loop is bounded only by the evaluation deadline, so a
+ * call made with no deadline armed runs unbounded. This is deliberately a
+ * dedicated constant and NOT `engine.iterationLimit`: that cap defaults to
+ * 1024 and governs collection/iterator length, a different budget entirely
+ * (mirrors the dedicated-epsilon convention in `GCD`/`LCM` on reals).
+ *
+ * 10⁷ keeps `PrimePi(10⁷)` (~1s) working while bounding the no-deadline case.
+ */
+const MAX_VALUE_SCALED_ITERATIONS = 1e7;
 
 /**
  * Above this many digits (in the target base), materializing or iterating an
@@ -157,7 +179,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         // `m` is now >= 1; when it is 1 (i.e. k === -1) there are no prime
         // factors and only the leading `[-1, 1]` tuple remains.
         if (m > 1n) {
-          const factors = bigPrimeFactors(m);
+          const factors = bigPrimeFactors(m, ce._deadlineFrame);
           // Sort by ascending prime so the result is canonical regardless of
           // the order in which the factors were discovered.
           const primes = [...factors.keys()].sort((a, b) =>
@@ -211,7 +233,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (m === 0n) return undefined;
         return ce.function(
           'List',
-          divisorsAscending(m, ce._deadline).map((d) => ce.number(d))
+          divisorsAscending(m, ce._deadlineFrame).map((d) => ce.number(d))
         );
       },
     },
@@ -233,7 +255,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         let steps = 0;
         while (count < k) {
           candidate += 2n;
-          if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+          if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
           if (isPrimeBigint(candidate)) count += 1n;
         }
         return ce.number(candidate);
@@ -258,14 +280,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           for (let i = 0n; i < k; i++) {
             do {
               p += 1n;
-              if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+              if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
             } while (!isPrimeBigint(p));
           }
         } else {
           for (let i = 0n; i > k; i--) {
             do {
               p -= 1n;
-              if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+              if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
               if (p < 2n) return undefined; // no prime below 2
             } while (!isPrimeBigint(p));
           }
@@ -284,7 +306,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (k === null) return undefined;
         const m = k < 0n ? -k : k;
         if (m === 0n) return undefined; // 0 has no well-defined factorization
-        const primes = [...bigPrimeFactors(m).keys()]
+        const primes = [...bigPrimeFactors(m, ce._deadlineFrame).keys()]
           .filter((p) => p !== 1n)
           .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
         return ce.function(
@@ -306,7 +328,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const m = k < 0n ? -k : k;
         if (m === 0n) return undefined;
         if (m === 1n) return ce.number(0);
-        return ce.number(bigPrimeFactors(m).size);
+        return ce.number(bigPrimeFactors(m, ce._deadlineFrame).size);
       },
     },
 
@@ -323,7 +345,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (m === 0n) return undefined;
         if (m === 1n) return ce.number(0);
         let total = 0;
-        for (const e of bigPrimeFactors(m).values()) total += e;
+        for (const e of bigPrimeFactors(m, ce._deadlineFrame).values())
+          total += e;
         return ce.number(total);
       },
     },
@@ -340,7 +363,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const m = k < 0n ? -k : k;
         if (m === 0n) return undefined;
         if (m === 1n) return ce.number(1);
-        const factors = bigPrimeFactors(m);
+        const factors = bigPrimeFactors(m, ce._deadlineFrame);
         for (const e of factors.values()) if (e > 1) return ce.number(0);
         return ce.number(factors.size % 2 === 0 ? 1 : -1);
       },
@@ -357,7 +380,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const m = k < 0n ? -k : k;
         if (m === 0n) return ce.False;
         if (m === 1n) return ce.True;
-        const factors = bigPrimeFactors(m);
+        const factors = bigPrimeFactors(m, ce._deadlineFrame);
         for (const e of factors.values()) if (e > 1) return ce.False;
         return ce.True;
       },
@@ -376,7 +399,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (m === 0n) return undefined;
         if (m === 1n) return ce.number(1);
         let product = 1n;
-        for (const p of bigPrimeFactors(m).keys()) product *= p;
+        for (const p of bigPrimeFactors(m, ce._deadlineFrame).keys())
+          product *= p;
         return ce.number(product);
       },
     },
@@ -480,7 +504,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1n) return undefined;
-        return ce.number(carmichaelLambda(k));
+        return ce.number(carmichaelLambda(k, ce._deadlineFrame));
       },
     },
 
@@ -499,7 +523,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         let b = 1n;
         let steps = 0;
         for (let i = 0n; i < kk; i++) {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
           [a, b] = [b, a + b];
         }
         return ce.number(neg && kk % 2n === 1n ? -a : a);
@@ -525,7 +549,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         let c = 1n;
         let steps = 0;
         for (let i = 0n; i < k; i++) {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
           c = (c * 2n * (2n * i + 1n)) / (i + 2n);
         }
         return ce.number(c);
@@ -712,7 +736,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         // Safety net: a deterministic scan guarantees a result when the range
         // does contain a prime (only reached when sampling keeps missing).
         for (let p = lo; p <= hi; p++) {
-          checkDeadline(ce._deadline);
+          checkDeadline(ce._deadlineFrame);
           if (isPrimeBigint(p)) return ce.number(p);
         }
         return undefined;
@@ -733,7 +757,17 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         let count = 1; // 2 is prime
         let steps = 0;
         for (let k = 3n; k <= bound; k += 2n) {
-          if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+          if ((++steps & 0x3ff) === 0) {
+            checkDeadline(ce._deadlineFrame);
+            // Backstop: this loop scales with `bound`, so without a budget it
+            // is bounded only by the deadline (see
+            // MAX_VALUE_SCALED_ITERATIONS).
+            if (steps > MAX_VALUE_SCALED_ITERATIONS)
+              throw new CancellationError({
+                message: `PrimePi: exceeded ${MAX_VALUE_SCALED_ITERATIONS} iterations`,
+                cause: 'iteration-limit-exceeded',
+              });
+          }
           if (isPrimeBigint(k)) count++;
         }
         return ce.number(count);
@@ -808,7 +842,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (k === null || n === null || k < 0n || n < 1n) return undefined;
         if (n === 1n) return ce.number(1);
         let result = 1n;
-        for (const [p, e] of bigPrimeFactors(n)) {
+        for (const [p, e] of bigPrimeFactors(n, ce._deadlineFrame)) {
           if (k === 0n) result *= BigInt(e + 1);
           else {
             const pk = p ** k;
@@ -863,8 +897,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const a = ((a0 % n) + n) % n;
         if (gcd(a, n) !== 1n) return undefined;
         // The order divides λ(n); the smallest such divisor is the order.
-        for (const d of divisorsAscending(carmichaelLambda(n), ce._deadline)) {
-          checkDeadline(ce._deadline);
+        for (const d of divisorsAscending(
+          carmichaelLambda(n, ce._deadlineFrame),
+          ce._deadlineFrame
+        )) {
+          checkDeadline(ce._deadlineFrame);
           if (modPow(a, d, n) === 1n) return ce.number(d);
         }
         return undefined;
@@ -883,11 +920,23 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (n === 1n) return ce.number(0);
         if (n === 2n) return ce.number(1);
         if (n === 4n) return ce.number(3);
-        if (!hasPrimitiveRoot(n)) return undefined;
-        const phi = eulerPhi(n);
-        const phiFactors = [...bigPrimeFactors(phi).keys()];
+        if (!hasPrimitiveRoot(n, ce._deadlineFrame)) return undefined;
+        const phi = eulerPhi(n, ce._deadlineFrame);
+        const phiFactors = [...bigPrimeFactors(phi, ce._deadlineFrame).keys()];
+        let steps = 0;
         for (let a = 2n; a < n; a++) {
-          checkDeadline(ce._deadline);
+          if ((++steps & 0x3ff) === 0) {
+            checkDeadline(ce._deadlineFrame);
+            // Backstop: this loop scales with `n` (bounded by the smallest
+            // primitive root, small in practice but unbounded worst-case),
+            // so without a budget it is bounded only by the deadline (see
+            // MAX_VALUE_SCALED_ITERATIONS).
+            if (steps > MAX_VALUE_SCALED_ITERATIONS)
+              throw new CancellationError({
+                message: `PrimitiveRoot: exceeded ${MAX_VALUE_SCALED_ITERATIONS} iterations`,
+                cause: 'iteration-limit-exceeded',
+              });
+          }
           if (gcd(a, n) !== 1n) continue;
           if (phiFactors.every((q) => modPow(a, phi / q, n) !== 1n))
             return ce.number(a);
@@ -921,13 +970,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (n.isInteger !== true) return undefined;
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
-        let result = 1n;
-        let count = 0;
-        for (let i = 2n; i < k; i++) {
-          if ((++count & 0x3ff) === 0) checkDeadline(ce._deadline);
-          if (gcd(i, k) === 1n) result++;
-        }
-        return ce.number(result);
+        return ce.number(eulerPhi(k, ce._deadlineFrame));
       },
     },
 
@@ -938,13 +981,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
-        let count = 0;
-        let steps = 0;
-        for (let i = 1n; i <= k; i++) {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
-          if (k % i === 0n) count++;
-        }
-        return ce.number(count);
+        return ce.number(sigma0(k, ce._deadlineFrame));
       },
     },
 
@@ -955,13 +992,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
-        let sum = ce.bignum(0);
-        let steps = 0;
-        for (let i = 1n; i <= k; i++) {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
-          if (k % i === 0n) sum = sum.add(ce.bignum(i));
-        }
-        return ce.number(sum);
+        return ce.number(sigma1(k, ce._deadlineFrame));
       },
     },
 
@@ -972,13 +1003,10 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
-        let sum = ce.bignum(0);
-        let steps = 0;
-        for (let i = 1n; i <= k; i++) {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
-          if (k % i === 0n) sum = sum.add(ce.bignum(1).div(ce.bignum(i)));
-        }
-        return ce.number(sum);
+        // Σ 1/d over d | n is σ₁(n)/n: the divisors pair up as d ↔ n/d.
+        return ce.number(
+          ce.bignum(sigma1(k, ce._deadlineFrame)).div(ce.bignum(k))
+        );
       },
     },
 
@@ -990,13 +1018,10 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
-        let sum = 0n;
-        let steps = 0;
-        for (let i = 1n; i < k; i++) {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
-          if (k % i === 0n) sum += i;
-        }
-        return ce.symbol(sum === k ? 'True' : 'False');
+        // The proper divisors sum to σ₁(n) − n, so n is perfect iff σ₁(n) = 2n.
+        return ce.symbol(
+          sigma1(k, ce._deadlineFrame) === 2n * k ? 'True' : 'False'
+        );
       },
     },
 
@@ -1012,7 +1037,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         let steps = 0;
         const A = (n: bigint, k: bigint): bigint => {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
           if (k === 0n) return 1n;
           if (k >= n) return 0n;
           return (k + 1n) * A(n - 1n, k) + (n - k) * A(n - 1n, k - 1n);
@@ -1033,7 +1058,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         let steps = 0;
         const S = (n: bigint, k: bigint): bigint => {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
           if (n === 0n && k === 0n) return 1n;
           if (n === 0n || k === 0n) return 0n;
           return S(n - 1n, k - 1n) + k * S(n - 1n, k);
@@ -1056,7 +1081,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const memo = new Map<string, bigint>();
         let steps = 0;
         const s = (n: bigint, k: bigint): bigint => {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
           if (n === 0n && k === 0n) return 1n;
           if (n === 0n || k === 0n) return 0n;
           const key = `${n},${k}`;
@@ -1081,7 +1106,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const memo = new Map<bigint, bigint>();
         let steps = 0;
         const P = (n: bigint): bigint => {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
           if (n === 0n) return 1n;
           if (n < 0n) return 0n;
           if (memo.has(n)) return memo.get(n)!;
@@ -1192,7 +1217,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         let sum = 1n;
         let steps = 0;
         for (let i = 2n; i * i <= k; i++) {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
           if (k % i === 0n) {
             sum += i;
             const j = k / i;
@@ -1278,7 +1303,10 @@ function randomBigintBelow(n: bigint): bigint {
  * out ascending and the large ones descending, so reversing the latter yields
  * a single ascending list.
  */
-function divisorsAscending(m: bigint, deadline: number | undefined): bigint[] {
+function divisorsAscending(
+  m: bigint,
+  deadline: number | DeadlineFrame | undefined
+): bigint[] {
   const small: bigint[] = [];
   const large: bigint[] = [];
   let steps = 0;
@@ -1294,19 +1322,47 @@ function divisorsAscending(m: bigint, deadline: number | undefined): bigint[] {
   return [...small, ...large];
 }
 
+/**
+ * Number of positive divisors σ₀(n) = ∏ (aᵢ+1) over n = ∏ pᵢ^aᵢ (`n ≥ 1`).
+ *
+ * The `n <= 1n` guard is load-bearing: `bigPrimeFactors(1n)` reports `{1: 1}`
+ * (its `n <= 3` fast path returns the operand as its own factor), which would
+ * otherwise yield 2.
+ */
+function sigma0(n: bigint, deadline?: number | DeadlineFrame): bigint {
+  if (n <= 1n) return 1n;
+  let result = 1n;
+  for (const e of bigPrimeFactors(n, deadline).values()) result *= BigInt(e + 1);
+  return result;
+}
+
+/**
+ * Sum of positive divisors σ₁(n) = ∏ (pᵢ^(aᵢ+1) − 1)/(pᵢ − 1) (`n ≥ 1`).
+ * Each factor is the exact geometric sum 1 + p + … + p^a, so the division is
+ * always exact. See `sigma0` for the `n <= 1n` guard.
+ */
+function sigma1(n: bigint, deadline?: number | DeadlineFrame): bigint {
+  if (n <= 1n) return 1n;
+  let result = 1n;
+  for (const [p, e] of bigPrimeFactors(n, deadline))
+    result *= (p ** BigInt(e + 1) - 1n) / (p - 1n);
+  return result;
+}
+
 /** Euler's totient φ(n) computed from the prime factorization (`n ≥ 1`). */
-function eulerPhi(n: bigint): bigint {
+function eulerPhi(n: bigint, deadline?: number | DeadlineFrame): bigint {
   if (n <= 1n) return 1n;
   let result = n;
-  for (const p of bigPrimeFactors(n).keys()) result = (result / p) * (p - 1n);
+  for (const p of bigPrimeFactors(n, deadline).keys())
+    result = (result / p) * (p - 1n);
   return result;
 }
 
 /** Carmichael's reduced totient λ(n) from the prime factorization (`n ≥ 1`). */
-function carmichaelLambda(n: bigint): bigint {
+function carmichaelLambda(n: bigint, deadline?: number | DeadlineFrame): bigint {
   if (n <= 1n) return 1n;
   let result = 1n;
-  for (const [p, e] of bigPrimeFactors(n)) {
+  for (const [p, e] of bigPrimeFactors(n, deadline)) {
     const lambda =
       p === 2n
         ? e === 1
@@ -1341,7 +1397,10 @@ function jacobiSymbol(a: bigint, n: bigint): number {
  * Does a primitive root modulo `n` exist? True iff `n` is 1, 2, 4, pᵏ, or 2pᵏ
  * for an odd prime p (callers handle the small cases 1, 2, 4 directly).
  */
-function hasPrimitiveRoot(n: bigint): boolean {
+function hasPrimitiveRoot(
+  n: bigint,
+  deadline?: number | DeadlineFrame
+): boolean {
   if (n === 1n || n === 2n || n === 4n) return true;
   let m = n;
   let twos = 0;
@@ -1351,7 +1410,7 @@ function hasPrimitiveRoot(n: bigint): boolean {
   }
   if (twos > 1) return false; // divisible by 4 (and > 4)
   if (m === 1n) return false; // a pure power of two > 4
-  return bigPrimeFactors(m).size === 1; // odd part is a single prime power
+  return bigPrimeFactors(m, deadline).size === 1; // odd part is a single prime power
 }
 
 /** Reduce a fraction to lowest terms with a positive denominator. */

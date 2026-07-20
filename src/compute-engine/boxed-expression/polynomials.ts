@@ -400,7 +400,7 @@ export function polynomialDivide(
   // polynomials with exact radical coefficients the remainder coefficients
   // grow without bound — single simplify() calls were observed running for
   // minutes. Each division is ms-scale, so an unstrided check is cheap.
-  checkDeadline(dividend.engine._deadline);
+  checkDeadline(dividend.engine._deadlineFrame);
 
   const ce = dividend.engine;
 
@@ -509,7 +509,7 @@ export function polynomialGCD(
     // Bound the remainder sequence by the engine deadline (defense in depth):
     // with symbolic coefficients a single step's remainder can fail to reduce
     // in degree, so without a checkpoint the loop could spin unboundedly.
-    checkDeadline(ce._deadline);
+    checkDeadline(ce._deadlineFrame);
 
     const qCoeffs = getPolynomialCoefficients(q, variable);
     // `null` means the coefficients could not be extracted (e.g. they
@@ -588,7 +588,7 @@ function resultantRec(
   variable: string
 ): Expression | null {
   const ce = a.engine;
-  checkDeadline(ce._deadline);
+  checkDeadline(ce._deadlineFrame);
 
   const aCoeffs = getPolynomialCoefficients(a, variable);
   const bCoeffs = getPolynomialCoefficients(b, variable);

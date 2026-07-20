@@ -1730,7 +1730,7 @@ export function* reduceBigOp<T>(
     // `reduceBigOp` is also driven directly (and a single body evaluation can
     // be slow), so check the engine deadline here too. Amortize `Date.now()`
     // with a stride.
-    if ((++count & 0xff) === 0) checkDeadline(ce._deadline);
+    if ((++count & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     // An index-less bounds pair (`Limits(Nothing, 1, 9)`) iterates a constant
     // body: there is no index variable to assign.
     indexingSets.forEach((x, i) => {

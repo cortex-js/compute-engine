@@ -543,7 +543,7 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
       let fact = 1n;
       let steps = 0;
       for (let i = 2; i < n; i++) {
-        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
         fact *= BigInt(i);
       }
       return new BigDecimal(fact.toString()).ln();
@@ -562,12 +562,12 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
       let steps = 0;
       let fact2n = 1n;
       for (let i = 2; i <= 2 * n; i++) {
-        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
         fact2n *= BigInt(i);
       }
       let factN = 1n;
       for (let i = 2; i <= n; i++) {
-        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
         factN *= BigInt(i);
       }
       const fourN = 4n ** BigInt(n);
@@ -666,7 +666,7 @@ export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
       let fact = 1n;
       let steps = 0;
       for (let i = 2; i < n; i++) {
-        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
         fact *= BigInt(i);
       }
       return new BigDecimal(fact.toString());
@@ -1087,7 +1087,7 @@ function bigGammaPSeries(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   let sum = del;
   const maxTerms = 2000 + 20 * Math.ceil(Math.abs(x.toNumber())) + 20 * p;
   for (let n = 0; n < maxTerms; n++) {
-    if ((n & 0xff) === 0) checkDeadline(ce._deadline);
+    if ((n & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     ap = ap.add(BigDecimal.ONE);
     del = del.mul(x).div(ap);
     sum = sum.add(del);
@@ -1114,7 +1114,7 @@ function bigGammaQContinuedFraction(
   let h = d;
   const maxTerms = 2000 + 20 * p;
   for (let i = 1; i < maxTerms; i++) {
-    if ((i & 0xff) === 0) checkDeadline(ce._deadline);
+    if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     const an = new BigDecimal(i).sub(a).mul(-i); // −i·(i−a)
     b = b.add(BigDecimal.TWO);
     d = an.mul(d).add(b);
@@ -1195,7 +1195,7 @@ function bigBetaContinuedFraction(
   let h = d;
   const maxTerms = 1000 + 10 * p;
   for (let m = 1; m < maxTerms; m++) {
-    if ((m & 0xff) === 0) checkDeadline(ce._deadline);
+    if ((m & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     const m2 = 2 * m;
     // m·(b−m)·x / ((a−1+2m)·(a+2m))
     let aa = b
@@ -1300,7 +1300,7 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
       let factVal: BigNum = BigDecimal.ONE;
       let steps = 0;
       for (let i = 2; i <= sn; i++) {
-        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadline);
+        if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
         factVal = factVal.mul(i);
       }
       return bernAbs.mul(twoPi.pow(sn)).div(factVal.mul(2));
@@ -1353,7 +1353,7 @@ function zetaCore(ce: ComputeEngine, s: BigNum): BigNum {
   let c = d.neg();
   let sum = BigDecimal.ZERO;
   for (let k = 0; k < n; k++) {
-    if ((k & 0xff) === 0) checkDeadline(ce._deadline);
+    if ((k & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     c = b.sub(c);
     sum = sum.add(c.div(new BigDecimal(k + 1).pow(s)));
     // b_{k+1} = (k+n)(k−n) / ((k+½)(k+1)) · b_k
@@ -4153,7 +4153,7 @@ function bigGauss2F1Series(
   let term: BigNum = BigDecimal.ONE;
   let sum: BigNum = BigDecimal.ONE;
   for (let n = 0; n < maxTerms; n++) {
-    if ((n & 0xff) === 0) checkDeadline(ce._deadline);
+    if ((n & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     const nn = new BigDecimal(n);
     term = term
       .mul(a.add(nn))
@@ -4285,7 +4285,7 @@ function bigKummer1F1Series(
   let term: BigNum = BigDecimal.ONE;
   let sum: BigNum = BigDecimal.ONE;
   for (let n = 0; n < maxTerms; n++) {
-    if ((n & 0xff) === 0) checkDeadline(ce._deadline);
+    if ((n & 0xff) === 0) checkDeadline(ce._deadlineFrame);
     const nn = new BigDecimal(n);
     term = term
       .mul(a.add(nn))

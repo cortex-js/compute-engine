@@ -696,7 +696,7 @@ export function solveOverDomain(
   const results: Expression[] = [];
   let steps = 0;
   for (const item of domain.each()) {
-    if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+    if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
 
     // Compiled (float) sieve: a fast, inexact pre-filter.
     if (run) {
@@ -795,7 +795,7 @@ export function solveOverMultipleDomains(
   ) {
     // The symbolic path bypasses the deadline-checked enumeration loop, so honor
     // the engine deadline here too — an already-elapsed deadline must abort.
-    checkDeadline(ce._deadline);
+    checkDeadline(ce._deadlineFrame);
     const dio = tryDiophantineSolve(
       ce,
       ceq,
@@ -861,7 +861,7 @@ export function solveOverMultipleDomains(
   // the FIRST spec is the outermost (slowest) loop → lexicographic domain order
   // with the first spec varying slowest.
   for (;;) {
-    if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadline);
+    if ((++steps & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
 
     const tuple = idx.map((k, d) => elems[d][k]);
 

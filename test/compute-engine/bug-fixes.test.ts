@@ -181,7 +181,6 @@ describe('Playground regressions', () => {
     // ~18 minutes of CPU in the limit engine before the deadline sweep.
     test('a deliberately slow expression with a tiny time limit completes fast, inert or CancellationError', () => {
       const ce = new ComputeEngine();
-      ce.timeLimit = 50;
       // A hard iterated-exponential (Gruntz-class) limit the engine cannot
       // resolve quickly: x·ln(x)·ln(x·eˣ − x²)² / ln(ln(x² + 2·exp(exp(3x³ln x)))).
       const tower = ['Exp', ['Exp', ['Multiply', 3, ['Power', 'x', 3], ['Ln', 'x']]]];
@@ -206,7 +205,7 @@ describe('Playground regressions', () => {
       const start = Date.now();
       for (const run of [() => slow.evaluate(), () => slow.N()]) {
         try {
-          run();
+          ce.withTimeLimit({ ms: 50, label: 'test:gruntz-tower' }, run);
         } catch (e) {
           expect((e as Error).constructor.name).toBe('CancellationError');
         }

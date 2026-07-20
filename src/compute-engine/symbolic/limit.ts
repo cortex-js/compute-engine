@@ -159,7 +159,7 @@ function limitDispatch(
   // exp/log towers, numeric growth probes) can grind for many minutes on hard
   // Gruntz-class limits. Bound it by the engine evaluation deadline: the throw
   // unwinds to the public boundary, which returns the inert `Limit` form.
-  checkDeadline(ce._deadline);
+  checkDeadline(ce._deadlineFrame);
   if (!e.has(x)) return e.evaluate();
 
   if (point.isInfinity === true) {
@@ -330,7 +330,7 @@ function limitAtPosInf(
   depth: number
 ): Expression | undefined {
   if (depth > MAX_DEPTH) return undefined;
-  checkDeadline(ce._deadline);
+  checkDeadline(ce._deadlineFrame);
   // Rewrite to leading asymptotic order (drop negligible additive terms), which
   // often collapses the expression to something a structural pass can finish.
   const e = leadingOrder(e0, x, ce, depth).simplify();
@@ -464,7 +464,7 @@ function limitRatioAtPosInf(
   ce: ComputeEngine,
   depth: number
 ): Expression | undefined {
-  checkDeadline(ce._deadline);
+  checkDeadline(ce._deadlineFrame);
   // Bail on a numerator/denominator that suffers catastrophic cancellation or
   // overflow at the probe points (e.g. e^stuff − eˣ, whose huge terms cancel to
   // a far smaller value): neither the asymptotic nor the numeric pass can rank
@@ -610,7 +610,7 @@ function leadingOrder(
   depth: number
 ): Expression {
   if (depth > MAX_DEPTH || !e.has(x)) return e;
-  checkDeadline(ce._deadline);
+  checkDeadline(ce._deadlineFrame);
   const op = e.operator;
 
   if (op === 'Add') {
@@ -687,7 +687,7 @@ function growthLevel(
   depth: number
 ): number | undefined {
   if (depth > MAX_DEPTH) return undefined;
-  checkDeadline(ce._deadline);
+  checkDeadline(ce._deadlineFrame);
   if (!e.has(x)) return 0;
   const op = e.operator;
 
@@ -883,7 +883,7 @@ function numericAt(
   xv: number,
   ce: ComputeEngine
 ): number {
-  checkDeadline(ce._deadline);
+  checkDeadline(ce._deadlineFrame);
   // Prefer a compiled MACHINE-float evaluation over arbitrary-precision `.N()`.
   // On iterated-exponential (Gruntz-class) forms the interpreted BigDecimal path
   // builds astronomically large intermediates and burns minutes of CPU per

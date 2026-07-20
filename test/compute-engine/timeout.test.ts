@@ -112,28 +112,24 @@ describe('TIMEOUT', () => {
       expect(result.re).toBe(40);
     });
 
-    it('huge Totient throws CancellationError', () => {
-      expect(() => ce.expr(['Totient', 1_000_000_000]).evaluate()).toThrow(
-        CancellationError
-      );
+    it('huge Totient completes within timeout', () => {
+      const result = ce.expr(['Totient', 1_000_000_000]).evaluate();
+      expect(result.re).toBe(400000000);
     });
 
-    it('huge Sigma0 throws CancellationError', () => {
-      expect(() => ce.expr(['Sigma0', 10_000_000_000]).evaluate()).toThrow(
-        CancellationError
-      );
+    it('huge Sigma0 completes within timeout', () => {
+      const result = ce.expr(['Sigma0', 10_000_000_000]).evaluate();
+      expect(result.re).toBe(121);
     });
 
-    it('huge Sigma1 throws CancellationError', () => {
-      expect(() => ce.expr(['Sigma1', 10_000_000_000]).evaluate()).toThrow(
-        CancellationError
-      );
+    it('huge Sigma1 completes within timeout', () => {
+      const result = ce.expr(['Sigma1', 10_000_000_000]).evaluate();
+      expect(result.re).toBe(24987792457);
     });
 
-    it('huge IsPerfect throws CancellationError', () => {
-      expect(() => ce.expr(['IsPerfect', 10_000_000_000]).evaluate()).toThrow(
-        CancellationError
-      );
+    it('huge IsPerfect completes within timeout', () => {
+      const result = ce.expr(['IsPerfect', 10_000_000_000]).evaluate();
+      expect(result.symbol).toBe('False');
     });
 
     it('exponential Eulerian recursion throws CancellationError', () => {
@@ -141,6 +137,37 @@ describe('TIMEOUT', () => {
         CancellationError
       );
     });
+
+    it('huge PrimePi throws CancellationError', () => {
+      // PrimePi has no O(√n)-style algorithmic fix (unlike the divisor
+      // functions above, which now compute from the prime factorization);
+      // it stays a vehicle for exercising the number-theory deadline/budget
+      // guard. Under the suite's 200ms limit this throws via the DEADLINE —
+      // see the sibling test below for the iteration-budget path.
+      expect(() => ce.expr(['PrimePi', 1_000_000_000_000]).evaluate()).toThrow(
+        CancellationError
+      );
+    });
+
+    it('huge PrimePi throws on the iteration budget with no deadline', () => {
+      // Distinct from the test above: with the deadline disabled, the
+      // MAX_VALUE_SCALED_ITERATIONS budget is the ONLY thing that can stop
+      // this loop. That budget becomes the sole protection once ce.timeLimit
+      // is removed, so assert the cause explicitly rather than just the
+      // error type — a regression here would otherwise hide behind the
+      // deadline until the deprecation lands.
+      ce.timeLimit = 0; // normalizes to Infinity; ce is rebuilt in beforeEach
+      let caught: unknown;
+      try {
+        ce.expr(['PrimePi', 1_000_000_000_000]).evaluate();
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(CancellationError);
+      expect((caught as CancellationError).cause).toBe(
+        'iteration-limit-exceeded'
+      );
+    }, 15_000); // ~2.2s to burn the budget; generous margin for slow CI
   });
 
   describe('Collection enumeration', () => {
@@ -549,6 +576,11 @@ describe('withTimeLimit', () => {
     ).toThrow(CancellationError);
   });
 
+  // RELEASE-N-ONLY: this block tests the per-evaluate `ce.timeLimit` / span
+  // composition that is removed at release N+1 (docs/TIMEOUT-MODEL.md §5.2).
+  // When `ce.timeLimit` is deleted the behavior it exercises no longer exists,
+  // and this describe block goes with it.
+  //
   // Tycho item 61: inside a span, a per-evaluate `ce.timeLimit` budget used to
   // be silently inert — the span deadline REPLACED every inner clamp instead of
   // min-ing with it, so wrapping a clamp-using pipeline in a span stripped its
@@ -652,6 +684,109 @@ describe('withTimeLimit', () => {
     // A later evaluation on the same engine is unaffected.
     engine.timeLimit = 5000;
     expect(engine.parse('\\sqrt{16}').evaluate().re).toBe(4);
+  });
+
+  // The `label`/`attribution`/`spans` machinery lets a consumer tell WHICH
+  // budget fired: was it my sub-budget (degrade gracefully) or my caller's
+  // (propagate)? These assert the contract in TIMEOUT-MODEL.md §2/§3.2.
+  describe('attribution', () => {
+    // A single evaluate() that runs well past a ~50ms budget, routed through
+    // an attributed throw site (`run(..., ce._deadlineFrame)`).
+    const slowEval = (engine: ComputeEngine) =>
+      engine
+        .expr(['Sum', ['Power', 'k', 'k'], ['Tuple', 'k', 1, 100_000]])
+        .evaluate();
+
+    const grabCancellation = (fn: () => void): CancellationError => {
+      try {
+        fn();
+      } catch (e) {
+        if (e instanceof CancellationError) return e;
+        throw e;
+      }
+      throw new Error('expected a CancellationError to be thrown');
+    };
+
+    it('identifies the inner span when it owns the tighter deadline', () => {
+      const engine = new ComputeEngine();
+      const e = grabCancellation(() =>
+        engine.withTimeLimit({ ms: 10_000, label: 'outer' }, () =>
+          engine.withTimeLimit({ ms: 50, label: 'inner' }, () =>
+            slowEval(engine)
+          )
+        )
+      );
+      expect(e.attribution).toBe('inner');
+    });
+
+    it('identifies the outer span when the inner one is preempted', () => {
+      const engine = new ComputeEngine();
+      const e = grabCancellation(() =>
+        engine.withTimeLimit({ ms: 50, label: 'outer' }, () =>
+          engine.withTimeLimit({ ms: 10_000, label: 'inner' }, () =>
+            slowEval(engine)
+          )
+        )
+      );
+      // The inner 10s span cannot extend past the outer 50ms bound.
+      expect(e.attribution).toBe('outer');
+    });
+
+    it('lists nested span labels outermost-first in spans[]', () => {
+      const engine = new ComputeEngine();
+      const e = grabCancellation(() =>
+        engine.withTimeLimit({ ms: 50, label: 'outer' }, () =>
+          engine.withTimeLimit({ ms: 10_000, label: 'inner' }, () =>
+            slowEval(engine)
+          )
+        )
+      );
+      expect(e.spans).toEqual(['outer', 'inner']);
+    });
+
+    it('an unlabelled span still throws, with attribution undefined', () => {
+      const engine = new ComputeEngine();
+      const e = grabCancellation(() => engine.withTimeLimit(50, () => slowEval(engine)));
+      expect(e).toBeInstanceOf(CancellationError);
+      expect(e.attribution).toBeUndefined();
+      expect(e.spans).toEqual([]);
+    });
+
+    it('an ambient ce.timeLimit deadline is attributed to the operator', () => {
+      const engine = new ComputeEngine();
+      engine.timeLimit = 50;
+      const e = grabCancellation(() => slowEval(engine));
+      expect(e.attribution?.startsWith('engine.timeLimit:')).toBe(true);
+      // The synthesized owner label also appears in the spans[] list.
+      expect(e.spans).toContain(e.attribution);
+    });
+
+    it('lists both a span label and a winning ambient re-arm, outermost first', () => {
+      const engine = new ComputeEngine();
+      // A loose labelled span, then a tight ambient ce.timeLimit that wins:
+      // spans[] must list the enclosing span first, then the synthesized
+      // ambient owner.
+      engine.timeLimit = 50;
+      const e = grabCancellation(() =>
+        engine.withTimeLimit({ ms: 10_000, label: 'outer' }, () =>
+          slowEval(engine)
+        )
+      );
+      expect(e.attribution?.startsWith('engine.timeLimit:')).toBe(true);
+      expect(e.spans).toEqual(['outer', e.attribution]);
+    });
+
+    it('the numeric withTimeLimit(ms, fn) form still bounds and returns', () => {
+      const engine = new ComputeEngine();
+      // Returns normally when the work fits.
+      expect(engine.withTimeLimit(5000, () => engine.parse('2+3').evaluate().re)).toBe(5);
+      // And still enforces the bound.
+      expect(() => engine.withTimeLimit(50, () => slowEval(engine))).toThrow(
+        CancellationError
+      );
+      // Deadline restored afterwards.
+      expect(engine.deadline).toBeUndefined();
+    });
   });
 
   it('does not charge one-time cache builds against the deadline', () => {

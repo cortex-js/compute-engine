@@ -1455,7 +1455,7 @@ export function matchAnyRulesWithSteps(
     // ~100 ms; scanning a rule set then runs for seconds. Checkpoint the
     // engine deadline once per rule so a runaway rule scan honors
     // `ce.timeLimit` (e.g. the compiler's symbolic-antiderivative attempt).
-    checkDeadline(expr.engine._deadline);
+    checkDeadline(expr.engine._deadlineFrame);
     const r = applyRule(rule, expr, sub, options);
 
     // Verify that the results are unique

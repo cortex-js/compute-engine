@@ -1,4 +1,7 @@
-import { CancellationError } from '../common/interruptible.js';
+import {
+  CancellationError,
+  type DeadlineFrame,
+} from '../common/interruptible.js';
 
 export class EngineRuntimeState {
   private _timeLimit = 2000;
@@ -6,7 +9,7 @@ export class EngineRuntimeState {
   private _recursionLimit = 256;
   private _recursionDepth = 0;
   private _maxCollectionSize = 10_000;
-  private _deadline: number | undefined = undefined;
+  private _deadlineFrame: DeadlineFrame | undefined = undefined;
   private _isVerifying = false;
 
   get timeLimit(): number {
@@ -71,17 +74,32 @@ export class EngineRuntimeState {
     this._maxCollectionSize = value <= 0 ? Number.POSITIVE_INFINITY : value;
   }
 
+  /** The full deadline frame (or `undefined` when unarmed). */
+  get deadlineFrame(): DeadlineFrame | undefined {
+    return this._deadlineFrame;
+  }
+
+  set deadlineFrame(frame: DeadlineFrame | undefined) {
+    this._deadlineFrame = frame;
+  }
+
+  /**
+   * Compatibility accessor: the absolute ms timestamp of the effective
+   * deadline. Reading returns `frame?.at`; writing a bare number wraps it into
+   * a fresh (unlabelled) frame, and `undefined` clears the deadline.
+   */
   get deadline(): number | undefined {
-    return this._deadline;
+    return this._deadlineFrame?.at;
   }
 
   set deadline(value: number | undefined) {
-    this._deadline = value;
+    this._deadlineFrame =
+      value === undefined ? undefined : { at: value, spans: [] };
   }
 
   get timeRemaining(): number {
-    if (this._deadline === undefined) return Number.POSITIVE_INFINITY;
-    return this._deadline - Date.now();
+    if (this._deadlineFrame === undefined) return Number.POSITIVE_INFINITY;
+    return this._deadlineFrame.at - Date.now();
   }
 
   get isVerifying(): boolean {
@@ -93,6 +111,9 @@ export class EngineRuntimeState {
   }
 
   shouldContinueExecution(): boolean {
-    return this._deadline === undefined || this._deadline >= Date.now();
+    return (
+      this._deadlineFrame === undefined ||
+      this._deadlineFrame.at >= Date.now()
+    );
   }
 }

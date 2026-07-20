@@ -2407,6 +2407,7 @@ export type ExpressionInput =
   | MathJsonFunctionObject
   | MathJsonDictionaryObject
   | readonly [MathJsonSymbol, ...ExpressionInput[]]
+  | MathJsonExpression
   | Expression;
 
 /** Interface for dictionary-like structures.

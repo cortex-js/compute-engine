@@ -421,8 +421,10 @@ public API groups into:
   `listCompilationTargets()`.
 - **Configuration**: `precision` (default 21 significant digits; `'machine'`
   selects 64-bit float), `tolerance` (default `1e-10`), `angularUnit`
-  (default `'rad'`), `strict` (validation depth), `timeLimit` (default 2000 ms),
-  `iterationLimit` / `recursionLimit` (default 1024).
+  (default `'rad'`), `strict` (validation depth), `iterationLimit` /
+  `recursionLimit` (default 1024). Time budgets are set with `withTimeLimit`
+  spans; the global `timeLimit` property (default 2000 ms) is deprecated in
+  favor of them.
 
 Internally these responsibilities are delegated to focused services
 (`engine-startup-coordinator.ts`, `engine-scope.ts`, `engine-declarations.ts`,

@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { engine as ce } from '../utils';
+import { CancellationError } from '../../src/common/interruptible';
 
 const isOctahedral = (n: number | bigint) =>
   ce
@@ -888,5 +889,67 @@ describe('GCD/LCM on non-integer reals (tolerant float Euclid)', () => {
     for (let i = 0; i <= 750; i++)
       if (!Number.isFinite(r.run!({ t: i / 10 }) as number)) allFinite = false;
     expect(allFinite).toBe(true);
+  });
+});
+
+describe('factorization is interruptible (Finding 1)', () => {
+  // (2^61−1)² — a hard 37-digit square semiprime whose only prime factor is
+  // M61 ≈ 2.3·10¹⁸. Pollard rho needs ~√(2^61−1) ≈ 1.5·10⁹ iterations to
+  // split it, so before the fix this factored past any external kill.
+  const HARD_SEMIPRIME = 5316911983139663487003542222693990401n;
+
+  it('honors withTimeLimit — deadline wins, promptly and attributed', () => {
+    const engine = new ComputeEngine();
+    const n = engine.number(HARD_SEMIPRIME);
+    const t0 = Date.now();
+    let err: unknown;
+    try {
+      engine.withTimeLimit({ ms: 500, label: 'test:factor-span' }, () =>
+        engine.box(['Sigma1', n]).evaluate()
+      );
+    } catch (e) {
+      err = e;
+    }
+    const elapsed = Date.now() - t0;
+    expect(err).toBeInstanceOf(CancellationError);
+    // The deadline (500ms) fires long before the iteration budget, so the
+    // error is a timeout attributed to our span.
+    expect((err as CancellationError).cause).toBe('timeout');
+    expect((err as CancellationError).attribution).toBe('test:factor-span');
+    expect(elapsed).toBeLessThan(5000);
+  });
+
+  it('honors the iteration budget when no deadline is armed', () => {
+    const engine = new ComputeEngine();
+    engine.timeLimit = 0; // no deadline: only the budget can stop the rho loop
+    const n = engine.number(HARD_SEMIPRIME);
+    const t0 = Date.now();
+    let err: unknown;
+    try {
+      engine.box(['Sigma1', n]).evaluate();
+    } catch (e) {
+      err = e;
+    }
+    const elapsed = Date.now() - t0;
+    expect(err).toBeInstanceOf(CancellationError);
+    expect((err as CancellationError).cause).toBe('iteration-limit-exceeded');
+    // The budget fires in single-digit seconds (measured ~2.8s).
+    expect(elapsed).toBeLessThan(15000);
+  }, 20000);
+
+  it('still factors legitimate inputs correctly', () => {
+    const engine = new ComputeEngine();
+    // A prime: σ₁(p) = p + 1.
+    expect(engine.box(['Sigma1', 1000000007]).evaluate().toString()).toBe(
+      '1000000008'
+    );
+    // An 18-digit composite (product of two large primes) factors via rho.
+    const composite = 999999999989n * 999983n;
+    expect(
+      engine
+        .box(['FactorInteger', engine.number(composite)])
+        .evaluate()
+        .toString()
+    ).toBe('[(999983, 1),(999999999989, 1)]');
   });
 });

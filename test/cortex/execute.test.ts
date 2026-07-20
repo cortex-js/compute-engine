@@ -393,10 +393,12 @@ describe('CORTEX EXECUTE — structured cancellation cause', () => {
   });
 
   test('timeout on the final-statement Error value', () => {
-    const { value } = runWith('let c = 0\nwhile c >= 0 { c = c + 1 }', (ce) => {
-      ce.timeLimit = 1;
-      ce.iterationLimit = 100_000_000;
-    });
+    const ce = new ComputeEngine();
+    ce.iterationLimit = 100_000_000;
+    const { value } = ce.withTimeLimit(
+      { ms: 1, label: 'test:cortex-timeout' },
+      () => executeCortex(ce, 'let c = 0\nwhile c >= 0 { c = c + 1 }')
+    );
     expect(value.operator).toBe('Error');
     expect(value.op2?.string).toBe('timeout');
   });

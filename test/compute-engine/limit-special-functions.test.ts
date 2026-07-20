@@ -272,42 +272,36 @@ describe('HARD GRUNTZ LIMITS RESPECT THE DEADLINE (CORRECTNESS_FINDINGS #28)', (
     ['Gruntz #2 (→1/e)', gruntz2],
   ] as const) {
     test(`${name}: N() returns within the time budget, no throw`, () => {
-      const saved = timedEngine.timeLimit;
-      timedEngine.timeLimit = 2000;
-      try {
-        const start = Date.now();
-        let result: any;
-        // Must not throw a CancellationError (or anything) at the caller.
-        expect(() => {
-          result = limT(body).N();
-        }).not.toThrow();
-        // Bounded by ~2× the time limit (generous wall-clock allowance).
-        expect(Date.now() - start).toBeLessThan(10000);
-        // Whatever it returns, it must not be a spuriously "confident" wrong
-        // finite value: an inert Limit, undefined-ish, or NaN is acceptable.
-        const isInert = result?.operator === 'Limit';
-        const isNaNish = result?.re === undefined || Number.isNaN(result?.re);
-        expect(isInert || isNaNish).toBe(true);
-      } finally {
-        timedEngine.timeLimit = saved;
-      }
+      const start = Date.now();
+      let result: any;
+      // Must not throw a CancellationError (or anything) at the caller.
+      expect(() => {
+        result = timedEngine.withTimeLimit(
+          { ms: 2000, label: 'test:gruntz-N' },
+          () => limT(body).N()
+        );
+      }).not.toThrow();
+      // Bounded by ~2× the time limit (generous wall-clock allowance).
+      expect(Date.now() - start).toBeLessThan(10000);
+      // Whatever it returns, it must not be a spuriously "confident" wrong
+      // finite value: an inert Limit, undefined-ish, or NaN is acceptable.
+      const isInert = result?.operator === 'Limit';
+      const isNaNish = result?.re === undefined || Number.isNaN(result?.re);
+      expect(isInert || isNaNish).toBe(true);
     });
 
     test(`${name}: evaluate() stays symbolic within the time budget`, () => {
-      const saved = timedEngine.timeLimit;
-      timedEngine.timeLimit = 2000;
-      try {
-        const start = Date.now();
-        let result: any;
-        expect(() => {
-          result = limT(body).evaluate();
-        }).not.toThrow();
-        expect(Date.now() - start).toBeLessThan(10000);
-        // Symbolic path returns the inert Limit (no wrong closed form).
-        expect(result?.operator).toBe('Limit');
-      } finally {
-        timedEngine.timeLimit = saved;
-      }
+      const start = Date.now();
+      let result: any;
+      expect(() => {
+        result = timedEngine.withTimeLimit(
+          { ms: 2000, label: 'test:gruntz-evaluate' },
+          () => limT(body).evaluate()
+        );
+      }).not.toThrow();
+      expect(Date.now() - start).toBeLessThan(10000);
+      // Symbolic path returns the inert Limit (no wrong closed form).
+      expect(result?.operator).toBe('Limit');
     });
   }
 });

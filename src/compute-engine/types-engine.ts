@@ -4,6 +4,7 @@ import type { MathJsonSymbol, MathJsonNumberObject } from '../math-json.js';
 import type { Type, TypeString, TypeResolver } from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
+import type { DeadlineFrame } from '../common/interruptible.js';
 import type {
   ParseLatexOptions,
   SerializeLatexOptions,
@@ -208,6 +209,11 @@ export interface IComputeEngine {
    */
   _deadline?: number;
 
+  /** The full deadline frame (effective deadline plus attribution).
+   * @internal
+   */
+  _deadlineFrame?: DeadlineFrame;
+
   /** Time remaining before _deadline
    * @internal
    */
@@ -236,7 +242,26 @@ export interface IComputeEngine {
    * @internal */
   _freshlyInferred: Set<BoxedValueDefinition> | null;
 
+  /** @deprecated Use {@linkcode withTimeLimit} instead. */
   timeLimit: number;
+
+  /**
+   * Run `fn` with at most `ms` milliseconds (numeric form) or `limit.ms`
+   * (object form, which also accepts an attribution `label`). A tighter
+   * enclosing span preempts this limit; use the label and
+   * `CancellationError.attribution`/`spans` to tell which limit fired.
+   *
+   * **⚠️ `fn` MUST be synchronous.** The span is restored in a synchronous
+   * `finally`, so a `Promise`-returning (`async`) callback hands control back
+   * at its first `await` while the span is still open: work that resumes after
+   * that point runs **outside** the deadline and is never cancelled (see
+   * `docs/TIMEOUT-MODEL.md` §6.4). For asynchronous cancellation use
+   * `expr.evaluateAsync({ signal })` with an `AbortSignal` instead.
+   */
+  withTimeLimit<T>(
+    limit: number | { ms: number; label?: string },
+    fn: () => T extends Promise<unknown> ? never : T
+  ): T;
 
   iterationLimit: number;
 

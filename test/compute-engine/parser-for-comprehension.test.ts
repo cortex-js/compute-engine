@@ -196,14 +196,15 @@ describe('Parser: for-comprehensions', () => {
     });
 
     // C3: `IndexOf` over an infinite collection with no match must abort
-    // within the time budget rather than hang. Use a fresh engine with a
-    // small time limit so the shared engine's limit is untouched.
-    test('IndexOf on an infinite Range aborts within ce.timeLimit (C3)', () => {
+    // within the time budget rather than hang. Use a fresh engine and bound
+    // the work in a labelled span so the shared engine's limit is untouched.
+    test('IndexOf on an infinite Range aborts within a time-limited span (C3)', () => {
       const ce2 = new ComputeEngine();
-      ce2.timeLimit = 300; // ms
       const t0 = Date.now();
       expect(() =>
-        ce2.expr(['IndexOf', ['Range', 1, Infinity], 0.5]).evaluate()
+        ce2.withTimeLimit({ ms: 300, label: 'test:indexof-infinite-range' }, () =>
+          ce2.expr(['IndexOf', ['Range', 1, Infinity], 0.5]).evaluate()
+        )
       ).toThrow();
       // Aborts promptly, not after minutes.
       expect(Date.now() - t0).toBeLessThan(5000);

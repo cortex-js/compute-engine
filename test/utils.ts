@@ -21,6 +21,11 @@ engine.precision = 100; // Some arithmetic test cases assume a precision of at l
 // are still caught, just at a contention-proof threshold. Tests that
 // exercise timeout behavior itself set their own limit (see timeout.test.ts,
 // bug-fixes.test.ts) or use a dedicated engine.
+//
+// Release-N-only: `ce.timeLimit` is deprecated and removed at N+1 (see
+// docs/TIMEOUT-MODEL.md §6.5). At N+1 this suite-wide bound moves to jest's
+// `testTimeout` for hang detection plus explicit labelled `withTimeLimit`
+// spans for the compute-heavy cases that need attribution.
 engine.timeLimit = 20_000;
 
 // Make sure that the symbol "f" is interpreted as a function in all test

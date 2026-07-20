@@ -5,6 +5,7 @@ import { Type, TypeResolver, TypeString } from '../common/type/types.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 
 import type { OneOf } from '../common/one-of.js';
+import type { DeadlineFrame } from '../common/interruptible.js';
 import { hidePrivateProperties } from '../common/utils.js';
 
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
@@ -798,44 +799,91 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Time in milliseconds, default 2000 ms = 2 seconds.
    *
+   * @deprecated Use {@linkcode withTimeLimit} instead. `timeLimit` arms a
+   * hard-to-scope implicit deadline around each `evaluate()`/`simplify()`;
+   * wrap the work you want bounded in `ce.withTimeLimit({ ms, label }, fn)`
+   * instead:
+   *
+   * ```ts
+   * // Before
+   * ce.timeLimit = 500;
+   * const r = expr.evaluate();
+   *
+   * // After
+   * const r = ce.withTimeLimit({ ms: 500, label: 'my-app:eval' }, () =>
+   *   expr.evaluate()
+   * );
+   * ```
    */
   get timeLimit(): number {
     return this._runtimeState.timeLimit;
   }
 
+  /** @deprecated Use {@linkcode withTimeLimit} instead. */
   set timeLimit(t: number) {
     this._runtimeState.timeLimit = t;
   }
 
   /**
-   * Run `fn` under a single evaluation deadline of `ms` milliseconds.
+   * Run `fn` with **at most** `ms` milliseconds (the `limit`, or `limit.ms`
+   * for the object form).
    *
-   * Ordinarily each top-level `evaluate()` call arms its own `timeLimit`
-   * budget, so a long sequence of SHORT evaluations — e.g. draining a lazy
-   * collection element by element via `each()`/`at()` — can run unboundedly
-   * without ever tripping the limit. Wrapping the whole loop in
-   * `withTimeLimit()` arms one shared deadline for its full duration: any
-   * evaluation performed inside `fn` throws a `CancellationError` (with
-   * `cause: 'timeout'`) once the deadline is exceeded.
+   * A tighter deadline may already be in effect from an enclosing span, in
+   * which case that one preempts this limit — nesting can only shorten the
+   * effective deadline, never extend it. Any evaluation performed inside `fn`
+   * throws a `CancellationError` (with `cause: 'timeout'`) once the effective
+   * deadline is exceeded. Use the `label` and the `attribution`/`spans` fields
+   * on `CancellationError` to determine which limit fired.
+   *
+   * The object form is preferred for new code because the label reads before
+   * the callback:
    *
    * ```ts
-   * ce.withTimeLimit(2000, () => {
+   * ce.withTimeLimit({ ms: 500, label: 'plot:sample' }, () => {
    *   for (const el of collection.each()) process(el);
    * });
    * ```
    *
-   * Nested calls are re-entrant: an inner `withTimeLimit` may only shorten
-   * the effective deadline, never extend it past the outer one.
+   * The numeric form `ce.withTimeLimit(500, fn)` stays valid and produces an
+   * unlabelled span (`attribution: undefined` on any error it owns).
+   *
+   * **⚠️ `fn` MUST be synchronous.** The span is armed and restored around a
+   * single synchronous call: the frame is torn down in a synchronous `finally`
+   * as soon as `fn` returns. A `fn` that returns a `Promise` (an `async`
+   * callback, or one that returns un-awaited async work) hands control back at
+   * its first `await` while the span is still nominally open, so any work that
+   * resumes after that point runs **outside** the deadline and is never
+   * cancelled — the span is silently ineffective (see
+   * `docs/TIMEOUT-MODEL.md` §6.4). For asynchronous cancellation use
+   * `expr.evaluateAsync({ signal })` with an `AbortSignal` instead.
    */
-  withTimeLimit<T>(ms: number, fn: () => T): T {
-    const prev = this._runtimeState.deadline;
-    const deadline = Date.now() + ms;
-    this._runtimeState.deadline =
-      prev === undefined ? deadline : Math.min(prev, deadline);
+  withTimeLimit<T>(
+    limit: number | { ms: number; label?: string },
+    fn: () => T extends Promise<unknown> ? never : T
+  ): T {
+    const ms = typeof limit === 'number' ? limit : limit.ms;
+    const label = typeof limit === 'number' ? undefined : limit.label;
+
+    const prevFrame = this._runtimeState.deadlineFrame;
+    const own = Date.now() + ms;
+    const spans = [
+      ...(prevFrame?.spans ?? []),
+      ...(label !== undefined ? [label] : []),
+    ];
+
+    // Nesting stays `min()`: if an enclosing span's deadline is already at or
+    // before our own, it remains the effective one (and keeps its owner);
+    // otherwise this span's deadline wins.
+    const frame =
+      prevFrame !== undefined && prevFrame.at <= own
+        ? { at: prevFrame.at, owner: prevFrame.owner, spans }
+        : { at: own, owner: label, spans };
+
+    this._runtimeState.deadlineFrame = frame;
     try {
       return fn();
     } finally {
-      this._runtimeState.deadline = prev;
+      this._runtimeState.deadlineFrame = prevFrame;
     }
   }
 
@@ -857,6 +905,17 @@ export class ComputeEngine implements IComputeEngine {
 
   set _deadline(value: number | undefined) {
     this._runtimeState.deadline = value;
+  }
+
+  /** The full deadline frame (effective deadline plus attribution).
+   * @internal
+   */
+  get _deadlineFrame(): DeadlineFrame | undefined {
+    return this._runtimeState.deadlineFrame;
+  }
+
+  set _deadlineFrame(value: DeadlineFrame | undefined) {
+    this._runtimeState.deadlineFrame = value;
   }
 
   get _timeRemaining(): number {
@@ -1936,15 +1995,19 @@ export class ComputeEngine implements IComputeEngine {
         // A one-time cache build is engine warm-up, not part of the user's
         // evaluation: suspend the deadline while it runs (a partial cache
         // is useless), then push the deadline back by the build's duration
-        // so the caller's time budget is not charged for it.
-        const deadline = this._runtimeState.deadline;
-        if (deadline === undefined) return build();
-        this._runtimeState.deadline = undefined;
+        // so the caller's time budget is not charged for it. Keep the
+        // enclosing frame's owner/spans so attribution survives the build.
+        const frame = this._runtimeState.deadlineFrame;
+        if (frame === undefined) return build();
+        this._runtimeState.deadlineFrame = undefined;
         const start = Date.now();
         try {
           return build();
         } finally {
-          this._runtimeState.deadline = deadline + (Date.now() - start);
+          this._runtimeState.deadlineFrame = {
+            ...frame,
+            at: frame.at + (Date.now() - start),
+          };
         }
       },
       purge

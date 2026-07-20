@@ -276,7 +276,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           let b = 1n;
           let steps = 0;
           for (let i = 2n; i <= m; i++) {
-            if ((++steps & 0xffff) === 0) checkDeadline(ce._deadline);
+            if ((++steps & 0xffff) === 0) checkDeadline(ce._deadlineFrame);
             const next = a + b;
             a = b;
             b = next;
@@ -458,7 +458,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           let r = 1n;
           let steps = 0;
           for (let i = 2n; i <= BigInt(m); i++) {
-            if ((++steps & 0xffff) === 0) checkDeadline(ce._deadline);
+            if ((++steps & 0xffff) === 0) checkDeadline(ce._deadlineFrame);
             r *= i;
           }
           return r;
@@ -493,7 +493,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         let sign = 1n;
         let steps = 0;
         for (let i = 1; i <= k; i++) {
-          if ((++steps & 0xffff) === 0) checkDeadline(ce._deadline);
+          if ((++steps & 0xffff) === 0) checkDeadline(ce._deadlineFrame);
           sign = -sign;
           result = BigInt(i) * result + sign;
         }
@@ -530,7 +530,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         for (let i = 1; i <= k; i++) {
           const next: bigint[] = [row[row.length - 1]];
           for (let j = 0; j < row.length; j++) {
-            if ((++steps & 0xffff) === 0) checkDeadline(ce._deadline);
+            if ((++steps & 0xffff) === 0) checkDeadline(ce._deadlineFrame);
             next.push(next[j] + row[j]);
           }
           row = next;

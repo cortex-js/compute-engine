@@ -2889,7 +2889,7 @@ export function antiderivative(fn: Expression, index: string): Expression {
   // rational/parametric integrands (e.g. a linear numerator over a fully
   // symbolic quadratic) explore an unbounded search here, and without a
   // checkpoint the recursion ignored `ce.timeLimit` entirely.
-  checkDeadline(fn.engine._deadline);
+  checkDeadline(fn.engine._deadlineFrame);
 
   if (isFunction(fn, 'Function')) return antiderivative(fn.op1, index);
   if (isFunction(fn, 'Block')) return antiderivative(fn.op1, index);
