@@ -3,6 +3,10 @@
 **Date**: 2026-06-28
 **Status**: Exactness facet shipped; detection facet deferred (design note).
 **Roadmap**: Strategic item 9 in `ROADMAP.md`.
+**Superseded (Facet 2)**: the representation-level design this doc called for
+is now specified in
+[`2026-07-20-tensor-unification-design.md`](./2026-07-20-tensor-unification-design.md)
+(approved). The failure analysis below remains authoritative.
 
 ## Summary
 

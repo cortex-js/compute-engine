@@ -1,6 +1,13 @@
 # Timeout Model — Design Note
 
-**Status**: release-N work COMPLETE (§8 steps 1–5 done; see strikethroughs),
+**Status**: release N **SHIPPED as 0.88.0** (2026-07-20); the deprecation
+clock is running and **step 6 (removal) is eligible for 0.89.0** per the
+one-minor policy. Consumer readiness (Tycho, adopted 0.88.1 same day): zero
+live `ce.timeLimit` assignments remain in their src/tests (comments and one
+limits-reading test pin only), all four production sites converted to spans,
+their colour/classification engines arm their own spans, and label adoption
+is deliberately deferred until they first have two nested budgets to tell
+apart — none of which blocks removal. §8 steps 1–5 done (see strikethroughs),
 including the dual-review fix round: factorization made interruptible
 (deadline threading through Pollard rho + `POLLARD_RHO_MAX_ITERATIONS`
 budget — the review's one HIGH, a regression the §6.2 rewrite had introduced);
@@ -230,7 +237,7 @@ programmatically observable.
 
 Project policy: mark `@deprecated` for **one minor release**, remove in the
 **next minor**. Two stages, not three — there is no intermediate "inert"
-release.
+release. **Release N = 0.88.0 (shipped 2026-07-20); release N+1 = 0.89.0.**
 
 **Release N — deprecated, still fully functional.**
 `timeLimit` keeps arming the implicit top-level span exactly as today; behavior
@@ -655,8 +662,14 @@ on the deprecation decision.
    module-ambient" — CE probe-refuted the general claim on both source and
    the 0.87.2 dist (a span on engine A does NOT cancel engine B's interpreted
    evaluation; per-engine runtime state), but the narrow numerics seam is
-   real and Tycho has been told not to build on it. Answered in their ledger
-   2026-07-20.
+   real. **Resolution (2026-07-20): Tycho re-ran the probe on 0.88.1,
+   confirmed non-cancellation, and formally withdrew the module-ambient
+   claim; their re-audit found the two retired sites were already properly
+   bounded (classification span armed on its own engine) or have been
+   re-armed (colour engine now arms document-scale + per-row spans;
+   timeout → safe-inert `unresolved`). No consumer builds on the seam, so
+   this retirement is now pure internal cleanup with no coordination
+   required.**
 
 ## 9. Non-time limits: considered and declined (decision record, 2026-07-20)
 
