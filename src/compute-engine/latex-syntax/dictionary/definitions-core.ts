@@ -1204,8 +1204,22 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // `(n \mapsto n) > 102`.
       let rhs =
         parser.parseExpression({ ...(until ?? {}), minPrec: 21 }) ?? 'Nothing';
-      if (operator(rhs) === 'Delimiter') rhs = operand(rhs, 1) ?? 'Nothing';
-      if (operator(rhs) === 'Sequence') rhs = ['Block', ...operands(rhs)];
+      // A delimited body is DATA — a Tuple — whatever its separator, matching
+      // the `f(t) := …` form and the generic `Delimiter` canonicalization. A
+      // genuine statement block has already been built as a `Block` by the `;`
+      // infix parser (which fires only when the sequence contains an `Assign`),
+      // so it arrives here as `Delimiter(Block(…))` and never as a `Sequence`.
+      // Treating every delimited Sequence as a Block instead silently dropped
+      // all but the LAST component of a point-valued body — a `Block` evaluates
+      // to its final statement — so `t \mapsto (\cos t, \sin t)` lost its
+      // x-component on every compilation target.
+      let delimited = false;
+      if (operator(rhs) === 'Delimiter') {
+        delimited = true;
+        rhs = operand(rhs, 1) ?? 'Nothing';
+      }
+      if (operator(rhs) === 'Sequence')
+        rhs = [delimited ? 'Tuple' : 'Block', ...operands(rhs)];
 
       parser.pruneUndeclared(params, diagCp);
 

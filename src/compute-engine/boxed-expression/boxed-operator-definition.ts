@@ -323,7 +323,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     if (def.collection)
       this.collection = defaultCollectionHandlers(def.collection);
 
-    if (this.collection) {
+    // An `isCollection` handler declares that collection-ness is decided
+    // per-instance from the operands (e.g. `When`, a collection only when the
+    // value it guards is one). Such an operator's result type is legitimately
+    // not a collection type in general, so skip the static signature check.
+    if (this.collection && !this.collection.isCollection) {
       // If we have collection handlers, the result type must be a collection
       const resultType = functionResult(this.signature.type);
       if (!resultType)

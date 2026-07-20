@@ -1241,7 +1241,10 @@ export class BoxedFunction
       !def || (def.count !== undefined && def.iterator !== undefined)
     );
 
-    return def !== undefined;
+    if (def === undefined) return false;
+    // An operator whose collection-ness depends on its operands (e.g. `When`,
+    // a collection only when the value it guards is one) opts out per-instance.
+    return def.isCollection?.(this) ?? true;
   }
 
   get isIndexedCollection(): boolean {
@@ -1250,6 +1253,12 @@ export class BoxedFunction
 
     // If there is no `at` handler, it is definitely not indexed
     if (!def?.at) return false;
+
+    // An operator that opted out of being a collection for THIS instance is
+    // not an indexed collection either — the handlers are present but inert,
+    // and reporting otherwise contradicts `isCollection` (e.g. a `Tuple`-
+    // valued `When`, which is deliberately not broadcast over).
+    if (def.isCollection?.(this) === false) return false;
 
     // If there is an `at` handler, it _may_ be indexed.
     // We check the actual result type, e.g. Map has an at handler
@@ -2428,17 +2437,28 @@ function type(expr: BoxedFunction): Type {
 
 function withDeadline<T>(engine: ComputeEngine, fn: () => T): () => T {
   return () => {
-    if (engine._deadline === undefined) {
-      engine._deadline = Date.now() + engine.timeLimit;
+    const prev = engine._deadline;
+    const limit = engine.timeLimit;
 
-      try {
-        return fn();
-      } finally {
-        engine._deadline = undefined;
-      }
+    // A `timeLimit` of 0 or less reads as "no limit" (normalized to
+    // +Infinity): it can never tighten an ambient deadline.
+    if (prev !== undefined && !Number.isFinite(limit)) return fn();
+
+    // The effective deadline is the EARLIEST of this evaluation's own
+    // `timeLimit` budget and any ambient deadline (a `withTimeLimit()` span,
+    // or an enclosing evaluation). A span therefore never lengthens an inner
+    // per-evaluate clamp, and an inner clamp never outlives the span.
+    // For a plain nested evaluation the ambient deadline was armed earlier
+    // with the same budget, so it always wins and nothing changes.
+    const own = Date.now() + limit;
+    if (prev !== undefined && own >= prev) return fn();
+
+    engine._deadline = own;
+    try {
+      return fn();
+    } finally {
+      engine._deadline = prev;
     }
-
-    return fn();
   };
 }
 
@@ -2447,17 +2467,22 @@ function withDeadlineAsync<T>(
   fn: () => Promise<T>
 ): () => Promise<T> {
   return async () => {
-    if (engine._deadline === undefined) {
-      engine._deadline = Date.now() + engine.timeLimit;
+    // Unlike the synchronous `withDeadline`, this helper must NOT install a
+    // tighter deadline when one is already armed. `withTimeLimit()` restores
+    // its deadline in a SYNCHRONOUS `finally`, so it has already un-armed the
+    // span by the time an awaited evaluation resumes; restoring the captured
+    // span deadline here would install a deadline that outlives its span and
+    // can spuriously expire later, unrelated evaluations. Async work under a
+    // span is therefore bounded by neither — a known limitation that needs
+    // promise-aware spans to fix properly, not a tighter clamp here.
+    if (engine._deadline !== undefined) return fn();
 
-      try {
-        return await fn();
-      } finally {
-        engine._deadline = undefined;
-      }
+    engine._deadline = Date.now() + engine.timeLimit;
+    try {
+      return await fn();
+    } finally {
+      engine._deadline = undefined;
     }
-
-    return fn();
   };
 }
 

@@ -364,24 +364,55 @@ function gpuNaN(target?: CompileTarget<Expression>): string {
  * as `vec2(re, im)`).
  */
 function gpuComponentCount(expr: Expression | null): 2 | 3 | 4 | undefined {
-  if (expr === null) return undefined;
-  if (isFunction(expr, 'Tuple') || isFunction(expr, 'List')) {
-    const n = expr.nops;
-    return n >= 2 && n <= 4 ? (n as 2 | 3 | 4) : undefined;
+  return BaseCompiler.vectorComponentCount(expr);
+}
+
+/**
+ * Guard the `vecN(…)` lowering of a `Tuple`/`List` literal: every element must
+ * be a SCALAR, so the constructor's argument count is its component count.
+ *
+ * A vector-valued element (a complex component — lowered as `vec2(re, im)` —
+ * or a nested tuple) contributes 2+ components, so `(t, i·t)` would emit
+ * `vec2(t, vec2(0.0, t))`: three components into a two-component constructor,
+ * which a driver rejects with "constructor: too many arguments". Neither is
+ * there a correct flattening — a tuple whose element is complex is not a GPU
+ * vector — so fail closed (D6) with a diagnostic naming the shape instead of
+ * emitting shader source that cannot compile.
+ *
+ * The check is on AGGREGATE-ness, not on having a `vecN` lowering: a 1- or
+ * 5-element list element (`(⟦1⟧, 2)` → `vec2(float[1](1.0), 2.0)`) is just as
+ * invalid, and asking `gpuComponentCount` — which reports `undefined` for
+ * those widths — would wave them through. It is on being provably NON-SCALAR,
+ * not on having a component count: a `Matrix` element has no single count, but
+ * `(mat2(…), 1)` → `vec2(mat2(…), 1.0)` is exactly as unacceptable to a driver.
+ *
+ * Also rejects the EMPTY constructor: an empty tuple/list would lower to
+ * `float[0]()` / `array<f32, 0>()`, and neither language has a zero-length
+ * array type.
+ */
+export function assertGPUScalarComponents(
+  args: ReadonlyArray<Expression>,
+  ctor: string
+): void {
+  if (args.length === 0)
+    throw new Error(
+      `${ctor}: an empty tuple/list has no GPU lowering — neither GLSL nor ` +
+        `WGSL has a zero-length array type. Fail closed.`
+    );
+  for (const arg of args) {
+    if (!BaseCompiler.isNonScalarShape(arg)) continue;
+    const n = BaseCompiler.aggregateComponentCount(arg);
+    const shape =
+      n === undefined
+        ? 'a matrix/tensor value'
+        : `${n} component${n === 1 ? '' : 's'} — a complex value or a ` +
+          `nested tuple/list`;
+    throw new Error(
+      `${ctor}: a tuple/list element that is itself vector-valued ` +
+        `(${shape}) has no GPU ` +
+        `lowering; a ${ctor} constructor takes scalar components. Fail closed.`
+    );
   }
-  if (BaseCompiler.isComplexValued(expr)) return 2;
-  const t = expr.type.type;
-  if (typeof t !== 'string') {
-    if (t.kind === 'tuple') {
-      const n = t.elements.length;
-      return n >= 2 && n <= 4 ? (n as 2 | 3 | 4) : undefined;
-    }
-    if (t.kind === 'list' && t.dimensions?.length === 1) {
-      const n = t.dimensions[0];
-      return n >= 2 && n <= 4 ? (n as 2 | 3 | 4) : undefined;
-    }
-  }
-  return undefined;
 }
 
 /**

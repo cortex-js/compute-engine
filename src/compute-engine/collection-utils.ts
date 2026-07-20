@@ -1195,6 +1195,7 @@ export function defaultCollectionHandlers(
       }),
     subsetOf: def.subsetOf ?? collectionSubset,
   };
+  if (def.isCollection) result.isCollection = def.isCollection;
   if (def.isLazy) result.isLazy = def.isLazy;
   if (def.eltsgn) result.eltsgn = def.eltsgn;
   if (def.elttype) result.elttype = def.elttype;

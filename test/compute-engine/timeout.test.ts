@@ -549,6 +549,111 @@ describe('withTimeLimit', () => {
     ).toThrow(CancellationError);
   });
 
+  // Tycho item 61: inside a span, a per-evaluate `ce.timeLimit` budget used to
+  // be silently inert — the span deadline REPLACED every inner clamp instead of
+  // min-ing with it, so wrapping a clamp-using pipeline in a span stripped its
+  // inner bounds. The effective deadline is now the earlier of the two.
+  describe('composes with per-evaluate ce.timeLimit (item 61)', () => {
+    // A single evaluate() that runs well past any of the budgets below.
+    const slow = (engine: ComputeEngine) =>
+      engine.parse(
+        '\\sum_{i=1}^{60000}\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)',
+        { strict: false }
+      );
+
+    const elapsed = (fn: () => void): number => {
+      const t0 = Date.now();
+      try {
+        fn();
+      } catch (e) {
+        if (!(e instanceof CancellationError)) throw e;
+      }
+      return Date.now() - t0;
+    };
+
+    it('a tighter inner timeLimit clamps inside a longer span', () => {
+      const engine = new ComputeEngine();
+      engine.precision = 'machine';
+      const expr = slow(engine);
+      const ms = elapsed(() =>
+        engine.withTimeLimit(60_000, () => {
+          engine.timeLimit = 200;
+          expr.evaluate();
+        })
+      );
+      // Without the fix this ran the full 60s span.
+      expect(ms).toBeLessThan(2000);
+    });
+
+    it('a looser inner timeLimit does not extend a shorter span', () => {
+      const engine = new ComputeEngine();
+      engine.precision = 'machine';
+      const expr = slow(engine);
+      const ms = elapsed(() =>
+        engine.withTimeLimit(200, () => {
+          engine.timeLimit = 60_000;
+          expr.evaluate();
+        })
+      );
+      expect(ms).toBeLessThan(2000);
+    });
+
+    it('an unlimited inner timeLimit (<=0) does not extend the span', () => {
+      const engine = new ComputeEngine();
+      engine.precision = 'machine';
+      const expr = slow(engine);
+      const ms = elapsed(() =>
+        engine.withTimeLimit(200, () => {
+          engine.timeLimit = 0; // normalized to +Infinity == "no limit"
+          expr.evaluate();
+        })
+      );
+      expect(ms).toBeLessThan(2000);
+    });
+
+    it('restores the ambient deadline after an inner clamp fires', () => {
+      const engine = new ComputeEngine();
+      engine.precision = 'machine';
+      const expr = slow(engine);
+      engine.withTimeLimit(60_000, () => {
+        const spanDeadline = engine.deadline!;
+        engine.timeLimit = 200;
+        try {
+          expr.evaluate();
+        } catch (e) {
+          if (!(e instanceof CancellationError)) throw e;
+        }
+        // The span deadline is intact — the inner clamp did not clobber it.
+        expect(engine.deadline).toBe(spanDeadline);
+      });
+      expect(engine.deadline).toBeUndefined();
+    });
+  });
+
+  // Review finding: the async helper must NOT install a tighter deadline when
+  // one is already armed. `withTimeLimit` restores its deadline in a
+  // SYNCHRONOUS `finally`, so by the time an awaited evaluation resumes the
+  // span is already un-armed; restoring the captured span deadline there left
+  // a deadline installed that outlived its span and could expire later,
+  // unrelated evaluations. (Async work under a span is bounded by neither
+  // limit — a documented limitation needing promise-aware spans to fix.)
+  it('an async evaluation under a span leaves no deadline behind', async () => {
+    const engine = new ComputeEngine();
+    expect(engine.deadline).toBeUndefined();
+
+    await engine.withTimeLimit(60_000, () => {
+      engine.timeLimit = 100;
+      return engine.parse('2+2').evaluateAsync();
+    });
+
+    // The span has exited: no deadline may remain installed.
+    expect(engine.deadline).toBeUndefined();
+
+    // A later evaluation on the same engine is unaffected.
+    engine.timeLimit = 5000;
+    expect(engine.parse('\\sqrt{16}').evaluate().re).toBe(4);
+  });
+
   it('does not charge one-time cache builds against the deadline', () => {
     // A lazily-built engine cache (e.g. constructible trig values) is
     // warm-up work, not part of the user's evaluation: the deadline is

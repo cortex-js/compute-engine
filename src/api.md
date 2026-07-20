@@ -3605,6 +3605,25 @@ Optional flag to quickly check if the collection is finite, without having to co
 
 <MemberCard>
 
+##### BaseCollectionHandlers.isCollection?
+
+```ts
+optional isCollection?: (collection) => boolean;
+```
+
+Optional predicate for operators whose collection-ness depends on their
+operands, e.g. `When(value, cond)`, which is a collection exactly when
+`value` is one.
+
+Returning `false` reports the expression as a scalar, as if it had no
+collection handlers at all.
+
+Default: `true` (an operator with a `collection` block is a collection).
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BaseCollectionHandlers.isLazy?
 
 ```ts

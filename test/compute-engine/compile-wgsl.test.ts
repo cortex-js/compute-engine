@@ -745,3 +745,159 @@ describe('WGSL When NaN branch matches the value shape (Tycho item 49)', () => {
     expect(code).not.toContain('vec2f(bitcast');
   });
 });
+
+// Mirrors the GLSL regressions: a vector-valued block local declares a vecNf,
+// and a `vecNf` constructor takes scalar components only.
+describe('WGSL vector locals and vecNf constructor arity', () => {
+  it('a local assigned a 2-tuple is declared vec2f', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
+      'p',
+    ]);
+    const code = wgsl.compile(expr).code;
+    expect(code).toContain('var p: vec2f');
+    expect(code).not.toContain('var p: f32');
+  });
+
+  it('a tuple with a complex component fails closed', () => {
+    const expr = ce.box(['Tuple', 't', ['Multiply', 'ImaginaryUnit', 't']]);
+    expect(() => wgsl.compile(expr)).toThrow(/Fail closed/);
+  });
+
+  // Defect A: a width with no `vecNf` still lowers to `array<f32, N>(…)`, so
+  // the declaration must be that array type, not `f32`.
+  it('a local assigned a 5-tuple is declared as the matching array type', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 1, 2, 3, 4, 5]],
+      'p',
+    ]);
+    const code = wgsl.compile(expr).code;
+    expect(code).toContain('var p: array<f32, 5>');
+    expect(code).not.toContain('var p: f32');
+    expect(code).toContain('p = array<f32, 5>(');
+  });
+
+  // Defect B: aggregate elements outside widths 2–4 bypassed the guard.
+  it('a 1-element list component fails closed', () => {
+    expect(() => wgsl.compile(ce.box(['Tuple', ['List', 1], 2]))).toThrow(
+      /Fail closed/
+    );
+  });
+
+  it('a 5-element list component fails closed', () => {
+    expect(() =>
+      wgsl.compile(ce.box(['Tuple', ['List', 1, 2, 3, 4, 5], 2]))
+    ).toThrow(/Fail closed/);
+  });
+
+  // Defect C: the width must propagate through a local reference.
+  it('a local aliasing a vector local inherits its width', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Declare', 'q'],
+      ['Assign', 'q', 'p'],
+      'q',
+    ]);
+    const code = wgsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
+    expect(code).toContain('var p: vec2f');
+    expect(code).toContain('var q: vec2f');
+    expect(code).not.toContain('var q: f32');
+  });
+});
+
+// A shader local has ONE declared type, so every binding of it in a block must
+// agree on a shape. "First assignment wins" reached the very "declared `f32`,
+// assigned `vec2f`" mismatch the width inference exists to prevent, by
+// intra-block reassignment instead of aliasing.
+describe('WGSL block local with disagreeing binding shapes fails closed', () => {
+  it('scalar then vector fails closed', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Cos', 't']],
+      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      'p',
+    ]);
+    expect(() => wgsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
+      /disagreeing shapes.*scalar, then 2-component aggregate/s
+    );
+  });
+
+  it('vector then scalar fails closed', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Assign', 'p', ['Cos', 't']],
+      'p',
+    ]);
+    expect(() => wgsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
+      /disagreeing shapes.*2-component aggregate, then scalar/s
+    );
+  });
+
+  it('repeated bindings of the SAME shape still compile', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Assign', 'p', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
+      'p',
+    ]);
+    const code = wgsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
+    expect(code).toContain('var p: vec2f');
+    expect(code).toContain('p = vec2f(cos(t), sin(t));');
+  });
+});
+
+// A `Matrix` has no single component count, so it was reported `undefined` —
+// which every caller reads as "scalar" — and `vec2f(mat2x2f(…), 1.0)` was
+// emitted.
+describe('WGSL matrix-valued components are aggregates, not scalars', () => {
+  it('a matrix component of a tuple fails closed', () => {
+    const expr = ce.box([
+      'Tuple',
+      ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]],
+      1,
+    ]);
+    expect(() => wgsl.compile(expr)).toThrow(/matrix\/tensor value/);
+  });
+
+  it('a block local bound to a matrix fails closed', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]],
+      'p',
+    ]);
+    expect(() => wgsl.compile(expr)).toThrow(/matrix\/tensor-valued local/);
+  });
+});
+
+// Width 0 is a real observed width, not the scalar sentinel: an empty
+// tuple/list lowered to `array<f32, 0>()`, which WGSL has no type for.
+describe('WGSL zero-width aggregates fail closed', () => {
+  it('an empty Tuple fails closed instead of emitting array<f32, 0>()', () => {
+    expect(() => wgsl.compile(ce.box(['Tuple']))).toThrow(
+      /empty tuple\/list has no GPU lowering/
+    );
+  });
+
+  it('a block local bound to an empty tuple fails closed', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple']],
+      'p',
+    ]);
+    expect(() => wgsl.compile(expr)).toThrow(
+      /Block local "p": an empty tuple\/list/
+    );
+  });
+});

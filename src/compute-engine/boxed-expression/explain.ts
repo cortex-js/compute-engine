@@ -648,16 +648,22 @@ function toExplainStep(s: RuleStep): ExplainStep {
  * boxed-function.ts.) */
 function withDeadline<T>(engine: ComputeEngine, fn: () => T): () => T {
   return () => {
-    if (engine._deadline === undefined) {
-      engine._deadline = Date.now() + engine.timeLimit;
+    const prev = engine._deadline;
+    const limit = engine.timeLimit;
 
-      try {
-        return fn();
-      } finally {
-        engine._deadline = undefined;
-      }
+    // The effective deadline is the earliest of this evaluation's own
+    // `timeLimit` budget and any ambient deadline (e.g. a `withTimeLimit()`
+    // span). See the matching helper in boxed-function.ts.
+    if (prev !== undefined && !Number.isFinite(limit)) return fn();
+
+    const own = Date.now() + limit;
+    if (prev !== undefined && own >= prev) return fn();
+
+    engine._deadline = own;
+    try {
+      return fn();
+    } finally {
+      engine._deadline = prev;
     }
-
-    return fn();
   };
 }

@@ -4,7 +4,12 @@ import {
   resolveEscapingLambda,
 } from '../function-utils.js';
 import { checkConditions } from '../boxed-expression/rules.js';
-import { widen } from '../../common/type/utils.js';
+import { collectionElementType, widen } from '../../common/type/utils.js';
+import {
+  MAX_SIZE_EAGER_COLLECTION,
+  isFiniteIndexedCollection,
+  isTuple,
+} from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
 import type { Type } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -262,9 +267,46 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // A guard that evaluates to `Undefined` masks (decision 9): no value,
         // treated as not-True rather than held.
         if (cs === 'Undefined') return ce.symbol('Undefined');
+
+        // Indeterminate scalar condition over a collection value: the
+        // restriction distributes elementwise (Tycho item 66), so that
+        // `When(L, c)` behaves as `[When(L1, c), …, When(Ln, c)]` — the same
+        // shape the list-condition branch above produces. Without this a
+        // restricted list reported `isCollection === false` while its `.type`
+        // already said `list<…>`. HYBRID-lazy, mirroring `PointList` (Tycho
+        // item 52): at or below `MAX_SIZE_EAGER_COLLECTION` the distribution
+        // is materialized into a `List`; past the threshold the held `When` is
+        // kept and its `collection` handlers (see `whenCollectionHandlers`)
+        // expose the same elements lazily. The type check gates the extra
+        // `evaluate` so a scalar `When` keeps its held form unchanged.
+        // A `Tuple` is excluded: it is a fixed-arity structure (a point), not a
+        // list to broadcast over, so a restricted point must stay a point
+        // rather than degrade to a `List`. Mirrors `PointList`'s
+        // `isListComponent` predicate in `collections.ts`.
+        // A tuple-typed value is excluded before it is evaluated: evaluating
+        // it here would force every component of a value the restriction is
+        // meant to keep held, changing the lazy guard semantics for a shape
+        // that can never enter the distribution path anyway.
+        if (expr.type.matches('collection') && !expr.type.matches('tuple')) {
+          const ev = expr.evaluate(options);
+          if (isFiniteIndexedCollection(ev) && !isTuple(ev)) {
+            const n = ev.count ?? Infinity;
+            if (n <= MAX_SIZE_EAGER_COLLECTION) {
+              const result = Array.from(ev.each()).map((elem) =>
+                ce._fn('When', [elem, c])
+              );
+              return ce._fn('List', result);
+            }
+            // Too large to materialize: hold the (evaluated) collection so the
+            // collection handlers can walk it.
+            return ce._fn('When', [ev, c]);
+          }
+        }
+
         // Indeterminate: hold
         return ce._fn('When', [expr, c]);
       },
+      collection: whenCollectionHandlers(),
     },
 
     Which: {
@@ -376,6 +418,91 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+/**
+ * Lazy indexed-collection handlers for a held `When(value, cond)` (Tycho
+ * item 66).
+ *
+ * A restriction over a collection is elementwise: `When(L, c)` behaves as
+ * `[When(L1, c), …, When(Ln, c)]`. Small collections are distributed eagerly
+ * into a `List` by the `evaluate` handler; past `MAX_SIZE_EAGER_COLLECTION`
+ * the `When` is held and these handlers walk the wrapped value, re-wrapping
+ * each element with the condition — so the large form stays lazy but is fully
+ * enumerable, and `isCollection`/`count`/`each()` agree with `.type`.
+ *
+ * A `When` guarding a SCALAR is not a collection: `isCollection` reports
+ * `false` and every other handler reports scalar, exactly as before.
+ */
+function whenCollectionHandlers(): CollectionHandlers {
+  // The wrapped collection value, or `undefined` when `When` guards a scalar.
+  // The predicate matches the `evaluate` handler's distribution rule exactly —
+  // in particular a `Tuple` (a point) is NOT list-like here, so a restricted
+  // point presents as a scalar `When` wrapping the point rather than as a
+  // 2-element collection.
+  // Returns the wrapped collection together with a `restrict` closure that
+  // re-applies the condition to one of its elements.
+  const parts = (
+    expr: Expression
+  ):
+    | { value: Expression; restrict: (elem: Expression) => Expression }
+    | undefined => {
+    if (!isFunction(expr, 'When')) return undefined;
+    const v = expr.op1;
+    if (!v.isCollection || isTuple(v)) return undefined;
+    const cond = expr.op2;
+    return {
+      value: v,
+      restrict: (elem) => expr.engine._fn('When', [elem, cond]),
+    };
+  };
+  const value = (expr: Expression): Expression | undefined =>
+    parts(expr)?.value;
+
+  return {
+    isCollection: (expr) => value(expr) !== undefined,
+
+    isLazy: (expr) => value(expr) !== undefined,
+
+    count: (expr) => value(expr)?.count,
+
+    isEmpty: (expr) => value(expr)?.isEmptyCollection,
+
+    isFinite: (expr) => value(expr)?.isFiniteCollection,
+
+    elttype: (expr) => {
+      const v = value(expr);
+      if (!v) return undefined;
+      return collectionElementType(v.type.type) ?? 'unknown';
+    },
+
+    iterator: (expr) => {
+      const p = parts(expr);
+      if (!p) return undefined;
+      const iter = p.value.each();
+      return {
+        next: () => {
+          const result = iter.next();
+          if (result.done) return { value: undefined, done: true as const };
+          return { value: p.restrict(result.value), done: false as const };
+        },
+      };
+    },
+
+    at: (expr, index) => {
+      // Negative indexes are normalized by the caller; string keys (records)
+      // do not apply to a restricted indexed collection.
+      if (typeof index !== 'number') return undefined;
+      const p = parts(expr);
+      const elem = p?.value.at(index);
+      return elem ? p!.restrict(elem) : undefined;
+    },
+
+    indexWhere: (expr, predicate) => {
+      const p = parts(expr);
+      return p?.value.indexWhere((elem) => predicate(p.restrict(elem)));
+    },
+  };
+}
 
 /**
  * A conditional guard is "boolean-ish" — well-typed for `If`/`Which` even

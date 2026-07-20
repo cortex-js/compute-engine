@@ -1001,3 +1001,243 @@ describe('GLSL When/Which NaN branch matches the value shape (Tycho item 49)', (
     expect(code).toContain('vec2(_gpu_nan())');
   });
 });
+
+// A `Block` local bound to a point/tuple value is a vecN on the GPU, not a
+// float. The `float` default disagreed with its own assignment AND with the
+// enclosing function's declared return type when the local is the block's
+// value — a driver rejects it with "return type mismatch" (Tycho round).
+describe('GLSL vector-valued block locals declare a vecN', () => {
+  it('a local assigned a 2-tuple is declared vec2', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
+      'p',
+    ]);
+    const code = glsl.compileFunction(expr, 'curve', 'vec2', [['t', 'float']]);
+    expect(code).toContain('vec2 p;');
+    expect(code).not.toContain('float p;');
+    expect(code).toContain('return p;');
+  });
+
+  it('a Declare with a 3-tuple initial value is declared vec3', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p', 'number', ['Tuple', 't', ['Square', 't'], 1]],
+      'p',
+    ]);
+    const code = glsl.compile(expr).code;
+    expect(code).toContain('vec3 p;');
+  });
+
+  it('a scalar local still declares float', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'r'],
+      ['Assign', 'r', ['Cos', 't']],
+      'r',
+    ]);
+    expect(glsl.compile(expr).code).toContain('float r;');
+  });
+
+  // Defect A: widths outside 2–4 have no `vecN`, but the list compiler still
+  // lowers them to `float[N](…)`. A `float` declaration under an array
+  // assignment is the same mismatch, one width up.
+  it('a local assigned a 5-tuple is declared as the matching array type', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 1, 2, 3, 4, 5]],
+      'p',
+    ]);
+    const code = glsl.compile(expr).code;
+    expect(code).toContain('float[5] p;');
+    expect(code).not.toContain('float p;');
+    expect(code).toContain('p = float[5](');
+  });
+
+  it('a local assigned a 1-tuple is declared as the matching array type', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['List', 7]],
+      'p',
+    ]);
+    const code = glsl.compile(expr).code;
+    expect(code).toContain('float[1] p;');
+    expect(code).toContain('p = float[1](');
+  });
+
+  // Defect C: the width must propagate through a local reference, or the
+  // aliasing local is declared `float` while holding a vec2.
+  it('a local aliasing a vector local inherits its width', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Declare', 'q'],
+      ['Assign', 'q', 'p'],
+      'q',
+    ]);
+    const code = glsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
+    expect(code).toContain('vec2 p;');
+    expect(code).toContain('vec2 q;');
+    expect(code).not.toContain('float q;');
+  });
+
+  it('a nested block local shadows an outer vector local', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Block', ['Declare', 'p'], ['Assign', 'p', 'x'], 'p'],
+    ]);
+    const code = glsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
+    expect(code).toContain('vec2 p;');
+    expect(code).toContain('float p;');
+  });
+});
+
+// A `vecN` constructor takes SCALAR components: a vector-valued element (a
+// complex component, lowered as `vec2(re, im)`, or a nested tuple) made the
+// emitted constructor exceed its arity — `vec2(t, vec2(0.0, t))`, which a
+// driver rejects with "constructor: too many arguments" (Tycho round).
+describe('GLSL vecN constructor arity (no vector-valued components)', () => {
+  it('a tuple with a complex component fails closed', () => {
+    const expr = ce.box(['Tuple', 't', ['Multiply', 'ImaginaryUnit', 't']]);
+    expect(() => glsl.compile(expr)).toThrow(/Fail closed/);
+  });
+
+  it('a nested tuple fails closed rather than emit vec2(vec2, vec2)', () => {
+    const expr = ce.box(['Tuple', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
+    expect(() => glsl.compile(expr)).toThrow(/Fail closed/);
+  });
+
+  it('an all-scalar tuple still lowers to vec2', () => {
+    const expr = ce.box(['Tuple', ['Cos', 't'], ['Sin', 't']]);
+    expect(glsl.compile(expr).code).toBe('vec2(cos(t), sin(t))');
+  });
+
+  // Defect B: the guard asked "does this element have a vecN lowering?", so an
+  // aggregate element of width 1 or 5+ — which has none — slipped through and
+  // emitted `vec2(float[1](1.0), 2.0)`.
+  it('a 1-element list component fails closed', () => {
+    const expr = ce.box(['Tuple', ['List', 1], 2]);
+    expect(() => glsl.compile(expr)).toThrow(/Fail closed/);
+  });
+
+  it('a 5-element list component fails closed', () => {
+    const expr = ce.box(['Tuple', ['List', 1, 2, 3, 4, 5], 2]);
+    expect(() => glsl.compile(expr)).toThrow(/Fail closed/);
+  });
+});
+
+// A shader local has ONE declared type, so every binding of it in a block must
+// agree on a shape. "First assignment wins" reached the very "declared
+// `float`, assigned `vec2`" mismatch the width inference exists to prevent, by
+// intra-block reassignment instead of aliasing. Disagreement fails closed:
+// neither GLSL nor WGSL has a type a scalar and a vecN both fit.
+describe('GLSL block local with disagreeing binding shapes fails closed', () => {
+  it('scalar then vector fails closed', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Cos', 't']],
+      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      'p',
+    ]);
+    expect(() => glsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
+      /disagreeing shapes.*scalar, then 2-component aggregate/s
+    );
+  });
+
+  it('vector then scalar fails closed', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Assign', 'p', ['Cos', 't']],
+      'p',
+    ]);
+    expect(() => glsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
+      /disagreeing shapes.*2-component aggregate, then scalar/s
+    );
+  });
+
+  it('two different vector widths fail closed', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Assign', 'p', ['Tuple', 'x', 'y', 't']],
+      'p',
+    ]);
+    expect(() => glsl.compile(expr, { vars: { x: 'x', y: 'y' } })).toThrow(
+      /disagreeing shapes/
+    );
+  });
+
+  it('repeated bindings of the SAME shape still compile', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 'x', 'y']],
+      ['Assign', 'p', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
+      'p',
+    ]);
+    const code = glsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
+    expect(code).toContain('vec2 p;');
+    expect(code).toContain('p = vec2(cos(t), sin(t));');
+  });
+});
+
+// A `Matrix` has no single component count, so `aggregateComponentCount`
+// reported `undefined` for it — which every caller reads as "scalar". That let
+// `(mat2(…), 1)` emit `vec2(mat2(…), 1.0)`, which no shader compiler accepts.
+describe('GLSL matrix-valued components are aggregates, not scalars', () => {
+  it('a matrix component of a tuple fails closed', () => {
+    const expr = ce.box([
+      'Tuple',
+      ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]],
+      1,
+    ]);
+    expect(() => glsl.compile(expr)).toThrow(/matrix\/tensor value/);
+  });
+
+  it('a block local bound to a matrix fails closed', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]]],
+      'p',
+    ]);
+    expect(() => glsl.compile(expr)).toThrow(/matrix\/tensor-valued local/);
+  });
+});
+
+// Width 0 is a real observed width, not the scalar sentinel: an empty
+// tuple/list lowered to `float[0]()` — an invalid zero-sized array — while its
+// local stayed declared `float`.
+describe('GLSL zero-width aggregates fail closed', () => {
+  it('an empty Tuple fails closed instead of emitting float[0]()', () => {
+    expect(() => glsl.compile(ce.box(['Tuple']))).toThrow(
+      /empty tuple\/list has no GPU lowering/
+    );
+  });
+
+  it('an empty List fails closed', () => {
+    expect(() => glsl.compile(ce.box(['List']))).toThrow(/Fail closed/);
+  });
+
+  it('a block local bound to an empty tuple fails closed', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple']],
+      'p',
+    ]);
+    expect(() => glsl.compile(expr)).toThrow(
+      /Block local "p": an empty tuple\/list/
+    );
+  });
+});

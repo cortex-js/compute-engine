@@ -1,6 +1,10 @@
 import type { Expression } from '../global-types.js';
 import type { CompiledFunctions } from './types.js';
-import { GPUShaderTarget, compileGPUMatrix } from './gpu-target.js';
+import {
+  GPUShaderTarget,
+  compileGPUMatrix,
+  assertGPUScalarComponents,
+} from './gpu-target.js';
 import { BaseCompiler } from './base-compiler.js';
 
 /**
@@ -13,6 +17,10 @@ function compileGLSLList(
   args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string
 ) {
+  assertGPUScalarComponents(
+    args,
+    args.length >= 2 && args.length <= 4 ? `vec${args.length}` : 'float[]'
+  );
   if (args.length === 2)
     return `vec2(${args.map((x) => compile(x)).join(', ')})`;
   if (args.length === 3)

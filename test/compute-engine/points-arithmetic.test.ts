@@ -1491,3 +1491,94 @@ describe('POINT/TUPLE ARITHMETIC — fixed-shape tuple components (deliberate wi
     expect(s.type.toString()).toBe('tuple<matrix, integer>');
   });
 });
+
+describe('POINT/TUPLE ARITHMETIC — point-valued `\\mapsto` body', () => {
+  // A delimited lambda body keeps the meaning its separator gives it, matching
+  // the `f(t) := …` form: `(a, b)` is a Tuple, `(a; b)` is a statement Block.
+  // Treating every delimited Sequence as a Block silently dropped all but the
+  // LAST component, so a parametric curve returned only its y-component on
+  // every compilation target (found alongside Tycho item 62).
+  test('a comma-delimited body is a Tuple, not a Block', () => {
+    const ce = new ComputeEngine();
+    const f = ce.parse('t \\mapsto (\\cos t, \\sin t)', {
+      strict: false,
+      canonical: false,
+    });
+    expect(f.json).toEqual(['Function', ['Tuple', ['Cos', 't'], ['Sin', 't']], 't']);
+  });
+
+  test('the point-valued lambda applies to both components', () => {
+    const ce = new ComputeEngine();
+    const f = ce.parse('t \\mapsto (\\cos t, \\sin t)', { strict: false });
+    const v = ce.box(['Apply', f, 0.5]).N();
+    expect(v.type.toString()).toBe('tuple<finite_real, finite_real>');
+    expect(v.op1.re).toBeCloseTo(Math.cos(0.5), 12);
+    expect(v.op2.re).toBeCloseTo(Math.sin(0.5), 12);
+  });
+
+  test('it agrees with the equivalent `g(t) := …` assignment form', () => {
+    const ce = new ComputeEngine();
+    ce.parse('g(t) := (\\cos t, \\sin t)', { strict: false }).evaluate();
+    const viaAssign = ce.parse('g(0.5)', { strict: false }).N();
+    const f = ce.parse('t \\mapsto (\\cos t, \\sin t)', { strict: false });
+    const viaLambda = ce.box(['Apply', f, 0.5]).N();
+    expect(viaLambda.toString()).toBe(viaAssign.toString());
+  });
+
+  // A delimited sequence is DATA whatever its separator: the `;` infix builds a
+  // `Block` only when the sequence contains an `Assign`, so a genuine statement
+  // block arrives already built and a plain `(a; b)` must not lose `a`.
+  test('a semicolon-delimited data body is a Tuple, not a Block', () => {
+    const ce = new ComputeEngine();
+    const f = ce.parse('t \\mapsto (a; b)', {
+      strict: false,
+      canonical: false,
+    });
+    expect(f.json).toEqual(['Function', ['Tuple', 'a', 'b'], 't']);
+  });
+
+  test('semicolon-separated rows agree with the bare literal', () => {
+    const ce = new ComputeEngine();
+    const f = ce.parse('t \\mapsto (1, 2; 3, 4)', { strict: false });
+    const bare = ce.parse('(1, 2; 3, 4)', { strict: false });
+    expect(ce.box(['Apply', f, 0]).evaluate().json).toEqual(bare.json);
+  });
+
+  test('a body that really is a statement block stays a Block', () => {
+    const ce = new ComputeEngine();
+    const f = ce.parse('t \\mapsto (x := 1; x+1)', {
+      strict: false,
+      canonical: false,
+    });
+    expect(f.json).toEqual([
+      'Function',
+      ['Block', ['Declare', 'x'], ['Assign', 'x', 1], ['Add', 'x', 1]],
+      't',
+    ]);
+    expect(ce.box(['Apply', f, 7]).N().re).toBe(2);
+  });
+
+  test('single-expression and undelimited bodies are unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('t \\mapsto (t+1)', { strict: false, canonical: false }).json).toEqual([
+      'Function',
+      ['Add', 't', 1],
+      't',
+    ]);
+    expect(ce.parse('x \\mapsto x^2', { strict: false, canonical: false }).json).toEqual([
+      'Function',
+      ['Power', 'x', 2],
+      'x',
+    ]);
+  });
+
+  test('a lambda in an argument list does not swallow the following argument', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.parse('\\mathrm{Map}([1,2,3], x \\mapsto x^2)', {
+        strict: false,
+        canonical: false,
+      }).json
+    ).toEqual(['Map', ['List', 1, 2, 3], ['Function', ['Power', 'x', 2], 'x']]);
+  });
+});

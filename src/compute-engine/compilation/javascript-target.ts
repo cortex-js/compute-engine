@@ -3264,13 +3264,25 @@ function wrapRealOnly(
   result: CompilationResult<'javascript'>
 ): CompilationResult<'javascript', number> {
   const origRun = result.run;
+  // Recurses into arrays: a tuple/list result carries its components in
+  // number slots, so a `{ re, im }` there must be coerced too. The static
+  // `assertRealOnlyComponents` check catches provably-complex components at
+  // compile time; this is the runtime backstop for values that only become
+  // complex when the compiled function is called.
+  // Only complex values are coerced inside a collection: a boolean ELEMENT is
+  // a legitimate result (`Equal` over a collection yields `[false, …]`), so
+  // the top-level boolean → NaN rule below must not recurse.
+  const coerceComponents = (r: unknown): unknown => {
+    if (Array.isArray(r)) return r.map(coerceComponents);
+    if (typeof r === 'object' && r !== null && 'im' in r)
+      return (r as ComplexResult).im === 0 ? (r as ComplexResult).re : NaN;
+    return r;
+  };
   const realRun = ((...args: unknown[]) => {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     const r = (origRun as Function)(...args);
     if (typeof r === 'boolean') return NaN;
-    if (typeof r === 'object' && r !== null && 'im' in r)
-      return (r as ComplexResult).im === 0 ? (r as ComplexResult).re : NaN;
-    return r;
+    return coerceComponents(r);
   }) as unknown as CompiledRunner<number>;
   return {
     ...result,
@@ -3278,11 +3290,70 @@ function wrapRealOnly(
   } as CompilationResult<'javascript', number>;
 }
 
+/**
+ * Under `realOnly`, reject a complex-valued tuple/list COMPONENT.
+ *
+ * The top-level `realOnly` coercion inspects only the result itself, so a
+ * `{ re, im }` object sitting in a component slot passed straight through and
+ * reached the consumer in a number slot — `realOnly` was silently inert for
+ * anything but a scalar (Tycho item 62). The component's TYPE cannot decide
+ * this: with `t` undeclared, `(t, i t)` and `(t, t²)` both infer
+ * `finite_number`. `isComplexValued` distinguishes them, and it is the same
+ * predicate the GPU targets fail closed on, so every target now rejects the
+ * same shapes. Mirrors `Sqrt(-1)`'s "no real value" compile error rather than
+ * inventing a real lowering for a complex component.
+ */
+function assertRealOnlyComponents(expr: Expression): void {
+  if (!isFunction(expr)) return;
+  const op = expr.operator;
+  if (op === 'Tuple' || op === 'List') {
+    for (const [i, component] of expr.ops.entries()) {
+      if (BaseCompiler.isComplexValued(component))
+        throw new Error(
+          `${op}: component ${i + 1} is complex-valued and has no real lowering under \`realOnly\`. Fail closed.`
+        );
+    }
+    return;
+  }
+
+  // Only positions that can PRODUCE the compiled result are followed. A
+  // collection is an intermediate everywhere else — `At([i, 2], 2)` reads the
+  // real component and compiles to a real value, so rejecting its unused
+  // complex component would fail a compile that is correct today.
+  for (const result of resultPositions(expr)) assertRealOnlyComponents(result);
+}
+
+/** The operands of `expr` whose value can become the compiled result. */
+function resultPositions(expr: Expression): readonly Expression[] {
+  if (!isFunction(expr)) return [];
+  const ops: readonly Expression[] = expr.ops;
+  if (ops.length === 0) return [];
+  switch (expr.operator) {
+    // The body is the result; the trailing operands are parameters/limits.
+    case 'Function':
+      return [ops[0]];
+    // A block's value is its last statement.
+    case 'Block':
+      return [ops[ops.length - 1]];
+    // Every arm can be the result.
+    case 'When':
+      return [ops[0]];
+    case 'If':
+      return ops.slice(1);
+    case 'Which':
+      return ops.filter((_, i: number) => i % 2 === 1);
+    default:
+      return [];
+  }
+}
+
 function compileToTarget(
   expr: Expression,
   target: CompileTarget<Expression>,
   realOnly?: boolean
 ): CompilationResult<'javascript'> {
+  if (realOnly) assertRealOnlyComponents(expr);
+
   if (isFunction(expr, 'Function')) {
     const args = expr.ops;
     const params = args

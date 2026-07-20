@@ -775,6 +775,18 @@ export interface BaseCollectionHandlers {
   /** Optional flag to quickly check if the collection is finite, without having to count exactly how many elements it has (useful for lazy evaluation). */
   isFinite?: (collection: Expression) => boolean | undefined;
 
+  /**
+   * Optional predicate for operators whose collection-ness depends on their
+   * operands, e.g. `When(value, cond)`, which is a collection exactly when
+   * `value` is one.
+   *
+   * Returning `false` reports the expression as a scalar, as if it had no
+   * collection handlers at all.
+   *
+   * Default: `true` (an operator with a `collection` block is a collection).
+   */
+  isCollection?: (collection: Expression) => boolean;
+
   /** Return `true` if the collection is lazy, `false` otherwise.
    * If the collection is lazy, it means that the elements are not
    * computed until they are needed, for example when iterating over the

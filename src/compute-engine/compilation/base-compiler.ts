@@ -1211,8 +1211,87 @@ export class BaseCompiler {
     // `complex` type on the `Declare`, a `Declare` initial value, or the
     // first `Assign` RHS.
     const complexFrame = new Map<string, boolean>();
-    for (const local of locals) complexFrame.set(local, false);
+    // Vector width (2–4) of a local bound to a vector-valued expression — a
+    // point/tuple body such as `p ⩴ (x(t), y(t))`. On a GPU target such a
+    // local must be declared `vec2`/`vec3`/`vec4`: the `float` default would
+    // disagree with its own assignment AND with the declared return type when
+    // the local is the block's value (`vec2 f(…) { float p; p = vec2(…);
+    // return p; }` — "return type mismatch" on a real driver).
+    // Widths outside 2–4 are tracked too: the list compilers lower those to an
+    // ARRAY constructor (`float[5](…)` / `array<f32, 5>(…)`), so the local's
+    // declaration must be the matching array type — a `float` declaration with
+    // an array assignment is the same mismatch, one width up.
+    const vectorFrame = new Map<string, number>();
+    // A shader local gets ONE declared type, so every binding of it in the
+    // block must agree on a shape. On a GPU target we therefore inspect every
+    // binding, not just the first: "first assignment wins" reached the very
+    // "declared `float`, assigned `vecN`" mismatch this inference exists to
+    // prevent, by intra-block reassignment instead of aliasing.
+    //
+    // Disagreement FAILS CLOSED rather than widening to a union, because
+    // neither GLSL nor WGSL has a type a scalar and a `vecN` (or a `vec2` and
+    // a `vec3`) both fit: there is no variant type and no implicit
+    // scalar↔vector assignment conversion. "Widening" could only mean
+    // splatting the scalar binding (`p = vec2(cos(t))`), which silently
+    // rewrites the program's meaning — every later scalar use of `p` becomes
+    // vector arithmetic — and for two different vector widths not even that
+    // exists. A diagnostic naming the two shapes beats source no driver
+    // accepts (D6).
+    const isGPUTarget =
+      target.language === 'glsl' || target.language === 'wgsl';
+    const shapeName = (n: number) =>
+      n === BaseCompiler.LOCAL_SCALAR ? 'scalar' : `${n}-component aggregate`;
+    const noteVectorWidth = (name: string, value: Expression) => {
+      // Only declared locals get a declaration (and hence a type hint).
+      const prev = vectorFrame.get(name);
+      if (prev === undefined) return;
+      const count = BaseCompiler.aggregateComponentCount(value);
+      if (!isGPUTarget) {
+        // Off-GPU a local is untyped, so any shape may be rebound: keep the
+        // historical "first aggregate binding wins". A width of `0` is not
+        // recorded (it produces no declaration anywhere), which also keeps it
+        // from reading back as an aggregate count off-GPU.
+        if (prev < 0 && count) vectorFrame.set(name, count);
+        return;
+      }
+      if (count === 0)
+        throw new Error(
+          `Block local "${name}": an empty tuple/list has no GPU lowering — ` +
+            `neither GLSL nor WGSL has a zero-length array type, so there is ` +
+            `no declaration its assignment could match. Fail closed.`
+        );
+      // Provably non-scalar, but with no single component count (a `Matrix`,
+      // a multi-axis or unsized list): no declaration can be synthesized for
+      // it, and the `float` default would disagree with its `matN` assignment.
+      if (count === undefined && BaseCompiler.isNonScalarShape(value))
+        throw new Error(
+          `Block local "${name}": a matrix/tensor-valued local has no GPU ` +
+            `declaration (its shape has no single component count), so a ` +
+            `scalar declaration would disagree with its own assignment. ` +
+            `Fail closed.`
+        );
+      const n = count ?? BaseCompiler.LOCAL_SCALAR;
+      if (prev === BaseCompiler.LOCAL_UNSET) {
+        vectorFrame.set(name, n);
+        return;
+      }
+      if (n !== prev)
+        throw new Error(
+          `Block local "${name}" is bound to values of disagreeing shapes ` +
+            `(${shapeName(prev)}, then ${shapeName(n)}); a shader local has ` +
+            `one declared type and neither GLSL nor WGSL can convert between ` +
+            `these. Fail closed.`
+        );
+    };
+    for (const local of locals) {
+      complexFrame.set(local, false);
+      vectorFrame.set(local, BaseCompiler.LOCAL_UNSET);
+    }
     BaseCompiler._localComplex.push(complexFrame);
+    // Pushed before inference AND kept for the compilation of the statements,
+    // so a later local's RHS that merely references an earlier one (`q ⩴ p`)
+    // resolves the width through the frame (Defect C).
+    BaseCompiler._localVector.push(vectorFrame);
     try {
       for (const arg of args) {
         if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0])) {
@@ -1221,13 +1300,15 @@ export class BaseCompiler {
           const value = BaseCompiler.declareValueOperand(arg.ops);
           if (value !== undefined && BaseCompiler.isComplexValued(value))
             complexFrame.set(name, true);
-        } else if (
-          isFunction(arg, 'Assign') &&
-          isSymbol(arg.ops[0]) &&
-          complexFrame.get(arg.ops[0].symbol) === false &&
-          BaseCompiler.isComplexValued(arg.ops[1])
-        ) {
-          complexFrame.set(arg.ops[0].symbol, true);
+          if (value !== undefined) noteVectorWidth(name, value);
+        } else if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0])) {
+          const name = arg.ops[0].symbol;
+          if (
+            complexFrame.get(name) === false &&
+            BaseCompiler.isComplexValued(arg.ops[1])
+          )
+            complexFrame.set(name, true);
+          if (arg.ops[1] !== undefined) noteVectorWidth(name, arg.ops[1]);
         }
       }
 
@@ -1239,13 +1320,32 @@ export class BaseCompiler {
       // and scalar shader arithmetic is float, so an `int`-typed declaration
       // would disagree with its own float assignment (`int r; r = 3.0;` — not
       // valid GLSL) and poison every downstream use in float math. Only a
-      // complex-valued local needs a non-default hint (`vec2`/`vec2f`);
-      // everything else uses the `float` default in `target.declare`.
+      // complex-valued local needs a non-default hint (`vec2`/`vec2f`), as
+      // does a vector-valued (point/tuple) one (`vec2`…`vec4`); everything
+      // else uses the `float` default in `target.declare`.
       const typeHints: Record<string, string | undefined> = {};
       if (target.declare && target.language) {
-        const vec2 = target.language === 'wgsl' ? 'vec2f' : 'vec2';
-        for (const local of locals)
-          if (complexFrame.get(local)) typeHints[local] = vec2;
+        const isWGSL = target.language === 'wgsl';
+        const vecN = (n: number) => (isWGSL ? `vec${n}f` : `vec${n}`);
+        // A width with no `vecN` gets the array type the list compilers emit
+        // for it, so declaration and assignment agree.
+        const aggregateType = (n: number) =>
+          n >= 2 && n <= 4
+            ? vecN(n)
+            : isWGSL
+              ? `array<f32, ${n}>`
+              : `float[${n}]`;
+        for (const local of locals) {
+          if (complexFrame.get(local)) typeHints[local] = vecN(2);
+          else {
+            const n = vectorFrame.get(local);
+            // Negative entries are the "not an aggregate" sentinels. A width
+            // of `0` has no valid array type in either language; on a GPU
+            // target `noteVectorWidth` has already failed closed on it, and
+            // this guard keeps any other target from emitting `float[0]`.
+            if (n !== undefined && n > 0) typeHints[local] = aggregateType(n);
+          }
+        }
       }
 
       const localTarget: CompileTarget<Expression> = {
@@ -1297,6 +1397,7 @@ export class BaseCompiler {
       )}${target.ws('\n')}})()`;
     } finally {
       BaseCompiler._localComplex.pop();
+      BaseCompiler._localVector.pop();
     }
   }
 
@@ -1718,7 +1819,14 @@ export class BaseCompiler {
     } = normalizeIndexingSet(args[1]);
     const isSum = h === 'Sum';
     const op = isSum ? '+' : '*';
-    const bodyIsComplex = BaseCompiler.isComplexValued(args[0]);
+    // Analyze the body with the index masked, exactly as `isComplexValued`
+    // does for the whole `Sum`/`Product` — otherwise the emitter could produce
+    // a complex accumulator that the enclosing expression consumes as a real
+    // number (Tycho item 65).
+    const bodyIsComplex = BaseCompiler.withBinderMask(
+      { real: index ? [index] : [], shielded: index ? [index] : [] },
+      () => BaseCompiler.isComplexValued(args[0])
+    );
 
     if (!index) {
       // Loop over a collection
@@ -1812,6 +1920,108 @@ export class BaseCompiler {
   private static _localComplex: Map<string, boolean>[] = [];
 
   /**
+   * Frames of names bound by a binder form currently being ANALYZED (as
+   * opposed to compiled) by `isComplexValued` — see `binderParts`. Innermost
+   * last.
+   *
+   * Like `_boundVarsCtx`, a shielded name is not a free engine symbol, so the
+   * engine-value fallback must not read through it. Unlike `_localComplex`, a
+   * shield leaves the name's declared type in play: a lambda parameter can
+   * legitimately be complex (Tycho item 60), so it is shielded but not forced
+   * real.
+   */
+  private static _binderShield: Set<string>[] = [];
+
+  /**
+   * The binding structure of `expr` if it is a binder form, else `null`.
+   *
+   * A binder's operands are not all values: `Sum`/`Product`/`Loop`/
+   * `Comprehension` carry `Limits`/`Element` clauses and `Function` carries
+   * its parameter names. Those operands introduce a NAME, not a value, so the
+   * generic `ops.some(isComplexValued)` fallback must not walk them — doing so
+   * reaches the bound name as if it were free and resolves it against the
+   * engine, where an index named `i` is the imaginary unit. That made
+   * `\sum_{i=0}^{2}\cos(it)` report complex and complex-lowered the SIBLING
+   * operand of any enclosing arithmetic (`… + 2.5` → NaN, and a term silently
+   * vanishing inside `\sin(…)`; Tycho item 65).
+   *
+   * `bodies` are the operands that carry a value; `real` names are integer
+   * counters (a `Limits` clause, or an `Element` clause over a `Range`), which
+   * are masked real in the body analysis; `shielded` names are every bound
+   * name, masked only against the engine-value fallback.
+   */
+  private static binderParts(
+    expr: Expression & { ops: ReadonlyArray<Expression> }
+  ): {
+    bodies: ReadonlyArray<Expression>;
+    real: string[];
+    shielded: string[];
+  } | null {
+    const h = expr.operator;
+    if (h === 'Function') {
+      // ["Function", body, ...params]: a parameter may legitimately be
+      // complex, so shield only — never force it real (Tycho item 60).
+      const params = expr.ops
+        .slice(1)
+        .map((p) => (isSymbol(p) ? p.symbol : undefined))
+        .filter((p): p is string => p !== undefined);
+      return { bodies: expr.ops.slice(0, 1), real: [], shielded: params };
+    }
+    if (
+      h !== 'Sum' &&
+      h !== 'Product' &&
+      h !== 'Loop' &&
+      h !== 'Comprehension'
+    )
+      return null;
+
+    const real: string[] = [];
+    const shielded: string[] = [];
+    for (const clause of expr.ops.slice(1)) {
+      const isLimits = isFunction(clause, 'Limits');
+      if (!isLimits && !isFunction(clause, 'Element')) continue;
+      const ops = (clause as Expression & { ops: ReadonlyArray<Expression> })
+        .ops;
+      const name = ops[0];
+      if (!isSymbol(name)) continue;
+      shielded.push(name.symbol);
+      // A `Limits` index, or an `Element` index over a `Range`/`Linspace`, is
+      // a numeric loop counter: real by construction. An `Element` index over
+      // an arbitrary collection is left to type analysis.
+      if (
+        isLimits ||
+        isFunction(ops[1], 'Range') ||
+        isFunction(ops[1], 'Linspace')
+      )
+        real.push(name.symbol);
+    }
+    return { bodies: expr.ops.slice(0, 1), real, shielded };
+  }
+
+  /**
+   * Run `fn` with a binder's bound names masked, so that a body analysis
+   * inside it agrees with the analysis the binder's own callers see. Used both
+   * by `isComplexValued` and by the `Sum`/`Product` emitter — if the emitter
+   * decided a body was complex while a caller decided the binder was real, the
+   * caller would consume a `{re, im}` object as a number (NaN everywhere).
+   */
+  private static withBinderMask<T>(
+    binder: { real: ReadonlyArray<string>; shielded: ReadonlyArray<string> },
+    fn: () => T
+  ): T {
+    const frame = new Map<string, boolean>();
+    for (const n of binder.real) frame.set(n, false);
+    BaseCompiler._localComplex.push(frame);
+    BaseCompiler._binderShield.push(new Set(binder.shielded));
+    try {
+      return fn();
+    } finally {
+      BaseCompiler._binderShield.pop();
+      BaseCompiler._localComplex.pop();
+    }
+  }
+
+  /**
    * Determine at compile time whether an expression produces a complex value.
    *
    * Uses the expression's declared type (from operator signatures) when
@@ -1851,6 +2061,10 @@ export class BaseCompiler {
       // (`number + {re, im}` → NaN at every point; Tycho item 57). Does NOT
       // apply to compile-bound variables, which shadow the engine.
       if (BaseCompiler._boundVarsCtx?.has(expr.symbol)) return false;
+      // Same rule for a name bound by a binder form we are analyzing rather
+      // than compiling (Tycho item 65).
+      for (let i = BaseCompiler._binderShield.length - 1; i >= 0; i--)
+        if (BaseCompiler._binderShield[i].has(expr.symbol)) return false;
       const v = expr.engine._getSymbolValue(expr.symbol);
       if (v !== undefined) return BaseCompiler.isComplexValued(v);
       return false;
@@ -1864,11 +2078,122 @@ export class BaseCompiler {
 
       // Return type is unknown — fall back to checking whether any
       // operand is complex (conservative: assumes function propagates
-      // complex-ness from its inputs)
+      // complex-ness from its inputs). A binder form contributes only its
+      // body, analyzed with its bound names masked (see `binderParts`).
+      const binder = BaseCompiler.binderParts(expr);
+      if (binder)
+        return BaseCompiler.withBinderMask(binder, () =>
+          binder.bodies.some((b) => BaseCompiler.isComplexValued(b))
+        );
+
       return expr.ops.some((arg) => BaseCompiler.isComplexValued(arg));
     }
 
     return false;
+  }
+
+  /**
+   * Lexical frames of `Block` locals, innermost last, each mapping a local's
+   * name to its inferred aggregate width. The vector analog of
+   * `_localComplex`: pushed and popped by `compileBlock`, consulted by
+   * `aggregateComponentCount` so a local that merely ALIASES a vector-valued
+   * local (`q ⩴ p`) is recognized as vector-valued too. Innermost frame
+   * containing the name decides, so a shadowing inner local is not poisoned by
+   * an outer vector one.
+   *
+   * A NON-NEGATIVE entry is an observed component count. The "not an
+   * aggregate" cases use negative sentinels rather than `0`, because `0` is a
+   * genuine — and invalid — observed width (an empty `Tuple`/`List`); reading
+   * it back as "scalar" left the local declared `float` while its assignment
+   * compiled to `float[0]()`.
+   */
+  private static _localVector: Map<string, number>[] = [];
+
+  /** `_localVector`: declared, but no binding seen yet. */
+  private static readonly LOCAL_UNSET = -2;
+
+  /** `_localVector`: every binding seen so far was a scalar. */
+  private static readonly LOCAL_SCALAR = -1;
+
+  /**
+   * Number of components a value expression occupies when lowered on a GPU
+   * target, for ANY aggregate width (`0`, `1`, `5`, …), or `undefined` for a
+   * scalar.
+   *
+   * Structural for `Tuple`/`List` literals, type-based for typed operands
+   * (`tuple<…>`, a 1-axis `list`), 2 for a complex value (lowered as
+   * `vec2(re, im)`), and frame-based for a `Block` local.
+   *
+   * Distinct from `vectorComponentCount`, which answers the narrower question
+   * "does this have a `vec2`/`vec3`/`vec4` lowering?". Callers that must
+   * decide *whether a value is an aggregate at all* — the fail-closed
+   * constructor guard, the block-local type hint — need THIS one: a 1- or
+   * 5-element tuple is still an aggregate even though no `vecN` fits it.
+   */
+  static aggregateComponentCount(expr: Expression | null): number | undefined {
+    if (expr === null) return undefined;
+    if (isFunction(expr, 'Tuple') || isFunction(expr, 'List')) return expr.nops;
+    if (BaseCompiler.isComplexValued(expr)) return 2;
+    if (isSymbol(expr)) {
+      for (let i = BaseCompiler._localVector.length - 1; i >= 0; i--) {
+        const known = BaseCompiler._localVector[i].get(expr.symbol);
+        // Negative entries are the "no aggregate binding" sentinels (see
+        // `_localVector`); a width of `0` is a real — invalid — zero-width
+        // aggregate and must NOT read back as "scalar".
+        if (known !== undefined) return known < 0 ? undefined : known;
+      }
+    }
+    const t = expr.type.type;
+    if (typeof t !== 'string') {
+      if (t.kind === 'tuple') return t.elements.length;
+      if (t.kind === 'list' && t.dimensions?.length === 1)
+        return t.dimensions[0];
+    }
+    return undefined;
+  }
+
+  /**
+   * Whether `expr` is provably NOT a shader scalar — it lowers to a `vecN`, an
+   * array, or a `matN`/tensor.
+   *
+   * Broader than `aggregateComponentCount`, which reports a single component
+   * COUNT and so has nothing to say about a value with no one-dimensional
+   * shape: a `Matrix` (or any multi-axis / unsized `list` type) lowers to
+   * `mat2(…)` / an array, but "how many components" is not a well-posed
+   * question for it. Reporting `undefined` for those made every caller that
+   * uses `undefined` to mean "scalar" treat a matrix as a scalar — which let
+   * `Tuple(Matrix(…), 1)` emit `vec2(mat2(…), 1.0)`, source no shader compiler
+   * accepts.
+   *
+   * Callers that must decide "is this a scalar?" (the fail-closed constructor
+   * guard, the block-local declaration) need THIS predicate; callers that need
+   * a width (`vectorComponentCount`, the `vecN` type hint) still need the
+   * count, and are deliberately left unchanged.
+   */
+  static isNonScalarShape(expr: Expression | null): boolean {
+    if (expr === null) return false;
+    if (BaseCompiler.aggregateComponentCount(expr) !== undefined) return true;
+    if (isFunction(expr, 'Matrix')) return true;
+    const t = expr.type.type;
+    // A `list` type that `aggregateComponentCount` declined to size: either
+    // multi-axis (a matrix/tensor) or of unknown length. Non-scalar either way.
+    if (typeof t !== 'string' && t.kind === 'list') return true;
+    return false;
+  }
+
+  /**
+   * Number of vector components a value expression occupies on a GPU target
+   * (2–4), or `undefined` for a scalar (or a shape with no vector lowering).
+   *
+   * Structural for `Tuple`/`List` literals (the parametric-body shape
+   * `(x(t), y(t))` → `vec2`), type-based for typed operands (`tuple<…>`, a
+   * 1-axis `list`), and 2 for a complex value (lowered as `vec2(re, im)`).
+   */
+  static vectorComponentCount(
+    expr: Expression | null
+  ): 2 | 3 | 4 | undefined {
+    const n = BaseCompiler.aggregateComponentCount(expr);
+    return n !== undefined && n >= 2 && n <= 4 ? (n as 2 | 3 | 4) : undefined;
   }
 
   /**

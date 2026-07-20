@@ -811,3 +811,196 @@ describe('COMPILE COMPLEX - real/complex convention coercion (Tycho item 60)', (
     expect(v.im).toBeCloseTo(interp.im, 12);
   });
 });
+
+describe('COMPILE COMPLEX - binder index named `i` (Tycho item 65)', () => {
+  // A `Sum`/`Product` index named `i` used to be walked as a FREE symbol by
+  // `isComplexValued` (via the `Limits` operand, which carries the bound name
+  // but no value), resolve against the engine to the imaginary unit, and
+  // complex-lower the SIBLING operand of any enclosing arithmetic. The
+  // interpreter was correct throughout; the compiled result was NaN — or, for
+  // `Sin(Sum(…)) + 2.5`, silently 2.5 with the term vanished.
+  const ce2 = ce;
+  const jsTarget = (
+    ce2 as unknown as {
+      getCompilationTarget: (l: string) => {
+        compile: (
+          e: unknown,
+          o: unknown
+        ) => { success: boolean; run: (a: unknown) => unknown };
+      };
+    }
+  ).getCompilationTarget('javascript');
+
+  const run = (latex: string): unknown => {
+    const expr = ce2.parse(latex, { strict: false });
+    const res = jsTarget.compile(expr, { realOnly: true });
+    expect(res.success).toBe(true);
+    return res.run({ t: 1 });
+  };
+
+  // [latex, expected value at t = 1]
+  const cases: [string, number][] = [
+    ['\\sum_{i=0}^{2}\\cos(it)', 1.1241554693209974],
+    // Arithmetic siblings of the Sum: all four used to be NaN.
+    ['\\sum_{i=0}^{2}\\cos(it)+2.5', 3.624155469320997],
+    ['2.5+\\sum_{i=0}^{2}\\cos(it)', 3.624155469320997],
+    ['2\\sum_{i=0}^{2}\\cos(it)', 2.248310938641995],
+    // Index inside the body: masking only the `Limits` operand is not enough.
+    ['\\sum_{i=0}^{2}it+1', 4],
+    // Index does not even occur in the body.
+    ['\\sum_{i=0}^{2}\\cos(t)+2.5', 4.120906917604419],
+    ['\\prod_{i=1}^{3}(i+t)+2.5', 26.5],
+    // Was SILENTLY WRONG (2.5 — the Sin term vanished), not NaN.
+    ['\\sin(\\sum_{i=0}^{2}\\cos(it))+2.5', 3.4019031305828076],
+    // Control rows: an index not named `i` was always correct.
+    ['\\sum_{n=0}^{2}\\cos(nt)+2.5', 3.624155469320997],
+    ['\\prod_{j=1}^{3}(j+t)+2.5', 26.5],
+  ];
+
+  for (const [latex, expected] of cases) {
+    it(`compiles ${latex} to ${expected}`, () => {
+      const compiled = run(latex);
+      expect(compiled).toBeCloseTo(expected, 12);
+      // The compiled result must agree with the interpreter.
+      expect(
+        ce2.parse(latex, { strict: false }).subs({ t: 1 }).N().re
+      ).toBeCloseTo(expected, 12);
+    });
+  }
+
+  it('a Sum/Product index is not complex-valued', () => {
+    expect(
+      BaseCompiler.isComplexValued(
+        ce2.parse('\\sum_{i=0}^{2}\\cos(it)', { strict: false })
+      )
+    ).toBe(false);
+    expect(
+      BaseCompiler.isComplexValued(
+        ce2.parse('\\prod_{i=1}^{3}(i+t)', { strict: false })
+      )
+    ).toBe(false);
+  });
+
+  // The fix must not make real anything that genuinely IS complex.
+  it('a free `i` outside any binder is still the imaginary unit', () => {
+    for (const latex of ['i', '2+i', 'it', '\\sqrt{-1}', 'e^{i\\pi}'])
+      expect(
+        BaseCompiler.isComplexValued(ce2.parse(latex, { strict: false }))
+      ).toBe(true);
+  });
+
+  it('a free `i` inside a Sum bound by another index stays complex', () => {
+    expect(
+      BaseCompiler.isComplexValued(
+        ce2.parse('\\sum_{k=0}^{2}(k+i)', { strict: false })
+      )
+    ).toBe(true);
+  });
+
+  it('a lambda parameter named `i` shadows the imaginary unit', () => {
+    const f = ce2.parse('i \\mapsto i^2', { strict: false });
+    expect(BaseCompiler.isComplexValued(f)).toBe(false);
+    const res = jsTarget.compile(ce2.box(['Apply', f, ['Add', 'x', 1]]), {
+      realOnly: true,
+    });
+    expect(res.success).toBe(true);
+    expect(res.run({ x: 2 })).toBe(9);
+  });
+});
+
+// Tycho item 62 counter-ask: `realOnly: true` was silently inert for a complex
+// tuple/list COMPONENT — the top-level coercion inspects only the result
+// itself, so a `{re, im}` in a component slot reached the consumer in a number
+// slot. The component TYPE cannot decide this (with `t` undeclared,
+// `(t, i t)` and `(t, t^2)` both infer `finite_number`), so the check uses
+// `isComplexValued` — the same predicate the GPU targets fail closed on.
+describe('realOnly rejects complex tuple components (Tycho item 62)', () => {
+  const jsTarget = () =>
+    (
+      ce as unknown as { getCompilationTarget: (t: string) => any }
+    ).getCompilationTarget('javascript');
+
+  test.each([
+    ['(t, i t)', 2],
+    ['(t, 2+3i)', 2],
+    ['(i t, t)', 1],
+  ])('%s fails closed under realOnly (component %i)', (src, component) => {
+    const expr = ce.parse(src, { strict: false });
+    expect(() => jsTarget().compile(expr, { realOnly: true })).toThrow(
+      new RegExp(`component ${component} is complex-valued`)
+    );
+  });
+
+  test('the same expression still compiles WITHOUT realOnly', () => {
+    const r = jsTarget().compile(ce.parse('(t, i t)', { strict: false }));
+    expect(r.success).toBe(true);
+    expect(r.run({ t: 0.5 })).toEqual([0.5, { re: 0, im: 0.5 }]);
+  });
+
+  test.each([
+    '(\\cos t, \\sin t)',
+    '(t, t^2)',
+    '(t, \\sqrt{t})',
+    '(t, \\ln t)',
+    '[1,2,3]',
+  ])('real-valued %s still compiles under realOnly', (src) => {
+    const r = jsTarget().compile(ce.parse(src, { strict: false }), {
+      realOnly: true,
+    });
+    expect(r.success).toBe(true);
+    const v = r.run({ t: 0.5 }) as number[];
+    expect(v.every((x) => typeof x === 'number')).toBe(true);
+  });
+
+  test('a Sum-bearing point list is not a false positive', () => {
+    const r = jsTarget().compile(
+      ce.parse(
+        '\\operatorname{PointList}(\\sum_{i=0}^{2}\\cos(it), \\sum_{i=0}^{2}\\sin(it))',
+        { strict: false }
+      ),
+      { realOnly: true }
+    );
+    expect(r.success).toBe(true);
+    const v = r.run({ t: 0.5 }) as number[];
+    expect(v.every((x) => Number.isFinite(x))).toBe(true);
+  });
+
+  // The runtime backstop, for values that only become complex when called.
+  test('realOnly coercion recurses into array results', () => {
+    const r = jsTarget().compile(ce.parse('(t, \\sqrt{t})', { strict: false }), {
+      realOnly: true,
+    });
+    // sqrt of a negative argument is complex only at call time
+    expect(r.run({ t: -4 })).toEqual([-4, NaN]);
+  });
+});
+
+// Review finding: the realOnly component check must follow only positions that
+// can PRODUCE the result. Walking every intermediate rejected compiles that are
+// correct — `At([i, 2], 2)` reads the real component and returns a real value.
+describe('realOnly component check is result-flow-aware (review follow-up)', () => {
+  const jsTarget = () =>
+    (
+      ce as unknown as { getCompilationTarget: (t: string) => any }
+    ).getCompilationTarget('javascript');
+
+  test.each([
+    ['\\mathrm{At}([i, 2], 2)', 2],
+    ['\\mathrm{At}((t, i t), 1)', 0.5],
+  ])('%s compiles under realOnly (complex operand never reaches the result)', (src, expected) => {
+    const r = jsTarget().compile(ce.parse(src, { strict: false }), {
+      realOnly: true,
+    });
+    expect(r.success).toBe(true);
+    expect(r.run({ t: 0.5 })).toEqual(expected);
+  });
+
+  test.each(['(t, i t)', '(t, 2+3i)'])(
+    '%s is still rejected — the complex component IS the result',
+    (src) => {
+      expect(() =>
+        jsTarget().compile(ce.parse(src, { strict: false }), { realOnly: true })
+      ).toThrow(/is complex-valued/);
+    }
+  );
+});
