@@ -665,6 +665,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   AsRgb: {
     description: 'Convert any color to sRGB (channels 0-1)',
     complexity: 8000,
+    broadcastable: true,
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
@@ -686,6 +687,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   AsHsv: {
     description: 'Convert any color to HSV (hue degrees, s/v 0-1)',
     complexity: 8000,
+    broadcastable: true,
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
@@ -702,6 +704,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   AsHsl: {
     description: 'Convert any color to HSL (hue degrees, s/l 0-1)',
     complexity: 8000,
+    broadcastable: true,
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
@@ -718,6 +721,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   AsOklab: {
     description: 'Convert any color to OKLab',
     complexity: 8000,
+    broadcastable: true,
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
@@ -743,6 +747,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   AsOklch: {
     description: 'Convert any color to OKLCh',
     complexity: 8000,
+    broadcastable: true,
     signature: '(color) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];

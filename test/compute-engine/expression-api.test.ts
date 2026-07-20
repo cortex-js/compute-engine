@@ -166,3 +166,36 @@ describe('ce.number() argument validation', () => {
     expect(() => ce.number([1] as any)).toThrow();
   });
 });
+
+describe('ce.box() malformed input returns an Error expression (does not throw)', () => {
+  test('unrecognized plain object → Error expr, engine intact', () => {
+    let expr: any;
+    expect(() => (expr = ce.box({ foo: 1 } as any))).not.toThrow();
+    expect(expr.isValid).toBe(false);
+    expect(expr.operator).toBe('Error');
+    // The offending object is carried as diagnostic context.
+    expect(expr.toString()).toContain('unexpected-mathjson');
+    // .json is serializable and .toString() does not throw.
+    expect(() => JSON.stringify(expr.json)).not.toThrow();
+    // Engine remains fully usable afterwards.
+    expect(ce.parse('1 + 2').evaluate().toString()).toBe('3');
+  });
+
+  test('array with a non-string head → Error expr (does not throw)', () => {
+    let expr: any;
+    expect(() => (expr = ce.box([1, 2, 3] as any))).not.toThrow();
+    expect(expr.isValid).toBe(false);
+    expect(expr.operator).toBe('Error');
+    expect(() => JSON.stringify(expr.json)).not.toThrow();
+  });
+
+  test('valid MathJSON object shorthands are unchanged', () => {
+    expect(ce.box({ num: 4 } as any).toString()).toBe('4');
+    expect(ce.box({ str: 'hello' } as any).toString()).toBe('"hello"');
+    expect(ce.box({ sym: 'x' } as any).toString()).toBe('x');
+    expect(ce.box({ fn: ['Add', 1, 2] } as any).evaluate().toString()).toBe(
+      '3'
+    );
+    expect(ce.box({ dict: { a: 1 } } as any).isValid).toBe(true);
+  });
+});

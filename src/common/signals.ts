@@ -156,4 +156,5 @@ export type ErrorCode =
   | 'hold-first-function-has-too-few-arguments'
   | 'hold-rest-function-has-too-few-arguments'
   | 'base-out-of-range'
+  | 'unexpected-mathjson'
   | 'syntax-error';

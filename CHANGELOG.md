@@ -1,11 +1,30 @@
+## [Unreleased]
+
+## Issues Resolved
+
+- **Color converters (`AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`, `AsOklch`) broadcast
+  over lists**, like the color constructors already did:
+  `AsRgb([Hsv(120,1,1), Hsv(0,1,1)])` → `[Rgb(0,1,0), Rgb(1,0,0)]` instead of an
+  `incompatible-type` error. A non-color element produces a per-element error
+  rather than rejecting the whole call. Out-of-range channels continue to pass
+  through unchanged — they can represent valid out-of-sRGB-gamut colors, so
+  constructors and converters neither clamp nor error.
+
+- **`ce.box()` no longer throws on malformed MathJSON input.** A non-MathJSON
+  plain object (`ce.box({foo: 1})`) or an array whose head is not a symbol used
+  to throw a JavaScript `Error`; both now return a boxed
+  `["Error", "'unexpected-mathjson'", …]` expression (with the offending input
+  as context), consistent with how every other input problem is reported. The
+  engine remains fully usable afterward.
+
 ## 0.88.0 _2026-07-20_
 
 ### Deprecations
 
 - **`ComputeEngine.timeLimit` is deprecated** in favor of
   `ComputeEngine.withTimeLimit()`. `timeLimit` arms a hard-to-scope implicit
-  deadline around each `evaluate()`/`simplify()`; wrap the work you want
-  bounded in a span instead:
+  deadline around each `evaluate()`/`simplify()`; wrap the work you want bounded
+  in a span instead:
 
   ```ts
   // Before
@@ -25,9 +44,9 @@
 
 - **`ComputeEngine.withTimeLimit()` accepts an attribution label.** In addition
   to the numeric form `withTimeLimit(ms, fn)`, an object form
-  `withTimeLimit({ ms, label }, fn)` (preferred for new code) records a label
-  on the span. Nesting still composes as `min()` — a labelled inner span can
-  only shorten the effective deadline, never extend it past an enclosing one.
+  `withTimeLimit({ ms, label }, fn)` (preferred for new code) records a label on
+  the span. Nesting still composes as `min()` — a labelled inner span can only
+  shorten the effective deadline, never extend it past an enclosing one.
 
 - **`CancellationError` now carries `attribution` and `spans`.** When a timeout
   fires, `attribution` is the label of the span that owns the deadline that
@@ -38,16 +57,15 @@
   `engine.timeLimit:Integrate`).
 
 - **Divisor functions are now O(√n) instead of O(n).** `Sigma0`, `Sigma1`,
-  `SigmaMinus1`, `IsPerfect`, and `Totient` compute from the prime
-  factorization rather than trial iteration: `Sigma1(1000000007)` went from
-  ~14s to ~1ms, and 11+-digit inputs that previously ran essentially forever
-  return instantly.
+  `SigmaMinus1`, `IsPerfect`, and `Totient` compute from the prime factorization
+  rather than trial iteration: `Sigma1(1000000007)` went from ~14s to ~1ms, and
+  11+-digit inputs that previously ran essentially forever return instantly.
 
 - **Integer factorization is interruptible.** The Pollard-rho factorizer now
-  honors the active deadline (a `withTimeLimit` span interrupts a hard
-  semiprime factorization on time, with attribution) and is backstopped by an
-  iteration budget (`cause: 'iteration-limit-exceeded'`) so it terminates even
-  with no time limit set.
+  honors the active deadline (a `withTimeLimit` span interrupts a hard semiprime
+  factorization on time, with attribution) and is backstopped by an iteration
+  budget (`cause: 'iteration-limit-exceeded'`) so it terminates even with no
+  time limit set.
 
 - **Symbolic integration no longer swallows a caller's timeout.** If a
   `withTimeLimit` span enclosing an integration expires mid-attempt, the
@@ -59,23 +77,23 @@
 
 - **Unary `D` applications no longer serialize to a bare `D`.** An arity-1 (or
   otherwise unrecognized) `D` application — e.g. a document-defined function
-  named `D` — used to serialize with its argument silently dropped
-  (`["D","w"]` → `"D"`). It now serializes as `\operatorname{D}(w)`, which
-  round-trips exactly. Recognized derivative shapes (`D(f,x)` → Leibniz
-  notation) are unchanged.
+  named `D` — used to serialize with its argument silently dropped (`["D","w"]`
+  → `"D"`). It now serializes as `\operatorname{D}(w)`, which round-trips
+  exactly. Recognized derivative shapes (`D(f,x)` → Leibniz notation) are
+  unchanged.
 
 - **A known-value uppercase symbol before a parenthesized group now parses as
-  multiplication.** The predicate-notation heuristic (a single uppercase
-  letter before `(...)` reads as a function application, e.g. `P(x)`) applied
-  even when the scope knew the symbol was a value: with `K` assigned `-32.3`,
-  `K(2-0.1)` parsed as a *call* of `K` and evaluated to an
-  `incompatible-type` error. The heuristic now consults the scope — a symbol
-  with a known non-function type falls through to multiplication
-  (`K(2-0.1)` → `-61.37`). Unknown and function-typed symbols are unchanged.
+  multiplication.** The predicate-notation heuristic (a single uppercase letter
+  before `(...)` reads as a function application, e.g. `P(x)`) applied even when
+  the scope knew the symbol was a value: with `K` assigned `-32.3`, `K(2-0.1)`
+  parsed as a _call_ of `K` and evaluated to an `incompatible-type` error. The
+  heuristic now consults the scope — a symbol with a known non-function type
+  falls through to multiplication (`K(2-0.1)` → `-61.37`). Unknown and
+  function-typed symbols are unchanged.
 
 - **Juxtaposed-multiply serialization is round-trip safe for single-uppercase
-  factors.** `Multiply(K, group)` serialized as `K(group)`, which re-parses as
-  a function *call* of `K` — corrupting the expression when `K` is a numeric
+  factors.** `Multiply(K, group)` serialized as `K(group)`, which re-parses as a
+  function _call_ of `K` — corrupting the expression when `K` is a numeric
   symbol. A single-uppercase-letter factor directly against a parenthesized
   group now emits an explicit `\times` (`K\times(…)`). Other factor shapes
   (`x(y+z)`, `2(x+1)`, `\mathrm{abc}(x+1)`) already round-tripped and are
@@ -92,34 +110,33 @@
   `Filter` or `TakeWhile` whose predicate never (or eventually never) matches,
   and any walk over a `Dedup` of a source with infinitely repeating duplicates
   (e.g. `Dedup(Cycle([1,1]))`), could previously spin until the ambient time
-  limit fired — or forever with `timeLimit = 0`. These walks are now bounded
-  by `iterationLimit` and degrade gracefully (`Nothing`/`undefined`),
-  consistent with the documented lazy-collection contract. Note: as a
-  consequence, `Count(Dedup(...))` over a finite source **larger than
-  `iterationLimit`** now returns `undefined` (unknown) instead of walking the
-  whole source, matching `Filter`'s existing `count` behavior.
+  limit fired — or forever with `timeLimit = 0`. These walks are now bounded by
+  `iterationLimit` and degrade gracefully (`Nothing`/`undefined`), consistent
+  with the documented lazy-collection contract. Note: as a consequence,
+  `Count(Dedup(...))` over a finite source **larger than `iterationLimit`** now
+  returns `undefined` (unknown) instead of walking the whole source, matching
+  `Filter`'s existing `count` behavior.
 
 ## 0.87.2 _2026-07-20_
 
 ### Breaking Changes
 
-- **`Add` no longer widens an unreachable scalar arm into a broadcast
-  collection type.** A sum mixing a scalar with a list-shaped operand typed as
-  a union — `matrix + 1` was `finite_integer | matrix`, `2·[1,2,3] + a` was
-  `number | vector<3>` — even though the value ALWAYS broadcasts elementwise
-  and can never be a scalar (`[[1,2],[3,4]] + 1` → `[[2,3],[4,5]]`). These now
-  type as the collection: `matrix`, `vector<3>`. The behavior was inconsistent
-  as well as imprecise — a dimensionless `list<number> + 1` was already
-  repaired to `list<number>` downstream, so only *dimensioned* shapes carried
-  the artifact.
+- **`Add` no longer widens an unreachable scalar arm into a broadcast collection
+  type.** A sum mixing a scalar with a list-shaped operand typed as a union —
+  `matrix + 1` was `finite_integer | matrix`, `2·[1,2,3] + a` was
+  `number | vector<3>` — even though the value ALWAYS broadcasts elementwise and
+  can never be a scalar (`[[1,2],[3,4]] + 1` → `[[2,3],[4,5]]`). These now type
+  as the collection: `matrix`, `vector<3>`. The behavior was inconsistent as
+  well as imprecise — a dimensionless `list<number> + 1` was already repaired to
+  `list<number>` downstream, so only _dimensioned_ shapes carried the artifact.
 
   This is a **type-surface change**: code pinning the union spelling will see
   the narrowed type instead. It is a strict improvement for consumers that
-  *dispatch* on the type, and that is the motivation — union matching is
-  all-members, so `type.matches('collection')` returned a confident `false` on
-  a value that is always a collection, silently routing list-valued rows down
-  scalar paths (reported by Tycho as item 67). It also unblocks expressions
-  CE itself rejected: `MatrixMultiply([[x, y]], aM₁ + M₂)` failed signature
+  _dispatch_ on the type, and that is the motivation — union matching is
+  all-members, so `type.matches('collection')` returned a confident `false` on a
+  value that is always a collection, silently routing list-valued rows down
+  scalar paths (reported by Tycho as item 67). It also unblocks expressions CE
+  itself rejected: `MatrixMultiply([[x, y]], aM₁ + M₂)` failed signature
   validation on the union operand and now evaluates.
 
   Generic `collection`/`set`-typed operands are deliberately unchanged and keep
@@ -136,9 +153,9 @@
   errors and passed the gate. An embedded `Error` element now poisons the
   enclosing expression, matching what `BoxedFunction.isValid` already did.
 
-  Behavior change worth noting even though the contract is unchanged:
-  consumers using `isValid` as an admission gate before compiling or plotting
-  will now correctly reject expressions they previously admitted.
+  Behavior change worth noting even though the contract is unchanged: consumers
+  using `isValid` as an admission gate before compiling or plotting will now
+  correctly reject expressions they previously admitted.
 
   Only `expression`-dtype tensors are scanned; `float64`/`complex128`/`bool`
   fields cannot hold an `Error` by construction and keep the O(1) answer, so

@@ -1076,6 +1076,53 @@ describe('Color conversions (As*)', () => {
     expect(expr.ops!.length).toBe(4);
     expect(expr.ops![3].re).toBeCloseTo(0.5, 4);
   });
+
+  test('AsRgb broadcasts over a List of colors (Tycho item 69)', () => {
+    // hsv(120,1,1) is pure green; hsv(0,1,1) is pure red.
+    const expr = ce
+      .expr(['AsRgb', ['List', ['Hsv', 120, 1, 1], ['Hsv', 0, 1, 1]]])
+      .evaluate();
+    expect(expr.operator).toBe('List');
+    expect(expr.ops!.length).toBe(2);
+    expect(expr.ops![0].operator).toBe('Rgb');
+    expect(expr.ops![0].ops![0].re).toBeCloseTo(0, 4);
+    expect(expr.ops![0].ops![1].re).toBeCloseTo(1, 4);
+    expect(expr.ops![0].ops![2].re).toBeCloseTo(0, 4);
+    expect(expr.ops![1].operator).toBe('Rgb');
+    expect(expr.ops![1].ops![0].re).toBeCloseTo(1, 4);
+    expect(expr.ops![1].ops![1].re).toBeCloseTo(0, 4);
+    expect(expr.ops![1].ops![2].re).toBeCloseTo(0, 4);
+  });
+
+  test('AsRgb on a scalar color is unchanged by the broadcast lift', () => {
+    const expr = ce.expr(['AsRgb', ['Hsv', 120, 1, 1]]).evaluate();
+    expect(expr.operator).toBe('Rgb');
+    expect(expr.ops![0].re).toBeCloseTo(0, 4);
+    expect(expr.ops![1].re).toBeCloseTo(1, 4);
+    expect(expr.ops![2].re).toBeCloseTo(0, 4);
+  });
+
+  test('AsHsv broadcasts over a List of colors', () => {
+    const expr = ce
+      .expr(['AsHsv', ['List', ['Rgb', 0, 1, 0], ['Rgb', 1, 0, 0]]])
+      .evaluate();
+    expect(expr.operator).toBe('List');
+    expect(expr.ops!.length).toBe(2);
+    expect(expr.ops![0].operator).toBe('Hsv');
+    expect(expr.ops![0].ops![0].re).toBeCloseTo(120, 1);
+    expect(expr.ops![1].operator).toBe('Hsv');
+    expect(expr.ops![1].ops![0].re).toBeCloseTo(0, 1);
+  });
+
+  test('broadcast over a mixed List yields a per-element error', () => {
+    const expr = ce
+      .expr(['AsRgb', ['List', ['Hsv', 120, 1, 1], 42]])
+      .evaluate();
+    expect(expr.operator).toBe('List');
+    expect(expr.ops!.length).toBe(2);
+    expect(expr.ops![0].operator).toBe('Rgb');
+    expect(expr.ops![1].operator).toBe('Error');
+  });
 });
 
 describe('ColorDelta', () => {

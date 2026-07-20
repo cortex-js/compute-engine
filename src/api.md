@@ -457,6 +457,13 @@ Run `fn` with at most `ms` milliseconds (numeric form) or `limit.ms`
 enclosing span preempts this limit; use the label and
 `CancellationError.attribution`/`spans` to tell which limit fired.
 
+**⚠️ `fn` MUST be synchronous.** The span is restored in a synchronous
+`finally`, so a `Promise`-returning (`async`) callback hands control back
+at its first `await` while the span is still open: work that resumes after
+that point runs **outside** the deadline and is never cancelled (see
+`docs/TIMEOUT-MODEL.md` §6.4). For asynchronous cancellation use
+`expr.evaluateAsync({ signal })` with an `AbortSignal` instead.
+
 • T
 
 ####### limit
@@ -469,7 +476,7 @@ enclosing span preempts this limit; use the label and
 
 ####### fn
 
-() => `T`
+() => `T` *extends* `Promise`\<`unknown`\> ? `never` : `T`
 
 </MemberCard>
 
@@ -2336,6 +2343,7 @@ type ExpressionInput =
   | MathJsonFunctionObject
   | MathJsonDictionaryObject
   | readonly [MathJsonSymbol, ...ExpressionInput[]]
+  | MathJsonExpression
   | Expression;
 ```
 
@@ -7733,6 +7741,13 @@ Run `fn` with at most `ms` milliseconds (numeric form) or `limit.ms`
 enclosing span preempts this limit; use the label and
 `CancellationError.attribution`/`spans` to tell which limit fired.
 
+**⚠️ `fn` MUST be synchronous.** The span is restored in a synchronous
+`finally`, so a `Promise`-returning (`async`) callback hands control back
+at its first `await` while the span is still open: work that resumes after
+that point runs **outside** the deadline and is never cancelled (see
+`docs/TIMEOUT-MODEL.md` §6.4). For asynchronous cancellation use
+`expr.evaluateAsync({ signal })` with an `AbortSignal` instead.
+
 • T
 
 ####### limit
@@ -7745,7 +7760,7 @@ enclosing span preempts this limit; use the label and
 
 ####### fn
 
-() => `T`
+() => `T` *extends* `Promise`\<`unknown`\> ? `never` : `T`
 
 </MemberCard>
 

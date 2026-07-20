@@ -444,6 +444,19 @@ export function endInferenceTransaction(ce: ComputeEngine): void {
 
 const EMPTY_FRESHLY_INFERRED: ReadonlySet<BoxedValueDefinition> = new Set();
 
+/** Stringify an offending input for an error's context, truncating if huge.
+ *  Never throws (JSON.stringify can fail on bigint or circular values). */
+function stringifyForError(value: unknown): string {
+  let s: string;
+  try {
+    s = JSON.stringify(value);
+  } catch {
+    s = String(value);
+  }
+  if (typeof s !== 'string') s = String(value);
+  return s.length > 200 ? s.slice(0, 200) + '…' : s;
+}
+
 export function box(
   ce: ComputeEngine,
   expr: null | undefined | NumericValue | ExpressionInput,
@@ -499,13 +512,11 @@ function boxInternal(
       if (Array.isArray(expr[0]) || expr[0] instanceof _BoxedExpression)
         return box(ce, ['Apply', ...expr] as ExpressionInput, options);
 
-      throw new Error(
-        `The first element of an array should be a string (the function name): ${JSON.stringify(
-          expr,
-          undefined,
-          4
-        )}`
-      );
+      // Malformed MathJSON: the head of a function array must be a string,
+      // an array (function-literal head) or a boxed expression. Return an
+      // Error expression rather than throwing so callers boxing untrusted
+      // input never have to special-case a JS exception.
+      return ce.error('unexpected-mathjson', stringifyForError(expr));
     }
 
     return canonicalForm(
@@ -597,9 +608,10 @@ function boxInternal(
     if ('dict' in expr)
       return new BoxedDictionary(ce, expr.dict, { canonical });
 
-    throw new Error(
-      `Unexpected MathJSON object: ${JSON.stringify(expr, undefined, 4)}`
-    );
+    // Not a recognized MathJSON object (no 'fn'/'str'/'sym'/'num'/'dict'
+    // key). Return an Error expression rather than throwing so callers
+    // boxing untrusted input never have to special-case a JS exception.
+    return ce.error('unexpected-mathjson', stringifyForError(expr));
   }
 
   return ce.symbol('Undefined');
