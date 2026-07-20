@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../../src/compute-engine';
 import { engine as ce } from '../../utils';
 
 function parse(s: string) {
@@ -859,5 +860,76 @@ describe('UNICODE NORMALIZATION', () => {
     const a = parse(`\\mathrm{${NFD}}`);
     expect(a.isValid).toBe(true);
     expect(a.isSame(parse(`\\mathrm{${NFC}}`))).toBe(true);
+  });
+});
+
+// Call-vs-multiply disambiguation for a single-UPPERCASE-letter symbol before a
+// parenthesized group. The predicate heuristic (single uppercase letter + `(`)
+// only applies when the symbol carries no conflicting scope information: a
+// KNOWN non-function type (assigned value or numeric/value declaration) means
+// the symbol is a variable, so the group is a factor, not an argument list.
+// Unknown or function-typed symbols keep the predicate/call default.
+describe('uppercase-before-paren: scope overrides the predicate heuristic', () => {
+  test('K assigned a numeric value → Multiply (strict and lenient), evaluates', () => {
+    const ce = new ComputeEngine();
+    ce.assign('K', -32.3);
+    expect(ce.parse('K(2-0.1)').operator).toEqual('Multiply');
+    expect(ce.parse('K(2-0.1)', { canonical: true }).operator).toEqual(
+      'Multiply'
+    );
+    expect(ce.parse('K(2-0.1)').evaluate().re).toBeCloseTo(-61.37, 10);
+  });
+
+  test('K assigned → Multiply with ce.strict = false', () => {
+    const ce = new ComputeEngine();
+    ce.strict = false;
+    ce.assign('K', -32.3);
+    expect(ce.parse('K(2-0.1)').operator).toEqual('Multiply');
+    expect(ce.parse('K(2-0.1)').evaluate().re).toBeCloseTo(-61.37, 10);
+  });
+
+  test('K declared as `number` → Multiply', () => {
+    const ce = new ComputeEngine();
+    ce.declare('K', 'number');
+    expect(ce.parse('K(2-0.1)').operator).toEqual('Multiply');
+  });
+
+  test('K unknown → call (predicate default, UNCHANGED)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('K(2-0.1)').operator).toEqual('K');
+  });
+
+  test('K unknown → call even with ce.strict = false (UNCHANGED)', () => {
+    const ce = new ComputeEngine();
+    ce.strict = false;
+    expect(ce.parse('K(2-0.1)').operator).toEqual('K');
+  });
+
+  test('K declared as `(number) -> number` → call (UNCHANGED)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('K', '(number) -> number');
+    expect(ce.parse('K(2-0.1)').operator).toEqual('K');
+  });
+
+  test('lowercase v: assigned / declared number / unknown → Multiply, declared fn → call', () => {
+    {
+      const ce = new ComputeEngine();
+      ce.assign('v', 0.5);
+      expect(ce.parse('v(2-0.1)').operator).toEqual('Multiply');
+    }
+    {
+      const ce = new ComputeEngine();
+      ce.declare('v', 'number');
+      expect(ce.parse('v(2-0.1)').operator).toEqual('Multiply');
+    }
+    {
+      const ce = new ComputeEngine();
+      expect(ce.parse('v(2-0.1)').operator).toEqual('Multiply');
+    }
+    {
+      const ce = new ComputeEngine();
+      ce.declare('v', '(number) -> number');
+      expect(ce.parse('v(2-0.1)').operator).toEqual('v');
+    }
   });
 });

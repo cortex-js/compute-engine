@@ -57,6 +57,30 @@
 
 ### Fixes
 
+- **Unary `D` applications no longer serialize to a bare `D`.** An arity-1 (or
+  otherwise unrecognized) `D` application — e.g. a document-defined function
+  named `D` — used to serialize with its argument silently dropped
+  (`["D","w"]` → `"D"`). It now serializes as `\operatorname{D}(w)`, which
+  round-trips exactly. Recognized derivative shapes (`D(f,x)` → Leibniz
+  notation) are unchanged.
+
+- **A known-value uppercase symbol before a parenthesized group now parses as
+  multiplication.** The predicate-notation heuristic (a single uppercase
+  letter before `(...)` reads as a function application, e.g. `P(x)`) applied
+  even when the scope knew the symbol was a value: with `K` assigned `-32.3`,
+  `K(2-0.1)` parsed as a *call* of `K` and evaluated to an
+  `incompatible-type` error. The heuristic now consults the scope — a symbol
+  with a known non-function type falls through to multiplication
+  (`K(2-0.1)` → `-61.37`). Unknown and function-typed symbols are unchanged.
+
+- **Juxtaposed-multiply serialization is round-trip safe for single-uppercase
+  factors.** `Multiply(K, group)` serialized as `K(group)`, which re-parses as
+  a function *call* of `K` — corrupting the expression when `K` is a numeric
+  symbol. A single-uppercase-letter factor directly against a parenthesized
+  group now emits an explicit `\times` (`K\times(…)`). Other factor shapes
+  (`x(y+z)`, `2(x+1)`, `\mathrm{abc}(x+1)`) already round-tripped and are
+  untouched.
+
 - **`ce.box()` now accepts native `bigint` values.** `bigint` was declared in
   `ExpressionInput` but unhandled by the boxing dispatch, so `ce.box(123n)` —
   bare or as an operand in `ce.box(['Add', 10n, 5])` — silently became the

@@ -32,6 +32,7 @@ import {
   Terminator,
 } from '../types.js';
 import { joinLatex, supsub } from '../tokenizer.js';
+import { latexTemplate } from '../serializer-style.js';
 import { isEquationOperator, isInequalityOperator } from '../utils.js';
 import { BoxedType } from '../../../common/type/boxed-type.js';
 import { parseQuantifier } from './definitions-logic.js';
@@ -643,6 +644,12 @@ function rendersAsSolidus(
  * grouping when more material follows (Tycho item 53 — same round-trip class
  * as the `Mod` handling in `serializeMultiply`). A `\frac` needs no wrap: it
  * is visually grouped and re-parses as a single factor.
+ *
+ * Separately, a single UPPERCASE-letter symbol immediately followed by a
+ * parenthesized group re-parses as a function CALL regardless of what the
+ * symbol resolves to (the parser's predicate heuristic reads `K(…)` as an
+ * application), so an explicit multiplication is forced between them (Tycho
+ * item 71 — mirrors the guard in `serializeMultiply`).
  */
 function serializeInvisibleOperator(
   serializer: Serializer,
@@ -653,17 +660,28 @@ function serializeInvisibleOperator(
   if (xs.length === 0) return '';
   if (xs.length === 1) return serializer.serialize(xs[0]);
 
-  return joinLatex(
-    xs.map((op, i) => {
-      const s = serializer.serialize(op);
-      if (i < xs.length - 1 && rendersAsSolidus(serializer, op))
-        return serializer.wrapString(
-          s,
-          serializer.groupStyle(expr, serializer.level + 1)
-        );
-      return s;
-    })
-  );
+  const parts = xs.map((op, i) => {
+    const s = serializer.serialize(op);
+    if (i < xs.length - 1 && rendersAsSolidus(serializer, op))
+      return serializer.wrapString(
+        s,
+        serializer.groupStyle(expr, serializer.level + 1)
+      );
+    return s;
+  });
+
+  let result = parts[0];
+  for (let i = 1; i < parts.length; i++) {
+    const prevSym = symbol(xs[i - 1]);
+    if (
+      prevSym !== null &&
+      /^[A-Z]$/.test(prevSym) &&
+      /^(\\left)?\(/.test(parts[i])
+    )
+      result = latexTemplate(serializer.options.multiply, result, parts[i]);
+    else result = joinLatex([result, parts[i]]);
+  }
+  return result;
 }
 
 function serializeOps(sep = '') {
@@ -2541,7 +2559,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const fn = operand(expr, 1);
       const variable = operand(expr, 2);
 
-      if (!fn || !variable) return 'D';
+      // Unrecognized shape (e.g. arity-1 ["D", w], a user function named `D`).
+      // Serialize as a round-trippable function call rather than dropping the
+      // operands.
+      if (!fn || !variable) {
+        const args = (operands(expr) ?? []).map((op) =>
+          serializer.serialize(op)
+        );
+        return `\\operatorname{D}(${args.join(', ')})`;
+      }
 
       // Count nested D expressions to determine the derivative order
       let order = 1;

@@ -645,6 +645,19 @@ a prerequisite rather than a nicety.
 Steps 1 and 2 are safe to land immediately and independently — neither depends
 on the deprecation decision.
 
+7. **Retire the module-global `ambientDeadline`** (`interruptible.ts:125`,
+   `get/withAmbientDeadline`) by threading deadlines properly into the numeric
+   kernels that use it as a fallback (richardson, monte-carlo,
+   oscillatory-quadrature, modular-arithmetic — compiled callbacks with no
+   engine handle). It is a narrow cross-engine leak: engine-B work nested
+   inside engine-A's numeric-kernel run reads A's deadline. Surfaced by a
+   Tycho probe that (incorrectly) generalized it to "spans are
+   module-ambient" — CE probe-refuted the general claim on both source and
+   the 0.87.2 dist (a span on engine A does NOT cancel engine B's interpreted
+   evaluation; per-engine runtime state), but the narrow numerics seam is
+   real and Tycho has been told not to build on it. Answered in their ledger
+   2026-07-20.
+
 ## 9. Non-time limits: considered and declined (decision record, 2026-07-20)
 
 After release N shipped, we considered whether the other limits —

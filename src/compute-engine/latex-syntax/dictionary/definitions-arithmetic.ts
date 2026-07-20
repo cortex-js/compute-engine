@@ -615,9 +615,10 @@ function serializeMultiply(
   // Track a `ContinuationPlaceholder` (`…`) operand so the next factor gets an
   // explicit multiplication separator (see the join logic below).
   let prevWasContinuation = false;
-  // Track a bare-symbol factor: juxtaposed with a following parenthesized
-  // comma-group it would re-parse as a function CALL (see the join logic).
-  let prevWasSymbol = false;
+  // Track a bare-symbol factor (its serialized name, or null): juxtaposed with
+  // a following parenthesized group it can re-parse as a function CALL (see the
+  // join logic).
+  let prevSymbol: string | null = null;
   for (let i = 1; i < count; i++) {
     arg = xs[i - 1];
     if (arg === null) continue;
@@ -640,7 +641,7 @@ function serializeMultiply(
       }
       prevWasNumber = true;
       prevWasContinuation = false;
-      prevWasSymbol = false;
+      prevSymbol = null;
       continue;
     }
 
@@ -659,7 +660,7 @@ function serializeMultiply(
           );
           prevWasNumber = false;
           prevWasContinuation = false;
-          prevWasSymbol = false;
+          prevSymbol = null;
           continue;
         }
       }
@@ -677,7 +678,7 @@ function serializeMultiply(
 
       prevWasNumber = true;
       prevWasContinuation = false;
-      prevWasSymbol = false;
+      prevSymbol = null;
       continue;
     }
 
@@ -730,13 +731,23 @@ function serializeMultiply(
       else if (isContinuation || prevWasContinuation) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
-      // A bare symbol juxtaposed with a parenthesized COMMA-group re-parses
-      // as a function CALL (`s(1,2,3)` → `["s",1,2,3]`) whenever the parser
-      // cannot prove the symbol non-applicable — the product silently
-      // becomes an application (Tycho item 50). Force an explicit
-      // multiplication separator. A single-expression group (`s(x+1)`)
-      // re-parses as a product and stays juxtaposed.
-      else if (prevWasSymbol && isCommaGroup(arg)) {
+      // A bare symbol juxtaposed with a parenthesized group can re-parse as a
+      // function CALL rather than a product, silently turning the product into
+      // an application. Two cases force an explicit multiplication separator:
+      //
+      //  - Any symbol against a parenthesized COMMA-group re-parses as a call
+      //    (`s(1,2,3)` → `["s",1,2,3]`) — Tycho item 50.
+      //  - A single UPPERCASE-letter symbol against ANY parenthesized group
+      //    (comma or single-expression) re-parses as a call regardless of what
+      //    the symbol resolves to, because the parser's predicate heuristic
+      //    reads `K(…)` as an application (`K(2-0.1)` → `["K", …]`) — Tycho
+      //    item 71. Lowercase/multi-letter symbols against a single-expression
+      //    group (`s(x+1)`) re-parse as a product and stay juxtaposed.
+      else if (
+        prevSymbol !== null &&
+        (isCommaGroup(arg) ||
+          (/^[A-Z]$/.test(prevSymbol) && /^(\\left)?\(/.test(term)))
+      ) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
       // Not first term, use invisible multiply
@@ -754,7 +765,7 @@ function serializeMultiply(
     }
     prevWasNumber = false;
     prevWasContinuation = isContinuation;
-    prevWasSymbol = symbol(arg) !== null && !isContinuation;
+    prevSymbol = !isContinuation ? symbol(arg) : null;
   }
 
   // Restore the level

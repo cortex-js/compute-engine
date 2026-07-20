@@ -3810,6 +3810,15 @@ export class _Parser implements Parser {
     // Must be a single uppercase letter
     if (!/^[A-Z]$/.test(id)) return false;
 
+    // Known scope information overrides the predicate heuristic. Consult the
+    // same type query the lowercase path uses (`getSymbolType`): if the symbol
+    // has a known, non-function type — an assigned value or an explicit
+    // numeric/value declaration — it is a variable, so a following
+    // parenthesized group is multiplication, not a call. Only an unknown (or
+    // function-typed) symbol falls through to the predicate default.
+    const type = this.getSymbolType(id);
+    if (!type.isUnknown && !type.matches('function')) return false;
+
     // Must be followed by an opening parenthesis or \left(
     this.skipSpace();
     return this.peek === '(' || this.peek === '\\left';

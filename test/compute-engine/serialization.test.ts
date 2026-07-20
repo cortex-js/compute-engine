@@ -650,6 +650,79 @@ describe('DISPLAY DIGITS', () => {
     });
   });
 
+  // A single UPPERCASE-letter symbol juxtaposed with a parenthesized
+  // single-expression group re-parses as a function CALL (`K(2-0.1)` →
+  // `["K", …]`) regardless of what the symbol resolves to, because of the
+  // parser's predicate heuristic. A `Multiply`/`InvisibleOperator` must emit
+  // an explicit multiplication separator between them (Tycho item 71).
+  describe('uppercase symbol × parenthesized group keeps explicit multiply (Tycho item 71)', () => {
+    test("consumer repro: Multiply(K, Subtract(…)) re-parses as a product, not K's application", () => {
+      const t = ce.box(
+        ['Multiply', 'K', ['Subtract', ['ElementMax', 1, 2], 0.1]],
+        { canonical: false }
+      );
+      const out = t.toLatex();
+      expect(out).toEqual('K\\times(\\mathrm{ElementMax}(1, 2)-0.1)');
+      expect(ce.parse(out, { strict: false }).operator).toEqual('Multiply');
+    });
+
+    test('Multiply(K, Add) round-trips as a product even when K resolves to a value', () => {
+      const t = ce.box(['Multiply', 'K', ['Add', 'x', 1]], {
+        canonical: false,
+      });
+      expect(t.toLatex()).toEqual('K\\times(x+1)');
+      expect(ce.parse(t.toLatex(), { strict: false }).json).toEqual([
+        'Multiply',
+        'K',
+        ['Add', 'x', 1],
+      ]);
+    });
+
+    test('a lowercase symbol × single-expression group stays juxtaposed (already re-parses as a product)', () => {
+      const t = ce.box(['Multiply', 'x', ['Add', 'y', 'z']], {
+        canonical: false,
+      });
+      expect(t.toLatex()).toEqual('x(y+z)');
+      expect(ce.parse(t.toLatex(), { strict: false }).operator).toEqual(
+        'Multiply'
+      );
+    });
+
+    test('a multi-letter symbol × single-expression group stays juxtaposed and round-trips', () => {
+      const t = ce.box(['Multiply', 'abc', ['Add', 'x', 1]], {
+        canonical: false,
+      });
+      expect(t.toLatex()).toEqual('\\mathrm{abc}(x+1)');
+      expect(ce.parse(t.toLatex(), { strict: false }).operator).toEqual(
+        'Multiply'
+      );
+    });
+
+    test('a symbolic-fraction factor is pulled into the numerator and round-trips', () => {
+      const t = ce.box(['Multiply', ['Rational', 1, 2], ['Add', 'x', 1]], {
+        canonical: false,
+      });
+      expect(t.toLatex()).toEqual('\\frac{x+1}{2}');
+      expect(ce.parse(t.toLatex(), { strict: false }).operator).toEqual(
+        'Multiply'
+      );
+    });
+
+    test('a non-canonical InvisibleOperator(K, Delimiter) re-parses as a product', () => {
+      const t = ce.box(
+        [
+          'InvisibleOperator',
+          'K',
+          ['Delimiter', ['Subtract', ['ElementMax', 1, 2], 0.1]],
+        ],
+        { canonical: false }
+      );
+      expect(ce.parse(t.toLatex(), { strict: false }).operator).toEqual(
+        'Multiply'
+      );
+    });
+  });
+
   // A big-op body is parsed back at MULTIPLICATION_PRECEDENCE, so an
   // additive body must be fenced or its trailing terms escape the operator
   // on re-parse — and a body-bound index in the escaped terms degenerates to

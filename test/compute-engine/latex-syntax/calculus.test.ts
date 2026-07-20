@@ -240,6 +240,34 @@ describe('DERIVATIVE ROUND-TRIP', () => {
     const reparsed = ce.parse(latex);
     expect(reparsed.json).toEqual(expr.json);
   });
+
+  // Item 70: an arity-1 `["D", w]` application (e.g. a user function named
+  // `D`) must not silently drop its operand on serialization.
+  test('arity-1 D application round-trip (does not drop operand)', () => {
+    const latex = ce.box(['D', 'w'], { canonical: false }).toLatex();
+    expect(latex).toBe('\\operatorname{D}(w)');
+    const reparsed = ce.parse(latex, { canonical: false });
+    expect(reparsed.json).toEqual(['D', 'w']);
+  });
+
+  test('arity-1 D inside Multiply round-trip (does not drop operand)', () => {
+    const latex = ce
+      .box(['Multiply', 'u', ['D', 'w']], { canonical: false })
+      .toLatex();
+    expect(latex).toBe('u\\operatorname{D}(w)');
+    // The `w` operand survives the round-trip.
+    expect(ce.parse(latex, { canonical: false }).json).toEqual([
+      'InvisibleOperator',
+      'u',
+      ['D', 'w'],
+    ]);
+  });
+
+  test('recognized D(f, x) serialization is unchanged', () => {
+    expect(ce.box(['D', 'f', 'x'], { canonical: false }).toLatex()).toBe(
+      '\\frac{\\mathrm{d}}{\\mathrm{d}x}f'
+    );
+  });
 });
 
 describe('DERIVATIVE EVALUATION', () => {
