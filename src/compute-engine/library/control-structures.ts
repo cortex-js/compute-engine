@@ -138,7 +138,11 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       },
       canonical: (ops, options) => canonicalLoopLike('Loop', ops, options),
       evaluate: (ops, { engine: ce }) =>
-        run(runLoop(ops[0], ops.slice(1), ce), ce._timeRemaining, ce._deadlineFrame),
+        run(
+          runLoop(ops[0], ops.slice(1), ce),
+          ce._timeRemaining,
+          ce._deadlineFrame
+        ),
       evaluateAsync: async (ops, { engine: ce, signal }) =>
         runAsync(
           runLoop(ops[0], ops.slice(1), ce),

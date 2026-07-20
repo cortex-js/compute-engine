@@ -735,7 +735,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const ce = x.engine;
         if (bignumPreferred(ce))
           return ce.number(
-            run(bigFactorial2(ce.bignum(n)), ce._timeRemaining, ce._deadlineFrame)
+            run(
+              bigFactorial2(ce.bignum(n)),
+              ce._timeRemaining,
+              ce._deadlineFrame
+            )
           );
 
         return ce.number(factorial2(n));

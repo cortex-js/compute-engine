@@ -112,8 +112,7 @@ export class EngineRuntimeState {
 
   shouldContinueExecution(): boolean {
     return (
-      this._deadlineFrame === undefined ||
-      this._deadlineFrame.at >= Date.now()
+      this._deadlineFrame === undefined || this._deadlineFrame.at >= Date.now()
     );
   }
 }

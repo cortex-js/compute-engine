@@ -1421,7 +1421,8 @@ export class BoxedFunction
       // the tree at every nesting level — never reaches them: without this
       // check such an evaluation exhausts the heap instead of honoring
       // `ce.timeLimit`.
-      if ((++_evalTick & 0x3ff) === 0) checkDeadline(this.engine._deadlineFrame);
+      if ((++_evalTick & 0x3ff) === 0)
+        checkDeadline(this.engine._deadlineFrame);
 
       if (!this.isValid || !this._def) return this;
 
@@ -1720,7 +1721,8 @@ export class BoxedFunction
   ): () => Promise<Expression> {
     return async () => {
       // Cooperative deadline checkpoint — see `_computeValue`.
-      if ((++_evalTick & 0x3ff) === 0) checkDeadline(this.engine._deadlineFrame);
+      if ((++_evalTick & 0x3ff) === 0)
+        checkDeadline(this.engine._deadlineFrame);
 
       if (!this.isValid || !this._def) return this;
 

@@ -524,16 +524,19 @@ export class RubiDriver {
     const budgetMs = Math.max(1, Math.min(remainingMs, 5000));
     this.inNativeFallback = true;
     try {
-      return ce.withTimeLimit({ ms: budgetMs, label: 'rubi:native-fallback' }, () => {
-        const F = ce.function('Integrate', [integrand, x]).evaluate();
-        if (containsIntegrate(F)) return null;
-        // An antiderivative of a nonzero rational function always contains
-        // the variable; a constant result is a native miscomputation (e.g.
-        // the repeated-irreducible-quadratic partial-fraction bug that
-        // returns 0). Reject it rather than emit a wrong answer.
-        if (!F.has(variable)) return null;
-        return F;
-      });
+      return ce.withTimeLimit(
+        { ms: budgetMs, label: 'rubi:native-fallback' },
+        () => {
+          const F = ce.function('Integrate', [integrand, x]).evaluate();
+          if (containsIntegrate(F)) return null;
+          // An antiderivative of a nonzero rational function always contains
+          // the variable; a constant result is a native miscomputation (e.g.
+          // the repeated-irreducible-quadratic partial-fraction bug that
+          // returns 0). Reject it rather than emit a wrong answer.
+          if (!F.has(variable)) return null;
+          return F;
+        }
+      );
     } catch (e) {
       if (isRubiOwnedCancellation(e, 'rubi:native-fallback')) return null;
       throw e;

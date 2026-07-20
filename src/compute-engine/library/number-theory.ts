@@ -1332,7 +1332,8 @@ function divisorsAscending(
 function sigma0(n: bigint, deadline?: number | DeadlineFrame): bigint {
   if (n <= 1n) return 1n;
   let result = 1n;
-  for (const e of bigPrimeFactors(n, deadline).values()) result *= BigInt(e + 1);
+  for (const e of bigPrimeFactors(n, deadline).values())
+    result *= BigInt(e + 1);
   return result;
 }
 
@@ -1359,7 +1360,10 @@ function eulerPhi(n: bigint, deadline?: number | DeadlineFrame): bigint {
 }
 
 /** Carmichael's reduced totient λ(n) from the prime factorization (`n ≥ 1`). */
-function carmichaelLambda(n: bigint, deadline?: number | DeadlineFrame): bigint {
+function carmichaelLambda(
+  n: bigint,
+  deadline?: number | DeadlineFrame
+): bigint {
   if (n <= 1n) return 1n;
   let result = 1n;
   for (const [p, e] of bigPrimeFactors(n, deadline)) {
