@@ -176,3 +176,27 @@ describe('LIST-BROADCAST TYPING — non-interference with scalars', () => {
     expect(expr.type.toString()).toContain('tuple');
   });
 });
+
+describe('`isValid` is DEEP through a tensor (Tycho item 67)', () => {
+  // `BoxedTensor.isValid` used to return `true` unconditionally, so a list
+  // whose every element was an `Error` still reported `isValid: true` — and
+  // consumers use `isValid` as an admission gate before compiling/plotting.
+  test('a broadcast that errors per element is invalid', () => {
+    const v = ce.box(['Add', ['Tuple', 1, 2], ['List', 3, 4]]).evaluate();
+    expect(v.op1.isValid).toBe(false);
+    expect(v.isValid).toBe(false);
+  });
+
+  test('a directly embedded Error poisons the list', () => {
+    expect(ce.box(['List', ['Error', "'oops'"], 2]).isValid).toBe(false);
+  });
+
+  test('well-formed tensors of every dtype stay valid', () => {
+    // The numeric/bool fields cannot hold an `Error` by construction and keep
+    // the O(1) answer; only `expression`-dtype tensors are scanned.
+    expect(ce.box(['List', 1, 2, 3]).isValid).toBe(true);
+    expect(ce.box(['List', ['List', 1, 2], ['List', 3, 4]]).isValid).toBe(true);
+    expect(ce.box(['List', true, false]).isValid).toBe(true);
+    expect(ce.box(['List', 'x', 'y']).isValid).toBe(true);
+  });
+});

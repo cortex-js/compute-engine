@@ -126,7 +126,21 @@ export class BoxedTensor<T extends TensorDataType>
   }
 
   get isValid(): boolean {
-    if (this._tensor) return true;
+    // `isValid` is DEEP: an embedded `Error` element poisons the tensor, so a
+    // consumer gating on `isValid` cannot admit a list whose elements are all
+    // errors (e.g. `(1,2)+[3,4]` broadcasts to a `List` of
+    // `incompatible-type` errors — Tycho item 67). This used to return `true`
+    // unconditionally, since `_tensor` is always set by the constructor.
+    //
+    // Only an `expression`-dtype tensor can hold an `Error`: the `float64`,
+    // `complex128` and `bool` fields are numbers/booleans by construction, so
+    // they keep the O(1) answer rather than scanning a large numeric tensor.
+    if (this._tensor) {
+      if (this._tensor.dtype !== 'expression') return true;
+      return (this._tensor.data as ReadonlyArray<Expression>).every(
+        (x) => x?.isValid !== false
+      );
+    }
     return this.structural.isValid;
   }
 

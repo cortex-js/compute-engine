@@ -25,6 +25,18 @@
   the honest union — a non-indexed collection is never broadcast by the value
   path, so a scalar outcome stays reachable there.
 
+- **`isValid` is now deep through a list/tensor.** `BoxedTensor.isValid`
+  returned `true` unconditionally, so a `List` whose every element was an
+  `Error` still reported `isValid: true` — `(1,2)+[3,4]` broadcasts to a list of
+  `incompatible-type` errors and passed the gate. An embedded `Error` element
+  now poisons the enclosing expression, matching what `BoxedFunction.isValid`
+  already did. Consumers that use `isValid` as an admission gate before
+  compiling or plotting will now correctly reject these expressions.
+
+  Only `expression`-dtype tensors are scanned; `float64`/`complex128`/`bool`
+  fields cannot hold an `Error` by construction and keep the O(1) answer, so
+  this does not add a per-element walk to large numeric tensors.
+
 ## 0.87.1 _2026-07-20_
 
 ### Breaking Changes
