@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.88.1 _2026-07-20_
 
 ## Issues Resolved
 
