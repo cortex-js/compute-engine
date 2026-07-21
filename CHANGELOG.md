@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.90.0 _2026-07-21_
 
 ### New Features
@@ -10,27 +12,26 @@
   concrete `List`, so every reference to it sees the same draws (a lazy
   collection of `Random()` calls re-draws on each traversal). With a literal
   count the length is part of the type (`RandomList(5)` types
-  `vector<finite_real^5>`). The count is capped at 10⁶ elements; a larger
-  count — or a negative one — returns an `out-of-range` error rather than
-  silently misbehaving.
+  `vector<finite_real^5>`). The count is capped at 10⁶ elements; a larger count
+  — or a negative one — returns an `out-of-range` error rather than silently
+  misbehaving.
 
 ### Improvements and Bug Fixes
 
 - **`Abs` of a fixed-arity point is now the Euclidean norm.** `|(3, 4)|`
-  evaluates to `5` — the single-bar spelling of the vector magnitude,
-  consistent with the `\lVert…\rVert` (`Norm`) parse and with tuple
-  arithmetic treating points as vectors in ℝⁿ. Previously the expression
-  stayed inert under `evaluate()`, and **compiled to garbage**: the
-  JavaScript target returned the bare component array (which concatenated
-  into a *string* in downstream arithmetic), and the shader targets emitted
-  invalid code. All targets now compile it as the norm (`_SYS.norm` on the
-  js target, `length()` on GLSL/WGSL for 2–4 components; other arities and
-  points with a broadcasting component fail closed to interpretation).
-  Detection is type-based, so a tuple-*typed* symbol or parameter routes as
-  a point too. `Abs` over a `List` is unchanged and still broadcasts
-  elementwise. `Hypot` with a point argument now squares through the norm
-  as well: `Hypot((3,4), 1) = √26` (previously an inert `Power` of a
-  tuple). And `Norm`/`Abs` of a point now honor the exactness contract:
+  evaluates to `5` — the single-bar spelling of the vector magnitude, consistent
+  with the `\lVert…\rVert` (`Norm`) parse and with tuple arithmetic treating
+  points as vectors in ℝⁿ. Previously the expression stayed inert under
+  `evaluate()`, and **compiled to garbage**: the JavaScript target returned the
+  bare component array (which concatenated into a _string_ in downstream
+  arithmetic), and the shader targets emitted invalid code. All targets now
+  compile it as the norm (`_SYS.norm` on the js target, `length()` on GLSL/WGSL
+  for 2–4 components; other arities and points with a broadcasting component
+  fail closed to interpretation). Detection is type-based, so a tuple-_typed_
+  symbol or parameter routes as a point too. `Abs` over a `List` is unchanged
+  and still broadcasts elementwise. `Hypot` with a point argument now squares
+  through the norm as well: `Hypot((3,4), 1) = √26` (previously an inert `Power`
+  of a tuple). And `Norm`/`Abs` of a point now honor the exactness contract:
   `evaluate()` keeps the exact `√2`, `.N()` numericizes.
 
 - **`Norm` compiles on the `interval-js` target** for fixed-arity points
@@ -40,38 +41,35 @@
   sampling.
 
 - **`Norm`/`Abs` of a point with a broadcasting component reports an honest
-  `list<number>` type.** `‖(x+[0.5,1], y, z+2)‖` evaluates to a `List` (one
-  norm per zipped element); its static type now says so instead of `number`,
-  matching the equivalent `\sqrt{(x+[0.5,1])^2+…}` spelling.
+  `list<number>` type.** `‖(x+[0.5,1], y, z+2)‖` evaluates to a `List` (one norm
+  per zipped element); its static type now says so instead of `number`, matching
+  the equivalent `\sqrt{(x+[0.5,1])^2+…}` spelling.
 
-- **A `Comprehension` serializes with bracket delimiters** so it survives
-  its own round trip in every position:
-  `H=[k^2 \operatorname{for} k=[1...4]]` now serializes as
-  `H=\left[k^2 \operatorname{for} k = 1..4\right]` (previously the unfenced
-  form re-parsed with the assignment swallowed into the comprehension body,
-  and under an `Add` the trailing term was absorbed into the iteration
-  range). The fence is unconditional — `[body for …]` parses back to the
-  same `Comprehension`, so it is lossless. (Non-canonical
-  serialization-shape callout, same class as the 0.83 big-operator body
-  fence.)
+- **A `Comprehension` serializes with bracket delimiters** so it survives its
+  own round trip in every position: `H=[k^2 \operatorname{for} k=[1...4]]` now
+  serializes as `H=\left[k^2 \operatorname{for} k = 1..4\right]` (previously the
+  unfenced form re-parsed with the assignment swallowed into the comprehension
+  body, and under an `Add` the trailing term was absorbed into the iteration
+  range). The fence is unconditional — `[body for …]` parses back to the same
+  `Comprehension`, so it is lossless. (Non-canonical serialization-shape
+  callout, same class as the 0.83 big-operator body fence.)
 
 - **`Expression.isValid` is now O(1) after the first query.** Validity is a
   structural property of an immutable expression, so it is computed once and
   cached; previously every query re-walked the whole subtree (and a parent's
-  query re-entered each child's), which dominated large-document workloads —
-  one profiled 75-row import spent 77% of its time in repeated `isValid`
-  walks.
+  query re-entered each child's), which dominated large-document workloads — one
+  profiled 75-row import spent 77% of its time in repeated `isValid` walks.
 
 ## 0.89.0 _2026-07-21_
 
 ### Breaking Changes
 
-- **`ComputeEngine.timeLimit` is removed**, completing the deprecation begun
-  in 0.88.0. There is no implicit ambient deadline anymore: an `evaluate()`
-  or `simplify()` outside a span runs unbounded, and
-  `ce.withTimeLimit(ms, fn)` / `ce.withTimeLimit({ ms, label }, fn)` spans
-  are the only way to arm a deadline. If you relied on the old 2000&nbsp;ms
-  ambient default, wrap your evaluation entry point in a span:
+- **`ComputeEngine.timeLimit` is removed**, completing the deprecation begun in
+  0.88.0. There is no implicit ambient deadline anymore: an `evaluate()` or
+  `simplify()` outside a span runs unbounded, and `ce.withTimeLimit(ms, fn)` /
+  `ce.withTimeLimit({ ms, label }, fn)` spans are the only way to arm a
+  deadline. If you relied on the old 2000&nbsp;ms ambient default, wrap your
+  evaluation entry point in a span:
 
   ```ts
   const r = ce.withTimeLimit({ ms: 2000, label: 'my-app:eval' }, () =>
@@ -79,12 +77,12 @@
   );
   ```
 
-  The `engine.timeLimit:<operator>` attribution synthesized for ambient
-  timeouts is gone with it — every `CancellationError.attribution` now names
-  a span you created (or is `undefined` for an unlabelled span).
+  The `engine.timeLimit:<operator>` attribution synthesized for ambient timeouts
+  is gone with it — every `CancellationError.attribution` now names a span you
+  created (or is `undefined` for an unlabelled span).
 
-- **The `BoxedTensor` class is removed.** Tensor values (vectors, matrices)
-  are now ordinary canonical `List` expressions; "tensor-ness" is a property
+- **The `BoxedTensor` class is removed.** Tensor values (vectors, matrices) are
+  now ordinary canonical `List` expressions; "tensor-ness" is a property
   (shape-regularity), not a distinct representation. The `BoxedTensor` type
   export and the `TensorInterface.tensor` accessor (which exposed the internal
   packed `Tensor` object) are gone. The `isTensor()` guard remains and now
@@ -94,124 +92,132 @@
   `[]`/`0`. Code that used `expr.tensor` should operate on `expr.ops` (the
   elements) or use the public linear-algebra operators.
 
-- **Lists carry honest, shape-aware types.** A shape-regular list's type
-  reports its actual element type and dimensions: `[1, 2, 3]` types
+- **Lists carry honest, shape-aware types.** A shape-regular list's type reports
+  its actual element type and dimensions: `[1, 2, 3]` types
   `vector<finite_integer^3>` (previously `vector<3>`, i.e. `number` elements),
   `[[1, 2], [3.5, 4.5]]` types `matrix<finite_real^(2x2)>`, and a list of
   non-numeric values is no longer mistyped as a numeric vector —
   `[rgb(1,0,0), rgb(0,1,0)]` types `list<color^2>`, not `vector<2>`. The new
-  types are strict subtypes of the old ones, so `type.matches('vector<3>')`
-  and similar queries continue to answer `true`; only code comparing exact
-  type *strings* is affected. An evaluated broadcast result now carries its
-  shape too (`Sin([0,1]).evaluate()` types `vector<2>`), and the declared type
-  of a broadcast expression is always a sound upper bound of its evaluated
-  value's type.
+  types are strict subtypes of the old ones, so `type.matches('vector<3>')` and
+  similar queries continue to answer `true`; only code comparing exact type
+  _strings_ is affected. An evaluated broadcast result now carries its shape too
+  (`Sin([0,1]).evaluate()` types `vector<2>`), and the declared type of a
+  broadcast expression is always a sound upper bound of its evaluated value's
+  type.
 
 - **Signature validation of collection arguments is two-stage.** An operand
   whose static type could still conform to a collection parameter (a symbol
-  declared plain `list`, `list<unknown>`, a `broadcastable<…>` intermediate)
-  is accepted at canonicalization and checked against its actual value when
-  the operator evaluates. Provably-wrong operands (`Determinant("abc")`,
-  `Determinant(v)` with `v: list<number>` — a flat vector can never be a
-  matrix) still error immediately. Consequently some `incompatible-type`
-  errors that used to appear at parse/canonicalization time now surface at
-  evaluation time instead (as the operator's specific error, e.g.
-  `expected-square-matrix`, or as an inert expression).
+  declared plain `list`, `list<unknown>`, a `broadcastable<…>` intermediate) is
+  accepted at canonicalization and checked against its actual value when the
+  operator evaluates. Provably-wrong operands (`Determinant("abc")`,
+  `Determinant(v)` with `v: list<number>` — a flat vector can never be a matrix)
+  still error immediately. Consequently some `incompatible-type` errors that
+  used to appear at parse/canonicalization time now surface at evaluation time
+  instead (as the operator's specific error, e.g. `expected-square-matrix`, or
+  as an inert expression).
 
 ### Improvements
 
 - **Matrix operations work on computed matrices.** The static type of a
-  broadcast application now mirrors its operand's shape (`Sqrt(M)` with
-  `M` a 2×2 matrix types as a 2×2 matrix), so expressions like
-  `Determinant(Sqrt(M))`, `MatrixMultiply(Sqrt(M), Sqrt(M))`, or
-  `Inverse(A + B)` — which used to fail with `incompatible-type` at
-  canonicalization — now evaluate. Symbols declared `list` participate the
-  same way once a conforming value is assigned.
+  broadcast application now mirrors its operand's shape (`Sqrt(M)` with `M` a
+  2×2 matrix types as a 2×2 matrix), so expressions like `Determinant(Sqrt(M))`,
+  `MatrixMultiply(Sqrt(M), Sqrt(M))`, or `Inverse(A + B)` — which used to fail
+  with `incompatible-type` at canonicalization — now evaluate. Symbols declared
+  `list` participate the same way once a conforming value is assigned.
 
 - **Structural matrix operations work on any cell type.** `Transpose`,
   `ConjugateTranspose`, `Reshape`, `Flatten`, and the shape predicates
-  (`IsSquareMatrix`, `IsSymmetric`, `IsDiagonal`) operate on any
-  shape-regular list — a matrix of colors, tuples, or unevaluated function
-  applications — not just numeric ones. Numeric kernels (`Determinant`,
-  `Inverse`, …) still require numeric cells and decline others gracefully.
+  (`IsSquareMatrix`, `IsSymmetric`, `IsDiagonal`) operate on any shape-regular
+  list — a matrix of colors, tuples, or unevaluated function applications — not
+  just numeric ones. Numeric kernels (`Determinant`, `Inverse`, …) still require
+  numeric cells and decline others gracefully.
 
 - **Exact integer matrices stay exact.** Linear-algebra kernels over exact
   integer matrices now use exact arithmetic under `evaluate()`:
   `Determinant([[9007199254740991, 0], [0, 3]])` returns the exact
-  `27021597764222973` (previously rounded through float arithmetic).
-  Under `.N()` results are floated, as before
-  (`Inverse([[2,1],[1,3]]).N()` → `[[0.6, -0.2], [-0.2, 0.4]]`).
+  `27021597764222973` (previously rounded through float arithmetic). Under
+  `.N()` results are floated, as before (`Inverse([[2,1],[1,3]]).N()` →
+  `[[0.6, -0.2], [-0.2, 0.4]]`).
 
 - **List equality is tolerant and NaN-aware in all cases.**
   `[1,2,3].isEqual([1,2,3+1e-11])` is `true` (engine tolerance),
-  `[x,2].isEqual([y,2])` is `undefined` (symbolic), and a list containing
-  `NaN` is never `isEqual` to itself (mirroring scalar `NaN ≠ NaN`) —
-  uniformly for every list, whatever produced it. Ordering comparisons
-  (`isLessEqual`, …) between equal tensors of any cell type now answer
-  `true` instead of `undefined`.
+  `[x,2].isEqual([y,2])` is `undefined` (symbolic), and a list containing `NaN`
+  is never `isEqual` to itself (mirroring scalar `NaN ≠ NaN`) — uniformly for
+  every list, whatever produced it. Ordering comparisons (`isLessEqual`, …)
+  between equal tensors of any cell type now answer `true` instead of
+  `undefined`.
 
-- **Faster broadcast arithmetic.** Removing the eager tensor construction
-  from the boxing path makes broadcast-heavy evaluation measurably faster
-  (~30% on elementwise matrix expressions), with no per-expression packing
-  cost until a numeric kernel actually runs.
+- **Faster broadcast arithmetic.** Removing the eager tensor construction from
+  the boxing path makes broadcast-heavy evaluation measurably faster (~30% on
+  elementwise matrix expressions), with no per-expression packing cost until a
+  numeric kernel actually runs.
 
 ## Issues Resolved
 
-- **A function call over a collection-valued *expression* keeps its broadcast
+- **A function call over a collection-valued _expression_ keeps its broadcast
   type.** With `h` a function over numbers (declared or inferred) and `L` a
   list, `h(L)` already typed as a list — but `h(L + 1)` or `h(2L)` typed as a
-  *scalar* while still evaluating to a list. Both now type as the shaped
-  vector (`h(L+1)` → `vector<3>` for a 3-element `L`), and a declared scalar
-  signature no longer rejects a collection argument with `incompatible-type`
-  — scalar-parameter functions are threadable, so the argument broadcasts,
-  matching what evaluation always did. Scalar applications and genuinely
-  invalid arguments (`h("abc")`) are unchanged.
+  _scalar_ while still evaluating to a list. Both now type as the shaped vector
+  (`h(L+1)` → `vector<3>` for a 3-element `L`), and a declared scalar signature
+  no longer rejects a collection argument with `incompatible-type` —
+  scalar-parameter functions are threadable, so the argument broadcasts,
+  matching what evaluation always did. Scalar applications and genuinely invalid
+  arguments (`h("abc")`) are unchanged.
 
 ### Benchmarks
 
 #### Numeric performance (200-digit precision)
 
-Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
 
-| Expression | CE (current) | CE 0.86.1 | SymPy | math.js | Mathematica |
-| --- | --: | --: | --: | --: | --: |
-| $\pi^2$ | 6.7 | 7.5 | 176 | 137 | 4.1 |
-| $\sin 1$ | 21 | 21 | 220 | 444 | 5.1 |
-| $\cos 1$ | 20 | 20 | 224 | 536 | 6.9 |
-| $\ln 2$ | 16 | 16 | 352 | 5,754 | 3.8 |
-| $e^{\pi}$ | 14 | 15 | 215 | 4,765 | 4.5 |
-| $\zeta(3)$ | 1,734 | 1,790 | 282 | — | 51 |
-| $\Gamma(\tfrac13)$ | 957 | 950 | 356 | — | 209 |
-| $\psi(\tfrac13)$ | 806 | 795 | 2,818 | — | 170 |
+| Expression         | CE (current) | CE 0.86.1 | SymPy | math.js | Mathematica |
+| ------------------ | -----------: | --------: | ----: | ------: | ----------: |
+| $\pi^2$            |          6.7 |       7.5 |   176 |     137 |         4.1 |
+| $\sin 1$           |           21 |        21 |   220 |     444 |         5.1 |
+| $\cos 1$           |           20 |        20 |   224 |     536 |         6.9 |
+| $\ln 2$            |           16 |        16 |   352 |   5,754 |         3.8 |
+| $e^{\pi}$          |           14 |        15 |   215 |   4,765 |         4.5 |
+| $\zeta(3)$         |        1,734 |     1,790 |   282 |       — |          51 |
+| $\Gamma(\tfrac13)$ |          957 |       950 |   356 |       — |         209 |
+| $\psi(\tfrac13)$   |          806 |       795 | 2,818 |       — |         170 |
 
 #### Symbolic capability & performance
 
-Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.86.1** columns to see what is *new this release* (a `—` under `0.86.1` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE (current)** and **CE 0.86.1** columns to see
+what is _new this release_ (a `—` under `0.86.1` next to a number under the
+current build). The **CE + R/F** column is the current build with the opt-in
+Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
 
-| Operation | CE (current) | CE + R/F | CE 0.86.1 | SymPy | math.js | Mathematica |
-| --- | :--: | :--: | :--: | :--: | :--: | :--: |
-| **Antiderivatives** |  |  |  |  |  |  |
-| $\int\frac{1}{\sqrt x}\,dx$ | 6.6× | 3.1× | 5.4× | 0.5× | — | 1× |
-| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 8.0× | 1.3× | 6.8× | 0.09× | — | 1× |
-| $\int\frac{1}{x^3+1}\,dx$ | 5.6× | 0.8× | 4.3× | 0.3× | — | 1× |
-| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 1.7× | — | 0.1× | — | 1× |
-| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 1.2× | — | 0.01× | — | 1× |
-| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 1.2× | — | 0.007× | — | 1× |
-| **Derivatives** |  |  |  |  |  |  |
-| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.04× | 0.04× | 0.02× | 0.001× | 0.003× | 1× |
-| **Simplification** |  |  |  |  |  |  |
-| $\sqrt{3+2\sqrt2}$ | 44× | 34× | 34× | — | — | 1× |
-| $\sqrt6\,x+\sqrt2\,x$ | 131× | 67× | 72× | 5.0× | 23× | 1× |
-| **Evaluation** |  |  |  |  |  |  |
-| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 53× | 25× | 43× | 3.0× | — | 1× |
-| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 8.7× | 5.1× | 7.2× | 2.1× | — | 1× |
-| $\int_1^2\tfrac1x\,dx$ | 6954× | 6552× | 5758× | 93× | — | 1× |
-| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 382× | 133× | 341× | 2.6× | — | 1× |
-| **Solving** |  |  |  |  |  |  |
-| $x^4+x^2-1=0$ | 0.2× | 0.3× | 0.2× | 0.06× | — | 1× |
-| $x^3-x-1=0$ | 1.5× | 1.7× | 1.4× | 0.04× | — | 1× |
+| Operation                              | CE (current) | CE + R/F | CE 0.86.1 | SymPy  | math.js | Mathematica |
+| -------------------------------------- | :----------: | :------: | :-------: | :----: | :-----: | :---------: |
+| **Antiderivatives**                    |              |          |           |        |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |     6.6×     |   3.1×   |   5.4×    |  0.5×  |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |     8.0×     |   1.3×   |   6.8×    | 0.09×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |     5.6×     |   0.8×   |   4.3×    |  0.3×  |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |      —       |   1.7×   |     —     |  0.1×  |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |      —       |   1.2×   |     —     | 0.01×  |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |      —       |   1.2×   |     —     | 0.007× |    —    |     1×      |
+| **Derivatives**                        |              |          |           |        |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |    0.04×     |  0.04×   |   0.02×   | 0.001× | 0.003×  |     1×      |
+| **Simplification**                     |              |          |           |        |         |             |
+| $\sqrt{3+2\sqrt2}$                     |     44×      |   34×    |    34×    |   —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |     131×     |   67×    |    72×    |  5.0×  |   23×   |     1×      |
+| **Evaluation**                         |              |          |           |        |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |     53×      |   25×    |    43×    |  3.0×  |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |     8.7×     |   5.1×   |   7.2×    |  2.1×  |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |    6954×     |  6552×   |   5758×   |  93×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |     382×     |   133×   |   341×    |  2.6×  |    —    |     1×      |
+| **Solving**                            |              |          |           |        |         |             |
+| $x^4+x^2-1=0$                          |     0.2×     |   0.3×   |   0.2×    | 0.06×  |    —    |     1×      |
+| $x^3-x-1=0$                            |     1.5×     |   1.7×   |   1.4×    | 0.04×  |    —    |     1×      |
 
-Across the cases both solve, Compute Engine is a **median 6.6× faster than Mathematica** (up to 6954×) — in the browser, not a proprietary kernel.
+Across the cases both solve, Compute Engine is a **median 6.6× faster than
+Mathematica** (up to 6954×) — in the browser, not a proprietary kernel.
 
 <sub>
 Measured 2026-07-21 · Compute Engine `0.88.1` @ `afde4f88` (current build) · published `0.86.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
