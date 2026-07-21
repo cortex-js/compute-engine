@@ -367,8 +367,10 @@ The CE-vs-SymPy audit (`benchmarks/audit/`) already grades the
 through the real opt-in loaders. **Done (2026-07-21):** the Bondarenko
 integration set (35 hard nested-radical / log / transcendental integrals, MIT)
 is wired in — `benchmarks/audit/bondarenko.ts` → `REPORT-bondarenko.md`, graded
-by the invariant `d/dx(F) ≈ f` across base CE / CE+R/F / SymPy / Mathematica:
-CE 0/35 · CE+R/F 9/35 · SymPy 7/35 · Mathematica 32/35. (Rubi chapter
+by the invariant `d/dx(F) ≈ f` across base CE / CE+R/F / SymPy / Mathematica
+(with a finite-difference fallback where the symbolic derivative doesn't
+numericize — PolyLog, elliptic kernels):
+CE 0/35 · CE+R/F 12/35 · SymPy 7/35 · Mathematica 32/35. (Rubi chapter
 translation — the lever for the indefinite-∫ gap, with
 Rubi now recovering 6 of the 8 hard Wester integrals — is its own track: see
 **Coverage tracks → Rubi**.)

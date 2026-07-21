@@ -8,29 +8,29 @@ Vladimir Bondarenko's 35 integration problems — an independent test set from t
 
 Configs: **CE** = base shipping engine (no Rubi/Fungrim); **CE+R/F** = with the experimental Rubi integrator + Fungrim; **SymPy** = the open-source comparator; **Mathematica** = the reference baseline (the CAS these problems are written in).
 
-- **CE 0/35** · **CE+R/F 12/35** · **SymPy 3/35** · **Mathematica 32/35** correct.
+- **CE 0/35** · **CE+R/F 12/35** · **SymPy 7/35** · **Mathematica 32/35** correct.
 - Against the **Mathematica** baseline, base CE trails on **32** cases; **11** of those recovered by Rubi/Fungrim.
 
 | Operation | CE | CE+R/F | SymPy | Mathematica |
 |---|--:|--:|--:|--:|
-| Indefinite ∫ | 0/35 | 12/35 | 3/35 | 32/35 |
+| Indefinite ∫ | 0/35 | 12/35 | 7/35 | 32/35 |
 
 ## Per-case results
 
 | # | Steps | Integrand | CE | CE+R/F | SymPy | Mathematica | CE+R/F result |
 |--:|--:|---|:-:|:-:|:-:|:-:|---|
-| 1 | 1 | `1 / (sin(z) + cos(z) + sqrt(2))` | ∅ | ✅ | ∅ | ✅ | `-(-sqrt(2) * sin(z) + 1) / (-sin(z) + co` |
+| 1 | 1 | `1 / (sin(z) + cos(z) + sqrt(2))` | ∅ | ✅ | ✅ | ✅ | `-(-sqrt(2) * sin(z) + 1) / (-sin(z) + co` |
 | 2 | 4 | `(sqrt(x + 1) + sqrt(1 - x))^(-2)` | ∅ | ∅ | ∅ | ✅ | `int((sqrt(x + 1) + sqrt(1 - x))^(-2) dx)` |
 | 3 | 2 | `(cos(x) + 1)^(-2)` | ∅ | ✅ | ✅ | ✅ | `sin(x) / (3(cos(x) + 1)) + sin(x) / (3(c` |
 | 4 | 5 | `sin(x) / sqrt(x + 1)` | ∅ | ✅ | ✅ | ✅ | `-2(0.353553390593273726845 - 0.353553390` |
-| 5 | 3 | `(sin(x) + cos(x))^(-6)` | ∅ | ✅ | ∅ | ✅ | `(2sin(x)) / (15(sin(x) + cos(x))) - cos(` |
+| 5 | 3 | `(sin(x) + cos(x))^(-6)` | ∅ | ✅ | ✅ | ✅ | `(2sin(x)) / (15(sin(x) + cos(x))) - cos(` |
 | 6 | 22 | `ln(x^4 + x^(-4))` | ∅ | ✅ | ❌ | ✅ | `-4x + x * ln(x^4 + x^(-4)) - 1.847759065` |
 | 7 | -1 | `ln(x + 1) / (x * sqrt(sqrt(x + 1) + 1))` | ∅ | ∅ | ∅ | ✅ | `int(ln(x + 1) / (x * sqrt(sqrt(x + 1) + ` |
 | 8 | -1 | `ln(x + 1) / x * sqrt(sqrt(x + 1) + 1)` | ∅ | ∅ | ∅ | ✅ | `int(ln(x + 1) / x * sqrt(sqrt(x + 1) + 1` |
 | 9 | 4 | `1 / (sqrt(x + sqrt(x^2 + 1)) + 1)` | ∅ | ∅ | ∅ | ✅ | `int(1 / (sqrt(x + sqrt(x^2 + 1)) + 1) dx` |
-| 10 | 6 | `sqrt(x + 1) / (x + sqrt(sqrt(x + 1) + 1)` | ∅ | ∅ | ∅ | ✅ | `int(sqrt(x + 1) / (x + sqrt(sqrt(x + 1) ` |
-| 11 | 5 | `1 / (x - sqrt(sqrt(x + 1) + 1))` | ∅ | ∅ | ∅ | ✅ | `int(1 / (x - sqrt(sqrt(x + 1) + 1)) dx)` |
-| 12 | 6 | `x / (x + sqrt(1 - sqrt(x + 1)))` | ∅ | ∅ | ∅ | ✅ | `int(x / (x + sqrt(1 - sqrt(x + 1))) dx)` |
+| 10 | 6 | `sqrt(x + 1) / (x + sqrt(sqrt(x + 1) + 1)` | ∅ | ∅ | ✅ | ✅ | `int(sqrt(x + 1) / (x + sqrt(sqrt(x + 1) ` |
+| 11 | 5 | `1 / (x - sqrt(sqrt(x + 1) + 1))` | ∅ | ∅ | ✅ | ✅ | `int(1 / (x - sqrt(sqrt(x + 1) + 1)) dx)` |
+| 12 | 6 | `x / (x + sqrt(1 - sqrt(x + 1)))` | ∅ | ∅ | · | ✅ | `int(x / (x + sqrt(1 - sqrt(x + 1))) dx)` |
 | 13 | 20 | `sqrt(x + sqrt(x + 1)) / (x^2 + 1) * sqrt` | ∅ | ∅ | ∅ | ✅ | `int(sqrt(x + sqrt(x + 1)) / (x^2 + 1) * ` |
 | 14 | 22 | `sqrt(x + sqrt(x + 1)) / (x^2 + 1)` | ∅ | ∅ | ∅ | ✅ | `int(sqrt(x + sqrt(x + 1)) / (x^2 + 1) dx` |
 | 15 | 2 | `sqrt(sqrt(x) + sqrt(2x + 2sqrt(x) + 1) +` | ∅ | ∅ | ∅ | ✅ | `int(sqrt(sqrt(x) + sqrt(2x + 2sqrt(x) + ` |
