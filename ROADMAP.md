@@ -145,60 +145,33 @@ result against the declared return type (returns are pure ascriptions today),
 and **(S)** LaTeX typed-parameter notation behind a serialization style flag
 (annotations currently drop in LaTeX).
 
-**Compiled recursive lambdas — SHIPPED 2026-07-19 as lenient true
-recursion** (design ratified same day, superseding the unrolling-first
-draft; see
-[`docs/plans/2026-07-19-compiled-recursive-lambdas-design.md`](./docs/plans/2026-07-19-compiled-recursive-lambdas-design.md)):
-self- and mutually recursive user lambdas now compile on the JavaScript and
-interval-JS targets to true recursion by emitted name. Termination is the
-caller's contract — runaway recursion throws a catchable `RangeError`
-within ~1 ms (the original "frozen tab" rationale was wrong for recursion:
-JS stacks self-terminate, and compiled unbounded `Loop` already emits
-`while (true)`). Complex-valued recursion needs a `Typed` `complex` return
-ascription (untyped applications type `broadcastable<number>` and hit the
-complex-bcast deferral) — ergonomically written via the signature-string
-sugar, landed the same day. Shipped alongside: the JS-target **complex
-literal-power fast path** (inline square-and-multiply chains for exponents
-2–8 instead of polar `_SYS.cpow` — depth-10 Julia: recursive 0.18 µs/pt,
-closed form 1.25 → 0.14 µs/pt) and the `ce.assign` recursion-knot fix for
-pre-boxed literals.
+**Compiled recursive lambdas** shipped 2026-07-19 as lenient true recursion
+(as-built record:
+[`docs/plans/2026-07-19-compiled-recursive-lambdas-design.md`](./docs/plans/2026-07-19-compiled-recursive-lambdas-design.md)).
+Standing contracts: termination is the caller's — runaway recursion throws a
+catchable `RangeError`; complex-valued recursion needs a `Typed` `complex`
+return ascription (untyped applications type `broadcastable<number>` and hit
+the complex-bcast deferral).
 Remaining follow-ups, both demand-gated:
 
 - **(M) GPU literal-depth unrolling** (WGSL/GLSL cannot recurse; GPU stays
   fail-closed): the v1 memoized literal-argument specialization design
   (preserved in the design doc's git history) is the route — gate on a GPU
   consumer.
-- **(M) Interpreter perf** (triaged + main fix landed 2026-07-19; the
-  original `addN` attribution was wrong): the ×7.5-per-level blowup was the
-  D2 numericize tail of `Add`/`Multiply` gating on the dynamic-scope
-  `unknowns`, which counts a bound-but-symbolic parameter as known inside a
-  function application — fixed by gating on the lexical `isConstant`
-  (arithmetic.ts; also fixed the same-predicate wrong *values* from
-  `KroneckerDelta`/`Degree` over bound parameters). Remaining, all
-  demand-gated:
-  - the residual **×2-per-level** re-walk is FIXED for `arithmetic.ts`
-    (same day): **non-lazy** operator handlers were re-evaluating operands
-    the driver (`_computeValue` step 4/`holdMap`) had already evaluated —
-    `Power`, `Sqrt`, `Root`, `Divide`, `Ln`, `Log`, `Negate` now trust their
-    pre-evaluated operands, collapsing symbolic recursive unwinding from
-    exponential to linear (depth 80 ≈ 95 ms; previously walled at ~20). The
-    governing **evaluate-handler contract** (this is the one to enforce in
-    review): a `lazy: true` operator receives RAW operands and its handler
-    owns their (single) evaluation — `Add`/`Multiply`/`Sum`/`Product`/
-    `Measurement`/`NumeratorDenominator` re-evaluate legitimately; a
-    non-lazy operator receives EVALUATED operands and must not re-evaluate
-    them (each call re-descends the unmemoized subtree; under nesting that
-    compounds exponentially). An intermediate experiment deleted the lazy
-    `Add`/`Multiply` maps too — that froze recursive unrolling at one level
-    per pass (`Q(2,z)` stuck at `Q(1,z)²+0.3`), which is what confirmed the
-    lazy/non-lazy split is the real contract. The full library sweep landed
-    the same day: linear-algebra (~30 sites), statistics reducers (11),
-    `Text`, plus a semantic fix to `Timing` (now `lazy`, so it times the
-    real evaluation instead of a cache-warm re-walk; its handler
-    canonicalizes the raw operand outside the timed region — `lazy`
-    operands arrive raw and non-canonical, and evaluating a non-canonical
-    expression is a no-op, the item-52 "lazy leaks raw ops" trap).
-    `evaluateAsync` handlers audited clean.
+- **(M) Interpreter perf** (triaged + fixes landed 2026-07-19: the D2
+  numericize tail now gates on lexical `isConstant`, and the full-library
+  sweep made non-lazy handlers trust pre-evaluated operands — symbolic
+  recursive unwinding is linear, not exponential). What this leaves behind
+  is the governing **evaluate-handler contract** (the one to enforce in
+  review): a `lazy: true` operator receives RAW operands and its handler
+  owns their (single) evaluation — `Add`/`Multiply`/`Sum`/`Product`/
+  `Measurement`/`NumeratorDenominator` re-evaluate legitimately; a
+  non-lazy operator receives EVALUATED operands and must not re-evaluate
+  them (each call re-descends the unmemoized subtree; under nesting that
+  compounds exponentially). Do not delete the lazy `Add`/`Multiply` maps —
+  the experiment was run and froze recursive unrolling at one level per
+  pass, which is what confirmed the lazy/non-lazy split is the real
+  contract. Remaining, all demand-gated:
   - two sites carry the same dynamic-scope `unknowns.length === 0` predicate
     as a *latent* instance of the trap, with no demonstrated observable
     misbehavior — leave them until one surfaces: the equation-equivalence
@@ -281,6 +254,16 @@ Deferred:
   source-id stability across re-boxing (design doc "Non-goals").
 - **Relative-error notation** (`±5%`) and **distribution/`RandomVariate`
   links** (reuse the statistics RNG/seed policy).
+
+**`FindFit`/`FindRoot` residue (landed 2026-07-21, Tycho item 77; ratified
+design: `docs/plans/2026-07-21-findfit-design.md` § 8–9):** demand-gated v2
+items — per-point **weights** (resolved future shape: a trailing optional
+`weights` argument, NOT tuple-shape deduction), parameter
+uncertainty/covariance output (`JᵀJ⁻¹` is a byproduct), general
+`FindMinimum`, and multi-start/global search (revisit only on corpus
+evidence of basin sensitivity). Known naming quirk to document for
+consumers: a parameter named `e` canonicalizes to `ExponentialE` and cannot
+be fit.
 
 **Mathematica surface forms — deferred tail (need user steer before
 attempting; landed record in the 2026-07-14 commits):** Tier 3 heads
@@ -552,21 +535,12 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
   `Unique` — but any broader `Count(f(x))`-through-eager-op cheapness needs
   canonical-level rewrites, a churn-heavy direction to decide deliberately.
 - **Latent issues: none remaining.** The 2026-07-19 latent sweep
-  dispositioned the whole former list, including its last survivor — the
-  `Slice` finiteness over-claim (fixed via a shared `sliceBounds`
-  resolver: negative end over an infinite source is an honest infinite
-  tail; negative start over one is unresolvable and inert — this also
-  killed a `NaN`-count/`at(1) = +∞` fabrication; unknown-length sources
-  report finiteness unknown). Rest of the disposition:
-  the `enlist` materialization restructuring of literal pair-lists, the
-  `Take.isFinite` gap that kept `ListFrom(Take(<infinite>, n))` symbolic,
-  and the loose `Sort`/`Shuffle` `type:` handlers are FIXED; the
-  `Apply(inline-lambda, unknown-collection)` dangling-param hazard could
-  not be reproduced — the fresh-param `lazyBroadcastMap` hardening covers
-  the path, verified by capture-poison probes; user-written `Map(...).N()`
-  laziness was verified already fixed; and the `At` evaluate `@todo` was
-  audited against its description — behaviors agree, marker replaced with
-  the edge-convention record and mask/pick pins.)
+  dispositioned the whole former list (fixes, could-not-reproduce
+  verifications, and an `At` `@todo` audit — record in that day's commits
+  and `CHANGELOG.md`); the one lasting convention: `Slice` finiteness is
+  honest — negative end over an infinite source is an infinite tail,
+  negative start over one is inert, unknown-length sources report
+  finiteness unknown.
 
 ### Coverage tracks
 
@@ -875,9 +849,9 @@ self-time frame at `isSubtype`, **6.7%**. Clusters: type system
 (`ExactNumericValue`/`toNumericValue`) ≈ 6%, `mul` itself 5.2%, `Product` 1.7%,
 `sortProductOperands` 1.4%. Closing the 34 µs → 2.8 µs gap needs ~92% removed;
 no incremental patch reaches that. Reducing `.mul()` cost is a
-**representation-level** project (adjacent to Strategic item 9 — the same
-per-node type-query/binding tax), not a perf item. Recorded here so it is not
-mistaken for a contained optimization.
+**representation-level** project (the same per-node type-query/binding tax the
+2026-07-21 tensor unification addressed for collection values), not a perf
+item. Recorded here so it is not mistaken for a contained optimization.
 
 ### Strategic
 
@@ -928,50 +902,20 @@ splitting or watched-disjunct propagation), not an incremental patch. The guard
 census (`scripts/fungrim/guard-census.json`, currently 89.6% complex-domain
 dischargeable) quantifies exactly what it would buy. Let demand justify it.
 
-#### 9. Matrix/tensor value representation — unify `List` vs `BoxedTensor`
-
-**Landed (2026-07-21):** all three phases of the tensor unification shipped
-(`docs/plans/2026-07-20-tensor-unification-design.md` is the as-built record).
-The `BoxedTensor` Expression subclass is deleted; tensor values are canonical
-`List`s and tensor-ness is a lazy view (`boxed-expression/tensor-view.ts`:
-O(rank) `candidateShape` for hot dispatch, mode-aware `packTensor` for numeric
-kernels — exact `evaluate()` packs `expression` dtype, `.N()` packs `float64` —
-and `packStructural` for structure-only operations over any cell type). Lists
-carry honest shaped types (`[Rgb,Rgb]` → `list<color^2>`, closing Tycho item
-69); broadcast applications mirror their operands' shapes, so
-`Determinant(Sqrt(M))` evaluates; overlap-deferred validation admits
-statically-undecidable collection operands; the `CONTAINER_OPERATORS` blocklist
-retired into the type-kind atomicity predicate; the subtype checker bridges the
-dimensioned and nested list encodings. Broadcast-heavy evaluation got ~30%
-faster, and exact integer matrices no longer round through float kernels.
-
 #### 10. TypeScript 7 — retire the TS 6 compat alias
 
-**Landed (2026-07-08):** the CLI compiler is TS 7 (native), installed
-side-by-side per Microsoft's recommendation: `@typescript/native`
-(npm:typescript@7) drives the `.d.ts` build (`build.sh`, ~31s → ~5s),
-`typecheck.sh`, and the declaration-type test (reworked off the removed
-`--baseUrl`); the module name `typescript` is aliased to the TS 6 API
-(`@typescript/typescript6`) because **TS 7.0 ships no programmatic API**, and
-ts-jest, typedoc, typescript-eslint, and madge all require one. TS7-vs-TS6
-declaration output verified type-identical (cosmetic emission diffs only).
-Note: both packages ship a `tsc` bin, so scripts reference the native binary
-by explicit path — bare `npx tsc` is ambiguous (it currently resolves to TS
-6.0.3 via the compat package's internal `@typescript/old` dependency).
-The nodenext source-import codemod (former item (b)) landed the same day
-(`cced4d27`): all relative imports in `src/` carry explicit `.js`/`/index.js`
-specifiers, jest strips them via `moduleNameMapper`, ESLint resolves them via
-`eslint-import-resolver-typescript` (required for `import/no-cycle` to keep
-following edges), and the `fix-dts-extensions.mjs` post-processor is retired —
-declarations are nodenext-correct natively, gated by the consumer smoke test.
-**New-file convention: relative imports in `src/` use `.js` specifiers.**
+The TS 7 side-by-side install landed 2026-07-08 (`@typescript/native` drives
+the build/typecheck; the module name `typescript` is aliased to the TS 6 API
+because TS 7.0 ships no programmatic API and ts-jest/typedoc/
+typescript-eslint/madge all require one; bare `npx tsc` is ambiguous — use
+the explicit native-binary path). The nodenext `.js`-specifier codemod landed
+the same day; **new-file convention: relative imports in `src/` use `.js`
+specifiers.**
 
 **Remaining:** drop the TS 6 compat alias once TS 7.1 ships its (new,
 different) programmatic API **and** ts-jest/typedoc/typescript-eslint/madge
 support it. Until then the side-by-side install is the intended end state,
-not a hack.
-
-**Effort:** small once the ecosystem is ready.
+not a hack. **Effort:** small once the ecosystem is ready.
 
 ### Correctness & symbolic findings (2026-07) — residue
 
@@ -997,29 +941,9 @@ cold-start survives: the cache-shaped levers were closed measured-unprofitable
 by the 2026-07-18 P2/P3 tail (see `PERFORMANCE_FINDINGS.md`; do not
 re-attempt without a new profile).
 
-**Stage-2 corpus audit findings (2026-07-10)** — the per-topic numeric sweep
-(all 57 topics; the two upstream formula bugs it caught — a172c7, b16177 —
-are fixed in the fork and PR'd) surfaced three engine/tooling items; **all
-three are fixed** and the full-corpus Stage-2 run now grades **0 False**
-(True 1589, seed 42, 142 s, no kill guard):
-
-- the P1 deadline escape in the numeric limit prober (probe-path
-  `iterationBudget` on compiled `Sum`/`Product` loops, ladder deadline
-  checks, `extrapolate` default `power` corrected 2 → 1 — `const_gamma/4644c0`
-  and `pi/dea83d` now converge to γ/π in milliseconds);
-- the `Count(Range(1, n))` collapse, including the iteration channel
-  (symbolic-bound `Range`/`Linspace` stay inert through `count`/`at`/`eq`/
-  `subsetOf`/`eltsgn`, `iterator`, materialization, and every fold seam);
-- the set-builder mistranslation (fork `4b88330`: comprehensions emit
-  `Map(Filter(S, Function(P, x)), Function(f, x))` instead of a literal
-  `Set`; +9 recovered simplify rules incl.
-  `Count(Filter(Primes, p ≤ x)) → PrimePi(x)`, artifact 1450). The
-  follow-on optimum image sets (`Min/Max/Supremum/Infimum` over a
-  comprehension, the last carrier of the literal-`Set` fiction) are
-  re-encoded too (fork `a832b59`), after CE's extrema learned to keep
-  unenumerable collection operands symbolic instead of grinding an
-  `Interval`'s dyadic sampler to the deadline or silently dropping a
-  declined operand.
+The Stage-2 corpus audit (2026-07-10, all 57 topics) surfaced three
+engine/tooling items — all fixed; the full-corpus run grades **0 False**
+(True 1589, seed 42). Record in the findings tracker.
 
 Two design-level residues are deliberately carried forward:
 
