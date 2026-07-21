@@ -326,7 +326,7 @@ w('- **Where CE leads:** it solves GCD, expansion, simplification and limits, an
   'than SymPy on most of them — e.g. simplification ~0.2 ms vs ~4 ms, $(a+b)^{80}$ ~4 ms vs ~22 ms.');
 w('- **Scope:** hand-authored cases across operations. The **Wester** suite is wired in separately ' +
   '(`wester.ts` → `REPORT-wester.md`, via the Mathematica files + `wl-parser`); the **Bondarenko** integration ' +
-  'set (35, local) is the next integration-depth source.');
+  'set (35, local) is wired in too (`bondarenko.ts` → `REPORT-bondarenko.md`).');
 w();
 w('## Where CE trails Mathematica (baseline)');
 w();

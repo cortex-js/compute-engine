@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.91.0 _2026-07-21_
 
 ### New Features
@@ -8,86 +10,94 @@
   `{parameters, converged, residualNorm, iterations}`. Unlike the closed-form
   `LinearRegression`/`PolynomialFit`, the model may be any composition
   (`a·e^{b·x} + c`, Gaussians, power laws, cosines, …). `data` is a list of
-  `(x…, y)` tuples or a plain list of `y` values (`x = 1, 2, …`). Each
-  parameter spec is a bare symbol (start `1`, unbounded), `(a, a0)` (explicit
-  start), or `(a, a0, lo, hi)` (start plus a box constraint, with `±∞` allowed
-  for one-sided bounds). Convergence is first-class: non-convergence within the
+  `(x…, y)` tuples or a plain list of `y` values (`x = 1, 2, …`). Each parameter
+  spec is a bare symbol (start `1`, unbounded), `(a, a0)` (explicit start), or
+  `(a, a0, lo, hi)` (start plus a box constraint, with `±∞` allowed for
+  one-sided bounds). Convergence is first-class: non-convergence within the
   iteration budget is reported as `converged: False` with the best-so-far
   values, never a silent wrong answer. Jacobians are analytic (via `D`), with a
   per-column forward finite-difference fallback for components that cannot be
   differentiated symbolically. A **joint form** fits several models to several
-  datasets sharing parameters (a list of models paired with a list of
-  datasets, residuals stacked).
+  datasets sharing parameters (a list of models paired with a list of datasets,
+  residuals stacked).
 
-- **`FindRoot` — numerical equation solving.**
-  `FindRoot(equations, params)` finds parameter values that zero one or more
-  residuals, sharing the same parameter-spec grammar, box constraints, and
-  result record as `FindFit` (root-finding is the zero-residual case of the
-  same Levenberg–Marquardt core). `equations` is an equation (`lhs == rhs`), a
-  bare residual expression (read as `= 0`), or a list of either.
+- **`FindRoot` — numerical equation solving.** `FindRoot(equations, params)`
+  finds parameter values that zero one or more residuals, sharing the same
+  parameter-spec grammar, box constraints, and result record as `FindFit`
+  (root-finding is the zero-residual case of the same Levenberg–Marquardt core).
+  `equations` is an equation (`lhs == rhs`), a bare residual expression (read as
+  `= 0`), or a list of either.
 
 ### Bug Fixes
 
 - **Applying a declared-then-assigned function to a large collection is now
   lazy, matching the hybrid-laziness contract.** Since 0.84.0, element-wise
-  operations over collections of more than 100 elements (or of unknown
-  length) evaluate to a lazy `Map` — but a function registered via
+  operations over collections of more than 100 elements (or of unknown length)
+  evaluate to a lazy `Map` — but a function registered via
   `ce.declare('g', '(number) -> number')` + `ce.assign('g', x ↦ …)` resolved
   through a value definition whose application-site broadcast still zipped
   eagerly, walking the whole collection at `evaluate()` time. The
-  value-definition application path now goes through the same laziness gate
-  as parse-assigned functions (`g(x) := …`) and built-in broadcasts: past the
-  eager threshold `g(X)` returns a lazy `Map`, results of ≤100 known-finite
-  elements are byte-identical to before, collection-typed parameters still
-  bind their argument whole, and tuples stay atomic. (Not a recent
-  regression: this path had been eager on every release since laziness
-  shipped in 0.84.0.)
+  value-definition application path now goes through the same laziness gate as
+  parse-assigned functions (`g(x) := …`) and built-in broadcasts: past the eager
+  threshold `g(X)` returns a lazy `Map`, results of ≤100 known-finite elements
+  are byte-identical to before, collection-typed parameters still bind their
+  argument whole, and tuples stay atomic. (Not a recent regression: this path
+  had been eager on every release since laziness shipped in 0.84.0.)
 
 ### Benchmarks
 
 #### Numeric performance (200-digit precision)
 
-Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
 
-| Expression | CE (current) | CE 0.86.1 | SymPy | math.js | Mathematica |
-| --- | --: | --: | --: | --: | --: |
-| $\pi^2$ | 6.2 | 7.0 | 175 | 173 | 3.9 |
-| $\sin 1$ | 20 | 20 | 220 | 506 | 5.2 |
-| $\cos 1$ | 20 | 21 | 219 | 612 | 6.9 |
-| $\ln 2$ | 14 | 14 | 348 | 4,616 | 4.0 |
-| $e^{\pi}$ | 12 | 12 | 221 | 5,086 | 4.6 |
-| $\zeta(3)$ | 1,580 | 1,619 | 261 | — | 49 |
-| $\Gamma(\tfrac13)$ | 842 | 839 | 345 | — | 211 |
-| $\psi(\tfrac13)$ | 728 | 720 | 2,806 | — | 168 |
+| Expression         | CE (current) | CE 0.86.1 | SymPy | math.js | Mathematica |
+| ------------------ | -----------: | --------: | ----: | ------: | ----------: |
+| $\pi^2$            |          6.2 |       7.0 |   175 |     173 |         3.9 |
+| $\sin 1$           |           20 |        20 |   220 |     506 |         5.2 |
+| $\cos 1$           |           20 |        21 |   219 |     612 |         6.9 |
+| $\ln 2$            |           14 |        14 |   348 |   4,616 |         4.0 |
+| $e^{\pi}$          |           12 |        12 |   221 |   5,086 |         4.6 |
+| $\zeta(3)$         |        1,580 |     1,619 |   261 |       — |          49 |
+| $\Gamma(\tfrac13)$ |          842 |       839 |   345 |       — |         211 |
+| $\psi(\tfrac13)$   |          728 |       720 | 2,806 |       — |         168 |
 
 #### Symbolic capability & performance
 
-Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.86.1** columns to see what is *new this release* (a `—` under `0.86.1` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE (current)** and **CE 0.86.1** columns to see
+what is _new this release_ (a `—` under `0.86.1` next to a number under the
+current build). The **CE + R/F** column is the current build with the opt-in
+Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
 
-| Operation | CE (current) | CE + R/F | CE 0.86.1 | SymPy | math.js | Mathematica |
-| --- | :--: | :--: | :--: | :--: | :--: | :--: |
-| **Antiderivatives** |  |  |  |  |  |  |
-| $\int\frac{1}{\sqrt x}\,dx$ | 6.7× | 3.1× | 5.2× | 0.5× | — | 1× |
-| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 10× | 1.6× | 8.4× | 0.08× | — | 1× |
-| $\int\frac{1}{x^3+1}\,dx$ | 6.3× | 0.9× | 4.4× | 0.4× | — | 1× |
-| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 2.0× | — | 0.1× | — | 1× |
-| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 1.4× | — | 0.01× | — | 1× |
-| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 1.3× | — | 0.007× | — | 1× |
-| **Derivatives** |  |  |  |  |  |  |
-| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.1× | 0.1× | 0.06× | 0.003× | 0.01× | 1× |
-| **Simplification** |  |  |  |  |  |  |
-| $\sqrt{3+2\sqrt2}$ | 41× | 31× | 32× | — | — | 1× |
-| $\sqrt6\,x+\sqrt2\,x$ | 104× | 54× | 59× | 3.3× | 16× | 1× |
-| **Evaluation** |  |  |  |  |  |  |
-| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 58× | 29× | 47× | 3.0× | — | 1× |
-| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 9.3× | 5.6× | 8.0× | 2.1× | — | 1× |
-| $\int_1^2\tfrac1x\,dx$ | 7405× | 6951× | 6437× | 77× | — | 1× |
-| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 423× | 161× | 363× | 2.6× | — | 1× |
-| **Solving** |  |  |  |  |  |  |
-| $x^4+x^2-1=0$ | 0.3× | 0.3× | 0.2× | 0.06× | — | 1× |
-| $x^3-x-1=0$ | 1.7× | 2.0× | 1.4× | 0.04× | — | 1× |
+| Operation                              | CE (current) | CE + R/F | CE 0.86.1 | SymPy  | math.js | Mathematica |
+| -------------------------------------- | :----------: | :------: | :-------: | :----: | :-----: | :---------: |
+| **Antiderivatives**                    |              |          |           |        |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |     6.7×     |   3.1×   |   5.2×    |  0.5×  |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |     10×      |   1.6×   |   8.4×    | 0.08×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |     6.3×     |   0.9×   |   4.4×    |  0.4×  |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |      —       |   2.0×   |     —     |  0.1×  |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |      —       |   1.4×   |     —     | 0.01×  |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |      —       |   1.3×   |     —     | 0.007× |    —    |     1×      |
+| **Derivatives**                        |              |          |           |        |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |     0.1×     |   0.1×   |   0.06×   | 0.003× |  0.01×  |     1×      |
+| **Simplification**                     |              |          |           |        |         |             |
+| $\sqrt{3+2\sqrt2}$                     |     41×      |   31×    |    32×    |   —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |     104×     |   54×    |    59×    |  3.3×  |   16×   |     1×      |
+| **Evaluation**                         |              |          |           |        |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |     58×      |   29×    |    47×    |  3.0×  |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |     9.3×     |   5.6×   |   8.0×    |  2.1×  |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |    7405×     |  6951×   |   6437×   |  77×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |     423×     |   161×   |   363×    |  2.6×  |    —    |     1×      |
+| **Solving**                            |              |          |           |        |         |             |
+| $x^4+x^2-1=0$                          |     0.3×     |   0.3×   |   0.2×    | 0.06×  |    —    |     1×      |
+| $x^3-x-1=0$                            |     1.7×     |   2.0×   |   1.4×    | 0.04×  |    —    |     1×      |
 
-Across the cases both solve, Compute Engine is a **median 6.7× faster than Mathematica** (up to 7405×) — in the browser, not a proprietary kernel.
+Across the cases both solve, Compute Engine is a **median 6.7× faster than
+Mathematica** (up to 7405×) — in the browser, not a proprietary kernel.
 
 <sub>
 Measured 2026-07-21 · Compute Engine `0.90.0` @ `8740998f` (current build) · published `0.86.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.

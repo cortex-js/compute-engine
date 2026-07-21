@@ -21,6 +21,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Wester suite** | `audit/wester.ts` | CE · CE+R/F · SymPy · **Mathematica** | `audit/REPORT-wester.md` |
 | **Solving** | `audit/solve.ts` | CE · CE+Fungrim · SymPy · **Mathematica** | `audit/REPORT-solve.md` |
 | **ODE solving** | `audit/dsolve.ts` | CE · SymPy | `audit/REPORT-dsolve.md` |
+| **Bondarenko ∫** | `audit/bondarenko.ts` | CE · CE+R/F · SymPy · Mathematica | `audit/REPORT-bondarenko.md` |
 | **Kernel microbench** | `big-decimal/*` | CE · CE published · SymPy · mpmath | `big-decimal/BIGNUM-COMPARISON.md` |
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 
@@ -262,6 +263,8 @@ feed it, each writing its own report:
 | `audit/solve.ts` | The **univariate solving** benchmark: runs **base CE / CE+Fungrim solve templates / SymPy / Mathematica**, graded by a root-substitution oracle → **`audit/REPORT-solve.md`**. |
 | `audit/gen_dsolve.py` | Defines the **ODE** corpus once as MathJSON (SymPy's `test_ode.py` classes + textbook ODEs), translates each to a SymPy ODE, runs `dsolve` (per-case timeout — some hang) and grades it by a numeric residual oracle → `audit/dsolve_cases.json`. |
 | `audit/dsolve.ts` | The **ODE-solving** benchmark: runs CE `DSolve` from source and grades it by a **substitute-back residual oracle** (explicit `y=f(x)`; implicit `F(x,y)=C` via the first-integral identity `y′=−F_x/F_y`; initial/boundary conditions) → **`audit/REPORT-dsolve.md`**. CE’s inert-rather-than-wrong contract is scored honestly: `unsupported` (expected inert) is separated from `gap` (should have solved). SymPy is the comparator (graded by the mirror oracle in `gen_dsolve.py`); Mathematica is not yet wired in. |
+| `audit/bondarenko.ts` | The **Bondarenko** integration set: loads the 35 vendored problems (`benchmarks/bondarenko/`) via `scripts/rubi/load-tests.ts` and runs each indefinite integral on **base CE / CE+Rubi+Fungrim / SymPy / Mathematica**, graded by the invariant `d/dx(F) ≈ f` → **`audit/REPORT-bondarenko.md`**. Uses the same SymPy (`run_sympy_wester.py`) and Wolfram (`run_wolfram_batch.mjs`) batch runners as the Wester harness. |
+| `benchmarks/bondarenko/` | The vendored data: Vladimir Bondarenko's 35 integration problems (`bondarenko-problems.m`), an independent test set from the Rubi MathematicaSyntaxTestSuite (**MIT**). |
 
 The Mathematica side of all three is driven through the shared
 [`runners/run_wolfram_batch.mjs`](./runners/run_wolfram_batch.mjs) (one kernel
@@ -276,6 +279,7 @@ python benchmarks/audit/gen.py && npx tsx benchmarks/audit/audit.ts   # hand-aut
 npx tsx benchmarks/audit/wester.ts                                     # Wester audit
 ./venv/bin/python3 benchmarks/audit/gen_solve.py && npx tsx benchmarks/audit/solve.ts  # univariate solving
 ./venv/bin/python3 benchmarks/audit/gen_dsolve.py && npx tsx benchmarks/audit/dsolve.ts  # ODE solving
+npx tsx benchmarks/audit/bondarenko.ts                                 # Bondarenko integration set
 ```
 
 **Grading** is by operation invariant, so no reference answers are needed:
@@ -307,6 +311,13 @@ Heads covered: factor, expand, simplify, derivative, limit, indefinite &
 definite integration, `Solve` and `Resultant`. (`PolynomialGCD` problems in the
 Wester files reference stateful symbols / are multivariate, so they're skipped
 here — polynomial GCD is covered concretely by the hand-authored `audit.ts`.)
+
+The Bondarenko problems are **MIT** (Vladimir Bondarenko's independent test set
+from the Rubi MathematicaSyntaxTestSuite); `benchmarks/bondarenko/` holds a
+verbatim copy of the Wolfram-Language source (parseable by `load-tests.ts`).
+Unlike the release-baseline harnesses, `bondarenko.ts` is an **on-demand
+integration-depth probe** (like `dsolve.ts`) — run it when investigating the
+indefinite-∫ gap, not on every release.
 
 ---
 
