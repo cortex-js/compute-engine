@@ -1,5 +1,48 @@
 ## [Unreleased]
 
+### New Features
+
+- **`FindFit` — general nonlinear least-squares fitting.**
+  `FindFit(data, model, params, vars)` fits an arbitrary model expression to
+  data by Levenberg–Marquardt, returning a record
+  `{parameters, converged, residualNorm, iterations}`. Unlike the closed-form
+  `LinearRegression`/`PolynomialFit`, the model may be any composition
+  (`a·e^{b·x} + c`, Gaussians, power laws, cosines, …). `data` is a list of
+  `(x…, y)` tuples or a plain list of `y` values (`x = 1, 2, …`). Each
+  parameter spec is a bare symbol (start `1`, unbounded), `(a, a0)` (explicit
+  start), or `(a, a0, lo, hi)` (start plus a box constraint, with `±∞` allowed
+  for one-sided bounds). Convergence is first-class: non-convergence within the
+  iteration budget is reported as `converged: False` with the best-so-far
+  values, never a silent wrong answer. Jacobians are analytic (via `D`), with a
+  per-column forward finite-difference fallback for components that cannot be
+  differentiated symbolically. A **joint form** fits several models to several
+  datasets sharing parameters (a list of models paired with a list of
+  datasets, residuals stacked).
+
+- **`FindRoot` — numerical equation solving.**
+  `FindRoot(equations, params)` finds parameter values that zero one or more
+  residuals, sharing the same parameter-spec grammar, box constraints, and
+  result record as `FindFit` (root-finding is the zero-residual case of the
+  same Levenberg–Marquardt core). `equations` is an equation (`lhs == rhs`), a
+  bare residual expression (read as `= 0`), or a list of either.
+
+### Bug Fixes
+
+- **Applying a declared-then-assigned function to a large collection is now
+  lazy, matching the hybrid-laziness contract.** Since 0.84.0, element-wise
+  operations over collections of more than 100 elements (or of unknown
+  length) evaluate to a lazy `Map` — but a function registered via
+  `ce.declare('g', '(number) -> number')` + `ce.assign('g', x ↦ …)` resolved
+  through a value definition whose application-site broadcast still zipped
+  eagerly, walking the whole collection at `evaluate()` time. The
+  value-definition application path now goes through the same laziness gate
+  as parse-assigned functions (`g(x) := …`) and built-in broadcasts: past the
+  eager threshold `g(X)` returns a lazy `Map`, results of ≤100 known-finite
+  elements are byte-identical to before, collection-typed parameters still
+  bind their argument whole, and tuples stay atomic. (Not a recent
+  regression: this path had been eager on every release since laziness
+  shipped in 0.84.0.)
+
 ## 0.90.0 _2026-07-21_
 
 ### New Features

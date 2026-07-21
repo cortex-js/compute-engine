@@ -28,6 +28,8 @@ const OPERATORNAME_HEADS = [
   'Correlation',
   'LinearRegression',
   'PolynomialFit',
+  'FindFit',
+  'FindRoot',
 ];
 
 export const DEFINITIONS_STATISTICS: LatexDictionary = [

@@ -2589,6 +2589,20 @@ function applyFunctionLiteral(
     ops.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
     paramsAreScalar(broadcastGateType)
   ) {
+    // Hybrid laziness, as at the operator-def lambda broadcast (step 2b):
+    // past the eager threshold — or for a provably-finite collection of
+    // unknown size — return the lazy `Map` form instead of materializing.
+    // The `Map` body references the function by NAME (`g(_1)`), so each
+    // element re-dispatches through this path on a scalar at drain time.
+    const lazy = lazyBroadcastMapIfNeeded(
+      expr.engine,
+      expr.operator,
+      ops,
+      isBroadcastableCollection,
+      options?.numericApproximation ?? false
+    );
+    if (lazy) return lazy;
+
     const items = zip(ops);
     if (items) {
       const results: Expression[] = [];

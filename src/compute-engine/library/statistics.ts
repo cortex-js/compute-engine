@@ -53,6 +53,7 @@ import type {
 import { bignumPreferred } from '../boxed-expression/utils.js';
 import { toInteger } from '../boxed-expression/numerics.js';
 import { deterministicRandom, nextSeed } from '../numerics/random.js';
+import { findFit } from '../nonlinear-fit.js';
 import {
   distributionMean,
   distributionStandardDeviation,
@@ -661,6 +662,25 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '(any+) -> list<number>',
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluatePolynomialFit(ce, ops, !!numericApproximation),
+    },
+
+    FindFit: {
+      description:
+        'Nonlinear least-squares fit of a model to data. ' +
+        'FindFit(data, model, params, vars): fit `model` (an expression in ' +
+        '`vars` and the parameters) to `data`, a list of (x…, y) tuples or a ' +
+        'plain list of y values. Each parameter spec is a bare symbol, ' +
+        '(a, a0), or (a, a0, lo, hi) with box constraints. Returns a record ' +
+        '{parameters, converged, residualNorm, iterations}. The joint form ' +
+        'takes a list of models and matching datasets sharing parameters.',
+      complexity: 1200,
+      broadcastable: false,
+      // Hold the arguments: a parameter symbol may carry a seeded document
+      // value that must NOT be substituted before the fit (model/params/vars
+      // stay held; the data operand is evaluated inside the handler).
+      lazy: true,
+      signature: '(any, any, any, any) -> dictionary',
+      evaluate: (ops, { engine: ce }) => findFit(ce, ops),
     },
   },
   {

@@ -45,6 +45,7 @@ import {
   canonicalSolve,
   evaluateSolve,
 } from '../boxed-expression/solve-domain.js';
+import { findRoot } from '../nonlinear-fit.js';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
   Expression,
@@ -1164,6 +1165,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(any, any*) -> list',
       canonical: (ops, { engine: ce }) => canonicalSolve(ce, ops),
       evaluate: (ops, { engine: ce }) => evaluateSolve(ce, ops),
+    },
+
+    FindRoot: {
+      description: [
+        'FindRoot(equations, params): numerically find parameter values that',
+        'zero the residuals. `equations` is an equation (`lhs == rhs`), a bare',
+        'residual expression (read as `= 0`), or a list of either. `params` is',
+        'a list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with',
+        'box constraints), matching `FindFit`. Returns a record',
+        '{parameters, converged, residualNorm, iterations}.',
+      ],
+      keywords: ['roots', 'zeros'],
+      // Hold the arguments: an `Equal` must not collapse to a boolean, and a
+      // parameter symbol may carry a seeded value that must not be substituted
+      // before solving.
+      lazy: true,
+      signature: '(any, any) -> dictionary',
+      evaluate: (ops, { engine: ce }) => findRoot(ce, ops),
     },
 
     ReplaceAll: {
