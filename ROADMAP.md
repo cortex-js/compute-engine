@@ -921,38 +921,20 @@ dischargeable) quantifies exactly what it would buy. Let demand justify it.
 
 #### 9. Matrix/tensor value representation — unify `List` vs `BoxedTensor`
 
-**What:** tensor values exist in two forms — a `BoxedTensor` instance (the
-canonical `box`/`function` path) and a plain `List` `BoxedFunction` (broadcast /
-map results, `ce._fn('List', …)`). `isTensor` recognizes only the former, so a
-tensor-shaped plain list bypasses the tensor-only paths. Elementwise arithmetic
-over such lists was closed by `broadcastOverIndexedCollections` (2026-07-11):
-`Sqrt(M) − Sqrt(M)` now collapses to `[[0,0]]`. Visible residue: signature-gated
-and `isTensor`-gated operations — `Determinant(Sqrt(M))` errors
-`incompatible-type` ("matrix" vs `list<finite_number>`), and the
-`linear-algebra.ts` evaluate handlers decline broadcast-produced operands.
-
-**Status:** the *exactness* half of this cluster shipped — exact rational/radical
-tensor entries no longer floatify (`getExpressionDatatype` uses the `expression`
-dtype). The *detection* half now has an **approved representation-level design**
-(2026-07-20): a single canonical `List` representation with a lazy, cached
-tensor view, honest shaped element types (`[Rgb,Rgb]` → `list<color^2>`,
-closing Tycho item 69), deletion of the `BoxedTensor` Expression subclass, and
-retirement of the hardcoded `CONTAINER_OPERATORS` blocklist into a type-kind
-predicate. Phased A/B/C with per-phase measurement gates; see
-`docs/plans/2026-07-20-tensor-unification-design.md`. The earlier point-fix
-attempts (promote broadcast results to `BoxedTensor`; an `operator === 'List'`
-gate in `add`/`mul`; a dtype-aware "smart" promoter) each regressed on
-precision, performance, or correctness and remain do-not-re-attempt.
-
-**Why "strategic":** at the default precision a machine float and a
-high-precision bignum are both `BigNumericValue` / `isExact === false`, so a
-storage dtype can't be chosen cheaply, and any per-broadcast normalization is
-hot enough to blow simplify/calculus deadlines — which is why the approved
-design makes tensor-ness a lazy *view* on the single `List` representation
-(packing becomes a per-operation decision, not a storage commitment) instead
-of another construction-time patch. Demand arrived via Tycho item 69. Detailed
-findings on the failed point-fix approaches are in
-`docs/plans/2026-06-28-tensor-value-representation-design.md`.
+**Landed (2026-07-21):** all three phases of the tensor unification shipped
+(`docs/plans/2026-07-20-tensor-unification-design.md` is the as-built record).
+The `BoxedTensor` Expression subclass is deleted; tensor values are canonical
+`List`s and tensor-ness is a lazy view (`boxed-expression/tensor-view.ts`:
+O(rank) `candidateShape` for hot dispatch, mode-aware `packTensor` for numeric
+kernels — exact `evaluate()` packs `expression` dtype, `.N()` packs `float64` —
+and `packStructural` for structure-only operations over any cell type). Lists
+carry honest shaped types (`[Rgb,Rgb]` → `list<color^2>`, closing Tycho item
+69); broadcast applications mirror their operands' shapes, so
+`Determinant(Sqrt(M))` evaluates; overlap-deferred validation admits
+statically-undecidable collection operands; the `CONTAINER_OPERATORS` blocklist
+retired into the type-kind atomicity predicate; the subtype checker bridges the
+dimensioned and nested list encodings. Broadcast-heavy evaluation got ~30%
+faster, and exact integer matrices no longer round through float kernels.
 
 #### 10. TypeScript 7 — retire the TS 6 compat alias
 
