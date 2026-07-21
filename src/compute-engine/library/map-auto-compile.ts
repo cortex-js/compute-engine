@@ -144,6 +144,7 @@ function markedMapLambda(
 const EXCLUDED_HEADS = new Set([
   'Random',
   'RandomInteger',
+  'RandomList',
   'RandomVariate',
   'Shuffle',
 ]);

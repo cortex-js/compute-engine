@@ -8,6 +8,7 @@ import {
   isFiniteIndexedCollection,
   isNumericTuple,
   isPossiblyCollectionTyped,
+  isTuple,
 } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -62,6 +63,43 @@ function isBoundPossiblyCollectionTyped(a: Expression): boolean {
   const t = a.type.type;
   if (typeof t !== 'string' && t.kind === 'broadcastable') return true;
   return a.isCanonical || a.isStructural;
+}
+
+/**
+ * A `Tuple` or `List` literal with a broadcasting component — a shape whose
+ * norm does NOT reduce to one scalar, so `Norm`/`Abs` compile handlers use
+ * this to fail closed (D6) and let the interpreter broadcast. Exported for
+ * the compile targets, which must not import `collection-utils` directly
+ * (module-init ordering — see `isIndexedCollectionOperand` in
+ * javascript-target.ts); this module already imports it safely.
+ *
+ * The broadcast test differs by literal kind, mirroring evaluation
+ * semantics:
+ * - `Tuple` (a point): ANY non-tuple collection component broadcasts —
+ *   `([1,2], 3)` zips into a list of two points, one norm per element. A
+ *   tuple-typed component is atomic (a nested point), not a broadcast.
+ * - `List` (a vector): a literal `List` component is a matrix ROW (the
+ *   Frobenius norm is a legitimate scalar), so only a NON-literal
+ *   collection-typed component (e.g. the `broadcastable`-typed `x+[0.5,1]`)
+ *   is a hazard — evaluation nests it where a compiled flatten cannot
+ *   follow (invalid vecN shader source; a silently-flattened wrong scalar
+ *   through `_SYS.norm`).
+ */
+export function pointHasBroadcastComponent(expr: Expression): boolean {
+  if (isFunction(expr, 'Tuple'))
+    return expr.ops.some(
+      (op) =>
+        !isTuple(op) &&
+        (op.isCollection || op.type.matches('indexed_collection'))
+    );
+  if (isFunction(expr, 'List'))
+    return expr.ops.some(
+      (op) =>
+        !isFunction(op, 'List') &&
+        !isTuple(op) &&
+        (op.isCollection || op.type.matches('indexed_collection'))
+    );
+  return false;
 }
 
 /**
@@ -375,6 +413,21 @@ export class BaseCompiler {
         if (custom !== undefined && custom !== null && custom !== '')
           return custom;
       }
+    }
+
+    // |(x,y)| over a fixed-arity point is the Euclidean norm (`Abs(Tuple)`
+    // routes to `Norm` at evaluation). A point binds ATOMICALLY — it must
+    // never be broadcast into component-wise `abs`, so this rewrite sits
+    // BEFORE the broadcast lowering (which would map over the tuple) but
+    // AFTER the custom per-operator compile hook above, so a user-registered
+    // `Abs` handler keeps its documented precedence (Tycho item 74: the js
+    // target compiled `|(x,y)|` to a bare array that concatenated into a
+    // string downstream). `isTuple` (type-based), matching the evaluate and
+    // type-handler detection: a tuple-TYPED symbol is a point too — without
+    // it, `|p|` for `p: tuple<real,real>` broadcast `Math.abs` over the
+    // point's components behind `success: true`.
+    if (h === 'Abs' && args.length === 1 && isTuple(args[0])) {
+      return BaseCompiler.compileExpr(engine, 'Norm', args, prec, target);
     }
 
     // Element-wise broadcast of a `broadcastable` head (arithmetic + unary

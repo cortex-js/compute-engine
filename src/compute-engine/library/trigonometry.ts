@@ -28,6 +28,8 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import { isTuple } from '../collection-utils.js';
+import { pointNormType } from './utils.js';
 import { numericTypeHandler, elementaryFunctionType } from './type-handlers.js';
 import { isMeasurement, measurementTrig } from './measurement-arithmetic.js';
 import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite.js';
@@ -179,16 +181,28 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Hypotenuse length: sqrt(x^2 + y^2).',
       broadcastable: true,
       signature: '(real, real) -> real',
-      type: () => 'finite_real',
+      // A point argument with a broadcasting component zips into one result
+      // per element (via its norm below) — report the honest list type, not
+      // a decided-but-wrong scalar (the Tycho item-44 class).
+      type: ([x, y]) =>
+        (x && isTuple(x) && pointNormType(x) !== 'number') ||
+        (y && isTuple(y) && pointNormType(y) !== 'number')
+          ? 'list<number>'
+          : 'finite_real',
       sgn: () => 'non-negative',
       // Evaluate the constructed √(x²+y²) so `.N()` returns a number, not an
       // unevaluated expression (the handler result is not re-driven otherwise).
       // Under `evaluate()` the exact folding still applies (`Hypot(1/2,1/3) →
       // √13/6`); under `.N()` it numericizes.
-      evaluate: ([x, y], { engine, numericApproximation }) =>
-        engine
-          .expr(['Sqrt', ['Add', ['Square', x], ['Square', y]]])
-          .evaluate({ numericApproximation }),
+      // A fixed-arity point squares through its Euclidean norm (`Square` of a
+      // bare `Tuple` is inert): Hypot((3,4), 1) = √(‖(3,4)‖² + 1²).
+      evaluate: ([x, y], { engine, numericApproximation }) => {
+        const sq = (v: Expression): Expression =>
+          engine.expr(isTuple(v) ? ['Square', ['Norm', v]] : ['Square', v]);
+        return engine
+          .expr(['Sqrt', ['Add', sq(x), sq(y)]])
+          .evaluate({ numericApproximation });
+      },
     },
 
     // The definition of other trig functions may rely on Sin, so it is defined

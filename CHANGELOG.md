@@ -1,3 +1,67 @@
+## [Unreleased]
+
+### New Features
+
+- **`RandomList(n)` — an eagerly-materialized list of `n` independent uniform
+  reals in `[0, 1)`.** Draws come from the engine's random stream (honoring
+  `ce.randomSeed` for reproducibility); the two-argument form
+  `RandomList(n, seed)` produces a deterministic list from an explicit seed,
+  independent of the engine stream. Eagerness is deliberate: the result is a
+  concrete `List`, so every reference to it sees the same draws (a lazy
+  collection of `Random()` calls re-draws on each traversal). With a literal
+  count the length is part of the type (`RandomList(5)` types
+  `vector<finite_real^5>`). The count is capped at 10⁶ elements; a larger
+  count — or a negative one — returns an `out-of-range` error rather than
+  silently misbehaving.
+
+### Improvements and Bug Fixes
+
+- **`Abs` of a fixed-arity point is now the Euclidean norm.** `|(3, 4)|`
+  evaluates to `5` — the single-bar spelling of the vector magnitude,
+  consistent with the `\lVert…\rVert` (`Norm`) parse and with tuple
+  arithmetic treating points as vectors in ℝⁿ. Previously the expression
+  stayed inert under `evaluate()`, and **compiled to garbage**: the
+  JavaScript target returned the bare component array (which concatenated
+  into a *string* in downstream arithmetic), and the shader targets emitted
+  invalid code. All targets now compile it as the norm (`_SYS.norm` on the
+  js target, `length()` on GLSL/WGSL for 2–4 components; other arities and
+  points with a broadcasting component fail closed to interpretation).
+  Detection is type-based, so a tuple-*typed* symbol or parameter routes as
+  a point too. `Abs` over a `List` is unchanged and still broadcasts
+  elementwise. `Hypot` with a point argument now squares through the norm
+  as well: `Hypot((3,4), 1) = √26` (previously an inert `Power` of a
+  tuple). And `Norm`/`Abs` of a point now honor the exactness contract:
+  `evaluate()` keeps the exact `√2`, `.N()` numericizes.
+
+- **`Norm` compiles on the `interval-js` target** for fixed-arity points
+  (default L2 norm; `hypot`-based in 2-D for a tighter enclosure). Implicit
+  curves and line series expressed with `\lVert…\rVert` or `|…|` now get
+  interval-arithmetic break detection instead of silently degrading to point
+  sampling.
+
+- **`Norm`/`Abs` of a point with a broadcasting component reports an honest
+  `list<number>` type.** `‖(x+[0.5,1], y, z+2)‖` evaluates to a `List` (one
+  norm per zipped element); its static type now says so instead of `number`,
+  matching the equivalent `\sqrt{(x+[0.5,1])^2+…}` spelling.
+
+- **A `Comprehension` serializes with bracket delimiters** so it survives
+  its own round trip in every position:
+  `H=[k^2 \operatorname{for} k=[1...4]]` now serializes as
+  `H=\left[k^2 \operatorname{for} k = 1..4\right]` (previously the unfenced
+  form re-parsed with the assignment swallowed into the comprehension body,
+  and under an `Add` the trailing term was absorbed into the iteration
+  range). The fence is unconditional — `[body for …]` parses back to the
+  same `Comprehension`, so it is lossless. (Non-canonical
+  serialization-shape callout, same class as the 0.83 big-operator body
+  fence.)
+
+- **`Expression.isValid` is now O(1) after the first query.** Validity is a
+  structural property of an immutable expression, so it is computed once and
+  cached; previously every query re-walked the whole subtree (and a parent's
+  query re-entered each child's), which dominated large-document workloads —
+  one profiled 75-row import spent 77% of its time in repeated `isValid`
+  walks.
+
 ## 0.89.0 _2026-07-21_
 
 ### Breaking Changes

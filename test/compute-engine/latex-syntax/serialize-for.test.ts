@@ -26,11 +26,16 @@ describe('FOR LOOP - SERIALIZATION', () => {
 describe('COMPREHENSION - SERIALIZATION', () => {
   // A canonical Comprehension is a lazy collection. Its `.latex` must be the
   // faithful comprehension form (not a materialized, elided preview List that
-  // re-parses to a corrupt finite List). See Tycho item 22.
+  // re-parses to a corrupt finite List). See Tycho item 22. The bracket
+  // fence is unconditional (Tycho item 72): `[body for …]` re-parses to the
+  // same Comprehension, and without the fence an operand-position
+  // comprehension swallowed its surrounding operator on re-parse.
   test('canonical Comprehension serializes faithfully (not an elided List)', () => {
     expect(
       latex(['Comprehension', ['Power', 'n', 2], ['Element', 'n', ['Range', 1, 250]]])
-    ).toMatchInlineSnapshot(`n^2 \\operatorname{for} n = 1..250`);
+    ).toMatchInlineSnapshot(
+      `\\left[n^2 \\operatorname{for} n = 1..250\\right]`
+    );
   });
 
   // Round-trip contract: parse(serialize(x)) structurally equals x.

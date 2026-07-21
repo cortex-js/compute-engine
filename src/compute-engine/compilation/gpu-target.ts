@@ -22,7 +22,7 @@ import type {
   CompilationOptions,
   CompilationResult,
 } from './types.js';
-import { BaseCompiler } from './base-compiler.js';
+import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 
 /**
@@ -786,6 +786,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Standard math functions with complex dispatch
+  // Note: `Abs` of a fixed-arity point never reaches this handler — the
+  // shared compiler rewrites `Abs(Tuple)` → `Norm` (base-compiler.ts) so the
+  // point compiles through the `Norm` codegen below (Tycho item 74).
   Abs: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `length(${compile(args[0])})`;
@@ -1493,11 +1496,39 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Distance: 'distance',
   Dot: 'dot',
   // The GLSL/WGSL `length()` builtin is the Euclidean NORM of a vector, which
-  // is CE `Norm` — NOT CE `Length` (element count). Mapping CE `Length` here
-  // silently emitted a norm, and for >4 elements produced invalid shader source
-  // (`length(float[5](...))`). `Norm` carries the `length()` builtin; CE
-  // `Length` fails closed on GPU targets (below).
-  Norm: 'length',
+  // is CE `Norm` — NOT CE `Length` (element count; fails closed below).
+  // `length()` only accepts scalars and vec2/3/4: a fixed-arity point or list
+  // literal outside that range compiles to an ARRAY constructor
+  // (`float[5](...)`), which `length()` rejects — so emit `abs` for arity 1
+  // and fail closed (D6) for arity ≥ 5 or a norm-type argument rather than
+  // reporting success on invalid shader source.
+  Norm: (args, compile, target) => {
+    if (args.length > 1)
+      throw new Error(
+        `Norm: only the default L2 norm compiles on the ` +
+          `${target.language ?? 'GPU'} target. Fail closed (D6).`
+      );
+    const arg = args[0];
+    if (isFunction(arg, 'Tuple') || isFunction(arg, 'List')) {
+      // A broadcasting component means one norm per zipped element — not a
+      // scalar. Fail closed (D6).
+      if (pointHasBroadcastComponent(arg))
+        throw new Error(
+          'Norm: cannot compile a point with a broadcasting component. ' +
+            'Fail closed (D6).'
+        );
+      const n = arg.nops;
+      if (n === 0 || n > 4)
+        throw new Error(
+          `Norm: the ${target.language ?? 'GPU'} 'length()' builtin only ` +
+            `accepts 2-4 component vectors (got ${n}). Fail closed (D6).`
+        );
+      if (n === 1) return `abs(${compile(arg.op1)})`;
+      return `length(${compile(arg)})`;
+    }
+    // Non-literal operand (e.g. a vec-typed symbol): `length()` applies.
+    return `length(${compile(arg)})`;
+  },
   Length: (_args, _compile, target) => {
     throw new Error(
       `Length (collection element count) is not supported on the ` +

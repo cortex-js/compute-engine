@@ -161,6 +161,13 @@ export class BoxedFunction
 
   private _hash: number | undefined;
 
+  // Validity depends only on the (immutable) structure — the operator and
+  // the operands' own validity — so it is computed once and cached. Without
+  // the cache a parent's `isValid` re-walks every descendant on every query,
+  // which is O(nodes × depth) for nested queries (Tycho item 75: 77% of a
+  // large document import was spent in repeated `isValid` walks).
+  private _isValid: boolean | undefined;
+
   // Cached properties of the expression
   private _value: CachedValue<Expression> = {
     value: null,
@@ -336,9 +343,10 @@ export class BoxedFunction
   }
 
   get isValid(): boolean {
-    if (this._operator === 'Error') return false;
-
-    return this._ops.every((x) => x?.isValid);
+    if (this._isValid !== undefined) return this._isValid;
+    this._isValid =
+      this._operator !== 'Error' && this._ops.every((x) => x?.isValid);
+    return this._isValid;
   }
 
   /** Note: if the expression is not canonical, this will return a canonical

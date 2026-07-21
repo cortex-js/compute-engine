@@ -8,9 +8,13 @@
  */
 
 import type { Expression } from '../global-types.js';
-import { isSymbol, isNumber } from '../boxed-expression/type-guards.js';
+import {
+  isSymbol,
+  isNumber,
+  isFunction,
+} from '../boxed-expression/type-guards.js';
 
-import { BaseCompiler } from './base-compiler.js';
+import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import type {
   CompileTarget,
@@ -47,6 +51,25 @@ const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
   Or: ['_IA.or', 20],
   Not: ['_IA.not', 20],
 };
+
+/**
+ * Emit the Euclidean (L2) norm of a fixed-arity point from its compiled
+ * components: `hypot` for the 2-D case (tighter enclosure than the
+ * sqrt-of-squares composition), √(Σ xᵢ²) otherwise.
+ */
+function compileIntervalPointNorm(
+  components: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+): string {
+  const comps = components.map((c) => compile(c));
+  if (comps.length === 0) return '_IA.point(0)';
+  if (comps.length === 1) return `_IA.abs(${comps[0]})`;
+  if (comps.length === 2) return `_IA.hypot(${comps[0]}, ${comps[1]})`;
+  let sum = `_IA.add(_IA.square(${comps[0]}), _IA.square(${comps[1]}))`;
+  for (let i = 2; i < comps.length; i++)
+    sum = `_IA.add(${sum}, _IA.square(${comps[i]}))`;
+  return `_IA.sqrt(${sum})`;
+}
 
 /**
  * Compile an N-ary chained relation (`Less`, `Greater`, `Equal`, …) to the
@@ -125,7 +148,33 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Negate: (args, compile) => `_IA.negate(${compile(args[0])})`,
 
   // Elementary functions
+  // Note: `Abs` of a fixed-arity point never reaches this handler — the
+  // shared compiler rewrites `Abs(Tuple)` → `Norm` (base-compiler.ts) so
+  // the point compiles through the `Norm` codegen below (Tycho item 74).
   Abs: (args, compile) => `_IA.abs(${compile(args[0])})`,
+  // Euclidean (L2) norm of a fixed-arity point. Only the default L2 norm of
+  // a structural `Tuple` is representable here; any other operand, an
+  // explicit norm-type argument, or a broadcasting component throws to fail
+  // closed to scalar JS.
+  Norm: (args, compile) => {
+    if (args.length > 1)
+      throw new Error(
+        'Norm: only the default L2 norm compiles on the interval target'
+      );
+    const arg = args[0];
+    if (!isFunction(arg, 'Tuple'))
+      throw new Error(
+        'Norm: the interval target requires a fixed-arity point operand'
+      );
+    // A broadcasting component means one norm per zipped element — not
+    // representable as a scalar interval. Fail closed (D6).
+    if (pointHasBroadcastComponent(arg))
+      throw new Error(
+        'Norm: cannot compile a point with a broadcasting component. ' +
+          'Fail closed (D6).'
+      );
+    return compileIntervalPointNorm(arg.ops, compile);
+  },
   Ceil: (args, compile) => `_IA.ceil(${compile(args[0])})`,
   Exp: (args, compile) => `_IA.exp(${compile(args[0])})`,
   Floor: (args, compile) => `_IA.floor(${compile(args[0])})`,

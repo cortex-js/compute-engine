@@ -2207,11 +2207,22 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           ]);
         })
         .join(', ');
-      return joinLatex([
+      const comprehension = joinLatex([
         serializer.serialize(body),
         ' \\operatorname{for} ',
         bindings,
       ]);
+      // In operand position the bare form does not survive re-parse: the
+      // `for` binds looser than any surrounding operator and swallows it
+      // (`H = body for k=…` re-parses with the assignment as the BODY;
+      // `… for k=1..4 + 1` absorbs the `+1` into the range end). Fence with
+      // brackets unconditionally — `[body for k=…]` parses back to the same
+      // `Comprehension`, so the fence is lossless in every position
+      // (Tycho item 72; same fix shape as the big-operator body fence).
+      // Note `serializer.level` is a STYLING depth, not operand position —
+      // `Add`/`Multiply` serialize children at the parent's level, so a
+      // level-gated fence missed arithmetic parents.
+      return joinLatex(['\\left[', comprehension, '\\right]']);
     },
   },
   // Serializer for Break

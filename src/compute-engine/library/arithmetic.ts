@@ -98,6 +98,7 @@ import {
   infiniteProductClosedForm,
   acceleratedInfiniteSum,
   acceleratedInfiniteProduct,
+  pointNormType,
 } from './utils.js';
 import { inferContinuationPattern } from '../symbolic/interpret.js';
 import {
@@ -171,6 +172,7 @@ import {
   isBroadcastCollectionType,
   isPossiblyCollectionTyped,
   broadcastableResultTypeOf,
+  isTuple,
 } from '../collection-utils.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { signFromAssumedPart } from './complex.js';
@@ -272,7 +274,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       idempotent: true,
       complexity: 1200,
       signature: '(number) -> real',
-      type: ([x]) => absFunctionType(x),
+      // `isTuple` (type-based, follows symbol value bindings), not an
+      // `operator === 'Tuple'` check: a tuple-TYPED symbol or lambda
+      // parameter is a point too, even without a literal `Tuple` node.
+      type: ([x]) => (x && isTuple(x) ? pointNormType(x) : absFunctionType(x)),
       sgn: ([x], { engine: ce }) => {
         if (x.isNaN) return 'unsigned'; // |NaN| = NaN
         if (x.isSame(0)) return 'zero';
@@ -3427,6 +3432,14 @@ function evaluateAbs(
   numericApproximation?: boolean
 ): Expression | undefined {
   const ce = arg.engine;
+  // A fixed-arity point: |(x,y)| is the Euclidean norm — the single-bar
+  // spelling of the vector magnitude (Desmos convention; matches the
+  // `\lVert…\rVert` parse). `isTuple` is type-based, so a tuple-typed
+  // symbol routes too (staying an inert `Norm` until it has a value). Only
+  // tuples route: `Abs` over a `List` keeps broadcasting elementwise
+  // (`Abs([3,-4]) → [3,4]`).
+  if (isTuple(arg))
+    return ce.function('Norm', [arg]).evaluate({ numericApproximation });
   if (isNumber(arg)) {
     const num = arg.numericValue;
     if (typeof num === 'number') return ce.number(Math.abs(num));

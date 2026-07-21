@@ -8,7 +8,7 @@ import {
 } from '../boxed-expression/tensor-view.js';
 import { totalDegree } from '../boxed-expression/polynomial-degree.js';
 import { checkArity } from '../boxed-expression/validate.js';
-import { isFiniteIndexedCollection } from '../collection-utils.js';
+import { isFiniteIndexedCollection, isTuple } from '../collection-utils.js';
 import {
   Expression,
   ExpressionInput,
@@ -23,6 +23,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { asRational, toInteger } from '../boxed-expression/numerics.js';
+import { pointNormType } from './utils.js';
 
 // Total number of elements (m·n) at or below which a constant matrix
 // constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`, and the vector
@@ -1365,13 +1366,20 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Vector or matrix norm.',
       complexity: 8200,
       signature: '(value, number|string?) -> number',
-      evaluate: (ops, { engine: ce }): Expression | undefined => {
+      // A point with a broadcasting collection component zips into one norm
+      // per element — the honest type is then `list<number>` (Tycho item 74).
+      // `isTuple` is type-based so tuple-typed symbols route too.
+      type: ([x]) => (x && isTuple(x) ? pointNormType(x) : 'number'),
+      evaluate: (
+        ops,
+        { engine: ce, numericApproximation }
+      ): Expression | undefined => {
         const x = ops[0];
         const normTypeExpr = ops.length > 1 ? ops[1] : undefined;
 
         // Scalar: |x| (absolute value)
         if (x.isNumber) {
-          return ce.expr(['Abs', x]).evaluate();
+          return ce.expr(['Abs', x]).evaluate({ numericApproximation });
         }
 
         // Determine norm type
@@ -1407,7 +1415,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (const el of elements) {
               sum = sum.add(ce.expr(['Abs', el]).evaluate());
             }
-            return sum.evaluate();
+            // Honor `.N()`: the exact form only under plain evaluate().
+            return sum.evaluate({ numericApproximation });
           }
 
           if (normType === 2) {
@@ -1417,7 +1426,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               const absEl = ce.expr(['Abs', el]).evaluate();
               sumSq = sumSq.add(absEl.mul(absEl));
             }
-            return ce.expr(['Sqrt', sumSq]).evaluate();
+            // Honor `.N()`: `Norm((1,1)).N()` must numericize to 1.414…,
+            // not stay the exact √2 (the exactness contract).
+            return ce.expr(['Sqrt', sumSq]).evaluate({ numericApproximation });
           }
 
           if (normType === 'infinity') {
@@ -1425,6 +1436,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             let maxVal: Expression = ce.Zero;
             for (const el of elements) {
               const absEl = ce.expr(['Abs', el]).evaluate();
+              // A broadcasting component evaluates to a List: the scalar
+              // max below cannot represent the per-element result (its
+              // `.re` is NaN, so the component would be silently DROPPED).
+              // Stay symbolic rather than return a wrong scalar.
+              if (absEl.isCollection) return undefined;
               // Compare: use numeric comparison
               const absNum = absEl.re ?? 0;
               const maxNum = maxVal.re ?? 0;
@@ -1432,7 +1448,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
                 maxVal = absEl;
               }
             }
-            return maxVal;
+            return numericApproximation ? maxVal.N() : maxVal;
           }
 
           // General Lp norm: (Σ|xi|^p)^(1/p)
@@ -1490,7 +1506,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
                 sumSq = sumSq.add(absEl.mul(absEl));
               }
             }
-            return ce.expr(['Sqrt', sumSq]).evaluate();
+            return ce.expr(['Sqrt', sumSq]).evaluate({ numericApproximation });
           }
 
           // L1 (max column sum of absolute values)

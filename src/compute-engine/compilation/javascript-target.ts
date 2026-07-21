@@ -100,7 +100,7 @@ import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { adaptiveQuadrature } from '../numerics/gauss-kronrod.js';
 import { mulberry32 } from '../numerics/random.js';
 
-import { BaseCompiler } from './base-compiler.js';
+import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import type {
   CompileTarget,
@@ -309,6 +309,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `===` is exact and disagrees with the interpreter's tolerant compare.
   Equal: (args, compile) => compileJSEquality('Equal', args, compile),
   NotEqual: (args, compile) => compileJSEquality('NotEqual', args, compile),
+  // Note: `Abs` of a fixed-arity point never reaches this handler — the
+  // shared compiler rewrites `Abs(Tuple)` → `Norm` (base-compiler.ts) so the
+  // point compiles through the `Norm` codegen below (Tycho item 74).
   Abs: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.cabs(${compile(args[0])})`;
@@ -1032,6 +1035,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // norm fails closed).
   Norm: (args, compile) => {
     if (args[0] == null) throw new Error('Norm: missing argument');
+    // A point with a broadcasting (non-tuple collection) component zips into
+    // one norm per element at evaluation; `_SYS.norm` would flatten it into a
+    // single scalar that silently disagrees with the interpreter and with the
+    // declared `list<number>` type. Fail closed (D6) so the engine falls back
+    // to interpretation, which broadcasts correctly.
+    if (pointHasBroadcastComponent(args[0]))
+      throw new Error(
+        'Norm: cannot compile a point with a broadcasting component. ' +
+          'Fail closed (D6).'
+      );
     if (args[1] != null) {
       if (isString(args[1])) {
         if (args[1].string === 'Frobenius')

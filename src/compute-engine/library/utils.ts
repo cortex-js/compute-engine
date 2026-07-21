@@ -12,10 +12,50 @@ import {
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 
 import { checkDeadline } from '../../common/interruptible.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
 import { reduceCollection, enumerationDeclined } from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
+import { isTuple } from '../collection-utils.js';
+
+/**
+ * Result type of the Euclidean norm of a fixed-arity point (`Tuple`
+ * operand of `Norm`/`Abs`): a scalar, unless a component carries a
+ * broadcasting collection — `‖(x+[0.5,1], y)‖` zips into one norm per
+ * element, so the honest type is `list<number>`, not `number` (Tycho
+ * item 74: a `number`-typed expression evaluating to a `List` breaks
+ * consumers that dispatch on the declared type).
+ *
+ * A tuple-typed component is NOT a broadcasting collection (tuples are
+ * indexed collections in the type lattice but bind atomically): the norm
+ * of `((3,4), 12)` takes the inner point's norm and stays scalar.
+ *
+ * A non-literal point (a tuple-TYPED symbol or parameter) has no operands
+ * to walk — inspect its declared element types instead, so
+ * `p: tuple<list<real>, real>` reports the same `list<number>` its
+ * evaluation produces.
+ */
+export function pointNormType(point: Expression): string {
+  if (isFunction(point))
+    return point.ops.some(
+      (op) => op.type.matches('indexed_collection') && !isTuple(op)
+    )
+      ? 'list<number>'
+      : 'number';
+  const t = point.type.type;
+  if (
+    typeof t !== 'string' &&
+    t.kind === 'tuple' &&
+    t.elements.some((el) => {
+      const et = el.type;
+      if (typeof et !== 'string' && et.kind === 'tuple') return false;
+      return isSubtype(et, 'indexed_collection');
+    })
+  )
+    return 'list<number>';
+  return 'number';
+}
 
 /**
  * EL-4: Convert known infinite integer sets to their equivalent Limits bounds.

@@ -25,7 +25,12 @@ import {
 import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
 
 import { fromDigits } from '../numerics/strings.js';
-import { deterministicRandom } from '../numerics/random.js';
+import {
+  deterministicRandom,
+  hashSeed,
+  mulberry32,
+} from '../numerics/random.js';
+import { checkDeadline } from '../../common/interruptible.js';
 
 import { randomExpression } from './random-expression.js';
 import { canonicalInvisibleOperator } from '../boxed-expression/invisible-operator.js';
@@ -85,6 +90,9 @@ function splitGraphemeClusters(s: string): string[] {
 // U+3000 (ideographic space).
 const UNICODE_WHITESPACE =
   /[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
+
+// Cap on the number of elements `RandomList` will eagerly materialize.
+const MAX_RANDOM_LIST_SIZE = 1_000_000;
 
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
@@ -1379,6 +1387,76 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return ce.number(
           lower + Math.floor(ce._random() * (upper - lower + 1))
         );
+      },
+    },
+
+    // An eagerly-materialized list of independent uniform draws. Eagerness is
+    // the point (draw-once semantics): a lazy collection of `Random()` calls
+    // yields FRESH draws on each traversal, so two references to the same
+    // list would silently disagree (Tycho item 76).
+    RandomList: {
+      description: [
+        'RandomList(n): eager list of n independent uniform reals in [0, 1), ' +
+          'drawn from the engine random stream (honors `ce.randomSeed`)',
+        'RandomList(n, seed): deterministic list of n uniform reals in ' +
+          '[0, 1) from a seed, independent of the engine stream',
+      ],
+      pure: false,
+      signature: '(integer, number?) -> list<finite_real>',
+      // With a literal count the shape is part of the type. A zero count
+      // stays the unshaped list type: a `^0` dimension reduces to the unit
+      // type, which would misdispatch the (valid) empty-list result.
+      type: ([n]) => {
+        const count = n ? asSmallInteger(n) : null;
+        if (count !== null && count > 0 && count <= MAX_RANDOM_LIST_SIZE)
+          return `list<finite_real^${count}>`;
+        return 'list<finite_real>';
+      },
+      evaluate: (ops, { engine: ce }) => {
+        // `toInteger`, not `asSmallInteger`: the count must still be read
+        // above the small-integer bound so an out-of-range length errors
+        // loudly below instead of falling through as symbolic. (Note
+        // `toInteger` rounds a non-integer literal — strict validation
+        // rejects those upstream via the `(integer, …)` signature.)
+        const n = toInteger(ops[0]);
+        if (n === null) {
+          // `toInteger` also declines finite literals beyond the
+          // safe-integer range (e.g. 1e20) — those are out-of-range counts
+          // and must error loudly, not linger as symbolic. Everything else
+          // (a symbol, an error operand) stays symbolic.
+          if (isNumber(ops[0]) && Number.isFinite(ops[0].re))
+            return ce.error([
+              'out-of-range',
+              `a list length in 0..${MAX_RANDOM_LIST_SIZE}`,
+              ops[0].toString(),
+            ]);
+          return undefined;
+        }
+        // A literal count outside [0, cap] errors loudly: negative is
+        // nonsense, and an unbounded eager list is an uncatchable heap-OOM
+        // (the item-64b class) — refuse rather than allocate past the cap.
+        if (n < 0 || n > MAX_RANDOM_LIST_SIZE)
+          return ce.error([
+            'out-of-range',
+            `a list length in 0..${MAX_RANDOM_LIST_SIZE}`,
+            n.toString(),
+          ]);
+        const seedOp = ops[1];
+        let draw: () => number;
+        if (seedOp !== undefined) {
+          const seed = seedOp.re;
+          if (isNaN(seed)) return undefined;
+          draw = mulberry32(hashSeed(seed));
+        } else draw = () => ce._random();
+        const elements: Expression[] = [];
+        for (let i = 0; i < n; i++) {
+          // Materializing up to 10⁶ boxed numbers can outlast an enclosing
+          // `withTimeLimit` span — honor the deadline with an amortized
+          // check, like the big-operator reduction loop.
+          if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+          elements.push(ce.number(draw()));
+        }
+        return ce.function('List', elements);
       },
     },
 
