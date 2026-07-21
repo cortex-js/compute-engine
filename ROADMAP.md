@@ -924,10 +924,12 @@ dischargeable) quantifies exactly what it would buy. Let demand justify it.
 **What:** tensor values exist in two forms — a `BoxedTensor` instance (the
 canonical `box`/`function` path) and a plain `List` `BoxedFunction` (broadcast /
 map results, `ce._fn('List', …)`). `isTensor` recognizes only the former, so a
-tensor-shaped plain list bypasses the tensor-arithmetic paths
-(`addTensors`/`mulTensors`, `MatrixMultiply`, `MatrixPower`). Visible residue:
-`Sqrt(M) − Sqrt(M)` (both operands broadcast-produced) stays symbolic instead of
-collapsing element-wise to `[[0,0]]`.
+tensor-shaped plain list bypasses the tensor-only paths. Elementwise arithmetic
+over such lists was closed by `broadcastOverIndexedCollections` (2026-07-11):
+`Sqrt(M) − Sqrt(M)` now collapses to `[[0,0]]`. Visible residue: signature-gated
+and `isTensor`-gated operations — `Determinant(Sqrt(M))` errors
+`incompatible-type` ("matrix" vs `list<finite_number>`), and the
+`linear-algebra.ts` evaluate handlers decline broadcast-produced operands.
 
 **Status:** the *exactness* half of this cluster shipped — exact rational/radical
 tensor entries no longer floatify (`getExpressionDatatype` uses the `expression`
