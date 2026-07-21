@@ -137,6 +137,15 @@ export function couldBeNumericTuple(expr: Expression): boolean {
  * tensor typing.
  */
 function couldBeNumericElement(el: Type): boolean {
+  // A union element COULD be numeric if any arm could (COULD-semantics).
+  if (typeof el !== 'string' && el.kind === 'union')
+    return el.types.some((t) => couldBeNumericElement(t));
+  // Note: `signature`-kind elements deliberately do NOT qualify — a function
+  // value is not a numeric component, and blessing its collection here would
+  // leak numeric broadcast/tuple result types through the shared
+  // `Add`/`Multiply` type handlers. The lenient treatment of a function
+  // SYMBOL in numeric position (`2·N` stays symbolic) lives in
+  // `checkNumericArgs`'s eager element walk instead (validate.ts).
   return (
     el === 'any' ||
     el === 'unknown' ||

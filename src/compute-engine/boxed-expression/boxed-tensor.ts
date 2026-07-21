@@ -23,6 +23,7 @@ import type {
 } from '../global-types.js';
 
 import { BoxedType } from '../../common/type/boxed-type.js';
+import { cachedValue, CachedValue } from './cache.js';
 
 import {
   getExpressionDatatype,
@@ -37,6 +38,7 @@ import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
 import { hashCode, isExpression } from './utils.js';
 import { isFunction } from './type-guards.js';
+import { shapedListType } from './shaped-list-type.js';
 
 /**
  * A boxed tensor represents an expression that can be represented by a tensor.
@@ -58,6 +60,14 @@ export class BoxedTensor<T extends TensorDataType>
   private _tensor: AbstractTensor<T>;
 
   private _expression?: Expression;
+
+  // Memoizes the (possibly expensive) expression-dtype type computation —
+  // `shapedListType` walks every cell. Generation-tracked: symbolic cells'
+  // types can shift under inference.
+  private _type: CachedValue<BoxedType> = {
+    value: null,
+    generation: -1,
+  };
 
   constructor(
     ce: ComputeEngine,
@@ -258,9 +268,34 @@ export class BoxedTensor<T extends TensorDataType>
       return new BoxedType('number');
     }
 
-    // Build type string with dimensions: list<number^2x3> or list<number^5>
-    const dims = shape.join('x');
-    return new BoxedType(`list<number^${dims}>`);
+    // A homogeneous numeric or boolean tensor has a uniform cell type derivable
+    // from its dtype. This preserves today's `vector<n>`/`matrix<…>` strings
+    // byte-for-byte for numeric tensors (the numeric-lift clause), reports
+    // boolean tensors honestly (`list<boolean^…>`, was `list<number^…>`), and
+    // sidesteps the fact that non-`expression`-dtype tensors reconstruct their
+    // leaves as raw JS primitives rather than boxed expressions.
+    const dtype = this.tensor.dtype;
+    if (dtype !== 'expression') {
+      const cell = dtype === 'bool' ? 'boolean' : 'number';
+      return new BoxedType(`list<${cell}^${shape.join('x')}>`);
+    }
+
+    // Expression-dtype tensor (colors, symbolic cells, …): delegate to the
+    // shared honest-typing rule (§D3) over the properly-boxed ops.
+    // Memoized (generation-tracked — symbolic cells' types can shift under
+    // inference): `shapedListType` walks every cell, and `.type` is queried
+    // repeatedly on hot validation/broadcast paths.
+    return cachedValue(this._type, this.engine._generation, () => {
+      const ops = this.ops;
+      const shaped = shapedListType(ops);
+      if (shaped !== null) return new BoxedType(shaped);
+
+      // No shape claim (non-atomic elements, …): fall back to a plain
+      // `list<widen(...)>` of the ops.
+      return new BoxedType(
+        `list<${BoxedType.widen(...ops.map((op) => op.type))}>`
+      );
+    });
   }
 
   get json(): MathJsonExpression {

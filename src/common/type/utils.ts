@@ -88,6 +88,78 @@ export function isValidTypeName(name: string): boolean {
 }
 
 /**
+ * True if `t` denotes an **atomic** value type — a cell in the cell/axis model
+ * (see `docs/plans/2026-07-20-tensor-unification-design.md`, §D5). Atomic
+ * types are the ones that may occupy a single tensor cell: numbers, booleans,
+ * strings, symbols, colors, function/expression values, and all
+ * product/aggregate values (tuples, sets, dictionaries, records). List- and
+ * collection-kind types are NOT atomic (they form axes / are opaque
+ * collections), and neither is `value` (documented as scalar ∪ collection — a
+ * value-typed element could be a collection at runtime).
+ *
+ * Conservative principle: **when in doubt, not atomic** — a false "not atomic"
+ * only withholds a shape claim (safe); a false "atomic" creates a spurious
+ * tensor. One deliberate exception, per §D5: `unknown`/`any` ARE atomic —
+ * atomicity governs *cell classification* only, and whether an
+ * unknown-typed element supports a *shape claim* is the stricter, separate
+ * rule in `shapedListType` (bare symbols fold to `number`; applications
+ * block). Callers must apply that second gate — do not use this predicate
+ * alone to justify a shape.
+ */
+export function isAtomicValueType(t: Readonly<Type>): boolean {
+  // Bare (primitive) string form first — the codebase's `typeof t === 'string'`
+  // idiom.
+  if (typeof t === 'string')
+    return (
+      t !== 'list' &&
+      t !== 'collection' &&
+      t !== 'indexed_collection' &&
+      t !== 'value'
+    );
+
+  switch (t.kind) {
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+      return false;
+
+    case 'union':
+    case 'intersection':
+      // union: the value MIGHT be a collection arm → block unless all atomic.
+      // intersection: the value IS every arm → any collection arm makes it one.
+      return t.types.every((arm) => isAtomicValueType(arm));
+
+    case 'broadcastable':
+      return false; // lift marker — may broadcast over a collection
+
+    case 'negation':
+      return false; // can't bound the negated set; conservative
+
+    case 'reference':
+      // Recurse on the resolved definition; unresolved → conservative.
+      return t.def !== undefined ? isAtomicValueType(t.def) : false;
+
+    case 'value':
+      // A literal value type — recurse on the literal's underlying type.
+      return isAtomicValueType(valueLiteralType(t.value));
+
+    // signature (functions are cells), tuple/set/dictionary/record
+    // (product/aggregate cells), and all remaining primitive kinds
+    // (numeric, symbol, expression, ...) are atomic.
+    default:
+      return true;
+  }
+}
+
+/** The primitive type of a `value`-kind literal's JS value. */
+function valueLiteralType(value: unknown): Type {
+  if (typeof value === 'number') return 'number';
+  if (typeof value === 'string') return 'string';
+  if (typeof value === 'boolean') return 'boolean';
+  return 'expression';
+}
+
+/**
  * Given the scalar per-element result type `elementType` a broadcastable
  * operator computed for its arguments, produce the type of the broadcast
  * (element-wise) result: an (unbounded) `list<elementType>`.

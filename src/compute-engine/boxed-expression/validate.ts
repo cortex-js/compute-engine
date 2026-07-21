@@ -319,6 +319,18 @@ export function checkNumericArgs(
         // one with a type error.
         let allNumbers = true;
         for (const x of op.each()) {
+          // A function-valued symbol element is accepted without inference,
+          // mirroring the scalar gate's treatment of a bare function symbol
+          // in numeric position (`2·N` stays symbolic and valid). An
+          // `unknown`-typed element is infer-later, mirroring the
+          // unknown-operand branch above. Both keep pathological values like
+          // `[N, 2N]` (a list capturing an operator symbol) OUT of the
+          // element-inference path — the operator-definition corruption
+          // guard (type-inference.test.ts) pins this.
+          const xt = x.type.type;
+          if (isSymbol(x) && typeof xt !== 'string' && xt.kind === 'signature')
+            continue;
+          if (x.type.isUnknown) continue;
           if (!x.isNumber) {
             allNumbers = false;
             break;

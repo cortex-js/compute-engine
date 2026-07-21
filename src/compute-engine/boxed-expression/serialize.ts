@@ -37,7 +37,13 @@ import type {
   DisplayDigits,
 } from '../global-types.js';
 import { isDictionary, isOperatorDef } from './utils.js';
-import { isNumber, isSymbol, isString, isFunction } from './type-guards.js';
+import {
+  isNumber,
+  isSymbol,
+  isString,
+  isFunction,
+  isTensor,
+} from './type-guards.js';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils.js';
 
 // Lazy reference to break circular dependency:
@@ -1041,8 +1047,13 @@ export function serializeJson(
       latex: expr.verbatimLatex,
     });
 
-  // Is it a tensor?
-  if (expr.rank > 0) return expr.json;
+  // Is it a `BoxedTensor`? (Its `.json` serializes from the packed data.)
+  // Deliberately NOT `expr.rank > 0`: since honest List typing
+  // (tensor-unification Phase A) a plain `List` with a shape-regular type
+  // also reports a nonzero rank, but it must go through the normal function
+  // serialization below — the pretty pipeline (`Tuple`→`Pair` shorthand,
+  // `Negate`→negative-literal folding, dictionary shorthands) applies to it.
+  if (isTensor(expr)) return expr.json;
 
   // Is it a dictionary *value*? (`isDictionary` is type-based, so a symbol
   // merely *typed* `dictionary` matches too — it has no entries and must

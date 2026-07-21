@@ -32,7 +32,13 @@ import type { Parser, Terminator } from '../latex-syntax/types.js';
 import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary.js';
 
 import { isPrime } from './predicates.js';
-import { isString, isNumber, isSymbol, isFunction } from './type-guards.js';
+import {
+  isString,
+  isNumber,
+  isSymbol,
+  isFunction,
+  isTensor,
+} from './type-guards.js';
 import { getRuleIndex, candidateRules } from './rule-index.js';
 
 /** Condition functions that already triggered the one-time "non-boolean
@@ -246,10 +252,15 @@ export const CONDITIONS = {
   pair: (x: Expression) => x.operator === 'Pair',
   triple: (x: Expression) => x.operator === 'Triple',
 
-  scalar: (x: Expression) => x.rank === 0,
-  tensor: (x: Expression) => x.rank > 0,
-  vector: (x: Expression) => x.rank === 1,
-  matrix: (x: Expression) => x.rank === 2,
+  // Guarded on `isTensor` (a `BoxedTensor` value), not bare `.rank`: since
+  // honest List typing (tensor-unification Phase A) a plain `List` with a
+  // shape-regular type (e.g. `list<tuple^2>`, `list<color^2>`) also reports
+  // a nonzero rank, but these wildcard conditions mean a genuine tensor
+  // value — same reasoning as the `serializeJson` tensor early-exit.
+  scalar: (x: Expression) => !isTensor(x),
+  tensor: (x: Expression) => isTensor(x),
+  vector: (x: Expression) => isTensor(x) && x.rank === 1,
+  matrix: (x: Expression) => isTensor(x) && x.rank === 2,
 
   unit: (x: Expression) => x.operator === 'Unit',
   dimension: (x: Expression) => x.operator === 'Dimension',

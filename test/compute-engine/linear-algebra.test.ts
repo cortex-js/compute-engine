@@ -1159,8 +1159,10 @@ describe('Inverse', () => {
     const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
     const result = ce.expr(['Inverse', A]).evaluate();
     expect(result.toString()).toEqual('[[3/5,-1/5],[-1/5,2/5]]');
-    // The result carries a matrix type (not `list<list<…>>`).
-    expect(result.type.toString()).toEqual('matrix<2x2>');
+    // The result carries a matrix type (not `list<list<…>>`). Since honest
+    // List typing (tensor-unification Phase A) the element type is precise
+    // (e.g. `matrix<finite_rational^(2x2)>`) — assert matrix-ness via matches.
+    expect(result.type.matches('matrix<2x2>')).toBe(true);
   });
 
   it('inverts an exact-radical 2x2 matrix exactly', () => {
@@ -1175,7 +1177,7 @@ describe('Inverse', () => {
       ['List', ['Sqrt', 2], -1],
       ['List', -1, ['Sqrt', 2]],
     ]);
-    expect(result.type.toString()).toEqual('matrix<2x2>');
+    expect(result.type.matches('matrix<2x2>')).toBe(true);
   });
 
   it('inverts an exact-radical 3x3 matrix exactly', () => {
@@ -1192,7 +1194,7 @@ describe('Inverse', () => {
       ['List', 0, ['Divide', ['Sqrt', 3], 3], 0],
       ['List', 0, 0, ['Rational', 1, 2]],
     ]);
-    expect(result.type.toString()).toEqual('matrix<3x3>');
+    expect(result.type.matches('matrix<3x3>')).toBe(true);
   });
 
   it('floats the exact inverse under .N()', () => {

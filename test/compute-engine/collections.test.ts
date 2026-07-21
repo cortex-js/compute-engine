@@ -132,7 +132,11 @@ describe('LIST TENSOR ELIGIBILITY', () => {
     const expr = ce.box(['List', 'p1', 'p2']);
     expect(isTensor(expr)).toBe(false);
     expect(expr.operator).toBe('List');
-    expect(expr.type.toString()).toBe('list<tuple>');
+    // Honest List typing (tensor-unification Phase A): a shape-regular list
+    // of tuple cells carries its dimensions — a list of points is rank-1
+    // with point cells. The VALUE stays a plain List (isTensor false above);
+    // only the reported type gains its honest shape.
+    expect(expr.type.toString()).toBe('list<tuple^2>');
   });
 
   test('genuine numeric vectors and matrices remain tensors', () => {
@@ -1607,7 +1611,7 @@ describe('CONTINUATION PLACEHOLDER', () => {
       [
         "Map",
         ["List", 1, 1, 2, 2, 3, 4, 7, 8, 9, 10, 11, 12, 14],
-        ["Function", ["Block", ["Power", "_1", 2]], "_1"]
+        ["Function", ["Square", "_1"]]
       ]
     `);
     expect(finite_list.evaluate({ materialization: true }))

@@ -1073,9 +1073,13 @@ describe('SUM', () => {
     const sum = engine.parse(
       '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
     );
-    expect(sum.type.toString()).toBe('vector<2>');
+    // Honest List typing (tensor-unification Phase A): the shaped result
+    // carries its honest element type (e.g. `vector<finite_number^2>`), a
+    // strict subtype of `vector<2>`. The item-44a pin is the vector-ness
+    // and length, asserted via `matches`.
+    expect(sum.type.matches('vector<2>')).toBe(true);
     const prod = engine.parse('\\prod_{i=0}^{2}a(i)');
-    expect(prod.type.toString()).toBe('vector<2>');
+    expect(prod.type.matches('vector<2>')).toBe(true);
 
     // At over the list-valued Sum no longer bakes an incompatible-type error.
     const at = engine.parse(
@@ -1085,8 +1089,8 @@ describe('SUM', () => {
 
     // A's inferred result is the vector, so A(t)[1] types the element (not
     // `any`) and evaluates to a number once `t` is bound.
-    expect(engine.parse('A(t)').type.toString()).toBe('vector<2>');
-    expect(engine.parse('A(t)[1]').type.toString()).toBe('number');
+    expect(engine.parse('A(t)').type.matches('vector<2>')).toBe(true);
+    expect(engine.parse('A(t)[1]').type.matches('number')).toBe(true);
     engine.assign('t', 0.5);
     expect(engine.parse('A(t)[1]').evaluate().re).toBeCloseTo(-0.3883979339);
 

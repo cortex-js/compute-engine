@@ -50,6 +50,7 @@ import { typeToString } from '../../common/type/serialize.js';
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
+import { shapedListType } from '../boxed-expression/shaped-list-type.js';
 import {
   isDictionary,
   isFunction,
@@ -524,6 +525,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     signature: '(any*) -> list',
     type: (ops, { engine: _ce }) =>
+      shapedListType(ops) ??
       parseType(`list<${BoxedType.widen(...ops.map((op) => op.type))}>`),
     canonical: canonicalList,
     lazy: true,

@@ -177,23 +177,29 @@ The `List` type handler emits, for a **literal `List` node**:
      claim (a heterogeneous cell population makes no kernel or signature
      sense — this is the formerly-implicit `[x, Rgb]` exclusion, now a
      normative clause; review R2-4).
-3. **Type** = `list<C^dims>` when the claim holds; otherwise plain
-   `list<widen(...)>` exactly as today. **C — the numeric-lift clause**:
-   when the global widened cell type is numeric (a subtype of `number`), C
-   is `number` — preserving today's `vector<n>`/`matrix<…>` types
-   byte-for-byte for every numeric and folded-symbol list (this is what
-   makes the "unchanged" rows below literally unchanged, containing
-   snapshot churn). Otherwise C is the widened type, reported honestly
-   (`color`, `boolean`, `tuple<…>`, …).
+3. **Type** = `list<C^dims>` when the claim holds — C the global widened
+   cell type, **reported honestly with no numeric lift** — otherwise plain
+   `list<widen(...)>` exactly as today. *(A numeric-lift-to-`number` clause
+   was tried in revision 4 to keep `vector<n>` strings byte-stable and was
+   **measured wrong in Phase A**: the landed broadcast-typing contract
+   requires an evaluated value's type to be a SUBTYPE of the statically
+   declared `list<R>` — `evaluated.matches(declared)`,
+   `list-broadcast-typing.test.ts` — and lifting `finite_real` cells to
+   `number` widens past `R`, breaking the contract for every wrapper-lifted
+   family. Honest widening satisfies it by construction. Consequence,
+   owned: literal numeric lists' type strings narrow —
+   `[1,2,3]: list<finite_integer^3>`, not `vector<3>`; still `matches
+   'vector<3>'` for every consumer, since `finite_integer ⊂ number` and
+   dimensioned lists subtype their unbounded forms.)*
 
 Normative examples:
 
 | Expression | Type | Note |
 | --- | --- | --- |
-| `[1, 2, 3]` | `vector<3>` | unchanged |
-| `[x, y]` (bare symbols) | `vector<2>` | unchanged (fold) |
+| `[1, 2, 3]` | `list<finite_integer^3>` | honest; `matches('vector<3>')` holds |
+| `[x, y]` (bare symbols) | `vector<2>` | unchanged (fold gives exactly `number`) |
 | `[Rgb, Rgb]` | `list<color^2>` | fixed (was `vector<2>`) — closes Tycho 69 |
-| `[[1,2],[3.5,4.5]]` | `matrix<2x2>` (= `list<number^2x2>`) | rows widen differently; global widening governs (R2-3), then numeric-lifts to `number` |
+| `[[1,2],[3.5,4.5]]` | `list<finite_real^2x2>` | rows widen differently; global widening governs (R2-3); `matches('matrix<2x2>')` holds. *Phase A interim: as a boxed literal this takes the packed-dtype fast path and types `matrix<2x2>` — see the Phase A note; the honest form applies to plain Lists and from Phase C on.* |
 | `[x, Rgb]` | `list<(number\|color)>` — no shape | union-free clause (R2-4) |
 | `[h(x)]`, `h: → unknown` | `list<unknown>` — no shape, no fold | applications never folded |
 | `[L, L]`, `L: list<number>` | `list<list<number>>` — no shape | list-typed symbol blocks; also `isTensor` false, `shape []` (§D4.1 — type and guard agree) |
@@ -431,7 +437,14 @@ time; `parseDiagnostics` consumers see fewer parse-time
 ## Phasing — each independently landable, each with a measurement gate
 
 **Phase A — honest List typing (closes Tycho item 69).** D3 in the `List`
-type handler; `BoxedTensor.type` delegates to it (interim).
+type handler; `BoxedTensor.type` delegates to it (interim) **for
+`expression`-dtype tensors**; packed numeric/bool dtypes keep
+`number`/`boolean` cells (their leaves are raw JS primitives, not boxed
+ops), preserving `vector<n>`/`matrix<…>` strings for boxed literals. This
+is a transitional dual typing — literal `[1,2,3]` types `vector<3>` while a
+plain-List `[1,2,3]` (broadcast result) types `list<finite_integer^3>` —
+consistent under subtyping (the honest form ⊆ the packed form) and resolved
+by Phase C's single representation.
 *Gate*: full suite; snapshot-churn count reported (no `@fixme` updates);
 `matches()` audit over (a) `addType`/`Multiply.type` single-tensor branches,
 (b) compile/GLSL `vars` typing, (c) the evaluated shape-regular List class

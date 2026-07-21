@@ -111,9 +111,17 @@ describe('LIST-BROADCAST TYPING — wrapper-lifted families (sound list<R>)', ()
     expectHonestBroadcast(expr);
   });
 
-  test('Round(List) declared type equals evaluated type', () => {
+  test('Round(List) evaluated type is a shaped subtype of the declared type', () => {
+    // Since honest List typing (tensor-unification Phase A), an evaluated
+    // literal list gains its shape: declared stays the sound unbounded
+    // `list<finite_integer>`, the evaluated value types
+    // `list<finite_integer^2>` — a strict subtype (the broadcast contract
+    // `evaluated ⊆ declared` still holds, and is what this test guards).
     const expr = ce.box(['Round', ['List', 1.2, 2.7]]);
-    expect(expr.type.toString()).toBe(expr.evaluate().type.toString());
+    const evaluated = expr.evaluate();
+    expect(expr.type.toString()).toBe('list<finite_integer>');
+    expect(evaluated.type.toString()).toBe('vector<finite_integer^2>');
+    expect(evaluated.type.matches(expr.type.type)).toBe(true);
   });
 
   test('symbolic broadcast: Sin(List(t,1)) is a list, not a scalar', () => {
@@ -135,7 +143,12 @@ describe('LIST-BROADCAST TYPING — logic broadcast (list<boolean>)', () => {
   ])('%s → list<boolean>', (_label, mathjson) => {
     const expr = ce.box(mathjson as any);
     expect(expr.type.toString()).toBe('list<boolean>');
-    expect(expr.type.toString()).toBe(expr.evaluate().type.toString());
+    // Evaluated literal lists gain their shape (tensor-unification Phase A):
+    // `list<boolean^2>` ⊆ the declared `list<boolean>` — the broadcast
+    // contract `evaluated ⊆ declared` is what this asserts.
+    const evaluated = expr.evaluate();
+    expect(evaluated.type.toString()).toBe('list<boolean^2>');
+    expect(evaluated.type.matches(expr.type.type)).toBe(true);
   });
 });
 
