@@ -1540,7 +1540,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 tt.elements,
                 ...others.map((x) => x.type.type)
               );
-              return { kind: 'list', elements: cell, dimensions: tt.dimensions };
+              return {
+                kind: 'list',
+                elements: cell,
+                dimensions: tt.dimensions,
+              };
             }
             return tensorOps[0].type;
           }

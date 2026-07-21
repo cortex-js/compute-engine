@@ -45,7 +45,6 @@ import {
   isNumber,
   isFunction,
   isString,
-  isTensor,
   isContinuationOperand,
 } from './type-guards.js';
 import { candidateShape } from './tensor-view.js';

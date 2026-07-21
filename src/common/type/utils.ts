@@ -238,8 +238,7 @@ export function broadcastShapedResultType(
       return broadcastResultType(elementType); // rank mismatch
     } else {
       // Same rank: keep provably-identical entries, open the rest.
-      for (let i = 0; i < dims.length; i++)
-        if (dims[i] !== d[i]) dims[i] = -1;
+      for (let i = 0; i < dims.length; i++) if (dims[i] !== d[i]) dims[i] = -1;
     }
   }
   if (dims === null) return broadcastResultType(elementType);
@@ -344,7 +343,11 @@ export function overlapsForDeferredValidation(
     if (opDims !== null && paramDims !== null) {
       if (opDims.length !== paramDims.length) return false;
       for (let i = 0; i < opDims.length; i++)
-        if (opDims[i] !== -1 && paramDims[i] !== -1 && opDims[i] !== paramDims[i])
+        if (
+          opDims[i] !== -1 &&
+          paramDims[i] !== -1 &&
+          opDims[i] !== paramDims[i]
+        )
           return false;
     }
   }

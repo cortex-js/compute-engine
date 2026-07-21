@@ -462,7 +462,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         }
 
         if (isTensorValue(op1)) {
-          const op1Tensor = packTensor(ce, op1, { numeric: numericApproximation });
+          const op1Tensor = packTensor(ce, op1, {
+            numeric: numericApproximation,
+          });
           return op1Tensor ? op1Tensor.pseudoInverse()?.expression : undefined;
         }
 
@@ -520,7 +522,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { numericApproximation }) => {
         const op1 = ops[0];
         if (isTensorValue(op1)) {
-          const op1Tensor = packTensor(op1.engine, op1, { numeric: numericApproximation });
+          const op1Tensor = packTensor(op1.engine, op1, {
+            numeric: numericApproximation,
+          });
           return op1Tensor ? op1Tensor.adjugateMatrix()?.expression : undefined;
         }
 

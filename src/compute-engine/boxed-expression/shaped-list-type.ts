@@ -99,8 +99,7 @@ function analyzeLevel(ops: ReadonlyArray<Expression>): ShapeAnalysis | null {
   if (childShapes.length > 0 && cellTypes.length > 0) return null;
 
   // All cells → a rank-1 level.
-  if (childShapes.length === 0)
-    return { dims: [ops.length], cells: cellTypes };
+  if (childShapes.length === 0) return { dims: [ops.length], cells: cellTypes };
 
   // All nested Lists → rank ≥ 2. Every child must have identical dimensions
   // (cell types need not match row-to-row).

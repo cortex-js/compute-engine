@@ -638,4 +638,3 @@ function toExplainStep(s: RuleStep): ExplainStep {
     ? { value: s.value, id, description, purpose: s.purpose }
     : { value: s.value, id, description };
 }
-

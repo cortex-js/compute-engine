@@ -1726,8 +1726,7 @@ function mulTensors(
       // failure falls back to an inert product.
       const productTensor = packTensor(ce, product);
       const nextTensorPacked = packTensor(ce, nextTensor);
-      if (!productTensor || !nextTensorPacked)
-        return ce._fn('Multiply', xs);
+      if (!productTensor || !nextTensorPacked) return ce._fn('Multiply', xs);
       const n = product.shape[0];
       const elements: Expression[] = [];
       for (let k = 1; k <= n; k++) {

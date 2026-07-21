@@ -64,9 +64,7 @@ export function structuralShape(x: Expression): number[] | null {
   return structuralShapeOfOps(x.ops);
 }
 
-function structuralShapeOfOps(
-  ops: ReadonlyArray<Expression>
-): number[] | null {
+function structuralShapeOfOps(ops: ReadonlyArray<Expression>): number[] | null {
   if (ops.length === 0) return null; // empty level — never claimed
   let nested = 0;
   for (const op of ops) if (isFunction(op, 'List')) nested++;
@@ -189,9 +187,7 @@ export function packStructural(
 // re-check for container/string cells.
 // ---------------------------------------------------------------------------
 
-function expressionTensorInfo(
-  rows: ReadonlyArray<Expression>
-):
+function expressionTensorInfo(rows: ReadonlyArray<Expression>):
   | {
       shape: number[];
       dtype: TensorDataType;
