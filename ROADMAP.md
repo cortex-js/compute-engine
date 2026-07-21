@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-19.
+**Last updated:** 2026-07-21.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -33,7 +33,14 @@ clean-parse 3/345 → 278/345, throws 9 → 0). Fresh unseen-sample validation
 measured 97.4% clean parse with 0 throws/0 hangs; the remaining MathNet work
 is a small notation tail tracked below.
 
-**0.86.0 released 2026-07-19** (latest). The 0.74–0.86 line carried the
+**0.90.0 released 2026-07-21** (latest). The 0.87–0.90 line carried the
+Tycho items 56–76 rounds (complex-compile emission, the timeout-span model
+replacing `ce.timeLimit`, compiled recursive lambdas, `RandomList`,
+`Abs(point)` = norm), the tensor unification (BoxedTensor removed; tensor
+values are canonical Lists with a lazy view), and honest shaped list types.
+The unreleased line adds `FindFit`/`FindRoot` (general nonlinear
+least-squares with box constraints and joint shared-parameter systems —
+Tycho item 77). The 0.74–0.86 line carried the
 Tycho-compatibility rounds (through items 50–54: hybrid-lazy `PointList`
 transposes, the serialize→re-parse juxtaposition fixes, machine-precision
 exact-sum crash, `ce.withTimeLimit`), the collection-operator-gaps +
@@ -277,7 +284,9 @@ Deferred:
 
 **Mathematica surface forms — deferred tail (need user steer before
 attempting; landed record in the 2026-07-14 commits):** Tier 3 heads
-(`NSolve` — cheap as Solve+N —, `FindRoot` with `{x, x0}`, `Reduce`); the
+(`NSolve` — cheap as Solve+N — and `Reduce`; `FindRoot` landed 2026-07-21
+via the item-77 nonlinear least-squares core, with `(x, x0)` start tuples
+and box constraints); the
 `{i, n}` 2-element iterator shorthand and bare-count `Table(expr, n)`
 (rejected as malformed for cross-operator consistency — adopt everywhere at
 once if ever); symbolic directional limits (`lim_{x→a⁺}` at a symbolic

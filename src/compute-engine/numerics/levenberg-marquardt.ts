@@ -158,7 +158,8 @@ export function levenbergMarquardt(
     for (let i = 0; i < JJ.length; i++)
       for (let j = 0; j < p; j++)
         for (let k = j; k < p; k++) A[j][k] += JJ[i][j] * JJ[i][k];
-    for (let j = 0; j < p; j++) for (let k = j + 1; k < p; k++) A[k][j] = A[j][k];
+    for (let j = 0; j < p; j++)
+      for (let k = j + 1; k < p; k++) A[k][j] = A[j][k];
     return A;
   };
 
@@ -254,7 +255,8 @@ export function levenbergMarquardt(
     predicted *= 0.5;
 
     const actual = F - FNew;
-    const rho = Number.isFinite(FNew) && predicted > 0 ? actual / predicted : -1;
+    const rho =
+      Number.isFinite(FNew) && predicted > 0 ? actual / predicted : -1;
 
     if (rho > 0) {
       // Accept the step.

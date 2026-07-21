@@ -161,10 +161,7 @@ function parseVars(varsExpr: Expression): string[] | null {
 /** Extract a single dataset of `(x…, y)` rows. `nvars` is the arity of the
  * independent variables. A plain list of `y` values (only when `nvars === 1`)
  * binds `x = 1, 2, …`. Returns `null` (→ inert) on any non-numeric datum. */
-function extractDataset(
-  dataExpr: Expression,
-  nvars: number
-): DataRow[] | null {
+function extractDataset(dataExpr: Expression, nvars: number): DataRow[] | null {
   if (!dataExpr.isFiniteCollection) return null;
   const elements = [...dataExpr.each()] as Expression[];
   if (elements.length === 0) return null;
@@ -232,7 +229,11 @@ function extractDatasetList(
 //
 
 /** Fresh, guaranteed-unbound symbol names avoiding every name in `avoid`. */
-function freshNames(prefix: string, count: number, avoid: Set<string>): string[] {
+function freshNames(
+  prefix: string,
+  count: number,
+  avoid: Set<string>
+): string[] {
   let realPrefix = prefix;
   while (
     Array.from({ length: count }, (_, i) => `${realPrefix}${i}`).some((n) =>
@@ -323,10 +324,7 @@ function buildRecord(
   const paramsDict = ce.function('Dictionary', paramEntries);
   return ce.function('Dictionary', [
     ce.tuple(ce.string('parameters'), paramsDict),
-    ce.tuple(
-      ce.string('converged'),
-      result.converged ? TRUE_(ce) : FALSE_(ce)
-    ),
+    ce.tuple(ce.string('converged'), result.converged ? TRUE_(ce) : FALSE_(ce)),
     ce.tuple(ce.string('residualNorm'), ce.number(result.residualNorm)),
     ce.tuple(ce.string('iterations'), ce.number(result.iterations)),
   ]);
