@@ -794,36 +794,6 @@ export class ComputeEngine implements IComputeEngine {
     this._reset();
   }
 
-  /** Throw a `CancellationError` when the duration of an evaluation exceeds
-   * the time limit.
-   *
-   * Time in milliseconds, default 2000 ms = 2 seconds.
-   *
-   * @deprecated Use {@linkcode withTimeLimit} instead. `timeLimit` arms a
-   * hard-to-scope implicit deadline around each `evaluate()`/`simplify()`;
-   * wrap the work you want bounded in `ce.withTimeLimit({ ms, label }, fn)`
-   * instead:
-   *
-   * ```ts
-   * // Before
-   * ce.timeLimit = 500;
-   * const r = expr.evaluate();
-   *
-   * // After
-   * const r = ce.withTimeLimit({ ms: 500, label: 'my-app:eval' }, () =>
-   *   expr.evaluate()
-   * );
-   * ```
-   */
-  get timeLimit(): number {
-    return this._runtimeState.timeLimit;
-  }
-
-  /** @deprecated Use {@linkcode withTimeLimit} instead. */
-  set timeLimit(t: number) {
-    this._runtimeState.timeLimit = t;
-  }
-
   /**
    * Run `fn` with **at most** `ms` milliseconds (the `limit`, or `limit.ms`
    * for the object form).
@@ -1993,21 +1963,17 @@ export class ComputeEngine implements IComputeEngine {
       cacheName,
       () => {
         // A one-time cache build is engine warm-up, not part of the user's
-        // evaluation: suspend the deadline while it runs (a partial cache
-        // is useless), then push the deadline back by the build's duration
-        // so the caller's time budget is not charged for it. Keep the
-        // enclosing frame's owner/spans so attribution survives the build.
+        // evaluation: it runs outside any deadline (an explicit "no deadline"
+        // span). A partial cache is useless, so a build in progress is never
+        // interrupted by an enclosing span's expiry, and the enclosing frame
+        // is restored unchanged when it completes (see TIMEOUT-MODEL.md §7.3).
         const frame = this._runtimeState.deadlineFrame;
         if (frame === undefined) return build();
         this._runtimeState.deadlineFrame = undefined;
-        const start = Date.now();
         try {
           return build();
         } finally {
-          this._runtimeState.deadlineFrame = {
-            ...frame,
-            at: frame.at + (Date.now() - start),
-          };
+          this._runtimeState.deadlineFrame = frame;
         }
       },
       purge

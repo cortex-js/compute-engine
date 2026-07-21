@@ -6,7 +6,8 @@
  * instead carries the signal's `reason` through `cause`, which may be any
  * value, so consumers should treat an unrecognized `cause` as opaque.
  *
- *  - `'timeout'`: the evaluation deadline (`engine.timeLimit`) was exceeded.
+ *  - `'timeout'`: an enclosing `ce.withTimeLimit(...)` span's deadline was
+ *    exceeded.
  *  - `'iteration-limit-exceeded'`: a loop/iterator exceeded
  *    `engine.iterationLimit`.
  *  - `'recursion-depth-exceeded'`: user-function recursion exceeded
@@ -20,9 +21,9 @@ export type CancellationCause =
 /**
  * The engine's deadline state.
  *
- * A deadline is armed only by entering a span (`ce.withTimeLimit(...)`) or the
- * (deprecated) ambient `ce.timeLimit`. The frame is immutable: entering a span
- * creates a new frame; exiting restores the saved previous frame object.
+ * A deadline is armed only by entering a span (`ce.withTimeLimit(...)`). The
+ * frame is immutable: entering a span creates a new frame; exiting restores
+ * the saved previous frame object.
  *
  *  - `at`: absolute ms timestamp beyond which execution should not proceed.
  *  - `owner`: label of the span whose deadline is the EFFECTIVE one (i.e. the

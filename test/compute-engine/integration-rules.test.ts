@@ -166,11 +166,10 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
 
   // ── Finding 3: the native-rational fallback's catch must swallow ONLY a
   // cancellation that belongs to Rubi's own bounded work window (its own
-  // `rubi:native-fallback` sub-budget, the deprecated ambient `engine.timeLimit`
-  // which re-arms per-evaluate INSIDE the span, or an unattributed numeric
-  // deadline). A CancellationError attributed to an ENCLOSING caller span (e.g.
-  // a user `withTimeLimit({label:'caller'})`) must propagate — Rubi must not eat
-  // the caller's deadline and continue past it. Simulated deterministically by
+  // `rubi:native-fallback` sub-budget, or an unattributed numeric deadline). A
+  // CancellationError attributed to an ENCLOSING caller span (e.g. a user
+  // `withTimeLimit({label:'caller'})`) must propagate — Rubi must not eat the
+  // caller's deadline and continue past it. Simulated deterministically by
   // stubbing the fallback's `Integrate.evaluate()` seam to throw an error with a
   // chosen `attribution`, so no real timer race is needed. ──
   describe('native-fallback swallows only Rubi-owned cancellations (Finding 3)', () => {
@@ -213,12 +212,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
 
     test("swallows Rubi's own sub-budget → null degrade", () => {
       expect(runFallback('rubi:native-fallback')).toEqual({ result: null });
-    });
-
-    test('swallows the deprecated ambient engine.timeLimit deadline → null', () => {
-      expect(runFallback('engine.timeLimit:Integrate')).toEqual({
-        result: null,
-      });
     });
 
     test('swallows an unattributed deadline → null', () => {
@@ -273,7 +266,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     // default driver budget under worker contention, so raise both budgets
     // (same convention as the other heavy describes).
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
-    ce.timeLimit = 30_000;
     const verify = (latex: string, params: Record<string, number>) => {
       const integrand = ce.parse(latex);
       let F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -613,7 +605,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     // CancellationError. Under full-suite worker contention the ~2 s chain
     // can stretch past 10 s, so the heavy describes raise BOTH budgets.
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
-    ce.timeLimit = 30_000;
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -659,7 +650,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('closes complex-Si / reciprocal-arg families (Chapter-4, R18)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
-    ce.timeLimit = 30_000; // complex Si/Ci/Ei kernels are slow under ts-jest
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -764,7 +754,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('integrates the inverse-hyperbolic family (Chapter-7, R21)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
-    ce.timeLimit = 30_000; // Chi/Shi results carry slow complex kernels
     const verify = (latex: string, xs = [0.31, 0.52, 0.73, 1.42, 2.3]) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -883,7 +872,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('the InvTrig^n multiple-angle → CosIntegral reduction (Chapter-5, R23)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
-    ce.timeLimit = 30_000; // arcsin Subst chains are slow under ts-jest contention
     const verify = (latex: string, xs = [0.17, 0.31, 0.52, 0.73]) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -938,7 +926,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('poly × same-angle trig-product reduction (Chapter-5, R27)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
-    ce.timeLimit = 30_000; // high-degree Sin·Cos reductions carry many Si/Ci
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -1000,7 +987,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('mixed-parity poly-numerator × binomial-radical split (1.1.3, R28a)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
-    ce.timeLimit = 30_000; // Elliptic/ArcTanh-heavy pieces are slow under ts-jest
 
     // Integrate `latex` over x and central-difference F.N() == integrand at
     // several sample points, substituting `params` (fixed so a+b·xⁿ > 0).
@@ -1096,7 +1082,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('algebraic-in-hyperbolic substitution (Chapter-6, R29)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
-    ce.timeLimit = 30_000; // ArcTanh/radical pieces are slow under ts-jest
 
     // Integrate `latex` over x and central-difference Re(F.N()) == integrand at
     // several sample points, substituting `params` (fixed so the radicands are
@@ -1165,7 +1150,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('rational-in-hyperbolic cyclotomic-factored substitution (Chapter-6, R30)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
-    ce.timeLimit = 30_000; // partial-fraction / artanh pieces are slow under ts-jest
 
     const verify = (
       latex: string,
@@ -1236,7 +1220,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   describe('poly × single-angle-hyperbolic → single-exponential (Chapter-6, R8)', () => {
     const ce = new ComputeEngine();
     loadIntegrationRules(ce, { timeLimitMs: 60_000 });
-    ce.timeLimit = 60_000; // PolyLog telescope / partial-fraction pieces are slow
 
     // Integrate `latex` over x and central-difference F.N() == integrand at
     // several sample points, substituting `params` (fixed so the radicands are
@@ -1312,7 +1295,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // `env['x']` to the real integration variable before RHS construction.
   describe('integration variable other than x (R26A)', () => {
     const ce = new ComputeEngine();
-    ce.timeLimit = 30_000; // Subst / exp-substitution classes are slow under ts-jest
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
 
     // Integrate `latex` (parsed over variable `v`) and numerically D-verify
@@ -1411,7 +1393,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // symbolic-parameter antiderivatives, so we differentiate F back here.
   describe('symbolic-coefficient reciprocal-hyperbolic closure (Chapter-6, R26B)', () => {
     const ce = new ComputeEngine();
-    ce.timeLimit = 30_000; // the exp-substitution rational chain is slow under ts-jest
     loadIntegrationRules(ce, { timeLimitMs: 30_000 });
 
     // Close ∫1/(a+b·F(v)) symbolically, then D-verify F'(v) == integrand at

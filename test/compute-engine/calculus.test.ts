@@ -448,29 +448,23 @@ describe('INDEFINITE INTEGRATION', () => {
   // ∫(1+x²+x³)/((x−1)x(1+x²)²(1+x+x²)) previously returned a WRONG 0; the
   // others returned an inert integral. Verify D(F) = integrand numerically.
   describe('repeated-factor rational integration', () => {
-    const verify = (latex: string, timeLimit = engine.timeLimit) => {
-      const savedTimeLimit = engine.timeLimit;
-      engine.timeLimit = timeLimit;
-      try {
-        const integrand = engine.parse(latex);
-        const F = engine.expr(['Integrate', integrand, 'x']).evaluate();
-        expect(F.has('Integrate')).toBe(false); // a closed form, not inert
-        expect(F.is(0)).toBe(false); // never the spurious 0
-        const dF = engine.expr(['D', F, 'x']).evaluate();
-        for (const x of [0.3, 1.7, -0.6, 2.3]) {
-          const a = dF.subs({ x }).N().re;
-          const b = integrand.subs({ x }).N().re;
-          if (a === undefined || b === undefined) continue;
-          expect(a).toBeCloseTo(b, 6);
-        }
-      } finally {
-        engine.timeLimit = savedTimeLimit;
+    const verify = (latex: string) => {
+      const integrand = engine.parse(latex);
+      const F = engine.expr(['Integrate', integrand, 'x']).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      expect(F.is(0)).toBe(false); // never the spurious 0
+      const dF = engine.expr(['D', F, 'x']).evaluate();
+      for (const x of [0.3, 1.7, -0.6, 2.3]) {
+        const a = dF.subs({ x }).N().re;
+        const b = integrand.subs({ x }).N().re;
+        if (a === undefined || b === undefined) continue;
+        expect(a).toBeCloseTo(b, 6);
       }
     };
     test('∫1/(x²(x+1)) dx', () => verify('\\frac{1}{x^2(x+1)}'));
     test('∫1/(x(1+x²)²) dx', () => verify('\\frac{1}{x(1+x^2)^2}'));
     test('∫(1+x²+x³)/((x-1)x(1+x²)²(1+x+x²)) dx (was wrongly 0)', () =>
-      verify('\\frac{1+x^2+x^3}{(x-1)x(1+x^2)^2(1+x+x^2)}', 10_000));
+      verify('\\frac{1+x^2+x^3}{(x-1)x(1+x^2)^2(1+x+x^2)}'));
   });
 
   // ∫xᵐ·(a+bx)^p — a radical or power of a linear function (Sqrt and Power
@@ -1474,15 +1468,13 @@ describe('LIMIT', () => {
     // Deadline-free sibling of the test above. The Richardson ladder cannot
     // interrupt a single compiled `Sum` sample from the outside, so the
     // LIMIT_PROBE_ITERATION_BUDGET compiled into that sample is the SOLE
-    // protection once `ce.timeLimit` is removed: with the deadline disabled
-    // (`ce.timeLimit = 0` normalizes to Infinity), an unbudgeted Sum whose
-    // bound is 8^k would run an ever-longer uninterruptible loop and hang.
-    // The budget makes the over-budget rungs read as NaN, the ladder stops at
-    // its clean prefix, and extrapolation still converges to γ — in ms. A
-    // regression in the budget would hang here rather than hide behind a
+    // protection: with no deadline armed (no enclosing span), an unbudgeted
+    // Sum whose bound is 8^k would run an ever-longer uninterruptible loop and
+    // hang. The budget makes the over-budget rungs read as NaN, the ladder
+    // stops at its clean prefix, and extrapolation still converges to γ — in
+    // ms. A regression in the budget would hang here rather than hide behind a
     // deadline.
     const ce = new ComputeEngine();
-    ce.timeLimit = 0;
     const start = Date.now();
     const r = ce
       .parse(
@@ -1804,20 +1796,9 @@ describe('LIMIT', () => {
 
 describe('DOUBLY-INFINITE SUMS', () => {
   // Regression: limits of n = −∞…∞ produced an empty iteration range, so
-  // these sums evaluated to 0
-  //
-  // These tests assert VALUES, not timing. Under a fully-parallel jest sweep
-  // the default 2 s wall-clock deadline can expire from CPU contention alone
-  // (observed flake), so give them a generous limit.
-  let savedTimeLimit: number;
-  beforeAll(() => {
-    savedTimeLimit = engine.timeLimit;
-    engine.timeLimit = 20_000;
-  });
-  afterAll(() => {
-    engine.timeLimit = savedTimeLimit;
-  });
-
+  // these sums evaluated to 0. These tests assert VALUES, not timing, and run
+  // unbounded (no enclosing span); jest's per-test timeout is the hang
+  // backstop.
   test('Σ 2^−|n| over all integers = 3', () => {
     const r = engine
       .expr([

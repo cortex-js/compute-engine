@@ -242,20 +242,6 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~timeLimit~~
-
-```ts
-timeLimit: number;
-```
-
-###### Deprecated
-
-Use [`withTimeLimit`](#withtimelimit) instead.
-
-</MemberCard>
-
-<MemberCard>
-
 ##### ExpressionComputeEngine.iterationLimit
 
 ```ts
@@ -7516,20 +7502,6 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
-##### IComputeEngine.~~timeLimit~~
-
-```ts
-timeLimit: number;
-```
-
-###### Deprecated
-
-Use [`withTimeLimit`](#withtimelimit) instead.
-
-</MemberCard>
-
-<MemberCard>
-
 ##### IComputeEngine.iterationLimit
 
 ```ts
@@ -10900,11 +10872,11 @@ It is possible that the result of `expr.evaluate()` may be the same as
 
 The result is in canonical form.
 
-**Time and recursion limits**: if the evaluation exceeds
-`engine.timeLimit` or the recursion limit, a `CancellationError` is
-thrown (its `cause` is `'timeout'` or `'recursion-depth-exceeded'`).
-Catch it to distinguish an interrupted evaluation from a symbolic
-(inert) result.
+**Time and recursion limits**: if the evaluation runs inside an enclosing
+ComputeEngine.withTimeLimit span and exceeds its deadline, or
+exceeds the recursion limit, a `CancellationError` is thrown (its `cause`
+is `'timeout'` or `'recursion-depth-exceeded'`). Catch it to distinguish
+an interrupted evaluation from a symbolic (inert) result.
 
 ####### options?
 

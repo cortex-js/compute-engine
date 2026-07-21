@@ -1939,13 +1939,11 @@ describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
     // `isEmpty` handler swallows that cause and reports `undefined`. Here the
     // source Range is infinite and the predicate (`x < 0`) is NEVER true, so
     // the filtered stream yields nothing and the walk is unbounded — the
-    // iteration-limit guard is the ONLY thing that can stop it once
-    // `ce.timeLimit` is removed. With the deadline disabled
-    // (`timeLimit = 0` normalizes to Infinity) a regression in the guard would
-    // hang forever here rather than hide behind a deadline. A fresh engine is
-    // used so the default `iterationLimit` (1024) applies.
+    // iteration-limit guard is the ONLY thing that can stop it. With no
+    // deadline armed (a fresh engine, no enclosing span) a regression in the
+    // guard would hang forever here rather than hide behind a deadline. A
+    // fresh engine is used so the default `iterationLimit` (1024) applies.
     const ce = new ComputeEngine();
-    ce.timeLimit = 0;
     const neverTrue: Expression = ['Function', ['Less', 'x', 0], 'x'];
     const filter: Expression = ['Filter', ['Range', 1, 'Infinity'], neverTrue];
     const start = Date.now();
@@ -1960,12 +1958,11 @@ describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
     // uses. `First(Filter(...))` calls the Filter `at` handler, whose
     // positive-index path must route through the guarded iterator (capping the
     // source walk at `ce.iterationLimit`) rather than the raw `expr.op1.each()`
-    // — otherwise, with the deadline disabled (`timeLimit = 0`), a never-true
-    // predicate over an infinite source would walk forever. The guarded walk
-    // trips iteration-limit-exceeded, which the `at` handler swallows (returns
+    // — otherwise, with no deadline armed, a never-true predicate over an
+    // infinite source would walk forever. The guarded walk trips
+    // iteration-limit-exceeded, which the `at` handler swallows (returns
     // undefined), so `First` yields `Nothing`.
     const ce = new ComputeEngine();
-    ce.timeLimit = 0;
     const neverTrue: Expression = ['Function', ['Less', 'x', 0], 'x'];
     const first: Expression = [
       'First',
@@ -2911,12 +2908,11 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     // without ever emitting. The iterator caps that source walk at
     // `ce.iterationLimit` and throws `iteration-limit-exceeded`, which the `at`
     // handler swallows (returns undefined), so `Second` yields `Nothing`. With
-    // the deadline disabled (`timeLimit = 0` normalizes to Infinity) the
-    // iteration-limit guard is the ONLY thing that can stop it — a regression
-    // would hang forever here rather than hide behind a deadline. A fresh
-    // engine is used so the default `iterationLimit` (1024) applies.
+    // no deadline armed (a fresh engine, no enclosing span) the iteration-limit
+    // guard is the ONLY thing that can stop it — a regression would hang
+    // forever here rather than hide behind a deadline. A fresh engine is used
+    // so the default `iterationLimit` (1024) applies.
     const ce = new ComputeEngine();
-    ce.timeLimit = 0;
     const second: Expression = ['Second', ['Dedup', ['Cycle', ['List', 1, 1]]]];
     const start = Date.now();
     expect(ce.box(second).evaluate().symbol).toBe('Nothing');

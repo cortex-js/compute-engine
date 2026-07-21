@@ -13,20 +13,11 @@ let errors: string[] = [];
 export const engine = new ComputeEngine();
 engine.precision = 100; // Some arithmetic test cases assume a precision of at least 100
 
-// The engine's default `timeLimit` (2s) is calibrated for interactive use.
-// Under jest, legitimate evaluations run ~10× slower (vm instrumentation),
-// and a full-suite run adds 6-way worker contention (P+E cores) on top —
-// a sub-200ms evaluation can then blow the 2s internal deadline and throw
-// `CancellationError`, making every compute-heavy test flaky. Genuine hangs
-// are still caught, just at a contention-proof threshold. Tests that
-// exercise timeout behavior itself set their own limit (see timeout.test.ts,
-// bug-fixes.test.ts) or use a dedicated engine.
-//
-// Release-N-only: `ce.timeLimit` is deprecated and removed at N+1 (see
-// docs/TIMEOUT-MODEL.md §6.5). At N+1 this suite-wide bound moves to jest's
-// `testTimeout` for hang detection plus explicit labelled `withTimeLimit`
-// spans for the compute-heavy cases that need attribution.
-engine.timeLimit = 20_000;
+// A deadline is armed only by an explicit `withTimeLimit` span (there is no
+// ambient `ce.timeLimit` any more, removed in TIMEOUT-MODEL.md §8 step 6), so
+// this shared engine runs unbounded by default. Hang detection is jest's
+// per-test timeout; the few tests that exercise timeout behavior itself arm
+// their own labelled `withTimeLimit` span (see timeout.test.ts).
 
 // Make sure that the symbol "f" is interpreted as a function in all test
 // cases that use it.

@@ -3882,7 +3882,8 @@ function referencesVarsSymbol(
  * `∫₀ˣ f(t) dt` whose closed form is a function of the free bound `x` — that
  * straight-line expression is compiled directly, so each sample costs ~µs
  * instead of a full quadrature. The symbolic attempt is bounded by the engine
- * deadline (`ce.timeLimit`, default 2 s), so a non-elementary integrand
+ * deadline (the enclosing `withTimeLimit` span, if any), so a
+ * non-elementary integrand
  * degrades to quadrature rather than hanging. Skipped when the integral
  * references a `vars`-mapped symbol, which must survive to run time as a live
  * input (the vars contract) rather than be folded into a baked closed form.

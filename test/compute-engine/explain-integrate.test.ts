@@ -5,7 +5,6 @@ import { loadIntegrationRules } from '../../src/integration-rules';
 // bounded by its own per-integral budget; give the engine a generous
 // wall-clock so a loaded machine doesn't spuriously time out.
 const ce = new ComputeEngine();
-ce.timeLimit = 10_000;
 loadIntegrationRules(ce);
 
 const INERT_TRIG = new Set(['sin', 'cos', 'tan', 'sec', 'csc', 'cot']);

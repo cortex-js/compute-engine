@@ -1465,7 +1465,8 @@ export function matchAnyRulesWithSteps(
     // multinomial-expanded integrand with thousands of operands) can take
     // ~100 ms; scanning a rule set then runs for seconds. Checkpoint the
     // engine deadline once per rule so a runaway rule scan honors
-    // `ce.timeLimit` (e.g. the compiler's symbolic-antiderivative attempt).
+    // the enclosing `withTimeLimit` span (e.g. the compiler's
+    // symbolic-antiderivative attempt).
     checkDeadline(expr.engine._deadlineFrame);
     const r = applyRule(rule, expr, sub, options);
 

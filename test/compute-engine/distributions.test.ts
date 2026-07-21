@@ -180,7 +180,6 @@ describe('regularized incomplete gamma/beta kernels', () => {
     beforeAll(() => {
       savedPrecision = BigDecimal.precision;
       ce = new ComputeEngine();
-      ce.timeLimit = 20_000; // value tests; guard against CPU contention
     });
     afterAll(() => {
       BigDecimal.precision = savedPrecision;

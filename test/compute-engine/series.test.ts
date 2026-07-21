@@ -6,7 +6,6 @@ export const ce = new ComputeEngine();
 // Series expansion is compute-heavy; the default 2s internal time limit is
 // flaky under jest instrumentation + full-suite worker contention (same
 // rationale as the shared engine in test/utils.ts).
-ce.timeLimit = 20_000;
 
 //
 // Helpers

@@ -4,13 +4,18 @@ import { extrapolate } from '../../src/compute-engine/numerics/richardson';
 import { monteCarloEstimate } from '../../src/compute-engine/numerics/monte-carlo';
 import { polynomialGCD } from '../../src/compute-engine/boxed-expression/polynomials';
 
-// Use a dedicated engine with a short timeout for all tests
+// Use a dedicated engine for all tests.
 let ce: ComputeEngine;
 
 beforeEach(() => {
   ce = new ComputeEngine();
-  ce.timeLimit = 200; // 200ms — short enough to catch hangs, long enough for CI
 });
+
+// A deadline is armed only by a `withTimeLimit` span (there is no ambient
+// `ce.timeLimit` any more). Wrap the evaluations that must time out in a short
+// labelled span — 200ms is short enough to catch hangs, long enough for CI.
+const limited = <T>(fn: () => T, ms = 200): T =>
+  ce.withTimeLimit({ ms, label: 'test:timeout' }, fn);
 
 describe('TIMEOUT', () => {
   describe('Factorial', () => {
@@ -20,13 +25,20 @@ describe('TIMEOUT', () => {
     });
 
     it('nested factorial (700!)! throws CancellationError (sync)', () => {
-      expect(() => ce.parse('(700!)!').evaluate()).toThrow(CancellationError);
-    });
-
-    it('nested factorial (700!)! throws CancellationError (async)', async () => {
-      await expect(ce.parse('(700!)!').evaluateAsync()).rejects.toThrow(
+      expect(() => limited(() => ce.parse('(700!)!').evaluate())).toThrow(
         CancellationError
       );
+    });
+
+    it('nested factorial (700!)! aborts via an AbortSignal (async)', async () => {
+      // Async work is not bounded by a span (TIMEOUT-MODEL.md §6.4); it is
+      // interrupted by an `AbortSignal`. `Factorial` is one of the four
+      // signal-instrumented handlers, so the abort is delivered.
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), 50);
+      await expect(
+        ce.parse('(700!)!').evaluateAsync({ signal: ctrl.signal })
+      ).rejects.toThrow(CancellationError);
     });
   });
 
@@ -38,8 +50,9 @@ describe('TIMEOUT', () => {
 
     it('large double factorial in bignum mode throws CancellationError', () => {
       ce.precision = 200; // enable bignum path
-      ce.timeLimit = 5; // very short — 5ms
-      expect(() => ce.parse('100000!!').evaluate()).toThrow(CancellationError);
+      expect(() => limited(() => ce.parse('100000!!').evaluate(), 5)).toThrow(
+        CancellationError
+      );
     });
   });
 
@@ -53,9 +66,11 @@ describe('TIMEOUT', () => {
       // Sum k^k for k=1..100000 — each iteration evaluates k^k which gets
       // expensive, and there are 100K of them
       expect(() =>
-        ce
-          .expr(['Sum', ['Power', 'k', 'k'], ['Tuple', 'k', 1, 100_000]])
-          .evaluate()
+        limited(() =>
+          ce
+            .expr(['Sum', ['Power', 'k', 'k'], ['Tuple', 'k', 1, 100_000]])
+            .evaluate()
+        )
       ).toThrow(CancellationError);
     });
   });
@@ -71,9 +86,11 @@ describe('TIMEOUT', () => {
 
     it('large product throws CancellationError', () => {
       expect(() =>
-        ce
-          .expr(['Product', ['Power', 'k', 2], ['Tuple', 'k', 1, 100_000]])
-          .evaluate()
+        limited(() =>
+          ce
+            .expr(['Product', ['Power', 'k', 2], ['Tuple', 'k', 1, 100_000]])
+            .evaluate()
+        )
       ).toThrow(CancellationError);
     });
   });
@@ -99,9 +116,11 @@ describe('TIMEOUT', () => {
       );
       // Body does expensive work per element
       expect(() =>
-        ce
-          .expr(['Loop', ['Power', 'x', 'x'], ['Element', 'x', list]])
-          .evaluate()
+        limited(() =>
+          ce
+            .expr(['Loop', ['Power', 'x', 'x'], ['Element', 'x', list]])
+            .evaluate()
+        )
       ).toThrow(CancellationError);
     });
   });
@@ -133,30 +152,27 @@ describe('TIMEOUT', () => {
     });
 
     it('exponential Eulerian recursion throws CancellationError', () => {
-      expect(() => ce.expr(['Eulerian', 60, 30]).evaluate()).toThrow(
-        CancellationError
-      );
+      expect(() =>
+        limited(() => ce.expr(['Eulerian', 60, 30]).evaluate())
+      ).toThrow(CancellationError);
     });
 
     it('huge PrimePi throws CancellationError', () => {
       // PrimePi has no O(√n)-style algorithmic fix (unlike the divisor
       // functions above, which now compute from the prime factorization);
       // it stays a vehicle for exercising the number-theory deadline/budget
-      // guard. Under the suite's 200ms limit this throws via the DEADLINE —
-      // see the sibling test below for the iteration-budget path.
-      expect(() => ce.expr(['PrimePi', 1_000_000_000_000]).evaluate()).toThrow(
-        CancellationError
-      );
+      // guard. Under a 200ms span this throws via the DEADLINE — see the
+      // sibling test below for the iteration-budget path.
+      expect(() =>
+        limited(() => ce.expr(['PrimePi', 1_000_000_000_000]).evaluate())
+      ).toThrow(CancellationError);
     });
 
     it('huge PrimePi throws on the iteration budget with no deadline', () => {
-      // Distinct from the test above: with the deadline disabled, the
-      // MAX_VALUE_SCALED_ITERATIONS budget is the ONLY thing that can stop
-      // this loop. That budget becomes the sole protection once ce.timeLimit
-      // is removed, so assert the cause explicitly rather than just the
-      // error type — a regression here would otherwise hide behind the
-      // deadline until the deprecation lands.
-      ce.timeLimit = 0; // normalizes to Infinity; ce is rebuilt in beforeEach
+      // Distinct from the test above: with no span armed there is no deadline,
+      // so the MAX_VALUE_SCALED_ITERATIONS budget is the ONLY thing that can
+      // stop this loop. That budget is now the sole protection, so assert the
+      // cause explicitly rather than just the error type.
       let caught: unknown;
       try {
         ce.expr(['PrimePi', 1_000_000_000_000]).evaluate();
@@ -180,9 +196,11 @@ describe('TIMEOUT', () => {
 
     it('enumeration of a huge Range throws CancellationError', () => {
       expect(() =>
-        ce
-          .expr(['CountIf', ['Range', 100_000_000], ['Function', 'True']])
-          .evaluate()
+        limited(() =>
+          ce
+            .expr(['CountIf', ['Range', 100_000_000], ['Function', 'True']])
+            .evaluate()
+        )
       ).toThrow(CancellationError);
     });
   });
@@ -265,11 +283,15 @@ describe('TIMEOUT', () => {
       // bounded multiple of the time limit, never unbounded.
       const start = Date.now();
       try {
-        ce.expr([
-          'Apply',
-          ['Derivative', ['Function', ['LambertW', 'z'], 'z'], 9],
-          0,
-        ]).evaluate();
+        limited(() =>
+          ce
+            .expr([
+              'Apply',
+              ['Derivative', ['Function', ['LambertW', 'z'], 'z'], 9],
+              0,
+            ])
+            .evaluate()
+        );
       } catch (e) {
         expect(e).toBeInstanceOf(CancellationError);
       }
@@ -278,26 +300,30 @@ describe('TIMEOUT', () => {
   });
 
   describe('Nested numeric integration', () => {
-    it('double integral is bounded by the ambient deadline', () => {
+    it('double integral is bounded by the enclosing span deadline', () => {
       // ∫₀¹∫₀¹ 1/(1+x²y²) dx dy (= Catalan) — the inner integral runs via
       // compiled code with no engine access and previously sampled
-      // unbounded (10⁷ × 10⁷ evaluations → OOM). It now inherits the outer
-      // deadline. (Fungrim 5b31ee)
+      // unbounded (10⁷ × 10⁷ evaluations → OOM). It now inherits the enclosing
+      // span's deadline. (Fungrim 5b31ee)
       const start = Date.now();
       try {
-        ce.expr([
-          'Integrate',
-          [
-            'Integrate',
-            [
-              'Divide',
-              1,
-              ['Add', 1, ['Multiply', ['Power', 'x', 2], ['Power', 'y', 2]]],
-            ],
-            ['Limits', 'x', 0, 1],
-          ],
-          ['Limits', 'y', 0, 1],
-        ]).N();
+        limited(() =>
+          ce
+            .expr([
+              'Integrate',
+              [
+                'Integrate',
+                [
+                  'Divide',
+                  1,
+                  ['Add', 1, ['Multiply', ['Power', 'x', 2], ['Power', 'y', 2]]],
+                ],
+                ['Limits', 'x', 0, 1],
+              ],
+              ['Limits', 'y', 0, 1],
+            ])
+            .N()
+        );
       } catch (e) {
         expect(e).toBeInstanceOf(CancellationError);
       }
@@ -329,9 +355,9 @@ describe('TIMEOUT', () => {
         ])
         .evaluate();
       const start = Date.now();
-      expect(() => ce.function('Divide', [num, den]).simplify()).toThrow(
-        CancellationError
-      );
+      expect(() =>
+        limited(() => ce.function('Divide', [num, den]).simplify())
+      ).toThrow(CancellationError);
       // Interrupted near the 200ms time limit, not after minutes
       expect(Date.now() - start).toBeLessThan(5000);
     });
@@ -349,9 +375,9 @@ describe('TIMEOUT', () => {
           ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 5]], 8],
         ])
         .evaluate();
-      expect(() => ce.function('Divide', [num, den]).simplify()).toThrow(
-        CancellationError
-      );
+      expect(() =>
+        limited(() => ce.function('Divide', [num, den]).simplify())
+      ).toThrow(CancellationError);
       expect(ce._deadline).toBeUndefined();
       // Subsequent simplify still works
       expect(ce.parse('x+x').simplify().toString()).toBe('2x');
@@ -374,17 +400,18 @@ describe('TIMEOUT', () => {
     };
 
     it('symbolic nested chain throws CancellationError (sync)', () => {
-      expect(() => defineNewton().evaluate()).toThrow(CancellationError);
-    });
-
-    it('symbolic nested chain throws CancellationError (async)', async () => {
-      await expect(defineNewton().evaluateAsync()).rejects.toThrow(
+      expect(() => limited(() => defineNewton().evaluate())).toThrow(
         CancellationError
       );
     });
 
+    // No async counterpart: this is a user-function substitution storm, not one
+    // of the four signal-instrumented handlers (Loop/Factorial/Sum/Product), so
+    // `evaluateAsync` cannot be bounded by an `AbortSignal`, and a span does not
+    // bound async work (TIMEOUT-MODEL.md §6.4). There is no N+1 mechanism that
+    // interrupts it, so there is nothing to assert.
+
     it('numeric nested chain completes (folds to a number per level)', () => {
-      ce.timeLimit = 2000;
       ce.parse('f(x) := x + 0.95\\cos(x) + 1').evaluate();
       ce.parse("s(y, x_p) := \\frac{y - f(x_p)}{f'(x_p)} + x_p").evaluate();
       let chain = '1.5';
@@ -404,11 +431,13 @@ describe('TIMEOUT', () => {
     it('high-power integrand throws CancellationError, bounded (sync)', () => {
       const start = Date.now();
       expect(() =>
-        ce
-          .parse(
-            '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
-          )
-          .evaluate()
+        limited(() =>
+          ce
+            .parse(
+              '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
+            )
+            .evaluate()
+        )
       ).toThrow(CancellationError);
       // Interrupted near the 200ms limit, not after seconds.
       expect(Date.now() - start).toBeLessThan(3000);
@@ -416,11 +445,13 @@ describe('TIMEOUT', () => {
 
     it('deadline is reset after the integration timeout', () => {
       expect(() =>
-        ce
-          .parse(
-            '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
-          )
-          .evaluate()
+        limited(() =>
+          ce
+            .parse(
+              '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
+            )
+            .evaluate()
+        )
       ).toThrow(CancellationError);
       expect(ce._deadline).toBeUndefined();
       // Subsequent evaluation still works.
@@ -431,7 +462,9 @@ describe('TIMEOUT', () => {
   describe('deadline cleanup', () => {
     it('deadline is reset after timeout so subsequent evaluations work', () => {
       // First: trigger a timeout
-      expect(() => ce.parse('(700!)!').evaluate()).toThrow(CancellationError);
+      expect(() => limited(() => ce.parse('(700!)!').evaluate())).toThrow(
+        CancellationError
+      );
 
       // Second: a normal evaluation should still work (deadline was cleaned up)
       const result = ce.parse('10!').evaluate();
@@ -518,9 +551,8 @@ describe('Symbolic polynomial GCD terminates', () => {
 
   it('the symbolic-coefficient rational integral no longer hangs', () => {
     const engine = new ComputeEngine();
-    engine.timeLimit = 3000;
     // Completes quickly now (stays inert without the Rubi rules); the point is
-    // it returns rather than spinning past the deadline.
+    // it returns rather than spinning. Jest's per-test timeout is the backstop.
     const r = engine
       .parse('\\int_0^x \\frac{u-a}{b_2 u^2 + b_1 u + b_0}\\,du')
       .evaluate();
@@ -528,10 +560,10 @@ describe('Symbolic polynomial GCD terminates', () => {
   });
 });
 
-// Each top-level evaluate() arms its own timeLimit budget, so a loop of many
-// SHORT evaluations — a lazy-collection drain via each()/at() — can run
-// unboundedly without tripping the limit. `withTimeLimit` arms ONE deadline
-// across the whole span (Tycho item 42 addendum).
+// A deadline is armed ONLY by a `withTimeLimit` span; work outside a span runs
+// unbounded. `withTimeLimit` arms ONE deadline across the whole span, so a loop
+// of many SHORT evaluations — a lazy-collection drain via each()/at() — is
+// bounded by it (Tycho item 42 addendum).
 describe('withTimeLimit', () => {
   it('interrupts a long lazy-collection drain mid-stream', () => {
     const engine = new ComputeEngine();
@@ -576,113 +608,23 @@ describe('withTimeLimit', () => {
     ).toThrow(CancellationError);
   });
 
-  // RELEASE-N-ONLY: this block tests the per-evaluate `ce.timeLimit` / span
-  // composition that is removed at release N+1 (docs/TIMEOUT-MODEL.md §5.2).
-  // When `ce.timeLimit` is deleted the behavior it exercises no longer exists,
-  // and this describe block goes with it.
-  //
-  // Tycho item 61: inside a span, a per-evaluate `ce.timeLimit` budget used to
-  // be silently inert — the span deadline REPLACED every inner clamp instead of
-  // min-ing with it, so wrapping a clamp-using pipeline in a span stripped its
-  // inner bounds. The effective deadline is now the earlier of the two.
-  describe('composes with per-evaluate ce.timeLimit (item 61)', () => {
-    // A single evaluate() that runs well past any of the budgets below.
-    const slow = (engine: ComputeEngine) =>
-      engine.parse(
-        '\\sum_{i=1}^{60000}\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)',
-        { strict: false }
-      );
-
-    const elapsed = (fn: () => void): number => {
-      const t0 = Date.now();
-      try {
-        fn();
-      } catch (e) {
-        if (!(e instanceof CancellationError)) throw e;
-      }
-      return Date.now() - t0;
-    };
-
-    it('a tighter inner timeLimit clamps inside a longer span', () => {
-      const engine = new ComputeEngine();
-      engine.precision = 'machine';
-      const expr = slow(engine);
-      const ms = elapsed(() =>
-        engine.withTimeLimit(60_000, () => {
-          engine.timeLimit = 200;
-          expr.evaluate();
-        })
-      );
-      // Without the fix this ran the full 60s span.
-      expect(ms).toBeLessThan(2000);
-    });
-
-    it('a looser inner timeLimit does not extend a shorter span', () => {
-      const engine = new ComputeEngine();
-      engine.precision = 'machine';
-      const expr = slow(engine);
-      const ms = elapsed(() =>
-        engine.withTimeLimit(200, () => {
-          engine.timeLimit = 60_000;
-          expr.evaluate();
-        })
-      );
-      expect(ms).toBeLessThan(2000);
-    });
-
-    it('an unlimited inner timeLimit (<=0) does not extend the span', () => {
-      const engine = new ComputeEngine();
-      engine.precision = 'machine';
-      const expr = slow(engine);
-      const ms = elapsed(() =>
-        engine.withTimeLimit(200, () => {
-          engine.timeLimit = 0; // normalized to +Infinity == "no limit"
-          expr.evaluate();
-        })
-      );
-      expect(ms).toBeLessThan(2000);
-    });
-
-    it('restores the ambient deadline after an inner clamp fires', () => {
-      const engine = new ComputeEngine();
-      engine.precision = 'machine';
-      const expr = slow(engine);
-      engine.withTimeLimit(60_000, () => {
-        const spanDeadline = engine.deadline!;
-        engine.timeLimit = 200;
-        try {
-          expr.evaluate();
-        } catch (e) {
-          if (!(e instanceof CancellationError)) throw e;
-        }
-        // The span deadline is intact — the inner clamp did not clobber it.
-        expect(engine.deadline).toBe(spanDeadline);
-      });
-      expect(engine.deadline).toBeUndefined();
-    });
-  });
-
-  // Review finding: the async helper must NOT install a tighter deadline when
-  // one is already armed. `withTimeLimit` restores its deadline in a
-  // SYNCHRONOUS `finally`, so by the time an awaited evaluation resumes the
-  // span is already un-armed; restoring the captured span deadline there left
-  // a deadline installed that outlived its span and could expire later,
-  // unrelated evaluations. (Async work under a span is bounded by neither
-  // limit — a documented limitation needing promise-aware spans to fix.)
+  // A span restores its deadline in a SYNCHRONOUS `finally`, so by the time an
+  // awaited evaluation resumes the span is already un-armed — async work under
+  // a span is therefore bounded by neither the span nor anything else (a
+  // documented limitation needing promise-aware spans to fix, TIMEOUT-MODEL.md
+  // §6.4). This test asserts the span leaves no deadline installed behind it.
   it('an async evaluation under a span leaves no deadline behind', async () => {
     const engine = new ComputeEngine();
     expect(engine.deadline).toBeUndefined();
 
-    await engine.withTimeLimit(60_000, () => {
-      engine.timeLimit = 100;
-      return engine.parse('2+2').evaluateAsync();
-    });
+    await engine.withTimeLimit(60_000, () =>
+      engine.parse('2+2').evaluateAsync()
+    );
 
     // The span has exited: no deadline may remain installed.
     expect(engine.deadline).toBeUndefined();
 
     // A later evaluation on the same engine is unaffected.
-    engine.timeLimit = 5000;
     expect(engine.parse('\\sqrt{16}').evaluate().re).toBe(4);
   });
 
@@ -752,30 +694,6 @@ describe('withTimeLimit', () => {
       expect(e.spans).toEqual([]);
     });
 
-    it('an ambient ce.timeLimit deadline is attributed to the operator', () => {
-      const engine = new ComputeEngine();
-      engine.timeLimit = 50;
-      const e = grabCancellation(() => slowEval(engine));
-      expect(e.attribution?.startsWith('engine.timeLimit:')).toBe(true);
-      // The synthesized owner label also appears in the spans[] list.
-      expect(e.spans).toContain(e.attribution);
-    });
-
-    it('lists both a span label and a winning ambient re-arm, outermost first', () => {
-      const engine = new ComputeEngine();
-      // A loose labelled span, then a tight ambient ce.timeLimit that wins:
-      // spans[] must list the enclosing span first, then the synthesized
-      // ambient owner.
-      engine.timeLimit = 50;
-      const e = grabCancellation(() =>
-        engine.withTimeLimit({ ms: 10_000, label: 'outer' }, () =>
-          slowEval(engine)
-        )
-      );
-      expect(e.attribution?.startsWith('engine.timeLimit:')).toBe(true);
-      expect(e.spans).toEqual(['outer', e.attribution]);
-    });
-
     it('the numeric withTimeLimit(ms, fn) form still bounds and returns', () => {
       const engine = new ComputeEngine();
       // Returns normally when the work fits.
@@ -789,10 +707,12 @@ describe('withTimeLimit', () => {
     });
   });
 
-  it('does not charge one-time cache builds against the deadline', () => {
-    // A lazily-built engine cache (e.g. constructible trig values) is
-    // warm-up work, not part of the user's evaluation: the deadline is
-    // suspended during the build, then pushed back by the build's duration.
+  it('runs one-time cache builds outside any deadline (§7.3)', () => {
+    // A lazily-built engine cache (e.g. constructible trig values) is warm-up
+    // work, not part of the user's evaluation: it runs as an explicit "no
+    // deadline" span — the deadline is suspended during the build and the
+    // enclosing frame is restored UNCHANGED afterward (no push-forward
+    // arithmetic), so a build in progress is never interrupted by the span.
     const engine = new ComputeEngine();
     engine.withTimeLimit(10_000, () => {
       const before = engine.deadline!;
@@ -805,10 +725,10 @@ describe('withTimeLimit', () => {
         }
         return 1;
       });
-      // ...and afterwards restored, shifted by at least the build time.
-      expect(engine.deadline).toBeGreaterThanOrEqual(before + 30);
+      // ...and afterwards restored unchanged (verbatim, not shifted).
+      expect(engine.deadline).toBe(before);
     });
-    // Cache hits don't shift anything: no deadline armed, none created.
+    // Cache hits don't touch anything: no deadline armed, none created.
     engine._cache('test-deadline-exclusion', () => 2);
     expect(engine.deadline).toBeUndefined();
   });

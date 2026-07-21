@@ -1163,14 +1163,10 @@ export class BoxedFunction
   }
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
-    // Arm the evaluation deadline (like evaluate()): simplification of
-    // large expressions (e.g. radical towers) can run unboundedly, and the
-    // simplify main loop checks `engine._deadline`.
-    return withDeadline(
-      this.engine,
-      () => simplify(this, options).at(-1)?.value ?? this,
-      this.operator
-    )();
+    // A deadline is armed only by an enclosing `withTimeLimit` span; work
+    // outside a span runs unbounded. The simplify main loop checks the
+    // ambient deadline (`engine._deadlineFrame`) if one is in effect.
+    return simplify(this, options).at(-1)?.value ?? this;
   }
 
   explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation {
@@ -1178,19 +1174,14 @@ export class BoxedFunction
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {
-    return withDeadline(
-      this.engine,
-      this._computeValue(options),
-      this.operator
-    )();
+    // A deadline is armed only by an enclosing `withTimeLimit` span; work
+    // outside a span runs unbounded. Evaluation checkpoints the ambient
+    // deadline (`engine._deadlineFrame`) if one is in effect.
+    return this._computeValue(options)();
   }
 
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
-    return withDeadlineAsync(
-      this.engine,
-      this._computeValueAsync(options),
-      this.operator
-    )();
+    return this._computeValueAsync(options)();
   }
 
   N(): Expression {
@@ -1421,8 +1412,8 @@ export class BoxedFunction
       // matching) carry their own checks, but handler-driven evaluation —
       // e.g. a user-function body whose parameter substitution multiplies
       // the tree at every nesting level — never reaches them: without this
-      // check such an evaluation exhausts the heap instead of honoring
-      // `ce.timeLimit`.
+      // check such an evaluation exhausts the heap instead of honoring an
+      // enclosing `withTimeLimit` span's deadline.
       if ((++_evalTick & 0x3ff) === 0)
         checkDeadline(this.engine._deadlineFrame);
 
@@ -2436,7 +2427,16 @@ function type(expr: BoxedFunction): Type {
       // instead of `list<list<number>>`.
       {
         const mapped = expr.ops.filter(
-          (x) => isFiniteIndexedCollection(x) && !isTuple(x)
+          (x) =>
+            (isFiniteIndexedCollection(x) && !isTuple(x)) ||
+            // Collection-TYPED operands too (Tycho item 73): `h(L+1)` /
+            // `h(2L)` — an unevaluated expression statically typed as a
+            // list/vector broadcasts through the lambda at runtime (the
+            // post-eval lambda-broadcast arm maps it element-wise), so the
+            // static type must be the lifted list as well, exactly as at
+            // the generic wrapper's arm 1.
+            isBroadcastCollectionType(x) ||
+            isFixedShapeCollection(x)
         );
         if (mapped.length > 0) {
           // A collection-valued per-element result keeps the plain nested
@@ -2495,7 +2495,16 @@ function type(expr: BoxedFunction): Type {
       // flattened by `broadcastElementType`.
       {
         const mapped = expr.ops.filter(
-          (x) => isFiniteIndexedCollection(x) && !isTuple(x)
+          (x) =>
+            (isFiniteIndexedCollection(x) && !isTuple(x)) ||
+            // Collection-TYPED operands too (Tycho item 73): `h(L+1)` /
+            // `h(2L)` — an unevaluated expression statically typed as a
+            // list/vector broadcasts through the lambda at runtime (the
+            // post-eval lambda-broadcast arm maps it element-wise), so the
+            // static type must be the lifted list as well, exactly as at
+            // the generic wrapper's arm 1.
+            isBroadcastCollectionType(x) ||
+            isFixedShapeCollection(x)
         );
         // Shape-aware (§D6.1), as at the operator-def lambda site above —
         // including the collection-valued-result exception.
@@ -2525,81 +2534,6 @@ function type(expr: BoxedFunction): Type {
   // we don't know (somehow?) we return 'unknown', not 'function', which
   // is the type of the function itself, not of its result.
   return 'unknown';
-}
-
-function withDeadline<T>(
-  engine: ComputeEngine,
-  fn: () => T,
-  operator?: string
-): () => T {
-  return () => {
-    const prevFrame = engine._deadlineFrame;
-    const limit = engine.timeLimit;
-
-    // A `timeLimit` of 0 or less reads as "no limit" (normalized to
-    // +Infinity): it can never tighten an ambient deadline.
-    if (prevFrame !== undefined && !Number.isFinite(limit)) return fn();
-
-    // The effective deadline is the EARLIEST of this evaluation's own
-    // `timeLimit` budget and any ambient deadline (a `withTimeLimit()` span,
-    // or an enclosing evaluation). A span therefore never lengthens an inner
-    // per-evaluate clamp, and an inner clamp never outlives the span.
-    // For a plain nested evaluation the ambient deadline was armed earlier
-    // with the same budget, so it always wins and nothing changes.
-    const own = Date.now() + limit;
-    if (prevFrame !== undefined && own >= prevFrame.at) return fn();
-
-    // This ambient deadline wins. Synthesize an attribution label so the
-    // (deprecated) `ce.timeLimit` is still traceable while it exists. Preserve
-    // any enclosing spans and append this frame's own label (spans lists ALL
-    // active span labels, outermost-first).
-    const owner =
-      operator !== undefined ? `engine.timeLimit:${operator}` : undefined;
-    engine._deadlineFrame = {
-      at: own,
-      owner,
-      spans: [
-        ...(prevFrame?.spans ?? []),
-        ...(owner !== undefined ? [owner] : []),
-      ],
-    };
-    try {
-      return fn();
-    } finally {
-      engine._deadlineFrame = prevFrame;
-    }
-  };
-}
-
-function withDeadlineAsync<T>(
-  engine: ComputeEngine,
-  fn: () => Promise<T>,
-  operator?: string
-): () => Promise<T> {
-  return async () => {
-    // Unlike the synchronous `withDeadline`, this helper must NOT install a
-    // tighter deadline when one is already armed. `withTimeLimit()` restores
-    // its deadline in a SYNCHRONOUS `finally`, so it has already un-armed the
-    // span by the time an awaited evaluation resumes; restoring the captured
-    // span deadline here would install a deadline that outlives its span and
-    // can spuriously expire later, unrelated evaluations. Async work under a
-    // span is therefore bounded by neither — a known limitation that needs
-    // promise-aware spans to fix properly, not a tighter clamp here.
-    if (engine._deadlineFrame !== undefined) return fn();
-
-    const owner =
-      operator !== undefined ? `engine.timeLimit:${operator}` : undefined;
-    engine._deadlineFrame = {
-      at: Date.now() + engine.timeLimit,
-      owner,
-      spans: owner !== undefined ? [owner] : [],
-    };
-    try {
-      return await fn();
-    } finally {
-      engine._deadlineFrame = undefined;
-    }
-  };
 }
 
 function applyFunctionLiteral(
@@ -2676,7 +2610,9 @@ function applyFunctionLiteral(
  * which makes this a permissive default for inferred lambda signatures.
  * @internal
  */
-function paramsAreScalar(source: BoxedOperatorDefinition | Type): boolean {
+export function paramsAreScalar(
+  source: BoxedOperatorDefinition | Type
+): boolean {
   const sigType = isOperatorDefinition(source)
     ? source.signature?.type
     : source;

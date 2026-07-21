@@ -1058,7 +1058,8 @@ function collectionIndexWhere(
   // collection with an O(n) `at()` (e.g. `Comprehension`) the repeated-`at`
   // walk is O(k²); a single stream is linear. A deadline checkpoint (strided
   // to amortize `Date.now()`) means an unbounded search — `IndexOf` of a
-  // never-matching value in an infinite collection — aborts at `ce.timeLimit`
+  // never-matching value in an infinite collection — aborts at the active
+  // `withTimeLimit` span deadline, if any
   // with the usual timeout `CancellationError` instead of hanging forever.
   const deadline = expr.engine._deadline;
   let i = 0;

@@ -998,17 +998,10 @@ describe('SUM', () => {
 
   it('should compute the sum of a function over an open interval numerically', () => {
     // Sums 1/x over the default unbounded range (MAX_ITERATION = 10000 terms).
-    // Fast locally (~60ms), but on slow/loaded CI hardware it can exceed the
-    // engine's default 2000ms internal deadline and abort with a
-    // CancellationError. Raise the deadline so the computation can complete.
-    const savedTimeLimit = ce.timeLimit;
-    ce.timeLimit = 30_000;
-    try {
-      const result = ce.expr(['Sum', ['Divide', 1, 'x'], 'x']).N();
-      expect(result.re).toBeCloseTo(9.787606036044382);
-    } finally {
-      ce.timeLimit = savedTimeLimit;
-    }
+    // Fast locally (~60ms); runs unbounded (no enclosing span), with jest's
+    // per-test timeout as the backstop.
+    const result = ce.expr(['Sum', ['Divide', 1, 'x'], 'x']).N();
+    expect(result.re).toBeCloseTo(9.787606036044382);
   }, 30_000);
 
   it('should compute the sum of a collection', () =>

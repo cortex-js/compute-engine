@@ -2,6 +2,23 @@
 
 ### Breaking Changes
 
+- **`ComputeEngine.timeLimit` is removed**, completing the deprecation begun
+  in 0.88.0. There is no implicit ambient deadline anymore: an `evaluate()`
+  or `simplify()` outside a span runs unbounded, and
+  `ce.withTimeLimit(ms, fn)` / `ce.withTimeLimit({ ms, label }, fn)` spans
+  are the only way to arm a deadline. If you relied on the old 2000&nbsp;ms
+  ambient default, wrap your evaluation entry point in a span:
+
+  ```ts
+  const r = ce.withTimeLimit({ ms: 2000, label: 'my-app:eval' }, () =>
+    expr.evaluate()
+  );
+  ```
+
+  The `engine.timeLimit:<operator>` attribution synthesized for ambient
+  timeouts is gone with it — every `CancellationError.attribution` now names
+  a span you created (or is `undefined` for an unlabelled span).
+
 - **The `BoxedTensor` class is removed.** Tensor values (vectors, matrices)
   are now ordinary canonical `List` expressions; "tensor-ness" is a property
   (shape-regularity), not a distinct representation. The `BoxedTensor` type
@@ -73,6 +90,68 @@
   from the boxing path makes broadcast-heavy evaluation measurably faster
   (~30% on elementwise matrix expressions), with no per-expression packing
   cost until a numeric kernel actually runs.
+
+## Issues Resolved
+
+- **A function call over a collection-valued *expression* keeps its broadcast
+  type.** With `h` a function over numbers (declared or inferred) and `L` a
+  list, `h(L)` already typed as a list — but `h(L + 1)` or `h(2L)` typed as a
+  *scalar* while still evaluating to a list. Both now type as the shaped
+  vector (`h(L+1)` → `vector<3>` for a 3-element `L`), and a declared scalar
+  signature no longer rejects a collection argument with `incompatible-type`
+  — scalar-parameter functions are threadable, so the argument broadcasts,
+  matching what evaluation always did. Scalar applications and genuinely
+  invalid arguments (`h("abc")`) are unchanged.
+
+### Benchmarks
+
+#### Numeric performance (200-digit precision)
+
+Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+
+| Expression | CE (current) | CE 0.86.1 | SymPy | math.js | Mathematica |
+| --- | --: | --: | --: | --: | --: |
+| $\pi^2$ | 6.7 | 7.5 | 176 | 137 | 4.1 |
+| $\sin 1$ | 21 | 21 | 220 | 444 | 5.1 |
+| $\cos 1$ | 20 | 20 | 224 | 536 | 6.9 |
+| $\ln 2$ | 16 | 16 | 352 | 5,754 | 3.8 |
+| $e^{\pi}$ | 14 | 15 | 215 | 4,765 | 4.5 |
+| $\zeta(3)$ | 1,734 | 1,790 | 282 | — | 51 |
+| $\Gamma(\tfrac13)$ | 957 | 950 | 356 | — | 209 |
+| $\psi(\tfrac13)$ | 806 | 795 | 2,818 | — | 170 |
+
+#### Symbolic capability & performance
+
+Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.86.1** columns to see what is *new this release* (a `—` under `0.86.1` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+
+| Operation | CE (current) | CE + R/F | CE 0.86.1 | SymPy | math.js | Mathematica |
+| --- | :--: | :--: | :--: | :--: | :--: | :--: |
+| **Antiderivatives** |  |  |  |  |  |  |
+| $\int\frac{1}{\sqrt x}\,dx$ | 6.6× | 3.1× | 5.4× | 0.5× | — | 1× |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 8.0× | 1.3× | 6.8× | 0.09× | — | 1× |
+| $\int\frac{1}{x^3+1}\,dx$ | 5.6× | 0.8× | 4.3× | 0.3× | — | 1× |
+| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 1.7× | — | 0.1× | — | 1× |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 1.2× | — | 0.01× | — | 1× |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 1.2× | — | 0.007× | — | 1× |
+| **Derivatives** |  |  |  |  |  |  |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.04× | 0.04× | 0.02× | 0.001× | 0.003× | 1× |
+| **Simplification** |  |  |  |  |  |  |
+| $\sqrt{3+2\sqrt2}$ | 44× | 34× | 34× | — | — | 1× |
+| $\sqrt6\,x+\sqrt2\,x$ | 131× | 67× | 72× | 5.0× | 23× | 1× |
+| **Evaluation** |  |  |  |  |  |  |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 53× | 25× | 43× | 3.0× | — | 1× |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 8.7× | 5.1× | 7.2× | 2.1× | — | 1× |
+| $\int_1^2\tfrac1x\,dx$ | 6954× | 6552× | 5758× | 93× | — | 1× |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 382× | 133× | 341× | 2.6× | — | 1× |
+| **Solving** |  |  |  |  |  |  |
+| $x^4+x^2-1=0$ | 0.2× | 0.3× | 0.2× | 0.06× | — | 1× |
+| $x^3-x-1=0$ | 1.5× | 1.7× | 1.4× | 0.04× | — | 1× |
+
+Across the cases both solve, Compute Engine is a **median 6.6× faster than Mathematica** (up to 6954×) — in the browser, not a proprietary kernel.
+
+<sub>
+Measured 2026-07-21 · Compute Engine `0.88.1` @ `afde4f88` (current build) · published `0.86.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+</sub>
 
 ## 0.88.1 _2026-07-20_
 

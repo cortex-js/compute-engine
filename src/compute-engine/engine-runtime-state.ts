@@ -4,21 +4,12 @@ import {
 } from '../common/interruptible.js';
 
 export class EngineRuntimeState {
-  private _timeLimit = 2000;
   private _iterationLimit = 1024;
   private _recursionLimit = 256;
   private _recursionDepth = 0;
   private _maxCollectionSize = 10_000;
   private _deadlineFrame: DeadlineFrame | undefined = undefined;
   private _isVerifying = false;
-
-  get timeLimit(): number {
-    return this._timeLimit;
-  }
-
-  set timeLimit(value: number) {
-    this._timeLimit = value <= 0 ? Number.POSITIVE_INFINITY : value;
-  }
 
   get iterationLimit(): number {
     return this._iterationLimit;

@@ -254,21 +254,10 @@ describe('Interpret — v2 negative gates stay inert', () => {
 });
 
 describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => {
-  // The RSolve + anchor-validation pipeline can exceed the default 2 s
-  // evaluation budget; raise it modestly so the cooperative deadline checkpoint
-  // (see boxed-function.ts `_computeValue`) doesn't cancel a run that is slow
-  // under parallel CI load. (The former ~13 s cost — an anchor search grinding
-  // all 100 000 steps against a spurious high-degree interpolant — is fixed in
-  // findNumericUpperBound, so a large budget is no longer needed.)
-  let savedTimeLimit: number;
-  beforeAll(() => {
-    savedTimeLimit = ce.timeLimit;
-    ce.timeLimit = 15_000;
-  });
-  afterAll(() => {
-    ce.timeLimit = savedTimeLimit;
-  });
-
+  // The RSolve + anchor-validation pipeline runs unbounded (no enclosing span);
+  // jest's per-test timeout is the backstop. (The former ~13 s cost — an anchor
+  // search grinding all 100 000 steps against a spurious high-degree
+  // interpolant — is fixed in findNumericUpperBound.)
   test('Fibonacci 1+1+2+3+5+8+…+55 → Sum(Fibonacci(k), (k,1,10)) = 143', () => {
     // BM finds a(k)=a(k−1)+a(k−2) (L=2); m=6 ≥ 2L+1=5. The samples match the
     // library `Fibonacci` head, so the display body is `Fibonacci(k)`, which
@@ -295,10 +284,17 @@ describe('Interpret — linear recurrence (Berlekamp–Massey + RSolve)', () => 
   // CancellationError on a regression.
   test('interpret rejects the spurious polynomial fit fast (< 2 s budget)', () => {
     const fast = new ComputeEngine();
-    fast.timeLimit = 2000;
-    const sum = fast
-      .function('Interpret', [fast.parse('1 + 1 + 2 + 3 + 5 + 8 + \\dots + 55')])
-      .evaluate();
+    // A 2 s span makes this a genuine performance guard: a regression back to
+    // the ~13 s grind throws a CancellationError instead of passing slowly.
+    const sum = fast.withTimeLimit(
+      { ms: 2000, label: 'test:interpret-fast' },
+      () =>
+        fast
+          .function('Interpret', [
+            fast.parse('1 + 1 + 2 + 3 + 5 + 8 + \\dots + 55'),
+          ])
+          .evaluate()
+    );
     expect(sum.json).toEqual(['Sum', ['Fibonacci', 'k'], ['Limits', 'k', 1, 10]]);
   });
 

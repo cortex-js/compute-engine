@@ -242,9 +242,6 @@ export interface IComputeEngine {
    * @internal */
   _freshlyInferred: Set<BoxedValueDefinition> | null;
 
-  /** @deprecated Use {@linkcode withTimeLimit} instead. */
-  timeLimit: number;
-
   /**
    * Run `fn` with at most `ms` milliseconds (numeric form) or `limit.ms`
    * (object form, which also accepts an attribution `label`). A tighter

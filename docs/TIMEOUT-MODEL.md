@@ -1,27 +1,34 @@
 # Timeout Model — Design Note
 
-**Status**: release N **SHIPPED as 0.88.0** (2026-07-20); the deprecation
-clock is running and **step 6 (removal) is eligible for 0.89.0** per the
-one-minor policy. Consumer readiness (Tycho, adopted 0.88.1 same day): zero
-live `ce.timeLimit` assignments remain in their src/tests (comments and one
-limits-reading test pin only), all four production sites converted to spans,
-their colour/classification engines arm their own spans, and label adoption
-is deliberately deferred until they first have two nested budgets to tell
-apart — none of which blocks removal. §8 steps 1–5 done (see strikethroughs),
+**Status**: release N shipped as 0.88.0 (2026-07-20). **§8 step 6 (removal)
+DONE** — `ce.timeLimit` is gone. The getter/setter (`index.ts`), the backing
+field/default (`engine-runtime-state.ts`), and the `IComputeEngine.timeLimit`
+type-surface entry are removed; `withDeadline`/`withDeadlineAsync`
+(`boxed-function.ts`) and the `explain.ts` duplicate are deleted, so a deadline
+is now armed ONLY by a `withTimeLimit` span and work outside a span runs
+unbounded. All the inline N+1 items are complete too: ~~item-61 block~~ removed
+from `timeout.test.ts` (behavior no longer exists); ~~precondition-raise
+deletions~~ done across the test suite (test/utils.ts's suite-wide 20s and the
+`ce.timeLimit = N` preconditions in distributions/series/rubi-utils/
+map-auto-compile/assign-recursion/integration-rules/… all deleted; hang
+detection now falls to jest's per-test timeout, and genuine perf guards were
+converted to labelled spans); ~~`driver.ts` `_timeRemaining` check~~ replaced
+by a `ce._deadline` span check; ~~`numeric.ts:448` comment~~ refreshed; ~~§7.3
+cache exemption~~ implemented as a plain "no deadline" span (frame restored
+verbatim, no push-forward arithmetic). The `engine.timeLimit:<operator>`
+attribution synthesis is unproducible and its `isRubiOwnedCancellation` swallow
+arm was removed. §8 steps 1–5 were done in release N (see strikethroughs),
 including the dual-review fix round: factorization made interruptible
 (deadline threading through Pollard rho + `POLLARD_RHO_MAX_ITERATIONS`
 budget — the review's one HIGH, a regression the §6.2 rewrite had introduced);
-ambient frames now append their synthesized label to `spans`; Rubi swallow
-sites rethrow caller-owned timeouts (`isRubiOwnedCancellation` predicate:
-swallow own-label/ambient/unattributed, rethrow foreign span labels); Dedup
+Rubi swallow sites rethrow caller-owned timeouts (`isRubiOwnedCancellation`
+predicate: swallow own-label/unattributed, rethrow foreign span labels); Dedup
 iterator guarded (with `count` joining the Filter-family swallow contract —
 CHANGELOG'd behavior narrowing for >iterationLimit finite sources);
 `withTimeLimit` rejects Promise-returning callbacks at the type level.
 Model (§2), API (§3), and the §7 decisions are settled and implemented.
-Remaining: §8 step 6 — the N+1 removal — plus the N+1 items called out inline
-(item-61 block rewrite, precondition-raise deletions, `driver.ts`
-`_timeRemaining` check, `numeric.ts:448` comment refresh, §7.3 cache
-exemption).
+Remaining: only §8 step 7 (retire the module-global `ambientDeadline`), pure
+internal cleanup with no consumer coordination required.
 
 ## 1. Current state
 
@@ -207,13 +214,12 @@ Rubi's own deadline (`driver.ts:232, :385`, default 30s; loader default 10s)
 and its `matchAll` deadline (`match.ts:29-37`, a module-global) are
 independent and unaffected.
 
-**Open, not urgent** — `driver.ts:524` checks `ce._timeRemaining <= 0`, which
-reads the *per-evaluate* budget, a different quantity from the span deadline.
-It is belt-and-braces: the same line also checks `Date.now() > this.deadline`,
-which is load-bearing. Natural replacement at release N+1 is a check against
-`ce.deadline`. Also `numerics/numeric.ts:448` is a *comment* referencing
-`ce.timeLimit = 2000` (documenting a deadline-escape hazard in the
-Euler–Mascheroni limit) — inert today, wants a prose refresh at removal.
+**DONE (release N+1)** — the `intRec` recursion check that read
+`ce._timeRemaining <= 0` (the old per-evaluate budget) now checks
+`ce._deadline` (the enclosing span deadline) alongside the load-bearing
+`Date.now() > this.deadline`. `numerics/numeric.ts:448`'s comment (documenting
+the Euler–Mascheroni deadline-escape hazard, `ce.timeLimit = 2000`) was
+refreshed to describe the compiled-sample iteration budget as the bound.
 
 ## 5. Deprecating `ce.timeLimit`
 
@@ -646,8 +652,19 @@ a prerequisite rather than a nicety.
    Every guide snippet executed against source and verified against its
    prose. The old guide's `Totient` timeout example no longer times out
    (it is O(√n) now) — replaced with a large `Sum`.
-6. Remove `timeLimit`, the mid-span re-arm, and the `explain.ts` duplicate;
-   cache-build exemption (§7.3). → **release N+1**.
+6. ~~Remove `timeLimit`, the mid-span re-arm, and the `explain.ts` duplicate;
+   cache-build exemption (§7.3)~~ — **DONE** (release N+1). `withDeadline`/
+   `withDeadlineAsync` deleted (evaluate/simplify/evaluateAsync now call their
+   compute thunk directly); the `explain.ts` copy deleted; `_cache` (§7.3) runs
+   the build under a "no deadline" span and restores the enclosing frame
+   verbatim (no push-forward). `IComputeEngine.timeLimit` removed from the type
+   surface. The unproducible `engine.timeLimit:<operator>` attribution and its
+   `isRubiOwnedCancellation` swallow arm removed; `driver.ts`'s
+   `_timeRemaining` recursion check replaced by a `ce._deadline` span check.
+   Test suite migrated to spans / unbounded-with-jest-backstop; `timeout.test.ts`
+   item-61 composition block removed, its two async throw-vehicles split into an
+   AbortSignal case (`Factorial`, instrumented) and a removed one (a
+   non-instrumented substitution storm has no N+1 bounding mechanism, §6.4).
 
 Steps 1 and 2 are safe to land immediately and independently — neither depends
 on the deprecation decision.

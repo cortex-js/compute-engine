@@ -445,8 +445,10 @@ function reliableLimitSamples(
  * a compiled `Sum`/`Product` whose bound depends on the limit variable would
  * otherwise run an astronomically long — or, for an infinite bound, endless —
  * uninterruptible loop inside a single sample (the Stage-2 corpus-audit
- * deadline escape: `γ = lim (Hₙ − ln n)` with `ce.timeLimit = 2000` ran
- * unbounded). Over-budget samples evaluate to NaN, the ladder's existing
+ * deadline escape: `γ = lim (Hₙ − ln n)` ran unbounded because a compiled
+ * sample carries no engine handle, so no enclosing `withTimeLimit` span
+ * deadline reaches it — this iteration budget is its only bound). Over-budget
+ * samples evaluate to NaN, the ladder's existing
  * "horizon" signal: `reliableLimitSamples` caps the rungs to the clean prefix
  * and Richardson extrapolation converges from those (γ still comes out
  * correct to ~1e-10 from the ≤ 8⁶-term rungs).

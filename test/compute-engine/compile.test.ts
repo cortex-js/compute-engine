@@ -2188,7 +2188,6 @@ describe('COMPILE user-defined function calls', () => {
     // Generous budget so the (now compiled) 1e7-sample quadrature completes
     // deterministically under CI/CPU contention rather than hitting the engine
     // deadline and returning NaN. Timing is not asserted here.
-    e.timeLimit = 60000;
     e.parse('f(x) \\coloneq e^{-x^2/2}').evaluate();
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {

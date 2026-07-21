@@ -42,7 +42,7 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
-import { BoxedFunction } from './boxed-function.js';
+import { BoxedFunction, paramsAreScalar } from './boxed-function.js';
 import { BoxedString } from './boxed-string.js';
 import { BoxedDictionary } from './boxed-dictionary.js';
 import { canonicalForm } from './canonical.js';
@@ -710,7 +710,18 @@ function makeCanonicalFunction(
       // pure-imaginary product such as `√2·i` types as `imaginary` ⊂
       // `complex`), which retired the last `signatureHasComplexParam` skip.
     ) {
-      const invalid = validateArguments(ce, boxedOps, valueType);
+      // Scalar-param signatures are THREADABLE at the application site: the
+      // lambda-broadcast machinery maps the body element-wise over a
+      // collection operand at runtime (`h(L+1)` evaluates to a List), so
+      // validation must admit collection-typed operands against the scalar
+      // parameter instead of baking `incompatible-type` (Tycho item 73).
+      const invalid = validateArguments(
+        ce,
+        boxedOps,
+        valueType,
+        undefined,
+        paramsAreScalar(valueType)
+      );
       if (invalid) {
         // Only reject *closed* operands — literals and constant expressions
         // whose type is definite (`0.5`, `"a"`). An operand with free

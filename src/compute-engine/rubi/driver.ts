@@ -236,10 +236,6 @@ export type DriverStats = {
  * `e` is name-checked, not `instanceof CancellationError` (cross-bundle-safe),
  * so `attribution` is read via a safe cast. Swallow iff:
  * - the attribution is the local span label — Rubi's own sub-budget fired; or
- * - the attribution starts with `engine.timeLimit:` — the deprecated ambient
- *   limit re-arms per-evaluate INSIDE Rubi's span (withDeadline computes
- *   min(prev, now+timeLimit)), so an ambient-owned timeout in Rubi's window is
- *   part of Rubi's bounded attempt, not a caller signal; or
  * - the attribution is undefined — unattributed numeric-deadline sites inside
  *   Rubi's work (and pre-attribution error paths) are Rubi's own.
  * Any other defined attribution means a caller's span owns it → rethrow.
@@ -254,7 +250,6 @@ export function isRubiOwnedCancellation(
   const attribution = (e as { attribution?: string }).attribution;
   if (attribution === undefined) return true;
   if (attribution === localLabel) return true;
-  if (attribution.startsWith('engine.timeLimit:')) return true;
   return false;
 }
 
@@ -553,9 +548,15 @@ export class RubiDriver {
     const ce = this.ce;
     this.stats.calls++;
     if (depth > MAX_DEPTH) return null;
-    // the engine deadline is armed only inside evaluate(); the driver
-    // keeps its own wall-clock budget per top-level int() call
-    if (Date.now() > this.deadline || ce._timeRemaining <= 0) return null;
+    // The driver keeps its own wall-clock budget per top-level int() call
+    // (`this.deadline`, load-bearing). Also honor any enclosing `withTimeLimit`
+    // span deadline armed on the engine, so a caller's tighter bound stops the
+    // recursion too.
+    if (
+      Date.now() > this.deadline ||
+      (ce._deadline !== undefined && Date.now() > ce._deadline)
+    )
+      return null;
 
     // The integrand as it ENTERS this call — before the trig deactivation /
     // normal-form pipeline below rewrites it. Step records use `Integrate(entry)`

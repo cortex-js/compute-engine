@@ -1895,11 +1895,11 @@ export interface Expression {
    *
    * The result is in canonical form.
    *
-   * **Time and recursion limits**: if the evaluation exceeds
-   * `engine.timeLimit` or the recursion limit, a `CancellationError` is
-   * thrown (its `cause` is `'timeout'` or `'recursion-depth-exceeded'`).
-   * Catch it to distinguish an interrupted evaluation from a symbolic
-   * (inert) result.
+   * **Time and recursion limits**: if the evaluation runs inside an enclosing
+   * {@linkcode ComputeEngine.withTimeLimit} span and exceeds its deadline, or
+   * exceeds the recursion limit, a `CancellationError` is thrown (its `cause`
+   * is `'timeout'` or `'recursion-depth-exceeded'`). Catch it to distinguish
+   * an interrupted evaluation from a symbolic (inert) result.
    *
    */
   evaluate(options?: Partial<EvaluateOptions>): Expression;

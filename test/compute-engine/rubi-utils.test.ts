@@ -953,7 +953,6 @@ describe('R9 end-to-end (shipped bundle)', () => {
   beforeAll(() => {
     engine = new ComputeEngine();
     loadIntegrationRules(engine);
-    engine.timeLimit = 30_000; // complex-Ei kernel is slow under ts-jest
   });
   const closes = (latex: string): boolean => {
     const integ = engine.parse(latex);
@@ -1095,7 +1094,6 @@ describe('R18 end-to-end complex-Si / reciprocal-arg closure (shipped bundle)', 
   beforeAll(() => {
     eng = new ComputeEngine();
     loadIntegrationRules(eng);
-    eng.timeLimit = 30_000; // complex Si/Ci/Ei kernels are slow under ts-jest
   });
   const closesLatex = (latex: string): boolean => {
     const integ = eng.parse(latex);
@@ -1940,15 +1938,16 @@ describe('isRubiOwnedCancellation (caller-owned timeout rethrow)', () => {
     ).toBe(true);
   });
 
-  test('swallows an ambient-owned timeout inside its window', () => {
-    // At release N the deprecated ambient limit still re-arms per-evaluate
-    // inside Rubi's span; those timeouts are part of Rubi's bounded attempt.
+  test('rethrows a legacy ambient-style attribution (no longer produced)', () => {
+    // The ambient `ce.timeLimit` was removed at release N+1, so it no longer
+    // synthesizes an `engine.timeLimit:*` label. Such an attribution is no
+    // longer special-cased: like any other foreign label it is rethrown.
     expect(
       isRubiOwnedCancellation(
         cancellation('engine.timeLimit:Integrate'),
         'rubi:native-fallback'
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test('swallows an unattributed timeout (numeric-deadline sites)', () => {

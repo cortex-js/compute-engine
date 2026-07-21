@@ -920,8 +920,8 @@ describe('factorization is interruptible (Finding 1)', () => {
   });
 
   it('honors the iteration budget when no deadline is armed', () => {
+    // No enclosing span, so no deadline: only the budget can stop the rho loop.
     const engine = new ComputeEngine();
-    engine.timeLimit = 0; // no deadline: only the budget can stop the rho loop
     const n = engine.number(HARD_SEMIPRIME);
     const t0 = Date.now();
     let err: unknown;

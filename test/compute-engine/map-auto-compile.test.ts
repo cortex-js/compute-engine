@@ -455,33 +455,26 @@ describe('Map auto-compile', () => {
   test('literal loop bounds above the trip cap are ineligible', () => {
     // An over-cap Sum would compile into an unguarded loop that no deadline
     // check can interrupt; it must fall back to the (interruptible)
-    // interpreter. In-cap big-ops still compile.
-    // The 150k-term interpreted sum races the default 2s timeLimit under
-    // full-suite load: raise it, since this test is about compile
-    // eligibility, not about evaluation speed.
-    const savedTimeLimit = ce.timeLimit;
-    ce.timeLimit = 20_000;
-    try {
-      const over = ce.box([
-        'Map',
-        ['List', 1, 2],
-        ['Function', ['N', ['Sum', 'j4', ['Limits', 'j4', 1, 150_000]]], 'x4'],
-      ]);
-      expect(over.at(1)!.re).toBe((150_000 * 150_001) / 2);
-      expect(stats.attempts).toBe(1);
-      expect(stats.compiledHits).toBe(0);
+    // interpreter. In-cap big-ops still compile. The 150k-term interpreted sum
+    // runs unbounded (no enclosing span); this test is about compile
+    // eligibility, not evaluation speed.
+    const over = ce.box([
+      'Map',
+      ['List', 1, 2],
+      ['Function', ['N', ['Sum', 'j4', ['Limits', 'j4', 1, 150_000]]], 'x4'],
+    ]);
+    expect(over.at(1)!.re).toBe((150_000 * 150_001) / 2);
+    expect(stats.attempts).toBe(1);
+    expect(stats.compiledHits).toBe(0);
 
-      _resetMapAutoCompileStats();
-      const inCap = ce.box([
-        'Map',
-        ['List', 1, 2],
-        ['Function', ['N', ['Sum', 'j5', ['Limits', 'j5', 1, 50]]], 'x5'],
-      ]);
-      expect(inCap.at(1)!.re).toBe(1275);
-      expect(stats.compiledHits).toBe(1);
-    } finally {
-      ce.timeLimit = savedTimeLimit;
-    }
+    _resetMapAutoCompileStats();
+    const inCap = ce.box([
+      'Map',
+      ['List', 1, 2],
+      ['Function', ['N', ['Sum', 'j5', ['Limits', 'j5', 1, 50]]], 'x5'],
+    ]);
+    expect(inCap.at(1)!.re).toBe(1275);
+    expect(stats.compiledHits).toBe(1);
   });
 
   test('at()-only access recovers after a free symbol is assigned', () => {

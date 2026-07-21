@@ -72,7 +72,6 @@ describe('Assign + Function recursion knot-tying', () => {
   // Unwinding is now linear: depth 40 ≈ 30 ms (was: timeout at depth 8).
   test('literal-depth recursion over a symbolic argument unwinds in linear time', () => {
     const ce = new ComputeEngine();
-    ce.timeLimit = 5000; // depth 40 needs ~30 ms; generous margin for CI
     ce.box([
       'Assign',
       'Q',

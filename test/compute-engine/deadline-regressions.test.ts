@@ -46,7 +46,6 @@ let ce: ComputeEngine;
 
 beforeEach(() => {
   ce = new ComputeEngine();
-  ce.timeLimit = 2000;
 });
 
 describe('WP-2.11 / EX-14: Gamma/GammaLn/Zeta bignum kernels', () => {
