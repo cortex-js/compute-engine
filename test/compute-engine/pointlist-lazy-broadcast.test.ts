@@ -185,7 +185,9 @@ describe('Tycho item 52 — lazy PointList transpose and projections', () => {
     const px = ce
       .box(['PointX', ['PointList', ['List', ...ys], 7]])
       .evaluate();
-    expect(px.type.toString()).toBe('vector<5>');
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
+    expect(px.type.toString()).toBe('vector<finite_integer^5>');
   });
 
   test('projection of a SCALAR slot broadcasts (no fast-path shape change)', () => {

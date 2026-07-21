@@ -252,7 +252,7 @@ export const CONDITIONS = {
   pair: (x: Expression) => x.operator === 'Pair',
   triple: (x: Expression) => x.operator === 'Triple',
 
-  // Guarded on `isTensor` (a `BoxedTensor` value), not bare `.rank`: since
+  // Guarded on `isTensor` (a shaped `List` tensor value), not bare `.rank`: since
   // honest List typing (tensor-unification Phase A) a plain `List` with a
   // shape-regular type (e.g. `list<tuple^2>`, `list<color^2>`) also reports
   // a nonzero rank, but these wildcard conditions mean a genuine tensor

@@ -1137,7 +1137,7 @@ export abstract class _BoxedExpression implements Expression {
 
   indexWhere(predicate: (element: Expression) => boolean): number | undefined {
     // Default for any finite indexed collection that does not supply a
-    // dedicated `indexWhere` handler (e.g. a `BoxedTensor`-backed list): scan
+    // dedicated `indexWhere` handler (e.g. a shaped `List` tensor): scan
     // the elements and return the 1-based index of the first match, or
     // `undefined` if none. Non-collections keep returning `undefined`.
     if (!this.isIndexedCollection || this.isFiniteCollection !== true)

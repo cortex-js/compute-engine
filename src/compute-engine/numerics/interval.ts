@@ -30,7 +30,7 @@ function isFunction(
   operator?: string
 ): expr is Expression & FunctionInterface {
   return (
-    (expr?._kind === 'function' || expr?._kind === 'tensor') &&
+    expr?._kind === 'function' &&
     (operator === undefined || expr!.operator === operator)
   );
 }

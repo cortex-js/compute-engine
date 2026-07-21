@@ -172,7 +172,7 @@ import {
   isPossiblyCollectionTyped,
   broadcastableResultTypeOf,
 } from '../collection-utils.js';
-import { isTensor } from '../boxed-expression/boxed-tensor.js';
+import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { signFromAssumedPart } from './complex.js';
 
 // When processing an arithmetic expression, the following are the core
@@ -1493,7 +1493,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // here. (The tuple-free broadcast — `2R`, `R·x` — is handled by the
         // wrapper.) Tensors keep their matrix-product typing below.
         if (
-          !ops.some((x) => isTensor(x)) &&
+          !ops.some((x) => isTensorValue(x)) &&
           ops.some((x) => isBroadcastCollectionType(x)) &&
           ops.some((x) => couldBeNumericTuple(x))
         )
@@ -1518,8 +1518,33 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // keeps the tensor's shape/type. The list-broadcast wrapper is
         // skip-listed for tensor Multiply (mulTensors handles the value), so
         // the honest list type must come from here.
-        const tensorOps = ops.filter((x) => isTensor(x));
-        if (tensorOps.length === 1) return tensorOps[0].type;
+        const tensorOps = ops.filter((x) => isTensorValue(x));
+        if (tensorOps.length === 1) {
+          const others = ops.filter((x) => !isTensorValue(x));
+          // Only SCALAR factors fold into the cells (see `addType`): a
+          // collection-TYPED co-operand is a sibling collection (matrix
+          // product / elementwise pair) — fall through to the collection
+          // branch below for those.
+          if (others.every((x) => !isLinearAlgebraCollection(x))) {
+            // Scalar factors fold INTO the cells elementwise: widen the
+            // tensor's honest cell type with the scalar types so the
+            // declared type stays a sound upper bound (`x·[0,0,1,1]` has
+            // `number` cells, not `finite_integer`).
+            const tt = tensorOps[0].type.type;
+            if (
+              typeof tt !== 'string' &&
+              tt.kind === 'list' &&
+              others.length > 0
+            ) {
+              const cell = widen(
+                tt.elements,
+                ...others.map((x) => x.type.type)
+              );
+              return { kind: 'list', elements: cell, dimensions: tt.dimensions };
+            }
+            return tensorOps[0].type;
+          }
+        }
         // Collection-typed operands (declared matrix/vector/list symbols, or
         // any operand whose type is a collection) make the product a
         // collection: `2Y`, `XY`, `X·Y` on declared-matrix symbols are

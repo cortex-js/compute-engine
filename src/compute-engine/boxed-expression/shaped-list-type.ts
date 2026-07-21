@@ -21,8 +21,8 @@ type ShapeAnalysis = { dims: number[]; cells: Type[] };
  * its plain `list<widen(...)>` behavior.
  *
  * Cell classification (per element):
- * - a **literal `List` child** (`operator === 'List'`, including a
- *   `BoxedTensor` whose operator is `'List'`) → a nested axis (recurse);
+ * - a **literal `List` child** (`operator === 'List'`) → a nested axis
+ *   (recurse);
  * - an **inference-pending bare symbol** (a symbol typed `unknown`) → a cell of
  *   type `number` (the generic-symbol fold — bare SYMBOLS only, never an
  *   application, which could return a collection);
@@ -83,8 +83,7 @@ function analyzeLevel(ops: ReadonlyArray<Expression>): ShapeAnalysis | null {
   const cellTypes: Type[] = [];
 
   for (const op of ops) {
-    // A literal `List` child (a plain `List` function or a `BoxedTensor`, both
-    // reporting operator `'List'`) is a nested axis.
+    // A literal `List` child (a plain `List` function) is a nested axis.
     if (isFunction(op, 'List')) {
       const sub = analyzeLevel(op.ops);
       if (sub === null) return null;

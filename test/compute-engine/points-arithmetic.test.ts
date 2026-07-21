@@ -1445,7 +1445,9 @@ describe('POINT/TUPLE ARITHMETIC — could-be-numeric elements match the validat
     ce.assign('m', ce.parse('[1,2,3]').evaluate());
     const p = ce.parse('2(1, 0.3m)');
     expect(p.operator).toBe('Multiply');
-    expect(p.type.toString()).toBe('tuple<finite_integer, vector<3>>');
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
+    expect(p.type.toString()).toBe('tuple<finite_integer, vector<finite_integer^3>>');
   });
 
   test('provably non-numeric component: tuple<number, list<string>> symbol still groups as Tuple', () => {

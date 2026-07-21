@@ -2,7 +2,19 @@
 
 **Date**: 2026-07-20 (revision 4 — resolves all three review rounds in
 `docs/scratch/2026-07-20-tensor-unification-design_SPEC_REVIEW.md`)
-**Status**: APPROVED (ratified 2026-07-20); Phase A in progress.
+**Status**: **IMPLEMENTED — all three phases** (A committed 2026-07-20; B
+committed 2026-07-21; C staged 2026-07-21). `BoxedTensor` is deleted; tensor
+values are canonical `List`s with a lazy view (`boxed-expression/
+tensor-view.ts`). As-built deviations are annotated per-section; Phase C
+additions beyond the plan: `packStructural` (structure-only packing for
+`Transpose`/`ConjugateTranspose` — the model's "shape-regularity applies to
+any cell type" made operational), tolerant list equality via
+`defaultCollectionEq` declining to the element-wise walk (with a collection
+carve-out on `eq`'s structural shortcut for NaN), the subtype **encoding
+bridge** (dimensioned rank-n ⊆ list-of-rank-(n−1), `subtype.ts`), and
+cell-fold soundness in `addType`/`Multiply.type` (scalar co-operands widen
+the CELL type so declared stays a sound upper bound of the honest literal
+cells).
 **Roadmap**: Strategic item 9 in `ROADMAP.md`.
 **Supersedes**: the "Facet 2 — Detection (DEFERRED)" section of
 [`2026-06-28-tensor-value-representation-design.md`](./2026-06-28-tensor-value-representation-design.md).

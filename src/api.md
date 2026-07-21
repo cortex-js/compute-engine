@@ -2156,16 +2156,6 @@ Obtained via `isTensor()`.
 
 <MemberCard>
 
-##### TensorInterface.tensor
-
-```ts
-readonly tensor: Tensor<keyof DataTypeMap>;
-```
-
-</MemberCard>
-
-<MemberCard>
-
 ##### TensorInterface.shape
 
 ```ts

@@ -2,6 +2,7 @@ import { MathJsonExpression as Expression } from '../../src/math-json/types';
 import { ComputeEngine } from '../../src/compute-engine';
 import { engine as ce } from '../utils';
 import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards';
+import { packTensor } from '../../src/compute-engine/boxed-expression/tensor-view';
 import { makeTensor } from '../../src/compute-engine/tensor/tensors';
 import { getSupertype } from '../../src/compute-engine/tensor/tensor-fields';
 
@@ -948,9 +949,11 @@ describe('Determinant', () => {
 
   it('should calculate the determinant of a numeric vector', () => {
     const result = ce.expr(['Determinant', v7_n]).evaluate();
-    // Type checking rejects vector (not a matrix)
+    // Type checking rejects vector (not a matrix).
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "vector<7>")))`
+      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>")))`
     );
   });
 
@@ -968,7 +971,7 @@ describe('Determinant', () => {
     const result = ce.expr(['Determinant', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
+      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>")))`
     );
   });
 
@@ -1120,9 +1123,11 @@ describe('Inverse', () => {
 
   it('should calculate the inverse of a numeric vector', () => {
     const result = ce.expr(['Inverse', v7_n]).evaluate();
-    // Type checking rejects vector (not a matrix)
+    // Type checking rejects vector (not a matrix).
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "vector<7>")))`
+      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>")))`
     );
   });
 
@@ -1142,7 +1147,7 @@ describe('Inverse', () => {
     const result = ce.expr(['Inverse', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
+      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>")))`
     );
   });
 
@@ -1276,9 +1281,11 @@ describe('PseudoInverse', () => {
 
   it('should calculate the pseudo inverse of a numeric vector', () => {
     const result = ce.expr(['PseudoInverse', v7_n]).evaluate();
-    // Type checking rejects vector (not a matrix)
+    // Type checking rejects vector (not a matrix).
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "vector<7>")))`
+      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>")))`
     );
   });
 
@@ -1302,7 +1309,7 @@ describe('PseudoInverse', () => {
     const result = ce.expr(['PseudoInverse', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(2x3x4)>")))`
+      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>")))`
     );
   });
 
@@ -2336,8 +2343,10 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     ...rows.map((r) => ['List', ...r] as Expression),
   ];
   const tensorOf = (m: Expression) => {
+    // Phase C representation unification: the `.tensor` accessor is removed;
+    // a kernel tensor is obtained operation-locally via `packTensor`.
     const e = ce.expr(m).evaluate();
-    return isTensor(e) ? e.tensor : null;
+    return isTensor(e) ? packTensor(ce, e) ?? null : null;
   };
 
   // F1: determinant() threw for n >= 4 (flat array indexed as 2D, rowIndices[-1]

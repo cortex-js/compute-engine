@@ -23,8 +23,8 @@ import {
   isString,
   isFunction,
   isDictionary,
-  isTensor,
 } from '../boxed-expression/type-guards.js';
+import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
@@ -1075,7 +1075,7 @@ export class BaseCompiler {
     // `compile-fallback.test.ts`).
     if (h === 'Multiply') {
       const isArrayish = (a: Expression): boolean =>
-        isTensor(a) ||
+        isTensorValue(a) ||
         isNumericTuple(a) ||
         a.type.matches('list') ||
         a.type.matches('indexed_collection') ||
@@ -1104,12 +1104,12 @@ export class BaseCompiler {
           return `_SYS.mul(${compiledArgs})`;
         }
         const isMatrix = (a: Expression): boolean =>
-          (isTensor(a) && a.shape.length >= 2) || a.type.matches('matrix');
+          (isTensorValue(a) && a.shape.length >= 2) || a.type.matches('matrix');
         if (collection.some((a) => isNumericTuple(a)) || args.some(isMatrix))
           return null;
         // Statically-known mismatched rank-1 lengths: fail closed.
         const lengths = collection
-          .filter((a) => isTensor(a) && a.shape.length === 1)
+          .filter((a) => isTensorValue(a) && a.shape.length === 1)
           .map((a) => a.shape[0]);
         if (lengths.length >= 2 && new Set(lengths).size > 1) return null;
       }

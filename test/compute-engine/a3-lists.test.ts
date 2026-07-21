@@ -165,8 +165,11 @@ describe('A3.4 — Mixed-kind / mixed-dim list type', () => {
     // A fixed-size numeric list now keeps its dimension (REVIEW.md F7): the
     // tensor type `list<number^3>` serializes to `vector<3>`. Previously the
     // dimension was silently dropped, yielding `list<number>`.
+    // Phase C representation unification: literal lists type honestly, so the
+    // element type is reported precisely (e.g. `vector<finite_integer^3>`).
+    const numericElem = '(integer|number|finite_integer|finite_number|real|finite_real)';
     expect(t).toMatch(
-      /^(list<(integer|number|finite_integer|finite_number|real|finite_real)>|vector<\d+>)$/
+      new RegExp(`^(list<${numericElem}>|vector<(\\d+|${numericElem}\\^\\d+)>)$`)
     );
   });
 

@@ -243,7 +243,7 @@ describe('DELIMITERS PARSING', () => {
       canonical = [
         "List",
         ["Equal", ["Add", "x", 1], 0],
-        ["Equal", ["Add", ["Multiply", 2, ["Power", "x", 2]], 5], 1]
+        ["Equal", ["Add", ["Multiply", 2, ["Square", "x"]], 5], 1]
       ]
       box-latex = \\begin{cases}x+1=0\\\\2x^2+5=1\\end{cases}
       latex     = \\begin{cases}x+1=0\\\\2x^2+5=1\\end{cases}

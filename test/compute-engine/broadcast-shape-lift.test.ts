@@ -15,12 +15,15 @@ import { ComputeEngine } from '../../src/compute-engine';
  */
 
 describe('D6.1 — rank/shape-aware broadcast lift', () => {
+  // Phase C representation unification: literal lists type honestly
+  // (list<finite_…^dims>); broadcast-applied scalar results report `number`
+  // cells.
   const ce = new ComputeEngine();
   const M = ['List', ['List', 2, 3], ['List', 5, 7]];
 
   test('fixed-shape source: Sqrt(M) types with the operand dims', () => {
     const s = ce.box(['Sqrt', M]);
-    expect(s.type.toString()).toBe('matrix<finite_number^(2x2)>');
+    expect(s.type.toString()).toBe('matrix<2x2>');
     expect(s.type.matches('matrix')).toBe(true);
   });
 
@@ -53,7 +56,7 @@ describe('D6.1 — rank/shape-aware broadcast lift', () => {
 
   test('finite materialized operand: static and evaluated types coincide', () => {
     const expr = ce.box(['Sin', ['List', 0, 1]]);
-    expect(expr.type.toString()).toBe('vector<finite_number^2>');
+    expect(expr.type.toString()).toBe('vector<2>');
     // evaluated ⊆ declared (the broadcast soundness contract)
     expect(expr.evaluate().type.matches(expr.type.type)).toBe(true);
   });

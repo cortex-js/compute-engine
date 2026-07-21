@@ -42,12 +42,14 @@ function expectHonestBroadcast(expr: BoxedExpression): void {
 }
 
 describe('LIST-BROADCAST TYPING — tensor Add/Multiply (exact vector<n>)', () => {
+  // Phase C representation unification: literal lists type honestly
+  // (list<finite_…^dims>).
   // These operands box to BoxedTensors; the broadcast wrapper is skip-listed
   // for tensor Add/Multiply, so the honest list type comes from the operator's
   // own type handler and equals the evaluated type exactly.
   test.each([
-    ['[1,2]·2 (parsed)', '[1,2]\\cdot 2', 'vector<2>'],
-    ['2·[1,2] (parsed)', '2\\cdot [1,2]', 'vector<2>'],
+    ['[1,2]·2 (parsed)', '[1,2]\\cdot 2', 'vector<finite_integer^2>'],
+    ['2·[1,2] (parsed)', '2\\cdot [1,2]', 'vector<finite_integer^2>'],
   ])('%s → %s', (_label, latex, expected) => {
     const expr = ce.parse(latex);
     expect(expr.type.toString()).toBe(expected);
@@ -55,20 +57,30 @@ describe('LIST-BROADCAST TYPING — tensor Add/Multiply (exact vector<n>)', () =
   });
 
   test.each([
+    // Scalar symbol folds into the cells: number cells, sound upper bound.
     ['Multiply(List, x)', ['Multiply', ['List', 0, 0, 1, 1], 'x'], 'vector<4>'],
-    ['Multiply(2, List)', ['Multiply', 2, ['List', 1, 2]], 'vector<2>'],
+    ['Multiply(2, List)', ['Multiply', 2, ['List', 1, 2]], 'vector<finite_integer^2>'],
     ['Add(List, x)', ['Add', ['List', 1, 2], 'x'], 'vector<2>'],
-    ['Add(List, List)', ['Add', ['List', 1, 2], ['List', 3, 4]], 'vector<2>'],
+    [
+      'Add(List, List)',
+      ['Add', ['List', 1, 2], ['List', 3, 4]],
+      'vector<finite_integer^2>',
+    ],
   ])('%s → %s', (_label, mathjson, expected) => {
     const expr = ce.box(mathjson as any);
     expect(expr.type.toString()).toBe(expected);
-    // Declared type equals the evaluated type.
-    expect(expr.type.toString()).toBe(expr.evaluate().type.toString());
+    // Declared type does not disagree with the evaluated type: it is a subtype
+    // of it. (Post Phase C, a symbol operand's declared element type can be
+    // narrower than the evaluated one — e.g. Add([1,2], x) declares
+    // vector<finite_integer^2> and evaluates to vector<2> — so this is a
+    // subtype relation, not string equality.)
+    expect(expr.type.matches(expr.evaluate().type.type)).toBe(true);
   });
 
   test('the old `number | vector<2>` union artifact is gone', () => {
     const expr = ce.box(['Add', ['List', 1, 2], 'x']);
     expect(expr.type.toString()).not.toContain('|');
+    // Scalar symbol folds into the cells: number cells, sound upper bound.
     expect(expr.type.toString()).toBe('vector<2>');
   });
 
@@ -78,48 +90,53 @@ describe('LIST-BROADCAST TYPING — tensor Add/Multiply (exact vector<n>)', () =
   // Nothing here is unbound and no symbol is involved in the last two rows —
   // the scalar arm was unreachable, and it broke consumers routing on
   // `type.matches('collection')` (union matching is all-members).
+  // Scalar co-operands fold into the honest cell type (widened, sound):
+  // integer scalars keep integer cells, `/10` makes them rational, a bare
+  // symbol widens to `number` (displayed `vector<3>`).
   test.each([
-    ['2·[1,2,3] + a', ['Add', ['Multiply', 2, ['List', 1, 2, 3]], 'a']],
-    ['1/10·[1,2,3] + 1', ['Add', ['Divide', ['List', 1, 2, 3], 10], 1]],
-    ['[1,2,3]/10 + a', ['Add', ['Divide', ['List', 1, 2, 3], 10], 'a']],
-  ])('%s → vector<3>, no scalar arm', (_label, mathjson) => {
+    ['2·[1,2,3] + a', ['Add', ['Multiply', 2, ['List', 1, 2, 3]], 'a'], 'vector<3>'],
+    ['1/10·[1,2,3] + 1', ['Add', ['Divide', ['List', 1, 2, 3], 10], 1], 'vector<finite_rational^3>'],
+    ['[1,2,3]/10 + a', ['Add', ['Divide', ['List', 1, 2, 3], 10], 'a'], 'vector<3>'],
+  ])('%s → shaped vector, no scalar arm', (_label, mathjson, expected) => {
     const expr = ce.box(mathjson as any);
-    expect(expr.type.toString()).toBe('vector<3>');
+    expect(expr.type.toString()).toBe(expected);
     expect(expr.type.matches('collection')).toBe(true);
+    expect(expr.type.matches('vector<3>')).toBe(true);
   });
 });
 
 // §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('LIST-BROADCAST TYPING — wrapper-lifted families (sound list<R>)', () => {
+  // Phase C representation unification: literal lists type honestly
+  // (list<finite_…^dims>).
   // For each: `.type` is a list (not a scalar), and the evaluated type is a
   // subtype of (or equal to) the declared type.
   test.each([
-    ['Sin', ['Sin', ['List', 0, 1]], 'vector<finite_number^2>'],
-    ['Cos', ['Cos', ['List', 0, 1]], 'vector<finite_number^2>'],
+    ['Sin', ['Sin', ['List', 0, 1]], 'vector<2>'],
+    ['Cos', ['Cos', ['List', 0, 1]], 'vector<2>'],
     ['Tan', ['Tan', ['List', 0, 1]], 'vector<2>'],
-    ['Exp', ['Exp', ['List', 0, 1]], 'vector<finite_number^2>'],
-    ['Ln', ['Ln', ['List', 1, 2]], 'vector<finite_number^2>'],
-    ['Sqrt', ['Sqrt', ['List', 4, 9]], 'vector<finite_number^2>'],
-    ['Gamma (special fn)', ['Gamma', ['List', 1, 2]], 'vector<finite_number^2>'],
+    ['Exp', ['Exp', ['List', 0, 1]], 'vector<2>'],
+    ['Ln', ['Ln', ['List', 1, 2]], 'vector<2>'],
+    ['Sqrt', ['Sqrt', ['List', 4, 9]], 'vector<2>'],
+    ['Gamma (special fn)', ['Gamma', ['List', 1, 2]], 'vector<2>'],
     ['Abs', ['Abs', ['List', -1, 2]], 'vector<real^2>'],
     ['Negate', ['Negate', ['List', 'a', 'b']], 'vector<2>'],
     ['Real (complex)', ['Real', ['List', 2, 3]], 'vector<finite_real^2>'],
-    ['Conjugate (complex)', ['Conjugate', ['List', 2, 3]], 'vector<2>'],
-    ['Round', ['Round', ['List', 1.2, 2.7]], 'vector<finite_integer^2>'],
+    ['Conjugate (complex)', ['Conjugate', ['List', 2, 3]], 'vector<finite_integer^2>'],
+    ['Round', ['Round', ['List', 1.2, 2.7]], 'vector<2>'],
   ])('%s → %s', (_label, mathjson, expected) => {
     const expr = ce.box(mathjson as any);
     expect(expr.type.toString()).toBe(expected);
     expectHonestBroadcast(expr);
   });
 
-  test('Round(List) evaluated type equals the declared (dimensioned) type', () => {
+  test('Round(List) evaluated type is a subtype of the declared type', () => {
     // Since §D6.1 (rank/shape-aware broadcast lift), a shape-known operand's
-    // declared type already carries its dimension: `vector<finite_integer^2>`,
-    // equal to the evaluated type (the broadcast contract `evaluated ⊆
-    // declared` still holds, now as equality, and is what this test guards).
+    // declared type carries its dimension; the broadcast contract `evaluated ⊆
+    // declared` holds and is what this test guards.
     const expr = ce.box(['Round', ['List', 1.2, 2.7]]);
     const evaluated = expr.evaluate();
-    expect(expr.type.toString()).toBe('vector<finite_integer^2>');
+    expect(expr.type.toString()).toBe('vector<2>');
     expect(evaluated.type.toString()).toBe('vector<finite_integer^2>');
     expect(evaluated.type.matches(expr.type.type)).toBe(true);
   });
@@ -157,9 +174,11 @@ describe('LIST-BROADCAST TYPING — exactness / N stability', () => {
     const sin = ce.box(['Sin', ['List', 0, 1]]);
     expect(sin.N().type.matches('list<any>')).toBe(true);
 
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
     const mul = ce.box(['Multiply', ['List', 1, 2], 2]);
-    expect(mul.type.toString()).toBe('vector<2>');
-    expect(mul.N().type.toString()).toBe('vector<2>');
+    expect(mul.type.toString()).toBe('vector<finite_integer^2>');
+    expect(mul.N().type.toString()).toBe('vector<finite_integer^2>');
   });
 
   test('the type path does not evaluate (value is unchanged)', () => {

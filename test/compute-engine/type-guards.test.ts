@@ -137,9 +137,9 @@ describe('isTensor', () => {
 
   test('narrows type to TensorInterface', () => {
     const expr = ce.expr(['List', 1, 2, 3]);
+    // Phase C representation unification: the `.tensor` accessor is removed;
+    // a qualifying List narrows to the structural `shape`/`rank` surface.
     if (isTensor(expr)) {
-      // After guard, tensor is Tensor<any> (no undefined)
-      expect(expr.tensor).toBeDefined();
       expect(expr.shape).toEqual([3]);
       expect(expr.rank).toBe(1);
     }

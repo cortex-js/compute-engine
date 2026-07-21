@@ -827,7 +827,7 @@ export function toAsciiMath(
   //
   // Check operator (available on all expression types) for dispatch,
   // then use isFunction for narrowing to access .ops, .op1 etc.
-  // Tensors like List also have operator but _kind = 'tensor'.
+  // A tensor value is a plain `List` `BoxedFunction` (_kind = 'function').
   //
   const fnExpr = isFunction(expr) ? expr : null;
   const operators = options.operators

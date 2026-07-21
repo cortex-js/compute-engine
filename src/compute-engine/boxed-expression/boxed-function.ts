@@ -40,14 +40,15 @@ import {
   lazyMapNumericApproximation,
   zip,
 } from '../collection-utils.js';
-import { isTensor } from './boxed-tensor.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
   isNumber,
   isFunction,
   isString,
+  isTensor,
   isContinuationOperand,
 } from './type-guards.js';
+import { candidateShape } from './tensor-view.js';
 import type { NumericPrimitiveType } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -1452,7 +1453,11 @@ export class BoxedFunction
       // `add()`/`mul()`, which run on EVALUATED operands. (They are already
       // excluded from the post-evaluation steps 3b/4b for the same reason.)
       //
-      const hasTensors = this.ops!.some((x) => isTensor(x));
+      // O(rank) candidate check (§D4.2 hot-path contract): dispatch must
+      // never pay the O(cells) type computation per broadcast evaluation.
+      // Kernel entries (addTensors/mulTensors) fully qualify + pack, and
+      // DECLINE non-qualified candidates back to the generic broadcast path.
+      const hasTensors = this.ops!.some((x) => candidateShape(x) !== null);
       const hasRawOperand =
         (this.operator === 'Add' || this.operator === 'Multiply') &&
         this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
@@ -1745,7 +1750,11 @@ export class BoxedFunction
       // cartesian-explodes when it evaluates to a collection; `add()`/`mul()`
       // broadcast those soundly on EVALUATED operands (see the sync path).
       //
-      const hasTensors = this.ops!.some((x) => isTensor(x));
+      // O(rank) candidate check (§D4.2 hot-path contract): dispatch must
+      // never pay the O(cells) type computation per broadcast evaluation.
+      // Kernel entries (addTensors/mulTensors) fully qualify + pack, and
+      // DECLINE non-qualified candidates back to the generic broadcast path.
+      const hasTensors = this.ops!.some((x) => candidateShape(x) !== null);
       const hasRawOperand =
         (this.operator === 'Add' || this.operator === 'Multiply') &&
         this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
@@ -2281,7 +2290,8 @@ function type(expr: BoxedFunction): Type {
     // Numeric tuples/points and tensor Add/Multiply (dedicated component-wise
     // typing) stay untouched via `skipBroadcastForVectorOps`.
     if (def.broadcastable) {
-      const hasTensors = expr.ops.some((x) => isTensor(x));
+      // O(rank) candidate check — see the §D4.2 note at the sibling sites.
+      const hasTensors = expr.ops.some((x) => candidateShape(x) !== null);
       // `Equal`/`NotEqual` over TWO OR MORE definite collections is
       // whole-value equality — a scalar `boolean`, never a broadcast (see
       // `skipBroadcastForVectorOps`). That skip tests value-level

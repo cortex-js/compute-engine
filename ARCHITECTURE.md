@@ -194,7 +194,13 @@ concrete subclasses are:
 | `BoxedFunction` | `boxed-function.ts` | Function applications `[operator, ...operands]`, bound to an operator definition |
 | `BoxedString` | `boxed-string.ts` | String literals (stored NFC-normalized) |
 | `BoxedDictionary` | `boxed-dictionary.ts` | Key/value maps |
-| `BoxedTensor` | `boxed-tensor.ts` | Vectors, matrices, n-dimensional arrays |
+
+There is no dedicated tensor class: a vector/matrix/n-dimensional array is a
+canonical `List` `BoxedFunction`. Tensor-ness is a **lazy view** over a
+`List`'s ops (`boxed-expression/tensor-view.ts`) — `isTensor`, `.shape`,
+`.rank` and the `List` type handler all agree via one shared shape-claim
+predicate, and packed numeric kernels obtain an `AbstractTensor` per operation
+through `packTensor` (never cached on the node).
 
 The shared public surface (on `_BoxedExpression`) includes the getters/methods
 most consumers use: `.json`, `.latex`/`.toLatex()`, `.operator`, `.ops`,

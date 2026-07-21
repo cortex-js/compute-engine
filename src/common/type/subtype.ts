@@ -815,8 +815,39 @@ export function isSubtype(
   // Handle lists
   //
   if (rhs.kind === 'list' && lhs.kind === 'list') {
+    // Encoding bridge (tensor-unification Phase C): a dimensioned rank-n
+    // list IS a list of rank-(n-1) lists — `matrix<E^2x2>` ⊆
+    // `list<vector<2>>` (peel the outer dimension, recurse). Only needed
+    // when the rhs element is itself list-kind and the direct element check
+    // would fail (`E ⊄ vector<2>`); the peeled outer length is bounded by
+    // the rhs's outer dimension when it has one.
+    const elementsMatch = isSubtype(lhs.elements, rhs.elements);
+    if (
+      !elementsMatch &&
+      lhs.dimensions !== undefined &&
+      lhs.dimensions.length >= 2 &&
+      typeof rhs.elements !== 'string' &&
+      rhs.elements.kind === 'list'
+    ) {
+      const inner: Type = {
+        kind: 'list',
+        elements: lhs.elements,
+        dimensions: lhs.dimensions.slice(1),
+      };
+      if (isSubtype(inner, rhs.elements)) {
+        // Outer length: rhs unbounded (no dims) always accepts; a
+        // dimensioned rhs must accept the peeled outer length.
+        if (!rhs.dimensions) return true;
+        if (
+          rhs.dimensions.length === 1 &&
+          (rhs.dimensions[0] === -1 || rhs.dimensions[0] === lhs.dimensions[0])
+        )
+          return true;
+      }
+    }
+
     // Check that the element types match
-    if (!isSubtype(lhs.elements, rhs.elements)) return false;
+    if (!elementsMatch) return false;
 
     // Check that the dimensions match
     if (rhs.dimensions) {

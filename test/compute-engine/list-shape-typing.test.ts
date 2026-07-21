@@ -23,12 +23,12 @@ function typeOf(expr: any): string {
 }
 
 describe('Phase A — honest List shape typing (§D3 normative table)', () => {
-  test('[1,2,3] → vector<3> (packed-dtype BoxedTensor fast path, Phase A interim)', () => {
-    // ce.box literals take the BoxedTensor packed-numeric path (raw JS
-    // leaves): cell stays `number` until Phase C unifies representations.
-    // Plain Lists (broadcast results) get the honest widened cell type from
-    // the List type handler — see the evaluated-broadcast test below.
-    expect(typeOf(['List', 1, 2, 3])).toBe('vector<3>');
+  // Phase C representation unification: literal lists type honestly
+  // (list<finite_…^dims>).
+  test('[1,2,3] → vector<finite_integer^3> (honest literal-list typing)', () => {
+    // Phase C: every List is a plain canonical List; its cell type is the
+    // honest global-widened element type reported from the List type handler.
+    expect(typeOf(['List', 1, 2, 3])).toBe('vector<finite_integer^3>');
   });
 
   test('evaluated broadcast result: honest shaped type, subtype of declared', () => {
@@ -50,9 +50,9 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
     );
   });
 
-  test('[[1,2],[3.5,4.5]] → matrix<2x2> (packed-dtype fast path, Phase A interim)', () => {
+  test('[[1,2],[3.5,4.5]] → matrix<finite_real^(2x2)> (honest global widening)', () => {
     const boxed = ce.box(['List', ['List', 1, 2], ['List', 3.5, 4.5]]);
-    expect(boxed.type.toString()).toBe('matrix<2x2>');
+    expect(boxed.type.toString()).toBe('matrix<finite_real^(2x2)>');
   });
 
   test('[[x,y],[z,w]] undeclared symbols → matrix<2x2> (fold at every leaf)', () => {
@@ -111,6 +111,8 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
 });
 
 describe('Phase A — degenerate lists keep prior (no-claim) behavior', () => {
+  // Phase C representation unification: literal lists type honestly
+  // (list<finite_…^dims>).
   test('[] → list<nothing>', () => {
     expect(typeOf(['List'])).toBe('list<nothing>');
   });
@@ -119,13 +121,17 @@ describe('Phase A — degenerate lists keep prior (no-claim) behavior', () => {
     const boxed = ce.box(['List', ['List', 1, 2], ['List', 3]]);
     expect(boxed.type.matches('matrix<2x2>')).toBe(false);
     // Mixed row dimensions surface as a list of differently-shaped vectors.
-    expect(boxed.type.toString()).toBe('list<vector<1> | vector<2>>');
+    expect(boxed.type.toString()).toBe(
+      'list<vector<finite_integer^1> | vector<finite_integer^2>>'
+    );
   });
 
   test('mixed-depth [1,[2]] → no shape claim', () => {
     const boxed = ce.box(['List', 1, ['List', 2]]);
     expect(boxed.type.matches('vector<2>')).toBe(false);
-    expect(boxed.type.toString()).toBe('list<finite_integer | vector<1>>');
+    expect(boxed.type.toString()).toBe(
+      'list<finite_integer | vector<finite_integer^1>>'
+    );
   });
 
   test('[[],[]] empty inner levels → no shape claim', () => {

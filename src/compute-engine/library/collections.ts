@@ -465,8 +465,8 @@ function pointComponentAt(
             numericApproximation
           );
         // Build with `ce.function`, keeping the full canonicalization pass:
-        // its tensor detection is what makes a numeric coordinate list a
-        // rank-1 `BoxedTensor` (tensor-only consumers like `MatrixMultiply`
+        // its tensor typing is what makes a numeric coordinate list a
+        // rank-1 tensor value (tensor-only consumers like `MatrixMultiply`
         // rely on it). The pass is O(n), but this eager branch only runs at
         // or below `MAX_SIZE_EAGER_COLLECTION` (or for non-indexed sources),
         // so the cost is bounded — the large-list case took the lazy arm
@@ -5698,8 +5698,15 @@ function defaultCollectionEq(a: Expression, b: Expression) {
   if (!isFunction(a) || !isFunction(b)) return false;
   if (a.nops !== b.nops) return false;
 
-  // The elements are assumed to be in the same order
-  return a.ops.every((x, i) => x.isSame(b.ops[i]));
+  // Same operator, same arity: DECLINE (undefined) rather than deciding with
+  // an exact `.isSame` element walk. `eq()` in compare.ts then runs its
+  // element-wise collection comparison — tolerant (engine tolerance),
+  // three-valued (symbolic elements → undefined), and NaN-aware (NaN ≠ NaN)
+  // — the semantics `BoxedTensor.isEqual` provided before the tensor
+  // representation unification (canonical-comparison #16 pins them; an
+  // `isSame` walk is exact, two-valued, and treats identical NaN patterns as
+  // equal).
+  return undefined;
 }
 
 export function fromRange(start: number, end: number): number[] {

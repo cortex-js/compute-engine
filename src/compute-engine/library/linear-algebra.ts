@@ -1,7 +1,11 @@
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { ListType } from '../../common/type/types.js';
-import { isTensor } from '../boxed-expression/boxed-tensor.js';
+import {
+  isTensorValue,
+  packTensor,
+  packStructural,
+} from '../boxed-expression/tensor-view.js';
 import { totalDegree } from '../boxed-expression/polynomial-degree.js';
 import { checkArity } from '../boxed-expression/validate.js';
 import { isFiniteIndexedCollection } from '../collection-utils.js';
@@ -143,9 +147,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Handle empty shape tuple - return scalar
         if (targetShape.length === 0) {
           if (op1.isNumber) return op1;
-          if (isTensor(op1)) {
+          if (isTensorValue(op1)) {
+            // Structural consumer: any shape-regular list reshapes.
+            const op1Tensor = packStructural(ce, op1);
+            if (!op1Tensor) return undefined;
             // Return first element as scalar
-            const flatData = op1.tensor.flatten();
+            const flatData = op1Tensor.flatten();
             return flatData.length > 0 ? ce.expr(flatData[0]) : ce.Zero;
           }
           return undefined;
@@ -157,17 +164,20 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         }
 
         // If a finite indexable collection, convert to a list
-        // -> BoxedTensor
-        if (!isTensor(op1) && isFiniteIndexedCollection(op1))
+        // -> shaped `List` tensor value
+        if (!isTensorValue(op1) && isFiniteIndexedCollection(op1))
           op1 = ce.function('List', [...op1.each()]);
 
-        if (isTensor(op1)) {
+        if (isTensorValue(op1)) {
+          // Structural consumer: any shape-regular list reshapes.
+          const op1Tensor = packStructural(ce, op1);
+          if (!op1Tensor) return undefined;
           // If shapes match, return as-is
           if (targetShape.join('x') === op1.shape.join('x')) return op1;
 
           // Flatten tensor data and reshape with cycling
           // Use tensor.flatten() to get all scalar elements
-          const flatData = op1.tensor.flatten();
+          const flatData = op1Tensor.flatten();
           const flatElements = flatData.map((x) => ce.expr(x));
           return reshapeWithCycling(ce, flatElements, targetShape);
         }
@@ -193,7 +203,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const depth = toInteger(ops[1]);
           if (depth === null || depth < 0) return undefined;
           if (op1.isNumber) return ce.expr(['List', op1]);
-          if (!isFiniteIndexedCollection(op1) && !isTensor(op1))
+          if (!isFiniteIndexedCollection(op1) && !isTensorValue(op1))
             return undefined;
           return ce.function('List', flattenToDepth(op1, depth));
         }
@@ -201,11 +211,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Handle scalar - return single-element list
         if (op1.isNumber) return ce.expr(['List', op1]);
 
-        if (isTensor(op1))
+        if (isTensorValue(op1)) {
+          // Structural consumer: any shape-regular list flattens.
+          const op1Tensor = packStructural(ce, op1);
+          if (!op1Tensor) return undefined;
           return ce.expr([
             'List',
-            ...op1.tensor.flatten().map((x) => ce.expr(x)),
+            ...op1Tensor.flatten().map((x) => ce.expr(x)),
           ]);
+        }
 
         // No depth means "flatten completely" (Wolfram semantics). Route the
         // non-tensor case through the same machinery as the depth form with
@@ -233,11 +247,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Transpose of scalar is the scalar itself
         if (op1.isNumber) return op1;
 
-        if (!isTensor(op1) && isFiniteIndexedCollection(op1))
+        if (!isTensorValue(op1) && isFiniteIndexedCollection(op1))
           op1 = ce.function('List', [...op1.each()]);
 
-        if (isTensor(op1)) {
-          const rank = op1.shape.length;
+        {
+          // Structure-only operation: accepts any STRUCTURALLY regular list
+          // (packStructural), including cells that block the type-level shape
+          // claim (e.g. a function-application cell) — §D2 shape-regularity
+          // applies to any cell type; only kernels require packTensor.
+          const op1Tensor = packStructural(ce, op1);
+          if (!op1Tensor) return undefined;
+          const rank = op1Tensor.shape.length;
 
           // For rank 1 (vectors), transpose is identity
           if (rank === 1) return op1;
@@ -256,7 +276,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (axis1 <= 0 || axis1 > rank) return undefined;
           if (axis2 <= 0 || axis2 > rank) return undefined;
 
-          return op1.tensor.transpose(axis1, axis2)?.expression;
+          return op1Tensor.transpose(axis1, axis2)?.expression;
         }
         return undefined;
       },
@@ -275,8 +295,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Conjugate transpose of scalar is its conjugate
         if (op1.isNumber) return ce.expr(['Conjugate', op1]).evaluate();
 
-        if (isTensor(op1)) {
-          const rank = op1.shape.length;
+        {
+          // Structure-only operation — see `Transpose` (packStructural).
+          const op1Tensor = packStructural(ce, op1);
+          if (!op1Tensor) return undefined;
+          const rank = op1Tensor.shape.length;
 
           // For rank 1 (vectors), conjugate transpose is just element-wise conjugate
           if (rank === 1) {
@@ -300,7 +323,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (axis1 <= 0 || axis1 > rank) return undefined;
           if (axis2 <= 0 || axis2 > rank) return undefined;
 
-          return op1.tensor.conjugateTranspose(axis1, axis2)?.expression;
+          return op1Tensor.conjugateTranspose(axis1, axis2)?.expression;
         }
 
         return undefined;
@@ -317,7 +340,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Determinant of scalar (1x1 matrix) is the scalar itself
         if (op1.isNumber) return op1;
 
-        if (isTensor(op1)) {
+        if (isTensorValue(op1)) {
+          const op1Tensor = packTensor(ce, op1);
+          if (!op1Tensor) return undefined;
           const shape = op1.shape;
           // Vector: not a square matrix
           if (shape.length === 1)
@@ -335,17 +360,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // value-correct but unfactored rational form carrying a division
           // artifact, which Factor/simplify cannot recover. Gated to symbolic
           // matrices so numeric determinants keep their existing fast path.
-          if (op1.tensor.dtype === 'expression') {
+          if (op1Tensor.dtype === 'expression') {
             const vdm = vandermondeDifferenceProduct(op1, shape[0], ce);
             if (vdm !== undefined) return vdm;
           }
 
-          const det = op1.tensor.determinant();
+          const det = op1Tensor.determinant();
           // `determinant()` returns a raw field value (e.g. a JS number for a
           // numeric matrix); box it so the operator yields a usable expression.
           return det === undefined
             ? undefined
-            : op1.tensor.field.expression(det);
+            : op1Tensor.field.expression(det);
         }
 
         return undefined;
@@ -363,7 +388,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Inverse of scalar is 1/scalar
         if (op1.isNumber) return ce.expr(['Divide', 1, op1]).evaluate();
 
-        if (isTensor(op1)) {
+        if (isTensorValue(op1)) {
+          // §D2.3: exact evaluate → expression dtype; `.N()` → float64.
+          const op1Tensor = packTensor(ce, op1, {
+            numeric: numericApproximation,
+          });
+          if (!op1Tensor) return undefined;
           const shape = op1.shape;
           // Vector: not a square matrix
           if (shape.length === 1)
@@ -406,7 +436,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // so the nested list collapses to a `matrix<…>` type (the raw tensor
           // `.expression` is typed `list<list<…>>`, which `Dot`/`MatrixMultiply`
           // reject).
-          const inv = op1.tensor.inverse();
+          const inv = op1Tensor.inverse();
           if (inv === undefined) return undefined;
           const invExpr = inv.expression;
           return isFunction(invExpr)
@@ -422,7 +452,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Moore-Penrose pseudoinverse of a matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
-      evaluate: ([matrix], { engine: ce }) => {
+      evaluate: ([matrix], { engine: ce, numericApproximation }) => {
         const op1 = matrix;
 
         // Pseudoinverse of scalar is 1/scalar (or 0 if scalar is 0)
@@ -431,7 +461,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return ce.expr(['Divide', 1, op1]).evaluate();
         }
 
-        if (isTensor(op1)) return op1.tensor.pseudoInverse()?.expression;
+        if (isTensorValue(op1)) {
+          const op1Tensor = packTensor(ce, op1, { numeric: numericApproximation });
+          return op1Tensor ? op1Tensor.pseudoInverse()?.expression : undefined;
+        }
 
         return undefined;
       },
@@ -447,7 +480,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const A = a;
         const B = b;
 
-        if (!isTensor(A) || !isTensor(B)) return undefined;
+        if (!isTensorValue(A) || !isTensorValue(B)) return undefined;
 
         // A must be a square matrix.
         if (A.shape.length !== 2 || A.shape[0] !== A.shape[1])
@@ -460,7 +493,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const inv = ce
           .function('Inverse', [A])
           .evaluate({ numericApproximation });
-        if (!isTensor(inv)) return undefined;
+        if (!isTensorValue(inv)) return undefined;
         return ce
           .function('MatrixMultiply', [inv, B])
           .evaluate({ numericApproximation });
@@ -484,9 +517,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Adjugate (classical adjoint) of a square matrix.',
       complexity: 8200,
       signature: '(matrix) -> matrix',
-      evaluate: (ops) => {
+      evaluate: (ops, { numericApproximation }) => {
         const op1 = ops[0];
-        if (isTensor(op1)) return op1.tensor.adjugateMatrix()?.expression;
+        if (isTensorValue(op1)) {
+          const op1Tensor = packTensor(op1.engine, op1, { numeric: numericApproximation });
+          return op1Tensor ? op1Tensor.adjugateMatrix()?.expression : undefined;
+        }
 
         return undefined;
       },
@@ -535,7 +571,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Trace of scalar is the scalar itself
         if (op1.isNumber) return op1;
 
-        if (isTensor(op1)) {
+        if (isTensorValue(op1)) {
+          const op1Tensor = packTensor(ce, op1);
+          if (!op1Tensor) return undefined;
           const shape = op1.shape;
 
           // Vector: trace not defined
@@ -562,7 +600,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (shape[axis1 - 1] !== shape[axis2 - 1])
             return ce.error('expected-square-matrix', op1.toString());
 
-          const result = op1.tensor.trace(axis1, axis2);
+          const result = op1Tensor.trace(axis1, axis2);
           if (result === undefined) return undefined;
 
           // For scalar result (rank 2), box the value
@@ -593,7 +631,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return ce.expr(['List']);
         }
 
-        if (!isTensor(op)) return undefined;
+        if (!isTensorValue(op)) return undefined;
 
         // Interpret vectors as 1×n matrices (linear forms)
         const shape = op.shape;
@@ -712,7 +750,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const B = ops[1];
 
         // Both operands must be tensors
-        if (!isTensor(A) || !isTensor(B)) return undefined;
+        if (!isTensorValue(A) || !isTensorValue(B)) return undefined;
+
+        const aTensor = packTensor(ce, A);
+        const bTensor = packTensor(ce, B);
+        if (!aTensor || !bTensor) return undefined;
 
         const shapeA = A.shape;
         const shapeB = B.shape;
@@ -729,8 +771,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const n = shapeA[0];
           let sum: Expression = ce.Zero;
           for (let i = 0; i < n; i++) {
-            const aVal = A.tensor.at(i + 1) ?? ce.Zero;
-            const bVal = B.tensor.at(i + 1) ?? ce.Zero;
+            const aVal = aTensor.at(i + 1) ?? ce.Zero;
+            const bVal = bTensor.at(i + 1) ?? ce.Zero;
             sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
           }
           return sum.evaluate();
@@ -746,8 +788,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let i = 0; i < m; i++) {
             let sum: Expression = ce.Zero;
             for (let k = 0; k < n; k++) {
-              const aVal = A.tensor.at(i + 1, k + 1) ?? ce.Zero;
-              const bVal = B.tensor.at(k + 1) ?? ce.Zero;
+              const aVal = aTensor.at(i + 1, k + 1) ?? ce.Zero;
+              const bVal = bTensor.at(k + 1) ?? ce.Zero;
               sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
             }
             result.push(sum.evaluate());
@@ -766,8 +808,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let j = 0; j < n; j++) {
             let sum: Expression = ce.Zero;
             for (let k = 0; k < m; k++) {
-              const aVal = A.tensor.at(k + 1) ?? ce.Zero;
-              const bVal = B.tensor.at(k + 1, j + 1) ?? ce.Zero;
+              const aVal = aTensor.at(k + 1) ?? ce.Zero;
+              const bVal = bTensor.at(k + 1, j + 1) ?? ce.Zero;
               sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
             }
             result.push(sum.evaluate());
@@ -789,8 +831,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let j = 0; j < p; j++) {
               let sum: Expression = ce.Zero;
               for (let k = 0; k < n; k++) {
-                const aVal = A.tensor.at(i + 1, k + 1) ?? ce.Zero;
-                const bVal = B.tensor.at(k + 1, j + 1) ?? ce.Zero;
+                const aVal = aTensor.at(i + 1, k + 1) ?? ce.Zero;
+                const bVal = bTensor.at(k + 1, j + 1) ?? ce.Zero;
                 sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
               }
               row.push(sum.evaluate());
@@ -827,7 +869,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const B = ops[1];
 
         // Both operands must be tensors of the same shape.
-        if (!isTensor(A) || !isTensor(B)) return undefined;
+        if (!isTensorValue(A) || !isTensorValue(B)) return undefined;
+
+        const aTensor = packTensor(ce, A);
+        const bTensor = packTensor(ce, B);
+        if (!aTensor || !bTensor) return undefined;
 
         const shapeA = A.shape;
         const shapeB = B.shape;
@@ -841,7 +887,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           );
 
         // Element-wise product (reuses the tensor field's broadcast multiply).
-        return A.tensor.multiply(B.tensor).expression;
+        return aTensor.multiply(bTensor).expression;
       },
     },
 
@@ -857,7 +903,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Rank of a scalar map x ↦ a·x: 1 if non-zero, 0 if zero.
         if (op.isNumber) return ce.number(op.isSame(0) ? 0 : 1);
 
-        if (!isTensor(op)) return undefined;
+        if (!isTensorValue(op)) return undefined;
 
         const shape = op.shape;
         if (shape.length > 2) return ce.error('expected-matrix', op.toString());
@@ -928,8 +974,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value) -> boolean',
       evaluate: ([m], { engine: ce }) => {
         const op = m;
-        if (!isTensor(op)) return ce.False;
-        return op.tensor.isSquare ? ce.True : ce.False;
+        // Structural predicate (no numeric kernel): packStructural admits
+        // any shape-regular list — a square color matrix IS square.
+        const opTensor = packStructural(ce, op);
+        if (!opTensor) return ce.False;
+        return opTensor.isSquare ? ce.True : ce.False;
       },
     },
 
@@ -939,8 +988,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value) -> boolean',
       evaluate: ([m], { engine: ce }) => {
         const op = m;
-        if (!isTensor(op)) return ce.False;
-        return op.tensor.isSymmetric ? ce.True : ce.False;
+        // Structural predicate (no numeric kernel): packStructural admits
+        // any shape-regular list — a square color matrix IS square.
+        const opTensor = packStructural(ce, op);
+        if (!opTensor) return ce.False;
+        return opTensor.isSymmetric ? ce.True : ce.False;
       },
     },
 
@@ -951,8 +1003,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value) -> boolean',
       evaluate: ([m], { engine: ce }) => {
         const op = m;
-        if (!isTensor(op)) return ce.False;
-        return op.tensor.isDiagonal ? ce.True : ce.False;
+        // Structural predicate (no numeric kernel): packStructural admits
+        // any shape-regular list — a square color matrix IS square.
+        const opTensor = packStructural(ce, op);
+        if (!opTensor) return ce.False;
+        return opTensor.isDiagonal ? ce.True : ce.False;
       },
     },
 
@@ -963,7 +1018,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([a, b], { engine: ce }) => {
         const A = a;
         const B = b;
-        if (!isTensor(A) || !isTensor(B)) return undefined;
+        if (!isTensorValue(A) || !isTensorValue(B)) return undefined;
+        const aTensor = packTensor(ce, A);
+        const bTensor = packTensor(ce, B);
+        if (!aTensor || !bTensor) return undefined;
         if (
           A.shape.length !== 1 ||
           A.shape[0] !== 3 ||
@@ -975,12 +1033,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             'cross product requires two 3-vectors'
           );
 
-        const a1 = ce.expr(A.tensor.at(1) ?? ce.Zero);
-        const a2 = ce.expr(A.tensor.at(2) ?? ce.Zero);
-        const a3 = ce.expr(A.tensor.at(3) ?? ce.Zero);
-        const b1 = ce.expr(B.tensor.at(1) ?? ce.Zero);
-        const b2 = ce.expr(B.tensor.at(2) ?? ce.Zero);
-        const b3 = ce.expr(B.tensor.at(3) ?? ce.Zero);
+        const a1 = ce.expr(aTensor.at(1) ?? ce.Zero);
+        const a2 = ce.expr(aTensor.at(2) ?? ce.Zero);
+        const a3 = ce.expr(aTensor.at(3) ?? ce.Zero);
+        const b1 = ce.expr(bTensor.at(1) ?? ce.Zero);
+        const b2 = ce.expr(bTensor.at(2) ?? ce.Zero);
+        const b3 = ce.expr(bTensor.at(3) ?? ce.Zero);
 
         return ce
           .function('List', [
@@ -999,10 +1057,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'positive-semidefinite matrix is the principal matrix square root.',
       complexity: 8300,
       signature: '(matrix, number) -> matrix',
-      evaluate: ([mat, exponent], { engine: ce }) => {
+      evaluate: ([mat, exponent], { engine: ce, numericApproximation }) => {
         const A = mat;
-        if (!isTensor(A)) return undefined;
-        if (!A.tensor.isSquare)
+        if (!isTensorValue(A)) return undefined;
+        const aTensor = packTensor(ce, A, { numeric: numericApproximation });
+        if (!aTensor) return undefined;
+        if (!aTensor.isSquare)
           return ce.error('expected-square-matrix', A.toString());
 
         const size = A.shape[0];
@@ -1055,8 +1115,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(matrix, any?) -> expression',
       evaluate: ([mat, variable], { engine: ce }) => {
         const A = mat;
-        if (!isTensor(A)) return undefined;
-        if (!A.tensor.isSquare)
+        if (!isTensorValue(A)) return undefined;
+        const aTensor = packTensor(ce, A);
+        if (!aTensor) return undefined;
+        if (!aTensor.isSquare)
           return ce.error('expected-square-matrix', A.toString());
 
         const x = variable && isSymbol(variable) ? variable : ce.symbol('x');
@@ -1068,7 +1130,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         for (let i = 0; i < n; i++) {
           const row: Expression[] = [];
           for (let j = 0; j < n; j++) {
-            const entry = ce.expr(A.tensor.at(i + 1, j + 1) ?? ce.Zero);
+            const entry = ce.expr(aTensor.at(i + 1, j + 1) ?? ce.Zero);
             row.push(i === j ? x.sub(entry) : entry.neg());
           }
           rows.push(ce.function('List', row));
@@ -1085,7 +1147,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(matrix) -> matrix',
       evaluate: ([m], { engine: ce }) => {
         const op = m;
-        if (!isTensor(op)) return undefined;
+        if (!isTensorValue(op)) return undefined;
 
         const shape = op.shape;
         if (shape.length !== 2)
@@ -1133,7 +1195,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Scalar → return as-is
         if (op1.isNumber) return op1;
 
-        if (isTensor(op1)) {
+        if (isTensorValue(op1)) {
+          const op1Tensor = packTensor(ce, op1);
+          if (!op1Tensor) return undefined;
           const shape = op1.shape;
 
           // Vector → create diagonal matrix
@@ -1166,7 +1230,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             const minDim = Math.min(m, n);
             const diagonal: Expression[] = [];
             for (let i = 0; i < minDim; i++) {
-              diagonal.push(ce.expr(op1.tensor.at(i + 1, i + 1) ?? ce.Zero));
+              diagonal.push(ce.expr(op1Tensor.at(i + 1, i + 1) ?? ce.Zero));
             }
             return ce.expr(['List', ...diagonal]);
           }
@@ -1390,7 +1454,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Norm (no general Tuple→vector coercion is introduced elsewhere).
         if (isFunction(x, 'Tuple')) return vectorNorm(x.ops);
 
-        if (!isTensor(x)) return undefined;
+        if (!isTensorValue(x)) return undefined;
+        const xTensor = packTensor(ce, x);
+        if (!xTensor) return undefined;
 
         const shape = x.shape;
 
@@ -1399,7 +1465,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const elements: Expression[] = [];
           const n = shape[0];
           for (let i = 0; i < n; i++) {
-            const val = x.tensor.at(i + 1);
+            const val = xTensor.at(i + 1);
             elements.push(val !== undefined ? ce.expr(val) : ce.Zero);
           }
           return vectorNorm(elements);
@@ -1414,7 +1480,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             let sumSq: Expression = ce.Zero;
             for (let i = 0; i < m; i++) {
               for (let j = 0; j < n; j++) {
-                const val = x.tensor.at(i + 1, j + 1);
+                const val = xTensor.at(i + 1, j + 1);
                 const el = val !== undefined ? ce.expr(val) : ce.Zero;
                 const absEl = ce.expr(['Abs', el]).evaluate();
                 sumSq = sumSq.add(absEl.mul(absEl));
@@ -1429,7 +1495,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let j = 0; j < n; j++) {
               let colSum = 0;
               for (let i = 0; i < m; i++) {
-                const val = x.tensor.at(i + 1, j + 1);
+                const val = xTensor.at(i + 1, j + 1);
                 const el = val !== undefined ? ce.expr(val) : ce.Zero;
                 const absEl = ce.expr(['Abs', el]).evaluate();
                 colSum += absEl.re ?? 0;
@@ -1445,7 +1511,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let i = 0; i < m; i++) {
               let rowSum = 0;
               for (let j = 0; j < n; j++) {
-                const val = x.tensor.at(i + 1, j + 1);
+                const val = xTensor.at(i + 1, j + 1);
                 const el = val !== undefined ? ce.expr(val) : ce.Zero;
                 const absEl = ce.expr(['Abs', el]).evaluate();
                 rowSum += absEl.re ?? 0;
@@ -1473,7 +1539,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
-        if (!isTensor(M)) return undefined;
+        if (!isTensorValue(M)) return undefined;
+        const mTensor = packTensor(ce, M);
+        if (!mTensor) return undefined;
 
         const shape = M.shape;
         // Must be a square matrix
@@ -1485,7 +1553,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Special case: 1×1 matrix
         if (n === 1) {
-          const val = M.tensor.at(1, 1);
+          const val = mTensor.at(1, 1);
           return ce.expr(['List', val !== undefined ? ce.expr(val) : ce.Zero]);
         }
 
@@ -1494,7 +1562,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (isDiagonalOrTriangular) {
           const eigenvalues: Expression[] = [];
           for (let i = 0; i < n; i++) {
-            const val = M.tensor.at(i + 1, i + 1);
+            const val = mTensor.at(i + 1, i + 1);
             eigenvalues.push(val !== undefined ? ce.expr(val) : ce.Zero);
           }
           return ce.expr(['List', ...eigenvalues]);
@@ -1541,7 +1609,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
-        if (!isTensor(M)) return undefined;
+        if (!isTensorValue(M)) return undefined;
 
         const shape = M.shape;
         // Must be a square matrix
@@ -1588,7 +1656,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
-        if (!isTensor(M)) return undefined;
+        if (!isTensorValue(M)) return undefined;
 
         const shape = M.shape;
         // Must be a square matrix
@@ -1615,7 +1683,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
-        if (!isTensor(M)) return undefined;
+        if (!isTensorValue(M)) return undefined;
 
         const shape = M.shape;
         // Must be a square matrix
@@ -1641,7 +1709,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
-        if (!isTensor(M)) return undefined;
+        if (!isTensorValue(M)) return undefined;
 
         const shape = M.shape;
         // Must be at least a 2D matrix
@@ -1667,7 +1735,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
-        if (!isTensor(M)) return undefined;
+        if (!isTensorValue(M)) return undefined;
 
         const shape = M.shape;
         // Must be a square matrix
@@ -1689,7 +1757,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
 
-        if (!isTensor(M)) return undefined;
+        if (!isTensorValue(M)) return undefined;
 
         const shape = M.shape;
         // Must be a 2D matrix
@@ -1716,7 +1784,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(matrix) -> list',
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const M = ops[0];
-        if (!isTensor(M)) return undefined;
+        if (!isTensorValue(M)) return undefined;
 
         const shape = M.shape;
         if (shape.length !== 2)
@@ -1754,14 +1822,16 @@ function computeLU(
   n: number,
   ce: ComputeEngine
 ): { P: Expression; L: Expression; U: Expression } | undefined {
-  if (!isTensor(M)) return undefined;
+  if (!isTensorValue(M)) return undefined;
+  const mTensor = packTensor(ce, M);
+  if (!mTensor) return undefined;
 
   // Convert matrix to numeric array
   const A: number[][] = [];
   for (let i = 0; i < n; i++) {
     A[i] = [];
     for (let j = 0; j < n; j++) {
-      const val = M.tensor.at(i + 1, j + 1);
+      const val = mTensor.at(i + 1, j + 1);
       const num =
         typeof val === 'number'
           ? val
@@ -1855,14 +1925,16 @@ function computeQR(
   n: number,
   ce: ComputeEngine
 ): { Q: Expression; R: Expression } | undefined {
-  if (!isTensor(M)) return undefined;
+  if (!isTensorValue(M)) return undefined;
+  const mTensor = packTensor(ce, M);
+  if (!mTensor) return undefined;
 
   // Convert matrix to numeric array
   const A: number[][] = [];
   for (let i = 0; i < m; i++) {
     A[i] = [];
     for (let j = 0; j < n; j++) {
-      const val = M.tensor.at(i + 1, j + 1);
+      const val = mTensor.at(i + 1, j + 1);
       const num =
         typeof val === 'number'
           ? val
@@ -1965,14 +2037,16 @@ function computeCholesky(
   n: number,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!isTensor(M)) return undefined;
+  if (!isTensorValue(M)) return undefined;
+  const mTensor = packTensor(ce, M);
+  if (!mTensor) return undefined;
 
   // Convert matrix to numeric array
   const A: number[][] = [];
   for (let i = 0; i < n; i++) {
     A[i] = [];
     for (let j = 0; j < n; j++) {
-      const val = M.tensor.at(i + 1, j + 1);
+      const val = mTensor.at(i + 1, j + 1);
       const num =
         typeof val === 'number'
           ? val
@@ -2036,14 +2110,16 @@ function computeSVD(
 ):
   | { U: Expression; S: Expression; V: Expression; singularValues: number[] }
   | undefined {
-  if (!isTensor(M)) return undefined;
+  if (!isTensorValue(M)) return undefined;
+  const mTensor = packTensor(ce, M);
+  if (!mTensor) return undefined;
 
   // Convert matrix to numeric array
   const A: number[][] = [];
   for (let i = 0; i < m; i++) {
     A[i] = [];
     for (let j = 0; j < n; j++) {
-      const val = M.tensor.at(i + 1, j + 1);
+      const val = mTensor.at(i + 1, j + 1);
       const num =
         typeof val === 'number'
           ? val
@@ -2228,14 +2304,17 @@ function matrixSqrt2x2Exact(
   A: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!isTensor(A)) return undefined;
+  if (!isTensorValue(A)) return undefined;
   // Require exact rational entries.
   if (tensorToRationalMatrix(A, 2, 2) === undefined) return undefined;
 
-  const a = ce.box(A.tensor.at(1, 1) as Expression);
-  const b = ce.box(A.tensor.at(1, 2) as Expression);
-  const c = ce.box(A.tensor.at(2, 1) as Expression);
-  const d = ce.box(A.tensor.at(2, 2) as Expression);
+  const aTensor = packTensor(ce, A);
+  if (!aTensor) return undefined;
+
+  const a = ce.box(aTensor.at(1, 1) as Expression);
+  const b = ce.box(aTensor.at(1, 2) as Expression);
+  const c = ce.box(aTensor.at(2, 1) as Expression);
+  const d = ce.box(aTensor.at(2, 2) as Expression);
 
   const tr = ce.function('Add', [a, d]).evaluate();
   const det = ce
@@ -2280,7 +2359,7 @@ function exactSingularValues(
   n: number,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!isTensor(M)) return undefined;
+  if (!isTensorValue(M)) return undefined;
   const rational = tensorToRationalMatrix(M, m, n);
   if (rational === undefined) return undefined;
 
@@ -2342,8 +2421,10 @@ function getElement(
   j: number,
   ce: ComputeEngine
 ): Expression {
-  if (!isTensor(M)) return ce.Zero;
-  const val = M.tensor.at(i, j);
+  if (!isTensorValue(M)) return ce.Zero;
+  const mTensor = packTensor(ce, M);
+  if (!mTensor) return ce.Zero;
+  const val = mTensor.at(i, j);
   return val !== undefined ? ce.expr(val) : ce.Zero;
 }
 
@@ -2351,14 +2432,16 @@ function getElement(
  * Check if matrix is diagonal or triangular
  */
 function checkDiagonalOrTriangular(M: Expression, n: number): boolean {
-  if (!isTensor(M)) return false;
+  if (!isTensorValue(M)) return false;
+  const mTensor = packTensor(M.engine, M);
+  if (!mTensor) return false;
 
   let isUpperTriangular = true;
   let isLowerTriangular = true;
 
   for (let i = 0; i < n && (isUpperTriangular || isLowerTriangular); i++) {
     for (let j = 0; j < n; j++) {
-      const val = M.tensor.at(i + 1, j + 1);
+      const val = mTensor.at(i + 1, j + 1);
       const isZero =
         val === undefined ||
         val === 0 ||
@@ -2379,7 +2462,7 @@ function computeEigenvalues3x3(
   M: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!isTensor(M)) return undefined;
+  if (!isTensorValue(M)) return undefined;
 
   // Get matrix elements
   const a11 = getElement(M, 1, 1, ce).re ?? 0;
@@ -2490,14 +2573,16 @@ function computeEigenvaluesQR(
   n: number,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!isTensor(M)) return undefined;
+  if (!isTensorValue(M)) return undefined;
+  const mTensor = packTensor(ce, M);
+  if (!mTensor) return undefined;
 
   // Convert matrix to numeric array
   const A: number[][] = [];
   for (let i = 0; i < n; i++) {
     A[i] = [];
     for (let j = 0; j < n; j++) {
-      const val = M.tensor.at(i + 1, j + 1);
+      const val = mTensor.at(i + 1, j + 1);
       const num =
         typeof val === 'number'
           ? val
@@ -2818,7 +2903,7 @@ function exactEigenvector(
   n: number,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!isTensor(M)) return undefined;
+  if (!isTensorValue(M)) return undefined;
 
   // λ must be an exact rational (integers included).
   if (!isNumber(lambda) || !lambda.isExact) return undefined;
@@ -2854,7 +2939,9 @@ function computeEigenvector(
   n: number,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!isTensor(M)) return undefined;
+  if (!isTensorValue(M)) return undefined;
+  const mTensor = packTensor(ce, M);
+  if (!mTensor) return undefined;
 
   // Exact path: when M and λ are both exact rationals, A − λI is exact, so the
   // eigenvector (a null-space vector of A − λI) can be computed with exact
@@ -2876,7 +2963,7 @@ function computeEigenvector(
   for (let i = 0; i < n; i++) {
     AminusLambdaI[i] = [];
     for (let j = 0; j < n; j++) {
-      const num = asRealNumber(M.tensor.at(i + 1, j + 1)) ?? 0;
+      const num = asRealNumber(mTensor.at(i + 1, j + 1)) ?? 0;
       AminusLambdaI[i][j] = num - (i === j ? lambdaNum : 0);
     }
   }
@@ -2896,7 +2983,7 @@ function computeEigenvector2x2Symbolic(
   lambda: Expression,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!isTensor(M)) return undefined;
+  if (!isTensorValue(M)) return undefined;
 
   const a = getElement(M, 1, 1, ce);
   const b = getElement(M, 1, 2, ce);
@@ -3025,10 +3112,12 @@ function vandermondeDifferenceProduct(
   n: number,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (!isTensor(tensor) || n < 2) return undefined;
+  if (!isTensorValue(tensor) || n < 2) return undefined;
+  const tensorPacked = packTensor(ce, tensor);
+  if (!tensorPacked) return undefined;
 
   const at = (i: number, j: number): Expression | undefined =>
-    tensor.tensor.at(i, j) as Expression | undefined;
+    tensorPacked.at(i, j) as Expression | undefined;
 
   for (const rowPower of [true, false]) {
     const nodes: Expression[] = [];
@@ -3074,7 +3163,9 @@ function tensorToNumericMatrix(
   rowCount: number,
   columnCount: number
 ): number[][] | undefined {
-  if (!isTensor(tensor)) return undefined;
+  if (!isTensorValue(tensor)) return undefined;
+  const tensorPacked = packTensor(tensor.engine, tensor);
+  if (!tensorPacked) return undefined;
 
   const matrix: number[][] = [];
   for (let i = 0; i < rowCount; i++) {
@@ -3082,8 +3173,8 @@ function tensorToNumericMatrix(
     for (let j = 0; j < columnCount; j++) {
       const value =
         tensor.rank === 1
-          ? tensor.tensor.at(j + 1)
-          : tensor.tensor.at(i + 1, j + 1);
+          ? tensorPacked.at(j + 1)
+          : tensorPacked.at(i + 1, j + 1);
       const num = asRealNumber(value);
       if (num === undefined || isNaN(num)) return undefined;
       matrix[i][j] = num;
@@ -3140,16 +3231,18 @@ function tensorToRationalMatrix(
   rows: number,
   cols: number
 ): BigRat[][] | undefined {
-  if (!isTensor(tensor)) return undefined;
+  if (!isTensorValue(tensor)) return undefined;
   const ce = tensor.engine;
+  const tensorPacked = packTensor(ce, tensor);
+  if (!tensorPacked) return undefined;
   const matrix: BigRat[][] = [];
   for (let i = 0; i < rows; i++) {
     const row: BigRat[] = [];
     for (let j = 0; j < cols; j++) {
       const value =
         tensor.rank === 1
-          ? tensor.tensor.at(j + 1)
-          : tensor.tensor.at(i + 1, j + 1);
+          ? tensorPacked.at(j + 1)
+          : tensorPacked.at(i + 1, j + 1);
       const boxed = ce.box(value as Expression);
       if (!isNumber(boxed) || !boxed.isExact) return undefined;
       const r = asRational(boxed);
@@ -3396,7 +3489,7 @@ function finiteDimension(value: Expression): number | undefined {
     }
   }
 
-  if (isTensor(value)) {
+  if (isTensorValue(value)) {
     if (value.shape.length === 0) return 1;
     return value.shape.reduce((a, b) => a * b, 1);
   }
@@ -3421,7 +3514,7 @@ function kernelBasisDimension(value: Expression): number | undefined {
     }
   }
 
-  if (isTensor(value) && (value.rank === 1 || value.rank === 2))
+  if (isTensorValue(value) && (value.rank === 1 || value.rank === 2))
     return value.shape[0];
 
   return undefined;

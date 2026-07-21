@@ -7,9 +7,9 @@ import {
   isFunction,
   isSymbol,
   isString,
-  isTensor,
   isDictionary,
 } from './type-guards.js';
+import { isTensorValue } from './tensor-view.js';
 import { stochasticEqual } from './stochastic-equal.js';
 
 // Lazy reference to break circular dependency:
@@ -90,18 +90,9 @@ export function same(a: Expression, b: Expression): boolean {
     return a.symbol === b.symbol;
   }
 
-  //
-  // BoxedTensor
-  //
-  if (isTensor(a)) {
-    if (a.rank !== 0) {
-      if (!isTensor(b)) return false;
-      if (a.rank !== b.rank) return false;
-      for (let i = 0; i < a.rank; i++)
-        if (a.shape[i] !== b.shape[i]) return false;
-      return a.tensor.equals(b.tensor);
-    }
-  }
+  // (No tensor special case: tensor values are canonical `List` function
+  // expressions, so the function-expression branch above already compares
+  // them structurally, operand by operand.)
 
   //
   // BoxedDictionary
@@ -174,8 +165,18 @@ export function eq(
     cmp = b.operatorDefinition?.eq?.(b, a);
     if (cmp !== undefined) return cmp;
 
-    // If the expressions are structurally identical, they are equal
-    if (a.isSame(b)) return true;
+    // If the expressions are structurally identical, they are equal — EXCEPT
+    // a collection containing NaN, where an identical NaN pattern must still
+    // compare unequal (`[NaN].isEqual([NaN])` is `false`, mirroring scalar
+    // `NaN ≠ NaN`; canonical-comparison #16 pins this, and
+    // `BoxedTensor.isEqual` deliberately provided it before the
+    // representation unification). The NaN scan is a cheap property walk —
+    // far cheaper than discarding the `isSame` result and re-walking with
+    // per-element tolerant `eq()` for every identical large list.
+    if (a.isSame(b)) {
+      if (a.isCollection && b.isCollection && containsNaNLeaf(a)) return false;
+      return true;
+    }
 
     // Two collections compare by their elements. Lazy pipelines (`Map(…)`,
     // `Join(…)`, `Filter(…)`) deliberately do not materialize under `.N()`
@@ -533,6 +534,16 @@ export function cmp(
   // Note: we could have `1-x` and `x` (a symbol), so they don't have
   // to both be function expressions.
   //
+  // Tensor values first: only equality applies, and this must PRECEDE the
+  // generic function branch — a tensor value is a `List` function
+  // expression, and the numeric-difference logic there returns `undefined`
+  // for it (the old bottom-of-function tensor branch was unreachable for
+  // the same reason, for `BoxedTensor` too). Delegate to `eq` (tolerant,
+  // NaN-aware, cell-type-agnostic): `[Rgb,Rgb] ≤ [Rgb,Rgb]` is `true`
+  // via `=`.
+  if (isTensorValue(a) && typeof b !== 'number' && isTensorValue(b))
+    return eq(a, b) === true ? '=' : undefined;
+
   if (isFunction(a) || isFunction(b)) {
     // If the function has a special handler for equality, use it. Only a
     // definite `true` means equal; `false` (definitely not equal) and
@@ -665,16 +676,20 @@ export function cmp(
     return a.string < b.string ? '<' : '>';
   }
 
-  //
-  // For tensors, only equality applies
-  //
-  if (isTensor(a)) {
-    if (!isTensor(b)) return undefined;
-    if (a.tensor.equals(b.tensor)) return '=';
-    return undefined;
-  }
+  // (Tensor equality is handled ABOVE the function-expression branch —
+  // a tensor value IS a function expression and never reaches this point.)
 
   return undefined;
+}
+
+/** True when any leaf of a (possibly nested) structure is a NaN number
+ *  literal. Cheap property walk — used to preserve `NaN ≠ NaN` semantics for
+ *  structurally-identical collections without paying the tolerant
+ *  element-wise `eq()` walk on every identical pair. */
+function containsNaNLeaf(expr: Expression): boolean {
+  if (isNumber(expr)) return expr.isNaN === true;
+  if (isFunction(expr)) return expr.ops.some((op) => containsNaNLeaf(op));
+  return false;
 }
 
 function isZeroWithTolerance(expr: Expression): boolean {

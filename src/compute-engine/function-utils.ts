@@ -13,7 +13,6 @@ import {
   isSymbol,
   isFunction,
   isString,
-  isTensor,
   sym,
 } from './boxed-expression/type-guards.js';
 import {
@@ -689,10 +688,10 @@ function captureAvoidingSubs(
   const s = sym(expr);
   if (s !== undefined) return map[s] ?? expr;
 
-  // Leaf (number/string) or tensor: no `Function` literal to capture inside, so
-  // the built-in substitution (which also handles rational/tensor structural
-  // forms) is safe.
-  if (!isFunction(expr) || isTensor(expr)) return expr.subs(map);
+  // Leaf (number/string): no `Function` literal to capture inside, so
+  // the built-in substitution (which also handles rational structural
+  // forms) is safe. A `List` is a plain function and traverses its ops below.
+  if (!isFunction(expr)) return expr.subs(map);
 
   // Recurse into operands, rebuilding as `BoxedFunction.subs` does.
   const ops = expr.ops.map((x) => captureAvoidingSubs(x, map));

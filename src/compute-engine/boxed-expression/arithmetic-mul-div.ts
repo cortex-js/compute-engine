@@ -2,10 +2,9 @@ import { isSubtype } from '../../common/type/subtype.js';
 
 import type {
   Expression,
-  TensorInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isTensor } from './boxed-tensor.js';
+import { isTensorValue, packTensor } from './tensor-view.js';
 import {
   isNumber,
   isFunction,
@@ -1502,7 +1501,10 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
 
   // Tensor (matrix/vector) operands follow matrix-product / scalar-scaling
   // semantics rather than the scalar Product machinery.
-  if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs);
+  if (xs.some((x) => isTensorValue(x))) {
+    const r = mulTensors(ce, xs);
+    if (r) return r;
+  }
 
   // A non-tensor finite indexed collection (a lazy `Range`, or a `List` that
   // emerged from evaluating a broadcast operand): broadcast the product over
@@ -1555,7 +1557,10 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
       isBroadcastableCollection,
       true
     );
-  if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs, true);
+  if (xs.some((x) => isTensorValue(x))) {
+    const r = mulTensors(ce, xs, true);
+    if (r) return r;
+  }
   // Broadcast over a non-tensor finite indexed collection (see `mul`).
   if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
     const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
@@ -1586,7 +1591,10 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
         isBroadcastableCollection,
         true
       );
-    if (xs.some((x) => isTensor(x))) return mulTensors(ce, xs, true);
+    if (xs.some((x) => isTensorValue(x))) {
+      const rt = mulTensors(ce, xs, true);
+      if (rt) return rt;
+    }
     if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
       const r = broadcastOverIndexedCollections(ce, 'Multiply', xs, true, true);
       if (r) return r;
@@ -1673,19 +1681,25 @@ function mulTensors(
   ce: ComputeEngine,
   xs: ReadonlyArray<Expression>,
   numericApproximation = false
-): Expression {
+): Expression | undefined {
   // Separate evaluated operands into tensors and scalars, preserving order.
-  const tensors: (Expression & TensorInterface)[] = [];
+  const tensors: Expression[] = [];
   const scalars: Expression[] = [];
   for (const op of xs) {
     const x = numericApproximation ? op.N() : op.evaluate();
-    if (isTensor(x)) tensors.push(x);
-    else scalars.push(x);
+    if (isTensorValue(x)) {
+      // A tensor-valued operand that does not pack (e.g. a list of
+      // non-kernel-admissible cells such as tuples/points) means the tensor
+      // kernels do not apply — decline so the caller falls through to the
+      // generic broadcast / tuple path (behave as if not a tensor).
+      if (packTensor(ce, x) === undefined) return undefined;
+      tensors.push(x);
+    } else scalars.push(x);
   }
 
-  // No tensors survived evaluation: fall back to an ordinary scalar product.
-  if (tensors.length === 0)
-    return numericApproximation ? mulN(...scalars) : mul(...scalars);
+  // No tensors survived evaluation: let the caller fall through to the generic
+  // (broadcast / tuple / Product) path.
+  if (tensors.length === 0) return undefined;
 
   // Combine the scalar factors (these are commutative).
   let scalar: Expression | null = null;
@@ -1700,7 +1714,7 @@ function mulTensors(
     // (Issue #29 — `Multiply` is element-wise for vectors, mirroring `Add`).
     // Any rank-2+ operand falls through to the matrix product below.
     if (
-      isTensor(product) &&
+      isTensorValue(product) &&
       product.shape.length === 1 &&
       nextTensor.shape.length === 1
     ) {
@@ -1708,11 +1722,17 @@ function mulTensors(
       // behavior of the matrix-product fold below).
       if (product.shape[0] !== nextTensor.shape[0])
         return ce._fn('Multiply', xs);
+      // Pack both vector operands once for the element-wise fold. A pack
+      // failure falls back to an inert product.
+      const productTensor = packTensor(ce, product);
+      const nextTensorPacked = packTensor(ce, nextTensor);
+      if (!productTensor || !nextTensorPacked)
+        return ce._fn('Multiply', xs);
       const n = product.shape[0];
       const elements: Expression[] = [];
       for (let k = 1; k <= n; k++) {
-        const a = ce.expr(product.tensor.at(k) ?? ce.Zero);
-        const b = ce.expr(nextTensor.tensor.at(k) ?? ce.Zero);
+        const a = ce.expr(productTensor.at(k) ?? ce.Zero);
+        const b = ce.expr(nextTensorPacked.at(k) ?? ce.Zero);
         // Use the module-level `mul`/`mulN` helpers (not `.mul()`) so exact
         // elements stay exact under `evaluate()`.
         elements.push(numericApproximation ? mulN(a, b) : mul(a, b));
@@ -1733,7 +1753,7 @@ function mulTensors(
 
   // Apply the combined scalar factor.
   if (scalar !== null && !isLiteral(scalar, 1)) {
-    product = isTensor(product)
+    product = isTensorValue(product)
       ? scaleTensor(ce, product, scalar)
       : scalar.mul(product);
   }
@@ -1743,16 +1763,20 @@ function mulTensors(
 /** Scale every element of a vector or matrix `tensor` by the scalar `scalar`. */
 function scaleTensor(
   ce: ComputeEngine,
-  tensor: Expression & TensorInterface,
+  tensor: Expression,
   scalar: Expression
 ): Expression {
   const shape = tensor.shape;
+
+  // Pack once for the whole scaling. A pack failure leaves the scaling inert.
+  const packed = packTensor(ce, tensor);
+  if (!packed) return ce._fn('Multiply', [scalar, tensor]);
 
   // Vector (rank 1)
   if (shape.length === 1) {
     const result: Expression[] = [];
     for (let i = 0; i < shape[0]; i++) {
-      const val = ce.expr(tensor.tensor.at(i + 1) ?? ce.Zero);
+      const val = ce.expr(packed.at(i + 1) ?? ce.Zero);
       result.push(scalar.mul(val).evaluate());
     }
     return ce.function('List', result);
@@ -1765,7 +1789,7 @@ function scaleTensor(
     for (let i = 0; i < m; i++) {
       const row: Expression[] = [];
       for (let j = 0; j < n; j++) {
-        const val = ce.expr(tensor.tensor.at(i + 1, j + 1) ?? ce.Zero);
+        const val = ce.expr(packed.at(i + 1, j + 1) ?? ce.Zero);
         row.push(scalar.mul(val).evaluate());
       }
       rows.push(ce.function('List', row));

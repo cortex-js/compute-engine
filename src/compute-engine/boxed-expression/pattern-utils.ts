@@ -2,7 +2,7 @@
  * Leaf module for wildcard pattern utility functions.
  *
  * These are extracted from boxed-patterns.ts to break circular dependencies:
- * boxed-tensor.ts and match.ts need these functions, but boxed-patterns.ts
+ * match.ts needs these functions, but boxed-patterns.ts
  * has dependencies that create cycles through boxed-symbol.ts.
  */
 

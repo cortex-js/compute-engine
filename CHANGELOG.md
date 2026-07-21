@@ -1,5 +1,79 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The `BoxedTensor` class is removed.** Tensor values (vectors, matrices)
+  are now ordinary canonical `List` expressions; "tensor-ness" is a property
+  (shape-regularity), not a distinct representation. The `BoxedTensor` type
+  export and the `TensorInterface.tensor` accessor (which exposed the internal
+  packed `Tensor` object) are gone. The `isTensor()` guard remains and now
+  answers the representation-independent question "is this a shape-regular
+  list?"; `.shape` and `.rank` remain and now report honestly on **every**
+  tensor-shaped list — including broadcast results, which previously reported
+  `[]`/`0`. Code that used `expr.tensor` should operate on `expr.ops` (the
+  elements) or use the public linear-algebra operators.
+
+- **Lists carry honest, shape-aware types.** A shape-regular list's type
+  reports its actual element type and dimensions: `[1, 2, 3]` types
+  `vector<finite_integer^3>` (previously `vector<3>`, i.e. `number` elements),
+  `[[1, 2], [3.5, 4.5]]` types `matrix<finite_real^(2x2)>`, and a list of
+  non-numeric values is no longer mistyped as a numeric vector —
+  `[rgb(1,0,0), rgb(0,1,0)]` types `list<color^2>`, not `vector<2>`. The new
+  types are strict subtypes of the old ones, so `type.matches('vector<3>')`
+  and similar queries continue to answer `true`; only code comparing exact
+  type *strings* is affected. An evaluated broadcast result now carries its
+  shape too (`Sin([0,1]).evaluate()` types `vector<2>`), and the declared type
+  of a broadcast expression is always a sound upper bound of its evaluated
+  value's type.
+
+- **Signature validation of collection arguments is two-stage.** An operand
+  whose static type could still conform to a collection parameter (a symbol
+  declared plain `list`, `list<unknown>`, a `broadcastable<…>` intermediate)
+  is accepted at canonicalization and checked against its actual value when
+  the operator evaluates. Provably-wrong operands (`Determinant("abc")`,
+  `Determinant(v)` with `v: list<number>` — a flat vector can never be a
+  matrix) still error immediately. Consequently some `incompatible-type`
+  errors that used to appear at parse/canonicalization time now surface at
+  evaluation time instead (as the operator's specific error, e.g.
+  `expected-square-matrix`, or as an inert expression).
+
+### Improvements
+
+- **Matrix operations work on computed matrices.** The static type of a
+  broadcast application now mirrors its operand's shape (`Sqrt(M)` with
+  `M` a 2×2 matrix types as a 2×2 matrix), so expressions like
+  `Determinant(Sqrt(M))`, `MatrixMultiply(Sqrt(M), Sqrt(M))`, or
+  `Inverse(A + B)` — which used to fail with `incompatible-type` at
+  canonicalization — now evaluate. Symbols declared `list` participate the
+  same way once a conforming value is assigned.
+
+- **Structural matrix operations work on any cell type.** `Transpose`,
+  `ConjugateTranspose`, `Reshape`, `Flatten`, and the shape predicates
+  (`IsSquareMatrix`, `IsSymmetric`, `IsDiagonal`) operate on any
+  shape-regular list — a matrix of colors, tuples, or unevaluated function
+  applications — not just numeric ones. Numeric kernels (`Determinant`,
+  `Inverse`, …) still require numeric cells and decline others gracefully.
+
+- **Exact integer matrices stay exact.** Linear-algebra kernels over exact
+  integer matrices now use exact arithmetic under `evaluate()`:
+  `Determinant([[9007199254740991, 0], [0, 3]])` returns the exact
+  `27021597764222973` (previously rounded through float arithmetic).
+  Under `.N()` results are floated, as before
+  (`Inverse([[2,1],[1,3]]).N()` → `[[0.6, -0.2], [-0.2, 0.4]]`).
+
+- **List equality is tolerant and NaN-aware in all cases.**
+  `[1,2,3].isEqual([1,2,3+1e-11])` is `true` (engine tolerance),
+  `[x,2].isEqual([y,2])` is `undefined` (symbolic), and a list containing
+  `NaN` is never `isEqual` to itself (mirroring scalar `NaN ≠ NaN`) —
+  uniformly for every list, whatever produced it. Ordering comparisons
+  (`isLessEqual`, …) between equal tensors of any cell type now answer
+  `true` instead of `undefined`.
+
+- **Faster broadcast arithmetic.** Removing the eager tensor construction
+  from the boxing path makes broadcast-heavy evaluation measurably faster
+  (~30% on elementwise matrix expressions), with no per-expression packing
+  cost until a numeric kernel actually runs.
+
 ## 0.88.1 _2026-07-20_
 
 ## Issues Resolved

@@ -8,10 +8,11 @@ import { isSubtype } from '../../common/type/subtype.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
-  TensorInterface,
+  Tensor,
+  TensorDataType,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isTensor } from './boxed-tensor.js';
+import { isTensorValue, packTensor } from './tensor-view.js';
 import {
   isNumber,
   isFunction,
@@ -295,8 +296,28 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
   // Add (addTensors handles the value), so the honest list type must come from
   // here — this also removes the `number | vector<n>` union artifact that the
   // final `widen` used to produce.
-  const tensors = args.filter((x) => isTensor(x));
-  if (tensors.length === 1) return tensors[0].type.type;
+  const tensors = args.filter((x) => isTensorValue(x));
+  if (tensors.length === 1) {
+    const others = args.filter((x) => !isTensorValue(x));
+    // Only SCALAR co-operands fold into the cells: a collection-TYPED
+    // co-operand (an unevaluated matrix-valued `Multiply`, a declared
+    // matrix symbol) is a sibling collection, not a cell contributor —
+    // fall through to the collection branch below for those.
+    if (others.every((x) => !isLinearAlgebraCollection(x))) {
+      // The scalar co-operands fold INTO the cells elementwise, so the
+      // honest result cell type widens the tensor's cells with the scalar
+      // types: `[1,2] + x` has `number` cells, not `finite_integer` — the
+      // declared type must remain a sound UPPER bound of the evaluated
+      // value (the honest literal cell type made verbatim propagation
+      // over-narrow).
+      const tt = tensors[0].type.type;
+      if (typeof tt !== 'string' && tt.kind === 'list' && others.length > 0) {
+        const cell = widen(tt.elements, ...others.map((x) => x.type.type));
+        return { kind: 'list', elements: cell, dimensions: tt.dimensions };
+      }
+      return tt;
+    }
+  }
   // Collection-typed operands (declared matrix/vector/list symbols, OR a
   // `Multiply` etc. that the type handlers now type as a collection — e.g.
   // `2Y`, `-1·Y` for `X-Y`, `3X`) widen to the collection type. Hoisted above
@@ -326,8 +347,29 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
       args.every(
         (x) => isBroadcastShaped(x) || isSubtype(x.type.type, 'number')
       )
-    )
-      return widen(...shaped.map((x) => x.type.type));
+    ) {
+      const collected = widen(...shaped.map((x) => x.type.type));
+      // The scalar operands fold INTO the cells elementwise (no scalar arm
+      // in the result — item 67), so they widen the CELL type, keeping the
+      // declared type a sound upper bound: `2·[1,2,3] + a` has `number`
+      // cells (`vector<3>`), not `finite_integer` — the evaluated value's
+      // elements include `a`.
+      const scalars = args.filter((x) => !isBroadcastShaped(x));
+      if (
+        scalars.length > 0 &&
+        typeof collected !== 'string' &&
+        collected.kind === 'list'
+      )
+        return {
+          kind: 'list',
+          elements: widen(
+            collected.elements,
+            ...scalars.map((x) => x.type.type)
+          ),
+          dimensions: collected.dimensions,
+        };
+      return collected;
+    }
     return widen(...args.map((x) => x.type.type));
   }
   // An operand whose collection-ness is not statically visible (a top
@@ -397,8 +439,11 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
     );
 
   // Check if any operands are tensors
-  const hasTensors = xs.some((x) => isTensor(x));
-  if (hasTensors) return addTensors(xs[0].engine, xs);
+  const hasTensors = xs.some((x) => isTensorValue(x));
+  if (hasTensors) {
+    const r = addTensors(xs[0].engine, xs);
+    if (r) return r;
+  }
 
   // Broadcast over a non-tensor finite indexed collection that only became a
   // collection through evaluation — e.g. `L^2 - 2` = `Add(-2, List(1,4,9))`,
@@ -451,11 +496,12 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
     );
 
   // Check if any operands are tensors
-  const hasTensors = xs.some((x) => isTensor(x));
+  const hasTensors = xs.some((x) => isTensorValue(x));
   if (hasTensors) {
     // Evaluate tensors numerically
-    xs = xs.map((x) => (isTensor(x) ? x.evaluate() : x.N()));
-    return addTensors(xs[0].engine, xs);
+    xs = xs.map((x) => (isTensorValue(x) ? x.evaluate() : x.N()));
+    const r = addTensors(xs[0].engine, xs);
+    if (r) return r;
   }
 
   // Broadcast over a non-tensor finite indexed collection (see `add` — checked
@@ -503,7 +549,10 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
         isBroadcastableCollection,
         true
       );
-    if (xs.some((x) => isTensor(x))) return addTensors(xs[0].engine, xs);
+    if (xs.some((x) => isTensorValue(x))) {
+      const rt = addTensors(xs[0].engine, xs);
+      if (rt) return rt;
+    }
     if (xs.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))) {
       const r = broadcastOverIndexedCollections(
         xs[0].engine,
@@ -577,24 +626,37 @@ function addTuples(
 function addTensors(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
-): Expression {
-  // Separate tensors and scalars
-  const tensors: (Expression & TensorInterface)[] = [];
+): Expression | undefined {
+  // Separate tensors and scalars. Pack each tensor operand once, here at
+  // entry (not per element access below).
+  const tensors: Tensor<TensorDataType>[] = [];
   const scalars: Expression[] = [];
 
   for (const op of ops) {
     const evaluated = op.evaluate();
-    if (isTensor(evaluated)) {
-      tensors.push(evaluated);
+    if (isTensorValue(evaluated)) {
+      const packed = packTensor(ce, evaluated);
+      // A tensor-VALUED operand that fails to pack (non-kernel-admissible
+      // cells — colors, tuples, …) must NOT fall into the scalar bucket:
+      // "adding" a whole collection to every cell would produce a wrong,
+      // nested result. Decline the entire kernel; the caller falls through
+      // to the generic elementwise broadcast path.
+      if (!packed) return undefined;
+      tensors.push(packed);
     } else {
       scalars.push(evaluated);
     }
   }
 
-  // If no tensors after evaluation, fall back to regular addition
-  if (tensors.length === 0) {
-    return new Terms(ce, scalars).asExpression();
-  }
+  // A lone tensor combined only with scalars is an *elementwise* broadcast
+  // (scalar added to every cell). Per the tensor-view design that case uses
+  // the generic broadcast path (no packing), which preserves the honest cell
+  // type of the result; `addTensors` re-boxes to a literal `List` that takes
+  // the legacy numeric-lift type. Decline here so the caller falls through to
+  // `broadcastOverIndexedCollections`. Also covers the "nothing packed"
+  // case (every tensor-valued operand was non-kernel-admissible, e.g. a
+  // point-list of tuples). Genuine tensor⊗tensor sums stay on this path.
+  if (tensors.length < 2) return undefined;
 
   // Get the reference shape from the first tensor
   const referenceShape = tensors[0].shape;
@@ -626,8 +688,8 @@ function addTensors(
     for (let i = 0; i < n; i++) {
       let sum = scalarSum;
       for (const tensor of tensors) {
-        // tensor.tensor.at() uses 1-based indexing for vectors
-        const val = tensor.tensor.at(i + 1) ?? ce.Zero;
+        // tensor.at() uses 1-based indexing for vectors
+        const val = tensor.at(i + 1) ?? ce.Zero;
         sum = sum.add(ce.expr(val));
       }
       result.push(sum.evaluate());
@@ -644,8 +706,8 @@ function addTensors(
       for (let j = 0; j < n; j++) {
         let sum = scalarSum;
         for (const tensor of tensors) {
-          // tensor.tensor.at(row, col) uses 1-based indexing
-          const val = tensor.tensor.at(i + 1, j + 1) ?? ce.Zero;
+          // tensor.at(row, col) uses 1-based indexing
+          const val = tensor.at(i + 1, j + 1) ?? ce.Zero;
           sum = sum.add(ce.expr(val));
         }
         row.push(sum.evaluate());

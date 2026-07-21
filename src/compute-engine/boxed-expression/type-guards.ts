@@ -49,7 +49,7 @@ export function isFunction(
   operator?: string
 ): expr is Expression & FunctionInterface {
   return (
-    (expr?._kind === 'function' || expr?._kind === 'tensor') &&
+    expr?._kind === 'function' &&
     (operator === undefined || expr!.operator === operator)
   );
 }
@@ -60,10 +60,22 @@ export function isString(
   return expr?._kind === 'string';
 }
 
+/**
+ * The unified tensor guard (§D4.1): a genuine tensor VALUE — a canonical
+ * `List` `BoxedFunction` whose (generation-cached) honest type carries a
+ * shape claim (`dimensions`). Because the `List` type handler and this guard
+ * share one predicate, `isTensor`, `.shape`, `.rank` and `.type` can never
+ * disagree. NOT for hot dispatch paths (reads `.type` on first access) —
+ * those use `candidateShape` (`tensor-view.ts`).
+ */
 export function isTensor(
   expr: Expression | null | undefined
 ): expr is Expression & TensorInterface {
-  return expr?._kind === 'tensor';
+  if (!isFunction(expr, 'List')) return false;
+  const t = expr.type.type;
+  return (
+    typeof t !== 'string' && t.kind === 'list' && t.dimensions !== undefined
+  );
 }
 
 export function isDictionary(

@@ -87,8 +87,14 @@ describe('LIST TENSOR ELIGIBILITY', () => {
     ];
 
     for (const expr of expressions) {
-      expect(isTensor(expr)).toBe(false);
+      // Phase C representation unification: a shape-regular list of tuple cells
+      // IS shape-regular (isTensor may be true), but tuple cells are NOT
+      // kernel-admissible — the value stays a plain List and never enters a
+      // numeric kernel (no `list<number>` / `vector` typing).
+      expect(expr.operator).toBe('List');
       expect(expr.type.matches('list')).toBe(true);
+      expect(expr.type.matches('list<number>')).toBe(false);
+      expect(expr.type.matches('vector')).toBe(false);
     }
     for (const expr of expressions.filter((x) => x.ops[0].operator !== 'Hold'))
       expect(expr.type.matches('list<tuple<number, number>>')).toBe(true);
@@ -118,9 +124,14 @@ describe('LIST TENSOR ELIGIBILITY', () => {
     ];
 
     for (const expr of expressions) {
-      expect(isTensor(expr)).toBe(false);
+      // Phase C representation unification: shape-regular container-cell lists
+      // (Set/Dictionary cells) may report isTensor true, but such cells are NOT
+      // kernel-admissible — the value stays a plain List and never enters a
+      // numeric kernel.
       expect(expr.operator).toBe('List');
       expect(expr.type.matches('list')).toBe(true);
+      expect(expr.type.matches('list<number>')).toBe(false);
+      expect(expr.type.matches('vector')).toBe(false);
     }
   });
 
@@ -130,12 +141,13 @@ describe('LIST TENSOR ELIGIBILITY', () => {
     ce.declare('p2', 'tuple');
 
     const expr = ce.box(['List', 'p1', 'p2']);
-    expect(isTensor(expr)).toBe(false);
+    // Phase C representation unification: a shape-regular list of tuple cells
+    // IS shape-regular (isTensor true), but tuple cells are NOT kernel-
+    // admissible — the value stays a plain List and never enters a numeric
+    // kernel (its type carries the honest tuple cell, not a numeric vector).
+    expect(isTensor(expr)).toBe(true);
     expect(expr.operator).toBe('List');
-    // Honest List typing (tensor-unification Phase A): a shape-regular list
-    // of tuple cells carries its dimensions — a list of points is rank-1
-    // with point cells. The VALUE stays a plain List (isTensor false above);
-    // only the reported type gains its honest shape.
+    expect(expr.type.matches('list<number>')).toBe(false);
     expect(expr.type.toString()).toBe('list<tuple^2>');
   });
 
@@ -148,10 +160,12 @@ describe('LIST TENSOR ELIGIBILITY', () => {
       ['List', 3, 4],
     ]);
 
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
     expect(isTensor(vector)).toBe(true);
-    expect(vector.type.toString()).toBe('vector<3>');
+    expect(vector.type.toString()).toBe('vector<finite_integer^3>');
     expect(isTensor(matrix)).toBe(true);
-    expect(matrix.type.toString()).toBe('matrix<2x2>');
+    expect(matrix.type.toString()).toBe('matrix<finite_integer^(2x2)>');
   });
 });
 
@@ -733,10 +747,12 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // path (symbol operand has no collection `elttype` handler).
     engine.assign('mtx', engine.box(matrix));
     const m = engine.box('mtx');
-    expect(m.type.toString()).toMatchInlineSnapshot(`matrix<3x3>`);
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
+    expect(m.type.toString()).toMatchInlineSnapshot(`matrix<finite_integer^(3x3)>`);
     // A single index into the matrix yields a row (vector), not a scalar.
     expect(engine.box(['At', 'mtx', 2]).type.toString()).toMatchInlineSnapshot(
-      `vector<3>`
+      `vector<finite_integer^3>`
     );
     // Nested `At` validates and evaluates (1-based indexing): row 2, column 1.
     expect(evaluate(['At', ['At', 'mtx', 2], 1])).toMatchInlineSnapshot(`6`);
@@ -746,8 +762,10 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // Sanity: a single index into a 1D list yields the scalar element type, so
     // a second `At` on that scalar does not validate (stays symbolic here).
     engine.assign('vec', engine.box(list));
+    // Phase C representation unification: literal lists type honestly, so a
+    // single index reports the honest element type.
     expect(engine.box(['At', 'vec', 1]).type.toString()).toMatchInlineSnapshot(
-      `number`
+      `finite_integer`
     );
     expect(evaluate(['At', 'vec', 1])).toMatchInlineSnapshot(`7`);
   });
@@ -2209,9 +2227,12 @@ describe('LIST LITERAL EVALUATION', () => {
   });
 
   test('.N() numericizes elements', () => {
+    // Phase C representation unification: `.N()` on a list is precision-driven
+    // (design §D2.3), so each element is numericized at engine precision rather
+    // than truncated to a machine float.
     const ce = new ComputeEngine();
     expect(exprToString(ce.box(['List', ['Divide', 1, 3], 'Pi']).N())).toBe(
-      '["List", 0.3333333333333333, 3.141592653589793]'
+      '["List", "0.(3)", "3.141592653589793238462643"]'
     );
   });
 
@@ -2232,10 +2253,17 @@ describe('LIST LITERAL EVALUATION', () => {
     ).toBe('["List", ["Pair", 5, 1], ["List", 5]]');
   });
 
-  test('all-literal list is returned unchanged (fast path, identity)', () => {
+  test('all-literal list evaluates to an equal plain List (honest dimensioned type)', () => {
+    // Phase C representation unification: a literal numeric list is a plain
+    // canonical List (the BoxedTensor construction path is gone), so `evaluate`
+    // returns an equal List with an honest dimensioned type rather than the same
+    // reference via the old fast-path identity.
     const ce = new ComputeEngine();
     const big = ce.box(['List', ...Array.from({ length: 5000 }, (_, i) => i)]);
-    expect(big.evaluate() === big).toBe(true);
+    const evaluated = big.evaluate();
+    expect(evaluated.operator).toBe('List');
+    expect(evaluated.isEqual(big)).toBe(true);
+    expect(big.type.matches('vector')).toBe(true);
   });
 });
 

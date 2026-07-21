@@ -144,7 +144,6 @@ export type { BoxedNumber } from './compute-engine/boxed-expression/boxed-number
 export type { BoxedSymbol } from './compute-engine/boxed-expression/boxed-symbol.js';
 export type { BoxedFunction } from './compute-engine/boxed-expression/boxed-function.js';
 export type { BoxedString } from './compute-engine/boxed-expression/boxed-string.js';
-export type { BoxedTensor } from './compute-engine/boxed-expression/boxed-tensor.js';
 
 export type {
   FunctionProperties,

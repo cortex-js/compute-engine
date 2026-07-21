@@ -21,7 +21,7 @@ import type {
 } from '../global-types.js';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
-import { isTensor } from './boxed-tensor.js';
+import { isTensorValue } from './tensor-view.js';
 import { isSymbol, isFunction, isContinuationOperand } from './type-guards.js';
 
 // Parsed once: the type of an indexed collection whose every element is a
@@ -284,7 +284,7 @@ export function checkNumericArgs(
       // vector arithmetic (Add/Multiply/Negate/Subtract/Divide). Pass through
       // without inferring its elements to `real` (like the tensor branch).
       xs.push(op);
-    } else if (isTensor(op)) {
+    } else if (isTensorValue(op)) {
       // The argument is a tensor (matrix or vector). Accept it for tensor
       // operations like element-wise addition. Tensor-specific validation
       // (shape compatibility, etc.) happens in the evaluate function.

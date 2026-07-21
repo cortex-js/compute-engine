@@ -95,8 +95,11 @@ describe('Comparison correctness (REVIEW.md A1, A3)', () => {
     expect(a.isLessEqual(b)).toBeUndefined();
     expect(a.isLess(b)).toBeUndefined();
     expect(a.isEqual(b)).toBe(false);
-    // identical lists are still equal
-    expect(ce.expr(['List', 1, 2]).isEqual(['List', 1, 2])).toBe(true);
+    // identical lists are still equal.
+    // Phase C representation unification: `isEqual` takes a boxed operand
+    // (`number | Expression`); the raw-MathJSON form used to work only via the
+    // now-removed BoxedTensor.isEqual override, so box the argument.
+    expect(ce.expr(['List', 1, 2]).isEqual(ce.expr(['List', 1, 2]))).toBe(true);
   });
 
   // A3: strict/opposite predicates returned a definitive `false` for the

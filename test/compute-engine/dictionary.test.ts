@@ -68,9 +68,14 @@ describe('Dictionary', () => {
           ['Tuple', { str: 'list1' }, ['List', 1, 2, 3]],
           ['Tuple', { str: 'list2' }, ['List', 'a', 'b', 'c']],
         ])
-      ).toMatchInlineSnapshot(
-        `{dict: {list1: ["List", 1, 2, 3]; list2: ["List", "a", "b", "c"]}}`
-      );
+      ).toMatchInlineSnapshot(`
+        {
+          dict: {
+            list1: {fn: ["List", {num: "1"}, {num: "2"}, {num: "3"}]};
+              list2: {fn: ["List", {sym: "a"}, {sym: "b"}, {sym: "c"}]}
+          }
+        }
+      `);
     });
 
     test('nested dictionaries', () => {
@@ -129,7 +134,7 @@ describe('Dictionary', () => {
       ).toMatchInlineSnapshot(`
         {
           dict: {
-            list: ["List", 1, 2, 3];
+            list: {fn: ["List", {num: "1"}, {num: "2"}, {num: "3"}]};
               items: {fn: ["List", {str: "a"}, {str: "b"}, {str: "c"}]}
           }
         }
@@ -152,7 +157,7 @@ describe('Dictionary', () => {
             number: {num: "42"};
               string: {str: "hello"};
               boolean: {sym: "True"};
-              list: ["List", 1, 2, 3]
+              list: {fn: ["List", {num: "1"}, {num: "2"}, {num: "3"}]}
           }
         }
       `);

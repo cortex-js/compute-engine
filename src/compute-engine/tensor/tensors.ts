@@ -23,7 +23,7 @@ import type {
 // The data is stored in a linear array, the shape indicates how to
 // interpret the data as a tensor.
 //
-// - BoxedTensor: a general purpose tensor (lists of lists of lists ...) with arbitrary elements (Expression).
+// - expression-dtype tensor: a general purpose tensor (lists of lists of lists ...) with arbitrary elements (Expression).
 // Has limited support for operations.
 // - Vector: a column vector (1D tensor) of scalars (numbers, boolean, Complex). Has full support for operations.
 // - Matrix: a matrix (2D tensor) of scalars. Has full support for operations.

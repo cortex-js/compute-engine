@@ -60,8 +60,10 @@ describe('ElementMax / ElementMin — evaluate', () => {
 // §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('ElementMax / ElementMin — type', () => {
   test('scalar⊗collection is typed as a list', () => {
+    // Phase C representation unification: broadcast-applied scalar results
+    // report `number` cells (list<finite_…^dims> for literal lists).
     expect(ce.box(['ElementMax', 0, ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<finite_number^3>'
+      'vector<3>'
     );
   });
   test('scalar⊗scalar is a scalar type', () => {

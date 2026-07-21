@@ -491,8 +491,10 @@ describe('numeric list literals preserve oversized integers exactly', () => {
   });
   test('small-int list still promotes to a numeric tensor (fast path)', () => {
     // The exactness fix must not disturb the safe-range integer dtype selection.
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
     expect(ce.box(['List', 1, 2, 3]).evaluate().type.toString()).toEqual(
-      'vector<3>'
+      'vector<finite_integer^3>'
     );
   });
 });

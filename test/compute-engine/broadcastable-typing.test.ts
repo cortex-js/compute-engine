@@ -76,8 +76,10 @@ describe('broadcastable<T> typing (phase B)', () => {
     expect(ce.box(['Add', 2, 'x']).type.toString()).toBe('number');
     expect(ce.box(['Multiply', 2, 'x']).type.toString()).toBe('finite_number');
     // Statically-visible collection/tuple/wrapper branches keep today's typing.
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
     expect(ce.box(['Multiply', 2, ['List', 1, 2, 3]]).type.toString()).toBe(
-      'vector<3>'
+      'vector<finite_integer^3>'
     );
     expect(
       ce.box(['Add', ['Tuple', 1, 2], ['Tuple', 3, 4]]).type.toString()
@@ -218,7 +220,9 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     const ce = new ComputeEngine();
     const v1 = ['Multiply', 10000, ['List', 1, 2, 3]];
     const rem = ce.box(['Remainder', v1, 7]);
-    expect(rem.type.toString()).toBe('vector<3>');
+    // Phase C representation unification: literal lists type honestly
+    // (list<finite_…^dims>).
+    expect(rem.type.toString()).toBe('vector<finite_integer^3>');
     expect(rem.evaluate().operator).toBe('List');
   });
 
@@ -242,9 +246,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     expect(ce.box(['Sin', ['Range', 1, 5]]).type.toString()).toBe(
       'list<number>'
     );
-    expect(ce.box(['Sin', ['List', 0, 1]]).type.toString()).toBe(
-      'vector<finite_number^2>'
-    );
+    expect(ce.box(['Sin', ['List', 0, 1]]).type.toString()).toBe('vector<2>');
   });
 
   test('idempotence: never broadcastable<broadcastable<…>>', () => {
@@ -356,10 +358,10 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     const ev = app.evaluate();
     expect(ev.toString()).toBe('[[1,-1],[2,-2]]');
     expect(ev.type.toString()).toBe('matrix<finite_integer^(2x2)>');
-    // KNOWN GAP (pre-existing, tracked in the tensor-unification design for
-    // Phase C): the subtype checker does not bridge the dimensioned
-    // (`matrix<E^2x2>`) and nested (`list<vector<2>>`) encodings, so
-    // `evaluated ⊆ declared` cannot yet be asserted across them.
+    // The subtype encoding bridge (tensor-unification Phase C): a
+    // dimensioned rank-2 list IS a list of fixed-length vectors, so
+    // `evaluated ⊆ declared` holds across the two encodings.
+    expect(ev.type.matches(app.type.type)).toBe(true);
   });
 
   test('Tycho 19.2 chain: broadcastable argument flows through an application', () => {
