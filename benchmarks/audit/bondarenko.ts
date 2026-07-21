@@ -36,6 +36,14 @@ const WOLFRAM_BATCH = join(__dirname, '..', 'runners', 'run_wolfram_batch.mjs');
 // leads with points inside (0,1).
 const POINTS = [0.13, 0.35, 0.7, 1.3, 2.1, 3.4];
 const TOL = 1e-6;
+// Finite-difference fallback step and tolerance: `D` of some special functions
+// (PolyLog, elliptic kernels) doesn't numericize even when F itself does, so
+// those sample points fall back to a central difference of F. h = 1e-4
+// balances O(h²) truncation against float64 cancellation in F(p±h); the
+// looser per-point tolerance absorbs the O(h²) error while still catching
+// wrong antiderivatives (off by sign / magnitude, not by 1e-5).
+const FD_H = 1e-4;
+const FD_TOL = 1e-4;
 
 const CONSTS: Record<string, string> = { Pi: 'pi', ExponentialE: 'E', ImaginaryUnit: 'I', EulerGamma: 'EulerGamma' };
 
@@ -131,7 +139,15 @@ function runOn(engine: any, c: Case) {
     const F = build();
     if (F == null || F.operator === 'Integrate' || /\bint\(/.test(F.toString())) return { status: 'unsolved', text: F ? F.toString() : 'null', values: [], timeMs };
     const dF = engine.expr(['D', F, c.varName]).evaluate();
-    return { status: 'ok', text: F.toString(), values: POINTS.map((p) => numAt(engine, dF, c.varName, p)), timeMs };
+    const values: (number | null)[] = [], fd: boolean[] = [];
+    for (const p of POINTS) {
+      const v = numAt(engine, dF, c.varName, p);
+      if (v != null) { values.push(v); fd.push(false); continue; }
+      const hi = numAt(engine, F, c.varName, p + FD_H), lo = numAt(engine, F, c.varName, p - FD_H);
+      values.push(hi == null || lo == null ? null : (hi - lo) / (2 * FD_H));
+      fd.push(true);
+    }
+    return { status: 'ok', text: F.toString(), values, fd, timeMs };
   } catch (e: any) { return { status: 'error', error: String(e?.message ?? e).slice(0, 120) }; }
 }
 
@@ -152,12 +168,20 @@ function runSymPy(): Record<string, any> {
     console.error('SymPy %d/%d', ++n, cases.length);
     const task = [{ id: c.id, op: 'integrate', expr: c.sympyExpr, var: c.varName, points: POINTS }];
     writeFileSync(tmp, JSON.stringify(task));
-    try {
-      const out = execFileSync(PYTHON, [join(__dirname, 'run_sympy_wester.py'), tmp], { encoding: 'utf8', timeout: SYMPY_TASK_TIMEOUT_MS });
-      for (const line of out.trim().split('\n')) { try { const o = JSON.parse(line); if (o.id) by[o.id] = o; } catch {} }
-    } catch (e: any) {
-      const isTimeout = e.killed || e.code === 'ETIMEDOUT';
-      by[c.id] = isTimeout ? { status: 'unsolved', text: 'timeout', values: [] } : { status: 'error', error: (e.message || String(e)).split('\n')[0].slice(0, 120) };
+    // Retry a timed-out task once: a transient machine stall otherwise records
+    // a solvable case as unsolved (observed: 5 spurious timeouts in one run,
+    // all ≤3s when replayed solo). A genuine hang costs 2× the cap, still
+    // bounded per case.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const out = execFileSync(PYTHON, [join(__dirname, 'run_sympy_wester.py'), tmp], { encoding: 'utf8', timeout: SYMPY_TASK_TIMEOUT_MS });
+        for (const line of out.trim().split('\n')) { try { const o = JSON.parse(line); if (o.id) by[o.id] = o; } catch {} }
+        break;
+      } catch (e: any) {
+        const isTimeout = e.killed || e.code === 'ETIMEDOUT';
+        if (isTimeout && attempt === 0) { console.error('  timeout, retrying %s', c.id); continue; }
+        by[c.id] = isTimeout ? { status: 'unsolved', text: 'timeout', values: [] } : { status: 'error', error: (e.message || String(e)).split('\n')[0].slice(0, 120) };
+      }
     }
   }
   return by;
@@ -198,7 +222,8 @@ function grade(c: Case, ref: (number | null)[], res: any) {
     const r = ref[i], g = res.values?.[i];
     if (r == null || g == null || !isFinite(r) || !isFinite(g)) continue;
     valid++;
-    if (Math.abs(g - r) <= TOL * (1 + Math.abs(r)) + 1e-9) ok++;
+    const tol = res.fd?.[i] ? FD_TOL : TOL; // finite-diff points carry O(h²) error
+    if (Math.abs(g - r) <= tol * (1 + Math.abs(r)) + 1e-9) ok++;
   }
   if (valid < minValid) return { v: 'inconclusive' };
   if (ok < valid) return { v: 'wrong' };
@@ -242,7 +267,9 @@ w("Vladimir Bondarenko's 35 integration problems — an independent test set fro
   '[MathematicaSyntaxTestSuite](https://github.com/RuleBasedIntegration/MathematicaSyntaxTestSuite) (MIT), vendored under ' +
   '`benchmarks/bondarenko/`. These are hard nested-radical / log / transcendental integrands. Each indefinite integral is ' +
   'graded by the operation invariant **`d/dx(F) ≈ f`** sampled numerically (per-point relative tolerance ' +
-  `${TOL}, ≥2 valid points required), so the suite's optimal antiderivatives aren't needed. ` +
+  `${TOL}, ≥2 valid points required), so the suite's optimal antiderivatives aren't needed. Where the symbolic ` +
+  'derivative of a CE result doesn\'t numericize (PolyLog, elliptic kernels), the point falls back to a central ' +
+  `finite difference of \`F\` itself (relative tolerance ${FD_TOL}). ` +
   '✅ correct · ❌ wrong · ∅ not solved · ⚠️ error · · inconclusive (domain).');
 w();
 w('## Summary');
