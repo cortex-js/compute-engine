@@ -10,18 +10,19 @@ import { ComputeEngine } from '../../src/compute-engine';
  * subscript `At` serializer (T3).
  */
 
+// §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('T1 — relational operators broadcast over lists', () => {
   const ce = new ComputeEngine();
 
   test('literal list > scalar (box form) broadcasts to a boolean list', () => {
     const expr = ce.box(['Greater', ['List', -1, 2, -3], 0]);
-    expect(expr.type.toString()).toBe('list<boolean>');
+    expect(expr.type.toString()).toBe('list<boolean^3>');
     expect(expr.evaluate().toString()).toBe('["False","True","False"]');
   });
 
   test('parsed list > scalar (tensor-boxed) broadcasts to a boolean list', () => {
     const expr = ce.parse('[-1,2,-3]>0');
-    expect(expr.type.toString()).toBe('list<boolean>');
+    expect(expr.type.toString()).toBe('list<boolean^3>');
     expect(expr.evaluate().toString()).toBe('["False","True","False"]');
   });
 
@@ -68,12 +69,13 @@ describe('T1 — relational operators broadcast over lists', () => {
   });
 });
 
+// §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('T1 — Equal/NotEqual: list-vs-scalar broadcasts, list-vs-list stays scalar', () => {
   const ce = new ComputeEngine();
 
   test('Equal(list, scalar) broadcasts (Desmos d=4)', () => {
     const expr = ce.box(['Equal', ['List', 1, 4, 4], 4]);
-    expect(expr.type.toString()).toBe('list<boolean>');
+    expect(expr.type.toString()).toBe('list<boolean^3>');
     expect(expr.evaluate().toString()).toBe('["False","True","True"]');
   });
 

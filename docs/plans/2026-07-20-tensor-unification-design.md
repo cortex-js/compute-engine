@@ -369,10 +369,14 @@ and get the same treatment. Consequence: `Determinant(Sqrt(M))` with
 all fixed-shape sources, which is the common case.
 
 **D6.2 — Overlap-deferred validation.** For the residue where the operand's
-static type genuinely underdetermines conformance (e.g. `Determinant(xs)`
-with `xs: list<number>` of unknown length — could be a flat vector or,
-post-evaluation, never a matrix), signature validation gains a three-way
-outcome:
+static type genuinely underdetermines conformance. *(Corrected during
+implementation, 2026-07-21: the overlap zone is narrower than earlier
+revisions implied — `xs: list<number>` is provably rank-1 with **number**
+elements, disjoint from `matrix` (whose elements are rows), so it correctly
+keeps erroring at canonicalization. The genuine zone: operands typed bare
+`list`/`collection`, `list<unknown>`/`list<any>`, `broadcastable<R>` (the
+rank-unknowable case §D6.1 identifies), and rank-compatible nested lists
+with compatible leaves.)* Signature validation gains a three-way outcome:
 
 - **provably incompatible** (empty meet with the parameter type) → Error at
   canonicalization, exactly as today (`Determinant("abc")`,
@@ -383,42 +387,42 @@ outcome:
   re-validated against its **evaluated** value at evaluate entry, failing
   with the same `incompatible-type` error there.
 
-**Mechanization** (review R3-3/R3-5/R3-6 — the machinery this must actually
-land in):
+**Mechanization** (review R3-3/R3-5/R3-6; **as-built 2026-07-21**, one
+deliberate simplification vs. revision 4 noted below):
 
-- **Overlap primitive**: `common/type/reduce.ts`'s `meet2` is
-  module-private and partial. Export a specified `overlaps(a, b)` (or a
-  completed, exported meet) covering: primitives, lists in **both** the
-  dimensioned and nested encodings (related to `matrix`/`vector` wildcard
-  dims), unions/intersections (arm-wise), references (dereferenced), and
-  `broadcastable<T>` — whose collection alternative **does** participate in
-  deferral (it is precisely the rank-unknowable case D6.1 identifies; the
-  "collection-kind only" restriction is on the *parameter*, not the
-  operand).
-- **Scope**: the three-way outcome lands in the fixed-arity
-  `.matches(param)` gates of `validate.ts` (required/optional/variadic
-  param blocks) used by the `Determinant`/`Inverse`/`MatrixMultiply`-class
-  signatures. `checkNumericArgs` is **out of scope** — its operator class
-  (variadic threadable arithmetic) is covered by generic broadcast and the
-  deliberately-lenient gate ruling (§D4.3, validate row).
-- **Marking + re-check point**: a provisionally-accepted operand is
-  recorded on the canonical `BoxedFunction` (the unmet parameter type,
-  alongside the existing validation state); the re-check runs at
-  **evaluate entry** in `_computeValue` (the single choke point through
-  which `evaluate()`/`evaluateAsync()`/`.N()` all pass — behavior is
-  identical across all three), against the **once-evaluated** operand,
-  which is then reused by the handler (never re-evaluated).
-- **Still-undetermined outcome**: if the evaluated operand is *still* only
-  overlap-compatible (an unassigned symbol evaluating to itself, a lazy
-  collection), the expression stays **inert** — unevaluated, no error;
-  same posture as any symbolic operand today.
-- **Handler precedence** (review R3-6): operators with their own runtime
-  shape guards (`Determinant`/`Inverse` already emit
-  `expected-square-matrix` for the non-square case) keep them, and they
-  take precedence — the generic re-check covers conformance the handler
-  doesn't itself check, so the error identifier for an evaluated non-square
-  operand remains the more specific `expected-square-matrix`, not
-  order-dependent.
+- **Overlap primitive**: `overlapsForDeferredValidation(t, param)` in
+  `common/type/utils.ts` — **refutation-based** rather than a general
+  type-meet (a completed exported meet was not needed): it returns `true`
+  unless the operand's static type *refutes* conformance. Refutations:
+  non-collection-like operand; both ranks statically known and different
+  (`staticCollectionDims`, wildcard-tolerant, both encodings); both leaf
+  element types known and disjoint. `broadcastable<T>` participates (open
+  rank, leaf-checked); the collection-kind restriction is on the
+  *parameter*.
+- **Scope**: applied at all four `.matches` gates — `validateArguments`'s
+  required/optional/variadic param blocks and `checkType` — after the
+  repair/devolve attempts, before the `typeError`. `checkNumericArgs` is
+  untouched (its operator class is covered by generic broadcast and the
+  deliberately-lenient gate ruling, §D4.3).
+- **No marking / no generic evaluate-entry re-check** (simplification vs.
+  revision 4): every collection-param operator in the current inventory
+  (the linear-algebra family) already gates its evaluate handler on
+  `isTensor` + its own shape checks, declining nonconforming operands
+  (inert) or emitting its specific error (`expected-square-matrix`). Under
+  the handler-precedence rule those gates would take priority over a
+  generic re-check anyway, making the generic mechanism dead weight for
+  every existing operator — so the handler gates ARE the runtime
+  re-validation, and the marking machinery is deferred until an unguarded
+  collection-param operator exists (adding one without a runtime gate is
+  now a checklist item for the "Adding a New Operator" recipe).
+  Verified behavior: `Determinant(bl)` with `bl: list` canonicalizes,
+  stays inert while `bl` is unassigned, evaluates once `bl` holds a square
+  matrix, and yields `expected-square-matrix` for a non-square value —
+  identical across `evaluate()`/`.N()` (both flow through the same
+  handler).
+- **Still-undetermined outcome**: an operand that evaluates to something
+  still only overlap-compatible leaves the expression **inert** —
+  unevaluated, no error; same posture as any symbolic operand today.
 
 **Diagnostics timing note** (CHANGELOG + Tycho callout): expressions in the
 overlap zone stop erroring at parse time and error (or succeed) at evaluate
@@ -459,8 +463,11 @@ re-validation.
 *Gate*: `Determinant(Sqrt(M))` and `MatrixMultiply(Sqrt(M), Sqrt(M))`
 (`M = [[2,3],[5,7]]`) **canonicalize without `incompatible-type`** and their
 static types are asserted (`Sqrt(M): list<finite_number^2x2>`); deferral
-case `Determinant(xs)`, `xs: list<number>` undeclared length, canonicalizes
-provisionally and errors at evaluate when `xs` evaluates non-square;
+case `Determinant(bl)`, `bl: list` (bare), canonicalizes provisionally,
+stays inert unassigned, evaluates for a square value, and yields the
+handler's `expected-square-matrix` for a non-square value — while
+`Determinant(xs)`, `xs: list<number>`, still errors at canonicalization
+(provable rank refutation, see the D6.2 correction);
 provably-wrong operands still error at canonicalization (the R2-1 table);
 mixed-shape n-ary fixture `Greater(matrix<2x2>, vector<3>)` types
 `list<boolean>` (no dims invented); static-type churn audit over broadcast
@@ -468,7 +475,14 @@ applications with fixed-shape operands; full suite. *(Note: `Determinant(Sqrt(M)
 **evaluate** until Phase C lands — Phase B's gate is canonical validity and
 types, Phase C's is the value.)*
 
-**Phase C — lazy view + representation unification.** D2 caches/levels;
+**Phase C — lazy view + representation unification.** Also in scope
+(surfaced by the Phase B review): the **subtype encoding bridge** — the
+checker does not relate the dimensioned (`matrix<E^2x2>`) and nested
+(`list<vector<2>>`) list encodings, though they describe the same values;
+`evaluated ⊆ declared` therefore cannot be asserted for collection-valued
+lambda broadcasts (pinned as a known gap in `broadcastable-typing.test.ts`).
+Bridging (peel one dimension, recurse) belongs with the representation
+unification. D2 caches/levels;
 D4.1 single `isTensor`; migrate every D4.3 row; metadata forwarding (D1);
 stop constructing `BoxedTensor`; delete the class; remove
 `expressionTensorInfo` + `CONTAINER_OPERATORS`; update `ARCHITECTURE.md`

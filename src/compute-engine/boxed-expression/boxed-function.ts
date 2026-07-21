@@ -57,6 +57,7 @@ import { NUMERIC_TYPES } from '../../common/type/primitive.js';
 import {
   broadcastElementType,
   broadcastResultType,
+  broadcastShapedResultType,
   functionResult,
   isSignatureType,
   narrow,
@@ -2347,15 +2348,23 @@ function type(expr: BoxedFunction): Type {
             (typeof sigResult !== 'string' &&
               sigResult.kind === 'union' &&
               sigResult.types.some((m) => isSubtype(m, 'collection'))));
-        if (
-          expr.ops.some(
-            (x) =>
-              (isFiniteIndexedCollection(x) && !isTuple(x)) ||
-              isBroadcastCollectionType(x) ||
-              (!deferToHandler && isFixedShapeCollection(x))
-          )
-        )
-          return broadcastResultType(broadcastElementType(sigResult));
+        const broadcastingOps = expr.ops.filter(
+          (x) =>
+            (isFiniteIndexedCollection(x) && !isTuple(x)) ||
+            isBroadcastCollectionType(x) ||
+            (!deferToHandler && isFixedShapeCollection(x))
+        );
+        if (broadcastingOps.length > 0)
+          // Rank/shape-aware lift (§D6.1): mirror the operands'
+          // statically-provable structure — `Sqrt(M)` with `M: matrix<2x2>`
+          // types `list<finite_number^2x2>`, statically compatible with
+          // `matrix` signature parameters. Falls back to the plain unbounded
+          // `list<E>` whenever the shape is not provable from every
+          // broadcasting operand (see `broadcastShapedResultType`).
+          return broadcastShapedResultType(
+            broadcastingOps.map((x) => x.type.type),
+            broadcastElementType(sigResult)
+          );
 
         // Arm 2 (possibly-collection, step 2 phase C). No operand is a
         // statically-visible collection, but some operand's collection-ness is
@@ -2415,8 +2424,29 @@ function type(expr: BoxedFunction): Type {
       // verbatim — NOT `broadcastElementType(sigResult)`, which would unwrap a
       // collection-valued return and mis-type `f([1, 2])` as `list<number>`
       // instead of `list<list<number>>`.
-      if (expr.ops.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)))
-        return broadcastResultType(sigResult);
+      {
+        const mapped = expr.ops.filter(
+          (x) => isFiniteIndexedCollection(x) && !isTuple(x)
+        );
+        if (mapped.length > 0) {
+          // A collection-valued per-element result keeps the plain nested
+          // lift (`f := x ↦ [x,-x]` over `[1,2]` → `list<vector<2>>`):
+          // installing the collection result as the element of a dimensioned
+          // list mixes encodings and breaks `evaluated ⊆ declared` (the
+          // value is a rank-2 tensor with scalar leaves).
+          const collectionValued =
+            isSubtype(sigResult, 'collection') ||
+            (typeof sigResult !== 'string' &&
+              sigResult.kind === 'union' &&
+              sigResult.types.some((m) => isSubtype(m, 'collection')));
+          if (collectionValued) return broadcastResultType(sigResult);
+          // Shape-aware (§D6.1): the map preserves the source's structure.
+          return broadcastShapedResultType(
+            mapped.map((x) => x.type.type),
+            sigResult
+          );
+        }
+      }
       if (expr.ops.some((x) => isPossiblyCollectionTyped(x)))
         return {
           kind: 'broadcastable',
@@ -2453,8 +2483,25 @@ function type(expr: BoxedFunction): Type {
       // (see the operator-def lambda site above): use `sigResult` verbatim so a
       // collection-valued return types as `list<list<…>>` rather than being
       // flattened by `broadcastElementType`.
-      if (expr.ops.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)))
-        return broadcastResultType(sigResult);
+      {
+        const mapped = expr.ops.filter(
+          (x) => isFiniteIndexedCollection(x) && !isTuple(x)
+        );
+        // Shape-aware (§D6.1), as at the operator-def lambda site above —
+        // including the collection-valued-result exception.
+        if (mapped.length > 0) {
+          const collectionValued =
+            isSubtype(sigResult, 'collection') ||
+            (typeof sigResult !== 'string' &&
+              sigResult.kind === 'union' &&
+              sigResult.types.some((m) => isSubtype(m, 'collection')));
+          if (collectionValued) return broadcastResultType(sigResult);
+          return broadcastShapedResultType(
+            mapped.map((x) => x.type.type),
+            sigResult
+          );
+        }
+      }
       if (expr.ops.some((x) => isPossiblyCollectionTyped(x)))
         return {
           kind: 'broadcastable',

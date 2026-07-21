@@ -15,10 +15,10 @@ import type { BoxedExpression } from '../../src/compute-engine/global-types';
  *   equals the evaluated type.
  * - Every other broadcastable operator over a collection (trig, log, special
  *   functions, `Negate`, logic, …) is lifted centrally in `boxed-function.ts`
- *   `type()` to an (unbounded) `list<R>`. The value path materializes a plain
- *   `List`, whose own type handler is also `list<…>` (it drops the fixed
- *   length), so `list<R>` is the consistent, sound upper bound of the
- *   evaluated type.
+ *   `type()` to a `list<R>`. Since §D6.1 (rank/shape-aware broadcast lift),
+ *   a shape-known operand carries its dimension through: the declared type is
+ *   the dimensioned `list<R^n>` (displayed `vector<R^n>` when R is `number`),
+ *   which equals the evaluated type.
  */
 
 const ce = new ComputeEngine();
@@ -89,37 +89,37 @@ describe('LIST-BROADCAST TYPING — tensor Add/Multiply (exact vector<n>)', () =
   });
 });
 
+// §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('LIST-BROADCAST TYPING — wrapper-lifted families (sound list<R>)', () => {
   // For each: `.type` is a list (not a scalar), and the evaluated type is a
   // subtype of (or equal to) the declared type.
   test.each([
-    ['Sin', ['Sin', ['List', 0, 1]], 'list<finite_number>'],
-    ['Cos', ['Cos', ['List', 0, 1]], 'list<finite_number>'],
-    ['Tan', ['Tan', ['List', 0, 1]], 'list<number>'],
-    ['Exp', ['Exp', ['List', 0, 1]], 'list<finite_number>'],
-    ['Ln', ['Ln', ['List', 1, 2]], 'list<finite_number>'],
-    ['Sqrt', ['Sqrt', ['List', 4, 9]], 'list<finite_number>'],
-    ['Gamma (special fn)', ['Gamma', ['List', 1, 2]], 'list<finite_number>'],
-    ['Abs', ['Abs', ['List', -1, 2]], 'list<real>'],
-    ['Negate', ['Negate', ['List', 'a', 'b']], 'list<number>'],
-    ['Real (complex)', ['Real', ['List', 2, 3]], 'list<finite_real>'],
-    ['Conjugate (complex)', ['Conjugate', ['List', 2, 3]], 'list<number>'],
-    ['Round', ['Round', ['List', 1.2, 2.7]], 'list<finite_integer>'],
+    ['Sin', ['Sin', ['List', 0, 1]], 'vector<finite_number^2>'],
+    ['Cos', ['Cos', ['List', 0, 1]], 'vector<finite_number^2>'],
+    ['Tan', ['Tan', ['List', 0, 1]], 'vector<2>'],
+    ['Exp', ['Exp', ['List', 0, 1]], 'vector<finite_number^2>'],
+    ['Ln', ['Ln', ['List', 1, 2]], 'vector<finite_number^2>'],
+    ['Sqrt', ['Sqrt', ['List', 4, 9]], 'vector<finite_number^2>'],
+    ['Gamma (special fn)', ['Gamma', ['List', 1, 2]], 'vector<finite_number^2>'],
+    ['Abs', ['Abs', ['List', -1, 2]], 'vector<real^2>'],
+    ['Negate', ['Negate', ['List', 'a', 'b']], 'vector<2>'],
+    ['Real (complex)', ['Real', ['List', 2, 3]], 'vector<finite_real^2>'],
+    ['Conjugate (complex)', ['Conjugate', ['List', 2, 3]], 'vector<2>'],
+    ['Round', ['Round', ['List', 1.2, 2.7]], 'vector<finite_integer^2>'],
   ])('%s → %s', (_label, mathjson, expected) => {
     const expr = ce.box(mathjson as any);
     expect(expr.type.toString()).toBe(expected);
     expectHonestBroadcast(expr);
   });
 
-  test('Round(List) evaluated type is a shaped subtype of the declared type', () => {
-    // Since honest List typing (tensor-unification Phase A), an evaluated
-    // literal list gains its shape: declared stays the sound unbounded
-    // `list<finite_integer>`, the evaluated value types
-    // `list<finite_integer^2>` — a strict subtype (the broadcast contract
-    // `evaluated ⊆ declared` still holds, and is what this test guards).
+  test('Round(List) evaluated type equals the declared (dimensioned) type', () => {
+    // Since §D6.1 (rank/shape-aware broadcast lift), a shape-known operand's
+    // declared type already carries its dimension: `vector<finite_integer^2>`,
+    // equal to the evaluated type (the broadcast contract `evaluated ⊆
+    // declared` still holds, now as equality, and is what this test guards).
     const expr = ce.box(['Round', ['List', 1.2, 2.7]]);
     const evaluated = expr.evaluate();
-    expect(expr.type.toString()).toBe('list<finite_integer>');
+    expect(expr.type.toString()).toBe('vector<finite_integer^2>');
     expect(evaluated.type.toString()).toBe('vector<finite_integer^2>');
     expect(evaluated.type.matches(expr.type.type)).toBe(true);
   });
@@ -130,6 +130,7 @@ describe('LIST-BROADCAST TYPING — wrapper-lifted families (sound list<R>)', ()
   });
 });
 
+// §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('LIST-BROADCAST TYPING — logic broadcast (list<boolean>)', () => {
   // Relational operators (Less/Greater/…) are NOT broadcastable yet — the
   // `list<boolean>` assertion for those belongs to the follow-on
@@ -142,10 +143,9 @@ describe('LIST-BROADCAST TYPING — logic broadcast (list<boolean>)', () => {
     ['Or(List, False)', ['Or', ['List', 'True', 'False'], 'False']],
   ])('%s → list<boolean>', (_label, mathjson) => {
     const expr = ce.box(mathjson as any);
-    expect(expr.type.toString()).toBe('list<boolean>');
-    // Evaluated literal lists gain their shape (tensor-unification Phase A):
-    // `list<boolean^2>` ⊆ the declared `list<boolean>` — the broadcast
-    // contract `evaluated ⊆ declared` is what this asserts.
+    expect(expr.type.toString()).toBe('list<boolean^2>');
+    // The declared type already carries the operand's shape (§D6.1): the
+    // evaluated type equals the declared `list<boolean^2>` exactly.
     const evaluated = expr.evaluate();
     expect(evaluated.type.toString()).toBe('list<boolean^2>');
     expect(evaluated.type.matches(expr.type.type)).toBe(true);

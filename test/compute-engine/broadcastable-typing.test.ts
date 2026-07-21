@@ -164,6 +164,7 @@ describe('broadcastable<T> typing (phase B)', () => {
  * collection-ness is not statically visible (`isPossiblyCollectionTyped`). This
  * covers all such operators without touching their per-operator handlers.
  */
+// §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
   // `h(x)` in LaTeX with an undeclared `h` parses as multiplication; declare it
   // as an unknown-return call so the operand is possibly-collection typed.
@@ -179,7 +180,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     // wrapper's visible triggers — `Sin` collapsed to scalar `number`, every
     // later hop stayed scalar, and `At` hard-rejected a provably-list base.
     // The `isFixedShapeCollection` trigger lifts it: each hop types
-    // `list<number>` and `At` over the end state is valid.
+    // `vector<3>` and `At` over the end state is valid.
     const ce = new ComputeEngine();
     const L = ['List', 1, 2, 3];
     const probe = ce.box([
@@ -187,7 +188,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
       ['Multiply', 2, ['Mod', ['Multiply', 10000, ['Sin', ['Multiply', 10000, L]]], 1]],
       1,
     ]);
-    expect(probe.type.toString()).toBe('list<number>');
+    expect(probe.type.toString()).toBe('vector<3>');
     const at = ce.box(['At', probe.json, 1]);
     expect(at.isValid).toBe(true);
   });
@@ -205,7 +206,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     expect(eq.type.toString()).toBe('boolean');
     expect(eq.evaluate().toString()).toBe('"False"');
     expect(ce.box(['NotEqual', v1, v2]).type.toString()).toBe('boolean');
-    expect(ce.box(['Equal', v1, 5]).type.toString()).toBe('list<boolean>');
+    expect(ce.box(['Equal', v1, 5]).type.toString()).toBe('list<boolean^3>');
   });
 
   test('a widen-produced scalar|collection union is repaired to a definite list', () => {
@@ -217,7 +218,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     const ce = new ComputeEngine();
     const v1 = ['Multiply', 10000, ['List', 1, 2, 3]];
     const rem = ce.box(['Remainder', v1, 7]);
-    expect(rem.type.toString()).toBe('list<number>');
+    expect(rem.type.toString()).toBe('vector<3>');
     expect(rem.evaluate().operator).toBe('List');
   });
 
@@ -233,6 +234,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     expect(ce.box(['Abs', arg]).type.toString()).toBe('broadcastable<real>');
   });
 
+  // §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
   test('priority: a statically-visible collection operand still types list<…>', () => {
     const ce = mkEngine();
     // The statically-visible arm keeps priority: a concrete list/Range operand
@@ -241,7 +243,7 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
       'list<number>'
     );
     expect(ce.box(['Sin', ['List', 0, 1]]).type.toString()).toBe(
-      'list<finite_number>'
+      'vector<finite_number^2>'
     );
   });
 
@@ -286,13 +288,14 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
  * these cases build the possibly-collection argument via box form or a
  * declared `h`.
  */
+// §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('broadcastable<T> typing (phase E — application-site typing)', () => {
   test('scalar-param lambda applied to a List types list<E>, agreeing with the value', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto 2x'));
     const app = ce.box(['g', ['List', 1, 2, 3]]);
     // Honest element per g's return (`2x` body → finite_number).
-    expect(app.type.toString()).toBe('list<finite_number>');
+    expect(app.type.toString()).toBe('vector<finite_number^3>');
     // Type and value agree: evaluation broadcasts to a List.
     expect(app.evaluate().toString()).toBe('[2,4,6]');
   });
@@ -342,11 +345,21 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     // over a list types as a list OF that return type — not its unwrapped
     // scalar element (`broadcastElementType` would have flattened it to
     // `list<number>`).
+    // A collection-valued per-element result keeps the plain NESTED lift —
+    // no outer dimensions (§D6.1 exception): the evaluated value is a
+    // rank-2 tensor with scalar leaves, and installing `vector<2>` as the
+    // element of a dimensioned list would break `evaluated ⊆ declared`.
     const ce = new ComputeEngine();
     ce.assign('f', ce.parse('x \\mapsto \\lbrack x, -x \\rbrack'));
     const app = ce.box(['f', ['List', 1, 2]]);
     expect(app.type.toString()).toBe('list<vector<2>>');
-    expect(app.evaluate().toString()).toBe('[[1,-1],[2,-2]]');
+    const ev = app.evaluate();
+    expect(ev.toString()).toBe('[[1,-1],[2,-2]]');
+    expect(ev.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    // KNOWN GAP (pre-existing, tracked in the tensor-unification design for
+    // Phase C): the subtype checker does not bridge the dimensioned
+    // (`matrix<E^2x2>`) and nested (`list<vector<2>>`) encodings, so
+    // `evaluated ⊆ declared` cannot yet be asserted across them.
   });
 
   test('Tycho 19.2 chain: broadcastable argument flows through an application', () => {
@@ -498,6 +511,7 @@ describe('post-evaluation lambda broadcast', () => {
   });
 });
 
+// §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('fixed-shape vs generic-collection broadcast typing', () => {
   test('vector<1>-typed operand: broadcastable op types list<…>', () => {
     const ce = new ComputeEngine();
@@ -506,7 +520,7 @@ describe('fixed-shape vs generic-collection broadcast typing', () => {
     // honest type is a definite `list<…>` (arm 1, `isFixedShapeCollection`).
     ce.declare('v', 'vector<1>');
     expect(ce.box(['Sin', ['Multiply', 2, 'v']]).type.toString()).toBe(
-      'list<number>'
+      'vector<1>'
     );
   });
 

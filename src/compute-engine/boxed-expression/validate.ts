@@ -7,7 +7,10 @@ import {
 
 import { flatten } from './flatten.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { couldBeNonRealNumber } from '../../common/type/utils.js';
+import {
+  couldBeNonRealNumber,
+  overlapsForDeferredValidation,
+} from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { Type } from '../../common/type/types.js';
 import type {
@@ -442,6 +445,9 @@ export function checkType(
   // Broadcastable operand: could be a plain scalar at runtime, admit it.
   if (broadcastableBaseMatches(arg.type.type, type)) return arg;
 
+  // Overlap-deferred validation (§D6.2) — see validateArguments.
+  if (overlapsForDeferredValidation(arg.type.type, type)) return arg;
+
   return ce.typeError(type, arg.type, arg);
 }
 
@@ -540,6 +546,13 @@ export function validateArguments(
   // `N := 11` was invisible to the expression).
   let substituted = false;
 
+  // Positions accepted via overlap-deferred validation (§D6.2): acceptance
+  // is an unrefuted possibility, not a proof, so these positions are
+  // excluded from the final `infer(param)` narrowing below — narrowing an
+  // inferred symbol to `matrix` on the strength of a guess would
+  // over-constrain unrelated later uses.
+  const deferredIdx = new Set<number>();
+
   const params = signature.args?.map((x) => x.type) ?? [];
   const optParams = signature.optArgs?.map((x) => x.type) ?? [];
   const varParam = signature.variadicArg?.type;
@@ -623,6 +636,18 @@ export function validateArguments(
         substituted = true;
         continue;
       }
+      // Overlap-deferred validation (§D6.2): a collection-kind parameter and
+      // an operand whose static type does not REFUTE conformance (bare
+      // `list`, unknown elements, `broadcastable<R>`, rank-compatible
+      // nested lists) is accepted provisionally; runtime conformance is the
+      // operator's own evaluate-time gate (handler precedence — a
+      // nonconforming or still-symbolic operand stays inert or gets the
+      // handler's specific error, e.g. `expected-square-matrix`).
+      if (overlapsForDeferredValidation(op.type.type, param)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        continue;
+      }
       result.push(ce.typeError(param, op.type, op));
       isValid = false;
       continue;
@@ -682,6 +707,13 @@ export function validateArguments(
       continue;
     }
     if (!op.type.matches(param)) {
+      // Overlap-deferred validation (§D6.2) — see the required-param gate.
+      if (overlapsForDeferredValidation(op.type.type, param)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        i += 1;
+        continue;
+      }
       result.push(ce.typeError(param, op.type, op));
       isValid = false;
       i += 1;
@@ -738,6 +770,12 @@ export function validateArguments(
         continue;
       }
       if (!op.type.matches(varParam)) {
+        // Overlap-deferred validation (§D6.2) — see the required-param gate.
+        if (overlapsForDeferredValidation(op.type.type, varParam)) {
+          result.push(op);
+          deferredIdx.add(result.length - 1);
+          continue;
+        }
         result.push(ce.typeError(varParam, op.type, op));
         isValid = false;
         continue;
@@ -770,21 +808,21 @@ export function validateArguments(
   const finalOps = substituted ? result : ops;
   i = 0;
   for (const param of params) {
-    if (!lazy)
+    if (!lazy && !deferredIdx.has(i))
       if (!threadable || !couldBeCollectionOperand(finalOps[i]))
         finalOps[i].infer(param);
     i += 1;
   }
   for (const param of optParams) {
     if (!finalOps[i]) break;
-    if (!lazy)
+    if (!lazy && !deferredIdx.has(i))
       if (!threadable || !couldBeCollectionOperand(finalOps[i]))
         finalOps[i].infer(param);
     i += 1;
   }
   if (varParam) {
     for (const op of finalOps.slice(i)) {
-      if (!lazy)
+      if (!lazy && !deferredIdx.has(i))
         if (!threadable || !couldBeCollectionOperand(op)) op.infer(varParam);
       i += 1;
     }

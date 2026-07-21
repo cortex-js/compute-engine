@@ -1439,12 +1439,13 @@ describe('POINT/TUPLE ARITHMETIC — could-be-numeric elements match the validat
     expect(p.isValid).toBe(true);
   });
 
+  // §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
   test('point-list component (scaled list) still admitted: 2·(1, 0.3m)', () => {
     const ce = new ComputeEngine();
     ce.assign('m', ce.parse('[1,2,3]').evaluate());
     const p = ce.parse('2(1, 0.3m)');
     expect(p.operator).toBe('Multiply');
-    expect(p.type.toString()).toBe('tuple<finite_integer, list<number>>');
+    expect(p.type.toString()).toBe('tuple<finite_integer, vector<3>>');
   });
 
   test('provably non-numeric component: tuple<number, list<string>> symbol still groups as Tuple', () => {

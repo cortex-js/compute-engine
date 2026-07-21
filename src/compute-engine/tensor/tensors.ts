@@ -596,6 +596,12 @@ export abstract class AbstractTensor<
   }
 
   determinant(): undefined | DataTypeMap[DT] {
+    // Boolean tensors have no arithmetic field (`mul`/`add`/`div` are not
+    // meaningful): bail out rather than crash. Reachable since overlap-
+    // deferred validation (§D6.2) — a `list`-typed operand may evaluate to a
+    // boolean tensor; the handler then declines (inert) instead of throwing.
+    if (this.dtype === 'bool') return undefined;
+
     if (this.rank !== 2) return undefined;
     const [m, n] = this.shape;
     if (m !== n) return undefined;
@@ -666,6 +672,12 @@ export abstract class AbstractTensor<
   }
 
   inverse(): undefined | AbstractTensor<DT> {
+    // Boolean tensors have no arithmetic field (`mul`/`add`/`div` are not
+    // meaningful): bail out rather than crash. Reachable since overlap-
+    // deferred validation (§D6.2) — a `list`-typed operand may evaluate to a
+    // boolean tensor; the handler then declines (inert) instead of throwing.
+    if (this.dtype === 'bool') return undefined;
+
     if (this.rank !== 2) return undefined;
 
     // Check it's a square matrix
@@ -755,12 +767,24 @@ export abstract class AbstractTensor<
   // A^+ is the Moore-Penrose pseudoinverse of A. https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
   // Pseudoinverse can also be defined for scalars: the pseudoinverse of a scalar is its reciprocal if it is non-zero, and zero otherwise.
   pseudoInverse(): undefined | AbstractTensor<DT> {
+    // Boolean tensors have no arithmetic field (`mul`/`add`/`div` are not
+    // meaningful): bail out rather than crash. Reachable since overlap-
+    // deferred validation (§D6.2) — a `list`-typed operand may evaluate to a
+    // boolean tensor; the handler then declines (inert) instead of throwing.
+    if (this.dtype === 'bool') return undefined;
+
     // @todo tensor
     return undefined;
   }
 
   // The adjugate, classical adjoint, or adjunct of a square matrix is the transpose of its cofactor matrix. https://en.wikipedia.org/wiki/Adjugate_matrix
   adjugateMatrix(): undefined | AbstractTensor<DT> {
+    // Boolean tensors have no arithmetic field (`mul`/`add`/`div` are not
+    // meaningful): bail out rather than crash. Reachable since overlap-
+    // deferred validation (§D6.2) — a `list`-typed operand may evaluate to a
+    // boolean tensor; the handler then declines (inert) instead of throwing.
+    if (this.dtype === 'bool') return undefined;
+
     // @todo tensor
     return undefined;
   }

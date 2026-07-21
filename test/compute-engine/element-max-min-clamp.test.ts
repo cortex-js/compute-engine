@@ -57,10 +57,11 @@ describe('ElementMax / ElementMin — evaluate', () => {
   });
 });
 
+// §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('ElementMax / ElementMin — type', () => {
   test('scalar⊗collection is typed as a list', () => {
     expect(ce.box(['ElementMax', 0, ['List', 1, 2, 3]]).type.toString()).toBe(
-      'list<finite_number>'
+      'vector<finite_number^3>'
     );
   });
   test('scalar⊗scalar is a scalar type', () => {
@@ -69,7 +70,7 @@ describe('ElementMax / ElementMin — type', () => {
   test('a non-finite operand widens to number (non-finite convention)', () => {
     expect(
       ce.box(['ElementMax', ['List', 1, 2], 'PositiveInfinity']).type.toString()
-    ).toBe('list<number>');
+    ).toBe('vector<2>');
   });
 });
 

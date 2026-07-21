@@ -128,13 +128,14 @@ describe('BROADCAST LIFT Phase 1 — declared type is honest where the wrapper f
   });
 });
 
+// §D6.1 shape-aware lift: shape-known operands now yield dimensioned static types.
 describe('BROADCAST LIFT Phase 1 — eager forms unchanged', () => {
   const ce = new ComputeEngine();
 
   test('Mod([0,1,2,3,4],2) → [0,1,0,1,0]', () => {
     const e = ce.box(['Mod', ['List', 0, 1, 2, 3, 4], 2]);
     expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('list<number>');
+    expect(e.type.toString()).toBe('vector<5>');
     expect(JSON.stringify(e.evaluate().json)).toBe(
       JSON.stringify(['List', 0, 1, 0, 1, 0])
     );
