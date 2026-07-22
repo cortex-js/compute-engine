@@ -30,7 +30,6 @@ import {
   getPowerStyle,
   getRootStyle,
 } from './serializer-style.js';
-import { BoxedType } from '../../common/type/boxed-type.js';
 
 // ---------------------------------------------------------------------------
 //  Public option types
@@ -133,9 +132,8 @@ function defaultParseOptions(opts: LatexSyntaxOptions): ParseLatexOptions {
     // Standalone mode has no engine; use the same default as ComputeEngine
     tolerance: 1e-7,
 
-    // Callbacks -- standalone mode has no engine, so these are stubs
-    getSymbolType: (_id) => BoxedType.unknown,
-    hasSubscriptEvaluate: (_id) => false,
+    // Callbacks -- standalone mode has no engine: no symbol oracle (every
+    // symbol is undeclared unless a per-call `resolveSymbol` is supplied)
     parseUnexpectedToken: (_lhs, _parser) => null,
   };
 }

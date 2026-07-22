@@ -309,7 +309,7 @@ export class Serializer {
     if (def?.serialize) return def.serialize(this, expr);
 
     // It's a function without a serializer.
-    // It may have come from `getSymbolType()`
+    // It may have come from the `resolveSymbol()` handler
     // Serialize the arguments as function arguments
     const h = operator(expr);
     return serializeSymbol(h, 'auto') + this.wrapArguments(expr);

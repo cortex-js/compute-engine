@@ -2142,26 +2142,25 @@ export class ComputeEngine implements IComputeEngine {
       };
     }
 
+    // The symbol oracle: a per-call or engine-wide `resolveSymbol` handler
+    // SUPPLEMENTS the engine scope — it is consulted first (it may know
+    // about symbols the scope cannot, e.g. names a later pass will declare),
+    // and any symbol it does not resolve falls back to the scope's
+    // definitions. Wired after the spreads so the composition always wins.
+    const userResolve =
+      parseOpts.resolveSymbol ?? this._latexOptions?.resolveSymbol;
+    const resolveSymbol = userResolve
+      ? (id: MathJsonSymbol) =>
+          userResolve(id) ?? this._resolveSymbolFromScope(id)
+      : (id: MathJsonSymbol) => this._resolveSymbolFromScope(id);
+
     beginInferenceTransaction(this);
     try {
       const result = syntax.parse(latex, {
-        getSymbolType: (id) => {
-          const def = this.lookupDefinition(id);
-          if (!def) return BoxedType.unknown;
-          if (isOperatorDef(def)) return def.operator.signature;
-          if (isValueDef(def)) return def.value.type;
-          return BoxedType.unknown;
-        },
-        hasSubscriptEvaluate: (id) => {
-          const def = this.lookupDefinition(id);
-          return !!(isValueDef(def) && def.value.subscriptEvaluate);
-        },
-        // Declaration *presence* (independent of type knowledge), for the
-        // `undeclared-symbol` diagnostic predicate.
-        isSymbolDeclared: (id) => !!this.lookupDefinition(id),
         tolerance: this.tolerance,
         ...this._latexOptions,
         ...parseOpts,
+        resolveSymbol,
         // Resolved diagnostics wiring wins over both spreads.
         diagnostics: wantDiagnostics,
         onDiagnostic,
@@ -2241,6 +2240,28 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * What the current scope knows about `id`, in the shape of the parser's
+   * `resolveSymbol` oracle: `undefined` if undeclared, otherwise the
+   * definition's type (and whether it has a `subscriptEvaluate` handler).
+   * Declaration *presence* is the record's presence — a declared symbol with
+   * an `unknown` type still resolves.
+   */
+  private _resolveSymbolFromScope(
+    id: MathJsonSymbol
+  ): { type: BoxedType; subscriptEvaluate?: boolean } | undefined {
+    const def = this.lookupDefinition(id);
+    if (!def) return undefined;
+    if (isOperatorDef(def)) return { type: def.operator.signature };
+    if (isValueDef(def))
+      return {
+        type: def.value.type,
+        subscriptEvaluate: !!def.value.subscriptEvaluate,
+      };
+    // A definition of neither kind is still a declaration.
+    return { type: BoxedType.unknown };
+  }
+
+  /**
    * The symbols that appear in function-application syntax — `f(…)` — in
    * `latex` but are **not** defined as functions in the current scope, and so
    * are interpreted as implicit multiplication (`f·x`) or left unresolved.
@@ -2261,15 +2282,13 @@ export class ComputeEngine implements IComputeEngine {
   appliedNonFunctions(latex: string): string[] {
     const syntax = this.latexSyntax;
     if (!syntax) return [];
+    // Same handler-supplements-scope composition as `parse()`.
+    const userResolve = this._latexOptions?.resolveSymbol;
     const raw = syntax.parse(latex, {
-      getSymbolType: (id) => {
-        const def = this.lookupDefinition(id);
-        if (!def) return BoxedType.unknown;
-        if (isOperatorDef(def)) return def.operator.signature;
-        if (isValueDef(def)) return def.value.type;
-        return BoxedType.unknown;
-      },
       ...this._latexOptions,
+      resolveSymbol: userResolve
+        ? (id) => userResolve(id) ?? this._resolveSymbolFromScope(id)
+        : (id) => this._resolveSymbolFromScope(id),
     });
     const result = new Set<string>();
     if (raw !== null) collectAppliedNonFunctions(raw, result);

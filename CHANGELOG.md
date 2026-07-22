@@ -1,6 +1,56 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The parser's three symbol hooks are replaced by one oracle:
+  `resolveSymbol`.** The `ParseLatexOptions` handlers `getSymbolType` and
+  `hasSubscriptEvaluate` (and the internal `isSymbolDeclared`) are replaced by
+  a single optional handler:
+
+  ```js
+  resolveSymbol?: (symbol) => { type, subscriptEvaluate? } | undefined
+  ```
+
+  Return `undefined` for a symbol the handler does not know; return a record
+  (with a `BoxedType` or type-string `type`) for one it does. Declaration is
+  the *presence* of the record — `{ type: 'unknown' }` is a declared symbol of
+  unknown type — so the previously inexpressible distinction between
+  "undeclared" and "declared, type unknown" is now first-class, and
+  inconsistent answers (a typed-but-undeclared symbol) are unrepresentable.
+
+  Semantics also changed from *replace* to *supplement*: through `ce.parse()`
+  the handler is consulted first and any symbol it does not resolve falls back
+  to the engine scope's definitions. Handlers no longer need to re-implement
+  scope delegation (previously required boilerplate with `getSymbolType`):
+
+  ```js
+  // Before: vouch + hand-written scope delegation
+  getSymbolType: (id) => {
+    if (vouched(id)) return 'function';
+    const def = ce.lookupDefinition(id); // boilerplate, easy to forget
+    /* ... map def to a type ... */
+  };
+  // After: vouch only; unresolved symbols fall back to the scope
+  resolveSymbol: (id) => (vouched(id) ? { type: 'function' } : undefined);
+  ```
+
+  Similarly, the `Parser` interface (custom LaTeX dictionary entries) replaces
+  `getSymbolType()`/`hasSubscriptEvaluate()` with `parser.resolveSymbol()`,
+  e.g. `parser.getSymbolType(id).matches('function')` becomes
+  `parser.resolveSymbol(id)?.type.matches('function')`.
+
 ### Improvements
+
+- **A declared name now outranks subscript-index capture.** Once a symbol `B`
+  is bound to an indexed-collection value (a point, list, tuple…), the parser
+  reads `B_{2}` as indexing (`At(B, 2)`), which made every subscripted sibling
+  name (`B_2`, `B_3`, … alongside the point `B`) unspellable — and, since
+  `B_{2}` and `B[2]` produce identical trees, unrecoverable after the parse. A
+  subscripted spelling whose joined name is declared or assigned in scope now
+  parses as that symbol; index capture applies only to undeclared joins, and
+  bracket indexing (`B[2]`) is unaffected. Note that with the non-default
+  `indexStyle: 'subscript'` serialization, `At(B, 2)` serializes as `B_{2}`,
+  which re-parses as the symbol `B_2` when such a declaration exists.
 
 - **Rubi integration (experimental) — nested-radical substitution fallback
   (R31).** `loadIntegrationRules` now closes nested-radical and sum-of-two-radical

@@ -449,9 +449,10 @@ function describeTypeCallbackResult(value: unknown): string {
  *
  * The parser keeps track of the parsing state with a stack of symbol tables.
  *
- * In addition, the handler `getSymbolType()` is called when the parser
- * encounters an unknown symbol. This handler can be used to declare the
- * symbol, or to return `unknown` if the symbol is not known.
+ * In addition, the `resolveSymbol()` handler is consulted when the parser
+ * encounters a symbol the symbol tables don't know. It reports what the
+ * ambient environment (e.g. the engine scope) knows about the symbol, or
+ * `undefined` if the symbol is undeclared.
  *
  * Some functions affect the state of the parser:
  * - `Declare`, `Assign` modify the symbol table
@@ -605,9 +606,9 @@ export class _Parser implements Parser {
   // Cache for the speculative `parseSymbol()` performed by the
   // `symbolTrigger` path of `peekDefinitions()`. The parsed candidate
   // depends only on the (immutable) token stream, the position, and the
-  // symbol table (tracked by `_symbolTableGen` — the engine scope consulted
-  // via `options.getSymbolType`/`options.hasSubscriptEvaluate` is stable
-  // for the duration of a parse), so it can be reused across the several
+  // symbol table (tracked by `_symbolTableGen` — the ambient environment
+  // consulted via `options.resolveSymbol` is stable for the duration of a
+  // parse), so it can be reused across the several
   // `peekDefinitions()` calls made at the same position (once per kind).
   private _symbolTableGen = 0;
   private _symCandidateIndex = -1;
@@ -783,32 +784,53 @@ export class _Parser implements Parser {
   private _operandDiagnosticCheckpoint = 0;
 
   /**
-   * True if `id` resolves to a declaration — a parser-local binding tracked in
-   * `symbolTable`, or a definition in the engine scope (via the
-   * `isSymbolDeclared` hook). Declaration *presence*, not type knowledge: a
-   * symbol declared with an `unknown` type is still declared.
+   * The single symbol oracle (see {@link Parser.resolveSymbol}): parser-local
+   * bindings — sum indices, `Block`/`Function` parameters, tracked in
+   * `symbolTable` — merged over the `resolveSymbol` option handler.
+   * `undefined` means undeclared; declaration *presence* is distinct from
+   * type knowledge (a declared symbol may resolve with an `unknown` type).
    */
-  isSymbolDeclared(id: MathJsonSymbol): boolean {
+  resolveSymbol(
+    id: MathJsonSymbol
+  ): { type: BoxedType; subscriptEvaluate?: boolean } | undefined {
+    // Parser-local bindings shadow the ambient environment
     let table: SymbolTable | null = this.symbolTable;
     while (table) {
-      if (id in table.ids) return true;
+      if (id in table.ids) return { type: table.ids[id] };
       table = table.parent;
     }
-    // A declaration-presence hook (e.g. engine scope lookup) is authoritative
-    // when it reports the symbol declared, but it is not the whole story: the
-    // `getSymbolType` handler (which the parse-option handler REPLACES for
-    // typing) may know a non-`unknown` type for a symbol the presence hook does
-    // not find — Tycho's validator declares in-scope definitions purely through
-    // `getSymbolType`. Treat a known type as a declaration too, so the
-    // `undeclared-symbol` diagnostic never contradicts a resolved type.
-    if (this.options.isSymbolDeclared?.(id)) return true;
-    return !this.getSymbolType(id).isUnknown;
+
+    const info = this.options.resolveSymbol?.(id);
+    if (info === undefined || info === null) return undefined;
+
+    // Both branches carry the record's other fields (`subscriptEvaluate`)
+    // through unchanged; only `type` is normalized to a BoxedType.
+    const type = info.type;
+    if (type instanceof BoxedType)
+      return info as { type: BoxedType; subscriptEvaluate?: boolean };
+
+    if (typeof type === 'string') {
+      try {
+        return { ...info, type: new BoxedType(type) };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `ce.parse(): resolveSymbol("${id}") returned invalid type string "${type}". ${message}`
+        );
+      }
+    }
+
+    throw new Error(
+      `ce.parse(): resolveSymbol("${id}") must return a \`type\` that is a BoxedType or a type string, received ${describeTypeCallbackResult(
+        type
+      )}`
+    );
   }
 
   /**
    * Shared emission point for a symbol *reference*: records an
-   * `undeclared-symbol` diagnostic iff `id` is not declared (see
-   * {@link isSymbolDeclared}). No-op unless diagnostics are enabled. Every
+   * `undeclared-symbol` diagnostic iff `id` does not resolve (see
+   * {@link resolveSymbol}). No-op unless diagnostics are enabled. Every
    * parser path that yields a bare symbol reference routes through here so no
    * charitable interpretation escapes the diagnostic.
    */
@@ -818,10 +840,12 @@ export class _Parser implements Parser {
     endToken: number
   ): void {
     if (this.diagnostics === null) return;
-    if (!this.isSymbolDeclared(id))
+    // An unresolved symbol has, by definition, no known type: `resolveSymbol`
+    // reports a record (with a type) for every declared symbol.
+    if (this.resolveSymbol(id) === undefined)
       this.emitDiagnostic('undeclared-symbol', startToken, endToken, {
         name: id,
-        type: this.getSymbolType(id).toString(),
+        type: 'unknown',
       });
   }
 
@@ -880,49 +904,6 @@ export class _Parser implements Parser {
   }
 
   private _numberFormatTokens!: NumberFormatTokens;
-
-  getSymbolType(id: MathJsonSymbol): BoxedType {
-    // Check if the symbol is in the symbol table
-    // (which means it has been encountered as part of the current parsing)
-    let table: SymbolTable | null = this.symbolTable;
-    while (table) {
-      if (id in table.ids) return table.ids[id];
-      table = table.parent;
-    }
-
-    // Is the symbol known in the compute engine current scope?
-    if (this.options.getSymbolType) {
-      const type = this.options.getSymbolType(id);
-      if (type instanceof BoxedType) return type;
-
-      if (typeof type === 'string') {
-        try {
-          return new BoxedType(type);
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          throw new Error(
-            `ce.parse(): getSymbolType("${id}") returned invalid type string "${type}". ${message}`
-          );
-        }
-      }
-
-      throw new Error(
-        `ce.parse(): getSymbolType("${id}") must return a BoxedType or a type string, received ${describeTypeCallbackResult(
-          type
-        )}`
-      );
-    }
-
-    return BoxedType.unknown;
-  }
-
-  hasSubscriptEvaluate(id: MathJsonSymbol): boolean {
-    // Check if the symbol has a custom subscript evaluation handler
-    if (this.options.hasSubscriptEvaluate)
-      return this.options.hasSubscriptEvaluate(id);
-    return false;
-  }
 
   get peek(): LatexToken {
     const peek = this._tokens[this.index];
@@ -2456,7 +2437,7 @@ export class _Parser implements Parser {
     //
     for (const [def, tokenCount] of this.peekDefinitions('symbol')) {
       this.index = start + tokenCount;
-      // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling getSymbolType() or somethinglike it (getSymbolType() may aggressively return 'symbol'...)). Maybe not during parsing, but canonicalization
+      // @todo: should capture symbol, and check it is not in use as a symbol,  function, or inferred (calling resolveSymbol() or something like it). Maybe not during parsing, but canonicalization
       if (typeof def.parse === 'function') {
         const result = def.parse(this, until);
         if (result !== null) return result;
@@ -2469,7 +2450,7 @@ export class _Parser implements Parser {
     this.index = start;
 
     const id = parseSymbol(this);
-    if (id !== null && !this.getSymbolType(id).matches('error')) {
+    if (id !== null && !this.resolveSymbol(id)?.type.matches('error')) {
       // Diagnostic: a symbol reference that resolves to no declaration —
       // neither a parser-local binding (sum index, Block/Function parameter,
       // tracked in `symbolTable`) nor a definition in the engine scope.
@@ -3733,11 +3714,13 @@ export class _Parser implements Parser {
     // `declaredAs` keys on declaration *presence*, not type knowledge: a
     // declared-but-unknown-type symbol is a `value`, and only a truly
     // undeclared name is reported as `unknown`.
-    const declaredAs = !this.isSymbolDeclared(name)
-      ? 'unknown'
-      : this.getSymbolType(name).matches('function')
-        ? 'function'
-        : 'value';
+    const info = this.resolveSymbol(name);
+    const declaredAs =
+      info === undefined
+        ? 'unknown'
+        : info.type.matches('function')
+          ? 'function'
+          : 'value';
 
     this.emitDiagnostic(
       'juxtaposition-as-multiply',
@@ -3789,7 +3772,7 @@ export class _Parser implements Parser {
     if (id === 'D' || id === 'N') return false;
 
     // Is this a valid function symbol?
-    if (this.getSymbolType(id).matches('function')) return true;
+    if (this.resolveSymbol(id)?.type.matches('function')) return true;
 
     // This doesn't look like the expression could be the name of a function:
     // it's a number, a string, a symbol or something else.
@@ -3811,13 +3794,15 @@ export class _Parser implements Parser {
     if (!/^[A-Z]$/.test(id)) return false;
 
     // Known scope information overrides the predicate heuristic. Consult the
-    // same type query the lowercase path uses (`getSymbolType`): if the symbol
+    // same oracle the lowercase path uses (`resolveSymbol`): if the symbol
     // has a known, non-function type — an assigned value or an explicit
     // numeric/value declaration — it is a variable, so a following
-    // parenthesized group is multiplication, not a call. Only an unknown (or
-    // function-typed) symbol falls through to the predicate default.
-    const type = this.getSymbolType(id);
-    if (!type.isUnknown && !type.matches('function')) return false;
+    // parenthesized group is multiplication, not a call. Only an undeclared,
+    // unknown-typed, or function-typed symbol falls through to the predicate
+    // default.
+    const type = this.resolveSymbol(id)?.type;
+    if (type !== undefined && !type.isUnknown && !type.matches('function'))
+      return false;
 
     // Must be followed by an opening parenthesis or \left(
     this.skipSpace();

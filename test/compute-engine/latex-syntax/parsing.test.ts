@@ -44,37 +44,63 @@ describe('FUNCTIONS', () => {
     expect(parse('q(2, 1)')).toMatchInlineSnapshot(`["q", 2, 1]`));
 });
 
-describe('CUSTOM SYMBOL TYPE CALLBACK', () => {
-  test('Accept type strings from getSymbolType()', () => {
+describe('CUSTOM SYMBOL RESOLUTION CALLBACK', () => {
+  test('Accept type strings from resolveSymbol()', () => {
     expect(
       ce.parse('f(x)', {
-        getSymbolType: (symbol) => (symbol === 'f' ? 'function' : 'unknown'),
+        resolveSymbol: (symbol) =>
+          symbol === 'f' ? { type: 'function' } : undefined,
       })
     ).toMatchInlineSnapshot(`["f", "x"]`);
   });
 
-  test('Accept mixed getSymbolType() return styles', () => {
+  test('Accept mixed resolveSymbol() type styles', () => {
     expect(
       ce.parse('f(g)', {
-        getSymbolType: (symbol) => {
-          if (symbol === 'f') return 'function';
-          if (symbol === 'g') return ce.type('unknown');
-          return 'unknown';
+        resolveSymbol: (symbol) => {
+          if (symbol === 'f') return { type: 'function' };
+          if (symbol === 'g') return { type: ce.type('unknown') };
+          return undefined;
         },
       })
     ).toMatchInlineSnapshot(`["f", "g"]`);
   });
 
-  test('Report invalid getSymbolType() return values', () => {
+  test('Preserve subscriptEvaluate through both type styles', () => {
+    // The normalization branches (BoxedType pass-through, string → BoxedType)
+    // must carry `subscriptEvaluate` along: the symbol keeps its subscript as
+    // a Subscript expression instead of absorbing it into a compound name.
+    for (const type of ['number', ce.type('number')] as const) {
+      expect(
+        ce
+          .parse('S_{5}', {
+            resolveSymbol: (symbol) =>
+              symbol === 'S' ? { type, subscriptEvaluate: true } : undefined,
+            canonical: false,
+          })
+          .json.toString()
+      ).toBe(['Subscript', 'S', 5].toString());
+    }
+    // Control: without the flag the subscript is absorbed into the name.
+    expect(
+      ce.parse('S_{5}', {
+        resolveSymbol: (symbol) =>
+          symbol === 'S' ? { type: 'number' } : undefined,
+        canonical: false,
+      }).json
+    ).toBe('S_5');
+  });
+
+  test('Report invalid resolveSymbol() type values', () => {
     expect(() =>
       ce.parse('f(x)', {
-        getSymbolType: (symbol) =>
+        resolveSymbol: (symbol) =>
           symbol === 'f'
-            ? ({} as unknown as ReturnType<typeof ce.type>)
-            : 'unknown',
+            ? { type: {} as unknown as ReturnType<typeof ce.type> }
+            : undefined,
       })
     ).toThrow(
-      /ce\.parse\(\): getSymbolType\("f"\) must return a BoxedType or a type string, received object/
+      /ce\.parse\(\): resolveSymbol\("f"\) must return a `type` that is a BoxedType or a type string, received object/
     );
   });
 });

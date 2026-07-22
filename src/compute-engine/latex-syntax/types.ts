@@ -727,6 +727,29 @@ export type NumberSerializationFormat = NumberFormat & {
 };
 
 /**
+ * What the ambient environment knows about a declared symbol, as reported by
+ * the {@link ParseLatexOptions.resolveSymbol} handler.
+ *
+ * Declaration is signaled by the *presence* of this record (the handler
+ * returns `undefined` for an undeclared symbol), so a declared symbol whose
+ * type is not known is `{ type: 'unknown' }` — there is no way to report a
+ * type for an undeclared symbol.
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type SymbolResolution = {
+  /** The type of the symbol, as a `BoxedType` or a type string. */
+  type: BoxedType | TypeString;
+
+  /**
+   * If true, the symbol has a custom subscript-evaluation handler: subscripts
+   * on it are kept as `Subscript` expressions (for the handler to interpret)
+   * rather than absorbed into a compound symbol name or read as indexing.
+   */
+  subscriptEvaluate?: boolean;
+};
+
+/**
  *
  * The LaTeX parsing options can be used with the `ce.parse()` method.
  *
@@ -773,21 +796,24 @@ export type ParseLatexOptions = NumberFormat & {
   parseNumbers: 'auto' | 'rational' | 'decimal' | 'never';
 
   /**
-   * This handler is invoked when the parser encounters a
-   * that has not yet been declared.
+   * The symbol oracle: invoked when the parser needs to know what the
+   * ambient environment knows about a symbol.
+   *
+   * Return `undefined` if the symbol is undeclared, or a {@link SymbolResolution}
+   * record if it is declared. Declaration is the *presence* of the record —
+   * a symbol declared with an `unknown` type is still declared (return
+   * `{ type: 'unknown' }` for it), which is distinct from returning
+   * `undefined`.
+   *
+   * Through `ce.parse()` this handler *supplements* the engine scope: it is
+   * consulted first, and a symbol it does not resolve (`undefined`) falls
+   * back to the scope's definitions. Use it to inject knowledge the scope
+   * cannot have yet — e.g. names a later pass of a multi-pass document load
+   * will declare.
    *
    * The `symbol` argument is a [valid symbol](/math-json/#symbols).
-   *
    */
-  getSymbolType: (symbol: MathJsonSymbol) => BoxedType | TypeString;
-
-  /**
-   * This handler is invoked when the parser needs to determine if a symbol
-   * has a custom subscript evaluation handler. If true, subscripts on this
-   * symbol will be kept as `Subscript` expressions rather than being absorbed
-   * into a compound symbol name.
-   */
-  hasSubscriptEvaluate?: (symbol: MathJsonSymbol) => boolean;
+  resolveSymbol?: (symbol: MathJsonSymbol) => SymbolResolution | undefined;
 
   /** This handler is invoked when the parser encounters an unexpected token.
    *
@@ -860,17 +886,6 @@ export type ParseLatexOptions = NumberFormat & {
   onBoundVariable?: (name: string) => void;
 
   /**
-   * Internal hook reporting whether a symbol has a declaration in the engine
-   * scope — declaration *presence*, independent of whether its type is known.
-   * Wired by `ce.parse()` via `lookupDefinition`. Used to decide the
-   * `undeclared-symbol` diagnostic (code 1) and code 2's `declaredAs`. When
-   * absent, the parser falls back to type knowledge (`getSymbolType`).
-   *
-   * @internal
-   */
-  isSymbolDeclared?: (name: MathJsonSymbol) => boolean;
-
-  /**
    * Controls how quantifier scope is determined when parsing expressions
    * like `\forall x. P(x) \rightarrow Q(x)`.
    *
@@ -936,12 +951,22 @@ export type ParseLatexOptions = NumberFormat & {
 export interface Parser {
   readonly options: Readonly<ParseLatexOptions>;
 
-  getSymbolType(id: MathJsonSymbol): BoxedType;
-
   /**
-   * Check if a symbol has a custom subscript evaluation handler.
+   * The single symbol oracle: everything the parser knows about `id`.
+   *
+   * Merges (in priority order) parser-local bindings — sum indices, `Block`/
+   * `Function` parameters, tracked in the parser's symbol table — over the
+   * {@link ParseLatexOptions.resolveSymbol} handler (which `ce.parse()` wires
+   * to consult per-call/engine-wide handlers first, then the engine scope).
+   *
+   * Returns `undefined` if `id` is undeclared. A declared symbol always gets
+   * a record — declaration *presence* is the `!== undefined` check, distinct
+   * from type knowledge: a symbol declared with an `unknown` type still
+   * resolves (with `type.isUnknown` true).
    */
-  hasSubscriptEvaluate(id: MathJsonSymbol): boolean;
+  resolveSymbol(
+    id: MathJsonSymbol
+  ): { type: BoxedType; subscriptEvaluate?: boolean } | undefined;
 
   pushSymbolTable(): void;
 

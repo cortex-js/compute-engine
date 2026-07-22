@@ -681,22 +681,24 @@ describe('function-definition LHS is a declaration (E1)', () => {
   });
 });
 
-describe('undeclared-symbol honors the getSymbolType hook (E2)', () => {
-  test('a symbol the hook types as non-unknown is treated as declared', () => {
-    // The parse-option `getSymbolType` replaces scope lookup for typing; a
-    // symbol it types as `number` is declared, so no undeclared diagnostic —
+describe('undeclared-symbol honors the resolveSymbol hook (E2)', () => {
+  test('a symbol the hook resolves is treated as declared', () => {
+    // The parse-option `resolveSymbol` supplements scope lookup; a symbol it
+    // resolves (with any type) is declared, so no undeclared diagnostic —
     // and no self-contradiction (flagging undeclared while reporting a type).
     const ds = diags('k + 1', {
-      getSymbolType: (id: string) => (id === 'k' ? 'number' : 'unknown'),
+      resolveSymbol: (id: string) =>
+        id === 'k' ? { type: 'number' } : undefined,
     });
     expect(
       byCode(ds, 'undeclared-symbol').some((d) => d.detail?.name === 'k')
     ).toBe(false);
   });
 
-  test('a symbol the hook types as unknown still fires', () => {
+  test('a symbol the hook does not resolve still fires', () => {
     const ds = diags('w + 1', {
-      getSymbolType: (id: string) => (id === 'k' ? 'number' : 'unknown'),
+      resolveSymbol: (id: string) =>
+        id === 'k' ? { type: 'number' } : undefined,
     });
     expect(
       byCode(ds, 'undeclared-symbol').some((d) => d.detail?.name === 'w')

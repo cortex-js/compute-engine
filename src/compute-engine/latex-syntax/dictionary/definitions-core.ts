@@ -362,7 +362,7 @@ function parseComponentAccess(
     // key lookup, not a `First` / `Real` component. Non-dictionary LHS keep the
     // existing (deliberately tight) single-letter member behavior below.
     const lhsSym = symbol(lhs);
-    if (lhsSym !== null && parser.getSymbolType(lhsSym).matches('dictionary')) {
+    if (lhsSym !== null && parser.resolveSymbol(lhsSym)?.type.matches('dictionary')) {
       let key = '';
       while (typeof parser.peek === 'string' && /^[a-zA-Z]$/.test(parser.peek))
         key += parser.nextToken();
@@ -1899,7 +1899,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const sym = symbol(lhs);
       if (
         rhs !== null &&
-        ((sym && parser.getSymbolType(sym).matches('indexed_collection')) ||
+        ((sym && parser.resolveSymbol(sym)?.type.matches('indexed_collection')) ||
           operator(lhs) === 'List')
       ) {
         // Unwrap Delimiter if present (e.g. from comma-separated subscripts)
@@ -2463,7 +2463,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'postfix',
     parse: (parser: Parser, lhs, until) => {
       const sym = symbol(lhs);
-      if (!sym || !parser.getSymbolType(sym).matches('function')) return null;
+      if (!sym || !parser.resolveSymbol(sym)?.type.matches('function'))
+        return null;
 
       parser.addBoundary([')']);
       const expr = parser.parseExpression(until);
@@ -2492,18 +2493,18 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const sym = symbol(lhs);
       if (!sym) return null;
 
-      const symType = parser.getSymbolType(sym);
+      const symType = parser.resolveSymbol(sym)?.type;
 
       // If the lhs is a matrix-typed symbol, return the matrix inverse
       // i.e. A^{-1} -> Inverse(A)
-      if (symType.matches(new BoxedType('matrix'))) {
+      if (symType?.matches(new BoxedType('matrix'))) {
         parser.match('<}>');
         return ['Inverse', lhs] as MathJsonExpression;
       }
 
       // If the lhs is a function, return the inverse function
       // i.e. f^{-1} -> InverseFunction(f)
-      if (!symType.matches('function')) return null;
+      if (!symType?.matches('function')) return null;
 
       // There may be additional postfixes, i.e. \prime, \doubleprime,
       // \tripleprime in the superscript. Account for them.
@@ -3125,7 +3126,8 @@ function parsePrime(
 
   const sym = symbol(lhs);
   const isKnownFunction =
-    (sym && parser.getSymbolType(sym).matches('function')) || operator(lhs);
+    (sym && parser.resolveSymbol(sym)?.type.matches('function')) ||
+    operator(lhs);
 
   // Check if followed by arguments - if so, treat as function derivative
   // This handles both known functions like sin'(x) and unknown like g'(t)
@@ -3900,7 +3902,7 @@ function parseAssign(
         (typeof subscript === 'string' && subscript.length === 1));
 
     if (
-      parser.getSymbolType(baseName).matches('indexed_collection') ||
+      parser.resolveSymbol(baseName)?.type.matches('indexed_collection') ||
       (!isLocalBindingContext && simpleSequenceLikeSubscript)
     ) {
       // Base is a collection, or this is a top-level sequence-like assignment
@@ -3948,7 +3950,7 @@ function parseAssign(
 
     // In local-binding contexts, if the base is NOT a known collection,
     // treat simple subscripted names as compound symbols for assignment.
-    if (!parser.getSymbolType(fn).matches('indexed_collection')) {
+    if (!parser.resolveSymbol(fn)?.type.matches('indexed_collection')) {
       const sub = operand(lhs, 2);
       const subStr =
         (sub !== null && typeof sub === 'string' ? sub : undefined) ??

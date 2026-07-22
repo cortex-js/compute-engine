@@ -367,13 +367,14 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
   if (/^[a-zA-Z]$/.test(parser.peek) || /^\p{XIDS}$/u.test(parser.peek)) {
     let id = parser.nextToken();
 
-    // Check if the symbol is declared as a collection type or has subscriptEvaluate.
-    // If so, don't absorb subscripts into the symbol name - let them be
-    // handled as Subscript expressions which will convert to At() calls
-    // or be evaluated by the subscriptEvaluate handler.
-    const symbolType = parser.getSymbolType(id);
-    const isCollection = symbolType.matches('indexed_collection');
-    const hasSubscriptEval = parser.hasSubscriptEvaluate(id);
+    const info = parser.resolveSymbol(id);
+
+    // A symbol with subscriptEvaluate keeps ALL its subscripts as Subscript
+    // expressions: the handler owns the subscript's meaning. Return the bare
+    // symbol, leaving any `_` for the Subscript parselet.
+    if (info?.subscriptEvaluate) return id;
+
+    const isCollection = info?.type.matches('indexed_collection') ?? false;
 
     // Check if followed by subscript(s) - if so, include them in the symbol name
     // This ensures 'i_A' is parsed as a single symbol 'i_A', not as a subscript
@@ -382,13 +383,35 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
     // - {n,m} (comma indicates multi-index)
     // - {n+1} (operators indicate an expression)
     // - {(n+1)} (parentheses indicate an expression)
-    // Also, if the symbol is a collection type or has subscriptEvaluate,
-    // all subscripts should be Subscript expressions.
-    while (!parser.atEnd && !isCollection && !hasSubscriptEval) {
+    //
+    // An indexed-collection base normally keeps its subscripts too, so `B_2`
+    // on a list `B` reads as indexing (`At(B, 2)`). But a subscripted
+    // spelling whose JOINED name is itself declared in scope is a reference
+    // to that symbol: sibling names (a point `B` alongside `B_2`, `B_3`, …)
+    // must outrank index capture, which would otherwise make every such name
+    // unspellable — and indistinguishable post-parse from genuine `B[2]`
+    // indexing. So absorb speculatively and keep the absorption only if the
+    // joined name resolves to a declaration; otherwise rewind and let the
+    // index reading stand.
+    while (!parser.atEnd) {
       const currentPeek = parser.peek;
       if (currentPeek !== '_') break;
 
       const underscoreIndex = parser.index;
+      // The name this iteration would produce, committed at the end of the
+      // loop body via `commit()`.
+      let suffix: string | null = null;
+      const commit = (): boolean => {
+        if (suffix === null) return false;
+        const candidate = id + '_' + suffix;
+        if (isCollection && parser.resolveSymbol(candidate) === undefined) {
+          parser.index = underscoreIndex;
+          return false;
+        }
+        id = candidate;
+        return true;
+      };
+
       parser.nextToken(); // consume '_'
       const hasBrace = parser.match('<{>');
       if (hasBrace) {
@@ -430,7 +453,7 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
           break;
         }
         parser.match('<}>');
-        id += '_' + sub;
+        suffix = sub;
       } else {
         // Unbraced subscript: only accept a single letter or digit
         // In non-strict mode, consume all consecutive digits
@@ -441,19 +464,23 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
             digits += parser.peek;
             parser.nextToken();
           }
-          id += '_' + digits;
+          suffix = digits;
         } else if (
           /^[a-zA-Z0-9]$/.test(subToken) ||
           /^\p{XIDS}$/u.test(subToken)
         ) {
           parser.nextToken();
-          id += '_' + subToken;
+          suffix = subToken;
         } else {
           // Not a valid subscript token, backtrack the '_'
           parser.index = underscoreIndex;
           break;
         }
       }
+
+      // Commit the absorbed subscript, or rewind (an indexed-collection base
+      // whose joined name is not declared: the subscript is an index).
+      if (!commit()) break;
     }
 
     return id;
