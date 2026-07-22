@@ -2,6 +2,9 @@ import { BLUE, BOLD, CYAN, GREY, RESET } from '../common/ansi-codes.js';
 
 import type { BoxedDefinition, IComputeEngine, Scope } from './global-types.js';
 
+/** One frame of the engine's evaluation-context stack. */
+type EvalContext = IComputeEngine['_evalContextStack'][number];
+
 import { ExpressionMap } from './boxed-expression/expression-map.js';
 import { isValueDef, isOperatorDef } from './boxed-expression/utils.js';
 
@@ -44,8 +47,35 @@ export function pushEvalContext(
 }
 
 export function popEvalContext(ce: IComputeEngine): void {
-  const context = ce._evalContextStack.pop();
+  discardEvalContext(ce, ce._evalContextStack.pop());
+}
 
+/**
+ * Remove one SPECIFIC evaluation context, wherever it currently sits.
+ *
+ * The asynchronous evaluation path holds its context across an `await`
+ * (`BoxedFunction._computeValueAsync`), so by the time it unwinds, its frame is
+ * not necessarily on top: another evaluation on the same engine may have pushed
+ * above it. Popping the top there would destroy a frame belonging to something
+ * still running — disposing its bindings out from under it. Removing by
+ * identity leaves every other frame intact.
+ *
+ * A no-op if the context is not on the stack (already removed).
+ */
+export function removeEvalContext(
+  ce: IComputeEngine,
+  context: EvalContext
+): void {
+  const index = ce._evalContextStack.lastIndexOf(context);
+  if (index < 0) return;
+  ce._evalContextStack.splice(index, 1);
+  discardEvalContext(ce, context);
+}
+
+function discardEvalContext(
+  ce: IComputeEngine,
+  context: EvalContext | undefined
+): void {
   // Definitions owned by a scope may subscribe to engine-wide lifecycle
   // events. Release those subscriptions as soon as the scope is discarded,
   // rather than retaining otherwise-dead local constants for the lifetime of

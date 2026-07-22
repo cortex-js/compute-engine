@@ -1926,16 +1926,33 @@ export class BoxedFunction
       //
       const isScoped = this._localScope !== undefined;
 
+      // This path holds its context across an `await` (see below), so by the
+      // time it unwinds its frame is NOT necessarily on top: another
+      // evaluation on the same engine may have pushed above it. Both popping
+      // the top and unwinding by depth would then destroy a frame belonging to
+      // something still running, disposing its bindings out from under it — so
+      // capture the frame and remove it by IDENTITY instead.
+      //
+      // This keeps one evaluation from corrupting another's scope, but it does
+      // not make concurrent async evaluation on a single engine *correct*: the
+      // context stack is engine-global mutable state, so while this evaluation
+      // is suspended its scope is the engine's current one, and anything else
+      // entering the engine in that window — a second `evaluateAsync`, or plain
+      // synchronous work from a timer or event handler — resolves against it.
+      // Making that sound needs per-evaluation (task-local) context
+      // propagation across every await in the async path, not just this one.
+      // Until then: one engine per concurrent evaluation.
       if (isScoped) {
         this.engine._pushEvalContext(this._localScope!);
       }
+      const localContext = isScoped ? this.engine.context : undefined;
 
       //
       // 5/ Call the `evaluate` handler
       //
       const engine = this.engine;
 
-      let evaluateFn: Expression | Promise<Expression | undefined> | undefined;
+      let value: Expression | undefined;
       try {
         const opts: Partial<EvaluateOptions> & { engine: ComputeEngine } = {
           numericApproximation,
@@ -1943,31 +1960,40 @@ export class BoxedFunction
           signal: options?.signal,
           materialization: options?.materialization,
         };
-        evaluateFn =
-          def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(tail, opts);
+        // AWAIT INSIDE THE `try`: an `evaluateAsync` handler returns at its
+        // first suspension point, not at completion, so popping on the
+        // handler's *return* tore the local scope down while the handler was
+        // still running. Anything the resumed handler did then ran against
+        // the enclosing scope: a big operator whose reduction outlives one
+        // `runAsync` chunk (>16ms) assigned its loop index globally — leaking
+        // it, clobbering an outer binding of the same name, and throwing
+        // `Cannot assign a value to the constant "i"` for the commonest index
+        // spelling of all, since global `i` is `ImaginaryUnit`. Holding the
+        // context across the await is what makes the async lane's scoping
+        // match the sync lane's.
+        value = await (def.evaluateAsync?.(tail, opts) ??
+          def.evaluate?.(tail, opts));
       } finally {
-        if (isScoped) this.engine._popEvalContext();
+        if (localContext) this.engine._removeEvalContext(localContext);
       }
 
-      return Promise.resolve(evaluateFn).then((value) => {
-        // Handler-less scoped-operator no-operand-change identity: see the
-        // matching comment in the sync path (avoids re-canonicalizing a lazy
-        // scoped collection into a fresh, split-off local scope; every other
-        // operator keeps the load-bearing re-box).
-        const result =
-          value ??
-          (isScoped &&
-          def.evaluate === undefined &&
-          def.evaluateAsync === undefined &&
-          this.isCanonical &&
-          tail.every((x, i) => x === this._ops[i])
-            ? this
-            : engine.function(this._operator, tail));
-        // 5b/ Pole-aware numeric evaluation (see the sync path).
-        if (numericApproximation)
-          return applyPoleOverride(engine, this._operator, tail, result);
-        return result;
-      });
+      // Handler-less scoped-operator no-operand-change identity: see the
+      // matching comment in the sync path (avoids re-canonicalizing a lazy
+      // scoped collection into a fresh, split-off local scope; every other
+      // operator keeps the load-bearing re-box).
+      const result =
+        value ??
+        (isScoped &&
+        def.evaluate === undefined &&
+        def.evaluateAsync === undefined &&
+        this.isCanonical &&
+        tail.every((x, i) => x === this._ops[i])
+          ? this
+          : engine.function(this._operator, tail));
+      // 5b/ Pole-aware numeric evaluation (see the sync path).
+      if (numericApproximation)
+        return applyPoleOverride(engine, this._operator, tail, result);
+      return result;
     };
   }
 }

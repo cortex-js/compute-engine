@@ -2487,6 +2487,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Join: {
     description: [
       'Join the elements of some collections into a flat collection.',
+      'A tuple operand is appended as a single element, not spliced.',
     ],
     complexity: 8200,
     signature: '(collection*) -> collection',
@@ -2497,6 +2498,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         let total = 0;
         for (const op of expr.ops) {
+          if (isAtomicJoinOperand(op)) {
+            total += 1;
+            continue;
+          }
           const count = op.count;
           if (count === undefined) return undefined;
           if (!Number.isFinite(count)) return Infinity;
@@ -2506,22 +2511,31 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
-        return expr.ops.some((op) => op.contains(target));
+        return expr.ops.some((op) =>
+          isAtomicJoinOperand(op) ? op.isSame(target) : op.contains(target)
+        );
       },
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
-        const iters = expr.ops.map((op) => op.each());
+        const sources = expr.ops.map((op) =>
+          isAtomicJoinOperand(op) ? op : op.each()
+        );
         let index = 0;
         return {
           next: () => {
             while (true) {
-              const { value, done } = iters[index].next();
+              if (index >= sources.length)
+                return { value: undefined, done: true };
+              const source = sources[index];
+              if (!isIterator(source)) {
+                // An atomic (tuple) operand contributes exactly one element
+                index += 1;
+                return { value: source, done: false };
+              }
+              const { value, done } = source.next();
               if (!done) return { value, done: false };
               index += 1;
-              // No more sources?
-              if (index >= iters.length)
-                return { value: undefined, done: true };
             }
           },
         };
@@ -2532,11 +2546,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ): undefined | Expression => {
         if (typeof index !== 'number' || !isFunction(expr)) return undefined;
 
+        const countOf = (op: Expression): number | undefined =>
+          isAtomicJoinOperand(op) ? 1 : op.count;
+
         // A negative index counts from the end of the joined collection
         if (index < 0) {
           let total = 0;
           for (const op of expr.ops) {
-            const count = op.count;
+            const count = countOf(op);
             if (count === undefined || !Number.isFinite(count))
               return undefined;
             total += count;
@@ -2547,9 +2564,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
         // Walk the sources, skipping over each one's elements
         for (const op of expr.ops) {
-          const count = op.count;
+          const count = countOf(op);
           if (count === undefined) return undefined;
-          if (index <= count) return op.at(index);
+          if (index <= count)
+            return isAtomicJoinOperand(op) ? op : op.at(index);
           index -= count;
         }
         return undefined;
@@ -5674,11 +5692,53 @@ export function* reduceCollection<T>(
   return acc;
 }
 
+/**
+ * Is this `Join` operand contributed as a single element rather than spliced?
+ *
+ * A tuple is an `indexed_collection` (load-bearing — see
+ * `docs/plans/2026-07-07-tuple-point-semantics.md`), so `Join` used to iterate
+ * it and splice its components: `Join([(0,3),(1,4)], (2,5))` produced
+ * `[(0,3),(1,4),2,5]` — length +2 and a heterogeneous `number` tail that no
+ * longer matched `list<point>`. But a tuple is a *value* (a point/vector), not
+ * a sequence of values to concatenate; everywhere else in the engine it is
+ * treated as one (`Abs(point)` → `Norm`, point arithmetic component-wise).
+ * `Join` follows suit: tuples append atomically, matching `Append` and the
+ * point-list accumulation idiom `L → Join(L, P)`.
+ *
+ * Keyed on the static type, so a tuple-typed symbol routes too.
+ */
+function isAtomicJoinOperand(op: Expression): boolean {
+  return op.type.matches('tuple');
+}
+
+function isIterator(x: unknown): x is Iterator<Expression> {
+  return typeof (x as Iterator<Expression>)?.next === 'function';
+}
+
 function joinResultType(ops: ReadonlyArray<Expression>): Type {
   if (ops.some((op) => op.type.matches('record'))) return 'record';
   if (ops.some((op) => op.type.matches('dictionary'))) return 'dictionary';
   if (ops.some((op) => op.type.matches('set'))) return 'set';
-  return 'list';
+
+  // Carry the element type through, so a joined point list still MATCHES
+  // `list<tuple<…>>` and downstream type-directed dispatch keeps recognizing
+  // it. Each operand contributes either its own type (an atomic tuple, which
+  // becomes one element) or its element type (a collection, which is spliced).
+  // Any operand whose element type is unknown makes the whole result
+  // unknown-element, so fall back to the bare `list` rather than narrowing to
+  // something the value may not satisfy.
+  const eltTypes: Type[] = [];
+  for (const op of ops) {
+    if (isAtomicJoinOperand(op)) {
+      eltTypes.push(op.type.type);
+      continue;
+    }
+    const elt = collectionElementType(op.type.type);
+    if (elt === undefined) return 'list';
+    eltTypes.push(elt);
+  }
+  if (eltTypes.length === 0) return 'list';
+  return parseType(`list<${typeToString(widen(...eltTypes))}>`);
 }
 
 function defaultCollectionEq(a: Expression, b: Expression) {

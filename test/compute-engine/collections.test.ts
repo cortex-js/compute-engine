@@ -1262,6 +1262,50 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
     expect(evaluate(['Join', list1, list2])).toMatchInlineSnapshot(
       `["List", 100, 4, 2, 62, 34, "ContinuationPlaceholder", 8, 9, 7, 2, 24]`
     )); // 11 elements: default materialization shows a 5-element head and tail
+
+  // A tuple operand is ONE element, not a sequence to splice: the point-list
+  // accumulation idiom `L → Join(L, P)`. Previously the point's components
+  // were spliced (length +2, and the result stopped matching `list<point>`).
+  describe('Join with a tuple operand appends it atomically', () => {
+    const points: Expression = ['List', ['Tuple', 0, 3], ['Tuple', 1, 4]];
+    const joined: Expression = ['Join', points, ['Tuple', 2, 5]];
+
+    test('length is +1, not +2', () =>
+      expect(evaluate(['Length', joined])).toMatchInlineSnapshot(`3`));
+
+    test('the point survives as one element', () =>
+      expect(evaluate(joined)).toMatchInlineSnapshot(
+        `["List", ["Pair", 0, 3], ["Pair", 1, 4], ["Pair", 2, 5]]`
+      ));
+
+    test('indexing lands on whole points', () =>
+      expect(
+        [1, 3, -1].map((i) => engine.box(joined).evaluate().at(i)?.toString())
+      ).toMatchInlineSnapshot(`
+        [
+          (0, 3),
+          (2, 5),
+          (2, 5),
+        ]
+      `));
+
+    test('agrees with Append', () =>
+      expect(evaluate(joined)).toEqual(
+        evaluate(['Append', points, ['Tuple', 2, 5]])
+      ));
+
+    test('a LIST operand still splices', () =>
+      expect(
+        evaluate(['Join', points, ['List', ['Tuple', 2, 5]]])
+      ).toMatchInlineSnapshot(
+        `["List", ["Pair", 0, 3], ["Pair", 1, 4], ["Pair", 2, 5]]`
+      ));
+
+    test('tuple-only Join collects the tuples', () =>
+      expect(
+        evaluate(['Join', ['Tuple', 1, 2], ['Tuple', 3, 4]])
+      ).toMatchInlineSnapshot(`["List", ["Pair", 1, 2], ["Pair", 3, 4]]`));
+  });
 });
 
 describe('ANY / ALL QUANTIFIERS', () => {

@@ -1,3 +1,88 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **`Join` appends a tuple operand as a single element instead of splicing its
+  components.** A tuple is an `indexed_collection`, so `Join` used to iterate it
+  and concatenate its components. But a tuple is a _value_ — a point or vector —
+  and the engine treats it as one everywhere else (`Abs(point)` → `Norm`,
+  component-wise point arithmetic). Splicing silently degraded the point-list
+  accumulation idiom `L → Join(L, P)`: the result grew by 2 instead of 1 and
+  stopped matching `list<point>`.
+
+  ```js
+  // Before
+  ce.box(['Join', pointList, ['Tuple', 2, 5]]).evaluate();
+  // → ["List", …, 2, 5]        length +2, heterogeneous `number` tail
+  // After
+  // → ["List", …, ["Pair", 2, 5]]   length +1, still a list of points
+  ```
+
+  `Join` of collections is unchanged (`Join([1,2],[3,4])` → `[1,2,3,4]`;
+  `Join([(0,3)],[(2,5)])` → `[(0,3),(2,5)]`). The one reversal is a tuple in
+  operand position where it was previously flattened:
+  `Join((1,2),(3,4))` was `[1,2,3,4]` and is now `[(1,2),(3,4)]`. `Join` now
+  agrees with `Append` on a tuple element.
+
+- **`Join` now reports the joined ELEMENT type instead of a bare `list`.** Its
+  type handler returned `list` whatever it was given, so a joined point list did
+  not match `list<tuple<…>>` and type-directed dispatch downstream stopped
+  recognizing it. Each operand now contributes either its own type (an atomic
+  tuple, which becomes one element) or its element type (a collection, which is
+  spliced), widened into the result:
+
+  ```js
+  Join(pointList, point); // was: list      now: list<tuple<number, number>>
+  Join([1, 2], [3, 4]); //   was: list      now: list<finite_integer>
+  ```
+
+  An operand whose element type is unknown still yields the bare `list`. This is
+  a **type-surface change**: code pinning the exact string `'list'` for a `Join`
+  result sees the narrowed type instead — but `matches()`-based queries only
+  gain precision.
+
+### Issues Resolved
+
+- **`evaluateAsync()` no longer tears down a scoped operator's local scope
+  while the operator is still running.** An `evaluateAsync` handler returns at
+  its first suspension point, not at completion, so the dispatcher popped the
+  operator's local evaluation context too early; everything the resumed handler
+  did then ran against the enclosing scope. A big operator whose reduction
+  outlived one time slice (roughly, more than ~16ms of work) assigned its loop
+  index globally — leaking it, overwriting an outer binding of the same name,
+  and throwing `Cannot assign a value to the constant "i"` for the commonest
+  index spelling of all, since global `i` is `ImaginaryUnit`:
+
+  ```js
+  await ce.parse('\\sum_{i=1}^{200000} i').evaluateAsync();
+  // Before: throws `Cannot assign a value to the constant "i"`
+  // After:  20000100000  (matches the synchronous lane)
+
+  ce.assign('n', 7);
+  await ce.parse('\\sum_{n=1}^{200000} n').evaluateAsync();
+  ce.box('n'); // Before: 200000 (clobbered). After: 7
+  ```
+
+  The synchronous lane was fixed in 0.87.1; this brings the asynchronous lane —
+  the cancellation path `withTimeLimit` documents — into line with it.
+  Cancellation behavior is unchanged.
+
+  Because the context is now held across the `await`, a scoped operator's frame
+  is no longer necessarily on top of the evaluation-context stack when it
+  unwinds — a second evaluation started while the first is suspended pushes
+  above it. The frame is therefore removed by identity rather than popped, so an
+  unwinding evaluation cannot discard (and dispose the bindings of) one that is
+  still running.
+
+  One known limitation remains, unchanged by this release: while an async
+  evaluation is suspended, its scope is the engine's current one, so code that
+  enters the same engine in that window can see the operator's local bindings
+  (e.g. a loop index). Enclosing bindings still resolve correctly through the
+  scope's parent chain, and the local scope is gone once the evaluation settles,
+  but a name that collides with an in-flight index resolves to that index.
+  Removing this needs per-evaluation (task-local) context propagation; until
+  then, use one engine per concurrent evaluation.
+
 ## 0.92.0 _2026-07-21_
 
 ### Breaking Changes

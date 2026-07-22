@@ -143,6 +143,7 @@ import {
   popScope as popScopeImpl,
   pushEvalContext as pushEvalContextImpl,
   popEvalContext as popEvalContextImpl,
+  removeEvalContext as removeEvalContextImpl,
   inScope as inScopeImpl,
   printStack as printStackImpl,
 } from './engine-scope.js';
@@ -1597,6 +1598,14 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _popEvalContext(): void {
     popEvalContextImpl(this);
+  }
+
+  /**
+   * Remove one specific evaluation context, wherever it sits on the stack.
+   * @internal
+   */
+  _removeEvalContext(context: EvalContext): void {
+    removeEvalContextImpl(this, context);
   }
 
   /** @internal */

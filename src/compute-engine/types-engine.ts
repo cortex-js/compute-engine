@@ -550,6 +550,13 @@ export interface IComputeEngine {
   _popEvalContext(): void;
 
   /**
+   * Remove one specific evaluation context, wherever it currently sits on the
+   * stack — used by the asynchronous path, whose frame may not be on top by
+   * the time it unwinds.
+   * @internal */
+  _removeEvalContext(context: EvalContext): void;
+
+  /**
    * Temporarily sets the lexical scope to the provided scope, then
    * executes the function `f` in that scope and returns the result.
    * @internal */

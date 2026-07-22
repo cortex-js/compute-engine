@@ -428,3 +428,178 @@ describe('makeLambda post-evaluation parameter substitution', () => {
     ).toBe('w + 2');
   });
 });
+
+describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
+  // An `evaluateAsync` handler returns at its FIRST SUSPENSION POINT, not at
+  // completion. The dispatcher used to pop the operator's local eval context
+  // on that return, so anything the resumed handler did ran against the
+  // enclosing scope. A big operator whose reduction outlives one `runAsync`
+  // chunk (>16ms) then assigned its loop index globally.
+  //
+  // The bound counts below are chosen to straddle that 16ms chunk: the small
+  // sum completes inside one chunk (never suspends), the large one does not.
+  // Sized by MEASUREMENT, not margin: 20 000 terms already takes ~110ms, far
+  // past the ~16ms chunk, so it reliably suspends. Bigger bounds only make the
+  // suite slower — these tests time out under full-suite parallel load if they
+  // are oversized.
+  const SMALL = 10;
+  const LARGE = 60_000;
+  // Still in flight while a poller watches it (~250ms of work)
+  const BIGGER_FOR_SUSPEND = 100_000;
+  const sum = (index: string, upper: number): Expression => [
+    'Sum',
+    [index, 1, upper],
+  ];
+  const gauss = (n: number) => (n * (n + 1)) / 2;
+
+  test('an index spelled `i` is the loop index, not ImaginaryUnit', async () => {
+    // The loud case: global `i` is a CONSTANT (ImaginaryUnit), so the stray
+    // assign threw `Cannot assign a value to the constant "i"` — and `i` is
+    // the commonest summation index there is.
+    const ce = new ComputeEngine();
+    const result = await ce.parse(`\\sum_{i=1}^{${LARGE}} i`).evaluateAsync();
+    expect(result.toString()).toBe(String(gauss(LARGE)));
+    // `i` is left untouched as the imaginary unit
+    expect(ce.box('i').type.toString()).toBe('imaginary');
+  });
+
+  test('the index does not leak into the global scope', async () => {
+    const ce = new ComputeEngine();
+    await ce.parse(`\\sum_{k=1}^{${LARGE}} k`).evaluateAsync();
+    expect(ce.box('k').value).toBeUndefined();
+  });
+
+  test('an outer binding of the same name is not clobbered', async () => {
+    // The silent case: the sum returned the RIGHT answer while overwriting
+    // the caller's `n`.
+    const ce = new ComputeEngine();
+    ce.assign('n', 7);
+    const result = await ce.parse(`\\sum_{n=1}^{${LARGE}} n`).evaluateAsync();
+    expect(result.toString()).toBe(String(gauss(LARGE)));
+    expect(ce.box('n').value?.toString()).toBe('7');
+  });
+
+  test('async matches sync, suspended or not', async () => {
+    const ce = new ComputeEngine();
+    for (const upper of [SMALL, LARGE]) {
+      const expr = ce.box(sum('i', upper));
+      expect((await expr.evaluateAsync()).toString()).toBe(
+        expr.evaluate().toString()
+      );
+    }
+  });
+
+  // Holding the local context across the `await` means a SECOND evaluation
+  // started while the first is suspended interleaves its own push, so the
+  // first one's frame is no longer on top when it unwinds. (Measured: the two
+  // frames do coexist — the stack reaches depth 4, and the first unwind finds
+  // its own frame at index 2 of 4.) The frame is therefore removed by
+  // IDENTITY, so an unwinding evaluation cannot dispose a still-running one's
+  // bindings.
+  //
+  // HONESTY NOTE: these are CHARACTERIZATION tests, not discriminating
+  // regression tests. They also pass against the pop-the-top and unwind-by-
+  // depth versions: on this workload the wrong frame being disposed has no
+  // observable effect (the stack still rebalances, and the sums still come out
+  // right). They pin the outcome so a future change that DOES make it
+  // observable fails here. Do not read a pass as proof the removal is correct.
+  describe('concurrent async evaluation', () => {
+    // Asymmetric ON PURPOSE: the smaller sum is started FIRST, so it settles
+    // while the larger one is still mid-flight — the ordering that makes one
+    // evaluation unwind through another's live frame.
+    const SMALLER = 20_000;
+    const BIGGER = 40_000;
+
+    // `allSettled`, not `all`: a fast reject would leave the other evaluation
+    // still looping past the assertions (and past the end of the test).
+    const runBoth = async (first: string, second: string) => {
+      const ce = new ComputeEngine();
+      const depth = ce._evalContextStack.length;
+      const settled = await Promise.allSettled([
+        ce.parse(`\\sum_{${first}=1}^{${SMALLER}} ${first}`).evaluateAsync(),
+        ce.parse(`\\sum_{${second}=1}^{${BIGGER}} ${second}`).evaluateAsync(),
+      ]);
+      return { ce, depth, settled };
+    };
+
+    const values = (settled: PromiseSettledResult<Expression>[]) =>
+      settled.map((s) =>
+        s.status === 'fulfilled' ? s.value.toString() : `REJECTED: ${s.reason}`
+      );
+    const expected = [String(gauss(SMALLER)), String(gauss(BIGGER))];
+
+    // The invariant that actually regressed: BOTH results must be right. A
+    // depth-only assertion passes even when one evaluation has corrupted the
+    // other, because the stack self-heals.
+    test('both evaluations still compute the correct result', async () => {
+      const { settled } = await runBoth('q', 'w');
+      expect(values(settled)).toEqual(expected);
+    });
+
+    // The adversarial spelling: the two evaluations use the SAME index name,
+    // so any cross-talk between their scopes shows up as a wrong sum.
+    test('a shared index name does not cross-talk', async () => {
+      const { ce, settled } = await runBoth('m', 'm');
+      expect(values(settled)).toEqual(expected);
+      expect(ce.box('m').value).toBeUndefined();
+    });
+
+    test('the engine is left clean', async () => {
+      const { ce, depth } = await runBoth('q', 'w');
+      expect(ce._evalContextStack.length).toBe(depth);
+      expect(ce.box('q').value).toBeUndefined();
+      expect(ce.box('w').value).toBeUndefined();
+      expect(ce.parse('1+1').evaluate().toString()).toBe('2');
+    });
+  });
+
+  // KNOWN LIMITATION, pinned so a change of behavior is deliberate: while an
+  // async evaluation is suspended, its scope is the engine's current one, so
+  // code that enters the engine in that window can SEE the loop index. Outer
+  // bindings still resolve correctly through the scope's parent chain, and the
+  // index is gone once the evaluation settles. Making this invisible needs
+  // per-evaluation (task-local) context propagation.
+  test('a suspended evaluation’s index is visible to a mid-flight caller', async () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', 42);
+    const pending = ce
+      .parse(`\\sum_{z=1}^{${BIGGER_FOR_SUSPEND}} z`)
+      .evaluateAsync();
+
+    // POLL rather than sleep a fixed interval: a single sleep races the
+    // evaluation finishing, which would make this test flaky under load.
+    let sawIndex = false;
+    let outerStayedCorrect = true;
+    for (let i = 0; i < 100 && !sawIndex; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (ce.box('z').value !== undefined) sawIndex = true;
+      // Enclosing bindings resolve through the scope's parent chain throughout
+      if (ce.parse('a+1').evaluate().toString() !== '43')
+        outerStayedCorrect = false;
+    }
+    expect(outerStayedCorrect).toBe(true);
+    expect(sawIndex).toBe(true);
+
+    await pending;
+    // ...and it is gone again once the evaluation settles
+    expect(ce.box('z').value).toBeUndefined();
+    expect(ce._evalContextStack.length).toBe(2);
+  });
+
+  test('cancellation still reports as a CancellationError', async () => {
+    const ce = new ComputeEngine();
+    const controller = new AbortController();
+    setTimeout(() => controller.abort('user'), 40);
+    // Assert the ERROR IDENTITY, not merely that something threw: a bare
+    // `toThrow()` would also accept the `Cannot assign a value to the
+    // constant "i"` failure this suite exists to prevent.
+    await expect(
+      ce.parse('\\sum_{i=1}^{100000000} i').evaluateAsync({
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ name: 'CancellationError', cause: 'user' });
+    // ...and the engine is left usable, with `i` intact
+    expect(ce.parse('1+1').evaluate().toString()).toBe('2');
+    expect(ce.box('i').type.toString()).toBe('imaginary');
+  });
+});
