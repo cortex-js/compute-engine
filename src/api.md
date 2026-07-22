@@ -4891,6 +4891,28 @@ const ce = new ComputeEngine({
 
 <MemberCard>
 
+### SymbolResolution
+
+```ts
+type SymbolResolution = {
+  type:   | BoxedType
+     | TypeString;
+  subscriptEvaluate: boolean;
+};
+```
+
+What the ambient environment knows about a declared symbol, as reported by
+the [ParseLatexOptions.resolveSymbol](#parselatexoptions) handler.
+
+Declaration is signaled by the *presence* of this record (the handler
+returns `undefined` for an undeclared symbol), so a declared symbol whose
+type is not known is `{ type: 'unknown' }` — there is no way to report a
+type for an undeclared symbol.
+
+</MemberCard>
+
+<MemberCard>
+
 ### ParseLatexOptions
 
 ```ts
@@ -4898,10 +4920,7 @@ type ParseLatexOptions = NumberFormat & {
   strict: boolean;
   skipSpace: boolean;
   parseNumbers: "auto" | "rational" | "decimal" | "never";
-  getSymbolType: (symbol) => 
-     | BoxedType
-     | TypeString;
-  hasSubscriptEvaluate: (symbol) => boolean;
+  resolveSymbol: (symbol) => SymbolResolution | undefined;
   parseUnexpectedToken: (lhs, parser) => MathJsonExpression | null;
   preserveLatex: boolean;
   diagnostics: boolean;
@@ -4958,29 +4977,28 @@ it will be parsed as a decimal number even if this setting is `"rational"`.
 
 **Default**: `"auto"`
 
-#### ParseLatexOptions.getSymbolType
+#### ParseLatexOptions.resolveSymbol?
 
 ```ts
-getSymbolType: (symbol) => 
-  | BoxedType
-  | TypeString;
+optional resolveSymbol?: (symbol) => SymbolResolution | undefined;
 ```
 
-This handler is invoked when the parser encounters a
-that has not yet been declared.
+The symbol oracle: invoked when the parser needs to know what the
+ambient environment knows about a symbol.
+
+Return `undefined` if the symbol is undeclared, or a [SymbolResolution](#symbolresolution)
+record if it is declared. Declaration is the *presence* of the record —
+a symbol declared with an `unknown` type is still declared (return
+`{ type: 'unknown' }` for it), which is distinct from returning
+`undefined`.
+
+Through `ce.parse()` this handler *supplements* the engine scope: it is
+consulted first, and a symbol it does not resolve (`undefined`) falls
+back to the scope's definitions. Use it to inject knowledge the scope
+cannot have yet — e.g. names a later pass of a multi-pass document load
+will declare.
 
 The `symbol` argument is a [valid symbol](#symbols).
-
-#### ParseLatexOptions.hasSubscriptEvaluate?
-
-```ts
-optional hasSubscriptEvaluate?: (symbol) => boolean;
-```
-
-This handler is invoked when the parser needs to determine if a symbol
-has a custom subscript evaluation handler. If true, subscripts on this
-symbol will be kept as `Subscript` expressions rather than being absorbed
-into a compound symbol name.
 
 #### ParseLatexOptions.parseUnexpectedToken
 
@@ -5170,27 +5188,28 @@ Return the next token, without advancing the index
 
 <MemberCard>
 
-##### Parser.getSymbolType()
+##### Parser.resolveSymbol()
 
 ```ts
-getSymbolType(id): BoxedType
+resolveSymbol(id): 
+  | {
+  type: BoxedType;
+  subscriptEvaluate: boolean;
+ }
+  | undefined
 ```
 
-####### id
+The single symbol oracle: everything the parser knows about `id`.
 
-`string`
+Merges (in priority order) parser-local bindings — sum indices, `Block`/
+`Function` parameters, tracked in the parser's symbol table — over the
+[ParseLatexOptions.resolveSymbol](#parselatexoptions) handler (which `ce.parse()` wires
+to consult per-call/engine-wide handlers first, then the engine scope).
 
-</MemberCard>
-
-<MemberCard>
-
-##### Parser.hasSubscriptEvaluate()
-
-```ts
-hasSubscriptEvaluate(id): boolean
-```
-
-Check if a symbol has a custom subscript evaluation handler.
+Returns `undefined` if `id` is undeclared. A declared symbol always gets
+a record — declaration *presence* is the `!== undefined` check, distinct
+from type knowledge: a symbol declared with an `unknown` type still
+resolves (with `type.isUnknown` true).
 
 ####### id
 
