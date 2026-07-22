@@ -8,6 +8,9 @@
  * Within a single host, the same seed always yields the same value.
  */
 
+// Cap on the number of elements `RandomList` will eagerly materialize.
+export const MAX_RANDOM_LIST_SIZE = 1_000_000;
+
 /**
  * Return a deterministic pseudorandom value in [0, 1) for the given seed.
  * Matches the GLSL `_gpu_random(seed)` hash to within fp32 precision.

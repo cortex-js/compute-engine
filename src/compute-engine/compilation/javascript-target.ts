@@ -98,7 +98,11 @@ import {
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { adaptiveQuadrature } from '../numerics/gauss-kronrod.js';
-import { mulberry32 } from '../numerics/random.js';
+import {
+  mulberry32,
+  hashSeed,
+  MAX_RANDOM_LIST_SIZE,
+} from '../numerics/random.js';
 
 import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -113,6 +117,26 @@ import type {
   ComplexResult,
   TargetSource,
 } from './types.js';
+
+// Per-compilation `RandomList` engine-stream identity (Tycho item 80).
+//
+// The compiled `RandomList(n)` engine-stream form (1 arg, under a compile-time
+// engine seed) is a random PROCESS: fresh draws per invocation, like the
+// interpreter, while remaining reproducible via seeding. It cannot keep its
+// stream state inside the emitted function body — the JS target re-runs that
+// body (preamble included) on every call, so any in-body state resets per call.
+// Instead the handler allocates a monotonic id (`cid`) at COMPILE time, which
+// the emitted code passes to `_SYS.randomList`; the helper lazily creates one
+// `mulberry32` stream per id and advances it across calls.
+//
+// The streams themselves live on the compiled function's OWN `_SYS` bundle
+// (see `makeSysHelpers`), not in a module-global map, so a stream is reclaimed
+// with the compiled function that draws from it. A recompile builds a new
+// bundle and a new id → a fresh stream seeded from the same mixed per-node
+// seed → REPLAY from the start (the compile-time analog of the interpreter's
+// `ce.randomSeed = k` reseed-replay). This counter only hands out distinct
+// ids; it retains nothing.
+let _randomListStreamId = 0;
 
 /**
  * JavaScript operator mappings
@@ -209,6 +233,82 @@ function compileJSEquality(
   for (let i = 0; i < args.length - 1; i++)
     parts.push(pair(args[i], args[i + 1]));
   return `(${parts.join(' && ')})`;
+}
+
+/** JavaScript infix spelling of each ordering relation. */
+const JS_ORDERING_OPERATORS = {
+  Less: '<',
+  LessEqual: '<=',
+  Greater: '>',
+  GreaterEqual: '>=',
+} as const;
+
+/**
+ * Codegen for the ordering relations and logical connectives when an operand
+ * may be a COLLECTION at run time: fail closed (D6).
+ *
+ * The raw infix path in `BaseCompiler` is silently wrong on an array. JS
+ * stringifies it for a comparison — `0 < [1, 0, 1]` compares against
+ * `"1,0,1"` and yields the scalar `false` — and an array is TRUTHY, so
+ * `m1 && m2` returns a whole operand and `!m` returns `false`. The
+ * interpreter broadcasts element-wise in all of these, so each was a wrong
+ * answer behind a `success: true`. The base compiler therefore declines the
+ * infix path for these heads when an operand is collection-TYPED
+ * (`.isCollection` is false for a computed `list<real>` such as `|L - k|`,
+ * which is why this went unnoticed) and dispatches here.
+ *
+ * Refusing rather than broadcasting is a deliberate scope choice. An
+ * element-wise lowering was implemented and withdrawn: reproducing the
+ * interpreter faithfully needs per-POSITION projection (an empty or complex
+ * position must not poison its siblings), correct handling of shortest-length
+ * truncation, and a purity rule that distinguishes a repeated scalar from the
+ * collection being traversed. A whole-result post-scan got all three wrong.
+ * Failing closed falls back to the interpreter, which is correct — the
+ * capability is tracked in ROADMAP.md ("Element-wise compiled comparisons").
+ */
+function compileJSCollectionBoolean(
+  kind: string,
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string
+): string {
+  // SCALAR operands still lower normally. This handler is also reached from
+  // INSIDE the unary `.map` broadcast that `BaseCompiler` emits for a concrete
+  // finite collection (`Not([True, False])` becomes
+  // `([true, false]).map((x) => !x)`), where each element is a scalar. Throwing
+  // unconditionally would refuse that perfectly correct lowering.
+  const collectionish = (a: Expression): boolean =>
+    a.isCollection ||
+    a.type.matches('collection') ||
+    isPossiblyCollectionTypedJS(a);
+  if (!args.some(collectionish)) {
+    if (kind === 'Not') {
+      if (args.length !== 1)
+        throw new Error(`Not: expected exactly one argument`);
+      return `!(${compile(args[0])})`;
+    }
+    if (kind === 'And' || kind === 'Or') {
+      const op = kind === 'And' ? '&&' : '||';
+      return `(${args.map((a) => `(${compile(a)})`).join(` ${op} `)})`;
+    }
+    if (args.length === 2) {
+      const op =
+        JS_ORDERING_OPERATORS[kind as keyof typeof JS_ORDERING_OPERATORS];
+      return `((${compile(args[0])}) ${op} (${compile(args[1])}))`;
+    }
+    // A chained scalar comparison reaches the infix path in `BaseCompiler`,
+    // which binds the shared middle operands to temporaries; there is nothing
+    // to reproduce that here, and it cannot occur without a collection operand
+    // having diverted us in the first place.
+  }
+  throw new Error(
+    `${kind}: cannot compile a comparison or logical connective over an ` +
+      `operand that may be a collection at run time — the JavaScript ` +
+      `operators do not broadcast element-wise (an array stringifies in a ` +
+      `comparison and is truthy in a connective), so the result would ` +
+      `silently disagree with interpretation. Fail closed (D6). Materialize ` +
+      `the collection with evaluate() and compile a scalar element function ` +
+      `instead.`
+  );
 }
 
 /**
@@ -309,6 +409,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `===` is exact and disagrees with the interpreter's tolerant compare.
   Equal: (args, compile) => compileJSEquality('Equal', args, compile),
   NotEqual: (args, compile) => compileJSEquality('NotEqual', args, compile),
+  // The ordering relations and logical connectives normally lower to raw JS
+  // infix in `BaseCompiler`. These handlers are reached ONLY when that path
+  // declines — i.e. when an operand may be a collection at run time — and
+  // they fail closed, because the JS operators do not broadcast element-wise.
+  Less: (args, compile) => compileJSCollectionBoolean('Less', args, compile),
+  LessEqual: (args, compile) =>
+    compileJSCollectionBoolean('LessEqual', args, compile),
+  Greater: (args, compile) =>
+    compileJSCollectionBoolean('Greater', args, compile),
+  GreaterEqual: (args, compile) =>
+    compileJSCollectionBoolean('GreaterEqual', args, compile),
+  And: (args, compile) => compileJSCollectionBoolean('And', args, compile),
+  Or: (args, compile) => compileJSCollectionBoolean('Or', args, compile),
+  Not: (args, compile) => compileJSCollectionBoolean('Not', args, compile),
   // Note: `Abs` of a fixed-arity point never reaches this handler — the
   // shared compiler rewrites `Abs(Tuple)` → `Norm` (base-compiler.ts) so the
   // point compiles through the `Norm` codegen below (Tycho item 74).
@@ -509,8 +623,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(${compile(arg)}).length`;
   },
   // Positional access. CE `At` is 1-based and supports negative indices from
-  // the end; an out-of-range or zero index yields NaN (matching the
-  // interpreter's `Nothing`, projected to NaN on a real target). Only the
+  // the end. The index may be a scalar, a list of integers (gather), or a
+  // boolean mask — `_SYS.at` dispatches on its runtime shape, since an index
+  // expression (e.g. `p[X-1]`) is not always statically provably a collection.
+  // A scalar out-of-range or zero index yields NaN (matching the interpreter's
+  // `Nothing`, projected to NaN on a real target); a gather drops out-of-range
+  // entries; a non-integer entry in a collection index makes the interpreter
+  // decline, projected as a scalar NaN for the whole result. Only the
   // single-index form over an indexed collection compiles; nested/multi-index
   // access and non-collection operands fail closed (D6).
   At: (args, compile) => {
@@ -533,6 +652,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `At: cannot compile — first operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
       );
+    // A COMPLEX index needs no compile-time gate: the interpreter validates an
+    // index through its `.re` (so `p[1+2i]` selects `p[1]`, the imaginary part
+    // silently dropped), and `_SYS.at` reproduces that at RUN time. A static
+    // gate was tried and reverted — the index's declared type is routinely far
+    // wider than its runtime value (a comprehension variable types as
+    // `boolean | indexed_collection | number | string`), so refusing on
+    // "not provably real" declined ordinary compilable code such as `P[n]`
+    // inside a comprehension. Matching the interpreter beats refusing.
     return `_SYS.at(${compile(coll)}, ${compile(index)})`;
   },
   // Fold a collection. CE `Reduce` canonicalizes `\sum_{i=d}^{d} d` to
@@ -1446,6 +1573,57 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // Inline the hash; no runtime helper is required.
     const a = compile(arg);
     return `(() => { const _s = (${a}) * 12.9898; const _v = Math.sin(_s) * 43758.5453; return _v - Math.floor(_v); })()`;
+  },
+  // Eager list of `n` uniform reals in [0, 1) — compiled via `_SYS.randomList`
+  // (Tycho item 80). Two contracts, both faithful to "compiled = interpreted,
+  // or refuse" (D6):
+  //   • Engine-stream form `RandomList(n)` under a compile-time engine seed is
+  //     a random PROCESS: fresh draws per invocation (like the interpreter's
+  //     engine stream), reproducible because a recompile under the same
+  //     `ce.randomSeed` replays the sequence from the start. Implemented as a
+  //     per-compilation advancing `mulberry32` stream keyed by a compile-time
+  //     id (`cid`), held in the compiled function's own `_SYS` bundle — see
+  //     `makeSysHelpers`/`makeRandomList`. The per-node seed mixing matches
+  //     `Random`/`Shuffle`.
+  //   • Explicit-seed form `RandomList(n, seed)` is a pure random VALUE:
+  //     runtime-hashed, matching interpretation bit-for-bit. ALL call-site
+  //     stability lives here.
+  // The count is range-checked at RUNTIME inside the helper, before any draw.
+  RandomList: (args, compile, target) => {
+    if (args.length === 2) {
+      // Explicit-seed form `RandomList(n, seed)`: hash the runtime seed value
+      // exactly as the interpreter's `mulberry32(hashSeed(seedOp.re))`.
+      // A COMPLEX seed compiles to an `{ re, im }` object, which `hashSeed`
+      // would treat as a string — returning the empty-string FNV hash and so a
+      // DIFFERENT sequence from interpretation, silently breaking the
+      // bit-for-bit parity this form exists to provide. The interpreter seeds
+      // from the real part only, which no real-target lowering can reproduce
+      // from the object, so refuse (D6).
+      // A complex seed needs no compile-time gate either: `_SYS.randomList`
+      // takes its real part at run time, exactly as the interpreter's
+      // `hashSeed(seedOp.re)` does. (Left to itself, `hashSeed` would hash the
+      // `{ re, im }` OBJECT as a string — the empty-string FNV hash — and
+      // silently produce a different sequence.)
+      return `_SYS.randomList(${compile(args[0])}, ${compile(args[1])}, true)`;
+    }
+    if (args.length !== 1)
+      throw new Error(
+        `RandomList: expected one or two arguments. Fail closed (D6).`
+      );
+    const seed = target?.randomSeed;
+    if (seed !== undefined && seed !== null) {
+      // Engine-stream form: mix a per-node 32-bit seed (identical mixing to
+      // `Random`/`Shuffle`) and allocate a compile-time stream id. The helper
+      // draws the NEXT n values from this compilation's stream on each call, so
+      // invocations advance (fresh per call); a recompile allocates a fresh
+      // id → replay from `s`.
+      const idx = target?.randomState ? target.randomState.counter++ : 0;
+      const s = (seed ^ Math.imul(idx + 1, 0x9e3779b1)) >>> 0;
+      const cid = _randomListStreamId++;
+      return `_SYS.randomList(${compile(args[0])}, ${s}, false, ${cid})`;
+    }
+    // No engine seed: fresh `Math.random` draws each invocation.
+    return `_SYS.randomList(${compile(args[0])})`;
   },
   Round: (args, compile) => {
     // The interpreter rounds half away from zero (Round(-2.5) = -3); JS
@@ -2363,6 +2541,22 @@ type BcastValue = number | { re: number; im: number } | BcastValue[];
  * `f` is applied directly. `f` therefore only ever sees scalar (or complex)
  * operands.
  */
+/**
+ * The numeric value an `At` index entry contributes, mirroring the
+ * interpreter's use of the boxed index's `.re`: a plain number passes through,
+ * a compiled complex `{ re, im }` yields its real part (the imaginary part is
+ * dropped, exactly as interpretation does), and anything else — a boolean, a
+ * string, `undefined` — yields NaN so the caller declines.
+ */
+function indexValue(v: unknown): number {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'object' && v !== null && 're' in v) {
+    const re = (v as { re: unknown }).re;
+    if (typeof re === 'number') return re;
+  }
+  return NaN;
+}
+
 function bcast(
   f: (...xs: BcastValue[]) => BcastValue,
   ...args: BcastValue[]
@@ -2702,6 +2896,10 @@ const SYS_HELPERS = {
     }
     return l;
   },
+  // NOTE: `randomList` is deliberately NOT defined here — it is the one
+  // STATEFUL helper, so it is bound per compiled function by
+  // `makeSysHelpers()` below, which owns the engine-stream store. Defining a
+  // shared instance here would reintroduce a process-global stream map.
   // --- Linear algebra (real, nested-array representation) ----------------
   // Dimension mismatches yield NaN (the interpreter's error/inert result
   // projected onto a real target).
@@ -2857,10 +3055,59 @@ const SYS_HELPERS = {
   // Positional access for compiled `At`. CE `At` is 1-based; a negative index
   // counts from the end. A zero or out-of-range index yields NaN (the
   // interpreter returns `Nothing`, projected to NaN on a real target).
-  at: (arr: unknown, i: number): number => {
+  //
+  // A COMPLEX index value arrives as an `{ re, im }` object; the interpreter
+  // reads its `.re` and ignores the imaginary part, so `indexValue` does the
+  // same. Doing this at RUN time rather than gating at compile time is
+  // deliberate: the index's declared type is routinely far wider than its
+  // runtime value (a comprehension variable types as
+  // `boolean | indexed_collection | number | string`), so a static
+  // "provably real" gate rejected ordinary compilable code.
+  //
+  // The index may itself be a collection at run time (a literal list, or the
+  // array a `_SYS.bcast` index expression such as `p[X-1]` produces), so
+  // dispatch on its shape here rather than at compile time. A collection index
+  // mirrors the interpreter's `At` Case B:
+  //  - boolean mask (EVERY entry a boolean — an empty index is a mask, since
+  //    `every` on an empty array is true): keep element i where mask[i] is
+  //    true, 1-based; mask entries past the end contribute nothing;
+  //  - integer gather: select each indexed element, negative entries counting
+  //    from the end (same normalization as the scalar path), out-of-range
+  //    entries DROPPED (the result may be shorter than the index list).
+  // A non-integer entry makes the interpreter decline — `At` stays unevaluated
+  // and produces no value at all — so the WHOLE result is NaN (the projection
+  // of "no value" on a real target), not a per-slot NaN, which would invent an
+  // element the interpreter never produces.
+  at: (arr: unknown, i: number | unknown[]): number | unknown[] => {
     if (!Array.isArray(arr)) return NaN;
     const n = arr.length;
-    const idx = i > 0 ? i - 1 : n + i;
+    if (Array.isArray(i)) {
+      const picked: unknown[] = [];
+      if (i.every((m) => typeof m === 'boolean')) {
+        i.forEach((m, k) => {
+          if (m === true && k < n) picked.push(arr[k]);
+        });
+        return picked;
+      }
+      for (const m of i) {
+        const mv = indexValue(m);
+        if (!Number.isInteger(mv)) return NaN;
+        const idx = mv > 0 ? mv - 1 : n + mv;
+        if (mv === 0 || idx < 0 || idx >= n) continue;
+        picked.push(arr[idx]);
+      }
+      return picked;
+    }
+    // Scalar index. The interpreter's Case C reads the index's `.re` and
+    // accepts it only if that is an INTEGER, otherwise declining (`At` stays
+    // unevaluated, producing no value) — so anything else projects to NaN.
+    // Guard explicitly rather than falling into index arithmetic: JS coercion
+    // would silently invent a value — `true` would index slot 0 (`true > 0`,
+    // `true - 1 === 0`) and a fractional or NaN index would read a
+    // non-existent property and yield `undefined`.
+    const iv = indexValue(i);
+    if (!Number.isInteger(iv)) return NaN;
+    const idx = iv > 0 ? iv - 1 : n + iv;
     if (i === 0 || idx < 0 || idx >= n) return NaN;
     return arr[idx] as number;
   },
@@ -3014,10 +3261,94 @@ const SYS_HELPERS = {
 };
 
 /**
+ * Build the `randomList` helper over a given engine-stream store.
+ *
+ * Eager list of `n` uniform reals in [0, 1) — the compiled form of
+ * `RandomList` (Tycho item 80). Three modes, matching the interpreter and the
+ * "compiled = interpreted, or refuse" doctrine (D6):
+ *   • `seed` given, `hash` false, `cid` given: the engine-stream form
+ *     `RandomList(n)` under a compile-time engine seed. A random PROCESS: one
+ *     `mulberry32` stream per compiled random node (keyed by `cid` in
+ *     `streams`), created lazily from the mixed `seed` and ADVANCED across
+ *     calls, so each invocation draws the next `n` values.
+ *   • `seed` given, `hash` true: the explicit user seed of
+ *     `RandomList(n, seed)`. A pure random VALUE — hashed with `hashSeed`,
+ *     exactly as the interpreter does, so every invocation replays the same
+ *     list. All call-site stability lives here.
+ *   • no `seed`: `Math.random` per draw (fresh list each invocation, like
+ *     unseeded `Random`/`Shuffle`).
+ *
+ * The count is rounded (`toInteger` semantics) and range-checked loudly BEFORE
+ * any draw — never silently clamp or return NaN, and a bad count never
+ * advances the stream.
+ */
+function makeRandomList(
+  streams: Map<number, () => number>
+): (n: number, seed?: number, hash?: boolean, cid?: number) => number[] {
+  return (n, seed, hash, cid) => {
+    // The interpreter seeds from `seedOp.re`; a compiled complex seed arrives
+    // as `{ re, im }`, so take its real part rather than letting `hashSeed`
+    // stringify the object into the empty-string FNV hash.
+    if (seed !== undefined && typeof seed !== 'number') {
+      const re = indexValue(seed);
+      if (Number.isNaN(re))
+        throw new Error('RandomList: the seed must be a number');
+      seed = re;
+    }
+    n = Math.round(n);
+    if (!Number.isFinite(n) || n < 0 || n > MAX_RANDOM_LIST_SIZE)
+      throw new Error(
+        `RandomList: expected a list length in 0..${MAX_RANDOM_LIST_SIZE}`
+      );
+    let draw: () => number;
+    if (seed === undefined) draw = Math.random;
+    else {
+      if (Number.isNaN(seed))
+        throw new Error('RandomList: the seed must be a number');
+      if (cid !== undefined) {
+        // Engine-stream form: reuse (or lazily create) this compilation's
+        // advancing stream so successive invocations draw fresh values.
+        let stream = streams.get(cid);
+        if (stream === undefined) {
+          stream = mulberry32(seed >>> 0);
+          streams.set(cid, stream);
+        }
+        draw = stream;
+      } else draw = mulberry32(hash ? hashSeed(seed) : seed >>> 0);
+    }
+    const l: number[] = new Array(n);
+    for (let i = 0; i < n; i++) l[i] = draw();
+    return l;
+  };
+}
+
+/** The `_SYS` bundle injected into a compiled JavaScript function. */
+type SysHelpers = typeof SYS_HELPERS & {
+  randomList: ReturnType<typeof makeRandomList>;
+};
+
+/**
+ * Build the `_SYS` bundle for ONE compiled function.
+ *
+ * The stateless helpers are shared through the prototype chain (no per-compile
+ * copying); the only stateful one, `randomList`, gets an own binding over a
+ * fresh engine-stream store. Scoping that store here — rather than to a
+ * module-global map keyed by a monotonic id — ties each PRNG stream's lifetime
+ * to the compiled function that draws from it, so a discarded compiled
+ * function releases its streams instead of retaining them for the life of the
+ * process.
+ */
+function makeSysHelpers(): SysHelpers {
+  const sys = Object.create(SYS_HELPERS) as SysHelpers;
+  sys.randomList = makeRandomList(new Map());
+  return sys;
+}
+
+/**
  * JavaScript-specific function extension that provides system functions
  */
 export class ComputeEngineFunction extends Function {
-  SYS = SYS_HELPERS;
+  SYS: SysHelpers = makeSysHelpers();
 
   constructor(body: string, preamble = '') {
     super(
@@ -3041,7 +3372,7 @@ export class ComputeEngineFunction extends Function {
  * JavaScript function literal with parameters
  */
 export class ComputeEngineFunctionLiteral extends Function {
-  SYS = SYS_HELPERS;
+  SYS: SysHelpers = makeSysHelpers();
 
   constructor(body: string, args: string[], preamble = '') {
     super(
@@ -3088,6 +3419,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         const result = {
           Pi: 'Math.PI',
           ExponentialE: 'Math.E',
+          // The boolean literals are constants, not free symbols: otherwise a
+          // literal mask (e.g. `p[[False, True, True]]`) compiles to a dangling
+          // `_.False`/`_.True` vars-object lookup and throws at run time.
+          True: 'true',
+          False: 'false',
           NaN: 'Number.NaN',
           ImaginaryUnit: '({ re: 0, im: 1 })',
           Half: '0.5',
@@ -3219,6 +3555,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         const result = {
           Pi: 'Math.PI',
           ExponentialE: 'Math.E',
+          // The boolean literals are constants, not free symbols: otherwise a
+          // literal mask (e.g. `p[[False, True, True]]`) compiles to a dangling
+          // `_.False`/`_.True` vars-object lookup and throws at run time.
+          True: 'true',
+          False: 'false',
           NaN: 'Number.NaN',
           ImaginaryUnit: '({ re: 0, im: 1 })',
           Half: '0.5',

@@ -2654,44 +2654,113 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '(value: indexed_collection | dictionary, index: (number|string|boolean|indexed_collection)+) -> unknown',
     type: (ops) => {
-      const xs = ops[0];
-      const t = xs.type.type;
-      // A dictionary/record is a keyed collection whose `At` returns the
-      // VALUE, not the iteration pair `tuple<string, T>` that
-      // `collectionElementType` reports (that is correct for iteration, but
-      // wrong here). Special-case it.
-      if (typeof t === 'string') {
-        if (t === 'dictionary' || t === 'record') return 'any';
-      } else if (t.kind === 'dictionary') {
-        return t.values;
-      } else if (t.kind === 'record') {
-        // A literal string index selecting a known field yields that field's
-        // type; otherwise widen across all field value types.
-        const key = ops[1];
-        if (key && isString(key)) {
-          const fieldType = t.elements[key.string];
-          if (fieldType) return fieldType;
-        }
-        return widen(...Object.values(t.elements)) as Type;
-      } else if (t.kind === 'tuple') {
-        // A literal integer index selects that slot's type (1-based, negatives
-        // count from the end); otherwise `collectionElementType` widens across
-        // all slot types.
-        const key = ops[1];
-        if (ops.length === 2 && key?.isInteger === true) {
-          const n = t.elements.length;
-          const raw = key.re;
-          if (typeof raw === 'number' && Number.isFinite(raw)) {
-            const i = raw < 0 ? n + raw + 1 : raw;
-            if (i >= 1 && i <= n) return t.elements[i - 1].type;
+      // The type of the element(s) a single index selects.
+      const elementType = (): Type => {
+        const xs = ops[0];
+        const t = xs.type.type;
+        // A dictionary/record is a keyed collection whose `At` returns the
+        // VALUE, not the iteration pair `tuple<string, T>` that
+        // `collectionElementType` reports (that is correct for iteration, but
+        // wrong here). Special-case it.
+        if (typeof t === 'string') {
+          if (t === 'dictionary' || t === 'record') return 'any';
+        } else if (t.kind === 'dictionary') {
+          return t.values;
+        } else if (t.kind === 'record') {
+          // A literal string index selecting a known field yields that field's
+          // type; otherwise widen across all field value types.
+          const key = ops[1];
+          if (key && isString(key)) {
+            const fieldType = t.elements[key.string];
+            if (fieldType) return fieldType;
+          }
+          return widen(...Object.values(t.elements)) as Type;
+        } else if (t.kind === 'tuple') {
+          // A literal integer index selects that slot's type (1-based,
+          // negatives count from the end); otherwise `collectionElementType`
+          // widens across all slot types.
+          const key = ops[1];
+          if (ops.length === 2 && key?.isInteger === true) {
+            const n = t.elements.length;
+            const raw = key.re;
+            if (typeof raw === 'number' && Number.isFinite(raw)) {
+              const i = raw < 0 ? n + raw + 1 : raw;
+              if (i >= 1 && i <= n) return t.elements[i - 1].type;
+            }
           }
         }
+        return (
+          xs.operatorDefinition?.collection?.elttype?.(xs) ??
+          collectionElementType(t) ??
+          'any'
+        );
+      };
+
+      // A COLLECTION-valued index (an integer gather or a boolean mask)
+      // selects MANY elements, so the result is a `list` of the element type,
+      // not a single element. Reporting the bare element type here would
+      // claim a scalar for a value that is actually a list: parent operators
+      // would then skip broadcasting (compiled `At(p, I) + 1` degenerating to
+      // JS array-plus-number string concatenation) and collection operators
+      // such as `Length` would fail closed on a genuine list.
+      //
+      // Both operands must qualify, mirroring what `evaluate` actually does:
+      //  - the SOURCE must be an indexed collection. A dictionary/record
+      //    source takes the `isDictionary` branch in `evaluate`, which accepts
+      //    a plain string key only and DECLINES any collection-shaped index —
+      //    so claiming `list<T>` there would over-claim a shape the
+      //    interpreter never produces.
+      //  - the INDEX must be an indexed collection. A string index is a record
+      //    key, not a gather, so it is excluded by the source test above and
+      //    by `isString`.
+      const isGatherIndex = (idx: Expression | undefined): boolean =>
+        idx !== undefined &&
+        !isString(idx) &&
+        isSubtype(idx.type.type, 'indexed_collection');
+
+      if (ops.length === 2) {
+        if (
+          isSubtype(ops[0].type.type, 'indexed_collection') &&
+          isGatherIndex(ops[1])
+        )
+          return { kind: 'list', elements: elementType() } as ListType;
+        return elementType();
       }
-      return (
-        xs.operatorDefinition?.collection?.elttype?.(xs) ??
-        collectionElementType(t) ??
-        'any'
-      );
+
+      // CHAINED form `At(M, i, j, …)`: `evaluate` walks the indices, and each
+      // step transforms the CURRENT value — a scalar index peels one collection
+      // level, while a gather REPLACES the value with a fresh `List` of the
+      // peeled element type. The next index then applies to that new value.
+      // Without this branch the handler fell back to `elementType()`, which
+      // only ever consulted `ops[1]`, so `At(M, 1, [1,2])` on a 2x3 matrix
+      // reported `vector<int^3>` (a whole row) for the 2-element list `[1,2]`.
+      //
+      // The step must be applied per index, NOT accumulated into a single
+      // "did any step gather" flag: a gather followed by a scalar index selects
+      // one entry OUT of the gathered list, so `At(M, [1,2], 1)` is a whole row
+      // (`[1,2,3]`), not a list of scalars. A global flag reported
+      // `list<integer>` for it — over-peeled and mis-shaped.
+      //
+      // Only walk an indexed-collection source, and not a TUPLE: a tuple IS an
+      // `indexed_collection`, but `elementType()` has slot-aware handling for
+      // it that a plain `collectionElementType` walk (which widens across all
+      // slots) would lose. Dictionaries/records likewise.
+      const sourceType = ops[0].type.type;
+      const isTupleSource =
+        typeof sourceType !== 'string' && sourceType.kind === 'tuple';
+      if (!isSubtype(sourceType, 'indexed_collection') || isTupleSource)
+        return elementType();
+
+      let current: Type = sourceType;
+      for (let i = 1; i < ops.length; i++) {
+        const peeled = collectionElementType(current) ?? 'any';
+        // A gather yields a dimensionless list: the gathered length is a
+        // runtime property (out-of-range entries are dropped).
+        current = isGatherIndex(ops[i])
+          ? ({ kind: 'list', elements: peeled } as ListType)
+          : peeled;
+      }
+      return current;
     },
 
     // Custom canonical handler delegating operand validation to

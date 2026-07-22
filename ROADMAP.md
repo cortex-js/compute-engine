@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-21.
+**Last updated:** 2026-07-22.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -78,6 +78,61 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 ---
 
 ## Remaining work
+
+### Element-wise compiled comparisons and connectives (deferred 2026-07-22)
+
+The ordering relations (`<`, `<=`, `>`, `>=`) and the logical connectives
+(`And`, `Or`, `Not`) **fail closed** on the JavaScript target when an operand
+may be a collection at run time, so those expressions fall back to the
+interpreter (which is correct). Compiling them element-wise is the open item.
+
+Background: these heads lower to raw JS infix operators, which are silently
+wrong on an array — `0 < [1,0,1]` stringifies it to `"1,0,1"` and yields a
+scalar `false`, and an array is truthy, so `m1 && m2` returns a whole operand
+and `!m` returns `false`. The fix that shipped only stops the wrong answer; it
+does not add broadcasting. The user-visible cost is the Desmos filter form
+`L[|[1...n]-k|>0]`, which now interprets instead of compiling.
+
+A `_SYS.bcast`-based element-wise lowering was implemented and **withdrawn**
+after review — it got three things wrong, all of which a real implementation
+must handle:
+
+- **Per-POSITION projection.** An empty or complex position must not poison its
+  siblings. `Not([[], [True]])` broadcasts to `[[], [false]]`; the interpreter
+  projects only the empty position to `Nothing`/NaN, whereas a whole-result
+  post-scan collapsed everything to a scalar NaN.
+- **Shortest-length truncation.** `bcast` truncates to the shortest operand, so
+  a pre-scan over all operands inspects suffix elements that interpretation
+  never evaluates.
+- **Purity.** A broadcast operand is evaluated once and reused per element,
+  while the interpreter re-evaluates per element — so a repeated impure
+  *scalar* (`And([T,T], Random() < 0.5)`) diverges. But an impure operand that
+  *is* the collection being traversed (`Less([Random(), Random()], 0.5)`) is
+  safe; a guard must distinguish them. Note the interpreter is itself
+  inconsistent here: the arithmetic broadcast path evaluates such a scalar only
+  once. **Settle the interpreter's semantics before matching them.**
+
+Adjacent, and worth doing with it: `Not([])` compiles through the unary `.map`
+broadcast to `[]`, whereas the interpreter yields `Nothing` (→ NaN). Only
+`Not` is affected in practice — the numeric unary heads type-error on a
+`list<nothing>` operand.
+
+### Complex values in compiled scalar comparisons (deferred 2026-07-22)
+
+A compiled scalar comparison whose operand is merely `number`- or
+`unknown`-typed lowers to a raw JS `<`. If that operand holds a complex
+`{re, im}` at run time, JS coercion returns a silent `false`, where the
+interpreter leaves the ordering unevaluated (→ NaN on a real target).
+Indexing and `RandomList` seeding already project the real part at run time;
+comparisons do not.
+
+Deferred because the fix touches the hottest compiled path: every scalar
+comparison — including compiled plot bodies, where `x < 3` with `x` typed
+`unknown` is the norm — would need a runtime object-check, with a real
+performance cost. A compile-time refusal is *not* an option: it would stop
+ordinary `unknown`-typed plot variables from compiling at all. Wanted: a
+cheaper discrimination (e.g. only guarding operands that can actually receive
+a complex binding), measured against the plot benchmark.
 
 ### Broadcast typing residue (`broadcastable<T>` lift landed 2026-07-17)
 

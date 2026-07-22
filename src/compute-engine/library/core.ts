@@ -29,6 +29,7 @@ import {
   deterministicRandom,
   hashSeed,
   mulberry32,
+  MAX_RANDOM_LIST_SIZE,
 } from '../numerics/random.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
@@ -91,9 +92,6 @@ function splitGraphemeClusters(s: string): string[] {
 // U+3000 (ideographic space).
 const UNICODE_WHITESPACE =
   /[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
-
-// Cap on the number of elements `RandomList` will eagerly materialize.
-const MAX_RANDOM_LIST_SIZE = 1_000_000;
 
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {

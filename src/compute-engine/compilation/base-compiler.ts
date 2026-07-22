@@ -591,8 +591,34 @@ export class BaseCompiler {
             .map((arg) => BaseCompiler.compileValueOperand(arg, target))
             .join(', ')})`;
         } else {
+          // A relational or logical head whose operand is merely
+          // collection-TYPED must not take the raw infix path. `.isCollection`
+          // is false for a computed `list<real>` (e.g. `|L - k|`, or
+          // `Power(L, 2)`), so the check below lets it through and emits
+          // `0 < X` — which, when `X` is an array at run time, stringifies it
+          // (`0 < "1,0,1"`) and returns a silent scalar `false` behind a
+          // `success: true`. The connectives are worse: a JS array is TRUTHY,
+          // so `m1 && m2` yields a whole operand and `!m` yields `false`.
+          // Decline here so the head falls through to function codegen, which
+          // fails closed (`compileJSCollectionBoolean`) and lets the engine
+          // fall back to the interpreter. `Equal`/`NotEqual` are unaffected:
+          // they have no infix mapping and always reach their own codegen,
+          // which already handles collection operands.
+          //
+          // JAVASCRIPT ONLY, so that other targets keep their existing
+          // lowering unchanged: this diverts to a JS-specific handler, and the
+          // hazard being avoided is a JS coercion rule.
+          const relationalOverCollection =
+            target.language === 'javascript' &&
+            (isRelationalOperator(h) ||
+              BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h)) &&
+            args.some(
+              (x) =>
+                x.type.matches('collection') ||
+                isBoundPossiblyCollectionTyped(x)
+            );
           // Compile as an operator (only for non-collection arguments)
-          if (args.every((x) => !x.isCollection)) {
+          if (args.every((x) => !x.isCollection) && !relationalOverCollection) {
             if (isRelationalOperator(h) && args.length > 2) {
               // Chain relational operators, conjoined with the target's chain
               // operator (`&&` by default; Python `and`).

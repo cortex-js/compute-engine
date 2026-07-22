@@ -68,6 +68,32 @@ const OPERATOR_DEF_KEYS = new Set([
   'collection',
 ]);
 
+/**
+ * Normalize a definition's `signature` to a `Type`/`TypeString` the local
+ * bundle can box.
+ *
+ * When an operator definition is built by spreading an existing boxed
+ * definition (`{ ...ce.lookupDefinition('At').operator, evaluate }`), its
+ * `signature` field is a `BoxedType` instance. Detect it by duck-typing on its
+ * inner `type` property and `matches` method — NOT `instanceof BoxedType`,
+ * which fails across a host/plugin bundle boundary (see the cross-bundle
+ * identity hazard in CLAUDE.md) — and unwrap it to its inner `Type` so a fresh,
+ * local `BoxedType` can be constructed from it. A plain `Type`/`TypeString` is
+ * returned unchanged.
+ */
+function normalizeSignatureField(
+  sig: BoxedType | Type | TypeString
+): Type | TypeString {
+  if (
+    typeof sig === 'object' &&
+    sig !== null &&
+    'type' in sig &&
+    typeof (sig as { matches?: unknown }).matches === 'function'
+  )
+    return (sig as BoxedType).type;
+  return sig as Type | TypeString;
+}
+
 export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   engine: ComputeEngine;
 
@@ -179,10 +205,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
     if (def.signature) {
       this.inferredSignature = false;
-      this.signature =
-        def.signature instanceof BoxedType
-          ? def.signature
-          : new BoxedType(def.signature, ce._typeResolver);
+      this.signature = new BoxedType(
+        normalizeSignatureField(def.signature),
+        ce._typeResolver
+      );
     } else this.signature = new BoxedType('(any*) -> unknown');
 
     this.update(def);
@@ -224,6 +250,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   update(def: OperatorDefinition): void {
     if (this.engine.strict) {
       for (const key in def) {
+        // Silently ignore private fields so that spreading an existing boxed
+        // operator definition (`{ ...ce.lookupDefinition('At').operator }`) to
+        // override a handler is accepted: such a spread carries private keys
+        // (`_isLambda`, `_lambdaLiteral`, …) that are intentionally absent
+        // from `OPERATOR_DEF_KEYS`. Its public engine-internal keys
+        // (`engine`, `name`, `inferredSignature`) are already listed there and
+        // need no carve-out. A genuine typo key (e.g. `evaluete`) is neither
+        // private nor listed, and still throws.
+        if (key.startsWith('_')) continue;
         if (!OPERATOR_DEF_KEYS.has(key))
           throw new Error(
             `Operator Definition "${this.name}": unexpected key "${key}"`
@@ -292,11 +327,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.complexity = def.complexity ?? this.complexity;
 
     if (def.signature) {
-      const oldSig = def.signature;
-      const newSig =
-        def.signature instanceof BoxedType
-          ? def.signature
-          : this.engine.type(def.signature);
+      const oldSig = normalizeSignatureField(def.signature);
+      const newSig = this.engine.type(oldSig);
       if (oldSig && !newSig.matches(this.engine.type(oldSig))) {
         throw new Error(
           `Operator Definition "${this.name}": signature "${newSig}" does not match "${oldSig}"`

@@ -1,5 +1,77 @@
 ## [Unreleased]
 
+### Improvements
+
+- **`RandomList` now compiles on the JavaScript target.** `RandomList(n)` draws
+  fresh values on every call of the compiled function, matching `evaluate()`.
+  For draws that stay the same from call to call, use the explicit-seed form
+  `RandomList(n, seed)`. A count that is negative, non-finite, or above the
+  1,000,000 cap makes the compiled function throw, rather than silently
+  clamping or returning `NaN`. (`evaluate()` reports an `out-of-range` error
+  expression for the same input.)
+
+- **`declare()` accepts a spread of an existing operator definition**, so you
+  can override one handler and keep the rest:
+
+  ```js
+  ce.declare('At', { ...ce.lookupDefinition('At').operator, evaluate });
+  ```
+
+  The built-in's other handlers (`type`, `signature`, `canonical`, …) are
+  preserved. Overriding with a bare `{ signature, evaluate }` instead **drops**
+  them — prefer the spread.
+
+- **Compiled `At` supports a collection-valued index.** An index that is a list
+  of indices or a boolean mask now works when compiled, matching `evaluate()`:
+
+  ```js
+  const p = ['List', 10, 20, 30];
+
+  ce.box(['At', p, ['List', 3, 1]]);                    // → [30, 10]
+  ce.box(['At', p, ['List', 'False', 'True', 'True']]); // → [20, 30]
+
+  ce.assign('p', ce.box(p));
+  ce.assign('X', ce.box(['List', 1, 2, 3]));
+  ce.parse('p_{X}'); // → [10, 20, 30]
+  ```
+
+  Negative indices count from the end and out-of-range entries are dropped, so
+  a gather may be shorter than its index list. Previously these returned
+  `undefined`, a wrongly-shaped scalar (`p[[2]]` gave `20` rather than `[20]`),
+  or threw.
+
+  An `At` with a collection-valued index now has type `list<T>` rather than the
+  element type `T`. **If you dispatch on `.type`, expect the new value.** This
+  is what lets surrounding operations compose: `At(p, I) + 1` broadcasts
+  element-wise, and `Length(At(p, I))` compiles.
+
+### Bug Fixes
+
+- **Compiled comparisons and logical connectives no longer return a wrong
+  answer for a list operand.** `<`, `<=`, `>`, `>=`, `And`, `Or` and `Not`
+  could produce a scalar `false` (or one of their operands) where `evaluate()`
+  returns an element-wise list of booleans — a wrong result from a successful
+  compile. Such expressions now decline to compile and fall back to
+  interpretation, which gives the correct answer.
+
+  Mostly affects a filter whose condition is computed, such as
+  `L[|[1...n]-k|>0]`: it now evaluates correctly but is no longer compiled, so
+  expect interpreter performance for that shape. Scalar comparisons and
+  connectives, and list literals such as `Not([True, False])`, still compile.
+
+- **Complex values are handled correctly when compiled.** `At(p, 1+2i)` and
+  `RandomList(n, 7+3i)` now agree with `evaluate()`, which uses the real part
+  of a complex index or seed. Previously the compiled forms returned `NaN` and
+  a different random sequence respectively.
+
+  A compiled scalar *comparison* against a complex value is still wrong (it
+  returns `false` rather than declining); this is unchanged and tracked in
+  `ROADMAP.md`.
+
+- **`At` with several indices reports the correct type.** For a 2×3 matrix
+  `M`, `At(M, 1, [1,2])` is the 2-element list `[1,2]` and `At(M, 1, 2)` is a
+  single element — both previously reported the type of a whole matrix row.
+
 ## 0.92.1 _2026-07-22_
 
 ### Breaking Changes
@@ -22,9 +94,9 @@
 
   `Join` of collections is unchanged (`Join([1,2],[3,4])` → `[1,2,3,4]`;
   `Join([(0,3)],[(2,5)])` → `[(0,3),(2,5)]`). The one reversal is a tuple in
-  operand position where it was previously flattened:
-  `Join((1,2),(3,4))` was `[1,2,3,4]` and is now `[(1,2),(3,4)]`. `Join` now
-  agrees with `Append` on a tuple element.
+  operand position where it was previously flattened: `Join((1,2),(3,4))` was
+  `[1,2,3,4]` and is now `[(1,2),(3,4)]`. `Join` now agrees with `Append` on a
+  tuple element.
 
 - **`Join` now reports the joined ELEMENT type instead of a bare `list`.** Its
   type handler returned `list` whatever it was given, so a joined point list did
@@ -45,9 +117,9 @@
 
 ### Issues Resolved
 
-- **`evaluateAsync()` no longer tears down a scoped operator's local scope
-  while the operator is still running.** An `evaluateAsync` handler returns at
-  its first suspension point, not at completion, so the dispatcher popped the
+- **`evaluateAsync()` no longer tears down a scoped operator's local scope while
+  the operator is still running.** An `evaluateAsync` handler returns at its
+  first suspension point, not at completion, so the dispatcher popped the
   operator's local evaluation context too early; everything the resumed handler
   did then ran against the enclosing scope. A big operator whose reduction
   outlived one time slice (roughly, more than ~16ms of work) assigned its loop
@@ -91,21 +163,21 @@
 
 - **The parser's three symbol hooks are replaced by one oracle:
   `resolveSymbol`.** The `ParseLatexOptions` handlers `getSymbolType` and
-  `hasSubscriptEvaluate` (and the internal `isSymbolDeclared`) are replaced by
-  a single optional handler:
+  `hasSubscriptEvaluate` (and the internal `isSymbolDeclared`) are replaced by a
+  single optional handler:
 
   ```js
   resolveSymbol?: (symbol) => { type, subscriptEvaluate? } | undefined
   ```
 
   Return `undefined` for a symbol the handler does not know; return a record
-  (with a `BoxedType` or type-string `type`) for one it does. Declaration is
-  the *presence* of the record — `{ type: 'unknown' }` is a declared symbol of
+  (with a `BoxedType` or type-string `type`) for one it does. Declaration is the
+  _presence_ of the record — `{ type: 'unknown' }` is a declared symbol of
   unknown type — so the previously inexpressible distinction between
-  "undeclared" and "declared, type unknown" is now first-class, and
-  inconsistent answers (a typed-but-undeclared symbol) are unrepresentable.
+  "undeclared" and "declared, type unknown" is now first-class, and inconsistent
+  answers (a typed-but-undeclared symbol) are unrepresentable.
 
-  Semantics also changed from *replace* to *supplement*: through `ce.parse()`
+  Semantics also changed from _replace_ to _supplement_: through `ce.parse()`
   the handler is consulted first and any symbol it does not resolve falls back
   to the engine scope's definitions. Handlers no longer need to re-implement
   scope delegation (previously required boilerplate with `getSymbolType`):
@@ -122,27 +194,27 @@
   ```
 
   Similarly, the `Parser` interface (custom LaTeX dictionary entries) replaces
-  `getSymbolType()`/`hasSubscriptEvaluate()` with `parser.resolveSymbol()`,
-  e.g. `parser.getSymbolType(id).matches('function')` becomes
+  `getSymbolType()`/`hasSubscriptEvaluate()` with `parser.resolveSymbol()`, e.g.
+  `parser.getSymbolType(id).matches('function')` becomes
   `parser.resolveSymbol(id)?.type.matches('function')`.
 
 ### Improvements
 
-- **A declared name now outranks subscript-index capture.** Once a symbol `B`
-  is bound to an indexed-collection value (a point, list, tuple…), the parser
-  reads `B_{2}` as indexing (`At(B, 2)`), which made every subscripted sibling
-  name (`B_2`, `B_3`, … alongside the point `B`) unspellable — and, since
-  `B_{2}` and `B[2]` produce identical trees, unrecoverable after the parse. A
-  subscripted spelling whose joined name is declared or assigned in scope now
-  parses as that symbol; index capture applies only to undeclared joins, and
-  bracket indexing (`B[2]`) is unaffected. Note that with the non-default
+- **A declared name now outranks subscript-index capture.** Once a symbol `B` is
+  bound to an indexed-collection value (a point, list, tuple…), the parser reads
+  `B_{2}` as indexing (`At(B, 2)`), which made every subscripted sibling name
+  (`B_2`, `B_3`, … alongside the point `B`) unspellable — and, since `B_{2}` and
+  `B[2]` produce identical trees, unrecoverable after the parse. A subscripted
+  spelling whose joined name is declared or assigned in scope now parses as that
+  symbol; index capture applies only to undeclared joins, and bracket indexing
+  (`B[2]`) is unaffected. Note that with the non-default
   `indexStyle: 'subscript'` serialization, `At(B, 2)` serializes as `B_{2}`,
   which re-parses as the symbol `B_2` when such a declaration exists.
 
 - **Rubi integration (experimental) — nested-radical substitution fallback
-  (R31).** `loadIntegrationRules` now closes nested-radical and sum-of-two-radical
-  integrands the bundled algebraic rules leave inert. A nested radical
-  (`√(x+√(x+1))/x²`, `√(1/x+√(1/x+1))`, the double-radical
+  (R31).** `loadIntegrationRules` now closes nested-radical and
+  sum-of-two-radical integrands the bundled algebraic rules leave inert. A
+  nested radical (`√(x+√(x+1))/x²`, `√(1/x+√(1/x+1))`, the double-radical
   `√(x+1)/(x+√(√(x+1)+1))`) is rationalized by iteratively substituting
   `u = (a+b·x)^{1/k}` (or the Laurent `(a+b/x)^{1/k}`) at the innermost radical
   linear in `x`, keeping the resulting rational's denominator factored so the
@@ -150,10 +222,10 @@
   `(√(x+1)+√(1−x))⁻²` is rationalized by its conjugate. Each result is accepted
   only after a domain-aware numeric derivative check against the integrand, so
   out-of-scope shapes stay cleanly unsolved. On the Bondarenko benchmark this
-  lifts CE+Rubi from 12/35 to 20/35 (closing 8 previously unsolved nested-radical
-  integrals; a ninth, #16, closes only under the production bundle's compiled
-  rule set). Structurally inert off its family, and disableable with
-  `RUBI_NO_R31`.
+  lifts CE+Rubi from 12/35 to 20/35 (closing 8 previously unsolved
+  nested-radical integrals; a ninth, #16, closes only under the production
+  bundle's compiled rule set). Structurally inert off its family, and
+  disableable with `RUBI_NO_R31`.
 
 ## 0.91.0 _2026-07-21_
 

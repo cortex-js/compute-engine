@@ -463,6 +463,19 @@ export function isValidValueDef(def: unknown): def is Partial<ValueDefinition> {
   }
 
   if ('description' in def) {
+    // A def that carries operator-shaped fields (e.g. a spread of an existing
+    // boxed operator definition, `{ ...ce.lookupDefinition('At').operator }`)
+    // is not a value definition — let the operator classifier claim it rather
+    // than throwing on the missing `type`/`value` field. A bare
+    // `{ description }` (no operator-shaped fields) still gets the helpful error.
+    if (
+      'evaluate' in def ||
+      'signature' in def ||
+      'canonical' in def ||
+      'complexity' in def ||
+      ('type' in def && typeof (def as { type: unknown }).type === 'function')
+    )
+      return false;
     throw new Error('Definitions should have a `type` or `value` field.');
   }
 
