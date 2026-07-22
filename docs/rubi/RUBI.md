@@ -6,7 +6,10 @@
 ≈90–91%; ch2 ≈72% / ch6 ≈60% effective (R30: **71/120** s120 seed5, +9 over the
 R29 baseline via the rational-in-hyperbolic cyclotomic-factored substitution;
 R8: **+3** via the poly×hyperbolic single-exponential PolyLog fallback —
-#230/#233/#47, clean per-problem A/B, 0 wrongs);
+#230/#233/#47, clean per-problem A/B, 0 wrongs); R31: nested-radical
+substitution fallback closes the Bondarenko nested-radical family (CE+R/F
+**12 → 20 / 35**, +8 — #2/#10/#11/#12/#15/#16/#17/#18, clean per-problem A/B,
+0 wrongs);
 **4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
 71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R24, s120 seed5):
@@ -2117,6 +2120,72 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     `singleAngleHyperbolicExponentialPieces` block (`hyperbolicHeadYForm` numeric
     identity vs the true hyperbolic value, pre-filter on/off-shape, piece
     reconstruction for #230/#47, off-shape → null).
+- **Phase R31 — nested-radical substitution fallback LANDED (2026-07-21, behind
+  `RUBI_NO_R31`).** Closes the nested-radical family of the Bondarenko benchmark
+  (`benchmarks/audit/REPORT-bondarenko.md`, CE+R/F **12 → 20 / 35**). A nested
+  radical — a fractional power whose argument itself contains a fractional power
+  of a LINEAR base (`√(x+√(x+1))/x²`, `√(1/x+√(1/x+1))`, the double-radical
+  `√(x+1)/(x+√(√(x+1)+1))`) — or the two-radical CONJUGATE shape
+  `(√(x+1)+√(1−x))⁻²` is not a rational function of x nor of any single radical,
+  so no bundled algebraic rule (nor R28/R29/R30) closes it. **Two levers** (new
+  `nestedRadicalFallback` driver method):
+  - **Lever A — fractional-power-of-linear substitution.** Substitute
+    `u = (a+b·x)^(1/k)` (`x=(u^k−a)/b`, `dx=(k/b)u^(k−1)du`; the Laurent case
+    `u=(a+b/x)^(1/k)` is `x=b/(u^k−a)`) at the INNERMOST such radical, removing
+    one nesting level (`fractionalPowerOfLinearSubstitution` — a single-pass
+    tree-walk that maps `L^q → u^(kq)` and bare `x → x(u)`, reusing `x` as the
+    new variable). Applied ITERATIVELY (a driver loop) — the double-radical cases
+    #10/#11/#12 need two substitutions — until the integrand is a rational
+    function of the new variable. A single-quadratic-radical residual
+    (`2u·√(u²+u−1)/(u²−1)²`, #17/#18) is routed as-is (the bundled 1.1.2
+    quadratic-radical rules close it).
+  - **Factored presentation (the R26B lesson).** When Lever A produces a
+    rational, `factoredRationalPresentation` normalizes it (`rationalNormalFormX`)
+    and keeps the denominator FACTORED (`x^m·(x−1)·(x+1)·residual`, via the shared
+    `factorDenominatorByCyclotomics` peeler — the family's roots are exactly
+    0/±1 + a residual quadratic). The bundled partial-fraction rules close the
+    factored form; the expanded high-degree denominator is inert (or, for #11,
+    takes a complex-cube-root path that does not numericize).
+  - **Lever B — conjugate rationalization.** `(c₁√L₁+c₂√L₂)^(−n)` times the
+    conjugate `(c₁√L₁−c₂√L₂)^n` clears the sum-of-radicals denominator to the
+    polynomial `(c₁²L₁−c₂²L₂)^n`; `expand()` leaves the numerator as an UNMERGED
+    product of linear radicals (`√(x+1)·√(1−x)`, not merged to `√(1−x²)`), which
+    the bundled product-of-linear-radicals rules close (#2 → `(1−√(1−x²))/(2x²)`).
+  - **Placement + fail-closed.** Wired into `intRec` behind `RUBI_NO_R31`, after
+    R30 / before the mutually-exclusive hyperbolic function-of-exponential
+    fallback. The pre-filter `hasNestedRadicalCandidate` is DELIBERATELY tight —
+    a bare `√(a+b·x)` (the binomial-product corpus's staple) does NOT qualify, so
+    the rung is structurally inert off-family. Each level D-verifies the composed
+    antiderivative against the ORIGINAL integrand with a DOMAIN-AWARE check
+    (`verifyNestedAntiderivative` tries several point-sets probing |x|<1, x>1,
+    x<0, since the substitutions restrict the real domain), so a non-verifying
+    or wrong-branch result stays cleanly unsolved.
+  - **Bondarenko before→after (`benchmarks/audit/bondarenko.ts`, the minified
+    dist bundle, CE+R/F `timeLimitMs: 8000`).** CE+R/F **12 → 20 / 35**: **+8**
+    newly closed, all previously ∅ and all D-verified by the harness invariant
+    `d/dx(F) ≈ f` (and #15/#17/#18/#2/#10/#11 cross-checked against independent
+    Simpson quadrature, matching to ~1e-15 where the antiderivative is real): #2
+    (conjugate), #10, #11, #12 (double substitution), #17, #18 (single
+    substitution + Laurent), and **#15/#16** — the two denesting cases the brief
+    scoped OUT that Lever A in fact rationalizes correctly (their `√x` and
+    `√(…+2√x…)` are radicals of a linear base) as a bonus. Out-of-scope declines
+    stay cleanly inert: #13 (two independent radicals), #14 (radical over
+    irreducible quartic). The **stretch** #9 (Euler substitution `u=x+√(x²+1)`,
+    inner radical is QUADRATIC not linear) is NOT taken — it needs a distinct
+    Euler lever + a pre-filter extension; deferred as the R31 follow-up rung once
+    the ≥18 target was met (20). NB: #16 needs the dist bundle's speed (or the
+    combined Rubi+Fungrim engine) to close within budget — under source
+    `loadIntegrationRules` alone it is inert at 40 s; #15 closes in both.
+  - **Guards (= expected; R31 is structurally inert off the nested-radical
+    family — the tight pre-filter never fires on the binomial-product / hyperbolic
+    corpus).** ch1 1.1 s120 seed5 byte-identical per-problem A/B (`RUBI_NO_R31=1`,
+    120/120 identical); ch6 s50 seed5 32c/0w identical A/B.
+  - **Tests.** `integration-rules.test.ts` R31 block (#17 / #18 / #2 / #10
+    end-to-ends, D-verified on Re of a central-differenced F.N(); #14 out-of-scope
+    stays inert; `RUBI_NO_R31` gate meaningful in both directions); `rubi-utils.test.ts`
+    R31 block (pre-filter positives/negatives, the substitution identity
+    `g(u(x))·u′(x) ≡ f(x)` numeric check for the non-Laurent and Laurent cases,
+    Lever B value preservation, factored-denominator presentation).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

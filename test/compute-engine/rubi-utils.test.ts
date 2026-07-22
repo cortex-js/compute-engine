@@ -36,6 +36,10 @@ import {
   hasAlgebraicHyperbolicCandidate,
   hyperbolicRationalFactoredForm,
   hasHyperbolicRationalCandidate,
+  hasNestedRadicalCandidate,
+  fractionalPowerOfLinearSubstitution,
+  conjugateRadicalRationalization,
+  factoredRationalPresentation,
   rationalNormalFormX,
   polyDegreeX,
   RuleFail,
@@ -1976,5 +1980,116 @@ describe('isRubiOwnedCancellation (caller-owned timeout rethrow)', () => {
     expect(isRubiOwnedCancellation(undefined, 'rubi:native-fallback')).toBe(
       false
     );
+  });
+});
+
+// R31 — nested-radical substitution helpers (RUBI.md §5). `hasNestedRadicalCandidate`
+// is the tight structural pre-filter; `fractionalPowerOfLinearSubstitution` (Lever
+// A) and `conjugateRadicalRationalization` (Lever B) do the rewrites;
+// `factoredRationalPresentation` keeps the produced rational's denominator factored.
+describe('nested-radical substitution helpers (R31)', () => {
+  test('hasNestedRadicalCandidate — nested-radical positives', () => {
+    for (const l of [
+      '\\frac{\\sqrt{x+\\sqrt{x+1}}}{x^2}', // #17
+      '\\sqrt{\\frac{1}{x}+\\sqrt{\\frac{1}{x}+1}}', // #18 (Laurent)
+      '\\frac{\\sqrt{x+1}}{x+\\sqrt{\\sqrt{x+1}+1}}', // #10 (double)
+    ])
+      expect(hasNestedRadicalCandidate(ce.parse(l), 'x')).toBe(true);
+  });
+
+  test('hasNestedRadicalCandidate — conjugate-shape positive', () => {
+    expect(
+      hasNestedRadicalCandidate(
+        ce.parse('\\frac{1}{(\\sqrt{x+1}+\\sqrt{1-x})^2}'),
+        'x'
+      )
+    ).toBe(true);
+  });
+
+  test('hasNestedRadicalCandidate — Root-headed nested radical (no toTimesPower)', () => {
+    // A raw parse of `\sqrt[3]{…}` is a `Root` node (not `Power`); `asFracPower`
+    // must classify it directly so the pre-filter fires without the driver's
+    // `toTimesPower` normalization step.
+    const e = ce.parse('\\sqrt[3]{x+\\sqrt{x+1}}');
+    expect(e.operator).toBe('Root'); // sanity: raw parse yields a Root head
+    expect(hasNestedRadicalCandidate(e, 'x')).toBe(true);
+  });
+
+  test('hasNestedRadicalCandidate — off-family negatives (structurally inert)', () => {
+    for (const l of [
+      '\\sqrt{x+1}', // a bare linear radical
+      '\\frac{\\sqrt{x}}{x^2+1}', // radical over quadratic, not nested
+      '\\sqrt{a+b x}\\sqrt{c+d x}', // product of two linear radicals (binomial corpus)
+      '(\\sqrt{x+1}+\\sqrt{1-x})^2', // sum of radicals but POSITIVE power
+      '\\frac{\\tanh(x)^2}{a+b\\tanh(x)}', // ch6 rational-hyperbolic
+      '\\sqrt{a+b\\sinh(x)^2}', // ch6 algebraic-hyperbolic (R29)
+      '\\frac{1}{x^2+1}', // plain rational
+    ])
+      expect(hasNestedRadicalCandidate(ce.parse(l), 'x')).toBe(false);
+  });
+
+  test('conjugate pre-filter bounds the exponent (declines a huge negative power fast)', () => {
+    // `(√(x+1)+√(1−x))^(−100000)` must NOT be a candidate: an unbounded conjugate
+    // exponent would drive a ~100k-term binomial expansion in
+    // `conjugateRadicalRationalization` before expand's deadline checkpoint.
+    const f = ce.parse('(\\sqrt{x+1}+\\sqrt{1-x})^{-100000}');
+    const t0 = Date.now();
+    expect(hasNestedRadicalCandidate(f, 'x')).toBe(false);
+    // And the rewrite declines rather than expanding.
+    expect(conjugateRadicalRationalization(ce, toTimesPower(ce, f), 'x')).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(1000); // fast decline, no runaway expand
+  });
+
+  // The substitution identity: g(u(x))·u′(x) ≡ f(x), where u(x) = back and
+  // g = f(ψ(u))·ψ′(u) — a numeric check at sample points in the domain.
+  const idcheck = (latex: string, xs: number[]) => {
+    const f = ce.parse(latex);
+    const sub = fractionalPowerOfLinearSubstitution(ce, f, 'x');
+    expect(sub).not.toBeNull();
+    const uprime = ce.box(['D', sub!.back, 'x']).evaluate();
+    let checked = 0;
+    for (const x0 of xs) {
+      const u0 = sub!.back.subs({ x: x0 }).N().re as number;
+      const g0 = sub!.g.subs({ x: u0 }).N().re as number;
+      const up = uprime.subs({ x: x0 }).N().re as number;
+      const fx = f.subs({ x: x0 }).N().re as number;
+      if (![u0, g0, up, fx].every(Number.isFinite)) continue;
+      expect(Math.abs(g0 * up - fx)).toBeLessThan(1e-5 * (1 + Math.abs(fx)));
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(0);
+  };
+
+  test('Lever A identity g(u(x))·u′(x) ≡ f(x) — non-Laurent (#17)', () =>
+    idcheck('\\frac{\\sqrt{x+\\sqrt{x+1}}}{x^2}', [0.4, 0.9, 1.7]));
+
+  test('Lever A identity g(u(x))·u′(x) ≡ f(x) — Laurent (#18)', () =>
+    idcheck('\\sqrt{\\frac{1}{x}+\\sqrt{\\frac{1}{x}+1}}', [0.3, 0.5, 0.8]));
+
+  test('Lever B conjugate rationalization preserves value (#2)', () => {
+    const f = ce.parse('\\frac{1}{(\\sqrt{x+1}+\\sqrt{1-x})^2}');
+    const g = conjugateRadicalRationalization(ce, toTimesPower(ce, f), 'x');
+    expect(g).not.toBeNull();
+    for (const x0 of [0.2, 0.4, 0.6])
+      expect(g!.subs({ x: x0 }).N().re).toBeCloseTo(
+        f.subs({ x: x0 }).N().re as number,
+        6
+      );
+  });
+
+  test('factoredRationalPresentation keeps the denominator factored', () => {
+    // #10 second-stage rational (variable s): denominator (s²−1)²+s−1 =
+    // s·(s−1)·(s²+s−1); the shared s cancels → 4(s²−1)²/((s−1)(s²+s−1)).
+    const g = ce.parse('\\frac{4s(s^2-1)^2}{(s^2-1)^2+s-1}');
+    const fac = factoredRationalPresentation(ce, g, 's');
+    expect(fac).not.toBeNull();
+    // Denominator is a PRODUCT of factors (not one expanded quartic).
+    expect(fac!.denominator.operator).toBe('Multiply');
+    // Value preserved on the domain.
+    for (const s0 of [1.3, 1.6, 2.0])
+      expect(fac!.subs({ s: s0 }).N().re).toBeCloseTo(
+        g.subs({ s: s0 }).N().re as number,
+        6
+      );
   });
 });

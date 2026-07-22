@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Improvements
+
+- **Rubi integration (experimental) — nested-radical substitution fallback
+  (R31).** `loadIntegrationRules` now closes nested-radical and sum-of-two-radical
+  integrands the bundled algebraic rules leave inert. A nested radical
+  (`√(x+√(x+1))/x²`, `√(1/x+√(1/x+1))`, the double-radical
+  `√(x+1)/(x+√(√(x+1)+1))`) is rationalized by iteratively substituting
+  `u = (a+b·x)^{1/k}` (or the Laurent `(a+b/x)^{1/k}`) at the innermost radical
+  linear in `x`, keeping the resulting rational's denominator factored so the
+  bundled partial-fraction rules close it; the conjugate shape
+  `(√(x+1)+√(1−x))⁻²` is rationalized by its conjugate. Each result is accepted
+  only after a domain-aware numeric derivative check against the integrand, so
+  out-of-scope shapes stay cleanly unsolved. On the Bondarenko benchmark this
+  lifts CE+Rubi from 12/35 to 20/35 (closing 8 previously unsolved nested-radical
+  integrals; a ninth, #16, closes only under the production bundle's compiled
+  rule set). Structurally inert off its family, and disableable with
+  `RUBI_NO_R31`.
+
 ## 0.91.0 _2026-07-21_
 
 ### New Features

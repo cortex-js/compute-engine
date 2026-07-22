@@ -8,19 +8,19 @@ Vladimir Bondarenko's 35 integration problems — an independent test set from t
 
 Configs: **CE** = base shipping engine (no Rubi/Fungrim); **CE+R/F** = with the experimental Rubi integrator + Fungrim; **SymPy** = the open-source comparator; **Mathematica** = the reference baseline (the CAS these problems are written in).
 
-- **CE 0/35** · **CE+R/F 12/35** · **SymPy 7/35** · **Mathematica 32/35** correct.
-- Against the **Mathematica** baseline, base CE trails on **32** cases; **11** of those recovered by Rubi/Fungrim.
+- **CE 0/35** · **CE+R/F 20/35** · **SymPy 7/35** · **Mathematica 32/35** correct.
+- Against the **Mathematica** baseline, base CE trails on **32** cases; **19** of those recovered by Rubi/Fungrim.
 
 | Operation | CE | CE+R/F | SymPy | Mathematica |
 |---|--:|--:|--:|--:|
-| Indefinite ∫ | 0/35 | 12/35 | 7/35 | 32/35 |
+| Indefinite ∫ | 0/35 | 20/35 | 7/35 | 32/35 |
 
 ## Per-case results
 
 | # | Steps | Integrand | CE | CE+R/F | SymPy | Mathematica | CE+R/F result |
 |--:|--:|---|:-:|:-:|:-:|:-:|---|
 | 1 | 1 | `1 / (sin(z) + cos(z) + sqrt(2))` | ∅ | ✅ | ✅ | ✅ | `-(-sqrt(2) * sin(z) + 1) / (-sin(z) + co` |
-| 2 | 4 | `(sqrt(x + 1) + sqrt(1 - x))^(-2)` | ∅ | ∅ | ∅ | ✅ | `int((sqrt(x + 1) + sqrt(1 - x))^(-2) dx)` |
+| 2 | 4 | `(sqrt(x + 1) + sqrt(1 - x))^(-2)` | ∅ | ✅ | ∅ | ✅ | `-1 / (2x) + arcsin(sqrt(2)/2 * sqrt(x + ` |
 | 3 | 2 | `(cos(x) + 1)^(-2)` | ∅ | ✅ | ✅ | ✅ | `sin(x) / (3(cos(x) + 1)) + sin(x) / (3(c` |
 | 4 | 5 | `sin(x) / sqrt(x + 1)` | ∅ | ✅ | ✅ | ✅ | `-2(0.353553390593273726845 - 0.353553390` |
 | 5 | 3 | `(sin(x) + cos(x))^(-6)` | ∅ | ✅ | ✅ | ✅ | `(2sin(x)) / (15(sin(x) + cos(x))) - cos(` |
@@ -28,15 +28,15 @@ Configs: **CE** = base shipping engine (no Rubi/Fungrim); **CE+R/F** = with the 
 | 7 | -1 | `ln(x + 1) / (x * sqrt(sqrt(x + 1) + 1))` | ∅ | ∅ | ∅ | ✅ | `int(ln(x + 1) / (x * sqrt(sqrt(x + 1) + ` |
 | 8 | -1 | `ln(x + 1) / x * sqrt(sqrt(x + 1) + 1)` | ∅ | ∅ | ∅ | ✅ | `int(ln(x + 1) / x * sqrt(sqrt(x + 1) + 1` |
 | 9 | 4 | `1 / (sqrt(x + sqrt(x^2 + 1)) + 1)` | ∅ | ∅ | ∅ | ✅ | `int(1 / (sqrt(x + sqrt(x^2 + 1)) + 1) dx` |
-| 10 | 6 | `sqrt(x + 1) / (x + sqrt(sqrt(x + 1) + 1)` | ∅ | ∅ | ✅ | ✅ | `int(sqrt(x + 1) / (x + sqrt(sqrt(x + 1) ` |
-| 11 | 5 | `1 / (x - sqrt(sqrt(x + 1) + 1))` | ∅ | ∅ | ✅ | ✅ | `int(1 / (x - sqrt(sqrt(x + 1) + 1)) dx)` |
-| 12 | 6 | `x / (x + sqrt(1 - sqrt(x + 1)))` | ∅ | ∅ | · | ✅ | `int(x / (x + sqrt(1 - sqrt(x + 1))) dx)` |
+| 10 | 6 | `sqrt(x + 1) / (x + sqrt(sqrt(x + 1) + 1)` | ∅ | ✅ | ✅ | ✅ | `2sqrt(x + 1) - 1.78885438199983175713 * ` |
+| 11 | 5 | `1 / (x - sqrt(sqrt(x + 1) + 1))` | ∅ | ✅ | ✅ | ✅ | `1.10557280900008412144 * ln(sqrt(sqrt(x ` |
+| 12 | 6 | `x / (x + sqrt(1 - sqrt(x + 1)))` | ∅ | ✅ | · | ✅ | `-4sqrt(1 - sqrt(x + 1)) + 2sqrt(x + 1) -` |
 | 13 | 20 | `sqrt(x + sqrt(x + 1)) / (x^2 + 1) * sqrt` | ∅ | ∅ | ∅ | ✅ | `int(sqrt(x + sqrt(x + 1)) / (x^2 + 1) * ` |
 | 14 | 22 | `sqrt(x + sqrt(x + 1)) / (x^2 + 1)` | ∅ | ∅ | ∅ | ✅ | `int(sqrt(x + sqrt(x + 1)) / (x^2 + 1) dx` |
-| 15 | 2 | `sqrt(sqrt(x) + sqrt(2x + 2sqrt(x) + 1) +` | ∅ | ∅ | ∅ | ✅ | `int(sqrt(sqrt(x) + sqrt(2x + 2sqrt(x) + ` |
-| 16 | 3 | `sqrt(sqrt(x) + sqrt(2x + 2sqrt(2) * sqrt` | ∅ | ∅ | ∅ | ✅ | `int(sqrt(sqrt(x) + sqrt(2x + 2sqrt(2) * ` |
-| 17 | 7 | `sqrt(x + sqrt(x + 1)) / x^2` | ∅ | ∅ | ∅ | ✅ | `int(sqrt(x + sqrt(x + 1)) / x^2 dx)` |
-| 18 | 7 | `sqrt(1 / x + sqrt(1 / x + 1))` | ∅ | ∅ | ∅ | ✅ | `int(sqrt(1 / x + sqrt(1 / x + 1)) dx)` |
+| 15 | 2 | `sqrt(sqrt(x) + sqrt(2x + 2sqrt(x) + 1) +` | ∅ | ✅ | ∅ | ✅ | `(2(6sqrt(x)^3 + sqrt(x) + (sqrt(x) - 2) ` |
+| 16 | 3 | `sqrt(sqrt(x) + sqrt(2x + 2sqrt(2) * sqrt` | ∅ | ✅ | ∅ | ✅ | `(4(3sqrt(x)^3 + sqrt(x) + (sqrt(x) - 2sq` |
+| 17 | 7 | `sqrt(x + sqrt(x + 1)) / x^2` | ∅ | ✅ | ∅ | ✅ | `-3/4 * artanh((3sqrt(x + 1) - 1) / (2sqr` |
+| 18 | 7 | `sqrt(1 / x + sqrt(1 / x + 1))` | ∅ | ✅ | ∅ | ✅ | `-1/4 * arctan((-3 - sqrt(1 / x + 1)) / (` |
 | 19 | 6 | `sqrt(e^(-x) + 1) / (-e^(-x) + e^x)` | ∅ | ✅ | ∅ | ✅ | `-sqrt(2) * artanh(sqrt(2)/2 * sqrt(e^(-x` |
 | 20 | 7 | `sqrt(e^(-x) + 1) / sinh(x)` | ∅ | ✅ | ∅ | ✅ | `-2sqrt(2) * artanh(sqrt(2)/2 * sqrt(e^(-` |
 | 21 | -45 | `(cos(x) + cos(3x))^(-5)` | ∅ | ∅ | ∅ | ✅ | `int((cos(x) + cos(3x))^(-5) dx)` |
@@ -49,7 +49,7 @@ Configs: **CE** = base shipping engine (no Rubi/Fungrim); **CE+R/F** = with the 
 | 28 | 13 | `cosh(x) * ln(cosh(x)^2 + 1)^2` | ∅ | ∅ | ∅ | ✅ | `int(cosh(x) * ln(cosh(x)^2 + 1)^2 dx)` |
 | 29 | 28 | `cosh(x) * ln(sinh(x) + cosh(x)^2)^2` | ∅ | ∅ | ∅ | ✅ | `int(cosh(x) * ln(sinh(x) + cosh(x)^2)^2 ` |
 | 30 | 44 | `ln(x + sqrt(x + 1)) / (x^2 + 1)` | ∅ | ∅ | ∅ | ∅ | `int(ln(x + sqrt(x + 1)) / (x^2 + 1) dx)` |
-| 31 | 35 | `ln(x + sqrt(x + 1))^2 / (x + 1)^2` | ∅ | ∅ | ∅ | · | `int(ln(x + sqrt(x + 1))^2 / (x + 1)^2 dx` |
+| 31 | 35 | `ln(x + sqrt(x + 1))^2 / (x + 1)^2` | ∅ | ∅ | ∅ | ∅ | `int(ln(x + sqrt(x + 1))^2 / (x + 1)^2 dx` |
 | 32 | 21 | `ln(x + sqrt(x + 1)) / x` | ∅ | ∅ | ∅ | ✅ | `int(ln(x + sqrt(x + 1)) / x dx)` |
 | 33 | 7 | `arctan(2tan(x))` | ∅ | ∅ | ∅ | ✅ | `int(arctan(2tan(x)) dx)` |
 | 34 | 5 | `(arctan(x) * ln(x)) / x` | ∅ | ✅ | ∅ | ✅ | `-1/2i * PolyLog(3, -i * x) + 1/2i * Poly` |

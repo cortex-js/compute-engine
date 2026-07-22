@@ -6842,6 +6842,337 @@ function factorDenominatorByCyclotomics(
   return { num, den };
 }
 
+// ---------------------------------------------------------------------------
+// R31 — nested-radical substitution fallback
+//
+// A nested-radical integrand — a fractional power whose argument itself contains
+// a fractional power of a LINEAR expression (in x or in 1/x), e.g.
+// `√(x+√(x+1))/x²`, `√(1/x+√(1/x+1))`, `√(x+1)/(x+√(√(x+1)+1))` — is not a
+// rational function of x nor of any single radical, so no bundled algebraic rule
+// (and none of the R28/R29/R30 fallbacks) closes it. Two levers rationalize the
+// family:
+//
+//  A — fractional-power-of-linear substitution. Substitute `u = (a+b·x)^(1/k)`
+//      (x = (u^k−a)/b, dx = (k/b)·u^(k−1) du; the Laurent case `u = (a+b/x)^(1/k)`
+//      is `x = b/(u^k−a)`, dx = −b·k·u^(k−1)/(u^k−a)² du) at the INNERMOST such
+//      radical, removing one nesting level. Applied iteratively — the two-radical
+//      cases (`√(√(x+1)+1)`) need a second substitution — until the integrand is
+//      a rational function of the new variable, whose denominator is then kept
+//      FACTORED (`x^m·(x−1)·(x²+…)`, the R26B lesson: the bundled partial-fraction
+//      rules close the factored form, never the expanded high-degree polynomial).
+//      Single-quadratic-radical residuals (`2u·√(u²+u−1)/(u²−1)²`, cases #17/#18)
+//      are routed as-is — the bundled 1.1.2 quadratic-radical rules close those.
+//
+//  B — conjugate rationalization. `(c₁√L₁+c₂√L₂)^(−n)` (L₁,L₂ linear) times the
+//      conjugate `(c₁√L₁−c₂√L₂)^n` clears the sum-of-radicals denominator to the
+//      polynomial `(c₁²L₁−c₂²L₂)^n`, leaving a single quadratic radical the rules
+//      close (case #2, `(√(x+1)+√(1−x))⁻² → (1−√(1−x²))/(2x²)`).
+//
+// The caller (driver `nestedRadicalFallback`) routes the produced integrand
+// through `intRec`, back-substitutes, and fail-closes on a numeric D-check at
+// sample points inside the family's domain. The pre-filter is tight — it fires
+// ONLY on genuine nesting or the conjugate shape, never on a bare `√(a+b·x)` —
+// so the rung stays structurally inert on the (radical-heavy but un-nested)
+// binomial-product corpus.
+
+/** If `u` is a fractional (non-integer rational) power `B^(p/k)` — as an explicit
+ *  `Power`, a `Sqrt`, or a `Root` (`\sqrt[k]{B}`, the shape a raw parse produces)
+ *  — return its base and the exponent denominator `k`. */
+function asFracPower(u: Expression): { base: Expression; k: number } | null {
+  if (u.operator === 'Sqrt' && u.ops && u.ops.length === 1)
+    return { base: u.ops[0], k: 2 };
+  if (u.operator === 'Root' && u.ops && u.ops.length === 2) {
+    const n = u.ops[1];
+    if (isNumber(n) && n.isInteger === true && typeof n.re === 'number' && n.re > 1)
+      return { base: u.ops[0], k: n.re };
+  }
+  if (u.operator === 'Power' && u.ops && u.ops.length === 2) {
+    const q = u.ops[1];
+    if (isNumber(q) && q.isRational === true && q.isInteger !== true) {
+      const rp = ratParts(q);
+      if (rp !== null && rp[1] > 1) return { base: u.ops[0], k: rp[1] };
+    }
+  }
+  return null;
+}
+
+/** Classify a base `B` as linear in x (`a+b·x`, non-Laurent) or linear in 1/x
+ *  (`a+b/x`, Laurent), returning `{ a, b, laurent }` with `b ≠ 0`, else null. */
+function linearBaseInfo(
+  B: Expression,
+  x: string
+): { a: Expression; b: Expression; laurent: boolean } | null {
+  const c = polyCoeffsX(B, x);
+  if (c !== null && c.length === 2 && !zeroQ(c[1]))
+    return { a: c[0], b: c[1], laurent: false };
+  // Laurent: B·x is linear in x with a nonzero constant term (the 1/x coeff).
+  const ce = B.engine;
+  const cx = polyCoeffsX(expand(B.mul(ce.symbol(x))), x);
+  if (cx !== null && cx.length === 2 && !zeroQ(cx[0]))
+    return { a: cx[1], b: cx[0], laurent: true };
+  return null;
+}
+
+/** True iff `e` is itself a fractional power of a linear (in x or 1/x) base. */
+function isFracPowerOfLinear(e: Expression, x: string): boolean {
+  const fp = asFracPower(e);
+  return (
+    fp !== null && fp.base.has(x) && linearBaseInfo(fp.base, x) !== null
+  );
+}
+
+/** True iff `e` contains (anywhere) a fractional power of a linear base. */
+function containsFracPowerOfLinear(e: Expression, x: string): boolean {
+  if (isFracPowerOfLinear(e, x)) return true;
+  return (e.ops ?? []).some((o) => containsFracPowerOfLinear(o, x));
+}
+
+/** True iff `t` is a `c·√(linear)` term: exactly one x-carrying factor, and that
+ *  factor is a fractional power of a linear base (the constant coefficient `c` is
+ *  x-free). Backs the conjugate-shape detector. */
+function isRadicalLinearTerm(t: Expression, x: string): boolean {
+  const factors = t.operator === 'Multiply' && t.ops ? t.ops : [t];
+  const carriers = factors.filter((f) => f.has(x));
+  if (carriers.length !== 1) return false;
+  return isFracPowerOfLinear(carriers[0], x);
+}
+
+/** True iff `B` is a two-term sum of `c·√(linear)` radicals — the conjugate
+ *  denominator shape `c₁√L₁ + c₂√L₂`. */
+function conjugateSumQ(B: Expression, x: string): boolean {
+  return (
+    B.operator === 'Add' &&
+    B.ops !== undefined &&
+    B.ops.length === 2 &&
+    B.ops.every((t) => isRadicalLinearTerm(t, x))
+  );
+}
+
+/** True iff `e` is a `(c₁√L₁+c₂√L₂)^(−n)` conjugate-rationalizable power. */
+function isConjugatePower(e: Expression, x: string): boolean {
+  if (e.operator !== 'Power' || !e.ops || e.ops.length !== 2) return false;
+  const n = e.ops[1];
+  if (!(isNumber(n) && n.isInteger === true && typeof n.re === 'number' && n.re < 0))
+    return false;
+  // Bound the exponent magnitude: `conjugateRadicalRationalization` EAGERLY
+  // `expand()`s `(c₁√L₁−c₂√L₂)^n`, so a large `n` would fire a runaway binomial
+  // expansion (~|n|·… terms) before expand's deadline checkpoint. The conjugate
+  // family only ever needs n=2..3; cap at 4 for a small margin.
+  if (-n.re > 4) return false;
+  return conjugateSumQ(e.ops[0], x);
+}
+
+/** True iff `e` contains a nested radical: a fractional power whose base itself
+ *  contains a fractional power of a linear base. Purely structural. */
+function hasNestedFracPower(e: Expression, x: string): boolean {
+  const fp = asFracPower(e);
+  if (fp !== null && fp.base.has(x) && containsFracPowerOfLinear(fp.base, x))
+    return true;
+  return (e.ops ?? []).some((o) => hasNestedFracPower(o, x));
+}
+
+/** True iff `e` contains a `(c₁√L₁+c₂√L₂)^(−n)` conjugate power. */
+function hasConjugateRadical(e: Expression, x: string): boolean {
+  if (isConjugatePower(e, x)) return true;
+  return (e.ops ?? []).some((o) => hasConjugateRadical(o, x));
+}
+
+/** Fast O(nodes) syntactic pre-filter for the R31 nested-radical fallback: does
+ *  the integrand contain a genuine NESTED radical (a fractional power whose
+ *  argument contains another fractional power of a linear-in-x-or-1/x base) OR
+ *  the two-radical CONJUGATE shape (`(c₁√L₁+c₂√L₂)^(−n)`)? Deliberately tight —
+ *  a bare `√(a+b·x)` (the binomial-product corpus's staple) does NOT qualify, so
+ *  the fallback stays a near-zero-cost no-op off its family. Purely structural.
+ *  Note: the driver call site normalizes the integrand via `toTimesPower` first
+ *  (so `Sqrt`/`Power`/`Root` heads are unified); `asFracPower` still handles a
+ *  raw `Root` head directly for callers that skip that normalization. */
+export function hasNestedRadicalCandidate(e: Expression, x: string): boolean {
+  return hasNestedFracPower(e, x) || hasConjugateRadical(e, x);
+}
+
+/** Locate the innermost fractional power of a linear base (a `√(a+b·x)` or
+ *  `√(a+b/x)`) in `e` — pre-order, so the first found is topmost; a linear base
+ *  contains no sub-radical, so any such node IS an innermost one. */
+function findInnermostLinearRadical(
+  e: Expression,
+  x: string
+): {
+  L: Expression;
+  a: Expression;
+  b: Expression;
+  k: number;
+  laurent: boolean;
+} | null {
+  let found:
+    | { L: Expression; a: Expression; b: Expression; k: number; laurent: boolean }
+    | null = null;
+  const walk = (u: Expression): void => {
+    if (found !== null) return;
+    const fp = asFracPower(u);
+    if (fp !== null && fp.base.has(x)) {
+      const lin = linearBaseInfo(fp.base, x);
+      if (lin !== null) {
+        found = {
+          L: fp.base,
+          a: lin.a,
+          b: lin.b,
+          k: fp.k,
+          laurent: lin.laurent,
+        };
+        return;
+      }
+    }
+    (u.ops ?? []).forEach(walk);
+  };
+  walk(e);
+  return found;
+}
+
+/** R31 Lever A: one fractional-power-of-linear substitution. Finds the innermost
+ *  `u = (a+b·x)^(1/k)` (or Laurent `u = (a+b/x)^(1/k)`), rewrites `integrand·dx`
+ *  as a function of `u` (REUSING `x` as the new variable), and returns `{ g,
+ *  back }` — `g` the substituted integrand and `back = (a+b·x)^(1/k)` the
+ *  expression (in the current x) to substitute for the reused variable in the
+ *  antiderivative. Null when there is no such radical or the substitution would
+ *  leave a mixed (non-integer `k·q`) radical of the same base. */
+export function fractionalPowerOfLinearSubstitution(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): { g: Expression; back: Expression } | null {
+  // Recanonicalize first so every occurrence of the linear base has an IDENTICAL
+  // canonical form (the driver hands integrands whose Add args can differ in
+  // order between subterms — e.g. numerator `√(1+x)` vs a nested `√(x+1)` — which
+  // would break the structural `isSame(L)` match in the walk below).
+  const norm = toTimesPower(ce, recanonicalize(ce, integrand));
+  const info = findInnermostLinearRadical(norm, x);
+  if (info === null) return null;
+  const { L, a, b, k, laurent } = info;
+  const X = ce.symbol(x);
+  const Xk = X.pow(k);
+  const kNum = ce.number(k);
+  let inv: Expression; // x_old expressed in the new variable
+  let jac: Expression; // dx_old/du
+  if (laurent) {
+    const denom = Xk.sub(a); // u^k − a
+    // Build with canonical Multiply/Divide/Negate/Power so exact operands (an
+    // irrational coefficient `b`, e.g. √2) stay exact — chained `.mul()`/`.div()`
+    // fold exact literals to floats and `mul()` distributes over sums.
+    inv = ce.function('Divide', [b, denom]);
+    jac = ce.function('Divide', [
+      ce.function('Multiply', [
+        ce.function('Negate', [b]),
+        kNum,
+        X.pow(k - 1),
+      ]),
+      ce.function('Power', [denom, ce.number(2)]),
+    ]);
+  } else {
+    inv = ce.function('Divide', [Xk.sub(a), b]);
+    jac = ce.function('Divide', [
+      ce.function('Multiply', [kNum, X.pow(k - 1)]),
+      b,
+    ]);
+  }
+  let failed = false;
+  const walk = (u: Expression): Expression => {
+    if (failed) return u;
+    // A power of the substitution base L → u^(k·q).
+    if (
+      u.operator === 'Power' &&
+      u.ops &&
+      u.ops.length === 2 &&
+      u.ops[0].isSame(L)
+    ) {
+      const kq = kNum.mul(u.ops[1]).evaluate();
+      if (!(isNumber(kq) && kq.isInteger === true)) {
+        failed = true;
+        return u;
+      }
+      return X.pow(kq);
+    }
+    if (u.operator === 'Sqrt' && u.ops && u.ops[0].isSame(L)) {
+      if (k % 2 !== 0) {
+        failed = true;
+        return u;
+      }
+      return X.pow(k / 2);
+    }
+    if (u.isSame(L)) return Xk;
+    if (u.symbol === x) return inv;
+    if (!u.ops) return u;
+    return ce.function(u.operator, u.ops.map(walk));
+  };
+  const rewritten = walk(norm);
+  if (failed) return null;
+  const g = recanonicalize(ce, ce.function('Multiply', [rewritten, jac]));
+  const back = ce.function('Power', [L, ce.number(1).div(kNum)]);
+  return { g, back };
+}
+
+/** R31 Lever B: conjugate rationalization of a `(c₁√L₁+c₂√L₂)^(−n)` factor.
+ *  Multiplies the factor by `(c₁√L₁−c₂√L₂)^n / (c₁√L₁−c₂√L₂)^n`, clearing the
+ *  sum-of-radicals denominator to `(c₁²L₁−c₂²L₂)^n` (a polynomial). `expand()`
+ *  leaves the numerator's radicals as an UNMERGED product of linear radicals
+ *  (e.g. `√(x+1)·√(1−x)`, NOT merged to the single quadratic radical `√(1−x²)`);
+ *  closure then comes from the bundled product-of-linear-radicals rules. Returns
+ *  the rewritten integrand (same variable, no substitution), or null when no
+ *  conjugate factor occurs. */
+export function conjugateRadicalRationalization(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): Expression | null {
+  const factors =
+    integrand.operator === 'Multiply' && integrand.ops
+      ? integrand.ops
+      : [integrand];
+  let target: Expression | null = null;
+  const rest: Expression[] = [];
+  for (const f of factors) {
+    if (target === null && isConjugatePower(f, x)) target = f;
+    else rest.push(f);
+  }
+  if (target === null || !target.ops) return null;
+  const sum = target.ops[0];
+  const n = -(target.ops[1].re as number);
+  if (!sum.ops || sum.ops.length !== 2) return null;
+  const [A, B] = sum.ops;
+  // (c₁√L₁)² − (c₂√L₂)² = c₁²L₁ − c₂²L₂, a linear polynomial in x.
+  const diffSq = expand(ce.function('Power', [A, ce.number(2)]).sub(
+    ce.function('Power', [B, ce.number(2)])
+  ));
+  if (diffSq.isSame(0)) return null;
+  const numer = expand(
+    ce.function('Power', [ce.function('Subtract', [A, B]), ce.number(n)])
+  );
+  const denom = ce.function('Power', [diffSq, ce.number(n)]);
+  let g = numer.div(denom);
+  if (rest.length > 0) g = ce.function('Multiply', [...rest, g]);
+  return recanonicalize(ce, g);
+}
+
+/** R31 factored presentation: normalize a rational integrand `g` to `N/D` and
+ *  return it with `D` kept FACTORED (`x^m·(x−1)·(x+1)·…·residual`, via the shared
+ *  cyclotomic/rational-root peeler), so the bundled partial-fraction rules close
+ *  it (they match `poly/(x^m·factored)`, never the expanded high-degree
+ *  denominator). Null when `g` is not a rational function of x or the denominator
+ *  does not reduce. */
+export function factoredRationalPresentation(
+  ce: ComputeEngine,
+  g: Expression,
+  x: string
+): Expression | null {
+  const nf = rationalNormalFormX(g, x, true);
+  if (nf === null || nf.operator !== 'Divide' || !nf.ops) return null;
+  const nc = polyCoeffsX(expand(nf.ops[0]), x);
+  const dc = polyCoeffsX(expand(nf.ops[1]), x);
+  if (nc === null || dc === null) return null;
+  const fac = factorDenominatorByCyclotomics(ce, nc, dc, x);
+  if (fac === null) return null;
+  return coeffsToPolyX(ce, fac.num, x).div(fac.den);
+}
+
 function coeff(args: Json[], ctx: Ctx): Expression {
   const u = build(args[0], ctx);
   const n = args.length >= 3 ? (realNum(build(args[2], ctx)) ?? NaN) : 1;

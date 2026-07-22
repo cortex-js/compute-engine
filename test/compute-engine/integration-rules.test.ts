@@ -1285,6 +1285,111 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     }, 120_000);
   });
 
+  // R31: nested-radical substitution fallback (RUBI.md §5, Phase R31; driver
+  // `nestedRadicalFallback` + rubi-utils `fractionalPowerOfLinearSubstitution` /
+  // `conjugateRadicalRationalization` / `factoredRationalPresentation`). Lever A
+  // iteratively substitutes `u = (a+b·x)^(1/k)` (or Laurent `(a+b/x)^(1/k)`) at
+  // the innermost linear radical — the double-radical cases need two — keeping
+  // the produced rational's denominator FACTORED; Lever B conjugate-rationalizes
+  // the sum-of-two-radicals power. The Bondarenko nested-radical family (#2, #10,
+  // #11, #12, #15, #17, #18). D-verified by finite-differencing F.N() (the
+  // antiderivatives carry artanh/arctan of radicals that can exceed 1 → a complex
+  // constant that a symbolic derivative would strand). Heavy: BOTH budgets raised
+  // (engine `timeLimit` AND loader `timeLimitMs`); every case goes INERT under
+  // `RUBI_NO_R31=1`.
+  describe('nested-radical substitution fallback (Bondarenko, R31)', () => {
+    const ce = new ComputeEngine();
+    ce.timeLimit = 30_000;
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+
+    // `NO_R31` is captured at module load. Under `RUBI_NO_R31=1` the rung is
+    // disabled and none of these close, so skip the closure tests (the gate test
+    // below proves each goes inert). In the DEFAULT config they run and must
+    // close — keeping this describe A/B-clean in both configurations.
+    const NO_R31 = process.env.RUBI_NO_R31 !== undefined;
+    const closureTest = NO_R31 ? test.skip : test;
+
+    // Integrate `latex` over x and central-difference F.N() == integrand at the
+    // given sample points (chosen inside the family's real domain). Central
+    // differences avoid needing a symbolic derivative and cancel the (possibly
+    // complex) integration constant.
+    const verify = (latex: string, samples: number[]) => {
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      let checked = 0;
+      for (const x of samples) {
+        const d = (fp(x + h) - fp(x - h)) / (2 * h);
+        const f = integrand.subs({ x }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        expect(Math.abs(d - f)).toBeLessThan(1e-4 * (1 + Math.abs(f)));
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    };
+
+    // #17: √(x+√(x+1))/x² — one Lever A substitution `u=√(x+1)` leaves a single
+    // quadratic radical `2u·√(u²+u−1)/(u²−1)²` the bundled 1.1.2 rules close.
+    closureTest('∫√(x+√(x+1))/x² dx (#17)', () =>
+      verify('\\frac{\\sqrt{x+\\sqrt{x+1}}}{x^2}', [0.3, 0.5, 0.7]), 30_000);
+
+    // #18: √(1/x+√(1/x+1)) — the Laurent substitution `u=√(1/x+1)`.
+    closureTest('∫√(1/x+√(1/x+1)) dx (#18)', () =>
+      verify('\\sqrt{\\frac{1}{x}+\\sqrt{\\frac{1}{x}+1}}', [0.3, 0.5, 0.7]), 30_000);
+
+    // #2: (√(x+1)+√(1−x))⁻² — Lever B conjugate rationalization to
+    // (1−√(1−x²))/(2x²). Domain |x|<1.
+    closureTest('∫(√(x+1)+√(1−x))⁻² dx (#2, conjugate)', () =>
+      verify('\\frac{1}{(\\sqrt{x+1}+\\sqrt{1-x})^2}', [0.3, 0.5, 0.7]), 30_000);
+
+    // #10: √(x+1)/(x+√(√(x+1)+1)) — TWO successive Lever A substitutions, then
+    // the produced rational closes via its FACTORED denominator.
+    closureTest('∫√(x+1)/(x+√(√(x+1)+1)) dx (#10, double substitution)', () =>
+      verify('\\frac{\\sqrt{x+1}}{x+\\sqrt{\\sqrt{x+1}+1}}', [0.3, 0.5, 0.7]), 30_000);
+
+    // #11: 1/(x−√(√(x+1)+1)) — double Lever A substitution; the produced rational
+    // closes via its FACTORED denominator. Verified at x≈4–6.
+    closureTest('∫1/(x−√(√(x+1)+1)) dx (#11, double substitution)', () =>
+      verify('\\frac{1}{x-\\sqrt{\\sqrt{x+1}+1}}', [4, 5, 6]), 30_000);
+
+    // #12: x/(x+√(1−√(x+1))) — double Lever A substitution on the domain x<0
+    // (needs 1−√(x+1) ≥ 0, i.e. x ≤ 0). Verified at x≈−0.9..−0.5.
+    closureTest('∫x/(x+√(1−√(x+1))) dx (#12, double substitution)', () =>
+      verify('\\frac{x}{x+\\sqrt{1-\\sqrt{x+1}}}', [-0.9, -0.7, -0.5]), 30_000);
+
+    // #15: √(√x+√(2x+2√x+1)+1) — nested radical closed by iterated Lever A.
+    // Verified at x≈0.5–2.
+    closureTest('∫√(√x+√(2x+2√x+1)+1) dx (#15)', () =>
+      verify('\\sqrt{\\sqrt{x}+\\sqrt{2x+2\\sqrt{x}+1}+1}', [0.5, 1, 2]), 30_000);
+
+    // k=3 nested radical (cube-root outer): ∛(x+√(x+1)) — Lever A at the inner
+    // `u=√(x+1)` (the driver normalizes the raw `Root` head via `toTimesPower`).
+    // Exercises the odd-index (non-Laurent, k=3) branch end-to-end.
+    closureTest('∫∛(x+√(x+1)) dx (k=3 nested radical)', () =>
+      verify('\\sqrt[3]{x+\\sqrt{x+1}}', [0.5, 1, 2]), 30_000);
+
+    // Out-of-scope decline: #14 (single quadratic radical over an irreducible
+    // quartic) must stay cleanly inert (no wrong answer, no throw).
+    test('∫√(x+√(x+1))/(x²+1) dx (#14) stays inert (out of scope)', () => {
+      const F = ce
+        .parse('\\int \\frac{\\sqrt{x+\\sqrt{x+1}}}{x^2+1} \\, dx')
+        .evaluate();
+      expect(F.has('Integrate')).toBe(true);
+    }, 30_000);
+
+    // Toggle meaningfulness: `NO_R31` is captured at module load, so this branches
+    // on the env var present at process start — the default suite proves the
+    // closure, a `RUBI_NO_R31=1` run proves each goes inert.
+    test('∫√(x+√(x+1))/x² is gated by RUBI_NO_R31', () => {
+      const F = ce.parse('\\int \\frac{\\sqrt{x+\\sqrt{x+1}}}{x^2} \\, dx').evaluate();
+      if (process.env.RUBI_NO_R31 === undefined)
+        expect(F.has('Integrate')).toBe(false);
+      else expect(F.has('Integrate')).toBe(true);
+    }, 30_000);
+  });
+
   // ── Integration variable other than `x` (R26A). ──
   // The bundled rules all carry `variable: "x"`; every RHS references the
   // integration variable as the string token `"x"`. The match env does not
