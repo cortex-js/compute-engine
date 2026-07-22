@@ -6883,7 +6883,12 @@ function asFracPower(u: Expression): { base: Expression; k: number } | null {
     return { base: u.ops[0], k: 2 };
   if (u.operator === 'Root' && u.ops && u.ops.length === 2) {
     const n = u.ops[1];
-    if (isNumber(n) && n.isInteger === true && typeof n.re === 'number' && n.re > 1)
+    if (
+      isNumber(n) &&
+      n.isInteger === true &&
+      typeof n.re === 'number' &&
+      n.re > 1
+    )
       return { base: u.ops[0], k: n.re };
   }
   if (u.operator === 'Power' && u.ops && u.ops.length === 2) {
@@ -6916,9 +6921,7 @@ function linearBaseInfo(
 /** True iff `e` is itself a fractional power of a linear (in x or 1/x) base. */
 function isFracPowerOfLinear(e: Expression, x: string): boolean {
   const fp = asFracPower(e);
-  return (
-    fp !== null && fp.base.has(x) && linearBaseInfo(fp.base, x) !== null
-  );
+  return fp !== null && fp.base.has(x) && linearBaseInfo(fp.base, x) !== null;
 }
 
 /** True iff `e` contains (anywhere) a fractional power of a linear base. */
@@ -6952,7 +6955,14 @@ function conjugateSumQ(B: Expression, x: string): boolean {
 function isConjugatePower(e: Expression, x: string): boolean {
   if (e.operator !== 'Power' || !e.ops || e.ops.length !== 2) return false;
   const n = e.ops[1];
-  if (!(isNumber(n) && n.isInteger === true && typeof n.re === 'number' && n.re < 0))
+  if (
+    !(
+      isNumber(n) &&
+      n.isInteger === true &&
+      typeof n.re === 'number' &&
+      n.re < 0
+    )
+  )
     return false;
   // Bound the exponent magnitude: `conjugateRadicalRationalization` EAGERLY
   // `expand()`s `(c₁√L₁−c₂√L₂)^n`, so a large `n` would fire a runaway binomial
@@ -7003,9 +7013,13 @@ function findInnermostLinearRadical(
   k: number;
   laurent: boolean;
 } | null {
-  let found:
-    | { L: Expression; a: Expression; b: Expression; k: number; laurent: boolean }
-    | null = null;
+  let found: {
+    L: Expression;
+    a: Expression;
+    b: Expression;
+    k: number;
+    laurent: boolean;
+  } | null = null;
   const walk = (u: Expression): void => {
     if (found !== null) return;
     const fp = asFracPower(u);
@@ -7060,11 +7074,7 @@ export function fractionalPowerOfLinearSubstitution(
     // fold exact literals to floats and `mul()` distributes over sums.
     inv = ce.function('Divide', [b, denom]);
     jac = ce.function('Divide', [
-      ce.function('Multiply', [
-        ce.function('Negate', [b]),
-        kNum,
-        X.pow(k - 1),
-      ]),
+      ce.function('Multiply', [ce.function('Negate', [b]), kNum, X.pow(k - 1)]),
       ce.function('Power', [denom, ce.number(2)]),
     ]);
   } else {
@@ -7139,9 +7149,11 @@ export function conjugateRadicalRationalization(
   if (!sum.ops || sum.ops.length !== 2) return null;
   const [A, B] = sum.ops;
   // (c₁√L₁)² − (c₂√L₂)² = c₁²L₁ − c₂²L₂, a linear polynomial in x.
-  const diffSq = expand(ce.function('Power', [A, ce.number(2)]).sub(
-    ce.function('Power', [B, ce.number(2)])
-  ));
+  const diffSq = expand(
+    ce
+      .function('Power', [A, ce.number(2)])
+      .sub(ce.function('Power', [B, ce.number(2)]))
+  );
   if (diffSq.isSame(0)) return null;
   const numer = expand(
     ce.function('Power', [ce.function('Subtract', [A, B]), ce.number(n)])

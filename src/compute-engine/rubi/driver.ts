@@ -1260,7 +1260,11 @@ export class RubiDriver {
         this.suppressRecording--;
       }
       if (F !== null) {
-        this.record(entryNode, () => F, 'integrate.nested-radical-substitution');
+        this.record(
+          entryNode,
+          () => F,
+          'integrate.nested-radical-substitution'
+        );
         return F;
       }
     }

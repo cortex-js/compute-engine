@@ -362,7 +362,10 @@ function parseComponentAccess(
     // key lookup, not a `First` / `Real` component. Non-dictionary LHS keep the
     // existing (deliberately tight) single-letter member behavior below.
     const lhsSym = symbol(lhs);
-    if (lhsSym !== null && parser.resolveSymbol(lhsSym)?.type.matches('dictionary')) {
+    if (
+      lhsSym !== null &&
+      parser.resolveSymbol(lhsSym)?.type.matches('dictionary')
+    ) {
       let key = '';
       while (typeof parser.peek === 'string' && /^[a-zA-Z]$/.test(parser.peek))
         key += parser.nextToken();
@@ -1899,7 +1902,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       const sym = symbol(lhs);
       if (
         rhs !== null &&
-        ((sym && parser.resolveSymbol(sym)?.type.matches('indexed_collection')) ||
+        ((sym &&
+          parser.resolveSymbol(sym)?.type.matches('indexed_collection')) ||
           operator(lhs) === 'List')
       ) {
         // Unwrap Delimiter if present (e.g. from comma-separated subscripts)
