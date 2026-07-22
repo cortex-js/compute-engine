@@ -209,7 +209,11 @@ export class BoxedDictionary
     const ce = this.engine;
     return (function* (self: BoxedDictionary) {
       for (const [key, value] of Object.entries(self._keyValues)) {
-        yield ce.tuple(ce.string(key), value);
+        // POSITIONAL pair: `_fn`, not `tuple()`. A dictionary value may
+        // legitimately be `Nothing` (the dictionary keeps it, and `Values`
+        // reports it), and `tuple()` splices `Nothing` out — which would
+        // yield a 1-tuple and silently unpair the entry.
+        yield ce._fn('Tuple', [ce.string(key), value]);
       }
     })(this);
   }

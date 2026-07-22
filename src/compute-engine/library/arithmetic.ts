@@ -147,6 +147,7 @@ import {
   hasSymbolicRangeBounds,
   enumerationDeclined,
 } from './collections.js';
+import { missingDatum } from './missing-data.js';
 import {
   run,
   runAsync,
@@ -3734,6 +3735,12 @@ function evaluateMinMax(
   const upper = mode === 'Max' || mode === 'Supremum';
 
   ops = flatten(ops);
+
+  // `Missing` PROPAGATES (`Nothing` is skipped — collection literals splice it
+  // out, and `flattenArguments` skips any a lazy source still yields). Same
+  // rule as the statistics; `NaN` absorbs on its own in the fold below.
+  const absent = missingDatum(ce, ops);
+  if (absent) return absent;
 
   if (ops.length === 0)
     return upper ? ce.NegativeInfinity : ce.PositiveInfinity;

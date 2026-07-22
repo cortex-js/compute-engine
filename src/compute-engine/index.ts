@@ -2355,6 +2355,14 @@ export class ComputeEngine implements IComputeEngine {
   /** Shortcut for `this.expr(["Tuple", ...])`
    *
    * The result is canonical.
+   *
+   * A `Nothing` element is spliced out, exactly as it is from a `Tuple`
+   * literal built with `box()`/`expr()`/`function()` — `Nothing` is an
+   * ERASURE marker, and splicing changes the ARITY of the tuple. A caller
+   * that needs a fixed-arity POSITIONAL pair whose slot may legitimately hold
+   * `Nothing` (a dictionary `(key, value)` entry, say) must build it with
+   * `_fn('Tuple', …)` instead. Use `Missing` for an absent-but-positioned
+   * coordinate.
    */
   tuple(...elements: ReadonlyArray<number>): Expression;
   tuple(...elements: ReadonlyArray<Expression>): Expression;
@@ -2362,9 +2370,9 @@ export class ComputeEngine implements IComputeEngine {
     return new BoxedFunction(
       this,
       'Tuple',
-      elements.map((x) =>
-        typeof x === 'number' ? this.number(x) : x.canonical
-      ),
+      elements
+        .map((x) => (typeof x === 'number' ? this.number(x) : x.canonical))
+        .filter((x) => !isSymbol(x, 'Nothing')),
       { canonical: true }
     );
   }

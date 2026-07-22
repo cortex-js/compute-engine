@@ -828,7 +828,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(any*) -> tuple',
     type: (ops) => parseType(`tuple<${ops.map((op) => op.type).join(', ')}>`),
-    canonical: (ops, { engine }) => engine.tuple(...ops),
+    // `Nothing` is an ERASURE marker: it is spliced out of a collection
+    // literal, exactly as for `List` and `Set`. Splicing changes the ARITY of
+    // the tuple — `(1, Nothing, 3)` is the 2-tuple `(1, 3)`, typed
+    // accordingly. Use `Missing` for an absent-but-positioned coordinate.
+    canonical: (ops, { engine }) =>
+      engine.tuple(...ops.filter((op) => !isSymbol(op, 'Nothing'))),
     // A `Tuple` is inert data: it evaluates its operands but never transposes a
     // collection component into a list of points. The Desmos point-list idiom
     // (zip a tuple-with-collection into a `List` of point-tuples) lives in the
@@ -964,7 +969,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const [key, value] = checkTypes(engine, args, ['string', 'any']);
       if (!key.isValid || !value.isValid)
         return engine._fn('KeyValuePair', [key, value]);
-      return engine.tuple(key, value);
+      // POSITIONAL pair: `_fn`, not `tuple()` — see `BoxedDictionary.each()`.
+      // A `Nothing` value must not be spliced out (it would unpair the entry).
+      return engine._fn('Tuple', [key, value]);
     },
   },
 
@@ -5252,7 +5259,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isString(key)) {
           throw new Error(`Expected a string key, got ${key.type}`);
         }
-        entries.push(ce.tuple(key, value));
+        // POSITIONAL pair: `_fn`, not `tuple()` — see `BoxedDictionary.each()`.
+        entries.push(ce._fn('Tuple', [key, value]));
       }
       return ce.function('Dictionary', entries);
     },
@@ -5286,7 +5294,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isString(key)) {
           throw new Error(`Expected a string key, got ${key.type}`);
         }
-        entries.push(ce.tuple(key, value));
+        // POSITIONAL pair: `_fn`, not `tuple()` — see `BoxedDictionary.each()`.
+        entries.push(ce._fn('Tuple', [key, value]));
       }
       return ce.function('Record', entries);
     },
@@ -5566,11 +5575,14 @@ function canonicalSet(
   // its syntactic operands (body + indexing set)
   if (parseSetComprehension(ops) !== null) return engine._fn('Set', [...ops]);
 
-  // Check that each element is only present once
+  // Check that each element is only present once. `Nothing` is an ERASURE
+  // marker: it is spliced out of a collection literal (`{12, Nothing, 34}` is
+  // a 2-element set), exactly as for `List` and `Tuple`. Use `Missing` for an
+  // absent-but-positioned element.
   const set: Expression[] = [];
   const has = (x: Expression) => set.some((y) => y.isSame(x));
 
-  for (const op of ops) if (!has(op)) set.push(op);
+  for (const op of ops) if (!isSymbol(op, 'Nothing') && !has(op)) set.push(op);
 
   return engine._fn('Set', set);
 }

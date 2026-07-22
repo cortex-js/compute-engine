@@ -19,6 +19,7 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
   windowedCollectionOps,
 } from '../collection-utils.js';
+import { flattenArguments, missingDatum } from './missing-data.js';
 import {
   bigCorrelation,
   bigCovariance,
@@ -768,40 +769,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
-
-function* flattenArguments(
-  args: ReadonlyArray<Expression>
-): Generator<Expression> {
-  // Go over each argument and yield it if a scalar, otherwise yield its elements
-  for (const arg of args) {
-    // `Nothing` is an ERASURE marker: a `Nothing` datum is SKIPPED, never
-    // folded into a statistic. Collection literals already splice it out at
-    // canonicalization, but a lazy source can still yield one, so the skip is
-    // made explicit here (the guarantee, not an accident of canonicalization).
-    if (isSymbol(arg, 'Nothing')) continue;
-    if (arg.isFiniteCollection) {
-      for (const x of arg.each()) if (!isSymbol(x, 'Nothing')) yield x;
-    } else yield arg;
-  }
-}
-
-/**
- * `Missing` PROPAGATES through statistics: a statistic over data containing
- * an absent-but-positioned value is itself `Missing` (Julia/R semantics —
- * there is no defensible value to report). Contrast `Nothing`, which is an
- * ERASURE marker and is skipped by `flattenArguments`. `NaN` propagates on
- * its own through the numeric kernels.
- *
- * Returns the `Missing` symbol when any datum is `Missing`, else `undefined`.
- */
-function missingDatum(
-  ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>
-): Expression | undefined {
-  for (const op of flattenArguments(ops))
-    if (isSymbol(op, 'Missing')) return ce.Missing;
-  return undefined;
-}
 
 function* flattenScalars(args: ReadonlyArray<Expression>) {
   for (const op of flattenArguments(args)) yield op.re;

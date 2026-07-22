@@ -122,6 +122,23 @@ describe('EXOTIC INTEGRALS', () => {
     expect(parse('\\oint_C f')).toMatchSnapshot();
   });
 
+  // `CircularIntegrate` has an operator definition whose canonical handler
+  // rewrites the parser's `Tuple` limits (which use `Nothing` as a POSITIONAL
+  // placeholder) into `Limits`. Without it, the canonical `Tuple` literal
+  // splices `Nothing` out and the serializer emits `\ointundefined`.
+  test('\\oint - limits canonicalize to Limits and round-trip', () => {
+    const expr = ce.parse('\\oint_C f');
+    expect(expr.op2.operator).toBe('Limits');
+    expect(expr.op2.nops).toBe(3);
+    expect(expr.toLatex()).toBe('\\oint_{C}\\!f');
+    expect(ce.parse('\\oint_V f(s) ds').toLatex()).toBe(
+      '\\oint_{V}\\!f(s)\\, \\mathrm{d}s'
+    );
+    // Inert: no contour-integration evaluation.
+    expect(expr.evaluate().operator).toBe('CircularIntegrate');
+    expect(expr.N().operator).toBe('CircularIntegrate');
+  });
+
   test('\\intop', () => {
     expect(parse('\\intop_0^1\\sin x dx')).toMatchSnapshot();
   });

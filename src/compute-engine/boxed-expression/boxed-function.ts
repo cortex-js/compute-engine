@@ -49,6 +49,7 @@ import {
   isContinuationOperand,
 } from './type-guards.js';
 import { candidateShape } from './tensor-view.js';
+import { propagatesMissing } from './missing.js';
 import type { NumericPrimitiveType } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -1431,6 +1432,41 @@ export class BoxedFunction
     );
   }
 
+  /**
+   * `Missing` (an absent value whose position is preserved) PROPAGATES through
+   * numeric operations: `Missing + 1` is `Missing`, `Sin(Missing)` is
+   * `Missing`. The canonicalization-time gate in `box.ts` catches expressions
+   * built by `ce.box()`/`ce.parse()`/`ce.function()`, but internal builders —
+   * `ce._fn()`, and the big-op reduction kernels that use it — bypass it. The
+   * rule is therefore enforced here too, at the evaluation layer, where every
+   * construction route converges.
+   *
+   * Cheap-first: the operand scan is a symbol identity test with no
+   * allocation, and the (allocating) signature walk only runs once a `Missing`
+   * operand is actually present.
+   *
+   * Returns `Missing` when the operator propagates it, `undefined` otherwise
+   * (structural/higher-order operators — `List`, `At`, `Equal`, the big-op
+   * containers — keep `Missing` as an ordinary operand, which is what makes
+   * `[1, Missing, 3]` a 3-element list).
+   */
+  private _propagatedMissing(
+    def: BoxedOperatorDefinition
+  ): Expression | undefined {
+    const ops = this._ops;
+    for (let i = 0; i < ops.length; i++) {
+      if (!isSymbol(ops[i], 'Missing')) continue;
+      return propagatesMissing(
+        this._operator,
+        def.signature.type,
+        def.inferredSignature
+      )
+        ? this.engine.Missing
+        : undefined;
+    }
+    return undefined;
+  }
+
   _computeValue(options?: Partial<EvaluateOptions>): () => Expression {
     return () => {
       // Cooperative deadline checkpoint on the per-node evaluation path.
@@ -1457,6 +1493,13 @@ export class BoxedFunction
         return applyFunctionLiteral(this, this._def.value, options);
 
       const def = this._def.operator;
+
+      //
+      // 1b/ `Missing` propagates through numeric operators, whatever route
+      // built this expression (see `_propagatedMissing`).
+      //
+      const missing = this._propagatedMissing(def);
+      if (missing) return missing;
 
       //
       // 2/ Broadcast if applicable
@@ -1759,6 +1802,12 @@ export class BoxedFunction
         return applyFunctionLiteral(this, this._def.value, options);
 
       const def = this._def.operator;
+
+      //
+      // 1b/ `Missing` propagates through numeric operators — see the sync path.
+      //
+      const missing = this._propagatedMissing(def);
+      if (missing) return missing;
 
       //
       // 2/ Broadcast if applicable

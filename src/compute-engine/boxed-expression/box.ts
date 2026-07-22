@@ -48,14 +48,17 @@ import { BoxedDictionary } from './boxed-dictionary.js';
 import { canonicalForm } from './canonical.js';
 import { sortOperands } from './order.js';
 import { validateArguments, checkNumericArgs } from './validate.js';
-import { isSubtype } from '../../common/type/subtype.js';
-import type { Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
 import { isValueDef } from './utils.js';
 import { lookupApplicable } from '../function-utils.js';
 import { canonicalNegate } from './negate.js';
 import { canonical } from './canonical-utils.js';
 import { isNumber, isFunction, isSymbol } from './type-guards.js';
+import {
+  NUMERIC_SHORTCUT_OPERATORS,
+  allParamsNumeric,
+  propagatesMissing,
+} from './missing.js';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -612,27 +615,6 @@ function boxInternal(
   return ce.symbol('Undefined');
 }
 
-/**
- * True when every declared parameter of a signature (required, optional and
- * variadic) is a numeric type (a subtype of `number`). Used to restrict the
- * post-canonical argument re-validation in `makeCanonicalFunction` to the
- * pure-numeric operators (`Sin`, `Factorial`, …) whose custom canonical
- * handlers historically only checked arity. A signature with no parameters, or
- * any non-numeric parameter, returns `false` so structural/higher-order
- * operators are left untouched.
- */
-function allParamsNumeric(signature: Type): boolean {
-  if (typeof signature === 'string') return false;
-  if (signature.kind !== 'signature') return false;
-  const params: Type[] = [
-    ...(signature.args?.map((x) => x.type) ?? []),
-    ...(signature.optArgs?.map((x) => x.type) ?? []),
-    ...(signature.variadicArg ? [signature.variadicArg.type] : []),
-  ];
-  if (params.length === 0) return false;
-  return params.every((t) => isSubtype(t, 'number'));
-}
-
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
@@ -814,14 +796,14 @@ function makeCanonicalFunction(
   const xs = ops.map((x) => ce.expr(x));
 
   // `Missing` (an absent value whose position is preserved) PROPAGATES
-  // through numeric operations: `Sin(Missing)` is `Missing`. Gated on
-  // `allParamsNumeric` (the same gate the post-canonical numeric
-  // re-validation uses) so structural/higher-order operators — `List`,
-  // `At`, `Equal`, the big-ops — keep `Missing` as a plain operand.
+  // through numeric operations: `Sin(Missing)` is `Missing`, and through the
+  // data-consuming aggregates: `Max(1, Missing, 3)` is `Missing`. Gated on
+  // `propagatesMissing` (the same predicate the evaluate-time gate uses) so
+  // structural/higher-order operators — `List`, `At`, `Equal`, the big-ops —
+  // keep `Missing` as a plain operand.
   if (
-    !opDef.inferredSignature &&
     xs.some((x) => isSymbol(x, 'Missing')) &&
-    allParamsNumeric(opDef.signature.type)
+    propagatesMissing(name, opDef.signature.type, opDef.inferredSignature)
   )
     return ce.Missing;
 
@@ -966,22 +948,6 @@ function makeCanonicalFunction(
     scope,
   });
 }
-
-/** The operators handled by `makeNumericFunction`'s short path (they bypass
- *  the definition lookup and go straight to their `canonicalXxx` builder). */
-const NUMERIC_SHORTCUT_OPERATORS = new Set<MathJsonSymbol>([
-  'Add',
-  'Multiply',
-  'Negate',
-  'Square',
-  'Sqrt',
-  'Exp',
-  'Ln',
-  'Log',
-  'Power',
-  'Root',
-  'Divide',
-]);
 
 function makeNumericFunction(
   ce: ComputeEngine,

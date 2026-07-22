@@ -4,23 +4,34 @@
 
 - **`Nothing` now erases inside collections, as it already did inside operator
   argument lists.** `Nothing` is the ERASURE marker — an empty-sequence splice
-  — so a `Nothing` element is spliced out of a collection instead of being
-  retained. Length, type and indexing all follow:
+  — so a `Nothing` element is spliced out of a `List`, `Set` or `Tuple` literal
+  instead of being retained. Length, arity, type and indexing all follow:
 
   ```js
   ce.box(['List', 12, 'Nothing', 34]);
   // Before → [12, "Nothing", 34]   Length 3, vector<finite_integer^3>
   // Now    → [12, 34]              Length 2, vector<finite_integer^2>
 
+  ce.box(['Set', 1, 'Nothing', 3]);    // Now → Set(1, 3)
+  ce.box(['Tuple', 1, 'Nothing', 3]);  // Now → (1, 3), tuple<finite_integer, finite_integer>
+  ce.parse('(a,,b)');                  // Now → (a, b)   (an empty slot is `Nothing`)
+
   ce.box(['At', ['List', 12, 'Nothing', 34], 2]).evaluate();
   // Before → "Nothing"     Now → 34
   ```
+
+  Splicing a tuple changes its ARITY, and its type follows: a 3-point with an
+  erased coordinate is an honest 2-tuple. `ce.tuple()` splices too, so every
+  route that builds a `Tuple` agrees. A caller that needs a fixed-arity
+  POSITIONAL pair whose slot may hold `Nothing` — a dictionary `(key, value)`
+  entry, say — must build it with `ce._fn('Tuple', …)`; the built-in dictionary
+  entry/`KeyValuePair` paths already do.
 
   This also applies to the lazy iteration path: an element that _evaluates_ to
   `Nothing` is skipped. A mapping function returning `Nothing` therefore drops
   its element — the `mapMaybe` idiom — so `Map(xs, _ ↦ Nothing)` is the empty
   collection. **If you were using `Nothing` as a hole/placeholder inside a
-  list, use `Missing` instead** (below).
+  list, set or tuple, use `Missing` instead** (below).
 
 - **New `Missing` marker and `missing` type for an absent-but-positioned
   value.** `Missing` is the complement of `Nothing`: "a position exists, its
@@ -31,6 +42,19 @@
   ce.box(['List', 1, 'Missing', 3]); // → length 3, list<finite_integer | missing>
   ce.box(['Add', 'Missing', 1]);     // → "Missing"   (vs `Nothing + 1` → 1)
   ```
+
+  Propagation is enforced at the evaluation layer, so it does not depend on how
+  the expression was built: a `Missing` reaching a numeric operator through a
+  reduction kernel behaves like one written literally.
+
+  ```js
+  ce.box(['Sum', ['List', 1, 'Missing', 3]]).evaluate();     // → "Missing"
+  ce.box(['Product', ['List', 1, 'Missing', 3]]).evaluate(); // → "Missing"
+  ```
+
+  Structural and higher-order operators — `List`, `Set`, `Tuple`, `At`,
+  `Equal`, the big-op containers — keep `Missing` as an ordinary operand, which
+  is what makes `[1, Missing, 3]` a 3-element list.
 
   `missing` is a primitive unit type (a subtype only of itself and `any`,
   mirroring `nothing`), and the symbol is reachable as `ce.Missing`.
@@ -57,10 +81,21 @@
   coordinate accessors follow the same rule (e.g. `PointZ` over 2D points is
   now a list of `NaN`, not a list of `Nothing` that would erase itself).
 
-- **Statistics skip `Nothing` and propagate `Missing`/`NaN`.** `Mean`,
-  `Median`, `Variance`, `StandardDeviation`, `Kurtosis`, `Skewness`, `Mode`,
-  `Quartiles` and `InterquartileRange` ignore a `Nothing` datum; a `Missing`
-  datum makes the whole statistic `Missing`, and a `NaN` datum makes it `NaN`.
+- **Statistics, `Max` and `Min` skip `Nothing` and propagate `Missing`/`NaN`.**
+  `Mean`, `Median`, `Variance`, `StandardDeviation`, `Kurtosis`, `Skewness`,
+  `Mode`, `Quartiles`, `InterquartileRange`, and `Max`/`Min`/`Supremum`/
+  `Infimum` ignore a `Nothing` datum; a `Missing` datum makes the whole
+  aggregate `Missing`, and a `NaN` datum makes it `NaN`. Both call shapes
+  follow the rule — variadic scalars and a collection operand.
+
+  ```js
+  ce.box(['Max', 1, 'Missing', 3]); //             → "Missing"
+  ce.box(['Max', ['List', 1, 'Missing', 3]]).evaluate(); // → "Missing"
+  ce.box(['Max', 1, 'Nothing', 3]).evaluate(); //           → 3
+  ```
+
+  Previously a `Missing` operand of `Max`/`Min` was rejected with an
+  `incompatible-type` error.
 
 ### Improvements
 
@@ -108,6 +143,21 @@
   element-wise, and `Length(At(p, I))` compiles.
 
 ### Bug Fixes
+
+- **`CircularIntegrate` (`\oint`) gained an operator definition, so its limits
+  canonicalize like `Integrate`'s.** `\oint_C f` parses to limits built as a
+  `Tuple` in which the symbol `Nothing` is a POSITIONAL placeholder for an
+  absent index/bound; with no definition to rewrite them into `Limits`, the
+  canonical `Tuple` literal spliced the placeholder out and the serializer
+  emitted the literal string `\ointundefined`. `CircularIntegrate` remains
+  inert — there is still no contour-integration evaluation — but it now types
+  as `number` and round-trips through LaTeX.
+
+  ```js
+  ce.parse('\\oint_C f').json;
+  // Before → ["CircularIntegrate", "f", ["Triple", "Nothing", "C", "Nothing"]]
+  // Now    → ["CircularIntegrate", "f", ["Limits", "Nothing", "C", "Nothing"]]
+  ```
 
 - **`Map` now evaluates over a source that only becomes a collection when
   evaluated.** `Map(X - 1, f)` stayed in its unevaluated lazy form while

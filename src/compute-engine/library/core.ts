@@ -272,7 +272,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // the arguments, so it needs to be preserved.
         // If there is a single element, unpack it.
         if (isFunction(body, 'Sequence'))
-          return ce._fn('Tuple', canonical(ce, body.ops));
+          return ce._fn(
+            'Tuple',
+            // `Nothing` is an ERASURE marker: it is spliced out of a tuple
+            // literal, so `(1, Nothing, 3)` is the 2-tuple `(1, 3)`. This
+            // mirrors the filter in the `Tuple` canonical handler — the
+            // `Delimiter` route builds the `Tuple` directly and would
+            // otherwise bypass it.
+            canonical(ce, body.ops).filter((x) => !isSymbol(x, 'Nothing'))
+          );
 
         body = body.canonical;
 

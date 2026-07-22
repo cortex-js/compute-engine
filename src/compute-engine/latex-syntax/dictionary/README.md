@@ -24,9 +24,14 @@ touch one stage, read this first.
 - each `limitᵢ` is `["Limits", var, lower, upper]`. `Nothing` marks a missing
   bound (`∫_0 …`) or a missing variable.
 
-`CircularIntegrate` (`\oint`) shares the parser/serializer but is **not**
-canonicalized the same way — its body is left as a bare application and its
-limits stay `Tuple`, not `Limits`. See the serialization caveat below.
+`CircularIntegrate` (`\oint`) shares the parser/serializer and canonicalizes its
+limits to `Limits` the same way, but is otherwise **inert**: it has no
+`evaluate` handler (no contour-integration mathematics), and its body is left as
+a bare application rather than wrapped in a `Function` literal, so it round-trips
+to the same LaTeX. Its `canonical` handler exists specifically because the
+parser uses the symbol `Nothing` as a *positional* placeholder inside the
+`Tuple` limits, and a canonical `Tuple` literal splices `Nothing` out — which
+would shift the remaining bounds. See the serialization caveat below.
 
 ## Parsing (`definitions-calculus.ts`)
 
