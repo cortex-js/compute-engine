@@ -328,6 +328,7 @@ export class ComputeEngine implements IComputeEngine {
   readonly Pi: Expression;
   readonly E: Expression;
   readonly Nothing: Expression;
+  readonly Missing: Expression;
 
   // Common numbers
   readonly Zero: Expression;
@@ -396,6 +397,7 @@ export class ComputeEngine implements IComputeEngine {
 
     All: null,
     Nothing: null,
+    Missing: null,
     None: null,
     Undefined: null,
 
@@ -666,6 +668,7 @@ export class ComputeEngine implements IComputeEngine {
     this.Pi = commonSymbols.Pi;
     this.E = commonSymbols.E;
     this.Nothing = commonSymbols.Nothing;
+    this.Missing = commonSymbols.Missing;
 
     // Push a fresh scope to protect system definitions:
     // this will be the "global" scope

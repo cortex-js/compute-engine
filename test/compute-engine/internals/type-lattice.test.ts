@@ -164,9 +164,12 @@ describe('isPrimitiveSubtype and isSubtype agree (SYM P2-22)', () => {
   test('the unknown cells (the P2-22 disagreement) now agree in both directions', () => {
     for (const t of PRIMITIVE_TYPES) {
       // `X <: unknown`: unknown is a top type for every primitive except the
-      // unit type `nothing` (which is a subtype only of `any` and itself).
+      // unit types `nothing` and `missing` (each a subtype only of `any` and
+      // itself).
       expect(isPrimitiveSubtype(t, 'unknown')).toBe(isSubtype(t, 'unknown'));
-      expect(isPrimitiveSubtype(t, 'unknown')).toBe(t !== 'nothing');
+      expect(isPrimitiveSubtype(t, 'unknown')).toBe(
+        t !== 'nothing' && t !== 'missing'
+      );
       // `unknown <: X`: only `any`/`unknown`.
       expect(isPrimitiveSubtype('unknown', t)).toBe(isSubtype('unknown', t));
       expect(isPrimitiveSubtype('unknown', t)).toBe(t === 'any' || t === 'unknown');

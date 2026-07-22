@@ -261,7 +261,11 @@ describe('A3.5 — Indexing extensions', () => {
     expect(expr.nops).toEqual(0);
   });
 
-  test('At with out-of-range index in list: filters or yields Nothing for that slot', () => {
+  // BREAKING (2026-07-22): an out-of-range entry of an integer-list pick is
+  // POSITION-PRESERVING — it yields the absence marker (`NaN` for a numeric
+  // collection) in place instead of being dropped, so the picked list has the
+  // same length as the index list.
+  test('At with out-of-range index in list: yields the absence marker in that slot', () => {
     const ce = new ComputeEngine();
     const expr = ce.expr([
       'At',
@@ -269,8 +273,9 @@ describe('A3.5 — Indexing extensions', () => {
       ['List', 1, 99],
     ]).evaluate();
     expect(expr.operator).toEqual('List');
-    expect(expr.ops!.length).toBeGreaterThanOrEqual(1);
+    expect(expr.ops!.length).toEqual(2);
     expect(expr.op1.re).toEqual(10);
+    expect(expr.op2.isNaN).toBe(true);
   });
 
   test('At with predicate-derived mask works (manual case)', () => {

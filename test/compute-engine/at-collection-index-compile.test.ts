@@ -9,10 +9,12 @@
  * suite pins parity (D6: compiled = interpreted, or refuse) rather than
  * restating one side's expectations.
  *
- * Projection convention: the interpreter's "no value" outcomes have no numeric
- * equivalent, so they compile to NaN — `Nothing` (scalar out-of-range index)
- * and a DECLINED `At` (a non-integer entry in a collection index leaves `At`
- * unevaluated) both project to a scalar NaN.
+ * Projection convention: out-of-band access is POSITION-PRESERVING and yields
+ * the absence marker on BOTH routes — for a numeric collection that marker is
+ * literally `NaN`, so an out-of-range scalar index and an out-of-range gather
+ * entry agree between interpreter and compiler with no projection at all. A
+ * DECLINED `At` (a non-integer entry in a collection index leaves `At`
+ * unevaluated) has no numeric equivalent and still projects to a scalar NaN.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -27,9 +29,10 @@ const P = ['List', 10, 20, 30];
 function interpreted(expr: BoxedExpression): number | number[] {
   const v = expr.evaluate();
   if (v.operator === 'List') return (v.ops ?? []).map((x) => x.re as number);
-  // `Nothing` (out-of-range scalar index) and an unevaluated `At` (declined:
-  // non-integer entry) both mean "no value" — NaN on a real target.
-  if (v.symbol === 'Nothing' || v.operator === 'At') return NaN;
+  // An unevaluated `At` (declined: non-integer entry) means "no value" — NaN
+  // on a real target. (The absence marker for a numeric collection is already
+  // `NaN`, so no projection is needed for out-of-band access.)
+  if (v.operator === 'At') return NaN;
   return v.re as number;
 }
 
@@ -61,10 +64,14 @@ describe('At with a collection index — gather', () => {
     expect(parity(at(['List', 2, -1]))).toEqual([20, 30]);
   });
 
-  test('out-of-range entries are dropped (result may be shorter)', () => {
-    expect(parity(at(['List', 0, 1, 2]))).toEqual([10, 20]);
-    expect(parity(at(['List', 1, 2, 4]))).toEqual([10, 20]);
-    expect(parity(at(['List', 10]))).toEqual([]);
+  // BREAKING (2026-07-22): a gather is POSITION-PRESERVING — an out-of-range
+  // entry yields the absence marker in place (`NaN` for this numeric source)
+  // instead of being dropped, so the result always has the index list's
+  // length. Both routes agree.
+  test('out-of-range entries yield the absence marker in place', () => {
+    expect(parity(at(['List', 0, 1, 2]))).toEqual([NaN, 10, 20]);
+    expect(parity(at(['List', 1, 2, 4]))).toEqual([10, 20, NaN]);
+    expect(parity(at(['List', 10]))).toEqual([NaN]);
   });
 });
 
@@ -122,13 +129,13 @@ describe('At with a scalar index (regression — unchanged)', () => {
     expect(parity(at(-1))).toBe(30);
   });
 
-  test('a zero index yields NaN (interpreted `Nothing`)', () => {
-    expect(at(0).evaluate().symbol).toBe('Nothing');
+  test('a zero index yields the absence marker (NaN here) on both routes', () => {
+    expect(at(0).evaluate().isNaN).toBe(true);
     expect(parity(at(0))).toBeNaN();
   });
 
-  test('an out-of-range index yields NaN (interpreted `Nothing`)', () => {
-    expect(at(4).evaluate().symbol).toBe('Nothing');
+  test('an out-of-range index yields the absence marker (NaN here) on both routes', () => {
+    expect(at(4).evaluate().isNaN).toBe(true);
     expect(parity(at(4))).toBeNaN();
   });
 });
@@ -200,10 +207,12 @@ describe('At on the parse route (subscript access)', () => {
   });
 
   test('p_{X-1} — index computed at run time (bcast)', () => {
+    // `X-1` is `[0,1,2]`: the 0 entry is out of range and now yields the
+    // marker in place, so the result keeps the index list's length.
     const expr = engine.parse('p_{X-1}');
     const r = compile(expr);
     expect(r?.success).toBe(true);
-    expect(r!.run!()).toEqual([10, 20]);
+    expect(r!.run!()).toEqual([NaN, 10, 20]);
     expect(r!.run!()).toEqual(interpreted(expr));
   });
 });

@@ -100,6 +100,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'The absence of a value; the sole member of the unit type.',
       type: 'nothing',
     },
+
+    // The sole member of the unit type, `missing`.
+    //
+    // `Nothing` and `Missing` are complementary absence markers:
+    // - `Nothing` is an ERASURE marker (an empty-sequence splice): it is
+    //   elided from operator argument lists (`Nothing + 1` → `1`) and from
+    //   collection literals (`[12, Nothing, 34]` → `[12, 34]`).
+    // - `Missing` is a POSITION-PRESERVING marker: "a position exists, its
+    //   value is absent" (Julia `missing`, R `NA`). It is never elided, and
+    //   it propagates through numeric operations (`Missing + 1` → `Missing`)
+    //   and through statistics.
+    Missing: {
+      description:
+        'A value that is absent but whose position is preserved (Julia `missing`, R `NA`); the sole member of the `missing` type.',
+      type: 'missing',
+    },
   },
 
   //

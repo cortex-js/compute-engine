@@ -1,5 +1,67 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`Nothing` now erases inside collections, as it already did inside operator
+  argument lists.** `Nothing` is the ERASURE marker — an empty-sequence splice
+  — so a `Nothing` element is spliced out of a collection instead of being
+  retained. Length, type and indexing all follow:
+
+  ```js
+  ce.box(['List', 12, 'Nothing', 34]);
+  // Before → [12, "Nothing", 34]   Length 3, vector<finite_integer^3>
+  // Now    → [12, 34]              Length 2, vector<finite_integer^2>
+
+  ce.box(['At', ['List', 12, 'Nothing', 34], 2]).evaluate();
+  // Before → "Nothing"     Now → 34
+  ```
+
+  This also applies to the lazy iteration path: an element that _evaluates_ to
+  `Nothing` is skipped. A mapping function returning `Nothing` therefore drops
+  its element — the `mapMaybe` idiom — so `Map(xs, _ ↦ Nothing)` is the empty
+  collection. **If you were using `Nothing` as a hole/placeholder inside a
+  list, use `Missing` instead** (below).
+
+- **New `Missing` marker and `missing` type for an absent-but-positioned
+  value.** `Missing` is the complement of `Nothing`: "a position exists, its
+  value is absent" (Julia `missing`, R `NA`). It is never erased, and it
+  propagates through numeric operations.
+
+  ```js
+  ce.box(['List', 1, 'Missing', 3]); // → length 3, list<finite_integer | missing>
+  ce.box(['Add', 'Missing', 1]);     // → "Missing"   (vs `Nothing + 1` → 1)
+  ```
+
+  `missing` is a primitive unit type (a subtype only of itself and `any`,
+  mirroring `nothing`), and the symbol is reachable as `ce.Missing`.
+
+- **Out-of-band access preserves position instead of yielding `Nothing` or
+  dropping the entry.** An out-of-range index, or a dictionary key that is not
+  present, now yields a position-preserving marker chosen by the collection's
+  element type: `NaN` when the elements are numeric, `Missing` otherwise.
+
+  ```js
+  const p = ['List', 10, 20, 30];
+
+  ce.box(['At', p, 9]).evaluate();                  // Before → "Nothing"  Now → NaN
+  ce.box(['At', p, ['List', 0, 1, 2]]).evaluate();  // Before → [10, 20]   Now → [NaN, 10, 20]
+  ce.box(['At', ['List', "'a'", "'b'"], 5]).evaluate(); //           Now → "Missing"
+  ```
+
+  An integer-list gather now always has the same length as its index list, so
+  it no longer misaligns positional data. (This supersedes the "out-of-range
+  entries are dropped" note in the compiled-`At` entry below; compiled and
+  interpreted results still agree exactly.) A **boolean mask is unchanged** —
+  a mask is a filter, so unselected and out-of-range positions are still
+  dropped. `First`/`Second`/`Third`/`Last` and the `PointX`/`PointY`/`PointZ`
+  coordinate accessors follow the same rule (e.g. `PointZ` over 2D points is
+  now a list of `NaN`, not a list of `Nothing` that would erase itself).
+
+- **Statistics skip `Nothing` and propagate `Missing`/`NaN`.** `Mean`,
+  `Median`, `Variance`, `StandardDeviation`, `Kurtosis`, `Skewness`, `Mode`,
+  `Quartiles` and `InterquartileRange` ignore a `Nothing` datum; a `Missing`
+  datum makes the whole statistic `Missing`, and a `NaN` datum makes it `NaN`.
+
 ### Improvements
 
 - **`RandomList` now compiles on the JavaScript target.** `RandomList(n)` draws
@@ -35,10 +97,10 @@
   ce.parse('p_{X}'); // → [10, 20, 30]
   ```
 
-  Negative indices count from the end and out-of-range entries are dropped, so
-  a gather may be shorter than its index list. Previously these returned
-  `undefined`, a wrongly-shaped scalar (`p[[2]]` gave `20` rather than `[20]`),
-  or threw.
+  Negative indices count from the end, and out-of-range entries preserve their
+  position (see the absent-value marker change under Breaking Changes).
+  Previously these returned `undefined`, a wrongly-shaped scalar (`p[[2]]` gave
+  `20` rather than `[20]`), or threw.
 
   An `At` with a collection-valued index now has type `list<T>` rather than the
   element type `T`. **If you dispatch on `.type`, expect the new value.** This
@@ -46,6 +108,29 @@
   element-wise, and `Length(At(p, I))` compiles.
 
 ### Bug Fixes
+
+- **`Map` now evaluates over a source that only becomes a collection when
+  evaluated.** `Map(X - 1, f)` stayed in its unevaluated lazy form while
+  `Map(X, f)` and `Map([0, 1, 2], f)` both evaluated. The trigger was any
+  source whose collection-ness is not visible before evaluation — a broadcast
+  arithmetic result over a list, or an eager collection operator such as
+  `UnicodeScalars`.
+
+  ```js
+  ce.assign('X', ce.box(['List', 0, 1, 2]));
+  ce.box(['Map', ['Subtract', 'X', 1], sq]).evaluate();
+  // Before → Map(X - 1, (x) |-> x^2)     Now → [1, 0, 1]
+
+  ce.box(['Map', ['UnicodeScalars', { str: 'ab' }], sq]).evaluate();
+  // Before → Map(UnicodeScalars("ab"), …) Now → [9409, 9604]
+  ```
+
+  Applies to the `zipWith` (multi-source) form as well, and to `.at()` — which
+  previously returned `undefined` for such a source, so a result longer than
+  the materialization head was silently rendered head-only instead of
+  head-and-tail. Every other collection operator (`Filter`, `Take`, `Sort`,
+  `Reverse`, `First`, …) already accepted these sources. Expressions that are
+  genuinely not collections are unchanged: `Map(5, f)` still stays symbolic.
 
 - **Compiled comparisons and logical connectives no longer return a wrong
   answer for a list operand.** `<`, `<=`, `>`, `>=`, `And`, `Or` and `Not`

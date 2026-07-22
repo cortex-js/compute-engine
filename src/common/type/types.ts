@@ -5,6 +5,8 @@
  *    - `expression`
  *    - `error`: an invalid value, such as `["Error", "missing"]`
  *    - `nothing`: the type of the `Nothing` symbol, the unit type
+ *    - `missing`: the type of the `Missing` symbol, the unit type of an
+ *       absent-but-positioned value (Julia `missing`, R `NA`)
  *    - `never`: the bottom type
  *    - `unknown`: a value whose type is not known
  *
@@ -58,6 +60,7 @@ export type PrimitiveType =
   | 'unknown'
   | 'error'
   | 'nothing'
+  | 'missing'
   | 'never'
   | 'any';
 

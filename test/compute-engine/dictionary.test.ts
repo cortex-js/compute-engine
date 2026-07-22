@@ -491,9 +491,12 @@ describe('Dictionary key access via At', () => {
     );
   });
 
-  it('returns Nothing for a missing key', () => {
-    expect(box(['At', dict, { str: 'depth' }] as any).evaluate().symbol).toBe(
-      'Nothing'
+  // BREAKING (2026-07-22): a missing key is out-of-band access, so it yields
+  // the position-preserving absence marker — `NaN` when the dictionary's
+  // values are numeric, `Missing` otherwise. Never `Nothing`, which erases.
+  it('returns the absence marker for a missing key', () => {
+    expect(box(['At', dict, { str: 'depth' }] as any).evaluate().isNaN).toBe(
+      true
     );
   });
 

@@ -55,7 +55,7 @@ import { isValueDef } from './utils.js';
 import { lookupApplicable } from '../function-utils.js';
 import { canonicalNegate } from './negate.js';
 import { canonical } from './canonical-utils.js';
-import { isNumber, isFunction } from './type-guards.js';
+import { isNumber, isFunction, isSymbol } from './type-guards.js';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -650,7 +650,12 @@ function makeCanonicalFunction(
   //
   if (name === 'List') {
     const boxedOps = ops.map((x) => ce.expr(x, { form: 'raw' }));
-    const canonicalOps = canonical(ce, boxedOps, scope);
+    // `Nothing` is an ERASURE marker (an empty-sequence splice): it is
+    // elided from a collection literal, so `[12, Nothing, 34]` is a
+    // 2-element list. Use `Missing` for an absent-but-positioned value.
+    const canonicalOps = canonical(ce, boxedOps, scope).filter(
+      (x) => !isSymbol(x, 'Nothing')
+    );
     return new BoxedFunction(ce, 'List', canonicalOps, {
       metadata,
       canonical: true,
@@ -808,6 +813,18 @@ function makeCanonicalFunction(
   // eligible for repair.
   const xs = ops.map((x) => ce.expr(x));
 
+  // `Missing` (an absent value whose position is preserved) PROPAGATES
+  // through numeric operations: `Sin(Missing)` is `Missing`. Gated on
+  // `allParamsNumeric` (the same gate the post-canonical numeric
+  // re-validation uses) so structural/higher-order operators — `List`,
+  // `At`, `Equal`, the big-ops — keep `Missing` as a plain operand.
+  if (
+    !opDef.inferredSignature &&
+    xs.some((x) => isSymbol(x, 'Missing')) &&
+    allParamsNumeric(opDef.signature.type)
+  )
+    return ce.Missing;
+
   //
   // 3/ Apply `canonical` handler
   //
@@ -950,6 +967,22 @@ function makeCanonicalFunction(
   });
 }
 
+/** The operators handled by `makeNumericFunction`'s short path (they bypass
+ *  the definition lookup and go straight to their `canonicalXxx` builder). */
+const NUMERIC_SHORTCUT_OPERATORS = new Set<MathJsonSymbol>([
+  'Add',
+  'Multiply',
+  'Negate',
+  'Square',
+  'Sqrt',
+  'Exp',
+  'Ln',
+  'Log',
+  'Power',
+  'Root',
+  'Divide',
+]);
+
 function makeNumericFunction(
   ce: ComputeEngine,
   name: MathJsonSymbol,
@@ -957,9 +990,19 @@ function makeNumericFunction(
   metadata?: Metadata,
   scope?: Scope
 ): Expression | null {
+  if (!NUMERIC_SHORTCUT_OPERATORS.has(name)) return null;
+
+  const semi = semiCanonical(ce, semiOps, scope);
+
+  // `Missing` (an absent value whose position is preserved) PROPAGATES
+  // through numeric operations: `Missing + 1` is `Missing`. This is the
+  // counterpart of `Nothing`, which is *elided* from an operand list
+  // (`Nothing + 1` is `1`) — see `flatten()`.
+  if (semi.some((x) => isSymbol(x, 'Missing'))) return ce.Missing;
+
   let ops: ReadonlyArray<Expression> = [];
   if (name === 'Add' || name === 'Multiply')
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), {
+    ops = checkNumericArgs(ce, semi, {
       flatten: name,
     });
   else if (
@@ -968,17 +1011,17 @@ function makeNumericFunction(
     name === 'Sqrt' ||
     name === 'Exp'
   )
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), 1);
+    ops = checkNumericArgs(ce, semi, 1);
   else if (name === 'Ln' || name === 'Log') {
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope));
+    ops = checkNumericArgs(ce, semi);
     if (ops.length === 0) ops = [ce.error('missing')];
   } else if (name === 'Power' || name === 'Root')
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), 2);
+    ops = checkNumericArgs(ce, semi, 2);
   else if (name === 'Divide') {
     // Note: Divide can have more than one argument, i.e.
     // Divide(a, b, c) = a / b / c
     // But it needs at least two arguments
-    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope));
+    ops = checkNumericArgs(ce, semi);
     if (ops.length === 0) ops = [ce.error('missing'), ce.error('missing')];
     if (ops.length === 1) ops = [ops[0], ce.error('missing')];
   } else return null;
