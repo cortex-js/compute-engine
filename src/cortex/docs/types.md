@@ -10,13 +10,13 @@ sidebar:
 # Types
 
 Cortex does not have its own type system: it reuses the Compute Engine's
-type language (`src/common/type/`), the same syntax accepted by
-`ce.declare("f", "(real) -> real")`. This page covers where a type
+type language, the same syntax accepted by
+`ce.declare("f", "(real) -> real")`. See the
+[Compute Engine type guide](/compute-engine/guides/types/) for the type
+language itself. This page covers where a type
 annotation is written in Cortex source and what it means; the type grammar
-itself — unions, intersections, tuples, records, function signatures, and so
-on — is defined by the BNF grammar documented at the top of
-[`src/common/type/parser.ts`](https://github.com/cortex-js/compute-engine/blob/main/src/common/type/parser.ts).
-This page does not fork or duplicate that grammar.
+includes unions, intersections, tuples, records, function signatures, and
+generic collection types.
 
 ## Annotation positions
 
@@ -35,22 +35,32 @@ where the type subparser stopped. An unrelated `:` that doesn't follow a
 declaration target at the start of a statement is not treated as an
 annotation at all.
 
-Function parameter and return-type annotations (`f(x: real, n: integer) ->
-real`) are planned for Phase 4, once function definitions are designed; they
-are not yet part of the grammar.
+Function parameters and return values can also be annotated:
 
-## Current parse shape
+```cortex
+f(x: real, n: integer) -> real = x^n
+function g(x: integer) -> integer { x + 1 }
+(x: integer) |-> x + 1
+```
 
-The Cortex parser parses a type annotation and holds it, unevaluated, as a
-string inside the produced MathJSON — the final `Declare`/`Assign` shape is
-still being finalized as part of the Phase 4 declaration design. Today:
+Parameter annotations are enforced when a function is called. A return-type
+annotation is recorded in the function's signature, but the current runtime
+does not reject a returned value merely because its inferred type differs from
+the annotation.
+
+## MathJSON representation
+
+The parser holds a type annotation as a MathJSON string. A declaration places
+that string after the declared symbol. An initializer is stored in the
+declaration's attributes dictionary:
 
 ```cortex
 x: real = 5
 ```
 
 ```json
-["Declare", "x", {"str": "real"}, 5]
+["Declare", "x", {"str": "real"},
+  ["Dictionary", ["KeyValuePair", "value", 5]]]
 ```
 
 ```cortex
@@ -77,11 +87,24 @@ expression grammar.
 
 ## Semantics
 
-An annotation compiles to the same engine type machinery used by
+An annotation uses the same engine type machinery as
 `ce.declare()`. Type checking is not a separate Cortex-side pass — it happens
 at canonicalization/evaluation time, the same way it does for any other
 declared symbol. Cortex does not add a second type checker on top of the
 engine's.
+
+Typed parameters are represented with `Typed` nodes:
+
+```cortex
+f(x: integer) -> real = x + 1
+```
+
+```json
+["Assign", "f",
+  ["Function",
+    ["Typed", ["Add", "x", 1], {"str": "real"}],
+    ["Typed", "x", {"str": "integer"}]]]
+```
 
 ## Inference
 

@@ -30,9 +30,9 @@ The whitespace rules are necessary to support unambiguous parsing of expressions
 spanning multiple lines without requiring a separator between expressions
 {.notice--info}
 
-This page is generated from the single source of truth for operator spelling,
-precedence, and associativity: `src/cortex/operators.ts`. Both the parser and
-the serializer read that table, so they cannot diverge.
+The implementation's source of truth for operator spelling, precedence, and
+associativity is `src/cortex/operators.ts`. Both the parser and serializer read
+that table. The reference table below mirrors it.
 
 ## Precedence
 
@@ -45,6 +45,7 @@ precedence (for example `+` and `-`, or `*` and `/`).
 | Tier | Operator            | ASCII  | Fancy | Kind   | Associativity |
 | ---- | -------------------- | ------ | ----- | ------ | ------------- |
 | 10   | Assign                | `=`    |       | infix  | right         |
+| 15   | MapsTo                | `\|->` | `↦`   | infix  | right         |
 | 20   | Pipe                  | `\|>`  |       | infix  | left          |
 | 20   | Pipe                  | `~>`   |       | infix  | left          |
 | 30   | KeyValuePair          | `->`   | `→`   | infix  | left          |
@@ -59,6 +60,7 @@ precedence (for example `+` and `-`, or `*` and `/`).
 | 60   | GreaterEqual          | `>=`   | `⩾`   | infix  | n-ary chain   |
 | 60   | Element               | `in`   | `∈`   | infix  | n-ary chain   |
 | 60   | NotElement            | `!in`  | `∉`   | infix  | n-ary chain   |
+| 65   | Range                 | `..`   | `‥`   | infix  | left          |
 | 70   | Add                   | `+`    |       | infix  | left          |
 | 70   | Subtract              | `-`    | `−`   | infix  | left          |
 | 80   | Multiply              | `*`    | `×`   | infix   | left          |
@@ -117,6 +119,42 @@ a + b |> f       // (a + b) |> f
 a || b |> f      // (a || b) |> f
 x = a |> f       // x = (a |> f)
 ```
+
+## Anonymous functions: `|->`
+
+The mapsto operator constructs an anonymous function:
+
+```cortex
+x |-> x^2
+(x, y) |-> x + y
+```
+
+It is right-associative, so `x |-> y |-> x + y` constructs a function that
+returns another function. It binds tighter than assignment but more loosely
+than the other expression operators, so `f = x |-> x + 1` assigns the complete
+function to `f`. Typed parameters can be written in parentheses:
+
+```cortex
+(x: integer) |-> x + 1
+```
+
+The `MapsTo` name in the table is internal to parsing. The resulting MathJSON
+uses `Function`, not a `MapsTo` head.
+
+## Ranges: `..`
+
+The range operator is a compact spelling of a two-argument `Range`:
+
+```cortex
+1..5          // Range(1, 5)
+1..n - 1      // Range(1, n - 1)
+k in 1..5     // k in Range(1, 5)
+```
+
+It binds tighter than relational operators and more loosely than addition and
+subtraction. The Unicode two-dot leader `‥` is an input alias. Serialization
+uses `Range(a, b)`, and a stepped range continues to use the three-argument
+call `Range(a, b, step)`.
 
 ## Unary prefix: `-` and `!`
 
@@ -243,11 +281,15 @@ mathematicians write inequalities and how the engine already represents them:
 a < b < c     // ["Less", "a", "b", "c"]
 ```
 
-A *mix* of relational operators nests left-associatively instead:
+A *mix* of relational operators initially lowers as a left-associated tree:
 
 ```cortex
 a < b <= c    // ["LessEqual", ["Less", "a", "b"], "c"]
 ```
+
+When the tree is boxed by the Compute Engine, it is canonicalized to the
+pairwise conjunction `a < b && b <= c`. Consequently, evaluating a mixed chain
+has the usual mathematical chained-comparison semantics.
 
 ## Logic operators
 
@@ -255,8 +297,9 @@ a < b <= c    // ["LessEqual", ["Less", "a", "b"], "c"]
   `⋁`, `¬`.
 - `&&` binds tighter than `||`, matching the tiers above.
 
-The word forms `and`, `or`, `not`, and the implication/equivalence operators
-`=>` and `<=>` are reserved words but not implemented as operators.
+The word forms `and`, `or`, and `not`, and the implication/equivalence infix
+operators `=>` and `<=>`, are reserved but not implemented. The token `=>` is
+used contextually to separate a `match` pattern from its result.
 
 ## Assignment vs. equality
 

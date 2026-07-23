@@ -11,32 +11,47 @@ sidebar:
 
 ## Encoding
 
-Cortex source code is using the UTF-8 Unicode encoding in [NFC form](https://www.unicode.org/reports/tr15/tr15-50.html).
+Cortex's JavaScript API accepts a string. A host reading a Cortex source file
+should decode it as UTF-8 and should write identifiers in
+[Unicode NFC form](https://www.unicode.org/reports/tr15/tr15-50.html), as
+required by the MathJSON symbol contract.
 
-Unicode codepoints that are not in NFC form can be represented in 
-[strings](/cortex/literals/#strings) using escape sequences.
-
-A stream or file containing Cortex source code may begin with a UTF-8 BOM, that
-is the byte sequence `0xEF, 0xBB, 0xBF`. If present, the BOM is ignored.
-
-When modifying a Cortex source file, if it had a BOM when read, it should 
-include the BOM when written. This is important to avoid spurious changes 
-when using source code control tools.
+The Cortex parser does not decode files or strip a byte-order mark. File I/O
+and decoding are the responsibility of the host. Inside a string literal,
+Unicode code points can also be written with
+[escape sequences](/cortex/literals/#escape-sequence).
 
 ## File Extension
 
-When stored in a file, the **file extension** is `.cortex` or `.cx`.
+The conventional file extensions are `.cortex` and `.cx`.
 
 ## MIME-type
 
-The recommended **MIME media type** for Cortex source code is `text/cortex`.
+The project uses `text/cortex` as its media-type convention. It is not a
+registered IANA media type.
 
+## Command line
+
+Installing `@cortex-js/compute-engine` provides the `cortex` command:
+
+```shell
+cortex --eval "1 + 2"
+cortex program.cx
+cortex --json program.cortex
+```
+
+With no file or `--eval`, `cortex` starts an interactive REPL when standard
+input is a terminal; otherwise it reads a program from standard input. The
+command applies a 10-second evaluation limit by default. Use
+`--time-limit <milliseconds>` to change it or `--time-limit 0` to disable it.
+Run `cortex --help` for the complete option list.
 
 ## Hashbang Comment
 
-A **Hashbang Comment** can be included as the first line of a Cortex source file
-prefixed with `#!`. Its content indicate the command line interpreter to use:
+A hashbang comment can appear at the absolute start of the source and is ignored
+by the Cortex parser. It can be used to run an executable source file through
+the installed command:
 
-```
-#!/usr/bin/cortex
+```cortex
+#!/usr/bin/env cortex
 ```

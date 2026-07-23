@@ -12,8 +12,19 @@ sidebar:
 Cortex is a programming language for scientific computing built on the Cortex
 Compute Engine.
 
-The Cortex language is a work in progress. The information below reflects the
-current thinking and may change.{notice--warning}
+Cortex is available as an **experimental** entry point. Its syntax and
+semantics may change between releases while the language is being exercised in
+notebooks and other applications.{notice--warning}
+
+```js
+import {
+  ComputeEngine,
+  executeCortex,
+} from "@cortex-js/compute-engine/cortex";
+
+const ce = new ComputeEngine();
+const { value, diagnostics } = executeCortex(ce, "1 + 2");
+```
 
 Here is "Hello World" in Cortex:
 
@@ -27,12 +38,12 @@ Here are a few more examples:
 Simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
 // ➔ 4x^3 + 2x^2 + 3
 
-x = 2^11 - 1
+let x = 2^11 - 1
 "\(x) has type \(Type(x))"
 // ➔ "2047 has type integer"
 ```
 
-{% readmore "/cortex/syntax/" %} Read more about the <strong>formal syntax of
+{% readmore "/cortex/syntax/" %} Read more about the <strong>syntax of
 Cortex</strong> {% endreadmore %}
 
 {% readmore "/cortex/implementation/" %} Read more about the
@@ -40,7 +51,7 @@ Cortex</strong> {% endreadmore %}
 
 
 {% readmore "/cortex/pragmas/" %}
-**Pragmas**: compiler directives embedded in the code 
+**Pragmas**: parser directives embedded in the code
 {% endreadmore %}
 
 
@@ -97,7 +108,7 @@ convention (`xs[1]` is the first element).
 
 ```cortex
 [3, 5, 7, 11]
-[3, 3 + 5, 3 + + 7, 3 + 5 + 7 + 11]
+[3, 3 + 5, 3 + 7, 3 + 5 + 7 + 11]
 ```
 
 The empty list is `[]`.

@@ -17,11 +17,11 @@ and functions.
 ```cortex
 Sin(x)
 Simplify(2 + 3x^3)
-Print("hello")
+Map([1, 2, 3], x |-> x^2)
 ```
 
-`Sin`, `Simplify`, and `Print` are library operators; `x` and `hello` are
-ordinary (user) symbols.
+`Sin`, `Simplify`, and `Map` are library operators; `x` is an ordinary user
+symbol.
 
 This is a **convention with no enforced semantics** — nothing in the parser
 or the engine requires a capitalized name to be an operator or a lowercase

@@ -18,9 +18,9 @@ underscore followed by letters, digits and underscores, drawn from the
 Unicode recommended scripts (emoji are also allowed). The prohibited
 characters below can never appear in a symbol name.
 
-Before they are used, symbols are normalized to the
+When expressions are boxed for execution, symbol bindings are normalized to the
 [Unicode Normalization Form Canonical Composition (NFC)](http://www.macchiato.com/unicode/nfc-faq).
-They are stored internally and compared using the NFC. For example, `Å`
+They are stored and compared using NFC. For example, `Å`
 written as **U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE** and as
 **U+0041 LATIN CAPITAL LETTER A** followed by **U+030A COMBINING RING ABOVE**
 represent the same symbol.
@@ -153,37 +153,33 @@ character:
 - `\\` is a backslash character
 - `\'` is a single quote character
 - `\"` is a quotation mark
+- `\b` is a backspace character
+- `\f` is a form-feed character
+- `\s` is a space character
 - `\t` is a tab character
 - `\n` is a line feed character
 - `\r` is a carriage return character
 - `\u0061` is the Unicode character **U+0061 LATIN SMALL LETTER A**. In this
   form, the `\u` must be followed by exactly 4 hex-digits.
 - `\u{61}` is the Unicode character **U+0061 LATIN SMALL LETTER A**. In this
-  form, a string of 0 to 8 hex-digits must be included between `\u{` and `}.
+  form, a string of 1 to 8 hex-digits must be included between `\u{` and `}`.
 
 ### Multi-line String Literals
 
 A multiline string is delimited by `"""` (three quotation marks).
 
 ```cortex
-cortex = """
-      ,ad8888ba,
-    d8"'    `"8b                             ,d
-    d8'                                       88
-    88              ,adPPYba,   8b,dPPYba,  MM88MMM   ,adPPYba,  8b,     ,d8
-    88             a8"     "8a  88P'   "Y8    88     a8P_____88   `Y8, ,8P'
-    Y8,            8b       d8  88            88     8PP"""""""     )888(
-    Y8a.    .a8P  "8a,   ,a8"  88            88,    "8b,   ,aa   ,d8" "8b,
-      `"Y8888Y"'    `"YbbdP"'   88            "Y888   `"Ybbd8"'  8P'     `Y8
+let message = """
+    Cortex supports
+    multiline strings.
     """
 ```
 
 A multiline string can contain `"` or new line characters. It can't contain an
 unescaped sequence of `"""`.
 
-Anything after the `"""` that begins the multiline string literal and before the
-end of the line is ignored. The line break after the `"""` isn’t part of the
-string.
+Only spaces or tabs may follow the opening `"""` on its line. The line break
+after the delimiter is not part of the string.
 
 The line break before the `"""` that ends the literal is also not part of the
 string. To make a multiline string literal that begins or ends with a line feed,
@@ -203,11 +199,13 @@ feeds, all of the line breaks in the string will be the same.
 If a line of a multiline string ends with a `\` character, the next line is
 considered a continuation and the string will include neither the `\` nor the
 new line characters. Any whitespace between the backslash and the line break is
-also omitted.This can come in handy when using a very long string.
+also omitted. This continuation form applies to multiline strings.
 
 ```cortex
-hello = "Hello \
-World"  // Same as "Hello World"
+let hello = """
+Hello \
+World
+""" // Same as "Hello World"
 ```
 
 ```cortex
@@ -243,16 +241,17 @@ PARAGRAPH SEPARATOR**)
 
 ### Extended String Literal
 
-A string literal which contains no escape sequences is delimited by one or more
-'#' and a quotation mark.
+An extended string literal contains no escape sequences and is delimited by one
+or more `#` characters and a quotation mark. Extended strings are single-line;
+a line break before the matching delimiter is an error.
 
-```
+```cortex
 #"There is no escaping now"#
 #"Using "quotation marks" and \ without escaping"#
 ##"As many # as one needs"##
 ```
 
-These string as useful for string containing characters such as quotation mark
+These strings are useful for text containing characters such as quotation marks
 or backslash that would otherwise need to be escaped, leading to the
 [Leaning Tootpick Syndrome](https://en.wikipedia.org/wiki/Leaning_toothpick_syndrome).
 

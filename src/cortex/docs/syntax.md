@@ -27,7 +27,15 @@ In the grammar below, the following notation is used:
   indicated with a trailing hash sign, followed by the separator. If no
   separator is provided, the comma (,) is implied.
 
-## Grammar
+## Grammar overview
+
+The productions below describe the source forms accepted by the current
+parser. The Unicode identifier rules are delegated to the
+[MathJSON symbol profile](/math-json/#symbols), and the type following a `:`
+or return arrow is parsed using the
+[Compute Engine type language](/compute-engine/guides/types/). Detailed
+`match` patterns are documented under
+[Control Flow](/cortex/control-flow/#match).
 
 _quoted-text-item_ → U+0000-U+0009 U+000B-U+000C U+000E-U+0021 U+0023-U+2027
 U+202A-U+D7FF | U+E000-U+10FFFF
@@ -91,14 +99,17 @@ _hexadecimal-number_ | _decimal-number_))
 
 _symbol_ → _verbatim-symbol_ | _inline-symbol_
 
-_verbatim-symbol_ → **`` ` ``** _symbol-start_ (_symbol_continue_)\*
+_verbatim-symbol_ → **`` ` ``** _symbol-start_ (_symbol-continue_)\*
 **`` ` ``**
 
 The content of a _verbatim-symbol_ is taken literally: no escape sequences
 are applied, and it must be a valid MathJSON symbol name. The form exists to
 write symbols whose name is a reserved word, e.g. `` `while` ``.
 
-_inline-symbol_ → _symbol-start_ (_symbol_continue_)\*
+_inline-symbol_ → _symbol-start_ (_symbol-continue_)\*
+
+_symbol-start_ and _symbol-continue_ follow the MathJSON symbol profile.
+Reserved words are not accepted as _inline-symbol_; use the verbatim form.
 
 _escape-expression_ → **`\(`** _expression_ **`)`**
 
@@ -115,14 +126,45 @@ inside an extended string, so it can hold `"` and `\` literally.
 
 _string_ → _single-line-string_ | _multiline-string_ | _extended-string_
 
-_primary_ → _signed-number_ | _symbol_ | _string_ | _pragma_ | _latex-island_ |
-_parenthesized_ | _list_ | _set_ | _dictionary_ | _do-block_ | _call_ | _index_
+String escapes, interpolation, multiline indentation and continuation are
+specified in [Literals](/cortex/literals/#strings).
 
 _parenthesized_ → **`(`** _expression_ **`)`**
 
-_do-block_ → **`do`** **`{`** (_statement_)#_statement-separator_ **`}`**
+_list_ → **`[`** \[(_expression_)#**`,`**\] **`]`**
+
+_set_ → **`{`** \[(_expression_)#**`,`**\] **`}`**
+
+_dictionary_ → **`{`** \[(_key-value-pair_)#**`,`**\] **`}`** | **`{->}`**
+
+_key-value-pair_ → _expression_ **`->`** _expression_
+
+_block_ → **`{`** \[(_statement_)#_statement-separator_\] **`}`**
+
+_do-block_ → **`do`** _block_
 
 _latex-island_ → **`$`** (_unicode-char_ | **`\$`**)\* **`$`**
+
+_pragma_ → **`#line`** | **`#column`** | **`#url`** | **`#filename`** |
+**`#date`** | **`#time`** | _pragma-call_
+
+_pragma-call_ → (**`#env`** | **`#navigator`** | **`#warning`** |
+**`#error`**) **`(`** \[(_expression_)#**`,`**\] **`)`**
+
+_if-expression_ → **`if`** _expression_ _block_
+\[**`else`** (_block_ | _if-expression_)\]
+
+_match-expression_ → **`match`** _expression_ **`{`** _match-case_+ **`}`**
+
+_primary_ → _signed-number_ | _symbol_ | _string_ | _pragma_ |
+_latex-island_ | _parenthesized_ | _list_ | _set_ | _dictionary_ |
+_do-block_ | _if-expression_ | _match-expression_
+
+_call-clause_ → **`(`** \[(_expression_)#**`,`**\] **`)`**
+
+_index-clause_ → **`[`** (_expression_)#**`,`** **`]`**
+
+_postfix-expression_ → _primary_ (_call-clause_ | _index-clause_ | **`!`**)\*
 
 _expression_ → _primary_ | _prefix-expression_ | _infix-expression_ |
 _postfix-expression_
@@ -131,9 +173,24 @@ _prefix-expression_ → (**`-`** | **`!`**) _expression_
 
 _infix-expression_ → _expression_ _operator_ _expression_
 
-_postfix-expression_ → _expression_ **`!`**
+_parameter_ → _symbol_ \[**`:`** _type_\]
 
-_statement_ → _expression_ | _declaration_
+_parameters_ → **`(`** \[(_parameter_)#**`,`**\] **`)`**
+
+_declaration_ → (**`let`** | **`const`**) _symbol_
+\[**`:`** _type_\] \[**`=`** _expression_\] |
+_symbol_ **`:`** _type_ \[**`=`** _expression_\]
+
+_function-definition_ → _symbol_ _parameters_
+\[**`->`** _type_\] **`=`** _expression_ |
+**`function`** _symbol_ _parameters_ \[**`->`** _type_\] _block_
+
+_while-statement_ → **`while`** _expression_ _block_
+
+_for-statement_ → **`for`** _symbol_ **`in`** _expression_ _block_
+
+_statement_ → _declaration_ | _function-definition_ | _while-statement_ |
+_for-statement_ | _expression_
 
 _statement-separator_ → **`;`** | _linebreak_
 
@@ -218,7 +275,7 @@ f()         // ["f"]
 ```
 
 If the callee is not a bare symbol (for example, a parenthesized expression
-or the result of another call), the call compiles to `Apply`:
+or the result of another call), the call lowers to `Apply`:
 
 ```cortex
 (getF())(x)   // ["Apply", ["getF"], "x"]
@@ -226,7 +283,7 @@ or the result of another call), the call compiles to `Apply`:
 ```
 
 Indexing is a primary immediately followed — with no whitespace — by a
-bracketed index expression, and compiles to `At`. Indexing is **1-based**,
+bracketed index expression, and lowers to `At`. Indexing is **1-based**,
 matching the engine convention (`xs[1]` is the first element):
 
 ```cortex
@@ -250,7 +307,7 @@ call/index — the same whitespace-sensitivity that governs operators.
   zero-parameter lambda (`["Function", body]`).
 - **Dictionary**: `{k -> v}` → `["Dictionary", ["KeyValuePair", {str: "k"}, "v"]]`;
   an unquoted key becomes a string key. The empty dictionary is spelled
-  `{->}` (not `{}`, which is the empty set) and compiles to
+  `{->}` (not `{}`, which is the empty set) and lowers to
   `["Dictionary"]`.
 
 `{ … }` is disambiguated by looking at the first element once it has been
@@ -283,15 +340,16 @@ and diffs:
 ```
 
 A bare, top-level comma-separated sequence with no enclosing delimiter (for
-example `1, 2, 3` on its own) is **not** a `Sequence` literal in v0 — it is a
+example `1, 2, 3` on its own) is **not** a `Sequence` literal — it is a
 diagnostic. `Sequence` is available only as an explicit call: `Sequence(1, 2,
 3)` → `["Sequence", 1, 2, 3]`.
 
 ## Round-trip and serialization normalizations
 
 `serializeCortex` and `parseCortex` are inverses over the MathJSON the grammar
-can produce, up to a small set of documented normalizations. `parse(serialize(e))`
-is **structurally** equal to `e` after applying:
+can produce, up to a small set of documented normalizations.
+`parseCortex(serializeCortex(e))` is **structurally** equal to `e` after
+applying:
 
 - **Number formatting** — `2`, `{num: "2"}` and `"2"` are the same number;
   the serializer emits a single canonical spelling (with `_` digit grouping),
@@ -315,9 +373,8 @@ is **structurally** equal to `e` after applying:
 Comments are **not** preserved by a round-trip — see
 [Comments](/cortex/comments/).
 
-`If` has no `if`-expression spelling in this grammar; it serializes to the
-generic `If(cond, then, else)` call form (which round-trips). A dedicated
-statement form is deferred to a later phase.
+`If` and `Match` have dedicated expression spellings. Other MathJSON heads that
+do not have a special surface form serialize as ordinary function calls.
 
 ## Relationship to the loose math parser
 
@@ -331,13 +388,12 @@ same language, and they overlap only partially:
 | `[1, 2, 3]` | `["List", 1, 2, 3]`                | `["List", 1, 2, 3]`                           | ✅ same |
 | `x^2`      | `["Power", "x", 2]`                  | `["Power", "x", 2]`                            | ✅ same |
 | `2**3`     | `["Power", 2, 3]`                   | math-parser artifact (`**` is not an operator) | ❌ diverge |
-| `a \|> b`   | `["Pipe", "a", "b"]`               | `["Apply", "b", "a"]`                          | ❌ diverge |
+| `a \|> b`   | `["Pipe", "a", "b"]`               | `["Pipe", "a", "b"]`                           | ✅ same |
 | `f(x, y)`  | `["f", "x", "y"]` (call)            | `["InvisibleOperator", "f", ["Delimiter", …]]` | ❌ diverge |
 | `sin`      | `"sin"` (a symbol)                  | `["InvisibleOperator", "s", "i", "n"]`         | ❌ diverge |
 | `2x`       | `["Multiply", 2, "x"]`             | `["InvisibleOperator", 2, "x"]`               | ❌ diverge |
 
-The divergences are intentional: in Cortex a juxtaposed name is a single
-identifier (`sin` is one symbol, not `s·i·n`), `f(x, y)` is a function call,
-`|>` is the pipeline operator, and `**` is exponentiation — none of which the
-math-notation parser assigns the same meaning. Do not rely on the two parsers
-agreeing except on the two rows marked *same*.
+The remaining divergences are intentional: in Cortex a juxtaposed name is a
+single identifier (`sin` is one symbol, not `s·i·n`), `f(x, y)` is a function
+call, and `**` is exponentiation. The two parsers do agree that `|>` produces
+`Pipe`. Do not rely on them agreeing except on the rows marked *same*.

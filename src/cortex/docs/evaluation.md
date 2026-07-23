@@ -116,7 +116,23 @@ crash the host embedding it.
 
 ## Interruptibility
 
-A long-running evaluation respects the engine's existing deadline mechanism
-(`ce.timeLimit`/`ce.deadline`) — the same cancellation path any other engine
-evaluation uses. This is what lets a host notebook offer a stop button on a
-runaway cell.
+A host can give a Cortex evaluation an explicit time budget by wrapping it in
+the Compute Engine's `withTimeLimit()` span:
+
+```ts
+const result = ce.withTimeLimit(
+  { ms: 500, label: "cortex-cell" },
+  () => executeCortex(ce, source, { parseLatex })
+);
+```
+
+The engine's `iterationLimit` and `recursionLimit` provide independent
+count-based bounds. `executeCortex()` converts a limit breach during execution
+into an error value (or an `evaluation-canceled` diagnostic when it occurs in a
+non-final statement).
+
+These limits are cooperative. A browser that evaluates untrusted or potentially
+unbounded programs should run Cortex in a Web Worker that the host can terminate
+from the outside. See
+[Execution Constraints](/compute-engine/guides/execution-constraints/) for the
+complete cancellation model.

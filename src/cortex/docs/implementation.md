@@ -8,86 +8,108 @@ sidebar:
 ---
 # Inside Cortex
 
-A Cortex program is an expression that gets transformed into an IR (Intermediate
-Representation) expressed in MathJSON, compiled and evaluated by the Cortex
-Compute Engine.
+Cortex uses MathJSON as its intermediate representation and the Compute Engine
+as its runtime. The public language entry point exposes the three stages
+directly:
 
-The process to convert a Cortex program into a MathJSON expression is pretty
-straightforward:
-
-- Function calls gets converted into MathJSON functions:
-
-```cortex
-Print("x =", x)
+```js
+import {
+  ComputeEngine,
+  executeCortex,
+  parseCortex,
+  serializeCortex,
+} from "@cortex-js/compute-engine/cortex";
 ```
 
-```json example
-["Print", "'x ='", "x"]
+## Parsing
+
+`parseCortex(source, url?, options?)` returns a MathJSON expression and an
+array of diagnostics:
+
+```js
+const [expression, diagnostics] = parseCortex("2x + 1");
 ```
 
-- String get converted into MathJSON string. Interpolated strings get converted
-  into MathJSON `String` functions:
+Ignoring source-location metadata, the expression is:
+
+```json
+["Add", ["Multiply", 2, "x"], 1]
+```
+
+The parser recovers from most syntax errors and returns a partial expression
+alongside its diagnostics. Every parsed node also carries source offsets so a
+host can associate a diagnostic or expression with the original text.
+
+Common surface forms lower to ordinary MathJSON:
 
 ```cortex
 "The solution is \(x)"
 ```
 
-```json example
-["String", "'The solution is '", "x"]
+```json
+["String", {"str": "The solution is "}, "x"]
 ```
-
-- Operators get converted into equivalent MathJSON functions:
 
 ```cortex
-2x + 1
+let xs = [2, 7, 2, 4]
 ```
 
-```json example
-["Add", ["Multiply", 2, "x"], 1]
+```json
+["Declare", "xs",
+  ["Dictionary",
+    ["KeyValuePair", "value", ["List", 2, 7, 2, 4]]]]
 ```
-
-- Collections (List, Set, Tuple, Sequence, Dictionary) get converted into a
-  corresponding MathJSON expression:
 
 ```cortex
-set =  {2, 5, 7, 11, 13}
-list = [2, 7, 2, 4, 2]
-tuple = (1.5, 0.5)
-sequence = 2, 5, 7
+if x > 0 { x + 1 } else { x - 1 }
 ```
 
-```json example
-["Assign", "set", ["Set", 2, 5, 7, 11, 13]]
+```json
+["If", ["Greater", "x", 0],
+  ["Block", ["Add", "x", 1]],
+  ["Block", ["Subtract", "x", 1]]]
 ```
 
-```json example
-["Assign", "list", ["List", 2, 7, 2, 4, 2]]
+The examples omit the `sourceOffsets` fields for readability.
+
+## Execution
+
+`executeCortex(ce, source, options?)` parses a program and evaluates its
+top-level statements sequentially in the current scope of `ce`:
+
+```js
+const ce = new ComputeEngine();
+
+const first = executeCortex(ce, "let x = 5");
+const second = executeCortex(ce, "x = x + 1\nx");
+// second.value.re === 6
 ```
 
-```json example
-["Assign", "tuple", ["Tuple", 1.5, 0.5]]
+Reusing the engine preserves declarations between calls, which is the
+notebook/REPL execution model. A fresh `ComputeEngine` starts a fresh session.
+The returned object contains the last statement's boxed value and all
+diagnostics. Runtime failures are represented as error values rather than
+escaping to the host as ordinary exceptions.
+
+To enable `$…$` LaTeX islands, inject the engine's LaTeX parser:
+
+```js
+const parseLatex = (latex) => ce.parse(latex).json;
+const result = executeCortex(ce, "2 * $\\frac{1}{2}$", { parseLatex });
 ```
 
-```json example
-["Assign", "sequence", ["Sequence", 2, 5, 7]]
+Host-state pragmas remain disabled unless
+`allowHostPragmas: true` is explicitly supplied.
+
+## Serialization
+
+`serializeCortex(expression, options?)` converts MathJSON back to Cortex:
+
+```js
+serializeCortex(["Add", ["Multiply", 2, "x"], 1]);
+// ➔ "2 * x + 1"
 ```
 
-- Control structures get converted to an appropriate expression:
-
-```cortex
-if (x in PrimeNumber) {
-  Print(x);
-  x = x + 1;
-} else {
-  x = x + 2;
-}
-```
-
-```json example
-[
-  "If",
-  ["Element", "x", "PrimeNumber"],
-  ["Block", ["Print", "x"], ["Assign", "x", ["Add", "x", 1]]],
-  ["Block", ["Assign", "x", ["Add", "x", 2]]]
-]
-```
+The serializer formats an expression; it does not execute it. Comments are
+currently lossy on the parse side, so parsing and then serializing source code
+does not preserve comments or the author's original whitespace.

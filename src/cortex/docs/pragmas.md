@@ -9,21 +9,19 @@ sidebar:
 
 # Pragmas
 
-Pragmas, or compiler directives, are annotations in the source code that provide
-instructions to the parser/compiler about how to interpret the source code.
-These instructions are executed during the parsing/compilation phase, not during
-the execution phase.
+Pragmas are source forms evaluated by the Cortex parser. Their values are
+inserted into the produced MathJSON before ordinary program execution begins.
 
 ## Environment Variables
 
-Environment variables are defined in the execution environment of the compiler
-process when executed from a `node` process. In Unix, they are set using a
+Environment variables are defined in the host process when Cortex is parsed
+under Node.js. In Unix, they are set using a
 shell-specific syntax (`export VARIABLE=value` in bash shells, for example).
 
-Environment variables are not available when the compilation/parsing is taking
-place in a browser process.
+Environment variables are not normally available when parsing takes place in a
+browser.
 
-**To access an environment variable**, use the `#env()` pragma.
+Use `#env()` to read an environment variable:
 
 ```cortex
 #env("DEBUG")
@@ -37,72 +35,53 @@ Some common environment variables include:
 - `HOME`: path to the user home directory
 - `TEMP`: path to a temporary file directory
 
+`#env()` reads host state and is therefore disabled by default. Calling
+`parseCortex()` or `executeCortex()` without opting in produces a
+`host-pragma-disabled` diagnostic and the value `Nothing`. A trusted host can
+enable it with `{ allowHostPragmas: true }`.
+
 ### Navigator Properties
 
-The navigator properties are available when the compilation/parsing is taking
-place in a browser process.
+Navigator properties are available when parsing takes place in a browser.
 
-**To access the properties of the `navigator` JavaScript global object**, use
-the `#navigator()` pragma function. It returns "Nothing" if the property is not
-available.
+Use `#navigator()` to read a property of the browser's `navigator` object. Like
+`#env()`, it is disabled unless the host passes
+`{ allowHostPragmas: true }`. It returns `Nothing` when the browser property is
+not available.
 
 ```cortex
 #navigator("userAgent")
 ```
 
-## Compile-Time Diagnostic Statement
+## Parser Messages
 
-A compile-time diagnostic statement causes the compiler to emit an error or a
-warning during compilation.
-
-**To output a message to the console and immediately interrupt the
-parsing/compilation**, use the `#error()` pragma function.
+`#error()` stops parsing. A direct call to `parseCortex()` throws a
+`FatalParsingError`; `executeCortex()` catches it and returns an
+`error-directive` diagnostic instead:
 
 ```cortex
 #error("File cannot be compiled")
 ```
 
-**To output a message to the console**, but continue the parsing/compilation,
-use the `#warning()` pragma function.
+`#warning()` does not write to the console and does not add a diagnostic. It
+evaluates at parse time to its message string, allowing parsing to continue:
 
 ```cortex
 #warning("TODO: Implement function")
 ```
 
-## Line Control Statements
-
-The name and URL of the source file being parsed/compiled can be accessed using
-the `#filename` and `#url` pragmas. The current line is indicated by `#line` and
-the column by `#column`.
-
-The `#sourceLocation()` pragma function is **not yet implemented** and is
-reserved for a future release. When implemented, it will override the source URL
-and line reported for the current file. This is useful when generating or
-pre-processing code, to indicate the original source code and location rather
-than the current one.
-
-```cortex
-#sourceLocation(145, "file://localhost/~user/dev/source.ctx")
-```
-
-**To number the following line to 146**, use:
-
-```cortex
-#sourceLocation(145)
-```
-
-**To reset the source location to the actual source and line**, use
-`#sourceLocation()`.
-
 ## Other Pragmas
 
 The following pragmas are replaced with the indicated value:
 
-- `#line`: the current source line number, which is either the actual source
-  line number, or as calculated based on `#sourceLocation()`. The first line is
-  line 1.
+- `#line`: the current source line number. The first line is line 1.
 - `#column`: the current column number. The first column is column 1.
-- `#url`: the URL of the current source file.
-- `#filename`: the filename of the current source file.
+- `#url`: the source URL passed to `parseCortex()` or `executeCortex()`, or
+  `Nothing` when none was supplied.
+- `#filename`: the final path component of the source URL, or `Nothing` when no
+  URL was supplied.
 - `#date`: the current date in the `YYYY-MM-DD` format.
 - `#time`: the current time in the `HH:MM:SS` format.
+
+These six pragmas are always available. Cortex does not currently implement a
+pragma for overriding the source location.

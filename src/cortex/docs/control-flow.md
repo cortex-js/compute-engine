@@ -45,16 +45,18 @@ function f(x) { x + 1 }
 
 Parameters can carry a type annotation (`f(x: real) = …`), and the block
 form accepts a return-type annotation in the unambiguous post-parameter-list
-position (`function f(x) -> real { … }`). **v0 limitation**: both are parsed
-but not enforced — the type is currently dropped rather than compiled into
-the `Function` or checked at call time:
+position (`function f(x) -> real { … }`). Parameter types are enforced when
+the function is called. Return types are retained in the function signature;
+the current runtime does not validate the inferred type of every returned
+value against that annotation.
 
 ```cortex
 f(x: real) = x + 1
 ```
 
 ```json
-["Assign", "f", ["Function", ["Add", "x", 1], "x"]]
+["Assign", "f",
+  ["Function", ["Add", "x", 1], ["Typed", "x", {"str": "real"}]]]
 ```
 
 ### Anonymous functions
@@ -443,7 +445,7 @@ Evaluating this expression yields `Error("match-no-case", 3)`.
 There is one loop keyword form for each of the two common shapes, and both
 lower to the engine's imperative `Loop` — evaluated **for effect**, not for
 its value (a `Loop`'s value is `Nothing`). Value-producing iteration over a
-collection belongs to the library functions `map`/`filter`/`reduce`, not to
+collection belongs to the library functions `Map`/`Filter`/`Reduce`, not to
 a loop statement.
 
 `while cond { … }` lowers to a `Loop` over a `Block` whose first statement
@@ -488,8 +490,8 @@ for x in a in b { x }
 
 A `{ … }` that immediately follows a keyword (`function`/`if`/`else`/
 `while`/`for`) is a **statement block** — the engine's `Block` — and is
-distinct from the Phase 2 `{ … }` **collection** grammar (set/dictionary
-literals). A bare `{ … }` with no introducing keyword is always the
+distinct from the `{ … }` **collection** grammar (set/dictionary literals).
+A bare `{ … }` with no introducing keyword is always the
 collection grammar:
 
 ```cortex
@@ -563,7 +565,7 @@ A `do` **not** followed by `{` is an `opening-bracket-expected` diagnostic.
 
 ## `return` / `break` / `continue`
 
-These three words are reserved but **not implemented** in v0: Cortex's
+These three words are reserved but **not implemented**: Cortex's
 expression-oriented style (an `if` is a value, a block's value is its last
 expression) doesn't need an explicit `return` yet, and loops are for-effect
 only. Using them produces a `reserved-word` diagnostic rather than the
