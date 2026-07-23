@@ -1,12 +1,11 @@
 ---
 title: Cortex Syntax
-permalink: /cortex/syntax/
-layout: single
+sidebar_label: Syntax
+slug: /cortex/syntax/
+description: "Cortex Syntax"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Cortex Syntax
 
 ## Notation
@@ -397,3 +396,4 @@ The remaining divergences are intentional: in Cortex a juxtaposed name is a
 single identifier (`sin` is one symbol, not `s·i·n`), `f(x, y)` is a function
 call, and `**` is exponentiation. The two parsers do agree that `|>` produces
 `Pipe`. Do not rely on them agreeing except on the rows marked *same*.
+

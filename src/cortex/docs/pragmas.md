@@ -1,12 +1,11 @@
 ---
 title: Cortex Pragmas
-permalink: /cortex/pragmas/
-layout: single
+sidebar_label: Pragmas
+slug: /cortex/pragmas/
+description: "Cortex Pragmas"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Pragmas
 
 Pragmas are source forms evaluated by the Cortex parser. Their values are
@@ -85,3 +84,4 @@ The following pragmas are replaced with the indicated value:
 
 These six pragmas are always available. Cortex does not currently implement a
 pragma for overriding the source location.
+

@@ -1,12 +1,11 @@
 ---
 title: Cortex Naming
-permalink: /cortex/naming/
-layout: single
+sidebar_label: Naming Conventions
+slug: /cortex/naming/
+description: "Cortex Naming"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Naming Conventions
 
 Cortex follows the naming convention already used throughout MathJSON and
@@ -36,3 +35,4 @@ parse error. It resolves the same way any other symbol lookup does: by
 **scope**, not by case. A local declaration shadows an outer one (including
 a library operator) for the rest of that scope, exactly as it would for any
 other symbol.
+

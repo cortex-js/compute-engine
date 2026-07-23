@@ -1,12 +1,11 @@
 ---
 title: Cortex Literals
-permalink: /cortex/literals/
-layout: single
+sidebar_label: Literals
+slug: /cortex/literals/
+description: "Cortex Literals"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Literals
 
 ## Symbols
@@ -119,9 +118,13 @@ decimal integer.
 - `0xFp2` means $$15 \times 2^2$$, or $$60.0$$.
 - `0xFp-2` means $$15 \times 2^{-2}$$, or $$3.75$$.
 
+:::info
+
 The hexadecimal float format is documented in
 [the C99 standard](http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1256.pdf)
-(p.57-58). {.notice--info}
+(p.57-58).
+
+:::
 
 Numeric literals can contain extra formatting to make them easier to read. Both
 integers and floats can be padded with extra zeros and can contain underscores
@@ -295,3 +298,4 @@ Without an injected parser, a `$…$` island produces a
 [Prohibited Symbol Characters](#prohibited-symbol-characters) above). This is
 what keeps the lexer unambiguous: seeing a `$` at the start of a primary
 always means "LaTeX island begins here," never "symbol reference."
+

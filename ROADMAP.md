@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-22.
+**Last updated:** 2026-07-23.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -1120,6 +1120,33 @@ is in git history. The only items deliberately left open:
   intentional; no observed hits); `arithmetic-power.ts` ~:345 carries an
   order-dependent `matches('complex')` with its own `fix?` comment
   (narrowing to literals).
+- **Transformer protected-set family (LOW) — 2026-07-23 simplify/together
+  review:** nested-transformer reduction (`resolveBoundSymbols`) resolves a
+  bound variable that carries a global value because the protected-name set does
+  not reach the transformer handler. Three sibling manifestations, all on
+  doubly-contradictory input (a solve/differentiation/integration variable that
+  also has a concrete value), all silent wrong/inert answers, documented with
+  repros in `docs/plans/2026-07-23-simplify-together-scoping.md` §B/C/D:
+  `Solve(Simplify(s)=2, w)` with `w` value-bound and appearing in `s` → `[]`
+  (§B); `∫ Simplify(x²) dx` with `x:=5` → `25x` (§C); Solve shielding computed
+  before bundled `Element` specs are lifted (§D, Codex-flagged, not yet
+  reproduced). The proper fix is the shared rework — thread a protected-unknown
+  set through transformer-operand resolution (the `EvaluateOptions` plumbing the
+  session deliberately avoided), or mirror `JacobianMatrix`'s fresh-symbol
+  rename in the `Integrate`/`Limit`/`Solve` reduction paths. Deferred as
+  vanishingly rare; do it if the transformer-resolution architecture is reworked.
+- **`simplify()` structural-head denylist (LOW) — 2026-07-23 review:**
+  `evaluateStructuralHead` (`boxed-expression/simplify.ts`) evaluates a
+  whitelisted structural head (`Determinant`/`Trace`/`Transpose`/`Length`) over
+  its whole operand tree, gated by a `HEAVY_COMPUTE_HEADS` **denylist** to keep
+  heavy pure descendants (`D`, `Integrate`, `Sum`, …) symbolic. A denylist
+  inherently leaks: benign-but-documented heads still fold during simplify —
+  `simplify(Transpose([[Max(3,5)]]))` → `[[5]]` though `docs/SIMPLIFY.md` says
+  `Max`/`Min` stay evaluation-only, and `Inverse` (real matrix compute) folds
+  too. Low harm (over-evaluation is the pre-fix behavior, value-preserving). The
+  complete fix is head-specific structural reduction over held operands (no
+  operand `.evaluate()`); the cheap mitigation is adding `Max`/`Min`/`Inverse`
+  to the denylist to honor the documented contract.
 
 **Lessons worth keeping in mind** (the durable ones are in CLAUDE.md): the
 `undefined → false` collapse in three-valued predicates was the single most

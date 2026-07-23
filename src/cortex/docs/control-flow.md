@@ -1,12 +1,11 @@
 ---
 title: Cortex Control Flow
-permalink: /cortex/control-flow/
-layout: single
+sidebar_label: Control Flow
+slug: /cortex/control-flow/
+description: "Cortex Control Flow"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Control Flow
 
 ## Functions
@@ -570,3 +569,4 @@ expression-oriented style (an `if` is a value, a block's value is its last
 expression) doesn't need an explicit `return` yet, and loops are for-effect
 only. Using them produces a `reserved-word` diagnostic rather than the
 control-transfer behavior their names suggest.
+

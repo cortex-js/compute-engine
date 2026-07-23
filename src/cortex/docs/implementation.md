@@ -1,10 +1,10 @@
 ---
 title: Inside Cortex
-permalink: /cortex/implementation/
-layout: single
+sidebar_label: Implementation
+slug: /cortex/implementation/
+description: "Cortex uses MathJSON as its intermediate representation and the Compute Engine as its runtime. The public language entry point exposes the three stages …"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
 # Inside Cortex
 
@@ -113,3 +113,4 @@ serializeCortex(["Add", ["Multiply", 2, "x"], 1]);
 The serializer formats an expression; it does not execute it. Comments are
 currently lossy on the parse side, so parsing and then serializing source code
 does not preserve comments or the author's original whitespace.
+

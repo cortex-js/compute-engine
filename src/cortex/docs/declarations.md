@@ -1,12 +1,11 @@
 ---
 title: Cortex Declarations
-permalink: /cortex/declarations/
-layout: single
+sidebar_label: Declarations
+slug: /cortex/declarations/
+description: "Cortex Declarations"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Declarations
 
 A declaration introduces a symbol into the current scope. Cortex has two
@@ -134,3 +133,4 @@ enclosing scope.
 
 `let` and `const` are the binding keywords. There is currently no compound
 assignment (`+=`) or destructuring declaration.
+

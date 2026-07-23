@@ -1,12 +1,11 @@
 ---
 title: Cortex Source Code
-permalink: /cortex/source-code/
-layout: single
+sidebar_label: Source Code
+slug: /cortex/source-code/
+description: "Cortex Source Code"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Source Code
 
 ## Encoding
@@ -46,6 +45,9 @@ command applies a 10-second evaluation limit by default. Use
 `--time-limit <milliseconds>` to change it or `--time-limit 0` to disable it.
 Run `cortex --help` for the complete option list.
 
+See [Cortex CLI](/cortex/cli/) for installation, output modes, REPL commands,
+diagnostics, and exit-status behavior.
+
 ## Hashbang Comment
 
 A hashbang comment can appear at the absolute start of the source and is ignored
@@ -55,3 +57,4 @@ the installed command:
 ```cortex
 #!/usr/bin/env cortex
 ```
+

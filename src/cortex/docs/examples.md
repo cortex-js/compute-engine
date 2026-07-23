@@ -1,12 +1,11 @@
 ---
 title: Cortex Examples
-permalink: /cortex/examples/
-layout: single
+sidebar_label: Examples
+slug: /cortex/examples/
+description: "Cortex Examples"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Examples
 
 Complete Cortex programs, from simple iteration to symbolic computation.
@@ -783,3 +782,4 @@ let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
 Intersection(d48, d36) == {1, 2, 3, 4, 6, 12}
 // ➔ True
 ```
+

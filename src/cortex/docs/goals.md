@@ -1,12 +1,11 @@
 ---
 title: Cortex Goals
-permalink: /cortex/goals/
-layout: single
+sidebar_label: Goals
+slug: /cortex/goals/
+description: "Cortex Goals"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Goals and Priorities
 
 - Ergonomics: code that is easy to read, understand and write
@@ -18,9 +17,10 @@ sidebar:
 - Expressiveness. The solution of a problem should be expressed
   - in the closest way to the original problem formulation
   - in a clear, natural, concise and intuitive way
-- Error Recovery: whenever an unexpected result is reached, it should be 
+- Error Recovery: whenever an unexpected result is reached, it should be
   easy to understand what caused it, and how to recover from it.
 
 ## Non-Goals
 
 - Source compatibility with an existing programming language.
+

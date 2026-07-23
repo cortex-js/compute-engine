@@ -1,12 +1,11 @@
 ---
 title: Cortex Operators
-permalink: /cortex/operators/
-layout: single
+sidebar_label: Operators
+slug: /cortex/operators/
+description: "Cortex Operators"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Operators
 
 Most operators are infix operators: they have two operands, a left-hand side
@@ -26,9 +25,12 @@ A postfix operator (`!`, `Factorial`) has only a left-hand side and follows it
 immediately: like a prefix operator, it cannot be separated from its operand by
 whitespace.
 
+:::info
+
 The whitespace rules are necessary to support unambiguous parsing of expressions
 spanning multiple lines without requiring a separator between expressions
-{.notice--info}
+
+:::
 
 The implementation's source of truth for operator spelling, precedence, and
 associativity is `src/cortex/operators.ts`. Both the parser and serializer read
@@ -305,3 +307,4 @@ used contextually to separate a `match` pattern from its result.
 
 `=` is `Assign` — **assignment**, not equality. Use `==` (`Equal`) to compare
 values and `===` (`Same`) for structural identity.
+

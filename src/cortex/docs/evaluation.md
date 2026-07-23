@@ -1,12 +1,11 @@
 ---
 title: Cortex Evaluation
-permalink: /cortex/evaluation/
-layout: single
+sidebar_label: Evaluation
+slug: /cortex/evaluation/
+description: "Cortex Evaluation"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Evaluation
 
 `executeCortex(ce, source, options?)` parses a Cortex program and evaluates
@@ -136,3 +135,4 @@ unbounded programs should run Cortex in a Web Worker that the host can terminate
 from the outside. See
 [Execution Constraints](/compute-engine/guides/execution-constraints/) for the
 complete cancellation model.
+

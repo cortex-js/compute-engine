@@ -1,12 +1,11 @@
 ---
 title: Cortex Principles
-permalink: /cortex/principles/
-layout: single
+sidebar_label: Principles
+slug: /cortex/principles/
+description: "Cortex Principles"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Principles
 
 - Cortex is
@@ -22,3 +21,4 @@ sidebar:
 - Prefer one idiomatic way to express a concept.
 - Regularity and Orthogonality. Define a small number of concepts and allow
   them to be combined without restrictions.
+

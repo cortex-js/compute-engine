@@ -1,12 +1,11 @@
 ---
 title: Cortex Comments
-permalink: /cortex/comments/
-layout: single
+sidebar_label: Comments
+slug: /cortex/comments/
+description: "Cortex Comments"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Comments
 
 **Line Comments** start with `//`. Everything after a `//` is ignored until the
@@ -18,14 +17,12 @@ comments can be nested.
 **To indicate that a comment is part of the documentation and is formatted using
 markdown**, use `///` for single line comments and `/** */` for block comments.
 
-
 ```cortex
 // This is a line comment
 
 /* This is a block comment */
 
 ```
-
 
 ## Documentation comments
 
@@ -49,3 +46,4 @@ markdown cells rather than in code comments, so comment preservation is not
 required for the notebook workflow. (The serializer can still *emit* a
 `/* … */` comment when a MathJSON expression carries a `comment` metadata
 field, but nothing on the parse side currently populates that field.)
+

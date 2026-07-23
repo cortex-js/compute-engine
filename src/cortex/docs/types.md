@@ -1,12 +1,11 @@
 ---
 title: Cortex Types
-permalink: /cortex/types/
-layout: single
+sidebar_label: Types
+slug: /cortex/types/
+description: "Cortex Types"
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Types
 
 Cortex does not have its own type system: it reuses the Compute Engine's
@@ -128,3 +127,4 @@ x: notatype
 ```
 
 produces a `type-annotation-error` diagnostic pointing at `notatype`.
+

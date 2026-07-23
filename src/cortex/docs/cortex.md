@@ -1,134 +1,120 @@
 ---
 title: Cortex
-permalink: /cortex/
-layout: single
+sidebar_label: Introduction
+slug: /cortex/
+description: Cortex is a programming language for scientific computing built on the Compute Engine.
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
 
 # Cortex
 
-Cortex is a programming language for scientific computing built on the Cortex
+<Intro>
+Cortex is a programming language for scientific computing, built on the
 Compute Engine.
+</Intro>
 
+:::warning[Experimental]
 Cortex is available as an **experimental** entry point. Its syntax and
 semantics may change between releases while the language is being exercised in
-notebooks and other applications.{notice--warning}
+notebooks and other applications.
+:::
+
+Cortex is embedded from JavaScript through the
+`@cortex-js/compute-engine/cortex` entry point:
 
 ```js
-import {
-  ComputeEngine,
-  executeCortex,
-} from "@cortex-js/compute-engine/cortex";
+import { ComputeEngine, executeCortex } from "@cortex-js/compute-engine/cortex";
 
 const ce = new ComputeEngine();
 const { value, diagnostics } = executeCortex(ce, "1 + 2");
 ```
 
-Here is "Hello World" in Cortex:
+Here is "Hello World" in Cortex. Edit the code and press **Run** (or
+<kbd>⌘/Ctrl</kbd>+<kbd>Enter</kbd>) — the result is the value of the last
+statement, shown as a Cortex value and as its underlying MathJSON.
 
-```cortex
+```cortex-live
 "Hello World"
 ```
 
-Here are a few more examples:
+Cortex is **symbolic by default**: expressions stay exact unless you ask for a
+numeric approximation with `N()`.
 
-```cortex
+```cortex-live
 Simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
-// ➔ 4x^3 + 2x^2 + 3
-
-let x = 2^11 - 1
-"\(x) has type \(Type(x))"
-// ➔ "2047 has type integer"
 ```
 
-{% readmore "/cortex/syntax/" %} Read more about the <strong>syntax of
-Cortex</strong> {% endreadmore %}
+Values have a type, and strings support `\(…)` interpolation:
 
-{% readmore "/cortex/implementation/" %} Read more about the
-<strong>implementation of Cortex</strong> {% endreadmore %}
+```cortex-live
+let x = 2^11 - 1
+"\(x) has type \(Type(x))"
+```
 
+Errors are ordinary values, so a program never throws to its host — a problem
+surfaces as an `["Error", …]` value or a diagnostic:
 
-{% readmore "/cortex/pragmas/" %}
-**Pragmas**: parser directives embedded in the code
-{% endreadmore %}
+```cortex-live
+1 / 0
+```
 
+## Language Tour
 
-{% readmore "/cortex/comments/" %}
-**Comments**: line and block comments
-{% endreadmore %}
+<ReadMore path="/cortex/syntax/">
+Read more about the **formal syntax of Cortex** — statements, primaries,
+calls and indexing.
+</ReadMore>
 
-{% readmore "/cortex/literals/" %}
-**Literals**: strings, numbers, symbols
-{% endreadmore %}
+<ReadMore path="/cortex/literals/">
+**Literals** — numbers, strings, symbols, and `$…$` LaTeX islands.
+</ReadMore>
 
+<ReadMore path="/cortex/operators/">
+**Operators** — arithmetic, logic, relational, and the pipeline operator.
+</ReadMore>
 
-{% readmore "/cortex/operators/" %}
-**Operators**: arithmetic, logic, relational
-{% endreadmore %}
+<ReadMore path="/cortex/control-flow/">
+**Control flow** — `if`/`else`, `match`, loops, blocks, and functions.
+</ReadMore>
 
+<ReadMore path="/cortex/declarations/">
+**Declarations** — binding names with `let` and `const`.
+</ReadMore>
 
+<ReadMore path="/cortex/comments/">
+**Comments** — line and block comments.
+</ReadMore>
 
-## Functions
+<ReadMore path="/cortex/pragmas/">
+**Pragmas** — parser directives embedded in the code.
+</ReadMore>
 
 ## Collections
 
-### Tuples
+Cortex has literal syntax for the Compute Engine's collections.
 
-### Dictionaries
+**Lists** are ordered and 1-indexed with `xs[i]`:
 
-A dictionary is a collection of set of key/value pairs separated with a comma
-(`,`) and surrounded by curly brackets.
-
-Elements in a dictionary are not ordered and the keys are unique. They are
-iterable and indexable by the key value.
-
-A key/value pair is a string, followed by `->` and by an expression. If the
-string does not contain a character with a _White_Space_ or _Pattern_Syntax_
-Unicode property the quotation mark around the string can be omitted. Note that
-if the quotation mark is omitted the character escape sequences are not applied.
-
-```cortex
-{one -> 1, two -> 2}
-{"one" -> 1, "two" -> 2}
-```
-
-The empty dictionary is `{->}`.
-
-### Lists
-
-A list is a collection of expressions separated with a comma `,` and surrounded
-by square brackets: `[` and `]`
-
-Elements in a list are ordered and don't have to be unique. They are iterable
-and indexable with a numeric value (their position in the list, starting at 1).
-Indexing uses the `xs[i]` syntax and is 1-based, matching the Compute Engine
-convention (`xs[1]` is the first element).
-
-```cortex
+```cortex-live
 [3, 5, 7, 11]
-[3, 3 + 5, 3 + 7, 3 + 5 + 7 + 11]
 ```
 
-The empty list is `[]`.
+**Sets** are unordered collections of unique elements:
 
-### Sets
+```cortex-live
+{3, 5, 7, 11}
+```
 
-A set is a collection of expressions surrounded by curly brackets: `{` and `}`.
+**Dictionaries** are sets of key/value pairs. The empty dictionary is `{->}`:
 
-Elements in a set are not ordered and must be unique. They are iterable but they
-are not indexable.
+```cortex-live
+{one -> 1, two -> 2}
+```
 
-The empty set is `{}`.
-
-## Flow Control
-
-Cortex is expression-oriented: `if`/`else` and `match` both yield a value,
-loops map onto the engine's iteration operators, and a `do { … }` block is an
-expression whose value is its last statement. Function definitions, anonymous
-functions (`x |-> x^2`), and the full control-flow grammar are covered in
-[Control Flow](/cortex/control-flow/).
+<ReadMore path="/cortex/syntax/#collections-tuples-and-dictionaries">
+Read more about **lists, sets, tuples and dictionaries**.
+</ReadMore>
 
 ## Future Directions
 
