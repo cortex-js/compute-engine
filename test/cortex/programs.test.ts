@@ -5,8 +5,9 @@ import { executeCortex } from '../../src/cortex/execute-cortex';
 //
 // Complete example programs, exercising Cortex end-to-end: control flow,
 // functions, collections, and the engine's exact/symbolic arithmetic working
-// together. Each program here is mirrored in `src/cortex/docs/examples.md` —
-// keep the two in sync so the documented examples can never rot.
+// together. `documentation.test.ts` executes the source blocks in
+// `src/cortex/docs/examples.md` directly so the published snippets cannot rot;
+// this suite keeps deeper result assertions and additional regression variants.
 //
 // Idioms these programs rely on (current v0 semantics):
 // - Loops are for-effect; value-producing iteration uses `Map`/`Filter`.

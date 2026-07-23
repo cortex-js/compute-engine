@@ -22,6 +22,8 @@ browser.
 
 Use `#env()` to read an environment variable:
 
+<!-- cortex-test: expect-diagnostics -->
+
 ```cortex
 #env("DEBUG")
 ```
@@ -48,6 +50,8 @@ Use `#navigator()` to read a property of the browser's `navigator` object. Like
 `{ allowHostPragmas: true }`. It returns `Nothing` when the browser property is
 not available.
 
+<!-- cortex-test: expect-diagnostics -->
+
 ```cortex
 #navigator("userAgent")
 ```
@@ -57,6 +61,8 @@ not available.
 `#error()` stops parsing. A direct call to `parseCortex()` throws a
 `FatalParsingError`; `executeCortex()` catches it and returns an
 `error-directive` diagnostic instead:
+
+<!-- cortex-test: expect-diagnostics -->
 
 ```cortex
 #error("File cannot be compiled")
@@ -84,4 +90,3 @@ The following pragmas are replaced with the indicated value:
 
 These six pragmas are always available. Cortex does not currently implement a
 pragma for overriding the source location.
-

@@ -90,6 +90,8 @@ a + b     // infix Add: ["Add", "a", "b"]
 a+b       // same: whitespace on neither side
 ```
 
+<!-- cortex-test: expect-diagnostics -->
+
 ```cortex
 a +b
 ```
@@ -307,4 +309,3 @@ used contextually to separate a `match` pattern from its result.
 
 `=` is `Assign` — **assignment**, not equality. Use `==` (`Equal`) to compare
 values and `===` (`Same`) for structural identity.
-

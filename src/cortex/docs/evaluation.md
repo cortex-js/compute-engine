@@ -97,6 +97,8 @@ supported), or reassigning a `const` in the middle of a program.
 browser) at parse time. Because a notebook document can be shared or opened
 in an unfamiliar environment, both are **gated off by default**:
 
+<!-- cortex-test: expect-diagnostics -->
+
 ```cortex
 #env("HOME")
 ```
@@ -135,4 +137,3 @@ unbounded programs should run Cortex in a Web Worker that the host can terminate
 from the outside. See
 [Execution Constraints](/compute-engine/guides/execution-constraints/) for the
 complete cancellation model.
-

@@ -122,9 +122,10 @@ An invalid type inside an annotation position surfaces as a
 offending token within the type text (not at the `:` or the declaration
 target):
 
+<!-- cortex-test: expect-diagnostics -->
+
 ```cortex
 x: notatype
 ```
 
 produces a `type-annotation-error` diagnostic pointing at `notatype`.
-

@@ -194,6 +194,8 @@ matches unconditionally, a *non-final* case consisting of just a binding (or
 `match-irrefutable-case` diagnostic (a final catch-all is expected and not
 flagged):
 
+<!-- cortex-test: expect-diagnostics -->
+
 ```cortex
 match x {
   Pi => 1
@@ -569,4 +571,3 @@ expression-oriented style (an `if` is a value, a block's value is its last
 expression) doesn't need an explicit `return` yet, and loops are for-effect
 only. Using them produces a `reserved-word` diagnostic rather than the
 control-transfer behavior their names suggest.
-

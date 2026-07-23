@@ -212,6 +212,8 @@ A program is a sequence of statements separated by a linebreak or a `;`. Two
 expressions on the same line with no separator between them is **not** a
 silent sequence — it is a diagnostic:
 
+<!-- cortex-test: expect-diagnostics -->
+
 ```cortex
 1 2
 ```
@@ -396,4 +398,3 @@ The remaining divergences are intentional: in Cortex a juxtaposed name is a
 single identifier (`sin` is one symbol, not `s·i·n`), `f(x, y)` is a function
 call, and `**` is exponentiation. The two parsers do agree that `|>` produces
 `Pipe`. Do not rely on them agreeing except on the rows marked *same*.
-

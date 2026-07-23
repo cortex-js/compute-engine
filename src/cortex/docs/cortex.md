@@ -56,10 +56,27 @@ Errors are ordinary values, so a program never throws to its host — a problem
 surfaces as an `["Error", …]` value or a diagnostic:
 
 ```cortex-live
-1 / 0
+const answer = 42
+answer = 0
 ```
 
-## Language Tour
+## Start Here
+
+<ReadMore path="/cortex/getting-started/">
+Follow the **five-minute getting-started guide** — try the REPL, run a source
+file, and embed Cortex in JavaScript.
+</ReadMore>
+
+<ReadMore path="/cortex/examples/">
+Explore **complete Cortex programs** for symbolic computation, collections,
+calculus, linear algebra, strings, and more.
+</ReadMore>
+
+<ReadMore path="/cortex/cli/">
+Use the **CLI and interactive REPL** from a terminal.
+</ReadMore>
+
+## Language Reference
 
 <ReadMore path="/cortex/syntax/">
 Read more about the **formal syntax of Cortex** — statements, primaries,

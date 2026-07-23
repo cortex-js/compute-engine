@@ -9,9 +9,10 @@ date: Last Modified
 # Examples
 
 Complete Cortex programs, from simple iteration to symbolic computation.
-Every example on this page is executable as written: each one is verified by
-`test/cortex/programs.test.ts`, which runs it through `executeCortex` and
-asserts the result shown here.
+Every example on this page is executable as written. The documentation test
+executes each code fence directly through `executeCortex`, while
+`test/cortex/programs.test.ts` provides deeper assertions for representative
+results and runtime behavior.
 
 A few idioms these programs rely on:
 
@@ -221,6 +222,9 @@ Wrap the call in `N(…)` for a floating-point value — numericization reaches
 through the user-function/closure call:
 
 ```cortex
+deriv(f, h) = x |-> (f(x + h) - f(x - h)) / (2h)
+g(x) = x^3
+let dg = deriv(g, 1/1000)
 N(dg(2))
 // ➔ 12.000001
 ```
@@ -263,6 +267,10 @@ Each `makeCounter()` call captures its own `count`, so counters are
 independent:
 
 ```cortex
+function makeCounter() {
+  let count = 0
+  () |-> do { count = count + 1; count }
+}
 let a = makeCounter()
 let b = makeCounter()
 [a(), a(), b(), a()]
@@ -463,7 +471,7 @@ let x = 2
 for k in Range(1, 40) { x = 1 + 1/x }
 let phi = $\frac{1 + \sqrt{5}}{2}$
 N(Abs(x - phi))
-// ➔ 6.2e-18
+// ➔ ≈ 6.24e-18
 ```
 
 **Trailing zeros of 100!, two ways.** Legendre's formula counts the factors of
@@ -782,4 +790,3 @@ let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
 Intersection(d48, d36) == {1, 2, 3, 4, 6, 12}
 // ➔ True
 ```
-
