@@ -120,7 +120,10 @@ function evaluateNumericSubexpressions(expr: Expression): Expression {
  */
 function mightExpand(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
-  if (expr.operator === 'Multiply' && expr.ops.some((x) => isFunction(x, 'Add')))
+  if (
+    expr.operator === 'Multiply' &&
+    expr.ops.some((x) => isFunction(x, 'Add'))
+  )
     return true;
   if (expr.operator === 'Power' && isFunction(expr.op1, 'Add')) return true;
   return expr.ops.some(mightExpand);
@@ -425,7 +428,8 @@ export function simplify(
         ...options,
         noExpansionTrial: true,
       }).at(-1)!.value;
-      const costFn = options.costFunction ?? ((e: Expression) => ce.costFunction(e));
+      const costFn =
+        options.costFunction ?? ((e: Expression) => ce.costFunction(e));
       if (costFn(settled) < costFn(expr))
         steps = [...steps, { value: settled, because: 'expanded (cheaper)' }];
     }

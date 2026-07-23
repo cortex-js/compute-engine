@@ -366,9 +366,7 @@ export function resolveBoundSymbols(
   // names before descending. (`localScope` covers `Block`/`Sum`/`Product`/…;
   // a `Function`'s parameters live in its operand slots, not its scope.)
   const bound = boundVariableNames(expr);
-  const childProtect = bound.length
-    ? new Set([...protect, ...bound])
-    : protect;
+  const childProtect = bound.length ? new Set([...protect, ...bound]) : protect;
 
   const ops = expr.ops;
   const resolved = ops.map((op) => resolveBoundSymbols(op, childProtect, seen));
@@ -452,10 +450,7 @@ export function reduceStructuralIndex(expr: Expression): Expression {
  * being solved for. A transformer is asked to rewrite a concrete expression
  * and has no such constraint.
  */
-const TRANSFORMER_OPERAND_HEADS = new Set([
-  ...TRANSFORMER_HEADS,
-  'ReplaceAll',
-]);
+const TRANSFORMER_OPERAND_HEADS = new Set([...TRANSFORMER_HEADS, 'ReplaceAll']);
 
 /**
  * Reduce the held operand of an expression transformer (`Expand`, `Factor`,

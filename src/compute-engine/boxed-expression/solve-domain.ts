@@ -297,17 +297,13 @@ export function evaluateSolve(
     shielded.size === 0
       ? e
       : e.subs(
-          Object.fromEntries(
-            [...shielded].map(([a, b]) => [a, ce.symbol(b)])
-          )
+          Object.fromEntries([...shielded].map(([a, b]) => [a, ce.symbol(b)]))
         );
   const fromFresh = (e: Expression) =>
     shielded.size === 0
       ? e
       : e.subs(
-          Object.fromEntries(
-            [...shielded].map(([a, b]) => [b, ce.symbol(a)])
-          )
+          Object.fromEntries([...shielded].map(([a, b]) => [b, ce.symbol(a)]))
         );
 
   let ceq = fromFresh(reduceTransformerHead(toFresh(eq.canonical)));

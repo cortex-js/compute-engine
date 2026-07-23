@@ -292,7 +292,9 @@ function lambdaFromLiteral(
 ): { params: string[]; body: Expression } | undefined {
   if (!isFunction(literal, 'Function')) return undefined;
 
-  const params = literal.ops.slice(1).map((p) => functionLiteralParameterName(p));
+  const params = literal.ops
+    .slice(1)
+    .map((p) => functionLiteralParameterName(p));
   if (params.length === 0 || params.some((n) => !n)) return undefined;
 
   // Canonicalization wraps a lambda body in a `Block`; a single-statement

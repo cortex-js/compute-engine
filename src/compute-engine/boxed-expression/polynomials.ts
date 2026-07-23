@@ -864,7 +864,6 @@ export function cancelCommonFactors(
   // exactly, fall back to the univariate GCD rather than returning `expr`
   // unreduced — otherwise preferring `mgcd` could regress a valid cancellation.
   const cancelled =
-    tryCancel(gcd) ??
-    (gcd !== univariateGcd ? tryCancel(univariateGcd) : null);
+    tryCancel(gcd) ?? (gcd !== univariateGcd ? tryCancel(univariateGcd) : null);
   return cancelled ?? expr;
 }
