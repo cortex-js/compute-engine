@@ -19,6 +19,14 @@ export function simplifySum(x: Expression): RuleStep | undefined {
 
   const ce = x.engine;
 
+  // Index-dependence must be VALUE-BLIND. The index is bound by the `Sum`, so
+  // it counts as a dependence whether or not a same-named global carries a
+  // value: with `x := 5`, `Sum(x, [x,1,3])` is `6`, never `3·x` (which is what
+  // `.unknowns` — it drops a value-bound symbol — would wrongly produce by
+  // classifying the body `x` as index-independent). `.symbols` is the
+  // syntactic occurrence set, so it always sees the bound index.
+  const dependsOnIndex = (e: Expression): boolean => e.symbols.includes(index);
+
   // Simplify nested Sum/Product in the body first
   if (body.operator === 'Sum' || body.operator === 'Product') {
     const simplifiedBody = body.simplify();
@@ -52,10 +60,8 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     }
   }
 
-  const bodyUnknowns = new Set(body.unknowns);
-
   // If body doesn't depend on index: Sum(c, [n, a, b]) → (b - a + 1) * c
-  if (!bodyUnknowns.has(index)) {
+  if (!dependsOnIndex(body)) {
     const count = upper.sub(lower).add(ce.One).simplify();
     // Check for empty range with symbolic bounds
     if (isNumber(count) && count.numericValue !== undefined) {
@@ -170,8 +176,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     let coefficient: Expression | null = null;
 
     for (const term of body.ops) {
-      const termUnknowns = new Set(term.unknowns);
-      if (!termUnknowns.has(index)) {
+      if (!dependsOnIndex(term)) {
         // Constant term
         constant = constant ? constant.add(term) : term;
       } else if (sym(term) === index) {
@@ -239,7 +244,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
   if (
     isFunction(body, 'Power') &&
     sym(body.op2) === index &&
-    !new Set(body.op1.unknowns).has(index)
+    !dependsOnIndex(body.op1)
   ) {
     const r = body.op1;
     const b = upper;
@@ -569,8 +574,7 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     const indexFactors: Expression[] = [];
 
     for (const factor of body.ops) {
-      const factorUnknowns = new Set(factor.unknowns);
-      if (factorUnknowns.has(index)) {
+      if (dependsOnIndex(factor)) {
         indexFactors.push(factor);
       } else {
         constantFactors.push(factor);

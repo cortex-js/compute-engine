@@ -247,8 +247,7 @@ if (symSpeedups.length) {
 // Provenance footnote
 // ===========================================================================
 
-w('<sub>');
-w(`Measured ${(results.generated || '').slice(0, 10)} · ` +
+w(`<sub>Measured ${(results.generated || '').slice(0, 10)} · ` +
   `Compute Engine \`${versions.ceCurrent || '?'}\`${versions.ceCurrentSha ? ` @ \`${versions.ceCurrentSha}\`` : ''} (current build) · ` +
   `published \`${PUB_VERSION}\` · ` +
   `SymPy \`${versions.sympy || '?'}\` · math.js \`${versions.mathjs || '?'}\` · Mathematica \`${versions.wolfram || '?'}\` · Node \`${versions.node || '?'}\`. ` +

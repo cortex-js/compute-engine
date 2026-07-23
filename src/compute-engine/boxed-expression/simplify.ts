@@ -3,7 +3,7 @@ import { replace } from './rules.js';
 import { holdMap } from './hold.js';
 import { expToTrig } from './exp-to-trig.js';
 import { expand } from './expand.js';
-import { isValueDef } from './utils.js';
+import { isValueDef, hasAssignedVariable } from './utils.js';
 import type {
   Expression,
   SimplifyOptions,
@@ -80,8 +80,21 @@ function evaluateNumericSubexpressions(expr: Expression): Expression {
     }
   }
 
+  // Value-blindness (see the `hasAssignedVariable` guard below): fold only a
+  // GENUINELY constant subexpression (literals and built-in constants). A
+  // subexpression with no free unknowns must NOT be folded when its
+  // constant-ness comes from an assigned value — `9 - w²` with `w := 5` stays
+  // symbolic, not `-72`, and a binder body `Add(x,1)` with a global `x := 5`
+  // stays `x + 1`. `simplify()` never substitutes assigned values; that is
+  // `.evaluate()`'s job. The `hasAssignedVariable` check is ordered LAST (after
+  // the cheap `unknowns`/operator gates) so it runs only on fold candidates.
+
   // If purely numeric (no unknowns), evaluate the whole expression.
-  if (expr.unknowns.length === 0 && BASIC_ARITHMETIC.includes(expr.operator)) {
+  if (
+    expr.unknowns.length === 0 &&
+    BASIC_ARITHMETIC.includes(expr.operator) &&
+    !hasAssignedVariable(expr)
+  ) {
     const evaluated = expr.evaluate();
     if (isNumber(evaluated)) return evaluated;
   }
@@ -96,7 +109,8 @@ function evaluateNumericSubexpressions(expr: Expression): Expression {
   // closed-form constants (Ln(e) -> 1, Log(1000,10) -> 3) fold here.
   if (
     (expr.operator === 'Ln' || expr.operator === 'Log') &&
-    expr.unknowns.length === 0
+    expr.unknowns.length === 0 &&
+    !hasAssignedVariable(expr)
   ) {
     const evaluated = expr.evaluate();
     if (isNumber(evaluated) && !evaluated.isSame(expr)) return evaluated;
@@ -659,7 +673,9 @@ function simplifyOperands(
   // But x^(1+2)/(1+2) should still simplify to x^3/3.
   if (expr.operator === 'Divide') {
     // Numeric folding only — no operand sub-chain, so nothing to capture.
-    const simplifiedOps = ops.map((x) => evaluateNumericSubexpressions(x));
+    const simplifiedOps = ops.map((x) =>
+      evaluateNumericSubexpressions(x)
+    );
     const changed = simplifiedOps.some((op, i) => op !== ops[i]);
     if (!changed) return expr;
     return expr.engine._fn(expr.operator, simplifiedOps);
@@ -678,6 +694,7 @@ function simplifyOperands(
       !isNumber(x) &&
       isFunction(x) &&
       x.unknowns.length === 0 &&
+      !hasAssignedVariable(x) &&
       BASIC_ARITHMETIC.includes(x.operator)
     ) {
       // Don't evaluate Power expressions that produce irrational results

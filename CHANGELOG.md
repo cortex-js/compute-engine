@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.93.0 _2026-07-23_
 
 ### New Features
@@ -659,9 +661,11 @@ Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
 Across the cases both solve, Compute Engine is a **median 6.7× faster than
 Mathematica** (up to 7405×) — in the browser, not a proprietary kernel.
 
-<sub>
-Measured 2026-07-21 · Compute Engine `0.90.0` @ `8740998f` (current build) · published `0.86.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
-</sub>
+<sub>Measured 2026-07-21 · Compute Engine `0.90.0` @ `8740998f` (current build)
+· published `0.86.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.</sub>
 
 ## 0.90.0 _2026-07-21_
 
@@ -882,9 +886,11 @@ Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
 Across the cases both solve, Compute Engine is a **median 6.6× faster than
 Mathematica** (up to 6954×) — in the browser, not a proprietary kernel.
 
-<sub>
-Measured 2026-07-21 · Compute Engine `0.88.1` @ `afde4f88` (current build) · published `0.86.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
-</sub>
+<sub>Measured 2026-07-21 · Compute Engine `0.88.1` @ `afde4f88` (current build)
+· published `0.86.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.</sub>
 
 ## 0.88.1 _2026-07-20_
 
@@ -1337,9 +1343,11 @@ Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
 Across the cases both solve, Compute Engine is a **median 5.4× faster than
 Mathematica** (up to 6388×) — in the browser, not a proprietary kernel.
 
-<sub>
-Measured 2026-07-20 · Compute Engine `0.87.0` @ `0158397a` (current build) · published `0.86.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
-</sub>
+<sub>Measured 2026-07-20 · Compute Engine `0.87.0` @ `0158397a` (current build)
+· published `0.86.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.</sub>
 
 ## 0.86.3 _2026-07-19_
 
@@ -1911,9 +1919,11 @@ Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
 Across the cases both solve, Compute Engine is a **median 7.5× faster than
 Mathematica** (up to 6653×) — in the browser, not a proprietary kernel.
 
-<sub>
-Measured 2026-07-18 · Compute Engine `0.84.2` @ `40cc077a` (current build) · published `0.84.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
-</sub>
+<sub>Measured 2026-07-18 · Compute Engine `0.84.2` @ `40cc077a` (current build)
+· published `0.84.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.</sub>
 
 ## 0.84.1 _2026-07-17_
 
@@ -4912,9 +4922,11 @@ Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
 Across the cases both solve, Compute Engine is a **median 6.3× faster than
 Mathematica** (up to 5213×).
 
-<sub>
-Measured 2026-07-10 · Compute Engine `0.72.0` @ `2cf87db4` (current build) · published `0.70.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
-</sub>
+<sub>Measured 2026-07-10 · Compute Engine `0.72.0` @ `2cf87db4` (current build)
+· published `0.70.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.</sub>
 
 ## 0.72.0 _2026-07-09_
 
@@ -5590,9 +5602,11 @@ Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
 Across the cases both solve, Compute Engine is a **median 6.8× faster than
 Mathematica** (up to 7429×).
 
-<sub>
-Measured 2026-07-08 · Compute Engine `0.68.0` @ `5a2abce1` (current build) · published `0.66.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
-</sub>
+<sub>Measured 2026-07-08 · Compute Engine `0.68.0` @ `5a2abce1` (current build)
+· published `0.66.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.</sub>
 
 ## 0.68.0 _2026-07-05_
 
@@ -5647,24 +5661,19 @@ Measured 2026-07-08 · Compute Engine `0.68.0` @ `5a2abce1` (current build) · p
     `Series(\arctan x, x, +\infty)` →
     $\tfrac{\pi}{2} - \tfrac{1}{x} + \tfrac{1}{3x^3} - \dots$. Coefficients are
     exact (`Series(\sin x, x, \frac{\pi}{6})` gives $\tfrac12$,
-    $\tfrac{\sqrt
-    3}{2}$, …), and an undeclared `f` yields the textbook form
-    $f(0) + f'(0)x +
-    \dots$.
+    $\tfrac{\sqrt 3}{2}$, …), and an undeclared `f` yields the textbook form
+    $f(0) + f'(0)x + \dots$.
   - At a **pole** the result is a Laurent expansion with a finite principal
     part: `Series(\frac{1}{\sin x}, x)` →
-    $\tfrac{1}{x} + \tfrac{x}{6} +
-    \tfrac{7x^3}{360} + O(x^7)$,
+    $\tfrac{1}{x} + \tfrac{x}{6} + \tfrac{7x^3}{360} + O(x^7)$,
     `Series(\cot x, x)` →
     $\tfrac{1}{x} - \tfrac{x}{3} - \tfrac{x^3}{45} + \dots$, and the special
     functions expand at their poles with exact coefficients —
     `Series(\Gamma(x), x)` →
-    $\tfrac{1}{x} - \gamma + (\tfrac{\gamma^2}{2} +
-    \tfrac{\pi^2}{12})x + \dots$,
+    $\tfrac{1}{x} - \gamma + (\tfrac{\gamma^2}{2} + \tfrac{\pi^2}{12})x + \dots$,
     `Series(\zeta(x), x, 1)` → $\tfrac{1}{x-1} + \gamma + O(x-1)$. Poles at `±∞`
     are handled too (`Series(\frac{x^2}{x-1}, x, +\infty)` →
-    $x + 1 + \tfrac1x + \tfrac1{x^2} +
-    \dots$). An essential singularity or
+    $x + 1 + \tfrac1x + \tfrac1{x^2} + \dots$). An essential singularity or
     branch point (e.g. `Series(e^{1/x}, x)`, `Series(\ln x, x)`) is still left
     unevaluated rather than expanded incorrectly.
   - `BigO(u)` is the inert Landau remainder, serialized `O\left(u\right)` and
@@ -5673,8 +5682,7 @@ Measured 2026-07-08 · Compute Engine `0.68.0` @ `5a2abce1` (current build) · p
     containing it is `NaN`.
   - `Normal(expr)` strips the `BigO` terms, yielding the compilable/plottable
     truncated polynomial: `Normal(Series(\sin x, x))` →
-    $x - \tfrac{x^3}{6} +
-    \tfrac{x^5}{120}$.
+    $x - \tfrac{x^3}{6} + \tfrac{x^5}{120}$.
 
 - **`TrigExpand`, `TrigToExp`, and `TrigReduce` rewrite trigonometric and
   hyperbolic expressions.** These are transformation verbs in the spirit of
@@ -5856,8 +5864,7 @@ Measured 2026-07-08 · Compute Engine `0.68.0` @ `5a2abce1` (current build) · p
 
 - **Periodic equations expand their root families over a bounded domain.**
   `Solve(\sin x = \tfrac12,\; x \in [0, 4\pi])` returns all four exact solutions
-  $\tfrac{\pi}{6}, \tfrac{5\pi}{6}, \tfrac{13\pi}{6},
-  \tfrac{17\pi}{6}$ — not
+  $\tfrac{\pi}{6}, \tfrac{5\pi}{6}, \tfrac{13\pi}{6}, \tfrac{17\pi}{6}$ — not
   just the principal values. Scaled arguments work too (`\sin 2x = 1` over
   $[0, 2\pi]$ → $\tfrac{\pi}{4}, \tfrac{5\pi}{4}$). Expansion applies when the
   unknown appears only inside trigonometric functions of linear arguments; each
@@ -6058,8 +6065,7 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues` returned wrong values — fixed.** The analytic solver used
   a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
   $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-  $\{\tfrac{10}{3}, -\tfrac53,
-  \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+  $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
   symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
   it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
   returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);

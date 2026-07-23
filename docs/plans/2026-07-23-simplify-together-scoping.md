@@ -313,7 +313,7 @@ given zero churn.
 Two issues surfaced by the staged-review of the lazy-operand fixes were left
 unfixed on purpose. Both are confirmed with repros below.
 
-### A. `.simplify()` (the method) corrupts a lambda/binder body — PRE-EXISTING
+### A. `.simplify()` (the method) corrupts a lambda/binder body — PRE-EXISTING — **LANDED 2026-07-23**
 
 `.simplify()` on an expression that *binds* a variable resolves that bound
 variable to a same-named GLOBAL value, violating the value-blindness invariant
@@ -342,7 +342,55 @@ Contrast: `.evaluate()` on the same lambda is fine (`(x) |-> x + 1`), and
 - **Severity:** medium — a value-blindness violation that silently changes a
   function literal. Narrow trigger (a bound var shadowing a global assignment).
 
-### B. Solve unknown-shielding: doubly-contradictory edge case
+**Outcome (landed).** Two distinct loci, both located by bisection rather than
+guessed:
+
+1. `boxed-expression/simplify.ts` — `evaluateNumericSubexpressions` folded a
+   subexpression whose only reason for having no `unknowns` was a value-bound
+   variable (the `Function` body `Add(x,1)` with a global `x := 5`).
+2. `symbolic/simplify-sum.ts` — the `simplifySum` rule classified the body `x`
+   as index-INDEPENDENT because a value-bound `x` drops out of `.unknowns`,
+   producing `3·x`. Its index-dependence tests now use the value-blind
+   `.symbols` (syntactic occurrence), so a bound index always counts. Behavior
+   is unchanged for an unbound index (the normal case).
+
+The first locus turned out to be one face of a **broader value-blindness leak**
+(see below) and is fixed by the same predicate.
+
+#### Broader fix: `simplify()`'s numeric folds are now fully value-blind
+
+The binder corruption was a special case of a general leak: every numeric-fold
+gate used `unknowns.length === 0` as a proxy for "genuinely constant", but
+`.unknowns` silently drops symbols that carry an assigned value — so
+`(9 - w²).simplify()` with `w := 5` folded to `-72`, and `|w|` folded to `5`.
+`.simplify()` must never substitute an assigned value (that is `.evaluate()`'s
+job).
+
+A single predicate, `hasAssignedVariable(expr)` (`boxed-expression/utils.ts`),
+now gates each fold: it is true when a free symbol carries a USER value —
+excluding built-in constants via `def.value.isConstant`, so `ln(e) -> 1`,
+`√(1+2) -> √3`, and `|3+4i| -> 5` still reduce. It subsumes the binder case (a
+corrupting bound variable is exactly one with a global value), so no separate
+binder-tracking is needed. Applied at all five fold sites:
+
+- `simplify.ts` — `evaluateNumericSubexpressions` (Add/Multiply/… and Ln/Log)
+  and the default-branch numeric fold;
+- `symbolic/simplify-rules.ts` — the `Add` and `Multiply` operand folds;
+- `symbolic/simplify-abs.ts` — the `|z|`-modulus fold.
+
+Ordered last (after the cheap `unknowns`/operator checks), so it runs only on
+fold candidates — no hot-path cost.
+
+Regression tests in `test/compute-engine/simplify.test.ts` (both binder repros,
+a compound lambda body, `Sum x²`, the plain value-blindness pins, the broader
+`9 - w²`/`|w|`/quotient cases, and the constant-still-folds pins). Full suite
+green (18432 passed), **zero snapshot churn**.
+
+Not addressed (separate, deeper): sign-based rewrites still read a value's SIGN
+(`|w|` with `w := 5` simplifies to `w`, using `w ≥ 0` inferred from the value) —
+that is not a numeric fold and would need value-blind sign inference.
+
+### B. Solve unknown-shielding: doubly-contradictory edge case — **LANDED 2026-07-23**
 
 `Solve` shields a value-bound unknown by renaming it to a fresh symbol across
 transformer reduction (finding #2 fix, `solve-domain.ts`). That rename breaks
@@ -371,7 +419,26 @@ no longer match. The non-edge case (`w` unbound) works.
   transformer-resolution architecture is reworked (see Item 1 option 4).
 - **Severity:** low — silent wrong answer, but only on contradictory input.
 
-### C. Integrate/Limit of a nested transformer substitutes a valued bound variable
+**Outcome (landed).** The `EvaluateOptions`-threading route was explored and
+**rejected as incomplete**: threading a protected set into the transformer's
+`resolveBoundSymbols` keeps the unknown symbolic *there*, but the transformer's
+own `.simplify()` then re-folds it via the `Add`/`Multiply` simplification
+**rules** (`simplify-rules.ts` evaluates a no-`unknowns` compound operand), and
+those pure rule functions have no options channel — reaching them would mean
+re-plumbing the whole rule system.
+
+Instead, `evaluateSolve` (`solve-domain.ts`) now protects each value-bound
+unknown at the **source**: `reduceWithUnknownsShielded` shadow-declares it
+VALUELESS (with its current type) in a temporary scope for the duration of the
+transformer reduction. With no value in scope the unknown reduces as a genuine
+unknown — `Simplify`/`Expand`/… resolve the *other* bound symbols and leave it
+symbolic — and because the shield is on the binding rather than the name, it
+covers the doubly-contradictory case (`s := (9-w²)/4` reintroduces `w`, still
+valueless). The rename shield and its `KNOWN EDGE` note are removed.
+
+Regression tests in `test/compute-engine/solve.test.ts` (the §B repro plus a
+value-restored-after-solve pin, and the three protected verification cases).
+Full suite green, zero snapshot churn.
 
 Same protected-set gap as §B, on the differentiation/integration side. `Integrate`
 reduces a nested transformer head in its integrand via `reduceTransformerHead`

@@ -270,43 +270,19 @@ export function evaluateSolve(
   let specs = parseSolveSpecs(ops.slice(1));
   if (specs === undefined) return undefined; // invalid spec → stay inert
 
-  // Reduce transformer heads (`Solve(Simplify(eq), x)`) before solving. But a
-  // nested transformer resolves bound symbols with no protected set, so it
+  // Reduce transformer heads (`Solve(Simplify(eq), x)`) before solving. A
+  // nested transformer resolves the value-bound symbols in its operand, which
   // would substitute an unknown that also carries a global value (`x := 5`),
   // turning `Solve(Simplify(x - 2) = 0, x)` into `Solve(1 = 0, x)` → `[]`.
-  // Shield each value-bound unknown by renaming it to a fresh unbound symbol
-  // across the reduction, then rename back. An unknown with no value needs no
-  // shielding (nothing to substitute).
-  //
-  // KNOWN EDGE (tracked in docs/plans/2026-07-23-simplify-together-scoping.md,
-  // §B): if the unknown BOTH carries a value AND is reintroduced by another
-  // bound symbol's value, the rename and the resolved value disagree. Rare
-  // (doubly-contradictory input); the real fix threads a protected set into the
-  // nested transformer's resolution.
-  const shielded = new Map<string, string>();
-  for (const spec of specs) {
-    const name = spec.unknown;
-    const def = ce.lookupDefinition(name);
-    if (isValueDef(def) && def.value.value !== undefined) {
-      let fresh = `__solve_${name}`;
-      while (ce.lookupDefinition(fresh) !== undefined) fresh = `_${fresh}`;
-      shielded.set(name, fresh);
-    }
-  }
-  const toFresh = (e: Expression) =>
-    shielded.size === 0
-      ? e
-      : e.subs(
-          Object.fromEntries([...shielded].map(([a, b]) => [a, ce.symbol(b)]))
-        );
-  const fromFresh = (e: Expression) =>
-    shielded.size === 0
-      ? e
-      : e.subs(
-          Object.fromEntries([...shielded].map(([a, b]) => [b, ce.symbol(a)]))
-        );
-
-  let ceq = fromFresh(reduceTransformerHead(toFresh(eq.canonical)));
+  // Protect each value-bound unknown by shadow-declaring it VALUELESS in a
+  // temporary scope for the duration of the reduction: with no value in scope,
+  // the nested transformer resolves the OTHER bound symbols but keeps the
+  // unknown symbolic (`Simplify` no longer folds it, and neither does its
+  // `resolveBoundSymbols`). This protects at the SOURCE — the binding — so it
+  // also covers the doubly-contradictory case where the unknown both carries a
+  // value AND is reintroduced by another bound symbol's value (`s := (9-w²)/4`,
+  // `w := 9`): resolving `s` re-introduces `w`, which is still valueless here.
+  let ceq = reduceWithUnknownsShielded(ce, eq, specs);
 
   // Shared (multi-unknown) side-condition predicates lifted out of a constraint
   // set (e.g. `a < b` in `Solve(\{a+b=5, a<b\}, \{a,b\})`). Single-unknown side
@@ -590,6 +566,45 @@ export function evaluateSolve(
   const tuples = solveOverMultipleDomains(ce, ceq, specs, sideConditions);
   if (tuples === undefined) return undefined; // undecidable → stay inert
   return ce.function('List', tuples);
+}
+
+/**
+ * Reduce the transformer heads in a held `Solve` equation while shielding the
+ * value-bound unknowns.
+ *
+ * A nested transformer (`Simplify`/`Expand`/…) resolves and folds the
+ * value-bound symbols in its operand — including an unknown that also carries a
+ * global value, which erases the very variable being solved for (`x := 5` makes
+ * `Solve(Simplify(x - 2) = 0, x)` reduce to `Solve(1 = 0, x)` → `[]`).
+ *
+ * Shield each such unknown by shadow-declaring it VALUELESS (with its current
+ * type) in a temporary scope: with no value in scope it reduces as a genuine
+ * unknown and stays symbolic. Protecting the *binding* also handles the case
+ * where the unknown is reintroduced by another bound symbol's value
+ * (`s := (9 - w²)/4`), which a name-level rename could not. Unknowns with no
+ * value need no shield. Building `ceq` inside the scope is safe: the returned
+ * expression references the unknowns by name, re-resolved against the restored
+ * (value-carrying) binding once the scope is popped.
+ */
+function reduceWithUnknownsShielded(
+  ce: ComputeEngine,
+  eq: Expression,
+  specs: ReadonlyArray<SolveSpec>
+): Expression {
+  const valueBound = specs.filter((spec) => {
+    const def = ce.lookupDefinition(spec.unknown);
+    return isValueDef(def) && def.value.value !== undefined;
+  });
+  if (valueBound.length === 0) return reduceTransformerHead(eq.canonical);
+
+  ce.pushScope();
+  try {
+    for (const spec of valueBound)
+      ce.declare(spec.unknown, ce.symbol(spec.unknown).type.type);
+    return reduceTransformerHead(eq.canonical);
+  } finally {
+    ce.popScope();
+  }
 }
 
 function isExpression(x: unknown): x is Expression {

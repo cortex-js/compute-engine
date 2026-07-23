@@ -1831,3 +1831,122 @@ describe('simplify() structural-head evaluation is pure and value-blind', () => 
     expect(r.toString()).toBe('-b * c + a * d');
   });
 });
+
+// The `.simplify()` method is value-blind ACROSS A BINDER: a variable bound by
+// a Function/Block/Sum shadows a same-named global assignment, so its body must
+// NOT be folded to the global value. Regression for the §A defect in
+// docs/plans/2026-07-23-simplify-together-scoping.md.
+describe('simplify() is value-blind across a binder', () => {
+  test('a Function literal body is not folded to the global value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    // `x` here is the lambda parameter, not the global 5.
+    expect(
+      ce.box(['Function', ['Add', 'x', 1], 'x']).simplify().toString()
+    ).toBe('(x) |-> x + 1');
+  });
+
+  test('.evaluate() on the same lambda is unchanged (still value-blind)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    expect(
+      ce.box(['Function', ['Add', 'x', 1], 'x']).evaluate().toString()
+    ).toBe('(x) |-> x + 1');
+  });
+
+  test('a compound bound-variable subexpression in a lambda body is preserved', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    // `x^2` would fold to 25 if the bound `x` were resolved to the global.
+    expect(
+      ce.box(['Function', ['Add', ['Power', 'x', 2], 1], 'x']).simplify().toString()
+    ).toBe('(x) |-> x^2 + 1');
+  });
+
+  test('a Sum over a bound index that shadows a global stays correct', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    // sum_{x=1}^{3} x = 6, never 3·x (the value-bound index used to be read as
+    // index-INDEPENDENT because it dropped out of `.unknowns`).
+    expect(ce.parse('\\sum_{x=1}^{3} x').simplify().toString()).toBe('6');
+  });
+
+  test('a Sum of the bound index squared stays correct', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    // sum_{x=1}^{3} x^2 = 1 + 4 + 9 = 14.
+    expect(ce.parse('\\sum_{x=1}^{3} x^2').simplify().toString()).toBe('14');
+  });
+
+  test('the plain value-blindness invariant still holds (no binder)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    expect(ce.parse('x + 1').simplify().toString()).toBe('x + 1');
+  });
+
+  test('a Sum with an unbound index still uses the closed form', () => {
+    const ce = new ComputeEngine();
+    // No global `k`: the ordinary triangular-number closed form is unaffected.
+    expect(ce.parse('\\sum_{k=1}^{n} k').simplify().toString()).toBe(
+      '1/2 * (n^2 + n)'
+    );
+  });
+});
+
+// `.simplify()` never substitutes an assigned value — a compound subexpression
+// that is "constant" only because it mentions a value-bound symbol must stay
+// symbolic. Genuine constants (`Pi`, `e`) still fold under the exactness
+// contract. Regression for the broader value-blindness leak: the numeric-fold
+// gates used `unknowns.length === 0`, which silently drops value-bound symbols.
+describe('simplify() does not fold a value-bound compound subexpression', () => {
+  test('a difference with a value-bound square stays symbolic', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    expect(ce.parse('9 - w^2').simplify().toString()).toBe('9 - w^2');
+  });
+
+  test('a quotient with a value-bound numerator stays symbolic', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    expect(ce.parse('\\frac{9 - w^2}{4}').simplify().toString()).toBe(
+      '-1/4 * w^2 + 9/4'
+    );
+  });
+
+  test('a product/sum with a value-bound factor stays symbolic', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    expect(ce.parse('w^2 + 2w').simplify().toString()).toBe('w^2 + 2w');
+  });
+
+  test('a value-bound modulus is not folded', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    // |w| must not become 5 (value substitution).
+    expect(ce.parse('|w|').simplify().toString()).not.toBe('5');
+  });
+
+  test('genuinely numeric subexpressions still fold', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('\\sqrt{1 + 2}').simplify().toString()).toBe('sqrt(3)');
+    expect(ce.parse('9 - 4').simplify().toString()).toBe('5');
+  });
+
+  test('a constant modulus still folds (|3+4i| -> 5)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('|3 + 4i|').simplify().toString()).toBe('5');
+  });
+
+  test('a built-in constant still folds under the exactness contract', () => {
+    const ce = new ComputeEngine();
+    // `e` is a constant, not an assigned variable: `ln(e) -> 1` still reduces.
+    expect(ce.parse('\\ln(e)').simplify().toString()).toBe('1');
+  });
+
+  test('the Simplify OPERATOR still resolves assigned values', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    // The operator (unlike the method) evaluates its argument: 9 - 25 = -16.
+    expect(ce.box(['Simplify', ['Subtract', 9, ['Power', 'w', 2]]]).evaluate().toString()).toBe('-16');
+  });
+});

@@ -2209,11 +2209,12 @@ describe('Solve sees through list indexing', () => {
   });
 });
 
-// A transformer nested in a Solve equation resolves bound symbols with no
-// protected set, so it would substitute an unknown that also carries a global
-// value — `Solve(Simplify(x-2)=0, x)` with `x:=5` became `Solve(1=0,x)` → [].
-// The unknown is shielded (renamed to a fresh symbol) across transformer
-// reduction.
+// A transformer nested in a Solve equation resolves bound symbols, so it would
+// substitute an unknown that also carries a global value — `Solve(Simplify(x-2)
+// = 0, x)` with `x:=5` became `Solve(1=0,x)` -> []. The unknown is shielded by
+// shadow-declaring it VALUELESS across the transformer reduction, so it reduces
+// as a genuine unknown. See §B in
+// docs/plans/2026-07-23-simplify-together-scoping.md.
 describe('Solve shields a value-bound unknown from a nested transformer', () => {
   test('Solve(Simplify(x-2)==0, x) with x:=5', () => {
     const ce = new ComputeEngine();
@@ -2231,5 +2232,32 @@ describe('Solve shields a value-bound unknown from a nested transformer', () => 
     expect(
       ce.box(['Solve', ['Equal', ['Simplify', 's'], 2], 'w']).evaluate().toString()
     ).toBe('[1,-1]');
+  });
+
+  // The doubly-contradictory case: the unknown BOTH carries a value AND is
+  // reintroduced by another bound symbol's value. Shadow-declaring `w` valueless
+  // protects it at the SOURCE, so `Simplify(s)` resolves `s` to `(9-w^2)/4` yet
+  // keeps `w` symbolic instead of folding it to `9`. A name-level rename could
+  // not fix this (the value reintroduces the original `w`).
+  test('the unknown both has a value and is reintroduced by another binding', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 9);
+    ce.assign('s', ce.parse('\\frac{9-w^2}{4}'));
+    expect(
+      ce.box(['Solve', ['Equal', ['Simplify', 's'], 2], 'w']).evaluate().toString()
+    ).toBe('[1,-1]');
+    // The global value is restored after the solve.
+    expect(ce.symbol('w').evaluate().toString()).toBe('9');
+  });
+
+  // A value-bound unknown solved via a user-function equation still works (the
+  // shield covers the whole transformer/inline reduction).
+  test('Solve(g(x)==0, x) with x:=5 and a value-bound function', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    ce.assign('g', ce.parse('t \\mapsto t^2 - 4'));
+    expect(
+      ce.box(['Solve', ['Equal', ['g', 'x'], 0], 'x']).evaluate().toString()
+    ).toBe('[2,-2]');
   });
 });

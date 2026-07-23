@@ -1,5 +1,6 @@
 import type { Expression, RuleStep } from '../global-types.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { hasAssignedVariable } from '../boxed-expression/utils.js';
 import { isEligibleRealRewrite } from '../function-properties/index.js';
 
 /**
@@ -83,9 +84,11 @@ function simplifyAbsCore(x: Expression): RuleStep | undefined {
   // Kahan value |3 - √7 + i√(6√7 - 15)| -> 1. The evaluate() handler
   // (arithmetic.ts, evaluateAbs) computes the exact √(a²+b²) split and only
   // succeeds when it genuinely folds, so a non-reducing complex Abs stays
-  // symbolic. Gate on an unknown-free operand so this never touches a
-  // symbolic |x|.
-  if (op.unknowns.length === 0) {
+  // symbolic. Gate on a genuinely-constant operand (no unknowns AND no assigned
+  // value) so this never touches a symbolic |x| nor value-substitutes: |w| with
+  // `w := 5` must stay |w|, not fold to 5. `hasAssignedVariable` still lets a
+  // true constant modulus (|3+4i| -> 5) fold.
+  if (op.unknowns.length === 0 && !hasAssignedVariable(op)) {
     const evaluated = x.evaluate();
     if (isNumber(evaluated) && evaluated.im === 0 && !evaluated.isSame(x))
       return { value: evaluated, because: '|z| -> exact modulus' };

@@ -30,6 +30,7 @@ import {
   isRelationalOperator,
 } from '../latex-syntax/utils.js';
 import { cancelCommonFactors } from '../boxed-expression/polynomials.js';
+import { hasAssignedVariable } from '../boxed-expression/utils.js';
 import { simplifySum } from './simplify-sum.js';
 import { simplifyProduct } from './simplify-product.js';
 import {
@@ -333,8 +334,17 @@ export const SIMPLIFY_RULES: Rule[] = [
       value: add(
         ...x.ops.map((op) => {
           const canonical = op.canonical;
-          // Evaluate purely numeric operands (no unknowns) to simplify them
-          if (canonical.unknowns.length === 0 && isFunction(canonical)) {
+          // Evaluate GENUINELY numeric operands (no unknowns, no assigned
+          // value) to simplify them — `√(1+2) → √3`. Value-blindness: an
+          // operand that is constant only because it mentions a value-bound
+          // symbol (`w²` with `w := 5`) must NOT fold, or `simplify()` would
+          // substitute the value. `hasAssignedVariable` excludes true constants
+          // (`Pi`, `e`), so those still fold.
+          if (
+            canonical.unknowns.length === 0 &&
+            isFunction(canonical) &&
+            !hasAssignedVariable(canonical)
+          ) {
             const evaluated = canonical.evaluate();
             // Only use evaluated form if it's simpler (a number literal)
             if (isNumber(evaluated)) return evaluated;
@@ -427,11 +437,17 @@ export const SIMPLIFY_RULES: Rule[] = [
       value: mul(
         ...ops.map((op) => {
           const canonical = op.canonical;
-          // Evaluate purely numeric operands (no unknowns) to simplify them
-          // BUT skip Power expressions that should stay symbolic:
+          // Evaluate GENUINELY numeric operands (no unknowns, no assigned
+          // value — value-blindness, so `w²` with `w := 5` stays symbolic;
+          // `hasAssignedVariable` still lets true constants fold) to simplify
+          // them. BUT skip Power expressions that should stay symbolic:
           // - e^n (for potential combination with e^x)
           // - n^{p/q} where result is irrational (e.g., 2^{3/5})
-          if (canonical.unknowns.length === 0 && isFunction(canonical)) {
+          if (
+            canonical.unknowns.length === 0 &&
+            isFunction(canonical) &&
+            !hasAssignedVariable(canonical)
+          ) {
             if (canonical.operator === 'Power') {
               // Skip evaluation for e^n to allow power combination rules to work
               if (sym(canonical.op1) === 'ExponentialE') {

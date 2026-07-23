@@ -190,6 +190,10 @@ export function reduceTransformerHead(expr: Expression): Expression {
  * Recursing is safe for exactly this set — every member rewrites its operand
  * without resolving assigned symbol values, so the unknown survives. That is
  * why `Evaluate`/`N`/`ReplaceAll` are not members.
+ *
+ * A value-bound `Solve` unknown is shielded upstream (`evaluateSolve` shadow-
+ * declares it valueless for the duration of the reduction), so the transformer
+ * resolves other bound symbols but leaves the unknown symbolic.
  */
 function reduceTransformerHeads(expr: Expression): Expression {
   if (TRANSFORMER_HEADS.has(expr.operator)) return expr.evaluate();
@@ -823,6 +827,34 @@ export function isValueDef(
   def: BoxedDefinition | undefined
 ): def is TaggedValueDefinition {
   return def !== undefined && 'value' in def;
+}
+
+/**
+ * Whether `expr` contains a free symbol that carries a USER-ASSIGNED value: a
+ * NON-constant symbol with a value (`x` after `assign('x', 5)`), as opposed to
+ * a built-in constant (`Pi`, `ExponentialE`).
+ *
+ * This is the value-blindness gate for `simplify()`'s numeric folds. A
+ * subexpression with no free *unknowns* still must NOT be folded to a number
+ * when its "constant-ness" comes only from substituting an assigned value:
+ * `9 - w²` with `w := 5` must stay symbolic, not become `-72`. `.simplify()`
+ * does not resolve assigned values — that is `.evaluate()`'s job. A genuine
+ * constant is exempt: folding it is governed by the exactness contract, so
+ * `ln(e) -> 1` and `√(1+2) -> √3` still reduce.
+ *
+ * Reads `def.value.isConstant` (the constness marker on the value definition),
+ * so no boxed symbol is allocated per check.
+ */
+export function hasAssignedVariable(expr: Expression): boolean {
+  const ce = expr.engine;
+  for (const name of expr.symbols) {
+    const def = ce.lookupDefinition(name);
+    if (!isValueDef(def)) continue;
+    if (def.value.value === undefined || def.value.value === null) continue;
+    if (def.value.isConstant === true) continue;
+    return true;
+  }
+  return false;
 }
 
 export function isOperatorDef(
