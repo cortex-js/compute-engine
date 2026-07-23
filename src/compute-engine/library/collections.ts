@@ -202,6 +202,35 @@ function checkCollectionOperand(
   return checkType(engine, x, type);
 }
 
+/**
+ * A source operand for `Map`, with an *eager* collection resolved to its
+ * evaluated form.
+ *
+ * An expression with no collection handlers whose static type is nonetheless
+ * a collection only becomes a concrete collection once evaluated. Two shapes
+ * reach here: a broadcast arithmetic result (`X - 1` where `X` holds a list,
+ * typed `vector<integer^3>`) and an eager collection operator
+ * (`UnicodeScalars(s)`). Iteration already copes — the iterator evaluates once
+ * and iterates the result — but `count`/`isEmptyCollection`/
+ * `isFiniteCollection`/`at` all report `undefined` for such an operand, which
+ * stalls `materialize()` and leaves the whole `Map` symbolic: `Map(X - 1, f)`
+ * stayed unevaluated while `Map(X, f)` and `Map([0,1,2], f)` did not.
+ *
+ * Every other lazy collection operator answers those predicates from its own
+ * iterator (`Filter`, `Drop`, `Rest`, …, all of which already handle a
+ * computed source); `Map` is the one that delegates them to its source, so the
+ * resolution lives here rather than on `BoxedExpression`. Reporting such an
+ * operand as a collection engine-wide is NOT a safe generalization — it
+ * reclassifies broadcast results for `Sum`/`Product` body typing and for the
+ * compile targets' collection-valued-body fail-closed gates.
+ */
+function mapSource(xs: Expression): Expression {
+  if (xs.isCollection) return xs;
+  if (!xs.type.matches('collection')) return xs;
+  const evaluated = xs.evaluate();
+  return evaluated.isCollection ? evaluated : xs;
+}
+
 // Rebuild the operand list with `first` in place of `op1`, dropping nothing
 // else. Used by the peek handlers after stripping a wrapper from op1.
 function withFirst(
@@ -1638,8 +1667,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.nops > 2)
-          return minCount(expr.ops.slice(0, -1).map((c) => c.count));
-        return expr.op1.count;
+          return minCount(expr.ops.slice(0, -1).map((c) => mapSource(c).count));
+        return mapSource(expr.op1).count;
       },
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -1647,13 +1676,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // Empty as soon as *any* source is empty (mirrors Zip).
           let anyUnknown = false;
           for (const x of expr.ops.slice(0, -1)) {
-            const e = x.isEmptyCollection;
+            const e = mapSource(x).isEmptyCollection;
             if (e === true) return true;
             if (e === undefined) anyUnknown = true;
           }
           return anyUnknown ? undefined : false;
         }
-        return expr.op1.isEmptyCollection;
+        return mapSource(expr.op1).isEmptyCollection;
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -1661,13 +1690,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // Finite as soon as *any* source is finite (mirrors Zip).
           let anyUnknown = false;
           for (const x of expr.ops.slice(0, -1)) {
-            const f = x.isFiniteCollection;
+            const f = mapSource(x).isFiniteCollection;
             if (f === true) return true;
             if (f === undefined) anyUnknown = true;
           }
           return anyUnknown ? undefined : false;
         }
-        return expr.op1.isFiniteCollection;
+        return mapSource(expr.op1).isFiniteCollection;
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -1737,7 +1766,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // needed (a source with an unknown count still answers `at`).
           const collections = expr.ops.slice(0, -1);
           if (index < 1) return undefined;
-          const items = collections.map((c) => c.at(index));
+          const items = collections.map((c) => mapSource(c).at(index));
           if (items.some((x) => x === undefined)) return undefined;
           // Each at() access is its own micro-drain (resets the
           // once-per-drain attempt bound, so a cleared `{symbol}` mark can
@@ -1753,10 +1782,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // holding a collection), not the Map's own static type: a lazy
         // broadcast over a declared-`unknown` symbol types `unknown`, but its
         // source still answers `at`. A genuinely non-indexed source returns
-        // `undefined` from `op1.at` below anyway.
-        if (expr.op1.isIndexedCollection === false) return undefined;
+        // `undefined` from `source.at` below anyway. `mapSource` resolves an
+        // eager/broadcast source that only becomes a collection on evaluation
+        // (else `at` reports `undefined` and a result longer than the
+        // materialization head renders head-only).
+        const source = mapSource(expr.op1);
+        if (source.isIndexedCollection === false) return undefined;
         if (!Number.isFinite(index) || index === 0) return undefined;
-        const item = expr.op1.at(index);
+        const item = source.at(index);
         if (!item) return undefined;
         // Each at() access is its own micro-drain (see the zip form above).
         const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.([

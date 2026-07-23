@@ -614,6 +614,29 @@ volumes
       },
     },
 
+    CircularIntegrate: {
+      description: 'Contour (closed-path) integral. Inert: never evaluated.',
+      keywords: ['contour integral', 'closed integral', 'line integral'],
+      broadcastable: false,
+
+      lazy: true,
+      signature: '(function, limits+) -> number',
+
+      // `CircularIntegrate` carries no contour-integration machinery: the
+      // integrand is left as the bare application it was parsed as (not wrapped
+      // in a `Function` literal the way `Integrate` does), so it round-trips to
+      // the same LaTeX. The canonical handler exists to (a) rewrite the limits
+      // that `parseIntegral` builds as `Tuple`s into `Limits` expressions, so a
+      // limits-consuming caller sees the same shape as `Integrate` (the `Tuple`
+      // uses the symbol `Nothing` as a *positional* placeholder for an absent
+      // index/bound), and (b) give the operator a `number` type.
+      canonical: (ops, { engine: ce }) => {
+        if (!ops[0]) return null;
+        const limits = canonicalLimitsSequence(ops.slice(1), { engine: ce });
+        return ce._fn('CircularIntegrate', [ops[0].canonical, ...limits]);
+      },
+    },
+
     Integrate: {
       description: 'Symbolic integral with optional bounds.',
       keywords: [

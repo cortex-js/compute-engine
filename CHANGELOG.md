@@ -2,6 +2,19 @@
 
 ### Improvements
 
+- **`CircularIntegrate` (`\oint`) gained an operator definition.** It previously
+  had only a parser entry, so it typed as `any` and its limits stayed a raw
+  `Tuple`. It now types as `number` and canonicalizes its limits into `Limits`
+  expressions, matching `Integrate` so a limits-consuming caller sees a uniform
+  shape. `CircularIntegrate` remains inert — there is still no contour-
+  integration evaluation.
+
+  ```js
+  ce.parse('\\oint_C f').json;
+  // Before → ["CircularIntegrate", "f", ["Tuple", "Nothing", "C", "Nothing"]]  (type: any)
+  // Now    → ["CircularIntegrate", "f", ["Limits", "Nothing", "C", "Nothing"]] (type: number)
+  ```
+
 - **`RandomList` now compiles on the JavaScript target.** `RandomList(n)` draws
   fresh values on every call of the compiled function, matching `evaluate()`.
   For draws that stay the same from call to call, use the explicit-seed form
@@ -46,6 +59,29 @@
   element-wise, and `Length(At(p, I))` compiles.
 
 ### Bug Fixes
+
+- **`Map` now evaluates over a source that only becomes a collection when
+  evaluated.** `Map(X - 1, f)` stayed in its unevaluated lazy form while
+  `Map(X, f)` and `Map([0, 1, 2], f)` both evaluated. The trigger was any
+  source whose collection-ness is not visible before evaluation — a broadcast
+  arithmetic result over a list, or an eager collection operator such as
+  `UnicodeScalars`.
+
+  ```js
+  ce.assign('X', ce.box(['List', 0, 1, 2]));
+  ce.box(['Map', ['Subtract', 'X', 1], sq]).evaluate();
+  // Before → Map(X - 1, (x) |-> x^2)     Now → [1, 0, 1]
+
+  ce.box(['Map', ['UnicodeScalars', { str: 'ab' }], sq]).evaluate();
+  // Before → Map(UnicodeScalars("ab"), …) Now → [9409, 9604]
+  ```
+
+  Applies to the `zipWith` (multi-source) form as well, and to `.at()` — which
+  previously returned `undefined` for such a source, so a result longer than
+  the materialization head was silently rendered head-only instead of
+  head-and-tail. Every other collection operator (`Filter`, `Take`, `Sort`,
+  `Reverse`, `First`, …) already accepted these sources. Expressions that are
+  genuinely not collections are unchanged: `Map(5, f)` still stays symbolic.
 
 - **Compiled comparisons and logical connectives no longer return a wrong
   answer for a list operand.** `<`, `<=`, `>`, `>=`, `And`, `Or` and `Not`
