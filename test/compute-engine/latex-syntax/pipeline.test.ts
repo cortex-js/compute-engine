@@ -72,8 +72,8 @@ describe('PIPELINE OPERATOR — infix `x |> f`', () => {
   test.each(['\\rhd', '\\triangleright', '\\vartriangleright', '|>', '⊳'])(
     'infix %s applies the RHS function to the LHS',
     (op) => {
-      expect(json(`2${op}\\ln`)).toBe(`["Apply","Ln",2]`);
-      expect(json(`9${op}\\sqrt`)).toBe(`["Apply","Sqrt",9]`);
+      expect(json(`2${op}\\ln`)).toBe(`["Pipe",2,"Ln"]`);
+      expect(json(`9${op}\\sqrt`)).toBe(`["Pipe",9,"Sqrt"]`);
     }
   );
 
@@ -81,13 +81,18 @@ describe('PIPELINE OPERATOR — infix `x |> f`', () => {
     expect(ce.parse('9\\rhd\\sqrt').evaluate().json).toEqual(3);
     expect(ce.parse('e\\rhd\\ln').evaluate().json).toEqual(1);
   });
+
+  test('a non-function RHS remains an inert Pipe', () => {
+    expect(parse('5|>3').json).toEqual(['Pipe', 5, 3]);
+    expect(parse('5|>3').evaluate().json).toEqual(['Pipe', 5, 3]);
+  });
 });
 
 describe('PIPELINE OPERATOR — prefix `|> f` (anonymous unary function)', () => {
   test.each(['\\rhd', '\\triangleright', '\\vartriangleright', '|>', '⊳'])(
     'prefix %s builds a unary lambda over the topic',
     (op) => {
-      expect(json(`${op}\\ln`)).toBe(`["Function",["Apply","Ln","_"],"_"]`);
+      expect(json(`${op}\\ln`)).toBe(`["Function",["Pipe","_","Ln"],"_"]`);
     }
   );
 

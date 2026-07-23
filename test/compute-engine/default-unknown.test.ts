@@ -147,7 +147,8 @@ describe('DEFAULT UNKNOWN INFERENCE', () => {
   });
 
   // The pipe topic placeholder `_` is never a valid inferred unknown. In a
-  // deferred prefix-pipeline stage (`\rhd Solve` → `Function(Solve(_), _)`)
+  // deferred prefix-pipeline stage
+  // (`\rhd Solve` → `Function(Pipe(_, Solve), _)`)
   // the operand IS the placeholder at canonicalization time; inferring it
   // baked `_` into the unknown slot, so applying the stage computed
   // `Solve(expr, expr)` → `[0]` while the infix spelling returned `[-1]`.
@@ -165,7 +166,7 @@ describe('DEFAULT UNKNOWN INFERENCE', () => {
     test('the prefix stage keeps a deferred body', () => {
       expect(ce.parse('\\rhd\\operatorname{Solve}').json).toEqual([
         'Function',
-        ['Block', ['Solve', '_']],
+        ['Block', ['Pipe', '_', 'Solve']],
         '_',
       ]);
     });

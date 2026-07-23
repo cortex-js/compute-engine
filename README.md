@@ -158,6 +158,26 @@ const { value } = executeCortex(ce, `
 
 See the [Cortex language documentation](https://cortexjs.io/cortex/).
 
+#### Cortex CLI and REPL
+
+The package also installs a `cortex` command:
+
+```sh
+# Start an interactive session
+npx cortex
+
+# Evaluate source text or a file
+npx cortex -e 'Simplify(2 + 2x)'
+npx cortex program.cx
+
+# Cortex programs can also be piped over stdin
+printf '1/2 + 1' | npx cortex
+```
+
+The interactive session preserves declarations between inputs and supports
+persistent history, multiline input, `.load`, `.clear`, `.ast`, and `.time`. Run
+`cortex --help` for output formats and execution-limit options.
+
 **💡 Best Practices:**
 
 - Always use type guards (`isNumber`, `isSymbol`, `isFunction`) before accessing

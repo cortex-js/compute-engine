@@ -2,6 +2,20 @@
 
 ### New Features
 
+- **Cortex CLI and interactive REPL.** Installing
+  `@cortex-js/compute-engine` now provides a `cortex` executable. It evaluates
+  inline source (`cortex -e '1 + 2'`), `.cx`/`.cortex` files, or a program read
+  from standard input; with no input argument in a terminal it starts a
+  stateful REPL.
+
+  The REPL retains declarations across inputs, supports multiline programs and
+  persistent history, and adds `.load`, `.clear`, `.ast`, and `.time` commands
+  alongside Node's standard REPL commands. Non-interactive output can be
+  emitted as text, MathJSON (`--json`), or Cortex source (`--cortex`).
+  Diagnostics include source locations and are written to standard error.
+  Evaluations have a 10-second deadline by default; `--time-limit` changes it
+  and `--time-limit 0` disables it.
+
 - **`JacobianMatrix(fs, vars)`** — the matrix of partial derivatives ∂fᵢ/∂xⱼ,
   one row per function and one column per variable.
 
@@ -34,6 +48,14 @@
   list and a symbol bound to a list are both treated as systems.
 
 ### Improvements
+
+- **The LaTeX/ASCII-math pipeline operators now preserve `Pipe`.** A bare
+  pipeline stage such as `x |> f` previously lowered immediately to
+  `["Apply", "f", "x"]`; it now produces `["Pipe", "x", "f"]`, matching the
+  Cortex parser and retaining `Pipe`'s held-operand semantics. Chained stages
+  remain left-associated, prefix stages use `Function(Pipe(_, f), _)`, and a
+  programmatic `Pipe` serializes with `\rhd`. Pipeline topic markers remain
+  direct substitutions, so `x |> f(\square)` still becomes `f(x)`.
 
 - **`simplify()` reaches a distributed form when it is cheaper.** Rules tagged
   `purpose: 'expand'` are excluded from its scan, because expansion usually

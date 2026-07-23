@@ -2,6 +2,7 @@
 // @ts-nocheck
 
 import * as esbuild from 'esbuild';
+import { chmod } from 'node:fs/promises';
 
 import pkg from '../package.json' with { type: 'json' };
 const SDK_VERSION = pkg.version || 'v?.?.?';
@@ -277,7 +278,33 @@ for (const e of ENTRIES) {
   );
 }
 
+// Node CLI. Keep this as a small bundle of the command-line implementation,
+// with the Cortex library entry external: the output lives under `cli/`, so
+// its preserved `../cortex.js` import resolves to the sibling library bundle.
+// This avoids shipping a second ~2 MB copy of the Compute Engine in the
+// executable.
+for (const [outdir, extra] of [
+  ['./dist/esm', {}],
+  ['./dist/esm-min', MIN_OPTIONS],
+]) {
+  builds.push(
+    esbuild.build({
+      ...BUILD_OPTIONS,
+      ...extra,
+      entryPoints: ['./src/cli/cortex.ts'],
+      outfile: `${outdir}/cli/cortex.js`,
+      format: 'esm',
+      platform: 'node',
+      external: ['../cortex.js'],
+    })
+  );
+}
+
 //
 // Build all variants in parallel for maximum performance
 //
 await Promise.all(builds);
+await Promise.all([
+  chmod('./dist/esm/cli/cortex.js', 0o755),
+  chmod('./dist/esm-min/cli/cortex.js', 0o755),
+]);

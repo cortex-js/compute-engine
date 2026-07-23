@@ -634,34 +634,36 @@ describe('APPLY', () => {
   // `\rhd`, `\triangleright`, `|>` and `⊳` are synonyms
   test('pipeline x \\rhd f', () =>
     expect(ce.parse('x \\rhd f', { canonical: false }).json).toEqual([
-      'Apply',
-      'f',
+      'Pipe',
       'x',
+      'f',
     ]));
   test('pipeline x \\triangleright f', () =>
     expect(ce.parse('x \\triangleright f', { canonical: false }).json).toEqual([
-      'Apply',
-      'f',
+      'Pipe',
       'x',
+      'f',
     ]));
   test('pipeline x |> f', () =>
     expect(ce.parse('x |> f', { canonical: false }).json).toEqual([
-      'Apply',
-      'f',
+      'Pipe',
       'x',
+      'f',
     ]));
   test('pipeline x ⊳ f', () =>
     expect(ce.parse('x ⊳ f', { canonical: false }).json).toEqual([
-      'Apply',
-      'f',
+      'Pipe',
       'x',
+      'f',
     ]));
   test('pipeline chains left-associatively', () =>
     expect(ce.parse('x |> f |> g', { canonical: false }).json).toEqual([
-      'Apply',
+      'Pipe',
+      ['Pipe', 'x', 'f'],
       'g',
-      ['Apply', 'f', 'x'],
     ]));
+  test('Pipe serializes with pipeline notation', () =>
+    expect(ce.box(['Pipe', 'x', 'f']).latex).toBe('x\\rhd f'));
   test('pipeline evaluates', () =>
     expect(ce.parse('\\pi |> \\cos').evaluate().json).toEqual(-1));
   test('|> does not break absolute value: |x|>2', () =>
@@ -697,7 +699,7 @@ describe('APPLY', () => {
   test('prefix pipeline: bare function', () =>
     expect(ce.parse('|> f', { canonical: false }).json).toEqual([
       'Function',
-      ['Apply', 'f', '_'],
+      ['Pipe', '_', 'f'],
       '_',
     ]));
   test('prefix pipeline: topic marker', () =>

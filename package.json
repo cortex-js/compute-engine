@@ -13,6 +13,7 @@
     "test": "bash ./scripts/test.sh",
     "test:nodenext": "node ./test/consumer/nodenext-smoke.mjs",
     "test:cortex-runtime": "node ./test/consumer/cortex-runtime-smoke.mjs",
+    "test:cortex-cli": "node ./test/consumer/cortex-cli-smoke.mjs",
     "test:nightly": "CE_NIGHTLY=1 jest --config ./config/jest.config.cjs --reporters default -- test/compute-engine/nightly/",
     "check:deps": "madge --circular --extensions ts src/compute-engine && echo 'No runtime circular dependencies found (type-only cycles are expected)'",
     "check:corpus": "npx --yes tsx docs/mathnet/scripts/check-corpus.ts",
@@ -44,6 +45,9 @@
     "sympy"
   ],
   "license": "MIT",
+  "bin": {
+    "cortex": "./dist/esm-min/cli/cortex.js"
+  },
   "files": [
     "/CHANGELOG.md",
     "/dist/esm-min",

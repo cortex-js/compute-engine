@@ -1078,7 +1078,9 @@ function serializeKeyword(
 // A topic marker `\square` in the right-hand side names the position the
 // left-hand side fills, so the right-hand side may be a multi-argument call,
 // e.g. `x |> \operatorname{Solve}(\square, y)` -> `Solve(x, y)`. Without a
-// marker the left-hand side is passed as the sole argument (`Apply`).
+// marker, preserve the pipeline as `Pipe(lhs, rhs)`. `Pipe` evaluates by
+// applying the right-hand side while retaining the held-operand semantics that
+// distinguish a pipeline from an eager `Apply(rhs, lhs)`.
 
 // The internal symbol a bare `\square` parses to (see the `Quadrilateral`
 // definition in definitions-other.ts). Within a pipeline it acts as the
@@ -1108,15 +1110,15 @@ function substituteTopic(
   return [[op, ...args] as MathJsonExpression, true];
 }
 
-// Build the body of a pipeline stage: substitute `arg` for the topic marker
-// in `rhs` if present, otherwise apply `rhs` to `arg` as the sole argument.
+// Build a pipeline stage: substitute `arg` for an explicit topic marker in
+// `rhs`; otherwise retain the stage as `Pipe(arg, rhs)`.
 function buildPipe(
   rhs: MathJsonExpression,
   arg: MathJsonExpression
 ): MathJsonExpression {
   const [body, found] = substituteTopic(rhs, arg);
   if (found) return body;
-  return ['Apply', rhs, arg] as MathJsonExpression;
+  return ['Pipe', arg, rhs] as MathJsonExpression;
 }
 
 function parsePipeline(
@@ -1131,7 +1133,7 @@ function parsePipeline(
 // Prefix pipeline (`|> f`, `|> \operatorname{Solve}(\square, x)`): the
 // left-hand side is implied, so the stage becomes an anonymous unary function
 // over the topic. The caller applies it to the value it wants to pipe in.
-// e.g. `|> f` -> `Function(Apply(f, _), _)`; `|> Solve(\square, x)` ->
+// e.g. `|> f` -> `Function(Pipe(_, f), _)`; `|> Solve(\square, x)` ->
 // `Function(Solve(_, x), _)`.
 function parsePipelinePrefix(
   parser: Parser,
@@ -1368,6 +1370,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // `x \vartriangleright f`, `x |> f`) applies the function on the right to
   // the argument on the left
   {
+    name: 'Pipe',
     latexTrigger: '\\rhd',
     kind: 'infix',
     precedence: 20,

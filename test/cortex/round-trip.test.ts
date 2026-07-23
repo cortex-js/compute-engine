@@ -293,16 +293,16 @@ describe('CORTEX vs loose math parser', () => {
     expect(cortex('x^2')).toEqual(loose('x^2'));
   });
 
+  test('|> — SAME (Pipe)', () => {
+    expect(cortex('a |> b')).toEqual(['Pipe', 'a', 'b']);
+    expect(cortex('a |> b')).toEqual(loose('a |> b'));
+  });
+
   // Documented divergences: Cortex assigns programming-language meaning; the
   // loose math parser does something else. These assert the divergence stands.
   test('** — DIVERGES (Power vs math-parser artifact)', () => {
     expect(cortex('2**3')).toEqual(['Power', { num: '2' }, { num: '3' }]);
     expect(cortex('2**3')).not.toEqual(loose('2**3'));
-  });
-
-  test('|> — DIVERGES (Pipe vs Apply)', () => {
-    expect(cortex('a |> b')).toEqual(['Pipe', 'a', 'b']);
-    expect(cortex('a |> b')).not.toEqual(loose('a |> b'));
   });
 
   test('f(x, y) — DIVERGES (call vs InvisibleOperator/Delimiter)', () => {

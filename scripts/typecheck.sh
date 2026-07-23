@@ -14,6 +14,11 @@ echo "Running TypeScript type check..."
   --skipLibCheck -d --allowImportingTsExtensions true --emitDeclarationOnly \
   --ignoreConfig --outDir /tmp/typecheck ./src/compute-engine.ts
 
+echo "Checking Cortex CLI..."
+./node_modules/@typescript/native/bin/tsc --target es2022 --module es2022 --moduleResolution bundler --types node \
+  --skipLibCheck --allowImportingTsExtensions true --noEmit \
+  --ignoreConfig ./src/cli/cortex.ts
+
 # Circular dependency check
 MAX_CYCLES=0
 echo ""

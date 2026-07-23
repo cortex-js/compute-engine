@@ -100,6 +100,9 @@ fi
 if [[ "$TARGETS" == *cortex* ]]; then
   "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts
+  "$TS7" --target es2022 --module es2022 --moduleResolution bundler \
+    --types node --skipLibCheck --allowImportingTsExtensions true \
+    --noEmit --ignoreConfig ./src/cli/cortex.ts
 fi
 if [[ "$TARGETS" == *latex-syntax* ]]; then
   "$TS7" $DTS_FLAGS \
@@ -178,6 +181,10 @@ if [ "$BUILD" = "production" ]; then
     printf "$BASENAME$DOT Verifying Cortex runtime smoke"
     node ./test/consumer/cortex-runtime-smoke.mjs
     echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying Cortex runtime smoke$RESET"
+
+    printf "$BASENAME$DOT Verifying Cortex CLI smoke"
+    node ./test/consumer/cortex-cli-smoke.mjs
+    echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying Cortex CLI smoke$RESET"
 
 
     # Run test suite
