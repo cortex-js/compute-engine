@@ -48,17 +48,14 @@ import { BoxedDictionary } from './boxed-dictionary.js';
 import { canonicalForm } from './canonical.js';
 import { sortOperands } from './order.js';
 import { validateArguments, checkNumericArgs } from './validate.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import type { Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
 import { isValueDef } from './utils.js';
 import { lookupApplicable } from '../function-utils.js';
 import { canonicalNegate } from './negate.js';
 import { canonical } from './canonical-utils.js';
-import { isNumber, isFunction, isSymbol } from './type-guards.js';
-import {
-  NUMERIC_SHORTCUT_OPERATORS,
-  allParamsNumeric,
-  propagatesMissing,
-} from './missing.js';
+import { isNumber, isFunction } from './type-guards.js';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -615,6 +612,27 @@ function boxInternal(
   return ce.symbol('Undefined');
 }
 
+/**
+ * True when every declared parameter of a signature (required, optional and
+ * variadic) is a numeric type (a subtype of `number`). Used to restrict the
+ * post-canonical argument re-validation in `makeCanonicalFunction` to the
+ * pure-numeric operators (`Sin`, `Factorial`, …) whose custom canonical
+ * handlers historically only checked arity. A signature with no parameters, or
+ * any non-numeric parameter, returns `false` so structural/higher-order
+ * operators are left untouched.
+ */
+function allParamsNumeric(signature: Type): boolean {
+  if (typeof signature === 'string') return false;
+  if (signature.kind !== 'signature') return false;
+  const params: Type[] = [
+    ...(signature.args?.map((x) => x.type) ?? []),
+    ...(signature.optArgs?.map((x) => x.type) ?? []),
+    ...(signature.variadicArg ? [signature.variadicArg.type] : []),
+  ];
+  if (params.length === 0) return false;
+  return params.every((t) => isSubtype(t, 'number'));
+}
+
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
@@ -632,12 +650,7 @@ function makeCanonicalFunction(
   //
   if (name === 'List') {
     const boxedOps = ops.map((x) => ce.expr(x, { form: 'raw' }));
-    // `Nothing` is an ERASURE marker (an empty-sequence splice): it is
-    // elided from a collection literal, so `[12, Nothing, 34]` is a
-    // 2-element list. Use `Missing` for an absent-but-positioned value.
-    const canonicalOps = canonical(ce, boxedOps, scope).filter(
-      (x) => !isSymbol(x, 'Nothing')
-    );
+    const canonicalOps = canonical(ce, boxedOps, scope);
     return new BoxedFunction(ce, 'List', canonicalOps, {
       metadata,
       canonical: true,
@@ -795,18 +808,6 @@ function makeCanonicalFunction(
   // eligible for repair.
   const xs = ops.map((x) => ce.expr(x));
 
-  // `Missing` (an absent value whose position is preserved) PROPAGATES
-  // through numeric operations: `Sin(Missing)` is `Missing`, and through the
-  // data-consuming aggregates: `Max(1, Missing, 3)` is `Missing`. Gated on
-  // `propagatesMissing` (the same predicate the evaluate-time gate uses) so
-  // structural/higher-order operators — `List`, `At`, `Equal`, the big-ops —
-  // keep `Missing` as a plain operand.
-  if (
-    xs.some((x) => isSymbol(x, 'Missing')) &&
-    propagatesMissing(name, opDef.signature.type, opDef.inferredSignature)
-  )
-    return ce.Missing;
-
   //
   // 3/ Apply `canonical` handler
   //
@@ -956,19 +957,9 @@ function makeNumericFunction(
   metadata?: Metadata,
   scope?: Scope
 ): Expression | null {
-  if (!NUMERIC_SHORTCUT_OPERATORS.has(name)) return null;
-
-  const semi = semiCanonical(ce, semiOps, scope);
-
-  // `Missing` (an absent value whose position is preserved) PROPAGATES
-  // through numeric operations: `Missing + 1` is `Missing`. This is the
-  // counterpart of `Nothing`, which is *elided* from an operand list
-  // (`Nothing + 1` is `1`) — see `flatten()`.
-  if (semi.some((x) => isSymbol(x, 'Missing'))) return ce.Missing;
-
   let ops: ReadonlyArray<Expression> = [];
   if (name === 'Add' || name === 'Multiply')
-    ops = checkNumericArgs(ce, semi, {
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), {
       flatten: name,
     });
   else if (
@@ -977,17 +968,17 @@ function makeNumericFunction(
     name === 'Sqrt' ||
     name === 'Exp'
   )
-    ops = checkNumericArgs(ce, semi, 1);
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), 1);
   else if (name === 'Ln' || name === 'Log') {
-    ops = checkNumericArgs(ce, semi);
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope));
     if (ops.length === 0) ops = [ce.error('missing')];
   } else if (name === 'Power' || name === 'Root')
-    ops = checkNumericArgs(ce, semi, 2);
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope), 2);
   else if (name === 'Divide') {
     // Note: Divide can have more than one argument, i.e.
     // Divide(a, b, c) = a / b / c
     // But it needs at least two arguments
-    ops = checkNumericArgs(ce, semi);
+    ops = checkNumericArgs(ce, semiCanonical(ce, semiOps, scope));
     if (ops.length === 0) ops = [ce.error('missing'), ce.error('missing')];
     if (ops.length === 1) ops = [ops[0], ce.error('missing')];
   } else return null;

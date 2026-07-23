@@ -32,7 +32,6 @@ export type CommonSymbolBindings = {
   Pi: Expression;
   E: Expression;
   Nothing: Expression;
-  Missing: Expression;
 };
 
 function expectCommonSymbol(
@@ -82,7 +81,6 @@ export class EngineStartupCoordinator {
       Pi: expectCommonSymbol(commonSymbols, 'Pi'),
       E: expectCommonSymbol(commonSymbols, 'ExponentialE'),
       Nothing: expectCommonSymbol(commonSymbols, 'Nothing'),
-      Missing: expectCommonSymbol(commonSymbols, 'Missing'),
     };
   }
 }

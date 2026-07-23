@@ -136,14 +136,14 @@ exports[`EXOTIC INTEGRALS \\intop 1`] = `
 
 exports[`EXOTIC INTEGRALS \\oint - contour integral 1`] = `
 \\oint_{V}\\!f(s)\\, \\mathrm{d}s
-CircularIntegrate(f(s), Limits(s, V, "Nothing"))
-["CircularIntegrate", ["f", "s"], ["Limits", "s", "V", "Nothing"]]
+CircularIntegrate(f(s), (s, V, "Nothing"))
+["CircularIntegrate", ["f", "s"], ["Triple", "s", "V", "Nothing"]]
 `;
 
 exports[`EXOTIC INTEGRALS \\oint - contour integral, no index 1`] = `
 \\oint_{C}\\!f
-CircularIntegrate(f, Limits("Nothing", C, "Nothing"))
-["CircularIntegrate", "f", ["Limits", "Nothing", "C", "Nothing"]]
+CircularIntegrate(f, ("Nothing", C, "Nothing"))
+["CircularIntegrate", "f", ["Triple", "Nothing", "C", "Nothing"]]
 `;
 
 exports[`EXOTIC INTEGRALS \\smallint 1`] = `

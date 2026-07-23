@@ -131,7 +131,7 @@ import { PRIMITIVE_TYPES_SET } from './primitive.js';
           | "-infinity" | "-oo" | "-∞"
 
 <primitive_type> ::= <numeric_primitive>
-                   | "any" | "unknown" | "nothing" | "missing" | "never" | "error"
+                   | "any" | "unknown" | "nothing" | "never" | "error"
                    | "expression" | "symbol" | "function" | "value"
                    | "scalar" | "boolean" | "string"
                    | "collection" | "indexed_collection" | "list" | "tuple"

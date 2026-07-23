@@ -728,18 +728,10 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
       `["List", 13, 11]`
     ));
 
-  // BREAKING (2026-07-22): out-of-band access is POSITION-PRESERVING. A
-  // scalar out-of-range index yields the absence marker (`NaN` here — the
-  // collection is numeric), and an out-of-range entry of an integer-list pick
-  // yields the marker IN PLACE instead of being dropped, so the picked list
-  // always has the same length as the index list.
-  test('At out-of-range: scalar and pick entries yield the absence marker, position preserved', () => {
-    expect(evaluate(['At', list, 10])).toMatchInlineSnapshot(`NaN`);
+  test('At out-of-range: scalar yields Nothing, pick entries are dropped', () => {
+    expect(evaluate(['At', list, 10])).toMatchInlineSnapshot(`Nothing`);
     expect(evaluate(['At', list, ['List', 10]])).toMatchInlineSnapshot(
-      `["List", "NaN"]`
-    );
-    expect(evaluate(['At', list, ['List', 1, 10, 2]])).toMatchInlineSnapshot(
-      `["List", 7, "NaN", 13]`
+      `["List"]`
     );
   });
 
@@ -1078,9 +1070,9 @@ describe('NEGATIVE INDEX NORMALIZATION IN at() DISPATCHER (regression)', () => {
   test('At(Range, -1)', () =>
     expect(evaluate(['At', ['Range', 1, 10], -1])).toMatchInlineSnapshot(`10`));
 
-  test('At(Range, out-of-range negative) is the absence marker', () =>
+  test('At(Range, out-of-range negative) is Nothing', () =>
     expect(evaluate(['At', ['Range', 1, 10], -11])).toMatchInlineSnapshot(
-      `NaN`
+      `Nothing`
     ));
 
   test('At(Linspace, -1)', () =>
@@ -1114,10 +1106,8 @@ describe('NEGATIVE INDEX NORMALIZATION IN at() DISPATCHER (regression)', () => {
   test('Last of an infinite collection does not hang and stays inert', () => {
     // Negative-index normalization requires a finite, known count; an infinite
     // source keeps returning undefined (no materialization, no hang).
-    // (Out-of-band access yields the absence marker, not the erasing
-    // `Nothing`; the element type is indeterminate here, so `Missing`.)
     const e = engine.box(['Last', ['Cycle', ['List', 1, 2]]]).evaluate();
-    expect(e.symbol).toBe('Missing');
+    expect(e.operator === 'Nothing' || e.symbol === 'Nothing').toBe(true);
   });
 });
 
@@ -2015,8 +2005,7 @@ describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
     // — otherwise, with no deadline armed, a never-true predicate over an
     // infinite source would walk forever. The guarded walk trips
     // iteration-limit-exceeded, which the `at` handler swallows (returns
-    // undefined), so `First` yields the absence marker — `NaN` here, since
-    // the source's elements are numeric.
+    // undefined), so `First` yields `Nothing`.
     const ce = new ComputeEngine();
     const neverTrue: Expression = ['Function', ['Less', 'x', 0], 'x'];
     const first: Expression = [
@@ -2024,7 +2013,7 @@ describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
       ['Filter', ['Range', 1, 'Infinity'], neverTrue],
     ];
     const start = Date.now();
-    expect(ce.box(first).evaluate().isNaN).toBe(true);
+    expect(ce.box(first).evaluate().symbol).toBe('Nothing');
     expect(Date.now() - start).toBeLessThan(5000);
   }, 15_000);
 });
@@ -2962,8 +2951,7 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     // yields a single deduped element and then spins consuming the source
     // without ever emitting. The iterator caps that source walk at
     // `ce.iterationLimit` and throws `iteration-limit-exceeded`, which the `at`
-    // handler swallows (returns undefined), so `Second` yields the absence
-    // marker (`Missing` — `Nothing` would ERASE the slot). With
+    // handler swallows (returns undefined), so `Second` yields `Nothing`. With
     // no deadline armed (a fresh engine, no enclosing span) the iteration-limit
     // guard is the ONLY thing that can stop it — a regression would hang
     // forever here rather than hide behind a deadline. A fresh engine is used
@@ -2971,7 +2959,7 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     const ce = new ComputeEngine();
     const second: Expression = ['Second', ['Dedup', ['Cycle', ['List', 1, 1]]]];
     const start = Date.now();
-    expect(ce.box(second).evaluate().symbol).toBe('Missing');
+    expect(ce.box(second).evaluate().symbol).toBe('Nothing');
     expect(Date.now() - start).toBeLessThan(5000);
   }, 15_000);
 

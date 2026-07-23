@@ -45,11 +45,9 @@ import {
   isNumber,
   isFunction,
   isString,
-  isSymbol,
   isContinuationOperand,
 } from './type-guards.js';
 import { candidateShape } from './tensor-view.js';
-import { propagatesMissing } from './missing.js';
 import type { NumericPrimitiveType } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -1320,24 +1318,6 @@ export class BoxedFunction
   }
 
   each(): Generator<Expression> {
-    const raw = this._eachRaw();
-    return (function* () {
-      // `Nothing` is an ERASURE marker: an element that evaluates to
-      // `Nothing` is spliced out of the stream (the `mapMaybe` idiom —
-      // `Map(xs, _ ↦ Nothing)` is the empty collection). Use `Missing` for
-      // an absent value whose position must be preserved.
-      for (const x of raw) if (!isSymbol(x, 'Nothing')) yield x;
-    })();
-  }
-
-  /**
-   * @internal
-   * Enumerate the collection WITHOUT the `Nothing`-erasure filter applied by
-   * `each()`. Only `materialize()` uses it: it must tell "the iterator
-   * declined to enumerate" (keep the lazy form) apart from "every element
-   * was erased" (a genuinely empty result).
-   */
-  _eachRaw(): Generator<Expression> {
     // An operator that opted out of being a collection for THIS instance has
     // inert handlers: enumerate nothing rather than iterate a scalar.
     if (this._optedOutOfCollection) return (function* () {})();
@@ -1432,41 +1412,6 @@ export class BoxedFunction
     );
   }
 
-  /**
-   * `Missing` (an absent value whose position is preserved) PROPAGATES through
-   * numeric operations: `Missing + 1` is `Missing`, `Sin(Missing)` is
-   * `Missing`. The canonicalization-time gate in `box.ts` catches expressions
-   * built by `ce.box()`/`ce.parse()`/`ce.function()`, but internal builders —
-   * `ce._fn()`, and the big-op reduction kernels that use it — bypass it. The
-   * rule is therefore enforced here too, at the evaluation layer, where every
-   * construction route converges.
-   *
-   * Cheap-first: the operand scan is a symbol identity test with no
-   * allocation, and the (allocating) signature walk only runs once a `Missing`
-   * operand is actually present.
-   *
-   * Returns `Missing` when the operator propagates it, `undefined` otherwise
-   * (structural/higher-order operators — `List`, `At`, `Equal`, the big-op
-   * containers — keep `Missing` as an ordinary operand, which is what makes
-   * `[1, Missing, 3]` a 3-element list).
-   */
-  private _propagatedMissing(
-    def: BoxedOperatorDefinition
-  ): Expression | undefined {
-    const ops = this._ops;
-    for (let i = 0; i < ops.length; i++) {
-      if (!isSymbol(ops[i], 'Missing')) continue;
-      return propagatesMissing(
-        this._operator,
-        def.signature.type,
-        def.inferredSignature
-      )
-        ? this.engine.Missing
-        : undefined;
-    }
-    return undefined;
-  }
-
   _computeValue(options?: Partial<EvaluateOptions>): () => Expression {
     return () => {
       // Cooperative deadline checkpoint on the per-node evaluation path.
@@ -1493,13 +1438,6 @@ export class BoxedFunction
         return applyFunctionLiteral(this, this._def.value, options);
 
       const def = this._def.operator;
-
-      //
-      // 1b/ `Missing` propagates through numeric operators, whatever route
-      // built this expression (see `_propagatedMissing`).
-      //
-      const missing = this._propagatedMissing(def);
-      if (missing) return missing;
 
       //
       // 2/ Broadcast if applicable
@@ -1802,12 +1740,6 @@ export class BoxedFunction
         return applyFunctionLiteral(this, this._def.value, options);
 
       const def = this._def.operator;
-
-      //
-      // 1b/ `Missing` propagates through numeric operators — see the sync path.
-      //
-      const missing = this._propagatedMissing(def);
-      if (missing) return missing;
 
       //
       // 2/ Broadcast if applicable
@@ -2842,13 +2774,6 @@ function materialize(
 
   const xs: Expression[] = [];
 
-  // `Nothing` is an ERASURE marker: an element that evaluates to `Nothing` is
-  // spliced out. `sawRawElement` records whether the underlying iterator
-  // yielded anything at all, so "every element was erased" (a genuinely empty
-  // result) stays distinguishable from "the iterator declined to enumerate"
-  // (keep the lazy form). Hence `_eachRaw()` rather than `each()` here.
-  let sawRawElement = false;
-
   if (!expr.isEmptyCollection) {
     if (!isIndexed || !isFinite) {
       //
@@ -2858,10 +2783,8 @@ function materialize(
         typeof materialization === 'number'
           ? materialization
           : materialization[0];
-      const iter = expr._eachRaw();
+      const iter = expr.each();
       for (const x of iter) {
-        sawRawElement = true;
-        if (isSymbol(x, 'Nothing')) continue;
         if (xs.length === last) {
           // If we have more elements, add a ContinuationPlaceholder
           if (!iter.next().done)
@@ -2884,63 +2807,39 @@ function materialize(
 
       // Materialize the head
       let i = 1;
-      let erased = 0;
-      // True when the head loop drained the iterator instead of stopping at
-      // `headSize` — the collected elements are then the WHOLE content.
-      let drained = true;
-      const iter = expr._eachRaw();
+      const iter = expr.each();
       for (const x of iter) {
-        sawRawElement = true;
-        if (isSymbol(x, 'Nothing')) {
-          erased += 1;
-          continue;
-        }
         xs.push(x.evaluate(options));
         i += 1;
-        if (i > headSize) {
-          drained = false;
-          break;
-        }
+        if (i > headSize) break;
       }
 
       // Nothing enumerable despite claiming elements (e.g. Linspace with a
       // symbolic endpoint: concrete count, but its iterator declines): keep
-      // the lazy form rather than fabricate a placeholder literal. A
-      // collection whose every element was ERASED did enumerate: it falls
-      // through and materializes to an empty literal.
-      if (xs.length === 0) {
-        if (!sawRawElement) return expr;
-      } else if (drained && erased > 0) {
-        // Erasure makes `count` (a static property of the source) larger than
-        // the number of elements actually produced. Having drained the
-        // iterator we hold the complete content, so skip the count-driven
-        // placeholder/tail logic, which would append a spurious
-        // `ContinuationPlaceholder`.
+      // the lazy form rather than fabricate a placeholder literal.
+      if (xs.length === 0) return expr;
+
+      const count = expr.count;
+      if (count === undefined || count <= headSize) {
+        // If the collection is smaller than the head, we don't need to evaluate the tail
+        if (count === undefined || xs.length < count)
+          xs.push(expr.engine.symbol('ContinuationPlaceholder'));
       } else {
-        const count = expr.count;
-        if (count === undefined || count <= headSize) {
-          // If the collection is smaller than the head, we don't need to evaluate the tail
-          if (count === undefined || xs.length < count)
-            xs.push(expr.engine.symbol('ContinuationPlaceholder'));
-        } else {
-          // Materialize the tail
-          // Ensure tail doesn't overlap with head and add ContinuationPlaceholder if needed
-          const tailStartIndex = Math.max(headSize + 1, count - tailSize + 1);
+        // Materialize the tail
+        // Ensure tail doesn't overlap with head and add ContinuationPlaceholder if needed
+        const tailStartIndex = Math.max(headSize + 1, count - tailSize + 1);
 
-          // Add ContinuationPlaceholder if there's a gap between head and tail
-          if (count > headSize + tailSize) {
-            xs.push(expr.engine.symbol('ContinuationPlaceholder'));
-          }
+        // Add ContinuationPlaceholder if there's a gap between head and tail
+        if (count > headSize + tailSize) {
+          xs.push(expr.engine.symbol('ContinuationPlaceholder'));
+        }
 
-          i = tailStartIndex;
-          while (i <= count) {
-            const x = expr.at(i);
-            if (!x) break;
-            i += 1;
-            // An erased element contributes nothing to the tail.
-            if (isSymbol(x, 'Nothing')) continue;
-            xs.push(x.evaluate(options));
-          }
+        i = tailStartIndex;
+        while (i <= count) {
+          const x = expr.at(i);
+          if (!x) break;
+          xs.push(x.evaluate(options));
+          i += 1;
         }
       }
     }
@@ -2948,11 +2847,8 @@ function materialize(
 
   // A collection that claims elements but yielded none cannot be enumerated
   // (e.g. Linspace with a symbolic endpoint, whose iterator declines): keep
-  // the lazy form rather than fabricate an empty or placeholder literal. (A
-  // collection whose elements were all erased DID enumerate — `sawRawElement`
-  // — and legitimately materializes to an empty literal.)
-  if (xs.length === 0 && expr.isEmptyCollection === false && !sawRawElement)
-    return expr;
+  // the lazy form rather than fabricate an empty or placeholder literal.
+  if (xs.length === 0 && expr.isEmptyCollection === false) return expr;
 
   //
   // Convert to a List, Set or Dictionary depending on the type of

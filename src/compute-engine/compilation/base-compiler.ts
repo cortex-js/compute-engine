@@ -3253,6 +3253,15 @@ export class BaseCompiler {
           return;
         }
         // No mapping, no value, not a constant: a genuinely free symbol.
+        //
+        // KNOWN GAP (see ROADMAP "Known defects"): the boolean literals
+        // `True`/`False` reach here and are reported free, even though the
+        // target inlines them to `true`/`false`. Do NOT fix this by testing
+        // `target.var(s) !== undefined` — `var` is the general variable
+        // emitter, not a constants lookup (the javascript target's main-path
+        // copy falls back to `_.${id}` for free symbols), so that check
+        // suppresses EVERY free symbol. A fix needs a constants-only lookup
+        // distinct from `var`, consulted after the `varsKeys` guard above.
         free.add(s);
         return;
       }

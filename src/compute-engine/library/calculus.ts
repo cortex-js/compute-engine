@@ -889,30 +889,6 @@ volumes
       },
     },
 
-    CircularIntegrate: {
-      description: 'Contour (closed-path) integral. Inert: never evaluated.',
-      keywords: ['contour integral', 'closed integral', 'line integral'],
-      broadcastable: false,
-
-      lazy: true,
-      signature: '(function, limits+) -> number',
-
-      // `CircularIntegrate` carries no contour-integration machinery: the
-      // integrand is deliberately left as the bare application it was parsed
-      // as (not wrapped in a `Function` literal the way `Integrate` does), so
-      // the expression round-trips to the same LaTeX. But the limits MUST
-      // become `Limits` expressions: `parseIntegral` builds them as `Tuple`s
-      // using the symbol `Nothing` as a *positional* placeholder for an absent
-      // index/bound, and a canonical `Tuple` literal splices `Nothing` out —
-      // which would silently shift the remaining bounds (and break
-      // serialization). Hence `lazy: true` plus this handler.
-      canonical: (ops, { engine: ce }) => {
-        if (!ops[0]) return null;
-        const limits = canonicalLimitsSequence(ops.slice(1), { engine: ce });
-        return ce._fn('CircularIntegrate', [ops[0].canonical, ...limits]);
-      },
-    },
-
     NIntegrate: {
       description: 'Numerical approximation of a definite integral.',
       broadcastable: false,

@@ -3053,9 +3053,8 @@ const SYS_HELPERS = {
     return NaN;
   },
   // Positional access for compiled `At`. CE `At` is 1-based; a negative index
-  // counts from the end. A zero or out-of-range index yields NaN — matching
-  // the interpreter, whose out-of-band access yields the position-preserving
-  // absence marker (`NaN` for a numeric collection).
+  // counts from the end. A zero or out-of-range index yields NaN (the
+  // interpreter returns `Nothing`, projected to NaN on a real target).
   //
   // A COMPLEX index value arrives as an `{ re, im }` object; the interpreter
   // reads its `.re` and ignores the imaginary part, so `indexValue` does the
@@ -3073,10 +3072,8 @@ const SYS_HELPERS = {
   //    `every` on an empty array is true): keep element i where mask[i] is
   //    true, 1-based; mask entries past the end contribute nothing;
   //  - integer gather: select each indexed element, negative entries counting
-  //    from the end (same normalization as the scalar path). POSITION-
-  //    PRESERVING: an out-of-range entry contributes NaN in place (the
-  //    interpreter's absence marker), so the result always has the same
-  //    length as the index list.
+  //    from the end (same normalization as the scalar path), out-of-range
+  //    entries DROPPED (the result may be shorter than the index list).
   // A non-integer entry makes the interpreter decline — `At` stays unevaluated
   // and produces no value at all — so the WHOLE result is NaN (the projection
   // of "no value" on a real target), not a per-slot NaN, which would invent an
@@ -3096,9 +3093,8 @@ const SYS_HELPERS = {
         const mv = indexValue(m);
         if (!Number.isInteger(mv)) return NaN;
         const idx = mv > 0 ? mv - 1 : n + mv;
-        // Out-of-range (or zero) index: keep the position, mark the absence.
-        if (mv === 0 || idx < 0 || idx >= n) picked.push(NaN);
-        else picked.push(arr[idx]);
+        if (mv === 0 || idx < 0 || idx >= n) continue;
+        picked.push(arr[idx]);
       }
       return picked;
     }

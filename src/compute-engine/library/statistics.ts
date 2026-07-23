@@ -19,7 +19,6 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
   windowedCollectionOps,
 } from '../collection-utils.js';
-import { flattenArguments, missingDatum } from './missing-data.js';
 import {
   bigCorrelation,
   bigCovariance,
@@ -254,10 +253,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const r = distributionMean(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactMean(engine, vals);
@@ -279,10 +274,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Median of a collection of numbers.',
       examples: ['Mode([1, 2, 2, 3])  // Returns 2'],
       evaluate: (ops, { engine, numericApproximation }) => {
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactMedianOf(engine, sortExact(vals));
@@ -307,10 +298,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const r = distributionVariance(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactVariance(engine, vals, false);
@@ -331,10 +318,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine, numericApproximation }) => {
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactVariance(engine, vals, true);
@@ -360,10 +343,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const r = distributionStandardDeviation(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals)
@@ -387,10 +366,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine, numericApproximation }) => {
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals)
@@ -414,10 +389,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine, numericApproximation }) => {
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactKurtosis(engine, vals);
@@ -438,10 +409,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine, numericApproximation }) => {
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactSkewness(engine, vals);
@@ -462,10 +429,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '((collection|number)+) -> number',
       type: () => 'finite_real',
       evaluate: (ops, { engine, numericApproximation }) => {
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactMode(engine, vals);
@@ -493,10 +456,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         '((collection|number)+) -> tuple<mid:number, lower:number, upper:number>',
       examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)'],
       evaluate: (ops, { engine, numericApproximation }) => {
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) {
@@ -522,10 +481,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       type: () => 'finite_real',
 
       evaluate: (ops, { engine, numericApproximation }) => {
-        // `Missing` PROPAGATES through statistics (`Nothing` is skipped —
-        // see `flattenArguments`).
-        const absent = missingDatum(engine, ops);
-        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) {
@@ -769,6 +724,16 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+function* flattenArguments(
+  args: ReadonlyArray<Expression>
+): Generator<Expression> {
+  // Go over each argument and yield it if a scalar, otherwise yield its elements
+  for (const arg of args) {
+    if (arg.isFiniteCollection) yield* arg.each();
+    else yield arg;
+  }
+}
 
 function* flattenScalars(args: ReadonlyArray<Expression>) {
   for (const op of flattenArguments(args)) yield op.re;

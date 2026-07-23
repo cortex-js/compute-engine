@@ -202,36 +202,6 @@ function checkCollectionOperand(
   return checkType(engine, x, type);
 }
 
-/**
- * A source operand for `Map`, with an *eager* collection resolved to its
- * evaluated form.
- *
- * An expression with no collection handlers whose static type is nonetheless
- * a collection only becomes a concrete collection once evaluated. Two shapes
- * reach here: a broadcast arithmetic result (`X - 1` where `X` holds a list,
- * typed `vector<integer^3>`) and an eager collection operator
- * (`UnicodeScalars(s)`). Iteration already copes — `_eachRaw()` evaluates
- * once and iterates the result — but `count`/`isEmptyCollection`/
- * `isFiniteCollection`/`at` all report `undefined` for such an operand,
- * which stalls `materialize()` and leaves the whole `Map` symbolic:
- * `Map(X - 1, f)` stayed unevaluated while `Map(X, f)` and
- * `Map([0,1,2], f)` did not.
- *
- * Every other lazy collection operator answers those predicates from its own
- * iterator (`Filter`, `Drop`, `Rest`, …, all of which already handle a
- * computed source); `Map` is the one that delegates them to its source, so
- * the resolution lives here rather than on `BoxedExpression`. Reporting such
- * an operand as a collection engine-wide is NOT a safe generalization — it
- * reclassifies broadcast results for `Sum`/`Product` body typing and for the
- * compile targets' collection-valued-body fail-closed gates.
- */
-function mapSource(xs: Expression): Expression {
-  if (xs.isCollection) return xs;
-  if (!xs.type.matches('collection')) return xs;
-  const evaluated = xs.evaluate();
-  return evaluated.isCollection ? evaluated : xs;
-}
-
 // Rebuild the operand list with `first` in place of `op1`, dropping nothing
 // else. Used by the peek handlers after stripping a wrapper from op1.
 function withFirst(
@@ -299,79 +269,17 @@ function mapResultType(
   return parseType(`collection<${typeToString(elementType)}>`);
 }
 
-/** How many actual elements `absenceMarker()` probes when a collection's
- *  element type is statically indeterminate. */
-const MAX_ABSENCE_MARKER_PROBE = 10;
-
-/**
- * The POSITION-PRESERVING absence marker for `xs`: `NaN` when the
- * collection's elements are numeric, `Missing` otherwise.
- *
- * `Nothing` is deliberately NOT used here. `Nothing` is an ERASURE marker: it
- * is spliced out of operand lists AND of collections, so using it for an
- * out-of-band access (or for an element the handler failed to compute) would
- * silently shorten the result and misalign positional data.
- *
- * The element type is taken from the collection's `elttype` handler, falling
- * back to `collectionElementType()` of its static type. When that is
- * indeterminate (`unknown`/`any`/`never`), the runtime evidence of the
- * collection's own elements decides: `NaN` when the first few elements are
- * all numbers (and there is at least one), `Missing` otherwise.
- */
-function absenceMarker(ce: ComputeEngine, xs?: Expression): Expression {
-  if (xs === undefined) return ce.Missing;
-
-  // A dictionary/record is a KEYED collection: the value `At` returns is the
-  // entry's value, not the `tuple<string, T>` iteration pair that
-  // `collectionElementType` reports. Use the value type instead.
-  const xt = xs.type.type;
-  let t: Type | undefined;
-  if (typeof xt !== 'string' && xt.kind === 'dictionary') t = xt.values;
-  else if (typeof xt !== 'string' && xt.kind === 'record')
-    t = widen(...Object.values(xt.elements)) as Type;
-  else
-    t =
-      xs.operatorDefinition?.collection?.elttype?.(xs) ??
-      collectionElementType(xt);
-
-  if (t !== undefined && t !== 'unknown' && t !== 'any' && t !== 'never')
-    return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
-
-  // Indeterminate element type: probe a bounded prefix of the actual
-  // elements. Only for a small, finite collection — never materialize a
-  // large or unknown-length source just to pick a marker.
-  const count = xs.count;
-  if (
-    xs.isFiniteCollection === true &&
-    count !== undefined &&
-    count <= MAX_SIZE_EAGER_COLLECTION
-  ) {
-    let sawNumber = false;
-    let n = 0;
-    for (const el of xs.each()) {
-      if (++n > MAX_ABSENCE_MARKER_PROBE) break;
-      if (!isNumber(el)) return ce.Missing;
-      sawNumber = true;
-    }
-    if (sawNumber) return ce.NaN;
-  }
-
-  return ce.Missing;
-}
-
 // Access the element of `xs` at 1-based `position` (`-1` = last), used by the
 // `First`/`Second`/`Third`/`Last` evaluate handlers. A literal indexed
-// collection returns the element (an out-of-range position yields the
-// position-preserving absence marker, NOT `Nothing`, which would erase it);
-// a symbolic operand whose type is (or could be) an indexed collection stays
-// symbolic (return `undefined`); an operand provably not an indexed
-// collection is a type error.
+// collection returns the element; a symbolic operand whose type is (or could
+// be) an indexed collection stays symbolic (return `undefined`); an operand
+// provably not an indexed collection is a type error.
 function componentAt(
   xs: Expression,
   position: number,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (xs.isCollection) return xs.at(position) ?? absenceMarker(ce, xs);
+  if (xs.isCollection) return xs.at(position) ?? ce.Nothing;
   if (xs.type.matches('indexed_collection')) return undefined;
   return ce.error(['incompatible-type', `'collection'`, xs.type.toString()]);
 }
@@ -563,13 +471,8 @@ function pointComponentAt(
         // or below `MAX_SIZE_EAGER_COLLECTION` (or for non-indexed sources),
         // so the cost is bounded — the large-list case took the lazy arm
         // above (Tycho item 52).
-        // A point with no such coordinate (a `z` on a 2D point) is an
-        // OUT-OF-BAND access: it contributes the position-preserving marker.
-        // `Nothing` would erase the slot and misalign the coordinate list
-        // against the point list it was derived from.
         const comps: Expression[] = [];
-        for (const e of xs.each())
-          comps.push(e.at(position) ?? absenceMarker(ce, e));
+        for (const e of xs.each()) comps.push(e.at(position) ?? ce.Nothing);
         return ce.function('List', comps);
       }
       // Elements are not points → element indexing, like First/Second/Third.
@@ -577,8 +480,7 @@ function pointComponentAt(
     }
     // Empty collection: if the declared element type is a point, broadcast to
     // an empty list (matching the JS compiler's `[].map(...)` → `[]`);
-    // otherwise index (→ the absence marker), like First/Second/Third on an
-    // empty list.
+    // otherwise index (→ Nothing), like First/Second/Third on an empty list.
     if (hasPointElementType(xs)) return ce.function('List', []);
     return componentAt(xs, position, ce);
   }
@@ -632,11 +534,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (materialization) {
         return engine._fn(
           'List',
-          // `Nothing` is an ERASURE marker: an element that *evaluates* to
-          // `Nothing` is spliced out (`enlist` already drops syntactic ones).
-          enlist(ops)
-            .map((op) => op.evaluate({ numericApproximation, materialization }))
-            .filter((op) => !isSymbol(op, 'Nothing'))
+          enlist(ops).map((op) =>
+            op.evaluate({ numericApproximation, materialization })
+          )
         );
       }
       // A collection literal evaluates its elements (unlike lazy operators,
@@ -649,9 +549,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return undefined;
       return engine.function(
         'List',
-        ops
-          .map((op) => op.evaluate({ numericApproximation, materialization }))
-          .filter((op) => !isSymbol(op, 'Nothing'))
+        ops.map((op) => op.evaluate({ numericApproximation, materialization }))
       );
     },
     eq: defaultCollectionEq,
@@ -828,12 +726,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(any*) -> tuple',
     type: (ops) => parseType(`tuple<${ops.map((op) => op.type).join(', ')}>`),
-    // `Nothing` is an ERASURE marker: it is spliced out of a collection
-    // literal, exactly as for `List` and `Set`. Splicing changes the ARITY of
-    // the tuple — `(1, Nothing, 3)` is the 2-tuple `(1, 3)`, typed
-    // accordingly. Use `Missing` for an absent-but-positioned coordinate.
-    canonical: (ops, { engine }) =>
-      engine.tuple(...ops.filter((op) => !isSymbol(op, 'Nothing'))),
+    canonical: (ops, { engine }) => engine.tuple(...ops),
     // A `Tuple` is inert data: it evaluates its operands but never transposes a
     // collection component into a list of points. The Desmos point-list idiom
     // (zip a tuple-with-collection into a `List` of point-tuples) lives in the
@@ -969,9 +862,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const [key, value] = checkTypes(engine, args, ['string', 'any']);
       if (!key.isValid || !value.isValid)
         return engine._fn('KeyValuePair', [key, value]);
-      // POSITIONAL pair: `_fn`, not `tuple()` — see `BoxedDictionary.each()`.
-      // A `Nothing` value must not be spliced out (it would unpair the entry).
-      return engine._fn('Tuple', [key, value]);
+      return engine.tuple(key, value);
     },
   },
 
@@ -1747,8 +1638,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.nops > 2)
-          return minCount(expr.ops.slice(0, -1).map((c) => mapSource(c).count));
-        return mapSource(expr.op1).count;
+          return minCount(expr.ops.slice(0, -1).map((c) => c.count));
+        return expr.op1.count;
       },
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -1756,13 +1647,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // Empty as soon as *any* source is empty (mirrors Zip).
           let anyUnknown = false;
           for (const x of expr.ops.slice(0, -1)) {
-            const e = mapSource(x).isEmptyCollection;
+            const e = x.isEmptyCollection;
             if (e === true) return true;
             if (e === undefined) anyUnknown = true;
           }
           return anyUnknown ? undefined : false;
         }
-        return mapSource(expr.op1).isEmptyCollection;
+        return expr.op1.isEmptyCollection;
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -1770,13 +1661,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // Finite as soon as *any* source is finite (mirrors Zip).
           let anyUnknown = false;
           for (const x of expr.ops.slice(0, -1)) {
-            const f = mapSource(x).isFiniteCollection;
+            const f = x.isFiniteCollection;
             if (f === true) return true;
             if (f === undefined) anyUnknown = true;
           }
           return anyUnknown ? undefined : false;
         }
-        return mapSource(expr.op1).isFiniteCollection;
+        return expr.op1.isFiniteCollection;
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -1811,10 +1702,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               const compiled = auto?.(items);
               if (compiled !== undefined)
                 return { value: compiled, done: false };
-              // A mapping function that produced no value is a COMPUTATION
-              // FAILURE, not an erasure: emit the position-preserving marker
-              // (`Nothing` here would silently shorten the result).
-              const v = f(items) ?? absenceMarker(expr.engine, expr);
+              const v = f(items) ?? expr.engine.Nothing;
               return { value: v, done: false };
             },
           };
@@ -1833,8 +1721,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               const compiled = auto?.([value]);
               if (compiled !== undefined)
                 return { value: compiled, done: false };
-              // See above: a failed mapping is the marker, not an erasure.
-              const v = f([value]) ?? absenceMarker(expr.engine, expr);
+              const v = f([value]) ?? expr.engine.Nothing;
               return { value: v, done: false };
             }
           },
@@ -1850,7 +1737,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // needed (a source with an unknown count still answers `at`).
           const collections = expr.ops.slice(0, -1);
           if (index < 1) return undefined;
-          const items = collections.map((c) => mapSource(c).at(index));
+          const items = collections.map((c) => c.at(index));
           if (items.some((x) => x === undefined)) return undefined;
           // Each at() access is its own micro-drain (resets the
           // once-per-drain attempt bound, so a cleared `{symbol}` mark can
@@ -1867,10 +1754,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // broadcast over a declared-`unknown` symbol types `unknown`, but its
         // source still answers `at`. A genuinely non-indexed source returns
         // `undefined` from `op1.at` below anyway.
-        const source = mapSource(expr.op1);
-        if (source.isIndexedCollection === false) return undefined;
+        if (expr.op1.isIndexedCollection === false) return undefined;
         if (!Number.isFinite(index) || index === 0) return undefined;
-        const item = source.at(index);
+        const item = expr.op1.at(index);
         if (!item) return undefined;
         // Each at() access is its own micro-drain (see the zip form above).
         const compiled = mapAutoCompileRunner(expr, { drainStart: true })?.([
@@ -2153,9 +2039,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return run(
         reduceCollection<Expression>(
           collection,
-          // A reducer that produced no value is a computation failure:
-          // fold in the marker rather than the erasure symbol.
-          (acc, x) => f([acc, x]) ?? absenceMarker(ce, collection),
+          (acc, x) => f([acc, x]) ?? ce.Nothing,
           initial
         ) as Generator<Expression | undefined, Expression | undefined>,
         ce._timeRemaining,
@@ -2239,10 +2123,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (!started) {
               started = true;
               acc = hasInitial
-                ? (f([initial, value]) ?? absenceMarker(expr.engine, expr.op1))
+                ? (f([initial, value]) ?? expr.engine.Nothing)
                 : value;
             } else {
-              acc = f([acc!, value]) ?? absenceMarker(expr.engine, expr.op1);
+              acc = f([acc!, value]) ?? expr.engine.Nothing;
             }
             return { value: acc!, done: false };
           },
@@ -2264,9 +2148,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           i += 1;
           if (i === 1)
             acc = hasInitial
-              ? (f([initial, item]) ?? absenceMarker(expr.engine, expr.op1))
+              ? (f([initial, item]) ?? expr.engine.Nothing)
               : item;
-          else acc = f([acc!, item]) ?? absenceMarker(expr.engine, expr.op1);
+          else acc = f([acc!, item]) ?? expr.engine.Nothing;
           if (i === index) return acc;
         }
         return undefined;
@@ -2578,7 +2462,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               }
               const { value, done } = source.next();
               if (done) return { value: undefined, done: true };
-              const mapped = f([value]) ?? absenceMarker(expr.engine, expr);
+              const mapped = f([value]) ?? expr.engine.Nothing;
               if (mapped.isCollection) inner = mapped.each();
               else return { value: mapped, done: false };
             }
@@ -2763,9 +2647,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Access an element of an indexed collection.',
       'If the index is negative, it is counted from the end.',
       'Multiple indices can be provided to access nested collections (e.g., matrices).',
-      'If the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter: unselected positions are dropped).',
-      'If the index is a finite collection of integers, returns the elements at those indices, preserving position: an out-of-range index yields the absence marker, it is not dropped.',
-      'Out-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `Missing` otherwise. It never yields `Nothing`, which would erase the position.',
+      'If the index is a finite collection of booleans, returns the elements where the mask is True.',
+      'If the index is a finite collection of integers, returns the elements at those indices.',
     ],
     complexity: 8200,
     signature:
@@ -2872,9 +2755,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       for (let i = 1; i < ops.length; i++) {
         const peeled = collectionElementType(current) ?? 'any';
         // A gather yields a dimensionless list: the gathered length is a
-        // runtime property. (Out-of-range entries are position-preserving —
-        // they yield the absence marker — but the index list's own length is
-        // generally not statically known.)
+        // runtime property (out-of-range entries are dropped).
         current = isGatherIndex(ops[i])
           ? ({ kind: 'list', elements: peeled } as ListType)
           : peeled;
@@ -2937,19 +2818,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
 
     evaluate: (ops, { engine: ce }) => {
-      // Edge conventions, on the record (revised 2026-07-22 — BREAKING):
-      // out-of-band access is POSITION-PRESERVING and yields the absence
-      // MARKER (`NaN` for a numeric collection, `Missing` otherwise — see
-      // `absenceMarker()`), never `Nothing` (which erases).
-      //  - an out-of-range SCALAR index yields the marker;
-      //  - out-of-range entries of an integer-list pick yield the marker in
-      //    place, so the picked list has the same length as the index list;
-      //  - a missing dictionary key yields the marker;
-      //  - a boolean MASK is a filter, so unselected (and out-of-range)
-      //    positions are DROPPED — compaction is correct there;
-      //  - mask/pick always return a `List`, possibly empty; a mask shorter
-      //    than the source selects from its prefix only; a scalar boolean or
-      //    a non-string dictionary index leaves `At` unevaluated.
+      // Audited against the description 2026-07-19 — behaviors agree. Edge
+      // conventions, on the record: an out-of-range SCALAR index yields
+      // `Nothing`; out-of-range entries of an integer-list pick are DROPPED
+      // (mask/pick always return a `List`, possibly empty); a mask shorter
+      // than the source selects from its prefix only; a scalar boolean or a
+      // non-string dictionary index leaves `At` unevaluated.
       let expr = ops[0];
       let index = 1;
       while (ops[index]) {
@@ -2958,11 +2832,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Dictionary key access: a `dictionary` is a keyed (not indexed)
         // collection with no `collection.at` handler, so look the value up by
         // its string key directly. Only string keys are supported; a missing
-        // key yields the absence marker, a non-string index leaves `At`
-        // unevaluated.
+        // key yields `Nothing`, a non-string index leaves `At` unevaluated.
         if (isDictionary(expr)) {
           if (!isString(opAtIndex)) return undefined;
-          expr = expr.get(opAtIndex.string) ?? absenceMarker(ce, expr);
+          expr = expr.get(opAtIndex.string) ?? ce.Nothing;
           index += 1;
           continue;
         }
@@ -2974,7 +2847,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Case A: string key (dictionary-style access).
         const s = isString(opAtIndex) ? opAtIndex.string : undefined;
         if (s !== undefined) {
-          expr = at(expr, s) ?? absenceMarker(ce, expr);
+          expr = at(expr, s) ?? ce.Nothing;
           index += 1;
           continue;
         }
@@ -2997,18 +2870,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               if (v !== undefined) picked.push(v);
             });
           } else {
-            // Integer-list pick (gather): select the element at each integer
-            // index. POSITION-PRESERVING — an out-of-range index contributes
-            // the absence marker, so the result has the same length as the
-            // index list (previously such entries were dropped, which
-            // misaligned positional data).
-            let marker: Expression | undefined;
+            // Integer-list pick: select element at each integer index.
+            // Out-of-range indices are dropped.
             for (const m of indices) {
               const k = m.re;
               if (!Number.isInteger(k)) return undefined;
               // Route through the dispatcher so negative indices normalize.
               const v = expr.at(k);
-              picked.push(v ?? (marker ??= absenceMarker(ce, expr)));
+              if (v !== undefined) picked.push(v);
             }
           }
 
@@ -3018,11 +2887,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
 
         // Case C: primitive integer index. Route through the dispatcher so
-        // negative indices normalize (count from the end). An out-of-range
-        // index yields the absence marker.
+        // negative indices normalize (count from the end).
         const i = opAtIndex.re;
         if (!Number.isInteger(i)) return undefined;
-        expr = expr.at(i) ?? absenceMarker(ce, expr);
+        expr = expr.at(i) ?? ce.Nothing;
         index += 1;
       }
       return expr;
@@ -4932,9 +4800,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return {
           next: () => {
             n += 1;
-            acc =
-              f([expr.engine.number(n), acc]) ??
-              absenceMarker(expr.engine, expr);
+            acc = f([expr.engine.number(n), acc]) ?? expr.engine.Nothing;
             return { value: acc, done: false };
           },
         };
@@ -4947,8 +4813,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!f) return undefined;
         let acc = expr.op2 ?? expr.engine.Nothing;
         for (let i = 1; i < index; i++) {
-          acc =
-            f([expr.engine.number(i), acc]) ?? absenceMarker(expr.engine, expr);
+          acc = f([expr.engine.number(i), acc]) ?? expr.engine.Nothing;
         }
         return acc;
       },
@@ -5129,7 +4994,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             for (let j = 1; j <= cols; j++) {
               row.push(
                 f([expr.engine.number(index - 1), expr.engine.number(j)]) ??
-                  absenceMarker(expr.engine, expr)
+                  expr.engine.Nothing
               );
             }
             return {
@@ -5153,7 +5018,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const col = ((index - 1) % cols) + 1; // 1-based column index
         return (
           f([expr.engine.number(row), expr.engine.number(col)]) ??
-          absenceMarker(expr.engine, expr)
+          expr.engine.Nothing
         );
       },
     },
@@ -5259,8 +5124,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isString(key)) {
           throw new Error(`Expected a string key, got ${key.type}`);
         }
-        // POSITIONAL pair: `_fn`, not `tuple()` — see `BoxedDictionary.each()`.
-        entries.push(ce._fn('Tuple', [key, value]));
+        entries.push(ce.tuple(key, value));
       }
       return ce.function('Dictionary', entries);
     },
@@ -5294,8 +5158,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isString(key)) {
           throw new Error(`Expected a string key, got ${key.type}`);
         }
-        // POSITIONAL pair: `_fn`, not `tuple()` — see `BoxedDictionary.each()`.
-        entries.push(ce._fn('Tuple', [key, value]));
+        entries.push(ce.tuple(key, value));
       }
       return ce.function('Record', entries);
     },
@@ -5547,19 +5410,14 @@ function canonicalList(
     }
   }
 
-  const canonicalOps = ops
-    .map((op) => {
-      if (isFunction(op, 'Delimiter')) {
-        if (isFunction(op.op1, 'Sequence'))
-          return ce._fn('List', canonical(ce, op.op1.ops));
-        return ce._fn('List', [op.op1?.canonical ?? ce.Nothing]);
-      }
-      return op.canonical;
-    })
-    // `Nothing` is an ERASURE marker: it is spliced out of a collection
-    // literal (`[12, Nothing, 34]` is a 2-element list). Use `Missing` for
-    // an absent-but-positioned value.
-    .filter((op) => !isSymbol(op, 'Nothing'));
+  const canonicalOps = ops.map((op) => {
+    if (isFunction(op, 'Delimiter')) {
+      if (isFunction(op.op1, 'Sequence'))
+        return ce._fn('List', canonical(ce, op.op1.ops));
+      return ce._fn('List', [op.op1?.canonical ?? ce.Nothing]);
+    }
+    return op.canonical;
+  });
   return ce._fn('List', canonicalOps);
 }
 
@@ -5575,14 +5433,11 @@ function canonicalSet(
   // its syntactic operands (body + indexing set)
   if (parseSetComprehension(ops) !== null) return engine._fn('Set', [...ops]);
 
-  // Check that each element is only present once. `Nothing` is an ERASURE
-  // marker: it is spliced out of a collection literal (`{12, Nothing, 34}` is
-  // a 2-element set), exactly as for `List` and `Tuple`. Use `Missing` for an
-  // absent-but-positioned element.
+  // Check that each element is only present once
   const set: Expression[] = [];
   const has = (x: Expression) => set.some((y) => y.isSame(x));
 
-  for (const op of ops) if (!isSymbol(op, 'Nothing') && !has(op)) set.push(op);
+  for (const op of ops) if (!has(op)) set.push(op);
 
   return engine._fn('Set', set);
 }
@@ -6306,13 +6161,11 @@ function tabulateElement(
   dims: number[],
   outerIndex: number
 ): Expression {
-  // A tabulating function that produced no value is a computation failure:
-  // keep the position with the `Missing` marker rather than erase it.
-  if (dims.length === 1) return fn([ce.number(outerIndex)]) ?? ce.Missing;
+  if (dims.length === 1) return fn([ce.number(outerIndex)]) ?? ce.Nothing;
 
   const fillArray = (index: number[], level: number): ExpressionInput => {
     if (level === dims.length)
-      return fn(index.map((v) => ce.number(v))) ?? ce.Missing;
+      return fn(index.map((v) => ce.number(v))) ?? ce.Nothing;
     const arr: ['List', ...ExpressionInput[]] = ['List'];
     for (let j = 1; j <= dims[level]; j++) {
       index[level] = j;
