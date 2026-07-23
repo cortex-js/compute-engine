@@ -41,6 +41,54 @@ protections are documented in
 
 ---
 
+## `simplify()` and operator `evaluate` handlers
+
+`.simplify()` is **rule-driven**: it applies the simplification rule set and
+folds purely numeric subexpressions (`evaluateNumericSubexpressions` in
+`boxed-expression/simplify.ts`). It does not, in general, invoke an operator's
+`evaluate` handler.
+
+The exception is a closed list of **structural** heads —
+`SIMPLIFY_EVALUABLE_HEADS`: `Determinant`, `Trace`, `Transpose`, `Length`.
+Their handlers reduce operands to a closed form determined by the operands'
+*structure* (a matrix to a scalar, a collection to a measure) rather than
+rewriting the expression, and they carry no simplification rule of their own.
+Without this they came back untouched:
+
+```
+ce.parse('\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}').simplify()
+// Before → Determinant(Matrix([[a,b],[c,d]]))   Now → a·d - b·c
+```
+
+`Max`/`Min` deliberately fail that rule and are not members: they reduce their
+operands' *values*, not their structure, and the value fold is evaluation's
+job.
+
+**Everything else still needs `evaluate()` first.** `D`, `Integrate`,
+`Inverse`, and any operator whose result comes from a handler rather than a
+rule are unchanged by `simplify()`, so the ordering rule stands — `simplify()`
+alone is not a superset of `evaluate()`:
+
+```
+expr.evaluate().simplify()   // the reliable order
+```
+
+`N()` runs handlers too, but yields the float form rather than the exact one.
+
+### `simplify()` is value-blind
+
+`.simplify()` never substitutes an assigned symbol value: with `a := 5`,
+`(a + 2).simplify()` is `a + 2`, while `(a + 2).evaluate()` is `7`. Structural
+heads honor this — evaluating one whose operands mention a symbol carrying a
+value would substitute it, so `simplify()` declines and leaves the head alone.
+
+This is separate from the **`Simplify` operator**, which does resolve bound
+symbols in its argument (an operator evaluates its arguments; `lazy` there only
+protects the operand's structure). So `Simplify(v)` with `v := (x²-1)/(x-1)`
+gives `x + 1`, while `ce.symbol('v').simplify()` gives `v`.
+
+---
+
 ## Generic-real simplification policy
 
 This is the single authoritative statement of how `.simplify()` treats an

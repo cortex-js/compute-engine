@@ -11,6 +11,7 @@ import {
   getPolynomialCoefficients,
   polynomialDivide,
   fromCoefficients,
+  cancelCommonFactors,
 } from './polynomials.js';
 import { asSmallInteger } from './numerics.js';
 import { expand } from './expand.js';
@@ -51,6 +52,25 @@ export function together(op: Expression): Expression {
         if (isFunction(t, 'Divide')) {
           [tn, td] = t.ops;
           sawDenominator = true;
+        } else if (!isNumber(t)) {
+          // A denominator is not always a `Divide` node: canonical form writes
+          // `1/x^2` as `Power(x, -2)` and `y/x^2` as a `Multiply` with a
+          // negative exponent. Only matching `Divide` left those terms with an
+          // implicit denominator of 1, so they were folded into the numerator
+          // and the result kept negative powers (`(x·x^-2 + 1)/x`).
+          // Number literals are deliberately excluded: splitting `1/2` into
+          // `[1, 2]` here would put every rational coefficient over a common
+          // denominator, which is not what `Together` is asked to do.
+          const [n, d] = t.numeratorDenominator;
+          if (
+            n.operator !== 'Nothing' &&
+            d.operator !== 'Nothing' &&
+            !d.isSame(1)
+          ) {
+            tn = n;
+            td = d;
+            sawDenominator = true;
+          }
         }
         if (num === undefined) {
           [num, den] = [tn, td];
@@ -80,6 +100,34 @@ export function together(op: Expression): Expression {
   }
 
   return op;
+}
+
+/**
+ * `together()` followed by reduction to lowest terms.
+ *
+ * `together()` folds over the *product* of the denominators, so its result is
+ * correct but not reduced: `1/x + 1/x^2` → `(x^2 + x)/(x·x^2)`. Dividing
+ * through by the numerator/denominator GCD both reduces the fraction and
+ * yields the LCD (product / gcd **is** the LCD), so no separate LCD pass is
+ * needed.
+ *
+ * Used by the `Together` **operator** only. The same-denominator simplify rule
+ * calls `together()` directly and deliberately keeps the unreduced result: it
+ * runs inside the simplify fixpoint, where output stability and cost matter
+ * more than presentation.
+ *
+ * IMPORTANT: does not call `.simplify()` — `cancelCommonFactors` is itself
+ * reachable from simplification rules.
+ */
+export function togetherReduced(op: Expression): Expression {
+  const t = together(op);
+  if (!isFunction(t, 'Divide')) return t;
+
+  const vars = [...new Set([...t.op1.unknowns, ...t.op2.unknowns])];
+  if (vars.length === 0) return t;
+
+  const reduced = cancelCommonFactors(t, vars[0]);
+  return reduced;
 }
 
 /**

@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
 
 function expr(s: string) {
@@ -2077,5 +2078,158 @@ describe('rational and absolute-value equations', () => {
   test('2|x| − |x−1| = 0 → x = 1/3, −1', () => {
     const result = expr('2|x| - |x-1| = 0').solve('x')?.map((x) => x.json);
     expect(result).toEqual([['Rational', 1, 3], -1]);
+  });
+});
+
+// A lazy operator holds its equation and takes only `.canonical`, which binds
+// structure without resolving values. Two kinds of operand were therefore
+// opaque to the solver, and `Solve` answered `[]` — which by contract means
+// "proven no solutions", so these were silent wrong answers rather than
+// visible inertness.
+describe('Solve sees through user functions and bound symbols', () => {
+  test('an equation built from a user-defined function', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.parse('t \\mapsto t^2 - 4'));
+    const r = ce.box(['Solve', ['Equal', ['g', 'x'], 0], 'x']).evaluate();
+    expect(r.toString()).toBe('[2,-2]');
+  });
+
+  test('a symbol whose value contains the unknown', () => {
+    // `s` hides `w`: the equation `s = 2` has no `w` in it syntactically.
+    const ce = new ComputeEngine();
+    ce.assign('s', ce.parse('\\frac{9-w^2}{4}'));
+    const r = ce.box(['Solve', ['Equal', 's', 2], 'w']).evaluate();
+    expect(r.toString()).toBe('[1,-1]');
+  });
+
+  test('a transformer nested inside the equation', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Solve', ['Equal', ['Simplify', ['Divide', ['Subtract', ['Power', 'x', 2], 1], ['Subtract', 'x', 1]]], 3], 'x'])
+      .evaluate();
+    expect(r.toString()).toBe('[2]');
+  });
+
+  // The unknown must never be substituted, even when it has a value: that is
+  // why the reduction is structural (`.subs` on the lambda body, `.value` on a
+  // binding) and never `.evaluate()`.
+  test('an assigned unknown is still solved for symbolically', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    expect(
+      ce.box(['Solve', ['Equal', ['Subtract', 'x', 2], 0], 'x']).evaluate().toString()
+    ).toBe('[2]');
+
+    ce.assign('g', ce.parse('t \\mapsto t^2 - 4'));
+    expect(
+      ce.box(['Solve', ['Equal', ['g', 'x'], 0], 'x']).evaluate().toString()
+    ).toBe('[2,-2]');
+  });
+
+  test('a recursive definition inlines one level and terminates', () => {
+    // Declare before assigning, so the self-reference in the body resolves.
+    const ce = new ComputeEngine();
+    ce.declare('f', 'function');
+    ce.assign('f', ce.parse('n \\mapsto n \\cdot f(n-1)'));
+    // Inlining walks into the body, which calls `f` again: the expansion must
+    // stop rather than recurse forever. The value is uninteresting here; that
+    // the call returns at all is the assertion.
+    expect(() =>
+      ce.box(['Solve', ['Equal', ['f', 'x'], 0], 'x']).evaluate()
+    ).not.toThrow();
+  });
+
+  test('sibling calls to the same function both inline', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.parse('t \\mapsto t^2 - 4'));
+    expect(
+      ce.box(['Simplify', ['Add', ['g', 'a'], ['g', 'b']]]).evaluate().toString()
+    ).toBe('a^2 + b^2 - 8');
+  });
+
+  // Inlining is capture-avoiding: `subs` is not binder-aware, so an argument
+  // whose symbol collides with a binder inside the body (here the `Sum` index
+  // `k`) must NOT be blindly substituted into the binder's scope. `g(k)` would
+  // corrupt to `∑_{k=1}^{3} k·k` (= 14) instead of the correct `6k`; the
+  // inliner declines and leaves the application opaque. A non-colliding
+  // argument still inlines.
+  test('inlining does not capture an argument under an inner binder', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.parse('x \\mapsto \\sum_{k=1}^{3} x \\cdot k'));
+    // `k` collides with the Sum index: decline rather than corrupt.
+    expect(ce.box(['Simplify', ['g', 'k']]).evaluate().toString()).toBe('g(k)');
+    // `a` is free of any binder in the body: inlines correctly to 6a.
+    expect(ce.box(['Simplify', ['g', 'a']]).evaluate().toString()).toBe('6a');
+  });
+});
+
+// Indexing into a computed list hid the unknown the same way a value-bound
+// symbol did: `Solve(roots[1] = 5, Y)` saw an opaque `At(…)` with no `Y` in it
+// and returned `[]` — "proven no solutions".
+describe('Solve sees through list indexing', () => {
+  test('projects At(List(…), k) structurally', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Solve', ['Equal', ['At', ['List', 'Y', 2], 1], 5], 'Y']).evaluate().toString()
+    ).toBe('[5]');
+  });
+
+  test('a negative index counts from the end', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Solve', ['Equal', ['At', ['List', 2, 'Y'], -1], 5], 'Y']).evaluate().toString()
+    ).toBe('[5]');
+  });
+
+  test('an index that selects no unknown still reports none', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Solve', ['Equal', ['At', ['List', 'Y', 2], 2], 5], 'Y']).evaluate().toString()
+    ).toBe('[]');
+  });
+
+  // Projection, never evaluation: `At([Y, 2], 1).evaluate()` is `5` when
+  // `Y := 5`, which inside a held equation would replace the unknown.
+  test('does not substitute a value for the unknown', () => {
+    const ce = new ComputeEngine();
+    ce.assign('Y', 99);
+    expect(
+      ce.box(['Solve', ['Equal', ['At', ['List', 'Y', 2], 1], 5], 'Y']).evaluate().toString()
+    ).toBe('[5]');
+  });
+
+  test.each([
+    ['a symbolic list', ['At', 'L', 1]],
+    ['a symbolic index', ['At', ['List', 'Y', 2], 'k']],
+  ])('leaves %s alone', (_label, at) => {
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.box(['Solve', ['Equal', at as any, 5], 'Y']).evaluate()
+    ).not.toThrow();
+  });
+});
+
+// A transformer nested in a Solve equation resolves bound symbols with no
+// protected set, so it would substitute an unknown that also carries a global
+// value — `Solve(Simplify(x-2)=0, x)` with `x:=5` became `Solve(1=0,x)` → [].
+// The unknown is shielded (renamed to a fresh symbol) across transformer
+// reduction.
+describe('Solve shields a value-bound unknown from a nested transformer', () => {
+  test('Solve(Simplify(x-2)==0, x) with x:=5', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    expect(
+      ce.box(['Solve', ['Equal', ['Simplify', ['Subtract', 'x', 2]], 0], 'x']).evaluate().toString()
+    ).toBe('[2]');
+  });
+
+  // The complementary case must keep working: a bound symbol that is NOT the
+  // unknown is still resolved (it brings the unknown into the equation).
+  test('a nested transformer still resolves a non-unknown bound symbol', () => {
+    const ce = new ComputeEngine();
+    ce.assign('s', ce.parse('\\frac{9-w^2}{4}'));
+    expect(
+      ce.box(['Solve', ['Equal', ['Simplify', 's'], 2], 'w']).evaluate().toString()
+    ).toBe('[1,-1]');
   });
 });

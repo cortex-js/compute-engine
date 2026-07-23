@@ -744,8 +744,32 @@ function delimiter(
   return `${open}${items.map((x) => serialize(x)).join(separator)}${close}`;
 }
 
+/**
+ * Whether `s` is a single parenthesized group, i.e. its leading `(` is closed
+ * by its trailing `)`.
+ *
+ * A `/^\(.+\)$/` test is not enough: `(x + 1) * (x^2 - 1)` starts with `(` and
+ * ends with `)` yet is two groups joined by an operator. Treating it as already
+ * wrapped dropped the parentheses a lower-precedence context needed, so
+ * `Divide(1, (x+1)(x^2-1))` printed as `1 / (x + 1) * (x^2 - 1)` — which reads
+ * back as `(1/(x+1))·(x^2-1)`.
+ */
+function isParenthesizedGroup(s: string): boolean {
+  if (s.length < 2 || !s.startsWith('(') || !s.endsWith(')')) return false;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '(') depth += 1;
+    else if (s[i] === ')') {
+      depth -= 1;
+      // The opening parenthesis closed before the end: not a single group.
+      if (depth === 0 && i < s.length - 1) return false;
+    }
+  }
+  return depth === 0;
+}
+
 function wrap(s: string, precedence = 0, target = -1): string {
-  if (precedence > target && !/^\(.+\)$/.test(s)) return `(${s})`;
+  if (precedence > target && !isParenthesizedGroup(s)) return `(${s})`;
   return s;
 }
 

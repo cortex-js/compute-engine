@@ -18,6 +18,7 @@ import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import { functionLiteralParameterName } from './function-literal.js';
 
 /**
  * Check if an expression contains symbolic transcendental functions of constants
@@ -178,8 +179,349 @@ const TRANSFORMER_HEADS = new Set([
  * call. Any other expression is returned unchanged.
  */
 export function reduceTransformerHead(expr: Expression): Expression {
-  if (!TRANSFORMER_HEADS.has(expr.operator)) return expr;
-  return expr.evaluate();
+  return reduceTransformerHeads(inlineLambdaApplications(expr));
+}
+
+/**
+ * Reduce transformer heads anywhere in `expr`, not only at its root: in
+ * `Solve(Simplify(u) = 2, w)` the transformer sits inside the `Equal`, so a
+ * root-only check left it opaque and the solve returned `[]`.
+ *
+ * Recursing is safe for exactly this set — every member rewrites its operand
+ * without resolving assigned symbol values, so the unknown survives. That is
+ * why `Evaluate`/`N`/`ReplaceAll` are not members.
+ */
+function reduceTransformerHeads(expr: Expression): Expression {
+  if (TRANSFORMER_HEADS.has(expr.operator)) return expr.evaluate();
+  if (!isFunction(expr)) return expr;
+
+  const ops = expr.ops;
+  const reduced = ops.map(reduceTransformerHeads);
+  if (reduced.every((op, i) => op === ops[i])) return expr;
+  return expr.engine.function(expr.operator, reduced);
+}
+
+/**
+ * Beta-reduce one application of a user-defined function, or `undefined` if
+ * `call` is not such an application.
+ *
+ * Substitution is **structural** (`.subs` on the lambda body), never
+ * `.evaluate()`. Evaluating the call would resolve assigned symbol values —
+ * with `x` assigned `5`, `g(x).evaluate()` is `21`, which would turn
+ * `Solve(g(x) = 0, x)` into `Solve(21 = 0, x)`. Beta-reduction substitutes the
+ * function *body*, so it never touches the unknown.
+ */
+function betaReduceLambda(call: Expression): Expression | undefined {
+  if (!isFunction(call)) return undefined;
+
+  const def = call.operatorDefinition as
+    | (BoxedOperatorDefinition & {
+        _isLambda?: boolean;
+        _lambdaLiteral?: Expression;
+      })
+    | undefined;
+  if (!def?._isLambda) return undefined;
+
+  const literal = def._lambdaLiteral;
+  if (!literal || !isFunction(literal, 'Function')) return undefined;
+
+  // `Function(body, param₁, …)`. Decline on an arity mismatch: that is the
+  // broadcast/partial-application path, which has its own semantics.
+  const params = literal.ops.slice(1);
+  if (params.length === 0 || params.length !== call.nops) return undefined;
+
+  const substitution: Record<string, Expression> = {};
+  for (let i = 0; i < params.length; i++) {
+    // `functionLiteralParameterName` unwraps a `Typed(x, type)` parameter, so
+    // a typed function literal (`(x: real) ↦ …`) inlines like a bare one.
+    const name = functionLiteralParameterName(params[i]);
+    if (!name) return undefined;
+    substitution[name] = call.ops[i];
+  }
+
+  // Canonicalization wraps a lambda body in a `Block`. A single-statement
+  // block is just its statement; a multi-statement body is declined — inlining
+  // it would need the block's sequencing and local-scope semantics.
+  let body = literal.op1;
+  if (isFunction(body, 'Block')) {
+    if (body.nops !== 1) return undefined;
+    body = body.op1;
+  }
+
+  // `subs` is NOT binder-aware (unlike `resolveBoundSymbols` below): it rewrites
+  // through inner `Function`/`Block`/`Sum`/… binders blindly. Inlining is only
+  // capture-safe when no substituted parameter name is rebound by a binder
+  // inside the body, and no argument introduces a symbol that such a binder
+  // would capture. When either could happen, decline (leave the application
+  // opaque) — value-safe, and strictly better than silently corrupting.
+  const binders = collectBinderNames(body);
+  if (binders.size > 0) {
+    for (const name of Object.keys(substitution)) {
+      if (binders.has(name)) return undefined;
+      for (const s of substitution[name].symbols)
+        if (binders.has(s)) return undefined;
+    }
+  }
+
+  return body.subs(substitution);
+}
+
+/** Every name bound by a binder anywhere within `expr` (its own bound names
+ * plus those of every descendant), used to keep lambda inlining capture-safe. */
+function collectBinderNames(
+  expr: Expression,
+  acc: Set<string> = new Set()
+): Set<string> {
+  if (!isFunction(expr)) return acc;
+  for (const n of boundVariableNames(expr)) acc.add(n);
+  for (const op of expr.ops) collectBinderNames(op, acc);
+  return acc;
+}
+
+/**
+ * Inline applications of user-defined functions throughout `expr`.
+ *
+ * A lazy operator holds its expression operand and takes only `.canonical`,
+ * which binds structure without substituting values. A call to a user-defined
+ * function therefore arrived as an opaque node that the algorithm could not
+ * see into: `Simplify(g(a))` returned `g(a)`, `Integrate(g(t), t)` stayed
+ * inert, and — worst — `Solve(g(x) = 0, x)` returned `[]`, which by contract
+ * means "proven no solutions".
+ *
+ * `budget` bounds the TOTAL number of beta-reductions so a self-recursive
+ * definition (`fact(n) = … fact(n - 1) …`) cannot loop forever, while a finite
+ * self-composition (`g(g(x))` for a non-recursive `g`) still fully expands — an
+ * on-path name guard would wrongly stop the inner `g(x)`, leaving `Solve` an
+ * opaque `g(x)` it reads as "no solutions". `budget` is a single object shared
+ * by reference across every branch of the traversal, so it is one global cap on
+ * the TOTAL number of beta-reductions in the whole tree — sibling calls
+ * (`g(a) + g(b)`) draw down the same counter rather than each getting a fresh
+ * budget. That shared cap is what bounds a self-recursive definition.
+ */
+// Generous enough that no realistic expression (a wide system of many function
+// calls) is capped, low enough that a self-recursive definition terminates
+// quickly. Only genuine runaway recursion reaches it.
+const MAX_LAMBDA_INLINE = 1000;
+
+function inlineLambdaApplications(
+  expr: Expression,
+  budget: { n: number } = { n: MAX_LAMBDA_INLINE }
+): Expression {
+  if (!isFunction(expr)) return expr;
+
+  if (budget.n > 0) {
+    const reduced = betaReduceLambda(expr);
+    if (reduced !== undefined) {
+      budget.n -= 1;
+      return inlineLambdaApplications(reduced, budget);
+    }
+  }
+
+  const ops = expr.ops;
+  const inlined = ops.map((op) => inlineLambdaApplications(op, budget));
+  if (inlined.every((op, i) => op === ops[i])) return expr;
+  return expr.engine.function(expr.operator, inlined);
+}
+
+/**
+ * Replace symbols bound to a value by that value, except for the names in
+ * `protect`.
+ *
+ * A symbol whose value *contains* the unknown hides it from the solver:
+ * `Solve(s = 2, w)` with `s := (9 - w²)/4` saw an equation with no `w` in it
+ * and returned `[]` — which by contract means "proven no solutions". A
+ * coefficient symbol was already resolved further down the pipeline; only a
+ * binding that conceals the unknown was mishandled.
+ *
+ * Reads the *stored* value (`.value`), never `.evaluate()`: evaluating would
+ * resolve the unknown inside that value too (with `w := 7`, `s.evaluate()`
+ * would fold `w` away). `protect` holds the unknowns, so the variable being
+ * solved for is never substituted, and `seen` stops a self-referential or
+ * mutually-referential binding from looping.
+ */
+export function resolveBoundSymbols(
+  expr: Expression,
+  protect: ReadonlySet<string>,
+  seen: Set<string> = new Set()
+): Expression {
+  if (isSymbol(expr)) {
+    const name = expr.symbol;
+    if (protect.has(name) || seen.has(name)) return expr;
+    const def = expr.engine.lookupDefinition(name);
+    if (!isValueDef(def)) return expr;
+    const value = def.value.value;
+    if (value === undefined || value === null) return expr;
+    seen.add(name);
+    const resolved = resolveBoundSymbols(value, protect, seen);
+    seen.delete(name);
+    return resolved;
+  }
+
+  if (!isFunction(expr)) return expr;
+
+  // Binder-awareness: a `Function` literal, `Block`, `Sum`, etc. binds its own
+  // variables. Those must NOT be resolved to a same-named GLOBAL value —
+  // `Simplify(x ↦ x + 1)` with `x := 5` must stay `x ↦ x + 1`, not corrupt the
+  // body's bound `x` into `5`. Extend the protected set with the locally-bound
+  // names before descending. (`localScope` covers `Block`/`Sum`/`Product`/…;
+  // a `Function`'s parameters live in its operand slots, not its scope.)
+  const bound = boundVariableNames(expr);
+  const childProtect = bound.length
+    ? new Set([...protect, ...bound])
+    : protect;
+
+  const ops = expr.ops;
+  const resolved = ops.map((op) => resolveBoundSymbols(op, childProtect, seen));
+  if (resolved.every((op, i) => op === ops[i])) return expr;
+  return expr.engine.function(expr.operator, resolved);
+}
+
+/** Names bound by `expr` itself (a binder): its local-scope declarations plus,
+ * for a `Function` literal, its parameter symbols. */
+function boundVariableNames(expr: Expression): string[] {
+  const names: string[] = [];
+  if (expr.localScope?.bindings) names.push(...expr.localScope.bindings.keys());
+  if (isFunction(expr, 'Function'))
+    for (const p of expr.ops.slice(1)) {
+      const n = functionLiteralParameterName(p);
+      if (n) names.push(n);
+    }
+  return names;
+}
+
+/**
+ * Replace `At(List(e₁, …, eₙ), k)` by `e_k` — a purely *structural*
+ * projection, applied recursively.
+ *
+ * The point is to avoid `.evaluate()`. Evaluating an `At` evaluates the picked
+ * element too, which substitutes assigned symbol values: with `Y := 5`,
+ * `At([Y, 2], 1).evaluate()` is `5`. Inside a held `Solve` equation that would
+ * replace the very unknown being solved for. Projection just hands back the
+ * operand.
+ *
+ * Without this, indexing into a computed list hid the unknown from the solver
+ * exactly as a value-bound symbol did — `Solve(At([Y, 2], 1) = 5, Y)` returned
+ * `[]`, i.e. "proven no solutions".
+ *
+ * Only a literal `List` with a literal integer index in range is reduced;
+ * indices are 1-based and a negative index counts from the end, matching `At`.
+ */
+export function reduceStructuralIndex(expr: Expression): Expression {
+  if (!isFunction(expr)) return expr;
+
+  const ops = expr.ops;
+  const reduced = ops.map(reduceStructuralIndex);
+  const self = reduced.every((op, i) => op === ops[i])
+    ? expr
+    : expr.engine.function(expr.operator, reduced);
+
+  if (!isFunction(self, 'At') || self.nops !== 2) return self;
+
+  const list = self.op1;
+  if (!isFunction(list, 'List')) return self;
+
+  const index = self.op2;
+  if (!isNumber(index)) return self;
+  // A complex index (`1 + 2i`) is not a valid list position: decline rather
+  // than silently projecting on its real part.
+  if (index.im !== 0) return self;
+  const k = index.re;
+  if (!Number.isInteger(k) || k === 0) return self;
+
+  const n = list.nops;
+  const i = k > 0 ? k : n + k + 1;
+  if (i < 1 || i > n) return self;
+
+  return list.ops[i - 1];
+}
+
+/**
+ * Heads that *produce* the expression a transformer is meant to rewrite, and
+ * so must be reduced when they appear as a transformer's held operand.
+ *
+ * `Expand(ReplaceAll(e, x -> a + 1))` means "expand the substituted
+ * expression", not "expand a `ReplaceAll` call". The transformers are `lazy`
+ * and only take `.canonical` of their operand, so an unreduced producer head
+ * reached `expand`/`factor`/`together`, which found no polynomial structure
+ * and silently returned it unchanged.
+ *
+ * Deliberately a *different* set from `TRANSFORMER_HEADS`: that one is reduced
+ * by the structural algorithms (`Solve`, `Integrate`, `Limit`), which must not
+ * substitute assigned symbol values — `ReplaceAll`'s handler ends in
+ * `.evaluate()` and does exactly that, which would replace the very unknown
+ * being solved for. A transformer is asked to rewrite a concrete expression
+ * and has no such constraint.
+ */
+const TRANSFORMER_OPERAND_HEADS = new Set([
+  ...TRANSFORMER_HEADS,
+  'ReplaceAll',
+]);
+
+/**
+ * Reduce the held operand of an expression transformer (`Expand`, `Factor`,
+ * `Together`, `Simplify`, …) so the transformer sees the expression the
+ * operand denotes rather than the call that produces it.
+ *
+ * Applied recursively: a producer head is just as likely to appear *inside*
+ * the operand as at its root (`Expand(ReplaceAll(f, …) - ReplaceAll(g, …))`).
+ * Only the producer subexpressions are evaluated — every other node is left
+ * structurally untouched, so no assigned symbol value is substituted anywhere
+ * else in the operand.
+ *
+ * Applications of user-defined functions are inlined first, so a transformer
+ * can see into `Simplify(g(a))`, and symbols bound to a value are resolved, so
+ * it can see into `Simplify(v)`.
+ *
+ * Resolving bindings here is an *argument*-level operation: an operator
+ * normally evaluates its arguments, and these transformers are `lazy` only to
+ * protect the operand's structure from premature rewriting, not to keep its
+ * values symbolic. `Simplify(v)` with `v := (x²-1)/(x-1)` therefore simplifies
+ * `v`'s value rather than returning `v` unchanged.
+ *
+ * This does **not** make `simplify()` itself value-substituting: `.simplify()`
+ * on an expression is still value-blind (`(a + 2).simplify()` is `a + 2` even
+ * when `a := 5`). Only the operand handed to the operator is resolved.
+ */
+export function reduceTransformerOperand(expr: Expression): Expression {
+  return reduceProducerHeads(
+    reduceStructuralIndex(
+      resolveBoundSymbols(inlineLambdaApplications(expr), EMPTY_NAME_SET)
+    )
+  );
+}
+
+const EMPTY_NAME_SET: ReadonlySet<string> = new Set<string>();
+
+/**
+ * Resolve `expr` to a `List` if it denotes one — inlining a function
+ * application (`F(x,y,z)` → its body) and following a symbol bound to a list
+ * (`let g = […]`) — WITHOUT substituting any scalar values.
+ *
+ * Used by `JacobianMatrix` to decide system-vs-gradient on what the operand
+ * denotes, without resolving the differentiation variables: with `x := 5` and
+ * `g := [x²y, x+y]`, `JacobianMatrix(g, [x,y])` must still differentiate a list
+ * of `x`, not of `5`. Unlike `reduceTransformerOperand`, the list elements are
+ * left exactly as stored.
+ */
+export function resolveToList(expr: Expression): Expression {
+  const inlined = inlineLambdaApplications(expr);
+  if (isFunction(inlined, 'List')) return inlined;
+  if (isSymbol(inlined)) {
+    const def = inlined.engine.lookupDefinition(inlined.symbol);
+    const value = isValueDef(def) ? def.value.value : undefined;
+    if (value !== undefined && isFunction(value, 'List')) return value;
+  }
+  return inlined;
+}
+
+function reduceProducerHeads(expr: Expression): Expression {
+  if (TRANSFORMER_OPERAND_HEADS.has(expr.operator)) return expr.evaluate();
+  if (!isFunction(expr)) return expr;
+
+  const ops = expr.ops;
+  const reduced = ops.map(reduceProducerHeads);
+  if (reduced.every((op, i) => op === ops[i])) return expr;
+  return expr.engine.function(expr.operator, reduced);
 }
 
 export function normalizedUnknownsForSolve(
@@ -214,7 +556,7 @@ export function normalizedUnknownsForSolve(
  *
  */
 export function getLocalVariables(expr: Expression): string[] {
-  if (expr.localScope) return [...expr.localScope?.bindings.keys()];
+  if (expr.localScope?.bindings) return [...expr.localScope.bindings.keys()];
   return [];
 }
 

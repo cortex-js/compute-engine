@@ -355,3 +355,38 @@ describe('BIG OPERATORS', () => {
     expect(check('\\int x^2 \\, dx')).toMatchInlineSnapshot(`int(x^2 dx)`);
   });
 });
+
+// `wrap()` skipped parenthesizing a string that merely started with `(` and
+// ended with `)`. `(x + 1) * (x^2 - 1)` matches that shape without being a
+// single group, so the parentheses a lower-precedence context needed were
+// dropped: `Divide(1, (x+1)(x^2-1))` printed as `1 / (x + 1) * (x^2 - 1)`,
+// which reads back as `(1/(x+1))·(x^2-1)`.
+describe('grouping: operand that is two parenthesized groups', () => {
+  it('parenthesizes a product-of-sums denominator', () => {
+    const e = ce.function('Divide', [
+      ce.parse('1'),
+      ce.function('Multiply', [ce.parse('x+1'), ce.parse('x^2-1')]),
+    ]);
+    expect(e.toString()).toBe('1 / ((x + 1) * (x^2 - 1))');
+  });
+
+  it('round-trips through the parser to the same value', () => {
+    const e = ce.function('Divide', [
+      ce.parse('1'),
+      ce.function('Multiply', [ce.parse('x+1'), ce.parse('x^2-1')]),
+    ]);
+    const at = (x: any) => x.subs({ x: ce.box(3) }).N().re;
+    expect(at(ce.parse(e.toString()))).toBeCloseTo(at(e), 12);
+  });
+
+  it('does not add redundant parentheses to a single group', () => {
+    expect(
+      ce
+        .function('Divide', [
+          ce.parse('1'),
+          ce.function('Multiply', [ce.parse('a'), ce.parse('b')]),
+        ])
+        .toString()
+    ).toBe('1 / (a * b)');
+  });
+});

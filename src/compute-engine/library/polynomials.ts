@@ -1,6 +1,6 @@
 import {
   factorPolynomial,
-  together,
+  togetherReduced,
   partialFraction,
 } from '../boxed-expression/factor.js';
 import { distribute } from '../symbolic/distribute.js';
@@ -16,7 +16,10 @@ import {
 } from '../boxed-expression/polynomials.js';
 import type { SymbolDefinitions } from '../global-types.js';
 import { isFunction, sym } from '../boxed-expression/type-guards.js';
-import { defaultUnknown } from '../boxed-expression/utils.js';
+import {
+  defaultUnknown,
+  reduceTransformerOperand,
+} from '../boxed-expression/utils.js';
 
 export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
   {
@@ -24,7 +27,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       description: 'Expand out products and positive integer powers',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => expand(x.canonical),
+      evaluate: ([x]) => expand(reduceTransformerOperand(x.canonical)),
     },
 
     ExpandAll: {
@@ -32,7 +35,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Recursively expand out products and positive integer powers',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => expandAll(x.canonical),
+      evaluate: ([x]) => expandAll(reduceTransformerOperand(x.canonical)),
     },
 
     Factor: {
@@ -44,16 +47,17 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> value',
       evaluate: ([x, varExpr]) => {
         if (!x) return x;
+        const target = reduceTransformerOperand(x.canonical);
 
         // If variable is provided, use polynomial factoring with that variable
         if (varExpr) {
           const variable = sym(varExpr.canonical);
-          if (!variable) return x.canonical;
-          return factorPolynomial(x.canonical, variable);
+          if (!variable) return target;
+          return factorPolynomial(target, variable);
         }
 
         // Otherwise, try polynomial factoring without specific variable
-        return factorPolynomial(x.canonical);
+        return factorPolynomial(target);
       },
     },
 
@@ -61,14 +65,15 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       description: 'Combine rational expressions into a single fraction',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => together(x.canonical),
+      evaluate: ([x]) => togetherReduced(reduceTransformerOperand(x.canonical)),
     },
 
     Distribute: {
       description: 'Distribute multiplication over addition',
       lazy: true,
       signature: '(value)-> value',
-      evaluate: ([x]) => (!x ? x : distribute(x.canonical)),
+      evaluate: ([x]) =>
+        !x ? x : distribute(reduceTransformerOperand(x.canonical)),
     },
 
     PolynomialDegree: {

@@ -1,6 +1,117 @@
 ## [Unreleased]
 
+### New Features
+
+- **`JacobianMatrix(fs, vars)`** — the matrix of partial derivatives ∂fᵢ/∂xⱼ,
+  one row per function and one column per variable.
+
+  ```js
+  ce.box(['JacobianMatrix', ['List', fs…], ['List', 'x', 'y', 'z']]).evaluate();
+  // → [[∂f₁/∂x, ∂f₁/∂y, ∂f₁/∂z], …]
+  ```
+
+  - `vars` may be **omitted**: the free variables of `fs` are used, in
+    lexicographic order, so the column order is predictable.
+  - A single (non-list) `fs` is the **gradient** case and yields a flat vector
+    `[∂f/∂x₁, …, ∂f/∂xₙ]`, directly usable as one.
+  - `JacobianMatrix(F)` accepts a **bare function** reference: its body is the
+    system and its parameters are the differentiation variables, in declared
+    order (`JacobianMatrix((z,y,x) ↦ …)` has columns z, y, x — an order
+    free-variable inference could not preserve). Explicit variables then rename
+    the parameters.
+  - A square system composes with `Determinant`, which now also reduces under
+    `simplify()` — so `JacobianDeterminant` is one composition away and is not
+    provided separately.
+
+  Beyond brevity this removes a real trap: the obvious hand-rolled form
+  `Map([x,y,z], v |-> D(f, v))` silently returns **zeros**, because the lambda
+  parameter shadows and `D` differentiates with respect to `v`.
+
+  The operands are held — evaluating the variable list would replace a symbol
+  carrying a value (`x := 5`) by that value, leaving nothing to differentiate
+  against. Whether `fs` is a system or a single function is decided on what the
+  operand *denotes*, not its syntax, so a user-defined function returning a
+  list and a symbol bound to a list are both treated as systems.
+
 ### Improvements
+
+- **`simplify()` reaches a distributed form when it is cheaper.** Rules tagged
+  `purpose: 'expand'` are excluded from its scan, because expansion usually
+  grows an expression — but that left `simplify()` unable to reach a strictly
+  *cheaper* result. It was not cost-rejecting the better form; it never
+  generated the candidate.
+
+  ```js
+  const f = ce.parse('(1 + x y)^3 z + y^2 (1 + x y) (4 + 3 x y)');
+  f.subs({ z: ce.parse('-\\frac{3y}{x} + \\frac{2}{x^2}') }).simplify();
+  // Before → unchanged (cost 76)      Now → y^2 + 3y/x + 2/x^2 (cost 27)
+  ```
+
+  `simplify()` now tries expansion once, at the fixpoint, and keeps the result
+  only when the cost function says it is strictly cheaper. That cannot cycle
+  (the inner call has the trial disabled) and cannot blow up (the cost gate is
+  the acceptance test), so a factored form survives: `(x+1)^5`, `(a+b)(c+d)`
+  and `x(y+z)` are all left alone. A structural pre-check keeps the trial off
+  expressions with no product or power for expansion to act on.
+
+- **`simplify()` now evaluates structural operators.** It is rule-driven and
+  ran no operator `evaluate` handler at all, so an operator whose result comes
+  from a handler rather than a rule was handed straight back.
+
+  ```js
+  ce.parse('\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}').simplify();
+  // Before → Determinant(Matrix([[a,b],[c,d]]))    Now → a * d - b * c
+  ```
+
+  The members are a closed list — `Determinant`, `Trace`, `Transpose`,
+  `Length` — chosen by a membership rule: the handler reduces its operands to a
+  closed form determined by their *structure* (a matrix to a scalar, a
+  collection to a measure) rather than rewriting the expression, and the head
+  carries no simplification rule of its own. `Max`/`Min` deliberately fail that
+  rule and are not members: they reduce their operands' *values*, which is
+  evaluation's job.
+
+  **`simplify()` remains value-blind.** With `a := 5`, `(a + 2).simplify()` is
+  still `a + 2`. A structural head whose operands mention a symbol carrying a
+  value is left alone rather than substituting it.
+
+  Operators outside the list are unchanged, so the ordering rule still stands:
+  `evaluate()` then `simplify()`; `simplify()` alone is not a superset.
+
+- **The `Simplify` operator resolves symbols bound to a value.** An operator
+  normally evaluates its arguments; the transformers are `lazy` only to keep
+  the operand's *structure* from being rewritten early, not to keep its values
+  symbolic. This applies to `Expand`, `ExpandAll`, `Factor`, `Together` and
+  `Distribute` as well.
+
+  ```js
+  ce.assign('v', ce.parse('\\frac{x^2-1}{x-1}'));
+  ce.box(['Simplify', 'v']).evaluate();
+  // Before → v      Now → x + 1
+  ```
+
+  This is the operator, not the method: `ce.symbol('v').simplify()` is still
+  `v`, because `.simplify()` is value-blind.
+
+- **`Together` reduces its result to lowest terms.** It folds the terms over
+  the *product* of the denominators, which is correct but not reduced; the
+  result is now divided through by the numerator/denominator GCD. This also
+  yields the least common denominator, since product / gcd **is** the LCD.
+
+  ```js
+  ce.box(['Together', ce.parse('-\\frac{3y}{x}+\\frac{2}{x^2}')]).evaluate();
+  // Before → (-3y * x^2 + 2x) / (x * x^2)    Now → (-3x * y + 2) / x^2
+  ```
+
+  The multivariate case needs Brown's algorithm: the univariate Euclidean GCD
+  treats `y` as an opaque coefficient and reports `1` for that pair.
+  `cancelCommonFactors` now falls back to the multivariate GCD when the
+  univariate one comes back trivial and more than one unknown is present. The
+  order matters — the cheap path runs first, so the common case is unaffected.
+
+  The same-denominator simplification rule still uses the unreduced fold: it
+  runs inside the `simplify()` fixpoint, where output stability and cost matter
+  more than presentation.
 
 - **`CircularIntegrate` (`\oint`) gained an operator definition.** It previously
   had only a parser entry, so it typed as `any` and its limits stayed a raw
@@ -59,6 +170,172 @@
   element-wise, and `Length(At(p, I))` compiles.
 
 ### Bug Fixes
+
+- **Value-resolution overreach in the lazy-operand fixes.** The machinery that
+  lets `Solve`/`Simplify`/`JacobianMatrix` see through a held operand resolved
+  bound symbols too aggressively. Fixed:
+  - `resolveBoundSymbols` is now **binder-aware**: it no longer resolves a
+    variable bound by a `Function`, `Block`, `Sum`, … to a same-named global
+    value (`Simplify(x ↦ x+1)` no longer corrupts the body's bound `x`).
+  - A transformer nested in a `Solve` equation could substitute an unknown that
+    also carries a value — `Solve(Simplify(x-2)=0, x)` with `x:=5` returned `[]`.
+    The unknown is now shielded across transformer reduction.
+  - `JacobianMatrix` differentiated a system in which a diff variable had
+    already been replaced by its global value (`JacobianMatrix(g,[x,y])` with
+    `x:=5`, `g:=[x²y,x+y]` gave a wrong matrix). It now resolves the operand's
+    *shape* without substituting values, and differentiates against a fresh
+    symbol when a diff variable carries a value.
+  - `simplify()` evaluated a structural head's whole operand tree, running an
+    impure descendant — `simplify(Transpose([[Random()]]))` drew a random
+    number. It now declines when the expression is impure.
+
+- **`Distribute` fold, `numeratorDenominator`, `Together`, transformers, and
+  `toString()` grouping** — as previously listed.
+
+- **Beta-reduction completeness.** A finite self-composition (`g(g(x))` for a
+  non-recursive `g`) only inlined one level, so `Solve(g(g(x))=0, x)` returned
+  `[]`; the recursion guard is now a total-count budget that still terminates
+  genuine recursion. Typed function parameters (`(x: real) ↦ …`) are unwrapped,
+  so a typed function inlines like a bare one.
+
+- **`Pipe` (`|>`) declines a non-function right-hand side** (`5 |> 3` stays
+  inert) and its handler now delegates to `apply` instead of duplicating its
+  named-operator path.
+
+- **`Pipe` (`|>`) holds its operands, so `x |> f` behaves exactly like
+  `f(x)`.** It evaluated the topic eagerly, regardless of `f` — which broke a
+  chain whose right-hand side is a *lazy* operator that needs its argument
+  unevaluated. A bare function reference was the sharp case: `F |> JacobianMatrix`
+  passed an evaluated `F`, stripped of its definition, so the Jacobian could
+  not see the map's body.
+
+  ```js
+  // F |> JacobianMatrix |> Determinant |> Simplify
+  ce.assign('F', /* the counterexample map */);
+  // Before → Pipe(Pipe(F, JacobianMatrix), Determinant)   Now → -2
+  ```
+
+  `f` now decides whether the topic is evaluated (a lazy `f` receives it
+  unevaluated). A chained topic — the inner pipe of `a |> g |> f` — is plumbing
+  whose value flows on, so it is evaluated before reaching `f`. Eager stages,
+  lambda right-hand sides, `N()`, and numeric chains are unaffected.
+
+- **Indexing into a computed list hid the unknown from `Solve`.** A held
+  equation containing `At(List(…), k)` was opaque to the solver — it saw no
+  unknown and answered `[]`, which by contract means "proven no solutions".
+  This is the last of the lazy-operand family: `At` is now projected
+  structurally in a held operand.
+
+  ```js
+  ce.box(['Solve', ['Equal', ['At', ['List', 'Y', 2], 1], 5], 'Y']).evaluate();
+  // Before → []      Now → [5]
+  ```
+
+  Projection, never evaluation: with `Y := 99`, `At([Y, 2], 1).evaluate()` is
+  `99`, which inside a held equation would replace the unknown being solved
+  for. Only a literal `List` with a literal in-range index is projected
+  (negative indices count from the end); a symbolic list or index is left
+  alone. The transformers (`Simplify`, `Expand`, …) get the same treatment.
+
+- **`Solve` returned `[]` for an equation it could not see into.** A lazy
+  operator holds its equation and takes only `.canonical`, which binds
+  structure without resolving values, so two kinds of operand stayed opaque:
+  a call to a user-defined function, and a symbol whose value *contains* the
+  unknown. Because `[]` means "proven no solutions", these were silent wrong
+  answers rather than visible inertness.
+
+  ```js
+  ce.assign('g', ce.parse('t \\mapsto t^2 - 4'));
+  ce.box(['Solve', ['Equal', ['g', 'x'], 0], 'x']).evaluate();
+  // Before → []      Now → [2, -2]
+
+  ce.assign('s', ce.parse('\\frac{9-w^2}{4}'));   // `s = 2` has no `w` in it
+  ce.box(['Solve', ['Equal', 's', 2], 'w']).evaluate();
+  // Before → []      Now → [1, -1]
+  ```
+
+  A transformer nested inside the equation (rather than at its root) is now
+  reduced too, so `Solve(Simplify(u) = 2, w)` works.
+
+  The unknown is never substituted, even when it has a value: the reduction is
+  structural — `.subs` on the lambda body, `.value` on a binding — never
+  `.evaluate()`. With `x` assigned `5`, `Solve(g(x) = 0, x)` still returns
+  `[2, -2]`. A recursive definition expands one level and stops.
+
+- **Expression transformers ignored a user-defined function in their operand.**
+  Same root cause: `Simplify(g(a))`, `Expand`, `Factor`, `Together` and
+  `Distribute` returned `g(a)` unchanged, and `Integrate(g(t), t)` stayed
+  inert.
+
+  ```js
+  ce.assign('g', ce.parse('t \\mapsto t^2 - 4'));
+  ce.box(['Factor', ['g', 'a']]).evaluate();
+  // Before → g(a)    Now → (a - 2) * (a + 2)
+  ```
+
+  Beta-reduction substitutes the function *body*, so an assigned value for a
+  symbol elsewhere in the operand is still left alone.
+
+- **`Distribute` returned a product where it should return a sum.** The helper
+  recombined the branches of a distributed sum with `Multiply` instead of
+  `Add`, so `(a + b)·c` became `(a·c)·(b·c)`. Every input the operator acted on
+  came back with a different value. The operator had no test coverage, which is
+  why this survived; it is now covered by a numeric oracle.
+
+  ```js
+  ce.box(['Distribute', ce.parse('(a+b)c')]).evaluate();
+  // Before → a * b * c * c      Now → a * c + b * c
+  ```
+
+- **`numeratorDenominator` reported a denominator of `1` for a bare negative
+  power.** Canonical form writes `1/x^2` as `Power(x, -2)`, and the `Power`
+  branch never moved a negative exponent into the denominator. The same factor
+  inside a `Multiply` (`y/x^2`) routes through `Product.asNumeratorDenominator`,
+  which splits on exponent sign and was already correct — so the two disagreed.
+  This also affected the `NumeratorDenominator` operator and `.denominator`.
+  A *symbolic* exponent is still left alone: its sign is not decidable there.
+
+  ```js
+  ce.parse('\\frac{1}{x^2}').numeratorDenominator;
+  // Before → [x^(-2), 1]        Now → [1, x^2]
+  ```
+
+- **`Together` dropped denominators written as negative powers.** It treated
+  only a `Divide` node as carrying a denominator, so such terms were folded
+  into the numerator and the combined fraction kept negative powers.
+
+  ```js
+  ce.box(['Together', ce.parse('\\frac{1}{x}+\\frac{1}{x^2}')]).evaluate();
+  // Before → (x * x^(-2) + 1) / x    Now → (x + 1) / x^2
+  ```
+
+- **Expression transformers ignored a `ReplaceAll` in their operand.**
+  `Expand`, `ExpandAll`, `Factor`, `Together`, `Distribute` and `Simplify` are
+  lazy and took only `.canonical` of their held operand, so a `ReplaceAll`
+  reached them as an unevaluated call with no polynomial structure and was
+  silently returned unchanged. The reduction is recursive, so a producer head
+  nested inside the operand is handled too.
+
+  ```js
+  ce.parse('\\mathrm{Expand}(\\mathrm{ReplaceAll}(x^2+x, x \\to a+1))').evaluate();
+  // Before → ReplaceAll(x^2 + x, To(x, a + 1))    Now → a^2 + 3a + 2
+  ```
+
+  Note this is deliberately a different set from the transformer heads reduced
+  by `Solve`/`Integrate`/`Limit`: `ReplaceAll` ends in `.evaluate()` and so
+  substitutes assigned symbol values, which those algorithms must avoid.
+
+- **`toString()` dropped the parentheses around a product-of-sums
+  denominator**, producing text that reads back as a different expression. The
+  MathJSON and LaTeX serializations were correct throughout; only the ASCII
+  form was affected. The grouping check treated any string starting with `(`
+  and ending with `)` as already parenthesized, which `(x + 1) * (x^2 - 1)`
+  satisfies without being a single group.
+
+  ```js
+  ce.box(['Divide', 1, ['Multiply', ['Add', 'x', 1], ['Add', ['Power','x',2], -1]]]).toString();
+  // Before → 1 / (x + 1) * (x^2 - 1)    Now → 1 / ((x + 1) * (x^2 - 1))
+  ```
 
 - **`Map` now evaluates over a source that only becomes a collection when
   evaluated.** `Map(X - 1, f)` stayed in its unevaluated lazy form while

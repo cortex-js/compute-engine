@@ -4,6 +4,7 @@ import { asSmallInteger } from './numerics.js';
 import { add } from './arithmetic-add.js';
 import { expand } from './expand.js';
 import { multivariateGCD } from './multivariate-gcd.js';
+import { totalDegree } from './polynomial-degree.js';
 import { isNumber, isFunction, isSymbol } from './type-guards.js';
 
 // Re-export degree functions from leaf module (no circular deps)
@@ -790,12 +791,48 @@ export function cancelCommonFactors(
 
   if (numDeg < 0 || denDeg < 0) return expr;
 
-  // Compute GCD
-  const gcd = polynomialGCD(numerator, denominator, variable);
+  // Compute GCD. The univariate Euclidean path treats every other variable as
+  // an opaque coefficient. This misses a genuinely multivariate common factor
+  // in two ways, both requiring a fall back to Brown's multivariate algorithm:
+  //   1. It reports a *trivial* (constant-in-`variable`) GCD for a genuinely
+  //      multivariate pair — `gcd(-3y·x² + 2x, x³)` → 1, real factor `x`.
+  //   2. It returns a *nonconstant-but-incomplete* monic factor that keeps
+  //      `variable` while dropping a pure-coefficient common factor in another
+  //      variable — e.g. `y·(x+1) / (y·(x+1)²)` gives univariate gcd `x+1`,
+  //      missing the shared `y`. Cancelling with it yields `y / (y·(x+1))`,
+  //      which is value-correct but NOT lowest terms.
+  // Ordered univariate-first so the common (cheap) single-unknown path is
+  // unaffected; only pay for the multivariate pass when there are ≥2 unknowns
+  // (`multivariateBinaryGCD` expands both operands before running).
+  let gcd = polynomialGCD(numerator, denominator, variable);
+  const unknowns = new Set([...numerator.unknowns, ...denominator.unknowns]);
+  if (unknowns.size >= 2) {
+    if (polynomialDegree(gcd, variable) <= 0) {
+      // Case 1: univariate GCD is trivial in `variable`.
+      gcd = multivariateBinaryGCD(numerator, denominator) ?? gcd;
+    } else {
+      // Case 2: univariate GCD is nonconstant but may be incomplete. Prefer
+      // the multivariate GCD only when it captures a factor the univariate
+      // result missed: strictly more unknowns, or the same unknowns at a
+      // higher total degree. The exact-remainder guard below rejects any
+      // over-eager `mgcd` that doesn't actually divide, so this is value-safe.
+      const mgcd = multivariateBinaryGCD(numerator, denominator);
+      if (mgcd) {
+        const mUnknowns = mgcd.unknowns.length;
+        const uUnknowns = gcd.unknowns.length;
+        if (
+          mUnknowns > uUnknowns ||
+          (mUnknowns === uUnknowns && totalDegree(mgcd) > totalDegree(gcd))
+        )
+          gcd = mgcd;
+      }
+    }
+  }
 
-  // Check if GCD is trivial (degree 0)
-  const gcdDeg = polynomialDegree(gcd, variable);
-  if (gcdDeg <= 0) return expr;
+  // Check if the GCD is trivial. A multivariate GCD need not involve
+  // `variable` (it may be a factor in another unknown), so "trivial" is
+  // "constant", not "degree 0 in `variable`".
+  if (gcd.unknowns.length === 0) return expr;
 
   // Divide numerator and denominator by GCD
   const numDivResult = polynomialDivide(numerator, gcd, variable);

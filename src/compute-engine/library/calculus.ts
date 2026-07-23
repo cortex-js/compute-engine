@@ -9,6 +9,8 @@ import { checkType } from '../boxed-expression/validate.js';
 import {
   defaultUnknown,
   hasSymbolicTranscendental,
+  resolveToList,
+  isValueDef,
 } from '../boxed-expression/utils.js';
 import {
   isFunction,
@@ -273,6 +275,62 @@ function repairDependentApplications(
   });
   if (!changed) return expr;
   return ce.function(expr.operator, newOps);
+}
+
+/**
+ * If `expr` is a bare reference to a user-defined function (`F`, not `F(…)`),
+ * return its parameter names (the natural differentiation variables, in
+ * declared order) and its body. `undefined` otherwise.
+ *
+ * The parameter *order* is why this beats free-variable inference: the map's
+ * own signature fixes the column order of the Jacobian, with no lexicographic
+ * guess.
+ */
+function lambdaFromLiteral(
+  literal: Expression
+): { params: string[]; body: Expression } | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
+
+  const params = literal.ops.slice(1).map((p) => functionLiteralParameterName(p));
+  if (params.length === 0 || params.some((n) => !n)) return undefined;
+
+  // Canonicalization wraps a lambda body in a `Block`; a single-statement
+  // block is just its statement (a multi-statement body is not a plain system
+  // and is declined).
+  let body = literal.op1;
+  if (isFunction(body, 'Block')) {
+    if (body.nops !== 1) return undefined;
+    body = body.op1;
+  }
+  return { params: params as string[], body };
+}
+
+function bareFunctionLambda(
+  expr: Expression,
+  seen: Set<string> = new Set()
+): { params: string[]; body: Expression } | undefined {
+  // A `Function` literal directly (e.g. the value a pipe resolves `F` to).
+  if (isFunction(expr, 'Function')) return lambdaFromLiteral(expr);
+
+  if (!isSymbol(expr) || seen.has(expr.symbol)) return undefined;
+  seen.add(expr.symbol);
+  const def = expr.engine.lookupDefinition(expr.symbol);
+
+  // A named function: its operator definition holds the lambda literal.
+  const opDef = (def as { operator?: unknown } | undefined)?.operator as
+    | { _isLambda?: boolean; _lambdaLiteral?: Expression }
+    | undefined;
+  if (opDef?._isLambda && opDef._lambdaLiteral)
+    return lambdaFromLiteral(opDef._lambdaLiteral);
+
+  // A value binding. `F |> JacobianMatrix` reaches the handler with `F` bound
+  // as a VALUE whose content is the `Function` literal (or, one level up, the
+  // symbol `F`); a direct call sees the operator definition instead. Follow
+  // either so the pipe and direct forms agree.
+  const value = (def as { value?: { value?: Expression } } | undefined)?.value
+    ?.value;
+  if (value !== undefined) return bareFunctionLambda(value, seen);
+  return undefined;
 }
 
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
@@ -611,6 +669,171 @@ volumes
         const fn =
           (compiled?.run as (x: number) => number) ?? applicableN1(body);
         return new BoxedNumber(engine, centeredDiff8thOrder(fn, xValue));
+      },
+    },
+
+    JacobianMatrix: {
+      description: [
+        'JacobianMatrix(fs, vars): the matrix of partial derivatives',
+        '∂fᵢ/∂xⱼ, one row per function and one column per variable.',
+        '`fs` is a list of expressions. A single (non-list) expression is the',
+        'gradient case: the result is the flat vector [∂f/∂x₁, …, ∂f/∂xₙ].',
+        '`vars` is a list of symbols and may be omitted, in which case the',
+        'free variables of `fs` are used, in lexicographic order.',
+        'Example: JacobianMatrix([x^2 y, x + z], [x, y, z]).',
+      ],
+      keywords: ['jacobian', 'gradient', 'derivative', 'partial derivative'],
+      broadcastable: false,
+
+      // Hold the operands. The variable list must NOT be evaluated: a symbol
+      // carrying a value (`x := 5`) would be replaced by that value, leaving
+      // nothing to differentiate with respect to. Held operands arrive
+      // unbound, so each is canonicalized below before use.
+      lazy: true,
+      signature: '(any, any?) -> value',
+
+      // A system of functions yields a matrix; a single function yields the
+      // gradient vector. Reported from the operand's *shape*, which is
+      // available before evaluation; the element type is left to the value.
+      type: ([fs], { engine: ce }) => {
+        if (!fs) return undefined;
+        // System (matrix) vs gradient (vector) must be decided on what the
+        // operand *denotes* — the same semantic test the evaluate handler
+        // uses. A syntactic `List` check alone typed `JacobianMatrix(F(x,y,z),
+        // …)` for a list-returning user function `F` as a `vector`, so a
+        // directly-nested `Determinant(JacobianMatrix(…))` failed typecheck
+        // (the `let`-bound value path worked, masking it).
+        let operand = fs.canonical;
+        // A bare function reference (`JacobianMatrix(F)`) denotes its body.
+        const lambda = bareFunctionLambda(operand);
+        if (lambda) operand = lambda.body;
+        if (!isFunction(operand, 'List')) {
+          const reduced = resolveToList(operand);
+          if (isFunction(reduced, 'List')) operand = reduced;
+        }
+        return isFunction(operand, 'List')
+          ? ce.type('matrix')
+          : ce.type('vector');
+      },
+
+      evaluate: (ops, { engine: ce }) => {
+        let target = ops[0]?.canonical;
+        if (target === undefined || !target.isValid) return undefined;
+
+        // `JacobianMatrix(F)` / `JacobianMatrix(F, vars)` — a bare function
+        // reference. Its body is the system and its parameters are the default
+        // differentiation variables, in declared order. When explicit `vars`
+        // are also given, rename: substitute the parameters by the given
+        // symbols (an arity mismatch declines).
+        const lambda = bareFunctionLambda(target);
+        let paramDefault: string[] | undefined;
+        if (lambda) {
+          target = lambda.body;
+          paramDefault = lambda.params;
+        }
+
+        // "System or gradient?" must be decided on what the operand *denotes*,
+        // not on its syntax. `JacobianMatrix(F(x,y,z), …)` for a user-defined
+        // `F` returning a list is a system; a purely syntactic `List` check
+        // took the gradient path and produced the TRANSPOSE — invisible to a
+        // determinant test, since det A = det Aᵀ. A `let`-bound list went
+        // inert for the same reason.
+        if (!isFunction(target, 'List')) {
+          // Resolve to a `List` WITHOUT substituting scalar values — the
+          // differentiation variables must survive (see `resolveToList`). A
+          // syntactic `List` check alone typed `JacobianMatrix(F(x,y,z), …)`
+          // for a list-returning `F` as the TRANSPOSE — invisible to a
+          // determinant test, since det A = det Aᵀ.
+          const reduced = resolveToList(target);
+          if (isFunction(reduced, 'List')) target = reduced;
+        }
+
+        // A `List` operand is a system of functions; anything else is a single
+        // scalar function (the gradient case).
+        const isSystem = isFunction(target, 'List');
+        let fs = isFunction(target, 'List') ? [...target.ops] : [target];
+        if (fs.length === 0) return undefined;
+
+        // Runtime gate (the static type cannot refute these): every entry must
+        // be a scalar expression, not a nested collection.
+        if (fs.some((f) => !f.isValid || f.isCollection === true))
+          return undefined;
+
+        // Variables: the explicit list; else a bare function's parameters (in
+        // declared order); else the free variables of `fs`, lexicographically.
+        let names: string[];
+        const varsOp = ops[1]?.canonical;
+        if (varsOp !== undefined) {
+          const items = isFunction(varsOp, 'List') ? varsOp.ops : [varsOp];
+          const syms = items.map((v) => sym(v));
+          if (syms.some((n) => n === undefined)) return undefined;
+          names = syms as string[];
+          // Rename a bare function's parameters to the given variables.
+          if (paramDefault) {
+            if (paramDefault.length !== names.length) return undefined;
+            const rename = Object.fromEntries(
+              paramDefault.map((p, i) => [p, ce.symbol(names[i])])
+            );
+            fs = fs.map((f) => f.subs(rename));
+          }
+        } else if (paramDefault) {
+          names = paramDefault;
+        } else {
+          const free = new Set<string>();
+          for (const f of fs) for (const n of f.unknowns) free.add(n);
+          // Lexicographic, so the column order is predictable and stable.
+          names = [...free].sort();
+        }
+        if (names.length === 0) return undefined;
+
+        // A differentiation variable that ALSO carries a global value (`x := 5`
+        // then differentiate w.r.t. `x`) is contradictory: evaluating `D(x²y,
+        // x)` would substitute `5` and yield a wrong derivative. Differentiate
+        // against a fresh unbound symbol in that case, then rename back. Only
+        // the offending variables are renamed, so the common case is untouched.
+        const boundNames = names.filter((n) => {
+          const def = ce.lookupDefinition(n);
+          return isValueDef(def) && def.value.value !== undefined;
+        });
+        const rename = new Map<string, string>();
+        for (const n of boundNames) {
+          let fresh = `__jac_${n}`;
+          while (ce.lookupDefinition(fresh) !== undefined) fresh = `_${fresh}`;
+          rename.set(n, fresh);
+        }
+        const forward = (e: Expression) =>
+          rename.size === 0
+            ? e
+            : e.subs(
+                Object.fromEntries(
+                  [...rename].map(([a, b]) => [a, ce.symbol(b)])
+                )
+              );
+        const back = (e: Expression) =>
+          rename.size === 0
+            ? e
+            : e.subs(
+                Object.fromEntries(
+                  [...rename].map(([a, b]) => [b, ce.symbol(a)])
+                )
+              );
+
+        const row = (f: Expression): Expression[] => {
+          const rf = forward(f);
+          return names.map((n) =>
+            back(
+              ce.function('D', [rf, ce.symbol(rename.get(n) ?? n)]).evaluate()
+            )
+          );
+        };
+
+        // Gradient: a flat vector, directly usable as one. A system: a matrix,
+        // which `Determinant` accepts when it is square.
+        if (!isSystem) return ce.function('List', row(fs[0]));
+        return ce.function(
+          'List',
+          fs.map((f) => ce.function('List', row(f)))
+        );
       },
     },
 

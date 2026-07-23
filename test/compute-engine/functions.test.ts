@@ -203,6 +203,41 @@ describe('Pipe', () => {
       Math.sin(5),
       10
     ));
+
+  // `x |> f` must behave exactly like `f(x)`, so a LAZY `f` receives `x`
+  // unevaluated — Pipe holds its operands. Evaluating `x` eagerly stripped a
+  // bare function reference of its definition, so `Pipe(F, JacobianMatrix)`
+  // could not see F's body.
+  test('a lazy right-hand side receives its argument unevaluated', () => {
+    const ce = new ComputeEngine();
+    ce.assign('F', ce.parse('(x, y, z) \\mapsto \\lbrack x^2 y, x + z, y\\rbrack'));
+    const piped = ce.box(['Pipe', 'F', 'JacobianMatrix']).evaluate();
+    const direct = ce.function('JacobianMatrix', [ce.symbol('F')]).evaluate();
+    expect(piped.isSame(direct)).toBe(true);
+  });
+
+  test('a chain ending in a lazy stage reduces fully', () => {
+    const ce = new ComputeEngine();
+    ce.assign('F', ce.parse('(x, y, z) \\mapsto \\lbrack x^2 y, x + z, y\\rbrack'));
+    // F |> JacobianMatrix |> Determinant |> Simplify
+    const chain = ce.box([
+      'Pipe',
+      ['Pipe', ['Pipe', 'F', 'JacobianMatrix'], 'Determinant'],
+      'Simplify',
+    ]);
+    expect(chain.evaluate().toString()).toBe('-2x * y');
+  });
+
+  test('a chained topic is evaluated before a lazy stage', () =>
+    // Pipe(Pipe([[a,b],[c,d]], Determinant), Simplify) — the inner pipe is a
+    // value that must reach Simplify evaluated.
+    expect(
+      evaluate([
+        'Pipe',
+        ['Pipe', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']], 'Determinant'],
+        'Simplify',
+      ])
+    ).toMatchInlineSnapshot(`["Subtract", ["Multiply", "a", "d"], ["Multiply", "b", "c"]]`));
 });
 
 describe('Argument Evaluation', () => {

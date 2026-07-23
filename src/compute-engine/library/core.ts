@@ -58,7 +58,11 @@ import type {
 import type { Type } from '../../common/type/types.js';
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
-import { isDictionary, isValueDef } from '../boxed-expression/utils.js';
+import {
+  isDictionary,
+  isValueDef,
+  reduceTransformerOperand,
+} from '../boxed-expression/utils.js';
 import {
   isNumber,
   isSymbol,
@@ -567,10 +571,44 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Pipe: {
       description:
         'Apply a function to a value: `Pipe(x, f)` evaluates to `f(x)`.',
+      // Hold the operands. `x |> f` must behave exactly like `f(x)`, so it is
+      // `f` that decides whether `x` is evaluated: a lazy `f` (`Solve`,
+      // `Simplify`, `JacobianMatrix`, …) needs `x` unevaluated. Evaluating `x`
+      // eagerly here broke `F |> JacobianMatrix` — a bare function `F` came
+      // through stripped of its definition.
+      lazy: true,
       signature: '(value, function) -> unknown',
-      type: ([_x, f]) => functionResult(f.type.type) ?? 'unknown',
-      evaluate: (ops, { numericApproximation }) => {
-        const result = apply(ops[1], [ops[0]]);
+      type: ([_x, f]) => (f ? functionResult(f.type.type) ?? 'unknown' : undefined),
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length !== 2) return ce._fn('Pipe', checkArity(ce, ops, 2));
+        return ce._fn('Pipe', ops);
+      },
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        // The held operands arrive UNBOUND; `.canonical` binds their operator
+        // definitions (without substituting values). Canonicalizing keeps a
+        // bare function reference intact — it is *evaluation*, not binding,
+        // that strips it.
+        let x = ops[0]?.canonical;
+        const f = ops[1]?.canonical;
+        if (x === undefined || f === undefined) return undefined;
+
+        // A chained topic (`a |> g |> f` parses to `Pipe(Pipe(a, g), f)`) is
+        // plumbing: the inner pipe is `g(a)`, whose VALUE flows on. Evaluate it
+        // before handing it to `f`, so a lazy `f` (e.g. a trailing `Simplify`)
+        // receives that value rather than an unreduced `Pipe`. A non-`Pipe`
+        // topic — a bare function `F`, or `x^2 - 1` — is passed as-is, letting
+        // `f` decide whether to evaluate it.
+        if (isFunction(x, 'Pipe')) x = x.evaluate({ numericApproximation });
+
+        // The right operand must be applicable. A literal number is not a
+        // function — decline (`5 |> 3` stays inert) rather than treating it as
+        // a constant nullary. `apply` then handles the rest: a named-operator
+        // symbol goes through `ce.function(f, [x]).evaluate()` (respecting its
+        // hold semantics), a `Function` literal is beta-reduced, and any other
+        // applicable expression is applied.
+        if (isNumber(f)) return undefined;
+        const result = apply(f, [x]);
+
         if (!numericApproximation) return result;
         // Mirror `Apply`: under N(), numericize the applied result unless it
         // stayed symbolic as an `Apply` expression (re-entering N() there
@@ -1118,8 +1156,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return ce._fn('Simplify', ops);
       },
       evaluate: (ops, { engine: ce }) => {
-        const x = ops[0];
-        if (x === undefined) return undefined;
+        const raw = ops[0];
+        if (raw === undefined) return undefined;
+        // `Simplify(ReplaceAll(e, …))` means "simplify the substituted
+        // expression": reduce a producer head before simplifying. The held
+        // operand arrives UNBOUND, so `.canonical` first — `.evaluate()` on an
+        // unbound expression does not resolve its operator definition.
+        const x = reduceTransformerOperand(raw.canonical);
         const assumptions = ops[1];
         if (assumptions === undefined) return x.simplify() ?? undefined;
         // A `List`/`And`/`Set` bundles several assumptions; a bare predicate is

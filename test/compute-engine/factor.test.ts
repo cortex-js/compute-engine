@@ -12,6 +12,7 @@ import {
   factorByRationalRoots,
   together,
 } from '../../src/compute-engine/boxed-expression/factor';
+import { cancelCommonFactors } from '../../src/compute-engine/boxed-expression/polynomials';
 
 const ce = new ComputeEngine();
 
@@ -738,5 +739,133 @@ describe('together() common-denominator fold', () => {
   test('a sum with no denominators is returned unchanged', () => {
     const e = parse('x + y');
     expect(together(e).isSame(e)).toBe(true);
+  });
+});
+
+// `numeratorDenominator` split a *bare* negative power incorrectly: `1/x^2`
+// canonicalizes to `Power(x, -2)`, whose `Power` branch returned
+// `[x^-2, 1]` — a denominator of 1. The same factor inside a `Multiply`
+// (`y/x^2`) routes through `Product.asNumeratorDenominator`, which splits on
+// exponent sign and correctly reported `x^2`, so the two disagreed. This also
+// leaked to the public `NumeratorDenominator` operator and `.denominator`.
+describe('numeratorDenominator: bare negative power', () => {
+  test.each([
+    ['\\frac{1}{x^2}', '1', 'x^2'],
+    ['x^{-2}', '1', 'x^2'],
+    ['\\frac{1}{(x+1)^2}', '1', '(x + 1)^2'],
+  ])('%s → [%s, %s]', (latex, num, den) => {
+    const [n, d] = parse(latex).numeratorDenominator;
+    expect(n.toString()).toBe(num);
+    expect(d.toString()).toBe(den);
+  });
+
+  test('agrees with the Multiply path', () => {
+    // `y/x^2` (a Multiply) already reported `x^2`; `1/x^2` must agree.
+    expect(parse('x^{-2}y').denominator.toString()).toBe('x^2');
+    expect(parse('x^{-2}').denominator.toString()).toBe('x^2');
+  });
+
+  test('a symbolic exponent is left alone (sign not decidable)', () => {
+    const [n, d] = parse('x^{-n}').numeratorDenominator;
+    expect(d.toString()).toBe('1');
+    expect(n.toString()).toBe('x^(-n)');
+  });
+});
+
+// together() only treated a `Divide` node as carrying a denominator, so terms
+// written as negative powers (`1/x^2` → `Power(x, -2)`) were folded into the
+// numerator and the "combined" fraction kept negative powers:
+// `1/x + 1/x^2` → `(x·x^-2 + 1)/x`.
+describe('together(): denominators written as negative powers', () => {
+  test('1/x + 1/x^2 has no negative power in the result', () => {
+    const t = together(parse('\\frac{1}{x} + \\frac{1}{x^2}'));
+    const [n, d] = [t.op1, t.op2];
+    expect(t.operator).toBe('Divide');
+    expect(n.toString()).not.toContain('^(-');
+    expect(d.toString()).not.toContain('^(-');
+  });
+
+  test('the combined fraction is value-preserving', () => {
+    for (const src of [
+      '\\frac{1}{x} + \\frac{1}{x^2}',
+      '-\\frac{3y}{x} + \\frac{2}{x^2}',
+    ]) {
+      const e = parse(src);
+      expect(together(e).sub(e).simplify().isSame(0)).toBe(true);
+    }
+  });
+
+  test('numeric terms are not put over a common denominator', () => {
+    // Splitting `1/2` into [1, 2] here would rewrite every rational
+    // coefficient; Together is only asked to combine symbolic fractions.
+    const t = together(parse('\\frac{1}{2} + x'));
+    expect(t.isSame(parse('\\frac{1}{2} + x'))).toBe(true);
+  });
+});
+
+// The `Together` operator now reduces its result to lowest terms. together()
+// folds over the *product* of the denominators, so `1/x + 1/x^2` gave
+// `(x^2 + x)/(x·x^2)`. Dividing through by the numerator/denominator GCD both
+// reduces the fraction and yields the LCD (product / gcd IS the LCD).
+describe('Together reduces to lowest terms', () => {
+  const T = (latex: string) =>
+    ce.function('Together', [parse(latex)]).evaluate();
+
+  test.each([
+    ['\\frac{1}{x} + \\frac{1}{x^2}', '(x + 1) / x^2'],
+    ['\\frac{1}{x} + \\frac{1}{y}', '(x + y) / (x * y)'],
+    ['\\frac{x}{y} + \\frac{z}{y}', '(x + z) / y'],
+    ['1 + \\frac{1}{k}', '(k + 1) / k'],
+  ])('Together(%s) = %s', (src, expected) => {
+    expect(T(src).toString()).toBe(expected);
+  });
+
+  // The multivariate case: the univariate Euclidean GCD reports 1 here
+  // (it treats `y` as an opaque coefficient); Brown's algorithm finds `x`.
+  test('multivariate: -3y/x + 2/x^2 → (2 - 3xy)/x^2', () => {
+    const t = T('-\\frac{3y}{x} + \\frac{2}{x^2}');
+    expect(t.operator).toBe('Divide');
+    expect(t.op2.toString()).toBe('x^2');
+  });
+
+  test('numeric oracle: reduction preserves the value', () => {
+    const vals = { x: 3, y: 5, z: 7, a: 2, b: 3, c: 5, d: 7, k: 4 };
+    const at = (e: Expression) =>
+      e.subs(
+        Object.fromEntries(Object.entries(vals).map(([s, v]) => [s, ce.box(v)]))
+      ).N().re;
+    for (const src of [
+      '\\frac{1}{x} + \\frac{1}{x^2}',
+      '-\\frac{3y}{x} + \\frac{2}{x^2}',
+      '\\frac{1}{x+1} + \\frac{1}{(x+1)^2}',
+      '\\frac{x}{x^2-1} + \\frac{1}{x+1}',
+      '\\frac{a}{b} + \\frac{c}{d}',
+    ]) {
+      expect(at(T(src))).toBeCloseTo(at(parse(src)), 9);
+    }
+  });
+
+  // The same-denominator simplify rule calls together() directly and must keep
+  // the unreduced result: it runs inside the simplify fixpoint, where output
+  // stability matters more than presentation.
+  test('the bare together() helper is unchanged', () => {
+    expect(together(parse('\\frac{1}{x} + \\frac{1}{x^2}')).toString()).toBe(
+      '(x^2 + x) / (x * x^2)'
+    );
+  });
+});
+
+// Regression: the univariate Euclidean GCD in `x` treats `y` as an opaque
+// coefficient, so for `y·(x+1) / (y·(x+1)²)` it returns the monic, nonconstant
+// `x+1` (degree 1). Dividing by that alone leaves `y / (y·(x+1))` — value-
+// correct but NOT lowest terms. Brown's multivariate algorithm recovers the
+// full common factor `y·(x+1)`, reducing all the way to `1 / (x+1)`.
+describe('cancelCommonFactors: nonconstant-but-incomplete univariate GCD', () => {
+  test('y(x+1)/(y(x+1)^2) reduces to lowest terms 1/(x+1)', () => {
+    const expr = ce.function('Divide', [
+      parse('y(x+1)'),
+      parse('y(x+1)^2'),
+    ]);
+    expect(cancelCommonFactors(expr, 'x').toString()).toBe('1 / (x + 1)');
   });
 });

@@ -759,7 +759,18 @@ export class BoxedFunction
 
     if (operator === 'Power') {
       const [num, denom] = this.op1.numeratorDenominator;
-      return [num.pow(this.op2), denom.pow(this.op2)];
+      // A literal negative exponent belongs in the denominator:
+      // `x^-2` → `[1, x^2]`. Without this a *bare* negative power reported a
+      // denominator of `1`, while the same factor inside a `Multiply` (routed
+      // through `Product.asNumeratorDenominator`, which splits on exponent
+      // sign) reported `x^2` — so `1/x^2` and `y/x^2` disagreed. A symbolic
+      // exponent keeps the old behavior: its sign is not decidable here.
+      const exponent = this.op2;
+      if (isNumber(exponent) && exponent.isNegative === true) {
+        const e = exponent.neg();
+        return [denom.pow(e), num.pow(e)];
+      }
+      return [num.pow(exponent), denom.pow(exponent)];
     }
 
     if (operator === 'Root') {

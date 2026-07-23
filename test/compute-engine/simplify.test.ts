@@ -1679,3 +1679,155 @@ describe('Simplify with assumptions', () => {
     expect(ce.box(['Greater', 'x', 0]).evaluate().symbol).not.toBe('True');
   });
 });
+
+// `simplify()` is rule-driven and used to run no operator `evaluate` handler
+// at all, so an operator whose result comes from a handler rather than a rule
+// was returned untouched: `det [[a,b],[c,d]]` stayed `Determinant(…)` while
+// `evaluate()` gave `ad - bc`. A closed list of *structural* heads — those
+// reducing their operands to a closed form determined by their structure — is
+// now evaluated during simplification.
+describe('simplify() evaluates structural operators', () => {
+  const ce9 = new ComputeEngine();
+
+  test.each([
+    ['\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}', '-b * c + a * d'],
+    ['\\mathrm{Trace}(\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix})', 'a + d'],
+    ['\\mathrm{Length}(\\lbrack a, b, c\\rbrack)', '3'],
+    ['\\mathrm{Transpose}(\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix})', '[[a,c],[b,d]]'],
+  ])('%s simplifies to %s', (latex, expected) => {
+    expect(ce9.parse(latex).simplify().toString()).toBe(expected);
+  });
+
+  // Max/Min reduce their operands' VALUES, not their structure, so they are
+  // deliberately not members: the value fold is evaluation's job.
+  test('Max/Min are left to evaluate()', () => {
+    expect(ce9.parse('\\mathrm{Max}(3, 5)').simplify().operator).toBe('Max');
+    expect(ce9.parse('\\mathrm{Max}(3, 5)').evaluate().toString()).toBe('5');
+  });
+
+  test('the Jacobian determinant of the counterexample map reduces to -2', () => {
+    const ce10 = new ComputeEngine();
+    const f = [
+      '(1 + x y)^3 z + y^2 (1 + x y) (4 + 3 x y)',
+      'y + 3 x (1 + x y)^2 z + 3 x y^2 (4 + 3 x y)',
+      '2 x - 3 x^2 y - x^3 z',
+    ];
+    const rows = f.map((fi) =>
+      ['x', 'y', 'z'].map((v) => ce10.parse(`D_${v}{${fi}}`).evaluate().latex)
+    );
+    const m =
+      '\\begin{bmatrix}' + rows.map((r) => r.join(' & ')).join(' \\\\ ') + '\\end{bmatrix}';
+    expect(ce10.parse(`\\det${m}`).simplify().isSame(-2)).toBe(true);
+  });
+
+  // `simplify()` is value-blind: `(a + 2).simplify()` is `a + 2` even when
+  // `a := 5`. Evaluating a structural head whose operands mention a bound
+  // symbol would substitute that value, so it declines instead.
+  test('declines when an operand mentions a symbol with a value', () => {
+    const ce11 = new ComputeEngine();
+    ce11.assign('a', 5);
+    expect(ce11.parse('a + 2').simplify().toString()).toBe('a + 2');
+    const det = ce11
+      .parse('\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}')
+      .simplify();
+    expect(det.operator).toBe('Determinant');
+  });
+});
+
+// Rules tagged `purpose: 'expand'` are excluded from simplify()'s scan because
+// expansion usually grows an expression. That left simplify() unable to reach a
+// strictly *cheaper* distributed form — it never generated the candidate.
+// `simplify()` now tries expansion once at the fixpoint and keeps the result
+// only when the cost function says it is strictly cheaper.
+describe('simplify(): cost-guarded trial expansion', () => {
+  const ce12 = new ComputeEngine();
+
+  test('reaches the cheaper distributed form', () => {
+    // The case from the Jacobian counterexample: substituting the split-fraction
+    // form of z left simplify() stuck at cost 76, with a cost-27 form available.
+    const f1 = ce12.parse('(1 + x y)^3 z + y^2 (1 + x y) (4 + 3 x y)');
+    const stuck = f1.subs({ z: ce12.parse('-\\frac{3y}{x} + \\frac{2}{x^2}') });
+
+    const before = ce12.costFunction(stuck);
+    const after = stuck.simplify();
+    expect(ce12.costFunction(after)).toBeLessThan(before);
+    expect(after.toString()).toBe('y^2 + (3y) / x + 2 / x^2');
+  });
+
+  test('agrees with the equal-valued single-fraction form', () => {
+    const f1 = ce12.parse('(1 + x y)^3 z + y^2 (1 + x y) (4 + 3 x y)');
+    const viaSplit = f1
+      .subs({ z: ce12.parse('-\\frac{3y}{x} + \\frac{2}{x^2}') })
+      .simplify();
+    const viaDivide = f1
+      .subs({ z: ce12.parse('\\frac{2-3xy}{x^2}') })
+      .simplify();
+    expect(viaSplit.sub(viaDivide).simplify().isSame(0)).toBe(true);
+  });
+
+  // The cost gate is the whole safety story: a factored form must survive,
+  // because expanding it is more expensive, not less.
+  test.each(['(x+1)^2', '(x+1)^5', '(a+b)(c+d)', 'x(y+z)'])(
+    'leaves %s factored',
+    (src) => {
+      const e = ce12.parse(src);
+      const s = e.simplify();
+      expect(ce12.costFunction(s)).toBeLessThanOrEqual(ce12.costFunction(e));
+      expect(s.operator).not.toBe('Add');
+    }
+  );
+
+  test('expands when the expansion really is cheaper', () => {
+    expect(ce12.parse('(x+1)(x-1)').simplify().toString()).toBe('x^2 - 1');
+  });
+
+  test('terminates (the trial cannot nest or cycle)', () => {
+    expect(() =>
+      ce12.parse('((x+1)(x+2) + (y+1)(y+2))^2').simplify()
+    ).not.toThrow();
+  });
+});
+
+// A structural head is evaluated during simplify only when pure — an impure
+// descendant (`Random`) must not run, and simplify() stays value-blind.
+describe('simplify() structural-head evaluation is pure and value-blind', () => {
+  test('does not execute an impure descendant', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Simplify', ['Transpose', ['List', ['List', ['Random']]]]]).evaluate();
+    // Random() must remain unevaluated inside the (still-symbolic) transpose.
+    expect(r.toString().toLowerCase()).toContain('random');
+  });
+
+  test('the Simplify operator resolves a bound symbol; the method does not', () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', 5);
+    // Operator: evaluates its argument (documented) → 7.
+    expect(ce.box(['Simplify', ['Add', 'a', 2]]).evaluate().toString()).toBe('7');
+    // Method: value-blind → a + 2.
+    expect(ce.parse('a + 2').simplify().toString()).toBe('a + 2');
+  });
+
+  test('does not run a heavy-compute descendant (D stays symbolic)', () => {
+    const ce = new ComputeEngine();
+    // The whitelisted `Transpose` head would evaluate the whole operand tree,
+    // running the inner `D`. It must stay symbolic per docs/SIMPLIFY.md.
+    const r = ce
+      .box(['Transpose', ['List', ['List', ['D', ['Power', 'x', 2], 'x']]]])
+      .simplify();
+    // The derivative must not have been computed (would be `2x`).
+    expect(r.toString()).not.toContain('2x');
+    expect(r.toString()).not.toBe('4'); // not any evaluated scalar
+    expect(JSON.stringify(r.json)).toContain('D');
+  });
+
+  test('a plain Determinant still simplifies to ad - bc', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Determinant',
+        ['List', ['List', 'a', 'b'], ['List', 'c', 'd']],
+      ])
+      .simplify();
+    expect(r.toString()).toBe('-b * c + a * d');
+  });
+});

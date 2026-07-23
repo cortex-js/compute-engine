@@ -2,6 +2,8 @@ import { checkDeadline } from '../../common/interruptible.js';
 import { replace } from './rules.js';
 import { holdMap } from './hold.js';
 import { expToTrig } from './exp-to-trig.js';
+import { expand } from './expand.js';
+import { isValueDef } from './utils.js';
 import type {
   Expression,
   SimplifyOptions,
@@ -24,6 +26,9 @@ type InternalSimplifyOptions = SimplifyOptions & {
    * step's `substeps`. Off (undefined) in the plain `simplify()` path — no
    * allocation, byte-identical driver behavior. */
   collectSubsteps?: boolean;
+  /** Set on the inner call of the trial expansion (see the end of
+   * `simplify()`) so the trial cannot nest. */
+  noExpansionTrial?: boolean;
 };
 
 const BASIC_ARITHMETIC = [
@@ -106,6 +111,154 @@ function evaluateNumericSubexpressions(expr: Expression): Expression {
 
   // Reconstruct with _fn to avoid re-canonicalization
   return expr.engine._fn(expr.operator, newOps);
+}
+
+/**
+ * Cheap structural pre-check: is there a product or power that expansion could
+ * act on at all? Keeps the trial expansion below from calling `expand()` on
+ * every expression that reaches the fixpoint.
+ */
+function mightExpand(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (expr.operator === 'Multiply' && expr.ops.some((x) => isFunction(x, 'Add')))
+    return true;
+  if (expr.operator === 'Power' && isFunction(expr.op1, 'Add')) return true;
+  return expr.ops.some(mightExpand);
+}
+
+/** Cap on the number of terms the trial expansion may produce. Beyond this the
+ * expansion is skipped — the acceptance gate rejects a growth anyway, and
+ * running `expand()` first would allocate the multinomial blow-up before the
+ * cost check could reject it. */
+const MAX_TRIAL_EXPANSION_TERMS = 1000;
+
+/** Upper bound on the term count of `expand(expr)` — the product of operand
+ * counts for a `Multiply`, `baseᵉˣᵖ` for an integer-power of a sum. Returns
+ * `Infinity` for a blow-up so the caller skips the trial. */
+function expandedTermBound(expr: Expression): number {
+  if (!isFunction(expr)) return 1;
+  const op = expr.operator;
+  if (op === 'Add')
+    return expr.ops.reduce((s, x) => s + expandedTermBound(x), 0);
+  if (op === 'Multiply')
+    return expr.ops.reduce((p, x) => p * expandedTermBound(x), 1);
+  if (op === 'Power') {
+    const base = expandedTermBound(expr.op1);
+    const n = isNumber(expr.op2) ? expr.op2.re : undefined;
+    // Use the exponent's magnitude: `expand()` fully expands the positive
+    // power even for a negative exponent, so `(a+b)^-10000` blows up just as
+    // `(a+b)^10000` does.
+    if (base > 1 && n !== undefined && Number.isInteger(n) && n !== 0) {
+      const k = Math.abs(n);
+      return k > 40 ? Infinity : Math.pow(base, k);
+    }
+    return base;
+  }
+  // Any other head is atomic for expansion purposes (it is not grown).
+  return 1;
+}
+
+/**
+ * Heads that `simplify()` evaluates.
+ *
+ * **Membership rule:** the operator's `evaluate` handler reduces its operands
+ * to a closed form determined by their *structure* — a matrix to a scalar, a
+ * collection to a measure — rather than rewriting the expression. Such a head
+ * carries no simplification rule of its own, so without this `simplify()`
+ * returned it untouched: `det [[a,b],[c,d]]` stayed `Determinant(…)` while
+ * `evaluate()` gave `ad − bc`.
+ *
+ * `Max`/`Min` deliberately fail that rule and are **not** members: they reduce
+ * their operands' *values*, not their structure, and the value fold is already
+ * evaluation's job. Including them changed no result, only which stage
+ * produced it.
+ *
+ * Deliberately excluded:
+ * - the transformers (`Simplify`, `Expand`, `Factor`, …) — their operands are
+ *   reduced by `reduceTransformerOperand` instead;
+ * - `Evaluate`/`N` — they numericize, the opposite of simplifying;
+ * - anything whose handler can re-enter simplification (see CLAUDE.md's
+ *   recursion notes), which is why this is a closed list rather than "evaluate
+ *   whatever gets cheaper".
+ */
+const SIMPLIFY_EVALUABLE_HEADS = new Set([
+  'Determinant',
+  'Trace',
+  'Transpose',
+  'Length',
+]);
+
+/**
+ * Heads whose `evaluate` handler performs a heavy symbolic *computation*
+ * (differentiation, integration, summation, limits, root-finding) that
+ * `simplify()` must never trigger — `docs/SIMPLIFY.md` promises these stay
+ * symbolic under `simplify()`. Evaluating a whitelisted structural head
+ * (`evaluateStructuralHead`) evaluates the *whole* operand tree, so a matrix
+ * entry containing one of these would run it; the gate below declines instead.
+ */
+const HEAVY_COMPUTE_HEADS = new Set([
+  'D',
+  'Derivative',
+  'ND',
+  'Integrate',
+  'NIntegrate',
+  'Sum',
+  'Product',
+  'Limit',
+  'NLimit',
+  'Solve',
+  'Root',
+  'Series',
+]);
+
+/** Does the operand subtree of `expr` contain a heavy-compute head? */
+function containsHeavyHead(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  return expr.ops.some(
+    (op) =>
+      (isFunction(op) && HEAVY_COMPUTE_HEADS.has(op.operator)) ||
+      containsHeavyHead(op)
+  );
+}
+
+/** Does any symbol in `expr` carry an assigned value? */
+function hasBoundSymbol(expr: Expression): boolean {
+  for (const name of expr.symbols) {
+    const def = expr.engine.lookupDefinition(name);
+    if (isValueDef(def) && def.value.value !== undefined) return true;
+  }
+  return false;
+}
+
+/**
+ * Evaluate a structural head (see `SIMPLIFY_EVALUABLE_HEADS`), or `undefined`
+ * when it does not apply.
+ *
+ * Declines when any operand mentions a symbol with an assigned value:
+ * `simplify()` is value-blind — `(a + 2).simplify()` is `a + 2` even when
+ * `a := 5` — and evaluating the head would substitute that value, breaking the
+ * invariant for this one family of expressions.
+ */
+function evaluateStructuralHead(expr: Expression): Expression | undefined {
+  if (!SIMPLIFY_EVALUABLE_HEADS.has(expr.operator)) return undefined;
+  if (hasBoundSymbol(expr)) return undefined;
+
+  // `expr.evaluate()` evaluates the whole operand tree, not just the
+  // whitelisted head. An impure descendant would then *run* during
+  // simplification — `simplify(Transpose([[Random()]]))` must not draw a
+  // random number. Decline anything impure; the exact/value-carrying heads we
+  // want (matrix entries, `Length` of a list) are all pure.
+  if (expr.isPure === false) return undefined;
+
+  // A pure-but-heavy symbolic-compute descendant (`D`, `Integrate`, `Sum`,
+  // `Limit`, …) would likewise *run* during simplification — e.g.
+  // `simplify(Transpose([[D(x^2,x)]]))` must leave the `D` symbolic per
+  // docs/SIMPLIFY.md. Decline when the operand tree contains such a head.
+  if (containsHeavyHead(expr)) return undefined;
+
+  const result = expr.evaluate();
+  if (result.isSame(expr) || !result.isValid) return undefined;
+  return result;
 }
 
 export function simplify(
@@ -215,6 +368,11 @@ export function simplify(
   // default simplification rules", and any provided value is used as the custom
   // ruleset. A truthy check conflated `null` with omitted, applying the full
   // default ruleset where the docs promise none — so branch on the exact value.
+  // Capture the caller's original `rules` mode before it is overwritten below:
+  // `null` means "no rules, structural/numeric folding only", which also
+  // disables the trial expansion (an `expand()` is a rule-driven rewrite).
+  const rulesWereNull = options?.rules === null;
+
   let rules: BoxedRuleSet;
   if (options?.rules === null) {
     rules = { rules: [] };
@@ -239,6 +397,39 @@ export function simplify(
 
     steps = newSteps;
   } while (!steps.slice(0, -1).some((x) => x.value.isSame(expr)));
+
+  //
+  // 4/ Cost-guarded trial expansion
+  //
+  // Rules tagged `purpose: 'expand'` are excluded from the scan above because
+  // expansion usually grows an expression. That left `simplify()` unable to
+  // reach a strictly *cheaper* distributed form — it never generated the
+  // candidate. For `(-3y/x + 2/x²)·(1+xy)³` the stuck form costs 76 and the
+  // distributed, recombined form costs 27; `Expand(expr).simplify()` found it
+  // immediately, `expr.simplify()` could not.
+  //
+  // So try it exactly once, at the fixpoint, and keep the result only when the
+  // cost function says it is strictly cheaper. This cannot cycle — it runs
+  // after the loop and the inner call has the trial disabled — and it cannot
+  // blow up, because the cost gate is the acceptance test.
+  //
+  if (
+    !options.noExpansionTrial &&
+    !rulesWereNull &&
+    mightExpand(expr) &&
+    expandedTermBound(expr) <= MAX_TRIAL_EXPANSION_TERMS
+  ) {
+    const expanded = expand(expr);
+    if (expanded !== null && expanded !== undefined && !expanded.isSame(expr)) {
+      const settled = simplify(expanded, {
+        ...options,
+        noExpansionTrial: true,
+      }).at(-1)!.value;
+      const costFn = options.costFunction ?? ((e: Expression) => ce.costFunction(e));
+      if (costFn(settled) < costFn(expr))
+        steps = [...steps, { value: settled, because: 'expanded (cheaper)' }];
+    }
+  }
 
   return steps as RuleSteps;
 }
@@ -576,6 +767,14 @@ function simplifyExpression(
         : { value: alt, because: 'simplified operands' };
     steps = [...steps, aggregate];
     expr = alt;
+  }
+
+  // A structural head (`Determinant`, `Trace`, …) has no rule of its own: run
+  // its `evaluate` handler so `simplify()` does not hand back the input.
+  const evaluated = evaluateStructuralHead(expr);
+  if (evaluated !== undefined) {
+    steps = [...steps, { value: evaluated, because: 'evaluated operator' }];
+    expr = evaluated;
   }
 
   // Try to simplify the function expression

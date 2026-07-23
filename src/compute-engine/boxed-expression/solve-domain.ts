@@ -8,7 +8,13 @@ import type {
   Expression,
 } from '../global-types.js';
 import { isFunction, sym } from './type-guards.js';
-import { defaultUnknown, reduceTransformerHead } from './utils.js';
+import {
+  defaultUnknown,
+  reduceTransformerHead,
+  resolveBoundSymbols,
+  reduceStructuralIndex,
+  isValueDef,
+} from './utils.js';
 import { findUnivariateRoots } from './solve.js';
 import { getPolynomialCoefficients } from './polynomials.js';
 import { interval } from '../numerics/interval.js';
@@ -261,10 +267,50 @@ export function evaluateSolve(
   // whose operator is `Simplify`. Full evaluation would be unsound here
   // (relational collapse, unknown-value substitution) — see
   // `reduceTransformerHead`.
-  let ceq = reduceTransformerHead(eq.canonical);
-
   let specs = parseSolveSpecs(ops.slice(1));
   if (specs === undefined) return undefined; // invalid spec → stay inert
+
+  // Reduce transformer heads (`Solve(Simplify(eq), x)`) before solving. But a
+  // nested transformer resolves bound symbols with no protected set, so it
+  // would substitute an unknown that also carries a global value (`x := 5`),
+  // turning `Solve(Simplify(x - 2) = 0, x)` into `Solve(1 = 0, x)` → `[]`.
+  // Shield each value-bound unknown by renaming it to a fresh unbound symbol
+  // across the reduction, then rename back. An unknown with no value needs no
+  // shielding (nothing to substitute).
+  //
+  // KNOWN EDGE (tracked in docs/plans/2026-07-23-simplify-together-scoping.md,
+  // §B): if the unknown BOTH carries a value AND is reintroduced by another
+  // bound symbol's value, the rename and the resolved value disagree. Rare
+  // (doubly-contradictory input); the real fix threads a protected set into the
+  // nested transformer's resolution.
+  const shielded = new Map<string, string>();
+  for (const spec of specs) {
+    const name = spec.unknown;
+    const def = ce.lookupDefinition(name);
+    if (isValueDef(def) && def.value.value !== undefined) {
+      let fresh = `__solve_${name}`;
+      while (ce.lookupDefinition(fresh) !== undefined) fresh = `_${fresh}`;
+      shielded.set(name, fresh);
+    }
+  }
+  const toFresh = (e: Expression) =>
+    shielded.size === 0
+      ? e
+      : e.subs(
+          Object.fromEntries(
+            [...shielded].map(([a, b]) => [a, ce.symbol(b)])
+          )
+        );
+  const fromFresh = (e: Expression) =>
+    shielded.size === 0
+      ? e
+      : e.subs(
+          Object.fromEntries(
+            [...shielded].map(([a, b]) => [b, ce.symbol(a)])
+          )
+        );
+
+  let ceq = fromFresh(reduceTransformerHead(toFresh(eq.canonical)));
 
   // Shared (multi-unknown) side-condition predicates lifted out of a constraint
   // set (e.g. `a < b` in `Solve(\{a+b=5, a<b\}, \{a,b\})`). Single-unknown side
@@ -442,6 +488,16 @@ export function evaluateSolve(
     if (unknown === undefined) return undefined;
     specs = [{ unknown }];
   }
+
+  // A symbol bound to an expression that *contains* the unknown hides it:
+  // `Solve(s = 2, w)` with `s := (9 - w²)/4` saw an equation with no `w` and
+  // returned `[]` — "proven no solutions". Resolve such bindings, protecting
+  // the unknowns so the very variable being solved for is never substituted.
+  ceq = resolveBoundSymbols(ceq, new Set(specs.map((spec) => spec.unknown)));
+
+  // Indexing into a computed list hides the unknown the same way: project
+  // `At(List(…), k)` structurally so the solver can see through `roots[1]`.
+  ceq = reduceStructuralIndex(ceq);
 
   const domainSpecs = specs.filter((s) => s.domain !== undefined);
 
