@@ -805,6 +805,12 @@ export function cancelCommonFactors(
   // unaffected; only pay for the multivariate pass when there are ≥2 unknowns
   // (`multivariateBinaryGCD` expands both operands before running).
   let gcd = polynomialGCD(numerator, denominator, variable);
+  // The univariate Euclidean GCD divides both operands exactly by construction.
+  // A multivariate `mgcd` (Brown's algorithm) may be a strictly better factor
+  // but need not divide exactly under `polynomialDivide`'s symbolic coefficient
+  // division, so keep the univariate result as a fallback: preferring `mgcd`
+  // must never REGRESS a valid univariate cancellation to no reduction.
+  const univariateGcd = gcd;
   const unknowns = new Set([...numerator.unknowns, ...denominator.unknowns]);
   if (unknowns.size >= 2) {
     if (polynomialDegree(gcd, variable) <= 0) {
@@ -829,30 +835,36 @@ export function cancelCommonFactors(
     }
   }
 
-  // Check if the GCD is trivial. A multivariate GCD need not involve
-  // `variable` (it may be a factor in another unknown), so "trivial" is
-  // "constant", not "degree 0 in `variable`".
-  if (gcd.unknowns.length === 0) return expr;
+  // Attempt cancellation with a candidate GCD. Returns the reduced expression,
+  // or `null` when the candidate is trivial (constant) or does not divide both
+  // operands exactly — a wrong GCD, cancelling with which would silently change
+  // the value of the expression.
+  const tryCancel = (g: Expression): Expression | null => {
+    // A multivariate GCD need not involve `variable` (it may be a factor in
+    // another unknown), so "trivial" is "constant", not "degree 0 in `variable`".
+    if (g.unknowns.length === 0) return null;
 
-  // Divide numerator and denominator by GCD
-  const numDivResult = polynomialDivide(numerator, gcd, variable);
-  const denDivResult = polynomialDivide(denominator, gcd, variable);
+    const numDivResult = polynomialDivide(numerator, g, variable);
+    const denDivResult = polynomialDivide(denominator, g, variable);
+    if (!numDivResult || !denDivResult) return null;
 
-  if (!numDivResult || !denDivResult) return expr;
+    const [newNumerator, numRemainder] = numDivResult;
+    const [newDenominator, denRemainder] = denDivResult;
+    if (!numRemainder.isSame(0) || !denRemainder.isSame(0)) return null;
 
-  const [newNumerator, numRemainder] = numDivResult;
-  const [newDenominator, denRemainder] = denDivResult;
+    // Check if denominator became 1
+    const denCoeffs = getPolynomialCoefficients(newDenominator, variable);
+    if (denCoeffs && denCoeffs.length === 1 && denCoeffs[0].isSame(1))
+      return newNumerator;
 
-  // Defense in depth: a true GCD divides both exactly. If either division
-  // leaves a remainder, the "GCD" was wrong — cancelling with it would
-  // silently change the value of the expression.
-  if (!numRemainder.isSame(0) || !denRemainder.isSame(0)) return expr;
+    return newNumerator.div(newDenominator);
+  };
 
-  // Check if denominator became 1
-  const denCoeffs = getPolynomialCoefficients(newDenominator, variable);
-  if (denCoeffs && denCoeffs.length === 1 && denCoeffs[0].isSame(1)) {
-    return newNumerator;
-  }
-
-  return newNumerator.div(newDenominator);
+  // Prefer the chosen (possibly multivariate) GCD, but if it does not divide
+  // exactly, fall back to the univariate GCD rather than returning `expr`
+  // unreduced — otherwise preferring `mgcd` could regress a valid cancellation.
+  const cancelled =
+    tryCancel(gcd) ??
+    (gcd !== univariateGcd ? tryCancel(univariateGcd) : null);
+  return cancelled ?? expr;
 }

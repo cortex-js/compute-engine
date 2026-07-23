@@ -578,9 +578,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // through stripped of its definition.
       lazy: true,
       signature: '(value, function) -> unknown',
-      type: ([_x, f]) => (f ? functionResult(f.type.type) ?? 'unknown' : undefined),
+      type: ([_x, f]) =>
+        f ? (functionResult(f.type.type) ?? 'unknown') : undefined,
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 2) return ce._fn('Pipe', checkArity(ce, ops, 2));
+        // @fixme: should we do a type check here to ensure the second operand is applicable to the first operand? Or do we have to wait until evaluation to check that? If we do it here, we can return an error code instead of an unevaluated Pipe expression.
         return ce._fn('Pipe', ops);
       },
       evaluate: (ops, { engine: ce, numericApproximation }) => {
@@ -606,6 +608,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // symbol goes through `ce.function(f, [x]).evaluate()` (respecting its
         // hold semantics), a `Function` literal is beta-reduced, and any other
         // applicable expression is applied.
+        // @fixme: Shouldn't that check for applicability be done in the type system? The type of `f` is `function` so it should be applicable to `x`. If not, the type system should reject it. And should that check actually be in `apply()`?
         if (isNumber(f)) return undefined;
         const result = apply(f, [x]);
 

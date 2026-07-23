@@ -268,7 +268,7 @@ function betaReduceLambda(call: Expression): Expression | undefined {
 
 /** Every name bound by a binder anywhere within `expr` (its own bound names
  * plus those of every descendant), used to keep lambda inlining capture-safe. */
-function collectBinderNames(
+export function collectBinderNames(
   expr: Expression,
   acc: Set<string> = new Set()
 ): Set<string> {

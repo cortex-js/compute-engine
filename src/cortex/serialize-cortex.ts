@@ -120,13 +120,16 @@ export function serializeCortex(
     if (!body) {
       const dict = dictionaryFromExpression(expr);
       if (dict !== null) {
-        const dictEntries = dict as unknown as Record<
+        // `dictionaryFromExpression` returns a `MathJsonDictionaryObject`
+        // (`{ dict: { key: value, … } }`); the entries live in `.dict`, not on
+        // the wrapper itself.
+        const dictEntries = dict.dict as unknown as Record<
           string,
           MathJsonExpression
         >;
-        const keyValues = Object.keys(dict).map((key) =>
+        const keyValues = Object.keys(dictEntries).map((key) =>
           fmt.line(
-            escapeString(key),
+            serializeString(key),
             fmt.relationalOperator('->'),
             serializeExpression(dictEntries[key])
           )

@@ -370,3 +370,48 @@ no longer match. The non-edge case (`w` unbound) works.
   the `EvaluateOptions` plumbing this session deliberately avoided. Do it if the
   transformer-resolution architecture is reworked (see Item 1 option 4).
 - **Severity:** low — silent wrong answer, but only on contradictory input.
+
+### C. Integrate/Limit of a nested transformer substitutes a valued bound variable
+
+Same protected-set gap as §B, on the differentiation/integration side. `Integrate`
+reduces a nested transformer head in its integrand via `reduceTransformerHead`
+(`antiderivative.ts`, the `∫ Simplify(f) dx` path), which calls
+`resolveBoundSymbols(…, EMPTY_NAME_SET)`. The integration variable is bound by the
+`Integrate` ABOVE the integrand, not by a binder inside it, so it is not protected
+and a global value substitutes:
+
+```js
+const ce = new ComputeEngine();
+ce.assign('x', 5);
+ce.box(['Integrate', ['Simplify', ['Power', 'x', 2]], 'x']).evaluate();
+// → 25x   (want x³/3)
+```
+
+`Limit` has the analogous gap. Note `JacobianMatrix` already guards this exact
+situation by renaming a value-bound differentiation variable to a fresh symbol
+(`calculus.ts`, the `__jac_<name>` rename) — `Integrate`/`Limit` do not.
+
+- **Trigger is doubly-contradictory:** integrating/limiting w.r.t. a variable that
+  carries a concrete value. Vanishingly rare.
+- **Proper fix:** same as §B — thread the bound variable into the nested
+  transformer's `resolveBoundSymbols` protected set (or mirror `JacobianMatrix`'s
+  fresh-symbol rename in the `Integrate`/`Limit` transformer-head reduction).
+- **Severity:** low — silent wrong answer, only on contradictory input.
+
+### D. Solve shielding is computed before bundled specs are lifted
+
+The value-bound-unknown shielding map in `evaluateSolve` (`solve-domain.ts`) is
+built only from the positional argument specs, BEFORE `Element`-constraint specs
+bundled inside a collection-shaped first argument are lifted into `specs`. For an
+arity-one bundled solve, a value-bound unknown that is only discovered during that
+later lifting therefore stays unprotected while nested transformers reduce, so its
+global value can substitute before the code learns it is the solve target.
+
+- **Trigger:** a bundled/collection first-argument solve whose unknown both carries
+  a value and is introduced via a bundled `Element` spec. Same §B family.
+- **Proper fix:** lift the bundled specs (and resolve deferred unknown inference)
+  BEFORE transformer reduction, so the full protected-unknown set is known when
+  shielding is computed — subsumed by the §B protected-set rework.
+- **Severity:** low — silent wrong/inert answer, only on contradictory input.
+  (Surfaced by Codex; not independently reproduced — confirm with a repro before
+  fixing.)

@@ -11,6 +11,7 @@ import {
   hasSymbolicTranscendental,
   resolveToList,
   isValueDef,
+  collectBinderNames,
 } from '../boxed-expression/utils.js';
 import {
   isFunction,
@@ -774,6 +775,20 @@ volumes
             const rename = Object.fromEntries(
               paramDefault.map((p, i) => [p, ce.symbol(names[i])])
             );
+            // `subs` is NOT binder-aware: it rewrites through inner
+            // `Sum`/`Function`/… binders blindly. Renaming a parameter that an
+            // inner binder rebinds — or renaming to a target name that an inner
+            // binder already binds (e.g. `x ↦ Sum(x·k, k, 1, 3)` with vars `[k]`,
+            // where the substituted `k` would be captured by the `Sum`) — yields
+            // a wrong derivative. Decline in that case (leave `JacobianMatrix`
+            // symbolic), value-safe and strictly better than corrupting.
+            for (const f of fs) {
+              const binders = collectBinderNames(f);
+              if (binders.size === 0) continue;
+              for (let i = 0; i < paramDefault.length; i++)
+                if (binders.has(paramDefault[i]) || binders.has(names[i]))
+                  return undefined;
+            }
             fs = fs.map((f) => f.subs(rename));
           }
         } else if (paramDefault) {

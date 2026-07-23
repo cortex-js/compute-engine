@@ -462,13 +462,12 @@ export function apply(
   // recursing forever (stack overflow). Instead, substitute the argument
   // structurally — swap the placeholder operand for the actual argument — so
   // `Apply(Derivative(f, n), 0)` is returned unevaluated.
-  if (isFunction(fn, 'Derivative')) {
+  // @fixme: it feels wrong to be checking for `Derivative` here. There should be a more general way to handle this, e.g. check the `lazy` attribute on the function definition?
+  if (isFunction(fn, 'Derivative'))
     return fn.engine._fn('Apply', [fn, ...args]);
-  }
 
-  if (isFunction(fn, 'Apply') && fn.op1?.operator === 'Derivative') {
+  if (isFunction(fn, 'Apply') && fn.op1?.operator === 'Derivative')
     return fn.engine._fn('Apply', [fn.op1, ...args]);
-  }
 
   const result = makeLambda(fn)?.(args, options);
   if (result) return result;

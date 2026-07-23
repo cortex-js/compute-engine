@@ -1,12 +1,11 @@
 ---
 title: Cortex CLI
-permalink: /cortex/cli/
-layout: single
+sidebar_label: CLI
+slug: /cortex/cli/
+description: "The cortex command-line interface: run files, evaluate inline programs, or start an interactive REPL."
+hide_title: true
 date: Last Modified
-sidebar:
-  - nav: "universal"
 ---
-
 # Cortex CLI
 
 The `@cortex-js/compute-engine` package installs a `cortex` command for
@@ -14,8 +13,12 @@ evaluating Cortex source from a terminal. It can run a source file, evaluate an
 inline program, read a program from standard input, or start an interactive
 REPL.
 
+:::warning
+
 Cortex and its command-line interface are experimental. Their syntax and
-behavior may change between releases.{notice--warning}
+behavior may change between releases.
+
+:::
 
 ## Installation
 
@@ -164,4 +167,5 @@ npx cortex --time-limit 30000 long-running.cx
 
 Set `--time-limit 0` for no deadline. The Compute Engine's iteration and
 recursion limits continue to apply independently.
+
 
