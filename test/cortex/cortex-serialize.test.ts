@@ -216,25 +216,37 @@ describe('CORTEX SERIALIZING FUNCTIONS', () => {
   });
 });
 
-// describe('CORTEX SERIALIZING DICTIONARIES', () => {
-//   test('Dictionaries', () => {
-//     // Empty dictionary
-//     expect(serializeCortex({ dict: {} })).toMatchInlineSnapshot(`""`);
+describe('CORTEX SERIALIZING DICTIONARIES', () => {
+  test('Dictionaries', () => {
+    // Empty dictionary
+    expect(serializeCortex({ dict: {} })).toMatchInlineSnapshot(`"{ -> }"`);
 
-//     //Regular dictionary
-//     expect(
-//       serializeCortex({ dict: { x: 1, y: 2, z: ['Add', 2, 'x'] } })
-//     ).toMatchInlineSnapshot(`""`);
+    //Regular dictionary
+    expect(
+      serializeCortex({ dict: { x: 1, y: 2, z: ['Add', 2, 'x'] } })
+    ).toMatchInlineSnapshot(`"{"x" -> 1, "y" -> 2, "z" -> 2 + x}"`);
 
-//     // Nested dictionary
-//     expect(
-//       serializeCortex({
-//         dict: { x: { dict: { a: 7, b: 5 } }, y: 2, z: ['Add', 2, 'x'] },
-//       })
-//     ).toMatchInlineSnapshot(`""`);
-//     // @todo:indexed-access
-//   });
-// });
+    // Nested dictionary
+    expect(
+      serializeCortex({
+        dict: { x: { dict: { a: 7, b: 5 } }, y: 2, z: ['Add', 2, 'x'] },
+      })
+    ).toMatchInlineSnapshot(
+      `"{"x" -> {"a" -> 7, "b" -> 5}, "y" -> 2, "z" -> 2 + x}"`
+    );
+    // @todo:indexed-access
+
+    // The dictionary-object form (`{ dict: … }`) and the operator form
+    // (`["Dictionary", ["KeyValuePair", …], …]`) serialize identically.
+    expect(serializeCortex({ dict: { one: 1, two: 2 } })).toEqual(
+      serializeCortex([
+        'Dictionary',
+        ['KeyValuePair', { str: 'one' }, 1],
+        ['KeyValuePair', { str: 'two' }, 2],
+      ])
+    );
+  });
+});
 
 describe('CORTEX SERIALIZING COLLECTIONS', () => {
   test('Sets', () => {

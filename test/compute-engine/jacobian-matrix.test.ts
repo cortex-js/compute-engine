@@ -211,6 +211,21 @@ describe('JacobianMatrix of a bare function', () => {
     ).toBe('JacobianMatrix');
   });
 
+  // A rename to a variable name that an inner binder already binds would be
+  // captured by that binder (`subs` is not binder-aware): here the requested
+  // `k` would be swallowed by the `Sum`'s bound `k`, yielding a wrong
+  // derivative. The handler declines rather than corrupt the result — so it
+  // stays an unevaluated symbolic `JacobianMatrix`, never a captured answer.
+  test('a rename that an inner binder would capture declines', () => {
+    const ce = new ComputeEngine();
+    ce.assign('F', ce.parse('(x) \\mapsto \\sum_{k=1}^{3} x k'));
+    expect(
+      ce
+        .function('JacobianMatrix', [ce.symbol('F'), S(ce, 'k')])
+        .evaluate().operator
+    ).toBe('JacobianMatrix');
+  });
+
   test('the static type of a bare vector function is a matrix', () => {
     const ce = new ComputeEngine();
     vecF(ce);
