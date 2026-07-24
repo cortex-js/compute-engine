@@ -3,11 +3,7 @@ import { replace } from './rules.js';
 import { holdMap } from './hold.js';
 import { expToTrig } from './exp-to-trig.js';
 import { expand } from './expand.js';
-import {
-  isValueDef,
-  hasAssignedVariable,
-  assignedVariableNames,
-} from './utils.js';
+import { hasAssignedVariable, assignedVariableNames } from './utils.js';
 import type {
   Expression,
   SimplifyOptions,
@@ -177,109 +173,6 @@ function expandedTermBound(expr: Expression): number {
   }
   // Any other head is atomic for expansion purposes (it is not grown).
   return 1;
-}
-
-/**
- * Heads that `simplify()` evaluates.
- *
- * **Membership rule:** the operator's `evaluate` handler reduces its operands
- * to a closed form determined by their *structure* — a matrix to a scalar, a
- * collection to a measure — rather than rewriting the expression. Such a head
- * carries no simplification rule of its own, so without this `simplify()`
- * returned it untouched: `det [[a,b],[c,d]]` stayed `Determinant(…)` while
- * `evaluate()` gave `ad − bc`.
- *
- * `Max`/`Min` deliberately fail that rule and are **not** members: they reduce
- * their operands' *values*, not their structure, and the value fold is already
- * evaluation's job. Including them changed no result, only which stage
- * produced it.
- *
- * Deliberately excluded:
- * - the transformers (`Simplify`, `Expand`, `Factor`, …) — their operands are
- *   reduced by `reduceTransformerOperand` instead;
- * - `Evaluate`/`N` — they numericize, the opposite of simplifying;
- * - anything whose handler can re-enter simplification (see CLAUDE.md's
- *   recursion notes), which is why this is a closed list rather than "evaluate
- *   whatever gets cheaper".
- */
-const SIMPLIFY_EVALUABLE_HEADS = new Set([
-  'Determinant',
-  'Trace',
-  'Transpose',
-  'Length',
-]);
-
-/**
- * Heads whose `evaluate` handler performs a heavy symbolic *computation*
- * (differentiation, integration, summation, limits, root-finding) that
- * `simplify()` must never trigger — `docs/SIMPLIFY.md` promises these stay
- * symbolic under `simplify()`. Evaluating a whitelisted structural head
- * (`evaluateStructuralHead`) evaluates the *whole* operand tree, so a matrix
- * entry containing one of these would run it; the gate below declines instead.
- */
-const HEAVY_COMPUTE_HEADS = new Set([
-  'D',
-  'Derivative',
-  'ND',
-  'Integrate',
-  'NIntegrate',
-  'Sum',
-  'Product',
-  'Limit',
-  'NLimit',
-  'Solve',
-  'Root',
-  'Series',
-]);
-
-/** Does the operand subtree of `expr` contain a heavy-compute head? */
-function containsHeavyHead(expr: Expression): boolean {
-  if (!isFunction(expr)) return false;
-  return expr.ops.some(
-    (op) =>
-      (isFunction(op) && HEAVY_COMPUTE_HEADS.has(op.operator)) ||
-      containsHeavyHead(op)
-  );
-}
-
-/** Does any symbol in `expr` carry an assigned value? */
-function hasBoundSymbol(expr: Expression): boolean {
-  for (const name of expr.symbols) {
-    const def = expr.engine.lookupDefinition(name);
-    if (isValueDef(def) && def.value.value !== undefined) return true;
-  }
-  return false;
-}
-
-/**
- * Evaluate a structural head (see `SIMPLIFY_EVALUABLE_HEADS`), or `undefined`
- * when it does not apply.
- *
- * Declines when any operand mentions a symbol with an assigned value:
- * `simplify()` is value-blind — `(a + 2).simplify()` is `a + 2` even when
- * `a := 5` — and evaluating the head would substitute that value, breaking the
- * invariant for this one family of expressions.
- */
-function evaluateStructuralHead(expr: Expression): Expression | undefined {
-  if (!SIMPLIFY_EVALUABLE_HEADS.has(expr.operator)) return undefined;
-  if (hasBoundSymbol(expr)) return undefined;
-
-  // `expr.evaluate()` evaluates the whole operand tree, not just the
-  // whitelisted head. An impure descendant would then *run* during
-  // simplification — `simplify(Transpose([[Random()]]))` must not draw a
-  // random number. Decline anything impure; the exact/value-carrying heads we
-  // want (matrix entries, `Length` of a list) are all pure.
-  if (expr.isPure === false) return undefined;
-
-  // A pure-but-heavy symbolic-compute descendant (`D`, `Integrate`, `Sum`,
-  // `Limit`, …) would likewise *run* during simplification — e.g.
-  // `simplify(Transpose([[D(x^2,x)]]))` must leave the `D` symbolic per
-  // docs/SIMPLIFY.md. Decline when the operand tree contains such a head.
-  if (containsHeavyHead(expr)) return undefined;
-
-  const result = expr.evaluate();
-  if (result.isSame(expr) || !result.isValid) return undefined;
-  return result;
 }
 
 /**
@@ -842,14 +735,6 @@ function simplifyExpression(
         : { value: alt, because: 'simplified operands' };
     steps = [...steps, aggregate];
     expr = alt;
-  }
-
-  // A structural head (`Determinant`, `Trace`, …) has no rule of its own: run
-  // its `evaluate` handler so `simplify()` does not hand back the input.
-  const evaluated = evaluateStructuralHead(expr);
-  if (evaluated !== undefined) {
-    steps = [...steps, { value: evaluated, because: 'evaluated operator' }];
-    expr = evaluated;
   }
 
   // Try to simplify the function expression

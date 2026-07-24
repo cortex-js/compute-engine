@@ -1853,3 +1853,95 @@ describe('D with no operand does not crash', () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 });
+
+// Binder value-shield convention (ARCHITECTURE.md, "Bound variables, free
+// symbols, and assigned values"): a variable bound by `D`/`Integrate`/`Limit`
+// is a pure symbol — a same-named GLOBAL assignment (`x := 5`) must not leak
+// into the operation OR its result. Any OTHER symbol is free and resolves
+// normally. Each case uses a fresh engine (`assign` mutates the engine).
+describe('binder value-shield: D / Integrate / Limit keep the bound variable symbolic', () => {
+  test('D result stays symbolic in the differentiation variable (box + parse)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    // Was `10` (differentiated to `2x`, then evaluated at `x := 5`).
+    expect(ce.box(['D', ['Power', 'x', 2], 'x']).evaluate().toString()).toBe('2x');
+    expect(ce.parse('\\frac{d}{dx}x^2').evaluate().toString()).toBe('2x');
+    // The global value is intact after the operation.
+    expect(ce.box('x').evaluate().toString()).toBe('5');
+  });
+
+  test('D shields only the bound variable; free symbols still resolve', () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', 3);
+    ce.assign('x', 5);
+    // Was `30`; the free coefficient `a` resolves, the bound `x` stays symbolic.
+    expect(
+      ce.box(['D', ['Multiply', 'a', ['Power', 'x', 2]], 'x']).evaluate().toString()
+    ).toBe('6x');
+  });
+
+  test('Integrate: indefinite result stays symbolic in the integration variable', () => {
+    const clean = new ComputeEngine();
+    const expected = clean
+      .box(['Integrate', ['Power', 'x', 2], 'x'])
+      .evaluate()
+      .toString();
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    // Was `125/3` (antiderivative `x³/3` evaluated at `x := 5`).
+    expect(ce.box(['Integrate', ['Power', 'x', 2], 'x']).evaluate().toString()).toBe(
+      expected
+    );
+    expect(ce.box('x').evaluate().toString()).toBe('5');
+  });
+
+  test('Integrate: a nested transformer head does not fold the bound variable', () => {
+    const clean = new ComputeEngine();
+    const expected = clean
+      .box(['Integrate', ['Power', 'x', 2], 'x'])
+      .evaluate()
+      .toString();
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    // Was `25x` (`Simplify(x²)` folded to `25` before integrating).
+    expect(
+      ce.box(['Integrate', ['Simplify', ['Power', 'x', 2]], 'x']).evaluate().toString()
+    ).toBe(expected);
+  });
+
+  test('Integrate: definite value is independent of the bound variable value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    // ∫₀¹ x² dx = 1/3; was `0`.
+    expect(
+      ce
+        .box(['Integrate', ['Power', 'x', 2], ['Tuple', 'x', 0, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('1/3');
+  });
+
+  test('Integrate: free coefficients still resolve', () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', 3);
+    ce.assign('x', 5);
+    // ∫ a·x dx = (a/2)·x² = (3/2)·x², with the bound `x` symbolic.
+    expect(
+      ce.box(['Integrate', ['Multiply', 'a', 'x'], 'x']).evaluate().toString()
+    ).toBe('3/2 * x^2');
+  });
+
+  test('Limit stays symbolic through a nested transformer (box + parse)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    // Was `25` on BOTH routes; the box route also mis-canonicalized because a
+    // value-bound `x` dropped out of `.unknowns`.
+    expect(
+      ce.box(['Limit', ['Simplify', ['Power', 'x', 2]], 'x', 0]).evaluate().toString()
+    ).toBe('0');
+    expect(
+      ce.parse('\\lim_{x\\to 0}\\operatorname{Simplify}(x^2)').evaluate().toString()
+    ).toBe('0');
+    expect(ce.box('x').evaluate().toString()).toBe('5');
+  });
+});

@@ -243,10 +243,24 @@
   silently baking in `w ≥ 0` and evaluating wrong after a later `w := -3`).
   Sign and parity are taken only from a symbol's declared type and in-scope
   assumptions — so `assume(w > 0)` still licenses `|w| → w` — never from its
-  assigned value. As a corollary, a structural head (`Determinant`, `Trace`, …)
-  over a symbol carrying a value now simplifies to its value-blind symbolic form
-  (`det[[a,b],[c,d]]` → `a·d − b·c`) instead of declining. `.evaluate()` and
-  `.N()` are unchanged — they still substitute the value.
+  assigned value. `.evaluate()` and `.N()` are unchanged — they still substitute
+  the value.
+- **The `Simplify` operator now evaluates its argument before simplifying.**
+  `Simplify(expr)` is now evaluate-then-simplify — the operator counterpart of
+  the `expr.evaluate().simplify()` recipe — so it computes handler-driven results
+  the value-blind `.simplify()` method never touches: `Simplify(Max(3, 5))` → `5`,
+  `Simplify(D(x²+ax, x))` → `a + 2x`, `Simplify(∫x² dx)` → `x³/3`. Because
+  evaluation substitutes assigned symbol values, the change is visible from
+  Cortex: `let x = 5; Simplify(x^2 + x)` now gives `30`. The other transformers
+  (`Expand`, `Factor`, `Together`, `Distribute`) are unchanged — they keep
+  reduce-not-evaluate.
+- **The `.simplify()` method no longer evaluates structural operators.**
+  `Determinant`, `Trace`, `Transpose` and `Length` are no longer reduced by the
+  `.simplify()` method (an unreleased whitelist added earlier in this cycle):
+  the method is rule-driven and value-blind, and running an operator's `evaluate`
+  handler is `.evaluate()`'s job. Use `expr.evaluate()` (or the `Simplify`
+  operator, which now evaluates) to reduce them — e.g.
+  `Determinant([[a,b],[c,d]]).evaluate()` → `a·d − b·c`.
 
 ## 0.93.0 _2026-07-23_
 
@@ -459,6 +473,25 @@
   - `simplify()` evaluated a structural head's whole operand tree, running an
     impure descendant — `simplify(Transpose([[Random()]]))` drew a random
     number. It now declines when the expression is impure.
+
+- **`D` no longer evaluates its result at the differentiation variable's
+  assigned value.** With `x := 5`, `D(x², x)` is now `2x` (was `10`). Under the
+  ratified binding convention (ARCHITECTURE.md, "Bound variables, free symbols,
+  and assigned values"), the variable a binder owns is a pure symbol — its
+  declared type and assumptions apply, its assigned value never does, INCLUDING
+  in the result. A caller who wants the value evaluates the result again or
+  substitutes explicitly. Free symbols are unaffected: with `a := 3` too,
+  `D(a·x², x)` is `6x`.
+
+- **`Integrate`, `Limit`, and bundled `Solve` shield a value-bound bound
+  variable.** The same convention: a same-named global assignment no longer
+  leaks into these binders or their results. With `x := 5`, `Integrate(x², x)`
+  is `x³/3` (was `125/3`), `∫₀¹ x² dx` is `1/3` (was `0`), and
+  `Limit(Simplify(x²), x, 0)` is `0` (was `25`, on both the box and parse
+  routes). A bundled `Solve(\{Simplify(9 − w²) = 8, w ∈ -3..3\})` with `w := 9`
+  now returns `[1, -1]` (was `[]`): the value-bound bundled unknown is now
+  discovered before the shield is computed. A shared `withValueShield` helper
+  implements the shield and replaces `JacobianMatrix`'s per-variable rename.
 
 - **`Distribute` fold, `numeratorDenominator`, `Together`, transformers, and
   `toString()` grouping** — as previously listed.

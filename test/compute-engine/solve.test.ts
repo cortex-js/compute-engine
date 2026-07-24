@@ -2152,14 +2152,18 @@ describe('Solve sees through user functions and bound symbols', () => {
   // `k`) must NOT be blindly substituted into the binder's scope. `g(k)` would
   // corrupt to `∑_{k=1}^{3} k·k` (= 14) instead of the correct `6k`; the
   // inliner declines and leaves the application opaque. A non-colliding
-  // argument still inlines.
+  // argument still inlines. Probed via `Expand` — a reduce-not-evaluate
+  // transformer that routes through the capture-avoiding inliner. (The
+  // `Simplify` operator now evaluates its argument (Ruling 2026-07-24), so it
+  // delegates capture handling to `.evaluate()` rather than to the inliner.)
   test('inlining does not capture an argument under an inner binder', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto \\sum_{k=1}^{3} x \\cdot k'));
     // `k` collides with the Sum index: decline rather than corrupt.
-    expect(ce.box(['Simplify', ['g', 'k']]).evaluate().toString()).toBe('g(k)');
-    // `a` is free of any binder in the body: inlines correctly to 6a.
-    expect(ce.box(['Simplify', ['g', 'a']]).evaluate().toString()).toBe('6a');
+    expect(ce.box(['Expand', ['g', 'k']]).evaluate().toString()).toBe('g(k)');
+    // `a` is free of any binder in the body: inlines correctly (the Sum is left
+    // unevaluated by the reduce-not-evaluate transformer).
+    expect(ce.box(['Expand', ['g', 'a']]).evaluate().operator).toBe('Sum');
   });
 });
 

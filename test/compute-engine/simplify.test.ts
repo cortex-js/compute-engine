@@ -1680,29 +1680,101 @@ describe('Simplify with assumptions', () => {
   });
 });
 
-// `simplify()` is rule-driven and used to run no operator `evaluate` handler
-// at all, so an operator whose result comes from a handler rather than a rule
-// was returned untouched: `det [[a,b],[c,d]]` stayed `Determinant(…)` while
-// `evaluate()` gave `ad - bc`. A closed list of *structural* heads — those
-// reducing their operands to a closed form determined by their structure — is
-// now evaluated during simplification.
-describe('simplify() evaluates structural operators', () => {
+// Ruling 2026-07-24 (docs/plans/2026-07-23-simplify-together-scoping.md, end of
+// Item 1): the `.simplify()` METHOD is rule-driven and value-blind — it runs no
+// operator `evaluate` handler, so a structural head (`Determinant`, `Trace`,
+// `Transpose`, `Length`) whose result comes from a handler rather than a rule is
+// returned UNCHANGED. The `Simplify` OPERATOR evaluates its argument first, then
+// simplifies, so it (and `evaluate()`) is how those heads reduce.
+describe('simplify() METHOD leaves structural operators unchanged', () => {
   const ce9 = new ComputeEngine();
 
   test.each([
-    ['\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}', '-b * c + a * d'],
-    ['\\mathrm{Trace}(\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix})', 'a + d'],
-    ['\\mathrm{Length}(\\lbrack a, b, c\\rbrack)', '3'],
-    ['\\mathrm{Transpose}(\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix})', '[[a,c],[b,d]]'],
-  ])('%s simplifies to %s', (latex, expected) => {
-    expect(ce9.parse(latex).simplify().toString()).toBe(expected);
+    ['\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}', 'Determinant'],
+    ['\\mathrm{Trace}(\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix})', 'Trace'],
+    ['\\mathrm{Length}(\\lbrack a, b, c\\rbrack)', 'Length'],
+    ['\\mathrm{Transpose}(\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix})', 'Transpose'],
+  ])('%s stays as %s under the method', (latex, head) => {
+    expect(ce9.parse(latex).simplify().operator).toBe(head);
   });
 
-  // Max/Min reduce their operands' VALUES, not their structure, so they are
-  // deliberately not members: the value fold is evaluation's job.
   test('Max/Min are left to evaluate()', () => {
     expect(ce9.parse('\\mathrm{Max}(3, 5)').simplify().operator).toBe('Max');
     expect(ce9.parse('\\mathrm{Max}(3, 5)').evaluate().toString()).toBe('5');
+  });
+
+  // `simplify()` is value-blind (ROADMAP Item E): `(a + 2).simplify()` is
+  // `a + 2` even when `a := 5`.
+  test('the method stays value-blind', () => {
+    const ce11 = new ComputeEngine();
+    ce11.assign('a', 5);
+    expect(ce11.parse('a + 2').simplify().toString()).toBe('a + 2');
+  });
+});
+
+// The `Simplify` OPERATOR (Ruling 2026-07-24) is evaluate-then-simplify: it
+// evaluates its argument (substituting assigned symbol values, running the
+// handlers the value-blind method never touches), then applies the rules.
+// Probed on BOTH the `ce.box(['Simplify', …])` route AND the `ce.parse` LaTeX
+// route (the lazy-operator trap: `ce.function`/box-only tests miss the
+// unbound-held-operand failure class).
+describe('Simplify OPERATOR evaluates then simplifies', () => {
+  const ce9 = new ComputeEngine();
+
+  test('Simplify(Max(3, 5)) → 5', () => {
+    expect(ce9.box(['Simplify', ['Max', 3, 5]]).evaluate().toString()).toBe('5');
+    expect(ce9.parse('\\mathrm{Simplify}(\\max(3, 5))').evaluate().toString()).toBe(
+      '5'
+    );
+  });
+
+  test('Simplify(D(x^2 + a x, x)) → a + 2x', () => {
+    const box = ce9
+      .box(['Simplify', ['D', ['Add', ['Power', 'x', 2], ['Multiply', 'a', 'x']], 'x']])
+      .evaluate();
+    expect(box.isSame(ce9.parse('a + 2x'))).toBe(true);
+    const parsed = ce9
+      .parse('\\mathrm{Simplify}(\\frac{d}{dx}(x^2 + a x))')
+      .evaluate();
+    expect(parsed.isSame(ce9.parse('a + 2x'))).toBe(true);
+  });
+
+  test('Simplify(Integrate(x^2, x)) → x^3/3', () => {
+    const box = ce9.box(['Simplify', ['Integrate', ['Power', 'x', 2], 'x']]).evaluate();
+    expect(box.isSame(ce9.parse('\\frac{x^3}{3}'))).toBe(true);
+    const parsed = ce9.parse('\\mathrm{Simplify}(\\int x^2 \\, dx)').evaluate();
+    expect(parsed.isSame(ce9.parse('\\frac{x^3}{3}'))).toBe(true);
+  });
+
+  test('Simplify(Determinant([[a,b],[c,d]])) → ad − bc (unassigned)', () => {
+    const det = ['Determinant', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]];
+    expect(ce9.box(['Simplify', det]).evaluate().isSame(ce9.parse('a d - b c'))).toBe(
+      true
+    );
+    expect(
+      ce9
+        .parse('\\mathrm{Simplify}(\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix})')
+        .evaluate()
+        .isSame(ce9.parse('a d - b c'))
+    ).toBe(true);
+  });
+
+  // The ruling: values substitute at the operator. With `a := 5`, the operator
+  // evaluates `a` to `5`, giving `5d − bc` — NOT the symbolic `ad − bc` the
+  // retired whitelist briefly produced via the method.
+  test('Simplify(Determinant([[a,b],[c,d]])) → 5d − bc with a := 5', () => {
+    const ce11 = new ComputeEngine();
+    ce11.assign('a', 5);
+    const det = ['Determinant', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']]];
+    expect(ce11.box(['Simplify', det]).evaluate().isSame(ce11.parse('5 d - b c'))).toBe(
+      true
+    );
+    expect(
+      ce11
+        .parse('\\mathrm{Simplify}(\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix})')
+        .evaluate()
+        .isSame(ce11.parse('5 d - b c'))
+    ).toBe(true);
   });
 
   test('the Jacobian determinant of the counterexample map reduces to -2', () => {
@@ -1717,27 +1789,9 @@ describe('simplify() evaluates structural operators', () => {
     );
     const m =
       '\\begin{bmatrix}' + rows.map((r) => r.join(' & ')).join(' \\\\ ') + '\\end{bmatrix}';
-    expect(ce10.parse(`\\det${m}`).simplify().isSame(-2)).toBe(true);
-  });
-
-  // `simplify()` is value-blind (ROADMAP Item E): `(a + 2).simplify()` is
-  // `a + 2` even when `a := 5`, and a structural head over a bound symbol
-  // evaluates to its VALUE-BLIND symbolic form — `det[[a,b],[c,d]]` → `ad − bc`
-  // (with `a` kept symbolic, NOT substituted to `5`), never the value-baked
-  // `5d − bc`. `.evaluate()` still substitutes the value.
-  test('a structural head over a valued symbol simplifies value-blind', () => {
-    const ce11 = new ComputeEngine();
-    ce11.assign('a', 5);
-    expect(ce11.parse('a + 2').simplify().toString()).toBe('a + 2');
-    const src = '\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}';
-    const det = ce11.parse(src).simplify();
-    // Value-blind symbolic determinant: `a` survives, no `5` baked in.
-    expect(det.isSame(ce11.parse('a d - b c'))).toBe(true);
-    expect(det.symbols).toContain('a');
-    // `.evaluate()` DOES use the assigned value.
-    expect(ce11.parse(src).evaluate().isSame(ce11.parse('5 d - b c'))).toBe(
-      true
-    );
+    expect(
+      ce10.box(['Simplify', ce10.parse(`\\det${m}`)]).evaluate().isSame(-2)
+    ).toBe(true);
   });
 });
 
@@ -1795,16 +1849,11 @@ describe('simplify(): cost-guarded trial expansion', () => {
   });
 });
 
-// A structural head is evaluated during simplify only when pure — an impure
-// descendant (`Random`) must not run, and simplify() stays value-blind.
-describe('simplify() structural-head evaluation is pure and value-blind', () => {
-  test('does not execute an impure descendant', () => {
-    const ce = new ComputeEngine();
-    const r = ce.box(['Simplify', ['Transpose', ['List', ['List', ['Random']]]]]).evaluate();
-    // Random() must remain unevaluated inside the (still-symbolic) transpose.
-    expect(r.toString().toLowerCase()).toContain('random');
-  });
-
+// The `.simplify()` METHOD runs no operator `evaluate` handler, so a heavy or
+// impure descendant of a structural head stays symbolic under the method. (The
+// `Simplify` OPERATOR does evaluate — its cost profile matches `Evaluate` — but
+// the method is value-blind and rule-only.)
+describe('simplify() METHOD does not run operator handlers', () => {
   test('the Simplify operator resolves a bound symbol; the method does not', () => {
     const ce = new ComputeEngine();
     ce.assign('a', 5);
@@ -1814,10 +1863,10 @@ describe('simplify() structural-head evaluation is pure and value-blind', () => 
     expect(ce.parse('a + 2').simplify().toString()).toBe('a + 2');
   });
 
-  test('does not run a heavy-compute descendant (D stays symbolic)', () => {
+  test('the method does not run a heavy-compute descendant (D stays symbolic)', () => {
     const ce = new ComputeEngine();
-    // The whitelisted `Transpose` head would evaluate the whole operand tree,
-    // running the inner `D`. It must stay symbolic per docs/SIMPLIFY.md.
+    // The method never evaluates the `Transpose` head, so the inner `D` stays
+    // symbolic per docs/SIMPLIFY.md.
     const r = ce
       .box(['Transpose', ['List', ['List', ['D', ['Power', 'x', 2], 'x']]]])
       .simplify();
@@ -1827,7 +1876,7 @@ describe('simplify() structural-head evaluation is pure and value-blind', () => 
     expect(JSON.stringify(r.json)).toContain('D');
   });
 
-  test('a plain Determinant still simplifies to ad - bc', () => {
+  test('a plain Determinant is returned unchanged by the method', () => {
     const ce = new ComputeEngine();
     const r = ce
       .box([
@@ -1835,7 +1884,7 @@ describe('simplify() structural-head evaluation is pure and value-blind', () => 
         ['List', ['List', 'a', 'b'], ['List', 'c', 'd']],
       ])
       .simplify();
-    expect(r.toString()).toBe('-b * c + a * d');
+    expect(r.operator).toBe('Determinant');
   });
 });
 

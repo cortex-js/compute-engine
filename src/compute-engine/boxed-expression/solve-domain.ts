@@ -13,7 +13,7 @@ import {
   reduceTransformerHead,
   resolveBoundSymbols,
   reduceStructuralIndex,
-  isValueDef,
+  withValueShield,
 } from './utils.js';
 import { findUnivariateRoots } from './solve.js';
 import { getPolynomialCoefficients } from './polynomials.js';
@@ -591,20 +591,33 @@ function reduceWithUnknownsShielded(
   eq: Expression,
   specs: ReadonlyArray<SolveSpec>
 ): Expression {
-  const valueBound = specs.filter((spec) => {
-    const def = ce.lookupDefinition(spec.unknown);
-    return isValueDef(def) && def.value.value !== undefined;
-  });
-  if (valueBound.length === 0) return reduceTransformerHead(eq.canonical);
+  const names = new Set(specs.map((spec) => spec.unknown));
 
-  ce.pushScope();
-  try {
-    for (const spec of valueBound)
-      ce.declare(spec.unknown, ce.symbol(spec.unknown).type.type);
-    return reduceTransformerHead(eq.canonical);
-  } finally {
-    ce.popScope();
+  // §D: an arity-1 bundled solve carries its unknowns inside a collection-shaped
+  // first argument as `Element(symbol, …)` items — visible on the canonical
+  // equation here, but not yet lifted into `specs` (that happens later, AFTER
+  // this reduction). Discover them now so a value-bound bundled unknown is
+  // shielded too. Without this, `Solve(\{Simplify(9 - w²) = 8, w ∈ -3..3\})`
+  // with `w := 9` reduced `Simplify(9 - w²)` to `-72` before learning `w` was
+  // the solve target, and returned `[]`.
+  const canonEq = eq.canonical;
+  if (
+    isFunction(canonEq, 'Set') ||
+    isFunction(canonEq, 'List') ||
+    isFunction(canonEq, 'Tuple') ||
+    isFunction(canonEq, 'And')
+  ) {
+    for (const item of canonEq.ops ?? []) {
+      if (isFunction(item, 'Element')) {
+        const u = sym(item.op1);
+        if (u !== undefined) names.add(u);
+      }
+    }
   }
+
+  return withValueShield(ce, names, () =>
+    reduceTransformerHead(eq.canonical)
+  );
 }
 
 function isExpression(x: unknown): x is Expression {

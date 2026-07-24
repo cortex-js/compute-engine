@@ -8,7 +8,10 @@ import {
   polynomialDegree,
   getPolynomialCoefficients,
 } from '../boxed-expression/polynomials.js';
-import { reduceTransformerHead } from '../boxed-expression/utils.js';
+import {
+  reduceTransformerHead,
+  withValueShield,
+} from '../boxed-expression/utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { laurentData } from './series.js';
 import {
@@ -72,8 +75,11 @@ export function symbolicLimit(
     // A transformer head (`Limit(Simplify(f), …)`, e.g. from the pipeline
     // `f |> Simplify |> Limit`) is a computation step: reduce it so the
     // structural strategies see the transformed expression rather than an
-    // opaque `Simplify` node.
-    b = reduceTransformerHead(b);
+    // opaque `Simplify` node. Shield the limit variable while reducing: the
+    // `Simplify` operator evaluates its argument, so a value-bound limit
+    // variable (`x := 5`) would fold `Simplify(x²)` to `25` before the limit
+    // is taken. It is a bound variable — its assigned value must not apply.
+    b = withValueShield(ce, [x], () => reduceTransformerHead(b));
 
     // Soundness guard for special-function poles. The structural strategies
     // (notably direct substitution) don't model the poles of Gamma/Digamma/…,

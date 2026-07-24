@@ -95,8 +95,12 @@ describe('JacobianMatrix', () => {
       'y + 3 x (1 + x y)^2 z + 3 x y^2 (4 + 3 x y)',
       '2 x - 3 x^2 y - x^3 z'
     );
+    // The `.simplify()` METHOD runs no operator handler (Ruling 2026-07-24), so
+    // the determinant is computed by `.evaluate()` and then folded to -2 by the
+    // trailing `.simplify()`.
     const det = ce
       .function('Determinant', [J(ce, fs, S(ce, 'x', 'y', 'z'))])
+      .evaluate()
       .simplify();
     expect(det.isSame(-2)).toBe(true);
   });
@@ -274,7 +278,12 @@ describe('JacobianMatrix of a bare function', () => {
         '(x, y, z) \\mapsto \\lbrack (1 + x y)^3 z + y^2 (1 + x y)(4 + 3 x y), y + 3 x (1 + x y)^2 z + 3 x y^2 (4 + 3 x y), 2 x - 3 x^2 y - x^3 z\\rbrack'
       )
     );
-    const det = ce.function('Determinant', [ce.function('JacobianMatrix', [ce.symbol('F')])]).simplify();
+    // `.evaluate()` computes the determinant (the method runs no handler); the
+    // trailing `.simplify()` folds it to the constant -2.
+    const det = ce
+      .function('Determinant', [ce.function('JacobianMatrix', [ce.symbol('F')])])
+      .evaluate()
+      .simplify();
     expect(det.isSame(-2)).toBe(true);
   });
 });

@@ -699,3 +699,29 @@ ratified together:
    (`collectBinderNames`) including quantifiers and comprehension indices.
 
 This section subsumes §C (its fix becomes one site of the audit).
+
+**User-facing doc + Cortex checklist (2026-07-24):**
+
+- **With the Item-1 ruling:** `doc/11-guide-simplify.md` — the guide currently
+  says nothing about assigned values; add the value-blindness contract
+  (method: type + assumptions, never the assigned value; `assume(w>0)` vs
+  `w := 5` contrast) and the operator/method split (`Simplify(expr)` evaluates
+  its argument first; `evaluate().simplify()` is the method-side recipe).
+  `doc/09-guide-symbolic-computing.md` — the simplify/evaluate/N table's
+  `simplify()` row gains "does not substitute assigned symbol values".
+  `docs/SIMPLIFY.md` (internal) updated to match. CHANGELOG callout: the
+  operator change is Cortex-visible (`let x = 5 … Simplify(x^2 + x)` → `30`).
+- **With §F:** `doc/10-guide-evaluate.md` — the binding convention in user
+  language (it already covers value binding/scopes).
+  `doc/85-reference-core.md` — `SymbolicBlock` entry beside `Block`/`Declare`,
+  plus the `Block(Declare(w, "real"), …)` idiom which works today.
+  `doc/81-reference-calculus.md` — bound variable stays symbolic in the
+  result; the `D` behavior change gets its own CHANGELOG callout.
+  `src/cortex/docs/for-agents.md` — "Symbolic:" tool list gains
+  `SymbolicBlock` (card is CI-verified; keep examples passing).
+- **Sequencing:** `SymbolicBlock` ships in the SAME release as the
+  Simplify-operator change — once the operator evaluates first, it is the
+  ONLY value-blind route reachable from Cortex (the `.simplify()` method is
+  not exposed there).
+- **Tycho:** note the Simplify-operator semantic change in the next round
+  (they run one release behind).

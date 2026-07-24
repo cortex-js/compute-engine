@@ -732,6 +732,32 @@ describe('SOLVE — collection-shaped first argument (lifted constraints)', () =
     ]);
     expect(isUnevaluated(expr)).toBe(true);
   });
+
+  // §D: the value-bound-unknown shield is computed from the positional specs,
+  // which are EMPTY for an arity-1 bundled solve — the unknown is discovered
+  // only when the bundled `Element` specs are lifted, AFTER the nested
+  // transformer reduces. So a value-bound bundled unknown had its global value
+  // folded away before the code learned it was the solve target. The unknown
+  // must sit DIRECTLY under the transformer (the `s := (9-w²)/4` indirection
+  // form does not exhibit the gap). A fresh engine — `assign` mutates it.
+  test('a value-bound bundled unknown is shielded (§D)', () => {
+    const fresh = new ComputeEngine();
+    fresh.assign('w', 9);
+    const eqn: Expression = [
+      'Equal',
+      ['Simplify', ['Subtract', 9, ['Power', 'w', 2]]],
+      8,
+    ];
+    const elem: Expression = ['Element', 'w', ['Range', -3, 3]];
+    // The positional form already conforms; the bundled form must match it.
+    const positional = fresh.box(['Solve', eqn, elem]);
+    const bundled = fresh.box(['Solve', ['Set', eqn, elem]]);
+    // 9 − w² = 8 ⟺ w² = 1 ⟺ w = ±1, within −3..3.
+    expect(solutions(positional)).toEqual([-1, 1]);
+    expect(solutions(bundled)).toEqual([-1, 1]);
+    // The global value survives the solve.
+    expect(fresh.box('w').evaluate().re).toBe(9);
+  });
 });
 
 describe('SOLVE — trailing bare domain-name spec (Mathematica)', () => {

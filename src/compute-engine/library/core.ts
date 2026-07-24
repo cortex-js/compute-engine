@@ -60,11 +60,7 @@ import type {
 import type { Type } from '../../common/type/types.js';
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
-import {
-  isDictionary,
-  isValueDef,
-  reduceTransformerOperand,
-} from '../boxed-expression/utils.js';
+import { isDictionary, isValueDef } from '../boxed-expression/utils.js';
 import {
   isNumber,
   isSymbol,
@@ -1317,11 +1313,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }) => {
         const raw = ops[0];
         if (raw === undefined) return undefined;
-        // `Simplify(ReplaceAll(e, …))` means "simplify the substituted
-        // expression": reduce a producer head before simplifying. The held
+        // The `Simplify` operator evaluates its argument first, then applies
+        // the simplification rules to the result — the operator counterpart of
+        // the `evaluate().simplify()` recipe. Evaluation substitutes assigned
+        // symbol values (`let x = 5; Simplify(x^2 + x)` → `30`) and subsumes the
+        // producer-head/lambda/index/value reductions `reduceTransformerOperand`
+        // performs for the other, reduce-not-evaluate transformers. The held
         // operand arrives UNBOUND, so `.canonical` first — `.evaluate()` on an
         // unbound expression does not resolve its operator definition.
-        const x = reduceTransformerOperand(raw.canonical);
+        const x = raw.canonical.evaluate();
         const assumptions = ops[1];
         if (assumptions === undefined) return x.simplify() ?? undefined;
         // A `List`/`And`/`Set` bundles several assumptions; a bare predicate is

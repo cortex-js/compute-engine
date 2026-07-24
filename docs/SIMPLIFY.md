@@ -43,42 +43,47 @@ protections are documented in
 
 ## `simplify()` and operator `evaluate` handlers
 
-`.simplify()` is **rule-driven**: it applies the simplification rule set and
-folds purely numeric subexpressions (`evaluateNumericSubexpressions` in
-`boxed-expression/simplify.ts`). It does not, in general, invoke an operator's
-`evaluate` handler.
+The `.simplify()` **method** and the `Simplify` **operator** are deliberately
+different, and the split is the whole story (Ruling 2026-07-24):
 
-The exception is a closed list of **structural** heads —
-`SIMPLIFY_EVALUABLE_HEADS`: `Determinant`, `Trace`, `Transpose`, `Length`.
-Their handlers reduce operands to a closed form determined by the operands'
-*structure* (a matrix to a scalar, a collection to a measure) rather than
-rewriting the expression, and they carry no simplification rule of their own.
-Without this they came back untouched:
+- **Method — rules only, value-blind.** `expr.simplify()` applies the
+  simplification rule set and folds purely numeric subexpressions
+  (`evaluateNumericSubexpressions` in `boxed-expression/simplify.ts`). It
+  **never** invokes an operator's `evaluate` handler, and never reads an
+  assigned symbol's value. So a head whose result comes from a handler rather
+  than a rule — `Determinant`, `Trace`, `Transpose`, `Length`, `D`,
+  `Integrate`, `Inverse`, … — comes back untouched under the method:
+
+  ```
+  ce.parse('\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}').simplify()
+  // → Determinant(Matrix([[a,b],[c,d]]))   (unchanged — no rule for it)
+  ```
+
+- **Operator — evaluate, then rules.** `Simplify(expr)` is evaluate-then-
+  simplify: it calls `.evaluate()` on its argument, then `.simplify()` on the
+  result. So it *does* run handlers and *does* substitute assigned symbol
+  values — it is the operator counterpart of the `expr.evaluate().simplify()`
+  recipe:
+
+  ```
+  ce.box(['Simplify', ['Max', 3, 5]]).evaluate()                 // → 5
+  ce.box(['Simplify', ['Determinant', [[a,b],[c,d]]]]).evaluate() // → a·d − b·c
+  // with a := 5, the operator substitutes the value:              → 5·d − b·c
+  ```
+
+The reliable ordering rule for the method stands — `expr.simplify()` alone is
+not a superset of `expr.evaluate()`:
 
 ```
-ce.parse('\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}').simplify()
-// Before → Determinant(Matrix([[a,b],[c,d]]))   Now → a·d - b·c
-```
-
-`Max`/`Min` deliberately fail that rule and are not members: they reduce their
-operands' *values*, not their structure, and the value fold is evaluation's
-job.
-
-**Everything else still needs `evaluate()` first.** `D`, `Integrate`,
-`Inverse`, and any operator whose result comes from a handler rather than a
-rule are unchanged by `simplify()`, so the ordering rule stands — `simplify()`
-alone is not a superset of `evaluate()`:
-
-```
-expr.evaluate().simplify()   // the reliable order
+expr.evaluate().simplify()   // the reliable order (method-side recipe)
 ```
 
 `N()` runs handlers too, but yields the float form rather than the exact one.
 
-### `simplify()` is value-blind
+### The method is value-blind
 
-`.simplify()` never substitutes an assigned symbol value, and never reads it —
-not its magnitude, and not its **sign or parity**. For the duration of a
+`expr.simplify()` never substitutes an assigned symbol value, and never reads it
+— not its magnitude, and not its **sign or parity**. For the duration of a
 `.simplify()` call, every assigned non-constant symbol is shadowed *valueless*
 (keeping its declared type), so its sign/parity come from its type and in-scope
 assumptions, never its value:
@@ -88,17 +93,15 @@ assumptions, never its value:
 - with `w := 5`, `|w|.simplify()` stays `|w|` and `√(w²).simplify()` is `|w|` —
   the sign is *not* baked in, so the result is still correct after `w := -3`
   (whereas `assume(w > 0)` *does* license `|w| → w`, because an assumption is
-  not a value);
-- structural heads evaluate value-blindly too: with `a := 5`,
-  `det[[a,b],[c,d]].simplify()` is the symbolic `a·d − b·c` (the `5` is not
-  substituted), whereas `.evaluate()` gives `5·d − b·c`.
+  not a value).
 
 Constants (`π`, `e`, …) keep their value — their value *is* their identity.
 
-This is separate from the **`Simplify` operator**, which does resolve bound
-symbols in its argument (an operator evaluates its arguments; `lazy` there only
-protects the operand's structure). So `Simplify(v)` with `v := (x²-1)/(x-1)`
-gives `x + 1`, while `ce.symbol('v').simplify()` gives `v`.
+The **operator** does the opposite by design: `Simplify(v)` with
+`v := (x²-1)/(x-1)` gives `x + 1` (evaluation resolves `v`), while the method
+`ce.symbol('v').simplify()` gives `v`. The other transformers (`Expand`,
+`Factor`, `Together`, `Distribute`) keep their reduce-not-evaluate behavior —
+they resolve bound symbols in their operand but do not run a full evaluation.
 
 ---
 

@@ -876,6 +876,60 @@ function isAssignedVariableName(ce: Expression['engine'], name: string): boolean
   return true;
 }
 
+/**
+ * Run `fn` with each name in `names` shielded from its assigned value: for the
+ * duration of the call, the symbol is shadow-declared VALUELESS (keeping its
+ * declared type; in-scope assumptions survive) in a temporary scope.
+ *
+ * This is the shared mechanism behind the binder convention (ARCHITECTURE.md,
+ * "Bound variables, free symbols, and assigned values"): a variable a binder
+ * owns (`Solve`/`Integrate`/`Limit`/`D`/`Sum`/…) is a pure symbol, so a
+ * same-named global assignment must not leak into the operation OR its result.
+ *
+ * Only names carrying a USER-ASSIGNED, non-constant value are shielded — a
+ * valueless or built-in-constant name needs no shield (and a constant must not
+ * be stripped). When none qualify, `fn` runs directly with no scope push, so
+ * the common case (no contradictory assignment) has zero overhead and cannot
+ * change behavior.
+ *
+ * Re-entrancy is naturally safe: a shielded symbol no longer reads as assigned,
+ * so a nested `withValueShield` over the same name finds nothing to shield.
+ */
+export function withValueShield<T>(
+  ce: ComputeEngine,
+  names: Iterable<string>,
+  fn: () => T
+): T {
+  const shielded: { name: string; type: string }[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    if (!isAssignedVariableName(ce, name)) continue;
+    // Capture the declared type as a STRING; passing the BoxedType object to
+    // `declare` throws "type invalid".
+    shielded.push({ name, type: ce.box(name).type.toString() });
+  }
+  if (shielded.length === 0) return fn();
+
+  ce.pushScope();
+  try {
+    for (const { name, type } of shielded) {
+      // Skip an exotic type that fails to round-trip through `declare` rather
+      // than aborting the whole operation: a rare value leak is better than a
+      // thrown evaluation.
+      try {
+        ce.declare(name, { type });
+      } catch {
+        /* leave this symbol unshadowed */
+      }
+    }
+    return fn();
+  } finally {
+    ce.popScope();
+  }
+}
+
 export function isOperatorDef(
   def: BoxedDefinition | undefined
 ): def is TaggedOperatorDefinition {

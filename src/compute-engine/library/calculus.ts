@@ -10,8 +10,8 @@ import {
   defaultUnknown,
   hasSymbolicTranscendental,
   resolveToList,
-  isValueDef,
   collectBinderNames,
+  withValueShield,
 } from '../boxed-expression/utils.js';
 import {
   isFunction,
@@ -670,47 +670,62 @@ volumes
 
         return ce._fn('D', [f, ...ops!.slice(1)], { scope });
       },
-      evaluate: (ops, { engine: _engine }) => {
+      evaluate: (ops, { engine: ce }) => {
         // Guard against a malformed `D` with no operand (see the canonical
         // handler above): there is nothing to differentiate, so leave it
         // unevaluated rather than crashing on `ops[0].canonical`.
         if (!ops[0]) return undefined;
-        let f: Expression | undefined = ops[0].canonical;
 
-        // Unwrap Function literals to get the body for differentiation.
-        // For non-Function expressions (e.g., ['f', 'x']), do NOT call
-        // .evaluate() before differentiating — that would prematurely
-        // substitute variable values (e.g., x=5) and lose structural info.
-        if (isFunction(f, 'Function')) {
-          f = f.op1;
+        // The differentiation variable(s) are bound by `D`: a same-named global
+        // assignment (`x := 5`) must not substitute into the result. Shield
+        // them across the whole evaluation — the final `.evaluate()` of the
+        // symbolic derivative would otherwise resolve the variable's value
+        // (`D(x², x)` → `2x`, then `10`). Other free symbols still resolve
+        // normally: with `a := 3`, `D(a·x², x)` → `6x`.
+        const diffVars: string[] = [];
+        for (const p of ops.slice(1)) {
+          const n = sym(p);
+          if (n) diffVars.push(n);
         }
 
-        const params = ops.slice(1);
-        if (params.length === 0) f = undefined;
-        for (const param of params) {
-          const paramSym = sym(param);
-          if (!paramSym) {
-            f = undefined;
-            break;
+        return withValueShield(ce, diffVars, () => {
+          let f: Expression | undefined = ops[0].canonical;
+
+          // Unwrap Function literals to get the body for differentiation.
+          // For non-Function expressions (e.g., ['f', 'x']), do NOT call
+          // .evaluate() before differentiating — that would prematurely
+          // substitute variable values (e.g., x=5) and lose structural info.
+          if (isFunction(f, 'Function')) {
+            f = f.op1;
           }
-          f = differentiate(f!, paramSym);
-          if (f === undefined) break;
-        }
-        f = f?.canonical;
-        // Avoid recursive evaluation
-        if (f?.operator === 'D') return f;
-        // Avoid evaluating symbolic derivative applications like Digamma'(x)
-        // which would incorrectly evaluate to 0
-        if (
-          f?.operator === 'Apply' &&
-          isFunction(f) &&
-          f.op1?.operator === 'Derivative'
-        )
-          return f;
-        // If the result contains symbolic transcendentals (like ln(2)),
-        // return it without full evaluation to preserve the symbolic form
-        if (f && hasSymbolicTranscendental(f)) return f;
-        return f?.evaluate();
+
+          const params = ops.slice(1);
+          if (params.length === 0) f = undefined;
+          for (const param of params) {
+            const paramSym = sym(param);
+            if (!paramSym) {
+              f = undefined;
+              break;
+            }
+            f = differentiate(f!, paramSym);
+            if (f === undefined) break;
+          }
+          f = f?.canonical;
+          // Avoid recursive evaluation
+          if (f?.operator === 'D') return f;
+          // Avoid evaluating symbolic derivative applications like Digamma'(x)
+          // which would incorrectly evaluate to 0
+          if (
+            f?.operator === 'Apply' &&
+            isFunction(f) &&
+            f.op1?.operator === 'Derivative'
+          )
+            return f;
+          // If the result contains symbolic transcendentals (like ln(2)),
+          // return it without full evaluation to preserve the symbolic form
+          if (f && hasSymbolicTranscendental(f)) return f;
+          return f?.evaluate();
+        });
       },
     },
 
@@ -878,53 +893,22 @@ volumes
         if (names.length === 0) return undefined;
 
         // A differentiation variable that ALSO carries a global value (`x := 5`
-        // then differentiate w.r.t. `x`) is contradictory: evaluating `D(x²y,
-        // x)` would substitute `5` and yield a wrong derivative. Differentiate
-        // against a fresh unbound symbol in that case, then rename back. Only
-        // the offending variables are renamed, so the common case is untouched.
-        const boundNames = names.filter((n) => {
-          const def = ce.lookupDefinition(n);
-          return isValueDef(def) && def.value.value !== undefined;
-        });
-        const rename = new Map<string, string>();
-        for (const n of boundNames) {
-          let fresh = `__jac_${n}`;
-          while (ce.lookupDefinition(fresh) !== undefined) fresh = `_${fresh}`;
-          rename.set(n, fresh);
-        }
-        const forward = (e: Expression) =>
-          rename.size === 0
-            ? e
-            : e.subs(
-                Object.fromEntries(
-                  [...rename].map(([a, b]) => [a, ce.symbol(b)])
-                )
-              );
-        const back = (e: Expression) =>
-          rename.size === 0
-            ? e
-            : e.subs(
-                Object.fromEntries(
-                  [...rename].map(([a, b]) => [b, ce.symbol(a)])
-                )
-              );
+        // then differentiate w.r.t. `x`) is a bound variable: evaluating
+        // `D(x²y, x)` must differentiate, not substitute `5`. Shield the
+        // differentiation variables' values for the whole computation (the
+        // shared binder helper), leaving the result symbolic in them.
+        const row = (f: Expression): Expression[] =>
+          names.map((n) => ce.function('D', [f, ce.symbol(n)]).evaluate());
 
-        const row = (f: Expression): Expression[] => {
-          const rf = forward(f);
-          return names.map((n) =>
-            back(
-              ce.function('D', [rf, ce.symbol(rename.get(n) ?? n)]).evaluate()
-            )
+        return withValueShield(ce, names, () => {
+          // Gradient: a flat vector, directly usable as one. A system: a
+          // matrix, which `Determinant` accepts when it is square.
+          if (!isSystem) return ce.function('List', row(fs[0]));
+          return ce.function(
+            'List',
+            fs.map((f) => ce.function('List', row(f)))
           );
-        };
-
-        // Gradient: a flat vector, directly usable as one. A system: a matrix,
-        // which `Determinant` accepts when it is square.
-        if (!isSystem) return ce.function('List', row(fs[0]));
-        return ce.function(
-          'List',
-          fs.map((f) => ce.function('List', row(f)))
-        );
+        });
       },
     },
 
@@ -1086,17 +1070,36 @@ volumes
           ]);
         }
 
-        let expr = ops[0];
-        const argNames = isFunction(expr)
-          ? expr.ops.slice(1).map((x) => sym(x))
-          : [];
-
         const limitsSequence = ops.slice(1);
 
         // Indefinite integral?
         if (limitsSequence.length === 0) {
           return undefined;
         }
+
+        // The integration variable(s) are bound by `Integrate`: a same-named
+        // global assignment (`x := 5`) must not substitute into the
+        // antiderivative computation or its result. Shield them for the whole
+        // symbolic pass so `∫ x² dx` stays `x³/3` (not `125/3`) and
+        // `∫₀¹ x² dx` is `1/3` (not `0`). The names come from the limits and,
+        // as a fallback, the integrand function-literal's parameters.
+        const intVarNames: string[] = [];
+        for (const l of limitsSequence)
+          if (isFunction(l)) {
+            const v = sym(l.op1);
+            if (v && v !== 'Nothing') intVarNames.push(v);
+          }
+        if (isFunction(ops[0]))
+          for (const p of ops[0].ops.slice(1)) {
+            const n = sym(p);
+            if (n) intVarNames.push(n);
+          }
+
+        return withValueShield(ce, intVarNames, () => {
+        let expr = ops[0];
+        const argNames = isFunction(expr)
+          ? expr.ops.slice(1).map((x) => sym(x))
+          : [];
 
         let isIndefinite = true;
         for (let i = limitsSequence.length - 1; i >= 0; i--) {
@@ -1223,6 +1226,7 @@ volumes
           return expr.evaluate({ numericApproximation });
         }
         return expr;
+        });
       },
     },
 
@@ -1525,7 +1529,10 @@ volumes
           isSymbol(x) &&
           !isFunction(f, 'Function')
         ) {
-          if (f.canonical.unknowns.includes(x.symbol)) {
+          // Syntactic occurrence (`.has`), not `.unknowns`: the middle operand
+          // is the bound expansion variable, so it counts even when it also
+          // carries a global value (`x := 5`), which drops it from `.unknowns`.
+          if (f.canonical.has(x.symbol)) {
             const fn = canonicalFunctionLiteralArguments(engine, [f, x]);
             if (!fn) return null;
             return engine._fn('Limit', [
