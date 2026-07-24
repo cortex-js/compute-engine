@@ -1,6 +1,7 @@
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { ListType } from '../../common/type/types.js';
+import { ListType, Type, TypeString } from '../../common/type/types.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   isTensorValue,
   packTensor,
@@ -63,6 +64,49 @@ function lazyConstantMatrix(
     ['Function', ['Tabulate', ['Function', cell, 'j'], n], 'i'],
     m,
   ]);
+}
+
+/**
+ * Result type of `Transpose`/`ConjugateTranspose`: the element type is
+ * preserved and two axes of the shape (default: the last two) are swapped, so
+ * it can be reported from the operand's type. A scalar or rank-1 vector
+ * transposes to itself. Without this handler, the generic `value` from the
+ * signature made `Transpose(JacobianMatrix(…))` — typed `matrix` by its own
+ * type handler — unusable inside `Multiply` (`incompatible-type`), while the
+ * directly-nested `Determinant(JacobianMatrix(…))` worked.
+ */
+function transposedType(
+  ops: ReadonlyArray<Expression>
+): Type | TypeString | BoxedType | undefined {
+  const m = ops[0];
+  if (m === undefined) return 'value';
+  if (m.isNumber) return m.type;
+  const t = m.type.type;
+  if (typeof t === 'string' || t.kind !== 'list') return 'value';
+  const dims = t.dimensions;
+  // Rank unknown: the element type is still preserved, but no shape claim.
+  if (!dims) return { kind: 'list', elements: t.elements };
+  // Scalar-ish or vector (rank ≤ 1): identity.
+  if (dims.length <= 1) return m.type;
+  let axis1 = dims.length - 1;
+  let axis2 = dims.length;
+  if (ops.length === 3) {
+    const a1 = ops[1].re;
+    const a2 = ops[2].re;
+    // Non-literal axes: keep the element type, drop the shape claim.
+    if (!Number.isInteger(a1) || !Number.isInteger(a2))
+      return { kind: 'list', elements: t.elements };
+    if (a1 <= 0 || a1 > dims.length || a2 <= 0 || a2 > dims.length)
+      return 'value';
+    axis1 = a1;
+    axis2 = a2;
+  }
+  const swapped = [...dims];
+  [swapped[axis1 - 1], swapped[axis2 - 1]] = [
+    swapped[axis2 - 1],
+    swapped[axis1 - 1],
+  ];
+  return { kind: 'list', elements: t.elements, dimensions: swapped };
 }
 
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
@@ -242,6 +286,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Transpose a matrix or swap two tensor axes.',
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
+      type: transposedType,
       evaluate: (ops, { engine: ce }) => {
         let op1 = ops[0];
 
@@ -290,6 +335,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'Conjugate transpose (Hermitian adjoint) of a matrix or tensor.',
       complexity: 8200,
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
+      type: transposedType,
       evaluate: (ops, { engine: ce }) => {
         const op1 = ops[0];
 

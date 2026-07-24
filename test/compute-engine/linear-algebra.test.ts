@@ -889,6 +889,27 @@ describe('Transpose', () => {
       `[[[a,c,"e_1",g],[b,d,"f_1",h]],[["i_1",k,m,o],[j,l,"n_1",p]],[[q,s,u,w],[r,t,v,"x_1"]]]`
     );
   });
+
+  // Regression: with no type handler, `Transpose` reported the signature's
+  // generic `value`, so an unevaluated `Transpose(m)` was rejected as an
+  // operand of matrix arithmetic (`incompatible-type` inside `Multiply`).
+  it('reports the transposed static type (element type kept, axes swapped)', () => {
+    const m23 = ce.expr([
+      'List',
+      ['List', 1, 2, 3],
+      ['List', 4, 5, 6],
+    ]);
+    expect(ce.expr(['Transpose', m23]).type.toString()).toBe(
+      'matrix<finite_integer^(3x2)>'
+    );
+    expect(ce.expr(['ConjugateTranspose', m23]).type.toString()).toBe(
+      'matrix<finite_integer^(3x2)>'
+    );
+    // Vector: transpose is the identity, type included.
+    expect(ce.expr(['Transpose', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'vector<finite_integer^3>'
+    );
+  });
 });
 
 describe('ConjugateTranspose', () => {

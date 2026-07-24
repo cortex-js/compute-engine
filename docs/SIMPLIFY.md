@@ -103,6 +103,16 @@ The **operator** does the opposite by design: `Simplify(v)` with
 `Factor`, `Together`, `Distribute`) keep their reduce-not-evaluate behavior —
 they resolve bound symbols in their operand but do not run a full evaluation.
 
+**Operator-surface value-blindness — `SymbolicBlock`.** Since the `Simplify`
+operator now evaluates its argument first, and the `.simplify()` method is not
+reachable from the operator surface (e.g. Cortex), the value-blind route there
+is `SymbolicBlock(body)`: it shields the assigned free symbols of `body` (all
+of them, or a listed subset) so they stay symbolic — declared type and
+assumptions apply, the assigned value does not — for the duration of the
+evaluation. `SymbolicBlock(Simplify(|w|))` with `w := 5` is `|w|`, where the
+bare `Simplify(|w|)` is `5`. It shares the shadow-scope shield described above
+(`withValueShield`, `boxed-expression/utils.ts`).
+
 ---
 
 ## Generic-real simplification policy

@@ -1094,6 +1094,65 @@ describe('DEFINITE INTEGRATION', () => {
     ));
 });
 
+// Regression: the numeric branch of `Integrate.evaluate` used to read only the
+// FIRST limit, so `.N()` on a multi-limit integral silently integrated one
+// dimension and dropped the rest (∫∫ 1 dx dy over [0,3]×[0,2] gave 3, and a
+// multivariate integrand gave NaN). Multiple limits now do iterated quadrature.
+describe('MULTIPLE INTEGRALS: .N() uses every limit', () => {
+  // A quadrature result is `Measurement(value, error)`, but a zero error
+  // (exact GK on a polynomial) simplifies to the bare value.
+  const nValue = (F: ReturnType<typeof engine.expr>): number => {
+    const r = F.N();
+    return r.operator === 'Measurement' ? r.op1.re : r.re;
+  };
+
+  test('∫∫ 1 over [0,3]×[0,2] (was 3)', () => {
+    const F = engine.expr([
+      'Integrate',
+      1,
+      ['Limits', 'x', 0, 3],
+      ['Limits', 'y', 0, 2],
+    ]);
+    expect(F.evaluate().re).toBe(6);
+    expect(nValue(F)).toBeCloseTo(6, 10);
+  });
+
+  test('∫∫ x·y over [0,3]×[0,2] (was NaN)', () => {
+    const F = engine.expr([
+      'Integrate',
+      ['Multiply', 'x', 'y'],
+      ['Limits', 'x', 0, 3],
+      ['Limits', 'y', 0, 2],
+    ]);
+    expect(F.evaluate().re).toBe(9);
+    expect(nValue(F)).toBeCloseTo(9, 10);
+  });
+
+  test('∫∫∫ x·y·z over [0,1]³', () => {
+    const F = engine.expr([
+      'Integrate',
+      ['Multiply', 'x', 'y', 'z'],
+      ['Limits', 'x', 0, 1],
+      ['Limits', 'y', 0, 1],
+      ['Limits', 'z', 0, 1],
+    ]);
+    expect(nValue(F)).toBeCloseTo(0.125, 10);
+  });
+
+  test('a bound depending on another integration variable declines', () => {
+    // `Limits(x, 0, y)` does not numericize: iterated numeric quadrature over
+    // a non-product domain is not supported, so `.N()` must keep the integral
+    // inert rather than integrate wrongly.
+    const F = engine.expr([
+      'Integrate',
+      1,
+      ['Limits', 'x', 0, 'y'],
+      ['Limits', 'y', 0, 2],
+    ]);
+    expect(F.N().has('Integrate')).toBe(true);
+  });
+});
+
 // Regression for CORRECTNESS_FINDINGS P0-1: when no antiderivative can be
 // found, `evaluate()` must keep the definite integral inert (symbolic) rather
 // than wrapping the inert `Integrate` in `EvaluateAt`. Beta-reducing the

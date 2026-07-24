@@ -45,6 +45,25 @@ describe('JacobianMatrix', () => {
     ).toBe('2x * y');
   });
 
+  // Regression: `Transpose` had no type handler, so `Transpose(J)` reported
+  // the signature's generic `value` and `Multiply(Transpose(J), J)` — the
+  // Gram-matrix idiom JᵀJ — errored with `incompatible-type` unless `J` was
+  // pre-evaluated. (`Determinant(J)` worked; its signature claims `number`.)
+  test('composes with Transpose inside Multiply (JᵀJ)', () => {
+    const ce = new ComputeEngine();
+    const jm = ce.function('JacobianMatrix', [
+      L(ce, 'x y', 'x+y'),
+      S(ce, 'x', 'y'),
+    ]);
+    expect(ce.function('Transpose', [jm]).type.matches('matrix')).toBe(true);
+    expect(
+      ce
+        .function('Multiply', [ce.function('Transpose', [jm]), jm])
+        .evaluate()
+        .toString()
+    ).toBe('[[y^2 + 1,x * y + 1],[x * y + 1,x^2 + 1]]');
+  });
+
   test('static type follows the operand shape', () => {
     const ce = new ComputeEngine();
     expect(

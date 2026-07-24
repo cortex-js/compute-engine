@@ -235,7 +235,8 @@ Verified operator names, so you don't have to guess (search for more with
 - **Strings**: `Characters`, `StringJoin`, `StringSplit(s)` (splits on
   whitespace by default), `String(x)`.
 - **Dictionaries**: `Keys`, `Values`.
-- **Symbolic**: `Simplify`, `Solve(eq == v, x)`, `D(expr, x)`,
+- **Symbolic**: `Simplify`, `SymbolicBlock(body)` (evaluate `body` with its
+  assigned symbols kept symbolic), `Solve(eq == v, x)`, `D(expr, x)`,
   `Derivative(f)`, `Integrate`, `N`, `Type`.
 
 Caution: `Head` and `Tail` exist but are **structural** operators

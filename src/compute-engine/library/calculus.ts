@@ -24,6 +24,7 @@ import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { BoxedNumber } from '../boxed-expression/boxed-number.js';
 
 import {
+  applicable,
   applicableN1,
   canonicalFunctionLiteral,
   canonicalFunctionLiteralArguments,
@@ -208,6 +209,82 @@ function improperEndpointValue(
   if (fLower === undefined) return undefined;
   const result = fUpper.sub(fLower).evaluate({ numericApproximation });
   return result.isNaN === true ? undefined : result;
+}
+
+/**
+ * Iterated numeric quadrature for a multi-limit `Integrate`, e.g.
+ * `Integrate(f, Limits(x, 0, 3), Limits(y, 0, 2))`. All bounds must be
+ * numeric constants (a product domain, so by Fubini the nesting order is
+ * immaterial); a bound that depends on another integration variable does not
+ * numericize and declines (returns `undefined`, keeping the integral
+ * symbolic) rather than integrating wrongly.
+ */
+function nIntegrateMultiple(
+  ce: ComputeEngine,
+  f: Expression,
+  limits: ReadonlyArray<Expression>
+): Expression | undefined {
+  const vars: string[] = [];
+  const bounds: [number, number][] = [];
+  for (const l of limits) {
+    if (!isFunction(l)) return undefined;
+    const v = sym(l.op1);
+    if (!v || v === 'Nothing') return undefined;
+    const lower = l.op2.N().re;
+    const upper = l.op3.N().re;
+    if (isNaN(lower) || isNaN(upper)) return undefined;
+    vars.push(v);
+    bounds.push([lower, upper]);
+  }
+
+  const fnExpr =
+    f.operator === 'Function' ? f : ce.expr(['Function', f, ...vars]);
+
+  // Map each integration variable to its parameter slot: a user-supplied
+  // `Function` may list its parameters in a different order than the limits.
+  // A variable with no parameter slot, a duplicated variable, or a spare
+  // parameter (which would be left unbound) all decline.
+  const params = isFunction(fnExpr)
+    ? fnExpr.ops.slice(1).map((p) => sym(p))
+    : [];
+  const slots = vars.map((v) => params.indexOf(v));
+  if (
+    params.length !== vars.length ||
+    slots.some((i) => i < 0) ||
+    new Set(slots).size !== slots.length
+  )
+    return undefined;
+
+  const compiled = implicitCompile(ce, fnExpr);
+  let jsf: (...args: number[]) => number;
+  if (compiled?.success) jsf = compiled.run as (...args: number[]) => number;
+  else {
+    const app = applicable(fnExpr);
+    jsf = (...args: number[]) =>
+      app(args.map((x) => ce.number(x)))?.re ?? NaN;
+  }
+
+  // Nested adaptive Gauss–Kronrod, one level per limit; a level that fails to
+  // converge falls back to 1-D Monte Carlo (as the single-limit path does).
+  // `argv` is shared across levels — recursion is strictly sequential.
+  const argv = new Array<number>(vars.length).fill(NaN);
+  const last = limits.length - 1;
+  const integrateDim = (dim: number): { estimate: number; error: number } => {
+    const g = (t: number): number => {
+      argv[slots[dim]] = t;
+      return dim === last ? jsf(...argv) : integrateDim(dim + 1).estimate;
+    };
+    const [lower, upper] = bounds[dim];
+    const gk = adaptiveQuadrature(g, lower, upper);
+    if (gk.converged && Number.isFinite(gk.estimate)) return gk;
+    return monteCarloEstimate(g, lower, upper, 1e4, ce._deadline);
+  };
+
+  // The reported uncertainty is the outermost level's own error estimate:
+  // inner-level quadrature error reaches the outer estimator as integrand
+  // noise, so it is already reflected there.
+  const r = integrateDim(0);
+  return ce.expr(['Measurement', ce.number(r.estimate), ce.number(r.error)]);
 }
 
 /**
@@ -989,6 +1066,12 @@ volumes
         if (numericApproximation) {
           // If a numeric approximation is requested, equivalent to NIntegrate
           const f = ops[0];
+
+          // Multiple limits (`Integrate(f, Limits(x,…), Limits(y,…))`):
+          // iterated quadrature over every limit. The single-limit path below
+          // reads only `ops[1]` and would silently drop the other dimensions.
+          if (ops.length > 2) return nIntegrateMultiple(ce, f, ops.slice(1));
+
           const firstLimit = ops[1];
           if (!isFunction(firstLimit)) return undefined;
           const [lower, upper] = [firstLimit.op2.N().re, firstLimit.op3.N().re];

@@ -172,6 +172,28 @@
   ce.box(['IsMissing', 'NaN']).evaluate(); // → True
   ```
 
+- **`SymbolicBlock(body)` — the value-blind evaluation route from the operator
+  surface.** A binder that shields the assigned free symbols of its body: for
+  the duration of the evaluation each such symbol becomes a pure symbol (its
+  declared type and in-scope assumptions apply, its assigned value does not),
+  analogous to Mathematica's `Block[{x}, …]`. Now that the `Simplify` operator
+  evaluates its argument first, `SymbolicBlock` is the only value-blind route
+  reachable from Cortex (the `.simplify()` method is not exposed there). Shield
+  every assigned symbol, or a listed subset with a second `List`/`Set`/`Tuple`
+  or single-symbol operand. Constants are never shielded, in-scope assumptions
+  survive the shield, and the global values are intact afterwards.
+
+  ```js
+  ce.assign('x', 5);
+  ce.assign('a', 3);
+  ce.box([
+    'SymbolicBlock',
+    ['Together', ['Add', ['Divide', 1, 'x'], ['Divide', 'a', ['Power', 'x', 2]]]],
+  ]).evaluate(); // → (a + x) / x²   (without the wrapper: 8/25)
+  ce.box(['SymbolicBlock', ['Add', ['Power', 'x', 2], 'a'], ['List', 'a']]).evaluate();
+  // → 25 + a   (x resolves, a shielded)
+  ```
+
 ### Improvements
 
 - **`declare()` accepts `inferredSignature: true`, to vouch that a name is an
@@ -455,6 +477,33 @@
   element-wise, and `Length(At(p, I))` compiles.
 
 ### Bug Fixes
+
+- **`.N()` on a multi-limit `Integrate` no longer drops all but the first
+  limit.** The numeric-approximation branch read only the first `Limits`
+  operand, so `Integrate(f, Limits(x,0,3), Limits(y,0,2))` numericized as a
+  single-variable integral — `∫∫ 1` over `[0,3]×[0,2]` gave `3` (a wrong
+  value, not a decline) and a multivariate integrand gave `NaN`. Multiple
+  limits now perform iterated adaptive Gauss–Kronrod quadrature (Monte-Carlo
+  fallback per level, as for a single limit). A bound that depends on another
+  integration variable declines (the integral stays inert) rather than
+  integrating wrongly.
+
+- **`Transpose`/`ConjugateTranspose` report the transposed static type.** They
+  had no type handler, so an unevaluated `Transpose(m)` typed as the generic
+  `value` and was rejected by matrix arithmetic: `Multiply(Transpose(J), J)`
+  for `J = JacobianMatrix(…)` — the Gram-matrix idiom JᵀJ — errored with
+  `incompatible-type` unless `J` was evaluated first. Both now preserve the
+  element type and swap the shape's axes (`matrix<T^(2x3)>` →
+  `matrix<T^(3x2)>`).
+
+- **`simplify()` reaches trig identities inside a quotient.** Recursion into
+  `Divide` operands is deliberately withheld to preserve factored structure
+  for common-factor cancellation, but that also blocked operand-local trig
+  reductions: `(r·cosθ)/(r·sin²θ + r·cos²θ)` didn't simplify even though the
+  denominator alone reduces to `r`. Trig-bearing operands of a `Divide` now
+  get the full recursion (the same carve-out `Add`/`Multiply` already made),
+  so it simplifies to `cos(θ)`; factored-polynomial cancellation is
+  unaffected.
 
 - **Value-resolution overreach in the lazy-operand fixes.** The machinery that
   lets `Solve`/`Simplify`/`JacobianMatrix` see through a held operand resolved

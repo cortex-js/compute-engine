@@ -60,7 +60,12 @@ import type {
 import type { Type } from '../../common/type/types.js';
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
-import { isDictionary, isValueDef } from '../boxed-expression/utils.js';
+import {
+  isDictionary,
+  isValueDef,
+  assignedVariableNames,
+  withValueShield,
+} from '../boxed-expression/utils.js';
 import {
   isNumber,
   isSymbol,
@@ -86,6 +91,23 @@ function isRefutablePipeTarget(f: Expression): boolean {
   return (
     isNumber(f) || isString(f) || isSymbol(f, 'True') || isSymbol(f, 'False')
   );
+}
+
+/** The symbol names named by a `SymbolicBlock` subset spec: a single symbol,
+ * or the symbol members of a `List`/`Set`/`Tuple`. Non-symbol members are
+ * ignored. */
+function symbolicBlockShieldNames(spec: Expression): string[] {
+  if (isSymbol(spec)) return [spec.symbol];
+  if (
+    isFunction(spec, 'List') ||
+    isFunction(spec, 'Set') ||
+    isFunction(spec, 'Tuple')
+  ) {
+    const names: string[] = [];
+    for (const op of spec.ops) if (isSymbol(op)) names.push(op.symbol);
+    return names;
+  }
+  return [];
 }
 
 // Split a string into grapheme clusters (UAX #29, via `Intl.Segmenter`).
@@ -1340,6 +1362,53 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         } finally {
           ce.popScope();
         }
+      },
+    },
+
+    SymbolicBlock: {
+      description: [
+        'SymbolicBlock(body): evaluate `body` with its assigned free symbols',
+        'shielded — each such symbol becomes a pure symbol (its declared type',
+        'and in-scope assumptions apply, its assigned value does NOT) for the',
+        'duration. The value-blind counterpart of evaluating `body` directly;',
+        "analogous to Mathematica's `Block[{x}, …]`.",
+        'SymbolicBlock(body, [x, y]): shield only the listed symbols (a List,',
+        'Set, Tuple, or a single symbol); every other symbol resolves normally.',
+        'Constants (`Pi`, `ExponentialE`, …) are never shielded, assumptions',
+        'survive the shield, and the global values are intact afterwards.',
+      ],
+      // Hold the body: it must NOT evaluate before the shield exists, or a
+      // same-named assigned value would substitute first.
+      lazy: true,
+      signature: '(any, any?) -> expression',
+      type: ([x]) => x?.type ?? undefined,
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length === 0)
+          return ce._fn('SymbolicBlock', checkArity(ce, ops, 1));
+        if (ops.length > 2)
+          return ce._fn('SymbolicBlock', checkArity(ce, ops, 2));
+        return ce._fn('SymbolicBlock', ops);
+      },
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        const raw = ops[0];
+        if (raw === undefined) return undefined;
+        // The held operand arrives UNBOUND on the box/parse routes; `.canonical`
+        // binds its structure. `.canonical` is value-safe — it does NOT
+        // substitute assigned symbol values, so the shield names computed below
+        // still see the symbols.
+        const body = raw.canonical;
+        // Compute the shield names from the (canonical) body, THEN evaluate
+        // inside the shield: an explicit list/set/tuple/symbol restricts the
+        // shield to those names; otherwise every assigned, non-constant free
+        // symbol of the body is shielded.
+        const spec = ops[1];
+        const names =
+          spec === undefined
+            ? assignedVariableNames(body)
+            : symbolicBlockShieldNames(spec.canonical);
+        return withValueShield(ce, names, () =>
+          body.evaluate({ numericApproximation })
+        );
       },
     },
 

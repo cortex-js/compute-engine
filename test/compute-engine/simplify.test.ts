@@ -1485,6 +1485,40 @@ describe('Fu Advanced Tests', () => {
   });
 });
 
+// Regression: `simplifyOperands` deliberately does not recurse into `Divide`
+// operands (preserving factored structure for cancelCommonFactors), so a
+// Pythagorean reduction in a numerator/denominator never fired: the
+// denominator of (r·cosθ)/(r·sin²θ + r·cos²θ) simplifies to r on its own, but
+// the fraction stayed untouched. Trig-bearing operands now get the full
+// recursion (the same carve-out the Add/Multiply lazy branch makes).
+describe('DIVIDE RECURSES INTO TRIG-BEARING OPERANDS', () => {
+  test('(r·cosθ)/(r·sin²θ + r·cos²θ) → cos(θ)', () => {
+    expect(
+      ce
+        .parse('\\frac{r\\cos\\theta}{r\\sin^2\\theta + r\\cos^2\\theta}')
+        .simplify()
+        .toString()
+    ).toBe('cos(theta)');
+  });
+
+  test('x/(sin²θ + cos²θ) → x', () => {
+    expect(
+      ce
+        .parse('\\frac{x}{\\sin^2\\theta + \\cos^2\\theta}')
+        .simplify()
+        .toString()
+    ).toBe('x');
+  });
+
+  // The factored-structure preservation that motivated the no-recursion rule
+  // must survive the carve-out.
+  test('factored cancellation still holds: (x-1)(x+2)/((x-1)(x+3))', () => {
+    expect(
+      ce.parse('\\frac{(x-1)(x+2)}{(x-1)(x+3)}').simplify().toString()
+    ).toBe('(x + 2) / (x + 3)');
+  });
+});
+
 describe('AUTO PARTIAL FRACTION IN SIMPLIFY', () => {
   const engine = ce;
 

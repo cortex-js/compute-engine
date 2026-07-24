@@ -700,6 +700,41 @@ ratified together:
 
 This section subsumes §C (its fix becomes one site of the audit).
 
+**Outcome — Item-1 ruling + binder audit LANDED 2026-07-24** (committed
+`6c300185`). **`SymbolicBlock` LANDED 2026-07-24** (staged): lazy binder in
+`library/core.ts` over the shared shield; all-symbols and subset forms;
+assumptions survive; box+parse routes pinned (20 tests,
+`symbolic-block.test.ts`); default `\mathrm{SymbolicBlock}(…)` LaTeX
+round-trips, no dictionary entry needed; zero snapshot churn (third wave in a
+row). One adjacent quirk re-confirmed (pre-existing, also affects the method):
+an assumption registered AFTER `assign` is not retained — assume-then-assign
+works. `Simplify` operator evaluates-then-simplifies; whitelist deleted;
+shared `withValueShield(ce, names, fn)` extracted to
+`boxed-expression/utils.ts` and applied at `Limit` (box-canon routing fix +
+`limit.ts` reduction), `Integrate`, `D`, bundled `Solve` (§D), and
+`JacobianMatrix` (rename machinery removed). Both waves: full suite green,
+**zero snapshot churn** (4176/4176). Notable findings from implementation:
+
+- `Integrate`'s leak was broader than the §C transformer path: plain
+  `∫x²dx` with `x := 5` gave `125/3` and definite `∫₀¹x²dx` gave `0`. The
+  shield wraps the whole symbolic branch, fixing all three paths.
+- `Limit`'s box route had a second defect: canonicalization classified the
+  limit variable via `.unknowns` (which drops value-bound symbols); now
+  syntactic `.has()`.
+- The §D repro must put the unknown DIRECTLY under the transformer — assigned-
+  expression symbols evaluate one level deep without folding their own free
+  symbols, so the `s`-indirection form is inert-correct, not gap-exhibiting.
+- **Correction to this section's audit list: `Minimize`/`Maximize` are not
+  defined operators at all** — they entered the list by analogy with
+  Mathematica during scoping, and a repo-wide grep confirms no definition,
+  doc, or test references them. The probed `Minimize(25, 5)` is generic
+  unknown-function argument evaluation — standard, convention-consistent
+  behavior, not a binder leak. NOT a defect and NOT open convention work;
+  symbolic optimization operators would be a new feature (ROADMAP material
+  if wanted). `ArgMin`/`ArgMax` (defined, function-literal-based) are clean.
+- Sweep verdicts: `Sum`/`Product`/`ForAll`/`Exists` clean; `Root` is not a
+  binder (2nd operand is a degree).
+
 **User-facing doc + Cortex checklist (2026-07-24):**
 
 - **With the Item-1 ruling:** `doc/11-guide-simplify.md` — the guide currently

@@ -619,13 +619,34 @@ function simplifyOperands(
   // e.g., (x-1)(x+2)/((x-1)(x+3)) should cancel to (x+2)/(x+3), not expand first.
   // But x^(1+2)/(1+2) should still simplify to x^3/3.
   if (expr.operator === 'Divide') {
-    // Numeric folding only — no operand sub-chain, so nothing to capture.
-    const simplifiedOps = ops.map((x) =>
-      evaluateNumericSubexpressions(x)
-    );
-    const changed = simplifiedOps.some((op, i) => op !== ops[i]);
+    const build = (o: Expression[]) => expr.engine._fn(expr.operator, o);
+    const simplifiedOps: Expression[] = [];
+    for (let i = 0; i < ops.length; i++) {
+      const x = ops[i];
+      // A trig-bearing operand gets the full recursion (the same carve-out
+      // the Add/Multiply branch above makes): identities such as
+      // r·sin²θ + r·cos²θ → r fire only inside the operand, so skipping it
+      // left e.g. (r·cosθ)/(r·sin²θ + r·cos²θ) entirely un-simplified even
+      // though the denominator alone simplifies. Other operands get numeric
+      // folding only, preserving factored polynomial structure for the
+      // cancelCommonFactors rule.
+      if (containsConstructibleTrig(x))
+        simplifiedOps.push(
+          simplifyOperandCapture(
+            x,
+            i,
+            ops,
+            simplifiedOps,
+            options,
+            substepsOut,
+            build
+          )
+        );
+      else simplifiedOps.push(evaluateNumericSubexpressions(x));
+    }
+    const changed = simplifiedOps.some((op, i) => !op.isSame(ops[i]));
     if (!changed) return expr;
-    return expr.engine._fn(expr.operator, simplifiedOps);
+    return build(simplifiedOps);
   }
 
   // Use _fn() since operands are already canonical (simplified above)
