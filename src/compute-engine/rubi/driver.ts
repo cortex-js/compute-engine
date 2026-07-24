@@ -62,6 +62,7 @@ import {
   hasHyperbolicRationalCandidate,
   hasNestedRadicalCandidate,
   fractionalPowerOfLinearSubstitution,
+  eulerQuadraticSubstitution,
   conjugateRadicalRationalization,
   factoredRationalPresentation,
   RuleFail,
@@ -169,6 +170,15 @@ const NO_R8 = process.env.RUBI_NO_R8 !== undefined;
 // domain-aware D-check. A/B measures its Bondarenko effect; structurally inert
 // off-family (the tight `hasNestedRadicalCandidate` pre-filter).
 const NO_R31 = process.env.RUBI_NO_R31 !== undefined;
+// RUBI_NO_R32: disable the R32 Euler-substitution lever ("Lever C") for
+// √(quadratic)-nested radicals (a `√B` whose base contains a `√(a·x²+b·x+c)`,
+// `√(x+√(x²+1))`, Bondarenko #9). Lever C substitutes `t = √a·x + √Q` (Euler I,
+// a>0), rationalizing `√Q` and collapsing the outer radical to a √-of-linear the
+// existing Lever A then removes; it runs SECOND (after Lever A) in each iteration
+// of the nested-radical fallback loop. Under `RUBI_NO_R32=1` the pre-filter also
+// stops admitting the Euler-nested shape (clean A/B); structurally inert
+// off-family. A/B measures its Bondarenko effect.
+const NO_R32 = process.env.RUBI_NO_R32 !== undefined;
 function hasInexactFloat(e: Expression): boolean {
   if (e.isNumberLiteral) return (e as any).isExact === false;
   return e.ops?.some(hasInexactFloat) ?? false;
@@ -1232,14 +1242,17 @@ export class RubiDriver {
       }
     }
 
-    // ---- nested-radical substitution fallback (R31) -------------------------
+    // ---- nested-radical substitution fallback (R31 / R32) -------------------
     // A nested radical (`√(x+√(x+1))/x²`, `√(1/x+√(1/x+1))`, the double-radical
-    // `√(x+1)/(x+√(√(x+1)+1))`) or the two-radical conjugate shape
-    // `(√(x+1)+√(1−x))⁻²` is not a rational function of x nor of any single
-    // radical, so no bundled algebraic rule closes it. Lever A iteratively
-    // substitutes `u = (a+b·x)^(1/k)` (or the Laurent `(a+b/x)^(1/k)`) at the
-    // INNERMOST linear radical — the two-radical cases need two substitutions —
-    // until the integrand is a rational function of the new variable, whose
+    // `√(x+1)/(x+√(√(x+1)+1))`, or the √(quadratic)-nested `√(x+√(x²+1))`) or the
+    // two-radical conjugate shape `(√(x+1)+√(1−x))⁻²` is not a rational function
+    // of x nor of any single radical, so no bundled algebraic rule closes it.
+    // Lever A iteratively substitutes `u = (a+b·x)^(1/k)` (or the Laurent
+    // `(a+b/x)^(1/k)`) at the INNERMOST linear radical — the two-radical cases
+    // need two substitutions — and Lever C (R32) performs an Euler I substitution
+    // `t = √a·x + √Q` at a √(quadratic)-nested radical (leaving a residual
+    // √-of-linear the next Lever A step removes), until the integrand is a
+    // rational function of the new variable, whose
     // denominator is kept FACTORED (the R26B lesson: the bundled partial-fraction
     // rules close `poly/(x^m·factored)`, never the expanded high-degree
     // polynomial); single-quadratic-radical residuals are routed as-is (the 1.1.2
@@ -1251,7 +1264,10 @@ export class RubiDriver {
     // (radical over quartic / two independent radicals) and #15/#16 (denesting)
     // decline cleanly. The routed/substituted pieces are radical-free or single-
     // radical, so they cannot re-enter this fallback.
-    if (!NO_R31 && hasNestedRadicalCandidate(integrand, variable)) {
+    if (
+      !NO_R31 &&
+      hasNestedRadicalCandidate(integrand, variable, !NO_R32)
+    ) {
       this.suppressRecording++;
       let F: Expression | null;
       try {
@@ -1872,13 +1888,17 @@ export class RubiDriver {
     }
   }
 
-  /** R31: `∫f(x) dx` for a nested-radical / conjugate-radical integrand. Lever B
-   * conjugate-rationalizes a `(c₁√L₁+c₂√L₂)^(−n)` factor; Lever A iteratively
-   * substitutes `u = (a+b·x)^(1/k)` at the innermost linear radical (see
-   * `fractionalPowerOfLinearSubstitution`), keeping the produced rational's
-   * denominator FACTORED (`factoredRationalPresentation`) and routing single-
-   * quadratic-radical residuals as-is, then back-substitutes and unwinds the
-   * substitution stack. Accept only if the composed antiderivative passes a
+  /** R31/R32: `∫f(x) dx` for a nested-radical / conjugate-radical integrand.
+   * Lever B conjugate-rationalizes a `(c₁√L₁+c₂√L₂)^(−n)` factor; Lever A
+   * iteratively substitutes `u = (a+b·x)^(1/k)` at the innermost linear radical
+   * (see `fractionalPowerOfLinearSubstitution`), and Lever C (R32) performs an
+   * Euler I substitution `t = √a·x + √Q` at a √(quadratic)-nested radical
+   * (`√(x+√(x²+1))`, `eulerQuadraticSubstitution`), leaving a residual √-of-
+   * linear the next Lever A iteration removes. The produced rational's
+   * denominator is kept FACTORED (`factoredRationalPresentation`) and single-
+   * quadratic-radical residuals are routed as-is, then back-substitutes and
+   * unwinds the substitution stack. Accept only if the composed antiderivative
+   * passes a
    * DOMAIN-AWARE numeric D-check against the ORIGINAL integrand (several point-
    * sets probing |x|<1, x>1, and x<0 — the substitutions restrict the domain).
    * Fail-closed: a non-closing subproblem or a failing D-check → null. Body
@@ -1904,43 +1924,77 @@ export class RubiDriver {
         }
       }
 
-      // Lever A — iterated fractional-power-of-linear substitution. Each step
-      // removes the innermost linear radical; loop until the integrand is a
-      // rational function of the (reused) variable or no linear radical remains.
-      const backs: Expression[] = [];
-      let current = integrand;
-      for (let iter = 0; iter < 5; iter++) {
-        if (rationalFnQ(current, variable)) break;
-        const sub = fractionalPowerOfLinearSubstitution(ce, current, variable);
-        if (sub === null) break;
-        backs.push(sub.back);
-        current = sub.g;
-      }
-      if (backs.length === 0) return null; // Lever A did not apply
-
-      // A fully rationalized integrand: hand its FACTORED presentation to the
-      // driver (the bundled partial-fraction rules close the factored form).
-      // A single-quadratic-radical residual (`2u·√(u²+u−1)/(u²−1)²`) is routed
-      // as-is — the bundled 1.1.2 quadratic-radical rules close it.
-      let routed = current;
-      if (rationalFnQ(current, variable)) {
-        const fac = factoredRationalPresentation(ce, current, variable);
-        if (fac !== null) routed = fac;
-      }
-      const G = this.intRec(recanonicalize(ce, routed), variable, depth + 1);
-      if (G === null || G.has('Integrate')) return null;
-      // Unwind the substitution stack: replace the reused variable with the
-      // deepest back-expression first, then outward, reintroducing the original x.
-      let F = G;
-      for (let i = backs.length - 1; i >= 0; i--)
-        F = F.subs({ [variable]: backs[i] });
-      F = this.cleanExpansionResult(F);
-      if (F.has('Integrate')) return null;
-      if (!verifyNestedAntiderivative(ce, F, integrand, variable)) return null;
-      return F;
+      // Lever A / Lever C — iterated substitution loop. Two passes: the FIRST
+      // uses Lever A alone (the pure R31 path — this keeps R31 byte-identical:
+      // cases that close via linear-radical substitution + routing never see the
+      // Euler lever). Only if that fails to close is a SECOND pass run with Lever
+      // C (R32 Euler I) enabled, so a √(quadratic)-nested radical (#9) that Lever
+      // A cannot touch is rescued without diverting any case R31 already closed.
+      // The second pass is NOT short-circuited on "pass 1 already ran Lever A":
+      // Lever C fires precisely where Lever A returns null (that is how #9 opens,
+      // with zero Lever-A steps), and an intermediate produced by a Lever-A step
+      // can itself become Euler-nested — so a cheap gate on the ORIGINAL
+      // integrand could skip a legitimate close. The redundant re-run only costs
+      // a repeated Lever-A grind on the small set of candidates that pass the
+      // pre-filter, apply Lever A, yet fail to verify; correctness is unaffected.
+      const F1 = this.leverSubstitutionLoop(integrand, variable, depth, false);
+      if (F1 !== null) return F1;
+      if (!NO_R32)
+        return this.leverSubstitutionLoop(integrand, variable, depth, true);
+      return null;
     } catch {
       return null;
     }
+  }
+
+  /** One pass of the R31/R32 substitution loop: iterated Lever A (and, when
+   * `useEuler`, Lever C after Lever A declines within an iteration), then route
+   * the residual (FACTORED if rational, single-quadratic-radical as-is), take its
+   * integral, unwind the substitution stack, and fail-closed on a domain-aware
+   * D-check. Returns the verified antiderivative or null. */
+  private leverSubstitutionLoop(
+    integrand: Expression,
+    variable: string,
+    depth: number,
+    useEuler: boolean
+  ): Expression | null {
+    const ce = this.ce;
+    // Order per iteration: Lever A (fractional-power-of-linear) first, then
+    // Lever C (Euler I for a √(quadratic)-nested radical) — the Euler step leaves
+    // a residual √-of-linear the NEXT iteration's Lever A removes.
+    const backs: Expression[] = [];
+    let current = integrand;
+    for (let iter = 0; iter < 5; iter++) {
+      if (rationalFnQ(current, variable)) break;
+      let sub = fractionalPowerOfLinearSubstitution(ce, current, variable);
+      if (sub === null && useEuler)
+        sub = eulerQuadraticSubstitution(ce, current, variable);
+      if (sub === null) break;
+      backs.push(sub.back);
+      current = sub.g;
+    }
+    if (backs.length === 0) return null; // no lever applied
+
+    // A fully rationalized integrand: hand its FACTORED presentation to the
+    // driver (the bundled partial-fraction rules close the factored form).
+    // A single-quadratic-radical residual (`2u·√(u²+u−1)/(u²−1)²`) is routed
+    // as-is — the bundled 1.1.2 quadratic-radical rules close it.
+    let routed = current;
+    if (rationalFnQ(current, variable)) {
+      const fac = factoredRationalPresentation(ce, current, variable);
+      if (fac !== null) routed = fac;
+    }
+    const G = this.intRec(recanonicalize(ce, routed), variable, depth + 1);
+    if (G === null || G.has('Integrate')) return null;
+    // Unwind the substitution stack: replace the reused variable with the
+    // deepest back-expression first, then outward, reintroducing the original x.
+    let F = G;
+    for (let i = backs.length - 1; i >= 0; i--)
+      F = F.subs({ [variable]: backs[i] });
+    F = this.cleanExpansionResult(F);
+    if (F.has('Integrate')) return null;
+    if (!verifyNestedAntiderivative(ce, F, integrand, variable)) return null;
+    return F;
   }
 
   /** Clean the exponential-fallback antiderivative: collect like terms via a

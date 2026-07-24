@@ -425,9 +425,11 @@ is wired in — `benchmarks/audit/bondarenko.ts` → `REPORT-bondarenko.md`, gra
 by the invariant `d/dx(F) ≈ f` across base CE / CE+R/F / SymPy / Mathematica
 (with a finite-difference fallback where the symbolic derivative doesn't
 numericize — PolyLog, elliptic kernels):
-CE 0/35 · CE+R/F 20/35 · SymPy 7/35 · Mathematica 32/35 (CE+R/F **12 → 20**
-after the R31 nested-radical substitution fallback — see **Coverage tracks →
-Rubi**, closing #2/#10/#11/#12/#15/#16/#17/#18). (Rubi chapter translation — the
+CE 0/35 · CE+R/F 21/35 · SymPy 7/35 · Mathematica 32/35 (CE+R/F **12 → 20**
+after the R31 nested-radical substitution fallback — closing
+#2/#10/#11/#12/#15/#16/#17/#18 — then **20 → 21** after the R32
+Euler-substitution lever ("Lever C") closing the √(quadratic)-nested **#9**; see
+**Coverage tracks → Rubi**). (Rubi chapter translation — the
 lever for the indefinite-∫ gap, with Rubi now recovering 6 of the 8 hard Wester
 integrals — is its own track: see **Coverage tracks → Rubi**.)
 
@@ -686,7 +688,12 @@ Lever A iterated `u = (a+b·x)^(1/k)` fractional-power-of-linear substitution
 with factored-denominator presentation, Lever B `(√L₁+√L₂)^(−n)` conjugate
 rationalization; closes the Bondarenko nested-radical family, CE+R/F 12 → 20/35;
 structurally inert off-family via a tight `hasNestedRadicalCandidate` pre-filter,
-fail-closed on a domain-aware D-check).
+fail-closed on a domain-aware D-check), `RUBI_NO_R32` (R32 Euler-substitution
+lever "Lever C" — an Euler I substitution `t = √a·x + √Q` at a √(quadratic)-
+nested radical that rationalizes `√Q` and collapses the outer radical to a
+√-of-linear the existing Lever A removes; closes Bondarenko **#9**, CE+R/F
+20 → 21/35; two-pass so R31 stays byte-identical, inert off-family via the
+Euler branch of `hasNestedRadicalCandidate`).
 
 **Driver-determinism residual (2026-07-18):** route selection still has
 wall-clock-sensitive seams (budget-relative simplify slices

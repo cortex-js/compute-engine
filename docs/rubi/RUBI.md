@@ -9,7 +9,9 @@ R8: **+3** via the poly×hyperbolic single-exponential PolyLog fallback —
 #230/#233/#47, clean per-problem A/B, 0 wrongs); R31: nested-radical
 substitution fallback closes the Bondarenko nested-radical family (CE+R/F
 **12 → 20 / 35**, +8 — #2/#10/#11/#12/#15/#16/#17/#18, clean per-problem A/B,
-0 wrongs);
+0 wrongs); R32: Euler-substitution lever ("Lever C") for √(quadratic)-nested
+radicals closes Bondarenko **#9** (CE+R/F **20 → 21 / 35**, clean per-problem
+A/B on ch2/ch3, 0 wrongs);
 **4.1 Sine 107/120 and 331/400 (seed 5;
 4.1.11 file 93/113, post-R18); 4.3 Tangent 72/120; 4.5 Secant 69/120; ch3 Logarithms
 71/120 (R20, +2 from ch5 family-C producers); Chapter 5 Inverse trig (R24, s120 seed5):
@@ -2186,6 +2188,39 @@ first four). Without them, the ~100 affected Chapter-1 rules can still be
     R31 block (pre-filter positives/negatives, the substitution identity
     `g(u(x))·u′(x) ≡ f(x)` numeric check for the non-Laurent and Laurent cases,
     Lever B value preservation, factored-denominator presentation).
+- **Phase R32 — Euler-substitution lever ("Lever C") LANDED (2026-07-23, behind
+  `RUBI_NO_R32`).** The R31 follow-up the R31 landing deferred: closes the
+  √(quadratic)-nested radical Bondarenko **#9** (`1/(√(x+√(x²+1))+1)`), whose
+  inner radical `√(x²+1)` is a fractional power of a QUADRATIC base that the R31
+  pre-filter (linear bases only) does not admit.
+  - **Mechanism.** An Euler I substitution `t = √a·x + √Q`, `Q = a·x²+b·x+c`
+    with `a>0`, rationalizes `√Q` — `x = (t²−c)/(2√a·t+b)`,
+    `√Q = (√a·t²+b·t+√a·c)/(2√a·t+b)`, `dx = 2·(√a·t²+b·t+√a·c)/(2√a·t+b)² dt`
+    (numerically verified, relerr ~1e-10 on the whole real line). For #9 the
+    outer radical collapses (`x+√Q = t`, so `√(x+√Q) = √t`), leaving a residual
+    `√(linear-in-t)` the existing **Lever A** removes (`s=√t`) down to the
+    rational `(s⁴+1)/(s³(s+1))`, whose FACTORED denominator the bundled
+    partial-fraction rules close; the composed antiderivative back-substitutes to
+    `s = √(x+√(x²+1))`, D-verified relerr ~1e-12.
+  - **Detector + helper (`rubi-utils.ts`).** `hasEulerNestedRadical` (a `√B`
+    whose base contains a `√(quadratic)`; a bare `√(quadratic)` does NOT qualify)
+    extends `hasNestedRadicalCandidate` via an optional `includeEuler` flag (the
+    driver passes `!NO_R32`). `eulerQuadraticSubstitution` mirrors Lever A's
+    contract (`{ g, back }` | null), declines a<0 (Euler II/III out of scope) and
+    perfect squares, and self-gates on `hasEulerNestedRadical` so it never fires
+    on a bare single-quadratic-radical residual (which R31 routes as-is).
+  - **Placement.** `nestedRadicalFallback` now runs the substitution loop in TWO
+    passes: Lever-A-only first (keeps R31 byte-identical — every case R31 closes
+    never sees Lever C), then Lever-C-enabled only if the first fails. This
+    rescues #9 without diverting #15 (whose Lever-A residual is routed as-is).
+  - **Guards (= expected; R32 is structurally inert off the Euler-nested family).**
+    ch2 Exponentials and ch3 Logarithms, s120 seed5, byte-identical per-problem
+    A/B (`RUBI_NO_R32=1`, 120/120 identical each). Bondarenko CE+R/F **20 → 21 /
+    35** (#9 ∅→✅), 0 wrongs, no case regressed.
+  - **Tests.** `integration-rules.test.ts` R32 block (#9 end-to-end, D-verified;
+    `RUBI_NO_R32` gate meaningful in both directions); `rubi-utils.test.ts` R32
+    block (pre-filter #9-positive / bare-√(quadratic)-negative / `includeEuler`
+    toggle, the substitution identity `g(u(x))·u′(x) ≡ f(x)`, off-family declines).
 - **Phase R3+ — chapters by value**: 2 (exponentials, 125 rules — small) and
   3 (logarithms, 337) first; 5/6/7 (inverse trig/hyperbolic) next; Chapter 4
   (trig, 2,126 rules + the inert-trig utility machinery) — the

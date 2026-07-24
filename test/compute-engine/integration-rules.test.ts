@@ -1390,6 +1390,55 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     }, 30_000);
   });
 
+  // ── R32 — Euler-substitution lever ("Lever C") for √(quadratic)-nested
+  // radicals. R31's linear-radical machinery does not recognize a fractional
+  // power whose inner radical is a √ of a genuine QUADRATIC (`√(x+√(x²+1))`,
+  // Bondarenko #9). Lever C adds an Euler I substitution `t = √a·x + √Q`
+  // (`Q = a·x²+b·x+c`, a>0) that rationalizes `√Q` and collapses the outer
+  // radical to a √-of-linear the existing Lever A then removes. Gated by
+  // `RUBI_NO_R32` for a clean A/B toggle.
+  describe('Euler-substitution lever (Bondarenko #9, R32)', () => {
+    const ce = new ComputeEngine();
+    ce.timeLimit = 30_000;
+    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+
+    const NO_R32 = process.env.RUBI_NO_R32 !== undefined;
+    const closureTest = NO_R32 ? test.skip : test;
+
+    // #9: 1/(√(x+√(x²+1))+1). The Euler I substitution `t=x+√(x²+1)` collapses
+    // the outer radical to √t = √x (Lever A then substitutes s=√x), closing to
+    // s+ln(s)+1/s−1/(2s²)−2ln(s+1), s=√(x+√(x²+1)). Valid for all real x
+    // (x+√(x²+1)>0 always). Central-difference D-verify.
+    closureTest('∫1/(√(x+√(x²+1))+1) dx (#9)', () => {
+      const latex = '\\frac{1}{\\sqrt{x+\\sqrt{x^2+1}}+1}';
+      const integrand = ce.parse(latex);
+      const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
+      expect(F.has('Integrate')).toBe(false); // a closed form, not inert
+      const h = 1e-5;
+      const fp = (v: number) => F.subs({ x: v }).N().re as number;
+      let checked = 0;
+      for (const x0 of [0.3, 2.5]) {
+        const d = (fp(x0 + h) - fp(x0 - h)) / (2 * h);
+        const f = integrand.subs({ x: x0 }).N().re as number;
+        if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+        expect(Math.abs(d - f)).toBeLessThan(1e-4 * (1 + Math.abs(f)));
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(0);
+    }, 30_000);
+
+    // Toggle meaningfulness: `NO_R32` is captured at module load. The default
+    // suite proves the closure; a `RUBI_NO_R32=1` run proves #9 goes inert.
+    test('∫1/(√(x+√(x²+1))+1) is gated by RUBI_NO_R32', () => {
+      const F = ce
+        .parse('\\int \\frac{1}{\\sqrt{x+\\sqrt{x^2+1}}+1} \\, dx')
+        .evaluate();
+      if (process.env.RUBI_NO_R32 === undefined)
+        expect(F.has('Integrate')).toBe(false);
+      else expect(F.has('Integrate')).toBe(true);
+    }, 30_000);
+  });
+
   // ── Integration variable other than `x` (R26A). ──
   // The bundled rules all carry `variable: "x"`; every RHS references the
   // integration variable as the string token `"x"`. The match env does not

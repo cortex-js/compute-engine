@@ -38,6 +38,7 @@ import {
   hasHyperbolicRationalCandidate,
   hasNestedRadicalCandidate,
   fractionalPowerOfLinearSubstitution,
+  eulerQuadraticSubstitution,
   conjugateRadicalRationalization,
   factoredRationalPresentation,
   rationalNormalFormX,
@@ -2091,5 +2092,67 @@ describe('nested-radical substitution helpers (R31)', () => {
         g.subs({ s: s0 }).N().re as number,
         6
       );
+  });
+});
+
+// R32 — Euler-substitution lever ("Lever C") for √(quadratic)-nested radicals
+// (RUBI.md §5). `eulerQuadraticSubstitution` substitutes `t = √a·x + √Q` at the
+// innermost `√(a·x²+b·x+c)` (Euler I, a>0), rationalizing `√Q` and collapsing the
+// outer radical to a √-of-linear the existing Lever A then removes.
+describe('Euler-substitution lever for √(quadratic)-nested radicals (R32)', () => {
+  test('hasNestedRadicalCandidate — Euler-nested positive (#9), bare √(quadratic) negative', () => {
+    // #9: `√(x+√(x²+1))` — an outer √ whose base contains a √ of a genuine
+    // quadratic. Admitted only via the Euler branch (`includeEuler` default true).
+    const f9 = ce.parse('\\frac{1}{\\sqrt{x+\\sqrt{x^2+1}}+1}');
+    expect(hasNestedRadicalCandidate(f9, 'x')).toBe(true);
+    // With the Euler branch off, #9 is NOT a candidate (clean A/B).
+    expect(hasNestedRadicalCandidate(f9, 'x', false)).toBe(false);
+    // A bare √(quadratic) (not nested inside another radical) must NOT qualify.
+    expect(hasNestedRadicalCandidate(ce.parse('\\sqrt{x^2+1}'), 'x')).toBe(false);
+  });
+
+  test('eulerQuadraticSubstitution identity g(u(x))·u′(x) ≡ f(x) — #9', () => {
+    const f = ce.parse('\\frac{1}{\\sqrt{x+\\sqrt{x^2+1}}+1}');
+    const sub = eulerQuadraticSubstitution(ce, f, 'x');
+    expect(sub).not.toBeNull();
+    const uprime = ce.box(['D', sub!.back, 'x']).evaluate();
+    let checked = 0;
+    for (const x0 of [0.3, 1, 2.5]) {
+      const u0 = sub!.back.subs({ x: x0 }).N().re as number;
+      const g0 = sub!.g.subs({ x: u0 }).N().re as number;
+      const up = uprime.subs({ x: x0 }).N().re as number;
+      const fx = f.subs({ x: x0 }).N().re as number;
+      if (![u0, g0, up, fx].every(Number.isFinite)) continue;
+      expect(Math.abs(g0 * up - fx)).toBeLessThan(1e-8 * (1 + Math.abs(fx)));
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  test('eulerQuadraticSubstitution declines off its family', () => {
+    // A LINEAR-inner nested radical (Lever A's domain, no √-of-quadratic).
+    expect(
+      eulerQuadraticSubstitution(ce, ce.parse('\\sqrt{x+\\sqrt{x+1}}'), 'x')
+    ).toBeNull();
+    // Euler I requires a>0: a √-of-quadratic with negative leading coefficient
+    // (`√(1−x²)`) is out of scope (Euler II/III).
+    expect(
+      eulerQuadraticSubstitution(ce, ce.parse('\\sqrt{x+\\sqrt{1-x^2}}'), 'x')
+    ).toBeNull();
+  });
+
+  test('a non-1/2 half-power of a quadratic is NOT treated as √Q', () => {
+    // `asFracPower` keeps only the exponent DENOMINATOR, so a naive `k === 2`
+    // gate would conflate `Q^(3/2)` (which stays a raw `Power(Q, 3/2)` node) with
+    // a plain `√Q` and let the Euler rewrite substitute the √Q t-form for the
+    // higher half power. `sqrtRadicandOf` requires exponent exactly 1/2, so these
+    // must NOT be admitted as Euler-nested and the substitution must decline.
+    // (NB: `(x²+1)^(−1/2)` is deliberately NOT tested — it canonicalizes to
+    // `1/√(x²+1)`, which genuinely DOES contain a `√Q`, so admitting it is
+    // correct.)
+    for (const l of ['\\sqrt{x+(x^2+1)^{3/2}}', '\\sqrt{x+(x^2+1)^{5/2}}']) {
+      expect(hasNestedRadicalCandidate(ce.parse(l), 'x')).toBe(false);
+      expect(eulerQuadraticSubstitution(ce, ce.parse(l), 'x')).toBeNull();
+    }
   });
 });

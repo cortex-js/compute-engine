@@ -6987,6 +6987,70 @@ function hasConjugateRadical(e: Expression, x: string): boolean {
   return (e.ops ?? []).some((o) => hasConjugateRadical(o, x));
 }
 
+// ---------------------------------------------------------------------------
+// R32 — Euler-substitution lever ("Lever C") for √(quadratic)-nested radicals.
+//
+// R31's linear-radical machinery does not recognize a fractional power whose
+// inner radical is a √ of a genuine QUADRATIC (`√(x+√(x²+1))`, Bondarenko #9):
+// its pre-filter fires only on fractional powers of a LINEAR base. Lever C adds
+// an Euler I substitution — `t = √a·x + √Q`, `Q = a·x²+b·x+c` with `a>0` — that
+// rationalizes `√Q` (and, when the outer radical is `√(x+√Q)`, collapses it to a
+// √-of-linear the existing Lever A then removes). The step reuses `x` as the new
+// variable `t` and leaves a residual whose remaining radical is √-of-linear, so
+// the driver's iterated Lever A loop composes with it directly.
+
+/** The radicand `Q` iff `u` is EXACTLY a square root of `Q` — `Sqrt(Q)`,
+ *  `Root(Q, 2)`, or `Power(Q, 1/2)`. Unlike `asFracPower` (whose `k` is only the
+ *  exponent DENOMINATOR, so `k === 2` also matches `Q^(3/2)`, `Q^(−1/2)`, …),
+ *  this recognizes a plain square root only — so the Euler rewrite never
+ *  mis-substitutes the `√Q` t-form for a higher or negative half power. Null
+ *  otherwise. Purely structural. */
+function sqrtRadicandOf(u: Expression): Expression | null {
+  if (u.operator === 'Sqrt' && u.ops && u.ops.length === 1) return u.ops[0];
+  if (u.operator === 'Root' && u.ops && u.ops.length === 2) {
+    const n = u.ops[1];
+    if (isNumber(n) && n.isInteger === true && n.re === 2) return u.ops[0];
+  }
+  if (u.operator === 'Power' && u.ops && u.ops.length === 2) {
+    const q = u.ops[1];
+    if (isNumber(q) && q.isRational === true && q.isInteger !== true) {
+      const rp = ratParts(q);
+      if (rp !== null && rp[0] === 1 && rp[1] === 2) return u.ops[0];
+    }
+  }
+  return null;
+}
+
+/** True iff `u` is a `√Q` with `Q = a·x²+b·x+c` a genuine quadratic in x
+ *  (degree exactly 2, nonzero leading coefficient). Purely structural. */
+function isSqrtOfQuadratic(u: Expression, x: string): boolean {
+  const base = sqrtRadicandOf(u);
+  if (base === null || !base.has(x)) return false;
+  const c = polyCoeffsX(base, x);
+  return c !== null && c.length === 3 && !zeroQ(c[2]);
+}
+
+/** True iff `e` contains (anywhere) a `√(quadratic in x)`. */
+function containsSqrtOfQuadratic(e: Expression, x: string): boolean {
+  if (isSqrtOfQuadratic(e, x)) return true;
+  return (e.ops ?? []).some((o) => containsSqrtOfQuadratic(o, x));
+}
+
+/** True iff `e` contains an Euler-nested radical: a `√B` whose base `B` itself
+ *  contains a `√(quadratic in x)`. A bare `√(a·x²+b·x+c)` (not nested inside
+ *  another radical) does NOT qualify. Purely structural, O(nodes). */
+function hasEulerNestedRadical(e: Expression, x: string): boolean {
+  const fp = asFracPower(e);
+  if (
+    fp !== null &&
+    fp.k === 2 &&
+    fp.base.has(x) &&
+    containsSqrtOfQuadratic(fp.base, x)
+  )
+    return true;
+  return (e.ops ?? []).some((o) => hasEulerNestedRadical(o, x));
+}
+
 /** Fast O(nodes) syntactic pre-filter for the R31 nested-radical fallback: does
  *  the integrand contain a genuine NESTED radical (a fractional power whose
  *  argument contains another fractional power of a linear-in-x-or-1/x base) OR
@@ -6995,9 +7059,20 @@ function hasConjugateRadical(e: Expression, x: string): boolean {
  *  the fallback stays a near-zero-cost no-op off its family. Purely structural.
  *  Note: the driver call site normalizes the integrand via `toTimesPower` first
  *  (so `Sqrt`/`Power`/`Root` heads are unified); `asFracPower` still handles a
- *  raw `Root` head directly for callers that skip that normalization. */
-export function hasNestedRadicalCandidate(e: Expression, x: string): boolean {
-  return hasNestedFracPower(e, x) || hasConjugateRadical(e, x);
+ *  raw `Root` head directly for callers that skip that normalization.
+ *  `includeEuler` (default true) also admits the R32 Euler-nested shape (a `√B`
+ *  whose base contains a `√(quadratic)`, `√(x+√(x²+1))`); the driver passes
+ *  `!NO_R32` for a clean A/B toggle. */
+export function hasNestedRadicalCandidate(
+  e: Expression,
+  x: string,
+  includeEuler = true
+): boolean {
+  return (
+    hasNestedFracPower(e, x) ||
+    hasConjugateRadical(e, x) ||
+    (includeEuler && hasEulerNestedRadical(e, x))
+  );
 }
 
 /** Locate the innermost fractional power of a linear base (a `√(a+b·x)` or
@@ -7117,6 +7192,140 @@ export function fractionalPowerOfLinearSubstitution(
   if (failed) return null;
   const g = recanonicalize(ce, ce.function('Multiply', [rewritten, jac]));
   const back = ce.function('Power', [L, ce.number(1).div(kNum)]);
+  return { g, back };
+}
+
+/** Locate the FIRST `√Q` (Q a genuine quadratic in x) in `e` in PRE-ORDER
+ *  (a node before its children), returning the sqrt node and Q's coefficients
+ *  `a·x²+b·x+c`. For the Euler-nested target family the pre-order-first match is
+ *  the inner quadratic radical because the outer nesting radical's base is
+ *  non-polynomial (`polyCoeffsX` returns null there, so `sqrtRadicandOf`'s base
+ *  is not a quadratic and the outer node is skipped). */
+function findSqrtOfQuadratic(
+  e: Expression,
+  x: string
+): { node: Expression; a: Expression; b: Expression; c: Expression } | null {
+  let found: {
+    node: Expression;
+    a: Expression;
+    b: Expression;
+    c: Expression;
+  } | null = null;
+  const walk = (u: Expression): void => {
+    if (found !== null) return;
+    const base = sqrtRadicandOf(u);
+    if (base !== null && base.has(x)) {
+      const coeffs = polyCoeffsX(base, x);
+      if (coeffs !== null && coeffs.length === 3 && !zeroQ(coeffs[2])) {
+        found = { node: u, a: coeffs[2], b: coeffs[1], c: coeffs[0] };
+        return;
+      }
+    }
+    (u.ops ?? []).forEach(walk);
+  };
+  walk(e);
+  return found;
+}
+
+/** R32 Lever C: one Euler I substitution for a √(quadratic)-nested radical.
+ *  Finds the innermost `√Q`, `Q = a·x²+b·x+c` with `a>0`, and substitutes the
+ *  new variable `t = √a·x + √Q` (REUSING `x` as `t`), under which
+ *
+ *    x = (t²−c)/(2√a·t+b),  √Q = (√a·t²+b·t+√a·c)/(2√a·t+b),
+ *    dx/dt = 2·(√a·t²+b·t+√a·c)/(2√a·t+b)².
+ *
+ *  Returns `{ g, back }` — `g` the substituted integrand (`√Q` replaced by its
+ *  t-form, every bare `x` replaced by `inv`, times the Jacobian) and
+ *  `back = √a·x + √Q` (in the ORIGINAL x) the expression to substitute for the
+ *  reused variable when unwinding the antiderivative. Declines (null) unless Q
+ *  is a genuine quadratic with `a>0` that is not a perfect square (Euler II/III
+ *  are out of scope for R32). */
+export function eulerQuadraticSubstitution(
+  ce: ComputeEngine,
+  integrand: Expression,
+  x: string
+): { g: Expression; back: Expression } | null {
+  // Unify radical head forms and Add-arg order so `isSame` matches (as Lever A).
+  const norm = toTimesPower(ce, recanonicalize(ce, integrand));
+  // Only fire on a genuinely NESTED Euler radical (a `√B` whose base contains a
+  // `√(quadratic)`). A bare `√(a·x²+b·x+c)` residual — e.g. the single-quadratic-
+  // radical `2u·√(u²+u−1)/(u²−1)²` that Lever A leaves for #17/#18 — must be
+  // routed as-is to the bundled 1.1.2 rules, NOT Euler-substituted.
+  if (!hasEulerNestedRadical(norm, x)) return null;
+  const info = findSqrtOfQuadratic(norm, x);
+  if (info === null) return null;
+  const { node: Qnode, a, b, c } = info;
+  // Euler I requires a > 0.
+  const aN = a.N();
+  if (!(isNumber(aN) && typeof aN.re === 'number' && aN.re > 0)) return null;
+  if (isNumber(aN) && typeof aN.im === 'number' && Math.abs(aN.im) > 1e-12)
+    return null;
+  // Decline a perfect square (`√Q` is then rational — discriminant b²−4ac = 0).
+  const disc = ce.function('Subtract', [
+    ce.function('Power', [b, ce.number(2)]),
+    ce.function('Multiply', [ce.number(4), a, c]),
+  ]);
+  if (zeroQ(disc)) return null;
+
+  const X = ce.symbol(x); // reused as the new variable t
+  const two = ce.number(2);
+  const sqrtA = ce.function('Sqrt', [a]);
+  const t2 = ce.function('Power', [X, two]);
+  // Build with canonical Multiply/Divide/Add/Power so exact operands (an
+  // irrational a/b/c, e.g. √2) stay exact — chained `.mul()`/`.add()` fold
+  // exact literals to floats and `mul()` distributes over sums.
+  const denom = ce.function('Add', [
+    ce.function('Multiply', [two, sqrtA, X]),
+    b,
+  ]); // 2√a·t + b
+  const inv = ce.function('Divide', [
+    ce.function('Subtract', [t2, c]),
+    denom,
+  ]); // (t²−c)/(2√a·t+b)
+  const sqrtQnum = ce.function('Add', [
+    ce.function('Multiply', [sqrtA, t2]),
+    ce.function('Multiply', [b, X]),
+    ce.function('Multiply', [sqrtA, c]),
+  ]); // √a·t² + b·t + √a·c
+  const sqrtQ_in_t = ce.function('Divide', [sqrtQnum, denom]);
+  const jac = ce.function('Divide', [
+    ce.function('Multiply', [two, sqrtQnum]),
+    ce.function('Power', [denom, two]),
+  ]); // 2·(√a·t²+b·t+√a·c)/(2√a·t+b)²
+
+  const walk = (u: Expression): Expression => {
+    if (u.isSame(Qnode)) return sqrtQ_in_t; // do NOT descend into √Q
+    if (u.symbol === x) return inv;
+    if (!u.ops) return u;
+    return ce.function(u.operator, u.ops.map(walk));
+  };
+  const rewritten = walk(norm);
+  // Collapse each radical's ARGUMENT: the Euler substitution merges `x+√Q`
+  // (and any other radical base) into a single fraction that `recanonicalize`
+  // alone does not combine, so the residual `√(rational)` hides the `√(linear)`
+  // the driver's next Lever A step must see (e.g. #9's outer radical becomes
+  // `√((x²−1)/(2x)+(x²+1)/(2x))` = `√x`). Simplify ONLY the base of each
+  // fractional power — a full `simplify()` would rationalize the whole integrand
+  // (folding the `√t+1` denominator away) and defeat the composition.
+  const collapseRadicalArgs = (u: Expression): Expression => {
+    if (u.symbol || !u.ops) return u;
+    const fp = asFracPower(u);
+    if (fp !== null)
+      return ce.function(
+        u.operator,
+        u.ops.map((o) => (o.isSame(fp.base) ? o.simplify() : o))
+      );
+    return ce.function(u.operator, u.ops.map(collapseRadicalArgs));
+  };
+  const g = recanonicalize(
+    ce,
+    ce.function('Multiply', [collapseRadicalArgs(rewritten), jac])
+  );
+  // The new variable t expressed in the ORIGINAL x: t = √a·x + √Q.
+  const back = ce.function('Add', [
+    ce.function('Multiply', [sqrtA, X]),
+    Qnode,
+  ]);
   return { g, back };
 }
 

@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Improvements
+
+- **Rubi integrator: Euler-substitution lever for √(quadratic)-nested
+  radicals.** The experimental Rubi integrator now closes nested radicals whose
+  inner radical is a square root of a quadratic with a positive leading
+  coefficient — e.g. `∫ 1/(√(x+√(x²+1))+1) dx` (Bondarenko #9) — via an Euler I
+  substitution
+  `t = √a·x + √Q` that rationalizes `√Q` and reduces the integrand to a form the
+  existing linear-radical machinery closes. This raises the Bondarenko benchmark
+  to CE+R/F 21/35.
+
 ## 0.93.0 _2026-07-23_
 
 ### New Features
