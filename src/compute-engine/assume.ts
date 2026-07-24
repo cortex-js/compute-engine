@@ -17,6 +17,7 @@ import {
   domainToType,
   isValueDef,
   isOperatorDef,
+  assignedVariableNames,
 } from './boxed-expression/utils.js';
 import { isInequalityOperator } from './latex-syntax/utils.js';
 import {
@@ -86,6 +87,55 @@ function inferTypeFromValue(ce: ComputeEngine, value: Expression): BoxedType {
  */
 
 export function assume(proposition: Expression): AssumeResult {
+  //
+  // ── Value-blindness shield (ARCHITECTURE.md, "Bound variables, free symbols,
+  //    and assigned values"; ratified 2026-07-24) ─────────────────────────────
+  //
+  // When the predicate mentions assigned, non-constant free symbols, evaluating
+  // it *through* those values would fold it to `True`/`False` before the
+  // assumption system can record it. For example `w := 5; assume(w > 0)` folded
+  // to a no-op `'tautology'` (and `w := -2` to `'contradiction'`), silently
+  // dropping the fact. Shield + record: keep the consistency signal, but record
+  // the surviving predicate as a fact about the *symbol*, not its value.
+  //
+  const names = assignedVariableNames(proposition);
+  if (names.length === 0) return assumeDispatch(proposition);
+
+  // 1. Consistency check first, values applied: a *provably False* predicate is
+  //    a user error — return `'contradiction'` and record nothing (unchanged
+  //    signal). `True`/indeterminate falls through to value-blind recording.
+  if (isSymbol(proposition.evaluate(), 'False')) return 'contradiction';
+
+  // 2. Record value-blind. The values must be shielded IN PLACE (strip +
+  //    restore in the current context): `withValueShield` pushes a fresh
+  //    eval-context whose assumptions map is discarded on pop, which would lose
+  //    the very fact being recorded, so it cannot be used here.
+  return withValueBlindRecording(names, () => assumeDispatch(proposition));
+
+  /** Strip the assigned value of each name for the duration of `fn`, then
+   * restore it, so the recording pipeline sees the symbols as valueless (a
+   * fact `w > 0` instead of the folded `5 > 0 → True`). */
+  function withValueBlindRecording<T>(names: string[], fn: () => T): T {
+    const ce = proposition.engine;
+    const saved: { name: string; value: Expression }[] = [];
+    for (const name of names) {
+      const def = ce.lookupDefinition(name);
+      if (!isValueDef(def) || def.value.isConstant) continue;
+      const value = def.value.value;
+      if (value === undefined || value === null) continue;
+      saved.push({ name, value });
+      ce._setSymbolValue(name, undefined);
+    }
+    if (saved.length === 0) return fn();
+    try {
+      return fn();
+    } finally {
+      for (const { name, value } of saved) ce._setSymbolValue(name, value);
+    }
+  }
+}
+
+function assumeDispatch(proposition: Expression): AssumeResult {
   const op = proposition.operator;
   if (op === 'Element') return assumeElement(proposition);
   if (op === 'NotElement') return assumeNotElement(proposition);

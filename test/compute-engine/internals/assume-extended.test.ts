@@ -383,12 +383,19 @@ describe('NotEqual assumptions', () => {
     );
   });
 
-  it('is a tautology when the values are known to differ', () => {
+  // Value-blindness shield (ratified 2026-07-24): a disequality that is only
+  // redundant relative to an ASSIGNED value is not a `tautology` — it is
+  // recorded value-blind as a fact about the symbol and returns `ok`.
+  // (`tautology` stays reserved for redundancy relative to types/assumptions.)
+  it('records value-blind when only the assigned value makes it redundant', () => {
     const ce = freshEngine();
     ce.assume(ce.expr(['Equal', 'w', 5]));
     expect(ce.assume(ce.expr(['NotEqual', 'w', 4], { canonical: false }))).toBe(
-      'tautology'
+      'ok'
     );
+    const facts = getFactIndex(ce).bySubject.get('self:w');
+    expect(facts?.notEqual).toHaveLength(1);
+    expect(facts?.notEqual[0].isSame(4)).toBe(true);
   });
 });
 

@@ -200,6 +200,53 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     for (let i = 0; i < 50; i++) r.run({ x: 1 + (i % 5) });
     expect(Date.now() - start).toBeLessThan(2000);
   });
+
+  // A multi-limit `Integrate` compiles to NESTED `_SYS.integrate` calls,
+  // innermost last (Mathematica iterator convention: the first limit is the
+  // outermost integral). Previously only the first limit was read, silently
+  // truncating the quadrature fallback to one dimension. Non-elementary
+  // integrands force quadrature (a closed form would fold via the
+  // antiderivative-first path); reference values from independent mpmath
+  // computations.
+  describe('multiple limits (nested iterated quadrature)', () => {
+    test('product domain: ∫₀¹∫₀¹ e^{x²y} dy dx', () => {
+      const e = ce.expr([
+        'Integrate',
+        ['Exp', ['Multiply', ['Square', 'x'], 'y']],
+        ['Limits', 'x', 0, 1],
+        ['Limits', 'y', 0, 1],
+      ]);
+      const r = compile(e, { realOnly: true });
+      expect(r.success).toBe(true);
+      expect(r.run({}) as number).toBeCloseTo(1.207021663355318, 10);
+    });
+
+    test('dependent inner bound: ∫₀¹ dx ∫₀ˣ e^{y²} dy', () => {
+      // The inner bound references the outer lambda variable, in scope at its
+      // nesting depth.
+      const e = ce.expr([
+        'Integrate',
+        ['Exp', ['Square', 'y']],
+        ['Limits', 'x', 0, 1],
+        ['Limits', 'y', 0, 'x'],
+      ]);
+      const r = compile(e, { realOnly: true });
+      expect(r.success).toBe(true);
+      expect(r.run({}) as number).toBeCloseTo(0.60351083167765899, 10);
+    });
+
+    test('closed-form multi-limit folds via the antiderivative-first path', () => {
+      const e = ce.expr([
+        'Integrate',
+        ['Multiply', 'x', 'y'],
+        ['Limits', 'x', 0, 3],
+        ['Limits', 'y', 0, 2],
+      ]);
+      const r = compile(e, { realOnly: true });
+      expect(r.success).toBe(true);
+      expect(r.run({}) as number).toBeCloseTo(9, 12);
+    });
+  });
 });
 
 describe('adaptiveQuadrature (unit)', () => {

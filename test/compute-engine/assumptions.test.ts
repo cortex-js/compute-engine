@@ -78,8 +78,12 @@ describe('INEQUALITY EVALUATION USING ASSUMPTIONS', () => {
 // #20: Tautology and Contradiction Detection
 // ce.assume() should return 'tautology' for redundant assumptions and 'contradiction' for conflicting ones
 describe('TAUTOLOGY AND CONTRADICTION DETECTION', () => {
-  test(`assuming one = 1 again should return tautology`, () => {
-    expect(ce.assume(ce.expr(['Equal', 'one', 1]))).toEqual('tautology');
+  // Value-blindness shield (ratified 2026-07-24): `tautology` is reserved for
+  // predicates redundant relative to TYPES/ASSUMPTIONS, not relative to an
+  // assigned value. `one` carries the assigned value 1, so re-asserting
+  // `one = 1` is recorded value-blind and returns `ok`, not `tautology`.
+  test(`assuming one = 1 again is value-blind and returns ok`, () => {
+    expect(ce.assume(ce.expr(['Equal', 'one', 1]))).toEqual('ok');
   });
 
   test(`assuming one < 0 should return contradiction (one = 1)`, () => {
@@ -537,5 +541,49 @@ describe('TRANSITIVE-CHAIN INEQUALITY REASONING (Wester 21/22)', () => {
       ['Multiply', 2, ['Power', 'y', 2]],
       ['Multiply', 2, ['Power', 'x', 2]],
     ]);
+  });
+});
+
+// Value-blindness shield in assume() (ARCHITECTURE.md, "Bound variables, free
+// symbols, and assigned values"; ratified 2026-07-24). A predicate mentioning
+// an assigned, non-constant symbol must not fold through that symbol's value
+// before the assumption system can record it.
+describe('ASSUME VALUE-BLINDNESS (SHIELD + RECORD)', () => {
+  test('assign-then-assume records the fact value-blind', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    expect(ce.assume(ce.parse('w > 0'))).toBe('ok');
+    expect(ce.parse('|w|').simplify().json).toBe('w');
+    expect(ce.parse('\\sqrt{w^2}').simplify().json).toBe('w');
+  });
+
+  test('the assigned value is untouched by assume', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    ce.assume(ce.parse('w > 0'));
+    expect(ce.parse('w').evaluate().json).toBe(5);
+    expect(ce.parse('|w|').evaluate().json).toBe(5);
+  });
+
+  test('a predicate provably false through the value is a contradiction', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', -2);
+    expect(ce.assume(ce.parse('w > 0'))).toBe('contradiction');
+    // Nothing recorded: the sign of w stays unknown, so |w| does not reduce.
+    expect(ce.parse('|w|').simplify().json).toEqual(['Abs', 'w']);
+  });
+
+  test('assume-then-assign is unchanged (fact survives the later assignment)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.parse('w > 0'))).toBe('ok');
+    ce.assign('w', 5);
+    expect(ce.parse('|w|').simplify().json).toBe('w');
+  });
+
+  test('a predicate with no assigned free symbols is unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.parse('x > 0'))).toBe('ok');
+    // Re-asserting is tautological relative to the recorded assumption.
+    expect(ce.assume(ce.parse('x > 0'))).toBe('tautology');
   });
 });

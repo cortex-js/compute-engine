@@ -93,10 +93,10 @@ function isRefutablePipeTarget(f: Expression): boolean {
   );
 }
 
-/** The symbol names named by a `SymbolicBlock` subset spec: a single symbol,
+/** The symbol names named by a `HoldValues` subset spec: a single symbol,
  * or the symbol members of a `List`/`Set`/`Tuple`. Non-symbol members are
  * ignored. */
-function symbolicBlockShieldNames(spec: Expression): string[] {
+function holdValuesShieldNames(spec: Expression): string[] {
   if (isSymbol(spec)) return [spec.symbol];
   if (
     isFunction(spec, 'List') ||
@@ -1365,14 +1365,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    SymbolicBlock: {
+    HoldValues: {
       description: [
-        'SymbolicBlock(body): evaluate `body` with its assigned free symbols',
+        'HoldValues(body): evaluate `body` with its assigned free symbols',
         'shielded — each such symbol becomes a pure symbol (its declared type',
         'and in-scope assumptions apply, its assigned value does NOT) for the',
         'duration. The value-blind counterpart of evaluating `body` directly;',
         "analogous to Mathematica's `Block[{x}, …]`.",
-        'SymbolicBlock(body, [x, y]): shield only the listed symbols (a List,',
+        'HoldValues(body, [x, y]): shield only the listed symbols (a List,',
         'Set, Tuple, or a single symbol); every other symbol resolves normally.',
         'Constants (`Pi`, `ExponentialE`, …) are never shielded, assumptions',
         'survive the shield, and the global values are intact afterwards.',
@@ -1384,10 +1384,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       type: ([x]) => x?.type ?? undefined,
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0)
-          return ce._fn('SymbolicBlock', checkArity(ce, ops, 1));
+          return ce._fn('HoldValues', checkArity(ce, ops, 1));
         if (ops.length > 2)
-          return ce._fn('SymbolicBlock', checkArity(ce, ops, 2));
-        return ce._fn('SymbolicBlock', ops);
+          return ce._fn('HoldValues', checkArity(ce, ops, 2));
+        return ce._fn('HoldValues', ops);
       },
       evaluate: (ops, { engine: ce, numericApproximation }) => {
         const raw = ops[0];
@@ -1405,7 +1405,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const names =
           spec === undefined
             ? assignedVariableNames(body)
-            : symbolicBlockShieldNames(spec.canonical);
+            : holdValuesShieldNames(spec.canonical);
         return withValueShield(ce, names, () =>
           body.evaluate({ numericApproximation })
         );

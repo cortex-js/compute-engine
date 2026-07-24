@@ -375,27 +375,29 @@ varies is whether an operator **binds** a variable:
   arithmetic, everything else — bind nothing, so all their symbols are free
   and all values apply: `Together(1/x + a/x²)` with those assignments is
   `8/25`.
-- **`SymbolicBlock`** *(planned)* is not an exception but the rule made
-  available à la carte: it is itself a binder, binding the assigned free
-  symbols of its body (all of them, or a listed subset) — the analogue of
-  Mathematica's `Block[{x}, …]`. `SymbolicBlock(Together(1/x + a/x²))` is
-  `(x + a)/x²`. The compositional form exists today:
+- **`HoldValues`** is not an exception but the rule made available à la
+  carte: it is itself a binder, binding the assigned free symbols of its body
+  (all of them, or a listed subset via a second operand) — the analogue of
+  Mathematica's `Block[{x}, …]`. `HoldValues(Together(1/x + a/x²))` is
+  `(x + a)/x²`. The granular compositional form also works:
   `Block(Declare(w, 'real'), …)` shadow-declares `w` valueless for the body.
 
 Two footnotes:
 
 - The `.simplify()` **method** (engine API, not reachable from the operator
   surface) is value-blind wholesale — as if the expression were wrapped in
-  `SymbolicBlock`. That is its documented contract (see
+  `HoldValues`. That is its documented contract (see
   [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md)); the `Simplify` *operator*
   evaluates its argument like any operator.
 - Shielding is implemented by shadow-declaring the bound variable valueless
   (keeping its type; assumptions survive) in a temporary scope — use the
-  shared helper, do not invent per-operator renames.
+  shared `withValueShield` helper (`boxed-expression/utils.ts`), do not
+  invent per-operator renames or new shadow-declare loops.
 
-Implementation status: `Solve` conforms; known deviations (`Integrate`'s
-transformer reduction, `Minimize`, `D`'s result being evaluated at the global
-value) are tracked in
+Implementation status: the convention is enforced across the binder operators
+(`D`, `Integrate`, `Limit`, `Solve` — positional and bundled — and
+`JacobianMatrix`), and `HoldValues` is implemented; history and per-site
+details are in
 [`docs/plans/2026-07-23-simplify-together-scoping.md`](./docs/plans/2026-07-23-simplify-together-scoping.md) §F.
 
 ## Type system

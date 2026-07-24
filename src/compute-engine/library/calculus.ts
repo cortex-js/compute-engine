@@ -213,11 +213,14 @@ function improperEndpointValue(
 
 /**
  * Iterated numeric quadrature for a multi-limit `Integrate`, e.g.
- * `Integrate(f, Limits(x, 0, 3), Limits(y, 0, 2))`. All bounds must be
- * numeric constants (a product domain, so by Fubini the nesting order is
- * immaterial); a bound that depends on another integration variable does not
- * numericize and declines (returns `undefined`, keeping the integral
- * symbolic) rather than integrating wrongly.
+ * `Integrate(f, Limits(x, 0, 3), Limits(y, 0, 2))`. Limits follow the
+ * Mathematica iterator convention (matching the symbolic path): the FIRST
+ * limit is the OUTERMOST integral, so the bounds of limit i may reference the
+ * variables of limits 0..i−1 (`Integrate(1, Limits(x,0,1), Limits(y,0,x))` is
+ * the triangle, ½). A bound that references its own or a LATER (inner)
+ * integration variable, or that otherwise fails to numericize, declines
+ * (returns `undefined`, keeping the integral symbolic) rather than
+ * integrating wrongly.
  */
 function nIntegrateMultiple(
   ce: ComputeEngine,
@@ -225,16 +228,44 @@ function nIntegrateMultiple(
   limits: ReadonlyArray<Expression>
 ): Expression | undefined {
   const vars: string[] = [];
-  const bounds: [number, number][] = [];
   for (const l of limits) {
     if (!isFunction(l)) return undefined;
     const v = sym(l.op1);
     if (!v || v === 'Nothing') return undefined;
-    const lower = l.op2.N().re;
-    const upper = l.op3.N().re;
-    if (isNaN(lower) || isNaN(upper)) return undefined;
     vars.push(v);
-    bounds.push([lower, upper]);
+  }
+
+  // Each bound becomes a function of the OUTER integration values (in limit
+  // order). A constant bound ignores them; a dependent one is wrapped in a
+  // `Function` of the outer variables — the literal's parameter binding also
+  // shields a same-named global assignment, as for the integrand itself.
+  type BoundFn = (outer: ReadonlyArray<number>) => number;
+  const mkBound = (b: Expression, d: number): BoundFn | undefined => {
+    const syms = b.symbols;
+    if (syms.some((s) => vars.indexOf(s) >= d)) return undefined;
+    if (syms.some((s) => vars.includes(s))) {
+      const fn = ce.expr(['Function', b, ...vars.slice(0, d)]);
+      const compiledB = implicitCompile(ce, fn);
+      if (compiledB?.success) {
+        const run = compiledB.run as (...args: number[]) => number;
+        return (outer) => run(...outer);
+      }
+      const app = applicable(fn);
+      return (outer) => app(outer.map((x) => ce.number(x)))?.re ?? NaN;
+    }
+    const c = b.N().re;
+    if (isNaN(c)) return undefined;
+    return () => c;
+  };
+
+  const boundFns: [BoundFn, BoundFn][] = [];
+  for (let d = 0; d < limits.length; d++) {
+    const l = limits[d];
+    if (!isFunction(l)) return undefined;
+    const lower = mkBound(l.op2, d);
+    const upper = mkBound(l.op3, d);
+    if (!lower || !upper) return undefined;
+    boundFns.push([lower, upper]);
   }
 
   const fnExpr =
@@ -266,15 +297,22 @@ function nIntegrateMultiple(
 
   // Nested adaptive Gauss–Kronrod, one level per limit; a level that fails to
   // converge falls back to 1-D Monte Carlo (as the single-limit path does).
-  // `argv` is shared across levels — recursion is strictly sequential.
+  // `argv` (integrand arguments, by parameter slot) and `outerVals` (current
+  // integration values, in limit order, consumed by dependent bounds) are
+  // shared across levels — the recursion is strictly sequential.
   const argv = new Array<number>(vars.length).fill(NaN);
+  const outerVals = new Array<number>(vars.length).fill(NaN);
   const last = limits.length - 1;
   const integrateDim = (dim: number): { estimate: number; error: number } => {
     const g = (t: number): number => {
       argv[slots[dim]] = t;
+      outerVals[dim] = t;
       return dim === last ? jsf(...argv) : integrateDim(dim + 1).estimate;
     };
-    const [lower, upper] = bounds[dim];
+    const outer = outerVals.slice(0, dim);
+    const lower = boundFns[dim][0](outer);
+    const upper = boundFns[dim][1](outer);
+    if (isNaN(lower) || isNaN(upper)) return { estimate: NaN, error: NaN };
     const gk = adaptiveQuadrature(g, lower, upper);
     if (gk.converged && Number.isFinite(gk.estimate)) return gk;
     return monteCarloEstimate(g, lower, upper, 1e4, ce._deadline);

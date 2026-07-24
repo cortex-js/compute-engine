@@ -1139,14 +1139,48 @@ describe('MULTIPLE INTEGRALS: .N() uses every limit', () => {
     expect(nValue(F)).toBeCloseTo(0.125, 10);
   });
 
-  test('a bound depending on another integration variable declines', () => {
-    // `Limits(x, 0, y)` does not numericize: iterated numeric quadrature over
-    // a non-product domain is not supported, so `.N()` must keep the integral
-    // inert rather than integrate wrongly.
+  // Limits follow the Mathematica iterator convention: the FIRST limit is the
+  // OUTERMOST integral, so an inner bound may reference the outer variables.
+  test('dependent inner bound: triangle ∫₀¹dx ∫₀ˣdy 1 = 1/2', () => {
+    const F = engine.expr([
+      'Integrate',
+      1,
+      ['Limits', 'x', 0, 1],
+      ['Limits', 'y', 0, 'x'],
+    ]);
+    expect(F.evaluate().toString()).toBe('1/2');
+    expect(nValue(F)).toBeCloseTo(0.5, 10);
+  });
+
+  test('dependent bound with non-elementary integrand: ∫₀¹dx ∫₀ˣ e^(y²) dy', () => {
+    const F = engine.expr([
+      'Integrate',
+      ['Exp', ['Square', 'y']],
+      ['Limits', 'x', 0, 1],
+      ['Limits', 'y', 0, 'x'],
+    ]);
+    // Reference value from an independent mpmath computation.
+    expect(nValue(F)).toBeCloseTo(0.60351083167765899, 10);
+  });
+
+  test('a bound referencing an INNER integration variable declines', () => {
+    // `Limits(x, 0, y)` with `y` bound by a LATER (inner) limit: under the
+    // first-limit-outermost convention that `y` is out of scope, so `.N()`
+    // keeps the integral inert rather than integrate wrongly.
     const F = engine.expr([
       'Integrate',
       1,
       ['Limits', 'x', 0, 'y'],
+      ['Limits', 'y', 0, 2],
+    ]);
+    expect(F.N().has('Integrate')).toBe(true);
+  });
+
+  test('a bound with a foreign free symbol declines', () => {
+    const F = engine.expr([
+      'Integrate',
+      1,
+      ['Limits', 'x', 0, 'q_unbound'],
       ['Limits', 'y', 0, 2],
     ]);
     expect(F.N().has('Integrate')).toBe(true);

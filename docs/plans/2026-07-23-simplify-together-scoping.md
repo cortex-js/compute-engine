@@ -1,13 +1,14 @@
 # Scoping: `simplify()` reach, `Together` reduction, and the evaluate/simplify split
 
 **Date:** 2026-07-23 (updated 2026-07-24)
-**Status:** living record. Items 1–3 and follow-ups §A/§B/§E landed 2026-07-23.
-§C and §D remain open. Two 2026-07-24 rulings, both decided and not yet
-implemented: the end of Item 1 rejects option 4 for the `.simplify()` method,
-adopts it for the `Simplify` operator, and retires the option-2 whitelist; §F
-ratifies the bound-variable binding convention (recorded normatively in
-`ARCHITECTURE.md`), the symbolic-result rule for binders, `SymbolicBlock`, and
-a binder audit that subsumes §C.
+**Status:** living record — all items CLOSED or in flight as of 2026-07-24.
+Items 1–3 and §A/§B/§E landed 2026-07-23. The two 2026-07-24 rulings are
+**implemented**: Item-1 (option 4 rejected for the `.simplify()` method,
+adopted for the `Simplify` operator, option-2 whitelist retired) and §F (the
+bound-variable binding convention — normative in `ARCHITECTURE.md` — the
+symbolic-result rule, the binder audit subsuming §C/§D, and the `HoldValues`
+operator, renamed from `SymbolicBlock` 2026-07-24). §G (value-blind `assume`)
+ruled and in flight.
 
 Context: this came out of working a Jacobian-conjecture counterexample end to
 end through the public LaTeX surface (`parse → D → Determinant → Solve →
@@ -362,7 +363,7 @@ Original order (Items 2 → 1 → 3) completed 2026-07-23. Remaining, as of
    helper; fix `Integrate`/`Limit` transformer reduction (build a real `Limit`
    repro first), `Minimize`, and `D`'s result under the symbolic-result
    ruling; migrate `JacobianMatrix`'s rename; sweep the full binder list.
-3. **§F `SymbolicBlock`**: lazy binder operator, sugar over the shadow-scope
+3. **§F `HoldValues`**: lazy binder operator, sugar over the shadow-scope
    shield; box/parse-route tests per the lazy-operator trap; document in
    `docs/SIMPLIFY.md` alongside the `Block(Declare(…), …)` compositional form.
 4. **§D** — construct the canonical bundled-solve repro; fix (lift specs before
@@ -655,7 +656,7 @@ the method (`Determinant` with `a := 5` → symbolic `ad − bc`) — superseded
 the 2026-07-24 ruling at the end of Item 1, which retires that whitelist
 entirely.
 
-### F. The binding convention, `SymbolicBlock`, and the binder audit — RATIFIED 2026-07-24, not yet implemented
+### F. The binding convention, `HoldValues`, and the binder audit — RATIFIED 2026-07-24, not yet implemented
 
 The §B/§E shadow-scope shield generalized into a single user-facing mental
 model, ratified by the repo owner and recorded normatively in
@@ -676,11 +677,11 @@ ratified together:
    global value) and `Integrate(x², x)` → `x³/3` (today: `25x`, wrong under
    any semantics). A user who wants the value evaluates the result again or
    substitutes explicitly.
-2. **`SymbolicBlock` operator** (name TBD-ok): a lazy binder that binds the
+2. **`HoldValues` operator** (name TBD-ok) (renamed HoldValues 2026-07-24): a lazy binder that binds the
    assigned free symbols of its body — all of them, or a listed subset —
    analogous to Mathematica's `Block[{x}, …]`. It is the per-call opt-out
    that lets `Together`/`Expand`/`Factor` keep their landed resolve-values
-   default: `SymbolicBlock(Together(1/x + a/x²))` → `(x + a)/x²`. Probe
+   default: `HoldValues(Together(1/x + a/x²))` → `(x + a)/x²`. Probe
    2026-07-24 confirmed the compositional form already works —
    `Block(Declare(w, 'real'), Simplify(|w|))` with `w := 5` → `|w|` — so the
    operator is thin sugar over an existing mechanism. Implementation notes:
@@ -701,10 +702,10 @@ ratified together:
 This section subsumes §C (its fix becomes one site of the audit).
 
 **Outcome — Item-1 ruling + binder audit LANDED 2026-07-24** (committed
-`6c300185`). **`SymbolicBlock` LANDED 2026-07-24** (staged): lazy binder in
+`6c300185`). **`HoldValues` LANDED 2026-07-24** (staged): lazy binder in
 `library/core.ts` over the shared shield; all-symbols and subset forms;
 assumptions survive; box+parse routes pinned (20 tests,
-`symbolic-block.test.ts`); default `\mathrm{SymbolicBlock}(…)` LaTeX
+`hold-values.test.ts`); default `\mathrm{HoldValues}(…)` LaTeX
 round-trips, no dictionary entry needed; zero snapshot churn (third wave in a
 row). One adjacent quirk re-confirmed (pre-existing, also affects the method):
 an assumption registered AFTER `assign` is not retained — assume-then-assign
@@ -748,15 +749,60 @@ shared `withValueShield(ce, names, fn)` extracted to
   operator change is Cortex-visible (`let x = 5 … Simplify(x^2 + x)` → `30`).
 - **With §F:** `doc/10-guide-evaluate.md` — the binding convention in user
   language (it already covers value binding/scopes).
-  `doc/85-reference-core.md` — `SymbolicBlock` entry beside `Block`/`Declare`,
+  `doc/85-reference-core.md` — `HoldValues` entry beside `Block`/`Declare`,
   plus the `Block(Declare(w, "real"), …)` idiom which works today.
   `doc/81-reference-calculus.md` — bound variable stays symbolic in the
   result; the `D` behavior change gets its own CHANGELOG callout.
   `src/cortex/docs/for-agents.md` — "Symbolic:" tool list gains
-  `SymbolicBlock` (card is CI-verified; keep examples passing).
-- **Sequencing:** `SymbolicBlock` ships in the SAME release as the
+  `HoldValues` (card is CI-verified; keep examples passing).
+- **Sequencing:** `HoldValues` ships in the SAME release as the
   Simplify-operator change — once the operator evaluates first, it is the
   ONLY value-blind route reachable from Cortex (the `.simplify()` method is
   not exposed there).
 - **Tycho:** note the Simplify-operator semantic change in the next round
   (they run one release behind).
+
+### G. `assume()` is not value-blind — assume-after-assign discarded — RULED 2026-07-24, fix in flight
+
+Found while landing §F (flagged by the `HoldValues` implementation as an
+"adjacent quirk", then root-caused): `assume()` evaluates its predicate
+through assigned symbol values before the assumption system records it. With
+`w := 5`, `assume(w > 0)` folds to `True` → returns `'tautology'` →
+**records nothing** (the assumption is discarded on arrival, not forgotten
+later). With `w := -2` it returns `'contradiction'`. Assume-before-assign
+works because there is no value to fold through. This is the same
+value-blindness violation the binding convention forbids: an `assume`
+predicate mentions a symbol as a *subject to constrain*, not a value to fold.
+
+**Ruling (repo owner, 2026-07-24): shield + record.**
+
+1. Consistency check preserved: a predicate provably False under the current
+   value still returns `'contradiction'` and records nothing (real user-error
+   signal).
+2. Otherwise the predicate is canonicalized and recorded under
+   `withValueShield` (a fact about the symbol), returning `'ok'`.
+3. `'tautology'` is reserved for predicates tautological relative to types and
+   existing assumptions — never relative to an assigned value.
+4. Predicates with no assigned free symbols: unchanged.
+
+Also fixed by this: the §E "pre-existing quirk" note (assign-then-assume
+ordering) and the equivalent note in the `HoldValues` outcome — both were
+this bug.
+
+**Tycho heads-up:** written 2026-07-24 to
+`/Users/arno/dev/tycho/docs/COMPUTE_ENGINE.md` (Simplify evaluate-first,
+binder convention, `HoldValues`) — the checklist's "next round" item is done.
+
+**Outcome (§G landed 2026-07-24, staged).** Implemented in `assume.ts`: the
+exported `assume()` is now a value-blindness wrapper around the former body
+(`assumeDispatch`). Consistency check first (values applied; provably-False →
+`'contradiction'`, nothing recorded), then value-blind recording. One
+mechanism finding worth remembering: **`withValueShield` could NOT be used
+here** — a pushed scope receives a *copy* of the assumptions map that is
+discarded on pop, so an assumption recorded inside the shield's scope
+vanishes (confirmed empirically). The shield is read-safe but write-lossy for
+assumptions. Recording therefore strips the assigned values **in place**
+(`_setSymbolValue(name, undefined)`, restored in `finally`) and stays in the
+durable context. Two existing pins updated to the new semantics (assigned-
+symbol re-asserts now `'ok'`, not `'tautology'`). Full suite green, zero
+snapshot churn (fourth wave in a row).

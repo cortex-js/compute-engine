@@ -4325,31 +4325,46 @@ function compileIntegrate(
     }
   }
 
-  const { index, lowerExpr, upperExpr } = extractLimits(args[1]);
+  const limits = args.slice(1).map(extractLimits);
 
-  // Unwrap a `Function(body, param)` integrand to its body, binding the
-  // lambda to the function's own parameter; otherwise the integrand is a bare
-  // expression in the limits' index variable.
-  let lambdaVar = index;
+  // Unwrap a `Function(body, …params)` integrand to its body, binding the
+  // lambdas to the function's own parameters (one per limit, in limit order,
+  // as the canonical handler builds them); otherwise the integrand is a bare
+  // expression in the limits' index variables.
+  let lambdaVars = limits.map((l) => l.index);
   let bodyExpr = args[0];
   if (isFunction(args[0], 'Function')) {
-    const name = functionLiteralParameterName(args[0].ops[1]);
-    if (name) lambdaVar = name;
+    const names = args[0].ops
+      .slice(1)
+      .map((p) => functionLiteralParameterName(p));
+    if (names.length === limits.length && names.every((n) => n !== undefined))
+      lambdaVars = names as string[];
     bodyExpr = args[0].ops[0];
   }
 
-  const f = BaseCompiler.compile(bodyExpr, {
+  const scoped = (names: string[]): CompileTarget<Expression> => ({
     ...target,
-    var: (id) => (id === lambdaVar ? id : target.var(id)),
-    boundVars: BaseCompiler.withBoundNames(target, [lambdaVar]),
+    var: (id) => (names.includes(id) ? id : target.var(id)),
+    boundVars: BaseCompiler.withBoundNames(target, names),
   });
 
-  const lo = BaseCompiler.compile(lowerExpr, target);
-  const hi = BaseCompiler.compile(upperExpr, target);
+  const f = BaseCompiler.compile(bodyExpr, scoped(lambdaVars));
 
+  // Multiple limits nest, innermost last (Mathematica iterator convention:
+  // the FIRST limit is the OUTERMOST integral). A bound of limit d may
+  // reference the outer lambda variables 0..d−1 — at its nesting depth they
+  // are in scope, so dependent bounds (∫₀¹dx ∫₀ˣdy) compile naturally.
   const fn =
     target.quadrature === 'monte-carlo' ? '_SYS.integrateMC' : '_SYS.integrate';
-  return `${fn}((${lambdaVar}) => (${f}), ${lo}, ${hi})`;
+  let code = f;
+  for (let d = limits.length - 1; d >= 0; d--) {
+    const outer = lambdaVars.slice(0, d);
+    const boundTarget = outer.length > 0 ? scoped(outer) : target;
+    const lo = BaseCompiler.compile(limits[d].lowerExpr, boundTarget);
+    const hi = BaseCompiler.compile(limits[d].upperExpr, boundTarget);
+    code = `${fn}((${lambdaVars[d]}) => (${code}), ${lo}, ${hi})`;
+  }
+  return code;
 }
 
 /**
