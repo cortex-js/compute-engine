@@ -335,6 +335,30 @@ export type OperatorDefinition = Partial<BaseDefinition> &
     signature?: Type | TypeString | BoxedType;
 
     /**
+     * If `true`, the `signature` is a starting point to be refined, not a
+     * contract: assigning a function literal to this operator narrows the
+     * signature from the literal's body, and calls type from the narrowed
+     * signature.
+     *
+     * Declaring a `signature` normally pins it (`inferredSignature: false`),
+     * which is what you want for a fixed API. Set this to `true` to vouch
+     * that a name is an operator — so `f(x)` parses as an application rather
+     * than a multiplication — while leaving its types to be inferred from the
+     * body assigned later:
+     *
+     * ```js
+     * ce.declare('q', { signature: '(unknown) -> unknown', inferredSignature: true });
+     * ce.assign('q', ce.parse('t \\mapsto 2t+1'));
+     * // signature is now `(unknown) -> finite_number`, so `q(x) < y` types
+     * // `boolean` and compiles, while `q(L) < y` over a list `L` still types
+     * // `list<boolean>` and fails closed.
+     * ```
+     *
+     * A declaration that omits `signature` entirely behaves the same way.
+     */
+    inferredSignature?: boolean;
+
+    /**
      * The type of the result (return type) based on the type of
      * the arguments.
      *

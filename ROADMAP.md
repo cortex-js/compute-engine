@@ -79,12 +79,32 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
-### Element-wise compiled comparisons and connectives (deferred 2026-07-22)
+### Element-wise compiled comparisons and connectives (PRIORITIZED 2026-07-24)
 
 The ordering relations (`<`, `<=`, `>`, `>=`) and the logical connectives
 (`And`, `Or`, `Not`) **fail closed** on the JavaScript target when an operand
 may be a collection at run time, so those expressions fall back to the
 interpreter (which is correct). Compiling them element-wise is the open item.
+
+**Prioritized** (was: deferred 2026-07-22). Two things changed. The
+missing-value typing work settled per-position absence semantics, which is most
+of the first withdrawn-implementation problem below. And a second consumer
+witness arrived: Tycho item 86 — a helper declared with a wide return type made
+an ordinary *scalar* comparison uncompilable, and the workaround they shipped
+is sound only under an invariant of their own pipeline. Both witnesses are the
+same asymmetry: compiled arithmetic broadcasts, compiled comparisons refuse.
+
+Note the scalar path is **not** at stake here — this lowering fires only where
+compilation today throws, so it costs nothing on ordinary scalar comparisons.
+(The runtime-guard cost belongs to the *Complex values in compiled scalar
+comparisons* item below, which is a different change and stays deferred.)
+
+**Do the semantics decision first — it is the real blocker, not the codegen.**
+The purity and truncation questions below are interpreter-level rulings whose
+blast radius is wider than compilation; settle them, then implement against the
+settled spec. Sequencing note: the missing-value batch is committed but
+unreleased and Tycho has been told it ships next, so land this in a *later*
+release rather than stacking two comparison-semantics shifts into one adoption.
 
 Background: these heads lower to raw JS infix operators, which are silently
 wrong on an array — `0 < [1,0,1]` stringifies it to `"1,0,1"` and yields a
@@ -100,7 +120,12 @@ must handle:
 - **Per-POSITION projection.** An empty or complex position must not poison its
   siblings. `Not([[], [True]])` broadcasts to `[[], [false]]`; the interpreter
   projects only the empty position to `Nothing`/NaN, whereas a whole-result
-  post-scan collapsed everything to a scalar NaN.
+  post-scan collapsed everything to a scalar NaN. *Largely settled by the
+  missing-value work:* absence is now per-position by construction (IEEE over
+  `NaN`, Kleene over the `Missing` symbol — see the Kleene-absence residue
+  entry), so a broadcast comparison inherits the per-cell rule instead of
+  needing its own. What remains is honoring it in the compiled lowering rather
+  than post-scanning the result.
 - **Shortest-length truncation.** `bcast` truncates to the shortest operand, so
   a pre-scan over all operands inspects suffix elements that interpretation
   never evaluates.

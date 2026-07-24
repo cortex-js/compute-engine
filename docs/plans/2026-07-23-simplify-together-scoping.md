@@ -2,9 +2,12 @@
 
 **Date:** 2026-07-23 (updated 2026-07-24)
 **Status:** living record. Items 1–3 and follow-ups §A/§B/§E landed 2026-07-23.
-§C and §D remain open. A 2026-07-24 ruling (end of Item 1) rejects option 4 for
-the `.simplify()` method, adopts it for the `Simplify` operator, and retires
-the option-2 whitelist — decided, not yet implemented.
+§C and §D remain open. Two 2026-07-24 rulings, both decided and not yet
+implemented: the end of Item 1 rejects option 4 for the `.simplify()` method,
+adopts it for the `Simplify` operator, and retires the option-2 whitelist; §F
+ratifies the bound-variable binding convention (recorded normatively in
+`ARCHITECTURE.md`), the symbolic-result rule for binders, `SymbolicBlock`, and
+a binder audit that subsumes §C.
 
 Context: this came out of working a Jacobian-conjecture counterexample end to
 end through the public LaTeX surface (`parse → D → Determinant → Solve →
@@ -352,13 +355,17 @@ given zero churn.
 Original order (Items 2 → 1 → 3) completed 2026-07-23. Remaining, as of
 2026-07-24:
 
-1. **Implement the 2026-07-24 ruling** (end of Item 1): `Simplify` operator
+1. **Implement the Item-1 ruling**: `Simplify` operator
    evaluates-then-simplifies; delete the option-2 whitelist; update tests,
    `docs/SIMPLIFY.md`, and CHANGELOG; measure snapshot blast radius.
-2. **§C** — shadow-scope shield for `Integrate`/`Limit` transformer-head
-   reduction, via a helper shared with `solve-domain.ts`; build a real `Limit`
-   repro first.
-3. **§D** — construct the canonical bundled-solve repro; fix (lift specs before
+2. **§F binder audit** (subsumes §C): extract the shared `withValueShield`
+   helper; fix `Integrate`/`Limit` transformer reduction (build a real `Limit`
+   repro first), `Minimize`, and `D`'s result under the symbolic-result
+   ruling; migrate `JacobianMatrix`'s rename; sweep the full binder list.
+3. **§F `SymbolicBlock`**: lazy binder operator, sugar over the shadow-scope
+   shield; box/parse-route tests per the lazy-operator trap; document in
+   `docs/SIMPLIFY.md` alongside the `Block(Declare(…), …)` compositional form.
+4. **§D** — construct the canonical bundled-solve repro; fix (lift specs before
    shielding) only if it reproduces, else record and close.
 
 ---
@@ -496,7 +503,7 @@ Regression tests in `test/compute-engine/solve.test.ts` (the §B repro plus a
 value-restored-after-solve pin, and the three protected verification cases).
 Full suite green, zero snapshot churn.
 
-### C. `Integrate`/`Limit` transformer reduction substitutes a value-bound bound variable — OPEN
+### C. `Integrate`/`Limit` transformer reduction substitutes a value-bound bound variable — OPEN, subsumed by the §F binder audit
 
 Same protected-set gap as §B, on the differentiation/integration side. `Integrate`
 reduces a nested transformer head in its integrand via `reduceTransformerHead`
@@ -647,3 +654,48 @@ reads as assigned, so nested simplifies don't re-shadow). Zero snapshot churn
 the method (`Determinant` with `a := 5` → symbolic `ad − bc`) — superseded by
 the 2026-07-24 ruling at the end of Item 1, which retires that whitelist
 entirely.
+
+### F. The binding convention, `SymbolicBlock`, and the binder audit — RATIFIED 2026-07-24, not yet implemented
+
+The §B/§E shadow-scope shield generalized into a single user-facing mental
+model, ratified by the repo owner and recorded normatively in
+[`ARCHITECTURE.md`](../../ARCHITECTURE.md) ("Bound variables, free symbols,
+and assigned values"):
+
+> A bound variable is a pure symbol: its declared type and in-scope
+> assumptions apply, its assigned value never does. A free symbol's value
+> always applies under evaluation — in every operator uniformly.
+
+There is no operator taxonomy ("symbolic" vs "value-considering") — what
+varies is whether an operator **binds** a variable. Three consequences were
+ratified together:
+
+1. **Symbolic-result ruling for binders.** The bound variable stays symbolic
+   *in the result*: with `x := 5`, `D(x², x)` → `2x` (today: `10` — the
+   handler differentiates correctly but the result is then evaluated at the
+   global value) and `Integrate(x², x)` → `x³/3` (today: `25x`, wrong under
+   any semantics). A user who wants the value evaluates the result again or
+   substitutes explicitly.
+2. **`SymbolicBlock` operator** (name TBD-ok): a lazy binder that binds the
+   assigned free symbols of its body — all of them, or a listed subset —
+   analogous to Mathematica's `Block[{x}, …]`. It is the per-call opt-out
+   that lets `Together`/`Expand`/`Factor` keep their landed resolve-values
+   default: `SymbolicBlock(Together(1/x + a/x²))` → `(x + a)/x²`. Probe
+   2026-07-24 confirmed the compositional form already works —
+   `Block(Declare(w, 'real'), Simplify(|w|))` with `w := 5` → `|w|` — so the
+   operator is thin sugar over an existing mechanism. Implementation notes:
+   shadow-declare valueless keeping declared type; assumptions survive
+   (§E-confirmed); constants exempt; it is `lazy`, so per the lazy-operator
+   trap it needs a `canonical` handler and box/parse-route tests.
+3. **Binder audit with a shared helper.** Extract
+   `reduceWithUnknownsShielded` (`solve-domain.ts`) into a shared
+   `withValueShield(ce, names, fn)` and apply it at every binder head — no
+   more per-operator renames (`JacobianMatrix`'s `__jac_` rename migrates).
+   Probe findings 2026-07-24: `Solve` ✓, `Sum`/`Product`/`Limit` (parse
+   route) ✓; **`Minimize` is broken** (`Minimize(x², x)` with `x := 5`
+   canonicalizes to inert `Minimize(25, 5)` — value substitutes into body
+   AND variable spec); `D` needs the symbolic-result fix; `Integrate`/`Limit`
+   transformer reduction is §C. Audit the full binder list
+   (`collectBinderNames`) including quantifiers and comprehension indices.
+
+This section subsumes §C (its fix becomes one site of the audit).

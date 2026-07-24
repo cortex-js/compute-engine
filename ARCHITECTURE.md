@@ -349,6 +349,55 @@ of the operation with human-readable labels (a ~250-entry registry in
 (`symbolic/explain-derivative.ts`) self-registers via `_setExplainDDriver`,
 keeping `boxed-expression/` free of an upward import into `symbolic/`.
 
+### Bound variables, free symbols, and assigned values
+
+*(Convention ratified 2026-07-24. It governs every operator, including future
+ones — check new binder operators against it.)*
+
+One rule governs how an assigned symbol value interacts with every operation:
+
+> **A bound variable is a pure symbol: its declared type and in-scope
+> assumptions apply, its assigned value never does. A free symbol's value
+> always applies under evaluation — in every operator uniformly.**
+
+There is no taxonomy of "symbolic" vs "value-considering" operators. What
+varies is whether an operator **binds** a variable:
+
+- **Binder operators** — `D`/`Derivative`, `Integrate`, `Limit`, `Sum`,
+  `Product`, `Solve`, `Minimize`/`Maximize`, `Function` (lambda parameters),
+  comprehension/table indices, quantifiers — bind their own variable. That
+  variable is shielded from any same-named global assignment for the whole
+  operation, **including in the result**: with `x := 5`, `D(x², x)` is `2x`
+  and `Integrate(x², x)` is `x³/3`, both left in terms of the still-symbolic
+  `x`. Any *other* symbol in the operand is free and resolves normally:
+  with `a := 3` as well, `D(a·x², x)` is `6x`.
+- **Non-binder operators** — `Together`, `Expand`, `Factor`, `Simplify`,
+  arithmetic, everything else — bind nothing, so all their symbols are free
+  and all values apply: `Together(1/x + a/x²)` with those assignments is
+  `8/25`.
+- **`SymbolicBlock`** *(planned)* is not an exception but the rule made
+  available à la carte: it is itself a binder, binding the assigned free
+  symbols of its body (all of them, or a listed subset) — the analogue of
+  Mathematica's `Block[{x}, …]`. `SymbolicBlock(Together(1/x + a/x²))` is
+  `(x + a)/x²`. The compositional form exists today:
+  `Block(Declare(w, 'real'), …)` shadow-declares `w` valueless for the body.
+
+Two footnotes:
+
+- The `.simplify()` **method** (engine API, not reachable from the operator
+  surface) is value-blind wholesale — as if the expression were wrapped in
+  `SymbolicBlock`. That is its documented contract (see
+  [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md)); the `Simplify` *operator*
+  evaluates its argument like any operator.
+- Shielding is implemented by shadow-declaring the bound variable valueless
+  (keeping its type; assumptions survive) in a temporary scope — use the
+  shared helper, do not invent per-operator renames.
+
+Implementation status: `Solve` conforms; known deviations (`Integrate`'s
+transformer reduction, `Minimize`, `D`'s result being evaluated at the global
+value) are tracked in
+[`docs/plans/2026-07-23-simplify-together-scoping.md`](./docs/plans/2026-07-23-simplify-together-scoping.md) §F.
+
 ## Type system
 
 `src/common/type/` is a self-contained type system used to describe and check

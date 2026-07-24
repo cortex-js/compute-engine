@@ -174,6 +174,25 @@
 
 ### Improvements
 
+- **`declare()` accepts `inferredSignature: true`, to vouch that a name is an
+  operator without pinning its types.** Declaring a `signature` normally makes
+  it a contract, so a wide placeholder such as `(unknown) -> unknown` keeps
+  every call typed `unknown` even after a function literal is assigned. That is
+  the right default for a fixed API, but not for a name that must be declared
+  *before* its body exists — most often so that `f(x)` parses as an application
+  rather than a multiplication:
+
+  ```js
+  ce.declare('q', { signature: '(unknown) -> unknown', inferredSignature: true });
+  ce.assign('q', ce.parse('t \\mapsto 2t+1'));
+  // signature is now `(unknown) -> finite_number`
+  // `q(x) < y` types `boolean` and compiles;
+  // `q(L) < y` over a list `L` types `list<boolean>` and still fails closed
+  ```
+
+  The flag was already honored at run time and is now part of the
+  `OperatorDefinition` type, so it no longer needs a cast. A declaration that
+  omits `signature` entirely behaves the same way.
 - **An unapplied `Derivative(f)` now evaluates to a named-parameter function
   literal.** `Derivative(Sin)` evaluates to `x ↦ cos(x)` (`["Function",
   ["Cos","x"],"x"]`) instead of the hole-form `cos(_)`, which was typed
