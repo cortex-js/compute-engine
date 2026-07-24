@@ -1,23 +1,32 @@
-import { readFile } from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
-
 import { version } from '../cortex.js';
 
 import { CliUsageError, parseCliArguments } from './arguments.js';
-import { formatDiagnostics, formatValue, hasErrors } from './format.js';
+import { runCheck } from './check.js';
+import { runDoc } from './doc.js';
+import {
+  diagnosticToJson,
+  formatDiagnostics,
+  formatValue,
+  hasErrors,
+} from './format.js';
+import { readSource, type CliIo } from './io.js';
 import { runRepl } from './repl.js';
 import { makeCortexSession } from './session.js';
 
-export interface CliIo {
-  stdin: NodeJS.ReadStream;
-  stdout: NodeJS.WriteStream;
-  stderr: NodeJS.WriteStream;
-  env: NodeJS.ProcessEnv;
-}
+export type { CliIo } from './io.js';
 
 const HELP = `Usage: cortex [options] [file]
+       cortex check [options] [file]
+       cortex doc [options] <name or keywords>
 
 Evaluate Cortex programs or start an interactive session.
+
+Commands:
+  check                   parse a program and report diagnostics without
+                          evaluating it; "--json" prints them as JSON
+  doc                     show documentation for a library symbol, or search
+                          the library by keyword; "--json" for JSON,
+                          "--limit <n>" for more matches
 
 Arguments:
   file                    Cortex source file (.cortex or .cx)
@@ -26,6 +35,7 @@ Options:
   -e, --eval <source>     evaluate source text
       --json              print the result as MathJSON
       --cortex            print the result as Cortex source
+      --diagnostics <fmt> print diagnostics as "text" (default) or "json"
       --time-limit <ms>   evaluation deadline; 0 disables it (default: 10000)
       --no-color          disable colored diagnostics
   -h, --help              display this help
@@ -44,6 +54,9 @@ export async function main(
     env: process.env,
   }
 ): Promise<number> {
+  if (args[0] === 'check') return runCheck(args.slice(1), io);
+  if (args[0] === 'doc') return runDoc(args.slice(1), io);
+
   let options;
   try {
     options = parseCliArguments(args, io.env);
@@ -81,13 +94,22 @@ export async function main(
   try {
     const { source, url } = await readSource(options.eval, options.file, io);
     const result = session.evaluate(source, url);
-    const diagnostics = formatDiagnostics(
-      result.diagnostics,
-      source,
-      options.file,
-      options.color && Boolean(io.stderr.isTTY)
-    );
-    if (diagnostics) io.stderr.write(`${diagnostics}\n`);
+    if (options.diagnosticsFormat === 'json') {
+      if (result.diagnostics.length > 0)
+        io.stderr.write(
+          `${JSON.stringify(
+            result.diagnostics.map((x) => diagnosticToJson(x, source))
+          )}\n`
+        );
+    } else {
+      const diagnostics = formatDiagnostics(
+        result.diagnostics,
+        source,
+        options.file,
+        options.color && Boolean(io.stderr.isTTY)
+      );
+      if (diagnostics) io.stderr.write(`${diagnostics}\n`);
+    }
 
     if (!result.diagnostics.some((x) => x.severity === 'error')) {
       const value = formatValue(result, options.outputMode);
@@ -100,23 +122,4 @@ export async function main(
     );
     return 1;
   }
-}
-
-async function readSource(
-  inline: string | undefined,
-  file: string | undefined,
-  io: CliIo
-): Promise<{ source: string; url?: string }> {
-  if (inline !== undefined) return { source: inline };
-  if (file !== undefined && file !== '-') {
-    return {
-      source: await readFile(file, 'utf8'),
-      url: pathToFileURL(file).href,
-    };
-  }
-
-  let source = '';
-  io.stdin.setEncoding('utf8');
-  for await (const chunk of io.stdin) source += chunk;
-  return { source };
 }

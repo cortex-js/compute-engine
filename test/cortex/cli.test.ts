@@ -1,11 +1,39 @@
-import { parseCliArguments, CliUsageError } from '../../src/cli/arguments';
+import {
+  parseCheckArguments,
+  parseCliArguments,
+  parseDocArguments,
+  CliUsageError,
+} from '../../src/cli/arguments';
 import {
   formatDiagnostics,
   formatValue,
   hasErrors,
 } from '../../src/cli/format';
+import { main, type CliIo } from '../../src/cli/main';
 import { isRecoverable } from '../../src/cli/repl';
 import { makeCortexSession } from '../../src/cli/session';
+
+function makeIo(): { io: CliIo; stdout: () => string; stderr: () => string } {
+  let out = '';
+  let err = '';
+  const io: CliIo = {
+    stdin: {
+      isTTY: false,
+      setEncoding() {},
+      async *[Symbol.asyncIterator]() {},
+    } as unknown as NodeJS.ReadStream,
+    stdout: {
+      isTTY: false,
+      write: (s: string) => ((out += s), true),
+    } as unknown as NodeJS.WriteStream,
+    stderr: {
+      isTTY: false,
+      write: (s: string) => ((err += s), true),
+    } as unknown as NodeJS.WriteStream,
+    env: {},
+  };
+  return { io, stdout: () => out, stderr: () => err };
+}
 
 describe('Cortex CLI arguments', () => {
   test('parses execution and output options', () => {
@@ -33,6 +61,132 @@ describe('Cortex CLI arguments', () => {
     expect(() => parseCliArguments(['--time-limit', '-1'])).toThrow(
       CliUsageError
     );
+  });
+
+  test('parses the diagnostics format', () => {
+    expect(parseCliArguments([], {}).diagnosticsFormat).toBe('text');
+    expect(
+      parseCliArguments(['--diagnostics', 'json'], {}).diagnosticsFormat
+    ).toBe('json');
+    expect(() => parseCliArguments(['--diagnostics', 'yaml'], {})).toThrow(
+      CliUsageError
+    );
+  });
+
+  test('parses check and doc subcommand options', () => {
+    expect(parseCheckArguments(['-e', '1 + 2', '--json'], {})).toMatchObject({
+      eval: '1 + 2',
+      json: true,
+    });
+    expect(() => parseCheckArguments(['-e', '1', 'a.cx'], {})).toThrow(
+      CliUsageError
+    );
+
+    expect(
+      parseDocArguments(['greatest', 'common', 'divisor', '--limit', '3'])
+    ).toEqual({ query: 'greatest common divisor', json: false, limit: 3 });
+    expect(() => parseDocArguments([])).toThrow(CliUsageError);
+    expect(() => parseDocArguments(['Sin', '--limit', '0'])).toThrow(
+      CliUsageError
+    );
+  });
+});
+
+describe('Cortex CLI check command', () => {
+  test('exits 0 and prints nothing for a well-formed program', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(await main(['check', '-e', 'let x = 5\nx + 1'], io)).toBe(0);
+    expect(stdout()).toBe('');
+    expect(stderr()).toBe('');
+  });
+
+  test('reports syntax errors without evaluating', async () => {
+    const { io, stderr } = makeIo();
+    expect(await main(['check', '-e', '1 +'], io)).toBe(1);
+    expect(stderr()).toContain('Unexpected symbol "+"');
+  });
+
+  test('emits a JSON envelope with locations and fix-its', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['check', '-e', 'a+ b', '--json'], io)).toBe(0);
+    const envelope = JSON.parse(stdout());
+    expect(envelope.ok).toBe(true);
+    expect(envelope.diagnostics).toHaveLength(1);
+    expect(envelope.diagnostics[0]).toMatchObject({
+      severity: 'warning',
+      code: 'asymmetric-operator-whitespace',
+      line: 1,
+      fixits: [{ start: 1, end: 2, value: ' + ' }],
+    });
+  });
+
+  test('reports error diagnostics in the JSON envelope', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['check', '-e', '1 @ 2', '--json'], io)).toBe(1);
+    const envelope = JSON.parse(stdout());
+    expect(envelope.ok).toBe(false);
+    expect(envelope.diagnostics[0].severity).toBe('error');
+    expect(typeof envelope.diagnostics[0].message).toBe('string');
+  });
+});
+
+describe('Cortex CLI doc command', () => {
+  test('shows an exact entry, case-insensitively', async () => {
+    for (const name of ['Sin', 'sin']) {
+      const { io, stdout } = makeIo();
+      expect(await main(['doc', name], io)).toBe(0);
+      expect(stdout()).toContain('Sin (function)');
+      expect(stdout()).toContain('->');
+    }
+  });
+
+  test('searches by keywords', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['doc', 'greatest', 'common', 'divisor'], io)).toBe(0);
+    expect(stdout()).toContain('GCD (function)');
+  });
+
+  test('emits structured JSON matches', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['doc', 'average', '--json'], io)).toBe(0);
+    const { query, matches } = JSON.parse(stdout());
+    expect(query).toBe('average');
+    expect(matches.map((x: { id: string }) => x.id)).toContain('Mean');
+    const mean = matches.find((x: { id: string }) => x.id === 'Mean');
+    expect(mean.kind).toBe('function');
+    expect(typeof mean.signature).toBe('string');
+  });
+
+  test('includes the value of constants', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['doc', 'Pi', '--json'], io)).toBe(0);
+    const { matches } = JSON.parse(stdout());
+    expect(matches[0]).toMatchObject({ id: 'Pi', kind: 'constant' });
+    expect(matches[0].value).toContain('3.14159');
+  });
+
+  test('exits 1 when nothing matches', async () => {
+    const { io, stderr } = makeIo();
+    expect(await main(['doc', 'zzzqqq'], io)).toBe(1);
+    expect(stderr()).toContain('no documentation matches');
+  });
+});
+
+describe('Cortex CLI JSON diagnostics for evaluation', () => {
+  test('prints runtime diagnostics as JSON to stderr', async () => {
+    const { io, stderr } = makeIo();
+    expect(
+      await main(
+        ['-e', 'let xs = [1, 2, 3]\nxs[2] = 9\nxs', '--diagnostics', 'json'],
+        io
+      )
+    ).toBe(1);
+    const diagnostics = JSON.parse(stderr());
+    expect(diagnostics[0]).toMatchObject({
+      severity: 'error',
+      code: 'runtime-error',
+      line: 2,
+    });
   });
 });
 

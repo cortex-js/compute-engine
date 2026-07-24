@@ -76,6 +76,11 @@ calculus, linear algebra, strings, and more.
 Use the **CLI and interactive REPL** from a terminal.
 </ReadMore>
 
+<ReadMore path="/cortex/for-agents/">
+Writing Cortex with an LLM? Give it the **language card for AI agents** — a
+condensed, machine-verified reference.
+</ReadMore>
+
 ## Language Reference
 
 <ReadMore path="/cortex/syntax/">

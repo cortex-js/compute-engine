@@ -47,6 +47,54 @@ export function hasErrors(result: EvaluationResult): boolean {
   );
 }
 
+/**
+ * A machine-readable diagnostic: the structured counterpart of the text
+ * format produced by `formatDiagnostics()`. Offsets are 0-based character
+ * offsets into the source; `line`/`column` are 1-based and derived from the
+ * diagnostic's position (the same location the text format points at).
+ */
+export interface JsonDiagnostic {
+  severity: 'warning' | 'error';
+  code: string;
+  args: string[];
+  message: string;
+  start: number;
+  end: number;
+  line: number;
+  column: number;
+  fixits?: { start: number; end: number; value: string }[];
+}
+
+export function diagnosticToJson(
+  diagnostic: ParsingDiagnostic,
+  source: string
+): JsonDiagnostic {
+  const parts = Array.isArray(diagnostic.message)
+    ? diagnostic.message
+    : [diagnostic.message];
+  const [code, ...args] = parts;
+  const offset = diagnostic.range[2] ?? diagnostic.range[1];
+  const { line, column } = sourceLocation(source, offset);
+
+  const result: JsonDiagnostic = {
+    severity: diagnostic.severity,
+    code: String(code),
+    args: args.map(String),
+    message: diagnosticMessage(diagnostic),
+    start: diagnostic.range[0],
+    end: diagnostic.range[1],
+    line,
+    column,
+  };
+  if (diagnostic.fixits && diagnostic.fixits.length > 0)
+    result.fixits = diagnostic.fixits.map(([start, end, value]) => ({
+      start,
+      end,
+      value,
+    }));
+  return result;
+}
+
 function formatDiagnostic(
   diagnostic: ParsingDiagnostic,
   source: string,

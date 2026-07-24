@@ -78,6 +78,7 @@ Pi * radius^2
 | `-e`, `--eval <source>` | Evaluate Cortex source supplied on the command line. |
 | `--json` | Write the result as formatted MathJSON. |
 | `--cortex` | Write the result as serialized Cortex source. |
+| `--diagnostics <fmt>` | Write diagnostics as `text` (the default) or as a `json` array. |
 | `--time-limit <ms>` | Set the evaluation deadline in milliseconds. The default is `10000`; `0` disables it. |
 | `--no-color` | Disable color in diagnostics. The [`NO_COLOR`](https://no-color.org/) environment variable is also honored. |
 | `-h`, `--help` | Display command help. |
@@ -85,6 +86,72 @@ Pi * radius^2
 
 `--json` and `--cortex` are mutually exclusive. With neither option, results
 use the Compute Engine's ordinary textual representation.
+
+## Checking a Program Without Evaluating It
+
+`cortex check` parses a program and reports its diagnostics — syntax errors,
+malformed strings, invalid type annotations, `match` shape problems — without
+evaluating anything. It accepts the same source forms as evaluation: a file,
+`--eval`, or standard input.
+
+```shell
+npx cortex check program.cx
+npx cortex check --eval 'let x = 5; x +'
+```
+
+The exit status is `0` when there are no error diagnostics (warnings are
+allowed) and `1` otherwise. With `--json`, a machine-readable envelope is
+written to standard output instead of formatted text on standard error:
+
+```shell
+$ npx cortex check --eval 'a+ b' --json
+{
+  "ok": true,
+  "diagnostics": [
+    {
+      "severity": "warning",
+      "code": "asymmetric-operator-whitespace",
+      "args": ["+"],
+      "message": "asymmetric operator whitespace: +",
+      "start": 1,
+      "end": 2,
+      "line": 1,
+      "column": 3,
+      "fixits": [{ "start": 1, "end": 2, "value": " + " }]
+    }
+  ]
+}
+```
+
+`start`/`end` are 0-based character offsets into the source; `line`/`column`
+are 1-based. A `fixits` entry is a replacement (`value`) for the source range
+`[start, end)`. The same structured form is available during evaluation with
+`--diagnostics json`, which writes the array to standard error.
+
+Because `check` does not evaluate, it does not report runtime problems —
+unknown-function suggestions, type mismatches at call sites, or error values.
+Those surface when the program runs.
+
+## Looking Up Documentation
+
+`cortex doc` shows the definition of a library symbol — its kind, signature
+or type, description, and keywords — or searches the library when the
+argument is not an exact name. Search matches identifiers, descriptions,
+curated keywords, and LaTeX commands:
+
+```shell
+$ npx cortex doc Sin
+Sin (function) (number) -> number — Sine of an angle.
+  keywords: sine
+
+$ npx cortex doc greatest common divisor
+GCD (function) (any*) -> number — Greatest Common Divisor
+...
+```
+
+Use `--limit <n>` for more search matches (default 10) and `--json` for a
+structured `{ query, matches }` envelope. The exit status is `1` when
+nothing matches.
 
 ## Interactive REPL
 

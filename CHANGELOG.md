@@ -1,5 +1,27 @@
 ## [Unreleased]
 
+### New Features
+
+- **`cortex check` — validate a program without evaluating it.** Parses the
+  source (a file, `--eval`, or stdin) and reports diagnostics; exit status is
+  `0` when there are no errors. With `--json` it emits a machine-readable
+  envelope (`{ ok, diagnostics }` with severities, codes, messages, 0-based
+  source offsets, 1-based line/column, and fix-its). The same structured
+  diagnostics are available during evaluation with `--diagnostics json`.
+- **`cortex doc` — library documentation from the terminal.**
+  `cortex doc Sin` shows a definition's kind, signature or type, description,
+  keywords, and (for constants) value; a non-name argument searches the
+  library by identifier, description, curated keywords, and LaTeX commands
+  (`cortex doc greatest common divisor` → `GCD`, …). `--limit <n>` controls
+  the number of matches and `--json` emits a structured `{ query, matches }`
+  envelope.
+- **`Cortex for AI Agents` language card.** A condensed, machine-verified
+  reference for LLMs and coding agents writing Cortex (`/cortex/for-agents/`):
+  core semantics, an operator-precedence summary, a table of
+  Python/JavaScript reflexes that don't transfer, and verified idioms. Every
+  example on the page is executed by the documentation test suite, so the
+  card cannot drift from the implementation.
+
 ### Improvements
 
 - **`Pipe`/`Apply` reject or defer a non-function right operand more

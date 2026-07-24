@@ -1,10 +1,17 @@
 import { parseArgs } from 'node:util';
 
-import type { CliOptions, OutputMode } from './types.js';
+import type {
+  CheckOptions,
+  CliOptions,
+  DiagnosticsFormat,
+  DocOptions,
+  OutputMode,
+} from './types.js';
 
 export class CliUsageError extends Error {}
 
 const DEFAULT_TIME_LIMIT = 10_000;
+const DEFAULT_DOC_LIMIT = 10;
 
 export function parseCliArguments(
   args: readonly string[],
@@ -22,6 +29,7 @@ export function parseCliArguments(
         'version': { type: 'boolean', short: 'v' },
         'json': { type: 'boolean' },
         'cortex': { type: 'boolean' },
+        'diagnostics': { type: 'string' },
         'no-color': { type: 'boolean' },
         'time-limit': { type: 'string' },
       },
@@ -52,9 +60,90 @@ export function parseCliArguments(
     help: values.help === true,
     version: values.version === true,
     outputMode,
+    diagnosticsFormat: parseDiagnosticsFormat(values.diagnostics),
     color: values['no-color'] !== true && env.NO_COLOR === undefined,
     timeLimit: parseTimeLimit(timeLimit),
   };
+}
+
+export function parseCheckArguments(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = process.env
+): CheckOptions {
+  let parsed: ReturnType<typeof parseArgs>;
+  try {
+    parsed = parseArgs({
+      args: [...args],
+      allowPositionals: true,
+      strict: true,
+      options: {
+        'eval': { type: 'string', short: 'e' },
+        'json': { type: 'boolean' },
+        'no-color': { type: 'boolean' },
+      },
+    });
+  } catch (error) {
+    throw new CliUsageError(messageFromError(error));
+  }
+
+  const { values, positionals } = parsed;
+  const evalSource = typeof values.eval === 'string' ? values.eval : undefined;
+  if (positionals.length > 1)
+    throw new CliUsageError('Expected at most one Cortex source file.');
+  if (evalSource !== undefined && positionals.length > 0)
+    throw new CliUsageError('The --eval option cannot be used with a file.');
+
+  return {
+    eval: evalSource,
+    file: positionals[0],
+    json: values.json === true,
+    color: values['no-color'] !== true && env.NO_COLOR === undefined,
+  };
+}
+
+export function parseDocArguments(args: readonly string[]): DocOptions {
+  let parsed: ReturnType<typeof parseArgs>;
+  try {
+    parsed = parseArgs({
+      args: [...args],
+      allowPositionals: true,
+      strict: true,
+      options: {
+        'json': { type: 'boolean' },
+        'limit': { type: 'string' },
+      },
+    });
+  } catch (error) {
+    throw new CliUsageError(messageFromError(error));
+  }
+
+  const { values, positionals } = parsed;
+  const query = positionals.join(' ').trim();
+  if (query.length === 0)
+    throw new CliUsageError(
+      'Expected a symbol name or search keywords, e.g. "cortex doc Sin".'
+    );
+
+  return {
+    query,
+    json: values.json === true,
+    limit: parseDocLimit(
+      typeof values.limit === 'string' ? values.limit : undefined
+    ),
+  };
+}
+
+function parseDiagnosticsFormat(value: unknown): DiagnosticsFormat {
+  if (value === undefined) return 'text';
+  if (value === 'text' || value === 'json') return value;
+  throw new CliUsageError('--diagnostics must be "text" or "json".');
+}
+
+function parseDocLimit(value: string | undefined): number {
+  if (value === undefined) return DEFAULT_DOC_LIMIT;
+  if (!/^\d+$/.test(value) || Number(value) < 1)
+    throw new CliUsageError('--limit must be a positive integer.');
+  return Math.min(Number(value), 100);
 }
 
 function parseTimeLimit(value: string | undefined): number {

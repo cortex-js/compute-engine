@@ -154,7 +154,8 @@ describe('CORTEX DOCUMENTATION', () => {
     const executable = blocks.filter(
       (block) =>
         block.language === 'cortex-live' ||
-        basename(block.file) === 'examples.md'
+        basename(block.file) === 'examples.md' ||
+        basename(block.file) === 'for-agents.md'
     );
     const failures: string[] = [];
 
