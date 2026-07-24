@@ -126,6 +126,44 @@ innermost cell** (§3.B). No new type kind is needed — a `missing` arm on
 is not, which is why `broadcastable<T>` exists as a type and missing-ability
 does not).
 
+**The parallel with `broadcastable`, and where it stops.** Both features
+exist for the same root reason: a semantic opt-in must be a definition flag,
+never a widened parameter type, because a parameter type is also an inference
+source (I4; the item-67 lesson). Both are functor lifts in spirit — broadcast
+over the container functor, missing-ability over the option functor — and
+they compose per cell because functors compose (`list ∘ maybe`), which is why
+§3.B is one pipeline rather than two interacting features. Both share the
+strip/peel-validate-rebuild shape (broadcast peels shape before checking the
+cell against the parameter; missing strips the arm before `Tᵢ° <: Pᵢ`), and
+both are resolved at definition-binding time and recomputed on
+`infer()`/`update()` — two instances of I5's "one declaration, all consumers
+agree."
+
+The analogy stops in three places, and each stop is load-bearing:
+
+1. **Lift vs absorption.** Broadcast is wrapper-preserving (`list` in →
+   `list` out), so its structure must survive into the result type — hence
+   `broadcastable<T>` exists *as a type*. Missing-ability preserves the
+   wrapper only on the object-domain path; on the numeric path the option
+   wrapper is *absorbed* into a domain that already contains its own absent
+   element (`NaN ∈ number`) — a fold into a pointed domain, not a `map`. Do
+   not "restore symmetry" with a `missingable<T>` type kind; the asymmetry is
+   the design.
+2. **The map/fold boundary.** The operators declared `handle` (`Max`, `Mean`,
+   the statistics) are reducers — the same class that cannot be
+   `broadcastable`, because a fold consumes the container rather than mapping
+   over it. Broadcast needs no policy taxonomy since mapping is the only
+   behavior a shape lift can have; absence needs `reject | propagate | handle
+   | pass-through` because at a fold boundary absence has *semantics* (skip,
+   propagate, Kleene) that no generic rule can choose.
+3. **Runtime cost inversion.** Broadcast's runtime is a loop the engine must
+   supply on every target; numeric absence propagation is free — IEEE
+   hardware *is* the gate (`NaN + 1 = NaN`), which is why §3.F compiles
+   guard-free and why I1 chose `NaN`. The flip side: broadcast degrades
+   gracefully everywhere, while absence *discharge* requires the target to
+   observe the absent element (`isnan` surviving fast-math) — hence the GPU
+   story "propagation free, discharge fails closed" (§3.F).
+
 Per operand cell of a `propagate` application:
 
 | operand cell type | validated as | result cell | runtime |

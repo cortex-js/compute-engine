@@ -1,7 +1,10 @@
 # Scoping: `simplify()` reach, `Together` reduction, and the evaluate/simplify split
 
-**Date:** 2026-07-23
-**Status:** scoping only — no behavior change proposed here has been implemented.
+**Date:** 2026-07-23 (updated 2026-07-24)
+**Status:** living record. Items 1–3 and follow-ups §A/§B/§E landed 2026-07-23.
+§C and §D remain open. A 2026-07-24 ruling (end of Item 1) rejects option 4 for
+the `.simplify()` method, adopts it for the `Simplify` operator, and retires
+the option-2 whitelist — decided, not yet implemented.
 
 Context: this came out of working a Jacobian-conjecture counterexample end to
 end through the public LaTeX surface (`parse → D → Determinant → Solve →
@@ -116,22 +119,67 @@ rather than `b^2 + 2b + 1`. A test added earlier in the same session pinned the
 old behavior; it was updated, and that pin was the *only* thing in the suite
 that changed.
 
-### Related, still open: transformers and value-bound symbols
+### Resolved (was "Related, still open: transformers and value-bound symbols")
 
-The lazy-operand fix (2026-07-23) resolves value-bound symbols for **`Solve`**,
-where the unknowns give a precise set to protect from substitution. The
-transformers have no such anchor, so `Simplify(v)` with `v := (x²-1)/(x-1)`
-is still a no-op — and `Simplify` of an expression containing a bound symbol
-serializes the unresolved symbol oddly (`2w^2 + "yw"^2 + 3w * "yw"`, a
-string, which is a separate display defect worth a look).
+This section predated the "Outcome — transformers and value-bound symbols"
+above and was left in by mistake. Both of its claims were re-probed 2026-07-24
+and are resolved: `Simplify(v)` with `v := (x²-1)/(x-1)` returns `x + 1`, and
+the `"yw"` string-serialization defect no longer reproduces (the probe
+serializes cleanly as `4y² + 12y + 8`).
 
-Whether a transformer should resolve bound symbols is the *same question* as
-this item: it is value substitution, and option 4 above would settle both. Do
-not fix it in isolation.
+### Ruling 2026-07-24 — option 4 rejected for the method, adopted for the operator; option 2 retired
 
-The practical consequence today: in Cortex, nothing that is not written inline
-can be simplified, because every route (`Simplify(v)`, `Simplify(Evaluate(v))`)
-goes through a lazy operand.
+**Status: decided, not yet implemented.**
+
+The question option 4 left open ("should `simplify()` evaluate first?") is
+settled by splitting it per surface — the same line the landed transformer
+outcome already drew:
+
+- **The `.simplify()` method keeps its contract unchanged**: value-blind,
+  rule-driven rewriting, never substitutes an assigned value, never runs an
+  `evaluate` handler. Option 4 at the method level is **rejected** — it is now
+  architecturally incompatible with the value-blindness contract ratified and
+  test-pinned across the fold fix (`e8848081`), Item E (`915c1a33`), and the
+  §B shield. The recipe for "compute, then simplify" remains
+  `expr.evaluate().simplify()` (documented in `docs/SIMPLIFY.md`).
+- **The `Simplify` operator becomes evaluate-then-simplify**: its handler
+  calls `.evaluate()` on the (reduced) operand, then `.simplify()`. This is
+  option 4 scoped to the operator boundary, and is the consistent endpoint of
+  the landed ruling that "an operator normally evaluates its arguments" — the
+  operator already resolves value-bound symbols. It closes the residual
+  producer-head inertness (probed 2026-07-24: `Simplify(Max(3,5))`,
+  `Simplify(D(x²+ax, x))`, and `Simplify(Integrate(x², x))` are all no-ops on
+  both routes today; the whitelist only ever covered structural heads).
+- **The option-2 whitelist is retired as subsumed.** `SIMPLIFY_EVALUABLE_HEADS`
+  and `evaluateStructuralHead` (self-contained in
+  `boxed-expression/simplify.ts`, one call site) are deleted, along with the
+  Item-E corollary machinery that rode on them. The whitelist was compensation
+  for the operator gap; with the operator evaluating, its only residual
+  coverage was the bare method on a structural head, where the answer is the
+  same recipe we give for `Max` and `D`. It is unreleased (landed after the
+  0.93.0 commit), so retirement has zero consumer exposure — still worth a
+  CHANGELOG line under `## [Unreleased]`.
+
+Consequences accepted with the ruling:
+
+1. `Determinant(...).simplify()` (the method) returns to being a no-op — the
+   contract working as documented.
+2. The whitelist's value-blind structural evaluation migrates to normal
+   evaluation at the operator: with `a := 5`, `Simplify(Det([[a,b],[c,d]]))`
+   gives `5d − bc`, not the symbolic `ad − bc` the method briefly produced.
+   Consistent with operators evaluating their arguments.
+3. `Simplify` inherits evaluation cost (an expensive `Sum`/`Integrate` operand
+   now computes). Same cost profile as `Evaluate`.
+4. The other transformers (`Expand`/`Factor`/`Together`/`Distribute`) are
+   **unchanged** — they keep reduce-not-evaluate, since acting on an
+   unevaluated structure is often the point there.
+
+The resulting two-line contract: **method — rules only, value-blind; operator —
+evaluate, then rules.**
+
+Before landing: measure snapshot blast radius (expected ~zero — the whitelist
+landed with zero churn), and check whether `reduceTransformerOperand` becomes
+partially redundant inside `Simplify`'s handler once evaluation runs first.
 
 ---
 
@@ -301,10 +349,17 @@ given zero churn.
 
 ## Suggested order
 
-1. **Item 2** — clearest win, existing machinery, small diff.
-2. **Item 1** — needs a decision, not effort; option 4 should be ruled in/out first.
-3. **Item 3** — most valuable but widest blast radius; do it last and behind an
-   option flag initially.
+Original order (Items 2 → 1 → 3) completed 2026-07-23. Remaining, as of
+2026-07-24:
+
+1. **Implement the 2026-07-24 ruling** (end of Item 1): `Simplify` operator
+   evaluates-then-simplifies; delete the option-2 whitelist; update tests,
+   `docs/SIMPLIFY.md`, and CHANGELOG; measure snapshot blast radius.
+2. **§C** — shadow-scope shield for `Integrate`/`Limit` transformer-head
+   reduction, via a helper shared with `solve-domain.ts`; build a real `Limit`
+   repro first.
+3. **§D** — construct the canonical bundled-solve repro; fix (lift specs before
+   shielding) only if it reproduces, else record and close.
 
 ---
 
@@ -441,6 +496,8 @@ Regression tests in `test/compute-engine/solve.test.ts` (the §B repro plus a
 value-restored-after-solve pin, and the three protected verification cases).
 Full suite green, zero snapshot churn.
 
+### C. `Integrate`/`Limit` transformer reduction substitutes a value-bound bound variable — OPEN
+
 Same protected-set gap as §B, on the differentiation/integration side. `Integrate`
 reduces a nested transformer head in its integrand via `reduceTransformerHead`
 (`antiderivative.ts`, the `∫ Simplify(f) dx` path), which calls
@@ -461,10 +518,19 @@ situation by renaming a value-bound differentiation variable to a fresh symbol
 
 - **Trigger is doubly-contradictory:** integrating/limiting w.r.t. a variable that
   carries a concrete value. Vanishingly rare.
-- **Proper fix:** same as §B — thread the bound variable into the nested
-  transformer's `resolveBoundSymbols` protected set (or mirror `JacobianMatrix`'s
-  fresh-symbol rename in the `Integrate`/`Limit` transformer-head reduction).
+- **Proper fix (revised 2026-07-24):** the originally suggested route — thread
+  the bound variable into `resolveBoundSymbols`'s protected set — is the one
+  §B's outcome explored and **rejected** (the simplify rules re-fold the symbol
+  and have no options channel). Use the seam that worked in §B and Item E
+  instead: shadow-declare the integration/limit variable **valueless** (keeping
+  its type) for the duration of the transformer-head reduction, ideally by
+  extracting `reduceWithUnknownsShielded` (`solve-domain.ts`) into a shared
+  helper rather than writing a third copy.
 - **Severity:** low — silent wrong answer, only on contradictory input.
+- **Re-confirmed 2026-07-24:** the `Integrate` repro above still returns `25x`.
+  The `Limit` gap is asserted by analogy only — build a correct repro first
+  (a naive probe form evaluates the operand before `Limit` sees it, proving
+  nothing).
 
 ### D. Solve shielding is computed before bundled specs are lifted
 
@@ -483,8 +549,12 @@ global value can substitute before the code learns it is the solve target.
 - **Severity:** low — silent wrong/inert answer, only on contradictory input.
   (Surfaced by Codex; not independently reproduced — confirm with a repro before
   fixing.)
+- **Probe note 2026-07-24:** a bundled-form probe
+  (`Solve([equation, Element(w, Integers)])`) came back inert, but the surface
+  form used may itself have been wrong — read `solve-domain.ts`'s spec-lifting
+  to construct the canonical bundled form before treating this as reproduced.
 
-### E. `simplify()` reads a value's SIGN — value-blind sign inference — OPEN
+### E. `simplify()` reads a value's SIGN — value-blind sign inference — **LANDED 2026-07-23**
 
 The numeric-fold fix (§A "Broader fix") made `simplify()` value-blind for
 **folds** — it no longer substitutes an assigned value to reduce a
@@ -562,3 +632,18 @@ sign into a saved expression. Narrow trigger (assign a value, then `simplify()`
 
 **Recommendation:** worth doing for the same reason the fold case was, but as a
 deliberate pass with the audit up front, not a reflexive patch.
+
+**Outcome (landed).** Committed `915c1a33` (8 files). Seam **2** (the
+value-stripped view) was chosen: `simplifyValueBlind` in `simplify.ts`
+shadow-declares each assigned non-constant free symbol **valueless, keeping its
+declared type**, for the duration of the run. It is wired at the public
+`.simplify()` **method** (`boxed-function.ts`, `boxed-symbol.ts`), not the
+recursive internal `simplify()` function — one shadow scope per call, not per
+recursion. The make-or-break was empirically confirmed: assumptions survive the
+shadow scope (`assume(w > 0)` + `w := 5` still gives `|w| → w`), constants keep
+their values, and re-entrancy is naturally safe (a shadowed symbol no longer
+reads as assigned, so nested simplifies don't re-shadow). Zero snapshot churn
+(4172/4172). One corollary: structural heads evaluated **value-blindly** under
+the method (`Determinant` with `a := 5` → symbolic `ad − bc`) — superseded by
+the 2026-07-24 ruling at the end of Item 1, which retires that whitelist
+entirely.

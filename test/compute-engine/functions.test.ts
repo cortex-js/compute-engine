@@ -210,6 +210,23 @@ describe('Apply', () => {
     ).toBe('Apply(Derivative(f, 1), 0)');
   });
 
+  // Same class as InverseFunction: an `NDSolveFunction` that declines to
+  // evaluate (symbolic coefficient `a`) is a function-typed residual, not a
+  // shorthand lambda body.
+  test('applying an unevaluated NDSolveFunction stays symbolic', () => {
+    const ce = new ComputeEngine();
+    const residual = [
+      'NDSolveFunction',
+      ['Equal', ['Derivative', 'y', 1], ['Multiply', 'a', 'y']],
+      'y',
+      ['Tuple', 0, 1],
+      1,
+    ];
+    expect(ce.box(['Apply', residual, 0.5]).evaluate().toString()).toBe(
+      'Apply(NDSolveFunction(Derivative(y, 1) === a * y, y, Limits("Nothing", 0, 1), 1), 0.5)'
+    );
+  });
+
   // A shorthand body with a wildcard is a genuine lambda and still reduces.
   test('a wildcard shorthand still beta-reduces', () => {
     const ce = new ComputeEngine();
