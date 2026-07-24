@@ -77,10 +77,23 @@ expr.evaluate().simplify()   // the reliable order
 
 ### `simplify()` is value-blind
 
-`.simplify()` never substitutes an assigned symbol value: with `a := 5`,
-`(a + 2).simplify()` is `a + 2`, while `(a + 2).evaluate()` is `7`. Structural
-heads honor this — evaluating one whose operands mention a symbol carrying a
-value would substitute it, so `simplify()` declines and leaves the head alone.
+`.simplify()` never substitutes an assigned symbol value, and never reads it —
+not its magnitude, and not its **sign or parity**. For the duration of a
+`.simplify()` call, every assigned non-constant symbol is shadowed *valueless*
+(keeping its declared type), so its sign/parity come from its type and in-scope
+assumptions, never its value:
+
+- with `a := 5`, `(a + 2).simplify()` is `a + 2` (while `(a + 2).evaluate()`
+  is `7`);
+- with `w := 5`, `|w|.simplify()` stays `|w|` and `√(w²).simplify()` is `|w|` —
+  the sign is *not* baked in, so the result is still correct after `w := -3`
+  (whereas `assume(w > 0)` *does* license `|w| → w`, because an assumption is
+  not a value);
+- structural heads evaluate value-blindly too: with `a := 5`,
+  `det[[a,b],[c,d]].simplify()` is the symbolic `a·d − b·c` (the `5` is not
+  substituted), whereas `.evaluate()` gives `5·d − b·c`.
+
+Constants (`π`, `e`, …) keep their value — their value *is* their identity.
 
 This is separate from the **`Simplify` operator**, which does resolve bound
 symbols in its argument (an operator evaluates its arguments; `lazy` there only

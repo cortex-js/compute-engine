@@ -49,7 +49,7 @@ import type {
 import { mul, div } from './arithmetic-mul-div.js';
 
 import { replace } from './rules.js';
-import { simplify } from './simplify.js';
+import { simplifyValueBlind } from './simplify.js';
 import { explainExpression } from './explain.js';
 import { negate } from './negate.js';
 
@@ -802,7 +802,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
-    return simplify(this, options).at(-1)?.value ?? this;
+    return simplifyValueBlind(this, options).at(-1)?.value ?? this;
   }
 
   explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation {

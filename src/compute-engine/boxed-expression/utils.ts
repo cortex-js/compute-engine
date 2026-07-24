@@ -848,13 +848,32 @@ export function isValueDef(
 export function hasAssignedVariable(expr: Expression): boolean {
   const ce = expr.engine;
   for (const name of expr.symbols) {
-    const def = ce.lookupDefinition(name);
-    if (!isValueDef(def)) continue;
-    if (def.value.value === undefined || def.value.value === null) continue;
-    if (def.value.isConstant === true) continue;
-    return true;
+    if (isAssignedVariableName(ce, name)) return true;
   }
   return false;
+}
+
+/**
+ * The names of the free symbols in `expr` that carry a USER-ASSIGNED value (the
+ * same predicate as `hasAssignedVariable`, but returning every matching name).
+ * Used by the value-blind `simplify()` seam to shadow-declare these symbols as
+ * valueless so their sign/parity fall back to type + assumptions.
+ */
+export function assignedVariableNames(expr: Expression): string[] {
+  const ce = expr.engine;
+  const names: string[] = [];
+  for (const name of expr.symbols) {
+    if (isAssignedVariableName(ce, name)) names.push(name);
+  }
+  return names;
+}
+
+function isAssignedVariableName(ce: Expression['engine'], name: string): boolean {
+  const def = ce.lookupDefinition(name);
+  if (!isValueDef(def)) return false;
+  if (def.value.value === undefined || def.value.value === null) return false;
+  if (def.value.isConstant === true) return false;
+  return true;
 }
 
 export function isOperatorDef(

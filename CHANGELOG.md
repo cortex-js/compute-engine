@@ -10,6 +10,17 @@
   `t = √a·x + √Q` that rationalizes `√Q` and reduces the integrand to a form the
   existing linear-radical machinery closes. This raises the Bondarenko benchmark
   to CE+R/F 21/35.
+- **`simplify()` is value-blind for a symbol's sign and parity.**
+  `.simplify()` no longer reads an assigned symbol's *value* when applying a
+  sign- or parity-driven rewrite: with `w := 5`, `|w|.simplify()` now stays
+  `|w|` and `√(w²).simplify()` is `|w|` (previously both collapsed to `w`,
+  silently baking in `w ≥ 0` and evaluating wrong after a later `w := -3`).
+  Sign and parity are taken only from a symbol's declared type and in-scope
+  assumptions — so `assume(w > 0)` still licenses `|w| → w` — never from its
+  assigned value. As a corollary, a structural head (`Determinant`, `Trace`, …)
+  over a symbol carrying a value now simplifies to its value-blind symbolic form
+  (`det[[a,b],[c,d]]` → `a·d − b·c`) instead of declining. `.evaluate()` and
+  `.N()` are unchanged — they still substitute the value.
 
 ## 0.93.0 _2026-07-23_
 

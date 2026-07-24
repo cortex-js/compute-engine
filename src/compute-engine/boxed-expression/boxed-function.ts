@@ -71,7 +71,7 @@ import { solveSystem, solveOr } from './solve-system.js';
 import { solveCongruence } from './solve-congruence.js';
 import { replace } from './rules.js';
 import { negate } from './negate.js';
-import { simplify } from './simplify.js';
+import { simplifyValueBlind } from './simplify.js';
 import { explainExpression } from './explain.js';
 import { canonicalMultiply, mul, div, Product } from './arithmetic-mul-div.js';
 import { add } from './arithmetic-add.js';
@@ -1184,7 +1184,7 @@ export class BoxedFunction
     // A deadline is armed only by an enclosing `withTimeLimit` span; work
     // outside a span runs unbounded. The simplify main loop checks the
     // ambient deadline (`engine._deadlineFrame`) if one is in effect.
-    return simplify(this, options).at(-1)?.value ?? this;
+    return simplifyValueBlind(this, options).at(-1)?.value ?? this;
   }
 
   explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation {

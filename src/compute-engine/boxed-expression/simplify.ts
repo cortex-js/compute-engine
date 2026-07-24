@@ -3,7 +3,11 @@ import { replace } from './rules.js';
 import { holdMap } from './hold.js';
 import { expToTrig } from './exp-to-trig.js';
 import { expand } from './expand.js';
-import { isValueDef, hasAssignedVariable } from './utils.js';
+import {
+  isValueDef,
+  hasAssignedVariable,
+  assignedVariableNames,
+} from './utils.js';
 import type {
   Expression,
   SimplifyOptions,
@@ -276,6 +280,56 @@ function evaluateStructuralHead(expr: Expression): Expression | undefined {
   const result = expr.evaluate();
   if (result.isSame(expr) || !result.isValid) return undefined;
   return result;
+}
+
+/**
+ * Value-blind entry point for the PUBLIC `.simplify()` methods (on
+ * `BoxedSymbol`/`BoxedFunction`). It enforces ROADMAP Item E's invariant:
+ *
+ * > `simplify()` may use sign/parity derived from a symbol's DECLARED TYPE and
+ * > in-scope ASSUMPTIONS, but NOT from its ASSIGNED VALUE. An assigned value is
+ * > treated as if the symbol were merely declared with that value's type.
+ *
+ * The seam: before running `simplify`, shadow-declare every assigned,
+ * non-constant free symbol of `expr` as VALUELESS (keeping its declared type)
+ * in a fresh scope. With no value, `BoxedSymbol.sgn`/`isOdd`/`isEven` fall back
+ * to type + assumptions (the shadow scope preserves outer assumptions), so no
+ * value leaks into a sign/parity-driven rewrite. `.evaluate()`/`.N()`/type
+ * inference are untouched — only `simplify()`'s VIEW is blinded.
+ *
+ * Re-entrancy is automatically safe: a rule that recursively calls
+ * `.simplify()` on a sub-expression re-enters here, but the symbols are already
+ * shadowed valueless, so `assignedVariableNames` returns nothing and no scope
+ * is pushed.
+ */
+export function simplifyValueBlind(
+  expr: Expression,
+  options?: Partial<InternalSimplifyOptions>
+): RuleSteps {
+  const shadow = assignedVariableNames(expr);
+  if (shadow.length === 0) return simplify(expr, options);
+
+  const ce = expr.engine;
+  // Capture each symbol's declared type as a STRING; passing the BoxedType
+  // object to `declare` throws "type invalid".
+  const types = shadow.map((n) => ce.box(n).type.toString());
+
+  ce.pushScope();
+  try {
+    shadow.forEach((n, i) => {
+      // If an exotic type fails to round-trip through `declare`, skip shadowing
+      // THAT symbol rather than aborting the whole simplify: a rare value leak
+      // is better than a thrown simplify.
+      try {
+        ce.declare(n, { type: types[i] });
+      } catch {
+        /* leave this symbol unshadowed */
+      }
+    });
+    return simplify(expr, options);
+  } finally {
+    ce.popScope();
+  }
 }
 
 export function simplify(

@@ -1720,17 +1720,24 @@ describe('simplify() evaluates structural operators', () => {
     expect(ce10.parse(`\\det${m}`).simplify().isSame(-2)).toBe(true);
   });
 
-  // `simplify()` is value-blind: `(a + 2).simplify()` is `a + 2` even when
-  // `a := 5`. Evaluating a structural head whose operands mention a bound
-  // symbol would substitute that value, so it declines instead.
-  test('declines when an operand mentions a symbol with a value', () => {
+  // `simplify()` is value-blind (ROADMAP Item E): `(a + 2).simplify()` is
+  // `a + 2` even when `a := 5`, and a structural head over a bound symbol
+  // evaluates to its VALUE-BLIND symbolic form — `det[[a,b],[c,d]]` → `ad − bc`
+  // (with `a` kept symbolic, NOT substituted to `5`), never the value-baked
+  // `5d − bc`. `.evaluate()` still substitutes the value.
+  test('a structural head over a valued symbol simplifies value-blind', () => {
     const ce11 = new ComputeEngine();
     ce11.assign('a', 5);
     expect(ce11.parse('a + 2').simplify().toString()).toBe('a + 2');
-    const det = ce11
-      .parse('\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}')
-      .simplify();
-    expect(det.operator).toBe('Determinant');
+    const src = '\\det\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}';
+    const det = ce11.parse(src).simplify();
+    // Value-blind symbolic determinant: `a` survives, no `5` baked in.
+    expect(det.isSame(ce11.parse('a d - b c'))).toBe(true);
+    expect(det.symbols).toContain('a');
+    // `.evaluate()` DOES use the assigned value.
+    expect(ce11.parse(src).evaluate().isSame(ce11.parse('5 d - b c'))).toBe(
+      true
+    );
   });
 });
 
@@ -1948,5 +1955,89 @@ describe('simplify() does not fold a value-bound compound subexpression', () => 
     ce.assign('w', 5);
     // The operator (unlike the method) evaluates its argument: 9 - 25 = -16.
     expect(ce.box(['Simplify', ['Subtract', 9, ['Power', 'w', 2]]]).evaluate().toString()).toBe('-16');
+  });
+});
+
+// ROADMAP Item E: `simplify()` is value-blind for a symbol's SIGN/PARITY.
+// The method may use sign/parity from a symbol's DECLARED TYPE and in-scope
+// ASSUMPTIONS, but NOT from its ASSIGNED VALUE. `.evaluate()`/`.N()` keep
+// reading the value — the blindness belongs to `simplify()`'s VIEW only.
+describe('simplify() is value-blind for sign/parity (ROADMAP Item E)', () => {
+  test('Abs: assigned positive value does not drop the modulus', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    // Value w=5 is nonnegative, but simplify must not bake that in.
+    expect(ce.parse('|w|').simplify().toString()).toBe('|w|');
+  });
+
+  test('Abs: a sign ASSUMPTION still drops the modulus', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('w > 0'));
+    expect(ce.parse('|w|').simplify().toString()).toBe('w');
+  });
+
+  test('even root: √(w²) stays |w|, not w, under an assigned value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    expect(ce.parse('\\sqrt{w^2}').simplify().toString()).toBe('|w|');
+  });
+
+  test('even root: √(w²) → w under a nonnegative assumption', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('w >= 0'));
+    expect(ce.parse('\\sqrt{w^2}').simplify().toString()).toBe('w');
+  });
+
+  test('Sign: assigned value does not resolve the sign', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    expect(ce.parse('\\operatorname{sign}(w)').simplify().toString()).toBe(
+      'Sign(w)'
+    );
+  });
+
+  test('Sign: a sign ASSUMPTION resolves it to 1', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.parse('w > 0'));
+    expect(ce.parse('\\operatorname{sign}(w)').simplify().toString()).toBe('1');
+  });
+
+  test('parity: |x^m| stays symbolic when m has an even assigned value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('m', 'integer');
+    ce.assign('m', 2);
+    // m=2 is even, which would justify |x^m| → x^m; the assigned parity must
+    // NOT drive the rewrite.
+    expect(ce.parse('|x^m|').simplify().toString()).toBe('|x^m|');
+  });
+
+  test('HEADLINE regression: value baked at simplify then reassigned', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    const e = ce.parse('|w|').simplify();
+    ce.assign('w', -3);
+    // |−3| = 3. If simplify had baked w ≥ 0 → w, this would wrongly be −3.
+    expect(e.evaluate().toString()).toBe('3');
+  });
+
+  test('evaluate() and N() still read the assigned value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    expect(ce.parse('|w|').evaluate().toString()).toBe('5');
+    expect(ce.parse('|w|').N().toString()).toBe('5');
+  });
+
+  test('a difference with a value-bound square still stays symbolic', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    // Shadowing makes `w` a genuine unknown, so the fold gate skips it too.
+    expect(ce.parse('9 - w^2').simplify().toString()).toBe('9 - w^2');
+  });
+
+  test('a built-in constant sign still folds (|−π| → π)', () => {
+    const ce = new ComputeEngine();
+    // Pi is a constant, not an assigned variable: its sign is not blinded.
+    expect(ce.parse('|{-\\pi}|').simplify().toString()).toBe('pi');
   });
 });
