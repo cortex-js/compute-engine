@@ -6,6 +6,11 @@ export interface CliIo {
   stdout: NodeJS.WriteStream;
   stderr: NodeJS.WriteStream;
   env: NodeJS.ProcessEnv;
+  /** Return the agent-facing language card (`for-agents.md`), served as a
+   * resource by `cortex mcp`. The installed CLI resolves it relative to its
+   * own bundle (`import.meta` — unavailable in modules jest compiles, so
+   * the loader is injected here rather than defined in `mcp.ts`). */
+  loadCard?: () => Promise<string>;
 }
 
 export async function readSource(

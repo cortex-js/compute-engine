@@ -2,7 +2,7 @@
 // @ts-nocheck
 
 import * as esbuild from 'esbuild';
-import { chmod } from 'node:fs/promises';
+import { chmod, copyFile } from 'node:fs/promises';
 
 import pkg from '../package.json' with { type: 'json' };
 const SDK_VERSION = pkg.version || 'v?.?.?';
@@ -307,4 +307,11 @@ await Promise.all(builds);
 await Promise.all([
   chmod('./dist/esm/cli/cortex.js', 0o755),
   chmod('./dist/esm-min/cli/cortex.js', 0o755),
+  // The agent-facing language card is served by `cortex mcp` as a resource;
+  // the CLI resolves it relative to its own bundle.
+  copyFile('./src/cortex/docs/for-agents.md', './dist/esm/cli/for-agents.md'),
+  copyFile(
+    './src/cortex/docs/for-agents.md',
+    './dist/esm-min/cli/for-agents.md'
+  ),
 ]);

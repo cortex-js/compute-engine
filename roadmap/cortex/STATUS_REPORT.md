@@ -111,6 +111,18 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-24 — **`cortex mcp` — Model Context Protocol server (landed).**
+  Final item of the LLM-friendliness initiative (card → CLI → eval pass →
+  idiom diagnostics → MCP). A new `mcp` subcommand starts a stdio MCP server:
+  tools `evaluate` (stateless — each call runs a complete program in a fresh
+  session), `check`, `doc`, `parse`, `serialize`, all thin wrappers over the
+  same functions as the CLI (`parseSource` extracted from `check.ts`,
+  `lookupDoc` from `doc.ts`); the `for-agents.md` language card is served as
+  the `cortex://docs/for-agents` resource (copied beside the CLI bundle at
+  build time). The newline-delimited JSON-RPC protocol is implemented
+  directly in `src/cli/mcp.ts` — no new package dependencies. Tests:
+  `test/cortex/mcp.test.ts`.
+
 - 2026-07-11 — **`Solve` of a univariate inequality stays inert (landed).**
   `Solve(x^2 < 4, x)` returned `[]` — the univariate path calls `ceq.solve()`,
   which yields `[]` for an inequality, serializing as "no solutions" when the

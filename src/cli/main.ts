@@ -10,6 +10,7 @@ import {
   hasErrors,
 } from './format.js';
 import { readSource, type CliIo } from './io.js';
+import { runMcp } from './mcp.js';
 import { runRepl } from './repl.js';
 import { makeCortexSession } from './session.js';
 
@@ -18,6 +19,7 @@ export type { CliIo } from './io.js';
 const HELP = `Usage: cortex [options] [file]
        cortex check [options] [file]
        cortex doc [options] <name or keywords>
+       cortex mcp [options]
 
 Evaluate Cortex programs or start an interactive session.
 
@@ -27,6 +29,9 @@ Commands:
   doc                     show documentation for a library symbol, or search
                           the library by keyword; "--json" for JSON,
                           "--limit <n>" for more matches
+  mcp                     start a Model Context Protocol server on stdio,
+                          exposing evaluate/check/doc/parse/serialize tools
+                          and the language card resource
 
 Arguments:
   file                    Cortex source file (.cortex or .cx)
@@ -56,6 +61,7 @@ export async function main(
 ): Promise<number> {
   if (args[0] === 'check') return runCheck(args.slice(1), io);
   if (args[0] === 'doc') return runDoc(args.slice(1), io);
+  if (args[0] === 'mcp') return runMcp(args.slice(1), io);
 
   let options;
   try {

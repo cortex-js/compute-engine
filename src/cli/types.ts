@@ -29,6 +29,11 @@ export interface DocOptions {
   limit: number;
 }
 
+export interface McpOptions {
+  /** Default evaluation deadline for the `evaluate` tool, in ms. */
+  timeLimit: number;
+}
+
 export interface EvaluationResult {
   source: string;
   value: BoxedExpression;

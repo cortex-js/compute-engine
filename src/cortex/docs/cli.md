@@ -154,6 +154,50 @@ Use `--limit <n>` for more search matches (default 10) and `--json` for a
 structured `{ query, matches }` envelope. The exit status is `1` when
 nothing matches.
 
+## MCP Server
+
+`cortex mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io)
+server on standard input/output, giving AI agents structured access to the
+same operations as the CLI:
+
+| Tool        | Purpose                                                        |
+| :---------- | :------------------------------------------------------------- |
+| `evaluate`  | Run a complete program; returns the value as display text, Cortex source and MathJSON, plus diagnostics |
+| `check`     | Parse and report diagnostics without evaluating                |
+| `doc`       | Look up a library symbol, or search the library by keywords    |
+| `parse`     | Convert Cortex source to MathJSON                              |
+| `serialize` | Convert MathJSON to Cortex source                              |
+
+The server also exposes the agent-facing language card
+(`/cortex/for-agents/`) as the resource `cortex://docs/for-agents`.
+
+Each `evaluate` call runs in a fresh session: definitions do not persist
+between calls, so every program must be self-contained.
+
+Register the server with an MCP client using `npx`. For example, with
+Claude Code:
+
+```shell
+claude mcp add cortex -- npx -y @cortex-js/compute-engine mcp
+```
+
+or in a JSON client configuration:
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "npx",
+      "args": ["-y", "@cortex-js/compute-engine", "mcp"]
+    }
+  }
+}
+```
+
+The `--time-limit <ms>` option sets the default evaluation deadline for the
+`evaluate` tool (default 10000; each call can override it with its
+`timeLimit` argument).
+
 ## Interactive REPL
 
 Run `cortex` with no file or `--eval` while standard input is a terminal:

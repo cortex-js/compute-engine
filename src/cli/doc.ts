@@ -7,7 +7,7 @@ import type { CliIo } from './io.js';
  * One documentation entry, as printed by `cortex doc`. `signature` is set
  * for operators, `type` (and `value`, when it has one) for symbols.
  */
-interface DocEntry {
+export interface DocEntry {
   id: string;
   kind: 'function' | 'opaque' | 'constant' | 'variable';
   signature?: string;
@@ -38,33 +38,7 @@ export function runDoc(args: readonly string[], io: CliIo): number {
   }
 
   const engine = new ComputeEngine();
-
-  // An exact (or case-insensitively exact) name gets the full entry; other
-  // queries get a ranked search-result list.
-  let entries: DocEntry[];
-  let exact = describeName(engine, options.query);
-  const results = engine.searchDefinitions(options.query, {
-    limit: options.limit,
-  });
-  if (!exact) {
-    const top = results[0];
-    if (top && top.id.toLowerCase() === options.query.toLowerCase())
-      exact = describeName(engine, top.id);
-  }
-
-  if (exact) {
-    entries = [
-      exact,
-      ...results
-        .filter((x) => x.id !== exact!.id)
-        .map((x) => describeName(engine, x.id))
-        .filter((x): x is DocEntry => x !== undefined),
-    ];
-  } else {
-    entries = results
-      .map((x) => describeName(engine, x.id))
-      .filter((x): x is DocEntry => x !== undefined);
-  }
+  const { exact, entries } = lookupDoc(engine, options.query, options.limit);
 
   if (entries.length === 0) {
     if (options.json) {
@@ -97,6 +71,43 @@ export function runDoc(args: readonly string[], io: CliIo): number {
   return 0;
 }
 
+/**
+ * Look up library documentation the way `cortex doc` does: an exact (or
+ * case-insensitively exact) name gets the full entry first; other queries
+ * get a ranked search-result list.
+ */
+export function lookupDoc(
+  engine: ComputeEngine,
+  query: string,
+  limit: number
+): { exact?: DocEntry; entries: DocEntry[] } {
+  let exact = describeName(engine, query);
+  const results = engine.searchDefinitions(query, { limit });
+  if (!exact) {
+    const top = results[0];
+    if (top && top.id.toLowerCase() === query.toLowerCase())
+      exact = describeName(engine, top.id);
+  }
+
+  if (exact) {
+    return {
+      exact,
+      entries: [
+        exact,
+        ...results
+          .filter((x) => x.id !== exact!.id)
+          .map((x) => describeName(engine, x.id))
+          .filter((x): x is DocEntry => x !== undefined),
+      ],
+    };
+  }
+  return {
+    entries: results
+      .map((x) => describeName(engine, x.id))
+      .filter((x): x is DocEntry => x !== undefined),
+  };
+}
+
 function describeName(
   engine: ComputeEngine,
   name: string
@@ -111,8 +122,7 @@ function describeName(
     entry.description = Array.isArray(base.description)
       ? base.description
       : [base.description];
-  if (base.keywords && base.keywords.length > 0)
-    entry.keywords = base.keywords;
+  if (base.keywords && base.keywords.length > 0) entry.keywords = base.keywords;
   if (base.url) entry.url = base.url;
   if (base.wikidata) entry.wikidata = base.wikidata;
 

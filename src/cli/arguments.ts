@@ -5,6 +5,7 @@ import type {
   CliOptions,
   DiagnosticsFormat,
   DocOptions,
+  McpOptions,
   OutputMode,
 } from './types.js';
 
@@ -109,8 +110,8 @@ export function parseDocArguments(args: readonly string[]): DocOptions {
       allowPositionals: true,
       strict: true,
       options: {
-        'json': { type: 'boolean' },
-        'limit': { type: 'string' },
+        json: { type: 'boolean' },
+        limit: { type: 'string' },
       },
     });
   } catch (error) {
@@ -129,6 +130,29 @@ export function parseDocArguments(args: readonly string[]): DocOptions {
     json: values.json === true,
     limit: parseDocLimit(
       typeof values.limit === 'string' ? values.limit : undefined
+    ),
+  };
+}
+
+export function parseMcpArguments(args: readonly string[]): McpOptions {
+  let parsed: ReturnType<typeof parseArgs>;
+  try {
+    parsed = parseArgs({
+      args: [...args],
+      allowPositionals: false,
+      strict: true,
+      options: {
+        'time-limit': { type: 'string' },
+      },
+    });
+  } catch (error) {
+    throw new CliUsageError(messageFromError(error));
+  }
+
+  const timeLimit = parsed.values['time-limit'];
+  return {
+    timeLimit: parseTimeLimit(
+      typeof timeLimit === 'string' ? timeLimit : undefined
     ),
   };
 }

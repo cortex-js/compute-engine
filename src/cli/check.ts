@@ -1,9 +1,44 @@
+import type { MathJsonExpression } from '../math-json/types.js';
+
 import { ComputeEngine, parseCortex } from '../cortex.js';
 import type { ParsingDiagnostic } from '../cortex/diagnostics.js';
 
 import { CliUsageError, parseCheckArguments } from './arguments.js';
 import { diagnosticToJson, formatDiagnostics } from './format.js';
 import { readSource, type CliIo } from './io.js';
+
+/**
+ * Parse a program without evaluating it, the way `cortex check` does: a
+ * LaTeX parser is injected so `$…$` islands check the same way they
+ * evaluate, and a `#error` directive (which throws a FatalParsingError)
+ * is reported as a diagnostic rather than crashing the caller.
+ */
+export function parseSource(
+  source: string,
+  url?: string
+): { ast: MathJsonExpression | null; diagnostics: ParsingDiagnostic[] } {
+  const engine = new ComputeEngine();
+  const parseLatex = (latex: string) => engine.parse(latex).json;
+
+  try {
+    const [ast, diagnostics] = parseCortex(source, url, { parseLatex });
+    return { ast, diagnostics };
+  } catch (error) {
+    return {
+      ast: null,
+      diagnostics: [
+        {
+          severity: 'error',
+          message: [
+            'error-directive',
+            error instanceof Error ? error.message : String(error),
+          ],
+          range: [0, 0],
+        },
+      ],
+    };
+  }
+}
 
 /**
  * `cortex check` — parse a program and report diagnostics without
@@ -39,29 +74,7 @@ export async function runCheck(
     return 1;
   }
 
-  // A LaTeX parser is injected so `$…$` islands check the same way they
-  // evaluate, rather than producing a spurious `latex-parsing-unavailable`.
-  const engine = new ComputeEngine();
-  const parseLatex = (latex: string) => engine.parse(latex).json;
-
-  let diagnostics: ParsingDiagnostic[];
-  try {
-    [, diagnostics] = parseCortex(source, url, { parseLatex });
-  } catch (error) {
-    // A `#error` directive throws a FatalParsingError; report it as a
-    // diagnostic like `executeCortex` does rather than crashing the check.
-    diagnostics = [
-      {
-        severity: 'error',
-        message: [
-          'error-directive',
-          error instanceof Error ? error.message : String(error),
-        ],
-        range: [0, 0],
-      },
-    ];
-  }
-
+  const { diagnostics } = parseSource(source, url);
   const ok = !diagnostics.some((x) => x.severity === 'error');
 
   if (options.json) {
