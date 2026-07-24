@@ -174,12 +174,12 @@
   ce.box(['IsMissing', 'NaN']).evaluate(); // → True
   ```
 
-- **`SymbolicBlock(body)` — the value-blind evaluation route from the operator
+- **`HoldValues(body)` — the value-blind evaluation route from the operator
   surface.** A binder that shields the assigned free symbols of its body: for
   the duration of the evaluation each such symbol becomes a pure symbol (its
   declared type and in-scope assumptions apply, its assigned value does not),
   analogous to Mathematica's `Block[{x}, …]`. Now that the `Simplify` operator
-  evaluates its argument first, `SymbolicBlock` is the only value-blind route
+  evaluates its argument first, `HoldValues` is the only value-blind route
   reachable from Cortex (the `.simplify()` method is not exposed there). Shield
   every assigned symbol, or a listed subset with a second `List`/`Set`/`Tuple`
   or single-symbol operand. Constants are never shielded, in-scope assumptions
@@ -189,10 +189,10 @@
   ce.assign('x', 5);
   ce.assign('a', 3);
   ce.box([
-    'SymbolicBlock',
+    'HoldValues',
     ['Together', ['Add', ['Divide', 1, 'x'], ['Divide', 'a', ['Power', 'x', 2]]]],
   ]).evaluate(); // → (a + x) / x²   (without the wrapper: 8/25)
-  ce.box(['SymbolicBlock', ['Add', ['Power', 'x', 2], 'a'], ['List', 'a']]).evaluate();
+  ce.box(['HoldValues', ['Add', ['Power', 'x', 2], 'a'], ['List', 'a']]).evaluate();
   // → 25 + a   (x resolves, a shielded)
   ```
 
@@ -480,15 +480,34 @@
 
 ### Bug Fixes
 
+- **`assume()` after `assign()` now records the assumption.** The predicate
+  was evaluated through the symbol's assigned value before the assumption
+  system saw it, so with `w := 5`, `assume(w > 0)` folded to `True`, returned
+  `'tautology'`, and recorded **nothing** — the assumption was silently
+  discarded on arrival (only the assume-before-assign order worked). Predicates
+  mentioning assigned symbols are now recorded *value-blind*, as facts about
+  the symbol: `assume(w > 0)` after `w := 5` returns `'ok'` and `|w|` then
+  simplifies to `w`. A predicate that contradicts the current value (e.g.
+  `assume(w > 0)` with `w := -2`) still returns `'contradiction'` and is
+  rejected. `'tautology'` now means tautological relative to types and existing
+  assumptions, never relative to an assigned value — re-asserting an equality
+  a symbol's value already satisfies returns `'ok'`, not `'tautology'`.
+
 - **`.N()` on a multi-limit `Integrate` no longer drops all but the first
   limit.** The numeric-approximation branch read only the first `Limits`
   operand, so `Integrate(f, Limits(x,0,3), Limits(y,0,2))` numericized as a
   single-variable integral — `∫∫ 1` over `[0,3]×[0,2]` gave `3` (a wrong
   value, not a decline) and a multivariate integrand gave `NaN`. Multiple
   limits now perform iterated adaptive Gauss–Kronrod quadrature (Monte-Carlo
-  fallback per level, as for a single limit). A bound that depends on another
-  integration variable declines (the integral stays inert) rather than
-  integrating wrongly.
+  fallback per level, as for a single limit), following the Mathematica
+  iterator convention the symbolic path already used: the FIRST limit is the
+  OUTERMOST integral, so an inner bound may reference the outer variables —
+  `Integrate(1, Limits(x,0,1), Limits(y,0,x))` (the triangle) numericizes to
+  ½. A bound that references an inner integration variable or a foreign free
+  symbol declines (the integral stays inert) rather than integrating wrongly.
+  The same fix applies to `compile()`: a multi-limit integral that does not
+  close symbolically now compiles to nested quadrature calls — dependent
+  bounds included — where it previously truncated to the first limit.
 
 - **`Transpose`/`ConjugateTranspose` report the transposed static type.** They
   had no type handler, so an unevaluated `Transpose(m)` typed as the generic
