@@ -4,6 +4,35 @@ import { Origin } from '../common/debug.js';
 import { ParsingDiagnostic } from './diagnostics.js';
 import { Parser } from './parser.js';
 
+/**
+ * `7 // 2` is `7` followed by a line comment — the Python floor-division
+ * reflex, which silently truncates the statement. Warn when code precedes
+ * `//` on the same line and the comment text is pure arithmetic (digits,
+ * operators, and parentheses only, with at least one digit). Prose comments
+ * (`// the 2nd item`) and expected-output annotations (`// ➔ 21`) contain
+ * other characters and never match.
+ */
+function lintFloorDivisionComments(
+  source: string,
+  diagnostics: ParsingDiagnostic[]
+): void {
+  const suspicious =
+    /^(.*?[^\s/])[ \t]*\/\/(?!\/)[ \t]*[\d+\-*/(). \t]*\d[\d+\-*/(). \t]*$/;
+  let offset = 0;
+  for (const line of source.split('\n')) {
+    const m = suspicious.exec(line);
+    if (m !== null) {
+      const commentStart = line.indexOf('//', m[1].length);
+      diagnostics.push({
+        severity: 'warning',
+        message: ['floor-division-comment'],
+        range: [offset + commentStart, offset + line.length],
+      });
+    }
+    offset += line.length + 1;
+  }
+}
+
 /** Analyze the reported errors and combine them when possible */
 export function analyzeErrors(
   errors: ParsingDiagnostic[]
@@ -42,6 +71,8 @@ export function parseCortex(
   });
 
   const value: MathJsonExpression | null = parser.parseProgram();
+
+  lintFloorDivisionComments(source, parser.diagnostics);
 
   const diagnostics = analyzeErrors(parser.diagnostics);
   if (diagnostics.length === 0) return [value ?? 'Nothing', []];

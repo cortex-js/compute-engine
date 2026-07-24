@@ -127,6 +127,14 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
   switch (code) {
     case 'unknown-function':
       return `Unknown function "${args[0]}"; did you mean "${args[1]}"?`;
+    case 'print-not-available':
+      return `There is no "${args[0]}" function: a program's output is the value of its last statement`;
+    case 'assign-in-argument':
+      return `"=" in an argument is assignment; use "==" for an equation or comparison`;
+    case 'zero-index':
+      return `Indexing is 1-based: xs[1] is the first element (index 0 yields NaN)`;
+    case 'floor-division-comment':
+      return `"//" starts a comment, not floor division; use Floor(a / b) for the integer quotient`;
     case 'runtime-error':
       return `Runtime error: ${args[0]}`;
     case 'evaluation-canceled':

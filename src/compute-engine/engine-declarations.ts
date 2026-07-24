@@ -235,6 +235,8 @@ function operatorNamePool(ce: IComputeEngine): string[] {
  * close enough. Matching is conservative and applied in priority order, the
  * first tier that yields a match wins:
  *
+ *  0. curated cross-language synonyms (`split` → `StringSplit`,
+ *     `push` → `Append`, `ceiling` → `Ceil`),
  *  1. case-insensitive exact match (`arg` → `Arg`),
  *  2. singular/plural (`Quartile` → `Quartiles`, or vice-versa),
  *  3. Damerau–Levenshtein distance ≤ 2 for names of length ≥ 6, ≤ 1 for
@@ -246,6 +248,18 @@ function operatorNamePool(ce: IComputeEngine): string[] {
  * the query (`integral` → `Integrate`, not `Interval`), then the shortest,
  * then alphabetically.
  */
+/**
+ * Curated cross-language synonyms: names newcomers (and LLM agents)
+ * reflexively try — from Python, JavaScript, or Mathematica — that no fuzzy
+ * tier can bridge. Keys are lowercase. A curated suggestion is returned only
+ * when its target operator is actually visible in the current scope chain.
+ */
+const CURATED_SYNONYMS: Record<string, string> = {
+  split: 'StringSplit',
+  push: 'Append',
+  ceiling: 'Ceil',
+};
+
 export function suggestOperatorName(
   ce: IComputeEngine,
   name: string
@@ -254,6 +268,11 @@ export function suggestOperatorName(
 
   const pool = operatorNamePool(ce);
   const lower = name.toLowerCase();
+
+  // Tier 0: curated cross-language synonyms.
+  const curated = CURATED_SYNONYMS[lower];
+  if (curated !== undefined && curated !== name && pool.includes(curated))
+    return curated;
 
   // Longest common prefix between the query and a candidate, case-insensitive.
   const lcp = (n: string): number => {

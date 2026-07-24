@@ -170,6 +170,11 @@ function statementRange(
   );
 }
 
+/** Print-statement names from other languages: these get a dedicated hint
+ * (there is no printing in Cortex) instead of a fuzzy did-you-mean, which
+ * would either stay silent or suggest something misleading. */
+const PRINT_LIKE = new Set(['print', 'println', 'printf', 'puts', 'echo']);
+
 /**
  * Walk a result expression (in MathJSON form) for function applications whose
  * head is a symbol that is **not** a known operator (`ce.operatorInfo` is
@@ -192,13 +197,23 @@ function scanUnknownFunctions(
 
   if (!reported.has(head) && ce.operatorInfo(head) === undefined) {
     reported.add(head);
-    const suggestion = ce.suggestOperatorName(head);
-    if (suggestion !== undefined) {
+    if (PRINT_LIKE.has(head.toLowerCase())) {
+      // `print(...)` deserves better than a fuzzy suggestion: there is no
+      // print in Cortex — the value of the last statement is the output.
       diagnostics.push({
         severity: 'warning',
-        message: ['unknown-function', head, suggestion],
+        message: ['print-not-available', head],
         range: statementRange(stmt, source),
       });
+    } else {
+      const suggestion = ce.suggestOperatorName(head);
+      if (suggestion !== undefined) {
+        diagnostics.push({
+          severity: 'warning',
+          message: ['unknown-function', head, suggestion],
+          range: statementRange(stmt, source),
+        });
+      }
     }
   }
 

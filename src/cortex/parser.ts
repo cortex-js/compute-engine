@@ -2096,6 +2096,17 @@ export class Parser {
   private parseCall(callee: MathJsonExpression): MathJsonExpression {
     const start = this.localStart(callee) ?? this.current.start;
     const { values, end } = this.parseBracketedList('CLOSE_PAREN', ')');
+    // `f(x = 4)` is almost always a mistake: `=` is assignment, so
+    // `Solve(x^2 = 4, x)` silently reports no solutions, and Cortex has no
+    // keyword arguments. Advisory only — the parse is unchanged.
+    for (const v of values)
+      if (operator(v) === 'Assign')
+        this.error(
+          'assign-in-argument',
+          this.localStart(v) ?? start,
+          this.localEnd(v) ?? end,
+          'warning'
+        );
     const head = symbolNameOf(callee);
     if (head !== null)
       return this.wrap([head, ...values] as MathJsonExpression[], start, end);
@@ -2110,6 +2121,16 @@ export class Parser {
   private parseIndex(base: MathJsonExpression): MathJsonExpression {
     const start = this.localStart(base) ?? this.current.start;
     const { values, end } = this.parseBracketedList('CLOSE_BRACKET', ']');
+    // A literal index 0 is the zero-based-indexing reflex; `At` is 1-based
+    // and `xs[0]` evaluates to NaN. Advisory only — the parse is unchanged.
+    for (const v of values)
+      if (isNumberNode(v) && (v as { num: string }).num === '0')
+        this.error(
+          'zero-index',
+          this.localStart(v) ?? start,
+          this.localEnd(v) ?? end,
+          'warning'
+        );
     return this.wrap(
       ['At', base, ...values] as MathJsonExpression[],
       start,
@@ -2519,7 +2540,8 @@ export class Parser {
   private parseBracketedList(
     closeType: TokenType,
     closeText: string,
-    allowTypedParams = false
+    allowTypedParams = false,
+    allowSpread = false
   ): {
     values: MathJsonExpression[];
     open: Token;
@@ -2533,6 +2555,31 @@ export class Parser {
     let typed = false;
     if (!this.check(closeType)) {
       for (;;) {
+        // `...expr` — a spread argument (call argument lists only): the
+        // elements of the tuple `expr` splice into the call's arguments.
+        if (
+          allowSpread &&
+          this.check('OPERATOR') &&
+          this.current.text === '...'
+        ) {
+          const dots = this.advance();
+          const arg = this.parseExpression(0);
+          if (arg === null) {
+            this.reportUnexpected(this.current);
+            this.recoverInBracket();
+            break;
+          }
+          values.push(
+            this.wrap(
+              ['Spread', arg] as MathJsonExpression[],
+              dots.start,
+              this.localEnd(arg) ?? this.previousEnd()
+            )
+          );
+          if (!this.match('COMMA')) break;
+          if (this.check(closeType)) break; // trailing comma
+          continue;
+        }
         const expr = this.parseExpression(0);
         if (expr === null) {
           this.reportUnexpected(this.current);

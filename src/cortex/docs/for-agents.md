@@ -69,7 +69,9 @@ g(x) + f(2)
   enforced at call time.
 - **Collections**: list `[1, 2, 3]`, set `{1, 2, 3}`, tuple `(1, 2)`,
   dictionary `{one -> 1, two -> 2}`, empty dictionary `{->}` (`{}` is the
-  empty set). Access dictionaries with `d["key"]`, not `d.key`.
+  empty set). Access dictionaries with `d["key"]`, not `d.key`. Tuples index
+  like lists (`p[1]` is the first component); a matrix (list of lists)
+  indexes as `m[2, 1]` or `m[2][1]`.
 - **Block in expression position**: `do { … }` (a bare `{ … }` in expression
   position is always a set/dictionary literal).
 - **LaTeX islands**: `$\frac{1}{2}$` splices parsed LaTeX into the expression
@@ -127,7 +129,8 @@ let sym = Sqrt(2) * Sqrt(2) // symbolic radicals reduce exactly
 // ➔ "1/2, 2, 3.141592654"
 ```
 
-Functions, recursion (one-step self-reference works), and closures:
+Functions, recursion (self-reference works in a one-step definition, with
+any number of recursive calls — `fib(n-1) + fib(n-2)` is fine), and closures:
 
 ```cortex
 fact(n) = if n <= 1 { 1 } else { n * fact(n - 1) }
@@ -213,6 +216,33 @@ let d = {one -> 1, two -> 2}
 // ➔ (2, ["one","two"])
 ```
 
+## Library Quick Roster
+
+Verified operator names, so you don't have to guess (search for more with
+`cortex doc <keywords>`):
+
+- **Numbers**: `Abs`, `Floor`, `Ceil` (not `Ceiling`), `Round`, `Sqrt`,
+  `Max`, `Min` (each takes a list or varargs), `Mod`, `GCD`, `LCM`,
+  `IsPrime`, `RandomInteger(a, b)`.
+- **Lists**: `Length`, `First`, `Last`, `Rest`, `Take`, `Drop`, `Reverse`,
+  `Sort` (optional comparator — see below), `IndexOf`, `Join`, `Append`,
+  `Sum`, `Mean`, `StandardDeviation` (sample, n−1), `Map`, `Filter`,
+  `Reduce(list, f, init)`, `Range(a, b)` inclusive, `Range(a, b, step)`.
+- **Strings**: `Characters`, `StringJoin`, `StringSplit(s)` (splits on
+  whitespace by default), `String(x)`.
+- **Dictionaries**: `Keys`, `Values`.
+- **Symbolic**: `Simplify`, `Solve(eq == v, x)`, `D(expr, x)`,
+  `Derivative(f)`, `Integrate`, `N`, `Type`.
+
+Caution: `Head` and `Tail` exist but are **structural** operators
+(`Head([1,2,3])` is the *operator name* `"List"`, not the first element) —
+for elements use `First`/`Rest`.
+
+```cortex
+Sort([3, 1, 4, 1, 5], (a, b) |-> a > b)
+// ➔ [5,4,3,1,1]
+```
+
 ## Watch Out For
 
 - **Laziness**: `Range`, `Map`, `Filter`, `Take`, `Drop`, `Join` are
@@ -221,6 +251,15 @@ let d = {one -> 1, two -> 2}
   `Take(...)`), and a deferred mapping function reads variables **at
   materialization time**. Collection *literals* snapshot their element values
   immediately. To force work now, aggregate or index where you stand.
+- **Output is the engine's textual form**: strings and booleans print
+  *quoted* (`"True"`, `"xetroc"`) — that quoted `"True"` is a boolean, not a
+  string. Derived collections (`Range`, `Map`/`Filter` results, loop-built
+  lists) preview-elide above 10 elements (`[1,2,3,4,5,...,]`); the value is
+  complete — use `--json` to see all of it. Literals print in full.
+- **Binder variables stay symbolic**: `D(expr, x)` and `Integrate(expr, x)`
+  treat `x` symbolically even if `x` has an assigned value; the *result*
+  then evaluates with the value. So `let x = 2` followed by
+  `N(D(x^3 + x, x))` is `13` — the derivative is taken first.
 - **Interpolating a collection broadcasts**: `"\(expr)"` with a list-valued
   `expr` maps the string over the elements, yielding a *list of strings*
   (`"n = \([1, 2])"` → `["n = 1", "n = 2"]`), not one string containing the

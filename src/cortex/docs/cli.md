@@ -90,8 +90,9 @@ use the Compute Engine's ordinary textual representation.
 ## Checking a Program Without Evaluating It
 
 `cortex check` parses a program and reports its diagnostics — syntax errors,
-malformed strings, invalid type annotations, `match` shape problems — without
-evaluating anything. It accepts the same source forms as evaluation: a file,
+malformed strings, invalid type annotations, `match` shape problems, and the
+trap lints (`=` inside a call argument, a literal index `0`, a `//` comment
+that reads as floor division) — without evaluating anything. It accepts the same source forms as evaluation: a file,
 `--eval`, or standard input.
 
 ```shell

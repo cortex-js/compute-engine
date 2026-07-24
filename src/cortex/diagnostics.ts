@@ -26,6 +26,10 @@ export type DiagnosticCode =
   | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value)
   | 'evaluation-canceled' // %0 = machine-readable CancellationCause, %1 = error description (non-final statement hit a cap breach: timeout/iteration/recursion)
   | 'unknown-function' // %0 = called name, %1 = suggested known operator ("did you mean")
+  | 'print-not-available' // %0 = called name — there is no print; a program's output is its last statement's value
+  | 'assign-in-argument' // `=` (Assign) as a call argument; `==` was probably meant
+  | 'zero-index' // literal index 0 — indexing is 1-based
+  | 'floor-division-comment' // `//` after code on the same line looks like floor division; it starts a comment
   | 'latex-parsing-unavailable' // no LaTeX parser was injected for a `$…$` island
   | 'match-case-arrow-expected' // a `match` case is missing its `=>` arrow
   | 'match-alternative-binding' // a named binding appears inside an or-alternative
