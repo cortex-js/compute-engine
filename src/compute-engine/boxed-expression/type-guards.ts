@@ -44,6 +44,16 @@ export function isSymbol(
   );
 }
 
+/**
+ * True when a value is an absence MARKER — the `Missing` symbol or a `NaN`
+ * number — regardless of provenance (I6). This is the value-level test the
+ * missing-value runtime gate and chained-`At` absorption use
+ * (`docs/plans/2026-07-22-missing-value-typing-design.md`).
+ */
+export function isAbsentValue(expr: Expression | null | undefined): boolean {
+  return isSymbol(expr, 'Missing') || (isNumber(expr) && expr.isNaN === true);
+}
+
 export function isFunction(
   expr: Expression | null | undefined,
   operator?: string

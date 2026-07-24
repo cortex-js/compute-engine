@@ -9,7 +9,11 @@ import {
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { Complex } from 'complex-esm';
 import { tryGetConstant } from './constant-folding.js';
-import { collectionElementType } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  stripMissingFromType,
+  typeContainsMissing,
+} from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 
 import {
@@ -660,7 +664,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `boolean | indexed_collection | number | string`), so refusing on
     // "not provably real" declined ordinary compilable code such as `P[n]`
     // inside a comprehension. Matching the interpreter beats refusing.
-    return `_SYS.at(${compile(coll)}, ${compile(index)})`;
+    const base = `_SYS.at(${compile(coll)}, ${compile(index)})`;
+    // `_SYS.at` marks an out-of-band SCALAR access with `NaN` (the numeric
+    // absence marker). For an OBJECT-domain collection (non-numeric elements),
+    // absence must instead be the target null (`undefined`, I6) so the object
+    // discharge (`Coalesce`, `IsMissing`) sees it — map the marker across. Only
+    // the scalar-index case: a gather yields an array, handled position-wise.
+    const eltT = collectionElementType(coll.type.type);
+    const scalarIndex =
+      !isIndexedCollectionOperand(index) && !index.type.matches('collection');
+    const objectDomain =
+      eltT !== undefined &&
+      eltT !== 'unknown' &&
+      eltT !== 'any' &&
+      !isSubtype(stripMissingFromType(eltT), 'number');
+    if (objectDomain && scalarIndex)
+      return `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(${base})`;
+    return base;
   },
   // Fold a collection. CE `Reduce` canonicalizes `\sum_{i=d}^{d} d` to
   // `Reduce(d, Add, 0)`. The Add/Multiply/Min/Max folds compile, as does a
@@ -3072,8 +3092,10 @@ const SYS_HELPERS = {
   //    `every` on an empty array is true): keep element i where mask[i] is
   //    true, 1-based; mask entries past the end contribute nothing;
   //  - integer gather: select each indexed element, negative entries counting
-  //    from the end (same normalization as the scalar path), out-of-range
-  //    entries DROPPED (the result may be shorter than the index list).
+  //    from the end (same normalization as the scalar path). POSITION-
+  //    PRESERVING: an out-of-range entry contributes NaN in place (the
+  //    interpreter's absence marker), so the result always has the same
+  //    length as the index list.
   // A non-integer entry makes the interpreter decline — `At` stays unevaluated
   // and produces no value at all — so the WHOLE result is NaN (the projection
   // of "no value" on a real target), not a per-slot NaN, which would invent an
@@ -3083,9 +3105,15 @@ const SYS_HELPERS = {
     const n = arr.length;
     if (Array.isArray(i)) {
       const picked: unknown[] = [];
-      if (i.every((m) => typeof m === 'boolean')) {
+      // A boolean MASK is a filter, but its length must EQUAL the collection
+      // length (BREAKING — was a silent prefix). A mismatch makes the
+      // interpreter decline (an error), projected here as a whole-result NaN.
+      // An EMPTY index is a gather that yields the empty list (not a mask —
+      // `every` on an empty array is true), so guard the length explicitly.
+      if (i.length > 0 && i.every((m) => typeof m === 'boolean')) {
+        if (i.length !== n) return NaN;
         i.forEach((m, k) => {
-          if (m === true && k < n) picked.push(arr[k]);
+          if (m === true) picked.push(arr[k]);
         });
         return picked;
       }
@@ -3093,8 +3121,12 @@ const SYS_HELPERS = {
         const mv = indexValue(m);
         if (!Number.isInteger(mv)) return NaN;
         const idx = mv > 0 ? mv - 1 : n + mv;
-        if (mv === 0 || idx < 0 || idx >= n) continue;
-        picked.push(arr[idx]);
+        // Out-of-range (or zero) index: keep the position, mark the absence
+        // (POSITION-PRESERVING gather — matches the interpreter, whose
+        // out-of-band access yields the absence marker, `NaN` for a numeric
+        // collection). The result always has the same length as the index list.
+        if (mv === 0 || idx < 0 || idx >= n) picked.push(NaN);
+        else picked.push(arr[idx]);
       }
       return picked;
     }
@@ -3446,6 +3478,20 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // A non-boolean Which/When condition (e.g. NaN) fails closed at run time,
       // matching the interpreter's throw (D6).
       assertBoolean: (code) => `_SYS.cond(${code})`,
+      // Absence capability (§3.F): numeric absence is `NaN`; the object axis is
+      // `undefined`. Consumed by `IsMissing`/`Coalesce`/Kleene `Equal` (P3).
+      absence: {
+        numeric: {
+          make: () => 'Number.NaN',
+          isAbsent: (x) => `Number.isNaN(${x})`,
+          coalesce: (x, d) => `((_c) => Number.isNaN(_c) ? ${d} : _c)(${x})`,
+        },
+        object: {
+          nullLiteral: 'undefined',
+          isAbsent: (x) => `(${x} === undefined)`,
+          coalesce: (x, d) => `(${x} ?? ${d})`,
+        },
+      },
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',

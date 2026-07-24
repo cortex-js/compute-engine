@@ -240,14 +240,16 @@ describe('A3.5 — Indexing extensions', () => {
     expect(expr.ops!.map((x) => x.re)).toEqual([10, 30]);
   });
 
-  test('boolean mask with mismatched length: takes min(len(L), len(mask))', () => {
+  // BREAKING (2026-07-22): a boolean mask's length must EQUAL the collection
+  // length; a mismatch is an error (was a silent min-length prefix).
+  test('boolean mask with mismatched length is an error', () => {
     const ce = new ComputeEngine();
     const expr = ce.expr([
       'At',
       ['List', 10, 20, 30, 40, 50],
       ['List', 'True', 'False', 'True'],
     ]).evaluate();
-    expect(expr.ops!.map((x) => x.re)).toEqual([10, 30]);
+    expect(expr.operator).toEqual('Error');
   });
 
   test('At with empty index list returns empty list', () => {

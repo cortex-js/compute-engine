@@ -9,7 +9,13 @@ import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { isFiniteIndexedCollection, isTuple } from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { eq } from '../boxed-expression/compare.js';
-import { isNumber, isFunction } from '../boxed-expression/type-guards.js';
+import {
+  isNumber,
+  isFunction,
+  isAbsentValue,
+} from '../boxed-expression/type-guards.js';
+import { typeContainsMissing } from '../../common/type/utils.js';
+import { parseType } from '../../common/type/parse.js';
 import { toBigint } from '../boxed-expression/numerics.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
 import {
@@ -191,6 +197,29 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     lazy: true,
 
+    // Kleene equality over absence (§3.D). An absent operand — `Missing`, or a
+    // `NaN` (provenance irrelevant, I6) — makes the comparison `Missing`, NOT
+    // `False` (`Equal(NaN, NaN) = Missing`; R: `NaN == 1` is `NA`). Declared
+    // `handle` so a `Missing` operand validates (its `missing` arm is stripped
+    // against the `any` parameter, which already admits it, but the handle
+    // declaration keeps the gate off the propagate path). Result type: `missing`
+    // when an operand is definitely absent, `boolean | missing` when only
+    // possibly (an operand's type carries the arm), `boolean` otherwise.
+    missingBehavior: 'handle',
+
+    type: (ops) => {
+      let definite = false;
+      let possible = false;
+      for (const op of ops) {
+        const t = op.type.type;
+        if (t === 'missing') definite = true;
+        else if (typeContainsMissing(t)) possible = true;
+      }
+      if (definite) return 'missing';
+      if (possible) return parseType('boolean | missing');
+      return 'boolean';
+    },
+
     // Broadcast element-wise over a list operand (Desmos `L[d=4]` filtering).
     // Restricted to the list-vs-scalar case: `skipBroadcastForVectorOps` skips
     // broadcasting when two-or-more operands are collections, so whole-list
@@ -309,6 +338,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         const bc = broadcastComparison(ce, 'Equal', ops, numericApproximation);
         if (bc) return bc;
       }
+      // Kleene absence (§3.D): once broadcast has had its chance (so a
+      // list-vs-scalar operand comparison is per-cell), a SCALAR absent operand
+      // — `Missing` or `NaN` — makes the whole comparison `Missing`. Per-cell
+      // broadcast re-enters this handler on scalar cells, so the rule applies
+      // element-wise too.
+      if (ops.some((op) => isAbsentValue(op))) return ce.Missing;
       let lhs: Expression | undefined = undefined;
       for (const arg of ops) {
         if (!lhs) lhs = arg;

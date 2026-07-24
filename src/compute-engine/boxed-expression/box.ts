@@ -55,7 +55,7 @@ import { isValueDef } from './utils.js';
 import { lookupApplicable } from '../function-utils.js';
 import { canonicalNegate } from './negate.js';
 import { canonical } from './canonical-utils.js';
-import { isNumber, isFunction } from './type-guards.js';
+import { isNumber, isFunction, isSymbol } from './type-guards.js';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -650,7 +650,12 @@ function makeCanonicalFunction(
   //
   if (name === 'List') {
     const boxedOps = ops.map((x) => ce.expr(x, { form: 'raw' }));
-    const canonicalOps = canonical(ce, boxedOps, scope);
+    // `Nothing` is an ERASURE marker (an empty-sequence splice): it is elided
+    // from a collection literal, so `[12, Nothing, 34]` is a 2-element list.
+    // Use `Missing` for an absent-but-positioned value.
+    const canonicalOps = canonical(ce, boxedOps, scope).filter(
+      (x) => !isSymbol(x, 'Nothing')
+    );
     return new BoxedFunction(ce, 'List', canonicalOps, {
       metadata,
       canonical: true,
@@ -808,6 +813,20 @@ function makeCanonicalFunction(
   // eligible for repair.
   const xs = ops.map((x) => ce.expr(x));
 
+  // A symbolic `Spread` operand (`f(...p)` where `p` is not a literal tuple
+  // — a literal one already spliced to a `Sequence` when the operand
+  // canonicalized above) makes the final positional operands unknown until
+  // evaluation, and every canonical handler assumes them (arity checks,
+  // sorting, folding). Skip the handler and validation: the evaluate path
+  // (step 0 of `_computeValue`) splices the tuple and rebuilds through
+  // `ce.function`, which re-runs both on the real arguments.
+  if (xs.some((x) => x.operator === 'Spread'))
+    return new BoxedFunction(ce, name, xs, {
+      metadata,
+      canonical: true,
+      scope,
+    });
+
   //
   // 3/ Apply `canonical` handler
   //
@@ -905,7 +924,11 @@ function makeCanonicalFunction(
         // fresh inference happened", not "repair disabled".
         ce._inferenceTxDepth > 0
           ? (ce._freshlyInferred ?? EMPTY_FRESHLY_INFERRED)
-          : undefined
+          : undefined,
+        // Strip-before-validate (§3.B): a `propagate`/`handle` operator admits
+        // an absent (`Missing`) or possibly-absent (`T | missing`) operand in a
+        // stripped position; the runtime gate carries the absence.
+        (i) => opDef.stripsMissingAt(i)
       );
 
   if (adjustedArgs) {
@@ -982,6 +1005,13 @@ function makeNumericFunction(
     if (ops.length === 0) ops = [ce.error('missing'), ce.error('missing')];
     if (ops.length === 1) ops = [ops[0], ce.error('missing')];
   } else return null;
+
+  // A `Spread` operand (`Add(...t)`) defers the whole numeric fast path to
+  // the generic operator route: the canonical constructors below (the
+  // single-operand `Add`/`Multiply` unwrap, eager folding) and the arity
+  // padding above assume the FINAL positional operands, which only exist
+  // once the spread splices at evaluation (step 0 of the evaluate path).
+  if (ops.some((x) => x.operator === 'Spread')) return null;
 
   // If some of the arguments are not valid, we're done
   // (note: the result is canonical, but not valid)

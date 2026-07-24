@@ -45,6 +45,7 @@ import {
   isNumber,
   isFunction,
   isString,
+  isSymbol,
   isContinuationOperand,
 } from './type-guards.js';
 import { candidateShape } from './tensor-view.js';
@@ -55,12 +56,15 @@ import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { NUMERIC_TYPES } from '../../common/type/primitive.js';
 import {
+  absorbNumericAbsence,
   broadcastElementType,
   broadcastResultType,
   broadcastShapedResultType,
   functionResult,
   isSignatureType,
   narrow,
+  stripMissingFromType,
+  typeContainsMissing,
   widen,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
@@ -1423,6 +1427,34 @@ export class BoxedFunction
     );
   }
 
+  /** Splice `Spread` operands (`f(...p)`) into the operand list.
+   *
+   * Returns `null` when no operand is a `Spread` (the common case, one cheap
+   * scan); the spliced operand list when every spread argument evaluated to a
+   * tuple; `this` when a spread argument has not (yet) resolved to a value
+   * (the call stays symbolic — a `Spread` operand must never reach positional
+   * parameter binding); or an error expression when it resolved to a definite
+   * non-tuple value (only tuples spread — a `List` does not).
+   */
+  private _spliceSpreadOps(): ReadonlyArray<Expression> | Expression | null {
+    if (!this._ops.some((x) => x.operator === 'Spread')) return null;
+    const spliced: Expression[] = [];
+    for (const x of this._ops) {
+      if (x.operator !== 'Spread' || !isFunction(x) || x.nops !== 1) {
+        spliced.push(x);
+        continue;
+      }
+      // Exact evaluation deliberately: only the tuple STRUCTURE is needed
+      // here; a `numericApproximation` option applies to the rebuilt call.
+      const v = x.op1.canonical.evaluate();
+      if (isFunction(v, 'Tuple')) spliced.push(...v.ops);
+      else if (isNumber(v) || isString(v) || isFunction(v, 'List'))
+        return this.engine.typeError('tuple', v.type, x.op1);
+      else return this;
+    }
+    return spliced;
+  }
+
   _computeValue(options?: Partial<EvaluateOptions>): () => Expression {
     return () => {
       // Cooperative deadline checkpoint on the per-node evaluation path.
@@ -1436,6 +1468,21 @@ export class BoxedFunction
         checkDeadline(this.engine._deadlineFrame);
 
       if (!this.isValid || !this._def) return this;
+
+      //
+      // 0/ Splice spread arguments — `f(...p)` — before any application,
+      // broadcast or hold logic (including user function literals in step
+      // 1): the elements of a spread tuple are ordinary positional
+      // arguments. Rebuilding through `ce.function` runs the arity/type
+      // validation that was deferred at canonicalization.
+      //
+      const spliced = this._spliceSpreadOps();
+      if (spliced !== null) {
+        if (!Array.isArray(spliced)) return spliced as Expression;
+        return this.engine
+          .function(this.operator, spliced as Expression[])
+          .evaluate(options);
+      }
 
       const numericApproximation = options?.numericApproximation ?? false;
 
@@ -1574,6 +1621,38 @@ export class BoxedFunction
       // 4/ Evaluate the applicable operands in the current scope
       //
       const tail = holdMap(this, (x) => x.evaluate(options));
+
+      //
+      // 4a/ Missing-value behavior gate (§3.E of the missing-value typing
+      // design). A `propagate` operator with an absent SCALAR operand
+      // (`Missing`, or a `NaN`) yields `NaN` in the numeric result cell (I6
+      // absorption) — but only when NO operand is a collection: a
+      // scalar-vs-collection application (`Add(Missing, matrix)`) broadcasts
+      // the absence per cell through the operator's own kernel (packing
+      // demotion, tensor-view). Under an element-wise broadcast (step 2 above)
+      // the gate re-enters per element (`Sin([1,Missing,3])` →
+      // `[Sin(1), NaN, Sin(3)]`). A `reject` operator errors at an absent
+      // operand in BOTH strict modes (the behavior gate, not validation).
+      //
+      if (def instanceof _BoxedOperatorDefinition) {
+        const behavior = def.resolvedMissingBehavior;
+        // The gate fires on the `Missing` SYMBOL only: a `NaN` operand already
+        // propagates through numeric evaluation natively (and some operators —
+        // e.g. `Rgb` — give a literal `NaN` operand a bespoke meaning), so it
+        // must NOT be hijacked here.
+        if (
+          (behavior === 'propagate' || behavior === 'reject') &&
+          tail.some((x) => isSymbol(x, 'Missing')) &&
+          !tail.some((x) => x.isCollection)
+        ) {
+          if (behavior === 'reject')
+            return this.engine.error([
+              'unexpected-argument',
+              this.engine.Missing.toString(),
+            ]);
+          return this.engine.NaN;
+        }
+      }
 
       //
       // 4b/ Broadcast over operands that only became collections *after*
@@ -1741,6 +1820,17 @@ export class BoxedFunction
 
       if (!this.isValid || !this._def) return this;
 
+      // 0/ Splice spread arguments — mirrors the sync path (the spread
+      // argument itself resolves synchronously; the rebuilt call continues
+      // async).
+      const spliced = this._spliceSpreadOps();
+      if (spliced !== null) {
+        if (!Array.isArray(spliced)) return spliced as Expression;
+        return this.engine
+          .function(this.operator, spliced as Expression[])
+          .evaluateAsync(options);
+      }
+
       const numericApproximation = options?.numericApproximation ?? false;
 
       //
@@ -1865,6 +1955,27 @@ export class BoxedFunction
         this,
         async (x) => await x.evaluateAsync(options)
       );
+
+      //
+      // 3a/ Missing-value behavior gate (§3.E) — parity with the sync path's
+      // step 4a. A `propagate` operator with an absent `Missing` scalar operand
+      // (no collection operand) yields `NaN`; a `reject` operator errors.
+      //
+      if (def instanceof _BoxedOperatorDefinition) {
+        const behavior = def.resolvedMissingBehavior;
+        if (
+          (behavior === 'propagate' || behavior === 'reject') &&
+          tail.some((x) => isSymbol(x, 'Missing')) &&
+          !tail.some((x) => x.isCollection)
+        ) {
+          if (behavior === 'reject')
+            return this.engine.error([
+              'unexpected-argument',
+              this.engine.Missing.toString(),
+            ]);
+          return this.engine.NaN;
+        }
+      }
 
       //
       // 3b/ Broadcast over operands that only became collections after
@@ -2272,9 +2383,41 @@ function type(expr: BoxedFunction): Type {
 
     let sigResult = functionResult(sig) ?? 'unknown';
 
-    // If there is a type handler, call it
+    // Missing-value absorption (§3.B of the missing-value typing design). When
+    // this application resolves to `propagate` and some operand carries a
+    // `missing` arm, the base result is absorbed: every `missing` arm is
+    // stripped and every numeric result cell widens to `number` (an absent
+    // numeric cell contributes `NaN` — Q2/I6). Gated on `typeContainsMissing`,
+    // so a Missing-free program's type is byte-identical.
+    const absorbMissing =
+      def.resolvedMissingBehavior === 'propagate' &&
+      expr.ops.some((x) => typeContainsMissing(x.type.type));
+    const maybeAbsorb = (t: Type): Type =>
+      absorbMissing ? absorbNumericAbsence(t) : t;
+
+    // If there is a type handler, call it. Strip-before-validate (§3.B step 3):
+    // for a `propagate`/`handle` operator with an absent operand, convey the
+    // stripped operand types via the `operandTypes` context override — a
+    // handler consults `options.operandTypes[i]` before `ops[i].type` (no proxy
+    // expressions, no interaction with the `_type` cache).
     if (typeof def.type === 'function') {
-      const calculatedType = def.type(expr.ops, { engine: expr.engine });
+      const stripsAny =
+        (def.resolvedMissingBehavior === 'propagate' ||
+          def.resolvedMissingBehavior === 'handle') &&
+        expr.ops.some(
+          (x, i) => def.stripsMissingAt(i) && typeContainsMissing(x.type.type)
+        );
+      const operandTypes = stripsAny
+        ? expr.ops.map((x, i) =>
+            def.stripsMissingAt(i) && typeContainsMissing(x.type.type)
+              ? stripMissingFromType(x.type.type)
+              : undefined
+          )
+        : undefined;
+      const calculatedType = def.type(expr.ops, {
+        engine: expr.engine,
+        operandTypes,
+      });
       if (calculatedType) {
         if (calculatedType instanceof BoxedType)
           sigResult = calculatedType.type;
@@ -2406,9 +2549,11 @@ function type(expr: BoxedFunction): Type {
           // `matrix` signature parameters. Falls back to the plain unbounded
           // `list<E>` whenever the shape is not provable from every
           // broadcasting operand (see `broadcastShapedResultType`).
-          return broadcastShapedResultType(
-            broadcastingOps.map((x) => x.type.type),
-            broadcastElementType(sigResult)
+          return maybeAbsorb(
+            broadcastShapedResultType(
+              broadcastingOps.map((x) => x.type.type),
+              broadcastElementType(sigResult)
+            )
           );
 
         // Arm 2 (possibly-collection, step 2 phase C). No operand is a
@@ -2421,10 +2566,10 @@ function type(expr: BoxedFunction): Type {
         // `sigResult` (Add/Multiply handlers compute their own broadcastable
         // type), keeping the arm idempotent — never `broadcastable<broadcastable<…>>`.
         if (expr.ops.some((x) => isPossiblyCollectionTyped(x)))
-          return {
+          return maybeAbsorb({
             kind: 'broadcastable',
             elements: broadcastElementType(sigResult),
-          };
+          });
       }
     }
 
@@ -2508,7 +2653,7 @@ function type(expr: BoxedFunction): Type {
         };
     }
 
-    return sigResult;
+    return maybeAbsorb(sigResult);
   }
 
   // Is this a function literal?
@@ -2873,7 +3018,13 @@ function materialize(
     return expr.engine.function('Dictionary', xs);
   }
 
-  if (isIndexed) return expr.engine._fn('List', xs);
+  // `Nothing` is an ERASURE marker: a lazy stream element that materialized as
+  // `Nothing` (e.g. a `Map` body producing `Nothing`) is spliced out of the
+  // resulting collection (§3.G). `Missing` is preserved. (The
+  // `ContinuationPlaceholder` sentinel is not `Nothing`, so it survives.)
+  const materialized = xs.filter((x) => !isSymbol(x, 'Nothing'));
 
-  return expr.engine.function('Set', [...xs]);
+  if (isIndexed) return expr.engine._fn('List', materialized);
+
+  return expr.engine.function('Set', [...materialized]);
 }

@@ -13,7 +13,11 @@ import {
 import {
   collectionElementType,
   isNonRealNumber,
+  stripMissingFromType,
+  typeContainsMissing,
+  widen,
 } from '../../common/type/utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { parseType } from '../../common/type/parse.js';
 import type { Type } from '../../common/type/types.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
@@ -180,6 +184,39 @@ export class BaseCompiler {
    * `return _acc; + 1.0`). The offending head is named in the error, which the
    * engine-level `compile()` surfaces via `success: false` + `unsupported`.
    */
+  /**
+   * Pick the target's absence axis (§3.F) for a position of type `t` by its
+   * DOMAIN (I6): a numeric-domain position (`<: number` after stripping the
+   * `missing` arm — `never` counts, since a bare-`missing` numeric absence is
+   * `NaN`) uses `absence.numeric`; any other (object) domain uses
+   * `absence.object`. Throws (fail closed) when the target declares no absence
+   * capability at all, or lacks the required object axis.
+   */
+  static absenceAxisForType(
+    t: Readonly<Type>,
+    target: CompileTarget<Expression>,
+    opName: string
+  ): {
+    isAbsent?: (x: TargetSource) => TargetSource;
+    coalesce?: (x: TargetSource, d: TargetSource) => TargetSource;
+  } {
+    if (target.absence === undefined)
+      throw new Error(
+        `${opName}: target '${target.language ?? 'unknown'}' has no absence ` +
+          `capability. Fail closed (§3.F).`
+      );
+    const stripped = stripMissingFromType(t);
+    const numeric = stripped === 'never' || isSubtype(stripped, 'number');
+    if (numeric) return target.absence.numeric;
+    if (target.absence.object === undefined)
+      throw new Error(
+        `${opName}: an object-domain absent position has no representation on ` +
+          `target '${target.language ?? 'unknown'}'. Discharge with 'Coalesce' ` +
+          `first. Fail closed (§3.F).`
+      );
+    return target.absence.object;
+  }
+
   static compileValueOperand(
     expr: Expression | undefined,
     target: CompileTarget<Expression>,
@@ -214,6 +251,31 @@ export class BaseCompiler {
       throw new Error(
         `Cannot compile invalid expression: "${expr.toString()}"`
       );
+    }
+    // Object-domain absence gate (§3.F). A subexpression whose type carries a
+    // `missing` arm in an OBJECT (non-numeric) domain has no representation on a
+    // target lacking the `object` absence axis (interval, GPU) — fail closed
+    // (D6) with a diagnostic rather than emit source that cannot represent the
+    // hole. Numeric-domain absence (`number | missing`) is `NaN` (I6) and needs
+    // no object axis, so it is exempt. Only object-axis-less targets pay the
+    // check (JS/Python declare `object`, so the guard short-circuits).
+    if (target.absence !== undefined && target.absence.object === undefined) {
+      const t = expr.type.type;
+      if (typeContainsMissing(t)) {
+        const stripped = stripMissingFromType(t);
+        if (
+          stripped !== 'never' &&
+          stripped !== 'unknown' &&
+          stripped !== 'any' &&
+          !isSubtype(stripped, 'number')
+        )
+          throw new Error(
+            `Cannot compile an object-domain absent ('missing') position ` +
+              `(type '${expr.type.toString()}') to target ` +
+              `'${target.language ?? 'unknown'}': it has no object null ` +
+              `representation. Discharge with 'Coalesce' first (fail closed, §3.F).`
+          );
+      }
     }
     // Keep the compile-bound-variables context in sync for the contextless
     // analysis helpers (`isComplexValued`): every recursive compilation flows
@@ -909,6 +971,111 @@ export class BaseCompiler {
 
     if (h === 'Block') {
       return BaseCompiler.compileBlock(args, target);
+    }
+
+    // Absence-discharge primitives (§3.F). `IsMissing`/`Coalesce` lower through
+    // the target-supplied absence capability, choosing the numeric or object
+    // axis by the operand's (result's) domain (I6). A target lacking the needed
+    // axis — GPU has no `isAbsent`, interval/GPU have no `object` axis — fails
+    // closed with a diagnostic (propagation stays native; discharge does not).
+    if (h === 'IsMissing') {
+      if (args.length !== 1)
+        throw new Error('IsMissing: expected exactly one argument');
+      const axis = BaseCompiler.absenceAxisForType(
+        args[0].type.type,
+        target,
+        'IsMissing'
+      );
+      if (axis.isAbsent === undefined)
+        throw new Error(
+          `IsMissing: target '${target.language ?? 'unknown'}' cannot test ` +
+            `absence (no 'isAbsent' capability — e.g. GPU fast-math cannot ` +
+            `guarantee 'isnan' survives). Fail closed (§3.F).`
+        );
+      return axis.isAbsent(BaseCompiler.compileValueOperand(args[0], target));
+    }
+
+    if (h === 'Coalesce') {
+      if (args.length === 0)
+        throw new Error('Coalesce: expected at least one argument');
+      // The result's domain (its widened type — `T₁° | … | Tₙ₋₁° | Tₙ`, §3.D)
+      // picks the axis: numeric → NaN-coalesce, object → null-coalesce.
+      const resultType = widen(
+        ...args.map((a, i) =>
+          i < args.length - 1 ? stripMissingFromType(a.type.type) : a.type.type
+        )
+      );
+      const axis = BaseCompiler.absenceAxisForType(
+        resultType,
+        target,
+        'Coalesce'
+      );
+      if (axis.coalesce === undefined)
+        throw new Error(
+          `Coalesce: target '${target.language ?? 'unknown'}' cannot ` +
+            `discharge absence (no 'coalesce' capability). Fail closed (§3.F).`
+        );
+      const codes = args.map((a) =>
+        BaseCompiler.compileValueOperand(a, target)
+      );
+      // Fold right: coalesce(a0, coalesce(a1, … coalesce(a_{n-1}, a_n))).
+      let acc = codes[codes.length - 1];
+      for (let i = codes.length - 2; i >= 0; i--)
+        acc = axis.coalesce(codes[i], acc);
+      return acc;
+    }
+
+    // Kleene `Equal` guarded lowering (§3.D). When an operand may be absent
+    // (its type carries a `missing` arm), an absent side makes the comparison
+    // absent: emit `isAbsent(a) || isAbsent(b) ? <object null> : <a == b>`. A
+    // Missing-free comparison keeps the plain codegen below (no pessimization).
+    // The absent boolean is an OBJECT-domain value (the target null), so a
+    // target without the object axis (GPU) fails closed.
+    if (
+      h === 'Equal' &&
+      target.absence !== undefined &&
+      args.length === 2 &&
+      args.some((a) => typeContainsMissing(a.type.type)) &&
+      args.every((a) => !a.isCollection && !a.type.matches('collection'))
+    ) {
+      if (target.absence.object === undefined)
+        throw new Error(
+          `Equal: an absent (Kleene) boolean has no object representation on ` +
+            `target '${target.language ?? 'unknown'}'. Discharge the operands ` +
+            `with 'Coalesce' first. Fail closed (§3.F).`
+        );
+      const guardOf = (a: Expression): TargetSource => {
+        const axis = BaseCompiler.absenceAxisForType(
+          a.type.type,
+          target,
+          'Equal'
+        );
+        if (axis.isAbsent === undefined)
+          throw new Error(
+            `Equal: target '${target.language ?? 'unknown'}' cannot test ` +
+              `absence (no 'isAbsent' capability). Fail closed (§3.F).`
+          );
+        return axis.isAbsent(BaseCompiler.compileValueOperand(a, target));
+      };
+      const eqFn = target.functions?.('Equal');
+      if (typeof eqFn !== 'function')
+        throw new Error(
+          `Equal: target '${target.language ?? 'unknown'}' has no equality ` +
+            `codegen for the guarded (Kleene) form. Fail closed (§3.F).`
+        );
+      const inner = eqFn(
+        args,
+        (e) => BaseCompiler.compileValueOperand(e, target),
+        target
+      );
+      const nullLit = target.absence.object.nullLiteral;
+      // A word-`chainOp` target (Python: `and`) spells logical-or `or` and the
+      // conditional `X if C else Y`; a C-style target uses `||` and `C ? X : Y`.
+      const pythonic = target.chainOp === 'and';
+      const guard = `${guardOf(args[0])} ${pythonic ? 'or' : '||'} ${guardOf(args[1])}`;
+      return pythonic
+        ? `(${nullLit} if (${guard}) else ${inner})`
+        : `((${guard}) ? ${nullLit} : ${inner})`;
     }
 
     // `Typed(value, type)` is a transparent runtime ascription — it constrains

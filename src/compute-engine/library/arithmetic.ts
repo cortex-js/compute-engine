@@ -165,6 +165,7 @@ import {
   isContinuationOperand,
 } from '../boxed-expression/type-guards.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
+import { aggregateAbsence } from './missing-data.js';
 import { expand } from '../boxed-expression/expand.js';
 import {
   couldBeNumericTuple,
@@ -307,6 +308,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       // Accept numbers, vectors, and matrices for element-wise addition
       signature: '(value+) -> value',
+      // The `value`-typed signature would default to `pass-through`; declare
+      // `propagate` so an absent operand yields `NaN` (every cell `Add`
+      // computes on is numeric — §3.A/§5 of the missing-value typing design).
+      missingBehavior: 'propagate',
       type: addType,
 
       sgn: (ops) => {
@@ -1733,6 +1738,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 2000,
       broadcastable: true,
       signature: '(value) -> value',
+      // `value`-typed signature defaults to `pass-through`; declare `propagate`
+      // (§3.A/§5) so `Negate(Missing)` yields `NaN`.
+      missingBehavior: 'propagate',
       type: ([x]) => x.type,
       sgn: ([x]) => oppositeSgn(x.sgn),
       canonical: (args, { engine }) => {
@@ -2897,6 +2905,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
       signature: '(value*) -> number',
+      // A data-consuming aggregate: it OWNS its `Missing` runtime (§3.C). An
+      // absent datum (a `Missing` operand or element, or a `NaN`) or empty
+      // input evaluates to `NaN` (I6 absorption). `missingStrip: 'all'` (the
+      // default) lets a `Missing` operand validate against `(value*)`.
+      missingBehavior: 'handle',
       sgn: (ops) => {
         if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
         if (ops.some((x) => x.isReal == false || x.isNaN !== false))
@@ -2927,6 +2940,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false, // The function take a variable number of arguments,
       // including collections
       signature: '(value+) -> number',
+      missingBehavior: 'handle',
       sgn: (ops) => {
         if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
         if (ops.some((x) => x.isReal == false || x.isNaN !== false))
@@ -2991,6 +3005,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // including collections
 
       signature: '(value*) -> number',
+      missingBehavior: 'handle',
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Supremum'),
     },
 
@@ -3001,6 +3016,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // including collections
 
       signature: '(value*) -> number',
+      missingBehavior: 'handle',
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Infimum'),
     },
 
@@ -3732,6 +3748,11 @@ function evaluateMinMax(
   mode: 'Min' | 'Max' | 'Supremum' | 'Infimum'
 ): Expression {
   const upper = mode === 'Max' || mode === 'Supremum';
+
+  // Absent-datum / empty-input gate (§3.C): any absent datum (`Missing` or
+  // `NaN`, scalar operand or flattened element) or empty input ⇒ `NaN`.
+  const absent = aggregateAbsence(ce, ops);
+  if (absent) return absent;
 
   ops = flatten(ops);
 

@@ -19,6 +19,7 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
   windowedCollectionOps,
 } from '../collection-utils.js';
+import { aggregateAbsence } from './missing-data.js';
 import {
   bigCorrelation,
   bigCovariance,
@@ -245,7 +246,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number|distribution)+) -> number',
-      type: () => 'finite_real',
+      // A data-consuming aggregate (§3.C): result type is the numeric base
+      // with NO `| missing` arm (I6 absorption) — `number`, NOT `finite_real`,
+      // because an absent datum or empty input evaluates to `NaN`.
+      type: () => 'number',
+      missingBehavior: 'handle',
       description: 'Arithmetic mean (average) of a collection of numbers.',
       keywords: ['average'],
       evaluate: (ops, { engine, numericApproximation }) => {
@@ -253,6 +258,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const r = distributionMean(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
+        const absent = aggregateAbsence(engine, ops);
+        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactMean(engine, vals);
@@ -270,10 +277,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
-      type: () => 'finite_real',
+      type: () => 'number',
+      missingBehavior: 'handle',
       description: 'Median of a collection of numbers.',
       examples: ['Mode([1, 2, 2, 3])  // Returns 2'],
       evaluate: (ops, { engine, numericApproximation }) => {
+        const absent = aggregateAbsence(engine, ops);
+        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactMedianOf(engine, sortExact(vals));
@@ -292,12 +302,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number|distribution)+) -> number',
-      type: () => 'finite_real',
+      type: () => 'number',
+      missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
           const r = distributionVariance(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
+        const absent = aggregateAbsence(engine, ops);
+        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactVariance(engine, vals, false);
@@ -316,8 +329,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
-      type: () => 'finite_real',
+      type: () => 'number',
+      missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
+        const absent = aggregateAbsence(engine, ops);
+        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactVariance(engine, vals, true);
@@ -337,12 +353,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Sample Standard Deviation of a collection of numbers.',
       keywords: ['stdev', 'std'],
       signature: '((collection|number|distribution)+) -> number',
-      type: () => 'finite_real',
+      type: () => 'number',
+      missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
           const r = distributionStandardDeviation(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
+        const absent = aggregateAbsence(engine, ops);
+        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals)
@@ -364,8 +383,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       description: 'Population Standard Deviation of a collection of numbers.',
       signature: '((collection|number)+) -> number',
-      type: () => 'finite_real',
+      type: () => 'number',
+      missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
+        const absent = aggregateAbsence(engine, ops);
+        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals)
@@ -387,8 +409,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
-      type: () => 'finite_real',
+      type: () => 'number',
+      missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
+        const absent = aggregateAbsence(engine, ops);
+        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactKurtosis(engine, vals);
@@ -407,8 +432,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
-      type: () => 'finite_real',
+      type: () => 'number',
+      missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
+        const absent = aggregateAbsence(engine, ops);
+        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactSkewness(engine, vals);
@@ -427,8 +455,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
-      type: () => 'finite_real',
+      type: () => 'number',
+      missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
+        const absent = aggregateAbsence(engine, ops);
+        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) return exactMode(engine, vals);
@@ -454,8 +485,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
       signature:
         '((collection|number)+) -> tuple<mid:number, lower:number, upper:number>',
+      missingBehavior: 'handle',
       examples: ['Quartiles([1, 2, 3, 4, 5])  // Returns (1.5, 3, 4.5)'],
       evaluate: (ops, { engine, numericApproximation }) => {
+        // Absent datum or empty input ⇒ `(NaN, NaN, NaN)` (§3.C).
+        if (aggregateAbsence(engine, ops))
+          return engine.tuple(engine.NaN, engine.NaN, engine.NaN);
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) {
@@ -478,9 +513,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '((collection|number)+) -> number',
-      type: () => 'finite_real',
+      type: () => 'number',
+      missingBehavior: 'handle',
 
       evaluate: (ops, { engine, numericApproximation }) => {
+        const absent = aggregateAbsence(engine, ops);
+        if (absent) return absent;
         if (!numericApproximation) {
           const vals = exactData(ops);
           if (vals) {

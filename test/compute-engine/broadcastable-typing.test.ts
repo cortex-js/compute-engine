@@ -374,11 +374,13 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     const p1 = ce.box(['m', p0]);
     expect(p1.type.toString()).toBe('broadcastable<finite_number>');
 
-    // `At(m(2h(1)), 1)` is valid with an element type from the return.
+    // `At(m(2h(1)), 1)` is valid with an element type from the return. §3.C:
+    // the access is `T | marker(T)`; a numeric `T` absorbs its absence value
+    // (I6/Q2), so the type widens to `number` (BREAKING — was `finite_number`).
     const at = ce.box(['At', ['m', p0], 1]);
     expect(at.isValid).toBe(true);
     expect(hasErrorOperand(at)).toBe(false);
-    expect(at.type.toString()).toBe('finite_number');
+    expect(at.type.toString()).toBe('number');
 
     // Chaining stays single-layer broadcastable (idempotent).
     expect(ce.box(['m', p1]).type.toString()).toBe(

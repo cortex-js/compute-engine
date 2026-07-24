@@ -148,15 +148,17 @@ describe('T2 — L[condition] end-to-end filtering', () => {
     expect(expr.evaluate().toString()).toBe('[20]');
   });
 
-  test('mask alignment: CE truncates to the shorter of list/mask', () => {
-    // Mask longer than the list: extra entries past the end contribute nothing.
+  test('mask alignment: a length mismatch is an error (BREAKING)', () => {
+    // BREAKING (2026-07-22): a boolean mask is a filter whose length must EQUAL
+    // the collection length; a mismatch is an error (was truncate-to-shorter).
+    // Mask longer than the list.
     expect(
-      ce.box(['At', ['List', 10, 20], ['List', 'True', 'True', 'True']]).evaluate().toString()
-    ).toBe('[10,20]');
-    // Mask shorter than the list: the uncovered tail is dropped.
+      ce.box(['At', ['List', 10, 20], ['List', 'True', 'True', 'True']]).evaluate().operator
+    ).toBe('Error');
+    // Mask shorter than the list.
     expect(
-      ce.box(['At', ['List', 10, 20, 30], ['List', 'True', 'False']]).evaluate().toString()
-    ).toBe('[10]');
+      ce.box(['At', ['List', 10, 20, 30], ['List', 'True', 'False']]).evaluate().operator
+    ).toBe('Error');
   });
 });
 

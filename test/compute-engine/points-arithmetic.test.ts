@@ -926,14 +926,13 @@ describe('POINT/TUPLE ARITHMETIC — component accessors on non-indexed collecti
     expect(ce.box(['PointY', l]).evaluate().json).toEqual(['List', 2, 4]);
   });
 
-  test('PointZ over 2D points broadcasts a list of Nothing (unchanged)', () => {
+  test('PointZ over 2D points broadcasts a list of the absence marker', () => {
+    // BREAKING (2026-07-22): an out-of-band coordinate is POSITION-PRESERVING —
+    // it yields the marker (`NaN` for numeric coordinates), not `Nothing`,
+    // which would erase the slot and misalign the coordinate list.
     const ce = new ComputeEngine();
     const s = ce.box(['Set', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
-    expect(ce.box(['PointZ', s]).evaluate().json).toEqual([
-      'List',
-      'Nothing',
-      'Nothing',
-    ]);
+    expect(ce.box(['PointZ', s]).evaluate().json).toEqual(['List', 'NaN', 'NaN']);
   });
 });
 

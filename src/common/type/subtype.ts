@@ -75,6 +75,7 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   any: PRIMITIVE_TYPES,
   unknown: [],
   nothing: [],
+  missing: [],
   never: [],
   error: [],
   value: VALUE_TYPES,
@@ -152,6 +153,11 @@ export function isPrimitiveSubtype(
   // itself; nothing else is a subtype of `nothing`.
   if (rhs === 'nothing') return lhs === 'nothing';
   if (lhs === 'nothing') return false;
+
+  // `missing` (unit type of an absent-but-positioned value) behaves like
+  // `nothing`: a subtype only of `any` (handled above) and itself.
+  if (rhs === 'missing') return lhs === 'missing';
+  if (lhs === 'missing') return false;
 
   // `unknown` is a top type: every (remaining) type is a subtype of it, and it
   // is a subtype only of `any`/`unknown`.
@@ -292,6 +298,7 @@ function provablyDisjoint(a: Type, b: Type): boolean {
   if (a === 'any' || b === 'any') return false;
   if (a === 'unknown' || b === 'unknown') return false;
   if (a === 'nothing' || b === 'nothing') return a !== b;
+  if (a === 'missing' || b === 'missing') return a !== b;
 
   // If either is a subtype of the other, they share values (overlap).
   if (isSubtype(a, b) || isSubtype(b, a)) return false;
@@ -384,13 +391,25 @@ export function isSubtype(
   // No type is a subtype of `nothing` (unit type), except itself
   if (rhs === 'nothing') return lhs === 'nothing';
 
-  // Nothing is the unit type, it is only a subtype of itself
-  if (lhs === 'nothing') return false;
+  // Nothing is the unit type, it is only a subtype of itself.
+  // Gate on a primitive (string) rhs: a composite rhs (e.g. a union that
+  // *contains* `nothing`) must fall through to its own handler below so
+  // `nothing <: nothing | integer` is true (union-self-membership fix,
+  // 2026-07-22). The relative order of these unit-type checks is load-bearing.
+  if (lhs === 'nothing' && typeof rhs === 'string') return false;
+
+  // No type is a subtype of `missing` (unit type), except itself
+  if (rhs === 'missing') return lhs === 'missing';
+
+  // `Missing` is a unit type, it is only a subtype of itself; gate on a
+  // primitive rhs so a composite rhs (e.g. `integer | missing`) falls through.
+  if (lhs === 'missing' && typeof rhs === 'string') return false;
 
   // Every type is a subtype of `unknown`
   if (rhs === 'unknown') return true;
-  // 'unknown' is only a subtype of `any` (handled above)
-  if (lhs === 'unknown') return false;
+  // 'unknown' is only a subtype of `any` (handled above); gate on a primitive
+  // rhs so `unknown <: unknown | integer` falls through to the union handler.
+  if (lhs === 'unknown' && typeof rhs === 'string') return false;
 
   //
   // Handle other subtype of primitive types

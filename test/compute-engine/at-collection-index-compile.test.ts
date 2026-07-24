@@ -27,9 +27,16 @@ const P = ['List', 10, 20, 30];
 function interpreted(expr: BoxedExpression): number | number[] {
   const v = expr.evaluate();
   if (v.operator === 'List') return (v.ops ?? []).map((x) => x.re as number);
-  // `Nothing` (out-of-range scalar index) and an unevaluated `At` (declined:
-  // non-integer entry) both mean "no value" — NaN on a real target.
-  if (v.symbol === 'Nothing' || v.operator === 'At') return NaN;
+  // The absence marker (`Missing`/`NaN`, out-of-band access), an unevaluated
+  // `At` (declined: non-integer entry), and a runtime `Error` (a mask-length
+  // mismatch) all mean "no value" — NaN on a real target.
+  if (
+    v.symbol === 'Nothing' ||
+    v.symbol === 'Missing' ||
+    v.operator === 'At' ||
+    v.operator === 'Error'
+  )
+    return NaN;
   return v.re as number;
 }
 
@@ -61,10 +68,13 @@ describe('At with a collection index — gather', () => {
     expect(parity(at(['List', 2, -1]))).toEqual([20, 30]);
   });
 
-  test('out-of-range entries are dropped (result may be shorter)', () => {
-    expect(parity(at(['List', 0, 1, 2]))).toEqual([10, 20]);
-    expect(parity(at(['List', 1, 2, 4]))).toEqual([10, 20]);
-    expect(parity(at(['List', 10]))).toEqual([]);
+  // BREAKING (2026-07-22): a gather is POSITION-PRESERVING — an out-of-range
+  // entry contributes the marker (`NaN` for a numeric collection) in place, so
+  // the result has the same length as the index list (was dropped/shorter).
+  test('out-of-range entries yield the marker in place (length preserved)', () => {
+    expect(parity(at(['List', 0, 1, 2]))).toEqual([NaN, 10, 20]);
+    expect(parity(at(['List', 1, 2, 4]))).toEqual([10, 20, NaN]);
+    expect(parity(at(['List', 10]))).toEqual([NaN]);
   });
 });
 
@@ -77,19 +87,21 @@ describe('At with a collection index — boolean mask', () => {
     expect(parity(at(['List', 'False', 'False', 'False']))).toEqual([]);
   });
 
-  test('a mask shorter than the source selects from its prefix', () => {
-    expect(parity(at(['List', 'True', 'False']))).toEqual([10]);
+  // BREAKING (2026-07-22): a mask's length must EQUAL the collection length; a
+  // mismatch is an error (interpreter), projected to a whole-result NaN on a
+  // real target. Both routes agree.
+  test('a mask shorter than the source is an error (→ NaN)', () => {
+    expect(parity(at(['List', 'True', 'False']))).toBeNaN();
   });
 
-  test('mask entries past the end contribute nothing', () => {
-    expect(parity(at(['List', 'True', 'True', 'True', 'True']))).toEqual([
-      10, 20, 30,
-    ]);
+  test('a mask longer than the source is an error (→ NaN)', () => {
+    expect(parity(at(['List', 'True', 'True', 'True', 'True']))).toBeNaN();
   });
 });
 
 describe('At with an empty index list', () => {
-  // An empty index takes the mask branch (`every` on an empty array is true).
+  // An empty index is a gather (not a mask — a mask requires a matching source
+  // length), and an empty gather yields the empty list.
   test('yields an empty list on both routes', () => {
     expect(parity(at(['List']))).toEqual([]);
   });
@@ -122,13 +134,15 @@ describe('At with a scalar index (regression — unchanged)', () => {
     expect(parity(at(-1))).toBe(30);
   });
 
-  test('a zero index yields NaN (interpreted `Nothing`)', () => {
-    expect(at(0).evaluate().symbol).toBe('Nothing');
+  // BREAKING (2026-07-22): out-of-band scalar access yields the marker (`NaN`
+  // for a numeric collection), not `Nothing`.
+  test('a zero index yields NaN (interpreted marker)', () => {
+    expect(at(0).evaluate().isNaN).toBe(true);
     expect(parity(at(0))).toBeNaN();
   });
 
-  test('an out-of-range index yields NaN (interpreted `Nothing`)', () => {
-    expect(at(4).evaluate().symbol).toBe('Nothing');
+  test('an out-of-range index yields NaN (interpreted marker)', () => {
+    expect(at(4).evaluate().isNaN).toBe(true);
     expect(parity(at(4))).toBeNaN();
   });
 });
@@ -158,11 +172,15 @@ describe('a collection-valued At is typed as a LIST, so parents compose', () => 
   // `At(p, I) + 1` degenerating to JS array-plus-number string concatenation)
   // and collection operators would fail closed on a genuine list.
   test('a collection index yields a list type, a scalar index does not', () => {
-    expect(at(['List', 1, 3]).type.toString()).toBe('list<finite_integer>');
+    // §3.C: a gather is `list<T | marker(T)>`; a numeric `T` absorbs its
+    // absence value (I6/Q2), so the element type widens to `number`. A mask
+    // filters (no marker), but its element type still widens under Q2 because
+    // the source element type is numeric. A scalar index is `T | marker(T)`.
+    expect(at(['List', 1, 3]).type.toString()).toBe('list<number>');
     expect(at(['List', 'True', 'False', 'True']).type.toString()).toBe(
       'list<finite_integer>'
     );
-    expect(at(2).type.toString()).toBe('finite_integer');
+    expect(at(2).type.toString()).toBe('number');
   });
 
   test('arithmetic over a gather broadcasts elementwise', () => {
@@ -200,10 +218,12 @@ describe('At on the parse route (subscript access)', () => {
   });
 
   test('p_{X-1} — index computed at run time (bcast)', () => {
+    // X-1 = [0, 1, 2]; index 0 is out of range → the marker (NaN) in place
+    // (POSITION-PRESERVING gather, BREAKING). Both routes agree.
     const expr = engine.parse('p_{X-1}');
     const r = compile(expr);
     expect(r?.success).toBe(true);
-    expect(r!.run!()).toEqual([10, 20]);
+    expect(r!.run!()).toEqual([NaN, 10, 20]);
     expect(r!.run!()).toEqual(interpreted(expr));
   });
 });
@@ -310,15 +330,17 @@ describe('At with a CHAINED (multi-)index — result type follows the chain', ()
   const M = ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]];
 
   test('a chained scalar index yields the scalar element type', () => {
+    // §3.C: the final scalar step is `T | marker(T)`; a numeric `T` absorbs to
+    // `number` (I6/Q2).
     const expr = ce.box(['At', M, 1, 2] as any);
     expect(expr.evaluate().re).toBe(2);
-    expect(expr.type.toString()).toBe('finite_integer');
+    expect(expr.type.toString()).toBe('number');
   });
 
   test('a gather at a later step yields a list', () => {
     const expr = ce.box(['At', M, 1, ['List', 1, 2]] as any);
     expect(expr.evaluate().toString()).toBe('[1,2]');
-    expect(expr.type.toString()).toBe('list<finite_integer>');
+    expect(expr.type.toString()).toBe('list<number>');
   });
 
   test('a single index into a matrix still yields the row type', () => {
@@ -347,7 +369,8 @@ describe('At with a CHAINED (multi-)index — result type follows the chain', ()
   test('a tuple source keeps its slot-aware typing', () => {
     const expr = ce.box(['At', ['Tuple', 10, 20, 30], ['List', 1, 3]] as any);
     expect(expr.evaluate().toString()).toBe('[10,30]');
-    expect(expr.type.toString()).toBe('list<finite_integer>');
+    // A gather is `list<T | marker(T)>`; numeric `T` absorbs to `number`.
+    expect(expr.type.toString()).toBe('list<number>');
     expect(ce.box(['At', ['Tuple', 10, 20, 30], 2] as any).type.toString()).toBe(
       'finite_integer'
     );

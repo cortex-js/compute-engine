@@ -118,9 +118,12 @@ describe('TYPE INFERENCE FOR SPECIAL FUNCTIONS', () => {
 });
 
 describe('TYPE INFERENCE FOR STATISTICS FUNCTIONS', () => {
-  it('Mean returns finite_real', () => {
+  it('Mean returns number', () => {
+    // A data-consuming aggregate types as the numeric base `number` (never
+    // `finite_real`): an absent datum or empty input evaluates to `NaN`, so a
+    // `finite_real` claim would be unsound (§3.C of the missing-value design).
     const expr = ce.expr(['Mean', ['List', 1, 2, 3]]);
-    expect(expr.type.toString()).toBe('finite_real');
+    expect(expr.type.toString()).toBe('number');
   });
 
   it('Erf returns finite_real', () => {

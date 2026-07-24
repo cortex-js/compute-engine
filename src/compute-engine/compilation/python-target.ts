@@ -1397,6 +1397,20 @@ export class PythonTarget implements LanguageTarget<Expression> {
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',
+      // Absence capability (§3.F): numeric absence is `math.nan`; the object
+      // axis is `None`. Consumed by `IsMissing`/`Coalesce`/Kleene `Equal` (P3).
+      absence: {
+        numeric: {
+          make: () => 'math.nan',
+          isAbsent: (x) => `math.isnan(${x})`,
+          coalesce: (x, d) => `(lambda _c: ${d} if math.isnan(_c) else _c)(${x})`,
+        },
+        object: {
+          nullLiteral: 'None',
+          isAbsent: (x) => `(${x} is None)`,
+          coalesce: (x, d) => `(${d} if ${x} is None else ${x})`,
+        },
+      },
       // A Python Block is a bare statement sequence (like GLSL/WGSL), never a
       // JS IIFE. Fail closed (D6) if such a block is spliced as a sub-operand.
       bareStatementBlocks: true,

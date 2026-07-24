@@ -353,7 +353,14 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      */
     type?: (
       ops: ReadonlyArray<Expression>,
-      options: { engine: ComputeEngine }
+      options: {
+        engine: ComputeEngine;
+        /** Strip-before-validate override (§3.B): for a stripped parameter
+         * position with an absent operand, the operand's `missing`-stripped
+         * type; `undefined` where no override applies. A handler consults
+         * `operandTypes[i]` before `ops[i].type`. */
+        operandTypes?: ReadonlyArray<Type | undefined>;
+      }
     ) => Type | TypeString | BoxedType | undefined;
 
     /** Return the sign of the function expression.
@@ -1039,6 +1046,37 @@ export type OperatorDefinitionFlags = {
    */
   broadcastable: boolean;
 
+  /**
+   * How this operator treats an absent (`Missing`) operand, per the
+   * missing-value typing design
+   * (`docs/plans/2026-07-22-missing-value-typing-design.md`, §3.A). The
+   * declarable states are:
+   *
+   * - `'propagate'` — the signature is implicitly lifted `(A) -> B` to
+   *   `(A | missing) -> B`; an absent operand cell yields `NaN` in the
+   *   corresponding numeric result cell (arithmetic, transcendentals,
+   *   `Power`/`Root`).
+   * - `'handle'` — the operator owns its `Missing` result and runtime (`At`,
+   *   the reducers, `Coalesce`, `IsMissing`, `Equal`).
+   * - `'reject'` — an absent operand is an error, enforced in both strict and
+   *   non-strict modes.
+   *
+   * If undeclared, the *resolved* behavior is `'propagate'` when the signature
+   * is declared (not inferred) and every parameter type is numeric, otherwise
+   * `'pass-through'` (no strip, ordinary validation). See
+   * {@link BoxedOperatorDefinition.resolvedMissingBehavior}.
+   */
+  missingBehavior?: 'reject' | 'propagate' | 'handle';
+
+  /**
+   * Which parameter positions strip a `missing` arm before validation (§3.A).
+   * `'all'` (the default where the resolved behavior is `propagate`/`handle`)
+   * strips every position; a `number[]` strips only the listed 0-based
+   * positions. Consumed identically by validation, typing, and the runtime
+   * gate.
+   */
+  missingStrip: 'all' | number[];
+
   /** If `true`, `["f", ["f", a], b]` simplifies to `["f", a, b]`
    *
    * **Default**: `false`
@@ -1139,6 +1177,24 @@ export interface BoxedOperatorDefinition
   /** The type of the arguments and return value of this function */
   signature: BoxedType;
 
+  /**
+   * The *resolved* missing-value behavior (§3.A of the missing-value typing
+   * design): the declared {@link missingBehavior} when present, otherwise
+   * `'propagate'` for a declared all-numeric signature and `'pass-through'`
+   * for everything else. Recomputed from the current signature — never cached
+   * across a signature mutation.
+   */
+  readonly resolvedMissingBehavior:
+    | 'reject'
+    | 'propagate'
+    | 'handle'
+    | 'pass-through';
+
+  /** True if a `missing` arm is stripped from parameter position `i` before
+   * validation (§3.A). Only `propagate`/`handle` operators strip; `missingStrip`
+   * selects the positions. */
+  stripsMissingAt(i: number): boolean;
+
   /** If this operator definition was created from a user-defined function
    * literal (`f(x) := …`, `x ↦ …`, `ce.assign('f', lambda)`), a structured
    * view of it for traversal and classification: the parameters and the body
@@ -1157,7 +1213,12 @@ export interface BoxedOperatorDefinition
    */
   type?: (
     ops: ReadonlyArray<Expression>,
-    options: { engine: ComputeEngine }
+    options: {
+      engine: ComputeEngine;
+      /** Stripped operand types conveyed by the missing-value strip (§3.B).
+       * A handler consults `operandTypes[i]` before `ops[i].type`. */
+      operandTypes?: ReadonlyArray<Type | undefined>;
+    }
   ) => Type | TypeString | BoxedType | undefined;
 
   /** If present, this handler can be used to determine the sign of the

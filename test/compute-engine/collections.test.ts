@@ -713,10 +713,26 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
 
   // At description-audit pins (2026-07-19): mask/pick forms and the edge
   // conventions documented at the evaluate handler.
-  test('At with a boolean mask keeps the True positions (short mask = prefix)', () =>
+  // BREAKING (2026-07-22): a boolean mask is a filter whose length must EQUAL
+  // the collection length; a mismatch is an error (was a silent prefix apply).
+  test('At with a boolean mask keeps the True positions (mask length matches)', () =>
+    expect(
+      evaluate([
+        'At',
+        list,
+        ['List', 'True', 'False', 'True', 'False', 'False', 'False', 'False'],
+      ])
+    ).toMatchInlineSnapshot(`["List", 7, 5]`));
+
+  test('At with a mask of the wrong length is an error', () =>
     expect(
       evaluate(['At', list, ['List', 'True', 'False', 'True']])
-    ).toMatchInlineSnapshot(`["List", 7, 5]`));
+    ).toMatchInlineSnapshot(`
+      [
+        "Error",
+        "The mask (length 3) must have the same length as the collection (length 7)"
+      ]
+    `));
 
   test('At with an integer-list pick selects those indices, in order', () =>
     expect(evaluate(['At', list, ['List', 3, 1]])).toMatchInlineSnapshot(
@@ -728,10 +744,13 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
       `["List", 13, 11]`
     ));
 
-  test('At out-of-range: scalar yields Nothing, pick entries are dropped', () => {
-    expect(evaluate(['At', list, 10])).toMatchInlineSnapshot(`Nothing`);
+  // BREAKING (2026-07-22): out-of-band access is POSITION-PRESERVING and
+  // yields the absence marker (`NaN` for a numeric collection), never
+  // `Nothing`; a gather is length-preserving (out-of-range → marker in place).
+  test('At out-of-range: scalar yields the marker, pick preserves length', () => {
+    expect(evaluate(['At', list, 10])).toMatchInlineSnapshot(`NaN`);
     expect(evaluate(['At', list, ['List', 10]])).toMatchInlineSnapshot(
-      `["List"]`
+      `["List", "NaN"]`
     );
   });
 
@@ -750,9 +769,11 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(m.type.toString()).toMatchInlineSnapshot(`matrix<finite_integer^(3x3)>`);
-    // A single index into the matrix yields a row (vector), not a scalar.
+    // A single index into the matrix yields a row (vector), not a scalar. The
+    // access may be out of band, so the honest type carries the `| missing`
+    // arm (§3.C `T | marker(T)`).
     expect(engine.box(['At', 'mtx', 2]).type.toString()).toMatchInlineSnapshot(
-      `vector<finite_integer^3>`
+      `missing | vector<finite_integer^3>`
     );
     // Nested `At` validates and evaluates (1-based indexing): row 2, column 1.
     expect(evaluate(['At', ['At', 'mtx', 2], 1])).toMatchInlineSnapshot(`6`);
@@ -764,8 +785,10 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     engine.assign('vec', engine.box(list));
     // Phase C representation unification: literal lists type honestly, so a
     // single index reports the honest element type.
+    // §3.C: `At(list<T>, i) : T | marker(T)`; a numeric `T` absorbs its own
+    // absence value (`NaN ∈ number`, I6/Q2), so the type widens to `number`.
     expect(engine.box(['At', 'vec', 1]).type.toString()).toMatchInlineSnapshot(
-      `finite_integer`
+      `number`
     );
     expect(evaluate(['At', 'vec', 1])).toMatchInlineSnapshot(`7`);
   });
@@ -776,7 +799,9 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // that `collectionElementType` reports for iteration. Otherwise `d["a"] + 10`
     // fails with `incompatible-type`.
     const at = engine.box(['At', dict, { str: 'x' }]);
-    expect(at.type.toString()).toMatchInlineSnapshot(`finite_integer`);
+    // §3.C: `At(dictionary<T>, key) : T | marker(T)`; a numeric `T` absorbs
+    // its absence value (I6/Q2), so the type widens to `number`.
+    expect(at.type.toString()).toMatchInlineSnapshot(`number`);
     expect(
       engine.box(['Add', ['At', dict, { str: 'x' }], 10]).evaluate().toString()
     ).toMatchInlineSnapshot(`11`);
@@ -792,10 +817,11 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     expect(ce.box(['At', 'tpl', 2]).type.toString()).toEqual('string');
     expect(ce.box(['At', 'tpl', 3]).type.toString()).toEqual('boolean');
     expect(ce.box(['At', 'tpl', -1]).type.toString()).toEqual('boolean');
-    // Out-of-range or non-literal index widens across all slot types.
-    expect(ce.box(['At', 'tpl', 5]).type.toString()).toEqual(
-      'boolean | integer | string'
-    );
+    // BREAKING (§3.C): an out-of-range LITERAL tuple index is a definite miss,
+    // so it types as `marker(⊔S)` — the absence marker over the widened slots,
+    // NOT the widened slots themselves (the value is absent).
+    // `marker(integer ⊔ string ⊔ boolean)` = `number ⊔ missing ⊔ missing`.
+    expect(ce.box(['At', 'tpl', 5]).type.toString()).toEqual('missing | number');
   });
 
   test('First', () =>
@@ -1070,9 +1096,11 @@ describe('NEGATIVE INDEX NORMALIZATION IN at() DISPATCHER (regression)', () => {
   test('At(Range, -1)', () =>
     expect(evaluate(['At', ['Range', 1, 10], -1])).toMatchInlineSnapshot(`10`));
 
-  test('At(Range, out-of-range negative) is Nothing', () =>
+  // BREAKING (2026-07-22): out-of-band access yields the position-preserving
+  // marker (`NaN` for a numeric collection), not `Nothing`.
+  test('At(Range, out-of-range negative) is the marker (NaN)', () =>
     expect(evaluate(['At', ['Range', 1, 10], -11])).toMatchInlineSnapshot(
-      `Nothing`
+      `NaN`
     ));
 
   test('At(Linspace, -1)', () =>
@@ -1103,11 +1131,13 @@ describe('NEGATIVE INDEX NORMALIZATION IN at() DISPATCHER (regression)', () => {
       evaluate(['ListFrom', ['Reverse', ['Range', 1, 5]]])
     ).toMatchInlineSnapshot(`["List", 5, 4, 3, 2, 1]`));
 
-  test('Last of an infinite collection does not hang and stays inert', () => {
+  test('Last of an infinite collection does not hang and yields the marker', () => {
     // Negative-index normalization requires a finite, known count; an infinite
-    // source keeps returning undefined (no materialization, no hang).
+    // source keeps returning undefined (no materialization, no hang). The
+    // out-of-band access is POSITION-PRESERVING: a numeric collection yields
+    // `NaN` (BREAKING — was `Nothing`).
     const e = engine.box(['Last', ['Cycle', ['List', 1, 2]]]).evaluate();
-    expect(e.operator === 'Nothing' || e.symbol === 'Nothing').toBe(true);
+    expect(e.isNaN === true || e.symbol === 'Missing').toBe(true);
   });
 });
 
@@ -2005,7 +2035,8 @@ describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
     // — otherwise, with no deadline armed, a never-true predicate over an
     // infinite source would walk forever. The guarded walk trips
     // iteration-limit-exceeded, which the `at` handler swallows (returns
-    // undefined), so `First` yields `Nothing`.
+    // undefined), so `First` yields the position-preserving absence marker
+    // (`NaN` for a numeric collection; BREAKING — was `Nothing`).
     const ce = new ComputeEngine();
     const neverTrue: Expression = ['Function', ['Less', 'x', 0], 'x'];
     const first: Expression = [
@@ -2013,7 +2044,7 @@ describe('FILTER FINITENESS/COUNT DO NOT WALK (regression)', () => {
       ['Filter', ['Range', 1, 'Infinity'], neverTrue],
     ];
     const start = Date.now();
-    expect(ce.box(first).evaluate().symbol).toBe('Nothing');
+    expect(ce.box(first).evaluate().isNaN).toBe(true);
     expect(Date.now() - start).toBeLessThan(5000);
   }, 15_000);
 });
@@ -2959,7 +2990,10 @@ describe('CHUNKBY / DEDUP / INSERT / DELETEAT / REPLACEAT', () => {
     const ce = new ComputeEngine();
     const second: Expression = ['Second', ['Dedup', ['Cycle', ['List', 1, 1]]]];
     const start = Date.now();
-    expect(ce.box(second).evaluate().symbol).toBe('Nothing');
+    // BREAKING (2026-07-22): out-of-band access yields the position-preserving
+    // marker; with an indeterminate/infinite element domain that is `Missing`.
+    const r = ce.box(second).evaluate();
+    expect(r.symbol === 'Missing' || r.isNaN === true).toBe(true);
     expect(Date.now() - start).toBeLessThan(5000);
   }, 15_000);
 

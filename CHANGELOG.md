@@ -1,5 +1,97 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`Nothing` now erases inside collections, as it already did inside operator
+  argument lists.** `Nothing` is the ERASURE marker — an empty-sequence splice
+  — so a `Nothing` element is spliced out of a `List`, `Set` or `Tuple` literal
+  instead of being retained. Length, arity, type and indexing all follow:
+
+  ```js
+  ce.box(['List', 12, 'Nothing', 34]); // → [12, 34]   (length 2, was length 3)
+  ce.box(['Set', 1, 'Nothing', 3]); // → Set(1, 3)
+  ce.box(['Tuple', 1, 'Nothing', 3]); // → (1, 3)
+  ce.parse('(a,,b)'); // → (a, b)   (an empty slot is `Nothing`)
+  ```
+
+  A key–value pair tuple is a NON-erasing position, so a dictionary/record entry
+  whose value is `Nothing` is dropped as a whole entry, but a caller that needs a
+  fixed-arity positional pair whose slot may hold an absent value must build it
+  with `ce._fn('Tuple', …)` and use `Missing` (below) for the hole. This also
+  applies to lazy iteration: an element that _evaluates_ to `Nothing` is dropped
+  (`Map(xs, _ ↦ Nothing)` is the empty collection — the `mapMaybe` idiom).
+
+- **New `Missing` marker and `missing` type for an absent-but-positioned
+  value.** `Missing` is the complement of `Nothing`: "a position exists, its
+  value is absent" (Julia `missing`, R `NA`). It is never erased —
+  `[1, Missing, 3]` is a 3-element `list<integer | missing>` — and `missing` is
+  a primitive unit type (a subtype only of itself and `any`, mirroring
+  `nothing`), reachable as `ce.Missing`.
+
+  Absence is **domain-normalized at value construction**: absence flowing
+  through an operator into a NUMERIC result cell becomes `NaN` (the numeric
+  absent element), while a non-numeric result cell keeps `Missing`. So a
+  numeric operator ABSORBS a `Missing` operand into `NaN` rather than carrying a
+  `missing` arm:
+
+  ```js
+  ce.box(['Add', 'Missing', 1]).evaluate(); // → NaN   (Add(Missing, 1) : number)
+  ce.box(['Sin', 'Missing']).evaluate(); // → NaN
+  ce.box(['Sin', ['List', 1, 'Missing', 3]]).evaluate(); // → [Sin(1), NaN, Sin(3)]
+  ```
+
+- **Out-of-band access preserves position instead of yielding `Nothing` or
+  dropping the entry.** An out-of-range index, or a dictionary key that is not
+  present, now yields a position-preserving marker chosen by the collection's
+  element domain: `NaN` when the elements are numeric, `Missing` otherwise.
+
+  ```js
+  ce.box(['At', ['List', 10, 20, 30], 9]).evaluate(); // → NaN   (numeric)
+  ce.box(['At', ['List', 'a', 'b'], 9]).evaluate(); // → Missing (non-numeric)
+  ```
+
+  **Gather is now length-preserving** — `At([a, b], [1, 9, 2])` is `[a, hole, b]`
+  (length 3), where the baseline dropped the out-of-range entry — and a **boolean
+  mask whose length differs from the collection is now an error**, where the
+  baseline silently applied the prefix.
+
+- **The 15 data-consuming aggregates return `NaN` on an absent datum or empty
+  input.** `Mean`, `Variance`, `PopulationVariance`, `StandardDeviation`,
+  `PopulationStandardDeviation`, `Kurtosis`, `Skewness`, `Median`,
+  `InterquartileRange`, `Quartiles`, `Max`, `Min`, `Supremum`, `Infimum`, and
+  `Mode` — over both call shapes (`Max(1, Missing, 3)` and
+  `Max([1, Missing, 3])`) — now evaluate to `NaN` when any datum is absent
+  (`Missing` or `NaN`) or the input is empty (`Quartiles` → `(NaN, NaN, NaN)`).
+  `Max([])`/`Min([])` are therefore `NaN` (was `∓∞`), and these operators now
+  type as `number` rather than `finite_real`, since their result may be `NaN`.
+
+  ```js
+  ce.box(['Max', 1, 'Missing', 3]).evaluate(); // → NaN
+  ce.box(['Mean', ['List']]).evaluate(); // → NaN
+  ```
+
+- **`Equal` is now Kleene over absence: `Equal(NaN, NaN)` is `Missing`, not
+  `False`.** If either operand is absent — the `Missing` symbol, or a `NaN`
+  (provenance irrelevant) — the comparison is `Missing`, diverging from native
+  float `==`. Broadcast comparisons apply the rule per cell. Compiled JS/Python
+  emit the guarded form `isAbsent(a) || isAbsent(b) ? null : a == b`; a
+  Missing-free comparison keeps the plain, unguarded codegen.
+
+  ```js
+  ce.box(['Equal', 'NaN', 'NaN']).evaluate(); // → Missing
+  ce.box(['Equal', 2, 'Missing']).evaluate(); // → Missing
+  ce.box(['Equal', 2, 2]).evaluate(); // → True   (unchanged)
+  ```
+
+  Two known limitations, tracked in `ROADMAP.md`: a comparison whose operands
+  are typed plain `number` (no `missing` arm) keeps the static type `boolean`
+  and the unguarded codegen, so **compiled** `Equal` over such operands still
+  returns `false` for `NaN == NaN` where the interpreter returns `Missing`;
+  and a scalar `If`/`Which` condition that evaluates to `Missing` throws
+  (`Condition must evaluate to "True" or "False"`), as any non-boolean scalar
+  condition already did — comparisons that may involve `NaN` should be
+  discharged with `Coalesce`/`IsMissing` before use as a condition.
+
 ### New Features
 
 - **`cortex check` — validate a program without evaluating it.** Parses the
@@ -22,8 +114,54 @@
   example on the page is executed by the documentation test suite, so the
   card cannot drift from the implementation.
 
+- **Spread arguments — `f(...t)` splices a tuple into a call's arguments.**
+  New Cortex prefix syntax `...` (call argument lists only) and engine `Spread`
+  marker: the elements of a tuple become ordinary positional arguments, so a
+  point can be fed to a component function without manual indexing —
+  `F(p) = (a(...p), b(...p), c(...p))` instead of `a(p[1], p[2], p[3])`.
+  Several spreads splice in order (`g(...p, ...q)`), variadic built-ins accept
+  them (`Max(...t)`), and the syntax round-trips through the Cortex
+  serializer. A literal tuple splices at canonicalization; a symbolic argument
+  defers — argument validation and the operator's canonical handler wait —
+  until evaluation resolves the tuple and re-validates the real arguments.
+  Tuples only: spreading a `List` or a scalar is an `incompatible-type` error,
+  and an unresolved argument leaves the call symbolic.
+
+  ```js
+  ce.box(['Add', ['Spread', ['Tuple', 1, 2, 3]]]).evaluate(); // → 6
+  ```
+
+- **`IsMissing` and `Coalesce` — absence testing and discharge.**
+  `IsMissing(x)` is `True` when `x` is absent (the `Missing` symbol OR a `NaN`,
+  R’s `is.na`); `IsNaN` remains a NaN-specific test. `Coalesce(a, b, …)` returns
+  the first non-absent operand, evaluated left-to-right with short-circuit; if
+  every operand is absent it returns the last one verbatim. Both discharge
+  primitives work identically in the interpreter and compiled (JS/Python) — a
+  numeric hole (`NaN`) and an object hole (`Missing`/null) are handled
+  uniformly. On a target that cannot observe its absent element (a GPU shader,
+  where fast-math may not preserve `isnan`), `IsMissing`/`Coalesce` fail closed
+  with a compile error; propagation still works natively.
+
+  ```js
+  ce.box(['Coalesce', ['At', ['List', 10, 20], 9], 0]).evaluate(); // → 0
+  ce.box(['IsMissing', 'NaN']).evaluate(); // → True
+  ```
+
 ### Improvements
 
+- **Cortex trap lints and better "did you mean" suggestions.** Three common
+  cross-language reflexes that previously failed *silently* now produce an
+  advisory warning (the parse and value are unchanged): `=` inside a call
+  argument (`Solve(x^2 = 4, x)` is assignment, not an equation — use `==`),
+  a literal index `0` (indexing is 1-based; `xs[0]` is `NaN`), and a `//`
+  comment that reads as floor division (`7 // 2` is `7` followed by a
+  comment; use `Floor(a / b)`). Calling `print` (or `println`, `printf`,
+  `puts`, `echo`) now explains that a program's output is the value of its
+  last statement. The "did you mean" matcher gained a curated
+  cross-language tier: `split` → `StringSplit`, `push` → `Append`,
+  `ceiling` → `Ceil`. The agent language card gained a verified library
+  quick-roster, output-rendering notes (quoted booleans, list preview
+  elision), and binder-variable semantics for `D`/`Integrate`.
 - **`Pipe`/`Apply` reject or defer a non-function right operand more
   sensibly.** `x |> f` (`Pipe`) now returns an `incompatible-type` error when
   `f` is a number, string, or boolean literal (which can never be applied),

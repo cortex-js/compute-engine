@@ -185,6 +185,36 @@ export interface CompileTarget<Expr = unknown> {
    */
   boundVars?: ReadonlySet<string>;
 
+  /**
+   * Target-supplied absence capability (§3.F of the missing-value typing
+   * design, `docs/plans/2026-07-22-missing-value-typing-design.md`). Because
+   * the interpreter domain-normalizes at construction (I6), numeric absence
+   * reaches the compile boundary already as `NaN` — no conversion shim is
+   * needed. The capability lets the discharge primitives (`IsMissing`,
+   * `Coalesce`; the consumers land in P3) and Kleene `Equal` lower uniformly:
+   *
+   * - `numeric` — the absent-element operations for a numeric-domain position.
+   *   `make()` emits the target's `NaN`; `isAbsent(x)` tests it; `coalesce(x,
+   *   d)` returns `x` unless absent, else `d`. `isAbsent` is **omitted** on a
+   *   target that cannot guarantee `isnan` survives (GPU fast-math) — then
+   *   discharge on that target is a compile error (fail closed).
+   * - `object` — the analogous operations for an object-domain (non-numeric)
+   *   position, keyed on the target's null literal. A target without this axis
+   *   rejects (compile error) any `missing`-typed object-domain position.
+   */
+  absence?: {
+    numeric: {
+      make: () => TargetSource;
+      isAbsent?: (x: TargetSource) => TargetSource;
+      coalesce?: (x: TargetSource, d: TargetSource) => TargetSource;
+    };
+    object?: {
+      nullLiteral: TargetSource;
+      isAbsent: (x: TargetSource) => TargetSource;
+      coalesce: (x: TargetSource, d: TargetSource) => TargetSource;
+    };
+  };
+
   /** Target language identifier (for debugging/logging) */
   language?: string;
 

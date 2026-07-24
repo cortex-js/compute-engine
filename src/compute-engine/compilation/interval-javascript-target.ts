@@ -720,6 +720,17 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       },
       string: (str) => JSON.stringify(str),
       number: (n) => `_IA.point(${n})`,
+      // Absence capability (§3.F): numeric absence is a whole-NaN interval
+      // (reusing the machinery already present for `NaN`); `isAbsent` tests the
+      // lower endpoint. No object axis. Consumers land in P3.
+      absence: {
+        numeric: {
+          make: () => '{ lo: NaN, hi: NaN }',
+          isAbsent: (x) => `Number.isNaN((${x}).lo)`,
+          coalesce: (x, d) =>
+            `((_c) => Number.isNaN(_c.lo) ? ${d} : _c)(${x})`,
+        },
+      },
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',

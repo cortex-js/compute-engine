@@ -3681,6 +3681,19 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       number: formatGPUNumber,
       complex: (re, im) =>
         `${v2}(${formatGPUNumber(re)}, ${formatGPUNumber(im)})`,
+      // Absence capability (§3.F): a shader can MAKE `NaN` (propagation is free
+      // — IEEE hardware is the gate), but `isnan` is not reliable under
+      // fast-math, so `isAbsent`/`coalesce` are DELIBERATELY omitted and no
+      // object axis is declared. Discharge (`IsMissing`/`Coalesce`) and Kleene
+      // `Equal` over possibly-absent operands are therefore a compile error on
+      // this target — fail closed (§3.F). Propagation still works natively.
+      absence: {
+        numeric: {
+          make: () => gpuNaN({ language: this.languageId } as CompileTarget<
+            Expression
+          >),
+        },
+      },
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',

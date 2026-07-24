@@ -39,6 +39,8 @@ import {
   collectionElementType,
   functionResult,
   isValidType,
+  stripMissingFromType,
+  widen,
 } from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { canonicalMultiply } from '../boxed-expression/arithmetic-mul-div.js';
@@ -68,6 +70,7 @@ import {
   isSymbol,
   isFunction,
   isString,
+  isAbsentValue,
   sym,
 } from '../boxed-expression/type-guards.js';
 
@@ -113,6 +116,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Nothing: {
       description: 'The absence of a value; the sole member of the unit type.',
       type: 'nothing',
+    },
+
+    // The sole member of the unit type, `missing`.
+    //
+    // `Nothing` and `Missing` are complementary absence markers:
+    // - `Nothing` is an ERASURE marker (an empty-sequence splice): it is
+    //   elided from operator argument lists (`Nothing + 1` → `1`) and from
+    //   collection literals (`[12, Nothing, 34]` → `[12, 34]`).
+    // - `Missing` is a POSITION-PRESERVING marker: "a position exists, its
+    //   value is absent" (Julia `missing`, R `NA`). It is never elided, and
+    //   it propagates through numeric operations (`Missing + 1` → `NaN`)
+    //   and through data-consuming aggregates.
+    Missing: {
+      description:
+        'A value that is absent but whose position is preserved (Julia `missing`, R `NA`); the sole member of the `missing` type.',
+      type: 'missing',
     },
   },
 
@@ -270,7 +289,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // the arguments, so it needs to be preserved.
         // If there is a single element, unpack it.
         if (isFunction(body, 'Sequence'))
-          return ce._fn('Tuple', canonical(ce, body.ops));
+          return ce._fn(
+            'Tuple',
+            // `Nothing` is an ERASURE marker: it is spliced out of a tuple
+            // literal, so `(1, Nothing, 3)` is the 2-tuple `(1, 3)`. This
+            // mirrors the filter in the `Tuple` canonical handler — the
+            // `Delimiter` route builds the `Tuple` directly and would
+            // otherwise bypass it.
+            canonical(ce, body.ops).filter((x) => !isSymbol(x, 'Nothing'))
+          );
 
         body = body.canonical;
 
@@ -351,6 +378,80 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       canonical: (args, { engine: ce, scope }) =>
         ce._fn('Unevaluated', canonical(ce, args, scope)),
       evaluate: ([x], options) => x.evaluate(options),
+    },
+
+    IsMissing: {
+      description:
+        'True if the value is ABSENT — the `Missing` symbol, or a `NaN` ' +
+        'number (regardless of provenance). R’s `is.na` (`TRUE` for both `NA` ' +
+        'and `NaN`); `IsNaN` remains a NaN-specific test (R’s `is.nan`).',
+      complexity: 500,
+      signature: '(any) -> boolean',
+      evaluate: ([x], { engine: ce }) =>
+        x !== undefined && isAbsentValue(x) ? ce.True : ce.False,
+    },
+
+    Coalesce: {
+      description:
+        'Return the first operand that is not ABSENT (`Missing` or `NaN`), ' +
+        'evaluated left-to-right. If every operand is absent, the last ' +
+        'operand’s value is returned verbatim (still absent).',
+      complexity: 500,
+      // Lazy so operands are evaluated on demand (short-circuit) rather than
+      // all up front. Per the documented lazy-operator trap, a lazy operator
+      // with NO `canonical` handler is inert on the box/parse routes (held
+      // operands arrive UNBOUND) — the `canonical` handler below canonicalizes
+      // each held operand (value-safe: `.canonical` binds structure without
+      // substituting assigned symbol values).
+      lazy: true,
+      // Accept absence into any operand position (a `Missing` operand is the
+      // whole point) — declared `handle`, stripping every position (§3.A).
+      missingBehavior: 'handle',
+      signature: '(any+) -> unknown',
+      // Result type `T₁° | … | Tₙ₋₁° | Tₙ` (§3.D): every operand but the last
+      // contributes its stripped type (its `| missing` arm removed), the last
+      // its full type. An arm-free final operand yields an arm-free result
+      // type — but that never promises presence (`NaN ∈ number`, I6).
+      type: (ops) => {
+        if (ops.length === 0) return 'nothing';
+        const arms = ops.map((op, i) =>
+          i < ops.length - 1
+            ? stripMissingFromType(op.type.type)
+            : op.type.type
+        );
+        return widen(...arms) as Type;
+      },
+      canonical: (args, { engine: ce, scope }) => {
+        if (args.length === 0)
+          return ce.error('missing');
+        return ce._fn('Coalesce', canonical(ce, args, scope));
+      },
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        if (ops.length === 0)
+          return ce.error('missing');
+        let last: Expression | undefined = undefined;
+        for (let i = 0; i < ops.length; i++) {
+          const v = ops[i].evaluate({ numericApproximation });
+          last = v;
+          // Skip an absent operand (`Missing` or `NaN`).
+          if (isAbsentValue(v)) continue;
+          // An operand whose absence cannot be decided (it still carries free
+          // variables) leaves the expression partially unevaluated from here
+          // on: return `Coalesce` of this operand and the remaining tail.
+          if (v.freeVariables.length > 0) {
+            const tail = [
+              v,
+              ...ops.slice(i + 1).map((o) => o.evaluate({ numericApproximation })),
+            ];
+            return tail.length === 1 ? tail[0] : ce._fn('Coalesce', tail);
+          }
+          // A decided, non-absent value: this is the result.
+          return v;
+        }
+        // Every operand was absent: return the last operand's value verbatim
+        // (still absent).
+        return last!;
+      },
     },
 
     Hold: {
@@ -540,6 +641,35 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // **IMPORTANT** Tail should work on non-canonical expressions
       evaluate: ([x], { engine: ce }) =>
         isFunction(x) ? ce._fn('Sequence', x.ops) : ce.Nothing,
+    },
+
+    Spread: {
+      description: [
+        'Spread(t): splice the elements of the tuple `t` into the enclosing',
+        'argument list (Cortex surface syntax: `f(...t)`).',
+        'A literal tuple splices at canonicalization; a symbolic argument is',
+        'spliced by the enclosing call at evaluation (step 0 of the evaluate',
+        'path), which re-validates the resulting arity.',
+      ],
+      lazy: true,
+      signature: '(any) -> unknown',
+      canonical: (args, { engine: ce }) => {
+        if (args.length !== 1) return null;
+        // `op.canonical` is value-safe: it binds structure but does not
+        // substitute assigned symbol values, so `f(...p)` keeps `p` intact
+        // until evaluation.
+        const op1 = args[0].canonical;
+        if (isFunction(op1, 'Tuple')) return ce._fn('Sequence', [...op1.ops]);
+        return ce._fn('Spread', [op1]);
+      },
+      // Normally consumed by the enclosing call before its own evaluation; a
+      // bare `Spread(t)` evaluated directly resolves to a `Sequence`, which
+      // splices if it lands in an argument list.
+      evaluate: ([x], { engine: ce }) => {
+        const v = x.canonical.evaluate();
+        if (isFunction(v, 'Tuple')) return ce._fn('Sequence', [...v.ops]);
+        return undefined;
+      },
     },
 
     Identity: {

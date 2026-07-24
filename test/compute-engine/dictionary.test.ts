@@ -491,10 +491,12 @@ describe('Dictionary key access via At', () => {
     );
   });
 
-  it('returns Nothing for a missing key', () => {
-    expect(box(['At', dict, { str: 'depth' }] as any).evaluate().symbol).toBe(
-      'Nothing'
-    );
+  it('returns the absence marker for a missing key', () => {
+    // BREAKING (2026-07-22): out-of-band access is POSITION-PRESERVING and
+    // yields the domain-normalized marker (`NaN` for a numeric value domain,
+    // `Missing` otherwise), never `Nothing` (which would erase).
+    const r = box(['At', dict, { str: 'depth' }] as any).evaluate();
+    expect(r.isNaN === true || r.symbol === 'Missing').toBe(true);
   });
 
   it('leaves a non-string index unevaluated (string keys only)', () => {

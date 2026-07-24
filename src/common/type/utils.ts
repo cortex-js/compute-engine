@@ -88,6 +88,128 @@ export function isValidTypeName(name: string): boolean {
 }
 
 /**
+ * True if `t` carries a `missing` arm at any nesting level (a scalar `missing`,
+ * a `T | missing` union, or a `missing` cell nested inside a list/collection/
+ * tuple/record). Used to gate the missing-value strip (§3.B of
+ * `docs/plans/2026-07-22-missing-value-typing-design.md`) so that a
+ * Missing-free program is never touched by the lift.
+ */
+export function typeContainsMissing(t: Readonly<Type>): boolean {
+  if (t === 'missing') return true;
+  if (typeof t === 'string') return false;
+  switch (t.kind) {
+    case 'union':
+    case 'intersection':
+      return t.types.some(typeContainsMissing);
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return typeContainsMissing(t.elements);
+    case 'tuple':
+      return t.elements.some((e) => typeContainsMissing(e.type));
+    case 'dictionary':
+      return typeContainsMissing(t.values);
+    case 'record':
+      return Object.values(t.elements).some((x) => typeContainsMissing(x));
+    default:
+      return false;
+  }
+}
+
+/**
+ * The result type of a `propagate` application in which some operand cell may
+ * be absent (I6 absorption, §3.0/§3.B). Every `propagate` result cell is
+ * numeric, and an absent numeric cell contributes `NaN` — which is `number`
+ * but not any `finite_*`/`real`/`integer` subtype (Q2). So this transform:
+ *
+ * - strips every `missing` arm (the arm is absorbed, never re-attached), and
+ * - widens every numeric leaf to `number` (to admit the injected `NaN`),
+ *
+ * recursing through list/collection/tuple cells. `Sin(Missing) : number`,
+ * `Add(Missing, 1) : number`, `Sin(list<number|missing>) : list<number>`,
+ * `Add(Missing, matrix) : matrix`. Applied ONLY when absence is possible (some
+ * operand carries a `missing` arm), so Missing-free programs are untouched.
+ */
+export function absorbNumericAbsence(t: Readonly<Type>): Type {
+  // A whole `missing`/`never` cell in a `propagate` result is numeric-domain
+  // (I6): its runtime value is `NaN`, so it is `number`. (`never <: number`,
+  // so the string branch below already maps `never` → `number`.)
+  if (t === 'missing') return 'number';
+  if (typeof t === 'string') return isSubtype(t, 'number') ? 'number' : t;
+  switch (t.kind) {
+    case 'union': {
+      const arms = t.types
+        .map((x) => absorbNumericAbsence(x))
+        .filter((x) => x !== 'never');
+      if (arms.length === 0) return 'never';
+      if (arms.length === 1) return arms[0];
+      return widen(...arms);
+    }
+    case 'intersection':
+      return { kind: 'intersection', types: t.types.map((x) => absorbNumericAbsence(x)) };
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return { ...t, elements: absorbNumericAbsence(t.elements) };
+    case 'tuple':
+      return {
+        ...t,
+        elements: t.elements.map((e) => ({
+          ...e,
+          type: absorbNumericAbsence(e.type),
+        })),
+      };
+    default:
+      return t;
+  }
+}
+
+/**
+ * `t` with every `missing` arm removed, recursively through each cell (§3.B
+ * step 1). A bare `missing` cell becomes `never` (`never <:` anything, so the
+ * absence signal is carried by the runtime, not the type). This is the
+ * strip-before-validate transform: an operand of type `T | missing` validates
+ * against a parameter `P` iff `strip(T | missing) = T <: P`, so a scalar
+ * `Missing` is admissible without widening `P` (I4 — inference still unifies an
+ * unconstrained symbol against the bare `P`).
+ */
+export function stripMissingFromType(t: Readonly<Type>): Type {
+  if (t === 'missing') return 'never';
+  if (typeof t === 'string') return t;
+  switch (t.kind) {
+    case 'union': {
+      const arms = t.types
+        .map((x) => stripMissingFromType(x))
+        .filter((x) => x !== 'never');
+      if (arms.length === 0) return 'never';
+      if (arms.length === 1) return arms[0];
+      return { kind: 'union', types: arms };
+    }
+    case 'intersection': {
+      const arms = t.types.map((x) => stripMissingFromType(x));
+      return { kind: 'intersection', types: arms };
+    }
+    case 'list':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return { ...t, elements: stripMissingFromType(t.elements) };
+    case 'tuple':
+      return {
+        ...t,
+        elements: t.elements.map((e) => ({
+          ...e,
+          type: stripMissingFromType(e.type),
+        })),
+      };
+    default:
+      return t;
+  }
+}
+
+/**
  * True if `t` denotes an **atomic** value type — a cell in the cell/axis model
  * (see `docs/plans/2026-07-20-tensor-unification-design.md`, §D5). Atomic
  * types are the ones that may occupy a single tensor cell: numbers, booleans,

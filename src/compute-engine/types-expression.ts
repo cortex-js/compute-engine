@@ -133,6 +133,8 @@ type OperatorDefinitionFlags = {
   lazy: boolean;
   scoped: boolean;
   broadcastable: boolean;
+  missingBehavior?: 'reject' | 'propagate' | 'handle';
+  missingStrip: 'all' | number[];
   associative: boolean;
   commutative: boolean;
   commutativeOrder: ((a: Expression, b: Expression) => number) | undefined;
@@ -151,10 +153,19 @@ interface BoxedOperatorDefinition
   complexity: number;
   inferredSignature: boolean;
   signature: BoxedType;
+  readonly resolvedMissingBehavior:
+    | 'reject'
+    | 'propagate'
+    | 'handle'
+    | 'pass-through';
+  stripsMissingAt(i: number): boolean;
   readonly lambda: LambdaDefinition | undefined;
   type?: (
     ops: ReadonlyArray<Expression>,
-    options: { engine: ExpressionComputeEngine }
+    options: {
+      engine: ExpressionComputeEngine;
+      operandTypes?: ReadonlyArray<Type | undefined>;
+    }
   ) => Type | TypeString | BoxedType | undefined;
   sgn?: (
     ops: ReadonlyArray<Expression>,

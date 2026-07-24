@@ -29,7 +29,12 @@ import type {
   BoxedValueDefinition,
 } from '../global-types.js';
 import { spellCheckMessage } from '../boxed-expression/validate.js';
-import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isSymbol,
+  isAbsentValue,
+  sym,
+} from '../boxed-expression/type-guards.js';
 import { isValueDef } from '../boxed-expression/utils.js';
 import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
 import { assignLoopIndex } from './utils.js';
@@ -528,7 +533,21 @@ function isBooleanishCondition(evaluated: Expression): boolean {
   if (evaluated.type.matches('boolean')) return true;
   if (!evaluated.isCollection || !evaluated.isFiniteCollection) return false;
   const items = Array.from(evaluated.each()) as Expression[];
-  return items.length > 0 && items.every((x) => x.type.matches('boolean'));
+  // A broadcast (list) condition is held when every cell is boolean — or ABSENT
+  // (`Missing`/`NaN`), which is Kleene-undecidable, so the `Which` stays held
+  // rather than crashing the surrounding comprehension. This surfaces when a
+  // broadcast condition contains a Kleene-`Equal` result (`Equal(NaN, k) =
+  // Missing`, §3.D). A SCALAR absent condition still fails closed (throws),
+  // unchanged.
+  return (
+    items.length > 0 &&
+    items.every(
+      (x) =>
+        x.type.matches('boolean') ||
+        x.type.matches('missing') ||
+        isAbsentValue(x)
+    )
+  );
 }
 
 function evaluateWhich(

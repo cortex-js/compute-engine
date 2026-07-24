@@ -40,6 +40,8 @@ const OPERATOR_DEF_KEYS = new Set([
   'lazy',
   'scoped',
   'broadcastable',
+  'missingBehavior',
+  'missingStrip',
   'associative',
   'commutative',
   'commutativeOrder',
@@ -94,6 +96,26 @@ function normalizeSignatureField(
   return sig as Type | TypeString;
 }
 
+/**
+ * True when every parameter of a function signature is a numeric type (subtype
+ * of `number`). Mirrors the `allParamsNumeric` gate used for the numeric
+ * canonicalization fast-path; a signature with no parameters (or a non-signature
+ * type) returns `false`. Used for the default resolution of `missingBehavior`
+ * (§3.A): an undeclared, non-inferred, all-numeric signature resolves to
+ * `propagate`.
+ */
+function signatureAllParamsNumeric(signature: Type): boolean {
+  if (typeof signature === 'string') return false;
+  if (signature.kind !== 'signature') return false;
+  const params: Type[] = [
+    ...(signature.args?.map((x) => x.type) ?? []),
+    ...(signature.optArgs?.map((x) => x.type) ?? []),
+    ...(signature.variadicArg ? [signature.variadicArg.type] : []),
+  ];
+  if (params.length === 0) return false;
+  return params.every((t) => isSubtype(t, 'number'));
+}
+
 export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   engine: ComputeEngine;
 
@@ -104,6 +126,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   wikidata?: string;
 
   broadcastable = false;
+  missingBehavior?: 'reject' | 'propagate' | 'handle';
+  missingStrip: 'all' | number[] = 'all';
   associative = false;
   commutative = false;
   commutativeOrder: ((a: Expression, b: Expression) => number) | undefined;
@@ -159,7 +183,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   type?: (
     ops: ReadonlyArray<Expression>,
-    options: { engine: ComputeEngine }
+    options: {
+      engine: ComputeEngine;
+      operandTypes?: ReadonlyArray<Type | undefined>;
+    }
   ) => BoxedType | Type | TypeString | undefined;
 
   sgn?: (
@@ -238,6 +265,33 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     return result;
   }
 
+  /**
+   * The *resolved* missing-value behavior (§3.A of the missing-value typing
+   * design). Computed from the declared {@link missingBehavior} and the current
+   * signature on every access — never cached, so a signature mutation
+   * (`infer()`/`update()`) is reflected immediately.
+   */
+  get resolvedMissingBehavior():
+    | 'reject'
+    | 'propagate'
+    | 'handle'
+    | 'pass-through' {
+    if (this.missingBehavior) return this.missingBehavior;
+    // undeclared ∧ ¬inferredSignature ∧ allParamsNumeric(sig) → propagate
+    if (
+      !this.inferredSignature &&
+      signatureAllParamsNumeric(this.signature.type)
+    )
+      return 'propagate';
+    return 'pass-through';
+  }
+
+  stripsMissingAt(i: number): boolean {
+    const b = this.resolvedMissingBehavior;
+    if (b !== 'propagate' && b !== 'handle') return false;
+    return this.missingStrip === 'all' || this.missingStrip.includes(i);
+  }
+
   infer(sig: Type): void {
     const newSig = new BoxedType(sig, this.engine._typeResolver);
     if (!newSig.matches(this.signature))
@@ -296,6 +350,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.wikidata = def.wikidata ?? this.wikidata;
 
     this.broadcastable = def.broadcastable ?? this.broadcastable;
+    this.missingBehavior = def.missingBehavior ?? this.missingBehavior;
+    this.missingStrip = def.missingStrip ?? this.missingStrip;
     this.associative = def.associative ?? this.associative;
     this.commutative = def.commutative ?? this.commutative;
     this.commutativeOrder = def.commutativeOrder ?? this.commutativeOrder;

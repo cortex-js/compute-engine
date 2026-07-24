@@ -55,6 +55,7 @@ export const PRIMITIVE_TYPES: PrimitiveType[] = [
   'any',
   'unknown',
   'nothing',
+  'missing',
   'never',
   'error',
   ...EXPRESSION_TYPES,

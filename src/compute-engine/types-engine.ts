@@ -177,6 +177,8 @@ export interface IComputeEngine {
   readonly Pi: Expression;
   readonly E: Expression;
   readonly Nothing: Expression;
+  /** The `Missing` symbol: an absent value whose position is preserved. */
+  readonly Missing: Expression;
 
   readonly Zero: Expression;
   readonly One: Expression;

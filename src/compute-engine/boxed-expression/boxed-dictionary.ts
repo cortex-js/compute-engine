@@ -64,11 +64,13 @@ export class BoxedDictionary
       }
       if (key.length === 0)
         throw new Error('Dictionary keys must not be empty strings');
-      this._keyValues[key] = dictionaryValueToBoxedExpression(
+      // A `Nothing` VALUE erases the whole entry (§3.G).
+      const v = dictionaryValueToBoxedExpression(
         this.engine,
         keyValues[key],
         options
       );
+      if (!isSymbol(v, 'Nothing')) this._keyValues[key] = v;
     }
   }
 
@@ -92,12 +94,17 @@ export class BoxedDictionary
         );
       }
       const [key, value] = dictionary.ops;
+      // A `Nothing` KEY is an error (§3.G).
+      if (isSymbol(key, 'Nothing'))
+        throw new Error('A dictionary key must not be `Nothing`');
       let k: string;
       if (isString(key)) k = key.string;
       else if (isSymbol(key)) k = key.symbol;
       else throw new Error(`Expected a string key, got ${key.type}`);
 
-      this._keyValues[k] = value.canonical;
+      // A `Nothing` VALUE erases the whole entry (§3.G).
+      const v = value.canonical;
+      if (!isSymbol(v, 'Nothing')) this._keyValues[k] = v;
       return;
     }
 
@@ -112,12 +119,17 @@ export class BoxedDictionary
         ) {
           if (!isFunction(pair)) continue;
           const [key, value] = pair.ops;
+          // A `Nothing` KEY is an error (§3.G).
+          if (isSymbol(key, 'Nothing'))
+            throw new Error('A dictionary key must not be `Nothing`');
           let k: string;
           if (isString(key)) k = key.string;
           else if (isSymbol(key)) k = key.symbol;
           else return; // Empty dictionary
 
-          this._keyValues[k] = value.canonical;
+          // A `Nothing` VALUE erases the whole entry (§3.G).
+          const v = value.canonical;
+          if (!isSymbol(v, 'Nothing')) this._keyValues[k] = v;
         } else throw new Error(`Expected a key/value pair, got ${pair.type}`);
       }
       return;
@@ -209,7 +221,11 @@ export class BoxedDictionary
     const ce = this.engine;
     return (function* (self: BoxedDictionary) {
       for (const [key, value] of Object.entries(self._keyValues)) {
-        yield ce.tuple(ce.string(key), value);
+        // POSITIONAL pair: `_fn`, not `tuple()`. A dictionary value may
+        // legitimately be `Nothing` (the dictionary keeps it, and `Values`
+        // reports it), and `tuple()` splices `Nothing` out — which would
+        // yield a 1-tuple and silently unpair the entry.
+        yield ce._fn('Tuple', [ce.string(key), value]);
       }
     })(this);
   }

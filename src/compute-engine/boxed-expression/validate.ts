@@ -10,6 +10,8 @@ import { isSubtype } from '../../common/type/subtype.js';
 import {
   couldBeNonRealNumber,
   overlapsForDeferredValidation,
+  stripMissingFromType,
+  typeContainsMissing,
 } from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
 import { Type } from '../../common/type/types.js';
@@ -274,6 +276,13 @@ export function checkNumericArgs(
     } else if (op.type.isUnknown || op.type.type === 'any') {
       // Unknown or any type. Keep it that way, infer later
       xs.push(op);
+    } else if (typeContainsMissing(op.type.type)) {
+      // An absent (`Missing`) or possibly-absent (`T | missing`) operand in a
+      // numeric position. Every numeric operator resolves to `propagate`
+      // (§3.A), so admit it here — the runtime gate produces `NaN` in the
+      // result cell (strip-before-validate, §3.B). Keeps the short path in
+      // lockstep with the definition route for `Add`/`Multiply`/`Negate`/…
+      xs.push(op);
     } else if (typeCouldBeNumericCollection(op.type.type)) {
       // The argument's type could be a numeric collection at runtime
       // (e.g. `list`, `number | list`). Since numeric functions are
@@ -505,14 +514,45 @@ export function checkPure(
  * -->
  *
  */
+/**
+ * Strip-before-validate decision (§3.B): at a stripped position, an operand
+ * carrying a `missing` arm is admitted iff its stripped type still matches the
+ * parameter. A Missing-free operand (`typeContainsMissing` false) is never
+ * touched, so the lift is invisible to Missing-free programs.
+ */
+function strippedMatchesParam(
+  op: Expression,
+  param: Type,
+  idx: number,
+  stripMissing?: (index: number) => boolean
+): boolean {
+  if (!stripMissing?.(idx)) return false;
+  if (!typeContainsMissing(op.type.type)) return false;
+  const stripped = stripMissingFromType(op.type.type);
+  return stripped === 'never' || isSubtype(stripped, param);
+}
+
 export function validateArguments(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
   signature: Type,
   lazy?: boolean,
   threadable?: boolean,
-  freshlyInferred?: ReadonlySet<BoxedValueDefinition>
+  freshlyInferred?: ReadonlySet<BoxedValueDefinition>,
+  /** Strip-before-validate (§3.B of the missing-value typing design): for a
+   * position where this predicate returns `true`, an operand carrying a
+   * `missing` arm is admitted when its stripped type still matches the
+   * parameter (a scalar `Missing` → `never`, admissible everywhere). The
+   * missing arm is carried by the runtime gate, not the type. */
+  stripMissing?: (index: number) => boolean
 ): ReadonlyArray<Expression> | null {
+  // A `Spread` operand (`f(...p)`) makes the effective arity unknown until
+  // the enclosing call's evaluation splices the tuple's elements in — defer
+  // ALL validation (including the non-strict missing-argument padding below)
+  // to that runtime re-validation. Must precede the non-strict fastpath: the
+  // padding would otherwise treat `f(...p)` as an arity-1 call.
+  if (ops.some((x) => x.operator === 'Spread')) return null;
+
   // @fastpath
   if (!ce.strict) {
     // Skip the full per-parameter type checking below, but still pad a
@@ -562,6 +602,7 @@ export function validateArguments(
 
   // Iterate over any required parameters
   for (const param of params) {
+    const idx = i;
     const op = ops[i++];
     if (!op) {
       result.push(ce.error('missing'));
@@ -615,6 +656,15 @@ export function validateArguments(
     }
 
     if (!op.type.matches(param)) {
+      // Strip-before-validate (§3.B): admit an operand carrying a `missing`
+      // arm whose stripped type still matches the parameter. Accepted
+      // provisionally (added to `deferredIdx`) so the final `infer(param)`
+      // narrowing does not widen an unconstrained symbol (I4).
+      if (strippedMatchesParam(op, param, idx, stripMissing)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        continue;
+      }
       const repaired = repairFreshMatrixInference(
         ce,
         op,
@@ -707,6 +757,13 @@ export function validateArguments(
       continue;
     }
     if (!op.type.matches(param)) {
+      // Strip-before-validate (§3.B) — see the required-param gate.
+      if (strippedMatchesParam(op, param, i, stripMissing)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        i += 1;
+        continue;
+      }
       // Overlap-deferred validation (§D6.2) — see the required-param gate.
       if (overlapsForDeferredValidation(op.type.type, param)) {
         result.push(op);
@@ -770,6 +827,13 @@ export function validateArguments(
         continue;
       }
       if (!op.type.matches(varParam)) {
+        // Strip-before-validate (§3.B) — see the required-param gate. The
+        // operand index is `i - 1` (already incremented at the loop top).
+        if (strippedMatchesParam(op, varParam, i - 1, stripMissing)) {
+          result.push(op);
+          deferredIdx.add(result.length - 1);
+          continue;
+        }
         // Overlap-deferred validation (§D6.2) — see the required-param gate.
         if (overlapsForDeferredValidation(op.type.type, varParam)) {
           result.push(op);
