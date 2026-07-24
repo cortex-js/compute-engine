@@ -796,3 +796,93 @@ describe('CORTEX PROGRAMS — equations, exactly solved', () => {
     expect(text).toBe('([1,2,3], [-2,8], [3])');
   });
 });
+
+//
+// Spread arguments: `f(...t)` splices the elements of the tuple `t` into the
+// call's argument list. Tuples only — a `List` argument is an error — and the
+// splice happens at evaluation, so a symbolic argument leaves the call
+// symbolic rather than mis-binding positionally.
+//
+describe('CORTEX PROGRAMS — spread arguments', () => {
+  test('spreading a tuple-valued variable into a user function', () => {
+    const { text, diagnostics } = run(`
+a(x, y) = x + 2*y
+let p = (3, 4)
+a(...p)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('11');
+  });
+
+  test('spreading a literal tuple (splices at canonicalization)', () => {
+    const { text, diagnostics } = run(`
+a(x, y) = x + 2*y
+a(...(3, 4))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('11');
+  });
+
+  test('spread mixes with positional arguments', () => {
+    const { text, diagnostics } = run(`
+g(x, y, z) = x + 10*y + 100*z
+let q = (2, 3)
+g(1, ...q)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('321');
+  });
+
+  test('multiple spreads splice in order', () => {
+    const { text, diagnostics } = run(`
+g(x, y, z, w) = (x, y, z, w)
+let q = (2, 3)
+g(...q, ...q)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(2, 3, 2, 3)');
+  });
+
+  test('spreading into a variadic built-in', () => {
+    const { text, diagnostics } = run(`
+let t = (3, 41, 7)
+Max(...t)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('41');
+  });
+
+  test('a lambda parameter can be spread (the document idiom)', () => {
+    const { text, diagnostics } = run(`
+a(x, y) = 10*x + y
+F(p) = (a(...p), a(...p))
+F((1, 2))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(12, 12)');
+  });
+
+  test('spreading a non-tuple value is an error', () => {
+    const { text } = run(`
+a(x, y) = x + 2*y
+a(...5)`);
+    expect(text).toContain('incompatible-type');
+    expect(text).toContain('tuple');
+  });
+
+  test('spreading a List is an error (tuples only)', () => {
+    const { text } = run(`
+a(x, y) = x + 2*y
+a(...[3, 4])`);
+    expect(text).toContain('incompatible-type');
+  });
+
+  test('an unresolved spread stays symbolic', () => {
+    const { text, diagnostics } = run(`f(...w)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('f(Spread(w))');
+  });
+
+  test('numeric approximation reaches through a spread', () => {
+    const { text, diagnostics } = run(`
+a(x, y) = x / y
+let p = (1, 3)
+N(a(...p))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toMatch(/^0\.3333/);
+  });
+});

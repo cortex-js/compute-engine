@@ -658,6 +658,17 @@ let m = [[1, 2], [3, 4]]
 // ➔ 18
 ```
 
+**Spread arguments.** In a call argument list, `...t` splices the elements of
+the tuple `t` in as positional arguments; several spreads splice in order:
+
+```cortex
+dot(x1, y1, x2, y2) = x1*x2 + y1*y2
+let p = (1, 2)
+let q = (3, 4)
+dot(...p, ...q)
+// ➔ 11
+```
+
 **Fold** threads an accumulator through a collection, starting from an
 explicit initial value:
 

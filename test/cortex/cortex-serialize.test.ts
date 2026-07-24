@@ -469,3 +469,12 @@ describe('CORTEX SERIALIZING OPERATORS', () => {
     ).toMatchInlineSnapshot(`"2 ^ 3!"`);
   });
 });
+
+describe('CORTEX SERIALIZING SPREAD', () => {
+  test('a Spread argument serializes as `...`', () => {
+    expect(serializeCortex(['f', ['Spread', 'p']])).toBe('f(...p)');
+    expect(serializeCortex(['f', 1, ['Spread', ['Tuple', 'p', 'q']]])).toBe(
+      'f(1, ...(p, q))'
+    );
+  });
+});

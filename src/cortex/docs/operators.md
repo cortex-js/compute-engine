@@ -160,6 +160,26 @@ subtraction. The Unicode two-dot leader `‥` is an input alias. Serialization
 uses `Range(a, b)`, and a stepped range continues to use the three-argument
 call `Range(a, b, step)`.
 
+## Spread: `...`
+
+In a **call argument list** — and only there — a prefix `...` spreads a tuple
+into the call's arguments: the tuple's elements become ordinary positional
+arguments.
+
+```cortex
+f(...t)          // ["f", ["Spread", "t"]]
+f(1, ...t, q)    // splices between positional arguments
+g(...p, ...q)    // several spreads splice in order
+Max(...t)        // variadic built-ins accept spreads
+```
+
+Only **tuples** spread — a `List` (or any other value) is an
+`incompatible-type` error. A literal tuple splices immediately; a symbolic
+argument is spliced when the call evaluates, and until then the call stays
+symbolic (the spread never binds positionally to a single parameter). The
+three-dot token is distinct from the range operator `..`; outside an argument
+list `...` is a diagnostic.
+
 ## Unary prefix: `-` and `!`
 
 `-` (`Negate`) and `!` (`Not`) are prefix operators. They must abut their

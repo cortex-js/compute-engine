@@ -375,6 +375,14 @@ export function serializeCortex(
     // clean signed `num` rather than a doubled sign (`--1`). Non-literal
     // operands go through the prefix-operator path (`-x`, `-(2 + 3)`).
     //
+    //
+    // Spread — `...t` in an argument list
+    //
+    Spread: (expr: MathJsonExpression): FormattingBlock => {
+      if (nops(expr) !== 1) return serializeGenericFunction(expr);
+      return fmt.line('...', serializeExpression(operand(expr, 1)));
+    },
+
     Negate: (expr: MathJsonExpression): FormattingBlock => {
       if (nops(expr) !== 1) return serializeGenericFunction(expr);
       const arg = operand(expr, 1);

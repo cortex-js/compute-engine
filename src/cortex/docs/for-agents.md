@@ -72,6 +72,10 @@ g(x) + f(2)
   empty set). Access dictionaries with `d["key"]`, not `d.key`. Tuples index
   like lists (`p[1]` is the first component); a matrix (list of lists)
   indexes as `m[2, 1]` or `m[2][1]`.
+- **Spread**: in a call argument list, `...t` splices a **tuple**'s elements
+  in as positional arguments (`f(...p)`, `Max(...t)`, `g(1, ...p, ...q)`).
+  Tuples only — spreading a list is an `incompatible-type` error — and `...`
+  is valid nowhere else.
 - **Block in expression position**: `do { … }` (a bare `{ … }` in expression
   position is always a set/dictionary literal).
 - **LaTeX islands**: `$\frac{1}{2}$` splices parsed LaTeX into the expression
@@ -255,7 +259,8 @@ Sort([3, 1, 4, 1, 5], (a, b) |-> a > b)
   *quoted* (`"True"`, `"xetroc"`) — that quoted `"True"` is a boolean, not a
   string. Derived collections (`Range`, `Map`/`Filter` results, loop-built
   lists) preview-elide above 10 elements (`[1,2,3,4,5,...,]`); the value is
-  complete — use `--json` to see all of it. Literals print in full.
+  complete — the CLI's `--json` output materializes the full elements (up to
+  10,000). Literals print in full.
 - **Binder variables stay symbolic**: `D(expr, x)` and `Integrate(expr, x)`
   treat `x` symbolically even if `x` has an assigned value; the *result*
   then evaluates with the value. So `let x = 2` followed by

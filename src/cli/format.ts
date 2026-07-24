@@ -10,18 +10,38 @@ const ANSI = {
   reset: '\u001b[0m',
 };
 
+/** Maximum number of collection elements materialized in `--json` output.
+ * Beyond the cap, the output carries a `ContinuationPlaceholder` marker. */
+const JSON_MATERIALIZATION_CAP = 10_000;
+
 export function formatValue(
   result: EvaluationResult,
   mode: OutputMode
 ): string {
   if (result.source.trim() === '') return '';
 
-  if (mode === 'json')
+  if (mode === 'json') {
+    let value = result.value;
+    // A lazy pipeline result (`Range`, `Map`, a loop-built `Join` chain)
+    // serializes structurally — the recipe, not the elements. For display,
+    // materialize finite collections (recursively: a tuple holding a lazy
+    // `Take` materializes too). Infinite or indeterminate collections keep
+    // their structural form.
+    if (value.isCollection && value.isFiniteCollection === true) {
+      try {
+        value = value.evaluate({
+          materialization: [JSON_MATERIALIZATION_CAP, 0],
+        });
+      } catch {
+        // Materialization is best-effort: fall back to the structural form.
+      }
+    }
     return JSON.stringify(
-      result.value.toMathJson({ fractionalDigits: 'auto' }),
+      value.toMathJson({ fractionalDigits: 'auto' }),
       null,
       2
     );
+  }
   if (mode === 'cortex')
     return serializeCortex(
       result.value.toMathJson({ fractionalDigits: 'auto' })

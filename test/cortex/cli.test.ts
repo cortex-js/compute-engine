@@ -207,6 +207,32 @@ describe('Cortex CLI evaluation', () => {
     expect(JSON.parse(formatValue(result, 'json'))).toEqual(['Rational', 3, 2]);
   });
 
+  test('JSON output materializes finite lazy collections', () => {
+    const session = makeCortexSession(0);
+    expect(JSON.parse(formatValue(session.evaluate('Range(1, 15)'), 'json')))
+      .toEqual(['List', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    expect(
+      JSON.parse(
+        formatValue(
+          session.evaluate(
+            'let xs = []\nfor k in 1..12 { xs = Join(xs, [k]) }\nxs'
+          ),
+          'json'
+        )
+      )
+    ).toEqual(['List', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    // Materialization descends into containers.
+    expect(
+      JSON.parse(
+        formatValue(session.evaluate('([10,20,30,40] |> Take(_, 3), 1)'), 'json')
+      )
+    ).toEqual(['Pair', ['List', 10, 20, 30], 1]);
+    // An infinite collection keeps its structural form.
+    expect(
+      JSON.parse(formatValue(session.evaluate('Range(1, Infinity)'), 'json'))
+    ).toEqual(['Range', 1, 'PositiveInfinity']);
+  });
+
   test('formats diagnostics with a location and source excerpt', () => {
     const result = makeCortexSession(0).evaluate('1 +');
     const output = formatDiagnostics(

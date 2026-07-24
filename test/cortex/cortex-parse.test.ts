@@ -1920,3 +1920,42 @@ describe('CORTEX PARSING ZERO-PARAMETER LAMBDAS', () => {
     expect(diags[0].message).toStrictEqual(['expression-expected']);
   });
 });
+
+describe('CORTEX PARSING SPREAD ARGUMENTS', () => {
+  test('`f(...p)` is a Spread argument', () => {
+    expect(validCortex('f(...p)')).toStrictEqual(['f', ['Spread', 'p']]);
+  });
+
+  test('spread mixes with positional arguments', () => {
+    expect(validCortex('f(1, ...p, q)')).toStrictEqual([
+      'f',
+      1,
+      ['Spread', 'p'],
+      'q',
+    ]);
+  });
+
+  test('a parenthesized tuple can be spread', () => {
+    expect(validCortex('f(...(1, 2))')).toStrictEqual([
+      'f',
+      ['Spread', ['Tuple', 1, 2]],
+    ]);
+  });
+
+  test('multiple spreads in one call', () => {
+    expect(validCortex('f(...p, ...q)')).toStrictEqual([
+      'f',
+      ['Spread', 'p'],
+      ['Spread', 'q'],
+    ]);
+  });
+
+  test('spread is a diagnostic outside a call argument list', () => {
+    const [, inList] = parseCortex('[...p]');
+    expect(inList.length).toBeGreaterThan(0);
+    expect(inList[0].message).toStrictEqual(['unexpected-symbol', '...']);
+
+    const [, inLet] = parseCortex('let x = ...p');
+    expect(inLet.length).toBeGreaterThan(0);
+  });
+});

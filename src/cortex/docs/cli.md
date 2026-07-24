@@ -76,7 +76,7 @@ Pi * radius^2
 | Option | Description |
 |:--|:--|
 | `-e`, `--eval <source>` | Evaluate Cortex source supplied on the command line. |
-| `--json` | Write the result as formatted MathJSON. |
+| `--json` | Write the result as formatted MathJSON. Finite lazy collections (`Range`, `Map` results, …) are materialized into their elements, up to 10,000. |
 | `--cortex` | Write the result as serialized Cortex source. |
 | `--diagnostics <fmt>` | Write diagnostics as `text` (the default) or as a `json` array. |
 | `--time-limit <ms>` | Set the evaluation deadline in milliseconds. The default is `10000`; `0` disables it. |

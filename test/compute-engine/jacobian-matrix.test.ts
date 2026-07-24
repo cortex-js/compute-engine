@@ -279,6 +279,122 @@ describe('JacobianMatrix of a bare function', () => {
   });
 });
 
+// `[a, b, c]` — a List whose elements are all bare function references.
+// Resolves only when every element is one and all parameter lists agree
+// exactly (names and order); the shared parameters are the default
+// differentiation variables. `JacobianMatrix` is `lazy: true`, so the raw
+// MathJSON box route must be probed alongside pre-boxed arguments.
+describe('JacobianMatrix of a list of bare functions', () => {
+  const ab = (ce: ComputeEngine) => {
+    ce.assign('a', ce.parse('(x, y) \\mapsto x^2 y'));
+    ce.assign('b', ce.parse('(x, y) \\mapsto x + y'));
+  };
+
+  test('resolves each element, differentiating w.r.t. the shared parameters', () => {
+    const ce = new ComputeEngine();
+    ab(ce);
+    expect(
+      ce.box(['JacobianMatrix', ['List', 'a', 'b']]).evaluate().toString()
+    ).toBe('[[2x * y,x^2],[1,1]]');
+  });
+
+  test('box route and pre-boxed route agree', () => {
+    const ce = new ComputeEngine();
+    ab(ce);
+    const viaBox = ce.box(['JacobianMatrix', ['List', 'a', 'b']]).evaluate();
+    const viaFn = ce
+      .function('JacobianMatrix', [S(ce, 'a', 'b')])
+      .evaluate();
+    expect(viaBox.isSame(viaFn)).toBe(true);
+  });
+
+  test('agrees with the applied form', () => {
+    const ce = new ComputeEngine();
+    ab(ce);
+    const bare = ce.box(['JacobianMatrix', ['List', 'a', 'b']]).evaluate();
+    const applied = ce
+      .function('JacobianMatrix', [
+        L(ce, 'a(x, y)', 'b(x, y)'),
+        S(ce, 'x', 'y'),
+      ])
+      .evaluate();
+    expect(bare.isSame(applied)).toBe(true);
+  });
+
+  test('round-trips through LaTeX', () => {
+    const ce = new ComputeEngine();
+    ab(ce);
+    const j = ce.box(['JacobianMatrix', ['List', 'a', 'b']]);
+    expect(ce.parse(j.latex).evaluate().toString()).toBe(
+      '[[2x * y,x^2],[1,1]]'
+    );
+  });
+
+  test('explicit variables rename the shared parameters', () => {
+    const ce = new ComputeEngine();
+    ab(ce);
+    expect(
+      ce
+        .box(['JacobianMatrix', ['List', 'a', 'b'], ['List', 'u', 'v']])
+        .evaluate()
+        .toString()
+    ).toBe('[[2u * v,u^2],[1,1]]');
+  });
+
+  test('differing parameter names decline', () => {
+    const ce = new ComputeEngine();
+    ab(ce);
+    ce.assign('c', ce.parse('(u, v) \\mapsto u v'));
+    expect(
+      ce.box(['JacobianMatrix', ['List', 'a', 'c']]).evaluate().operator
+    ).toBe('JacobianMatrix');
+  });
+
+  test('differing arities decline', () => {
+    const ce = new ComputeEngine();
+    ab(ce);
+    ce.assign('h', ce.parse('(x, y, z) \\mapsto x y z'));
+    expect(
+      ce.box(['JacobianMatrix', ['List', 'a', 'h']]).evaluate().operator
+    ).toBe('JacobianMatrix');
+  });
+
+  // A system of one is still a system: a 1×n matrix, not the gradient vector.
+  test('a single-element list is a 1×n matrix', () => {
+    const ce = new ComputeEngine();
+    ab(ce);
+    expect(
+      ce.box(['JacobianMatrix', ['List', 'a']]).evaluate().toString()
+    ).toBe('[[2x * y,x^2]]');
+  });
+
+  test('the static type is a matrix', () => {
+    const ce = new ComputeEngine();
+    ab(ce);
+    expect(
+      ce.box(['JacobianMatrix', ['List', 'a', 'b']]).type.matches('matrix')
+    ).toBe(true);
+  });
+
+  test('the counterexample map, as named components, has determinant -2', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'a',
+      ce.parse('(x, y, z) \\mapsto (1 + x y)^3 z + y^2 (1 + x y)(4 + 3 x y)')
+    );
+    ce.assign(
+      'b',
+      ce.parse('(x, y, z) \\mapsto y + 3 x (1 + x y)^2 z + 3 x y^2 (4 + 3 x y)')
+    );
+    ce.assign('c', ce.parse('(x, y, z) \\mapsto 2 x - 3 x^2 y - x^3 z'));
+    const det = ce
+      .box(['Determinant', ['JacobianMatrix', ['List', 'a', 'b', 'c']]])
+      .evaluate()
+      .simplify();
+    expect(det.isSame(-2)).toBe(true);
+  });
+});
+
 // A symbol bound to a list whose elements mention a globally-assigned diff
 // variable must not have that value substituted before differentiation.
 describe('JacobianMatrix protects the differentiation variables', () => {

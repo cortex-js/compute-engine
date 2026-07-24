@@ -336,6 +336,32 @@ function bareFunctionLambda(
   return undefined;
 }
 
+function bareFunctionSystem(
+  list: Expression
+): { params: string[]; bodies: Expression[] } | undefined {
+  // `[a, b, c] |> JacobianMatrix` — a List whose elements are all bare
+  // function references. Resolve only when EVERY element is such a reference
+  // and all parameter lists agree exactly, in names and order; the shared
+  // parameters are then the default differentiation variables. A mixed list,
+  // or lambdas with differing parameters, would need a guessed variable
+  // correspondence — decline instead.
+  if (!isFunction(list, 'List') || list.nops === 0) return undefined;
+  const lambdas: { params: string[]; body: Expression }[] = [];
+  for (const op of list.ops) {
+    const lambda = bareFunctionLambda(op);
+    if (lambda === undefined) return undefined;
+    lambdas.push(lambda);
+  }
+  const params = lambdas[0].params;
+  for (const l of lambdas)
+    if (
+      l.params.length !== params.length ||
+      l.params.some((p, i) => p !== params[i])
+    )
+      return undefined;
+  return { params, bodies: lambdas.map((l) => l.body) };
+}
+
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
   {
     /* @todo
@@ -733,6 +759,15 @@ volumes
         if (lambda) {
           target = lambda.body;
           paramDefault = lambda.params;
+        } else {
+          // `[a, b, c]` — a list of bare function references (each element a
+          // named scalar component). Their common parameters are the default
+          // differentiation variables, as for a single bare function.
+          const system = bareFunctionSystem(target);
+          if (system) {
+            target = ce._fn('List', system.bodies);
+            paramDefault = system.params;
+          }
         }
 
         // "System or gradient?" must be decided on what the operand *denotes*,

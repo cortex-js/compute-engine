@@ -2095,7 +2095,13 @@ export class Parser {
    * `Apply` (`(g)(x)` → `["Apply", g, x]`). */
   private parseCall(callee: MathJsonExpression): MathJsonExpression {
     const start = this.localStart(callee) ?? this.current.start;
-    const { values, end } = this.parseBracketedList('CLOSE_PAREN', ')');
+    // Spread arguments (`f(...t)`) are admitted in call argument lists only.
+    const { values, end } = this.parseBracketedList(
+      'CLOSE_PAREN',
+      ')',
+      false,
+      true
+    );
     // `f(x = 4)` is almost always a mistake: `=` is assignment, so
     // `Solve(x^2 = 4, x)` silently reports no solutions, and Cortex has no
     // keyword arguments. Advisory only — the parse is unchanged.

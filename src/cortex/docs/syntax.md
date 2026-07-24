@@ -159,7 +159,9 @@ _primary_ → _signed-number_ | _symbol_ | _string_ | _pragma_ |
 _latex-island_ | _parenthesized_ | _list_ | _set_ | _dictionary_ |
 _do-block_ | _if-expression_ | _match-expression_
 
-_call-clause_ → **`(`** \[(_expression_)#**`,`**\] **`)`**
+_call-clause_ → **`(`** \[(_argument_)#**`,`**\] **`)`**
+
+_argument_ → \[**`...`**\] _expression_
 
 _index-clause_ → **`[`** (_expression_)#**`,`** **`]`**
 
@@ -273,6 +275,15 @@ whitespace — by a parenthesized, comma-separated argument list:
 ```cortex
 f(x, y)     // ["f", "x", "y"]
 f()         // ["f"]
+```
+
+An argument may be prefixed with `...` to spread a tuple's elements into the
+call's arguments (valid only in call argument lists — see
+[Spread](/cortex/operators/#spread)):
+
+```cortex
+f(...p)      // ["f", ["Spread", "p"]]
+f(1, ...p)   // ["f", 1, ["Spread", "p"]]
 ```
 
 If the callee is not a bare symbol (for example, a parenthesized expression
