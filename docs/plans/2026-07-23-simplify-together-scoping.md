@@ -388,7 +388,8 @@ green (18432 passed), **zero snapshot churn**.
 
 Not addressed (separate, deeper): sign-based rewrites still read a value's SIGN
 (`|w|` with `w := 5` simplifies to `w`, using `w ≥ 0` inferred from the value) —
-that is not a numeric fold and would need value-blind sign inference.
+that is not a numeric fold and would need value-blind sign inference. Scoped as
+item **E** below.
 
 ### B. Solve unknown-shielding: doubly-contradictory edge case — **LANDED 2026-07-23**
 
@@ -482,3 +483,82 @@ global value can substitute before the code learns it is the solve target.
 - **Severity:** low — silent wrong/inert answer, only on contradictory input.
   (Surfaced by Codex; not independently reproduced — confirm with a repro before
   fixing.)
+
+### E. `simplify()` reads a value's SIGN — value-blind sign inference — OPEN
+
+The numeric-fold fix (§A "Broader fix") made `simplify()` value-blind for
+**folds** — it no longer substitutes an assigned value to reduce a
+subexpression to a number. But a second class of rewrite remains: ones that read
+a symbol's **sign/parity** rather than its magnitude. With `w := 5`:
+
+```js
+ce.assign('w', 5);
+ce.parse('|w|').simplify();        // → w        (uses w ≥ 0 from the value)
+ce.parse('\\sqrt{w^2}').simplify(); // → w        (same)
+```
+
+This is the same value-blindness violation as `9 - w²` → `-72`, and it is a
+genuine **silent-wrong-answer trap**, not just an inconsistency:
+
+```js
+ce.assign('w', 5);
+const e = ce.parse('|w|').simplify();  // → w
+ce.assign('w', -3);
+e.evaluate();                          // → -3   (WRONG: |−3| = 3)
+ce.parse('|w|').evaluate();            // →  3   (a fresh |w| is correct)
+```
+
+The simplified form silently baked in the sign that held at simplify time.
+
+**The crux — do NOT just stop doing sign rewrites.** The *same* rewrite is
+correct and intended when the sign comes from an **assumption**:
+
+```js
+ce.assume(ce.parse('w > 0'));
+ce.parse('|w|').simplify();  // → w   ✓ correct — assumptions are how you give
+                             //          simplify() facts
+```
+
+So the invariant is precise:
+
+> `simplify()` may use sign/parity derived from a symbol's **declared type** and
+> **in-scope assumptions**, but NOT from its **assigned value**. An assigned
+> value must be treated as if the symbol were merely *declared* with that
+> value's type — an `integer` is not provably non-negative, so `|w|` stays
+> symbolic.
+
+**Why this is harder than the fold fix.** The fold fix keyed off a single cheap
+predicate (`hasAssignedVariable`) at a handful of gates. Sign is driven by the
+`isNonNegative` / `isPositive` / `isNonPositive` / parity properties, which
+(a) are consulted by a *family* of rewrites, not one site, and (b) legitimately
+read the assigned value elsewhere (`.evaluate()`, type inference) — so they
+cannot be changed globally. The value-blindness belongs to `simplify()`'s *view*
+of the symbol, not to the sign property itself.
+
+**Scope — it is a family, audit first.** Confirmed so far: `Abs`
+(`symbolic/simplify-abs.ts`) and even-root `√(w²)`. Likely also: `Sign`,
+sign-dependent power branches (`(x²)^(1/2)`, odd/even exponent rules), piecewise
+guards, and any `isEligibleRealRewrite`-style gate that reads a sign. Enumerate
+every sign/parity-driven rewrite before designing the fix.
+
+**Two implementation seams to weigh:**
+
+1. **A value-blind sign query** threaded through the sign-based rewrites: sign
+   from type + assumptions, ignoring an assigned value. Most surgical, but needs
+   the query built and every site converted.
+2. **Run the sign-based rewrites under a value-stripped view** — reuse the §B
+   shadow-scope trick: shadow-declare assigned non-constants valueless for the
+   duration, so `isNonNegative` naturally falls back to type + assumptions.
+   Cheaper to wire, but must not strip *constants* and must keep assumption
+   lookups intact; watch the per-simplify cost.
+
+**Risk:** higher than the fold fix — sign rewrites are load-bearing in many
+snapshots (the fold fix hit zero churn partly by luck). Measure the blast radius
+before committing to a direction.
+
+**Severity:** medium — a silent value-blindness violation that can bake a wrong
+sign into a saved expression. Narrow trigger (assign a value, then `simplify()`
+— not `evaluate()` — an expression whose rewrite depends on that value's sign).
+
+**Recommendation:** worth doing for the same reason the fold case was, but as a
+deliberate pass with the audit up front, not a reflexive patch.

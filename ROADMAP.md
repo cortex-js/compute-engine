@@ -1024,6 +1024,18 @@ Two design-level residues are deliberately carried forward:
   evaluated derivative of a known function is not yet tightened (documented in
   `library/calculus.ts`); it is blocked on evaluate-recursion and
   underscore-lambda LaTeX serialization, so it waits on those.
+- **`simplify()` value-blind sign inference.** The 2026-07-23 value-blindness
+  pass made `simplify()` stop substituting an assigned value in numeric *folds*
+  (`9 - w²` no longer collapses to `-72`), but sign/parity-driven rewrites still
+  read a value's sign: with `w := 5`, `|w|.simplify()` and `√(w²).simplify()`
+  become `w`, which silently bakes in `w ≥ 0` and evaluates wrong after a later
+  `w := -3`. The fix must keep the *assumption*-driven rewrite
+  (`assume(w>0); |w| → w` is correct) and change only the value-derived path —
+  a value-blind sign query, or the §B shadow-scope trick, threaded through a
+  *family* of sign rewrites (`Abs`, even roots, `Sign`, power branches, …).
+  Medium severity, higher churn risk than the fold fix — audit + measure first.
+  Full analysis and the precise invariant: item **E** of
+  [`docs/plans/2026-07-23-simplify-together-scoping.md`](./docs/plans/2026-07-23-simplify-together-scoping.md).
 
 ### Test-suite ledger — skips and `@fixme` markers (sweep 2026-07-18)
 
