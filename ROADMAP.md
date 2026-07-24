@@ -171,14 +171,15 @@ symbol** only, across the full relational family (`Equal`/`NotEqual`/`Less`/
 `Coalesce`) and aggregates (`Max`/`Mean`/…) is unchanged — `NaN` stays absent
 there. Because `NaN` follows IEEE, compiled and interpreted numeric comparisons
 now agree by construction (plain `==`, no guard); empty `Max`/`Min` compile to
-`NaN` matching the interpreter. Remaining residue:
+`NaN` matching the interpreter.
 
-- **A scalar `If`/`Which` condition evaluating to `Missing` throws** an
-  uncatchable-in-expression-space `Error` (pre-existing behavior for any
-  non-boolean scalar condition, reachable via a Kleene-`Missing` comparison —
-  a `NaN`-comparison condition now yields a plain boolean and no longer
-  throws). A gentler degrade — an error *expression* at the condition — needs
-  a ruling on whether `If(3, …)` should change with it.
+**Ruling (2026-07-24, later):** a scalar `If`/`Which` condition evaluating to
+`Missing` yields a catchable **error expression** ("The condition is
+absent…"), the R `if (NA)` stance — absence is a runtime data state, not a
+program defect. The typo path (a condition that is not boolean at all,
+`If(3, …)`) deliberately keeps its spell-check **throw**: changing it was
+ruled out of this feature's blast radius. No residue remains from the
+missing-value feature.
 
 ### Broadcast typing residue (`broadcastable<T>` lift landed 2026-07-17)
 

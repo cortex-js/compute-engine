@@ -846,3 +846,48 @@ describe('P3 — compile discharge (§3.F)', () => {
     expect(r.error).toMatch(/isAbsent|absence|Fail closed/i);
   });
 });
+
+describe('P3 — absent If/Which condition is a catchable error expression (resolved 2026-07-24)', () => {
+  test('a scalar Missing condition yields an error EXPRESSION, not a throw', () => {
+    // R's `if (NA)` stance, but catchable: absence is a runtime data state of
+    // a correct program, so it must not crash the host's .evaluate().
+    const r = ce.box(['If', 'Missing', 1, 2]).evaluate();
+    expect(r.operator).toBe('Error');
+    expect(r.toString()).toMatch(/absent/);
+  });
+
+  test('reachable from ordinary data: an object-domain Kleene comparison as condition', () => {
+    const e = new ComputeEngine();
+    e.declare('s', 'string | missing');
+    e.assign('s', e.Missing);
+    const r = e.box(['If', ['Equal', 's', { str: 'a' }], 1, 2]).evaluate();
+    expect(r.operator).toBe('Error');
+  });
+
+  test('an absent Which guard errors — it cannot fall through (that would decide the undecidable)', () => {
+    const r = ce.box(['Which', 'Missing', 1, 'True', 2]).evaluate();
+    expect(r.operator).toBe('Error');
+  });
+
+  test('discharge restores branching', () => {
+    const e = new ComputeEngine();
+    e.declare('s', 'string | missing');
+    e.assign('s', e.Missing);
+    const cond = ['Equal', 's', { str: 'a' }];
+    const r = e.box(['If', ['Coalesce', cond, 'False'], 1, 2]).evaluate();
+    expect(r.re).toBe(2);
+  });
+
+  test('the typo path still throws (not-a-boolean-at-all keeps the spell-check crash)', () => {
+    expect(() => ce.box(['If', 3, 1, 2]).evaluate()).toThrow(
+      /must evaluate to/
+    );
+  });
+
+  test('an undecided symbolic condition still holds the If (unchanged)', () => {
+    const e = new ComputeEngine();
+    e.declare('x', 'number');
+    const r = e.box(['If', ['Equal', 'x', 4], 1, 2]).evaluate();
+    expect(r.operator).toBe('If');
+  });
+});

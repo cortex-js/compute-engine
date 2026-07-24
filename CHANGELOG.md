@@ -108,10 +108,12 @@
   and lowers via the guarded form
   (`isAbsent(a) || isAbsent(b) ? null : a == b`) so a `Missing` becomes the
   target null. A scalar `If`/`Which` condition that evaluates to **`Missing`**
-  still throws (`Condition must evaluate to "True" or "False"`), as any
-  non-boolean scalar condition does — a `NaN`-comparison condition now yields a
-  plain boolean and no longer throws. Discharge a possibly-`Missing` condition
-  with `Coalesce`/`IsMissing` first.
+  yields a catchable **error expression** (`The condition is absent…`) rather
+  than crashing `evaluate()` — absence is a runtime data state, so it must be
+  renderable and catchable; discharge with `Coalesce`/`IsMissing` to branch on
+  possibly-absent data. (A condition that is not boolean at all, e.g.
+  `If(3, …)`, keeps the existing spell-check throw.) A `NaN`-comparison
+  condition yields a plain boolean (IEEE) and branches normally.
 
 - **Compiled `Max([])` / `Min([])` now return `NaN`, matching the
   interpreter** (previously `-Infinity` / `+Infinity` from the identity-seeded

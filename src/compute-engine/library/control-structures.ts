@@ -109,6 +109,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           return ifTrue?.evaluate() ?? engine.Nothing;
         if (evaluatedCond === 'False')
           return ifFalse?.evaluate() ?? engine.Nothing;
+        // An ABSENT condition (the `Missing` symbol) is a legitimate runtime
+        // data state, not a program defect: it is Kleene-undecidable, so
+        // branching is an error — but a catchable error EXPRESSION (R's
+        // `if (NA)` stance), never the typo throw below. Discharge with
+        // `Coalesce`/`IsMissing` before branching. (§3.D residual, resolved
+        // 2026-07-24.)
+        if (evaluatedCond === 'Missing')
+          return absentConditionError(engine);
         // An UNDECIDED boolean condition — e.g. a relation with free
         // variables (`x = 4` stays symbolic under evaluate()) — leaves the
         // `If` unevaluated rather than erroring: it may become decidable
@@ -529,6 +537,20 @@ function whenCollectionHandlers(): CollectionHandlers {
  * are bound, and crashing an enclosing `Comprehension` on a broadcast guard is
  * worse than yielding a held value. Mirrors `When`'s broadcast detection.
  */
+/**
+ * The catchable error for a scalar condition that evaluated to the `Missing`
+ * symbol (an absent guard). Distinct from the "not a boolean at all" typo
+ * throw: absence is a runtime DATA state of a correct program, so it yields
+ * an error expression the host can render or catch, instead of crashing
+ * `.evaluate()`.
+ */
+function absentConditionError(ce: ComputeEngine): Expression {
+  return ce.error(
+    'The condition is absent (`Missing`). Discharge absence with ' +
+      '`Coalesce()` or `IsMissing()` before branching'
+  );
+}
+
 function isBooleanishCondition(evaluated: Expression): boolean {
   if (evaluated.type.matches('boolean')) return true;
   if (!evaluated.isCollection || !evaluated.isFiniteCollection) return false;
@@ -564,6 +586,12 @@ function evaluateWhich(
       if (!args[i + 1]) return options.engine.symbol('Undefined');
       return args[i + 1].evaluate(options);
     } else if (cond !== 'False' && cond !== 'Undefined') {
+      // An ABSENT guard (the `Missing` symbol) is Kleene-undecidable: this
+      // clause can neither be taken nor skipped (falling through to a later
+      // clause would decide what absence left undecided), so the `Which` is
+      // a catchable error EXPRESSION — not the typo throw below. (§3.D
+      // residual, resolved 2026-07-24.)
+      if (cond === 'Missing') return absentConditionError(options.engine);
       // An UNDECIDED boolean condition (e.g. `x = 4` with a free `x`, which
       // stays symbolic under evaluate()) leaves the `Which` unevaluated:
       // picking a later branch would be wrong once the condition becomes
