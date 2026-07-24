@@ -172,31 +172,15 @@ The server also exposes the agent-facing language card
 (`/cortex/for-agents/`) as the resource `cortex://docs/for-agents`.
 
 Each `evaluate` call runs in a fresh session: definitions do not persist
-between calls, so every program must be self-contained.
-
-Register the server with an MCP client using `npx`. For example, with
-Claude Code:
-
-```shell
-claude mcp add cortex -- npx -y @cortex-js/compute-engine mcp
-```
-
-or in a JSON client configuration:
-
-```json
-{
-  "mcpServers": {
-    "cortex": {
-      "command": "npx",
-      "args": ["-y", "@cortex-js/compute-engine", "mcp"]
-    }
-  }
-}
-```
-
-The `--time-limit <ms>` option sets the default evaluation deadline for the
+between calls, so every program must be self-contained. The
+`--time-limit <ms>` option sets the default evaluation deadline for the
 `evaluate` tool (default 10000; each call can override it with its
 `timeLimit` argument).
+
+<ReadMore path="/cortex/mcp/">
+See how to **register the server with Claude Code, Claude Desktop, or
+another MCP client**, and what to expect once it is connected.
+</ReadMore>
 
 ## Interactive REPL
 
