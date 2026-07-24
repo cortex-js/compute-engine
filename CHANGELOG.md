@@ -99,8 +99,13 @@
   Broadcast comparisons apply the rule per cell. Because `NaN` follows IEEE,
   **compiled and interpreted comparisons now agree by construction** on numeric
   operands (plain `==` is the IEEE semantics — no guard is emitted, and
-  `NaN == NaN` compiles to `false`). A `missing`-arm operand over an object
-  domain (e.g. `string | missing`) still lowers via the guarded form
+  `NaN == NaN` compiles to `false`). A **numeric-domain** `missing` arm
+  (`number | missing`) does not widen a comparison's result type — that slot's
+  absence value is `NaN`, so the result is a plain `boolean`, a `Missing`
+  value read through such a slot compares as `NaN` (IEEE), and the comparison
+  **compiles on float-only targets (GLSL/WGSL)**. A `missing`-arm operand over
+  an object domain (e.g. `string | missing`) still types `boolean | missing`
+  and lowers via the guarded form
   (`isAbsent(a) || isAbsent(b) ? null : a == b`) so a `Missing` becomes the
   target null. A scalar `If`/`Which` condition that evaluates to **`Missing`**
   still throws (`Condition must evaluate to "True" or "False"`), as any

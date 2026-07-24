@@ -773,6 +773,43 @@ describe('P3 — compile discharge (§3.F)', () => {
     expect(e.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('False');
   });
 
+  test('a numeric-domain missing arm does not widen a comparison result, and compiles on GPU', () => {
+    // GPU cleanup (2026-07-24, follow-up to the IEEE amendment): a
+    // `number | missing` slot's absence representation is `NaN` (I6), and an
+    // IEEE comparison of `NaN` is a plain boolean — so the `missing` arm never
+    // reaches the comparison result. Static type has no arm, the interpreter
+    // reads a numeric-slot `Missing` as `NaN` (IEEE False/True), and the
+    // comparison compiles guard-free on a float-only target.
+    const e = new ComputeEngine();
+    e.declare('a', 'number | missing');
+    e.declare('b', 'number | missing');
+    e.declare('s', 'string | missing');
+
+    // Type: no missing arm from numeric-domain operands…
+    expect(e.box(['Equal', 'a', 'b']).type.toString()).toBe('boolean');
+    expect(e.box(['Less', 'a', 1]).type.toString()).toBe('boolean');
+    // …but an object-domain arm still widens (Kleene reachable).
+    expect(e.box(['Equal', 's', { str: 'x' }]).type.toString()).toBe(
+      'boolean | missing'
+    );
+
+    // Interpreter: a Missing VALUE in a numeric-domain slot reads as NaN.
+    e.assign('a', e.Missing);
+    expect(e.box(['Equal', 'a', 1]).evaluate().symbol).toBe('False');
+    expect(e.box(['NotEqual', 'a', 1]).evaluate().symbol).toBe('True');
+    expect(e.box(['Less', 'a', 1]).evaluate().symbol).toBe('False');
+    // An object-domain slot stays Kleene.
+    e.assign('s', e.Missing);
+    expect(e.box(['Equal', 's', { str: 'x' }]).evaluate().symbol).toBe(
+      'Missing'
+    );
+
+    // GPU: compiles guard-free (previously failed closed on the result's arm).
+    const r = compile(e.box(['Equal', 'a', 'b']), { to: 'glsl', fallback: true });
+    expect(r.success).toBe(true);
+    expect(r.code).not.toMatch(/isnan/);
+  });
+
   test('an object-domain (string|missing) Equal keeps the Kleene guard on JS', () => {
     const e = new ComputeEngine();
     e.declare('s', 'string | missing');

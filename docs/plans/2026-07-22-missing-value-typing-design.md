@@ -390,12 +390,24 @@ primitives are *absence* tests, not `Missing`-symbol tests:
     operand value that is `NaN`) triggers the IEEE rule; a symbolic operand
     (`x < 1`) stays symbolic. Exact operands are not numericized just to probe
     for `NaN` (exactness contract).
+  - **Numeric-domain slots read as `NaN` (GPU cleanup, 2026-07-24).** A
+    `Missing` *value* read through an operand whose static type carries a
+    **numeric-domain** `missing` arm (`number | missing`) is the I6 off-contract
+    occupant of a slot whose honest absence value is `NaN` — comparisons read
+    it as `NaN` and follow IEEE (`x : number | missing := Missing` ⇒
+    `x == 1` is `False`, not Kleene). Only an **object-domain** arm
+    (`string | missing`), a definite `missing` operand, or a literal `Missing`
+    keeps the Kleene result reachable. This keeps all three surfaces agreeing:
+    the static type (below), the interpreter, and compiled code (where the
+    slot's absent value already IS `NaN` at the ABI).
   - **Result type:** `missing` when some operand is definitely absent
-    (`missing`); `boolean | missing` when only possibly (an operand cell
-    carries a `missing` arm); `boolean` otherwise. A `NaN` operand is invisible
-    at the type level (its static type is `number`), so it never widens the
-    result type — the IEEE `False`/`True` is a runtime-only outcome. (The type
-    handler is unchanged from the earlier revision.)
+    (`missing`); `boolean | missing` when an operand cell carries an
+    **object-domain** `missing` arm; `boolean` otherwise — a **numeric-domain**
+    arm does not widen (its absence is `NaN`, and IEEE yields a plain boolean),
+    which is what lets a comparison over `number | missing` operands compile
+    guard-free on float-only targets (GPU). A `NaN` operand is likewise
+    invisible at the type level (its static type is `number`) — the IEEE
+    `False`/`True` is a runtime-only outcome.
   - **Broadcast:** per-cell, shapes per tensor-design §D6; the element type
     follows the same rule per cell.
   - **Lowering:** numeric-domain operands need **no guard** — a raw `==`/
