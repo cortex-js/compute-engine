@@ -154,6 +154,13 @@
   Tuples only: spreading a `List` or a scalar is an `incompatible-type` error,
   and an unresolved argument leaves the call symbolic.
 
+  Spread also **compiles**, on every target: a literal tuple splices directly,
+  and a tuple-typed argument (`p: tuple<number, number>`) is rewritten
+  statically to positional accesses (`f(At(p,1), At(p,2))`). An argument whose
+  tuple arity is not statically known fails closed — a dynamic JS/Python
+  spread would silently mis-bind on an arity mismatch instead of erroring
+  like the interpreter.
+
   ```js
   ce.box(['Add', ['Spread', ['Tuple', 1, 2, 3]]]).evaluate(); // → 6
   ```
@@ -211,6 +218,14 @@
   ```
 
 ### Improvements
+
+- **The Cortex serializer reconstructs `let`/`const` syntax.** A `Declare`
+  node now serializes back to its statement form — `let x = 5`,
+  `const c = 6.28`, `let x: real`, and destructuring patterns
+  `let (x, y) = p` — instead of the generic `Declare(x, {value -> 5})`
+  function spelling, so declarations round-trip source → MathJSON → source.
+  Shapes with no `let` spelling (a `holdUntil` attribute, a computed name)
+  keep the generic form.
 
 - **Compiled comparisons and connectives look through provably-scalar user
   functions.** A helper declared with an open signature (`(unknown) ->

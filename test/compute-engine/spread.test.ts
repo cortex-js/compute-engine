@@ -130,3 +130,63 @@ describe('Spread: non-tuple arguments', () => {
     expect(v.toString()).toContain('incompatible-type');
   });
 });
+
+//
+// Compilation: a Spread operand is spliced STATICALLY — a literal tuple
+// directly, a tuple-typed argument via positional `At` accesses. Unknown
+// arity fails closed (D6): a dynamic JS/Python spread would silently
+// mis-bind on an arity mismatch instead of erroring like the interpreter.
+//
+describe('Spread: compilation', () => {
+  const { compile } = require('../../src/compute-engine/compilation/compile-expression');
+
+  test('a tuple-typed argument compiles to positional accesses', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'tuple<number, number>');
+    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
+    const r = compile(ce.box(['a', ['Spread', 'p']]));
+    expect(r?.success).toBe(true);
+    expect(r!.run!({ p: [3, 4] })).toBe(11);
+  });
+
+  test('a raw-held spread under a lazy numeric head compiles', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'tuple<number, number>');
+    const r = compile(ce.box(['Add', 5, ['Spread', 'p']]));
+    expect(r?.success).toBe(true);
+    expect(r!.run!({ p: [3, 4] })).toBe(12);
+  });
+
+  test('a literal tuple spread compiles (spliced at canonicalization)', () => {
+    const ce = new ComputeEngine();
+    const r = compile(ce.box(['Add', ['Spread', ['Tuple', 1, 2, 3]], 10]));
+    expect(r?.success).toBe(true);
+    expect(r!.run!()).toBe(16);
+  });
+
+  test('a variadic built-in over a typed tuple compiles', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'tuple<number, number>');
+    const r = compile(ce.box(['Max', ['Spread', 'p']]));
+    expect(r?.success).toBe(true);
+    expect(r!.run!({ p: [7, 3] })).toBe(7);
+  });
+
+  test('unknown arity fails closed', () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
+    const r = compile(ce.box(['a', ['Spread', 'w']]));
+    expect(r?.success).toBe(false);
+  });
+
+  test('compiled and interpreted results agree', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'tuple<number, number>');
+    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
+    const expr = ce.box(['a', ['Spread', 'p']]);
+    const r = compile(expr);
+    expect(r?.success).toBe(true);
+    ce.assign('p', ce.box(['Tuple', 3, 4]));
+    expect(expr.evaluate().isSame(r!.run!({ p: [3, 4] }))).toBe(true);
+  });
+});

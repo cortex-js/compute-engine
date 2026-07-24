@@ -106,12 +106,31 @@ compilation today throws, so it costs nothing on ordinary scalar comparisons.
 (The runtime-guard cost belongs to the *Complex values in compiled scalar
 comparisons* item below, which is a different change and stays deferred.)
 
-**Do the semantics decision first — it is the real blocker, not the codegen.**
-The purity and truncation questions below are interpreter-level rulings whose
-blast radius is wider than compilation; settle them, then implement against the
-settled spec. Sequencing note: the missing-value batch is committed but
-unreleased and Tycho has been told it ships next, so land this in a *later*
-release rather than stacking two comparison-semantics shifts into one adoption.
+**The semantics are now RULED (user-ratified 2026-07-24)** — both align the
+comparison/connective broadcast with what the arithmetic broadcast already
+does (measured beforehand: arithmetic evaluates an impure scalar operand
+once and errors on length mismatch; comparisons re-evaluated per element and
+silently truncated — `Less([1,2,3],[2,2])` → `[True, False]`):
+
+1. **Purity: broadcast operands are evaluated ONCE**, then the operation maps
+   over cells (the NumPy/Julia/R model — broadcasting is an operation on
+   values). `L < Random()` draws one number. Per-cell draws are written
+   explicitly: `Map(L, l ↦ l < Random())`. The current per-element
+   re-evaluation in `broadcastComparison` is an implementation artifact, not
+   a semantic. Breaking surface: impure *scalar* operands under
+   comparison/connective broadcast only.
+2. **Length mismatch is an ERROR** (`incompatible-dimensions`), exactly like
+   the arithmetic broadcast and the boolean-mask ruling. No truncation, no
+   recycling. Scalar-vs-list is the lift, not a mismatch. A lazy/unbounded
+   operand against a finite one errors on the count comparison (no
+   materialization); unbounded-vs-unbounded declines as today. This also
+   dissolves the pre-scan/suffix-inspection concern below: under strict-zip
+   the length check is O(1) and no element is inspected out of order.
+
+**Sequencing (unchanged):** the missing-value batch is committed but
+unreleased and Tycho has been told it ships next, so implement the interpreter
+ruling changes AND the element-wise lowering together in a *later* release
+rather than stacking a third comparison-semantics shift into that adoption.
 
 Background: these heads lower to raw JS infix operators, which are silently
 wrong on an array — `0 < [1,0,1]` stringifies it to `"1,0,1"` and yields a

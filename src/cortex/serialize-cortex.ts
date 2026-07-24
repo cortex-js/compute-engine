@@ -486,6 +486,84 @@ export function serializeCortex(
     // `Assign` (including an UNANNOTATED function literal) keeps the generic
     // infix `a = b` form (unchanged).
     //
+    //
+    // Declarations: reconstruct the `let`/`const` statement syntax.
+    //
+    //   ["Declare", "x"]                              → let x
+    //   ["Declare", "x", {str:"real"}]                → let x: real
+    //   ["Declare", "x", {value -> v}]                → let x = v
+    //   ["Declare", "x", {str:"real"}, {value -> v}]  → let x: real = v
+    //   …with a `constant -> True` attribute          → const …
+    //   ["Declare", ["Tuple", …], {value -> v}]       → let (x, y) = v
+    //
+    // Any other shape — extra attributes (`holdUntil`), a computed name, a
+    // pattern whose leaves are not symbols — has no `let` spelling and falls
+    // back to the generic function form.
+    //
+    Declare: (expr: MathJsonExpression): FormattingBlock => {
+      const args = operands(expr);
+      if (args.length < 1 || args.length > 3)
+        return serializeGenericFunction(expr);
+
+      // The declared name: a symbol, or a destructuring Tuple pattern whose
+      // leaves are all symbols.
+      const nameOp = args[0];
+      const isSymbolLeafPattern = (p: MathJsonExpression): boolean =>
+        operator(p) === 'Tuple' &&
+        nops(p) >= 2 &&
+        operands(p).every((el) => symbol(el) !== null || isSymbolLeafPattern(el));
+      const isPattern = isSymbolLeafPattern(nameOp);
+      if (!isPattern && symbol(nameOp) === null)
+        return serializeGenericFunction(expr);
+
+      // Optional positional type (a string or type-name symbol), optional
+      // trailing attributes dictionary.
+      let typeStr: string | null = null;
+      let attrsOp: MathJsonExpression | null = null;
+      for (const a of args.slice(1)) {
+        if (operator(a) === 'Dictionary') {
+          if (attrsOp !== null) return serializeGenericFunction(expr);
+          attrsOp = a;
+        } else {
+          const s = stringValue(a) ?? symbol(a);
+          if (s === null || typeStr !== null || attrsOp !== null)
+            return serializeGenericFunction(expr);
+          typeStr = s;
+        }
+      }
+
+      // The attributes bag: only `value` and `constant -> True` have a
+      // `let`/`const` spelling.
+      let valueOp: MathJsonExpression | null = null;
+      let isConst = false;
+      if (attrsOp !== null) {
+        for (const entry of operands(attrsOp)) {
+          if (operator(entry) !== 'KeyValuePair')
+            return serializeGenericFunction(expr);
+          const key =
+            stringValue(operand(entry, 1)) ?? symbol(operand(entry, 1));
+          if (key === 'value') valueOp = operand(entry, 2);
+          else if (key === 'constant') {
+            if (symbol(operand(entry, 2)) !== 'True')
+              return serializeGenericFunction(expr);
+            isConst = true;
+          } else return serializeGenericFunction(expr);
+        }
+      }
+
+      // A pattern requires an initializer and takes no type annotation.
+      if (isPattern && (typeStr !== null || valueOp === null))
+        return serializeGenericFunction(expr);
+
+      const parts: (string | FormattingBlock)[] = [
+        isConst ? 'const ' : 'let ',
+        serializeExpression(nameOp),
+      ];
+      if (typeStr !== null) parts.push(': ' + typeStr);
+      if (valueOp !== null) parts.push(' = ', serializeExpression(valueOp));
+      return fmt.line(...parts);
+    },
+
     Assign: (expr: MathJsonExpression): FormattingBlock => {
       const name = operand(expr, 1);
       const rhs = operand(expr, 2);

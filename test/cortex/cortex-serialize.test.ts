@@ -478,3 +478,43 @@ describe('CORTEX SERIALIZING SPREAD', () => {
     );
   });
 });
+
+// `Declare` reconstructs the `let`/`const` statement syntax; shapes with no
+// such spelling (extra attributes, a computed name) keep the generic form.
+describe('CORTEX SERIALIZING DECLARATIONS', () => {
+  const rt = (src: string) => {
+    const { parseCortex } = require('../../src/cortex/parse-cortex');
+    const strip = (x: any) =>
+      JSON.parse(
+        JSON.stringify(x, (k, v) => (k === 'sourceOffsets' ? undefined : v))
+      );
+    const [v] = parseCortex(src);
+    return serializeCortex(strip(v));
+  };
+
+  test('scalar declarations round-trip to their source form', () => {
+    expect(rt('let x = 5')).toBe('let x = 5');
+    expect(rt('const c = 6.28')).toBe('const c = 6.28');
+    expect(rt('let x')).toBe('let x');
+    expect(rt('let x: real')).toBe('let x: real');
+    expect(rt('let x: real = 5')).toBe('let x: real = 5');
+  });
+
+  test('destructuring declarations round-trip', () => {
+    expect(rt('let (x, y) = p')).toBe('let (x, y) = p');
+    expect(rt('const (q, r) = divmod(17, 5)')).toBe(
+      'const (q, r) = divmod(17, 5)'
+    );
+    expect(rt('let ((a, b), _, c) = t')).toBe('let ((a, b), _, c) = t');
+  });
+
+  test('inexpressible shapes fall back to the generic form', () => {
+    expect(
+      serializeCortex([
+        'Declare',
+        'x',
+        ['Dictionary', ['KeyValuePair', { sym: 'holdUntil' }, { str: 'never' }]],
+      ] as any)
+    ).toBe('Declare(x, {holdUntil -> "never"})');
+  });
+});

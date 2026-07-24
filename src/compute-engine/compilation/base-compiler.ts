@@ -294,11 +294,64 @@ export class BaseCompiler {
   /** The innermost compile target's `boundVars`, synced by `compile()`. */
   private static _boundVarsCtx: ReadonlySet<string> | undefined;
 
+  /**
+   * Statically splice `Spread` operands (`f(...p)`) into the call's argument
+   * list. A literal tuple splices directly; a symbolic argument whose STATIC
+   * type is a tuple of known arity n rewrites to n positional `At` accesses
+   * (`f(At(p,1), …, At(p,n))`). An argument whose arity is not statically
+   * known fails closed (D6): the compiled code could not re-validate the
+   * arity the interpreter enforces at splice time (a JS/Python dynamic
+   * spread would silently mis-bind on a mismatch instead of erroring).
+   */
+  private static spliceSpreadOperands(expr: Expression): Expression {
+    if (!isFunction(expr)) return expr;
+    const ce = expr.engine;
+    const ops: Expression[] = [];
+    for (const x of expr.ops) {
+      if (x.operator !== 'Spread' || !isFunction(x) || x.nops !== 1) {
+        ops.push(x);
+        continue;
+      }
+      // A lazy parent (e.g. `Add`'s canonical handler) holds its operands
+      // raw, so the Spread's argument may be unbound here — `.canonical` is
+      // value-safe (binds structure, does not substitute assigned values)
+      // and is required to read the declared type.
+      const arg = x.op1.canonical;
+      if (isFunction(arg, 'Tuple')) {
+        ops.push(...arg.ops);
+        continue;
+      }
+      const t = arg.type.type;
+      if (typeof t !== 'string' && t.kind === 'tuple') {
+        for (let i = 1; i <= t.elements.length; i++)
+          ops.push(ce.function('At', [arg, ce.number(i)]));
+        continue;
+      }
+      throw new Error(
+        `Spread: cannot compile — the argument's tuple arity is not ` +
+          `statically known (type '${arg.type.toString()}'). Annotate it ` +
+          `with a tuple type, or evaluate first. Fail closed (D6).`
+      );
+    }
+    return ce.function(expr.operator, ops);
+  }
+
   private static _compileInner(
     expr: Expression,
     target: CompileTarget<Expression>,
     prec = 0
   ): TargetSource {
+    // `f(...p)` — a `Spread` operand splices a tuple into the call's
+    // arguments. Rewrite statically and re-enter compilation; the rewrite is
+    // target-agnostic (it lowers to positional `At` accesses, which each
+    // target compiles with its own indexing rules).
+    if (isFunction(expr) && expr.ops.some((x) => x.operator === 'Spread'))
+      return BaseCompiler.compile(
+        BaseCompiler.spliceSpreadOperands(expr),
+        target,
+        prec
+      );
+
     // Is it a symbol?
     if (isSymbol(expr)) {
       const s = expr.symbol;
