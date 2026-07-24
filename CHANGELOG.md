@@ -173,7 +173,14 @@
   (wrong length, or not a tuple) yields an `incompatible-type` error value and
   binds nothing. `const (x, y) = …` makes each binding constant. Lowers to the
   `Declare` primitive with a `Tuple` pattern in the name position, which now
-  accepts it on all routes:
+  accepts it on all routes.
+
+  In **compiled** code, a destructuring declare with a literal tuple value
+  desugars to per-leaf declares (each element bound once, in order); a
+  non-literal value or a shape mismatch fails closed so the interpreter takes
+  over. (This also fixes a silent divergence: the pattern previously compiled
+  as a single `let _ = …`, and every pattern name read as NaN behind
+  `success: true`.)
 
   ```js
   ce.box(['Declare', ['Tuple', 'x', 'y'], d]).evaluate(); // d = {value: (3, 4)}

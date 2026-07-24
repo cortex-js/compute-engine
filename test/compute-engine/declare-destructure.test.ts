@@ -79,3 +79,65 @@ describe('Declare with a Tuple pattern', () => {
     expect(r.operator).toBe('Declare');
   });
 });
+
+//
+// Compilation: a destructuring declare with a LITERAL tuple value desugars to
+// per-leaf declares (each element bound once, in order — observationally
+// identical to the interpreter). A non-literal value or a shape mismatch
+// fails closed (D6) so the engine falls back to the interpreter. Regression:
+// the pattern used to compile as a single `let _ = …`, silently yielding NaN
+// behind `success: true`.
+//
+describe('Declare with a Tuple pattern: compilation', () => {
+  const {
+    compile,
+  } = require('../../src/compute-engine/compilation/compile-expression');
+  const { parseCortex } = require('../../src/cortex/parse-cortex');
+  const strip = (x: any) =>
+    JSON.parse(
+      JSON.stringify(x, (k, v) => (k === 'sourceOffsets' ? undefined : v))
+    );
+  const boxed = (src: string) => {
+    const ce = new ComputeEngine();
+    const [ast] = parseCortex(src);
+    return ce.box(strip(ast));
+  };
+
+  test('a literal tuple value compiles and matches the interpreter', () => {
+    const expr = boxed('do { let (a, b) = (3, 4); 10*a + b }');
+    const r = compile(expr);
+    expect(r?.success).toBe(true);
+    expect(r!.run!()).toBe(34);
+    expect(expr.evaluate().isSame(34)).toBe(true);
+  });
+
+  test('nested patterns and wildcards compile', () => {
+    const nested = compile(
+      boxed('do { let ((a, b), c) = ((1, 2), 5); a + b + c }')
+    );
+    expect(nested?.success).toBe(true);
+    expect(nested!.run!()).toBe(8);
+    const wild = compile(boxed('do { let (a, _, c) = (1, 99, 5); a + c }'));
+    expect(wild?.success).toBe(true);
+    expect(wild!.run!()).toBe(6);
+  });
+
+  test('complex-valued leaves flow through the complex inference', () => {
+    const r = compile(boxed('do { let (a, b) = (2 + 3i, 1 - i); a * b }'));
+    expect(r?.success).toBe(true);
+    expect(r!.run!()).toEqual({ re: 5, im: 1 });
+  });
+
+  test('a non-literal tuple value fails closed (interpreter fallback)', () => {
+    const expr = boxed('do { let p = (3, 4); let (x, y) = p; 10*x + y }');
+    const r = compile(expr);
+    expect(r?.success).toBe(false);
+    // The interpreter handles it correctly.
+    expect(expr.evaluate().isSame(34)).toBe(true);
+  });
+
+  test('a shape mismatch fails closed', () => {
+    const r = compile(boxed('do { let (x, y, z) = (1, 2); 0 }'));
+    expect(r?.success).toBe(false);
+  });
+});

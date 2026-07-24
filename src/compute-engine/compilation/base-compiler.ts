@@ -858,6 +858,14 @@ export class BaseCompiler {
     }
 
     if (h === 'Declare') {
+      // A destructuring declare (`let (x, y) = …`) is desugared at the block
+      // level; a bare one reaching here would compile as `let _ = …` and its
+      // pattern names would silently read as NaN — fail closed (D6).
+      if (isFunction(args[0], 'Tuple'))
+        throw new Error(
+          `Cannot compile a destructuring declaration outside a block. ` +
+            `Fail closed (D6).`
+        );
       const name = isSymbol(args[0]) ? args[0].symbol : '_';
       // Targets with a `declare` hook handle any initial value at the block
       // level (as a separate assignment statement — see `compileBlock`). For
@@ -1492,12 +1500,91 @@ export class BaseCompiler {
   }
 
   /**
+   * Desugar a destructuring `Declare` statement (`let (x, y) = (…, …)`) into
+   * per-leaf declares, so locals collection, complex/vector inference and
+   * every target's statement emitter see only plain scalar declares. Returns
+   * `null` when the statement is not a destructuring declare.
+   *
+   * Only a LITERAL tuple value lowers: each element expression is bound
+   * exactly once, in pattern order, so the rewrite is observationally
+   * identical to the interpreter's evaluate-once semantics. A `_` leaf keeps
+   * its element as a bare statement (its evaluation still happens). A
+   * non-literal value (a symbol, a call) has no sound static lowering
+   * without a typed temporary, and a shape mismatch is an interpreter error
+   * — both fail closed (D6) so the engine falls back to the interpreter.
+   * (Without this, the pattern compiled as a single `let _ = …` and every
+   * pattern name silently read as NaN.)
+   */
+  private static desugarPatternDeclare(
+    arg: Expression
+  ): ReadonlyArray<Expression> | null {
+    if (!isFunction(arg, 'Declare') || !isFunction(arg.ops[0], 'Tuple'))
+      return null;
+    const ce = arg.engine;
+    const out: Expression[] = [];
+    const walk = (
+      pattern: Expression,
+      v: Expression | undefined
+    ): void => {
+      if (!isFunction(pattern, 'Tuple'))
+        throw new Error(
+          `Cannot compile a destructuring declaration: the pattern is not a ` +
+            `tuple. Fail closed (D6).`
+        );
+      if (v === undefined || !isFunction(v, 'Tuple'))
+        throw new Error(
+          `Cannot compile a destructuring declaration whose value is not a ` +
+            `literal tuple` +
+            (v === undefined ? '' : ` (got '${v.type.toString()}')`) +
+            `. Fail closed (D6) — the interpreter evaluates it.`
+        );
+      if (pattern.nops !== v.nops)
+        throw new Error(
+          `Cannot compile a destructuring declaration: the pattern has ` +
+            `${pattern.nops} positions but the value tuple has ${v.nops}. ` +
+            `Fail closed (D6).`
+        );
+      for (let i = 0; i < pattern.nops; i++) {
+        const p = pattern.ops[i];
+        const el = v.ops[i];
+        if (isFunction(p, 'Tuple')) {
+          walk(p, el);
+          continue;
+        }
+        if (!isSymbol(p))
+          throw new Error(
+            `Cannot compile a destructuring declaration: a pattern position ` +
+              `is not a symbol. Fail closed (D6).`
+          );
+        if (p.symbol === '_') {
+          out.push(el);
+          continue;
+        }
+        out.push(ce._fn('Declare', [p, ce.string('unknown'), el]));
+      }
+    };
+    walk(arg.ops[0], BaseCompiler.declareValueOperand(arg.ops));
+    return out;
+  }
+
+  /**
    * Compile a block expression
    */
   private static compileBlock(
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): TargetSource {
+    // Desugar destructuring declares first, so the locals collection and the
+    // inference below see only plain scalar declares.
+    if (
+      args.some(
+        (a) => isFunction(a, 'Declare') && isFunction(a.ops[0], 'Tuple')
+      )
+    )
+      args = args.flatMap(
+        (a) => BaseCompiler.desugarPatternDeclare(a) ?? [a]
+      );
+
     // Get all the Declare statements
     const locals: string[] = [];
     for (const arg of args) {
@@ -3615,9 +3702,20 @@ export class BaseCompiler {
       }
       if (h === 'Block') {
         const locals: string[] = [];
+        // A destructuring declare (`let (x, y) = …`) binds every symbol leaf
+        // of its tuple pattern (`_` binds nothing; patterns nest).
+        const collectPatternLeaves = (p: Expression): void => {
+          if (isSymbol(p)) {
+            if (p.symbol !== '_') locals.push(p.symbol);
+          } else if (isFunction(p, 'Tuple'))
+            for (const el of p.ops) collectPatternLeaves(el);
+        };
         for (const stmt of ops)
-          if (isFunction(stmt, 'Declare') && isSymbol(stmt.ops[0]))
-            locals.push(stmt.ops[0].symbol);
+          if (isFunction(stmt, 'Declare')) {
+            if (isSymbol(stmt.ops[0])) locals.push(stmt.ops[0].symbol);
+            else if (isFunction(stmt.ops[0], 'Tuple'))
+              collectPatternLeaves(stmt.ops[0]);
+          }
         const inner = locals.length ? union(bound, locals) : bound;
         for (const op of ops) visit(op, inner);
         return;
