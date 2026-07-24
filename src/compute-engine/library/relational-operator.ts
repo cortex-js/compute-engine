@@ -12,7 +12,7 @@ import { eq } from '../boxed-expression/compare.js';
 import {
   isNumber,
   isFunction,
-  isAbsentValue,
+  isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { typeContainsMissing } from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
@@ -197,14 +197,15 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     lazy: true,
 
-    // Kleene equality over absence (§3.D). An absent operand — `Missing`, or a
-    // `NaN` (provenance irrelevant, I6) — makes the comparison `Missing`, NOT
-    // `False` (`Equal(NaN, NaN) = Missing`; R: `NaN == 1` is `NA`). Declared
-    // `handle` so a `Missing` operand validates (its `missing` arm is stripped
-    // against the `any` parameter, which already admits it, but the handle
-    // declaration keeps the gate off the propagate path). Result type: `missing`
-    // when an operand is definitely absent, `boolean | missing` when only
-    // possibly (an operand's type carries the arm), `boolean` otherwise.
+    // Comparisons follow IEEE 754 for `NaN` and Kleene for the `Missing` symbol
+    // (the Julia model, §3.D amended 2026-07-24). A `Missing` operand makes the
+    // comparison `Missing` (Kleene); a `NaN` operand makes it `False` (IEEE:
+    // `NaN == NaN` is `false`). Declared `handle` so a `Missing` operand
+    // validates (its `missing` arm is stripped against the `any` parameter,
+    // which already admits it, but the handle declaration keeps the gate off the
+    // propagate path). Result type: `missing` when an operand is definitely
+    // absent, `boolean | missing` when only possibly (an operand's type carries
+    // the arm), `boolean` otherwise.
     missingBehavior: 'handle',
 
     type: (ops) => {
@@ -338,12 +339,15 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         const bc = broadcastComparison(ce, 'Equal', ops, numericApproximation);
         if (bc) return bc;
       }
-      // Kleene absence (§3.D): once broadcast has had its chance (so a
-      // list-vs-scalar operand comparison is per-cell), a SCALAR absent operand
-      // — `Missing` or `NaN` — makes the whole comparison `Missing`. Per-cell
-      // broadcast re-enters this handler on scalar cells, so the rule applies
+      // Absence semantics (§3.D, amended 2026-07-24): once broadcast has had
+      // its chance (so a list-vs-scalar operand comparison is per-cell), a
+      // SCALAR `Missing` operand makes the comparison `Missing` (Kleene), while
+      // a `NaN` operand makes it `False` (IEEE: `NaN == NaN` is `false`).
+      // `Missing` wins over `NaN` (Kleene propagation). Per-cell broadcast
+      // re-enters this handler on scalar cells, so the rule applies
       // element-wise too.
-      if (ops.some((op) => isAbsentValue(op))) return ce.Missing;
+      if (ops.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
+      if (ops.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
       let lhs: Expression | undefined = undefined;
       for (const arg of ops) {
         if (!lhs) lhs = arg;
@@ -382,6 +386,15 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
 
     signature: '(any, any) -> boolean',
+
+    // Kleene over the `Missing` symbol, IEEE over `NaN` (§3.D, family coherence
+    // with `Equal`, amended 2026-07-24): `NotEqual(Missing, x) = Missing`;
+    // `NotEqual(NaN, x) = True` (IEEE: `NaN != x` is `true`, incl. `NaN != NaN`).
+    // Declared `handle` so a `Missing` operand validates and the propagate gate
+    // stays off.
+    missingBehavior: 'handle',
+
+    type: relationalAbsenceType,
 
     // Broadcast element-wise over a list operand (list-vs-scalar only; see
     // `Equal` above and `skipBroadcastForVectorOps`).
@@ -426,6 +439,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         );
         if (bc) return bc;
       }
+      // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`
+      // (`NotEqual(Missing, x) = Missing`), IEEE over `NaN` (`NotEqual(NaN, x)
+      // = True`). `Missing` wins over `NaN`.
+      if (ops.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
+      if (ops.some((op) => isNumber(op) && op.isNaN === true)) return ce.True;
       let lhs: Expression | undefined = undefined;
       for (const arg of ops!) {
         if (!lhs) lhs = arg;
@@ -460,6 +478,16 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
     signature: '(any, any+) -> boolean',
 
+    // Kleene over the `Missing` symbol, IEEE over `NaN` (§3.D, family coherence,
+    // amended 2026-07-24): a `Missing` operand makes the ordering `Missing`; a
+    // `NaN` operand makes it `False` (IEEE: `NaN` is unordered). `Greater`/
+    // `GreaterEqual` canonicalize to `Less`/`LessEqual`, so this handler (and
+    // `LessEqual`'s) covers all four orderings. Declared `handle` so a `Missing`
+    // operand validates and the propagate gate stays off.
+    missingBehavior: 'handle',
+
+    type: relationalAbsenceType,
+
     lazy: true,
     // Broadcast element-wise over a list operand so `L > 0` (canonicalizes to
     // `Less(0, L)`) yields a `list<boolean>` mask for Desmos `L[L>0]` filtering.
@@ -478,6 +506,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       // `|[1...5]-2| > 0`, canonical `Less(0, Abs(…))`). See `broadcastComparison`.
       const bc = broadcastComparison(ce, 'Less', ops, numericApproximation);
       if (bc) return bc;
+      // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`,
+      // IEEE over `NaN` (unordered ⇒ `False`). Applies per-cell too (broadcast
+      // re-enters this handler on scalar cells).
+      if (ops.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
+      if (ops.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
       if (ops.length === 2) {
         const [lhs, rhs] = ops;
         // Try quantity comparison first
@@ -545,6 +578,13 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
     signature: '(any, any+) -> boolean',
 
+    // Kleene over the `Missing` symbol, IEEE over `NaN` (§3.D, family coherence,
+    // amended 2026-07-24); see `Less`. Covers `GreaterEqual` too (canonicalizes
+    // here).
+    missingBehavior: 'handle',
+
+    type: relationalAbsenceType,
+
     lazy: true,
     // Broadcast element-wise over a list operand (see `Less`).
     broadcastable: true,
@@ -564,6 +604,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         numericApproximation
       );
       if (bc) return bc;
+      // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`,
+      // IEEE over `NaN` (unordered ⇒ `False`). See `Less`.
+      if (ops.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
+      if (ops.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
       if (ops.length === 2) {
         const [lhs, rhs] = ops;
         const qcmp = quantityCompare(lhs, rhs);
@@ -788,6 +832,28 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       engine._fn('Not', [canonicalRelational(engine, 'Succeeds', args)]),
   },
 };
+
+/**
+ * Result-type handler for the absence-aware relational operators (`NotEqual`,
+ * `Less`, `LessEqual`; `Equal` inlines the same rule). Mirrors §3.D: a
+ * definitely-absent operand (`missing`) makes the result `missing`; a
+ * possibly-absent operand (an operand type carrying a `missing` arm) makes it
+ * `boolean | missing`; otherwise `boolean` (unchanged). A `NaN` operand is not
+ * visible at the type level (its static type is `number`), so it does not
+ * widen the result type — the IEEE `False`/`True` is a runtime-only outcome.
+ */
+function relationalAbsenceType(ops: ReadonlyArray<Expression>) {
+  let definite = false;
+  let possible = false;
+  for (const op of ops) {
+    const t = op.type.type;
+    if (t === 'missing') definite = true;
+    else if (typeContainsMissing(t)) possible = true;
+  }
+  if (definite) return 'missing';
+  if (possible) return parseType('boolean | missing');
+  return 'boolean';
+}
 
 /**
  * Post-evaluation element-wise broadcast for the `lazy` comparison operators.

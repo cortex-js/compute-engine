@@ -182,6 +182,16 @@ accepts a single collection of strings, including a lazy `Map` result, so
 - **String concatenation stays interpolation + `StringJoin` (decided
   2026-07-11).** No `+` overload or dedicated operator; `"a" + "b"` remains a
   type error by design.
+- **Loop accumulation builds an O(n)-deep lazy `Join` chain (M — found by the
+  2026-07-24 agent eval, see `agent-eval-2026-07-24.md`).** The documented
+  idiom `for k in 1..n { xs = Join(xs, [k]) }` stores `xs` as an n-deep
+  `["Join",["Join",…]]` tree — every later operation re-walks (and recurses
+  through) the chain, and its `toMathJson()` serializes the recipe. A
+  targeted fix (eagerly flatten `Join` when all operands are materialized
+  lists, below a size cap) must respect the deliberate Join laziness and the
+  0.92.1 tuple-atomic Join semantics — needs its own design pass. The CLI
+  `--json` materialization (2026-07-24) hides the symptom for display but
+  not the accumulation cost.
 
 ### Language-design candidates from the examples sweep 2 (2026-07-11)
 

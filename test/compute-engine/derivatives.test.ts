@@ -64,7 +64,7 @@ describe('Derivative', () => {
   it('should compute the derivative of a function', () => {
     const expr = engine.expr(['Derivative', 'Sin']);
     const result = expr.evaluate();
-    expect(result.latex).toMatchInlineSnapshot(`\\cos(\\operatorname{\\_})`);
+    expect(result.latex).toMatchInlineSnapshot(`x\\mapsto\\cos(x)`);
   });
 
   it('should compute higher order derivatives', () => {
@@ -74,7 +74,7 @@ describe('Derivative', () => {
       2,
     ]);
     const result = expr.evaluate();
-    expect(result.latex).toMatchInlineSnapshot(`2`);
+    expect(result.latex).toMatchInlineSnapshot(`x\\mapsto2`);
   });
 });
 

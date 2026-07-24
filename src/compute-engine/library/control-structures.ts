@@ -536,9 +536,11 @@ function isBooleanishCondition(evaluated: Expression): boolean {
   // A broadcast (list) condition is held when every cell is boolean — or ABSENT
   // (`Missing`/`NaN`), which is Kleene-undecidable, so the `Which` stays held
   // rather than crashing the surrounding comprehension. This surfaces when a
-  // broadcast condition contains a Kleene-`Equal` result (`Equal(NaN, k) =
-  // Missing`, §3.D). A SCALAR absent condition still fails closed (throws),
-  // unchanged.
+  // broadcast condition contains a Kleene-`Missing` comparison cell (§3.D,
+  // amended 2026-07-24: `Missing` is Kleene, so `Equal(Missing, k)` /
+  // `Less(Missing, k)` are `Missing`; a `NaN` cell is IEEE and yields a plain
+  // boolean, which is already covered). A SCALAR absent condition still fails
+  // closed (throws), unchanged.
   return (
     items.length > 0 &&
     items.every(

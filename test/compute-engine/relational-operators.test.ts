@@ -479,3 +479,27 @@ describe('Equal over an operand that only becomes a collection at evaluation (Ty
     expect(oce.parse('q(2) \\ne 9').evaluate().json).toBe('False');
   });
 });
+
+describe('Absence in comparisons: IEEE over NaN, Kleene over Missing (§3.D)', () => {
+  // Amended 2026-07-24 (Julia model): NaN follows IEEE 754 (`NaN == NaN` is
+  // false, and NaN is unordered so orderings are false), while the `Missing`
+  // symbol is Kleene (`Missing == x` is `Missing`). Discharge/aggregates are
+  // unaffected (see missing-value.test.ts).
+  test('NaN is IEEE', () => {
+    expect(ce.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('False');
+    expect(ce.box(['NotEqual', 'NaN', 'NaN']).evaluate().symbol).toBe('True');
+    expect(ce.box(['Less', 'NaN', 1]).evaluate().symbol).toBe('False');
+    expect(ce.box(['Greater', 'NaN', 1]).evaluate().symbol).toBe('False');
+    expect(ce.box(['LessEqual', 'NaN', 1]).evaluate().symbol).toBe('False');
+    expect(ce.box(['GreaterEqual', 'NaN', 1]).evaluate().symbol).toBe('False');
+  });
+
+  test('the Missing symbol is Kleene', () => {
+    expect(ce.box(['Equal', 2, 'Missing']).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['NotEqual', 'Missing', 1]).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['Less', 'Missing', 1]).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['GreaterEqual', 'Missing', 1]).evaluate().symbol).toBe(
+      'Missing'
+    );
+  });
+});

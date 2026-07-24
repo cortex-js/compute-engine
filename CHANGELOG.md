@@ -70,27 +70,47 @@
   ce.box(['Mean', ['List']]).evaluate(); // → NaN
   ```
 
-- **`Equal` is now Kleene over absence: `Equal(NaN, NaN)` is `Missing`, not
-  `False`.** If either operand is absent — the `Missing` symbol, or a `NaN`
-  (provenance irrelevant) — the comparison is `Missing`, diverging from native
-  float `==`. Broadcast comparisons apply the rule per cell. Compiled JS/Python
-  emit the guarded form `isAbsent(a) || isAbsent(b) ? null : a == b`; a
-  Missing-free comparison keeps the plain, unguarded codegen.
+- **Comparisons follow IEEE 754 for `NaN` and Kleene for the `Missing` symbol,
+  across the whole relational family** (`Equal`, `NotEqual`, `Less`,
+  `LessEqual`, `Greater`, `GreaterEqual`). This is the Julia model:
+
+  - The **`Missing` symbol is Kleene** — a comparison with a `Missing` operand
+    is itself `Missing`: `Equal(x, Missing) = Missing`,
+    `NotEqual(Missing, x) = Missing`, `Less(Missing, 1) = Missing`. (An ordering
+    with a `Missing` operand previously stayed symbolically unevaluated.)
+  - **`NaN` follows IEEE** — `NaN` is unequal to everything (including itself)
+    and unordered: `Equal(NaN, NaN) = False`, `NotEqual(NaN, x) = True`, and
+    every ordering with a `NaN` operand is `False`. The `Equal`/`NotEqual`
+    results match native float `==`/`!=`; the **ordering comparisons with `NaN`
+    previously stayed symbolic** (`NaN < 1` was inert), so they now resolve to
+    `False`.
 
   ```js
-  ce.box(['Equal', 'NaN', 'NaN']).evaluate(); // → Missing
-  ce.box(['Equal', 2, 'Missing']).evaluate(); // → Missing
-  ce.box(['Equal', 2, 2]).evaluate(); // → True   (unchanged)
+  ce.box(['Equal', 'NaN', 'NaN']).evaluate(); // → False    (IEEE)
+  ce.box(['Less', 'NaN', 1]).evaluate(); // → False         (IEEE unordered)
+  ce.box(['Equal', 2, 'Missing']).evaluate(); // → Missing  (Kleene)
+  ce.box(['Less', 'Missing', 1]).evaluate(); // → Missing   (Kleene)
+  ce.box(['Equal', 2, 2]).evaluate(); // → True             (unchanged)
   ```
 
-  Two known limitations, tracked in `ROADMAP.md`: a comparison whose operands
-  are typed plain `number` (no `missing` arm) keeps the static type `boolean`
-  and the unguarded codegen, so **compiled** `Equal` over such operands still
-  returns `false` for `NaN == NaN` where the interpreter returns `Missing`;
-  and a scalar `If`/`Which` condition that evaluates to `Missing` throws
-  (`Condition must evaluate to "True" or "False"`), as any non-boolean scalar
-  condition already did — comparisons that may involve `NaN` should be
-  discharged with `Coalesce`/`IsMissing` before use as a condition.
+  Absence for **discharge** (`IsMissing`, `Coalesce`) and **aggregates**
+  (`Max`, `Mean`, …) is unaffected — a `NaN` is still absent there
+  (`IsMissing(NaN) = True`, `Coalesce(NaN, d) = d`, `Max(1, NaN, 3) = NaN`).
+  Broadcast comparisons apply the rule per cell. Because `NaN` follows IEEE,
+  **compiled and interpreted comparisons now agree by construction** on numeric
+  operands (plain `==` is the IEEE semantics — no guard is emitted, and
+  `NaN == NaN` compiles to `false`). A `missing`-arm operand over an object
+  domain (e.g. `string | missing`) still lowers via the guarded form
+  (`isAbsent(a) || isAbsent(b) ? null : a == b`) so a `Missing` becomes the
+  target null. A scalar `If`/`Which` condition that evaluates to **`Missing`**
+  still throws (`Condition must evaluate to "True" or "False"`), as any
+  non-boolean scalar condition does — a `NaN`-comparison condition now yields a
+  plain boolean and no longer throws. Discharge a possibly-`Missing` condition
+  with `Coalesce`/`IsMissing` first.
+
+- **Compiled `Max([])` / `Min([])` now return `NaN`, matching the
+  interpreter** (previously `-Infinity` / `+Infinity` from the identity-seeded
+  reduce). Non-empty folds are unchanged.
 
 ### New Features
 
@@ -149,6 +169,18 @@
 
 ### Improvements
 
+- **An unapplied `Derivative(f)` now evaluates to a named-parameter function
+  literal.** `Derivative(Sin)` evaluates to `x ↦ cos(x)` (`["Function",
+  ["Cos","x"],"x"]`) instead of the hole-form `cos(_)`, which was typed
+  `finite_number` — so a stored derivative is now callable:
+  `let g = Derivative(f); g(2)` works instead of erroring with
+  `incompatible-type`. Results with no closed form stay symbolic, and the
+  multivariate mixed-partial form no longer throws
+  `Function body must be a scoped Block expression` when applied.
+- **The Cortex CLI's `--json` output materializes finite lazy collections.**
+  `Range`, `Map`/`Filter` results, and loop-built `Join` chains now serialize
+  as their elements (`["List", 1, 2, …]`, up to 10,000) instead of their
+  unevaluated recipe; infinite collections keep the structural form.
 - **Cortex trap lints and better "did you mean" suggestions.** Three common
   cross-language reflexes that previously failed *silently* now produce an
   advisory warning (the parse and value are unchanged): `=` inside a call

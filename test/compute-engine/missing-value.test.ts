@@ -650,37 +650,76 @@ describe('P3 — Coalesce (§3.D)', () => {
   });
 });
 
-describe('P3 — Kleene Equal (§3.D, BREAKING)', () => {
-  test('an absent operand makes Equal Missing (not False)', () => {
+describe('P3 — relational absence: IEEE over NaN, Kleene over Missing (§3.D, amended 2026-07-24)', () => {
+  test('Equal: a Missing operand is Kleene (Missing), a NaN operand is IEEE (False)', () => {
+    // Kleene: the `Missing` symbol.
     expect(ce.box(['Equal', 2, 'Missing']).evaluate().symbol).toBe('Missing');
     expect(ce.box(['Equal', 'Missing', 'Missing']).evaluate().symbol).toBe(
       'Missing'
     );
-    expect(ce.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('Missing');
-    expect(ce.box(['Equal', 'NaN', 2]).evaluate().symbol).toBe('Missing');
+    // IEEE: NaN (even NaN == NaN is False).
+    expect(ce.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('False');
+    expect(ce.box(['Equal', 'NaN', 2]).evaluate().symbol).toBe('False');
   });
 
-  test('an ordinary comparison is unchanged', () => {
+  test('NotEqual: Missing is Kleene (Missing), NaN is IEEE (True)', () => {
+    expect(ce.box(['NotEqual', 'Missing', 1]).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['NotEqual', 'NaN', 'NaN']).evaluate().symbol).toBe('True');
+    expect(ce.box(['NotEqual', 'NaN', 2]).evaluate().symbol).toBe('True');
+    expect(ce.box(['NotEqual', 2, 3]).evaluate().symbol).toBe('True');
+  });
+
+  test('ordering comparisons: Missing is Kleene (Missing), NaN is IEEE (False, unordered)', () => {
+    // Less / LessEqual directly.
+    expect(ce.box(['Less', 'NaN', 1]).evaluate().symbol).toBe('False');
+    expect(ce.box(['LessEqual', 'NaN', 1]).evaluate().symbol).toBe('False');
+    expect(ce.box(['Less', 'Missing', 1]).evaluate().symbol).toBe('Missing');
+    // Greater / GreaterEqual canonicalize to Less / LessEqual — same outcome.
+    expect(ce.box(['Greater', 'NaN', 1]).evaluate().symbol).toBe('False');
+    expect(ce.box(['GreaterEqual', 'NaN', 1]).evaluate().symbol).toBe('False');
+    expect(ce.box(['Greater', 'Missing', 1]).evaluate().symbol).toBe('Missing');
+    expect(ce.box(['GreaterEqual', 'Missing', 1]).evaluate().symbol).toBe(
+      'Missing'
+    );
+  });
+
+  test('ordinary comparisons are unchanged', () => {
     expect(ce.box(['Equal', 2, 2]).evaluate().symbol).toBe('True');
     expect(ce.box(['Equal', 2, 3]).evaluate().symbol).toBe('False');
+    expect(ce.box(['Less', 1, 2]).evaluate().symbol).toBe('True');
+    expect(ce.box(['NotEqual', 2, 3]).evaluate().symbol).toBe('True');
   });
 
-  test('result type: missing / boolean | missing / boolean', () => {
+  test('result type: missing / boolean | missing / boolean (unchanged, family-wide)', () => {
     const e = new ComputeEngine();
     e.declare('q', 'number | missing');
+    // Definite Missing operand → missing.
     expect(e.box(['Equal', 'x', 'Missing']).type.toString()).toBe('missing');
+    expect(e.box(['Less', 'x', 'Missing']).type.toString()).toBe('missing');
+    expect(e.box(['NotEqual', 'x', 'Missing']).type.toString()).toBe('missing');
+    // A `missing`-arm operand → boolean | missing.
     expect(e.box(['Equal', 'q', 2]).type.matches('boolean | missing')).toBe(
       true
     );
+    expect(e.box(['Less', 'q', 2]).type.matches('boolean | missing')).toBe(
+      true
+    );
+    // Otherwise boolean (unchanged).
     expect(e.box(['Equal', 2, 3]).type.toString()).toBe('boolean');
+    expect(e.box(['Less', 2, 3]).type.toString()).toBe('boolean');
   });
 
-  test('broadcast is per-cell Kleene', () => {
+  test('broadcast is per-cell (Kleene Missing / IEEE NaN)', () => {
     const v = ce.box(['Equal', ['List', 1, 'Missing', 3], 1]).evaluate();
     expect(v.operator).toBe('List');
     expect(v.op1.symbol).toBe('True');
     expect(v.op2.symbol).toBe('Missing');
     expect(v.op3.symbol).toBe('False');
+    // A NaN cell is IEEE (False), not Missing.
+    const w = ce.box(['Equal', ['List', 1, 'NaN', 3], 1]).evaluate();
+    expect(w.op1.symbol).toBe('True');
+    expect(w.op2.symbol).toBe('False');
+    expect(w.op3.symbol).toBe('False');
   });
 });
 
@@ -718,15 +757,29 @@ describe('P3 — compile discharge (§3.F)', () => {
     expect(r.run()).toBe('d');
   });
 
-  test('Equal over possibly-absent operands lowers guarded on JS', () => {
+  test('numeric Equal is IEEE: NO isNaN guard, false for NaN inputs (interpreter parity)', () => {
+    // Amended 2026-07-24: NaN follows IEEE, so plain `==` IS the semantics and
+    // interpreter/compiled agree by construction — no guard is emitted, and
+    // `NaN == NaN` compiles to `false` (matching the interpreter).
     const e = new ComputeEngine();
     e.declare('a', 'number | missing');
     e.declare('b', 'number | missing');
     const r = compile(e.box(['Equal', 'a', 'b']));
-    expect(r.code).toMatch(/isNaN/);
-    expect(r.run({ a: NaN, b: NaN })).toBe(undefined); // Kleene: absent
+    expect(r.code).not.toMatch(/isNaN|\?\?/);
+    expect(r.run({ a: NaN, b: NaN })).toBe(false); // IEEE, matches interpreter
     expect(r.run({ a: 2, b: 2 })).toBe(true);
     expect(r.run({ a: 2, b: 3 })).toBe(false);
+    // Interpreter parity for a literal NaN comparison.
+    expect(e.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('False');
+  });
+
+  test('an object-domain (string|missing) Equal keeps the Kleene guard on JS', () => {
+    const e = new ComputeEngine();
+    e.declare('s', 'string | missing');
+    e.declare('t', 'string | missing');
+    const r = compile(e.box(['Equal', 's', 't']), { to: 'javascript' });
+    // The object hole (Missing) lowers to the target null; the guard stays.
+    expect(r.code).toMatch(/undefined/);
   });
 
   test('a Missing-free Equal is NOT pessimized (no guard)', () => {
@@ -735,6 +788,17 @@ describe('P3 — compile discharge (§3.F)', () => {
     e.declare('q', 'number');
     const r = compile(e.box(['Equal', 'p', 'q']));
     expect(r.code).not.toMatch(/isNaN/);
+  });
+
+  test('compiled Max([]) / Min([]) = NaN (interpreter parity)', () => {
+    expect(Number.isNaN(compile(ce.box(['Max', ['List']])).run())).toBe(true);
+    expect(Number.isNaN(compile(ce.box(['Min', ['List']])).run())).toBe(true);
+    // Non-empty folds are unpoisoned.
+    expect(compile(ce.box(['Max', ['List', 3, 4, 5]])).run()).toBe(5);
+    expect(compile(ce.box(['Min', ['List', 3, 4, 5]])).run()).toBe(3);
+    // Interpreter parity.
+    expect(ce.box(['Max', ['List']]).evaluate().isNaN).toBe(true);
+    expect(ce.box(['Min', ['List']]).evaluate().isNaN).toBe(true);
   });
 
   test('IsMissing on a GPU target (no isAbsent) is a compile error', () => {

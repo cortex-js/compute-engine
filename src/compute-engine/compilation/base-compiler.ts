@@ -1025,17 +1025,27 @@ export class BaseCompiler {
       return acc;
     }
 
-    // Kleene `Equal` guarded lowering (§3.D). When an operand may be absent
-    // (its type carries a `missing` arm), an absent side makes the comparison
-    // absent: emit `isAbsent(a) || isAbsent(b) ? <object null> : <a == b>`. A
-    // Missing-free comparison keeps the plain codegen below (no pessimization).
-    // The absent boolean is an OBJECT-domain value (the target null), so a
-    // target without the object axis (GPU) fails closed.
+    // Kleene/IEEE `Equal` guarded lowering (§3.D, amended 2026-07-24).
+    // Comparisons are IEEE over `NaN` and Kleene over the `Missing` symbol. For
+    // a NUMERIC-domain operand a raw `==`/tolerant-compare already IS the IEEE
+    // semantics (`NaN == NaN` is `false`), so no guard is emitted — the plain
+    // codegen below runs and interpreter/compiled agree by construction. The
+    // guard is kept ONLY when an operand can hold an OBJECT-domain hole (e.g.
+    // `string | missing`), where a `Missing` must lower to the target null:
+    // emit `isAbsent(a) || isAbsent(b) ? <object null> : <a == b>`. The absent
+    // boolean is an OBJECT-domain value, so a target without the object axis
+    // (GPU) fails closed.
+    const isObjectDomainMissing = (a: Expression): boolean => {
+      const t = a.type.type;
+      if (!typeContainsMissing(t)) return false;
+      const stripped = stripMissingFromType(t);
+      return !(stripped === 'never' || isSubtype(stripped, 'number'));
+    };
     if (
       h === 'Equal' &&
       target.absence !== undefined &&
       args.length === 2 &&
-      args.some((a) => typeContainsMissing(a.type.type)) &&
+      args.some(isObjectDomainMissing) &&
       args.every((a) => !a.isCollection && !a.type.matches('collection'))
     ) {
       if (target.absence.object === undefined)

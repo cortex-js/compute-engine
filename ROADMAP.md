@@ -137,29 +137,23 @@ a complex binding), measured against the plot benchmark.
 ### Kleene-absence residue (missing-value typing landed 2026-07-24)
 
 The `Missing`/`missing` feature shipped (record in `CHANGELOG.md` and
-`docs/plans/2026-07-22-missing-value-typing-design.md`). Deliberately
-deferred residue:
+`docs/plans/2026-07-22-missing-value-typing-design.md`).
 
-- **Compiled `Equal` over plain-`number` operands is not Kleene.** The type
-  handler keeps bare-`number` comparisons at `boolean` (widening every float
-  equality to `boolean | missing` would cascade through `And`/`Or`/`Which`
-  and `matches()` dispatch — the item-67 blast radius), so the compiler
-  emits the unguarded `==` and returns `false` for `NaN == NaN` where the
-  interpreter returns `Missing`. Same shape as the complex-comparison
-  deferral above: the fix costs the hottest compiled path. Wanted: cheap
-  discrimination of operands that can actually be NaN at run time.
+**Ruling (2026-07-24):** comparisons are **IEEE over `NaN`** (`NaN == NaN` is
+`False`, orderings with `NaN` are `False`) and **Kleene over the `Missing`
+symbol** only, across the full relational family (`Equal`/`NotEqual`/`Less`/
+`LessEqual`/`Greater`/`GreaterEqual`). Absence for discharge (`IsMissing`/
+`Coalesce`) and aggregates (`Max`/`Mean`/…) is unchanged — `NaN` stays absent
+there. Because `NaN` follows IEEE, compiled and interpreted numeric comparisons
+now agree by construction (plain `==`, no guard); empty `Max`/`Min` compile to
+`NaN` matching the interpreter. Remaining residue:
+
 - **A scalar `If`/`Which` condition evaluating to `Missing` throws** an
   uncatchable-in-expression-space `Error` (pre-existing behavior for any
-  non-boolean scalar condition, newly reachable via Kleene `Equal`). A
-  gentler degrade — an error *expression* at the condition — needs a ruling
-  on whether `If(3, …)` should change with it.
-- **`NotEqual`/`Less`/`Greater` are not Kleene**, so `NotEqual(NaN, NaN)` is
-  `True` while `Equal(NaN, NaN)` is `Missing`, and `Not(Equal(NaN, NaN))`
-  type-errors. Extending Kleene absence to the full relational family is a
-  coherent follow-up once `Equal` has soaked.
-- **Empty `Max`/`Min` diverge compiled vs interpreted** (`∓Infinity` from the
-  `_SYS` reduce seeds vs `NaN`); non-empty absent inputs agree. Flip the
-  compiled seeds or document the empty-input edge.
+  non-boolean scalar condition, reachable via a Kleene-`Missing` comparison —
+  a `NaN`-comparison condition now yields a plain boolean and no longer
+  throws). A gentler degrade — an error *expression* at the condition — needs
+  a ruling on whether `If(3, …)` should change with it.
 
 ### Broadcast typing residue (`broadcastable<T>` lift landed 2026-07-17)
 

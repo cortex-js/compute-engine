@@ -371,11 +371,13 @@ describe('COMPILE Sum/Product/Max/Min - collection form', () => {
     expect(jsRun(['Product', 'V'], { V: [] })).toBe(1);
   });
 
-  test('Max/Min(collection) reduce (empty → ∓∞)', () => {
+  test('Max/Min(collection) reduce (empty → NaN, interpreter parity)', () => {
     expect(jsRun(['Max', 'V'], { V: [3, 9, 2] })).toBe(9);
     expect(jsRun(['Min', 'V'], { V: [3, 9, 2] })).toBe(2);
-    expect(jsRun(['Max', 'V'], { V: [] })).toBe(-Infinity);
-    expect(jsRun(['Min', 'V'], { V: [] })).toBe(Infinity);
+    // Missing-value typing (§3.C, amended 2026-07-24): an empty input is `NaN`,
+    // matching the interpreter (was `∓∞` from the identity-seed reduce).
+    expect(jsRun(['Max', 'V'], { V: [] })).toBeNaN();
+    expect(jsRun(['Min', 'V'], { V: [] })).toBeNaN();
   });
 
   test('Max/Min scalar variadic form is unchanged', () => {

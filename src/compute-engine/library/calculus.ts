@@ -498,15 +498,50 @@ volumes
         });
 
         // Univariate (bare or single order): ordinary n-th derivative.
-        // NOTE (SYM P1-19c residual): the closed-form result (e.g. `cos(_)`)
-        // is a *function of the hole* yet is typed `finite_number`. Lifting it
-        // into a `Function` literal to make the type honest is deliberately
-        // NOT done here: it (1) re-enters `Derivative.evaluate` on symbolic
-        // residuals (e.g. `AiryAi`) causing evaluation recursion, and (2) an
-        // underscore-parameter lambda currently mis-serializes to LaTeX as
-        // `()\mapsto\cos`. The unevaluated `Derivative(f)` is already typed
-        // `function`; only the evaluated closed form under-reports.
-        if (orders.length <= 1) return derivative(op, orders[0] ?? 1);
+        //
+        // The closed-form result is lifted into a *named-parameter* `Function`
+        // literal (P1-19c): a bare hole-form (`cos(_)`) typed `finite_number`,
+        // so a stored `let g = Derivative(f)` was not callable. The historical
+        // blockers are addressed by construction:
+        // - a result still carrying a `Derivative` stays bare — wrapping it
+        //   would re-enter this handler when the body evaluates;
+        // - the hole is renamed to a real parameter, so no `_` reaches the
+        //   serializers (the `()\mapsto…` mis-rendering) or the
+        //   `denotesFunction` wildcard gate.
+        if (orders.length <= 1) {
+          const r = derivative(op, orders[0] ?? 1);
+          if (r === undefined) return undefined;
+          // Order 0 (or an already-lifted result) is the function itself.
+          if (isFunction(r, 'Function')) return r;
+          if (r.operator === 'Derivative' || r.has('Derivative')) return r;
+
+          // A named-parameter function literal: the derivative was taken with
+          // respect to its own (first) parameter, so the body is already in
+          // terms of the named parameters — preserve the signature.
+          if (isFunction(op, 'Function')) {
+            const params = op.ops.slice(1);
+            if (
+              params.length > 0 &&
+              params.every((p) => functionLiteralParameterName(p) !== null)
+            )
+              // `ce.function()` (not `_fn`): the canonical handler wraps the
+              // body in the scoped Block that `makeLambda` requires.
+              return ce.function('Function', [r, ...params]);
+          }
+
+          // Otherwise the body is in terms of the hole `_` (an operator
+          // symbol such as `Sin`): rename the hole to a fresh parameter that
+          // collides with no free variable or binder name of the body.
+          let name = 'x';
+          if (r.has(name) || collectBinderNames(r).has(name)) {
+            let i = 1;
+            while (r.has(`x_${i}`) || collectBinderNames(r).has(`x_${i}`))
+              i += 1;
+            name = `x_${i}`;
+          }
+          const param = ce.symbol(name);
+          return ce.function('Function', [r.subs({ _: param }), param]);
+        }
 
         // Multi-index: mixed partial of a multivariate function. For a known
         // function literal, differentiate the body the requested number of
@@ -520,7 +555,11 @@ volumes
             for (let i = 0; i < orders.length && body; i++)
               for (let d = 0; d < orders[i] && body; d++)
                 body = differentiate(body, params[i]!);
-            if (body) return ce._fn('Function', [body, ...op.ops.slice(1)]);
+            // `ce.function()` (not `_fn`): the canonical handler wraps the
+            // body in the scoped Block that `makeLambda` requires — a bare
+            // `_fn` literal throws on application.
+            if (body)
+              return ce.function('Function', [body, ...op.ops.slice(1)]);
           }
         }
 

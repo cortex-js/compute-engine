@@ -4018,9 +4018,11 @@ export function requirePrimitiveElements(kind: string, arg: Expression): void {
  * Compile `Max`/`Min`. Two shapes:
  *   - a single indexed-collection operand (`[3,4,5].max`, `Max(range)`) reduces
  *     over the elements. A reduce (not `Math.max(...spread)`) is used so a large
- *     list can't overflow the call-stack argument limit. The identity seed
- *     (`-Infinity`/`Infinity`) makes the empty collection agree with the
- *     interpreter (`Max([]) = -oo`, `Min([]) = +oo`).
+ *     list can't overflow the call-stack argument limit. An EMPTY input yields
+ *     `NaN`, matching the interpreter (missing-value typing, §3.C: `Max([])` /
+ *     `Min([])` are `NaN`, was `∓∞`). The empty case is guarded explicitly
+ *     rather than seeded with `NaN` — a `NaN` seed would poison a non-empty
+ *     fold (`Math.max(NaN, 1) = NaN`).
  *   - the scalar variadic form (`Max(a, b, c)`) lowers to `Math.max(a, b, c)`.
  * A non-collection single operand takes the variadic path (`Math.max(x)` = x).
  */
@@ -4031,20 +4033,25 @@ function compileExtremum(
 ): string {
   const fn = kind === 'Max' ? 'Math.max' : 'Math.min';
   const identity = kind === 'Max' ? '-Infinity' : 'Infinity';
+  // Reduce with the identity seed, but map an empty input to `NaN` (interpreter
+  // parity). The seed is safe for non-empty folds; `NaN` is not, so it is only
+  // returned on the empty branch.
+  const guardedReduce = (arrayCode: string): string =>
+    `((_l) => _l.length === 0 ? NaN : _l.reduce((_a, _b) => ${fn}(_a, _b), ${identity}))(${arrayCode})`;
   if (args.length === 1 && args[0] && isIndexedCollectionOperand(args[0])) {
-    return `(${compile(args[0])}).reduce((_a, _b) => ${fn}(_a, _b), ${identity})`;
+    return guardedReduce(compile(args[0]));
   }
   // Mixed scalars + collection operand(s): `Max`/`Min` REDUCE — fold the
   // scalars and every collection's elements into a single scalar (matching
   // `evaluateMinMax`, which flattens collection operands). Spreading a
   // collection into a plain `Math.max(...)` call would pass an array as one
   // argument → `NaN`; instead spread each collection into a combined array and
-  // reduce it.
+  // reduce it. An all-empty combined array yields `NaN` (interpreter parity).
   if (args.some((a) => a && isIndexedCollectionOperand(a))) {
     const parts = args.map((a) =>
       isIndexedCollectionOperand(a) ? `...(${compile(a)})` : compile(a)
     );
-    return `[${parts.join(', ')}].reduce((_a, _b) => ${fn}(_a, _b), ${identity})`;
+    return guardedReduce(`[${parts.join(', ')}]`);
   }
   return `${fn}(${args.map((x) => compile(x)).join(', ')})`;
 }

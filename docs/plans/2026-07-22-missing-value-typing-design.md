@@ -9,10 +9,12 @@ maps in §10. Revision 5 regrounded to a **from-scratch build** after the
 initial implementation was reverted to the clean baseline `f50e1619`; the
 round-2/round-3 review files were lost in an untracked-file sweep during the
 revert — their findings live in §10's maps.)
-**Status**: **DRAFT (design)** — not implemented. The prior organic
+**Status**: **IMPLEMENTED (2026-07-24)** — P0–P3 landed in one round (four
+sequential phases, each suite-green), plus the same-day §10 amendment
+(comparisons: IEEE over `NaN`, Kleene over `Missing`). The prior organic
 implementation (commits `67569c26` "Introduce Missing" and `1e59ac3c` "Missing
 propagation + Nothing erasure", both reverted) is what this design
-**replaces**, cleanly.
+**replaced**, cleanly.
 **Roadmap**: extends the `Nothing`/`Missing` marker split (Tycho item 81).
 **Related**:
 - `docs/plans/2026-07-20-tensor-unification-design.md` — the type-directed
@@ -372,25 +374,36 @@ primitives are *absence* tests, not `Missing`-symbol tests:
   - **Domain.** Numeric operand absence = `NaN`, object = `Missing`/null;
     `IsMissing` handles both, so `Coalesce` is uniform across domains — no
     `FillNaN` variant needed.
-- **`Equal` — Kleene over absence.**
-  - **Scalar truth table:** if either operand is absent — `Missing`, or `NaN`
-    (provenance irrelevant, I6) — the result is `Missing`. Otherwise
-    `boolean`. In particular **`Equal(NaN, NaN) = Missing`** (R: `NaN == 1` is
-    `NA`), *not* `False` — **BREAKING** vs native float `==`; CHANGELOG
-    callout (§5).
-  - **Result type:** `missing` when some operand is definitely absent;
-    `boolean | missing` when only possibly (an operand cell carries the arm or
-    a numeric operand is not provably non-NaN — conservatively, any `number`
-    operand admits `NaN`, so `boolean | missing` is the common honest result
-    for float comparisons; a provably-exact numeric comparison stays
-    `boolean`); `boolean` otherwise.
+- **Relational family — IEEE over `NaN`, Kleene over `Missing`** (`Equal`,
+  `NotEqual`, `Less`, `LessEqual`, `Greater`, `GreaterEqual`; the Julia model,
+  **amended 2026-07-24** — supersedes the earlier "Kleene over all absence").
+  `Greater`/`GreaterEqual` canonicalize to `Less`/`LessEqual`, so the rule is
+  implemented in the four canonical-target handlers (`Equal`, `NotEqual`,
+  `Less`, `LessEqual`).
+  - **Scalar truth table:** a `Missing` operand (the symbol) makes the result
+    `Missing` (Kleene); it wins over `NaN`. Otherwise a `NaN` operand (or an
+    operand that numerically evaluates to `NaN`) follows IEEE: `Equal` →
+    `False`, `NotEqual` → `True`, every ordering → `False` (unordered). In
+    particular **`Equal(NaN, NaN) = False`** and **`NaN < 1 = False`** — the
+    orderings previously stayed symbolic, so that is a behavior change worth a
+    CHANGELOG callout (§5). Only a literal `NaN` (or an already-evaluated
+    operand value that is `NaN`) triggers the IEEE rule; a symbolic operand
+    (`x < 1`) stays symbolic. Exact operands are not numericized just to probe
+    for `NaN` (exactness contract).
+  - **Result type:** `missing` when some operand is definitely absent
+    (`missing`); `boolean | missing` when only possibly (an operand cell
+    carries a `missing` arm); `boolean` otherwise. A `NaN` operand is invisible
+    at the type level (its static type is `number`), so it never widens the
+    result type — the IEEE `False`/`True` is a runtime-only outcome. (The type
+    handler is unchanged from the earlier revision.)
   - **Broadcast:** per-cell, shapes per tensor-design §D6; the element type
     follows the same rule per cell.
-  - **Lowering:** JS/Python emit the guarded form —
-    `absence.isAbsent(a) || absence.isAbsent(b) ? objectNull : a === b`. A
-    target without the needed capability (GPU): `Equal` over possibly-absent
-    operands is a **compile error** (fail closed; discharge with `Coalesce`
-    first). §3.F.
+  - **Lowering:** numeric-domain operands need **no guard** — a raw `==`/
+    tolerant compare IS the IEEE semantics (`NaN == NaN` → `false`), so
+    interpreter and compiled agree by construction. An operand that can hold an
+    **object-domain** hole (e.g. `string | missing`) still emits the guarded
+    form `absence.object.isAbsent(a) || … ? objectNull : a === b`; a target
+    without the object axis (GPU) fails closed there. §3.F.
 
 **Flow-narrowing for `IsMissing` is OUT OF SCOPE** — needs occurrence typing a
 separate design owns; `IsMissing` ships as a plain boolean, `Coalesce` is the
@@ -402,7 +415,9 @@ primary discharge.
 | `Coalesce(Missing, 3)` / `Coalesce(NaN, 3)` / `Coalesce(2, 3)` | `3` / `3` / `2` |
 | `Coalesce(Missing, Missing)` | `Missing` (all-absent → last verbatim) |
 | `Equal(x, Missing)`, `Equal(Missing, Missing)` | `Missing` (Kleene) |
-| `Equal(NaN, NaN)` | `Missing` (Kleene; BREAKING vs float `==`) |
+| `Less(Missing, 1)`, `NotEqual(Missing, x)` | `Missing` (Kleene, family-wide) |
+| `Equal(NaN, NaN)` | `False` (IEEE; matches float `==`) |
+| `NaN < 1`, `Greater(NaN, 1)` | `False` (IEEE unordered; BREAKING — was symbolic) |
 | `List(1, Missing, 3)` | `[1, Missing, 3]` (length 3) |
 | `Max(1, Missing, 3)` | `NaN` (numeric absorption, I6) |
 
@@ -481,8 +496,10 @@ absence: {
   optimization; if undeclared, `IsMissing`/`Coalesce` on that target are a
   **compile error** (fail closed — propagation still works natively, discharge
   doesn't). No object axis: GPU targets compile booleans, but *absent*
-  booleans (Kleene `Equal` results) do not lower — `Equal` over
-  possibly-absent operands is a compile error there (§3.D).
+  booleans (Kleene results over the `Missing` symbol) do not lower — a
+  comparison over an **object-domain** possibly-absent operand is a compile
+  error there (§3.D, amended 2026-07-24). A **numeric** comparison is IEEE and
+  needs no guard, so it compiles natively.
 - A target lacking the `object` axis rejects (compile error) any
   `missing`-typed object-domain position.
 
@@ -519,9 +536,12 @@ parent).
   the visible arm is confined to non-numeric/indeterminate `T`.
 - **Re-engages item-67 `matches()` — honestly.** `.matches('number')` on
   `At(list<string>, i)` is `false`; numeric `At` stays `number`, unaffected.
-- **`Equal(NaN, NaN)` becomes `Missing`** (Kleene, §3.D) — diverges from
-  native float `==` (`False`) by design; compiled targets emit the guarded
-  form or fail closed.
+- **Comparisons are IEEE over `NaN`, Kleene over `Missing`** (§3.D, amended
+  2026-07-24). `Equal(NaN, NaN) = False` and orderings with `NaN` are `False`
+  (matching native float semantics; compiled/interpreted agree with no guard on
+  numeric operands), while the `Missing` symbol stays Kleene family-wide
+  (`Less(Missing, 1) = Missing`). Object-domain `Missing` comparisons emit the
+  guarded form or fail closed.
 - **Kernel packing:** a `missing`-carrying cell demotes packed numeric kernels
   to generic elementwise broadcast (tensor design §D2.3) before the per-cell
   gate runs (§3.E).
@@ -554,7 +574,11 @@ current `main`. Consequences for the plan:
   - The `Missing` marker, `missing` type, and type-directed out-of-band access.
   - **Gather becomes length-preserving** and a mask-length mismatch becomes an
     error (§3.C) — baseline dropped/prefixed silently.
-  - **`Equal(NaN, NaN)` = `Missing`** (Kleene) — baseline/native `False`.
+  - **Comparisons are IEEE over `NaN`, Kleene over `Missing`** (amended
+    2026-07-24): `Equal(NaN, NaN) = False` matches native `==`, but the
+    orderings with `NaN` (`NaN < 1 = False`) previously stayed symbolic, and the
+    `Missing` symbol is now Kleene across the whole family
+    (`Less(Missing, 1) = Missing`).
 - **Initial declarations:** the 15 aggregates declare `missingBehavior:
   'handle'`; `Add`/`Negate` declare `'propagate'` (their `value`-typed
   signatures would otherwise default to `pass-through`); numeric operators
@@ -634,8 +658,10 @@ native); Q4 → §3.E; D-Q1 → §3.D unified absence, no separate `FillNaN`.)
 - **Discharge (§3.D):** `Coalesce(x:T|missing, d:T) : T`; variadic result;
   short-circuit; all-absent `Coalesce(Missing, Missing) = Missing`; box/parse
   route probes; `IsMissing(NaN) = True`, `Coalesce(NaN, 3) = 3` — same
-  interpreter and compiled; `Equal(NaN, NaN) = Missing`; `Equal` broadcast
-  over `list<number|missing>`.
+  interpreter and compiled; `Equal(NaN, NaN) = False` (IEEE) and
+  `Less(Missing, 1) = Missing` (Kleene) across the relational family; `Equal`
+  broadcast over `list<number|missing>` (Missing cell → `Missing`, NaN cell →
+  `False`).
 - **Runtime element level (§3.E):** `Sin([1,Missing,3]) → [Sin(1), NaN,
   Sin(3)]`; `Add([1,Missing],[10,20]) = [11, NaN]` (packing demotion).
 - **Short-path parity (§3.E):** box/parse/`ce.function`/`ce._fn` agree; a
@@ -682,15 +708,36 @@ Coalesce(NaN, 3) / Coalesce(Missing, 3) : 3 / 3
 Coalesce(Missing, Missing)         = Missing               (all-absent → last operand verbatim)
 Coalesce(At(list<number>, 9), 0)   = 0    (interpreter AND compiled)
 Coalesce(At(list<string>, 9), "d") = "d"  (interpreter AND compiled)
-Equal(x, Missing)                  : Missing
-Equal(NaN, NaN)                    = Missing               (Kleene, BREAKING vs float ==)
+Equal(x, Missing)                  : Missing               (Kleene)
+Equal(NaN, NaN)                    = False                 (IEEE; matches float ==)
+NotEqual(NaN, x)                   = True                  (IEEE)
+Less(NaN, 1) / Greater(NaN, 1)     = False                 (IEEE unordered; was symbolic)
+Less(Missing, 1)                   = Missing               (Kleene, family-wide)
+NotEqual(Missing, x)               = Missing               (Kleene, family-wide)
 compile_js( Add(x:number|missing,1) )         : ok — native x+1 (NaN), NO guard
-compile_js( Equal(a,b) [a,b possibly absent] ): ok — guarded: isAbsent(a)||isAbsent(b) ? undefined : a===b
+compile_js( Equal(a,b) [a,b:number|missing] ) : ok — plain a==b, NO guard (IEEE; NaN==NaN → false)
+compile_js( Equal(s,t) [s,t:string|missing] ) : ok — guarded: isAbsent(s)||isAbsent(t) ? undefined : s===t
 compile_js( Coalesce(At(list<string>,i),"d") ): ok — _at(...) ?? "d"
+compile_js( Max([]) ) / compile_js( Min([]) ) : ok — NaN (interpreter parity)
 compile_glsl( IsMissing(x) )                  : COMPILE ERROR unless target declares absence.numeric.isAbsent
 ```
 
 ### 10. Review-finding resolutions
+
+**Amendment (2026-07-24 user ruling).** Comparisons follow **IEEE 754 for
+`NaN`** and **Kleene for the `Missing` symbol** only (the Julia model), across
+the whole relational family (`Equal`/`NotEqual`/`Less`/`LessEqual`/`Greater`/
+`GreaterEqual`). `Equal(NaN, NaN) = False`, `NotEqual(NaN, x) = True`, and
+orderings with a `NaN` operand are `False` (unordered); the `Missing` symbol
+stays `Missing` (`Equal(x, Missing)`, `Less(Missing, 1)`, `NotEqual(Missing, x)`
+are all `Missing`). This supersedes the revision-6 "Kleene over all absence"
+(finding 20 below, and its `Equal(NaN, NaN) = Missing` vector). Absence for
+**discharge** (`IsMissing`/`Coalesce`) and **aggregates** (`Max`/`Mean`/…) is
+**unchanged** — `NaN` remains absent there (`IsMissing(NaN) = True`,
+`Coalesce(NaN, d) = d`, `Max(1, NaN, 3) = NaN`). Compiled consequence: numeric
+comparisons need no guard (plain `==` is IEEE), so compiled/interpreted agree by
+construction; only an object-domain (`string | missing`) comparison keeps the
+guarded lowering; compiled `Max([])`/`Min([])` now return `NaN`.
 
 **Round 4 → revision 6** (review:
 `docs/scratch/2026-07-22-missing-value-typing-design_SPEC_REVIEW_r4.md`;
