@@ -444,6 +444,22 @@ function typedBinding(
   return value.type.matches(t) ? t : undefined;
 }
 
+/** The shorthand-lambda placeholder symbols: `_` and `_1`…`_9`. An expression
+ * containing any of these is a shorthand function body (case 6 of
+ * `canonicalFunctionLiteral`). */
+const WILDCARD_SYMBOLS = [
+  '_',
+  '_1',
+  '_2',
+  '_3',
+  '_4',
+  '_5',
+  '_6',
+  '_7',
+  '_8',
+  '_9',
+];
+
 /**
  * Apply arguments to an expression which is either:
  * - a `["Function"]` expression
@@ -454,19 +470,28 @@ export function apply(
   args: ReadonlyArray<Expression>,
   options?: Partial<EvaluateOptions>
 ): Expression {
-  // An unresolved symbolic derivative applied to an argument must stay
-  // symbolic. `derivative()` represents the derivative of a function with no
-  // known derivative as the self-applied lambda `Apply(Derivative(f, n), _)`.
-  // Letting `makeLambda` beta-reduce and re-evaluate that body would
+  // A function-valued expression that is not itself a `Function` literal
+  // DENOTES a function (e.g. `Derivative(f, n)`, `InverseFunction(f)`); it
+  // cannot be beta-reduced and must stay symbolic when applied. Letting
+  // `makeLambda` treat such an expression as a shorthand lambda body would
+  // substitute the argument for its free symbol (`Apply(InverseFunction(f), 2)`
+  // → `InverseFunction(2)`), or, for `Derivative(f, n)` whose `derivative()`
+  // representation is the self-applied lambda `Apply(Derivative(f, n), _)`,
   // re-evaluate the inner `Derivative`, regenerating the same lambda and
-  // recursing forever (stack overflow). Instead, substitute the argument
-  // structurally — swap the placeholder operand for the actual argument — so
-  // `Apply(Derivative(f, n), 0)` is returned unevaluated.
-  // @fixme: it feels wrong to be checking for `Derivative` here. There should be a more general way to handle this, e.g. check the `lazy` attribute on the function definition?
-  if (isFunction(fn, 'Derivative'))
-    return fn.engine._fn('Apply', [fn, ...args]);
+  // recursing forever (stack overflow). Wildcards (`_`, `_1`…`_9`) mark a
+  // genuine shorthand body, so an expression containing one is NOT gated here
+  // and still beta-reduces. (The `lazy` attribute was considered as the gate
+  // and rejected: laziness governs whether operands are evaluated, not whether
+  // the expression is function-valued.)
+  const denotesFunction = (e: Expression | undefined | null): boolean =>
+    isFunction(e) &&
+    e.operator !== 'Function' &&
+    e.type.matches('function') &&
+    !e.has(WILDCARD_SYMBOLS);
 
-  if (isFunction(fn, 'Apply') && fn.op1?.operator === 'Derivative')
+  if (denotesFunction(fn)) return fn.engine._fn('Apply', [fn, ...args]);
+
+  if (isFunction(fn, 'Apply') && denotesFunction(fn.op1))
     return fn.engine._fn('Apply', [fn.op1, ...args]);
 
   const result = makeLambda(fn)?.(args, options);
@@ -754,10 +779,12 @@ function wrapRecursion(
 
 function makeLambda(
   expr: Expression
-): (
-  params: ReadonlyArray<Expression>,
-  options?: Partial<EvaluateOptions>
-) => Expression | undefined {
+):
+  | ((
+      params: ReadonlyArray<Expression>,
+      options?: Partial<EvaluateOptions>
+    ) => Expression | undefined)
+  | undefined {
   const ce = expr.engine;
 
   // If the expression is a symbol, interpret it as an operator
@@ -767,7 +794,10 @@ function makeLambda(
   }
 
   const canonicalExpr = canonicalFunctionLiteral(expr);
-  if (!canonicalExpr) throw new Error('Invalid function literal');
+  // Not a function literal (e.g. a bare string or number): decline so callers
+  // fall through to their symbolic `Apply(fn, args)` fallback instead of
+  // throwing (`apply()` uses `makeLambda(fn)?.(...)`).
+  if (!canonicalExpr) return undefined;
 
   expr = canonicalExpr;
 

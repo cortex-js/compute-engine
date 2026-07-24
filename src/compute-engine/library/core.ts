@@ -79,6 +79,16 @@ import {
 // xcas/gias https://www-fourier.ujf-grenoble.fr/~parisse/giac/doc/en/cascmd_en/cascmd_en.html
 // https://www.haskell.org/onlinereport/haskell2010/haskellch9.html#x16-1720009.1
 
+/** A `Pipe` right operand that is statically refutable as a function: a bare
+ * number, string, or boolean (`True`/`False`) literal. Such an operand can
+ * never become applicable, so `Pipe` rejects it early. A general symbol is NOT
+ * refutable — its definition may arrive later (deferral). */
+function isRefutablePipeTarget(f: Expression): boolean {
+  return (
+    isNumber(f) || isString(f) || isSymbol(f, 'True') || isSymbol(f, 'False')
+  );
+}
+
 // Split a string into grapheme clusters (UAX #29, via `Intl.Segmenter`).
 // Shared by `Characters` and its synonym `GraphemeClusters`.
 function splitGraphemeClusters(s: string): string[] {
@@ -582,7 +592,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         f ? (functionResult(f.type.type) ?? 'unknown') : undefined,
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 2) return ce._fn('Pipe', checkArity(ce, ops, 2));
-        // @fixme: should we do a type check here to ensure the second operand is applicable to the first operand? Or do we have to wait until evaluation to check that? If we do it here, we can return an error code instead of an unevaluated Pipe expression.
+        // Reject early only a statically-refutable rhs: a bare number, string,
+        // or boolean literal can never become applicable, so wrap it in an
+        // `incompatible-type` error (mirroring non-lazy signature validation).
+        // Deferral is correct for everything else: definitions may arrive
+        // between canonicalization and evaluation, held operands are
+        // deliberately unbound per the lazy contract, and a non-refutable type
+        // is accepted under overlap-deferred validation (§D6.2). We do not
+        // bind/canonicalize the non-literal operands here.
+        if (ce.strict && isRefutablePipeTarget(ops[1]))
+          return ce._fn('Pipe', [
+            ops[0],
+            ce.typeError('function', ops[1].type, ops[1].toString()),
+          ]);
         return ce._fn('Pipe', ops);
       },
       evaluate: (ops, { engine: ce, numericApproximation }) => {
@@ -602,14 +624,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `f` decide whether to evaluate it.
         if (isFunction(x, 'Pipe')) x = x.evaluate({ numericApproximation });
 
-        // The right operand must be applicable. A literal number is not a
-        // function — decline (`5 |> 3` stays inert) rather than treating it as
-        // a constant nullary. `apply` then handles the rest: a named-operator
-        // symbol goes through `ce.function(f, [x]).evaluate()` (respecting its
-        // hold semantics), a `Function` literal is beta-reduced, and any other
-        // applicable expression is applied.
-        // @fixme: Shouldn't that check for applicability be done in the type system? The type of `f` is `function` so it should be applicable to `x`. If not, the type system should reject it. And should that check actually be in `apply()`?
-        if (isNumber(f)) return undefined;
+        // The right operand must be applicable. A statically-refutable rhs — a
+        // literal number, string, or boolean — can never be a function, so
+        // return an `incompatible-type` error (covering the non-strict route
+        // and an rhs that evaluated to a bare literal at runtime). This check
+        // stays here rather than in the type system, which cannot validate the
+        // held (lazy) operands, and rather than in `apply()`, whose
+        // constant-nullary shorthand (`Apply(3, 5)` → `3`, relied on by
+        // `Map([1, 2], 3)` → `[3, 3]`) must be preserved: `Pipe` is
+        // deliberately stricter than `Apply`. Anything else non-applicable
+        // stays inert (returns `undefined`).
+        if (isRefutablePipeTarget(f))
+          return ce.typeError('function', f.type, f.toString());
         const result = apply(f, [x]);
 
         if (!numericApproximation) return result;

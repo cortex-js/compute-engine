@@ -177,6 +177,56 @@ describe('Apply', () => {
 
     expect(evaluate(['f', 42])).toMatchInlineSnapshot(`43`);
   });
+
+  // These assert clean-engine contracts (the shared `engine` has `f` bound by
+  // an earlier test), so they use a fresh engine.
+
+  // A string function operand used to crash `makeLambda` with an uncaught
+  // `Error: Invalid function literal`; it now declines and `apply` falls
+  // through to the symbolic form.
+  test('a string operand does not crash', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Apply', { str: 'abc' }, 5]).evaluate().toString()).toBe(
+      'Apply("abc", 5)'
+    );
+  });
+
+  // A function-valued expression (not a `Function` literal) DENOTES a function
+  // and cannot be beta-reduced: applying it stays symbolic instead of
+  // substituting the argument for its free symbol.
+  test('applying InverseFunction(f) stays symbolic', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Apply', ['InverseFunction', 'f'], 2]).evaluate().toString()
+    ).toBe('Apply(InverseFunction(f), 2)');
+  });
+
+  // Regression: an unresolved symbolic derivative applied to an argument must
+  // stay symbolic (beta-reducing it recurses forever — stack overflow).
+  test('applying Derivative(f, 1) stays symbolic', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Apply', ['Derivative', 'f', 1], 0]).evaluate().toString()
+    ).toBe('Apply(Derivative(f, 1), 0)');
+  });
+
+  // A shorthand body with a wildcard is a genuine lambda and still reduces.
+  test('a wildcard shorthand still beta-reduces', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Apply', ['Add', '_', 1], 5]).evaluate().toString()).toBe(
+      '6'
+    );
+  });
+
+  // The constant-nullary shorthand contract is preserved (relied on by `Map`).
+  // This asymmetry with the stricter `Pipe` is deliberate.
+  test('a non-function literal operand is a constant nullary', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Apply', 3, 5]).evaluate().toString()).toBe('3');
+    expect(ce.box(['Map', ['List', 1, 2], 3]).evaluate().toString()).toBe(
+      '[3,3]'
+    );
+  });
 });
 
 describe('Pipe', () => {
@@ -199,10 +249,7 @@ describe('Pipe', () => {
     ).toMatchInlineSnapshot(`-3`));
 
   test('N() numericizes the applied result', () =>
-    expect(engine.box(['Pipe', 5, 'Sin']).N().re).toBeCloseTo(
-      Math.sin(5),
-      10
-    ));
+    expect(engine.box(['Pipe', 5, 'Sin']).N().re).toBeCloseTo(Math.sin(5), 10));
 
   // `x |> f` must behave exactly like `f(x)`, so a LAZY `f` receives `x`
   // unevaluated — Pipe holds its operands. Evaluating `x` eagerly stripped a
@@ -210,7 +257,10 @@ describe('Pipe', () => {
   // could not see F's body.
   test('a lazy right-hand side receives its argument unevaluated', () => {
     const ce = new ComputeEngine();
-    ce.assign('F', ce.parse('(x, y, z) \\mapsto \\lbrack x^2 y, x + z, y\\rbrack'));
+    ce.assign(
+      'F',
+      ce.parse('(x, y, z) \\mapsto \\lbrack x^2 y, x + z, y\\rbrack')
+    );
     const piped = ce.box(['Pipe', 'F', 'JacobianMatrix']).evaluate();
     const direct = ce.function('JacobianMatrix', [ce.symbol('F')]).evaluate();
     expect(piped.isSame(direct)).toBe(true);
@@ -218,7 +268,10 @@ describe('Pipe', () => {
 
   test('a chain ending in a lazy stage reduces fully', () => {
     const ce = new ComputeEngine();
-    ce.assign('F', ce.parse('(x, y, z) \\mapsto \\lbrack x^2 y, x + z, y\\rbrack'));
+    ce.assign(
+      'F',
+      ce.parse('(x, y, z) \\mapsto \\lbrack x^2 y, x + z, y\\rbrack')
+    );
     // F |> JacobianMatrix |> Determinant |> Simplify
     const chain = ce.box([
       'Pipe',
@@ -234,10 +287,95 @@ describe('Pipe', () => {
     expect(
       evaluate([
         'Pipe',
-        ['Pipe', ['List', ['List', 'a', 'b'], ['List', 'c', 'd']], 'Determinant'],
+        [
+          'Pipe',
+          ['List', ['List', 'a', 'b'], ['List', 'c', 'd']],
+          'Determinant',
+        ],
         'Simplify',
       ])
-    ).toMatchInlineSnapshot(`["Subtract", ["Multiply", "a", "d"], ["Multiply", "b", "c"]]`));
+    ).toMatchInlineSnapshot(
+      `["Subtract", ["Multiply", "a", "d"], ["Multiply", "b", "c"]]`
+    ));
+
+  // A statically-refutable rhs (number/string/boolean literal) can never be a
+  // function, so `Pipe` rejects it with an `incompatible-type` error — at
+  // canonicalization in strict mode and at evaluation otherwise. (This is
+  // stricter than `Apply`, which treats a non-function literal as a constant
+  // nullary — a deliberate, accepted asymmetry.)
+  test('a number literal rhs is rejected (strict canonical route)', () => {
+    const piped = engine.box(['Pipe', 5, 3]);
+    expect(piped.isValid).toBe(false);
+    expect(exprToString(piped)).toMatchInlineSnapshot(`
+      [
+        "Pipe",
+        5,
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "'function'",
+            "'finite_integer'"
+          ],
+          "'3'"
+        ]
+      ]
+    `);
+  });
+
+  test('a number literal rhs is rejected (evaluate route)', () =>
+    expect(evaluate(['Pipe', 5, 3])).toMatchInlineSnapshot(`
+      [
+        "Pipe",
+        5,
+        [
+          "Error",
+          [
+            "ErrorCode",
+            "incompatible-type",
+            "'function'",
+            "'finite_integer'"
+          ],
+          "'3'"
+        ]
+      ]
+    `));
+
+  test('a string literal rhs is rejected without crashing', () =>
+    expect(evaluate(['Pipe', 5, { str: 'abc' }])).toMatchInlineSnapshot(`
+      [
+        "Pipe",
+        5,
+        [
+          "Error",
+          ["ErrorCode", "incompatible-type", "'function'", "'string'"],
+          ""abc""
+        ]
+      ]
+    `));
+
+  test('a boolean literal rhs is rejected', () => {
+    const piped = engine.box(['Pipe', 5, true]);
+    expect(piped.isValid).toBe(false);
+  });
+
+  // The parse route (`|>` / `\rhd`) is exercised because a lazy operator can
+  // break on box/parse routes while passing `ce.function`-only tests.
+  test('parse route rejects a refutable rhs', () => {
+    const piped = engine.parse('5 \\rhd 3');
+    expect(piped.isValid).toBe(false);
+    expect(exprToString(piped)).toContain('incompatible-type');
+  });
+
+  // A symbol rhs is NOT refutable: its definition may arrive later, so the
+  // pipe defers (stays symbolic) and reduces once the symbol is assigned.
+  test('a symbol rhs defers and reduces after assignment', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Pipe', 5, 'g']).evaluate().toString()).toBe('g(5)');
+    ce.assign('g', ce.parse('x \\mapsto x + 1'));
+    expect(ce.box(['Pipe', 5, 'g']).evaluate().toString()).toBe('6');
+  });
 });
 
 describe('Argument Evaluation', () => {
@@ -317,9 +455,8 @@ describe('Function-literal head application (G4)', () => {
 
   test('multi-argument lambda head', () =>
     expect(
-      engine
-        .expr([['Function', ['Add', 'x', 'y'], 'x', 'y'], 3, 4])
-        .evaluate().re
+      engine.expr([['Function', ['Add', 'x', 'y'], 'x', 'y'], 3, 4]).evaluate()
+        .re
     ).toBe(7));
 });
 
@@ -449,9 +586,7 @@ describe('makeLambda post-evaluation parameter substitution', () => {
     const id = engine.expr(['Function', 'w', 'w']);
     // id(Hold(w)) stays Hold(w), not Hold(Hold(w)).
     expect(
-      engine
-        .function('Apply', [id, engine.box(['Hold', 'w'])])
-        .evaluate().json
+      engine.function('Apply', [id, engine.box(['Hold', 'w'])]).evaluate().json
     ).toEqual(['Hold', 'w']);
     // (w ↦ w + 1)(w + 1) is w + 2, not w + 3.
     const inc = engine.expr(['Function', ['Add', 'w', 1], 'w']);

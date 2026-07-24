@@ -2,6 +2,16 @@
 
 ### Improvements
 
+- **`Pipe`/`Apply` reject or defer a non-function right operand more
+  sensibly.** `x |> f` (`Pipe`) now returns an `incompatible-type` error when
+  `f` is a number, string, or boolean literal (which can never be applied),
+  instead of staying silently inert; a symbol or unevaluated `f` still defers
+  (definitions may arrive later). `Apply` and `Pipe` no longer throw an
+  uncaught `Invalid function literal` when given a string function operand —
+  they decline gracefully. Applying a function-valued expression such as
+  `InverseFunction(f)` now stays symbolic (`Apply(InverseFunction(f), 2)`)
+  instead of misinterpreting it as a lambda body and substituting the argument
+  for `f`.
 - **Rubi integrator: Euler-substitution lever for √(quadratic)-nested
   radicals.** The experimental Rubi integrator now closes nested radicals whose
   inner radical is a square root of a quadratic with a positive leading
