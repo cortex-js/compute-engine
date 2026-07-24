@@ -82,8 +82,8 @@ condensed, machine-verified reference.
 </ReadMore>
 
 <ReadMore path="/cortex/mcp/">
-Connect Claude or another AI assistant to Cortex with the built-in **MCP
-server** — exact math as a tool call.
+Connect ChatGPT, Claude, or another AI assistant to Cortex with the built-in
+**MCP server** — exact math as a tool call.
 </ReadMore>
 
 ## Language Reference

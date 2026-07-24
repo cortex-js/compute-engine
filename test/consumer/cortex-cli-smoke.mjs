@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdtempSync,
@@ -91,6 +91,50 @@ if (evaluated.value !== '3/2')
 if (!responses[2].result?.contents?.[0]?.text?.includes('Cortex'))
   fail(`mcp language card resource missing:\n${mcp.stdout}`);
 
+// Native Streamable HTTP transport: start on a free loopback port and call
+// the built bundle through the advertised /mcp endpoint.
+const httpMcp = spawn(
+  process.execPath,
+  [CLI, 'mcp', '--transport', 'streamable-http', '--port', '0'],
+  {
+    cwd: REPO_ROOT,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  }
+);
+try {
+  const endpoint = await waitForHttpEndpoint(httpMcp);
+  const initialized = await postMcp(endpoint, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2025-11-25', capabilities: {} },
+  });
+  if (initialized.result?.serverInfo?.name !== 'cortex')
+    fail(`HTTP MCP initialize mismatch:\n${JSON.stringify(initialized)}`);
+
+  const httpEvaluated = await postMcp(
+    endpoint,
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'evaluate', arguments: { source: '1/2 + 1' } },
+    },
+    { 'MCP-Protocol-Version': '2025-11-25' }
+  );
+  const httpPayload = JSON.parse(
+    httpEvaluated.result?.content?.[0]?.text ?? '{}'
+  );
+  if (httpPayload.value !== '3/2')
+    fail(`HTTP MCP evaluate returned ${httpPayload.value}, expected 3/2`);
+} finally {
+  if (httpMcp.exitCode === null) {
+    const exited = new Promise((resolve) => httpMcp.once('exit', resolve));
+    httpMcp.kill('SIGTERM');
+    await exited;
+  }
+}
+
 console.log('cortex-cli-smoke: PASSED');
 
 function expectRun(args, expected) {
@@ -113,6 +157,47 @@ function run(args, input) {
     input,
     encoding: 'utf8',
   });
+}
+
+function waitForHttpEndpoint(child) {
+  return new Promise((resolve, reject) => {
+    let stderr = '';
+    const timeout = setTimeout(() => {
+      reject(new Error(`HTTP MCP did not start:\n${stderr}`));
+    }, 5_000);
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+      const match = stderr.match(/listening on (http:\/\/\S+)/u);
+      if (match) {
+        clearTimeout(timeout);
+        resolve(match[1]);
+      }
+    });
+    child.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once('exit', (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`HTTP MCP exited ${code} before listening:\n${stderr}`));
+    });
+  });
+}
+
+async function postMcp(endpoint, message, headers = {}) {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json, text/event-stream',
+      'content-type': 'application/json',
+      ...headers,
+    },
+    body: JSON.stringify(message),
+  });
+  if (!response.ok)
+    fail(`HTTP MCP returned ${response.status}: ${await response.text()}`);
+  return response.json();
 }
 
 function fail(message) {

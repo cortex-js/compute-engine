@@ -1,5 +1,9 @@
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
 import { parseMcpArguments, CliUsageError } from '../../src/cli/arguments';
 import { main, type CliIo } from '../../src/cli/main';
+import { createMcpHttpServer } from '../../src/cli/mcp';
 
 /** Run `cortex mcp` over a scripted stdin and return the JSON responses. */
 async function runServer(
@@ -45,6 +49,53 @@ function callTool(id: number, name: string, args: unknown) {
   return request(id, 'tools/call', { name, arguments: args });
 }
 
+async function startHttpServer(
+  extraArgs: string[] = []
+): Promise<{ server: Server; endpoint: string }> {
+  const options = parseMcpArguments([
+    '--transport',
+    'streamable-http',
+    '--port',
+    '0',
+    ...extraArgs,
+  ]);
+  const server = createMcpHttpServer(
+    options,
+    async () => '# Cortex card fixture'
+  );
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(options.port, options.host, resolve);
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    server,
+    endpoint: `http://${options.host}:${address.port}${options.path}`,
+  };
+}
+
+async function stopHttpServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
+function postMcp(
+  endpoint: string,
+  message: unknown,
+  headers: Record<string, string> = {}
+): Promise<Response> {
+  return fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json, text/event-stream',
+      'content-type': 'application/json',
+      ...headers,
+    },
+    body: JSON.stringify(message),
+  });
+}
+
 /** The payload of a tool result: parsed from its JSON text content. */
 function payload(response: any): any {
   expect(response.error).toBeUndefined();
@@ -76,7 +127,7 @@ describe('MCP server protocol', () => {
     const [response] = await runServer([
       request(1, 'initialize', { protocolVersion: '1999-01-01' }),
     ]);
-    expect(response.result.protocolVersion).toBe('2025-06-18');
+    expect(response.result.protocolVersion).toBe('2025-11-25');
   });
 
   test('lists the five tools', async () => {
@@ -91,6 +142,11 @@ describe('MCP server protocol', () => {
     for (const tool of response.result.tools) {
       expect(typeof tool.description).toBe('string');
       expect(tool.inputSchema.type).toBe('object');
+      expect(tool.annotations).toEqual({
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false,
+      });
     }
   });
 
@@ -236,15 +292,243 @@ describe('MCP server resources', () => {
   });
 });
 
+describe('MCP Streamable HTTP transport', () => {
+  test('initializes, lists tools, evaluates and reads resources', async () => {
+    const { server, endpoint } = await startHttpServer();
+    try {
+      const initialized = await postMcp(
+        endpoint,
+        request(1, 'initialize', {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'http-test', version: '0' },
+        })
+      );
+      expect(initialized.status).toBe(200);
+      expect(initialized.headers.get('content-type')).toContain(
+        'application/json'
+      );
+      expect((await initialized.json()) as any).toMatchObject({
+        id: 1,
+        result: {
+          protocolVersion: '2025-11-25',
+          serverInfo: { name: 'cortex' },
+        },
+      });
+
+      const listed = await postMcp(endpoint, request(2, 'tools/list'), {
+        'MCP-Protocol-Version': '2025-11-25',
+      });
+      expect(listed.status).toBe(200);
+      expect(
+        ((await listed.json()) as any).result.tools.map((x: any) => x.name)
+      ).toEqual(['evaluate', 'check', 'doc', 'parse', 'serialize']);
+
+      const evaluated = await postMcp(
+        endpoint,
+        callTool(3, 'evaluate', { source: '1/2 + 1' }),
+        { 'MCP-Protocol-Version': '2025-11-25' }
+      );
+      expect(payload(await evaluated.json())).toMatchObject({
+        ok: true,
+        value: '3/2',
+      });
+
+      const resource = await postMcp(
+        endpoint,
+        request(4, 'resources/read', {
+          uri: 'cortex://docs/for-agents',
+        }),
+        { 'MCP-Protocol-Version': '2025-11-25' }
+      );
+      expect((await resource.json()) as any).toMatchObject({
+        result: {
+          contents: [{ text: '# Cortex card fixture' }],
+        },
+      });
+    } finally {
+      await stopHttpServer(server);
+    }
+  });
+
+  test('returns 202 for accepted notifications', async () => {
+    const { server, endpoint } = await startHttpServer();
+    try {
+      const response = await postMcp(endpoint, {
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+      });
+      expect(response.status).toBe(202);
+      expect(await response.text()).toBe('');
+    } finally {
+      await stopHttpServer(server);
+    }
+  });
+
+  test('enforces endpoint, method, media type and protocol headers', async () => {
+    const { server, endpoint } = await startHttpServer();
+    try {
+      expect((await fetch(`${endpoint}/wrong`)).status).toBe(404);
+      expect((await fetch(endpoint)).status).toBe(405);
+
+      const wrongContentType = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json, text/event-stream',
+          'content-type': 'text/plain',
+        },
+        body: '{}',
+      });
+      expect(wrongContentType.status).toBe(415);
+
+      const wrongAccept = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      });
+      expect(wrongAccept.status).toBe(406);
+
+      const wrongVersion = await postMcp(endpoint, request(1, 'ping'), {
+        'MCP-Protocol-Version': '1999-01-01',
+      });
+      expect(wrongVersion.status).toBe(400);
+
+      const tooLarge = await postMcp(
+        endpoint,
+        callTool(2, 'evaluate', { source: 'x'.repeat(1024 * 1024) })
+      );
+      expect(tooLarge.status).toBe(413);
+    } finally {
+      await stopHttpServer(server);
+    }
+  });
+
+  test('rejects unapproved browser origins and allows configured origins', async () => {
+    const first = await startHttpServer();
+    try {
+      const rejected = await postMcp(first.endpoint, request(1, 'ping'), {
+        origin: 'https://example.com',
+      });
+      expect(rejected.status).toBe(403);
+
+      const local = await postMcp(first.endpoint, request(2, 'ping'), {
+        origin: 'http://localhost:3000',
+      });
+      expect(local.status).toBe(200);
+    } finally {
+      await stopHttpServer(first.server);
+    }
+
+    const second = await startHttpServer([
+      '--allow-origin',
+      'https://example.com',
+    ]);
+    try {
+      const allowed = await postMcp(second.endpoint, request(3, 'ping'), {
+        origin: 'https://example.com',
+      });
+      expect(allowed.status).toBe(200);
+      expect(allowed.headers.get('access-control-allow-origin')).toBe(
+        'https://example.com'
+      );
+
+      const preflight = await fetch(second.endpoint, {
+        method: 'OPTIONS',
+        headers: { origin: 'https://example.com' },
+      });
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get('access-control-allow-methods')).toContain(
+        'POST'
+      );
+    } finally {
+      await stopHttpServer(second.server);
+    }
+  });
+
+  test('reports malformed JSON as a JSON-RPC parse error', async () => {
+    const { server, endpoint } = await startHttpServer();
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json, text/event-stream',
+          'content-type': 'application/json',
+        },
+        body: '{',
+      });
+      expect(response.status).toBe(400);
+      expect((await response.json()) as any).toMatchObject({
+        id: null,
+        error: { code: -32700 },
+      });
+    } finally {
+      await stopHttpServer(server);
+    }
+  });
+});
+
 describe('MCP server arguments', () => {
-  test('parses the default time limit', () => {
-    expect(parseMcpArguments([])).toEqual({ timeLimit: 10_000 });
-    expect(parseMcpArguments(['--time-limit', '250'])).toEqual({
-      timeLimit: 250,
+  test('parses stdio and Streamable HTTP options', () => {
+    expect(parseMcpArguments([])).toEqual({
+      timeLimit: 10_000,
+      transport: 'stdio',
+      host: '127.0.0.1',
+      port: 8000,
+      path: '/mcp',
+      allowedOrigins: [],
     });
+    expect(
+      parseMcpArguments([
+        '--transport',
+        'streamable-http',
+        '--time-limit',
+        '250',
+        '--host',
+        'localhost',
+        '--port',
+        '3000',
+        '--path',
+        '/cortex',
+        '--allow-origin',
+        'https://chatgpt.com',
+        '--allow-origin',
+        'http://localhost:6274',
+      ])
+    ).toEqual({
+      timeLimit: 250,
+      transport: 'streamable-http',
+      host: 'localhost',
+      port: 3000,
+      path: '/cortex',
+      allowedOrigins: ['https://chatgpt.com', 'http://localhost:6274'],
+    });
+  });
+
+  test('rejects invalid MCP server options', () => {
     expect(() => parseMcpArguments(['extra'])).toThrow(CliUsageError);
     expect(() => parseMcpArguments(['--time-limit', '-1'])).toThrow(
       CliUsageError
     );
+    expect(() =>
+      parseMcpArguments(['--transport', 'streamable-http', '--port', '65536'])
+    ).toThrow(CliUsageError);
+    expect(() =>
+      parseMcpArguments(['--transport', 'streamable-http', '--path', 'mcp'])
+    ).toThrow(CliUsageError);
+    expect(() =>
+      parseMcpArguments(['--transport', 'streamable-http', '--host', 'a/b'])
+    ).toThrow(CliUsageError);
+    expect(() =>
+      parseMcpArguments([
+        '--transport',
+        'streamable-http',
+        '--allow-origin',
+        'https://example.com/path',
+      ])
+    ).toThrow(CliUsageError);
+    expect(() => parseMcpArguments(['--port', '8000'])).toThrow(CliUsageError);
   });
 });

@@ -13,6 +13,9 @@ export class CliUsageError extends Error {}
 
 const DEFAULT_TIME_LIMIT = 10_000;
 const DEFAULT_DOC_LIMIT = 10;
+const DEFAULT_MCP_HOST = '127.0.0.1';
+const DEFAULT_MCP_PORT = 8000;
+const DEFAULT_MCP_PATH = '/mcp';
 
 export function parseCliArguments(
   args: readonly string[],
@@ -143,18 +146,115 @@ export function parseMcpArguments(args: readonly string[]): McpOptions {
       strict: true,
       options: {
         'time-limit': { type: 'string' },
+        'transport': { type: 'string' },
+        'host': { type: 'string' },
+        'port': { type: 'string' },
+        'path': { type: 'string' },
+        'allow-origin': { type: 'string', multiple: true },
       },
     });
   } catch (error) {
     throw new CliUsageError(messageFromError(error));
   }
 
-  const timeLimit = parsed.values['time-limit'];
+  const { values } = parsed;
+  const timeLimit = values['time-limit'];
+  const transport = parseMcpTransport(values.transport);
+  const host = parseMcpHost(values.host);
+  const port = parseMcpPort(values.port);
+  const path = parseMcpPath(values.path);
+  const allowedOrigins = parseMcpOrigins(values['allow-origin']);
+
+  if (
+    transport === 'stdio' &&
+    (values.host !== undefined ||
+      values.port !== undefined ||
+      values.path !== undefined ||
+      values['allow-origin'] !== undefined)
+  )
+    throw new CliUsageError(
+      '--host, --port, --path and --allow-origin require ' +
+        '"--transport streamable-http".'
+    );
+
   return {
     timeLimit: parseTimeLimit(
       typeof timeLimit === 'string' ? timeLimit : undefined
     ),
+    transport,
+    host,
+    port,
+    path,
+    allowedOrigins,
   };
+}
+
+function parseMcpTransport(value: unknown): McpOptions['transport'] {
+  if (value === undefined || value === 'stdio') return 'stdio';
+  if (value === 'streamable-http') return value;
+  throw new CliUsageError('--transport must be "stdio" or "streamable-http".');
+}
+
+function parseMcpHost(value: unknown): string {
+  if (value === undefined) return DEFAULT_MCP_HOST;
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.trim() !== value ||
+    /[/?#\s]/u.test(value)
+  )
+    throw new CliUsageError('--host must be a hostname or IP address.');
+  return value;
+}
+
+function parseMcpPort(value: unknown): number {
+  if (value === undefined) return DEFAULT_MCP_PORT;
+  if (typeof value !== 'string' || !/^\d+$/u.test(value))
+    throw new CliUsageError('--port must be an integer from 0 to 65535.');
+  const result = Number(value);
+  if (!Number.isSafeInteger(result) || result > 65_535)
+    throw new CliUsageError('--port must be an integer from 0 to 65535.');
+  return result;
+}
+
+function parseMcpPath(value: unknown): string {
+  if (value === undefined) return DEFAULT_MCP_PATH;
+  if (
+    typeof value !== 'string' ||
+    !value.startsWith('/') ||
+    value.startsWith('//') ||
+    /[?#\s]/u.test(value)
+  )
+    throw new CliUsageError(
+      '--path must be an absolute URL path without a query or fragment.'
+    );
+  return value;
+}
+
+function parseMcpOrigins(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value))
+    throw new CliUsageError('--allow-origin must be an HTTP(S) origin.');
+  return value.map((origin) => {
+    if (typeof origin !== 'string')
+      throw new CliUsageError('--allow-origin must be an HTTP(S) origin.');
+    let url: URL;
+    try {
+      url = new URL(origin);
+    } catch {
+      throw new CliUsageError(
+        `Invalid --allow-origin value: ${JSON.stringify(origin)}.`
+      );
+    }
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      url.origin !== origin
+    )
+      throw new CliUsageError(
+        `Invalid --allow-origin value: ${JSON.stringify(origin)}.`
+      );
+    return origin;
+  });
 }
 
 function parseDiagnosticsFormat(value: unknown): DiagnosticsFormat {

@@ -157,8 +157,24 @@ nothing matches.
 ## MCP Server
 
 `cortex mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io)
-server on standard input/output, giving AI agents structured access to the
-same operations as the CLI:
+server, giving AI agents structured access to the same operations as the CLI.
+The default transport is standard input/output:
+
+```shell
+npx cortex mcp
+```
+
+Use the native Streamable HTTP transport for clients that connect to a URL:
+
+```shell
+npx cortex mcp --transport streamable-http
+```
+
+The HTTP endpoint defaults to `http://127.0.0.1:8000/mcp`. Configure it with
+`--host <address>`, `--port <number>`, and `--path <path>`. The server binds
+only to loopback by default; using a public bind address does not add HTTPS or
+authentication. Repeat `--allow-origin <origin>` to allow a browser client
+from a non-local origin.
 
 | Tool        | Purpose                                                        |
 | :---------- | :------------------------------------------------------------- |
@@ -178,8 +194,8 @@ between calls, so every program must be self-contained. The
 `timeLimit` argument).
 
 <ReadMore path="/cortex/mcp/">
-See how to **register the server with Claude Code, Claude Desktop, or
-another MCP client**, and what to expect once it is connected.
+See how to **connect ChatGPT, Claude Code, Claude Desktop, or another MCP
+client**, and what to expect once it is connected.
 </ReadMore>
 
 ## Interactive REPL
@@ -263,5 +279,3 @@ npx cortex --time-limit 30000 long-running.cx
 
 Set `--time-limit 0` for no deadline. The Compute Engine's iteration and
 recursion limits continue to apply independently.
-
-

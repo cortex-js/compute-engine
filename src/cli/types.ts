@@ -32,6 +32,15 @@ export interface DocOptions {
 export interface McpOptions {
   /** Default evaluation deadline for the `evaluate` tool, in ms. */
   timeLimit: number;
+  transport: 'stdio' | 'streamable-http';
+  /** Address used by the Streamable HTTP listener. */
+  host: string;
+  /** Port used by the Streamable HTTP listener. Zero selects a free port. */
+  port: number;
+  /** URL path of the Streamable HTTP endpoint. */
+  path: string;
+  /** Browser origins allowed to call the HTTP endpoint. */
+  allowedOrigins: string[];
 }
 
 export interface EvaluationResult {

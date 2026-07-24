@@ -142,15 +142,17 @@
   card cannot drift from the implementation.
 
 - **`cortex mcp` — a Model Context Protocol server for Cortex.** Starts an
-  MCP server on stdio giving AI agents structured access to the same
-  operations as the CLI: an `evaluate` tool (each call runs a complete,
-  self-contained program in a fresh session and returns the value as display
-  text, Cortex source and MathJSON, plus diagnostics), `check`, `doc`,
-  `parse` and `serialize` tools, and the `Cortex for AI Agents` language card
-  as the `cortex://docs/for-agents` resource. Register it with, e.g.,
-  `claude mcp add cortex -- npx -y @cortex-js/compute-engine mcp`. The
-  protocol implementation is self-contained: the package gains no new
-  dependencies.
+  MCP server on stdio (the default) or native Streamable HTTP, giving AI
+  agents structured access to the same operations as the CLI: an `evaluate`
+  tool (each call runs a complete, self-contained program in a fresh session
+  and returns the value as display text, Cortex source and MathJSON, plus
+  diagnostics), `check`, `doc`, `parse` and `serialize` tools, and the
+  `Cortex for AI Agents` language card as the
+  `cortex://docs/for-agents` resource. Register the stdio transport with,
+  e.g., `claude mcp add cortex -- npx -y @cortex-js/compute-engine mcp`, or
+  start the URL endpoint with
+  `cortex mcp --transport streamable-http`. The protocol implementation is
+  self-contained: the package gains no new dependencies.
 
 - **Spread arguments — `f(...t)` splices a tuple into a call's arguments.**
   New Cortex prefix syntax `...` (call argument lists only) and engine `Spread`

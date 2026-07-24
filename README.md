@@ -191,7 +191,15 @@ claude mcp add cortex -- npx -y @cortex-js/compute-engine mcp
 
 The server exposes `evaluate`, `check`, `doc`, `parse`, and `serialize` tools,
 and serves a machine-verified language card so the assistant can learn Cortex on
-its own. See the [MCP server guide](https://cortexjs.io/cortex/mcp/).
+its own. It also has a native Streamable HTTP transport for ChatGPT and other
+URL-based clients:
+
+```sh
+npx -y @cortex-js/compute-engine mcp --transport streamable-http
+```
+
+See the [MCP server guide](https://cortexjs.io/cortex/mcp/) for ChatGPT setup
+and HTTPS deployment options.
 
 **💡 Best Practices:**
 

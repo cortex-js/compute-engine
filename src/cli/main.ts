@@ -29,9 +29,9 @@ Commands:
   doc                     show documentation for a library symbol, or search
                           the library by keyword; "--json" for JSON,
                           "--limit <n>" for more matches
-  mcp                     start a Model Context Protocol server on stdio,
-                          exposing evaluate/check/doc/parse/serialize tools
-                          and the language card resource
+  mcp                     start a Model Context Protocol server, exposing
+                          evaluate/check/doc/parse/serialize tools and the
+                          language card resource; stdio is the default
 
 Arguments:
   file                    Cortex source file (.cortex or .cx)
@@ -42,6 +42,13 @@ Options:
       --cortex            print the result as Cortex source
       --diagnostics <fmt> print diagnostics as "text" (default) or "json"
       --time-limit <ms>   evaluation deadline; 0 disables it (default: 10000)
+      --transport <type>  MCP transport: "stdio" (default) or
+                          "streamable-http"
+      --host <address>    MCP HTTP bind address (default: 127.0.0.1)
+      --port <number>     MCP HTTP port (default: 8000)
+      --path <path>       MCP HTTP endpoint path (default: /mcp)
+      --allow-origin <o>  allow a browser origin to call the MCP HTTP endpoint;
+                          may be repeated
       --no-color          disable colored diagnostics
   -h, --help              display this help
   -v, --version           display the package version

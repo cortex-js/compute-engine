@@ -113,13 +113,14 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 - 2026-07-24 — **`cortex mcp` — Model Context Protocol server (landed).**
   Final item of the LLM-friendliness initiative (card → CLI → eval pass →
-  idiom diagnostics → MCP). A new `mcp` subcommand starts a stdio MCP server:
-  tools `evaluate` (stateless — each call runs a complete program in a fresh
-  session), `check`, `doc`, `parse`, `serialize`, all thin wrappers over the
-  same functions as the CLI (`parseSource` extracted from `check.ts`,
-  `lookupDoc` from `doc.ts`); the `for-agents.md` language card is served as
-  the `cortex://docs/for-agents` resource (copied beside the CLI bundle at
-  build time). The newline-delimited JSON-RPC protocol is implemented
+  idiom diagnostics → MCP). A new `mcp` subcommand starts an MCP server over
+  stdio (the default) or native Streamable HTTP: tools `evaluate` (stateless —
+  each call runs a complete program in a fresh session), `check`, `doc`,
+  `parse`, `serialize`, all thin wrappers over the same functions as the CLI
+  (`parseSource` extracted from `check.ts`, `lookupDoc` from `doc.ts`); the
+  `for-agents.md` language card is served as the
+  `cortex://docs/for-agents` resource (copied beside the CLI bundle at build
+  time). The newline-delimited JSON-RPC and HTTP transports are implemented
   directly in `src/cli/mcp.ts` — no new package dependencies. Tests:
   `test/cortex/mcp.test.ts`.
 

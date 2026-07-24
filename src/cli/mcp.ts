@@ -1,4 +1,11 @@
 import { readFile } from 'node:fs/promises';
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 import { ComputeEngine, serializeCortex, version } from '../cortex.js';
 
@@ -8,13 +15,14 @@ import { lookupDoc } from './doc.js';
 import { diagnosticToJson, formatValue, hasErrors } from './format.js';
 import type { CliIo } from './io.js';
 import { makeCortexSession } from './session.js';
+import type { McpOptions } from './types.js';
 
 /**
- * `cortex mcp` — a Model Context Protocol server over stdio, exposing the
- * same operations as the CLI as tools (`evaluate`, `check`, `doc`, `parse`,
- * `serialize`) and the agent-facing language card as a resource. The
- * protocol is newline-delimited JSON-RPC 2.0; it is implemented directly
- * rather than through the MCP SDK to keep the package dependency-free.
+ * `cortex mcp` — a Model Context Protocol server over stdio or Streamable
+ * HTTP, exposing the same operations as the CLI as tools (`evaluate`,
+ * `check`, `doc`, `parse`, `serialize`) and the agent-facing language card
+ * as a resource. It is implemented directly rather than through the MCP SDK
+ * to keep the package dependency-free.
  *
  * Tool calls are stateless: each one runs against a fresh engine, so a
  * program must be self-contained. (A persistent session would also let one
@@ -23,9 +31,18 @@ import { makeCortexSession } from './session.js';
  */
 
 const CARD_URI = 'cortex://docs/for-agents';
+const MAX_HTTP_BODY_BYTES = 1024 * 1024;
 
 /** Newest first; `initialize` echoes the client's version when supported. */
-const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+const PROTOCOL_VERSIONS = [
+  '2025-11-25',
+  '2025-06-18',
+  '2025-03-26',
+  '2024-11-05',
+];
+const STREAMABLE_HTTP_PROTOCOL_VERSIONS = new Set(
+  PROTOCOL_VERSIONS.filter((x) => x !== '2024-11-05')
+);
 
 const INSTRUCTIONS = `Tools for Cortex, the programming language of the Compute Engine (https://cortexjs.io). Before writing Cortex source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions.`;
 
@@ -46,6 +63,7 @@ const TOOLS = [
       },
       required: ['source'],
     },
+    annotations: readOnlyAnnotations(),
   },
   {
     name: 'check',
@@ -58,6 +76,7 @@ const TOOLS = [
       },
       required: ['source'],
     },
+    annotations: readOnlyAnnotations(),
   },
   {
     name: 'doc',
@@ -77,6 +96,7 @@ const TOOLS = [
       },
       required: ['query'],
     },
+    annotations: readOnlyAnnotations(),
   },
   {
     name: 'parse',
@@ -89,6 +109,7 @@ const TOOLS = [
       },
       required: ['source'],
     },
+    annotations: readOnlyAnnotations(),
   },
   {
     name: 'serialize',
@@ -102,6 +123,7 @@ const TOOLS = [
       },
       required: ['mathjson'],
     },
+    annotations: readOnlyAnnotations(),
   },
 ];
 
@@ -113,6 +135,14 @@ const CARD_RESOURCE = {
     'A compact guide to the Cortex language for agents: syntax, semantics, idioms, common traps and a roster of the standard library. Read this before writing Cortex.',
   mimeType: 'text/markdown',
 };
+
+function readOnlyAnnotations(): Record<string, boolean> {
+  return {
+    readOnlyHint: true,
+    destructiveHint: false,
+    openWorldHint: false,
+  };
+}
 
 /** A JSON-RPC protocol error (as opposed to a tool-execution failure,
  * which is reported as a result with `isError: true`). */
@@ -142,6 +172,12 @@ export async function runMcp(
   }
 
   const server = new McpServer(options.timeLimit, io.loadCard);
+  if (options.transport === 'streamable-http')
+    return runMcpHttp(server, options, io);
+  return runMcpStdio(server, io);
+}
+
+async function runMcpStdio(server: McpServer, io: CliIo): Promise<number> {
   const send = (message: unknown): void => {
     io.stdout.write(`${JSON.stringify(message)}\n`);
   };
@@ -172,6 +208,152 @@ export async function runMcp(
     }
   }
   return 0;
+}
+
+async function runMcpHttp(
+  mcp: McpServer,
+  options: McpOptions,
+  io: CliIo
+): Promise<number> {
+  const server = createMcpHttpServerForDispatcher(mcp, options);
+  return new Promise((resolve) => {
+    const handleListenError = (error: Error): void => {
+      io.stderr.write(`cortex mcp: ${error.message}\n`);
+      resolve(1);
+    };
+    server.once('error', handleListenError);
+    server.listen(options.port, options.host, () => {
+      server.off('error', handleListenError);
+      const address = server.address() as AddressInfo | null;
+      const port = address?.port ?? options.port;
+      io.stderr.write(
+        `Cortex MCP server listening on http://${displayHost(
+          options.host
+        )}:${port}${options.path}\n`
+      );
+      server.once('close', () => resolve(0));
+    });
+  });
+}
+
+/**
+ * Create the native Streamable HTTP server. Exported for transport-level
+ * tests; command-line callers normally use `runMcp()`.
+ */
+export function createMcpHttpServer(
+  options: McpOptions,
+  loadCard?: () => Promise<string>
+): Server {
+  return createMcpHttpServerForDispatcher(
+    new McpServer(options.timeLimit, loadCard),
+    options
+  );
+}
+
+function createMcpHttpServerForDispatcher(
+  mcp: McpServer,
+  options: McpOptions
+): Server {
+  return createServer((request, response) => {
+    void handleHttpRequest(mcp, options, request, response);
+  });
+}
+
+async function handleHttpRequest(
+  mcp: McpServer,
+  options: McpOptions,
+  request: IncomingMessage,
+  response: ServerResponse
+): Promise<void> {
+  try {
+    if (requestPath(request) !== options.path) {
+      sendHttpText(response, 404, 'Not Found');
+      return;
+    }
+
+    const origin = request.headers.origin;
+    if (!isAllowedOrigin(origin, options)) {
+      sendHttpText(response, 403, 'Forbidden: invalid Origin header');
+      return;
+    }
+    if (origin !== undefined) {
+      response.setHeader('Access-Control-Allow-Origin', origin);
+      response.setHeader('Vary', 'Origin');
+    }
+
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204, {
+        'Access-Control-Allow-Headers':
+          'Accept, Content-Type, MCP-Protocol-Version',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Max-Age': '600',
+      });
+      response.end();
+      return;
+    }
+
+    if (request.method !== 'POST') {
+      response.setHeader('Allow', 'POST, OPTIONS');
+      sendHttpText(response, 405, 'Method Not Allowed');
+      return;
+    }
+
+    if (!hasJsonContentType(request.headers['content-type'])) {
+      sendHttpText(response, 415, 'Content-Type must be application/json');
+      return;
+    }
+    if (!acceptsMcpResponse(request.headers.accept)) {
+      sendHttpText(
+        response,
+        406,
+        'Accept must include application/json and text/event-stream'
+      );
+      return;
+    }
+    if (!hasSupportedProtocolVersion(request)) {
+      sendHttpText(response, 400, 'Unsupported MCP-Protocol-Version');
+      return;
+    }
+
+    const body = await readHttpBody(request);
+    let message: unknown;
+    try {
+      message = JSON.parse(body);
+    } catch {
+      sendHttpJson(response, 400, {
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32700, message: 'Parse error' },
+      });
+      return;
+    }
+
+    const responses = await mcp.handle(message);
+    if (responses.length === 0) {
+      response.writeHead(202);
+      response.end();
+      return;
+    }
+    sendHttpJson(
+      response,
+      200,
+      responses.length === 1 ? responses[0] : responses
+    );
+  } catch (error) {
+    const status = error instanceof HttpTransportError ? error.status : 500;
+    const message =
+      error instanceof Error ? error.message : 'Internal Server Error';
+    sendHttpText(response, status, message);
+  }
+}
+
+class HttpTransportError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message);
+  }
 }
 
 class McpServer {
@@ -384,6 +566,126 @@ function requireTimeLimit(value: unknown): number {
       'Expected "timeLimit" to be a non-negative integer (milliseconds).'
     );
   return value;
+}
+
+function requestPath(request: IncomingMessage): string {
+  try {
+    return new URL(request.url ?? '/', 'http://localhost').pathname;
+  } catch {
+    return '';
+  }
+}
+
+function isAllowedOrigin(
+  origin: string | undefined,
+  options: McpOptions
+): boolean {
+  if (origin === undefined) return true;
+  if (options.allowedOrigins.includes(origin)) return true;
+  if (!isLoopbackHost(options.host)) return false;
+
+  try {
+    const url = new URL(origin);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      isLoopbackHost(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.replace(/^\[(.*)\]$/u, '$1').toLowerCase();
+  return (
+    normalized === 'localhost' ||
+    normalized === '::1' ||
+    normalized === '0:0:0:0:0:0:0:1' ||
+    /^127(?:\.\d{1,3}){3}$/u.test(normalized)
+  );
+}
+
+function hasJsonContentType(value: string | undefined): boolean {
+  return value?.split(';', 1)[0].trim().toLowerCase() === 'application/json';
+}
+
+function acceptsMcpResponse(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const types = value
+    .split(',')
+    .map((x) => x.split(';', 1)[0].trim().toLowerCase());
+  return (
+    types.includes('application/json') && types.includes('text/event-stream')
+  );
+}
+
+function hasSupportedProtocolVersion(request: IncomingMessage): boolean {
+  const value = request.headers['mcp-protocol-version'];
+  if (value === undefined) return true;
+  return (
+    typeof value === 'string' && STREAMABLE_HTTP_PROTOCOL_VERSIONS.has(value)
+  );
+}
+
+async function readHttpBody(request: IncomingMessage): Promise<string> {
+  const declaredLength = request.headers['content-length'];
+  if (
+    declaredLength !== undefined &&
+    (/^\d+$/u.test(declaredLength) === false ||
+      Number(declaredLength) > MAX_HTTP_BODY_BYTES)
+  )
+    throw new HttpTransportError(
+      413,
+      `Request body exceeds ${MAX_HTTP_BODY_BYTES} bytes`
+    );
+
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.length;
+    if (bytes > MAX_HTTP_BODY_BYTES)
+      throw new HttpTransportError(
+        413,
+        `Request body exceeds ${MAX_HTTP_BODY_BYTES} bytes`
+      );
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function sendHttpJson(
+  response: ServerResponse,
+  status: number,
+  body: unknown
+): void {
+  if (response.headersSent || response.destroyed) return;
+  const text = JSON.stringify(body);
+  response.writeHead(status, {
+    'Cache-Control': 'no-cache, no-store',
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(text),
+    'X-Content-Type-Options': 'nosniff',
+  });
+  response.end(text);
+}
+
+function sendHttpText(
+  response: ServerResponse,
+  status: number,
+  text: string
+): void {
+  if (response.headersSent || response.destroyed) return;
+  response.writeHead(status, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Content-Length': Buffer.byteLength(text),
+    'X-Content-Type-Options': 'nosniff',
+  });
+  response.end(text);
+}
+
+function displayHost(host: string): string {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 }
 
 /** Locate the language card when the caller did not supply a loader (the
