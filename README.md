@@ -178,6 +178,21 @@ The interactive session preserves declarations between inputs and supports
 persistent history, multiline input, `.load`, `.clear`, `.ast`, and `.time`. Run
 `cortex --help` for output formats and execution-limit options.
 
+#### MCP Server for AI Assistants
+
+The `cortex` command includes a
+[Model Context Protocol](https://modelcontextprotocol.io) server, so an AI
+assistant can evaluate Cortex programs — exact arithmetic and symbolic
+computation as a tool call. For example, with Claude Code:
+
+```sh
+claude mcp add cortex -- npx -y @cortex-js/compute-engine mcp
+```
+
+The server exposes `evaluate`, `check`, `doc`, `parse`, and `serialize` tools,
+and serves a machine-verified language card so the assistant can learn Cortex on
+its own. See the [MCP server guide](https://cortexjs.io/cortex/mcp/).
+
 **💡 Best Practices:**
 
 - Always use type guards (`isNumber`, `isSymbol`, `isFunction`) before accessing

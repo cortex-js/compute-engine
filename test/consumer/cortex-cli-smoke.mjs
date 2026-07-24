@@ -45,6 +45,52 @@ if (syntaxError.status !== 1)
 if (!syntaxError.stderr.includes('Unexpected symbol "+"'))
   fail(`syntax error diagnostic missing:\n${syntaxError.stderr}`);
 
+// MCP server: the language card must ship beside the CLI bundle, and the
+// stdio server must answer a handshake, a tool call, and a resource read.
+if (!existsSync(join(dirname(CLI), 'for-agents.md')))
+  fail('for-agents.md was not copied beside the CLI bundle.');
+
+const mcp = run(
+  ['mcp'],
+  [
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {} },
+    },
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'evaluate', arguments: { source: '1/2 + 1' } },
+    },
+    {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'resources/read',
+      params: { uri: 'cortex://docs/for-agents' },
+    },
+  ]
+    .map((message) => `${JSON.stringify(message)}\n`)
+    .join('')
+);
+if (mcp.status !== 0) fail(`mcp exited ${mcp.status}\nstderr:\n${mcp.stderr}`);
+const responses = mcp.stdout
+  .split('\n')
+  .filter((line) => line.length > 0)
+  .map((line) => JSON.parse(line));
+if (responses.length !== 3)
+  fail(`mcp returned ${responses.length} responses, expected 3`);
+if (responses[0].result?.serverInfo?.name !== 'cortex')
+  fail(`mcp initialize mismatch:\n${mcp.stdout}`);
+const evaluated = JSON.parse(responses[1].result?.content?.[0]?.text ?? '{}');
+if (evaluated.value !== '3/2')
+  fail(`mcp evaluate returned ${evaluated.value}, expected 3/2`);
+if (!responses[2].result?.contents?.[0]?.text?.includes('Cortex'))
+  fail(`mcp language card resource missing:\n${mcp.stdout}`);
+
 console.log('cortex-cli-smoke: PASSED');
 
 function expectRun(args, expected) {
