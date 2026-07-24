@@ -198,6 +198,19 @@
 
 ### Improvements
 
+- **Compiled comparisons and connectives look through provably-scalar user
+  functions.** A helper declared with an open signature (`(unknown) ->
+  unknown`, the shape that keeps list-broadcasting working) no longer makes a
+  scalar comparison uncompilable: `q(x) < y` with `q(t) = n·t+1` compiles when
+  every argument is scalar and the function's body provably maps scalar
+  parameters to a scalar result (arithmetic/transcendental operators,
+  scalar-typed captured symbols, and nested user helpers — analyzed
+  recursively, with self-recursion declining). A call whose argument may be a
+  collection (`q(L) < y`) still fails closed, so the sound half of the
+  0.93.0 rule is preserved — and unlike a `-> number` return annotation, the
+  look-through never mis-compiles the broadcast call. Element-wise compiled
+  comparisons over collections remain a separate roadmap item.
+
 - **`declare()` accepts `inferredSignature: true`, to vouch that a name is an
   operator without pinning its types.** Declaring a `signature` normally makes
   it a contract, so a wide placeholder such as `(unknown) -> unknown` keeps

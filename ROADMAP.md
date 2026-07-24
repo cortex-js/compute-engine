@@ -94,6 +94,13 @@ an ordinary *scalar* comparison uncompilable, and the workaround they shipped
 is sound only under an invariant of their own pipeline. Both witnesses are the
 same asymmetry: compiled arithmetic broadcasts, compiled comparisons refuse.
 
+**The item-86 half is RESOLVED (2026-07-24)** — a compile-time scalar
+look-through (`isProvablyScalarApplication`, `javascript-target.ts`) admits a
+comparison/connective over a user-function application when the arguments are
+scalar-ish and the body provably maps scalars to a scalar (conservative
+whitelist; `q(L) < y` still fails closed). What remains of this entry is the
+element-wise lowering itself, which still needs the semantics rulings below.
+
 Note the scalar path is **not** at stake here — this lowering fires only where
 compilation today throws, so it costs nothing on ordinary scalar comparisons.
 (The runtime-guard cost belongs to the *Complex values in compiled scalar

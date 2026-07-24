@@ -350,9 +350,118 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
   // collection-ness is unknown — so it must not fail closed here. A
   // `broadcastable<T>` operand is an explicit declared type, reliable on any
   // node.
-  if (t === 'unknown' || t === 'any' || t === 'value')
-    return isFunction(e) && (e.isCanonical || e.isStructural);
-  return typeof t !== 'string' && t.kind === 'broadcastable';
+  if (t === 'unknown' || t === 'any' || t === 'value') {
+    if (!isFunction(e) || (!e.isCanonical && !e.isStructural)) return false;
+    // Item-86 look-through (Tycho): an application of a USER function whose
+    // body is provably scalar under scalar arguments is NOT
+    // possibly-collection, even when its declared return type is open
+    // (`(unknown) -> unknown`, the shape consumers use so list-broadcasting
+    // keeps working). `q(x) < y` with `q(t) = n·t+1` compiles; `q(L) < y`
+    // with a collection-ish `L` still fails closed at the argument check.
+    return !isProvablyScalarApplication(e, new Set(), (a) =>
+      !a.type.matches('collection') && !isPossiblyCollectionTypedJS(a)
+    );
+  }
+  if (typeof t !== 'string' && t.kind === 'broadcastable') {
+    // A `broadcastable<T>`-typed APPLICATION means "T, or a list-nesting of
+    // T, depending on the operand shapes." When every operand is provably
+    // NOT collection-ish (recursively, so the item-86 look-through applies
+    // to an operand like `q(x)`), the lift cannot fire at run time and the
+    // result is the plain scalar `T` — e.g. `q(x) < y` types
+    // `broadcastable<boolean>` only because `q`'s return is open, yet with
+    // scalar operands it is a scalar boolean. A broadcastable-typed
+    // non-application (a declared symbol) keeps the conservative answer.
+    if (isFunction(e) && (e.ops ?? []).length > 0) {
+      return (e.ops ?? []).some(
+        (a) => a.type.matches('collection') || isPossiblyCollectionTypedJS(a)
+      );
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Item-86 look-through: is `e` an application of a user function whose result
+ * is provably scalar — every actual argument accepted by `argIsScalar`, and
+ * the function's body mapping scalar parameters to a scalar result?
+ *
+ * The body analysis is a conservative WHITELIST: its only permitted failure
+ * mode is *declining* (the caller then keeps the fail-closed path), never
+ * unsound admission — the inverse discipline of the usual "static gates
+ * over-fire" rule, because here admission is the dangerous direction.
+ *
+ * - the actual arguments are judged by the caller-supplied `argIsScalar` (at
+ *   the top level: the gate's own convention, where a bare unknown symbol is
+ *   a plot variable and scalar; inside a body: the enclosing analysis);
+ * - a parameter is scalar by assumption;
+ * - a captured (non-parameter) symbol must have a provably-scalar declared
+ *   type (`number`/`boolean`/`string`) — unlike a plot variable, a captured
+ *   document symbol is routinely assigned a list later, so `unknown` is not
+ *   trusted here;
+ * - an application must be of a `broadcastable` operator (whose base
+ *   signature is scalar → scalar by definition of the lift) over
+ *   scalar-if-scalar operands, or of another user function passing this same
+ *   analysis — self/mutual recursion declines via `visited`;
+ * - everything else declines: `List`/`Range`/collection constructors (not
+ *   broadcastable), multi-statement `Block` bodies, arity mismatches,
+ *   non-symbol parameters.
+ */
+function isProvablyScalarApplication(
+  e: Expression,
+  visited: Set<string>,
+  argIsScalar: (a: Expression) => boolean
+): boolean {
+  if (!isFunction(e)) return false;
+  const op = e.operator;
+  if (visited.has(op)) return false;
+  // Only a USER function — a symbol whose value is a `Function` literal — is
+  // looked through; built-in operators have their own compile handlers.
+  const fnVal = e.engine.box(op).value;
+  if (!isFunction(fnVal, 'Function')) return false;
+  const fnOps = fnVal.ops;
+  const params = fnOps
+    .slice(1)
+    .map((p: Expression) => functionLiteralParameterName(p));
+  const args = e.ops;
+  if (params.length !== args.length) return false;
+  if (params.some((p: string) => !p)) return false;
+  if (!args.every(argIsScalar)) return false;
+  const nextVisited = new Set(visited);
+  nextVisited.add(op);
+  // Canonical parse wraps a lambda body in `Block`; unwrap only the
+  // single-statement form (a multi-statement body declines below — `Block`
+  // is not a broadcastable operator).
+  let body: Expression | undefined = fnOps[0];
+  if (body === undefined) return false;
+  while (isFunction(body, 'Block') && body.nops === 1) body = body.ops[0];
+  return scalarIfScalarBody(body, new Set(params), nextVisited);
+}
+
+/** See `isProvablyScalarApplication` — the body half of the whitelist. */
+function scalarIfScalarBody(
+  x: Expression,
+  params: Set<string>,
+  visited: Set<string>
+): boolean {
+  if (isNumber(x) || isString(x)) return true;
+  if (isSymbol(x)) {
+    if (params.has(x.symbol)) return true;
+    const t = x.type;
+    return t.matches('number') || t.matches('boolean') || t.matches('string');
+  }
+  if (!isFunction(x)) return false;
+  const op = x.operator;
+  if (typeof op === 'string') {
+    const def = x.engine.lookupDefinition(op);
+    if (def && (def as any).operator?.broadcastable === true)
+      return (x.ops ?? []).every((o) => scalarIfScalarBody(o, params, visited));
+  }
+  // A nested user-function application: same look-through, with its
+  // arguments judged under THIS body's scalar assumptions.
+  return isProvablyScalarApplication(x, visited, (a) =>
+    scalarIfScalarBody(a, params, visited)
+  );
 }
 
 /**
