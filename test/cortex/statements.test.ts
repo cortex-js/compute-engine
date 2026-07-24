@@ -370,3 +370,67 @@ describe('CORTEX MULTI-STATEMENT PROGRAM', () => {
     ]);
   });
 });
+
+// `let (x, y) = value` — tuple destructuring declarations. The pattern is
+// irrefutable in FORM (bare symbols, `_`, nested tuple patterns); it lowers to
+// `["Declare", ["Tuple", …], {value -> …}]` and requires an initializer.
+describe('CORTEX STATEMENTS — destructuring declarations', () => {
+  test('`let (x, y) = p` lowers to Declare of a Tuple pattern', () => {
+    expect(validCortex('let (x, y) = p')).toStrictEqual([
+      'Declare',
+      ['Tuple', 'x', 'y'],
+      ['Dictionary', ['KeyValuePair', 'value', 'p']],
+    ]);
+  });
+
+  test('`const` adds the constant attribute', () => {
+    expect(validCortex('const (x, y) = p')).toStrictEqual([
+      'Declare',
+      ['Tuple', 'x', 'y'],
+      [
+        'Dictionary',
+        ['KeyValuePair', 'value', 'p'],
+        ['KeyValuePair', 'constant', 'True'],
+      ],
+    ]);
+  });
+
+  test('nested patterns and `_` wildcards parse', () => {
+    expect(validCortex('let ((a, b), _) = p')).toStrictEqual([
+      'Declare',
+      ['Tuple', ['Tuple', 'a', 'b'], '_'],
+      ['Dictionary', ['KeyValuePair', 'value', 'p']],
+    ]);
+  });
+
+  test('a missing initializer is a diagnostic', () => {
+    const [, diags] = parseCortex('let (x, y)');
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].message).toStrictEqual(['expression-expected']);
+  });
+
+  test('a type annotation on a pattern is a diagnostic', () => {
+    const [, diags] = parseCortex('let (x, y): real = p');
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].message).toStrictEqual(['unexpected-symbol', ':']);
+  });
+
+  test('a duplicate name anywhere in the pattern is a diagnostic', () => {
+    const [, flat] = parseCortex('let (x, x) = p');
+    expect(flat[0].message).toStrictEqual(['unexpected-symbol', 'x']);
+    const [, nested] = parseCortex('let (x, (y, x)) = p');
+    expect(nested[0].message).toStrictEqual(['unexpected-symbol', 'x']);
+  });
+
+  test('a single-element pattern is a diagnostic (parenthesized name)', () => {
+    const [, diags] = parseCortex('let (x) = p');
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].message).toStrictEqual(['symbol-expected']);
+  });
+
+  test('a non-symbol pattern element is a diagnostic', () => {
+    const [, diags] = parseCortex('let (x, 5) = p');
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].message).toStrictEqual(['symbol-expected']);
+  });
+});

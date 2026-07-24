@@ -180,7 +180,11 @@ _parameters_ → **`(`** \[(_parameter_)#**`,`**\] **`)`**
 
 _declaration_ → (**`let`** | **`const`**) _symbol_
 \[**`:`** _type_\] \[**`=`** _expression_\] |
+(**`let`** | **`const`**) _tuple-pattern_ **`=`** _expression_ |
 _symbol_ **`:`** _type_ \[**`=`** _expression_\]
+
+_tuple-pattern_ → **`(`** (_symbol_ | _tuple-pattern_)#**`,`** **`)`**
+&nbsp;&nbsp;&nbsp;&nbsp;— at least two elements; `_` skips a position
 
 _function-definition_ → _symbol_ _parameters_
 \[**`->`** _type_\] **`=`** _expression_ |

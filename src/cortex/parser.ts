@@ -473,6 +473,18 @@ export class Parser {
 
   private parseDeclaration(isConst: boolean): MathJsonExpression | null {
     const kw = this.advance(); // 'let' | 'const'
+    // `let (x, y) = value` — a tuple destructuring declaration. The pattern
+    // is irrefutable in FORM (bare symbols, `_` to skip a position, nested
+    // tuple patterns — no literals or pins); a runtime shape mismatch is an
+    // ordinary Error value. Requires an initializer; no type annotation.
+    if (this.current.type === 'OPEN_PAREN') {
+      const pattern = this.parseDeclarationPattern(new Set());
+      if (pattern === null) return null;
+      return this.finishDeclaration(isConst, kw.start, pattern, {
+        allowType: false,
+        requireValue: true,
+      });
+    }
     const nameTok = this.current;
     if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
       this.error(['symbol-expected'], nameTok.start, nameTok.end);
@@ -491,20 +503,101 @@ export class Parser {
     return this.finishDeclaration(isConst, kw.start, nameNode);
   }
 
+  /** A tuple destructuring pattern in a declaration: `(a, b)`, `(a, _, c)`,
+   * `(a, (b, c))`. Elements are bare symbols (`_` skips a position) or nested
+   * tuple patterns; at least two elements are required (one element is a
+   * parenthesized name, not a tuple). `names` collects the bound names across
+   * nesting levels so a duplicate anywhere in the pattern is a diagnostic.
+   * Returns a `Tuple` node, or `null` after reporting a diagnostic. */
+  private parseDeclarationPattern(
+    names: Set<string>
+  ): MathJsonExpression | null {
+    const open = this.advance(); // '('
+    const elements: MathJsonExpression[] = [];
+    let ok = true;
+    if (!this.check('CLOSE_PAREN')) {
+      for (;;) {
+        if (this.current.type === 'OPEN_PAREN') {
+          const nested = this.parseDeclarationPattern(names);
+          if (nested === null) ok = false;
+          else elements.push(nested);
+        } else if (
+          this.current.type === 'SYMBOL' ||
+          this.current.type === 'VERBATIM_SYMBOL'
+        ) {
+          const tok = this.advance();
+          this.harvest(tok);
+          const name =
+            tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
+          if (tok.type === 'SYMBOL' && (name === 'true' || name === 'false')) {
+            this.error(['reserved-word', name], tok.start, tok.end);
+            ok = false;
+          }
+          if (name !== '_') {
+            if (names.has(name)) {
+              this.error(['unexpected-symbol', name], tok.start, tok.end);
+              ok = false;
+            }
+            names.add(name);
+          }
+          elements.push(this.wrap({ sym: name }, tok.start, tok.end));
+        } else {
+          this.error(
+            ['symbol-expected'],
+            this.current.start,
+            this.current.end
+          );
+          return null;
+        }
+        if (!this.match('COMMA')) break;
+        if (this.check('CLOSE_PAREN')) break; // trailing comma
+      }
+    }
+    let end = this.current.end;
+    if (this.check('CLOSE_PAREN')) {
+      end = this.current.end;
+      this.advance();
+    } else {
+      this.error(['closing-bracket-expected', ')'], open.start, open.end);
+      return null;
+    }
+    if (elements.length < 2) {
+      this.error(['symbol-expected'], open.start, end);
+      return null;
+    }
+    if (!ok) return null;
+    return this.wrap(
+      ['Tuple', ...elements] as MathJsonExpression[],
+      open.start,
+      end
+    );
+  }
+
   /** Parse the optional `: Type` and `= value` tail of a declaration and build
    * the engine `Declare` node (type positional; `value`/`constant` in a
    * trailing attributes `Dictionary`). On a malformed type, returns `null` (the
    * type subparse has already recovered). The current token is the one right
-   * after the declared name (`:`, `=`, or a separator). */
+   * after the declared name (`:`, `=`, or a separator). With `allowType:
+   * false` a `:` annotation is a diagnostic; with `requireValue: true` a
+   * missing `= value` is one (both used by destructuring declarations). */
   private finishDeclaration(
     isConst: boolean,
     start: number,
-    nameNode: MathJsonExpression
+    nameNode: MathJsonExpression,
+    options?: { allowType?: boolean; requireValue?: boolean }
   ): MathJsonExpression | null {
     let typeNode: MathJsonExpression | undefined;
     let end = this.localEnd(nameNode) ?? this.previousEnd();
 
     if (this.check('OPERATOR') && this.current.text === ':') {
+      if (options?.allowType === false) {
+        this.error(
+          ['unexpected-symbol', ':'],
+          this.current.start,
+          this.current.end
+        );
+        return null;
+      }
       const t = this.parseTypeAnnotation();
       if (t === null) return null;
       typeNode = t.node;
@@ -525,6 +618,11 @@ export class Parser {
         valueNode = init;
         end = this.localEnd(init) ?? this.previousEnd();
       }
+    }
+    if (options?.requireValue && valueNode === undefined) {
+      // A destructuring declaration without an initializer binds nothing.
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
     }
 
     // Assemble `["Declare", name, type?, attributes?]`. The type is positional

@@ -158,6 +158,20 @@
   ce.box(['Add', ['Spread', ['Tuple', 1, 2, 3]]]).evaluate(); // → 6
   ```
 
+- **Destructuring declarations — `let (q, r) = divmod(17, 5)`.** A Cortex
+  `let`/`const` may bind the components of a tuple in one statement. Patterns
+  are irrefutable in form — bare symbols, `_` to skip a position, nested tuple
+  patterns; no literals or pins (use `match` for conditional destructuring) —
+  and require an initializer. The value is evaluated once; a shape mismatch
+  (wrong length, or not a tuple) yields an `incompatible-type` error value and
+  binds nothing. `const (x, y) = …` makes each binding constant. Lowers to the
+  `Declare` primitive with a `Tuple` pattern in the name position, which now
+  accepts it on all routes:
+
+  ```js
+  ce.box(['Declare', ['Tuple', 'x', 'y'], d]).evaluate(); // d = {value: (3, 4)}
+  ```
+
 - **`IsMissing` and `Coalesce` — absence testing and discharge.**
   `IsMissing(x)` is `True` when `x` is absent (the `Missing` symbol OR a `NaN`,
   R’s `is.na`); `IsNaN` remains a NaN-specific test. `Coalesce(a, b, …)` returns

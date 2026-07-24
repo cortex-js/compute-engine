@@ -1009,8 +1009,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         ops[2] && !isDictionary(ops[2]) ? ops[2].type : 'nothing',
       canonical: (args, { engine: ce }) => {
         // Note: we can't use checkType() because it canonicalized/bind the argument.
+        // A `Tuple` first operand is a destructuring pattern (`let (x, y) = v`):
+        // kept raw — canonicalizing it would bind the about-to-be-declared
+        // names to any existing outer definitions.
         let symbolExpr = args[0];
-        if (!isSymbol(symbolExpr)) {
+        if (!isSymbol(symbolExpr) && !isFunction(symbolExpr, 'Tuple')) {
           // If the argument was not a symbol literal, see if we can evaluate it to a symbol
           symbolExpr = checkType(ce, args[0], 'symbol');
         }
@@ -1041,9 +1044,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return null;
       },
       evaluate: (ops, { engine: ce }) => {
-        const symbolName = sym(ops[0].evaluate());
-        if (!symbolName) return undefined;
-
         // Separate an optional trailing attributes dictionary. When the last
         // operand (with arity ≥ 2) is a `Dictionary`, it carries definition
         // attributes (`type`, `value`, `constant`, `holdUntil`); the
@@ -1086,6 +1086,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           holdOp && isString(holdOp) ? holdOp.string : undefined
         ) as 'never' | 'evaluate' | 'N' | undefined;
 
+        // Declare ONE name with the resolved type/constant/holdUntil.
+        //
         // A symbol may already exist in the current scope as an *inferred*
         // binding with no value — typically because the block's canonical
         // pass hoisted it (see `canonicalBlock`), or an earlier statement in
@@ -1105,69 +1107,124 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Loop body on its second iteration, or a warmed engine re-running a
         // program — and re-executing the Declare must reset the local, not
         // conflict with its own earlier run.
-        const currentScope = ce.context.lexicalScope;
-        let existing = currentScope.bindings.get(symbolName);
-        if (
-          existing &&
-          (existing as { _declaredByStatement?: boolean })
-            ._declaredByStatement === true
-        ) {
-          currentScope.bindings.delete(symbolName);
-          existing = undefined;
-        }
-        const existingValueDef =
-          existing && isValueDef(existing) ? existing : undefined;
-        const isAutoDeclareHere =
-          !!existingValueDef &&
-          existingValueDef.value.inferredType &&
-          existingValueDef.value.value === undefined;
+        const declareOne = (
+          symbolName: string,
+          boundValue: Expression | undefined
+        ): void => {
+          const boundHasValue = boundValue !== undefined;
+          const currentScope = ce.context.lexicalScope;
+          let existing = currentScope.bindings.get(symbolName);
+          if (
+            existing &&
+            (existing as { _declaredByStatement?: boolean })
+              ._declaredByStatement === true
+          ) {
+            currentScope.bindings.delete(symbolName);
+            existing = undefined;
+          }
+          const existingValueDef =
+            existing && isValueDef(existing) ? existing : undefined;
+          const isAutoDeclareHere =
+            !!existingValueDef &&
+            existingValueDef.value.inferredType &&
+            existingValueDef.value.value === undefined;
 
-        if (isAutoDeclareHere && existingValueDef) {
-          // Upgrade the existing auto-declared binding in place.
-          (
-            existingValueDef as { _declaredByStatement?: boolean }
-          )._declaredByStatement = true;
-          if (hasType) {
-            existingValueDef.value.type = ce.type(type!);
-            existingValueDef.value.inferredType = false;
-          }
-          if (holdUntil) existingValueDef.value.holdUntil = holdUntil;
-          if (hasValue) ce.assign(symbolName, value!); // assign while mutable
-          if (isConstant)
-            // Freeze AFTER assigning the value. There is no public setter to
-            // turn an existing definition into a constant, so set the backing
-            // flag directly. This is safe here: the value was just assigned
-            // (so the binding holds a concrete `_value`), and the config-change
-            // listener / `_defValue` recomputation that the constructor sets up
-            // is only needed for precision-dependent constants (`Pi`), which
-            // cannot be expressed through `Declare`.
+          if (isAutoDeclareHere && existingValueDef) {
+            // Upgrade the existing auto-declared binding in place.
             (
-              existingValueDef.value as unknown as {
-                _isConstant: boolean;
-              }
-            )._isConstant = true;
-        } else {
-          // Fresh declaration.
-          const def: Partial<SymbolDefinition> = {};
-          if (hasType) def.type = type;
-          else if (!hasValue) {
-            // Preserve the bare-declare default (inferred `unknown`). When a
-            // value is present without a type, leave the type unset so
-            // `ce.declare` infers it from the value.
-            def.inferred = true;
-            def.type = 'unknown';
-          }
-          if (hasValue) def.value = value;
-          if (holdUntil) def.holdUntil = holdUntil;
-          if (isConstant) (def as { isConstant?: boolean }).isConstant = true;
-          ce.declare(symbolName, def);
-          const created = ce.context.lexicalScope.bindings.get(symbolName);
-          if (created)
-            (
-              created as { _declaredByStatement?: boolean }
+              existingValueDef as { _declaredByStatement?: boolean }
             )._declaredByStatement = true;
+            if (hasType) {
+              existingValueDef.value.type = ce.type(type!);
+              existingValueDef.value.inferredType = false;
+            }
+            if (holdUntil) existingValueDef.value.holdUntil = holdUntil;
+            if (boundHasValue) ce.assign(symbolName, boundValue!); // assign while mutable
+            if (isConstant)
+              // Freeze AFTER assigning the value. There is no public setter to
+              // turn an existing definition into a constant, so set the backing
+              // flag directly. This is safe here: the value was just assigned
+              // (so the binding holds a concrete `_value`), and the config-change
+              // listener / `_defValue` recomputation that the constructor sets up
+              // is only needed for precision-dependent constants (`Pi`), which
+              // cannot be expressed through `Declare`.
+              (
+                existingValueDef.value as unknown as {
+                  _isConstant: boolean;
+                }
+              )._isConstant = true;
+          } else {
+            // Fresh declaration.
+            const def: Partial<SymbolDefinition> = {};
+            if (hasType) def.type = type;
+            else if (!boundHasValue) {
+              // Preserve the bare-declare default (inferred `unknown`). When a
+              // value is present without a type, leave the type unset so
+              // `ce.declare` infers it from the value.
+              def.inferred = true;
+              def.type = 'unknown';
+            }
+            if (boundHasValue) def.value = boundValue;
+            if (holdUntil) def.holdUntil = holdUntil;
+            if (isConstant) (def as { isConstant?: boolean }).isConstant = true;
+            ce.declare(symbolName, def);
+            const created = ce.context.lexicalScope.bindings.get(symbolName);
+            if (created)
+              (
+                created as { _declaredByStatement?: boolean }
+              )._declaredByStatement = true;
+          }
+        };
+
+        //
+        // `Declare((x, y), {value -> t})` — a destructuring declaration
+        // (`let (x, y) = t`). The pattern is a raw Tuple of symbols (`_`
+        // skips a position) or nested tuple patterns — irrefutable in FORM;
+        // a runtime shape mismatch is an Error value. Requires a value; a
+        // type annotation is not supported. Each name declares in the
+        // current scope (constant for `const`); evaluates to the tuple
+        // value.
+        //
+        if (isFunction(ops[0], 'Tuple')) {
+          if (hasType || !hasValue) return undefined;
+          const bindPattern = (
+            pattern: Expression,
+            v: Expression
+          ): Expression | null => {
+            if (!isFunction(pattern, 'Tuple'))
+              return ce.typeError('tuple', pattern.type, pattern.toString());
+            if (!isFunction(v, 'Tuple'))
+              return ce.typeError('tuple', v.type, v.toString());
+            if (v.nops !== pattern.nops)
+              return ce.typeError(
+                parseType(
+                  `tuple<${Array(pattern.nops).fill('unknown').join(', ')}>`
+                )!,
+                v.type,
+                v.toString()
+              );
+            for (let i = 0; i < pattern.nops; i++) {
+              const p = pattern.ops[i];
+              const el = v.ops[i];
+              if (isFunction(p, 'Tuple')) {
+                const err = bindPattern(p, el.evaluate());
+                if (err) return err;
+                continue;
+              }
+              const name = sym(p);
+              if (!name) return ce.typeError('symbol', p.type, p.toString());
+              if (name === '_') continue;
+              declareOne(name, el);
+            }
+            return null;
+          };
+          return bindPattern(ops[0], value!) ?? value!;
         }
 
+        const symbolName = sym(ops[0].evaluate());
+        if (!symbolName) return undefined;
+
+        declareOne(symbolName, hasValue ? value : undefined);
         return hasValue ? value : ce.Nothing;
       },
     },

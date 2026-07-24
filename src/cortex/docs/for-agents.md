@@ -76,6 +76,10 @@ g(x) + f(2)
   in as positional arguments (`f(...p)`, `Max(...t)`, `g(1, ...p, ...q)`).
   Tuples only — spreading a list is an `incompatible-type` error — and `...`
   is valid nowhere else.
+- **Destructuring**: `let (q, r) = divmod(17, 5)` binds a tuple's components
+  (`const` makes them constants; `_` skips a position; patterns nest). Tuples
+  only, ≥ 2 elements, initializer required; a shape mismatch is an Error
+  value. For conditional destructuring use `match`.
 - **Block in expression position**: `do { … }` (a bare `{ … }` in expression
   position is always a set/dictionary literal).
 - **LaTeX islands**: `$\frac{1}{2}$` splices parsed LaTeX into the expression

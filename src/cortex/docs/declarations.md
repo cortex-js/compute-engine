@@ -30,6 +30,38 @@ is a declaration of `x` with type `real`, exactly as if it had been written
 declaration — that's what distinguishes a declaration from a plain
 reassignment (see below).
 
+## Destructuring declarations
+
+A `let` or `const` may bind the components of a **tuple** in one statement:
+
+```cortex
+divmod(a, b) = (Floor(a / b), a % b)
+let (q, r) = divmod(17, 5)
+(q, r)
+// ➔ (3, 2)
+```
+
+The pattern is a parenthesized list of **at least two** elements, each a bare
+symbol, a `_` (which skips that position), or a nested tuple pattern:
+
+```cortex
+let ((a, b), _, c) = ((1, 2), 99, 5)
+a + b + c
+// ➔ 8
+```
+
+The pattern is **irrefutable in form** — no literals, pins, or guards (use
+[`match`](/cortex/control-flow/) for conditional destructuring). The value is
+evaluated once; it must be a tuple of the same shape, otherwise the
+declaration yields an `incompatible-type` **error value** and binds nothing.
+With `const`, every bound name is a constant. An initializer is required, and
+a type annotation is not accepted on a pattern. Duplicate names anywhere in
+one pattern are a diagnostic.
+
+Destructuring lowers to the same `Declare` primitive with the pattern in the
+name position: `["Declare", ["Tuple", "q", "r"], ["Dictionary",
+["KeyValuePair", "value", …]]]`.
+
 ## Reassignment vs. declaration
 
 A bare `x = 5` — no `let`/`const` keyword, no type annotation — is not

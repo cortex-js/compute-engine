@@ -886,3 +886,87 @@ N(a(...p))`);
     expect(text).toMatch(/^0\.3333/);
   });
 });
+
+//
+// Destructuring declarations: `let (x, y) = t` binds each name from a tuple
+// value. Irrefutable in form; a runtime shape mismatch is an Error value.
+//
+describe('CORTEX PROGRAMS — destructuring declarations', () => {
+  test('binds each component of a tuple value', () => {
+    const { text, diagnostics } = run(`
+let p = (3, 4)
+let (x, y) = p
+10*x + y`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('34');
+  });
+
+  test('nested patterns and `_` skip positions', () => {
+    const { text, diagnostics } = run(`
+let ((a, b), _, c) = ((1, 2), 99, 5)
+a + b + c`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('8');
+  });
+
+  test('destructures a function result', () => {
+    const { text, diagnostics } = run(`
+divmod(a, b) = (Floor(a / b), a % b)
+let (q, r) = divmod(17, 5)
+(q, r)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(3, 2)');
+  });
+
+  test('const destructuring makes each binding constant', () => {
+    const { text } = run(`
+const (x, y) = (3, 4)
+x = 9
+x + y`);
+    // The reassignment errors; the constant keeps its value.
+    expect(text).toBe('7');
+  });
+
+  test('rebinding pattern in a loop body re-enters cleanly', () => {
+    const { text, diagnostics } = run(`
+let s = 0
+for k in Range(1, 3) {
+  let (a, b) = (k, 2*k)
+  s = s + a + b
+}
+s`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('18');
+  });
+
+  test('pair-carrying iteration (Fibonacci)', () => {
+    const { text, diagnostics } = run(`
+let (a, b) = (0, 1)
+for k in Range(1, 10) {
+  let (na, nb) = (b, a + b)
+  a = na; b = nb
+}
+a`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('55');
+  });
+
+  test('a shape mismatch is an Error value', () => {
+    const { text } = run(`let (x, y, z) = (1, 2)`);
+    expect(text).toContain('incompatible-type');
+  });
+
+  test('a non-tuple value is an Error value', () => {
+    const { text } = run(`let (x, y) = 5`);
+    expect(text).toContain('incompatible-type');
+  });
+
+  test('composes with spread: destructure, then re-spread', () => {
+    const { text, diagnostics } = run(`
+a(x, y) = 10*x + y
+let (u, v) = (3, 4)
+a(...(u, v))`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('34');
+  });
+});
