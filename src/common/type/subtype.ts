@@ -641,8 +641,16 @@ export function isSubtype(
 
   // Handle intersection types with other types
   if (lhs.kind === 'intersection') {
-    // lhs is an intersection, rhs is not an intersection
-    return lhs.types.every((lhsType) => isSubtype(lhsType, rhs));
+    // lhs is an intersection, rhs is not an intersection.
+    //
+    // A value of type `A & B` is a member of BOTH arms, so it is a subtype of
+    // `R` as soon as ANY arm is (`A & B <: A <: R`). Requiring EVERY arm was
+    // sound but so incomplete that an overload set — an intersection of
+    // function signatures — was not a subtype of its own members, which in
+    // turn broke the `inferredSignature` reconciliation in
+    // `boxed-operator-definition.ts`. Matches the primitive-rhs branch above,
+    // which already uses `some`.
+    return lhs.types.some((lhsType) => isSubtype(lhsType, rhs));
   }
 
   if (rhs.kind === 'intersection') {

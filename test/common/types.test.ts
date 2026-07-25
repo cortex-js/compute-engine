@@ -1459,3 +1459,101 @@ describe('NON-REAL NUMBER PREDICATES', () => {
     }
   });
 });
+
+describe('Signature serialization round-trip', () => {
+  // `->` binds LOOSEST in the grammar: a signature's result type is read with
+  // `parseUnionType()`, so it absorbs any following `&`/`|`. A signature that
+  // is a MEMBER of a union/intersection/negation must therefore be
+  // parenthesized by the serializer. Without that, an overload set such as
+  // `((number) -> real) & ((string) -> boolean)` re-parsed as the single
+  // signature `(number) -> (real & ((string) -> boolean))` — a structurally
+  // different type with a byte-identical serialization.
+  const roundTrips = (s: string) => {
+    const t = parseType(s);
+    const once = typeToString(t);
+    // Serialization is a fixed point (the union serializer canonicalizes
+    // member order, so compare strings rather than the parsed objects).
+    expect(typeToString(parseType(once))).toBe(once);
+    return once;
+  };
+
+  it('parenthesizes a signature inside an intersection', () => {
+    expect(roundTrips('((number) -> real) & ((string) -> boolean)')).toBe(
+      '((number) -> real) & ((string) -> boolean)'
+    );
+  });
+
+  it('parenthesizes a signature inside a union', () => {
+    expect(roundTrips('((number) -> real) | string')).toBe(
+      '((number) -> real) | string'
+    );
+  });
+
+  it('parenthesizes a signature inside a negation', () => {
+    expect(roundTrips('!((number) -> real)')).toBe('!((number) -> real)');
+  });
+
+  it('round-trips a three-arm overload set', () => {
+    const sig =
+      '((number?) -> finite_real) & ((set<real>, number?) -> real) & ((collection, number?) -> any)';
+    expect(roundTrips(sig)).toBe(sig);
+    // The arms survive as arms, rather than collapsing into one signature
+    // whose result swallowed the rest.
+    const t = parseType(sig) as { kind: string; types: unknown[] };
+    expect(t.kind).toBe('intersection');
+    expect(t.types).toHaveLength(3);
+  });
+
+  it('does NOT parenthesize a union/intersection in RESULT position', () => {
+    // The result absorbs `&`/`|` unambiguously — parens would be noise.
+    expect(roundTrips('(number) -> real | string')).toBe(
+      '(number) -> real | string'
+    );
+    expect(roundTrips('(number) -> real & string')).toBe(
+      '(number) -> real & string'
+    );
+  });
+
+  it('does not parenthesize a signature inside a bracketed constructor', () => {
+    // `list<…>`/`set<…>`/`tuple<…>` already delimit their arguments.
+    expect(roundTrips('list<(number) -> real>')).toBe('list<(number) -> real>');
+    expect(roundTrips('tuple<(number) -> real, string>')).toBe(
+      'tuple<(number) -> real, string>'
+    );
+  });
+});
+
+describe('isSubtype with an intersection on the left', () => {
+  // `A & B` is a member of BOTH arms, so it is a subtype of `R` as soon as ANY
+  // arm is. Requiring EVERY arm was sound but so incomplete that an overload
+  // set was not a subtype of its own members.
+  it('an overload set is a subtype of each of its arms', () => {
+    const overloads = parseType('((number) -> real) & ((string) -> boolean)');
+    expect(isSubtype(overloads, parseType('(number) -> real'))).toBe(true);
+    expect(isSubtype(overloads, parseType('(string) -> boolean'))).toBe(true);
+  });
+
+  it('an overload set is not a subtype of an arm it does not have', () => {
+    const overloads = parseType('((number) -> real) & ((string) -> boolean)');
+    expect(isSubtype(overloads, parseType('(boolean) -> string'))).toBe(false);
+  });
+
+  it('agrees with the primitive-rhs branch', () => {
+    // This branch already used `some`; the composite-rhs branch now matches.
+    expect(isSubtype(parseType('integer & real'), 'integer')).toBe(true);
+    expect(
+      isSubtype(parseType('integer & real'), parseType('list<number>'))
+    ).toBe(false);
+  });
+
+  it('an overload set is a subtype of `function`', () => {
+    expect(
+      isSubtype(
+        parseType(
+          '((number) -> finite_real) & ((set<real>, number?) -> real) & ((collection, number?) -> any)'
+        ),
+        'function'
+      )
+    ).toBe(true);
+  });
+});

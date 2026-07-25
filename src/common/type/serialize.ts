@@ -1,16 +1,27 @@
 import { NUMERIC_TYPES_SET } from './primitive.js';
 import type { NamedElement, NumericPrimitiveType, Type } from './types.js';
 
-const NEGATION_PRECEDENCE = 3;
-const UNION_PRECEDENCE = 1;
-const INTERSECTION_PRECEDENCE = 2;
-const LIST_PRECEDENCE = 4;
-const RECORD_PRECEDENCE = 5;
-const DICTIONARY_PRECEDENCE = 6;
-const SET_PRECEDENCE = 7;
-const COLLECTION_PRECEDENCE = 8;
-const TUPLE_PRECEDENCE = 9;
-const SIGNATURE_PRECEDENCE = 10;
+// Binding tightness, ascending. A node is parenthesized when the context it is
+// being emitted into binds *tighter* than the node itself (see the check at the
+// end of `typeToString`), so these must mirror the grammar in `parser.ts`.
+//
+// `signature` is the LOOSEST: the parser reads a signature's result type with
+// `parseUnionType()` (`parser.ts:594`), so `->` extends maximally to the right
+// and absorbs any following `&`/`|`. A signature appearing as a member of a
+// union, an intersection or a negation must therefore be parenthesized —
+// without it, `((number) -> real) & string` re-parsed as the single signature
+// `(number) -> (real & string)`, a structurally different type with an
+// identical serialization.
+const SIGNATURE_PRECEDENCE = 1;
+const UNION_PRECEDENCE = 2;
+const INTERSECTION_PRECEDENCE = 3;
+const NEGATION_PRECEDENCE = 4;
+const LIST_PRECEDENCE = 5;
+const RECORD_PRECEDENCE = 6;
+const DICTIONARY_PRECEDENCE = 7;
+const SET_PRECEDENCE = 8;
+const COLLECTION_PRECEDENCE = 9;
+const TUPLE_PRECEDENCE = 10;
 const VALUE_PRECEDENCE = 11;
 
 export function typeToString(type: Type, precedence = 0): string {
