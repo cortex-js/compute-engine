@@ -433,20 +433,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       type: (ops) => {
         if (ops.length === 0) return 'nothing';
         const arms = ops.map((op, i) =>
-          i < ops.length - 1
-            ? stripMissingFromType(op.type.type)
-            : op.type.type
+          i < ops.length - 1 ? stripMissingFromType(op.type.type) : op.type.type
         );
         return widen(...arms) as Type;
       },
       canonical: (args, { engine: ce, scope }) => {
-        if (args.length === 0)
-          return ce.error('missing');
+        if (args.length === 0) return ce.error('missing');
         return ce._fn('Coalesce', canonical(ce, args, scope));
       },
       evaluate: (ops, { engine: ce, numericApproximation }) => {
-        if (ops.length === 0)
-          return ce.error('missing');
+        if (ops.length === 0) return ce.error('missing');
         let last: Expression | undefined = undefined;
         for (let i = 0; i < ops.length; i++) {
           const v = ops[i].evaluate({ numericApproximation });
@@ -459,7 +455,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (v.freeVariables.length > 0) {
             const tail = [
               v,
-              ...ops.slice(i + 1).map((o) => o.evaluate({ numericApproximation })),
+              ...ops
+                .slice(i + 1)
+                .map((o) => o.evaluate({ numericApproximation })),
             ];
             return tail.length === 1 ? tail[0] : ce._fn('Coalesce', tail);
           }
@@ -1442,8 +1440,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0)
           return ce._fn('HoldValues', checkArity(ce, ops, 1));
-        if (ops.length > 2)
-          return ce._fn('HoldValues', checkArity(ce, ops, 2));
+        if (ops.length > 2) return ce._fn('HoldValues', checkArity(ce, ops, 2));
         return ce._fn('HoldValues', ops);
       },
       evaluate: (ops, { engine: ce, numericApproximation }) => {

@@ -3689,9 +3689,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // this target — fail closed (§3.F). Propagation still works natively.
       absence: {
         numeric: {
-          make: () => gpuNaN({ language: this.languageId } as CompileTarget<
-            Expression
-          >),
+          make: () =>
+            gpuNaN({ language: this.languageId } as CompileTarget<Expression>),
         },
       },
       indent: 0,

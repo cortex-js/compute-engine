@@ -358,8 +358,10 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
     // (`(unknown) -> unknown`, the shape consumers use so list-broadcasting
     // keeps working). `q(x) < y` with `q(t) = n·t+1` compiles; `q(L) < y`
     // with a collection-ish `L` still fails closed at the argument check.
-    return !isProvablyScalarApplication(e, new Set(), (a) =>
-      !a.type.matches('collection') && !isPossiblyCollectionTypedJS(a)
+    return !isProvablyScalarApplication(
+      e,
+      new Set(),
+      (a) => !a.type.matches('collection') && !isPossiblyCollectionTypedJS(a)
     );
   }
   if (typeof t !== 'string' && t.kind === 'broadcastable') {

@@ -115,8 +115,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // `if (NA)` stance), never the typo throw below. Discharge with
         // `Coalesce`/`IsMissing` before branching. (§3.D residual, resolved
         // 2026-07-24.)
-        if (evaluatedCond === 'Missing')
-          return absentConditionError(engine);
+        if (evaluatedCond === 'Missing') return absentConditionError(engine);
         // An UNDECIDED boolean condition — e.g. a relation with free
         // variables (`x = 4` stays symbolic under evaluate()) — leaves the
         // `If` unevaluated rather than erroring: it may become decidable

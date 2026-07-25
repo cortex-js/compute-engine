@@ -3030,7 +3030,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (isGatherIndex(ops[i])) {
           // A gather yields a dimensionless list; the final gather's elements
           // carry the marker, a mask filters (no marker).
-          const inner = last && !isMaskIndex(ops[i]) ? withMarker(peeled) : peeled;
+          const inner =
+            last && !isMaskIndex(ops[i]) ? withMarker(peeled) : peeled;
           current = { kind: 'list', elements: inner } as ListType;
         } else {
           current = last ? withMarker(peeled) : peeled;

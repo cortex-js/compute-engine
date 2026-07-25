@@ -1264,10 +1264,7 @@ export class RubiDriver {
     // (radical over quartic / two independent radicals) and #15/#16 (denesting)
     // decline cleanly. The routed/substituted pieces are radical-free or single-
     // radical, so they cannot re-enter this fallback.
-    if (
-      !NO_R31 &&
-      hasNestedRadicalCandidate(integrand, variable, !NO_R32)
-    ) {
+    if (!NO_R31 && hasNestedRadicalCandidate(integrand, variable, !NO_R32)) {
       this.suppressRecording++;
       let F: Expression | null;
       try {

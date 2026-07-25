@@ -1522,10 +1522,7 @@ export class BaseCompiler {
       return null;
     const ce = arg.engine;
     const out: Expression[] = [];
-    const walk = (
-      pattern: Expression,
-      v: Expression | undefined
-    ): void => {
+    const walk = (pattern: Expression, v: Expression | undefined): void => {
       if (!isFunction(pattern, 'Tuple'))
         throw new Error(
           `Cannot compile a destructuring declaration: the pattern is not a ` +
@@ -1581,9 +1578,7 @@ export class BaseCompiler {
         (a) => isFunction(a, 'Declare') && isFunction(a.ops[0], 'Tuple')
       )
     )
-      args = args.flatMap(
-        (a) => BaseCompiler.desugarPatternDeclare(a) ?? [a]
-      );
+      args = args.flatMap((a) => BaseCompiler.desugarPatternDeclare(a) ?? [a]);
 
     // Get all the Declare statements
     const locals: string[] = [];

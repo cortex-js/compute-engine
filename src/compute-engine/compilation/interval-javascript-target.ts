@@ -727,8 +727,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         numeric: {
           make: () => '{ lo: NaN, hi: NaN }',
           isAbsent: (x) => `Number.isNaN((${x}).lo)`,
-          coalesce: (x, d) =>
-            `((_c) => Number.isNaN(_c.lo) ? ${d} : _c)(${x})`,
+          coalesce: (x, d) => `((_c) => Number.isNaN(_c.lo) ? ${d} : _c)(${x})`,
         },
       },
       indent: 0,

@@ -147,7 +147,10 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
       return widen(...arms);
     }
     case 'intersection':
-      return { kind: 'intersection', types: t.types.map((x) => absorbNumericAbsence(x)) };
+      return {
+        kind: 'intersection',
+        types: t.types.map((x) => absorbNumericAbsence(x)),
+      };
     case 'list':
     case 'collection':
     case 'indexed_collection':

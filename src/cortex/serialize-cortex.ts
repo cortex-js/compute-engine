@@ -511,7 +511,9 @@ export function serializeCortex(
       const isSymbolLeafPattern = (p: MathJsonExpression): boolean =>
         operator(p) === 'Tuple' &&
         nops(p) >= 2 &&
-        operands(p).every((el) => symbol(el) !== null || isSymbolLeafPattern(el));
+        operands(p).every(
+          (el) => symbol(el) !== null || isSymbolLeafPattern(el)
+        );
       const isPattern = isSymbolLeafPattern(nameOp);
       if (!isPattern && symbol(nameOp) === null)
         return serializeGenericFunction(expr);

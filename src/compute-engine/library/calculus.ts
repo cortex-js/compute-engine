@@ -291,8 +291,7 @@ function nIntegrateMultiple(
   if (compiled?.success) jsf = compiled.run as (...args: number[]) => number;
   else {
     const app = applicable(fnExpr);
-    jsf = (...args: number[]) =>
-      app(args.map((x) => ce.number(x)))?.re ?? NaN;
+    jsf = (...args: number[]) => app(args.map((x) => ce.number(x)))?.re ?? NaN;
   }
 
   // Nested adaptive Gauss–Kronrod, one level per limit; a level that fails to
@@ -1217,136 +1216,136 @@ volumes
           }
 
         return withValueShield(ce, intVarNames, () => {
-        let expr = ops[0];
-        const argNames = isFunction(expr)
-          ? expr.ops.slice(1).map((x) => sym(x))
-          : [];
+          let expr = ops[0];
+          const argNames = isFunction(expr)
+            ? expr.ops.slice(1).map((x) => sym(x))
+            : [];
 
-        let isIndefinite = true;
-        for (let i = limitsSequence.length - 1; i >= 0; i--) {
-          if (!isFunction(limitsSequence[i])) continue;
-          const limitFn = limitsSequence[i] as Expression &
-            import('../global-types.js').FunctionInterface;
-          const [varExpr, lower, upper] = limitFn.ops;
-          let variable = sym(varExpr);
+          let isIndefinite = true;
+          for (let i = limitsSequence.length - 1; i >= 0; i--) {
+            if (!isFunction(limitsSequence[i])) continue;
+            const limitFn = limitsSequence[i] as Expression &
+              import('../global-types.js').FunctionInterface;
+            const [varExpr, lower, upper] = limitFn.ops;
+            let variable = sym(varExpr);
 
-          // Default variable name if missing
-          if ((!variable || variable === 'Nothing') && i < argNames.length)
-            variable = argNames[i];
-          if (!variable) variable = 'x';
+            // Default variable name if missing
+            if ((!variable || variable === 'Nothing') && i < argNames.length)
+              variable = argNames[i];
+            if (!variable) variable = 'x';
 
-          // An opt-in integration provider (e.g. the Rubi rule driver loaded
-          // via `loadIntegrationRules`) is consulted first; it returns null or
-          // an inert `Integrate` when it can't close the integrand, in which
-          // case we fall back to the built-in antiderivative. With no provider
-          // registered (the default), behavior is unchanged.
-          let antideriv: Expression | null = null;
-          if (ce._integrationProvider) {
-            try {
-              antideriv = ce._integrationProvider(expr, variable);
-            } catch (e) {
-              // A cancellation (deadline/interrupt) thrown inside the provider
-              // must propagate — swallowing it would turn a timeout into a
-              // silent fall-through to the built-in antiderivative.
-              if (e instanceof CancellationError) throw e;
-              antideriv = null;
+            // An opt-in integration provider (e.g. the Rubi rule driver loaded
+            // via `loadIntegrationRules`) is consulted first; it returns null or
+            // an inert `Integrate` when it can't close the integrand, in which
+            // case we fall back to the built-in antiderivative. With no provider
+            // registered (the default), behavior is unchanged.
+            let antideriv: Expression | null = null;
+            if (ce._integrationProvider) {
+              try {
+                antideriv = ce._integrationProvider(expr, variable);
+              } catch (e) {
+                // A cancellation (deadline/interrupt) thrown inside the provider
+                // must propagate — swallowing it would turn a timeout into a
+                // silent fall-through to the built-in antiderivative.
+                if (e instanceof CancellationError) throw e;
+                antideriv = null;
+              }
             }
-          }
-          if (!antideriv || antideriv.operator === 'Integrate')
-            antideriv = antiderivative(expr, variable);
+            if (!antideriv || antideriv.operator === 'Integrate')
+              antideriv = antiderivative(expr, variable);
 
-          if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
-            // Indefinite integral: keep the antiderivative, whether it was
-            // resolved (a closed form) or left inert (an `Integrate` node, or
-            // an `Add` such as `5x + Integrate(g, x)` when only some terms
-            // integrate).
-            expr = antideriv;
-          } else if (antideriv.has('Integrate')) {
-            // The antiderivative could NOT be fully found — the result is
-            // either an inert `Integrate` (e.g. an unknown integrand, or
-            // `√(1−x²)/(1+x²)`) or an `Add` that still contains one (e.g.
-            // `∫ (g(x) + 5) dx → 5x + Integrate(g, x)`). Keep the definite
-            // integral inert; do NOT wrap it in `EvaluateAt`. Beta-reducing
-            // the integrand at the bounds would capture the integration
-            // variable and silently collapse the integral to a wrong finite
-            // value (∫₋₁¹ √(1−x²)/(1+x²) dx → 0, the `+5` case → 10, etc.).
-            // The `.N()` path (NIntegrate quadrature) still gives the value.
-            // See CORRECTNESS_FINDINGS P0-1.
-            isIndefinite = false;
-            expr = ce.function('Integrate', [
-              expr,
-              ce.function('Limits', [ce.symbol(variable), lower, upper]),
-            ]);
-          } else {
-            // The antiderivative was found in closed form. Apply the bounds
-            // via `EvaluateAt`, which also supports symbolic bounds
-            // (∫₀^a x dx → a²/2; see commit 9b818ec8).
-            isIndefinite = false;
-            const F = ce.expr(['Function', antideriv, variable]);
-            const at = ce.expr(['EvaluateAt', F, lower, upper]);
-            // Resolve any parameter-dependent endpoint indeterminate left by
-            // FTC at a limit-point bound (0, ±∞): emit a convergence-guarded
-            // `When`, or keep the integral inert (fail closed) rather than leak
-            // an indeterminate form (`0^…`, `∞^…`).
-            let raw = at.evaluate({ numericApproximation });
-            // FTC at an infinite bound can leave a `poly(var)·e^{−c·var}`-type
-            // `∞·0` product that naive substitution collapses to NaN. Re-resolve
-            // each improper endpoint as a genuine limit of the antiderivative.
-            let viaLimit: Expression | undefined;
-            if (
-              raw.isNaN === true &&
-              (lower.isInfinity === true || upper.isInfinity === true)
-            ) {
-              viaLimit = improperEndpointValue(
-                antideriv,
-                variable,
-                lower,
-                upper,
-                ce,
-                numericApproximation ?? false
-              );
-              if (viaLimit !== undefined) raw = viaLimit;
-            }
-            // A NaN result is an unresolved indeterminate, not a leak-free
-            // value — fail closed (inert) rather than leak the NaN.
-            const resolved =
-              raw.isNaN === true ? null : resolveEndpointLeaks(raw, ce);
-            if (resolved !== null && isSymbol(resolved.guard, 'True')) {
-              // Leak-free: keep the original evaluation path's RESULT. `raw`
-              // IS `at.evaluate({numericApproximation})`, so returning it is
-              // value-identical to re-evaluating `at` — but skips a second
-              // full FTC endpoint pass (measured ~35–40% of the whole
-              // definite-Gaussian evaluation; the tail's `expr.evaluate()`
-              // on an already-evaluated value is an idempotent cheap walk).
-              // When a limit re-resolved an improper endpoint, `raw` holds
-              // that limit value already (and `at` itself would still
-              // collapse to NaN), so `raw` covers both cases.
-              expr = raw;
+            if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
+              // Indefinite integral: keep the antiderivative, whether it was
+              // resolved (a closed form) or left inert (an `Integrate` node, or
+              // an `Add` such as `5x + Integrate(g, x)` when only some terms
+              // integrate).
+              expr = antideriv;
+            } else if (antideriv.has('Integrate')) {
+              // The antiderivative could NOT be fully found — the result is
+              // either an inert `Integrate` (e.g. an unknown integrand, or
+              // `√(1−x²)/(1+x²)`) or an `Add` that still contains one (e.g.
+              // `∫ (g(x) + 5) dx → 5x + Integrate(g, x)`). Keep the definite
+              // integral inert; do NOT wrap it in `EvaluateAt`. Beta-reducing
+              // the integrand at the bounds would capture the integration
+              // variable and silently collapse the integral to a wrong finite
+              // value (∫₋₁¹ √(1−x²)/(1+x²) dx → 0, the `+5` case → 10, etc.).
+              // The `.N()` path (NIntegrate quadrature) still gives the value.
+              // See CORRECTNESS_FINDINGS P0-1.
+              isIndefinite = false;
+              expr = ce.function('Integrate', [
+                expr,
+                ce.function('Limits', [ce.symbol(variable), lower, upper]),
+              ]);
             } else {
-              const guarded =
-                resolved === null
-                  ? null
-                  : conditionalValue(ce, resolved.value, resolved.guard);
-              expr =
-                guarded ??
-                ce.function('Integrate', [
-                  expr,
-                  ce.function('Limits', [ce.symbol(variable), lower, upper]),
-                ]);
+              // The antiderivative was found in closed form. Apply the bounds
+              // via `EvaluateAt`, which also supports symbolic bounds
+              // (∫₀^a x dx → a²/2; see commit 9b818ec8).
+              isIndefinite = false;
+              const F = ce.expr(['Function', antideriv, variable]);
+              const at = ce.expr(['EvaluateAt', F, lower, upper]);
+              // Resolve any parameter-dependent endpoint indeterminate left by
+              // FTC at a limit-point bound (0, ±∞): emit a convergence-guarded
+              // `When`, or keep the integral inert (fail closed) rather than leak
+              // an indeterminate form (`0^…`, `∞^…`).
+              let raw = at.evaluate({ numericApproximation });
+              // FTC at an infinite bound can leave a `poly(var)·e^{−c·var}`-type
+              // `∞·0` product that naive substitution collapses to NaN. Re-resolve
+              // each improper endpoint as a genuine limit of the antiderivative.
+              let viaLimit: Expression | undefined;
+              if (
+                raw.isNaN === true &&
+                (lower.isInfinity === true || upper.isInfinity === true)
+              ) {
+                viaLimit = improperEndpointValue(
+                  antideriv,
+                  variable,
+                  lower,
+                  upper,
+                  ce,
+                  numericApproximation ?? false
+                );
+                if (viaLimit !== undefined) raw = viaLimit;
+              }
+              // A NaN result is an unresolved indeterminate, not a leak-free
+              // value — fail closed (inert) rather than leak the NaN.
+              const resolved =
+                raw.isNaN === true ? null : resolveEndpointLeaks(raw, ce);
+              if (resolved !== null && isSymbol(resolved.guard, 'True')) {
+                // Leak-free: keep the original evaluation path's RESULT. `raw`
+                // IS `at.evaluate({numericApproximation})`, so returning it is
+                // value-identical to re-evaluating `at` — but skips a second
+                // full FTC endpoint pass (measured ~35–40% of the whole
+                // definite-Gaussian evaluation; the tail's `expr.evaluate()`
+                // on an already-evaluated value is an idempotent cheap walk).
+                // When a limit re-resolved an improper endpoint, `raw` holds
+                // that limit value already (and `at` itself would still
+                // collapse to NaN), so `raw` covers both cases.
+                expr = raw;
+              } else {
+                const guarded =
+                  resolved === null
+                    ? null
+                    : conditionalValue(ce, resolved.value, resolved.guard);
+                expr =
+                  guarded ??
+                  ce.function('Integrate', [
+                    expr,
+                    ce.function('Limits', [ce.symbol(variable), lower, upper]),
+                  ]);
+              }
             }
           }
-        }
-        if (expr.operator !== 'Integrate') {
-          // For indefinite integrals with symbolic transcendental constants
-          // (like ln(2)), don't call evaluate/simplify as it would convert
-          // them to numeric values. Otherwise, simplify for cleaner output.
-          if (isIndefinite) {
-            if (hasSymbolicTranscendental(expr)) return expr;
-            return expr.simplify();
+          if (expr.operator !== 'Integrate') {
+            // For indefinite integrals with symbolic transcendental constants
+            // (like ln(2)), don't call evaluate/simplify as it would convert
+            // them to numeric values. Otherwise, simplify for cleaner output.
+            if (isIndefinite) {
+              if (hasSymbolicTranscendental(expr)) return expr;
+              return expr.simplify();
+            }
+            return expr.evaluate({ numericApproximation });
           }
-          return expr.evaluate({ numericApproximation });
-        }
-        return expr;
+          return expr;
         });
       },
     },

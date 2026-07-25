@@ -542,11 +542,7 @@ export class Parser {
           }
           elements.push(this.wrap({ sym: name }, tok.start, tok.end));
         } else {
-          this.error(
-            ['symbol-expected'],
-            this.current.start,
-            this.current.end
-          );
+          this.error(['symbol-expected'], this.current.start, this.current.end);
           return null;
         }
         if (!this.match('COMMA')) break;

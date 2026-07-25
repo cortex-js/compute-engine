@@ -7278,10 +7278,7 @@ export function eulerQuadraticSubstitution(
     ce.function('Multiply', [two, sqrtA, X]),
     b,
   ]); // 2√a·t + b
-  const inv = ce.function('Divide', [
-    ce.function('Subtract', [t2, c]),
-    denom,
-  ]); // (t²−c)/(2√a·t+b)
+  const inv = ce.function('Divide', [ce.function('Subtract', [t2, c]), denom]); // (t²−c)/(2√a·t+b)
   const sqrtQnum = ce.function('Add', [
     ce.function('Multiply', [sqrtA, t2]),
     ce.function('Multiply', [b, X]),
@@ -7322,10 +7319,7 @@ export function eulerQuadraticSubstitution(
     ce.function('Multiply', [collapseRadicalArgs(rewritten), jac])
   );
   // The new variable t expressed in the ORIGINAL x: t = √a·x + √Q.
-  const back = ce.function('Add', [
-    ce.function('Multiply', [sqrtA, X]),
-    Qnode,
-  ]);
+  const back = ce.function('Add', [ce.function('Multiply', [sqrtA, X]), Qnode]);
   return { g, back };
 }
 

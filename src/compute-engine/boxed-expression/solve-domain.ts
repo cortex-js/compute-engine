@@ -615,9 +615,7 @@ function reduceWithUnknownsShielded(
     }
   }
 
-  return withValueShield(ce, names, () =>
-    reduceTransformerHead(eq.canonical)
-  );
+  return withValueShield(ce, names, () => reduceTransformerHead(eq.canonical));
 }
 
 function isExpression(x: unknown): x is Expression {

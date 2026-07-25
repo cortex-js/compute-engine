@@ -868,7 +868,10 @@ export function assignedVariableNames(expr: Expression): string[] {
   return names;
 }
 
-function isAssignedVariableName(ce: Expression['engine'], name: string): boolean {
+function isAssignedVariableName(
+  ce: Expression['engine'],
+  name: string
+): boolean {
   const def = ce.lookupDefinition(name);
   if (!isValueDef(def)) return false;
   if (def.value.value === undefined || def.value.value === null) return false;

@@ -1403,7 +1403,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
         numeric: {
           make: () => 'math.nan',
           isAbsent: (x) => `math.isnan(${x})`,
-          coalesce: (x, d) => `(lambda _c: ${d} if math.isnan(_c) else _c)(${x})`,
+          coalesce: (x, d) =>
+            `(lambda _c: ${d} if math.isnan(_c) else _c)(${x})`,
         },
         object: {
           nullLiteral: 'None',
