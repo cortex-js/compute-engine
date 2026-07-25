@@ -502,7 +502,14 @@ export function nDSolveFunction(
     )
   );
 
-  const param = ce.symbol(independentName);
+  // Build the parameter UNBOUND. `ce.symbol(name)` would bind it in the scope
+  // active here, and since canonicalizing an already-canonical body is a
+  // no-op, the `Function` wrapper's Block would declare its own `x` while the
+  // body kept pointing at the outer one — so applying the solution to another
+  // variable (`ndsf(t)`) left the body's `x` in place and compiled to a
+  // function of the wrong argument. Leaving it raw lets the binding be decided
+  // by the binder that owns it.
+  const param = ce.symbol(independentName, { canonical: false });
   return ce.function('Function', [
     ce.function('InterpolatingFunction', [data, param]),
     param,

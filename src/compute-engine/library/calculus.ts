@@ -7,6 +7,7 @@ import type {
 import { functionResult } from '../../common/type/utils.js';
 import { checkType } from '../boxed-expression/validate.js';
 import {
+  rebindEscaping,
   defaultUnknown,
   hasSymbolicTranscendental,
   resolveToList,
@@ -417,7 +418,15 @@ function lambdaFromLiteral(
   let body = literal.op1;
   if (isFunction(body, 'Block')) {
     if (body.nops !== 1) return undefined;
+    // Lifting the body out of its Block takes it out of the scope that binds
+    // the parameters, so occurrences of `x` in the returned body would still
+    // point at the lambda's (now unreachable) parameter binding. Re-bind them
+    // to the caller's symbols — which is what "the Jacobian is taken with
+    // respect to the parameters, in declared order" means, and what makes the
+    // bare form agree with the applied form.
+    const scope = body.localScope;
     body = body.op1;
+    if (scope) body = rebindEscaping(body, scope);
   }
   return { params: params as string[], body };
 }
@@ -1804,6 +1813,14 @@ volumes
           if (v !== undefined) x = ce.symbol(v);
         }
         if (!x || !isSymbol(x)) return null;
+        // The expansion variable is this operator's BOUND variable: keep the
+        // operand RAW so the parse route (which leaves a binding-site symbol
+        // raw) and the function route (whose caller passes a canonical,
+        // scope-bound symbol) agree about the same expression — otherwise
+        // `Series(f, x)` does not round-trip through LaTeX under
+        // binding-aware equality. Same convention as `nDSolveFunction`'s
+        // parameter: the binding belongs to the binder, not to the operand.
+        x = ce.symbol(x.symbol, { canonical: false });
         const x0 = ops[2] ? ops[2].canonical : ce.Zero;
         const n = ops[3] ? ops[3].canonical : ce.number(5);
         return ce._fn('Series', [f, x, x0, n]);

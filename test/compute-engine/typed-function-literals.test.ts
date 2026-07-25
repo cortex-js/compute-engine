@@ -265,8 +265,13 @@ describe('Phase 2 — currying preserves annotations (§6.5)', () => {
   test('curried literal keeps the remaining annotated parameter', () => {
     const ce = new ComputeEngine();
     const curried = ce.box(['Apply', typedAdd, 10]).evaluate();
-    // The remaining parameter keeps its `real` annotation.
-    expect(curried.type.toString()).toBe('(_1: real) -> number');
+    // The remaining parameter keeps its `real` annotation, and the result type
+    // is unchanged by partial application (§6.5 point 3): the uncurried
+    // literal is `(x: integer, y: real) -> real`, so the curried one is
+    // `-> real` too. This previously read `-> number` because the curried
+    // body's `_1` was not bound to the annotated declaration, so the return
+    // type was inferred without the annotation visible and widened.
+    expect(curried.type.toString()).toBe('(_1: real) -> real');
   });
 
   test('applying the remaining argument completes the computation', () => {

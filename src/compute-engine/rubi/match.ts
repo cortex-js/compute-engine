@@ -19,6 +19,7 @@
 
 import type { Expr as Expression } from './types.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { isSymbol } from '../boxed-expression/type-guards.js';
 
 // Deadline plumbing. The backtracking AC matcher (mAC) can blow up
 // combinatorially on products with many factors — this is the dominant
@@ -102,6 +103,14 @@ function bindIn(
   return false;
 }
 
+/** Is `expr` an occurrence of the bound variable `x`? Both are compared by
+ * NAME: `x` is supplied by the driver as a re-boxed symbol, so it carries the
+ * global binding rather than the one the integral's binder created. */
+function sameBoundName(expr: Expression, x: Expression): boolean {
+  if (!isSymbol(expr)) return expr.isSame(x);
+  return isSymbol(x) && expr.symbol === x.symbol;
+}
+
 function m(
   pat: Pat,
   expr: Expression,
@@ -112,7 +121,14 @@ function m(
   tickDeadline(); // every backtracking step funnels through here
   switch (pat.kind) {
     case 'var':
-      return expr.isSame(x) && k();
+      // The integration variable is a BOUND variable: `∫ … dx` binds `x`, and
+      // parsing gives that binding its own definition, distinct from any
+      // same-named global. The driver identifies it by NAME (`RubiDriver.int`
+      // takes `variable: string` and re-boxes it with `ce.symbol`), so it has
+      // no binding to offer — and per alpha-equivalence a bound occurrence is
+      // compared by name anyway. Comparing bindings here made every rule that
+      // mentions the integration variable fail to match.
+      return sameBoundName(expr, x) && k();
     case 'const':
       return pat.value.isSame(expr) && k();
     case 'slot':

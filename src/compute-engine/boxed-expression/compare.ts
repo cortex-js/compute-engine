@@ -1,5 +1,9 @@
 import { NumericValue } from '../numeric-value/types.js';
-import type { Expression } from '../global-types.js';
+import type {
+  BoxedBaseDefinition,
+  BoxedValueDefinition,
+  Expression,
+} from '../global-types.js';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
 import { compareBounds, relationFromChains } from './constraint-subject.js';
 import {
@@ -9,6 +13,7 @@ import {
   isString,
   isDictionary,
 } from './type-guards.js';
+import { boundVariableBindings } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
 import { stochasticEqual } from './stochastic-equal.js';
 
@@ -22,9 +27,237 @@ export function _setExpand(fn: ExpandFn) {
 }
 
 /**
- * Structural equality of boxed expressions.
+ * Do two same-named symbols denote the same binding?
+ *
+ * `true` when the name is bound by an enclosing binder on both sides (each
+ * denotes its binder, so the name is the whole answer), or when both free
+ * occurrences resolve to the same binding — where a standard-library
+ * definition counts as the same binding across engines, and a user constant
+ * compares by its value. Everything else — including a raw occurrence against
+ * a bound one — is a different symbol; a caller comparing a TEMPLATE against
+ * a subject asks the syntactic question explicitly via `sameSyntactic`.
+ *
+ * @internal Exported for `BoxedSymbol.isSame`, which handles the top-level
+ * symbol-vs-symbol case before `same()` is reached.
  */
-export function same(a: Expression, b: Expression): boolean {
+export function sameBinding(
+  a: Expression & { symbol: string },
+  b: Expression & { symbol: string },
+  boundA?: BinderMap,
+  boundB?: BinderMap,
+  syntactic = false
+): boolean {
+  // Comparing SYNTAX: the names already matched and bindings are not the
+  // question. See `sameSyntactic`.
+  if (syntactic) return true;
+
+  // Is each occurrence bound by a binder enclosing it ON ITS OWN SIDE? An
+  // occurrence counts as bound only when it RESOLVES to that binder: a symbol
+  // carrying an outer binding can sit inside the subtree (`.subs()`
+  // transplants one without re-canonicalizing), and comparing that by name is
+  // the capture this repair prevents. `null` marks a binder that owns the name
+  // but not a definition (a `Function`'s parameter list). An occurrence with
+  // NO definition denotes the binder — there is nothing else it could mean,
+  // and the parser leaves a binding-site symbol raw (the `k` in
+  // `\sum_{k=1}^n`) while `ce.box(json)` binds it.
+  const ea = boundA?.get(a.symbol);
+  const eb = boundB?.get(b.symbol);
+  const aBound = isBoundHere(ea, a.valueDefinition);
+  const bBound = isBoundHere(eb, b.valueDefinition);
+  // One is its binder's variable and the other is a free reference: different
+  // symbols, whatever they are spelled.
+  if (aBound !== bBound) return false;
+  // Both bound, names already equal: each denotes its own side's binder, and
+  // the binders sit at the same position — the same variable.
+  if (aBound) return true;
+
+  // Free occurrences: which binding do they refer to? `baseDefinition` covers
+  // operator definitions too — a symbol naming a local function has no
+  // `valueDefinition`, and reading only that would make two distinct local
+  // functions of the same name compare equal.
+  const ad = a.baseDefinition;
+  const bd = b.baseDefinition;
+
+  // Same definition object (or both unbound): the common case, and the only
+  // way two same-engine occurrences of one symbol compare — check it before
+  // anything that would walk or compare values.
+  if (ad === bd) return true;
+
+  // A standard-library symbol is not a binding: `Pi`, `Nothing`, `Sin` denote
+  // the same object in every engine, so two ROOT-scope definitions can differ
+  // in identity (two engine instances, or an engine restart) while naming the
+  // same thing. The root scope of the chain IS the standard library — user
+  // globals land in a child scope — so this stays exact: a user symbol that
+  // merely shadows a library name resolves to its own (non-root) binding and
+  // never reaches this carve-out.
+  if (
+    ad !== undefined &&
+    bd !== undefined &&
+    isLibraryBinding(a, ad) &&
+    isLibraryBinding(b, bd)
+  )
+    return true;
+
+  // A user-defined constant compares by what it holds: a constant IS its
+  // value, so two definitions can legitimately differ in identity while
+  // denoting the same thing. But a constant with NO value has nothing to
+  // compare — two unrelated valueless constants that merely share a spelling
+  // stay distinct (their definitions already differ, above).
+  if (ad?.isConstant && bd?.isConstant) {
+    const av = (ad as { value?: Expression }).value;
+    const bv = (bd as { value?: Expression }).value;
+    if (av === undefined || bv === undefined) return false;
+    return same(av, bv);
+  }
+
+  // Both sides must agree on being bound, AND on the binding — and the
+  // bindings differ here.
+  //
+  // The lenient form — either side unbound ⇒ equal — was not merely "outside
+  // the relation for raw expressions": a CANONICAL expression can CONTAIN raw
+  // operands, because a lazy operator holds them un-canonicalized. So a
+  // canonical `Map(…)` holding a raw `q` compared equal to canonical `Map(…)`s
+  // from two different scopes that were themselves unequal — the transitivity
+  // bridge sat inside the domain every dedup key uses.
+  //
+  // A caller that legitimately compares a TEMPLATE against a bound subject
+  // asks for it explicitly (`sameSyntactic`) rather than relying on
+  // unboundness as an implicit signal.
+  return false;
+}
+
+/**
+ * Is `def` the standard-library definition of `sym.symbol`?
+ *
+ * The engine's ROOT scope (the end of the parent chain) holds exactly the
+ * standard library; every user declaration — including a top-level one —
+ * lands in a child scope. Only reached when the two sides' definitions
+ * already differ in identity, so the chain walk is off the hot path.
+ */
+function isLibraryBinding(
+  sym: Expression & { symbol: string },
+  def: BoxedBaseDefinition
+): boolean {
+  let scope = sym.engine.context?.lexicalScope;
+  if (scope === undefined) return false;
+  // Loose check: the chain terminates with `null` OR `undefined` depending on
+  // how the root context was built.
+  while (scope.parent != null) scope = scope.parent;
+  const binding = scope.bindings.get(sym.symbol);
+  if (binding === undefined) return false;
+  // A scope binding is a tagged record; `baseDefinition` unwraps it, so
+  // compare against both halves. (Inline — `isValueDef`/`isOperatorDef` live
+  // in `utils.ts`, whose import would close the cycle `binders.ts` broke.)
+  return (
+    ('value' in binding && binding.value === def) ||
+    ('operator' in binding && binding.operator === def)
+  );
+}
+
+/**
+ * Structural equality that compares symbols by NAME, ignoring bindings.
+ *
+ * For comparing a TEMPLATE against a subject: a rule pattern is parsed raw so
+ * canonicalization cannot collapse its structure or mangle its wildcards,
+ * which leaves its literal symbols unbound — the `\pi` of `\pi + a -> 2a`
+ * must still match a canonical `π`. That is a question about syntax, not
+ * about which binding a symbol denotes, so it gets its own entry point.
+ */
+export function sameSyntactic(a: Expression, b: Expression): boolean {
+  return same(a, b, undefined, undefined, true);
+}
+
+/** What a node binds: name → its definition, or `null` when the binder names
+ * the variable without owning its definition. See `boundVariableBindings`. */
+type BinderMap = ReadonlyMap<string, BoxedValueDefinition | null>;
+
+/**
+ * Does an occurrence denote the enclosing binder?
+ *
+ * `entry` is what the binder holds for that name (`undefined` = it does not
+ * bind the name at all; `null` = it names the variable without owning a
+ * definition). `def` is the occurrence's own binding.
+ */
+function isBoundHere(
+  entry: BoxedValueDefinition | null | undefined,
+  def: BoxedValueDefinition | undefined
+): boolean {
+  if (entry === undefined) return false; // not bound by this binder
+  if (entry === null) return true; // binder owns the name, not a definition
+  if (def === undefined) return true; // raw occurrence: nothing else it can mean
+  return entry === def;
+}
+
+/** Merge an enclosing binder map with the one a node introduces. */
+function extendBinders(
+  outer: BinderMap | undefined,
+  inner: BinderMap | undefined
+): BinderMap | undefined {
+  if (inner === undefined) return outer;
+  if (outer === undefined) return inner;
+  const merged = new Map(outer);
+  for (const [k, v] of inner) merged.set(k, v);
+  return merged;
+}
+
+/**
+ * Structural equality of boxed expressions, up to BINDING IDENTITY.
+ *
+ * NOT alpha-equivalence: bound occurrences are compared by NAME, so renaming
+ * a bound variable changes the answer — `(x ↦ x+1)` ≠ `(y ↦ y+1)`, exactly as
+ * in SymPy (`==`) and Mathematica (`SameQ`). What is quotiented is only the
+ * IDENTITY of the binding objects for identically-named bound variables (the
+ * re-boxing case). If rename-invariance is ever added, `BoxedFunction.hash`
+ * must become alpha-invariant first — it folds bound-variable NAMES, and
+ * rename-invariant equality over name-keyed hashing silently breaks every
+ * hash consumer (`match.ts` anchor bucketing).
+ *
+ * Two symbols are the same symbol when they share a name AND denote the same
+ * binding. A name alone is not identity: since scopes were introduced, the
+ * same spelling can name different bindings (a call frame's parameter `x` and
+ * a stored value's free `x`), and treating them as one is what let a frame
+ * capture a value's free symbols and let `Add` merge two unrelated `x` terms
+ * into `2x`. See docs/plans/2026-07-24-defining-scope-dereference-design.md.
+ *
+ * `bound` carries the names bound by binders ENCLOSING the current position
+ * (a `Function`'s parameters, a scoped `Block`/`Sum`/`Comprehension`'s local
+ * bindings). A bound occurrence is compared by NAME only: it denotes its
+ * binder, not a scope, so re-boxing or reparsing an expression — which mints
+ * fresh binding objects for every bound variable — must not change the
+ * answer (`serialization.test.ts`, "Bound-variable identity across
+ * re-boxing"). Only FREE occurrences ask which binding they refer to.
+ *
+ * The set is allocated lazily, so comparing binder-free expressions — the hot
+ * path, via `Terms.find` — costs exactly what it did before.
+ *
+ * ### Contract: an equivalence relation (modulo value-following)
+ *
+ * Reflexive, symmetric and transitive — unconditionally, for every operand —
+ * EXCEPT across value-following: `isSame` follows a symbol's assigned value
+ * when compared against a non-symbol (`x := 1` makes `x.isSame(1)` true while
+ * `x.isSame(y)` with `y := 1` stays false), a pre-existing hybrid no other
+ * system's structural equality has. Dedup keys are safe as long as the keyed
+ * set is all-symbols or all-values; do not mix.
+ *
+ * An earlier revision exempted RAW operands, on the reasoning that they carry
+ * no bindings and so can only be compared syntactically. That broke
+ * transitivity even between two CANONICAL expressions: a lazy operator holds
+ * its operands un-canonicalized, so a canonical `Map(…)` containing a raw `q`
+ * compared equal to canonical `Map(…)`s from two different scopes that were
+ * themselves unequal. The bridge sat inside the domain every dedup key uses
+ * (`Terms.find`'s like-term collection, the assumptions `ExpressionMap`).
+ *
+ * Comparing a TEMPLATE against a subject — a rule pattern is raw by
+ * necessity — is now an explicit mode (`sameSyntactic`) rather than an
+ * implicit consequence of unboundness.
+ */
+export function same(
+  a: Expression,
+  b: Expression,
+  boundA?: BinderMap,
+  boundB?: BinderMap,
+  syntactic = false
+): boolean {
   if (a === b) return true;
 
   //
@@ -38,13 +271,18 @@ export function same(a: Expression, b: Expression): boolean {
   const aSym = isSymbol(a);
   const bSym = isSymbol(b);
   if (aSym !== bSym) {
+    // A followed VALUE was never inside the binders enclosing the occurrence
+    // that held it, so it gets no binder map: a name it shares with one of
+    // those binders is a coincidence of spelling, not a bound occurrence.
     if (bSym) {
       const bv = b.value;
-      if (bv !== undefined && (bv as Expression) !== b) return same(a, bv);
+      if (bv !== undefined && (bv as Expression) !== b)
+        return same(a, bv, boundA, undefined, syntactic);
       return false;
     }
     const av = a.value;
-    if (av !== undefined && (av as Expression) !== a) return same(av, b);
+    if (av !== undefined && (av as Expression) !== a)
+      return same(av, b, undefined, boundB, syntactic);
     return false;
   }
 
@@ -56,7 +294,16 @@ export function same(a: Expression, b: Expression): boolean {
     if (a.operator !== b.operator) return false;
     if (!isFunction(b)) return false;
     if (a.nops !== b.nops) return false;
-    return a.ops.every((op, i) => same(op, b.ops[i]));
+    // What this node binds shadows any outer binding of the same name for the
+    // whole subtree. Tracked PER SIDE: `a` and `b` mint their own definitions
+    // for the same bound variable (re-boxing does exactly that), so a single
+    // shared set would be asymmetric — `same(a,b)` could differ from
+    // `same(b,a)`, breaking the equivalence relation this is a key for.
+    const innerA = extendBinders(boundA, boundVariableBindings(a));
+    const innerB = extendBinders(boundB, boundVariableBindings(b));
+    return a.ops.every((op, i) =>
+      same(op, b.ops[i], innerA, innerB, syntactic)
+    );
   }
 
   //
@@ -87,7 +334,8 @@ export function same(a: Expression, b: Expression): boolean {
   //
   if (isSymbol(a) || isSymbol(b)) {
     if (!isSymbol(a) || !isSymbol(b)) return false;
-    return a.symbol === b.symbol;
+    if (a.symbol !== b.symbol) return false;
+    return sameBinding(a, b, boundA, boundB, syntactic);
   }
 
   // (No tensor special case: tensor values are canonical `List` function
@@ -110,7 +358,7 @@ export function same(a: Expression, b: Expression): boolean {
     for (const key of aKeys) {
       const bValue = b.get(key);
       if (bValue === undefined) return false;
-      if (!same(a.get(key)!, bValue)) return false;
+      if (!same(a.get(key)!, bValue, boundA, boundB, syntactic)) return false;
     }
     return true;
   }

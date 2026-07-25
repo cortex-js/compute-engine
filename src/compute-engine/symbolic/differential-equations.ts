@@ -6,6 +6,7 @@ import {
   isSymbol,
   sym,
 } from '../boxed-expression/type-guards.js';
+import { sameSyntactic } from '../boxed-expression/compare.js';
 import {
   getPolynomialCoefficients,
   polynomialDegree,
@@ -1452,13 +1453,18 @@ function replaceDependentCall(
   dependentCall: Expression,
   replacement: Expression
 ): Expression {
-  if (expr.isSame(dependentCall)) return replacement;
+  // `dependentCall` is a TEMPLATE the solver builds from names (`y(x)`
+  // re-boxed in the solver's context), while `expr` comes from the held
+  // equation, whose occurrences carry their own bindings. Which binding a
+  // symbol denotes is not the question here — the spelling is — so compare
+  // syntactically (see `sameSyntactic`).
+  if (sameSyntactic(expr, dependentCall)) return replacement;
   if (
     isFunction(expr) &&
     isFunction(dependentCall) &&
     expr.operator === dependentCall.operator &&
     expr.nops === dependentCall.nops &&
-    expr.ops.every((op, i) => op.isSame(dependentCall.ops[i]))
+    expr.ops.every((op, i) => sameSyntactic(op, dependentCall.ops[i]))
   )
     return replacement;
   if (!isFunction(expr)) return expr;
@@ -1516,7 +1522,8 @@ function conditionEquationForSolution(
     derivativeAtPoint(condition.op1, dependentName, independentName) ??
     derivativeAtPoint(condition.op2, dependentName, independentName);
   if (!derivative) return undefined;
-  if (!solutionEquation.op1.isSame(dependentCall)) return undefined;
+  // Template comparison, as in `replaceDependentCall`.
+  if (!sameSyntactic(solutionEquation.op1, dependentCall)) return undefined;
 
   const value = derivativeAtPoint(condition.op1, dependentName, independentName)
     ? condition.op2
@@ -1658,7 +1665,8 @@ function solveSeparableFirstOrder(
     dependentCall,
     y
   ).simplify();
-  if (separated.yPart.isSame(dependentCall)) return undefined;
+  // Template comparison, as in `replaceDependentCall` above.
+  if (sameSyntactic(separated.yPart, dependentCall)) return undefined;
   if (yPart.has(independentName) || yPart.isSame(0)) return undefined;
 
   const left = dSolveAntiderivative(reciprocal(yPart), ySymbolName);
@@ -1728,17 +1736,20 @@ function cancelHomogeneousRatio(
   independentName: string
 ): Expression {
   const ce = expr.engine;
+  // `v` and `x` are re-boxed here from names, so they carry the solver's
+  // bindings, not the equation's — a template comparison (see
+  // `replaceDependentCall`).
   const v = ce.symbol(ratioName);
   const x = ce.symbol(independentName);
 
   if (
     isFunction(expr, 'Divide') &&
-    expr.op2.isSame(x) &&
+    sameSyntactic(expr.op2, x) &&
     isFunction(expr.op1, 'Multiply') &&
-    expr.op1.ops.some((op) => op.isSame(v)) &&
-    expr.op1.ops.some((op) => op.isSame(x))
+    expr.op1.ops.some((op) => sameSyntactic(op, v)) &&
+    expr.op1.ops.some((op) => sameSyntactic(op, x))
   ) {
-    const remaining = expr.op1.ops.filter((op) => !op.isSame(x));
+    const remaining = expr.op1.ops.filter((op) => !sameSyntactic(op, x));
     return productExpression(ce, remaining);
   }
 
@@ -1755,15 +1766,17 @@ function termDependentPower(
 ): { power: Expression; coefficient: Expression } | undefined {
   const ce = term.engine;
 
-  if (term.isSame(dependentCall)) return { power: ce.One, coefficient: ce.One };
+  // Template comparisons, as in `replaceDependentCall`.
+  if (sameSyntactic(term, dependentCall))
+    return { power: ce.One, coefficient: ce.One };
   if (
     isFunction(term, 'Power') &&
-    (term.op1.isSame(dependentCall) ||
+    (sameSyntactic(term.op1, dependentCall) ||
       (isFunction(term.op1) &&
         isFunction(dependentCall) &&
         term.op1.operator === dependentCall.operator &&
         term.op1.nops === dependentCall.nops &&
-        term.op1.ops.every((op, i) => op.isSame(dependentCall.ops[i]))))
+        term.op1.ops.every((op, i) => sameSyntactic(op, dependentCall.ops[i]))))
   )
     return { power: term.op2, coefficient: ce.One };
 
@@ -2188,11 +2201,12 @@ function isClairautLinearTerm(
   independentName: string
 ): boolean {
   if (!isFunction(term, 'Multiply')) return false;
-  const x = term.engine.symbol(independentName);
   const factors = term.ops.filter((op) => !op.isSame(1));
   return (
     factors.length === 2 &&
-    factors.some((op) => op.isSame(x)) &&
+    // By NAME: the term's `x` carries the equation's binding, and re-boxing
+    // the name here would carry the solver's — a template comparison.
+    factors.some((op) => isSymbol(op, independentName)) &&
     factors.some((op) =>
       isDerivativeOfDependent(op, dependentName, independentName)
     )
@@ -2208,9 +2222,10 @@ function solveClairautFirstOrder(
   if (!isFunction(equation, 'Equal')) return undefined;
 
   const ce = equation.engine;
-  const [lhs, rhs] = equation.op1.isSame(dependentCall)
+  // Template comparison, as in `replaceDependentCall`.
+  const [lhs, rhs] = sameSyntactic(equation.op1, dependentCall)
     ? [equation.op1, equation.op2]
-    : equation.op2.isSame(dependentCall)
+    : sameSyntactic(equation.op2, dependentCall)
       ? [equation.op2, equation.op1]
       : [undefined, undefined];
   if (!lhs || !rhs) return undefined;

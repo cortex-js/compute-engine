@@ -211,6 +211,13 @@ export class BoxedFunction
     if (options?.canonical || this._isStructural) this.bind();
   }
 
+  // NOTE: this hash folds bound-variable NAMES (via each symbol operand's
+  // name-keyed hash). That is sound because `isSame` compares bound
+  // occurrences by name too (binding-identity equality, NOT
+  // alpha-equivalence — see `same()` in compare.ts). If rename-invariant
+  // equality is ever introduced, this hash must become alpha-invariant in the
+  // same change, or equal expressions will hash differently and every hash
+  // consumer (e.g. `match.ts` anchor bucketing) silently breaks.
   get hash(): number {
     if (this._hash !== undefined) return this._hash;
 

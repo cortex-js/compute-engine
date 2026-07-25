@@ -75,6 +75,7 @@ import { getSignFromAssumptions } from '../assume.js';
 import { getFactIndex, hasAssumptions } from './constraint-subject.js';
 import { isNumber, isSymbol } from './type-guards.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { sameBinding } from './compare.js';
 
 /**
  * ### BoxedSymbol
@@ -207,8 +208,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (other === false)
       return this.symbol === 'False' || isSymbol(this.value, 'False');
 
+    // Two symbols are the same symbol when they share a name AND denote the
+    // same binding (see `sameBinding`). No binder can enclose this
+    // comparison — it is the whole expression — so every occurrence here is
+    // free and asks which binding it refers to.
     if (other instanceof _BoxedExpression && isSymbol(other))
-      return this.symbol === other.symbol;
+      return this.symbol === other.symbol && sameBinding(this, other);
 
     // `other` is not a symbol. Follow *this* symbol's value binding and compare
     // it against `other` directly (isSame follows symbol value bindings).

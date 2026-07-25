@@ -9,6 +9,7 @@ import type {
   BoxedOperatorDefinition,
   BoxedValueDefinition,
   DictionaryInterface,
+  Scope,
 } from '../global-types.js';
 
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
@@ -19,6 +20,7 @@ import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { functionLiteralParameterName } from './function-literal.js';
+import { boundVariableNames, rewriteWithBinders } from './binders.js';
 
 /**
  * Check if an expression contains symbolic transcendental functions of constants
@@ -376,19 +378,6 @@ export function resolveBoundSymbols(
   const resolved = ops.map((op) => resolveBoundSymbols(op, childProtect, seen));
   if (resolved.every((op, i) => op === ops[i])) return expr;
   return expr.engine.function(expr.operator, resolved);
-}
-
-/** Names bound by `expr` itself (a binder): its local-scope declarations plus,
- * for a `Function` literal, its parameter symbols. */
-function boundVariableNames(expr: Expression): string[] {
-  const names: string[] = [];
-  if (expr.localScope?.bindings) names.push(...expr.localScope.bindings.keys());
-  if (isFunction(expr, 'Function'))
-    for (const p of expr.ops.slice(1)) {
-      const n = functionLiteralParameterName(p);
-      if (n) names.push(n);
-    }
-  return names;
 }
 
 /**
@@ -916,6 +905,8 @@ export function withValueShield<T>(
   if (shielded.length === 0) return fn();
 
   ce.pushScope();
+  const shieldScope = ce.context.lexicalScope;
+  let result: T;
   try {
     for (const { name, type } of shielded) {
       // Skip an exotic type that fails to round-trip through `declare` rather
@@ -927,10 +918,54 @@ export function withValueShield<T>(
         /* leave this symbol unshadowed */
       }
     }
-    return fn();
+    result = fn();
   } finally {
     ce.popScope();
   }
+  // The shadow bindings are dead now that the scope is popped: re-bind any the
+  // result still points at, so it denotes the caller's symbols (see
+  // `rebindEscaping`). Done AFTER the pop so `ce.symbol()` resolves outward.
+  return isExpression(result)
+    ? (rebindEscaping(result, shieldScope) as T)
+    : result;
+}
+
+/**
+ * Re-bind the free symbols of an escaping result away from a scope that is
+ * being discarded.
+ *
+ * A temporary scope (the value shield, a call frame) shadow-declares a name so
+ * the work inside sees a pure symbol. The RESULT then escapes still pointing
+ * at that shadow binding — which is dead the moment the scope pops. That was
+ * invisible while symbols compared by name; with binding-aware equality it
+ * makes the result compare unequal to the same expression written outside
+ * (`HoldValues(Simplify(Abs(w)))` vs `w`). It is a latent defect either way:
+ * an expression must not reference a discarded binding.
+ *
+ * Only occurrences bound BY `scope` are re-bound; a symbol referring to any
+ * other scope is left exactly as it is — that is what keeps a stored value's
+ * free symbols from being captured. Occurrences bound by a binder INSIDE
+ * `expr` (a returned lambda's own parameters) are skipped too: they are
+ * self-contained and re-binding them would corrupt the closure.
+ *
+ * MUST be called after the scope has been popped, so `ce.symbol()` resolves
+ * against the enclosing scope.
+ */
+export function rebindEscaping(expr: Expression, scope: Scope): Expression {
+  if (scope.bindings.size === 0) return expr;
+  return rewriteWithBinders(expr, (sym, shadowed) => {
+    const name = sym.symbol;
+    // An occurrence bound by a binder INSIDE `expr` is self-contained: leave
+    // a returned closure's own parameters alone.
+    if (shadowed?.has(name)) return sym;
+    const def = sym.valueDefinition;
+    if (def === undefined) return sym;
+    const binding = scope.bindings.get(name);
+    // Only a symbol pointing at THIS scope's binding is re-bound.
+    if (binding === undefined || !isValueDef(binding) || binding.value !== def)
+      return sym;
+    return sym.engine.symbol(name);
+  });
 }
 
 export function isOperatorDef(

@@ -1,4 +1,6 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
+import { sameSyntactic } from '../../src/compute-engine/boxed-expression/compare';
 
 const TESTS: [string, string][] = [
   ['1234', '1234.0'],
@@ -75,4 +77,81 @@ describe('Equation equivalence - multiple unknowns (REVIEW.md B13)', () => {
   for (const [a, b] of NOT_EQUIVALENT)
     it(`("${a}").isEqual("${b}") is false`, () =>
       expect(ce.parse(a).isEqual(ce.parse(b))).toBe(false));
+});
+
+// `isSame` is an unconditional equivalence relation (option B): two symbols
+// are the same symbol only when they agree on being bound AND on the binding.
+// A RAW (non-canonical) operand carries no binding, so it never equals a
+// canonical symbol — comparing a TEMPLATE against a subject is the explicit
+// `sameSyntactic` entry point, not an implicit consequence of unboundness.
+// See the contract on `same()` in compare.ts.
+describe('isSame: the canonical/raw boundary', () => {
+  test('two canonical symbols of the same name in DIFFERENT scopes differ', () => {
+    const engine = new ComputeEngine();
+    const outer = engine.box('q');
+    engine.pushScope();
+    engine.declare('q', 'number');
+    const inner = engine.box('q');
+    engine.popScope();
+    expect(outer.isSame(inner)).toBe(false);
+    expect(inner.isSame(outer)).toBe(false); // symmetric
+  });
+
+  test('a raw symbol does NOT match a canonical one — templates use sameSyntactic', () => {
+    const engine = new ComputeEngine();
+    const raw = engine.box('q', { canonical: false });
+    const canonical = engine.box('q');
+    expect(raw.isSame(canonical)).toBe(false);
+    expect(canonical.isSame(raw)).toBe(false); // symmetric
+    // The template-vs-subject question is asked explicitly:
+    expect(sameSyntactic(raw, canonical)).toBe(true);
+  });
+
+  test('a lazy operator holding a raw symbol is not a transitivity bridge', () => {
+    // The case that falsified the lenient rule: `Hold` keeps its operand
+    // un-canonicalized, so a CANONICAL `Hold(q)` contains a raw `q`. Under
+    // the lenient rule it compared equal to canonical `Hold(q)`s from two
+    // different scopes that were themselves unequal — non-transitivity inside
+    // the domain every dedup key uses. Option B: the raw-holding expression
+    // equals neither, and the relation stays transitive.
+    const engine = new ComputeEngine();
+    // A pre-boxed raw operand survives inside the canonical wrapper (the
+    // box/parse routes bind `Hold`'s operand, so build it explicitly).
+    const holdRaw = engine.function('Hold', [
+      engine.box('q', { canonical: false }),
+    ]);
+    expect(holdRaw.isCanonical).toBe(true);
+    const holdOuter = engine.function('Hold', [engine.box('q')]);
+    engine.pushScope();
+    engine.declare('q', 'number');
+    const holdInner = engine.function('Hold', [engine.box('q')]);
+    engine.popScope();
+    expect(holdOuter.isSame(holdInner)).toBe(false);
+    expect(holdRaw.isSame(holdOuter)).toBe(false);
+    expect(holdRaw.isSame(holdInner)).toBe(false);
+  });
+
+  test('a rule pattern (raw, with a literal constant) still matches a canonical subject', () => {
+    // The concrete case `sameSyntactic` exists for: `\pi` is a literal, not a
+    // wildcard, and the pattern is raw while the subject is canonical.
+    const engine = new ComputeEngine();
+    expect(
+      engine.parse('\\pi + 3').replace('\\pi + a -> 2a')?.toString()
+    ).toEqual('6');
+  });
+
+  test('standard-library symbols compare by name across engine instances', () => {
+    // A library symbol is not a binding: `Nothing`, `Sin`, `Pi` denote the
+    // same object in every engine, even though each engine mints its own
+    // root-scope definition.
+    const a = new ComputeEngine();
+    const b = new ComputeEngine();
+    for (const n of ['Nothing', 'Missing', 'Sin', 'List', 'Pi'])
+      expect(a.box(n).isSame(b.box(n))).toBe(true);
+    // …but a user symbol SHADOWING a library name is its own binding:
+    a.pushScope();
+    a.declare('Sin', 'number');
+    expect(a.box('Sin').isSame(b.box('Sin'))).toBe(false);
+    a.popScope();
+  });
 });

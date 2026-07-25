@@ -1,9 +1,14 @@
 import { checkDeadline } from '../../common/interruptible.js';
 import { replace } from './rules.js';
+import { sameSyntactic } from './compare.js';
 import { holdMap } from './hold.js';
 import { expToTrig } from './exp-to-trig.js';
 import { expand } from './expand.js';
-import { hasAssignedVariable, assignedVariableNames } from './utils.js';
+import {
+  rebindEscaping,
+  hasAssignedVariable,
+  assignedVariableNames,
+} from './utils.js';
 import type {
   Expression,
   SimplifyOptions,
@@ -208,6 +213,8 @@ export function simplifyValueBlind(
   const types = shadow.map((n) => ce.box(n).type.toString());
 
   ce.pushScope();
+  const shadowScope = ce.context.lexicalScope;
+  let steps: RuleSteps;
   try {
     shadow.forEach((n, i) => {
       // If an exotic type fails to round-trip through `declare`, skip shadowing
@@ -219,10 +226,24 @@ export function simplifyValueBlind(
         /* leave this symbol unshadowed */
       }
     });
-    return simplify(expr, options);
+    steps = simplify(expr, options);
   } finally {
     ce.popScope();
   }
+  // The shadow bindings are dead now that the scope is popped, but a result
+  // that could not fully reduce still mentions the shielded symbols and would
+  // carry those dead bindings out to the caller — where they compare unequal
+  // to the caller's own symbols. Same fix as `withValueShield`; this is the
+  // second site of the same pattern, reached by the public `.simplify()`.
+  //
+  // Only the FINAL step's value escapes as the caller's result; the
+  // intermediate steps exist for `explain()`, which serializes them by name.
+  // Rebinding only the last value keeps the fix off the O(steps × tree) path.
+  const last = steps.at(-1);
+  if (last === undefined) return steps;
+  const rebound = rebindEscaping(last.value, shadowScope);
+  if (rebound === last.value) return steps;
+  return [...steps.slice(0, -1), { ...last, value: rebound }] as RuleSteps;
 }
 
 export function simplify(
@@ -230,8 +251,14 @@ export function simplify(
   options?: Partial<InternalSimplifyOptions>,
   steps?: RuleSteps
 ): RuleSteps {
+  // The simplify driver's progress, cycle and change checks are all SYNTACTIC
+  // (`sameSyntactic`): simplification rewrites spelling, and its machinery
+  // (shadow scopes, rule application, re-canonicalization) can re-box a
+  // spelled-identical result with different bindings. Binding-aware equality
+  // here would treat such a result as "new", defeating the cycle guards and
+  // recording no-op steps.
   const hasSeen = (x: Expression) =>
-    steps && steps.some((y) => y.value.isSame(x));
+    steps && steps.some((y) => sameSyntactic(y.value, x));
 
   // Check we are not recursing infinitely
   if (hasSeen(expr)) return steps!;
@@ -279,7 +306,7 @@ export function simplify(
     let result1 = fuFirst?.value ?? expr;
     if (fuFirst) {
       const postSimplified = result1.simplify();
-      if (!postSimplified.isSame(result1)) {
+      if (!sameSyntactic(postSimplified, result1)) {
         result1 = postSimplified;
       }
     }
@@ -290,7 +317,7 @@ export function simplify(
     let result2 = fuSecond?.value ?? preSimplified;
     if (fuSecond) {
       const postSimplified = result2.simplify();
-      if (!postSimplified.isSame(result2)) {
+      if (!sameSyntactic(postSimplified, result2)) {
         result2 = postSimplified;
       }
     }
@@ -300,7 +327,7 @@ export function simplify(
     const cost2 = costFn(result2);
     const bestResult = cost1 <= cost2 ? result1 : result2;
 
-    if (!bestResult.isSame(expr)) {
+    if (!sameSyntactic(bestResult, expr)) {
       steps.push({ value: bestResult, because: 'fu' });
     }
 
@@ -315,7 +342,7 @@ export function simplify(
   //
   if (options?.strategy === 'trig') {
     const converted = expToTrig(expr);
-    if (!converted.isSame(expr)) {
+    if (!sameSyntactic(converted, expr)) {
       expr = converted;
       steps.push({ value: expr, because: 'exp-to-trig' });
     }
@@ -360,7 +387,7 @@ export function simplify(
     expr = newSteps.at(-1)!.value;
 
     steps = newSteps;
-  } while (!steps.slice(0, -1).some((x) => x.value.isSame(expr)));
+  } while (!steps.slice(0, -1).some((x) => sameSyntactic(x.value, expr)));
 
   //
   // 4/ Cost-guarded trial expansion
@@ -384,7 +411,11 @@ export function simplify(
     expandedTermBound(expr) <= MAX_TRIAL_EXPANSION_TERMS
   ) {
     const expanded = expand(expr);
-    if (expanded !== null && expanded !== undefined && !expanded.isSame(expr)) {
+    if (
+      expanded !== null &&
+      expanded !== undefined &&
+      !sameSyntactic(expanded, expr)
+    ) {
       const settled = simplify(expanded, {
         ...options,
         noExpansionTrial: true,
@@ -407,7 +438,7 @@ function isCheaper(
   if (newExpr === null || newExpr === undefined) return false;
   if (oldExpr === newExpr) return false;
 
-  if (oldExpr.isSame(newExpr)) return false;
+  if (sameSyntactic(oldExpr, newExpr)) return false;
 
   const ce = oldExpr.engine;
 
@@ -552,7 +583,7 @@ function simplifyOperands(
           build
         )
       );
-    const changed = simplifiedOps.some((op, i) => !op.isSame(ops[i]));
+    const changed = simplifiedOps.some((op, i) => !sameSyntactic(op, ops[i]));
     if (!changed) return expr;
     return build(simplifiedOps);
   }
@@ -644,7 +675,7 @@ function simplifyOperands(
         );
       else simplifiedOps.push(evaluateNumericSubexpressions(x));
     }
-    const changed = simplifiedOps.some((op, i) => !op.isSame(ops[i]));
+    const changed = simplifiedOps.some((op, i) => !sameSyntactic(op, ops[i]));
     if (!changed) return expr;
     return build(simplifiedOps);
   }
@@ -749,7 +780,7 @@ function simplifyExpression(
     ? []
     : undefined;
   const alt = simplifyOperands(expr, options, substeps);
-  if (!alt.isSame(expr)) {
+  if (!sameSyntactic(alt, expr)) {
     const aggregate: RuleStep =
       substeps && substeps.length > 0
         ? { value: alt, because: 'simplified operands', substeps }
@@ -804,7 +835,7 @@ function simplifyNonCommutativeFunction(
   // we bail out.
 
   let last = result.at(-1)!.value;
-  if (last.isSame(expr)) return steps;
+  if (sameSyntactic(last, expr)) return steps;
 
   // Post-rule operand cleanup: NOT captured as substeps — it stays absorbed
   // into the rule step (as today), so `explain()` attributes it to the rule.

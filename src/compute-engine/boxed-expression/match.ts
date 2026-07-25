@@ -9,6 +9,7 @@ import { permutations } from '../../common/utils.js';
 
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
 import { isOperatorDef } from './utils.js';
+import { sameSyntactic } from './compare.js';
 import { isNumber, isFunction, isSymbol, isString } from './type-guards.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 
@@ -86,8 +87,12 @@ function captureWildcard(
     return substitution;
 
   if (wildcard in substitution) {
-    // There was already a matching wildcard, make sure this one is identical
-    if (!expr.isSame(substitution[wildcard])) return null;
+    // There was already a matching wildcard, make sure this one is identical.
+    // Patterns are syntax: a capture can contain pattern-side artifacts (a
+    // pre-bound wildcard like the unknown `_x` during equation solving, raw
+    // by construction), so consistency between two captures is a syntactic
+    // question, not one about which binding a symbol denotes.
+    if (!sameSyntactic(expr, substitution[wildcard])) return null;
     return substitution;
   }
 
@@ -563,7 +568,10 @@ function matchPermutation(
           // Find a matching candidate that hasn't been used
           let found = false;
           for (const idx of candidates) {
-            if (!usedIndices.has(idx) && exprOps[idx].isSame(op)) {
+            // Anchor matching compares a PATTERN operand (raw by
+            // construction — see `sameSyntactic`) against subject operands, so
+            // it asks about syntax, not about which binding a symbol denotes.
+            if (!usedIndices.has(idx) && sameSyntactic(exprOps[idx], op)) {
               usedIndices.add(idx);
               found = true;
               break;
@@ -577,7 +585,7 @@ function matchPermutation(
       const availableOps = [...exprOps];
       for (const op of patternOps) {
         if (!hasWildcards(op)) {
-          const idx = availableOps.findIndex((e) => e.isSame(op));
+          const idx = availableOps.findIndex((e) => sameSyntactic(e, op));
           if (idx === -1) return null; // Anchor not found
           availableOps.splice(idx, 1); // Remove to handle multiplicity
         }

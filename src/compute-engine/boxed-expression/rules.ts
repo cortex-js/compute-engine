@@ -32,6 +32,7 @@ import type { Parser, Terminator } from '../latex-syntax/types.js';
 import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary.js';
 
 import { isPrime } from './predicates.js';
+import { sameSyntactic } from './compare.js';
 import {
   isString,
   isNumber,
@@ -1310,10 +1311,15 @@ export function replace(
   // `null` otherwise. Exceptions from `applyRule` propagate to the caller.
   const stepOf = (rule: BoxedRule): RuleStep | null => {
     const result = applyRule(rule, expr, {}, options);
+    // "Did the rule change anything" is a SYNTACTIC question: rules rewrite
+    // spelling, and their machinery re-boxes values in a clean scope, so a
+    // result spelled identically to the subject is no progress even when its
+    // bindings differ (`sameSyntactic`, not `isSame` — binding-aware equality
+    // here would accept a no-op rewrite and loop on it).
     if (
       result !== null &&
       result.value !== expr &&
-      (!result.value.isSame(expr) || varyingForm(expr, result.value))
+      (!sameSyntactic(result.value, expr) || varyingForm(expr, result.value))
     )
       return result;
     return null;
