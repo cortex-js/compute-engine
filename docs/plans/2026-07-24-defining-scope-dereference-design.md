@@ -1,346 +1,192 @@
-# Defining-Scope Dereference of Symbol Values
+# Symbol Identity: Name vs Binder
 
-**Status**: DESIGN — approved direction ("re-evaluate on reference is the
-right path", 2026-07-24); revised 2026-07-24 after a design review that
-corrected the root-cause analysis of Symptom 2 (see §Mechanism and §Design
-sketch step 3). Implementation pending.
+**Status**: ARCHITECTURE NOTE — 2026-07-24. Supersedes the "defining-scope
+dereference" design that previously occupied this file (kept in §Appendix A);
+that framing treated a symptom. All numbers below are measured, from
+experiments applied and then reverted in one session.
 **Executable spec**: `test/compute-engine/symbol-value-scoping.test.ts`
-(characterization tests; the `@fixme` assertions flip to their documented
-intended values when this lands).
+(characterization tests; the `@fixme` assertions flip when this lands).
 
-## Problem
+## The stale invariant
 
-Two user-visible defects share a theme — **dereferencing a symbol's stored
-value has no notion of the value's defining scope** — but they have *two
-distinct mechanisms*, and only one of them lives in the dereference path.
-Fixing dereference alone fixes Symptom 1; Symptom 2 additionally requires a
-change in the function-application path (§Design sketch step 3).
+`BoxedSymbol._def` dates to the **2022-03-16** baseline. `lexicalScope` first
+appears **2025-07-15**. In the three years between, the engine had a single
+global namespace, where
 
-### Symptom 1 — staleness ("one-evaluate-late")
+> a symbol's **name** determines its **binding**
+
+was simply true — so keying the expression algebra on names was correct, not
+sloppy. Scopes were woven in around `_def` without revisiting that premise.
+Today a name no longer determines a binding, but the algebra still behaves as
+if it does:
+
+- `BoxedSymbol.isSame` (`boxed-symbol.ts:211`) is `this.symbol === other.symbol`;
+- `Terms.find` (`arithmetic-add.ts`) collects like terms with `term.isSame(…)`;
+- `hash` is `hashCode(this._id)` — name only.
+
+So two same-named symbols bound to *different* definitions are, to the
+algebra, one symbol. **`_def` is advisory; the name is load-bearing.** Every
+defect below is a consequence.
+
+## The consequences
+
+### Staleness ("one-evaluate-late")
 
 ```
 let d = 3x^2 + 1      // x free at this point
 let x = 2
 d                     // → 3x^2 + 1   (stale)
-N(d)                  // → 13         (N resolves; evaluate does not)
+N(d)                  // → 13
 ```
 
-`BoxedSymbol.evaluate()` (non-constant path, `boxed-symbol.ts` ~829) returns
-`_getSymbolValue(id)` **verbatim** — the value was evaluated at assignment
-time and free symbols inside it are never re-resolved. Each additional
-`evaluate()` resolves one more layer; `N()` recurses fully. `evaluate()` and
-`N()` therefore disagree about what `d` *is*.
+`BoxedSymbol.evaluate()`'s non-constant path returns the stored value
+verbatim. The constant path one branch up already re-evaluates
+(`def.value?.evaluate(options)`), and so does the compiled path —
+`compile(ce.box('d'))?.code` is `(3 * (2 * 2) + 1)` via
+`BaseCompiler.tryFoldKnownSymbol`. Among interpret / `N` / compile, plain
+`evaluate()` is the outlier.
 
-The **constant** branch one level up (`boxed-symbol.ts` ~820) already does the
-right thing structurally — it returns `def.value?.evaluate(options)`, i.e. it
-re-evaluates the stored value on every dereference. A constant declared with
-value `3x^2 + 1` evaluates to `13` once `x = 2`. The non-constant path is the
-outlier. (But see Symptom 2: the constant path re-evaluates in the *current*
-context, which is the semantics this design disqualifies.)
-
-The compiled path also already resolves deeply:
-`compile(ce.box('d'))?.code` → `(3 * (2 * 2) + 1)`, via
-`BaseCompiler.tryFoldKnownSymbol` (`base-compiler.ts` ~3232). So among
-interpret / `N` / compile, plain `evaluate()` is the only route that reports
-`3x^2 + 1`. Landing this closes a live interpret-vs-compile divergence.
-
-### Symptom 2 — dynamic name capture through call frames
+### Name capture through call frames
 
 ```
 let a = x + 1
 g(x) = a
-g(5)                  // → 6    (the call frame's x = 5 captured a's free x!)
+g(5)                  // → 6, and → 6 even with a global `let x = 100`
 ```
 
-Worse, the frame wins **even over an existing, lexically-correct global**:
+Two independent channels, both name-keyed:
 
-```
-let a = x + 1
-let x = 100
-g(x) = a
-g(5)                  // → 6, not 101
-```
+- **Channel A** — the Tycho item 26 post-evaluation substitution
+  (`function-utils.ts:1158`) rewrites any parameter *name* still present in
+  the result. It fires even where no dereference occurred:
+  `let a = x+1; g(z) = a; h(x) = g(1); h(5)` → `6`, captured by `h`'s frame
+  on a value `g` had already returned cleanly.
+- **Channel B** — the constant branch re-evaluates its stored value in the
+  *current* context, so a frame binding intercepts at the dereference itself
+  (verified with Channel A disabled).
+- **Channel C** — the in-frame `numericApproximation` re-evaluation
+  (`function-utils.ts:1180`) does the same thing on the `N` route.
 
-The capture is purely by name (a parameter named `z` doesn't capture), it
-happens through lambda frames too (`x |-> a`), and it does **not** happen
-through block-locals (`do { let x = 99; a }` stays clean) — so current
-behavior is not even consistently dynamic; it is an artifact.
+Underneath all three: the frame's `x` and the stored value's `x` are the same
+symbol as far as the engine can tell.
 
-### Mechanism (corrected 2026-07-24)
+### Identity erasure by the algebra
 
-There are **two independent capture channels**. An earlier revision of this
-doc attributed the capture to "the applied body's result is evaluated once
-more while the call frame is still pushed"; that is not the mechanism for the
-non-constant case.
+The sharpest demonstration. With substitution made identity-aware but the
+algebra left alone, `g(x) = a + x; g(5)` returns **`2x + 1`**: canonical `Add`
+merged the parameter's `x` and the stored value's `x` into a single `2x` term
+by name, destroying the distinction *before* any substitution could act on it.
 
-**Channel A — post-evaluation parameter substitution (non-constant values).**
-`function-utils.ts:1158`, the Tycho item 26 block: after the body evaluates,
-any parameter name still present in the *result* is rewritten to that
-parameter's value via `captureAvoidingSubs`. It cannot tell an unevaluated
-reference to the parameter (what item 26 exists to fix) from a free symbol
-that arrived inside a dereferenced stored value — they are the same name.
+## Measurements
 
-The decisive evidence is a capture in a frame where **no dereference happens
-at all**:
+Four experiments, each applied to a clean tree and reverted.
 
-```
-let a = x + 1
-g(z) = a        // z parameter: the deref of `a` is clean, returns x + 1
-h(x) = g(1)
-h(5)            // → 6   ← h's frame captured g's already-returned x + 1
-```
+| experiment | full-suite result |
+|:--|:--|
+| **Delete** the item 26 substitution | 3 intended flips + **8 genuine regressions** (`collections` Map/Tabulate/Apply, `functions` held-conditional, NDSolveFunction ×2, cortex docs); 0 snapshot churn |
+| **Body-source gate** (name-keyed: substitute only params occurring in the body source) | 4 intended flips + 2 timing flakes (`fungrim-loops`, `bug-fixes` — both pass isolated); 0 snapshot churn. Residual gap: `g(x) = a + x` → `11` |
+| **Held-position gate** | too tight — 3 regressions (`Map(_1, k↦k²)` degrades, NDSolveFunction ×2) |
+| **Identity-keyed `isSame`** (name **and** binder) | **9 failed / 19,662; 4,176 snapshots green** |
 
-Measured: gating off that one block flips all three `@fixme` capture
-assertions with the dereference path untouched. Therefore **step 2 alone does
-not fix Symptom 2**.
+The last row is the headline. Three lines in one method, and:
 
-**Channel B — in-frame re-evaluation (constants).** The constant branch
-evaluates its stored value while the call frame is pushed, so its free symbols
-resolve against the runtime chain directly. Measured with Channel A disabled:
-a constant `kk = x + 1` with `g(x) = kk` still yields `g(5) → 6`. This channel
-*is* in the dereference path and step 2 does fix it — which is why "no change
-to constants" is no longer a non-goal.
+| failures | cause | verdict |
+|:--|:--|:--|
+| 6 — `integration-rules` (Rubi) | `F.has('Integrate')` true: rules stopped matching. Rule patterns are boxed in a clean scope, so their symbols carry different defs | **carve-out**: patterns are syntax |
+| 2 — `hold-values` | `r.isSame(ce.symbol('w'))` across the shield's shadow scope | **ruling needed** on assumption scoping |
+| 1 — `jacobian-matrix` | `det.isSame(-2)` after `simplify()` | downstream of the rule path |
 
-A third site, the `numericApproximation` re-evaluation at
-`function-utils.ts:1180`, is in the same frame and must be audited alongside
-Channel A.
+**Not one failure is the arithmetic algebra.** `Add`/`Multiply` folding,
+ordering, canonicalization and 4,176 snapshots are indifferent to the change.
 
-## Evidence base (2026-07-24 experiments)
+Scope of the surface, counted: of 138 name comparisons in
+`src/compute-engine`, **67** check against a *literal* name (`x.symbol ===
+'Pi'` — legitimately name-based, untouched) and only **12** compare two
+symbols to each other. The algebra funnels through one of the 12.
 
-A naive prototype (re-evaluate the stored value in the *current* context at
-dereference, mirroring `N()`'s Tycho-46 self-reference guard — patch preserved
-in the session record, ~10 lines in `BoxedSymbol.evaluate`) established:
+## The repair
 
-- **Full suite: zero churn.** 18,684 tests, 4,176 snapshots, all green with
-  the naive patch applied. Nothing in the corpus depends on one-evaluate-late
-  staleness — and nothing covers the capture bug either (coverage gap now
-  closed by the executable spec).
-- **Perf: neutral on the number-literal fast path only.** Symbol-deref
-  microloop ~5–6 µs/iter with and without the patch (an initial 25 µs baseline
-  reading was machine-contention noise; caught by control reruns). A 20k-
-  iteration Cortex loop: 13–15 ms both ways. Both of these measure values that
-  are *number literals*; see §Risks for the symbolic-value cost, which is the
-  case this change actually affects.
-- **But the naive patch is semantically disqualified**: evaluating in the
-  *current* frame makes block-locals capture too (`do { let x = 99; a + y }`
-  returned 105 instead of the lexical `x + 6`), and mutual references drift
-  (`a = b+1; b = a+1; a` → `b + 3` instead of `b + 1`). Note this is exactly
-  what the constant path does today (Channel B).
+1. **Symbol identity = name AND binder.** Tighten `isSame`
+   (`boxed-symbol.ts:211`): equal iff same name and same `_def`, falling back
+   to name-only when either side is unbound/non-canonical (preserves
+   non-canonical comparisons and post-serialization reboxing). `hash` needs
+   **no** change — it stays name-keyed, since tightening equality only removes
+   equalities and hash collisions remain legal.
 
-A second experiment gated off the Tycho item 26 substitution
-(`function-utils.ts:1158`) and ran the full suite:
+2. **Patterns are syntax — carve them out explicitly.** The matcher compares
+   *templates* to *subjects*; a rule's `x` is a syntactic placeholder, not a
+   binding. `match-dispatch.ts:476` and `compare.ts:90` stay name-based. This
+   boundary exists implicitly today; the repair makes it stated.
 
-- **Flips all three capture `@fixme`s** — with no change to the deref path.
-- **Breaks 8 genuine tests**, zero snapshot churn (`11 failed, 18796 passed,
-  4176 snapshots passed`):
-  - `collections.test.ts` — Map `each()`, Map `evaluate()`, Tabulate, direct
-    `Apply` ("substitutes the element into an undetermined body")
-  - `functions.test.ts` — "held conditional branch is substituted when
-    argument shares the symbol"
-  - `differential-equations.test.ts` — NDSolveFunction ×2 (compile
-    composition; MathJSON round-trip via `N()`)
-  - `cortex/documentation.test.ts` — live doc blocks
+3. **Rule the assumptions question.** Should `assume(x > 0)` in one scope
+   apply to a same-named `x` in another? Today yes, by accident of name
+   keying. Identity says no. The `HoldValues` shield needs whichever answer
+   is chosen to be explicit rather than emergent.
 
-So the item 26 substitution cannot simply be deleted: step 3 needs
-*provenance*, not removal.
+### What this retires
 
-## Proposed semantics
+- the item 26 heuristic — spike-verified: keyed on binder identity, all four
+  `collections` tests and the held-conditional test pass with the entire
+  held-conditional / shadowing / argument-ambiguity heuristic **deleted**;
+- the body-source gate (a name-keyed approximation of the same question);
+- α-renaming (only ever a way to smuggle identity into the channel the
+  algebra respected — unnecessary once the algebra respects identity);
+- the def→scope back-reference and `_inScope`-at-dereference of the
+  superseded design;
+- environment-carrying expressions — the heavier alternative, which has the
+  same erasure problem unless symbol equality accounts for the environment.
 
-> **A stored value's free symbols mean their bindings in the scope where the
-> value was stored.** At dereference, the value is re-evaluated **against the
-> def's own scope chain** — never against the caller's frame.
+## Sequencing
 
-Outcomes (these are the spec-test flips):
+1. **Carve-outs first, on today's equality.** Make pattern matching and
+   assumption lookup explicitly name-based where they are already implicitly
+   so. Zero behavior change; reviewable in isolation.
+2. **Flip `isSame`.** Expected residue after step 1: the 2 `hold-values`
+   tests plus whatever the assumptions ruling decides.
+3. **Delete the compensation layer** — item 26's heuristic, then re-examine
+   Channel C (`function-utils.ts:1180`) and the frame-death passes
+   (`captureClosures`, `resolveEscapingLambda`, `hideBodyScopeParams`, the
+   body-scope re-parenting), which lose their reason to exist.
 
-| Case | Today | Proposed | Needs |
-|:--|:--|:--|:--|
-| `let d = 3x²+1; let x = 2; d` | `3x²+1` | **13** (agrees with `N` and with compile) | step 2 |
-| `let a = x+1; g(x) = a; g(5)` | `6` | **`x + 1`** (global x unbound; frame never intercepts) | step 3 |
-| … with `let x = 100` global | `6` | **`101`** | steps 2 **and** 3 |
-| `const kk = x+1; g(x) = kk; g(5)` | `6` | **`x + 1`** / `101` with a global | step 2 (Channel B) |
-| `let a = x+1; g(z) = a; h(x) = g(1); h(5)` | `6` | **`x + 1`** | step 3 |
-| `let a = x+1; g(z) = a; g(5)` | `x + 1` | `x + 1` (unchanged) | — |
-| `do { let x = 99; a }` | clean | clean (unchanged) | — |
-| `a = b+1; b = a+1; a` | `b + 1` | `b + 1` (unchanged — see step 2's cycle guard) | step 2 |
+Do NOT reopen the shared-canon-scope model (the failed 2026-07-07 redesign;
+`docs/plans/2026-07-07-block-scope-capture-investigation.md`). This repair
+leaves the parenting model untouched — "canon scope IS the runtime frame"
+stays true.
 
-The rule that keeps this coherent with function application: **the evaluation
-context for body *source* is the frame (parameters must resolve); the
-evaluation context for a dereferenced stored *value* is the def's scope.**
-The N-threading lesson (2026-07-11) already established the body-source half:
-approximate inside the closure's frame, never re-evaluate a lambda result
-after the frame pops. This design adds the missing value half.
+## Open questions
 
-### Ruling: free symbols are late-bound, assigned symbols stay early-bound
+- **`Sum`/`Comprehension` index binders and re-entered canon scopes**, where
+  one binder is reused across iterations. Green under the measurement, but
+  green under a change this deep deserves a targeted probe, not trust.
+- **Recursion**: whether one binder with several simultaneous activations
+  needs distinguishing. A spike hit a stack overflow here, but the trace
+  showed a *single* activation on the stack — the hook sat in `_value`, which
+  type inference also consults. Unresolved, and not evidence either way.
+- **NDSolveFunction ×2 and the cortex `Map(_1, k↦k²)` doc block** failed under
+  *every* variant except the body-source gate. They are the cheapest available
+  oracle for this area; understand them before step 2.
+- **Serialization** deliberately stays name-only, so a MathJSON round-trip
+  loses identity and reboxing rebinds to the current scope. That is the
+  intended semantics — worth stating in user docs.
 
-Assignment-time evaluation is unchanged (§Non-goals), so a stored value
-snapshots whatever was *already bound* when it was written and stays live only
-for what was *free*. That is observable as order-dependence — measured today,
-and unchanged by this design:
+## Appendix A: the superseded framing
 
-```
-let x = 2;  let d = 3x^2 + 1;  x = 3;  N(d)   // → 13   (x was bound: snapshot)
-let d = 3x^2 + 1;  let x = 2;  x = 3;  N(d)   // → 28   (x was free: live)
-```
+This file previously proposed giving each *definition* a back-reference to its
+scope and re-evaluating stored values there (`_inScope`), plus a "provenance"
+mechanism for the item 26 substitution. It was wrong in a specific, instructive
+way: it attached the environment to the **definition**, but the thing that
+travels is the **value** — so the environment was lost the moment the value was
+extracted, and step 3 existed only to reconstruct information the architecture
+had discarded. A fix whose hard part is recovering discarded information is a
+mitigation by construction. The three capture rows of its outcome table also
+required two unrelated mechanisms to combine, which is what a missing
+abstraction looks like.
 
-Same three statements, different answers by declaration order. This is an
-**accepted ruling**, not a defect — it is the direct consequence of keeping
-assignment eager — but it is the first thing a user will report as a bug, so
-it is pinned by the spec and must be documented in the user-facing docs when
-this lands.
+## Appendix B: the naive prototype (measured, then reverted)
 
-## Design sketch
-
-1. **Defs remember their scope.** A `_BoxedValueDefinition` lives in exactly
-   one `scope.bindings`; give it a back-reference to that scope.
-   - Record it **where the value is stored** (the value setter,
-     `engine-declarations.ts` ~405 / `setSymbolValue`), not only at
-     declaration: `let a; do { a = u + 1 }` declares in the global scope but
-     writes from the block, and the prose above says "the scope where the
-     value was stored". If the two are ever meant to differ, say so
-     explicitly; otherwise the setter is the single source of truth.
-   - `updateDef` can replace the inner `_BoxedValueDefinition`, so both the
-     back-reference and the cycle key (below) must survive that. Key on the
-     `BoxedDefinition` wrapper held in `scope.bindings`
-     (`engine-declarations.ts:350`), which is the stable identity.
-   - Watch the interaction with the async-scope-lifetime machinery
-     (identity-based frame removal, 0.92.1): a def's scope back-reference must
-     not extend a popped frame's lifetime beyond what closures already do.
-   - **Invariant this rests on**: call-frame parameter bindings are defs whose
-     declaring scope is the *frame*, and that is the correct scope only
-     because arguments are pre-evaluated in the caller (verified:
-     `f(x,y) = x; let y = 7; f(y,2)` → `7`, not `2`). If any path ever binds
-     an unevaluated argument, defining-scope dereference would capture it.
-     State and test this invariant.
-
-2. **Dereference evaluates in that scope.** In `BoxedSymbol.evaluate()`,
-   replace "return stored value verbatim" (non-constant path) and "evaluate in
-   the current context" (constant path — Channel B) with:
-   - number-literal fast path (unchanged, O(1), keeps loop indices hot);
-   - **memoized result** — cache the resolved value on the def, keyed by
-     `ce._generation` (+ `_mutationGeneration`). This is not an optimization
-     to add later: without it, every dereference of a symbolic value pays a
-     full `evaluate()` (see §Risks for measured costs);
-   - self-reference guard (unchanged — Tycho item 46: substitute once when
-     the value mentions the symbol itself; keeps `f(t) = t + 1; f(t + 1)` at
-     `t + 2`);
-   - **cycle guard — abort, do not return locally.** A per-engine
-     "dereference in progress" set keyed by def identity; on re-entry, throw a
-     sentinel caught by the *outermost* dereference, which then returns its
-     stored value verbatim. Returning the stored value at the re-entry point
-     instead is wrong: for `a = b+1; b = a+1; a` it yields `b + 3` (eval `a`
-     → `b+1` → eval `b` → `a+1` → re-entry returns `b+1` → `b` ⇒ `b+2` → `a`
-     ⇒ `b+3`), which is precisely the naive-patch drift this design rejects.
-     Returning the bare symbol instead yields `a + 2`. Only abort-and-unwind
-     preserves today's `b + 1`;
-   - otherwise evaluate the stored value with the engine's lexical context
-     temporarily switched to the def's scope, via the **existing**
-     `ce._inScope(scope, fn)` (`index.ts:1615`, `engine-scope.ts:106`) — no
-     new mechanism needed. Note `_inScope` pushes a context whose
-     *assumptions* are copied from the current context, so a dereference under
-     `assume(x > 0)` re-evaluates with the def's bindings and the caller's
-     assumptions. That hybrid is intended (assumptions are ambient, bindings
-     are lexical); document it rather than leaving it implicit.
-
-3. **Give the item 26 substitution provenance.** *(Load-bearing for Symptom 2
-   — this is the fix, not cleanup.)* The parameter-value substitution at
-   `function-utils.ts:1158` must stop rewriting occurrences that arrived
-   inside a dereferenced stored value, while still rewriting genuine
-   unevaluated parameter references (the Map/Tabulate/Apply/held-conditional
-   cases listed in §Evidence base, which regress the moment it is disabled).
-   Name-based `result.has(name)` cannot make that distinction; the design must
-   carry provenance across the boundary. Candidate approaches, to be settled
-   before implementation:
-   - have step 2's dereference **tag** what it returns (a marker the
-     substitution walk treats as opaque), then strip the tags at the end of
-     the invoke;
-   - **diff against the pre-substitution body**: substitute only at positions
-     where the parameter symbol was present in the body *source*, computed
-     once per invoke;
-   - restrict substitution to the held-conditional / undetermined-body cases
-     it was written for, and prove by test that nothing else depends on it
-     (the measured 8 failures are the bar).
-
-   Audit the sibling `numericApproximation` re-evaluation at
-   `function-utils.ts:1180` under whichever approach is chosen. Do NOT reopen
-   the shared-canon-scope model (the failed 2026-07-07 redesign;
-   block-scope-capture notes) — this design deliberately leaves how bodies
-   bind untouched.
-
-4. **`N()` unification.** Once `evaluate()` resolves in the defining scope,
-   `N()`'s non-constant path should route through the same resolution (its
-   current context-value walk is the same name-based mechanism and has the
-   same capture exposure — the spec now covers the capture cases under `N`).
-
-## Non-goals
-
-- No change to `holdUntil` or to assignment-time evaluation (see the ruling
-  above for the order-dependence this implies).
-- No change to collection laziness ("literals are values, pipelines are
-  generators") — this is about symbol dereference, not materialization.
-- No change to `.simplify()`, which is deliberately value-blind: dereference-
-  time resolution is an `evaluate`/`N` behavior only.
-- No reopening of canonicalization scope-capture for function bodies.
-
-(Previously listed here: "no change to constants". Removed — the constant path
-is Channel B of Symptom 2 and is brought under step 2.)
-
-## Risks / open questions
-
-- **Perf: the measured neutrality does not cover the affected shape.** Today a
-  dereference of a symbolic value is a verbatim return (~free). Measured cost
-  of the `evaluate()` this design would add per dereference:
-
-  | stored value | `evaluate()` |
-  |:--|--:|
-  | `3x² + 2x + 1 + sin x + cos y` | **285 µs** |
-  | `\sum_{k=1}^{5}(3x² + 2x + 1)` | **3.5 ms** |
-
-  A 20k-iteration loop referencing a symbolic-valued variable would go from
-  ~0.1 s to ~5.7 s. Hence the memo in step 2. The perf gate must include a
-  **symbolic**-value loop; the existing numeric canary passes this regression
-  silently.
-- **Observable-API consistency**: after the fix `d.evaluate()` is a number
-  while `d.freeVariables` still reports `x`. Consumers gate on
-  `freeVariables`/`symbols` (and it is already dynamic-context-sensitive).
-  Decide whether that pair needs to agree, or document that it does not.
-- **Scope lifetime**: def→scope back-references may retain popped frames in
-  long sessions (REPL/notebook engines live long). Mitigation: the back-ref
-  points at the *lexical* scope object already retained by the binding
-  itself; measure heap on the notebook-sized session before/after.
-- **Concurrent async evaluations** share one engine context (deliberately
-  unfixed, needs task-local propagation): switching context to a def's scope
-  during dereference must use the same discipline as the async frame
-  machinery to avoid cross-talk.
-- **Cycle-guard residual forms**: the spec pins `b + 1` exactly (it is
-  today's output and the abort-and-unwind guard preserves it). If
-  implementation experience forces a different residual, the spec assertion —
-  not this paragraph — is the thing to renegotiate.
-
-## Test plan
-
-- Flip the `@fixme` assertions in
-  `test/compute-engine/symbol-value-scoping.test.ts` to their documented
-  intended values. Note the split: the staleness and constant `@fixme`s flip
-  on step 2; the capture `@fixme`s flip only once step 3 lands (a partial
-  landing leaves them red, which is the intended acceptance gate). The
-  non-`@fixme` tests (name-sensitivity, block-local cleanliness, cycle
-  termination, order-dependence ruling, Tycho-46 self-referential argument,
-  loop hot path) must pass unchanged throughout.
-- Interpret/compile parity: `compile(ce.box('d'))?.code` already folds to
-  `(3 * (2 * 2) + 1)`; pin that `evaluate()` agrees after the fix.
-- Full suite + snapshot-churn measure (expect near-zero: both experiments had
-  zero snapshot churn).
-- Perf canary + 20k-loop A/B with control reruns, **including a symbolic
-  (non-literal) stored value**, not only the numeric fast path.
-- Cortex route parity (the spec exercises `ce.box`, `executeCortex`, and `N`
-  routes).
-
-## Appendix: the naive prototype (measured, then reverted)
-
-For reference — the current-context variant that produced the evidence base.
-It is NOT the proposed implementation (it evaluates in the caller's context,
-which is what makes block-locals capture — and is what the constant path does
-today):
+The current-context variant. NOT proposed — it evaluates in the caller's
+context, which is what makes block-locals capture, and is what the constant
+path does today (Channel B):
 
 ```diff
 --- a/src/compute-engine/boxed-expression/boxed-symbol.ts
@@ -349,15 +195,13 @@ today):
          let expr = this.engine._getSymbolValue(this._id) ?? this;
          if (expr.operator === 'Unevaluated')
            expr = expr.evaluate(options) ?? this;
-+        // EXPERIMENT (#3, 2026-07-24): re-evaluate the stored value so free
-+        // symbols assigned *after* it was stored resolve at dereference time
-+        // (`let d = 3x^2+1; let x = 2; d` → 13, matching `N(d)`). Guards
-+        // mirror `N()`: number literals take the O(1) fast path; a value
-+        // mentioning this very symbol substitutes ONCE without recursing
-+        // (Tycho item 46's self-reference guard).
 +        else if (!isNumber(expr) && !expr.symbols.includes(this._id))
 +          expr = expr.evaluate(options);
          return expr;
        }
      }
 ```
+
+Full suite green with it applied (zero churn), which is how we learned that
+nothing in the corpus depends on staleness — and nothing covered the capture
+bug either, a gap the executable spec now closes.
