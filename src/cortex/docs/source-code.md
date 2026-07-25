@@ -2,7 +2,7 @@
 title: Cortex Source Code
 sidebar_label: Source Code
 slug: /cortex/source-code/
-description: "Cortex Source Code"
+description: "Source code requirements for Cortex: UTF-8 decoding, Unicode NFC normalization of identifiers, and how line terminators and whitespace are treated."
 hide_title: true
 date: Last Modified
 ---

@@ -2,7 +2,7 @@
 title: Cortex Control Flow
 sidebar_label: Control Flow
 slug: /cortex/control-flow/
-description: "Cortex Control Flow"
+description: "Control flow in Cortex: function definitions in math and block style, conditionals, pattern matching and loops, and the MathJSON each form lowers to."
 hide_title: true
 date: Last Modified
 ---

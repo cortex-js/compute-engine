@@ -2,7 +2,7 @@
 title: Cortex Syntax
 sidebar_label: Syntax
 slug: /cortex/syntax/
-description: "Cortex Syntax"
+description: "The complete Cortex grammar: the notation used for productions, and the syntactic categories covering expressions, statements, literals and operators."
 hide_title: true
 date: Last Modified
 ---

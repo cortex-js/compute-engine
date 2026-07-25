@@ -2,7 +2,7 @@
 title: Cortex Naming
 sidebar_label: Naming Conventions
 slug: /cortex/naming/
-description: "Cortex Naming"
+description: "Naming conventions in Cortex: capitalized identifiers denote library and engine operators, lowercase identifiers denote user-defined variables and functions."
 hide_title: true
 date: Last Modified
 ---

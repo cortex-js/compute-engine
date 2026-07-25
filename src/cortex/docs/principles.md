@@ -2,7 +2,7 @@
 title: Cortex Principles
 sidebar_label: Principles
 slug: /cortex/principles/
-description: "Cortex Principles"
+description: "The principles behind Cortex: an expression-oriented language where conditionals, matches and blocks produce values, while declarations remain statements."
 hide_title: true
 date: Last Modified
 ---

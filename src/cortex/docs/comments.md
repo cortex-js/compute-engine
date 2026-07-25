@@ -2,7 +2,7 @@
 title: Cortex Comments
 sidebar_label: Comments
 slug: /cortex/comments/
-description: "Cortex Comments"
+description: "Line and nestable block comments in Cortex, documentation comments, and why comments are lossy — they do not survive the round trip through MathJSON."
 hide_title: true
 date: Last Modified
 ---

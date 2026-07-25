@@ -2,7 +2,7 @@
 title: Cortex Declarations
 sidebar_label: Declarations
 slug: /cortex/declarations/
-description: "Cortex Declarations"
+description: "Declare symbols in Cortex: let for mutable bindings, const for immutable ones, with optional type annotations and lexical scoping rules."
 hide_title: true
 date: Last Modified
 ---

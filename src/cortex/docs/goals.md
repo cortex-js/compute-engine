@@ -2,7 +2,7 @@
 title: Cortex Goals
 sidebar_label: Goals
 slug: /cortex/goals/
-description: "Cortex Goals"
+description: "The goals guiding Cortex's design: ergonomic code that is easy to read and write, and familiarity with existing scientific and programming notation."
 hide_title: true
 date: Last Modified
 ---

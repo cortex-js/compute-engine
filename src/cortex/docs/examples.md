@@ -2,7 +2,7 @@
 title: Cortex Examples
 sidebar_label: Examples
 slug: /cortex/examples/
-description: "Cortex Examples"
+description: "Complete, executable Cortex programs — from simple iteration to symbolic computation — each one verified by the documentation test suite."
 hide_title: true
 date: Last Modified
 ---

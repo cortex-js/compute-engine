@@ -2,7 +2,7 @@
 title: Cortex Operators
 sidebar_label: Operators
 slug: /cortex/operators/
-description: "Cortex Operators"
+description: "Operators in Cortex: infix, prefix and postfix forms, precedence and associativity, and the whitespace rules that govern how operands are parsed."
 hide_title: true
 date: Last Modified
 ---

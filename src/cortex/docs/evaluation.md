@@ -2,7 +2,7 @@
 title: Cortex Evaluation
 sidebar_label: Evaluation
 slug: /cortex/evaluation/
-description: "Cortex Evaluation"
+description: "How executeCortex evaluates a Cortex program: top-level statements run sequentially in the engine's current scope, and the last statement's value is the result."
 hide_title: true
 date: Last Modified
 ---

@@ -2,7 +2,7 @@
 title: Cortex Pragmas
 sidebar_label: Pragmas
 slug: /cortex/pragmas/
-description: "Cortex Pragmas"
+description: "Pragmas in Cortex: source forms the parser evaluates, injecting environment variables and other host values into MathJSON before the program runs."
 hide_title: true
 date: Last Modified
 ---

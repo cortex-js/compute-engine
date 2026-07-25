@@ -2,7 +2,7 @@
 title: Cortex Types
 sidebar_label: Types
 slug: /cortex/types/
-description: "Cortex Types"
+description: "Cortex has no type system of its own — it reuses the Compute Engine's type language, the same syntax accepted by ce.declare(\"f\", \"(real) -> real\")."
 hide_title: true
 date: Last Modified
 ---

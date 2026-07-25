@@ -2,7 +2,7 @@
 title: Cortex Literals
 sidebar_label: Literals
 slug: /cortex/literals/
-description: "Cortex Literals"
+description: "Literal forms in Cortex: symbols following the MathJSON Unicode UAX31 profile, numbers, strings and collections, and the MathJSON each produces."
 hide_title: true
 date: Last Modified
 ---
