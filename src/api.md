@@ -130,6 +130,18 @@ readonly Nothing: Expression;
 
 <MemberCard>
 
+##### ExpressionComputeEngine.Missing
+
+```ts
+readonly Missing: Expression;
+```
+
+The `Missing` symbol: an absent value whose position is preserved.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.Zero
 
 ```ts
@@ -1110,6 +1122,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`ValueType`](#valuetype)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `inferredSignature`: `boolean`;
   `type`: (`ops`, `options`) => 
      \| `string`
      \| [`AlgebraicType`](#algebraictype)
@@ -1191,6 +1204,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`ValueType`](#valuetype)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `inferredSignature`: `boolean`;
   `type`: (`ops`, `options`) => 
      \| `string`
      \| [`AlgebraicType`](#algebraictype)
@@ -1305,6 +1319,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ValueType`](#valuetype)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `inferredSignature`: `boolean`;
   `type`: (`ops`, `options`) => 
      \| `string`
      \| [`AlgebraicType`](#algebraictype)
@@ -1386,6 +1401,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ValueType`](#valuetype)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `inferredSignature`: `boolean`;
   `type`: (`ops`, `options`) => 
      \| `string`
      \| [`AlgebraicType`](#algebraictype)
@@ -3126,6 +3142,7 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   signature:   | Type
      | TypeString
      | BoxedType;
+  inferredSignature: boolean;
   type: (ops, options) => 
      | Type
      | TypeString
@@ -3166,6 +3183,33 @@ return type.
 
 If a `type` handler is provided, the return type of the function should
 be a subtype of the return type in the signature.
+
+#### OperatorDefinition.inferredSignature?
+
+```ts
+optional inferredSignature?: boolean;
+```
+
+If `true`, the `signature` is a starting point to be refined, not a
+contract: assigning a function literal to this operator narrows the
+signature from the literal's body, and calls type from the narrowed
+signature.
+
+Declaring a `signature` normally pins it (`inferredSignature: false`),
+which is what you want for a fixed API. Set this to `true` to vouch
+that a name is an operator — so `f(x)` parses as an application rather
+than a multiplication — while leaving its types to be inferred from the
+body assigned later:
+
+```js
+ce.declare('q', { signature: '(unknown) -> unknown', inferredSignature: true });
+ce.assign('q', ce.parse('t \\mapsto 2t+1'));
+// signature is now `(unknown) -> finite_number`, so `q(x) < y` types
+// `boolean` and compiles, while `q(L) < y` over a list `L` still types
+// `list<boolean>` and fails closed.
+```
+
+A declaration that omits `signature` entirely behaves the same way.
 
 #### OperatorDefinition.type?
 
@@ -3996,6 +4040,8 @@ type OperatorDefinitionFlags = {
   lazy: boolean;
   scoped: boolean;
   broadcastable: boolean;
+  missingBehavior: "reject" | "propagate" | "handle";
+  missingStrip: "all" | number[];
   associative: boolean;
   commutative: boolean;
   commutativeOrder: ((a, b) => number) | undefined;
@@ -4073,6 +4119,22 @@ signature: BoxedType;
 ```
 
 The type of the arguments and return value of this function
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.resolvedMissingBehavior
+
+```ts
+readonly resolvedMissingBehavior: "reject" | "propagate" | "handle" | "pass-through";
+```
+
+The *resolved* missing-value behavior (§3.A of the missing-value typing
+design): the declared [missingBehavior](#missingbehavior) when present, otherwise
+`'propagate'` for a declared all-numeric signature and `'pass-through'`
+for everything else. Recomputed from the current signature — never cached
+across a signature mutation.
 
 </MemberCard>
 
@@ -4215,6 +4277,24 @@ optional evalDimension?: (ops, options) => Expression;
 ```ts
 optional compile?: OperatorCompileHandler;
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.stripsMissingAt()
+
+```ts
+stripsMissingAt(i): boolean
+```
+
+True if a `missing` arm is stripped from parameter position `i` before
+validation (§3.A). Only `propagate`/`handle` operators strip; `missingStrip`
+selects the positions.
+
+####### i
+
+`number`
 
 </MemberCard>
 
@@ -7409,6 +7489,18 @@ readonly Nothing: Expression;
 
 <MemberCard>
 
+##### IComputeEngine.Missing
+
+```ts
+readonly Missing: Expression;
+```
+
+The `Missing` symbol: an absent value whose position is preserved.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.Zero
 
 ```ts
@@ -8389,6 +8481,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`ValueType`](#valuetype)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `inferredSignature`: `boolean`;
   `type`: (`ops`, `options`) => 
      \| `string`
      \| [`AlgebraicType`](#algebraictype)
@@ -8470,6 +8563,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`ValueType`](#valuetype)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `inferredSignature`: `boolean`;
   `type`: (`ops`, `options`) => 
      \| `string`
      \| [`AlgebraicType`](#algebraictype)
@@ -8584,6 +8678,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ValueType`](#valuetype)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `inferredSignature`: `boolean`;
   `type`: (`ops`, `options`) => 
      \| `string`
      \| [`AlgebraicType`](#algebraictype)
@@ -8665,6 +8760,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`ValueType`](#valuetype)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `inferredSignature`: `boolean`;
   `type`: (`ops`, `options`) => 
      \| `string`
      \| [`AlgebraicType`](#algebraictype)
@@ -13586,6 +13682,7 @@ type PrimitiveType =
   | "unknown"
   | "error"
   | "nothing"
+  | "missing"
   | "never"
   | "any";
 ```
@@ -13596,6 +13693,8 @@ A primitive type is a simple type that represents a concrete value.
    - `expression`
    - `error`: an invalid value, such as `["Error", "missing"]`
    - `nothing`: the type of the `Nothing` symbol, the unit type
+   - `missing`: the type of the `Missing` symbol, the unit type of an
+      absent-but-positioned value (Julia `missing`, R `NA`)
    - `never`: the bottom type
    - `unknown`: a value whose type is not known
 
