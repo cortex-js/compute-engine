@@ -1,10 +1,12 @@
+## [Unreleased]
+
 ## 0.95.0 _2026-07-25_
 
 ### Breaking Changes
 
-- **The random family is redesigned around block-scoped seeding.** Seeding
-  moves out of argument lists and engine state entirely: there is no seed
-  argument anywhere in the family, and no ambient seed to set. A
+- **The random family is redesigned around block-scoped seeding.** Seeding moves
+  out of argument lists and engine state entirely: there is no seed argument
+  anywhere in the family, and no ambient seed to set. A
   `WithRandomSeed(seed, body)` frame makes every draw inside it — including
   draws in user-function calls (dynamic scoping) and in compiled code —
   deterministic and replayable, while draws outside any frame are live.
@@ -14,36 +16,36 @@
   // → two DIFFERENT values, and the same two values on every re-evaluation
   ```
 
-  The *n*-th draw of a frame is `hash(seed, n)` — PCG3D, a pure function of
-  the seed and the draw index, computed identically by the interpreter, the
+  The _n_-th draw of a frame is `hash(seed, n)` — PCG3D, a pure function of the
+  seed and the draw index, computed identically by the interpreter, the
   JavaScript target, and (as f32) the GPU targets. Draws are IEEE float64
   regardless of the engine's precision mode, and the seed→stream mapping is a
   **cross-version contract** pinned by published test vectors. Frames nest
   (innermost wins) with independent per-frame counters, so one document cell's
   frame cannot perturb another's. See
   [Random Numbers](/compute-engine/reference/arithmetic/#random-numbers) (and
-  `docs/RANDOMNESS-MODEL.md` in the repository) for the full contract,
-  including the draw-consumption table and the rule that **only evaluation
-  consumes draw indices** (an untaken branch, an unmaterialized lazy view, or
-  a canonicalized-away wrapper consumes none).
+  `docs/RANDOMNESS-MODEL.md` in the repository) for the full contract, including
+  the draw-consumption table and the rule that **only evaluation consumes draw
+  indices** (an untaken branch, an unmaterialized lazy view, or a
+  canonicalized-away wrapper consumes none).
 
   The surface changes:
 
   - **`Random` is domain-only.** `Random()` draws a real in [0, 1);
-    `Random(Interval(a, b))` a real in [a, b); `Random(Range(…))` an element
-    of the (normalized, inclusive) range; `Random(xs)` an element of a finite
-    collection. The old `Random(seed)`/`Random(m, n)` forms — where the
-    first argument meant a *seed* or a *bound* depending on its numeric type
-    — are rejected by the signature.
+    `Random(Interval(a, b))` a real in [a, b); `Random(Range(…))` an element of
+    the (normalized, inclusive) range; `Random(xs)` an element of a finite
+    collection. The old `Random(seed)`/`Random(m, n)` forms — where the first
+    argument meant a _seed_ or a _bound_ depending on its numeric type — are
+    rejected by the signature.
   - **`Sample` → `RandomSample`, `Shuffle` → `RandomShuffle`** — renamed,
-    seedless. `RandomSample`'s domain must be an indexed collection (a `Set`
-    or an `Interval` is now invalid), and `k < 0` or `k > n` is now an
+    seedless. `RandomSample`'s domain must be an indexed collection (a `Set` or
+    an `Interval` is now invalid), and `k < 0` or `k > n` is now an
     `out-of-range` error rather than `undefined`. Without-replacement remains
-    over *positions*, not values: sampling a multiset can repeat a value.
-  - **`RandomInteger`, `RandomList`, and `RandomSeed` are removed**, along
-    with the **`ce.randomSeed`** property. For one release, evaluating a
-    removed head throws an `operator-removed` error naming its replacement,
-    and `ce.randomSeed` is a throwing accessor — nothing fails silently.
+    over _positions_, not values: sampling a multiset can repeat a value.
+  - **`RandomInteger`, `RandomList`, and `RandomSeed` are removed**, along with
+    the **`ce.randomSeed`** property. For one release, evaluating a removed head
+    throws an `operator-removed` error naming its replacement, and
+    `ce.randomSeed` is a throwing accessor — nothing fails silently.
 
   Migration: `Random(seed)` → `WithRandomSeed(seed, Random())`;
   `Random(n)`/`Random(m, n)` → `Random(Range(0, n-1))`/`Random(Range(m, n-1))`
@@ -52,25 +54,23 @@
   `RandomChoice(Interval(0, 1), n)`, framed if seeded;
   `Shuffle(xs[, seed])`/`Sample(xs, k[, seed])` →
   `RandomShuffle(xs)`/`RandomSample(xs, k)`, framed if seeded;
-  `RandomSeed(s)`/`ce.randomSeed = s` → `WithRandomSeed(s, …)` around the
-  work.
+  `RandomSeed(s)`/`ce.randomSeed = s` → `WithRandomSeed(s, …)` around the work.
 
 ### New Features
 
 - **`RandomChoice(domain, k)`** — `k` independent draws **with** replacement,
-  the twin of `RandomSample` (without replacement). The domain may be a
-  bounded `Interval`, a `Range`, or any finite collection, and is never
-  materialized: `RandomChoice(Range(1, 10^9), 5)` is O(k). The count is typed
-  `number` (a computed count need not be pre-rounded; it is rounded on
-  evaluation), and `k` may exceed the domain size — that is what replacement
-  means.
+  the twin of `RandomSample` (without replacement). The domain may be a bounded
+  `Interval`, a `Range`, or any finite collection, and is never materialized:
+  `RandomChoice(Range(1, 10^9), 5)` is O(k). The count is typed `number` (a
+  computed count need not be pre-rounded; it is rounded on evaluation), and `k`
+  may exceed the domain size — that is what replacement means.
 
-- **Random draws now compile — including inside auto-compiled `Map` bodies
-  and in shaders.** Every compiled draw goes through the same engine primitive
-  as the interpreter, deciding framed-vs-unframed at **call time**, so a
-  function compiled outside any frame is deterministic when later called
-  inside one, bit-identical to the interpreter. On the GPU, `WithRandomSeed`
-  frames compile lexically (per-invocation counters): per-pixel seeding is
+- **Random draws now compile — including inside auto-compiled `Map` bodies and
+  in shaders.** Every compiled draw goes through the same engine primitive as
+  the interpreter, deciding framed-vs-unframed at **call time**, so a function
+  compiled outside any frame is deterministic when later called inside one,
+  bit-identical to the interpreter. On the GPU, `WithRandomSeed` frames compile
+  lexically (per-invocation counters): per-pixel seeding is
   `WithRandomSeed(perPixelSeed, Random())`. Unsupported forms fail closed at
   compile time rather than drawing silently.
 
@@ -119,24 +119,23 @@
 
 - **`Sample` materialized its whole source to draw a few elements.**
   `Sample(Range(1, 1000000), 3)` allocated a million boxed numbers and ran a
-  full Fisher-Yates (~300 ms) to return three; large sources were an
-  uncatchable OOM. `RandomSample` now runs a sparse Fisher-Yates over the
-  index space — O(k) time and memory — and `RandomShuffle` refuses sources
-  past the element cap instead of exhausting the heap.
+  full Fisher-Yates (~300 ms) to return three; large sources were an uncatchable
+  OOM. `RandomSample` now runs a sparse Fisher-Yates over the index space — O(k)
+  time and memory — and `RandomShuffle` refuses sources past the element cap
+  instead of exhausting the heap.
 
-- **Compiled random draws bypassed the engine's stream.** A compiled
-  `Random()` emitted a bare `Math.random()`, so a compiled `Map` silently
-  stopped being reproducible under a seed. Compiled and interpreted draws now
-  share one code path (and the auto-compile gate that excluded impure bodies
-  from `Map` compilation is gone — per-sample-point draws stay in the hot
-  path).
+- **Compiled random draws bypassed the engine's stream.** A compiled `Random()`
+  emitted a bare `Math.random()`, so a compiled `Map` silently stopped being
+  reproducible under a seed. Compiled and interpreted draws now share one code
+  path (and the auto-compile gate that excluded impure bodies from `Map`
+  compilation is gone — per-sample-point draws stay in the hot path).
 
 - **`compileShader` emitted shaders that referenced undefined helpers.** A
-  shader whose body used any `_gpu_*` helper (`Gamma`, the fractal helpers,
-  and now the random draw) compiled in CE but failed at GPU shader-compile
-  time, because the helper preamble was never spliced into the emitted source.
-  `compileShader` now derives the preamble from the compiled body and inserts
-  it ahead of the entry point, on both GLSL and WGSL.
+  shader whose body used any `_gpu_*` helper (`Gamma`, the fractal helpers, and
+  now the random draw) compiled in CE but failed at GPU shader-compile time,
+  because the helper preamble was never spliced into the emitted source.
+  `compileShader` now derives the preamble from the compiled body and inserts it
+  ahead of the entry point, on both GLSL and WGSL.
 
 - **A function signature nested in a union or an intersection lost its
   parentheses when serialized**, and re-parsed as a structurally different type
@@ -190,8 +189,8 @@
 ### Breaking Changes
 
 - **`Nothing` now erases inside collections, as it already did inside operator
-  argument lists.** `Nothing` is the ERASURE marker — an empty-sequence splice
-  — so a `Nothing` element is spliced out of a `List`, `Set` or `Tuple` literal
+  argument lists.** `Nothing` is the ERASURE marker — an empty-sequence splice —
+  so a `Nothing` element is spliced out of a `List`, `Set` or `Tuple` literal
   instead of being retained. Length, arity, type and indexing all follow:
 
   ```js
@@ -202,9 +201,9 @@
   ```
 
   A key–value pair tuple is a NON-erasing position, so a dictionary/record entry
-  whose value is `Nothing` is dropped as a whole entry, but a caller that needs a
-  fixed-arity positional pair whose slot may hold an absent value must build it
-  with `ce._fn('Tuple', …)` and use `Missing` (below) for the hole. This also
+  whose value is `Nothing` is dropped as a whole entry, but a caller that needs
+  a fixed-arity positional pair whose slot may hold an absent value must build
+  it with `ce._fn('Tuple', …)` and use `Missing` (below) for the hole. This also
   applies to lazy iteration: an element that _evaluates_ to `Nothing` is dropped
   (`Map(xs, _ ↦ Nothing)` is the empty collection — the `mapMaybe` idiom).
 
@@ -217,8 +216,8 @@
 
   Absence is **domain-normalized at value construction**: absence flowing
   through an operator into a NUMERIC result cell becomes `NaN` (the numeric
-  absent element), while a non-numeric result cell keeps `Missing`. So a
-  numeric operator ABSORBS a `Missing` operand into `NaN` rather than carrying a
+  absent element), while a non-numeric result cell keeps `Missing`. So a numeric
+  operator ABSORBS a `Missing` operand into `NaN` rather than carrying a
   `missing` arm:
 
   ```js
@@ -237,10 +236,10 @@
   ce.box(['At', ['List', 'a', 'b'], 9]).evaluate(); // → Missing (non-numeric)
   ```
 
-  **Gather is now length-preserving** — `At([a, b], [1, 9, 2])` is `[a, hole, b]`
-  (length 3), where the baseline dropped the out-of-range entry — and a **boolean
-  mask whose length differs from the collection is now an error**, where the
-  baseline silently applied the prefix.
+  **Gather is now length-preserving** — `At([a, b], [1, 9, 2])` is
+  `[a, hole, b]` (length 3), where the baseline dropped the out-of-range entry —
+  and a **boolean mask whose length differs from the collection is now an
+  error**, where the baseline silently applied the prefix.
 
 - **The 15 data-consuming aggregates return `NaN` on an absent datum or empty
   input.** `Mean`, `Variance`, `PopulationVariance`, `StandardDeviation`,
@@ -280,31 +279,31 @@
   ce.box(['Equal', 2, 2]).evaluate(); // → True             (unchanged)
   ```
 
-  Absence for **discharge** (`IsMissing`, `Coalesce`) and **aggregates**
-  (`Max`, `Mean`, …) is unaffected — a `NaN` is still absent there
+  Absence for **discharge** (`IsMissing`, `Coalesce`) and **aggregates** (`Max`,
+  `Mean`, …) is unaffected — a `NaN` is still absent there
   (`IsMissing(NaN) = True`, `Coalesce(NaN, d) = d`, `Max(1, NaN, 3) = NaN`).
   Broadcast comparisons apply the rule per cell. Because `NaN` follows IEEE,
   **compiled and interpreted comparisons now agree by construction** on numeric
   operands (plain `==` is the IEEE semantics — no guard is emitted, and
   `NaN == NaN` compiles to `false`). A **numeric-domain** `missing` arm
   (`number | missing`) does not widen a comparison's result type — that slot's
-  absence value is `NaN`, so the result is a plain `boolean`, a `Missing`
-  value read through such a slot compares as `NaN` (IEEE), and the comparison
+  absence value is `NaN`, so the result is a plain `boolean`, a `Missing` value
+  read through such a slot compares as `NaN` (IEEE), and the comparison
   **compiles on float-only targets (GLSL/WGSL)**. A `missing`-arm operand over
-  an object domain (e.g. `string | missing`) still types `boolean | missing`
-  and lowers via the guarded form
-  (`isAbsent(a) || isAbsent(b) ? null : a == b`) so a `Missing` becomes the
-  target null. A scalar `If`/`Which` condition that evaluates to **`Missing`**
-  yields a catchable **error expression** (`The condition is absent…`) rather
-  than crashing `evaluate()` — absence is a runtime data state, so it must be
-  renderable and catchable; discharge with `Coalesce`/`IsMissing` to branch on
-  possibly-absent data. (A condition that is not boolean at all, e.g.
-  `If(3, …)`, keeps the existing spell-check throw.) A `NaN`-comparison
-  condition yields a plain boolean (IEEE) and branches normally.
+  an object domain (e.g. `string | missing`) still types `boolean | missing` and
+  lowers via the guarded form (`isAbsent(a) || isAbsent(b) ? null : a == b`) so
+  a `Missing` becomes the target null. A scalar `If`/`Which` condition that
+  evaluates to **`Missing`** yields a catchable **error expression**
+  (`The condition is absent…`) rather than crashing `evaluate()` — absence is a
+  runtime data state, so it must be renderable and catchable; discharge with
+  `Coalesce`/`IsMissing` to branch on possibly-absent data. (A condition that is
+  not boolean at all, e.g. `If(3, …)`, keeps the existing spell-check throw.) A
+  `NaN`-comparison condition yields a plain boolean (IEEE) and branches
+  normally.
 
-- **Compiled `Max([])` / `Min([])` now return `NaN`, matching the
-  interpreter** (previously `-Infinity` / `+Infinity` from the identity-seeded
-  reduce). Non-empty folds are unchanged.
+- **Compiled `Max([])` / `Min([])` now return `NaN`, matching the interpreter**
+  (previously `-Infinity` / `+Infinity` from the identity-seeded reduce).
+  Non-empty folds are unchanged.
 
 ### New Features
 
@@ -314,52 +313,51 @@
   envelope (`{ ok, diagnostics }` with severities, codes, messages, 0-based
   source offsets, 1-based line/column, and fix-its). The same structured
   diagnostics are available during evaluation with `--diagnostics json`.
-- **`cortex doc` — library documentation from the terminal.**
-  `cortex doc Sin` shows a definition's kind, signature or type, description,
-  keywords, and (for constants) value; a non-name argument searches the
-  library by identifier, description, curated keywords, and LaTeX commands
-  (`cortex doc greatest common divisor` → `GCD`, …). `--limit <n>` controls
-  the number of matches and `--json` emits a structured `{ query, matches }`
+- **`cortex doc` — library documentation from the terminal.** `cortex doc Sin`
+  shows a definition's kind, signature or type, description, keywords, and (for
+  constants) value; a non-name argument searches the library by identifier,
+  description, curated keywords, and LaTeX commands
+  (`cortex doc greatest common divisor` → `GCD`, …). `--limit <n>` controls the
+  number of matches and `--json` emits a structured `{ query, matches }`
   envelope.
 - **`Cortex for AI Agents` language card.** A condensed, machine-verified
   reference for LLMs and coding agents writing Cortex (`/cortex/for-agents/`):
-  core semantics, an operator-precedence summary, a table of
-  Python/JavaScript reflexes that don't transfer, and verified idioms. Every
-  example on the page is executed by the documentation test suite, so the
-  card cannot drift from the implementation.
+  core semantics, an operator-precedence summary, a table of Python/JavaScript
+  reflexes that don't transfer, and verified idioms. Every example on the page
+  is executed by the documentation test suite, so the card cannot drift from the
+  implementation.
 
-- **`cortex mcp` — a Model Context Protocol server for Cortex.** Starts an
-  MCP server on stdio (the default) or native Streamable HTTP, giving AI
-  agents structured access to the same operations as the CLI: an `evaluate`
-  tool (each call runs a complete, self-contained program in a fresh session
-  and returns the value as display text, Cortex source and MathJSON, plus
-  diagnostics), `check`, `doc`, `parse` and `serialize` tools, and the
-  `Cortex for AI Agents` language card as the
-  `cortex://docs/for-agents` resource. Register the stdio transport with,
-  e.g., `claude mcp add cortex -- npx -y @cortex-js/compute-engine mcp`, or
-  start the URL endpoint with
-  `cortex mcp --transport streamable-http`. The protocol implementation is
-  self-contained: the package gains no new dependencies.
+- **`cortex mcp` — a Model Context Protocol server for Cortex.** Starts an MCP
+  server on stdio (the default) or native Streamable HTTP, giving AI agents
+  structured access to the same operations as the CLI: an `evaluate` tool (each
+  call runs a complete, self-contained program in a fresh session and returns
+  the value as display text, Cortex source and MathJSON, plus diagnostics),
+  `check`, `doc`, `parse` and `serialize` tools, and the `Cortex for AI Agents`
+  language card as the `cortex://docs/for-agents` resource. Register the stdio
+  transport with, e.g.,
+  `claude mcp add cortex -- npx -y @cortex-js/compute-engine mcp`, or start the
+  URL endpoint with `cortex mcp --transport streamable-http`. The protocol
+  implementation is self-contained: the package gains no new dependencies.
 
-- **Spread arguments — `f(...t)` splices a tuple into a call's arguments.**
-  New Cortex prefix syntax `...` (call argument lists only) and engine `Spread`
+- **Spread arguments — `f(...t)` splices a tuple into a call's arguments.** New
+  Cortex prefix syntax `...` (call argument lists only) and engine `Spread`
   marker: the elements of a tuple become ordinary positional arguments, so a
   point can be fed to a component function without manual indexing —
-  `F(p) = (a(...p), b(...p), c(...p))` instead of `a(p[1], p[2], p[3])`.
-  Several spreads splice in order (`g(...p, ...q)`), variadic built-ins accept
-  them (`Max(...t)`), and the syntax round-trips through the Cortex
-  serializer. A literal tuple splices at canonicalization; a symbolic argument
-  defers — argument validation and the operator's canonical handler wait —
-  until evaluation resolves the tuple and re-validates the real arguments.
-  Tuples only: spreading a `List` or a scalar is an `incompatible-type` error,
-  and an unresolved argument leaves the call symbolic.
+  `F(p) = (a(...p), b(...p), c(...p))` instead of `a(p[1], p[2], p[3])`. Several
+  spreads splice in order (`g(...p, ...q)`), variadic built-ins accept them
+  (`Max(...t)`), and the syntax round-trips through the Cortex serializer. A
+  literal tuple splices at canonicalization; a symbolic argument defers —
+  argument validation and the operator's canonical handler wait — until
+  evaluation resolves the tuple and re-validates the real arguments. Tuples
+  only: spreading a `List` or a scalar is an `incompatible-type` error, and an
+  unresolved argument leaves the call symbolic.
 
   Spread also **compiles**, on every target: a literal tuple splices directly,
   and a tuple-typed argument (`p: tuple<number, number>`) is rewritten
   statically to positional accesses (`f(At(p,1), At(p,2))`). An argument whose
-  tuple arity is not statically known fails closed — a dynamic JS/Python
-  spread would silently mis-bind on an arity mismatch instead of erroring
-  like the interpreter.
+  tuple arity is not statically known fails closed — a dynamic JS/Python spread
+  would silently mis-bind on an arity mismatch instead of erroring like the
+  interpreter.
 
   ```js
   ce.box(['Add', ['Spread', ['Tuple', 1, 2, 3]]]).evaluate(); // → 6
@@ -378,24 +376,24 @@
   In **compiled** code, a destructuring declare with a literal tuple value
   desugars to per-leaf declares (each element bound once, in order); a
   non-literal value or a shape mismatch fails closed so the interpreter takes
-  over. (This also fixes a silent divergence: the pattern previously compiled
-  as a single `let _ = …`, and every pattern name read as NaN behind
+  over. (This also fixes a silent divergence: the pattern previously compiled as
+  a single `let _ = …`, and every pattern name read as NaN behind
   `success: true`.)
 
   ```js
   ce.box(['Declare', ['Tuple', 'x', 'y'], d]).evaluate(); // d = {value: (3, 4)}
   ```
 
-- **`IsMissing` and `Coalesce` — absence testing and discharge.**
-  `IsMissing(x)` is `True` when `x` is absent (the `Missing` symbol OR a `NaN`,
-  R’s `is.na`); `IsNaN` remains a NaN-specific test. `Coalesce(a, b, …)` returns
-  the first non-absent operand, evaluated left-to-right with short-circuit; if
-  every operand is absent it returns the last one verbatim. Both discharge
-  primitives work identically in the interpreter and compiled (JS/Python) — a
-  numeric hole (`NaN`) and an object hole (`Missing`/null) are handled
-  uniformly. On a target that cannot observe its absent element (a GPU shader,
-  where fast-math may not preserve `isnan`), `IsMissing`/`Coalesce` fail closed
-  with a compile error; propagation still works natively.
+- **`IsMissing` and `Coalesce` — absence testing and discharge.** `IsMissing(x)`
+  is `True` when `x` is absent (the `Missing` symbol OR a `NaN`, R’s `is.na`);
+  `IsNaN` remains a NaN-specific test. `Coalesce(a, b, …)` returns the first
+  non-absent operand, evaluated left-to-right with short-circuit; if every
+  operand is absent it returns the last one verbatim. Both discharge primitives
+  work identically in the interpreter and compiled (JS/Python) — a numeric hole
+  (`NaN`) and an object hole (`Missing`/null) are handled uniformly. On a target
+  that cannot observe its absent element (a GPU shader, where fast-math may not
+  preserve `isnan`), `IsMissing`/`Coalesce` fail closed with a compile error;
+  propagation still works natively.
 
   ```js
   ce.box(['Coalesce', ['At', ['List', 10, 20], 9], 0]).evaluate(); // → 0
@@ -426,33 +424,32 @@
 
 ### Improvements
 
-- **The Cortex serializer reconstructs `let`/`const` syntax.** A `Declare`
-  node now serializes back to its statement form — `let x = 5`,
-  `const c = 6.28`, `let x: real`, and destructuring patterns
-  `let (x, y) = p` — instead of the generic `Declare(x, {value -> 5})`
-  function spelling, so declarations round-trip source → MathJSON → source.
-  Shapes with no `let` spelling (a `holdUntil` attribute, a computed name)
-  keep the generic form.
+- **The Cortex serializer reconstructs `let`/`const` syntax.** A `Declare` node
+  now serializes back to its statement form — `let x = 5`, `const c = 6.28`,
+  `let x: real`, and destructuring patterns `let (x, y) = p` — instead of the
+  generic `Declare(x, {value -> 5})` function spelling, so declarations
+  round-trip source → MathJSON → source. Shapes with no `let` spelling (a
+  `holdUntil` attribute, a computed name) keep the generic form.
 
 - **Compiled comparisons and connectives look through provably-scalar user
-  functions.** A helper declared with an open signature (`(unknown) ->
-  unknown`, the shape that keeps list-broadcasting working) no longer makes a
-  scalar comparison uncompilable: `q(x) < y` with `q(t) = n·t+1` compiles when
-  every argument is scalar and the function's body provably maps scalar
-  parameters to a scalar result (arithmetic/transcendental operators,
-  scalar-typed captured symbols, and nested user helpers — analyzed
-  recursively, with self-recursion declining). A call whose argument may be a
-  collection (`q(L) < y`) still fails closed, so the sound half of the
-  0.93.0 rule is preserved — and unlike a `-> number` return annotation, the
-  look-through never mis-compiles the broadcast call. Element-wise compiled
-  comparisons over collections remain a separate roadmap item.
+  functions.** A helper declared with an open signature (`(unknown) -> unknown`,
+  the shape that keeps list-broadcasting working) no longer makes a scalar
+  comparison uncompilable: `q(x) < y` with `q(t) = n·t+1` compiles when every
+  argument is scalar and the function's body provably maps scalar parameters to
+  a scalar result (arithmetic/transcendental operators, scalar-typed captured
+  symbols, and nested user helpers — analyzed recursively, with self-recursion
+  declining). A call whose argument may be a collection (`q(L) < y`) still fails
+  closed, so the sound half of the 0.93.0 rule is preserved — and unlike a
+  `-> number` return annotation, the look-through never mis-compiles the
+  broadcast call. Element-wise compiled comparisons over collections remain a
+  separate roadmap item.
 
 - **`declare()` accepts `inferredSignature: true`, to vouch that a name is an
   operator without pinning its types.** Declaring a `signature` normally makes
   it a contract, so a wide placeholder such as `(unknown) -> unknown` keeps
   every call typed `unknown` even after a function literal is assigned. That is
   the right default for a fixed API, but not for a name that must be declared
-  *before* its body exists — most often so that `f(x)` parses as an application
+  _before_ its body exists — most often so that `f(x)` parses as an application
   rather than a multiplication:
 
   ```js
@@ -466,73 +463,71 @@
   The flag was already honored at run time and is now part of the
   `OperatorDefinition` type, so it no longer needs a cast. A declaration that
   omits `signature` entirely behaves the same way.
+
 - **An unapplied `Derivative(f)` now evaluates to a named-parameter function
-  literal.** `Derivative(Sin)` evaluates to `x ↦ cos(x)` (`["Function",
-  ["Cos","x"],"x"]`) instead of the hole-form `cos(_)`, which was typed
-  `finite_number` — so a stored derivative is now callable:
+  literal.** `Derivative(Sin)` evaluates to `x ↦ cos(x)`
+  (`["Function", ["Cos","x"],"x"]`) instead of the hole-form `cos(_)`, which was
+  typed `finite_number` — so a stored derivative is now callable:
   `let g = Derivative(f); g(2)` works instead of erroring with
   `incompatible-type`. Results with no closed form stay symbolic, and the
   multivariate mixed-partial form no longer throws
   `Function body must be a scoped Block expression` when applied.
 - **The Cortex CLI's `--json` output materializes finite lazy collections.**
-  `Range`, `Map`/`Filter` results, and loop-built `Join` chains now serialize
-  as their elements (`["List", 1, 2, …]`, up to 10,000) instead of their
+  `Range`, `Map`/`Filter` results, and loop-built `Join` chains now serialize as
+  their elements (`["List", 1, 2, …]`, up to 10,000) instead of their
   unevaluated recipe; infinite collections keep the structural form.
 - **Cortex trap lints and better "did you mean" suggestions.** Three common
-  cross-language reflexes that previously failed *silently* now produce an
+  cross-language reflexes that previously failed _silently_ now produce an
   advisory warning (the parse and value are unchanged): `=` inside a call
-  argument (`Solve(x^2 = 4, x)` is assignment, not an equation — use `==`),
-  a literal index `0` (indexing is 1-based; `xs[0]` is `NaN`), and a `//`
-  comment that reads as floor division (`7 // 2` is `7` followed by a
-  comment; use `Floor(a / b)`). Calling `print` (or `println`, `printf`,
-  `puts`, `echo`) now explains that a program's output is the value of its
-  last statement. The "did you mean" matcher gained a curated
-  cross-language tier: `split` → `StringSplit`, `push` → `Append`,
-  `ceiling` → `Ceil`. The agent language card gained a verified library
-  quick-roster, output-rendering notes (quoted booleans, list preview
-  elision), and binder-variable semantics for `D`/`Integrate`.
-- **`Pipe`/`Apply` reject or defer a non-function right operand more
-  sensibly.** `x |> f` (`Pipe`) now returns an `incompatible-type` error when
-  `f` is a number, string, or boolean literal (which can never be applied),
-  instead of staying silently inert; a symbol or unevaluated `f` still defers
-  (definitions may arrive later). `Apply` and `Pipe` no longer throw an
-  uncaught `Invalid function literal` when given a string function operand —
-  they decline gracefully. Applying a function-valued expression such as
-  `InverseFunction(f)` now stays symbolic (`Apply(InverseFunction(f), 2)`)
-  instead of misinterpreting it as a lambda body and substituting the argument
-  for `f`.
+  argument (`Solve(x^2 = 4, x)` is assignment, not an equation — use `==`), a
+  literal index `0` (indexing is 1-based; `xs[0]` is `NaN`), and a `//` comment
+  that reads as floor division (`7 // 2` is `7` followed by a comment; use
+  `Floor(a / b)`). Calling `print` (or `println`, `printf`, `puts`, `echo`) now
+  explains that a program's output is the value of its last statement. The "did
+  you mean" matcher gained a curated cross-language tier: `split` →
+  `StringSplit`, `push` → `Append`, `ceiling` → `Ceil`. The agent language card
+  gained a verified library quick-roster, output-rendering notes (quoted
+  booleans, list preview elision), and binder-variable semantics for
+  `D`/`Integrate`.
+- **`Pipe`/`Apply` reject or defer a non-function right operand more sensibly.**
+  `x |> f` (`Pipe`) now returns an `incompatible-type` error when `f` is a
+  number, string, or boolean literal (which can never be applied), instead of
+  staying silently inert; a symbol or unevaluated `f` still defers (definitions
+  may arrive later). `Apply` and `Pipe` no longer throw an uncaught
+  `Invalid function literal` when given a string function operand — they decline
+  gracefully. Applying a function-valued expression such as `InverseFunction(f)`
+  now stays symbolic (`Apply(InverseFunction(f), 2)`) instead of misinterpreting
+  it as a lambda body and substituting the argument for `f`.
 - **Rubi integrator: Euler-substitution lever for √(quadratic)-nested
   radicals.** The experimental Rubi integrator now closes nested radicals whose
   inner radical is a square root of a quadratic with a positive leading
   coefficient — e.g. `∫ 1/(√(x+√(x²+1))+1) dx` (Bondarenko #9) — via an Euler I
-  substitution
-  `t = √a·x + √Q` that rationalizes `√Q` and reduces the integrand to a form the
-  existing linear-radical machinery closes. This raises the Bondarenko benchmark
-  to CE+R/F 21/35.
-- **`simplify()` is value-blind for a symbol's sign and parity.**
-  `.simplify()` no longer reads an assigned symbol's *value* when applying a
-  sign- or parity-driven rewrite: with `w := 5`, `|w|.simplify()` now stays
-  `|w|` and `√(w²).simplify()` is `|w|` (previously both collapsed to `w`,
-  silently baking in `w ≥ 0` and evaluating wrong after a later `w := -3`).
-  Sign and parity are taken only from a symbol's declared type and in-scope
-  assumptions — so `assume(w > 0)` still licenses `|w| → w` — never from its
-  assigned value. `.evaluate()` and `.N()` are unchanged — they still substitute
-  the value.
+  substitution `t = √a·x + √Q` that rationalizes `√Q` and reduces the integrand
+  to a form the existing linear-radical machinery closes. This raises the
+  Bondarenko benchmark to CE+R/F 21/35.
+- **`simplify()` is value-blind for a symbol's sign and parity.** `.simplify()`
+  no longer reads an assigned symbol's _value_ when applying a sign- or
+  parity-driven rewrite: with `w := 5`, `|w|.simplify()` now stays `|w|` and
+  `√(w²).simplify()` is `|w|` (previously both collapsed to `w`, silently baking
+  in `w ≥ 0` and evaluating wrong after a later `w := -3`). Sign and parity are
+  taken only from a symbol's declared type and in-scope assumptions — so
+  `assume(w > 0)` still licenses `|w| → w` — never from its assigned value.
+  `.evaluate()` and `.N()` are unchanged — they still substitute the value.
 - **The `Simplify` operator now evaluates its argument before simplifying.**
   `Simplify(expr)` is now evaluate-then-simplify — the operator counterpart of
-  the `expr.evaluate().simplify()` recipe — so it computes handler-driven results
-  the value-blind `.simplify()` method never touches: `Simplify(Max(3, 5))` → `5`,
-  `Simplify(D(x²+ax, x))` → `a + 2x`, `Simplify(∫x² dx)` → `x³/3`. Because
-  evaluation substitutes assigned symbol values, the change is visible from
-  Cortex: `let x = 5; Simplify(x^2 + x)` now gives `30`. The other transformers
-  (`Expand`, `Factor`, `Together`, `Distribute`) are unchanged — they keep
-  reduce-not-evaluate.
+  the `expr.evaluate().simplify()` recipe — so it computes handler-driven
+  results the value-blind `.simplify()` method never touches:
+  `Simplify(Max(3, 5))` → `5`, `Simplify(D(x²+ax, x))` → `a + 2x`,
+  `Simplify(∫x² dx)` → `x³/3`. Because evaluation substitutes assigned symbol
+  values, the change is visible from Cortex: `let x = 5; Simplify(x^2 + x)` now
+  gives `30`. The other transformers (`Expand`, `Factor`, `Together`,
+  `Distribute`) are unchanged — they keep reduce-not-evaluate.
 - **The `.simplify()` method no longer evaluates structural operators.**
   `Determinant`, `Trace`, `Transpose` and `Length` are no longer reduced by the
   `.simplify()` method (an unreleased whitelist added earlier in this cycle):
-  the method is rule-driven and value-blind, and running an operator's `evaluate`
-  handler is `.evaluate()`'s job. Use `expr.evaluate()` (or the `Simplify`
-  operator, which now evaluates) to reduce them — e.g.
+  the method is rule-driven and value-blind, and running an operator's
+  `evaluate` handler is `.evaluate()`'s job. Use `expr.evaluate()` (or the
+  `Simplify` operator, which now evaluates) to reduce them — e.g.
   `Determinant([[a,b],[c,d]]).evaluate()` → `a·d − b·c`.
 
 ## 0.93.0 _2026-07-23_
@@ -729,51 +724,50 @@
 
 ### Bug Fixes
 
-- **`assume()` after `assign()` now records the assumption.** The predicate
-  was evaluated through the symbol's assigned value before the assumption
-  system saw it, so with `w := 5`, `assume(w > 0)` folded to `True`, returned
+- **`assume()` after `assign()` now records the assumption.** The predicate was
+  evaluated through the symbol's assigned value before the assumption system saw
+  it, so with `w := 5`, `assume(w > 0)` folded to `True`, returned
   `'tautology'`, and recorded **nothing** — the assumption was silently
   discarded on arrival (only the assume-before-assign order worked). Predicates
-  mentioning assigned symbols are now recorded *value-blind*, as facts about
-  the symbol: `assume(w > 0)` after `w := 5` returns `'ok'` and `|w|` then
+  mentioning assigned symbols are now recorded _value-blind_, as facts about the
+  symbol: `assume(w > 0)` after `w := 5` returns `'ok'` and `|w|` then
   simplifies to `w`. A predicate that contradicts the current value (e.g.
   `assume(w > 0)` with `w := -2`) still returns `'contradiction'` and is
   rejected. `'tautology'` now means tautological relative to types and existing
-  assumptions, never relative to an assigned value — re-asserting an equality
-  a symbol's value already satisfies returns `'ok'`, not `'tautology'`.
+  assumptions, never relative to an assigned value — re-asserting an equality a
+  symbol's value already satisfies returns `'ok'`, not `'tautology'`.
 
 - **`.N()` on a multi-limit `Integrate` no longer drops all but the first
   limit.** The numeric-approximation branch read only the first `Limits`
   operand, so `Integrate(f, Limits(x,0,3), Limits(y,0,2))` numericized as a
-  single-variable integral — `∫∫ 1` over `[0,3]×[0,2]` gave `3` (a wrong
-  value, not a decline) and a multivariate integrand gave `NaN`. Multiple
-  limits now perform iterated adaptive Gauss–Kronrod quadrature (Monte-Carlo
-  fallback per level, as for a single limit), following the Mathematica
-  iterator convention the symbolic path already used: the FIRST limit is the
-  OUTERMOST integral, so an inner bound may reference the outer variables —
-  `Integrate(1, Limits(x,0,1), Limits(y,0,x))` (the triangle) numericizes to
-  ½. A bound that references an inner integration variable or a foreign free
-  symbol declines (the integral stays inert) rather than integrating wrongly.
-  The same fix applies to `compile()`: a multi-limit integral that does not
-  close symbolically now compiles to nested quadrature calls — dependent
-  bounds included — where it previously truncated to the first limit.
+  single-variable integral — `∫∫ 1` over `[0,3]×[0,2]` gave `3` (a wrong value,
+  not a decline) and a multivariate integrand gave `NaN`. Multiple limits now
+  perform iterated adaptive Gauss–Kronrod quadrature (Monte-Carlo fallback per
+  level, as for a single limit), following the Mathematica iterator convention
+  the symbolic path already used: the FIRST limit is the OUTERMOST integral, so
+  an inner bound may reference the outer variables —
+  `Integrate(1, Limits(x,0,1), Limits(y,0,x))` (the triangle) numericizes to ½.
+  A bound that references an inner integration variable or a foreign free symbol
+  declines (the integral stays inert) rather than integrating wrongly. The same
+  fix applies to `compile()`: a multi-limit integral that does not close
+  symbolically now compiles to nested quadrature calls — dependent bounds
+  included — where it previously truncated to the first limit.
 
 - **`Transpose`/`ConjugateTranspose` report the transposed static type.** They
   had no type handler, so an unevaluated `Transpose(m)` typed as the generic
-  `value` and was rejected by matrix arithmetic: `Multiply(Transpose(J), J)`
-  for `J = JacobianMatrix(…)` — the Gram-matrix idiom JᵀJ — errored with
+  `value` and was rejected by matrix arithmetic: `Multiply(Transpose(J), J)` for
+  `J = JacobianMatrix(…)` — the Gram-matrix idiom JᵀJ — errored with
   `incompatible-type` unless `J` was evaluated first. Both now preserve the
   element type and swap the shape's axes (`matrix<T^(2x3)>` →
   `matrix<T^(3x2)>`).
 
 - **`simplify()` reaches trig identities inside a quotient.** Recursion into
-  `Divide` operands is deliberately withheld to preserve factored structure
-  for common-factor cancellation, but that also blocked operand-local trig
+  `Divide` operands is deliberately withheld to preserve factored structure for
+  common-factor cancellation, but that also blocked operand-local trig
   reductions: `(r·cosθ)/(r·sin²θ + r·cos²θ)` didn't simplify even though the
-  denominator alone reduces to `r`. Trig-bearing operands of a `Divide` now
-  get the full recursion (the same carve-out `Add`/`Multiply` already made),
-  so it simplifies to `cos(θ)`; factored-polynomial cancellation is
-  unaffected.
+  denominator alone reduces to `r`. Trig-bearing operands of a `Divide` now get
+  the full recursion (the same carve-out `Add`/`Multiply` already made), so it
+  simplifies to `cos(θ)`; factored-polynomial cancellation is unaffected.
 
 - **Value-resolution overreach in the lazy-operand fixes.** The machinery that
   lets `Solve`/`Simplify`/`JacobianMatrix` see through a held operand resolved
