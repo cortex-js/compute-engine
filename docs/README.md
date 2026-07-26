@@ -16,6 +16,8 @@ read the repository [`README.md`](../README.md).
 | Understand the overall architecture | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) |
 | Use free functions for common operations | This file (Free Functions section) |
 | Understand simplification behavior snapshots | [`SIMPLIFY.md`](./SIMPLIFY.md) |
+| Understand seeding, `Random` draws, and cross-target parity | [`RANDOMNESS-MODEL.md`](./RANDOMNESS-MODEL.md) |
+| Understand time budgets and cancellation | [`TIMEOUT-MODEL.md`](./TIMEOUT-MODEL.md) |
 | Review playground sample outcomes | [`PLAYGROUND.md`](./PLAYGROUND.md) |
 | Validate arguments in custom function definitions | [`FUNCTION-VALIDATION.md`](./FUNCTION-VALIDATION.md) |
 | Review internal architecture boundaries | [`architecture/README.md`](./architecture/README.md) |

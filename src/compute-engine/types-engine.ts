@@ -15,6 +15,7 @@ import type {
   NumericValueData,
 } from './numeric-value/types.js';
 import type { BigNum, Rational } from './numerics/types.js';
+import type { RandomSeedFrame } from './numerics/random.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type {
@@ -216,6 +217,12 @@ export interface IComputeEngine {
    */
   _deadlineFrame?: DeadlineFrame;
 
+  /** The innermost active `WithRandomSeed` frame (see
+   * `withRandomSeedFrame`), or `undefined` when random draws are live.
+   * @internal
+   */
+  _randomFrame?: RandomSeedFrame;
+
   /** Time remaining before _deadline
    * @internal
    */
@@ -289,17 +296,9 @@ export interface IComputeEngine {
 
   tolerance: number;
 
-  /** Seed controlling deterministic, reproducible randomness. `null` (default)
-   *  is non-deterministic. See the accessor on `ComputeEngine` for the full
-   *  semantics (stream reset on assignment, compile-time baking). */
-  randomSeed: number | string | null;
-
-  /** @internal Draw the next uniform in [0, 1) from the seeded stream (or
-   *  `Math.random()` when no seed is set). */
+  /** @internal Draw the next uniform in [0, 1) — from the innermost
+   *  `WithRandomSeed` frame when one is active, otherwise `Math.random()`. */
   _random(): number;
-
-  /** @internal The hashed numeric seed for compile-time baking, or `null`. */
-  _randomNumericSeed(): number | null;
 
   angularUnit: AngularUnit;
 

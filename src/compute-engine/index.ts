@@ -119,7 +119,7 @@ import './boxed-expression/serialize.js';
 import { SIMPLIFY_RULES } from './symbolic/simplify-rules.js';
 
 import { bigint } from './numerics/bigint.js';
-import { mulberry32, hashSeed } from './numerics/random.js';
+import { frameDraw, type RandomSeedFrame } from './numerics/random.js';
 import { isValidSymbol } from '../math-json/symbols.js';
 
 import { getFunctionProperties } from './function-properties/index.js';
@@ -356,13 +356,6 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   private _cost?: (expr: Expression) => number;
-
-  /** @internal Backing value for the `randomSeed` accessor. */
-  private _randomSeed: number | string | null = null;
-
-  /** @internal The seeded PRNG stream (mulberry32), or `undefined` when no
-   *  seed is set (non-deterministic `Math.random()` path). */
-  private _rng?: () => number;
 
   /** @internal Optional symbolic-integration provider consulted by the
    * `Integrate` evaluator before the built-in antiderivative. Registered by
@@ -1002,53 +995,34 @@ export class ComputeEngine implements IComputeEngine {
     this._numericConfiguration.setTolerance(val);
   }
 
-  /**
-   * The seed controlling deterministic, reproducible randomness for this
-   * engine.
-   *
-   * - `null` (default): `Random()` and `Random(n)` are non-deterministic
-   *   (backed by `Math.random()`).
-   * - a `number` or `string`: `Random()`/`Random(n)` draw from a per-engine
-   *   seeded PRNG stream (a `mulberry32` generator; a string seed is hashed to
-   *   an integer). The explicit `Random(seed)` overload keeps its own per-call
-   *   deterministic semantics and is unaffected.
-   *
-   * Assigning a seed **(re)initializes and resets** the stream: assigning the
-   * same seed again rewinds it, so two identical evaluation sequences
-   * reproduce the same draws. Assigning `null` returns to non-deterministic
-   * behavior.
-   *
-   * When a seed is set at **compile time**, each `Random` node in a compiled
-   * expression is **baked** to a deterministic value derived from the seed and
-   * the node's position, so every call of the compiled function returns the
-   * same value for that call site (matching a document-level "one draw per
-   * render" model). Distinct `Random` nodes get distinct values; recompiling
-   * the same expression with the same seed reproduces them.
-   *
-   * NON-GOAL: the stream is **not** bit-compatible with any external RNG (e.g.
-   * Desmos); it is only a well-distributed, reproducible sequence.
+  /** The innermost active `WithRandomSeed` frame, or `undefined` when draws
+   * are live. Swapped by `withRandomSeedFrame`, exactly like `_deadlineFrame`.
+   * @internal
    */
-  get randomSeed(): number | string | null {
-    return this._randomSeed;
+  get _randomFrame(): RandomSeedFrame | undefined {
+    return this._runtimeState.randomFrame;
   }
 
-  set randomSeed(seed: number | string | null) {
-    this._randomSeed = seed;
-    // (Re)initialize the stream. Assigning the same seed resets it, so an
-    // identical sequence of Random() evaluations reproduces.
-    this._rng = seed === null ? undefined : mulberry32(hashSeed(seed));
+  set _randomFrame(value: RandomSeedFrame | undefined) {
+    this._runtimeState.randomFrame = value;
   }
 
-  /** @internal Draw the next uniform in [0, 1) from the seeded stream when a
-   *  seed is set, otherwise from `Math.random()`. */
+  /** @internal Draw the next uniform in [0, 1).
+   *
+   * Inside a `WithRandomSeed` frame the draw is the counter-based
+   * `hash(seed, n)` of the innermost frame, and the frame's counter advances
+   * (u32, wrapping). Outside any frame the draw is LIVE (`Math.random()`):
+   * there is no ambient seed to set, so an unframed draw is
+   * non-deterministic by construction.
+   */
   _random(): number {
-    return this._rng ? this._rng() : Math.random();
-  }
-
-  /** @internal The numeric (hashed) seed used to bake `Random` nodes at
-   *  compile time, or `null` when no seed is set. */
-  _randomNumericSeed(): number | null {
-    return this._randomSeed === null ? null : hashSeed(this._randomSeed);
+    const frame = this._runtimeState.randomFrame;
+    if (frame !== undefined) {
+      const n = frame.next >>> 0;
+      frame.next = (frame.next + 1) >>> 0;
+      return frameDraw(frame.seedLo, frame.seedHi, n);
+    }
+    return Math.random();
   }
 
   /** Replace a number that is close to 0 with the exact integer 0.
@@ -2596,6 +2570,35 @@ export class ComputeEngine implements IComputeEngine {
     forgetImpl(this, symbol);
   }
 }
+
+//
+// `ce.randomSeed` — ACCESSOR TOMBSTONE, for one release.
+//
+// The property is removed from the TypeScript surface (`IComputeEngine` in
+// `types-engine.ts`), which is loud for type-checked embedders. It is NOT
+// loud for a plain-JS caller: assigning a removed property on an extensible
+// object succeeds silently, and randomness quietly stops being seeded —
+// exactly the silent failure class the operator tombstones exist to prevent
+// (`docs/plans/2026-07-25-random-signature-redesign.md` §9).
+//
+// Defined here rather than as a class member so it stays off the TS surface
+// while remaining present at runtime. Delete next cycle.
+//
+Object.defineProperty(ComputeEngine.prototype, 'randomSeed', {
+  configurable: true,
+  get(): never {
+    throw new Error(
+      'operator-removed: `ce.randomSeed` has been removed — use ' +
+        '`WithRandomSeed(seed, body)` to scope a seed to an expression'
+    );
+  },
+  set(_value: unknown): never {
+    throw new Error(
+      'operator-removed: `ce.randomSeed` has been removed — use ' +
+        '`WithRandomSeed(seed, body)` to scope a seed to an expression'
+    );
+  },
+});
 
 // Register a factory with the free-functions module so it can lazily
 // instantiate a default engine without importing back from this file.

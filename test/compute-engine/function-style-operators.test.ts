@@ -15,9 +15,9 @@ describe('Function-style aliases for existing operators', () => {
     expect(expr.evaluate().re).toBeCloseTo(5 / 3, 6);
   });
 
-  test('\\operatorname{shuffle}(L) parses to Shuffle', () => {
+  test('\\operatorname{shuffle}(L) parses to RandomShuffle', () => {
     const expr = ce.parse('\\operatorname{shuffle}([1, 2, 3])');
-    expect(expr.operator).toBe('Shuffle');
+    expect(expr.operator).toBe('RandomShuffle');
     const out = expr.evaluate();
     expect(out.operator).toBe('List');
     expect(out.ops!.length).toBe(3);

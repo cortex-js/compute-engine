@@ -2,271 +2,164 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
- * Seeded, deterministic randomness: `ce.randomSeed`, deterministic `Random`
- * evaluation under a seed, and deterministic (baked) compiled output.
+ * Seeding after the 2026-07-25 Random family redesign
+ * (`docs/plans/2026-07-25-random-signature-redesign.md`).
  *
- * These tests use fresh `new ComputeEngine()` instances so they never perturb
- * the shared test engine's RNG state.
+ * There were three seeding mechanisms, none composable: `ce.randomSeed`
+ * (global, host-only), the `RandomSeed(n)` operator (global,
+ * expression-level), and per-operator seed arguments (local, per call). All
+ * three are gone. There is exactly one mechanism — `WithRandomSeed(seed,
+ * body)`, a dynamically-scoped, nesting frame — and this suite pins the two
+ * things that fact implies:
+ *
+ * 1. `ce.randomSeed` is an ACCESSOR TOMBSTONE: both the getter and the setter
+ *    throw, naming the replacement. Removing the property outright would be
+ *    loud only for type-checked embedders; a plain-JS caller assigning to a
+ *    removed property on an extensible object succeeds SILENTLY and
+ *    randomness quietly stops being seeded (§9).
+ * 2. Unframed draws are LIVE. There is no ambient seed to set, so an unseeded
+ *    draw is non-deterministic by construction — which is what an
+ *    animation/ticker needs, and what seeding a global stream used to break.
+ *
+ * The frame semantics themselves (nesting, dynamic scope, seed folding, the
+ * cross-version stability vectors) live in `with-random-seed.test.ts` and
+ * `random-vectors.test.ts`.
  */
 
-function draw(ce: ComputeEngine): number {
-  return ce.box(['Random']).evaluate().re;
-}
+const MESSAGE = /operator-removed: `ce\.randomSeed` has been removed/;
 
-describe('ce.randomSeed — evaluate()', () => {
-  it('defaults to null (non-deterministic path works, values in [0, 1))', () => {
+describe('ce.randomSeed — accessor tombstone', () => {
+  it('the getter throws, naming WithRandomSeed', () => {
     const ce = new ComputeEngine();
-    expect(ce.randomSeed).toBe(null);
-    for (let i = 0; i < 20; i++) {
-      const v = draw(ce);
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThan(1);
-    }
+    expect(() => (ce as any).randomSeed).toThrow(MESSAGE);
+    expect(() => (ce as any).randomSeed).toThrow('WithRandomSeed(seed, body)');
   });
 
-  it('same seed ⇒ identical sequence across two engines', () => {
-    const a = new ComputeEngine();
-    a.randomSeed = 12345;
-    const b = new ComputeEngine();
-    b.randomSeed = 12345;
-    const seqA = [draw(a), draw(a), draw(a), draw(a)];
-    const seqB = [draw(b), draw(b), draw(b), draw(b)];
-    expect(seqA).toEqual(seqB);
-  });
-
-  it('re-assigning the same seed resets (rewinds) the stream', () => {
+  it('the setter throws — a silent assignment is the failure it prevents', () => {
     const ce = new ComputeEngine();
-    ce.randomSeed = 'hello';
-    const first = [draw(ce), draw(ce), draw(ce)];
-    ce.randomSeed = 'hello';
-    const second = [draw(ce), draw(ce), draw(ce)];
-    expect(first).toEqual(second);
+    expect(() => {
+      (ce as any).randomSeed = 42;
+    }).toThrow(MESSAGE);
+    expect(() => {
+      (ce as any).randomSeed = null;
+    }).toThrow(MESSAGE);
+    expect(() => {
+      (ce as any).randomSeed = 'hello';
+    }).toThrow(MESSAGE);
   });
 
-  it('successive draws in a seeded sequence differ', () => {
+  it('the RandomSeed operator is a tombstone too, on every route', () => {
     const ce = new ComputeEngine();
-    ce.randomSeed = 42;
-    const v1 = draw(ce);
-    const v2 = draw(ce);
-    expect(v1).not.toEqual(v2);
-  });
-
-  it('different seeds ⇒ different first draws', () => {
-    const a = new ComputeEngine();
-    a.randomSeed = 1;
-    const b = new ComputeEngine();
-    b.randomSeed = 2;
-    expect(draw(a)).not.toEqual(draw(b));
-  });
-
-  it('string seeds are supported and reproducible', () => {
-    const a = new ComputeEngine();
-    a.randomSeed = 'desmos-doc';
-    const b = new ComputeEngine();
-    b.randomSeed = 'desmos-doc';
-    expect(draw(a)).toEqual(draw(b));
-    expect(draw(a)).toBeGreaterThanOrEqual(0);
-  });
-
-  it('assigning null returns to the non-deterministic path', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 7;
-    ce.randomSeed = null;
-    expect(ce.randomSeed).toBe(null);
-    const v = draw(ce);
-    expect(v).toBeGreaterThanOrEqual(0);
-    expect(v).toBeLessThan(1);
-  });
-
-  it('seeded Random(n) draws integers in [0, n) from the stream', () => {
-    const a = new ComputeEngine();
-    a.randomSeed = 99;
-    const b = new ComputeEngine();
-    b.randomSeed = 99;
-    const seqA = [0, 0, 0].map(() => a.box(['Random', 6]).evaluate().re);
-    const seqB = [0, 0, 0].map(() => b.box(['Random', 6]).evaluate().re);
-    expect(seqA).toEqual(seqB);
-    for (const v of seqA) {
-      expect(Number.isInteger(v)).toBe(true);
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThan(6);
-    }
-  });
-
-  it('the explicit Random(seed) overload is unaffected by ce.randomSeed', () => {
-    const plain = new ComputeEngine();
-    const seeded = new ComputeEngine();
-    seeded.randomSeed = 500;
-    const a = plain.box(['Random', 0.25]).evaluate().re;
-    const b = seeded.box(['Random', 0.25]).evaluate().re;
-    // Per-call deterministic hash of the argument — identical regardless of
-    // the engine seed, and stable across repeated calls.
-    expect(a).toEqual(b);
-    expect(seeded.box(['Random', 0.25]).evaluate().re).toEqual(b);
-  });
-});
-
-describe('RandomInteger — evaluate()', () => {
-  it('RandomInteger(a, b) stays within the inclusive range [a, b]', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 7;
-    let min = Infinity;
-    let max = -Infinity;
-    for (let i = 0; i < 500; i++) {
-      const v = ce.box(['RandomInteger', 1, 6]).evaluate().re;
-      expect(Number.isInteger(v)).toBe(true);
-      expect(v).toBeGreaterThanOrEqual(1);
-      expect(v).toBeLessThanOrEqual(6);
-      if (v < min) min = v;
-      if (v > max) max = v;
-    }
-    // Both endpoints are reachable (inclusive upper bound).
-    expect(min).toBe(1);
-    expect(max).toBe(6);
-  });
-
-  it('the one-argument form draws from the inclusive range [0, n]', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 11;
-    let max = -Infinity;
-    for (let i = 0; i < 500; i++) {
-      const v = ce.box(['RandomInteger', 3]).evaluate().re;
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThanOrEqual(3);
-      if (v > max) max = v;
-    }
-    expect(max).toBe(3);
-  });
-
-  it('a single point [k, k] always yields k', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 1;
-    expect(ce.box(['RandomInteger', 5, 5]).evaluate().re).toBe(5);
-  });
-
-  it('reversed bounds are normalized', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 3;
-    for (let i = 0; i < 100; i++) {
-      const v = ce.box(['RandomInteger', 6, 1]).evaluate().re;
-      expect(v).toBeGreaterThanOrEqual(1);
-      expect(v).toBeLessThanOrEqual(6);
-    }
-  });
-
-  it('same seed ⇒ identical sequence across two engines', () => {
-    const a = new ComputeEngine();
-    a.randomSeed = 12345;
-    const b = new ComputeEngine();
-    b.randomSeed = 12345;
-    const drawInt = (ce: ComputeEngine) =>
-      ce.box(['RandomInteger', 0, 1000]).evaluate().re;
-    const seqA = [drawInt(a), drawInt(a), drawInt(a), drawInt(a)];
-    const seqB = [drawInt(b), drawInt(b), drawInt(b), drawInt(b)];
-    expect(seqA).toEqual(seqB);
-  });
-
-  it('a symbolic bound stays unevaluated', () => {
-    const ce = new ComputeEngine();
-    expect(ce.box(['RandomInteger', 'n']).evaluate().operator).toBe(
-      'RandomInteger'
+    const pattern = /operator-removed: `RandomSeed` has been removed/;
+    expect(() => ce.box(['RandomSeed', 42]).evaluate()).toThrow(pattern);
+    expect(() => ce.box(['RandomSeed']).evaluate()).toThrow(pattern);
+    expect(() => ce.function('RandomSeed', [ce.number(42)]).evaluate()).toThrow(
+      pattern
+    );
+    expect(() => ce.parse('\\operatorname{RandomSeed}(42)').evaluate()).toThrow(
+      pattern
+    );
+    // The message points at the replacement.
+    expect(() => ce.box(['RandomSeed', 42]).evaluate()).toThrow(
+      'WithRandomSeed(n, ...)'
     );
   });
 });
 
-describe('RandomSeed — operator', () => {
-  // These use fresh engines, so the shared test engine is never left seeded.
-  it('RandomSeed(n) makes a RandomInteger sequence reproducible', () => {
+describe('Seeding is WithRandomSeed', () => {
+  const draw = (ce: ComputeEngine): number => ce.box(['Random']).evaluate().re;
+
+  it('an unframed draw is live — two evaluations differ', () => {
     const ce = new ComputeEngine();
-    const drawInt = () => ce.box(['RandomInteger', 0, 1000]).evaluate().re;
-    ce.box(['RandomSeed', 42]).evaluate();
-    const first = [drawInt(), drawInt(), drawInt(), drawInt()];
-    ce.box(['RandomSeed', 42]).evaluate();
-    const second = [drawInt(), drawInt(), drawInt(), drawInt()];
-    expect(first).toEqual(second);
+    const seen = new Set<number>();
+    for (let i = 0; i < 20; i++) {
+      const v = draw(ce);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(1);
+      seen.add(v);
+    }
+    // 20 live draws colliding is a ~1e-16 event, not a flake budget.
+    expect(seen.size).toBe(20);
   });
 
-  it('RandomSeed(n) sets ce.randomSeed and returns Nothing', () => {
-    const ce = new ComputeEngine();
-    const result = ce.box(['RandomSeed', 5]).evaluate();
-    expect(result.symbol).toBe('Nothing');
-    expect(ce.randomSeed).toBe(5);
+  it('a frame replays exactly, across engines', () => {
+    const a = new ComputeEngine();
+    const b = new ComputeEngine();
+    const framed = (ce: ComputeEngine): string =>
+      ce
+        .box([
+          'WithRandomSeed',
+          12345,
+          ['List', ['Random'], ['Random'], ['Random']],
+        ])
+        .evaluate()
+        .toString();
+    expect(framed(a)).toEqual(framed(a));
+    expect(framed(a)).toEqual(framed(b));
   });
 
-  it('a string seed is supported', () => {
+  it('repeated draws WITHIN a frame differ — the headline behavior', () => {
+    // The old `Random(0.5) + Random(0.5) = 2 × 0.2725…` did not do this.
     const ce = new ComputeEngine();
-    ce.box(['RandomSeed', { str: 'hi' }]).evaluate();
-    expect(ce.randomSeed).toBe('hi');
+    const v = [
+      ...ce
+        .box(['WithRandomSeed', 42, ['List', ['Random'], ['Random']]])
+        .evaluate()
+        .each(),
+    ].map((x) => x.re);
+    expect(v).toHaveLength(2);
+    expect(v[0]).not.toEqual(v[1]);
   });
 
-  it('RandomSeed() clears the seed (back to non-deterministic)', () => {
+  it('a different seed gives a different stream', () => {
     const ce = new ComputeEngine();
-    ce.box(['RandomSeed', 7]).evaluate();
-    expect(ce.randomSeed).toBe(7);
-    const result = ce.box(['RandomSeed']).evaluate();
-    expect(result.symbol).toBe('Nothing');
-    expect(ce.randomSeed).toBe(null);
+    const framed = (seed: number | string): number =>
+      ce.box(['WithRandomSeed', seed, ['Random']]).evaluate().re;
+    expect(framed(1)).not.toEqual(framed(2));
+    expect(framed('cell-a7')).not.toEqual(framed('cell-a8'));
   });
 
-  it('a symbolic argument leaves the expression unevaluated', () => {
+  it('the frame is scoped: a draw after it is live again', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['RandomSeed', 'x']).evaluate().operator).toBe('RandomSeed');
-    expect(ce.randomSeed).toBe(null);
+    ce.box(['WithRandomSeed', 42, ['Random']]).evaluate();
+    const after = [draw(ce), draw(ce), draw(ce)];
+    expect(new Set(after).size).toBe(3);
   });
 });
 
-describe('ce.randomSeed — compile() baking', () => {
-  it('with no seed, Random emits Math.random()', () => {
+describe('Compiled draws — no compile-time bake path', () => {
+  // The bake path existed solely to give `ce.randomSeed` a compiled meaning:
+  // each `Random` node became a constant derived from the compile-time seed.
+  // With no compile-time seed there is nothing to bake. Phase 3 of the
+  // redesign routes every compiled draw through `_SYS.drawNextRandomNumber()`,
+  // which branches at CALL time on whether a frame is active.
+  it('Random() emits the frame-aware helper, never a baked constant', () => {
     const ce = new ComputeEngine();
-    expect(compile(ce.box(['Random'])).code).toBe('Math.random()');
+    // NOT a bare `Math.random()`: whether a frame is active is a CALL-time
+    // property, so the branch lives inside the helper (spec §7).
+    expect(compile(ce.box(['Random'])).code).toBe(
+      '_SYS.drawNextRandomNumber()'
+    );
   });
 
-  it('with a seed, a compiled Random is baked and stable across calls', () => {
+  it('a compiled draw is live: repeated calls differ', () => {
     const ce = new ComputeEngine();
-    ce.randomSeed = 2024;
-    const result = compile(ce.box(['Random']));
-    const run = result.run!;
-    expect(run()).toEqual(run());
-    // The baked value is a constant (no Math.random() in the emitted code).
-    expect(result.code).not.toContain('Math.random');
+    const run = compile(ce.box(['Random'])).run!;
+    const seen = new Set<unknown>();
+    for (let i = 0; i < 20; i++) seen.add(run());
+    expect(seen.size).toBe(20);
   });
 
-  it('two Random nodes in one expression bake to different values', () => {
+  it('the unseeded arm is exempt from parity — and there is no claim to break', () => {
+    // Interpreted unframed `Random()` is also `Math.random()`: both engines
+    // are non-deterministic, so compiled and interpreted are NOT required to
+    // agree, and asserting they do would be asserting a coincidence.
     const ce = new ComputeEngine();
-    ce.randomSeed = 2024;
-    // Compile the two nodes separately as [Random - Random]; a nonzero result
-    // proves the two baked constants differ.
-    const result = compile(ce.box(['Subtract', ['Random'], ['Random']]));
-    expect(result.run!()).not.toEqual(0);
-  });
-
-  it('recompiling the same expression with the same seed reproduces values', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 314;
-    const r1 = compile(ce.box(['Add', ['Random'], ['Random']]));
-    const r2 = compile(ce.box(['Add', ['Random'], ['Random']]));
-    expect(r1.run!()).toEqual(r2.run!());
-  });
-
-  it('different seeds bake different compiled values', () => {
-    const a = new ComputeEngine();
-    a.randomSeed = 1;
-    const b = new ComputeEngine();
-    b.randomSeed = 2;
-    const ra = compile(a.box(['Random']));
-    const rb = compile(b.box(['Random']));
-    expect(ra.run!()).not.toEqual(rb.run!());
-  });
-
-  it('seeded Random(n) bakes a call-site-stable integer', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 77;
-    const result = compile(ce.box(['Random', 10]));
-    const run = result.run!;
-    const v = run();
-    expect(run()).toEqual(v);
-    expect(Number.isInteger(v)).toBe(true);
-    expect(v).toBeGreaterThanOrEqual(0);
-    expect(v).toBeLessThan(10);
+    const compiled = compile(ce.box(['Random'])).run!() as number;
+    const interpreted = ce.box(['Random']).evaluate().re;
+    expect(compiled).toBeGreaterThanOrEqual(0);
+    expect(compiled).toBeLessThan(1);
+    expect(interpreted).toBeGreaterThanOrEqual(0);
+    expect(interpreted).toBeLessThan(1);
   });
 });

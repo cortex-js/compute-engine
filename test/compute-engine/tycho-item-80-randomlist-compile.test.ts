@@ -1,234 +1,194 @@
-/**
- * Tycho item 80 — `RandomList` on the JavaScript compilation target.
- *
- * `RandomList` previously failed closed on the JS target (unsupported
- * operator). Per "compiled = interpreted, or refuse" (D6), the engine-stream
- * form `RandomList(n)` (under a compile-time engine seed) is a random PROCESS:
- * fresh draws per invocation, matching the interpreter's engine stream, but
- * reproducible because recompiling under the same `ce.randomSeed` replays the
- * sequence from the start. The explicit-seed form `RandomList(n, seed)` is a
- * pure random VALUE that matches interpretation bit-for-bit and is the route
- * for call-site-stable draws. Out-of-range counts throw at runtime rather than
- * clamping or returning NaN.
- */
-
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
+import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
+import { foldSeed, frameDraw } from '../../src/compute-engine/numerics/random';
 
-describe('Item 80 — RandomList compiles (seeded engine, advancing stream)', () => {
-  test('RandomList(3) compiles and returns 3 reals in [0, 1)', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 42;
-    const r = compile(ce.box(['RandomList', 3]));
-    expect(r?.success).toBe(true);
-    const out = r?.run?.() as number[];
-    expect(Array.isArray(out)).toBe(true);
-    expect(out).toHaveLength(3);
-    for (const u of out) {
-      expect(typeof u).toBe('number');
-      expect(u).toBeGreaterThanOrEqual(0);
-      expect(u).toBeLessThan(1);
-    }
-  });
+/**
+ * Tycho item 80 — the compiled eager-draw list, on the JavaScript target.
+ *
+ * The 2026-07-25 Random family redesign
+ * (`docs/plans/2026-07-25-random-signature-redesign.md`) removed `RandomList`
+ * and every per-operator seed argument, and with them the compile-time bake
+ * machinery this suite used to pin (`ce.randomSeed`, `target.randomSeed`,
+ * `randomState.counter`, `makeRandomList`'s three modes). `RandomList(n)`
+ * migrates to `RandomChoice(Interval(0, 1), n)` and `RandomList(n, seed)` to
+ * `WithRandomSeed(seed, RandomChoice(Interval(0, 1), n))`, so the suite is
+ * REWRITTEN to the new semantics rather than re-pointed (§4 "replaced, not
+ * ported").
+ *
+ * What carries over from item 80 / item 76: the draw-once EAGERNESS contract
+ * (the result is a materialized list of `k` values, drawn at call time), and
+ * the loud range check on `k` before any draw. What replaces the three baked
+ * modes: exactly two, framed and unframed, decided per CALL inside
+ * `_SYS.drawNextRandomNumber()`.
+ *
+ * The general compiled random-family parity plan (§8) lives in
+ * `random-compile.test.ts`; this file stays focused on `RandomChoice`.
+ */
 
-  test('two invocations of the compiled fn draw fresh lists (process)', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 42;
-    const r = compile(ce.box(['RandomList', 3]));
-    const a = r?.run?.() as number[];
-    const b = r?.run?.() as number[];
-    // The engine-stream form advances across calls — at least one element must
-    // differ (fresh per invocation, like the interpreter).
-    expect(a.some((v, i) => v !== b[i])).toBe(true);
-  });
+/** The expected n-th draw of a frame seeded `seed`. */
+function draw(seed: number | string, n: number): number {
+  const [seedLo, seedHi] = foldSeed(seed);
+  return frameDraw(seedLo, seedHi, n);
+}
 
-  test('recompiling under the same seed replays the sequence', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 42;
-    const a = compile(ce.box(['RandomList', 3]));
-    const b = compile(ce.box(['RandomList', 3]));
-    // Fresh compile ⇒ fresh stream from the same mixed seed ⇒ replay.
-    const a1 = a?.run?.() as number[];
-    const a2 = a?.run?.() as number[];
-    const b1 = b?.run?.() as number[];
-    const b2 = b?.run?.() as number[];
-    // Same invocation index across two compilations is identical (deterministic
-    // sequence), and the stream advances (invocation #2 ≠ invocation #1).
-    expect(b1).toEqual(a1);
-    expect(b2).toEqual(a2);
-    expect(a1.some((v, i) => v !== a2[i])).toBe(true);
-  });
+function mkEngine(): ComputeEngine {
+  const ce = new ComputeEngine();
+  ce.declare('xs', 'list<number>');
+  return ce;
+}
 
-  test('two distinct RandomList nodes in one expression differ', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 42;
-    const r = compile(
-      ce.box(['List', ['RandomList', 3], ['RandomList', 3]])
+/** Compile, refusing the interpreter fallback so a missing handler is loud. */
+function compiled(ce: ComputeEngine, json: any) {
+  const r = compile(ce.box(json), { fallback: false })!;
+  expect(r.success).toBe(true);
+  return r;
+}
+
+describe('compiled RandomChoice — the RandomList migration', () => {
+  it('`RandomChoice(Interval(0, 1), n)` replays inside a frame, matching the interpreter', () => {
+    const ce = mkEngine();
+    const json = ['RandomChoice', ['Interval', 0, 1], 4];
+    const r = compiled(ce, json);
+    const c = withRandomSeedFrame(ce, 0.5, () => r.run!() as number[]);
+    const i = withRandomSeedFrame(ce, 0.5, () =>
+      ce
+        .box(json)
+        .evaluate()
+        .ops!.map((x) => x.re)
     );
-    // Independent per-node streams (distinct compile-time ids).
-    const out = r?.run?.() as number[][];
-    expect(out[0]).not.toEqual(out[1]);
-  });
-});
-
-describe('Item 80 — engine-stream state is owned by the compiled function', () => {
-  // The advancing stream must live on the compiled function's own `_SYS`
-  // bundle, NOT in a process-global map keyed by a monotonic compile id: a
-  // global would retain one PRNG closure per compiled random node forever, so
-  // a long-lived host that recompiles repeatedly would leak. Owning the store
-  // per compiled function lets a discarded function release its streams.
-  test('each compiled function gets its own stream store', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 42;
-    const a = compile(ce.box(['RandomList', 3]))?.run as unknown as {
-      SYS: Record<string, unknown>;
-    };
-    const b = compile(ce.box(['RandomList', 3]))?.run as unknown as {
-      SYS: Record<string, unknown>;
-    };
-    // Distinct bundles, each owning its own `randomList` binding...
-    expect(a.SYS).not.toBe(b.SYS);
-    expect(Object.hasOwn(a.SYS, 'randomList')).toBe(true);
-    expect(Object.hasOwn(b.SYS, 'randomList')).toBe(true);
-    // ...while the stateless helpers stay shared (no per-compile copying).
-    expect(a.SYS.at).toBe(b.SYS.at);
-  });
-});
-
-describe('Item 80 — explicit-seed form matches the interpreter exactly', () => {
-  test('RandomList(4, 7) compiled === evaluated (element-for-element)', () => {
-    const ce = new ComputeEngine();
-    const compiled = compile(ce.box(['RandomList', 4, 7]))?.run?.() as number[];
-    const evaluated = (
-      ce.box(['RandomList', 4, 7]).evaluate().json as [string, ...number[]]
-    ).slice(1) as number[];
-    expect(compiled).toEqual(evaluated);
-  });
-});
-
-describe('Item 80 — a complex explicit seed seeds from its real part', () => {
-  // The interpreter seeds from `seedOp.re`. Left alone, `hashSeed` would treat
-  // the compiled `{ re, im }` object as a string — returning the empty-string
-  // FNV hash and hence a DIFFERENT sequence — so `_SYS.randomList` takes the
-  // real part at run time. Run time rather than a compile-time refusal because
-  // a seed declared merely `number` cannot be classified statically.
-  test('RandomList(n, 1+2i) matches interpretation', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box(['RandomList', 2, ['Complex', 7, 3]]);
-    const r = compile(expr);
-    expect(r?.success).toBe(true);
-    const evaluated = (expr.evaluate().ops ?? []).map((x) => x.re as number);
-    expect(r!.run!()).toEqual(evaluated);
+    expect(c).toEqual(i);
+    expect(c).toEqual([0, 1, 2, 3].map((n) => draw(0.5, n)));
+    // The whole frame replays.
+    expect(withRandomSeedFrame(ce, 0.5, () => r.run!())).toEqual(c);
   });
 
-  test('a `number`-typed seed bound to a complex value matches too', () => {
-    const ce = new ComputeEngine();
-    ce.declare('s', 'number');
-    const r = compile(ce.box(['RandomList', 2, 's'] as any));
-    expect(r?.success).toBe(true);
-    const evaluated = (
-      ce.box(['RandomList', 2, ['Complex', 7, 3]]).evaluate().ops ?? []
-    ).map((x) => x.re as number);
-    expect(r!.run!({ s: { re: 7, im: 3 } })).toEqual(evaluated);
-  });
-
-  test('a real seed still compiles and matches interpretation', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box(['RandomList', 4, 7]);
-    const r = compile(expr);
-    expect(r?.success).toBe(true);
-    const evaluated = (expr.evaluate().ops ?? []).map((x) => x.re as number);
-    expect(r!.run!()).toEqual(evaluated);
-  });
-});
-
-describe('Item 80 — Tycho witnesses (parse and ce.function routes)', () => {
-  test('RandomList(1, 5)[1] compiled === evaluated (parse route)', () => {
-    const ce = new ComputeEngine();
-    const src = '\\mathrm{RandomList}(1,5)[1]';
-    const compiled = compile(ce.parse(src))?.run?.() as number;
-    const evaluated = ce.parse(src).evaluate().re;
-    expect(compiled).toEqual(evaluated);
-  });
-
-  test('RandomList(1, 5)[1] compiled === evaluated (ce.function route)', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.function('At', [ce.function('RandomList', [1, 5]), 1]);
-    const compiled = compile(expr)?.run?.() as number;
-    const evaluated = expr.evaluate().re;
-    expect(compiled).toEqual(evaluated);
-  });
-
-  test('Sum(RandomList(1, n)[1], n=1..10) compiled === evaluated', () => {
-    const ce = new ComputeEngine();
-    const src = '\\sum_{n=1}^{10}\\mathrm{RandomList}(1,n)[1]';
-    const compiled = compile(ce.parse(src))?.run?.() as number;
-    const evaluated = ce.parse(src).evaluate().N().re;
-    expect(compiled).toBeCloseTo(evaluated, 12);
-  });
-});
-
-describe('Item 80 — unseeded engine draws fresh each invocation', () => {
-  test('compiles; two invocations produce different lists', () => {
-    const ce = new ComputeEngine();
-    // No engine seed set.
-    const r = compile(ce.box(['RandomList', 3]));
-    expect(r?.success).toBe(true);
-    const a = r?.run?.() as number[];
-    const b = r?.run?.() as number[];
+  it('is EAGER: the k draws happen at call time and differ per call', () => {
+    // The item-76 draw-once contract: the result is a materialized list of
+    // `k` values (not a lazy view), and an unframed call is live.
+    const ce = mkEngine();
+    const r = compiled(ce, ['RandomChoice', ['Interval', 0, 1], 3]);
+    const a = r.run!() as number[];
+    const b = r.run!() as number[];
     expect(a).toHaveLength(3);
-    expect(a).not.toEqual(b);
+    expect(new Set(a).size).toBe(3); // k independent draws, not one repeated
+    expect(a).not.toEqual(b); // live outside a frame
   });
-});
 
-describe('Item 80 — runtime range guard throws (never clamps)', () => {
-  test('a negative count throws at runtime', () => {
-    const ce = new ComputeEngine();
+  it('draws from a `Range` domain in closed form, matching the interpreter', () => {
+    const ce = mkEngine();
+    const json = ['RandomChoice', ['Range', 1, 6], 10];
+    const r = compiled(ce, json);
+    const c = withRandomSeedFrame(ce, 42, () => r.run!() as number[]);
+    const i = withRandomSeedFrame(ce, 42, () =>
+      ce
+        .box(json)
+        .evaluate()
+        .ops!.map((x) => x.re)
+    );
+    expect(c).toEqual(i);
+    expect(c.every((v) => v >= 1 && v <= 6 && Number.isInteger(v))).toBe(true);
+  });
+
+  it('draws from a literal list domain, matching the interpreter', () => {
+    const ce = mkEngine();
+    const json = ['RandomChoice', ['List', 10, 20, 30], 6];
+    const r = compiled(ce, json);
+    const c = withRandomSeedFrame(ce, 7, () => r.run!() as number[]);
+    const i = withRandomSeedFrame(ce, 7, () =>
+      ce
+        .box(json)
+        .evaluate()
+        .ops!.map((x) => x.re)
+    );
+    expect(c).toEqual(i);
+    // `k > n` is legal — that is what replacement means.
+    expect(c).toHaveLength(6);
+    expect(c.every((v) => [10, 20, 30].includes(v))).toBe(true);
+  });
+
+  it('never expands a `Range` domain: k draws cost O(k), not O(n)', () => {
+    // The descriptor rule (§7): compiling the domain as a COLLECTION would
+    // route it through the JS `Range` handler, which materializes via
+    // `Array.from` — a million-element allocation to draw a thousand values.
+    const ce = mkEngine();
+    const r = compiled(ce, ['RandomChoice', ['Range', 1, 1000000], 1000]);
+    expect(r.code).not.toContain('Array.from');
+    expect(r.code).toContain('_SYS.domainRange');
+    const t = Date.now();
+    const v = withRandomSeedFrame(ce, 1, () => r.run!() as number[]);
+    expect(Date.now() - t).toBeLessThan(200);
+    expect(v).toHaveLength(1000);
+  });
+
+  it('consumes exactly k draw indices (trailing-draw probe)', () => {
+    // A handler can return correct output while leaving the frame's counter in
+    // the wrong place — invisible to result-only parity tests.
+    const ce = mkEngine();
+    const r = compiled(ce, ['RandomChoice', ['Range', 1, 6], 5]);
+    const trailing = withRandomSeedFrame(ce, 3, () => {
+      r.run!();
+      return ce._random();
+    });
+    expect(trailing).toBe(draw(3, 5));
+  });
+
+  it('a zero count consumes no draws and returns an empty list', () => {
+    const ce = mkEngine();
+    const r = compiled(ce, ['RandomChoice', ['Range', 1, 6], 0]);
+    const [v, trailing] = withRandomSeedFrame(ce, 3, () => [
+      r.run!(),
+      ce._random(),
+    ]);
+    expect(v).toEqual([]);
+    expect(trailing).toBe(draw(3, 0));
+  });
+
+  it('rounds a non-integer count half toward +infinity, like the interpreter', () => {
+    const ce = mkEngine();
+    ce.declare('k', 'number');
+    const r = compiled(ce, ['RandomChoice', ['Range', 1, 6], 'k']);
+    for (const [k, n] of [
+      [2.7, 3],
+      [2.4, 2],
+      [2.5, 3],
+      [-0.4, 0],
+    ] as const)
+      expect((r.run!({ k }) as number[]).length).toBe(n);
+  });
+
+  it('throws loudly on a bad count, BEFORE any draw', () => {
+    const ce = mkEngine();
+    ce.declare('k', 'number');
+    const r = compiled(ce, ['RandomChoice', ['Range', 1, 6], 'k']);
+    expect(() => r.run!({ k: -3 })).toThrow(/RandomChoice/);
+    expect(() => r.run!({ k: Number.NaN })).toThrow(/RandomChoice/);
+    expect(() => r.run!({ k: 1e9 })).toThrow(/RandomChoice/);
+    // A rejected count leaves the frame's counter untouched.
+    const trailing = withRandomSeedFrame(ce, 3, () => {
+      expect(() => r.run!({ k: -3 })).toThrow();
+      return ce._random();
+    });
+    expect(trailing).toBe(draw(3, 0));
+  });
+
+  it('a degenerate domain throws rather than drawing from a reversed range', () => {
+    const ce = mkEngine();
     ce.declare('n', 'integer');
-    // A symbolic count forces the RUNTIME guard inside `_SYS.randomList`.
-    const r = compile(ce.box(['RandomList', 'n']));
-    expect(r?.success).toBe(true);
-    expect(() => r?.run?.({ n: -1 })).toThrow();
+    // An explicit step makes the emptiness runtime-visible: `Range(1, n, 1)`
+    // with `n <= 0` is the empty range the interpreter reports `out-of-range`
+    // for. Compiled code cannot raise a structured error, so it throws.
+    const r = compiled(ce, ['RandomChoice', ['Range', 1, 'n', 1], 2]);
+    expect(() => r.run!({ n: 0 })).toThrow(/RandomChoice/);
+    expect(r.run!({ n: 5 })).toHaveLength(2);
   });
 
-  test('a count above the cap throws at runtime', () => {
-    const ce = new ComputeEngine();
-    ce.declare('n', 'integer');
-    const r = compile(ce.box(['RandomList', 'n']));
-    expect(() => r?.run?.({ n: 2_000_000 })).toThrow();
-  });
-
-  test('a within-range symbolic count still draws', () => {
-    const ce = new ComputeEngine();
-    ce.declare('n', 'integer');
-    const r = compile(ce.box(['RandomList', 'n']));
-    const out = r?.run?.({ n: 3 }) as number[];
-    expect(out).toHaveLength(3);
-  });
-
-  test('a bad count throws WITHOUT advancing the stream', () => {
-    const ce = new ComputeEngine();
-    ce.randomSeed = 42;
-    ce.declare('n', 'integer');
-    const r = compile(ce.box(['RandomList', 'n']));
-    // An out-of-range count throws before any draw…
-    expect(() => r?.run?.({ n: -1 })).toThrow();
-    // …so the first valid draw equals a fresh compilation's first valid draw.
-    const afterThrow = r?.run?.({ n: 3 }) as number[];
-
-    const ce2 = new ComputeEngine();
-    ce2.randomSeed = 42;
-    ce2.declare('n', 'integer');
-    const fresh = compile(ce2.box(['RandomList', 'n']));
-    const freshFirst = fresh?.run?.({ n: 3 }) as number[];
-    expect(afterThrow).toEqual(freshFirst);
-  });
-});
-
-describe('Item 80 — non-JS targets still fail closed', () => {
-  test('a GLSL compile of RandomList(3) does not succeed', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.box(['RandomList', 3]), { to: 'glsl' });
-    expect(r?.success).toBe(false);
+  it('fails closed on a domain with no descriptor (D6)', () => {
+    const ce = mkEngine();
+    const js = new JavaScriptTarget();
+    expect(() =>
+      js.compile(ce.box(['RandomChoice', ['Set', 1, 2, 3], 2]))
+    ).toThrow(/Fail closed/);
   });
 });

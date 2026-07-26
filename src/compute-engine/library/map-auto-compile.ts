@@ -71,8 +71,8 @@ interface MapCompileCache {
    * change forces a recompile (never a re-stamp). */
   tolerance: number;
   /** `ce.angularUnit` stamp — baked into the code by `rewriteAngularUnit`
-   * (the third compiler-baked engine input, alongside tolerance and seeded
-   * randomness); a change forces a recompile (never a re-stamp). */
+   * (the second compiler-baked engine input, alongside tolerance); a change
+   * forces a recompile (never a re-stamp). */
   angularUnit: ComputeEngine['angularUnit'];
   /**
    * Why the instance is `no-compile`:
@@ -138,20 +138,31 @@ function markedMapLambda(
   return { fn, inner: body.op1 };
 }
 
-// Heads whose compiled semantics diverge from the interpreter's per-element
-// evaluation were once listed here as a hardcoded `EXCLUDED_HEADS` set. It was
-// deleted 2026-07-25: the `pure: false` check below subsumed every entry, and a
-// name list drifts silently — `'RandomVariate'` sat in it guarding an operator
-// that never existed, and a rename would have made the rest match nothing while
-// producing no error.
+// THE RANDOMNESS GATE IS GONE. Two successive gates lived here and both were
+// deleted: a hardcoded `EXCLUDED_HEADS` name set (2026-07-25 — a name list
+// drifts silently: `'RandomVariate'` sat in it guarding an operator that never
+// existed), and then the `pure: false` check that had subsumed it.
 //
-// The divergence being guarded is narrower than that set implied. Unseeded,
-// `Random()` compiles to `Math.random()` and is called per element, matching
-// the interpreter exactly. Only under a COMPILE-TIME `ce.randomSeed` does the
-// JS target bake each `Random` node to a literal constant, so every element of
-// a compiled `Map` would share one value where the interpreter advances the
-// stream per element. `pure: false` refuses both cases; declining the safe
-// unseeded one costs a little speed and keeps the rule to a single property.
+// Random draws inside a compiled `Map` are a REQUIREMENT of the 2026-07-25
+// Random family redesign (`docs/plans/2026-07-25-random-signature-redesign.md`
+// §6), not a follow-up: per-sample-point draws must stay in the hot path. The
+// divergence the gate stood on is gone with it — `ce.randomSeed` and the
+// compile-time bake path no longer exist, and every compiled draw goes through
+// `_SYS.drawNextRandomNumber()` → `ce._random()`, the same primitive the
+// interpreter uses, reading the same per-engine `WithRandomSeed` frame. Parity
+// is by construction.
+//
+// Eligibility is therefore the compiler's own D6 question — *can the target
+// emit semantically-equivalent code?* — answered by whether a handler exists.
+// `Assume` has none, so a `Map` body containing it throws at compile time and
+// falls back to the interpreter. Nothing is listed, flagged, or kept in sync.
+//
+// `pure: false` STAYS on every random operator: it is still the correct
+// semantic property, it feeds `isPure` → `isConstant` (so the engine does not
+// believe a shuffle of a literal list is constant), and it stops a repeated
+// `Random()` being eliminated as a common subexpression — which would
+// desynchronize the frame's shared counter. It simply stops doubling as a
+// compile gate. One property, one purpose.
 
 /** Is `x` a finite real number literal (a literal loop bound)? */
 function isLiteralBound(x: Expression | undefined): boolean {
@@ -294,23 +305,11 @@ function bodyEligible(
     return true;
   }
 
-  // The randomness/impurity gate (D2). An operator the engine itself declares
-  // impure (`pure: false` — the `Random` family, `Shuffle`, `Sample`,
-  // `RandomSeed`, …) is ineligible even if a compile mapping exists for it,
-  // because compiled and interpreted randomness can diverge (see the note at
-  // the top of this file). This is the ONLY such gate: it reads the property
-  // off the definition rather than matching a name, so it cannot fall out of
-  // sync with the library.
-  //
-  // The structural forms handled above never reach this check — none of them
-  // is an impure head, so that is not a coverage gap.
-  const opDef = ce.lookupDefinition(op);
-  if (
-    opDef !== undefined &&
-    'operator' in opDef &&
-    (opDef.operator as { pure?: boolean }).pure === false
-  )
-    return false;
+  // NO randomness/impurity gate. An impure head (`Random`, `RandomChoice`,
+  // `RandomSample`, `RandomShuffle`) is eligible: compiled draws go through
+  // the same per-engine frame stack as interpreted ones. A head with no
+  // compile handler fails closed at compile time instead. See the note at the
+  // top of this file.
 
   // A user-function call in head position: descend into its body.
   if (!bound.has(op) && !seenFns.has(op)) {
@@ -591,6 +590,21 @@ export function mapAutoCompileRunner(
       args.push(item.im !== 0 ? { re: item.re, im: item.im } : item.re);
     }
 
+    // Draw-counter rollback: a compiled body can draw from the ambient
+    // `WithRandomSeed` frame (`_SYS.drawNextRandomNumber`). Every path below
+    // that DISCARDS `r` and returns `undefined` hands the element back to the
+    // interpreter, which draws AGAIN — so the frame counter must be rewound to
+    // where the compiled call found it, or the fallback silently consumes each
+    // element's draws twice and every later draw in the frame shifts.
+    // (`docs/RANDOMNESS-MODEL.md` §5: an operation consumes a FIXED number of
+    // indices, whichever implementation serves it.)
+    const frame = ce._randomFrame;
+    const drawsBefore = frame?.next ?? 0;
+    const fallback = (): undefined => {
+      if (frame !== undefined) frame.next = drawsBefore;
+      return undefined;
+    };
+
     // Runtime throws propagate (D4) — a runaway recursive user function
     // surfaces its `RangeError` to the caller, not a silent fallback.
     const r = cache.fn(...args);
@@ -604,7 +618,7 @@ export function mapAutoCompileRunner(
     if (typeof r === 'number') {
       if (Number.isNaN(r)) {
         _mapAutoCompileStats.nanDoubleChecks++;
-        return undefined;
+        return fallback();
       }
       _mapAutoCompileStats.compiledHits++;
       return ce.number(r);
@@ -615,7 +629,7 @@ export function mapAutoCompileRunner(
       if (typeof re === 'number' && typeof im === 'number') {
         if (Number.isNaN(re) || Number.isNaN(im)) {
           _mapAutoCompileStats.nanDoubleChecks++;
-          return undefined;
+          return fallback();
         }
         _mapAutoCompileStats.compiledHits++;
         return ce.number(im === 0 ? re : ce.complex(re, im));
@@ -630,6 +644,6 @@ export function mapAutoCompileRunner(
     cache.fn = undefined;
     cache.deps = undefined;
     _mapAutoCompileStats.elementFallbacks++;
-    return undefined;
+    return fallback();
   };
 }

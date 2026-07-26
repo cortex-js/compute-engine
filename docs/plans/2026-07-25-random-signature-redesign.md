@@ -3,8 +3,11 @@
 **Status**: design ratified 2026-07-25 (revised three times: after the dual
 spec review, after the `WithRandomSeed` direction change, then after a second
 dual review round — 24 findings applied, see
-`docs/scratch/2026-07-25-random-signature-redesign_SPEC_REVIEW.md`). Not yet
-implemented.
+`docs/scratch/2026-07-25-random-signature-redesign_SPEC_REVIEW.md`).
+**Implemented 2026-07-25.** Where implementation reality diverged from the text,
+the text is corrected in place and marked; the durable model reference extracted
+from this plan is [`docs/RANDOMNESS-MODEL.md`](../RANDOMNESS-MODEL.md), and
+§11 records what was learned while building it.
 
 **Scope**: `WithRandomSeed` (new), `Random` (domain-only), `RandomChoice` (new),
 `RandomSample`/`RandomShuffle` (renamed from `Sample`/`Shuffle`);
@@ -332,6 +335,15 @@ and silently maps non-finite values to `0`. Do not reuse it.
   when the branch runs, and short-circuiting `And`/`Or` likewise.
 - **`Map` and comprehension bodies consume indices in iteration order** —
   element *i*'s draws follow element *i−1*'s.
+- **Lazy collections draw at materialization time, from whatever frame is then
+  active** (ruled 2026-07-25). `Map(xs, …).evaluate()` is a lazy view; its body
+  draws when elements are materialized. A caller who wants the values framed
+  materializes inside the frame — with an operator that actually consumes the
+  collection: `ListFrom`, an index (`At`), or a reducer such as `Sum`. (`N()` is
+  NOT one — it returns another lazy view, so the draws still happen later.) A
+  view created inside a frame but materialized after it draws from whatever
+  frame is active *then* — dynamic scoping applied consistently, not a defect.
+  The docs must show the materialize-inside-the-frame idiom.
 
 Consequence worth documenting rather than hiding: **editing a body so it draws
 earlier shifts every later draw in the same frame.** That is inherent to a
@@ -367,6 +379,14 @@ Two rulings fall out:
 - **The counter is a u32.** The draw index is `next mod 2³²`; a frame's stream
   has period 2³². Wraparound is documented, not an error — a single frame
   consuming four billion draws is outside any supported use.
+
+**Only evaluation consumes** (ruled 2026-07-25): draw indices are consumed by
+evaluation and only by evaluation, so the engine is free to not evaluate what it
+can prove it does not need — a branch not taken, a lazy view never materialized,
+or a count-preserving wrapper erased at canonicalization
+(`Count(RandomShuffle(xs))` → `Count(xs)`, consuming **zero** draws) — and in
+every such case the counter does not advance; consumers must not rely on a
+discarded expression's draws for counter positioning.
 
 ### Frame stack
 
@@ -887,10 +907,20 @@ delete the eligibility gate: "has a handler" becomes a meaningful answer to
 "can this be compiled", instead of an accident of which operators happened to
 get one.
 
-**Symbolic bounds degenerate only at runtime** (a compiled `Random(Range(1,n))`
-called with `n <= 0`): compiled code cannot raise the interpreter's structured
-errors, so emit a plain `Error` naming the operator. It must not silently return
-`NaN` or draw from a reversed range.
+**Symbolic bounds degenerate only at runtime**: compiled code cannot raise the
+interpreter's structured errors, so the runtime descriptor emits a plain `Error`
+naming the operator. It must not silently return `NaN` or draw from a reversed
+range.
+
+> **Corrected 2026-07-25 (implementation).** An earlier revision stated the rule
+> as "compiled `Random(Range(1,n))` with `n <= 0` throws". That is **wrong**, and
+> would have broken parity: two-operand `Range` normalization infers a
+> **descending** step, so `Range(1, 0)` is the two-element range `[1, 0]` and the
+> *interpreter* legitimately draws from it (verified: `Random(Range(1,0))` → `0`
+> or `1`). The implemented rule is parity-preserving — the descriptor throws
+> **exactly where the interpreter errors**: a zero or sign-mismatched *explicit*
+> step, non-finite bounds, an unbounded or empty `Interval`. A degenerate
+> two-operand range is not one of those cases on either side.
 
 ### GPU target
 
@@ -917,9 +947,10 @@ in a shader. Which fold applies is decided by where the seed value lives:
 
 | Seed form | Folding | Stream identity |
 |---|---|---|
-| compile-time literal (number or string) | **host** `foldSeed`; `(seedLo, seedHi)` emitted as `uvec2` constants | **identical** to the interpreted/JS stream for that seed |
-| host-provided uniform | host folds, uploads a `uvec2` uniform per render | identical to the interpreted/JS stream |
-| shader-computed (invocation-varying) expression — `perPixelSeed` | **in-shader**: `seedLo = floatBitsToUint(seed)` (WGSL: `bitcast<u32>`), `seedHi = 0u` | its **own** stream — deterministic given the seed bits, but *not* the stream a host f64 fold of the same real produces. No contract is broken: an invocation-varying seed has no host counterpart to agree with |
+| compile-time constant (number or string; `tryGetConstant` on the boxed value — post-review fix, so `Pi` folds the true f64, not the truncated emission string) | **host** `foldSeed`; `(seedLo, seedHi)` emitted as `uvec2` constants | **identical** to the interpreted/JS stream for that seed |
+| ~~host-provided uniform~~ — **NOT IMPLEMENTED; fails closed** (post-review: a `vars`-mapped seed **throws** naming this row, instead of silently diverging) | ~~host folds, uploads a `uvec2` uniform per render~~ | ~~identical to the interpreted/JS stream~~ |
+| bare invocation-varying **symbol** — `perPixelSeed`, not `vars`-mapped | **in-shader**: `seedLo = floatBitsToUint(seed)` (WGSL: `bitcast<u32>`), `seedHi = 0u` | its **own** stream — deterministic given the seed bits, but *not* the stream a host f64 fold of the same real produces. No contract is broken: an invocation-varying seed has no host counterpart to agree with |
+| computed seed **expression** (`x*100 + y`) | **compile error** (post-review: the seed is spliced per draw site; once-evaluation cannot be guaranteed without statement emission — hoist into a symbol) |
 | string computed at runtime | impossible in a shader — **compile error** |
 
 `floatBitsToUint`/`bitcast` are exact bit reinterpretations, so the derived
@@ -927,7 +958,20 @@ stream is bit-deterministic **given the seed bits**; the seed *expression's*
 own f32 arithmetic remains subject to ordinary GPU float variance (GLSL ES
 float ops are not IEEE-pinned). Determinism claims stop at the fold's input —
 say so in the docs. The §2 "same integer stream" tier contract applies to the
-first two rows, the only seed forms that exist on both sides of the boundary.
+host-folded row, the only seed form that exists on both sides of the boundary.
+
+> **Corrected 2026-07-25 (implementation): the "host-provided uniform" row was
+> not built.** There is no CE-controlled uniform plumbing — nothing in the GPU
+> targets uploads a `uvec2` seed uniform, and adding one means owning a
+> render-time upload protocol the compiler does not currently have. A seed
+> mapped through the compiler's `vars` option emits a *symbol name*, not a
+> literal. **Post-review update (staged-review finding 7): that case now FAILS
+> CLOSED** — it previously fell through to the shader-computed fold and
+> silently produced a different stream than the host, the one silent case in
+> an otherwise loud boundary; it now throws naming this ABI row and the two
+> supported options. A consumer that wants the host-identical stream passes a
+> **constant** seed at compile time. Building the uniform row is a separate
+> piece of work, not a defect in this one.
 
 #### Unframed GLSL draws are spatial noise — a stated exception
 
@@ -1094,7 +1138,12 @@ Compile:
   `WithRandomSeed` frame is on the host side throws at CE compile time (§4
   "The GPU boundary") — never a silent unframed draw. Likewise the GLSL stage
   check: an unframed draw compiled for a non-fragment stage throws (§7).
-- Compiled `Random(Range(1,n))` with `n <= 0` throws rather than returning `NaN`.
+- A compiled domain that degenerates at runtime throws a plain `Error` naming
+  the operator rather than returning `NaN`, and throws **exactly where the
+  interpreter errors** — a zero or sign-mismatched explicit `Range` step,
+  non-finite bounds, an unbounded or empty `Interval`. Not `Range(1, n)` with
+  `n <= 0`: that normalizes to a descending range and both engines draw from it
+  (see the §7 correction).
 
 Docs: `doc/80-reference-arithmetic.md:457-505`,
 `doc/03-guide-expressions.md:293`, and
@@ -1241,6 +1290,33 @@ framed draws off the compile path inside comparisons (§4). Two items land on
    | without replacement | `Random(xs)` | `RandomSample(xs, k)` |
    | all of them | — | `RandomShuffle(xs)` |
 
+   **Closed 2026-07-25**: the table ships in `doc/80-reference-arithmetic.md`,
+   with the cross-reference in both directions.
+
+2. **GPU sibling-draw order is not pinned across drivers** (opened 2026-07-25
+   by the implementation; **RULED 2026-07-25: accepted as a documented
+   caveat** — no per-call-site indices, no refusal of multi-draw expressions;
+   revisit only if a consumer reports it). GLSL leaves the evaluation
+   order of an expression's operands unspecified — WGSL pins left-to-right —
+   so for two sibling draws in **one expression** inside one GLSL frame, which
+   one receives `n = 0` and which `n = 1` is driver-dependent:
+   `Random() - Random()` in a single frame may differ in **sign** between GPUs.
+
+   What *is* pinned: the multiset of values drawn, and each draw's own
+   determinism. What is not: the assignment of indices to sibling positions.
+   The host tiers evaluate left to right and have no such freedom, so this is
+   also a (bounded) GLSL-vs-host divergence beyond the §2 2⁻²⁴ bound.
+
+   The mutable invocation-local counter is **required** regardless — a loop
+   body must advance the index, and a purely positional (lexical) index cannot
+   express that — so this is not fixable by dropping the counter. The
+   candidate fixes are all costlier: emit each draw into its own `let`/local
+   in source order (needs statement emission, which a shader *expression*
+   target does not have), or refuse multi-draw expressions on GLSL. Neither is
+   worth doing before a consumer reports it. The caveat is repeated at
+   `allocGPURandomCounter` (`compilation/gpu-target.ts`) and in
+   `docs/RANDOMNESS-MODEL.md` §8.
+
 *(The hash choice was open here; it is now ratified — see §2 "The generator".)*
 
 Resolved during design, recorded so they are not re-opened:
@@ -1264,8 +1340,78 @@ Resolved during design, recorded so they are not re-opened:
 - Reservoir sampling (`Random` branch 5, `RandomSample` non-indexed) → replaced
   by count-then-select so every operator consumes a fixed number of draws (§4
   draw-consumption contract).
-- GPU seed handling → host-folded for literals/uniforms (stream-identical),
-  in-shader bit-reinterpretation fold for invocation-varying seeds (own
-  stream); runtime strings impossible (§7 GPU seed ABI).
+- GPU seed handling → host-folded for compile-time constants
+  (stream-identical), in-shader bit-reinterpretation fold for bare
+  invocation-varying symbols (own stream); computed seed expressions,
+  `vars`-mapped seeds, and runtime strings all **fail closed** (§7 GPU seed
+  ABI, tightened in the staged-review round).
 - `_SYS` frame binding → per-engine via `makeSysHelpers(ce)`, resolved at call
   time; never a module-level slot (§4, §7).
+
+## 11. Implementation notes (2026-07-25)
+
+What the build found, beyond the in-place corrections in §7 and §8 above.
+
+### 11.1 A `.N()` double-draw defect — found and fixed
+
+Building the parity vectors surfaced a **pre-existing** defect unrelated to
+seeding: `Add` and `Multiply` were passing their **raw** operands to the numeric
+kernels `addN`/`mulN` rather than the operands they had just evaluated. For a
+pure operand that is only wasted work; for an **impure** one it is a second
+draw. `N(Random() + Random())` therefore consumed **four** indices, not two —
+each operand evaluated once for the symbolic pass and again inside the numeric
+pass — which silently violates the §4 draw-consumption contract and desynchronizes
+every later draw in the frame.
+
+Fixed by threading the evaluated operands into `addN`/`mulN`. This is exactly
+the failure class the trailing-draw probes of §8 exist to catch: the *values*
+looked fine, only the counter was wrong.
+
+The related lazy-materialization question raised during the same work is a
+ruling, not a defect, and is already recorded in §4.
+
+### 11.2 `compileShader` emitted no preamble — FIXED 2026-07-25
+
+`GLSLTarget.compileShader()` / `WGSLTarget.compileShader()` assemble a complete
+shader — `#version`, `precision`, `in`/`out`/`uniform` declarations, `void
+main()` — but **never emit the helper preamble**. A shader produced this way
+that uses any `_gpu_*` helper references a function it does not define, and
+fails at GPU shader-compile time.
+
+This is **not** new and not caused by the random work: it was true of every
+`_gpu_*` helper (`_gpu_gcd`, the fractal helpers, …) before this redesign. The
+random family simply adds `_gpu_pcg3d`/`_gpu_rnd_draw` and the per-frame counter
+globals to the set of things that go missing, and the counter globals make it
+slightly more visible because they must be declared at file scope.
+
+The single-expression entry points (`compile()` / `compileToSource()`) are
+unaffected — they return the preamble alongside the code, and the caller
+concatenates.
+
+**Fixed 2026-07-25** (same cycle, after review): the sniffing block that
+derives the preamble from the emitted code was extracted into
+`GPUTarget.preambleFor(code)`; `compileOrThrow` uses it for the
+`CompilationResult.preamble` channel, and both `compileShader`s now compile
+their body statements first, derive the preamble from the joined emissions,
+and splice it after the declarations, ahead of the entry point. Pinned by the
+"compileShader splices the helper preamble" block in `random-gpu.test.ts`
+(framed draw + `Gamma` on GLSL, framed draw on WGSL, and a helper-free shader
+gaining nothing). Note the known consumer (Tycho) uses the
+`compile()`+`preamble` route exclusively and assembles shaders itself, so this
+fix double-defines nothing for them.
+
+### 11.3 What went as designed
+
+Worth recording, because these were the risky parts:
+
+- The **call-time branch** (§7) held: one compiled artifact, compiled with no
+  frame active, draws live when called unframed and deterministically when
+  called from inside a `WithRandomSeed` frame, advancing that frame's counter.
+- The **`type`-handler-through-`canonical`** fix (§4) was needed exactly as
+  predicted: without canonicalizing the held body, the box and parse routes
+  read `unknown`. `HoldValues` had the same latent gap and got the same fix.
+- **Domains as descriptors** (§7): no random path materializes a `Range`, in
+  either engine.
+- The **tombstones** (§9) are the only reason the removal is safe to ship in
+  one release; each removed head throws `operator-removed` on the box, parse
+  and `ce.function` routes alike.

@@ -1,4 +1,7 @@
-import type { Expression } from '../global-types.js';
+import type {
+  Expression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import {
   isSymbol,
@@ -102,11 +105,10 @@ import {
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { adaptiveQuadrature } from '../numerics/gauss-kronrod.js';
-import {
-  mulberry32,
-  hashSeed,
-  MAX_RANDOM_ELEMENT_COUNT,
-} from '../numerics/random.js';
+import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
+import { interval } from '../numerics/interval.js';
+import { withRandomSeedFrame } from '../boxed-expression/utils.js';
+import { checkDeadline } from '../../common/interruptible.js';
 
 import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -121,26 +123,6 @@ import type {
   ComplexResult,
   TargetSource,
 } from './types.js';
-
-// Per-compilation `RandomList` engine-stream identity (Tycho item 80).
-//
-// The compiled `RandomList(n)` engine-stream form (1 arg, under a compile-time
-// engine seed) is a random PROCESS: fresh draws per invocation, like the
-// interpreter, while remaining reproducible via seeding. It cannot keep its
-// stream state inside the emitted function body — the JS target re-runs that
-// body (preamble included) on every call, so any in-body state resets per call.
-// Instead the handler allocates a monotonic id (`cid`) at COMPILE time, which
-// the emitted code passes to `_SYS.randomList`; the helper lazily creates one
-// `mulberry32` stream per id and advances it across calls.
-//
-// The streams themselves live on the compiled function's OWN `_SYS` bundle
-// (see `makeSysHelpers`), not in a module-global map, so a stream is reclaimed
-// with the compiled function that draws from it. A recompile builds a new
-// bundle and a new id → a fresh stream seeded from the same mixed per-node
-// seed → REPLAY from the start (the compile-time analog of the interpreter's
-// `ce.randomSeed = k` reseed-replay). This counter only hands out distinct
-// ids; it retains nothing.
-let _randomListStreamId = 0;
 
 /**
  * JavaScript operator mappings
@@ -1133,23 +1115,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `((_l) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _l[_a - 1] - _l[_b - 1]))(${coll})`;
   },
-  // Unbiased Fisher–Yates shuffle on a copy (`_SYS.shuffle`). When the
-  // engine's `randomSeed` is set at compile time, a per-node seed is baked
-  // in (the same mixing scheme as `Random`) so the compiled permutation is
-  // deterministic and reproducible; otherwise `Math.random` drives it. The
-  // explicit seed-operand form does not compile — fail closed.
-  Shuffle: (args, compile, target) => {
-    const coll = collArg('Shuffle', args[0], compile);
+  // Unbiased Fisher–Yates shuffle on a copy (`_SYS.shuffle`), consuming its
+  // `n − 1` draws through the frame-aware `_SYS.drawNextRandomNumber()` in the
+  // same order as the interpreter (`library/collections.ts`), so a framed
+  // shuffle replays and leaves the frame's counter where the interpreter does.
+  // A permutation needs every element, so materializing the source is inherent
+  // here (it is in the interpreter too) — unlike the sampling operators, whose
+  // domains stay descriptors.
+  RandomShuffle: (args, compile) => {
+    const coll = collArg('RandomShuffle', args[0], compile);
     if (args.length > 1)
       throw new Error(
-        `Shuffle: the seeded form does not compile. Fail closed (D6).`
+        `RandomShuffle: expected exactly one argument. Fail closed (D6).`
       );
-    const seed = target?.randomSeed;
-    if (seed !== undefined && seed !== null) {
-      const idx = target?.randomState ? target.randomState.counter++ : 0;
-      const s = (seed ^ Math.imul(idx + 1, 0x9e3779b1)) >>> 0;
-      return `_SYS.shuffle(${coll}, ${s})`;
-    }
     return `_SYS.shuffle(${coll})`;
   },
   // True if the predicate holds for at least one / every element (vacuously
@@ -1661,100 +1639,72 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (nConst !== undefined) return `Math.pow(${compile(arg)}, ${1 / nConst})`;
     return `Math.pow(${compile(arg)}, 1 / (${compile(exp)}))`;
   },
-  Random: (args, compile, target) => {
-    // Bake path: when the engine has a random seed set at compile time, each
-    // Random node compiles to a deterministic uniform derived from the seed
-    // and the node's position, so every call of the compiled function returns
-    // the same value for that call site (document-level "one draw per render").
-    const seed = target?.randomSeed;
-    const isRealSeedOverload =
-      args.length === 1 && !BaseCompiler.isIntegerValued(args[0]);
-    if (seed !== undefined && seed !== null && !isRealSeedOverload) {
-      const idx = target?.randomState ? target.randomState.counter++ : 0;
-      // Decorrelate per node: mix the seed with the node index, then draw one
-      // mulberry32 value. Two different Random nodes get different constants;
-      // the same expression + seed reproduces them.
-      const u = mulberry32((seed ^ Math.imul(idx + 1, 0x9e3779b1)) >>> 0)();
-      if (args.length === 0) return u.toString();
-      if (args.length === 2) {
-        // Random(m, n): integer in [m, n), argument-dependent but call-site
-        // stable (the uniform `u` is baked).
-        const m = compile(args[0]);
-        const n = compile(args[1]);
-        return `((${m}) + Math.floor(${u} * ((${n}) - (${m}))))`;
-      }
-      // Random(n): integer in [0, n) — the uniform `u` is baked.
-      return `Math.floor(${u} * (${compile(args[0])}))`;
-    }
-
-    if (args.length === 0) return 'Math.random()';
-    if (args.length === 2) {
-      // Random(m, n): integer in [m, n)
-      const m = compile(args[0]);
-      const n = compile(args[1]);
-      return `((${m}) + Math.floor(Math.random() * ((${n}) - (${m}))))`;
-    }
-    // One arg — branch on the arg's type.
-    const arg = args[0];
-    if (BaseCompiler.isIntegerValued(arg)) {
-      // Integer-bound: Random(n) → integer in [0, n)
-      return `Math.floor(Math.random() * (${compile(arg)}))`;
-    }
-    // Real seed: deterministic float in [0, 1)
-    // Inline the hash; no runtime helper is required.
-    const a = compile(arg);
-    return `(() => { const _s = (${a}) * 12.9898; const _v = Math.sin(_s) * 43758.5453; return _v - Math.floor(_v); })()`;
-  },
-  // Eager list of `n` uniform reals in [0, 1) — compiled via `_SYS.randomList`
-  // (Tycho item 80). Two contracts, both faithful to "compiled = interpreted,
-  // or refuse" (D6):
-  //   • Engine-stream form `RandomList(n)` under a compile-time engine seed is
-  //     a random PROCESS: fresh draws per invocation (like the interpreter's
-  //     engine stream), reproducible because a recompile under the same
-  //     `ce.randomSeed` replays the sequence from the start. Implemented as a
-  //     per-compilation advancing `mulberry32` stream keyed by a compile-time
-  //     id (`cid`), held in the compiled function's own `_SYS` bundle — see
-  //     `makeSysHelpers`/`makeRandomList`. The per-node seed mixing matches
-  //     `Random`/`Shuffle`.
-  //   • Explicit-seed form `RandomList(n, seed)` is a pure random VALUE:
-  //     runtime-hashed, matching interpretation bit-for-bit. ALL call-site
-  //     stability lives here.
-  // The count is range-checked at RUNTIME inside the helper, before any draw.
-  RandomList: (args, compile, target) => {
-    if (args.length === 2) {
-      // Explicit-seed form `RandomList(n, seed)`: hash the runtime seed value
-      // exactly as the interpreter's `mulberry32(hashSeed(seedOp.re))`.
-      // A COMPLEX seed compiles to an `{ re, im }` object, which `hashSeed`
-      // would treat as a string — returning the empty-string FNV hash and so a
-      // DIFFERENT sequence from interpretation, silently breaking the
-      // bit-for-bit parity this form exists to provide. The interpreter seeds
-      // from the real part only, which no real-target lowering can reproduce
-      // from the object, so refuse (D6).
-      // A complex seed needs no compile-time gate either: `_SYS.randomList`
-      // takes its real part at run time, exactly as the interpreter's
-      // `hashSeed(seedOp.re)` does. (Left to itself, `hashSeed` would hash the
-      // `{ re, im }` OBJECT as a string — the empty-string FNV hash — and
-      // silently produce a different sequence.)
-      return `_SYS.randomList(${compile(args[0])}, ${compile(args[1])}, true)`;
-    }
+  // EXACTLY ONE draw, for every domain kind.
+  //
+  // The draw is ALWAYS `_SYS.drawNextRandomNumber()` — one emission, no
+  // compile-time framed/unframed branch. Whether a `WithRandomSeed` frame is
+  // active is a CALL-time property (the same compiled function may later be
+  // invoked from inside an interpreted frame), and the helper is what
+  // branches. Emitting a bare `Math.random()` because no frame existed at
+  // compile time would turn dynamic scope into lexical scope silently — see
+  // `docs/plans/2026-07-25-random-signature-redesign.md` §4/§7.
+  //
+  // Domains lower to DESCRIPTORS, never to compiled collections: a literal
+  // `Interval`/`Range` folds to inline closed-form arithmetic, and a symbolic
+  // one builds a runtime descriptor. Compiling the domain as a collection
+  // would route a `Range` through the JS `Range` handler, which materializes
+  // via `Array.from` — a million-element allocation for one draw.
+  Random: (args, compile) => {
+    if (args.length === 0) return '_SYS.drawNextRandomNumber()';
     if (args.length !== 1)
       throw new Error(
-        `RandomList: expected one or two arguments. Fail closed (D6).`
+        `Random: expected at most one domain operand. Fail closed (D6).`
       );
-    const seed = target?.randomSeed;
-    if (seed !== undefined && seed !== null) {
-      // Engine-stream form: mix a per-node 32-bit seed (identical mixing to
-      // `Random`/`Shuffle`) and allocate a compile-time stream id. The helper
-      // draws the NEXT n values from this compilation's stream on each call, so
-      // invocations advance (fresh per call); a recompile allocates a fresh
-      // id → replay from `s`.
-      const idx = target?.randomState ? target.randomState.counter++ : 0;
-      const s = (seed ^ Math.imul(idx + 1, 0x9e3779b1)) >>> 0;
-      const cid = _randomListStreamId++;
-      return `_SYS.randomList(${compile(args[0])}, ${s}, false, ${cid})`;
+    const domain = args[0];
+
+    // Literal `Interval(lo, hi)` → `lo + u·(hi − lo)`, endpoints inlined.
+    if (isFunction(domain, 'Interval')) {
+      const int = interval(domain);
+      if (int !== undefined) {
+        assertDrawableInterval('Random', int.start, int.end);
+        return `(${int.start} + _SYS.drawNextRandomNumber() * ${int.end - int.start})`;
+      }
     }
-    // No engine seed: fresh `Math.random` draws each invocation.
-    return `_SYS.randomList(${compile(args[0])})`;
+
+    // Literal `Range(…)` → `first + step·⌊u·n⌋` over the NORMALIZED
+    // parameters, folded at compile time.
+    if (isFunction(domain, 'Range')) {
+      const p = literalRangeParams(domain);
+      if (p !== undefined) {
+        assertDrawableRange('Random', p.n);
+        return `(${p.first} + ${p.step} * Math.floor(_SYS.drawNextRandomNumber() * ${p.n}))`;
+      }
+    }
+
+    return `_SYS.randomPick(${randomDomain('Random', domain, compile, true)})`;
+  },
+  // `k` independent draws from a domain, WITH replacement. Exactly `k` draws,
+  // in output order — the same order and count as the interpreter
+  // (`library/core.ts`), so the frame's counter lands in the same place.
+  RandomChoice: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        `RandomChoice: expected exactly two arguments. Fail closed (D6).`
+      );
+    const domain = randomDomain('RandomChoice', args[0], compile, true);
+    return `_SYS.randomChoice(${domain}, ${compile(args[1])})`;
+  },
+  // `k` elements WITHOUT replacement, by the same sparse Fisher-Yates as the
+  // interpreter (`library/statistics.ts`): `k` draws, one per step, in the
+  // same order. The domain gate is `indexed_collection`, so an `Interval`
+  // fails closed.
+  RandomSample: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        `RandomSample: expected exactly two arguments. Fail closed (D6).`
+      );
+    const domain = randomDomain('RandomSample', args[0], compile, false);
+    return `_SYS.randomSample(${domain}, ${compile(args[1])})`;
   },
   Round: (args, compile) => {
     // The interpreter rounds half away from zero (Round(-2.5) = -3); JS
@@ -2237,6 +2187,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Distance: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Distance: need two points');
     return `_SYS.distance(${compile(a)}, ${compile(b)})`;
+  },
+  // Block-scoped seeding. A prologue pushes a frame onto the SAME per-engine
+  // stack the interpreter uses, and a `finally` pops it — literally
+  // `withRandomSeedFrame(ce, seed, fn)`, reached through the `_SYS` bundle's
+  // engine binding. Compiled callees (and interpreted code reached from them)
+  // therefore see the frame, which is what dynamic scoping requires.
+  //
+  // The seed expression is emitted in argument position, so it is evaluated
+  // ONCE per frame entry, never per draw.
+  WithRandomSeed: (args, compile) => {
+    if (args.length !== 2)
+      throw new Error(
+        `WithRandomSeed: expected exactly two arguments. Fail closed (D6).`
+      );
+    return `_SYS.withRandomSeed(${compile(args[0])}, () => ${compile(args[1])})`;
   },
 };
 
@@ -3014,23 +2979,12 @@ const SYS_HELPERS = {
     throw new Error('Condition must evaluate to "True" or "False".');
   },
   heaviside: (x: number) => (x < 0 ? 0 : x === 0 ? 0.5 : 1),
-  // Unbiased Fisher–Yates shuffle on a copy. With a seed (baked at compile
-  // time when the engine's `randomSeed` is set), the permutation is
-  // deterministic and reproducible across calls, matching the engine-level
-  // determinism contract that `Random` honors.
-  shuffle: (xs: unknown[], seed?: number): unknown[] => {
-    const rnd = seed === undefined ? Math.random : mulberry32(seed >>> 0);
-    const l = xs.slice();
-    for (let i = l.length - 1; i > 0; i--) {
-      const j = Math.floor(rnd() * (i + 1));
-      [l[i], l[j]] = [l[j], l[i]];
-    }
-    return l;
-  },
-  // NOTE: `randomList` is deliberately NOT defined here — it is the one
-  // STATEFUL helper, so it is bound per compiled function by
-  // `makeSysHelpers()` below, which owns the engine-stream store. Defining a
-  // shared instance here would reintroduce a process-global stream map.
+  // NOTE: the random helpers (`drawNextRandomNumber`, `withRandomSeed`, the
+  // `domain*` descriptor builders, `randomPick`/`randomChoice`/
+  // `randomSample`/`shuffle`) are deliberately NOT defined here: they need the
+  // OWNING ENGINE, so they are bound per compiled artifact by
+  // `makeSysHelpers(ce)` below. A shared instance would have to reach a
+  // module-level slot — a process singleton cross-contaminating engines.
   // --- Linear algebra (real, nested-array representation) ----------------
   // Dimension mismatches yield NaN (the interpreter's error/inert result
   // projected onto a real target).
@@ -3404,86 +3358,205 @@ const SYS_HELPERS = {
 };
 
 /**
- * Build the `randomList` helper over a given engine-stream store.
- *
- * Eager list of `n` uniform reals in [0, 1) — the compiled form of
- * `RandomList` (Tycho item 80). Three modes, matching the interpreter and the
- * "compiled = interpreted, or refuse" doctrine (D6):
- *   • `seed` given, `hash` false, `cid` given: the engine-stream form
- *     `RandomList(n)` under a compile-time engine seed. A random PROCESS: one
- *     `mulberry32` stream per compiled random node (keyed by `cid` in
- *     `streams`), created lazily from the mixed `seed` and ADVANCED across
- *     calls, so each invocation draws the next `n` values.
- *   • `seed` given, `hash` true: the explicit user seed of
- *     `RandomList(n, seed)`. A pure random VALUE — hashed with `hashSeed`,
- *     exactly as the interpreter does, so every invocation replays the same
- *     list. All call-site stability lives here.
- *   • no `seed`: `Math.random` per draw (fresh list each invocation, like
- *     unseeded `Random`/`Shuffle`).
- *
- * The count is rounded (`toInteger` semantics) and range-checked loudly BEFORE
- * any draw — never silently clamp or return NaN, and a bad count never
- * advances the stream.
+ * A compiled random domain, built (and validated) at RUN time by the
+ * `_SYS.domain*` builders. `continuous` is an `Interval`; everything else is
+ * an indexed domain of `n` elements addressed by a 0-based `at`.
  */
-function makeRandomList(
-  streams: Map<number, () => number>
-): (n: number, seed?: number, hash?: boolean, cid?: number) => number[] {
-  return (n, seed, hash, cid) => {
-    // The interpreter seeds from `seedOp.re`; a compiled complex seed arrives
-    // as `{ re, im }`, so take its real part rather than letting `hashSeed`
-    // stringify the object into the empty-string FNV hash.
-    if (seed !== undefined && typeof seed !== 'number') {
-      const re = indexValue(seed);
-      if (Number.isNaN(re))
-        throw new Error('RandomList: the seed must be a number');
-      seed = re;
-    }
-    n = Math.round(n);
-    if (!Number.isFinite(n) || n < 0 || n > MAX_RANDOM_ELEMENT_COUNT)
-      throw new Error(
-        `RandomList: expected a list length in 0..${MAX_RANDOM_ELEMENT_COUNT}`
-      );
-    let draw: () => number;
-    if (seed === undefined) draw = Math.random;
-    else {
-      if (Number.isNaN(seed))
-        throw new Error('RandomList: the seed must be a number');
-      if (cid !== undefined) {
-        // Engine-stream form: reuse (or lazily create) this compilation's
-        // advancing stream so successive invocations draw fresh values.
-        let stream = streams.get(cid);
-        if (stream === undefined) {
-          stream = mulberry32(seed >>> 0);
-          streams.set(cid, stream);
-        }
-        draw = stream;
-      } else draw = mulberry32(hash ? hashSeed(seed) : seed >>> 0);
-    }
-    const l: number[] = new Array(n);
-    for (let i = 0; i < n; i++) l[i] = draw();
-    return l;
-  };
-}
+type RandomDomainDescriptor =
+  | { continuous: true; lo: number; hi: number }
+  | { continuous: false; n: number; at: (i: number) => unknown };
+
+/** The engine-bound half of the `_SYS` bundle: the random family. */
+type RandomSysHelpers = {
+  drawNextRandomNumber: () => number;
+  withRandomSeed: <T>(seed: unknown, body: () => T) => T;
+  domainInterval: (
+    op: string,
+    lo: number,
+    hi: number
+  ) => RandomDomainDescriptor;
+  domainRange: (
+    op: string,
+    a: number,
+    b: number,
+    s?: number
+  ) => RandomDomainDescriptor;
+  domainList: (op: string, xs: unknown) => RandomDomainDescriptor;
+  randomPick: (d: RandomDomainDescriptor) => unknown;
+  randomChoice: (d: RandomDomainDescriptor, k: unknown) => unknown[];
+  randomSample: (d: RandomDomainDescriptor, k: unknown) => unknown[];
+  shuffle: (xs: unknown[]) => unknown[];
+};
 
 /** The `_SYS` bundle injected into a compiled JavaScript function. */
-type SysHelpers = typeof SYS_HELPERS & {
-  randomList: ReturnType<typeof makeRandomList>;
-};
+type SysHelpers = typeof SYS_HELPERS & RandomSysHelpers;
+
+/**
+ * The random family of `_SYS`, bound to the engine that compiled the artifact.
+ *
+ * The binding is an ENGINE REFERENCE, not a frame handle: there is exactly one
+ * `WithRandomSeed` frame stack per engine, and both the interpreter and
+ * compiled code reach it through the engine. So a compiled function called
+ * from inside an interpreted frame draws from that frame (dynamic scoping
+ * across the compile boundary), two engines never share frames, and a call
+ * made outside any evaluation sees an empty stack and draws live.
+ *
+ * Compiled code cannot raise the interpreter's structured errors, so every
+ * validation failure here is a plain `Error` naming the operator — never a
+ * silent `NaN` or a reversed draw.
+ *
+ * Every draw goes through `ce._random()`, the SAME primitive the interpreter
+ * uses, so interpreted/compiled parity for framed draws is by construction
+ * rather than by two implementations kept in agreement. Draw ORDER and COUNT
+ * are equally load-bearing (the frame's counter is shared), so each loop below
+ * mirrors its interpreted counterpart step for step.
+ */
+function makeRandomHelpers(ce: ComputeEngine): RandomSysHelpers {
+  const cap = MAX_RANDOM_ELEMENT_COUNT;
+
+  /** The `k` operand, rounded and validated — the compiled half of
+   * `randomCount` (`library/random-utils.ts`). `toInteger` rounds half toward
+   * `+∞`, which is what `Math.round` does. */
+  const count = (op: string, k: unknown): number => {
+    const v = typeof k === 'number' ? Math.round(k) : NaN;
+    if (!Number.isSafeInteger(v) || v < 0 || v > cap)
+      throw new Error(`${op}: expected a count in 0..${cap}, got ${k}`);
+    return v;
+  };
+
+  /** The uniform-driven element of an indexed descriptor. */
+  const pick = (d: RandomDomainDescriptor, u: number): unknown =>
+    d.continuous ? d.lo + u * (d.hi - d.lo) : d.at(Math.floor(u * d.n));
+
+  return {
+    // The one primitive: `ce._random()` already branches at CALL time —
+    // innermost frame → `hash(seed, n)` and advance; no frame → live.
+    drawNextRandomNumber: () => ce._random(),
+
+    withRandomSeed: <T>(seed: unknown, body: () => T): T => {
+      if (
+        (typeof seed !== 'number' || !Number.isFinite(seed)) &&
+        typeof seed !== 'string'
+      )
+        throw new Error(
+          `WithRandomSeed: expected a finite real number or a string seed, got ${String(seed)}`
+        );
+      return withRandomSeedFrame(ce, seed as number | string, body);
+    },
+
+    domainInterval: (op, lo, hi) => {
+      if (!Number.isFinite(lo) || !Number.isFinite(hi))
+        throw new Error(
+          `${op}: expected a bounded Interval, got (${lo}, ${hi})`
+        );
+      if (!(hi > lo))
+        throw new Error(
+          `${op}: expected a non-empty Interval, got (${lo}, ${hi})`
+        );
+      return { continuous: true, lo, hi };
+    },
+
+    domainRange: (op, a, b, s) => {
+      // The normalization of `range()` + the `Range` handler's `count`
+      // (`library/collections.ts`): a two-operand range descends when
+      // `b < a`, and a zero or sign-mismatched step is empty.
+      const step = s === undefined ? (b >= a ? 1 : -1) : s;
+      const n =
+        step === 0
+          ? 0
+          : !Number.isFinite(a) || !Number.isFinite(b)
+            ? Infinity
+            : Math.max(0, Math.floor((b - a) / step) + 1);
+      if (!Number.isFinite(n) || n <= 0)
+        throw new Error(
+          `${op}: expected a finite, non-empty Range, got Range(${a}, ${b}, ${step})`
+        );
+      return { continuous: false, n, at: (i) => a + step * i };
+    },
+
+    domainList: (op, xs) => {
+      if (!Array.isArray(xs))
+        throw new Error(`${op}: expected a finite indexed collection`);
+      if (xs.length === 0)
+        throw new Error(`${op}: expected a non-empty collection`);
+      return { continuous: false, n: xs.length, at: (i) => xs[i] };
+    },
+
+    // `Random(domain)` — exactly ONE draw, for every domain kind.
+    randomPick: (d) => pick(d, ce._random()),
+
+    // `RandomChoice(domain, k)` — exactly `k` draws, WITH replacement, in
+    // output order.
+    randomChoice: (d, k) => {
+      const n = count('RandomChoice', k);
+      const out: unknown[] = new Array(n);
+      for (let i = 0; i < n; i++) {
+        if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+        out[i] = pick(d, ce._random());
+      }
+      return out;
+    },
+
+    // `RandomSample(domain, k)` — exactly `k` draws, WITHOUT replacement, by
+    // the same SPARSE Fisher-Yates over the index space as the interpreter
+    // (`library/statistics.ts`): only the touched positions are held, so
+    // `RandomSample(Range(1, 10^6), 3)` never materializes the domain.
+    randomSample: (d, k) => {
+      if (d.continuous)
+        throw new Error(
+          `RandomSample: an Interval is not an indexed collection`
+        );
+      const n = count('RandomSample', k);
+      // Unlike `RandomChoice`, `k` may not exceed the domain size.
+      if (n > d.n)
+        throw new Error(
+          `RandomSample: expected a count in 0..${d.n}, got ${n}`
+        );
+      const swapped = new Map<number, number>();
+      const at = (i: number): number => swapped.get(i) ?? i;
+      const out: unknown[] = new Array(n);
+      for (let i = 0; i < n; i++) {
+        if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+        const j = i + Math.floor(ce._random() * (d.n - i));
+        const vi = at(i);
+        const vj = at(j);
+        swapped.set(i, vj);
+        swapped.set(j, vi);
+        out[i] = d.at(vj);
+      }
+      return out;
+    },
+
+    // `RandomShuffle(xs)` — unbiased Fisher-Yates on a copy, consuming
+    // exactly `n − 1` draws in the interpreter's order and direction
+    // (`library/collections.ts`).
+    shuffle: (xs: unknown[]): unknown[] => {
+      if (xs.length > cap)
+        throw new Error(
+          `RandomShuffle: expected a collection of at most ${cap} elements`
+        );
+      const l = xs.slice();
+      for (let i = l.length - 1; i > 0; i--) {
+        if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+        const j = Math.floor(ce._random() * (i + 1));
+        [l[i], l[j]] = [l[j], l[i]];
+      }
+      return l;
+    },
+  };
+}
 
 /**
  * Build the `_SYS` bundle for ONE compiled function.
  *
  * The stateless helpers are shared through the prototype chain (no per-compile
- * copying); the only stateful one, `randomList`, gets an own binding over a
- * fresh engine-stream store. Scoping that store here — rather than to a
- * module-global map keyed by a monotonic id — ties each PRNG stream's lifetime
- * to the compiled function that draws from it, so a discarded compiled
- * function releases its streams instead of retaining them for the life of the
- * process.
+ * copying); the random family gets own bindings over the OWNING ENGINE, so
+ * `_SYS.drawNextRandomNumber()` resolves that engine's active
+ * `WithRandomSeed` frame at call time.
  */
-function makeSysHelpers(): SysHelpers {
+function makeSysHelpers(ce: ComputeEngine): SysHelpers {
   const sys = Object.create(SYS_HELPERS) as SysHelpers;
-  sys.randomList = makeRandomList(new Map());
+  Object.assign(sys, makeRandomHelpers(ce));
   return sys;
 }
 
@@ -3491,14 +3564,15 @@ function makeSysHelpers(): SysHelpers {
  * JavaScript-specific function extension that provides system functions
  */
 export class ComputeEngineFunction extends Function {
-  SYS: SysHelpers = makeSysHelpers();
+  SYS: SysHelpers;
 
-  constructor(body: string, preamble = '') {
+  constructor(ce: ComputeEngine, body: string, preamble = '') {
     super(
       '_SYS',
       '_',
       preamble ? `${preamble};return ${body}` : `return ${body}`
     );
+    this.SYS = makeSysHelpers(ce);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
         super.apply(thisArg, [this.SYS, ...argumentsList]),
@@ -3515,14 +3589,15 @@ export class ComputeEngineFunction extends Function {
  * JavaScript function literal with parameters
  */
 export class ComputeEngineFunctionLiteral extends Function {
-  SYS: SysHelpers = makeSysHelpers();
+  SYS: SysHelpers;
 
-  constructor(body: string, args: string[], preamble = '') {
+  constructor(ce: ComputeEngine, body: string, args: string[], preamble = '') {
     super(
       '_SYS',
       ...args,
       preamble ? `${preamble}return ${body}` : `return ${body}`
     );
+    this.SYS = makeSysHelpers(ce);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) =>
         super.apply(thisArg, [this.SYS, ...argumentsList]),
@@ -3741,10 +3816,6 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       iterationBudget,
       quadrature,
       varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
-      // When the engine has a random seed set, bake Random nodes to
-      // deterministic, call-site-stable constants (see the `Random` handler).
-      randomSeed: expr.engine._randomNumericSeed(),
-      randomState: { counter: 0 },
       // Opt in to compiling calls to user-defined function literals (`f(x) :=
       // …`) as named local functions collected into the preamble.
       userFunctions: { defs: new Map(), compiling: new Set() },
@@ -3878,7 +3949,12 @@ function compileToTarget(
     // A lambda body may call user-defined functions (`t ↦ f(t)`); emit their
     // definitions as a preamble inside the lambda's own body.
     const userDefs = BaseCompiler.userFunctionsPreamble(target);
-    const fn = new ComputeEngineFunctionLiteral(body, params, userDefs);
+    const fn = new ComputeEngineFunctionLiteral(
+      expr.engine,
+      body,
+      params,
+      userDefs
+    );
     const result = {
       target: 'javascript' as const,
       success: true,
@@ -3894,7 +3970,10 @@ function compileToTarget(
   if (isSymbol(expr)) {
     const op = target.operators?.(expr.symbol);
     if (op) {
-      const fn = new ComputeEngineFunctionLiteral(`a ${op[0]} b`, ['a', 'b']);
+      const fn = new ComputeEngineFunctionLiteral(expr.engine, `a ${op[0]} b`, [
+        'a',
+        'b',
+      ]);
       const result = {
         target: 'javascript' as const,
         success: true,
@@ -3917,7 +3996,7 @@ function compileToTarget(
       ? `${target.preamble}\n${userDefs}`
       : userDefs
     : target.preamble;
-  const fn = new ComputeEngineFunction(js, preamble);
+  const fn = new ComputeEngineFunction(expr.engine, js, preamble);
   const result = {
     target: 'javascript' as const,
     success: true,
@@ -4042,6 +4121,125 @@ function collArg(
         `is not an indexed collection (list/vector/range). Fail closed (D6).`
     );
   return compile(arg);
+}
+
+//
+// ─── Random domains ─────────────────────────────────────────────────────────
+//
+// A `Random`/`RandomChoice`/`RandomSample` domain compiles to a DESCRIPTOR —
+// closed-form arithmetic when its parameters are literal, a runtime
+// `_SYS.domain*` object otherwise — and NEVER to a compiled collection. The
+// JS `Range` collection handler materializes via `Array.from`, so compiling
+// the domain would allocate a million elements to draw three
+// (`docs/plans/2026-07-25-random-signature-redesign.md` §7).
+//
+
+/** Reject a domain the interpreter would refuse (an unbounded or empty
+ * `Interval`) at COMPILE time, so `fallback: true` drops to the interpreter
+ * and its structured error rather than emitting a NaN draw. */
+function assertDrawableInterval(op: string, lo: number, hi: number): void {
+  if (!Number.isFinite(lo) || !Number.isFinite(hi))
+    throw new Error(
+      `${op}: an unbounded Interval has no uniform draw. Fail closed (D6).`
+    );
+  if (!(hi > lo))
+    throw new Error(`${op}: an empty Interval has no draw. Fail closed (D6).`);
+}
+
+/** As `assertDrawableInterval`, for a `Range`'s normalized element count. */
+function assertDrawableRange(op: string, n: number): void {
+  if (!Number.isFinite(n) || n <= 0)
+    throw new Error(
+      `${op}: expected a finite, non-empty Range. Fail closed (D6).`
+    );
+}
+
+/** A finite real literal operand, or `undefined`. */
+function literalReal(x: Expression | undefined): number | undefined {
+  if (x === undefined || !isNumber(x) || x.im !== 0) return undefined;
+  return Number.isFinite(x.re) ? x.re : undefined;
+}
+
+/**
+ * The NORMALIZED `(first, step, count)` of a `Range` whose bounds are all
+ * literal, or `undefined` when any bound is symbolic (the runtime
+ * `_SYS.domainRange` descriptor handles those).
+ *
+ * Mirrors `range()` and the `Range` collection handler's `count`
+ * (`library/collections.ts`): a two-operand range infers a descending step,
+ * and a zero or sign-mismatched step yields an empty range.
+ */
+function literalRangeParams(
+  expr: Expression
+): { first: number; step: number; n: number } | undefined {
+  if (!isFunction(expr)) return undefined;
+  const ops = expr.ops;
+  if (ops.length === 0 || ops.length > 3) return undefined;
+  const bounds = ops.map(literalReal);
+  if (bounds.some((b) => b === undefined)) return undefined;
+  const [first, upper, step] =
+    ops.length === 1
+      ? [1, bounds[0]!, 1]
+      : [bounds[0]!, bounds[1]!, ops.length > 2 ? bounds[2]! : undefined];
+  const s = step ?? (upper >= first ? 1 : -1);
+  const n = s === 0 ? 0 : Math.max(0, Math.floor((upper - first) / s) + 1);
+  return { first, step: s, n };
+}
+
+/** Strip an `Open`/`Closed` endpoint marker: a float draw cannot respect an
+ * open endpoint, so the markers are ignored (§4). */
+function intervalEndpoint(x: Expression): Expression {
+  if (isFunction(x, 'Open') || isFunction(x, 'Closed')) return x.op1;
+  return x;
+}
+
+/**
+ * Compile a random domain operand to a runtime descriptor expression.
+ *
+ * `continuousOk` is false for `RandomSample`, whose domain gate is
+ * `indexed_collection` — an `Interval` is invalid there, as in the
+ * interpreter.
+ */
+function randomDomain(
+  op: string,
+  domain: Expression | undefined,
+  compile: (expr: Expression) => string,
+  continuousOk: boolean
+): string {
+  if (domain === undefined)
+    throw new Error(`${op}: expected a domain operand. Fail closed (D6).`);
+  const name = JSON.stringify(op);
+
+  if (isFunction(domain, 'Interval')) {
+    if (!continuousOk)
+      throw new Error(
+        `${op}: an Interval is not an indexed collection. Fail closed (D6).`
+      );
+    if (domain.nops !== 2)
+      throw new Error(`${op}: expected Interval(lo, hi). Fail closed (D6).`);
+    const lo = compile(intervalEndpoint(domain.op1));
+    const hi = compile(intervalEndpoint(domain.op2));
+    return `_SYS.domainInterval(${name}, ${lo}, ${hi})`;
+  }
+
+  if (isFunction(domain, 'Range')) {
+    const ops = domain.ops;
+    if (ops.length === 0 || ops.length > 3)
+      throw new Error(`${op}: expected Range(…). Fail closed (D6).`);
+    if (ops.length === 1)
+      return `_SYS.domainRange(${name}, 1, ${compile(ops[0])}, 1)`;
+    const bounds = `${compile(ops[0])}, ${compile(ops[1])}`;
+    // No explicit step: the descriptor infers ±1 at run time, exactly as
+    // `range()` does — never a fixed +1, which would make a descending range
+    // silently empty.
+    if (ops.length === 2) return `_SYS.domainRange(${name}, ${bounds})`;
+    return `_SYS.domainRange(${name}, ${bounds}, ${compile(ops[2])})`;
+  }
+
+  // Any other domain is compiled as an indexed collection — a literal list
+  // compiles to the JS array it already is. `collArg` fails closed on
+  // anything that is not one.
+  return `_SYS.domainList(${name}, ${collArg(op, domain, compile)})`;
 }
 
 /**

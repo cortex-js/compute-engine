@@ -863,8 +863,8 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
       `["List", 5, 6, 3, 1, 7, 2, 4]`
     ));
 
-  // test('Shuffle', () =>
-  //   expect(evaluate(['Shuffle', list])).toMatchInlineSnapshot());
+  // test('RandomShuffle', () =>
+  //   expect(evaluate(['RandomShuffle', list])).toMatchInlineSnapshot());
 
   test('Unique', () =>
     expect(evaluate(['Unique', list3])).toMatchInlineSnapshot(
@@ -901,7 +901,7 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
 });
 
 describe('SORT/SHUFFLE REBUILD AS LIST (regression)', () => {
-  // Regression: Sort/Shuffle rebuilt the result with the source's operator
+  // Regression: Sort/RandomShuffle rebuilt the result with the source's operator
   // head. For a `Range` source, that reinterpreted the sorted elements as
   // lo/hi/step (`Sort(Range(1,10))` → `["Range",1,2,3]` == `[1]`).
   test('Sort(Range) rebuilds as List', () =>
@@ -914,8 +914,10 @@ describe('SORT/SHUFFLE REBUILD AS LIST (regression)', () => {
     expect(e.operator).toEqual('List');
   });
 
-  test('Shuffle(Range) rebuilds as List (deterministic seed)', () => {
-    const e = engine.box(['Shuffle', ['Range', 1, 5], 42]).evaluate();
+  test('RandomShuffle(Range) rebuilds as List (seeded frame)', () => {
+    const e = engine
+      .box(['WithRandomSeed', 42, ['RandomShuffle', ['Range', 1, 5]]])
+      .evaluate();
     expect(e.operator).toEqual('List');
     const elements = [...e.each()].map((x) => x.re).sort((a, b) => a! - b!);
     expect(elements).toEqual([1, 2, 3, 4, 5]);
@@ -927,7 +929,7 @@ describe('SORT/SHUFFLE REBUILD AS LIST (regression)', () => {
     expect(e.operator).toEqual('Sort');
   });
 
-  // Regression: Sort/Shuffle always rebuild as `List`, but their `type`
+  // Regression: Sort/RandomShuffle always rebuild as `List`, but their `type`
   // handler returned the source's type — so `Sort(Range(1,5))` statically
   // claimed an indexed_collection/Range shape instead of a list.
   test('Sort static type is list<elt>, not the source type', () => {
@@ -936,10 +938,10 @@ describe('SORT/SHUFFLE REBUILD AS LIST (regression)', () => {
     );
   });
 
-  test('Shuffle static type is list<elt>, not the source type', () => {
-    expect(engine.box(['Shuffle', ['Range', 1, 5]]).type.toString()).toEqual(
-      'list<integer>'
-    );
+  test('RandomShuffle static type is list<elt>, not the source type', () => {
+    expect(
+      engine.box(['RandomShuffle', ['Range', 1, 5]]).type.toString()
+    ).toEqual('list<integer>');
   });
 });
 
@@ -3539,7 +3541,7 @@ describe('At: lenient over-narrowed base (Tycho 19.3)', () => {
 });
 
 // Canonical-time peek through count/membership-preserving wrappers. A consumer
-// like Count evaluates its operand first, so an eager Sort/Shuffle would
+// like Count evaluates its operand first, so an eager Sort/RandomShuffle would
 // materialize the whole collection before the count is read. The rewrite
 // strips these wrappers at canonicalization since they don't change the answer.
 describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
@@ -3552,8 +3554,8 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
     expect(expr.evaluate().toString()).toBe('100000');
   });
 
-  test('Length strips Shuffle', () => {
-    const expr = ce.box(['Length', ['Shuffle', ['Range', 1, 50]]]);
+  test('Length strips RandomShuffle', () => {
+    const expr = ce.box(['Length', ['RandomShuffle', ['Range', 1, 50]]]);
     expect(expr.json).toEqual(['Length', ['Range', 1, 50]]);
     expect(expr.evaluate().toString()).toBe('50');
   });
@@ -3570,7 +3572,7 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
     expect(expr.evaluate().toString()).toBe('10');
   });
 
-  test('Sort comparator/Shuffle seed is dropped by the strip', () => {
+  test('Sort comparator is dropped by the strip', () => {
     const expr = ce.box(['Count', ['Sort', ['List', 3, 1, 2], 'cmp']]);
     expect(expr.json).toEqual(['Count', ['List', 3, 1, 2]]);
     expect(expr.evaluate().toString()).toBe('3');

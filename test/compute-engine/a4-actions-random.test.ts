@@ -56,7 +56,17 @@ describe('A4.1 — Block is sequential (regression)', () => {
   });
 });
 
-describe('A4.2 — Random(seed) polymorphic dispatch', () => {
+// A4.2/A4.3 originally pinned `Random`'s seed-or-bound dispatch and the
+// per-operator `seed` arguments of `Shuffle`/`Sample`. The 2026-07-25 Random
+// family redesign removed all of them: the first operand of `Random` is
+// always a DOMAIN, and seeding is the block-scoped `WithRandomSeed` frame.
+// See `docs/plans/2026-07-25-random-signature-redesign.md` §1 (P1–P8).
+//
+// The exhaustive coverage lives in `random.test.ts`; what is kept here is the
+// A4 action-context shape — a randomized draw used inside an action-style
+// `Block`, which is what the A4 round was about.
+
+describe('A4.2 — Random draws from a domain (no seed argument)', () => {
   test('Random() returns a float in [0,1)', () => {
     const ce = new ComputeEngine();
     const v = ce.expr(['Random']).evaluate().re!;
@@ -64,180 +74,128 @@ describe('A4.2 — Random(seed) polymorphic dispatch', () => {
     expect(v).toBeLessThan(1);
   });
 
-  test('Random(seed) is deterministic — same seed → same value', () => {
+  test('a numeric first operand is now signature-invalid (P1/P2 are gone)', () => {
     const ce = new ComputeEngine();
-    const v1 = ce.expr(['Random', 0.5]).evaluate().re!;
-    const v2 = ce.expr(['Random', 0.5]).evaluate().re!;
-    expect(v1).toEqual(v2);
+    // `Random(0.5)` used to mean "seed", `Random(5)` used to mean "bound",
+    // and `5.0` canonicalized to `5` so an integral seed silently became a
+    // bound. Both spellings are rejected outright now.
+    expect(ce.expr(['Random', 0.5]).isValid).toBe(false);
+    expect(ce.expr(['Random', 5]).isValid).toBe(false);
+    expect(ce.expr(['Random', 10, 20]).isValid).toBe(false);
   });
 
-  test('Random(seed) returns a float in [0,1)', () => {
+  test('Random(Range(m, n)) replaces the old integer-bound forms — INCLUSIVE at both ends', () => {
     const ce = new ComputeEngine();
-    for (const seed of [0.1, 1.5, 42.7, -3.2, 1e6 + 0.5]) {
-      const v = ce.expr(['Random', seed]).evaluate().re!;
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThan(1);
-    }
-  });
-
-  test('Random(seed) varies with seed', () => {
-    const ce = new ComputeEngine();
-    const v1 = ce.expr(['Random', 0.1]).evaluate().re!;
-    const v2 = ce.expr(['Random', 0.2]).evaluate().re!;
-    expect(v1).not.toEqual(v2);
-  });
-
-  test('Random(n) — integer arg — still returns integer in [0, n)', () => {
-    const ce = new ComputeEngine();
-    for (let i = 0; i < 30; i++) {
-      const v = ce.expr(['Random', 5]).evaluate().re!;
-      expect(Number.isInteger(v)).toBe(true);
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThan(5);
-    }
-  });
-
-  test('Random(m, n) — both integer — returns integer in [m, n)', () => {
-    const ce = new ComputeEngine();
-    for (let i = 0; i < 30; i++) {
-      const v = ce.expr(['Random', 10, 20]).evaluate().re!;
+    for (let i = 0; i < 40; i++) {
+      const v = ce.expr(['Random', ['Range', 10, 20]]).evaluate().re!;
       expect(Number.isInteger(v)).toBe(true);
       expect(v).toBeGreaterThanOrEqual(10);
-      expect(v).toBeLessThan(20);
+      expect(v).toBeLessThanOrEqual(20);
     }
   });
 
-  test('Random(seed) matches the hash formula', () => {
+  test('a frame makes a draw deterministic; two evaluations of the frame agree', () => {
     const ce = new ComputeEngine();
-    const seed = 0.5;
-    const expected = (() => {
-      const v = Math.sin(seed * 12.9898) * 43758.5453;
-      return v - Math.floor(v);
-    })();
-    const got = ce.expr(['Random', 0.5]).evaluate().re!;
-    expect(got).toBeCloseTo(expected, 12);
-  });
-
-  test('Random compiles to JS with deterministic-seed support', () => {
-    const ce = new ComputeEngine();
-    const seeded = ce.parse('\\operatorname{Random}(0.7)');
-    const compiledSeeded = compile(seeded);
-    expect(compiledSeeded.success).toBe(true);
-    const fnSeeded = compiledSeeded.run as () => number;
-    const a = fnSeeded();
-    const b = fnSeeded();
-    expect(a).toEqual(b);
+    const framed = (): number =>
+      ce.expr(['WithRandomSeed', 0.7, ['Random']]).evaluate().re!;
+    const a = framed();
+    expect(framed()).toEqual(a);
     expect(a).toBeGreaterThanOrEqual(0);
     expect(a).toBeLessThan(1);
-
-    const unseeded = ce.parse('\\operatorname{Random}()');
-    const compiledUnseeded = compile(unseeded);
-    expect(compiledUnseeded.success).toBe(true);
-    const fnUnseeded = compiledUnseeded.run as () => number;
-    const c = fnUnseeded();
-    expect(c).toBeGreaterThanOrEqual(0);
-    expect(c).toBeLessThan(1);
   });
 
-  test('Random(integer-typed-symbol) routes to integer-bound on GLSL', () => {
+  test('an unframed Random() compiles to JS and stays live', () => {
     const ce = new ComputeEngine();
-    ce.declare('n', 'integer');
-    const expr = ce.expr(['Random', 'n']);
-    const compiled = compile(expr, { to: 'glsl' });
+    const compiled = compile(ce.parse('\\operatorname{Random}()'));
     expect(compiled.success).toBe(true);
-    const glsl = compiled.code;
-    // Integer-bound form must scale a seeded draw by n; result must be a
-    // float-typed expression (so it composes with float arithmetic), not a
-    // bare `_gpu_random(float(n))` (which would be a seeded float in [0,1),
-    // the old A1 bug).
-    expect(glsl).toMatch(/floor.*_gpu_random.*\*\s*float\(n\)/);
-    // No `int(...)` cast — GLSL is strongly typed and `int + float` fails
-    // to compile in strict mode.
-    expect(glsl).not.toMatch(/\bint\(/);
+    const fn = compiled.run as () => number;
+    const v = fn();
+    expect(v).toBeGreaterThanOrEqual(0);
+    expect(v).toBeLessThan(1);
+    // Live, not baked: repeated calls differ.
+    expect(new Set([fn(), fn(), fn(), fn(), fn()]).size).toBe(5);
   });
 
-  test('Random(int) composes with float arithmetic on GLSL (no type errors)', () => {
+  test('a draw inside an action-style Block advances the frame per statement', () => {
     const ce = new ComputeEngine();
-    ce.declare('n', 'integer');
-    const expr = ce.parse('\\operatorname{Random}(n) + 1.5');
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    // The emitted code must not introduce an `int + float` pattern that
-    // strict GLSL drivers reject.
-    expect(compiled.code).not.toMatch(/\bint\(/);
-  });
-
-  test('Random(real-typed-arg) compiles to seeded float on GLSL', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.parse('\\operatorname{Random}(0.5)');
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toMatch(/_gpu_random/);
+    const r = ce
+      .expr([
+        'WithRandomSeed',
+        11,
+        [
+          'Block',
+          ['Assign', 'a', ['Random', ['Range', 1, 100]]],
+          ['Assign', 'b', ['Random', ['Range', 1, 100]]],
+          ['List', 'a', 'b'],
+        ],
+      ])
+      .evaluate();
+    const v = [...r.each()].map((x) => x.re);
+    expect(v).toHaveLength(2);
+    for (const x of v) {
+      expect(Number.isInteger(x)).toBe(true);
+      expect(x).toBeGreaterThanOrEqual(1);
+      expect(x).toBeLessThanOrEqual(100);
+    }
   });
 });
 
-describe('A4.3 — Seeded Shuffle / Sample', () => {
-  test('Shuffle without seed still works (non-deterministic)', () => {
+describe('A4.3 — RandomShuffle / RandomSample (seedless)', () => {
+  test('RandomShuffle is a permutation of the source', () => {
     const ce = new ComputeEngine();
-    const r = ce.expr(['Shuffle', ['List', 1, 2, 3, 4, 5]]).evaluate();
+    const r = ce.expr(['RandomShuffle', ['List', 1, 2, 3, 4, 5]]).evaluate();
     expect(r.operator).toEqual('List');
     expect(r.nops).toEqual(5);
-    const elements = r.ops!.map((x) => x.re).sort();
-    expect(elements).toEqual([1, 2, 3, 4, 5]);
+    expect(r.ops!.map((x) => x.re).sort((a, b) => a! - b!)).toEqual([
+      1, 2, 3, 4, 5,
+    ]);
   });
 
-  test('Shuffle(L, seed) is deterministic', () => {
+  test('a frame makes RandomShuffle deterministic, and different seeds differ', () => {
     const ce = new ComputeEngine();
-    const a = ce.expr(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.7]).evaluate();
-    const b = ce.expr(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.7]).evaluate();
-    expect(a.ops!.map((x) => x.re)).toEqual(b.ops!.map((x) => x.re));
+    const framed = (seed: number): (number | undefined)[] =>
+      [
+        ...ce
+          .expr([
+            'WithRandomSeed',
+            seed,
+            ['RandomShuffle', ['List', 1, 2, 3, 4, 5]],
+          ])
+          .evaluate()
+          .each(),
+      ].map((x) => x.re);
+    expect(framed(0.7)).toEqual(framed(0.7));
+    // P(two seeds agreeing on a 5-element permutation) ≈ 1/120.
+    expect(framed(0.1)).not.toEqual(framed(0.9));
   });
 
-  test('Shuffle(L, seed) varies with seed', () => {
-    const ce = new ComputeEngine();
-    const a = ce.expr(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.1]).evaluate();
-    const b = ce.expr(['Shuffle', ['List', 1, 2, 3, 4, 5], 0.9]).evaluate();
-    // Almost certainly different orderings (P(equal) ≈ 1/120).
-    expect(a.ops!.map((x) => x.re)).not.toEqual(b.ops!.map((x) => x.re));
-  });
-
-  test('Shuffle(L, seed) preserves elements (permutation)', () => {
+  test('RandomSample(L, k) returns k elements drawn from L', () => {
     const ce = new ComputeEngine();
     const r = ce
-      .expr(['Shuffle', ['List', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.5])
+      .expr(['RandomSample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3])
       .evaluate();
-    const elements = r.ops!.map((x) => x.re).sort((a, b) => a! - b!);
-    expect(elements).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-  });
-
-  test('Sample(L, k) without seed still works (non-deterministic)', () => {
-    const ce = new ComputeEngine();
-    const r = ce.expr(['Sample', ['List', 1, 2, 3, 4, 5], 3]).evaluate();
     expect(r.operator).toEqual('List');
     expect(r.nops).toEqual(3);
-  });
-
-  test('Sample(L, k, seed) is deterministic', () => {
-    const ce = new ComputeEngine();
-    const a = ce
-      .expr(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
-      .evaluate();
-    const b = ce
-      .expr(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
-      .evaluate();
-    expect(a.ops!.map((x) => x.re)).toEqual(b.ops!.map((x) => x.re));
-  });
-
-  test('Sample(L, k, seed) returns k distinct elements from L', () => {
-    const ce = new ComputeEngine();
-    const r = ce
-      .expr(['Sample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3, 0.4])
-      .evaluate();
-    expect(r.nops).toEqual(3);
     const got = r.ops!.map((x) => x.re!);
-    const all = [1, 2, 3, 4, 5, 6, 7, 8];
-    for (const v of got) expect(all).toContain(v);
+    for (const v of got) expect([1, 2, 3, 4, 5, 6, 7, 8]).toContain(v);
+    // Distinct source values, and each POSITION is drawn at most once.
     expect(new Set(got).size).toEqual(3);
+  });
+
+  test('a frame makes RandomSample deterministic', () => {
+    const ce = new ComputeEngine();
+    const framed = (): (number | undefined)[] =>
+      [
+        ...ce
+          .expr([
+            'WithRandomSeed',
+            0.4,
+            ['RandomSample', ['List', 1, 2, 3, 4, 5, 6, 7, 8], 3],
+          ])
+          .evaluate()
+          .each(),
+      ].map((x) => x.re);
+    expect(framed()).toEqual(framed());
   });
 });
 

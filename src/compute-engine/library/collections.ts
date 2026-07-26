@@ -33,8 +33,12 @@ import {
   widen,
 } from '../../common/type/utils.js';
 import { interval, intervalContains } from '../numerics/interval.js';
-import { deterministicRandom, nextSeed } from '../numerics/random.js';
-import { CancellationError, run } from '../../common/interruptible.js';
+import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
+import {
+  CancellationError,
+  checkDeadline,
+  run,
+} from '../../common/interruptible.js';
 import { mapAutoCompileRunner } from './map-auto-compile.js';
 import { implicitCompile } from '../implicit-compile.js';
 import type {
@@ -103,25 +107,37 @@ function hasIndexableMember(expr: Expression): boolean {
 // the answer a consumer is about to read.
 //
 // Soundness: `Length`/`Count`/`IsEmpty` depend only on the multiset of
-// elements, so any COUNT-PRESERVING wrapper (`Sort`, `Shuffle`, `Reverse`) can
+// elements, so any COUNT-PRESERVING wrapper (`Sort`, `RandomShuffle`, `Reverse`)
+// can
 // be stripped — the wrapped and unwrapped collections have the same number of
 // elements, whether the operand is concrete or symbolic, evaluated or not.
 // `Contains` depends only on the SET of elements, so it may additionally strip
 // `Unique` (which drops duplicates but preserves membership).
 //
 // Why it matters: consumers evaluate their operand first, so an EAGER wrapper
-// (Sort/Shuffle) would materialize and reorder the whole collection before the
+// (Sort/RandomShuffle) would materialize and reorder the whole collection before
 // consumer reads a count/membership — e.g. `Count(Sort(Range(1,1e5)))` sorted
 // 1e5 elements (~15s) only to discard the order. `Reverse` is lazy and cheap,
 // but is included for structural uniformity (the same soundness argument
 // applies); the real win is the eager wrappers.
 //
 // The strip keeps only the wrapper's first operand and drops any extra
-// arguments (a `Sort` comparator, a `Shuffle` seed) — by design, since those
+// arguments (a `Sort` comparator) — by design, since those
 // cannot change the count/membership. Loops to collapse nesting, e.g.
 // `Count(Reverse(Sort(x))) → Count(x)`.
-const COUNT_PRESERVING_WRAPPERS = ['Sort', 'Shuffle', 'Reverse'];
-const MEMBERSHIP_PRESERVING_WRAPPERS = ['Sort', 'Shuffle', 'Reverse', 'Unique'];
+//
+// Interaction with randomness, RULED (`docs/RANDOMNESS-MODEL.md` §5): stripping
+// `RandomShuffle` means `Count(RandomShuffle(xs))` consumes ZERO draw indices,
+// because the shuffle is never evaluated. That is correct — draw indices are
+// consumed by evaluation and only by evaluation, exactly as an untaken `If`
+// branch consumes none.
+const COUNT_PRESERVING_WRAPPERS = ['Sort', 'RandomShuffle', 'Reverse'];
+const MEMBERSHIP_PRESERVING_WRAPPERS = [
+  'Sort',
+  'RandomShuffle',
+  'Reverse',
+  'Unique',
+];
 
 function peekWrappers(
   op: Expression | undefined,
@@ -144,12 +160,12 @@ function peekWrappers(
   return result;
 }
 
-// Strip count-preserving wrappers (Sort/Shuffle/Reverse) from `op`.
+// Strip count-preserving wrappers (Sort/RandomShuffle/Reverse) from `op`.
 const peekCountPreserving = (
   op: Expression | undefined
 ): Expression | undefined => peekWrappers(op, COUNT_PRESERVING_WRAPPERS);
 
-// Strip membership-preserving wrappers (Sort/Shuffle/Reverse/Unique) from `op`.
+// Strip membership-preserving wrappers (Sort/RandomShuffle/Reverse/Unique).
 // NOTE: `Unique` is membership-preserving but NOT count-preserving, so it is
 // only stripped for `Contains`, never for `Length`/`Count`/`IsEmpty`.
 const peekMembershipPreserving = (
@@ -885,7 +901,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 4000,
     signature: '(any) -> integer',
     type: () => 'integer' as Type,
-    // Peek through count-preserving wrappers so an eager Sort/Shuffle isn't
+    // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a length (see `peekCountPreserving`).
     canonical: (ops, { engine: ce }) => {
       // Run the framework's default flatten step (Sequence-splice + Nothing-
@@ -1622,7 +1638,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(collection, element: any) -> boolean',
     // Peek through membership-preserving wrappers (incl. `Unique`) so an eager
-    // Sort/Shuffle isn't materialized just to test membership (see
+    // Sort/RandomShuffle isn't materialized just to test membership (see
     // `peekMembershipPreserving`).
     canonical: (ops, { engine: ce }) => {
       // Run the framework's default flatten step (Sequence-splice + Nothing-
@@ -1652,7 +1668,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     keywords: ['cardinality'],
     complexity: 8200,
     signature: '(collection) -> integer',
-    // Peek through count-preserving wrappers so an eager Sort/Shuffle isn't
+    // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a count (see `peekCountPreserving`).
     canonical: (ops, { engine: ce }) => {
       // Run the framework's default flatten step (Sequence-splice + Nothing-
@@ -1688,7 +1704,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: ['Return True if the collection is empty, False otherwise.'],
     complexity: 8200,
     signature: '(collection) -> boolean',
-    // Peek through count-preserving wrappers so an eager Sort/Shuffle isn't
+    // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to test emptiness (see `peekCountPreserving`).
     canonical: (ops, { engine: ce }) => {
       // Run the framework's default flatten step (Sequence-splice + Nothing-
@@ -4396,45 +4412,61 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
-  // Randomize the order of the elements in the collection.
-  Shuffle: {
+  // Randomize the order of the elements in the collection. Seeding is
+  // `WithRandomSeed`; there is no seed argument (see
+  // `docs/plans/2026-07-25-random-signature-redesign.md` §5).
+  RandomShuffle: {
     description:
       'Randomize the order of the elements in the collection. ' +
-      'With an optional `seed` argument, the shuffle is deterministic.',
+      'Wrap the call in `WithRandomSeed(seed, ...)` to make it deterministic.',
     complexity: 8200,
-    // Purity is per-operator, not per-form: `Shuffle(xs, seed)` is a
-    // deterministic pure value, but `Shuffle(xs)` draws from the engine
-    // stream, so the operator must declare itself impure (as `Random` does,
-    // even though `Random(seed)` is likewise a pure value). Without this,
-    // `isPure` — and therefore `isConstant` — is true for a shuffle of a
-    // literal list, and the `pure: false` backstop in `map-auto-compile.ts`
-    // does not gate it.
+    // `RandomShuffle(xs)` draws from the engine stream, so the operator must
+    // declare itself impure (as `Random` does). Without this, `isPure` — and
+    // therefore `isConstant` — is true for a shuffle of a literal list, and
+    // the `pure: false` backstop in `map-auto-compile.ts` does not gate it.
     pure: false,
-    signature: '(indexed_collection, real?) -> indexed_collection',
+    signature: '(indexed_collection) -> indexed_collection',
     // The result always rebuilds as a `List` (see `evaluate`), so the static
     // type must be `list<elt>`, not the source's (possibly indexed/Range) type.
     type: ([xs]) =>
       `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
-    evaluate: ([xs, seedOp], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+    evaluate: ([xs], { engine: ce }) => {
+      // An INFINITE collection can never be shuffled: error loudly, matching
+      // `Random`/`RandomSample` (`out-of-range`, "a finite collection").
+      // Only an INDETERMINATE finiteness stays symbolic — that is a "not yet
+      // known", not a "cannot".
+      if (xs.isFiniteCollection === false)
+        return ce.error(['out-of-range', 'a finite collection', xs.toString()]);
+      if (xs.isFiniteCollection === undefined) return undefined;
 
-      const data = Array.from(xs.each());
-      const seed = seedOp?.re;
-      if (seed !== undefined && !Number.isNaN(seed)) {
-        // Deterministic Fisher-Yates with advancing seed.
-        let s = seed;
-        for (let i = data.length - 1; i > 0; i--) {
-          const j = Math.floor(deterministicRandom(s) * (i + 1));
-          [data[i], data[j]] = [data[j], data[i]];
-          s = nextSeed(s);
-        }
-      } else {
-        // No explicit seed: draw from the engine's seeded stream when
-        // `ce.randomSeed` is set, otherwise non-deterministic Fisher-Yates.
-        for (let i = data.length - 1; i > 0; i--) {
-          const j = Math.floor(ce._random() * (i + 1));
-          [data[i], data[j]] = [data[j], data[i]];
-        }
+      // A permutation needs every element, so materializing is inherent —
+      // but `Shuffle(Range(1, 10^9))` would then try to allocate a billion
+      // boxed numbers (an uncatchable heap-OOM, the item-64b class). Refuse
+      // past the size cap, loudly, before allocating.
+      const tooBig = (n: string): Expression =>
+        ce.error([
+          'out-of-range',
+          `a collection of at most ${MAX_RANDOM_ELEMENT_COUNT} elements`,
+          n,
+        ]);
+      const count = xs.count;
+      if (count !== undefined && count > MAX_RANDOM_ELEMENT_COUNT)
+        return tooBig(count.toString());
+
+      const data: Expression[] = [];
+      for (const x of xs.each()) {
+        if ((data.length & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+        // A lazy collection with an unknown count is bounded here instead.
+        if (data.length >= MAX_RANDOM_ELEMENT_COUNT)
+          return tooBig(`more than ${MAX_RANDOM_ELEMENT_COUNT}`);
+        data.push(x);
+      }
+
+      // Fisher-Yates: exactly `n − 1` draws, one per swap.
+      for (let i = data.length - 1; i > 0; i--) {
+        if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+        const j = Math.floor(ce._random() * (i + 1));
+        [data[i], data[j]] = [data[j], data[i]];
       }
 
       // Eager collection results rebuild as `List`, never the source's head

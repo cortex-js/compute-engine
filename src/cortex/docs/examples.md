@@ -315,15 +315,14 @@ N(4 * inside / total)
 // ➔ ≈ 3.14 (varies by run)
 ```
 
-**Reproducible simulations.** `RandomSeed(n)` seeds the random stream, so a
-simulation can be replayed exactly; seeding again with the same value rewinds
-the stream (`RandomSeed()` returns to a non-deterministic stream):
+**Reproducible simulations.** `WithRandomSeed(seed, body)` evaluates `body`
+with a seeded random frame. The block replays exactly, while repeated draws
+*inside* it still differ (the n-th draw of a frame is `hash(seed, n)`). Frames
+nest, and the innermost one wins. Outside any frame, draws are live:
 
 ```cortex
-RandomSeed(7)
-let a = [RandomInteger(1, 100), RandomInteger(1, 100), RandomInteger(1, 100)]
-RandomSeed(7)
-let b = [RandomInteger(1, 100), RandomInteger(1, 100), RandomInteger(1, 100)]
+let a = WithRandomSeed(7, [Random(Range(1, 100)), Random(Range(1, 100))])
+let b = WithRandomSeed(7, [Random(Range(1, 100)), Random(Range(1, 100))])
 a == b
 // ➔ True
 ```

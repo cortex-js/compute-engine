@@ -24,6 +24,7 @@ import type {
 } from './types.js';
 import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { foldSeed } from '../numerics/random.js';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.
@@ -1747,72 +1748,81 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   /**
-   * Deterministic pseudorandom for GPU.
+   * One draw from the counter-based PCG3D stream — the GPU tier of the
+   * random family redesign
+   * (`docs/plans/2026-07-25-random-signature-redesign.md` §2, §4, §7).
    *
-   * All emitted forms return a GLSL `float` (or WGSL `f32`) so the result
-   * composes with surrounding float arithmetic without explicit casts. The
-   * "integer-bound" forms return an integer-valued float (the result of
-   * `floor`), matching the convention used by `Floor` and other ostensibly
-   * integer-returning operators in this target.
+   * Every form returns a GLSL `float` (WGSL `f32`), so it composes with the
+   * surrounding float arithmetic without a cast. The domain forms return an
+   * integer-valued float (the result of `floor`) for a `Range`, matching the
+   * convention `Floor` and the other ostensibly integer-returning operators
+   * of this target use.
    *
-   * - 0 args (GLSL only): fall back to a fragment-coord-derived seed.
-   *   Only meaningful in fragment shaders (gl_FragCoord is FS-only).
-   * - 0 args (WGSL): throws — WGSL has no built-in fragment coordinate;
-   *   caller must provide an explicit seed.
-   * - 1 arg, real-typed: `_gpu_random(seed)` — deterministic float in [0, 1)
-   * - 1 arg, integer-typed: `floor(_gpu_random(float(n)) * float(n))` —
-   *   integer-valued float in {0, 1, ..., n-1}. The seed is derived from
-   *   `n` itself, so the result is per-pixel-and-n deterministic in GLSL.
-   * - 2 args (integer m, n): float in [m, n), seeded from gl_FragCoord.
+   * | Form | GLSL | WGSL |
+   * |---|---|---|
+   * | `Random()` inside `WithRandomSeed` | `hash(seed, n)` | `hash(seed, n)` |
+   * | `Random(Interval/Range)` inside a frame | arithmetic on the draw | same |
+   * | `Random()` unframed | fragment stage: spatial noise; any other stage **throws** | **throws** |
+   * | `Random(collection)` | **throws** — no general indexing | **throws** |
    *
-   * JS-side `Random` has matching semantics (see `library/core.ts`'s
-   * polymorphic dispatch). JS↔GLSL parity is approximate — same seed yields
-   * a similar value, not bit-identical, due to fp64 vs fp32 and platform
-   * `sin` differences.
+   * The presented value is `(w0 >> 8) * 2⁻²⁴` — an EXACT power-of-two
+   * conversion of the top 24 bits of the same `w0` the f64 tier is built
+   * from, so the two tiers agree to within 2⁻²⁴ by construction rather than
+   * by tuning. See `gpuRandomDraw`.
    */
   Random: (args, compile, target) => {
-    if (args.length === 0) {
-      if (target.language === 'wgsl') {
-        throw new Error(
-          'Random(): WGSL compile requires an explicit seed argument. ' +
-            'WGSL has no gl_FragCoord built-in outside fragment entry points, ' +
-            'so the no-arg fallback used in GLSL is unavailable. ' +
-            'Use Random(seed) where seed is a deterministic per-invocation value.'
-        );
-      }
-      // GLSL fragment-shader fallback: derive a per-pixel seed from the
-      // fragment coordinates. The 1024.0 multiplier separates rows in seed
-      // space; viewport widths > 1024 px will alias (two pixels can produce
-      // the same seed). Acceptable for typical viewport sizes.
-      return '_gpu_random(gl_FragCoord.x + gl_FragCoord.y * 1024.0)';
+    if (args.length === 0) return gpuRandomDraw(target);
+    if (args.length === 1) return gpuRandomDomainDraw(args[0], compile, target);
+    throw new Error(
+      'Random: expects at most one operand, the DOMAIN to draw from ' +
+        '(`Random()`, `Random(Interval(a, b))`, `Random(Range(…))`). The ' +
+        'seed argument was removed by the Random family redesign — seed with ' +
+        '`WithRandomSeed(seed, body)`.'
+    );
+  },
+
+  /**
+   * A LEXICALLY scoped random-seed frame (§4 "The GPU boundary is genuinely
+   * one-domain"). A shader invocation cannot share the host's mutable draw
+   * counter, and fragments run in parallel, so a GPU frame lives entirely
+   * inside the shader: the seed is folded (see `gpuFoldSeedSource` for the
+   * seed ABI) and the frame gets its own invocation-local u32 counter, which
+   * every invocation starts at 0.
+   *
+   * `WithRandomSeed` returns its body's value, so the emission is the body's
+   * code — the frame exists only as the counter the enclosed draws consume.
+   * Nested frames each allocate their own counter, so an inner frame cannot
+   * perturb its parent's subsequent draws (the §2 per-frame-counter rule).
+   */
+  WithRandomSeed: (args, compile, target) => {
+    if (args.length !== 2)
+      throw new Error(
+        'WithRandomSeed(seed, body): expects exactly two operands'
+      );
+    const state = gpuRandomState(target);
+    // The seed is folded ONCE per frame, before the body is compiled.
+    const seed = gpuFoldSeedSource(args[0], compile, target);
+    const counter = allocGPURandomCounter(state);
+    state.frames.push({ seed, counter });
+    try {
+      return compile(args[1]);
+    } finally {
+      state.frames.pop();
     }
-    if (args.length === 1) {
-      const arg = args[0];
-      // Integer-typed → integer-valued float in {0, ..., n-1}. Emit `floor`
-      // (returns float in GLSL) rather than `int(floor(...))` so the result
-      // remains a float and composes with mixed-precision arithmetic.
-      if (BaseCompiler.isIntegerValued(arg)) {
-        const compiled = compile(arg);
-        return `floor(_gpu_random(float(${compiled})) * float(${compiled}))`;
-      }
-      // Real-typed → seeded float (existing behavior).
-      return `_gpu_random(${compile(arg)})`;
-    }
-    if (args.length === 2) {
-      // Random(m, n) — integer-valued float in [m, n)
-      if (target.language === 'wgsl') {
-        throw new Error(
-          'Random(m, n): WGSL compile requires explicit seeding. ' +
-            'Use a seeded variant or compute the integer range manually.'
-        );
-      }
-      const m = compile(args[0]);
-      const n = compile(args[1]);
-      // Seed the integer draw from gl_FragCoord (GLSL fragment-shader path).
-      const seed = '_gpu_random(gl_FragCoord.x + gl_FragCoord.y * 1024.0)';
-      return `(float(${m}) + floor(${seed} * float((${n}) - (${m}))))`;
-    }
-    throw new Error('Random: GPU compile expects 0, 1, or 2 arguments');
+  },
+
+  // The multi-draw members of the family need general collection indexing (or
+  // a mutable permutation buffer), which a shader expression has no way to
+  // express. Fail closed (D6) with the reason rather than let them fall
+  // through to a bare `Unknown operator`.
+  RandomChoice: (_args, _compile, target) => {
+    throw new Error(gpuNoIndexingMessage('RandomChoice(domain, k)', target));
+  },
+  RandomSample: (_args, _compile, target) => {
+    throw new Error(gpuNoIndexingMessage('RandomSample(xs, k)', target));
+  },
+  RandomShuffle: (_args, _compile, target) => {
+    throw new Error(gpuNoIndexingMessage('RandomShuffle(xs)', target));
   },
 
   // Function (lambda) — not supported in GPU
@@ -1822,6 +1832,470 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
 };
+
+//
+// ─── Counter-based random draws (PCG3D) ─────────────────────────────────────
+//
+// The GPU tier of `docs/plans/2026-07-25-random-signature-redesign.md`. The
+// n-th draw of a frame is `hash(seed, n)` — a pure function of the seed and
+// the draw index — so a shader, which has no persistent stream and cannot
+// carry mutable RNG state across invocations, can still replay a frame.
+//
+// Three things make the tier well-defined:
+//
+// 1. `pcg3d` is transcribed VERBATIM from the paper (§2 of the design), pure
+//    u32 arithmetic, so it is a transcription on every target rather than an
+//    independent reimplementation. `pcg3dWords` in `numerics/random.ts` is
+//    the reference: the shader must compute the identical integer words.
+// 2. The presentation is `(w0 >> 8) * 2⁻²⁴` — an EXACT power-of-two scaling
+//    of the top 24 bits of `w0`, never implementation-rounded float math.
+//    The f64 tier is built from the SAME `w0`, so the tiers agree to within
+//    2⁻²⁴ by construction.
+// 3. Frames are LEXICAL (§4): the seed is folded in the shader (or on the
+//    host, for a literal — see `gpuFoldSeedSource`) and each frame owns an
+//    invocation-local u32 counter that every invocation starts at 0.
+//
+
+/**
+ * Per-compilation state for the counter-based random draws.
+ *
+ * Installed eagerly by `GPUShaderTarget.createTarget()` so it survives the
+ * `{ ...target }` spreads the base compiler makes while recursing — the state
+ * object is shared by reference, which is what lets a `WithRandomSeed` handler
+ * push a frame that the `Random` handlers nested inside its body can see.
+ */
+export type GPURandomState = {
+  /** The stack of enclosing LEXICAL frames, innermost last. */
+  frames: Array<{ seed: string; counter: string }>;
+
+  /** How many counter variables have been allocated (names are positional). */
+  counters: number;
+
+  /** The counter shared by unframed (spatial-noise) draws, allocated lazily. */
+  spatialCounter: string | undefined;
+
+  /**
+   * The shader stage being compiled, when known. `undefined` means the caller
+   * did not say — the `compile()`/`compileToSource()` entry points — and the
+   * historical fragment-shader assumption applies. `compileShader()` sets it,
+   * which is what makes the §7 vertex-stage check possible.
+   */
+  stage: string | undefined;
+
+  /**
+   * Whether a HOST `WithRandomSeed` frame was active when this GPU compile
+   * ran. An unframed shader draw is then the cross-domain case (§4) and fails
+   * closed — never a silent live/spatial draw.
+   */
+  hostFrame: boolean;
+
+  /**
+   * The names the caller mapped through `vars`, when the entry point knows
+   * them. A seed that resolves to one of these is the HOST-UNIFORM row of the
+   * seed ABI, which is not implemented — see `gpuFoldSeedSource`.
+   */
+  varNames: ReadonlySet<string> | undefined;
+};
+
+type GPURandomTarget = CompileTarget<Expression> & {
+  /**
+   * The identity of the compilation this target belongs to.
+   *
+   * The state itself lives in the module-level `GPU_RANDOM_STATES` map, never
+   * on the target, so a CALLER-supplied target is not mutated (and does not
+   * carry counter numbering from one compilation into the next). The token is
+   * a plain enumerable property because the base compiler recurses through
+   * `{ ...target }` spreads: those copy the token BY REFERENCE, which is what
+   * keeps a frame pushed by `WithRandomSeed` visible to the draws nested in
+   * its body.
+   */
+  gpuRandomRoot?: object;
+};
+
+/**
+ * Per-compilation random state, keyed by the compilation's root token — or,
+ * for a hand-rolled target that never went through `createTarget()`, by the
+ * target itself. Never stored ON the target.
+ */
+const GPU_RANDOM_STATES = new WeakMap<object, GPURandomState>();
+
+/** A fresh (empty) random state — one per compilation. */
+export function newGPURandomState(): GPURandomState {
+  return {
+    frames: [],
+    counters: 0,
+    spatialCounter: undefined,
+    stage: undefined,
+    hostFrame: false,
+    varNames: undefined,
+  };
+}
+
+/**
+ * Give `target` — freshly created by `createTarget()`, so ours to write to —
+ * its own compilation identity and a fresh random state.
+ */
+function installGPURandomState(target: GPURandomTarget): void {
+  const token = {};
+  target.gpuRandomRoot = token;
+  GPU_RANDOM_STATES.set(token, newGPURandomState());
+}
+
+/**
+ * The random state of the compilation `target` belongs to. A hand-rolled
+ * target that never went through `createTarget()` gets one keyed by the target
+ * object itself — enough for a single unframed draw, and without writing
+ * anything to the caller's object.
+ */
+export function gpuRandomState(
+  target: CompileTarget<Expression>
+): GPURandomState {
+  const key = (target as GPURandomTarget).gpuRandomRoot ?? target;
+  let state = GPU_RANDOM_STATES.get(key);
+  if (state === undefined) {
+    state = newGPURandomState();
+    GPU_RANDOM_STATES.set(key, state);
+  }
+  return state;
+}
+
+/**
+ * Allocate the next invocation-local counter variable.
+ *
+ * Each frame owns one, plus one shared by the unframed spatial-noise draws.
+ * The counter is a shader global (`var<private>` in WGSL): per-invocation and
+ * initialized before the entry point runs, so every invocation runs each of
+ * its frames from `n = 0`.
+ *
+ * Caveat worth knowing: GLSL and WGSL leave the evaluation ORDER of an
+ * expression's operands unspecified, so which of two sibling draws in one
+ * frame gets `n = 0` is not pinned by the source. The set of values drawn is,
+ * and so is each draw's own determinism — but `Random() - Random()` inside one
+ * frame may differ in sign between GPU drivers. The host tiers, which evaluate
+ * left to right, do not have this freedom.
+ */
+function allocGPURandomCounter(state: GPURandomState): string {
+  return `_gpu_rnd_n${state.counters++}`;
+}
+
+/** The prefix every allocated counter name carries (scanned for by the
+ * preamble assembly). */
+const GPU_RANDOM_COUNTER_PREFIX = '_gpu_rnd_n';
+
+/** How a draw site passes its counter: GLSL takes it by `inout`, WGSL by a
+ * pointer into the private address space. */
+function gpuCounterArg(name: string, language: string | undefined): string {
+  return language === 'wgsl' ? `&${name}` : name;
+}
+
+/** A `uvec2` (WGSL `vec2<u32>`) literal holding the two folded seed words. */
+function gpuSeedWords(
+  lo: number,
+  hi: number,
+  language: string | undefined
+): string {
+  const hex = (w: number) => `0x${(w >>> 0).toString(16).padStart(8, '0')}u`;
+  const ctor = language === 'wgsl' ? 'vec2<u32>' : 'uvec2';
+  return `${ctor}(${hex(lo)}, ${hex(hi)})`;
+}
+
+/**
+ * One draw `u ∈ [0, 1)`.
+ *
+ * Inside a lexical frame this is `_gpu_rnd_draw(seed, n)`, which advances the
+ * frame's own counter. Outside any frame it is the GLSL fragment-shader
+ * spatial-noise exception (§7): a `gl_FragCoord`-derived seed through the same
+ * PCG3D stream, with an invocation-local counter so repeated unframed draws
+ * decorrelate instead of returning one value. Every other unframed case throws.
+ */
+function gpuRandomDraw(target: CompileTarget<Expression>): string {
+  const state = gpuRandomState(target);
+  const language = target.language;
+
+  const frame = state.frames[state.frames.length - 1];
+  if (frame !== undefined)
+    return `_gpu_rnd_draw(${frame.seed}, ${gpuCounterArg(
+      frame.counter,
+      language
+    )})`;
+
+  // Unframed. The cross-domain case first (§4): the enclosing frame lives on
+  // the HOST, whose mutable counter a parallel shader invocation cannot share.
+  if (state.hostFrame)
+    throw new Error(
+      'Random(): an unframed draw cannot be compiled to a shader while a host ' +
+        '`WithRandomSeed` frame is active — a shader invocation cannot share ' +
+        "the host's mutable draw counter, and fragments run in parallel. GPU " +
+        'frames must be LEXICAL: move the `WithRandomSeed(seed, …)` inside the ' +
+        'compiled expression. Fail closed (D6).'
+    );
+
+  if (language === 'wgsl')
+    throw new Error(
+      'Random(): an unframed draw cannot be compiled to WGSL — a shader has no ' +
+        'live random stream, and WGSL has no `gl_FragCoord` built-in to derive ' +
+        'spatial noise from. Wrap the draw in `WithRandomSeed(seed, …)`, whose ' +
+        'seed may be an invocation-varying expression. Fail closed (D6).'
+    );
+
+  // `gl_FragCoord` exists only in a fragment shader. A vertex (or other) stage
+  // fails at CE compile time rather than emitting code that fails later, at
+  // GPU shader-compile time. An UNKNOWN stage keeps the historical
+  // fragment-shader assumption of the `compile()` entry points.
+  if (state.stage !== undefined && state.stage !== 'fragment')
+    throw new Error(
+      `Random(): an unframed draw compiles to \`gl_FragCoord\`-derived spatial ` +
+        `noise, which exists only in a fragment shader (this is a ` +
+        `\`${state.stage}\` shader). Wrap the draw in ` +
+        `\`WithRandomSeed(seed, …)\` to get a stage-independent stream. ` +
+        `Fail closed (D6).`
+    );
+
+  state.spatialCounter ??= allocGPURandomCounter(state);
+  // A fragment's coordinate is stable across renders, so this is DETERMINISTIC
+  // SPATIAL NOISE, not the live randomness an unframed draw has on the host —
+  // the one documented exception to the liveness contract (§7). Both
+  // coordinates are reinterpreted whole, so there is no row-aliasing bound.
+  return (
+    `_gpu_rnd_draw(uvec2(floatBitsToUint(gl_FragCoord.x), ` +
+    `floatBitsToUint(gl_FragCoord.y)), ${state.spatialCounter})`
+  );
+}
+
+/** The message for a random form that would need general collection indexing. */
+function gpuNoIndexingMessage(
+  form: string,
+  target: CompileTarget<Expression>
+): string {
+  const lang = target.language ?? 'GPU';
+  return (
+    `${form} is not supported on the ${lang} target: a shader expression has ` +
+    `no general collection indexing. Only \`Random()\`, ` +
+    `\`Random(Interval(a, b))\` and \`Random(Range(…))\` compile — the ` +
+    `closed-form domains. Fail closed (D6).`
+  );
+}
+
+/**
+ * `Random(domain)` — the closed-form domains only.
+ *
+ * `Interval` → `lo + u * (hi - lo)`; `Range` → `first + step * floor(u * n)`
+ * over the range's NORMALIZED parameters, matching the interpreter's
+ * `selectRandomElement` (`library/core.ts`) term for term. Any other domain
+ * would need indexing, so it fails closed.
+ */
+function gpuRandomDomainDraw(
+  domain: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  if (isFunction(domain, 'Interval')) {
+    if (domain.nops !== 2)
+      throw new Error('Random(Interval(a, b)): expects two endpoints');
+    // Endpoint markers are IGNORED — a float draw cannot respect an open
+    // endpoint, so the draw is half-open `[lo, hi)` either way.
+    const strip = (x: Expression): Expression =>
+      isFunction(x, 'Open') || isFunction(x, 'Closed') ? x.op1 : x;
+    const loExpr = strip(domain.op1);
+    const hiExpr = strip(domain.op2);
+
+    // Endpoints are SPLICED into the emitted expression — `lo` twice — because
+    // a shader expression has no statement to evaluate them into once. Pure
+    // arithmetic on uniforms is only an ALU cost, but an endpoint that
+    // consumes draws would consume a different NUMBER of them than the host.
+    // Fail closed (D6).
+    for (const [role, endpoint] of [
+      ['lower', loExpr],
+      ['upper', hiExpr],
+    ] as const)
+      if (!endpoint.canonical.isPure)
+        throw new Error(
+          `Random(Interval(a, b)): the ${role} endpoint is not pure — a ` +
+            `shader expression has no statement to evaluate it into once, so ` +
+            `the endpoint is spliced (and would run) more than once per ` +
+            `draw. Hoist the draw out of the endpoint. Fail closed (D6).`
+        );
+
+    const lo = tryGetConstant(loExpr);
+    const hi = tryGetConstant(hiExpr);
+    if (lo !== undefined && hi !== undefined) {
+      if (!(hi > lo))
+        throw new Error(
+          `Random(Interval(${lo}, ${hi})): the interval is empty or reversed ` +
+            `— there is no uniform distribution to draw from.`
+        );
+      return `(${formatGPUNumber(lo)} + ${gpuRandomDraw(
+        target
+      )} * ${formatGPUNumber(hi - lo)})`;
+    }
+    // Symbolic endpoints (typically uniforms) stay live. `lo` is spliced
+    // twice, so an endpoint with a side effect (a nested draw) would be
+    // consumed twice — endpoints are expected to be uniforms or constants.
+    const loSrc = compile(loExpr);
+    const hiSrc = compile(hiExpr);
+    return `((${loSrc}) + ${gpuRandomDraw(
+      target
+    )} * ((${hiSrc}) - (${loSrc})))`;
+  }
+
+  if (isFunction(domain, 'Range')) {
+    const n = domain.count;
+    if (n === undefined || !Number.isFinite(n))
+      throw new Error(
+        'Random(Range(…)): the GPU target requires a Range with constant, ' +
+          'finite bounds — a symbolic or unbounded range has no known element ' +
+          'count to draw from. Fail closed (D6).'
+      );
+    if (n === 0)
+      throw new Error('Random(Range(…)): the range is empty (no elements).');
+
+    // The normalized (first, step) of the range — mirrors `range()` in
+    // `library/collections.ts`: a two-operand range infers a DESCENDING step
+    // when its bounds are reversed (`Range(7, 2)`).
+    const ops = domain.ops;
+    let first: number;
+    let step: number;
+    if (ops.length === 1) {
+      first = 1;
+      step = 1;
+    } else if (ops.length === 2) {
+      first = ops[0].re;
+      step = ops[1].re >= ops[0].re ? 1 : -1;
+    } else {
+      first = ops[0].re;
+      step = ops[2].re;
+    }
+    if (!Number.isFinite(first) || !Number.isFinite(step))
+      throw new Error(
+        'Random(Range(…)): the GPU target requires constant numeric bounds.'
+      );
+
+    const index = `floor(${gpuRandomDraw(target)} * ${formatGPUNumber(n)})`;
+    // `first + step * index`, with the sign lifted out of the literal so a
+    // descending range emits `(7.0 - 1.0 * …)` rather than `(7.0 + -1.0 * …)`.
+    const sign = step < 0 ? '-' : '+';
+    const magnitude = Math.abs(step);
+    if (magnitude === 1) return `(${formatGPUNumber(first)} ${sign} ${index})`;
+    return `(${formatGPUNumber(first)} ${sign} ${formatGPUNumber(
+      magnitude
+    )} * ${index})`;
+  }
+
+  throw new Error(gpuNoIndexingMessage('Random(collection)', target));
+}
+
+/**
+ * The GPU seed ABI (§7). Which fold applies is decided by WHERE the seed value
+ * lives, because a shader has neither f64 nor strings and so cannot run the
+ * normative `foldSeed`:
+ *
+ * | Seed form | Folding | Stream identity |
+ * |---|---|---|
+ * | compile-time constant (number or string literal, a declared constant such as `Pi`, an assigned engine value) | HOST `foldSeed`, emitted as a `uvec2` constant | **identical** to the interpreted/JS stream |
+ * | a FREE symbol the shader supplies (uniform/varying, not in `vars`) | in-shader `floatBitsToUint` / `bitcast<u32>`, `seedHi = 0u` | its OWN stream — deterministic given the seed BITS |
+ * | a `vars`-mapped symbol (a HOST-supplied uniform) | — | **compile error**: the host-uniform ABI row is not implemented |
+ * | a COMPUTED expression | — | **compile error**: the seed is spliced per draw site |
+ * | a string computed at run time | impossible in a shader | **compile error** |
+ *
+ * The last two rows are the once-evaluation rule. The emitted seed source is
+ * spliced into EVERY draw site of the frame — a shader expression has no
+ * statement to evaluate it into once — so anything but a constant or a single
+ * identifier would be recomputed per draw (and, if it consumed draws, would
+ * silently change the draw count). Symbol handling is therefore: a symbol that
+ * resolves to a VALUE folds on the host; a symbol the caller mapped through
+ * `vars` fails closed (below); any other symbol is a name the shader itself
+ * must declare, and stays live as its own stream.
+ *
+ * A bit reinterpretation is exact, so the derived stream is bit-deterministic
+ * given the seed bits; the seed's own f32 value remains subject to ordinary
+ * GPU float variance. Determinism claims stop at the fold's input.
+ */
+function gpuFoldSeedSource(
+  seedExpr: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const language = target.language;
+
+  if (isString(seedExpr)) {
+    const [lo, hi] = foldSeed(seedExpr.string);
+    return gpuSeedWords(lo, hi, language);
+  }
+  if (seedExpr.type.matches('string'))
+    throw new Error(
+      'WithRandomSeed(seed, …): a string seed that is not a compile-time ' +
+        'literal cannot be folded in a shader — GLSL and WGSL have no ' +
+        'strings. Use a literal string, a numeric seed, or fold the seed on ' +
+        'the host. Fail closed (D6).'
+    );
+
+  // `WithRandomSeed` is `lazy`, so the held seed arrives UNBOUND on the box
+  // and parse routes: canonicalize before asking it anything. (`.canonical` is
+  // value-safe — it binds structure without substituting assigned values.)
+  const seed = seedExpr.canonical;
+
+  // The seed source is spliced at every draw site, so a seed with a side
+  // effect — a nested draw above all — would run once per draw. Fail closed
+  // (D6) rather than silently consume extra draws.
+  if (!seed.isPure)
+    throw new Error(
+      'WithRandomSeed(seed, …): the seed expression is not pure — the folded ' +
+        'seed is spliced at EVERY draw site of the frame, so it would be ' +
+        'evaluated once per draw. Use a compile-time constant or a single ' +
+        'shader-supplied symbol. Fail closed (D6).'
+    );
+
+  // A compile-time constant — a literal, a declared constant such as `Pi`, or
+  // an assigned engine value — folds on the HOST with the normative
+  // `foldSeed`, so the shader draws the SAME integer stream as the interpreter
+  // and the JS target. Read off the EXPRESSION, never off the emitted source:
+  // `Pi` emits the truncated `3.14159265359`, which folds to a different f64
+  // than `Math.PI`.
+  const value = tryGetConstant(seed) ?? tryGetConstant(seed.N());
+  if (value !== undefined) {
+    const [lo, hi] = foldSeed(value);
+    return gpuSeedWords(lo, hi, language);
+  }
+
+  const symbol = isSymbol(seed) ? seed.symbol : undefined;
+  if (symbol === undefined)
+    throw new Error(
+      'WithRandomSeed(seed, …): a COMPUTED seed expression cannot be ' +
+        'compiled to a shader — the folded seed is spliced at every draw ' +
+        'site of the frame, so it would be recomputed per draw. Use a ' +
+        'compile-time constant seed (host-identical stream) or a single ' +
+        'shader-supplied symbol (its own stream). Fail closed (D6).'
+    );
+
+  const mapped = target.var(symbol);
+  if (mapped !== undefined) {
+    if (gpuRandomState(target).varNames?.has(symbol))
+      throw new Error(
+        `WithRandomSeed(${symbol}, …): a seed supplied through \`vars\` ` +
+          `(\`${symbol}\` → \`${mapped}\`) is the HOST-UNIFORM row of the ` +
+          `seed ABI, which is not implemented: the host folds an f64 seed ` +
+          `with \`foldSeed\` into TWO words, while a shader can only ` +
+          `reinterpret the f32 bits it receives (\`seedHi = 0u\`), so the ` +
+          `shader would silently draw a DIFFERENT stream than the host. Use ` +
+          `either a compile-time literal seed — the host-identical stream — ` +
+          `or an explicitly invocation-varying seed symbol that is NOT in ` +
+          `\`vars\`, which owns its own stream. Fail closed (D6).`
+      );
+    throw new Error(
+      `WithRandomSeed(${symbol}, …): the seed resolves to the shader ` +
+        `constant \`${mapped}\`, which the seed ABI cannot fold. Use a ` +
+        `compile-time numeric or string seed. Fail closed (D6).`
+    );
+  }
+
+  // A free symbol: the shader supplies its value (a uniform or varying the
+  // caller declares), so there is no host counterpart to agree with and the
+  // frame derives its OWN stream from the seed's BITS.
+  const src = compile(seed).trim();
+  return language === 'wgsl'
+    ? `vec2<u32>(bitcast<u32>(${src}), 0u)`
+    : `uvec2(floatBitsToUint(${src}), 0u)`;
+}
 
 /**
  * Compile a Matrix expression to GPU-native types when possible.
@@ -2663,32 +3137,55 @@ fn _gpu_gcd(a_in: f32, b_in: f32) -> f32 {
 `;
 
 /**
- * GPU Random preamble (GLSL syntax).
+ * GPU Random preamble (GLSL syntax) — PCG3D.
  *
- * Deterministic pseudorandom in [0, 1) from a float seed.
- * Standard fract-sin hash; reproducible across runs for the same seed.
- * Note: this hash exhibits visible banding near seed ≈ kπ for integer k.
- * For high-quality shader random, callers should use a more robust hash
- * (e.g. PCG or xxHash) and pre-seed it appropriately.
+ * `_gpu_pcg3d` is transcribed VERBATIM from Jarzynski & Olano, *Hash Functions
+ * for GPU Rendering*, JCGT 2020, §6 — the same listing `pcg3d()` in
+ * `numerics/random.ts` transcribes. Pure u32 arithmetic (exact on ES 3.00+),
+ * so the shader computes the identical integer words as the host for identical
+ * inputs; changing a constant or the operation order is a BREAKING change to
+ * the seed→stream mapping, pinned by `test/compute-engine/random-vectors.test.ts`.
+ *
+ * The cross-multiply-adds are SEQUENTIAL — `v.y += v.z*v.x` reads the `v.x`
+ * just updated.
+ *
+ * `_gpu_rnd_draw` presents `w0` as `(w0 >> 8) * 2⁻²⁴`: the top 24 bits scaled
+ * by an exact power of two, never implementation-rounded float math. It
+ * advances the caller's invocation-local counter, taken by `inout`, so
+ * repeated draws in one frame decorrelate.
  */
-export const GPU_RANDOM_PREAMBLE_GLSL = `
-float _gpu_random(float seed) {
-  return fract(sin(seed * 12.9898) * 43758.5453);
+export const GPU_PCG3D_PREAMBLE_GLSL = `
+uvec3 _gpu_pcg3d(uvec3 v) {
+  v = v * 1664525u + 1013904223u;
+  v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;
+  v ^= v >> 16u;
+  v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;
+  return v;
+}
+float _gpu_rnd_draw(uvec2 seed, inout uint n) {
+  uvec3 w = _gpu_pcg3d(uvec3(seed.x, seed.y, n));
+  n = n + 1u;
+  return float(w.x >> 8u) * (1.0 / 16777216.0);
 }
 `;
 
 /**
- * GPU Random preamble (WGSL syntax).
- *
- * Deterministic pseudorandom in [0, 1) from a float seed.
- * Standard fract-sin hash; reproducible across runs for the same seed.
- * Note: this hash exhibits visible banding near seed ≈ kπ for integer k.
- * For high-quality shader random, callers should use a more robust hash
- * (e.g. PCG or xxHash) and pre-seed it appropriately.
+ * GPU Random preamble (WGSL syntax) — PCG3D. See
+ * `GPU_PCG3D_PREAMBLE_GLSL` for the algorithm notes; this is the same
+ * transcription with WGSL's `var<private>` counters passed by pointer.
  */
-export const GPU_RANDOM_PREAMBLE_WGSL = `
-fn _gpu_random(seed: f32) -> f32 {
-  return fract(sin(seed * 12.9898) * 43758.5453);
+export const GPU_PCG3D_PREAMBLE_WGSL = `
+fn _gpu_pcg3d(v_in: vec3<u32>) -> vec3<u32> {
+  var v = v_in * 1664525u + 1013904223u;
+  v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;
+  v = v ^ (v >> vec3<u32>(16u));
+  v.x += v.y*v.z; v.y += v.z*v.x; v.z += v.x*v.y;
+  return v;
+}
+fn _gpu_rnd_draw(seed: vec2<u32>, n: ptr<private, u32>) -> f32 {
+  let w = _gpu_pcg3d(vec3<u32>(seed.x, seed.y, *n));
+  *n = *n + 1u;
+  return f32(w.x >> 8u) * (1.0 / 16777216.0);
 }
 `;
 
@@ -3623,7 +4120,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const functions = this.getFunctions();
     const constants = this.getConstants();
     const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
-    return {
+    const target: GPURandomTarget = {
       language: this.languageId,
       // A shader has no expression-level loop or IIFE, so the multi-statement
       // block forms (loop-form Sum/Product, Loop, Block) are only valid at
@@ -3693,6 +4190,31 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       },
       ...options,
     };
+    // Per-compilation random state (§7 of the Random family redesign),
+    // installed EAGERLY: the base compiler recurses through `{ ...target }`
+    // spreads, which copy the identity token by reference, so a
+    // `WithRandomSeed` frame pushed here is visible to the `Random` draws
+    // nested in its body. The state itself is held off the target.
+    installGPURandomState(target);
+    return target;
+  }
+
+  /**
+   * A target for compiling `expr`, with the random-draw context (§7) stamped
+   * on it: the shader stage when the caller knows it, and whether a HOST
+   * `WithRandomSeed` frame is active — the cross-domain case an unframed
+   * shader draw must fail closed on.
+   */
+  protected createTargetFor(
+    expr: Expression | undefined,
+    stage?: string,
+    options: Partial<CompileTarget<Expression>> = {}
+  ): CompileTarget<Expression> {
+    const target = this.createTarget(options);
+    const state = gpuRandomState(target);
+    state.stage = stage;
+    state.hostFrame = expr?.engine?._randomFrame !== undefined;
+    return target;
   }
 
   compile(
@@ -3730,7 +4252,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const constants = this.getConstants();
 
     const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
-    const target = this.createTarget({
+    const target = this.createTargetFor(expr, undefined, {
       functions: (id) => {
         if (userFunctions && id in userFunctions) {
           const fn = userFunctions[id];
@@ -3753,6 +4275,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         return undefined;
       },
     });
+    // The `vars` names, for the seed ABI check (§7): a seed that resolves to a
+    // HOST-supplied uniform is the deferred ABI row, and must fail loudly
+    // rather than silently draw a different stream than the host.
+    if (vars) gpuRandomState(target).varNames = new Set(Object.keys(vars));
 
     const code = BaseCompiler.compile(expr, target);
     const result: CompilationResult = {
@@ -3760,6 +4286,26 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       success: true,
       code,
     };
+    const preamble = this.preambleFor(code);
+    if (preamble) result.preamble = preamble;
+
+    return BaseCompiler.withReferences(
+      result,
+      expr,
+      target,
+      vars ? new Set(Object.keys(vars)) : undefined
+    );
+  }
+
+  /**
+   * The helper-function preamble required by `code` — every `_gpu_*` (and
+   * complex/fractal) helper the emission references, in dependency order.
+   * Used by `compileOrThrow` (which returns it as `CompilationResult.preamble`
+   * for the caller to splice) and by `compileShader` (which splices it into
+   * the emitted shader ahead of `main()`, since that route returns a complete
+   * shader with no separate preamble channel).
+   */
+  protected preambleFor(code: string): string {
     let preamble = '';
     preamble += buildComplexPreamble(code, this.languageId);
     // Only GLSL emits `_gpu_nan()` (WGSL uses an inline bit pattern); the helper
@@ -3816,11 +4362,34 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           ? GPU_FRACTAL_PREAMBLE_WGSL
           : GPU_FRACTAL_PREAMBLE_GLSL;
     }
-    if (code.includes('_gpu_random'))
+    if (code.includes('_gpu_rnd_draw')) {
+      // One invocation-local u32 counter per frame (plus one shared by the
+      // unframed spatial-noise draws). A shader global / WGSL `var<private>`
+      // is per-invocation and initialized before the entry point runs, so
+      // every invocation runs each of its frames from `n = 0`.
+      const counters = [
+        ...new Set(
+          code.match(new RegExp(`${GPU_RANDOM_COUNTER_PREFIX}\\d+`, 'g')) ?? []
+        ),
+      ].sort(
+        (a, b) =>
+          Number(a.slice(GPU_RANDOM_COUNTER_PREFIX.length)) -
+          Number(b.slice(GPU_RANDOM_COUNTER_PREFIX.length))
+      );
+      preamble +=
+        '\n' +
+        counters
+          .map((n) =>
+            this.languageId === 'wgsl'
+              ? `var<private> ${n}: u32 = 0u;\n`
+              : `uint ${n} = 0u;\n`
+          )
+          .join('');
       preamble +=
         this.languageId === 'wgsl'
-          ? GPU_RANDOM_PREAMBLE_WGSL
-          : GPU_RANDOM_PREAMBLE_GLSL;
+          ? GPU_PCG3D_PREAMBLE_WGSL
+          : GPU_PCG3D_PREAMBLE_GLSL;
+    }
     if (code.includes('_gpu_gcd'))
       preamble +=
         this.languageId === 'wgsl'
@@ -3843,21 +4412,40 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           ? GPU_COLOR_PREAMBLE_WGSL
           : GPU_COLOR_PREAMBLE_GLSL;
     }
-    if (preamble) result.preamble = preamble;
-
-    return BaseCompiler.withReferences(
-      result,
-      expr,
-      target,
-      vars ? new Set(Object.keys(vars)) : undefined
-    );
+    return preamble;
   }
 
   compileToSource(
     expr: Expression,
     _options: CompilationOptions<Expression> = {}
   ): string {
-    const target = this.createTarget();
-    return BaseCompiler.compile(expr, target);
+    return BaseCompiler.compile(expr, this.createTargetFor(expr));
+  }
+
+  /**
+   * Compile the statements of a shader body, for a KNOWN stage.
+   *
+   * ONE target — and therefore ONE random state — for the WHOLE body. The
+   * random counters are numbered per compilation and `preambleFor` declares
+   * each allocated name once over the JOINED emission, so compiling each
+   * statement against a fresh target would restart the numbering and let two
+   * independent frames in different statements ALIAS one counter (the second
+   * frame's first draw would then be `hash(seed, 1)`).
+   *
+   * The stage is what makes the §7 check possible: an unframed `Random()`
+   * lowers to `gl_FragCoord`-derived spatial noise, which exists only in a
+   * fragment shader, so a non-fragment stage throws at CE compile time rather
+   * than emitting code that fails later at GPU shader-compile time. It is a
+   * property of the SHADER, not of the statement.
+   */
+  protected compileShaderBody(
+    body: ReadonlyArray<{ variable: string; expression: Expression }>,
+    stage: string
+  ): Array<{ variable: string; code: string }> {
+    const target = this.createTargetFor(body[0]?.expression, stage);
+    return body.map((assignment) => ({
+      variable: assignment.variable,
+      code: BaseCompiler.compile(assignment.expression, target),
+    }));
   }
 }

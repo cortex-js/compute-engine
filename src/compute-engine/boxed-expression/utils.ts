@@ -13,6 +13,7 @@ import type {
 } from '../global-types.js';
 
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
+import { foldSeed } from '../numerics/random.js';
 import { Type } from '../../common/type/types.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
@@ -887,6 +888,89 @@ function isAssignedVariableName(
  * Re-entrancy is naturally safe: a shielded symbol no longer reads as assigned,
  * so a nested `withValueShield` over the same name finds nothing to shield.
  */
+/**
+ * Run `fn` with a `WithRandomSeed` frame seeded by `seed` installed as the
+ * innermost frame: for the duration of the call, every `ce._random()` draw is
+ * the counter-based `hash(seed, n)` of that frame (§2 of
+ * `docs/plans/2026-07-25-random-signature-redesign.md`).
+ *
+ * Scoping is DYNAMIC — the frame is active through user-function calls, not
+ * just lexically inside `fn` — and frames NEST with the innermost winning.
+ * Counters are per-frame, so a nested frame cannot perturb its parent's
+ * subsequent draws.
+ *
+ * The frame is restored in a `finally`: a body that throws must not leak its
+ * frame into everything evaluated afterwards.
+ *
+ * SYNCHRONOUS CALLBACKS ONLY — do not pass an async function. The frame is
+ * restored when `fn` RETURNS, not when its result settles, so an async body
+ * would resume after the `finally` has already popped the frame: its draws
+ * would escape the frame (live, unseeded) while any evaluation interleaved
+ * before it would run *inside* the frame. This is the same hazard as the
+ * engine's async-eval scope lifetime (ARCHITECTURE.md; an async evaluation
+ * holds its scope across the await), and it is why both call sites are sync.
+ *
+ * Throws if `seed` is not a finite real (callers translate that into a
+ * structured error — see `foldSeed`).
+ */
+export function withRandomSeedFrame<T>(
+  ce: ComputeEngine,
+  seed: number | string,
+  fn: () => T
+): T {
+  const [seedLo, seedHi] = foldSeed(seed);
+  const prevFrame = ce._randomFrame;
+  ce._randomFrame = { seedLo, seedHi, next: 0 };
+  try {
+    return fn();
+  } finally {
+    ce._randomFrame = prevFrame;
+  }
+}
+
+/**
+ * Run `fn`, and if it BAILS, roll the ambient frame's draw counter back to
+ * where it was before the call.
+ *
+ * The draw-consumption contract (`docs/RANDOMNESS-MODEL.md` §5) promises that
+ * an operation which returns an error or stays symbolic consumes **zero**
+ * draws. Most of the family gets that for free — validation completes before
+ * the first draw — but a few paths can only discover failure AFTER drawing:
+ * a lazy view that shrinks between the count and the access makes `at()` (or
+ * the position pick) return `undefined`, and the operator then returns
+ * `undefined` with the counter already advanced, shifting every later draw in
+ * the frame.
+ *
+ * A bail is: `undefined` (stay symbolic), an `Error` expression, or a throw.
+ * Anything else is a success and keeps whatever the body consumed.
+ *
+ * Inert (a direct call) when no frame is active: an unframed draw consumes no
+ * counter, so there is nothing to roll back.
+ *
+ * SYNCHRONOUS CALLBACKS ONLY, for the same reason as `withRandomSeedFrame`.
+ */
+export function withDrawRollback<T>(ce: ComputeEngine, fn: () => T): T {
+  const frame = ce._randomFrame;
+  if (frame === undefined) return fn();
+  // Capture the object, not just `ce._randomFrame`: a nested frame installed
+  // by `fn` restores this same object on the way out, and it is THIS frame's
+  // counter that must be rolled back.
+  const next = frame.next;
+  let result: T;
+  try {
+    result = fn();
+  } catch (e) {
+    frame.next = next;
+    throw e;
+  }
+  if (
+    result === undefined ||
+    isFunction(result as unknown as Expression, 'Error')
+  )
+    frame.next = next;
+  return result;
+}
+
 export function withValueShield<T>(
   ce: ComputeEngine,
   names: Iterable<string>,

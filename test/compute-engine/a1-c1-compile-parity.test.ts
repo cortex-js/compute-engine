@@ -217,20 +217,18 @@ describe('A1 — Variance/GCD/Median GPU compile', () => {
   });
 });
 
-describe('A1 — Random GPU compile (deterministic seed)', () => {
-  test('Random(seed) compiles to a deterministic GLSL hash', () => {
-    const ce = new ComputeEngine();
-    // Random(n) with an integer seed is valid per the Random signature.
-    // In GPU shaders the seed is typically a per-fragment integer expression.
-    ce.declare('n', 'integer');
-    const target = new GLSLTarget();
-    const expr = ce.expr(['Random', 'n']);
-    const result = target.compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.code).toMatch(/_gpu_random|fract\(sin/);
-  });
+// The 2026-07-25 Random family redesign removed `Random`'s seed argument:
+// `Random(n)` is now signature-invalid, and seeding is `WithRandomSeed`. The
+// GPU targets still emit the old `_gpu_random(seed)` lowering — Phase 3 of the
+// redesign (`docs/plans/2026-07-25-random-signature-redesign.md` §7) rewrites
+// them over the PCG3D frame stream, with a per-language/per-form matrix, the
+// GPU seed ABI, the GLSL stage check and the cross-domain fail-closed rule.
+// The suite that pinned `Random(seed)` on GLSL/WGSL is retired here rather
+// than re-pointed: every one of its assertions is about the removed form.
+describe('A1 — Random GPU compile', () => {
+  test.todo('Phase 3: the §7 GPU matrix (framed draws, seed ABI, stage check)');
 
-  test('Random() with no seed compiles to a fragment-coord-based fallback in GLSL', () => {
+  test('an unframed Random() still compiles to GLSL spatial noise', () => {
     const ce = new ComputeEngine();
     const target = new GLSLTarget();
     const expr = ce.expr(['Random']);
@@ -239,35 +237,11 @@ describe('A1 — Random GPU compile (deterministic seed)', () => {
     expect(result.code).toMatch(/gl_FragCoord|_gpu_random/);
   });
 
-  test('Random(seed) preamble is emitted exactly once', () => {
-    const ce = new ComputeEngine();
-    ce.declare('n1', 'integer');
-    ce.declare('n2', 'integer');
-    const target = new GLSLTarget();
-    // Use Random twice in same expression — preamble should appear only once.
-    const expr = ce.expr(['Add', ['Random', 'n1'], ['Random', 'n2']]);
-    const result = target.compile(expr);
-    expect(result.success).toBe(true);
-    // The function definition should appear exactly once in the preamble.
-    const defMatches = (result.preamble ?? '').match(/float _gpu_random\s*\(/g) ?? [];
-    expect(defMatches.length).toEqual(1);
-  });
-
-  test('Random() with no seed in WGSL throws', () => {
+  test('an unframed Random() still throws on WGSL (no stream, no fragment coord)', () => {
     const ce = new ComputeEngine();
     const target = new WGSLTarget();
-    const expr = ce.parse('\\operatorname{Random}()');
-    expect(() => target.compile(expr)).toThrow(/explicit seed/i);
-  });
-
-  test('Random(seed) compiles in WGSL', () => {
-    const ce = new ComputeEngine();
-    ce.declare('s', 'integer');
-    const target = new WGSLTarget();
-    const expr = ce.parse('\\operatorname{Random}(s)');
-    const result = target.compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.code).toMatch(/_gpu_random/);
+    const expr = ce.expr(['Random']);
+    expect(() => target.compile(expr)).toThrow();
   });
 });
 

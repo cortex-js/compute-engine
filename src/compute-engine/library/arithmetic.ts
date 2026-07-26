@@ -349,10 +349,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const r = measurementAdd(engine!, evaluated);
           return numericApproximation ? r?.N() : r;
         }
-        // Do not evaluate in the case of numericApproximation
-        // to avoid premature rounding errors.
-        // For example: `\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}`
-        if (numericApproximation) return addN(...ops);
+        // For an IMPURE operand, pass its evaluated form: re-evaluating it
+        // inside `addN`'s numericization would repeat its side effects — a
+        // framed `Random()` consumed two draw indices under `N()` and one
+        // under `evaluate()`, breaking the draw-consumption contract. An
+        // impure operand evaluates to a drawn VALUE (literals), which is safe
+        // to hand on. A PURE operand keeps the raw path: its re-evaluation is
+        // free of side effects, `addN`'s number-literal gate keeps fractions
+        // exact until the final fold (late rounding, e.g.
+        // `\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}`),
+        // and — decisive — a SELF-REFERENTIAL frame binding (`t → t + 1`,
+        // Tycho item 46) makes the pure operand's evaluated form loop, both
+        // through this handler's re-entry and through the type-level
+        // `isFinite` → value → `type` cycle; the substitute-once guard lives
+        // on the raw symbol's own `.N()` path.
+        if (numericApproximation)
+          return addN(...ops.map((op, i) => (op.isPure ? op : evaluated[i])));
         const result = add(...evaluated);
         // D2: an inexact (float) operand has no exactness to preserve, so it
         // numericizes the whole sum even when mixed with an exact symbolic
@@ -1713,8 +1725,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const r = measurementMultiply(engine!, evaluated);
           return numericApproximation ? r?.N() : r;
         }
-        // Use evaluate in both cases: do not introduce premature rounding errors
-        if (numericApproximation) return mulN(...ops);
+        // Impure operands pass their evaluated form so their side effects run
+        // once; pure operands keep the raw, substitute-once-guarded path
+        // (Tycho item 46) — see the matching comment in `Add`.
+        if (numericApproximation)
+          return mulN(...ops.map((op, i) => (op.isPure ? op : evaluated[i])));
         const result = mul(...evaluated);
         // D2: see the matching comment in `Add` — an inexact (float) operand
         // numericizes the whole product even when mixed with an exact

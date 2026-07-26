@@ -68,8 +68,7 @@ export class GLSLTarget extends GPUShaderTarget {
     returnType: string,
     parameters: Array<[name: string, type: string]>
   ): string {
-    const target = this.createTarget();
-    const body = BaseCompiler.compile(expr, target);
+    const body = BaseCompiler.compile(expr, this.createTargetFor(expr));
 
     const params = parameters
       .map(([name, type]) => `${type} ${name}`)
@@ -117,7 +116,10 @@ export class GLSLTarget extends GPUShaderTarget {
     let code = `#version ${version}\n\n`;
 
     if (type === 'fragment') {
-      code += 'precision highp float;\n\n';
+      // `highp int` is declared alongside `highp float`: the PCG3D draw helper
+      // needs EXACT 32-bit unsigned arithmetic, and the default integer
+      // precision of an ES 3.00 fragment shader is not reliably `highp`.
+      code += 'precision highp float;\nprecision highp int;\n\n';
     }
 
     for (const input of inputs) {
@@ -135,10 +137,21 @@ export class GLSLTarget extends GPUShaderTarget {
     }
     if (uniforms.length > 0) code += '\n';
 
+    // Compile the body statements FIRST: the shader must define every
+    // `_gpu_*` helper they reference, so the preamble is derived from the
+    // emitted code and spliced in ahead of `main()` — this route returns a
+    // complete shader, with no separate `preamble` channel for the caller to
+    // assemble. (Passing the STAGE is the redesign's §7 check: an unframed
+    // `Random()` lowers to `gl_FragCoord`-derived spatial noise, which only a
+    // fragment shader has.) The whole body compiles against ONE target, so
+    // random frames in different statements get DISTINCT counters.
+    const statements = this.compileShaderBody(body, type);
+    const preamble = this.preambleFor(statements.map((s) => s.code).join('\n'));
+    if (preamble) code += `${preamble}\n`;
+
     code += 'void main() {\n';
-    for (const assignment of body) {
-      const glsl = this.compileToSource(assignment.expression);
-      code += `  ${assignment.variable} = ${glsl};\n`;
+    for (const s of statements) {
+      code += `  ${s.variable} = ${s.code};\n`;
     }
     code += '}\n';
 

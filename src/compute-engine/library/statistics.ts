@@ -51,9 +51,13 @@ import type {
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { bignumPreferred } from '../boxed-expression/utils.js';
+import {
+  bignumPreferred,
+  withDrawRollback,
+} from '../boxed-expression/utils.js';
 import { toInteger } from '../boxed-expression/numerics.js';
-import { deterministicRandom, nextSeed } from '../numerics/random.js';
+import { randomCount } from './random-utils.js';
+import { checkDeadline } from '../../common/interruptible.js';
 import { findFit } from '../nonlinear-fit.js';
 import {
   distributionMean,
@@ -722,46 +726,73 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
   },
   {
-    Sample: {
+    // `k` elements drawn WITHOUT replacement — the twin of `RandomChoice`
+    // (with replacement). See
+    // `docs/plans/2026-07-25-random-signature-redesign.md` §5.
+    RandomSample: {
       description:
-        'Return a random sample of k elements from the collection, ' +
-        'without replacement. With an optional `seed` argument, the sample ' +
-        'is deterministic.',
+        'RandomSample(xs, k): a list of k elements drawn from the indexed ' +
+        'collection `xs`, without replacement. "Without replacement" is over ' +
+        'POSITIONS, not values: on a multiset, repeats are expected — ' +
+        'RandomSample([1, 1, 2], 2) can return [1, 1]. Wrap the call in ' +
+        '`WithRandomSeed(seed, ...)` to make it deterministic.',
       complexity: 8200,
-      // Impure for the same reason as `Shuffle`: the unseeded form draws from
-      // the engine stream, and purity is declared per-operator, not per-form.
-      // Without this, `isConstant` is true for a sample of a literal list.
+      // Impure for the same reason as `RandomShuffle`: it draws from the
+      // engine stream. Without this, `isConstant` is true for a sample of a
+      // literal list.
       pure: false,
-      signature: '(collection, integer, real?) -> list',
-      evaluate: ([xs, nArg, seedArg], { engine: ce }) => {
-        if (!xs.isFiniteCollection) return undefined;
+      // `k` is typed `number`, not `integer`: a caller who computes a count
+      // should not have to round it first (it is rounded on evaluation).
+      // The domain gate is `indexed_collection` — an `Interval` and a `Set`
+      // are invalid, while a lazy indexed view (`Filter` over a `Range`)
+      // passes.
+      signature: '(indexed_collection, number) -> list',
+      evaluate: ([xs, kOp], { engine: ce }) => {
+        if (!xs.isIndexedCollection) return undefined;
+        const n = xs.count;
+        if (n === undefined) return undefined;
+        if (!Number.isFinite(n))
+          return ce.error([
+            'out-of-range',
+            'a finite collection',
+            xs.toString(),
+          ]);
 
-        const k = toInteger(nArg);
-        if (k === null || k < 0) return undefined;
+        const k = randomCount(ce, kOp);
+        if (k === null) return undefined;
+        if (typeof k !== 'number') return k;
+        // Unlike `RandomChoice`, `k` may not exceed the domain size: there
+        // are only `n` positions to draw without replacement.
+        if (k > n)
+          return ce.error(['out-of-range', `a count in 0..${n}`, k.toString()]);
+        if (k === 0) return ce.function('List', []);
 
-        const data = Array.from(xs.each()) as Expression[];
-        if (k > data.length) return undefined;
-
-        const seed = seedArg?.re;
-        if (seed !== undefined && !Number.isNaN(seed)) {
-          // Deterministic Fisher-Yates with advancing seed.
-          let s = seed;
-          for (let i = data.length - 1; i > 0; i--) {
-            const j = Math.floor(deterministicRandom(s) * (i + 1));
-            [data[i], data[j]] = [data[j], data[i]];
-            s = nextSeed(s);
+        // SPARSE Fisher-Yates over the INDEX space: `k` partial steps,
+        // holding only the touched positions (an absent key is the identity
+        // position). O(k) time and memory — the previous implementation
+        // materialized the whole collection and ran a full Fisher-Yates, so
+        // `Sample(Range(1, 1000000), 3)` allocated a million boxed numbers.
+        // Exactly `k` draws, one per step — and zero if a step bails after
+        // drawing (a lazy view that shrank between the count and the `at()`);
+        // `withDrawRollback` restores the frame counter so a symbolic result
+        // still consumes nothing (`docs/RANDOMNESS-MODEL.md` §5).
+        return withDrawRollback(ce, () => {
+          const swapped = new Map<number, number>();
+          const at = (i: number): number => swapped.get(i) ?? i;
+          const out: Expression[] = [];
+          for (let i = 0; i < k; i++) {
+            if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+            const j = i + Math.floor(ce._random() * (n - i));
+            const vi = at(i);
+            const vj = at(j);
+            swapped.set(i, vj);
+            swapped.set(j, vi);
+            const element = xs.at(vj + 1);
+            if (element === undefined) return undefined;
+            out.push(element);
           }
-        } else {
-          // No explicit seed: draw from the engine's seeded stream when
-          // `ce.randomSeed` is set, otherwise non-deterministic Fisher-Yates.
-          for (let i = data.length - 1; i > 0; i--) {
-            const j = Math.floor(ce._random() * (i + 1));
-            [data[i], data[j]] = [data[j], data[i]];
-          }
-        }
-
-        const sample = data.slice(0, k);
-        return ce.function('List', sample);
+          return ce.function('List', out);
+        });
       },
     },
   },

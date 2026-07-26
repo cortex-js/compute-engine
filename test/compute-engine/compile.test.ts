@@ -374,17 +374,13 @@ describe('COMPILE', () => {
       it('should compile a tuple to GLSL', () => {
         const expr = ce.expr(['Tuple', ['Sin', 't'], ['Cos', 't']]);
         const compiled = compile(expr, { to: 'glsl' });
-        expect(compiled?.code).toMatchInlineSnapshot(
-          `vec2(sin(t), cos(t))`
-        );
+        expect(compiled?.code).toMatchInlineSnapshot(`vec2(sin(t), cos(t))`);
       });
 
       it('should compile a tuple to WGSL', () => {
         const expr = ce.expr(['Tuple', ['Sin', 't'], ['Cos', 't']]);
         const compiled = compile(expr, { to: 'wgsl' });
-        expect(compiled?.code).toMatchInlineSnapshot(
-          `vec2f(sin(t), cos(t))`
-        );
+        expect(compiled?.code).toMatchInlineSnapshot(`vec2f(sin(t), cos(t))`);
       });
     });
 
@@ -413,22 +409,21 @@ describe('COMPILE', () => {
           ['List', ['List', 1, 0], ['List', 0, 1]],
         ]);
         const result = compile(expr)?.run?.();
-        expect(result).toEqual([[1, 0], [0, 1]]);
+        expect(result).toEqual([
+          [1, 0],
+          [0, 1],
+        ]);
       });
 
       it('should compile a column vector to GLSL', () => {
-        const expr = ce.parse(
-          '\\begin{pmatrix}1\\\\ 2\\\\ 3\\end{pmatrix}'
-        );
+        const expr = ce.parse('\\begin{pmatrix}1\\\\ 2\\\\ 3\\end{pmatrix}');
         const compiled = compile(expr, { to: 'glsl' });
         // Column vector Nx1 is flattened to vecN
         expect(compiled?.code).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0)`);
       });
 
       it('should compile a column vector to WGSL', () => {
-        const expr = ce.parse(
-          '\\begin{pmatrix}1\\\\ 2\\\\ 3\\end{pmatrix}'
-        );
+        const expr = ce.parse('\\begin{pmatrix}1\\\\ 2\\\\ 3\\end{pmatrix}');
         const compiled = compile(expr, { to: 'wgsl' });
         expect(compiled?.code).toMatchInlineSnapshot(`vec3f(1.0, 2.0, 3.0)`);
       });
@@ -460,12 +455,7 @@ describe('COMPILE', () => {
       it('should compile a 3x3 matrix to GLSL', () => {
         const expr = ce.expr([
           'Matrix',
-          [
-            'List',
-            ['List', 1, 0, 0],
-            ['List', 0, 1, 0],
-            ['List', 0, 0, 1],
-          ],
+          ['List', ['List', 1, 0, 0], ['List', 0, 1, 0], ['List', 0, 0, 1]],
         ]);
         const compiled = compile(expr, { to: 'glsl' });
         expect(compiled?.code).toMatchInlineSnapshot(
@@ -491,8 +481,15 @@ describe('COMPILE', () => {
     };
 
     it('ConjugateTranspose (real → transpose)', () => {
-      expect(run(['ConjugateTranspose', M])).toEqual([[1, 3], [2, 4]]);
-      expect(run(['ConjugateTranspose', M23])).toEqual([[1, 4], [2, 5], [3, 6]]);
+      expect(run(['ConjugateTranspose', M])).toEqual([
+        [1, 3],
+        [2, 4],
+      ]);
+      expect(run(['ConjugateTranspose', M23])).toEqual([
+        [1, 4],
+        [2, 5],
+        [3, 6],
+      ]);
     });
 
     it('Diagonal is rank-dispatched (matrix → vector, vector → matrix)', () => {
@@ -506,9 +503,18 @@ describe('COMPILE', () => {
     });
 
     it('MatrixPower (identity, powers, and negative → inverse)', () => {
-      expect(run(['MatrixPower', M, 0])).toEqual([[1, 0], [0, 1]]);
-      expect(run(['MatrixPower', M, 2])).toEqual([[7, 10], [15, 22]]);
-      expect(run(['MatrixPower', M, 3])).toEqual([[37, 54], [81, 118]]);
+      expect(run(['MatrixPower', M, 0])).toEqual([
+        [1, 0],
+        [0, 1],
+      ]);
+      expect(run(['MatrixPower', M, 2])).toEqual([
+        [7, 10],
+        [15, 22],
+      ]);
+      expect(run(['MatrixPower', M, 3])).toEqual([
+        [37, 54],
+        [81, 118],
+      ]);
       const inv = run(['MatrixPower', M, -1]) as number[][];
       const expected = [
         [-2, 1],
@@ -528,9 +534,18 @@ describe('COMPILE', () => {
     });
 
     it('RowReduce (reduced row echelon form)', () => {
-      expect(run(['RowReduce', M])).toEqual([[1, 0], [0, 1]]);
-      expect(run(['RowReduce', Msing])).toEqual([[1, 2], [0, 0]]);
-      expect(run(['RowReduce', M23])).toEqual([[1, 0, -1], [0, 1, 2]]);
+      expect(run(['RowReduce', M])).toEqual([
+        [1, 0],
+        [0, 1],
+      ]);
+      expect(run(['RowReduce', Msing])).toEqual([
+        [1, 2],
+        [0, 0],
+      ]);
+      expect(run(['RowReduce', M23])).toEqual([
+        [1, 0, -1],
+        [0, 1, 2],
+      ]);
     });
   });
 
@@ -708,7 +723,7 @@ describe('COMPILE', () => {
         {
           getFunctions: () => Record<string, unknown>;
           getOperators: () => Record<string, unknown>;
-        }
+        },
       ]
     > = [
       ['javascript', new JavaScriptTarget()],
@@ -808,7 +823,10 @@ describe('COMPILE integral special functions (Si/Ci/Ei/li)', () => {
     expect(closedForm.operator).toBe('SinIntegral');
     const result = compile(closedForm)!;
     expect(result.success).toBe(true);
-    expect(result.run!({ x: 2 })).toBeCloseTo(ce.box(['SinIntegral', 2]).N().re, 10);
+    expect(result.run!({ x: 2 })).toBeCloseTo(
+      ce.box(['SinIntegral', 2]).N().re,
+      10
+    );
   });
 });
 
@@ -849,7 +867,10 @@ describe('COMPILE Tier-2 special functions (elliptic / AGM / hypergeometric / Er
   it('lowers AGM and EllipticE with a free variable', () => {
     const k = compile(ce.box(['EllipticK', 'm']))!;
     expect(k.success).toBe(true);
-    expect(k.run!({ m: 0.5 })).toBeCloseTo(ce.box(['EllipticK', 0.5]).N().re, 9);
+    expect(k.run!({ m: 0.5 })).toBeCloseTo(
+      ce.box(['EllipticK', 0.5]).N().re,
+      9
+    );
   });
 });
 
@@ -907,11 +928,13 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
   });
 
   it('Round is half-away-from-zero (P0-41)', () => {
-    for (const v of [0.5, -0.5, 1.5, -1.5, 2.5, -2.5]) parity(['Round', 'x'], { x: v });
+    for (const v of [0.5, -0.5, 1.5, -1.5, 2.5, -2.5])
+      parity(['Round', 'x'], { x: v });
   });
 
   it('Arccot uses the (0, π) branch for negative arguments (P0-42)', () => {
-    for (const v of [2, -2, 0.5, -0.5, 10, -10]) parity(['Arccot', 'x'], { x: v });
+    for (const v of [2, -2, 0.5, -0.5, 10, -10])
+      parity(['Arccot', 'x'], { x: v });
   });
 
   it('odd roots of negatives are real (P0-42)', () => {
@@ -947,11 +970,15 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
   });
 
   it('non-canonical right-associative grouping is preserved (P0-45)', () => {
-    const div = compile(ce.box(['Divide', 'a', ['Divide', 'b', 'c']], { canonical: false }))!;
+    const div = compile(
+      ce.box(['Divide', 'a', ['Divide', 'b', 'c']], { canonical: false })
+    )!;
     expect(div.success).toBe(true);
     expect(div.run!({ a: 12, b: 6, c: 2 })).toBe(4);
 
-    const sub = compile(ce.box(['Subtract', 'a', ['Subtract', 'b', 'c']], { canonical: false }))!;
+    const sub = compile(
+      ce.box(['Subtract', 'a', ['Subtract', 'b', 'c']], { canonical: false })
+    )!;
     expect(sub.success).toBe(true);
     expect(sub.run!({ a: 5, b: 3, c: 1 })).toBe(3);
   });
@@ -1082,8 +1109,9 @@ describe('COMPILE chained relation binds shared middle once (CO-P2-23c)', () => 
     const r = compile(ce.box(['Less', 'a', ['Random'], 'b']), {
       fallback: false,
     })!;
-    // Exactly one Math.random() draw, reused in both comparisons via an IIFE.
-    expect(r.code.match(/Math\.random\(\)/g)?.length).toBe(1);
+    // Exactly one draw, reused in both comparisons via an IIFE. (A duplicated
+    // emission would also desynchronize a `WithRandomSeed` frame's counter.)
+    expect(r.code.match(/_SYS\.drawNextRandomNumber\(\)/g)?.length).toBe(1);
     // Consistency check: for a<mid<b, whenever it returns true the same middle
     // value satisfied both bounds (would be flaky if drawn twice).
     for (let i = 0; i < 200; i++)
@@ -1156,7 +1184,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // string concatenation), a silently WRONG value; it must throw (D6).
     const e = new ComputeEngine();
     e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
-    e.parse('h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)').evaluate();
+    e.parse(
+      'h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)'
+    ).evaluate();
     const sum = '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))';
     expect(() => compile(e.parse(sum), { fallback: false })).toThrow(
       /collection-valued body/
@@ -1186,9 +1216,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const cases = e.parse('\\begin{cases}10^{9} & d = m \\\\ d\\end{cases}', {
       strict: false,
     });
-    expect(() => js.compile(cases, { realOnly: true })).toThrow(
-      /Fail closed/
-    );
+    expect(() => js.compile(cases, { realOnly: true })).toThrow(/Fail closed/);
   });
 
   it('If with a collection condition fails closed', () => {
@@ -1230,9 +1258,16 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   it('Reduce compiles Multiply/Min/Max folds', () => {
     const e = mkEngine();
     e.assign('d', e.parse('[1, 2, 3, 4]').evaluate());
-    expect(compile(e.box(['Reduce', 'd', 'Multiply', 1]), { fallback: false })!.run!()).toBe(24);
-    expect(compile(e.box(['Reduce', 'd', 'Min']), { fallback: false })!.run!()).toBe(1);
-    expect(compile(e.box(['Reduce', 'd', 'Max']), { fallback: false })!.run!()).toBe(4);
+    expect(
+      compile(e.box(['Reduce', 'd', 'Multiply', 1]), { fallback: false })!
+        .run!()
+    ).toBe(24);
+    expect(
+      compile(e.box(['Reduce', 'd', 'Min']), { fallback: false })!.run!()
+    ).toBe(1);
+    expect(
+      compile(e.box(['Reduce', 'd', 'Max']), { fallback: false })!.run!()
+    ).toBe(4);
   });
 
   it('Reduce compiles a custom combiner when an initial value is present', () => {
@@ -1349,12 +1384,34 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
 
   it('At compiles 1-based access with negative-from-end and NaN out-of-range', () => {
     const e = mkEngine();
-    expect(compile(e.box(['At', 'd', 1]), { fallback: false, realOnly: true })!.run!()).toBe(10);
-    expect(compile(e.box(['At', 'd', 3]), { fallback: false, realOnly: true })!.run!()).toBe(30);
-    expect(compile(e.box(['At', 'd', -1]), { fallback: false, realOnly: true })!.run!()).toBe(30);
-    expect(compile(e.box(['At', 'd', -3]), { fallback: false, realOnly: true })!.run!()).toBe(10);
-    expect(Number.isNaN(compile(e.box(['At', 'd', 0]), { fallback: false, realOnly: true })!.run!() as number)).toBe(true);
-    expect(Number.isNaN(compile(e.box(['At', 'd', 4]), { fallback: false, realOnly: true })!.run!() as number)).toBe(true);
+    expect(
+      compile(e.box(['At', 'd', 1]), { fallback: false, realOnly: true })!
+        .run!()
+    ).toBe(10);
+    expect(
+      compile(e.box(['At', 'd', 3]), { fallback: false, realOnly: true })!
+        .run!()
+    ).toBe(30);
+    expect(
+      compile(e.box(['At', 'd', -1]), { fallback: false, realOnly: true })!
+        .run!()
+    ).toBe(30);
+    expect(
+      compile(e.box(['At', 'd', -3]), { fallback: false, realOnly: true })!
+        .run!()
+    ).toBe(10);
+    expect(
+      Number.isNaN(
+        compile(e.box(['At', 'd', 0]), { fallback: false, realOnly: true })!
+          .run!() as number
+      )
+    ).toBe(true);
+    expect(
+      Number.isNaN(
+        compile(e.box(['At', 'd', 4]), { fallback: false, realOnly: true })!
+          .run!() as number
+      )
+    ).toBe(true);
   });
 
   it('At with a nested/multi-index access fails closed', () => {
@@ -1383,9 +1440,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       // A `dictionary` base type slips through boxing (At accepts
       // `dictionary | indexed_collection`) but is not an indexed collection at
       // compile time — the handler fails closed (D6).
-      expect(() => js.compile(e.box(['At', 'd', 1]), { realOnly: true })).toThrow(
-        /indexed collection.*Fail closed \(D6\)/
-      );
+      expect(() =>
+        js.compile(e.box(['At', 'd', 1]), { realOnly: true })
+      ).toThrow(/indexed collection.*Fail closed \(D6\)/);
     });
 
     it('with fallback:true returns success:false + the D6 message, without throwing', () => {
@@ -1519,9 +1576,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
 
   it('Join concatenates the elements of each collection operand', () => {
     const e = mkEngine();
-    expect(
-      runJs(e, ['Join', 'd', e.box(['List', 40, 50])])
-    ).toEqual([10, 20, 30, 40, 50]);
+    expect(runJs(e, ['Join', 'd', e.box(['List', 40, 50])])).toEqual([
+      10, 20, 30, 40, 50,
+    ]);
   });
 
   it('IndexOf compiles to a 1-based index (0 when absent)', () => {
@@ -1577,9 +1634,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   it('Table (alias + iterator specs) canonicalizes and compiles', () => {
     const e = mkEngine();
     // All-ones iterator → Tabulate
-    expect(
-      runJs(e, ['Table', ['Square', 'i'], ['Set', 'i', 1, 4]])
-    ).toEqual([1, 4, 9, 16]);
+    expect(runJs(e, ['Table', ['Square', 'i'], ['Set', 'i', 1, 4]])).toEqual([
+      1, 4, 9, 16,
+    ]);
     // General lo/step iterator → Map over Range
     expect(runJs(e, ['Table', 'i', ['Set', 'i', 0, 10, 5]])).toEqual([
       0, 5, 10,
@@ -1677,11 +1734,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       [],
     ]);
     // Partition(xs, n): chunks of SIZE n; trailing chunk may be shorter
-    expect(runJs(e, ['Partition', L, 2])).toEqual([
-      [1, 5],
-      [2, 4],
-      [3],
-    ]);
+    expect(runJs(e, ['Partition', L, 2])).toEqual([[1, 5], [2, 4], [3]]);
     // Partition(xs, n, step): complete sliding windows only
     expect(runJs(e, ['Partition', L, 2, 1])).toEqual([
       [1, 5],
@@ -1708,9 +1761,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(runJs(e, ['Ordering', ['List', 2, 1, 2, 1]])).toEqual([2, 4, 1, 3]);
   });
 
-  it('Shuffle compiles to an unbiased permutation of the source', () => {
+  it('RandomShuffle compiles to an unbiased permutation of the source', () => {
     const e = mkEngine();
-    const v = runJs(e, ['Shuffle', 'd']) as number[];
+    const v = runJs(e, ['RandomShuffle', 'd']) as number[];
     expect([...v].sort((a, b) => a - b)).toEqual([10, 20, 30]);
     // the source is not mutated
     expect(runJs(e, ['At', 'd', 1])).toBe(10);
@@ -1757,34 +1810,32 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toThrow(/Fail closed/);
   });
 
-  it('Shuffle honors the engine randomSeed (deterministic permutation)', () => {
+  // The compile-time bake path (`ce.randomSeed`) was removed by the
+  // 2026-07-25 Random family redesign: every compiled draw goes through the
+  // frame-aware `_SYS.drawNextRandomNumber()`, which is live outside a
+  // `WithRandomSeed` frame. Framed bit-parity lives in `random-compile.test.ts`.
+  it('an unframed compiled RandomShuffle is live (a permutation each call)', () => {
     const e = mkEngine();
-    e.randomSeed = 12345;
-    const r = compile(e.box(['Shuffle', 'd']), { fallback: false })!;
-    const a = r.run!() as number[];
-    expect([...a].sort((x, y) => x - y)).toEqual([10, 20, 30]);
-    // The same compiled function redraws the same permutation…
-    expect(r.run!()).toEqual(a);
-    // …and an independent compile with the same seed agrees
-    const r2 = compile(e.box(['Shuffle', 'd']), { fallback: false })!;
-    expect(r2.run!()).toEqual(a);
+    const r = compile(e.box(['RandomShuffle', 'd']), { fallback: false })!;
+    for (let i = 0; i < 4; i++)
+      expect([...(r.run!() as number[])].sort((x, y) => x - y)).toEqual([
+        10, 20, 30,
+      ]);
   });
 
-  it('custom Ordering function and seeded Shuffle fail closed', () => {
+  it('custom Ordering function and an unsupported Random domain fail closed', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
     expect(() =>
       js.compile(
-        e.box([
-          'Ordering',
-          'd',
-          ['Function', ['Greater', 'a', 'b'], 'a', 'b'],
-        ]),
+        e.box(['Ordering', 'd', ['Function', ['Greater', 'a', 'b'], 'a', 'b']]),
         { realOnly: true }
       )
     ).toThrow(/Fail closed/);
+    // `Interval` and `Range` lower to descriptors and a literal list to the JS
+    // array it already is; every other collection domain fails closed (D6).
     expect(() =>
-      js.compile(e.box(['Shuffle', 'd', 42]), { realOnly: true })
+      js.compile(e.box(['Random', ['Set', 1, 2, 3]]), { realOnly: true })
     ).toThrow(/Fail closed/);
   });
 
@@ -1816,7 +1867,11 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toEqual([1, 10, 2, 20]);
     // A scalar-valued mapping is kept as-is (native flatMap semantics)
     expect(
-      runJs(e, ['FlatMap', ['List', 1, 2], ['Function', ['Multiply', 10, 'x'], 'x']])
+      runJs(e, [
+        'FlatMap',
+        ['List', 1, 2],
+        ['Function', ['Multiply', 10, 'x'], 'x'],
+      ])
     ).toEqual([10, 20]);
   });
 
@@ -1824,7 +1879,12 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     const e = mkEngine();
     const sub = ['Function', ['Subtract', 'a', 'b'], 'a', 'b'];
     expect(
-      runJs(e, ['Scan', ['List', 1, 2, 3], ['Function', ['Add', 'a', 'b'], 'a', 'b'], 0])
+      runJs(e, [
+        'Scan',
+        ['List', 1, 2, 3],
+        ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+        0,
+      ])
     ).toEqual([1, 3, 6]);
     // No initial value: first element seeds and is emitted as-is
     expect(runJs(e, ['Scan', ['List', 10, 2, 3], sub])).toEqual([10, 8, 5]);
@@ -1871,7 +1931,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(runJs(e, ['MatrixMultiply', ['List', 1, 2], M23])).toEqual([
       9, 12, 15,
     ]);
-    expect(runJs(e, ['MatrixMultiply', ['List', 1, 2, 3], ['List', 4, 5, 6]])).toBe(32);
+    expect(
+      runJs(e, ['MatrixMultiply', ['List', 1, 2, 3], ['List', 4, 5, 6]])
+    ).toBe(32);
   });
 
   it('Cross / Norm / Trace compile', () => {
@@ -1879,14 +1941,19 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(runJs(e, ['Cross', ['List', 1, 2, 3], ['List', 4, 5, 6]])).toEqual([
       -3, 6, -3,
     ]);
-    expect(runJs(e, ['Norm', ['List', 1, 2, 3]])).toBeCloseTo(Math.sqrt(14), 12);
+    expect(runJs(e, ['Norm', ['List', 1, 2, 3]])).toBeCloseTo(
+      Math.sqrt(14),
+      12
+    );
     expect(runJs(e, ['Norm', -5])).toBe(5);
     // Frobenius norm of a matrix; L1 norm with an explicit p
     expect(
       runJs(e, ['Norm', ['List', ['List', 1, 2], ['List', 3, 4]]])
     ).toBeCloseTo(Math.sqrt(30), 12);
     expect(runJs(e, ['Norm', ['List', 1, 2, 3], 1])).toBe(6);
-    expect(runJs(e, ['Trace', ['List', ['List', 1, 2], ['List', 3, 4]]])).toBe(5);
+    expect(runJs(e, ['Trace', ['List', ['List', 1, 2], ['List', 3, 4]]])).toBe(
+      5
+    );
   });
 
   it('Transpose / Determinant / Inverse compile', () => {
@@ -1916,7 +1983,10 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     // A singular matrix yields NaN (interpreter stays inert)
     expect(
       Number.isNaN(
-        runJs(e, ['Inverse', ['List', ['List', 1, 2], ['List', 2, 4]]]) as number
+        runJs(e, [
+          'Inverse',
+          ['List', ['List', 1, 2], ['List', 2, 4]],
+        ]) as number
       )
     ).toBe(true);
   });
@@ -2318,9 +2388,10 @@ describe('COMPILE collection-op findings', () => {
         b.evaluate().re,
         10
       );
-      expect(
-        (r.run as (v: Record<string, number>) => number)({})
-      ).toBeCloseTo(expected, 10);
+      expect((r.run as (v: Record<string, number>) => number)({})).toBeCloseTo(
+        expected,
+        10
+      );
     }
   });
 
@@ -2363,9 +2434,9 @@ describe('COMPILE collection-op findings', () => {
     );
     expect(rMap.code).toContain('(_x) => _f(_x)');
     expect(rMap.code).not.toMatch(/\.map\(\(_f\)/); // no bare fn to native map
-    expect(
-      (rMap.run as (v: Record<string, number>) => number[])({})
-    ).toEqual([11, 21, 31]);
+    expect((rMap.run as (v: Record<string, number>) => number[])({})).toEqual([
+      11, 21, 31,
+    ]);
 
     const rFilter = compile(
       ce.box([
@@ -2417,8 +2488,12 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
       ).toThrow(/Fail closed/);
     }
     // Binary arithmetic operator symbols still compile.
-    expect(compile(e.box(['Reduce', L, 'Subtract', 0]), { fallback: false })!.run!()).toBe(-6);
-    expect(compile(e.box(['Reduce', L, 'Add', 0]), { fallback: false })!.run!()).toBe(6);
+    expect(
+      compile(e.box(['Reduce', L, 'Subtract', 0]), { fallback: false })!.run!()
+    ).toBe(-6);
+    expect(
+      compile(e.box(['Reduce', L, 'Add', 0]), { fallback: false })!.run!()
+    ).toBe(6);
   });
 
   it('Map/Filter over an operator symbol fall back to the interpreter — finding 1', () => {
@@ -2446,10 +2521,9 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // Unary Function literal: the interpreter raises an arity error; the
     // compiled fold must not silently return 3.
     expect(() =>
-      js.compile(
-        e.box(['Reduce', L, ['Function', ['Add', 'x', 1], 'x'], 0]),
-        { realOnly: true }
-      )
+      js.compile(e.box(['Reduce', L, ['Function', ['Add', 'x', 1], 'x'], 0]), {
+        realOnly: true,
+      })
     ).toThrow(/Fail closed/);
     // Unary user-defined function symbol.
     e.assign('inc', e.box(['Function', ['Add', 'a', 1], 'a']));
@@ -2480,7 +2554,9 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
       js.compile(e.box(['Tabulate', f, 3, 0]), { realOnly: true })
     ).toThrow(/Fail closed/);
     // A positive dimension still compiles.
-    expect(compile(e.box(['Tabulate', f, 3]), { fallback: false })!.run!()).toEqual([2, 4, 6]);
+    expect(
+      compile(e.box(['Tabulate', f, 3]), { fallback: false })!.run!()
+    ).toEqual([2, 4, 6]);
   });
 
   it('Reduce over an empty collection with no initial value yields NaN — finding 4', () => {
@@ -2491,6 +2567,9 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // interpreter's `Nothing` projected onto a real target).
     expect(Number.isNaN(r.run!() as number)).toBe(true);
     // A non-empty seedless reduce still folds pairwise.
-    expect(compile(e.box(['Reduce', ['List', 1, 2, 3], 'Add']), { fallback: false })!.run!()).toBe(6);
+    expect(
+      compile(e.box(['Reduce', ['List', 1, 2, 3], 'Add']), { fallback: false })!
+        .run!()
+    ).toBe(6);
   });
 });

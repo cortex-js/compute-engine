@@ -564,6 +564,25 @@ evaluates back to itself, while a user `assign()` survives.
 lazily-created shared engine (`getDefaultEngine()`), so simple use needs no
 explicit `ComputeEngine` setup.
 
+### Randomness & seeding
+
+Random draws are **block-scoped**. There is no ambient seed: `WithRandomSeed(seed,
+body)` installs a frame — `{ seedLo, seedHi, next }` in a per-engine slot on
+`engine-runtime-state.ts`, swapped by `withRandomSeedFrame` with a `finally`
+restore, exactly like the deadline frame — and every draw inside it (dynamically,
+through user-function calls) is the counter-based `hash(seed, n)`. Outside a
+frame, draws are live. Because a draw is a pure function of the seed and the draw
+index, the interpreter, the compiled JavaScript target and the GPU targets all
+compute the same integer stream; compiled code reaches the same frame through its
+engine reference at call time, which is what keeps dynamic scoping from silently
+becoming lexical at the compile boundary.
+
+The generator (PCG3D), the normative `foldSeed`, the tiered parity contract, the
+draw-consumption table, and the GPU seed ABI are specified in
+[`docs/RANDOMNESS-MODEL.md`](./docs/RANDOMNESS-MODEL.md). The seed→stream mapping
+is a cross-version contract: a change there is a breaking change, not a test
+update.
+
 ## Standard library
 
 `src/compute-engine/library/` is the table of built-in operator and constant

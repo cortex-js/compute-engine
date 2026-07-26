@@ -358,18 +358,18 @@ let palindrome = Characters(s) == Reverse(Characters(s))
 });
 
 describe('CORTEX PROGRAMS — reproducible randomness', () => {
-  test('RandomSeed makes a simulation reproducible', () => {
-    // Seeding with the same value rewinds the stream, so two runs of the same
-    // draws produce identical results. List literals are eager, so each draw
-    // happens right after its `RandomSeed(7)`.
+  test('WithRandomSeed makes a simulation reproducible', () => {
+    // A frame replays as a whole, while the three draws WITHIN it differ:
+    // the n-th draw of a frame is hash(seed, n). (`RandomSeed(n)`, which
+    // seeded a global stream, was removed by the 2026-07-25 redesign.)
+    const draws =
+      'Random(Range(1, 100)), Random(Range(1, 100)), Random(Range(1, 100))';
     const { text, diagnostics } = run(`
-RandomSeed(7)
-let a = [RandomInteger(1, 100), RandomInteger(1, 100), RandomInteger(1, 100)]
-RandomSeed(7)
-let b = [RandomInteger(1, 100), RandomInteger(1, 100), RandomInteger(1, 100)]
+let a = WithRandomSeed(7, [${draws}])
+let b = WithRandomSeed(7, [${draws}])
 (a == b, a)`);
     expect(diagnostics).toEqual([]);
-    expect(text).toBe('("True", [97,46,38])');
+    expect(text).toBe('("True", [9,20,25])');
   });
 });
 

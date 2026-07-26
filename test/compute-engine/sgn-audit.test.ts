@@ -67,11 +67,18 @@ describe('SGN HANDLER AUDIT', () => {
     expect(ce.box(['Abs', -2]).sgn).toBe('positive');
   });
 
-  it('Random: only non-negative when the bounds are', () => {
+  it('Random: derived from the DOMAIN endpoints', () => {
+    // No-arg `Random()` ∈ [0, 1).
     expect(ce.box(['Random']).sgn).toBe('non-negative');
-    expect(ce.box(['Random', 2, 5]).sgn).toBe('non-negative');
-    // Random(-5, 5) can be negative; it was reported 'non-negative'.
-    expect(ce.box(['Random', -5, 5]).sgn).toBeUndefined();
+    expect(ce.box(['Random', ['Interval', 2, 5]]).sgn).toBe('non-negative');
+    expect(ce.box(['Random', ['Range', 2, 5]]).sgn).toBe('non-negative');
+    expect(ce.box(['Random', ['Interval', -5, 0]]).sgn).toBe('negative');
+    expect(ce.box(['Random', ['Range', -5, -1]]).sgn).toBe('non-positive');
+    // A domain straddling zero can be negative.
+    expect(ce.box(['Random', ['Interval', -5, 5]]).sgn).toBeUndefined();
+    expect(ce.box(['Random', ['Range', -5, 5]]).sgn).toBeUndefined();
+    // A general collection: no endpoints to derive from.
+    expect(ce.box(['Random', ['List', 1, 2, 3]]).sgn).toBeUndefined();
   });
 
   it('Arctan preserves the sign of its argument', () => {

@@ -231,7 +231,7 @@ Verified operator names, so you don't have to guess (search for more with
 
 - **Numbers**: `Abs`, `Floor`, `Ceil` (not `Ceiling`), `Round`, `Sqrt`,
   `Max`, `Min` (each takes a list or varargs), `Mod`, `GCD`, `LCM`,
-  `IsPrime`, `RandomInteger(a, b)`.
+  `IsPrime`, `Random(Range(a, b))`.
 - **Lists**: `Length`, `First`, `Last`, `Rest`, `Take`, `Drop`, `Reverse`,
   `Sort` (optional comparator — see below), `IndexOf`, `Join`, `Append`,
   `Sum`, `Mean`, `StandardDeviation` (sample, n−1), `Map`, `Filter`,

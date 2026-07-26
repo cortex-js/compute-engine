@@ -9,7 +9,10 @@
  *   interval-js leg; `Norm`/`Abs` of a point with a broadcasting component
  *   type `list<number>`.
  * - Item 75: `isValid` is memoized (O(1) on repeat queries).
- * - Item 76: `RandomList(n)` / `RandomList(n, seed)`.
+ * - Item 76: the draw-once eagerness contract, now carried by
+ *   `RandomChoice(Interval(0, 1), n)` (`RandomList` was removed by the
+ *   2026-07-25 Random family redesign; `WithRandomSeed` replaces its seed
+ *   argument).
  * - Item 64 (defect b): large *finite* big-operator bounds stream and honor
  *   the evaluation deadline instead of eagerly materializing (OOM class).
  */
@@ -314,10 +317,12 @@ describe('Item 75 — isValid is memoized', () => {
   });
 });
 
-describe('Item 76 — RandomList', () => {
+describe('Item 76 — RandomChoice(Interval(0, 1), n) (was RandomList)', () => {
+  const RL = (n: unknown): unknown[] => ['RandomChoice', ['Interval', 0, 1], n];
+
   test('returns an eager List of n uniforms in [0,1)', () => {
     const engine = new ComputeEngine();
-    const v = engine.box(['RandomList', 5]).evaluate();
+    const v = engine.box(RL(5)).evaluate();
     expect(v.operator).toEqual('List');
     if (!('ops' in v)) throw new Error('expected a function expression');
     const ops = (v as any).ops;
@@ -332,52 +337,40 @@ describe('Item 76 — RandomList', () => {
 
   test('literal count is part of the type', () => {
     const engine = new ComputeEngine();
-    const t = engine.box(['RandomList', 5]).type;
+    const t = engine.box(RL(5)).type;
     expect(t.matches('list<real>')).toBe(true);
     expect(t.toString()).toContain('5');
   });
 
-  test('honors ce.randomSeed (reproducible engine stream)', () => {
+  test('a WithRandomSeed frame makes the list reproducible', () => {
     const engine = new ComputeEngine();
-    engine.randomSeed = 42;
-    const a = engine.box(['RandomList', 3]).evaluate().toString();
-    engine.randomSeed = 42;
-    const b = engine.box(['RandomList', 3]).evaluate().toString();
-    expect(a).toEqual(b);
-  });
-
-  test('explicit seed is deterministic and independent of the engine stream', () => {
-    const engine = new ComputeEngine();
-    const a = engine.box(['RandomList', 3, 7]).evaluate().toString();
-    const b = engine.box(['RandomList', 3, 7]).evaluate().toString();
-    const c = engine.box(['RandomList', 3, 8]).evaluate().toString();
-    expect(a).toEqual(b);
-    expect(a).not.toEqual(c);
+    const framed = (seed: number): string =>
+      engine
+        .box(['WithRandomSeed', seed, RL(3)])
+        .evaluate()
+        .toString();
+    expect(framed(42)).toEqual(framed(42));
+    expect(framed(42)).not.toEqual(framed(43));
   });
 
   test('a symbolic count stays symbolic', () => {
     const engine = new ComputeEngine();
-    expect(engine.box(['RandomList', 'm']).evaluate().operator).toEqual(
-      'RandomList'
-    );
+    expect(engine.box(RL('m')).evaluate().operator).toEqual('RandomChoice');
   });
 
   test('an over-cap count errors loudly instead of materializing', () => {
     const engine = new ComputeEngine();
-    const r = engine.box(['RandomList', 10_000_000]).evaluate();
-    expect(r.operator).toEqual('Error');
+    expect(engine.box(RL(10_000_000)).evaluate().operator).toEqual('Error');
   });
 
   test('a negative literal count errors loudly (like over-cap), not silently inert', () => {
     const engine = new ComputeEngine();
-    const r = engine.box(['RandomList', -3]).evaluate();
-    expect(r.operator).toEqual('Error');
+    expect(engine.box(RL(-3)).evaluate().operator).toEqual('Error');
   });
 
   test('a beyond-safe-integer literal count errors loudly, not silently inert', () => {
     const engine = new ComputeEngine();
-    const r = engine.box(['RandomList', 1e20]).evaluate();
-    expect(r.operator).toEqual('Error');
+    expect(engine.box(RL(1e20)).evaluate().operator).toEqual('Error');
   });
 
   test('materialization honors the evaluation deadline', () => {
@@ -385,13 +378,13 @@ describe('Item 76 — RandomList', () => {
     // 10⁶ draws take long enough that a 1 ms deadline must fire inside the
     // materialization loop (the amortized checkDeadline poll).
     expect(() =>
-      engine.withTimeLimit(1, () => engine.box(['RandomList', 1_000_000]).evaluate())
+      engine.withTimeLimit(1, () => engine.box(RL(1_000_000)).evaluate())
     ).toThrow();
   });
 
   test('a zero count yields the empty list with an unshaped list type', () => {
     const engine = new ComputeEngine();
-    const e = engine.box(['RandomList', 0]);
+    const e = engine.box(RL(0));
     // A `^0` shape would reduce to the unit type — keep the plain list type
     expect(e.type.matches('list<real>')).toBe(true);
     expect(e.type.toString()).not.toContain('^0');

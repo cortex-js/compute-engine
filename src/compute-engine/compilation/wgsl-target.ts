@@ -103,8 +103,7 @@ export class WGSLTarget extends GPUShaderTarget {
     returnType: string,
     parameters: Array<[name: string, type: string]>
   ): string {
-    const target = this.createTarget();
-    const body = BaseCompiler.compile(expr, target);
+    const body = BaseCompiler.compile(expr, this.createTargetFor(expr));
 
     const params = parameters
       .map(([name, type]) => `${name}: ${toWGSLType(type)}`)
@@ -209,15 +208,24 @@ export class WGSLTarget extends GPUShaderTarget {
     const paramStr = hasInputStruct ? 'input: VertexInput' : '';
     const returnStr = hasOutputStruct ? ` -> ${outputStructName}` : '';
 
+    // Compile the body statements FIRST so the `_gpu_*` helper preamble they
+    // reference can be spliced in ahead of the entry point — this route
+    // returns a complete shader, with no separate `preamble` channel (see the
+    // matching comment in the GLSL target). The whole body compiles against
+    // ONE target, so random frames in different statements get DISTINCT
+    // counters.
+    const statements = this.compileShaderBody(body, type);
+    const preamble = this.preambleFor(statements.map((s) => s.code).join('\n'));
+    if (preamble) code += `${preamble}\n`;
+
     code += `${stageAttr}\n${workgroupAttr}fn main(${paramStr})${returnStr} {\n`;
 
     if (hasOutputStruct) {
       code += `  var output: ${outputStructName};\n`;
     }
 
-    for (const assignment of body) {
-      const wgsl = this.compileToSource(assignment.expression);
-      code += `  ${assignment.variable} = ${wgsl};\n`;
+    for (const s of statements) {
+      code += `  ${s.variable} = ${s.code};\n`;
     }
 
     if (hasOutputStruct) {

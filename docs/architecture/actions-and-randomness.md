@@ -46,34 +46,69 @@ RHSs with a fresh alias bound to the pre-state value before the Block runs:
 
 ## 3. Deterministic randomness
 
-`Random()` returns a non-deterministic float in `[0, 1)` (host PRNG, e.g.
-`Math.random` on JS).
+Seeding is **block-scoped**, not an argument. There is no seed parameter
+anywhere in the random family, and no ambient engine seed.
 
-`Random(seed)` where `seed` is a real number returns a deterministic float in
-`[0, 1)` derived from `seed`. The hash matches the GLSL hash used by the GPU
-compile target so that the same seed produces a similar (not bit-identical)
-value on JS and GLSL:
+`WithRandomSeed(seed, body)` evaluates `body` with a seed frame installed:
+every draw inside it — dynamically, through user-function calls, not just
+lexically — is the *n*-th value of that frame's stream. `seed` is a finite real
+or a string, evaluated once per frame entry.
 
-  `fract(sin(seed * 12.9898) * 43758.5453)`
+```mathjson
+["WithRandomSeed", 42, ["Random"]]
 
-Caveats:
-  - JS uses fp64 by default; GLSL fragment shaders use fp32. JS↔GLSL parity is
-    approximate (within fp32 precision near the seed; can diverge for large
-    seeds or near sin's roots).
-  - `Math.sin` is not bit-portable across JS engines (ECMAScript permits
-    implementation-defined precision).
-  - Within a single host, the same seed always yields the same value — that's
-    the guarantee.
+["WithRandomSeed", "'cell-a7'",
+ ["Delimiter", ["Sequence", ["Random"], ["Random"]]]]
+```
 
-For integer bounds, `Random(n: integer)` returns an integer in `[0, n)` and
-`Random(m: integer, n: integer)` returns an integer in `[m, n)`. These are
-non-deterministic — to seed an integer draw, scale a seeded float yourself:
-`Floor(Add(m, Multiply(Random(seed), Subtract(n, m))))`.
+Two properties, both intended:
 
-`Shuffle(L, seed?)` and `Sample(L, k, seed?)` accept an optional seed that
-makes the reordering deterministic. Internally, the seed advances per element
-via an additive Weyl-sequence increment (golden-ratio fractional part) so
-element-to-element draws are decorrelated.
+- **Inside a frame, repeated draws differ and the block replays.** The two
+  `Random()` calls above return different values, and the same two values on
+  every evaluation.
+- **Outside a frame, draws are live.** `Random()` with no enclosing frame is
+  non-deterministic (`Math.random` on the JS host) — which is what a ticker or
+  animation needs.
+
+Frames nest, the innermost wins, and counters are **per frame**, so a nested
+frame never perturbs its parent's later draws:
+
+```mathjson
+["WithRandomSeed", 1,
+ ["Delimiter", ["Sequence",
+   ["Random"],                            // hash(1, 0)
+   ["WithRandomSeed", 2, ["Random"]],     // hash(2, 0)
+   ["Random"]]]]                          // hash(1, 1) — unaffected
+```
+
+That is what makes per-cell seeding safe in a document: editing one cell's
+frame cannot change another cell's values. Seed per row or per cell, never once
+around a whole document.
+
+The rest of the family is domain-directed and seedless:
+
+| Form | Result |
+|---|---|
+| `Random()` | real in `[0, 1)` |
+| `Random(Interval(a, b))` | real in `[a, b)` (endpoint markers ignored) |
+| `Random(Range(…))` | an element of the range |
+| `Random(xs)` | an element of the finite collection `xs` |
+| `RandomChoice(domain, k)` | `k` draws, **with** replacement |
+| `RandomSample(xs, k)` | `k` elements, **without** replacement |
+| `RandomShuffle(xs)` | a permutation |
+
+Removed heads throw an `operator-removed` error naming their replacement for
+one release: `RandomInteger` → `Random(Range(…))`, `RandomList(n)` →
+`RandomChoice(Interval(0,1), n)`, `RandomSeed(s)` → `WithRandomSeed(s, …)`,
+`Sample` → `RandomSample`, `Shuffle` → `RandomShuffle`. The `ce.randomSeed`
+property is gone (its accessor throws).
+
+**The model — the generator, the seed fold, the interpreted/compiled/GPU parity
+tiers, how many draws each operator consumes, and the GPU seed ABI — is
+specified in [`../RANDOMNESS-MODEL.md`](../RANDOMNESS-MODEL.md).** In one line:
+the *n*-th draw of a frame is `hash(seed, n)` with PCG3D, a pure function of the
+seed and the draw index, which is why the interpreter, compiled JavaScript and
+a shader can all reproduce one stream.
 
 ## 4. The `\operatorname{where}` clause — local bindings
 

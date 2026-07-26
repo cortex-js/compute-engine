@@ -25,12 +25,11 @@ import {
 import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
 
 import { fromDigits } from '../numerics/strings.js';
-import {
-  deterministicRandom,
-  hashSeed,
-  mulberry32,
-  MAX_RANDOM_ELEMENT_COUNT,
-} from '../numerics/random.js';
+import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
+import { randomCount } from './random-utils.js';
+import { interval } from '../numerics/interval.js';
+import { range, rangeLast } from './collections.js';
+import { typeToString } from '../../common/type/serialize.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
 import { randomExpression } from './random-expression.js';
@@ -51,6 +50,7 @@ import {
 import { findRoot } from '../nonlinear-fit.js';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
+  IComputeEngine as ComputeEngine,
   Expression,
   SymbolDefinition,
   SymbolDefinitions,
@@ -65,6 +65,8 @@ import {
   isValueDef,
   assignedVariableNames,
   withValueShield,
+  withRandomSeedFrame,
+  withDrawRollback,
 } from '../boxed-expression/utils.js';
 import {
   isNumber,
@@ -127,6 +129,250 @@ function splitGraphemeClusters(s: string): string[] {
 // U+3000 (ideographic space).
 const UNICODE_WHITESPACE =
   /[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
+
+//
+// ─── Random domains ─────────────────────────────────────────────────────────
+//
+// `Random` and `RandomChoice` share one domain analysis. See
+// `docs/plans/2026-07-25-random-signature-redesign.md` §4: domain validity is
+// decided by KIND, never by `count` — a bounded `Interval` reports
+// `count: Infinity` (and `Interval(1,0)`/`Interval(1,1)` do too, though they
+// are empty), so a count test would silently draw from a degenerate interval.
+//
+// Validation completes BEFORE the first draw, so an invalid domain consumes
+// zero draws (the §4 draw-consumption contract).
+//
+
+/** How `Random`/`RandomChoice` draw from a domain, once its kind is known. */
+type RandomDomainPlan =
+  /** An invalid domain: a structured error, ready to return. */
+  | { kind: 'error'; error: Expression }
+  /** The domain is not resolved (an unassigned symbol…): stay symbolic. */
+  | { kind: 'symbolic' }
+  /** A bounded, non-empty `Interval`: draws are `lo + u·(hi − lo)`, `[lo, hi)`.
+   * Endpoint open/closed markers are ignored — a float draw cannot respect an
+   * open endpoint. */
+  | { kind: 'continuous'; lo: number; hi: number }
+  /** A finite, non-empty `Range`: draws are `first + step·⌊u·n⌋` over the
+   * range's NORMALIZED parameters (`range()` in `collections.ts`). */
+  | { kind: 'arithmetic'; first: number; step: number; n: number }
+  /** A finite, non-empty indexed collection: draws are `xs.at(1 + ⌊u·n⌋)`.
+   * NEVER materialized. */
+  | { kind: 'indexed'; xs: Expression; n: number }
+  /** A finite, non-empty non-indexed collection (a `Set`…): the count is
+   * obtained first (consuming no draws), then the drawn positions are picked
+   * out by a single `each()` pass. */
+  | { kind: 'sequential'; xs: Expression; n: number };
+
+/** An `out-of-range` error naming the offending domain kind. */
+function randomDomainError(
+  ce: ComputeEngine,
+  expected: string,
+  domain: Expression
+): RandomDomainPlan {
+  return {
+    kind: 'error',
+    error: ce.error(['out-of-range', expected, domain.toString()]),
+  };
+}
+
+/**
+ * Count a collection whose `count` is not directly available, by ONE pass over
+ * `each()`. Counting consumes no random draws (CE collections are re-iterable
+ * views), which is what lets `Random`/`RandomChoice` promise a fixed number of
+ * draws on a non-indexed domain instead of reservoir-sampling.
+ *
+ * Returns `undefined` past `MAX_RANDOM_ELEMENT_COUNT` — an unbounded pass is
+ * an uncatchable hang, so refuse rather than walk it.
+ */
+function countByTraversal(
+  ce: ComputeEngine,
+  xs: Expression
+): number | undefined {
+  let n = 0;
+  for (const _x of xs.each()) {
+    if ((n & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+    n += 1;
+    if (n > MAX_RANDOM_ELEMENT_COUNT) return undefined;
+  }
+  return n;
+}
+
+/** Classify a `Random`/`RandomChoice` domain operand. */
+function analyzeRandomDomain(
+  ce: ComputeEngine,
+  domain: Expression
+): RandomDomainPlan {
+  // 1. `Interval` — a closed form, short-circuited before any collection
+  //    machinery. Endpoints must be finite reals; emptiness is decided by
+  //    `isEmptyCollection`, never by `count`.
+  if (isFunction(domain, 'Interval')) {
+    const int = interval(domain);
+    // Symbolic endpoints: stay symbolic rather than claim an error.
+    if (!int) return { kind: 'symbolic' };
+    if (!Number.isFinite(int.start) || !Number.isFinite(int.end))
+      return randomDomainError(ce, 'a bounded Interval', domain);
+    if (domain.isEmptyCollection !== false)
+      return randomDomainError(ce, 'a non-empty Interval', domain);
+    return { kind: 'continuous', lo: int.start, hi: int.end };
+  }
+
+  // 2. `Range` — closed form over the normalized `(first, step, count)`.
+  //    `range()` already infers a descending step for `Range(7, 2)` and
+  //    reports an empty range for a zero or sign-mismatched step.
+  if (isFunction(domain, 'Range')) {
+    const n = domain.count;
+    // Symbolic bounds (e.g. `Range(1, n)`): the count is indeterminate.
+    if (n === undefined) return { kind: 'symbolic' };
+    if (!Number.isFinite(n))
+      return randomDomainError(ce, 'a finite Range', domain);
+    if (n === 0) return randomDomainError(ce, 'a non-empty Range', domain);
+    const [first, , step] = range(domain);
+    return { kind: 'arithmetic', first, step, n };
+  }
+
+  // A domain that is not (yet) a resolved collection — an unassigned symbol
+  // of collection type, an error operand — stays symbolic.
+  if (!domain.isCollection) return { kind: 'symbolic' };
+
+  if (domain.isFiniteCollection === false)
+    return randomDomainError(ce, 'a finite collection', domain);
+
+  if (domain.isIndexedCollection) {
+    const n = domain.count;
+    if (n === undefined) return { kind: 'symbolic' };
+    if (!Number.isFinite(n))
+      return randomDomainError(ce, 'a finite collection', domain);
+    if (n === 0) return randomDomainError(ce, 'a non-empty collection', domain);
+    return { kind: 'indexed', xs: domain, n };
+  }
+
+  // Non-indexed: the count when it is known, otherwise ONE counting pass.
+  let n = domain.count;
+  if (n === undefined || !Number.isFinite(n)) n = countByTraversal(ce, domain);
+  if (n === undefined)
+    return randomDomainError(
+      ce,
+      `a collection of at most ${MAX_RANDOM_ELEMENT_COUNT} elements`,
+      domain
+    );
+  if (n === 0) return randomDomainError(ce, 'a non-empty collection', domain);
+  return { kind: 'sequential', xs: domain, n };
+}
+
+/** The element of `plan` selected by the uniform `u` ∈ [0, 1), for every plan
+ * kind that can be indexed in O(1). `sequential` is handled by its callers,
+ * which batch their positions into a single traversal. */
+function selectRandomElement(
+  ce: ComputeEngine,
+  plan: RandomDomainPlan,
+  u: number
+): Expression | undefined {
+  if (plan.kind === 'continuous')
+    return ce.number(plan.lo + u * (plan.hi - plan.lo));
+  if (plan.kind === 'arithmetic')
+    return ce.number(plan.first + plan.step * Math.floor(u * plan.n));
+  if (plan.kind === 'indexed') return plan.xs.at(1 + Math.floor(u * plan.n));
+  return undefined;
+}
+
+/**
+ * Pick the elements at the given 0-based `positions` (with multiplicity, in
+ * output order) out of a non-indexed collection, by a SINGLE `each()` pass.
+ */
+function pickPositions(
+  ce: ComputeEngine,
+  xs: Expression,
+  positions: number[]
+): Expression[] {
+  const slots = new Map<number, number[]>();
+  positions.forEach((p, i) => {
+    const bucket = slots.get(p);
+    if (bucket === undefined) slots.set(p, [i]);
+    else bucket.push(i);
+  });
+  const out: Expression[] = new Array(positions.length);
+  let i = 0;
+  for (const x of xs.each()) {
+    if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+    const bucket = slots.get(i);
+    if (bucket !== undefined) for (const slot of bucket) out[slot] = x;
+    i += 1;
+  }
+  return out;
+}
+
+/** The finite counterpart of a numeric primitive, for `randomElementType`. */
+const FINITE_NUMERIC_TYPE: Record<string, Type> = {
+  number: 'finite_number',
+  complex: 'finite_complex',
+  real: 'finite_real',
+  rational: 'finite_rational',
+  integer: 'finite_integer',
+};
+
+/**
+ * The element type of a `Random` DOMAIN, narrowed to its finite counterpart
+ * for the closed-form domains (`Interval`, `Range`).
+ *
+ * `Interval`'s element type is `real` and `Range`'s is `integer`, and both of
+ * those admit ±∞ — correctly, since a SET of reals may contain them. A DRAW
+ * cannot: `Random` only ever draws from a bounded `Interval` or a finite
+ * `Range` (an unbounded one is an evaluation error, never an infinite result),
+ * so the drawn value is finite by construction. The narrower type is not just
+ * tidiness — an imprecise `real` pushes comparisons over a framed draw off the
+ * compile path.
+ */
+function randomElementType(domain: Expression): Type {
+  const elt = collectionElementType(domain.type.type) ?? 'any';
+  if (!isFunction(domain, 'Interval') && !isFunction(domain, 'Range'))
+    return elt;
+  return typeof elt === 'string' ? (FINITE_NUMERIC_TYPE[elt] ?? elt) : elt;
+}
+
+/** `list<T^k>` from a domain's element type, or the unshaped `list<T>`.
+ * A zero count stays unshaped: a `^0` dimension reduces to the unit type,
+ * which would misdispatch the (valid) empty-list result. */
+function randomListType(
+  domain: Expression | undefined,
+  kOp: Expression | undefined
+): Type {
+  const elt = domain
+    ? typeToString(collectionElementType(domain.type.type) ?? 'any')
+    : 'any';
+  const count = kOp ? asSmallInteger(kOp) : null;
+  if (count !== null && count > 0 && count <= MAX_RANDOM_ELEMENT_COUNT)
+    return parseType(`list<${elt}^${count}>`);
+  return parseType(`list<${elt}>`);
+}
+
+/**
+ * A tombstone definition for a head removed by the Random family redesign
+ * (§9). An unrecognized head is a VALID, INERT expression in CE
+ * (`ce.box(['Zzz', 1]).evaluate()` → `Zzz(1)`), so simply deleting these
+ * definitions would make every stored document calling them silently stop
+ * producing randomness — the hardest failure class to notice, because nothing
+ * errors and the document still renders. A throwing `evaluate` is loud on the
+ * box route, the parse route and `ce.function` alike. Delete next cycle.
+ */
+function removedRandomOperator(
+  name: string,
+  replacement: string
+): SymbolDefinition {
+  return {
+    description: `\`${name}\` has been removed. Use \`${replacement}\` instead.`,
+    // Hold the operands: the tombstone throws before looking at them, so a
+    // held operand cannot raise a different (quieter) error first.
+    lazy: true,
+    pure: false,
+    signature: '(any*) -> nothing',
+    evaluate: () => {
+      throw new Error(
+        `operator-removed: \`${name}\` has been removed — use \`${replacement}\``
+      );
+    },
+  };
+}
 
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
@@ -1437,7 +1683,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any, any?) -> expression',
       type: ([x]) => x?.type ?? undefined,
-      canonical: (ops, { engine: ce }) => {
+      canonical: (rawOps, { engine: ce }) => {
+        // The held operands arrive UNBOUND on the box/parse routes, so a
+        // `type` handler reading `body.type` would see `unknown`. `.canonical`
+        // binds their structure; it is value-safe (it does NOT substitute
+        // assigned symbol values), so the shield still sees the symbols.
+        const ops = rawOps.map((op) => op.canonical);
         if (ops.length === 0)
           return ce._fn('HoldValues', checkArity(ce, ops, 1));
         if (ops.length > 2) return ce._fn('HoldValues', checkArity(ce, ops, 2));
@@ -1462,6 +1713,73 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             : holdValuesShieldNames(spec.canonical);
         return withValueShield(ce, names, () =>
           body.evaluate({ numericApproximation })
+        );
+      },
+    },
+
+    // Block-scoped seeding. See
+    // `docs/plans/2026-07-25-random-signature-redesign.md`: the n-th draw of a
+    // frame is `hash(seed, n)`, a pure function of the seed and the draw
+    // index, so a frame replays exactly while repeated draws inside it still
+    // differ.
+    WithRandomSeed: {
+      description: [
+        'WithRandomSeed(seed, body): evaluate `body` with a random seed frame',
+        'seeded by `seed` (a finite real or a string). The block replays',
+        'identically, while repeated draws WITHIN the frame differ (the n-th',
+        'draw is hash(seed, n)).',
+        'Scoping is dynamic: the frame is active through user-function calls,',
+        'not just lexically inside `body`. Frames nest and the innermost wins.',
+        'Counters are per-frame, so a nested frame does not perturb its',
+        "parent's subsequent draws.",
+        'Outside any frame, draws are live (non-deterministic).',
+      ],
+      // Consumes draws from the frame's counter: not a pure expression.
+      pure: false,
+      // Hold the body: it must NOT evaluate before the frame exists.
+      lazy: true,
+      signature: '(finite_real | string, any) -> expression',
+      // Carry the body's type through. Load-bearing, not cosmetic: a bare
+      // `expression` makes a framed draw opaque, and a comparison over an
+      // operand that might be a collection is declined by the compiler
+      // (fail-closed), so `WithRandomSeed(s, Random()) < y` would silently
+      // leave the compile path.
+      type: ([, body]) => body?.type ?? undefined,
+      canonical: (rawOps, { engine: ce }) => {
+        // The held operands arrive UNBOUND on the box/parse routes; without
+        // this the `type` handler above would read `unknown`. `.canonical`
+        // binds their structure and is value-safe (it substitutes no values).
+        const ops = rawOps.map((op) => op.canonical);
+        if (ops.length !== 2)
+          return ce._fn('WithRandomSeed', checkArity(ce, ops, 2));
+        return ce._fn('WithRandomSeed', ops);
+      },
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        const [rawSeed, rawBody] = ops;
+        if (rawSeed === undefined || rawBody === undefined) return undefined;
+
+        // The seed is evaluated ONCE per frame entry, never per draw.
+        const seedValue = rawSeed.canonical.evaluate();
+        let seed: number | string;
+        if (isString(seedValue)) seed = seedValue.string;
+        else if (isNumber(seedValue)) {
+          // A non-finite or non-real seed is a structured error, never a
+          // shared zero-seed stream.
+          if (seedValue.im !== 0 || !Number.isFinite(seedValue.re))
+            return ce.error([
+              'out-of-range',
+              'a finite real number or a string',
+              seedValue.toString(),
+            ]);
+          seed = seedValue.re;
+        } else {
+          // A seed that does not reduce to a literal (a symbol, an error…)
+          // leaves the whole expression unevaluated.
+          return undefined;
+        }
+
+        return withRandomSeedFrame(ce, seed, () =>
+          rawBody.canonical.evaluate({ numericApproximation })
         );
       },
     },
@@ -1642,196 +1960,144 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    // One draw from a DOMAIN. There is no seed argument anywhere in the
+    // random family: seeding is `WithRandomSeed`. See
+    // `docs/plans/2026-07-25-random-signature-redesign.md` §4.
     Random: {
       description: [
-        'Random(): non-deterministic float in [0, 1)',
-        'Random(seed: real): deterministic float in [0, 1) from a real seed',
-        'Random(n: integer): non-deterministic integer in [0, n)',
-        'Random(m: integer, n: integer): non-deterministic integer in [m, n)',
+        'Random(): non-deterministic real in [0, 1)',
+        'Random(Interval(a, b)): a real in [a, b) (endpoint markers ignored)',
+        'Random(Range(...)): an element of the range',
+        'Random(xs): an element of the finite collection `xs`',
       ],
       pure: false,
-      // Signature accepts: nothing, one number, or two integers.
-      // Use `number` (not `integer`) for the single-arg case so float seeds
-      // type-check; runtime dispatch differentiates integer vs real.
-      signature: '(number?, integer?) -> finite_number',
-      type: ([first, second]) => {
-        // No args: float in [0, 1)
-        if (first === undefined) return 'finite_number';
-        // Two args: integer in [m, n)
-        if (second !== undefined) return 'finite_integer';
-        // One arg — integer type → integer result; real type → float
-        if (first.type.matches('integer')) return 'finite_integer';
-        return 'finite_number';
+      // One plain signature: it accepts `Random()` and `Random(xs)`, and
+      // rejects `Random(5)` and `Random(5, 7)`.
+      signature: '((collection | set<real>)?) -> any',
+      type: ([domain]) => {
+        if (domain === undefined) return 'finite_real';
+        return randomElementType(domain);
       },
-      // No-arg Random() ∈ [0, 1). With bounds the value lies in [m, n), so
-      // it is only non-negative when the bounds are (Random(-5, 5) can be
-      // negative).
-      sgn: (ops) =>
-        ops.every((x) => x.isNonNegative) ? 'non-negative' : undefined,
-      evaluate: (ops, { engine: ce }) => {
-        // No-arg: draws from the engine's seeded stream when `ce.randomSeed`
-        // is set, otherwise non-deterministic (`Math.random()`).
-        if (ops.length === 0) return ce.number(ce._random());
-
-        const [firstOp, secondOp] = ops;
-
-        // Two-arg: integer in [m, n).
-        if (secondOp !== undefined) {
-          let lower = Math.floor(firstOp.re);
-          let upper = Math.floor(secondOp.re);
-          if (isNaN(lower)) lower = 0;
-          if (isNaN(upper)) upper = 0;
-          return ce.number(lower + Math.floor(ce._random() * (upper - lower)));
-        }
-
-        // One-arg: dispatch on the argument's type.
-        // - integer-typed → integer in [0, n)
-        // - real / non-integer → seeded float in [0, 1)
-        if (firstOp.type.matches('integer')) {
-          let n = Math.floor(firstOp.re);
-          if (isNaN(n)) n = 0;
-          return ce.number(Math.floor(ce._random() * n));
-        }
-
-        // Real-typed: seeded float in [0, 1).
-        const seed = firstOp.re;
-        if (isNaN(seed)) return ce.number(0);
-        return ce.number(deterministicRandom(seed));
-      },
-    },
-
-    RandomInteger: {
-      description: [
-        'RandomInteger(n): uniform integer in [0, n] (inclusive)',
-        'RandomInteger(a, b): uniform integer in [a, b] (inclusive)',
-      ],
-      pure: false,
-      signature: '(integer, integer?) -> integer',
-      type: () => 'finite_integer',
-      // Draws from the engine's seeded stream when `ce.randomSeed` is set,
-      // otherwise non-deterministic (`Math.random()`), exactly like `Random`.
-      // Unlike `Random`, the upper bound is *inclusive* (Mathematica
-      // convention): `RandomInteger(a, b)` covers all of `a..b`.
-      evaluate: (ops, { engine: ce }) => {
-        const [firstOp, secondOp] = ops;
-        let lower: number;
-        let upper: number;
-        if (secondOp === undefined) {
-          lower = 0;
-          upper = Math.floor(firstOp.re);
-        } else {
-          lower = Math.floor(firstOp.re);
-          upper = Math.floor(secondOp.re);
-        }
-        // A non-numeric bound (e.g. a symbol) leaves the expression symbolic.
-        if (isNaN(lower) || isNaN(upper)) return undefined;
-        if (upper < lower) [lower, upper] = [upper, lower];
-        return ce.number(
-          lower + Math.floor(ce._random() * (upper - lower + 1))
-        );
-      },
-    },
-
-    // An eagerly-materialized list of independent uniform draws. Eagerness is
-    // the point (draw-once semantics): a lazy collection of `Random()` calls
-    // yields FRESH draws on each traversal, so two references to the same
-    // list would silently disagree (Tycho item 76).
-    RandomList: {
-      description: [
-        'RandomList(n): eager list of n independent uniform reals in [0, 1), ' +
-          'drawn from the engine random stream (honors `ce.randomSeed`)',
-        'RandomList(n, seed): deterministic list of n uniform reals in ' +
-          '[0, 1) from a seed, independent of the engine stream',
-      ],
-      pure: false,
-      signature: '(integer, number?) -> list<finite_real>',
-      // With a literal count the shape is part of the type. A zero count
-      // stays the unshaped list type: a `^0` dimension reduces to the unit
-      // type, which would misdispatch the (valid) empty-list result.
-      type: ([n]) => {
-        const count = n ? asSmallInteger(n) : null;
-        if (count !== null && count > 0 && count <= MAX_RANDOM_ELEMENT_COUNT)
-          return `list<finite_real^${count}>`;
-        return 'list<finite_real>';
-      },
-      evaluate: (ops, { engine: ce }) => {
-        // `toInteger`, not `asSmallInteger`: the count must still be read
-        // above the small-integer bound so an out-of-range length errors
-        // loudly below instead of falling through as symbolic. (Note
-        // `toInteger` rounds a non-integer literal — strict validation
-        // rejects those upstream via the `(integer, …)` signature.)
-        const n = toInteger(ops[0]);
-        if (n === null) {
-          // `toInteger` also declines finite literals beyond the
-          // safe-integer range (e.g. 1e20) — those are out-of-range counts
-          // and must error loudly, not linger as symbolic. Everything else
-          // (a symbol, an error operand) stays symbolic.
-          if (isNumber(ops[0]) && Number.isFinite(ops[0].re))
-            return ce.error([
-              'out-of-range',
-              `a list length in 0..${MAX_RANDOM_ELEMENT_COUNT}`,
-              ops[0].toString(),
-            ]);
+      // Derived from the DOMAIN's endpoints. (The old handler read
+      // `ops.every(x => x.isNonNegative)` against numeric bounds that no
+      // longer exist — `Range(1, 10).isNonNegative` is `undefined`.)
+      sgn: ([domain]) => {
+        // No-arg `Random()` ∈ [0, 1).
+        if (domain === undefined) return 'non-negative';
+        if (isFunction(domain, 'Interval')) {
+          const int = interval(domain);
+          if (!int) return undefined;
+          // Draws lie in [start, end): non-negative when the low endpoint is,
+          // negative when the (excluded) high endpoint is at or below zero.
+          if (int.start >= 0) return 'non-negative';
+          if (int.end <= 0) return 'negative';
           return undefined;
         }
-        // A literal count outside [0, cap] errors loudly: negative is
-        // nonsense, and an unbounded eager list is an uncatchable heap-OOM
-        // (the item-64b class) — refuse rather than allocate past the cap.
-        if (n < 0 || n > MAX_RANDOM_ELEMENT_COUNT)
-          return ce.error([
-            'out-of-range',
-            `a list length in 0..${MAX_RANDOM_ELEMENT_COUNT}`,
-            n.toString(),
-          ]);
-        const seedOp = ops[1];
-        let draw: () => number;
-        if (seedOp !== undefined) {
-          const seed = seedOp.re;
-          if (isNaN(seed)) return undefined;
-          draw = mulberry32(hashSeed(seed));
-        } else draw = () => ce._random();
-        const elements: Expression[] = [];
-        for (let i = 0; i < n; i++) {
-          // Materializing up to 10⁶ boxed numbers can outlast an enclosing
-          // `withTimeLimit` span — honor the deadline with an amortized
-          // check, like the big-operator reduction loop.
-          if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
-          elements.push(ce.number(draw()));
+        if (isFunction(domain, 'Range')) {
+          if (domain.count === undefined) return undefined;
+          const [first, upper, step] = range(domain);
+          const last = rangeLast([first, upper, step]);
+          if (!Number.isFinite(first) || !Number.isFinite(last))
+            return undefined;
+          if (first >= 0 && last >= 0) return 'non-negative';
+          if (first <= 0 && last <= 0) return 'non-positive';
         }
-        return ce.function('List', elements);
+        return undefined;
+      },
+      evaluate: (ops, { engine: ce }) => {
+        // 1. No operand: one draw from the ambient frame (live if unframed).
+        if (ops.length === 0) return ce.number(ce._random());
+
+        // 2–6. Domain-directed. Validation completes before the draw, so an
+        // invalid domain consumes NO draw.
+        const plan = analyzeRandomDomain(ce, ops[0]);
+        if (plan.kind === 'error') return plan.error;
+        if (plan.kind === 'symbolic') return undefined;
+
+        // Exactly ONE draw, for every domain kind — and zero if the selection
+        // bails. Branches 4/5 read the domain AFTER drawing (`at()`, a
+        // position pick), so a lazy view that shrank between the count and the
+        // access yields `undefined` with the counter already advanced;
+        // `withDrawRollback` puts it back (§5: symbolic/error consumes 0).
+        return withDrawRollback(ce, () => {
+          const u = ce._random();
+
+          if (plan.kind === 'sequential')
+            return pickPositions(ce, plan.xs, [Math.floor(u * plan.n)])[0];
+
+          return selectRandomElement(ce, plan, u);
+        });
       },
     },
 
-    // Seed the engine's random stream so that `Random`, `RandomInteger` and
-    // `Shuffle` produce a reproducible sequence. Sets `ce.randomSeed`, which
-    // is otherwise only reachable host-side, making notebook simulations
-    // self-contained.
-    RandomSeed: {
+    // `k` independent draws from a domain, WITH replacement — the twin of
+    // `RandomSample` (without replacement). The source domain is never
+    // materialized; only the `k` drawn elements are.
+    RandomChoice: {
       description: [
-        'RandomSeed(n): seed the random stream with an integer or string, ' +
-          'making subsequent Random/RandomInteger draws reproducible.',
-        'RandomSeed(): clear the seed, returning to a non-deterministic stream.',
+        'RandomChoice(domain, k): a list of k independent draws from ' +
+          '`domain`, with replacement. `k` may exceed the size of the ' +
+          'domain — that is what replacement means.',
       ],
       pure: false,
-      signature: '(integer|string?) -> nothing',
-      evaluate: (ops, { engine: ce }) => {
-        // No argument: clear the seed (back to non-deterministic).
-        if (ops.length === 0) {
-          ce.randomSeed = null;
-          return ce.Nothing;
-        }
-        const arg = ops[0];
-        if (isString(arg)) {
-          ce.randomSeed = arg.string;
-          return ce.Nothing;
-        }
-        // A non-numeric argument (e.g. a symbol) leaves it unevaluated.
-        const n = arg.re;
-        if (isNaN(n)) return undefined;
-        ce.randomSeed = Math.floor(n);
-        return ce.Nothing;
+      // `k` is typed `number`, not `integer`: a caller who computes a count
+      // (`Count(xs)/2`, a fitted value, `4N` for a slider `N`) should not have
+      // to round it first. It is rounded on evaluation.
+      signature: '(collection | set<real>, number) -> list<any>',
+      type: ([domain, k]) => randomListType(domain, k),
+      evaluate: ([domain, kOp], { engine: ce }) => {
+        // Domain validity is checked FIRST, by KIND, before any `k` test.
+        const plan = analyzeRandomDomain(ce, domain);
+        if (plan.kind === 'error') return plan.error;
+        if (plan.kind === 'symbolic') return undefined;
+
+        const k = randomCount(ce, kOp);
+        if (k === null) return undefined;
+        if (typeof k !== 'number') return k;
+        if (k === 0) return ce.function('List', []);
+
+        // EXACTLY `k` draws, in output order — and zero if the selection bails
+        // after drawing (a lazy view that shrank makes `at()` return
+        // `undefined`); `withDrawRollback` restores the counter so a symbolic
+        // result still consumes nothing (§5).
+        return withDrawRollback(ce, () => {
+          if (plan.kind === 'sequential') {
+            const positions: number[] = [];
+            for (let i = 0; i < k; i++) {
+              if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+              positions.push(Math.floor(ce._random() * plan.n));
+            }
+            return ce.function('List', pickPositions(ce, plan.xs, positions));
+          }
+
+          const elements: Expression[] = [];
+          for (let i = 0; i < k; i++) {
+            if ((i & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+            const x = selectRandomElement(ce, plan, ce._random());
+            if (x === undefined) return undefined;
+            elements.push(x);
+          }
+          return ce.function('List', elements);
+        });
       },
     },
+
+    //
+    // ─── Tombstones (§9) ────────────────────────────────────────────────
+    //
+    // Removed by the Random family redesign. Kept for ONE release so a stored
+    // document calling a removed head gets a loud error naming its
+    // replacement, instead of the silent inert expression an unrecognized
+    // head would produce. Delete next cycle.
+    //
+    RandomInteger: removedRandomOperator('RandomInteger', 'Random(Range(...))'),
+    RandomList: removedRandomOperator(
+      'RandomList',
+      'RandomChoice(Interval(0, 1), n)'
+    ),
+    RandomSeed: removedRandomOperator('RandomSeed', 'WithRandomSeed(n, ...)'),
+    Sample: removedRandomOperator('Sample', 'RandomSample'),
+    Shuffle: removedRandomOperator('Shuffle', 'RandomShuffle'),
 
     // @todo: need review
     Signature: {

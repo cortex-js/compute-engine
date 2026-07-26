@@ -2,6 +2,7 @@ import {
   CancellationError,
   type DeadlineFrame,
 } from '../common/interruptible.js';
+import type { RandomSeedFrame } from './numerics/random.js';
 
 export class EngineRuntimeState {
   private _iterationLimit = 1024;
@@ -9,6 +10,7 @@ export class EngineRuntimeState {
   private _recursionDepth = 0;
   private _maxCollectionSize = 10_000;
   private _deadlineFrame: DeadlineFrame | undefined = undefined;
+  private _randomFrame: RandomSeedFrame | undefined = undefined;
   private _isVerifying = false;
 
   get iterationLimit(): number {
@@ -86,6 +88,23 @@ export class EngineRuntimeState {
   set deadline(value: number | undefined) {
     this._deadlineFrame =
       value === undefined ? undefined : { at: value, spans: [] };
+  }
+
+  /**
+   * The innermost active `WithRandomSeed` frame (or `undefined` when no frame
+   * is active, i.e. draws are live).
+   *
+   * Stored and swapped exactly like {@linkcode deadlineFrame}: the "stack" is
+   * the JS call stack — `withRandomSeedFrame` saves the previous frame, sets
+   * its own, and restores in a `finally`. It belongs to the evaluation
+   * context, never a module-level slot, so engines never share frames.
+   */
+  get randomFrame(): RandomSeedFrame | undefined {
+    return this._randomFrame;
+  }
+
+  set randomFrame(frame: RandomSeedFrame | undefined) {
+    this._randomFrame = frame;
   }
 
   get timeRemaining(): number {

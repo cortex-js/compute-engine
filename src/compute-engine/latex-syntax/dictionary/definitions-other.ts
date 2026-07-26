@@ -816,7 +816,7 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
   {
     latexTrigger: '\\operatorname{shuffle}',
     kind: 'function',
-    parse: 'Shuffle',
+    parse: 'RandomShuffle',
   },
   { latexTrigger: '\\operatorname{repeat}', kind: 'function', parse: 'Repeat' },
   { latexTrigger: '\\operatorname{join}', kind: 'function', parse: 'Join' },

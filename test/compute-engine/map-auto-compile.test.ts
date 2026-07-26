@@ -4,6 +4,7 @@ import {
   _mapAutoCompileStats as stats,
   _resetMapAutoCompileStats,
 } from '../../src/compute-engine/library/map-auto-compile';
+import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
 
 /**
  * Auto-compilation of lazy-`Map` element lambdas on numeric drains
@@ -206,17 +207,40 @@ describe('Map auto-compile', () => {
     expect(stats.compiledHits).toBe(120);
   });
 
-  // ── 7. Purity gate ─────────────────────────────────────────────────────
-  test('a Random-containing body is ineligible; interpreter serves', () => {
+  // ── 7. Randomness is ELIGIBLE (the purity gate is gone) ────────────────
+  // The 2026-07-25 Random family redesign deletes the `pure: false` gate (§6):
+  // per-sample-point draws must stay in the hot path. Compiled draws go
+  // through `_SYS.drawNextRandomNumber()` → `ce._random()`, the same primitive
+  // the interpreter uses, so parity is by construction. Bit-parity itself is
+  // pinned by `random-compile.test.ts`; here only ELIGIBILITY is asserted.
+  test('a Random-containing body IS auto-compiled', () => {
     ce.assign('f7', ce.box(['Function', ['Add', 'x', ['Random']], 'x']));
     const m = broadcast('f7', 120);
     const els = drainRe(m.N());
-    expect(stats.attempts).toBe(1); // one attempt…
-    expect(stats.compiledHits).toBe(0); // …no compiled elements
-    // The interpreter advanced the stream per element.
+    expect(stats.attempts).toBe(1);
+    expect(stats.compiledHits).toBe(120);
+    // Each element drew its own value (unframed here, so live).
     expect(els[0]).toBeGreaterThanOrEqual(1);
     expect(els[0]).toBeLessThanOrEqual(2);
     expect(new Set(els.map((v, i) => v - (i + 1))).size).toBeGreaterThan(1);
+  });
+
+  // The fail-closed path that REPLACES the purity gate: eligibility is now the
+  // compiler's own D6 question — does a handler exist? `Assume` has none.
+  test('an Assume-containing body still falls back to the interpreter', () => {
+    ce.assign(
+      'f7b',
+      ce.box([
+        'Function',
+        ['Block', ['Assume', ['Greater', 'q7', 0]], 'x'],
+        'x',
+      ])
+    );
+    const m = broadcast('f7b', 120);
+    const els = drainRe(m.N());
+    expect(stats.attempts).toBe(1); // one attempt…
+    expect(stats.compiledHits).toBe(0); // …no compiled elements
+    expect(els.slice(0, 3)).toEqual([1, 2, 3]);
 
     // Structural ineligibility is permanent: zero attempts on later drains.
     _resetMapAutoCompileStats();
@@ -505,7 +529,12 @@ describe('Map auto-compile', () => {
       // This is now the ONLY thing standing between a random draw and the
       // compiled bake path, so it is asserted directly.
       const engine = new ComputeEngine();
-      for (const head of ['Random', 'RandomInteger', 'RandomList', 'Shuffle', 'Sample']) {
+      for (const head of [
+        'Random',
+        'RandomChoice',
+        'RandomSample',
+        'RandomShuffle',
+      ]) {
         const def = engine.lookupDefinition(head) as
           | { operator?: { pure?: boolean } }
           | undefined;
@@ -519,27 +548,87 @@ describe('Map auto-compile', () => {
       // expression, which would license folding it.
       const engine = new ComputeEngine();
       const list = ['List', 1, 2, 3, 4, 5];
-      expect(engine.box(['Shuffle', list]).isPure).toBe(false);
-      expect(engine.box(['Shuffle', list]).isConstant).toBe(false);
-      expect(engine.box(['Sample', list, 2]).isPure).toBe(false);
-      expect(engine.box(['Sample', list, 2]).isConstant).toBe(false);
+      expect(engine.box(['RandomShuffle', list]).isPure).toBe(false);
+      expect(engine.box(['RandomShuffle', list]).isConstant).toBe(false);
+      expect(engine.box(['RandomSample', list, 2]).isPure).toBe(false);
+      expect(engine.box(['RandomSample', list, 2]).isConstant).toBe(false);
     });
 
-    test('a Map over a random draw is not auto-compiled', () => {
-      // The behaviour the gate exists for, asserted end-to-end: under a
-      // compile-time engine seed the JS target bakes each `Random` node to a
-      // literal constant, so a compiled Map would give every element the same
-      // value where the interpreter advances the stream per element.
+    test('a Map over a random draw advances the frame per element', () => {
+      // The behaviour the gate exists for, asserted end-to-end: inside a
+      // `WithRandomSeed` frame each element's draw advances the frame's
+      // counter, so the six values differ. (A compiled Map that baked one
+      // constant, or left the counter alone, would repeat a single value.)
       const engine = new ComputeEngine();
       engine.precision = 'machine';
-      engine.randomSeed = 42;
       const drawn = engine
-        .box(['Map', ['Range', 1, 6], ['Function', ['N', ['Random']], 'i']])
+        .box([
+          'WithRandomSeed',
+          42,
+          ['Map', ['Range', 1, 6], ['Function', ['N', ['Random']], 'i']],
+        ])
         .evaluate();
       const values = [...drawn.each()].map((x) => x.re);
       expect(values).toHaveLength(6);
       // Per-element draws, not one baked constant repeated six times.
       expect(new Set(values).size).toBeGreaterThan(1);
+    });
+
+    // ── Fallback paths must not DOUBLE-consume draws ─────────────────────
+    //
+    // The runner calls the compiled function (draws advance), then some paths
+    // DISCARD the result and return `undefined` so the interpreter re-evaluates
+    // the element — drawing a second time. Without a rollback the frame counter
+    // runs ahead of the interpreter's, so every later draw in the frame shifts:
+    // invisible to result-only assertions, which is why these compare the
+    // TRAILING COUNTER against a jit-off drain, not just the values.
+    // (`docs/RANDOMNESS-MODEL.md` §5: a fixed number of indices per operation,
+    // whichever implementation serves it.)
+
+    /** Build a fresh `Map(Range(1,n), x |-> body)`, drain it inside a frame,
+     * and report the frame's trailing draw index alongside the values. */
+    function framedDrain(body: any, n: number, jit: 'auto' | 'off') {
+      const engine = new ComputeEngine();
+      engine.precision = 'machine';
+      engine.jit = jit;
+      const m = engine
+        .box(['Map', ['Range', 1, n], ['Function', body, 'x']])
+        .evaluate();
+      return withRandomSeedFrame(engine, 7, () => {
+        const values = [...m.N().each()].map((x) => x.toString());
+        return { next: engine._randomFrame!.next, values };
+      });
+    }
+
+    test('the NaN double-check does not double-consume draws', () => {
+      // `√(Random() − 0.5)` is NaN for about half the elements under the
+      // compiled real emission, so each of those re-runs on the interpreter.
+      const body = ['Sqrt', ['Subtract', ['Random'], 0.5]];
+      _resetMapAutoCompileStats();
+      const compiled = framedDrain(body, 200, 'auto');
+      // The path under test was actually taken.
+      expect(stats.nanDoubleChecks).toBeGreaterThan(0);
+      expect(stats.compiledHits).toBeGreaterThan(0);
+
+      const interpreted = framedDrain(body, 200, 'off');
+      // One draw per element, exactly as the interpreter consumes.
+      expect(compiled.next).toBe(200);
+      expect(compiled.next).toBe(interpreted.next);
+      expect(compiled.values).toEqual(interpreted.values);
+    });
+
+    test('an ABI failure does not double-consume draws', () => {
+      // A list-returning body is an ABI failure (permanent `no-compile`), so
+      // the FIRST element pays a compiled call whose result is discarded.
+      const body = ['List', ['Random'], ['Random']];
+      _resetMapAutoCompileStats();
+      const compiled = framedDrain(body, 5, 'auto');
+      expect(stats.elementFallbacks).toBeGreaterThanOrEqual(1);
+
+      const interpreted = framedDrain(body, 5, 'off');
+      expect(compiled.next).toBe(10); // 5 elements × 2 draws
+      expect(compiled.next).toBe(interpreted.next);
+      expect(compiled.values).toEqual(interpreted.values);
     });
   });
 

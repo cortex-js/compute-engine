@@ -314,20 +314,6 @@ tolerance: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.randomSeed
-
-```ts
-randomSeed: string | number | null;
-```
-
-Seed controlling deterministic, reproducible randomness. `null` (default)
- is non-deterministic. See the accessor on `ComputeEngine` for the full
- semantics (stream reset on assignment, compile-time baking).
-
-</MemberCard>
-
-<MemberCard>
-
 ##### ExpressionComputeEngine.angularUnit
 
 ```ts
@@ -7668,20 +7654,6 @@ complex: (a, b?) => Complex;
 ```ts
 tolerance: number;
 ```
-
-</MemberCard>
-
-<MemberCard>
-
-##### IComputeEngine.randomSeed
-
-```ts
-randomSeed: string | number | null;
-```
-
-Seed controlling deterministic, reproducible randomness. `null` (default)
- is non-deterministic. See the accessor on `ComputeEngine` for the full
- semantics (stream reset on assignment, compile-time baking).
 
 </MemberCard>
 
