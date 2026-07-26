@@ -9,6 +9,14 @@ import {
 } from '../global-types.js';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards.js';
 
+// Lazy reference to the n-ary `add()` from arithmetic-add.ts, registered by
+// `init-lazy-refs.ts` — a static import here would close a dependency cycle
+// (arithmetic-add → … → tensor-view → tensor-fields).
+let _addN: ((...xs: Expression[]) => Expression) | undefined;
+export function _setFieldAddN(fn: (...xs: Expression[]) => Expression): void {
+  _addN = fn;
+}
+
 /** @category Tensors */
 export function makeTensorField<DT extends keyof DataTypeMap>(
   ce: ComputeEngine,
@@ -292,6 +300,14 @@ export class TensorFieldExpression implements TensorField<Expression> {
   }
 
   addn(...xs: Expression[]): Expression {
+    // n-ary `add()` in one pass, not an incremental `reduce(.add)`: the
+    // accumulator re-canonicalizes the growing sum at every step (quadratic
+    // in the number of terms — e.g. the trace of an n×n symbolic matrix).
+    // Same semantics as chained `.add()` (like-term collection included,
+    // which the symbolic determinant's expanded form relies on).
+    if (xs.length === 0) return this.zero;
+    if (xs.length === 1) return xs[0];
+    if (_addN) return _addN(...xs);
     return xs.reduce((a, b) => a.add(b), this.zero);
   }
 
@@ -308,6 +324,11 @@ export class TensorFieldExpression implements TensorField<Expression> {
   }
 
   muln(...xs: Expression[]): Expression {
+    // Deliberately incremental: `mul()` distributes over sums, and the
+    // 3×3 symbolic determinant (and through it `CharacteristicPolynomial`)
+    // relies on that expansion. Call sites pass at most a handful of
+    // factors, so the per-step re-canonicalization stays cheap — do not
+    // convert to a one-shot `Multiply` (it would keep products factored).
     return xs.reduce((a, b) => a.mul(b), this.one);
   }
 

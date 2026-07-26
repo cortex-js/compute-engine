@@ -1233,8 +1233,13 @@ function solveSingleSqrtEquation(
   const sqrtTermNode: Expression = sqrtTerm;
   const substitute = (node: Expression): Expression => {
     if (node.isSame(sqrtTermNode)) return t;
-    if (isFunction(node))
-      return ce.function(node.operator, node.ops!.map(substitute));
+    if (isFunction(node)) {
+      const ops = node.ops.map(substitute);
+      // Nothing below this node was substituted: reuse it rather than
+      // re-canonicalizing an unchanged subtree.
+      if (ops.every((x, i) => x === node.ops![i])) return node;
+      return ce.function(node.operator, ops);
+    }
     return node;
   };
   const exprT = substitute(expr);
@@ -1317,8 +1322,13 @@ function sqrtEquationRhsGuard(
   const sqrtTermNode: Expression = sqrtTerm;
   const substitute = (node: Expression): Expression => {
     if (node.isSame(sqrtTermNode)) return t;
-    if (isFunction(node))
-      return ce.function(node.operator, node.ops!.map(substitute));
+    if (isFunction(node)) {
+      const ops = node.ops.map(substitute);
+      // Nothing below this node was substituted: reuse it rather than
+      // re-canonicalizing an unchanged subtree.
+      if (ops.every((x, i) => x === node.ops![i])) return node;
+      return ce.function(node.operator, ops);
+    }
     return node;
   };
   const coeffs = getPolynomialCoefficients(substitute(expr), tName);
@@ -2076,7 +2086,12 @@ function substituteGenerator(
 function expandLogPowers(node: Expression): Expression {
   if (!isFunction(node)) return node;
   const ce = node.engine;
-  const rebuilt = ce.function(node.operator, node.ops!.map(expandLogPowers));
+  const ops = node.ops.map(expandLogPowers);
+  // Nothing below this node was rewritten: reuse it instead of
+  // re-canonicalizing an unchanged subtree.
+  const rebuilt = ops.every((x, i) => x === node.ops[i])
+    ? node
+    : ce.function(node.operator, ops);
   if (isFunction(rebuilt, 'Ln')) {
     const a = rebuilt.op1;
     if (isFunction(a, 'Power'))
@@ -2352,8 +2367,11 @@ export function findUnivariateRoots(
   if (expr.has('BaseForm')) {
     const stripBaseForm = (node: Expression): Expression => {
       if (isFunction(node, 'BaseForm')) return stripBaseForm(node.op1);
-      if (isFunction(node) && node.ops)
-        return ce.function(node.operator, node.ops.map(stripBaseForm));
+      if (isFunction(node)) {
+        const ops = node.ops.map(stripBaseForm);
+        if (ops.every((x, i) => x === node.ops![i])) return node;
+        return ce.function(node.operator, ops);
+      }
       return node;
     };
     expr = stripBaseForm(expr);

@@ -25,6 +25,9 @@ import { _setCompile } from './stochastic-equal.js';
 import { validateArguments } from './validate.js';
 import { _setValidateArguments } from '../function-utils.js';
 
+import { add } from './arithmetic-add.js';
+import { _setFieldAddN } from '../tensor/tensor-fields.js';
+
 _setExpand(expand);
 _setExpandForIs(expand);
 _setSerializeJson(serializeJson);
@@ -38,3 +41,4 @@ _setGetPolynomialCoefficients(getPolynomialCoefficients);
 _setGetPolynomialDegree(polynomialDegree);
 _setFindUnivariateRoots(findUnivariateRoots);
 _setValidateArguments(validateArguments);
+_setFieldAddN(add);

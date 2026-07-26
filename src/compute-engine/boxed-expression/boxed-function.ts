@@ -609,6 +609,18 @@ export class BoxedFunction
     if (!ops.every((x) => x.isValid))
       return this.engine.function(this._operator, ops, { form: 'raw' });
 
+    // Nothing in this subtree matched the substitution (every operand came
+    // back identical) and the node is already in the requested form:
+    // rebuilding it would re-canonicalize an unchanged tree. Return `this`.
+    // (A `CanonicalForm[]` request is not a plain canonicalization, so it
+    // always rebuilds.)
+    if (
+      form === 'canonical' &&
+      this.isCanonical &&
+      ops.every((x, i) => x === this._ops[i])
+    )
+      return this;
+
     return this.engine.function(this._operator, ops, { form });
   }
 

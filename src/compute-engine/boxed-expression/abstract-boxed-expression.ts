@@ -910,6 +910,19 @@ export abstract class _BoxedExpression implements Expression {
     const recursive = options?.recursive ?? true;
 
     const ops = this.ops.map((x) => (recursive ? x.map(fn, options) : fn(x)));
+
+    // No operand was rewritten and the node is already in the form the
+    // rebuild would produce: hand `this` to `fn` instead of reconstructing
+    // (and re-canonicalizing) an identical node. (A `CanonicalForm[]` request
+    // is a transformation pipeline, not a plain form, so it always rebuilds.)
+    if (
+      (canonical === true
+        ? this.isCanonical
+        : canonical === false && !this.isCanonical && !this.isStructural) &&
+      ops.every((x, i) => x === this.ops![i])
+    )
+      return fn(this);
+
     return fn(
       this.engine.function(this.operator, ops, {
         form: canonical ? 'canonical' : 'raw',

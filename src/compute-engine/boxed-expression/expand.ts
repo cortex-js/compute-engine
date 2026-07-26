@@ -240,6 +240,7 @@ export function expandAll(expr: Expression): Expression {
 
   const ops = expr.ops.map((x) => expandAll(x));
 
-  const result = expr.engine.function(expr.operator, ops);
-  return expand(result);
+  // No operand expanded: reuse the node instead of re-canonicalizing it.
+  if (ops.every((x, i) => x === expr.ops[i])) return expand(expr);
+  return expand(expr.engine.function(expr.operator, ops));
 }

@@ -198,7 +198,9 @@ export function factorPerfectSquare(expr: Expression): Expression | null {
 function stripAbs(expr: Expression): Expression {
   if (!isFunction(expr)) return expr;
   if (expr.operator === 'Abs') return stripAbs(expr.op1);
-  return expr.engine.function(expr.operator, expr.ops.map(stripAbs));
+  const ops = expr.ops.map(stripAbs);
+  if (ops.every((x, i) => x === expr.ops[i])) return expr;
+  return expr.engine.function(expr.operator, ops);
 }
 
 /**
