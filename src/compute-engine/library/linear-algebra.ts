@@ -24,6 +24,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { asRational, toInteger } from '../boxed-expression/numerics.js';
+import { add } from '../boxed-expression/arithmetic-add.js';
 import { pointNormType } from './utils.js';
 
 // Total number of elements (m·n) at or below which a constant matrix
@@ -818,15 +819,18 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               `${shapeA[0]} vs ${shapeB[0]}`
             );
 
-          // Dot product: sum of element-wise products
+          // Dot product: sum of element-wise products. One n-ary `add()`
+          // over the collected terms — an incremental accumulator
+          // re-canonicalizes the growing sum every step (quadratic in n).
           const n = shapeA[0];
-          let sum: Expression = ce.Zero;
+          if (n === 0) return ce.Zero;
+          const terms: Expression[] = [];
           for (let i = 0; i < n; i++) {
             const aVal = aTensor.at(i + 1) ?? ce.Zero;
             const bVal = bTensor.at(i + 1) ?? ce.Zero;
-            sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
+            terms.push(ce.expr(aVal).mul(ce.expr(bVal)));
           }
-          return sum.evaluate();
+          return add(...terms).evaluate();
         }
 
         // Handle matrix × vector: A (m×n) × v (n) → result (m)
@@ -835,15 +839,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (n !== shapeB[0])
             return ce.error('incompatible-dimensions', `${n} vs ${shapeB[0]}`);
 
+          // Degenerate inner dimension: every entry is an empty sum, i.e. 0.
+          if (n === 0)
+            return ce.expr([
+              'List',
+              ...Array.from({ length: m }, () => ce.Zero),
+            ]);
+
           const result: Expression[] = [];
           for (let i = 0; i < m; i++) {
-            let sum: Expression = ce.Zero;
+            const terms: Expression[] = [];
             for (let k = 0; k < n; k++) {
               const aVal = aTensor.at(i + 1, k + 1) ?? ce.Zero;
               const bVal = bTensor.at(k + 1) ?? ce.Zero;
-              sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
+              terms.push(ce.expr(aVal).mul(ce.expr(bVal)));
             }
-            result.push(sum.evaluate());
+            result.push(add(...terms).evaluate());
           }
           return ce.expr(['List', ...result]);
         }
@@ -855,15 +866,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (shapeA[0] !== m)
             return ce.error('incompatible-dimensions', `${shapeA[0]} vs ${m}`);
 
+          // Degenerate inner dimension: every entry is an empty sum, i.e. 0.
+          if (m === 0)
+            return ce.expr([
+              'List',
+              ...Array.from({ length: n }, () => ce.Zero),
+            ]);
+
           const result: Expression[] = [];
           for (let j = 0; j < n; j++) {
-            let sum: Expression = ce.Zero;
+            const terms: Expression[] = [];
             for (let k = 0; k < m; k++) {
               const aVal = aTensor.at(k + 1) ?? ce.Zero;
               const bVal = bTensor.at(k + 1, j + 1) ?? ce.Zero;
-              sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
+              terms.push(ce.expr(aVal).mul(ce.expr(bVal)));
             }
-            result.push(sum.evaluate());
+            result.push(add(...terms).evaluate());
           }
           return ce.expr(['List', ...result]);
         }
@@ -876,17 +894,29 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             return ce.error('incompatible-dimensions', `${n1} vs ${n2}`);
 
           const n = n1;
+          // Degenerate inner dimension: every entry is an empty sum, i.e. 0.
+          if (n === 0) {
+            const zeroRow = ce.expr([
+              'List',
+              ...Array.from({ length: p }, () => ce.Zero),
+            ]);
+            return ce.expr([
+              'List',
+              ...Array.from({ length: m }, () => zeroRow),
+            ]);
+          }
+
           const rows: Expression[] = [];
           for (let i = 0; i < m; i++) {
             const row: Expression[] = [];
             for (let j = 0; j < p; j++) {
-              let sum: Expression = ce.Zero;
+              const terms: Expression[] = [];
               for (let k = 0; k < n; k++) {
                 const aVal = aTensor.at(i + 1, k + 1) ?? ce.Zero;
                 const bVal = bTensor.at(k + 1, j + 1) ?? ce.Zero;
-                sum = sum.add(ce.expr(aVal).mul(ce.expr(bVal)));
+                terms.push(ce.expr(aVal).mul(ce.expr(bVal)));
               }
-              row.push(sum.evaluate());
+              row.push(add(...terms).evaluate());
             }
             rows.push(ce.expr(['List', ...row]));
           }
@@ -1455,23 +1485,25 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const vectorNorm = (
           elements: readonly Expression[]
         ): Expression | undefined => {
+          // The norm of an empty vector is 0 for every norm type.
+          if (elements.length === 0) return ce.Zero;
+
           if (normType === 1) {
-            // L1 norm: sum of absolute values
-            let sum: Expression = ce.Zero;
-            for (const el of elements) {
-              sum = sum.add(ce.expr(['Abs', el]).evaluate());
-            }
+            // L1 norm: sum of absolute values (one n-ary `add()` — an
+            // incremental accumulator is quadratic in the element count)
+            const sum = add(...elements.map((el) => ce.expr(['Abs', el]).evaluate()));
             // Honor `.N()`: the exact form only under plain evaluate().
             return sum.evaluate({ numericApproximation });
           }
 
           if (normType === 2) {
             // L2 norm: sqrt of sum of squares
-            let sumSq: Expression = ce.Zero;
-            for (const el of elements) {
-              const absEl = ce.expr(['Abs', el]).evaluate();
-              sumSq = sumSq.add(absEl.mul(absEl));
-            }
+            const sumSq = add(
+              ...elements.map((el) => {
+                const absEl = ce.expr(['Abs', el]).evaluate();
+                return absEl.mul(absEl);
+              })
+            );
             // Honor `.N()`: `Norm((1,1)).N()` must numericize to 1.414…,
             // not stay the exact √2 (the exactness contract).
             return ce.expr(['Sqrt', sumSq]).evaluate({ numericApproximation });
@@ -1500,11 +1532,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // General Lp norm: (Σ|xi|^p)^(1/p)
           if (typeof normType === 'number' && normType > 0) {
             const p = normType;
-            let sumPow: Expression = ce.Zero;
-            for (const el of elements) {
-              const absEl = ce.expr(['Abs', el]).evaluate();
-              sumPow = sumPow.add(ce.expr(['Power', absEl, p]).evaluate());
-            }
+            const sumPow = add(
+              ...elements.map((el) => {
+                const absEl = ce.expr(['Abs', el]).evaluate();
+                return ce.expr(['Power', absEl, p]).evaluate();
+              })
+            );
             // Use Root for integer p values, Power for non-integer
             // Use .N() to get numeric result for non-perfect roots
             if (Number.isInteger(p)) {

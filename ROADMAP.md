@@ -1025,6 +1025,23 @@ Some of the gap is real capability (`mul()` distributes over sums — `2·(x+1)`
 outputs are identical and the cost is not. **This is engine-wide, not specific
 to `D`.**
 
+**Corollaries measured 2026-07-26** (canonicalization-deferral audit): (1) For
+n-ary assembly, use the n-ary `add(...xs)`/`mul(...xs)` helpers
+(`arithmetic-add.ts`/`arithmetic-mul-div.ts`) — same semantics as chained
+`.add()`/`.mul()` (like-term collection, distribution) in one pass. A
+`reduce((a, b) => a.add(b))` accumulator pays the helper tax **quadratically**
+(65× at 50 terms): the growing sum is re-canonicalized every step
+(tensor-fields `addn` fixed this way; remaining small-N accumulator sites are
+catalogued in the audit memory, the rubi ones deliberately left — their result
+shapes depend on stepwise `mul()` distribution). (2) The lever that *did* pay,
+orthogonal to the two measured-unprofitable deferral levers above: `subs()` and
+`map()` now skip the rebuild entirely when no operand changed and the node is
+already in the requested form (up to ~200× on substitutions that touch little
+of the tree; ~1× when most nodes change, so no regression). Deferral of
+per-part canonicalization during build-up remains a ~1.7× constant — parts are
+consumed as-is by a canonical parent, never re-canonicalized — consistent with
+the Lever B ceiling.
+
 **Attempted and reverted (2026-07-19): `isTensorProductOperand` fast path.**
 `sortProductOperands` (`order.ts`) maps that predicate — two `type.matches()`
 walks per operand — over every product, to decide whether ≥2 operands are

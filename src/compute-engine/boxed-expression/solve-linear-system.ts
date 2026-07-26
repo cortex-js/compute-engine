@@ -6,6 +6,7 @@ import type {
 import { polynomialDegree } from './polynomials.js';
 import { findUnivariateRoots, rootsAsEquations } from './solve.js';
 import { expand } from './expand.js';
+import { add } from './arithmetic-add.js';
 import { isFunction, isSymbol, numericValue } from './type-guards.js';
 
 //
@@ -481,10 +482,13 @@ function gaussianElimination(
   const solution: Expression[] = new Array(n);
 
   for (let i = n - 1; i >= 0; i--) {
-    let sum = aug[i][n]; // RHS
-    for (let j = i + 1; j < n; j++) {
-      sum = sum.sub(aug[i][j].mul(solution[j]));
-    }
+    // RHS minus the already-resolved terms, in one n-ary `add()` — an
+    // incremental `.sub()` accumulator re-canonicalizes the growing sum
+    // at every step (quadratic in the number of unknowns).
+    const terms: Expression[] = [aug[i][n]]; // RHS
+    for (let j = i + 1; j < n; j++)
+      terms.push(aug[i][j].mul(solution[j]).neg());
+    const sum = terms.length === 1 ? terms[0] : add(...terms);
     solution[i] = sum.div(aug[i][i]);
 
     // One step per back-substituted variable: the variables resolved so far,
@@ -623,15 +627,14 @@ function solveParametric(
     const col = pivotCol[row];
     if (col === undefined) continue;
 
-    // Start with RHS
-    let expr = aug[row][n];
-
-    // Subtract contributions from columns to the right
+    // RHS minus the contributions from columns to the right, in one n-ary
+    // `add()` (see the back-substitution above).
+    const terms: Expression[] = [aug[row][n]];
     for (let j = col + 1; j < n; j++) {
-      if (!isEffectivelyZero(aug[row][j])) {
-        expr = expr.sub(aug[row][j].mul(solution[j]));
-      }
+      if (!isEffectivelyZero(aug[row][j]))
+        terms.push(aug[row][j].mul(solution[j]).neg());
     }
+    const expr = terms.length === 1 ? terms[0] : add(...terms);
 
     // Divide by pivot
     solution[col] = expr.div(aug[row][col]).simplify();
