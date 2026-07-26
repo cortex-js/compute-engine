@@ -26,43 +26,22 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * `random-vectors.test.ts`.
  */
 
-const MESSAGE = /operator-removed: `ce\.randomSeed` has been removed/;
-
-describe('ce.randomSeed — accessor tombstone', () => {
-  it('the getter throws, naming WithRandomSeed', () => {
+describe('ce.randomSeed — fully removed (0.96.0)', () => {
+  // The accessor tombstone (a throwing getter/setter) lived for the one
+  // release promised by the redesign's §9 (0.95.0) and is now deleted along
+  // with the operator tombstones. `randomSeed` is no longer a property of any
+  // kind: reading it yields `undefined`, and a plain-JS assignment is an
+  // ordinary silent expando with NO effect on draws.
+  it('is not a property; assignment has no effect on draws', () => {
     const ce = new ComputeEngine();
-    expect(() => (ce as any).randomSeed).toThrow(MESSAGE);
-    expect(() => (ce as any).randomSeed).toThrow('WithRandomSeed(seed, body)');
-  });
+    expect((ce as any).randomSeed).toBeUndefined();
+    expect('randomSeed' in ComputeEngine.prototype).toBe(false);
 
-  it('the setter throws — a silent assignment is the failure it prevents', () => {
-    const ce = new ComputeEngine();
-    expect(() => {
-      (ce as any).randomSeed = 42;
-    }).toThrow(MESSAGE);
-    expect(() => {
-      (ce as any).randomSeed = null;
-    }).toThrow(MESSAGE);
-    expect(() => {
-      (ce as any).randomSeed = 'hello';
-    }).toThrow(MESSAGE);
-  });
-
-  it('the RandomSeed operator is a tombstone too, on every route', () => {
-    const ce = new ComputeEngine();
-    const pattern = /operator-removed: `RandomSeed` has been removed/;
-    expect(() => ce.box(['RandomSeed', 42]).evaluate()).toThrow(pattern);
-    expect(() => ce.box(['RandomSeed']).evaluate()).toThrow(pattern);
-    expect(() => ce.function('RandomSeed', [ce.number(42)]).evaluate()).toThrow(
-      pattern
-    );
-    expect(() => ce.parse('\\operatorname{RandomSeed}(42)').evaluate()).toThrow(
-      pattern
-    );
-    // The message points at the replacement.
-    expect(() => ce.box(['RandomSeed', 42]).evaluate()).toThrow(
-      'WithRandomSeed(n, ...)'
-    );
+    (ce as any).randomSeed = 42;
+    // Draws stay live — repeated unframed draws differ.
+    const a = ce.box(['Random']).evaluate().re;
+    const b = ce.box(['Random']).evaluate().re;
+    expect(a).not.toBe(b);
   });
 });
 

@@ -613,43 +613,26 @@ describe('Deadline — every O(k)/O(n) loop honors an enclosing withTimeLimit', 
   });
 });
 
-describe('Tombstones — a removed head errors LOUDLY, naming its replacement', () => {
-  // An unrecognized head is a VALID, INERT expression in CE, so a missing
-  // tombstone reverts that head to silent-inert with no other signal — hence
-  // a test per head, on all three routes.
-  const TOMBSTONES: [head: string, replacement: string, args: any[]][] = [
-    ['RandomInteger', 'Random(Range(...))', [1, 10]],
-    ['RandomList', 'RandomChoice(Interval(0, 1), n)', [3]],
-    ['RandomSeed', 'WithRandomSeed(n, ...)', [7]],
-    ['Sample', 'RandomSample', [['List', 1, 2, 3], 2]],
-    ['Shuffle', 'RandomShuffle', [['List', 1, 2, 3]]],
+describe('Removed heads — the one-release tombstones are gone (0.96.0)', () => {
+  // The Random-redesign tombstones threw `operator-removed` for exactly one
+  // release (0.95.0), per the redesign's §9. They are now deleted: the
+  // removed heads behave like any other unrecognized operator — a VALID,
+  // INERT expression that evaluates to itself. This test pins the deletion
+  // (a resurrected definition, tombstone or otherwise, would fail it).
+  const REMOVED: [head: string, args: any[]][] = [
+    ['RandomInteger', [1, 10]],
+    ['RandomList', [3]],
+    ['RandomSeed', [7]],
+    ['Sample', [['List', 1, 2, 3], 2]],
+    ['Shuffle', [['List', 1, 2, 3]]],
   ];
 
-  for (const [head, replacement, args] of TOMBSTONES) {
-    it(`${head} → ${replacement}`, () => {
-      const pattern = new RegExp(
-        `operator-removed.*\`${head}\` has been removed`
-      );
-      // Box route
-      expect(() => ce.box([head, ...args]).evaluate()).toThrow(pattern);
-      // The message names the replacement verbatim (substring match).
-      expect(() => ce.box([head, ...args]).evaluate()).toThrow(replacement);
-      // `ce.function` route (pre-boxed operands)
-      expect(() =>
-        ce
-          .function(
-            head,
-            args.map((a) => ce.box(a))
-          )
-          .evaluate()
-      ).toThrow(pattern);
-      // Parse route
-      const latexArgs = args
-        .map((a) => (typeof a === 'number' ? String(a) : '[1, 2, 3]'))
-        .join(', ');
-      expect(() =>
-        ce.parse(`\\operatorname{${head}}(${latexArgs})`).evaluate()
-      ).toThrow(pattern);
+  for (const [head, args] of REMOVED) {
+    it(`${head} is an ordinary unknown head — valid and inert`, () => {
+      const expr = ce.box([head, ...args]);
+      expect(expr.isValid).toBe(true);
+      const result = expr.evaluate();
+      expect(result.operator).toBe(head); // inert: evaluates to itself
     });
   }
 });

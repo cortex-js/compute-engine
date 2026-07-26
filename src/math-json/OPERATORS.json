@@ -5474,30 +5474,6 @@
       "description": "Generate a random expression."
     },
     {
-      "name": "RandomInteger",
-      "category": "Core",
-      "arity": "variadic",
-      "signature": "(any*) -> nothing",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": true,
-      "broadcastable": false,
-      "description": "`RandomInteger` has been removed. Use `Random(Range(...))` instead."
-    },
-    {
-      "name": "RandomList",
-      "category": "Core",
-      "arity": "variadic",
-      "signature": "(any*) -> nothing",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": true,
-      "broadcastable": false,
-      "description": "`RandomList` has been removed. Use `RandomChoice(Interval(0, 1), n)` instead."
-    },
-    {
       "name": "RandomPrime",
       "category": "Number Theory",
       "arity": "optional",
@@ -5523,18 +5499,6 @@
       "lazy": false,
       "broadcastable": false,
       "description": "RandomSample(xs, k): a list of k elements drawn from the indexed collection `xs`, without replacement. \"Without replacement\" is over POSITIONS, not values: on a multiset, repeats are expected — RandomSample([1, 1, 2], 2) can return [1, 1]. Wrap the call in `WithRandomSeed(seed, ...)` to make it deterministic."
-    },
-    {
-      "name": "RandomSeed",
-      "category": "Core",
-      "arity": "variadic",
-      "signature": "(any*) -> nothing",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": true,
-      "broadcastable": false,
-      "description": "`RandomSeed` has been removed. Use `WithRandomSeed(n, ...)` instead."
     },
     {
       "name": "RandomShuffle",
@@ -5853,18 +5817,6 @@
       "description": "Pattern replacement rule."
     },
     {
-      "name": "Sample",
-      "category": "Core",
-      "arity": "variadic",
-      "signature": "(any*) -> nothing",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": true,
-      "broadcastable": false,
-      "description": "`Sample` has been removed. Use `RandomSample` instead."
-    },
-    {
       "name": "Scan",
       "category": "Collections",
       "arity": "optional",
@@ -5996,18 +5948,6 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return the shape tuple of an expression."
-    },
-    {
-      "name": "Shuffle",
-      "category": "Core",
-      "arity": "variadic",
-      "signature": "(any*) -> nothing",
-      "associative": false,
-      "commutative": false,
-      "idempotent": false,
-      "lazy": true,
-      "broadcastable": false,
-      "description": "`Shuffle` has been removed. Use `RandomShuffle` instead."
     },
     {
       "name": "Sigma0",

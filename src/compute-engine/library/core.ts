@@ -346,33 +346,6 @@ function randomListType(
   return parseType(`list<${elt}>`);
 }
 
-/**
- * A tombstone definition for a head removed by the Random family redesign
- * (§9). An unrecognized head is a VALID, INERT expression in CE
- * (`ce.box(['Zzz', 1]).evaluate()` → `Zzz(1)`), so simply deleting these
- * definitions would make every stored document calling them silently stop
- * producing randomness — the hardest failure class to notice, because nothing
- * errors and the document still renders. A throwing `evaluate` is loud on the
- * box route, the parse route and `ce.function` alike. Delete next cycle.
- */
-function removedRandomOperator(
-  name: string,
-  replacement: string
-): SymbolDefinition {
-  return {
-    description: `\`${name}\` has been removed. Use \`${replacement}\` instead.`,
-    // Hold the operands: the tombstone throws before looking at them, so a
-    // held operand cannot raise a different (quieter) error first.
-    lazy: true,
-    pure: false,
-    signature: '(any*) -> nothing',
-    evaluate: () => {
-      throw new Error(
-        `operator-removed: \`${name}\` has been removed — use \`${replacement}\``
-      );
-    },
-  };
-}
 
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
@@ -2082,22 +2055,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    //
-    // ─── Tombstones (§9) ────────────────────────────────────────────────
-    //
-    // Removed by the Random family redesign. Kept for ONE release so a stored
-    // document calling a removed head gets a loud error naming its
-    // replacement, instead of the silent inert expression an unrecognized
-    // head would produce. Delete next cycle.
-    //
-    RandomInteger: removedRandomOperator('RandomInteger', 'Random(Range(...))'),
-    RandomList: removedRandomOperator(
-      'RandomList',
-      'RandomChoice(Interval(0, 1), n)'
-    ),
-    RandomSeed: removedRandomOperator('RandomSeed', 'WithRandomSeed(n, ...)'),
-    Sample: removedRandomOperator('Sample', 'RandomSample'),
-    Shuffle: removedRandomOperator('Shuffle', 'RandomShuffle'),
+    // The Random-redesign tombstones (`RandomInteger`, `RandomList`,
+    // `RandomSeed`, `Sample`, `Shuffle`) lived here for the one release
+    // promised by the redesign's §9 (0.95.0) and were deleted afterwards.
+    // Those heads are now ordinary unrecognized operators — valid, inert
+    // expressions — like any other unknown head.
 
     // @todo: need review
     Signature: {

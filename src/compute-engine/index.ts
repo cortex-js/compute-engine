@@ -2571,34 +2571,11 @@ export class ComputeEngine implements IComputeEngine {
   }
 }
 
-//
-// `ce.randomSeed` — ACCESSOR TOMBSTONE, for one release.
-//
-// The property is removed from the TypeScript surface (`IComputeEngine` in
-// `types-engine.ts`), which is loud for type-checked embedders. It is NOT
-// loud for a plain-JS caller: assigning a removed property on an extensible
-// object succeeds silently, and randomness quietly stops being seeded —
-// exactly the silent failure class the operator tombstones exist to prevent
-// (`docs/plans/2026-07-25-random-signature-redesign.md` §9).
-//
-// Defined here rather than as a class member so it stays off the TS surface
-// while remaining present at runtime. Delete next cycle.
-//
-Object.defineProperty(ComputeEngine.prototype, 'randomSeed', {
-  configurable: true,
-  get(): never {
-    throw new Error(
-      'operator-removed: `ce.randomSeed` has been removed — use ' +
-        '`WithRandomSeed(seed, body)` to scope a seed to an expression'
-    );
-  },
-  set(_value: unknown): never {
-    throw new Error(
-      'operator-removed: `ce.randomSeed` has been removed — use ' +
-        '`WithRandomSeed(seed, body)` to scope a seed to an expression'
-    );
-  },
-});
+// The `ce.randomSeed` accessor tombstone (a throwing getter/setter installed
+// on the prototype, off the TS surface) lived here for the one release
+// promised by the Random redesign's §9 (0.95.0) and was deleted afterwards.
+// A plain-JS assignment to `ce.randomSeed` is now an ordinary silent expando,
+// like any other unknown property.
 
 // Register a factory with the free-functions module so it can lazily
 // instantiate a default engine without importing back from this file.

@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **The 0.95.0 random-family tombstones are deleted, completing the one-release
+  migration window.** In 0.95.0, evaluating a removed head (`RandomInteger`,
+  `RandomList`, `RandomSeed`, `Sample`, `Shuffle`) threw an `operator-removed`
+  error naming its replacement, and `ce.randomSeed` was a throwing accessor.
+  Those guards are now gone: the removed heads behave like any other
+  unrecognized operator — a valid, inert expression — and `randomSeed` is no
+  longer a property of the engine. Migrate on 0.95.0 (where every legacy call
+  site fails loudly with its replacement named) before adopting this release;
+  the migration table is in the 0.95.0 notes below.
+
 ## 0.95.1 _2026-07-26_
 
 ### Breaking Changes
@@ -7,12 +21,11 @@
   the target was a composite type and the all-branch rule when it was a
   primitive, so the answer depended on the shape of the target:
   `list<tuple<number,number,number>> | tuple<number,number,number>` matched
-  `tuple<number, number, number>`, while `number | list<number>` matched
-  neither `number` nor `collection`. Assignability is now all-branch
-  throughout — the dual of the intersection rule, where `A & B` is assignable
-  as soon as one arm is. A union still matches any target covering all its
-  arms (`integer | real` ⊑ `real`, `number | list<number>` ⊑
-  `collection | number`).
+  `tuple<number, number, number>`, while `number | list<number>` matched neither
+  `number` nor `collection`. Assignability is now all-branch throughout — the
+  dual of the intersection rule, where `A & B` is assignable as soon as one arm
+  is. A union still matches any target covering all its arms (`integer | real` ⊑
+  `real`, `number | list<number>` ⊑ `collection | number`).
 
   Code that asked `unionType.matches(T)` to mean "could this be a `T`" was
   asking the wrong question and now gets `false`; ask it the other way round
@@ -28,41 +41,41 @@
   fired and any query that resolves a symbol's value and delegates to it
   recursed until the stack blew. This reached far more than the reported
   `isFiniteCollection`: `count`, `at`, `each`, `N()`, `isEqual`, `isSame`, and
-  the scalar predicates (`sgn`, `isFinite`, `isNaN`, `re`/`im`) all crashed on
-  a cyclic binding. Such a query now **fails closed** — `undefined`/`false`,
-  never a throw. An enumeration that traverses a cycle yields the elements it
-  gathered before closing it, matching what a direct self-reference
-  (`d := Append(d, 1)` → `[1]`) has always produced.
+  the scalar predicates (`sgn`, `isFinite`, `isNaN`, `re`/`im`) all crashed on a
+  cyclic binding. Such a query now **fails closed** — `undefined`/`false`, never
+  a throw. An enumeration that traverses a cycle yields the elements it gathered
+  before closing it, matching what a direct self-reference (`d := Append(d, 1)`
+  → `[1]`) has always produced.
 
 - **Comparison, ordering and rationalization no longer numericize an argument
   they are about to reject.** `isEqual`/`Equal`, `Sort`, `assume`,
-  `ApproxEqual`, `Rationalize` and the `.N()` trig path each called `.N()` on
-  an operand and then discarded the result when it turned out not to be a
-  number literal. An operand with unknowns can never become one, and over
-  nested applications of a user function that discarded walk is exponential in
-  the nesting depth: at depth 12, `isEqual` against such a chain took ~1.8 s
-  and `Sort` of five of them far longer; both are now milliseconds. Arguments
-  that *can* numericize — including partially numericizable symbolic ones such
-  as `sin(2) + x` — are unaffected. (Same class as the elementwise-`Sin` fix
-  below; that one was the exact path, these are the `.N()` path.)
+  `ApproxEqual`, `Rationalize` and the `.N()` trig path each called `.N()` on an
+  operand and then discarded the result when it turned out not to be a number
+  literal. An operand with unknowns can never become one, and over nested
+  applications of a user function that discarded walk is exponential in the
+  nesting depth: at depth 12, `isEqual` against such a chain took ~1.8 s and
+  `Sort` of five of them far longer; both are now milliseconds. Arguments that
+  _can_ numericize — including partially numericizable symbolic ones such as
+  `sin(2) + x` — are unaffected. (Same class as the elementwise-`Sin` fix below;
+  that one was the exact path, these are the `.N()` path.)
 
 - **`Round`/`Floor`/`Ceil`/`Truncate` of a symbolic term keeps its integer
-  type.** `Round(4Q)` typed `number` while both the less informative
-  `Round(Q)` and the fully known `Round(4.7)` typed `finite_integer`: an
-  operand typed `finite_number` reports `isReal === false`, which means "not
-  provably real", and the handler read it as "provably complex". Non-realness
-  is now proven from a number literal or from a type that excludes the reals,
-  so an operand of unknown realness keeps the generic-point convention. A
-  wrap asserting integrality (`RandomChoice(Interval(0,1), Round(4N))` with
-  `N` unbound) now type-checks.
+  type.** `Round(4Q)` typed `number` while both the less informative `Round(Q)`
+  and the fully known `Round(4.7)` typed `finite_integer`: an operand typed
+  `finite_number` reports `isReal === false`, which means "not provably real",
+  and the handler read it as "provably complex". Non-realness is now proven from
+  a number literal or from a type that excludes the reals, so an operand of
+  unknown realness keeps the generic-point convention. A wrap asserting
+  integrality (`RandomChoice(Interval(0,1), Round(4N))` with `N` unbound) now
+  type-checks.
 
 - **`sin`/`cos`/`tan`… of a deeply nested symbolic argument no longer blows
   up.** The constructible-value lookup called `.N()` on every argument,
   including one with free symbols that can never numericize; over nested
   applications of a user function that wasted traversal re-walked shared
   sub-chains and grew exponentially with the nesting depth. Evaluating
-  `sin(πR/8)` over a 17-element list whose element *k* is a user function
-  applied *k* times took 44 s and now takes ~0.1 s. Arguments that can
+  `sin(πR/8)` over a 17-element list whose element _k_ is a user function
+  applied _k_ times took 44 s and now takes ~0.1 s. Arguments that can
   numericize — including a symbol with an assigned value — reduce exactly as
   before.
 
@@ -254,49 +267,62 @@
 
 #### Numeric performance (200-digit precision)
 
-Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
 
-| Expression | CE (current) | CE 0.92.1 | SymPy | math.js | Mathematica |
-| --- | --: | --: | --: | --: | --: |
-| $\pi^2$ | 6.1 | 6.5 | 175 | 101 | 3.8 |
-| $\sin 1$ | 19 | 20 | 219 | 483 | 5.2 |
-| $\cos 1$ | 20 | 20 | 218 | 567 | 7.0 |
-| $\ln 2$ | 14 | 14 | 340 | 4,558 | 3.8 |
-| $e^{\pi}$ | 12 | 12 | 226 | 4,770 | 4.5 |
-| $\zeta(3)$ | 1,519 | 1,542 | 268 | — | 49 |
-| $\Gamma(\tfrac13)$ | 831 | 827 | 348 | — | 212 |
-| $\psi(\tfrac13)$ | 717 | 713 | 2,778 | — | 169 |
+| Expression         | CE (current) | CE 0.92.1 | SymPy | math.js | Mathematica |
+| ------------------ | -----------: | --------: | ----: | ------: | ----------: |
+| $\pi^2$            |          6.1 |       6.5 |   175 |     101 |         3.8 |
+| $\sin 1$           |           19 |        20 |   219 |     483 |         5.2 |
+| $\cos 1$           |           20 |        20 |   218 |     567 |         7.0 |
+| $\ln 2$            |           14 |        14 |   340 |   4,558 |         3.8 |
+| $e^{\pi}$          |           12 |        12 |   226 |   4,770 |         4.5 |
+| $\zeta(3)$         |        1,519 |     1,542 |   268 |       — |          49 |
+| $\Gamma(\tfrac13)$ |          831 |       827 |   348 |       — |         212 |
+| $\psi(\tfrac13)$   |          717 |       713 | 2,778 |       — |         169 |
 
 #### Symbolic capability & performance
 
-Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.92.1** columns to see what is *new this release* (a `—` under `0.92.1` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE (current)** and **CE 0.92.1** columns to see
+what is _new this release_ (a `—` under `0.92.1` next to a number under the
+current build). The **CE + R/F** column is the current build with the opt-in
+Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
 
-| Operation | CE (current) | CE + R/F | CE 0.92.1 | SymPy | math.js | Mathematica |
-| --- | :--: | :--: | :--: | :--: | :--: | :--: |
-| **Antiderivatives** |  |  |  |  |  |  |
-| $\int\frac{1}{\sqrt x}\,dx$ | 6.2× | 2.9× | 5.6× | 0.5× | — | 1× |
-| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 11× | 1.6× | 8.8× | 0.1× | — | 1× |
-| $\int\frac{1}{x^3+1}\,dx$ | 6.1× | 0.9× | 4.7× | 0.3× | — | 1× |
-| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 2.0× | — | 0.1× | — | 1× |
-| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 1.2× | — | 0.01× | — | 1× |
-| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 1.2× | — | 0.007× | — | 1× |
-| **Derivatives** |  |  |  |  |  |  |
-| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.04× | 0.04× | 0.04× | 0.0009× | 0.003× | 1× |
-| **Simplification** |  |  |  |  |  |  |
-| $\sqrt{3+2\sqrt2}$ | 41× | 29× | 36× | — | — | 1× |
-| $\sqrt6\,x+\sqrt2\,x$ | 83× | 45× | 58× | 3.2× | 15× | 1× |
-| **Evaluation** |  |  |  |  |  |  |
-| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 44× | 18× | 49× | 3.1× | — | 1× |
-| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 8.5× | 5.2× | 8.5× | 2.1× | — | 1× |
-| $\int_1^2\tfrac1x\,dx$ | 6294× | 6380× | 6457× | 92× | — | 1× |
-| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 388× | 143× | 389× | 2.4× | — | 1× |
-| **Solving** |  |  |  |  |  |  |
-| $x^4+x^2-1=0$ | 0.3× | 0.3× | 0.3× | 0.06× | — | 1× |
-| $x^3-x-1=0$ | 1.7× | 1.8× | 1.5× | 0.04× | — | 1× |
+| Operation                              | CE (current) | CE + R/F | CE 0.92.1 |  SymPy  | math.js | Mathematica |
+| -------------------------------------- | :----------: | :------: | :-------: | :-----: | :-----: | :---------: |
+| **Antiderivatives**                    |              |          |           |         |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |     6.2×     |   2.9×   |   5.6×    |  0.5×   |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |     11×      |   1.6×   |   8.8×    |  0.1×   |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |     6.1×     |   0.9×   |   4.7×    |  0.3×   |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |      —       |   2.0×   |     —     |  0.1×   |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |      —       |   1.2×   |     —     |  0.01×  |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |      —       |   1.2×   |     —     | 0.007×  |    —    |     1×      |
+| **Derivatives**                        |              |          |           |         |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |    0.04×     |  0.04×   |   0.04×   | 0.0009× | 0.003×  |     1×      |
+| **Simplification**                     |              |          |           |         |         |             |
+| $\sqrt{3+2\sqrt2}$                     |     41×      |   29×    |    36×    |    —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |     83×      |   45×    |    58×    |  3.2×   |   15×   |     1×      |
+| **Evaluation**                         |              |          |           |         |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |     44×      |   18×    |    49×    |  3.1×   |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |     8.5×     |   5.2×   |   8.5×    |  2.1×   |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |    6294×     |  6380×   |   6457×   |   92×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |     388×     |   143×   |   389×    |  2.4×   |    —    |     1×      |
+| **Solving**                            |              |          |           |         |         |             |
+| $x^4+x^2-1=0$                          |     0.3×     |   0.3×   |   0.3×    |  0.06×  |    —    |     1×      |
+| $x^3-x-1=0$                            |     1.7×     |   1.8×   |   1.5×    |  0.04×  |    —    |     1×      |
 
-Across the cases both solve, Compute Engine is a **median 6.2× faster than Mathematica** (up to 6294×) — in the browser, not a proprietary kernel.
+Across the cases both solve, Compute Engine is a **median 6.2× faster than
+Mathematica** (up to 6294×) — in the browser, not a proprietary kernel.
 
-<sub>Measured 2026-07-26 · Compute Engine `0.95.0` @ `6c188402` (current build) · published `0.92.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+<sub>Measured 2026-07-26 · Compute Engine `0.95.0` @ `6c188402` (current build)
+· published `0.92.1` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
 </sub>
 
 ## 0.94.0 _2026-07-24_
