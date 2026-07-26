@@ -587,6 +587,10 @@ export function canonicalAngle(
   const theta = angleToRadians(x);
   if (!theta) return undefined;
 
+  // A symbolic angle always takes this early return, so numericizing it first
+  // is pure waste — and on a deep tree of user-function applications the walk
+  // is exponential in the nesting depth. Ask the cheap question first.
+  if (theta.unknowns.length > 0) return theta;
   if (theta.N().im !== 0) return theta;
 
   const ce = theta.engine;

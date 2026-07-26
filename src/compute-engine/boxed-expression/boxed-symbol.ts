@@ -76,6 +76,15 @@ import { getFactIndex, hasAssumptions } from './constraint-subject.js';
 import { isNumber, isSymbol } from './type-guards.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { sameBinding } from './compare.js';
+import {
+  CYCLE_DETECTED,
+  CycleDepthQuery,
+  CycleQuery,
+  enterCycleDepthQuery,
+  enterCycleQuery,
+  exitCycleDepthQuery,
+  exitCycleQuery,
+} from './cycle-guard.js';
 
 /**
  * ### BoxedSymbol
@@ -195,11 +204,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (tolerance === undefined && this.isSame(other)) return true;
 
     // If value following didn't match but we have a bound value,
-    // try the smart check on the value (which may be a function expression)
+    // try the smart check on the value (which may be a function expression).
+    // Guarded: with an indirect cycle (`a := b`, `b := a`) each value is
+    // another symbol whose `is()` leads straight back here.
     const val = this.value;
-    if (val && val !== (this as unknown)) return val.is(other, tolerance);
-
-    return false;
+    if (!val || val === (this as unknown)) return false;
+    if (isNumber(val)) return val.is(other, tolerance);
+    const def = this._def!;
+    const guard = enterCycleQuery(def, CycleQuery.Is);
+    if (guard === CYCLE_DETECTED) return false;
+    try {
+      return val.is(other, tolerance);
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   isSame(other: Expression | number | bigint | boolean | string): boolean {
@@ -223,7 +241,21 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // comparison to `false` even when the binding matched (CM-P1-1). `same()`
     // follows the RHS binding for symmetry, so passing `other` unchanged is
     // correct for numbers, strings and function expressions alike.
-    return this.value?.isSame(other) ?? false;
+    //
+    // Following the binding can walk into an indirect reference cycle
+    // (`a := b` with `b := a`), so the delegation is guarded. A DEPTH limit
+    // rather than a flag: comparing nested structures legitimately re-enters
+    // the comparison of the same symbol (see `cycle-guard.ts`).
+    const value = this.value;
+    if (value === undefined) return false;
+    const def = this._def!;
+    const guard = enterCycleDepthQuery(def, CycleDepthQuery.IsSame);
+    if (guard === CYCLE_DETECTED) return false;
+    try {
+      return value.isSame(other);
+    } finally {
+      exitCycleDepthQuery(def, CycleDepthQuery.IsSame, guard);
+    }
   }
 
   toNumericValue(): [NumericValue, Expression] {
@@ -663,6 +695,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this.shape.length;
   }
 
+  // The scalar predicates below all delegate to the symbol's value, and a
+  // value that leads (indirectly) back to this symbol would recurse forever.
+  // The delegation is therefore wrapped in a cycle guard — EXCEPT when the
+  // value is a number literal, a leaf that cannot refer to anything: that
+  // keeps the hot `x := 5` case free of any bookkeeping (see
+  // `cycle-guard.ts`).
+
   // The sign of the value of the symbol
   //
   // Mixed binding semantics (SYMBOLIC P2-13, documented): type-backed
@@ -675,22 +714,53 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   // scope's assumptions.
   get sgn(): Sign | undefined {
     // First check if there's an assigned value
-    if (this.value) return this.value.sgn;
+    const value = this.value;
+    if (value !== undefined) {
+      if (isNumber(value)) return value.sgn;
+      const def = this._def!;
+      const guard = enterCycleQuery(def, CycleQuery.Sgn);
+      if (guard === CYCLE_DETECTED) return undefined;
+      try {
+        return value.sgn;
+      } finally {
+        exitCycleQuery(def, guard);
+      }
+    }
 
     // Otherwise, check if there are assumptions about this symbol's sign
     return getSignFromAssumptions(this.engine, this.symbol);
   }
 
   get isOdd(): boolean | undefined {
-    return this.value?.isOdd;
+    const value = this.value;
+    if (value === undefined) return undefined;
+    if (isNumber(value)) return value.isOdd;
+    const def = this._def!;
+    const guard = enterCycleQuery(def, CycleQuery.IsOdd);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return value.isOdd;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   get isEven(): boolean | undefined {
-    return this.value?.isEven;
+    const value = this.value;
+    if (value === undefined) return undefined;
+    if (isNumber(value)) return value.isEven;
+    const def = this._def!;
+    const guard = enterCycleQuery(def, CycleQuery.IsEven);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return value.isEven;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   get isFinite(): boolean | undefined {
-    const fromValue = this.value?.isFinite;
+    const fromValue = this._valueIsFinite();
     if (fromValue !== undefined) return fromValue;
     // Type fallback (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1e): a
     // `finite_number` refinement — e.g. from `assume(|q| < 1)` — entails
@@ -700,12 +770,46 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return undefined;
   }
 
+  private _valueIsFinite(): boolean | undefined {
+    const value = this.value;
+    if (value === undefined) return undefined;
+    if (isNumber(value)) return value.isFinite;
+    const def = this._def!;
+    const guard = enterCycleQuery(def, CycleQuery.IsFinite);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return value.isFinite;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
+  }
+
   get isInfinity(): boolean | undefined {
-    return this.value?.isInfinity;
+    const value = this.value;
+    if (value === undefined) return undefined;
+    if (isNumber(value)) return value.isInfinity;
+    const def = this._def!;
+    const guard = enterCycleQuery(def, CycleQuery.IsInfinity);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return value.isInfinity;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   get isNaN(): boolean | undefined {
-    return this.value?.isNaN;
+    const value = this.value;
+    if (value === undefined) return undefined;
+    if (isNumber(value)) return value.isNaN;
+    const def = this._def!;
+    const guard = enterCycleQuery(def, CycleQuery.IsNaN);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return value.isNaN;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   // x > 0
@@ -791,19 +895,59 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get re(): number {
-    return this.value?.re ?? NaN;
+    const value = this.value;
+    if (value === undefined) return NaN;
+    if (isNumber(value)) return value.re;
+    const def = this._def!;
+    const guard = enterCycleQuery(def, CycleQuery.Re);
+    if (guard === CYCLE_DETECTED) return NaN;
+    try {
+      return value.re;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   get im(): number {
-    return this.value?.im ?? NaN;
+    const value = this.value;
+    if (value === undefined) return NaN;
+    if (isNumber(value)) return value.im;
+    const def = this._def!;
+    const guard = enterCycleQuery(def, CycleQuery.Im);
+    if (guard === CYCLE_DETECTED) return NaN;
+    try {
+      return value.im;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   get bignumRe(): BigNum | undefined {
-    return this.value?.bignumRe;
+    const value = this.value;
+    if (value === undefined) return undefined;
+    if (isNumber(value)) return value.bignumRe;
+    const def = this._def!;
+    const guard = enterCycleQuery(def, CycleQuery.BignumRe);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return value.bignumRe;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   get bignumIm(): BigNum | undefined {
-    return this.value?.bignumIm;
+    const value = this.value;
+    if (value === undefined) return undefined;
+    if (isNumber(value)) return value.bignumIm;
+    const def = this._def!;
+    const guard = enterCycleQuery(def, CycleQuery.BignumIm);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return value.bignumIm;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
@@ -841,6 +985,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   N(): Expression {
+    // An indirect cycle (`a := b`, `b := a`) is invisible to the
+    // self-reference guards below: each value mentions only the OTHER symbol.
+    // Stay symbolic rather than recursing forever (see `cycle-guard.ts`).
+    const binding = this._def;
+    if (binding !== undefined) {
+      const guard = enterCycleQuery(binding, CycleQuery.N);
+      if (guard === CYCLE_DETECTED) return this;
+      try {
+        return this._N();
+      } finally {
+        exitCycleQuery(binding, guard);
+      }
+    }
+    return this._N();
+  }
+
+  private _N(): Expression {
     const def = this.valueDefinition;
     // Note: `holdUntil: 'never'` means "substitute as early as possible" —
     // it never *prevents* numeric evaluation. (A previous version returned
@@ -905,55 +1066,125 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isCollection(): boolean {
-    return (
-      this._asCollection?.iterator !== undefined ||
-      (this._value?.isCollection ?? false)
-    );
+    if (this._asCollection?.iterator !== undefined) return true;
+    const def = this._def;
+    if (def === undefined) return false;
+    const guard = enterCycleQuery(def, CycleQuery.IsCollection);
+    if (guard === CYCLE_DETECTED) return false;
+    try {
+      return this._value?.isCollection ?? false;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   get isIndexedCollection(): boolean {
-    return (
-      this._asCollection?.at !== undefined ||
-      (this._value?.isIndexedCollection ?? false)
-    );
+    if (this._asCollection?.at !== undefined) return true;
+    const def = this._def;
+    if (def === undefined) return false;
+    const guard = enterCycleQuery(def, CycleQuery.IsIndexedCollection);
+    if (guard === CYCLE_DETECTED) return false;
+    try {
+      return this._value?.isIndexedCollection ?? false;
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   get isLazyCollection(): boolean {
-    return (
-      this._asCollection?.isLazy?.(this._value ?? this) ??
-      this._value?.isLazyCollection ??
-      false
-    );
+    const def = this._def;
+    if (def === undefined) return false;
+    const guard = enterCycleQuery(def, CycleQuery.IsLazyCollection);
+    if (guard === CYCLE_DETECTED) return false;
+    try {
+      return (
+        this._asCollection?.isLazy?.(this._value ?? this) ??
+        this._value?.isLazyCollection ??
+        false
+      );
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   contains(rhs: Expression): boolean | undefined {
-    return (
-      this._asCollection?.contains?.(this._value ?? this, rhs) ??
-      this._value?.contains?.(rhs)
-    );
+    const def = this._def;
+    if (def === undefined) return undefined;
+    const guard = enterCycleQuery(def, CycleQuery.Contains);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return (
+        this._asCollection?.contains?.(this._value ?? this, rhs) ??
+        this._value?.contains?.(rhs)
+      );
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   // For a non-collection symbol these return `undefined` (the abstract-class
   // contract), not 0 / true — a plain symbol is not an empty collection.
   get count(): number | undefined {
-    return this._asCollection?.count(this._value ?? this) ?? this._value?.count;
+    const def = this._def;
+    if (def === undefined) return undefined;
+    const guard = enterCycleQuery(def, CycleQuery.Count);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return (
+        this._asCollection?.count(this._value ?? this) ?? this._value?.count
+      );
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   get isEmptyCollection(): boolean | undefined {
-    return (
-      this._asCollection?.isEmpty?.(this._value ?? this) ??
-      this._value?.isEmptyCollection
-    );
+    const def = this._def;
+    if (def === undefined) return undefined;
+    const guard = enterCycleQuery(def, CycleQuery.IsEmptyCollection);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return (
+        this._asCollection?.isEmpty?.(this._value ?? this) ??
+        this._value?.isEmptyCollection
+      );
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   get isFiniteCollection(): boolean | undefined {
-    return (
-      this._asCollection?.isFinite?.(this._value ?? this) ??
-      this._value?.isFiniteCollection
-    );
+    const def = this._def;
+    if (def === undefined) return undefined;
+    const guard = enterCycleQuery(def, CycleQuery.IsFiniteCollection);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return (
+        this._asCollection?.isFinite?.(this._value ?? this) ??
+        this._value?.isFiniteCollection
+      );
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   each(): Generator<Expression> {
+    // The guard spans this method's SYNCHRONOUS body only — that is where the
+    // delegation to another symbol's `each()` happens, so it is enough to
+    // break a cycle — and not the consumption of the returned generator, which
+    // would otherwise stay "in progress" for as long as the caller holds it.
+    const def = this._def;
+    if (def === undefined) return (function* () {})();
+    const guard = enterCycleQuery(def, CycleQuery.Each);
+    if (guard === CYCLE_DETECTED) return (function* () {})();
+    try {
+      return this._each();
+    } finally {
+      exitCycleQuery(def, guard);
+    }
+  }
+
+  private _each(): Generator<Expression> {
     const iter = this._asCollection?.iterator?.(this._value ?? this);
     if (iter) {
       const engine = this.engine;
@@ -972,6 +1203,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   at(index: number): Expression | undefined {
+    const def = this._def;
+    if (def === undefined) return undefined;
+    const guard = enterCycleDepthQuery(def, CycleDepthQuery.At);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return this._at(index);
+    } finally {
+      exitCycleDepthQuery(def, CycleDepthQuery.At, guard);
+    }
+  }
+
+  private _at(index: number): Expression | undefined {
     // When dispatching to a value-def's own collection handler, centralize
     // negative-index normalization (mirroring `BoxedFunction.at`): the handler
     // gets a 1-based positive index. The `_value.at` fallback is left to
@@ -999,20 +1242,44 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get(index: Expression | string): Expression | undefined {
-    return this._value?.get?.(index);
+    const def = this._def;
+    if (def === undefined) return undefined;
+    const guard = enterCycleQuery(def, CycleQuery.Get);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      return this._value?.get?.(index);
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   indexWhere(predicate: (element: Expression) => boolean): number | undefined {
-    if (this._asCollection?.indexWhere)
-      return this._asCollection.indexWhere(this._value ?? this, predicate);
-    return this._value?.indexWhere(predicate);
+    const def = this._def;
+    if (def === undefined) return undefined;
+    const guard = enterCycleQuery(def, CycleQuery.IndexWhere);
+    if (guard === CYCLE_DETECTED) return undefined;
+    try {
+      if (this._asCollection?.indexWhere)
+        return this._asCollection.indexWhere(this._value ?? this, predicate);
+      return this._value?.indexWhere(predicate);
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 
   subsetOf(rhs: Expression, strict: boolean): boolean {
-    return (
-      this._asCollection?.subsetOf?.(this._value ?? this, rhs, strict) ??
-      this._value?.subsetOf?.(rhs, strict) ??
-      false
-    );
+    const def = this._def;
+    if (def === undefined) return false;
+    const guard = enterCycleQuery(def, CycleQuery.SubsetOf);
+    if (guard === CYCLE_DETECTED) return false;
+    try {
+      return (
+        this._asCollection?.subsetOf?.(this._value ?? this, rhs, strict) ??
+        this._value?.subsetOf?.(rhs, strict) ??
+        false
+      );
+    } finally {
+      exitCycleQuery(def, guard);
+    }
   }
 }

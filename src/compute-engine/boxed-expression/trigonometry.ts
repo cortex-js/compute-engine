@@ -228,8 +228,15 @@ function applyAngle(
   bigFn?: (x: BigDecimal) => BigDecimal | Complex | number | Expression,
   complexFn?: (x: Complex) => number | Complex
 ): Expression | undefined {
-  const theta = canonicalAngle(angle)?.N();
-  if (theta === undefined) return undefined;
+  const angle0 = canonicalAngle(angle);
+  if (angle0 === undefined) return undefined;
+  // `apply` below declines anything that is not a number LITERAL, and an
+  // expression with unknowns cannot become one — so numericizing it first is
+  // waste, and on a nested tree of user-function applications an exponential
+  // one. (This is the same walk `constructibleValues` skips on the exact path;
+  // `applyAngle` is the `.N()` path's copy of it.)
+  if (angle0.unknowns.length > 0) return undefined;
+  const theta = angle0.N();
   // `apply`'s machine/bignum handlers can also yield an already-boxed
   // expression (e.g. `ce.ComplexInfinity` for a `Tan` pole), which it boxes
   // through `ce.number`; its public signature is narrower, so cast here.
@@ -714,7 +721,8 @@ export function constructibleValues(
   // An argument with unknowns cannot numericize, so the `.N()` below would
   // walk the whole expression only for `x.im !== 0` to reject it. Gate on
   // `.unknowns` (a symbol with an assigned value is NOT unknown, so
-  // `sin(y)` with `y := π/4` still reduces): the walk is cached and cheap,
+  // `sin(y)` with `y := π/4` still reduces): the walk is a single linear pass
+  // (NOT cached — it allocates a `Set` and resolves each symbol per access),
   // while the wasted `.N()` is not — over nested applications of a user
   // function it re-evaluates shared sub-chains and grows exponentially with
   // the nesting depth (44 s for a 17-element list of such chains).

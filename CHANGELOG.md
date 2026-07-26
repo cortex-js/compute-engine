@@ -22,6 +22,30 @@
 
 ### Issues Resolved
 
+- **A cycle between symbol values no longer overflows the stack.** A pair of
+  bindings such as `a := b` with `b := a` is individually well-formed — each
+  value mentions no symbol of its own name — so the self-reference guard never
+  fired and any query that resolves a symbol's value and delegates to it
+  recursed until the stack blew. This reached far more than the reported
+  `isFiniteCollection`: `count`, `at`, `each`, `N()`, `isEqual`, `isSame`, and
+  the scalar predicates (`sgn`, `isFinite`, `isNaN`, `re`/`im`) all crashed on
+  a cyclic binding. Such a query now **fails closed** — `undefined`/`false`,
+  never a throw. An enumeration that traverses a cycle yields the elements it
+  gathered before closing it, matching what a direct self-reference
+  (`d := Append(d, 1)` → `[1]`) has always produced.
+
+- **Comparison, ordering and rationalization no longer numericize an argument
+  they are about to reject.** `isEqual`/`Equal`, `Sort`, `assume`,
+  `ApproxEqual`, `Rationalize` and the `.N()` trig path each called `.N()` on
+  an operand and then discarded the result when it turned out not to be a
+  number literal. An operand with unknowns can never become one, and over
+  nested applications of a user function that discarded walk is exponential in
+  the nesting depth: at depth 12, `isEqual` against such a chain took ~1.8 s
+  and `Sort` of five of them far longer; both are now milliseconds. Arguments
+  that *can* numericize — including partially numericizable symbolic ones such
+  as `sin(2) + x` — are unaffected. (Same class as the elementwise-`Sin` fix
+  below; that one was the exact path, these are the `.N()` path.)
+
 - **`Round`/`Floor`/`Ceil`/`Truncate` of a symbolic term keeps its integer
   type.** `Round(4Q)` typed `number` while both the less informative
   `Round(Q)` and the fully known `Round(4.7)` typed `finite_integer`: an

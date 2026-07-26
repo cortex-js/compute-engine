@@ -390,3 +390,63 @@ describe('Tycho item 90 — constructible-value lookup skips symbolic arguments'
     expect(ce.parse('\\arctan(1)').evaluate().toString()).toBe('1/4 * pi');
   });
 });
+
+describe('numericization is skipped for arguments that cannot numericize', () => {
+  // The sibling of the item-90 fix on the `.N()` path: `eq`, `compare`,
+  // `approxEq`, `Rationalize` and `applyAngle`/`canonicalAngle` all called
+  // `.N()` on an argument they then rejected for not being a number literal.
+  // An argument with unknowns can never become one, and over nested
+  // applications of a user function that discarded walk is exponential in the
+  // nesting depth.
+  const chain = (ce: ComputeEngine, depth: number) => {
+    ce.assign('f', ce.parse('x \\mapsto \\operatorname{mod}(x\\cdot5+c,16)'));
+    let body = 's';
+    for (let k = 0; k < depth; k++) body = `f(${body})`;
+    return body;
+  };
+
+  const underBudget = (build: (body: string) => (ce: ComputeEngine) => void) => {
+    const ce = new ComputeEngine();
+    const body = chain(ce, 14);
+    const run = build(body);
+    const start = Date.now();
+    run(ce);
+    // Each of these was seconds-to-minutes at this depth; the bound is loose
+    // on purpose (a complexity guard, not a timing pin).
+    expect(Date.now() - start).toBeLessThan(2_000);
+  };
+
+  it('isEqual against a symbolic chain', () =>
+    underBudget((body) => (ce) => {
+      expect(ce.parse(body).isEqual(0)).not.toBe(true);
+    }));
+
+  it('Equal / Sort / ApproxEqual / Rationalize over symbolic chains', () => {
+    underBudget((body) => (ce) => {
+      ce.parse(`\\mathrm{Equal}(${body},0)`).evaluate();
+    });
+    underBudget((body) => (ce) => {
+      ce.parse(`\\mathrm{Sort}([${body},${body},${body}])`).evaluate();
+    });
+    underBudget((body) => (ce) => {
+      ce.parse(`\\mathrm{ApproxEqual}(${body},0)`).evaluate();
+    });
+    underBudget((body) => (ce) => {
+      ce.parse(`\\mathrm{Rationalize}(${body})`).evaluate();
+    });
+  });
+
+  it('the gated paths still answer for arguments that DO numericize', () => {
+    const ce = new ComputeEngine();
+    // Partial numericization of a symbolic operand still compares equal.
+    expect(ce.parse('\\sin(2)+x').isEqual(ce.parse('0.9092974268256817+x'))).toBe(true);
+    expect(ce.parse('\\sqrt{2}x').isEqual(ce.parse('1.4142135623730951x'))).toBe(true);
+    expect(ce.parse('(x+1)^2').isEqual(ce.parse('x^2+2x+1'))).toBe(true);
+    // Ordering, approximate equality and rationalization of closed forms.
+    expect(ce.parse('\\mathrm{Rationalize}(0.5)').evaluate().toString()).toBe('1/2');
+    expect(ce.parse('\\mathrm{ApproxEqual}(\\pi, 3.14159265358979)').evaluate().symbol).toBe('True');
+    // The `.N()` trig path is unchanged for numericizable angles.
+    expect(ce.parse('\\sin(\\frac{\\pi}{4})').N().toString()).toBe('0.707106781186547524401');
+    expect(ce.parse('\\sin(2+x)').N().toString()).toBe('sin(x + 2)');
+  });
+});

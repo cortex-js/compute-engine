@@ -932,6 +932,10 @@ function broadcastComparison(
  */
 function approxEq(a: Expression, b: Expression): boolean | undefined {
   const ce = a.engine;
+  // An operand with unknowns cannot numericize, so the `isNumber` test below
+  // would reject it after an unbounded (exponential, for nested user-function
+  // applications) traversal.
+  if (a.unknowns.length > 0 || b.unknowns.length > 0) return undefined;
   const aN = a.N();
   const bN = b.N();
 

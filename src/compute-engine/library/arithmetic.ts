@@ -2087,6 +2087,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // the function evaluates to a rational expression of the argument
         //
         if (ops.length === 1) {
+          // A symbolic argument cannot numericize; skip the (potentially
+          // exponential) `.N()` walk the `isNumber` test would then reject.
+          if (ops[0].unknowns.length > 0) return undefined;
           const f = ops[0].N();
           if (!isNumber(f) || f.im !== 0) return undefined;
           return ce.number(rationalize(f.re));
@@ -2118,6 +2121,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       ],
       evaluate: (ops, { engine }) => {
         const ce = engine;
+        // See `Rational`: a symbolic argument cannot numericize.
+        if (ops[0].unknowns.length > 0) return undefined;
         const f = ops[0].N();
         if (!isNumber(f) || f.im !== 0) return undefined;
         if (ops.length >= 2) {

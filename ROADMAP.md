@@ -924,6 +924,53 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 
 ### Symbolic-evaluation performance
 
+#### P0. `.N()` over nested user-function applications is exponential (filed 2026-07-26)
+
+**Open, unfixed, and the largest known evaluation cliff.** `.N()` on a chain of
+nested user-function applications costs ~2× per nesting level, while
+`evaluate()` on the same expression is flat:
+
+```
+f := x ↦ mod(5x + c, 16)        // c, s FREE
+chain(d) = f(f(…f(s)…))         // d applications
+```
+
+| depth | `chain.evaluate()` | `chain.N()` |
+| ----- | ------------------ | ----------- |
+| 12    | 7 ms               | 1 757 ms    |
+| 14    | 8 ms               | 6 390 ms    |
+| 16    | 8 ms               | ~25 000 ms  |
+
+This is **not** the discarded-`.N()` class fixed on 2026-07-25/26 (see
+`constructibleValues`, `eq`, `compare`, `approxEq`, `Rationalize`,
+`applyAngle` — all now gate on `.unknowns`). Nothing is numericized and thrown
+away here: with every one of those gates in place, `sin(chain).N()` costs the
+same as `chain.N()` alone (1 628 vs 1 757 ms at depth 12), so the whole
+residual is the bare `.N()`.
+
+**Suspected cause, not yet confirmed:** the unconditional re-box on the
+symbolic-fallback path of `BoxedFunction.N()`
+(`boxed-function.ts`, `this.engine.function(this._operator, tail)`), which
+re-canonicalizes the subtree at every level. A related shape — exact
+`sin^d(x).evaluate()`, ~1.4×/level, hangs past d ≈ 50 — may share it.
+
+**Why it is worth fixing rather than documenting.** A consumer whose
+architecture deliberately keeps document variables out of the engine scope
+(Tycho) has every element symbolic by construction, so this is their default
+path, not an edge case. Interim guidance given to them: prefer `evaluate()` on
+deeply nested symbolic expressions and reach for `.N()` only once the free
+symbols are bound.
+
+**Do not "fix" this by gating `.N()` on `.unknowns`.** Ruled out with evidence:
+partial numericization (`sin(2)+x` → `x + 0.909…`, `Sqrt(4y)` → `2sqrt(y)`,
+`cos(kπ)` → `cos(3.14159…·k)`) is load-bearing and pinned by ~12 test
+locations, and `addN`/`mulN`/lazy-`Map` re-dispatch on the *shape* of the
+`.N()` result rather than on it being a literal. Memoization is not an
+alternative either: `_value`/`_valueN` (`boxed-function.ts`) are dead fields —
+the memo was removed in `0e8c11b9` to fix repeat evaluation of impure
+operators — and a generation-keyed memo would be self-defeating, since
+evaluating a user-lambda application bumps `_generation` twice per level.
+
 #### P1. Differentiation performance — CLOSED, measured-unprofitable (2026-07-19)
 
 **Do not re-attempt either lever without a new profile.** Both were re-measured
@@ -999,6 +1046,28 @@ no incremental patch reaches that. Reducing `.mul()` cost is a
 **representation-level** project (the same per-node type-query/binding tax the
 2026-07-21 tensor unification addressed for collection values), not a perf
 item. Recorded here so it is not mistaken for a contained optimization.
+
+#### P2. Funnel the open-coded "numeric value or nothing" idiom (filed 2026-07-26)
+
+Roughly 25 sites open-code `x.N()` → `isNumber` / `im !== 0` → discard. Six of
+them were the exponential-cost defect fixed on 2026-07-25/26; the rest are
+constant-factor waste (`library/utils.ts:953, 1034`, `symbolic/solver-utils.ts`,
+`symbolic/recurrences.ts`, `boxed-expression/utils.ts:717`,
+`symbolic/simplify-power.ts`, plus unreachable-by-probe sites in `rubi/`,
+`nonlinear-fit.ts`, `library/statistics.ts`, `symbolic/interpret.ts`).
+
+Proposal: a `numericValueOf(x): number | undefined` helper
+(`boxed-expression/numerics.ts`) that gates on `.unknowns` first, so the gate is
+un-forgettable rather than a pattern each caller must remember. Mechanical, no
+semantic change intended — which is exactly why it should land on its own,
+where a snapshot diff would be attributable.
+
+If it lands, consider caching `unknowns` alongside `_sgn`/`_type`
+(`cachedValue(this._unknowns, engine._generation, …)`): it is currently a fresh
+`Set` plus a scope-chain `lookupDefinition` per symbol occurrence on **every**
+access — cheap per call and fine at today's handful of call sites, but not free
+if a helper multiplies the number of them.
+
 
 ### Strategic
 

@@ -16,6 +16,12 @@ import {
 import { boundVariableBindings } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
 import { stochasticEqual } from './stochastic-equal.js';
+import {
+  CYCLE_DETECTED,
+  CycleDepthQuery,
+  enterCycleDepthQuery,
+  exitCycleDepthQuery,
+} from './cycle-guard.js';
 
 // Lazy reference to break circular dependency:
 // expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare
@@ -274,16 +280,29 @@ export function same(
     // A followed VALUE was never inside the binders enclosing the occurrence
     // that held it, so it gets no binder map: a name it shares with one of
     // those binders is a coincidence of spelling, not a bound occurrence.
-    if (bSym) {
-      const bv = b.value;
-      if (bv !== undefined && (bv as Expression) !== b)
-        return same(a, bv, boundA, undefined, syntactic);
-      return false;
+    const sym = bSym ? b : a;
+    const value = sym.value;
+    if (value === undefined || (value as Expression) === sym) return false;
+
+    // `same()` follows symbol bindings itself, outside `BoxedSymbol`, so it
+    // needs its own guard against an indirect reference cycle (`a := b` with
+    // `b := a`): unwrapping either side leads back here forever. Fail closed —
+    // "not provably the same" — rather than overflowing the stack.
+    const binding = sym.valueDefinition;
+    if (binding !== undefined) {
+      const guard = enterCycleDepthQuery(binding, CycleDepthQuery.Same);
+      if (guard === CYCLE_DETECTED) return false;
+      try {
+        return bSym
+          ? same(a, value, boundA, undefined, syntactic)
+          : same(value, b, undefined, boundB, syntactic);
+      } finally {
+        exitCycleDepthQuery(binding, CycleDepthQuery.Same, guard);
+      }
     }
-    const av = a.value;
-    if (av !== undefined && (av as Expression) !== a)
-      return same(av, b, undefined, boundB, syntactic);
-    return false;
+    return bSym
+      ? same(a, value, boundA, undefined, syntactic)
+      : same(value, b, undefined, boundB, syntactic);
   }
 
   //
@@ -395,10 +414,13 @@ export function eq(
   // definitive `false` in the finiteness branch below (CM-P1-3).
   //
   if (!a.isCanonical) a = a.canonical;
-  a = a.N();
+  a = a.unknowns.length > 0 ? a : a.N();
   let b: Expression;
   if (typeof inputB === 'number') b = a.engine.expr(inputB);
-  else b = (inputB.isCanonical ? inputB : inputB.canonical).N();
+  else {
+    const b0 = inputB.isCanonical ? inputB : inputB.canonical;
+    b = b0.unknowns.length > 0 ? b0 : b0.N();
+  }
 
   //
   // Do we have at least one function expression?
@@ -799,8 +821,13 @@ export function cmp(
     const cmp = a.operatorDefinition?.eq?.(a, b);
     if (cmp === true) return '=';
 
-    // Subtract the two expressions
-    const diff = a.sub(b).N();
+    // Subtract the two expressions. A difference with unknowns can never
+    // numericize, so `.N()` would walk it only for the `isNumber` test below
+    // to reject it — and over nested user-function applications that walk is
+    // exponential in the nesting depth (see `constructibleValues`).
+    const diff0 = a.sub(b);
+    if (diff0.unknowns.length > 0) return undefined;
+    const diff = diff0.N();
 
     // If the difference is not a number, we can't compare
     // For example, '1 + y' and 'x - 1' can't be compared
