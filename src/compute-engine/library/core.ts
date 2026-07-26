@@ -721,8 +721,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Note: the operator is lazy and doesn't have a canonical handler:
       // the argument is not canonicalized.
       evaluate: ([x], options) => {
-        if (isFunction(x, 'Hold')) x = x.op1;
-        return x.canonical.evaluate(options);
+        if (isFunction(x, 'Hold')) return x.op1.canonical.evaluate(options);
+        // The operand is not a literal `Hold`: evaluate it, and if the RESULT
+        // is a held expression (e.g. a symbol whose value is a `Hold`),
+        // release that — one layer, like Mathematica's `ReleaseHold`.
+        const v = x.canonical.evaluate(options);
+        if (isFunction(v, 'Hold')) return v.op1.canonical.evaluate(options);
+        return v;
       },
     },
 

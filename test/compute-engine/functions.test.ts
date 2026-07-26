@@ -413,8 +413,18 @@ describe('Argument Evaluation', () => {
 
   test('To evaluate a Hold variable it must be wrapped in ReleaseHold', () =>
     expect(evaluate(['Add', ['ReleaseHold', 'h'], 7])).toMatchInlineSnapshot(
-      `["Add", 7, ["Hold", ["Add", 2, 6]]]`
+      `15`
     ));
+
+  test('ReleaseHold removes a single Hold layer, directly or via a symbol', () => {
+    expect(
+      evaluate(['ReleaseHold', ['Hold', ['Hold', 'x']]])
+    ).toMatchInlineSnapshot(`["Hold", "x"]`);
+    engine.assign('h2', ['Hold', ['Hold', 'x']]);
+    expect(evaluate(['ReleaseHold', 'h2'])).toMatchInlineSnapshot(
+      `["Hold", "x"]`
+    );
+  });
 
   test('An Unevaluated expression is unwrapped when evaluated', () =>
     expect(
