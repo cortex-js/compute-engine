@@ -281,9 +281,7 @@ export function resolveOverload(
   const viable = byArity.filter((arm) =>
     ops.every((op, i) => {
       const param = paramAt(arm, i);
-      return (
-        param !== undefined && operandAdmits(ce, op, param, i, policies)
-      );
+      return param !== undefined && operandAdmits(ce, op, param, i, policies);
     })
   );
 
@@ -353,7 +351,10 @@ export function diagnoseNoMatch(
       const distance = Math.abs(target - ops.length);
       // Ties prefer the SHORTER call (mark the surplus) over demanding more
       // arguments, and declaration order breaks a remaining tie.
-      if (distance < best || (distance === best && target < (arityTarget ?? 0))) {
+      if (
+        distance < best ||
+        (distance === best && target < (arityTarget ?? 0))
+      ) {
         best = distance;
         arityTarget = target;
       }

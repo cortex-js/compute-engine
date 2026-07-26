@@ -39,7 +39,6 @@ import { isSymbol, isFunction, isContinuationOperand } from './type-guards.js';
 // the strength of their static element type.
 const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
 
-
 // `typeCouldBeNumericCollection` / `typeCouldBeNumericTuple` — the COULD-
 // semantics predicates `checkNumericArgs` uses to admit collection/tuple
 // operands — are imported from `collection-utils.ts`, where the
