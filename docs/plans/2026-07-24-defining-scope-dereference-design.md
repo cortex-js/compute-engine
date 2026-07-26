@@ -253,7 +253,9 @@ to make resolution binding-aware *generally* — have `BoxedSymbol.evaluate()`
 prefer the occurrence's own definition over an inner same-named binding
 (reachable-but-shadowed ⇒ the occurrence wins). Measured: **100+ failures**,
 including beta-reduction itself (`[[Function, x+1, x], 5]`), the `D`/`Integrate`/
-`Limit` binder value-shields, and CONTRACT 4 in `scope.test.ts` — a written
+`Limit` binder value-shields, and CONTRACT 4 in `pipeline-contracts.test.ts`
+(`describe` at line ~515; NOT `scope.test.ts`, an error this doc used to
+propagate) — a written
 guarantee that a cached parent-scope expression DOES see a nested-scope shadow.
 
 The reason is instructive and is the case for §Sequencing steps 4–5: a `Function`
@@ -356,11 +358,25 @@ all four of these were found.
 A narrower symptom of the same gap, worth recording: **canonicalizing an
 already-canonical body is a no-op**, so a body bound before its binder existed
 keeps the earlier bindings. `rebindParameters` (`function-utils.ts`) repairs
-this for anonymous placeholders only — applying it to named parameters as
-well was measured at 8 regressions (Rubi's integration variable, curried
-literals, the conflicting-arguments case), so the general statement remains
-true and unrepaired for named parameters; there is simply no failing test that
-reaches it today.
+this — **for ALL parameters since step 4 landed (2026-07-26)**. The historical
+"8 measured dependents" that gated the widening proved stale on re-measurement
+(7 failures, 3 classes, no curried-literal regression, and the Rubi failure
+was arithmetic inside the driver — `Product.mul` declining to fold `x·x`
+across two bindings — not `case 'var'`): `Integrate` handed its provider and
+`antiderivative()` a body still bound to the literal's Block while both mint
+caller-scope occurrences (fixed by `liftIntegrand`, `library/calculus.ts`,
+using the `lambdaFromLiteral` convention), and a BINDING SITE held raw by a
+lazy operator (`Declare`'s first operand) must not be canonicalized by the
+rebind walk (fixed by skipping occurrences that carry no binding — the
+equality contract's raw-operand rule applied to the rewrite). Three pins in
+`symbol-value-scoping.test.ts` §SPEC: named-parameter rebind.
+
+Two traps recorded from that work: `rebindEscaping` applied to a Block whose
+own scope is the argument is a **no-op** (the root's bound names go straight
+into `shadowed`) — lift the body out first, as `liftIntegrand` and
+`lambdaFromLiteral` both do; and `Declare`'s `sym(ops[0].evaluate())` read
+(`library/core.ts:1414`) silently no-ops if anything ever canonicalizes its
+held first operand.
 
 ### Lesson for phase 2
 
@@ -381,14 +397,13 @@ the interactions are not predictable by inspection.
    (`captureClosures`, `resolveEscapingLambda`, `hideBodyScopeParams`, the
    body-scope re-parenting), which lose their reason to exist.
 3. **Dereference** for the staleness half.
-4. **Named-parameter rebind** — extend `rebindParameters`
-   (`function-utils.ts`) beyond anonymous placeholders. The general defect (a
-   body canonicalized before its binder existed keeps the earlier bindings)
-   stands for NAMED parameters; the repair is gated on 8 measured dependents
-   that rely on the broken binding today: Rubi's integration variable,
-   curried literals keeping their annotations, and the conflicting-arguments
-   case. Move those first, then widen the `/^_\d*$/` gate. Listed here so the
-   deferral is a numbered step, not a parenthetical.
+4. ~~**Named-parameter rebind**~~ — **done 2026-07-26**: the `/^_\d*$/` gate
+   is gone; the dependents were re-measured (3 classes, not the historical 8)
+   and migrated first, one at a time. See the updated §The recurring defect
+   closing paragraphs for what they actually were and the two traps recorded.
+   Full suite exit 0, snapshots unchanged (4182 baseline — the count moved
+   from 4179 via intervening commits, ReleaseHold pins among them, not with
+   this change).
 5. **A sanctioned binder mechanism** (see §The recurring defect) — the
    structural fix for the class that produced four separate repairs here.
    Antecedent worth copying (2026-07-25 review round): Lean's locally-nameless
