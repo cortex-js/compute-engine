@@ -88,6 +88,19 @@
       "wikidata": "Q403629"
     },
     {
+      "name": "AiryAiPrime",
+      "category": "Arithmetic",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Derivative of the Airy function of the first kind",
+      "wikidata": "Q403629"
+    },
+    {
       "name": "AiryBi",
       "category": "Arithmetic",
       "arity": "1",
@@ -101,6 +114,43 @@
       "wikidata": "Q403629"
     },
     {
+      "name": "AiryBiPrime",
+      "category": "Arithmetic",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Derivative of the Airy function of the second kind",
+      "wikidata": "Q403629"
+    },
+    {
+      "name": "All",
+      "category": "Collections",
+      "arity": "optional",
+      "signature": "(collection, function?) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given)."
+    },
+    {
+      "name": "Alternatives",
+      "category": "Control Structures",
+      "arity": "variadic",
+      "signature": "(expression+) -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Inside a `Match` pattern, `Alternatives(p1, p2, …)` matches if any alternative matches. Alternatives must be binding-free."
+    },
+    {
       "name": "And",
       "category": "Logic",
       "arity": "variadic",
@@ -110,7 +160,20 @@
       "idempotent": true,
       "lazy": false,
       "broadcastable": true,
+      "description": "Logical conjunction (AND): true when all operands are true.",
       "wikidata": "Q191081"
+    },
+    {
+      "name": "Angle",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any+) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Angle mark / measure (`\\angle ABC`, `\\varangle XYZ`, `∠ABC`) — opaque typed head; not evaluated."
     },
     {
       "name": "Annotated",
@@ -125,10 +188,22 @@
       "description": "Attach metadata or style annotations to an expression."
     },
     {
+      "name": "Any",
+      "category": "Collections",
+      "arity": "optional",
+      "signature": "(collection, function?) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given)."
+    },
+    {
       "name": "Apart",
       "category": "Polynomials",
-      "arity": "2",
-      "signature": "(value, symbol) -> value",
+      "arity": "optional",
+      "signature": "(value, symbol?) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -148,6 +223,18 @@
       "broadcastable": false,
       "description": "Appell hypergeometric function F₁(a; b₁, b₂; c; x, y), double series for |x|, |y| < 1.",
       "wikidata": "Q2701540"
+    },
+    {
+      "name": "Append",
+      "category": "Collections",
+      "arity": "2",
+      "signature": "(collection, value) -> collection",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Add an element to the end of a collection."
     },
     {
       "name": "Apply",
@@ -170,7 +257,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Approximate-equality relation (approximately equal)."
     },
     {
       "name": "ApproxEqual",
@@ -181,7 +269,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Approximately-equal relation."
     },
     {
       "name": "ApproxNotEqual",
@@ -192,7 +281,20 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Approximately-not-equal relation."
+    },
+    {
+      "name": "Arc",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any+) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Arc / wide-hat accent measure (`\\widehat{ABC}`) — opaque typed head; not evaluated."
     },
     {
       "name": "Arccos",
@@ -203,7 +305,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Arccosine, the inverse cosine function."
     },
     {
       "name": "Arccot",
@@ -214,7 +317,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Arccotangent, the inverse cotangent function."
     },
     {
       "name": "Arccsc",
@@ -225,7 +329,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Arccosecant, the inverse cosecant function."
     },
     {
       "name": "Arcosh",
@@ -236,7 +341,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Inverse hyperbolic cosine (area hyperbolic cosine)."
     },
     {
       "name": "Arcoth",
@@ -247,7 +353,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Inverse hyperbolic cotangent (area hyperbolic cotangent)."
     },
     {
       "name": "Arcsch",
@@ -258,7 +365,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Inverse hyperbolic cosecant (area hyperbolic cosecant)."
     },
     {
       "name": "Arcsec",
@@ -269,7 +377,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Arcsecant, the inverse secant function."
     },
     {
       "name": "Arcsin",
@@ -280,7 +389,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Arcsine, the inverse sine function."
     },
     {
       "name": "Arctan",
@@ -309,6 +419,42 @@
       "wikidata": "Q776598"
     },
     {
+      "name": "Arg",
+      "category": "Arithmetic",
+      "arity": "1",
+      "signature": "(number) -> real",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "`Arg` is an alias for `Argument`, which is the preferred name. Returns the complex argument (phase angle) of a number."
+    },
+    {
+      "name": "ArgMax",
+      "category": "Collections",
+      "arity": "optional",
+      "signature": "(indexed_collection, function?) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given)."
+    },
+    {
+      "name": "ArgMin",
+      "category": "Collections",
+      "arity": "optional",
+      "signature": "(indexed_collection, function?) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given)."
+    },
+    {
       "name": "Argument",
       "category": "Arithmetic",
       "arity": "1",
@@ -329,7 +475,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Inverse hyperbolic secant (area hyperbolic secant)."
     },
     {
       "name": "Arsinh",
@@ -340,7 +487,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Inverse hyperbolic sine (area hyperbolic sine)."
     },
     {
       "name": "Artanh",
@@ -351,7 +499,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Inverse hyperbolic tangent (area hyperbolic tangent)."
     },
     {
       "name": "AsHsl",
@@ -362,7 +511,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Convert any color to HSL (hue degrees, s/l 0-1)"
     },
     {
@@ -374,7 +523,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Convert any color to HSV (hue degrees, s/v 0-1)"
     },
     {
@@ -386,7 +535,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Convert any color to OKLab"
     },
     {
@@ -398,7 +547,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Convert any color to OKLCh"
     },
     {
@@ -410,7 +559,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "Convert any color to sRGB (channels 0-1)"
     },
     {
@@ -441,19 +590,19 @@
       "name": "At",
       "category": "Collections",
       "arity": "variadic",
-      "signature": "(value: indexed_collection | dictionary, index: (number|string|indexed_collection)+) -> unknown",
+      "signature": "(value: indexed_collection | dictionary, index: (number|string|boolean|indexed_collection)+) -> unknown",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Access an element of an indexed collection.\n\nIf the index is negative, it is counted from the end.\n\nMultiple indices can be provided to access nested collections (e.g., matrices).\n\nIf the index is a finite collection of booleans, returns the elements where the mask is True.\n\nIf the index is a finite collection of integers, returns the elements at those indices."
+      "description": "Access an element of an indexed collection.\n\nIf the index is negative, it is counted from the end.\n\nMultiple indices can be provided to access nested collections (e.g., matrices).\n\nIf the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter, and its length must match the collection length; otherwise it is an error).\n\nIf the index is a finite collection of integers, returns the elements at those indices, preserving position: an out-of-range index yields the absence marker, it is not dropped.\n\nOut-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `Missing` otherwise. It never yields `Nothing`, which would erase the position."
     },
     {
       "name": "BaseForm",
       "category": "Core",
       "arity": "optional",
-      "signature": "(number, (string|integer)?) -> string | nothing",
+      "signature": "(number, (string|number)?) -> string | nothing",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -555,10 +704,34 @@
       "wikidata": "Q189062"
     },
     {
+      "name": "BetaRegularized",
+      "category": "Statistics",
+      "arity": "3",
+      "signature": "(number, number, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Regularized incomplete beta function I_x(a, b)"
+    },
+    {
+      "name": "BigO",
+      "category": "Calculus",
+      "arity": "1",
+      "signature": "(value) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Landau big-O remainder term. Inert; any numeric approximation (.N()) of an expression containing it is NaN."
+    },
+    {
       "name": "BinCounts",
       "category": "Statistics",
       "arity": "2",
-      "signature": "(collection, integer | list<number>) -> list<number>",
+      "signature": "(collection, number | list<number>) -> list<number>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -581,6 +754,18 @@
       "broadcastable": false,
       "description": "Compute the binomial coefficient C(n, k) = n! / (k! (n-k)!). Agrees with Choose for all defined values.",
       "wikidata": "Q209875"
+    },
+    {
+      "name": "BinomialDistribution",
+      "category": "Statistics",
+      "arity": "2",
+      "signature": "(number, number) -> expression<BinomialDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Binomial distribution: number of successes in n independent trials, each with success probability p."
     },
     {
       "name": "Block",
@@ -607,6 +792,18 @@
       "description": "Return 1 if the argument is true, 0 otherwise. Also known as the Iverson bracket"
     },
     {
+      "name": "Break",
+      "category": "Control Structures",
+      "arity": "optional",
+      "signature": "(value:any?) -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Exit the enclosing loop immediately, optionally with a value (`Break(v)`) that becomes the loop value."
+    },
+    {
       "name": "BuiltinFunction",
       "category": "Core",
       "arity": "1",
@@ -621,8 +818,8 @@
     {
       "name": "Cancel",
       "category": "Polynomials",
-      "arity": "2",
-      "signature": "(value, symbol) -> value",
+      "arity": "optional",
+      "signature": "(value, symbol?) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -686,6 +883,18 @@
       ]
     },
     {
+      "name": "CDF",
+      "category": "Statistics",
+      "arity": "2",
+      "signature": "(distribution, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Cumulative distribution function P(X ≤ x) of a distribution."
+    },
+    {
       "name": "Ceil",
       "category": "Arithmetic",
       "arity": "1",
@@ -708,6 +917,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Characteristic polynomial det(x·I − A) of a square matrix (monic)."
+    },
+    {
+      "name": "Characters",
+      "category": "Core",
+      "arity": "1",
+      "signature": "(string) -> list<string>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Characters(s): split a string into a list of user-perceived characters (grapheme clusters). Synonym: GraphemeClusters. For stable integer decompositions see UnicodeScalars, Utf8 and Utf16. A non-string argument leaves the expression unevaluated."
     },
     {
       "name": "ChineseRemainder",
@@ -770,13 +991,61 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Split the collection into `k` nearly equal-sized chunks."
+      "description": "Split the collection into `k` nearly equal-sized groups. See `Partition` for splitting into fixed-size chunks."
+    },
+    {
+      "name": "ChunkBy",
+      "category": "Collections",
+      "arity": "2",
+      "signature": "(collection, function) -> list<list>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Split the collection into maximal runs of consecutive elements over which the key function yields the same value.\n\nReturns a list of lists. Unlike `GroupBy`, only adjacent elements are grouped, so a key value that recurs after a different run starts a new chunk."
+    },
+    {
+      "name": "CircularIntegrate",
+      "category": "Calculus",
+      "arity": "variadic",
+      "signature": "(function, limits+) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Contour (closed-path) integral. Inert: never evaluated."
+    },
+    {
+      "name": "Clamp",
+      "category": "Arithmetic",
+      "arity": "3",
+      "signature": "(number, number, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Clamp a value to the range [lo, hi] = min(max(x, lo), hi). Broadcasts over collection arguments."
+    },
+    {
+      "name": "Coalesce",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any+) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the first operand that is not ABSENT (`Missing` or `NaN`), evaluated left-to-right. If every operand is absent, the last operand’s value is returned verbatim (still absent)."
     },
     {
       "name": "CoefficientList",
       "category": "Polynomials",
-      "arity": "2",
-      "signature": "(value, symbol) -> list<value>",
+      "arity": "optional",
+      "signature": "(value, symbol?) -> list<value>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -944,6 +1213,18 @@
       "description": "All n-th complex roots of a number."
     },
     {
+      "name": "Comprehension",
+      "category": "Control Structures",
+      "arity": "variadic",
+      "signature": "(body:expression, iterators:expression+) -> indexed_collection",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Value-producing comprehension: evaluate `body` in nested iteration over one or more `Element` clauses and collect the results into an indexed collection (a `List`). Later clauses see earlier bindings; independent clauses produce a Cartesian product."
+    },
+    {
       "name": "Condition",
       "category": "Control Structures",
       "arity": "optional",
@@ -959,7 +1240,7 @@
       "name": "Congruent",
       "category": "Relational Operators",
       "arity": "3",
-      "signature": "(number, number, modulo: integer) -> boolean",
+      "signature": "(number, number, modulo: number) -> boolean",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1004,6 +1285,18 @@
       "description": "Return True if the collection contains the given element, False otherwise."
     },
     {
+      "name": "Continue",
+      "category": "Control Structures",
+      "arity": "0",
+      "signature": "() -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Skip to the next iteration of the enclosing loop."
+    },
+    {
       "name": "ContinuedFraction",
       "category": "Number Theory",
       "arity": "optional",
@@ -1031,6 +1324,18 @@
       "description": "Choose the foreground color with better APCA contrast against a background"
     },
     {
+      "name": "Correlation",
+      "category": "Statistics",
+      "arity": "optional",
+      "signature": "(collection, collection?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Pearson's correlation coefficient of paired data, given as two equal-length collections or one collection of (x, y) pairs."
+    },
+    {
       "name": "Cos",
       "category": "Trigonometry",
       "arity": "1",
@@ -1039,7 +1344,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Cosine of an angle."
     },
     {
       "name": "Cosh",
@@ -1050,13 +1356,26 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Hyperbolic cosine."
+    },
+    {
+      "name": "CoshIntegral",
+      "category": "Trigonometry",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt."
     },
     {
       "name": "CosIntegral",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(number) -> real",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1073,7 +1392,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Cotangent, the reciprocal of tangent."
     },
     {
       "name": "Coth",
@@ -1084,7 +1404,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Hyperbolic cotangent, the reciprocal of hyperbolic tangent."
     },
     {
       "name": "Count",
@@ -1111,6 +1432,18 @@
       "description": "Return the number of elements in the collection satisfying the predicate."
     },
     {
+      "name": "Covariance",
+      "category": "Statistics",
+      "arity": "optional",
+      "signature": "(collection, collection?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Sample covariance (n − 1 denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs."
+    },
+    {
       "name": "Cross",
       "category": "Linear Algebra",
       "arity": "2",
@@ -1132,7 +1465,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Cosecant"
+      "description": "Cosecant, the reciprocal of sine."
     },
     {
       "name": "Csch",
@@ -1144,7 +1477,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic cosecant"
+      "description": "Hyperbolic cosecant, the reciprocal of hyperbolic sine."
     },
     {
       "name": "Cycle",
@@ -1162,7 +1495,7 @@
       "name": "D",
       "category": "Calculus",
       "arity": "variadic",
-      "signature": "(expression, variable:symbol, variables:symbol+) -> expression",
+      "signature": "(expression, variables:symbol*) -> expression",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1173,14 +1506,14 @@
     {
       "name": "Declare",
       "category": "Core",
-      "arity": "2",
-      "signature": "(symbol, type: string | symbol) -> nothing",
+      "arity": "optional",
+      "signature": "(symbol, type: (string | symbol)?, value: any?, attributes: dictionary?) -> any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare a symbol and optionally assign a type."
+      "description": "Declare a symbol in the current scope, optionally assigning a type and an initial value. An optional trailing attributes dictionary (with keys `type`, `value`, `constant` and `holdUntil`) can further describe the definition, e.g. to declare a constant. With a value, evaluates to that value; otherwise evaluates to `Nothing`."
     },
     {
       "name": "DedekindEta",
@@ -1194,6 +1527,18 @@
       "broadcastable": false,
       "description": "Dedekind eta function η(τ), Im(τ) > 0.",
       "wikidata": "Q1187208"
+    },
+    {
+      "name": "Dedup",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(collection) -> collection",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the collection with consecutive duplicate elements collapsed to a single element.\n\nOnly immediately-adjacent equal elements are removed; unlike `Unique`, a value that recurs after a different element is kept."
     },
     {
       "name": "Degree",
@@ -1218,6 +1563,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Convert an angle in degrees."
+    },
+    {
+      "name": "DeleteAt",
+      "category": "Collections",
+      "arity": "2",
+      "signature": "(indexed_collection, integer) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return a copy of the indexed collection with the element at the 1-based `index` removed.\n\nA negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated."
     },
     {
       "name": "Delimiter",
@@ -1292,6 +1649,18 @@
       "description": "Create a dictionary from the elements of a collection of (key, value) pairs."
     },
     {
+      "name": "Differences",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(collection) -> indexed_collection",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input."
+    },
+    {
       "name": "Digamma",
       "category": "Arithmetic",
       "arity": "1",
@@ -1361,8 +1730,8 @@
     {
       "name": "Discriminant",
       "category": "Polynomials",
-      "arity": "2",
-      "signature": "(value, symbol) -> value",
+      "arity": "optional",
+      "signature": "(value, symbol?) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1406,6 +1775,21 @@
       "broadcastable": true,
       "description": "Quotient of a numerator and one or more denominators.",
       "wikidata": "Q1226939"
+    },
+    {
+      "name": "Divides",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(number, number) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "`Divides(a, b)` returns `True` if `a` divides `b` (i.e. `b` is an integer multiple of `a`), corresponding to the notation `a ∣ b`. Stays symbolic for non-integer operands.",
+      "examples": [
+        "Divides(3, 12)  // \"True\""
+      ]
     },
     {
       "name": "Divisors",
@@ -1472,6 +1856,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return the collection without the first n elements."
+    },
+    {
+      "name": "DropWhile",
+      "category": "Collections",
+      "arity": "2",
+      "signature": "(collection, predicate: function) -> collection",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the collection with its leading elements for which the predicate returns True removed; the remaining elements are returned unfiltered."
     },
     {
       "name": "DSolve",
@@ -1546,6 +1942,30 @@
       "description": "Test whether a value is an element of a collection. Optional third argument is a boolean expression (condition) for filtered iteration in Sum/Product.\n\nElement supports two modes of operation:\n1. Set membership: Element(3, [List, 1, 2, 3]) checks if 3 is in the list\n2. Type-style membership: Element(x, integer) checks if x has type integer\n\nType-style membership works with:\n- Mathematical sets: Integers, RealNumbers, ComplexNumbers, etc.\n- Type names: integer, real, number, finite_real, positive_integer, etc.\n- Invalid type names remain unevaluated (e.g., Element(2, \"Booleans\"))"
     },
     {
+      "name": "ElementMax",
+      "category": "Arithmetic",
+      "arity": "variadic",
+      "signature": "(number, number+) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic."
+    },
+    {
+      "name": "ElementMin",
+      "category": "Arithmetic",
+      "arity": "variadic",
+      "signature": "(number, number+) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. Variadic."
+    },
+    {
       "name": "EllipticE",
       "category": "special-functions",
       "arity": "optional",
@@ -1606,7 +2026,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": true,
+      "description": "Equality comparison (equal to)."
     },
     {
       "name": "Equivalent",
@@ -1618,6 +2039,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
+      "description": "Logical equivalence (if and only if): true when both operands have the same truth value.",
       "wikidata": "Q220433"
     },
     {
@@ -1737,7 +2159,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Existential quantifier (there exists): true when the predicate holds for at least one value."
     },
     {
       "name": "ExistsUnique",
@@ -1748,7 +2171,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Unique existential quantifier (there exists exactly one value satisfying the predicate)."
     },
     {
       "name": "Exp",
@@ -1760,7 +2184,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Natural exponential function: e^x.",
+      "description": "Natural exponential function: e^x. Applied to a matrix (or any collection), it broadcasts ELEMENTWISE — it is NOT the matrix exponential e^M (which is not currently implemented).",
       "wikidata": "Q168698"
     },
     {
@@ -1803,7 +2227,7 @@
       "name": "ExpIntegralEi",
       "category": "special-functions",
       "arity": "1",
-      "signature": "(number) -> real",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1811,6 +2235,18 @@
       "broadcastable": true,
       "description": "Exponential integral Ei(x) = PV ∫_{−∞}^x eᵗ/t dt.",
       "wikidata": "Q1361401"
+    },
+    {
+      "name": "ExponentialDistribution",
+      "category": "Statistics",
+      "arity": "1",
+      "signature": "(number) -> expression<ExponentialDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Exponential distribution with rate parameter λ."
     },
     {
       "name": "ExtendedGCD",
@@ -1856,7 +2292,7 @@
       "name": "Factorial2",
       "category": "Arithmetic",
       "arity": "1",
-      "signature": "(integer) -> integer",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1929,6 +2365,30 @@
       "description": "Return the first element of the collection satisfying the predicate, or Nothing if none found."
     },
     {
+      "name": "FindFit",
+      "category": "Statistics",
+      "arity": "4",
+      "signature": "(any, any, any, any) -> dictionary",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Nonlinear least-squares fit of a model to data. FindFit(data, model, params, vars): fit `model` (an expression in `vars` and the parameters) to `data`, a list of (x…, y) tuples or a plain list of y values. Each parameter spec is a bare symbol, (a, a0), or (a, a0, lo, hi) with box constraints. Returns a record {parameters, converged, residualNorm, iterations}. The joint form takes a list of models and matching datasets sharing parameters."
+    },
+    {
+      "name": "FindRoot",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(any, any) -> dictionary",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "FindRoot(equations, params): numerically find parameter values that\n\nzero the residuals. `equations` is an equation (`lhs == rhs`), a bare\n\nresidual expression (read as `= 0`), or a list of either. `params` is\n\na list of specs (a bare symbol, `(a, a0)`, or `(a, a0, lo, hi)` with\n\nbox constraints), matching `FindFit`. Returns a record\n\n{parameters, converged, residualNorm, iterations}."
+    },
+    {
       "name": "First",
       "category": "Collections",
       "arity": "1",
@@ -1937,7 +2397,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "The first element of a collection."
     },
     {
       "name": "FixedPoint",
@@ -1952,10 +2413,22 @@
       "description": "Iterate a function until a fixed point is reached."
     },
     {
+      "name": "FlatMap",
+      "category": "Collections",
+      "arity": "2",
+      "signature": "(collection, function) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements."
+    },
+    {
       "name": "Flatten",
       "category": "Linear Algebra",
-      "arity": "1",
-      "signature": "(value) -> list",
+      "arity": "optional",
+      "signature": "(value, integer?) -> list",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1977,6 +2450,18 @@
       "wikidata": "Q56860783"
     },
     {
+      "name": "Fold",
+      "category": "Collections",
+      "arity": "3",
+      "signature": "(function, value, collection) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value."
+    },
+    {
       "name": "ForAll",
       "category": "Logic",
       "arity": "2",
@@ -1985,7 +2470,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Universal quantifier (for all): true when the predicate holds for every value."
     },
     {
       "name": "Fract",
@@ -2057,7 +2543,7 @@
       "name": "Function",
       "category": "Core",
       "arity": "variadic",
-      "signature": "(expression, symbol*) -> function",
+      "signature": "(expression, (symbol | function)*) -> function",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -2089,6 +2575,18 @@
       "lazy": false,
       "broadcastable": true,
       "description": "Natural logarithm of the gamma function."
+    },
+    {
+      "name": "GammaRegularized",
+      "category": "Statistics",
+      "arity": "2",
+      "signature": "(number, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a)"
     },
     {
       "name": "GCD",
@@ -2124,7 +2622,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "A collection of grapheme clusters from a string."
+      "description": "A collection of grapheme clusters from a string. Synonym of Characters."
     },
     {
       "name": "Greater",
@@ -2135,7 +2633,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": true,
+      "description": "Greater-than comparison (strictly greater than)."
     },
     {
       "name": "GreaterEqual",
@@ -2146,7 +2645,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": true,
+      "description": "Greater-than-or-equal comparison (greater than or equal to)."
     },
     {
       "name": "GroupBy",
@@ -2213,7 +2713,7 @@
       "name": "Histogram",
       "category": "Statistics",
       "arity": "2",
-      "signature": "(collection, integer | list<number>) -> list<tuple<number, integer>>",
+      "signature": "(collection, number | list<number>) -> list<tuple<number, integer>>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -2235,6 +2735,18 @@
       "lazy": true,
       "broadcastable": false,
       "description": "Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it"
+    },
+    {
+      "name": "HoldValues",
+      "category": "Core",
+      "arity": "optional",
+      "signature": "(any, any?) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "HoldValues(body): evaluate `body` with its assigned free symbols\n\nshielded — each such symbol becomes a pure symbol (its declared type\n\nand in-scope assumptions apply, its assigned value does NOT) for the\n\nduration. The value-blind counterpart of evaluating `body` directly;\n\nanalogous to Mathematica's `Block[{x}, …]`.\n\nHoldValues(body, [x, y]): shield only the listed symbols (a List,\n\nSet, Tuple, or a single symbol); every other symbol resolves normally.\n\nConstants (`Pi`, `ExponentialE`, …) are never shielded, assumptions\n\nsurvive the shield, and the global values are intact afterwards."
     },
     {
       "name": "Hom",
@@ -2269,7 +2781,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "HSL color (hue degrees, saturation/lightness 0-1, optional alpha)"
     },
     {
@@ -2281,7 +2793,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "HSV color (hue degrees, saturation/value 0-1, optional alpha)"
     },
     {
@@ -2349,8 +2861,8 @@
     {
       "name": "If",
       "category": "Control Structures",
-      "arity": "3",
-      "signature": "(expression, expression, expression) -> any",
+      "arity": "optional",
+      "signature": "(expression, expression, expression?) -> any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -2380,7 +2892,20 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
+      "description": "Logical implication (if–then).",
       "wikidata": "Q7881229"
+    },
+    {
+      "name": "IndexedSequence",
+      "category": "Core",
+      "arity": "optional",
+      "signature": "(any, symbol, any, any?) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Indexed sequence `\\{a_n\\}_{n=1}^{\\infty}` — inert head `IndexedSequence(term, index, lower, upper?)`; not evaluated."
     },
     {
       "name": "IndexOf",
@@ -2410,13 +2935,25 @@
       "name": "Infimum",
       "category": "Arithmetic",
       "arity": "variadic",
-      "signature": "(value*) -> number | list",
+      "signature": "(value*) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
       "description": "Like Min, but defined for open sets"
+    },
+    {
+      "name": "Insert",
+      "category": "Collections",
+      "arity": "3",
+      "signature": "(indexed_collection, integer, value) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return a copy of the indexed collection with `value` inserted before the 1-based `index`.\n\n`index` may range from 1 to n+1 (n+1 appends). A negative index counts from the end, with -1 appending at the end (Elixir semantics).\n\nAn out-of-range, zero, or non-integer index leaves the expression unevaluated."
     },
     {
       "name": "IntegerDigits",
@@ -2474,6 +3011,30 @@
       "wikidata": "Q80091"
     },
     {
+      "name": "InterpolatingFunction",
+      "category": "Calculus",
+      "arity": "optional",
+      "signature": "(list, number?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced by `NDSolveFunction`). The first operand is the per-step coefficient table; applied to a number, it evaluates the solution there (clamping to the covered interval outside it). Stays symbolic for a non-numeric argument."
+    },
+    {
+      "name": "Interpret",
+      "category": "Arithmetic",
+      "arity": "1",
+      "signature": "(any) -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Interpret a notational expression as its mathematical meaning. In v1: a continuation-bearing `Add`/`Multiply` (e.g. `1 + 2 + \\dots + n`) becomes a `Sum`/`Product`. Returns the argument unchanged when the (strict) inference gate does not pass"
+    },
+    {
       "name": "InterquartileRange",
       "category": "Statistics",
       "arity": "variadic",
@@ -2489,13 +3050,13 @@
       "name": "Intersection",
       "category": "Collections",
       "arity": "variadic",
-      "signature": "(set+) -> set",
+      "signature": "(collection+) -> set",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the intersection of two or more sets.",
+      "description": "Return the intersection of two or more collections as a set.",
       "wikidata": "Q185837"
     },
     {
@@ -2654,6 +3215,18 @@
       "broadcastable": false,
       "description": "True if n is a happy number, a number which eventually reaches 1 when the number is replaced by the sum of the square of each digit",
       "wikidata": "Q44535"
+    },
+    {
+      "name": "IsMissing",
+      "category": "Core",
+      "arity": "1",
+      "signature": "(any) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "True if the value is ABSENT — the `Missing` symbol, or a `NaN` number (regardless of provenance). R’s `is.na` (`TRUE` for both `NA` and `NaN`); `IsNaN` remains a NaN-specific test (R’s `is.nan`)."
     },
     {
       "name": "IsOctahedral",
@@ -2832,6 +3405,18 @@
       "description": "Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value."
     },
     {
+      "name": "JacobianMatrix",
+      "category": "Calculus",
+      "arity": "optional",
+      "signature": "(any, any?) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "JacobianMatrix(fs, vars): the matrix of partial derivatives\n\n∂fᵢ/∂xⱼ, one row per function and one column per variable.\n\n`fs` is a list of expressions. A single (non-list) expression is the\n\ngradient case: the result is the flat vector [∂f/∂x₁, …, ∂f/∂xₙ].\n\n`vars` is a list of symbols and may be omitted, in which case the\n\nfree variables of `fs` are used, in lexicographic order.\n\nExample: JacobianMatrix([x^2 y, x + z], [x, y, z])."
+    },
+    {
       "name": "JacobiSymbol",
       "category": "Number Theory",
       "arity": "2",
@@ -2869,7 +3454,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Join the elements of some collections into a flat collection."
+      "description": "Join the elements of some collections into a flat collection.\n\nA tuple operand is appended as a single element, not spliced."
     },
     {
       "name": "Julia",
@@ -2894,6 +3479,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Kernel (null space) of a linear map"
+    },
+    {
+      "name": "Keys",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(dictionary) -> list<string>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return a list of the keys of a dictionary."
     },
     {
       "name": "KeyValuePair",
@@ -2934,8 +3531,8 @@
     {
       "name": "LambertW",
       "category": "Arithmetic",
-      "arity": "1",
-      "signature": "(number) -> number",
+      "arity": "optional",
+      "signature": "(number, number?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -2953,7 +3550,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "The last element of a collection."
     },
     {
       "name": "Latex",
@@ -2996,7 +3594,7 @@
       "name": "LCM",
       "category": "Arithmetic",
       "arity": "variadic",
-      "signature": "(any*) -> integer",
+      "signature": "(any*) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3040,7 +3638,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": true,
+      "description": "Less-than comparison (strictly less than)."
     },
     {
       "name": "LessEqual",
@@ -3051,7 +3650,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": true,
+      "description": "Less-than-or-equal comparison (less than or equal to)."
     },
     {
       "name": "Lg",
@@ -3091,6 +3691,30 @@
       "description": "Limits of a function"
     },
     {
+      "name": "LinearRegression",
+      "category": "Statistics",
+      "arity": "variadic",
+      "signature": "(any+) -> tuple<number, number>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Least-squares linear fit b0 + b1·x. Returns Tuple(b0, b1), or the fitted expression if a trailing variable symbol is given."
+    },
+    {
+      "name": "LinearSolve",
+      "category": "Linear Algebra",
+      "arity": "2",
+      "signature": "(matrix, matrix|vector) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Solve the linear system A·x = b for x."
+    },
+    {
       "name": "Linspace",
       "category": "Collections",
       "arity": "optional",
@@ -3099,7 +3723,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "A sequence of evenly spaced numbers between a start and end value, both endpoints included."
     },
     {
       "name": "List",
@@ -3110,7 +3735,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "An ordered collection of elements (a list)."
     },
     {
       "name": "ListFrom",
@@ -3197,7 +3823,19 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Evaluate a body expression in nested iteration over Element clauses. Later clauses see earlier bindings; independent clauses produce a Cartesian product."
+      "description": "Imperative loop, evaluated **for effect**. `Loop(body)` repeatedly evaluates `body` until it yields a `Break` or `Return`. `Loop(body, Element(x, coll), …)` iterates `body` in nested iteration over the Element clauses (later clauses see earlier bindings; independent clauses produce a Cartesian product). The loop value is `Nothing`, or the value carried by a `Break`/`Return`. For a value-producing comprehension use `Comprehension` or `Map`."
+    },
+    {
+      "name": "Lucas",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "`Lucas` is an alias for `LucasL`, which is the preferred name. Returns the nth Lucas number."
     },
     {
       "name": "LucasL",
@@ -3241,14 +3879,38 @@
     {
       "name": "Map",
       "category": "Collections",
-      "arity": "2",
-      "signature": "(collection, function) -> collection",
+      "arity": "variadic",
+      "signature": "(collection+, function) -> indexed_collection",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Return the collection where each element has been transformed by the mapping function.\n\nEquivalent to `[f(x) for x in xs]`."
+      "description": "Return the collection where each element has been transformed by the mapping function.\n\nWith a single collection, equivalent to `[f(x) for x in xs]`. With\n\nmultiple collections, combines them element-wise (like `zipWith`): \n\n`Map(xs, ys, f) = [f(x1, y1), f(x2, y2), …]`, with the length of the\n\nshortest input. The mapping function is always the LAST argument."
+    },
+    {
+      "name": "Match",
+      "category": "Control Structures",
+      "arity": "variadic",
+      "signature": "(expression, expression+) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Structural pattern match. `Match(subject, MatchCase(pattern, body), …)` evaluates `subject` once, then selects the first case whose pattern matches (structurally, `isSame`-like) and whose guard holds, applying its body to the captured values. Unlike `Which`, `Match` always decides: a symbolic subject that is not structurally a case still falls through to a wildcard case. No matching case yields `Error(\"match-no-case\", subject)`."
+    },
+    {
+      "name": "MatchCase",
+      "category": "Control Structures",
+      "arity": "optional",
+      "signature": "(expression, expression, expression?) -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "A case of a `Match`: `MatchCase(pattern, body)` or `MatchCase(pattern, guard, body)`. The pattern holds engine wildcards; the body references the bound capture names."
     },
     {
       "name": "Matrix",
@@ -3278,13 +3940,13 @@
       "name": "MatrixPower",
       "category": "Linear Algebra",
       "arity": "2",
-      "signature": "(matrix, integer) -> matrix",
+      "signature": "(matrix, number) -> matrix",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Square matrix raised to an integer power (repeated matrix product)."
+      "description": "Square matrix raised to a power. Integer powers are the repeated matrix product; a half-integer power (e.g. 1/2) of an exact 2×2 positive-semidefinite matrix is the principal matrix square root."
     },
     {
       "name": "MatrixRank",
@@ -3302,7 +3964,7 @@
       "name": "Max",
       "category": "Arithmetic",
       "arity": "variadic",
-      "signature": "(value*) -> number | list",
+      "signature": "(value*) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3311,16 +3973,40 @@
       "description": "Maximum of two or more numbers"
     },
     {
+      "name": "MaxBy",
+      "category": "Collections",
+      "arity": "2",
+      "signature": "(collection, function) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the element of the collection that maximizes the given key function."
+    },
+    {
       "name": "Mean",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection|number)+) -> number",
+      "signature": "((collection|number|distribution)+) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Arithmetic mean of a collection of numbers."
+      "description": "Arithmetic mean (average) of a collection of numbers."
+    },
+    {
+      "name": "Measurement",
+      "category": "Arithmetic",
+      "arity": "2",
+      "signature": "(value, value) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "A nominal value carrying a 1σ absolute uncertainty."
     },
     {
       "name": "Median",
@@ -3341,13 +4027,25 @@
       "name": "Min",
       "category": "Arithmetic",
       "arity": "variadic",
-      "signature": "(value+) -> number | list",
+      "signature": "(value+) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
       "description": "Minimum of two or more numbers"
+    },
+    {
+      "name": "MinBy",
+      "category": "Collections",
+      "arity": "2",
+      "signature": "(collection, function) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the element of the collection that minimizes the given key function."
     },
     {
       "name": "MinimalCNF",
@@ -3397,6 +4095,21 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Most frequently occurring value in a collection."
+    },
+    {
+      "name": "ModularInverse",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(integer, integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` in [0, m) with `a·x ≡ 1 (mod m)`. Undefined when `a` and `m` are not coprime.",
+      "examples": [
+        "ModularInverse(3, 7)  // 5"
+      ]
     },
     {
       "name": "MoebiusMu",
@@ -3516,6 +4229,18 @@
       "description": "Numerical differential equation solver."
     },
     {
+      "name": "NDSolveFunction",
+      "category": "Calculus",
+      "arity": "4",
+      "signature": "(expression, symbol, limits:(tuple|symbol), number) -> function",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `InterpolatingFunction`), usable at any point of the integration interval. Same arguments as `NDSolve`, without the sample count."
+    },
+    {
       "name": "Negate",
       "category": "Arithmetic",
       "arity": "1",
@@ -3594,6 +4319,30 @@
       "description": "Vector or matrix norm."
     },
     {
+      "name": "Normal",
+      "category": "Calculus",
+      "arity": "1",
+      "signature": "(value) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Strip Big-O remainder terms from a series, yielding the truncated polynomial. Example: Normal(Series(\\sin x, x)) → x - x^3/6 + x^5/120"
+    },
+    {
+      "name": "NormalDistribution",
+      "category": "Statistics",
+      "arity": "2",
+      "signature": "(number, number) -> expression<NormalDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Normal (Gaussian) distribution with mean μ and standard deviation σ."
+    },
+    {
       "name": "Not",
       "category": "Logic",
       "arity": "1",
@@ -3603,6 +4352,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
+      "description": "Logical negation (NOT).",
       "wikidata": "Q190558"
     },
     {
@@ -3614,7 +4364,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated approximate-equality relation (not approximately equal)."
     },
     {
       "name": "NotApproxEqual",
@@ -3625,7 +4376,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated approximately-equal relation."
     },
     {
       "name": "NotApproxNotEqual",
@@ -3636,7 +4388,20 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated approximately-not-equal relation."
+    },
+    {
+      "name": "NotDivides",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(integer, integer) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "`NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`."
     },
     {
       "name": "NotElement",
@@ -3659,7 +4424,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false,
+      "broadcastable": true,
+      "description": "Inequality comparison (not equal to).",
       "wikidata": "Q28113351"
     },
     {
@@ -3671,7 +4437,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated existential quantifier (there does not exist): true when the predicate holds for no value."
     },
     {
       "name": "NotForAll",
@@ -3682,7 +4449,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated universal quantifier (not for all): true when the predicate fails for at least one value."
     },
     {
       "name": "NotGreater",
@@ -3693,7 +4461,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated greater-than relation (not greater than)."
     },
     {
       "name": "NotGreaterNotEqual",
@@ -3704,7 +4473,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Neither greater than nor equal to."
     },
     {
       "name": "NotLess",
@@ -3715,7 +4485,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated less-than relation (not less than)."
     },
     {
       "name": "NotLessNotEqual",
@@ -3726,7 +4497,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Neither less than nor equal to."
     },
     {
       "name": "NotPrecedes",
@@ -3737,7 +4509,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated precedes relation (does not precede)."
     },
     {
       "name": "NotSubset",
@@ -3760,7 +4533,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated succeeds relation (does not succeed)."
     },
     {
       "name": "NotSuperset",
@@ -3787,6 +4561,18 @@
       "description": "Test whether the first collection is not a superset (possibly equal) of the second."
     },
     {
+      "name": "NotTilde",
+      "category": "Relational Operators",
+      "arity": "variadic",
+      "signature": "(any, any+) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Negated similarity relation (not similar)."
+    },
+    {
       "name": "NotTildeEqual",
       "category": "Relational Operators",
       "arity": "variadic",
@@ -3795,7 +4581,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated approximately/asymptotically-equal relation (not approximately equal)."
     },
     {
       "name": "NotTildeFullEqual",
@@ -3806,7 +4593,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Negated isomorphism/congruence relation (not isomorphic or congruent)."
     },
     {
       "name": "NPartition",
@@ -3868,7 +4656,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "OKLab color (L 0-1, a/b ~ -0.4..0.4, optional alpha)"
     },
     {
@@ -3880,7 +4668,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "OKLCh color (L 0-1, C 0-~0.4, hue degrees, optional alpha)"
     },
     {
@@ -3905,6 +4693,7 @@
       "idempotent": true,
       "lazy": false,
       "broadcastable": true,
+      "description": "Logical disjunction (OR): true when at least one operand is true.",
       "wikidata": "Q1651704"
     },
     {
@@ -3920,6 +4709,18 @@
       "description": "Return the indexes that would sort the collection."
     },
     {
+      "name": "OverParen",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any+) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Over-paren accent (`\\overparen{BC}`) — opaque typed head; not evaluated."
+    },
+    {
       "name": "Pair",
       "category": "Collections",
       "arity": "2",
@@ -3930,6 +4731,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "A tuple of two elements"
+    },
+    {
+      "name": "Parallel",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(any, any) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Parallelism relation (`AB \\parallel CD`) — opaque typed head; not evaluated."
     },
     {
       "name": "Parse",
@@ -3946,8 +4759,8 @@
     {
       "name": "PartialFraction",
       "category": "Polynomials",
-      "arity": "2",
-      "signature": "(value, symbol) -> value",
+      "arity": "optional",
+      "signature": "(value, symbol?) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3958,14 +4771,27 @@
     {
       "name": "Partition",
       "category": "Collections",
-      "arity": "2",
-      "signature": "(collection, integer | function) -> list",
+      "arity": "optional",
+      "signature": "(collection, integer | function, integer?) -> list",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
+      "description": "Partition a collection into consecutive chunks each of size `n`; the trailing chunk may be shorter when `n` does not divide the length.\n\nWith a third argument `step`, produce sliding windows of length `n` whose starts are `step` apart, keeping only complete windows.\n\nWith a predicate function instead of an integer, split into two groups: elements for which the predicate is true, and those for which it is false.\n\nAsymmetry: with no `step`, the trailing partial chunk is included; with an explicit `step`, only complete windows are returned.\n\nSee `Chunk` for splitting into a given number of nearly-equal groups.",
       "wikidata": "Q381060"
+    },
+    {
+      "name": "PDF",
+      "category": "Statistics",
+      "arity": "2",
+      "signature": "(distribution, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Probability density (continuous) or mass (discrete) function of a distribution, evaluated at x."
     },
     {
       "name": "Permutations",
@@ -3978,6 +4804,42 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Return all permutations of length k (default full length) of a collection."
+    },
+    {
+      "name": "Perpendicular",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(any, any) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Perpendicularity relation (`AB \\perp CD`) — opaque typed head; not evaluated."
+    },
+    {
+      "name": "Pin",
+      "category": "Control Structures",
+      "arity": "1",
+      "signature": "(expression) -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Inside a `Match` pattern, `Pin(expr)` matches the value of `expr` (evaluated at match time) rather than its structure."
+    },
+    {
+      "name": "Pipe",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(value, function) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Apply a function to a value: `Pipe(x, f)` evaluates to `f(x)`."
     },
     {
       "name": "PlusMinus",
@@ -3993,6 +4855,79 @@
       "wikidata": "Q120812"
     },
     {
+      "name": "Pochhammer",
+      "category": "Combinatorics",
+      "arity": "2",
+      "signature": "(number, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Rising factorial (Pochhammer symbol) (a)_k = a(a+1)…(a+k-1).",
+      "wikidata": "Q2367490"
+    },
+    {
+      "name": "PointList",
+      "category": "Collections",
+      "arity": "variadic",
+      "signature": "(any+) -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection."
+    },
+    {
+      "name": "PointX",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(any) -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The x-coordinate of a point, broadcasting over a list of points."
+    },
+    {
+      "name": "PointY",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(any) -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The y-coordinate of a point, broadcasting over a list of points."
+    },
+    {
+      "name": "PointZ",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(any) -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The z-coordinate of a point, broadcasting over a list of points."
+    },
+    {
+      "name": "PoissonDistribution",
+      "category": "Statistics",
+      "arity": "1",
+      "signature": "(number) -> expression<PoissonDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Poisson distribution with rate parameter λ."
+    },
+    {
       "name": "PolyGamma",
       "category": "Arithmetic",
       "arity": "2",
@@ -4004,6 +4939,31 @@
       "broadcastable": true,
       "description": "Polygamma function, the n-th derivative of the digamma function",
       "wikidata": "Q1817679"
+    },
+    {
+      "name": "Polygon",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any+) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Polygon primitive — opaque typed head."
+    },
+    {
+      "name": "PolyLog",
+      "category": "special-functions",
+      "arity": "2",
+      "signature": "(number, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Polylogarithm Liₛ(z) = Σ_{k≥1} zᵏ/kˢ.",
+      "wikidata": "Q320067"
     },
     {
       "name": "Polynomial",
@@ -4020,8 +4980,8 @@
     {
       "name": "PolynomialDegree",
       "category": "Polynomials",
-      "arity": "2",
-      "signature": "(value, symbol) -> integer",
+      "arity": "optional",
+      "signature": "(value, symbol?) -> integer",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4030,10 +4990,22 @@
       "description": "Return the degree of a polynomial with respect to a variable. Example: PolynomialDegree(x³ + 2x + 1, x) → 3"
     },
     {
+      "name": "PolynomialFit",
+      "category": "Statistics",
+      "arity": "variadic",
+      "signature": "(any+) -> list<number>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Least-squares polynomial fit of the given degree. Returns the ascending coefficient List(c0, …, c_deg), or the fitted expression if a trailing variable symbol is given."
+    },
+    {
       "name": "PolynomialGCD",
       "category": "Polynomials",
-      "arity": "3",
-      "signature": "(a: value, b: value, variable: symbol) -> value",
+      "arity": "optional",
+      "signature": "(a: value, b: value, variable: symbol?) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4044,8 +5016,8 @@
     {
       "name": "PolynomialQuotient",
       "category": "Polynomials",
-      "arity": "3",
-      "signature": "(dividend: value, divisor: value, variable: symbol) -> value",
+      "arity": "optional",
+      "signature": "(dividend: value, divisor: value, variable: symbol?) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4056,8 +5028,8 @@
     {
       "name": "PolynomialRemainder",
       "category": "Polynomials",
-      "arity": "3",
-      "signature": "(dividend: value, divisor: value, variable: symbol) -> value",
+      "arity": "optional",
+      "signature": "(dividend: value, divisor: value, variable: symbol?) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4068,14 +5040,26 @@
     {
       "name": "PolynomialRoots",
       "category": "Polynomials",
-      "arity": "2",
-      "signature": "(value, symbol) -> set<value>",
+      "arity": "optional",
+      "signature": "(value, symbol?) -> set<value>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
       "description": "Return the roots of a polynomial expression. Example: PolynomialRoots(x² - 5x + 6, x) → {2, 3}"
+    },
+    {
+      "name": "PopulationCovariance",
+      "category": "Statistics",
+      "arity": "optional",
+      "signature": "(collection, collection?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Population covariance (n denominator) of paired data, given as two equal-length collections or one collection of (x, y) pairs."
     },
     {
       "name": "PopulationStandardDeviation",
@@ -4163,7 +5147,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Precedes relation in an ordering (comes before)."
     },
     {
       "name": "PreDecrement",
@@ -4205,7 +5190,7 @@
       "name": "Prime",
       "category": "Core",
       "arity": "optional",
-      "signature": "(any, integer?) -> expression",
+      "signature": "(any, integer?) -> unknown",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4362,6 +5347,30 @@
       "description": "QR decomposition of a matrix."
     },
     {
+      "name": "Quadrilateral",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any+) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Quadrilateral mark (`\\square ABCD`) — opaque typed head; not evaluated."
+    },
+    {
+      "name": "Quantile",
+      "category": "Statistics",
+      "arity": "2",
+      "signature": "(distribution | collection, number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Quantile (inverse CDF): the least x with CDF(x) ≥ p, for p in [0, 1]. The first argument may also be a data collection, in which case the empirical quantile is returned."
+    },
+    {
       "name": "Quantity",
       "category": "Units",
       "arity": "2",
@@ -4432,13 +5441,25 @@
       "name": "Random",
       "category": "Core",
       "arity": "optional",
-      "signature": "(number?, integer?) -> finite_number",
+      "signature": "((collection | set<real>)?) -> any",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Random(): non-deterministic float in [0, 1)\n\nRandom(seed: real): deterministic float in [0, 1) from a real seed\n\nRandom(n: integer): non-deterministic integer in [0, n)\n\nRandom(m: integer, n: integer): non-deterministic integer in [m, n)"
+      "description": "Random(): non-deterministic real in [0, 1)\n\nRandom(Interval(a, b)): a real in [a, b) (endpoint markers ignored)\n\nRandom(Range(...)): an element of the range\n\nRandom(xs): an element of the finite collection `xs`"
+    },
+    {
+      "name": "RandomChoice",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(collection | set<real>, number) -> list<any>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "RandomChoice(domain, k): a list of k independent draws from `domain`, with replacement. `k` may exceed the size of the domain — that is what replacement means."
     },
     {
       "name": "RandomExpression",
@@ -4451,6 +5472,30 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Generate a random expression."
+    },
+    {
+      "name": "RandomInteger",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any*) -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "`RandomInteger` has been removed. Use `Random(Range(...))` instead."
+    },
+    {
+      "name": "RandomList",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any*) -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "`RandomList` has been removed. Use `RandomChoice(Interval(0, 1), n)` instead."
     },
     {
       "name": "RandomPrime",
@@ -4468,6 +5513,42 @@
       ]
     },
     {
+      "name": "RandomSample",
+      "category": "Statistics",
+      "arity": "2",
+      "signature": "(indexed_collection, number) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "RandomSample(xs, k): a list of k elements drawn from the indexed collection `xs`, without replacement. \"Without replacement\" is over POSITIONS, not values: on a multiset, repeats are expected — RandomSample([1, 1, 2], 2) can return [1, 1]. Wrap the call in `WithRandomSeed(seed, ...)` to make it deterministic."
+    },
+    {
+      "name": "RandomSeed",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any*) -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "`RandomSeed` has been removed. Use `WithRandomSeed(n, ...)` instead."
+    },
+    {
+      "name": "RandomShuffle",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(indexed_collection) -> indexed_collection",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Randomize the order of the elements in the collection. Wrap the call in `WithRandomSeed(seed, ...)` to make it deterministic."
+    },
+    {
       "name": "Range",
       "category": "Collections",
       "arity": "optional",
@@ -4476,7 +5557,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "A sequence of numbers from a start to an end value with an optional step."
     },
     {
       "name": "Rank",
@@ -4501,6 +5583,22 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Construct a rational number from a numerator and denominator."
+    },
+    {
+      "name": "Rationalize",
+      "category": "Arithmetic",
+      "arity": "optional",
+      "signature": "(number, number?) -> rational",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Approximate a real number by a rational. With a second argument `tolerance`, return the rational with the smallest denominator that approximates the number to within `tolerance` (a continued-fraction convergent); with no tolerance, rationalize at full working precision, as single-argument `Rational`.",
+      "examples": [
+        "Rationalize(1.75)  // 7/4",
+        "Rationalize(Sqrt(3), 1/500)  // 26/15"
+      ]
     },
     {
       "name": "Real",
@@ -4535,7 +5633,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value."
     },
     {
       "name": "ReleaseHold",
@@ -4572,6 +5671,30 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies."
+    },
+    {
+      "name": "ReplaceAll",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any, any+) -> any",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "ReplaceAll(expr, rules): apply one or more replacement rules to `expr`,\n\nthen evaluate the result (Mathematica `expr /. rules`).\n\nA rule is `lhs -> rhs` (parsed as `To`) or `Rule(lhs, rhs)`. Several\n\nrules may be given as extra arguments or as a `List`/`Set` of rules;\n\nthey are applied simultaneously in a single pass."
+    },
+    {
+      "name": "ReplaceAt",
+      "category": "Collections",
+      "arity": "3",
+      "signature": "(indexed_collection, integer, value) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`.\n\nA negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated."
     },
     {
       "name": "Reshape",
@@ -4612,8 +5735,8 @@
     {
       "name": "Resultant",
       "category": "Polynomials",
-      "arity": "3",
-      "signature": "(a: value, b: value, variable: symbol) -> value",
+      "arity": "optional",
+      "signature": "(a: value, b: value, variable: symbol?) -> value",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4630,7 +5753,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Reverse the order of the elements of an indexed collection."
     },
     {
       "name": "Rgb",
@@ -4641,7 +5765,7 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false,
+      "broadcastable": true,
       "description": "sRGB color (channels 0-1, optional alpha 0-1)"
     },
     {
@@ -4683,14 +5807,14 @@
     {
       "name": "Round",
       "category": "Arithmetic",
-      "arity": "1",
-      "signature": "(number) -> integer",
+      "arity": "optional",
+      "signature": "(number, integer?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Rounds a number to the nearest integer."
+      "description": "Rounds a number to the nearest integer, or (with a precision argument) to `n` decimal places."
     },
     {
       "name": "RowReduce",
@@ -4703,6 +5827,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Reduced row echelon form (RREF) of a matrix."
+    },
+    {
+      "name": "RSolve",
+      "category": "Calculus",
+      "arity": "3",
+      "signature": "(expression, symbol, symbol) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Symbolic recurrence equation solver."
     },
     {
       "name": "Rule",
@@ -4718,15 +5854,27 @@
     },
     {
       "name": "Sample",
-      "category": "Statistics",
-      "arity": "optional",
-      "signature": "(collection, integer, real?) -> list",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any*) -> nothing",
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false,
-      "description": "Return a random sample of k elements from the collection, without replacement. With an optional `seed` argument, the sample is deterministic."
+      "description": "`Sample` has been removed. Use `RandomSample` instead."
+    },
+    {
+      "name": "Scan",
+      "category": "Collections",
+      "arity": "optional",
+      "signature": "(collection, function, initial:value?) -> indexed_collection",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value)."
     },
     {
       "name": "Sec",
@@ -4738,7 +5886,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Secant, inverse of cosine"
+      "description": "Secant, the reciprocal of cosine."
     },
     {
       "name": "Sech",
@@ -4750,7 +5898,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic secant"
+      "description": "Hyperbolic secant, the reciprocal of hyperbolic cosine."
     },
     {
       "name": "Second",
@@ -4761,7 +5909,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "The second element of a collection."
     },
     {
       "name": "Segment",
@@ -4788,6 +5937,18 @@
       "description": "Ordered sequence of expressions."
     },
     {
+      "name": "Series",
+      "category": "Calculus",
+      "arity": "optional",
+      "signature": "(expression, variable:symbol?, point:value?, order:number?) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Taylor series expansion of an expression about a point (or an asymptotic expansion at ±∞), including Laurent, Puiseux (fractional-power), and log-aware expansions at poles and branch points. Only essential singularities, irrational exponents, and nested/reciprocal logarithms are left unevaluated. Example: Series(\\sin x, x) → x - x^3/6 + x^5/120 + O(x^7)"
+    },
+    {
       "name": "Set",
       "category": "Collections",
       "arity": "variadic",
@@ -4796,7 +5957,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": true,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "An unordered collection of distinct elements (a set)."
     },
     {
       "name": "SetFrom",
@@ -4837,15 +5999,15 @@
     },
     {
       "name": "Shuffle",
-      "category": "Collections",
-      "arity": "optional",
-      "signature": "(indexed_collection, real?) -> indexed_collection",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(any*) -> nothing",
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false,
-      "description": "Randomize the order of the elements in the collection. With an optional `seed` argument, the shuffle is deterministic."
+      "description": "`Shuffle` has been removed. Use `RandomShuffle` instead."
     },
     {
       "name": "Sigma0",
@@ -4910,14 +6072,14 @@
     {
       "name": "Simplify",
       "category": "Core",
-      "arity": "1",
-      "signature": "(any) -> expression",
+      "arity": "optional",
+      "signature": "(any, any?) -> expression",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Simplify an expression."
+      "description": "Simplify(expr): simplify an expression.\n\nSimplify(expr, assumptions): simplify under one or more boolean\n\nassumptions (e.g. `x > 0`), or a `List`/`And` of them. The assumptions\n\nhold only for the duration of the simplification."
     },
     {
       "name": "Sin",
@@ -4928,7 +6090,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Sine of an angle."
     },
     {
       "name": "Sinc",
@@ -4955,6 +6118,18 @@
       "description": "A tuple with a single element"
     },
     {
+      "name": "SingularValues",
+      "category": "Linear Algebra",
+      "arity": "1",
+      "signature": "(matrix) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The singular values of a matrix, sorted in descending order (including any zero values). Exact for a matrix whose Gram matrix A^T·A (or A·A^T) is at most 2×2 with exact rational entries; numeric otherwise."
+    },
+    {
       "name": "Sinh",
       "category": "Trigonometry",
       "arity": "1",
@@ -4963,13 +6138,26 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Hyperbolic sine."
+    },
+    {
+      "name": "SinhIntegral",
+      "category": "Trigonometry",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Hyperbolic sine integral: ∫₀ˣ sinh(t)/t dt."
     },
     {
       "name": "SinIntegral",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(number) -> real",
+      "signature": "(number) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5019,14 +6207,14 @@
     {
       "name": "Solve",
       "category": "Core",
-      "arity": "2",
-      "signature": "(any, symbol) -> list",
+      "arity": "variadic",
+      "signature": "(any, any*) -> list",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Solve(equation, unknown): the list of solutions of an equation for the\n\nunknown. The equation may be an `Equal` expression or a bare expression\n\n(read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`."
+      "description": "Solve(equation, unknown): the list of solutions of an equation for the\n\nunknown. The equation may be an `Equal` expression or a bare expression\n\n(read as `= 0`), e.g. `Solve(x^2 - 1 == 0, x)` or `Solve(x^2 - 1, x)`.\n\nThe unknown may be omitted: it defaults to the equation's single free\n\nvariable, or to `x` when there are several and one of them is `x`.\n\nSolve([eq1, eq2, …], [x, y, …]): solve a system of equations; each\n\nsolution is a tuple of values in the order of the variable list, e.g.\n\nSolve([x + y == 3, x - y == 1], [x, y]) → [(2, 1)]."
     },
     {
       "name": "Sort",
@@ -5051,6 +6239,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Sphere primitive — opaque typed head."
+    },
+    {
+      "name": "Spread",
+      "category": "Core",
+      "arity": "1",
+      "signature": "(any) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Spread(t): splice the elements of the tuple `t` into the enclosing\n\nargument list (Cortex surface syntax: `f(...t)`).\n\nA literal tuple splices at canonicalization; a symbolic argument is\n\nspliced by the enclosing call at evaluation (step 0 of the evaluate\n\npath), which re-validates the resulting arity."
     },
     {
       "name": "Sqrt",
@@ -5082,7 +6282,7 @@
       "name": "StandardDeviation",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection|number)+) -> number",
+      "signature": "((collection|number|distribution)+) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5101,6 +6301,21 @@
       "lazy": false,
       "broadcastable": false,
       "description": "Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets."
+    },
+    {
+      "name": "StirlingS1",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(integer, integer) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). Its absolute value counts the permutations of n elements with exactly m disjoint cycles.",
+      "examples": [
+        "StirlingS1(5, 2)  // -50"
+      ]
     },
     {
       "name": "String",
@@ -5123,8 +6338,32 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true,
+      "broadcastable": false,
       "description": "Create a string by converting its arguments to a string and joining them."
+    },
+    {
+      "name": "StringJoin",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "((string | collection<string>)*) -> string",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Concatenate strings. Pass the strings as separate arguments, or a single finite collection of strings. A non-string argument (or collection element) leaves the expression unevaluated."
+    },
+    {
+      "name": "StringSplit",
+      "category": "Core",
+      "arity": "optional",
+      "signature": "(string, string?) -> list<string>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "StringSplit(s): split a string on runs of whitespace (the Unicode White_Space code points), dropping empty parts.\n\nStringSplit(s, sep): split a string on the separator string `sep` (empty parts are kept). A non-string argument leaves the expression unevaluated."
     },
     {
       "name": "Subfactorial",
@@ -5197,7 +6436,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Succeeds relation in an ordering (comes after)."
     },
     {
       "name": "Sum",
@@ -5240,7 +6480,7 @@
       "name": "Supremum",
       "category": "Arithmetic",
       "arity": "variadic",
-      "signature": "(value*) -> number | list",
+      "signature": "(value*) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5286,10 +6526,22 @@
       "wikidata": "Q1147242"
     },
     {
-      "name": "Tabulate",
+      "name": "Table",
       "category": "Collections",
       "arity": "optional",
       "signature": "(function, integer, integer?) -> collection",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "An alias for `Tabulate` (the preferred name) that additionally accepts\n\nMathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or\n\n`Table(i, {i, lo, hi, step})`."
+    },
+    {
+      "name": "Tabulate",
+      "category": "Collections",
+      "arity": "optional",
+      "signature": "(function, integer, integer?) -> indexed_collection",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5322,6 +6574,18 @@
       "description": "Return `n` elements from a collection."
     },
     {
+      "name": "TakeWhile",
+      "category": "Collections",
+      "arity": "2",
+      "signature": "(collection, predicate: function) -> collection",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Return the leading elements of the collection for which the predicate returns True, stopping at the first element that does not."
+    },
+    {
       "name": "Tally",
       "category": "Collections",
       "arity": "1",
@@ -5342,7 +6606,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": true
+      "broadcastable": true,
+      "description": "Tangent of an angle."
     },
     {
       "name": "Tanh",
@@ -5354,7 +6619,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Hyperbolic tangent"
+      "description": "Hyperbolic tangent."
     },
     {
       "name": "Text",
@@ -5377,7 +6642,20 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "The third element of a collection."
+    },
+    {
+      "name": "Tilde",
+      "category": "Relational Operators",
+      "arity": "variadic",
+      "signature": "(any, any+) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Generic similarity relation (`\\sim`): similar geometric figures, asymptotic equivalence, or \"is distributed as\". Inert: stays symbolic."
     },
     {
       "name": "TildeEqual",
@@ -5411,7 +6689,7 @@
       "associative": false,
       "commutative": false,
       "idempotent": false,
-      "lazy": false,
+      "lazy": true,
       "broadcastable": false,
       "description": "`Timing(expr)` evaluates `expr` and return a `Pair` of the number of second elapsed for the evaluation, and the value of the evaluation"
     },
@@ -5436,7 +6714,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Convert a boolean expression to conjunctive normal form (CNF), an AND of ORs."
     },
     {
       "name": "ToDNF",
@@ -5447,7 +6726,8 @@
       "commutative": false,
       "idempotent": false,
       "lazy": false,
-      "broadcastable": false
+      "broadcastable": false,
+      "description": "Convert a boolean expression to disjunctive normal form (DNF), an OR of ANDs."
     },
     {
       "name": "Together",
@@ -5524,6 +6804,42 @@
       "wikidata": "Q2371722"
     },
     {
+      "name": "TrigExpand",
+      "category": "Trigonometry",
+      "arity": "1",
+      "signature": "(value) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Expand trigonometric and hyperbolic functions of sums and integer multiples of angles. Example: TrigExpand(sin(a+b)) → sin(a)cos(b) + cos(a)sin(b), TrigExpand(sin(2x)) → 2 sin(x) cos(x)"
+    },
+    {
+      "name": "TrigReduce",
+      "category": "Trigonometry",
+      "arity": "1",
+      "signature": "(value) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Rewrite products and integer powers of trigonometric and hyperbolic functions as a linear combination of functions of multiple angles (the inverse of TrigExpand). Example: TrigReduce(sin(x)^2) → (1 - cos(2x))/2"
+    },
+    {
+      "name": "TrigToExp",
+      "category": "Trigonometry",
+      "arity": "1",
+      "signature": "(value) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Rewrite trigonometric and hyperbolic functions in terms of the complex exponential, exactly. Example: TrigToExp(sin(x)) → -(i/2) e^{ix} + (i/2) e^{-ix}"
+    },
+    {
       "name": "Triple",
       "category": "Collections",
       "arity": "3",
@@ -5596,6 +6912,18 @@
       "description": "Return the type of an expression as a string."
     },
     {
+      "name": "Typed",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(any, string | symbol) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Ascribe a type to an expression. The type is asserted for the type system (ascription, not a check); evaluation is transparent. Used to annotate `Function` literal parameters and return types."
+    },
+    {
       "name": "Unevaluated",
       "category": "Core",
       "arity": "1",
@@ -5618,6 +6946,18 @@
       "lazy": false,
       "broadcastable": false,
       "description": "A collection of Unicode scalars from a string, same as UTF-32"
+    },
+    {
+      "name": "UniformDistribution",
+      "category": "Statistics",
+      "arity": "2",
+      "signature": "(number, number) -> expression<UniformDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Continuous uniform distribution on the interval [a, b]."
     },
     {
       "name": "Union",
@@ -5705,10 +7045,22 @@
       "description": "A collection of UTF-8 code units from a string."
     },
     {
+      "name": "Values",
+      "category": "Collections",
+      "arity": "1",
+      "signature": "(dictionary) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Return a list of the values of a dictionary."
+    },
+    {
       "name": "Variance",
       "category": "Statistics",
       "arity": "variadic",
-      "signature": "((collection|number)+) -> number",
+      "signature": "((collection|number|distribution)+) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5789,6 +7141,18 @@
       "description": "Pattern wildcard matching one or more expressions."
     },
     {
+      "name": "WithRandomSeed",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(finite_real | string, any) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "WithRandomSeed(seed, body): evaluate `body` with a random seed frame\n\nseeded by `seed` (a finite real or a string). The block replays\n\nidentically, while repeated draws WITHIN the frame differ (the n-th\n\ndraw is hash(seed, n)).\n\nScoping is dynamic: the frame is active through user-function calls,\n\nnot just lexically inside `body`. Frames nest and the innermost wins.\n\nCounters are per-frame, so a nested frame does not perturb its\n\nparent's subsequent draws.\n\nOutside any frame, draws are live (non-deterministic)."
+    },
+    {
       "name": "Xor",
       "category": "Logic",
       "arity": "variadic",
@@ -5858,13 +7222,15 @@
       "name": "CatalanConstant",
       "category": "Arithmetic",
       "type": "finite_real",
+      "description": "Catalan's constant G ≈ 0.9160.",
       "wikidata": "Q855282",
       "value": "{\"num\":\"0.91596559417721901505460351493238411077414937428167\\n                  21342664981196217630197762547694793565129261151062\\n                  48574422619196199579035898803325859059431594737481\\n                  15840699533202877331946051903872747816408786590902\\n                  47064841521630002287276409423882599577415088163974\\n                  70252482011560707644883807873370489900864775113225\\n                  99713434074854075532307685653357680958352602193823\\n                  23950800720680355761048235733942319149829836189977\\n                  06903640418086217941101917532743149978233976105512\\n                  24779530324875371878665828082360570225594194818097\\n                  53509711315712615804242723636439850017382875977976\\n                  53068370092980873887495610893659771940968726844441\\n                  66804621624339864838916280448281506273022742073884\\n                  31172218272190472255870531908685735423498539498309\\n                  91911596738846450861515249962423704374517773723517\\n                  75440708538464401321748392999947572446199754961975\\n                  87064007474870701490937678873045869979860644874974\\n                  64387206238513712392736304998503539223928787979063\\n                  36440323547845358519277777872709060830319943013323\\n                  16712476158709792455479119092126201854803963934243\\n                  \"}"
     },
     {
       "name": "ComplexInfinity",
       "category": "Arithmetic",
-      "type": "complex"
+      "type": "complex",
+      "description": "Complex infinity, a single unsigned infinity in the complex plane."
     },
     {
       "name": "ComplexNumbers",
@@ -5882,6 +7248,7 @@
       "name": "e",
       "category": "Arithmetic",
       "type": "finite_real",
+      "description": "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
       "value": "ExponentialE"
     },
     {
@@ -5902,12 +7269,14 @@
       "name": "EulerGamma",
       "category": "Arithmetic",
       "type": "finite_real",
+      "description": "The Euler–Mascheroni constant γ ≈ 0.5772.",
       "wikidata": "Q273023"
     },
     {
       "name": "ExponentialE",
       "category": "Arithmetic",
       "type": "finite_real",
+      "description": "Euler's number e ≈ 2.71828, the base of the natural logarithm.",
       "wikidata": "Q82435"
     },
     {
@@ -5938,6 +7307,7 @@
       "name": "False",
       "category": "Logic",
       "type": "boolean",
+      "description": "The boolean truth value false.",
       "wikidata": "Q5432619"
     },
     {
@@ -5951,6 +7321,7 @@
       "name": "GoldenRatio",
       "category": "Arithmetic",
       "type": "finite_real",
+      "description": "The golden ratio φ = (1+√5)/2 ≈ 1.618.",
       "wikidata": "Q41690",
       "value": "[\"Divide\",[\"Add\",1,[\"Sqrt\",5]],2]"
     },
@@ -5965,12 +7336,14 @@
       "name": "Half",
       "category": "Arithmetic",
       "type": "finite_rational",
+      "description": "The rational number one half (1/2).",
       "value": "[\"Rational\",1,2]"
     },
     {
       "name": "i",
       "category": "Arithmetic",
-      "type": "imaginary"
+      "type": "imaginary",
+      "description": "The imaginary unit, whose square is −1."
     },
     {
       "name": "ImaginaryNumbers",
@@ -5982,6 +7355,7 @@
       "name": "ImaginaryUnit",
       "category": "Arithmetic",
       "type": "imaginary",
+      "description": "The imaginary unit, whose square is −1.",
       "wikidata": "Q193796"
     },
     {
@@ -5994,6 +7368,7 @@
       "name": "MachineEpsilon",
       "category": "Arithmetic",
       "type": "finite_real",
+      "description": "The difference between 1 and the next larger floating point number (machine epsilon).",
       "value": "{\"num\":\"2.220446049250313e-16\"}"
     },
     {
@@ -6006,12 +7381,14 @@
     {
       "name": "NaN",
       "category": "Arithmetic",
-      "type": "number"
+      "type": "number",
+      "description": "Not a Number, the result of an undefined or unrepresentable numeric operation."
     },
     {
       "name": "NegativeInfinity",
       "category": "Arithmetic",
       "type": "non_finite_number",
+      "description": "Negative infinity (−∞).",
       "value": "null"
     },
     {
@@ -6060,6 +7437,7 @@
       "name": "Pi",
       "category": "Trigonometry",
       "type": "finite_real",
+      "description": "The constant π ≈ 3.14159, the ratio of a circle's circumference to its diameter.",
       "wikidata": "Q167"
     },
     {
@@ -6073,6 +7451,7 @@
       "name": "PositiveInfinity",
       "category": "Arithmetic",
       "type": "non_finite_number",
+      "description": "Positive infinity (+∞).",
       "value": "null"
     },
     {
@@ -6124,6 +7503,7 @@
       "name": "True",
       "category": "Logic",
       "type": "boolean",
+      "description": "The boolean truth value true.",
       "wikidata": "Q16751793"
     },
     {
