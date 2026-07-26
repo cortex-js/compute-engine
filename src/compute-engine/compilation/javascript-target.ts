@@ -105,7 +105,7 @@ import { adaptiveQuadrature } from '../numerics/gauss-kronrod.js';
 import {
   mulberry32,
   hashSeed,
-  MAX_RANDOM_LIST_SIZE,
+  MAX_RANDOM_ELEMENT_COUNT,
 } from '../numerics/random.js';
 
 import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
@@ -3439,9 +3439,9 @@ function makeRandomList(
       seed = re;
     }
     n = Math.round(n);
-    if (!Number.isFinite(n) || n < 0 || n > MAX_RANDOM_LIST_SIZE)
+    if (!Number.isFinite(n) || n < 0 || n > MAX_RANDOM_ELEMENT_COUNT)
       throw new Error(
-        `RandomList: expected a list length in 0..${MAX_RANDOM_LIST_SIZE}`
+        `RandomList: expected a list length in 0..${MAX_RANDOM_ELEMENT_COUNT}`
       );
     let draw: () => number;
     if (seed === undefined) draw = Math.random;

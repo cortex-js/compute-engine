@@ -105,27 +105,28 @@ export class GLSLTarget extends GPUShaderTarget {
       body,
     } = options;
 
+    // ES 3.00+ (or desktop 3.30+) only: the emitted code uses `in`/`out` and
+    // ES 3.00 builtins. Reject an older version rather than emit constructs the
+    // declared header does not support.
+    const versionNumber = Number.parseInt(version, 10);
+    if (!Number.isFinite(versionNumber) || versionNumber < 300)
+      throw new Error(
+        `GLSL version "${version}" is not supported: ES 3.00+ (or desktop 3.30+) is required`
+      );
+
     let code = `#version ${version}\n\n`;
 
     if (type === 'fragment') {
       code += 'precision highp float;\n\n';
     }
 
-    const inputKeyword =
-      version.startsWith('300') || version.startsWith('3')
-        ? 'in'
-        : type === 'vertex'
-          ? 'attribute'
-          : 'varying';
     for (const input of inputs) {
-      code += `${inputKeyword} ${input.type} ${input.name};\n`;
+      code += `in ${input.type} ${input.name};\n`;
     }
     if (inputs.length > 0) code += '\n';
 
-    const outputKeyword =
-      version.startsWith('300') || version.startsWith('3') ? 'out' : 'varying';
     for (const output of outputs) {
-      code += `${outputKeyword} ${output.type} ${output.name};\n`;
+      code += `out ${output.type} ${output.name};\n`;
     }
     if (outputs.length > 0) code += '\n';
 

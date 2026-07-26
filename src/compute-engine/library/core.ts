@@ -29,7 +29,7 @@ import {
   deterministicRandom,
   hashSeed,
   mulberry32,
-  MAX_RANDOM_LIST_SIZE,
+  MAX_RANDOM_ELEMENT_COUNT,
 } from '../numerics/random.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
@@ -1750,7 +1750,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // type, which would misdispatch the (valid) empty-list result.
       type: ([n]) => {
         const count = n ? asSmallInteger(n) : null;
-        if (count !== null && count > 0 && count <= MAX_RANDOM_LIST_SIZE)
+        if (count !== null && count > 0 && count <= MAX_RANDOM_ELEMENT_COUNT)
           return `list<finite_real^${count}>`;
         return 'list<finite_real>';
       },
@@ -1769,7 +1769,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (isNumber(ops[0]) && Number.isFinite(ops[0].re))
             return ce.error([
               'out-of-range',
-              `a list length in 0..${MAX_RANDOM_LIST_SIZE}`,
+              `a list length in 0..${MAX_RANDOM_ELEMENT_COUNT}`,
               ops[0].toString(),
             ]);
           return undefined;
@@ -1777,10 +1777,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // A literal count outside [0, cap] errors loudly: negative is
         // nonsense, and an unbounded eager list is an uncatchable heap-OOM
         // (the item-64b class) — refuse rather than allocate past the cap.
-        if (n < 0 || n > MAX_RANDOM_LIST_SIZE)
+        if (n < 0 || n > MAX_RANDOM_ELEMENT_COUNT)
           return ce.error([
             'out-of-range',
-            `a list length in 0..${MAX_RANDOM_LIST_SIZE}`,
+            `a list length in 0..${MAX_RANDOM_ELEMENT_COUNT}`,
             n.toString(),
           ]);
         const seedOp = ops[1];

@@ -345,10 +345,8 @@ function gpuVec3(target?: CompileTarget<Expression>): string {
  * rejects a constant `0.0 / 0.0` during const-evaluation, so it uses a NaN bit
  * pattern inline. GLSL routes through the `_gpu_nan()` preamble helper (see
  * `GPU_NAN_PREAMBLE_GLSL`): a masked (`When`/`Which` else) branch's NaN is thus
- * centralized in one overridable symbol rather than emitted as a bare
- * `0.0 / 0.0` literal — whose NaN semantics GLSL ES 1.00 leaves
- * implementation-defined, so a driver could fold it to a finite, renderable
- * value and draw a branch that must never draw.
+ * centralized in one overridable symbol, so a host can redefine what a masked
+ * branch produces without touching the generated code.
  */
 function gpuNaN(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl'
@@ -1886,13 +1884,13 @@ export function compileGPUMatrix(
 /**
  * GPU gamma function using Lanczos approximation (g=7, n=9 coefficients).
  *
- * Uses reflection formula for z < 0.5 and Lanczos for z >= 0.5.
- * GLSL syntax.
+ * Uses reflection formula for z < 0.5 (with inlined, non-recursive Lanczos)
+ * and Lanczos for z >= 0.5. `_gpu_gammaln` is the Stirling asymptotic
+ * expansion of ln(Gamma(z)), valid for z > 0. GLSL syntax.
  */
 export const GPU_GAMMA_PREAMBLE_GLSL = `
 float _gpu_gamma(float z) {
   const float PI = 3.14159265358979;
-  // For z < 0.5, use reflection formula with inlined Lanczos (non-recursive)
   float w = z;
   if (z < 0.5) w = 1.0 - z;
   w -= 1.0;
@@ -1912,7 +1910,6 @@ float _gpu_gamma(float z) {
 }
 
 float _gpu_gammaln(float z) {
-  // Stirling asymptotic expansion for ln(Gamma(z)), z > 0
   float z3 = z * z * z;
   return z * log(z) - z - 0.5 * log(z)
     + 0.5 * log(2.0 * 3.14159265358979)
@@ -2415,11 +2412,9 @@ float _gpu_besselJ_asymptotic(int n, float x) {
     float denom = _gpu_factorial(k) * pow(e8x, float(k));
     float contrib = ak / denom;
     if (k == 1 || k == 3 || k == 5 || k == 7 || k == 9 || k == 11) {
-      // odd k: contributes to Q
       if (((k - 1) / 2) % 2 == 0) Q += contrib;
       else Q -= contrib;
     } else {
-      // even k: contributes to P
       if ((k / 2) % 2 == 1) P -= contrib;
       else P += contrib;
     }
@@ -2442,7 +2437,6 @@ float _gpu_besselJ(int n, float x) {
   }
   if (x > 25.0 + float(n * n) / 2.0) return sgn * _gpu_besselJ_asymptotic(n, x);
   if (x < 5.0 + float(n)) return sgn * _gpu_besselJ_series(n, x);
-  // Miller's backward recurrence
   int M = max(n + 20, int(ceil(x)) + 30);
   if (M > 200) return sgn * _gpu_besselJ_series(n, x);
   float vals[201];
@@ -2524,7 +2518,6 @@ fn _gpu_besselJ(n_in: i32, x_in: f32) -> f32 {
   }
   if (x > 25.0 + f32(n * n) / 2.0) { return sgn * _gpu_besselJ_asymptotic(n, x); }
   if (x < 5.0 + f32(n)) { return sgn * _gpu_besselJ_series(n, x); }
-  // Miller's backward recurrence
   var M = max(n + 20, i32(ceil(x)) + 30);
   if (M > 200) { return sgn * _gpu_besselJ_series(n, x); }
   var vals: array<f32, 201>;
@@ -2606,15 +2599,17 @@ fn _fractal_julia(z_in: vec2f, c: vec2f, maxIter: i32) -> f32 {
  * below `ε · max(|a|, |b|)` (ε = 1e-6, the f32 float-GCD tolerance) rather than
  * exact zero, so it handles non-integer reals (e.g. Desmos-style
  * `gcd(θ², θ+a)`) as well as integer-valued inputs.
+ *
+ * Integer inputs within the f32 exact-integer range (< 2^24) take a plain
+ * Euclid path with no tolerance — mirrors the JS realGcd so integer inputs
+ * never regress (e.g. `_gpu_gcd(4000000.0, 2.0) == 2.0`). The final
+ * scale-mismatch guard keeps the result <= min(|a|, |b|).
  */
 export const GPU_GCD_PREAMBLE_GLSL = `
 float _gpu_gcd(float a, float b) {
   a = abs(a); b = abs(b);
   if (a == 0.0) return b;
   if (b == 0.0) return a;
-  // Exact integer path (within the f32 exact-integer range, < 2^24): plain
-  // Euclid, no tolerance — mirrors the JS realGcd so integer inputs never
-  // regress (e.g. _gpu_gcd(4000000.0, 2.0) == 2.0).
   if (floor(a) == a && floor(b) == b && a < 16777216.0 && b < 16777216.0) {
     for (int i = 0; i < 64; i++) {
       if (b == 0.0) break;
@@ -2624,7 +2619,6 @@ float _gpu_gcd(float a, float b) {
     }
     return a;
   }
-  // Tolerant floating Euclidean algorithm for non-integer reals.
   float mn = min(a, b);
   float tol = 1e-6 * max(a, b);
   for (int i = 0; i < 64; i++) {
@@ -2633,22 +2627,19 @@ float _gpu_gcd(float a, float b) {
     a = b;
     b = t;
   }
-  // Scale-mismatch guard: keep gcd <= min(|a|,|b|).
   return a > mn ? mn : a;
 }
 `;
 
 /**
- * GPU GCD preamble (WGSL syntax).
+ * GPU GCD preamble (WGSL syntax). See GPU_GCD_PREAMBLE_GLSL for the
+ * algorithm notes (integer fast path, tolerance, scale-mismatch guard).
  */
 export const GPU_GCD_PREAMBLE_WGSL = `
 fn _gpu_gcd(a_in: f32, b_in: f32) -> f32 {
   var a = abs(a_in); var b = abs(b_in);
   if (a == 0.0) { return b; }
   if (b == 0.0) { return a; }
-  // Exact integer path (within the f32 exact-integer range, < 2^24): plain
-  // Euclid, no tolerance — mirrors the JS realGcd so integer inputs never
-  // regress (e.g. _gpu_gcd(4000000.0, 2.0) == 2.0).
   if (floor(a) == a && floor(b) == b && a < 16777216.0 && b < 16777216.0) {
     for (var i: i32 = 0; i < 64; i++) {
       if (b == 0.0) { break; }
@@ -2658,7 +2649,6 @@ fn _gpu_gcd(a_in: f32, b_in: f32) -> f32 {
     }
     return a;
   }
-  // Tolerant floating Euclidean algorithm for non-integer reals.
   let mn = min(a, b);
   let tol = 1e-6 * max(a, b);
   for (var i: i32 = 0; i < 64; i++) {
@@ -2667,7 +2657,6 @@ fn _gpu_gcd(a_in: f32, b_in: f32) -> f32 {
     a = b;
     b = t;
   }
-  // Scale-mismatch guard: keep gcd <= min(|a|,|b|).
   if (a > mn) { return mn; }
   return a;
 }
@@ -2683,11 +2672,6 @@ fn _gpu_gcd(a_in: f32, b_in: f32) -> f32 {
  * (e.g. PCG or xxHash) and pre-seed it appropriately.
  */
 export const GPU_RANDOM_PREAMBLE_GLSL = `
-// Deterministic pseudorandom in [0, 1) from a float seed.
-// Standard fract-sin hash; reproducible across runs for the same seed.
-// Note: this hash exhibits visible banding near seed ≈ kπ for integer k.
-// For high-quality shader random, callers should use a more robust hash
-// (e.g. PCG or xxHash) and pre-seed it appropriately.
 float _gpu_random(float seed) {
   return fract(sin(seed * 12.9898) * 43758.5453);
 }
@@ -2703,11 +2687,6 @@ float _gpu_random(float seed) {
  * (e.g. PCG or xxHash) and pre-seed it appropriately.
  */
 export const GPU_RANDOM_PREAMBLE_WGSL = `
-// Deterministic pseudorandom in [0, 1) from a float seed.
-// Standard fract-sin hash; reproducible across runs for the same seed.
-// Note: this hash exhibits visible banding near seed ≈ kπ for integer k.
-// For high-quality shader random, callers should use a more robust hash
-// (e.g. PCG or xxHash) and pre-seed it appropriately.
 fn _gpu_random(seed: f32) -> f32 {
   return fract(sin(seed * 12.9898) * 43758.5453);
 }
@@ -2716,9 +2695,9 @@ fn _gpu_random(seed: f32) -> f32 {
 /**
  * GPU Median preamble (GLSL syntax).
  *
- * One function per supported list size (2..8) using sorting networks.
- * Each function takes N float arguments and returns the median via a
- * Batcher odd-even merge sort encoded entirely as min/max calls.
+ * One function per supported list size (2..8) using sorting networks
+ * encoded entirely as min/max calls (e.g. the 9-comparator Bose-Nelson
+ * network for N=5, where v2 holds the median).
  */
 export const GPU_MEDIAN_PREAMBLE_GLSL = `
 float _gpu_median_2(float a, float b) {
@@ -2733,7 +2712,6 @@ float _gpu_median_4(float a, float b, float c, float d) {
   return (lo + hi) * 0.5;
 }
 float _gpu_median_5(float a, float b, float c, float d, float e) {
-  // 9-comparator Bose-Nelson sort; v2 holds the median.
   float t; float v0=a,v1=b,v2=c,v3=d,v4=e;
   t=min(v0,v1); v1=max(v0,v1); v0=t;
   t=min(v3,v4); v4=max(v3,v4); v3=t;
@@ -2820,7 +2798,6 @@ fn _gpu_median_4(a: f32, b: f32, c: f32, d: f32) -> f32 {
   return (lo + hi) * 0.5;
 }
 fn _gpu_median_5(a: f32, b: f32, c: f32, d: f32, e: f32) -> f32 {
-  // 9-comparator Bose-Nelson sort; v2 holds the median.
   var v0=a; var v1=b; var v2=c; var v3=d; var v4=e; var t: f32;
   t=min(v0,v1); v1=max(v0,v1); v0=t;
   t=min(v3,v4); v4=max(v3,v4); v3=t;
@@ -2898,7 +2875,8 @@ fn _gpu_median_8(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32)
  * interpreted/JS-runtime layer. Shaders that write to a sRGB framebuffer must
  * wrap the final color in `_gpu_oklch_to_srgb()` at the boundary.
  *
- * Hue is in degrees throughout (matching the boxed-expression convention).
+ * Hue is in degrees throughout (matching the boxed-expression convention);
+ * HSL/HSV saturation, lightness and value are in 0-1.
  * `_gpu_color_mix` interpolates directly in OKLCh — no sRGB pinch — and
  * special-cases achromatic endpoints (C ≈ 0) so e.g. mixing red with white
  * preserves red's hue rather than drifting through arbitrary hues.
@@ -2963,7 +2941,6 @@ vec3 _gpu_oklch_to_srgb(vec3 lch) {
   return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(lch));
 }
 
-// HSL conversion. Hue in degrees, saturation/lightness in 0-1.
 vec3 _gpu_hsl_to_rgb(vec3 hsl) {
   float h = hsl.x;
   float s = hsl.y;
@@ -3000,7 +2977,6 @@ vec3 _gpu_rgb_to_hsl(vec3 rgb) {
   return vec3(h, s, l);
 }
 
-// HSV conversion. Hue in degrees, saturation/value in 0-1.
 vec3 _gpu_hsv_to_rgb(vec3 hsv) {
   float h = hsv.x;
   float s = hsv.y;
@@ -3522,20 +3498,15 @@ function buildComplexPreamble(code: string, language: string): string {
  * GLSL NaN helper preamble. Centralizes the masked/else-branch NaN (`When` /
  * `Which` fall-through) into a single overridable symbol.
  *
- * GLSL ES 1.00 has no `NaN` literal and leaves the result of `0.0 / 0.0`
- * implementation-defined — a driver may fold it to a finite, renderable value,
- * which breaks downstream consumers that rely on a masked branch never drawing.
- * Routing every such NaN through this one helper lets a host redefine it without
- * touching the generated code: on WebGL2 / GLSL ES 3.00 override the body with
- * `return intBitsToFloat(0x7FC00000);` for a guaranteed NaN bit pattern.
- * Kept ES 1.00-compatible here (no ES 3.00-only builtins) because the target's
- * `compileShader` still emits ES 1.00 (`attribute`/`varying`) output.
+ * GLSL has no `NaN` literal. The target assumes GLSL ES 3.00 (`#version
+ * 300 es`), where `intBitsToFloat(0x7FC00000)` yields a guaranteed NaN bit
+ * pattern. Routing every masked NaN through one helper lets a host redefine
+ * what a masked branch produces (e.g. a sentinel value) without touching the
+ * generated code. The current body is pinned by `compile-glsl.test.ts`.
  */
 const GPU_NAN_PREAMBLE_GLSL = `
 float _gpu_nan() {
-  // NaN semantics are implementation-defined under GLSL ES 1.00. On WebGL2 /
-  // GLSL ES 3.00, override with: return intBitsToFloat(0x7FC00000);
-  return 0.0 / 0.0;
+  return intBitsToFloat(0x7FC00000);
 }
 `;
 
@@ -3545,7 +3516,7 @@ float _gpu_nan() {
  * `pow(-2.0, 3.0)` (wrong sign) and NaN for even powers of a negative. Compute
  * the magnitude from `abs(x)` and restore the sign for odd exponents. `n` is a
  * non-negative integer value; matches JS `Math.pow` for integer exponents
- * (including `0^0 = 1`). GLSL ES 1.00-compatible (no recursion, no loops).
+ * (including `0^0 = 1`).
  */
 export const GPU_POWI_PREAMBLE_GLSL = `
 float _gpu_powi(float x, float n) {

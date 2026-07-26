@@ -831,7 +831,9 @@ describe('GLSL COMPILATION', () => {
       expect(/\bNaN\b/.test(result.code)).toBe(false);
       // …and the helper definition is emitted (selectively) into the preamble.
       expect(result.preamble ?? '').toContain('float _gpu_nan()');
-      expect(result.preamble ?? '').toContain('return 0.0 / 0.0;');
+      expect(result.preamble ?? '').toContain(
+        'return intBitsToFloat(0x7FC00000);'
+      );
     });
   });
 

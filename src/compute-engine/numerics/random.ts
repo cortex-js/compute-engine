@@ -8,8 +8,12 @@
  * Within a single host, the same seed always yields the same value.
  */
 
-// Cap on the number of elements `RandomList` will eagerly materialize.
-export const MAX_RANDOM_LIST_SIZE = 1_000_000;
+/**
+ * Cap on the number of elements a random operator will eagerly materialize.
+ * An unbounded eager allocation is an uncatchable heap-OOM, so operators refuse
+ * past this bound rather than attempt it.
+ */
+export const MAX_RANDOM_ELEMENT_COUNT = 1_000_000;
 
 /**
  * Return a deterministic pseudorandom value in [0, 1) for the given seed.

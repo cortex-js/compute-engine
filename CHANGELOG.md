@@ -57,6 +57,23 @@
   not arity-checked**, so a two-parameter literal could be stored against
   one-argument arms and every declared call would silently partial-apply.
 
+- **`Shuffle` and `Sample` were treated as pure functions.** Neither declared
+  `pure: false`, so `isPure` — and therefore `isConstant` — was `true` for a
+  random permutation or sample of a literal collection, and `Sample` was not
+  gated out of `Map` auto-compilation. Both are now declared impure.
+
+- **A masked GPU branch could draw.** The `When`/`Which` fall-through NaN
+  compiled to `0.0 / 0.0`, whose value is implementation-defined in GLSL: a
+  driver may fold it to a finite, renderable value. The `_gpu_nan()` helper now
+  returns `intBitsToFloat(0x7FC00000)`, a guaranteed quiet-NaN bit pattern.
+
+- **Desktop GLSL 4.x shaders were emitted with GLSL ES 1.00 syntax.**
+  `compileShader` chose `in`/`out` over `attribute`/`varying` by testing whether
+  the version string began with `3`, so `450 core` fell through to the ES 1.00
+  keywords. The version is now parsed rather than prefix-matched, and a version
+  below 300 is rejected: the emitted code uses ES 3.00 constructs throughout, so
+  a lower `#version` header could not have compiled.
+
 ### Improvements
 
 - The result type of the bare `function` type is now reported as `unknown`
