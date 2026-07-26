@@ -12,9 +12,9 @@
   site fails loudly with its replacement named) before adopting this release;
   the migration table is in the 0.95.0 notes below.
 
-- **`evaluate()` on a symbol now resolves the free symbols of its stored value.**
-  A symbolic value was returned verbatim, so a symbol assigned _after_ it was
-  stored never reached it:
+- **`evaluate()` on a symbol now resolves the free symbols of its stored
+  value.** A symbolic value was returned verbatim, so a symbol assigned _after_
+  it was stored never reached it:
 
   ```
   let d = 3x^2 + 1
@@ -24,11 +24,12 @@
   ```
 
   `N()` and `compile()` already resolved it, so plain `evaluate()` was the
-  outlier and disagreed with both; a second `evaluate()` used to resolve one more
-  level ("one-evaluate-late"). Assignment remains **eager**, so declaration order
-  still decides what a value snapshots: `let x = 2; let d = 3x^2 + 1; x = 3; N(d)`
-  is `13`, while `let d = 3x^2 + 1; let x = 2; x = 3; N(d)` is `28`. The residual
-  for a cyclic binding is unchanged (`s = s + 1; s` → `s + 1`).
+  outlier and disagreed with both; a second `evaluate()` used to resolve one
+  more level ("one-evaluate-late"). Assignment remains **eager**, so declaration
+  order still decides what a value snapshots:
+  `let x = 2; let d = 3x^2 + 1; x = 3; N(d)` is `13`, while
+  `let d = 3x^2 + 1; let x = 2; x = 3; N(d)` is `28`. The residual for a cyclic
+  binding is unchanged (`s = s + 1; s` → `s + 1`).
 
 - **A stored value's free symbols are no longer captured by a same-named
   parameter.** They now denote the binding they were canonicalized against, not
@@ -43,13 +44,11 @@
 
   With a global `x = 100`, `g(5)` is `101` — the lexically correct binding —
   where it used to be `6`. This closes the same defect on three paths that
-  disagreed with each other: the parameter substitution applied after a call, the
-  constant dereference path, and the numeric (`N`) re-evaluation inside a call
-  frame. A dictionary-valued symbol is covered too. Behavior that was already
-  correct is unchanged: a block-local `let` does not leak into a stored value,
-  and a renamed parameter never captured.
-
-### Breaking Changes
+  disagreed with each other: the parameter substitution applied after a call,
+  the constant dereference path, and the numeric (`N`) re-evaluation inside a
+  call frame. A dictionary-valued symbol is covered too. Behavior that was
+  already correct is unchanged: a block-local `let` does not leak into a stored
+  value, and a renamed parameter never captured.
 
 - **A union type is assignable only to a target that covers EVERY arm.**
   `isSubtype()` (and therefore `type.matches()`) used the any-branch rule when
@@ -77,7 +76,7 @@
   `RandomChoice` — the documented migration target for the removed
   `RandomList(n)` — `RandomChoice(Interval(0, 1), n)` came back as
   `RandomChoice(List(0, 1), n)`, demoting a uniform real draw to a Bernoulli
-  pick of the two *values* 0 and 1, with nothing downstream able to detect it.
+  pick of the two _values_ 0 and 1, with nothing downstream able to detect it.
 
   Serialization now depends on whether the position disambiguates the interval:
 
@@ -100,7 +99,7 @@
 
 - **`ListFrom` now compiles.** It had no compile handler, so the one eager
   materializer that works over an arbitrary collection body could not be used in
-  compiled code. That matters under `WithRandomSeed`: a frame around a *lazy*
+  compiled code. That matters under `WithRandomSeed`: a frame around a _lazy_
   comprehension does not make it replayable, because the view materializes after
   the frame has exited and the draws escape it. `ListFrom` inside the frame
   makes it eager, and the compiled form now agrees with the interpreter
@@ -161,6 +160,66 @@
   applied _k_ times took 44 s and now takes ~0.1 s. Arguments that can
   numericize — including a symbol with an assigned value — reduce exactly as
   before.
+
+### New Features
+
+- **`BoxedType.couldMatch()`** — "could a value of this type be a `target`?",
+  the predicate for classifying a value by shape. `matches()` answers the other
+  question — "is _every_ value of this type a `target`" — so it reports `false`
+  for a union whose members include exactly the shape being asked about, which
+  is the steady state for a variable declared with more than one admissible
+  shape:
+
+  ```ts
+  const t = ce.type('tuple<number, number> | list<tuple<number, number>>');
+  t.matches('list<tuple<number, number>>'); // false
+  t.couldMatch('list<tuple<number, number>>'); // true
+  ```
+
+  Unions are distributed at every depth, so a union nested inside a parameter is
+  handled too: `list<integer | tuple<number, number>>` could be a
+  `list<tuple<number, number>>` — witness `[(1,2)]`.
+
+  The relation is symmetric and decisive for the composite shapes it models: a
+  `tuple<number, number>` could not be a `list<tuple<number, number>>`,
+  `list<integer>` could not be a `list<string>`, and a `set<T>` could not be a
+  `list<T>`. List dimensions and tuple arity and element names are compared.
+  Shapes it does not model fall back to assignability in either direction, so
+  the answer is never narrower than `matches()` — with one deliberate exception:
+  `never` is uninhabited, so nothing could be a `never`. `unknown` could be
+  anything; consumers that treat an inconclusive type as "no" should check
+  `isUnknown` themselves.
+
+- **`BoxedType.unionMembers`** — the members of a union type, each boxed, or
+  `[this]` for any other type. Lets a consumer reason arm-by-arm without reading
+  the raw `Type` AST. It does not reach a union nested inside a parameter;
+  `couldMatch()` covers that case directly.
+
+- **`BoxedType.isDisjointFrom()`** — a type-overlap predicate for consumers that
+  classify an expression by comparing its type against a set of candidates.
+  `matches()` answers subtyping (`this <: other`), so two types that share
+  values without either containing the other look unrelated in both directions:
+
+  ```ts
+  const a = ce.type('integer | string');
+  const b = ce.type('integer | boolean');
+  a.matches(b); // false
+  b.matches(a); // false — yet they share `integer`
+  a.isDisjointFrom(b); // false: they may overlap
+  ```
+
+  The predicate is conservative in the safe direction: when disjointness cannot
+  be established the answer is `false` ("may overlap"), never a false claim of
+  disjointness. `unknown` — the type of an undeclared symbol — therefore
+  overlaps everything. It accepts a `Type`, a type string, or a `BoxedType`, and
+  throws on a string that is not a valid type.
+
+### Improvements
+
+- Disjointness now distributes over unions, so `integer | string` is recognized
+  as disjoint from `boolean` instead of falling through to "may overlap". This
+  also makes a union a subtype of a negation when no member meets the negated
+  type (`integer | boolean <: !string`).
 
 ## 0.95.0 _2026-07-25_
 

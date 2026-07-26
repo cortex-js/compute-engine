@@ -13,8 +13,10 @@ import {
 } from './primitive.js';
 import type {
   BroadcastableType,
+  CollectionType,
   NumericPrimitiveType,
   PrimitiveType,
+  SetType,
   Type,
   TypeCompatibility,
   TypeString,
@@ -289,11 +291,15 @@ function unionCoveringMembers(types: Readonly<Type[]>): Readonly<Type[]> {
 /**
  * True when `a` and `b` are *provably* disjoint (no value inhabits both).
  * Used for `A <: !B` (a subtype of a negation iff it is disjoint from the
- * negated type). Conservative: returns `false` (may overlap) whenever
- * disjointness cannot be established, so `isSubtype` never over-claims
- * `A <: !B`.
+ * negated type), and exposed to consumers as `BoxedType.isDisjointFrom()`.
+ * Conservative: returns `false` (may overlap) whenever disjointness cannot be
+ * established, so `isSubtype` never over-claims `A <: !B`.
+ *
+ * Note that this is *not* the negation of "one is a subtype of the other":
+ * `integer | string` and `integer | boolean` are comparable in neither
+ * direction, yet they share `integer`.
  */
-function provablyDisjoint(a: Type, b: Type): boolean {
+export function provablyDisjoint(a: Type, b: Type): boolean {
   if (a === 'never' || b === 'never') return true; // empty set
   if (a === 'any' || b === 'any') return false;
   if (a === 'unknown' || b === 'unknown') return false;
@@ -302,6 +308,15 @@ function provablyDisjoint(a: Type, b: Type): boolean {
 
   // If either is a subtype of the other, they share values (overlap).
   if (isSubtype(a, b) || isSubtype(b, a)) return false;
+
+  // A union is disjoint from `other` iff every one of its members is.
+  // Distributing here is exact, and is what makes the common `A | B` vs
+  // `B | C` shape answer "may overlap" instead of falling through to the
+  // conservative `false` with no member ever examined.
+  if (typeof a === 'object' && a.kind === 'union')
+    return a.types.every((t) => provablyDisjoint(t, b));
+  if (typeof b === 'object' && b.kind === 'union')
+    return b.types.every((t) => provablyDisjoint(a, t));
 
   // A value literal is a singleton `{v}`: having failed the subtype checks
   // above (it is not contained in the other type), it must be disjoint from it.
@@ -363,6 +378,103 @@ function provablyDisjoint(a: Type, b: Type): boolean {
 // already exist: `parseType`'s resolver-less string cache and the
 // `PRIMITIVE_SUBTYPES_CLOSURE` O(1) primitive lattice. Any future gain is in
 // reducing CALL COUNT (checkNumericArgs / type handlers), not per-call cost.
+
+/**
+ * True when the dimensions of two lists could describe the same value.
+ * A `-1` is a wildcard ("any size along this axis"), and an absent
+ * `dimensions` is unconstrained.
+ */
+function dimensionsCouldMatch(
+  a: number[] | undefined,
+  b: number[] | undefined
+): boolean {
+  if (a === undefined || b === undefined) return true;
+  if (a.length !== b.length) return false;
+  return a.every((d, i) => d === -1 || b[i] === -1 || d === b[i]);
+}
+
+/**
+ * True when *some* value inhabits both `a` and `b` — "could a value of type
+ * `a` be a `b`?".
+ *
+ * This is the predicate to use when classifying a value by shape ("might this
+ * be a point, a point list, a matrix"). `isSubtype` answers a different
+ * question — "is EVERY value of `a` a `b`" — and the two diverge on unions,
+ * which are the steady state for a variable declared with more than one
+ * admissible shape. `A | B` is a subtype of `B` only if `A` is too, so the
+ * subtype reading answers `false` for a union whose members include exactly
+ * what was asked about.
+ *
+ * `couldMatch` distributes over unions at *every* depth, so it is not fooled
+ * by a union nested inside a parameter (`list<integer | tuple<number,
+ * number>>` could be a `list<tuple<number, number>>` — witness `[(1,2)]`).
+ *
+ * The relation is symmetric, and strictly more permissive than assignability
+ * in either direction, with one deliberate exception: `never` has no
+ * inhabitants, so nothing could be a `never` — where `isSubtype` treats it as
+ * a subtype of everything.
+ *
+ * It is *not* the negation of {@linkcode provablyDisjoint}: that predicate is
+ * conservative (unproven ⇒ "may overlap"), which makes it answer `true` for
+ * shapes that plainly cannot coincide, such as a `tuple<number, number>` and a
+ * `list<tuple<number, number>>`. `couldMatch` is decisive for the composite
+ * shapes it models and falls back to assignability elsewhere.
+ */
+export function couldMatch(a: Type, b: Type): boolean {
+  // `never` is uninhabited: no value is one.
+  if (a === 'never' || b === 'never') return false;
+
+  // Distribute over unions, at any depth. This is the whole point of the
+  // predicate.
+  if (typeof a === 'object' && a.kind === 'union')
+    return a.types.some((t) => couldMatch(t, b));
+  if (typeof b === 'object' && b.kind === 'union')
+    return b.types.some((t) => couldMatch(a, t));
+
+  // Structural probe over same-kind composites. This only ever ADDS answers:
+  // any shape it does not model falls through to the assignability check
+  // below, so the result is never narrower than `matches()` in either
+  // direction. Kinds are compared like-with-like — a `set<T>` and a
+  // `list<T>` are different runtime shapes, and no value is both.
+  if (typeof a === 'object' && typeof b === 'object') {
+    if (a.kind === 'list' && b.kind === 'list') {
+      if (
+        dimensionsCouldMatch(a.dimensions, b.dimensions) &&
+        couldMatch(a.elements, b.elements)
+      )
+        return true;
+    } else if (a.kind === 'tuple' && b.kind === 'tuple') {
+      const bElements = b.elements;
+      if (
+        a.elements.length === bElements.length &&
+        a.elements.every((x, i) => {
+          const y = bElements[i];
+          // A name is erasable in the subtype direction, so a named and an
+          // unnamed element can describe the same value — but two *different*
+          // names cannot.
+          if (x.name !== undefined && y.name !== undefined && x.name !== y.name)
+            return false;
+          return couldMatch(x.type, y.type);
+        })
+      )
+        return true;
+    } else if (
+      a.kind === b.kind &&
+      (a.kind === 'set' ||
+        a.kind === 'collection' ||
+        a.kind === 'indexed_collection' ||
+        a.kind === 'broadcastable')
+    ) {
+      const elements = (b as SetType | CollectionType | BroadcastableType)
+        .elements;
+      if (couldMatch(a.elements, elements)) return true;
+    }
+  }
+
+  // Fall back to assignability in either direction: `a` could be a `b` if
+  // every `a` is a `b`, or if some `b`s are `a`s.
+  return isSubtype(a, b) || isSubtype(b, a);
+}
 
 /** Return true if lhs is a subtype of rhs */
 export function isSubtype(
