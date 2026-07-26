@@ -1,3 +1,73 @@
+## [Unreleased]
+
+### New Features
+
+- **Overload sets: an intersection of function signatures is now resolved at the
+  call site.** A function that can be called in several different ways is
+  declared with `&`, and the arm whose parameters accept the arguments is
+  selected. When several arms accept them the **most specific** one wins;
+  incomparable arms are tried in declaration order.
+
+  ```js
+  ce.declare('Draw', {
+    signature: '((set<real>) -> real) & ((collection) -> any)',
+    evaluate: (ops) => {
+      /* dispatch on ops at run time */
+    },
+  });
+
+  ce.box(['Draw', ['Interval', 0, 1]]).type; // → "real"  (set<real> is the more specific arm)
+  ce.box(['Draw', ['List', 1, 2, 3]]).type; // → "any"
+  ce.box(['Draw', 5]).isValid; // → false
+  ```
+
+  Previously such a signature parsed but was inert: applications were never
+  arity- or type-checked and always typed `unknown`. Argument validation, result
+  typing and type inference now all understand overload sets, on the operator
+  definition and the symbol declaration routes alike.
+
+  When an argument's type is not yet known, it is inferred as the **union** of
+  the parameters the surviving arms accept at that position — the constraint the
+  call actually carries. Above, an unknown `x` in `Draw(x)` is inferred
+  `collection`, not `set<real>`: assuming the more specific arm would wrongly
+  reject a later list.
+
+  Note that `->` binds looser than `&`, so each arm must be parenthesized:
+  `(number) -> real & string` is a _single_ signature returning `real & string`.
+  See [Overload Sets](/compute-engine/guides/types/#overload-sets).
+
+### Issues Resolved
+
+- **A function signature nested in a union or an intersection lost its
+  parentheses when serialized**, and re-parsed as a structurally different type
+  with an identical string. `((number) -> real) & ((string) -> boolean)` came
+  back as the single signature `(number) -> (real & ((string) -> boolean))`.
+  Type serialization now parenthesizes a signature wherever it is a member of a
+  union, intersection or negation.
+
+- **An intersection was not a subtype of its own members** when the members were
+  composite types. `((number) -> real) & ((string) -> boolean)` did not match
+  `(number) -> real`. `A & B` is now a subtype of `R` whenever _any_ arm is,
+  matching the behavior that already applied to primitive types.
+
+- **`ce.assume()` threw a `TypeError`** when applied to an operator whose
+  signature had no single result type.
+
+- **A function literal assigned to a symbol declared with an overload set was
+  not arity-checked**, so a two-parameter literal could be stored against
+  one-argument arms and every declared call would silently partial-apply.
+
+### Improvements
+
+- The result type of the bare `function` type is now reported as `unknown`
+  rather than `any`. `function` is shorthand for `(any*) -> unknown` and carries
+  no information about its result, so an application of an undeclared function
+  types `unknown`. This is visible in derived types — `[h(x)]` for an undeclared
+  `h` now types `list<unknown>` instead of `list<any>`.
+
+- The result type of a union or intersection of function signatures is now the
+  union of the arms' result types, instead of being undetermined.
+
 ## 0.94.0 _2026-07-24_
 
 ### Breaking Changes
