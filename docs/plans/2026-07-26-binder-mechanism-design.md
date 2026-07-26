@@ -113,6 +113,46 @@ operand); and the `ce.function` route for `Comprehension` does not materialize
 at canonicalization while `ce.box` does (route asymmetry, `isSame`/`evaluate`
 agree).
 
+### Stages 5–8 round (2026-07-26, staged: 5 and 8; blocked: 6; falsified: 7)
+
+- **Stage 5 (Integrate) LANDED — defect row VALIDATED**: the route-agreement
+  pin failed on the unmodified tree exactly as predicted (`ce.function` route
+  carried the caller's binding; parse/box routes raw). `scoped:
+  indexingSetSites(1)` + the open-expression escape repair
+  (`rebindEscapingCurrentScope`), which was REQUIRED (7 failures without it —
+  the same two suites as step 4's D1 class). Zero snapshot movement, as
+  declared beforehand.
+- **Stage 8 (quantifiers) LANDED — shadowing defect CONFIRMED then fixed**:
+  before migration, with `x := 5`, `\forall x, x > 4` evaluated to `True`
+  (the bound occurrence resolved the global's value); round-trip and route
+  agreement already passed (both raw). Now `scoped: limitsIndexSites(0)` on
+  all five; `ForAll(x, x > 4)` stays symbolic; `evaluateExists` unchanged.
+  Results are closed booleans — no escape repair needed.
+- **Stage 6 (D) BLOCKED on a design call, reverted intact.** The defect is
+  real and the migration works (value shield fine, NO double-shielding), but
+  post-phase step 6 rebinds a PRE-BOXED receiver's body (`ce.box(['D',
+  ce.parse('x^2'), 'x'])`), so `explain('D').initial.op1` stops being
+  `isSame` a free-standing `ce.parse('x^2')` — 3 `explain.test.ts` failures,
+  one a stored snapshot. This is the mechanism working as specified (the
+  landed `Sum` behaves identically), so the options are: accept + update the
+  expectations/snapshot, add a per-operator step-6 opt-out, or defer D behind
+  stage 10. Analysis recorded in `binder-mechanism.test.ts`.
+- **Stage 7 (Limit) — defect row FALSIFIED, nothing landed.** All three
+  handler paths already produce the identical
+  `Limit(Function(Block(body), x), point[, dir])` shape and all four routes
+  `isSame`. A `lambdaParamSites(0)` attempt bound the variable a SECOND time
+  (the node's scope on top of the literal's) — the two-live-bindings state
+  the mechanism exists to eliminate. Limit's variable is a `Function` literal
+  parameter: **stage 10's territory**. Three uniformity pins added.
+- **Re-ordering consequence: stage 10 now gates stages 6 and 7.** Stage 9
+  (Solve)'s risk profile updated: closed results ⇒ escape repair likely
+  irrelevant; the body-identity/explain class (stage 6's blocker) is its real
+  hazard.
+- Found, not fixed: `Limit(Function(1/(x-a), x), a, 1)` evaluates to
+  `1/(a-a)` and the literal's Block scope contains BOTH `a` and `x`
+  (pre-existing capture of the limit point; `calculus.ts:1717`); `\nexists`
+  does not parse (`NotExists` unreachable from LaTeX).
+
 **One correction up front, because two documents propagated it**: CONTRACT 4
 does *not* live in `test/compute-engine/scope.test.ts`. It is
 `test/compute-engine/pipeline-contracts.test.ts:513–612`,

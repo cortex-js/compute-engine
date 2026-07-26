@@ -69,6 +69,42 @@
 
 ### Issues Resolved
 
+- **A quantifier's variable is no longer captured by a same-named global
+  value.** `ForAll`, `Exists`, `NotExists`, `ExistsUnique` and `NotForAll`
+  declared a local scope that was created and then stayed empty, so the
+  quantified variable was bound wherever the caller had it. With `x` assigned,
+  the bound occurrence resolved the assigned value and the proposition was
+  discharged from it:
+
+  ```
+  x = 5
+  \forall x, x > 4      // was: True     now: ForAll(x, x > 4)
+  \exists x, x > 4      // was: True     now: Exists(x, x > 4)
+  ```
+
+  Quantification over a finite domain (`\forall x \in \{1,2,3\}, x > 0`) is
+  unchanged, and the global `x` is untouched in both cases. The quantifiers now
+  use the sanctioned binder mechanism (`scoped: limitsIndexSites(0)`).
+
+- **`Integrate`'s integration variable is bound by the integral.** The index of
+  a `Limits` operand was bound nowhere: it was left raw on the parse route and
+  carried the caller's binding on the `ce.function` route, so the same integral
+  written two ways did not compare equal.
+
+  ```js
+  const parsed = ce.parse('\\int_0^1 x^2 \\,dx');
+  const built = ce.function('Integrate', [
+    ce.parse('x^2'),
+    ce.function('Limits', [ce.symbol('x'), ce.number(0), ce.number(1)]),
+  ]);
+  parsed.isSame(built); // was: false    now: true
+  ```
+
+  `Integrate` now uses the sanctioned binder mechanism
+  (`scoped: indexingSetSites(1)`), so `expr.localScope` reports the integration
+  variable(s), and an indefinite integral's open result is re-bound to the
+  enclosing scope on the way out.
+
 - **`Interval` now survives a LaTeX round-trip.** A closed interval serialized
   as `\lbrack a, b\rbrack`, which the parser reads as a two-element `List`, and
   a fully-open one as `\lparen a, b\rparen`, read back as a parenthesized

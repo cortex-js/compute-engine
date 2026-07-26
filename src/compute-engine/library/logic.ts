@@ -16,6 +16,7 @@ import {
   toDNF,
 } from '../symbolic/logic-utils.js';
 import { isSymbol, isFunction, sym } from '../boxed-expression/type-guards.js';
+import { limitsIndexSites } from '../boxed-expression/binding-sites.js';
 import {
   extractFiniteDomainWithReason,
   bodyContainsVariable,
@@ -31,6 +32,20 @@ import {
   minimalDNF,
   minimalCNF,
 } from './logic-analysis.js';
+
+/**
+ * The quantified variable is the first operand — either a bare symbol
+ * (`ForAll(x, P)`) or the index of an `Element` domain spec
+ * (`Exists(Element(x, {1,2,3}), P)`). Both shapes are what
+ * `limitsIndexSites` already recognizes.
+ *
+ * Before this, the quantifiers were `scoped: true` with a `localScope` that was
+ * created and stayed EMPTY forever, so the quantified variable was bound
+ * wherever the caller had it: `∀x. x > 4` with `x := 5` assigned evaluated to
+ * `True`, the bound occurrence having resolved the global's value
+ * (`docs/plans/2026-07-26-binder-mechanism-design.md` §2 stage 8).
+ */
+const QUANTIFIER_SITES = limitsIndexSites(0);
 
 export const LOGIC_LIBRARY: SymbolDefinitions = {
   True: {
@@ -156,7 +171,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Existential quantifier (there exists): true when the predicate holds for at least one value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
-    scoped: true,
+    scoped: QUANTIFIER_SITES,
     evaluate: evaluateExists,
   },
   NotExists: {
@@ -164,7 +179,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Negated existential quantifier (there does not exist): true when the predicate holds for no value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
-    scoped: true,
+    scoped: QUANTIFIER_SITES,
     evaluate: (args, options) => {
       const result = evaluateExists(args, options);
       if (sym(result) === 'True') return options.engine.False;
@@ -177,7 +192,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Unique existential quantifier (there exists exactly one value satisfying the predicate).',
     signature: '(value, boolean) -> boolean',
     lazy: true,
-    scoped: true,
+    scoped: QUANTIFIER_SITES,
     evaluate: evaluateExistsUnique,
   },
   ForAll: {
@@ -185,7 +200,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Universal quantifier (for all): true when the predicate holds for every value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
-    scoped: true,
+    scoped: QUANTIFIER_SITES,
     evaluate: evaluateForAll,
   },
   NotForAll: {
@@ -193,7 +208,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
       'Negated universal quantifier (not for all): true when the predicate fails for at least one value.',
     signature: '(value, boolean) -> boolean',
     lazy: true,
-    scoped: true,
+    scoped: QUANTIFIER_SITES,
     evaluate: (args, options) => {
       const result = evaluateForAll(args, options);
       if (sym(result) === 'True') return options.engine.False;

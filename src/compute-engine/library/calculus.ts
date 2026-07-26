@@ -24,6 +24,7 @@ import {
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import {
   operandSites,
+  indexingSetSites,
   limitsIndexSites,
 } from '../boxed-expression/binding-sites.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
@@ -1106,6 +1107,13 @@ volumes
       broadcastable: false,
 
       lazy: true,
+      // The integration variable(s) live in the `Limits` operands, which
+      // `canonicalLimits` used to pass through untouched — leaving the index
+      // raw on the parse route and carrying the CALLER's binding on the
+      // `ce.function` route (the `Series` defect, stage 5 of
+      // `docs/plans/2026-07-26-binder-mechanism-design.md`). The integrand's
+      // own variable stays owned by its `Function` literal.
+      scoped: indexingSetSites(1),
       signature: '(function, limits+) -> number',
       canonical: (ops, { engine: ce }) => {
         if (!ops[0]) return null;
@@ -1260,7 +1268,7 @@ volumes
             if (n) intVarNames.push(n);
           }
 
-        return withValueShield(ce, intVarNames, () => {
+        const result = withValueShield(ce, intVarNames, () => {
           let expr = ops[0];
           const argNames = isFunction(expr)
             ? expr.ops.slice(1).map((x) => sym(x))
@@ -1397,6 +1405,14 @@ volumes
           }
           return expr;
         });
+
+        // An INDEFINITE integral's result is an OPEN expression in the
+        // integration variable, which this node now binds in its own scope
+        // (`scoped: indexingSetSites(1)`). Without this the antiderivative
+        // leaves the frame still referencing the dying binding and compares
+        // unequal to the same expression written in the ambient scope — the
+        // repair `Series` needed for exactly the same reason (stage 1).
+        return rebindEscapingCurrentScope(ce, result);
       },
     },
 
