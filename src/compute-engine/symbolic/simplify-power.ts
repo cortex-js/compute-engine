@@ -1,5 +1,5 @@
 import type { Expression, RuleStep } from '../global-types.js';
-import { asRational } from '../boxed-expression/numerics.js';
+import { asRational, numericValueOf } from '../boxed-expression/numerics.js';
 import {
   factorPerfectSquare,
   factorDifferenceOfSquares,
@@ -146,8 +146,8 @@ function denestSqrt3(arg: Expression): Expression | undefined {
 
   // Numeric safety gate: result must be the positive principal root.
   const argN = aVal + 2 * (Math.sqrt(p) + Math.sqrt(q) + Math.sqrt(r));
-  const resN = result.N().re;
-  if (resN === null || !(resN >= 0)) return undefined;
+  const resN = numericValueOf(result);
+  if (resN === undefined || !(resN >= 0)) return undefined;
   if (Math.abs(resN * resN - argN) > 1e-9 * (1 + Math.abs(argN)))
     return undefined;
 
@@ -317,14 +317,15 @@ function rationalizeRadicalDenominator(x: Expression): Expression | undefined {
   const result = ce.function('Divide', [newNum, newDenom]);
 
   // Numeric safety gate: the rationalized form must match the original.
+  //
+  // Deliberately NOT `numericValueOf()`: the numerator may be symbolic, and
+  // this gate's whole job is to numerically probe an expression that carries
+  // free variables. `.N()` folds such a probe (partial numericization floats
+  // the exponents, so `(⁴√b/⁴√a)² − √b/√a` reaches the literal `0`), which the
+  // `.unknowns` gate would discard. See the caveat on `numberLiteralOf`.
   const xN = x.N().re;
   const rN = result.N().re;
-  if (
-    xN !== null &&
-    rN !== null &&
-    Number.isFinite(xN) &&
-    Number.isFinite(rN)
-  ) {
+  if (Number.isFinite(xN) && Number.isFinite(rN)) {
     if (Math.abs(xN - rN) > 1e-9 * (1 + Math.abs(xN))) return undefined;
   }
 

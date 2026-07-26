@@ -718,6 +718,14 @@ export function getPiTerm(
     }
   }
 
+  // No π factor: the whole expression is the `t` term, and it only has one if
+  // it numericizes. Gate on `.unknowns` first — `.N()` cannot yield a literal
+  // while free variables remain, and the discarded walk is exponential over
+  // nested applications. This is `numberLiteralOf()` (`./numerics.ts`) spelled
+  // out, because `numerics` imports this module and may not be imported back.
+  if (expr.unknowns.length > 0)
+    return [ce._numericValue(0), ce._numericValue(0)];
+
   const nVal = expr.N();
   return [ce._numericValue(0), ce._numericValue(numericValue(nVal) ?? 0)];
 }

@@ -55,7 +55,7 @@ import {
   bignumPreferred,
   withDrawRollback,
 } from '../boxed-expression/utils.js';
-import { toInteger } from '../boxed-expression/numerics.js';
+import { numberLiteralOf, toInteger } from '../boxed-expression/numerics.js';
 import { randomCount } from './random-utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { findFit } from '../nonlinear-fit.js';
@@ -999,12 +999,17 @@ function extractPairs(
   return null;
 }
 
+// `numberLiteralOf` rather than a bare `.N()`: a datum carrying a free
+// variable has no numeric value, so numericizing it is pure waste (and
+// exponential over nested applications). Non-finite parts still pass through
+// — the float kernels propagate them — so the literal is read, not
+// `numericValueOf`.
 const machineVals = (vals: ReadonlyArray<Expression>): number[] =>
-  vals.map((v) => v.N().re);
+  vals.map((v) => numberLiteralOf(v)?.re ?? NaN);
 const bigVals = (vals: ReadonlyArray<Expression>) =>
   vals.map((v) => {
-    const n = v.N();
-    return n.bignumRe ?? v.engine.bignum(n.re);
+    const n = numberLiteralOf(v);
+    return n?.bignumRe ?? v.engine.bignum(n?.re ?? NaN);
   });
 
 function shapeError(ce: ComputeEngine, name: string): Expression {
@@ -1261,8 +1266,12 @@ function fitCoefficients(
   const exact = !numericApproximation && allExact(xs) && allExact(ys);
   // Under `.N()` or with inexact data, work with floats so the result is a
   // float; otherwise keep the boxed (exact) values.
-  const X = exact ? xs : xs.map((x) => ce.number(x.N().re));
-  const Y = exact ? ys : ys.map((y) => ce.number(y.N().re));
+  const X = exact
+    ? xs
+    : xs.map((x) => ce.number(numberLiteralOf(x)?.re ?? NaN));
+  const Y = exact
+    ? ys
+    : ys.map((y) => ce.number(numberLiteralOf(y)?.re ?? NaN));
 
   // Powers x_i^j for j = 0 … 2·degree.
   const maxPow = 2 * degree;
@@ -1315,9 +1324,9 @@ function gaussSolve(
   for (let col = 0; col < n; col++) {
     // Partial pivot on the largest magnitude (numeric proxy for exact too).
     let piv = col;
-    let pivMag = Math.abs(aug[col][col].N().re);
+    let pivMag = Math.abs(numberLiteralOf(aug[col][col])?.re ?? NaN);
     for (let r = col + 1; r < n; r++) {
-      const mag = Math.abs(aug[r][col].N().re);
+      const mag = Math.abs(numberLiteralOf(aug[r][col])?.re ?? NaN);
       if (mag > pivMag) {
         pivMag = mag;
         piv = r;

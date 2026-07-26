@@ -4,6 +4,7 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import type { Rational } from '../numerics/types.js';
 
 import type { Expression, ExpressionInput } from '../global-types.js';
+import type { NumberLiteralInterface } from '../types-expression.js';
 import { isExpression } from './utils.js';
 
 import { SMALL_INTEGER } from '../numerics/numeric.js';
@@ -219,4 +220,110 @@ export function toBigint(expr: Expression | undefined): bigint | null {
     return Number.isFinite(n) ? BigInt(Math.round(n)) : null;
 
   return bigint(n.round());
+}
+
+//
+// Gated numericization: "a numeric value, or nothing"
+//
+// These three helpers share one gate and differ only in the shape they hand
+// back. Reach for the narrowest one that fits:
+//
+//   - `numericValueOf()`  — a finite real machine `number`
+//   - `complexValueOf()`  — the `[re, im]` pair, *not* filtered for finiteness
+//   - `numberLiteralOf()` — the number literal itself, when the caller needs
+//                           the exact representation (`numericValue`,
+//                           `bignumRe`) rather than a machine float
+//
+
+/**
+ * The number literal `x` numericizes to, or `undefined` if it has none.
+ *
+ * **This is the gate.** An expression with free variables can never
+ * numericize to a literal, so `.N()` must not even be started on one: over
+ * nested applications of a user function `.N()` re-walks shared sub-chains,
+ * making a discarded result cost ~2× per level of nesting — exponential, and
+ * the cause of the six defects fixed on 2026-07-25/26. Checking `.unknowns`
+ * first costs 2–50× less than the `.N()` it replaces (measured: 0.04 µs on a
+ * literal, 1.2 µs on a small symbolic sum, against 0.12 µs / 63 µs for
+ * `.N().re`), so the gate is worth paying even when it never fires.
+ *
+ * A symbol with an *assigned value* is not an unknown, so `sin(y)` with
+ * `y := π/4` still numericizes; only genuinely free variables decline.
+ *
+ * ## The gate is conservative, not exact — so it is NOT universally applicable
+ *
+ * An expression can carry a free variable and still fold to a literal under
+ * `.N()`. The easy cases are degenerate (`0·x → 0`, `x − x → 0`, `e^{0x} → 1`,
+ * `Length([x, y]) → 2`), but the important ones are not: **partial
+ * numericization floats the exponents**, so
+ *
+ * ```
+ * (⁴√b / ⁴√a)² − √b / √a     →  .N()  →  0        (unknowns: a, b)
+ * ```
+ *
+ * — a correct, genuinely useful zero-detection for an identity `simplify()`
+ * cannot see. These helpers decline all of it.
+ *
+ * That is sound wherever "no numeric value" is the **give-up branch**: the
+ * shortcut, rewrite, or acceleration is simply not taken. It is *not* sound at
+ * a site whose purpose is to **probe a symbolic expression numerically** —
+ * Rubi's `PossibleZeroQ` (`zeroQ` in `rubi/rubi-utils.ts`), its `PosAux` sign
+ * heuristic, `numericMagnitude` (`symbolic/solver-utils.ts`), and the
+ * rationalize-denominator safety gate (`symbolic/simplify-power.ts`) all
+ * deliberately keep a bare `.N()` for this reason. Gating `zeroQ` was measured
+ * to lose a closed form outright (integration-rules #544, the R28a
+ * mixed-parity split). Before funnelling a new call site, ask which branch
+ * `undefined` lands the caller in.
+ *
+ * (Do not move this gate inside `.N()` itself either. Partial numericization —
+ * `sin(2) + x` → `x + 0.909…` — is load-bearing and pinned by ≥12 test
+ * locations; see ROADMAP.md § Symbolic-evaluation performance.)
+ */
+export function numberLiteralOf(
+  x: Expression | null | undefined
+): (Expression & NumberLiteralInterface) | undefined {
+  if (x === null || x === undefined) return undefined;
+  if (x.unknowns.length > 0) return undefined;
+  const v = x.N();
+  return isNumber(v) ? v : undefined;
+}
+
+/**
+ * The **finite real** machine value of `x`, or `undefined` if `x` has none.
+ *
+ * Declines a complex value (`im !== 0`) and a non-finite one (`±∞`, `NaN`) as
+ * well as a non-numeric expression, so a returned `number` is always safe to
+ * compare and arithmetic on. Callers that need `±∞` to pass through, or that
+ * apply their own tolerance to the imaginary part, want
+ * {@link complexValueOf}.
+ *
+ * See {@link numberLiteralOf} for the shared `.unknowns` gate and why it is
+ * conservative.
+ */
+export function numericValueOf(
+  x: Expression | null | undefined
+): number | undefined {
+  const v = numberLiteralOf(x);
+  if (v === undefined || v.im !== 0) return undefined;
+  const re = v.re;
+  return Number.isFinite(re) ? re : undefined;
+}
+
+/**
+ * The real and imaginary machine parts of `x` as `[re, im]`, or `undefined`
+ * if `x` does not numericize to a literal.
+ *
+ * Unlike {@link numericValueOf} this does **not** filter for finiteness: `±∞`
+ * and `NaN` parts are returned as-is, because the callers of this shape either
+ * take a magnitude (`Math.hypot`, where `∞` must stay `∞` rather than become
+ * `NaN` and silently pass a `> tolerance` reject) or apply their own
+ * finiteness test. Check `Number.isFinite` yourself if you need it.
+ *
+ * See {@link numberLiteralOf} for the shared `.unknowns` gate.
+ */
+export function complexValueOf(
+  x: Expression | null | undefined
+): readonly [re: number, im: number] | undefined {
+  const v = numberLiteralOf(x);
+  return v === undefined ? undefined : [v.re, v.im];
 }

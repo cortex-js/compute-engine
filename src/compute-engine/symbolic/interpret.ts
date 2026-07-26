@@ -10,6 +10,10 @@ import {
   solveLinearSystem,
 } from './solver-utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import {
+  complexValueOf,
+  numericValueOf,
+} from '../boxed-expression/numerics.js';
 
 /**
  * Ellipsis interpretation — from *notation* to *meaning*.
@@ -619,11 +623,16 @@ function bodyReproducesSamples(
 ): boolean {
   const name = isSymbol(index) ? index.symbol : '';
   for (let i = 0; i < samples.length; i++) {
-    const bv = body.subs({ [name]: i + 1 }).N();
-    const sv = samples[i].N();
-    const tol = 1e-8 * Math.max(1, Math.abs(sv.re), Math.abs(sv.im ?? 0));
-    if (Math.hypot(bv.re - sv.re, (bv.im ?? 0) - (sv.im ?? 0)) > tol)
-      return false;
+    const bv = complexValueOf(body.subs({ [name]: i + 1 }));
+    const sv = complexValueOf(samples[i]);
+    // A sample that does not numericize is not reproduced. (The open-coded
+    // form compared `NaN > tol`, which is `false` — so it counted such a
+    // sample as a match and could vouch for a closed form it never checked.
+    // Unreachable in practice: `samples` are numeric data by `Interpret`'s
+    // contract and `body` is a candidate in `name` alone.)
+    if (!bv || !sv) return false;
+    const tol = 1e-8 * Math.max(1, Math.abs(sv[0]), Math.abs(sv[1]));
+    if (Math.hypot(bv[0] - sv[0], bv[1] - sv[1]) > tol) return false;
   }
   return true;
 }
@@ -766,7 +775,7 @@ function findNumericUpperBound(
   m: number
 ): Expression | null {
   const CAP = 100000;
-  const anchorValue = anchor.N().re;
+  const anchorValue = numericValueOf(anchor) ?? NaN;
   const name = isSymbol(index) ? index.symbol : '';
 
   // A polynomial term is eventually monotonic, so once its value is on the far
@@ -790,8 +799,8 @@ function findNumericUpperBound(
   for (let u = m + 1; u <= CAP; u++) {
     const value = term.subs({ [name]: u }).evaluate();
     if (value.isSame(anchor)) return ce.number(u);
-    const numeric = value.N().re;
-    if (!Number.isFinite(numeric)) break;
+    const numeric = numericValueOf(value);
+    if (numeric === undefined) break;
     if (prev !== undefined) {
       const runningAway =
         (numeric > anchorValue && numeric > prev) || // above and rising

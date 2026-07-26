@@ -479,7 +479,16 @@ function safeSimplify(e: Expression): Expression {
   return r;
 }
 
-/** Rubi PossibleZeroQ: canonical zero, simplified zero, or numerically ~0 */
+/** Rubi PossibleZeroQ: canonical zero, simplified zero, or numerically ~0
+ *
+ * The `.N()` below must stay UNGATED — do not funnel it through
+ * `numericValueOf`/`numberLiteralOf` (`boxed-expression/numerics.ts`), whose
+ * `.unknowns` gate declines anything carrying a free variable. Deciding a
+ * *symbolic* zero is this predicate's entire job, and `.N()` does it by
+ * floating the exponents: `(⁴√b/⁴√a)² − √b/√a` numericizes to `0` (both terms
+ * become `b^0.5·a^-0.5`) where `simplify()` sees nothing. Gating it made this
+ * return `false` for a true zero and cost the R28a mixed-parity split its
+ * closed form (integration-rules #544). Same reasoning for `posAux` below. */
 export function zeroQ(d: Expression): boolean {
   if (d.isSame(0)) return true;
   const key = activeCaches ? d.toString() : '';

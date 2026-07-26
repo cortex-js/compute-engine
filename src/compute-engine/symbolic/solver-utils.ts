@@ -132,7 +132,19 @@ export function solutionRecord(
   return first as Record<string, Expression>;
 }
 
-/** Numeric magnitude `|z|` of an `Expression` via `.N()`. */
+/**
+ * Numeric magnitude `|z|` of an `Expression` via `.N()`.
+ *
+ * Deliberately ungated — do NOT funnel through
+ * `numericValueOf`/`complexValueOf` (`boxed-expression/numerics.ts`). Two
+ * reasons: (a) this is a numeric probe of a possibly-symbolic expression
+ * (partial numericization resolves identities `simplify()` cannot — see the
+ * caveat on `numberLiteralOf`); (b) both callers spell their reject as
+ * `numericMagnitude(...) > tolerance`, which `NaN` silently *passes*, so
+ * declining would make `solveLinearSystem`'s pivot test and
+ * `recurrences.ts`'s over-determined consistency check more permissive, not
+ * more conservative.
+ */
 export function numericMagnitude(x: Expression): number {
   const v = x.N();
   return Math.hypot(v.re, v.im ?? 0);

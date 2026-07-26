@@ -20,6 +20,7 @@ import { checkDeadline } from '../common/interruptible.js';
 
 import type { Expression, IComputeEngine } from './global-types.js';
 import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
+import { numberLiteralOf } from './boxed-expression/numerics.js';
 import { differentiate } from './symbolic/derivative.js';
 import { implicitCompile } from './implicit-compile.js';
 import {
@@ -95,8 +96,8 @@ function specParts(spec: Expression): Expression[] | null {
  * solver input (starts, bounds, data), so it is surfaced as `NaN` rather than
  * silently truncated to its real part. */
 function realValue(expr: Expression): number {
-  const v = expr.N();
-  return v.im === 0 ? v.re : NaN;
+  const v = numberLiteralOf(expr);
+  return v?.im === 0 ? v.re : NaN;
 }
 
 /** Parse the parameter-spec list. Returns the specs, `'error'` for a malformed
@@ -259,8 +260,7 @@ function makeNumericFn(
     // Match the compiled path (`wrapRealOnly` in the JS target): a nonzero
     // imaginary part is a domain escape and coerces to NaN, rather than being
     // silently truncated to its real part.
-    const v = expr.subs(sub).N();
-    return v.im === 0 ? v.re : NaN;
+    return realValue(expr.subs(sub));
   };
 }
 

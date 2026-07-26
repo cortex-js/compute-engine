@@ -1047,26 +1047,63 @@ no incremental patch reaches that. Reducing `.mul()` cost is a
 2026-07-21 tensor unification addressed for collection values), not a perf
 item. Recorded here so it is not mistaken for a contained optimization.
 
-#### P2. Funnel the open-coded "numeric value or nothing" idiom (filed 2026-07-26)
+#### P2. Funnel the open-coded "numeric value or nothing" idiom — LANDED 2026-07-26, with the scope cut in half
 
-Roughly 25 sites open-code `x.N()` → `isNumber` / `im !== 0` → discard. Six of
-them were the exponential-cost defect fixed on 2026-07-25/26; the rest are
-constant-factor waste (`library/utils.ts:953, 1034`, `symbolic/solver-utils.ts`,
-`symbolic/recurrences.ts`, `boxed-expression/utils.ts:717`,
-`symbolic/simplify-power.ts`, plus unreachable-by-probe sites in `rubi/`,
-`nonlinear-fit.ts`, `library/statistics.ts`, `symbolic/interpret.ts`).
+`boxed-expression/numerics.ts` now exports one gate in three shapes:
+`numberLiteralOf()` (the literal, for callers that need the exact
+representation), `numericValueOf()` (a finite real machine `number`), and
+`complexValueOf()` (the `[re, im]` pair, finiteness deliberately **not**
+filtered — `numericMagnitude` needs `∞` to stay `∞`, since callers spell the
+reject as `magnitude > tolerance`, which `NaN` silently passes). All three check
+`.unknowns` before `.N()`. Converted: `library/utils.ts` (both accelerated
+infinite series), `symbolic/interpret.ts`, `symbolic/simplify-power.ts`
+(`denestSqrt3` only), `boxed-expression/utils.ts` (`getPiTerm`, gate spelled out
+— `numerics` imports `utils`, so the edge cannot be reversed),
+`library/statistics.ts`, `nonlinear-fit.ts`. Full suite green, **0 of 4179
+snapshots changed**. Tests: `test/compute-engine/numeric-value-of.test.ts`.
 
-Proposal: a `numericValueOf(x): number | undefined` helper
-(`boxed-expression/numerics.ts`) that gates on `.unknowns` first, so the gate is
-un-forgettable rather than a pattern each caller must remember. Mechanical, no
-semantic change intended — which is exactly why it should land on its own,
-where a snapshot diff would be attributable.
+**The finding that halved the scope: the `.unknowns` gate is not universally
+sound, and "constant-factor waste" was the wrong diagnosis for `rubi/` and
+`solver-utils`.** Partial numericization floats the exponents, so `.N()`
+resolves symbolic identities that carry free variables and that `simplify()`
+cannot see:
 
-If it lands, consider caching `unknowns` alongside `_sgn`/`_type`
-(`cachedValue(this._unknowns, engine._generation, …)`): it is currently a fresh
-`Set` plus a scope-chain `lookupDefinition` per symbol occurrence on **every**
-access — cheap per call and fine at today's handful of call sites, but not free
-if a helper multiplies the number of them.
+```
+(⁴√b / ⁴√a)² − √b / √a     →  .N()  →  0        (unknowns: a, b)
+```
+
+Gating Rubi's `PossibleZeroQ` (`zeroQ`) on `.unknowns` therefore made it answer
+"not zero" for a true zero and **lost a closed form outright** —
+integration-rules #544, the R28a mixed-parity poly-numerator × binomial-radical
+split. Bisected to that single predicate; the rest of the rubi conversion was
+inert.
+
+So the rule for any future call site is: **ask which branch `undefined` lands
+the caller in.** The funnel is for sites where "no numeric value" is the
+give-up branch. It must not be applied where the site exists to *probe a
+symbolic expression numerically* — those keep a bare `.N()` and now say so in a
+comment: `zeroQ` and the `PosAux` sign heuristic (`rubi/rubi-utils.ts`),
+`numericMagnitude` (`symbolic/solver-utils.ts`, hence `symbolic/recurrences.ts`
+which consumes it), and the rationalize-denominator safety gate
+(`symbolic/simplify-power.ts`). Note that at two of those the gate is not even
+conservative — `numericMagnitude(diff) > 1e-9` and the rationalize gate both
+*accept* on a non-value, so declining would have made them more permissive, not
+less.
+
+**Do not cache `unknowns` for this** (the 2026-07-26 measurement retires that
+sub-item). The gate is 2–50× cheaper than the `.N()` it replaces — 0.042 µs on
+a literal, 0.28 µs on a small exact sum, 1.2 µs on `sin(2)+cos(3)√5−7/11+e²`,
+against 0.12 / 12.7 / 63.0 µs for the corresponding `.N().re`. Worst case (a
+bare literal, where the gate never fires) is ~35% of a very cheap call; on
+anything symbolic it is noise. A `cachedValue`-keyed `_unknowns` would add
+invalidation surface for no measurable win.
+
+One deliberate semantic tightening rode along, in
+`bodyReproducesSamples` (`symbolic/interpret.ts`): the open-coded form compared
+`NaN > tol`, which is `false`, so a sample that did not numericize counted as
+*reproduced* — it could vouch for a closed form it never checked. It now
+returns `false`. Unreachable in practice (`Interpret`'s samples are numeric
+data), and the suite is green either way.
 
 
 ### Strategic

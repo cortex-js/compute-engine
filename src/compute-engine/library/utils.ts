@@ -10,6 +10,7 @@ import {
   isFunction,
 } from '../boxed-expression/type-guards.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
+import { numericValueOf } from '../boxed-expression/numerics.js';
 
 import { checkDeadline } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -950,9 +951,7 @@ export function acceleratedInfiniteSum(
   // Numeric value of the body at integer index `k` (real series only).
   const term = (k: number): number => {
     assignLoopIndex(ce, index, k);
-    const v = body.N();
-    if (!isNumber(v) || v.im !== 0) return NaN;
-    return v.re;
+    return numericValueOf(body) ?? NaN;
   };
 
   // Partial sum S(N) = Σ_{k=a}^{N} f(k), accumulated across the strictly
@@ -1031,12 +1030,12 @@ export function acceleratedInfiniteProduct(
   let invalid = false;
   const logTerm = (k: number): number => {
     assignLoopIndex(ce, index, k);
-    const value = body.N();
-    if (!isNumber(value) || value.im !== 0 || !(value.re > 0)) {
+    const value = numericValueOf(body);
+    if (value === undefined || !(value > 0)) {
       invalid = true;
       return NaN;
     }
-    return Math.log(value.re);
+    return Math.log(value);
   };
 
   const MAX_TERMS = 1 << 15;
