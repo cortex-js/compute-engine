@@ -5,7 +5,11 @@ import { isSubtype, narrow } from '../../src/common/type/subtype';
 import {
   isNonRealNumber,
   couldBeNonRealNumber,
+  functionResult,
+  functionArity,
+  hasFunctionSignature,
 } from '../../src/common/type/utils';
+import type { Type } from '../../src/common/type/types';
 import { reduceType } from '../../src/common/type/reduce';
 import { isValidType } from '../../src/common/type/primitive';
 import { TypeReference } from '../../src/common/type/types';
@@ -1320,9 +1324,8 @@ describe('Paren disambiguation (grouped type vs function signature)', () => {
   });
 
   it('should parse higher-order function signature (function type as argument)', () => {
-    expect(
-      parseType('((number) -> boolean, string) -> nothing')
-    ).toMatchInlineSnapshot(`
+    expect(parseType('((number) -> boolean, string) -> nothing'))
+      .toMatchInlineSnapshot(`
       {
         "args": [
           {
@@ -1347,9 +1350,8 @@ describe('Paren disambiguation (grouped type vs function signature)', () => {
   });
 
   it('should parse named function-typed argument', () => {
-    expect(
-      parseType('(f: (x: number) -> number) -> string')
-    ).toMatchInlineSnapshot(`
+    expect(parseType('(f: (x: number) -> number) -> string'))
+      .toMatchInlineSnapshot(`
       {
         "args": [
           {
@@ -1457,6 +1459,71 @@ describe('NON-REAL NUMBER PREDICATES', () => {
       expect(isNonRealNumber(parseType(t))).toBe(false);
       expect(couldBeNonRealNumber(parseType(t))).toBe(false);
     }
+  });
+});
+
+describe('functionResult / functionArity / hasFunctionSignature', () => {
+  const t = (s: string) => parseType(s);
+  const show = (x: Type | undefined) =>
+    x === undefined ? 'undefined' : typeToString(x);
+
+  it('reads a plain signature', () => {
+    expect(show(functionResult(t('(integer) -> integer')))).toBe('integer');
+    expect(functionArity(t('(integer, string) -> real'))).toBe(2);
+    expect(hasFunctionSignature(t('(integer) -> integer'))).toBe(true);
+  });
+
+  it('JOINS the arms of an intersection — never the meet', () => {
+    // `f(3)` is an `integer` and `f("a")` is a `string`, so an application
+    // whose argument is unknown yields `integer | string`. The meet would be
+    // the empty `integer & string`.
+    const overloads = t('((integer) -> integer) & ((string) -> string)');
+    expect(show(functionResult(overloads))).toBe('integer | string');
+    expect(hasFunctionSignature(overloads)).toBe(true);
+  });
+
+  it('joins the arms of a union of signatures', () => {
+    // The value is one of the two functions without saying which, so a call
+    // returns something in the union of their results.
+    const either = t('((integer) -> integer) | ((string) -> string)');
+    expect(show(functionResult(either))).toBe('integer | string');
+    expect(hasFunctionSignature(either)).toBe(true);
+  });
+
+  it('declines a mixed algebraic type', () => {
+    // Not reliably callable — no partial arm list.
+    const mixed = t('((integer) -> integer) & list<boolean>');
+    expect(functionResult(mixed)).toBeUndefined();
+    expect(functionArity(mixed)).toBeUndefined();
+    expect(hasFunctionSignature(mixed)).toBe(false);
+  });
+
+  it('the bare `function` type: callable, unknown arity, UNKNOWN result', () => {
+    // `unknown`, not `any`: it carries no information about the result, and
+    // matches the `(any*) -> unknown` shape the old `functionSignature`
+    // synthesized for it — which `functionResult` used to contradict.
+    expect(hasFunctionSignature('function')).toBe(true);
+    expect(functionArity('function')).toBeUndefined();
+    expect(show(functionResult('function'))).toBe('unknown');
+  });
+
+  it('arity is fixed only when every arm agrees', () => {
+    expect(functionArity(t('((integer) -> real) & ((string) -> real)'))).toBe(
+      1
+    );
+    expect(
+      functionArity(t('((integer) -> real) & ((integer, string) -> real)'))
+    ).toBeUndefined();
+    // Variadic or optional arguments make the arity ambiguous.
+    expect(functionArity(t('(integer*) -> real'))).toBeUndefined();
+    expect(functionArity(t('(integer, string?) -> real'))).toBeUndefined();
+  });
+
+  it('is not callable for a non-function type', () => {
+    expect(hasFunctionSignature('string')).toBe(false);
+    expect(functionResult('string')).toBeUndefined();
+    expect(functionArity('string')).toBeUndefined();
+    expect(functionResult(undefined)).toBeUndefined();
   });
 });
 

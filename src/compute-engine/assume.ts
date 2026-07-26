@@ -1033,8 +1033,16 @@ function refineSymbolType(
     return 'ok';
   }
   if (isOperatorDef(def)) {
-    if (!isSubtype(type, functionResult(def.operator.signature.type)!))
-      return 'contradiction';
+    // `functionResult` yields `undefined` when the signature has no single
+    // result type — an overload set (an intersection of signatures) is the
+    // reachable case. The `!` that used to be here was a lie: `isSubtype`
+    // dereferenced the `undefined` and threw a raw TypeError.
+    //
+    // "Cannot determine the result type" is not a proven contradiction, so
+    // decline to claim one.
+    const result = functionResult(def.operator.signature.type);
+    if (result === undefined) return 'ok';
+    if (!isSubtype(type, result)) return 'contradiction';
     return 'ok';
   }
   return 'not-a-predicate';

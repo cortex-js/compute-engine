@@ -1,4 +1,5 @@
 import {
+  couldBeCollectionOperand,
   isFiniteIndexedCollection,
   typeCouldBeNumericCollection,
   typeCouldBeNumericTuple,
@@ -6,15 +7,22 @@ import {
 } from '../collection-utils.js';
 
 import { flatten } from './flatten.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, widen } from '../../common/type/subtype.js';
 import {
+  broadcastableBaseMatches,
   couldBeNonRealNumber,
   overlapsForDeferredValidation,
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
+import {
+  diagnoseNoMatch,
+  joinParamAt,
+  overloadArms,
+  resolveOverload,
+} from './overload.js';
 import { parseType } from '../../common/type/parse.js';
-import { Type } from '../../common/type/types.js';
+import { FunctionSignature, Type } from '../../common/type/types.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -31,36 +39,6 @@ import { isSymbol, isFunction, isContinuationOperand } from './type-guards.js';
 // the strength of their static element type.
 const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
 
-/**
- * Return true if a type could be a collection type at runtime.
- * This is used for threadable/broadcastable functions to accept arguments
- * whose type includes a collection possibility (e.g. `number | list`).
- */
-function typeCouldBeCollection(type: Type): boolean {
-  if (typeof type === 'string') {
-    return (
-      type === 'collection' ||
-      type === 'indexed_collection' ||
-      type === 'list' ||
-      type === 'set' ||
-      type === 'tuple' ||
-      type === 'any'
-    );
-  }
-  if (
-    type.kind === 'collection' ||
-    type.kind === 'indexed_collection' ||
-    type.kind === 'list' ||
-    type.kind === 'set' ||
-    type.kind === 'tuple' ||
-    // A `broadcastable<T>` operand COULD be an indexed collection at runtime.
-    type.kind === 'broadcastable'
-  )
-    return true;
-  if (type.kind === 'union')
-    return type.types.some((t) => typeCouldBeCollection(t));
-  return false;
-}
 
 // `typeCouldBeNumericCollection` / `typeCouldBeNumericTuple` — the COULD-
 // semantics predicates `checkNumericArgs` uses to admit collection/tuple
@@ -70,36 +48,11 @@ function typeCouldBeCollection(type: Type): boolean {
 // an operand admitted by validation but missed by the type handlers
 // collapsed to `number` and baked `incompatible-type` (Tycho item 30).
 
-/**
- * A threadable operand that broadcasting may consume as a collection: either
- * the *value* is an actual finite indexed collection (regardless of how
- * precise its static type is), or the static *type* admits a collection at
- * runtime (`list`, `number | list`, `broadcastable<T>`, …) even though no
- * value is materialized. Neither check subsumes the other. Such an operand is
- * admitted as-is and excluded from scalar parameter-type inference.
- */
-function couldBeCollectionOperand(op: Expression): boolean {
-  return isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type);
-}
-
-/**
- * A `broadcastable<S>` operand COULD be a plain scalar `S` at runtime — that
- * is the meaning of the lift (`S`, or an indexed collection of `S` that
- * broadcasts). When the scalar base matches the parameter type, admit the
- * operand instead of baking a type error: before the lift the same expression
- * typed plain `S` and was admitted by the `matches(param)` check, so this
- * exactly restores that admission (e.g. `Totient(p^e(k))` where `e(k)` is an
- * unknown application lifts `Power` to `broadcastable<number>`, which a
- * `number` parameter must still accept). Same COULD-semantics as
- * `typeCouldBeNumericCollection`.
- */
-function broadcastableBaseMatches(type: Type, param: Type): boolean {
-  if (typeof type === 'string') return false;
-  if (type.kind === 'broadcastable') return isSubtype(type.elements, param);
-  if (type.kind === 'union')
-    return type.types.some((t) => broadcastableBaseMatches(t, param));
-  return false;
-}
+// `couldBeCollectionOperand` moved to `collection-utils.ts` alongside the
+// sibling COULD-semantics predicates, so validation, overload resolution and
+// result typing share ONE definition — a private copy here would let the
+// resolution used for validation admit different arms from the one used for
+// result typing.
 
 /**
  * Check that the number of arguments is as expected.
@@ -569,12 +522,93 @@ export function validateArguments(
         while (xs.length < requiredCount) xs.push(ce.error('missing'));
         return xs;
       }
+    } else {
+      // Overload set: pad only up to the SMALLEST required count across the
+      // arms. An arm needing more is simply not the one being called; padding
+      // to the largest would manufacture `Error("missing")` operands for a
+      // perfectly well-formed call to a shorter arm.
+      const arms = overloadArms(signature);
+      if (arms) {
+        const requiredCount = Math.min(...arms.map((a) => a.args?.length ?? 0));
+        if (ops.length < requiredCount) {
+          const xs = [...ops];
+          while (xs.length < requiredCount) xs.push(ce.error('missing'));
+          return xs;
+        }
+      }
     }
     return null;
   }
 
   if (typeof signature === 'string') return null;
-  if (signature.kind !== 'signature') return null;
+
+  // An intersection of signatures is an overload set. Resolve it to a single
+  // arm and validate against that (`docs/plans/2026-07-25-overload-resolution
+  // -design.md`). Resolution is write-free (§4.2), so no symbol is mutated on
+  // account of an arm that is subsequently rejected.
+  //
+  // `viable` (not `selected`) drives the operand inference at the bottom of
+  // this function: the result type comes from the most-specific arm, but the
+  // constraint pushed back into an operand must be the JOIN over every arm
+  // that survived (§4.3). Those pull in opposite directions.
+  let sig: FunctionSignature;
+  let viableArms: ReadonlyArray<FunctionSignature> | undefined;
+  if (signature.kind === 'signature') {
+    sig = signature;
+  } else {
+    const arms = overloadArms(signature);
+    if (!arms) return null;
+    // Every admission policy this function applies must reach the filter, or
+    // the filter and the validator disagree about which arms are viable — a
+    // disagreement that mis-selects arms rather than merely widening the join.
+    const policies = {
+      lazy,
+      threadable,
+      couldBeCollection: couldBeCollectionOperand,
+      stripMissing,
+      freshMatrixRepair: (op: Expression, param: Type) =>
+        couldRepairFreshMatrixInference(ce, op, param, freshlyInferred),
+    };
+    const { selected, viable } = resolveOverload(ce, ops, arms, policies);
+    if (!selected) {
+      // No arm fits. Blame the operands actually at fault: an operand every
+      // near-miss arm accepts at its position stays untouched, so a bad seed
+      // does not also indict a perfectly good domain argument.
+      const { arityViable, arityTarget, refuted } = diagnoseNoMatch(
+        ce,
+        ops,
+        arms,
+        policies
+      );
+      if (arityViable.length === 0) {
+        // Wrong number of arguments for every arm. `arityTarget` is the
+        // NEAREST accepted count, which also covers a gap in the accepted set
+        // (arms of arity 1 and 3 called with 2) — the previous global
+        // min/max bracketing waved those through with no marker at all.
+        const target = arityTarget ?? ops.length;
+        const xs: Expression[] = ops.map((op, idx) =>
+          idx < target ? op : ce.error('unexpected-argument', op.toString())
+        );
+        while (xs.length < target) xs.push(ce.error('missing'));
+        return xs;
+      }
+      const blamed = ops.map((op, idx) => {
+        const expected = refuted.get(idx);
+        return expected === undefined
+          ? op
+          : ce.typeError(expected, op.type, op);
+      });
+      // Invariant: a call with no selected arm must never come back fully
+      // valid. `diagnoseNoMatch` guarantees a non-empty `refuted` whenever an
+      // arm was arity-viable, so this is a backstop against a future
+      // regression rather than an expected path.
+      if (blamed.every((x) => x.isValid))
+        blamed[0] = ce.error('unexpected-argument', ops[0]?.toString() ?? '');
+      return blamed;
+    }
+    sig = selected;
+    viableArms = viable;
+  }
 
   const result: Expression[] = [];
   let isValid = true;
@@ -593,10 +627,17 @@ export function validateArguments(
   // over-constrain unrelated later uses.
   const deferredIdx = new Set<number>();
 
-  const params = signature.args?.map((x) => x.type) ?? [];
-  const optParams = signature.optArgs?.map((x) => x.type) ?? [];
-  const varParam = signature.variadicArg?.type;
-  const varParamCount = signature.variadicMin ?? 0;
+  const params = sig.args?.map((x) => x.type) ?? [];
+  const optParams = sig.optArgs?.map((x) => x.type) ?? [];
+  const varParam = sig.variadicArg?.type;
+  const varParamCount = sig.variadicMin ?? 0;
+
+  /** The type to infer into the operand at `idx`. For a plain signature this
+   * is the parameter itself; for an overload set it is the JOIN over every
+   * viable arm (§4.3) — never the selected arm's parameter, which would
+   * over-constrain the symbol (§4.5). */
+  const inferenceTypeAt = (idx: number, param: Type): Type | undefined =>
+    viableArms ? joinParamAt(viableArms, idx) : param;
 
   let i = 0;
 
@@ -872,26 +913,65 @@ export function validateArguments(
   const finalOps = substituted ? result : ops;
   i = 0;
   for (const param of params) {
-    if (!lazy && !deferredIdx.has(i))
+    const t = inferenceTypeAt(i, param);
+    if (t !== undefined && !lazy && !deferredIdx.has(i))
       if (!threadable || !couldBeCollectionOperand(finalOps[i]))
-        finalOps[i].infer(param);
+        finalOps[i].infer(t);
     i += 1;
   }
   for (const param of optParams) {
     if (!finalOps[i]) break;
-    if (!lazy && !deferredIdx.has(i))
+    const t = inferenceTypeAt(i, param);
+    if (t !== undefined && !lazy && !deferredIdx.has(i))
       if (!threadable || !couldBeCollectionOperand(finalOps[i]))
-        finalOps[i].infer(param);
+        finalOps[i].infer(t);
     i += 1;
   }
   if (varParam) {
     for (const op of finalOps.slice(i)) {
-      if (!lazy && !deferredIdx.has(i))
-        if (!threadable || !couldBeCollectionOperand(op)) op.infer(varParam);
+      const t = inferenceTypeAt(i, varParam);
+      if (t !== undefined && !lazy && !deferredIdx.has(i))
+        if (!threadable || !couldBeCollectionOperand(op)) op.infer(t);
       i += 1;
     }
   }
   return substituted ? result : null;
+}
+
+/**
+ * The **write-free** precondition of {@link repairFreshMatrixInference}: true
+ * when the repair could apply to this operand/parameter pair.
+ *
+ * The repair itself mutates definitions, re-boxes, and rolls back on failure,
+ * so overload resolution — which must not write (§4.2 of the overload design)
+ * — cannot run it to find out. It consults this instead. Deliberately
+ * conservative in the ADMITTING direction: it checks the repair's own
+ * entry gates (a `matrix`-ish parameter, at least one fresh eligible symbol,
+ * and a non-empty structural plan) but not whether the re-box would actually
+ * produce a conforming type. An arm kept on a repair that then fails is handed
+ * to full validation, which produces the error — exactly what happens for a
+ * plain signature. Refusing to model the repair at all would be worse: an
+ * operand a plain signature repairs and accepts would silently match no arm.
+ */
+function couldRepairFreshMatrixInference(
+  ce: ComputeEngine,
+  op: Expression,
+  expected: Type,
+  freshlyInferred?: ReadonlySet<BoxedValueDefinition>
+): boolean {
+  if (!freshlyInferred || !ce.type(expected).matches('matrix')) return false;
+
+  const eligible = new Set<string>();
+  for (const name of op.freeVariables) {
+    const def = ce.lookupDefinition(name);
+    if (!def || !isValueDef(def) || !def.value.inferredType) continue;
+    if (freshlyInferred.has(def.value) || def.value.type.isUnknown)
+      eligible.add(name);
+  }
+  if (eligible.size === 0) return false;
+
+  const names = matrixInferencePlan(op, eligible);
+  return names !== null && names.size > 0;
 }
 
 /**
@@ -900,6 +980,10 @@ export function validateArguments(
  * first inferred while canonicalizing this argument are eligible. The repair
  * is deliberately structural and fail-closed: an ambiguous product such as
  * `a A` (both names fresh) is not guessed.
+ *
+ * Its write-free entry gates are factored into
+ * {@link couldRepairFreshMatrixInference} so overload resolution can consult
+ * them without mutating; keep the two in step.
  */
 function repairFreshMatrixInference(
   ce: ComputeEngine,

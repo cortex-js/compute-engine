@@ -138,16 +138,20 @@ function markedMapLambda(
   return { fn, inner: body.op1 };
 }
 
-/** Heads whose compiled semantics diverge from the interpreter's per-element
- * evaluation: sources of randomness (a seeded `Random` bakes ONE draw per
- * call site where the interpreter advances per element — review 7). */
-const EXCLUDED_HEADS = new Set([
-  'Random',
-  'RandomInteger',
-  'RandomList',
-  'RandomVariate',
-  'Shuffle',
-]);
+// Heads whose compiled semantics diverge from the interpreter's per-element
+// evaluation were once listed here as a hardcoded `EXCLUDED_HEADS` set. It was
+// deleted 2026-07-25: the `pure: false` check below subsumed every entry, and a
+// name list drifts silently — `'RandomVariate'` sat in it guarding an operator
+// that never existed, and a rename would have made the rest match nothing while
+// producing no error.
+//
+// The divergence being guarded is narrower than that set implied. Unseeded,
+// `Random()` compiles to `Math.random()` and is called per element, matching
+// the interpreter exactly. Only under a COMPILE-TIME `ce.randomSeed` does the
+// JS target bake each `Random` node to a literal constant, so every element of
+// a compiled `Map` would share one value where the interpreter advances the
+// stream per element. `pure: false` refuses both cases; declining the safe
+// unseeded one costs a little speed and keeps the rule to a single property.
 
 /** Is `x` a finite real number literal (a literal loop bound)? */
 function isLiteralBound(x: Expression | undefined): boolean {
@@ -212,7 +216,6 @@ function bodyEligible(
   if (!isFunction(e)) return true;
 
   const op = e.operator;
-  if (EXCLUDED_HEADS.has(op)) return false;
 
   if (op === 'Assign') {
     const target = e.op1;
@@ -291,11 +294,16 @@ function bodyEligible(
     return true;
   }
 
-  // Defense-in-depth against EXCLUDED_HEADS drifting from the library: an
-  // operator the engine itself declares impure (`pure: false` — the Random
-  // family, `Sample`, `RandomSeed`, …) is ineligible even if a compile
-  // mapping exists for it. (The structural forms handled above never reach
-  // this check.)
+  // The randomness/impurity gate (D2). An operator the engine itself declares
+  // impure (`pure: false` — the `Random` family, `Shuffle`, `Sample`,
+  // `RandomSeed`, …) is ineligible even if a compile mapping exists for it,
+  // because compiled and interpreted randomness can diverge (see the note at
+  // the top of this file). This is the ONLY such gate: it reads the property
+  // off the definition rather than matching a name, so it cannot fall out of
+  // sync with the library.
+  //
+  // The structural forms handled above never reach this check — none of them
+  // is an impure head, so that is not a coverage gap.
   const opDef = ce.lookupDefinition(op);
   if (
     opDef !== undefined &&

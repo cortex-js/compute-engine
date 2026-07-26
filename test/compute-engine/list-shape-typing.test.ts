@@ -59,9 +59,11 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
     const t = typeOf(['List', ['List', 'x', 'y'], ['List', 'z', 'w']]);
     expect(t).toBe('matrix<2x2>');
     // matrix<2x2> is the surface form of list<number^2x2>
-    expect(ce.box(['List', ['List', 'x', 'y'], ['List', 'z', 'w']]).type.matches(
-      'list<number^(2x2)>'
-    )).toBe(true);
+    expect(
+      ce
+        .box(['List', ['List', 'x', 'y'], ['List', 'z', 'w']])
+        .type.matches('list<number^(2x2)>')
+    ).toBe(true);
   });
 
   test('[x,Rgb] → unshaped honest union (union-free clause blocks shape)', () => {
@@ -89,9 +91,11 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
     expect(ce.symbol('SpeedOfLight').type.toString()).toBe('value');
     const t = typeOf(['List', 'SpeedOfLight', 'PlanckConstant']);
     expect(t).toBe('list<value>');
-    expect(ce.box(['List', 'SpeedOfLight', 'PlanckConstant']).type.matches(
-      'vector<2>'
-    )).toBe(false);
+    expect(
+      ce
+        .box(['List', 'SpeedOfLight', 'PlanckConstant'])
+        .type.matches('vector<2>')
+    ).toBe(false);
   });
 
   test('[L,L] with L: list<number> → list<list<number>>, no shape', () => {
@@ -106,7 +110,15 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
     const boxed = ce.box(['List', ['h', 'x']]);
     // Application typed unknown/any is never folded and blocks the claim.
     expect(boxed.type.matches('vector<1>')).toBe(false);
-    expect(boxed.type.toString()).toBe('list<any>');
+    // `h` is undeclared, so it types as the bare `function` type, whose result
+    // is genuinely not known: `unknown`. (This read `list<any>` until
+    // `functionResult('function')` was corrected from `any` to `unknown` —
+    // `any` asserted "could be anything" as a positive fact, and contradicted
+    // the `(any*) -> unknown` signature the same module synthesized for
+    // `function`.) §D3 treats `unknown`/`any` as interchangeable for the fold
+    // and the shape claim, and every subtyping answer is identical for
+    // `list<unknown>` and `list<any>` — only the rendering changed.
+    expect(boxed.type.toString()).toBe('list<unknown>');
   });
 });
 

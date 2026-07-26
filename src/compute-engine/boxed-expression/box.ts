@@ -48,6 +48,7 @@ import { BoxedDictionary } from './boxed-dictionary.js';
 import { canonicalForm } from './canonical.js';
 import { sortOperands } from './order.js';
 import { validateArguments, checkNumericArgs } from './validate.js';
+import { overloadArms } from './overload.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
@@ -706,7 +707,12 @@ function makeCanonicalFunction(
       ce.strict &&
       !def.value.inferredType &&
       typeof valueType !== 'string' &&
-      valueType.kind === 'signature'
+      // A plain signature, OR an overload set (an intersection of signatures).
+      // Gating on `kind === 'signature'` alone let an overload-typed value
+      // definition skip validation entirely — `h(true)` and `h(1,2,3)` against
+      // `((integer) -> integer) & ((string) -> string)` were both reported
+      // valid. `validateArguments` resolves the overload itself.
+      (valueType.kind === 'signature' || overloadArms(valueType) !== undefined)
       // Complex-family parameters (`(complex) -> complex`, …) are enforced
       // like any other: under D10 (2026-07-02) `real ⊂ complex`, so
       // real/integer/rational arguments satisfy them through the normal

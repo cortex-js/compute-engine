@@ -728,6 +728,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'without replacement. With an optional `seed` argument, the sample ' +
         'is deterministic.',
       complexity: 8200,
+      // Impure for the same reason as `Shuffle`: the unseeded form draws from
+      // the engine stream, and purity is declared per-operator, not per-form.
+      // Without this, `isConstant` is true for a sample of a literal list.
+      pure: false,
       signature: '(collection, integer, real?) -> list',
       evaluate: ([xs, nArg, seedArg], { engine: ce }) => {
         if (!xs.isFiniteCollection) return undefined;

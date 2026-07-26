@@ -29,7 +29,7 @@ import { ListType, Type } from '../../common/type/types.js';
 import {
   collectionElementType,
   functionResult,
-  functionSignature,
+  functionArity,
   widen,
 } from '../../common/type/utils.js';
 import { interval, intervalContains } from '../numerics/interval.js';
@@ -4402,6 +4402,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Randomize the order of the elements in the collection. ' +
       'With an optional `seed` argument, the shuffle is deterministic.',
     complexity: 8200,
+    // Purity is per-operator, not per-form: `Shuffle(xs, seed)` is a
+    // deterministic pure value, but `Shuffle(xs)` draws from the engine
+    // stream, so the operator must declare itself impure (as `Random` does,
+    // even though `Random(seed)` is likewise a pure value). Without this,
+    // `isPure` — and therefore `isConstant` — is true for a shuffle of a
+    // literal list, and the `pure: false` backstop in `map-auto-compile.ts`
+    // does not gate it.
+    pure: false,
     signature: '(indexed_collection, real?) -> indexed_collection',
     // The result always rebuilds as a `List` (see `evaluate`), so the static
     // type must be `list<elt>`, not the source's (possibly indexed/Range) type.
@@ -6227,7 +6235,7 @@ export function sortedIndices(
   // is used as a comparator (historical behavior); a statically-unknown
   // arity (bare `function`) is also treated as a comparator, so nothing
   // existing changes meaning.
-  if (f && fn && functionArity(fn) === 1) {
+  if (f && fn && functionArity(fn.type.type) === 1) {
     const keys = new Map<number, Expression>();
     for (const i of indices) {
       const key = f([expr.at(i)!]);
@@ -6269,23 +6277,6 @@ export function sortedIndices(
   });
 
   return indices;
-}
-
-/**
- * Return the fixed arity of a function operand, read from its declared
- * signature type: 1 for a unary function, 2 for a binary function, or
- * `undefined` when the arity is not statically a single fixed value (a bare
- * `function` type, a variadic or optional-argument signature, or a non-
- * signature type).
- */
-function functionArity(fn: Expression): number | undefined {
-  const sig = functionSignature(fn.type.type);
-  if (!sig || typeof sig === 'string' || sig.kind !== 'signature')
-    return undefined;
-  // Variadic or optional arguments make the arity ambiguous.
-  if (sig.variadicArg || (sig.optArgs && sig.optArgs.length > 0))
-    return undefined;
-  return sig.args?.length;
 }
 
 /** Compare two (already evaluated) key values with the default element

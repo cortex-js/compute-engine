@@ -493,6 +493,56 @@ describe('Map auto-compile', () => {
     expect(stats.compiledHits).toBe(1);
   });
 
+  // The randomness gate used to be a hardcoded `EXCLUDED_HEADS` name set,
+  // deleted 2026-07-25 in favour of the `pure: false` property it duplicated.
+  // A name list drifts silently: `'RandomVariate'` sat in it guarding an
+  // operator that never existed, and a rename would have made the remaining
+  // entries match nothing with no error to say so.
+  //
+  // These tests guard the property itself rather than a mirror of it.
+  describe('randomness eligibility gate', () => {
+    test('the impure heads declare `pure: false`', () => {
+      // This is now the ONLY thing standing between a random draw and the
+      // compiled bake path, so it is asserted directly.
+      const engine = new ComputeEngine();
+      for (const head of ['Random', 'RandomInteger', 'RandomList', 'Shuffle', 'Sample']) {
+        const def = engine.lookupDefinition(head) as
+          | { operator?: { pure?: boolean } }
+          | undefined;
+        expect([head, def?.operator?.pure]).toEqual([head, false]);
+      }
+    });
+
+    test('a shuffle or sample of a literal collection is not constant', () => {
+      // `pure: false` also feeds `isPure` → `isConstant`. Without it the
+      // engine believes a random permutation of a literal list is a constant
+      // expression, which would license folding it.
+      const engine = new ComputeEngine();
+      const list = ['List', 1, 2, 3, 4, 5];
+      expect(engine.box(['Shuffle', list]).isPure).toBe(false);
+      expect(engine.box(['Shuffle', list]).isConstant).toBe(false);
+      expect(engine.box(['Sample', list, 2]).isPure).toBe(false);
+      expect(engine.box(['Sample', list, 2]).isConstant).toBe(false);
+    });
+
+    test('a Map over a random draw is not auto-compiled', () => {
+      // The behaviour the gate exists for, asserted end-to-end: under a
+      // compile-time engine seed the JS target bakes each `Random` node to a
+      // literal constant, so a compiled Map would give every element the same
+      // value where the interpreter advances the stream per element.
+      const engine = new ComputeEngine();
+      engine.precision = 'machine';
+      engine.randomSeed = 42;
+      const drawn = engine
+        .box(['Map', ['Range', 1, 6], ['Function', ['N', ['Random']], 'i']])
+        .evaluate();
+      const values = [...drawn.each()].map((x) => x.re);
+      expect(values).toHaveLength(6);
+      // Per-element draws, not one baked constant repeated six times.
+      expect(new Set(values).size).toBeGreaterThan(1);
+    });
+  });
+
   test("ce.jit = 'off' keeps the numeric quadrature path working", () => {
     ce.jit = 'off';
     const v = ce

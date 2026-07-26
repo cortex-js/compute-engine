@@ -19,22 +19,117 @@ export function isSignatureType(
   return typeof type !== 'string' && type.kind === 'signature';
 }
 
-export function functionSignature(type: Readonly<Type>): Type | undefined {
-  if (type === 'function') return parseType('(any*) -> unknown');
-  if (typeof type === 'string') return undefined;
-
-  if (type.kind === 'signature') return type;
+/**
+ * The signature arms of a callable type: `[t]` for a plain signature, and
+ * every member of a union or intersection whose members are ALL signatures.
+ * `undefined` otherwise — including for the bare `function` type, which
+ * carries no arm information and is handled separately by each caller.
+ *
+ * - An **intersection** of signatures is an overload set: the value inhabits
+ *   every arm, i.e. it is callable at each of them.
+ * - A **union** of signatures is a value that is one of those functions,
+ *   without saying which.
+ *
+ * A mixed algebraic type (`((number) -> real) & list<boolean>`) is not
+ * reliably callable, so it yields `undefined` rather than a partial arm list.
+ */
+export function signatureArms(
+  type: Readonly<Type> | undefined
+): ReadonlyArray<FunctionSignature> | undefined {
+  if (!type || typeof type === 'string') return undefined;
+  if (type.kind === 'signature') return [type];
+  if (type.kind === 'union' || type.kind === 'intersection') {
+    const arms: FunctionSignature[] = [];
+    for (const member of type.types) {
+      if (typeof member === 'string' || member.kind !== 'signature')
+        return undefined;
+      arms.push(member);
+    }
+    return arms.length > 0 ? arms : undefined;
+  }
   return undefined;
 }
 
+/**
+ * True when `type` is callable with a known shape: the bare `function` type, a
+ * signature, or a union/intersection of signatures.
+ *
+ * Replaces the old `functionSignature`, which returned the signature itself
+ * but whose every caller only asked `!== undefined`. The one caller that
+ * wanted the value asked for the arity — see {@link functionArity}. Returning
+ * a value also meant synthesizing `(any*) -> unknown` for the bare `function`
+ * type, which callers then had to special-case back out (see
+ * `assertFunctionLiteralArity` in `engine-declarations.ts`).
+ */
+export function hasFunctionSignature(
+  type: Readonly<Type> | undefined
+): boolean {
+  if (type === 'function') return true;
+  return signatureArms(type) !== undefined;
+}
+
+/**
+ * The fixed arity of a callable type: 1 for a unary function, 2 for a binary
+ * one, or `undefined` when the arity is not statically a single fixed value —
+ * a bare `function` type, a variadic or optional-argument signature, a
+ * non-callable type, or a union/intersection whose arms disagree.
+ *
+ * For a union/intersection every arm must be fixed-arity AND agree, since a
+ * caller keying behavior off the arity (e.g. `Sort`'s unary-key vs. binary-
+ * comparator dispatch) must not guess which arm applies.
+ */
+export function functionArity(
+  type: Readonly<Type> | undefined
+): number | undefined {
+  // The top `function` type promises callers nothing about arity.
+  if (type === 'function') return undefined;
+  const arms = signatureArms(type);
+  if (!arms) return undefined;
+
+  let arity: number | undefined;
+  for (const sig of arms) {
+    // Variadic or optional arguments make the arity ambiguous.
+    if (sig.variadicArg || (sig.optArgs && sig.optArgs.length > 0))
+      return undefined;
+    const n = sig.args?.length ?? 0;
+    if (arity === undefined) arity = n;
+    else if (arity !== n) return undefined;
+  }
+  return arity;
+}
+
+/**
+ * The type an application of `type` yields, without reference to the actual
+ * arguments. `undefined` when `type` is not callable.
+ *
+ * For a union or intersection of signatures this is the **join** (`widen`) of
+ * the arms' results — never the meet. Consider
+ * `((integer) -> integer) & ((string) -> string)`: `f(3)` is an `integer` and
+ * `f("a")` is a `string`, so an unspecified application yields
+ * `integer | string`. The meet would be `integer & string` — an empty type,
+ * and plainly wrong. (Narrowing is only sound when every arm shares a domain,
+ * a special case not worth encoding; the join stays sound there, just less
+ * precise.) When the *arguments* are known, do not use this — resolve the
+ * overload and read the selected arm's result
+ * (`boxed-expression/overload.ts`).
+ *
+ * The bare `function` type yields `unknown`, not `any`: it carries no
+ * information about the result, and `unknown` is this system's "not known"
+ * signal — notably `infer()` treats inferring `unknown` as a no-op
+ * (`boxed-symbol.ts`), whereas `any` would be written into a definition as a
+ * positive claim. It also matches the `(any*) -> unknown` shape the old
+ * `functionSignature` synthesized for `function`, which `functionResult`
+ * contradicted by answering `any`.
+ */
 export function functionResult(
   type: Readonly<Type> | undefined
 ): Type | undefined {
   if (!type) return undefined;
-  if (type === 'function') return 'any';
-  if (typeof type === 'string') return undefined;
-  if (type.kind === 'signature') return type.result;
-  return undefined;
+  if (type === 'function') return 'unknown';
+  const arms = signatureArms(type);
+  if (!arms) return undefined;
+  if (arms.length === 1) return arms[0].result;
+  return widen(...arms.map((a) => a.result));
 }
 
 export function collectionElementType(type: Readonly<Type>): Type | undefined {
@@ -508,6 +603,34 @@ export function broadcastElementType(type: Readonly<Type>): Type {
   if (typeof type !== 'string' && type.kind === 'union')
     return widen(...type.types.map((t) => broadcastElementType(t)));
   return collectionElementType(type) ?? (type as Type);
+}
+
+/**
+ * A `broadcastable<S>` operand COULD be a plain scalar `S` at runtime — that
+ * is the meaning of the lift (`S`, or an indexed collection of `S` that
+ * broadcasts). When the scalar base matches the parameter type, admit the
+ * operand instead of baking a type error: before the lift the same expression
+ * typed plain `S` and was admitted by the `matches(param)` check, so this
+ * exactly restores that admission (e.g. `Totient(p^e(k))` where `e(k)` is an
+ * unknown application lifts `Power` to `broadcastable<number>`, which a
+ * `number` parameter must still accept). Same COULD-semantics as
+ * `typeCouldBeNumericCollection`.
+ *
+ * Lives here rather than in `boxed-expression/validate.ts` so that the
+ * write-free overload filter (`boxed-expression/overload.ts`) can share the
+ * exact same admission rule without importing `validate.ts` — which would
+ * close a cycle, since `validate.ts` imports the resolver.
+ */
+export function broadcastableBaseMatches(
+  type: Readonly<Type>,
+  param: Readonly<Type>
+): boolean {
+  if (typeof type === 'string') return false;
+  if (type.kind === 'broadcastable')
+    return isSubtype(type.elements, param as Type);
+  if (type.kind === 'union')
+    return type.types.some((t) => broadcastableBaseMatches(t, param));
+  return false;
 }
 
 /**

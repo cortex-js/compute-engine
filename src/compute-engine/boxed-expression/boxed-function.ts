@@ -33,6 +33,7 @@ import {
   isKnownFinitenessBroadcast,
   isLinearAlgebraCollection,
   isNumericTuple,
+  couldBeCollectionOperand,
   isPossiblyCollectionTyped,
   isTuple,
   isUnknownLengthBroadcast,
@@ -48,6 +49,7 @@ import {
   isSymbol,
   isContinuationOperand,
 } from './type-guards.js';
+import { overloadArms, resolveOverload } from './overload.js';
 import { candidateShape } from './tensor-view.js';
 import type { NumericPrimitiveType } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
@@ -2388,7 +2390,13 @@ function type(expr: BoxedFunction): Type {
           ? parseType(def.signature, expr.engine._typeResolver)
           : def.signature;
 
-    let sigResult = functionResult(sig) ?? 'unknown';
+    // An overload set resolves to its most-specific viable arm, and the result
+    // type is read off THAT arm (`docs/plans/2026-07-25-overload-resolution-
+    // design.md` §6). Note the asymmetry with operand inference, which uses the
+    // JOIN over every viable arm (§4.3): a result type wants the most precise
+    // arm, an operand constraint must be the weakest — conflating them
+    // reintroduces the §4.5 unsoundness.
+    let sigResult = functionResult(resolvedArm(expr, sig) ?? sig) ?? 'unknown';
 
     // Missing-value absorption (§3.B of the missing-value typing design). When
     // this application resolves to `propagate` and some operand carries a
@@ -2673,7 +2681,11 @@ function type(expr: BoxedFunction): Type {
     // operator-def lambda path above, keeping the DECLARED signature
     // authoritative: a collection-typed parameter binds its argument whole, so
     // `paramsAreScalar` is false and the scalar result is preserved.
-    const sig = expr.valueDefinition.type.type;
+    // As at the operator-def site above: an overload set resolves to its
+    // most-specific viable arm for the RESULT type (§6 of the overload design).
+    const sig =
+      resolvedArm(expr, expr.valueDefinition.type.type) ??
+      expr.valueDefinition.type.type;
     const sigResult = functionResult(sig) ?? 'unknown';
     if (paramsAreScalar(sig)) {
       // As at the operator-def lambda site above: a numeric-tuple argument
@@ -2808,6 +2820,39 @@ function applyFunctionLiteral(
   // the caller's options — `numericApproximation` is honored inside the
   // function's scope frame (see makeLambda), preserving lexical scoping.
   return apply(value, ops, options);
+}
+
+/**
+ * When `sig` is an overload set (an intersection of signatures), the arm this
+ * application resolves to — the most-specific one whose parameters admit
+ * `expr.ops`. `undefined` for a plain signature, for a non-overload type, and
+ * when no arm fits. In that last case the caller falls back to
+ * `functionResult` of the whole intersection, which is the §5.1 join over
+ * every arm's result — NOT `unknown`; the operands have already been marked
+ * invalid by `validateArguments`, so the imprecision is not load-bearing.
+ *
+ * **The policies must match the ones `validateArguments` resolved with.** They
+ * are recomputed here rather than threaded through because `.type` is a getter
+ * reached on paths that never ran validation; resolving with different
+ * policies would let the result type come from a different arm than the one
+ * the call was validated against (a lazy operator is the clearest case — its
+ * operands are unbound, so type filtering there is noise).
+ *
+ * Result typing only — see `overload.ts` for why operand *inference* must use
+ * the join over every viable arm instead.
+ */
+function resolvedArm(
+  expr: BoxedFunction,
+  sig: Readonly<Type> | undefined
+): Type | undefined {
+  const arms = overloadArms(sig);
+  if (!arms) return undefined;
+  const def = expr.operatorDefinition;
+  return resolveOverload(expr.engine, expr.ops, arms, {
+    lazy: def?.lazy,
+    threadable: def?.broadcastable,
+    couldBeCollection: couldBeCollectionOperand,
+  }).selected;
 }
 
 /** Returns true when every formal parameter of a signature is a scalar

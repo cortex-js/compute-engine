@@ -172,6 +172,56 @@ function couldBeNumericElement(el: Type): boolean {
  * path and lets the `Add` scalar-plus-tuple guard bake `incompatible-type`
  * (Tycho item 30).
  */
+/**
+ * Return true if a type could be a collection type at runtime.
+ * Used for threadable/broadcastable functions to accept arguments whose type
+ * includes a collection possibility (e.g. `number | list`).
+ */
+export function typeCouldBeCollection(type: Type): boolean {
+  if (typeof type === 'string') {
+    return (
+      type === 'collection' ||
+      type === 'indexed_collection' ||
+      type === 'list' ||
+      type === 'set' ||
+      type === 'tuple' ||
+      type === 'any'
+    );
+  }
+  if (
+    type.kind === 'collection' ||
+    type.kind === 'indexed_collection' ||
+    type.kind === 'list' ||
+    type.kind === 'set' ||
+    type.kind === 'tuple' ||
+    // A `broadcastable<T>` operand COULD be an indexed collection at runtime.
+    type.kind === 'broadcastable'
+  )
+    return true;
+  if (type.kind === 'union')
+    return type.types.some((t) => typeCouldBeCollection(t));
+  return false;
+}
+
+/**
+ * A threadable operand that broadcasting may consume as a collection: either
+ * the *value* is an actual finite indexed collection (regardless of how
+ * precise its static type is), or the static *type* admits a collection at
+ * runtime (`list`, `number | list`, `broadcastable<T>`, …) even though no
+ * value is materialized. Neither check subsumes the other. Such an operand is
+ * admitted as-is and excluded from scalar parameter-type inference.
+ *
+ * Lives here, beside the sibling COULD-semantics predicates, so that argument
+ * validation (`boxed-expression/validate.ts`), overload resolution
+ * (`boxed-expression/overload.ts`) and result typing
+ * (`boxed-expression/boxed-function.ts`) all share ONE definition. A private
+ * copy in `validate.ts` would let the resolution used for validation and the
+ * resolution used for result typing admit different arms.
+ */
+export function couldBeCollectionOperand(op: Expression): boolean {
+  return isFiniteIndexedCollection(op) || typeCouldBeCollection(op.type.type);
+}
+
 export function typeCouldBeNumericCollection(type: Type): boolean {
   if (typeof type === 'string') {
     return (

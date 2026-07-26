@@ -1,9 +1,14 @@
-import type { Type, TypeString } from '../common/type/types.js';
+import type {
+  FunctionSignature,
+  Type,
+  TypeString,
+} from '../common/type/types.js';
 import {
   functionResult,
-  functionSignature,
+  hasFunctionSignature,
   isValidType,
   isValidTypeName,
+  signatureArms,
   widen,
 } from '../common/type/utils.js';
 import { parseType } from '../common/type/parse.js';
@@ -531,7 +536,7 @@ export function declareFn(
     ) {
       const declaredType =
         def.type instanceof BoxedType ? def.type.type : parseType(def.type);
-      if (functionSignature(declaredType) !== undefined) {
+      if (hasFunctionSignature(declaredType)) {
         // The literal must be arity-compatible with the declared signature
         // (mirrors the assign path); otherwise a declared-arity call would
         // silently partial-apply.
@@ -648,7 +653,7 @@ export function assignFn(
     arg2 !== undefined &&
     arg2 !== null &&
     typeof arg2 !== 'function' &&
-    functionSignature(def.value.type.type) !== undefined
+    hasFunctionSignature(def.value.type.type)
   ) {
     const literal = canonicalFunctionLiteral(ce.expr(arg2));
     if (literal !== undefined) {
@@ -717,7 +722,7 @@ export function assignFn(
       arg2 !== undefined &&
       arg2 !== null &&
       typeof arg2 !== 'function' &&
-      functionSignature(def.operator.signature.type) !== undefined
+      hasFunctionSignature(def.operator.signature.type)
     ) {
       const literal = canonicalFunctionLiteral(ce.expr(arg2));
       if (literal !== undefined) {
@@ -922,31 +927,44 @@ function assertFunctionLiteralArity(
   // type (`ce.declare('f', 'function')`, stored as the primitive string
   // `'function'`) is a wildcard: it promises callers nothing about arity, so a
   // fixed-arity literal is a valid implementation. Use the raw declared type
-  // here rather than `functionSignature`, which would synthesize a variadic
-  // `(any*) -> unknown` signature for that wildcard and wrongly reject it.
-  if (typeof declaredType !== 'object' || declaredType.kind !== 'signature')
-    return;
-  const declaredSig = declaredType;
+  // here rather than `hasFunctionSignature`, which is true for that wildcard
+  // (it is callable) and would wrongly bring it into the arity check.
+  //
+  // An OVERLOAD SET (an intersection of signatures) constrains arity too, and
+  // every arm has to be satisfied — the value must be callable at all of them.
+  // Returning early for it let a 2-parameter literal be assigned to
+  // `((integer) -> number) & ((string) -> number)`, after which every declared
+  // 1-argument call would silently partial-apply.
+  const arms = signatureArms(declaredType);
+  if (!arms) return;
 
   const literalArity = functionLiteralParameters(literal).length;
-  const requiredArity = declaredSig.args?.length ?? 0;
-  const optArity = declaredSig.optArgs?.length ?? 0;
-  const hasVariadic = declaredSig.variadicArg !== undefined;
 
-  // Compatible iff the signature accepts exactly one call arity, equal to the
-  // literal's arity.
-  if (!hasVariadic && optArity === 0 && requiredArity === literalArity) return;
+  /** The arities `sig` accepts, as a description, plus whether `literalArity`
+   * is the ONLY one — a literal is a valid implementation of an arm only when
+   * that arm accepts exactly one call arity and it is the literal's. */
+  const armFits = (sig: FunctionSignature): boolean => {
+    const required = sig.args?.length ?? 0;
+    const optional = sig.optArgs?.length ?? 0;
+    if (sig.variadicArg !== undefined || optional > 0) return false;
+    return required === literalArity;
+  };
 
-  // Describe the arity range the declaration accepts for the error message.
-  let accepted: string;
-  if (hasVariadic) {
-    const min = requiredArity + (declaredSig.variadicMin ?? 0);
-    accepted = `${min} or more`;
-  } else if (optArity > 0) {
-    accepted = `${requiredArity} to ${requiredArity + optArity}`;
-  } else {
-    accepted = `exactly ${requiredArity}`;
-  }
+  if (arms.every(armFits)) return;
+
+  const describe = (sig: FunctionSignature): string => {
+    const required = sig.args?.length ?? 0;
+    const optional = sig.optArgs?.length ?? 0;
+    if (sig.variadicArg !== undefined)
+      return `${required + (sig.variadicMin ?? 0)} or more`;
+    if (optional > 0) return `${required} to ${required + optional}`;
+    return `exactly ${required}`;
+  };
+
+  // For an overload set, report every arm's accepted arity so the author can
+  // see which one the literal fails — deduplicated, since arms commonly agree
+  // on arity and differ only in parameter types ("exactly 1 / exactly 1").
+  const accepted = [...new Set(arms.map((a) => describe(a)))].join(' / ');
 
   throw new Error(
     [
