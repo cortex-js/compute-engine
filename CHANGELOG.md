@@ -1,6 +1,78 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The random family is redesigned around block-scoped seeding.** Seeding
+  moves out of argument lists and engine state entirely: there is no seed
+  argument anywhere in the family, and no ambient seed to set. A
+  `WithRandomSeed(seed, body)` frame makes every draw inside it — including
+  draws in user-function calls (dynamic scoping) and in compiled code —
+  deterministic and replayable, while draws outside any frame are live.
+
+  ```js
+  ce.box(['WithRandomSeed', 42, ['List', ['Random'], ['Random']]]).evaluate();
+  // → two DIFFERENT values, and the same two values on every re-evaluation
+  ```
+
+  The *n*-th draw of a frame is `hash(seed, n)` — PCG3D, a pure function of
+  the seed and the draw index, computed identically by the interpreter, the
+  JavaScript target, and (as f32) the GPU targets. Draws are IEEE float64
+  regardless of the engine's precision mode, and the seed→stream mapping is a
+  **cross-version contract** pinned by published test vectors. Frames nest
+  (innermost wins) with independent per-frame counters, so one document cell's
+  frame cannot perturb another's. See
+  [Random Numbers](/compute-engine/reference/arithmetic/#random-numbers) (and
+  `docs/RANDOMNESS-MODEL.md` in the repository) for the full contract,
+  including the draw-consumption table and the rule that **only evaluation
+  consumes draw indices** (an untaken branch, an unmaterialized lazy view, or
+  a canonicalized-away wrapper consumes none).
+
+  The surface changes:
+
+  - **`Random` is domain-only.** `Random()` draws a real in [0, 1);
+    `Random(Interval(a, b))` a real in [a, b); `Random(Range(…))` an element
+    of the (normalized, inclusive) range; `Random(xs)` an element of a finite
+    collection. The old `Random(seed)`/`Random(m, n)` forms — where the
+    first argument meant a *seed* or a *bound* depending on its numeric type
+    — are rejected by the signature.
+  - **`Sample` → `RandomSample`, `Shuffle` → `RandomShuffle`** — renamed,
+    seedless. `RandomSample`'s domain must be an indexed collection (a `Set`
+    or an `Interval` is now invalid), and `k < 0` or `k > n` is now an
+    `out-of-range` error rather than `undefined`. Without-replacement remains
+    over *positions*, not values: sampling a multiset can repeat a value.
+  - **`RandomInteger`, `RandomList`, and `RandomSeed` are removed**, along
+    with the **`ce.randomSeed`** property. For one release, evaluating a
+    removed head throws an `operator-removed` error naming its replacement,
+    and `ce.randomSeed` is a throwing accessor — nothing fails silently.
+
+  Migration: `Random(seed)` → `WithRandomSeed(seed, Random())`;
+  `Random(n)`/`Random(m, n)` → `Random(Range(0, n-1))`/`Random(Range(m, n-1))`
+  (for the non-degenerate ranges — the old bounds were upper-exclusive);
+  `RandomInteger(a, b)` → `Random(Range(a, b))`; `RandomList(n[, seed])` →
+  `RandomChoice(Interval(0, 1), n)`, framed if seeded;
+  `Shuffle(xs[, seed])`/`Sample(xs, k[, seed])` →
+  `RandomShuffle(xs)`/`RandomSample(xs, k)`, framed if seeded;
+  `RandomSeed(s)`/`ce.randomSeed = s` → `WithRandomSeed(s, …)` around the
+  work.
+
 ### New Features
+
+- **`RandomChoice(domain, k)`** — `k` independent draws **with** replacement,
+  the twin of `RandomSample` (without replacement). The domain may be a
+  bounded `Interval`, a `Range`, or any finite collection, and is never
+  materialized: `RandomChoice(Range(1, 10^9), 5)` is O(k). The count is typed
+  `number` (a computed count need not be pre-rounded; it is rounded on
+  evaluation), and `k` may exceed the domain size — that is what replacement
+  means.
+
+- **Random draws now compile — including inside auto-compiled `Map` bodies
+  and in shaders.** Every compiled draw goes through the same engine primitive
+  as the interpreter, deciding framed-vs-unframed at **call time**, so a
+  function compiled outside any frame is deterministic when later called
+  inside one, bit-identical to the interpreter. On the GPU, `WithRandomSeed`
+  frames compile lexically (per-invocation counters): per-pixel seeding is
+  `WithRandomSeed(perPixelSeed, Random())`. Unsupported forms fail closed at
+  compile time rather than drawing silently.
 
 - **Overload sets: an intersection of function signatures is now resolved at the
   call site.** A function that can be called in several different ways is
@@ -37,6 +109,34 @@
   See [Overload Sets](/compute-engine/guides/types/#overload-sets).
 
 ### Issues Resolved
+
+- **`.N()` evaluated the operands of `Add` and `Multiply` twice.** The numeric
+  path evaluated every operand exactly, discarded the results, and re-evaluated
+  them numerically — observably wrong for impure operands (a framed `Random()`
+  consumed two draw indices under `N()` and one under `evaluate()`) and a 2×
+  evaluation tax otherwise. Impure operands now evaluate exactly once; pure
+  operands keep the substitute-once-guarded path.
+
+- **`Sample` materialized its whole source to draw a few elements.**
+  `Sample(Range(1, 1000000), 3)` allocated a million boxed numbers and ran a
+  full Fisher-Yates (~300 ms) to return three; large sources were an
+  uncatchable OOM. `RandomSample` now runs a sparse Fisher-Yates over the
+  index space — O(k) time and memory — and `RandomShuffle` refuses sources
+  past the element cap instead of exhausting the heap.
+
+- **Compiled random draws bypassed the engine's stream.** A compiled
+  `Random()` emitted a bare `Math.random()`, so a compiled `Map` silently
+  stopped being reproducible under a seed. Compiled and interpreted draws now
+  share one code path (and the auto-compile gate that excluded impure bodies
+  from `Map` compilation is gone — per-sample-point draws stay in the hot
+  path).
+
+- **`compileShader` emitted shaders that referenced undefined helpers.** A
+  shader whose body used any `_gpu_*` helper (`Gamma`, the fractal helpers,
+  and now the random draw) compiled in CE but failed at GPU shader-compile
+  time, because the helper preamble was never spliced into the emitted source.
+  `compileShader` now derives the preamble from the compiled body and inserts
+  it ahead of the entry point, on both GLSL and WGSL.
 
 - **A function signature nested in a union or an intersection lost its
   parentheses when serialized**, and re-parsed as a structurally different type
