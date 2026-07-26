@@ -107,6 +107,133 @@ function parsedIntervalOperand(
   return expr;
 }
 
+/** Split an `Interval`'s operands into endpoints plus their openness. */
+function intervalBounds(expr: MathJsonExpression): {
+  lower: MathJsonExpression | null;
+  upper: MathJsonExpression | null;
+  openLower: boolean;
+  openUpper: boolean;
+} {
+  let lower = operand(expr, 1);
+  let upper = operand(expr, 2);
+  let openLower = false;
+  let openUpper = false;
+  if (operator(lower) === 'Open') {
+    lower = operand(lower, 1);
+    openLower = true;
+  }
+  if (operator(upper) === 'Open') {
+    upper = operand(upper, 1);
+    openUpper = true;
+  }
+  return { lower, upper, openLower, openUpper };
+}
+
+/**
+ * An interval in bracket notation, American convention: `[a, b]` closed,
+ * `(a, b)` open, `[a, b)` and `(a, b]` half-open.
+ *
+ * Only the two half-open spellings re-parse as an `Interval` on their own —
+ * they have dedicated, unambiguous matchfix entries. `[a, b]` re-reads as a
+ * 2-element `List` and `(a, b)` as a parenthesized `Sequence`, so this form is
+ * used ONLY where a set operator forces the set reading on the way back in (see
+ * `serializeSetOperand()`). In a neutral position use `serializeInterval()`.
+ */
+function serializeIntervalBrackets(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): LatexString {
+  const { lower, upper, openLower, openUpper } = intervalBounds(expr);
+  return joinLatex([
+    openLower ? '\\lparen' : '\\lbrack',
+    serializer.serialize(lower),
+    ', ',
+    serializer.serialize(upper),
+    openUpper ? '\\rparen' : '\\rbrack',
+  ]);
+}
+
+/**
+ * An interval in a position where nothing disambiguates it, so the result has
+ * to re-parse as an `Interval` on its own:
+ *
+ * - half-open: `[a, b)` / `(a, b]` — American notation, unambiguous
+ * - open: `]a, b[` — ISO reversed brackets, unambiguous
+ * - closed: `\mathrm{Interval}(a, b)` — no bracket spelling is available, since
+ *   `[a, b]` is also the notation for a 2-element list, which is how the parser
+ *   reads it.
+ */
+function serializeInterval(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): LatexString {
+  const { lower, upper, openLower, openUpper } = intervalBounds(expr);
+  if (openLower && openUpper)
+    return joinLatex([
+      '\\rbrack',
+      serializer.serialize(lower),
+      ', ',
+      serializer.serialize(upper),
+      '\\lbrack',
+    ]);
+  if (!openLower && !openUpper)
+    return joinLatex([
+      '\\mathrm{Interval}(',
+      serializer.serialize(lower),
+      ', ',
+      serializer.serialize(upper),
+      ')',
+    ]);
+  return serializeIntervalBrackets(serializer, expr);
+}
+
+/**
+ * Serialize an operand sitting in a *set* position of a set operator (the rhs
+ * of `\in`, either side of `\cup`, …).
+ *
+ * Serialize-side mirror of `parsedIntervalOperand()`: because the operator
+ * forces the set reading when this is parsed back, an `Interval` here can use
+ * the conventional bracket notation even in the two spellings that are
+ * ambiguous on their own.
+ */
+function serializeSetOperand(
+  serializer: Serializer,
+  expr: MathJsonExpression | null,
+  prec: number
+): LatexString {
+  if (expr !== null && operator(expr) === 'Interval')
+    return serializeIntervalBrackets(serializer, expr);
+  return serializer.wrap(expr, prec);
+}
+
+/**
+ * The default infix serialization, with the operands selected by `sides`
+ * treated as set positions.
+ *
+ * Serialize-side mirror of `parseSetOperator()` — keep the two in step: the
+ * pretty interval spelling is only sound for an operator whose parse handler
+ * reads its operands back through `parsedIntervalOperand()`.
+ */
+function serializeSetOperator(
+  latex: string,
+  prec: number,
+  sides: 'both' | 'rhs'
+) {
+  return (serializer: Serializer, expr: MathJsonExpression): LatexString => {
+    const n = nops(expr);
+    if (n === 0) return '';
+    return joinLatex(
+      [...operands(expr)].flatMap((val, i) => {
+        const arg =
+          sides === 'both' || i > 0
+            ? serializeSetOperand(serializer, val, prec + 1)
+            : serializer.wrap(val, prec + 1);
+        return i < n - 1 ? [arg, latex] : [arg];
+      })
+    );
+  };
+}
+
 /**
  * The default infix parse (associativity `none`), reading ambiguous bracket
  * pairs among the operands as intervals (`sides` selects which operands are
@@ -414,6 +541,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     precedence: 350,
     parse: parseSetOperator('Intersection', 350, 'both'),
+    serialize: serializeSetOperator('\\cap', 350, 'both'),
   },
   {
     // Unicode ∩ (U+2229 INTERSECTION): literal-glyph spelling of `\cap`.
@@ -544,6 +672,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     precedence: 350,
     parse: parseSetOperator('Union', 350, 'both'),
+    serialize: serializeSetOperator('\\cup', 350, 'both'),
   },
   {
     // Unicode ∪ (U+222A UNION): literal-glyph spelling of `\cup`.
@@ -698,6 +827,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     precedence: 650,
     parse: parseSetOperator('SetMinus', 650, 'both'),
+    serialize: serializeSetOperator('\\setminus', 650, 'both'),
   },
   {
     // `\backslash` between two expressions is a common spelling of set
@@ -743,6 +873,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     // the condition inside the domain. Still below comparisons (245).
     precedence: 241,
     parse: parseSetOperator('Element', 241, 'rhs'),
+    serialize: serializeSetOperator('\\in', 241, 'rhs'),
   },
   {
     // Unicode ∈ (U+2208 ELEMENT OF): literal-glyph spelling of `\in`.
@@ -757,6 +888,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     precedence: 240,
     parse: parseSetOperator('NotElement', 240, 'rhs'),
+    serialize: serializeSetOperator('\\notin', 240, 'rhs'),
   },
   {
     // Unicode ∉ (U+2209 NOT AN ELEMENT OF): literal-glyph spelling of `\notin`.
@@ -870,6 +1002,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     associativity: 'none',
     precedence: 240,
     parse: parseSetOperator('Subset', 240, 'both'),
+    serialize: serializeSetOperator('\\subset', 240, 'both'),
   },
   {
     latexTrigger: ['\\subsetneq'],
@@ -892,6 +1025,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     associativity: 'none',
     precedence: 240,
     parse: parseSetOperator('SubsetEqual', 240, 'both'),
+    serialize: serializeSetOperator('\\subseteq', 240, 'both'),
   },
   {
     name: 'Superset',
@@ -900,6 +1034,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     associativity: 'none',
     precedence: 240,
     parse: parseSetOperator('Superset', 240, 'both'),
+    serialize: serializeSetOperator('\\supset', 240, 'both'),
   },
   {
     latexTrigger: ['\\supsetneq'],
@@ -922,6 +1057,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     associativity: 'none',
     precedence: 240,
     parse: parseSetOperator('SupersetEqual', 240, 'both'),
+    serialize: serializeSetOperator('\\supseteq', 240, 'both'),
   },
 ];
 
@@ -973,32 +1109,7 @@ function serializeSet(
   //
   // `Range`
   //
-  if (h === 'Interval') {
-    let op1 = operand(expr, 1);
-    let op2 = operand(expr, 2);
-    let openLeft = false;
-    let openRight = false;
-    if (operator(op1) === 'Open') {
-      op1 = operand(op1, 1);
-      openLeft = true;
-    }
-    if (operator(op2) === 'Open') {
-      op2 = operand(op2, 1);
-      openRight = true;
-    }
-    // Use American notation for interval serialization:
-    // [a, b] closed, (a, b) open, [a, b) closed-open, (a, b] open-closed
-    // This enables round-trip parsing for half-open intervals.
-    // Note: [a, b] and (a, b) will parse back as List/Tuple respectively
-    // due to backward compatibility constraints.
-    return joinLatex([
-      openLeft ? '\\lparen' : '\\lbrack',
-      serializer.serialize(op1),
-      ', ',
-      serializer.serialize(op2),
-      openRight ? '\\rparen' : '\\rbrack',
-    ]);
-  }
+  if (h === 'Interval') return serializeInterval(serializer, expr);
 
   // -----
   const style = serializer.numericSetStyle(expr, serializer.level);

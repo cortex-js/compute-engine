@@ -69,6 +69,22 @@ import { typeMembership } from './sets.js';
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
 
+/**
+ * True when an operand's type rules out its being a collection, so a compile
+ * target may treat it as a single scalar slot.
+ *
+ * Deliberately conservative in one direction only: `unknown` and `value` (the
+ * type of a free symbol in a compiled body) are NOT provably scalar, even
+ * though they usually are at runtime. A union is scalar only if every arm is.
+ */
+function isProvablyScalar(operand: Expression): boolean {
+  const nonScalar = (t: Type): boolean =>
+    typeof t !== 'string' && t.kind === 'union'
+      ? t.types.some(nonScalar)
+      : isSubtype(t, 'collection');
+  return !nonScalar(operand.type.type);
+}
+
 // Parsed form of the `At` signature (kept in sync with the `signature:` string
 // on the `At` definition), used by its custom canonical handler to delegate
 // operand validation to `validateArguments`.
@@ -5439,6 +5455,45 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
       }
       return ce.function('List', elements);
+    },
+    // (Tycho item 94.) `ListFrom` is the only eager materializer that works
+    // over an arbitrary collection body, which makes it the documented escape
+    // from the lazy-view trap under `WithRandomSeed` — a frame around a lazy
+    // comprehension has already exited by the time the view materializes, so
+    // the draws escape it. That escape is only usable if it also compiles.
+    compile: (args, compile, { language }) => {
+      const parts = args.map((a) => compile(a));
+
+      // On the CPU targets the splice is decided at RUNTIME, per operand: a
+      // collection contributes its elements, anything else contributes itself.
+      // A static type gate would be wrong here — a free symbol in a compiled
+      // body types as `unknown`, and `unknown` is exactly the case that has to
+      // work.
+      if (language === 'javascript') {
+        if (args.every(isProvablyScalar)) return `[${parts.join(', ')}]`;
+        return `[${parts.join(', ')}].flatMap((_x) => Array.isArray(_x) ? _x : [_x])`;
+      }
+      if (language === 'python') {
+        if (args.every(isProvablyScalar)) return `[${parts.join(', ')}]`;
+        return `[_y for _x in [${parts.join(', ')}] for _y in (_x if isinstance(_x, list) else [_x])]`;
+      }
+
+      // The GPU targets have no runtime splice: their lists are fixed-size
+      // `vecN`/array literals. An all-scalar `ListFrom` is exactly the
+      // equivalent `List`, so emit that; anything with a provably collection
+      // operand fails closed (`undefined` → reported as uncompilable).
+      if (language === 'glsl' || language === 'wgsl') {
+        if (!args.every(isProvablyScalar)) return undefined;
+        const suffix = language === 'wgsl' ? 'f' : '';
+        if (parts.length >= 2 && parts.length <= 4)
+          return `vec${parts.length}${suffix}(${parts.join(', ')})`;
+        const arrayType =
+          language === 'wgsl'
+            ? `array<f32, ${parts.length}>`
+            : `float[${parts.length}]`;
+        return `${arrayType}(${parts.join(', ')})`;
+      }
+      return undefined;
     },
   },
 

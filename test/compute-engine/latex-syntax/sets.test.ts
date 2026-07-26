@@ -33,9 +33,15 @@ describe('SERIALIZING SETS', () => {
   // test('Range', () => {});
 
   test('Interval serialization', () => {
-    // Closed interval [a, b]
+    // Serialized in a NEUTRAL position, so each spelling has to re-parse as an
+    // `Interval` on its own. See `tycho-items-93-94.test.ts` for the full
+    // round-trip matrix and for the set-operator positions, where the operator
+    // forces the set reading and the bracket notation is kept.
+
+    // Closed interval [a, b]: no bracket spelling is available, since `[3, 4]`
+    // is also how a two-element list is written.
     expect(latex(['Interval', 3, 4])).toMatchInlineSnapshot(
-      `\\lbrack3, 4\\rbrack`
+      `\\mathrm{Interval}(3, 4)`
     );
     // Open-closed interval (a, b]
     expect(latex(['Interval', ['Open', 3], 4])).toMatchInlineSnapshot(
@@ -45,9 +51,10 @@ describe('SERIALIZING SETS', () => {
     expect(latex(['Interval', 3, ['Open', 4]])).toMatchInlineSnapshot(
       `\\lbrack3, 4\\rparen`
     );
-    // Open interval (a, b)
+    // Open interval: ISO reversed brackets, since `(3, 4)` re-parses as a
+    // parenthesized sequence.
     expect(latex(['Interval', ['Open', 3], ['Open', 4]])).toMatchInlineSnapshot(
-      `\\lparen3, 4\\rparen`
+      `\\rbrack3, 4\\lbrack`
     );
   });
 
@@ -644,14 +651,20 @@ describe('RANGE AND INTERVAL SERIALIZATION', () => {
   });
 
   it('should round-trip Interval expressions', () => {
-    // Closed interval [a, b]
+    // Closed interval [a, b]. This used to come back as `List(3, 4)` — the
+    // serializer emitted `\lbrack3, 4\rbrack`, which the parser reads as a
+    // two-element list. That was recorded here as a backward-compatibility
+    // limitation, but it is silently destructive wherever the list reading is
+    // also valid (Tycho item 93: under `RandomChoice` it turns a uniform real
+    // draw into a Bernoulli pick of the values 0 and 1). A closed interval is
+    // now serialized in the unambiguous function form and round-trips.
     const closed = ce.expr(['Interval', 3, 4]);
     const closedLatex = closed.latex;
+    expect(closedLatex).toMatchInlineSnapshot(`\\mathrm{Interval}(3, 4)`);
     const closedReparsed = ce.parse(closedLatex);
-    // Note: [3, 4] parses as List due to backward compatibility
     expect(closedReparsed.json).toMatchInlineSnapshot(`
       [
-        List,
+        Interval,
         3,
         4,
       ]

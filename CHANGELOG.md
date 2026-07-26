@@ -70,6 +70,54 @@
 
 ### Issues Resolved
 
+- **`Interval` now survives a LaTeX round-trip.** A closed interval serialized
+  as `\lbrack a, b\rbrack`, which the parser reads as a two-element `List`, and
+  a fully-open one as `\lparen a, b\rparen`, read back as a parenthesized
+  `Sequence`. The substitution was silent and could be destructive: under
+  `RandomChoice` — the documented migration target for the removed
+  `RandomList(n)` — `RandomChoice(Interval(0, 1), n)` came back as
+  `RandomChoice(List(0, 1), n)`, demoting a uniform real draw to a Bernoulli
+  pick of the two *values* 0 and 1, with nothing downstream able to detect it.
+
+  Serialization now depends on whether the position disambiguates the interval:
+
+  - In a **set position** of a set operator — the right side of `\in`/`\notin`,
+    either side of `\cup`, `\cap`, `\setminus`, `\subset`, `\subseteq`,
+    `\supset`, `\supseteq` — the conventional bracket notation is kept
+    (`x\in\lbrack0, 1\rbrack`), because the operator forces the set reading when
+    it is parsed back. This is unchanged, and stays the common display case.
+  - **Anywhere else** the serialization has to stand on its own: half-open
+    intervals use the unambiguous American spellings (`\lbrack a, b\rparen`,
+    `\lparen a, b\rbrack`), an open interval uses ISO reversed brackets
+    (`\rbrack a, b\lbrack`), and a **closed** interval uses the function form
+    `\mathrm{Interval}(a, b)` — `[a, b]` is also how a two-element list is
+    written, so no bracket spelling is available for it.
+
+  Consumers storing a uniform draw as LaTeX can now use the closed
+  `RandomChoice(Interval(0, 1), n)` from the migration table directly. The
+  half-open `Interval(0, Open(1))` remains the more precise spelling for what
+  `RandomList(n)` meant (upper-exclusive) and also round-trips.
+
+- **`ListFrom` now compiles.** It had no compile handler, so the one eager
+  materializer that works over an arbitrary collection body could not be used in
+  compiled code. That matters under `WithRandomSeed`: a frame around a *lazy*
+  comprehension does not make it replayable, because the view materializes after
+  the frame has exited and the draws escape it. `ListFrom` inside the frame
+  makes it eager, and the compiled form now agrees with the interpreter
+  draw-for-draw:
+
+  ```
+  WithRandomSeed(12345, ListFrom([Random() for k=[1...6]]))   // replays, compiles
+  ```
+
+  On the JavaScript and Python targets the splice is decided at runtime, per
+  operand, so an operand typing as `unknown` — a free symbol in a compiled body
+  — works. The GPU targets have no runtime splice (their lists are fixed-size
+  `vecN`/array literals), so an all-scalar `ListFrom` compiles exactly like the
+  equivalent `List` and anything with a provably collection operand fails
+  closed. Note that `Repeat(Random(), n)` is eager and round-trips but draws
+  **once**, yielding n copies of a single value — it is not a uniform batch.
+
 - **A cycle between symbol values no longer overflows the stack.** A pair of
   bindings such as `a := b` with `b := a` is individually well-formed — each
   value mentions no symbol of its own name — so the self-reference guard never
