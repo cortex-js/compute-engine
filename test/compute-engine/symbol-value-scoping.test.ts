@@ -3,33 +3,41 @@
  *
  * Design doc: docs/plans/2026-07-24-defining-scope-dereference-design.md
  *
- * Two symptoms, sharing a theme but NOT a mechanism:
+ * A symbol's stored value is evaluated in the environment ITS OWN free symbols
+ * denote (`evaluateInOwnBindings`, `binders.ts`), which settled two symptoms
+ * that shared a theme but not a mechanism:
  *
- *  1. STALENESS ("one-evaluate-late"): a stored symbolic value does not
- *     re-resolve free symbols assigned after it was stored — `evaluate()`
- *     disagrees with `N()`, with the constant path, and with `compile()`.
- *     Mechanism: `BoxedSymbol.evaluate()` returns the stored value verbatim.
- *  2. NAME CAPTURE: when a stored value's free symbols end up inside a call
- *     frame, they are captured BY NAME by parameters of the frame — even when
- *     a lexically-correct global binding exists. TWO mechanisms:
+ *  1. STALENESS ("one-evaluate-late"): a stored symbolic value did not
+ *     re-resolve free symbols assigned after it was stored, so `evaluate()`
+ *     disagreed with `N()`, with the constant path and with `compile()`.
+ *     `BoxedSymbol.evaluate()` returned the stored value verbatim; it now
+ *     dereferences it.
+ *  2. NAME CAPTURE: a stored value's free symbols, once inside a call frame,
+ *     were captured BY NAME by the frame's parameters — even when a
+ *     lexically-correct global binding existed. Three channels, all
+ *     name-keyed, all closed:
  *       - Channel A (non-constant values): the post-evaluation parameter
- *         substitution in `function-utils.ts` (Tycho item 26) rewrites any
- *         parameter name surviving in the RESULT — including one that arrived
- *         inside a dereferenced value. It fires even when no dereference
- *         happened in that frame (see the nested-frame test).
+ *         substitution in `function-utils.ts` (Tycho item 26) rewrote any
+ *         parameter name surviving in the RESULT, including one that arrived
+ *         inside a dereferenced value, and fired even where no dereference had
+ *         happened (the nested-frame test). Now keyed on the parameter's
+ *         BINDING.
  *       - Channel B (constants): the constant branch of
- *         `BoxedSymbol.evaluate()` re-evaluates its stored value in the
- *         CURRENT context, so a frame binding intercepts directly.
+ *         `BoxedSymbol.evaluate()` re-evaluated its stored value in the
+ *         CURRENT context, so a frame binding intercepted at the dereference.
+ *       - Channel C: the in-frame `numericApproximation` re-evaluation did the
+ *         same on the `N` route, which is why `g(5)` and `N(g(5))` disagreed.
  *
- * Every test marked `@fixme` asserts the CURRENT (wrong) behavior so the
- * suite stays green; the intended behavior under defining-scope dereference
- * is stated in the comment above each assertion, along with which design step
- * flips it. Tests NOT marked `@fixme` assert behavior that is correct today
- * and must be preserved by the fix.
+ * These began as characterization tests — asserting the buggy values so the
+ * suite stayed green — and were flipped to the intended values as each half
+ * landed. What they now pin, and what a future change must not undo:
  *
- * NOTE: these are characterization tests — they pass against the buggy
- * implementation by construction. The design pass flips the `@fixme`
- * assertions to their intended values.
+ *  - `evaluate()`, `N()` and `compile()` agree on a dereferenced value;
+ *  - a free symbol in a stored value means the binding it was canonicalized
+ *    against, not whatever an inner scope calls that name;
+ *  - assignment stays EAGER, so declaration order still decides what a stored
+ *    value snapshots (see the late/early ruling);
+ *  - the cycle residuals (`s = s + 1` → `s + 1`) are unchanged.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -54,35 +62,35 @@ function assignD(ce: ComputeEngine): void {
 }
 
 describe('SPEC: staleness (one-evaluate-late)', () => {
-  test('@fixme evaluate() does not re-resolve a later-assigned free symbol', () => {
+  test('evaluate() re-resolves a later-assigned free symbol', () => {
     const ce = engine();
     assignD(ce);
     ce.box(['Assign', 'x', 2]).evaluate();
-    // INTENDED (step 2): '13' — x is assigned in d's own (global) scope, so
-    // the dereference should resolve it. Must agree with N().
-    expect(ce.box('d').evaluate().toString()).toEqual('3x^2 + 1');
-    // N() already resolves — evaluate() and N() disagree today.
+    // `x` is assigned in d's own (global) scope, so the dereference resolves
+    // it — and agrees with N(), which always did.
+    expect(ce.box('d').evaluate().toString()).toEqual('13');
     expect(ce.box('d').N().toString()).toEqual('13');
-    // A second evaluate() resolves one more level ("one-evaluate-late").
+    // Idempotent: there is no second level left to resolve. (This assertion
+    // used to record the "one-evaluate-late" symptom, where the first
+    // evaluate() returned `3x^2 + 1` and only the second reached 13.)
     expect(ce.box('d').evaluate().evaluate().toString()).toEqual('13');
   });
 
-  test('@fixme Cortex route: bare deref is stale, N is not', () => {
-    // INTENDED (step 2): both '13'.
-    expect(cortex('let d = 3x^2 + 1\nlet x = 2\nd')).toEqual('3x^2 + 1');
+  test('Cortex route: bare deref and N agree', () => {
+    expect(cortex('let d = 3x^2 + 1\nlet x = 2\nd')).toEqual('13');
     expect(cortex('let d = 3x^2 + 1\nlet x = 2\nN(d)')).toEqual('13');
   });
 
-  test('@fixme the compiled route already resolves deeply', () => {
+  test('the compiled route agrees with evaluate()', () => {
     // `BaseCompiler.tryFoldKnownSymbol` folds the value AND its nested free
-    // symbols, so compile() reports 13 while evaluate() reports 3x^2 + 1.
-    // Among interpret / N / compile, plain evaluate() is the outlier.
-    // INTENDED (step 2): the two agree.
+    // symbols. It reported 13 while evaluate() still reported `3x^2 + 1` —
+    // among interpret / N / compile, plain evaluate() was the outlier. All
+    // three now agree.
     const ce = engine();
     assignD(ce);
     ce.box(['Assign', 'x', 2]).evaluate();
     expect(compile(ce.box('d'))?.code).toEqual('(3 * (2 * 2) + 1)');
-    expect(ce.box('d').evaluate().toString()).toEqual('3x^2 + 1');
+    expect(ce.box('d').evaluate().toString()).toEqual('13');
   });
 
   test('the constant path already re-evaluates on dereference', () => {
@@ -109,51 +117,73 @@ describe('SPEC: the late-bound/early-bound ruling', () => {
 });
 
 describe('SPEC: name capture through call frames', () => {
-  test('@fixme a parameter captures a stored value’s free symbol by name', () => {
+  test('a parameter does not capture a stored value’s free symbol', () => {
     const ce = engine();
     ce.box(['Assign', 'a', ['Add', 'x', 1]]).evaluate();
     ce.box(['Assign', 'g', ['Function', 'a', 'x']]).evaluate();
-    // INTENDED (step 3): 'x + 1' — a's free x lexically means the (unbound)
-    // global x; the call frame's parameter must not intercept it.
-    expect(ce.box(['g', 5]).evaluate().toString()).toEqual('6');
-    // ... and the same under N().
-    expect(ce.box(['g', 5]).N().toString()).toEqual('6');
+    // a's free x lexically means the (unbound) global x; the call frame's
+    // parameter is a different variable that happens to share the spelling.
+    expect(ce.box(['g', 5]).evaluate().toString()).toEqual('x + 1');
+    // ... and the same under N(), which used to be Channel C: the in-frame
+    // numeric re-evaluation looked `x` up again and found the parameter, so
+    // this returned 6 while `evaluate()` already returned `x + 1`.
+    expect(ce.box(['g', 5]).N().toString()).toEqual('x + 1');
   });
 
-  test('@fixme the frame wins even over an existing global binding', () => {
+  test('the lexical global binding wins over the frame', () => {
     const ce = engine();
     ce.box(['Assign', 'a', ['Add', 'x', 1]]).evaluate();
     ce.box(['Assign', 'x', 100]).evaluate();
     ce.box(['Assign', 'g', ['Function', 'a', 'x']]).evaluate();
-    // INTENDED (steps 2 AND 3): '101' — the global x = 100 is the lexically
-    // correct binding. Today the call frame's x = 5 shadows it: pure dynamic
-    // capture. Step 3 alone yields 'x + 1'; step 2 supplies the 100.
-    expect(ce.box(['g', 5]).evaluate().toString()).toEqual('6');
-    expect(ce.box(['g', 5]).N().toString()).toEqual('6');
+    // The global x = 100 is the lexically correct binding, so the dereference
+    // resolves it. The call frame's x = 5 used to shadow it — pure dynamic
+    // capture — giving 6. Both halves of the repair are needed here: closing
+    // the capture alone would yield `x + 1`, and the dereference supplies 100.
+    expect(ce.box(['g', 5]).evaluate().toString()).toEqual('101');
+    expect(ce.box(['g', 5]).N().toString()).toEqual('101');
   });
 
-  test('@fixme an enclosing frame captures a result it never dereferenced', () => {
+  test('an enclosing frame does not capture a result it never dereferenced', () => {
     // THE DECISIVE CASE for the mechanism: g's frame (parameter z) does the
-    // dereference cleanly and returns `x + 1`; h's frame then rewrites that
-    // x by name, without any dereference of its own. Channel A — the item 26
-    // substitution in function-utils — not the dereference path. A fix
-    // confined to BoxedSymbol.evaluate() cannot flip this.
-    // INTENDED (step 3): 'x + 1'.
-    expect(cortex('let a = x + 1\ng(z) = a\nh(x) = g(1)\nh(5)')).toEqual('6');
+    // dereference cleanly and returns `x + 1`; h's frame then used to rewrite
+    // that x by name without any dereference of its own — Channel A, the item
+    // 26 substitution in function-utils, not the dereference path. A fix
+    // confined to `BoxedSymbol.evaluate()` could not have flipped this; keying
+    // the substitution on the parameter's BINDING did.
+    expect(cortex('let a = x + 1\ng(z) = a\nh(x) = g(1)\nh(5)')).toEqual(
+      'x + 1'
+    );
     expect(cortex('let a = x + 1\ng(z) = a\nh(x) = g(1)\nN(h(5))')).toEqual(
-      '6'
+      'x + 1'
     );
   });
 
-  test('@fixme constants are captured too (a separate channel)', () => {
-    // Channel B: the constant branch re-evaluates its stored value in the
-    // CURRENT context, so the frame intercepts at the dereference itself
-    // (verified independent of the item 26 substitution).
-    // INTENDED (step 2): 'x + 1'.
+  test('constants are not captured either (a separate channel)', () => {
+    // Channel B: the constant branch re-evaluated its stored value in the
+    // CURRENT context, so the frame intercepted at the dereference itself
+    // (verified independent of the item 26 substitution). Both branches now go
+    // through the same binding-aware dereference.
     const ce = engine();
     ce.declare('kk', { value: ce.parse('x + 1'), isConstant: true });
     ce.box(['Assign', 'g', ['Function', 'kk', 'x']]).evaluate();
-    expect(ce.box(['g', 5]).evaluate().toString()).toEqual('6');
+    expect(ce.box(['g', 5]).evaluate().toString()).toEqual('x + 1');
+    expect(ce.box(['g', 5]).N().toString()).toEqual('x + 1');
+  });
+
+  test('a stored DICTIONARY’s values are not captured either', () => {
+    // The dereference helper's fast path used to be "no symbols, nothing to
+    // protect", and `symbols` does not descend into a dictionary — so a stored
+    // dictionary skipped the protection entirely and its values were evaluated
+    // in the ambient frame, giving `{k: 6}`.
+    const ce = engine();
+    const dict = ce.box([
+      'Dictionary',
+      ['Tuple', { str: 'k' }, ['Add', 'x', 1]],
+    ]);
+    expect(dict.symbols).toEqual([]); // why the fast path missed it
+    ce.box(['Assign', 'a', dict]).evaluate();
+    ce.box(['Assign', 'g', ['Function', 'a', 'x']]).evaluate();
+    expect(ce.box(['g', 5]).evaluate().toString()).toContain('x');
   });
 
   test('the capture is purely name-based: renaming the parameter avoids it', () => {
@@ -165,10 +195,11 @@ describe('SPEC: name capture through call frames', () => {
     expect(ce.box(['g', 5]).evaluate().toString()).toEqual('x + 1');
   });
 
-  test('@fixme lambda frames capture the same way', () => {
-    // INTENDED (step 3): 'x + 1' on all three routes.
-    expect(cortex('let a = x + 1\nlet h = x |-> a\nh(5)')).toEqual('6');
-    expect(cortex('let a = x + 1\nlet h = x |-> a\nN(h(5))')).toEqual('6');
+  test('lambda frames do not capture either', () => {
+    // A lambda's call frame is the same mechanism as a named function's, so it
+    // must answer the same way on all three routes.
+    expect(cortex('let a = x + 1\nlet h = x |-> a\nh(5)')).toEqual('x + 1');
+    expect(cortex('let a = x + 1\nlet h = x |-> a\nN(h(5))')).toEqual('x + 1');
     // Box route: same shape, no Cortex parsing involved.
     const ce = engine();
     ce.box(['Assign', 'a', ['Add', 'x', 1]]).evaluate();
@@ -177,7 +208,7 @@ describe('SPEC: name capture through call frames', () => {
         .box(['Apply', ['Function', 'a', 'x'], 5])
         .evaluate()
         .toString()
-    ).toEqual('6');
+    ).toEqual('x + 1');
   });
 
   test('block-local lets do NOT capture (must stay clean)', () => {
@@ -210,6 +241,18 @@ describe('SPEC: cycle behavior (must not regress)', () => {
     // 'a + 2' — both regressions of the residual pinned here).
     expect(cortex('let s\ns = s + 1\ns')).toEqual('s + 1');
     expect(cortex('a = b + 1\nb = a + 1\na')).toEqual('b + 1');
+  });
+
+  test('a cycle further down the chain costs only its own dereference', () => {
+    // `a` is not itself cyclic, so the cycle between `p` and `q` must not cost
+    // `a` its dereference. An abort that unwound the WHOLE chain returned `a`'s
+    // raw stored value (`p + 5`), silently reinstating the staleness above.
+    //
+    // The values look one level deeper than written because assignment is EAGER
+    // (see the late/early ruling): by the time `q = p + 1` runs, `p` already
+    // dereferences to `q + 1`, so `q` stores `q + 2`.
+    expect(cortex('p = q + 1\nq = p + 1\np')).toEqual('q + 1');
+    expect(cortex('a = p + 5\np = q + 1\nq = p + 1\na')).toEqual('q + 6');
   });
 
   test('a self-referential ARGUMENT substitutes once (Tycho item 46)', () => {

@@ -1,6 +1,9 @@
 import { MathJsonSymbol } from '../math-json.js';
 import { cmp } from './boxed-expression/compare.js';
-import { rewriteWithBinders } from './boxed-expression/binders.js';
+import {
+  evaluateInOwnBindings,
+  rewriteWithBinders,
+} from './boxed-expression/binders.js';
 import type {
   BoxedDefinition,
   BoxedValueDefinition,
@@ -1254,8 +1257,18 @@ function makeLambda(
       // frame is still pushed. Approximating after the frame is popped
       // would re-resolve free symbols in the *caller's* dynamic context,
       // breaking lexical scoping (see scope.test.ts "Dynamic scoping").
+      //
+      // In-frame, though, the pass must not re-resolve those symbols by NAME
+      // either — that was Channel C of the name-capture defect: `let a = x + 1;
+      // g(x) = a; N(g(5))` gave `6` while `g(5)` gave `x + 1`, because the
+      // numeric pass looked `x` up again and found the frame's parameter. Every
+      // occurrence that genuinely refers to a parameter has already been
+      // replaced by its value (`bindingKeyedSubs`, above), so what remains
+      // means its own binding and is resolved as such.
       if (options?.numericApproximation)
-        result = result.evaluate({ numericApproximation: true });
+        result = evaluateInOwnBindings(ce, result, {
+          numericApproximation: true,
+        });
     } finally {
       ce.popScope();
       bodyScope.parent = savedParent;

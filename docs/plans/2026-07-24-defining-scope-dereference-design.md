@@ -5,19 +5,26 @@ implementation record. Supersedes the "defining-scope dereference" design that
 previously occupied this file (kept in §Appendix A); that framing treated a
 symptom.
 
-> **RESUMING? START HERE — §Handoff (2026-07-25) at the end of this file.**
-> The staged tree is RED by exactly the 4 dereference-gated `@fixme`s (down
-> from 19 after review round 2); that section says why, and what to do next.
+> **RESUMING? START HERE — §Handoff (2026-07-26) at the end of this file.**
 
-**Phase 1 (equality + escape leaks): IMPLEMENTED, reviewed, staged** — see
+**Phase 1 (equality + escape leaks): IMPLEMENTED, reviewed, committed** — see
 §Implementation record.
 
-**Phase 2 (the compensation layer): SUBSTANTIALLY DONE, staged, red.** The item
-26 heuristic is deleted and replaced by a binding-keyed substitution; every
-capture symptom below is fixed, INCLUDING `g(x) = a + x` → `x + 6`, which no
-name-keyed variant could reach. Five wrong-scope binding defects were found and
-fixed along the way (§The recurring defect). **Staleness is untouched** — that
-is phase 2 step 3, the dereference half, and Channel C with it.
+**Phase 2 (the compensation layer): DONE.** The item 26 heuristic is deleted and
+replaced by a binding-keyed substitution; every capture symptom below is fixed,
+INCLUDING `g(x) = a + x` → `x + 6`, which no name-keyed variant could reach. Five
+wrong-scope binding defects were found and fixed along the way (§The recurring
+defect).
+
+**Phase 2 step 3 (dereference): IMPLEMENTED 2026-07-26, staged.** A symbol's
+stored value is evaluated in the environment its own free symbols denote
+(`evaluateInOwnBindings`, `binders.ts`), which closes the staleness half AND
+Channel C. All eight `@fixme`s are flipped and the executable spec is green;
+full suite green with **4179/4179 snapshots unchanged**.
+
+Still open, and deliberately: §Sequencing steps 4 (named-parameter rebind) and
+5 (a sanctioned binder mechanism). Step 3 did not need them, but it did confirm
+why they exist — see §The dereference rule.
 
 **Equality is now strict (option B).** `sameBinding` requires both sides to
 agree on being bound and on the binding; template-vs-subject comparison is the
@@ -56,6 +63,11 @@ algebra, one symbol. **`_def` is advisory; the name is load-bearing.** Every
 defect below is a consequence.
 
 ## The consequences
+
+Written in the present tense of the diagnosis. All of them are now fixed —
+staleness and Channels B and C by §The dereference rule, Channel A by the
+binding-keyed substitution — and each is pinned by
+`test/compute-engine/symbol-value-scoping.test.ts`.
 
 ### Staleness ("one-evaluate-late")
 
@@ -210,6 +222,61 @@ bound to the old scope — a `Sum` whose body no longer resolves its index.
 
 Assume the inventory is **incomplete**: three sites were found reactively, and
 the obvious untouched candidate is `makeLambda`'s call frame.
+
+### The dereference rule (phase 2 step 3, 2026-07-26)
+
+A free symbol inside a stored value is **not a name to be looked up again**. It
+already carries the binding it was canonicalized against, and that binding is
+the environment the value must be evaluated in. `evaluateInOwnBindings`
+(`binders.ts`) binds each such occurrence to ITS OWN definition for the duration
+of the evaluation, then evaluates. Called from two places:
+`BoxedSymbol.evaluate()` (both the constant and non-constant branches — Channels
+B and the staleness half) and `makeLambda`'s in-frame `numericApproximation` pass
+(Channel C).
+
+Two restrictions confine it, each one measured rather than reasoned:
+
+1. **The occurrence's definition must be reachable** in the current scope chain.
+   A call frame parks a parameter's value in a *fresh* definition and hides the
+   body's own (`hideBodyScopeParams`), so a body occurrence's definition is
+   unreachable BY DESIGN and the name lookup is the only thing that can answer.
+2. **The shadowing binding must hold a VALUE.** A valueless shadow cannot
+   capture anything, and shadowing a name valueless is how every shield in the
+   engine works — `Solve` blinds its unknown at the source, `withValueShield`
+   and `simplifyValueBlind` do it for `simplify`. Honoring the occurrence's own
+   binding there resolves precisely what the shield exists to hide, and
+   `solve.test.ts`'s "the unknown both has a value and is reintroduced by
+   another binding" catches it immediately.
+
+**The falsified alternative, recorded so it is not retried.** The obvious move is
+to make resolution binding-aware *generally* — have `BoxedSymbol.evaluate()`
+prefer the occurrence's own definition over an inner same-named binding
+(reachable-but-shadowed ⇒ the occurrence wins). Measured: **100+ failures**,
+including beta-reduction itself (`[[Function, x+1, x], 5]`), the `D`/`Integrate`/
+`Limit` binder value-shields, and CONTRACT 4 in `scope.test.ts` — a written
+guarantee that a cached parent-scope expression DOES see a nested-scope shadow.
+
+The reason is instructive and is the case for §Sequencing steps 4–5: a `Function`
+literal's body frequently carries the OUTER definition for the literal's own
+parameter, so "the occurrence's own binding" is not yet trustworthy for
+parameters. That is the same wrong-scope class as §The recurring defect. Until a
+binder owns its variables, dereference must stay confined to values it *knows*
+came out of a definition — which is exactly what the two restrictions above
+express.
+
+Cost: the numeric fast path (a number literal — loop counters, numeric
+arguments, `x = 2`) measures 0.0007 ms/iter, and the walk is not measurably more
+expensive than the `evaluate()` it wraps. The added cost of the repair is the
+evaluation the staleness fix now genuinely performs.
+
+**The fast path must not be `value.symbols.length === 0`.** That is the obvious
+cheap gate and it is unsound: `symbols` descends through function nodes only, so
+a stored DICTIONARY reports no symbols while its values are full of them. It sent
+`a = {k: x + 1}` down the fast path, and evaluating it inside a frame whose
+parameter is also `x` produced `{k: 6}` — the very capture this helper exists to
+prevent, reintroduced by its own optimization. `rewriteWithBinders` does descend
+into dictionary values, so gating only on a number literal is both sound and
+enough.
 
 ### What this retires
 
@@ -411,15 +478,89 @@ Full suite green with it applied (zero churn), which is how we learned that
 nothing in the corpus depends on staleness — and nothing covered the capture
 bug either, a gap the executable spec now closes.
 
-## Handoff (2026-07-25)
+## Handoff (2026-07-26)
 
 ### State of the tree
 
-Everything is **staged**, nothing committed, `HEAD` = `22b331ce`. The staged
-tree is **RED by exactly the 4 dereference-gated `@fixme`s** (full suite:
-4 failed / 18,840 passed, snapshots 4176/4176 unchanged). That is deliberate —
-they flip only after dereference — but the tree must not be committed until
-they do.
+Phase 1 and the phase-2 compensation layer were **committed** (they are in
+`HEAD`'s history; the round-2 handoff below described them while still staged).
+
+**Dereference (phase 2 step 3) is staged and GREEN.** Full suite **exit 0**:
+19,205 passed, 0 failed, snapshots **4179/4179 unchanged**. All eight `@fixme`s
+in the executable spec are flipped, plus two regression pins added from the
+review round, so the file is now a spec rather than a characterization suite.
+
+The review round (dual-reviewer, 5 findings, all fixed) is folded into the
+sections above: §The cycle guard is the subtle part (the throw became a flag, and
+the abort got narrowed to the re-entered definition), §Borrowed definitions must
+be handed back before the scope pops, and the fast-path note in §The dereference
+rule.
+
+Staged for this step:
+
+| file | what |
+|:--|:--|
+| `boxed-expression/binders.ts` | `evaluateInOwnBindings` — the dereference itself (see §The dereference rule) |
+| `boxed-expression/boxed-symbol.ts` | `evaluate()` routes both branches through `_dereference`, which owns the cycle guard |
+| `boxed-expression/cycle-guard.ts` | one new query kind, `Dereference` |
+| `function-utils.ts` | Channel C: the in-frame `numericApproximation` pass |
+| `test/compute-engine/symbol-value-scoping.test.ts` | the eight flips + a rewritten header |
+
+`binders.ts` rather than `utils.ts` is deliberate: `function-utils.ts` cannot
+import `utils.ts` (that is the cycle its inlined `isValueDef` check exists for),
+and `utils.ts` imports `binders.ts`, so the value-definition checks are inlined
+there for the same reason.
+
+### The cycle guard is the subtle part
+
+`s = s + 1; s` must stay `s + 1` and `a = b + 1; b = a + 1; a` must stay `b + 1`,
+while a cycle further away must not cost an innocent symbol its dereference.
+Five reactions, all measured, all now pinned:
+
+| on re-entry | `s = s+1; s` | `a = b+1; b = a+1; a` | `a = p+5; p = q+1; q = p+1; a` |
+|:--|:--|:--|:--|
+| resolve one more level | `s + 2` | `b + 5` | — |
+| return the bare symbol | `s + 1` | `a + 2` | — |
+| abort the whole chain | `s + 1` | `b + 1` | `p + 5` — loses a's dereference |
+| abandon the re-entered def, always returning its value | `s + 1` | `b + 3` | `q + 8` |
+| **…returning its value only at the top of the chain** | `s + 1` | `b + 1` | `q + 6` |
+
+The last row is implemented: the re-entry point records WHICH definition is
+cyclic, that definition's own frame abandons its dereference, and the stored
+value escapes only when that frame is also the top of the chain.
+
+Two traps live in the gap between rows 3–5, and both cost a debugging round:
+
+- **Row 3 is over-broad.** `a` is not cyclic; aborting its dereference because
+  something two hops down is reinstates exactly the staleness this repair
+  removes. A depth counter alone cannot tell "I am the top of the chain" from "I
+  am the cycle", so it needs both pieces of state.
+- **Assignment is EAGER, so the cycle is already baked into the stored value.**
+  With `a = b + 1` then `b = a + 1`, `b`'s stored value is `b + 2`, not `a + 1` —
+  the dereference resolved `a` while evaluating the right-hand side. Row 3 was
+  masking that; once a cyclic definition's value can escape to an enclosing
+  expression (row 4), the extra level shows up as `b + 3`. Hence "only at the top
+  of the chain".
+
+**Not a throw.** A thrown sentinel is absorbed by the rule engine's blanket
+`catch` handlers — `rules.ts` re-throws only `CancellationError` and otherwise
+treats an exception as "this rule failed" — so a cyclic definition dereferenced
+during `simplify()` would silently truncate the pass, or log a raw
+`Symbol(dereference-cycle)`. It would also make `Dereference` the one
+cycle-guard kind that throws, against the invariant at the top of
+`cycle-guard.ts`. Failing closed keeps both properties, and costs nothing: the
+guard already bounds the recursion.
+
+### Borrowed definitions must be handed back before the scope pops
+
+`evaluateInOwnBindings` installs the occurrences' OWN definitions in a temporary
+scope, and popping a scope **disposes every value definition among its bindings**
+(`discardEvalContext`, `engine-scope.ts`). Those definitions belong to the
+caller's scopes, and disposing one bumps its write version and permanently
+unsubscribes it from configuration changes — leaving a dynamic constant stale
+after a precision change. The borrowed entries are therefore withdrawn from the
+scope before the pop, and only those still identical to what was injected, so a
+definition genuinely created inside the scope is still disposed normally.
 
 (At the first checkpoint this read "RED: 19 failed / 18,824 passed, 7
 snapshots failed". Review round 2 — 2026-07-25, dual-reviewer, 17 findings —
@@ -476,7 +617,7 @@ round changed, beyond routing (each landed and measured individually):
 | 11 | ~~`DSolve › …` (differential-equations)~~ | RESOLVED — comparison sites routed through `sameSyntactic` (see UPDATE) |
 | 1 | ~~`explain: golden solve explanations › \|x-1\|=2`~~ | RESOLVED — same round (the rules/simplify progress checks) |
 | 2 | ~~`equal.test.ts › isSame: the canonical/raw boundary`~~ | RESOLVED — rewritten to the option-B guarantee, incl. the lazy-operator (`Hold` over a pre-boxed raw symbol) transitivity case and cross-engine library-symbol coverage |
-| 4 | `symbol-value-scoping › @fixme …` | flip to real behavior — but ONLY after the dereference half, since their `evaluate()` results are fixed and their `N()` results are not |
+| 4 | ~~`symbol-value-scoping › @fixme …`~~ | RESOLVED 2026-07-26 — dereference landed, and all EIGHT `@fixme`s flipped (the four staleness/Channel-B ones had been passing against the buggy values) |
 | 1 | ~~(varies)~~ | identified in round 2: `series.test.ts › unevaluated Series round-trips` — NOT a flake, a deterministic 5th sighting of §The recurring defect (see below). RESOLVED |
 
 ### The tracing recipe (found every binding site so far, one run each)
@@ -496,22 +637,51 @@ instrumentation afterwards; it has been added and removed several times.
 kind in one run passed in isolation. Tell: the test name says *hangs*,
 *terminates*, *stays fast*, or *polynomial time*.
 
+**NOT a flake, and a lesson in attribution (2026-07-26).**
+`integration-rules › … (1.1.3, R28a) › …(#544)` failed as
+`F.has('Integrate')` → `true` (the integral stayed inert) in two full runs of
+this session, passed in two others, and passed isolated. Every symptom said
+"load-sensitive Rubi time limit", and that was recorded here as a new flake
+entry. It was wrong.
+
+The cause was **concurrent unstaged work in the same tree**: gating `zeroQ`'s
+`.N()` through the `.unknowns` funnel made a *symbolic* zero test return `false`,
+costing R28a its closed form (`rubi-utils.ts` now carries a "must stay UNGATED"
+comment saying so). The pass/fail pattern tracked exactly when that change was
+present, reverted, re-applied and fixed — not load. The isolated run that
+"proved" it was a flake happened to run while the change was reverted.
+
+Two lessons, both cheap to apply next time:
+
+- **Isolated-passes is not sufficient evidence of a flake** when another agent or
+  the user is editing the tree. Check `git status` and file mtimes against the
+  run's start time before concluding anything, and re-run the suite at a known
+  tree state.
+- **A wrong flake entry is worse than no entry**, because the next session will
+  dismiss a real regression signal. If attribution is uncertain, record the
+  uncertainty and the evidence, not a verdict.
+
 ### Then, in order
 
 1. ~~Finish DSolve + explain~~ — done (review round 2).
 2. ~~Rewrite the two `equal.test.ts` boundary tests for option B~~ — done.
-3. **Dereference** (phase 2 step 3) — the staleness half, and Channel C:
-   `evaluate()` now gives `x + 1` but `N()` still gives `6`, because the
-   in-frame numeric re-evaluation (`function-utils.ts`, the
-   `numericApproximation` branch) re-resolves the freed symbol against the
-   frame BY NAME. Needs binding-aware *resolution*, not just substitution.
-   `let d = 3x^2+1; let x = 2; d` is still `3x^2 + 1`, and `g(5)` with a
-   global `x = 100` gives `x + 1` rather than `101`, for the same reason.
-4. Flip the four `@fixme`s.
-5. Fresh `/review-staged` before commit. Round 2 (2026-07-25) already ran on
-   the mid-phase checkpoint — dual-reviewer plus an antecedents-research leg,
-   17 findings, all addressed — but dereference (step 3) is new surface and
-   deserves its own pass.
+3. ~~**Dereference** (phase 2 step 3)~~ — done 2026-07-26; see §The dereference
+   rule for the mechanism, the two restrictions, and the 100+-failure
+   general-resolution variant that must not be retried.
+4. ~~Flip the `@fixme`s~~ — done; all eight.
+5. `/review-staged` on the dereference diff. Round 2 (2026-07-25) covered the
+   mid-phase checkpoint — dual-reviewer plus an antecedents-research leg, 17
+   findings, all addressed — but step 3 is new surface.
+
+### What phase 3 should take from step 3
+
+Dereference had to be *confined* (§The dereference rule) purely because a
+`Function` literal's body can carry the outer definition for the literal's own
+parameter. Fix that — §Sequencing steps 4 and 5 — and the confinement's second
+restriction becomes unnecessary, because "the occurrence's own binding" would
+then be trustworthy everywhere. The `Solve`/`simplify` shields would still need
+the valueless-shadow carve-out, or an explicit value-blind evaluation mode, which
+is what they arguably wanted in the first place.
 
 ### Process lessons worth not relearning
 

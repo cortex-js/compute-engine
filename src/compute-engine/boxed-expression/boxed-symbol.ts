@@ -76,6 +76,7 @@ import { getFactIndex, hasAssumptions } from './constraint-subject.js';
 import { isNumber, isSymbol } from './type-guards.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { sameBinding } from './compare.js';
+import { evaluateInOwnBindings } from './binders.js';
 import {
   CYCLE_DETECTED,
   CycleDepthQuery,
@@ -85,6 +86,20 @@ import {
   exitCycleDepthQuery,
   exitCycleQuery,
 } from './cycle-guard.js';
+
+/**
+ * The definition whose dereference a cycle has invalidated (`a = b + 1;
+ * b = a + 1`), or `undefined` when no cycle is being unwound. Set at the
+ * re-entry point and cleared by that definition's own frame — a flag rather
+ * than a thrown sentinel, which the rule engine's blanket handlers would
+ * absorb. See `BoxedSymbol._dereference`.
+ */
+let _dereferenceCycle: BoxedDefinition | undefined;
+
+/** Nesting depth of `BoxedSymbol._dereference`. Identifies the frame at the TOP
+ * of a dereference chain, which is the only one where a cycle's stored value is
+ * the pinned residual rather than something to keep symbolic. */
+let _dereferenceDepth = 0;
 
 /**
  * ### BoxedSymbol
@@ -966,22 +981,109 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (def.isConstant) {
       if (options?.numericApproximation) {
         if (hold === 'never' || hold === 'evaluate' || hold === 'N')
-          return def.value?.N() ?? this;
+          return this._dereference(def.value, { numericApproximation: true });
       } else if (hold === 'never' || hold === 'evaluate')
-        return def.value?.evaluate(options) ?? this;
+        return this._dereference(def.value, options);
     } else {
       if (
         hold === 'never' ||
         hold === 'evaluate' ||
         (hold === 'N' && options?.numericApproximation)
       ) {
-        let expr = this.engine._getSymbolValue(this._id) ?? this;
+        const expr = this.engine._getSymbolValue(this._id);
+        if (expr === undefined) return this;
         if (expr.operator === 'Unevaluated')
-          expr = expr.evaluate(options) ?? this;
-        return expr;
+          return expr.evaluate(options) ?? this;
+        return this._dereference(expr, options);
       }
     }
     return this;
+  }
+
+  /**
+   * Resolve `value` — this symbol's stored value — in the environment its own
+   * free symbols denote, rather than returning it verbatim (stale) or
+   * re-resolving it by name in the current context (captured). See
+   * `evaluateInOwnBindings`.
+   *
+   * `value` is `undefined` for a declared-but-unassigned symbol, in which case
+   * the symbol stays itself.
+   *
+   * The guard is keyed on this symbol's DEFINITION. A cycle abandons the
+   * dereference of the RE-ENTERED definition — not merely the re-entered step,
+   * and not the whole chain either — and its stored value is returned only at
+   * the TOP of the chain, where a raw residual is the pinned answer; deeper, the
+   * symbol stays symbolic so no part of a cycle is substituted into an
+   * enclosing expression. Every variant below was measured, and the residuals
+   * are pinned in `symbol-value-scoping.test.ts`:
+   *
+   * | on re-entry | `s = s+1; s` | `a = b+1; b = a+1; a` | `a = p+5; p = q+1; q = p+1; a` |
+   * |:--|:--|:--|:--|
+   * | resolve one more level | `s + 2` | `b + 5` | — |
+   * | return the bare symbol | `s + 1` | `a + 2` | — |
+   * | abandon the whole chain | `s + 1` | `b + 1` | `p + 5` — loses a's dereference |
+   * | abandon the re-entered def, always returning its value | `s + 1` | `b + 3` | `q + 8` |
+   * | **…returning its value only at the top of the chain** | `s + 1` | `b + 1` | `q + 6` |
+   *
+   * The last row is implemented. Two distinctions only show up beyond the
+   * one-hop case: `a` is not itself cyclic, so abandoning ITS dereference (row
+   * 3) silently reinstates the staleness this repair removes; and because
+   * assignment is EAGER, `b = a + 1` with `a = b + 1` actually stores `b + 2`, so
+   * returning a cyclic definition's stored value to an enclosing expression
+   * (row 4) substitutes that extra level.
+   *
+   * Signalled by a module-level flag naming the re-entered definition, NOT by a
+   * throw. A thrown sentinel is absorbed by the rule engine's blanket `catch`
+   * handlers (`rules.ts` re-throws only `CancellationError` and otherwise treats
+   * an exception as "this rule failed"), so a cyclic definition dereferenced
+   * during `simplify()` would silently truncate the whole pass. It would also
+   * make `Dereference` the one cycle-guard kind that throws, against the
+   * invariant stated at the top of `cycle-guard.ts`. Failing closed keeps both
+   * properties: the guard already bounds the recursion, so the frames between
+   * the re-entry point and the re-entered definition merely compute a result
+   * that is then discarded.
+   */
+  private _dereference(
+    value: Expression | undefined,
+    options?: Partial<EvaluateOptions>
+  ): Expression {
+    if (value === undefined) return this;
+    const def = this._def;
+    if (def === undefined) return value;
+    const guard = enterCycleQuery(def, CycleQuery.Dereference);
+    if (guard === CYCLE_DETECTED) {
+      // Name the definition whose dereference must be abandoned, and stay
+      // symbolic here so nothing of the cycle is substituted in the meantime.
+      _dereferenceCycle = def;
+      return this;
+    }
+    const outermost = _dereferenceDepth === 0;
+    _dereferenceDepth += 1;
+    try {
+      const result = evaluateInOwnBindings(this.engine, value, options);
+      // Reached by a cycle: this definition's own dereference is the one to
+      // abandon, so return the stored value unresolved. Any other definition's
+      // cycle propagates — the caller decides — and `result` is discarded there.
+      if (_dereferenceCycle === def) {
+        _dereferenceCycle = undefined;
+        // The stored value is the pinned residual only when this is the top of
+        // the chain (`s = s + 1; s` → `s + 1`). Deeper, returning it would
+        // substitute a level of the cycle into the enclosing expression
+        // (`a = b + 1; b = a + 1; a` → `b + 3`), so stay symbolic.
+        return outermost ? value : this;
+      }
+      // Another definition's cycle is unwinding past this frame: stay symbolic
+      // rather than returning the stored value, which would substitute one more
+      // level of the cycle on the way out (`a = b+1; b = a+1; a` → `b + 3`).
+      return _dereferenceCycle === undefined ? result : this;
+    } finally {
+      _dereferenceDepth -= 1;
+      exitCycleQuery(def, guard);
+      // Safety net: a cycle whose definition never gets its own frame back (its
+      // guard was already exited) must not leave the flag set for unrelated
+      // later work. The frame that opened the chain clears it.
+      if (outermost) _dereferenceCycle = undefined;
+    }
   }
 
   N(): Expression {

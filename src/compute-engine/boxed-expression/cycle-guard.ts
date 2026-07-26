@@ -75,6 +75,7 @@ export const CycleQuery = {
   BignumIm: 1 << 20,
   Is: 1 << 21,
   Each: 1 << 22,
+  Dereference: 1 << 23,
 } as const;
 
 /** A bitmask of the query kinds currently in progress for a binding. */

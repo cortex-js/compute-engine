@@ -12,7 +12,42 @@
   site fails loudly with its replacement named) before adopting this release;
   the migration table is in the 0.95.0 notes below.
 
-## 0.95.1 _2026-07-26_
+- **`evaluate()` on a symbol now resolves the free symbols of its stored value.**
+  A symbolic value was returned verbatim, so a symbol assigned _after_ it was
+  stored never reached it:
+
+  ```
+  let d = 3x^2 + 1
+  let x = 2
+  d          // was: 3x^2 + 1     now: 13
+  N(d)       // 13 — unchanged
+  ```
+
+  `N()` and `compile()` already resolved it, so plain `evaluate()` was the
+  outlier and disagreed with both; a second `evaluate()` used to resolve one more
+  level ("one-evaluate-late"). Assignment remains **eager**, so declaration order
+  still decides what a value snapshots: `let x = 2; let d = 3x^2 + 1; x = 3; N(d)`
+  is `13`, while `let d = 3x^2 + 1; let x = 2; x = 3; N(d)` is `28`. The residual
+  for a cyclic binding is unchanged (`s = s + 1; s` → `s + 1`).
+
+- **A stored value's free symbols are no longer captured by a same-named
+  parameter.** They now denote the binding they were canonicalized against, not
+  whatever an inner scope calls that name:
+
+  ```
+  let a = x + 1
+  g(x) = a
+  g(5)       // was: 6            now: x + 1
+  N(g(5))    // was: 6            now: x + 1
+  ```
+
+  With a global `x = 100`, `g(5)` is `101` — the lexically correct binding —
+  where it used to be `6`. This closes the same defect on three paths that
+  disagreed with each other: the parameter substitution applied after a call, the
+  constant dereference path, and the numeric (`N`) re-evaluation inside a call
+  frame. A dictionary-valued symbol is covered too. Behavior that was already
+  correct is unchanged: a block-local `let` does not leak into a stored value,
+  and a renamed parameter never captured.
 
 ### Breaking Changes
 

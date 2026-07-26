@@ -1,5 +1,17 @@
-import type { BoxedValueDefinition, Expression } from '../global-types.js';
-import { isFunction, isSymbol, isDictionary } from './type-guards.js';
+import type {
+  BoxedDefinition,
+  BoxedValueDefinition,
+  Expression,
+  IComputeEngine as ComputeEngine,
+  Scope,
+  TaggedValueDefinition,
+} from '../global-types.js';
+import {
+  isFunction,
+  isSymbol,
+  isDictionary,
+  isNumber,
+} from './type-guards.js';
 import { functionLiteralParameterName } from './function-literal.js';
 
 /**
@@ -146,4 +158,135 @@ export function rewriteWithBinders(
     return ce.function(expr.operator, next, { form: 'raw' });
   const form = expr.isCanonical || expr.isStructural ? 'canonical' : 'raw';
   return ce.function(expr.operator, next, { form, scope: expr.localScope });
+}
+
+/**
+ * Evaluate `value` in the environment its OWN free symbols denote — the
+ * dereference half of the name-vs-binder repair
+ * (`docs/plans/2026-07-24-defining-scope-dereference-design.md`).
+ *
+ * Two things were wrong with returning the stored value verbatim:
+ *
+ * - **Staleness** ("one-evaluate-late"): `let d = 3x^2 + 1; let x = 2; d` gave
+ *   `3x^2 + 1`, while `N(d)` and `compile()` both said `13`. Plain `evaluate()`
+ *   was the outlier.
+ * - Simply evaluating it instead — the naive fix, measured in §Appendix B of the
+ *   design doc — resolves those free symbols by NAME in whatever context the
+ *   dereference happens to occur, so a call frame's parameter or a block-local
+ *   `let` captures them: `let a = x + 1; f(y) = do { let x = 99; a + y }; f(5)`
+ *   became `105`.
+ *
+ * Both fall out of asking the right question. A free symbol inside a stored
+ * value is not a name to be looked up again: it already carries the binding it
+ * was canonicalized against, and that binding is the environment the value must
+ * be evaluated in. So such an occurrence is bound to ITS OWN definition for the
+ * duration of the evaluation, shadowing whatever the ambient context calls the
+ * same name. The value then resolves what it genuinely refers to (`x = 2` → 13,
+ * a global `x = 100` → 101) and stays symbolic for what it does not (an unbound
+ * `x` stays `x`, whatever a frame names its parameter).
+ *
+ * Two restrictions keep this confined to dereference, each one measured:
+ *
+ * - **The occurrence's definition must be reachable** in the current chain. A
+ *   call frame parks a parameter's value in a fresh definition and hides the
+ *   body's own (`hideBodyScopeParams` in `function-utils.ts`), so a body
+ *   occurrence's definition is unreachable BY DESIGN and the name lookup is the
+ *   only thing that can answer. Generalizing to "an occurrence always means its
+ *   own binding" contradicts both beta-reduction and the cached-expression
+ *   re-binding contract (CONTRACT 4, `scope.test.ts`) — measured at 100+
+ *   failures.
+ * - **The shadowing binding must hold a VALUE.** A valueless shadow cannot
+ *   capture anything, and shadowing a name valueless is how every shield in the
+ *   engine works: `Solve` blinds its unknown at the source, so
+ *   `Solve(Simplify(s) = 2, w)` resolves `s` to `(9-w²)/4` yet keeps `w`
+ *   symbolic even though `w` has a global value (`solve.test.ts`), and
+ *   `withValueShield`/`simplifyValueBlind` do the same for `simplify`. Honoring
+ *   the occurrence's own binding there would resolve precisely what the shield
+ *   exists to hide.
+ *
+ * (The value-definition checks are inlined rather than using `isValueDef`:
+ * `utils.ts` imports this module, so this module cannot import it back.)
+ *
+ * Recursion is bounded by the caller's cycle guard — see
+ * `BoxedSymbol._dereference`, which aborts the whole chain rather than the
+ * re-entered step.
+ */
+export function evaluateInOwnBindings(
+  ce: ComputeEngine,
+  value: Expression,
+  options?: { numericApproximation?: boolean }
+): Expression {
+  const evaluated = (): Expression =>
+    options?.numericApproximation ? value.N() : value.evaluate(options);
+
+  // Fast path: a number literal cannot contain a symbol, so there is nothing to
+  // protect. Keeps the hot path (loop counters, numeric arguments, `x = 2`) off
+  // the walk entirely.
+  //
+  // Deliberately NOT gated on `value.symbols.length === 0`, which looks cheaper
+  // and is unsound: `symbols` descends through function nodes only, so a stored
+  // DICTIONARY reports no symbols while its values are full of them. That gate
+  // sent `a = {k: x + 1}` down the fast path, and evaluating it inside a frame
+  // whose parameter is also `x` produced `{k: 6}` — the very capture this helper
+  // exists to prevent. `rewriteWithBinders` does descend into dictionary values.
+  if (isNumber(value)) return evaluated();
+
+  let env: Map<string, BoxedDefinition> | undefined;
+  rewriteWithBinders(value, (sym, shadowed) => {
+    const name = sym.symbol;
+    // An occurrence bound by a binder INSIDE the value (a stored lambda's own
+    // parameter, a `Sum` index) is not free: it is not ours to re-point.
+    if (shadowed?.has(name)) return sym;
+    if (env?.has(name)) return sym;
+    const own = sym.valueDefinition;
+    if (own === undefined) return sym;
+    let scope: Scope | null = ce.context.lexicalScope;
+    let innermost: BoxedDefinition | undefined;
+    let reachable = false;
+    while (scope) {
+      const found = scope.bindings.get(name);
+      if (found !== undefined) {
+        innermost ??= found;
+        if ('value' in found && found.value === own) {
+          reachable = true;
+          break;
+        }
+      }
+      scope = scope.parent;
+    }
+    if (!reachable || innermost === undefined) return sym;
+    // Already the innermost binding, or shadowed by something that holds no
+    // value: the ambient lookup answers correctly on its own.
+    if ('value' in innermost && innermost.value === own) return sym;
+    if (!('value' in innermost) || innermost.value.value === undefined)
+      return sym;
+    (env ??= new Map()).set(name, { value: own } satisfies TaggedValueDefinition);
+    return sym;
+  });
+
+  if (env === undefined) return evaluated();
+
+  // The entries carry the occurrences' OWN value definitions, so the value
+  // resolves the very bindings it references — and an assignment performed
+  // during the evaluation reaches the real definition.
+  const borrowed = [...env];
+  ce.pushScope({ parent: ce.context.lexicalScope, bindings: env });
+  try {
+    return evaluated();
+  } finally {
+    // Hand the borrowed definitions back BEFORE popping. Popping a scope
+    // disposes every value definition among its bindings (`discardEvalContext`,
+    // `engine-scope.ts`) — which is right for definitions the scope owns, and
+    // wrong for these: they belong to the caller's scopes, and disposing one
+    // bumps its write version and permanently unsubscribes it from
+    // configuration changes, leaving a dynamic constant stale after a
+    // precision change.
+    //
+    // Only entries still identical to what was injected are withdrawn, so a
+    // definition genuinely created inside this scope — or one that REPLACED a
+    // borrowed entry — is left for normal disposal.
+    for (const [name, def] of borrowed)
+      if (env.get(name) === def) env.delete(name);
+    ce.popScope();
+  }
 }
