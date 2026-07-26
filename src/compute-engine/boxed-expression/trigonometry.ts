@@ -711,6 +711,15 @@ export function constructibleValues(
     return undefined;
   const ce = x.engine;
 
+  // An argument with unknowns cannot numericize, so the `.N()` below would
+  // walk the whole expression only for `x.im !== 0` to reject it. Gate on
+  // `.unknowns` (a symbol with an assigned value is NOT unknown, so
+  // `sin(y)` with `y := π/4` still reduces): the walk is cached and cheap,
+  // while the wasted `.N()` is not — over nested applications of a user
+  // function it re-evaluates shared sub-chains and grows exponentially with
+  // the nesting depth (44 s for a 17-element list of such chains).
+  if (x.unknowns.length > 0) return undefined;
+
   x = x.N();
   // If the argument has an imaginary part, it's not a constructible value
   if (x.im !== 0) return undefined;

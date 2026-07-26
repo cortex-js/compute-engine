@@ -148,16 +148,32 @@ export function gammaPoleType(x: Expression | undefined): Type {
  * - NaN → NaN, and a non-finite argument that may be `~oo` (or a non-finite
  *   complex) → `number`;
  * - a provably real ±∞ maps to itself: `non_finite_number` (provable);
- * - a finite non-real argument rounds component-wise → `finite_complex`;
+ * - a *provably* non-real argument rounds component-wise → `finite_complex`
+ *   (widened to `number` when its finiteness is not established);
  * - otherwise (real or unknown, finiteness unknown = generic point) →
  *   `finite_integer`.
+ *
+ * Non-realness must be PROVEN, not merely un-disproven. On a function
+ * expression `isReal` is derived from the type (`isSubtype(type, 'real')`), so
+ * it answers `false` for an operand that is simply not *provably* real:
+ * `4Q` (Q undeclared) types `finite_number`, which admits both readings.
+ * Reading that `false` as "complex" made `Round(4Q)` type `number` while the
+ * strictly less informative `Round(Q)` typed `finite_integer` — more knowledge
+ * about the operand yielding a weaker result. Only a number *literal* (whose
+ * `isReal` is a value, not a type, question) or a type that excludes the reals
+ * proves the complex case; everything else keeps the generic-point convention.
  */
 export function roundingFunctionType(x: Expression | undefined): Type {
   if (!x || x.isNaN) return 'number';
   if (x.isFinite === false)
     return x.isReal === true ? 'non_finite_number' : 'number';
-  if (x.isReal === false)
-    return x.isFinite === true ? 'finite_complex' : 'number';
+  const provablyNonReal = isNumber(x)
+    ? x.isReal === false
+    : x.type.matches('imaginary');
+  if (provablyNonReal)
+    return x.isFinite === true || x.type.matches('finite_number')
+      ? 'finite_complex'
+      : 'number';
   return 'finite_integer';
 }
 

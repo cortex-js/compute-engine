@@ -938,6 +938,19 @@ export function validateArguments(
 }
 
 /**
+ * Would a `matrix` argument satisfy this parameter? The repair below rewrites
+ * its operands to `matrix`, so this — not "is the parameter type itself a
+ * matrix" — is its entry gate. The direction matters for a UNION parameter
+ * (`LinearSolve`'s `matrix | vector`): a union is assignable to `R` only when
+ * EVERY arm is, so `matrix | vector` does not match `matrix`, while `matrix`
+ * *is* assignable to `matrix | vector`. The reversed spelling silently
+ * declined the repair for every union-typed parameter.
+ */
+function acceptsMatrix(ce: ComputeEngine, expected: Type): boolean {
+  return ce.type('matrix').matches(expected);
+}
+
+/**
  * The **write-free** precondition of {@link repairFreshMatrixInference}: true
  * when the repair could apply to this operand/parameter pair.
  *
@@ -958,7 +971,7 @@ function couldRepairFreshMatrixInference(
   expected: Type,
   freshlyInferred?: ReadonlySet<BoxedValueDefinition>
 ): boolean {
-  if (!freshlyInferred || !ce.type(expected).matches('matrix')) return false;
+  if (!freshlyInferred || !acceptsMatrix(ce, expected)) return false;
 
   const eligible = new Set<string>();
   for (const name of op.freeVariables) {
@@ -990,7 +1003,7 @@ function repairFreshMatrixInference(
   expected: Type,
   freshlyInferred?: ReadonlySet<BoxedValueDefinition>
 ): Expression | null {
-  if (!freshlyInferred || !ce.type(expected).matches('matrix')) return null;
+  if (!freshlyInferred || !acceptsMatrix(ce, expected)) return null;
 
   const eligible = new Set<string>();
   for (const name of op.freeVariables) {

@@ -1,5 +1,47 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A union type is assignable only to a target that covers EVERY arm.**
+  `isSubtype()` (and therefore `type.matches()`) used the any-branch rule when
+  the target was a composite type and the all-branch rule when it was a
+  primitive, so the answer depended on the shape of the target:
+  `list<tuple<number,number,number>> | tuple<number,number,number>` matched
+  `tuple<number, number, number>`, while `number | list<number>` matched
+  neither `number` nor `collection`. Assignability is now all-branch
+  throughout — the dual of the intersection rule, where `A & B` is assignable
+  as soon as one arm is. A union still matches any target covering all its
+  arms (`integer | real` ⊑ `real`, `number | list<number>` ⊑
+  `collection | number`).
+
+  Code that asked `unionType.matches(T)` to mean "could this be a `T`" was
+  asking the wrong question and now gets `false`; ask it the other way round
+  (`ce.type(T).matches(unionType)` — "would a `T` satisfy this"), which is how
+  the matrix-inference repair gate on union-typed parameters such as
+  `LinearSolve`'s `matrix | vector` is now spelled.
+
+### Issues Resolved
+
+- **`Round`/`Floor`/`Ceil`/`Truncate` of a symbolic term keeps its integer
+  type.** `Round(4Q)` typed `number` while both the less informative
+  `Round(Q)` and the fully known `Round(4.7)` typed `finite_integer`: an
+  operand typed `finite_number` reports `isReal === false`, which means "not
+  provably real", and the handler read it as "provably complex". Non-realness
+  is now proven from a number literal or from a type that excludes the reals,
+  so an operand of unknown realness keeps the generic-point convention. A
+  wrap asserting integrality (`RandomChoice(Interval(0,1), Round(4N))` with
+  `N` unbound) now type-checks.
+
+- **`sin`/`cos`/`tan`… of a deeply nested symbolic argument no longer blows
+  up.** The constructible-value lookup called `.N()` on every argument,
+  including one with free symbols that can never numericize; over nested
+  applications of a user function that wasted traversal re-walked shared
+  sub-chains and grew exponentially with the nesting depth. Evaluating
+  `sin(πR/8)` over a 17-element list whose element *k* is a user function
+  applied *k* times took 44 s and now takes ~0.1 s. Arguments that can
+  numericize — including a symbol with an assigned value — reduce exactly as
+  before.
+
 ## 0.95.0 _2026-07-25_
 
 ### Breaking Changes

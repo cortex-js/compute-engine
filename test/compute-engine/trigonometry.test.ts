@@ -355,3 +355,38 @@ describe('Complex-branch numericization of inverse trig/hyperbolic (R28b)', () =
     expect(engine.box(['Arcsin', 2]).evaluate().operator).toBe('Arcsin');
   });
 });
+
+describe('Tycho item 90 — constructible-value lookup skips symbolic arguments', () => {
+  // `constructibleValues` used to call `.N()` on EVERY argument, including one
+  // with free symbols that can never numericize. Over nested applications of a
+  // user function the wasted `.N()` re-walked shared sub-chains, growing
+  // exponentially with the nesting depth (a 17-element list of such chains
+  // took 44 s under `sin`, versus milliseconds under division).
+  const nested = (ce: ComputeEngine, depth: number) => {
+    ce.assign('f', ce.parse('x \\mapsto \\operatorname{mod}(x\\cdot5+c,16)'));
+    let body = 's';
+    for (let k = 0; k < depth; k++) body = `f(${body})`;
+    return body;
+  };
+
+  it('a deeply nested symbolic argument evaluates in bounded time', () => {
+    const ce = new ComputeEngine();
+    const e = ce.parse(`\\sin(${nested(ce, 16)})`);
+    const start = Date.now();
+    expect(e.evaluate().operator).toBe('Sin');
+    // Was ~40 s at this depth; the bound is deliberately loose (this is a
+    // complexity guard, not a timing pin).
+    expect(Date.now() - start).toBeLessThan(5_000);
+  });
+
+  it('the reduction itself is unaffected: bound and constant arguments still fold', () => {
+    const ce = new ComputeEngine();
+    // A symbol with an ASSIGNED value is not an unknown, so it still reduces.
+    ce.assign('y', ce.parse('\\frac{\\pi}{4}'));
+    expect(ce.parse('\\sin(y)').evaluate().toString()).toBe('sqrt(2)/2');
+    expect(ce.parse('\\sin(\\frac{\\pi}{4})').evaluate().toString()).toBe(
+      'sqrt(2)/2'
+    );
+    expect(ce.parse('\\arctan(1)').evaluate().toString()).toBe('1/4 * pi');
+  });
+});

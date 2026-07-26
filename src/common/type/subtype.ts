@@ -630,8 +630,14 @@ export function isSubtype(
   // Handle algebraic types (union or intersection)
   //
 
-  // A union type is a subtype of a type if any of its types is a subtype of the type
-  if (lhs.kind === 'union') return lhs.types.some((t) => isSubtype(t, rhs));
+  // A value of type `A | B` is a member of exactly ONE arm, but which one is
+  // not known, so it is a subtype of `R` only when EVERY arm is — the dual of
+  // the intersection rule below. `some` was unsound and, because the
+  // primitive-rhs branch above already uses `every`, made the answer depend on
+  // the SHAPE of the rhs: `list<tuple<3>> | tuple<3>` matched the composite
+  // `tuple<number, number, number>` (any-branch) while `number | list<number>`
+  // failed the primitive `number` (all-branch). Tycho item 92.
+  if (lhs.kind === 'union') return lhs.types.every((t) => isSubtype(t, rhs));
 
   if (lhs.kind === 'intersection' && rhs.kind === 'intersection') {
     return rhs.types.every((rhsType) =>

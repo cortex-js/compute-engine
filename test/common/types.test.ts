@@ -775,11 +775,30 @@ describe('isSubtype POSITIVE', () => {
     ).toBe(true);
   });
 
-  it('should match an union of signatures', () => {
+  // A union of signatures is assignable only to a target EVERY arm satisfies:
+  // a value of the union type might be the `(y: number) -> boolean` arm, which
+  // is not a `(x: integer) -> string`. (This asserted `true` from 2025-02-06,
+  // when the type string — then `(x: integer) -> string | (y: number) ->
+  // boolean`, a SINGLE signature returning a union, since `->` binds loosest —
+  // was parenthesized into a real union without revisiting the expectation.)
+  it('should not match a union of signatures against one of its arms', () => {
     expect(
       isSubtype(
         parseType('((x: integer) -> string) | ((y: number) -> boolean)'),
         parseType('(x: integer) -> string')
+      )
+    ).toBe(false);
+    // …but it does match a target that covers both arms.
+    expect(
+      isSubtype(
+        parseType('((x: integer) -> string) | ((y: number) -> boolean)'),
+        parseType('((x: integer) -> string) | ((y: number) -> boolean)')
+      )
+    ).toBe(true);
+    expect(
+      isSubtype(
+        parseType('((x: integer) -> string) | ((y: number) -> boolean)'),
+        parseType('function')
       )
     ).toBe(true);
   });

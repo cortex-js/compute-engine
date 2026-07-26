@@ -179,3 +179,77 @@ describe('SYM P0-14 — three-valued isInteger / isRational', () => {
     expect(forType('finite_real').isInteger).toBe(undefined);
   });
 });
+
+describe('Tycho item 89 — rounding a symbolic finite_number stays integer-valued', () => {
+  const ce = new ComputeEngine();
+  const typeOf = (s: string) => ce.parse(s).type.toString();
+
+  it('Round of a literal, a bare symbol and an arithmetic term all agree', () => {
+    // `4Q` types `finite_number`, whose `isReal` is `false` only in the sense
+    // of "not PROVABLY real" — reading that as "complex" made the more
+    // informative operand produce the weaker type.
+    expect(typeOf('\\mathrm{Round}(4.7)')).toBe('finite_integer');
+    expect(typeOf('\\mathrm{Round}(Q)')).toBe('finite_integer');
+    expect(typeOf('\\mathrm{Round}(4Q)')).toBe('finite_integer');
+  });
+
+  it('Floor/Ceil follow', () => {
+    expect(typeOf('\\lfloor 4Q \\rfloor')).toBe('finite_integer');
+    expect(typeOf('\\lceil 4Q \\rceil')).toBe('finite_integer');
+  });
+
+  it('a PROVABLY non-real argument still rounds component-wise', () => {
+    expect(typeOf('\\mathrm{Round}(1.2+3.4i)')).toBe('finite_complex');
+    expect(typeOf('\\mathrm{Round}(i)')).toBe('finite_complex');
+  });
+
+  it('the non-finite and NaN claims are unchanged', () => {
+    expect(typeOf('\\mathrm{Round}(\\infty)')).toBe('non_finite_number');
+    expect(typeOf('\\mathrm{Round}(\\mathrm{NaN})')).toBe('number');
+  });
+
+  it('a precision argument still gives a real, not an integer', () => {
+    expect(typeOf('\\mathrm{Round}(4.7, 2)')).toBe('finite_real');
+  });
+});
+
+describe('Tycho item 92 — a union is assignable only when EVERY arm is', () => {
+  const ce = new ComputeEngine();
+
+  it('a union does not match a single arm, whatever the SHAPE of the target', () => {
+    // Composite target (was any-branch: `true`) and primitive target
+    // (already all-branch) now answer the same question the same way.
+    const t = ce.type(
+      'list<tuple<number,number,number>> | tuple<number,number,number>'
+    );
+    expect(t.matches('tuple<number, number, number>')).toBe(false);
+    expect(t.matches('list<unknown>')).toBe(false);
+    expect(ce.type('number | list<number>').matches('number')).toBe(false);
+  });
+
+  it('a union matches a target that covers every arm', () => {
+    expect(
+      ce
+        .type('list<tuple<number,number,number>> | tuple<number,number,number>')
+        .matches('collection')
+    ).toBe(true);
+    expect(
+      ce.type('number | list<number>').matches('collection | number')
+    ).toBe(true);
+    expect(ce.type('integer | real').matches('real')).toBe(true);
+    expect(ce.type('list<integer> | list<real>').matches('list<real>')).toBe(
+      true
+    );
+  });
+
+  it('a matrix-accepting UNION parameter still drives matrix repair', () => {
+    // `LinearSolve`'s first parameter is `matrix | vector`: the repair asks
+    // whether a matrix would satisfy the parameter, not whether the parameter
+    // is itself a matrix.
+    const engine = new ComputeEngine();
+    engine.declare('M', 'matrix');
+    expect(engine.box(['LinearSolve', 'M', ['Add', 'A', 'B']]).isValid).toBe(
+      true
+    );
+  });
+});
