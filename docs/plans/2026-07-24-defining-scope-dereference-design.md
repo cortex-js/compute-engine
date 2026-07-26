@@ -485,10 +485,18 @@ bug either, a gap the executable spec now closes.
 Phase 1 and the phase-2 compensation layer were **committed** (they are in
 `HEAD`'s history; the round-2 handoff below described them while still staged).
 
-**Dereference (phase 2 step 3) is staged and GREEN.** Full suite **exit 0**:
+**Dereference (phase 2 step 3) is COMMITTED** (`070fb966`). Full suite **exit 0**:
 19,205 passed, 0 failed, snapshots **4179/4179 unchanged**. All eight `@fixme`s
 in the executable spec are flipped, plus two regression pins added from the
 review round, so the file is now a spec rather than a characterization suite.
+
+The eager-capture semantics — including the `q + 6` cycle residual — were
+ratified by the user on 2026-07-26 after a probe session, and are now
+user-documented in `doc/06-guide-augmenting.md` ("When Is the Value Captured?")
+with a cross-reference from the `Assign` entry in `doc/85-reference-core.md`.
+A side-find from that session is fixed and committed separately (`2d0dabe6`):
+`ReleaseHold` applied to a symbol whose VALUE is a held expression was a no-op;
+it now releases one `Hold` layer, matching Mathematica.
 
 The review round (dual-reviewer, 5 findings, all fixed) is folded into the
 sections above: §The cycle guard is the subtle part (the throw became a flag, and
