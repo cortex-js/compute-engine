@@ -161,6 +161,34 @@
   numericize — including a symbol with an assigned value — reduce exactly as
   before.
 
+- **A function literal built around an already-canonical body now binds its
+  named parameters.** Canonicalizing an expression that is already canonical is
+  a no-op, so a body constructed _before_ the literal existed kept the bindings
+  it was built with — and its parameter occurrences went on denoting the
+  enclosing scope's variable of the same name instead of the literal's own
+  parameter. The repair previously covered only the anonymous placeholders
+  (`_`, `_1`, …) produced by the pipe/shorthand desugaring; it now covers named
+  parameters as well, so anything keyed on a symbol's binding — the
+  post-application substitution of a partially-symbolic result, symbol equality
+  — sees the parameter for what it is:
+
+  ```ts
+  const body = ce.box(['Add', 'y', 1]); // canonical: `y` is the caller's
+  const f = ce.function('Function', [body, ce.symbol('y', { canonical: false })]);
+  // the body's `y` is now this literal's parameter, not the caller's `y`
+  ```
+
+  Values are unchanged; what changes is which variable an occurrence refers to.
+
+- **An antiderivative is expressed in the caller's symbols.** `Integrate` binds
+  its integration variable, and an integrand's free coefficients are declared
+  alongside it — but the antiderivative machinery (and the Rubi rule driver
+  installed by `loadIntegrationRules`) works on the bare integrand and creates
+  its own occurrences of those names in the caller's scope. The two sets of
+  occurrences denoted different variables, so the result could compare unequal
+  to the same expression written by hand. The integrand is now re-bound as it
+  is lifted, matching how a Jacobian's body is lifted from its literal.
+
 ### New Features
 
 - **`BoxedType.couldMatch()`** — "could a value of this type be a `target`?",
@@ -220,6 +248,29 @@
   as disjoint from `boolean` instead of falling through to "may overlap". This
   also makes a union a subtype of a negation when no member meets the negated
   type (`integer | boolean <: !string`).
+
+- Disjointness is now decided by comparing the primitive *categories* of the two
+  types, so composite types are separated from each other and from primitives
+  instead of falling through to "may overlap": a `list<integer>` is not a
+  `string`, a `tuple<number, number>` is not a `list<tuple<number, number>>`, a
+  `set` is not a `list`, and a `record` is not a `dictionary`. Broad categories
+  still contain the narrow ones, so `integer` and `value`, or `list<integer>`
+  and `collection`, correctly report "may overlap". This generalizes and
+  replaces the narrower numeric-vs-non-numeric rule.
+
+  Two same-category composites whose parameters cannot coincide (`list<integer>`
+  vs `list<string>`) are deliberately *not* claimed disjoint: `list<never>` is a
+  subtype of both, so the claim would rest on how the empty list is typed rather
+  than on the type lattice. `couldMatch()` answers that question decisively.
+
+### Issues Resolved
+
+- **`nothing` and `missing` were reported as disjoint from any union
+  containing them** — `nothing` vs `boolean | nothing` claimed disjointness,
+  refuted by the value `Nothing`, which inhabits both. The unit-type
+  short-circuit ran before the union was examined and compared a type name
+  against a composite type object. This surfaced as an unsound
+  `nothing <: !(boolean | nothing)`.
 
 ## 0.95.0 _2026-07-25_
 

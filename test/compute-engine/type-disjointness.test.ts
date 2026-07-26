@@ -86,11 +86,62 @@ describe('BoxedType.isDisjointFrom', () => {
     expect(() => ce.type('integer').isDisjointFrom('bogus~~')).toThrow();
   });
 
+  it('separates types by their primitive category', () => {
+    // Composite vs. primitive.
+    expect(ce.type('list<integer>').isDisjointFrom('string')).toBe(true);
+    expect(ce.type('(number)->number').isDisjointFrom('integer')).toBe(true);
+    // Sibling composite categories: no value is both.
+    expect(
+      ce
+        .type('tuple<number, number>')
+        .isDisjointFrom('list<tuple<number, number>>')
+    ).toBe(true);
+    expect(ce.type('set<integer>').isDisjointFrom('list<integer>')).toBe(true);
+    expect(
+      ce.type('record<red: integer>').isDisjointFrom('dictionary<integer>')
+    ).toBe(true);
+    // The unit types are distinct from each other and from everything else.
+    expect(ce.type('nothing').isDisjointFrom('missing')).toBe(true);
+    expect(ce.type('nothing').isDisjointFrom('boolean')).toBe(true);
+  });
+
+  it('does not separate a narrow category from a broad one that contains it', () => {
+    // The lattice places the broad buckets above the narrow ones, so these
+    // meet rather than answering "disjoint".
+    expect(ce.type('list<integer>').isDisjointFrom('collection')).toBe(false);
+    expect(ce.type('integer').isDisjointFrom('value')).toBe(false);
+    expect(ce.type('integer').isDisjointFrom('scalar')).toBe(false);
+    expect(ce.type('list<integer>').isDisjointFrom('expression')).toBe(false);
+    // `broadcastable<T>` is `T | indexed_collection<T>` — it spans two
+    // categories, so no category conclusion is drawn about it.
+    expect(
+      ce.type('broadcastable<number>').isDisjointFrom('list<number>')
+    ).toBe(false);
+    expect(ce.type('broadcastable<number>').isDisjointFrom('number')).toBe(
+      false
+    );
+  });
+
+  it('reaches a unit type nested inside a union', () => {
+    // Regression: the `nothing`/`missing` short-circuit compared a string
+    // against a composite `Type` object and claimed disjointness here. The
+    // value `Nothing` inhabits both sides.
+    expect(ce.type('nothing').isDisjointFrom('boolean | nothing')).toBe(false);
+    expect(ce.type('missing').isDisjointFrom('boolean | missing')).toBe(false);
+    expect(ce.type('nothing').isDisjointFrom('boolean | missing')).toBe(true);
+    expect(isSubtype('nothing', '!(boolean | nothing)')).toBe(false);
+  });
+
   // Characterization, not a guarantee: the predicate errs toward "may
-  // overlap". These two are in fact disjoint, but composite-vs-primitive
-  // disjointness is not proven, so the answer is the safe `false`.
-  it('is conservative when disjointness cannot be established', () => {
-    expect(ce.type('list<integer>').isDisjointFrom('string')).toBe(false);
+  // overlap". Two same-category composites whose parameters cannot coincide
+  // are NOT claimed disjoint — `list<never>` is a subtype of both, so the
+  // claim would rest on how the empty list is typed rather than on the
+  // lattice. `couldMatch()` answers this question decisively.
+  it('is conservative for same-category composites with disjoint parameters', () => {
+    expect(ce.type('list<integer>').isDisjointFrom('list<string>')).toBe(false);
+    expect(ce.type('list<integer>').couldMatch('list<string>')).toBe(false);
+    expect(isSubtype('list<never>', 'list<integer>')).toBe(true);
+    expect(isSubtype('list<never>', 'list<string>')).toBe(true);
   });
 });
 

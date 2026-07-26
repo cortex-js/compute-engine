@@ -431,6 +431,37 @@ function lambdaFromLiteral(
   return { params: params as string[], body };
 }
 
+/**
+ * The integrand of an `Integrate`, lifted out of its `Function` literal's
+ * `Block`.
+ *
+ * Both `antiderivative()` and an integration provider (the Rubi driver) unwrap
+ * the `Function`/`Block` scaffolding and work on the bare integrand — while
+ * minting their own occurrences of the integration variable and of the
+ * integrand's free coefficients with `ce.symbol(…)`, i.e. in the CALLER's
+ * scope. But the literal's Block scope binds all of them (a coefficient `a` is
+ * auto-declared there when the body is canonicalized), so the lifted body and
+ * the minted symbols denote DIFFERENT bindings of the same name: the
+ * arithmetic then declines to combine them (measured inside the Rubi driver,
+ * where `Product.mul` stopped folding `x·x` and whole rule families went
+ * inert), and the answer compares unequal to the same expression written by
+ * the caller (`∫ x² dx` no longer `isSame` `x³/3`).
+ *
+ * So the lift re-binds, exactly as `lambdaFromLiteral` does for a Jacobian's
+ * body — see §Escaping results in
+ * `docs/plans/2026-07-24-defining-scope-dereference-design.md`. A body that is
+ * not a single-statement Block is handed over untouched; the callers unwrap
+ * whatever they are given.
+ */
+function liftIntegrand(literal: Expression): Expression {
+  if (!isFunction(literal, 'Function')) return literal;
+  const body = literal.op1;
+  if (!isFunction(body, 'Block') || body.nops !== 1) return literal;
+  const scope = body.localScope;
+  if (!scope) return literal;
+  return rebindEscaping(body.op1, scope);
+}
+
 function bareFunctionLambda(
   expr: Expression,
   seen: Set<string> = new Set()
@@ -1249,9 +1280,14 @@ volumes
             // case we fall back to the built-in antiderivative. With no provider
             // registered (the default), behavior is unchanged.
             let antideriv: Expression | null = null;
+            // Work on the LIFTED integrand: both paths below unwrap the
+            // `Function`/`Block` scaffolding anyway, and lifting it here
+            // re-binds its symbols to the caller's, so they agree with the
+            // occurrences these paths mint themselves (`liftIntegrand`).
+            const integrand = liftIntegrand(expr);
             if (ce._integrationProvider) {
               try {
-                antideriv = ce._integrationProvider(expr, variable);
+                antideriv = ce._integrationProvider(integrand, variable);
               } catch (e) {
                 // A cancellation (deadline/interrupt) thrown inside the provider
                 // must propagate — swallowing it would turn a timeout into a
@@ -1261,7 +1297,7 @@ volumes
               }
             }
             if (!antideriv || antideriv.operator === 'Integrate')
-              antideriv = antiderivative(expr, variable);
+              antideriv = antiderivative(integrand, variable);
 
             if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
               // Indefinite integral: keep the antiderivative, whether it was

@@ -302,9 +302,18 @@ function unionCoveringMembers(types: Readonly<Type[]>): Readonly<Type[]> {
 export function provablyDisjoint(a: Type, b: Type): boolean {
   if (a === 'never' || b === 'never') return true; // empty set
   if (a === 'any' || b === 'any') return false;
+  // `unknown` absorbs every type, and its lattice entry has no subtypes — so
+  // it must short-circuit before the category test below, which would
+  // otherwise read that empty entry as "shares nothing".
   if (a === 'unknown' || b === 'unknown') return false;
-  if (a === 'nothing' || b === 'nothing') return a !== b;
-  if (a === 'missing' || b === 'missing') return a !== b;
+
+  // The unit types `nothing` and `missing` need no special case: the subtype
+  // check below reports the overlap when the other side contains them, the
+  // union distribution reaches them inside a union, and the category test
+  // separates them from everything else (and from each other). They USED to
+  // short-circuit here as `a !== b`, which compared a string against a
+  // composite `Type` object and so claimed `nothing` was disjoint from
+  // `boolean | nothing` — refuted by the value `Nothing`, which inhabits both.
 
   // If either is a subtype of the other, they share values (overlap).
   if (isSubtype(a, b) || isSubtype(b, a)) return false;
@@ -326,13 +335,9 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
   )
     return true;
 
-  if (typeof a === 'string' && typeof b === 'string')
-    return (
-      meetPrimitiveTypes(a as PrimitiveType, b as PrimitiveType).length === 0
-    );
-
   // Two bounded numeric ranges: disjoint if their base types are disjoint or
-  // their intervals do not overlap.
+  // their intervals do not overlap. Checked before the category test below,
+  // which sees only the base types and so cannot separate two ranges.
   if (
     typeof a === 'object' &&
     a.kind === 'numeric' &&
@@ -347,21 +352,73 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
     return aHi < bLo || bHi < aLo;
   }
 
-  // A numeric primitive/range and a non-numeric composite (or vice versa) are
-  // disjoint; a numeric vs. numeric-with-overlapping-base is handled above.
-  const aNumeric = isNumeric(a);
-  const bNumeric = isNumeric(b);
-  if (aNumeric !== bNumeric) {
-    // One is numeric, the other isn't numeric — but the non-numeric side could
-    // still be a broad category (value/scalar/any) that includes numbers.
-    // Only conclude disjoint when the non-numeric side is not itself a
-    // container of numbers.
-    const other = aNumeric ? b : a;
-    if (!isScalar(other) && !isValue(other) && !isNumeric(other)) return true;
-  }
+  // Category test: every type sits in a primitive "bucket" the lattice knows
+  // about (`list`, `tuple`, `string`, `function`, …). If two buckets have an
+  // empty meet, no value can be in both — a `list<integer>` is not a `string`,
+  // a `tuple` is not a `list`, a `record` is not a `dictionary`. This
+  // generalizes the primitive-vs-primitive and numeric-vs-non-numeric cases
+  // that used to be spelled out separately: the lattice already places the
+  // broad buckets (`value`, `scalar`, `expression`) above the narrow ones, so
+  // `integer` vs `value` meets at `integer` and correctly reports "may
+  // overlap" with no special-casing.
+  const categoryA = typeCategory(a);
+  const categoryB = typeCategory(b);
+  if (
+    categoryA !== undefined &&
+    categoryB !== undefined &&
+    meetPrimitiveTypes(categoryA, categoryB).length === 0
+  )
+    return true;
 
-  // Conservative: assume they might overlap.
+  // Conservative: assume they might overlap. Note in particular that two
+  // same-category composites whose PARAMETERS cannot coincide (`list<integer>`
+  // vs `list<string>`) are not claimed disjoint: `list<never>` is a subtype of
+  // both, so the claim would rest on no value ever having that type — a fact
+  // about how the empty list is typed, not about the lattice. Use
+  // `couldMatch` for that question.
   return false;
+}
+
+/**
+ * The primitive category a type inhabits — the coarse bucket the primitive
+ * lattice knows about. Two types whose categories have an empty meet cannot
+ * share a value.
+ *
+ * `undefined` for any type that does not sit in a single bucket, and about
+ * which the caller must therefore draw no conclusion.
+ */
+function typeCategory(t: Type): PrimitiveType | undefined {
+  if (typeof t === 'string') return t as PrimitiveType;
+  switch (t.kind) {
+    case 'list':
+      return 'list';
+    case 'set':
+      return 'set';
+    case 'tuple':
+      return 'tuple';
+    case 'record':
+      return 'record';
+    case 'dictionary':
+      return 'dictionary';
+    case 'collection':
+      return 'collection';
+    case 'indexed_collection':
+      return 'indexed_collection';
+    case 'signature':
+      return 'function';
+    case 'symbol':
+      return 'symbol';
+    case 'expression':
+      return 'expression';
+    case 'numeric':
+      return t.type;
+    default:
+      // `union` and `value` are handled by the caller. A `broadcastable<T>` is
+      // `T | indexed_collection<T>` — it spans two buckets. A `negation` or
+      // `intersection` is not a bucket at all, and a `reference`'s meaning is
+      // resolver-dependent (`declareType` patches `.def` after construction).
+      return undefined;
+  }
 }
 
 // NOT memoized (perf review, P2-2 — measured 2026-07-18, do not re-attempt

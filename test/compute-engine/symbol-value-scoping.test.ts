@@ -232,6 +232,79 @@ describe('SPEC: name capture through call frames', () => {
   });
 });
 
+/** Every symbol occurrence in `expr`, in traversal order. */
+function symbolOccurrences(expr: any): any[] {
+  if (expr.symbol) return [expr];
+  return (expr.ops ?? []).flatMap((op: any) => symbolOccurrences(op));
+}
+
+describe('SPEC: named-parameter rebind', () => {
+  test('a body canonicalized before its binder rebinds its parameter', () => {
+    // Canonicalizing an already-canonical body is a NO-OP, so a body built
+    // before the literal existed keeps the bindings it was canonicalized
+    // against — and its parameter occurrences then denote whatever the
+    // enclosing scope had. `Pipe` does exactly this: it is lazy and takes
+    // `.canonical` of its right operand, so `x |> Map(_, f)` binds `_1` in the
+    // CALLER's scope before `Map(_1, f)` is wrapped into `(_1) ↦ Map(_1, f)`.
+    // `rebindParameters` repairs it — for NAMED parameters as well as for the
+    // anonymous placeholders it was originally restricted to.
+    const ce = engine();
+    const body = ce.box(['Add', 'y', 1]); // canonical, `y` bound in the caller
+    const f = ce.function('Function', [
+      body,
+      ce.symbol('y', { canonical: false }),
+    ]);
+    const occurrence = symbolOccurrences(f.op1).find(
+      (s) => s.symbol === 'y'
+    )!;
+    // The parameter is this literal's variable, NOT the caller's `y`.
+    expect(occurrence.isSame(ce.symbol('y'))).toBe(false);
+    expect(ce.box(['Apply', f, 5]).evaluate().toString()).toEqual('6');
+  });
+
+  test('an antiderivative is expressed in the caller’s symbols', () => {
+    // Regression pin for `liftIntegrand` (`library/calculus.ts`). `Integrate`
+    // binds its integration variable, and the integrand's free coefficients
+    // are auto-declared in the literal's body Block too — but the
+    // antiderivative machinery (and any integration provider) unwraps that
+    // scaffolding and mints its OWN occurrences in the caller's scope. Unless
+    // the lifted body is re-bound, the answer mixes two bindings of the same
+    // name: the arithmetic declines to combine them, and the result compares
+    // unequal to the same expression written by the caller.
+    const ce = engine();
+    const F = ce.box(['Integrate', ['Multiply', 'a', 'x'], 'x']).evaluate();
+    expect(F.toString()).toEqual('1/2 * a * x^2');
+    for (const occurrence of symbolOccurrences(F))
+      expect(occurrence.isSame(ce.symbol(occurrence.symbol))).toBe(true);
+    // The same, stated as the equality a caller would write.
+    expect(
+      ce
+        .box(['Integrate', ['Power', 'x', 2], 'x'])
+        .evaluate()
+        .isSame(ce.parse('\\frac{x^3}{3}'))
+    ).toBe(true);
+  });
+
+  test('a binding site held raw by a lazy operator is not rebound', () => {
+    // Regression pin for the visitor's "no binding, nothing to repair" rule.
+    // `Declare` keeps its first operand un-canonicalized on purpose: it is a
+    // NAME, and binding it would point it at an outer definition. Rebinding it
+    // to the parameter turns it into a reference, and `Declare`'s
+    // `sym(ops[0].evaluate())` then reads the argument's VALUE instead of the
+    // name — so the declaration silently vanishes and the conflict with the
+    // parameter goes unreported.
+    const ce = engine();
+    const f = ce.box([
+      'Function',
+      ['Block', ['Declare', 'x'], ['Multiply', 'x', 2]],
+      'x',
+    ]);
+    expect(() => ce.box(['Apply', f, 15]).evaluate()).toThrow(
+      /already declared/
+    );
+  });
+});
+
 describe('SPEC: cycle behavior (must not regress)', () => {
   test('self-referential and mutual references terminate', () => {
     // The write-time self-reference guard and one-step dereference keep these
