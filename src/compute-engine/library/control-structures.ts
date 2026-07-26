@@ -4,6 +4,7 @@ import {
   resolveEscapingLambda,
 } from '../function-utils.js';
 import { checkConditions } from '../boxed-expression/rules.js';
+import { indexingSetSites } from '../boxed-expression/binding-sites.js';
 import { collectionElementType, widen } from '../../common/type/utils.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
@@ -141,6 +142,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'value is `Nothing`, or the value carried by a `Break`/`Return`. For a ' +
         'value-producing comprehension use `Comprehension` or `Map`.',
       lazy: true,
+      // The index of each `Element` clause (from operand 1) is this operator's
+      // BOUND variable: the framework declares it in the loop's own scope
+      // before the clauses and body are canonicalized against it.
+      scoped: indexingSetSites(1),
       signature: '(body:expression, iterators:expression*) -> any',
       type: ([body]) => {
         if (!body) return 'nothing';
@@ -171,6 +176,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'indexed collection (a `List`). Later clauses see earlier bindings; ' +
         'independent clauses produce a Cartesian product.',
       lazy: true,
+      // See `Loop`: each `Element` clause's index is a bound variable of this
+      // node.
+      scoped: indexingSetSites(1),
       signature:
         '(body:expression, iterators:expression+) -> indexed_collection',
       type: ([body]) => {
@@ -798,47 +806,42 @@ function canonicalLoopLike(
     return ce._fn('Loop', [canonicalStatement(ce, body)]);
   }
 
-  // Variadic Element form: bound names must not leak. Mirror canonicalBigop.
+  // Variadic Element form: bound names must not leak. The scope, its
+  // `noAutoDeclare` flag, the push/pop around this handler and the declaration
+  // of each Element index come from the binder hook in `box.ts` (`scoped:
+  // indexingSetSites(1)`) — this used to be an independent copy of
+  // `canonicalBigop`'s prologue. A defensive fallback for a caller that did
+  // not come through the hook.
   const loopScope: Scope = scope ?? {
     parent: ce.context.lexicalScope,
     bindings: new Map(),
   };
-  loopScope.noAutoDeclare = true;
-  ce.pushScope(loopScope);
 
-  let canonicalIterators: Expression[];
-  let canonicalBody: Expression;
-  try {
-    // Canonicalize each Element clause in order. Earlier clauses declare
-    // their index in `loopScope` (via `ce.declare(name, 'unknown')`) before
-    // later clauses are canonicalized — so a later collection expression
-    // referencing an earlier name binds to the loop-scoped symbol rather
-    // than triggering auto-declaration in the enclosing scope.
-    canonicalIterators = iterators.map((it) => {
-      if (!isFunction(it, 'Element')) {
-        // Not an Element clause — flag as invalid rather than passing it
-        // through (which would be ignored at runtime → infinite loop).
-        return ce.error('unexpected-argument', it.toString());
-      }
-      const indexExpr = it.ops[0];
-      const collExpr = it.ops[1];
-      if (!indexExpr || !collExpr) {
-        return ce._fn('Element', [
-          (indexExpr ?? ce.error('missing')).canonical,
-          (collExpr ?? ce.error('missing')).canonical,
-        ]);
-      }
-      if (isSymbol(indexExpr) && indexExpr.symbol !== 'Nothing') {
-        if (!ce.context.lexicalScope.bindings.has(indexExpr.symbol))
-          ce.declare(indexExpr.symbol, 'unknown');
-      }
-      return ce._fn('Element', [indexExpr.canonical, collExpr.canonical]);
-    });
-    canonicalBody = canonicalStatement(ce, body);
-  } finally {
-    ce.popScope();
-    loopScope.noAutoDeclare = false;
-  }
+  // Canonicalize each Element clause in order. Earlier clauses declare their
+  // index in `loopScope` before later clauses are canonicalized — so a later
+  // collection expression referencing an earlier name binds to the loop-scoped
+  // symbol rather than triggering auto-declaration in the enclosing scope.
+  const canonicalIterators: Expression[] = iterators.map((it) => {
+    if (!isFunction(it, 'Element')) {
+      // Not an Element clause — flag as invalid rather than passing it
+      // through (which would be ignored at runtime → infinite loop).
+      return ce.error('unexpected-argument', it.toString());
+    }
+    const indexExpr = it.ops[0];
+    const collExpr = it.ops[1];
+    if (!indexExpr || !collExpr) {
+      return ce._fn('Element', [
+        (indexExpr ?? ce.error('missing')).canonical,
+        (collExpr ?? ce.error('missing')).canonical,
+      ]);
+    }
+    if (isSymbol(indexExpr) && indexExpr.symbol !== 'Nothing') {
+      if (!ce.context.lexicalScope.bindings.has(indexExpr.symbol))
+        ce.declare(indexExpr.symbol, 'unknown');
+    }
+    return ce._fn('Element', [indexExpr.canonical, collExpr.canonical]);
+  });
+  const canonicalBody: Expression = canonicalStatement(ce, body);
 
   return ce._fn(head, [canonicalBody, ...canonicalIterators], {
     scope: loopScope,

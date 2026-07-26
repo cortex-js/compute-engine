@@ -85,6 +85,7 @@ import {
   mulN,
   canonicalDivide,
 } from '../boxed-expression/arithmetic-mul-div.js';
+import { indexingSetSites } from '../boxed-expression/binding-sites.js';
 import {
   canonicalBigop,
   reduceBigOp,
@@ -3085,7 +3086,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1000,
       broadcastable: false,
 
-      scoped: true,
+      // The index of each indexing-set operand (from operand 1) is this
+      // operator's BOUND variable, declared `integer` in its own scope.
+      scoped: indexingSetSites(1, 'integer'),
       lazy: true,
       signature:
         '((number+) -> number, (tuple<integer>|tuple<integer, integer>)+) -> number',
@@ -3193,7 +3196,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1000,
       broadcastable: false,
 
-      scoped: true,
+      // The index of each indexing-set operand (from operand 1) is this
+      // operator's BOUND variable, declared `integer` in its own scope.
+      scoped: indexingSetSites(1, 'integer'),
       lazy: true,
       signature: '(any, tuple*) -> number',
       type: bigOpResultType,

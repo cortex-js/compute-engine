@@ -13,6 +13,7 @@ import {
   isNumber,
 } from './type-guards.js';
 import { functionLiteralParameterName } from './function-literal.js';
+import { assertLiveBinding } from './binding-tombstone.js';
 
 /**
  * The names bound BY THIS NODE (not by its descendants).
@@ -240,6 +241,11 @@ export function evaluateInOwnBindings(
     if (env?.has(name)) return sym;
     const own = sym.valueDefinition;
     if (own === undefined) return sym;
+    // Debug invariant (§3 of the binder-mechanism design). This site also pins
+    // the withdrawal below: were a borrowed definition ever left behind for the
+    // pop to dispose, the caller's next use of that symbol would report it here
+    // instead of silently going stale.
+    if (ce._debugBindings) assertLiveBinding(own, name);
     let scope: Scope | null = ce.context.lexicalScope;
     let innermost: BoxedDefinition | undefined;
     let reachable = false;

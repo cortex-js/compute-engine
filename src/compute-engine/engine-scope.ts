@@ -7,6 +7,11 @@ type EvalContext = IComputeEngine['_evalContextStack'][number];
 
 import { ExpressionMap } from './boxed-expression/expression-map.js';
 import { isValueDef, isOperatorDef } from './boxed-expression/utils.js';
+import {
+  isDormantPop,
+  reviveBindings,
+  tombstoneBinding,
+} from './boxed-expression/binding-tombstone.js';
 
 export function pushScope(
   ce: IComputeEngine,
@@ -38,6 +43,11 @@ export function pushEvalContext(
     if (l === 1) name = 'global';
     name ??= `anonymous_${l - 1}`;
   }
+
+  // A scope object outlives its frame by design (a canonicalized `Sum` pushes
+  // its `localScope` again on every evaluation), so pushing it revokes the
+  // debug tombstone its earlier pop left behind.
+  if (ce._debugBindings) reviveBindings(scope.bindings.values());
 
   ce._evalContextStack.push({
     lexicalScope: scope,
@@ -81,7 +91,17 @@ function discardEvalContext(
   // rather than retaining otherwise-dead local constants for the lifetime of
   // the engine. Disposal is intentionally idempotent.
   for (const binding of context?.lexicalScope.bindings.values() ?? []) {
-    if (isValueDef(binding)) binding.value.dispose();
+    if (isValueDef(binding)) {
+      // Debug invariant (§3 of the binder-mechanism design): stamp BEFORE
+      // disposing, so a later use of this binding reports where its scope died.
+      // A DORMANT pop is exempt: `canonicalizeBinder` pops a scope the
+      // canonical expression keeps and pushes again on every evaluation, so
+      // that pop is not the scope's death and a tombstone there would report
+      // every bound variable of every canonicalized binder.
+      if (ce._debugBindings && !isDormantPop())
+        tombstoneBinding(binding.value, context?.name ?? '<unnamed>');
+      binding.value.dispose();
+    }
   }
 
   // Popping an eval context reverts the active assumptions and local

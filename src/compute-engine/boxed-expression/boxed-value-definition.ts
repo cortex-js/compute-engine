@@ -81,6 +81,13 @@ export class _BoxedValueDefinition
   // If `true`, the value or type cannot be changed
   _isConstant = false;
 
+  // Debug tombstone (`binding-tombstone.ts`): where and in which scope this
+  // binding was discarded. Only ever set when `ce._debugBindings` is on;
+  // declared here (rather than assigned on demand) so turning the flag on does
+  // not change the object's shape.
+  _deadStack: string | undefined = undefined;
+  _deadScope: string | undefined = undefined;
+
   // Bumped on every semantic change to THIS definition (value write, type
   // change, disposal). Used with binding-identity re-resolution to validate
   // per-dependency caches (the `Comprehension` element memo) without an

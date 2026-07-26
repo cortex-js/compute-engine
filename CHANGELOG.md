@@ -191,6 +191,37 @@
 
 ### New Features
 
+- **An operator definition can now declare its bound variables.** The `scoped`
+  flag accepts a **binding-site selector** in addition to `true`:
+
+  ```ts
+  import { operandSites } from '@cortex-js/compute-engine';
+
+  ce.declare('MyBinder', {
+    lazy: true,
+    scoped: operandSites(1), // operand 1 is my bound variable
+    signature: '(expression, symbol) -> number',
+  });
+  ```
+
+  A selector implies a scope, so `scoped` remains the complete inventory of
+  scope-creating operators. When one is given, the engine declares each site's
+  symbol in the operator's own scope *before* the `canonical` handler runs, and
+  binds every occurrence of those names to that scope afterwards — so the
+  `parse`, `ce.box()` and `ce.function()` routes agree about which binding a
+  bound variable denotes, whichever route built the expression. The prebuilt
+  selectors (`operandSites`, `indexingSetSites`, `limitsIndexSites`,
+  `lambdaParamSites`) and the `BindingSite`/`BindingSiteSelector` types are
+  exported from `@cortex-js/compute-engine`. `Sum`, `Product`, `Loop`,
+  `Comprehension`, `Series` and `NDSolveFunction` now use it in place of six
+  hand-rolled conventions.
+
+  An indexing-set selector marks its sites `clauseLocal`: later clauses see
+  earlier bindings, but an *earlier* clause's collection resolves a name a
+  later clause binds in the enclosing scope
+  (`Comprehension(…, Element(i, [j, j+1]), Element(j, […]))` draws `i` from the
+  ambient `j`).
+
 - **`BoxedType.couldMatch()`** — "could a value of this type be a `target`?",
   the predicate for classifying a value by shape. `matches()` answers the other
   question — "is _every_ value of this type a `target`" — so it reports `false`

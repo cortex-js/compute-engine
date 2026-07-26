@@ -12,6 +12,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
   Sign,
+  BindingSiteSelector,
 } from '../global-types.js';
 
 import { applicable } from '../function-utils.js';
@@ -39,6 +40,7 @@ const OPERATOR_DEF_KEYS = new Set([
   // Function Flags
   'lazy',
   'scoped',
+  'bindingSites',
   'broadcastable',
   'missingBehavior',
   'missingStrip',
@@ -138,7 +140,40 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   complexity = DEFAULT_COMPLEXITY;
 
   lazy = false;
+
+  /** Normalized from the declaration's `scoped` flag: `true` for
+   * `scoped: true` AND for a binding-site selector, which implies a scope. */
   scoped = false;
+
+  /** The binding-site selector, when the declaration's `scoped` flag was one.
+   * `undefined` for a plain `scoped: true` (a scope with no syntactic bound
+   * variables — `Block`, the quantifiers) and for an unscoped operator. */
+  bindingSites?: BindingSiteSelector;
+
+  /** Normalize the union-typed `scoped` declaration into the boolean the
+   * engine reads plus the selector the canonicalization hook consumes.
+   *
+   * `spread` is the already-normalized selector of a definition built by
+   * spreading a BOXED definition (`{ ...ce.lookupDefinition('Sum').operator,
+   * evaluate }`), whose `scoped` is the boolean rather than the selector.
+   * Honoring it keeps such an override a binder, the same reason
+   * `normalizeSignatureField` accepts an already-boxed `signature`. */
+  private setScoped(
+    scoped: boolean | BindingSiteSelector | undefined,
+    spread?: BindingSiteSelector
+  ): void {
+    if (scoped === undefined && spread === undefined) return;
+    if (typeof scoped === 'function') {
+      this.bindingSites = scoped;
+      this.scoped = true;
+    } else if (scoped === undefined || scoped) {
+      this.bindingSites = spread ?? this.bindingSites;
+      this.scoped = scoped ?? this.scoped;
+    } else {
+      this.bindingSites = undefined;
+      this.scoped = false;
+    }
+  }
 
   signature: BoxedType;
   inferredSignature = true;
@@ -331,7 +366,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       );
 
     this.lazy = def.lazy ?? this.lazy;
-    this.scoped = def.scoped ?? this.scoped;
+    this.setScoped(
+      def.scoped,
+      (def as Partial<BoxedOperatorDefinition>).bindingSites
+    );
 
     const idempotent = def.idempotent ?? this.idempotent;
     const involution = def.involution ?? this.involution;
@@ -405,7 +443,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.compile = def.compile ?? this.compile;
     this.eq = def.eq ?? this.eq;
     this.neq = def.neq ?? this.neq;
-    this.scoped = def.scoped ?? this.scoped;
+    this.setScoped(
+      def.scoped,
+      (def as Partial<BoxedOperatorDefinition>).bindingSites
+    );
     this.lazy = def.lazy ?? this.lazy;
 
     if (def.collection)

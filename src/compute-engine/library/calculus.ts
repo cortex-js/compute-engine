@@ -8,6 +8,7 @@ import { functionResult } from '../../common/type/utils.js';
 import { checkType } from '../boxed-expression/validate.js';
 import {
   rebindEscaping,
+  rebindEscapingCurrentScope,
   defaultUnknown,
   hasSymbolicTranscendental,
   resolveToList,
@@ -21,6 +22,10 @@ import {
   sym,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  operandSites,
+  limitsIndexSites,
+} from '../boxed-expression/binding-sites.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { BoxedNumber } from '../boxed-expression/boxed-number.js';
 
@@ -1557,6 +1562,11 @@ volumes
         'sample count.',
       broadcastable: false,
       lazy: true,
+      // The ODE's independent variable is this operator's BOUND variable, and
+      // it is carried by the `Limits` operand (operand 2) — a position the
+      // evaluate path used to read out by hand, leaving the variable bound
+      // wherever the caller happened to have it.
+      scoped: limitsIndexSites(2),
       signature:
         '(expression, symbol, limits:(tuple|symbol), number) -> function',
       canonical: (ops, { engine }) => {
@@ -1835,6 +1845,13 @@ volumes
         'Example: Series(\\sin x, x) → x - x^3/6 + x^5/120 + O(x^7)',
       broadcastable: false,
       lazy: true,
+      // The expansion variable is this operator's BOUND variable: operand 1.
+      // The framework declares it in this node's own scope before the handler
+      // canonicalizes the body against it, and rebinds it afterwards — so the
+      // parse route (which leaves a binding-site symbol raw) and the function
+      // route (whose caller passes a symbol carrying the CALLER's binding)
+      // agree about the same expression.
+      scoped: operandSites(1),
       signature:
         '(expression, variable:symbol?, point:value?, order:number?) -> number',
       canonical: (ops, { engine: ce }) => {
@@ -1849,14 +1866,6 @@ volumes
           if (v !== undefined) x = ce.symbol(v);
         }
         if (!x || !isSymbol(x)) return null;
-        // The expansion variable is this operator's BOUND variable: keep the
-        // operand RAW so the parse route (which leaves a binding-site symbol
-        // raw) and the function route (whose caller passes a canonical,
-        // scope-bound symbol) agree about the same expression — otherwise
-        // `Series(f, x)` does not round-trip through LaTeX under
-        // binding-aware equality. Same convention as `nDSolveFunction`'s
-        // parameter: the binding belongs to the binder, not to the operand.
-        x = ce.symbol(x.symbol, { canonical: false });
         const x0 = ops[2] ? ops[2].canonical : ce.Zero;
         const n = ops[3] ? ops[3].canonical : ce.number(5);
         return ce._fn('Series', [f, x, x0, n]);
@@ -1873,7 +1882,13 @@ volumes
         const result = computeSeries(f, x, x0, n, ce, symbolicLimit);
         // No result: leave `Series(...)` unevaluated (deferred singular case).
         if (!result) return undefined;
-        return numericApproximation ? result.N() : result;
+        // The expansion is an OPEN expression in the expansion variable, which
+        // this node binds in its own scope: re-bind it so the result denotes
+        // the ambient variable rather than a binding of the frame being popped.
+        return rebindEscapingCurrentScope(
+          ce,
+          numericApproximation ? result.N() : result
+        );
       },
     },
 

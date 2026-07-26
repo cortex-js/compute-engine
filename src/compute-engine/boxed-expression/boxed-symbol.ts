@@ -77,6 +77,7 @@ import { isNumber, isSymbol } from './type-guards.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { sameBinding } from './compare.js';
 import { evaluateInOwnBindings } from './binders.js';
+import { assertLiveBinding } from './binding-tombstone.js';
 import {
   CYCLE_DETECTED,
   CycleDepthQuery,
@@ -976,6 +977,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   evaluate(options?: Partial<EvaluateOptions>): Expression {
     const def = this.valueDefinition;
     if (!def) return this;
+    // Debug invariant (§3 of the binder-mechanism design): a resolution site,
+    // not the `valueDefinition` getter, which must stay a plain field read.
+    if (this.engine._debugBindings) assertLiveBinding(def, this._id);
     const hold = def.holdUntil;
 
     if (def.isConstant) {
@@ -1105,6 +1109,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   private _N(): Expression {
     const def = this.valueDefinition;
+    if (def && this.engine._debugBindings) assertLiveBinding(def, this._id);
     // Note: `holdUntil: 'never'` means "substitute as early as possible" —
     // it never *prevents* numeric evaluation. (A previous version returned
     // `this` for 'never', which made `ImaginaryUnit.N()` a no-op and left

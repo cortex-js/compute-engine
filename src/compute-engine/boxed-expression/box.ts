@@ -8,6 +8,8 @@ import type {
   Metadata,
   Scope,
   BoxedValueDefinition,
+  BoxedOperatorDefinition,
+  BindingSiteSelector,
 } from '../global-types.js';
 import type { FormOption } from '../types-serialization.js';
 
@@ -57,6 +59,9 @@ import { lookupApplicable } from '../function-utils.js';
 import { canonicalNegate } from './negate.js';
 import { canonical } from './canonical-utils.js';
 import { isNumber, isFunction, isSymbol } from './type-guards.js';
+import { symbolAtSite, replaceAtSite } from './binding-sites.js';
+import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
+import { rewriteWithBinders } from './binders.js';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -778,9 +783,46 @@ function makeCanonicalFunction(
       }
     : undefined;
 
+  // A *binder* declares which of its operands are its bound variables, by
+  // giving its `scoped` flag a binding-site selector instead of `true`. The
+  // framework then owns the two things every binder used to improvise: the
+  // declaration of the variable in the operator's own scope (before the
+  // canonical handler canonicalizes the body against it), and the rebinding of
+  // the site afterwards, so the parse, `ce.box()` and `ce.function()` routes
+  // agree about which binding the variable denotes.
+  // See `docs/plans/2026-07-26-binder-mechanism-design.md` §1.3.
+  const sites = opDef.bindingSites;
+  if (sites !== undefined && scope !== undefined)
+    return canonicalizeBinder(ce, name, ops, metadata, scope, opDef, sites);
+
+  return applyOperatorDefinition(ce, name, ops, metadata, scope, opDef);
+}
+
+/**
+ * The operator-definition half of `makeCanonicalFunction`: apply the `lazy`
+ * flag, the `canonical` handler, signature validation, `flatten`,
+ * `idempotent`/`involution` and operand sorting.
+ *
+ * Split out so the binder hook (`canonicalizeBinder`) can wrap it as a whole:
+ * every one of its exits is a canonicalization result the post-phase must see.
+ * `rawOps` lets the caller pass operands it has already boxed raw (the
+ * pre-phase needs them to locate the binding sites), so a binder does not box
+ * its operands twice.
+ */
+function applyOperatorDefinition(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  ops: ReadonlyArray<ExpressionInput>,
+  metadata: Metadata | undefined,
+  scope: Scope | undefined,
+  opDef: BoxedOperatorDefinition,
+  rawOps?: ReadonlyArray<Expression>
+): Expression {
+  let result: Expression | null;
+
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
-    const xs = ops.map((x) => ce.expr(x, { form: 'raw' }));
+    const xs = rawOps ?? ops.map((x) => ce.expr(x, { form: 'raw' }));
     if (opDef.canonical) {
       try {
         result = opDef.canonical(xs, { engine: ce, scope });
@@ -977,6 +1019,204 @@ function makeCanonicalFunction(
     canonical: true,
     scope,
   });
+}
+
+/**
+ * Canonicalize a **binder**: an operator whose `scoped` flag is a
+ * binding-site selector (`docs/plans/2026-07-26-binder-mechanism-design.md`
+ * §1.3). Two phases, because a canonical handler both *needs* the bound
+ * variable declared before it canonicalizes the body and *may reshape* the
+ * operands.
+ *
+ * Pre-phase: declare each site's symbol in the operator's own scope, with
+ * `noAutoDeclare` set so the free variables of the body and the bounds are
+ * promoted to the ENCLOSING scope instead (the prologue `canonicalBigop` and
+ * `canonicalLoopLike` each hand-rolled).
+ *
+ * Post-phase: `bindBindingSites`, below.
+ *
+ * Two things the pre-phase deliberately does NOT do:
+ *
+ * - It does not push a scope when there is no site to declare. A bare
+ *   `Loop(body)` and a `Series(f)` whose expansion variable the handler
+ *   supplies have nothing to bind before the handler runs, and a scope pushed
+ *   for them is popped and discarded — swallowing a `Declare` in the body. The
+ *   post-phase still runs, and declares a site the handler revealed.
+ *
+ * - It does not declare a *later* clause's index (see
+ *   `BindingSite.clauseLocal`). The whole node is canonicalized by ONE
+ *   handler call, so the framework cannot interleave a declaration between two
+ *   clauses; the clause walk inside the handler (`canonicalIndexingSet`,
+ *   `canonicalLoopLike`) declares each index in this scope just before its own
+ *   clause, and the post-phase is the backstop. Only the FIRST clause's index
+ *   can be declared up front — nothing is canonicalized ahead of it.
+ */
+function canonicalizeBinder(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  ops: ReadonlyArray<ExpressionInput>,
+  metadata: Metadata | undefined,
+  scope: Scope,
+  opDef: BoxedOperatorDefinition,
+  sites: BindingSiteSelector
+): Expression {
+  // The selector reads the operands, so they must be boxed before the handler
+  // runs. Raw (unbound) boxing is what a lazy operator does anyway, and the
+  // result is handed on so it is done once.
+  const xs = ops.map((x) => ce.expr(x, { form: 'raw' }));
+
+  const preSites = sites(xs, 'pre');
+
+  let result: Expression;
+  if (preSites.length === 0) {
+    // Nothing to declare: canonicalize in the ambient scope rather than in a
+    // frame that is pushed, never populated, and discarded.
+    result = applyOperatorDefinition(ce, name, ops, metadata, scope, opDef, xs);
+  } else {
+    const wasNoAutoDeclare = scope.noAutoDeclare;
+    scope.noAutoDeclare = true;
+    ce.pushScope(scope);
+    try {
+      // A clause-local site is visible only from its own operand onward, and
+      // the handler canonicalizes the operands in one call: all the pre-phase
+      // can declare is the first clause's index.
+      let firstClause: number | undefined;
+      for (const site of preSites) {
+        if (site.clauseLocal) {
+          firstClause ??= site.path[0];
+          if (site.path[0] !== firstClause) continue;
+        }
+        const sym = symbolAtSite(xs, site.path);
+        if (sym === undefined) continue;
+        // An explicit `ce.declare()` is not affected by `noAutoDeclare`: it
+        // always lands in the target (this operator's) scope.
+        if (!scope.bindings.has(sym.symbol))
+          ce.declare(sym.symbol, site.type ?? 'unknown');
+      }
+      result = applyOperatorDefinition(
+        ce,
+        name,
+        ops,
+        metadata,
+        scope,
+        opDef,
+        xs
+      );
+    } finally {
+      // A DORMANT pop: the canonical expression keeps this scope as its
+      // `localScope` and pushes it again on every evaluation, so it is not
+      // dying and must not be tombstoned by the debug invariant.
+      beginDormantPop();
+      try {
+        ce.popScope();
+      } finally {
+        endDormantPop();
+      }
+      scope.noAutoDeclare = wasNoAutoDeclare;
+    }
+  }
+
+  return bindBindingSites(ce, name, result, metadata, scope, sites);
+}
+
+/**
+ * The post-phase of the binder hook: make every occurrence of a bound variable
+ * denote THIS node's binding.
+ *
+ * Step 5 — the binding site itself. What arrives there differs by route: the
+ * parse route leaves it RAW (a symbol with no definition — `box.ts` boxes a
+ * lazy operator's operands with `form: 'raw'`), while `ce.function('Series',
+ * [f, ce.symbol('x')])` hands over a symbol carrying the CALLER's binding.
+ * Both are discarded, and only at the binding site.
+ *
+ * Step 6 — the same names elsewhere in the node. `rebindParameters`
+ * generalized from a `Function` literal's parameters to arbitrary binders:
+ * canonicalizing an already-canonical body is a no-op, so a body canonicalized
+ * before this node's scope existed keeps the earlier bindings. An occurrence
+ * carrying NO binding is skipped — the equality contract's raw-operand rule: a
+ * binding site held raw by a lazy operator (`Declare`'s first operand) must not
+ * be canonicalized by a rewrite walk.
+ *
+ * Step 6 is CLAUSE-ORDERED: a `BindingSite.clauseLocal` site's name is
+ * rewritten only in its own clause and the ones after it (and in the operands
+ * before the first clause — the body, which is inside every clause). An
+ * earlier clause's collection referencing the name legitimately denotes the
+ * ENCLOSING binding — `Comprehension(…, Element(i, [j, j+1]), Element(j, …))`
+ * draws `i` from the ambient `j`.
+ */
+function bindBindingSites(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  result: Expression,
+  metadata: Metadata | undefined,
+  scope: Scope,
+  sites: BindingSiteSelector
+): Expression {
+  // A handler that rewrote the head (`canonicalBigop` returns a `Reduce` for a
+  // collection body) or gave up made its own decision: the paths no longer
+  // describe this expression.
+  if (!isFunction(result, name) || !result.isCanonical) return result;
+
+  const found = sites(result.ops, 'post');
+  if (found.length === 0) return result;
+
+  // Step 5: the site denotes this node's binding.
+  let ops: ReadonlyArray<Expression> = result.ops;
+  const bound = new Map<string, Expression>();
+  // The operand index a bound name becomes visible at (0 = the whole node),
+  // and the index of the first clause — every operand before it (the body)
+  // sees all the bindings.
+  const visibleFrom = new Map<string, number>();
+  let firstClause = Number.POSITIVE_INFINITY;
+  for (const site of found) {
+    const sym = symbolAtSite(ops, site.path);
+    if (sym === undefined) continue;
+    const id = sym.symbol;
+    const from = site.clauseLocal ? site.path[0] : 0;
+    if (site.clauseLocal) firstClause = Math.min(firstClause, site.path[0]);
+    visibleFrom.set(id, Math.min(visibleFrom.get(id) ?? from, from));
+    let binding = bound.get(id);
+    if (binding === undefined) {
+      binding = ce._inScope(scope, () => {
+        // The 'post' phase is the authoritative one: a handler that reshapes
+        // its operands (or supplies a default variable) can reveal a site the
+        // 'pre' phase could not see, and that site still gets its binding here.
+        if (!scope.bindings.has(id)) ce.declare(id, site.type ?? 'unknown');
+        return ce.symbol(id);
+      });
+      bound.set(id, binding);
+    }
+    if (sym.valueDefinition === binding.valueDefinition) continue;
+    ops = replaceAtSite(ops, site.path, binding);
+  }
+  if (bound.size === 0) return result;
+
+  // Step 6: same-named occurrences in the node's other operands.
+  //
+  // The node must also END UP carrying the scope: `boundVariableNames` reads
+  // `localScope.bindings`, and that is the only channel `same()`,
+  // `rebindEscaping` and the rewrite walks have for learning what a node binds.
+  // A handler that builds its result with a bare `ce._fn(…)` does not attach
+  // it, so a rebuild is needed even when no operand moved.
+  let changed = ops !== result.ops || result.localScope !== scope;
+  const next = ops.map((op, m) => {
+    // An operand before the first clause is the body: it is inside every
+    // clause, so it sees every binding.
+    const limit = m < firstClause ? Number.POSITIVE_INFINITY : m;
+    const rewritten = rewriteWithBinders(op, (sym, shadowed) => {
+      const binding = bound.get(sym.symbol);
+      if (binding === undefined || shadowed?.has(sym.symbol)) return sym;
+      if ((visibleFrom.get(sym.symbol) ?? 0) > limit) return sym;
+      if (sym.valueDefinition === undefined) return sym;
+      if (sym.valueDefinition === binding.valueDefinition) return sym;
+      return binding;
+    });
+    if (rewritten !== op) changed = true;
+    return rewritten;
+  });
+  if (!changed) return result;
+
+  return ce._fn(name, next, { metadata, scope });
 }
 
 function makeNumericFunction(

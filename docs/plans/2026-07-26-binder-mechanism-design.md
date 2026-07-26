@@ -33,6 +33,86 @@ defect, §Sequencing step 5).
    `scoped: true` with an empty scope — must move to a selector as part of
    their stage, which the unified type makes visible.
 
+## Implementation record — stages 0–4 (2026-07-26, staged)
+
+All five stages landed and measured individually: baseline 19,270 passed /
+4182 snapshots → final **19,278 passed (+8 new pins) / 4182/4182 unchanged**,
+typecheck + madge clean. New modules: `binding-sites.ts` (selectors + path
+helpers), `binding-tombstone.ts` (Tier-1 debug invariant); the hook =
+`canonicalizeBinder`/`bindBindingSites` in `box.ts`, wrapping the extracted
+`applyOperatorDefinition`. Adopters: Series (`operandSites(1)`),
+NDSolveFunction (`limitsIndexSites(2)`), Sum/Product
+(`indexingSetSites(1,'integer')`), Loop/Comprehension — the two hand-rolled
+prologues in `canonicalBigop`/`canonicalLoopLike` are deleted.
+
+What implementation added to the design, all load-bearing:
+
+- **Two hook amendments**: the post-phase DECLARES a site name absent from the
+  scope (reshaping handlers and default variables — `Series(f)` — reveal
+  sites only in 'post'), and it REBUILDS whenever `result.localScope !==
+  scope`, not only when an operand moved (a handler using bare `ce._fn` never
+  attaches the scope, and `boundVariableNames` reads `localScope.bindings`).
+- **Open-expression binders escape their own frame.** `Series`' expansion is
+  OPEN in the bound variable, so the result left the node's new scope
+  referencing a dying binding (12 failures). Fixed with
+  `rebindEscapingCurrentScope` (`utils.ts`) in the evaluate handler. **Budget
+  the same repair for `Integrate` (stage 5) and `Limit` (stage 7)**;
+  Sum/Product/Loop are closed over their index and immune. §Escaping results'
+  "inventory is incomplete" confirmed again.
+- **The redeclare signature** (memorize for stages 5–14): a second
+  `ce.declare` of a pre-declared index THROWS, `box.ts` swallows it into
+  `console.error` + a NON-canonical expression, and the operator silently
+  stops evaluating — polluting unrelated suites via shared engines. Stage 3
+  hit this via `canonicalIndexingSet`'s `Element` branch (the one
+  index-declaring branch without a `bindings.has()` guard; now guarded).
+- **Spread-overrides carry the selector**: `{...def.operator, evaluate}` must
+  survive `update()` — `'bindingSites'` is in `OPERATOR_DEF_KEYS` and
+  `setScoped` honors a spread-carried selector.
+- **Tombstone revive-on-push is required** (debug-gated, in
+  `pushEvalContext`): a big-op scope is popped after canonicalization and
+  re-pushed on every evaluation; without revive the flag fires on every
+  `Sum`. `inScope`'s no-dispose asymmetry untouched.
+- **Series micro-timing**: steady-state delta < 0.5% (≈0.255 ms/iter both
+  ways) — the §1.5 push-cost risk did NOT materialize for Series;
+  `binderScopeOnly` unused so far.
+- **Deviation from §1.6 naming**: no `isScoped` alias — the boxed definition
+  keeps `scoped: boolean` (public API) and exposes the selector as
+  `bindingSites`.
+- **Latent, found not fixed**: a bare `Loop(body)` (no iterator clauses) now
+  canonicalizes its body inside a pushed-then-discarded binder scope; a
+  `Declare` in such a body lands in the discarded scope. Fix (skip the
+  pre-phase push when 'pre' yields no sites) interacts with `Series(f)`'s
+  default-variable path — needs its own stage if pursued.
+
+### Review round (2026-07-26, dual-reviewer, 5 findings, all fixed)
+
+- **Clause visibility** (HIGH, verified by probe): the hook's up-front
+  declaration broke "later clauses see earlier bindings" for
+  `Comprehension`/`Loop`/big-ops. Fix: `BindingSite.clauseLocal` (stamped by
+  `indexingSetSites`/`limitsIndexSites`) — pre-phase declares only the FIRST
+  clause's index (the handlers' own ordered walks declare the rest), and
+  post-phase step 6 rewrites operand *m* only with names visible from ≤ *m*
+  (the body, before the first clause, sees all). Selector signatures
+  unchanged; one additive optional field.
+- **Bare `Loop` transient scope** (HIGH, was the "latent" note above): no
+  'pre' sites ⇒ no scope push. `Series(f)`'s post-only default variable still
+  works (pinned).
+- **Selectors now re-exported from the public entry** (`src/compute-engine.ts`)
+  and the CHANGELOG shows the real import path.
+- **Tombstone**: the `canonicalizeBinder` pop is "dormant" (not tombstoned) —
+  it is never terminal; the assert message also no longer blames
+  `rebindEscaping` unconditionally. The post-EVALUATION pop still tombstones,
+  so a between-frames window remains; message covers it.
+- **`shield`** documented as reserved for stage 14.
+
+7 new pins; final 19,285 passed / snapshots 4182/4182 / typecheck + madge
+clean. Two pre-existing issues flagged, NOT fixed: the flat form
+`ce.box(['Sum', body, 'n', 1, 'M'])` declares the symbolic BOUND `M` as an
+index (predates this work, `canonicalIndexingSet` declares any bare-symbol
+operand); and the `ce.function` route for `Comprehension` does not materialize
+at canonicalization while `ce.box` does (route asymmetry, `isSame`/`evaluate`
+agree).
+
 **One correction up front, because two documents propagated it**: CONTRACT 4
 does *not* live in `test/compute-engine/scope.test.ts`. It is
 `test/compute-engine/pipeline-contracts.test.ts:513–612`,

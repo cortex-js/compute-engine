@@ -36,6 +36,8 @@ export type {
   BoxedBaseDefinition,
   BoxedValueDefinition,
   OperatorDefinitionFlags,
+  BindingSite,
+  BindingSiteSelector,
   BoxedOperatorDefinition,
   LambdaDefinition,
 } from './types-definitions.js';

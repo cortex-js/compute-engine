@@ -65,6 +65,7 @@ import type {
 } from './latex-syntax/types.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
 import { isSymbol } from './boxed-expression/type-guards.js';
+import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
 
 import { getStandardLibrary } from './library/library.js';
 
@@ -527,6 +528,15 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _inferenceTxDepth = 0;
+
+  /** When true, a scope being discarded tombstones its value definitions and
+   * the symbol resolution sites report a use of a dead binding with both
+   * stacks (`boxed-expression/binding-tombstone.ts`). Debugging aid, not a
+   * semantic mode — defaults from the `CE_DEBUG_BINDINGS` environment
+   * variable and can be set programmatically.
+   * @internal
+   */
+  _debugBindings = debugBindingsDefault();
 
   /** Value definitions whose type was first inferred (unknown → concrete)
    * during the current top-level boxing operation — forward-computed

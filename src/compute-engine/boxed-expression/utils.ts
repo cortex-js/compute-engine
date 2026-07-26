@@ -1064,6 +1064,33 @@ export function rebindEscaping(expr: Expression, scope: Scope): Expression {
   });
 }
 
+/**
+ * Re-bind a result escaping the scope that is currently on top of the eval
+ * stack — the evaluate-time counterpart of {@link rebindEscaping}.
+ *
+ * A binder whose `scoped` flag names its binding sites owns a `localScope`,
+ * which `BoxedFunction._computeValue` pushes as an eval frame while the
+ * evaluate handler runs. Its bound variable is a DIFFERENT variable from the
+ * ambient one of the same name, so a result that is an open expression in it —
+ * `Series`' expansion is an expression in the ambient `x`, unlike a `Sum`,
+ * which is closed over its index — must be re-bound on the way out or it
+ * references a binding of a frame that is about to be popped.
+ *
+ * Call from inside the frame: the enclosing scope is pushed for the rewrite so
+ * `ce.symbol()` resolves outward, exactly as `withValueShield` does after its
+ * own pop.
+ */
+export function rebindEscapingCurrentScope(
+  ce: ComputeEngine,
+  expr: Expression
+): Expression {
+  const scope = ce.context.lexicalScope;
+  if (scope.bindings.size === 0) return expr;
+  return ce._inScope(scope.parent ?? undefined, () =>
+    rebindEscaping(expr, scope)
+  );
+}
+
 export function isOperatorDef(
   def: BoxedDefinition | undefined
 ): def is TaggedOperatorDefinition {

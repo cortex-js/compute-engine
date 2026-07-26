@@ -244,6 +244,13 @@ export interface IComputeEngine {
    * @internal */
   _inferenceTxDepth: number;
 
+  /** When true, a discarded scope tombstones its value definitions and the
+   * symbol resolution sites throw on a use of a dead binding
+   * (`boxed-expression/binding-tombstone.ts`). Defaults from the
+   * `CE_DEBUG_BINDINGS` environment variable.
+   * @internal */
+  _debugBindings: boolean;
+
   /** Value definitions whose type was first inferred (unknown → concrete)
    * during the current top-level boxing operation — the forward-computed
    * provenance for `repairFreshMatrixInference`'s eligibility. Lazily

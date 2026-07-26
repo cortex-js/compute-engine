@@ -1029,6 +1029,68 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
 }
 
 /**
+ * A located binding site: where, inside an operator expression, one of that
+ * operator's **bound variables** sits, and how to declare it.
+ *
+ * @category Definitions
+ */
+export type BindingSite = {
+  /** The operand-index chain from the operator node to the symbol: `[1]` is
+   * the second operand, `[2, 0]` the first operand of the third. */
+  path: readonly number[];
+
+  /** The type to declare the bound variable with. Defaults to `'unknown'`. */
+  type?: TypeString;
+
+  /**
+   * The site belongs to an iterator **clause** (an indexing set), so its
+   * binding is visible only from its own operand onward: in
+   * `Comprehension(b, Element(i, [j, j+1]), Element(j, [10, 20]))` the first
+   * clause's collection resolves `j` in the ENCLOSING scope — "later clauses
+   * see earlier bindings", not the reverse. An operand *before* the first
+   * clause (the body) sees every binding.
+   *
+   * Without the flag a site is visible to the whole node, which is what a
+   * non-clause binder (`Series`' expansion variable, a function literal's
+   * parameters) wants.
+   */
+  clauseLocal?: boolean;
+
+  /**
+   * Declare the binding without a value even if the enclosing scope binds
+   * the same name to one (the "shield" idiom).
+   *
+   * **Reserved for stage 14** of
+   * `docs/plans/2026-07-26-binder-mechanism-design.md` (§4, the `_isShield`
+   * marker that replaces the ad-hoc `withValueShield` sites of `Solve`/`D`).
+   * Not read by the binder hook yet: setting it today has no effect.
+   */
+  shield?: boolean;
+};
+
+/**
+ * Locate an operator's binding sites among its operands.
+ *
+ * Used as the value of the {@link OperatorDefinitionFlags.scoped} flag to
+ * declare that an operator is a *binder*: the framework mints the operator's
+ * scope, declares each site's symbol in it before the `canonical` handler
+ * runs, and rebinds the sites (and same-named occurrences elsewhere in the
+ * expression) to that scope afterwards. This is what makes the parse,
+ * `ce.box()` and `ce.function()` routes agree about which binding a bound
+ * variable denotes.
+ *
+ * `phase: 'pre'` runs on the RAW operands, before the `canonical` handler; it
+ * may return fewer sites than `'post'` — return nothing rather than guess.
+ * `phase: 'post'` runs on the handler's RESULT operands and is authoritative.
+ *
+ * @category Definitions
+ */
+export type BindingSiteSelector = (
+  ops: ReadonlyArray<Expression>,
+  phase: 'pre' | 'post'
+) => readonly BindingSite[];
+
+/**
  * An operator definition can have some flags to indicate specific
  * properties of the operator.
  * @category Definitions
@@ -1058,9 +1120,16 @@ export type OperatorDefinitionFlags = {
    * This will allow it to declare variables that are not visible outside
    * the function expression using the operator.
    *
+   * A **binding-site selector** may be given instead of `true`: the operator
+   * then also declares *which of its operands are its bound variables*, and
+   * the framework binds them in the operator's own scope (see
+   * {@link BindingSiteSelector}). A selector implies a scope, so the
+   * inconsistent state "binding sites without a scope" is unrepresentable and
+   * `scoped` remains the complete inventory of scope-creating operators.
+   *
    * **Default**: `false`
    */
-  scoped: boolean;
+  scoped: boolean | BindingSiteSelector;
 
   /**  If `true`, the operator is applied element by element to lists, matrices
    * (`["List"]` or `["Tuple"]` expressions) and equations (relational
@@ -1191,6 +1260,16 @@ export type LambdaDefinition = {
  */
 export interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
+  /** Normalized from the declaration's `scoped` flag: `true` when the operator
+   * creates a lexical scope, whether it was declared `true` or as a
+   * binding-site selector. */
+  scoped: boolean;
+
+  /** The binding-site selector of the declaration's `scoped` flag, when one
+   * was given. `undefined` for `scoped: true` (a scope with no syntactic
+   * bound variables) and for an unscoped operator. */
+  bindingSites?: BindingSiteSelector;
+
   complexity: number;
 
   /** If true, the signature was inferred from usage and may be modified
