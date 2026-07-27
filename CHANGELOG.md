@@ -1,5 +1,50 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`Multiply` of two mismatched `List` literals is now an error.** The rank-1
+  fold used to leave the product inert-symbolic (`[1,2,3] * [2,2]` stayed
+  `[1,2,3] * [2,2]`) where `Add` on the same operands answered
+  `incompatible-dimensions`. The fold now routes through the same
+  `broadcastLengthMismatch` check as every other broadcast path, so the two
+  heads agree. Nothing was silently lost before (the shape never truncated);
+  this closes the last rank-1 gap in the 0.97.0 length ruling. The
+  unit-carrying variant (`[1,2,3] · ([1,2]·Meter)`) errors the same way. The
+  rank-2 matrix-product mismatch is unchanged — dimension compatibility there
+  belongs to `MatrixMultiply`.
+
+- **The unused `BindingSite.shield` field is removed.** It was documented as
+  "not read by the binder hook yet" and setting it had no effect; the shield
+  narrowing shipped in 0.96.0 through `_isShield`. No behavior changes.
+
+### Improvements
+
+- **A compiled user-function application now broadcasts over a collection
+  argument.** With `q(t) := n·t + 1`, `q(L)` over a list interpreted to
+  `[5,9,13]` but compiled to `NaN` — the callee's body compiled as scalar
+  code and the array argument coerced. The application site now dispatches at
+  run time through the same `_SYS.bcast` helper the element-wise operators
+  use: scalar arguments call directly (provably-scalar calls keep the
+  allocation-free direct path), collection arguments map element-wise,
+  nesting recurses, and a length mismatch between two collection arguments
+  projects to `NaN` (the real-target rendering of the interpreter's
+  `incompatible-dimensions`). JavaScript target only.
+
+- **`RandomChoice` narrows its element type like `Random`.** The result type
+  now derives from the same domain narrowing as the rest of the random
+  family: `RandomChoice(Interval(0,1), 3)` types `vector<finite_real^3>`
+  (was `vector<real^3>`), `RandomChoice(Range(1,6), 4)` types
+  `vector<finite_integer^4>`.
+
+- **Recompiling with a reused external compile target is deterministic.** A
+  caller-constructed `target` object passed to two successive `compile()`
+  calls kept accumulating per-compilation counter numbering (GPU random
+  draws numbered `_gpu_rnd_n0`, then `_gpu_rnd_n1` for the identical
+  expression). Each top-level compilation now begins with a
+  compilation-boundary reset (`CompileTarget.beginCompilation`), so
+  identical input compiles to identical code on every route; multi-statement
+  shader bodies keep their single shared numbering.
+
 ## 0.97.0 _2026-07-27_
 
 ### Breaking Changes

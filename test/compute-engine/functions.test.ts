@@ -819,6 +819,11 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
   // bindings still resolve correctly through the scope's parent chain, and the
   // index is gone once the evaluation settles. Making this invisible needs
   // per-evaluation (task-local) context propagation.
+  // Generous timeout: the workload is sized so the sum is still in flight
+  // while the poller watches (do NOT shrink it — see BIGGER_FOR_SUSPEND), and
+  // on a loaded CI runner each poll iteration also absorbs a ~16ms runAsync
+  // chunk of the suspended sum, so the default 5s can be exceeded without
+  // anything being wrong.
   test('a suspended evaluation’s index is visible to a mid-flight caller', async () => {
     const ce = new ComputeEngine();
     ce.assign('a', 42);
@@ -844,7 +849,7 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
     // ...and it is gone again once the evaluation settles
     expect(ce.box('z').value).toBeUndefined();
     expect(ce._evalContextStack.length).toBe(2);
-  });
+  }, 30_000);
 
   test('cancellation still reports as a CancellationError', async () => {
     const ce = new ComputeEngine();
