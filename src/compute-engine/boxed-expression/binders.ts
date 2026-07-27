@@ -162,6 +162,78 @@ export function rewriteWithBinders(
 }
 
 /**
+ * Re-point occurrences of some names at the bindings a binder owns for them —
+ * the ONE implementation of *"rebind these names to this scope's bindings"*.
+ *
+ * Two callers had drifted copies of this walk: step 6 of the binder
+ * mechanism's post-phase (`bindBindingSites`, `box.ts`), which rebinds a
+ * declared binder's variables inside the node's other operands, and a
+ * `Function` literal's parameter repair (`rebindParameters`,
+ * `function-utils.ts`), which does the same for the one binder that is not
+ * definition-driven. They exist for the same reason — canonicalizing an
+ * already-canonical body is a no-op, so a body built BEFORE the binder existed
+ * keeps the bindings it was built with, and its occurrences of the bound
+ * variable go on denoting the enclosing scope's variable of the same name.
+ *
+ * `scope` is the AUTHORITY for "is this occurrence already the binder's
+ * variable"; `replacements` supplies the symbol to re-point it at otherwise,
+ * which the caller must have resolved inside `scope`. The two are separate on
+ * purpose: `ce.symbol(name)` does not always come back carrying the scope's
+ * binding — a parameter named after a library constant (`Function(Pi + 1, Pi)`)
+ * resolves to the CONSTANT — so comparing the occurrence against the resolved
+ * symbol rather than against the scope would rewrite a correctly-bound
+ * occurrence into the constant. Four rules, and they are the whole contract:
+ *
+ * - An occurrence shadowed by a binder INSIDE `expr` belongs to that binder.
+ * - An occurrence carrying NO binding is left alone — the equality contract's
+ *   raw-operand rule: it already denotes the enclosing binder, and it is also
+ *   how a BINDING SITE reaches here (a lazy operator holds its operands raw,
+ *   and `Declare` deliberately keeps its first operand un-canonicalized so the
+ *   about-to-be-declared name is not turned into a reference to an outer
+ *   definition — `Declare`'s `sym(ops[0].evaluate())` would then read the
+ *   symbol's VALUE and the declaration would silently vanish).
+ * - An occurrence already on `scope`'s binding for the name is returned
+ *   unchanged, so an already-correct body is preserved by identity.
+ * - Everything else is re-pointed at `replacements`.
+ *
+ * `accept` restricts a name to part of the tree — the clause ordering of
+ * `BindingSite.clauseLocal`, where an earlier clause's collection legitimately
+ * denotes the ENCLOSING binding. `skipRootBinds` ignores what the ROOT itself
+ * binds, for a caller whose whole purpose is to rewrite occurrences of the
+ * root's own bound variables (the body `Block` of a `Function` literal).
+ */
+export function rebindToBindings(
+  expr: Expression,
+  scope: Scope,
+  replacements: ReadonlyMap<string, Expression>,
+  options?: {
+    skipRootBinds?: boolean;
+    accept?: (name: string) => boolean;
+  }
+): Expression {
+  if (replacements.size === 0) return expr;
+  return rewriteWithBinders(
+    expr,
+    (sym, shadowed) => {
+      const name = sym.symbol;
+      if (shadowed?.has(name)) return sym;
+      const target = replacements.get(name);
+      if (target === undefined) return sym;
+      if (options?.accept?.(name) === false) return sym;
+      const def = sym.valueDefinition;
+      if (def === undefined) return sym;
+      // Inline value-def check (`isValueDef` lives in `utils.ts`, which
+      // imports this module).
+      const own = scope.bindings.get(name);
+      if (own !== undefined && 'value' in own && own.value === def) return sym;
+      return target;
+    },
+    undefined,
+    options?.skipRootBinds ?? false
+  );
+}
+
+/**
  * Evaluate `value` in the environment its OWN free symbols denote — the
  * dereference half of the name-vs-binder repair
  * (`docs/plans/2026-07-24-defining-scope-dereference-design.md`).

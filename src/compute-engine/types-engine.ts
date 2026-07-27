@@ -589,6 +589,17 @@ export interface IComputeEngine {
   ): BoxedDefinition;
 
   /**
+   * The symbol denoting `scope`'s OWN binding for `name` — how a binder's
+   * variable (a `Function` parameter, a `Sum` index, `D`'s variable) is built.
+   *
+   * Unlike `symbol()`, which resolves a NAME through the scope chain and
+   * short-circuits to the interned constant for `Pi`, `e`, `i`, ..., this reads
+   * the scope's bindings map, which is the authority for what a binder binds.
+   * `undefined` when the scope has no value binding for the name.
+   * @internal */
+  _bindingSymbol(name: MathJsonSymbol, scope: Scope): Expression | undefined;
+
+  /**
    * Push a set of parameter names that, while canonicalizing a function body,
    * shadow any same-named constant (`i`, `e`, ...) so they resolve as ordinary
    * local variables. Balanced with `_popShadowedParameters`. Optional `types`

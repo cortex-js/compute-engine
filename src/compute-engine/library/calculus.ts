@@ -24,6 +24,7 @@ import {
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import {
   operandSites,
+  operandsFrom,
   indexingSetSites,
   limitsIndexSites,
 } from '../boxed-expression/binding-sites.js';
@@ -744,7 +745,12 @@ volumes
       keywords: ['differentiate'],
       broadcastable: false,
 
-      scoped: true,
+      // The differentiation variables are operands 1..n. They used to be bound
+      // wherever the CALLER had them — this operator's scope was minted and
+      // never populated — so the parse route (raw) and the `ce.function` route
+      // (the caller's binding) disagreed about the same derivative. The
+      // `withValueShield` at evaluate is unaffected and stays (stage 14).
+      scoped: operandsFrom(1),
       lazy: true,
       signature: '(expression, variables:symbol*) -> expression',
       type: ([body]) => {
@@ -848,7 +854,7 @@ volumes
           if (n) diffVars.push(n);
         }
 
-        return withValueShield(ce, diffVars, () => {
+        const result = withValueShield(ce, diffVars, () => {
           let f: Expression | undefined = ops[0].canonical;
 
           // Unwrap Function literals to get the body for differentiation.
@@ -886,6 +892,15 @@ volumes
           if (f && hasSymbolicTranscendental(f)) return f;
           return f?.evaluate();
         });
+
+        // A derivative is an OPEN expression in the differentiation variable,
+        // which this node now binds in its own scope (`scoped: operandsFrom(1)`).
+        // Without this, `d/dx sin(x)` leaves the frame still referencing the
+        // dying binding and compares unequal to a separately parsed `-sin(x)` —
+        // the repair `Series` (stage 1) and `Integrate` (stage 5) both needed.
+        return result === undefined
+          ? undefined
+          : rebindEscapingCurrentScope(ce, result);
       },
     },
 

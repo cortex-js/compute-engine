@@ -2,6 +2,7 @@ import { MathJsonSymbol } from '../math-json.js';
 import { cmp } from './boxed-expression/compare.js';
 import {
   evaluateInOwnBindings,
+  rebindToBindings,
   rewriteWithBinders,
 } from './boxed-expression/binders.js';
 import type {
@@ -376,12 +377,85 @@ export function canonicalFunctionLiteralArguments(
   // the body moves.
   block = rebindParameters(block, params);
 
-  return ce._fn('Function', [block, ...params]);
+  return ce._fn('Function', [
+    block,
+    ...bindParameterOperands(ce, block, params),
+  ]);
+}
+
+/**
+ * Make each PARAMETER OPERAND denote the binding the body `Block` declares for
+ * it — step 5 of the binder discipline
+ * (`docs/plans/2026-07-26-binder-mechanism-design.md` §1.3), for the one binder
+ * that is not definition-driven.
+ *
+ * What arrived there differed by route, exactly as it did for `Series` and
+ * `Integrate` before their migration: the parse and `ce.box` routes leave the
+ * parameter RAW (a symbol with no definition), while
+ * `ce.function('Function', [body, ce.symbol('x')])` hands over a symbol
+ * carrying the CALLER's binding — a binding that has nothing to do with this
+ * literal and, for a caller-assigned `x`, holds a value.
+ *
+ * Afterwards the literal has exactly ONE binding for the parameter, referenced
+ * from both the parameter operand and the body's occurrences. That is what
+ * makes the "two live bindings at once" state (`Limit`'s migration attempt,
+ * §Stages 5–8 round) detectable rather than silent: a second binder declaring
+ * the parameter in ITS scope would show up here as a parameter operand that no
+ * longer matches the body.
+ */
+function bindParameterOperands(
+  ce: ComputeEngine,
+  block: Expression,
+  params: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  const scope = block.localScope;
+  if (!scope) return params;
+  return params.map((param) => {
+    const name = functionLiteralParameterName(param);
+    if (!name) return param;
+    // Inline value-def check (`isValueDef` lives in `utils.ts`, which this
+    // module cannot import).
+    const binding = scope.bindings.get(name);
+    if (binding === undefined || !('value' in binding)) return param;
+    const def = (binding as { value: BoxedValueDefinition }).value;
+    const site = isFunction(param, 'Typed') ? param.op1 : param;
+    if (
+      (site as { valueDefinition?: BoxedValueDefinition }).valueDefinition ===
+      def
+    )
+      return param;
+    // Built on the Block's OWN binding rather than by name: `ce.symbol()` would
+    // short-circuit to the interned constant for a parameter named after one
+    // (`Pi`, `e`, `i`, ...) and hand back something that is not this
+    // parameter at all.
+    const bound = ce._bindingSymbol(name, scope);
+    if (bound === undefined) return param;
+    if (!isFunction(param, 'Typed')) return bound;
+    return ce._fn('Typed', [bound, param.op2], { canonical: false });
+  });
 }
 
 /** Point every occurrence of this literal's parameter names at the binding the
  * body Block declares for them. See the call site for why an already-canonical
- * body can arrive bound elsewhere. */
+ * body can arrive bound elsewhere.
+ *
+ * EVERY parameter, named as well as anonymous. The invariant is that a
+ * parameter occurrence in the body denotes THIS literal's parameter — and
+ * nothing else about the body moves, because only the names this literal binds
+ * are targets and only occurrences that resolve elsewhere are touched.
+ *
+ * This used to be restricted to the anonymous placeholders (`_`, `_1`, …)
+ * produced by the shorthand/pipe desugaring, because widening it broke three
+ * things. All three were the same latent defect rather than a reason to keep
+ * the restriction, and are fixed: `Integrate` handed the antiderivative
+ * machinery a body still bound to the literal's Block while that machinery
+ * minted the integration variable in the caller's scope (`liftIntegrand`,
+ * `library/calculus.ts`), and a BINDING SITE held raw by a lazy operator must
+ * not be canonicalized (the raw-occurrence rule of `rebindToBindings`).
+ *
+ * The walk itself is `rebindToBindings` (`binders.ts`), shared with the binder
+ * mechanism's post-phase: this is the same repair, for the one binder that is
+ * not definition-driven. */
 function rebindParameters(
   block: Expression,
   params: ReadonlyArray<Expression>
@@ -389,64 +463,34 @@ function rebindParameters(
   const scope = block.localScope;
   if (!scope) return block;
 
-  const targets = new Map<string, BoxedValueDefinition>();
+  const names: string[] = [];
   for (const param of params) {
     const name = functionLiteralParameterName(param);
-    if (!name) continue;
-    // EVERY parameter, named as well as anonymous. The invariant is that a
-    // parameter occurrence in the body denotes THIS literal's parameter — and
-    // nothing else about the body moves, because only the names this literal
-    // binds are targets and only occurrences that resolve elsewhere are
-    // touched.
-    //
-    // This used to be restricted to the anonymous placeholders (`_`, `_1`, …)
-    // produced by the shorthand/pipe desugaring, because widening it broke
-    // three things. All three were the same latent defect rather than a reason
-    // to keep the restriction, and are fixed: `Integrate` handed the
-    // antiderivative machinery a body still bound to the literal's Block while
-    // that machinery minted the integration variable in the caller's scope
-    // (`liftIntegrand`, `library/calculus.ts`), and a BINDING SITE held raw by
-    // a lazy operator must not be canonicalized (see the visitor below).
-    const binding = scope.bindings.get(name);
+    if (!name || names.includes(name)) continue;
     // Inline value-def check (`isValueDef` lives in `utils.ts`, which this
     // module cannot import).
-    if (binding !== undefined && 'value' in binding)
-      targets.set(name, (binding as { value: BoxedValueDefinition }).value);
+    const binding = scope.bindings.get(name);
+    if (binding !== undefined && 'value' in binding) names.push(name);
   }
-  if (targets.size === 0) return block;
+  if (names.length === 0) return block;
 
-  // Resolve the replacement symbols INSIDE the Block's scope: without the
-  // `_inScope` wrapper, `ce.symbol()` would bind against the current lexical
-  // scope — the enclosing one — instead of the parameter binding this repair
-  // exists to restore. `skipRootBinds`: the Block's own bindings ARE the
-  // rebind targets, so the root must not shadow them; a nested binder that
-  // re-binds one of these names owns its occurrences (`shadowed`).
-  return block.engine._inScope(scope, () =>
-    rewriteWithBinders(
-      block,
-      (sym, shadowed) => {
-        if (shadowed?.has(sym.symbol)) return sym;
-        const target = targets.get(sym.symbol);
-        if (target === undefined) return sym;
-        const def = (sym as { valueDefinition?: BoxedValueDefinition })
-          .valueDefinition;
-        if (def === target) return sym;
-        // An occurrence carrying NO binding has none to repair, and per the
-        // equality contract it already denotes the enclosing binder — the same
-        // rule `sameBinding` and `bindingKeyedSubs` use for a raw operand. It
-        // is also how a BINDING SITE reaches here: a lazy operator holds its
-        // operands raw, and `Declare` deliberately keeps its first operand
-        // un-canonicalized so the about-to-be-declared name is not bound to an
-        // outer definition. Canonicalizing it would turn the name into a
-        // reference — `Declare`'s `sym(ops[0].evaluate())` would then read the
-        // parameter's VALUE instead of its name, and the declaration would
-        // silently vanish.
-        if (def === undefined) return sym;
-        return sym.engine.symbol(sym.symbol);
-      },
-      undefined,
-      true
-    )
+  // The replacement symbols are built on the Block's OWN bindings
+  // (`_bindingSymbol`), not resolved by name: `ce.symbol()` binds against the
+  // current lexical scope — the enclosing one — and, for a parameter named
+  // after a library constant, short-circuits to the constant even inside the
+  // Block's scope. The rewrite itself still runs in that scope, so a node it
+  // rebuilds canonicalizes where its operands are bound. `skipRootBinds`: the
+  // Block's own bindings ARE the rebind targets, so the root must not shadow
+  // them; a nested binder that re-binds one of these names owns its
+  // occurrences (`shadowed`).
+  const ce = block.engine;
+  const targets = new Map<string, Expression>();
+  for (const name of names) {
+    const bound = ce._bindingSymbol(name, scope);
+    if (bound !== undefined) targets.set(name, bound);
+  }
+  return ce._inScope(scope, () =>
+    rebindToBindings(block, scope, targets, { skipRootBinds: true })
   );
 }
 

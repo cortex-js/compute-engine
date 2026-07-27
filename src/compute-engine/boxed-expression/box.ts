@@ -61,7 +61,7 @@ import { canonical } from './canonical-utils.js';
 import { isNumber, isFunction, isSymbol } from './type-guards.js';
 import { symbolAtSite, replaceAtSite } from './binding-sites.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
-import { rewriteWithBinders } from './binders.js';
+import { rebindToBindings } from './binders.js';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -1129,13 +1129,12 @@ function canonicalizeBinder(
  * [f, ce.symbol('x')])` hands over a symbol carrying the CALLER's binding.
  * Both are discarded, and only at the binding site.
  *
- * Step 6 — the same names elsewhere in the node. `rebindParameters`
- * generalized from a `Function` literal's parameters to arbitrary binders:
- * canonicalizing an already-canonical body is a no-op, so a body canonicalized
- * before this node's scope existed keeps the earlier bindings. An occurrence
- * carrying NO binding is skipped — the equality contract's raw-operand rule: a
- * binding site held raw by a lazy operator (`Declare`'s first operand) must not
- * be canonicalized by a rewrite walk.
+ * Step 6 — the same names elsewhere in the node, through the shared
+ * `rebindToBindings` walk (`binders.ts`), which a `Function` literal's
+ * parameter repair also runs: canonicalizing an already-canonical body is a
+ * no-op, so a body canonicalized before this node's scope existed keeps the
+ * earlier bindings. See that function for the raw-occurrence rule and the
+ * rest of the contract.
  *
  * Step 6 is CLAUSE-ORDERED: a `BindingSite.clauseLocal` site's name is
  * rewritten only in its own clause and the ones after it (and in the operands
@@ -1177,13 +1176,16 @@ function bindBindingSites(
     visibleFrom.set(id, Math.min(visibleFrom.get(id) ?? from, from));
     let binding = bound.get(id);
     if (binding === undefined) {
-      binding = ce._inScope(scope, () => {
-        // The 'post' phase is the authoritative one: a handler that reshapes
-        // its operands (or supplies a default variable) can reveal a site the
-        // 'pre' phase could not see, and that site still gets its binding here.
-        if (!scope.bindings.has(id)) ce.declare(id, site.type ?? 'unknown');
-        return ce.symbol(id);
-      });
+      // The 'post' phase is the authoritative one: a handler that reshapes
+      // its operands (or supplies a default variable) can reveal a site the
+      // 'pre' phase could not see, and that site still gets its binding here.
+      if (!scope.bindings.has(id))
+        ce._inScope(scope, () => ce.declare(id, site.type ?? 'unknown'));
+      // From the scope's OWN binding, not by name: `ce.symbol()` resolves a
+      // constant-named variable (`D(f, Pi)`) to the interned constant rather
+      // than to the binding this node just declared for it.
+      binding = ce._bindingSymbol(id, scope);
+      if (binding === undefined) continue;
       bound.set(id, binding);
     }
     if (sym.valueDefinition === binding.valueDefinition) continue;
@@ -1203,13 +1205,8 @@ function bindBindingSites(
     // An operand before the first clause is the body: it is inside every
     // clause, so it sees every binding.
     const limit = m < firstClause ? Number.POSITIVE_INFINITY : m;
-    const rewritten = rewriteWithBinders(op, (sym, shadowed) => {
-      const binding = bound.get(sym.symbol);
-      if (binding === undefined || shadowed?.has(sym.symbol)) return sym;
-      if ((visibleFrom.get(sym.symbol) ?? 0) > limit) return sym;
-      if (sym.valueDefinition === undefined) return sym;
-      if (sym.valueDefinition === binding.valueDefinition) return sym;
-      return binding;
+    const rewritten = rebindToBindings(op, scope, bound, {
+      accept: (name) => (visibleFrom.get(name) ?? 0) <= limit,
     });
     if (rewritten !== op) changed = true;
     return rewritten;

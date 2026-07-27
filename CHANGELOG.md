@@ -69,6 +69,12 @@
 
 ### Issues Resolved
 
+- **`nothing` and `missing` were reported as disjoint from any union containing
+  them** — `nothing` vs `boolean | nothing` claimed disjointness, refuted by the
+  value `Nothing`, which inhabits both. The unit-type short-circuit ran before
+  the union was examined and compared a type name against a composite type
+  object. This surfaced as an unsound `nothing <: !(boolean | nothing)`.
+
 - **A quantifier's variable is no longer captured by a same-named global
   value.** `ForAll`, `Exists`, `NotExists`, `ExistsUnique` and `NotForAll`
   declared a local scope that was created and then stayed empty, so the
@@ -104,6 +110,56 @@
   (`scoped: indexingSetSites(1)`), so `expr.localScope` reports the integration
   variable(s), and an indefinite integral's open result is re-bound to the
   enclosing scope on the way out.
+
+- **`D`'s differentiation variables are bound by the derivative.** `D` declared
+  a local scope that was minted and then never populated, so its variable
+  operands were bound wherever the caller had them and the same derivative
+  written two ways did not compare equal:
+
+  ```js
+  const parsed = ce.parse('\\frac{d}{dx} x^2');
+  const built = ce.function('D', [ce.parse('x^2'), ce.symbol('x')]);
+  parsed.isSame(built); // was: false    now: true
+  ```
+
+  `D` now uses the sanctioned binder mechanism, with a new variadic selector
+  (`scoped: operandsFrom(1)`) for an operator whose bound variables are a
+  trailing list of arbitrary length. `expr.localScope` reports every
+  differentiation variable, and a derivative — an open expression in that
+  variable — is re-bound to the enclosing scope on the way out.
+
+  **Visible consequence**: a body handed to `D` already boxed is re-bound to the
+  derivative's own scope, so it stops comparing equal to the expression it was
+  built from — `ce.box(['D', body, 'x']).op1.isSame(body)` is now `false`, as it
+  has been for a `Sum`'s index since that operator was migrated. Code that lifts
+  a differentiand back OUT of a `D` node into the ambient scope has to re-bind
+  it; `expr.explain('D')`, which presents the differentiand as a free-standing
+  expression, now does.
+
+- **A `Function` literal's parameter operand denotes the literal's own
+  parameter.** The body `Block`'s binding was already the authority for
+  occurrences in the body, but the parameter operand itself was left raw on the
+  parse and `ce.box` routes and carried the CALLER's binding on the
+  `ce.function` route — the same route disagreement `Series` and `Integrate`
+  were migrated to fix. A canonical literal now has exactly one binding per
+  parameter, referenced from both the parameter operand and the body.
+
+- **A bound variable named after a library constant (`Pi`, `e`, `i`, ...) is now
+  bound like any other.** A binder's variable was resolved by NAME, and a name
+  owned by a constant short-circuits to the interned constant before the scope
+  chain is consulted — so the binder declared a binding that nothing referenced.
+  With an already-canonical body, the parameter was silently lost:
+
+  ```js
+  const f = ce.function('Function', [ce.parse('\\pi + 1'), ce.symbol('Pi')]);
+  ce.box(['Apply', f, 10]).evaluate(); // was: 1 + pi    now: 11
+  ```
+
+  The parse and `ce.box` routes gave `11` throughout, so this was also a route
+  disagreement. Bound variables are now built from the binder scope's own
+  binding, which fixes the binding identity for every binder that accepts a bare
+  symbol — including `D(Pi^2, Pi)`, whose value was already right while the
+  binding underneath was the constant's.
 
 - **`Interval` now survives a LaTeX round-trip.** A closed interval serialized
   as `\lbrack a, b\rbrack`, which the parser reads as a two-element `List`, and
@@ -202,8 +258,8 @@
   a no-op, so a body constructed _before_ the literal existed kept the bindings
   it was built with — and its parameter occurrences went on denoting the
   enclosing scope's variable of the same name instead of the literal's own
-  parameter. The repair previously covered only the anonymous placeholders
-  (`_`, `_1`, …) produced by the pipe/shorthand desugaring; it now covers named
+  parameter. The repair previously covered only the anonymous placeholders (`_`,
+  `_1`, …) produced by the pipe/shorthand desugaring; it now covers named
   parameters as well, so anything keyed on a symbol's binding — the
   post-application substitution of a partially-symbolic result, symbol equality
   — sees the parameter for what it is:
@@ -222,8 +278,8 @@
   installed by `loadIntegrationRules`) works on the bare integrand and creates
   its own occurrences of those names in the caller's scope. The two sets of
   occurrences denoted different variables, so the result could compare unequal
-  to the same expression written by hand. The integrand is now re-bound as it
-  is lifted, matching how a Jacobian's body is lifted from its literal.
+  to the same expression written by hand. The integrand is now re-bound as it is
+  lifted, matching how a Jacobian's body is lifted from its literal.
 
 ### New Features
 
@@ -242,7 +298,7 @@
 
   A selector implies a scope, so `scoped` remains the complete inventory of
   scope-creating operators. When one is given, the engine declares each site's
-  symbol in the operator's own scope *before* the `canonical` handler runs, and
+  symbol in the operator's own scope _before_ the `canonical` handler runs, and
   binds every occurrence of those names to that scope afterwards — so the
   `parse`, `ce.box()` and `ce.function()` routes agree about which binding a
   bound variable denotes, whichever route built the expression. The prebuilt
@@ -253,8 +309,8 @@
   hand-rolled conventions.
 
   An indexing-set selector marks its sites `clauseLocal`: later clauses see
-  earlier bindings, but an *earlier* clause's collection resolves a name a
-  later clause binds in the enclosing scope
+  earlier bindings, but an _earlier_ clause's collection resolves a name a later
+  clause binds in the enclosing scope
   (`Comprehension(…, Element(i, [j, j+1]), Element(j, […]))` draws `i` from the
   ambient `j`).
 
@@ -316,7 +372,7 @@
   also makes a union a subtype of a negation when no member meets the negated
   type (`integer | boolean <: !string`).
 
-- Disjointness is now decided by comparing the primitive *categories* of the two
+- Disjointness is now decided by comparing the primitive _categories_ of the two
   types, so composite types are separated from each other and from primitives
   instead of falling through to "may overlap": a `list<integer>` is not a
   `string`, a `tuple<number, number>` is not a `list<tuple<number, number>>`, a
@@ -326,18 +382,9 @@
   replaces the narrower numeric-vs-non-numeric rule.
 
   Two same-category composites whose parameters cannot coincide (`list<integer>`
-  vs `list<string>`) are deliberately *not* claimed disjoint: `list<never>` is a
+  vs `list<string>`) are deliberately _not_ claimed disjoint: `list<never>` is a
   subtype of both, so the claim would rest on how the empty list is typed rather
   than on the type lattice. `couldMatch()` answers that question decisively.
-
-### Issues Resolved
-
-- **`nothing` and `missing` were reported as disjoint from any union
-  containing them** — `nothing` vs `boolean | nothing` claimed disjointness,
-  refuted by the value `Nothing`, which inhabits both. The unit-type
-  short-circuit ran before the union was examined and compared a type name
-  against a composite type object. This surfaced as an unsound
-  `nothing <: !(boolean | nothing)`.
 
 ## 0.95.0 _2026-07-25_
 

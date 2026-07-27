@@ -178,6 +178,7 @@ import { CompilationTargetRegistry } from './engine-compilation-targets.js';
 import { EngineConfigurationLifecycle } from './engine-configuration-lifecycle.js';
 import {
   type CommonNumberTable,
+  createBindingSymbolExpression,
   createNumberExpression,
   createSymbolExpression,
 } from './engine-expression-entrypoints.js';
@@ -1603,6 +1604,11 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _printStack(options?: { details?: boolean; maxDepth?: number }): void {
     printStackImpl(this, options);
+  }
+
+  /** @internal */
+  _bindingSymbol(name: MathJsonSymbol, scope: Scope): Expression | undefined {
+    return createBindingSymbolExpression(this, name, scope);
   }
 
   /** Stack of parameter-name sets active while canonicalizing function bodies.

@@ -40,6 +40,17 @@ describe('Function parameter shadows a same-named constant', () => {
     expect(apply(ce, f, 10).valueOf()).toBe(11);
   });
 
+  it('λPi. Pi + 1 — the `ce.function` route, with an ALREADY canonical body', () => {
+    // The body is canonicalized before the literal exists, so its `Pi` is the
+    // constant when it arrives; only the parameter repair can make it the
+    // parameter. It could not while it built the replacement with
+    // `ce.symbol('Pi')` (which is the interned constant), and this returned
+    // `1 + π`.
+    const ce = new ComputeEngine();
+    const f = ce.function('Function', [ce.parse('\\pi + 1'), ce.symbol('Pi')]);
+    expect(apply(ce, f, 10).valueOf()).toBe(11);
+  });
+
   it('LaTeX `\\pi \\mapsto 2\\pi` — `\\pi` maps to `Pi` in both positions', () => {
     const ce = new ComputeEngine();
     const f = ce.parse('\\pi \\mapsto 2\\pi');

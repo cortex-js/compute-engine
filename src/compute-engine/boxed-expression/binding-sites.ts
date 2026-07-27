@@ -61,6 +61,29 @@ export function operandSites(...indices: number[]): BindingSiteSelector {
   };
 }
 
+/**
+ * Every operand from `first` onward is a bound variable — the VARIADIC
+ * counterpart of {@link operandSites}, for an operator whose bound variables
+ * are a trailing list of arbitrary length.
+ *
+ * `D: { scoped: operandsFrom(1) }` — `D(f, x, y)` binds both `x` and `y`.
+ * Operands that are not bare symbols (a `Set` higher-order spec the handler
+ * has yet to expand) yield no site: the 'post' phase sees the expanded form.
+ */
+export function operandsFrom(
+  first: number,
+  type?: TypeString
+): BindingSiteSelector {
+  return (ops) => {
+    const sites: BindingSite[] = [];
+    for (let i = first; i < ops.length; i++) {
+      const site = siteFor(ops[i], [i], type);
+      if (site) sites.push(site);
+    }
+    return sites.length === 0 ? NO_SITES : sites;
+  };
+}
+
 /** The operand shapes `canonicalIndexingSet`/`canonicalLimits` recognize as
  * carrying an index in their first position. */
 const INDEXING_SET_OPERATORS = new Set([

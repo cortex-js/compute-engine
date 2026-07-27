@@ -178,6 +178,34 @@ export function createSymbolExpression(
   return new BoxedSymbol(engine, name, { metadata, def });
 }
 
+/**
+ * The symbol denoting `scope`'s OWN binding for `name` — the one way to build a
+ * binder's variable.
+ *
+ * A binder (a `Function` literal's parameter, a `Sum` index, `D`'s variable)
+ * declares its variable in its own scope, and every occurrence of it — the
+ * binding site and the body — must denote THAT binding. `ce.symbol(name)`
+ * cannot answer that question: it resolves a NAME, and for a name owned by a
+ * library constant (`Pi`, `e`, `i`, ...) it short-circuits to the interned
+ * constant expression before the scope chain is even consulted. A binder whose
+ * variable is named after a constant then silently got the constant back —
+ * `Function(Pi + 1, Pi)` applied to 10 gave `1 + π` instead of `11`.
+ *
+ * So the scope's bindings map is the authority here, not the lookup: the symbol
+ * is built directly on the definition found there. Returns `undefined` when the
+ * scope has no VALUE binding for the name (an operator binding, or none at all)
+ * — a caller that cannot proceed without one should leave its operand alone.
+ */
+export function createBindingSymbolExpression(
+  engine: ComputeEngine,
+  name: MathJsonSymbol,
+  scope: import('./global-types.js').Scope
+): Expression | undefined {
+  const binding = scope.bindings.get(name);
+  if (!isValueDef(binding)) return undefined;
+  return new BoxedSymbol(engine, name, { def: binding });
+}
+
 export function createNumberExpression(
   engine: NumberHost,
   commonNumbers: CommonNumberTable,

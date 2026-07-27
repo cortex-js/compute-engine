@@ -153,6 +153,60 @@ agree).
   (pre-existing capture of the limit point; `calculus.ts:1717`); `\nexists`
   does not parse (`NotExists` unreachable from LaTeX).
 
+### Stages 6+10 round (2026-07-26, staged)
+
+- **Stage 6 (D) LANDED — and the granted explain-snapshot authorization went
+  UNUSED.** The 3 `explain.test.ts` deltas were not "accepted behavior" after
+  all: `explain('D')` lifts the differentiand out of the node and builds
+  around it in the ambient scope — the SEVENTH escaping-lift sighting, at a
+  site not in the inventory. One `rebindEscaping(f, canonical.localScope)` in
+  `symbolic/explain-derivative.ts` (the same repair as `liftIntegrand` and the
+  Jacobian lift) and the explain suite passes byte-identical. The underlying
+  semantic (a pre-boxed `D` receiver's body `x` is the binder's variable, not
+  `isSame` a free-standing parse) still stands and is now pinned for BOTH
+  `Sum` and `D` by `valueDefinition` identity. `operandsFrom(first, type?)`
+  variadic selector added and re-exported. Escape repair on the evaluate
+  result required, as predicted. No double-shielding.
+- **Stage 10 (Function parameters) LANDED.** `rebindParameters` and the hook's
+  step 6 are ONE shared walk, `rebindToBindings` (`binders.ts`), and
+  `bindParameterOperands` gives literals the step-5 discipline: the parameter
+  OPERAND and the body occurrences now share one definition (pinned by
+  identity across all three routes and through `Typed`). The two-bindings pin
+  did NOT hold before: the operand was raw on parse/box and CALLER-bound on
+  `ce.function`.
+- **Trap found by the convergence: `ce.symbol(name)` inside a scope does not
+  always return that scope's binding** — for a name owned by a library
+  constant (`Function(Pi+1, Pi)`) it returns the CONSTANT, so a naive
+  "compare against the replacement's definition" rewrites correct body
+  occurrences into the constant. The shared walk takes the SCOPE as the
+  authority. `box.ts`'s step-5 loop has the same latent hazard
+  (`sym.valueDefinition === binding.valueDefinition`) — unexercised (no
+  migrated binder has a constant-named variable), unpinned, left.
+- **Stage 7 FINAL: `Limit` migrates NEVER.** Measured post-stage-10: four
+  routes `isSame`, no node scope, the literal's Block is the sole binder and
+  its parameter operand is identical to the Block's binding; shadowing
+  correct. `lambdaParamSites(0)` would still create the second binding.
+- **For stage 11**: the parameter operand is now a SECOND live reference to
+  the static binding (`hideBodyScopeParams` deletes that binding during a
+  call; nothing reads the operand's definition during application today, so
+  inert) — `_activationOf` must account for it. `bindingKeyedSubs`' three-way
+  search remains the thing to collapse.
+- Persisting, untouched: `Limit(Function(1/(x-a),x), a, 1)` → `1/(a-a)`
+  (calculus.ts:1717).
+- **Review round on this stage (dual-reviewer, 2 findings, both fixed): the
+  constant-hazard deferral is RETIRED.** Confirmed repro: `Function(π+1, Pi)`
+  on the `ce.function` route applied to 10 gave `1 + π` (parse route: 11).
+  Root cause at three sites (`rebindParameters`' map, `bindParameterOperands`'
+  decline, box.ts step 5): `ce.symbol(name)` short-circuits to the interned
+  constant before consulting the scope chain. Fix: `ce._bindingSymbol(name,
+  scope)` (engine-expression-entrypoints.ts; the engine route adds zero
+  module edges — `binders.ts` cannot construct a `BoxedSymbol`). NOTE:
+  `rebindEscaping` deliberately still uses `ce.symbol` — an ESCAPING
+  occurrence re-points at the enclosing binding, and for `Pi` the constant IS
+  the enclosing binding (that is why `D(Pi², Pi)` evaluates with real π).
+  Constant-named parameters now bind like any other, pinned by identity on
+  all three routes for both `Function` and `D`.
+
 **One correction up front, because two documents propagated it**: CONTRACT 4
 does *not* live in `test/compute-engine/scope.test.ts`. It is
 `test/compute-engine/pipeline-contracts.test.ts:513–612`,

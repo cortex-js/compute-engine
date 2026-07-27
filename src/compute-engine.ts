@@ -117,6 +117,7 @@ export type { StepLabel } from './compute-engine/boxed-expression/explain-labels
 // `BindingSite`/`BindingSiteSelector` types come from `./types.js` above.
 export {
   operandSites,
+  operandsFrom,
   indexingSetSites,
   limitsIndexSites,
   lambdaParamSites,

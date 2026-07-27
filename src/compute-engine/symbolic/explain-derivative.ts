@@ -28,6 +28,7 @@ import {
   curateChain,
 } from '../boxed-expression/explain.js';
 import { isFunction, sym } from '../boxed-expression/type-guards.js';
+import { rebindEscaping } from '../boxed-expression/utils.js';
 
 function explainD(expr: Expression, options?: ExplainOptions): Explanation {
   const ce = expr.engine;
@@ -46,6 +47,16 @@ function explainD(expr: Expression, options?: ExplainOptions): Explanation {
     // ignored in this form (the receiver supplies the whole sequence).
     f = canonical.op1;
     if (isFunction(f, 'Function')) f = f.op1;
+    // Lifting the differentiand OUT of the `D` node makes it a free-standing
+    // expression again, so its occurrences of the differentiation variable
+    // must denote the AMBIENT variable rather than the binding `D` owns for
+    // it (`scoped: operandsFrom(1)`). Everything the explanation builds below
+    // — `initial`, the per-stage states, the folded derivatives — is written
+    // in the ambient scope, so without this the explanation is internally
+    // inconsistent: an unscoped `D(f, x)` whose body references another
+    // node's binder, comparing unequal to the very expression it displays.
+    // Same repair, same reason, as lifting an integrand out of `Integrate`.
+    if (canonical.localScope) f = rebindEscaping(f, canonical.localScope);
     vars = [];
     for (const op of canonical.ops!.slice(1)) {
       const s = sym(op);
