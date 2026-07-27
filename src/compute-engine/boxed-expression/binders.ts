@@ -7,12 +7,7 @@ import type {
   Scope,
   TaggedValueDefinition,
 } from '../global-types.js';
-import {
-  isFunction,
-  isSymbol,
-  isDictionary,
-  isNumber,
-} from './type-guards.js';
+import { isFunction, isSymbol, isDictionary, isNumber } from './type-guards.js';
 import { functionLiteralParameterName } from './function-literal.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 
@@ -447,7 +442,9 @@ export function evaluateInOwnBindings(
     // An operator definition is not ours to shadow with a value binding.
     if (!('value' in innermost)) return sym;
     if (isShield(innermost.value)) return sym;
-    (env ??= new Map()).set(name, { value: own } satisfies TaggedValueDefinition);
+    (env ??= new Map()).set(name, {
+      value: own,
+    } satisfies TaggedValueDefinition);
     return sym;
   });
 

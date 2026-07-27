@@ -646,7 +646,7 @@ function makeCanonicalFunction(
   metadata: Metadata | undefined,
   scope: Scope | undefined
 ): Expression {
-  let result = makeNumericFunction(ce, name, ops, metadata, scope);
+  const result = makeNumericFunction(ce, name, ops, metadata, scope);
   if (result) return result;
 
   //

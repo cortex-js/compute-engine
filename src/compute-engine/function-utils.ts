@@ -830,7 +830,9 @@ function staticParameterBinding(
     .valueDefinition;
   if (def !== undefined) return def;
   const binding = bodyScope?.bindings.get(name);
-  return binding !== undefined && 'value' in binding ? binding.value : undefined;
+  return binding !== undefined && 'value' in binding
+    ? binding.value
+    : undefined;
 }
 
 /** Restore param bindings removed by hideBodyScopeParams. */

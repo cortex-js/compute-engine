@@ -347,7 +347,6 @@ function randomListType(
   return parseType(`list<${elt}>`);
 }
 
-
 export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
     // The sole member of the unit type, `nothing`

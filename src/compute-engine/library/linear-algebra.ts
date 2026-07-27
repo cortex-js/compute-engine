@@ -1491,7 +1491,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (normType === 1) {
             // L1 norm: sum of absolute values (one n-ary `add()` — an
             // incremental accumulator is quadratic in the element count)
-            const sum = add(...elements.map((el) => ce.expr(['Abs', el]).evaluate()));
+            const sum = add(
+              ...elements.map((el) => ce.expr(['Abs', el]).evaluate())
+            );
             // Honor `.N()`: the exact form only under plain evaluate().
             return sum.evaluate({ numericApproximation });
           }
