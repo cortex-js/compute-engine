@@ -1,4 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
+// Stage 11 (§2.1) has no public surface: an activation exists only while its
+// call frame is pushed, so the pins below read the internal relation directly.
+import { sameBindingDef } from '../../src/compute-engine/boxed-expression/binders';
 
 /**
  * Pins for the binders migrated onto the sanctioned binder mechanism in
@@ -472,5 +475,173 @@ describe('Function literal: the body Block is the single authority for a paramet
         .evaluate()
         .toString()
     ).toEqual('x + 2');
+  });
+});
+
+/**
+ * Stage 11 — `makeLambda` call frames, as ACTIVATION RECORDS (§2.1).
+ *
+ * A call cannot store its argument in the literal's own binding — two
+ * simultaneous calls would overwrite each other — so the per-call definition
+ * in `freshScope` and the literal's static binding are, and remain, two
+ * objects. What stage 11 adds is that they are no longer UNRELATED: the frame's
+ * definition records the static binding it is an activation of, and
+ * `sameBindingDef` resolves both to it.
+ *
+ * Activations are deliberately INDISTINGUISHABLE from one another. `sameBinding`
+ * already compares an occurrence enclosed by its binder by NAME, so telling
+ * activations apart could only change the answer for an occurrence that has
+ * ESCAPED its frame — and an escaped occurrence must be re-bound, not
+ * distinguished.
+ */
+describe('Function call frames are activations of the literal binding', () => {
+  /** Capture the call frame's binding for `name` from inside the body, by
+   * evaluating a probe operator there. The activation only exists while the
+   * frame is pushed, so there is no public surface that reaches it. */
+  const framesOf = (
+    ce: ComputeEngine,
+    name: string
+  ): { frames: any[]; probe: string } => {
+    const frames: any[] = [];
+    ce.declare('BmProbe', {
+      signature: '() -> number',
+      evaluate: () => {
+        const binding = ce.context.lexicalScope?.bindings.get(name);
+        frames.push(binding && 'value' in binding ? binding.value : undefined);
+        return ce.number(0);
+      },
+    });
+    return { frames, probe: 'BmProbe' };
+  };
+
+  test('the frame binding is a DISTINCT definition that resolves to the literal', () => {
+    const ce = new ComputeEngine();
+    const { frames } = framesOf(ce, 'x');
+    const f = ce.box(['Function', ['Add', 'x', ['BmProbe']], 'x']);
+    const staticDef = (f.ops![1] as any).valueDefinition;
+    expect(staticDef).toBeDefined();
+
+    expect(ce.box(['Apply', f, 5]).evaluate().re).toEqual(5);
+    expect(frames.length).toBe(1);
+    // Two objects — the frame cannot write into the literal's binding...
+    expect(frames[0]).not.toBe(staticDef);
+    // ...but it says which binding it is an activation of.
+    expect(frames[0]._activationOf).toBe(staticDef);
+    expect(sameBindingDef(frames[0], staticDef)).toBe(true);
+    expect(sameBindingDef(staticDef, frames[0])).toBe(true);
+  });
+
+  test('N nested activations compare equal to each other and to the binder', () => {
+    // The recursion question left open by the 2026-07-24 doc (§Open questions):
+    // several simultaneous activations of one binder need no distinguishing.
+    const ce = new ComputeEngine();
+    const { frames } = framesOf(ce, 'n');
+    ce.box([
+      'Assign',
+      'bm_fact',
+      [
+        'Function',
+        [
+          'If',
+          ['LessEqual', 'n', 1],
+          1,
+          [
+            'Add',
+            ['BmProbe'],
+            ['Multiply', 'n', ['bm_fact', ['Subtract', 'n', 1]]],
+          ],
+        ],
+        'n',
+      ],
+    ]).evaluate();
+
+    expect(ce.box(['bm_fact', 5]).evaluate().re).toEqual(120);
+
+    // Four frames were live simultaneously (n = 5, 4, 3, 2).
+    expect(frames.length).toBe(4);
+    expect(new Set(frames).size).toBe(4); // all distinct objects
+    const statics = frames.map((f) => f._activationOf);
+    expect(statics.every((s) => s !== undefined)).toBe(true);
+    expect(new Set(statics).size).toBe(1); // ...all activating ONE binding
+    for (const a of frames)
+      for (const b of frames) expect(sameBindingDef(a, b)).toBe(true);
+    expect(sameBindingDef(frames[0], statics[0])).toBe(true);
+  });
+
+  test('a recursive lambda still evaluates through `Apply`', () => {
+    // The self-referencing `makeLambda` application, as opposed to the operator
+    // route above: `Apply` on the symbol goes through `makeLambda` directly.
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'bm_countdown',
+      [
+        'Function',
+        ['If', ['LessEqual', 'k', 0], 0, ['Apply', 'bm_countdown', ['Subtract', 'k', 1]]],
+        'k',
+      ],
+    ]).evaluate();
+    expect(ce.box(['Apply', 'bm_countdown', 4]).evaluate().re).toEqual(0);
+  });
+
+  test('two closures from one factory stay distinct', () => {
+    // The design's named risk: the two captured `p` activations DO compare
+    // equal under `sameBindingDef` (they activate one binder). Closure
+    // distinctness does not live in binding equality — it lives in scope
+    // re-parenting (`captureClosures`) — so this must be unaffected.
+    const ce = new ComputeEngine();
+    ce.declare('bm_mk', 'function');
+    ce.assign(
+      'bm_mk',
+      ce.expr([
+        'Function',
+        ['Block', ['Function', ['Block', ['Add', 'q', 'p']], 'q']],
+        'p',
+      ])
+    );
+    ce.declare('bm_g', 'function');
+    ce.declare('bm_h', 'function');
+    ce.assign('bm_g', ce.expr(['bm_mk', 3]).evaluate());
+    ce.assign('bm_h', ce.expr(['bm_mk', 7]).evaluate());
+    expect(ce.expr(['bm_g', 10]).evaluate().re).toEqual(13);
+    expect(ce.expr(['bm_h', 10]).evaluate().re).toEqual(17);
+    expect(ce.expr(['bm_g', 10]).evaluate().re).toEqual(13);
+  });
+
+  test('a HAND-BUILT literal activates its own Block binding', () => {
+    // `Integrate`'s canonical handler rebuilds the integrand literal with
+    // `ce._fn('Function', [f.op1, ...vars])`, taking the parameter operands
+    // from the `Limits` — a route that never runs `bindParameterOperands`, so
+    // the operand is a RAW symbol carrying no binding at all. The activation
+    // must still link to the literal's OWN Block binding (via the body-scope
+    // fallback in `staticParameterBinding`), NOT to whatever the enclosing
+    // `Integrate` node binds for the same name.
+    const ce = new ComputeEngine();
+    const frames: any[] = [];
+    ce.declare('BmIntProbe', {
+      signature: '() -> number',
+      evaluate: () => {
+        const binding = ce.context.lexicalScope?.bindings.get('x');
+        frames.push(binding && 'value' in binding ? binding.value : undefined);
+        return ce.number(0);
+      },
+    });
+    const integral: any = ce.box([
+      'Integrate',
+      ['Add', ['Power', 'x', 2], ['BmIntProbe']],
+      ['Limits', 'x', 0, 1],
+    ]);
+    const literal = integral.op1;
+    expect(literal.operator).toBe('Function');
+    // The parameter operand is raw: the body scope is the only authority.
+    expect((literal.ops[1] as any).valueDefinition).toBeUndefined();
+    const binding: any = literal.op1.localScope!.bindings.get('x');
+    const blockDef = binding && 'value' in binding ? binding.value : undefined;
+    expect(blockDef).toBeDefined();
+
+    integral.N();
+    expect(frames.length).toBeGreaterThan(0);
+    expect(frames[0]._activationOf).toBe(blockDef);
+    expect(sameBindingDef(frames[0], blockDef)).toBe(true);
   });
 });

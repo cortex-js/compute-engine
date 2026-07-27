@@ -88,6 +88,13 @@ export class _BoxedValueDefinition
   _deadStack: string | undefined = undefined;
   _deadScope: string | undefined = undefined;
 
+  // The STATIC binding this definition is a per-call activation of, when it is
+  // a `Function` call frame's parameter binding (`markActivation`,
+  // `binders.ts`; `docs/plans/2026-07-26-binder-mechanism-design.md` §2.1).
+  // Declared here — rather than assigned on demand — so a call frame's
+  // definition keeps the same object shape as every other one.
+  _activationOf: BoxedValueDefinition | undefined = undefined;
+
   // Bumped on every semantic change to THIS definition (value write, type
   // change, disposal). Used with binding-identity re-resolution to validate
   // per-dependency caches (the `Comprehension` element memo) without an

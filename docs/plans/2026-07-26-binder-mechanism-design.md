@@ -207,6 +207,98 @@ agree).
   Constant-named parameters now bind like any other, pinned by identity on
   all three routes for both `Function` and `D`.
 
+### Stage 11 round (2026-07-26, staged: A and B and C-half; falsified: the
+`hideBodyScopeParams` narrowing)
+
+Baseline measured fresh at `e5efead5`: 19,312 passed / **4182/4182**
+snapshots / exit 0. Final: **19,317 passed (+5 pins) / 4182/4182 / exit 0**,
+typecheck + whole-src tsc + madge clean.
+
+- **Milestone A (`_activationOf` + the `sameBinding` hop) — the zero-diff claim
+  HELD**, measured not assumed: full suite byte-identical to baseline.
+  `sameBindingDef` (`binders.ts`) is the one hop, used by `sameBinding`,
+  `bindingKeyedSubs` and `evaluateInOwnBindings`.
+- **The static binding must be read from the PARAMETER OPERAND, not from
+  `bodyScope.bindings`** — the §Stages 6+10 warning, and it bites immediately:
+  an enclosing activation of the same literal has already hidden the body's
+  binding (`hideBodyScopeParams`), so from the second frame of a RECURSIVE call
+  the scope no longer answers and every frame came back unlinked. The operand
+  reference (stage 10) is what makes recursion work here at all.
+- **Milestone B (collapse `bindingKeyedSubs`' three-candidate search) — zero
+  diff.** The ambiguity guard survives, and is now the ONLY thing the two sides
+  of an activation are distinguished for: `!ambiguous || def === binding`.
+  Note the guard cannot be expressed without that distinction, so activations
+  are indistinguishable to EQUALITY, not to this one consumer.
+  Control experiment: with `markActivation` neutralized, the two new structural
+  pins fail while `functions`/`collections`/`scope`/`lambda-capture` still
+  pass — the collapse is behavior-preserving *because of* the link, but the
+  corpus does not independently exercise the freshScope-side candidate.
+- **KNOWN LIMITATION (the pre-boxed-raw `Apply` double-apply): NOT resolved,
+  and structurally out of reach of this stage.** Recorded in the 2026-07-24 doc
+  as "owned by phase 2's makeLambda-frame work" — measured here: the doubling
+  comes from the RAW-NAME fallback, and a raw symbol carries NO binding, so no
+  amount of binding identity separates "raw `w` from the held BODY" (must
+  substitute — the held-conditional pin) from "raw `w` from the ARGUMENT" (must
+  not). It needs provenance, not identity. Now PINNED as characterization in
+  `functions.test.ts`, together with the two canonical routes that are correct.
+- **Milestone C, half landed.** The `evaluateInOwnBindings` reachability check
+  is now identity-or-activation-of and restriction 1 is left doing only its own
+  job (refusing definitions from already-popped scopes); zero diff, as §4
+  predicted.
+  **The `hideBodyScopeParams` narrowing is FALSIFIED — reverted, and §2.1's
+  claim that it "loses its first reason to exist" is wrong.** The two reasons
+  are not the same kind of thing: the parameter clause is consumed by NAME
+  LOOKUP (a nested `Block`/`Sum` inside the body resolves up through
+  `bodyScope` before reaching `freshScope`), and activation records say nothing
+  about name lookup. Dropping it leaves an ANNOTATED parameter — declared
+  `inferred: false`, so not covered by the second clause — valueless-but-visible
+  in `bodyScope`. One failure, unambiguous and attributed by reverting alone:
+  `test/cortex/execute.test.ts › recursion with a typed param still works`
+  (`f(n: integer) = if n <= 1 { 1 } else { n * f(n-1) }` → `NaN`). The reasoning
+  is now recorded at the function.
+- **Stage 12's question, measured while in the file: the pipe topic `_1` needs
+  nothing.** On both the `ce.box` and `ce.function` routes the wrapped literal's
+  parameter operand, its `Block` binding and the body occurrence are ONE
+  definition — stage 10's widening of `rebindParameters`/`bindParameterOperands`
+  to named parameters already covers the placeholder, so `Pipe` needs no
+  `bindingSites` selector for identity. (Route `isSame` still disagrees for
+  `Pipe`, but for the ordinary lazy-operator reason — held operands are raw on
+  `ce.box` and canonical on `ce.function` — not for a binding reason.)
+- Found, not fixed: with a global `_1` declared *with a value*,
+  `[1,2,3] |> Map(_1, k ↦ k²)` returns an unevaluated `Map` instead of
+  `[1,4,9]`; the literal's binding is still correct, so this is a resolution
+  question, not a binding one. Pathological input, unpinned.
+
+### Stage-11 review round (2026-07-26, dual-reviewer; 1 refuted, 1 fixed, 1 @fixme)
+
+- **REFUTED with instrumentation**: "activations can link to the wrong static
+  binding via hand-built `Function` nodes". The Integrate-built literal's
+  parameter operand is RAW (`canonicalLimits` passes the index through
+  uncanonicalized), so `staticParameterBinding`'s operand branch never fires
+  there; a full-suite instrumented run found **0** cases where operand and
+  body-scope definitions both exist and disagree. Preference order is
+  unobservable today; guarded by a forward-invariant pin
+  (`binder-mechanism.test.ts` › hand-built literal activates its own Block
+  binding) instead of a no-op patch.
+- **FIXED**: a valued global `_1` derailed `x |> Map(_1, …)` — `Map`'s
+  `checkCollectionOperand` rejected the bound value and the canonical handler
+  returned null. Fix: `canonicalWithFreshPlaceholders` (`function-utils.ts`)
+  — Pipe canonicalizes its held RHS with mentioned placeholders pre-declared
+  as fresh valueless locals in a throwaway `noAutoDeclare` scope.
+  `_pushShadowedParameters` could NOT express this: its untyped branch
+  deliberately REUSES an existing non-constant binding (the valued global is
+  exactly that), and its typed branch auto-declares into the very scope the
+  global lives in. Side effect: the no-global path no longer leaks an
+  auto-declared `_1` into the caller's scope (zero churn).
+- **@fixme**: the pre-boxed raw double-apply characterization now carries the
+  repo's known-wrong marker + the correct output (`['Hold','w']`); needs
+  argument provenance (raw-name-fallback work), not identity.
+- Adjacent, recorded not fixed: `bindingKeyedSubs`' second
+  `staticParameterBinding` call (`function-utils.ts:1371`) runs AFTER
+  `hideBodyScopeParams`; for a hand-built literal both candidates are then
+  `undefined` and the substitution entry keys on `undefined`. Surfaced in no
+  test; worth a look when the raw-name fallback is next opened.
+
 **One correction up front, because two documents propagated it**: CONTRACT 4
 does *not* live in `test/compute-engine/scope.test.ts`. It is
 `test/compute-engine/pipeline-contracts.test.ts:513–612`,

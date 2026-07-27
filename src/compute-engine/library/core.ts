@@ -20,6 +20,7 @@ import {
   apply,
   canonicalFunctionLiteral,
   canonicalFunctionLiteralArguments,
+  canonicalWithFreshPlaceholders,
 } from '../function-utils.js';
 
 import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
@@ -982,8 +983,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // definitions (without substituting values). Canonicalizing keeps a
         // bare function reference intact — it is *evaluation*, not binding,
         // that strips it.
+        //
+        // The right operand is the pipe STAGE, and a shorthand-lambda
+        // placeholder in it (`Map(_1, f)`) is that stage's parameter, not a
+        // reference to whatever `_1` happens to name in the caller's scope:
+        // canonicalize it with the placeholders freshly bound, so a global
+        // `_1` — a valued one in particular — cannot capture them.
         let x = ops[0]?.canonical;
-        const f = ops[1]?.canonical;
+        const f =
+          ops[1] === undefined
+            ? undefined
+            : canonicalWithFreshPlaceholders(ops[1]);
         if (x === undefined || f === undefined) return undefined;
 
         // A chained topic (`a |> g |> f` parses to `Pipe(Pipe(a, g), f)`) is

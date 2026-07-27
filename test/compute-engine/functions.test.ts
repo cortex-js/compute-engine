@@ -315,6 +315,27 @@ describe('Pipe', () => {
       `["Subtract", ["Multiply", "a", "d"], ["Multiply", "b", "c"]]`
     ));
 
+  // A shorthand-lambda placeholder in the pipe STAGE is that stage's
+  // parameter, not a reference to a same-named global. `Pipe` canonicalizes
+  // its held right operand in the caller's scope, so a VALUED global `_1`
+  // used to capture it: `Map`'s canonical handler saw a non-collection source
+  // and declined, leaving the whole pipe unevaluated.
+  test('a placeholder shadows a valued global of the same name', () => {
+    const ce = new ComputeEngine();
+    const pipe = () =>
+      ce.box([
+        'Pipe',
+        ['List', 1, 2, 3],
+        ['Map', '_1', ['Function', ['Square', 'k'], 'k']],
+      ]);
+    // `Map` is a lazy collection: `toString` materializes it.
+    expect(pipe().evaluate().toString()).toBe('[1,4,9]');
+    ce.box(['Assign', '_1', 7]).evaluate();
+    expect(pipe().evaluate().toString()).toBe('[1,4,9]');
+    // ...and the global is untouched.
+    expect(ce.box('_1').evaluate().re).toEqual(7);
+  });
+
   // A statically-refutable rhs (number/string/boolean literal) can never be a
   // function, so `Pipe` rejects it with an `incompatible-type` error — at
   // canonicalization in strict mode and at evaluation otherwise. (This is
@@ -623,6 +644,48 @@ describe('makeLambda post-evaluation parameter substitution', () => {
         .evaluate()
         .toString()
     ).toBe('w + 2');
+  });
+
+  // KNOWN LIMITATION, characterized rather than fixed. A pre-boxed RAW
+  // argument — no `ce.box` or `ce.parse` route produces one — still
+  // double-applies. It was recorded as owned by the makeLambda-frame work
+  // (activation records, stage 11 of the binder-mechanism design); measured
+  // there, activation records do NOT reach it, and the reason is structural:
+  // the doubling comes from the RAW-NAME fallback in `bindingKeyedSubs`, and a
+  // raw symbol carries no binding at all, so no amount of binding identity can
+  // tell "raw `w` from the held BODY" (which must be substituted — the held
+  // conditional above) from "raw `w` from the ARGUMENT" (which must not).
+  // Distinguishing them needs provenance, not identity.
+  test('a PRE-BOXED raw argument still double-applies (known limitation)', () => {
+    const id = engine.expr(['Function', 'w', 'w']);
+    // The canonical routes are correct: `w` inside the `Hold` carries a
+    // binding, which is not the parameter's, so nothing is substituted.
+    expect(
+      engine.function('Apply', [id, engine.box(['Hold', 'w'])]).evaluate().json
+    ).toEqual(['Hold', 'w']);
+    expect(
+      engine
+        .function('Apply', [id, engine.function('Hold', [engine.symbol('w')])])
+        .evaluate().json
+    ).toEqual(['Hold', 'w']);
+    // Built raw, the occurrence has no binding and the name is all there is.
+    // The CORRECT output of both assertions below is `['Hold', 'w']`; the
+    // fix needs argument provenance and is owned by the future
+    // raw-name-fallback work. Current (wrong) behavior is pinned so the
+    // limitation stays visible rather than silently becoming a contract.
+    expect(
+      engine
+        .function('Apply', [id, engine.box(['Hold', 'w'], { canonical: false })])
+        .evaluate().json
+    ).toEqual(['Hold', ['Hold', 'w']]); // @fixme
+    expect(
+      engine
+        .function('Apply', [
+          id,
+          engine.function('Hold', [engine.symbol('w', { canonical: false })]),
+        ])
+        .evaluate().json
+    ).toEqual(['Hold', ['Hold', 'w']]); // @fixme
   });
 });
 

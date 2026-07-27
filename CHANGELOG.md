@@ -69,6 +69,23 @@
 
 ### Issues Resolved
 
+- **A shorthand-lambda placeholder in a pipeline stage no longer picks up a
+  same-named global.** `Pipe` is lazy, so it canonicalizes its right operand in
+  the caller's scope — before the operand is wrapped into the implicit lambda
+  it denotes. A global `_1` holding a value therefore captured the placeholder,
+  and the stage silently failed to canonicalize:
+
+  ```js
+  ce.box(['Assign', '_1', 7]).evaluate();
+  ce.parse('[1,2,3] \\rhd \\mathrm{Map}(\\_1, k \\mapsto k^2)').evaluate();
+  // was: Map([1,2,3], (k) |-> k^2)   now: [1,4,9]
+  ```
+
+  The placeholders (`_`, `_1`…`_9`) mentioned by the stage are now bound to
+  fresh, valueless locals for the duration of that canonicalization. A genuine
+  free variable in the stage still resolves — and auto-declares — in the
+  caller's scope, unchanged.
+
 - **The empty list is now a member of every list type.** `[]` typed
   `list<nothing>`, which made `[] <: list<integer>` **false** — an empty list
   satisfied no list type at all:

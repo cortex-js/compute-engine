@@ -2,8 +2,10 @@ import { MathJsonSymbol } from '../math-json.js';
 import { cmp } from './boxed-expression/compare.js';
 import {
   evaluateInOwnBindings,
+  markActivation,
   rebindToBindings,
   rewriteWithBinders,
+  sameBindingDef,
 } from './boxed-expression/binders.js';
 import type {
   BoxedDefinition,
@@ -597,6 +599,41 @@ const WILDCARD_SYMBOLS = [
 ];
 
 /**
+ * Canonicalize `expr` with the shorthand-lambda placeholders it mentions
+ * (`_`, `_1`…`_9`) bound to FRESH, valueless locals.
+ *
+ * `Pipe` is lazy, so it canonicalizes its held right operand in the CALLER's
+ * scope — before `canonicalFunctionLiteral` wraps `Map(_1, f)` into
+ * `(_1) ↦ Map(_1, f)`. A placeholder is a parameter of that literal and must
+ * shadow a same-named global, in particular its VALUE: with a global
+ * `_1 := 7`, `Map`'s canonical handler saw a non-collection source operand,
+ * declined (`checkCollectionOperand`), and `[1,2,3] |> Map(_1, k ↦ k²)`
+ * returned an unevaluated `Map`.
+ *
+ * The placeholders are PRE-DECLARED in a throwaway scope rather than left to
+ * auto-declaration. `_pushShadowedParameters` alone does not shadow here:
+ * its untyped branch deliberately reuses an existing non-constant binding
+ * (that IS the valued global), and its typed branch auto-declares into the
+ * current lexical scope — the very scope the global lives in. The throwaway
+ * scope is `noAutoDeclare`, so a genuine free variable in the operand still
+ * auto-declares in the caller's scope exactly as before; only the
+ * placeholders are intercepted.
+ */
+export function canonicalWithFreshPlaceholders(expr: Expression): Expression {
+  const names = WILDCARD_SYMBOLS.filter((name) => expr.has(name));
+  if (names.length === 0) return expr.canonical;
+  const ce = expr.engine;
+  const scope: Scope = {
+    parent: ce.context.lexicalScope,
+    bindings: new Map(),
+    noAutoDeclare: true,
+  };
+  for (const name of names)
+    ce._declareSymbolValue(name, { type: 'unknown', inferred: true }, scope);
+  return ce._inScope(scope, () => expr.canonical);
+}
+
+/**
  * Apply arguments to an expression which is either:
  * - a `["Function"]` expression
  * - the symbol for a function, e.g. `Sin`.
@@ -696,6 +733,20 @@ function unwrapReturn(ce: ComputeEngine, expr: Expression): Expression {
  *   bodyScope must see that runtime binding, not the valueless stale one.
  *
  * Bindings that carry a value or an explicit type are left in place.
+ *
+ * The first reason is NOT the one activation records retire. §2.1 of the
+ * binder-mechanism design expected it to narrow to the second, on the grounds
+ * that a frame's definition and the body's now resolve to the same binding —
+ * which is true, and irrelevant here: this list is consumed by NAME LOOKUP,
+ * not by binding comparison. Dropping the parameter clause leaves an
+ * ANNOTATED parameter (declared `inferred: false`, so not covered by the
+ * second clause) valueless-but-visible in bodyScope, where a nested `Block`
+ * or `Sum` resolving up the chain finds it before `freshScope`'s value.
+ * Measured: `f(n: integer) = if n <= 1 { 1 } else { n * f(n-1) }` returns
+ * `NaN` (`test/cortex/execute.test.ts` › 'recursion with a typed param still
+ * works'). What activation records DID retire is the three-candidate binding
+ * search in `bindingKeyedSubs`, which is where the "two live bindings at once"
+ * state was actually observable.
  */
 function hideBodyScopeParams(
   bodyScope: Scope,
@@ -715,6 +766,71 @@ function hideBodyScopeParams(
     }
   }
   return hidden;
+}
+
+/**
+ * Declare a parameter in a call frame's `freshScope`, and record that the
+ * binding it creates is an ACTIVATION of the one the literal's body `Block`
+ * declares for the same parameter
+ * (`docs/plans/2026-07-26-binder-mechanism-design.md` §2.1).
+ *
+ * The "two live bindings at once" state this repairs is not removable: the
+ * call's value has to live somewhere other than the literal, or two
+ * simultaneous calls would overwrite each other. What the activation link adds
+ * is that the two are no longer *unrelated* — `sameBindingDef` resolves both
+ * to the static binding, so every consumer that asks "does this occurrence
+ * denote the parameter?" gets one answer instead of having to enumerate the
+ * places a parameter binding can live.
+ *
+ * The static binding is read from the PARAMETER OPERAND, not from
+ * `bodyScope.bindings`: an enclosing activation of the same literal
+ * (recursion) has already hidden the body's binding for the duration of ITS
+ * call (`hideBodyScopeParams`), so by the second frame the scope no longer
+ * answers. The binding OBJECT survives the hiding, and since stage 10 the
+ * parameter operand is a live reference to exactly it — which is what makes
+ * recursion work here at all. (Measured: keying on `bodyScope` left every
+ * frame of a recursive call unlinked.)
+ *
+ * Only strict mode declares with the declared type (`inferred: false`); see
+ * `typedBinding` for why an `unknown`/`any`/symbolic value still falls back to
+ * the historical inferred binding.
+ */
+function declareParameterActivation(
+  ce: ComputeEngine,
+  name: string,
+  param: Expression,
+  value: Expression,
+  freshScope: Scope,
+  bodyScope: Scope | undefined
+): void {
+  const pType = typedBinding(ce, param, value);
+  if (pType !== undefined)
+    ce.declare(name, { value, type: pType, inferred: false }, freshScope);
+  else ce.declare(name, { value, inferred: true }, freshScope);
+
+  const staticBinding = staticParameterBinding(param, name, bodyScope);
+  if (staticBinding === undefined) return;
+  // Inline value-def check (`isValueDef` lives in `utils.ts`, which this
+  // module cannot import).
+  const activation = freshScope.bindings.get(name);
+  if (activation !== undefined && 'value' in activation)
+    markActivation(activation.value, staticBinding);
+}
+
+/** The literal's OWN binding for a parameter: the operand's, falling back to
+ * the body scope's for a literal whose operand was never bound to it (a
+ * hand-built `Function` node that skipped `bindParameterOperands`). */
+function staticParameterBinding(
+  param: Expression,
+  name: string,
+  bodyScope: Scope | undefined
+): BoxedValueDefinition | undefined {
+  const site = isFunction(param, 'Typed') ? param.op1 : param;
+  const def = (site as { valueDefinition?: BoxedValueDefinition })
+    .valueDefinition;
+  if (def !== undefined) return def;
+  const binding = bodyScope?.bindings.get(name);
+  return binding !== undefined && 'value' in binding ? binding.value : undefined;
 }
 
 /** Restore param bindings removed by hideBodyScopeParams. */
@@ -813,31 +929,61 @@ function captureClosures(
   return expr;
 }
 
+/** One parameter's post-evaluation substitution: the literal's OWN binding for
+ * it, its name, the value to substitute, and whether the ARGUMENT mentions the
+ * name (see `bindingKeyedSubs`). */
+type ParameterSub = readonly [
+  binding: BoxedValueDefinition | undefined,
+  name: string,
+  value: Expression,
+  ambiguous: boolean,
+];
+
 /**
  * Substitute by BINDING identity: rewrite an occurrence only when it resolves
  * to the given binding, whatever it is spelled.
  *
+ * "Resolves to" is `sameBindingDef`, so a call frame's ACTIVATION of the
+ * parameter counts as the parameter — which is what lets this ask ONE question
+ * where it used to enumerate the three places a parameter's binding can live
+ * (the body binding hidden by `hideBodyScopeParams`, the live body binding,
+ * and `freshScope`'s).
+ *
+ * `ambiguous` is the item-26 guard, and it is the one thing the two sides of an
+ * activation are still distinguished for. When the argument itself mentions the
+ * parameter's name, an occurrence bound on the ACTIVATION side may have been
+ * bound by canonicalizing the ARGUMENT in-frame rather than by the body —
+ * substituting it double-applies (`Apply(x ↦ x, Hold(raw x))` must stay
+ * `Hold(x)`). An occurrence carrying the literal's own binding cannot have come
+ * from the argument, so it stays substitutable even when ambiguous
+ * (`Apply(w ↦ If(c, w, 0), w + 1)` = `If(c, w + 1, 0)`).
+ *
  * The binding-keyed half needs no shadowing exclusion — a nested `Function`
- * literal that re-binds the name declares a DIFFERENT binding, so its
- * occurrences simply do not match, and `(x ↦ (x ↦ x))(1)` keeps its inner
- * binder for free. The RAW-name fallback half is name-based, so it does need
- * one: any binder between the root and the occurrence that binds the name —
- * a nested literal's parameter list, but also a scoped operator's
- * `localScope` (the parser leaves a `Sum`'s binding-site symbol raw) — owns
- * its occurrences, and the walker's `shadowed` set carries exactly that.
+ * literal that re-binds the name declares a DIFFERENT binding (not an
+ * activation of this one), so its occurrences simply do not match, and
+ * `(x ↦ (x ↦ x))(1)` keeps its inner binder for free. The RAW-name fallback
+ * half is name-based, so it does need one: any binder between the root and the
+ * occurrence that binds the name — a nested literal's parameter list, but also
+ * a scoped operator's `localScope` (the parser leaves a `Sum`'s binding-site
+ * symbol raw) — owns its occurrences, and the walker's `shadowed` set carries
+ * exactly that.
  */
 function bindingKeyedSubs(
   expr: Expression,
-  subs: ReadonlyArray<
-    readonly [BoxedValueDefinition | undefined, string, Expression]
-  >
+  subs: ReadonlyArray<ParameterSub>
 ): Expression {
   return rewriteWithBinders(expr, (sym, shadowed) => {
     const def = (sym as { valueDefinition?: BoxedValueDefinition })
       .valueDefinition;
-    for (const [binder, name, value] of subs) {
-      // Bound: it resolves to this parameter's binding.
-      if (def !== undefined && binder !== undefined && def === binder)
+    for (const [binding, name, value, ambiguous] of subs) {
+      // Bound: it denotes this parameter — either the literal's own binding or
+      // this frame's activation of it.
+      if (
+        def !== undefined &&
+        binding !== undefined &&
+        sameBindingDef(def, binding) &&
+        (!ambiguous || def === binding)
+      )
         return value;
       // Raw: a lazy operator holds its operands unevaluated, so the body
       // source reaches here un-canonicalized and its parameter references
@@ -1077,23 +1223,17 @@ function makeLambda(
       };
       for (let i = 0; i < args.length; i++) {
         const name = functionLiteralParameterName(params[i]);
-        if (name) {
-          // See the full-application path: typed binding only in strict mode,
-          // where the applied prefix was validated in step 3.
-          const pType = typedBinding(ce, params[i], evaluatedKnownArgs[i]);
-          if (pType !== undefined)
-            ce.declare(
-              name,
-              { value: evaluatedKnownArgs[i], type: pType, inferred: false },
-              freshScope
-            );
-          else
-            ce.declare(
-              name,
-              { value: evaluatedKnownArgs[i], inferred: true },
-              freshScope
-            );
-        }
+        if (name)
+          // Typed binding only in strict mode, where the applied prefix was
+          // validated in step 3.
+          declareParameterActivation(
+            ce,
+            name,
+            params[i],
+            evaluatedKnownArgs[i],
+            freshScope,
+            bodyFn.localScope
+          );
       }
 
       // Re-parent body scope to chain through freshScope, so nested
@@ -1175,26 +1315,17 @@ function makeLambda(
     // inferred as before.
     const paramNames = params.map((p) => functionLiteralParameterName(p));
     for (let i = 0; i < params.length; i++) {
-      if (paramNames[i]) {
-        // Only strict mode declares with the declared type (`inferred: false`),
-        // and only there — arguments were validated in step 4b, so the value is
-        // compatible. See `typedBinding` for why an `unknown`/`any`/symbolic
-        // value (which passed validation as "not provably wrong") still falls
-        // back to the historical inferred binding.
-        const pType = typedBinding(ce, params[i], evaluatedArgs[i]);
-        if (pType !== undefined)
-          ce.declare(
-            paramNames[i],
-            { value: evaluatedArgs[i], type: pType, inferred: false },
-            freshScope
-          );
-        else
-          ce.declare(
-            paramNames[i],
-            { value: evaluatedArgs[i], inferred: true },
-            freshScope
-          );
-      }
+      if (paramNames[i])
+        // Arguments were validated in step 4b, so a strict-mode typed binding
+        // is known compatible.
+        declareParameterActivation(
+          ce,
+          paramNames[i]!,
+          params[i],
+          evaluatedArgs[i],
+          freshScope,
+          bodyFn.localScope
+        );
     }
 
     // Re-parent body scope to chain through freshScope, so nested
@@ -1260,53 +1391,23 @@ function makeLambda(
       // declares a DIFFERENT binding, and an `x` that came from the argument's
       // value carries the caller's binding, so neither matches.
       if (result.has(paramNames as string[])) {
-        // The body's occurrences resolve to the bodyScope binding, which is
-        // hidden for the duration of the call (`hideBodyScopeParams`) so that
-        // name lookup reaches `freshScope`'s value instead — so read the
-        // binding from the hidden set, falling back to the live scope.
-        const subs: Array<
-          [BoxedValueDefinition | undefined, string, Expression]
-        > = [];
+        // ONE binding per parameter — the literal's own. `hideBodyScopeParams`
+        // has removed it from `bodyScope` for the duration of the call, and
+        // the call's value lives in a SEPARATE definition in `freshScope`; the
+        // activation link (`declareParameterActivation`) is what makes both
+        // resolve to it, so this no longer has to enumerate the places a
+        // parameter's binding can be found. The raw-occurrence case is still
+        // name-keyed — a raw symbol carries no binding at all.
+        const subs: ParameterSub[] = [];
         for (let i = 0; i < params.length; i++) {
           const name = paramNames[i];
           if (!name || !result.has(name)) continue;
-          // Ambiguity guard: when the ARGUMENT itself mentions `name`, an
-          // occurrence in the result may have come from the argument rather
-          // than from the body, and substituting it double-applies
-          // (`Apply(x ↦ x, Hold(raw x))` must stay `Hold(x)`, not become
-          // `Hold(Hold(x))`). The occurrence's binding disambiguates:
-          //
-          // - CANONICAL-body references were bound when the literal was
-          //   canonicalized — the (hidden) bodyScope binding. The argument
-          //   cannot produce those, so they stay substitutable even when
-          //   ambiguous (`Apply(w ↦ If(c, w, 0), w + 1)` must give
-          //   `If(c, w + 1, 0)`).
-          // - A pre-boxed RAW argument is canonicalized lazily INSIDE the
-          //   frame; with the bodyScope params hidden, name lookup binds its
-          //   occurrences to FRESHSCOPE. A held body re-canonicalized
-          //   in-frame binds there too, so a freshScope occurrence is
-          //   genuinely ambiguous — suppress it when the argument mentions
-          //   the name (the conservative pre-binding-keyed behavior).
-          // - A RAW occurrence can only come from a held body source (a
-          //   canonically-boxed argument's occurrences always carry a
-          //   binding), so it stays substitutable.
-          const ambiguous = evaluatedArgs[i].has(name);
-          for (const binding of [
-            hiddenBindings.find(([n]) => n === name)?.[1],
-            bodyScope.bindings.get(name),
-            ambiguous ? undefined : freshScope.bindings.get(name),
-          ]) {
-            // Inline value-def check (`isValueDef` lives in `utils.ts`, which
-            // this module cannot import).
-            if (binding !== undefined && 'value' in binding)
-              subs.push([
-                (binding as { value: BoxedValueDefinition }).value,
-                name,
-                evaluatedArgs[i],
-              ]);
-          }
-          // Also cover a RAW occurrence of the name (see `bindingKeyedSubs`).
-          subs.push([undefined, name, evaluatedArgs[i]]);
+          subs.push([
+            staticParameterBinding(params[i], name, bodyScope),
+            name,
+            evaluatedArgs[i],
+            evaluatedArgs[i].has(name),
+          ]);
         }
         if (subs.length > 0) result = bindingKeyedSubs(result, subs);
       }

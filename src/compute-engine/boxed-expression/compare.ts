@@ -13,7 +13,7 @@ import {
   isString,
   isDictionary,
 } from './type-guards.js';
-import { boundVariableBindings } from './binders.js';
+import { boundVariableBindings, sameBindingDef } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
 import { stochasticEqual } from './stochastic-equal.js';
 import {
@@ -87,7 +87,14 @@ export function sameBinding(
   // Same definition object (or both unbound): the common case, and the only
   // way two same-engine occurrences of one symbol compare — check it before
   // anything that would walk or compare values.
-  if (ad === bd) return true;
+  //
+  // A call frame's parameter definition counts as the literal's own binding
+  // for that parameter: it is an ACTIVATION of it, and activations are
+  // deliberately indistinguishable (§2.1 of the binder-mechanism design). One
+  // hop on each side, so the newly-equal pairs are exactly (static binding,
+  // its activation) and (two activations of the same binder) — a stored
+  // value's free `x` and a frame's `x` stay unequal.
+  if (sameBindingDef(ad, bd)) return true;
 
   // A standard-library symbol is not a binding: `Pi`, `Nothing`, `Sin` denote
   // the same object in every engine, so two ROOT-scope definitions can differ

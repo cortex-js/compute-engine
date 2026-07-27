@@ -1,4 +1,5 @@
 import type {
+  BoxedBaseDefinition,
   BoxedDefinition,
   BoxedValueDefinition,
   Expression,
@@ -49,6 +50,67 @@ export function boundVariableNames(expr: Expression): readonly string[] {
 }
 
 const NO_BINDERS: readonly string[] = [];
+
+/**
+ * The activation-record link, as carried by `_BoxedValueDefinition`.
+ *
+ * Written structurally (rather than as a field of the public
+ * `BoxedValueDefinition` interface) for the same reason as the debug
+ * tombstone: it is an internal detail of the binder machinery, not part of the
+ * definition contract.
+ */
+type Activated = { _activationOf?: BoxedValueDefinition };
+
+/**
+ * Record that `activation` — the per-call definition a `Function` literal's
+ * call frame declares for a parameter — is an ACTIVATION of `staticBinding`,
+ * the binding the literal's body `Block` declares for that same parameter
+ * (`docs/plans/2026-07-26-binder-mechanism-design.md` §2.1).
+ *
+ * A binder with several simultaneous activations (recursion) produces N
+ * definitions all pointing at ONE static binding. They are deliberately
+ * indistinguishable: `sameBinding` already compares an occurrence enclosed by
+ * its binder by NAME, so distinguishing activations would only change the
+ * answer for an occurrence that has ESCAPED its frame — and an escaped
+ * occurrence must be re-bound (`rebindEscaping`), not distinguished.
+ */
+export function markActivation(
+  activation: BoxedValueDefinition,
+  staticBinding: BoxedValueDefinition
+): void {
+  (activation as Activated)._activationOf = staticBinding;
+}
+
+/**
+ * The static binding `def` denotes: itself, or — for a call frame's parameter
+ * definition — the literal's own binding for that parameter.
+ *
+ * ONE hop, non-recursive: an activation's target is always a static binding
+ * (a body `Block`'s canonicalization-time declaration), never another
+ * activation.
+ */
+function staticBindingOf(def: BoxedBaseDefinition): BoxedBaseDefinition {
+  return (def as Activated)._activationOf ?? def;
+}
+
+/**
+ * Do two definitions denote the same binding — identically, or because one is
+ * an ACTIVATION of the other (or both activate the same binder)?
+ *
+ * The newly-equal pairs are exactly (static binding, its activation) and
+ * (activation, activation of the same binder). A stored value's free `x` (a
+ * global definition) and a frame's `x` stay unequal: neither activates the
+ * other. Names are still compared separately everywhere — this does not make
+ * equality rename-invariant.
+ */
+export function sameBindingDef(
+  a: BoxedBaseDefinition | undefined,
+  b: BoxedBaseDefinition | undefined
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return staticBindingOf(a) === staticBindingOf(b);
+}
 
 /**
  * What this node binds, as name → the binding itself.
@@ -260,14 +322,20 @@ export function rebindToBindings(
  *
  * Two restrictions keep this confined to dereference, each one measured:
  *
- * - **The occurrence's definition must be reachable** in the current chain. A
- *   call frame parks a parameter's value in a fresh definition and hides the
- *   body's own (`hideBodyScopeParams` in `function-utils.ts`), so a body
- *   occurrence's definition is unreachable BY DESIGN and the name lookup is the
- *   only thing that can answer. Generalizing to "an occurrence always means its
- *   own binding" contradicts both beta-reduction and the cached-expression
- *   re-binding contract (CONTRACT 4, `scope.test.ts`) — measured at 100+
- *   failures.
+ * - **The occurrence's definition must be reachable** in the current chain —
+ *   it refuses to re-point a free symbol at a definition that is not in the
+ *   chain AT ALL, i.e. one belonging to an already-popped scope. Generalizing
+ *   to "an occurrence always means its own binding" contradicts both
+ *   beta-reduction and the cached-expression re-binding contract (CONTRACT 4,
+ *   `pipeline-contracts.test.ts`) — measured at 100+ failures.
+ *
+ *   "Reachable" is `sameBindingDef`, not identity: a call frame parks a
+ *   parameter's value in a fresh definition and hides the body's own
+ *   (`hideBodyScopeParams` in `function-utils.ts`), so a body occurrence used
+ *   to be unreachable BY DESIGN — the restriction looked conditional on that
+ *   arrangement. The frame's definition is an ACTIVATION of the body's
+ *   binding, so the walk now finds it and the restriction is left doing only
+ *   its own, unrelated job.
  * - **The shadowing binding must hold a VALUE.** A valueless shadow cannot
  *   capture anything, and shadowing a name valueless is how every shield in the
  *   engine works: `Solve` blinds its unknown at the source, so
@@ -325,7 +393,7 @@ export function evaluateInOwnBindings(
       const found = scope.bindings.get(name);
       if (found !== undefined) {
         innermost ??= found;
-        if ('value' in found && found.value === own) {
+        if ('value' in found && sameBindingDef(found.value, own)) {
           reachable = true;
           break;
         }
@@ -335,7 +403,8 @@ export function evaluateInOwnBindings(
     if (!reachable || innermost === undefined) return sym;
     // Already the innermost binding, or shadowed by something that holds no
     // value: the ambient lookup answers correctly on its own.
-    if ('value' in innermost && innermost.value === own) return sym;
+    if ('value' in innermost && sameBindingDef(innermost.value, own))
+      return sym;
     if (!('value' in innermost) || innermost.value.value === undefined)
       return sym;
     (env ??= new Map()).set(name, { value: own } satisfies TaggedValueDefinition);
