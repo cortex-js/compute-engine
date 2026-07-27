@@ -1,12 +1,18 @@
 # Step 5 — A Sanctioned Binder Mechanism
 
-**Status**: DESIGN — 2026-07-26, not yet implemented, not yet ratified.
-Produced by an Opus design agent against clean tree `0da66698`; step 4
-(widening `rebindParameters` to named parameters) is assumed DONE. This is
-phase 3 of the symbol-identity repair; the problem inventory and all
-prior-phase record live in
-`docs/plans/2026-07-24-defining-scope-dereference-design.md` (§The recurring
-defect, §Sequencing step 5).
+**Status**: **COMPLETE — 2026-07-26.** All 16 stages resolved: landed
+(0–6, 8, 10, 11, 13, 14), falsified with recorded evidence (7 — `Limit`
+migrates never; 12 — pipe needed nothing after 10), or dispositioned (9 —
+`Solve` keeps its shield channel, explicit via `_isShield`). Three
+dual-reviewer rounds ran along the way; every round's record is a dated
+section below. Snapshots stayed 4182/4182 through the entire initiative.
+Open residue for a future phase: raw-name-fallback provenance (the `@fixme`
+double-apply in `functions.test.ts`), the unwired `BindingSite.shield` type
+field, and the pristine-pop invalidation heuristic (ruling 2 — never needed,
+still available). Originally produced as a design by an Opus agent against
+clean tree `0da66698`; phase 3 of the symbol-identity repair, whose
+prior-phase record lives in
+`docs/plans/2026-07-24-defining-scope-dereference-design.md`.
 
 ## Rulings record (2026-07-26, user)
 

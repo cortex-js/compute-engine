@@ -404,8 +404,10 @@ the interactions are not predictable by inspection.
    Full suite exit 0, snapshots unchanged (4182 baseline — the count moved
    from 4179 via intervening commits, ReleaseHold pins among them, not with
    this change).
-5. **A sanctioned binder mechanism** (see §The recurring defect) — the
-   structural fix for the class that produced four separate repairs here.
+5. ~~**A sanctioned binder mechanism**~~ — **COMPLETE 2026-07-26**; see
+   `docs/plans/2026-07-26-binder-mechanism-design.md` (status header lists
+   every stage's outcome). The structural fix for the class that produced
+   four separate repairs here — eight escaping-lift sightings by the end.
    Antecedent worth copying (2026-07-25 review round): Lean's locally-nameless
    discipline — the binder constructor is the single authority for its
    variable, and a debug-mode invariant at `popScope` ("no live result
