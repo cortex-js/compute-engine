@@ -4019,12 +4019,54 @@ Release resources owned by this definition when its scope is disposed.
 
 <MemberCard>
 
+### BindingSite
+
+```ts
+type BindingSite = {
+  path: readonly number[];
+  type: TypeString;
+  clauseLocal: boolean;
+  shield: boolean;
+};
+```
+
+A located binding site: where, inside an operator expression, one of that
+operator's **bound variables** sits, and how to declare it.
+
+</MemberCard>
+
+<MemberCard>
+
+### BindingSiteSelector
+
+```ts
+type BindingSiteSelector = (ops, phase) => readonly BindingSite[];
+```
+
+Locate an operator's binding sites among its operands.
+
+Used as the value of the [OperatorDefinitionFlags.scoped](#scoped) flag to
+declare that an operator is a *binder*: the framework mints the operator's
+scope, declares each site's symbol in it before the `canonical` handler
+runs, and rebinds the sites (and same-named occurrences elsewhere in the
+expression) to that scope afterwards. This is what makes the parse,
+`ce.box()` and `ce.function()` routes agree about which binding a bound
+variable denotes.
+
+`phase: 'pre'` runs on the RAW operands, before the `canonical` handler; it
+may return fewer sites than `'post'` — return nothing rather than guess.
+`phase: 'post'` runs on the handler's RESULT operands and is authoritative.
+
+</MemberCard>
+
+<MemberCard>
+
 ### OperatorDefinitionFlags
 
 ```ts
 type OperatorDefinitionFlags = {
   lazy: boolean;
-  scoped: boolean;
+  scoped: boolean | BindingSiteSelector;
   broadcastable: boolean;
   missingBehavior: "reject" | "propagate" | "handle";
   missingStrip: "all" | number[];
@@ -4072,6 +4114,34 @@ operator.
 #### Extends
 
 - [`BoxedBaseDefinition`](#boxedbasedefinition).[`OperatorDefinitionFlags`](#operatordefinitionflags)
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.scoped
+
+```ts
+scoped: boolean;
+```
+
+Normalized from the declaration's `scoped` flag: `true` when the operator
+creates a lexical scope, whether it was declared `true` or as a
+binding-site selector.
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.bindingSites?
+
+```ts
+optional bindingSites?: BindingSiteSelector;
+```
+
+The binding-site selector of the declaration's `scoped` flag, when one
+was given. `undefined` for `scoped: true` (a scope with no syntactic
+bound variables) and for an unscoped operator.
+
+</MemberCard>
 
 <MemberCard>
 
@@ -13334,6 +13404,19 @@ type: Type;
 
 <MemberCard>
 
+##### BoxedType.unionMembers
+
+The members of a union type, each boxed, or `[this]` for any other type.
+
+Lets a consumer reason arm-by-arm without reading the raw `Type` AST.
+Note that a union may be nested inside a parameter (`list<A | B>`), which
+this does not reach — `couldMatch()` handles that case directly and is
+usually what an arm walk was reaching for.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedType.isUnknown
 
 </MemberCard>
@@ -13407,6 +13490,110 @@ is(other): boolean
 ####### other
 
 [`Type`](#type-3)
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedType.isDisjointFrom()
+
+```ts
+isDisjointFrom(other): boolean
+```
+
+True when no value can inhabit both this type and `other`.
+
+Use this — not `!matches()` — to decide whether two types are unrelated.
+`matches()` answers "is this a subtype of `other`", so two types that
+share values without either containing the other (`integer | string` vs
+`integer | boolean`) fail `matches()` in both directions.
+
+Conservative in the safe direction: when disjointness cannot be
+established the answer is `false` ("they may overlap"), never a false
+claim of disjointness. So `!a.isDisjointFrom(b)` reads as *possible*
+overlap, and `unknown` overlaps everything.
+
+Throws if `other` is a string that is not a valid type.
+
+####### other
+
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeReference`](#typereference)
+  \| [`BoxedType`](#boxedtype)
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedType.couldMatch()
+
+```ts
+couldMatch(other): boolean
+```
+
+True when *some* value inhabits both this type and `other` — "could a
+value of this type be an `other`?".
+
+This is the predicate for classifying a value by shape ("might this be a
+point, a point list, a matrix"). Prefer it to `matches()`, which answers
+"is EVERY value of this type an `other`" and so reports `false` for a
+union whose members include exactly the shape asked about:
+
+```ts
+const t = ce.type('tuple<number, number> | list<tuple<number, number>>');
+t.matches('list<tuple<number, number>>');    // false
+t.couldMatch('list<tuple<number, number>>'); // true
+```
+
+Unions are distributed at every depth, so a union nested inside a
+parameter is handled too — `list<integer | tuple<number, number>>` could
+be a `list<tuple<number, number>>`, witness `[(1,2)]`.
+
+Symmetric, and decisive for the composite shapes it models: a
+`tuple<number, number>` could not be a `list<tuple<number, number>>`, and
+`list<integer>` could not be a `list<string>`. Shapes it does not model
+fall back to assignability in either direction, so the answer is never
+narrower than `matches()` — with one deliberate exception: `never` is
+uninhabited, so nothing could be a `never`.
+
+`unknown` could be anything. Consumers that treat an inconclusive type as
+"no" must check `isUnknown` themselves.
+
+Throws if `other` is a string that is not a valid type.
+
+####### other
+
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeReference`](#typereference)
+  \| [`BoxedType`](#boxedtype)
 
 </MemberCard>
 

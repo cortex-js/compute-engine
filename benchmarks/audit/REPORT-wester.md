@@ -10,13 +10,13 @@ Configs: **CE** = base shipping engine (no Rubi/Fungrim); **CE+R/F** = with the 
 
 Grading: factor/expand/simplify (value-equal to input), indefinite ∫ (`d/dx` ≈ integrand), and derivatives (≈ central difference) are **invariant-verified**. Limits and definite ∫ have no cheap reliable numeric oracle, so for those **correct = the tool returned a finite value**, with CE-vs-SymPy disagreements flagged (`≠`) separately.
 
-- **CE 26/48** · **CE+R/F 33/48** · **SymPy 36/48** · **Mathematica 44/48** correct.
-- Against the **Mathematica** baseline, base CE trails on **18** cases; **7** of those recovered by Rubi/Fungrim.
+- **CE 31/48** · **CE+R/F 38/48** · **SymPy 36/48** · **Mathematica 44/48** correct.
+- Against the **Mathematica** baseline, base CE trails on **14** cases; **7** of those recovered by Rubi/Fungrim.
 
 | Operation | CE | CE+R/F | SymPy | Mathematica |
 |---|--:|--:|--:|--:|
 | Indefinite ∫ | 1/8 | 8/8 | 7/8 | 8/8 |
-| Definite ∫ | 0/5 | 0/5 | 0/5 | 4/5 |
+| Definite ∫ | 5/5 | 5/5 | 0/5 | 4/5 |
 | Derivative | 1/1 | 1/1 | 1/1 | 1/1 |
 | Limit | 4/6 | 4/6 | 6/6 | 6/6 |
 | Solve | 13/21 | 13/21 | 15/21 | 18/21 |
@@ -24,7 +24,7 @@ Grading: factor/expand/simplify (value-equal to input), indefinite ∫ (`d/dx` �
 | Factoring | 4/4 | 4/4 | 4/4 | 4/4 |
 | Simplification | 2/2 | 2/2 | 2/2 | 2/2 |
 
-## Where CE trails Mathematica (18)
+## Where CE trails Mathematica (14)
 
 | File | Op | Input | CE | CE+R/F | SymPy | Mathematica | CE result |
 |---|---|---|---|---|---|---|---|
@@ -35,11 +35,7 @@ Grading: factor/expand/simplify (value-equal to input), indefinite ∫ (`d/dx` �
 | indefinite_integrals | integrate | `1 / (3cos(x) + 4sin(x) + 4)` | ∅ | ✅ | ✅ | ✅ | `int(1 / (3cos(x) + 4sin(x)` |
 | indefinite_integrals | integrate | `1 / (3cos(x) + 4sin(x) + 5)` | ∅ | ✅ | ✅ | ✅ | `int(1 / (3cos(x) + 4sin(x)` |
 | indefinite_integrals | integrate | `1 / (3cos(x) + 4sin(x) + 6)` | ∅ | ✅ | · | ✅ | `int(1 / (3cos(x) + 4sin(x)` |
-| definite_integrals | defint | `sqrt(x + 1 / x - 2)` | ∅ | ∅ | ∅ | ✅ | `int_(0)^(1)(sqrt(x + 1 / x` |
-| definite_integrals | defint | `sqrt(x + 1 / x - 2)` | ∅ | ∅ | ∅ | ✅ | `int_(1)^(2)(sqrt(x + 1 / x` |
-| definite_integrals | defint | `sqrt(x + 1 / x - 2)` | ∅ | ∅ | ∅ | ✅ | `int_(0)^(2)(sqrt(x + 1 / x` |
-| definite_integrals | defint | `sqrt(1 - x^2) / (x^2 + 1)` | ∅ | ∅ | ∅ | ✅ | `int_(-1)^(1)(sqrt(1 - x^2)` |
-| limits | limit | `(-e^x + e^(x * e^(-x)) / (e^` | ∅ | ∅ | ✅ | ✅ | `lim_(+oo) {(-e^x + e^(x * ` |
+| limits | limit | `(-e^x + e^((x * e^(-x)) / (e` | ∅ | ∅ | ✅ | ✅ | `lim_(+oo) {(-e^x + e^((x *` |
 | limits | limit | `(x * ln(x) * ln(-x^2 + x * e` | ∅ | ∅ | ✅ | ✅ | `lim_(+oo) {(x * ln(x) * ln` |
 | equations | solve | `-x + x^x` | ∅ | ∅ | ✅ | ✅ | `[]` |
 | equations | solve | `-cos(x) + sin(x)` | 🟡 1/2 roots | 🟡 | 🟡 | ✅ | `1/4 * pi` |
