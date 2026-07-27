@@ -34,6 +34,17 @@ describe('Covariance / PopulationCovariance', () => {
     ).toBe('5/2');
   });
 
+  test('mismatched lengths report incompatible-dimensions, like every broadcast path', () => {
+    // Harmonized 2026-07-27 (`docs/BROADCAST-MODEL.md` audit): was
+    // `unexpected-argument: "... collections differ in length"`.
+    expect(
+      ce.box(['Covariance', L([1, 2, 3]), L([2, 4])]).evaluate().toString()
+    ).toMatch(/incompatible-dimensions.*3 vs 2/);
+    expect(
+      ce.box(['Correlation', L([1, 2, 3]), L([2, 4])]).evaluate().toString()
+    ).toMatch(/incompatible-dimensions.*3 vs 2/);
+  });
+
   test('pairs form is identical to two-list form', () => {
     const pairs = ce
       .box([

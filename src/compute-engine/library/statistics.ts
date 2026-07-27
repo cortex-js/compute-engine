@@ -1029,11 +1029,10 @@ function evaluateCovariance(
   const pairs = extractPairs(ops);
   if (!pairs) return shapeError(ce, name);
   const { xs, ys } = pairs;
+  // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`):
+  // a pairwise reducer over two collections is strict on length agreement.
   if (xs.length !== ys.length)
-    return ce.error(
-      'unexpected-argument',
-      `${name}: collections differ in length`
-    );
+    return ce.error('incompatible-dimensions', `${xs.length} vs ${ys.length}`);
   if (xs.length < 2)
     return ce.error(
       'unexpected-argument',
@@ -1064,11 +1063,9 @@ function evaluateCorrelation(
   const pairs = extractPairs(ops);
   if (!pairs) return shapeError(ce, 'Correlation');
   const { xs, ys } = pairs;
+  // Same error as every broadcast-path mismatch (`docs/BROADCAST-MODEL.md`).
   if (xs.length !== ys.length)
-    return ce.error(
-      'unexpected-argument',
-      'Correlation: collections differ in length'
-    );
+    return ce.error('incompatible-dimensions', `${xs.length} vs ${ys.length}`);
   if (xs.length < 2)
     return ce.error(
       'unexpected-argument',

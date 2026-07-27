@@ -85,6 +85,15 @@
 
 ### Issues Resolved
 
+- **`Covariance`/`Correlation` report a length mismatch as
+  `incompatible-dimensions`.** They were already strict — a ragged pair of
+  data collections errored — but with their own `unexpected-argument`
+  ("collections differ in length") rather than the `incompatible-dimensions`
+  error every broadcast path answers. One error tag now covers every
+  length-mismatch diagnosis (see `docs/BROADCAST-MODEL.md`). The other
+  argument errors (`at least 2 data points required`, the shape error, `zero
+  variance`) are unchanged.
+
 - **`Multiply` over operands of mixed collection kinds is element-wise again.**
   A `List` literal packs as a tensor value while a `Range`/`Filter`/`Take`/
   `Reverse` result does not, so the non-tensor operand was classified as a
@@ -202,6 +211,70 @@
   `scipy.special.factorial` (which answers `0` for a negative non-integer).
   The GPU targets already extended via `Γ`; the interval target remains
   deliberately integer-only. Reported by the Tycho team.
+
+### Benchmarks
+
+#### Numeric performance (200-digit precision)
+
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
+
+| Expression | CE (current) | CE 0.96.0 | SymPy | math.js | Mathematica |
+| --- | --: | --: | --: | --: | --: |
+| $\pi^2$ | 7.3 | 7.5 | 180 | 110 | 3.9 |
+| $\sin 1$ | 20 | 21 | 218 | 439 | 5.2 |
+| $\cos 1$ | 20 | 20 | 221 | 456 | 7.1 |
+| $\ln 2$ | 14 | 14 | 347 | 4,406 | 3.7 |
+| $e^{\pi}$ | 13 | 13 | 214 | 4,655 | 4.5 |
+| $\zeta(3)$ | 1,534 | 1,562 | 272 | — | 49 |
+| $\Gamma(\tfrac13)$ | 840 | 834 | 350 | — | 213 |
+| $\psi(\tfrac13)$ | 724 | 720 | 2,776 | — | 174 |
+
+#### Symbolic capability & performance
+
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE (current)** and **CE 0.96.0** columns to
+see what is _new this release_ (a `—` under `0.96.0` next to a number under
+the current build). The **CE + R/F** column is the current build with the
+opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
+
+| Operation | CE (current) | CE + R/F | CE 0.96.0 | SymPy | math.js | Mathematica |
+| --- | :--: | :--: | :--: | :--: | :--: | :--: |
+| **Antiderivatives** |  |  |  |  |  |  |
+| $\int\frac{1}{\sqrt x}\,dx$ | 4.6× | 2.3× | 3.4× | 0.5× | — | 1× |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 7.9× | 1.5× | 6.1× | 0.08× | — | 1× |
+| $\int\frac{1}{x^3+1}\,dx$ | 5.2× | 0.8× | 4.0× | 0.3× | — | 1× |
+| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 1.9× | — | 0.1× | — | 1× |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 1.1× | — | 0.01× | — | 1× |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 1.1× | — | 0.007× | — | 1× |
+| **Derivatives** |  |  |  |  |  |  |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.04× | 0.03× | 0.03× | 0.001× | 0.003× | 1× |
+| **Simplification** |  |  |  |  |  |  |
+| $\sqrt{3+2\sqrt2}$ | 42× | 29× | 29× | — | — | 1× |
+| $\sqrt6\,x+\sqrt2\,x$ | 77× | 45× | 51× | 3.0× | 18× | 1× |
+| **Evaluation** |  |  |  |  |  |  |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 15× | 16× | 33× | 3.1× | — | 1× |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 7.3× | 4.9× | 6.8× | 2.2× | — | 1× |
+| $\int_1^2\tfrac1x\,dx$ | 4819× | 4740× | 4259× | 80× | — | 1× |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 293× | 124× | 250× | 2.6× | — | 1× |
+| **Solving** |  |  |  |  |  |  |
+| $x^4+x^2-1=0$ | 0.3× | 0.3× | 0.3× | 0.06× | — | 1× |
+| $x^3-x-1=0$ | 1.7× | 1.9× | 1.5× | 0.04× | — | 1× |
+
+Across the cases both solve, Compute Engine is a **median 5.2× faster than
+Mathematica** (up to 4819×) — in the browser, not a proprietary kernel.
+
+<sub>Measured 2026-07-27 · Compute Engine `0.96.0` @ `9eb6538a` (current
+build) · published `0.96.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified
+numerically against an independent `mpmath` reference, never another tool.
+Reproduce with `npm run build production && ./venv/bin/python3
+benchmarks/gen_cases.py && node benchmarks/report.mjs && node
+benchmarks/report_changelog.mjs`.
+</sub>
 
 ## 0.96.0 _2026-07-26_
 

@@ -132,8 +132,8 @@ error on dimension grounds of their own.
 literals stays inert-symbolic (never truncated, never diagnosed) — and the
 unit-carrying variant (`[1,2,3] · ([1,2]·Meter)`) lands in the same inert
 shape; a late-resolving mismatch inside the lazy variadic `Map` can still
-truncate. Cosmetic: `Covariance`/`Correlation` are strict but answer
-`unexpected-argument` ("collections differ in length") rather than
-`incompatible-dimensions`. A non-indexed collection operand (`Add(L,
-Naturals)`) is lifted like a scalar, producing inert `Naturals + 1` cells —
-arguably deserving its own ruling.
+truncate. A non-indexed collection operand (`Add(L, Naturals)`) is lifted
+like a scalar, producing inert `Naturals + 1` cells — arguably deserving its
+own ruling. (`Covariance`/`Correlation` originally answered
+`unexpected-argument` on a length mismatch; harmonized to
+`incompatible-dimensions` same day.)
