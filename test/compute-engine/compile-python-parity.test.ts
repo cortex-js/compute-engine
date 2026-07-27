@@ -362,19 +362,24 @@ describeScipyMaybe('PYTHON EXECUTION PARITY — scipy special functions (venv)',
  * ElementMax / ElementMin / Clamp broadcasting parity (finding A8).
  *
  * `np.maximum`/`np.minimum`/`np.clip` broadcast by NumPy rules and raise
- * `ValueError` on a length mismatch that is not 1-vs-N, whereas the interpreter
- * (`broadcastOverIndexedCollections`) **zip-to-shortest** trims the arrays. When
- * any operand is a collection the Python target now routes through the injected
- * `_ce_bcast` runtime helper; when every operand is a scalar it keeps the direct
- * `np.*` fast path. This suite **runs the emitted Python** and asserts the value
- * matches the interpreter's `.evaluate()` for mismatched-length arrays,
- * scalar⊗array, equal-length arrays, all-scalar, and empty operands.
+ * `ValueError` on a length mismatch that is not 1-vs-N. When any operand is a
+ * collection the Python target routes through the injected `_ce_bcast` runtime
+ * helper; when every operand is a scalar it keeps the direct `np.*` fast path.
+ * This suite **runs the emitted Python** and asserts the value matches the
+ * interpreter's `.evaluate()` for mismatched-length arrays, scalar⊗array,
+ * equal-length arrays, all-scalar, and empty operands.
+ *
+ * A length mismatch used to zip-to-shortest on BOTH sides (the helper was built
+ * to reproduce the interpreter's truncation). The 2026-07-24 ruling made a
+ * mismatch an `incompatible-dimensions` ERROR everywhere — no truncation, no
+ * recycling — so both sides now answer the numeric projection of that error,
+ * `NaN`. The mismatched cases below are kept precisely because they are the
+ * ones that would drift if a target quietly kept trimming.
  *
  * Result normalization: a `List` result → an array of its element values; a
  * length-1 broadcast result unwraps to a scalar (interpreter convention); an
- * empty result is `[]` — the interpreter returns `Nothing` (no numeric
- * analogue), which the helper renders as an empty NumPy array, both normalized
- * to `[]` here.
+ * empty result is `[]`; an `Error` (and `Nothing` where no numeric analogue
+ * exists) is `NaN`, which is compared NaN-to-NaN rather than by distance.
  */
 type BcastCase = { name: string; expr: any };
 
@@ -438,10 +443,15 @@ describeMaybe('PYTHON EXECUTION PARITY — ElementMax/ElementMin/Clamp (venv)', 
       src += `${python.compileFunction(ce.box(c.expr), `fn_${c.name}`, [])}\n`;
 
     // Normalize a returned value: a 0-d array → float scalar; otherwise a list.
+    // `json.dumps` emits a bare `NaN`, which `JSON.parse` rejects — send it as
+    // `null` and map it back to NaN on the JavaScript side.
     src +=
+      'def _num(v):\n' +
+      '    f = float(v)\n' +
+      '    return None if f != f else f\n\n' +
       'def _ser(z):\n' +
       '    z = np.asarray(z)\n' +
-      '    return float(z) if z.ndim == 0 else [float(v) for v in z]\n\n';
+      '    return _num(z) if z.ndim == 0 else [_num(v) for v in z]\n\n';
     src += 'results = {}\n';
     for (const c of BCAST_CASES)
       src += `results[${JSON.stringify(c.name)}] = _ser(fn_${c.name}())\n`;
@@ -459,7 +469,8 @@ describeMaybe('PYTHON EXECUTION PARITY — ElementMax/ElementMin/Clamp (venv)', 
 
     for (const c of BCAST_CASES) {
       const e = interpBcast(c.expr);
-      const a = actual[c.name];
+      // `null` is the JSON transport for NaN (see `_num` above).
+      const a = actual[c.name] === null ? NaN : actual[c.name];
       if (Array.isArray(e)) {
         expect(Array.isArray(a)).toBe(true);
         expect((a as number[]).length).toBe(e.length);
@@ -467,6 +478,11 @@ describeMaybe('PYTHON EXECUTION PARITY — ElementMax/ElementMin/Clamp (venv)', 
           expect(Math.abs((a as number[])[i] - e[i])).toBeLessThanOrEqual(
             1e-10
           );
+      } else if (Number.isNaN(e)) {
+        // An `incompatible-dimensions` error (or an empty operand beside a
+        // non-empty one) projects to NaN on both sides.
+        expect(typeof a).toBe('number');
+        expect(a as number).toBeNaN();
       } else {
         expect(typeof a).toBe('number');
         expect(Math.abs((a as number) - e)).toBeLessThanOrEqual(1e-10);

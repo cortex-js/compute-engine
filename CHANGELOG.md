@@ -1,5 +1,183 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A broadcast operand is evaluated ONCE.** Broadcasting is an operation on
+  values (the NumPy/Julia/R model), so an operand that is lifted into every
+  cell is evaluated a single time and the operation then maps over the cells:
+
+  ```
+  L < Random()        // ONE draw, compared against every element of L
+  Map(L, l ↦ l < Random())   // a draw per element, written explicitly
+  ```
+
+  Comparisons and logical connectives used to re-evaluate a lifted operand per
+  element, so `[0.5, 0.5, 0.5] < Random()` could answer `[True, False, True]`.
+  Arithmetic (`L + Random()`) already drew once; the disagreement was an
+  implementation artifact of the element-wise zip, not a semantic. Only impure
+  *scalar* operands under a broadcast are affected — an impure operand that IS
+  the traversed collection (`[Random(), Random()] < 0.5`) still draws per cell,
+  because those draws are the cells.
+
+- **A length mismatch in a broadcast is an error, not a truncation.** Zipping
+  to the shortest operand silently discarded the tail of the longer one:
+
+  ```
+  [1,2,3] < [2,2]     // was: [True, False]   now: incompatible-dimensions
+  ```
+
+  `Add` already answered `incompatible-dimensions` for this shape, so the
+  engine disagreed with itself depending on the head. One check now governs
+  every broadcast path — the eager zip, the arithmetic broadcast, and the lazy
+  `Map` form — so the ordering relations, the logical connectives,
+  `Divide`/`Power`/`Mod`, `Add`/`Multiply`, and `ElementMax`/`ElementMin`/
+  `Clamp` all answer alike. In particular the SIZE of a collection no longer
+  decides the semantics (a mismatch used to error below the eager threshold and
+  truncate above it), and neither does the shape of the source: `Add(Filter(…),
+  L)` used to truncate where `Less` on the same operands errored.
+
+  An **unbounded** operand against a finite one is a mismatch too (`count` is
+  `Infinity`, which agrees with no finite length). A scalar operand is a LIFT,
+  not a participant, so it never mismatches; an operand whose length is not yet
+  known is not compared, since there is nothing to compare until it resolves. An
+  empty operand alongside a non-empty one is a mismatch, while a lone empty
+  operand still broadcasts to `Nothing` (`Not([])`).
+
+  `PointList` is deliberately unaffected: it ZIPS components rather than
+  broadcasting an operator over them, and its shortest-zip
+  (`PointList([1,2,3],[10,20])` → two points) is an existing consumer contract.
+
+### New Features
+
+- **Compiled comparisons and logical connectives broadcast element-wise.** The
+  ordering relations (`<`, `<=`, `>`, `>=`) and the connectives (`And`, `Or`,
+  `Not`) compile over collection-valued operands on the JavaScript target
+  instead of failing closed, so the Desmos filter form compiles rather than
+  falling back to the interpreter:
+
+  ```js
+  compile(ce.parse('[10,20,30][|[1...3]-k|>0]')).run(); // [10, 30]
+  ```
+
+  These heads lower to raw JS infix operators, which are silently wrong on an
+  array (`0 < [1,0,1]` stringifies it; an array is truthy, so `m1 && m2`
+  returns a whole operand). They now wrap the head's own scalar codegen in the
+  `_SYS.bcast` runtime helper, which recurses per POSITION — an empty or
+  mismatched position projects to NaN without poisoning its siblings
+  (`Not([[], [True]])` → `[NaN, [false]]`, matching the interpreter's
+  `[Nothing, [False]]`).
+
+  The scalar path is untouched: `x < 3` with an `unknown`-typed plot variable
+  still emits `_.x < 3`, with no runtime guard. Three shapes deliberately keep
+  failing closed, because the compiled answer would disagree with
+  interpretation: a CHAINED ordering (`0 < xs < 5`, whose pairwise `&&` is
+  sound only over scalars); `Equal`/`NotEqual` over two collections (whole-
+  collection equality, which keeps its `_SYS.eq` dispatch and stays element-wise
+  for the list-vs-scalar case); and an operand that types as a list but does not
+  COMPILE to one — notably a user-function application over a collection
+  argument (`q(L) < y`), since a user function's body compiles as scalar code
+  and returns NaN on an array, which a comparison would turn into a plausible
+  `false`.
+
+### Issues Resolved
+
+- **A symbol bound to a derived collection serializes as its name again.**
+  Regression in 0.96.0. `.latex` and `toString()` materialize a lazy collection
+  before serializing, and a symbol whose assigned value is a *derived*
+  collection (the result of evaluating a `Join`, a comprehension, …) delegates
+  `isLazyCollection` to that value — so the symbol serialized as its
+  materialized value while `.json` still answered the symbol's name:
+
+  ```js
+  ce.assign('L', ce.box(['List', 1, 2, 3]));
+  ce.assign('L', ce.box(['Join', 'L', ['List', 4]]).evaluate());
+  ce.symbol('L').json;   // 'L'
+  ce.symbol('L').latex;  // was: '\bigl\lbrack1, 2, 3, 4\bigr\rbrack'  now: 'L'
+  ```
+
+  A literal `List` value (eager, not lazy) never triggered it, which is what
+  made the failure value-provenance-dependent and hard to spot: a consumer that
+  serialized a symbol to persist a document wrote the value where the name
+  belonged. A symbol now never takes the materialize-before-serialize path — a
+  name's spelling does not depend on what the name currently holds. Lazy
+  collection *expressions* (`Range`, `Map`, comprehensions) serialize as
+  before. Reported by the Tycho team.
+
+- **`Add` and `Multiply` fold a `Measurement` operand on the first `.N()`.**
+  Every unary/binary arithmetic head already folded a quadrature result
+  (`Power`, `Divide`, `Sqrt`, `Sin`, `Negate`, `Abs` of a `Measurement` yield
+  another `Measurement`), but the two n-ary heads checked for `Measurement`
+  operands against the *plainly evaluated* operands. A quadrature operand only
+  becomes a `Measurement` under numeric approximation — `\int_0^1 \sin x\,dx`
+  evaluates to the exact `1 - \cos 1` — so the check saw nothing, and the first
+  `.N()` returned an inert `Add`/`Multiply` whose `.re` was `NaN` (the same
+  dead numeric read fixed for `Measurement` itself in 0.96.0, one level up). A
+  second `.N()` folded it:
+
+  ```js
+  const once = ce.parse('1 + \\int_0^1 \\sin(x) dx').N();
+  once.re;      // was: NaN     now: 1.4596976941318605
+  once.operator // was: 'Add'   now: 'Measurement'
+  ```
+
+  The handlers now re-dispatch the Measurement fold on the numericized result,
+  so the parse route agrees with the (already correct)
+  `ce.box(['Add', <measurement>, 1]).N()` route exactly — value and error bar.
+  The sibling `Quantity` check in the same handlers had the identical
+  structural gap (an operand that only becomes a `Quantity` under numeric
+  approximation was invisible to it); it is closed the same way. `evaluate()`
+  is unaffected and still returns the exact symbolic form. Reported by the
+  Tycho team.
+
+- **Compiling a definite integral that cannot close symbolically is now
+  bounded.** The JavaScript compilation target first attempts to resolve an
+  `Integrate` to a closed form (so a plotted `∫₀ˣ f` costs ~µs per sample
+  instead of a quadrature); that attempt ran under whatever deadline the caller
+  had armed — and under none by default. An integrand with a *symbolic*
+  exponent (`y^{k/2-1}` with `k` a free document parameter) sent the
+  integration-by-parts search into a cycle with no shrinking measure: bounded
+  in depth but not in cost, it did not return in over 5 minutes, synchronously,
+  with no way to interrupt it:
+
+  ```js
+  // χ² tail with shape parameter k left free: >5 min → ~2 s, success: true
+  ce.getCompilationTarget('javascript')
+    .compile(ce.parse('\\int_x^\\infty \\frac{e^{-y/2} y^{k/2-1}}{(k/2-1)!\\, 2^{k/2}} dy',
+             {strict: false}), {realOnly: true});
+  ```
+
+  The antiderivative-first attempt now arms its own 2-second span (an enclosing
+  caller span still tightens it, per the timeout model's `min()` nesting — it
+  can only shorten, never extend, a caller's bound) and degrades to the
+  GK15 quadrature emitter on expiry, so the compiled integral samples
+  numerically with the parameter bound at run time — which is the desired
+  behavior for a non-elementary integrand. Note that `ce.timeLimit` was
+  retired in 0.89.0: to bound `evaluate()` itself, use
+  `ce.withTimeLimit({ms, label}, () => …)`, which this shape honors to the
+  millisecond. Reported by the Tycho team.
+
+- **Compiled `Factorial` of a non-integer computes Γ(x+1) instead of NaN.**
+  The interpreter has always extended the factorial to the reals
+  (`(\frac12-1)!` → `Γ(\frac12)` = `√π`), but the compiled runtime used the
+  integer-only helper, so the same expression compiled successfully and
+  returned `NaN` — silently zeroing out, e.g., a χ² density's normalizing
+  constant `(k/2-1)!` at odd `k`:
+
+  ```js
+  const f = ce.getCompilationTarget('javascript')
+              .compile(ce.parse('(\\frac{1}{2}-1)!'));
+  f.run({}); // was: NaN    now: 1.7724538509055159 (= √π, identical to .N())
+  ```
+
+  Non-integer arguments route through the same `gamma` the interpreter uses,
+  so compiled and interpreted values are bit-identical; the non-negative
+  integer fast path is unchanged, and a negative integer stays at the Γ pole
+  (`NaN`, the real projection of the interpreter's `ComplexInfinity`). The
+  Python target likewise now emits `scipy.special.gamma(x + 1)` instead of
+  `scipy.special.factorial` (which answers `0` for a negative non-integer).
+  The GPU targets already extended via `Γ`; the interval target remains
+  deliberately integer-only. Reported by the Tycho team.
+
 ## 0.96.0 _2026-07-26_
 
 ### Breaking Changes

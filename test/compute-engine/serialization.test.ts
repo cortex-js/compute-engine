@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
 import { toAsciiMath } from '../../src/compute-engine/boxed-expression/ascii-math';
 
@@ -761,5 +762,57 @@ describe('DISPLAY DIGITS', () => {
         '\\sum_{i=1}^3i'
       );
     });
+  });
+});
+
+// A symbol serializes as its NAME, whatever the name currently holds. The
+// "materialize lazy collections before serializing" guard in `toString()`,
+// `latex` and `toLatex()` was keyed on `isLazyCollection`, which a symbol
+// delegates to its assigned value: a symbol bound to a DERIVED collection
+// (the evaluated result of `Join`, a comprehension, …) is a lazy view, so it
+// took the materialization path and serialized as its value while `.json`
+// still reported the symbol — `.json` and `.latex` disagreeing about what the
+// expression IS. Tycho item 100 (regression vs 0.95.1).
+describe('A symbol bound to a lazy collection serializes as its name (Tycho item 100)', () => {
+  test('derived collection (Join)', () => {
+    const engine = new ComputeEngine();
+    engine.assign('L', engine.box(['List', 1, 2, 3]));
+    engine.assign('L', engine.box(['Join', 'L', ['List', 4]]).evaluate());
+
+    expect(engine.symbol('L').json).toEqual('L');
+    expect(engine.symbol('L').latex).toEqual('L');
+    expect(engine.symbol('L').toLatex()).toEqual('L');
+    expect(engine.symbol('L').toString()).toEqual('L');
+    expect(engine.box('L').latex).toEqual('L');
+
+    // ... but the VALUE is still the collection
+    expect(engine.symbol('L').value?.toString()).toEqual('[1,2,3,4]');
+    expect(engine.symbol('L').evaluate().toString()).toEqual('[1,2,3,4]');
+    expect(engine.symbol('L').N().toString()).toEqual('[1,2,3,4]');
+  });
+
+  test('derived collection (comprehension)', () => {
+    const engine = new ComputeEngine();
+    engine.assign(
+      'C',
+      engine.parse('[k^2 \\operatorname{for} k=1..3]').evaluate()
+    );
+
+    expect(engine.symbol('C').json).toEqual('C');
+    expect(engine.symbol('C').latex).toEqual('C');
+    expect(engine.symbol('C').toString()).toEqual('C');
+    expect(engine.symbol('C').evaluate().toString()).toEqual('[1,4,9]');
+  });
+
+  test('lazy collection EXPRESSIONS still materialize', () => {
+    const engine = new ComputeEngine();
+    expect(engine.box(['Range', 1, 5]).toString()).toEqual('[1,2,3,4,5]');
+    expect(
+      engine.parse('[k^2 \\operatorname{for} k=1..3]').toString()
+    ).toEqual('[1,4,9]');
+    const joined = engine.box(['Join', ['List', 1, 2], ['List', 3]]).evaluate();
+    expect(joined.isLazyCollection).toBe(true);
+    expect(joined.toString()).toEqual('[1,2,3]');
+    expect(joined.latex).toEqual('\\bigl\\lbrack1, 2, 3\\bigr\\rbrack');
   });
 });

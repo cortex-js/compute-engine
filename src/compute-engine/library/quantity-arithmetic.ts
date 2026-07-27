@@ -256,6 +256,45 @@ export function quantityMultiply(
 }
 
 /**
+ * Post-numericization re-dispatch for `Add`/`Multiply` (Tycho item 101).
+ *
+ * The Quantity check in the `Add`/`Multiply` evaluate handlers runs against
+ * the operands as returned by `evaluate()`.  An operand that only BECOMES a
+ * Quantity under numeric approximation is invisible to that check, so
+ * `addN`/`mulN` leave the fold undone — the same structural gap as the
+ * Measurement one closed by `foldMeasurementOperands`, and the same fix:
+ * `addN`/`mulN` numericize their operands, so the Quantity IS visible in the
+ * result they return; fold it here so the FIRST `.N()` yields a Quantity.
+ *
+ * Checked BEFORE the Measurement fold at the call sites, mirroring the
+ * handlers' precedence for mixed operands (`quantityAdd`/`quantityMultiply`
+ * route Measurement-carrying magnitudes through the measurement combinators
+ * themselves).  The result shape mirrors the handlers' numeric-approximation
+ * branch: a Quantity wrapping a Measurement magnitude is `.N()`-ed, a plain
+ * Quantity is already numeric and returned as-is.
+ *
+ * Keyed off the RESULT's operator, not the caller's: `addN` may return a
+ * `Multiply` (`q + q` → `2·q`).  Returns `undefined` when there is nothing to
+ * fold, which is the hot path (a plain numeric sum returns a number literal,
+ * rejected by the operator test alone).
+ */
+export function foldQuantityOperands(
+  ce: ComputeEngine,
+  expr: Expression
+): Expression | undefined {
+  const operator = expr.operator;
+  if (operator !== 'Add' && operator !== 'Multiply') return undefined;
+  if (!isFunction(expr)) return undefined;
+  const ops = expr.ops;
+  if (!ops.some((x) => isQuantity(x))) return undefined;
+  const r =
+    operator === 'Add' ? quantityAdd(ce, ops) : quantityMultiply(ce, ops);
+  if (r === undefined) return undefined;
+  if (isQuantity(r) && isMeasurement(r.op1)) return r.N();
+  return r;
+}
+
+/**
  * Divide two expressions where at least one is a Quantity.
  */
 export function quantityDivide(

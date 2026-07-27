@@ -250,8 +250,10 @@ export abstract class _BoxedExpression implements Expression {
   /** Object.toString() */
   toString(): string {
     try {
-      // If this is a lazy collection, we need to force evaluation
-      if (this.isLazyCollection) {
+      // If this is a lazy collection, we need to force evaluation.
+      // Exception: a symbol always serializes as its name — its spelling must
+      // not depend on what the name currently holds (Tycho item 100).
+      if (this.isLazyCollection && this.symbol === undefined) {
         const materialized = this.evaluate({ materialization: true });
         if (!materialized.isLazyCollection) return toAsciiMath(materialized);
       }
@@ -289,8 +291,11 @@ export abstract class _BoxedExpression implements Expression {
     // (`body \operatorname{for} x = domain`). Materializing it would replace
     // it with an elided preview List (e.g. `[1, 4, …, 62500]`) that re-parses
     // to a corrupt finite List, so serialize it directly instead.
+    // Exception: a symbol always serializes as its name — its spelling must
+    // not depend on what the name currently holds (Tycho item 100).
     if (
       this.isLazyCollection &&
+      this.symbol === undefined &&
       !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator)
     ) {
       const materialized = this.evaluate({ materialization: true });
@@ -328,9 +333,12 @@ export abstract class _BoxedExpression implements Expression {
     // supplied `materialization` option (documented: `true` materializes all
     // elements, a number bounds the preview) takes precedence over the
     // faithful-head exemption.
+    // A symbol always serializes as its name — its spelling must not depend
+    // on what the name currently holds (Tycho item 100).
     const explicitMaterialization = options?.materialization !== undefined;
     if (
       this.isLazyCollection &&
+      this.symbol === undefined &&
       (explicitMaterialization || !LATEX_FAITHFUL_LAZY_HEADS.has(this.operator))
     ) {
       const materialized = this.evaluate({

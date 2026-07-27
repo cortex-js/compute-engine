@@ -1317,12 +1317,85 @@ export class BaseCompiler {
     const def = engine.lookupDefinition(h);
     if (!isOperatorDef(def) || def.operator.broadcastable !== true) return null;
 
-    // Comparison and logical heads are also `broadcastable`, but they return
-    // booleans; element-wise boolean-over-list has no compile coverage and is
-    // handled by the separate collection-condition guard (which fails closed).
-    // Restrict broadcasting to numeric element-wise operators.
-    if (isRelationalOperator(h) || BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h))
-      return null;
+    // The ordering relations and the logical connectives broadcast too (they
+    // return booleans rather than numbers, which is immaterial to the closure
+    // below — `_SYS.bcast` maps whatever the scalar codegen returns). Two
+    // relational shapes are NOT element-wise and stay excluded:
+    //
+    //  - `Equal`/`NotEqual` over two collections is WHOLE-COLLECTION equality
+    //    in the interpreter (`Equal([1,2,3],[1,9,3])` is the scalar `False`,
+    //    not `[True,False,True]`). They lower to the interpreter-faithful
+    //    `_SYS.eq`/`_SYS.neq` dispatch, which already handles the list-vs-
+    //    scalar element-wise case; broadcasting here would replace that scalar
+    //    with a list.
+    //  - a CHAINED ordering (`a < b < c`) is a pairwise `&&` conjunction, only
+    //    sound over scalar booleans. Keep it failing closed (D6).
+    //
+    // Heads with no JavaScript codegen (`Xor`, `Nand`, `Implies`, …) decline
+    // below at the `target.functions` lookup, so they are unaffected.
+    if (h === 'Equal' || h === 'NotEqual') return null;
+    if (isRelationalOperator(h) && args.length > 2) return null;
+
+    // For the boolean heads only, every collection-ish operand must PROVABLY
+    // compile to a JS array. A list TYPE is not enough: `q(L)` with
+    // `q: t ↦ n·t+1` types `list<unknown>` (the type system applies the
+    // broadcast lift) yet its compiled callee emits the SCALAR body `n*t+1`,
+    // which JS evaluates to NaN on an array — a pre-existing divergence
+    // (compiled NaN vs interpreted `[5,9,13]`), since a user function does not
+    // broadcast when compiled.
+    //
+    // Arithmetic tolerates that: NaN is the inert projection and stays NaN
+    // through `+`/`·`. A COMPARISON does not — `NaN < 10` is an ordinary
+    // `false`, so the wrong answer stops looking wrong (`q(L) < y` would answer
+    // a scalar `false` where the interpreter answers `[True,True,False]`).
+    //
+    // Array-ness is provable for a concrete collection, a list-typed SYMBOL
+    // (a parameter, which the caller supplies as a JS array), and an
+    // application of a BUILT-IN `broadcastable` head over such an operand —
+    // that one re-enters this method and broadcasts through `_SYS.bcast`
+    // itself, which is what makes the Desmos mask `|L-2| > 0` sound.
+    if (isRelationalOperator(h) || BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h)) {
+      const compilesToArray = (a: Expression): boolean => {
+        // A TUPLE is an atomic point/vector, never a broadcast source — the
+        // interpreter excludes it (`isBroadcastParticipant`,
+        // `skipBroadcastForVectorOps`) and leaves `Less(Tuple(1,2), 3)` inert.
+        // It lowers to a JS array all the same, so admitting it here compiled
+        // that inert comparison into `[true, true]`.
+        //
+        // This test MUST stay ahead of the two below, and `isTuple` must stay
+        // TYPE-based: `tuple<real,real>` matches `indexed_collection`, so a
+        // tuple-TYPED symbol (`p: tuple<real,real>`) would otherwise be admitted
+        // by the symbol branch, and a concrete tuple by the `isCollection`
+        // branch. Reordering these reintroduces the bug.
+        if (isTuple(a)) return false;
+        if (a.isCollection) return true;
+        if (isSymbol(a))
+          return a.type.matches('list') || a.type.matches('indexed_collection');
+        if (isFunction(a)) {
+          const d = engine.lookupDefinition(a.operator);
+          // A USER function's body is compiled as scalar code; only a built-in
+          // broadcastable head lowers through the element-wise path.
+          if (!isOperatorDef(d) || d.operator.broadcastable !== true)
+            return false;
+          return (a.ops ?? []).some(compilesToArray);
+        }
+        return false;
+      };
+      // Nothing provably array: ordinary scalar code, or an operand whose
+      // array-ness is unprovable — either way, leave it to the scalar /
+      // fail-closed path.
+      if (!args.some(compilesToArray)) return null;
+      // A collection-ish operand alongside a provable array (`q(L) < M`) would
+      // be broadcast against as if it were a scalar. Fail closed.
+      if (
+        args.some(
+          (a) =>
+            !compilesToArray(a) &&
+            (a.type.matches('collection') || isBoundPossiblyCollectionTyped(a))
+        )
+      )
+        return null;
+    }
 
     // A user `operators` override that lowers the head to a *function call*
     // (an identifier like `add(...)`, not a symbolic infix `+`) takes
@@ -1474,7 +1547,39 @@ export class BaseCompiler {
     const compiledArgs = args
       .map((a) => BaseCompiler.compile(a, target))
       .join(', ');
-    return `_SYS.bcast((${params.join(', ')}) => ${scalarBody}, ${compiledArgs})`;
+    const body = BaseCompiler.guardConnectiveAbsence(h, params, scalarBody);
+    return `_SYS.bcast((${params.join(', ')}) => ${body}, ${compiledArgs})`;
+  }
+
+  /**
+   * Make a broadcast connective's scalar body absence-aware.
+   *
+   * `_SYS.bcast` represents an empty or mismatched position as NaN, but the
+   * connectives lower to raw JavaScript `!`, `&&` and `||`, which coerce it:
+   * `!NaN` is `true` and `NaN || false` is `false`, so an error position came
+   * back out as an ordinary — and wrong — truth value once a second connective
+   * consumed it. The interpreter instead ABSORBS (`And(False, <error>)` is
+   * `False`, `Or(True, <error>)` is `True`) and otherwise propagates the error.
+   * This reproduces both halves: a dominant operand wins, else any absent
+   * operand makes the result absent, else the head's own codegen runs.
+   *
+   * Only the connectives need it. An ordering already agrees — `NaN < 3` is
+   * `false`, which is how the interpreter reads a NaN operand (IEEE). What it
+   * cannot distinguish is a NaN that stands for an ERROR rather than a numeric
+   * NaN; separating those needs a sentinel carried through nested broadcasts,
+   * recorded as residue in ROADMAP.md rather than papered over here.
+   */
+  private static guardConnectiveAbsence(
+    h: string,
+    params: ReadonlyArray<string>,
+    body: string
+  ): string {
+    if (h !== 'And' && h !== 'Or' && h !== 'Not') return body;
+    const absent = params.map((p) => `${p} !== ${p}`).join(' || ');
+    if (h === 'Not') return `((${absent}) ? NaN : ${body})`;
+    const dominant = h === 'And' ? 'false' : 'true';
+    const wins = params.map((p) => `${p} === ${dominant}`).join(' || ');
+    return `((${wins}) ? ${dominant} : ((${absent}) ? NaN : ${body}))`;
   }
 
   /**

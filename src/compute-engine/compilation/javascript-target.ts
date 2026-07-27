@@ -2658,9 +2658,23 @@ function bcast(
   ...args: BcastValue[]
 ): BcastValue {
   let n = -1;
-  for (const a of args)
-    if (Array.isArray(a)) n = n < 0 ? a.length : Math.min(n, a.length);
+  for (const a of args) {
+    if (!Array.isArray(a)) continue;
+    if (n < 0) n = a.length;
+    // Length mismatch: the interpreter answers `incompatible-dimensions`
+    // (2026-07-24 ruling — no truncation, no recycling), which projects onto a
+    // real target as NaN, exactly as `matmul` projects a dimension mismatch.
+    // Truncating to the shortest operand is what used to make compiled
+    // `Less([1,2,3],[2,2])` answer `[true,false]` where interpretation errors.
+    else if (a.length !== n) return NaN;
+  }
   if (n < 0) return f(...args);
+  // An EMPTY position broadcasts to `Nothing` in the interpreter, not to an
+  // empty list — `Not([])` is `Nothing` (NaN here), and in a nested operand
+  // (`Not([[], [True]])` → `[Nothing, [False]]`) only that position is
+  // projected. Recursing per position is what keeps a sibling from being
+  // poisoned by it.
+  if (n === 0) return NaN;
   const out: BcastValue[] = new Array(n);
   for (let i = 0; i < n; i++)
     out[i] = bcast(f, ...args.map((a) => (Array.isArray(a) ? a[i] : a)));
@@ -2959,7 +2973,16 @@ const SYS_HELPERS = {
   add: (a: BcastValue, b: BcastValue): BcastValue =>
     bcast((x, y) => (x as number) + (y as number), a, b),
   chop,
-  factorial,
+  // `x! = Γ(x+1)`, matching the interpreter's `Factorial` evaluate handler.
+  // The shared `factorial()` helper is integer-only (it returns NaN for a
+  // non-integer), so a non-integer argument goes through Γ instead —
+  // `(-1/2)! = Γ(1/2) = √π`, not NaN (Tycho item 99). The non-negative
+  // integer fast path is unchanged (including `n ≥ 170 → Infinity`).
+  // A negative *integer* is a pole of Γ(x+1): the interpreter returns
+  // ComplexInfinity, which a real target projects to NaN (the same value
+  // compiled `~oo` yields), so poles stay NaN.
+  factorial: (x: number): number =>
+    Number.isInteger(x) ? (x < 0 ? NaN : factorial(x)) : gamma(x + 1),
   factorial2,
   gamma,
   gcd,
@@ -4590,6 +4613,26 @@ function referencesVarsSymbol(
 }
 
 /**
+ * Wall-clock budget for one `Integrate` node's antiderivative-first attempt.
+ *
+ * The attempt is an **optimization** — every integral it declines still
+ * compiles, via the quadrature emitter below — so it must never be able to
+ * stall a compilation. Compilation establishes no deadline of its own, and
+ * since `ce.timeLimit` was retired (`docs/TIMEOUT-MODEL.md` §5) work outside a
+ * span runs unbounded: relying on "the enclosing span, if any" meant the
+ * default (no span) case could spin forever. So the attempt arms its own span.
+ *
+ * Per §3.4 nesting is `min()`, so an enclosing consumer span that is tighter
+ * still preempts this budget — this can only shorten, never extend, a caller's
+ * bound.
+ *
+ * Sized against the slowest symbolic resolution in the compile-integrate
+ * suite (~200 ms on a warm engine), with ~10× headroom for slow CI, so no
+ * integral that legitimately closes is pushed onto quadrature.
+ */
+const ANTIDERIVATIVE_ATTEMPT_BUDGET_MS = 2000;
+
+/**
  * Compile `Integrate(f, (x, a, b))`.
  *
  * **Antiderivative-first.** The integral is first resolved symbolically via
@@ -4597,12 +4640,12 @@ function referencesVarsSymbol(
  * closes to a form free of any residual `Integrate` — e.g. a plotted
  * `∫₀ˣ f(t) dt` whose closed form is a function of the free bound `x` — that
  * straight-line expression is compiled directly, so each sample costs ~µs
- * instead of a full quadrature. The symbolic attempt is bounded by the engine
- * deadline (the enclosing `withTimeLimit` span, if any), so a
- * non-elementary integrand
- * degrades to quadrature rather than hanging. Skipped when the integral
- * references a `vars`-mapped symbol, which must survive to run time as a live
- * input (the vars contract) rather than be folded into a baked closed form.
+ * instead of a full quadrature. The symbolic attempt runs under its own
+ * `ANTIDERIVATIVE_ATTEMPT_BUDGET_MS` span (tightened further by an enclosing
+ * span, never extended), so a non-elementary integrand degrades to quadrature
+ * rather than hanging. Skipped when the integral references a `vars`-mapped
+ * symbol, which must survive to run time as a live input (the vars contract)
+ * rather than be folded into a baked closed form.
  *
  * **Quadrature fallback.** Otherwise the compiled definite integral defaults to
  * **deterministic adaptive Gauss–Kronrod (GK15)**: near machine precision on
@@ -4622,7 +4665,14 @@ function compileIntegrate(
   // one (and does not reference a `vars`-mapped symbol, which must not fold).
   if (!referencesVarsSymbol(args, target)) {
     try {
-      const closed = args[0].engine._fn('Integrate', [...args]).evaluate();
+      const engine = args[0].engine;
+      const closed = engine.withTimeLimit(
+        {
+          ms: ANTIDERIVATIVE_ATTEMPT_BUDGET_MS,
+          label: 'compile:antiderivative',
+        },
+        () => engine._fn('Integrate', [...args]).evaluate()
+      );
       if (!closed.has('Integrate') && closed.isValid && closed.isNaN !== true)
         // Parenthesize: the closed form can be a low-precedence expression
         // (e.g. an `Add`), whereas the caller splices this handler's result as

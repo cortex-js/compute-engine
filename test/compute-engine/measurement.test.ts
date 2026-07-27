@@ -543,3 +543,125 @@ describe('Measurement — numeric projection (Tycho item 95)', () => {
     expect(f.sgn).toBeUndefined();
   });
 });
+
+describe('Measurement — n-ary fold on the FIRST .N() (Tycho item 101)', () => {
+  // `Add`/`Multiply` are lazy: their evaluate handler checks for a Measurement
+  // operand against `ops.map((x) => x.evaluate())`. Numeric quadrature only
+  // produces a Measurement under numeric approximation (`Integrate` evaluates
+  // to the symbolic `1 - cos(1)`), so on the first `.N()` that check saw none
+  // and the sum stayed an inert `Add`/`Multiply` with a Measurement operand —
+  // `.re` NaN, the item-95 dead numeric read one level up. A second `.N()`
+  // folded it, which is what made it a first-pass bug rather than a missing
+  // feature. Every unary/binary head (`Negate`, `Divide`, `Sqrt`, `Sin`, …)
+  // was already correct: those handlers are non-lazy, so the driver hands
+  // them operands already numericized to a Measurement.
+  const integral = '\\int_0^1 \\sin(x) dx';
+  const quadrature = 1 - Math.cos(1); // 0.45969769413186023
+
+  test.each([
+    [`1 + ${integral}`, 1 + quadrature],
+    [`1 - ${integral}`, 1 - quadrature],
+    [`2${integral}`, 2 * quadrature],
+    [`${integral} \\times 2`, 2 * quadrature],
+    [`\\frac{${integral}}{2}`, quadrature / 2],
+    [`${integral} + ${integral}`, 2 * quadrature],
+  ])('%s folds to a Measurement on the first .N()', (latex, expected) => {
+    const once = ce.parse(latex).N();
+    expect(once.operator).toBe('Measurement');
+    expect(once.re).toBeCloseTo(expected, 12);
+    // The uncertainty is real and propagated, not a collapsed zero.
+    expect(error(once)).toBeGreaterThan(0);
+  });
+
+  test('a second .N() is a fixed point, not the fold', () => {
+    const once = ce.parse(`1 + ${integral}`).N();
+    const twice = once.N();
+    expect(twice.operator).toBe('Measurement');
+    expect(twice.op1.isSame(once.op1)).toBe(true);
+    expect(twice.op2.isSame(once.op2)).toBe(true);
+  });
+
+  test('the parse route matches the box route exactly (value and error)', () => {
+    // `ce.box(['Add', <already a Measurement>, …])` always folded — the box
+    // route hands the handler an operand that is a Measurement before
+    // evaluation. The fix makes the parse route agree, error bars included.
+    const m = ce.parse(integral).N();
+
+    const boxSum = ce.box(['Add', m, 1]).N();
+    const parseSum = ce.parse(`1 + ${integral}`).N();
+    expect(parseSum.operator).toBe('Measurement');
+    expect(parseSum.op1.isSame(boxSum.op1)).toBe(true);
+    expect(parseSum.op2.isSame(boxSum.op2)).toBe(true);
+
+    const boxProduct = ce.box(['Multiply', m, 2]).N();
+    const parseProduct = ce.parse(`2${integral}`).N();
+    expect(parseProduct.operator).toBe('Measurement');
+    expect(parseProduct.op1.isSame(boxProduct.op1)).toBe(true);
+    expect(parseProduct.op2.isSame(boxProduct.op2)).toBe(true);
+  });
+
+  test('evaluate() keeps the exact symbolic antiderivative (no Measurement)', () => {
+    // `Integrate` has a closed form here, so `evaluate()` never reaches
+    // quadrature and no Measurement is involved: the exactness contract wins.
+    const exact = ce.parse(`1 + ${integral}`).evaluate();
+    expect(exact.operator).not.toBe('Measurement');
+    expect(exact.N().re).toBeCloseTo(1 + quadrature, 12);
+  });
+
+  test('ordinary sums and products are untouched', () => {
+    // The fold only fires on a Measurement operand; exact and symbolic
+    // arithmetic must not be dragged onto a numeric path.
+    expect(ce.parse('1 + \\sqrt2').evaluate().toString()).toBe('1 + sqrt(2)');
+    expect(ce.parse('2x + 3x').N().toString()).toBe('5x');
+    expect(ce.parse('0.5 x').N().toString()).toBe('0.5 * x');
+    expect(ce.parse('2 \\times 3 \\times 4').N().re).toBe(24);
+  });
+});
+
+describe('Quantity — n-ary fold on the FIRST .N() (Tycho item 101 sibling)', () => {
+  // The `Quantity` check in the `Add`/`Multiply` handlers has the same
+  // structural blind spot as the Measurement one: it runs against
+  // `ops.map((x) => x.evaluate())`, so an operand that only BECOMES a
+  // Quantity under numeric approximation is invisible to it, and the sum
+  // stays an inert `Add`/`Multiply`. No built-in operator currently takes
+  // that route (quadrature produces Measurement, not Quantity), so the gap
+  // is exercised with declared operators whose evaluate handler yields a
+  // Quantity only under `numericApproximation` — the same latent shape.
+  // Two DISTINCT operators with different units: identical operands would
+  // let `addN` merge like terms (`QN() + QN()` → `2·QN()`) and fold through
+  // `quantityMultiply` instead, bypassing the `quantityAdd` dispatch.
+  const qce = new ComputeEngine();
+  qce.declare('QN', {
+    signature: '() -> unknown',
+    evaluate: (_ops, { numericApproximation, engine }) =>
+      numericApproximation ? engine.expr(['Quantity', 1.5, 'm']) : undefined,
+  });
+  qce.declare('QM', {
+    signature: '() -> unknown',
+    evaluate: (_ops, { numericApproximation, engine }) =>
+      numericApproximation ? engine.expr(['Quantity', 25, 'cm']) : undefined,
+  });
+
+  test('Add of two numeric-only Quantities folds on the first .N()', () => {
+    // Mixed cm/m proves the fold ran genuine `quantityAdd` unit conversion.
+    const r = qce.box(['Add', ['QN'], ['QM']]).N();
+    expect(r.operator).toBe('Quantity');
+    expect(r.op1.re).toBeCloseTo(1.75, 12);
+    expect(toAsciiMath(r.op2)).toBe('m');
+  });
+
+  test('scalar × numeric-only Quantity folds on the first .N()', () => {
+    const r = qce.box(['Multiply', 2, ['QN']]).N();
+    expect(r.operator).toBe('Quantity');
+    expect(r.op1.re).toBeCloseTo(3, 12);
+    expect(toAsciiMath(r.op2)).toBe('m');
+  });
+
+  test('the pre-existing eager route still folds (guard)', () => {
+    // A literal Quantity operand is visible to the handler's own check; the
+    // new fold must not disturb that path.
+    const r = qce.box(['Add', ['Quantity', 2, 'm'], ['Quantity', 3, 'm']]).N();
+    expect(r.operator).toBe('Quantity');
+    expect(r.op1.re).toBeCloseTo(5, 12);
+  });
+});

@@ -1033,12 +1033,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // small point lists); past it, the transpose is the lazy `Map` form —
       // consumable via `at`/`each`/`count` — so a large point list is no
       // longer materialized (and re-materialized per coordinate projection).
+      // `strictLengths: false` — `PointList` ZIPS its components rather than
+      // broadcasting an operator over them, and its shortest-zip is a ratified
+      // consumer contract (Tycho item 52): `PointList([1,2,3],[10,20])` is two
+      // points, and a ragged lazy transpose projects to the shorter length. The
+      // 2026-07-24 length-mismatch ruling governs operator broadcasts, not this
+      // constructor, so it opts out explicitly.
       return broadcastOverIndexedCollections(
         ce,
         'Tuple',
         ops,
         numericApproximation ?? false,
-        true
+        true,
+        false
       );
     },
     // No `eq` handler: a definitive structural comparison would make

@@ -367,6 +367,21 @@ function isPyCollectionOperand(e: Expression): boolean {
  * `_op` selects the op: `'max'`→`np.maximum`, `'min'`→`np.minimum`,
  * `'clip'`→`np.clip(x, lo, hi)`.
  *
+ * A length mismatch (and an empty operand alongside a non-empty one) yields
+ * `nan`, matching the interpreter's `incompatible-dimensions` error projected
+ * onto a numeric target, and the JavaScript `_SYS.bcast`. The helper used to
+ * zip-to-shortest, mirroring the interpreter of the time; the 2026-07-24 ruling
+ * replaced truncation with an error everywhere, so trimming here would now
+ * reproduce a behavior the interpreter no longer has.
+ *
+ * The check recurses PER POSITION rather than testing the outer dimension only.
+ * NumPy would otherwise recycle a mismatched inner dimension — `(2,2)` against
+ * `(2,1)` broadcasts silently — where the interpreter reports each row's
+ * mismatch, giving `[nan, nan]` and not a whole-result `nan`. The vectorized
+ * NumPy call is kept as a fast path for the common case where every
+ * participating array has exactly the same shape (scalars still lift), since no
+ * recycling is possible there.
+ *
  * This helper is **op-name-keyed** (a fixed set of NumPy routines), not a
  * generic scalar-closure broadcaster like the JavaScript target's `_SYS.bcast`.
  * So it does NOT cover arithmetic (`+`/`*`/…) over a possibly-collection-typed
@@ -378,20 +393,29 @@ function isPyCollectionOperand(e: Expression): boolean {
  * `base-compiler` therefore FAILS CLOSED (D6) on that shape — the engine falls
  * back to the interpreter — rather than emitting binding-dependent output.
  */
-const PYTHON_BCAST_HELPER = `def _ce_bcast(_op, *args):
-    _arrs = [np.asarray(a) for a in args]
-    _lens = [a.shape[0] for a in _arrs if a.ndim > 0]
-    if _lens:
-        _n = min(_lens)
-        _arrs = [a[:_n] if a.ndim > 0 else a for a in _arrs]
+const PYTHON_BCAST_HELPER = `def _ce_bcast_apply(_op, _arrs):
     if _op == 'clip':
-        _r = np.clip(_arrs[0], _arrs[1], _arrs[2])
-    else:
-        _pair = np.maximum if _op == 'max' else np.minimum
-        _r = _arrs[0]
-        for _a in _arrs[1:]:
-            _r = _pair(_r, _a)
-    return np.asarray(_r)
+        return np.clip(_arrs[0], _arrs[1], _arrs[2])
+    _pair = np.maximum if _op == 'max' else np.minimum
+    _r = _arrs[0]
+    for _a in _arrs[1:]:
+        _r = _pair(_r, _a)
+    return _r
+
+def _ce_bcast(_op, *args):
+    _arrs = [np.asarray(a) for a in args]
+    _cols = [a for a in _arrs if a.ndim > 0]
+    if not _cols:
+        return np.asarray(_ce_bcast_apply(_op, _arrs))
+    _n = _cols[0].shape[0]
+    if any(a.shape[0] != _n for a in _cols) or _n == 0:
+        return np.asarray(float('nan'))
+    if all(a.shape == _cols[0].shape for a in _cols):
+        return np.asarray(_ce_bcast_apply(_op, _arrs))
+    return np.asarray([
+        _ce_bcast(_op, *[(a[_i] if a.ndim > 0 else a) for a in _arrs])
+        for _i in range(_n)
+    ])
 `;
 
 /**
@@ -926,7 +950,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Erfc: 'scipy.special.erfc',
   Gamma: 'scipy.special.gamma',
   GammaLn: 'scipy.special.loggamma',
-  Factorial: 'scipy.special.factorial',
+  // `x! = Γ(x+1)`, matching the interpreter and the JavaScript target.
+  // `scipy.special.factorial` is integer-only — it returns 0 for a negative or
+  // non-integer argument — so `(-1/2)!` came out 0 instead of Γ(1/2) = √π
+  // (Tycho item 99). `scipy.special.gamma` agrees with `factorial` on the
+  // non-negative integers (both go through Γ for `exact=False`).
+  Factorial: ([x], compile) => {
+    if (x === null) throw new Error('Factorial: no argument');
+    return `scipy.special.gamma((${compile(x)}) + 1)`;
+  },
   // Regularized upper incomplete gamma Q(a, z); scipy's argument order matches
   // ours directly.
   GammaRegularized: 'scipy.special.gammaincc',

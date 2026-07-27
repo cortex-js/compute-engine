@@ -89,99 +89,72 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
-### Element-wise compiled comparisons and connectives (PRIORITIZED 2026-07-24)
+### Broadcast semantics residue (element-wise lowering landed 2026-07-26)
 
-The ordering relations (`<`, `<=`, `>`, `>=`) and the logical connectives
-(`And`, `Or`, `Not`) **fail closed** on the JavaScript target when an operand
-may be a collection at run time, so those expressions fall back to the
-interpreter (which is correct). Compiling them element-wise is the open item.
+The element-wise compiled lowering shipped, and with it the two interpreter
+rulings it depended on (record in `CHANGELOG.md`). The ordering relations and
+the logical connectives now broadcast on the JavaScript target through
+`_SYS.bcast`; broadcast operands are evaluated ONCE; and a length mismatch is
+`incompatible-dimensions` across the eager zip, the arithmetic broadcast and
+the lazy form, instead of a silent zip-to-shortest. (`PointList` opts out by
+design — it zips components rather than broadcasting an operator, and its
+shortest-zip is a consumer contract.) Genuinely remaining:
 
-**Prioritized** (was: deferred 2026-07-22). Two things changed. The
-missing-value typing work settled per-position absence semantics, which is most
-of the first withdrawn-implementation problem below. And a second consumer
-witness arrived: Tycho item 86 — a helper declared with a wide return type made
-an ordinary *scalar* comparison uncompilable, and the workaround they shipped
-is sound only under an invariant of their own pipeline. Both witnesses are the
-same asymmetry: compiled arithmetic broadcasts, compiled comparisons refuse.
+- **An operand whose length is not yet KNOWN is not compared.** The check reads
+  `count`, so a participant reporting `undefined` (a symbolic-length `Range`
+  before its bound resolves, an operand held raw by a lazy operator) is skipped
+  and the broadcast proceeds. It is the lazy `Map` that then zips those, and
+  the variadic `Map` uses shortest-input semantics — so a mismatch that only
+  becomes visible after the length resolves can still truncate silently.
+  Diagnosing it means a strict lazy zipper that reports
+  `incompatible-dimensions` when one participant ends before another, which is
+  a change to `Map` iteration, not to this check. (An *infinite* operand is
+  already caught: `count` is `Infinity`, which mismatches any finite length.)
+- **A compiled ordering cannot tell an ERROR operand from a numeric NaN.** Both
+  are NaN at the ABI, and `NaN < 3` is `false` — which is right for a numeric
+  NaN (IEEE) but wrong for an error, where the interpreter stays an error. The
+  connectives are guarded (`guardConnectiveAbsence`), because there JS coercion
+  produced a plainly wrong truth value (`!NaN` → `true`); the orderings would
+  need a distinct absence sentinel carried through nested broadcasts to do
+  better.
 
-**The item-86 half is RESOLVED (2026-07-24)** — a compile-time scalar
-look-through (`isProvablyScalarApplication`, `javascript-target.ts`) admits a
-comparison/connective over a user-function application when the arguments are
-scalar-ish and the body provably maps scalars to a scalar (conservative
-whitelist; `q(L) < y` still fails closed). What remains of this entry is the
-element-wise lowering itself, which still needs the semantics rulings below.
+**Adjacent, pre-existing, and worth its own round — `Multiply` over MIXED
+collection kinds produces a cartesian nest.** Not a length problem: it misfires
+at matched lengths, and `Add` on the identical operands is element-wise.
+Measured on the published 0.96.0 bundle, so it predates the element-wise work:
 
-Note the scalar path is **not** at stake here — this lowering fires only where
-compilation today throws, so it costs nothing on ordinary scalar comparisons.
-(The runtime-guard cost belongs to the *Complex values in compiled scalar
-comparisons* item below, which is a different change and stays deferred.)
+```
+[1,2,3] · [4,5,6]        [4,10,18]                        element-wise
+[1...3] · [4,5,6]        [[4,8,12],[5,10,15],[6,12,18]]   3×3 nest
+Range(1,3) · Range(1,3)  [1,4,9]                          element-wise
+Range(1,3) · [1,2,3]     [[1,2,3],[2,4,6],[3,6,9]]        3×3 nest
+Range(1,3) + [1,2,3]     [2,4,6]                          element-wise
+```
 
-**The semantics are now RULED (user-ratified 2026-07-24)** — both align the
-comparison/connective broadcast with what the arithmetic broadcast already
-does (measured beforehand: arithmetic evaluates an impure scalar operand
-once and errors on length mismatch; comparisons re-evaluated per element and
-silently truncated — `Less([1,2,3],[2,2])` → `[True, False]`):
+The trigger is the operand NODE KINDS disagreeing — a `List` literal against a
+`Range`/`Filter`/`Take`/`Reverse` result — so `mulTensors` recognizes only one
+of them and the fallback distributes the list over the list instead of zipping.
+Same-kind pairs are fine either way. The Desmos-style surface `[1...n] · L` hits
+it directly. Separately, two mismatched `List` literals leave `Multiply`
+symbolic (`[1,2,3] * [2,2]`) where `Add` reports `incompatible-dimensions` — so
+`Multiply` never truncated, but it never diagnosed either.
 
-1. **Purity: broadcast operands are evaluated ONCE**, then the operation maps
-   over cells (the NumPy/Julia/R model — broadcasting is an operation on
-   values). `L < Random()` draws one number. Per-cell draws are written
-   explicitly: `Map(L, l ↦ l < Random())`. The current per-element
-   re-evaluation in `broadcastComparison` is an implementation artifact, not
-   a semantic. Breaking surface: impure *scalar* operands under
-   comparison/connective broadcast only.
-2. **Length mismatch is an ERROR** (`incompatible-dimensions`), exactly like
-   the arithmetic broadcast and the boolean-mask ruling. No truncation, no
-   recycling. Scalar-vs-list is the lift, not a mismatch. A lazy/unbounded
-   operand against a finite one errors on the count comparison (no
-   materialization); unbounded-vs-unbounded declines as today. This also
-   dissolves the pre-scan/suffix-inspection concern below: under strict-zip
-   the length check is O(1) and no element is inspected out of order.
-
-**Sequencing: the gate has CLEARED (2026-07-26).** The condition was not to
-stack a third comparison-semantics shift onto the missing-value adoption; that
-batch shipped in 0.94.0 and two releases have followed it. Implement the
-interpreter ruling changes AND the element-wise lowering together, as one batch
-in a single release, so consumers see one comparison-semantics change rather
-than two. Breaking surface to call out in the CHANGELOG: impure *scalar*
-operands under comparison/connective broadcast are now drawn once, and a length
-mismatch that used to truncate (`Less([1,2,3],[2,2])` → `[True, False]`) is now
-`incompatible-dimensions`.
-
-Background: these heads lower to raw JS infix operators, which are silently
-wrong on an array — `0 < [1,0,1]` stringifies it to `"1,0,1"` and yields a
-scalar `false`, and an array is truthy, so `m1 && m2` returns a whole operand
-and `!m` returns `false`. The fix that shipped only stops the wrong answer; it
-does not add broadcasting. The user-visible cost is the Desmos filter form
-`L[|[1...n]-k|>0]`, which now interprets instead of compiling.
-
-A `_SYS.bcast`-based element-wise lowering was implemented and **withdrawn**
-after review — it got three things wrong, all of which a real implementation
-must handle:
-
-- **Per-POSITION projection.** An empty or complex position must not poison its
-  siblings. `Not([[], [True]])` broadcasts to `[[], [false]]`; the interpreter
-  projects only the empty position to `Nothing`/NaN, whereas a whole-result
-  post-scan collapsed everything to a scalar NaN. *Largely settled by the
-  missing-value work:* absence is now per-position by construction (IEEE over
-  `NaN`, Kleene over the `Missing` symbol — see the Kleene-absence residue
-  entry), so a broadcast comparison inherits the per-cell rule instead of
-  needing its own. What remains is honoring it in the compiled lowering rather
-  than post-scanning the result.
-- **Shortest-length truncation.** `bcast` truncates to the shortest operand, so
-  a pre-scan over all operands inspects suffix elements that interpretation
-  never evaluates.
-- **Purity.** A broadcast operand is evaluated once and reused per element,
-  while the interpreter re-evaluates per element — so a repeated impure
-  *scalar* (`And([T,T], Random() < 0.5)`) diverges. But an impure operand that
-  *is* the collection being traversed (`Less([Random(), Random()], 0.5)`) is
-  safe; a guard must distinguish them. Note the interpreter is itself
-  inconsistent here: the arithmetic broadcast path evaluates such a scalar only
-  once. **Settle the interpreter's semantics before matching them.**
-
-Adjacent, and worth doing with it: `Not([])` compiles through the unary `.map`
-broadcast to `[]`, whereas the interpreter yields `Nothing` (→ NaN). Only
-`Not` is affected in practice — the numeric unary heads type-error on a
-`list<nothing>` operand.
+Deliberately NOT folded into the element-wise change: the fix is in the
+`mul()`/`mulTensors` rank dispatch, which carries its own ratified rules
+(vector·vector = element-wise, runtime rank-dispatch) and is the hottest
+symbolic path — it needs its own snapshot blast-radius measurement and review.
+- **A user-function application over a collection argument mis-compiles.**
+  `q(L)` with `q: t ↦ n·t+1` interprets to `[5,9,13]` but compiles to NaN: the
+  callee emits its body as SCALAR code, so the array argument coerces. This
+  predates the element-wise work and is why the boolean heads require an
+  operand that provably compiles to an array (a comparison would turn that NaN
+  into a plausible `false`). Fixing it means compiling a user function's body
+  under a broadcast, which is a larger change than this item was.
+- **Python still fails closed** for comparisons/connectives over a
+  possibly-collection operand — it has no generic scalar-closure broadcaster.
+  Tracked under *Broadcast typing residue* below; `_ce_bcast` now matches the
+  mismatch ruling for the heads it does cover (`ElementMax`/`ElementMin`/
+  `Clamp`).
 
 ### Complex values in compiled scalar comparisons (deferred 2026-07-22)
 

@@ -267,6 +267,65 @@ describe('E2E: Real-world Expressions', () => {
     });
   });
 
+  // ── Factorial of a non-integer (Tycho item 99) ─────────────────────
+
+  describe('Factorial extends to Γ(x+1) (Tycho item 99)', () => {
+    // The compiled runtime bound `Factorial` to the integer-only `factorial()`
+    // helper, so `(1/2 - 1)!` returned NaN with `success: true` while the
+    // interpreter answered Γ(1/2) = √π. A chi-squared normalizing constant
+    // `(k/2 - 1)!` at k = 1 made a whole compiled integrand NaN.
+    it('compiled (1/2-1)! is √π, with and without realOnly', () => {
+      const expr = ce.parse('(\\frac{1}{2}-1)!');
+      expect(expr.N().re).toBeCloseTo(Math.sqrt(Math.PI), 12);
+      expect(compile(expr, { realOnly: true })?.run?.({})).toBe(
+        1.7724538509055159
+      );
+      expect(compile(expr)?.run?.({})).toBe(1.7724538509055159);
+    });
+
+    it('compiled non-integer factorials match .N()', () => {
+      for (const latex of ['(-0.5)!', '(2.5)!', '(-1.5)!', '(1.5)!']) {
+        const expr = ce.parse(latex);
+        const expected = expr.N().re;
+        const actual = compile(expr, { realOnly: true })?.run?.({});
+        expect(typeof actual).toBe('number');
+        expect(Math.abs(actual! / expected - 1)).toBeLessThan(1e-12);
+      }
+    });
+
+    it('a run-time non-integer argument goes through Γ too', () => {
+      const e = new ComputeEngine();
+      e.declare('x', 'number');
+      const f = compile(e.parse('x!'), { realOnly: true });
+      expect(f?.run?.({ x: -0.5 })).toBe(1.7724538509055159);
+      expect(f?.run?.({ x: 2.5 })).toBe(3.3233509704478448);
+      expect(f?.run?.({ x: 5 })).toBe(120);
+    });
+
+    it('integer factorials are unchanged', () => {
+      const v = (latex: string) =>
+        compile(ce.parse(latex), { realOnly: true })?.run?.({});
+      expect(v('0!')).toBe(1);
+      expect(v('1!')).toBe(1);
+      expect(v('5!')).toBe(120);
+      // The integer fast path saturates at n ≥ 170 (unchanged by the fix).
+      expect(v('170!')).toBe(Infinity);
+      expect(v('171!')).toBe(Infinity);
+    });
+
+    it('a negative integer (a pole of Γ) stays NaN', () => {
+      // The interpreter answers ComplexInfinity (`~oo`); a real compile
+      // target projects `~oo` to NaN, as a compiled `\tilde\infty` does.
+      expect(ce.parse('(-1)!').N().toString()).toBe('~oo');
+      expect(
+        compile(ce.parse('(-1)!'), { realOnly: true })?.run?.({})
+      ).toBeNaN();
+      expect(
+        compile(ce.parse('(-2)!'), { realOnly: true })?.run?.({})
+      ).toBeNaN();
+    });
+  });
+
   // ── Broadcast over a list operand ──────────────────────────────────
 
   describe('Broadcastable operator over a list (sin([x, 2x]))', () => {
@@ -303,13 +362,15 @@ describe('E2E: Real-world Expressions', () => {
       expect(list('-L')?.run?.({ L: [1, 2, 3] })).toEqual([-1, -2, -3]);
     });
 
-    it('list + list zips element-wise to the shortest length', () => {
+    it('list + list zips element-wise, and a length mismatch is an error', () => {
       expect(list('L+M')?.run?.({ L: [1, 2, 3], M: [10, 20, 30] })).toEqual([
         11, 22, 33,
       ]);
-      expect(list('L+M')?.run?.({ L: [1, 2, 3], M: [10, 20] })).toEqual([
-        11, 22,
-      ]);
+      // Was `[11, 22]` — zip-to-shortest silently dropped `L`'s tail while the
+      // interpreter already answered `incompatible-dimensions` for this shape.
+      // The 2026-07-24 ruling made both sides agree: no truncation, and the
+      // error projects onto a real target as NaN.
+      expect(list('L+M')?.run?.({ L: [1, 2, 3], M: [10, 20] })).toBeNaN();
     });
 
     it('nested list (matrix) broadcasts a scalar', () => {

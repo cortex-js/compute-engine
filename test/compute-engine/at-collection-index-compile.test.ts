@@ -230,20 +230,18 @@ describe('At on the parse route (subscript access)', () => {
 
 describe('At with a runtime-generated boolean mask (the Desmos filter form)', () => {
   // The form the `At` canonical handler cites as its motivation:
-  // `L[|[1...n]-k|>0]`. Its mask is a COMPUTED comparison, which the compiler
-  // refuses (a raw JS `<` over an array stringifies it and yields a scalar
-  // `false`, which then made `_SYS.at` return NaN — a silent wrong answer).
-  // Refusal means the engine falls back to the interpreter, which is correct.
-  // Compiling this form element-wise is tracked in ROADMAP.md,
-  // "Element-wise compiled comparisons".
+  // `L[|[1...n]-k|>0]`. Its mask is a COMPUTED comparison, which a raw JS `<`
+  // over an array stringifies into a scalar `false`, making `_SYS.at` return
+  // NaN — a silent wrong answer. That made the form fail closed; it now
+  // compiles element-wise through `_SYS.bcast` (see
+  // `compiled-elementwise-boolean.test.ts`).
   const engine = new ComputeEngine();
   engine.assign('L', engine.box(['List', 10, 20, 30] as any));
   engine.assign('k', engine.box(2 as any));
 
-  test('the mask form fails closed rather than answering wrongly', () => {
+  test('the mask form compiles and agrees with the interpreter', () => {
     const expr = engine.parse('L[|[1...3]-k|>0]');
-    expect(compile(expr)?.success).toBe(false);
-    // The interpreter is unaffected and correct.
+    expect(parity(expr)).toEqual([10, 30]);
     expect(interpreted(expr)).toEqual([10, 30]);
   });
 

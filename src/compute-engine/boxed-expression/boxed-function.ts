@@ -26,6 +26,7 @@ import type {
 } from '../global-types.js';
 
 import {
+  broadcastLengthMismatch,
   isBroadcastableCollection,
   isBroadcastCollectionType,
   isFiniteIndexedCollection,
@@ -65,6 +66,7 @@ import {
   functionResult,
   isSignatureType,
   narrow,
+  numericMissingSlot,
   stripMissingFromType,
   typeContainsMissing,
   widen,
@@ -1609,16 +1611,26 @@ export class BoxedFunction
         // collection-ness or size only resolves at evaluation (a symbolic-length
         // `Range`, an infinite `Cycle`) are not finite-reported here and are left
         // to the post-evaluation broadcast (step 4b) once their count is known.
+        // Broadcast rulings (2026-07-24): operands lifted into every cell are
+        // evaluated ONCE, and a length mismatch is an error, not a truncation.
+        // Both run BEFORE the lazy form is built: the lazy `Map` zips to the
+        // shortest source, so deferring them would make the SIZE of a
+        // collection decide the semantics — a mismatch erroring under the eager
+        // threshold and silently truncating above it.
+        const bops = evaluateBroadcastLiftsOnce(this._ops!, options);
+        const mismatch = broadcastLengthMismatch(this.engine, bops);
+        if (mismatch) return mismatch;
+
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
           this.operator,
-          this._ops,
+          bops,
           isBroadcastableCollection,
           numericApproximation
         );
         if (lazy) return lazy;
 
-        const items = zip(this._ops);
+        const items = zip(bops);
         if (!items) return this.engine.Nothing;
 
         const results: Expression[] = [];
@@ -1653,16 +1665,22 @@ export class BoxedFunction
         // collection of unknown size (`Filter`) — map the lambda lazily.
         // Symbolic-length/infinite sources are deferred to the post-evaluation
         // broadcast (step 4b/3b) once their count resolves.
+        // Broadcast rulings (2026-07-24) — see step 2 above (both run before
+        // the lazy form, so size does not decide the semantics).
+        const bops = evaluateBroadcastLiftsOnce(this._ops!, options);
+        const mismatch = broadcastLengthMismatch(this.engine, bops);
+        if (mismatch) return mismatch;
+
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
           this.operator,
-          this._ops,
+          bops,
           isBroadcastableCollection,
           numericApproximation
         );
         if (lazy) return lazy;
 
-        const items = zip(this._ops);
+        const items = zip(bops);
         if (items) {
           const results: Expression[] = [];
           while (true) {
@@ -1780,6 +1798,12 @@ export class BoxedFunction
         // `isKnownFinitenessBroadcast` so a not-yet-resolved operand held raw by
         // a lazy operator is left to fold — return the lazy `Map` form over the
         // already-evaluated `tail`.
+        // Length-mismatch ruling (2026-07-24), before the lazy form so size
+        // does not decide the semantics. `tail` is already evaluated, so the
+        // purity half (evaluate lifted operands once) does not apply here.
+        const mismatch = broadcastLengthMismatch(this.engine, tail);
+        if (mismatch) return mismatch;
+
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
           this.operator,
@@ -1945,16 +1969,22 @@ export class BoxedFunction
         // collection of unknown size (`Filter`) — return the lazy `Map` form.
         // Symbolic-length/infinite sources are deferred to the post-evaluation
         // broadcast (mirrors the sync path).
+        // Broadcast rulings (2026-07-24) — mirrors the sync path in step 2,
+        // including running before the lazy form.
+        const bops = await evaluateBroadcastLiftsOnceAsync(this._ops!, options);
+        const mismatch = broadcastLengthMismatch(this.engine, bops);
+        if (mismatch) return mismatch;
+
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
           this.operator,
-          this._ops,
+          bops,
           isBroadcastableCollection,
           numericApproximation
         );
         if (lazy) return lazy;
 
-        const items = zip(this._ops);
+        const items = zip(bops);
         if (!items) return this.engine.Nothing;
 
         const results: Promise<Expression>[] = [];
@@ -1989,16 +2019,22 @@ export class BoxedFunction
         // collection of unknown size (`Filter`) — map the lambda lazily.
         // Symbolic-length/infinite sources are deferred to the post-evaluation
         // broadcast (step 4b/3b) once their count resolves.
+        // Broadcast rulings (2026-07-24) — mirrors the sync path in step 2b,
+        // including running before the lazy form.
+        const bops = await evaluateBroadcastLiftsOnceAsync(this._ops!, options);
+        const mismatch = broadcastLengthMismatch(this.engine, bops);
+        if (mismatch) return mismatch;
+
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
           this.operator,
-          this._ops,
+          bops,
           isBroadcastableCollection,
           numericApproximation
         );
         if (lazy) return lazy;
 
-        const items = zip(this._ops);
+        const items = zip(bops);
         if (items) {
           const results: Promise<Expression>[] = [];
           while (true) {
@@ -2091,6 +2127,12 @@ export class BoxedFunction
         // Hybrid laziness: past the eager threshold — and always for an
         // unknown/infinite-length source — return the lazy `Map` form over the
         // already-evaluated `tail` (mirrors the sync path).
+        // Length-mismatch ruling (2026-07-24) — mirrors the sync step 4b,
+        // before the lazy form; `tail` is already evaluated, so the purity half
+        // does not apply.
+        const mismatch = broadcastLengthMismatch(this.engine, tail);
+        if (mismatch) return mismatch;
+
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
           this.operator,
@@ -2196,6 +2238,83 @@ export class BoxedFunction
       return result;
     };
   }
+}
+
+/**
+ * Does `op` supply the CELLS of an element-wise broadcast (rather than being
+ * lifted into every cell)? Mirrors the participation test at each broadcast
+ * site: a tuple is an atomic value (a point/vector), never mapped over.
+ */
+function isBroadcastParticipant(op: Expression): boolean {
+  return isFiniteIndexedCollection(op) && !isTuple(op);
+}
+
+/**
+ * Evaluate the operands that are LIFTED into every cell, once.
+ *
+ * RULING (user-ratified 2026-07-24): broadcast operands are evaluated ONCE and
+ * the operation then maps over cells — the NumPy/Julia/R model, in which
+ * broadcasting is an operation on VALUES. `zip` repeats a lifted operand's
+ * *expression* in every cell, so an impure scalar was drawn per element:
+ * `L < Random()` produced a different number for each comparison, while the
+ * arithmetic broadcast (`L + Random()`) had always drawn once. A per-cell draw
+ * is written explicitly instead: `Map(L, l ↦ l < Random())`.
+ *
+ * Cell-supplying operands are left untouched — their elements ARE the values
+ * being traversed, so `[Random(), Random()]` still draws per cell. Evaluation
+ * can REVEAL a collection (a raw call returning a list), so participation is
+ * re-derived from the returned operands by the caller, not from the originals.
+ */
+function evaluateBroadcastLiftsOnce(
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions> | undefined
+): ReadonlyArray<Expression> {
+  if (!ops.some((op) => !isBroadcastParticipant(op))) return ops;
+  return ops.map((op) =>
+    isBroadcastParticipant(op)
+      ? op
+      : normalizeLiftedAbsence(op, op.evaluate(options) ?? op)
+  );
+}
+
+/** Async mirror of `evaluateBroadcastLiftsOnce`. */
+async function evaluateBroadcastLiftsOnceAsync(
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions> | undefined
+): Promise<ReadonlyArray<Expression>> {
+  if (!ops.some((op) => !isBroadcastParticipant(op))) return ops;
+  // Awaited together, not in sequence: the lifts are independent, and the sync
+  // mirror evaluates them without ordering either.
+  return await Promise.all(
+    ops.map(async (op) =>
+      isBroadcastParticipant(op)
+        ? op
+        : normalizeLiftedAbsence(op, (await op.evaluateAsync(options)) ?? op)
+    )
+  );
+}
+
+/**
+ * Carry a numeric slot's absence convention across the evaluate-once
+ * substitution.
+ *
+ * Substituting a lifted operand with its VALUE erases the declared type the
+ * comparison handlers' absence read keys on: an operand typed `number | missing`
+ * that evaluates to the `Missing` symbol must be read as `NaN` (IEEE), because
+ * `NaN` is that slot's honest absence value (I6 domain normalization). Without
+ * this, the same operand answered `False` as a scalar (`Less(1, x)`) and
+ * `Missing` under a broadcast (`Less([1,2], x)`) — Kleene where the scalar path
+ * is IEEE. `readComparisonAbsence` in `library/relational-operator.ts` applies
+ * the identical rule on the non-broadcast path.
+ */
+function normalizeLiftedAbsence(
+  original: Expression,
+  evaluated: Expression
+): Expression {
+  if (!isSymbol(evaluated, 'Missing')) return evaluated;
+  return numericMissingSlot(original.type.type)
+    ? original.engine.NaN
+    : evaluated;
 }
 
 /**

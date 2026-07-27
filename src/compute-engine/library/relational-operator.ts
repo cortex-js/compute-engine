@@ -17,6 +17,7 @@ import {
 import {
   typeContainsMissing,
   stripMissingFromType,
+  numericMissingSlot,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { parseType } from '../../common/type/parse.js';
@@ -860,18 +861,6 @@ function relationalAbsenceType(ops: ReadonlyArray<Expression>) {
   if (definite) return 'missing';
   if (possible) return parseType('boolean | missing');
   return 'boolean';
-}
-
-/**
- * Is `t` a type whose `missing` arm sits on a NUMERIC base (`number |
- * missing`, `integer | missing`, …)? Such a slot's absence representation is
- * `NaN`, not the `Missing` symbol (I6 domain normalization) — comparisons
- * read it as `NaN` (IEEE) and its arm never surfaces in a comparison result.
- */
-function numericMissingSlot(t: Parameters<typeof typeContainsMissing>[0]) {
-  if (!typeContainsMissing(t)) return false;
-  const stripped = stripMissingFromType(t);
-  return stripped !== 'never' && isSubtype(stripped, 'number');
 }
 
 /**

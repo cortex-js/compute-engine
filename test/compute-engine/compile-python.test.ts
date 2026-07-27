@@ -665,6 +665,17 @@ describe('PYTHON TARGET', () => {
     });
   });
 
+  // `x! = Γ(x+1)`. `scipy.special.factorial` is integer-only (0 for a negative
+  // or non-integer argument), which broke parity with the interpreter and the
+  // JavaScript target for `(-1/2)! = √π` (Tycho item 99).
+  describe('Factorial → scipy.special.gamma(x + 1)', () => {
+    it('emits Γ(x+1), not scipy.special.factorial', () => {
+      const code = python.compile(ce.box(['Factorial', 'x'])).code;
+      expect(code).toBe('scipy.special.gamma((x) + 1)');
+      expect(code).not.toContain('scipy.special.factorial');
+    });
+  });
+
   // Indexed Sum/Product compile to single Python generator expressions
   // (builtin `sum` / `math.prod`), so they compose everywhere. The engine's
   // inclusive upper bound maps to Python's exclusive `range` upper (`b + 1`).

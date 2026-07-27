@@ -129,6 +129,39 @@ export function measurementMultiply(
 }
 
 /**
+ * Post-numericization re-dispatch for `Add`/`Multiply` (Tycho item 101).
+ *
+ * The Measurement check in the `Add`/`Multiply` evaluate handlers runs against
+ * the operands as returned by `evaluate()`.  An operand may only BECOME a
+ * Measurement under numeric approximation — numeric quadrature evaluates
+ * `Integrate` symbolically (`1 - cos(1)`) but `.N()`s it to a Measurement — so
+ * on the first `.N()` that check sees nothing, and `addN`/`mulN` leave the
+ * fold undone: an `Add`/`Multiply` with a Measurement operand, whose `.re` is
+ * `NaN` (the dead numeric read of item 95, one level up).  `addN`/`mulN`
+ * numericize their operands, so the Measurement IS visible in the result they
+ * return; fold it here so the FIRST `.N()` yields a Measurement, matching the
+ * `ce.box(['Add', <measurement>, 1]).N()` route.
+ *
+ * Keyed off the RESULT's operator, not the caller's: `addN` may return a
+ * `Multiply` (`I + I` → `2·I`).  Returns `undefined` when there is nothing to
+ * fold, which is the hot path (a plain numeric sum returns a number literal,
+ * rejected by the operator test alone).
+ */
+export function foldMeasurementOperands(
+  ce: ComputeEngine,
+  expr: Expression
+): Expression | undefined {
+  const operator = expr.operator;
+  if (operator !== 'Add' && operator !== 'Multiply') return undefined;
+  if (!isFunction(expr)) return undefined;
+  const ops = expr.ops;
+  if (!ops.some((x) => isMeasurement(x))) return undefined;
+  const r =
+    operator === 'Add' ? measurementAdd(ce, ops) : measurementMultiply(ce, ops);
+  return r?.N();
+}
+
+/**
  * Divide two operands (at least one a Measurement).
  * nominal = a/b, σ = √(σ_a²/b² + a²σ_b²/b⁴).
  */

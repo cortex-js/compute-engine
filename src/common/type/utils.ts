@@ -308,6 +308,24 @@ export function stripMissingFromType(t: Readonly<Type>): Type {
 }
 
 /**
+ * Is `t` a type whose `missing` arm sits on a NUMERIC base (`number | missing`,
+ * `integer | missing`, …)? Such a slot's absence representation is `NaN`, not
+ * the `Missing` symbol (I6 domain normalization) — comparisons read it as `NaN`
+ * (IEEE) and its arm never surfaces in a comparison result.
+ *
+ * Shared by the comparison handlers' absence read (`readComparisonAbsence`) and
+ * the broadcast evaluate-once substitution: a lifted operand is replaced by its
+ * VALUE, which erases the slot type the absence read depends on, so the
+ * substitution has to apply the same normalization or the same operand would be
+ * Kleene under a broadcast and IEEE as a scalar.
+ */
+export function numericMissingSlot(t: Readonly<Type>): boolean {
+  if (!typeContainsMissing(t)) return false;
+  const stripped = stripMissingFromType(t);
+  return stripped !== 'never' && isSubtype(stripped, 'number');
+}
+
+/**
  * True if `t` denotes an **atomic** value type — a cell in the cell/axis model
  * (see `docs/plans/2026-07-20-tensor-unification-design.md`, §D5). Atomic
  * types are the ones that may occupy a single tensor cell: numbers, booleans,

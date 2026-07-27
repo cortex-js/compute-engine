@@ -57,6 +57,45 @@ export function isUnknownLengthBroadcast(x: Expression): boolean {
 }
 
 /**
+ * Length agreement across the operands that supply the CELLS of an element-wise
+ * broadcast.
+ *
+ * RULING (user-ratified 2026-07-24): a length mismatch is an ERROR, never a
+ * truncation. Zipping to the shortest operand silently dropped the tail of the
+ * longer one (`Less([1,2,3],[2,2])` → `[True, False]`), which is the same data
+ * loss whether it happens in the eager zip, in `broadcastOverIndexedCollections`,
+ * or lazily inside the variadic `Map`. This is the single check all three
+ * consult, so a shape cannot answer differently depending on which path it
+ * takes — the bug the first implementation shipped, where `Add(Filter(…), L)`
+ * truncated while `Less` on the same shape errored.
+ *
+ * Participation is `isBroadcastableCollection`, so an INFINITE operand counts
+ * too: `count` is `Infinity` there, which mismatches any finite length (the
+ * ruling's "an unbounded operand against a finite one errors on the count
+ * comparison"). A scalar is a LIFT, not a participant, and never mismatches; an
+ * operand whose count is not yet known (`undefined` — a `Filter` before
+ * evaluation, a symbolic-length `Range`) is skipped, since there is nothing to
+ * compare until it resolves.
+ *
+ * Returns the error expression, or `undefined` when the lengths agree.
+ */
+export function broadcastLengthMismatch(
+  ce: Expression['engine'],
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  let first: number | undefined;
+  for (const op of ops) {
+    if (!isBroadcastableCollection(op)) continue;
+    const n = op.count;
+    if (n === undefined || n < 0) continue;
+    if (first === undefined) first = n;
+    else if (n !== first)
+      return ce.error('incompatible-dimensions', `${first} vs ${n}`);
+  }
+  return undefined;
+}
+
+/**
  * A broadcast-eligible operand whose finiteness is **statically settled** —
  * either provably finite (`isFiniteCollection === true`, including the uncountable
  * `Filter`) or provably infinite (`isFiniteCollection === false`, e.g. `Cycle`).
@@ -591,7 +630,8 @@ export function broadcastOverIndexedCollections(
   operator: string,
   xs: ReadonlyArray<Expression>,
   numericApproximation: boolean,
-  allowLazy = false
+  allowLazy = false,
+  strictLengths = true
 ): Expression | undefined {
   const isBroadcast = (x: Expression): boolean =>
     isFiniteIndexedCollection(x) && !isTuple(x);
@@ -599,8 +639,26 @@ export function broadcastOverIndexedCollections(
   const cols = xs.filter(isBroadcast);
   if (cols.length === 0) return undefined;
 
-  // Broadcast length = shortest participating collection. Bail (stay inert) if
-  // any length is not statically known.
+  // Length-mismatch ruling (2026-07-24), applied here as well as at the
+  // `BoxedFunction` broadcast steps: `Add`/`Multiply` reach their element-wise
+  // path through this function, so without it a mismatch that `addTensors`
+  // does not catch (a `Filter` source, say — not a tensor value) would still
+  // zip-to-shortest, and the SAME shape would error under `Less` but truncate
+  // under `Add`.
+  //
+  // `strictLengths: false` is the deliberate exception, not a default: a caller
+  // that ZIPS components rather than broadcasting an operator over them — the
+  // `PointList` construction, whose shortest-zip is a ratified consumer
+  // contract (Tycho item 52, `PointList([1,2,3],[10,20])` → 2 points) — opts
+  // out. The default is strict so a future caller inherits the ruling instead
+  // of silently truncating.
+  if (strictLengths) {
+    const mismatch = broadcastLengthMismatch(ce, xs);
+    if (mismatch) return mismatch;
+  }
+
+  // Broadcast length = the participating collections' common length. Bail
+  // (stay inert) if any length is not statically known.
   let n = Infinity;
   for (const c of cols) {
     const len = c.count;

@@ -195,6 +195,51 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       // The compiled quadrature runner still produces a finite value.
       expect(Number.isFinite(r.run() as number)).toBe(true);
     });
+
+    // The item-8 bound above only fires when the CALLER arms a span. Since
+    // `ce.timeLimit` was retired, a compile with no enclosing span ran the
+    // antiderivative-first attempt unbounded — this χ² tail integral with a
+    // free shape parameter `k` (so the exponent `k/2−1` stays symbolic) sent
+    // `tryIntegrationByParts` into a search that had not returned after 2
+    // minutes. The attempt now arms its own budget, so BOTH arms — span and
+    // no span — degrade to quadrature promptly. (Tycho item 98, 2026-07-27.)
+    describe('free symbolic exponent degrades to quadrature (item 98)', () => {
+      const CHI2_TAIL =
+        '\\int_{x}^{\\infty}\\!\\frac{\\exp(-(\\frac{y}{2}))y^{\\frac{k}{2}-1}}' +
+        '{(\\frac{k}{2}-1)!\\times2^{\\frac{k}{2}}}\\, \\mathrm{d}y';
+
+      // `k` is bound at run time to 2, whose tail has the elementary closed
+      // form e^{−x/2} — so the assertions are exact and independent of how
+      // `x!` is evaluated at a non-integer (k = 2 gives 0! = 1).
+      const X_CRIT = 5.991464547107979; // χ²₂ 5% critical value
+
+      test.each([
+        ['no enclosing span', undefined],
+        ['enclosing 2 s span', 2000],
+      ])('%s', (_label, spanMs) => {
+        const engine = new ComputeEngine();
+        const expr = engine.parse(CHI2_TAIL, { strict: false });
+        const start = Date.now();
+        const run = () => compile(expr, { realOnly: true });
+        const r =
+          spanMs === undefined
+            ? run()
+            : engine.withTimeLimit({ ms: spanMs, label: 'test:item-98' }, run);
+        const elapsed = Date.now() - start;
+
+        expect(r.success).toBe(true);
+        // Degraded to quadrature rather than baking a closed form.
+        expect(r.code).toContain('_SYS.integrate(');
+        // Bounded by the compile-time attempt budget, not the >2 min hang.
+        expect(elapsed).toBeLessThan(15000);
+        // `k` stays a free symbol, bound at run time alongside `x`.
+        expect(r.run({ x: X_CRIT, k: 2 }) as number).toBeCloseTo(0.05, 8);
+        expect(r.run({ x: 1, k: 2 }) as number).toBeCloseTo(
+          Math.exp(-0.5), // 0.6065306597126334
+          8
+        );
+      });
+    });
   });
 
   test('performance smoke — 50 calls under 2 s', () => {

@@ -124,6 +124,7 @@ import {
   bigOpResultType,
 } from './type-handlers.js';
 import {
+  foldQuantityOperands,
   isQuantity,
   quantityAdd,
   quantityMultiply,
@@ -131,6 +132,7 @@ import {
   quantityPower,
 } from './quantity-arithmetic.js';
 import {
+  foldMeasurementOperands,
   isMeasurement,
   measurementAdd,
   measurementMultiply,
@@ -364,8 +366,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // through this handler's re-entry and through the type-level
         // `isFinite` → value → `type` cycle; the substitute-once guard lives
         // on the raw symbol's own `.N()` path.
-        if (numericApproximation)
-          return addN(...ops.map((op, i) => (op.isPure ? op : evaluated[i])));
+        if (numericApproximation) {
+          const r = addN(...ops.map((op, i) => (op.isPure ? op : evaluated[i])));
+          // An operand may only have BECOME a Quantity or Measurement through
+          // `addN`'s numericization, past the `evaluated` checks above
+          // (Tycho item 101). Quantity first, matching the handler precedence.
+          return (
+            foldQuantityOperands(engine!, r) ??
+            foldMeasurementOperands(engine!, r) ??
+            r
+          );
+        }
         const result = add(...evaluated);
         // D2: an inexact (float) operand has no exactness to preserve, so it
         // numericizes the whole sum even when mixed with an exact symbolic
@@ -1729,8 +1740,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Impure operands pass their evaluated form so their side effects run
         // once; pure operands keep the raw, substitute-once-guarded path
         // (Tycho item 46) — see the matching comment in `Add`.
-        if (numericApproximation)
-          return mulN(...ops.map((op, i) => (op.isPure ? op : evaluated[i])));
+        if (numericApproximation) {
+          const r = mulN(...ops.map((op, i) => (op.isPure ? op : evaluated[i])));
+          // See the matching comment in `Add` (Tycho item 101).
+          return (
+            foldQuantityOperands(engine!, r) ??
+            foldMeasurementOperands(engine!, r) ??
+            r
+          );
+        }
         const result = mul(...evaluated);
         // D2: see the matching comment in `Add` — an inexact (float) operand
         // numericizes the whole product even when mixed with an exact

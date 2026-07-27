@@ -104,9 +104,13 @@ describe('item 86 — scalar look-through for compiled comparisons/connectives',
     expect(compileJS(ce, 'f(x)<y').ok).toBe(false);
   });
 
-  test('the Desmos filter form still fails closed (element-wise lowering is a separate ROADMAP item)', () => {
+  test('the Desmos filter form now broadcasts element-wise', () => {
+    // Was: fail closed, tracked as a separate ROADMAP item. The element-wise
+    // lowering landed, and `L` is a list-typed SYMBOL — it provably compiles to
+    // an array, unlike `q(L)` above. See `compiled-elementwise-boolean.test.ts`.
     const r = compileJS(make(), '\\lvert L-2\\rvert>0');
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.run({ L: [1, 2, 3] })).toEqual([true, false, true]);
   });
 
   test('plain scalar comparisons are unaffected', () => {
