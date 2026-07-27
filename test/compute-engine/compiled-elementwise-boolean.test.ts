@@ -247,9 +247,51 @@ describe('the mismatch ruling reaches every broadcast path', () => {
     ).toMatch(/incompatible-dimensions/);
   });
 
+  test('the arithmetic value path agrees on an INFINITE operand', () => {
+    // Audit finding (2026-07-27): `addN`/`mulN` route an infinite operand to
+    // the lazy `Map` form via `isUnknownLengthBroadcast` — a path with no
+    // earlier mismatch check — so `Add([1,2,3], Range(1,∞))` zipped to
+    // `[2,4,6]` while `Less` on the same operands errored. The check now
+    // lives in the `lazyBroadcastMap` funnel itself: an infinite count is
+    // KNOWN (`Infinity`), not unknown, so it is compared.
+    const inf = ['Range', 1, 'PositiveInfinity'];
+    for (const op of ['Add', 'Subtract', 'Multiply']) {
+      expect(
+        ce.box([op, ['List', 1, 2, 3], inf] as any).evaluate().toString()
+      ).toMatch(/incompatible-dimensions/);
+    }
+    // `.N()` takes the same funnel.
+    expect(
+      ce.box(['Add', ['List', 1, 2, 3], inf] as any).N().toString()
+    ).toMatch(/incompatible-dimensions/);
+  });
+
+  test('two INFINITE operands still zip lazily — Infinity agrees with Infinity', () => {
+    const inf = ['Range', 1, 'PositiveInfinity'];
+    const r = ce.box(['Add', inf, inf] as any).evaluate();
+    expect(r.operator).toBe('Map');
+    expect(r.at(3)?.re).toBe(6);
+  });
+
+  test('an operand whose count is UNKNOWN is still not compared', () => {
+    // A `Filter` reports `count === undefined` until drained — there is
+    // nothing to compare until it resolves (the ROADMAP residue), so the
+    // scalar-lifted sum evaluates rather than erroring.
+    const filter3 = [
+      'Filter',
+      ['Range', 1, 5],
+      ['Function', ['Greater', '_', 2], '_'],
+    ];
+    expect(ce.box(['Add', filter3, 1] as any).evaluate().toString()).toBe(
+      '[4,5,6]'
+    );
+  });
+
   test('PointList keeps its ratified shortest-zip contract', () => {
     // `PointList` ZIPS components rather than broadcasting an operator over
-    // them (Tycho item 52), so it opts out of the ruling explicitly.
+    // them (Tycho item 52), so it opts out of the ruling explicitly — pairing
+    // constructors define their length as the shortest input (see
+    // `docs/BROADCAST-MODEL.md`).
     expect(
       ce.box(['PointList', ['List', 1, 2, 3], ['List', 10, 20]] as any).evaluate()
         .json

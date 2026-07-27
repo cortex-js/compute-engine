@@ -98,7 +98,9 @@ the logical connectives now broadcast on the JavaScript target through
 `incompatible-dimensions` across the eager zip, the arithmetic broadcast and
 the lazy form, instead of a silent zip-to-shortest. (`PointList` opts out by
 design — it zips components rather than broadcasting an operator, and its
-shortest-zip is a consumer contract.) Genuinely remaining:
+shortest-zip is a consumer contract.) The full policy — strict for LIFTED
+operators, shortest for explicit PAIRING constructors (`Zip`, variadic `Map`,
+`PointList`) — is recorded in `docs/BROADCAST-MODEL.md`. Genuinely remaining:
 
 - **An operand whose length is not yet KNOWN is not compared.** The check reads
   `count`, so a participant reporting `undefined` (a symbolic-length `Range`
@@ -118,31 +120,14 @@ shortest-zip is a consumer contract.) Genuinely remaining:
   need a distinct absence sentinel carried through nested broadcasts to do
   better.
 
-**Adjacent, pre-existing, and worth its own round — `Multiply` over MIXED
-collection kinds produces a cartesian nest.** Not a length problem: it misfires
-at matched lengths, and `Add` on the identical operands is element-wise.
-Measured on the published 0.96.0 bundle, so it predates the element-wise work:
-
-```
-[1,2,3] · [4,5,6]        [4,10,18]                        element-wise
-[1...3] · [4,5,6]        [[4,8,12],[5,10,15],[6,12,18]]   3×3 nest
-Range(1,3) · Range(1,3)  [1,4,9]                          element-wise
-Range(1,3) · [1,2,3]     [[1,2,3],[2,4,6],[3,6,9]]        3×3 nest
-Range(1,3) + [1,2,3]     [2,4,6]                          element-wise
-```
-
-The trigger is the operand NODE KINDS disagreeing — a `List` literal against a
-`Range`/`Filter`/`Take`/`Reverse` result — so `mulTensors` recognizes only one
-of them and the fallback distributes the list over the list instead of zipping.
-Same-kind pairs are fine either way. The Desmos-style surface `[1...n] · L` hits
-it directly. Separately, two mismatched `List` literals leave `Multiply`
-symbolic (`[1,2,3] * [2,2]`) where `Add` reports `incompatible-dimensions` — so
-`Multiply` never truncated, but it never diagnosed either.
-
-Deliberately NOT folded into the element-wise change: the fix is in the
-`mul()`/`mulTensors` rank dispatch, which carries its own ratified rules
-(vector·vector = element-wise, runtime rank-dispatch) and is the hottest
-symbolic path — it needs its own snapshot blast-radius measurement and review.
+Residue from the adjacent `Multiply` mixed-collection-kinds fix (landed
+2026-07-27, record in `CHANGELOG.md`): two mismatched `List` literals still
+leave `Multiply` symbolic (`[1,2,3] * [2,2]`) where `Add` reports
+`incompatible-dimensions` — the rank-1 fold in `mulTensors` returns an inert
+product rather than consulting the length ruling. `Multiply` never truncated
+that shape, so nothing is silently lost; deciding whether it should join the
+ruling is a small follow-up, pinned as characterization in
+`multiply-mixed-collection-kinds.test.ts`.
 - **A user-function application over a collection argument mis-compiles.**
   `q(L)` with `q: t ↦ n·t+1` interprets to `[5,9,13]` but compiles to NaN: the
   callee emits its body as SCALAR code, so the array argument coerces. This

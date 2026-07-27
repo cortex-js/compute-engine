@@ -646,12 +646,15 @@ export function broadcastOverIndexedCollections(
   // zip-to-shortest, and the SAME shape would error under `Less` but truncate
   // under `Add`.
   //
-  // `strictLengths: false` is the deliberate exception, not a default: a caller
-  // that ZIPS components rather than broadcasting an operator over them — the
-  // `PointList` construction, whose shortest-zip is a ratified consumer
-  // contract (Tycho item 52, `PointList([1,2,3],[10,20])` → 2 points) — opts
-  // out. The default is strict so a future caller inherits the ruling instead
-  // of silently truncating.
+  // `strictLengths: false` is the deliberate exception, not a default:
+  // strictness governs an operator LIFTED over collections, while an explicit
+  // PAIRING constructor (`Zip`, the variadic `Map`, the `PointList`
+  // construction) defines its length as the shortest input — see
+  // `docs/BROADCAST-MODEL.md` (ruling 2026-07-27). `PointList` is the one
+  // caller that opts out; its shortest-zip is a ratified consumer contract
+  // (Tycho item 52, `PointList([1,2,3],[10,20])` → 2 points). The default is
+  // strict so a future caller inherits the ruling instead of silently
+  // truncating.
   if (strictLengths) {
     const mismatch = broadcastLengthMismatch(ce, xs);
     if (mismatch) return mismatch;
@@ -681,7 +684,8 @@ export function broadcastOverIndexedCollections(
       operator,
       xs,
       isBroadcast,
-      numericApproximation
+      numericApproximation,
+      strictLengths
     );
 
   const options = { numericApproximation };
@@ -725,14 +729,30 @@ export function broadcastOverIndexedCollections(
  * the multi-collection `Map` carry through. Parameter names are chosen to avoid
  * every free symbol of a spliced operand, so a spliced scalar can never be
  * captured by a parameter.
+ *
+ * Length-mismatch ruling (`docs/BROADCAST-MODEL.md`): this is the lazify
+ * funnel, and the `addN`/`mulN` value paths reach it DIRECTLY (the
+ * `isUnknownLengthBroadcast` branch), with no earlier mismatch check — so
+ * without the check here, `Add([1,2,3], Cycle(5,6))` zipped to the shortest
+ * while `Less` on the same operands errored `3 vs Infinity`. An INFINITE
+ * operand has a KNOWN count (`Infinity`) that agrees with no finite sibling;
+ * only a count that is genuinely `undefined` is skipped (nothing to compare
+ * until it resolves — the ROADMAP "broadcast semantics residue").
+ * `strictLengths: false` is for pairing callers only (`PointList`, via
+ * `broadcastOverIndexedCollections`), whose shortest-zip is their contract.
  */
 export function lazyBroadcastMap(
   ce: Expression['engine'],
   operator: string,
   ops: ReadonlyArray<Expression>,
   isBroadcastOperand: (x: Expression) => boolean,
-  numericApproximation = false
+  numericApproximation = false,
+  strictLengths = true
 ): Expression {
+  if (strictLengths) {
+    const mismatch = broadcastLengthMismatch(ce, ops);
+    if (mismatch) return mismatch;
+  }
   // Parameter names must not shadow a free symbol of a spliced (whole) operand
   // once the body is canonicalized in the function-literal scope.
   const avoid = new Set<string>();

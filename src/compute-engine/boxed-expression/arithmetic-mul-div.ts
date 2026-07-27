@@ -1694,7 +1694,24 @@ function mulTensors(
       // generic broadcast / tuple path (behave as if not a tensor).
       if (packTensor(ce, x) === undefined) return undefined;
       tensors.push(x);
-    } else scalars.push(x);
+    } else {
+      // A COLLECTION that is not a tensor value (a `Range`, or a `Filter`/
+      // `Take`/`Reverse` view) must NOT fall into the scalar bucket: the fold
+      // below ends at `scaleTensor`, which multiplies every CELL by the scalar
+      // factor, so a collection factor turned each cell into a list —
+      // `Range(1,3)·[1,2,3]` became `[[1,2,3],[2,4,6],[3,6,9]]` instead of the
+      // element-wise `[1,4,9]`, at matched lengths, while `Add` on the same
+      // operands was element-wise. Decline the kernel so the caller falls
+      // through to `broadcastOverIndexedCollections`, which zips it.
+      //
+      // `addTensors` avoids this via its `tensors.length < 2` decline; that
+      // route is not mirrored here because it would also move plain
+      // scalar·vector products off the tensor path and change their result
+      // typing. Tuples are excluded — they scale component-wise by design
+      // (`mulTuples`).
+      if (isBroadcastableCollection(x)) return undefined;
+      scalars.push(x);
+    }
   }
 
   // No tensors survived evaluation: let the caller fall through to the generic

@@ -18,6 +18,7 @@ read the repository [`README.md`](../README.md).
 | Understand simplification behavior snapshots | [`SIMPLIFY.md`](./SIMPLIFY.md) |
 | Understand seeding, `Random` draws, and cross-target parity | [`RANDOMNESS-MODEL.md`](./RANDOMNESS-MODEL.md) |
 | Understand time budgets and cancellation | [`TIMEOUT-MODEL.md`](./TIMEOUT-MODEL.md) |
+| Understand broadcast length-mismatch policy (strict lifting vs shortest pairing) | [`BROADCAST-MODEL.md`](./BROADCAST-MODEL.md) |
 | Review playground sample outcomes | [`PLAYGROUND.md`](./PLAYGROUND.md) |
 | Validate arguments in custom function definitions | [`FUNCTION-VALIDATION.md`](./FUNCTION-VALIDATION.md) |
 | Review internal architecture boundaries | [`architecture/README.md`](./architecture/README.md) |

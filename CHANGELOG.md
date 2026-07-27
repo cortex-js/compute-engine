@@ -45,7 +45,11 @@
 
   `PointList` is deliberately unaffected: it ZIPS components rather than
   broadcasting an operator over them, and its shortest-zip
-  (`PointList([1,2,3],[10,20])` → two points) is an existing consumer contract.
+  (`PointList([1,2,3],[10,20])` → two points) is an existing consumer
+  contract. The general rule: an operator LIFTED over collections requires
+  length agreement, while an explicit PAIRING constructor (`Zip`, the variadic
+  `Map`, `PointList`) defines its length as the shortest input. See
+  `docs/BROADCAST-MODEL.md` for the full policy.
 
 ### New Features
 
@@ -80,6 +84,27 @@
   `false`.
 
 ### Issues Resolved
+
+- **`Multiply` over operands of mixed collection kinds is element-wise again.**
+  A `List` literal packs as a tensor value while a `Range`/`Filter`/`Take`/
+  `Reverse` result does not, so the non-tensor operand was classified as a
+  SCALAR factor — and applying a scalar multiplies every CELL by it, turning
+  each cell into a list:
+
+  ```
+  [1...3] · [4,5,6]        // was: [[4,8,12],[5,10,15],[6,12,18]]   now: [4,10,18]
+  Range(1,3) · [1,2,3]     // was: [[1,2,3],[2,4,6],[3,6,9]]        now: [1,4,9]
+  Range(1,3) + [1,2,3]     // [2,4,6] — `Add` was always element-wise
+  ```
+
+  Not a length problem: it misfired at *matched* lengths, and same-kind pairs
+  (`List`×`List`, `Range`×`Range`) were always element-wise, because neither
+  operand reached the scalar bucket. `Add` avoids it by declining its tensor
+  kernel when fewer than two operands pack; `Multiply` now declines when a
+  non-tensor collection would land among the scalars, and falls through to the
+  same element-wise broadcast — which also brings mixed-kind mismatches under
+  the length ruling above. Scalar×list scaling, matrix products, and
+  component-wise tuple scaling are unchanged.
 
 - **A symbol bound to a derived collection serializes as its name again.**
   Regression in 0.96.0. `.latex` and `toString()` materialize a lazy collection

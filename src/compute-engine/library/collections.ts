@@ -1034,11 +1034,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // consumable via `at`/`each`/`count` — so a large point list is no
       // longer materialized (and re-materialized per coordinate projection).
       // `strictLengths: false` — `PointList` ZIPS its components rather than
-      // broadcasting an operator over them, and its shortest-zip is a ratified
-      // consumer contract (Tycho item 52): `PointList([1,2,3],[10,20])` is two
-      // points, and a ragged lazy transpose projects to the shorter length. The
-      // 2026-07-24 length-mismatch ruling governs operator broadcasts, not this
-      // constructor, so it opts out explicitly.
+      // broadcasting an operator over them: it is in the explicit-pairing
+      // family (`Zip`, the variadic `Map`), whose length is DEFINED as the
+      // shortest input, and its shortest-zip is a ratified consumer contract
+      // (Tycho item 52): `PointList([1,2,3],[10,20])` is two points, and a
+      // ragged lazy transpose projects to the shorter length. The
+      // length-mismatch ruling governs lifted-operator broadcasts, not
+      // pairing constructors — see `docs/BROADCAST-MODEL.md` (ruling
+      // 2026-07-27).
       return broadcastOverIndexedCollections(
         ce,
         'Tuple',

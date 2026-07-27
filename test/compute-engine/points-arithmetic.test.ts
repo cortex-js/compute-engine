@@ -884,16 +884,33 @@ describe('ELEMENTWISE BROADCAST — hybrid laziness (huge collections)', () => {
       .then((a) => expect(a.operator).toBe('Map'));
   });
 
-  test('a mixed finite + infinite sum maps all collections as Map sources', () => {
+  test('a mixed finite + unknown-length sum maps all collections as Map sources', () => {
     const ce = new ComputeEngine();
-    // When any broadcast operand is infinite/unknown, the whole result is a
-    // single variadic `Map` (shortest-input semantics) — NOT the finite operand
-    // broadcast with the infinite one spliced whole (which would cartesian).
+    // When any broadcast operand is of unknown length, the whole result is a
+    // single variadic `Map` — NOT the finite operand broadcast with the other
+    // one spliced whole (which would cartesian). A symbolic-length `Range`
+    // reports `count === undefined`, so it is not length-compared (nothing to
+    // compare until it resolves) and the sum lazifies.
+    ce.declare('n', 'integer');
+    const r = ce
+      .box(['Add', ['List', 10, 20, 30], ['Range', 1, 'n']])
+      .evaluate();
+    expect(r.operator).toBe('Map');
+    ce.assign('n', 3);
+    expect([...r.evaluate().each()].map((x) => x.json)).toEqual([11, 22, 33]);
+  });
+
+  test('a mixed finite + INFINITE sum is a length mismatch, not a truncated zip', () => {
+    const ce = new ComputeEngine();
+    // Audit finding (2026-07-27): this shape used to lazify into a
+    // shortest-input `Map` ([11, 22, 31]) because the lazify branch ran with
+    // no mismatch check — while `Less` on the same operands errored. An
+    // infinite `count` is KNOWN (`Infinity`) and agrees with no finite
+    // length (`docs/BROADCAST-MODEL.md`).
     const r = ce
       .box(['Add', ['List', 10, 20, 30], ['Cycle', ['List', 1, 2]]])
       .evaluate();
-    expect(r.operator).toBe('Map');
-    expect([...r.each()].map((x) => x.json)).toEqual([11, 22, 31]);
+    expect(r.toString()).toMatch(/incompatible-dimensions/);
   });
 
   test('.N() over an infinite source threads the numeric wrap', () => {
