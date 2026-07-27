@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-07-23.
+**Last updated:** 2026-07-26.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -33,14 +33,24 @@ clean-parse 3/345 → 278/345, throws 9 → 0). Fresh unseen-sample validation
 measured 97.4% clean parse with 0 throws/0 hangs; the remaining MathNet work
 is a small notation tail tracked below.
 
-**0.90.0 released 2026-07-21** (latest). The 0.87–0.90 line carried the
+**0.96.0 released 2026-07-26** (latest). It carried the **symbol-identity
+repair** — a stored value's free symbols now denote the binding they were
+canonicalized against, not whatever an inner scope calls that name, with
+dereference (`evaluateInOwnBindings`), named-parameter rebind, and the
+sanctioned **binder mechanism** (binding sites declared by a `scoped:`
+selector; see `docs/plans/2026-07-26-binder-mechanism-design.md`) — plus
+all-branch union assignability, the peaked-quadrature and non-finite-integrand
+fixes, and deletion of the 0.95.0 random-family tombstones. The 0.91–0.95 line
+carried `FindFit`/`FindRoot` (Tycho item 77), the `Nothing`-erasure/`Missing`
+marker work, overload sets, the **Random family redesign**
+(`WithRandomSeed` frames, PCG3D, domain-only `Random` — see
+`docs/RANDOMNESS-MODEL.md`), and Cortex spread/destructuring. The 0.87–0.90
+line carried the
 Tycho items 56–76 rounds (complex-compile emission, the timeout-span model
 replacing `ce.timeLimit`, compiled recursive lambdas, `RandomList`,
 `Abs(point)` = norm), the tensor unification (BoxedTensor removed; tensor
 values are canonical Lists with a lazy view), and honest shaped list types.
-The unreleased line adds `FindFit`/`FindRoot` (general nonlinear
-least-squares with box constraints and joint shared-parameter systems —
-Tycho item 77). The 0.74–0.86 line carried the
+The 0.74–0.86 line carried the
 Tycho-compatibility rounds (through items 50–54: hybrid-lazy `PointList`
 transposes, the serialize→re-parse juxtaposition fixes, machine-precision
 exact-sum crash, `ce.withTimeLimit`), the collection-operator-gaps +
@@ -127,10 +137,15 @@ silently truncated — `Less([1,2,3],[2,2])` → `[True, False]`):
    dissolves the pre-scan/suffix-inspection concern below: under strict-zip
    the length check is O(1) and no element is inspected out of order.
 
-**Sequencing (unchanged):** the missing-value batch is committed but
-unreleased and Tycho has been told it ships next, so implement the interpreter
-ruling changes AND the element-wise lowering together in a *later* release
-rather than stacking a third comparison-semantics shift into that adoption.
+**Sequencing: the gate has CLEARED (2026-07-26).** The condition was not to
+stack a third comparison-semantics shift onto the missing-value adoption; that
+batch shipped in 0.94.0 and two releases have followed it. Implement the
+interpreter ruling changes AND the element-wise lowering together, as one batch
+in a single release, so consumers see one comparison-semantics change rather
+than two. Breaking surface to call out in the CHANGELOG: impure *scalar*
+operands under comparison/connective broadcast are now drawn once, and a length
+mismatch that used to truncate (`Less([1,2,3],[2,2])` → `[True, False]`) is now
+`incompatible-dimensions`.
 
 Background: these heads lower to raw JS infix operators, which are silently
 wrong on an array — `0 < [1,0,1]` stringifies it to `"1,0,1"` and yields a
@@ -230,6 +245,51 @@ remaining, as separate demand-gated items:
 Interactions to respect: non-finite typing convention, `infer(unknown)`
 destructiveness, scalar-requiring contexts (exponents, comparisons, plot
 coordinates).
+
+### Symbol-identity residue (initiative complete, shipped 0.96.0)
+
+The name-vs-binder repair is done — phases 1–3 including the sanctioned binder
+mechanism. Records: `docs/plans/2026-07-24-defining-scope-dereference-design.md`
+(dereference) and `docs/plans/2026-07-26-binder-mechanism-design.md` (binder
+mechanism, 16 stages). What is genuinely left:
+
+- **Raw-name-fallback provenance** — the one open thread, deferred to a future
+  phase. A pre-boxed operand can be applied twice through a raw name rather
+  than a binding, which binding identity cannot distinguish; the behavior is
+  characterization-pinned (`@fixme`) rather than fixed.
+- **`BindingSite.shield` is declared but never read**
+  (`types-definitions.ts:1068`) — the 0.96.0 `_isShield` narrowing landed
+  through a different path, so the field and its comment are stale. Wire it or
+  delete it.
+- **Found-not-fixed, all pre-existing and pathological:** `Limit(1/(x-a), …)`
+  capture in `library/calculus.ts`; a global `_1` that *holds a value* stalls a
+  pipe `Map`; flat-vs-nested `Multiply` breaks `isSame` (`\frac{ax^2}{2}` vs the
+  antiderivative's flat form) — possibly a canonicalization gap, unowned.
+
+### Random-redesign residue (shipped 0.95.0/0.96.0)
+
+The redesign shipped and the one-release tombstones are deleted. Model
+reference: `docs/RANDOMNESS-MODEL.md`; spec:
+`docs/plans/2026-07-25-random-signature-redesign.md`. Remaining:
+
+- **Counter numbering leaks across `compile()` calls** when an *external*
+  target object is reused: there is no compilation-boundary hook on the
+  `expr.compile({ target })` path (needs a root hook in `base-compiler.ts`).
+- **`compileShader` does not apply `rewriteAngularUnit`.** Both GLSL and WGSL
+  `compileShader` route through `compileShaderBody`, never `compileOrThrow`
+  (`gpu-target.ts` ~:4249), so a degree-mode engine emits radian trig on that
+  route only. Pre-existing and unrelated to randomness.
+- **Family typing consistency:** `RandomChoice` still types `vector<real^k>`
+  where `Random(Interval)` narrows to `finite_real`, and `Map` derives its
+  element type independently.
+
+Settled, not work: the GLSL sibling-draw order is an accepted documented caveat
+(operand evaluation order is unspecified in GLSL; WGSL pins L→R), and the
+"host uniform" seed-ABI deferral is user-ratified.
+
+**Open consult with the Tycho team** (do not land unilaterally): whether the
+*released* seeded `Random()`/`Shuffle` forms should move from bake to stream,
+matching the two-primitive model. Awaiting their acknowledgement.
 
 ### Product feature track (agreed 2026-07-04)
 

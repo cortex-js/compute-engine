@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.96.0 _2026-07-26_
 
 ### Breaking Changes
@@ -64,7 +66,7 @@
   Block(Declare(x, "real"), a + 5)   // was: x + 6        now: 106
   ```
 
-  `a` captured a *binding*; the inner `Declare` created a *different* variable,
+  `a` captured a _binding_; the inner `Declare` created a _different_ variable,
   and a different variable has no business intercepting. The asymmetry that made
   the old rule indefensible: give that shadow a value —
   `Block(Declare(x, "real"), Assign(x, 7), a + 5)` — and it already did not
@@ -96,8 +98,8 @@
   the whole interval, and could never recover from a first panel that read as
   zero: with every node returning ~0, the Gauss/Kronrod difference also
   vanished, met the absolute tolerance, and the integral "converged" after 15
-  evaluations. The witness is a peak far narrower than the interval whose
-  weight vanishes at the center node:
+  evaluations. The witness is a peak far narrower than the interval whose weight
+  vanishes at the center node:
 
   ```js
   ce.parse('\\int_{-50}^{50} x^2 \\frac{1}{\\sqrt{2\\pi}} e^{-x^2/2} dx').N();
@@ -110,27 +112,26 @@
   over the same interval was correct, because `φ(0)` is sampled. Quadrature now
   starts from 16 equal panels, which fixes the family exactly and brings the
   comb `∫₋₁₅¹⁵ φ(x)³⁵⁰` to 0.14% relative error. This is a mitigation, not a
-  guarantee — a peak narrower than a starting panel can still be missed, and
-  the error estimate still cannot report it — a peak-discovery strategy
-  (shifted or low-discrepancy probes) would close the family rather than move
-  the threshold, and is not attempted here. Iterated integrals reduce the
-  per-level count so the floor applies to the whole integral rather than
-  multiplying per dimension. The cost falls on integrals that
-  used to converge on the first panel: `∫₀¹ sin x` goes from 15 to 240
-  evaluations, so a compiled integral called per plotted sample goes from
-  ~40 µs to ~130 µs. Reported by the Tycho team.
+  guarantee — a peak narrower than a starting panel can still be missed, and the
+  error estimate still cannot report it — a peak-discovery strategy (shifted or
+  low-discrepancy probes) would close the family rather than move the threshold,
+  and is not attempted here. Iterated integrals reduce the per-level count so
+  the floor applies to the whole integral rather than multiplying per dimension.
+  The cost falls on integrals that used to converge on the first panel:
+  `∫₀¹ sin x` goes from 15 to 240 evaluations, so a compiled integral called per
+  plotted sample goes from ~40 µs to ~130 µs. Reported by the Tycho team.
 
-- **A definite integral whose integrand is identically non-finite now fails
-  fast instead of burning the full Monte-Carlo budget.** Adaptive quadrature
-  can never converge on a `NaN` integrand, so it fell through to the
-  Monte-Carlo estimator, which spent 1e7 samples — 250–450 ms per call — to
-  return the `NaN` that was decidable up front. The usual trigger is an unbound
-  variable reaching a compiled artifact as `undefined`; a plotted curve then
-  froze the thread and drew nothing. `monteCarloEstimate` now probes a few
-  samples and returns `NaN` immediately when they are all non-finite. Measured:
-  100 calls on such an integrand went from 30.5 s to 22 ms. Integrands with a
-  genuine endpoint singularity are unaffected — the bail requires *every* probe
-  to be non-finite. Reported by the Tycho team.
+- **A definite integral whose integrand is identically non-finite now fails fast
+  instead of burning the full Monte-Carlo budget.** Adaptive quadrature can
+  never converge on a `NaN` integrand, so it fell through to the Monte-Carlo
+  estimator, which spent 1e7 samples — 250–450 ms per call — to return the `NaN`
+  that was decidable up front. The usual trigger is an unbound variable reaching
+  a compiled artifact as `undefined`; a plotted curve then froze the thread and
+  drew nothing. `monteCarloEstimate` now probes a few samples and returns `NaN`
+  immediately when they are all non-finite. Measured: 100 calls on such an
+  integrand went from 30.5 s to 22 ms. Integrands with a genuine endpoint
+  singularity are unaffected — the bail requires _every_ probe to be non-finite.
+  Reported by the Tycho team.
 
 - **`.N()` of a definite integral with a free symbol in the integrand no longer
   throws a raw `ReferenceError` out of generated code.** The integrand was
@@ -147,11 +148,11 @@
   expression now stays symbolic; it evaluates as before once the symbol has a
   value. Both the single-limit and the iterated multi-limit paths are covered.
 
-- **A `Measurement` now answers the numeric accessors.** `Measurement(value,
-  error)` types as its nominal's scalar type, so `Integrate(…).N()` reports
-  `finite_real` and `isNumber === true` — but every numeric read was dead,
-  which silently poisoned any consumer reading `.re`, and propagated, since
-  `Measurement + 1` is another `Measurement`:
+- **A `Measurement` now answers the numeric accessors.**
+  `Measurement(value, error)` types as its nominal's scalar type, so
+  `Integrate(…).N()` reports `finite_real` and `isNumber === true` — but every
+  numeric read was dead, which silently poisoned any consumer reading `.re`, and
+  propagated, since `Measurement + 1` is another `Measurement`:
 
   ```js
   const n = ce.parse('\\int_0^1 \\sin(x) dx').N();
@@ -162,10 +163,10 @@
   ```
 
   `.re`, `.im`, `.bignumRe`, `.bignumIm`, `.sgn` and `valueOf()` project the
-  nominal — all of them on the public `Expression` type, so `.re` is the
-  channel and no cast is needed. The uncertainty stays reachable through the
-  MathJSON, or through `op2` after narrowing with `isFunction()`, and
-  `toString()` still shows `±`.
+  nominal — all of them on the public `Expression` type, so `.re` is the channel
+  and no cast is needed. The uncertainty stays reachable through the MathJSON,
+  or through `op2` after narrowing with `isFunction()`, and `toString()` still
+  shows `±`.
 
   Three members are deliberately NOT projected, all for the same reason: a
   `Measurement` is a **function expression**, and the number-literal surface
@@ -173,16 +174,16 @@
   `numericValue` stays `undefined` — it is declared only on
   `NumberLiteralInterface`, and projecting it would advertise an exact numeric
   representation that a quadrature result does not have; `isNumberLiteral` and
-  the `isNumber()` guard stay `false`; and `.value` stays `undefined` (it is
-  the expression for a literal and `undefined` for a symbolic expression).
+  the `isNumber()` guard stay `false`; and `.value` stays `undefined` (it is the
+  expression for a literal and `undefined` for a symbolic expression).
   `.re`/`.im` are sufficient for a `Measurement` precisely because its nominal
   is never an exact number. Reported by the Tycho team.
 
 - **A shorthand-lambda placeholder in a pipeline stage no longer picks up a
   same-named global.** `Pipe` is lazy, so it canonicalizes its right operand in
-  the caller's scope — before the operand is wrapped into the implicit lambda
-  it denotes. A global `_1` holding a value therefore captured the placeholder,
-  and the stage silently failed to canonicalize:
+  the caller's scope — before the operand is wrapped into the implicit lambda it
+  denotes. A global `_1` holding a value therefore captured the placeholder, and
+  the stage silently failed to canonicalize:
 
   ```js
   ce.box(['Assign', '_1', 7]).evaluate();
@@ -206,10 +207,10 @@
 
   The cause was in the type lattice rather than in lists: `widen()` (a join)
   returned `nothing` for an empty input, where the join of no types is the
-  *bottom* type. `nothing` is the unit type of the value `Nothing`, not the
+  _bottom_ type. `nothing` is the unit type of the value `Nothing`, not the
   bottom type — `never` is. With `never`, covariance does the rest, since
-  `never <: X` gives `list<never> <: list<X>`. `narrow()` had the mirror bug
-  and now returns the top type for an empty input.
+  `never <: X` gives `list<never> <: list<X>`. `narrow()` had the mirror bug and
+  now returns the top type for an empty input.
 
   Visible effects: the rendered type of an empty collection changes
   (`list<nothing>` → `list<never>`, `list<list<nothing>>` →
