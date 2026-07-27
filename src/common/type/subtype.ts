@@ -372,10 +372,10 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
 
   // Conservative: assume they might overlap. Note in particular that two
   // same-category composites whose PARAMETERS cannot coincide (`list<integer>`
-  // vs `list<string>`) are not claimed disjoint: `list<never>` is a subtype of
-  // both, so the claim would rest on no value ever having that type — a fact
-  // about how the empty list is typed, not about the lattice. Use
-  // `couldMatch` for that question.
+  // vs `list<string>`) are NOT disjoint, and this is not merely caution: the
+  // empty list inhabits both. It types `list<never>`, which is a subtype of
+  // every list type, so it is a witness against any such claim. Use
+  // `couldMatch` for the element-shape question.
   return false;
 }
 
@@ -470,6 +470,13 @@ function dimensionsCouldMatch(
  * in either direction, with one deliberate exception: `never` has no
  * inhabitants, so nothing could be a `never` — where `isSubtype` treats it as
  * a subtype of everything.
+ *
+ * It also deliberately ignores the EMPTY collection as a witness. `[]` types
+ * `list<never>` and so inhabits every list type, which on a purist reading
+ * would make every pair of list types "could match" and render the predicate
+ * useless for classification. `list<integer>.couldMatch('list<string>')` is
+ * therefore `false` — the question being asked is about element shape. The
+ * empty list's own type answers `true` against any list type, as it should.
  *
  * It is *not* the negation of {@linkcode provablyDisjoint}: that predicate is
  * conservative (unproven ⇒ "may overlap"), which makes it answer `true` for
@@ -1336,7 +1343,11 @@ function unionTypes(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
  *  only encompasses values that belong to both input types.
  */
 export function narrow(...types: Readonly<Type>[]): Type {
-  if (types.length === 0) return 'nothing';
+  // The meet of NO types is the top type: nothing has been constrained yet.
+  // (`nothing` — the unit type of the value `Nothing` — is neither the top nor
+  // the bottom of the lattice; using it here was a false friend for languages
+  // whose `Nothing` *is* the bottom type.)
+  if (types.length === 0) return 'any';
   if (types.length === 1) return types[0];
 
   return types.reduce((a, b) => narrow2(a, b));
@@ -1347,7 +1358,13 @@ export function narrow(...types: Readonly<Type>[]): Type {
  *  that encompasses the possible values of the input types.
  */
 export function widen(...types: Readonly<Type>[]): Readonly<Type> {
-  if (types.length === 0) return 'nothing';
+  // The join of NO types is the bottom type — the element type of an EMPTY
+  // collection, whose elements are drawn from the empty set. This is what
+  // makes `[]` type as `list<never>` and, by covariance, a member of every
+  // list type: `never <: X` gives `list<never> <: list<X>`. Returning
+  // `nothing` here (the unit type of the value `Nothing`) made `[]` a member
+  // of NO list type — `[] <: list<integer>` was false.
+  if (types.length === 0) return 'never';
   if (types.length === 1) return types[0];
 
   return types.reduce((a, b) => widen2(a, b));

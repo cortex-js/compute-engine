@@ -125,8 +125,16 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
 describe('Phase A — degenerate lists keep prior (no-claim) behavior', () => {
   // Phase C representation unification: literal lists type honestly
   // (list<finite_…^dims>).
-  test('[] → list<nothing>', () => {
-    expect(typeOf(['List'])).toBe('list<nothing>');
+  // The empty list's element type is the BOTTOM type: its elements are drawn
+  // from the empty set. `widen()` over zero operands returns `never`, so `[]`
+  // is `list<never>` and — by covariance, since `never <: X` — a member of
+  // every list type. This read `list<nothing>` until 2026-07-26; `nothing` is
+  // the unit type of the value `Nothing`, not the bottom type, so the empty
+  // list was a member of NO list type (`[] <: list<integer>` was false).
+  test('[] → list<never>, and is assignable to any list type', () => {
+    expect(typeOf(['List'])).toBe('list<never>');
+    expect(ce.box(['List']).type.matches('list<integer>')).toBe(true);
+    expect(ce.box(['List']).type.matches('list<string>')).toBe(true);
   });
 
   test('ragged [[1,2],[3]] → no shape claim', () => {
@@ -149,6 +157,6 @@ describe('Phase A — degenerate lists keep prior (no-claim) behavior', () => {
   test('[[],[]] empty inner levels → no shape claim', () => {
     const boxed = ce.box(['List', ['List'], ['List']]);
     expect(boxed.type.matches('matrix<2x0>')).toBe(false);
-    expect(boxed.type.toString()).toBe('list<list<nothing>>');
+    expect(boxed.type.toString()).toBe('list<list<never>>');
   });
 });

@@ -69,6 +69,29 @@
 
 ### Issues Resolved
 
+- **The empty list is now a member of every list type.** `[]` typed
+  `list<nothing>`, which made `[] <: list<integer>` **false** — an empty list
+  satisfied no list type at all:
+
+  ```js
+  ce.parse('[]').type.toString(); // was: "list<nothing>"   now: "list<never>"
+  ce.parse('[]').type.matches('list<integer>'); // was: false        now: true
+  ```
+
+  The cause was in the type lattice rather than in lists: `widen()` (a join)
+  returned `nothing` for an empty input, where the join of no types is the
+  *bottom* type. `nothing` is the unit type of the value `Nothing`, not the
+  bottom type — `never` is. With `never`, covariance does the rest, since
+  `never <: X` gives `list<never> <: list<X>`. `narrow()` had the mirror bug
+  and now returns the top type for an empty input.
+
+  Visible effects: the rendered type of an empty collection changes
+  (`list<nothing>` → `list<never>`, `list<list<nothing>>` →
+  `list<list<never>>`), and an empty list now satisfies a list-typed parameter
+  of any element type. Note that `couldMatch()` deliberately ignores the empty
+  list as a witness — `list<integer>.couldMatch('list<string>')` stays `false`,
+  since that question is about element shape.
+
 - **`nothing` and `missing` were reported as disjoint from any union containing
   them** — `nothing` vs `boolean | nothing` claimed disjointness, refuted by the
   value `Nothing`, which inhabits both. The unit-type short-circuit ran before
