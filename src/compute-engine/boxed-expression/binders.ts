@@ -112,6 +112,39 @@ export function sameBindingDef(
   return staticBindingOf(a) === staticBindingOf(b);
 }
 
+/** @see markShieldDeclaration */
+type Shielded = { _isShield?: true };
+
+/**
+ * Mark the binding `scope` holds for `name` as a SHIELD.
+ *
+ * A shield is a valueless shadow declared for no reason other than to hide an
+ * enclosing binding's VALUE for the duration of some work: `withValueShield`
+ * (`utils.ts` — `D`, `Integrate`, `Limit`, `JacobianMatrix`, `Solve`) and
+ * `simplifyValueBlind` (`simplify.ts` — the public `.simplify()`) are the two
+ * sites, and between them every shield in the engine.
+ *
+ * `evaluateInOwnBindings`' restriction 2 used to infer this from "the
+ * shadowing binding holds no value", which is a proxy, not the property: an
+ * ordinary inner `Declare(x, 'real')` shields nothing yet intercepted a stored
+ * value's free `x` all the same. The marker states it instead
+ * (`docs/plans/2026-07-26-binder-mechanism-design.md` §4).
+ *
+ * A no-op for a name the scope does not bind, or binds to an operator
+ * definition: `declare` may legitimately have declined (an exotic type that
+ * does not round-trip), and the caller leaves that symbol unshielded.
+ */
+export function markShieldDeclaration(scope: Scope, name: string): void {
+  const def = scope.bindings.get(name);
+  if (def !== undefined && 'value' in def)
+    (def.value as unknown as Shielded)._isShield = true;
+}
+
+/** Is `def` a shield (see `markShieldDeclaration`)? */
+function isShield(def: BoxedValueDefinition): boolean {
+  return (def as unknown as Shielded)._isShield === true;
+}
+
 /**
  * What this node binds, as name → the binding itself.
  *
@@ -336,14 +369,20 @@ export function rebindToBindings(
  *   arrangement. The frame's definition is an ACTIVATION of the body's
  *   binding, so the walk now finds it and the restriction is left doing only
  *   its own, unrelated job.
- * - **The shadowing binding must hold a VALUE.** A valueless shadow cannot
- *   capture anything, and shadowing a name valueless is how every shield in the
- *   engine works: `Solve` blinds its unknown at the source, so
- *   `Solve(Simplify(s) = 2, w)` resolves `s` to `(9-w²)/4` yet keeps `w`
- *   symbolic even though `w` has a global value (`solve.test.ts`), and
+ * - **The shadowing binding must not be a SHIELD.** Shadowing a name valueless
+ *   is how every shield in the engine works: `Solve` blinds its unknown at the
+ *   source, so `Solve(Simplify(s) = 2, w)` resolves `s` to `(9-w²)/4` yet keeps
+ *   `w` symbolic even though `w` has a global value (`solve.test.ts`), and
  *   `withValueShield`/`simplifyValueBlind` do the same for `simplify`. Honoring
  *   the occurrence's own binding there would resolve precisely what the shield
  *   exists to hide.
+ *
+ *   The restriction used to read "the shadowing binding must hold a VALUE",
+ *   which is a PROXY for that and one the shields do not have a monopoly on: an
+ *   ordinary `Block(Declare(x, 'real'), a + 5)` intercepted a stored `a = x + 1`
+ *   too, and left it symbolic in a variable it does not refer to — while the
+ *   same block with a VALUED shadow already did not intercept. Shields are now
+ *   marked (`markShieldDeclaration`) and only they defer.
  *
  * (The value-definition checks are inlined rather than using `isValueDef`:
  * `utils.ts` imports this module, so this module cannot import it back.)
@@ -401,12 +440,13 @@ export function evaluateInOwnBindings(
       scope = scope.parent;
     }
     if (!reachable || innermost === undefined) return sym;
-    // Already the innermost binding, or shadowed by something that holds no
-    // value: the ambient lookup answers correctly on its own.
+    // Already the innermost binding, or shadowed by a SHIELD: the ambient
+    // lookup answers correctly on its own.
     if ('value' in innermost && sameBindingDef(innermost.value, own))
       return sym;
-    if (!('value' in innermost) || innermost.value.value === undefined)
-      return sym;
+    // An operator definition is not ours to shadow with a value binding.
+    if (!('value' in innermost)) return sym;
+    if (isShield(innermost.value)) return sym;
     (env ??= new Map()).set(name, { value: own } satisfies TaggedValueDefinition);
     return sym;
   });

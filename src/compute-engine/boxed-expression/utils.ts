@@ -21,7 +21,11 @@ import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { functionLiteralParameterName } from './function-literal.js';
-import { boundVariableNames, rewriteWithBinders } from './binders.js';
+import {
+  boundVariableNames,
+  markShieldDeclaration,
+  rewriteWithBinders,
+} from './binders.js';
 
 /**
  * Check if an expression contains symbolic transcendental functions of constants
@@ -1010,6 +1014,10 @@ export function withValueShield<T>(
       // thrown evaluation.
       try {
         ce.declare(name, { type });
+        // Mark it as a SHIELD: the dereference defers to the ambient lookup
+        // for a shielded name (`evaluateInOwnBindings`, `binders.ts`), which
+        // is what makes the shadow actually hide the value.
+        markShieldDeclaration(shieldScope, name);
       } catch {
         /* leave this symbol unshadowed */
       }
@@ -1089,6 +1097,42 @@ export function rebindEscapingCurrentScope(
   return ce._inScope(scope.parent ?? undefined, () =>
     rebindEscaping(expr, scope)
   );
+}
+
+/**
+ * The integrand of an `Integrate`, lifted out of its `Function` literal's
+ * `Block`.
+ *
+ * Both `antiderivative()` and an integration provider (the Rubi driver) unwrap
+ * the `Function`/`Block` scaffolding and work on the bare integrand — while
+ * minting their own occurrences of the integration variable and of the
+ * integrand's free coefficients with `ce.symbol(…)`, i.e. in the CALLER's
+ * scope. But the literal's Block scope binds all of them (a coefficient `a` is
+ * auto-declared there when the body is canonicalized), so the lifted body and
+ * the minted symbols would denote DIFFERENT bindings of the same name: the
+ * arithmetic then declines to combine them (measured inside the Rubi driver,
+ * where `Product.mul` stopped folding `x·x` and whole rule families went
+ * inert), the answer compares unequal to the same expression written by the
+ * caller (`∫ x² dx` no longer `isSame` `x³/3`), and — since stage 13 — the
+ * matcher's `case 'var'` stops recognizing the integration variable at all.
+ *
+ * So the lift re-binds, exactly as `lambdaFromLiteral` does for a Jacobian's
+ * body — see §Escaping results in
+ * `docs/plans/2026-07-24-defining-scope-dereference-design.md`. A body that is
+ * not a single-statement Block is handed over untouched; the callers unwrap
+ * whatever they are given.
+ *
+ * EVERY route that hands an integrand to `ce._integrationProvider` or to
+ * `antiderivative()` must lift first, or it silently disagrees with the real
+ * run (`explain('Integrate')` did).
+ */
+export function liftIntegrand(literal: Expression): Expression {
+  if (!isFunction(literal, 'Function')) return literal;
+  const body = literal.op1;
+  if (!isFunction(body, 'Block') || body.nops !== 1) return literal;
+  const scope = body.localScope;
+  if (!scope) return literal;
+  return rebindEscaping(body.op1, scope);
 }
 
 export function isOperatorDef(

@@ -95,6 +95,15 @@ export class _BoxedValueDefinition
   // definition keeps the same object shape as every other one.
   _activationOf: BoxedValueDefinition | undefined = undefined;
 
+  // True when this binding is a SHIELD: a valueless shadow declared solely to
+  // hide an enclosing binding's value (`withValueShield` in `utils.ts`,
+  // `simplifyValueBlind` in `simplify.ts`). Read by `evaluateInOwnBindings`'s
+  // restriction 2 (`markShieldDeclaration`, `binders.ts`;
+  // `docs/plans/2026-07-26-binder-mechanism-design.md` §4). Declared here —
+  // rather than assigned on demand — so a shield keeps the same object shape
+  // as every other definition.
+  _isShield: true | undefined = undefined;
+
   // Bumped on every semantic change to THIS definition (value write, type
   // change, disposal). Used with binding-identity re-resolution to validate
   // per-dependency caches (the `Comprehension` element memo) without an

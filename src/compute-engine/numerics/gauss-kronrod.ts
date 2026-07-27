@@ -116,6 +116,66 @@ function panelIsBad(p: Panel): boolean {
 }
 
 /**
+ * Number of equal panels the adaptive loop starts from, instead of the single
+ * panel `[a, b]`.
+ *
+ * A single starting panel makes convergence a function of what 15 nodes happen
+ * to see, and the adaptive loop can never recover from a first panel that reads
+ * as zero: the GK/Gauss difference is then also ~0, so the error estimate meets
+ * `atol` and the integral "converges" on the first evaluation. The witness is a
+ * peak far narrower than the interval whose weight vanishes at the center node
+ * — `∫₋₅₀⁵⁰ x²·φ(x) dx` (φ the standard normal density) samples `0` at the
+ * center and `~1e-22` at every other node, and returns `3e-21 ± 5e-21` for a
+ * true value of `1`. The bare `∫φ` over the same interval converges correctly,
+ * because `φ(0)` is sampled.
+ *
+ * Starting from a fixed subdivision raises the sampling floor so the peak is
+ * seen. This is a mitigation, not a guarantee — a peak narrower than `(b−a)/N`
+ * can still be missed, and the error estimate remains unable to report it.
+ *
+ * `N = 16` was picked by measuring relative error and evaluation count over a
+ * battery (Gaussian moments 0/1/2/4/6 over `[-50, 50]`, the comb `φ(x)³⁵⁰`,
+ * `sin`, `√x`, `1/(1+x²)`, `e^(−x²)`, and a semi-infinite χ² tail):
+ *
+ * | N | moments 1–6      | `∫φ³⁵⁰` rel. err | total evaluations |
+ * | - | ---------------- | ---------------- | ----------------- |
+ * | 1 | all 100% wrong   | 2250%            | 1575              |
+ * | 2 | exact            | 25%              | 3360              |
+ * | 8 | exact            | 2.7%             | 3450              |
+ * | 16| exact            | 0.14%            | 4410              |
+ * | 32| exact            | 0.001%           | 6390              |
+ *
+ * Two panels already fix the moment family; the comb is what buys the rest.
+ * The aggregate cost is ~2.8× the single-panel budget, but it is not uniform:
+ * more starting panels often SAVE refinements later (`e^(−x²)` over `[-5, 5]`
+ * costs 225 evaluations at N=1 and 240 at N=16). The real cost lands on
+ * integrals that used to converge on the first panel — `∫₀¹ sin x` goes from 15
+ * to 240 evaluations, i.e. a compiled integral called per plotted sample goes
+ * from ~40 µs to ~130 µs. That is the trade: a 3× slower cheap integral in
+ * exchange for a whole family that was silently, confidently wrong.
+ *
+ * NESTING: this floor MULTIPLIES across the levels of an iterated integral,
+ * which runs one full quadrature per outer node — a smooth 2-D integral goes
+ * from 225 to 57 600 evaluations (256×), and another 16× per added dimension.
+ * A caller that nests must pass `initialPanels` explicitly; see
+ * `initialPanelsForDimensions`.
+ */
+const INITIAL_PANELS = 16;
+
+/**
+ * The per-level starting-panel count for a `dimensions`-deep iterated integral,
+ * chosen so the floor stays ~`INITIAL_PANELS` for the WHOLE integral instead of
+ * per level. Without this an iterated integral pays `INITIAL_PANELS^dimensions`
+ * — the 256× above — which would recreate the stalls this seeding exists to
+ * prevent. 1-D is unchanged at 16; 2-D uses 4 per level (16 total), 3-D uses 3
+ * (27 total). Never below 2, because a single starting panel is the defect.
+ */
+export function initialPanelsForDimensions(dimensions: number): number {
+  if (!Number.isFinite(dimensions) || dimensions < 2) return INITIAL_PANELS;
+  return Math.max(2, Math.round(Math.pow(INITIAL_PANELS, 1 / dimensions)));
+}
+
+/**
  * Adaptive GK15 over a finite interval `[a, b]`.
  */
 function adaptiveFinite(
@@ -124,10 +184,10 @@ function adaptiveFinite(
   b: number,
   rtol: number,
   atol: number,
-  maxIntervals: number
+  maxIntervals: number,
+  initialPanels: number
 ): { estimate: number; error: number; converged: boolean } {
-  const first = gk15(f, a, b);
-  const panels: Panel[] = [first];
+  const panels: Panel[] = [];
 
   // Incremental accumulators. A non-finite panel contribution must NOT enter
   // the running totals: subtracting a stale `NaN`/`±∞` parent when it is later
@@ -135,12 +195,10 @@ function adaptiveFinite(
   // (removable singularity at a node — see `panelIsBad`). Instead, bad panels
   // add 0 to `totalValue`/`totalError` and are tallied in `badPanels`, which
   // gates convergence until every one has been subdivided away.
-  let totalValue = Number.isFinite(first.value) ? first.value : 0;
-  let totalError = Number.isFinite(first.error) ? first.error : 0;
-  let badPanels = panelIsBad(first) ? 1 : 0;
+  let totalValue = 0;
+  let totalError = 0;
+  let badPanels = 0;
   let roundoffStop = false;
-
-  const tolerance = () => Math.max(atol, rtol * Math.abs(totalValue));
 
   // Fold a panel into the running totals, skipping non-finite contributions.
   const addPanel = (p: Panel) => {
@@ -153,6 +211,30 @@ function adaptiveFinite(
     if (Number.isFinite(p.error)) totalError -= p.error;
     if (panelIsBad(p)) badPanels -= 1;
   };
+
+  // Start from `initialPanels` equal panels rather than the single `[a, b]`.
+  // Both counts are floored: a fractional `maxIntervals` would otherwise make
+  // the loop run `ceil(n)` times while the `i === n - 1` endpoint clamp never
+  // fires, so the last panel would extend PAST `b` and the routine would
+  // integrate the wrong interval. Degenerate splits (an interval so narrow the
+  // cut points collapse under float roundoff) fall back to the single panel.
+  const n = Math.max(
+    1,
+    Math.min(Math.floor(initialPanels), Math.floor(maxIntervals))
+  );
+  for (let i = 0; i < n; i++) {
+    const lo = i === 0 ? a : a + ((b - a) * i) / n;
+    const hi = i === n - 1 ? b : a + ((b - a) * (i + 1)) / n;
+    if (!(lo < hi)) {
+      panels.length = 0;
+      break;
+    }
+    panels.push(gk15(f, lo, hi));
+  }
+  if (panels.length === 0) panels.push(gk15(f, a, b));
+  panels.forEach(addPanel);
+
+  const tolerance = () => Math.max(atol, rtol * Math.abs(totalValue));
 
   while (panels.length < maxIntervals) {
     if (badPanels === 0 && totalError <= tolerance()) break;
@@ -199,6 +281,9 @@ function adaptiveFinite(
  * @param options.rtol Relative tolerance target (default 1e-10).
  * @param options.atol Absolute tolerance target (default 1e-12).
  * @param options.maxIntervals Panel budget before giving up (default 1500).
+ * @param options.initialPanels Equal panels to start the adaptive loop from
+ * (default `INITIAL_PANELS`). An ITERATED integral must reduce this — the floor
+ * multiplies across levels; see `initialPanelsForDimensions`.
  *
  * Returns the `estimate`, an error `error` bound, and whether the requested
  * tolerance was met (`converged`). Semi-infinite bounds are handled by a
@@ -213,11 +298,17 @@ export function adaptiveQuadrature(
   f: (x: number) => number,
   a: number,
   b: number,
-  options?: { rtol?: number; atol?: number; maxIntervals?: number }
+  options?: {
+    rtol?: number;
+    atol?: number;
+    maxIntervals?: number;
+    initialPanels?: number;
+  }
 ): { estimate: number; error: number; converged: boolean } {
   const rtol = options?.rtol ?? 1e-10;
   const atol = options?.atol ?? 1e-12;
   const maxIntervals = options?.maxIntervals ?? 1500;
+  const initialPanels = options?.initialPanels ?? INITIAL_PANELS;
 
   if (Number.isNaN(a) || Number.isNaN(b))
     return { estimate: NaN, error: NaN, converged: false };
@@ -249,6 +340,7 @@ export function adaptiveQuadrature(
       rtol,
       atol,
       maxIntervals: Math.ceil(maxIntervals / 2),
+      initialPanels,
     };
     const left = adaptiveQuadrature(f, a, 0, halfOptions);
     const right = adaptiveQuadrature(f, 0, b, halfOptions);
@@ -292,5 +384,5 @@ export function adaptiveQuadrature(
     hi = b;
   }
 
-  return adaptiveFinite(g, lo, hi, rtol, atol, maxIntervals);
+  return adaptiveFinite(g, lo, hi, rtol, atol, maxIntervals, initialPanels);
 }

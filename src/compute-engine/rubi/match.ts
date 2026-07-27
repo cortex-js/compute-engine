@@ -20,6 +20,7 @@
 import type { Expr as Expression } from './types.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { isSymbol } from '../boxed-expression/type-guards.js';
+import { sameBindingDef } from '../boxed-expression/binders.js';
 
 // Deadline plumbing. The backtracking AC matcher (mAC) can blow up
 // combinatorially on products with many factors — this is the dominant
@@ -103,12 +104,29 @@ function bindIn(
   return false;
 }
 
-/** Is `expr` an occurrence of the bound variable `x`? Both are compared by
- * NAME: `x` is supplied by the driver as a re-boxed symbol, so it carries the
- * global binding rather than the one the integral's binder created. */
+/**
+ * Is `expr` an occurrence of the bound variable `x`?
+ *
+ * Name AND binding, the ordinary equality question — NOT the "patterns are
+ * syntax" carve-out (`m`'s `case 'const'` and `match-dispatch`'s template
+ * comparisons are that; this one compares a SUBJECT sub-expression against the
+ * driver's own integration variable).
+ *
+ * `RubiDriver.int` takes the variable as a STRING and re-boxes it with
+ * `ce.symbol`, so historically it carried the CALLER's binding while parsing
+ * `\int … dx` minted the integral's own — the reason this used to compare by
+ * name alone (366 misses, all on `x`, all from this site). The integrand now
+ * arrives LIFTED into the caller's scope (`liftIntegrand`,
+ * `boxed-expression/utils.ts`) so both sides denote one binding, and the
+ * comparison can ask the real
+ * question. `sameBindingDef` also treats a call frame's parameter definition as
+ * its static binding, and two raw occurrences still agree — the parse route
+ * leaves a binding-site symbol undefined.
+ */
 function sameBoundName(expr: Expression, x: Expression): boolean {
   if (!isSymbol(expr)) return expr.isSame(x);
-  return isSymbol(x) && expr.symbol === x.symbol;
+  if (!isSymbol(x) || expr.symbol !== x.symbol) return false;
+  return sameBindingDef(expr.valueDefinition, x.valueDefinition);
 }
 
 function m(
@@ -121,13 +139,8 @@ function m(
   tickDeadline(); // every backtracking step funnels through here
   switch (pat.kind) {
     case 'var':
-      // The integration variable is a BOUND variable: `∫ … dx` binds `x`, and
-      // parsing gives that binding its own definition, distinct from any
-      // same-named global. The driver identifies it by NAME (`RubiDriver.int`
-      // takes `variable: string` and re-boxes it with `ce.symbol`), so it has
-      // no binding to offer — and per alpha-equivalence a bound occurrence is
-      // compared by name anyway. Comparing bindings here made every rule that
-      // mentions the integration variable fail to match.
+      // The integration variable, compared by name AND binding — see
+      // `sameBoundName` for why the binding half is answerable now.
       return sameBoundName(expr, x) && k();
     case 'const':
       return pat.value.isSame(expr) && k();

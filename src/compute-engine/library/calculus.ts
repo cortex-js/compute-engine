@@ -9,6 +9,7 @@ import { checkType } from '../boxed-expression/validate.js';
 import {
   rebindEscaping,
   rebindEscapingCurrentScope,
+  liftIntegrand,
   defaultUnknown,
   hasSymbolicTranscendental,
   resolveToList,
@@ -38,7 +39,10 @@ import {
   canonicalFunctionLiteralArguments,
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
-import { adaptiveQuadrature } from '../numerics/gauss-kronrod.js';
+import {
+  adaptiveQuadrature,
+  initialPanelsForDimensions,
+} from '../numerics/gauss-kronrod.js';
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
 import {
   centeredDiff8thOrder,
@@ -320,7 +324,12 @@ function nIntegrateMultiple(
     const lower = boundFns[dim][0](outer);
     const upper = boundFns[dim][1](outer);
     if (isNaN(lower) || isNaN(upper)) return { estimate: NaN, error: NaN };
-    const gk = adaptiveQuadrature(g, lower, upper);
+    // The starting-panel floor multiplies across levels — one full quadrature
+    // runs per outer node — so a per-level 16 would cost 16^dimensions. Reduce
+    // it so the floor applies to the whole iterated integral, not each level.
+    const gk = adaptiveQuadrature(g, lower, upper, {
+      initialPanels: initialPanelsForDimensions(limits.length),
+    });
     if (gk.converged && Number.isFinite(gk.estimate)) return gk;
     return monteCarloEstimate(g, lower, upper, 1e4, ce._deadline);
   };
@@ -436,37 +445,6 @@ function lambdaFromLiteral(
     if (scope) body = rebindEscaping(body, scope);
   }
   return { params: params as string[], body };
-}
-
-/**
- * The integrand of an `Integrate`, lifted out of its `Function` literal's
- * `Block`.
- *
- * Both `antiderivative()` and an integration provider (the Rubi driver) unwrap
- * the `Function`/`Block` scaffolding and work on the bare integrand — while
- * minting their own occurrences of the integration variable and of the
- * integrand's free coefficients with `ce.symbol(…)`, i.e. in the CALLER's
- * scope. But the literal's Block scope binds all of them (a coefficient `a` is
- * auto-declared there when the body is canonicalized), so the lifted body and
- * the minted symbols denote DIFFERENT bindings of the same name: the
- * arithmetic then declines to combine them (measured inside the Rubi driver,
- * where `Product.mul` stopped folding `x·x` and whole rule families went
- * inert), and the answer compares unequal to the same expression written by
- * the caller (`∫ x² dx` no longer `isSame` `x³/3`).
- *
- * So the lift re-binds, exactly as `lambdaFromLiteral` does for a Jacobian's
- * body — see §Escaping results in
- * `docs/plans/2026-07-24-defining-scope-dereference-design.md`. A body that is
- * not a single-statement Block is handed over untouched; the callers unwrap
- * whatever they are given.
- */
-function liftIntegrand(literal: Expression): Expression {
-  if (!isFunction(literal, 'Function')) return literal;
-  const body = literal.op1;
-  if (!isFunction(body, 'Block') || body.nops !== 1) return literal;
-  const scope = body.localScope;
-  if (!scope) return literal;
-  return rebindEscaping(body.op1, scope);
 }
 
 function bareFunctionLambda(
@@ -1172,6 +1150,21 @@ volumes
           // If a numeric approximation is requested, equivalent to NIntegrate
           const f = ops[0];
 
+          // A free symbol in the integrand — a parameter with no value, e.g.
+          // `a` in `∫₀¹ a·sin(x) dx` or an unassigned slider in `∫ n(x,q) dx`
+          // — leaves nothing to integrate numerically, so stay symbolic. Not
+          // merely a quality guard: without it the integrand is handed to
+          // `implicitCompile`, whose generated body reads the free symbol from
+          // a scope slot that the numeric caller never supplies, and the raw
+          // `ReferenceError: _ is not defined` escapes out of generated code
+          // to the caller of `.N()`.
+          const boundVars = new Set<string>();
+          for (const l of ops.slice(1)) {
+            const v = isFunction(l) ? sym(l.op1) : undefined;
+            if (v) boundVars.add(v);
+          }
+          if (f.unknowns.some((s) => !boundVars.has(s))) return undefined;
+
           // Multiple limits (`Integrate(f, Limits(x,…), Limits(y,…))`):
           // iterated quadrature over every limit. The single-limit path below
           // reads only `ops[1]` and would silently drop the other dimensions.
@@ -1191,6 +1184,19 @@ volumes
           // This converts e.g. 'x' to ['Function', 'x', 'x'] -> (x) => x
           const fnExpr =
             f.operator === 'Function' ? f : ce.expr(['Function', f, variable]);
+
+          // A user-supplied `Function` literal may declare parameters the
+          // single limit does not supply — `Integrate(Function(x+q, x, q),
+          // Limits(x,0,1))`. Those are FORMAL parameters, so `f.unknowns` is
+          // empty and the free-symbol guard above passes; the literal then
+          // compiles two-arity, is invoked unary, and quadrature reads `NaN`.
+          // Mirror the parameter/variable agreement check `nIntegrateMultiple`
+          // already performs, and stay symbolic instead.
+          if (isFunction(fnExpr, 'Function')) {
+            const params = fnExpr.ops.slice(1).map((p) => sym(p));
+            if (params.length !== 1 || params[0] !== variable) return undefined;
+          }
+
           const compiled = implicitCompile(ce, fnExpr);
           const jsf =
             (compiled?.run as (x: number) => number) ?? applicableN1(fnExpr);

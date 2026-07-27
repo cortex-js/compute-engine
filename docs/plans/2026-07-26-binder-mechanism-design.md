@@ -584,6 +584,14 @@ first); **R3** known-hostile (a prior measurement says it breaks).
 Stages 1–8 are independent of one another; 9–13 are ordered. Stage 0.5
 deliberately lands early because it makes every later stage cheaper to debug.
 
+**Stage 9 (Solve) — final disposition (2026-07-26).** Solve KEEPS its ad-hoc
+shield channel; §5's "Solve keeps its ad-hoc channel, documented as such" is
+the outcome, and stage 14 is what documents it: the `withValueShield` call at
+`solve-domain.ts:618` now declares each shadow with an explicit `_isShield`
+marker, so the channel is a named mechanism rather than an inference from
+"this binding happens to hold no value". No further Solve migration is
+planned.
+
 ### 2.1 `makeLambda`, and a position on recursion
 
 The open question (2026-07-24 doc §Open questions, "Recursion") is *whether

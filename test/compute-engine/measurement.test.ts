@@ -1,4 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine/types';
+import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 import { toAsciiMath } from '../../src/compute-engine/boxed-expression/ascii-math';
 
 // A fresh engine so the `ce.assign('x', …)` cases don't leak into the shared
@@ -454,5 +456,90 @@ describe('Measurement — units interaction (Phase 5)', () => {
     expect(conv.operator).toBe('Quantity');
     expect(conv.op1!.re).toBeCloseTo(2.5, 12);
     expect(conv.op2!.symbol).toBe('m');
+  });
+});
+
+describe('Measurement — numeric projection (Tycho item 95)', () => {
+  // `measurementType()` reports the nominal's scalar type, so a Measurement
+  // answers `finite_real` / `isNumber === true`. The numeric read surface has
+  // to honor that: every accessor used to answer NaN/undefined, so a consumer
+  // reading `.re` silently got NaN for every numerically-integrated result and
+  // could not distinguish it from a genuine NaN.
+  const m = ce.parse('\\int_0^1 \\sin(x) dx').N();
+  const expected = 1 - Math.cos(1); // 0.45969769413186023
+
+  test('the fixture is in fact a Measurement claiming to be a real', () => {
+    expect(m.operator).toBe('Measurement');
+    expect(m.type.toString()).toBe('finite_real');
+    expect(m.isNumber).toBe(true);
+    expect(m.isReal).toBe(true);
+  });
+
+  test('.re / .im project the nominal', () => {
+    expect(m.re).toBeCloseTo(expected, 12);
+    expect(m.im).toBe(0);
+  });
+
+  test('.bignumRe and valueOf() are live', () => {
+    expect(Number(m.bignumRe)).toBeCloseTo(expected, 12);
+    expect(Number(m.valueOf())).toBeCloseTo(expected, 12);
+    expect(Number(m)).toBeCloseTo(expected, 12);
+  });
+
+  test('every projected accessor is reachable on the public `Expression` type', () => {
+    // The point of the projection is that a consumer needs no cast: each read
+    // below is typed on `Expression`, which is what makes `.re` the channel.
+    // `numericValue` and `op2` are deliberately NOT in this list — the first is
+    // not projected at all, the second needs an `isFunction()` narrow.
+    const e: Expression = m;
+    expect(e.re).toBeCloseTo(expected, 12);
+    expect(e.im).toBe(0);
+    expect(Number(e.bignumRe)).toBeCloseTo(expected, 12);
+    expect(e.sgn).toBe('positive');
+    expect(Number(e.valueOf())).toBeCloseTo(expected, 12);
+  });
+
+  test('`numericValue` is NOT projected — the literal surface stays behind isNumber()', () => {
+    // A Measurement is a function expression, and `numericValue` is declared
+    // only on `NumberLiteralInterface`. Projecting it would advertise an exact
+    // numeric representation a quadrature result does not have, on a surface
+    // this expression cannot narrow to. `.re`/`.im` are the channel.
+    expect(isNumber(m)).toBe(false);
+    expect(
+      (m as unknown as { numericValue: unknown }).numericValue
+    ).toBeUndefined();
+  });
+
+  test('.sgn / .isPositive answer from the nominal', () => {
+    expect(m.sgn).toBe('positive');
+    expect(m.isPositive).toBe(true);
+    expect(ce.function('Measurement', [-3, 0.5]).sgn).toBe('negative');
+  });
+
+  test('the uncertainty is still reachable, and display keeps it', () => {
+    expect(m.op2.re).toBeGreaterThan(0);
+    expect(m.json[0]).toBe('Measurement');
+    expect(m.toString()).toContain('±');
+  });
+
+  test('the projection survives arithmetic (the poison-propagation case)', () => {
+    const sum = ce.box(['Add', m, 1]).evaluate();
+    expect(sum.operator).toBe('Measurement');
+    expect(sum.re).toBeCloseTo(expected + 1, 12);
+  });
+
+  test('.value stays undefined, and a Measurement is not a number literal', () => {
+    // Both by contract: `.value` is the expression for a literal and
+    // `undefined` for a symbolic expression, and the `isNumber()` guard
+    // narrows on expression KIND — a Measurement is a function expression and
+    // must not be handed a BoxedNumber interface it does not implement.
+    expect(m.value).toBeUndefined();
+    expect(m.isNumberLiteral).toBe(false);
+  });
+
+  test('a non-Measurement function expression is unaffected', () => {
+    const f = ce.parse('f(x)');
+    expect(f.re).toBeNaN();
+    expect(f.sgn).toBeUndefined();
   });
 });

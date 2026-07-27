@@ -9,6 +9,7 @@ import {
   hasAssignedVariable,
   assignedVariableNames,
 } from './utils.js';
+import { markShieldDeclaration } from './binders.js';
 import type {
   Expression,
   SimplifyOptions,
@@ -222,6 +223,8 @@ export function simplifyValueBlind(
       // is better than a thrown simplify.
       try {
         ce.declare(n, { type: types[i] });
+        // Mark it as a SHIELD — see `withValueShield`, the other site.
+        markShieldDeclaration(shadowScope, n);
       } catch {
         /* leave this symbol unshadowed */
       }

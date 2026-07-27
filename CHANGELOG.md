@@ -50,6 +50,28 @@
   already correct is unchanged: a block-local `let` does not leak into a stored
   value, and a renamed parameter never captured.
 
+- **Only a value SHIELD hides a stored value's own binding.** Dereferencing a
+  symbol's stored value deferred to the ambient lookup whenever ANY valueless
+  shadow of a free symbol's name was in scope. That was a proxy for the shield
+  idiom — `Solve`, `D`, `Integrate`, `Limit` and `simplify()` all hide a
+  symbol's value by shadow-declaring it valueless — and it swept in ordinary
+  declarations, which shield nothing:
+
+  ```
+  a = x + 1                          // x still valueless: a captures the global x
+  x = 100
+  a + 5                              // 106 — unchanged
+  Block(Declare(x, "real"), a + 5)   // was: x + 6        now: 106
+  ```
+
+  `a` captured a *binding*; the inner `Declare` created a *different* variable,
+  and a different variable has no business intercepting. The asymmetry that made
+  the old rule indefensible: give that shadow a value —
+  `Block(Declare(x, "real"), Assign(x, 7), a + 5)` — and it already did not
+  intercept, evaluating to `106` before and after. The genuine shields are
+  unaffected: with a global `x = 100`, `Solve(x + 1 = 0, x)` is still `[-1]`,
+  and `simplify()` remains value-blind.
+
 - **A union type is assignable only to a target that covers EVERY arm.**
   `isSubtype()` (and therefore `type.matches()`) used the any-branch rule when
   the target was a composite type and the all-branch rule when it was a
@@ -68,6 +90,93 @@
   `LinearSolve`'s `matrix | vector` is now spelled.
 
 ### Issues Resolved
+
+- **Adaptive quadrature no longer reports a sharply-peaked integral as a
+  converged zero.** The adaptive loop started from a single 15-node panel over
+  the whole interval, and could never recover from a first panel that read as
+  zero: with every node returning ~0, the Gauss/Kronrod difference also
+  vanished, met the absolute tolerance, and the integral "converged" after 15
+  evaluations. The witness is a peak far narrower than the interval whose
+  weight vanishes at the center node:
+
+  ```js
+  ce.parse('\\int_{-50}^{50} x^2 \\frac{1}{\\sqrt{2\\pi}} e^{-x^2/2} dx').N();
+  // was: 3.2e-21 ± 5.1e-21     (true value: 1)
+  // now: 1.0000000000000002
+  ```
+
+  The whole Gaussian moment family failed this way (moments 1, 2, 4 and 6 were
+  each 100% wrong while claiming an error bar around `1e-21`); the bare `∫φ`
+  over the same interval was correct, because `φ(0)` is sampled. Quadrature now
+  starts from 16 equal panels, which fixes the family exactly and brings the
+  comb `∫₋₁₅¹⁵ φ(x)³⁵⁰` to 0.14% relative error. This is a mitigation, not a
+  guarantee — a peak narrower than a starting panel can still be missed, and
+  the error estimate still cannot report it — a peak-discovery strategy
+  (shifted or low-discrepancy probes) would close the family rather than move
+  the threshold, and is not attempted here. Iterated integrals reduce the
+  per-level count so the floor applies to the whole integral rather than
+  multiplying per dimension. The cost falls on integrals that
+  used to converge on the first panel: `∫₀¹ sin x` goes from 15 to 240
+  evaluations, so a compiled integral called per plotted sample goes from
+  ~40 µs to ~130 µs. Reported by the Tycho team.
+
+- **A definite integral whose integrand is identically non-finite now fails
+  fast instead of burning the full Monte-Carlo budget.** Adaptive quadrature
+  can never converge on a `NaN` integrand, so it fell through to the
+  Monte-Carlo estimator, which spent 1e7 samples — 250–450 ms per call — to
+  return the `NaN` that was decidable up front. The usual trigger is an unbound
+  variable reaching a compiled artifact as `undefined`; a plotted curve then
+  froze the thread and drew nothing. `monteCarloEstimate` now probes a few
+  samples and returns `NaN` immediately when they are all non-finite. Measured:
+  100 calls on such an integrand went from 30.5 s to 22 ms. Integrands with a
+  genuine endpoint singularity are unaffected — the bail requires *every* probe
+  to be non-finite. Reported by the Tycho team.
+
+- **`.N()` of a definite integral with a free symbol in the integrand no longer
+  throws a raw `ReferenceError` out of generated code.** The integrand was
+  handed to the implicit compiler regardless, and the generated body read the
+  free symbol from a scope slot the numeric caller never supplies:
+
+  ```js
+  ce.parse('\\int_0^1 (x+q)\\,dx').N();
+  // was: throws ReferenceError: _ is not defined
+  // now: stays symbolic
+  ```
+
+  A parameter with no value leaves nothing to integrate numerically, so the
+  expression now stays symbolic; it evaluates as before once the symbol has a
+  value. Both the single-limit and the iterated multi-limit paths are covered.
+
+- **A `Measurement` now answers the numeric accessors.** `Measurement(value,
+  error)` types as its nominal's scalar type, so `Integrate(…).N()` reports
+  `finite_real` and `isNumber === true` — but every numeric read was dead,
+  which silently poisoned any consumer reading `.re`, and propagated, since
+  `Measurement + 1` is another `Measurement`:
+
+  ```js
+  const n = ce.parse('\\int_0^1 \\sin(x) dx').N();
+  n.re;            // was NaN,       now 0.45969769413186023
+  n.numericValue;  // was undefined, now the nominal
+  n.valueOf();     // was the string '0.4596… ± 0.0000…', now the number
+  n.sgn;           // was undefined, now 'positive'
+  ```
+
+  `.re`, `.im`, `.bignumRe`, `.bignumIm`, `.sgn` and `valueOf()` project the
+  nominal — all of them on the public `Expression` type, so `.re` is the
+  channel and no cast is needed. The uncertainty stays reachable through the
+  MathJSON, or through `op2` after narrowing with `isFunction()`, and
+  `toString()` still shows `±`.
+
+  Three members are deliberately NOT projected, all for the same reason: a
+  `Measurement` is a **function expression**, and the number-literal surface
+  belongs behind the `isNumber()` guard, which narrows on expression kind.
+  `numericValue` stays `undefined` — it is declared only on
+  `NumberLiteralInterface`, and projecting it would advertise an exact numeric
+  representation that a quadrature result does not have; `isNumberLiteral` and
+  the `isNumber()` guard stay `false`; and `.value` stays `undefined` (it is
+  the expression for a literal and `undefined` for a symbolic expression).
+  `.re`/`.im` are sufficient for a `Measurement` precisely because its nominal
+  is never an exact number. Reported by the Tycho team.
 
 - **A shorthand-lambda placeholder in a pipeline stage no longer picks up a
   same-named global.** `Pipe` is lazy, so it canonicalizes its right operand in

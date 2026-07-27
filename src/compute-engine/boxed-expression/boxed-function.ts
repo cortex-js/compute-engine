@@ -70,6 +70,7 @@ import {
   widen,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
+import type { BigDecimal } from '../../big-decimal/index.js';
 
 import { findUnivariateRoots } from './solve.js';
 import { filterRootsByAssumptions } from './solve-domain.js';
@@ -648,7 +649,63 @@ export class BoxedFunction
     return this._ops.some((x) => x.has(v));
   }
 
+  /**
+   * The nominal value of a `Measurement(value, error)`, or `undefined` for
+   * every other operator.
+   *
+   * `Measurement` types as its nominal's scalar type (see `measurementType()`),
+   * so `Integrate(…).N()` reports `finite_real` and `isNumber === true`. The
+   * numeric read surface has to honor that: a head that claims to be a real
+   * number and then answers `NaN` to every numeric accessor is not a strict
+   * contract, it is an unfinished one — and the failure is silent, because a
+   * consumer reading `.re` cannot tell a poisoned read from a genuine `NaN`.
+   * So the numeric accessors below project the nominal; the uncertainty stays
+   * reachable through `.ops`/`op2` (after an `isFunction()` narrow) and the
+   * MathJSON. `re`/`im` are the channel, and they are sufficient: a
+   * `Measurement` is a quadrature result, so its nominal is never an exact
+   * number.
+   *
+   * Deliberately NOT projected, all three for the same reason — a `Measurement`
+   * is a FUNCTION expression, and the number-literal surface belongs behind the
+   * `isNumber()` guard, which narrows on expression kind:
+   * - `numericValue`, declared only on `NumberLiteralInterface`. Projecting it
+   *   would advertise an exact numeric representation this expression does not
+   *   have, on a surface a `Measurement` cannot legitimately narrow to.
+   * - `isNumberLiteral`, for the same reason — claiming it would hand callers a
+   *   `BoxedNumber` interface this expression does not implement.
+   * - `value`, documented as the expression itself for a literal and
+   *   `undefined` for a symbolic expression; a `Measurement` is the latter.
+   */
+  private get _measurementNominal(): Expression | undefined {
+    if (this._operator !== 'Measurement' || this._ops.length === 0)
+      return undefined;
+    return this._ops[0];
+  }
+
+  get re(): number {
+    return this._measurementNominal?.re ?? super.re;
+  }
+
+  get im(): number {
+    return this._measurementNominal?.im ?? super.im;
+  }
+
+  get bignumRe(): BigDecimal | undefined {
+    return this._measurementNominal?.bignumRe ?? super.bignumRe;
+  }
+
+  get bignumIm(): BigDecimal | undefined {
+    return this._measurementNominal?.bignumIm ?? super.bignumIm;
+  }
+
+  valueOf(): number | number[] | number[][] | number[][][] | string | boolean {
+    return this._measurementNominal?.valueOf() ?? super.valueOf();
+  }
+
   get sgn(): Sign | undefined {
+    const nominal = this._measurementNominal;
+    if (nominal) return nominal.sgn;
+
     const gen =
       this.isPure && this._ops.every((x) => x.isConstant)
         ? undefined

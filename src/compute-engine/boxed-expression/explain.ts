@@ -13,7 +13,7 @@ import { simplify } from './simplify.js';
 import { findUnivariateRoots, rootsAsEquations } from './solve.js';
 import { filterRootsByAssumptions } from './solve-domain.js';
 import { solveSystem } from './solve-system.js';
-import { normalizedUnknownsForSolve } from './utils.js';
+import { normalizedUnknownsForSolve, liftIntegrand } from './utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
 import { labelFor } from './explain-labels.js';
 
@@ -414,9 +414,15 @@ function explainIntegrate(
       'explain("Integrate") requires the integration rules: load them with loadIntegrationRules() from "@cortex-js/compute-engine/integration-rules"'
     );
 
-  // Pass the same wrapped integrand form `library/calculus.ts` passes, so the
+  // Pass the same LIFTED integrand `library/calculus.ts` passes, so the
   // provider's unwrap loop and the trace it records line up with the real run.
-  const integrand = isFunction(canonical) ? canonical.ops[0] : canonical;
+  // Handing over the un-lifted `Function` literal leaves the integrand bound to
+  // the literal's `Block`, which the driver's own `ce.symbol(variable)` does
+  // not denote — the rules then stop matching the integration variable and the
+  // explanation diverges from (or fails where) the real run succeeds.
+  const integrand = liftIntegrand(
+    isFunction(canonical) ? canonical.ops[0] : canonical
+  );
 
   const trace: RuleSteps = [];
   const anti = ce._integrationProvider!(integrand, variable, trace);

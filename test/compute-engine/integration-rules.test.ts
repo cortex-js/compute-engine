@@ -1673,4 +1673,63 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
       expect(F.has('Integrate')).toBe(false);
     });
   });
+
+  // ── SPEC (binder mechanism, stage 13): the matcher's `case 'var'` compares
+  // the integration variable by name AND binding (`sameBoundName`,
+  // `rubi/match.ts`), not by name alone.
+  //
+  // `RubiDriver.int` still takes the variable as a STRING and re-boxes it with
+  // `ce.symbol`, so this only works because the integrand arrives LIFTED into
+  // the caller's scope (`liftIntegrand`, `library/calculus.ts`). If that lift
+  // is ever lost, every rule mentioning the variable silently stops matching —
+  // the historical signature is a handful of red integration tests with
+  // `F.has('Integrate')` true, with nothing pointing at the cause. These two
+  // pins name it instead. ──
+  describe('SPEC: the integration variable is matched by binding', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+
+    test('the provider receives an integrand bound to the driver’s own `x`', () => {
+      // Compared IN the provider's own context: that is where the driver mints
+      // `ce.symbol(variable)`, and inside the `Integrate` node's evaluation the
+      // node's binding — not the ambient one — is what both sides see.
+      let agree: boolean | null = null;
+      let name: string | undefined;
+      const provider = (ce as any)._integrationProvider;
+      (ce as any)._integrationProvider = (f: any, v: string, t?: any) => {
+        if (agree === null) {
+          const occurrence = f.op1; // cos(x) → x
+          name = occurrence?.symbol;
+          agree =
+            occurrence?.valueDefinition === ce.symbol(v).valueDefinition;
+        }
+        return provider(f, v, t);
+      };
+      try {
+        ce.parse('\\int \\cos(x) \\mathrm{d}x').evaluate();
+      } finally {
+        (ce as any)._integrationProvider = provider;
+      }
+      expect(name).toBe('x');
+      expect(agree).toBe(true);
+    });
+
+    test('a same-named occurrence carrying a DIFFERENT binding is not the variable', () => {
+      // An inner scope's `x` is a different variable that merely shares the
+      // spelling. Under the old name-only comparison the rules integrated it as
+      // though it were the integration variable.
+      ce.pushScope();
+      ce.declare('x', 'real');
+      const foreign = ce.symbol('x');
+      ce.popScope();
+      expect(foreign.valueDefinition).not.toBe(ce.symbol('x').valueDefinition);
+
+      const provider = (ce as any)._integrationProvider;
+      expect(provider(ce.function('Cos', [foreign]), 'x')).toBeNull();
+      // …while the driver's own `x` still closes.
+      expect(
+        String(provider(ce.function('Cos', [ce.symbol('x')]), 'x'))
+      ).toContain('sin');
+    });
+  });
 });

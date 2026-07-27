@@ -92,6 +92,21 @@ export function monteCarloEstimate(
     sampler = () => f(a + Math.random() * (b - a));
   }
 
+  // Fail fast on an integrand that is non-finite EVERYWHERE. The usual cause
+  // is an unbound variable reaching a compiled artifact as `undefined`, making
+  // the integrand identically `NaN`: adaptive quadrature can never converge on
+  // it, so it falls through to here and pays the full sample budget — 1e7
+  // evaluations, ~250–450 ms per call — to produce a `NaN` that was decidable
+  // in microseconds. Only an ALL-non-finite probe bails; an integrand with a
+  // genuine endpoint singularity is non-finite at some samples and must still
+  // be integrated.
+  let anyFinite = false;
+  withAmbientDeadline(deadline, () => {
+    for (let i = 0; i < 32 && !anyFinite; i++)
+      if (Number.isFinite(sampler())) anyFinite = true;
+  });
+  if (!anyFinite) return { estimate: NaN, error: NaN };
+
   let sum = 0;
   let sumSq = 0;
   let taken = 0;

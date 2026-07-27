@@ -1,7 +1,10 @@
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { adaptiveQuadrature } from '../../src/compute-engine/numerics/gauss-kronrod';
+import {
+  adaptiveQuadrature,
+  initialPanelsForDimensions,
+} from '../../src/compute-engine/numerics/gauss-kronrod';
 
 /** Compile a parsed LaTeX definite integral to a real-valued runner. */
 function compileReal(latex: string, options?: { quadrature?: 'monte-carlo' }) {
@@ -333,5 +336,150 @@ describe('adaptiveQuadrature (unit)', () => {
     expect(r.estimate).toBeCloseTo(simpson, 12);
     // 2·Si(1) ≈ 1.8921661407343662
     expect(r.estimate).toBeCloseTo(1.8921661407343662, 12);
+  });
+});
+
+describe('sharply-peaked integrands (Tycho item 97)', () => {
+  // A peak far narrower than the interval, whose weight vanishes at the center
+  // node, used to "converge" on the first 15-node panel: every node read ~0, so
+  // the Gauss/Kronrod difference met `atol` and the routine reported
+  // `3.2e-21 ± 5.1e-21` for a true value of 1. See `INITIAL_PANELS`.
+  const phi = (x: number) => Math.exp((-x * x) / 2) / Math.sqrt(2 * Math.PI);
+
+  test.each([
+    ['moment 0', (x: number) => phi(x), 1],
+    ['moment 1 (|x|)', (x: number) => Math.abs(x) * phi(x), Math.sqrt(2 / Math.PI)],
+    ['moment 2', (x: number) => x * x * phi(x), 1],
+    ['moment 4', (x: number) => x ** 4 * phi(x), 3],
+    ['moment 6', (x: number) => x ** 6 * phi(x), 15],
+  ])('Gaussian %s over [-50, 50]', (_label, f, expected) => {
+    const r = adaptiveQuadrature(f, -50, 50);
+    expect(r.converged).toBe(true);
+    expect(r.estimate).toBeCloseTo(expected, 10);
+  });
+
+  test('the comb ∫_{-15}^{15} φ(x)^350 dx', () => {
+    // Closed form: (2π)^(-175)·√(π/175). The peak has width ~1/√175 ≈ 0.076
+    // over an interval of width 30, so this stays a hard problem — pinned at
+    // the accuracy the initial subdivision actually achieves, not exactness.
+    const closed = Math.exp(-175 * Math.log(2 * Math.PI) + 0.5 * Math.log(Math.PI / 175));
+    const r = adaptiveQuadrature((x) => Math.pow(phi(x), 350), -15, 15);
+    expect(Math.abs(r.estimate - closed) / closed).toBeLessThan(0.01);
+  });
+
+  test('via the engine, end to end', () => {
+    const local = new ComputeEngine();
+    const r = local
+      .parse('\\int_{-50}^{50} x^2 \\frac{1}{\\sqrt{2\\pi}} e^{-x^2/2} dx')
+      .N();
+    expect(r.re).toBeCloseTo(1, 10);
+  });
+});
+
+describe('non-finite integrand fails fast (Tycho item 96)', () => {
+  test('an identically-NaN integrand returns NaN without burning the sample budget', () => {
+    // An unbound variable reaches a compiled artifact as `undefined`, making the
+    // integrand identically NaN. Adaptive quadrature can never converge on it,
+    // so it fell through to a 1e7-sample Monte Carlo — ~250-450 ms per call to
+    // produce a NaN. The probe in `monteCarloEstimate` decides it immediately.
+    const r = compileReal('\\int_{-10}^{10} (x + q)\\,dx');
+    const t0 = Date.now();
+    const got = r.run({ q: NaN }) as number;
+    const elapsed = Date.now() - t0;
+
+    expect(Number.isNaN(got)).toBe(true);
+    // Generous bound: the point is the two-orders-of-magnitude collapse, not a
+    // tight timing pin. Pre-fix this single call took 250-450 ms.
+    expect(elapsed).toBeLessThan(100);
+  });
+
+  test('a genuine endpoint singularity is still integrated', () => {
+    // The bail is ALL-non-finite only: ∫_0^1 1/√x is +∞ at the endpoint but
+    // finite almost everywhere, and must still converge to 2.
+    const r = adaptiveQuadrature((x) => 1 / Math.sqrt(x), 0, 1);
+    expect(r.estimate).toBeCloseTo(2, 6);
+  });
+});
+
+describe('free symbol in the integrand stays symbolic (Tycho item 96, secondary)', () => {
+  // `.N()` used to hand the integrand to `implicitCompile`, whose generated
+  // body read the free symbol from a scope slot the numeric caller never
+  // supplies — a raw `ReferenceError: _ is not defined` escaped to the caller.
+  test.each([
+    ['single limit', '\\int_0^1 (x+q)\\,dx'],
+    ['double limit', '\\int_0^1\\int_0^1 (x+y+q)\\,dx\\,dy'],
+  ])('%s', (_label, latex) => {
+    const local = new ComputeEngine();
+    let result: string | undefined;
+    expect(() => {
+      result = local.parse(latex).N().toString();
+    }).not.toThrow();
+    expect(result).toContain('q');
+  });
+
+  test('and evaluates once the symbol has a value', () => {
+    const local = new ComputeEngine();
+    local.assign('q', 2);
+    expect(local.parse('\\int_0^1 (x+q)\\,dx').N().re).toBeCloseTo(2.5, 10);
+  });
+});
+
+describe('adaptive quadrature — review follow-ups', () => {
+  test('a fractional maxIntervals does not extend the last panel past b', () => {
+    // The starting-panel loop derives its endpoint clamp from `n`. With a
+    // fractional budget the loop ran `ceil(n)` times while `i === n - 1` never
+    // matched, so the last panel ran past `b` and the routine integrated the
+    // wrong interval: ∫₀¹1 read 1.2 and ∫₀¹x read 0.72.
+    for (const maxIntervals of [0.5, 1, 2.5, 3.7, 17.9]) {
+      expect(adaptiveQuadrature(() => 1, 0, 1, { maxIntervals }).estimate).toBeCloseTo(1, 10);
+      expect(adaptiveQuadrature((x) => x, 0, 1, { maxIntervals }).estimate).toBeCloseTo(0.5, 10);
+    }
+  });
+
+  test('the starting-panel floor does not multiply across nested levels', () => {
+    // An iterated integral runs a full quadrature per outer node, so a
+    // per-level floor of 16 costs 16² for 2-D and 16³ for 3-D. Measured: a
+    // smooth 2-D integral went 225 → 57 600 inner evaluations.
+    expect(initialPanelsForDimensions(1)).toBe(16);
+    expect(initialPanelsForDimensions(2)).toBe(4);
+    expect(initialPanelsForDimensions(3)).toBe(3);
+    // Never one panel — that is the item-97 defect.
+    for (const d of [1, 2, 3, 4, 8]) expect(initialPanelsForDimensions(d)).toBeGreaterThanOrEqual(2);
+
+    const count = (panels: number) => {
+      let n = 0;
+      const inner = (y: number) =>
+        adaptiveQuadrature((x) => { n++; return Math.sin(x * y); }, 0, 1, { initialPanels: panels }).estimate;
+      const r = adaptiveQuadrature(inner, 0, 1, { initialPanels: panels });
+      return { estimate: r.estimate, evals: n };
+    };
+    const flat = count(16);
+    const scaled = count(initialPanelsForDimensions(2));
+    expect(scaled.estimate).toBeCloseTo(0.2398117420005644, 10);
+    expect(flat.evals / scaled.evals).toBeGreaterThan(10);
+  });
+
+  test('a Function literal with unsupplied parameters stays symbolic', () => {
+    // `Function(x+q, x, q)` under a single `Limits(x,…)`: `q` is a FORMAL
+    // parameter, so `unknowns` is empty and the free-symbol guard passes. The
+    // literal then compiled two-arity, was invoked unary, and read NaN.
+    const local = new ComputeEngine();
+    const lit = local.function('Function', [
+      local.parse('x+q'),
+      local.symbol('x'),
+      local.symbol('q'),
+    ]);
+    const limits = local.function('Limits', [local.symbol('x'), 0, 1]);
+    const r = local.function('Integrate', [lit, limits]).N();
+    expect(r.operator).toBe('Integrate');
+    expect(Number.isNaN(r.re)).toBe(true); // symbolic, not a NaN measurement
+    expect(r.toString()).not.toContain('NaN');
+
+    // The well-formed unary literal still evaluates.
+    const ok = local.function('Integrate', [
+      local.function('Function', [local.parse('x^2'), local.symbol('x')]),
+      limits,
+    ]).N();
+    expect(ok.re).toBeCloseTo(1 / 3, 10);
   });
 });

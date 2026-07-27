@@ -116,6 +116,65 @@ describe('SPEC: the late-bound/early-bound ruling', () => {
   });
 });
 
+/**
+ * Stage 14 of the binder mechanism
+ * (`docs/plans/2026-07-26-binder-mechanism-design.md` §4, ruling 1): the
+ * dereference used to defer to the ambient lookup whenever ANY valueless
+ * shadow of the name existed. That blanket rule was only ever a proxy for the
+ * shield idiom — `withValueShield`/`simplifyValueBlind` hide a symbol's value
+ * by shadow-declaring it valueless — and it swept in ordinary declarations
+ * that shield nothing. Shields now carry an explicit `_isShield` marker and
+ * only they defer.
+ */
+describe('SPEC: only a SHIELD intercepts a stored value’s free symbol', () => {
+  test('a valueless inner Declare no longer intercepts', () => {
+    const ce = engine();
+    // ORDER IS LOAD-BEARING: `a` must be assigned while `x` is still valueless,
+    // or eager capture bakes the number in and there is no free symbol left to
+    // intercept.
+    ce.box(['Assign', 'a', ['Add', 'x', 1]]).evaluate();
+    ce.box(['Assign', 'x', 100]).evaluate();
+    expect(ce.box(['Add', 'a', 5]).evaluate().toString()).toEqual('106');
+    // The block's `x` is a DIFFERENT variable; `a` captured the global binding
+    // and has no business resolving through the block's one.
+    expect(
+      ce
+        .box(['Block', ['Declare', 'x', "'real'"], ['Add', 'a', 5]])
+        .evaluate()
+        .toString()
+    ).toEqual('106'); // was: 'x + 6'
+  });
+
+  test('a VALUED inner shadow is unchanged — it never intercepted', () => {
+    // The asymmetry that made the blanket rule indefensible: give the same
+    // shadow a value and it already did not capture. Both before and after.
+    const ce = engine();
+    ce.box(['Assign', 'a', ['Add', 'x', 1]]).evaluate();
+    ce.box(['Assign', 'x', 100]).evaluate();
+    expect(
+      ce
+        .box([
+          'Block',
+          ['Declare', 'x', "'real'"],
+          ['Assign', 'x', 7],
+          ['Add', 'a', 5],
+        ])
+        .evaluate()
+        .toString()
+    ).toEqual('106');
+  });
+
+  test('Solve still shields its unknown', () => {
+    // `Solve`'s shield (`withValueShield`, `solve-domain.ts`) is a real shield
+    // and keeps deferring: the unknown stays symbolic despite its global value.
+    const ce = engine();
+    ce.assign('x', 100);
+    expect(
+      ce.box(['Solve', ['Equal', ['Add', 'x', 1], 0], 'x']).evaluate().toString()
+    ).toEqual('[-1]');
+  });
+});
+
 describe('SPEC: name capture through call frames', () => {
   test('a parameter does not capture a stored value’s free symbol', () => {
     const ce = engine();
