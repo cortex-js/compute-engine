@@ -134,10 +134,12 @@ operators, shortest for explicit PAIRING constructors (`Zip`, variadic `Map`,
   coupling).
 - **Compiled elementwise `Which`/`If` selection.** The interpreter side
   landed 2026-07-27 (ratified spec:
-  `docs/plans/2026-07-27-elementwise-which-design.md`); a compiled `_SYS`
-  selection lowering is demand-gated — Tycho's consuming path (action
-  firings) is interpreted, so nothing waits on it. Natural to batch with
-  the boolean-head-guard revisit above.
+  `docs/plans/2026-07-27-elementwise-which-design.md`); the compiled `_SYS`
+  selection lowering (JS first; IJS/GLSL per their conventions) is still
+  open. The item-102 *firing* path is interpreted, but Tycho compiles
+  drawing paths to JS/IJS/GLSL — a piecewise-over-lists in a plotted
+  expression hits the compile path, which today fails closed on a
+  non-scalar condition. Batch with the boolean-head-guard revisit above.
 - **Python still fails closed** for comparisons/connectives over a
   possibly-collection operand — it has no generic scalar-closure broadcaster.
   Tracked under *Broadcast typing residue* below; `_ce_bcast` now matches the
@@ -694,12 +696,20 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
   per-element cost otherwise caps interactive workloads at roughly 6k
   drained elements per 50 ms frame. The elementwise `Add` itself measured
   ~2 ms/900 elements — not the bottleneck.
-- **`.N()` on a lazy-Map drain measured ~5× slower than `evaluate()`**
-  (743 ms vs 140 ms on the item-103 witness) even though Map auto-compile
-  targets exactly the numeric drain. Either the gate never matches this
-  shape or a compile attempt is paid and discarded per element —
-  uninvestigated; needs its own profile before touching the
-  `_computeValue` ordering (a ratified non-goal protects steps 3/3b).
+- **`.N()` on a lazy-Map drain — DIAGNOSED 2026-07-27** (was "5× slower
+  than `evaluate()`"). Two independent causes, ~2.3× each: (1) the witness
+  tripped the bare-assign builtin-clobber bug (fixed 2026-07-27: a bare
+  `assign` over a system-scope operator now shadows in the current scope
+  instead of mutating the builtin — see CHANGELOG) — `N` assigned over the
+  builtin made every lazy `N(...)` marker produce NaN and
+  the result was WRONG, not just slow; (2) Map auto-compile declines at
+  bignum-preferred (default) precision by an explicit, well-argued
+  precondition (`map-auto-compile.ts` `bignumPreferred` gate — float64
+  cannot reproduce bignum digits). At machine precision the gate fires
+  exactly right (one compile per Map, one hit per element) and the ratio is
+  1.6× with correct results. Open policy question only: whether a
+  bignum-safe compile tier is wanted, or the 2.5× interpreter drain at
+  default precision is accepted.
 - **Latent issues: none remaining.** The 2026-07-19 latent sweep
   dispositioned the whole former list (fixes, could-not-reproduce
   verifications, and an `At` `@todo` audit — record in that day's commits
