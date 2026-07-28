@@ -367,7 +367,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `isFinite` → value → `type` cycle; the substitute-once guard lives
         // on the raw symbol's own `.N()` path.
         if (numericApproximation) {
-          const r = addN(...ops.map((op, i) => (op.isPure ? op : evaluated[i])));
+          const r = addN(
+            ...ops.map((op, i) => (op.isPure ? op : evaluated[i]))
+          );
           // An operand may only have BECOME a Quantity or Measurement through
           // `addN`'s numericization, past the `evaluated` checks above
           // (Tycho item 101). Quantity first, matching the handler precedence.
@@ -1741,7 +1743,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // once; pure operands keep the raw, substitute-once-guarded path
         // (Tycho item 46) — see the matching comment in `Add`.
         if (numericApproximation) {
-          const r = mulN(...ops.map((op, i) => (op.isPure ? op : evaluated[i])));
+          const r = mulN(
+            ...ops.map((op, i) => (op.isPure ? op : evaluated[i]))
+          );
           // See the matching comment in `Add` (Tycho item 101).
           return (
             foldQuantityOperands(engine!, r) ??

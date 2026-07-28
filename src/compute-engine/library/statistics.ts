@@ -741,6 +741,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // engine stream. Without this, `isConstant` is true for a sample of a
       // literal list.
       pure: false,
+      drawsRandom: true,
       // `k` is typed `number`, not `integer`: a caller who computes a count
       // should not have to round it first (it is rounded on evaluation).
       // The domain gate is `indexed_collection` — an `Interval` and a `Set`

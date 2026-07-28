@@ -1449,7 +1449,10 @@ export class BaseCompiler {
     // application of a BUILT-IN `broadcastable` head over such an operand —
     // that one re-enters this method and broadcasts through `_SYS.bcast`
     // itself, which is what makes the Desmos mask `|L-2| > 0` sound.
-    if (isRelationalOperator(h) || BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h)) {
+    if (
+      isRelationalOperator(h) ||
+      BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h)
+    ) {
       const compilesToArray = (a: Expression): boolean => {
         // A TUPLE is an atomic point/vector, never a broadcast source — the
         // interpreter excludes it (`isBroadcastParticipant`,

@@ -113,6 +113,56 @@ function holdValuesShieldNames(spec: Expression): string[] {
   return [];
 }
 
+/**
+ * True if a partially-evaluated `WithRandomSeed` body still OWES random draws
+ * to the enclosing seed frame: an application of a stream-drawing operator
+ * (`drawsRandom` — `Random`, `RandomShuffle`, a nested `WithRandomSeed`…)
+ * survived evaluation in a position this evaluation was supposed to finish.
+ * Used by `WithRandomSeed` to keep the frame (Tycho item 104). Keyed on the
+ * `drawsRandom` definition flag, NOT on `pure` — `Assign`/`Assume`/`Declare`
+ * are impure but owe nothing to the stream, and a surviving one must not pin
+ * the frame forever.
+ *
+ * The walk distinguishes VALUE position from a surviving EAGER application:
+ *
+ * - `Hold` content never counts — inert until `Release`, under whatever
+ *   frame is active then.
+ * - A lazy collection VIEW in value position — `Map(xs, x |-> Random())`
+ *   escaping as the result, directly or inside `List`/`Tuple` cells — is a
+ *   COMPLETED value: its lambda draws at materialization (the §6 escape
+ *   ruling of `docs/RANDOMNESS-MODEL.md`), so its `Function` subtree is
+ *   skipped.
+ * - Any OTHER surviving application (`ListFrom(Map(xs, x |-> Random()))`
+ *   with an unresolved length, an `At` over it, …) is work THIS evaluation
+ *   was supposed to finish: everything beneath it — lambdas included — is
+ *   scanned, so the draws it still owes are detected and the frame is kept.
+ *
+ * The walk assumes a surviving stream-drawing application is eventually
+ * resolvable (a free symbol binds; the draws then replay in-frame). Should a
+ * collection operator ever surface permanently-raw impure cells, the failure
+ * direction is conservative: the expression stays whole and deterministic,
+ * it just never reduces. (Probed: `Repeat(Random(), n)` is NOT such a case —
+ * its cells evaluate in-frame to one completed draw.)
+ */
+function hasPendingImpureApplication(
+  expr: Expression,
+  underEagerSurvivor = false
+): boolean {
+  if (!isFunction(expr)) return false;
+  const h = expr.operator;
+  if (h === 'Hold') return false;
+  if (h === 'Function' && !underEagerSurvivor) return false;
+  if (expr.operatorDefinition?.drawsRandom === true) return true;
+  // Value position propagates through a lazy view and through the literal
+  // containers; every other surviving application puts its whole subtree —
+  // lambdas included — in eager-survivor position.
+  const isValueNode =
+    !underEagerSurvivor &&
+    (expr.isLazyCollection || h === 'List' || h === 'Tuple' || h === 'Pair');
+  const under = underEagerSurvivor || !isValueNode;
+  return expr.ops.some((op) => hasPendingImpureApplication(op, under));
+}
+
 // Split a string into grapheme clusters (UAX #29, via `Intl.Segmenter`).
 // Shared by `Characters` and its synonym `GraphemeClusters`.
 function splitGraphemeClusters(s: string): string[] {
@@ -1735,6 +1785,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       // Consumes draws from the frame's counter: not a pure expression.
       pure: false,
+      drawsRandom: true,
       // Hold the body: it must NOT evaluate before the frame exists.
       lazy: true,
       signature: '(finite_real | string, any) -> expression',
@@ -1777,9 +1828,23 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         }
 
-        return withRandomSeedFrame(ce, seed, () =>
-          rawBody.canonical.evaluate({ numericApproximation })
-        );
+        return withRandomSeedFrame(ce, seed, () => {
+          const result = rawBody.canonical.evaluate({ numericApproximation });
+          // A structured error passes through: by the draw-consumption
+          // contract an error consumed zero draws, and hiding it behind an
+          // inert `WithRandomSeed` would mask the diagnostic.
+          if (isFunction(result, 'Error')) return result;
+          // PARTIAL evaluation — the body still carries an unevaluated impure
+          // application (e.g. `RandomShuffle(Range(1, n))` with `n` unbound):
+          // returning the partial result would strip the seed frame and turn
+          // seeded randomness into live draws (Tycho item 104). Stay
+          // unevaluated as a WHOLE instead: replay is deterministic from
+          // draw 0, so a later evaluation of the intact expression (after the
+          // free symbol binds) reproduces the draws that did complete and is
+          // exactly the single-evaluation stream.
+          if (hasPendingImpureApplication(result)) return undefined;
+          return result;
+        });
       },
     },
 
@@ -1985,6 +2050,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Random(xs): an element of the finite collection `xs`',
       ],
       pure: false,
+      drawsRandom: true,
       // One plain signature: it accepts `Random()` and `Random(xs)`, and
       // rejects `Random(5)` and `Random(5, 7)`.
       signature: '((collection | set<real>)?) -> any',
@@ -2054,6 +2120,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'domain — that is what replacement means.',
       ],
       pure: false,
+      drawsRandom: true,
       // `k` is typed `number`, not `integer`: a caller who computes a count
       // (`Count(xs)/2`, a fitted value, `4N` for a slider `N`) should not have
       // to round it first. It is rounded on evaluation.

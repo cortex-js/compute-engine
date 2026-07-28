@@ -878,7 +878,8 @@ function elementwiseConditionShape(
  */
 function armElementType(t: Readonly<Type>): Type {
   if (typeof t === 'string') return t;
-  if (t.kind === 'union') return widen(...t.types.map((x) => armElementType(x)));
+  if (t.kind === 'union')
+    return widen(...t.types.map((x) => armElementType(x)));
   if (t.kind === 'list' || t.kind === 'indexed_collection')
     return broadcastElementType(t);
   return t as Type;

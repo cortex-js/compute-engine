@@ -103,6 +103,42 @@ does not worsen it and cannot independently fix it.
 | `NaN`, `±∞`, complex | `out-of-range` error — never a shared zero-seed stream |
 | does not reduce to a literal (a symbol, an error) | the whole `WithRandomSeed` expression stays **unevaluated** |
 
+### Partial evaluation keeps the frame
+
+A body that cannot **finish** its draws — an impure application survives
+evaluation, e.g. `RandomShuffle(Range(1, n))` with `n` unbound — also leaves
+the whole `WithRandomSeed` expression **unevaluated**. Returning the partial
+result would strip the seed frame, and every later draw from the stored
+partial would be live: seeded randomness silently converted to unseeded
+(Tycho item 104). Because replay is deterministic from draw 0, evaluating the
+intact expression later (once the free symbol binds) reproduces any draws
+that did complete and yields exactly the single-evaluation stream —
+`e.evaluate().subs({n: 5}).N()` and `e.subs({n: 5}).N()` are the same values.
+
+Two shapes are **completed values**, not pending draws, and do strip the
+frame: a lazy view whose lambda draws at materialization (the §6 ruling — the
+escape stays a live-draw escape, whether the view is the result itself or a
+cell of a returned `List`/`Tuple`), and `Hold` content (inert until
+`Release`, under whatever frame is active then). A lazy view beneath a
+**surviving eager consumer** (`ListFrom(Map(range, x ↦ Random()))` whose
+length has not resolved) is the opposite case: the materialization was asked
+for *inside* the frame, so its draws are owed and the frame is kept. A body
+that evaluates to a structured error passes the error through (§5: an error
+consumed zero draws), rather than hiding it behind an inert wrapper.
+
+Pending-ness is keyed on the `drawsRandom` operator flag — the operators
+that consume the stream — not on impurity in general: a surviving `Assign`
+or `Declare` is impure but owes nothing to the frame, and does not keep the
+expression wrapped.
+
+Keeping the expression whole means a later `evaluate()` **re-runs the
+body** — the standard semantics of re-evaluating any unreduced impure
+expression. Draws are deterministic under the frame (replay from draw 0),
+but a non-random side effect in the body (`Assign(x, x+1)`) executes once
+per evaluation, exactly as it would in any other expression that did not
+reduce. A pipeline that stores the kept expression should treat it like any
+other unreduced impure expression: substitute, then evaluate once.
+
 ### LaTeX
 
 `\operatorname{WithRandomSeed}(seed, body)`, serializing as

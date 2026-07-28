@@ -710,6 +710,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return a random prime. `RandomPrime(n)` draws a prime in [2, n]; `RandomPrime(m, n)` draws a prime in [m, n]. Undefined if the range contains no prime.',
       pure: false,
+      drawsRandom: true,
       signature: '(integer, integer?) -> integer',
       type: () => 'finite_integer',
       examples: ['RandomPrime(100)  // e.g. 47'],

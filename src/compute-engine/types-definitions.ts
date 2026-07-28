@@ -1217,6 +1217,20 @@ export type OperatorDefinitionFlags = {
    * **Default:** `true`
    */
   pure: boolean;
+
+  /** If `true`, evaluating this operator consumes draws from the engine's
+   * random stream (`Random`, `RandomShuffle`, …, and `WithRandomSeed`, which
+   * manages the stream's frame).
+   *
+   * Narrower than `pure: false`, which also covers side effects with no
+   * randomness (`Assign`, `Declare`, `Assume`). `WithRandomSeed` consults it
+   * to decide whether a partially-evaluated body still OWES draws to its
+   * seed frame — a surviving `Assign` is impure but owes nothing to the
+   * stream.
+   *
+   * **Default:** `false`
+   */
+  drawsRandom: boolean;
 };
 
 /**

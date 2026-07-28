@@ -4536,6 +4536,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // therefore `isConstant` — is true for a shuffle of a literal list, and
     // the `pure: false` backstop in `map-auto-compile.ts` does not gate it.
     pure: false,
+    drawsRandom: true,
     signature: '(indexed_collection) -> indexed_collection',
     // The result always rebuilds as a `List` (see `evaluate`), so the static
     // type must be `list<elt>`, not the source's (possibly indexed/Range) type.

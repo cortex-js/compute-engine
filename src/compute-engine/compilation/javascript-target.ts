@@ -4746,19 +4746,36 @@ function emitCollectionReduce(
  * clauses otherwise.
  */
 /**
- * Whether the indexed big-op body is a collection the element-wise
- * accumulation arm can fold: list/indexed-collection typed, but not a tuple
- * (atomic — no element-wise accumulation exists) and not complex-valued (the
- * `{re, im}` fold is the scalar loop's job). Complex CELLS inside a list share
- * the scalar arm's known blind spot (a `{re, im}` object reaching `+` — same
- * class as complex values in compiled scalar comparisons, tracked in ROADMAP).
+ * Whether the indexed big-op body takes the element-wise accumulation arm:
+ * list/indexed-collection typed, or POSSIBLY a collection at run time (a
+ * `broadcastable<T>` body such as `2·b`, or a top-typed application — with
+ * the item-86 look-through, so a provably-scalar wide-declared helper keeps
+ * the bare scalar loop). Routing the possibly-collection case through the
+ * `_SYS.bcast` fold is value-safe — the fold dispatches on runtime shape, so
+ * a scalar body accumulates as a scalar — and closes the hole where such a
+ * body slipped BOTH this gate and `assertScalarBigOpBody` (their predicates
+ * were identical) into the bare `+` loop, which string-concatenates arrays.
+ * The base-compiler assert is deliberately NOT widened the same way: on the
+ * GPU targets a wide-declared helper application in a Sum body is common and
+ * scalar-at-runtime by construction (shader values are static), so widening
+ * would break working shaders.
+ *
+ * Excluded: tuples (atomic — no element-wise accumulation exists) and
+ * complex-valued bodies (the `{re, im}` fold is the scalar loop's job).
+ * Complex CELLS inside a list share the scalar arm's known blind spot (a
+ * `{re, im}` object reaching `+` — same class as complex values in compiled
+ * scalar comparisons, tracked in ROADMAP).
  */
 function isElementwiseBigOpBody(body: Expression): boolean {
   if (isFunction(body, 'Tuple')) return false;
   const tt = body.type.type;
   if (typeof tt !== 'string' && tt.kind === 'tuple') return false;
   if (BaseCompiler.isComplexValued(body)) return false;
-  return body.type.matches('list') || body.type.matches('indexed_collection');
+  return (
+    body.type.matches('list') ||
+    body.type.matches('indexed_collection') ||
+    isPossiblyCollectionTypedJS(body)
+  );
 }
 
 function emitSumProduct(
@@ -4872,12 +4889,23 @@ function emitSumProduct(
 
   if (elementwiseBody) {
     const val = BaseCompiler.tempVar();
-    // The seed slices an array body so a single-iteration loop does not hand
-    // the caller's own array back (later iterations allocate fresh arrays
-    // through `_SYS.bcast` anyway). A runtime-empty range leaves the
-    // accumulator unseeded and answers the scalar identity, like the
-    // interpreter.
-    return `(() => { let ${acc} = null; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = ${acc} === null ? (Array.isArray(${val}) ? ${val}.slice() : ${val}) : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val}); ${index}++; } return ${acc} === null ? ${identity} : ${acc}; })()`;
+    // The seed slices an array body (SHALLOW — the guarantee covers only the
+    // top-level array; rank-≥2 cells stay shared with the caller) so a
+    // single-iteration loop does not hand the caller's own array object back;
+    // later iterations allocate fresh arrays through `_SYS.bcast` anyway. A
+    // runtime-empty range leaves the accumulator unseeded and answers the
+    // scalar identity, like the interpreter.
+    //
+    // The scalar-NaN LATCH: a length mismatch collapses the `bcast` fold to a
+    // scalar NaN; without the latch the NEXT iteration would broadcast that
+    // NaN back over the new term's shape, so whether the result was a scalar
+    // NaN or an array of NaNs depended on which shape came last. The latch
+    // short-circuits to the stable scalar NaN — the same mismatch projection
+    // as `_SYS.select`. (At this ABI an error and a legitimate NaN are
+    // indistinguishable, so a genuinely-NaN scalar term followed by array
+    // terms also latches — the standing error-vs-NaN seam, tracked in
+    // ROADMAP. `${acc} !== ${acc}` is false for an array, true only for NaN.)
+    return `(() => { let ${acc} = null; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = ${acc} === null ? (Array.isArray(${val}) ? ${val}.slice() : ${val}) : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val}); if (${acc} !== ${acc}) return NaN; ${index}++; } return ${acc} === null ? ${identity} : ${acc}; })()`;
   }
 
   if (bodyIsComplex) {

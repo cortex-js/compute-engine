@@ -69,6 +69,19 @@ describe('element-wise Sum/Product: interpreter parity', () => {
     ).toBe(1);
   });
 
+  test('a multi-index Sum folds element-wise at every clause level', () => {
+    expect(
+      parity(
+        ce.box([
+          'Sum',
+          ['Add', 'L', ['Multiply', 'j', 'k']],
+          ['Limits', 'j', 1, 2],
+          ['Limits', 'k', 1, 3],
+        ])
+      )
+    ).toEqual([24, 30, 36]);
+  });
+
   test('At distributes through the compiled element-wise Sum', () => {
     expect(
       parity(ce.box(['At', ['Sum', ['Add', 'L', 'k'], ['Limits', 'k', 1, 3]], 2]))
@@ -101,6 +114,43 @@ describe('element-wise Sum/Product: runtime dispatch', () => {
     expect(out).toEqual([11, 21]);
     out[0] = 999;
     expect(M[0]).toBe(10);
+  });
+});
+
+describe('element-wise Sum/Product: review-round fixes (2026-07-28)', () => {
+  test('a broadcastable<T>-typed body folds element-wise instead of string-concatenating', () => {
+    // `2·b` types `broadcastable<number>`, which matched NEITHER the
+    // element-wise gate NOR the fail-closed assert — the bare scalar loop
+    // then emitted `acc += <array>`, a silent string concatenation.
+    const e = new ComputeEngine();
+    e.declare('b', 'broadcastable<number>');
+    const r = compile(
+      e.box(['Sum', ['Multiply', 2, 'b'], ['Limits', 'k', 1, 3]]),
+      { fallback: false }
+    )!;
+    expect(r.success).toBe(true);
+    expect(r.run!({ b: [10, 20] })).toEqual([60, 120]);
+    // The fold dispatches on runtime shape: a scalar binding stays scalar.
+    expect(r.run!({ b: 5 })).toBe(30);
+  });
+
+  test('a mid-loop length mismatch latches to a stable scalar NaN', () => {
+    // Alternating-length terms used to answer scalar NaN or an array of NaNs
+    // depending on which shape came LAST; the latch pins the scalar
+    // projection (same as `_SYS.select` on a mismatch), both orders.
+    const e = new ComputeEngine();
+    e.declare('A2', 'list<number>');
+    e.declare('B3', 'list<number>');
+    const r = compile(
+      e.box([
+        'Sum',
+        ['If', ['Equal', ['Mod', 'k', 2], 0], 'A2', 'B3'],
+        ['Limits', 'k', 1, 3],
+      ]),
+      { fallback: false }
+    )!;
+    expect(r.run!({ A2: [1, 2], B3: [1, 2, 3] })).toBe(NaN);
+    expect(r.run!({ A2: [1, 2, 3], B3: [1, 2] })).toBe(NaN);
   });
 });
 

@@ -50,6 +50,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'idempotent',
   'involution',
   'pure',
+  'drawsRandom',
 
   'inferredSignature',
   'signature',
@@ -136,6 +137,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   idempotent = false;
   involution = false;
   pure = true;
+  drawsRandom = false;
 
   complexity = DEFAULT_COMPLEXITY;
 
@@ -289,6 +291,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     result.idempotent = this.idempotent;
     result.involution = this.involution;
     result.pure = this.pure;
+    result.drawsRandom = this.drawsRandom;
     result.lazy = this.lazy;
     result.complexity = this.complexity;
     result.scoped = this.scoped;
@@ -418,6 +421,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       );
 
     this.pure = def.pure ?? this.pure;
+    this.drawsRandom = def.drawsRandom ?? this.drawsRandom;
     this.complexity = def.complexity ?? this.complexity;
 
     if (def.signature) {

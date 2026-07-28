@@ -250,6 +250,105 @@ describe('WithRandomSeed — seed evaluation', () => {
   });
 });
 
+describe('WithRandomSeed — partial evaluation keeps the frame (Tycho item 104)', () => {
+  // A body that cannot finish its draws (an impure application survives
+  // evaluation, e.g. a shuffle over a Range with an unbound endpoint) must NOT
+  // come back as a partial result stripped of its seed frame: every later
+  // draw from the stored partial would be live, silently converting seeded
+  // randomness to unseeded. The whole expression stays unevaluated instead —
+  // replay is deterministic from draw 0, so completing it later reproduces
+  // the single-evaluation stream exactly.
+  const WITNESS = ['WithRandomSeed', 123, ['RandomShuffle', ['Range', 1, 'n']]];
+
+  it('an unfinishable body leaves the whole expression unevaluated (box route)', () => {
+    expect(boxed(WITNESS).evaluate().toString()).toBe(
+      'WithRandomSeed(123, RandomShuffle(Range(1, n)))'
+    );
+  });
+
+  it('an unfinishable body leaves the whole expression unevaluated (parse route)', () => {
+    expect(
+      parsed(
+        `${WRS}(123, \\operatorname{RandomShuffle}(\\operatorname{Range}(1, n)))`
+      )
+        .evaluate()
+        .toString()
+    ).toBe('WithRandomSeed(123, RandomShuffle(Range(1, n)))');
+  });
+
+  it('.N() likewise keeps the frame', () => {
+    expect(boxed(WITNESS).N().operator).toBe('WithRandomSeed');
+  });
+
+  it('evaluate-then-subs replays the SAME stream as subs-then-evaluate', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box(WITNESS);
+    const direct = e.subs({ n: 5 }).N();
+    const stored = e.evaluate().subs({ n: 5 }).N();
+    expect(stored.isSame(direct)).toBe(true);
+    // …and the stored form is deterministic across calls (the filed defect
+    // was non-determinism here).
+    expect(e.evaluate().subs({ n: 5 }).N().isSame(stored)).toBe(true);
+  });
+
+  it('a MIXED partial (a completed draw + a pending one) also stays whole, with exact replay', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'WithRandomSeed',
+      7,
+      ['List', ['Random'], ['RandomShuffle', ['Range', 1, 'n']]],
+    ]);
+    expect(e.evaluate().operator).toBe('WithRandomSeed');
+    expect(e.subs({ n: 3 }).N().isSame(e.evaluate().subs({ n: 3 }).N())).toBe(
+      true
+    );
+  });
+
+  it('a body that COMPLETES its draws still strips the frame', () => {
+    const result = boxed([
+      'WithRandomSeed',
+      1,
+      ['RandomShuffle', ['Range', 1, 5]],
+    ]).evaluate();
+    expect(result.operator).toBe('List');
+  });
+
+  it('a symbolic but draw-free body still strips the frame', () => {
+    expect(
+      boxed(['WithRandomSeed', 1, ['Add', 'x', 1]])
+        .evaluate()
+        .toString()
+    ).toBe('x + 1');
+  });
+
+  it('a body evaluating to a structured error passes the error through', () => {
+    const result = boxed([
+      'WithRandomSeed',
+      1,
+      ['RandomSample', ['Range', 1, 3], 5],
+    ]).evaluate();
+    expect(result.operator).toBe('Error');
+  });
+
+  it('a lazy view escaping the frame is a COMPLETED value, not a pending draw (§6 ruling)', () => {
+    // `Map(xs, x |-> Random())` evaluates to a lazy view; its lambda draws at
+    // materialization, from whatever frame is active THEN. The frame is
+    // stripped — the ruled live-draw escape — not preserved.
+    const result = parsed(
+      `${WRS}(1, \\operatorname{Map}(\\operatorname{Range}(1,3), x \\mapsto ${RANDOM}))`
+    ).evaluate();
+    expect(result.operator).toBe('Map');
+  });
+
+  it('Hold content is inert data, not a pending draw', () => {
+    expect(
+      boxed(['WithRandomSeed', 1, ['Hold', ['Random']]])
+        .evaluate()
+        .operator
+    ).toBe('Hold');
+  });
+});
+
 describe('WithRandomSeed — frame stack discipline', () => {
   it('pops the frame when the body throws (helper level)', () => {
     const ce = new ComputeEngine();
@@ -573,5 +672,87 @@ describe('Random — unframed', () => {
     const b = ce.box(['Random']).evaluate().re;
     expect(a).not.toBe(b);
     expect(a).not.toBe(draw(42, 1));
+  });
+});
+
+describe('WithRandomSeed — pending-draw detection (review round, 2026-07-28)', () => {
+  // The pending gate is keyed on the `drawsRandom` operator flag and on
+  // VALUE position: a lazy view escaping as the result draws at
+  // materialization (§6 — completed), while the same view beneath a
+  // surviving EAGER consumer still owes its draws to the frame.
+
+  it('a pending draw under an eager consumer keeps the frame', () => {
+    // `ListFrom` asked for materialization INSIDE the frame; only the
+    // unresolved length made it survive. Stripping here converted seeded
+    // randomness to live draws.
+    const e = boxed([
+      'WithRandomSeed',
+      1,
+      ['ListFrom', ['Map', ['Range', 1, 'n'], ['Function', ['Random'], 'u']]],
+    ]);
+    const kept = e.evaluate();
+    expect(kept.operator).toBe('WithRandomSeed');
+    const a = kept.subs({ n: 3 }).N().toString();
+    const b = kept.subs({ n: 3 }).N().toString();
+    expect(a).toBe(b);
+  });
+
+  it('a naked lazy-view escape still strips the frame (§6 unchanged)', () => {
+    const e = boxed([
+      'WithRandomSeed',
+      1,
+      ['Map', ['Range', 1, 3], ['Function', ['Random'], 'u']],
+    ]);
+    expect(e.evaluate().operator).not.toBe('WithRandomSeed');
+  });
+
+  it('a surviving non-random impure application does not pin the frame', () => {
+    // `Assign` is impure (`pure: false`) but owes nothing to the random
+    // stream (`drawsRandom` is false). Under the old `pure`-keyed gate this
+    // inert `If` kept the whole expression wrapped forever.
+    const e = boxed([
+      'WithRandomSeed',
+      7,
+      ['If', ['Less', 'zz', 1], ['Assign', 'x9', 1], 0],
+    ]);
+    expect(e.evaluate().operator).not.toBe('WithRandomSeed');
+  });
+
+  it('`Repeat(Random(), 3)` completes its draw in-frame and strips (probed against a review concern)', () => {
+    // A reviewer conjectured `Repeat` stores permanently-raw `Random()`
+    // cells that would pin the frame forever; in fact the cells evaluate
+    // in-frame to one completed, seed-deterministic draw.
+    const a = boxed(['WithRandomSeed', 5, ['Repeat', ['Random'], 3]])
+      .evaluate()
+      .toString();
+    const b = boxed(['WithRandomSeed', 5, ['Repeat', ['Random'], 3]])
+      .evaluate()
+      .toString();
+    expect(a).toBe(b);
+    expect(a.startsWith('[')).toBe(true);
+  });
+
+  it('a kept-whole body re-runs on each evaluation — the documented semantics of any unreduced impure expression', () => {
+    // Draws replay deterministically; a NON-random side effect in the body
+    // executes once per evaluation, exactly like any other expression that
+    // did not reduce (`docs/RANDOMNESS-MODEL.md`, "Partial evaluation keeps
+    // the frame"). Pipelines must substitute-then-evaluate once, not
+    // re-evaluate a stored kept expression.
+    const ce = new ComputeEngine();
+    ce.assign('ctr', 0);
+    ce.declare('n', 'integer');
+    const e = ce.box([
+      'WithRandomSeed',
+      7,
+      [
+        'Block',
+        ['Assign', 'ctr', ['Add', 'ctr', 1]],
+        ['RandomShuffle', ['Range', 1, 'n']],
+      ],
+    ]);
+    expect(e.evaluate().operator).toBe('WithRandomSeed');
+    expect(ce.box('ctr').evaluate().re).toBe(1);
+    e.evaluate();
+    expect(ce.box('ctr').evaluate().re).toBe(2);
   });
 });
