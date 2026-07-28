@@ -31,3 +31,42 @@ describe('ReplaceAll', () => {
     expect(r.isSame(ce.box(['Add', 'y', 1]))).toBe(true);
   });
 });
+
+describe('N / Evaluate nesting collapse', () => {
+  // Shape pins use `.json` (no evaluation): evaluating `N(x, p)` with p above
+  // the engine's precision raises the process-global precision and leaves it
+  // raised.
+
+  test('N(Evaluate(x)) keeps the OUTER N (the numericization)', () => {
+    expect(ce.box(['N', ['Evaluate', 'Pi']]).json).toEqual(['N', 'Pi']);
+    // …and still numericizes: collapsing to `Evaluate(x)` returned exact pi.
+    expect(ce.box(['N', ['Evaluate', 'Pi']]).evaluate().isNumberLiteral).toBe(
+      true
+    );
+  });
+
+  test('N(Evaluate(x), p) drops the redundant Evaluate, keeps the precision', () => {
+    expect(ce.box(['N', ['Evaluate', 'Pi'], 50]).json).toEqual(['N', 'Pi', 50]);
+  });
+
+  test('N(N(x)) collapses; N(N(x), p) does not (different rounding)', () => {
+    expect(ce.box(['N', ['N', 'Pi']]).json).toEqual(['N', 'Pi']);
+    expect(ce.box(['N', ['N', 'Pi'], 5]).json).toEqual(['N', ['N', 'Pi'], 5]);
+  });
+
+  test('Evaluate(Evaluate(x)) and Evaluate(N(x)) keep the INNER node', () => {
+    expect(ce.box(['Evaluate', ['Evaluate', 'Pi']]).json).toEqual([
+      'Evaluate',
+      'Pi',
+    ]);
+    expect(ce.box(['Evaluate', ['N', 'Pi']]).json).toEqual(['N', 'Pi']);
+  });
+
+  test('mixed chains normalize to a single wrapper', () => {
+    expect(ce.box(['N', ['Evaluate', ['N', 'Pi']]]).json).toEqual(['N', 'Pi']);
+    expect(ce.box(['Evaluate', ['N', ['Evaluate', 'Pi']]]).json).toEqual([
+      'N',
+      'Pi',
+    ]);
+  });
+});

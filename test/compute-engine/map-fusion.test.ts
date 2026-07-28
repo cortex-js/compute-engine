@@ -113,6 +113,36 @@ describe('Map fusion — the structural gate (R2)', () => {
     expect(spine.levels.every((l) => l.napprox === true)).toBe(true);
   });
 
+  test('the `N`-wrapped mapping-function body is canonical at the source', () => {
+    // Both `N`-wrapped constructions rebuild the mapping function from raw
+    // material (`lazyMapNumericApproximation` re-boxes from MathJSON,
+    // `lazyBroadcastMap` builds with `canonical: false`); `N`'s canonical
+    // handler must bind the held body inside the literal's parameter scope,
+    // so consumers reading the node structurally get bound operands — the
+    // `o.isCanonical ? o : o.canonical` in `lowerMapSpine` is
+    // belt-and-suspenders, not the binding mechanism.
+    const innerBody = (map: any) => {
+      expect(map.operator).toBe('Map');
+      const fn = map.ops[map.nops - 1];
+      let body = fn.op1;
+      if (body.operator === 'Block' && body.nops === 1) body = body.op1;
+      expect(body.operator).toBe('N');
+      return body.op1;
+    };
+
+    // The `.N()`-rewrap route (an already-evaluated lazy Map).
+    const rewrapped = innerBody(
+      ce.box(['Add', ['Range', 1, 200], 29]).evaluate().N()
+    );
+    expect(rewrapped.isCanonical).toBe(true);
+    expect(rewrapped.operatorDefinition).toBeDefined();
+
+    // The direct-construction route (broadcast built under `.N()`).
+    const direct = innerBody(ce.box(['Sin', ['Range', 1, 200]]).N());
+    expect(direct.isCanonical).toBe(true);
+    expect(direct.operatorDefinition).toBeDefined();
+  });
+
   test('a variadic bottom level terminates the walk with both sources', () => {
     const m = ce
       .box(['Mod', ['Add', ['Range', 1, 200], ['Range', 1, 200]], 7])

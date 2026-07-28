@@ -23,6 +23,7 @@ import type {
   CompilationResult,
 } from './types.js';
 import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
+import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { foldSeed } from '../numerics/random.js';
 
@@ -448,6 +449,408 @@ function gpuConditional(
   if (target?.language === 'wgsl')
     return `select(${whenFalse}, ${whenTrue}, ${cond})`;
   return `((${cond}) ? (${whenTrue}) : (${whenFalse}))`;
+}
+
+/** Componentwise comparison builtins (GLSL) / operators (WGSL). */
+const GPU_COMPARE_GLSL: Readonly<Record<string, string>> = {
+  Less: 'lessThan',
+  LessEqual: 'lessThanEqual',
+  Greater: 'greaterThan',
+  GreaterEqual: 'greaterThanEqual',
+  Equal: 'equal',
+  NotEqual: 'notEqual',
+};
+const GPU_COMPARE_WGSL: Readonly<Record<string, string>> = {
+  Less: '<',
+  LessEqual: '<=',
+  Greater: '>',
+  GreaterEqual: '>=',
+  Equal: '==',
+  NotEqual: '!=',
+};
+
+/** The boolean-vector (`bvecN` / `vecN<bool>`) type name for the target. */
+function gpuBVec(n: number, target?: CompileTarget<Expression>): string {
+  return target?.language === 'wgsl' ? `vec${n}<bool>` : `bvec${n}`;
+}
+
+/** The float-vector (`vecN` / `vecNf`) type name for the target. */
+function gpuFVec(n: number, target?: CompileTarget<Expression>): string {
+  return target?.language === 'wgsl' ? `vec${n}f` : `vec${n}`;
+}
+
+/** True when `expr` is a `Tuple` literal or is tuple-typed. */
+function gpuIsTupleShaped(expr: Expression): boolean {
+  if (isFunction(expr, 'Tuple')) return true;
+  const t = expr.type.type;
+  return typeof t !== 'string' && t.kind === 'tuple';
+}
+
+/** Fail closed (D6) on a shape the element-wise selection cannot render. */
+function gpuSelectionDecline(reason: string): never {
+  throw new Error(`Which: ${reason} Fail closed (D6).`);
+}
+
+/**
+ * Width (2–4) of a `Which` CONDITION lowered element-wise on a GPU target, or
+ * `undefined` when the condition is a plain shader scalar. Throws (D6) for a
+ * non-scalar condition with no static `vec2`–`vec4` shape — the case that used
+ * to emit garbage such as `u_L == 3.0` behind `success: true`.
+ */
+function gpuSelectionConditionWidth(c: Expression): 2 | 3 | 4 | undefined {
+  // `True` marks the default clause; `False` is a scalar (never-taken) mask.
+  if (isSymbol(c, 'True') || isSymbol(c, 'False')) return undefined;
+
+  if (isFunction(c, 'List')) {
+    for (const cell of c.ops) {
+      // A cell that is provably a SCALAR boolean lowers as its own scalar
+      // condition inside the `bvecN`/`vecN<bool>` constructor — a literal
+      // `True`/`False`, or a scalar comparison such as `x < 0`. Anything
+      // else declines: the interpreter selects only when every cell
+      // evaluates to a boolean, and a non-scalar cell has no single slot.
+      if (isSymbol(cell, 'True') || isSymbol(cell, 'False')) continue;
+      if (
+        BaseCompiler.isBooleanValued(cell) &&
+        !BaseCompiler.isComplexValued(cell) &&
+        !BaseCompiler.isNonScalarShape(cell)
+      )
+        continue;
+      gpuSelectionDecline(
+        `a literal list condition needs provably boolean scalar cells ` +
+          `(\`True\`/\`False\` or a scalar comparison); the cell ` +
+          `\`${cell.toString()}\` is not one, and the interpreter only ` +
+          `selects when every cell evaluates to a boolean.`
+      );
+    }
+    const n = c.nops;
+    if (n < 2 || n > 4)
+      gpuSelectionDecline(
+        `a ${n}-element list condition has no GPU vector lowering (only ` +
+          `vec2–vec4 are shader values).`
+      );
+    return n as 2 | 3 | 4;
+  }
+
+  const h = c.operator;
+  const ops: ReadonlyArray<Expression> = isFunction(c) ? c.ops : [];
+  if (isRelationalOperator(h)) {
+    let width: 2 | 3 | 4 | undefined = undefined;
+    for (const op of ops) {
+      // A complex value is ALSO lowered as a `vec2`, so it must be recognized
+      // BEFORE the width or it masquerades as a 2-cell collection.
+      if (BaseCompiler.isComplexValued(op))
+        gpuSelectionDecline(
+          `a complex-valued operand (\`${op.toString()}\`) in an element-wise ` +
+            `condition is lowered as a \`vec2\` of (re, im), which has no cell ` +
+            `meaning in a selection.`
+        );
+      if (gpuIsTupleShaped(op))
+        gpuSelectionDecline(
+          `a tuple operand (\`${op.toString()}\`) in an element-wise condition ` +
+            `has no element-wise reading — the interpreter binds a tuple ` +
+            `atomically.`
+        );
+      const w = BaseCompiler.vectorComponentCount(op);
+      if (w === undefined) {
+        if (BaseCompiler.isNonScalarShape(op))
+          gpuSelectionDecline(
+            `the condition operand \`${op.toString()}\` is not a shader scalar ` +
+              `and has no static vec2–vec4 shape (an unknown-length list, a ` +
+              `matrix, or a 5+-element list).`
+          );
+        continue;
+      }
+      if (width !== undefined && width !== w)
+        gpuSelectionDecline(
+          `an element-wise condition mixes vec${width} and vec${w} operands.`
+        );
+      width = w;
+    }
+    if (width === undefined) return undefined;
+    if ((h === 'Equal' || h === 'NotEqual') && ops.length > 2)
+      gpuSelectionDecline(
+        `an n-ary \`${h}\` over a collection operand has no faithful ` +
+          `element-wise lowering — the interpreter's n-ary form switches shape ` +
+          `on how many operands are collections at run time, so no pairwise ` +
+          `conjunction matches it.`
+      );
+    if (GPU_COMPARE_GLSL[h] === undefined)
+      gpuSelectionDecline(
+        `the relation \`${h}\` has no componentwise shader form.`
+      );
+    return width;
+  }
+
+  if (h === 'And' || h === 'Or' || h === 'Not') {
+    let width: 2 | 3 | 4 | undefined = undefined;
+    for (const op of ops) {
+      const w = gpuSelectionConditionWidth(op);
+      if (w === undefined) continue;
+      if (width !== undefined && width !== w)
+        gpuSelectionDecline(
+          `an element-wise \`${h}\` mixes vec${width} and vec${w} operands.`
+        );
+      width = w;
+    }
+    return width;
+  }
+
+  // A complex-valued condition is a scalar-side value (its `vec2` is (re, im),
+  // not two cells): left exactly as it is today.
+  if (BaseCompiler.isComplexValued(c)) return undefined;
+  const w = BaseCompiler.vectorComponentCount(c);
+  if (w !== undefined) {
+    // A value used DIRECTLY as a boolean-vector condition (e.g. a `vars`-mapped
+    // `bvec` uniform). Anything else with a vector shape is a numeric vector,
+    // which is not a condition.
+    if (!c.type.matches('indexed_collection<boolean>'))
+      gpuSelectionDecline(
+        `the condition \`${c.toString()}\` is a collection of ` +
+          `\`${c.type.toString()}\`, not of booleans.`
+      );
+    return w;
+  }
+  if (BaseCompiler.isNonScalarShape(c))
+    gpuSelectionDecline(
+      `the condition \`${c.toString()}\` is not a shader scalar and has no ` +
+        `static vec2–vec4 shape.`
+    );
+  return undefined;
+}
+
+/** Conjoin boolean-vector masks componentwise. */
+function gpuMaskAnd(
+  masks: ReadonlyArray<string>,
+  n: 2 | 3 | 4,
+  target: CompileTarget<Expression>
+): string {
+  if (masks.length === 1) return masks[0];
+  if (target.language === 'wgsl') return `(${masks.join(' & ')})`;
+  // GLSL has no componentwise `&&`: convert to 0/1 floats, multiply, and let
+  // the `bvecN` constructor read nonzero back as `true`.
+  const f = gpuFVec(n, target);
+  return `${gpuBVec(n, target)}(${masks.map((m) => `${f}(${m})`).join(' * ')})`;
+}
+
+/** Disjoin boolean-vector masks componentwise. */
+function gpuMaskOr(
+  masks: ReadonlyArray<string>,
+  n: 2 | 3 | 4,
+  target: CompileTarget<Expression>
+): string {
+  if (masks.length === 1) return masks[0];
+  if (target.language === 'wgsl') return `(${masks.join(' | ')})`;
+  const f = gpuFVec(n, target);
+  return `${gpuBVec(n, target)}(${masks.map((m) => `${f}(${m})`).join(' + ')})`;
+}
+
+/**
+ * Emit a `bvecN` / `vecN<bool>` mask for one `Which` condition.
+ *
+ * Boolean vectors — NOT float masks: a float `mix(a, b, t)` computes
+ * `a·(1−t) + b·t`, so a NaN in the unselected operand poisons the result
+ * (`mix(NaN, x, 1.0)` is NaN). The `genBType` `mix` / WGSL `select` overloads
+ * are true per-component SELECTION and are therefore NaN-safe.
+ */
+function gpuSelectionMask(
+  c: Expression,
+  n: 2 | 3 | 4,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const bvec = gpuBVec(n, target);
+  const fvec = gpuFVec(n, target);
+
+  if (isSymbol(c, 'True')) return `${bvec}(true)`;
+  if (isSymbol(c, 'False')) return `${bvec}(false)`;
+
+  if (isFunction(c, 'List'))
+    return `${bvec}(${c.ops
+      .map((x) =>
+        isSymbol(x, 'True')
+          ? 'true'
+          : isSymbol(x, 'False')
+            ? 'false'
+            : // A provably-boolean scalar cell (validated by
+              // `gpuSelectionConditionWidth`) compiles as its own scalar
+              // condition inside the constructor: `bvec2((x < 0.0), true)`.
+              compile(x)
+      )
+      .join(', ')})`;
+
+  const h = c.operator;
+  const ops: ReadonlyArray<Expression> = isFunction(c) ? c.ops : [];
+  if (isRelationalOperator(h)) {
+    // `isRelationalOperator` covers the FULL inequality set (`Precedes`,
+    // `Approx`, `Tilde`, …), not just the six componentwise comparators. A
+    // scalar-operand relation skips the width pass's compare-form check, so
+    // guard again at the emission site — indexing past the map would splice
+    // the literal string `undefined` into the shader source.
+    const cmp =
+      target.language === 'wgsl' ? GPU_COMPARE_WGSL[h] : GPU_COMPARE_GLSL[h];
+    if (cmp === undefined)
+      gpuSelectionDecline(
+        `the relation \`${h}\` has no componentwise shader form.`
+      );
+    const operand = (op: Expression): string => {
+      const code = compile(op);
+      return BaseCompiler.vectorComponentCount(op) === undefined
+        ? `${fvec}(${code})`
+        : code;
+    };
+    const codes = ops.map(operand);
+    const masks: string[] = [];
+    // A chained ordering `a < m < b` conjoins the successive pairwise masks.
+    // The shared middle operand is compiled twice: safe here because GPU
+    // targets have no `bindExpr` and only support deterministic operands.
+    for (let i = 0; i < codes.length - 1; i++) {
+      masks.push(
+        target.language === 'wgsl'
+          ? `((${codes[i]}) ${cmp} (${codes[i + 1]}))`
+          : `${cmp}(${codes[i]}, ${codes[i + 1]})`
+      );
+    }
+    return gpuMaskAnd(masks, n, target);
+  }
+
+  if (h === 'And' || h === 'Or' || h === 'Not') {
+    const masks = ops.map((op) => gpuSelectionMask(op, n, compile, target));
+    if (h === 'Not') {
+      if (masks.length !== 1) throw new Error('Not: expected one argument');
+      return target.language === 'wgsl'
+        ? `(!(${masks[0]}))`
+        : `not(${masks[0]})`;
+    }
+    return h === 'And'
+      ? gpuMaskAnd(masks, n, target)
+      : gpuMaskOr(masks, n, target);
+  }
+
+  // A boolean-vector value used directly as the condition, or a scalar boolean
+  // splat across the selection width.
+  if (
+    !BaseCompiler.isComplexValued(c) &&
+    BaseCompiler.vectorComponentCount(c) !== undefined
+  )
+    return compile(c);
+  return `${bvec}(${compile(c)})`;
+}
+
+/**
+ * Lower a `Which`/`If` whose condition may be an indexed collection to the GPU
+ * ELEMENT-WISE selection form (`np.select` semantics — R1–R4 of
+ * `docs/plans/2026-07-27-elementwise-which-design.md`). Clauses arrive in
+ * `Which` shape (condition, arm, condition, arm, …); the base compiler
+ * normalizes `If(c, t, f)` to `[c, t, True, f]`.
+ *
+ * Only STATICALLY SHAPED conditions lower: every non-scalar condition must have
+ * a `vec2`–`vec4` shape, and all of them the same one. Each condition becomes a
+ * boolean vector (`bvecN` / `vecN<bool>`), and the clauses are folded
+ * right-to-left with GLSL `mix` / WGSL `select` — first match wins (R1), with
+ * `vecN(NaN)` as the no-match value (R4). Returns `null` when every condition is
+ * provably scalar, so the ordinary scalar `Which`/`If` emission is untouched;
+ * throws (D6) on any shape the shader languages cannot render.
+ *
+ * Documented divergences from the interpreter (a shader cannot throw —
+ * CO-P2-24, the same reason the `absence` capability at `createTarget` declares
+ * no `isAbsent`):
+ *
+ * - R2: a shader evaluates EVERY condition and EVERY arm. This goes BEYOND
+ *   what R2 licenses (R2 promises an arm is evaluated only if selection
+ *   reaches it; it only permits computing unselected CELLS of a selected
+ *   arm) — a genuine GPU-specific divergence, accepted because the domain is
+ *   pure and total: no arm can throw, no draw count is observable, so only
+ *   the cells selection keeps are visible in the result.
+ * - R4′: an absent (NaN) condition cell follows IEEE comparison semantics
+ *   rather than the interpreter's consumed error cell: the orderings and
+ *   `equal` answer `false` (the position falls through to LATER clauses),
+ *   but `notEqual` answers `true` for a NaN cell (the clause SELECTS it) and
+ *   `Not` inverts. Absence is not detectable here — `isnan`, and under
+ *   aggressive fast-math even the NaN-comparison results themselves, are
+ *   unreliable (the same limitation that omits `absence.isAbsent`).
+ * - A non-boolean condition VALUE at run time cannot throw; only statically
+ *   visible non-boolean conditions are declined here.
+ */
+function compileGPUSelection(
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string | null {
+  let n: 2 | 3 | 4 | undefined = undefined;
+  for (let i = 0; i < args.length; i += 2) {
+    const w = gpuSelectionConditionWidth(args[i]);
+    if (w === undefined) continue;
+    if (n !== undefined && n !== w)
+      gpuSelectionDecline(
+        `the conditions of an element-wise selection mix vec${n} and vec${w}.`
+      );
+    n = w;
+  }
+  // Every condition is a scalar: leave the ordinary emission alone.
+  if (n === undefined) return null;
+
+  const width = n;
+  const fvec = gpuFVec(width, target);
+
+  const armCode = (arm: Expression): string => {
+    if (BaseCompiler.isComplexValued(arm))
+      gpuSelectionDecline(
+        `an element-wise selection cannot have a complex-valued arm ` +
+          `(\`${arm.toString()}\`) — a compiled complex value is a \`vec2\` of ` +
+          `(re, im), which has no cell convention inside a selection.`
+      );
+    if (gpuIsTupleShaped(arm))
+      gpuSelectionDecline(
+        `an element-wise selection cannot have a tuple arm ` +
+          `(\`${arm.toString()}\`) — a lifted point would be a list of points, ` +
+          `which is not a GPU value.`
+      );
+    // A boolean arm has no GPU rendering: the selection's value operands are
+    // one numeric vector type, and a `bvecN` (or a scalar `true`/`false`,
+    // which is not even a float) spliced into `mix`/`select` is invalid
+    // shader source. (The JS target returns boolean cells; a GPU consumer
+    // should spell the mask numerically — 1 and 0 arms.)
+    if (
+      isSymbol(arm, 'True') ||
+      isSymbol(arm, 'False') ||
+      arm.type.matches('boolean') ||
+      arm.type.matches('indexed_collection<boolean>')
+    )
+      gpuSelectionDecline(
+        `an element-wise selection cannot have a boolean-valued arm ` +
+          `(\`${arm.toString()}\`) — a GPU selection produces one numeric ` +
+          `vector, and there is no boolean-cell convention. Use numeric arms ` +
+          `(e.g. 1 and 0) instead.`
+      );
+    const w = BaseCompiler.vectorComponentCount(arm);
+    if (w === width) return compile(arm);
+    if (w === undefined && !BaseCompiler.isNonScalarShape(arm))
+      return `${fvec}(${compile(arm)})`;
+    gpuSelectionDecline(
+      `the arm \`${arm.toString()}\` does not fit the vec${width} shape of the ` +
+        `element-wise conditions (the interpreter answers ` +
+        `\`incompatible-dimensions\`).`
+    );
+  };
+
+  // First match wins: fold the clauses from LAST to FIRST over the no-match
+  // vector, so an earlier clause's mask overrides a later one.
+  let acc = `${fvec}(${gpuNaN(target)})`;
+  for (let i = args.length - 2; i >= 0; i -= 2) {
+    const code = armCode(args[i + 1]);
+    // A `True` condition is the default clause: everything built for the later
+    // (now unreachable) clauses is replaced.
+    if (isSymbol(args[i], 'True')) {
+      acc = code;
+      continue;
+    }
+    const mask = gpuSelectionMask(args[i], width, compile, target);
+    acc =
+      target.language === 'wgsl'
+        ? `select(${acc}, ${code}, ${mask})`
+        : `mix(${acc}, ${code}, ${mask})`;
+  }
+  return acc;
 }
 
 /**
@@ -888,6 +1291,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   When: (args, compile, target) => {
     if (args.length !== 2)
       throw new Error('When: expected exactly 2 arguments (expr, cond)');
+    // `When` is deliberately NOT a selection form (elementwise-Which design
+    // §5): its condition must be a scalar boolean. A provably collection-valued
+    // condition would otherwise emit garbage (`(vec2(True, False)) ? …`).
+    BaseCompiler.assertScalarCondition(args[1]);
     if (isSymbol(args[1], 'True')) return `(${compile(args[0])})`;
     // The masked branch's NaN must match the value's SHAPE (a tuple-valued
     // body compiles to a vecN) — see `gpuNaNFor` (Tycho item 49).
@@ -4162,6 +4569,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // of the shader language, or the generated shader fails to compile. Fail
       // closed (D6) with a clear diagnostic naming the offending identifier.
       mangleId: (id) => gpuCheckIdentifier(id, this.languageId),
+      // A `Which`/`If` with a statically-shaped (vec2–vec4) collection
+      // condition selects ELEMENT-WISE: lower it to boolean-vector masks
+      // combined with `mix`/`select`. Returns `null` — leaving the scalar
+      // emission below byte-identical — when every condition is a scalar.
+      selection: (args, compile, selTarget) =>
+        compileGPUSelection(args, compile, selTarget),
       operators: (op) => GPU_OPERATORS[op],
       functions: (id) => functions[id],
       var: (id) => {

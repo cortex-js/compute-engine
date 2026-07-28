@@ -919,3 +919,67 @@ describe('INTERVAL JS - fails closed on regularized gamma/beta (no kernel)', () 
     expect(fn.unsupported).toContain('BetaRegularized');
   });
 });
+
+// The interval domain is scalar — one interval per quantity — so there is no
+// element-wise selection convention for a collection-valued `Which`/`If`
+// condition. Decline with a message that says so (D6), instead of the generic
+// ``Unknown operator `List` `` the clause list used to produce.
+describe('INTERVAL JS - element-wise selection declines cleanly', () => {
+  const ceSel = new ComputeEngine();
+  ceSel.declare('BL', 'list<boolean>');
+
+  test('Which with a literal boolean-list condition declines', () => {
+    const fn = compile(
+      ceSel.box(['Which', ['List', 'True', 'False'], 1, 'True', 0]),
+      {
+        to: 'interval-js',
+      }
+    );
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('no interval-js lowering');
+  });
+
+  test('Which with a `list<boolean>` declared condition declines', () => {
+    const fn = compile(ceSel.box(['Which', 'BL', 1, 'True', 0]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('no interval-js lowering');
+  });
+
+  test('If with a collection condition declines', () => {
+    const fn = compile(ceSel.box(['If', 'BL', 1, 0]), { to: 'interval-js' });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('no interval-js lowering');
+  });
+
+  test('When with a collection condition declines', () => {
+    const fn = compile(ceSel.box(['When', 1, ['List', 'True', 'False']]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('branch condition is a collection-valued');
+  });
+
+  test('a scalar Which is unchanged', () => {
+    const fn = compile(ceSel.box(['Which', ['Less', 'x', 3], 1, 'True', 0]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toContain('_IA.piecewise');
+    expect(fn.code).toContain('_IA.less(_.x, _IA.point(3))');
+  });
+
+  test('a wide-declared (unprovable) condition still compiles', () => {
+    // Only PROVABLE collection-ness declines: a condition whose collection-ness
+    // is not statically visible must keep compiling (scalar curve/implicit
+    // plotting rides this target).
+    const ceWide = new ComputeEngine();
+    ceWide.declare('u', 'unknown');
+    const fn = compile(ceWide.box(['Which', ['Less', 'u', 3], 1, 'True', 0]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toContain('_IA.piecewise');
+  });
+});

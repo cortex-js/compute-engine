@@ -120,21 +120,6 @@ operators, shortest for explicit PAIRING constructors (`Zip`, variadic `Map`,
   need a distinct absence sentinel carried through nested broadcasts to do
   better.
 
-- **IJS/GLSL elementwise selection lowerings.** The JS `_SYS.select`
-  lowering landed 2026-07-27 (with the boolean-head guard relaxation — see
-  CHANGELOG); the interval-js and GPU targets still have no selection
-  lowering per their conventions. Note the intentional decline that stays:
-  chained n-ary `Equal`/`NotEqual` cannot lower faithfully — the
-  interpreter's n-ary form switches shape on how many operands are
-  collections at run time (evidence at the decline site in
-  `compileJSEquality`).
-- **GPU/interval `Which` over a collection condition does not fail
-  closed.** Pre-existing, surfaced by the 2026-07-27 other-target probes:
-  the GPU target's own `functions.Which` emits garbage for a collection
-  condition (`(vec2(True, False)) ? …`) and interval-js emits empty code,
-  rather than declining cleanly. The JS selection hook sits after the
-  `target.functions` lookup, so both are byte-unchanged by it; a clean
-  fail-closed is a separate small item.
 - **Python still fails closed** for comparisons/connectives over a
   possibly-collection operand — it has no generic scalar-closure broadcaster.
   Tracked under *Broadcast typing residue* below; `_ce_bcast` now matches the

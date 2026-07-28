@@ -376,6 +376,8 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   When: (args, compile) => {
     if (args.length !== 2)
       throw new Error('When: expected 2 arguments (value, condition)');
+    // `When` is not a selection form: its condition must be a scalar boolean.
+    BaseCompiler.assertScalarCondition(args[1]);
     return `_IA.restrict(${compile(args[1])}, () => ${compile(args[0])})`;
   },
   Which: (args, compile) => {
@@ -703,6 +705,26 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // Don't use operators - all arithmetic goes through functions
       // because interval arithmetic returns IntervalResult, not numbers
       operators: () => undefined,
+      // The interval domain is scalar — one interval per quantity — so there is
+      // no element-wise selection convention here. Decline a provably
+      // collection-valued `Which`/`If` condition with a message that says so,
+      // instead of the generic ``Unknown operator `List` `` the clause list used
+      // to produce. Only PROVABLE collection-ness is tested: a wide-declared
+      // condition (`q(x) < y` with `q: (unknown) -> unknown`) must keep
+      // compiling unchanged — scalar curve/implicit plotting rides this target.
+      selection: (args) => {
+        for (let i = 0; i < args.length; i += 2) {
+          const c = args[i];
+          if (c.isCollection || c.type.matches('collection'))
+            throw new Error(
+              'Which: a collection-valued condition has no interval-js lowering — ' +
+                'the interval domain is scalar (one interval per quantity), so there ' +
+                'is no elementwise selection convention. Evaluate the expression ' +
+                'instead, or compile a scalar per-element function. Fail closed (D6).'
+            );
+        }
+        return null;
+      },
       functions: (id) => INTERVAL_JAVASCRIPT_FUNCTIONS[id],
       var: (id) => {
         const result: Record<string, string> = {

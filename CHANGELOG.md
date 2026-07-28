@@ -87,6 +87,57 @@
   decline (fail closed), as do tuple and non-indexed-collection
   (set/dictionary/string) participants. Other targets are unchanged.
 
+- **Element-wise `Which`/`If` now compiles on the GPU targets (GLSL/WGSL).** A
+  condition with a static `vec2`–`vec4` shape — a comparison over a fixed-length
+  list/vector operand (`n == 3` with `n: vector<integer^4>`), `And`/`Or`/`Not`
+  combinations of those, or a literal list of provably-boolean scalar cells
+  (`[x < 0, True]`) — lowers to boolean-vector masks (`equal(u_n, vec4(3.0))`
+  on GLSL, componentwise `==` on WGSL) folded right-to-left with GLSL
+  `mix(…, …, bvecN)` / WGSL `select`, so first match wins per component and the
+  no-match value is a `vecN` of NaN. Scalar conditions and numeric arms splat; a
+  same-width numeric vector arm selects per component. Documented divergences (a
+  shader cannot throw): every condition and arm is computed — beyond what R2
+  licenses, accepted because the domain is pure and total — and an absent (NaN)
+  condition cell follows IEEE comparison semantics instead of producing the
+  interpreter's positioned error: orderings and `equal` answer `false` (the
+  position falls through to later clauses), while `notEqual` answers `true` (the
+  clause selects it) and `Not` inverts. Shapes the shader languages cannot
+  render — an unknown-length list operand, mixed vector widths, a complex,
+  tuple, or boolean-valued arm, a 5+-element list, n-ary `Equal`/`NotEqual` over
+  a collection, a relation with no componentwise shader form (`Precedes`, …) —
+  now **fail closed with a specific diagnostic**, where they previously compiled
+  successfully to invalid or wrong shader source (`(vec2(True, False)) ? …`,
+  `u_L == 3.0`). A provably collection-valued `When` condition also declines
+  cleanly (`When` is a guard carrier, not a selection form).
+
+- **Comparisons and connectives over a non-scalar operand now fail closed on
+  the GPU targets everywhere, not just in condition position.** A vec-shaped
+  operand outside a `Which`/`If` selection — `L < 3` at the root of a compiled
+  expression, a comparison in arm position, `And`/`Or`/`Not` over
+  boolean-vector values — used to lower through the scalar infix operators and
+  emit invalid shader source behind `success: true` (`u_m < 3.0` with a `vec2`
+  uniform, `!(u_m < 3.0)`). These now decline with a diagnostic pointing at the
+  selection form. One shape is deliberately kept: GLSL `Equal`/`NotEqual` over
+  two tuple-shaped operands (`p == q`) — GLSL `==` on vectors is atomic
+  aggregate equality, which matches the interpreter's atomic tuple comparison
+  (on WGSL the same `==` is componentwise, so it declines there).
+
+- **A collection-valued `Which`/`When` condition on the Python target now fails
+  closed.** The Python handlers bypassed the base compiler's condition guard,
+  and a non-empty Python list is truthy — so
+  `Which([True, False], 1, True, 0)` compiled to
+  `(1) if ([True, False]) else (0)`, silently answering `1` regardless of the
+  cells. Both handlers now decline (D6), matching the `If` route, which always
+  did.
+
+- **A collection-valued `Which`/`If`/`When` condition on the `interval-js`
+  target now declines with a specific message.** The interval domain is scalar —
+  one interval per quantity — so there is no element-wise selection convention
+  to lower to; the decline says exactly that (and suggests evaluating instead)
+  where it previously surfaced the incidental ``Unknown operator `List` ``.
+  Scalar piecewise compilation (`_IA.piecewise` chains, including wide-declared
+  conditions such as `q(x) < y`) is byte-identical.
+
 - **Compiled comparisons and connectives are now broadcast-aware (JavaScript
   target).** The `<`/`<=`/`>`/`>=`/`And`/`Or`/`Not` handlers used to decline to
   compile when an operand _might_ be a collection at run time — including a call
@@ -129,6 +180,27 @@
   operator application over parameters and closed operands, with a pure operator
   head) take the fast path — anything else falls back to the general path
   byte-identically.
+
+### Issues Resolved
+
+- **`["N", ["Evaluate", expr]]` dropped the numeric approximation.** The
+  canonicalization collapse kept the inner node, so the form canonicalized to
+  `["Evaluate", expr]` and evaluated exactly (`N(Evaluate(pi))` returned the
+  symbolic `pi` instead of `3.14159…`). Redundant `N`/`Evaluate` nestings now
+  normalize to the single wrapper that carries the semantics:
+  `N(Evaluate(x)) → N(x)` (both arities, so `N(Evaluate(x), 20)` keeps its
+  precision), `Evaluate(N(x)) → N(x)`, and `Evaluate(Evaluate(x)) →
+  Evaluate(x)`. `N(N(x), p)` deliberately stays nested — it rounds an
+  engine-precision result to `p` digits, which differs from `N(x, p)`.
+
+- **The body of an `N`-wrapped broadcast mapping function was unbound.** `N`
+  held its operand raw at canonicalization, so the mapping function of a lazy
+  broadcast built under `.N()` (`Sin(Range(1, 10^6)).N()`, or `.N()` on an
+  already-evaluated lazy `Map`) carried a non-canonical body that only bound at
+  first evaluation. `N` now canonicalizes (binds) its held operand — inside the
+  function literal's parameter scope, where the binding belongs — so consumers
+  that read the body structurally (the `Map`-drain lowering above) see bound
+  operands. Values were and are unchanged.
 
 ## 0.97.0 _2026-07-27_
 

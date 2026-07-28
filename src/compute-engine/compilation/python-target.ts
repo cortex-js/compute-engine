@@ -911,6 +911,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   When: (args, compile) => {
     if (args.length !== 2)
       throw new Error('When: expected exactly 2 arguments (expr, cond)');
+    // A provably collection-valued condition must fail closed: a non-empty
+    // Python list is TRUTHY, so the conditional expression below would
+    // silently take the value branch for every element instead of selecting.
+    BaseCompiler.assertScalarCondition(args[1]);
     if (isSymbol(args[1], 'True')) return `(${compile(args[0])})`;
     if (isSymbol(args[1], 'False')) return "float('nan')";
     return `((${compile(args[0])}) if (${compile(args[1])}) else float('nan'))`;
@@ -920,6 +924,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Which: (args, compile) => {
     if (args.length < 2 || args.length % 2 !== 0)
       throw new Error('Which: expected condition/value pairs');
+    // Same guard as `When`: this handler bypasses the base compiler's
+    // per-condition `guardCondition` assert, and Python truthiness would turn
+    // a collection condition into a silent whole-expression pick.
+    for (let i = 0; i < args.length; i += 2)
+      BaseCompiler.assertScalarCondition(args[i]);
     const build = (i: number): string => {
       if (i >= args.length) return "float('nan')";
       const cond = args[i];

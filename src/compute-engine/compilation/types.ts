@@ -116,8 +116,16 @@ export interface CompileTarget<Expr = unknown> {
    * conditional is unaffected by the hook's presence. Throws to fail closed
    * (D6) on a shape the target cannot render.
    *
-   * Only the JavaScript target implements it (its runtime `_SYS.select`); the
-   * others leave it undefined and keep the fail-closed scalar-condition guard.
+   * Consulted BEFORE the target's `functions` entry for the operator, for both
+   * `If` and `Which`, so a target that defines both gets the hook first.
+   *
+   * The JavaScript target lowers to its runtime `_SYS.select`; the GPU shader
+   * targets lower a statically shaped (`vec2`–`vec4`) condition to
+   * boolean-vector masks combined with `mix`/`select`, and decline anything
+   * with no static shape; interval-js implements it as a clean decline (the
+   * interval domain is scalar — one interval per quantity — so it has no
+   * element-wise selection convention). Targets that leave it undefined keep
+   * the fail-closed scalar-condition guard.
    */
   selection?: (
     args: ReadonlyArray<Expr>,

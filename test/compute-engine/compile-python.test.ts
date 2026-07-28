@@ -972,4 +972,33 @@ describe('PYTHON TARGET', () => {
       );
     });
   });
+
+  // The Python `Which`/`When` handlers bypass the base compiler's
+  // per-condition guard, and a non-empty Python list is TRUTHY — so a
+  // collection-valued condition used to compile to a conditional expression
+  // that silently picked the value branch for every element
+  // (`(1) if ([True, False]) else (0)`). They now fail closed (D6), matching
+  // the `If` route, which always asserted.
+  describe('Collection-valued conditions fail closed', () => {
+    it('declines Which with a literal boolean-list condition', () => {
+      expect(() =>
+        python.compile(
+          ce.box(['Which', ['List', 'True', 'False'], 1, 'True', 0])
+        )
+      ).toThrow(/branch condition is a collection-valued expression/);
+    });
+
+    it('declines When with a collection-valued condition', () => {
+      expect(() =>
+        python.compile(ce.box(['When', 1, ['List', 'True', 'False']]))
+      ).toThrow(/branch condition is a collection-valued expression/);
+    });
+
+    it('keeps the scalar Which emission byte-identical', () => {
+      const code = python.compile(
+        ce.box(['Which', ['Less', 'x', 3], 1, 'True', 0])
+      ).code;
+      expect(code).toBe('((1) if (x < 3) else (0))');
+    });
+  });
 });

@@ -705,6 +705,48 @@ export class BaseCompiler {
         );
     }
 
+    // GPU shader targets: a comparison or logical connective over a non-scalar
+    // operand must not lower through the scalar infix operators — GLSL rejects
+    // `vecN < float` outright, and where an infix form IS legal it means the
+    // wrong thing (WGSL `vecN == vecN` is a `vecN<bool>`, not the scalar bool
+    // the surrounding expression expects; GLSL `vecN == vecN` is ATOMIC
+    // aggregate equality where the interpreter broadcasts a `List`
+    // element-wise). The element-wise `Which`/`If` selection path builds its
+    // boolean-vector masks directly (`compileGPUSelection`) and never routes a
+    // condition through here; everything else fails closed (D6). One shape is
+    // deliberately admitted: GLSL `Equal`/`NotEqual` over TUPLE-shaped
+    // operands — a tuple (point) is atomic in the interpreter too, and GLSL
+    // `==` on two vecNs is scalar aggregate equality, so that lowering is
+    // faithful. (On WGSL the same `==` is component-wise — excluded.)
+    // Complex operands are excluded: they already skip the infix path below
+    // and fail closed in function dispatch.
+    if (
+      (target.language === 'glsl' || target.language === 'wgsl') &&
+      (isRelationalOperator(h) || BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h))
+    ) {
+      const isTupleShaped = (a: Expression): boolean => {
+        if (isFunction(a, 'Tuple')) return true;
+        const t = a.type.type;
+        return typeof t !== 'string' && t.kind === 'tuple';
+      };
+      const tupleEquality =
+        target.language === 'glsl' && (h === 'Equal' || h === 'NotEqual');
+      const offending = args.find(
+        (a) =>
+          !BaseCompiler.isComplexValued(a) &&
+          BaseCompiler.isNonScalarShape(a) &&
+          !(tupleEquality && isTupleShaped(a))
+      );
+      if (offending !== undefined)
+        throw new Error(
+          `${h}: cannot compile a comparison or logical connective over the ` +
+            `non-scalar operand \`${offending.toString()}\` on the ` +
+            `${target.language} target — the shader infix operators are ` +
+            `scalar-only (element-wise conditions compile only inside a ` +
+            `\`Which\`/\`If\` selection). Fail closed (D6).`
+        );
+    }
+
     // Handle operators
     const op = target.operators?.(h);
 
@@ -937,8 +979,10 @@ export class BaseCompiler {
       if (args.length !== 3) throw new Error('If: wrong number of arguments');
       // A condition that may be an indexed collection at run time selects
       // ELEMENT-WISE: `If(c, t, f)` is the two-clause `Which(c, t, True, f)`
-      // (see the `Which` branch below and `target.selection`). `null` — every
-      // condition provably scalar — keeps the ternary below unchanged.
+      // (see the `Which` branch below and `target.selection`). Consulted BEFORE
+      // the target's `functions` entry, so a target that has both — GPU,
+      // interval-js — gets the hook first. `null` — every condition provably
+      // scalar — keeps the `functions` entry / ternary below unchanged.
       const selection = target.selection?.(
         [args[0], args[1], engine.True, args[2]],
         (expr) => BaseCompiler.compileValueOperand(expr, target),
@@ -980,6 +1024,20 @@ export class BaseCompiler {
         throw new Error(
           'Which: expected even number of arguments (condition/value pairs)'
         );
+      // A condition that may be an indexed collection at run time selects
+      // ELEMENT-WISE (`np.select`, R1–R4 of
+      // `docs/plans/2026-07-27-elementwise-which-design.md`): the target lowers
+      // the whole clause list to its own selection helper. Consulted BEFORE the
+      // target's `functions` entry (as in the `If` branch above), so a target
+      // that has both — GPU, interval-js — gets the hook first. `null` — every
+      // condition provably scalar — keeps the `functions` entry / ternary chain
+      // below unchanged.
+      const selection = target.selection?.(
+        args,
+        (expr) => BaseCompiler.compileValueOperand(expr, target),
+        target
+      );
+      if (selection !== null && selection !== undefined) return selection;
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
@@ -993,17 +1051,6 @@ export class BaseCompiler {
           .map((x) => BaseCompiler.compile(x, target))
           .join(', ')})`;
       }
-      // A condition that may be an indexed collection at run time selects
-      // ELEMENT-WISE (`np.select`, R1–R4 of
-      // `docs/plans/2026-07-27-elementwise-which-design.md`): the target lowers
-      // the whole clause list to its own selection helper. `null` — every
-      // condition provably scalar — keeps the ternary chain below unchanged.
-      const selection = target.selection?.(
-        args,
-        (expr) => BaseCompiler.compileValueOperand(expr, target),
-        target
-      );
-      if (selection !== null && selection !== undefined) return selection;
       // Compile to chained ternaries. When arms mix real and complex values,
       // coerce every arm — including the no-match NaN default — to the complex
       // convention (Tycho item 60: a constant base-case arm in a

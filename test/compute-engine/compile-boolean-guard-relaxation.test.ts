@@ -180,11 +180,10 @@ describe('the shapes that must keep failing closed', () => {
 
 describe('other targets are unaffected', () => {
   // The relaxation is JavaScript-only: it is a JS coercion hazard, lowered
-  // onto a JS runtime helper. Every other target keeps the source it emitted
-  // before, byte for byte.
+  // onto a JS runtime helper. The non-shader targets keep the source they
+  // emitted before, byte for byte.
   test.each([
     ['python', 'xs < 3'],
-    ['glsl', 'xs < 3.0'],
     ['interval-js', '_IA.less(_.xs, _IA.point(3))'],
   ])('%s keeps its own lowering', (to, expected) => {
     const ce = new ComputeEngine();
@@ -192,5 +191,18 @@ describe('other targets are unaffected', () => {
     const r = compile(ce.box(['Less', 'xs', 3] as any), { to } as any)!;
     expect(r.code).toBe(expected);
     expect(r.code).not.toContain('_SYS');
+  });
+
+  // The GLSL row used to pin `xs < 3.0` — invalid shader source (`vec` vs
+  // `float` has no infix `<`) reported behind `success: true`. The GPU
+  // targets now fail closed on a comparison over a non-scalar operand
+  // outside a `Which`/`If` selection condition (2026-07-28); the engine-level
+  // compile() surfaces that as a fallback result.
+  test('glsl fails closed instead of emitting invalid infix source', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list<real>');
+    const r = compile(ce.box(['Less', 'xs', 3] as any), { to: 'glsl' } as any)!;
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/scalar-only/);
   });
 });

@@ -1481,8 +1481,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any) -> unknown',
       type: ([x]) => x.type,
-      canonical: (ops, { engine: ce }) =>
-        ce._fn('Evaluate', checkArity(ce, ops, 1)),
+      canonical: (ops, { engine: ce }) => {
+        const xs = checkArity(ce, ops, 1);
+        // Redundant nesting: evaluating an `Evaluate` or `N` node is exactly
+        // that node's own evaluation, so keep the INNER node (the mirror of
+        // `N`'s collapse, where the outer `N` carries the numericization).
+        if (xs.length === 1) {
+          const h = xs[0].operator;
+          if (h === 'Evaluate' || h === 'N') return xs[0];
+        }
+        return ce._fn('Evaluate', xs);
+      },
       evaluate: ([x], options) => x.evaluate(options),
     },
 
@@ -1909,13 +1918,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (ops.length === 0) return ce._fn('N', checkArity(ce, ops, 1));
         if (ops.length > 2) return ce._fn('N', checkArity(ce, ops, 2));
 
-        // Collapse nested `N(N(x))` / `N(Evaluate(x))` for the single-arg form.
-        if (ops.length === 1) {
-          const h = ops[0].operator;
-          if (h === 'N' || h === 'Evaluate') return ops[0].canonical;
-        }
+        // `lazy` keeps the operand from being EVALUATED before the handler
+        // runs, but the held operand must still be canonicalized (bound) here:
+        // `op.canonical` is value-safe, and an unbound operand breaks
+        // consumers that read the node structurally — the map-fusion lowering
+        // reads the body of an `N`-wrapped broadcast `Map` mapping function
+        // (`lazyBroadcastMap`, `lazyMapNumericApproximation`), and binding is
+        // what makes it canonicalize inside the function literal's parameter
+        // scope rather than at first evaluation.
+        const xs = ops.map((op) => op.canonical);
 
-        return ce._fn('N', ops);
+        // An inner `Evaluate` is subsumed by `N` (`x.N()` already evaluates),
+        // for either arity: keep the OUTER `N` — collapsing to the `Evaluate`
+        // node would drop the numericization.
+        if (isFunction(xs[0], 'Evaluate') && xs[0].nops === 1)
+          xs[0] = xs[0].op1;
+
+        // Collapse nested `N(N(x))` for the single-arg form. (Not for
+        // `N(N(x), p)`: the inner `N` computes at the engine's precision, the
+        // outer rounds to `p` — a different result from `N(x, p)`.)
+        if (xs.length === 1 && xs[0].operator === 'N') return xs[0];
+
+        return ce._fn('N', xs);
       },
       evaluate: (ops, { engine: ce }) => {
         // `N` is lazy, so its operand is held unbound. Calling `.N()` on an
