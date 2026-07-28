@@ -3,30 +3,29 @@
 ### New Features
 
 - **`Which` and `If` broadcast over list-valued conditions.** The lifted
-  comparisons produce `list<boolean>` values (`n == 3` over a list of
-  neighbour counts), and the conditionals can now consume them: with
-  `n = [3,2,1,3]` and `S = [1,0,1,1]`,
+  comparisons produce `list<boolean>` values (`n == 3` over a list of neighbour
+  counts), and the conditionals can now consume them: with `n = [3,2,1,3]` and
+  `S = [1,0,1,1]`,
 
   ```
   Which(n == 3, 1, n == 2, S, True, 0)   →  [1, 0, 0, 1]
   ```
 
   — first-match selection per element, scalar conditions and arms lift,
-  list-valued arms index at the selected position (the `np.select` model;
-  in Desmos terms, piecewise-over-lists). Semantics, ratified as rulings
-  R1–R4 of `docs/plans/2026-07-27-elementwise-which-design.md`: each arm is
-  evaluated at most once, whole, and only if selection reaches it
-  somewhere; every list-valued participant must share one length
-  (`incompatible-dimensions` otherwise, per the broadcast model's lifted
-  regime); a position no clause matches is `NaN` (write an explicit default
-  clause for any other marker); a `Missing` condition cell yields the same
-  catchable "condition is absent" error the scalar form produces, at that
-  position only. The elementwise path activates only when a condition
-  evaluates to an indexed collection whose cells are all
-  `True`/`False`/`Missing` — symbolic conditions stay unreduced exactly as
-  before, and all-scalar conditions are untouched. One edge behavior
-  changed with the gate: `Which([], value)` now answers `[]` (a lone empty
-  condition broadcasts) instead of throwing.
+  list-valued arms index at the selected position (the `np.select` model; in
+  Desmos terms, piecewise-over-lists). Semantics, ratified as rulings R1–R4 of
+  `docs/plans/2026-07-27-elementwise-which-design.md`: each arm is evaluated at
+  most once, whole, and only if selection reaches it somewhere; every
+  list-valued participant must share one length (`incompatible-dimensions`
+  otherwise, per the broadcast model's lifted regime); a position no clause
+  matches is `NaN` (write an explicit default clause for any other marker); a
+  `Missing` condition cell yields the same catchable "condition is absent" error
+  the scalar form produces, at that position only. The elementwise path
+  activates only when a condition evaluates to an indexed collection whose cells
+  are all `True`/`False`/`Missing` — symbolic conditions stay unreduced exactly
+  as before, and all-scalar conditions are untouched. One edge behavior changed
+  with the gate: `Which([], value)` now answers `[]` (a lone empty condition
+  broadcasts) instead of throwing.
 
 ### Breaking Changes
 
@@ -36,89 +35,100 @@
   `incompatible-dimensions`. The fold now routes through the same
   `broadcastLengthMismatch` check as every other broadcast path, so the two
   heads agree. Nothing was silently lost before (the shape never truncated);
-  this closes the last rank-1 gap in the 0.97.0 length ruling. The
-  unit-carrying variant (`[1,2,3] · ([1,2]·Meter)`) errors the same way. The
-  rank-2 matrix-product mismatch is unchanged — dimension compatibility there
-  belongs to `MatrixMultiply`.
+  this closes the last rank-1 gap in the 0.97.0 length ruling. The unit-carrying
+  variant (`[1,2,3] · ([1,2]·Meter)`) errors the same way. The rank-2
+  matrix-product mismatch is unchanged — dimension compatibility there belongs
+  to `MatrixMultiply`.
 
 - **The unused `BindingSite.shield` field is removed.** It was documented as
   "not read by the binder hook yet" and setting it had no effect; the shield
   narrowing shipped in 0.96.0 through `_isShield`. No behavior changes.
 
-- **Assigning to a builtin operator name now shadows it instead of
-  destroying it engine-wide.** `ce.assign('N', 5)` with no prior `declare`
-  used to overwrite the library definition in place in the system scope:
-  `assign('Sin', 30)` broke `Sin(0)` for the whole engine, and — because `N`
-  is the operator the engine injects into lazy-broadcast markers — every
-  >100-element `.N()` drain returned all-NaN (`Sin(Range(1,200)).N()`). The
-  assignment now declares a shadow in the current scope, exactly as
-  assigning to an undeclared name does: the bare symbol resolves to the
-  assigned value, operator-position uses (`N(x)`) still reach the intact
-  builtin through the applicable-lookup deferral, and popping the scope
-  restores the name. Assigning a function or function literal shadows the
-  same way (an applicable shadow wins in operator position).
-  `declare`-then-`assign` was already correct and is unchanged, as is
-  in-place redefinition of user-declared operators.
+- **Assigning to a builtin operator name now shadows it instead of destroying it
+  engine-wide.** `ce.assign('N', 5)` with no prior `declare` used to overwrite
+  the library definition in place in the system scope: `assign('Sin', 30)` broke
+  `Sin(0)` for the whole engine, and — because `N` is the operator the engine
+  injects into lazy-broadcast markers — every
+  > 100-element `.N()` drain returned all-NaN (`Sin(Range(1,200)).N()`). The
+  > assignment now declares a shadow in the current scope, exactly as assigning
+  > to an undeclared name does: the bare symbol resolves to the assigned value,
+  > operator-position uses (`N(x)`) still reach the intact builtin through the
+  > applicable-lookup deferral, and popping the scope restores the name.
+  > Assigning a function or function literal shadows the same way (an applicable
+  > shadow wins in operator position). `declare`-then-`assign` was already
+  > correct and is unchanged, as is in-place redefinition of user-declared
+  > operators.
 
 ### Improvements
 
 - **A compiled user-function application now broadcasts over a collection
   argument.** With `q(t) := n·t + 1`, `q(L)` over a list interpreted to
-  `[5,9,13]` but compiled to `NaN` — the callee's body compiled as scalar
-  code and the array argument coerced. The application site now dispatches at
-  run time through the same `_SYS.bcast` helper the element-wise operators
-  use: scalar arguments call directly (provably-scalar calls keep the
-  allocation-free direct path), collection arguments map element-wise,
-  nesting recurses, and a length mismatch between two collection arguments
-  projects to `NaN` (the real-target rendering of the interpreter's
-  `incompatible-dimensions`). JavaScript target only.
+  `[5,9,13]` but compiled to `NaN` — the callee's body compiled as scalar code
+  and the array argument coerced. The application site now dispatches at run
+  time through the same `_SYS.bcast` helper the element-wise operators use:
+  scalar arguments call directly (provably-scalar calls keep the allocation-free
+  direct path), collection arguments map element-wise, nesting recurses, and a
+  length mismatch between two collection arguments projects to `NaN` (the
+  real-target rendering of the interpreter's `incompatible-dimensions`).
+  JavaScript target only.
 
 - **Element-wise `Which`/`If` now compiles (JavaScript target).** The
   interpreter's new selection semantics (see New Features) previously had no
-  compiled counterpart — a piecewise over list-valued conditions failed
-  closed at compile time. The JS target now lowers it to a runtime selection
-  helper (`_SYS.select`) that mirrors the ratified semantics exactly:
-  first-match selection per element, each condition evaluated at most once
-  (whole, in clause order), each arm evaluated at most once, whole, and only
-  if selection reaches it somewhere; scalar conditions and arms lift,
-  list-valued arms index at the selected position; a no-match position is
-  `NaN`, and a length mismatch projects to `NaN` (the real-target rendering
-  of `incompatible-dimensions`, as elsewhere). When every condition is
-  provably scalar the existing ternary-chain codegen is emitted unchanged.
-  Complex-valued arms under a collection condition decline (fail closed), as
-  do tuple and non-indexed-collection (set/dictionary/string) participants.
-  Other targets are unchanged.
+  compiled counterpart — a piecewise over list-valued conditions failed closed
+  at compile time. The JS target now lowers it to a runtime selection helper
+  (`_SYS.select`) that mirrors the ratified semantics exactly: first-match
+  selection per element, each condition evaluated at most once (whole, in clause
+  order), each arm evaluated at most once, whole, and only if selection reaches
+  it somewhere; scalar conditions and arms lift, list-valued arms index at the
+  selected position; a no-match position is `NaN`, and a length mismatch
+  projects to `NaN` (the real-target rendering of `incompatible-dimensions`, as
+  elsewhere). When every condition is provably scalar the existing ternary-chain
+  codegen is emitted unchanged. Complex-valued arms under a collection condition
+  decline (fail closed), as do tuple and non-indexed-collection
+  (set/dictionary/string) participants. Other targets are unchanged.
 
-- **Compiled comparisons and connectives are now broadcast-aware
-  (JavaScript target).** The `<`/`<=`/`>`/`>=`/`And`/`Or`/`Not` handlers
-  used to decline to compile when an operand *might* be a collection at run
-  time — including a call to a helper declared with a wide signature
-  (`q: (unknown) -> unknown`), so `q(x) < y` refused even though the value
-  was scalar. They now compile to a runtime broadcast dispatch
-  (`_SYS.bcast`): scalar operands take the scalar path, a collection operand
-  broadcasts element-wise with interpreter parity (`q(L) < 5` →
-  `[true, true, false]`). Chained orderings (`a < b < c`) lower as one
-  element-wise conjunction, matching interpretation. Chained (n-ary)
-  `Equal`/`NotEqual` deliberately keeps declining: the interpreter's n-ary
-  form switches between element-wise and whole-collection equality depending
-  on how many operands are collections at run time, and no pairwise
-  conjunction reproduces that — the reasoning is recorded at the decline
-  site.
+- **Compiled comparisons and connectives are now broadcast-aware (JavaScript
+  target).** The `<`/`<=`/`>`/`>=`/`And`/`Or`/`Not` handlers used to decline to
+  compile when an operand _might_ be a collection at run time — including a call
+  to a helper declared with a wide signature (`q: (unknown) -> unknown`), so
+  `q(x) < y` refused even though the value was scalar. They now compile to a
+  runtime broadcast dispatch (`_SYS.bcast`): scalar operands take the scalar
+  path, a collection operand broadcasts element-wise with interpreter parity
+  (`q(L) < 5` → `[true, true, false]`). Chained orderings (`a < b < c`) lower as
+  one element-wise conjunction, matching interpretation. Chained (n-ary)
+  `Equal`/`NotEqual` deliberately keeps declining: the interpreter's n-ary form
+  switches between element-wise and whole-collection equality depending on how
+  many operands are collections at run time, and no pairwise conjunction
+  reproduces that — the reasoning is recorded at the decline site.
 
-- **`RandomChoice` narrows its element type like `Random`.** The result type
-  now derives from the same domain narrowing as the rest of the random
-  family: `RandomChoice(Interval(0,1), 3)` types `vector<finite_real^3>`
-  (was `vector<real^3>`), `RandomChoice(Range(1,6), 4)` types
+- **`RandomChoice` narrows its element type like `Random`.** The result type now
+  derives from the same domain narrowing as the rest of the random family:
+  `RandomChoice(Interval(0,1), 3)` types `vector<finite_real^3>` (was
+  `vector<real^3>`), `RandomChoice(Range(1,6), 4)` types
   `vector<finite_integer^4>`.
 
 - **Recompiling with a reused external compile target is deterministic.** A
-  caller-constructed `target` object passed to two successive `compile()`
-  calls kept accumulating per-compilation counter numbering (GPU random
-  draws numbered `_gpu_rnd_n0`, then `_gpu_rnd_n1` for the identical
-  expression). Each top-level compilation now begins with a
-  compilation-boundary reset (`CompileTarget.beginCompilation`), so
-  identical input compiles to identical code on every route; multi-statement
-  shader bodies keep their single shared numbering.
+  caller-constructed `target` object passed to two successive `compile()` calls
+  kept accumulating per-compilation counter numbering (GPU random draws numbered
+  `_gpu_rnd_n0`, then `_gpu_rnd_n1` for the identical expression). Each
+  top-level compilation now begins with a compilation-boundary reset
+  (`CompileTarget.beginCompilation`), so identical input compiles to identical
+  code on every route; multi-statement shader bodies keep their single shared
+  numbering.
+
+- **Draining a stack of broadcast-built lazy `Map`s is ~3× faster (`evaluate()`)
+  and ~4× faster (`.N()` at default precision).** Broadcast arithmetic over a
+  lazy collection stacks lazy `Map`s — `1 + Mod(Range(0,899) + x, 900)` is three
+  of them, so one 900-element drain performed 2,700 full lambda applications.
+  The `Map` iterator and `at()` now lower such a chain at iteration time and
+  apply each level's operator directly, bypassing the per-level
+  lambda-invocation machinery (fresh scope, parameter binding, closure capture).
+  Purely an iteration detail: canonical forms, results, reactivity to
+  reassignment, impure-operand draw order, and the machine-precision compiled
+  fast path are all unchanged; only lambdas with the broadcast shape (one
+  operator application over parameters and closed operands, with a pure operator
+  head) take the fast path — anything else falls back to the general path
+  byte-identically.
 
 ## 0.97.0 _2026-07-27_
 
