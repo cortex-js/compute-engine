@@ -7,7 +7,7 @@ import {
 } from '../collection-utils.js';
 
 import { flatten } from './flatten.js';
-import { isSubtype, widen } from '../../common/type/subtype.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import {
   broadcastableBaseMatches,
   couldBeNonRealNumber,

@@ -16,10 +16,8 @@ import {
 } from '../boxed-expression/type-guards.js';
 import {
   typeContainsMissing,
-  stripMissingFromType,
   numericMissingSlot,
 } from '../../common/type/utils.js';
-import { isSubtype } from '../../common/type/subtype.js';
 import { parseType } from '../../common/type/parse.js';
 import { toBigint } from '../boxed-expression/numerics.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';

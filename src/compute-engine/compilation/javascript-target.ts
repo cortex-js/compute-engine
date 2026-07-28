@@ -15,7 +15,6 @@ import { tryGetConstant } from './constant-folding.js';
 import {
   collectionElementType,
   stripMissingFromType,
-  typeContainsMissing,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 
