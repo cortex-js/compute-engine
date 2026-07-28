@@ -132,3 +132,77 @@ describe('lazy broadcast over a declared-unknown symbol (Tycho item 42)', () => 
     expect(ce.parse('N+1').evaluate().json).toBe(86);
   });
 });
+
+describe('bare assign to a builtin operator shadows instead of mutating (2026-07-27 ruling)', () => {
+  // The hole in the item-42 fix: `lookupApplicable` defers to the OUTER
+  // builtin, but a bare `ce.assign('N', …)` — no prior declare — used to
+  // mutate that builtin in place in the system scope, destroying it
+  // engine-wide (`assign('N', 5)` made every lazy >100-element `.N()` drain
+  // all-NaN; `assign('Sin', 30)` broke `Sin(0)`). Ruling: a value assigned
+  // over a SYSTEM-scope operator def declares a shadow in the current scope
+  // (same path as assigning to an undeclared symbol); user-defined operators
+  // keep the in-place value-conversion.
+
+  test('bare assign(N) keeps the lazy >100-element .N() drain numeric', () => {
+    const ce = new ComputeEngine(); // default precision: auto-compile must not mask
+    ce.assign('N', 5);
+    const r = ce.box(['Sin', ['Range', 1, 200]]).N();
+    expect(r.at(1)?.re).toBeCloseTo(Math.sin(1), 10);
+    expect(r.at(200)?.re).toBeCloseTo(Math.sin(200), 10);
+    // Value position resolves the shadow …
+    expect(ce.box('N').evaluate().json).toBe(5);
+    // … and the parse route agrees (route parity).
+    expect(ce.parse('N+1').evaluate().json).toBe(6);
+  });
+
+  test('bare assign(Sin) leaves the builtin intact on box and parse routes', () => {
+    const ce = new ComputeEngine();
+    ce.assign('Sin', 30);
+    expect(ce.box(['Sin', 0]).evaluate().json).toBe(0);
+    expect(ce.parse('\\sin(\\frac{\\pi}{2})').evaluate().json).toBe(1);
+    expect(ce.box('Sin').evaluate().json).toBe(30);
+  });
+
+  test('re-assign updates the shadow, not the builtin', () => {
+    const ce = new ComputeEngine();
+    ce.assign('Sin', 30);
+    ce.assign('Sin', 40);
+    expect(ce.box('Sin').evaluate().json).toBe(40);
+    expect(ce.box(['Sin', 0]).evaluate().json).toBe(0);
+  });
+
+  test('a scoped bare assign is undone by popScope', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.assign('Cos', 7);
+    expect(ce.box('Cos').evaluate().json).toBe(7);
+    ce.popScope();
+    expect(ce.box('Cos').evaluate().symbol).toBe('Cos');
+    expect(ce.box(['Cos', 0]).evaluate().json).toBe(1);
+  });
+
+  test('assigning a function over a builtin shadows the operator def', () => {
+    const ce = new ComputeEngine();
+    ce.assign('Sin', (_args, { engine }) => engine.number(99));
+    // New boxings apply the shadow (it IS applicable, unlike a value shadow) …
+    expect(ce.box(['Sin', 0]).evaluate().json).toBe(99);
+    // … without touching the system def: a fresh engine is unaffected.
+    const ce2 = new ComputeEngine();
+    expect(ce2.box(['Sin', 0]).evaluate().json).toBe(0);
+  });
+
+  test('bare assign and declare-then-assign now agree', () => {
+    const bare = new ComputeEngine();
+    bare.assign('N', 85);
+    const declared = new ComputeEngine();
+    declared.declare('N', { type: 'number' });
+    declared.assign('N', 85);
+    for (const ce of [bare, declared]) {
+      expect(ce.box(['N', ['Divide', 1, 3]]).evaluate().re).toBeCloseTo(
+        1 / 3,
+        10
+      );
+      expect(ce.parse('N+1').evaluate().json).toBe(86);
+    }
+  });
+});

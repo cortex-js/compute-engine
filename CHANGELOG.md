@@ -45,6 +45,21 @@
   "not read by the binder hook yet" and setting it had no effect; the shield
   narrowing shipped in 0.96.0 through `_isShield`. No behavior changes.
 
+- **Assigning to a builtin operator name now shadows it instead of
+  destroying it engine-wide.** `ce.assign('N', 5)` with no prior `declare`
+  used to overwrite the library definition in place in the system scope:
+  `assign('Sin', 30)` broke `Sin(0)` for the whole engine, and — because `N`
+  is the operator the engine injects into lazy-broadcast markers — every
+  >100-element `.N()` drain returned all-NaN (`Sin(Range(1,200)).N()`). The
+  assignment now declares a shadow in the current scope, exactly as
+  assigning to an undeclared name does: the bare symbol resolves to the
+  assigned value, operator-position uses (`N(x)`) still reach the intact
+  builtin through the applicable-lookup deferral, and popping the scope
+  restores the name. Assigning a function or function literal shadows the
+  same way (an applicable shadow wins in operator position).
+  `declare`-then-`assign` was already correct and is unchanged, as is
+  in-place redefinition of user-declared operators.
+
 ### Improvements
 
 - **A compiled user-function application now broadcasts over a collection

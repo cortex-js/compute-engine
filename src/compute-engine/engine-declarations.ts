@@ -691,8 +691,27 @@ export function assignFn(
   }
 
   if (isOperatorDef(def)) {
+    // A builtin operator — owned by the system scope — is never mutated in
+    // place: it is shared engine-wide (e.g. `N` is injected into every
+    // lazy-broadcast marker), so overwriting it would destroy the builtin
+    // for every consumer. Instead the assignment SHADOWS: declare in the
+    // current scope, exactly as if there were no prior definition. A bare
+    // symbol then resolves to the assigned value while `lookupApplicable`
+    // still reaches the builtin in operator position. In-place conversion
+    // is preserved for user-defined operators (non-system scopes) and
+    // during library bootstrap (current scope IS the system scope).
+    const systemScope = ce.contextStack[0]?.lexicalScope;
+    const shadowBuiltin =
+      systemScope !== undefined &&
+      systemScope.bindings.get(id) === def &&
+      ce.context.lexicalScope !== systemScope;
+
     const value = assignValueAsValue(ce, arg2);
     if (value !== undefined) {
+      if (shadowBuiltin) {
+        ce._declareSymbolValue(id, { value });
+        return ce;
+      }
       // Allow converting an operator to a value.
       // Existing expressions using this symbol as a function head (e.g.
       // ["g", 2]) will produce a type error at evaluation time if the
@@ -759,6 +778,13 @@ export function assignFn(
         // type-errors against the declared param, and a well-typed call applies
         // the lambda (an operator def cannot apply a bare tuple argument, so
         // keeping it an operator would leave `f((3, 4))` unevaluated).
+        if (shadowBuiltin) {
+          ce._declareSymbolValue(id, {
+            value: reconciled,
+            type: declaredType.type,
+          });
+          return ce;
+        }
         updateDef(ce, id, def, {
           value: reconciled,
           type: declaredType.type,
@@ -771,6 +797,10 @@ export function assignFn(
     // Update the operator definition.
     const fnDef = assignValueAsOperatorDef(ce, arg2);
     if (!fnDef) throw Error(`Invalid definition for symbol "${id}"`);
+    if (shadowBuiltin) {
+      ce._declareSymbolOperator(id, fnDef);
+      return ce;
+    }
     updateDef(ce, id, def, fnDef);
     // Redefining an existing operator is a semantic mutation (no value-setter
     // write happens on this path, so bump explicitly).
