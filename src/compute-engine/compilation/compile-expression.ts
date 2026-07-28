@@ -70,8 +70,11 @@ export function compile<T extends string = 'javascript'>(
     if (options?.target) {
       // Direct target override - use BaseCompiler. Registered language
       // targets apply the angular-unit rewrite in their own compile();
-      // this raw-target path must do it itself.
-      const code = BaseCompiler.compile(
+      // this raw-target path must do it itself. `compileRoot` opens the
+      // compilation boundary: the caller's target may be one it built once
+      // and reuses, and per-compilation numbering must restart for each
+      // `compile()` call (recompile-replay determinism).
+      const code = BaseCompiler.compileRoot(
         rewriteAngularUnit(expr),
         options.target
       );

@@ -4026,7 +4026,6 @@ type BindingSite = {
   path: readonly number[];
   type: TypeString;
   clauseLocal: boolean;
-  shield: boolean;
 };
 ```
 

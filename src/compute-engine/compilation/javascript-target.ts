@@ -2630,12 +2630,13 @@ type BcastValue = number | { re: number; im: number } | BcastValue[];
 /**
  * Element-wise broadcast of a scalar function `f` over its arguments (the
  * runtime side of the compile target's list broadcasting — see
- * `tryCompileBroadcast`). Any array argument makes the result an array; the
- * broadcast length is the shortest participating array (matching the
- * interpreter's `broadcastOverIndexedCollections`), a scalar argument is reused
- * for every element, and nested arrays recurse. When no argument is an array,
- * `f` is applied directly. `f` therefore only ever sees scalar (or complex)
- * operands.
+ * `tryCompileBroadcast` and `bcast`/`bcastFn` below). Any array argument makes
+ * the result an array; a length MISMATCH among the array arguments projects to
+ * NaN (the real-target rendering of the interpreter's
+ * `incompatible-dimensions` — no truncation to the shortest), a scalar
+ * argument is reused for every element, and nested arrays recurse. When no
+ * argument is an array, `f` is applied directly. `f` therefore only ever sees
+ * scalar (or complex) operands.
  */
 /**
  * The numeric value an `At` index entry contributes, mirroring the
@@ -2657,6 +2658,33 @@ function bcast(
   f: (...xs: BcastValue[]) => BcastValue,
   ...args: BcastValue[]
 ): BcastValue {
+  return bcastWith(false, f, args);
+}
+
+/**
+ * `bcast` for a USER-FUNCTION application (`q(L)` — see
+ * `tryCompileUserFunction`). Identical except at an empty position: applying a
+ * function literal to an empty collection zips zero elements and answers the
+ * EMPTY LIST in the interpreter (`q([])` → `[]`), where an empty OPERATOR
+ * position answers `Nothing` (NaN — see `bcastWith`).
+ */
+function bcastFn(
+  f: (...xs: BcastValue[]) => BcastValue,
+  ...args: BcastValue[]
+): BcastValue {
+  return bcastWith(true, f, args);
+}
+
+/**
+ * Shared implementation of `bcast`/`bcastFn`. `emptyIsList` selects what an
+ * empty broadcast position produces, and is carried into the nested positions
+ * so a `[[], [1]]` argument projects consistently at every depth.
+ */
+function bcastWith(
+  emptyIsList: boolean,
+  f: (...xs: BcastValue[]) => BcastValue,
+  args: BcastValue[]
+): BcastValue {
   let n = -1;
   for (const a of args) {
     if (!Array.isArray(a)) continue;
@@ -2673,11 +2701,17 @@ function bcast(
   // empty list — `Not([])` is `Nothing` (NaN here), and in a nested operand
   // (`Not([[], [True]])` → `[Nothing, [False]]`) only that position is
   // projected. Recursing per position is what keeps a sibling from being
-  // poisoned by it.
-  if (n === 0) return NaN;
+  // poisoned by it. A user-function application instead zips zero elements
+  // into an empty list (`emptyIsList` — a fresh array per position, never a
+  // shared instance).
+  if (n === 0) return emptyIsList ? [] : NaN;
   const out: BcastValue[] = new Array(n);
   for (let i = 0; i < n; i++)
-    out[i] = bcast(f, ...args.map((a) => (Array.isArray(a) ? a[i] : a)));
+    out[i] = bcastWith(
+      emptyIsList,
+      f,
+      args.map((a) => (Array.isArray(a) ? a[i] : a))
+    );
   return out;
 }
 
@@ -2965,6 +2999,7 @@ function rref(m: number[][]): number[][] | number {
  */
 const SYS_HELPERS = {
   bcast,
+  bcastFn,
   // Element-wise addition, mirroring the interpreter's `Add` broadcast
   // (`addTensors`/`broadcastOverIndexedCollections`): scalar+scalar is ordinary
   // addition; over (possibly nested) arrays it recurses element-wise. Used as

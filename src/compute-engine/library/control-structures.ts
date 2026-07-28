@@ -5,9 +5,15 @@ import {
 } from '../function-utils.js';
 import { checkConditions } from '../boxed-expression/rules.js';
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
-import { collectionElementType, widen } from '../../common/type/utils.js';
+import {
+  broadcastElementType,
+  collectionElementType,
+  widen,
+} from '../../common/type/utils.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
+  broadcastLengthMismatch,
+  isBroadcastableCollection,
   isFiniteIndexedCollection,
   isTuple,
 } from '../collection-utils.js';
@@ -91,8 +97,21 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       signature: '(expression, expression, expression?) -> any',
       // The else branch is optional: `If(cond, expr)` evaluates to `Nothing`
       // when the condition is false.
-      type: ([_cond, ifTrue, ifFalse]) =>
-        widen(ifTrue.type.type, ifFalse?.type.type ?? 'nothing'),
+      type: ([cond, ifTrue, ifFalse]) => {
+        // A condition that is provably a boolean indexed collection selects
+        // element-wise (see `evaluateElementwiseSelection`): the result is a
+        // list of the branches' element types.
+        const shape = elementwiseConditionShape([cond]);
+        if (shape)
+          return elementwiseResultType(
+            [ifTrue, ifFalse].filter((x) => x !== undefined),
+            shape.length,
+            // The else branch IS the default clause: without one, unselected
+            // positions are the `NaN` no-match cell.
+            ifFalse !== undefined
+          );
+        return widen(ifTrue.type.type, ifFalse?.type.type ?? 'nothing');
+      },
       canonical: (ops, { engine }) =>
         engine._fn(
           'If',
@@ -103,8 +122,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             i === 0 ? op.canonical : canonicalStatement(engine, op)
           )
         ),
-      evaluate: ([cond, ifTrue, ifFalse], { engine }) => {
-        const evaluated = cond.evaluate();
+      evaluate: ([cond, ifTrue, ifFalse], options) => {
+        const engine = options.engine;
+        const evaluated = cond.canonical.evaluate();
         const evaluatedCond = sym(evaluated);
         if (evaluatedCond === 'True')
           return ifTrue?.evaluate() ?? engine.Nothing;
@@ -117,6 +137,23 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // `Coalesce`/`IsMissing` before branching. (§3.D residual, resolved
         // 2026-07-24.)
         if (evaluatedCond === 'Missing') return absentConditionError(engine);
+        // A LIST-VALUED condition selects element-wise: `If(c, a, b)` is the
+        // two-clause `Which(c, a, True, b)` (see
+        // `evaluateElementwiseSelection`). Without an else branch the
+        // unselected positions are the no-match cell (`NaN`), not `Nothing`:
+        // an element-wise result preserves positions (R4).
+        const cells = conditionCells(evaluated);
+        if (cells !== undefined && ifTrue !== undefined) {
+          const clauses = [{ cond, arm: ifTrue }];
+          if (ifFalse !== undefined)
+            clauses.push({ cond: engine.True, arm: ifFalse });
+          return evaluateElementwiseSelection(
+            engine,
+            clauses,
+            { cond: evaluated, cells },
+            options
+          );
+        }
         // An UNDECIDED boolean condition — e.g. a relation with free
         // variables (`x = 4` stays symbolic under evaluate()) — leaves the
         // `If` unevaluated rather than erroring: it may become decidable
@@ -345,9 +382,31 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       signature: '(expression+) -> unknown',
       type: (args) => {
         if (args.length % 2 !== 0) return 'nothing';
-        return widen(
-          ...args.filter((_, i) => i % 2 === 1).map((x) => x.type.type)
-        );
+        let arms = args.filter((_, i) => i % 2 === 1);
+        let conds = args.filter((_, i) => i % 2 === 0);
+        // Only the REACHABLE clauses contribute: a literal `True` condition is
+        // the default clause, and evaluation never looks past it. The walk must
+        // stop there too, or `Which(True, 1, [True, False], 2)` — which
+        // evaluates to the scalar `1` — would be typed element-wise by a
+        // condition that is never even evaluated.
+        const dflt = conds.findIndex((c) => sym(c) === 'True');
+        if (dflt >= 0) {
+          conds = conds.slice(0, dflt + 1);
+          arms = arms.slice(0, dflt + 1);
+        }
+        // A condition that is provably a boolean indexed collection selects
+        // element-wise (see `evaluateElementwiseSelection`): the result is a
+        // list of the arms' element types.
+        const shape = elementwiseConditionShape(conds);
+        if (shape)
+          return elementwiseResultType(
+            arms,
+            shape.length,
+            // A literal `True` condition is the default clause: it matches
+            // every position, so the `NaN` no-match cell is unreachable.
+            dflt >= 0
+          );
+        return widen(...arms.map((x) => x.type.type));
       },
       canonical: (args, options) => {
         if (args.length % 2 !== 0) return options.engine.Nothing;
@@ -581,13 +640,287 @@ function isBooleanishCondition(evaluated: Expression): boolean {
   );
 }
 
+/**
+ * The supertype every element-wise-eligible condition is checked against.
+ *
+ * The cells admitted at RUNTIME (`conditionCells`) are `True`/`False`/`Missing`
+ * — an absent cell is a legitimate condition value (R4′) — so the static gate
+ * must admit `missing` cells too, or `Which(["True", "Missing"], …)` would
+ * evaluate element-wise while typing scalar. It stays a strict supertype of
+ * those cells: a condition typing `list<unknown>`, or plain `unknown`, does not
+ * match and keeps the scalar typing.
+ */
+const BOOLEAN_COLLECTION_TYPE = parseType(
+  'indexed_collection<boolean | missing>'
+);
+
+/**
+ * The materialized cells of a condition that activates the ELEMENT-WISE
+ * selection path, or `undefined` when it does not.
+ *
+ * The gate (§3 of `docs/plans/2026-07-27-elementwise-which-design.md`) is
+ * deliberately narrow: an indexed collection (never a `Set`, never a tuple —
+ * tuples are points, not lists) of statically known finite length whose cells
+ * are ALL condition values (`True`/`False`/`Missing`). A collection with a
+ * symbolic or non-boolean cell, or one whose length is not yet known, does not
+ * activate it — the conditional then keeps its existing behavior (inert, or
+ * the spell-check throw), so every symbolic `Which` PRODUCER (Solve validity
+ * guards, the conditional-value adopters) keeps round-tripping unreduced.
+ */
+function conditionCells(c: Expression): Expression[] | undefined {
+  if (!isBroadcastableCollection(c)) return undefined;
+  if (c.isFiniteCollection !== true) return undefined;
+  const n = c.count;
+  if (n === undefined || !Number.isFinite(n)) return undefined;
+  const cells = Array.from(c.each()) as Expression[];
+  for (const cell of cells) {
+    const s = sym(cell);
+    if (s !== 'True' && s !== 'False' && s !== 'Missing') return undefined;
+  }
+  return cells;
+}
+
+/**
+ * Element-wise conditional selection: `np.select` semantics, ruled 2026-07-27
+ * (`docs/plans/2026-07-27-elementwise-which-design.md`).
+ *
+ * `clauses[0]`'s condition has already been evaluated and materialized by the
+ * caller (that is what activated the gate) and arrives as `first`; it is never
+ * drained twice. Per position `j` the selected clause is the first whose
+ * condition is `True` at `j`; a scalar `True`/`False` condition lifts to every
+ * position (R1). Arms are evaluated at most once, WHOLE, and only when
+ * selection reaches them (R2); a list-valued arm is then indexed at `j`, a
+ * scalar arm lifts. All list-valued participants — conditions and selected
+ * arms — must share one length, checked with the same
+ * `broadcastLengthMismatch` as `Add` (R3). A position no clause matches is
+ * `NaN` (R4); a position whose condition cell is `Missing` is the same
+ * catchable "condition is absent" error the scalar form produces (R4′).
+ *
+ * The zip is EAGER — conditions are materialized once into plain arrays and
+ * the selection is computed in a JS loop — never a stack of lazy broadcast
+ * `Map`s, which costs ~8 µs per element per condition.
+ *
+ * Returns `undefined` when the expression must stay inert.
+ */
+function evaluateElementwiseSelection(
+  ce: ComputeEngine,
+  clauses: ReadonlyArray<{ cond: Expression; arm: Expression }>,
+  first: { cond: Expression; cells: Expression[] },
+  options: Partial<EvaluateOptions> & { engine: ComputeEngine }
+): Expression | undefined {
+  // 1/ Evaluate the conditions in clause order and materialize the
+  // list-valued ones. Clauses after a lifted `True` are unreachable: their
+  // conditions are not evaluated at all.
+  const participants: Expression[] = [];
+  // The cells of each retained clause's condition, `undefined` for a lifted
+  // scalar `True`, or `'Missing'` for a lifted scalar absent condition (an
+  // all-`Missing` condition row).
+  const selectors: (Expression[] | 'Missing' | undefined)[] = [];
+  const arms: Expression[] = [];
+  for (let k = 0; k < clauses.length; k++) {
+    const { cond, arm } = clauses[k];
+    if (arm === undefined) return undefined;
+    // The first clause's condition was evaluated and materialized by the
+    // caller (it is what activated the gate): never drain it twice.
+    const c = k === 0 ? first.cond : cond.canonical.evaluate();
+    const s = sym(c);
+    // `Undefined` is treated as not-True (decision 9), like `False`.
+    if (s === 'False' || s === 'Undefined') continue;
+    if (s === 'Missing') {
+      // A lifted scalar ABSENT condition is an all-`Missing` condition row,
+      // not a whole-expression error: absence is position-local (R4′) and a
+      // scalar condition lifts to every position (R1). Every position still
+      // undecided when this clause is reached becomes an absent-condition
+      // error cell; positions already selected keep their value, and no later
+      // clause can decide what absence left undecided — so the walk stops
+      // here, exactly as a lifted `True` does.
+      selectors.push('Missing');
+      arms.push(arm);
+      break;
+    }
+    if (s === 'True') {
+      selectors.push(undefined);
+      arms.push(arm);
+      break;
+    }
+    const cells = k === 0 ? first.cells : conditionCells(c);
+    if (cells === undefined) {
+      // A condition of KNOWN infinite length is a genuine length mismatch
+      // against the finite ones (R3: strict, lifted regime). Anything else —
+      // a symbolic condition, a collection with a symbolic or non-boolean
+      // cell, a collection whose length is not yet known — leaves the whole
+      // expression inert (§3 gate), whatever its length: the gate must not
+      // report a dimension error about a condition it never admitted.
+      if (isBroadcastableCollection(c) && c.count === Infinity)
+        return broadcastLengthMismatch(ce, [...participants, c]);
+      return undefined;
+    }
+    participants.push(c);
+    selectors.push(cells);
+    arms.push(arm);
+  }
+
+  const mismatch = broadcastLengthMismatch(ce, participants);
+  if (mismatch) return mismatch;
+
+  // The first clause's condition is the collection that activated the gate, so
+  // it always contributes the result length.
+  const n = first.cells.length;
+
+  // 2/ Compute the selection: the index of the first clause that is `True` at
+  // each position (`-1`: no match), and the positions whose condition is
+  // absent.
+  const selection = new Int32Array(n).fill(-1);
+  const absent = new Uint8Array(n);
+  let undecided = n;
+  for (let k = 0; k < selectors.length && undecided > 0; k++) {
+    const cells = selectors[k];
+    for (let j = 0; j < n; j++) {
+      if (selection[j] >= 0 || absent[j] === 1) continue;
+      const s =
+        cells === undefined
+          ? 'True'
+          : cells === 'Missing'
+            ? 'Missing'
+            : sym(cells[j]);
+      if (s === 'True') {
+        selection[j] = k;
+        undecided -= 1;
+      } else if (s === 'Missing') {
+        absent[j] = 1;
+        undecided -= 1;
+      }
+    }
+  }
+
+  // 3/ Evaluate each REACHED arm once, as a whole expression (R2).
+  const reached = new Set<number>();
+  for (let j = 0; j < n; j++) if (selection[j] >= 0) reached.add(selection[j]);
+  const values: (Expression | Expression[])[] = [];
+  for (let k = 0; k < arms.length; k++) {
+    if (!reached.has(k)) continue;
+    const value = arms[k].canonical.evaluate(options);
+    if (!isBroadcastableCollection(value)) {
+      values[k] = value;
+      continue;
+    }
+    // A list-valued arm is a participant too: check its length before
+    // materializing it, so an unbounded arm errors rather than hanging.
+    const armMismatch = broadcastLengthMismatch(ce, [...participants, value]);
+    if (armMismatch) return armMismatch;
+    if (value.isFiniteCollection !== true) return undefined;
+    const cells = Array.from(value.each()) as Expression[];
+    // The arm's length may only have become known by materializing it (a
+    // `Filter` reports `count === undefined`): re-check through the shared
+    // predicate so the diagnostic cannot drift.
+    const sizeMismatch = broadcastLengthMismatch(ce, [
+      ...participants,
+      ce._fn('List', cells),
+    ]);
+    if (sizeMismatch) return sizeMismatch;
+    values[k] = cells;
+  }
+
+  // 4/ Assemble the result, position by position.
+  const result: Expression[] = [];
+  for (let j = 0; j < n; j++) {
+    if (absent[j] === 1) result.push(absentConditionError(ce));
+    else if (selection[j] < 0) result.push(ce.NaN);
+    else {
+      const value = values[selection[j]];
+      result.push(Array.isArray(value) ? value[j] : value);
+    }
+  }
+  return ce._fn('List', result);
+}
+
+/**
+ * The shape of an element-wise conditional, from the TYPES of its conditions:
+ * `undefined` when no condition is provably a boolean indexed collection (the
+ * scalar typing applies), otherwise the common declared length when the
+ * boolean-collection conditions agree on one.
+ *
+ * Both spellings must be recognized: a literal condition types
+ * `list<boolean^n>`, a declared or derived one `indexed_collection<boolean>`,
+ * and those two do not match each other — `indexed_collection<boolean>` is the
+ * supertype both are checked against.
+ */
+function elementwiseConditionShape(
+  conds: ReadonlyArray<Expression | undefined>
+): { length?: number } | undefined {
+  let found = false;
+  let length: number | undefined;
+  for (const cond of conds) {
+    if (!cond?.type.matches(BOOLEAN_COLLECTION_TYPE)) continue;
+    // A tuple is a subtype of `indexed_collection`, but runtime lifts tuples
+    // whole (tuple-atomic): a tuple-typed condition never activates the
+    // element-wise path, so it must not flip the static shape either.
+    const t = cond.type.type;
+    if (typeof t !== 'string' && t.kind === 'tuple') continue;
+    found = true;
+    if (typeof t === 'string' || t.kind !== 'list') continue;
+    if (t.dimensions?.length !== 1) continue;
+    if (length === undefined) length = t.dimensions[0];
+    else if (length !== t.dimensions[0]) return { length: undefined };
+  }
+  return found ? { length } : undefined;
+}
+
+/**
+ * The type an arm contributes to the element-wise result.
+ *
+ * Only arms that would actually be INDEXED at runtime contribute their element
+ * type. Runtime lifts anything that is not an `isBroadcastableCollection`
+ * WHOLE — a tuple in particular is one element, not a row (the tuple-atomic
+ * convention) — so `broadcastElementType` must not be applied to it: it unwraps
+ * tuples, sets, dictionaries and records, which would declare `list<T>` for a
+ * `Which` that produces `list<tuple<…>>`.
+ */
+function armElementType(t: Readonly<Type>): Type {
+  if (typeof t === 'string') return t;
+  if (t.kind === 'union') return widen(...t.types.map((x) => armElementType(x)));
+  if (t.kind === 'list' || t.kind === 'indexed_collection')
+    return broadcastElementType(t);
+  return t as Type;
+}
+
+/**
+ * The type of an element-wise selection: a list of the arms' element types (a
+ * list-valued arm contributes its ELEMENT type, since it is indexed
+ * position-wise; a scalar arm contributes its own type, since it lifts).
+ *
+ * `hasDefault` — a clause whose condition is literally `True` (for `If`, an
+ * else branch) — decides whether the no-match cell can occur. Without one, a
+ * position no clause matches is `NaN` (R4), and `finite_*` types EXCLUDE NaN
+ * under the non-finite typing convention: the element type must therefore
+ * join in `number`, the narrowest type that admits NaN, or a consumer
+ * dispatching on `.type.matches()` would be promised a `finite_integer` cell
+ * and handed a `NaN`. WITH a default clause the no-match cell is unreachable
+ * and the exact join is kept — widening unconditionally would hand every
+ * element-wise conditional an over-wide union, which breaks that same
+ * dispatch.
+ */
+function elementwiseResultType(
+  arms: ReadonlyArray<Expression>,
+  length: number | undefined,
+  hasDefault: boolean
+): Type {
+  const armTypes = arms.map((x) => armElementType(x.type.type));
+  const elements = hasDefault
+    ? widen(...armTypes)
+    : widen(...armTypes, 'number');
+  return length === undefined
+    ? { kind: 'list', elements }
+    : { kind: 'list', elements, dimensions: [length] };
+}
+
 function evaluateWhich(
   args: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> & { engine: ComputeEngine }
 ): Expression | undefined {
   let i = 0;
   while (i < args.length - 1) {
-    const evaluated = args[i].evaluate();
+    const evaluated = args[i].canonical.evaluate();
     const cond = sym(evaluated);
     if (cond === 'True') {
       if (!args[i + 1]) return options.engine.symbol('Undefined');
@@ -599,6 +932,24 @@ function evaluateWhich(
       // a catchable error EXPRESSION — not the typo throw below. (§3.D
       // residual, resolved 2026-07-24.)
       if (cond === 'Missing') return absentConditionError(options.engine);
+      // A LIST-VALUED condition selects element-wise (§3 of
+      // `docs/plans/2026-07-27-elementwise-which-design.md`). Every earlier
+      // clause fell through (its condition was a scalar `False`/`Undefined`),
+      // so it can never select and the remaining clauses carry the whole
+      // selection.
+      const cells = conditionCells(evaluated);
+      if (cells !== undefined) {
+        const clauses: { cond: Expression; arm: Expression }[] = [];
+        for (let k = i; k < args.length - 1; k += 2)
+          clauses.push({ cond: args[k], arm: args[k + 1] });
+        const result = evaluateElementwiseSelection(
+          options.engine,
+          clauses,
+          { cond: evaluated, cells },
+          options
+        );
+        if (result) return result;
+      }
       // An UNDECIDED boolean condition (e.g. `x = 4` with a free `x`, which
       // stays symbolic under evaluate()) leaves the `Which` unevaluated:
       // picking a later branch would be wrong once the condition becomes

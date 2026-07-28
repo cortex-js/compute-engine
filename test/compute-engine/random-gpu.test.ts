@@ -2,6 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
 import {
   foldSeed,
@@ -320,6 +321,55 @@ describe('the random state is per-compilation, never on the caller’s target', 
     expect(second.preamble).toBe(first.preamble);
     expect(second.code).toContain('_gpu_rnd_n0');
     expect(second.code).not.toContain('_gpu_rnd_n1');
+  });
+
+  it('a REUSED external target restarts the numbering too', () => {
+    // The caller builds the target once and passes it to two successive
+    // `compile()` calls. Without the compilation-boundary hook the second
+    // compilation continued the first one's numbering (`_gpu_rnd_n1`), so two
+    // compilations of ONE expression emitted different source — recompile
+    // replay was broken on the external-target path only.
+    const expr = framed(42, ce.expr(['Random']));
+    const target = glsl.createTarget();
+    const first = compile(expr as any, { target, fallback: false });
+    const second = compile(expr as any, { target, fallback: false });
+    expect(second.code).toBe(first.code);
+    expect(second.code).toContain('_gpu_rnd_n0');
+    expect(second.code).not.toContain('_gpu_rnd_n1');
+  });
+
+  it('the reset reaches a spread copy of a target', () => {
+    // `{ ...target }` copies the identity token by reference (and a
+    // hand-rolled target has none at all), so the hook resets through the
+    // target it is HANDED, not one captured when the target was created.
+    const expr = framed(42, ce.expr(['Random']));
+    const foreign: any = { ...glsl.createTarget() };
+    delete foreign.gpuRandomRoot;
+    const first = BaseCompiler.compileRoot(expr as any, foreign);
+    const second = BaseCompiler.compileRoot(expr as any, foreign);
+    expect(second).toBe(first);
+    expect(second).toContain('_gpu_rnd_n0');
+    // Still nothing written onto the caller's object.
+    expect(Object.keys(foreign)).not.toContain('gpuRandomRoot');
+  });
+
+  it('a shader body keeps ONE numbering across its statements', () => {
+    // The compilation boundary is the ROOT of a compilation, not every
+    // `BaseCompiler.compile()` call: a shader body compiles each of its
+    // statements against a single target so two independent frames cannot
+    // alias one counter.
+    const src = glsl.compileShader({
+      type: 'fragment',
+      outputs: [{ name: 'a', type: 'float' }],
+      body: [
+        { variable: 'a', expression: framed(1, ce.expr(['Random'])) },
+        { variable: 'b', expression: framed(2, ce.expr(['Random'])) },
+      ],
+    } as any);
+    expect([...new Set(src.match(/_gpu_rnd_n\d+/g) ?? [])].sort()).toEqual([
+      '_gpu_rnd_n0',
+      '_gpu_rnd_n1',
+    ]);
   });
 });
 

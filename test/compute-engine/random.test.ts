@@ -326,6 +326,44 @@ describe('RandomChoice / RandomSample — the §4 k table', () => {
     const t0 = ce.box(['RandomChoice', ['Range', 1, 6], 0]).type;
     expect(t0.toString()).not.toContain('^0');
   });
+
+  it('a RandomChoice cell has the same type as the Random draw it is', () => {
+    // The closed-form domains narrow to their finite counterpart: a DRAW from
+    // a bounded `Interval`/finite `Range` cannot be ±∞ even though the SET
+    // element type admits them. `RandomChoice` cells are `Random` draws, so
+    // they carry the same narrowing (was the wider `list<real^k>`).
+    expect(ce.box(['Random', ['Interval', 0, 1]]).type.toString()).toBe(
+      'finite_real'
+    );
+    expect(
+      ce
+        .box(['RandomChoice', ['Interval', 0, 1], 3])
+        .type.matches('list<finite_real^3>')
+    ).toBe(true);
+
+    expect(ce.box(['Random', ['Range', 1, 6]]).type.toString()).toBe(
+      'finite_integer'
+    );
+    expect(
+      ce
+        .box(['RandomChoice', ['Range', 1, 6], 3])
+        .type.matches('list<finite_integer^3>')
+    ).toBe(true);
+
+    // An unshaped (symbolic-`k`) result narrows too.
+    expect(
+      ce
+        .box(['RandomChoice', ['Interval', 0, 1], 'm'])
+        .type.matches('list<finite_real>')
+    ).toBe(true);
+
+    // A non-closed-form domain keeps its collection element type unchanged.
+    expect(
+      ce
+        .box(['RandomChoice', ['List', 1, 2, 3], 2])
+        .type.matches('list<integer^2>')
+    ).toBe(true);
+  });
 });
 
 describe('The isIndexedCollection gate', () => {

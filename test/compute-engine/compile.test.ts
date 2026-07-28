@@ -2278,6 +2278,191 @@ describe('COMPILE user-defined function calls', () => {
     }
   });
 
+  // A user function applied to a collection BROADCASTS in the interpreter
+  // (`applyFunctionLiteral` / the step-2b lambda broadcast). The compiled
+  // callee is scalar code, so the call site dispatches at run time through
+  // `_SYS.bcast` — mirroring the interpreter rather than gating on a
+  // compile-time "is this operand provably a collection?" test.
+  describe('broadcast over a collection argument', () => {
+    const setup = () => {
+      const e = new ComputeEngine();
+      e.box(['Assign', 'n', 4]).evaluate();
+      e.box([
+        'Assign',
+        'q',
+        ['Function', ['Add', ['Multiply', 'n', 't'], 1], 't'],
+      ]).evaluate();
+      e.box(['Assign', 'L', ['List', 1, 2, 3]]).evaluate();
+      return e;
+    };
+
+    it('keeps a scalar argument on the direct-call path', () => {
+      const e = setup();
+      const expr = e.box(['q', 5]);
+      const r = compile(expr);
+      expect(r.success).toBe(true);
+      expect(r.code).toBe('_fn_q(5)');
+      expect(r.run!()).toBe(21);
+      expect(expr.evaluate().re).toBe(21);
+    });
+
+    it('broadcasts a list argument, matching evaluate() ([5,9,13])', () => {
+      const e = setup();
+      const expr = e.box(['q', 'L']);
+      expect(expr.evaluate().toString()).toBe('[5,9,13]');
+      const r = compile(expr);
+      expect(r.success).toBe(true);
+      expect(r.run!()).toEqual([5, 9, 13]);
+    });
+
+    it('captures an outer symbol inside the broadcast body', () => {
+      // `n` is captured (baked) into `_fn_q`'s body: reassigning it after the
+      // compile does not change the compiled artifact, and the broadcast
+      // applies the SAME captured body to every element.
+      const e = setup();
+      const r = compile(e.box(['q', 'L']));
+      expect(r.success).toBe(true);
+      expect(r.run!()).toEqual([5, 9, 13]);
+      e.box(['Assign', 'n', 100]).evaluate();
+      expect(r.run!()).toEqual([5, 9, 13]);
+    });
+
+    it('broadcasts a list bound at run time through vars', () => {
+      const e = setup();
+      const r = compile(e.box(['q', 'u']));
+      expect(r.success).toBe(true);
+      expect(r.run!({ u: 2 } as any)).toBe(9);
+      expect(r.run!({ u: [1, 2, 3] } as any)).toEqual([5, 9, 13]);
+    });
+
+    it('zips two list arguments of matching length', () => {
+      const e = setup();
+      e.box([
+        'Assign',
+        'g',
+        ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+      ]).evaluate();
+      e.box(['Assign', 'M', ['List', 10, 20, 30]]).evaluate();
+      const expr = e.box(['g', 'L', 'M']);
+      expect(expr.evaluate().toString()).toBe('[11,22,33]');
+      const r = compile(expr);
+      expect(r.success).toBe(true);
+      expect(r.run!()).toEqual([11, 22, 33]);
+    });
+
+    it('broadcasts a scalar against a list argument', () => {
+      const e = setup();
+      e.box([
+        'Assign',
+        'g',
+        ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+      ]).evaluate();
+      const expr = e.box(['g', 'L', 5]);
+      expect(expr.evaluate().toString()).toBe('[6,7,8]');
+      const r = compile(expr);
+      expect(r.success).toBe(true);
+      expect(r.run!()).toEqual([6, 7, 8]);
+    });
+
+    it('projects a length mismatch to NaN (interpreter: incompatible-dimensions)', () => {
+      const e = setup();
+      e.box([
+        'Assign',
+        'g',
+        ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+      ]).evaluate();
+      e.box(['Assign', 'K', ['List', 10, 20]]).evaluate();
+      const expr = e.box(['g', 'L', 'K']);
+      // Ratified policy (docs/BROADCAST-MODEL.md): no zip-to-shortest.
+      expect(expr.evaluate().toString()).toBe(
+        'Error("incompatible-dimensions", "3 vs 2")'
+      );
+      const r = compile(expr);
+      expect(r.success).toBe(true);
+      expect(r.run!()).toBeNaN();
+    });
+
+    it('binds a TUPLE argument whole (never broadcast)', () => {
+      const e = new ComputeEngine();
+      e.box([
+        'Assign',
+        'p',
+        ['Function', ['Add', ['PointX', 'v'], ['PointY', 'v']], 'v'],
+      ]).evaluate();
+      e.box(['Assign', 'T', ['Tuple', 3, 4]]).evaluate();
+      const expr = e.box(['p', 'T']);
+      expect(expr.evaluate().re).toBe(7);
+      const r = compile(expr);
+      expect(r.success).toBe(true);
+      expect(r.code).toBe('_fn_p([3, 4])');
+      expect(r.run!()).toBe(7);
+    });
+
+    // Applying a function literal to an EMPTY collection zips zero elements:
+    // the interpreter answers `[]`. (An empty OPERATOR position instead
+    // answers `Nothing` — `Not([])` → NaN — which is why the call site
+    // dispatches through `_SYS.bcastFn`, not `_SYS.bcast`.)
+    it('answers [] for an empty collection argument, like evaluate()', () => {
+      const e = setup();
+      const expr = e.box(['q', ['List']]);
+      expect(expr.evaluate().toString()).toBe('[]');
+      const r = compile(expr);
+      expect(r.success).toBe(true);
+      expect(r.run!()).toEqual([]);
+    });
+
+    it('projects a NESTED empty position to [], like evaluate()', () => {
+      const e = setup();
+      const expr = e.box(['q', ['List', ['List'], ['List', 1, 2]]]);
+      expect(expr.evaluate().toString()).toBe('[[],[5,9]]');
+      const r = compile(expr);
+      expect(r.success).toBe(true);
+      expect(r.run!()).toEqual([[], [5, 9]]);
+    });
+
+    // A complex-typed parameter fed a real argument is coerced to the
+    // `{ re, im }` convention. The coercion is PER PARAMETER and applies to
+    // the broadcast ELEMENT: a sibling collection argument must still
+    // broadcast (before, one coerced argument put the whole call on the
+    // direct scalar path, so `_fn_P([1,2,3], …)` ran the scalar body over the
+    // array — here, runaway recursion).
+    it('broadcasts alongside a complex-coerced argument', () => {
+      const e = new ComputeEngine();
+      e.declare('P', { type: '(number, complex) -> complex' });
+      e.assign(
+        'P',
+        e.box([
+          'Function',
+          [
+            'Which',
+            ['Equal', 'n', 0],
+            1,
+            'True',
+            ['Subtract', ['Square', ['P', ['Subtract', 'n', 1], 'z']], 'z'],
+          ],
+          'n',
+          'z',
+        ])
+      );
+      e.box(['Assign', 'L', ['List', 1, 2, 3]]).evaluate();
+      // `Complex(0, 0)` canonicalizes to the real literal 0: the second
+      // argument is coerced, the first is a list and broadcasts.
+      const expr = e.box(['P', 'L', ['Complex', 0, 0]]);
+      expect(expr.evaluate().toString()).toBe('[1,1,1]');
+      const r = compile(expr, { fallback: false });
+      expect(r.success).toBe(true);
+      // The wrap is inside the closure, around the element parameter.
+      expect(r.code).toMatch(/_SYS\.bcastFn\(\(\w+, (\w+)\) =>.*re: \1, im: 0/);
+      // Same values as the interpreter, in the complex convention the
+      // complex-returning callee uses on this target.
+      expect(r.run!({})).toEqual([
+        { re: 1, im: 0 },
+        { re: 1, im: 0 },
+        { re: 1, im: 0 },
+      ]);
+    });
+  });
+
   describe('custom operator compile handler', () => {
     it('emits a custom operator definition compile handler', () => {
       const e = new ComputeEngine();

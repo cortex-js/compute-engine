@@ -1960,6 +1960,30 @@ export function gpuRandomState(
 }
 
 /**
+ * Compilation-boundary hook (`CompileTarget.beginCompilation`): restart the
+ * per-compilation counter NUMBERING of the compilation `target` belongs to.
+ *
+ * A target the engine creates is fresh for every `compile()`, so its numbering
+ * starts at `_gpu_rnd_n0` on its own. A target the CALLER built once and passes
+ * to two successive `compile()` calls does not — without this reset the second
+ * compilation of the same expression would number its draws `n1, n2, …`,
+ * breaking recompile-replay determinism on that path.
+ *
+ * Reset through the state, not by replacing it: the state is reached by the
+ * identity token (which `{ ...target }` spreads copy by reference), and the
+ * compilation CONTEXT `createTargetFor` stamped on it — shader stage, active
+ * host frame, `vars` names — describes the caller, not this compilation, and
+ * must survive. Frames are cleared because an unbalanced frame can only be the
+ * residue of a compilation that threw.
+ */
+function resetGPURandomNumbering(target: CompileTarget<Expression>): void {
+  const state = gpuRandomState(target);
+  state.frames.length = 0;
+  state.counters = 0;
+  state.spatialCounter = undefined;
+}
+
+/**
  * Allocate the next invocation-local counter variable.
  *
  * Each frame owns one, plus one shared by the unframed spatial-noise draws.
@@ -4122,6 +4146,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
     const target: GPURandomTarget = {
       language: this.languageId,
+      // Restart the random-counter numbering at each compilation boundary, so
+      // a target the CALLER reuses across two `compile()` calls emits the same
+      // source both times (§7). Target-specific: only the GPU languages number
+      // anything per compilation.
+      beginCompilation: resetGPURandomNumbering,
       // A shader has no expression-level loop or IIFE, so the multi-statement
       // block forms (loop-form Sum/Product, Loop, Block) are only valid at
       // statement position. Flag it so the base compiler fails closed (D6)

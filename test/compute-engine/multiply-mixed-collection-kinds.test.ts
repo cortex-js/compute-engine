@@ -59,7 +59,10 @@ describe('MULTIPLY — mixed collection kinds zip element-wise', () => {
   });
 
   test('Multiply now agrees with Add on the same operands', () => {
-    const operands = [['Range', 1, 3], ['List', 1, 2, 3]];
+    const operands = [
+      ['Range', 1, 3],
+      ['List', 1, 2, 3],
+    ];
     expect(value(['Add', ...operands])).toBe('[2,4,6]');
     expect(value(['Multiply', ...operands])).toBe('[1,4,9]');
   });
@@ -95,7 +98,11 @@ describe('MULTIPLY — the paths that must not move', () => {
       ])
     ).toBe('[[1,2],[3,4]]');
     expect(
-      value(['Multiply', ['List', ['List', 1, 2], ['List', 3, 4]], ['List', 1, 1]])
+      value([
+        'Multiply',
+        ['List', ['List', 1, 2], ['List', 3, 4]],
+        ['List', 1, 1],
+      ])
     ).toBe('[3,7]');
   });
 
@@ -107,12 +114,28 @@ describe('MULTIPLY — the paths that must not move', () => {
     );
   });
 
-  test('two mismatched List literals stay symbolic, as before', () => {
-    // `Multiply` never truncated this shape and never diagnosed it either; the
-    // rank-1 fold in `mulTensors` leaves it inert. Unchanged here — noted so a
-    // future round can decide whether it should join the ruling.
-    expect(value(['Multiply', ['List', 1, 2, 3], ['List', 2, 2]])).toBe(
-      '[1,2,3] * [2,2]'
+  test('two mismatched List literals join the length ruling', () => {
+    // Was inert-symbolic (`[1,2,3] * [2,2]`): the rank-1 fold in `mulTensors`
+    // returned an inert product instead of consulting the mismatch check, so
+    // `Multiply` neither truncated nor diagnosed the shape while `Add` on the
+    // same operands errored. Both now report `incompatible-dimensions`.
+    expect(value(['Multiply', ['List', 1, 2, 3], ['List', 2, 2]])).toMatch(
+      /incompatible-dimensions/
     );
+    expect(value(['Add', ['List', 1, 2, 3], ['List', 2, 2]])).toMatch(
+      /incompatible-dimensions/
+    );
+    // The unit-carrying variant lands in the same fold, and is diagnosed too.
+    expect(
+      value([
+        'Multiply',
+        ['List', 1, 2, 3],
+        ['Multiply', ['List', 1, 2], 'Meter'],
+      ])
+    ).toMatch(/incompatible-dimensions/);
+    // A third, matching operand does not mask the mismatch.
+    expect(
+      value(['Multiply', ['List', 1, 2, 3], ['List', 2, 2], ['List', 1, 1, 1]])
+    ).toMatch(/incompatible-dimensions/);
   });
 });

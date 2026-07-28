@@ -120,21 +120,24 @@ operators, shortest for explicit PAIRING constructors (`Zip`, variadic `Map`,
   need a distinct absence sentinel carried through nested broadcasts to do
   better.
 
-Residue from the adjacent `Multiply` mixed-collection-kinds fix (landed
-2026-07-27, record in `CHANGELOG.md`): two mismatched `List` literals still
-leave `Multiply` symbolic (`[1,2,3] * [2,2]`) where `Add` reports
-`incompatible-dimensions` — the rank-1 fold in `mulTensors` returns an inert
-product rather than consulting the length ruling. `Multiply` never truncated
-that shape, so nothing is silently lost; deciding whether it should join the
-ruling is a small follow-up, pinned as characterization in
-`multiply-mixed-collection-kinds.test.ts`.
-- **A user-function application over a collection argument mis-compiles.**
-  `q(L)` with `q: t ↦ n·t+1` interprets to `[5,9,13]` but compiles to NaN: the
-  callee emits its body as SCALAR code, so the array argument coerces. This
-  predates the element-wise work and is why the boolean heads require an
-  operand that provably compiles to an array (a comparison would turn that NaN
-  into a plausible `false`). Fixing it means compiling a user function's body
-  under a broadcast, which is a larger change than this item was.
+- **Revisit the fail-closed boolean-head compile guards.** The compiled
+  `<`/`<=`/`>`/`>=`/`And`/`Or`/`Not` handlers decline when an operand may be
+  a collection, because a user-function application used to mis-compile a
+  collection argument to NaN (a comparison would have turned that into a
+  plausible `false`). That underlying bug is fixed (2026-07-27: the
+  application site now dispatches through `_SYS.bcast` at run time), so the
+  guards' justification is narrower than their reach — the stale comment in
+  `tryCompileBroadcast` (base-compiler.ts) says as much. Relaxing them is a
+  deliberate follow-up: the guards are still correct for other
+  unprovable-shape operands, and this is also Tycho's standing item-86 ask
+  (broadcast-aware compiled comparisons would remove their fan-out-invariant
+  coupling).
+- **Compiled elementwise `Which`/`If` selection.** The interpreter side
+  landed 2026-07-27 (ratified spec:
+  `docs/plans/2026-07-27-elementwise-which-design.md`); a compiled `_SYS`
+  selection lowering is demand-gated — Tycho's consuming path (action
+  firings) is interpreted, so nothing waits on it. Natural to batch with
+  the boolean-head-guard revisit above.
 - **Python still fails closed** for comparisons/connectives over a
   possibly-collection operand — it has no generic scalar-closure broadcaster.
   Tracked under *Broadcast typing residue* below; `_ce_bcast` now matches the
@@ -215,10 +218,6 @@ mechanism, 16 stages). What is genuinely left:
   phase. A pre-boxed operand can be applied twice through a raw name rather
   than a binding, which binding identity cannot distinguish; the behavior is
   characterization-pinned (`@fixme`) rather than fixed.
-- **`BindingSite.shield` is declared but never read**
-  (`types-definitions.ts:1068`) — the 0.96.0 `_isShield` narrowing landed
-  through a different path, so the field and its comment are stale. Wire it or
-  delete it.
 - **Found-not-fixed, all pre-existing and pathological:** `Limit(1/(x-a), …)`
   capture in `library/calculus.ts`; a global `_1` that *holds a value* stalls a
   pipe `Map`; flat-vs-nested `Multiply` breaks `isSame` (`\frac{ax^2}{2}` vs the
@@ -230,16 +229,13 @@ The redesign shipped and the one-release tombstones are deleted. Model
 reference: `docs/RANDOMNESS-MODEL.md`; spec:
 `docs/plans/2026-07-25-random-signature-redesign.md`. Remaining:
 
-- **Counter numbering leaks across `compile()` calls** when an *external*
-  target object is reused: there is no compilation-boundary hook on the
-  `expr.compile({ target })` path (needs a root hook in `base-compiler.ts`).
 - **`compileShader` does not apply `rewriteAngularUnit`.** Both GLSL and WGSL
   `compileShader` route through `compileShaderBody`, never `compileOrThrow`
   (`gpu-target.ts` ~:4249), so a degree-mode engine emits radian trig on that
   route only. Pre-existing and unrelated to randomness.
-- **Family typing consistency:** `RandomChoice` still types `vector<real^k>`
-  where `Random(Interval)` narrows to `finite_real`, and `Map` derives its
-  element type independently.
+- **`Map` element-type derivation** still widens independently of the
+  domain narrowing the random family uses (`RandomChoice` itself was aligned
+  with `Random` on 2026-07-27 via the shared `randomElementType`).
 
 Settled, not work: the GLSL sibling-draw order is an accepted documented caveat
 (operand evaluation order is unspecified in GLSL; WGSL pins L→R), and the
@@ -689,6 +685,21 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
   `Length`/`Count`/`IsEmpty`/`Contains` over `Sort`/`Shuffle`/`Reverse`/
   `Unique` — but any broader `Count(f(x))`-through-eager-op cheapness needs
   canonical-level rewrites, a churn-heavy direction to decide deliberately.
+  New evidence (Tycho item 103, profiled 2026-07-27): broadcast arithmetic
+  over a `Range` stacks lazy `Map`s — `1 + Mod(Range(0,899) + x, 900)` is
+  three of them — so one 900-element drain is 2,700 full `makeLambda`
+  applications at a flat ~8 µs each (scope push, per-parameter definition,
+  body through the canonical pipeline). Map fusion
+  (`Map(Map(s,f),g)` → `Map(s, g∘f)`) is the structural lever; the flat
+  per-element cost otherwise caps interactive workloads at roughly 6k
+  drained elements per 50 ms frame. The elementwise `Add` itself measured
+  ~2 ms/900 elements — not the bottleneck.
+- **`.N()` on a lazy-Map drain measured ~5× slower than `evaluate()`**
+  (743 ms vs 140 ms on the item-103 witness) even though Map auto-compile
+  targets exactly the numeric drain. Either the gate never matches this
+  shape or a compile attempt is paid and discarded per element —
+  uninvestigated; needs its own profile before touching the
+  `_computeValue` ordering (a ratified non-goal protects steps 3/3b).
 - **Latent issues: none remaining.** The 2026-07-19 latent sweep
   dispositioned the whole former list (fixes, could-not-reproduce
   verifications, and an `At` `@todo` audit — record in that day's commits

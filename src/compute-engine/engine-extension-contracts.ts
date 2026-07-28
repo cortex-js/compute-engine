@@ -162,6 +162,15 @@ function assertCompileTargetContract(
   if (target.language !== undefined && typeof target.language !== 'string') {
     throw new Error('Invalid compile target: "language" must be a string');
   }
+
+  if (
+    target.beginCompilation !== undefined &&
+    typeof target.beginCompilation !== 'function'
+  ) {
+    throw new Error(
+      'Invalid compile target: "beginCompilation" must be a function'
+    );
+  }
 }
 
 function assertOperatorEntry(operator: string, value: unknown): void {

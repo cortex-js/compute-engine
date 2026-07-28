@@ -333,14 +333,17 @@ function randomElementType(domain: Expression): Type {
 
 /** `list<T^k>` from a domain's element type, or the unshaped `list<T>`.
  * A zero count stays unshaped: a `^0` dimension reduces to the unit type,
- * which would misdispatch the (valid) empty-list result. */
+ * which would misdispatch the (valid) empty-list result.
+ *
+ * The element type is the SAME narrowing `Random` applies to a single draw
+ * (`randomElementType`) — a `RandomChoice` cell is a `Random` draw, so
+ * `RandomChoice(Interval(0,1), 3)` is `list<finite_real^3>`, not the wider
+ * `list<real^3>` the raw collection element type would give. */
 function randomListType(
   domain: Expression | undefined,
   kOp: Expression | undefined
 ): Type {
-  const elt = domain
-    ? typeToString(collectionElementType(domain.type.type) ?? 'any')
-    : 'any';
+  const elt = domain ? typeToString(randomElementType(domain)) : 'any';
   const count = kOp ? asSmallInteger(kOp) : null;
   if (count !== null && count > 0 && count <= MAX_RANDOM_ELEMENT_COUNT)
     return parseType(`list<${elt}^${count}>`);

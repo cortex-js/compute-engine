@@ -1055,17 +1055,6 @@ export type BindingSite = {
    * parameters) wants.
    */
   clauseLocal?: boolean;
-
-  /**
-   * Declare the binding without a value even if the enclosing scope binds
-   * the same name to one (the "shield" idiom).
-   *
-   * **Reserved for stage 14** of
-   * `docs/plans/2026-07-26-binder-mechanism-design.md` (§4, the `_isShield`
-   * marker that replaces the ad-hoc `withValueShield` sites of `Solve`/`D`).
-   * Not read by the binder hook yet: setting it today has no effect.
-   */
-  shield?: boolean;
 };
 
 /**

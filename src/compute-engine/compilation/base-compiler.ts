@@ -4,6 +4,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
+import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import {
   isFiniteIndexedCollection,
   isNumericTuple,
@@ -236,6 +237,30 @@ export class BaseCompiler {
       );
     }
     return code;
+  }
+
+  /**
+   * Compile `expr` as the **root** of a compilation: open the compilation
+   * boundary on `target`, then compile.
+   *
+   * `compile()` is the recursive entry — every sub-expression flows through it,
+   * so it cannot tell a new compilation from a nested one. This is the entry a
+   * caller driving a whole compilation uses (`expr.compile({ target })`,
+   * plugin targets), and the one that gives a REUSED target object the fresh
+   * per-compilation numbering an engine-created target gets by being new: two
+   * compilations of one expression then emit identical source.
+   *
+   * Not used where one target deliberately spans several root compilations —
+   * a shader body compiles each of its statements against a single target so
+   * their random counters stay distinct (`compileShaderBody`).
+   */
+  static compileRoot(
+    expr: Expression | undefined,
+    target: CompileTarget<Expression>,
+    prec = 0
+  ): TargetSource {
+    target.beginCompilation?.(target);
+    return BaseCompiler.compile(expr, target, prec);
   }
 
   /**
@@ -3413,22 +3438,108 @@ export class BaseCompiler {
     // item-60 convention-mismatch class): the body consumes such a parameter
     // through complex slots, so a plain number argument — e.g. the seed `0`
     // in `M(10, 0)`, after `Complex(0, 0)` canonicalizes to a real literal —
-    // would NaN-poison the whole call.
-    const callArgs = args
-      .map((a, i) => {
-        const code = BaseCompiler.compileValueOperand(a, target);
-        if (
-          target.language === 'javascript' &&
-          BaseCompiler.isProvablyRealValued(a)
-        ) {
-          const pt = BaseCompiler.userFunctionParamType(engine, h, i);
-          if (pt !== undefined && isNonRealNumber(pt))
-            return `({ re: ${code}, im: 0 })`;
-        }
-        return code;
-      })
-      .join(', ');
-    return `${name}(${callArgs})`;
+    // would NaN-poison the whole call. The coercion is PER PARAMETER: on the
+    // broadcast path below it is applied inside the scalar closure, to the
+    // element, not to the whole argument.
+    const coerceToComplex = args.map((a, i) => {
+      if (
+        target.language !== 'javascript' ||
+        !BaseCompiler.isProvablyRealValued(a)
+      )
+        return false;
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      return pt !== undefined && isNonRealNumber(pt);
+    });
+    const compiledArgs = args.map((a) =>
+      BaseCompiler.compileValueOperand(a, target)
+    );
+    const complexWrap = (code: string): string => `({ re: ${code}, im: 0 })`;
+
+    // The interpreter BROADCASTS a user function over a collection argument
+    // (`applyFunctionLiteral` / the step-2b lambda broadcast): `q(L)` with
+    // `q: t ↦ n·t+1` and `L = [1,2,3]` answers `[5,9,13]`, not a scalar. The
+    // emitted callee is SCALAR code, so a bare `_fn_q([1,2,3])` computes
+    // `4*[1,2,3]+1` — the string-coerced NaN this dispatch fixes.
+    //
+    // Mirroring the interpreter's *runtime* dispatch (the item-34 ruling)
+    // rather than a compile-time "is this operand provably a collection?"
+    // gate: `_SYS.bcast` applies the scalar closure directly when no argument
+    // is an array and maps it element-wise otherwise, so a declared type wider
+    // than the runtime value costs nothing. Length mismatches project the
+    // interpreter's `incompatible-dimensions` error to NaN, as everywhere else
+    // in `bcast`.
+    //
+    // What is decided at compile time is only a property of the CALLEE and of
+    // the argument's static shape class, both of which the interpreter also
+    // reads statically:
+    //   - `paramsAreScalar`: a collection-typed parameter binds its argument
+    //     WHOLE (`f: (list<number>) -> number`), so it must not be mapped;
+    //   - a TUPLE argument is atomic (a point/vector), excluded from broadcast
+    //     by the interpreter yet lowered to a JS array here — `bcast` would
+    //     map over its components. Leave those on the direct-call path;
+    //   - every argument PROVABLY not a collection (`number`/`boolean`/
+    //     `string`-typed — a plain numeric call such as `f(2)`) can never
+    //     broadcast at run time, so the dispatch would be dead weight in the
+    //     hot path. Note the direction: this declines only where the answer is
+    //     certain, so a type merely WIDER than the runtime value still gets the
+    //     runtime dispatch.
+    // The dispatch is `_SYS.bcastFn`, not `_SYS.bcast`: applying a function
+    // literal to an EMPTY collection zips zero elements and answers `[]` in
+    // the interpreter, where an empty operator position answers `Nothing`
+    // (NaN). Everything else — mismatch → NaN, scalar reuse, nesting — is
+    // shared.
+    const provablyScalarArg = (a: Expression): boolean =>
+      a.type.matches('number') ||
+      a.type.matches('boolean') ||
+      a.type.matches('string');
+    if (
+      target.language === 'javascript' &&
+      args.length > 0 &&
+      !args.every(provablyScalarArg) &&
+      !args.some((a) => isTuple(a)) &&
+      BaseCompiler.userFunctionParamsAreScalar(engine, h)
+    ) {
+      // A complex-typed parameter is coerced INSIDE the closure, on the
+      // element the broadcast selected: wrapping the whole argument would
+      // both hand the callee `{ re: [1,2,3], im: 0 }` and (before) force the
+      // entire call onto the direct scalar path, so a sibling collection
+      // argument never broadcast.
+      const params = args.map(() => BaseCompiler.tempVar());
+      const callParams = params.map((p, i) =>
+        coerceToComplex[i] ? complexWrap(p) : p
+      );
+      return `_SYS.bcastFn((${params.join(', ')}) => ${name}(${callParams.join(
+        ', '
+      )}), ${compiledArgs.join(', ')})`;
+    }
+
+    return `${name}(${compiledArgs
+      .map((code, i) => (coerceToComplex[i] ? complexWrap(code) : code))
+      .join(', ')})`;
+  }
+
+  /**
+   * Does user-defined function `h` broadcast over a collection argument, i.e.
+   * are all of its formal parameters scalar? Mirrors the interpreter's
+   * broadcast gate (`applyFunctionLiteral` / step 2b in `boxed-function.ts`):
+   * the DECLARED signature is authoritative when there is one, the literal's
+   * own inferred type is the fallback. Conservative (`unknown` → scalar), the
+   * same way `paramsAreScalar` is.
+   */
+  private static userFunctionParamsAreScalar(
+    engine: ComputeEngine,
+    h: string
+  ): boolean {
+    const def = engine.lookupDefinition(h);
+    if (!def) return true;
+    if (isOperatorDef(def)) return paramsAreScalar(def.operator);
+    if (!('value' in def) || def.value === undefined) return true;
+    const declared = def.value.type?.type;
+    if (typeof declared === 'object' && declared.kind === 'signature')
+      return paramsAreScalar(declared);
+    const literal = def.value.value?.type?.type;
+    if (literal === undefined) return true;
+    return paramsAreScalar(literal);
   }
 
   /**

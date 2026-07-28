@@ -215,6 +215,25 @@ export interface CompileTarget<Expr = unknown> {
     };
   };
 
+  /**
+   * Compilation-boundary hook: invoked **once**, at the root of each
+   * compilation (`BaseCompiler.compileRoot`), before any code is emitted.
+   *
+   * A target that allocates per-compilation NUMBERING (the GPU targets number
+   * their invocation-local random counters `_gpu_rnd_n0`, `_gpu_rnd_n1`, …)
+   * resets that numbering here, so compiling the same expression twice with
+   * one target object emits identical source — the recompile-replay
+   * determinism the engine-created targets get for free by being fresh. Only
+   * numbering is reset, never the compilation CONTEXT (shader stage, host-frame
+   * flag) the target was created with, and never module-level state a
+   * previously compiled function still references.
+   *
+   * The receiving target is passed explicitly rather than captured: the
+   * compiler recurses through `{ ...target }` spreads, and a caller may reuse
+   * such a copy as a root target of its own.
+   */
+  beginCompilation?: (target: CompileTarget<Expr>) => void;
+
   /** Target language identifier (for debugging/logging) */
   language?: string;
 

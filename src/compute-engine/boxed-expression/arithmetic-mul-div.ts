@@ -20,6 +20,7 @@ import {
   isBroadcastableCollection,
   isUnknownLengthBroadcast,
   lazyBroadcastMap,
+  broadcastLengthMismatch,
   broadcastOverIndexedCollections,
 } from '../collection-utils.js';
 import { NumericValue } from '../numeric-value/types.js';
@@ -1735,10 +1736,15 @@ function mulTensors(
       product.shape.length === 1 &&
       nextTensor.shape.length === 1
     ) {
-      // Mismatched lengths: stay inert (mirrors the incompatible-dimension
-      // behavior of the matrix-product fold below).
+      // Mismatched lengths: `Multiply` is LIFTED over these operands, so the
+      // broadcast length ruling applies (docs/BROADCAST-MODEL.md) — the same
+      // `incompatible-dimensions` `Add` reports on the same shape. Routed
+      // through the shared check so the diagnostic can't drift.
       if (product.shape[0] !== nextTensor.shape[0])
-        return ce._fn('Multiply', xs);
+        return (
+          broadcastLengthMismatch(ce, [product, nextTensor]) ??
+          ce._fn('Multiply', xs)
+        );
       // Pack both vector operands once for the element-wise fold. A pack
       // failure falls back to an inert product.
       const productTensor = packTensor(ce, product);

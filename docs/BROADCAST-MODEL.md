@@ -95,7 +95,13 @@ Corollary rules for the strict regime:
   `points-arithmetic.test.ts` (zip-to-shorter),
   `pointlist-lazy-broadcast.test.ts` (ragged lazy transpose),
   `multiply-mixed-collection-kinds.test.ts` (mixed-kind operands join the
-  strict regime).
+  strict regime), `linear-algebra.test.ts` (rank-1 `Multiply` mismatch
+  errors), `elementwise-which.test.ts` (selection joins the strict regime).
+- Selection (2026-07-27): elementwise `Which`/`If` over list-valued
+  conditions belongs to the LIFTED regime — every list-valued participant
+  (conditions and selected arms) must share one length, checked through the
+  same `broadcastLengthMismatch`. Semantics and rulings:
+  `docs/plans/2026-07-27-elementwise-which-design.md`.
 
 ## Audit record (2026-07-27)
 
@@ -128,12 +134,14 @@ well-defined. `Equal`/`NotEqual` on two collections is whole-collection
 equality (mismatched lengths → definitively `False`/`True`). `Dot`/`Cross`
 error on dimension grounds of their own.
 
-**Known residues (tracked in ROADMAP):** `Multiply` of two mismatched `List`
-literals stays inert-symbolic (never truncated, never diagnosed) — and the
-unit-carrying variant (`[1,2,3] · ([1,2]·Meter)`) lands in the same inert
-shape; a late-resolving mismatch inside the lazy variadic `Map` can still
-truncate. A non-indexed collection operand (`Add(L, Naturals)`) is lifted
-like a scalar, producing inert `Naturals + 1` cells — arguably deserving its
-own ruling. (`Covariance`/`Correlation` originally answered
-`unexpected-argument` on a length mismatch; harmonized to
-`incompatible-dimensions` same day.)
+**Known residues (tracked in ROADMAP):** a late-resolving mismatch inside
+the lazy variadic `Map` can still truncate. A non-indexed collection operand
+(`Add(L, Naturals)`) is lifted like a scalar, producing inert `Naturals + 1`
+cells — arguably deserving its own ruling. (`Covariance`/`Correlation`
+originally answered `unexpected-argument` on a length mismatch; harmonized to
+`incompatible-dimensions` same day. `Multiply` of two mismatched `List`
+literals — and the unit-carrying variant `[1,2,3] · ([1,2]·Meter)` — stayed
+inert-symbolic until 2026-07-27; the rank-1 fold in `mulTensors` now routes
+through `broadcastLengthMismatch` and errors like `Add`. The rank-2
+matrix-product mismatch stays inert: dimension compatibility there is
+`MatrixMultiply`'s question, not a broadcast length.)

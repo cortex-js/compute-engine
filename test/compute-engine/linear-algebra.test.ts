@@ -588,10 +588,12 @@ describe('Multiply list consistency (Issue #29)', () => {
     ).toMatchInlineSnapshot(`[4,10,18]`);
   });
 
-  it('mismatched lengths stay inert', () => {
+  it('mismatched lengths report incompatible-dimensions (was inert)', () => {
+    // `Multiply` is LIFTED over these operands, so the broadcast length ruling
+    // applies (docs/BROADCAST-MODEL.md) — the same error `Add` reports here.
     expect(
       ev(['Multiply', ['List', 1, 2], ['List', 1, 2, 3]])
-    ).toMatchInlineSnapshot(`[1,2] * [1,2,3]`);
+    ).toMatchInlineSnapshot(`Error("incompatible-dimensions", "2 vs 3")`);
   });
 
   it('Multiply(matrix, vector) is unchanged (matrix product)', () => {

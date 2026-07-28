@@ -1,5 +1,33 @@
 ## [Unreleased]
 
+### New Features
+
+- **`Which` and `If` broadcast over list-valued conditions.** The lifted
+  comparisons produce `list<boolean>` values (`n == 3` over a list of
+  neighbour counts), and the conditionals can now consume them: with
+  `n = [3,2,1,3]` and `S = [1,0,1,1]`,
+
+  ```
+  Which(n == 3, 1, n == 2, S, True, 0)   →  [1, 0, 0, 1]
+  ```
+
+  — first-match selection per element, scalar conditions and arms lift,
+  list-valued arms index at the selected position (the `np.select` model;
+  in Desmos terms, piecewise-over-lists). Semantics, ratified as rulings
+  R1–R4 of `docs/plans/2026-07-27-elementwise-which-design.md`: each arm is
+  evaluated at most once, whole, and only if selection reaches it
+  somewhere; every list-valued participant must share one length
+  (`incompatible-dimensions` otherwise, per the broadcast model's lifted
+  regime); a position no clause matches is `NaN` (write an explicit default
+  clause for any other marker); a `Missing` condition cell yields the same
+  catchable "condition is absent" error the scalar form produces, at that
+  position only. The elementwise path activates only when a condition
+  evaluates to an indexed collection whose cells are all
+  `True`/`False`/`Missing` — symbolic conditions stay unreduced exactly as
+  before, and all-scalar conditions are untouched. One edge behavior
+  changed with the gate: `Which([], value)` now answers `[]` (a lone empty
+  condition broadcasts) instead of throwing.
+
 ### Breaking Changes
 
 - **`Multiply` of two mismatched `List` literals is now an error.** The rank-1
