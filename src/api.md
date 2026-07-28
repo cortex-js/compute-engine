@@ -4075,6 +4075,7 @@ type OperatorDefinitionFlags = {
   idempotent: boolean;
   involution: boolean;
   pure: boolean;
+  drawsRandom: boolean;
 };
 ```
 

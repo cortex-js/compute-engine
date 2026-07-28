@@ -661,36 +661,19 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
   do not reorder `_computeValue` steps 3/3b), and non-`Map` lazy collections
   (`Filter`, `Comprehension` bodies) and bignum drains are not attempted.
   See [`docs/plans/2026-07-19-map-auto-compile-design.md`](./docs/plans/2026-07-19-map-auto-compile-design.md).
-- **Fusion/rewrite layer — open design decision (user has not ruled).** No
-  structural rewrite layer exists; lazy facet delegation gives O(1)
-  `Count`/`At` through lazy chains, and canonical peeks now cover
-  `Length`/`Count`/`IsEmpty`/`Contains` over `Sort`/`Shuffle`/`Reverse`/
-  `Unique` — but any broader `Count(f(x))`-through-eager-op cheapness needs
-  canonical-level rewrites, a churn-heavy direction to decide deliberately.
-  New evidence (Tycho item 103, profiled 2026-07-27): broadcast arithmetic
-  over a `Range` stacks lazy `Map`s — `1 + Mod(Range(0,899) + x, 900)` is
-  three of them — so one 900-element drain is 2,700 full `makeLambda`
-  applications at a flat ~8 µs each (scope push, per-parameter definition,
-  body through the canonical pipeline). Map fusion
-  (`Map(Map(s,f),g)` → `Map(s, g∘f)`) is the structural lever; the flat
-  per-element cost otherwise caps interactive workloads at roughly 6k
-  drained elements per 50 ms frame. The elementwise `Add` itself measured
-  ~2 ms/900 elements — not the bottleneck.
-- **`.N()` on a lazy-Map drain — DIAGNOSED 2026-07-27** (was "5× slower
-  than `evaluate()`"). Two independent causes, ~2.3× each: (1) the witness
-  tripped the bare-assign builtin-clobber bug (fixed 2026-07-27: a bare
-  `assign` over a system-scope operator now shadows in the current scope
-  instead of mutating the builtin — see CHANGELOG) — `N` assigned over the
-  builtin made every lazy `N(...)` marker produce NaN and
-  the result was WRONG, not just slow; (2) Map auto-compile declines at
-  bignum-preferred (default) precision by an explicit, well-argued
-  precondition (`map-auto-compile.ts` `bignumPreferred` gate — float64
-  cannot reproduce bignum digits). At machine precision the gate fires
-  exactly right (one compile per Map, one hit per element) and the ratio is
-  1.6× with correct results. RULED 2026-07-27: machine-precision-only
-  auto-compile is accepted — no bignum-safe compile tier; the interpreter
-  drain at default precision is by design (float64 cannot reproduce bignum
-  digits). Both halves of this diagnosis are now closed.
+- **Structural rewrite layer — open design decision (user has not ruled).**
+  The stacked-lazy-`Map` drain cost that motivated fusion is addressed:
+  drain-time lowering (`map-lowering.ts`, shipped in this cycle's release)
+  applies broadcast-shaped lambda levels directly at iteration, ~3×
+  (`evaluate()`) / ~4× (`.N()`, machine path) on the Tycho item-103 witness;
+  structural canonical-level fusion (`Map(Map(s,f),g)` → `Map(s, g∘f)`) was
+  considered and REJECTED (canonical forms are user-visible; reactivity).
+  What remains open is the broader question: `Count(f(x))`-through-eager-op
+  cheapness needs canonical-level rewrites, a churn-heavy direction to
+  decide deliberately. (Related closed rulings, recorded in
+  `docs/plans/2026-07-19-map-auto-compile-design.md` and the 0.95–0.98
+  CHANGELOG entries: Map auto-compile stays machine-precision-only — no
+  bignum-safe compile tier.)
 - **Latent issues: none remaining.** The 2026-07-19 latent sweep
   dispositioned the whole former list (fixes, could-not-reproduce
   verifications, and an `At` `@todo` audit — record in that day's commits
