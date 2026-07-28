@@ -32,6 +32,7 @@ import * as path from 'node:path';
 
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
+import { sameSyntactic } from '../../src/compute-engine/boxed-expression/compare';
 
 import {
   loadCorpus,
@@ -1070,11 +1071,22 @@ function selfTestScoped(
         return { ok: false, detail: 'invalid instantiated replace' };
       const result = inst.replace(ruleSet);
       if (result === null) return { ok: false, detail: 'rule did not fire' };
-      // Structural identity, with a provable-equality fallback: canonical
-      // form is not perfectly confluent (e.g. `pi * sqrt(2) / 2` vs
-      // `sqrt(2)/2 * pi`), and the fired result and the independently boxed
-      // expectation may settle in different but equal canonical shapes.
-      if (!result.isSame(expected) && result.isEqual(expected) !== true)
+      // Structural identity, with two fallbacks. Syntactic: `isSame`
+      // compares symbol BINDING identity, and rule substitution can
+      // transplant a binder-bound occurrence outside its binder (the
+      // derivative-of-lambda rules capture the lambda's own `_z`), so the
+      // fired result and the expectation can be name-identical yet carry
+      // different bindings — both sides are built from the same seed
+      // symbols, so name equality is the honest shape check here.
+      // Provable-equality: canonical form is not perfectly confluent (e.g.
+      // `pi * sqrt(2) / 2` vs `sqrt(2)/2 * pi`), and the fired result and
+      // the independently boxed expectation may settle in different but
+      // equal canonical shapes.
+      if (
+        !result.isSame(expected) &&
+        !sameSyntactic(result, expected) &&
+        result.isEqual(expected) !== true
+      )
         return {
           ok: false,
           detail: `fired but produced ${result.toString()} ≠ ${expected.toString()}`.slice(
