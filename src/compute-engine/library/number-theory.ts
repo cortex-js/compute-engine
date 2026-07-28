@@ -731,7 +731,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const range = hi - lo + 1n;
         const attempts = 100 + 20 * hi.toString().length;
         for (let i = 0; i < attempts; i++) {
-          const r = lo + randomBigintBelow(range);
+          const r = lo + randomBigintBelow(range, () => ce._random());
           if (isPrimeBigint(r)) return ce.number(r);
         }
         // Safety net: a deterministic scan guarantees a result when the range
@@ -1281,18 +1281,26 @@ function isPerfectPowerBigint(
   return false;
 }
 
-/** Uniform random bigint in `[0, n)` (for `n > 0`). */
-function randomBigintBelow(n: bigint): bigint {
+/**
+ * Uniform random bigint in `[0, n)` (for `n > 0`).
+ *
+ * `draw` is the caller's source of uniform `[0, 1)` reals — always
+ * `ce._random()`, never a bare `Math.random()`, so the draws come from the
+ * ambient `WithRandomSeed` frame when there is one (see
+ * `docs/RANDOMNESS-MODEL.md`). The number of draws is data-dependent (the
+ * rejection loop), which is fine: a frame replays the whole sequence.
+ */
+function randomBigintBelow(n: bigint, draw: () => number): bigint {
   if (n <= 1n) return 0n;
   if (n <= BigInt(Number.MAX_SAFE_INTEGER))
-    return BigInt(Math.floor(Math.random() * Number(n)));
+    return BigInt(Math.floor(draw() * Number(n)));
   // Rejection-sample enough random 30-bit chunks to cover `n`'s bit length.
   const bits = n.toString(2).length;
   let r: bigint;
   do {
     r = 0n;
     for (let i = 0; i < bits; i += 30)
-      r = (r << 30n) | BigInt(Math.floor(Math.random() * (1 << 30)));
+      r = (r << 30n) | BigInt(Math.floor(draw() * (1 << 30)));
     r &= (1n << BigInt(bits)) - 1n;
   } while (r >= n);
   return r;

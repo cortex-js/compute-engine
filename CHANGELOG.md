@@ -1,3 +1,16 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **`RandomPrime()` is now reproducible under `WithRandomSeed()`.** It declared
+  `drawsRandom: true`, but its draws bypassed the seed frame, so
+  `WithRandomSeed(42, RandomPrime(1000))` returned a different prime on every
+  evaluation. It now draws from the frame like the rest of the random family.
+
+- **`RandomExpression()` is now declared impure.** It was declared pure, which
+  made `isConstant` true for a generator that returns a different expression on
+  every call, and admitted it to common-subexpression elimination.
+
 ## 0.98.0 _2026-07-28_
 
 ### New Features

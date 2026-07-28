@@ -651,6 +651,71 @@ describe('Deadline — every O(k)/O(n) loop honors an enclosing withTimeLimit', 
   });
 });
 
+describe('Declaration flags — every nondeterministic head is impure', () => {
+  // `pure: true` on a head whose evaluate handler is nondeterministic is a
+  // correctness bug, not a cosmetic one: it makes `isConstant` true, admits
+  // the head to common-subexpression elimination (which would collapse two
+  // independent draws into one) and to the `Map` lowering gate, and makes
+  // `Add`/`Multiply` keep the RAW operand under `.N()` — re-evaluating it and
+  // drawing twice.
+  //
+  // `drawsRandom` is the STRICTER claim: "this head consumes indices from the
+  // ambient `WithRandomSeed` frame", used by `WithRandomSeed` to decide
+  // whether a partially-evaluated body still owes draws. A head that samples
+  // `Math.random()` directly (`RandomExpression`) is impure but owes the
+  // frame nothing.
+  const FLAGS: [head: string, pure: boolean, drawsRandom: boolean][] = [
+    ['Random', false, true],
+    ['RandomChoice', false, true],
+    ['RandomSample', false, true],
+    ['RandomShuffle', false, true],
+    ['RandomPrime', false, true],
+    ['WithRandomSeed', false, true],
+    ['RandomExpression', false, false],
+  ];
+
+  for (const [head, pure, drawsRandom] of FLAGS) {
+    it(`${head} declares pure=${pure}, drawsRandom=${drawsRandom}`, () => {
+      const def = ce.box([head]).operatorDefinition;
+      expect(def).toBeDefined();
+      expect(def!.pure).toBe(pure);
+      expect(def!.drawsRandom).toBe(drawsRandom);
+    });
+  }
+
+  it('RandomExpression is neither pure nor constant', () => {
+    const expr = ce.box(['RandomExpression']);
+    expect(expr.isPure).toBe(false);
+    expect(expr.isConstant).toBe(false);
+  });
+});
+
+describe('RandomPrime draws from the frame', () => {
+  // `drawsRandom: true` is a promise that the head reads `ce._random()`, so a
+  // frame replays it. Sampling `Math.random()` directly would pass every
+  // distributional test and fail only this one.
+  it('replays under WithRandomSeed', () => {
+    const body = ['List', ['RandomPrime', 1000], ['RandomPrime', 1000]];
+    const a = evaluate(['WithRandomSeed', 42, body]);
+    const b = evaluate(['WithRandomSeed', 42, body]);
+    expect(a).toEqual(b);
+  });
+
+  it('replays on the rejection-sampling path (n > MAX_SAFE_INTEGER)', () => {
+    const big = 100_000_000_000_000_000_000_000n;
+    const a = evaluate(['WithRandomSeed', 5, ['RandomPrime', big]]);
+    const b = evaluate(['WithRandomSeed', 5, ['RandomPrime', big]]);
+    expect(a).toEqual(b);
+    expect(a).not.toMatch(/RandomPrime/); // it actually evaluated
+  });
+
+  it('is live outside any frame', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 20; i++) seen.add(evaluate(['RandomPrime', 100_000]));
+    expect(seen.size).toBeGreaterThan(1);
+  });
+});
+
 describe('Removed heads — the one-release tombstones are gone (0.96.0)', () => {
   // The Random-redesign tombstones threw `operator-removed` for exactly one
   // release (0.95.0), per the redesign's §9. They are now deleted: the

@@ -2843,6 +2843,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
     RandomExpression: {
       description: 'Generate a random expression.',
+      // Nondeterministic, like the rest of the random family: without this,
+      // `isPure` — and therefore `isConstant` — is true for a generator that
+      // returns something different on every call, making it a candidate for
+      // common-subexpression elimination and for the `Map` lowering gate.
+      // NOT `drawsRandom`: it samples `Math.random()` directly rather than the
+      // `WithRandomSeed` frame, so it owes that frame nothing.
+      pure: false,
       signature: '() -> expression',
       evaluate: (_ops, { engine }) => engine.expr(randomExpression()),
     },
