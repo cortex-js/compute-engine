@@ -1178,27 +1178,29 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(r.run!({ x: 0.3 })).toBeCloseTo(Math.cos(0.3), 12);
   });
 
-  it('a collection-valued Sum body fails closed instead of emitting NaN (Tycho item 45)', () => {
+  it('a collection-valued Sum body compiles element-wise with interpreter parity (Tycho item 45)', () => {
     // `Σ h(i)·(1/1.4^i)·a(…)` — the interpreter's elementwise zip-broadcast
-    // Sum. The scalar accumulation would emit `<array> + <array>` (NaN /
-    // string concatenation), a silently WRONG value; it must throw (D6).
+    // Sum. This used to fail closed (the scalar accumulation would emit
+    // `<array> + <array>` — NaN / string concatenation); the JS target now
+    // folds the body through `_SYS.bcast` (2026-07-28), so it compiles and
+    // must MATCH interpretation (see compile-elementwise-bigop.test.ts for
+    // the systematic suite).
     const e = new ComputeEngine();
     e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
     e.parse(
       'h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)'
     ).evaluate();
     const sum = '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))';
-    expect(() => compile(e.parse(sum), { fallback: false })).toThrow(
-      /collection-valued body/
-    );
-    // The fallback run interprets correctly.
-    const viaFallback = compile(e.parse(`(${sum})[1]`))!;
-    expect(viaFallback.success).toBe(false);
+    const r = compile(e.parse(sum), { fallback: false })!;
+    expect(r.success).toBe(true);
     e.pushScope();
     e.assign('t', 0.3);
-    const want = e.parse(`(${sum})[1]`).N().re;
+    const want = e.parse(sum).N();
     e.popScope();
-    expect(viaFallback.run!({ t: 0.3 })).toBeCloseTo(want, 10);
+    const got = r.run!({ t: 0.3 }) as number[];
+    expect(Array.isArray(got)).toBe(true);
+    expect(got[0]).toBeCloseTo(want.ops![0].re, 10);
+    expect(got[1]).toBeCloseTo(want.ops![1].re, 10);
   });
 
   it('chained (n-ary) Equal over a collection operand still fails closed (D6)', () => {

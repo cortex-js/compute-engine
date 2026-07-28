@@ -4745,16 +4745,38 @@ function emitCollectionReduce(
  * body itself for the last clause, or the nested sum/product over the remaining
  * clauses otherwise.
  */
+/**
+ * Whether the indexed big-op body is a collection the element-wise
+ * accumulation arm can fold: list/indexed-collection typed, but not a tuple
+ * (atomic — no element-wise accumulation exists) and not complex-valued (the
+ * `{re, im}` fold is the scalar loop's job). Complex CELLS inside a list share
+ * the scalar arm's known blind spot (a `{re, im}` object reaching `+` — same
+ * class as complex values in compiled scalar comparisons, tracked in ROADMAP).
+ */
+function isElementwiseBigOpBody(body: Expression): boolean {
+  if (isFunction(body, 'Tuple')) return false;
+  const tt = body.type.type;
+  if (typeof tt !== 'string' && tt.kind === 'tuple') return false;
+  if (BaseCompiler.isComplexValued(body)) return false;
+  return body.type.matches('list') || body.type.matches('indexed_collection');
+}
+
 function emitSumProduct(
   kind: 'Sum' | 'Product',
   body: Expression,
   clauses: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
 ): string {
-  // Reject a collection-valued body for the indexed form (see
-  // `BaseCompiler.assertScalarBigOpBody`, Tycho item 45). `emitSumProduct` is
-  // only reached for the indexed Sum/Product form, so this is unconditional.
-  BaseCompiler.assertScalarBigOpBody(kind, body);
+  // A collection-valued body: element-wise accumulation (the interpreter's
+  // zip-broadcast big op — `Σ_k (L + k)` over a 3-list is a 3-list). The body
+  // is evaluated WHOLE each iteration and folded through `_SYS.bcast`, so a
+  // scalar-at-runtime body stays scalar, cells zip position-wise, and a
+  // length mismatch projects to NaN. An empty range answers the scalar
+  // identity (0 / 1), matching the interpreter; a BARE collection body never
+  // reaches here (it canonicalizes to the `Reduce` collection-reduce form).
+  // Everything else keeps the fail-closed assert (Tycho item 45).
+  const elementwiseBody = isElementwiseBigOpBody(body);
+  if (!elementwiseBody) BaseCompiler.assertScalarBigOpBody(kind, body);
 
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(
     clauses[0]
@@ -4780,8 +4802,11 @@ function emitSumProduct(
   // Empty range (only knowable when both bounds are constant)
   if (bothConstant && lowerNum > upperNum) return identity;
 
-  // Unroll when both bounds are constant and range is small
-  if (bothConstant) {
+  // Unroll when both bounds are constant and range is small. The element-wise
+  // arm never unrolls: joining array terms with the bare scalar operator
+  // would string-concatenate them — it always takes the `_SYS.bcast` fold
+  // loop below.
+  if (bothConstant && !elementwiseBody) {
     const termCount = upperNum - lowerNum + 1;
     if (termCount <= UNROLL_LIMIT) {
       const terms: string[] = [];
@@ -4844,6 +4869,16 @@ function emitSumProduct(
     budget !== undefined
       ? `if (!(_upper - ${index} < ${budget})) return ${nan}; `
       : '';
+
+  if (elementwiseBody) {
+    const val = BaseCompiler.tempVar();
+    // The seed slices an array body so a single-iteration loop does not hand
+    // the caller's own array back (later iterations allocate fresh arrays
+    // through `_SYS.bcast` anyway). A runtime-empty range leaves the
+    // accumulator unseeded and answers the scalar identity, like the
+    // interpreter.
+    return `(() => { let ${acc} = null; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = ${acc} === null ? (Array.isArray(${val}) ? ${val}.slice() : ${val}) : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val}); ${index}++; } return ${acc} === null ? ${identity} : ${acc}; })()`;
+  }
 
   if (bodyIsComplex) {
     const val = BaseCompiler.tempVar();

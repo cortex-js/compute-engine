@@ -122,6 +122,17 @@
   aggregate equality, which matches the interpreter's atomic tuple comparison
   (on WGSL the same `==` is componentwise, so it declines there).
 
+- **An indexed `Sum`/`Product` with a collection-valued body now compiles
+  (JavaScript target).** The interpreter zip-broadcasts such a body
+  (`Σ_k (L + k)` over a 3-list is a 3-list); the compiled form used to fail
+  closed with a rewrite hint. The JS target now folds the body through the
+  `_SYS.bcast` element-wise dispatch: cells zip position-wise, a
+  scalar-at-runtime body stays scalar, a length mismatch projects to `NaN`,
+  and an empty range answers the scalar identity (`0`/`1`) — all matching
+  interpretation. A bare collection body is unaffected (it canonicalizes to
+  the `Reduce` collection-reduce form); tuple-shaped and complex-valued
+  bodies, and every other target, keep the fail-closed decline.
+
 - **A collection-valued `Which`/`When` condition on the Python target now fails
   closed.** The Python handlers bypassed the base compiler's condition guard,
   and a non-empty Python list is truthy — so

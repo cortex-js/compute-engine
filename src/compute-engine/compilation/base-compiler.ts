@@ -2443,7 +2443,9 @@ export class BaseCompiler {
 
     // Reject a collection-valued body for the indexed form (see
     // `assertScalarBigOpBody`); the `!index` collection-reduce arm above is
-    // exempt.
+    // exempt. (The JavaScript target never reaches this generic loop — its
+    // own `emitSumProduct` handles the indexed form, including the
+    // element-wise collection-body arm.)
     BaseCompiler.assertScalarBigOpBody(h, args[0]);
 
     const fn = BaseCompiler.compile(args[0], {
