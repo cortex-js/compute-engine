@@ -120,26 +120,21 @@ operators, shortest for explicit PAIRING constructors (`Zip`, variadic `Map`,
   need a distinct absence sentinel carried through nested broadcasts to do
   better.
 
-- **Revisit the fail-closed boolean-head compile guards.** The compiled
-  `<`/`<=`/`>`/`>=`/`And`/`Or`/`Not` handlers decline when an operand may be
-  a collection, because a user-function application used to mis-compile a
-  collection argument to NaN (a comparison would have turned that into a
-  plausible `false`). That underlying bug is fixed (2026-07-27: the
-  application site now dispatches through `_SYS.bcast` at run time), so the
-  guards' justification is narrower than their reach — the stale comment in
-  `tryCompileBroadcast` (base-compiler.ts) says as much. Relaxing them is a
-  deliberate follow-up: the guards are still correct for other
-  unprovable-shape operands, and this is also Tycho's standing item-86 ask
-  (broadcast-aware compiled comparisons would remove their fan-out-invariant
-  coupling).
-- **Compiled elementwise `Which`/`If` selection.** The interpreter side
-  landed 2026-07-27 (ratified spec:
-  `docs/plans/2026-07-27-elementwise-which-design.md`); the compiled `_SYS`
-  selection lowering (JS first; IJS/GLSL per their conventions) is still
-  open. The item-102 *firing* path is interpreted, but Tycho compiles
-  drawing paths to JS/IJS/GLSL — a piecewise-over-lists in a plotted
-  expression hits the compile path, which today fails closed on a
-  non-scalar condition. Batch with the boolean-head-guard revisit above.
+- **IJS/GLSL elementwise selection lowerings.** The JS `_SYS.select`
+  lowering landed 2026-07-27 (with the boolean-head guard relaxation — see
+  CHANGELOG); the interval-js and GPU targets still have no selection
+  lowering per their conventions. Note the intentional decline that stays:
+  chained n-ary `Equal`/`NotEqual` cannot lower faithfully — the
+  interpreter's n-ary form switches shape on how many operands are
+  collections at run time (evidence at the decline site in
+  `compileJSEquality`).
+- **GPU/interval `Which` over a collection condition does not fail
+  closed.** Pre-existing, surfaced by the 2026-07-27 other-target probes:
+  the GPU target's own `functions.Which` emits garbage for a collection
+  condition (`(vec2(True, False)) ? …`) and interval-js emits empty code,
+  rather than declining cleanly. The JS selection hook sits after the
+  `target.functions` lookup, so both are byte-unchanged by it; a clean
+  fail-closed is a separate small item.
 - **Python still fails closed** for comparisons/connectives over a
   possibly-collection operand — it has no generic scalar-closure broadcaster.
   Tracked under *Broadcast typing residue* below; `_ce_bcast` now matches the
@@ -707,9 +702,10 @@ threshold-hybrid lazy views for `Insert`/`DeleteAt`/`ReplaceAt`,
   precondition (`map-auto-compile.ts` `bignumPreferred` gate — float64
   cannot reproduce bignum digits). At machine precision the gate fires
   exactly right (one compile per Map, one hit per element) and the ratio is
-  1.6× with correct results. Open policy question only: whether a
-  bignum-safe compile tier is wanted, or the 2.5× interpreter drain at
-  default precision is accepted.
+  1.6× with correct results. RULED 2026-07-27: machine-precision-only
+  auto-compile is accepted — no bignum-safe compile tier; the interpreter
+  drain at default precision is by design (float64 cannot reproduce bignum
+  digits). Both halves of this diagnosis are now closed.
 - **Latent issues: none remaining.** The 2026-07-19 latent sweep
   dispositioned the whole former list (fixes, could-not-reproduce
   verifications, and an `At` `@todo` audit — record in that day's commits

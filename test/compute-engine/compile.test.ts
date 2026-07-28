@@ -1210,21 +1210,33 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toThrow(/Fail closed/);
   });
 
-  it('Which with a collection condition fails closed (was success:true, wrong branch)', () => {
+  it('Which with a collection condition selects element-wise (was fail-closed)', () => {
+    // `d = m` broadcasts to `[False, False, False]`, so every position takes
+    // the default arm. Element-wise selection landed 2026-07-27
+    // (`_SYS.select`); see `compile-elementwise-which.test.ts`.
     const e = mkEngine();
     const js = new JavaScriptTarget();
     const cases = e.parse('\\begin{cases}10^{9} & d = m \\\\ d\\end{cases}', {
       strict: false,
     });
-    expect(() => js.compile(cases, { realOnly: true })).toThrow(/Fail closed/);
+    const r = js.compile(cases, { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run!()).toEqual([10, 20, 30]);
   });
 
-  it('If with a collection condition fails closed', () => {
+  it('If over a NON-boolean collection condition fails closed at run time', () => {
+    // `d` is `[10, 20, 30]`: not a condition value in any cell. The compile
+    // succeeds (the shape is only knowable at run time), and `_SYS.select`
+    // then throws the same message the interpreter does, rather than picking
+    // a branch.
     const e = mkEngine();
     const js = new JavaScriptTarget();
-    expect(() =>
-      js.compile(e.box(['If', 'd', 1, 2]), { realOnly: true })
-    ).toThrow(/collection/);
+    const r = js.compile(e.box(['If', 'd', 1, 2]), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(() => r.run!()).toThrow(/Condition must evaluate/);
+    expect(() => e.box(['If', 'd', 1, 2]).evaluate()).toThrow(
+      /Condition must evaluate/
+    );
   });
 
   it('the free-function compile() converts the throw to success:false + fallback', () => {

@@ -177,9 +177,17 @@ function compileJSEquality(
   // excluded by the predicate, so plot equalities (`x^2 + y^2 = 4`) stay on
   // the scalar fast path below.
   //
-  // The CHAINED (n-ary) form keeps failing closed (D6): its pairwise `&&`
-  // conjunction is only sound over scalar booleans — an element-wise array
-  // result would be truthy garbage.
+  // The CHAINED (n-ary) form keeps failing closed (D6), and was NOT relaxed
+  // with the orderings and connectives (2026-07-27, Tycho item 86). It is not
+  // a pairwise conjunction the way `a < b < c` is: the interpreter's n-ary
+  // `Equal` switches SHAPE on how many operands are collections at run time —
+  // `Equal([1,2,3], 3, 3)` is element-wise `[False,False,True]`, while
+  // `Equal([1,2,3], [1,2,3], 3)` is the SCALAR `False` (whole-collection
+  // equality wins, and it does not broadcast the way `And(False, <list>)`
+  // would, which answers `[False,False,False]`). Reproducing that means
+  // reimplementing the n-ary dispatch in `_SYS`, not conjoining `_SYS.eq`
+  // calls — and a conjunction of them is demonstrably a different value. No
+  // faithful runtime dispatch, so no relaxation.
   const tol = args[0]?.engine?.tolerance ?? 1e-10;
   const collectionish = (a: Expression): boolean =>
     a.type.matches('collection') || isPossiblyCollectionTypedJS(a);
@@ -231,7 +239,7 @@ const JS_ORDERING_OPERATORS = {
 
 /**
  * Codegen for the ordering relations and logical connectives when an operand
- * may be a COLLECTION at run time: fail closed (D6).
+ * may be a COLLECTION at run time.
  *
  * The raw infix path in `BaseCompiler` is silently wrong on an array. JS
  * stringifies it for a comparison — `0 < [1, 0, 1]` compares against
@@ -243,14 +251,25 @@ const JS_ORDERING_OPERATORS = {
  * (`.isCollection` is false for a computed `list<real>` such as `|L - k|`,
  * which is why this went unnoticed) and dispatches here.
  *
- * Refusing rather than broadcasting is a deliberate scope choice. An
- * element-wise lowering was implemented and withdrawn: reproducing the
- * interpreter faithfully needs per-POSITION projection (an empty or complex
- * position must not poison its siblings), correct handling of shortest-length
- * truncation, and a purity rule that distinguishes a repeated scalar from the
- * collection being traversed. A whole-result post-scan got all three wrong.
- * Failing closed falls back to the interpreter, which is correct — the
- * capability is tracked in ROADMAP.md ("Element-wise compiled comparisons").
+ * This used to fail closed (D6) for every such operand. It now emits the
+ * RUNTIME dispatch `_SYS.bcast` over the head's scalar closure instead
+ * (relaxed 2026-07-27, Tycho item 86): `bcast` applies the closure directly
+ * when no argument turns out to be an array, recurses per POSITION otherwise
+ * (so an empty or mismatched position never poisons a sibling), and projects a
+ * length mismatch to NaN — the same substrate `tryCompileBroadcast` uses for
+ * the provable-array case, which is what makes the two lowerings agree. The
+ * connectives additionally get `guardConnectiveAbsence`, since `!`/`&&`/`||`
+ * coerce an absent (NaN) position to a plain — and wrong — truth value.
+ *
+ * Three shapes keep failing closed, each because no faithful runtime dispatch
+ * exists (admission is the dangerous direction):
+ *  - a TUPLE operand: a point is atomic, and the interpreter leaves
+ *    `Less(Tuple(1,2), 3)` inert; `bcast` would map over its components;
+ *  - a non-INDEXED collection (`Set`, dictionary, string): it has no
+ *    positional JS-array lowering, so `bcast` would silently treat it as a
+ *    scalar;
+ *  - chained `Equal`/`NotEqual`, which never reach here (see
+ *    `compileJSEquality`).
  */
 function compileJSCollectionBoolean(
   kind: string,
@@ -258,10 +277,10 @@ function compileJSCollectionBoolean(
   compile: (e: Expression) => string
 ): string {
   // SCALAR operands still lower normally. This handler is also reached from
-  // INSIDE the unary `.map` broadcast that `BaseCompiler` emits for a concrete
-  // finite collection (`Not([True, False])` becomes
-  // `([true, false]).map((x) => !x)`), where each element is a scalar. Throwing
-  // unconditionally would refuse that perfectly correct lowering.
+  // INSIDE the `_SYS.bcast` closure that `BaseCompiler.tryCompileBroadcast`
+  // emits for a provable array operand (`Not([True, False])` becomes
+  // `_SYS.bcast((_1) => !(_1), [true, false])`), where each element is a
+  // scalar — the broadcast lowering below must not fire there.
   const collectionish = (a: Expression): boolean =>
     a.isCollection ||
     a.type.matches('collection') ||
@@ -285,16 +304,107 @@ function compileJSCollectionBoolean(
     // which binds the shared middle operands to temporaries; there is nothing
     // to reproduce that here, and it cannot occur without a collection operand
     // having diverted us in the first place.
+  } else if (args.every(admitsRuntimeBroadcast)) {
+    // Bind one element parameter per operand and build the scalar body from
+    // them. A chained ordering becomes ONE closure over all the operands
+    // (`(a < b) && (b < c)`), which also evaluates each operand exactly once —
+    // the `bindExpr` temporaries the scalar chained path needs are unnecessary
+    // here, since every operand is already an argument of the call.
+    const params = args.map(() => BaseCompiler.tempVar());
+    const body = BaseCompiler.guardConnectiveAbsence(
+      kind,
+      params,
+      compileScalarBooleanBody(kind, params)
+    );
+    const operands = args.map((a) => `(${compile(a)})`).join(', ');
+    return `_SYS.bcast((${params.join(', ')}) => ${body}, ${operands})`;
   }
   throw new Error(
     `${kind}: cannot compile a comparison or logical connective over an ` +
       `operand that may be a collection at run time — the JavaScript ` +
       `operators do not broadcast element-wise (an array stringifies in a ` +
-      `comparison and is truthy in a connective), so the result would ` +
+      `comparison and is truthy in a connective), and this operand has no ` +
+      `element-wise runtime dispatch (a tuple binds atomically; a set, ` +
+      `dictionary or string has no positional lowering), so the result would ` +
       `silently disagree with interpretation. Fail closed (D6). Materialize ` +
       `the collection with evaluate() and compile a scalar element function ` +
       `instead.`
   );
+}
+
+/**
+ * Codegen for `Which`/`If` (clauses in `Which` shape) when a CONDITION may be
+ * an indexed collection at run time: the element-wise selection lowering
+ * (`_SYS.select`, R1–R4 of
+ * `docs/plans/2026-07-27-elementwise-which-design.md`).
+ *
+ * Each clause is emitted as a THUNK so the runtime helper owns evaluation
+ * order: conditions in clause order, an arm only if selection reaches it, and
+ * then exactly once (R2). The helper also handles the case where every
+ * condition turns out SCALAR at run time — it returns the selected arm whole —
+ * so routing a merely-possibly-collection condition here is value-safe.
+ *
+ * Returns `null` when every condition is provably scalar: the base compiler
+ * then emits its ternary chain, unchanged.
+ *
+ * Declines (fail closed, D6) when a value arm is complex-valued: the compiled
+ * complex convention is a `{ re, im }` object, and a selection array mixing
+ * those with real cells has no settled rendering. Scalar complex
+ * `Which`/`If` is untouched — it never reaches here.
+ */
+function compileJSSelection(
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string
+): string | null {
+  const conds = args.filter((_x, i) => i % 2 === 0);
+  const collectionish = (a: Expression): boolean =>
+    a.isCollection ||
+    a.type.matches('collection') ||
+    isPossiblyCollectionTypedJS(a);
+  if (!conds.some(collectionish)) return null;
+  const arms = args.filter((_x, i) => i % 2 === 1);
+  if (arms.some((a) => BaseCompiler.isComplexValued(a)))
+    throw new Error(
+      `Which: cannot compile an element-wise selection with a complex-valued ` +
+        `branch — a compiled complex value is a \`{ re, im }\` object, which ` +
+        `has no cell convention inside a selection array. Fail closed (D6).`
+    );
+  return `_SYS.select(${args.map((x) => `() => (${compile(x)})`).join(', ')})`;
+}
+
+/**
+ * True when an operand of an ordering/connective can be handed to `_SYS.bcast`
+ * — a scalar, an INDEXED collection (which lowers to a JS array), or an operand
+ * whose collection-ness is unprovable (`bcast` dispatches on the runtime
+ * shape). A tuple (atomic point) and a non-indexed collection (`Set`,
+ * dictionary, string) are excluded: see `compileJSCollectionBoolean`.
+ */
+function admitsRuntimeBroadcast(a: Expression): boolean {
+  const t = a.type.type;
+  if ((typeof t !== 'string' && t.kind === 'tuple') || isFunction(a, 'Tuple'))
+    return false;
+  if (!a.isCollection && !a.type.matches('collection')) return true;
+  return isIndexedCollectionOperand(a);
+}
+
+/** The scalar body of an ordering/connective over bare element parameters. */
+function compileScalarBooleanBody(
+  kind: string,
+  params: ReadonlyArray<string>
+): string {
+  if (kind === 'Not') {
+    if (params.length !== 1) throw new Error(`Not: expected one argument`);
+    return `!(${params[0]})`;
+  }
+  if (kind === 'And' || kind === 'Or')
+    return `(${params.join(kind === 'And' ? ' && ' : ' || ')})`;
+  const op = JS_ORDERING_OPERATORS[kind as keyof typeof JS_ORDERING_OPERATORS];
+  if (op === undefined || params.length < 2)
+    throw new Error(`${kind}: expected at least two arguments`);
+  const pairs: string[] = [];
+  for (let i = 0; i < params.length - 1; i++)
+    pairs.push(`(${params[i]} ${op} ${params[i + 1]})`);
+  return pairs.length === 1 ? pairs[0] : `(${pairs.join(' && ')})`;
 }
 
 /**
@@ -2716,6 +2826,133 @@ function bcastWith(
 }
 
 /**
+ * Element-wise conditional selection — the runtime side of a compiled
+ * `Which`/`If` whose condition may be an indexed collection (`np.select`
+ * semantics, R1–R4 of
+ * `docs/plans/2026-07-27-elementwise-which-design.md`; the interpreter side is
+ * `evaluateElementwiseSelection` in `library/control-structures.ts`).
+ *
+ * The clauses arrive as THUNKS, in `Which` order (condition, arm, …), so this
+ * helper owns evaluation: conditions run in clause order and at most once, and
+ * an arm runs only if selection reaches it somewhere — then exactly once, as a
+ * WHOLE value (R2), cached for every position that selected it.
+ *
+ * - a scalar `true` condition captures every not-yet-decided position and ends
+ *   the walk (later conditions are never evaluated); a scalar `false` captures
+ *   none; an array condition captures its `true` cells;
+ * - if EVERY condition turns out scalar, this is an ordinary scalar `Which`:
+ *   the selected arm's value is returned WHOLE (it may itself be an array —
+ *   `Which(True, [1,2])` is `[1,2]`, not an indexed cell);
+ * - element-wise, all array participants (conditions AND selected arms) must
+ *   share one length; a mismatch is the interpreter's `incompatible-dimensions`
+ *   projected to NaN, as everywhere in `bcastWith` (R3). A scalar arm lifts to
+ *   its positions, an array arm is indexed at each;
+ * - a position no clause matched is NaN (R4). So is a position whose condition
+ *   cell is absent (NaN — how a real target renders `Missing`): the position is
+ *   CONSUMED, never offered to a later clause, matching the interpreter's
+ *   positioned "condition is absent" error cell (R4′);
+ * - a scalar condition that is neither boolean nor an array fails closed with
+ *   the same message as `_SYS.cond`, so a conditional that is scalar at run
+ *   time behaves exactly like the ternary chain it replaced.
+ */
+function select(...clauses: Array<() => unknown>): unknown {
+  // 1/ The conditions, in clause order.
+  const selectors: Array<true | 'absent' | unknown[]> = [];
+  const armThunks: Array<() => unknown> = [];
+  for (let k = 0; k + 1 < clauses.length; k += 2) {
+    const c = clauses[k]();
+    if (c === false) continue;
+    armThunks.push(clauses[k + 1]);
+    if (c === true) {
+      selectors.push(true);
+      break;
+    }
+    if (Array.isArray(c)) {
+      selectors.push(c);
+      continue;
+    }
+    if (c === undefined || c === null || c !== c) {
+      // A lifted ABSENT condition (NaN — the real-target rendering of
+      // `Missing`, which the interpreter answers with a whole-expression
+      // "condition is absent" error) decides nothing anywhere, and no later
+      // clause may decide what absence left undecided: stop, exactly as a
+      // lifted `true` does.
+      selectors.push('absent');
+      break;
+    }
+    throw new Error('Condition must evaluate to "True" or "False".');
+  }
+
+  // 2/ The common length of the array participants.
+  let n = -1;
+  for (const s of selectors) {
+    if (!Array.isArray(s)) continue;
+    if (n < 0) n = s.length;
+    else if (s.length !== n) return NaN;
+  }
+  if (n < 0) {
+    const last = selectors[selectors.length - 1];
+    if (last !== true) return NaN;
+    return armThunks[armThunks.length - 1]();
+  }
+
+  // 3/ Selection: the first clause that is `true` at each position (`-1`: no
+  // match), and the positions whose condition cell is absent.
+  const selection = new Int32Array(n).fill(-1);
+  const absent = new Uint8Array(n);
+  let undecided = n;
+  for (let k = 0; k < selectors.length && undecided > 0; k++) {
+    const cells = selectors[k];
+    for (let j = 0; j < n; j++) {
+      if (selection[j] >= 0 || absent[j] === 1) continue;
+      const v =
+        cells === true ? true : cells === 'absent' ? undefined : cells[j];
+      if (v === true) {
+        selection[j] = k;
+        undecided -= 1;
+      } else if (v === false) {
+        continue;
+      } else if (v === undefined || v === null || v !== v) {
+        // An ABSENT cell (NaN — how a real target renders `Missing`, and how a
+        // `Missing` symbol lowers through the vars object). Undecidable, and
+        // the position is CONSUMED so no later clause decides it (R4′).
+        absent[j] = 1;
+        undecided -= 1;
+      } else {
+        // Any other cell is not a condition value at all: the interpreter
+        // throws rather than picking a branch (`Which([10,20], …)`), and so
+        // does the scalar guard `_SYS.cond`.
+        throw new Error('Condition must evaluate to "True" or "False".');
+      }
+    }
+  }
+
+  // 4/ Each REACHED arm once, whole (R2), in clause order.
+  const reached = new Set<number>();
+  for (let j = 0; j < n; j++) if (selection[j] >= 0) reached.add(selection[j]);
+  const values: unknown[] = new Array(selectors.length);
+  for (let k = 0; k < selectors.length; k++) {
+    if (!reached.has(k)) continue;
+    const v = armThunks[k]();
+    // A list-valued arm is a length participant too (R3).
+    if (Array.isArray(v) && v.length !== n) return NaN;
+    values[k] = v;
+  }
+
+  // 5/ Assemble, position by position.
+  const out: unknown[] = new Array(n);
+  for (let j = 0; j < n; j++) {
+    if (absent[j] === 1 || selection[j] < 0) {
+      out[j] = NaN;
+      continue;
+    }
+    const v = values[selection[j]];
+    out[j] = Array.isArray(v) ? v[j] : v;
+  }
+  return out;
+}
+
+/**
  * Product dispatch on dimensionality, mirroring the interpreter's
  * `Dot`/`MatrixMultiply`: vector·vector → scalar, matrix·vector → vector,
  * vector·matrix → vector, matrix·matrix → matrix. Real, nested-array
@@ -3036,6 +3273,9 @@ const SYS_HELPERS = {
     if (c === true || c === false) return c;
     throw new Error('Condition must evaluate to "True" or "False".');
   },
+  // Element-wise `Which`/`If` selection over a condition that may be a
+  // collection at run time — see `select` and `compileJSSelection`.
+  select,
   heaviside: (x: number) => (x < 0 ? 0 : x === 0 ? 0.5 : 1),
   // NOTE: the random helpers (`drawNextRandomNumber`, `withRandomSeed`, the
   // `domain*` descriptor builders, `randomPick`/`randomChoice`/
@@ -3722,6 +3962,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // A non-boolean Which/When condition (e.g. NaN) fails closed at run time,
       // matching the interpreter's throw (D6).
       assertBoolean: (code) => `_SYS.cond(${code})`,
+      // Element-wise `Which`/`If` selection over a collection-valued condition.
+      selection: (args, compile) => compileJSSelection(args, compile),
       // Absence capability (§3.F): numeric absence is `NaN`; the object axis is
       // `undefined`. Consumed by `IsMissing`/`Coalesce`/Kleene `Equal` (P3).
       absence: {

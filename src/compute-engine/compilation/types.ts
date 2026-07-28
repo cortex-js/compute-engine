@@ -105,6 +105,27 @@ export interface CompileTarget<Expr = unknown> {
   ) => string;
 
   /**
+   * Lower a `Which`/`If` whose condition may be an indexed collection at run
+   * time to the target's ELEMENT-WISE selection form (`np.select` semantics —
+   * `docs/plans/2026-07-27-elementwise-which-design.md`, R1–R4). The clauses
+   * arrive in `Which` shape (condition, arm, condition, arm, …); an `If` is
+   * normalized to `[cond, then, True, else]` by the caller.
+   *
+   * Returns `null` when every condition is provably scalar: the base compiler
+   * then emits its ordinary ternary chain, byte for byte, so a scalar
+   * conditional is unaffected by the hook's presence. Throws to fail closed
+   * (D6) on a shape the target cannot render.
+   *
+   * Only the JavaScript target implements it (its runtime `_SYS.select`); the
+   * others leave it undefined and keep the fail-closed scalar-condition guard.
+   */
+  selection?: (
+    args: ReadonlyArray<Expr>,
+    compile: (expr: Expr) => TargetSource,
+    target: CompileTarget<Expr>
+  ) => TargetSource | null;
+
+  /**
    * Wrap a compiled `Which`/`When` condition that is **not** provably boolean so
    * that a non-boolean value (notably `NaN`) fails closed at run time, matching
    * the interpreter — which throws `Condition must evaluate to "True" or

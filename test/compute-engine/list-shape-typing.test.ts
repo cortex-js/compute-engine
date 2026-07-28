@@ -77,6 +77,18 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
     expect(boxed.type.toString()).toBe('list<color | number>');
   });
 
+  test('["hot", NaN] mixed literal cells → unshaped union (union-free clause)', () => {
+    // Same clause as `[x,Rgb]`, reached with plain literal cells and no
+    // symbol fold: a mixed string/number list carries NO dimension, so it is
+    // not a tensor. Pinned because a dimensioned `list` type IS the tensor
+    // claim (`isTensor` is exactly `dimensions !== undefined`) — the
+    // dimensionless type here is normative, not an omission.
+    const boxed = ce.box(['List', { str: 'hot' }, NaN]);
+    expect(boxed.type.toString()).toBe('list<number | string>');
+    expect(boxed.type.matches('vector<2>')).toBe(false);
+    expect(boxed.type.matches('list<number | string^2>')).toBe(false);
+  });
+
   test('union element with a numeric arm still admits to numeric ops (COULD-semantics)', () => {
     // Pins the union-arm clause of `couldBeNumericElement`
     // (collection-utils.ts): `Add` over a list whose element type is a

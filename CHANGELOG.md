@@ -73,6 +73,38 @@
   projects to `NaN` (the real-target rendering of the interpreter's
   `incompatible-dimensions`). JavaScript target only.
 
+- **Element-wise `Which`/`If` now compiles (JavaScript target).** The
+  interpreter's new selection semantics (see New Features) previously had no
+  compiled counterpart — a piecewise over list-valued conditions failed
+  closed at compile time. The JS target now lowers it to a runtime selection
+  helper (`_SYS.select`) that mirrors the ratified semantics exactly:
+  first-match selection per element, each condition evaluated at most once
+  (whole, in clause order), each arm evaluated at most once, whole, and only
+  if selection reaches it somewhere; scalar conditions and arms lift,
+  list-valued arms index at the selected position; a no-match position is
+  `NaN`, and a length mismatch projects to `NaN` (the real-target rendering
+  of `incompatible-dimensions`, as elsewhere). When every condition is
+  provably scalar the existing ternary-chain codegen is emitted unchanged.
+  Complex-valued arms under a collection condition decline (fail closed), as
+  do tuple and non-indexed-collection (set/dictionary/string) participants.
+  Other targets are unchanged.
+
+- **Compiled comparisons and connectives are now broadcast-aware
+  (JavaScript target).** The `<`/`<=`/`>`/`>=`/`And`/`Or`/`Not` handlers
+  used to decline to compile when an operand *might* be a collection at run
+  time — including a call to a helper declared with a wide signature
+  (`q: (unknown) -> unknown`), so `q(x) < y` refused even though the value
+  was scalar. They now compile to a runtime broadcast dispatch
+  (`_SYS.bcast`): scalar operands take the scalar path, a collection operand
+  broadcasts element-wise with interpreter parity (`q(L) < 5` →
+  `[true, true, false]`). Chained orderings (`a < b < c`) lower as one
+  element-wise conjunction, matching interpretation. Chained (n-ary)
+  `Equal`/`NotEqual` deliberately keeps declining: the interpreter's n-ary
+  form switches between element-wise and whole-collection equality depending
+  on how many operands are collections at run time, and no pairwise
+  conjunction reproduces that — the reasoning is recorded at the decline
+  site.
+
 - **`RandomChoice` narrows its element type like `Random`.** The result type
   now derives from the same domain narrowing as the rest of the random
   family: `RandomChoice(Interval(0,1), 3)` types `vector<finite_real^3>`

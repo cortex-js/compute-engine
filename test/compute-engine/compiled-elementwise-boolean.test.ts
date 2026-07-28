@@ -23,12 +23,15 @@
  * post-scanning the result: an empty or mismatched position yields NaN without
  * poisoning its siblings.
  *
- * The soundness boundary is NOT the static type: `q(L)` with `q: t ↦ n·t+1`
- * types `list<unknown>`, yet the compiled callee emits the scalar body and
- * returns NaN on an array. Arithmetic tolerates that (NaN stays NaN); a
- * comparison would turn it into a plausible `false`. So an operand must
- * provably COMPILE to an array — concrete collection, list-typed symbol, or a
- * built-in broadcastable head over one of those.
+ * An operand that provably COMPILES to an array — concrete collection,
+ * list-typed symbol, or a built-in broadcastable head over one of those —
+ * takes the tight `tryCompileBroadcast` lowering. Everything else whose shape
+ * is only knowable at run time (a user-function application `q(L)`, a
+ * `broadcastable<T>` node) used to fail closed and now goes through the same
+ * `_SYS.bcast` substrate from `compileJSCollectionBoolean` (relaxed
+ * 2026-07-27) — see "shapes relaxed to a runtime dispatch" below. A TUPLE
+ * operand and a non-indexed collection still fail closed: neither has a
+ * faithful element-wise dispatch.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -360,9 +363,16 @@ describe('the shapes that must keep failing closed', () => {
     expect(compile(engine.parse('p < 3'))?.success).toBe(false);
   });
 
-  // The operand types as a list but does NOT compile to one: a user function
-  // compiles its body as scalar code, so `q(L)` returns NaN at run time and a
-  // comparison would silently answer a plausible boolean.
+});
+
+/**
+ * Shapes that used to fail closed and now dispatch at RUN time (relaxed
+ * 2026-07-27, Tycho item 86). Both rest on `_SYS.bcast` seeing the actual
+ * value: an operand whose array-ness is unprovable at compile time is simply
+ * passed to it, and it applies the scalar closure directly when the value
+ * turns out not to be an array.
+ */
+describe('shapes relaxed to a runtime dispatch', () => {
   function make(): ComputeEngine {
     const engine = new ComputeEngine();
     engine.declare('n', 'number');
@@ -373,19 +383,44 @@ describe('the shapes that must keep failing closed', () => {
   }
 
   test('a user-function application over a list argument', () => {
+    // `q(L)` types as a list but is not PROVABLY an array at compile time (a
+    // user function's body compiles as scalar code). The application site now
+    // dispatches through `_SYS.bcastFn`, so it IS an array at run time, and
+    // the comparison zips against it.
     const engine = make();
-    expect(compile(engine.parse('q(L)<y'))?.success).toBe(false);
+    engine.assign('n', engine.box(2 as any));
+    engine.assign('L', engine.parse('[1, 2, 3]').evaluate());
+    const r = compile(engine.parse('q(L)<6'), { fallback: false })!;
+    expect(r.success).toBe(true);
+    // q(L) = [3, 5, 7]
+    expect(r.run!()).toEqual([true, true, false]);
+    expect(r.run!()).toEqual(interpreted(engine.parse('q(L)<6')));
     // ...including when mixed with a genuinely array-valued operand.
-    expect(compile(engine.parse('q(L)<L'))?.success).toBe(false);
+    const mixed = compile(engine.parse('q(L)<L'), { fallback: false })!;
+    expect(mixed.success).toBe(true);
+    expect(mixed.run!()).toEqual(interpreted(engine.parse('q(L)<L')));
   });
 
   test('a CHAINED ordering over a collection', () => {
-    // `a < b < c` is a pairwise `&&` conjunction, sound only over scalars.
+    // `a < b < c` lowers to ONE closure over all three operands, so each is
+    // evaluated once and the conjunction happens per POSITION.
+    const engine = new ComputeEngine();
+    engine.assign('xs', engine.parse('[1, 7, 3]').evaluate());
+    const expr = engine.box(['Less', 0, 'xs', 5] as any);
+    const r = compile(expr, { fallback: false })!;
+    expect(r.success).toBe(true);
+    expect(r.run!()).toEqual([true, false, true]);
+    expect(r.run!()).toEqual(interpreted(expr));
+  });
+
+  test('a chained ordering over a list-typed SYMBOL binds at run time', () => {
     const engine = new ComputeEngine();
     engine.declare('xs', 'list<real>');
-    expect(compile(engine.box(['Less', 0, 'xs', 5] as any))?.success).toBe(
-      false
-    );
+    const r = compile(engine.box(['Less', 0, 'xs', 5] as any), {
+      fallback: false,
+    })!;
+    expect(r.success).toBe(true);
+    expect(r.run!({ xs: [1, 7, 3] })).toEqual([true, false, true]);
   });
 });
 

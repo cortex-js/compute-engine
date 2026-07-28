@@ -174,11 +174,13 @@ for conditions); an eager zip of materialized lists measured ~2 ms per 900
 elements. Perf acceptance: the witness (3 clauses × 900) evaluates in ≤5 ms
 on the reference machine, comfortably inside Tycho's 50 ms budget.
 
-**Out (demand-gated follow-ups, record in ROADMAP):**
-- Compiled lowering (`_SYS` selection helper). Tycho's firing path is
-  interpreted, so the interpreter alone closes item 102; a compiled form
-  joins the boolean-head-guard revisit already on the roadmap (item-86
-  adjacency).
+**Out (follow-ups, record in ROADMAP):**
+- Compiled lowering (`_SYS` selection helper). The item-102 *firing* path
+  is interpreted, so the interpreter closes that witness — but Tycho
+  compiles drawing paths (JS/IJS/GLSL), so a piecewise-over-lists in a
+  plotted expression still fails closed at compile; the compiled form is a
+  real follow-up, batched with the boolean-head-guard revisit (item-86
+  adjacency), not idle.
 - `When` (a guard *carrier* with threading algebra, not a selector — its
   semantics are unrelated).
 - Any change to scalar `Which`/`If` behavior, including the scalar no-match

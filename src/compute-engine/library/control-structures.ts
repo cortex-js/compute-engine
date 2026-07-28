@@ -909,9 +909,20 @@ function elementwiseResultType(
   const elements = hasDefault
     ? widen(...armTypes)
     : widen(...armTypes, 'number');
-  return length === undefined
-    ? { kind: 'list', elements }
-    : { kind: 'list', elements, dimensions: [length] };
+  // The union-free clause (tensor-unification design §D3 rule 2): a
+  // dimensioned `list` type IS the tensor claim (`isTensor` is exactly
+  // `dimensions !== undefined`), and a heterogeneous cell population never
+  // qualifies — `shapedListType` declines the shape for it. Claiming a
+  // dimension here for a union element type would promise a shape no
+  // evaluated value can ever carry, breaking the value-vs-declared
+  // assignability invariant (`evaluated.type.matches(declared)`) for the
+  // no-default mixed case, whose no-match cell joins in `number`.
+  const shaped =
+    length !== undefined &&
+    (typeof elements === 'string' || elements.kind !== 'union');
+  return shaped
+    ? { kind: 'list', elements, dimensions: [length!] }
+    : { kind: 'list', elements };
 }
 
 function evaluateWhich(

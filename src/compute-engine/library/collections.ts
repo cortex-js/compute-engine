@@ -40,6 +40,7 @@ import {
   run,
 } from '../../common/interruptible.js';
 import { mapAutoCompileRunner } from './map-auto-compile.js';
+import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
 import type {
   Expression,
@@ -1915,6 +1916,55 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
 
+        // Broadcast-chain lowering (see `map-lowering.ts`): a stack of
+        // broadcast-shaped lazy `Map`s is served from ONE loop that applies
+        // each level's operator directly, bypassing the per-level
+        // `makeLambda` invoke. Purely structural, memoized per instance; a
+        // `Map` that doesn't match falls through to the general path below,
+        // byte-identically.
+        const spine = lowerMapSpine(expr);
+        if (spine) {
+          const ce = expr.engine;
+          // A level that fails yields THAT level's position-preserving marker
+          // as an ordinary element value, which flows through the remaining
+          // levels — exactly what the nested general iterators do.
+          const run = makeSpineRunner(ce, spine, (levelExpr) =>
+            absenceMarker(ce, levelExpr)
+          );
+          if (spine.bases.length > 1) {
+            // Variadic bottom level: advance every base lockstep, ending as
+            // soon as any source ends (mirrors the zipWith form below).
+            const sources = spine.bases.map((c) => c.each());
+            return {
+              next: () => {
+                const items: Expression[] = [];
+                for (const source of sources) {
+                  const { value, done } = source.next();
+                  if (done || value === undefined)
+                    return { value: undefined, done: true };
+                  items.push(value);
+                }
+                // A level that produced no value is a COMPUTATION FAILURE,
+                // not an erasure: the runner already substituted the marker,
+                // so this fallback is unreachable (kept for type totality).
+                const v = run(items) ?? absenceMarker(ce, expr);
+                return { value: v, done: false };
+              },
+            };
+          }
+          const source = spine.bases[0].each();
+          return {
+            next: () => {
+              const { value, done } = source.next();
+              if (done) return { value: undefined, done: true };
+              // See above: a failed mapping is the marker, not an erasure.
+              // The runner substitutes it; this fallback is unreachable.
+              const v = run([value]) ?? absenceMarker(ce, expr);
+              return { value: v, done: false };
+            },
+          };
+        }
+
         // Auto-compile trigger (see `map-auto-compile.ts`): when the element
         // lambda carries the numeric `Block(N(body))` marker and the engine
         // is at machine precision, elements are served by a cached compiled
@@ -1976,6 +2026,41 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       at: (expr: Expression, index: number | string) => {
         if (!isFunction(expr)) return undefined;
         if (typeof index !== 'number') return undefined;
+
+        // Random access re-derives the element through the memoized lowered
+        // chain (R5). Each `at()` remains its own auto-compile micro-drain.
+        const spine = lowerMapSpine(expr);
+        if (spine) {
+          const ce = expr.engine;
+          const levels = spine.levels;
+          // The general path recurses through each level's own `at` handler,
+          // so the composite gate is the CONJUNCTION of every level's gate.
+          // Apply them outermost-in, exactly as the recursion would (only the
+          // innermost level can be variadic).
+          for (let i = levels.length - 1; i >= 1; i--) {
+            if (mapSource(levels[i].sources[0]).isIndexedCollection === false)
+              return undefined;
+            if (!Number.isFinite(index) || index === 0) return undefined;
+          }
+          let items: Expression[];
+          if (levels[0].arity > 1) {
+            if (index < 1) return undefined;
+            const xs = spine.bases.map((c) => mapSource(c).at(index));
+            if (xs.some((x) => x === undefined)) return undefined;
+            items = xs as Expression[];
+          } else {
+            const source = mapSource(spine.bases[0]);
+            if (source.isIndexedCollection === false) return undefined;
+            if (!Number.isFinite(index) || index === 0) return undefined;
+            const item = source.at(index);
+            if (!item) return undefined;
+            items = [item];
+          }
+          // A failed level short-circuits the whole access to `undefined` —
+          // the general `at` path returns `undefined` (never a marker) as
+          // soon as one level's application declines.
+          return makeSpineRunner(ce, spine, () => undefined)(items);
+        }
 
         if (expr.nops > 2) {
           // Multi-collection (zipWith): f of each source's element at `index`;

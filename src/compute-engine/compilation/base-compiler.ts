@@ -935,6 +935,16 @@ export class BaseCompiler {
 
     if (h === 'If') {
       if (args.length !== 3) throw new Error('If: wrong number of arguments');
+      // A condition that may be an indexed collection at run time selects
+      // ELEMENT-WISE: `If(c, t, f)` is the two-clause `Which(c, t, True, f)`
+      // (see the `Which` branch below and `target.selection`). `null` — every
+      // condition provably scalar — keeps the ternary below unchanged.
+      const selection = target.selection?.(
+        [args[0], args[1], engine.True, args[2]],
+        (expr) => BaseCompiler.compileValueOperand(expr, target),
+        target
+      );
+      if (selection !== null && selection !== undefined) return selection;
       BaseCompiler.assertScalarCondition(args[0]);
       const fn = target.functions?.(h);
       if (fn) {
@@ -983,6 +993,17 @@ export class BaseCompiler {
           .map((x) => BaseCompiler.compile(x, target))
           .join(', ')})`;
       }
+      // A condition that may be an indexed collection at run time selects
+      // ELEMENT-WISE (`np.select`, R1–R4 of
+      // `docs/plans/2026-07-27-elementwise-which-design.md`): the target lowers
+      // the whole clause list to its own selection helper. `null` — every
+      // condition provably scalar — keeps the ternary chain below unchanged.
+      const selection = target.selection?.(
+        args,
+        (expr) => BaseCompiler.compileValueOperand(expr, target),
+        target
+      );
+      if (selection !== null && selection !== undefined) return selection;
       // Compile to chained ternaries. When arms mix real and complex values,
       // coerce every arm — including the no-match NaN default — to the complex
       // convention (Tycho item 60: a constant base-case arm in a
@@ -1353,26 +1374,28 @@ export class BaseCompiler {
     //    `_SYS.eq`/`_SYS.neq` dispatch, which already handles the list-vs-
     //    scalar element-wise case; broadcasting here would replace that scalar
     //    with a list.
-    //  - a CHAINED ordering (`a < b < c`) is a pairwise `&&` conjunction, only
-    //    sound over scalar booleans. Keep it failing closed (D6).
+    //  - a CHAINED ordering (`a < b < c`) needs ONE closure over all three
+    //    operands (`(a<b) && (b<c)`), not this method's per-head closure —
+    //    `compileJSCollectionBoolean` emits it.
     //
     // Heads with no JavaScript codegen (`Xor`, `Nand`, `Implies`, …) decline
     // below at the `target.functions` lookup, so they are unaffected.
     if (h === 'Equal' || h === 'NotEqual') return null;
     if (isRelationalOperator(h) && args.length > 2) return null;
 
-    // For the boolean heads only, every collection-ish operand must PROVABLY
-    // compile to a JS array. A list TYPE is not enough: `q(L)` with
-    // `q: t ↦ n·t+1` types `list<unknown>` (the type system applies the
-    // broadcast lift) yet its compiled callee emits the SCALAR body `n*t+1`,
-    // which JS evaluates to NaN on an array — a pre-existing divergence
-    // (compiled NaN vs interpreted `[5,9,13]`), since a user function does not
-    // broadcast when compiled.
+    // For the boolean heads only, this fast path requires every collection-ish
+    // operand to PROVABLY compile to a JS array. This is a ROUTING choice, not
+    // a soundness gate: an operand whose array-ness is unprovable — a user
+    // function application `q(L)`, a `broadcastable<T>` node — falls through to
+    // `compileJSCollectionBoolean`, which dispatches on the RUNTIME shape
+    // through `_SYS.bcast` (relaxed 2026-07-27, Tycho item 86). Both lowerings
+    // agree; this one emits the tighter code and keeps the tuple / whole-
+    // collection carve-outs above in one place.
     //
-    // Arithmetic tolerates that: NaN is the inert projection and stays NaN
-    // through `+`/`·`. A COMPARISON does not — `NaN < 10` is an ordinary
-    // `false`, so the wrong answer stops looking wrong (`q(L) < y` would answer
-    // a scalar `false` where the interpreter answers `[True,True,False]`).
+    // (Historical note: this used to be a fail-closed gate, because a compiled
+    // `q(L)` applied SCALAR callee code to an array and returned NaN, which a
+    // comparison then turned into a plausible `false`. The application site now
+    // dispatches through `_SYS.bcastFn`, so `q(L)` is an array at run time.)
     //
     // Array-ness is provable for a concrete collection, a list-typed SYMBOL
     // (a parameter, which the caller supplies as a JS array), and an
@@ -1408,10 +1431,12 @@ export class BaseCompiler {
       };
       // Nothing provably array: ordinary scalar code, or an operand whose
       // array-ness is unprovable — either way, leave it to the scalar /
-      // fail-closed path.
+      // runtime-dispatch path.
       if (!args.some(compilesToArray)) return null;
       // A collection-ish operand alongside a provable array (`q(L) < M`) would
-      // be broadcast against as if it were a scalar. Fail closed.
+      // be broadcast against as if it were a scalar here. Defer to
+      // `compileJSCollectionBoolean`, whose `_SYS.bcast` call passes BOTH
+      // operands and so zips them at run time.
       if (
         args.some(
           (a) =>
@@ -1593,8 +1618,11 @@ export class BaseCompiler {
    * cannot distinguish is a NaN that stands for an ERROR rather than a numeric
    * NaN; separating those needs a sentinel carried through nested broadcasts,
    * recorded as residue in ROADMAP.md rather than papered over here.
+   *
+   * Also used by the JavaScript target's own connective lowering
+   * (`compileJSCollectionBoolean`), which builds the same closure by hand.
    */
-  private static guardConnectiveAbsence(
+  static guardConnectiveAbsence(
     h: string,
     params: ReadonlyArray<string>,
     body: string

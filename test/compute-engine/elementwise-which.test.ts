@@ -745,6 +745,41 @@ describe('type handler', () => {
     expect(v.type.matches(e.type)).toBe(true);
   });
 
+  test('NO default + non-numeric arm: the union element type drops the shape', () => {
+    const ce = engine();
+    // Joining in the NaN marker over a `string` arm yields a UNION element
+    // type. A dimensioned `list` type IS the tensor claim (`isTensor` is
+    // exactly `dimensions !== undefined`) and the union-free clause
+    // (tensor-unification design §D3 rule 2) never claims a shape for a
+    // heterogeneous cell population — so the declared type must not either,
+    // or it promises a shape the evaluated value can never carry.
+    const e = ce.box(['Which', ['List', 'True', 'False'], { str: 'hot' }]);
+    expect(e.type.toString()).toBe('list<number | string>');
+    expect(e.type.matches(parseType('list<number | string^2>'))).toBe(false);
+
+    const v = e.evaluate();
+    expect(cells(v)).toEqual(['"hot"', 'NaN']);
+    expect(v.type.toString()).toBe('list<number | string>');
+    // The invariant this case used to break.
+    expect(v.type.matches(e.type)).toBe(true);
+  });
+
+  test('WITH a default clause the string arms stay union-free and keep the shape', () => {
+    const ce = engine();
+    // Contrast with the case above: a default makes the NaN cell
+    // unreachable, so the element type is the union-free `string` and the
+    // shape claim survives.
+    const e = ce.box([
+      'Which',
+      ['List', 'True', 'False'],
+      { str: 'hot' },
+      'True',
+      { str: 'cold' },
+    ]);
+    expect(e.type.toString()).toBe('list<string^2>');
+    expect(e.evaluate().type.matches(e.type)).toBe(true);
+  });
+
   test('If without an else branch widens; with one it does not', () => {
     const ce = engine();
     const noElse = ce.box(['If', ['List', 'True', 'False'], 1]);

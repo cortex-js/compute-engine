@@ -14,8 +14,12 @@
  * the function body maps scalar parameters to a scalar result (a whitelist:
  * parameters, scalar-typed captured symbols, `broadcastable`-operator
  * applications, nested user functions — recursion declines via a visited
- * set). Everything else keeps failing closed, including the element-wise
- * broadcast lowering, which remains a separate ROADMAP item.
+ * set). What the look-through buys is the TIGHT scalar lowering (bare infix,
+ * no call): since 2026-07-27 an application it declines no longer fails
+ * closed — it goes through the `_SYS.bcast` runtime dispatch instead, which
+ * is correct whatever shape the value turns out to have. The tests below pin
+ * both halves: the look-through cases emit scalar infix, the declined ones
+ * still compile and agree with the interpreter.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -33,12 +37,18 @@ function make(): ComputeEngine {
 function compileJS(
   ce: ComputeEngine,
   latex: string
-): { ok: true; run: (args?: object) => unknown } | { ok: false; error: string } {
+):
+  | { ok: true; code: string; run: (args?: object) => unknown }
+  | { ok: false; error: string } {
   const jt = (ce as any).getCompilationTarget('javascript');
   const expr = ce.parse(latex) as BoxedExpression;
   try {
     const r = jt.compile(expr);
-    return { ok: true, run: (args?: object) => (r.run ? r.run(args) : r(args)) };
+    return {
+      ok: true,
+      code: r.code ?? '',
+      run: (args?: object) => (r.run ? r.run(args) : r(args)),
+    };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -54,10 +64,16 @@ describe('item 86 — scalar look-through for compiled comparisons/connectives',
     }
   });
 
-  test('q(L) < y still fails closed (a collection-ish argument)', () => {
+  test('q(L) < y dispatches at run time (was fail-closed)', () => {
+    // The look-through declines (a collection-ish argument), so this is NOT
+    // the scalar infix lowering — it is the `_SYS.bcast` runtime dispatch,
+    // which zips the array `q(L)` against the scalar `y`.
     const r = compileJS(make(), 'q(L)<y');
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/Fail closed/);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.code).toContain('_SYS.bcast');
+      expect(r.run({ L: [1, 2, 3], y: 6, n: 2 })).toEqual([true, true, false]);
+    }
   });
 
   test('connectives: And over scalar look-through conjuncts compiles', () => {
@@ -69,9 +85,25 @@ describe('item 86 — scalar look-through for compiled comparisons/connectives',
     if (r.ok) expect(r.run({ x: 2, y: 10, n: 4 })).toBe(true);
   });
 
-  test('connectives: And with a list-argument conjunct still fails closed', () => {
+  test('connectives: And with a list-argument conjunct broadcasts', () => {
+    // The conjunction is element-wise over the list conjunct: a dominant
+    // `false` scalar absorbs per POSITION, so the result stays a list — which
+    // is what the interpreter answers too (`And(False, [T,F,T])` is
+    // `[False,False,False]`, not the scalar `False`).
     const r = compileJS(make(), 'q(L)<y \\wedge x>0');
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.run({ L: [1, 2, 3], y: 6, n: 2, x: 1 })).toEqual([
+        true,
+        true,
+        false,
+      ]);
+      expect(r.run({ L: [1, 2, 3], y: 6, n: 2, x: -1 })).toEqual([
+        false,
+        false,
+        false,
+      ]);
+    }
   });
 
   test('a nested user-function body looks through recursively', () => {
@@ -83,25 +115,45 @@ describe('item 86 — scalar look-through for compiled comparisons/connectives',
     if (r.ok) expect(r.run({ x: 2, y: 20, n: 4 })).toBe(true); // 9+2 = 11 < 20
   });
 
-  test('a body that builds a collection declines (List literal)', () => {
+  test('a body that builds a collection declines the look-through', () => {
+    // `g: t ↦ [t, t]` returns an ARRAY from a scalar argument, so the
+    // look-through must decline — and the runtime dispatch then broadcasts
+    // over the two cells, matching interpretation.
     const ce = make();
     ce.declare('g', { signature: '(unknown) -> unknown' });
     ce.assign('g', ce.parse('t \\mapsto \\lbrack t, t\\rbrack'));
-    expect(compileJS(ce, 'g(x)<y').ok).toBe(false);
+    const r = compileJS(ce, 'g(x)<y');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.code).toContain('_SYS.bcast');
+      expect(r.run({ x: 2, y: 10 })).toEqual([true, true]);
+    }
   });
 
-  test('a body over a captured collection symbol declines', () => {
+  test('a body over a captured collection symbol declines the look-through', () => {
     const ce = make();
     ce.declare('h', { signature: '(unknown) -> unknown' });
     ce.assign('h', ce.box(['Function', ['Add', ['At', 'L', 't'], 1], 't']));
-    expect(compileJS(ce, 'h(x)<y').ok).toBe(false);
+    const r = compileJS(ce, 'h(x)<y');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.code).toContain('_SYS.bcast');
+      // h(2) = L[2] + 1 = 5
+      expect(r.run({ x: 2, y: 10, L: [3, 4, 5] })).toBe(true);
+    }
   });
 
-  test('a self-recursive function declines (visited guard)', () => {
+  test('a self-recursive function declines the look-through (visited guard)', () => {
+    // `f: t ↦ f(t) + 1` does not terminate in EITHER engine — the interpreter
+    // hits its recursion limit, the compiled artifact a catchable
+    // `RangeError`. What is pinned here is that the look-through declines
+    // (no scalar infix lowering), not that the call is refused.
     const ce = make();
     ce.declare('f', { signature: '(unknown) -> unknown' });
     ce.assign('f', ce.box(['Function', ['Add', ['f', 't'], 1], 't']));
-    expect(compileJS(ce, 'f(x)<y').ok).toBe(false);
+    const r = compileJS(ce, 'f(x)<y');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.code).toContain('_SYS.bcast');
   });
 
   test('the Desmos filter form now broadcasts element-wise', () => {
