@@ -432,11 +432,52 @@ without redefinition.
   **`entropy`** unless a virtual-clock mechanism (`WithClock`?) ever gives
   it its own consumer, the same way `random` earned its label.
 
-Rejected as effects: **`error`/partiality** (errors are values in CE, fully
-expressible in return types); **`diverge`** (handled dynamically,
+Rejected as effects: **`diverge`/nontermination** (handled dynamically,
 `TIMEOUT-MODEL.md`; not inferable; no consumer); **GPU/target
-compilability** (a capability of an operator, not an effect of applying
-it).
+compilability** (a capability of an operator, not an effect of applying it);
+and **`error`/partiality** — expanded below, because the reasoning is
+load-bearing for planned Cortex ergonomics.
+
+### Rejected: `error`/partiality — failure is a value, and narrowing needs it that way
+
+1. **An effect describes what happens *while* computing; a failure is the
+   result.** Effect systems track errors where errors travel a channel
+   *separate* from return values — exceptions, i.e. non-local control flow
+   (Koka's `exc`, Swift's `throws`, Java's checked exceptions annotate the
+   bypass path). CE has no bypass channel: an `Error` expression flows
+   through the ordinary compositional value path. `->{error}` would track a
+   channel that does not exist.
+2. **The type lattice already represents it — strictly better.** `error`
+   and `nothing` are primitive types, and the lattice has unions and
+   negations. `(string) -> real | error` is opt-in, position-precise, and
+   distinguishes failure kinds (`real | nothing | error` separates
+   "failed" from "absent"). An effect is one bit on the arrow: it cannot
+   say which position, which kind, or participate in `match`.
+3. **The admission test fails on every prong.** A may-fail function is
+   still *pure* — same input, same `Error` value: deterministic, cacheable,
+   safely re-evaluable. No consumer (caching, frame gate, compile
+   fail-closed) distinguishes "may error" from "total"; compile targets
+   handle `NaN`/error as data.
+4. **The checked-exceptions failure mode.** In a CAS nearly every operator
+   is partial somewhere (`Divide`, `Sqrt` over reals, out-of-range,
+   non-convergence). An honest `{error}` label would infect essentially
+   every arrow (carrying no information) or demand discharge ceremony at
+   every call — the ergonomic collapse that made Java's checked exceptions
+   the cautionary tale. Union return types stay local to the boundaries
+   where partiality is part of the contract.
+
+The forward-looking reason is the strongest: failure-handling ergonomics
+are **narrowing** operations, and only the value representation narrows.
+The planned Cortex refutable binding (`if let x = parse(s) { … } else
+{ … }` — see the "Refutable binding" item in `roadmap/cortex/README.md`)
+binds `x` at type `typeOf(scrutinee) & !error` via the existing
+`NegationType`, and its `else` arm knows the scrutinee is `error` — all
+expressible today because failure lives in the lattice. An effect bit has
+nothing to narrow; representing errors as effects would foreclose exactly
+these ergonomics. Corollary ruling: Rust/Swift-style `?` propagation is
+declined — it requires early-return (non-local control flow), which
+Cortex's expression-`Block` model deliberately lacks; deep chains are
+`match`'s job.
 
 ## What does not change
 

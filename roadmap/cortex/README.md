@@ -202,6 +202,27 @@ bug — decide when Tycho demand appears:
   `km` is a free symbol. Units are expressible today via `$…$` LaTeX islands
   (`$30\,\mathrm{km/h}$`) or `Quantity(30, "km/h")`. A first-class unit literal
   (e.g. `30 `km/h``?) needs a grammar decision.
+- **Refutable binding — `if let` / `while let` (M — design sketched
+  2026-07-29, gated on `Match` typed patterns).** The refutable counterpart
+  of the destructuring `let` (which `declarations.md` rules irrefutable in
+  form, pointing at `match` for conditional destructuring):
+  `if let x = parse(s) { … } else { … }`, tuple patterns included. Design
+  (from the effects-model discussion, see the "Rejected: `error`/partiality"
+  section of `docs/EFFECTS-MODEL.md`): pure parser sugar lowering onto
+  `Match`/`MatchCase` — no new engine primitive — with the bound symbol
+  narrowed to `typeOf(scrutinee) & !error` via the existing `NegationType`.
+  **Concrete engine prerequisite: a type-refutable `Match` pattern** (typed
+  pattern `x: T`, incl. negation types) — today's `_x` wildcard matches
+  anything, including `Error` values; a typed pattern is independently
+  useful in plain `match`. Open ruling before implementing: the failure
+  family — `error` alone, or `error | nothing` (Swift-`nil` intuition says
+  include `nothing`, but `Nothing` is the engine's *erasure* marker,
+  position-preserving only as `Missing`/`NaN`, so the scrutinee/lowering
+  interaction with erasure must be specified and pinned by a test).
+  `while let` and a `guard`-style `let x = e else { … }` are the same sugar
+  at different lowerings. **Declined**: Rust/Swift `?` propagation —
+  requires early-return (non-local control flow), which the
+  expression-`Block` model deliberately lacks.
 - **Block-expression closure bodies — `do { … }` RATIFIED 2026-07-11 (M).**
   `{…}` in expression position stays a set literal; the block-in-expression
   form is an explicit `do { … }` (the keyword is already reserved): a
