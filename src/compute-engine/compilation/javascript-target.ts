@@ -120,6 +120,7 @@ import type {
   CompilationResult,
   CompiledRunner,
   ComplexResult,
+  OperandCompiler,
   TargetSource,
 } from './types.js';
 
@@ -273,8 +274,14 @@ const JS_ORDERING_OPERATORS = {
 function compileJSCollectionBoolean(
   kind: string,
   args: ReadonlyArray<Expression>,
-  compile: (e: Expression) => string
+  compile: OperandCompiler<Expression>,
+  target: CompileTarget<Expression>
 ): string {
+  // Operand indices are threaded through every position (`OperandCompiler`):
+  // `And`/`Or` operands after the first, and the comparisons of a chained
+  // relation, are the shared inventory's conditionally-evaluated positions, so
+  // the CSE pass must push the region harvest opened for them. A position that
+  // opened no region compiles exactly as before.
   // SCALAR operands still lower normally. This handler is also reached from
   // INSIDE the `_SYS.bcast` closure that `BaseCompiler.tryCompileBroadcast`
   // emits for a provable array operand (`Not([True, False])` becomes
@@ -288,16 +295,16 @@ function compileJSCollectionBoolean(
     if (kind === 'Not') {
       if (args.length !== 1)
         throw new Error(`Not: expected exactly one argument`);
-      return `!(${compile(args[0])})`;
+      return `!(${compile(args[0], 0)})`;
     }
     if (kind === 'And' || kind === 'Or') {
       const op = kind === 'And' ? '&&' : '||';
-      return `(${args.map((a) => `(${compile(a)})`).join(` ${op} `)})`;
+      return `(${args.map((a, i) => `(${compile(a, i)})`).join(` ${op} `)})`;
     }
     if (args.length === 2) {
       const op =
         JS_ORDERING_OPERATORS[kind as keyof typeof JS_ORDERING_OPERATORS];
-      return `((${compile(args[0])}) ${op} (${compile(args[1])}))`;
+      return `((${compile(args[0], 0)}) ${op} (${compile(args[1], 1)}))`;
     }
     // A chained scalar comparison reaches the infix path in `BaseCompiler`,
     // which binds the shared middle operands to temporaries; there is nothing
@@ -309,13 +316,13 @@ function compileJSCollectionBoolean(
     // (`(a < b) && (b < c)`), which also evaluates each operand exactly once —
     // the `bindExpr` temporaries the scalar chained path needs are unnecessary
     // here, since every operand is already an argument of the call.
-    const params = args.map(() => BaseCompiler.tempVar());
+    const params = args.map(() => BaseCompiler.tempVar(target));
     const body = BaseCompiler.guardConnectiveAbsence(
       kind,
       params,
       compileScalarBooleanBody(kind, params)
     );
-    const operands = args.map((a) => `(${compile(a)})`).join(', ');
+    const operands = args.map((a, i) => `(${compile(a, i)})`).join(', ');
     return `_SYS.bcast((${params.join(', ')}) => ${body}, ${operands})`;
   }
   throw new Error(
@@ -353,7 +360,7 @@ function compileJSCollectionBoolean(
  */
 function compileJSSelection(
   args: ReadonlyArray<Expression>,
-  compile: (e: Expression) => string
+  compile: OperandCompiler<Expression>
 ): string | null {
   const conds = args.filter((_x, i) => i % 2 === 0);
   const collectionish = (a: Expression): boolean =>
@@ -368,7 +375,13 @@ function compileJSSelection(
         `branch — a compiled complex value is a \`{ re, im }\` object, which ` +
         `has no cell convention inside a selection array. Fail closed (D6).`
     );
-  return `_SYS.select(${args.map((x) => `() => (${compile(x)})`).join(', ')})`;
+  // Every clause is a thunk the runtime helper owns the evaluation of, so each
+  // position after the first condition is a conditionally-evaluated operand:
+  // pass its index, and the CSE pass pushes the matching region instance
+  // (`OperandCompiler`, design §5.1).
+  return `_SYS.select(${args
+    .map((x, i) => `() => (${compile(x, i)})`)
+    .join(', ')})`;
 }
 
 /**
@@ -619,16 +632,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // infix in `BaseCompiler`. These handlers are reached ONLY when that path
   // declines — i.e. when an operand may be a collection at run time — and
   // they fail closed, because the JS operators do not broadcast element-wise.
-  Less: (args, compile) => compileJSCollectionBoolean('Less', args, compile),
-  LessEqual: (args, compile) =>
-    compileJSCollectionBoolean('LessEqual', args, compile),
-  Greater: (args, compile) =>
-    compileJSCollectionBoolean('Greater', args, compile),
-  GreaterEqual: (args, compile) =>
-    compileJSCollectionBoolean('GreaterEqual', args, compile),
-  And: (args, compile) => compileJSCollectionBoolean('And', args, compile),
-  Or: (args, compile) => compileJSCollectionBoolean('Or', args, compile),
-  Not: (args, compile) => compileJSCollectionBoolean('Not', args, compile),
+  Less: (args, compile, target) =>
+    compileJSCollectionBoolean('Less', args, compile, target),
+  LessEqual: (args, compile, target) =>
+    compileJSCollectionBoolean('LessEqual', args, compile, target),
+  Greater: (args, compile, target) =>
+    compileJSCollectionBoolean('Greater', args, compile, target),
+  GreaterEqual: (args, compile, target) =>
+    compileJSCollectionBoolean('GreaterEqual', args, compile, target),
+  And: (args, compile, target) =>
+    compileJSCollectionBoolean('And', args, compile, target),
+  Or: (args, compile, target) =>
+    compileJSCollectionBoolean('Or', args, compile, target),
+  Not: (args, compile, target) =>
+    compileJSCollectionBoolean('Not', args, compile, target),
   // Note: `Abs` of a fixed-arity point never reaches this handler — the
   // shared compiler rewrites `Abs(Tuple)` → `Norm` (base-compiler.ts) so the
   // point compiles through the `Norm` codegen below (Tycho item 74).
@@ -638,7 +655,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isNonNegative(args[0])) return compile(args[0]);
     return `Math.abs(${compile(args[0])})`;
   },
-  Add: (args, compile) => {
+  Add: (args, compile, target) => {
     if (args.length === 1) return compile(args[0]);
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
     if (!anyComplex) {
@@ -665,7 +682,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const code = compile(a);
       const isComplex = BaseCompiler.isComplexValued(a);
       if (isComplex && !isSymbol(a) && !isNumber(a)) {
-        const name = BaseCompiler.tempVar();
+        const name = BaseCompiler.tempVar(target);
         bindings.push([name, code]);
         return { code: name, isComplex, bound: true };
       }
@@ -749,18 +766,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.ccosh(${compile(args[0])})`;
     return `Math.cosh(${compile(args[0])})`;
   },
-  Cot: ([x], compile) => {
+  Cot: ([x], compile, target) => {
     if (x === null) throw new Error('Cot: no argument');
     if (BaseCompiler.isComplexValued(x)) return `_SYS.ccot(${compile(x)})`;
     return BaseCompiler.inlineExpression(
+      target,
       'Math.cos(${x}) / Math.sin(${x})',
       compile(x)
     );
   },
-  Coth: ([x], compile) => {
+  Coth: ([x], compile, target) => {
     if (x === null) throw new Error('Coth: no argument');
     if (BaseCompiler.isComplexValued(x)) return `_SYS.ccoth(${compile(x)})`;
     return BaseCompiler.inlineExpression(
+      target,
       '(Math.cosh(${x}) / Math.sinh(${x}))',
       compile(x)
     );
@@ -785,9 +804,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `Math.floor(${compile(args[0])})`;
   },
-  Fract: ([x], compile) => {
+  Fract: ([x], compile, target) => {
     if (x === null) throw new Error('Fract: no argument');
-    return BaseCompiler.inlineExpression('${x} - Math.floor(${x})', compile(x));
+    return BaseCompiler.inlineExpression(
+      target,
+      '${x} - Math.floor(${x})',
+      compile(x)
+    );
   },
   Gamma: '_SYS.gamma',
   // n-ary GCD/LCM. The `_SYS.gcd`/`_SYS.lcm` runtime helpers are BINARY with a
@@ -1589,7 +1612,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_SYS.correlation(${compile(args[0])}, ${compile(args[1])})`;
   },
   Min: (args, compile) => compileExtremum('Min', args, compile),
-  Power: (args, compile) => {
+  Power: (args, compile, target) => {
     const base = args[0];
     const exp = args[1];
     if (base === null) throw new Error('Power: no argument');
@@ -1616,7 +1639,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         eInt >= 2 &&
         eInt <= 8
       ) {
-        const t = BaseCompiler.tempVar();
+        const t = BaseCompiler.tempVar(target);
         const stmts: string[] = [`const ${t} = ${compile(base)};`];
         let n = 0;
         const sq = (src: string): string => {
@@ -1717,7 +1740,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     return `Array.from({length: Math.floor((${stop} - ${start}) / ${step}) + 1}, (_e, i) => ${start} + i * ${step})`;
   },
-  Root: ([arg, exp], compile) => {
+  Root: ([arg, exp], compile, target) => {
     if (arg === null) throw new Error('Root: no argument');
     if (exp === null) return `Math.sqrt(${compile(arg)})`;
     const aConst = tryGetConstant(arg);
@@ -1742,6 +1765,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // root exists. Emit the sign-corrected form `sign(x)·|x|^(1/n)`.
     if (nConst !== undefined && Number.isInteger(nConst) && nConst % 2 !== 0)
       return BaseCompiler.inlineExpression(
+        target,
         `(Math.sign(\${x}) * Math.pow(Math.abs(\${x}), ${1 / nConst}))`,
         compile(arg)
       );
@@ -1815,21 +1839,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const domain = randomDomain('RandomSample', args[0], compile, false);
     return `_SYS.randomSample(${domain}, ${compile(args[1])})`;
   },
-  Round: (args, compile) => {
+  Round: (args, compile, target) => {
     // The interpreter rounds half away from zero (Round(-2.5) = -3); JS
     // `Math.round` rounds half toward +∞ (Round(-2.5) = -2). Reconstruct
     // half-away as `sign(x)·round(|x|)`.
     if (args.length < 2) {
       if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
       return BaseCompiler.inlineExpression(
+        target,
         '(Math.sign(${x}) * Math.round(Math.abs(${x})))',
         compile(args[0])
       );
     }
     // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places
     // (Desmos/spreadsheet form). Bind both operands once.
-    const xv = BaseCompiler.tempVar();
-    const fv = BaseCompiler.tempVar();
+    const xv = BaseCompiler.tempVar(target);
+    const fv = BaseCompiler.tempVar(target);
     return (
       `(() => { const ${fv} = Math.pow(10, ${compile(args[1])}); ` +
       `const ${xv} = ${compile(args[0])} * ${fv}; ` +
@@ -2050,9 +2075,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Degrees: no argument');
     return `(${compile(x)} * Math.PI / 180)`;
   },
-  Haversine: ([x], compile) => {
+  Haversine: ([x], compile, target) => {
     if (x === null) throw new Error('Haversine: no argument');
     return BaseCompiler.inlineExpression(
+      target,
       '(1 - Math.cos(${x})) / 2',
       compile(x)
     );
@@ -3958,6 +3984,13 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         `((${bindings.map((b) => b[0]).join(', ')}) => ${body})(${bindings
           .map((b) => b[1])
           .join(', ')})`,
+      // Dependency-ordered CSE temporaries: a sequential-`const` IIFE, so a
+      // later right-hand side — and the body — can reference an earlier temp.
+      // Flat: no nesting growth with the candidate count.
+      cseBind: (bindings, body) =>
+        `(() => { ${bindings
+          .map(([name, code]) => `const ${name} = ${code};`)
+          .join(' ')} return ${body}; })()`,
       // A non-boolean Which/When condition (e.g. NaN) fails closed at run time,
       // matching the interpreter's throw (D6).
       assertBoolean: (code) => `_SYS.cond(${code})`,
@@ -3980,6 +4013,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',
+      // Per-compilation naming state for generated temporaries. Created here —
+      // `createTarget()` is called once per compilation — so `tempVar()` numbers
+      // `_tv1, _tv2, …` deterministically and two compiles of one expression
+      // emit byte-identical source. A boundary that knows the expression passes
+      // a context seeded with its collision inventory through `options`.
+      naming: { counter: 0, usedNames: new Set<string>() },
       ...options,
     };
   }
@@ -4058,15 +4097,16 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     }
 
     // Create operator lookup function
+    const customOperator = (op: MathJsonSymbol) => {
+      if (!operators) return undefined;
+      return typeof operators === 'function'
+        ? operators(op)
+        : operators[op as keyof typeof operators];
+    };
     const operatorLookup = (op: MathJsonSymbol) => {
       // Check custom operators first
-      if (operators) {
-        const customOp =
-          typeof operators === 'function'
-            ? operators(op)
-            : operators[op as keyof typeof operators];
-        if (customOp) return customOp;
-      }
+      const customOp = customOperator(op);
+      if (customOp) return customOp;
       // Fall back to default JavaScript operators
       return JAVASCRIPT_OPERATORS[op];
     };
@@ -4121,6 +4161,30 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // Capture-set collector for implicit-compilation callers (see
       // `CompileTarget.symbolDeps`).
       symbolDeps: options.symbolDeps,
+      // Root compilation boundary: fresh, deterministic numbering for the
+      // generated temporaries, seeded with the names this compilation must not
+      // reuse — the expression's own symbols and any `_tv`/`_cse` token in the
+      // source the caller splices in. Covers BOTH routes of `compileToTarget`
+      // (expression and `Function` literal): they share this target.
+      naming: BaseCompiler.newNamingContext(expr, [
+        preamble,
+        preambleImports,
+        ...Object.values(namedFunctions),
+        ...(vars ? Object.values(vars) : []),
+      ]),
+    });
+
+    // Common-subexpression elimination (design §4.2). Harvest the SAME tree
+    // the emitters walk (post `rewriteAngularUnit`). The G1b provenance
+    // predicates are built from the RAW options here — the resolver closures
+    // above cannot tell a caller-supplied entry from a built-in one.
+    BaseCompiler.openCseSession(expr, target, {
+      enabled: options.cse,
+      isOverriddenOperator: (name) =>
+        Object.prototype.hasOwnProperty.call(namedFunctions, name) ||
+        customOperator(name) !== undefined,
+      isStringVar: (name) =>
+        vars !== undefined && typeof vars[name] === 'string',
     });
 
     const result = compileToTarget(expr, target, realOnly);
@@ -4240,11 +4304,17 @@ function compileToTarget(
     const params = args
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');
-    const body = BaseCompiler.compile(args[0].canonical, {
+    const lambdaTarget: CompileTarget<Expression> = {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
       boundVars: BaseCompiler.withBoundNames(target, params),
-    });
+    };
+    // The lambda BODY is the bindable region here (the root region holds only
+    // the `Function` node itself), pushed under the lambda's own target so any
+    // temporaries land inside the emitted arrow function.
+    const body = BaseCompiler.compileCseRoot(expr, target, 0, () =>
+      BaseCompiler.compileOp(expr, 0, lambdaTarget, 0, args[0].canonical)
+    );
     // A lambda body may call user-defined functions (`t ↦ f(t)`); emit their
     // definitions as a preamble inside the lambda's own body.
     const userDefs = BaseCompiler.userFunctionsPreamble(target);
@@ -4284,7 +4354,7 @@ function compileToTarget(
     }
   }
 
-  const js = BaseCompiler.compile(expr, target);
+  const js = BaseCompiler.compileCseRoot(expr, target);
   // Collect any user-defined function definitions accumulated while compiling
   // `expr` (a symbol with a `Function`-literal definition used as an operator)
   // and prepend them to the preamble so their named local functions are in
@@ -4808,10 +4878,19 @@ function emitSumProduct(
   // Compile the term this clause accumulates, under a target that binds this
   // clause's index. For the last clause that's the body; otherwise it's the
   // nested sum/product over the remaining clauses.
+  //
+  // The body is the binder's own bindable region (design §5.1(a)). Each
+  // invocation pushes a FRESH instance of it — which is what makes the UNROLLED
+  // form correct: the same body node objects are compiled once per index value
+  // (only the index `var` mapping differs), so a node-keyed reuse would emit
+  // iteration 1's temporary for every later iteration (§6.1, silent wrong
+  // values). The node the region hangs off is the `Sum`/`Product` being
+  // lowered — this handler is handed only the operand list.
+  const sumNode = BaseCompiler.cseParentNode();
   const compileTerm = (innerTarget: CompileTarget<Expression>): string =>
     rest.length > 0
       ? emitSumProduct(kind, body, rest, innerTarget)
-      : BaseCompiler.compile(body, innerTarget);
+      : BaseCompiler.compileOp(sumNode, 0, innerTarget, 0, body);
 
   const bothConstant = lowerNum !== undefined && upperNum !== undefined;
 
@@ -4873,7 +4952,7 @@ function emitSumProduct(
     boundVars: BaseCompiler.withBoundNames(target, [index]),
   });
 
-  const acc = BaseCompiler.tempVar();
+  const acc = BaseCompiler.tempVar(target);
 
   // Iteration-budget guard (see CompileTarget.iterationBudget): a trip count
   // over the budget — including infinite or NaN bounds, for which the negated
@@ -4887,7 +4966,7 @@ function emitSumProduct(
       : '';
 
   if (elementwiseBody) {
-    const val = BaseCompiler.tempVar();
+    const val = BaseCompiler.tempVar(target);
     // The seed slices an array body (SHALLOW — the guarantee covers only the
     // top-level array; rank-≥2 cells stay shared with the caller) so a
     // single-iteration loop does not hand the caller's own array object back;
@@ -4908,7 +4987,7 @@ function emitSumProduct(
   }
 
   if (bodyIsComplex) {
-    const val = BaseCompiler.tempVar();
+    const val = BaseCompiler.tempVar(target);
     const guard = guardNaN('{ re: NaN, im: NaN }');
     if (isSum) {
       return `(() => { let ${acc} = { re: 0, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guard}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } return ${acc}; })()`;

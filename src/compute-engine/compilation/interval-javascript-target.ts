@@ -24,6 +24,7 @@ import type {
   CompilationOptions,
   CompilationResult,
   CompiledRunner,
+  OperandCompiler,
 } from './types.js';
 import { IntervalArithmetic } from '../interval/index.js';
 import type { Interval, IntervalResult } from '../interval/types.js';
@@ -80,15 +81,44 @@ function compileIntervalPointNorm(
 function compileIntervalChain(
   op: string,
   args: ReadonlyArray<Expression>,
-  compile: (expr: Expression) => string
+  compile: OperandCompiler<Expression>,
+  target?: CompileTarget<Expression>
 ): string {
   if (args.length < 2)
     throw new Error(`${op}: expected at least two arguments`);
-  let result = `${op}(${compile(args[0])}, ${compile(args[1])})`;
-  for (let i = 1; i < args.length - 1; i++)
-    result = `_IA.and(${result}, ${op}(${compile(args[i])}, ${compile(
-      args[i + 1]
-    )}))`;
+  // A MIDDLE operand appears in two comparisons (`a < m < b` → `and(a<m,
+  // m<b)`). Emitting it twice evaluates it twice, diverging from the
+  // interpreter — which evaluates each operand once — and doubling the work of
+  // a non-trivial operand. Bind each non-trivial middle operand to a temporary
+  // (the same treatment the scalar infix path in `BaseCompiler` gives them; a
+  // symbol or number literal is safe to duplicate and stays inline).
+  const bindings: Array<[name: string, value: string]> = [];
+  const codes = args.map((arg, i) => {
+    // Operands from index 2 on are the chained-relation lazy positions of the
+    // shared inventory (`LAZY_OPERANDS`): pass the index so the CSE pass pushes
+    // the region harvest opened for them. (This lowering is eager today —
+    // `_IA.and` is a strict call — but the region must be pushed regardless, or
+    // a later short-circuiting lowering would hoist a temp out of a position
+    // that may not run.) A non-region index simply compiles as before.
+    const code = compile(arg, i);
+    const isMiddle = i >= 1 && i <= args.length - 2;
+    if (
+      target?.bindExpr !== undefined &&
+      isMiddle &&
+      !isSymbol(arg) &&
+      !isNumber(arg)
+    ) {
+      const name = BaseCompiler.tempVar(target);
+      bindings.push([name, code]);
+      return name;
+    }
+    return code;
+  });
+  let result = `${op}(${codes[0]}, ${codes[1]})`;
+  for (let i = 1; i < codes.length - 1; i++)
+    result = `_IA.and(${result}, ${op}(${codes[i]}, ${codes[i + 1]}))`;
+  if (bindings.length > 0 && target?.bindExpr !== undefined)
+    return target.bindExpr(bindings, result);
   return result;
 }
 
@@ -99,13 +129,17 @@ function compileIntervalChain(
 function compileIntervalFold(
   op: string,
   args: ReadonlyArray<Expression>,
-  compile: (expr: Expression) => string
+  compile: OperandCompiler<Expression>
 ): string {
   if (args.length === 0)
     throw new Error(`${op}: expected at least one argument`);
-  let result = compile(args[0]);
+  let result = compile(args[0], 0);
+  // `And`/`Or` operands after the first are the inventory's short-circuit lazy
+  // positions: pass the index so the harvested region is pushed. (`_IA.and` is
+  // a strict call, so this lowering evaluates them eagerly today; the region
+  // must still be pushed — see `compileIntervalChain`.)
   for (let i = 1; i < args.length; i++)
-    result = `${op}(${result}, ${compile(args[i])})`;
+    result = `${op}(${result}, ${compile(args[i], i)})`;
   return result;
 }
 
@@ -362,11 +396,14 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Conditionals
   If: (args, compile) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
-    // For interval arithmetic, we need to handle indeterminate conditions
+    // For interval arithmetic, we need to handle indeterminate conditions.
+    // Both arms are thunks — conditionally evaluated — so their operand
+    // indices are passed to the compile callback (`OperandCompiler`), which
+    // opens the matching CSE region.
     return `_IA.piecewise(
       ${compile(args[0])},
-      () => ${compile(args[1])},
-      () => ${compile(args[2])}
+      () => ${compile(args[1], 1)},
+      () => ${compile(args[2], 2)}
     )`;
   },
   // Domain restriction: When(body, cond) → body where cond holds, empty
@@ -378,25 +415,29 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('When: expected 2 arguments (value, condition)');
     // `When` is not a selection form: its condition must be a scalar boolean.
     BaseCompiler.assertScalarCondition(args[1]);
-    return `_IA.restrict(${compile(args[1])}, () => ${compile(args[0])})`;
+    // The VALUE is the conditional position (operand 0); the condition is
+    // eager — matching the `When` entry of the lazy-operand inventory.
+    return `_IA.restrict(${compile(args[1])}, () => ${compile(args[0], 0)})`;
   },
   Which: (args, compile) => {
     if (args.length < 2 || args.length % 2 !== 0)
       throw new Error(
         'Which: expected even number of arguments (condition/value pairs)'
       );
-    // Build nested piecewise calls for each condition/value pair
+    // Build nested piecewise calls for each condition/value pair. Every value
+    // arm, and every condition after the first, is conditionally evaluated —
+    // pass its operand index so the CSE pass opens the matching region.
     const buildPiecewise = (i: number): string => {
       if (i >= args.length) return `{ kind: 'empty' }`;
       const cond = args[i];
       const val = args[i + 1];
       // If condition is the symbol True, it's the default branch
       if (isSymbol(cond, 'True')) {
-        return compile(val);
+        return compile(val, i + 1);
       }
       return `_IA.piecewise(
-      ${compile(cond)},
-      () => ${compile(val)},
+      ${i === 0 ? compile(cond) : compile(cond, i)},
+      () => ${compile(val, i + 1)},
       () => ${buildPiecewise(i + 2)}
     )`;
     };
@@ -414,16 +455,18 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // Comparisons. Chained (N-ary) relations conjoin ALL pairwise comparisons
   // with the tri-state `_IA.and` (e.g. `1 < x < 4` → less(1,x) ∧ less(x,4)).
-  Equal: (args, compile) => compileIntervalChain('_IA.equal', args, compile),
-  NotEqual: (args, compile) =>
-    compileIntervalChain('_IA.notEqual', args, compile),
-  LessEqual: (args, compile) =>
-    compileIntervalChain('_IA.lessEqual', args, compile),
-  GreaterEqual: (args, compile) =>
-    compileIntervalChain('_IA.greaterEqual', args, compile),
-  Less: (args, compile) => compileIntervalChain('_IA.less', args, compile),
-  Greater: (args, compile) =>
-    compileIntervalChain('_IA.greater', args, compile),
+  Equal: (args, compile, target) =>
+    compileIntervalChain('_IA.equal', args, compile, target),
+  NotEqual: (args, compile, target) =>
+    compileIntervalChain('_IA.notEqual', args, compile, target),
+  LessEqual: (args, compile, target) =>
+    compileIntervalChain('_IA.lessEqual', args, compile, target),
+  GreaterEqual: (args, compile, target) =>
+    compileIntervalChain('_IA.greaterEqual', args, compile, target),
+  Less: (args, compile, target) =>
+    compileIntervalChain('_IA.less', args, compile, target),
+  Greater: (args, compile, target) =>
+    compileIntervalChain('_IA.greater', args, compile, target),
   And: (args, compile) => compileIntervalFold('_IA.and', args, compile),
   Or: (args, compile) => compileIntervalFold('_IA.or', args, compile),
   Not: (args, compile) => `_IA.not(${compile(args[0])})`,
@@ -563,7 +606,7 @@ function compileIntervalSumProduct(
   const lowerCode = compileIntervalBound(lowerExpr, lowerNum, target);
   const upperCode = compileIntervalBound(upperExpr, upperNum, target);
 
-  const acc = BaseCompiler.tempVar();
+  const acc = BaseCompiler.tempVar(target);
   const bodyCode = BaseCompiler.compile(args[0], {
     ...target,
     var: (id) => (id === index ? `_IA.point(${index})` : target.var(id)),
@@ -742,6 +785,20 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       },
       string: (str) => JSON.stringify(str),
       number: (n) => `_IA.point(${n})`,
+      // Evaluate a shared middle operand of a chained relation exactly once
+      // (matching the interpreter) by binding it in an IIFE. Net-new here: the
+      // interval target used to inline every operand, so `a < m < b` evaluated
+      // `m` twice.
+      bindExpr: (bindings, body) =>
+        `((${bindings.map((b) => b[0]).join(', ')}) => ${body})(${bindings
+          .map((b) => b[1])
+          .join(', ')})`,
+      // Dependency-ordered CSE temporaries: a sequential-`const` IIFE (an
+      // interval `{ lo, hi }` value is `const`-bindable like any other).
+      cseBind: (bindings, body) =>
+        `(() => { ${bindings
+          .map(([name, code]) => `const ${name} = ${code};`)
+          .join(' ')} return ${body}; })()`,
       // Absence capability (§3.F): numeric absence is a whole-NaN interval
       // (reusing the machinery already present for `NaN`); `isAbsent` tests the
       // lower endpoint. No object axis. Consumers land in P3.
@@ -755,6 +812,9 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',
+      // Per-compilation naming state for generated temporaries (see the
+      // JavaScript target).
+      naming: { counter: 0, usedNames: new Set<string>() },
       ...options,
     };
   }
@@ -883,6 +943,26 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // Opt in to compiling calls to user-defined function literals (`f(x) :=
       // …`) as named local functions collected into the preamble.
       userFunctions: { defs: new Map(), compiling: new Set() },
+      // Root compilation boundary: fresh, deterministic numbering for the
+      // generated temporaries (see the JavaScript target).
+      naming: BaseCompiler.newNamingContext(expr, [
+        preamble,
+        preambleImports,
+        ...Object.values(namedFunctions),
+        ...(vars ? Object.values(vars) : []),
+      ]),
+    });
+
+    // Common-subexpression elimination (design §4.2), on the same
+    // post-`rewriteAngularUnit` tree the emitters walk. The G1b provenance
+    // predicates come from the RAW options (this target has no `operators`
+    // override channel — `operators` always resolves to `undefined` here).
+    BaseCompiler.openCseSession(expr, target, {
+      enabled: options.cse,
+      isOverriddenOperator: (name) =>
+        Object.prototype.hasOwnProperty.call(namedFunctions, name),
+      isStringVar: (name) =>
+        vars !== undefined && typeof vars[name] === 'string',
     });
 
     const result = compileToIntervalTarget(expr, target);
@@ -904,7 +984,7 @@ function compileToIntervalTarget(
 ): CompilationResult<'interval-js', IntervalResult | Interval> {
   let js: string;
   try {
-    js = BaseCompiler.compile(expr, target);
+    js = BaseCompiler.compileCseRoot(expr, target);
   } catch (e) {
     // Expression contains operators/functions not supported by the interval
     // target. Report failure so the caller can fall back to another target,

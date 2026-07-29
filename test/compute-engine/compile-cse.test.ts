@@ -1,0 +1,1692 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
+import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
+import type { CompileTarget } from '../../src/compute-engine/compilation/types';
+import type { Expression } from '../../src/compute-engine/global-types';
+
+const glsl = new GLSLTarget();
+
+/** The design's motivating probe: `sin(6u)` three times in one expression. */
+const PROBE_LATEX = '\\sin(6u)^2 + \\frac{\\sin(6u)}{2+\\sin(6u)}';
+
+/** The same expression built through the box route (no LaTeX parsing). */
+const probeBoxed = () =>
+  ce.box([
+    'Add',
+    ['Square', ['Sin', ['Multiply', 6, 'u']]],
+    [
+      'Divide',
+      ['Sin', ['Multiply', 6, 'u']],
+      ['Add', 2, ['Sin', ['Multiply', 6, 'u']]],
+    ],
+  ]);
+
+const occurrences = (code: string, needle: string): number =>
+  code.split(needle).length - 1;
+
+/** The `sin(6·v)` atom of the probe, as raw MathJSON. */
+const sin6 = (v: string | number): any => ['Sin', ['Multiply', 6, v]];
+
+/** `sin(6v)² + sin(6v) + sin(6v)` — a size-4 candidate occurring three times
+ * (score 8, exactly at `CSE_MIN_SCORE`). */
+const probe3 = (v: string | number): any => [
+  'Add',
+  ['Square', sin6(v)],
+  sin6(v),
+  sin6(v),
+];
+
+/** Run a compiled artifact with and without CSE and assert they agree. */
+function parity(
+  expr: Expression,
+  vars: Record<string, unknown> | number = {},
+  digits = 12
+): void {
+  const on = compile(expr, { fallback: false });
+  const off = compile(expr, { fallback: false, cse: false });
+  const a = (on.run as (v: any) => number)(vars);
+  const b = (off.run as (v: any) => number)(vars);
+  if (typeof a === 'number' && typeof b === 'number')
+    expect(a).toBeCloseTo(b, digits);
+  else expect(a).toEqual(b);
+}
+
+/**
+ * Deterministic temp naming (`docs/plans/2026-07-28-compile-cse-design.md` §2,
+ * §4.1, §6.3). `BaseCompiler.tempVar()` numbers `_tv1`, `_tv2`, … from the
+ * target's naming context instead of drawing a `Math.random()` name, so two
+ * compilations of one expression emit byte-identical source — on EVERY target,
+ * with or without CSE. Neither the `_tv` nor the `_cse` prefix is reserved:
+ * a name already used by the expression is skipped, not assumed unique.
+ */
+describe('COMPILE deterministic naming', () => {
+  it('emits byte-identical code for two compiles of a chained relation', () => {
+    // A chained relation binds its shared middle operand to a temporary
+    // (`bindExpr`), so this expression exercises `tempVar()`.
+    const expr = ce.parse('0 < x + 1 < 10');
+
+    const first = compile(expr).code;
+    const second = compile(expr).code;
+    const third = compile(expr).code;
+
+    expect(first).toContain('_tv1');
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+    expect(first).toMatchInlineSnapshot(
+      `((_tv1) => (0 < _tv1) && (_tv1 < 10))(_.x + 1)`
+    );
+  });
+
+  it('emits byte-identical GLSL for two compiles of a loop accumulator', () => {
+    // Symbolic bounds force the for-loop form, whose accumulator comes from
+    // `tempVar()` (`gpu-target.ts`, `compileGPUSumProduct`).
+    const expr = ce.parse('\\sum_{i=1}^{n} \\sin(i)');
+
+    const first = glsl.compile(expr).code;
+    const second = glsl.compile(expr).code;
+    const third = glsl.compile(expr).code;
+
+    expect(first).toContain('_tv1');
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+    expect(first).toMatchInlineSnapshot(`
+      float _tv1 = 0.0;
+      for (int i = 1; i <= n; i++) {
+        _tv1 += sin(float(i));
+      }
+      return _tv1;
+    `);
+  });
+
+  it('does not capture a lambda parameter named `_tv1`', () => {
+    // `Round(x, n)` binds two temporaries; the parameter is emitted BARE, so a
+    // generated name that collided with it would shadow the argument.
+    const expr = ce.box(['Function', ['Round', '_tv1', 2], '_tv1']);
+    const result = compile(expr);
+
+    expect(result.code).not.toMatch(/const _tv1\b/);
+    expect((result.run as (x: number) => number)(3.14159)).toBe(
+      ce.box(['Round', 3.14159, 2]).N().re
+    );
+    expect(result.code).toMatchInlineSnapshot(
+      `(_tv1) => (() => { const _tv3 = Math.pow(10, 2); const _tv2 = _tv1 * _tv3; return (Math.sign(_tv2) * Math.round(Math.abs(_tv2))) / _tv3; })()`
+    );
+  });
+
+  it('does not capture a loop index named `_tv1`', () => {
+    // The `Sum` index is emitted bare too, and the loop accumulator is a
+    // `tempVar()` — it must skip `_tv1` and take `_tv2`.
+    const expr = ce.box([
+      'Sum',
+      ['Square', '_tv1'],
+      ['Limits', '_tv1', 1, 'n'],
+    ]);
+    const result = compile(expr);
+
+    expect(result.code).not.toMatch(/let _tv1 = 0\b/);
+    expect(
+      (result.run as (v: Record<string, number>) => number)({ n: 4 })
+    ).toBe(
+      ce.box(['Sum', ['Square', '_tv1'], ['Limits', '_tv1', 1, 4]]).evaluate()
+        .re
+    );
+  });
+
+  it('restarts the numbering on a REUSED caller-built direct target', () => {
+    // The direct custom-target route stamps a fresh naming context per
+    // `compile()` call, so a target the caller built once and reuses never
+    // carries stale numbering into the next compilation.
+    const target = new JavaScriptTarget().createTarget();
+    const expr = ce.parse('0 < x + 1 < 10');
+
+    const first = compile(expr, { target, fallback: false }).code;
+    const second = compile(expr, { target, fallback: false }).code;
+
+    expect(first).toContain('_tv1');
+    expect(second).toBe(first);
+  });
+});
+
+/**
+ * Emission-level common-subexpression elimination
+ * (`docs/plans/2026-07-28-compile-cse-design.md` §6): a repeated PURE subtree
+ * inside one compiled expression is evaluated once, bound to a `_cseN`
+ * temporary at the top of its region, and referenced at every occurrence.
+ *
+ * Values are unchanged (same operations, no reassociation), and no binding
+ * ever crosses a region boundary — a conditional arm, a short-circuited tail,
+ * a binder body — so selection laziness and capture-soundness are structural.
+ */
+describe('COMPILE CSE — dedup', () => {
+  it('evaluates a thrice-repeated subtree once (parse route)', () => {
+    const expr = ce.parse(PROBE_LATEX);
+    const result = compile(expr, { fallback: false });
+
+    // ONE `Math.sin` call for three occurrences.
+    expect(occurrences(result.code, 'Math.sin')).toBe(1);
+    expect(occurrences(result.code, '_cse1')).toBe(4); // 1 binding + 3 uses
+    expect(result.code).toMatchInlineSnapshot(
+      `(() => { const _cse1 = Math.sin(6 * _.u); return Math.pow(_cse1, 2) + _cse1 / (_cse1 + 2); })()`
+    );
+
+    for (const u of [0.3, -1.25, 2]) {
+      const compiled = (result.run as (v: Record<string, number>) => number)({
+        u,
+      });
+      const interpreted = expr.subs({ u }).N().re;
+      expect(compiled).toBeCloseTo(interpreted!, 12);
+    }
+  });
+
+  it('evaluates a thrice-repeated subtree once (box route)', () => {
+    const result = compile(probeBoxed(), { fallback: false });
+
+    expect(occurrences(result.code, 'Math.sin')).toBe(1);
+    expect(
+      (result.run as (v: Record<string, number>) => number)({ u: 0.3 })
+    ).toBeCloseTo(
+      compile(ce.parse(PROBE_LATEX), { fallback: false, cse: false }).run!({
+        u: 0.3,
+      }) as number,
+      12
+    );
+  });
+
+  it('binds a nested candidate first, so the outer temp can reference it', () => {
+    // `sin(6u)` occurs 3×, `cos(u)·sin(6u)²` 2×: different per-region counts,
+    // so subsumption keeps both — and the outer right-hand side must reference
+    // the inner temporary (§6.1: the binding is appended AFTER its right-hand
+    // side compiles, which makes the list dependency-ordered for free).
+    const expr = ce.parse(
+      '\\frac{\\sin(6u)^2\\cos(u)}{1+\\sin(6u)^2\\cos(u)} + \\sin(6u)'
+    );
+    const result = compile(expr, { fallback: false });
+
+    expect(result.code).toMatchInlineSnapshot(
+      `(() => { const _cse1 = Math.sin(6 * _.u); const _cse2 = Math.cos(_.u) * Math.pow(_cse1, 2); return _cse1 + _cse2 / (_cse2 + 1); })()`
+    );
+    // The outer binding references the inner temp, and is bound after it.
+    expect(result.code.indexOf('const _cse1')).toBeLessThan(
+      result.code.indexOf('const _cse2')
+    );
+    expect(
+      (result.run as (v: Record<string, number>) => number)({ u: 0.4 })
+    ).toBeCloseTo(
+      compile(expr, { fallback: false, cse: false }).run!({ u: 0.4 }) as number,
+      12
+    );
+  });
+
+  it('emits the duplicated form with `cse: false`', () => {
+    const expr = ce.parse(PROBE_LATEX);
+    const off = compile(expr, { fallback: false, cse: false });
+
+    expect(off.code).not.toContain('_cse');
+    expect(occurrences(off.code, 'Math.sin')).toBe(3);
+    expect(off.code).toMatchInlineSnapshot(
+      `Math.pow(Math.sin(6 * _.u), 2) + Math.sin(6 * _.u) / (Math.sin(6 * _.u) + 2)`
+    );
+  });
+});
+
+describe('COMPILE CSE — conditionality', () => {
+  it('binds an arm-only candidate INSIDE the arm, and never evaluates an unselected arm', () => {
+    // The repeated subtree lives only in the `x > 0` arm, so its region is
+    // that arm — the binding must sit inside the ternary branch, not be
+    // hoisted in front of the condition (§7.3).
+    const expr = ce.box([
+      'Which',
+      ['Greater', 'x', 0],
+      ce.parse(PROBE_LATEX),
+      'True',
+      0,
+    ]);
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'Math.sin')).toBe(1);
+    // The binding is inside the selected branch: it appears AFTER the `?`.
+    expect(result.code.indexOf('_cse1')).toBeGreaterThan(
+      result.code.indexOf('?')
+    );
+    expect(result.code).toMatchInlineSnapshot(
+      `((0 < _.x) ? ((() => { const _cse1 = Math.sin(6 * _.u); return Math.pow(_cse1, 2) + _cse1 / (_cse1 + 2); })()) : (0))`
+    );
+
+    // The unselected arm evaluates NOTHING: a getter on the vars object counts
+    // every read of `u`, which only the arm's code performs.
+    let reads = 0;
+    const vars = {
+      x: -1,
+      get u() {
+        reads += 1;
+        return 0.3;
+      },
+    };
+    expect(
+      (result.run as (v: Record<string, number>) => number)(vars as any)
+    ).toBe(0);
+    expect(reads).toBe(0);
+
+    // …and the selected arm still computes the right value.
+    expect(
+      (result.run as (v: Record<string, number>) => number)({ x: 1, u: 0.3 })
+    ).toBeCloseTo(
+      compile(ce.parse(PROBE_LATEX), { fallback: false, cse: false }).run!({
+        u: 0.3,
+      }) as number,
+      12
+    );
+  });
+});
+
+describe('COMPILE CSE — binder bodies', () => {
+  it('keeps unrolled `Sum` terms in agreement with the interpreter', () => {
+    // `emitSumProduct` compiles the SAME body node objects once per index
+    // value, varying only the index `var` mapping. Each term opens a FRESH
+    // region instance (§6.1); a node-keyed reuse would emit iteration 1's
+    // temporary for every later iteration — silently wrong values.
+    const expr = ce.parse('\\sum_{i=1}^{5}(\\sin(i)\\sin(i)+i)');
+    const result = compile(expr, { fallback: false });
+
+    expect(
+      (result.run as (v: Record<string, number>) => number)({})
+    ).toBeCloseTo(expr.evaluate().N().re!, 12);
+    expect(result.code).toBe(
+      compile(expr, { fallback: false, cse: false }).code
+    );
+  });
+
+  it('gives every unrolled term its own temporary', () => {
+    // The candidate-bearing version of the same trap: each term must bind its
+    // OWN `_cseN` over its own index value.
+    const expr = ce.parse(`\\sum_{i=1}^{4}(${PROBE_LATEX.replace(/u/g, 'i')})`);
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(4);
+    expect(result.code).toContain('const _cse1 = Math.sin(6 * 1)');
+    expect(result.code).toContain('const _cse4 = Math.sin(6 * 4)');
+    expect(
+      (result.run as (v: Record<string, number>) => number)({})
+    ).toBeCloseTo(expr.N().re!, 12);
+  });
+
+  it('binds inside the loop body of a symbolic-bound `Sum`', () => {
+    // The binding belongs to the binder BODY region: it must sit inside the
+    // emitted loop, recomputed per iteration, never hoisted out of it.
+    const expr = ce.parse(`\\sum_{i=1}^{n}(${PROBE_LATEX.replace(/u/g, 'i')})`);
+    const result = compile(expr, { fallback: false });
+
+    expect(result.code.indexOf('while')).toBeLessThan(
+      result.code.indexOf('const _cse1')
+    );
+    expect(
+      (result.run as (v: Record<string, number>) => number)({ n: 5 })
+    ).toBeCloseTo(
+      compile(expr, { fallback: false, cse: false }).run!({ n: 5 }) as number,
+      12
+    );
+  });
+});
+
+describe('COMPILE CSE — emission purity (G1b)', () => {
+  it('does not merge two identical `Map(xs, f)` with a user-declared callback', () => {
+    // A NAMED callback is invisible to purity inference (`docs/EFFECTS-MODEL.md`):
+    // `Map(xs, f)` can report pure while `f` draws or writes, so merging two
+    // such applications could change a draw stream or a call count.
+    ce.assign('mapper', ce.parse('x \\mapsto x^2 + 3x + 1'));
+    const mapped = ['Sum', ['Map', ['List', 1, 2, 3, 4], 'mapper']];
+    const expr = ce.box(['Add', mapped, mapped]);
+    const result = compile(expr, { fallback: false });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    // Both applications are still emitted, in full.
+    expect(occurrences(result.code, '.map(')).toBe(2);
+    expect((result.run as (v: Record<string, number>) => number)({})).toBe(
+      expr.evaluate().N().re
+    );
+  });
+});
+
+describe('COMPILE CSE — other targets', () => {
+  it('binds with a flat comprehension on the Python target', () => {
+    const code = new PythonTarget().compileToSource(ce.parse(PROBE_LATEX));
+
+    expect(occurrences(code, 'np.sin')).toBe(1);
+    expect(code).toMatchInlineSnapshot(
+      `[_cse1 ** 2 + _cse1 / (_cse1 + 2) for _cse1 in [np.sin(6 * u)]][0]`
+    );
+  });
+
+  it('binds with a sequential-const IIFE on the interval-js target', () => {
+    const expr = ce.parse(PROBE_LATEX);
+    const result = compile(expr, { to: 'interval-js', fallback: false });
+
+    expect(occurrences(result.code, '_IA.sin')).toBe(1);
+    expect(result.code).toMatchInlineSnapshot(
+      `(() => { const _cse1 = _IA.sin(_IA.mul(_IA.point(6), _.u)); return _IA.add(_IA.square(_cse1), _IA.div(_cse1, _IA.add(_cse1, _IA.point(2)))); })()`
+    );
+
+    // A point interval reproduces the scalar value; a proper interval encloses
+    // the values of the scalar function over it.
+    const point = (result.run as any)({ u: { lo: 0.3, hi: 0.3 } });
+    expect(point.value.lo).toBeCloseTo(
+      compile(expr, { fallback: false }).run!({ u: 0.3 }) as number,
+      12
+    );
+    const box = (result.run as any)({ u: { lo: 0.3, hi: 0.31 } });
+    expect(box.value.lo).toBeLessThanOrEqual(point.value.lo);
+    expect(box.value.hi).toBeGreaterThanOrEqual(point.value.hi);
+  });
+});
+
+describe('COMPILE CSE — determinism', () => {
+  it('emits byte-identical source for two compiles of a candidate-bearing expression', () => {
+    const expr = ce.parse(PROBE_LATEX);
+    const first = compile(expr, { fallback: false }).code;
+    const second = compile(expr, { fallback: false }).code;
+    const third = compile(ce.parse(PROBE_LATEX), { fallback: false }).code;
+
+    expect(first).toContain('_cse1');
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it('emits byte-identical source when candidates and `tempVar()` temps share the counter', () => {
+    // A chained relation allocates `_tv` temporaries; the repeated middle
+    // operand is also a candidate, so both allocators draw from one counter.
+    const expr = ce.parse(`0 < ${PROBE_LATEX} < 10`);
+    const first = compile(expr, { fallback: false }).code;
+    const second = compile(expr, { fallback: false }).code;
+
+    expect(second).toBe(first);
+    expect(first).toMatchInlineSnapshot(
+      `(() => { const _cse1 = Math.sin(6 * _.u); return ((_tv2) => (0 < _tv2) && (_tv2 < 10))(Math.pow(_cse1, 2) + _cse1 / (_cse1 + 2)); })()`
+    );
+  });
+});
+
+/**
+ * §5.1(a) — capture. A binder body is its own region, so a subtree that reads
+ * a name bound by the binder can never share a temporary with the
+ * same-*spelled* subtree outside it: the two are different values.
+ */
+describe('COMPILE CSE — capture', () => {
+  it('never merges across a `Sum` binder (inside and outside share a name)', () => {
+    // `sin(6n)` occurs three times OUTSIDE (over the free `n`) and three times
+    // INSIDE the sum (over the loop index `n`). Two regions, two temporaries.
+    const expr = ce.parse(
+      '\\sin(6n)^2+\\sin(6n)+\\sin(6n)+\\sum_{n=1}^{m}(\\sin(6n)^2+\\sin(6n)+\\sin(6n))'
+    );
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(2);
+    // The inner temporary reads the LOOP index, the outer one the free symbol.
+    expect(result.code).toContain('const _cse1 = Math.sin(6 * n);');
+    expect(result.code).toContain('const _cse3 = Math.sin(6 * _.n);');
+    // …and the inner binding sits inside the emitted loop.
+    expect(result.code.indexOf('while')).toBeLessThan(
+      result.code.indexOf('const _cse1')
+    );
+
+    parity(expr, { n: 0.3, m: 4 });
+  });
+
+  it('never merges across an `Integrate` binder', () => {
+    // A non-elementary integrand keeps the integral at run time (`_SYS.integrate`
+    // over a lambda). The integrand's `sin(sin(6x))` reads the lambda's `x`; the
+    // outer occurrences read the free `x`.
+    const inner = '\\sin(\\sin(6x))';
+    const expr = ce.parse(
+      `\\int_0^t (${inner}^2+${inner}+${inner}) dx + ${inner}^2+${inner}+${inner}`
+    );
+    const result = compile(expr, { fallback: false });
+
+    // ONE temporary — the outer one, over `_.x`.
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    expect(result.code).toContain('const _cse1 = Math.sin(Math.sin(6 * _.x));');
+    // The integrand is emitted intact over its OWN `x`; the temp never leaks in.
+    const integrand = result.code.slice(
+      result.code.indexOf('_SYS.integrate((x) =>'),
+      result.code.indexOf(', 0, _.t)')
+    );
+    expect(integrand).not.toContain('_cse');
+    expect(occurrences(integrand, 'Math.sin(Math.sin(6 * x))')).toBe(3);
+
+    parity(expr, { x: 0.4, t: 1 }, 9);
+  });
+
+  it('never merges across a `Sum` binder on the interval-js target', () => {
+    const expr = ce.parse(
+      '\\sin(6n)^2+\\sin(6n)+\\sin(6n)+\\sum_{n=1}^{m}(\\sin(6n)^2+\\sin(6n)+\\sin(6n))'
+    );
+    const code = compile(expr, { to: 'interval-js', fallback: false }).code;
+
+    // The outer occurrences bind; the loop body is emitted unshared, and the
+    // outer temporary never appears inside the loop.
+    expect(code).toContain('const _cse2 = _IA.sin(_IA.mul(_IA.point(6), _.n))');
+    const loop = code.slice(code.indexOf('for (let n'), code.indexOf('return _tv1'));
+    expect(loop).not.toContain('_cse');
+  });
+
+  it('never merges across a `Sum` binder on the Python target', () => {
+    const code = new PythonTarget().compileToSource(
+      ce.parse(
+        '\\sin(6n)^2+\\sin(6n)+\\sin(6n)+\\sum_{n=1}^{m}(\\sin(6n)^2+\\sin(6n)+\\sin(6n))'
+      )
+    );
+    // One binding clause, whose right-hand side reads the ENCLOSING `n` (the
+    // generator's `for n in range(...)` has its own scope in Python).
+    expect(occurrences(code, 'for _cse')).toBe(1);
+    expect(code).toContain('for _cse1 in [np.sin(6 * n)]');
+    const genexp = code.slice(code.indexOf('sum('), code.indexOf(') + _cse1'));
+    expect(genexp).not.toContain('_cse');
+  });
+});
+
+/**
+ * §2, §5.1(b) — `Match` is fully CSE-inert in Phase 1: its guards and bodies
+ * are compiled from plan-constructed closure trees, not from the harvested
+ * operands, so the occurrence machinery cannot see them. Emission pushes a
+ * BLIND instance, which resolves no candidate.
+ */
+describe('COMPILE CSE — `Match` is inert', () => {
+  it('emits no `_cse` anywhere in a Match, subject included (javascript)', () => {
+    const expr = ce.box(['Match', probe3('u'), ['MatchCase', '_a', 'a']]);
+    const result = compile(expr, { fallback: false });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    // The repeated subtree is still emitted in full, three times.
+    expect(occurrences(result.code, 'Math.sin(6 * _.u)')).toBe(3);
+    // …and identically to the `cse: false` baseline.
+    expect(result.code).toBe(
+      compile(ce.box(['Match', probe3('u'), ['MatchCase', '_a', 'a']]), {
+        fallback: false,
+        cse: false,
+      }).code
+    );
+  });
+
+  it('emits no `_cse` in a Match BODY either', () => {
+    // The body is reached through the plan's closure tree, which harvest never
+    // sees — the blind instance is what keeps an enclosing candidate out.
+    const expr = ce.box(['Match', 'x', ['MatchCase', '_t', probe3('t')]]);
+    const result = compile(expr, { fallback: false });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, 'Math.sin(6 * _tv')).toBe(3);
+  });
+
+  it('keeps the interval-js fail-closed contract', () => {
+    const result = compile(
+      ce.box(['Match', probe3('u'), ['MatchCase', '_a', 'a']]),
+      { to: 'interval-js', fallback: false }
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(
+      /Match: pattern matching is not supported by the interval-js compile target/
+    );
+    expect(result.code).not.toMatch(/_cse/);
+  });
+
+  it('keeps the Python fail-closed contract', () => {
+    expect(() =>
+      new PythonTarget().compileToSource(
+        ce.box(['Match', probe3('u'), ['MatchCase', '_a', 'a']])
+      )
+    ).toThrow(
+      /Match: pattern matching is not supported by the Python compile target/
+    );
+  });
+});
+
+/**
+ * §5.1(c) — statement regions. A `Block` statement list and an imperative
+ * `Loop` body are INERT: nothing binds at the statement-list level, so
+ * `Return`/`Break`/`Continue` reachability and inter-statement ordering never
+ * interact with CSE. Each statement's own value expressions ARE bindable.
+ */
+describe('COMPILE CSE — statement regions', () => {
+  const loopBlock = () =>
+    ce.box([
+      'Block',
+      ['Assign', 'acc', 0],
+      [
+        'Loop',
+        ['Assign', 'acc', ['Add', 'acc', probe3('u')]],
+        ['Element', 'i', ['Range', 1, 3]],
+      ],
+      'acc',
+    ]);
+
+  it('deduplicates an Assign right-hand side inside a Loop body', () => {
+    const result = compile(loopBlock(), { fallback: false });
+
+    // The binding is INSIDE the loop, in the assignment's own value region.
+    expect(occurrences(result.code, 'const _cse1')).toBe(1);
+    expect(result.code.indexOf('for (let i')).toBeLessThan(
+      result.code.indexOf('const _cse1')
+    );
+    expect(occurrences(result.code, 'Math.sin(6 * _.u)')).toBe(1);
+  });
+
+  it('deduplicates an Assign right-hand side inside a Loop body (Python)', () => {
+    const code = new PythonTarget().compileFunction(loopBlock(), 'f', ['u']);
+    expect(code).toContain('    for i in range(1, 4):');
+    expect(code).toContain(
+      'acc = [acc + _cse1 + _cse1 + _cse1 ** 2 for _cse1 in [np.sin(6 * u)]][0]'
+    );
+  });
+
+  it('never binds across two statements of one Block', () => {
+    // Both statements have the same right-hand side. If the statement LIST
+    // bound, one temporary would serve both; it must be two.
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'y', 'number'],
+      ['Declare', 'z', 'number'],
+      ['Assign', 'y', probe3('u')],
+      ['Assign', 'z', probe3('u')],
+      ['Add', 'y', 'z'],
+    ]);
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(2);
+    expect(result.code).toContain('const _cse1 = Math.sin(6 * _.u)');
+    expect(result.code).toContain('const _cse2 = Math.sin(6 * _.u)');
+    parity(expr, { u: 0.3 });
+  });
+
+  it('does not hoist a candidate past a conditional `Return`', () => {
+    // The candidate lives only in the statement AFTER the early exit. Its
+    // binding must stay in that statement's own region.
+    const expr = ce.box([
+      'Block',
+      ['Assign', 'acc', 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['If', ['Less', 'u', 0], ['Return', 0]],
+          ['Assign', 'acc', probe3('u')],
+        ],
+        ['Element', 'i', ['Range', 1, 3]],
+      ],
+      'acc',
+    ]);
+    const result = compile(expr, { fallback: false });
+
+    expect(result.code).toContain('if (_.u < 0) { return 0 }');
+    expect(result.code.indexOf('if (_.u < 0)')).toBeLessThan(
+      result.code.indexOf('const _cse1')
+    );
+  });
+
+  it('deduplicates inside a multi-statement lambda body', () => {
+    const expr = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Declare', 'y', 'number'],
+        ['Assign', 'y', probe3('u')],
+        ['Multiply', 'y', 2],
+      ],
+      'u',
+    ]);
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse1')).toBe(1);
+    expect(result.code).toContain('const _cse1 = Math.sin(6 * u)');
+    expect(occurrences(result.code, 'Math.sin(6 * u)')).toBe(1);
+    expect((result.run as (x: number) => number)(0.3)).toBeCloseTo(
+      compile(expr, { fallback: false, cse: false }).run!(0.3) as number,
+      12
+    );
+  });
+});
+
+/**
+ * §5, §6.1 — DAG shapes. Harvest counts *edge-occurrences* (paths), and
+ * emission resolves a candidate through the REGION, so one shared node object
+ * reached from two regions is two candidates and gets two temporaries.
+ */
+describe('COMPILE CSE — DAG sharing', () => {
+  /** ONE `sin(6u)` node object, reused everywhere below. */
+  const shared = () => {
+    const s = ce.box(sin6('u'));
+    const arm = ce.function('Add', [ce.function('Square', [s]), s, s]);
+    return { s, arm };
+  };
+
+  it('binds one shared node object once when it is reused within one region', () => {
+    const { arm } = shared();
+    const result = compile(arm, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    expect(occurrences(result.code, 'Math.sin')).toBe(1);
+    expect(occurrences(result.code, '_cse1')).toBe(4); // 1 binding + 3 uses
+    parity(arm, { u: 0.3 });
+  });
+
+  it('gives one shared node object a separate temporary in each region', () => {
+    const { s, arm } = shared();
+    const expr = ce.function('Add', [
+      ce.function('Square', [s]),
+      s,
+      s,
+      ce.function('Which', [
+        ce.parse('0 < x'),
+        arm,
+        ce.symbol('True'),
+        ce.number(0),
+      ]),
+    ]);
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(2);
+    expect(result.code).toContain('const _cse1 = Math.sin(6 * _.u)');
+    expect(result.code).toContain('const _cse2 = Math.sin(6 * _.u)');
+    // The arm's temporary is bound INSIDE the ternary branch.
+    expect(result.code.indexOf('?')).toBeLessThan(
+      result.code.indexOf('const _cse2')
+    );
+    parity(expr, { u: 0.3, x: 1 });
+    parity(expr, { u: 0.3, x: -1 });
+  });
+
+  it('keeps the two differently-lazy operand positions of one construct apart', () => {
+    // The SAME node object in both arms of an `If`: two lazy edges, two region
+    // instances, two temporaries — the `compileOp` operand-index wiring.
+    const { arm } = shared();
+    const expr = ce.function('If', [ce.parse('0 < x'), arm, arm]);
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(2);
+    expect(result.code).toContain('const _cse1 = Math.sin(6 * _.u)');
+    expect(result.code).toContain('const _cse2 = Math.sin(6 * _.u)');
+    // Neither binding is hoisted in front of the condition.
+    expect(result.code.indexOf('?')).toBeLessThan(
+      result.code.indexOf('const _cse1')
+    );
+    parity(expr, { u: 0.3, x: 1 });
+    parity(expr, { u: 0.3, x: -1 });
+  });
+});
+
+/**
+ * §5.2 G3 — mutation. A candidate is dropped when any symbol it mentions is
+ * the target of an `Assign`/`Declare` anywhere in its region's subtree,
+ * descendant regions included. Deliberately conservative.
+ */
+describe('COMPILE CSE — mutation (G3)', () => {
+  it('does not merge reads separated by a rebinding `Block`', () => {
+    const expr = () =>
+      ce.box([
+        'Block',
+        ['Declare', 'u', 'number'],
+        ['Assign', 'u', 1],
+        [
+          'Add',
+          ['Square', sin6('u')],
+          ['Block', ['Assign', 'u', 2], 0],
+          sin6('u'),
+          sin6('u'),
+        ],
+      ]);
+    const on = compile(expr(), { fallback: false });
+    const off = compile(expr(), { fallback: false, cse: false });
+
+    expect(on.code).not.toMatch(/_cse\d/);
+    expect(on.code).toBe(off.code);
+    expect((on.run as (v: any) => number)({})).toBe(
+      (off.run as (v: any) => number)({})
+    );
+  });
+});
+
+/**
+ * §5.2 steps 5–6 — subsumption and the post-filter.
+ */
+describe('COMPILE CSE — subsumption and the post-filter', () => {
+  it('binds only the outer candidate when the counts match', () => {
+    // `sin(6u)` and `sin(sin(6u))` both occur three times; every inner
+    // occurrence sits inside an outer one, so only the outer binds.
+    const nested = ['Sin', sin6('u')] as any;
+    const expr = ce.box(['Add', nested, nested, nested]);
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    expect(result.code).toBe(
+      '(() => { const _cse1 = Math.sin(Math.sin(6 * _.u)); ' +
+        'return _cse1 + _cse1 + _cse1; })()'
+    );
+  });
+
+  it('emits no temporary when a region sees the subtree only once', () => {
+    // Five occurrences in total — but one per `Which` arm, and every arm is its
+    // own region, so no region reaches the same-region count of two.
+    const expr = ce.box([
+      'Which',
+      ['Less', 0, 'x'],
+      probe3('u'),
+      ['Less', 1, 'x'],
+      probe3('u'),
+      'True',
+      probe3('u'),
+    ]);
+    const result = compile(expr, { fallback: false });
+
+    // Each arm's own three occurrences DO bind (three arms, three temps); no
+    // temp is shared across arms.
+    expect(occurrences(result.code, 'const _cse')).toBe(3);
+
+    // …and a candidate that reaches a region only once binds nothing.
+    const once = ce.box([
+      'Which',
+      ['Less', 0, 'x'],
+      sin6('u'),
+      ['Less', 1, 'x'],
+      sin6('u'),
+      'True',
+      sin6('u'),
+    ]);
+    expect(compile(once, { fallback: false }).code).not.toMatch(/_cse\d/);
+  });
+});
+
+/**
+ * §6.3 — temp naming. Neither `_cse` nor `_tv` is a reserved prefix:
+ * collisions are PREVENTED, not assumed away. Both allocators skip any name
+ * the compilation already uses, whether CSE is on or off.
+ */
+describe('COMPILE CSE — name collisions', () => {
+  it('does not capture a lambda parameter named `_cse1`', () => {
+    const expr = ce.box(['Function', probe3('_cse1'), '_cse1']);
+    const on = compile(expr, { fallback: false });
+    const off = compile(expr, { fallback: false, cse: false });
+
+    expect(on.code).toContain('const _cse2 = Math.sin(6 * _cse1)');
+    expect(on.code).not.toMatch(/const _cse1\b/);
+    expect(off.code).not.toMatch(/_cse\d\s*=/);
+    expect((on.run as (x: number) => number)(0.3)).toBeCloseTo(
+      (off.run as (x: number) => number)(0.3),
+      12
+    );
+  });
+
+  it('does not capture a lambda parameter named `_tv1`', () => {
+    const expr = ce.box(['Function', probe3('_tv1'), '_tv1']);
+    const result = compile(expr, { fallback: false });
+
+    // `_cse1` is free here, so the CSE temp takes it; `_tv1` stays the param.
+    expect(result.code).toBe(
+      '(_tv1) => (() => { const _cse1 = Math.sin(6 * _tv1); ' +
+        'return _cse1 + _cse1 + Math.pow(_cse1, 2); })()'
+    );
+    expect((result.run as (x: number) => number)(0.3)).toBeCloseTo(
+      compile(expr, { fallback: false, cse: false }).run!(0.3) as number,
+      12
+    );
+  });
+
+  it('does not capture a Block local named `_cse1`', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', '_cse1', 'number'],
+      ['Assign', '_cse1', 0.3],
+      probe3('_cse1'),
+    ]);
+    const on = compile(expr, { fallback: false });
+
+    expect(on.code).toContain('let _cse1;');
+    expect(on.code).toContain('const _cse2 = Math.sin(6 * _cse1)');
+    expect(on.code).not.toMatch(/const _cse1\b/);
+    parity(expr);
+  });
+
+  it('does not capture a Match capture named `_tv1`', () => {
+    // The pattern symbol `_tv1` is in the tree, so the generated name skips it.
+    // (`Match` is CSE-inert, so the repeated body emits in full.)
+    const expr = ce.box(['Match', 'x', ['MatchCase', '_tv1', probe3('tv1')]]);
+    const on = compile(expr, { fallback: false });
+    const off = compile(
+      ce.box(['Match', 'x', ['MatchCase', '_tv1', probe3('tv1')]]),
+      { fallback: false, cse: false }
+    );
+
+    expect(on.code).toContain('((_tv2) =>');
+    expect(on.code).not.toMatch(/\b_tv1\b/);
+    expect(on.code).toBe(off.code);
+  });
+
+  it('does not capture a Python parameter named `_cse1`', () => {
+    const code = new PythonTarget().compileFunction(ce.box(probe3('_cse1')), 'f', [
+      '_cse1',
+    ]);
+    expect(code).toBe(
+      'def f(_cse1):\n' +
+        '    return [_cse2 + _cse2 + _cse2 ** 2 for _cse2 in [np.sin(6 * _cse1)]][0]\n'
+    );
+  });
+});
+
+/**
+ * §5.2 G4 and §6.2 — the benefit threshold and the per-region binding cap.
+ */
+describe('COMPILE CSE — threshold and the per-region cap', () => {
+  it('leaves a sub-threshold repeat inline', () => {
+    // `sin(6u)` is size 4 but occurs only twice: score 4 < `CSE_MIN_SCORE`.
+    const expr = ce.parse('\\sin(6u)+\\sin(6u)');
+    const result = compile(expr, { fallback: false });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(result.code).toBe('Math.sin(6 * _.u) + Math.sin(6 * _.u)');
+  });
+
+  /** 40 distinct thrice-repeated candidates in ONE region. */
+  const capped = () => {
+    const terms: any[] = [];
+    for (let k = 0; k < 40; k++) {
+      const t = ['Sin', ['Multiply', k + 2, 'u']];
+      terms.push(t, t, t);
+    }
+    return ce.box(['Add', ...terms]);
+  };
+
+  it('keeps the highest-scoring 32 candidates, deterministically', () => {
+    const first = compile(capped(), { fallback: false }).code;
+    const second = compile(capped(), { fallback: false }).code;
+
+    expect(occurrences(first, 'const _cse')).toBe(32);
+    expect(first).toContain('const _cse32 = Math.sin(33 * _.u)');
+    expect(first).not.toContain('const _cse33');
+    // Every score is equal here, so the tie-break is first-occurrence order:
+    // coefficients 2…33 bind, 34…41 stay inline.
+    expect(occurrences(first, 'Math.sin(34 * _.u)')).toBe(3);
+    expect(second).toBe(first);
+    parity(capped(), { u: 0.3 }, 9);
+  });
+
+  it('keeps the cap on the Python target too', () => {
+    const code = new PythonTarget().compileToSource(capped());
+    expect(occurrences(code, 'for _cse')).toBe(32);
+    expect(code).toContain('for _cse32 in [np.sin(33 * u)]');
+  });
+});
+
+/**
+ * §5 — the deterministic per-bucket verification budget. A structural-hash
+ * bucket that exhausts `CSE_MAX_VERIFY_NODES_PER_BUCKET` compared nodes is
+ * dropped WHOLE: its occurrences emit inline, unchanged.
+ *
+ * Real collisions of the cached structural hash are not constructible by hand,
+ * so the bucket is forced: an own `hash` property shadows the memoized getter
+ * on 80 structurally distinct subtrees. The budget then runs out on the
+ * quadratic `isSame` verification, and the whole compilation degrades to the
+ * `cse: false` emission — a lost optimization, never a correctness change.
+ */
+describe('COMPILE CSE — harvest verification budget', () => {
+  const collided = () => {
+    const nodes: Expression[] = [];
+    for (let k = 0; k < 80; k++) {
+      const n = ce.box(['Sin', ['Multiply', k + 2, 'u']]);
+      Object.defineProperty(n, 'hash', { value: 0x5eed, configurable: true });
+      nodes.push(n, n, n);
+    }
+    return ce.function('Add', nodes);
+  };
+
+  it('drops the exhausted bucket whole, emitting the `cse: false` source', () => {
+    const expr = collided();
+    const on = compile(expr, { fallback: false }).code;
+    const off = compile(expr, { fallback: false, cse: false }).code;
+
+    expect(on).not.toMatch(/_cse\d/);
+    expect(on).toBe(off);
+  });
+
+  it('is deterministic — two compiles of the collided tree agree', () => {
+    const expr = collided();
+    expect(compile(expr, { fallback: false }).code).toBe(
+      compile(expr, { fallback: false }).code
+    );
+  });
+});
+
+/**
+ * §7.2 — draw streams. Two occurrences of one `RandomChoice` subtree are
+ * DIFFERENT draws (counter-based streams) and must never merge; the pure part
+ * around them may. G1 excludes draws structurally, and G1b excludes
+ * user-defined function applications, whose purity inference is documented
+ * dependency-order-unsound.
+ */
+describe('COMPILE CSE — draw streams', () => {
+  const seeded = () =>
+    ce.box([
+      'WithRandomSeed',
+      42,
+      [
+        'List',
+        ['Square', sin6('u')],
+        sin6('u'),
+        sin6('u'),
+        ['At', ['RandomChoice', ['Range', 1, 1000000], 3], 1],
+        ['At', ['RandomChoice', ['Range', 1, 1000000], 3], 2],
+        ['At', ['RandomChoice', ['Range', 1, 1000000], 3], 3],
+      ],
+    ]);
+
+  it('draws the same sequence with CSE on, off, and in the interpreter', () => {
+    const on = compile(seeded(), { fallback: false });
+    const off = compile(seeded(), { fallback: false, cse: false });
+
+    // The pure repeat IS shared; the two draws are NOT.
+    expect(occurrences(on.code, 'const _cse')).toBe(1);
+    expect(occurrences(on.code, '_SYS.randomChoice')).toBe(3);
+
+    const a = (on.run as (v: any) => number[])({ u: 0.3 });
+    const b = (off.run as (v: any) => number[])({ u: 0.3 });
+    const interpreted = seeded()
+      .subs({ u: 0.3 })
+      .N()
+      .ops!.map((x) => x.re!);
+
+    expect(a).toEqual(b);
+    // Draw for draw — the three sampled positions, integers, not close-to.
+    expect(a.slice(3)).toEqual(interpreted.slice(3));
+    // …and the draws really are three DIFFERENT values (a merge would show up
+    // as a repeated one).
+    expect(new Set(a.slice(3)).size).toBe(3);
+    for (let i = 0; i < 3; i++) expect(a[i]).toBeCloseTo(interpreted[i], 12);
+
+    // Reseeded on every call: the same sequence again.
+    expect((on.run as (v: any) => number[])({ u: 0.3 })).toEqual(a);
+  });
+
+  it('does not merge applications of a dependency-order-unsound definition', () => {
+    // `docs/EFFECTS-MODEL.md` §"Dependency-order inference is unsound":
+    // `f() := g()` declared BEFORE an effectful `g` stays marked pure. G1b
+    // excludes user-defined function applications outright, so the stale
+    // marking can never merge two effectful calls.
+    const engine = new ComputeEngine();
+    engine.assign('f', engine.parse('() \\mapsto g()'));
+    engine.assign('g', engine.parse('() \\mapsto \\operatorname{Random}()'));
+
+    // The unsound marking is still there — this is the hazard, not a bug:
+    expect(engine.box(['f']).isPure).toBe(true);
+
+    const expr = engine.box([
+      'Add',
+      ['Multiply', ['f'], ['f']],
+      ['Multiply', ['f'], ['f']],
+      ['Multiply', ['f'], ['f']],
+    ]);
+    const result = compile(expr, { fallback: false });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    // All six applications survive: no call count changed.
+    expect(occurrences(result.code, '_fn_f()')).toBe(6);
+  });
+});
+
+/**
+ * §4.2, §4.3 — the option surface.
+ */
+describe('COMPILE CSE — options', () => {
+  it('`cse: false` is byte-identical to a target with no `cseBind`', () => {
+    // A target without the capability behaves exactly as `cse: false` — the
+    // session is stamped `enabled: false` either way (§4.3).
+    class NoCseBindTarget extends JavaScriptTarget {
+      createTarget(
+        options: Partial<CompileTarget<Expression>> = {}
+      ): CompileTarget<Expression> {
+        const target = super.createTarget(options);
+        delete (target as { cseBind?: unknown }).cseBind;
+        return target;
+      }
+    }
+    const expr = ce.parse(PROBE_LATEX);
+    const absent = new NoCseBindTarget().compile(expr).code;
+    const off = new JavaScriptTarget().compile(expr, { cse: false }).code;
+
+    expect(absent).toBe(off);
+    expect(absent).not.toMatch(/_cse/);
+  });
+
+  it('a direct custom target never emits `_cse`, even carrying `cseBind`', () => {
+    // §4.2: a direct target is caller-supplied code end to end. `cseBind`
+    // attests binding SYNTAX, not that the target's other emitters are pure
+    // and eager, and its resolvers carry no override provenance for G1b.
+    const target = new JavaScriptTarget().createTarget();
+    expect(typeof target.cseBind).toBe('function');
+
+    const result = compile(ce.parse(PROBE_LATEX), { target, fallback: false });
+    expect(result.code).not.toMatch(/_cse/);
+    expect(occurrences(result.code, 'Math.sin')).toBe(3);
+  });
+
+  it('a REUSED caller-built direct target compiles identically twice', () => {
+    const target = new JavaScriptTarget().createTarget();
+    const first = compile(ce.parse(PROBE_LATEX), { target, fallback: false }).code;
+    const second = compile(ce.parse(PROBE_LATEX), { target, fallback: false }).code;
+
+    expect(second).toBe(first);
+    expect(first).not.toMatch(/_cse/);
+  });
+
+  it('leaves a zero-candidate expression untouched', () => {
+    for (const latex of ['x+y', '\\sin(x)+\\cos(x)', '2x^2+3x+1']) {
+      const expr = ce.parse(latex);
+      expect(compile(expr, { fallback: false }).code).toBe(
+        compile(expr, { fallback: false, cse: false }).code
+      );
+    }
+  });
+
+  it('gives the Python no-options entries a default-enabled session', () => {
+    // `compileFunction`/`compileLambda` take no options bag (a stated v1 gap):
+    // they get a default-enabled session (§4.2).
+    const python = new PythonTarget();
+    const expr = ce.parse(PROBE_LATEX);
+
+    expect(python.compileFunction(expr, 'f', ['u'])).toBe(
+      'def f(u):\n' +
+        '    return [_cse1 ** 2 + _cse1 / (_cse1 + 2) for _cse1 in [np.sin(6 * u)]][0]\n'
+    );
+    expect(python.compileLambda(expr, ['u'])).toBe(
+      'lambda u: [_cse1 ** 2 + _cse1 / (_cse1 + 2) for _cse1 in [np.sin(6 * u)]][0]'
+    );
+  });
+});
+
+/**
+ * §5.4 — the harvest boundary. A user-defined function's definition body is
+ * emitted once, under its OWN nested harvest scope (own regions and
+ * candidates, shared naming counter). The CALL SITES stay ineligible (G1b).
+ */
+describe('COMPILE CSE — user-function body dedup', () => {
+  const engineWithF = () => {
+    const engine = new ComputeEngine();
+    engine.assign('f', engine.parse('x \\mapsto \\sin(6x)^2 + \\sin(6x) + \\sin(6x)'));
+    return engine;
+  };
+
+  it('deduplicates inside the emitted `_fn_f`, not across call sites', () => {
+    const engine = engineWithF();
+    // The `Function`-literal route puts the emitted definitions in `code`.
+    const expr = engine.parse('t \\mapsto f(t) + f(2t)');
+    const result = compile(expr, { fallback: false });
+
+    // ONE `Math.sin` in the whole artifact: the definition body deduplicated.
+    expect(occurrences(result.code, 'Math.sin')).toBe(1);
+    expect(result.code).toContain(
+      'const _fn_f = (x) => (() => { const _cse1 = Math.sin(6 * x); ' +
+        'return _cse1 + _cse1 + Math.pow(_cse1, 2); })()'
+    );
+    // …and the two call sites are still two calls (G1b: never merged).
+    expect(occurrences(result.code, '_fn_f(')).toBe(2);
+
+    expect((result.run as (t: number) => number)(0.3)).toBeCloseTo(
+      compile(engineWithF().parse('t \\mapsto f(t) + f(2t)'), {
+        fallback: false,
+        cse: false,
+      }).run!(0.3) as number,
+      12
+    );
+  });
+
+  it('does not merge two identical call sites', () => {
+    const engine = engineWithF();
+    const expr = engine.parse('t \\mapsto f(2t) + f(2t) + f(2t)');
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, '_fn_f(2 * t)')).toBe(3);
+    // The only temporary is the one inside the definition body.
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+  });
+
+  it('keeps the definition value unchanged on the interval-js target', () => {
+    // The interval target collects user-function definitions into the runner's
+    // PREAMBLE, which the public `CompilationResult` does not expose — so the
+    // body's dedup is asserted here by value parity, not by shape.
+    const engine = engineWithF();
+    const expr = () => engine.parse('f(2u)');
+    const on = compile(expr(), { to: 'interval-js', fallback: false });
+    const off = compile(expr(), {
+      to: 'interval-js',
+      fallback: false,
+      cse: false,
+    });
+    const point = { lo: 0.3, hi: 0.3 };
+
+    expect((on.run as any)({ u: point }).value).toEqual(
+      (off.run as any)({ u: point }).value
+    );
+  });
+});
+
+/**
+ * §7.4 — error behavior at a guard edge. In `x ≠ 0 && f(1/x) && f(1/x)` the
+ * repeated occurrences sit in a POST-GUARD region (`And`'s operands after the
+ * first are lazy edges), so the binding is emitted behind the guard and the
+ * short circuit still protects it.
+ */
+describe('COMPILE CSE — guard edge (§7.4)', () => {
+  it('keeps a short-circuited guard short-circuiting', () => {
+    const expr = ce.parse(
+      'x \\ne 0 \\land \\sin(6u/x)^2 + \\sin(6u/x) + \\sin(6u/x) > 0'
+    );
+    const result = compile(expr, { fallback: false });
+
+    // The binding is INSIDE the guarded operand.
+    expect(result.code).toContain('const _cse1 = Math.sin((6 * _.u) / _.x)');
+    expect(result.code.indexOf('&&')).toBeLessThan(
+      result.code.indexOf('const _cse1')
+    );
+
+    // At `x = 0` the guarded operand evaluates NOTHING: a getter counts every
+    // read of `u`, which only the guarded code performs.
+    let reads = 0;
+    const guarded = {
+      x: 0,
+      get u() {
+        reads += 1;
+        return 0.3;
+      },
+    };
+    expect((result.run as (v: any) => boolean)(guarded)).toBe(false);
+    expect(reads).toBe(0);
+
+    // …and past the guard the value is unchanged.
+    expect((result.run as (v: any) => boolean)({ x: 1, u: 0.3 })).toBe(
+      compile(expr, { fallback: false, cse: false }).run!({
+        x: 1,
+        u: 0.3,
+      }) as unknown as boolean
+    );
+  });
+});
+
+/**
+ * §5.3 — non-scalar candidates and aliasing. Binding a `List`-valued candidate
+ * makes every occurrence reference ONE shared runtime object. The invariant it
+ * rests on — no `_SYS` / interval helper mutates its input — was audited before
+ * landing; this pins it where it matters, by routing one shared array through
+ * the two helpers that would otherwise sort/reverse in place.
+ */
+describe('COMPILE CSE — non-scalar aliasing', () => {
+  const aliased = () =>
+    ce.box([
+      'Add',
+      ['At', ['Sort', ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']]], 1],
+      ['At', ['Reverse', ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']]], 1],
+      ['At', ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']], 1],
+      ['At', ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']], 2],
+    ]);
+
+  it('shares one array across Sort, Reverse and direct access without drift', () => {
+    const expr = aliased();
+    const on = compile(expr, { fallback: false });
+    const off = compile(expr, { fallback: false, cse: false });
+
+    // One temporary, the LIST itself.
+    expect(on.code).toContain(
+      'const _cse1 = [Math.sin(_.u), Math.cos(_.u), Math.sinh(_.u), Math.cosh(_.u)]'
+    );
+    expect(occurrences(on.code, '_cse1')).toBe(5); // 1 binding + 4 uses
+    // The mutation-prone helpers copy first — the audited invariant, in the
+    // emitted source.
+    expect(on.code).toContain('(_cse1).slice().sort(');
+    expect(on.code).toContain('(_cse1).slice().reverse(');
+
+    for (const u of [0.7, -1.3, 0]) {
+      const a = (on.run as (v: any) => number)({ u });
+      expect(a).toBeCloseTo((off.run as (v: any) => number)({ u }), 12);
+      expect(a).toBeCloseTo(expr.subs({ u }).N().re!, 12);
+    }
+  });
+
+  it('is not reachable on the interval-js target (no collection lowering)', () => {
+    // Recorded rather than skipped: the interval target has no `At`/`Sort`/
+    // `Reverse` lowering at all, so a non-scalar candidate cannot be built for
+    // it. The aliasing invariant is pinned above on the JS target, where the
+    // audited `_SYS` helpers actually live.
+    const result = compile(aliased(), { to: 'interval-js', fallback: false });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/At: cannot compile/);
+  });
+});
+
+/**
+ * §7.6 — determinism, on every target: two compiles of one expression emit
+ * byte-identical source. The expression below bears BOTH a CSE candidate and a
+ * `tempVar()` temporary (a chained relation binds its shared middle operand),
+ * so both allocators draw from the one naming counter.
+ */
+describe('COMPILE CSE — determinism across targets', () => {
+  const CHAINED = `0 < ${PROBE_LATEX} < 10`;
+
+  it.each(['javascript', 'interval-js'] as const)(
+    'emits byte-identical source twice on %s',
+    (to) => {
+      const first = compile(ce.parse(CHAINED), { to, fallback: false }).code;
+      const second = compile(ce.parse(CHAINED), { to, fallback: false }).code;
+
+      expect(first).toContain('_cse1');
+      expect(first).toContain('_tv2');
+      expect(second).toBe(first);
+    }
+  );
+
+  it('emits byte-identical source twice on python', () => {
+    const python = new PythonTarget();
+    const first = python.compileToSource(ce.parse(CHAINED));
+    const second = python.compileToSource(ce.parse(CHAINED));
+
+    expect(first).toContain('_cse1');
+    expect(first).toContain('_tv2');
+    expect(second).toBe(first);
+  });
+
+  it('emits byte-identical GLSL twice (naming context, no CSE)', () => {
+    const first = glsl.compile(ce.parse(CHAINED)).code;
+    const second = glsl.compile(ce.parse(CHAINED)).code;
+
+    expect(first).not.toMatch(/_cse/);
+    expect(second).toBe(first);
+  });
+});
+
+/**
+ * §8 pyexec — the Python target's emitted source is validated with the real
+ * `ast` module, and (when a `python3` is on PATH) EXECUTED against a stub
+ * `np` whose `sin` counts its calls. That is what proves the flat binding
+ * comprehension `[body for _cse1 in [rhs1] for _cse2 in [rhs2]][0]` really
+ * evaluates each right-hand side exactly once and makes earlier names visible
+ * to later clauses — a shape no amount of source inspection can establish.
+ *
+ * The suite SKIPS, with a reason, when `python3` is unavailable. numpy is NOT
+ * required: the harness supplies the `np.sin` the emitted source calls.
+ */
+const PYTHON3: string | undefined = (() => {
+  try {
+    execFileSync('python3', ['--version'], { stdio: 'ignore' });
+    return 'python3';
+  } catch {
+    return undefined;
+  }
+})();
+
+if (PYTHON3 === undefined)
+  console.warn(
+    'COMPILE CSE — Python emitted source: SKIPPED, no `python3` on PATH ' +
+      '(the emitted-source shape assertions elsewhere still run).'
+  );
+
+const pyDescribe = PYTHON3 ? describe : describe.skip;
+
+pyDescribe('COMPILE CSE — Python emitted source (pyexec)', () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ce-cse-py-'));
+  });
+  // The scratch `.py` files are only inputs to `python3`; clean them up rather
+  // than leaking a temp directory per run.
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** `ast.parse` the emitted expression — a real Python parse, not a regexp. */
+  const astParse = (source: string, name: string): void => {
+    const file = join(dir, `${name}.py`);
+    writeFileSync(file, `_ = (\n${source}\n)\n`);
+    execFileSync(
+      PYTHON3!,
+      ['-c', 'import ast,sys; ast.parse(open(sys.argv[1]).read())', file],
+      { stdio: 'pipe' }
+    );
+  };
+
+  /**
+   * Execute the emitted expression against a stub `np` that counts `sin`
+   * calls, and return `{ calls, value }`.
+   */
+  const run = (
+    source: string,
+    name: string,
+    bindings: string
+  ): { calls: number; value: unknown } => {
+    const file = join(dir, `${name}.py`);
+    writeFileSync(
+      file,
+      [
+        'import math, json',
+        'class _NP:',
+        '    def __init__(self): self.calls = 0',
+        '    def sin(self, x):',
+        '        self.calls += 1',
+        '        return math.sin(x)',
+        'np = _NP()',
+        bindings,
+        `_value = (\n${source}\n)`,
+        'print(json.dumps({"calls": np.calls, "value": _value}))',
+      ].join('\n') + '\n'
+    );
+    const out = execFileSync(PYTHON3!, [file], { encoding: 'utf-8' });
+    return JSON.parse(out);
+  };
+
+  it('parses, and evaluates the bound right-hand side exactly once', () => {
+    const source = new PythonTarget().compileToSource(ce.parse(PROBE_LATEX));
+    astParse(source, 'probe');
+
+    const { calls, value } = run(source, 'probe-run', 'u = 0.3');
+    // ONE `np.sin` call for three occurrences — the point of the exercise.
+    expect(calls).toBe(1);
+    expect(value as number).toBeCloseTo(
+      compile(ce.parse(PROBE_LATEX), { fallback: false }).run!({
+        u: 0.3,
+      }) as number,
+      12
+    );
+  });
+
+  it('keeps later binding clauses able to see earlier ones', () => {
+    // `sin(6u)` occurs 3×, `cos(u)·sin(6u)²` 2×: two dependent temporaries, the
+    // second referencing the first.
+    const expr = ce.parse(
+      '\\frac{\\sin(6u)^2\\cos(u)}{1+\\sin(6u)^2\\cos(u)} + \\sin(6u)'
+    );
+    const source = new PythonTarget().compileToSource(expr);
+    expect(occurrences(source, 'for _cse')).toBe(2);
+    expect(source.indexOf('for _cse1 in')).toBeLessThan(
+      source.indexOf('for _cse2 in')
+    );
+    astParse(source, 'dependent');
+
+    const { calls, value } = run(
+      source,
+      'dependent-run',
+      'np.cos = math.cos\nu = 0.4'
+    );
+    expect(calls).toBe(1);
+    expect(value as number).toBeCloseTo(
+      compile(expr, { fallback: false }).run!({ u: 0.4 }) as number,
+      12
+    );
+  });
+
+  it('scopes a nested generator correctly (binder capture)', () => {
+    // The outer clause's right-hand side reads the ENCLOSING `n`; the inner
+    // `sum(… for n in range(…))` has its own Python scope.
+    const expr = ce.parse(
+      '\\sin(6n)^2+\\sin(6n)+\\sin(6n)+\\sum_{n=1}^{3}(\\sin(6n)^2+\\sin(6n)+\\sin(6n))'
+    );
+    const source = new PythonTarget().compileToSource(expr);
+    astParse(source, 'capture');
+
+    const { calls, value } = run(source, 'capture-run', 'n = 0.3');
+    // 1 for the outer temp + 9 inside the (undeduplicated) generator body.
+    expect(calls).toBe(10);
+    expect(value as number).toBeCloseTo(
+      compile(expr, { fallback: false }).run!({ n: 0.3 }) as number,
+      10
+    );
+  });
+
+  it('emits a per-statement binding that parses and runs inside a def', () => {
+    const expr = ce.box([
+      'Block',
+      ['Assign', 'acc', 0],
+      [
+        'Loop',
+        ['Assign', 'acc', ['Add', 'acc', probe3('u')]],
+        ['Element', 'i', ['Range', 1, 3]],
+      ],
+      'acc',
+    ]);
+    const source = new PythonTarget().compileFunction(expr, 'f', ['u']);
+    const file = join(dir, 'stmt.py');
+    writeFileSync(
+      file,
+      [
+        'import math, json',
+        'class _NP:',
+        '    def __init__(self): self.calls = 0',
+        '    def sin(self, x):',
+        '        self.calls += 1',
+        '        return math.sin(x)',
+        'np = _NP()',
+        source,
+        // `f` must run BEFORE `np.calls` is read: a dict literal evaluates its
+        // values left to right.
+        '_value = f(0.3)',
+        'print(json.dumps({"calls": np.calls, "value": _value}))',
+      ].join('\n') + '\n'
+    );
+    const out = JSON.parse(
+      execFileSync(PYTHON3!, [file], { encoding: 'utf-8' })
+    );
+    // Three iterations, ONE `np.sin` per iteration.
+    expect(out.calls).toBe(3);
+    // Three accumulated iterations of the deduplicated right-hand side.
+    expect(out.value as number).toBeCloseTo(
+      3 *
+        (compile(ce.box(probe3('u')), { fallback: false }).run!({
+          u: 0.3,
+        }) as number),
+      12
+    );
+  });
+
+  it('keeps a 32-binding stress source within the Python parser', () => {
+    // The per-region cap (§6.2) exists so a many-candidate region cannot grow
+    // source past what the parser accepts. The FLAT comprehension form is what
+    // keeps the nesting depth constant.
+    const terms: any[] = [];
+    for (let k = 0; k < 40; k++) {
+      const t = ['Sin', ['Multiply', k + 2, 'u']];
+      terms.push(t, t, t);
+    }
+    const source = new PythonTarget().compileToSource(ce.box(['Add', ...terms]));
+    expect(occurrences(source, 'for _cse')).toBe(32);
+    astParse(source, 'stress');
+
+    const { calls, value } = run(source, 'stress-run', 'u = 0.3');
+    // 32 bound right-hand sides + 8 uncapped candidates emitted inline (3× each).
+    expect(calls).toBe(32 + 8 * 3);
+    expect(value as number).toBeCloseTo(
+      compile(ce.box(['Add', ...terms]), { fallback: false }).run!({
+        u: 0.3,
+      }) as number,
+      9
+    );
+  });
+});
+
+/**
+ * §5.1(b) — one test per `LAZY_OPERANDS` entry, plus the chained relation the
+ * table cannot name (it lowers to `(a<m) && (m<b)` with no `And` node in the
+ * boxed tree). Each pins BOTH the laziness and the region behavior: the
+ * binding must be emitted INSIDE the conditional position, never hoisted in
+ * front of it. Drift between the table and an emitter's actual laziness shows
+ * up here.
+ */
+describe('COMPILE CSE — conditionality, per lazy-operand entry', () => {
+  /** The index at which the guarded region begins in the emitted source. */
+  const guardAt = (code: string, marker: string): number => code.indexOf(marker);
+
+  it.each([
+    ['If (value arms)', ce.box(['If', ['Less', 'x', 0], probe3('u'), 0]), '?'],
+    ['When (the value arm)', ce.box(['When', probe3('u'), ['Less', 'x', 0]]), '?'],
+    [
+      'And (operands after the first)',
+      ce.box(['And', ['Less', 'x', 0], ['Less', 0, probe3('u')]]),
+      '&&',
+    ],
+    [
+      'Or (operands after the first)',
+      ce.box(['Or', ['Less', 'x', 0], ['Less', 0, probe3('u')]]),
+      '||',
+    ],
+    [
+      'Coalesce (the default)',
+      ce.box(['Coalesce', 'x', probe3('u')]),
+      'Number.isNaN',
+    ],
+    [
+      'chained relation (comparison after the first)',
+      ce.box(['Less', 0, 'x', probe3('u')]),
+      '&&',
+    ],
+  ])('binds inside the conditional position: %s', (_name, expr, marker) => {
+    const result = compile(expr as Expression, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse1')).toBe(1);
+    expect(occurrences(result.code, 'Math.sin(6 * _.u)')).toBe(1);
+    // The binding sits AFTER the construct's conditional marker.
+    expect(guardAt(result.code, marker as string)).toBeGreaterThanOrEqual(0);
+    expect(guardAt(result.code, marker as string)).toBeLessThan(
+      result.code.indexOf('const _cse1')
+    );
+  });
+
+  it('never evaluates the guarded region when the guard decides', () => {
+    // One probe per short-circuiting entry: a getter counts every read of `u`,
+    // which only the guarded code performs.
+    const cases: Array<[string, Expression, Record<string, unknown>]> = [
+      ['If', ce.box(['If', ['Less', 'x', 0], probe3('u'), 0]), { x: 1 }],
+      ['And', ce.box(['And', ['Less', 'x', 0], ['Less', 0, probe3('u')]]), { x: 1 }],
+      ['Or', ce.box(['Or', ['Less', 'x', 0], ['Less', 0, probe3('u')]]), { x: -1 }],
+      ['Coalesce', ce.box(['Coalesce', 'x', probe3('u')]), { x: 1 }],
+    ];
+    for (const [name, expr, base] of cases) {
+      const run = compile(expr, { fallback: false }).run as (v: any) => unknown;
+      let reads = 0;
+      run({
+        ...base,
+        get u() {
+          reads += 1;
+          return 0.3;
+        },
+      });
+      expect(`${name}:${reads}`).toBe(`${name}:0`);
+    }
+  });
+});
+
+/**
+ * §5.2 G1b — emission purity. `isPure` describes the boxed operator, not the
+ * emitted code. A subtree that resolves through a caller-supplied mapping
+ * splices LIVE SOURCE whose evaluation count the engine does not control, and
+ * a subtree BELOW such a mapping is evaluated as often (or as seldom) as the
+ * custom emitter chooses. Neither may count toward a candidate.
+ */
+describe('COMPILE CSE — emission purity (G1b), caller mappings', () => {
+  const overridden = (op: string) =>
+    ce.box([
+      'Add',
+      ['Square', [op, ['Multiply', 6, 'u']]],
+      [op, ['Multiply', 6, 'u']],
+      [op, ['Multiply', 6, 'u']],
+    ]);
+
+  it('never binds a subtree that resolves through a `functions` mapping', () => {
+    const result = compile(overridden('Sin'), {
+      fallback: false,
+      functions: { Sin: 'mySin' },
+    });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, 'mySin(6 * _.u)')).toBe(3);
+  });
+
+  it('never binds an occurrence BELOW a caller-mapped operator', () => {
+    // The mapping is on the enclosing `Foo`; the repeated `sin(6u)` beneath it
+    // does not count, because the custom emitter controls how often — or
+    // whether — everything beneath it evaluates.
+    const result = compile(ce.box(['Foo', probe3('u')]), {
+      fallback: false,
+      functions: { Foo: 'myFoo' },
+    });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, 'Math.sin(6 * _.u)')).toBe(3);
+  });
+
+  it('never binds a subtree containing a STRING-valued `vars` entry', () => {
+    const result = compile(ce.parse(PROBE_LATEX), {
+      fallback: false,
+      vars: { u: 'Math.PI/4' },
+    });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, 'Math.sin(6 * Math.PI/4)')).toBe(3);
+  });
+
+  it('does not collide with a `_cse1` a caller splice introduces', () => {
+    // §4.1/§6.3: the collision inventory includes `_tv`/`_cse` tokens found in
+    // caller-supplied source strings, so the generated temp skips `_cse1`.
+    const result = compile(ce.parse(PROBE_LATEX), {
+      fallback: false,
+      preamble: 'const _cse1 = 1;',
+    });
+
+    expect(result.code).toContain('const _cse2 = Math.sin(6 * _.u)');
+    expect(result.code).not.toMatch(/const _cse1\b/);
+  });
+});
+
+/**
+ * G1b, second provenance channel: a per-operator `compile` handler on the
+ * operator DEFINITION (`ce.declare(name, { compile })`).
+ * `BaseCompiler.compileExpr` consults it before any built-in mapping and
+ * splices whatever source it returns, exactly like a caller-supplied
+ * `functions` entry — while an operator definition defaults to `pure: true`,
+ * so G1 does not catch it. The head is therefore ineligible AND everything
+ * beneath it is under-mapped.
+ */
+describe('COMPILE CSE — emission purity (G1b), per-operator compile handlers', () => {
+  /** A fresh engine whose `Quadrance` carries a custom compile handler. */
+  const withHandler = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('Quadrance', {
+      signature: '(number, number) -> number',
+      compile: (args, c, { language }) =>
+        language === 'javascript'
+          ? `((${c(args[0])})**2 + (${c(args[1])})**2)`
+          : undefined,
+    });
+    return e;
+  };
+
+  it('never binds a subtree whose head carries a `compile` handler', () => {
+    const e = withHandler();
+    const call = (): any => ['Quadrance', ['Multiply', 6, 'u'], 'u'];
+    const result = compile(e.box(['Add', call(), call(), call()]), {
+      fallback: false,
+    });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, '((6 * _.u)**2 + (_.u)**2)')).toBe(3);
+  });
+
+  it('never binds an occurrence BELOW a head with a `compile` handler', () => {
+    // The handler controls how often — or whether — its operands are emitted,
+    // so the repeated `sin(6u)` beneath it does not count toward a candidate.
+    const e = withHandler();
+    const result = compile(e.box(['Quadrance', probe3('u'), 0]), {
+      fallback: false,
+    });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, 'Math.sin(6 * _.u)')).toBe(3);
+  });
+});

@@ -24,9 +24,12 @@ JS:    Math.pow(Math.sin(6 * _.u), 2) + Math.sin(6 * _.u) / (Math.sin(6 * _.u) +
 GLSL:  _gpu_powi(sin(6.0 * u), 2.0) + sin(6.0 * u) / (sin(6.0 * u) + 2.0)
 ```
 
-`Math.sin(6 * _.u)` is computed three times per call. V8 cannot rescue this
-in general: `_SYS.*` helper calls (broadcast closures, `cabs`, interval
-arithmetic) are opaque to the JIT, and unoptimized tiers rescue nothing.
+`Math.sin(6 * _.u)` is computed three times per call. This *particular*
+shape V8's optimizing tier can rescue (a known-pure builtin over a plain
+load gets GVN'd — measured 1.0× in §8), but the general case cannot be:
+`_SYS.*` helper calls (broadcast closures, `cabs`, interval arithmetic)
+are opaque to the JIT — measured 1.8× when the repeat is `_SYS.gamma` or
+a corpus-shaped piecewise (§8) — and unoptimized tiers rescue nothing.
 
 Two distinct duplication sources need two distinct answers:
 
@@ -177,9 +180,9 @@ at every **root compilation boundary**:
 | entry | mechanism |
 | --- | --- |
 | `JavaScriptTarget.compile()` (expression route and the `Function`-literal route in `compileToTarget`) | created in the per-call `createTarget()`; harvest on the post-`rewriteAngularUnit` tree |
-| `PythonTarget` public entries — `compile`, `compileFunction`, `compileToSource`, `compileVectorized`, `compileLambda` (exhaustive list; entries that delegate to another boundary are noted in code) | same. `compileFunction`/`compileLambda` currently take no options bag: they get a default-enabled session; callers needing `cse: false` use `compile()`. Stated as a v1 option gap. |
+| `PythonTarget` public entries — `compile`, `compileFunction`, `compileToSource`, `compileVectorized`, `compileLambda` (exhaustive list; entries that delegate to another boundary are noted in code) | same. `compileFunction`/`compileVectorized`/`compileLambda` take a trailing `{ cse?: boolean }` options argument (default enabled), threaded into their session setup. |
 | `IntervalJavaScriptTarget.compile()` | same |
-| Direct custom-target route (`compile-expression.ts`) | **`compile-expression.ts` stamps a fresh `target.naming` before calling `compileRoot`; `target.cse` is stamped `enabled: false` — direct custom targets get NO CSE in Phase 1.** A direct target is caller-supplied code end to end: `cseBind` attests binding *syntax*, not that the target's other emitters are pure or eager, and its resolver functions carry no override provenance for G1b to consult. A target-level emission-purity attestation that re-enables CSE here is v2 (§11). Stamping-per-call means a reused caller target never carries stale state; `beginCompilation` additionally resets for callers invoking `compileRoot` directly. (`compileRoot`'s `(expr, target, prec)` signature is unchanged — the options channel is the stamp.) |
+| Direct custom-target route (`compile-expression.ts`) | **`compile-expression.ts` stamps a fresh `target.naming` before calling `compileRoot`; `target.cse` is stamped `enabled: false` — direct custom targets get NO CSE in Phase 1.** A direct target is caller-supplied code end to end: `cseBind` attests binding *syntax*, not that the target's other emitters are pure or eager, and its resolver functions carry no override provenance for G1b to consult. A target-level emission-purity attestation that re-enables CSE here is v2 (§11). An **explicit** `cse: true` alongside `target` is rejected with an error (silently stamping it off would leave the caller believing CSE ran); omitting the option keeps the silent off. Stamping-per-call means a reused caller target never carries stale state; `compileRoot` additionally re-opens the naming boundary (counter reset + expression symbols merged) for callers invoking it directly, and then runs `beginCompilation`. (`compileRoot`'s `(expr, target, prec)` signature is unchanged — the options channel is the stamp.) |
 | GPU targets (`glsl`/`wgsl` via `compileRoot`/`beginCompilation`, and `compileShaderBody`, which deliberately spans several root compiles to keep counters distinct) | naming context only — created/reset exactly where GPU random numbering resets today, preserving that mechanism's semantics |
 | `buildInterpreterFallback` | nothing — no emission |
 | User-function definition bodies (`ensureUserFunctionEmitted`) | nested harvest scope, same session and naming context (§5.4) |
@@ -210,11 +213,19 @@ representative; each occurrence records its DFS enter/exit interval so
 containment queries are O(1). Verification cost is expected
 O(occurrences); hash collisions make it worse, and the size gate does not
 bound that (it is a lower bound). A **deterministic per-bucket verification
-budget** (`CSE_MAX_VERIFY_NODES_PER_BUCKET`, proposed 10 000 compared
-nodes) caps the worst case: a bucket exhausting its budget is dropped
-whole, its occurrences emit inline unchanged — a lost optimization, never
-a correctness change — and the drop is deterministic for a given
-expression. Pinned by a synthetic-collision test (§8).
+budget** (`CSE_MAX_VERIFY_NODES_PER_BUCKET`, 10 000 compared nodes) caps
+the worst case, and **charges only comparisons that FAIL** — distinct
+structures sharing a hash, the adversarial-collision work the budget
+exists to bound. A successful match is the duplication the pass exists to
+find; its cost is proportional to the win and is never charged. (The
+implementation initially charged successes too: a size-s candidate with k
+occurrences charged (k−1)·s, silently disabling CSE near size×count ≈
+10 000 — precisely the high-value corpus shapes. Measured before/after in
+§8.) A bucket exhausting its budget is dropped whole, its occurrences emit
+inline unchanged — a lost optimization, never a correctness change — and
+the drop is deterministic for a given expression. Pinned by
+synthetic-collision tests at both the harvest and public-compile level
+(§8).
 
 ### 5.1 Regions — one inventory for harvest and emission
 
@@ -317,6 +328,13 @@ interval). The candidate pipeline, in order:
    - any subtree containing a node that resolves through a caller-supplied
      `functions` entry, `operators` entry, or *string* `vars` entry (live
      source splices; non-string `vars` are baked constants, safe);
+   - any subtree containing a node whose operator DEFINITION carries a
+     per-operator `compile` handler (`ce.declare(name, { compile })`).
+     `compileExpr` consults it before every built-in mapping and splices
+     whatever source it returns, while the definition defaults to
+     `pure: true` — so this is the same channel as a `functions` entry,
+     reached through the engine instead of the options bag. Like a
+     caller-mapped operator, it also under-maps its whole subtree;
    - any occurrence **below** a caller-mapped operator (a harvest DFS flag:
      the custom emitter controls how often — or whether — everything
      beneath it evaluates, so those occurrences do not count toward any
@@ -556,13 +574,28 @@ visibility and evaluate-once).
 ### Performance and complexity
 
 - Harvest: one edge-DFS, memoized sizes, cached hashes, interval
-  containment — expected linear in edges; worst case (adversarial hash
-  collisions in `isSame` verification) bounded by the size gate and region
-  cap. Asserted by benchmark, not assumed: (a) no-candidate control,
-  (b) the probe expression, (c) corpus-extreme shapes (~65k-node
-  deep-repeat synthetic; a 100+-occurrence candidate). Acceptance:
-  compile time within 10% of `cse: false` on (a) and (c).
-- Run-time win measured on (b) and a corpus-shaped piecewise, cse on/off.
+  containment, name-keyed memos for the G1b definition lookups — expected
+  linear in edges; adversarial hash collisions bounded by the
+  failed-comparison budget (§5).
+- **Measured (2026-07-29, `scratchpad/bench-cse.ts`), superseding the
+  original "within 10%" acceptance bound.** Candidate-bearing trees are
+  large compile-time WINS — the emitted source collapses: 524-node subtree
+  ×128 in a 67k-node tree (Tycho's flagship shape) **−51%**; 1576-node
+  ×128 in a 201k-node tree **−35%**; 56–173-node ×128 **−57%**;
+  120-occurrence candidate **−27%**; the 18-node probe +2%. No-candidate
+  controls pay the harvest DFS: **+17%** (mixed 961 nodes) to **+27%**
+  (400 same-operator terms, 2 399 nodes) — absolute cost ~2 ms, one-time
+  per compile, ~1 ms/1 000 nodes. The original ±10% bound was not
+  reachable without harvest-allocation surgery disproportionate to a
+  one-time cost; the revised acceptance is: **no-candidate compile
+  overhead ≤ 30% and ≤ 5 ms at 2 500 nodes; candidate-bearing
+  corpus-extreme shapes must not regress** (they win by ≥ 30%).
+- Run-time: the original probe (`Math.sin` repeats) measures **1.0×** —
+  V8's optimizing tier already GVNs a known-pure builtin over a plain
+  load, so §1's headline example understates the JIT and the win there is
+  compile-size only. The win appears exactly where §1's *general* claim
+  says it should — opaque `_SYS.*` helpers: probe with `_SYS.gamma`
+  **1.8×**, corpus-shaped piecewise **1.8×** (1e6 calls each).
 
 ### Landing gates
 
@@ -616,6 +649,13 @@ recorded so they aren't rediscovered:
   split at abrupt-control-flow boundaries and an ordering-aware G3.
 - `Match` CSE via nested harvest scopes over the plan's closure trees.
 - Binder clause-sequence binding honoring `clauseLocal` visibility.
+- Wire the REMAINING binder bodies through `compileOp`. Harvest opens a
+  bindable body region for every `scoped:` binder, but emission pushes it
+  for only three — `Sum`, `Product`, and the `Function` literal. Every
+  other binder body (`Integrate`, the comprehensions, …) is emitted under
+  a target whose `boundVars` the enclosing instance does not describe, so
+  the blind-instance guard degrades it to the pre-CSE emission: sound, at
+  the cost of a wasted harvest.
 - User-defined function applications as candidates, behind a sound
   transitive effect-row check (per `docs/EFFECTS-MODEL.md`).
 - Named/opaque callbacks to higher-order built-ins, behind sound callback

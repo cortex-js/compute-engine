@@ -23,6 +23,7 @@ type CompileExpressionOptions<T extends string = string> = {
   iterationBudget?: number;
   quadrature?: 'adaptive' | 'monte-carlo';
   symbolDeps?: Set<MathJsonSymbol>;
+  cse?: boolean;
 };
 
 /**
@@ -65,6 +66,17 @@ export function compile<T extends string = 'javascript'>(
 ): CompilationResult<T> {
   assertCompilationOptionsContract(options);
 
+  // An option-contract violation, not a compilation failure: raised OUTSIDE
+  // the `try` so the interpreter fallback cannot swallow it. A direct custom
+  // target never gets CSE in Phase 1 (§4.2), so an EXPLICIT `cse: true` here
+  // is a request that cannot be honored — silently stamping it off would leave
+  // the caller believing CSE ran.
+  if (options?.target !== undefined && options.cse === true)
+    throw new Error(
+      'CSE is not supported on direct custom targets in Phase 1; omit `cse` ' +
+        'or use a registered target.'
+    );
+
   try {
     // Determine the target to use
     if (options?.target) {
@@ -74,10 +86,33 @@ export function compile<T extends string = 'javascript'>(
       // compilation boundary: the caller's target may be one it built once
       // and reuses, and per-compilation numbering must restart for each
       // `compile()` call (recompile-replay determinism).
-      const code = BaseCompiler.compileRoot(
-        rewriteAngularUnit(expr),
-        options.target
-      );
+      const rewritten = rewriteAngularUnit(expr);
+      // Stamp a FRESH naming context for the generated temporaries. Per-call,
+      // so a target the caller reuses never carries stale numbering into the
+      // next compilation; `compileRoot`'s signature is unchanged — this is the
+      // options channel. Seeded with the names this compilation must not
+      // reuse: the expression's own symbols and any `_tv`/`_cse` token in the
+      // source the caller splices in.
+      options.target.naming = BaseCompiler.newNamingContext(rewritten, [
+        options.preamble,
+        options.target.preamble,
+        ...(options.vars ? Object.values(options.vars) : []),
+        ...(options.functions
+          ? Object.values(options.functions).map((f) =>
+              typeof f === 'string' ? f : undefined
+            )
+          : []),
+      ]);
+      // A DIRECT custom target gets no CSE in Phase 1 (design §4.2): a
+      // `cseBind` attests binding SYNTAX, not that the target's other emitters
+      // are pure and eager, and its resolver closures carry no override
+      // provenance for the emission-purity gate (G1b) to consult. Stamped per
+      // call, like the naming context, so a reused caller target never carries
+      // stale state.
+      // An EXPLICIT `cse: true` is rejected up front (see above the `try`):
+      // omitting the option keeps the silent off.
+      options.target.cse = { enabled: false, instances: [] };
+      const code = BaseCompiler.compileRoot(rewritten, options.target);
       return BaseCompiler.withReferences(
         {
           target: (options.target.language ?? 'custom') as T,
@@ -114,6 +149,7 @@ export function compile<T extends string = 'javascript'>(
       iterationBudget: options?.iterationBudget,
       quadrature: options?.quadrature,
       symbolDeps: options?.symbolDeps,
+      cse: options?.cse,
     }) as CompilationResult<T>;
   } catch (e) {
     if (options?.fallback ?? true) {

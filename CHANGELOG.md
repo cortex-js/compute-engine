@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Performance
+
+- **Random draws are up to 100x faster when the engine runs inside a secondary
+  JavaScript realm** — a `vm` context, a sandboxed worker, or an
+  embedder-supplied global. V8 compiles `Math.imul(...)` down to a single
+  machine instruction only when `Math` is the host realm's; reached through
+  another realm's global it becomes a property lookup plus a call, and the
+  PCG3D hash behind every draw performs six of them. Binding the function once
+  at module scope removes the lookup. Measured on node 22: 10 million draws
+  went from ~880 ms to ~40 ms in a `vm` context (and from ~36 s to ~0.5 s for a
+  10-million-sample Monte-Carlo integral under Jest). Draw values are
+  unchanged — the stability vectors are untouched.
+
 ### Bug Fixes
 
 - **Monte-Carlo integration and stochastic equality now replay under

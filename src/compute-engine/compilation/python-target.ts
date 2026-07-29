@@ -210,33 +210,43 @@ function compilePythonStatements(
   if (h === 'Break') return 'break';
   if (h === 'Continue') return 'continue';
   if (h === 'Return')
-    return `return ${BaseCompiler.compile(expr.ops[0], target)}`;
+    return `return ${BaseCompiler.compileOp(expr, 0, target, 0, expr.ops[0])}`;
 
   if (h === 'If') {
     // The Python target's comparisons already emit real Python booleans, so —
     // unlike the JS `compileLoopBody`, whose interval-JS targets need a
     // `scalarConditionTarget` to avoid comparison *objects* — the condition is
-    // compiled directly.
-    const cond = BaseCompiler.compile(expr.ops[0], target);
+    // compiled directly. The condition is a value expression (its own bindable
+    // region); each branch is a statement list again (design §5.1(c)).
+    const cond = BaseCompiler.compileOp(expr, 0, target, 0, expr.ops[0]);
     let code = `if ${cond}:\n${indentPythonStatements(
-      compilePythonStatements(expr.ops[1], target)
+      BaseCompiler.withCseScope(expr, 1, target, () =>
+        compilePythonStatements(expr.ops[1], target)
+      )
     )}`;
     if (expr.ops.length > 2)
       code += `\nelse:\n${indentPythonStatements(
-        compilePythonStatements(expr.ops[2], target)
+        BaseCompiler.withCseScope(expr, 2, target, () =>
+          compilePythonStatements(expr.ops[2], target)
+        )
       )}`;
     return code;
   }
 
   if (h === 'Block')
-    return expr.ops
-      .map((s) => compilePythonStatements(s, target))
-      .filter((s) => s !== '')
-      .join('\n');
+    return BaseCompiler.withCseScope(expr, -1, target, () =>
+      expr.ops
+        .map((s) => compilePythonStatements(s, target))
+        .filter((s) => s !== '')
+        .join('\n')
+    );
 
-  if (h === 'Loop') return compilePythonLoop(expr.ops, target);
+  if (h === 'Loop') return compilePythonLoop(expr.ops, target, expr);
 
-  return BaseCompiler.compile(expr, target);
+  // A bare expression statement is its own bindable region (keyed
+  // `(statement, -1)`); every other statement head reaches its value edges
+  // from `compileExpr` (an `Assign` RHS, …).
+  return BaseCompiler.compileOp(expr, -1, target, 0, expr);
 }
 
 /**
@@ -256,7 +266,10 @@ function compilePythonStatements(
  */
 function compilePythonLoop(
   args: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  /** The `Loop` node, when the caller has it: its body is a statement-list
+   * region (design §5.1(c)). */
+  node?: Expression
 ): string {
   if (!args[0]) throw new Error('Loop: no body');
   const body = args[0];
@@ -298,7 +311,9 @@ function compilePythonLoop(
   // (`If`/`Break`/`Continue`/`Return`), a flattened `Block`, and nested `Loop`s
   // all compose, for effect (no trailing `return`).
   const indented = indentPythonStatements(
-    compilePythonStatements(body, bodyTarget)
+    BaseCompiler.withCseScope(node, 0, bodyTarget, () =>
+      compilePythonStatements(body, bodyTarget)
+    )
   );
   return `${header}\n${indented}`;
 }
@@ -897,8 +912,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // expressions (`a if cond else b`) and `float('nan')`.
   If: (args, compile) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
-    return `((${compile(args[1])}) if (${compile(args[0])}) else (${compile(
-      args[2]
+    // Both arms are conditionally evaluated: their operand indices go to the
+    // compile callback, which opens the matching CSE region (`OperandCompiler`).
+    return `((${compile(args[1], 1)}) if (${compile(args[0])}) else (${compile(
+      args[2],
+      2
     )}))`;
   },
   // DIVERGENCE (documented, CO-P2-24): a *non-boolean* condition (e.g. one that
@@ -915,9 +933,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // Python list is TRUTHY, so the conditional expression below would
     // silently take the value branch for every element instead of selecting.
     BaseCompiler.assertScalarCondition(args[1]);
-    if (isSymbol(args[1], 'True')) return `(${compile(args[0])})`;
+    // The VALUE is the conditional position (operand 0); the condition is
+    // eager — see the `When` entry of the lazy-operand inventory.
+    if (isSymbol(args[1], 'True')) return `(${compile(args[0], 0)})`;
     if (isSymbol(args[1], 'False')) return "float('nan')";
-    return `((${compile(args[0])}) if (${compile(args[1])}) else float('nan'))`;
+    return `((${compile(args[0], 0)}) if (${compile(
+      args[1]
+    )}) else float('nan'))`;
   },
   // See the divergence note on `When` above (non-boolean condition → else
   // branch here vs interpreter throw).
@@ -929,13 +951,17 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // a collection condition into a silent whole-expression pick.
     for (let i = 0; i < args.length; i += 2)
       BaseCompiler.assertScalarCondition(args[i]);
+    // Every value arm, and every condition after the first, is conditionally
+    // evaluated — pass its operand index so the CSE pass opens its region.
     const build = (i: number): string => {
       if (i >= args.length) return "float('nan')";
       const cond = args[i];
       const val = args[i + 1];
       // `True` marks the default (else) branch.
-      if (isSymbol(cond, 'True')) return `(${compile(val)})`;
-      return `((${compile(val)}) if (${compile(cond)}) else ${build(i + 2)})`;
+      if (isSymbol(cond, 'True')) return `(${compile(val, i + 1)})`;
+      return `((${compile(val, i + 1)}) if (${
+        i === 0 ? compile(cond) : compile(cond, i)
+      }) else ${build(i + 2)})`;
     };
     return build(0);
   },
@@ -952,7 +978,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Loop — a Python statement loop (`while True:` / `for … in range(…):`), not
   // the base compiler's JS `for`-IIFE (a Python SyntaxError). See
   // compilePythonLoop for the supported shapes.
-  Loop: (args, _compile, target) => compilePythonLoop(args, target),
+  Loop: (args, _compile, target) =>
+    compilePythonLoop(args, target, BaseCompiler.cseParentNode()),
 
   // Special functions
   Erf: 'scipy.special.erf',
@@ -1416,6 +1443,16 @@ export class PythonTarget implements LanguageTarget<Expression> {
         `(lambda ${bindings.map((b) => b[0]).join(', ')}: ${body})(${bindings
           .map((b) => b[1])
           .join(', ')})`,
+      // Dependency-ordered CSE temporaries: a FLAT sequential binding
+      // comprehension, `[body for _cse1 in [rhs1] for _cse2 in [rhs2]][0]`.
+      // Later `for` clauses see earlier names, each right-hand side evaluates
+      // exactly once, and the nesting depth is CONSTANT — nested lambdas would
+      // grow with the candidate count and could break a previously-compilable
+      // expression (design §6.2, §7.5).
+      cseBind: (bindings, body) =>
+        `[${body} ${bindings
+          .map(([name, code]) => `for ${name} in [${code}]`)
+          .join(' ')}][0]`,
       operators: (op) => PYTHON_OPERATORS[op],
       functions: (id) => PYTHON_FUNCTIONS[id],
       // Resolve a mathematical constant; otherwise return `undefined` so
@@ -1472,6 +1509,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
         else stmts[last] = `return ${stmts[last]}`;
         return stmts.join('\n');
       },
+      // Per-compilation naming state for generated temporaries (see the
+      // JavaScript target).
+      naming: { counter: 0, usedNames: new Set<string>() },
       ...options,
     };
   }
@@ -1534,10 +1574,25 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
     const vars = options.vars as Record<string, string> | undefined;
+    // Root compilation boundary: fresh, deterministic numbering for the
+    // generated temporaries, seeded with the names this compilation must not
+    // reuse (see `NamingContext`).
     const target = this.createTarget({
       var: this.makeVarResolver(vars),
+      naming: BaseCompiler.newNamingContext(expr, [
+        options.preamble,
+        ...(vars ? Object.values(vars) : []),
+      ]),
     });
-    let code = withPythonHelpers(BaseCompiler.compile(expr, target));
+    // Common-subexpression elimination (design §4.2). This target has no
+    // `functions`/`operators` override channel, so the only G1b provenance to
+    // record is the string-valued `vars` keys.
+    BaseCompiler.openCseSession(expr, target, {
+      enabled: options.cse,
+      isStringVar: (name) =>
+        vars !== undefined && typeof vars[name] === 'string',
+    });
+    let code = withPythonHelpers(BaseCompiler.compileCseRoot(expr, target));
     if (this.includeImports) code = this.withImports(code);
 
     const result: CompilationResult<'python'> = {
@@ -1575,8 +1630,20 @@ export class PythonTarget implements LanguageTarget<Expression> {
     options: CompilationOptions<Expression> = {}
   ): string {
     const vars = options.vars as Record<string, string> | undefined;
-    const target = this.createTarget({ var: this.makeVarResolver(vars) });
-    const code = withPythonHelpers(BaseCompiler.compile(expr, target));
+    // Root compilation boundary (see `compile`).
+    const target = this.createTarget({
+      var: this.makeVarResolver(vars),
+      naming: BaseCompiler.newNamingContext(expr, [
+        options.preamble,
+        ...(vars ? Object.values(vars) : []),
+      ]),
+    });
+    BaseCompiler.openCseSession(expr, target, {
+      enabled: options.cse,
+      isStringVar: (name) =>
+        vars !== undefined && typeof vars[name] === 'string',
+    });
+    const code = withPythonHelpers(BaseCompiler.compileCseRoot(expr, target));
     return this.includeImports ? this.withImports(code) : code;
   }
 
@@ -1587,19 +1654,26 @@ export class PythonTarget implements LanguageTarget<Expression> {
    * @param functionName - Name of the Python function
    * @param parameters - Parameter names (e.g., ['x', 'y', 'z'])
    * @param docstring - Optional docstring for the function
+   * @param options - `cse: false` disables common-subexpression elimination
    */
   compileFunction(
     expr: Expression,
     functionName: string,
     parameters: string[],
-    docstring?: string
+    docstring?: string,
+    options?: { cse?: boolean }
   ): string {
     // Shadow the declared parameters so they stay bare identifiers (never
     // folded to an assigned engine value).
+    // Root compilation boundary (see `compile`). The declared parameters are
+    // emitted bare, so they join the collision inventory.
     const target = this.createTarget({
       var: this.makeVarResolver(undefined, parameters),
+      naming: BaseCompiler.newNamingContext(expr, undefined, parameters),
     });
-    const body = BaseCompiler.compile(expr, target);
+    // CSE is default-enabled; `options.cse` is the opt-out.
+    BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
+    const body = BaseCompiler.compileCseRoot(expr, target);
 
     const params = parameters.join(', ');
     let code = '';
@@ -1650,18 +1724,21 @@ export class PythonTarget implements LanguageTarget<Expression> {
    * @param functionName - Name of the Python function
    * @param parameters - Parameter names
    * @param docstring - Optional docstring
+   * @param options - `cse: false` disables common-subexpression elimination
    */
   compileVectorized(
     expr: Expression,
     functionName: string,
     parameters: string[],
-    docstring?: string
+    docstring?: string,
+    options?: { cse?: boolean }
   ): string {
     const baseFunction = this.compileFunction(
       expr,
       `_${functionName}_scalar`,
       parameters,
-      docstring
+      docstring,
+      options
     );
 
     let code = baseFunction + '\n';
@@ -1677,12 +1754,21 @@ export class PythonTarget implements LanguageTarget<Expression> {
    *
    * @param expr - The expression to compile
    * @param parameters - Parameter names
+   * @param options - `cse: false` disables common-subexpression elimination
    */
-  compileLambda(expr: Expression, parameters: string[]): string {
+  compileLambda(
+    expr: Expression,
+    parameters: string[],
+    options?: { cse?: boolean }
+  ): string {
+    // Root compilation boundary (see `compile` and `compileFunction`).
     const target = this.createTarget({
       var: this.makeVarResolver(undefined, parameters),
+      naming: BaseCompiler.newNamingContext(expr, undefined, parameters),
     });
-    const body = BaseCompiler.compile(expr, target);
+    // Default-enabled, like `compileFunction`; `options.cse` is the opt-out.
+    BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
+    const body = BaseCompiler.compileCseRoot(expr, target);
     // A multi-statement construct (loop-form Sum/Product, Loop, Block) can
     // never be a Python lambda body. This path bypasses the D6 value-operand
     // guard, so check explicitly.

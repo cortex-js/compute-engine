@@ -1013,7 +1013,7 @@ function compileGPUSumProduct(
   }
 
   // For-loop block (multi-line) — usable as compileFunction body
-  const acc = BaseCompiler.tempVar();
+  const acc = BaseCompiler.tempVar(target);
   const floatType = isWGSL ? 'f32' : 'float';
   const intType = isWGSL ? 'i32' : 'int';
 
@@ -2388,6 +2388,12 @@ function resetGPURandomNumbering(target: CompileTarget<Expression>): void {
   state.frames.length = 0;
   state.counters = 0;
   state.spatialCounter = undefined;
+  // The generated-temporary numbering (`_tv1`, `_tv2`, … — the `Sum`/`Product`
+  // loop accumulator) is per-compilation for exactly the same reason, and
+  // restarts on the same boundary. Its collision inventory describes the
+  // caller's expression, not this compilation, so it survives the reset — the
+  // same split as the random state's CONTEXT above.
+  BaseCompiler.resetNaming(target);
 }
 
 /**
@@ -4630,6 +4636,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         stmts[last] = `return ${stmts[last]}`;
         return stmts.join(';\n') + ';';
       },
+      // Per-compilation naming state for generated temporaries (the loop
+      // accumulator of `compileGPUSumProduct`). Numbered per compilation like
+      // the random counters below, and reset alongside them at each
+      // compilation boundary (`resetGPURandomNumbering`).
+      naming: { counter: 0, usedNames: new Set<string>() },
       ...options,
     };
     // Per-compilation random state (§7 of the Random family redesign),
@@ -4656,6 +4667,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const state = gpuRandomState(target);
     state.stage = stage;
     state.hostFrame = expr?.engine?._randomFrame !== undefined;
+    // Seed the generated-temporary collision inventory from the expression,
+    // unless the caller supplied a context of its own (a root that knows more
+    // than one expression, or the caller's `vars` source).
+    if (options.naming === undefined)
+      target.naming = BaseCompiler.newNamingContext(expr, [target.preamble]);
     return target;
   }
 
@@ -4716,6 +4732,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // identifier.
         return undefined;
       },
+      // Root compilation boundary: fresh, deterministic numbering for the
+      // generated temporaries, seeded with the expression's own symbols and any
+      // `_tv`/`_cse` token in the source the caller splices in.
+      naming: BaseCompiler.newNamingContext(expr, [
+        options.preamble,
+        ...(vars ? Object.values(vars) : []),
+      ]),
     });
     // The `vars` names, for the seed ABI check (§7): a seed that resolves to a
     // HOST-supplied uniform is the deferred ABI row, and must fail loudly
@@ -4884,7 +4907,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     body: ReadonlyArray<{ variable: string; expression: Expression }>,
     stage: string
   ): Array<{ variable: string; code: string }> {
-    const target = this.createTargetFor(body[0]?.expression, stage);
+    // ONE naming context for the whole body too, seeded from EVERY statement:
+    // the counter must stay distinct across statements (same reason as the
+    // random counters), and a `_tv`-named symbol in any statement is a
+    // collision for all of them.
+    const target = this.createTargetFor(body[0]?.expression, stage, {
+      naming: BaseCompiler.newNamingContext(body.map((a) => a.expression)),
+    });
     return body.map((assignment) => ({
       variable: assignment.variable,
       code: BaseCompiler.compile(assignment.expression, target),

@@ -32,6 +32,27 @@ import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/u
  *    sub-stream wiring is fully exercised; only the sampling loop is skipped.
  *    Its NaN result is the point, not a defect.
  *
+ *    A SMOOTH integrand may now be completed for real: `∫₀¹ x² dx` samples
+ *    1e7 points in ~0.5s (the deferred-estimator block at the end does this
+ *    three times). It is only the pathological ones — no closed form, poor
+ *    convergence — that stay out. The whole file is ~7s.
+ *
+ * 2b. If an estimator test suddenly costs TENS of seconds, suspect
+ *    `Math.imul`, not the engine. V8 lowers `Math.imul(...)` to one machine
+ *    instruction only when `Math` is the host realm's; through the secondary
+ *    `vm` context jest gives each test file it becomes a property load plus a
+ *    call, ~700ns instead of ~1ns, and `pcg3d` makes six per draw — which put
+ *    a 1e7-sample estimate at 36s here versus 1.4s under `tsx`.
+ *    `numerics/random.ts` binds it once as `const imul = Math.imul` to avoid
+ *    that; check the alias is intact before blaming anything else.
+ *
+ *    The corollary for sizing any test here: NEVER take a timing from `npx
+ *    tsx` — the two environments are not comparable on this path. Read the
+ *    duration out of jest itself (`--json --outputFile`, then
+ *    `assertionResults[].duration`). A `-t` filter placed after `--` is
+ *    parsed as a PATH pattern, so timing "one test" that way silently times
+ *    the whole file.
+ *
  * 3. Do NOT wrap an integral in a short `withTimeLimit` to speed it up: the
  *    budget is enforced by THROWING, not by truncating the estimate. Deadline
  *    behavior is tested against `monteCarloEstimate` directly instead.
@@ -80,7 +101,7 @@ const res = (x: any): (number | undefined)[] =>
 // ─── The primitive, through the engine ──────────────────────────────────────
 //
 
-describe.skip('ce._substream', () => {
+describe('ce._substream', () => {
   /** Three draws of sub-stream `tag`, taken inside a frame seeded `seed`
    * after `burn` draws have already been consumed from the frame itself. */
   const inFrame = (seed: number, tag: number, burn: number): number[] =>
@@ -135,7 +156,7 @@ describe.skip('ce._substream', () => {
 // ─── monteCarloEstimate ─────────────────────────────────────────────────────
 //
 
-describe.skip('monteCarloEstimate', () => {
+describe('monteCarloEstimate', () => {
   // Published through `src/numerics.ts`, so the sub-stream had to arrive as an
   // OPTIONAL trailing parameter. An external caller using the old signature
   // must be unaffected.
@@ -199,7 +220,7 @@ describe.skip('monteCarloEstimate', () => {
 // ─── Wiring: the estimators actually ask the engine for a sub-stream ────────
 //
 
-describe.skip('Integrate / NIntegrate derive a sub-stream', () => {
+describe('Integrate / NIntegrate derive a sub-stream', () => {
   it('Integrate asks for exactly one sub-stream', () => {
     const tags = tagsUsed((e) =>
       e.box(['WithRandomSeed', 1, ce.parse(CHEAP)]).N()
@@ -273,7 +294,7 @@ describe.skip('Integrate / NIntegrate derive a sub-stream', () => {
   });
 });
 
-describe.skip('An estimator consumes ZERO frame indices', () => {
+describe('An estimator consumes ZERO frame indices', () => {
   // THE property that proves the design. Routing the estimator's samples
   // through `ce._random()` — the one-line fix that was correct for
   // `RandomPrime` — fails exactly here.
@@ -315,7 +336,7 @@ describe.skip('An estimator consumes ZERO frame indices', () => {
   });
 });
 
-describe.skip('stochasticEqual replays a seeded verdict', () => {
+describe('stochasticEqual replays a seeded verdict', () => {
   const probe = (seed: number): string =>
     ce
       .box([
@@ -372,41 +393,16 @@ describe('A DEFERRED estimator keeps its seed frame', () => {
     ]);
   };
 
-  // The two live tests below assert on the GATE and the FLAG, never on a
-  // sampled value, so neither completes an estimate: 35 ms and 49 ms measured.
-  // The two that do complete one are skipped — see the note before them.
+  // Two of these COMPLETE a Monte-Carlo estimate (1e7 samples), at ~0.5s and
+  // ~1.1s. They were 22.7s and 49.6s until `numerics/random.ts` bound
+  // `Math.imul` to a module-scope `imul` — see note 2b in the file header if
+  // they ever regress to tens of seconds.
 
   it('stays whole rather than stripping the frame', () => {
     expect(deferred().evaluate().operator).toBe('WithRandomSeed');
   });
 
-  // ── Skipped: each of these COMPLETES a Monte-Carlo estimate ───────────────
-  //
-  // Measured in jest (not under `tsx` — see below): route equality 49.6 s, the
-  // completed-estimate check 22.7 s. Together they are the whole cost of this
-  // block, against this file's ~10 s budget.
-  //
-  // TRAP, and the reason these look affordable when they are not: the same two
-  // integrals run in ~1 s each under `npx tsx`. The integrand compiles in BOTH
-  // environments (verified: `compiled.success` is true and both take exactly
-  // 1e7 samples) — the 25x is entirely `Math.imul`. Inside jest's VM context
-  // `Math.imul(...)` is not inlined to the machine instruction: every call is a
-  // property load on the context's `Math` plus a call, ~700 ns instead of ~1 ns
-  // (measured: 1e7 bare `Math.imul` calls = 7 s in jest). `pcg3d` — the PCG3D
-  // hash behind every derived-sub-stream draw — calls it six times per draw, so
-  // a 1e7-sample estimate pays ~30 s here and ~40 ms anywhere else. Nothing
-  // about it is a defect in the engine, and production is unaffected.
-  //
-  // So: NEVER size an estimator test with a `tsx` measurement. Take the
-  // duration from jest (`--json --outputFile`, read
-  // `assertionResults[].duration` — a `-t` filter placed after `--` is parsed
-  // as a PATH pattern, so timing "one test" that way silently times the whole
-  // file).
-  //
-  // Un-skip to verify by hand after touching the pending gate, the
-  // `readsRandomFrame` flag, or the sub-stream derivation.
-
-  it.skip('completes to the same estimate on both routes', () => {
+  it('completes to the same estimate on both routes', () => {
     // Route equality is THE property (§2's "same values" claim, applied to an
     // estimate rather than a draw): with the frame stripped, route A drifted
     // run to run while route B was stable, so one A-vs-B comparison catches it.
@@ -416,7 +412,7 @@ describe('A DEFERRED estimator keeps its seed frame', () => {
     );
   });
 
-  it.skip('a COMPLETED estimate still strips the frame (§6 unchanged)', () => {
+  it('a COMPLETED estimate still strips the frame (§6 unchanged)', () => {
     const e = new ComputeEngine();
     expect(
       e

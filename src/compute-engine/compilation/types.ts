@@ -7,13 +7,29 @@ import type { Interval, IntervalResult } from '../interval/types.js';
 export type TargetSource = string;
 
 /**
+ * Compile a sub-expression of the construct a handler is lowering.
+ *
+ * `opIndex` is the operand index the sub-expression sits at in the construct's
+ * OWN operand list. A handler lowering a construct with
+ * conditionally-evaluated operand positions (the `LAZY_OPERANDS` inventory,
+ * `cse.ts`) passes it for those positions, so the CSE pass can push the
+ * matching region instance (`docs/plans/2026-07-28-compile-cse-design.md`
+ * §5.1). It is OPTIONAL: a handler that omits it compiles exactly as before —
+ * the sub-expression simply inherits the enclosing region.
+ */
+export type OperandCompiler<Expr = unknown> = (
+  expr: Expr,
+  opIndex?: number
+) => TargetSource;
+
+/**
  * A compiled function that can be executed
  */
 export type CompiledFunction<Expr = unknown> =
   | string
   | ((
       args: ReadonlyArray<Expr>,
-      compile: (expr: Expr) => TargetSource,
+      compile: OperandCompiler<Expr>,
       target: CompileTarget<Expr>
     ) => TargetSource);
 
@@ -30,6 +46,127 @@ export type CompiledOperators = Record<
  */
 export type CompiledFunctions<Expr = unknown> = {
   [id: MathJsonSymbol]: CompiledFunction<Expr>;
+};
+
+/**
+ * Per-compilation state for the names the compiler GENERATES (the `tempVar()`
+ * temporaries `_tv1`, `_tv2`, …).
+ *
+ * Always present, on every target and every language: two `compile()` calls on
+ * one expression must emit byte-identical source, which a random name cannot
+ * give. Created at each root compilation boundary (each target's
+ * `createTarget()`; `compile-expression.ts` for the direct custom-target
+ * route) and held as a SHARED OBJECT REFERENCE on `CompileTarget.naming`, so
+ * it survives the `{ ...target }` spreads the compiler makes while recursing —
+ * scalar fields would fork and two branches would then allocate the same name.
+ */
+export type NamingContext = {
+  /** How many generated names have been allocated. Names are positional
+   * (`_tv1`, `_tv2`, …), so a fresh context restarts at `_tv1`. */
+  counter: number;
+
+  /**
+   * The names this compilation must NOT generate: every symbol name of the
+   * compiled expression, plus any `_tv`/`_cse`-prefixed identifier token
+   * appearing in caller-supplied source (`functions` strings, string-valued
+   * `vars`, `preamble`). Neither prefix is reserved — MathJSON accepts
+   * underscore-initial symbols, and a lambda parameter or `Block` local named
+   * `_tv1` emits as a bare identifier — so a generated name that appears here
+   * is SKIPPED rather than assumed unique.
+   *
+   * Mutable: engine-internal per-compilation state, added to in place as
+   * nested trees (a user-function definition body) join the artifact.
+   */
+  usedNames: Set<string>;
+};
+
+/**
+ * One EMISSION-TIME instance of a static CSE region
+ * (`docs/plans/2026-07-28-compile-cse-design.md` §6.1).
+ *
+ * Static regions describe the tree; instances exist while code is emitted. The
+ * distinction is load-bearing for every re-entrant emission of shared
+ * structure — an unrolled `Sum` compiles the SAME body node objects once per
+ * index value, so a bare node-keyed map would emit iteration 1's temporary for
+ * every later iteration (silent wrong values). Each such emission pushes a
+ * fresh instance, so bindings can never leak to a context where they are not
+ * in scope.
+ *
+ * ## Why the analysis types are opaque here
+ *
+ * `region`, and the keys of `state`/`names`, are the `CseRegion` /
+ * `CseCandidate` of `cse.ts`, kept **structurally opaque** (`object`) in this
+ * module: `compilation/types.ts` is expression-type-free by design — an import
+ * reaching `global-types` would close a module cycle (the zero-cycle budget,
+ * `docs/architecture/ZERO-CYCLES-PLAN.md`) — and `cse.ts`'s types are built on
+ * `Expression`. `BaseCompiler`, the only consumer, narrows them; nothing else
+ * inspects these fields.
+ */
+export type CseRegionInstance = {
+  /**
+   * The static region this instance realizes (a `CseRegion`), or `undefined`
+   * for a **blind** instance — one pushed because emission entered a binding
+   * scope the CSE wiring does not know about (a binder body with no push/pop
+   * site). A blind instance resolves no candidate, so the subtree simply
+   * compiles without CSE: unknown territory degrades to the pre-CSE emission,
+   * never to a capture.
+   */
+  readonly region: object | undefined;
+
+  /** Temporaries bound at this instance, in dependency order. */
+  readonly bindings: Array<[name: string, code: string]>;
+
+  /** Per-candidate (`CseCandidate`) occurrence state (§6.1). */
+  readonly state: Map<object, 'defining' | 'bound'>;
+
+  /** The temp name allocated for each `'bound'` candidate. */
+  readonly names: Map<object, string>;
+
+  /**
+   * The `boundVars` of the target this instance was pushed under. Emission
+   * reaching a target with a DIFFERENT set has entered a binding scope this
+   * instance does not describe, and pushes a blind instance instead.
+   */
+  readonly boundVars: ReadonlySet<string> | undefined;
+};
+
+/**
+ * Per-compilation CSE state (`docs/plans/2026-07-28-compile-cse-design.md`
+ * §4.1). Present on every compilation of a target that can bind temporaries
+ * (`cseBind`); `enabled: false` when the caller passed `cse: false`, when the
+ * target has no `cseBind`, or on the direct custom-target route (which gets no
+ * CSE in Phase 1 — §4.2).
+ *
+ * Like `NamingContext`, this is a SHARED OBJECT REFERENCE on the target
+ * (`CompileTarget.cse`), so it survives the compiler's pervasive
+ * `{ ...target }` spread copies; scalar fields would fork.
+ */
+export type CseSession = {
+  /** `false` ⇒ every CSE hook is inert and emission is unchanged. */
+  enabled: boolean;
+
+  /**
+   * The static harvest of the tree currently being emitted (the `CseHarvest`
+   * of `harvestCse`, opaque here — see `CseRegionInstance`). Swapped for a
+   * NESTED harvest while a user-defined function's body is emitted (§5.4) —
+   * own regions and candidates, same session and naming counter.
+   */
+  harvest?: object;
+
+  /**
+   * The provenance predicates this compilation harvests with (§5.2 G1b). Kept
+   * on the session because the NESTED harvest of a user-defined function's
+   * body (§5.4) runs long after the boundary that knew the caller's override
+   * key sets. (Structurally a `CseHarvestOptions`; the thresholds it also
+   * accepts are defaulted.)
+   */
+  harvestOptions?: {
+    isOverriddenOperator?: (name: string) => boolean;
+    isStringVar?: (name: string) => boolean;
+  };
+
+  /** The emission-time region instance stack, innermost last. */
+  instances: CseRegionInstance[];
 };
 
 /**
@@ -105,6 +242,53 @@ export interface CompileTarget<Expr = unknown> {
   ) => string;
 
   /**
+   * Bind a **dependency-ordered** list of temporaries around an
+   * expression-position body: each temporary is evaluated exactly once, and
+   * later right-hand sides — and the body — may reference earlier ones. The
+   * compile-time common-subexpression elimination pass
+   * (`docs/plans/2026-07-28-compile-cse-design.md` §6.2) wraps each region's
+   * compiled body with this. **Absent ⇒ CSE is inactive for this target** (the
+   * GPU shader targets, whose driver compilers already CSE pure expressions).
+   *
+   * Deliberately NOT the existing `bindExpr`: that one's parallel-application
+   * shape (`((a, b) => body)(x, y)`) cannot express a temporary whose value
+   * depends on an earlier temporary, which is exactly what nested candidates
+   * produce.
+   *
+   * - **javascript / interval-js** — a sequential-`const` IIFE:
+   *   `(() => { const _cse1 = …; const _cse2 = …_cse1…; return body; })()`.
+   * - **python** — a FLAT sequential binding comprehension,
+   *   `[body for _cse1 in [rhs1] for _cse2 in [rhs2]][0]`: later `for` clauses
+   *   see earlier names, the nesting depth is constant (nested lambdas would
+   *   grow with the candidate count and could break a previously-compilable
+   *   expression), and each right-hand side evaluates exactly once.
+   *
+   * ## Emitter-author contract
+   *
+   * A construct with **conditionally-evaluated operand positions** — a value
+   * arm behind a ternary, a short-circuited connective operand, a coalescing
+   * default — needs an entry in the `LAZY_OPERANDS` inventory (`cse.ts`) plus a
+   * conditionality test, AND its emitter must compile those operands through
+   * `BaseCompiler.compileOp` (or pass the operand index to the `compile`
+   * callback it was handed — see `OperandCompiler`). A missing entry is a
+   * soundness bug: a temporary could be hoisted out of an arm that never runs.
+   * A spurious entry only costs an optimization.
+   */
+  cseBind?: (
+    bindings: ReadonlyArray<[name: string, code: string]>,
+    body: string
+  ) => string;
+
+  /**
+   * Per-compilation common-subexpression-elimination state — the static
+   * harvest plus the emission-time region-instance stack. See `CseSession`: a
+   * shared object reference, created once per root compilation boundary, that
+   * survives the compiler's `{ ...target }` spreads. Absent (or
+   * `enabled: false`) ⇒ emission is exactly the pre-CSE emission.
+   */
+  cse?: CseSession;
+
+  /**
    * Lower a `Which`/`If` whose condition may be an indexed collection at run
    * time to the target's ELEMENT-WISE selection form (`np.select` semantics —
    * `docs/plans/2026-07-27-elementwise-which-design.md`, R1–R4). The clauses
@@ -129,7 +313,7 @@ export interface CompileTarget<Expr = unknown> {
    */
   selection?: (
     args: ReadonlyArray<Expr>,
-    compile: (expr: Expr) => TargetSource,
+    compile: OperandCompiler<Expr>,
     target: CompileTarget<Expr>
   ) => TargetSource | null;
 
@@ -170,6 +354,39 @@ export interface CompileTarget<Expr = unknown> {
    * source such as `return _acc; + 1.0`).
    */
   bareStatementBlocks?: boolean;
+
+  /**
+   * Statement-hoisting sink for a `bareStatementBlocks` target (GLSL/WGSL).
+   *
+   * A lowering that needs statements — the loop form of `Sum`/`Product` — can
+   * push them here and return a plain expression naming the result, so the
+   * construct COMPOSES: `1 + \sum_{k=0}^{n} kx` emits the loop ahead of the
+   * `return` instead of failing closed (Tycho item 110). The emitter that owns
+   * the enclosing statement position drains the sink — see
+   * `BaseCompiler.compileStatementBody`.
+   *
+   * `boundVars` records the target's bound-variable set at the moment the sink
+   * was installed. Hoisting a statement OUT of a binder scope would move code
+   * that references the bound name (a loop body referencing its own index) to
+   * where the name does not exist, so hoisting is legal only while
+   * `target.boundVars === hoist.boundVars`. Every binder spreads a fresh
+   * `boundVars` set into its inner target, which closes the sink automatically;
+   * a binder that wants its body to hoist installs a fresh sink of its own
+   * (`compileGPUBigOp` does, so nested loops compose too).
+   *
+   * Absent (`undefined`) on every other target: the JavaScript family wraps
+   * multi-statement constructs in an IIFE, which is already an expression.
+   *
+   * One divergence to know about: a hoisted loop inside a conditional ARM runs
+   * whichever branch is selected. That matches the GPU selection lowering,
+   * which already computes every condition and arm (the domain is pure, so
+   * this is a cost, not a semantic, difference) — and the alternative was
+   * failing closed to the interpreter, which is slower still.
+   */
+  hoist?: {
+    stmts: string[];
+    boundVars: ReadonlySet<string> | undefined;
+  };
 
   /**
    * When set, a cap on the trip count of emitted `Sum`/`Product` loops: a
@@ -262,6 +479,16 @@ export interface CompileTarget<Expr = unknown> {
    * such a copy as a root target of its own.
    */
   beginCompilation?: (target: CompileTarget<Expr>) => void;
+
+  /**
+   * Per-compilation naming state for the temporaries the compiler generates
+   * (`BaseCompiler.tempVar`). See `NamingContext`: a shared object reference,
+   * created once per root compilation boundary, that survives the compiler's
+   * `{ ...target }` spreads. A target reaching `tempVar()` without one gets a
+   * fresh context installed on the spot (a hand-rolled target driven through
+   * `BaseCompiler.compile` directly); the built-in targets always have one.
+   */
+  naming?: NamingContext;
 
   /** Target language identifier (for debugging/logging) */
   language?: string;
@@ -498,6 +725,28 @@ export interface CompilationOptions<Expr = unknown> {
    * generated code's capture set). See `CompileTarget.symbolDeps`.
    */
   symbolDeps?: Set<MathJsonSymbol>;
+
+  /**
+   * Common-subexpression elimination (default `true`).
+   *
+   * A repeated **pure** subtree inside one compiled expression is evaluated
+   * once and referenced by a temporary, instead of being emitted — and
+   * executed — at every occurrence
+   * (`docs/plans/2026-07-28-compile-cse-design.md`). Values are unchanged
+   * (same operations, no reassociation), selection laziness is preserved (no
+   * binding crosses a conditional arm, a short-circuited connective tail, or a
+   * binder body), and draw streams are unchanged (only pure subtrees, never a
+   * user-defined function application, are candidates).
+   *
+   * `false` restores the pre-CSE emission. Note this is NOT byte-identical to
+   * output from before the CSE change-set: generated temporary names are
+   * deterministic (`_tv1`, `_tv2`, …) regardless of this option.
+   *
+   * Consumed at each root compilation boundary. A target with no `cseBind`
+   * capability (the GPU shader targets), and the direct custom-target route
+   * (`compile({ target })`), behave as `false` in Phase 1.
+   */
+  cse?: boolean;
 
   /**
    * How a `LanguageTarget.compile()` call reports an expression it cannot lower

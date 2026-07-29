@@ -366,13 +366,17 @@ describe('COMPILATION PERFORMANCE', () => {
       log(`  Memory for 100 compilations: ${(memory / 1024).toFixed(2)} KB`);
       log(`  Per compilation: ${(memory / 100 / 1024).toFixed(2)} KB`);
 
-      // Should be reasonable (< 2MB for 100 compilations). The budget needs
-      // headroom over the ~1.1MB typically observed: jest doesn't expose
-      // `global.gc`, so `measureMemory` can't force a collection and the
-      // heap delta includes ambient garbage (the published 0.73.0 package
-      // measures ~1.4MB for this same loop under plain node). This guards
-      // against leaks (an order-of-magnitude blowup), not byte-level drift.
-      expect(memory).toBeLessThan(2 * 1024 * 1024);
+      // Should be reasonable (< 8MB for 100 compilations). The budget needs
+      // headroom over the observed range: jest doesn't expose `global.gc`,
+      // so `measureMemory` can't force a collection and the heap delta
+      // includes ambient garbage (2–4.6MB observed depending on machine
+      // load; the published 0.73.0 package measures ~1.4MB for this same
+      // loop under plain node, and the CSE harvest adds ~0.85MB of
+      // TRANSIENT allocation — retained memory verified identical with
+      // `--expose-gc`, ~4–7KB per 100 compiles, cse on or off). This
+      // guards against leaks (an order-of-magnitude blowup), not
+      // byte-level drift.
+      expect(memory).toBeLessThan(8 * 1024 * 1024);
     });
 
     it('should measure memory usage of GLSL compilation', () => {
@@ -388,7 +392,9 @@ describe('COMPILATION PERFORMANCE', () => {
       log(`  GLSL memory for 100 compilations: ${(memory / 1024).toFixed(2)} KB`);
       log(`  Per compilation: ${(memory / 100 / 1024).toFixed(2)} KB`);
 
-      expect(memory).toBeLessThan(1024 * 1024);
+      // Same leak-guard-not-drift-guard contract as above: ~1.3MB observed
+      // under load with the (transient) naming-context inventory included.
+      expect(memory).toBeLessThan(4 * 1024 * 1024);
     });
   });
 

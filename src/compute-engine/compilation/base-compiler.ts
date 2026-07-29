@@ -49,8 +49,70 @@ import type {
   CompileTarget,
   CompilationResult,
   CompiledRunner,
+  CseRegionInstance,
+  NamingContext,
+  OperandCompiler,
   TargetSource,
 } from './types.js';
+import { candidateAt, childRegionAt, harvestCse } from './cse.js';
+import type { CseHarvest, CseHarvestOptions, CseRegion } from './cse.js';
+
+/**
+ * A `_tv`/`_cse`-prefixed identifier token, as it appears inside a
+ * caller-supplied source string. The lookbehind keeps it from matching the
+ * tail of a longer identifier (`a_tv1`).
+ */
+const GENERATED_NAME_RE = /(?<![\p{L}\p{N}_])_(?:tv|cse)[\p{L}\p{N}_]*/gu;
+
+/** Accumulate every symbol name of `expr` into `names`. One walk by node
+ * object (a shared subtree is visited once — the set is a union either way). */
+function collectSymbolNames(
+  expr: Expression,
+  names: Set<string>,
+  seen: Set<Expression>
+): void {
+  if (seen.has(expr)) return;
+  seen.add(expr);
+  if (isSymbol(expr)) {
+    names.add(expr.symbol);
+    return;
+  }
+  if (isDictionary(expr)) {
+    for (const v of expr.values) collectSymbolNames(v, names, seen);
+    return;
+  }
+  if (isFunction(expr)) {
+    names.add(expr.operator);
+    for (const op of expr.ops) collectSymbolNames(op, names, seen);
+  }
+}
+
+/**
+ * The collision inventory of a compilation (`NamingContext.usedNames`): every
+ * symbol name reachable in `expr`, plus every `_tv`/`_cse` token appearing in
+ * the caller-supplied source strings spliced into the emitted code.
+ */
+function collectUsedNames(
+  expr: Expression | ReadonlyArray<Expression | undefined> | undefined,
+  sources?: ReadonlyArray<string | undefined>,
+  extra?: ReadonlyArray<string>
+): Set<string> {
+  const names = new Set<string>();
+  const seen = new Set<Expression>();
+  if (Array.isArray(expr)) {
+    for (const e of expr)
+      if (e !== undefined) collectSymbolNames(e, names, seen);
+  } else if (expr !== undefined)
+    collectSymbolNames(expr as Expression, names, seen);
+  if (extra) for (const n of extra) names.add(n);
+  if (sources) {
+    for (const src of sources) {
+      if (typeof src !== 'string' || src.length === 0) continue;
+      for (const m of src.matchAll(GENERATED_NAME_RE)) names.add(m[0]);
+    }
+  }
+  return names;
+}
 
 /**
  * Compile-time guard around `isPossiblyCollectionTyped`. A `broadcastable<T>`
@@ -240,6 +302,71 @@ export class BaseCompiler {
   }
 
   /**
+   * Whether `target` currently accepts hoisted statements (Tycho item 110).
+   *
+   * True only when the target declares a `hoist` sink AND no binder has been
+   * entered since it was installed: a statement hoisted out of a binder scope
+   * would reference a name that does not exist where it lands. Every binder
+   * spreads a FRESH `boundVars` set into its inner target, so the identity
+   * comparison detects the crossing without every binding site having to
+   * cooperate. A binder that wants its body to hoist installs its own sink.
+   */
+  static canHoist(target: CompileTarget<Expression>): boolean {
+    return (
+      target.hoist !== undefined && target.hoist.boundVars === target.boundVars
+    );
+  }
+
+  /** Push a statement onto `target`'s hoist sink. Callers must check
+   * `canHoist` first — hoisting into a closed sink is a compiler bug. */
+  static hoistStatement(
+    target: CompileTarget<Expression>,
+    ...stmts: string[]
+  ): void {
+    if (!BaseCompiler.canHoist(target))
+      throw new Error(
+        'Internal: hoisting a statement out of a binder scope (or with no ' +
+          'hoist sink installed)'
+      );
+    target.hoist!.stmts.push(...stmts);
+  }
+
+  /**
+   * Compile `expr` at a **statement position** — a function body, or the
+   * right-hand side of a shader-body assignment — with a fresh hoist sink
+   * installed.
+   *
+   * Returns the emitted source plus the statements that were hoisted while
+   * compiling it, in emission order. Nothing hoisted means the result is
+   * byte-identical to `compile()`, so this is a drop-in for every statement
+   * position on a `bareStatementBlocks` target.
+   */
+  static compileStatementBody(
+    expr: Expression | undefined,
+    target: CompileTarget<Expression>,
+    prec = 0
+  ): { stmts: string[]; code: string } {
+    const sink = { stmts: [] as string[], boundVars: target.boundVars };
+    const code = BaseCompiler.compile(expr, { ...target, hoist: sink }, prec);
+    return { stmts: sink.stmts, code };
+  }
+
+  /**
+   * `compileStatementBody`, assembled into a single function-body string:
+   * the hoisted statements followed by the value, `return`-prefixed when the
+   * value is an expression (a multi-statement value already carries its own
+   * `return` on the last line — the pre-item-110 block convention).
+   */
+  static compileFunctionBody(
+    expr: Expression | undefined,
+    target: CompileTarget<Expression>
+  ): string {
+    const { stmts, code } = BaseCompiler.compileStatementBody(expr, target);
+    if (stmts.length === 0) return code;
+    return [...stmts, code.includes('\n') ? code : `return ${code};`].join('\n');
+  }
+
+  /**
    * Compile `expr` as the **root** of a compilation: open the compilation
    * boundary on `target`, then compile.
    *
@@ -259,6 +386,17 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     prec = 0
   ): TargetSource {
+    // Open the naming boundary here, not only in the optional
+    // `beginCompilation` hook (which most targets do not define): restart the
+    // generated-name numbering and fold this expression's own symbols into the
+    // collision inventory. A caller-built target reused for two compilations
+    // then emits identical source for both. (The GPU targets' own
+    // `beginCompilation` resets as well — a double reset is harmless.)
+    if (target.naming !== undefined) {
+      target.naming.counter = 0;
+      if (expr !== undefined)
+        for (const n of collectUsedNames(expr)) target.naming.usedNames.add(n);
+    } else target.naming = BaseCompiler.newNamingContext(expr);
     target.beginCompilation?.(target);
     return BaseCompiler.compile(expr, target, prec);
   }
@@ -277,6 +415,15 @@ export class BaseCompiler {
         `Cannot compile invalid expression: "${expr.toString()}"`
       );
     }
+    // Install the naming context EAGERLY, on the outermost call, for a target
+    // that arrived without one (a hand-rolled target driven through
+    // `BaseCompiler.compile`). It must be installed before the first
+    // `{ ...target }` spread: a context installed lazily deeper in the
+    // recursion lands on a spread COPY, and the sibling branches then number
+    // their temporaries from a forked counter (§4.1 — the context is a SHARED
+    // object reference by design).
+    if (target.naming === undefined)
+      target.naming = BaseCompiler.newNamingContext(expr);
     // Object-domain absence gate (§3.F). A subexpression whose type carries a
     // `missing` arm in an OBJECT (non-numeric) domain has no representation on a
     // target lacking the `object` absence axis (interval, GPU) — fail closed
@@ -310,7 +457,7 @@ export class BaseCompiler {
     const prevBoundCtx = BaseCompiler._boundVarsCtx;
     BaseCompiler._boundVarsCtx = target.boundVars ?? prevBoundCtx;
     try {
-      return BaseCompiler._compileInner(expr, target, prec);
+      return BaseCompiler.compileWithCse(expr, target, prec);
     } finally {
       BaseCompiler._boundVarsCtx = prevBoundCtx;
     }
@@ -481,13 +628,38 @@ export class BaseCompiler {
     // It must be a function expression...
     if (!isFunction(expr))
       throw new Error(`Cannot compile expression: "${expr.toString()}"`);
-    return BaseCompiler.compileExpr(
-      expr.engine,
-      expr.operator,
-      expr.ops,
-      prec,
-      target
-    );
+    // The node itself is passed along: the CSE region inventory is keyed by
+    // the `(node, operandIndex)` EDGE (a tree may be a DAG, so a bare operand
+    // object is ambiguous), and `compileExpr` receives only the operand list.
+    const prevCseParent = BaseCompiler._cseParent;
+    BaseCompiler._cseParent = expr;
+    try {
+      return BaseCompiler.compileExpr(
+        expr.engine,
+        expr.operator,
+        expr.ops,
+        prec,
+        target,
+        expr
+      );
+    } finally {
+      BaseCompiler._cseParent = prevCseParent;
+    }
+  }
+
+  /**
+   * The node whose operands the currently-dispatched handler is lowering —
+   * the CSE edge key for emitters that are handed an operand LIST rather than
+   * the node (the targets' `Sum`/`Product` handlers). Synced by
+   * `_compileInner`, like `_boundVarsCtx`; compilation is synchronous, so a
+   * static is safe. `undefined` simply means no region is pushed (CSE
+   * degrades to the enclosing region).
+   */
+  private static _cseParent: Expression | undefined;
+
+  /** See `_cseParent`. */
+  static cseParentNode(): Expression | undefined {
+    return BaseCompiler._cseParent;
   }
 
   /**
@@ -498,7 +670,11 @@ export class BaseCompiler {
     h: string,
     args: ReadonlyArray<Expression>,
     prec: number,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    /** The node being lowered, when the caller has it: the CSE region
+     * inventory is keyed by the `(node, operandIndex)` edge (§5.1). Omitting
+     * it costs only the optimization — no region is pushed. */
+    node?: Expression
   ): TargetSource {
     if (h === 'Error') throw new Error('Error');
 
@@ -525,7 +701,7 @@ export class BaseCompiler {
           .map((x) => BaseCompiler.compile(x, target))
           .join(', ')})`;
       }
-      return BaseCompiler.compileLoop(h, args, target);
+      return BaseCompiler.compileLoop(h, args, target, node);
     }
 
     // A user operator definition may supply its own target-aware compile
@@ -539,6 +715,11 @@ export class BaseCompiler {
     // Loop/Comprehension/Sequence, …) are handled by their own bespoke lowering
     // and are NOT overridable. A handler that returns `undefined`/`null` OR an
     // empty string falls through to the default compilation (finding A5).
+    // Set when a per-operator `compile` handler ran and DECLINED — the head is
+    // known and lowerable in general, it just has no lowering for THIS operand
+    // shape or target. Read by the fall-through diagnostic below so the decline
+    // is not reported as `Unknown operator` (Tycho item 109a).
+    let declinedByCustomHandler = false;
     if (!BaseCompiler.CONTROL_FLOW_HEADS.has(h)) {
       const customDef = engine.lookupDefinition(h);
       if (
@@ -552,6 +733,7 @@ export class BaseCompiler {
         );
         if (custom !== undefined && custom !== null && custom !== '')
           return custom;
+        declinedByCustomHandler = true;
       }
     }
 
@@ -817,11 +999,13 @@ export class BaseCompiler {
               const chainOp = target.chainOp ?? '&&';
               const bindings: Array<[name: string, value: string]> = [];
               const codes = args.map((arg, i) => {
-                const code = BaseCompiler.compileValueOperand(
-                  arg,
-                  target,
-                  op[1]
-                );
+                // Each comparison after the first is short-circuited by the
+                // chain operator, so operands from index 2 on are the lazy
+                // edges of this (node-less) lowering — see `lazyOperandRegions`.
+                const code =
+                  i >= 2
+                    ? BaseCompiler.compileOpValue(node, i, target, op[1], arg)
+                    : BaseCompiler.compileValueOperand(arg, target, op[1]);
                 const isMiddle = i >= 1 && i <= args.length - 2;
                 if (
                   target.bindExpr &&
@@ -829,7 +1013,7 @@ export class BaseCompiler {
                   !isSymbol(arg) &&
                   !isNumber(arg)
                 ) {
-                  const name = BaseCompiler.tempVar();
+                  const name = BaseCompiler.tempVar(target);
                   bindings.push([name, code]);
                   return name;
                 }
@@ -886,10 +1070,16 @@ export class BaseCompiler {
                     operandPrec = op[1] + 1;
                   else if (leftAssocNonAssociative && i > 0)
                     operandPrec = op[1] + 1;
-                  return BaseCompiler.compileValueOperand(
-                    arg,
+                  // Routed through the edge helper so a short-circuiting
+                  // connective (`And`/`Or`, whose operands after the first are
+                  // lazy edges) pushes its region instance; a non-region edge
+                  // compiles exactly as before.
+                  return BaseCompiler.compileOpValue(
+                    node,
+                    i,
                     target,
-                    operandPrec
+                    operandPrec,
+                    arg
                   );
                 })
                 .join(` ${op[0]} `);
@@ -914,13 +1104,19 @@ export class BaseCompiler {
       const params = args
         .slice(1)
         .map((x) => functionLiteralParameterName(x) || '_');
-      return `((${params.join(', ')}) => ${BaseCompiler.compile(
-        args[0].canonical,
-        {
-          ...target,
-          var: (id) => (params.includes(id) ? id : target.var(id)),
-          boundVars: BaseCompiler.withBoundNames(target, params),
-        }
+      const lambdaTarget: CompileTarget<Expression> = {
+        ...target,
+        var: (id) => (params.includes(id) ? id : target.var(id)),
+        boundVars: BaseCompiler.withBoundNames(target, params),
+      };
+      // The body is a bindable region of its own (§5.1(a)); pushed under the
+      // lambda's target, so its temporaries land inside the arrow function.
+      return `((${params.join(', ')}) => ${BaseCompiler.compileOp(
+        node,
+        0,
+        lambdaTarget,
+        0,
+        args[0].canonical
       )})`;
     }
 
@@ -940,16 +1136,23 @@ export class BaseCompiler {
       // value-carrying `Declare(sym, type, value)` isn't dropped.
       if (target.declare) return target.declare(name);
       const value = BaseCompiler.declareValueOperand(args);
-      return value === undefined
-        ? `let ${name}`
-        : `let ${name} = ${BaseCompiler.compile(value, target)}`;
+      if (value === undefined) return `let ${name}`;
+      // The value may not be an operand of `node` at all (it can come from a
+      // trailing attributes dictionary), and `-1` is the WHOLE-NODE region
+      // sentinel — compile it plainly rather than open the wrong region.
+      const valueIndex = args.indexOf(value);
+      const valueCode =
+        valueIndex < 0
+          ? BaseCompiler.compile(value, target)
+          : BaseCompiler.compileOp(node, valueIndex, target, 0, value);
+      return `let ${name} = ${valueCode}`;
     }
     if (h === 'Assign')
       return `${
         isSymbol(args[0]) ? args[0].symbol : '_'
-      } = ${BaseCompiler.compile(args[1], target)}`;
+      } = ${BaseCompiler.compileOp(node, 1, target, 0, args[1])}`;
     if (h === 'Return')
-      return `return ${BaseCompiler.compile(args[0], target)}`;
+      return `return ${BaseCompiler.compileOp(node, 0, target, 0, args[0])}`;
     if (h === 'Break') return 'break';
     if (h === 'Continue') return 'continue';
 
@@ -961,7 +1164,7 @@ export class BaseCompiler {
           (expr) => BaseCompiler.compileValueOperand(expr, target),
           target
         );
-      return BaseCompiler.compileForLoop(args, target);
+      return BaseCompiler.compileForLoop(args, target, node);
     }
 
     if (h === 'Comprehension') {
@@ -983,9 +1186,23 @@ export class BaseCompiler {
       // the target's `functions` entry, so a target that has both — GPU,
       // interval-js — gets the hook first. `null` — every condition provably
       // scalar — keeps the `functions` entry / ternary below unchanged.
+      // The clause list handed to `selection` is in `Which` shape, so its
+      // positions are NOT the `If` node's operand indices: 0 → 0 (condition),
+      // 1 → 1 (then), 2 is the synthesized `True` (no edge), 3 → 2 (else).
+      const selectionOperand: OperandCompiler<Expression> = (expr, opIndex) => {
+        if (opIndex === undefined || opIndex === 2)
+          return BaseCompiler.compileValueOperand(expr, target);
+        return BaseCompiler.compileOpValue(
+          node,
+          opIndex === 3 ? 2 : opIndex,
+          target,
+          0,
+          expr
+        );
+      };
       const selection = target.selection?.(
         [args[0], args[1], engine.True, args[2]],
-        (expr) => BaseCompiler.compileValueOperand(expr, target),
+        selectionOperand,
         target
       );
       if (selection !== null && selection !== undefined) return selection;
@@ -993,11 +1210,7 @@ export class BaseCompiler {
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
-          return fn(
-            args,
-            (expr) => BaseCompiler.compileValueOperand(expr, target),
-            target
-          );
+          return fn(args, BaseCompiler.operandCompiler(node, target), target);
         }
         return `${fn}(${args
           .map((x) => BaseCompiler.compile(x, target))
@@ -1009,14 +1222,16 @@ export class BaseCompiler {
         [args[1], args[2]],
         target
       );
-      const arm = (v: Expression): TargetSource => {
-        const code = BaseCompiler.compile(v, target);
+      // Both arms are conditionally evaluated: each is its own region, so a
+      // temporary bound inside an arm is never hoisted out of it (§7.3).
+      const arm = (v: Expression, i: number): TargetSource => {
+        const code = BaseCompiler.compileOp(node, i, target, 0, v);
         return coerce ? coerce(v, code) : code;
       };
       return `((${BaseCompiler.compile(
         args[0],
         target
-      )}) ? (${arm(args[1])}) : (${arm(args[2])}))`;
+      )}) ? (${arm(args[1], 1)}) : (${arm(args[2], 2)}))`;
     }
 
     if (h === 'Which') {
@@ -1034,18 +1249,14 @@ export class BaseCompiler {
       // below unchanged.
       const selection = target.selection?.(
         args,
-        (expr) => BaseCompiler.compileValueOperand(expr, target),
+        BaseCompiler.operandCompiler(node, target),
         target
       );
       if (selection !== null && selection !== undefined) return selection;
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
-          return fn(
-            args,
-            (expr) => BaseCompiler.compileValueOperand(expr, target),
-            target
-          );
+          return fn(args, BaseCompiler.operandCompiler(node, target), target);
         }
         return `${fn}(${args
           .map((x) => BaseCompiler.compile(x, target))
@@ -1060,21 +1271,26 @@ export class BaseCompiler {
         args.filter((_x, i) => i % 2 === 1),
         target
       );
+      // Every value arm, and every condition after the first, sits behind a
+      // ternary test: each is its own region (§5.1(b)), so nothing binds
+      // across an arm that may not be evaluated.
       const compilePair = (i: number): string => {
         if (i >= args.length) return coerce ? '({ re: NaN, im: NaN })' : 'NaN';
         const cond = args[i];
         const val = args[i + 1];
-        const valCode = coerce
-          ? coerce(val, BaseCompiler.compile(val, target))
-          : BaseCompiler.compile(val, target);
+        const armCode = BaseCompiler.compileOp(node, i + 1, target, 0, val);
+        const valCode = coerce ? coerce(val, armCode) : armCode;
         // If condition is the symbol True, it's the default branch
         if (isSymbol(cond, 'True')) {
           return `(${valCode})`;
         }
-        return `((${BaseCompiler.guardCondition(
-          cond,
-          target
-        )}) ? (${valCode}) : ${compilePair(i + 2)})`;
+        const condCode =
+          i === 0
+            ? BaseCompiler.guardCondition(cond, target)
+            : BaseCompiler.withCseOperand(node, i, target, () =>
+                BaseCompiler.guardCondition(cond, target)
+              );
+        return `((${condCode}) ? (${valCode}) : ${compilePair(i + 2)})`;
       };
       return compilePair(0);
     }
@@ -1085,11 +1301,7 @@ export class BaseCompiler {
       const fn = target.functions?.(h);
       if (fn) {
         if (typeof fn === 'function') {
-          return fn(
-            args,
-            (expr) => BaseCompiler.compileValueOperand(expr, target),
-            target
-          );
+          return fn(args, BaseCompiler.operandCompiler(node, target), target);
         }
         return `${fn}(${args
           .map((x) => BaseCompiler.compile(x, target))
@@ -1102,9 +1314,11 @@ export class BaseCompiler {
       const nan = coerce ? '({ re: NaN, im: NaN })' : 'NaN';
       // Special-case constant True/False conditions to avoid bare symbol refs
       if (isSymbol(args[1], 'True'))
-        return `(${BaseCompiler.compile(args[0], target)})`;
+        return `(${BaseCompiler.compileOp(node, 0, target, 0, args[0])})`;
       if (isSymbol(args[1], 'False')) return nan;
-      const val = BaseCompiler.compile(args[0], target);
+      // The VALUE is the conditional position here (the single condition is
+      // eager) — see the `When` entry of the lazy-operand inventory.
+      const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
       const cond = BaseCompiler.guardCondition(args[1], target);
       return `((${cond}) ? (${val}) : ${nan})`;
     }
@@ -1113,18 +1327,25 @@ export class BaseCompiler {
       // A target may override the whole construct (GPU emits target-specific
       // ternaries; interval/Python fail closed). Otherwise the default is the
       // JavaScript emission (chained `if`/`switch` in an arrow-IIFE).
-      const fn = target.functions?.(h);
-      if (typeof fn === 'function')
-        return fn(
-          args,
-          (expr) => BaseCompiler.compileValueOperand(expr, target),
-          target
-        );
-      return BaseCompiler.compileMatchJS(engine, args, target);
+      //
+      // `Match` is fully CSE-inert in Phase 1 (§2): its guards and bodies are
+      // compiled from plan-constructed closure trees, not from these operands,
+      // so emission runs under a blind instance — no candidate resolves inside,
+      // and no enclosing region's candidate can leak in through a shared node.
+      return BaseCompiler.withCseBlind(target, () => {
+        const fn = target.functions?.(h);
+        if (typeof fn === 'function')
+          return fn(
+            args,
+            (expr) => BaseCompiler.compileValueOperand(expr, target),
+            target
+          );
+        return BaseCompiler.compileMatchJS(engine, args, target);
+      });
     }
 
     if (h === 'Block') {
-      return BaseCompiler.compileBlock(args, target);
+      return BaseCompiler.compileBlock(args, target, node);
     }
 
     // Absence-discharge primitives (§3.F). `IsMissing`/`Coalesce` lower through
@@ -1169,8 +1390,12 @@ export class BaseCompiler {
           `Coalesce: target '${target.language ?? 'unknown'}' cannot ` +
             `discharge absence (no 'coalesce' capability). Fail closed (§3.F).`
         );
-      const codes = args.map((a) =>
-        BaseCompiler.compileValueOperand(a, target)
+      // Compiled coalescing evaluates the defaults lazily, left to right: the
+      // operands after the first are their own regions (§5.1(b)).
+      const codes = args.map((a, i) =>
+        i === 0
+          ? BaseCompiler.compileValueOperand(a, target)
+          : BaseCompiler.compileOpValue(node, i, target, 0, a)
       );
       // Fold right: coalesce(a0, coalesce(a1, … coalesce(a_{n-1}, a_n))).
       let acc = codes[codes.length - 1];
@@ -1294,7 +1519,15 @@ export class BaseCompiler {
         target
       );
       if (userFn !== undefined) return userFn;
-      throw new Error(`Unknown operator \`${h}\``);
+      throw new Error(
+        BaseCompiler.noLoweringMessage(
+          engine,
+          h,
+          args,
+          target,
+          declinedByCustomHandler
+        )
+      );
     }
 
     if (typeof fn === 'function') {
@@ -1306,7 +1539,7 @@ export class BaseCompiler {
         args.length === 1 &&
         isFiniteIndexedCollection(args[0])
       ) {
-        const v = BaseCompiler.tempVar();
+        const v = BaseCompiler.tempVar(target);
         // Inside the map callback the element variable is the callback
         // parameter — shadow `target.var` so it compiles bare, not as a
         // `_.<name>` vars-object lookup (same pattern as the Sum/Product
@@ -1322,11 +1555,11 @@ export class BaseCompiler {
           innerTarget
         )})`;
       }
-      return fn(
-        args,
-        (expr) => BaseCompiler.compileValueOperand(expr, target),
-        target
-      );
+      // The index-aware operand compiler (`OperandCompiler`): a handler that
+      // lowers a construct with conditionally-evaluated operand positions
+      // passes the index for those positions and gets the matching CSE region
+      // instance. A handler that omits it compiles exactly as before.
+      return fn(args, BaseCompiler.operandCompiler(node, target), target);
     }
 
     // `fn` is a plain string: the target maps this head to a real-only helper
@@ -1349,6 +1582,55 @@ export class BaseCompiler {
     return `${fn}(${args
       .map((x) => BaseCompiler.compileValueOperand(x, target))
       .join(', ')})`;
+  }
+
+  /**
+   * The diagnostic for a head that reached the end of `compileExpr` with no
+   * lowering. Three distinct causes, three distinct messages (Tycho item 109a
+   * — bucketing a compile band by message is only possible if the message
+   * names the actual cause):
+   *
+   * 1. A per-operator `compile` handler ran and DECLINED (returned
+   *    `undefined`/`null`/`''`). The head IS lowerable — just not for these
+   *    operand shapes on this target. The operand types are named, since the
+   *    shape is what the handler rejected.
+   * 2. The head has an operator definition (the engine knows it) but this
+   *    target has no codegen for it — a target gap, not an unknown symbol.
+   * 3. No definition at all: a genuinely unknown operator. ONLY this case
+   *    keeps the historical `Unknown operator \`X\`` wording.
+   */
+  private static noLoweringMessage(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    declinedByCustomHandler: boolean
+  ): string {
+    const lang = target.language ?? 'unknown';
+    if (declinedByCustomHandler) {
+      const types = args.map((a) => `\`${a.type.toString()}\``).join(', ');
+      return (
+        `${h}: cannot compile — the operator's compile handler has no lowering ` +
+        `for target '${lang}' with these operand types (${types || 'none'}). ` +
+        `The head is known to the engine and lowers for other targets/operand ` +
+        `shapes; this is not an unknown operator. Fail closed (D6).`
+      );
+    }
+    // "Known" = the engine has an OPERATOR definition. A head that was merely
+    // auto-declared by boxing an application (`["zzz", 1]`) gets a *value*
+    // definition, and is genuinely unknown.
+    let known = false;
+    try {
+      known = isOperatorDef(engine.lookupDefinition(h));
+    } catch {
+      /* an unresolvable head is, by definition, unknown */
+    }
+    if (known)
+      return (
+        `${h}: cannot compile — the operator is known to the engine but ` +
+        `target '${lang}' has no lowering for it. Fail closed (D6).`
+      );
+    return `Unknown operator \`${h}\``;
   }
 
   /**
@@ -1633,7 +1915,7 @@ export class BaseCompiler {
     // re-invoking the head's own scalar codegen with those parameters (shadow
     // `target.var` so they compile bare, not as `_.<name>` lookups — same
     // pattern as the Sum/Product loop index).
-    const params = args.map(() => BaseCompiler.tempVar());
+    const params = args.map(() => BaseCompiler.tempVar(target));
     const innerTarget: CompileTarget<Expression> = {
       ...target,
       var: (id: string) => (params.includes(id) ? id : target.var(id)),
@@ -1777,7 +2059,8 @@ export class BaseCompiler {
    */
   private static compileBlock(
     args: ReadonlyArray<Expression>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    node?: Expression
   ): TargetSource {
     // Desugar destructuring declares first, so the locals collection and the
     // inference below see only plain scalar declares.
@@ -1798,7 +2081,14 @@ export class BaseCompiler {
     }
 
     if (args.length === 1 && locals.length === 0) {
-      return BaseCompiler.compile(args[0], target);
+      // The single-statement block is UNWRAPPED here, but harvest still saw
+      // the `Block` — so both its statement-list region and the statement's
+      // own value region are pushed, or the statement's candidates would find
+      // no instance to bind at. (A canonical `Function`-literal body is such a
+      // block, so this is the common case, not an edge one.)
+      return BaseCompiler.withCseScope(node, -1, target, () =>
+        BaseCompiler.compileOp(args[0], -1, target, 0, args[0])
+      );
     }
 
     // Infer each local's complex-ness, in statement order, so a later local
@@ -1956,34 +2246,55 @@ export class BaseCompiler {
         boundVars: BaseCompiler.withBoundNames(target, locals),
       };
 
-      const result = args
-        .filter((a) => !isSymbol(a, 'Nothing'))
-        .flatMap((arg) => {
-          // For Declare, pass inferred type hint to the target hook
-          if (
-            isFunction(arg, 'Declare') &&
-            isSymbol(arg.ops[0]) &&
-            target.declare
-          ) {
-            const name = arg.ops[0].symbol;
-            const decl = target.declare(name, typeHints[name]);
-            // A `Declare` may carry an initial value (`Declare(sym, type, value)`
-            // or a `value` key in a trailing attributes dictionary). Emit it as a
-            // separate assignment statement, mirroring how a hoisted
-            // `Declare`+`Assign` pair compiles. (Two statements — not a combined
-            // initializer — so the declaration stays a plain `let`/`float`, which
-            // is what the subsequent assignment requires.)
-            const value = BaseCompiler.declareValueOperand(arg.ops);
-            if (value !== undefined)
-              return [
-                decl,
-                `${name} = ${BaseCompiler.compile(value, localTarget)}`,
-              ];
-            return [decl];
-          }
-          return [BaseCompiler.compile(arg, localTarget)];
-        })
-        .filter((s) => s !== '');
+      // The statement LIST is one INERT region — no binding is placed at the
+      // statement-list level, so early-exit reachability and inter-statement
+      // ordering never interact with CSE. Each statement's own value
+      // expressions are separate, bindable child regions (§5.1(c)).
+      const result = BaseCompiler.withCseScope(node, -1, localTarget, () =>
+        args
+          .filter((a) => !isSymbol(a, 'Nothing'))
+          .flatMap((arg) => {
+            // For Declare, pass inferred type hint to the target hook
+            if (
+              isFunction(arg, 'Declare') &&
+              isSymbol(arg.ops[0]) &&
+              target.declare
+            ) {
+              const name = arg.ops[0].symbol;
+              const decl = target.declare(name, typeHints[name]);
+              // A `Declare` may carry an initial value (`Declare(sym, type, value)`
+              // or a `value` key in a trailing attributes dictionary). Emit it as a
+              // separate assignment statement, mirroring how a hoisted
+              // `Declare`+`Assign` pair compiles. (Two statements — not a combined
+              // initializer — so the declaration stays a plain `let`/`float`, which
+              // is what the subsequent assignment requires.)
+              const value = BaseCompiler.declareValueOperand(arg.ops);
+              if (value !== undefined) {
+                // `-1` is the whole-node region sentinel, so a value that is
+                // NOT one of `arg`'s operands (it may come from a trailing
+                // attributes dictionary) compiles plainly.
+                const valueIndex = arg.ops.indexOf(value);
+                const valueCode =
+                  valueIndex < 0
+                    ? BaseCompiler.compile(value, localTarget)
+                    : BaseCompiler.compileOp(
+                        arg,
+                        valueIndex,
+                        localTarget,
+                        0,
+                        value
+                      );
+                return [decl, `${name} = ${valueCode}`];
+              }
+              return [decl];
+            }
+            // A bare expression statement is its own bindable region, keyed
+            // `(statement, -1)`; every other statement head reaches its own
+            // value edges from `compileExpr` (Assign RHS, Return value, …).
+            return [BaseCompiler.compileOp(arg, -1, localTarget, 0, arg)];
+          })
+          .filter((s) => s !== '')
+      );
 
       if (result.length === 0) return '';
 
@@ -2025,13 +2336,19 @@ export class BaseCompiler {
    */
   private static compileForLoop(
     args: ReadonlyArray<Expression>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    node?: Expression
   ): TargetSource {
     if (!args[0]) throw new Error('Loop: no body');
 
     const body = args[0];
     const elements = args.slice(1);
     const lang = target.language ?? '';
+    // The loop body is a statement list — an INERT region (§5.1(c)): nothing
+    // binds at the list level (a body may run zero times), while each
+    // statement's own value expressions are bindable child regions.
+    const inBody = <T>(bodyTarget: CompileTarget<Expression>, fn: () => T): T =>
+      BaseCompiler.withCseScope(node, 0, bodyTarget, fn);
 
     // ── Bare infinite loop ────────────────────────────────────────────────
     if (elements.length === 0) {
@@ -2039,7 +2356,9 @@ export class BaseCompiler {
         throw new Error(
           `${lang.toUpperCase()}: an unbounded Loop(body) is not supported.`
         );
-      const bodyStmts = BaseCompiler.compileLoopBody(body, target);
+      const bodyStmts = inBody(target, () =>
+        BaseCompiler.compileLoopBody(body, target)
+      );
       return `(() => {${target.ws('\n')}while (true) {${target.ws(
         '\n'
       )}${bodyStmts}${target.ws('\n')}}${target.ws('\n')}})()`;
@@ -2086,7 +2405,9 @@ export class BaseCompiler {
         boundVars: BaseCompiler.withBoundNames(target, [index]),
       };
 
-      const bodyStmts = BaseCompiler.compileLoopBody(body, bodyTarget);
+      const bodyStmts = inBody(bodyTarget, () =>
+        BaseCompiler.compileLoopBody(body, bodyTarget)
+      );
 
       return `(() => {${target.ws(
         '\n'
@@ -2104,7 +2425,8 @@ export class BaseCompiler {
     const inner = BaseCompiler.compileElementLoops(
       elements,
       target,
-      (bodyTarget) => BaseCompiler.compileLoopBody(body, bodyTarget)
+      (bodyTarget) =>
+        inBody(bodyTarget, () => BaseCompiler.compileLoopBody(body, bodyTarget))
     );
     return `(() => {${target.ws('\n')}${inner}${target.ws('\n')}})()`;
   }
@@ -2317,18 +2639,24 @@ export class BaseCompiler {
     if (h === 'Break') return 'break';
     if (h === 'Continue') return 'continue';
     if (h === 'Return')
-      return `return ${BaseCompiler.compile(expr.ops[0], target)}`;
+      return `return ${BaseCompiler.compileOp(expr, 0, target, 0, expr.ops[0])}`;
 
     if (h === 'If') {
       // For the imperative `if` statement, the condition must produce a
       // boolean.  Interval targets compile comparisons to interval results
       // (e.g. `_IA.greater(...)` returns an object, not a boolean), which
       // would always be truthy.  Use scalar operators for the condition.
+      // The condition is a value expression (its own bindable region); each
+      // branch is a statement list again (§5.1(c)).
       const condTarget = BaseCompiler.scalarConditionTarget(target);
-      const cond = BaseCompiler.compile(expr.ops[0], condTarget);
-      const thenBranch = BaseCompiler.compileLoopBody(expr.ops[1], target);
+      const cond = BaseCompiler.compileOp(expr, 0, condTarget, 0, expr.ops[0]);
+      const branch = (i: number): string =>
+        BaseCompiler.withCseScope(expr, i, target, () =>
+          BaseCompiler.compileLoopBody(expr.ops[i], target)
+        );
+      const thenBranch = branch(1);
       if (expr.ops.length > 2) {
-        const elseBranch = BaseCompiler.compileLoopBody(expr.ops[2], target);
+        const elseBranch = branch(2);
         if (elseBranch)
           return `if (${cond}) { ${thenBranch} } else { ${elseBranch} }`;
       }
@@ -2336,12 +2664,12 @@ export class BaseCompiler {
     }
 
     if (h === 'Block') {
-      return expr.ops
-        .map((s) => BaseCompiler.compileLoopBody(s, target))
-        .join('; ');
+      return BaseCompiler.withCseScope(expr, -1, target, () =>
+        expr.ops.map((s) => BaseCompiler.compileLoopBody(s, target)).join('; ')
+      );
     }
 
-    return BaseCompiler.compile(expr, target);
+    return BaseCompiler.compileOp(expr, -1, target, 0, expr);
   }
 
   /**
@@ -2397,7 +2725,8 @@ export class BaseCompiler {
   private static compileLoop(
     h: string,
     args: ReadonlyArray<Expression>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    node?: Expression
   ): string {
     if (!args[0]) throw new Error('Sum/Product: no body');
 
@@ -2429,8 +2758,8 @@ export class BaseCompiler {
 
     if (!index) {
       // Loop over a collection
-      const indexVar = BaseCompiler.tempVar();
-      const acc = BaseCompiler.tempVar();
+      const indexVar = BaseCompiler.tempVar(target);
+      const acc = BaseCompiler.tempVar(target);
       const col = BaseCompiler.compile(args[0], target);
       if (bodyIsComplex) {
         if (isSum) {
@@ -2451,16 +2780,20 @@ export class BaseCompiler {
     // element-wise collection-body arm.)
     BaseCompiler.assertScalarBigOpBody(h, args[0]);
 
-    const fn = BaseCompiler.compile(args[0], {
+    // The body is the binder's own bindable region (§5.1(a)), pushed under the
+    // target that binds the index — so a temporary lands INSIDE the loop and
+    // is recomputed per iteration, never hoisted out of it.
+    const bodyTarget: CompileTarget<Expression> = {
       ...target,
       var: (id) => {
         if (id === index) return index;
         return target.var(id);
       },
       boundVars: BaseCompiler.withBoundNames(target, [index]),
-    });
+    };
+    const fn = BaseCompiler.compileOp(node, 0, bodyTarget, 0, args[0]);
 
-    const acc = BaseCompiler.tempVar();
+    const acc = BaseCompiler.tempVar(target);
 
     // Iteration-budget guard (see CompileTarget.iterationBudget): a trip
     // count over the budget — including infinite or NaN bounds, for which
@@ -2473,7 +2806,7 @@ export class BaseCompiler {
         : '';
 
     if (bodyIsComplex) {
-      const val = BaseCompiler.tempVar();
+      const val = BaseCompiler.tempVar(target);
       const guard = guardNaN('{ re: NaN, im: NaN }');
       if (isSum) {
         return `(() => {
@@ -3108,7 +3441,7 @@ export class BaseCompiler {
         `Match: an or-alternative binds the name '${plan.errorAlt.toString()}'; not compilable. Fail closed (D6).`
       );
 
-    const s = BaseCompiler.tempVar();
+    const s = BaseCompiler.tempVar(target);
     const nl = target.ws('\n');
     const stmts: string[] = [];
     let done = false;
@@ -3584,7 +3917,7 @@ export class BaseCompiler {
       // both hand the callee `{ re: [1,2,3], im: 0 }` and (before) force the
       // entire call onto the direct scalar path, so a sibling collection
       // argument never broadcast.
-      const params = args.map(() => BaseCompiler.tempVar());
+      const params = args.map(() => BaseCompiler.tempVar(target));
       const callParams = params.map((p, i) =>
         coerceToComplex[i] ? complexWrap(p) : p
       );
@@ -3709,13 +4042,27 @@ export class BaseCompiler {
         // comes from the engine definition — without the rewrite here, a
         // degree-mode compile of `t ↦ f(t)` emitted radian-based trig inside
         // `f`'s definition while `t ↦ sin(t)` correctly scaled.
-        const body = BaseCompiler.compile(
-          rewriteAngularUnit(literal.ops[0].canonical),
-          {
-            ...target,
-            var: (id) => (params.includes(id) ? id : target.var(id)),
-            boundVars: BaseCompiler.withBoundNames(target, params),
-          }
+        const bodyExpr = rewriteAngularUnit(literal.ops[0].canonical);
+        const bodyTarget: CompileTarget<Expression> = {
+          ...target,
+          var: (id) => (params.includes(id) ? id : target.var(id)),
+          boundVars: BaseCompiler.withBoundNames(target, params),
+        };
+        // The body is emitted into the artifact, so its symbols join the
+        // compilation's collision inventory UNCONDITIONALLY — a `_tv1` in a
+        // definition body must not be shadowed by a generated temp even when
+        // CSE is off (the nested harvest below merges the same names, but only
+        // when a session is enabled).
+        BaseCompiler.mergeUsedNames(target, collectUsedNames(bodyExpr));
+        // Each emitted definition body gets its OWN nested harvest scope in
+        // the same session (§5.4): its own regions and candidates — the body
+        // is not part of the root tree — but the same naming counter, so temp
+        // names never collide across the artifact. Duplication inside a called
+        // definition is therefore recovered once, in the emitted function.
+        const body = BaseCompiler.withNestedCseHarvest(
+          bodyExpr,
+          bodyTarget,
+          () => BaseCompiler.compile(bodyExpr, bodyTarget)
         );
         registry.defs.set(
           name,
@@ -4177,16 +4524,485 @@ export class BaseCompiler {
   }
 
   /**
-   * Generate a temporary variable name
+   * The naming context of the compilation `target` belongs to, installing a
+   * fresh one when the target has none.
+   *
+   * Every root compilation boundary creates the context (each target's
+   * `createTarget()`, `compile-expression.ts` for the direct custom-target
+   * route), and `compile()` installs one on the OUTERMOST call for a
+   * hand-rolled target that has none — before any `{ ...target }` spread, so
+   * every copy shares the one reference. This last-resort fallback therefore
+   * only fires for a target reached with no compilation around it at all
+   * (`tempVar()` called directly by a target's own helper); installing it on a
+   * spread COPY would fork the counter, and two branches would then allocate
+   * the same name.
    */
-  static tempVar(): string {
-    return `_${Math.random().toString(36).substring(4)}`;
+  static namingContext(target: CompileTarget<Expression>): NamingContext {
+    let naming = target.naming;
+    if (naming === undefined) {
+      naming = { counter: 0, usedNames: new Set<string>() };
+      target.naming = naming;
+    }
+    return naming;
+  }
+
+  /**
+   * A fresh naming context for a root compilation of `expr`.
+   *
+   * `sources` are the caller-supplied source strings spliced into the emitted
+   * code (`functions` entries that are strings, string-valued `vars`, the
+   * `preamble`): they are scanned for `_tv`/`_cse` tokens so a generated temp
+   * never captures a name a splice introduces.
+   *
+   * `extra` are identifiers the caller supplies OUT of band that the emitter
+   * writes bare — the Python target's `compileFunction`/`compileLambda`
+   * parameter lists. (Names that come from the expression, e.g. a `Function`
+   * literal's parameters, are already covered by the walk.)
+   */
+  static newNamingContext(
+    expr?: Expression | ReadonlyArray<Expression | undefined>,
+    sources?: ReadonlyArray<string | undefined>,
+    extra?: ReadonlyArray<string>
+  ): NamingContext {
+    return { counter: 0, usedNames: collectUsedNames(expr, sources, extra) };
+  }
+
+  /**
+   * Restart the generated-name numbering of the compilation `target` belongs
+   * to, keeping its collision inventory.
+   *
+   * The mirror of the GPU targets' random-counter reset: a target the CALLER
+   * built once and passes to two successive compilations would otherwise
+   * number the second compilation's temporaries from where the first stopped.
+   */
+  static resetNaming(target: CompileTarget<Expression>): void {
+    BaseCompiler.namingContext(target).counter = 0;
+  }
+
+  /**
+   * Generate a temporary variable name: `_tv1`, `_tv2`, … from the target's
+   * naming context, skipping any name the compilation already uses.
+   *
+   * Deterministic by construction — the same expression compiled twice emits
+   * byte-identical source (it used to draw from `Math.random()`).
+   */
+  static tempVar(target: CompileTarget<Expression>): string {
+    const naming = BaseCompiler.namingContext(target);
+    let name: string;
+    do {
+      name = `_tv${++naming.counter}`;
+    } while (naming.usedNames.has(name));
+    return name;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Common-subexpression elimination — emission side (§6 of
+  // `docs/plans/2026-07-28-compile-cse-design.md`). The ANALYSIS side is
+  // `cse.ts`; the dependency direction is base-compiler → cse.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * A CSE temporary: `_cse1`, `_cse2`, … drawn from the SAME naming-context
+   * counter as `tempVar()`, skipping any name the compilation already uses
+   * (§6.3 — neither prefix is reserved, collisions are prevented).
+   */
+  private static cseTempVar(target: CompileTarget<Expression>): string {
+    const naming = BaseCompiler.namingContext(target);
+    let name: string;
+    do {
+      name = `_cse${++naming.counter}`;
+    } while (naming.usedNames.has(name));
+    return name;
+  }
+
+  /**
+   * Open the CSE session of a **root compilation boundary** (§4.2): harvest
+   * `expr` — which must already be the post-`rewriteAngularUnit` tree the
+   * emitters will walk — and stamp the session on `target`, merging the
+   * harvest's symbol inventory into the naming context (§4.1).
+   *
+   * The session is stamped `enabled: false` — every CSE hook then short-circuits
+   * and emission is byte-identical to the pre-CSE one — when the caller passed
+   * `cse: false`, or when the target cannot bind temporaries in expression
+   * position (no `cseBind`: the GPU shader targets).
+   *
+   * `isOverriddenOperator` / `isStringVar` are the G1b provenance predicates
+   * (§5.2). They must be built from the caller's RAW options, before those are
+   * merged into the target's resolver closures — a closure cannot tell a
+   * built-in entry from a caller-supplied one.
+   */
+  static openCseSession(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    options: {
+      enabled?: boolean;
+      isOverriddenOperator?: (name: string) => boolean;
+      isStringVar?: (name: string) => boolean;
+    } = {}
+  ): void {
+    if (options.enabled === false || typeof target.cseBind !== 'function') {
+      target.cse = { enabled: false, instances: [] };
+      return;
+    }
+    const harvestOptions: CseHarvestOptions = {
+      isOverriddenOperator: options.isOverriddenOperator,
+      isStringVar: options.isStringVar,
+    };
+    const harvest = harvestCse(expr, harvestOptions);
+    BaseCompiler.mergeUsedNames(target, harvest.usedNames);
+    target.cse = { enabled: true, harvest, harvestOptions, instances: [] };
+  }
+
+  /** Add a harvest's symbol inventory to the compilation's collision
+   * inventory, in place (a harvest runs at every boundary AND per emitted
+   * user-function body — copying each time is pure churn). */
+  private static mergeUsedNames(
+    target: CompileTarget<Expression>,
+    names: ReadonlySet<string>
+  ): void {
+    const merged = BaseCompiler.namingContext(target).usedNames;
+    for (const n of names) merged.add(n);
+  }
+
+  /**
+   * The static region an instance realizes.
+   *
+   * `CseRegionInstance` keeps it structurally opaque — `compilation/types.ts`
+   * is expression-type-free by design, so it cannot name `cse.ts`'s types —
+   * and this compiler, their only consumer, narrows here.
+   */
+  private static cseRegionOf(
+    instance: CseRegionInstance | undefined
+  ): CseRegion | undefined {
+    return instance?.region as CseRegion | undefined;
+  }
+
+  /** The static harvest of the tree currently being emitted. See
+   * `cseRegionOf` for why the narrowing is explicit. */
+  private static cseHarvestOf(
+    target: CompileTarget<Expression>
+  ): CseHarvest | undefined {
+    return target.cse?.harvest as CseHarvest | undefined;
+  }
+
+  /** The innermost region instance, or `undefined` when CSE is inactive for
+   * this compilation. */
+  private static cseTop(
+    target: CompileTarget<Expression>
+  ): CseRegionInstance | undefined {
+    const session = target.cse;
+    if (session === undefined || !session.enabled) return undefined;
+    return session.instances[session.instances.length - 1];
+  }
+
+  /** Push a fresh instance of `region` (`undefined` = a blind instance, which
+   * resolves no candidate). */
+  private static pushCseInstance(
+    target: CompileTarget<Expression>,
+    region: CseRegion | undefined
+  ): CseRegionInstance {
+    const instance: CseRegionInstance = {
+      region,
+      bindings: [],
+      state: new Map(),
+      names: new Map(),
+      boundVars: target.boundVars,
+    };
+    target.cse!.instances.push(instance);
+    return instance;
+  }
+
+  /**
+   * Compile `fn`'s body as one instance of `region`, wrapping the result with
+   * the target's `cseBind` when temporaries were bound (§6.1). Instances —
+   * never static regions — hold the bindings, so a re-entrant emission of
+   * shared structure (an unrolled `Sum` term) can never reuse another
+   * traversal's temporary.
+   */
+  private static withCseRegion(
+    target: CompileTarget<Expression>,
+    region: CseRegion | undefined,
+    fn: () => TargetSource
+  ): TargetSource {
+    const session = target.cse!;
+    const instance = BaseCompiler.pushCseInstance(target, region);
+    let code: TargetSource;
+    try {
+      code = fn();
+    } finally {
+      session.instances.pop();
+    }
+    if (instance.bindings.length === 0) return code;
+    return target.cseBind!(instance.bindings, code);
+  }
+
+  /**
+   * Compile an expression-position operand through the region harvest opened
+   * for the edge `(parent, opIndex)`, if any — the emission counterpart of the
+   * shared lazy/binder inventory (§5.1). A non-region edge compiles exactly as
+   * before, inheriting the enclosing instance.
+   *
+   * `target` is the target the OPERAND compiles under (a binder body's inner
+   * target, say): the instance records its `boundVars`, which is what keeps the
+   * blind-instance guard from firing inside a region that was pushed on purpose.
+   */
+  static withCseOperand(
+    parent: Expression | undefined,
+    opIndex: number,
+    target: CompileTarget<Expression>,
+    fn: () => TargetSource
+  ): TargetSource {
+    const top = BaseCompiler.cseTop(target);
+    if (top === undefined || parent === undefined) return fn();
+    const region = childRegionAt(
+      BaseCompiler.cseRegionOf(top),
+      parent,
+      opIndex
+    );
+    if (region === undefined) return fn();
+    return BaseCompiler.withCseRegion(target, region, fn);
+  }
+
+  /**
+   * The statement-list flavor of {@link withCseOperand}: pushes the region of
+   * edge `(parent, opIndex)` for the duration of `fn` without wrapping its
+   * result. Only for INERT regions (a `Block`/`Loop` statement list, §5.1(c)),
+   * which bind nothing — the statements' own value expressions are separate,
+   * bindable child regions.
+   */
+  static withCseScope<T>(
+    parent: Expression | undefined,
+    opIndex: number,
+    target: CompileTarget<Expression>,
+    fn: () => T
+  ): T {
+    const top = BaseCompiler.cseTop(target);
+    if (top === undefined || parent === undefined) return fn();
+    const region = childRegionAt(
+      BaseCompiler.cseRegionOf(top),
+      parent,
+      opIndex
+    );
+    if (region === undefined) return fn();
+    const instance = BaseCompiler.pushCseInstance(target, region);
+    let result: T;
+    try {
+      result = fn();
+    } finally {
+      target.cse!.instances.pop();
+    }
+    // Fail CLOSED (D6) on the normal path: an inert region has no wrapper to
+    // emit the bindings with, so a temporary accumulated here would be
+    // DROPPED — the body would reference a name nothing defines. A
+    // `console.assert` is stripped from the production build, so this is a
+    // throw. (The exception path is left alone: it must not mask the original
+    // error.)
+    if (instance.bindings.length > 0)
+      throw new Error(
+        'Internal: a statement-list CSE region bound a temporary, which has ' +
+          'no wrapper to emit it. Fail closed (D6).'
+      );
+    return result;
+  }
+
+  /** Compile operand `opIndex` of `parent` (§5.1's `compileOp`). */
+  static compileOp(
+    parent: Expression | undefined,
+    opIndex: number,
+    target: CompileTarget<Expression>,
+    prec = 0,
+    operand?: Expression
+  ): TargetSource {
+    const expr = operand ?? BaseCompiler.operandAt(parent, opIndex);
+    return BaseCompiler.withCseOperand(parent, opIndex, target, () =>
+      BaseCompiler.compile(expr, target, prec)
+    );
+  }
+
+  /** {@link compileOp} through the multi-statement-block guard
+   * (`compileValueOperand`). */
+  static compileOpValue(
+    parent: Expression | undefined,
+    opIndex: number,
+    target: CompileTarget<Expression>,
+    prec = 0,
+    operand?: Expression
+  ): TargetSource {
+    const expr = operand ?? BaseCompiler.operandAt(parent, opIndex);
+    return BaseCompiler.withCseOperand(parent, opIndex, target, () =>
+      BaseCompiler.compileValueOperand(expr, target, prec)
+    );
+  }
+
+  private static operandAt(
+    parent: Expression | undefined,
+    opIndex: number
+  ): Expression | undefined {
+    if (parent === undefined || !isFunction(parent) || opIndex < 0)
+      return undefined;
+    return parent.ops[opIndex];
+  }
+
+  /**
+   * Compile the ROOT expression of a compilation as the harvest's root region
+   * (§6.1), so top-level candidates bind around the whole emitted expression.
+   * Falls back to a plain compile when CSE is inactive.
+   */
+  static compileCseRoot(
+    expr: Expression | undefined,
+    target: CompileTarget<Expression>,
+    prec = 0,
+    /** What to emit inside the root region. Defaults to compiling `expr`; the
+     * `Function`-literal route passes a callback that descends to the lambda
+     * BODY region (the root region holds only the `Function` node itself). */
+    fn?: () => TargetSource
+  ): TargetSource {
+    const emit = fn ?? (() => BaseCompiler.compile(expr, target, prec));
+    const session = target.cse;
+    if (
+      session === undefined ||
+      !session.enabled ||
+      session.harvest === undefined
+    )
+      return emit();
+    return BaseCompiler.withCseRegion(
+      target,
+      BaseCompiler.cseHarvestOf(target)!.root,
+      emit
+    );
+  }
+
+  /**
+   * Compile an emission-time tree that is NOT part of the root harvest — a
+   * user-defined function's definition body (§5.4) — under its own nested
+   * harvest scope: own regions and candidates, same session and naming
+   * counter (so temps never collide across the artifact), and the same G1b
+   * provenance predicates the boundary recorded.
+   */
+  private static withNestedCseHarvest(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    fn: () => TargetSource
+  ): TargetSource {
+    const session = target.cse;
+    if (session === undefined || !session.enabled) return fn();
+    const outer = session.harvest;
+    const nested = harvestCse(expr, session.harvestOptions ?? {});
+    BaseCompiler.mergeUsedNames(target, nested.usedNames);
+    session.harvest = nested;
+    try {
+      return BaseCompiler.withCseRegion(target, nested.root, fn);
+    } finally {
+      session.harvest = outer;
+    }
+  }
+
+  /**
+   * Compile `fn` under a BLIND instance — one that resolves no candidate — so
+   * a construct the CSE wiring deliberately does not describe (`Match`, fully
+   * inert in Phase 1) emits exactly the pre-CSE source, and no enclosing
+   * region's candidate can leak into it through a shared node object.
+   */
+  static withCseBlind(
+    target: CompileTarget<Expression>,
+    fn: () => TargetSource
+  ): TargetSource {
+    if (BaseCompiler.cseTop(target) === undefined) return fn();
+    return BaseCompiler.withCseRegion(target, undefined, fn);
+  }
+
+  /**
+   * The `compile` callback handed to a `CompiledFunction` handler. A handler
+   * lowering a construct with conditionally-evaluated operand positions passes
+   * the operand index for those positions (`OperandCompiler`), and the
+   * dispatcher — which is the only place that knows the parent node — turns it
+   * into the matching region instance. Handlers that omit the index compile
+   * exactly as before.
+   */
+  private static operandCompiler(
+    parent: Expression | undefined,
+    target: CompileTarget<Expression>
+  ): OperandCompiler<Expression> {
+    return (expr, opIndex) =>
+      opIndex === undefined
+        ? BaseCompiler.compileValueOperand(expr, target)
+        : BaseCompiler.compileOpValue(parent, opIndex, target, 0, expr);
+  }
+
+  /**
+   * The occurrence state machine (§6.1), interposed between `compile()` and
+   * the emission proper.
+   *
+   * Three states per candidate, per region instance: unseen → compile the
+   * right-hand side through (so it does not self-reference), then append the
+   * binding and emit the name; `'defining'` → compile through (we are inside
+   * the candidate's own right-hand side); `'bound'` → emit the name, an
+   * identifier, atomic at any precedence.
+   *
+   * Appending AFTER the right-hand side compiles is what makes the binding
+   * list dependency-ordered for free: a nested candidate's binding was
+   * appended while the outer one's right-hand side was being compiled.
+   */
+  private static compileWithCse(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    prec: number
+  ): TargetSource {
+    const session = target.cse;
+    if (session === undefined || !session.enabled)
+      return BaseCompiler._compileInner(expr, target, prec);
+
+    const top = session.instances[session.instances.length - 1];
+    if (top === undefined)
+      return BaseCompiler._compileInner(expr, target, prec);
+
+    // Emission has entered a binding scope this instance does not describe (a
+    // binder body with no push/pop site of its own): compile the subtree under
+    // a blind instance, so unknown territory degrades to the pre-CSE emission
+    // instead of resolving a name whose value would be captured.
+    if (top.boundVars !== target.boundVars)
+      return BaseCompiler.withCseRegion(target, undefined, () =>
+        BaseCompiler._compileInner(expr, target, prec)
+      );
+
+    const candidate = candidateAt(BaseCompiler.cseRegionOf(top), expr);
+    if (candidate === undefined)
+      return BaseCompiler._compileInner(expr, target, prec);
+
+    const state = top.state.get(candidate);
+    if (state === 'bound') return top.names.get(candidate)!;
+    if (state === 'defining')
+      return BaseCompiler._compileInner(expr, target, prec);
+
+    top.state.set(candidate, 'defining');
+    const rhs = BaseCompiler._compileInner(expr, target, 0);
+    // A target whose multi-statement constructs are bare statement sequences
+    // (Python, GPU) has no expression-position form for such a right-hand
+    // side. Leave the candidate `'defining'`: every occurrence then compiles
+    // inline, exactly as before — a lost optimization, never invalid source.
+    // The right-hand side above was compiled at precedence 0; the CALLER's
+    // precedence is what this position needs, so mirror the `'defining'`
+    // branch and recompile when they differ.
+    if (target.bareStatementBlocks === true && rhs.includes('\n'))
+      return prec === 0
+        ? rhs
+        : BaseCompiler._compileInner(expr, target, prec);
+
+    const name = BaseCompiler.cseTempVar(target);
+    top.state.set(candidate, 'bound');
+    top.names.set(candidate, name);
+    top.bindings.push([name, rhs]);
+    return name;
   }
 
   /**
    * Inline or wrap expression in IIFE based on complexity
    */
-  static inlineExpression(body: string, x: string): string {
+  static inlineExpression(
+    target: CompileTarget<Expression>,
+    body: string,
+    x: string
+  ): string {
     // Check if `x` is a simple value (like a number or a simple symbol)
     const isSimple = /^[\p{L}_][\p{L}\p{N}_]*$/u.test(x) || /^[0-9]+$/.test(x);
 
@@ -4195,7 +5011,7 @@ export class BaseCompiler {
       return new Function('x', `return \`${body}\`;`)(x);
     } else {
       // Generate an IIFE if `x` is a complex expression
-      const t = BaseCompiler.tempVar();
+      const t = BaseCompiler.tempVar(target);
       return new Function(
         'x',
         `return \`(() => { const ${t} = \${x}; return ${body.replace(
