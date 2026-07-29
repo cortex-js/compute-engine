@@ -58,6 +58,7 @@ import type {
   DictionaryInterface,
   CanonicalForm,
 } from '../global-types.js';
+import type { FunctionInterface } from '../types-expression.js';
 import type { Type } from '../../common/type/types.js';
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
@@ -131,7 +132,13 @@ function holdValuesShieldNames(spec: Expression): string[] {
  *   escaping as the result, directly or inside `List`/`Tuple` cells — is a
  *   COMPLETED value: its lambda draws at materialization (the §6 escape
  *   ruling of `docs/RANDOMNESS-MODEL.md`), so its `Function` subtree is
- *   skipped.
+ *   skipped. A lazy view that BINDS its own variables — `Comprehension(body,
+ *   Element(k, xs))`, the shape `[… for k = …]` parses to — is the same
+ *   thing spelled without a syntactic `Function` node, so its body is
+ *   skipped the same way (Tycho item 106). Which operands are the body is
+ *   derived from the definition's binding-site selector, not from a list of
+ *   operator names: the operands that carry binding sites are its clauses
+ *   and stay scanned, exactly as a `Map`'s source collection does.
  * - Any OTHER surviving application (`ListFrom(Map(xs, x |-> Random()))`
  *   with an unresolved length, an `At` over it, …) is work THIS evaluation
  *   was supposed to finish: everything beneath it — lambdas included — is
@@ -160,7 +167,30 @@ function hasPendingImpureApplication(
     !underEagerSurvivor &&
     (expr.isLazyCollection || h === 'List' || h === 'Tuple' || h === 'Pair');
   const under = underEagerSurvivor || !isValueNode;
+  // A binder lazy view in value position: only the clause operands are
+  // scanned; the body is per-element work performed at materialization.
+  if (!under && expr.isLazyCollection) {
+    const clauses = binderClauseOperands(expr);
+    if (clauses)
+      return expr.ops.some(
+        (op, i) => clauses.has(i) && hasPendingImpureApplication(op, under)
+      );
+  }
   return expr.ops.some((op) => hasPendingImpureApplication(op, under));
+}
+
+/**
+ * The operand indices of a binder node that are its CLAUSES — the operands
+ * carrying the syntactic bound variables the node declares. Everything else
+ * is body. `undefined` when the node is not a binder with syntactic bound
+ * variables (a plain `scoped: true` operator, or any non-binder).
+ */
+function binderClauseOperands(
+  expr: Expression & FunctionInterface
+): Set<number> | undefined {
+  const sites = expr.operatorDefinition?.bindingSites?.(expr.ops, 'post');
+  if (sites === undefined || sites.length === 0) return undefined;
+  return new Set(sites.map((site) => site.path[0]));
 }
 
 // Split a string into grapheme clusters (UAX #29, via `Intl.Segmenter`).

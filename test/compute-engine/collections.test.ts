@@ -3667,3 +3667,87 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
     expect(expr.isValid).toBe(true);
   });
 });
+
+describe('A collection parameter that is not yet evaluated (Tycho item 107)', () => {
+  // Collection handlers are consulted on the CANONICAL expression, not on an
+  // evaluated one — `.at()`/`.each()`/`.count` are public on any canonical
+  // expression, and the pre-evaluation broadcast in `_computeValue` zips raw
+  // operands. A parameter spelled `N-1` is still an `Add` node there, and
+  // every handler used to turn the failed integer read into its own DEFAULT:
+  // `RotateLeft(S, N-1) + RotateLeft(S, N-2)` answered `2·RotateLeft(S, 1)`.
+  // Literal offsets were unaffected, which is what hid the class.
+
+  function fresh() {
+    const ce = new ComputeEngine();
+    ce.assign('S107', ce.box(['List', 1, 2, 3, 4, 5, 6]));
+    ce.assign('N107', 6);
+    return ce;
+  }
+
+  test('the handlers resolve a symbolic offset on the RAW expression', () => {
+    const ce = fresh();
+    const e = ce.box(['RotateLeft', 'S107', ['Subtract', 'N107', 1]]);
+    expect(e.at(1)?.toString()).toBe('6');
+    expect([...e.each()].map((x) => x.toString()).join(',')).toBe(
+      '6,1,2,3,4,5'
+    );
+  });
+
+  test('Add over two RotateLeft views with symbolic offsets sums the rotations', () => {
+    const ce = fresh();
+    const sum = ce.box([
+      'Add',
+      ['RotateLeft', 'S107', ['Subtract', 'N107', 1]],
+      ['RotateLeft', 'S107', ['Subtract', 'N107', 2]],
+    ]);
+    // The canonical tree is NOT collapsed — the two views are distinct.
+    expect(sum.json).toEqual([
+      'Add',
+      ['RotateLeft', 'S107', ['Add', 'N107', -1]],
+      ['RotateLeft', 'S107', ['Add', 'N107', -2]],
+    ]);
+    // RotateLeft(S, 5) = [6,1,2,3,4,5], RotateLeft(S, 4) = [5,6,1,2,3,4]
+    expect(sum.evaluate().toString()).toBe('[11,7,3,5,7,9]');
+  });
+
+  test('a symbolic offset matches the equivalent literal offset', () => {
+    const ce = fresh();
+    const symbolic = ce
+      .box([
+        'Add',
+        ['RotateRight', 'S107', ['Subtract', 'N107', 1]],
+        ['RotateRight', 'S107', ['Subtract', 'N107', 2]],
+      ])
+      .evaluate()
+      .toString();
+    const literal = ce
+      .box(['Add', ['RotateRight', 'S107', 5], ['RotateRight', 'S107', 4]])
+      .evaluate()
+      .toString();
+    expect(symbolic).toBe(literal);
+  });
+
+  test('Take and Drop resolve symbolic counts under a broadcast', () => {
+    const ce = fresh();
+    expect(
+      ce
+        .box([
+          'Add',
+          ['Take', 'S107', ['Subtract', 'N107', 2]],
+          ['Take', 'S107', ['Subtract', 'N107', 2]],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[2,4,6,8]');
+    expect(
+      ce
+        .box([
+          'Add',
+          ['Drop', 'S107', ['Subtract', 'N107', 4]],
+          ['Drop', 'S107', ['Subtract', 'N107', 4]],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[6,8,10,12]');
+  });
+});

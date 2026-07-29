@@ -154,6 +154,16 @@ interface BoxedOperatorDefinition
   complexity: number;
   inferredSignature: boolean;
   signature: BoxedType;
+  /** The binding-site selector of the declaration's `scoped` flag, when one
+   * was given — `undefined` for a plain `scoped: true` and for an unscoped
+   * operator. Narrowed to the operand PATH here: `BindingSiteSelector` lives
+   * in `types-definitions.ts`, which imports this file, so the full type
+   * cannot be named from here. `readonly BindingSite[]` is assignable to the
+   * element shape below. */
+  bindingSites?: (
+    ops: ReadonlyArray<Expression>,
+    phase: 'pre' | 'post'
+  ) => readonly { readonly path: readonly number[] }[];
   readonly resolvedMissingBehavior:
     | 'reject'
     | 'propagate'

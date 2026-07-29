@@ -2,6 +2,29 @@
 
 ### Bug Fixes
 
+- **A collection operator now resolves an unevaluated numeric argument.**
+  Collection handlers are consulted on the canonical expression — `.at()`,
+  `.each()` and `.count` are available on any canonical expression, and the
+  broadcast that zips `Add`/`Multiply` operands runs before they are evaluated.
+  An argument spelled `N-1` was therefore still an unevaluated sum at that
+  point, and each operator silently fell back to its default: with `N` assigned
+  `6`, `RotateLeft(S, N-1) + RotateLeft(S, N-2)` returned `2·RotateLeft(S, 1)`,
+  and `Take(S, N-2) + Take(S, N-2)` returned nothing at all. Literal arguments
+  were never affected. Fixed for `Take`, `Drop`, `RotateLeft`, `RotateRight`,
+  `Repeat`, `Fill`, `Partition`, `Tabulate`, `Insert`, `DeleteAt`, `ReplaceAt`,
+  `Slice`, `Permutations` and `Combinations`.
+
+- **`WithRandomSeed(seed, [… for …])` draws again.** A comprehension is a lazy
+  view, like `Map`: its body draws per element when the collection is
+  materialized. The rule that keeps the seed frame around a body that could not
+  finish its draws (0.98.0) read the comprehension's unevaluated body as
+  unfinished work, so the expression evaluated to itself — the collection was
+  inert and yielded no elements, and nothing would ever complete it. A
+  comprehension now follows the same convention as `Map`: materialize it inside
+  the frame (`WithRandomSeed(1, ListFrom([Random() for k = [1...6]]))`) for
+  reproducible draws. A comprehension whose _clause_ still owes draws keeps the
+  frame, as before.
+
 - **A user-defined function now infers its `pure` and `drawsRandom` flags from
   its body.** Previously every user function was born pure, so `f() := Random()`
   reported `isConstant: true` while drawing from the random stream on every

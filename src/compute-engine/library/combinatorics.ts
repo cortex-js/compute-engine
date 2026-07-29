@@ -1,4 +1,8 @@
-import { toBigint, toInteger } from '../boxed-expression/numerics.js';
+import {
+  toBigint,
+  toInteger,
+  toIntegerOperand,
+} from '../boxed-expression/numerics.js';
 import type { Expression, SymbolDefinitions } from '../global-types.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { apply2 } from '../boxed-expression/apply.js';
@@ -392,7 +396,9 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         // infinite collection that yields nothing.
         isFinite: (expr) => {
           if (!isFunction(expr)) return undefined;
-          const k = expr.ops[1] ? toInteger(expr.ops[1]) : expr.op1.count;
+          const k = expr.ops[1]
+            ? toIntegerOperand(expr.ops[1])
+            : expr.op1.count;
           if (k === 0) return true;
           const f = expr.op1.isFiniteCollection;
           return f === false ? undefined : f;
@@ -423,7 +429,9 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         // infinite base with `k > 0` is `undefined` (unenumerable), not `false`.
         isFinite: (expr) => {
           if (!isFunction(expr)) return undefined;
-          const k = expr.ops[1] ? toInteger(expr.ops[1]) : expr.op1.count;
+          const k = expr.ops[1]
+            ? toIntegerOperand(expr.ops[1])
+            : expr.op1.count;
           if (k === 0) return true;
           const f = expr.op1.isFiniteCollection;
           return f === false ? undefined : f;
@@ -615,7 +623,7 @@ function permutationsCount(expr: Expression): number | undefined {
   const n = expr.op1.count;
   if (n === undefined) return undefined;
   const kExpr = expr.ops[1];
-  const k = kExpr ? toInteger(kExpr) : n;
+  const k = kExpr ? toIntegerOperand(kExpr) : n;
   // Validate `k` BEFORE the infinite short-circuit: an out-of-range `k` is an
   // invalid expression, not an infinite collection.
   if (k === null || k < 0 || (Number.isFinite(n) && k > n)) return undefined;
@@ -644,7 +652,7 @@ function combinationsCount(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
   const n = expr.op1.count;
   if (n === undefined) return undefined;
-  const k = toInteger(expr.ops[1]);
+  const k = toIntegerOperand(expr.ops[1]);
   if (k === null || k < 0 || (Number.isFinite(n) && k > n)) return undefined;
   if (k === 0) return 1; // C(n, 0) = 1
   if (!Number.isFinite(n)) return undefined; // see `permutationsCount`
@@ -674,7 +682,7 @@ function* permutationsIterator(
   // source (so it also works for an infinite source, which can't be
   // enumerated). A negative/invalid explicit `k` yields nothing.
   if (kExpr) {
-    const k0 = toInteger(kExpr);
+    const k0 = toIntegerOperand(kExpr);
     if (k0 === null || k0 < 0) return;
     if (k0 === 0) {
       yield ce.function('List', []);
@@ -683,7 +691,7 @@ function* permutationsIterator(
   }
   if (!xs.isFiniteCollection) return;
   const all = [...xs.each()] as Expression[];
-  const k = kExpr ? toInteger(kExpr) : all.length;
+  const k = kExpr ? toIntegerOperand(kExpr) : all.length;
   if (k === null || k < 0 || k > all.length) return;
 
   function* permute(
@@ -714,7 +722,7 @@ function* combinationsIterator(
   const kExpr = expr.ops[1];
   // C(n, 0) = 1: the single empty combination — yield it without touching the
   // source (works for an infinite source too). Negative/invalid `k` → nothing.
-  const k0 = kExpr ? toInteger(kExpr) : null;
+  const k0 = kExpr ? toIntegerOperand(kExpr) : null;
   if (k0 === null || k0 < 0) return;
   if (k0 === 0) {
     yield ce.function('List', []);

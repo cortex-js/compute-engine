@@ -5,7 +5,7 @@ import {
   spellCheckMessage,
   validateArguments,
 } from '../boxed-expression/validate.js';
-import { toInteger } from '../boxed-expression/numerics.js';
+import { toInteger, toIntegerOperand } from '../boxed-expression/numerics.js';
 
 import {
   basicIndexedCollectionHandlers,
@@ -3391,7 +3391,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const [xs, op2] = expr.ops;
         if (xs.isEmptyCollection) return true;
         if (xs.isFiniteCollection === false) return false;
-        const n = Math.max(0, toInteger(op2) ?? 0);
+        const n = Math.max(0, toIntegerOperand(op2) ?? 0);
         // A known non-empty source with n ≥ 1 gives a non-empty Take even
         // when the source's count is unknown (e.g. Dedup of an infinite
         // Iterate) — required for the generic materializer, which keeps the
@@ -3406,7 +3406,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         // A non-positive bound yields an empty (finite) collection regardless
         // of the source.
-        const n = toInteger(expr.op2);
+        const n = toIntegerOperand(expr.op2);
         if (n !== null && n <= 0) return true;
         // Otherwise the result is finite when its own element count is
         // known-finite — i.e. a finite bound over a source that is finite or
@@ -3424,7 +3424,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ): undefined | Expression => {
         if (typeof index !== 'number' || index === 0) return undefined;
         if (!isFunction(expr)) return undefined;
-        const n = Math.max(0, toInteger(expr.op2) ?? 0);
+        const n = Math.max(0, toIntegerOperand(expr.op2) ?? 0);
         if (n === 0) return undefined;
 
         if (index > 0) {
@@ -3457,7 +3457,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (count === undefined) return undefined;
         if (!Number.isFinite(count)) return Infinity;
         if (xs.isEmptyCollection) return 0;
-        const nValue = toInteger(n) ?? 0;
+        const nValue = toIntegerOperand(n) ?? 0;
         if (nValue >= count) return 0;
         return Math.max(0, count - nValue);
       },
@@ -3470,7 +3470,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return { next: () => ({ value: undefined, done: true }) };
         const [xs, nExpr] = expr.ops;
 
-        const n = toInteger(nExpr) ?? 0;
+        const n = toIntegerOperand(nExpr) ?? 0;
         if (n <= 0) return xs.each();
 
         const count = xs.count;
@@ -3497,7 +3497,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         const [xs, nExpr] = expr.ops;
 
-        const n = toInteger(nExpr) ?? 0;
+        const n = toIntegerOperand(nExpr) ?? 0;
         // Dropping <= 0 elements is the identity (matches the iterator, which
         // returns `xs.each()` for n <= 0).
         if (n <= 0) return xs.at(index);
@@ -4145,7 +4145,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const l = expr.op1.count;
         if (l === undefined || l <= 0)
           return { next: () => ({ value: undefined, done: true }) };
-        let n = toInteger(expr.op2) ?? 1;
+        let n = toIntegerOperand(expr.op2) ?? 1;
         n = ((n % l) + l) % l; // Normalize shift
 
         let index = 1;
@@ -4171,7 +4171,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (l === undefined || l <= 0) return undefined;
         if (index < 1) index = l + 1 + index;
         if (index < 1 || index > l) return undefined;
-        let n = toInteger(expr.op2) ?? 1;
+        let n = toIntegerOperand(expr.op2) ?? 1;
         n = ((n % l) + l) % l; // Normalize shift
 
         return expr.op1.at(((index - 1 + n) % l) + 1);
@@ -4200,7 +4200,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const l = expr.op1.count;
         if (l === undefined || l <= 0)
           return { next: () => ({ value: undefined, done: true }) };
-        let n = toInteger(expr.op2) ?? 1;
+        let n = toIntegerOperand(expr.op2) ?? 1;
         n = ((n % l) + l) % l; // Normalize shift
 
         let index = 1;
@@ -4226,7 +4226,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (l === undefined || l <= 0) return undefined;
         if (index < 1) index = l + 1 + index;
         if (index < 1 || index > l) return undefined;
-        let n = toInteger(expr.op2) ?? 1;
+        let n = toIntegerOperand(expr.op2) ?? 1;
         n = ((n % l) + l) % l; // Normalize shift
         const i = ((index - 1 + (l - n)) % l) + 1;
         return expr.op1.at(i);
@@ -4964,11 +4964,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // inert — `Count(Partition(<inf>, <pred>))` remains symbolic.
     collection: windowedCollectionOps((expr) => {
       if (!isFunction(expr)) return undefined;
-      const n = toInteger(expr.op2);
+      const n = toIntegerOperand(expr.op2);
       if (n === null || n <= 0) return undefined; // predicate form or invalid
       if (expr.nops >= 3) {
         // Sliding-window form: complete windows only.
-        const step = toInteger(expr.op3);
+        const step = toIntegerOperand(expr.op3);
         if (step === null || step <= 0) return undefined;
         return { src: expr.op1, size: n, step, keepPartial: false };
       }
@@ -5343,7 +5343,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.ops?.length === 2) {
-          const n = toInteger(expr.op2);
+          const n = toIntegerOperand(expr.op2);
           return n !== null ? Math.max(0, n) : undefined;
         }
         return Infinity;
@@ -5351,7 +5351,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.ops?.length === 2) {
-          const n = toInteger(expr.op2);
+          const n = toIntegerOperand(expr.op2);
           return n !== null ? n <= 0 : undefined;
         }
         return false; // infinite — never empty
@@ -5360,7 +5360,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
         if (expr.ops?.length === 2) {
-          const n = toInteger(expr.op2);
+          const n = toIntegerOperand(expr.op2);
           if (n !== null && n <= 0) return false; // empty list
         }
         return expr.op1.isSame(target);
@@ -5369,7 +5369,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         if (expr.ops?.length === 2) {
-          const n = toInteger(expr.op2);
+          const n = toIntegerOperand(expr.op2);
           if (n === null) {
             return { next: () => ({ value: undefined, done: true }) };
           }
@@ -5390,7 +5390,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         if (typeof index !== 'number') return undefined;
         if (expr.ops?.length === 2) {
-          const n = toInteger(expr.op2);
+          const n = toIntegerOperand(expr.op2);
           const count = n !== null ? Math.max(0, n) : 0;
           if (index < 1 || index > count) return undefined;
         } else {
@@ -5472,7 +5472,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (!isFunction(expr.op2)) return undefined;
-        const dims = expr.op2.ops.map((op) => toInteger(op) ?? 0);
+        const dims = expr.op2.ops.map((op) => toIntegerOperand(op) ?? 0);
         return dims[0] ?? 0;
       },
       iterator: (expr) => {
@@ -5482,7 +5482,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!f) return { next: () => ({ value: undefined, done: true }) };
         if (!isFunction(expr.op2))
           return { next: () => ({ value: undefined, done: true }) };
-        const dims = expr.op2.ops.map((op) => toInteger(op) ?? 0);
+        const dims = expr.op2.ops.map((op) => toIntegerOperand(op) ?? 0);
         const rows = dims[0] ?? 0;
         const cols = dims[1] ?? 0;
         const last = rows;
@@ -5511,7 +5511,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const f = applicable(expr.op1);
         if (!f) return undefined;
         if (!isFunction(expr.op2)) return undefined;
-        const dims = expr.op2.ops.map((op) => toInteger(op) ?? 0);
+        const dims = expr.op2.ops.map((op) => toIntegerOperand(op) ?? 0);
         const rows = dims[0] ?? 0;
         const cols = dims[1] ?? 0;
         if (index > rows * cols) return undefined;
@@ -5729,7 +5729,7 @@ function insertPosition(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
   const n = expr.op1.count;
   if (n === undefined) return undefined;
-  const index = toInteger(expr.op2);
+  const index = toIntegerOperand(expr.op2);
   if (index === null || index === 0) return undefined;
   if (index > 0) {
     if (Number.isFinite(n) && index > n + 1) return undefined;
@@ -5751,7 +5751,7 @@ function targetPosition(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
   const n = expr.op1.count;
   if (n === undefined) return undefined;
-  const index = toInteger(expr.op2);
+  const index = toIntegerOperand(expr.op2);
   if (index === null || index === 0) return undefined;
   if (index > 0) {
     if (Number.isFinite(n) && index > n) return undefined;
@@ -6552,13 +6552,13 @@ function sliceBounds(
   if (!isFunction(expr)) return undefined;
   const count = expr.op1.count;
   if (count === undefined) return undefined;
-  let start = toInteger(expr.op2) ?? 1;
+  let start = toIntegerOperand(expr.op2) ?? 1;
   if (start < 1) {
     if (!Number.isFinite(count)) return undefined;
     start = count + 1 + start;
   }
   if (start < 1) start = 1;
-  let end = toInteger(expr.op3) ?? count;
+  let end = toIntegerOperand(expr.op3) ?? count;
   if (end < 1) end = count + 1 + end;
   if (end < 1) end = 1;
   if (end > count) end = count;
@@ -6637,7 +6637,7 @@ function takeIterator(expr: Expression): Iterator<Expression> {
   if (!isFunction(expr))
     return { next: () => ({ value: undefined, done: true }) };
   // Number of elements to take
-  const count = Math.max(0, toInteger(expr.op2) ?? 0);
+  const count = Math.max(0, toIntegerOperand(expr.op2) ?? 0);
 
   if (count === 0) return { next: () => ({ value: undefined, done: true }) };
 
@@ -6661,7 +6661,7 @@ function takeCount(expr: Expression): number | undefined {
   const [xs, op2] = expr.ops;
   const count = xs.count;
   if (count === undefined) return undefined;
-  const n = Math.max(0, toInteger(op2) ?? 0);
+  const n = Math.max(0, toIntegerOperand(op2) ?? 0);
   if (!Number.isFinite(n)) return Infinity;
   return Math.min(count, n);
 }
@@ -6670,7 +6670,7 @@ function takeCount(expr: Expression): number | undefined {
  * non-integer, or non-positive. `Tabulate(fn)` (no dimensions) returns `[]`. */
 function tabulateDims(expr: Expression): number[] | null {
   if (!isFunction(expr)) return null;
-  const dims = expr.ops.slice(1).map((op) => toInteger(op));
+  const dims = expr.ops.slice(1).map((op) => toIntegerOperand(op));
   if (dims.some((d) => d === null || d <= 0)) return null;
   return dims as number[];
 }

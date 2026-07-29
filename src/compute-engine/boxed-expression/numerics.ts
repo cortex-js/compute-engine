@@ -194,6 +194,33 @@ export function toInteger(expr: Expression | undefined): number | null {
   return n;
 }
 
+/**
+ * `toInteger` for an operand that may not have been EVALUATED yet — the
+ * integer parameters a collection handler reads (a `Take` count, a
+ * `RotateLeft` offset, an `InsertAt` position).
+ *
+ * Collection handlers are consulted on the *canonical* expression, not on an
+ * evaluated one: `.at()`/`.each()`/`.count` are public on any canonical
+ * expression, and the pre-evaluation broadcast in
+ * `BoxedFunction._computeValue` zips raw operands. A parameter spelled `N-1`
+ * is therefore still an `Add` node at that point, where a bare `toInteger`
+ * answers `null` — which every call site turned into its own DEFAULT
+ * (`?? 1`, `?? 0`), silently substituting a different collection:
+ * `RotateLeft(S, N-1) + RotateLeft(S, N-2)` answered `2·RotateLeft(S, 1)`
+ * (Tycho item 107).
+ *
+ * `toInteger` runs first, so a literal operand — the hot path of a drain —
+ * costs nothing extra; only a symbolic operand pays one `evaluate()`. An
+ * operand that is already a number literal is never re-evaluated: if it is
+ * not an integer, no amount of evaluation will make it one.
+ */
+export function toIntegerOperand(expr: Expression | undefined): number | null {
+  const n = toInteger(expr);
+  if (n !== null) return n;
+  if (expr === undefined || isNumber(expr)) return null;
+  return toInteger(expr.evaluate());
+}
+
 /** Convert a boxed expression to a bigint.
  * Returns null if the expression cannot be converted to a bigint.
  * If the expression is a complex number, only the real part is considered.

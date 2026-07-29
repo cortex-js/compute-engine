@@ -756,3 +756,89 @@ describe('WithRandomSeed — pending-draw detection (review round, 2026-07-28)',
     expect(ce.box('ctr').evaluate().re).toBe(2);
   });
 });
+
+describe('WithRandomSeed — a binder LAZY view is a completed value (Tycho item 106)', () => {
+  // `Comprehension(body, Element(k, xs))` — what `[… for k = …]` parses to —
+  // is `Map(xs, k |-> body)` spelled without a syntactic `Function` node. The
+  // pending-draw walk used to read its unevaluated `Random()` body as work the
+  // frame still owed, so the whole expression evaluated to ITSELF and, unlike
+  // the unbound-symbol case, nothing would ever complete it: the row drew
+  // nothing at all. §6 applies to both spellings alike.
+
+  const COMPREHENSION = [
+    'WithRandomSeed',
+    424242,
+    ['Comprehension', ['Random'], ['Element', 'k', ['Range', 1, 6]]],
+  ];
+
+  it('evaluates to the lazy view, not to itself (box route)', () => {
+    const v = boxed(COMPREHENSION).evaluate();
+    expect(v.operator).toBe('Comprehension');
+    expect(v.isCollection).toBe(true);
+    expect(v.count).toBe(6);
+    expect([...v.each()].length).toBe(6);
+  });
+
+  it('evaluates to the lazy view, not to itself (parse route)', () => {
+    const v = parsed(
+      '\\mathrm{WithRandomSeed}(424242,[\\mathrm{Random}()\\operatorname{for}k=[1...6]])'
+    ).evaluate();
+    expect(v.operator).toBe('Comprehension');
+    expect([...v.each()].length).toBe(6);
+  });
+
+  it('matches the `Map` spelling: the escaped view strips the frame', () => {
+    const comprehension = boxed(COMPREHENSION).evaluate();
+    const map = boxed([
+      'WithRandomSeed',
+      424242,
+      ['Map', ['Range', 1, 6], ['Function', ['Random'], 'u']],
+    ]).evaluate();
+    expect(comprehension.operator).not.toBe('WithRandomSeed');
+    expect(map.operator).not.toBe('WithRandomSeed');
+  });
+
+  it('materializing INSIDE the frame replays (the §6 remedy)', () => {
+    const e = boxed([
+      'WithRandomSeed',
+      424242,
+      [
+        'ListFrom',
+        ['Comprehension', ['Random'], ['Element', 'k', ['Range', 1, 4]]],
+      ],
+    ]);
+    const a = e.evaluate().toString();
+    const b = e.evaluate().toString();
+    expect(a).toBe(b);
+    expect(a.startsWith('[')).toBe(true);
+  });
+
+  it('a comprehension beneath a surviving eager consumer still keeps the frame', () => {
+    // `ListFrom` asked for materialization in-frame; only the unresolved
+    // length made it survive — the draws are still owed (item 104).
+    const e = boxed([
+      'WithRandomSeed',
+      1,
+      [
+        'ListFrom',
+        ['Comprehension', ['Random'], ['Element', 'k', ['Range', 1, 'n']]],
+      ],
+    ]);
+    expect(e.evaluate().operator).toBe('WithRandomSeed');
+  });
+
+  it('a comprehension CLAUSE that owes draws still keeps the frame (only the body is skipped)', () => {
+    // The clause collection is the comprehension's source, the counterpart of
+    // a `Map`'s source operand — which the walk has always scanned.
+    const e = boxed([
+      'WithRandomSeed',
+      1,
+      [
+        'Comprehension',
+        'k',
+        ['Element', 'k', ['RandomShuffle', ['Range', 1, 'n']]],
+      ],
+    ]);
+    expect(e.evaluate().operator).toBe('WithRandomSeed');
+  });
+});

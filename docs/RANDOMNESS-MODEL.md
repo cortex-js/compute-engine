@@ -118,7 +118,9 @@ that did complete and yields exactly the single-evaluation stream —
 Two shapes are **completed values**, not pending draws, and do strip the
 frame: a lazy view whose lambda draws at materialization (the §6 ruling — the
 escape stays a live-draw escape, whether the view is the result itself or a
-cell of a returned `List`/`Tuple`), and `Hold` content (inert until
+cell of a returned `List`/`Tuple`; a view that BINDS its own variables, such
+as a `Comprehension`, counts here too — its body is the lambda, spelled
+without a `Function` node), and `Hold` content (inert until
 `Release`, under whatever frame is active then). A lazy view beneath a
 **surviving eager consumer** (`ListFrom(Map(range, x ↦ Random()))` whose
 length has not resolved) is the opposite case: the materialization was asked
@@ -377,6 +379,24 @@ ListFrom(WithRandomSeed(1, Map(Range(1, 3), x |-> Random())))   // LIVE draws:
 returns another lazy view, so the draws still happen later, outside the frame.
 Use an operator that actually consumes the collection (`ListFrom`, an index, a
 reducer such as `Sum`).
+
+**`Comprehension` is a lazy view too** — and it is the shape the LaTeX
+comprehension syntax parses to, so the trap is one keystroke away in a
+document:
+
+```
+WithRandomSeed(1, [Random() for k = [1...6]])              // LIVE draws
+WithRandomSeed(1, ListFrom([Random() for k = [1...6]]))    // replays
+```
+
+The bracket spelling reads like a list literal, but `[… for …]` builds a
+`Comprehension`, whose body draws per element at materialization exactly as a
+`Map`'s lambda does. It follows this section, not the "partial evaluation
+keeps the frame" rule of §2: a `Comprehension` body is per-element work, not a
+draw the enclosing evaluation owed (Tycho item 106). Its *clauses* are a
+different matter — a clause collection is the view's source, the counterpart
+of a `Map`'s source operand, so `Comprehension(k, Element(k,
+RandomShuffle(Range(1, n))))` with `n` unbound does keep the frame.
 
 ## 7. Crossing the interpret↔compile boundary
 
