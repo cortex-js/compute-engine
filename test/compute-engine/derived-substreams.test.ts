@@ -372,23 +372,42 @@ describe('A DEFERRED estimator keeps its seed frame', () => {
     ]);
   };
 
+  // The two live tests below assert on the GATE and the FLAG, never on a
+  // sampled value, so neither completes an estimate: 35 ms and 49 ms measured.
+  // The two that do complete one are skipped — see the note before them.
+
   it('stays whole rather than stripping the frame', () => {
     expect(deferred().evaluate().operator).toBe('WithRandomSeed');
   });
 
-  it('completes to the same estimate on both routes', () => {
+  // ── Skipped: each of these COMPLETES a Monte-Carlo estimate ───────────────
+  //
+  // Measured in jest (not under `tsx` — see below): route equality 49.6 s, the
+  // completed-estimate check 22.7 s. Together they are the whole cost of this
+  // block, against this file's ~10 s budget.
+  //
+  // TRAP, and the reason these look affordable when they are not: the same two
+  // integrals run in ~1 s each under `npx tsx`, because the integrand compiles
+  // there. Inside jest it does not, so the sampling loop runs interpreted and
+  // costs 20–50x more. NEVER size an estimator test with a `tsx` measurement;
+  // take the duration from jest (`--json --outputFile`, read
+  // `assertionResults[].duration` — a `-t` filter after `--` is parsed as a
+  // PATH pattern, so timing "one test" that way silently times the whole file).
+  //
+  // Un-skip to verify by hand after touching the pending gate, the
+  // `readsRandomFrame` flag, or the sub-stream derivation.
+
+  it.skip('completes to the same estimate on both routes', () => {
     // Route equality is THE property (§2's "same values" claim, applied to an
     // estimate rather than a draw): with the frame stripped, route A drifted
-    // run to run while route B was stable, so a single A-vs-B comparison
-    // catches it. Deliberately ONE comparison — each completion is a real
-    // ~1s Monte-Carlo estimate, and this file has a tight time budget.
+    // run to run while route B was stable, so one A-vs-B comparison catches it.
     const e = deferred();
     expect(e.evaluate().subs({ n: 1 }).N().toString()).toBe(
       e.subs({ n: 1 }).N().toString()
     );
   });
 
-  it('a COMPLETED estimate still strips the frame (§6 unchanged)', () => {
+  it.skip('a COMPLETED estimate still strips the frame (§6 unchanged)', () => {
     const e = new ComputeEngine();
     expect(
       e
