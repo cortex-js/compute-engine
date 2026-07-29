@@ -131,6 +131,16 @@ that consume the stream — not on impurity in general: a surviving `Assign`
 or `Declare` is impure but owes nothing to the frame, and does not keep the
 expression wrapped.
 
+**A user-defined function carries the flag too.** `f() := Random()` gives `f`
+an inferred `pure: false, drawsRandom: true`, derived from the heads its body
+applies, so a draw behind a user function is seen by this gate and by the
+draw-consumption accounting — a call is not a hole in the model. The inference
+is a one-way downgrade from heads with a *known* definition, so it has one
+documented blind spot: a head that has no definition at the point of
+definition — a higher-order parameter (`f(g) := g()`), or a callee defined
+*after* its caller — is assumed pure. Set the flag explicitly on the
+definition when that matters.
+
 Keeping the expression whole means a later `evaluate()` **re-runs the
 body** — the standard semantics of re-evaluating any unreduced impure
 expression. Draws are deterministic under the frame (replay from draw 0),

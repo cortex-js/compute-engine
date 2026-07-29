@@ -523,6 +523,23 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       if (isFunction(boxedFn) && boxedFn.operator === 'Function') {
         this._isLambda = true;
         this._lambdaLiteral = boxedFn;
+
+        // Derive `pure` / `drawsRandom` from the BODY unless the caller stated
+        // them. A user function is otherwise born with the defaults
+        // (`pure: true`, `drawsRandom: false`), so `f() := Random()` would
+        // claim to be a pure — hence CONSTANT — expression while drawing from
+        // the stream on every call. Two things break on that lie:
+        // `Add`/`Multiply` keep a PURE operand raw under `.N()` and
+        // re-evaluate it (drawing twice, see `library/arithmetic.ts`), and
+        // `WithRandomSeed`'s pending-draw gate is keyed on `drawsRandom`, so a
+        // partially-evaluated body calling `f` loses its frame and silently
+        // resumes with LIVE draws (the Tycho item 104 failure).
+        if (def.pure === undefined || def.drawsRandom === undefined) {
+          const inferred = inferLambdaFlags(this.engine, boxedFn);
+          if (def.pure === undefined) this.pure = inferred.pure;
+          if (def.drawsRandom === undefined)
+            this.drawsRandom = inferred.drawsRandom;
+        }
       }
 
       const fn = applicable(boxedFn);
@@ -543,4 +560,83 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
     this.evaluate = evaluate;
   }
+}
+
+/**
+ * Infer the `pure` and `drawsRandom` flags of an operator definition backed by
+ * a user `Function` literal, from the heads its body applies.
+ *
+ * The rule is a one-way downgrade: a body is assumed pure until a head with a
+ * KNOWN definition says otherwise. `drawsRandom` implies `pure: false` — a
+ * draw from the stream is nondeterministic by construction — but not the
+ * converse (`Assign` is impure and owes the stream nothing).
+ *
+ * Three deliberate limits, all failing in the OPTIMISTIC direction (a
+ * definition that stays pure when it should not), which is why they are worth
+ * stating rather than hiding:
+ *
+ * - **A head with no operator definition is treated as pure.** That covers the
+ *   higher-order case — `f(g) := g()` cannot know what `g` will be — and an
+ *   as-yet-undeclared name. Treating unknown heads as impure would instead
+ *   mark most user functions impure, losing `isConstant`, the `Map` lowering
+ *   fast path, and the type/sgn caches for them.
+ * - **Flags are read from the callee's definition, not re-derived from its
+ *   body**, so composition works only when definitions are made in dependency
+ *   order: `f() := g()` written BEFORE `g` is defined sees no definition for
+ *   `g` and stays pure. Redefining `f` after `g` re-runs the inference.
+ * - **A self-call is neutral** — the definition being constructed still holds
+ *   the defaults — so a recursive function is classified by the rest of its
+ *   body, which is where any draw or write actually appears.
+ *
+ * `Hold` is NOT skipped: `Hold(Random())` marks the definition as drawing even
+ * though nothing draws until `Release`. That is the conservative direction
+ * (the cost is a lost optimization) and it keeps the walk a plain structural
+ * scan.
+ *
+ * The literal arrives in `'raw'` form, so its nodes are UNBOUND and
+ * `operatorDefinition` is `undefined` throughout — the lookup by name is the
+ * load-bearing path here, not a fallback (same shape as `isImpureHead` in
+ * `library/map-lowering.ts`).
+ */
+function inferLambdaFlags(
+  ce: ComputeEngine,
+  literal: Expression
+): { pure: boolean; drawsRandom: boolean } {
+  // A parameter shadows any same-named operator for the whole body, so
+  // `f(Random) := Random` must not be read as a draw.
+  const params = new Set(functionLiteralParameters(literal).map((p) => p.name));
+
+  let pure = true;
+  let drawsRandom = false;
+
+  const visit = (expr: Expression): void => {
+    // Saturated: nothing further can change the answer.
+    if (!pure && drawsRandom) return;
+    if (!isFunction(expr)) return;
+
+    const head = expr.operator;
+    if (head !== 'Function' && !params.has(head)) {
+      const def = expr.operatorDefinition ?? operatorDefinitionOf(ce, head);
+      if (def?.pure === false) pure = false;
+      if (def?.drawsRandom === true) {
+        drawsRandom = true;
+        pure = false;
+      }
+    }
+
+    for (const op of expr.ops) visit(op);
+  };
+
+  visit(literal);
+  return { pure, drawsRandom };
+}
+
+/** The operator definition bound to `name`, or `undefined` when `name` is
+ * undeclared or holds a value rather than an operator. */
+function operatorDefinitionOf(
+  ce: ComputeEngine,
+  name: string
+): BoxedOperatorDefinition | undefined {
+  const def = ce.lookupDefinition(name);
+  return def && 'operator' in def ? def.operator : undefined;
 }

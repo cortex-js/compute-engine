@@ -2,6 +2,20 @@
 
 ### Bug Fixes
 
+- **A user-defined function now infers its `pure` and `drawsRandom` flags from
+  its body.** Previously every user function was born pure, so `f() := Random()`
+  reported `isConstant: true` while drawing from the random stream on every
+  call. Two things broke as a result: `N(f() + \pi)` consumed two draws where
+  `N(\mathrm{Random}() + \pi)` consumed one, and a partially evaluated
+  `WithRandomSeed()` body calling `f` lost its seed frame — silently resuming
+  with live, unseeded draws.
+
+  The flags are derived from the heads the body applies: a body reaching a
+  known-impure head is impure, and one reaching a stream-drawing head also
+  draws. A head with no definition at the point of definition — a higher-order
+  parameter (`f(g) := g()`), or a callee defined after its caller — is still
+  assumed pure; set the flag explicitly on the definition when that matters.
+
 - **`RandomPrime()` is now reproducible under `WithRandomSeed()`.** It declared
   `drawsRandom: true`, but its draws bypassed the seed frame, so
   `WithRandomSeed(42, RandomPrime(1000))` returned a different prime on every
