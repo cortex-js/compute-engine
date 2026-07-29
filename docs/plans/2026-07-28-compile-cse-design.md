@@ -179,7 +179,7 @@ at every **root compilation boundary**:
 | `JavaScriptTarget.compile()` (expression route and the `Function`-literal route in `compileToTarget`) | created in the per-call `createTarget()`; harvest on the post-`rewriteAngularUnit` tree |
 | `PythonTarget` public entries — `compile`, `compileFunction`, `compileToSource`, `compileVectorized`, `compileLambda` (exhaustive list; entries that delegate to another boundary are noted in code) | same. `compileFunction`/`compileLambda` currently take no options bag: they get a default-enabled session; callers needing `cse: false` use `compile()`. Stated as a v1 option gap. |
 | `IntervalJavaScriptTarget.compile()` | same |
-| Direct custom-target route (`compile-expression.ts`) | **`compile-expression.ts` stamps the state onto the caller's target before calling `compileRoot`**: `target.naming` fresh, `target.cse` fresh with `enabled = (options.cse ?? true) && target.cseBind !== undefined`. Stamping-per-call means a reused caller target never carries stale state from a prior compilation; `beginCompilation` additionally resets for callers invoking `compileRoot` directly. (`compileRoot`'s `(expr, target, prec)` signature is unchanged — the options channel is the stamp, not a new parameter.) |
+| Direct custom-target route (`compile-expression.ts`) | **`compile-expression.ts` stamps a fresh `target.naming` before calling `compileRoot`; `target.cse` is stamped `enabled: false` — direct custom targets get NO CSE in Phase 1.** A direct target is caller-supplied code end to end: `cseBind` attests binding *syntax*, not that the target's other emitters are pure or eager, and its resolver functions carry no override provenance for G1b to consult. A target-level emission-purity attestation that re-enables CSE here is v2 (§11). Stamping-per-call means a reused caller target never carries stale state; `beginCompilation` additionally resets for callers invoking `compileRoot` directly. (`compileRoot`'s `(expr, target, prec)` signature is unchanged — the options channel is the stamp.) |
 | GPU targets (`glsl`/`wgsl` via `compileRoot`/`beginCompilation`, and `compileShaderBody`, which deliberately spans several root compiles to keep counters distinct) | naming context only — created/reset exactly where GPU random numbering resets today, preserving that mechanism's semantics |
 | `buildInterpreterFallback` | nothing — no emission |
 | User-function definition bodies (`ensureUserFunctionEmitted`) | nested harvest scope, same session and naming context (§5.4) |
@@ -195,7 +195,8 @@ registered targets call `BaseCompiler.compile` directly — hence this table.
 baseline** — i.e. this change-set minus CSE. It is *not* byte-identical to
 pre-change output: the `tempVar()` naming migration applies unconditionally
 (a deliberate part of §2, with its snapshot churn measured in §8). A target
-without `cseBind` behaves as `cse: false`.
+without `cseBind` behaves as `cse: false`; a direct custom target is always
+`cse: false` in Phase 1 regardless of the option (§4.2).
 
 ## 5. Harvest
 
@@ -205,9 +206,15 @@ bare node objects — this is what makes DAG-shaped trees safe). During the
 walk: sizes are computed bottom-up and memoized per node object; symbol
 names accumulate into `usedNames`; subtrees are bucketed by the cached
 structural `hash` and verified with `isSame` against the bucket
-representative (expected O(occurrences); worst case bounded by the size gate
-and per-region cap); each occurrence records its DFS enter/exit interval so
-containment queries are O(1).
+representative; each occurrence records its DFS enter/exit interval so
+containment queries are O(1). Verification cost is expected
+O(occurrences); hash collisions make it worse, and the size gate does not
+bound that (it is a lower bound). A **deterministic per-bucket verification
+budget** (`CSE_MAX_VERIFY_NODES_PER_BUCKET`, proposed 10 000 compared
+nodes) caps the worst case: a bucket exhausting its budget is dropped
+whole, its occurrences emit inline unchanged — a lost optimization, never
+a correctness change — and the drop is deterministic for a given
+expression. Pinned by a synthetic-collision test (§8).
 
 ### 5.1 Regions — one inventory for harvest and emission
 
@@ -223,6 +230,18 @@ declarative inventory** so the two passes cannot drift:
   prec)`) that pushes/pops the matching region instance; non-lazy positions
   need no edge and inherit the current instance from `instanceStack`. Only
   the bounded set of lazy/binder emission sites needs the interposition.
+  **This requires a callback-API migration**, not just a new helper:
+  several lazy emitters live behind `CompiledFunction` handlers and the
+  `selection` hook, whose compile callback today takes only an
+  `Expression` — no parent, no operand index (and recovering the index via
+  `indexOf`/identity would reintroduce the DAG ambiguity this design
+  eliminates). The callback signature gains an optional operand index —
+  `compile(expr, opIndex?)` — bound to the parent by the dispatcher;
+  handlers for lazy constructs pass the index for their lazy positions.
+  Migrated callbacks (exhaustive): the JS `selection` lowering, and the
+  interval-js and Python `If`/`Which`/`When` `functions` entries. Pinned by
+  a DAG test reusing one node object in two differently-lazy operand
+  positions of one construct.
 - Drift between the table and an emitter's actual laziness is caught by the
   per-construct conditionality tests (§8): every entry in the table has a
   test pinning both the laziness and the region behavior. Adding a lazy
@@ -267,8 +286,9 @@ branches are statement lists again), a bare expression statement.
 `Assign(x, f(y) + f(y))` inside a loop therefore deduplicates `f(y)`
 within the RHS. This matters doubly because a canonical `Function`-literal
 body IS a scoped `Block` (the single-statement form is unwrapped at
-compilation, `javascript-target.ts:525-530`, and lands in the lambda-body
-region; multi-statement bodies get per-statement regions). Region push/pop
+compilation — `compileBlock`'s `args.length === 1 && locals.length === 0`
+branch, `base-compiler.ts:1800` — and lands in the lambda-body region;
+multi-statement bodies get per-statement regions). Region push/pop
 for these sites lives in the statement emitters
 (`compileBlock`, `compileLoopBody`, `compilePythonStatements`).
 
@@ -286,7 +306,14 @@ interval). The candidate pipeline, in order:
    structurally: two occurrences of one `RandomChoice(…)` subtree are
    *different draws* (counter-based streams) and must never merge.
 2. **G1b — emission purity.** `isPure` describes the boxed operator, not
-   the emitted code. Ineligible:
+   the emitted code. **Provenance**: the resolver closures a target carries
+   cannot distinguish built-in from caller-supplied entries, so the
+   registered-target `compile()` entries record the override key sets —
+   `Object.keys(options.functions)`, the `operators` lookup, string-valued
+   `vars` keys — into the session at target-creation time (they are in
+   scope exactly there); G1b consults those sets, never the closures.
+   (Direct custom targets have no such provenance — which is one reason
+   they get no CSE in Phase 1, §4.2.) Ineligible:
    - any subtree containing a node that resolves through a caller-supplied
      `functions` entry, `operators` entry, or *string* `vars` entry (live
      source splices; non-string `vars` are baked constants, safe);
@@ -296,14 +323,27 @@ interval). The candidate pipeline, in order:
      candidate);
    - any subtree containing a **user-defined function application** —
      purity inference for user definitions is dependency-order-unsound
-     (`docs/EFFECTS-MODEL.md`, §2), so a stale `pure` marking could merge
-     effectful calls. v2 restores these behind a sound transitive
-     effect-row check (§11);
+     (`docs/EFFECTS-MODEL.md` §"Dependency-order inference is unsound"),
+     so a stale `pure` marking could merge effectful calls. v2 restores
+     these behind a sound transitive effect-row check (§11);
    - any application whose operator position is not a fixed built-in
      (e.g. `Apply` with a symbolic head, a parameter used as a function) —
-     the EFFECTS-MODEL higher-order optimism.
-   Net: Phase 1 candidates are built-in-operator subtrees — which is what
-   the corpus consists of (§1).
+     the EFFECTS-MODEL higher-order optimism;
+   - any subtree containing a **function-valued operand that is not an
+     inline `Function` literal** — a named callback, a parameter, or an
+     opaque function value handed to a higher-order built-in
+     (`Map(xs, f)`, `Filter`, `Reduce`, `Sort` with a key, …). The head is
+     a fixed built-in, so the previous two bullets don't fire, but named
+     callbacks are **invisible to purity inference**
+     (EFFECTS-MODEL §"Current state"): `Map(xs, f)` can report pure while
+     `f` draws or writes, and merging two such applications would change
+     draw streams or callback invocation counts. The rule is derived from
+     the operand (function-typed and not a literal), not from an operator
+     list. An inline `Function` literal is fine — its body is ordinary
+     harvestable structure that passes these gates recursively.
+   Net: Phase 1 candidates are built-in-operator subtrees whose callable
+   operands, if any, are inline literals — which is what the corpus
+   consists of (§1).
 3. **G2 — same-region rule.** ≥ 2 occurrences attributed to the **same
    region**; binds at that region's top; occurrences elsewhere emit inline
    (or join that region's own candidate). No binding crosses a region
@@ -318,8 +358,11 @@ interval). The candidate pipeline, in order:
    interval containment). Different counts: keep both.
 6. **Re-check region counts.** Drop candidates whose surviving per-region
    count fell below 2 (no single-use temps).
-7. **G4 — benefit threshold.** Function expressions only;
-   `size ≥ CSE_MIN_SIZE` and `(regionCount − 1) × size ≥ CSE_MIN_SCORE`
+7. **G4 — benefit threshold.** Applies uniformly to every surviving
+   candidate regardless of region kind. Only compound (operator-applied)
+   subtrees are ever candidates — atoms (symbols, number/string literals)
+   never are. `size ≥ CSE_MIN_SIZE` and
+   `(regionCount − 1) × size ≥ CSE_MIN_SCORE`
    where **`regionCount` is the per-region count after steps 3–6, never the
    global bucket total**. Proposed `CSE_MIN_SIZE = 4`, `CSE_MIN_SCORE = 8`
    (admits the corpus's dominant size-4–7 patterns, skips `Negate(x)`
@@ -492,7 +535,7 @@ visibility and evaluate-once).
 | --- | --- | --- | --- |
 | dedup (single occurrence of repeated code + value parity) | value+shape | value+shape | shape+pyexec |
 | purity / draw-stream (`WithRandomSeed`, cse on/off/interpreter; EFFECTS-MODEL dependency-order counterexample) | value | — | — |
-| emission purity (custom `functions`/`operators`/string-`vars` → no CSE through OR below the mapping; user-fn application ineligible; splice containing `_cse1` doesn't collide) | shape | — | shape |
+| emission purity (custom `functions`/`operators`/string-`vars` → no CSE through OR below the mapping; user-fn application ineligible; **named-callback regression: two identical `Map(xs, f)` with a drawing `f` NOT merged, inline-literal callback IS eligible**; splice containing `_cse1` doesn't collide) | value+shape | — | shape |
 | capture (same-named subtree under different binders incl. `Integrate`, `D`; in/out of binder) | value+shape | shape | shape |
 | conditionality (arm-only candidates not hoisted; Coalesce default; chained-relation tail; §7.4 guard probe at `x = 0`) — one test per `LAZY_OPERANDS` entry | value+shape | shape | shape |
 | `Match` inert (JS: no `_cse` inside Match emission; interval-js/python: existing fail-closed contract asserted) | shape | shape | shape |
@@ -504,7 +547,9 @@ visibility and evaluate-once).
 | name collision (params/locals/captures named `_cse1` and `_tv1`, cse on AND off) | value+shape | — | shape |
 | determinism (two compiles byte-identical: candidate-bearing + chained-relation expression; a GPU compile via `tempVar()` path) | shape | shape | shape (+GPU shape) |
 | threshold + per-region cap (sub-threshold inline; > cap keeps top-scoring deterministically) | shape | — | shape+pyexec (stress: source stays parseable) |
-| options (`cse: false` byte-identical to the deterministic-naming baseline; reused caller-built direct target across two compiles; zero-candidate expression; Python no-options entries get default sessions) | shape | shape | shape |
+| options (`cse: false` byte-identical to the deterministic-naming baseline; direct custom target never emits `_cse` even with `cseBind` present; reused caller-built direct target across two compiles; zero-candidate expression; Python no-options entries get default sessions) | shape | shape | shape |
+| harvest budget (synthetic hash-collision bucket exhausts `CSE_MAX_VERIFY_NODES_PER_BUCKET` → dropped whole, output identical to `cse: false`, deterministic) | shape | — | — |
+| DAG lazy edges (one node object in two differently-lazy operand positions of one construct — the `compileOp` index wiring) | value+shape | shape | shape |
 | non-scalar aliasing (helper-mutation audit pin) | value | value | — |
 | user-function body dedup (duplicated subtree inside a called `f(x) := …` definition; call sites not merged) | value+shape | shape | — |
 
@@ -573,7 +618,11 @@ recorded so they aren't rediscovered:
 - Binder clause-sequence binding honoring `clauseLocal` visibility.
 - User-defined function applications as candidates, behind a sound
   transitive effect-row check (per `docs/EFFECTS-MODEL.md`).
-- Per-mapping purity attestation for caller-supplied `functions`.
+- Named/opaque callbacks to higher-order built-ins, behind sound callback
+  effect projection (same EFFECTS-MODEL dependency).
+- Per-mapping purity attestation for caller-supplied `functions`, and a
+  target-level emission-purity attestation re-enabling CSE on direct
+  custom targets (§4.2).
 - Cross-term sharing of index-free subtrees across unrolled terms.
 - Loop-invariant hoisting; cross-arm binding at conditional entry (both
   need a throw-free argument or a guard for the not-taken case).
