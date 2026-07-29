@@ -387,12 +387,21 @@ describe('A DEFERRED estimator keeps its seed frame', () => {
   // block, against this file's ~10 s budget.
   //
   // TRAP, and the reason these look affordable when they are not: the same two
-  // integrals run in ~1 s each under `npx tsx`, because the integrand compiles
-  // there. Inside jest it does not, so the sampling loop runs interpreted and
-  // costs 20–50x more. NEVER size an estimator test with a `tsx` measurement;
-  // take the duration from jest (`--json --outputFile`, read
-  // `assertionResults[].duration` — a `-t` filter after `--` is parsed as a
-  // PATH pattern, so timing "one test" that way silently times the whole file).
+  // integrals run in ~1 s each under `npx tsx`. The integrand compiles in BOTH
+  // environments (verified: `compiled.success` is true and both take exactly
+  // 1e7 samples) — the 25x is entirely `Math.imul`. Inside jest's VM context
+  // `Math.imul(...)` is not inlined to the machine instruction: every call is a
+  // property load on the context's `Math` plus a call, ~700 ns instead of ~1 ns
+  // (measured: 1e7 bare `Math.imul` calls = 7 s in jest). `pcg3d` — the PCG3D
+  // hash behind every derived-sub-stream draw — calls it six times per draw, so
+  // a 1e7-sample estimate pays ~30 s here and ~40 ms anywhere else. Nothing
+  // about it is a defect in the engine, and production is unaffected.
+  //
+  // So: NEVER size an estimator test with a `tsx` measurement. Take the
+  // duration from jest (`--json --outputFile`, read
+  // `assertionResults[].duration` — a `-t` filter placed after `--` is parsed
+  // as a PATH pattern, so timing "one test" that way silently times the whole
+  // file).
   //
   // Un-skip to verify by hand after touching the pending gate, the
   // `readsRandomFrame` flag, or the sub-stream derivation.
