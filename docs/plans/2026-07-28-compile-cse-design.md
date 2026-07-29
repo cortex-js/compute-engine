@@ -1,0 +1,608 @@
+# Compile-Time Common-Subexpression Elimination (CSE)
+
+**Status: DRAFT r4 — revised per three review passes, review converged**
+**Date: 2026-07-28**
+**Motivated by: Tycho item 108 (corpus survey, `docs/scratch/2026-07-28-cse-opportunities-for-ce.md` in the Tycho repo)**
+**Revision history: r1–r3 reviewed (Claude + Codex, three passes) → `docs/scratch/2026-07-28-compile-cse-design_SPEC_REVIEW.md`; r4 addresses the pass-3 findings (callback invisibility, callback-API edge wiring, override provenance, verification budget).**
+
+## 1. Motivation
+
+Tycho surveyed both Desmos corpora (685 documents, 3131 compiled member
+functions) through their real import pipeline: **28% of compiled member
+functions and 42% of documents contain at least one repeated pure subtree
+inside a single compiled expression**. Extremes: a 65,541-node implicit
+function with a 507-node subtree repeated 128×; a 154-node piecewise repeated
+64×. These expressions are compiled once but evaluated per-pixel/per-sample/
+per-frame against a 60 fps budget, so eliminated nodes multiply by
+thousands-to-millions of evaluations.
+
+The compiler today shares nothing. Verified baseline (0.98.0):
+
+```
+expr:  sin(6u)^2 + sin(6u) / (sin(6u) + 2)
+JS:    Math.pow(Math.sin(6 * _.u), 2) + Math.sin(6 * _.u) / (Math.sin(6 * _.u) + 2)
+GLSL:  _gpu_powi(sin(6.0 * u), 2.0) + sin(6.0 * u) / (sin(6.0 * u) + 2.0)
+```
+
+`Math.sin(6 * _.u)` is computed three times per call. V8 cannot rescue this
+in general: `_SYS.*` helper calls (broadcast closures, `cabs`, interval
+arithmetic) are opaque to the JIT, and unoptimized tiers rescue nothing.
+
+Two distinct duplication sources need two distinct answers:
+
+1. **Inlining-driven duplication** (the dominant source per Tycho's report): a
+   document defines `f(u,v)` and calls it repeatedly; Tycho's importer inlines
+   the body at every call site because compiled artifacts must be
+   self-contained. The engine *already* solves this on the JS and interval-js
+   targets — `tryCompileUserFunction` (`base-compiler.ts`) emits a
+   user-defined function literal ONCE as a named preamble function and calls
+   it by name, artifact still self-contained. Tycho inlines anyway because
+   the GPU targets have no `userFunctions` registry, and their pipeline is
+   target-uniform. Closing that gap is **Phase 2**. Note the pre-inlined
+   LaTeX Tycho hands us today contains no user-function applications — the
+   duplicated bodies arrive as plain built-in-operator subtrees, squarely in
+   Phase 1's eligible class.
+2. **Organic duplication**: the user typed the same subexpression repeatedly
+   (`π/60` ×27, `sin(360u)` in several factors). No definition exists to
+   share; only CSE recovers it. This is **Phase 1**, the primary subject of
+   this document.
+
+**Phase 3** (interpreted-mode evaluation memo) is sketched in §10 and gets its
+own design doc before any implementation.
+
+## 2. Scope
+
+### In scope (Phase 1)
+
+- An intra-expression CSE pass hosted in `BaseCompiler`, active for the
+  **JS-family targets: `javascript`, `python`, `interval-js`**.
+- Purity-, capture-, and conditionality-sound by construction (§5).
+- **Deterministic temp naming for ALL targets.** `BaseCompiler.tempVar()`
+  is converted from `Math.random()` names to a counter on an always-present
+  per-compilation **naming context** (§4.1) — distinct from, and broader
+  than, the CSE session: it exists even with `cse: false` and on GPU targets
+  (which call `tempVar()` for loop accumulators, `gpu-target.ts:1016`, and
+  are otherwise out of CSE scope). Without this, any candidate-bearing
+  expression that also exercises a `tempVar()` path (chained relations,
+  complex power chains, `Match`) would emit nondeterministic source and
+  §7.6 could not hold. This is a cross-cutting signature/plumbing change
+  (~10 call sites across 4 files, including `gpu-target.ts` — §12), not a
+  one-liner; its snapshot churn is measured together with CSE's (§8).
+- A `bindExpr` implementation for interval-js (§6.2) — **net-new
+  capability** for that target (today its chained relations sit in the
+  "inline everything" bucket, an existing double-evaluation gap this
+  incidentally fixes).
+
+### Out of scope (deliberately)
+
+- **GPU targets** (`glsl`, `wgsl`) for CSE itself: driver shader compilers
+  already CSE pure expressions; the real GPU win is source size, addressed
+  in Phase 2 (§9) via user-function emission first. The pass is architected
+  so a GPU target can opt in later via `cseBind` (§6.2). (GPU targets DO
+  get the deterministic naming context above.)
+- **Cross-row sharing** (Tycho's secondary ask): a compile-environment
+  design conversation, deferred with witnesses per standing practice.
+- **Cross-statement binding** in `Block` statement lists and imperative
+  `Loop` bodies: statement-list regions never bind (§5.1), so early-exit
+  reachability and inter-statement mutation ordering never interact with
+  CSE. **Each statement's own value expressions are bindable regions**
+  (§5.1) — inertness applies to the statement *list*, not to leaves.
+- **`Match`**: fully CSE-inert in Phase 1 (§5.1). Its guards/bodies are
+  compiled from plan-constructed closure trees
+  (`guardClosure.op1`/`bodyClosure.op1`, `base-compiler.ts:3053-3074`),
+  not from the harvested operands, so the occurrence machinery cannot see
+  them without a dedicated nested-harvest design; `Match` does not appear
+  in the motivating corpus's operator histogram. v2 (§11).
+- **Binder clause expressions** (indexing-set bounds/collections): inert
+  regions in Phase 1 (§5.1). Their `clauseLocal` sequential visibility
+  (`types-definitions.ts:1057` — later clause collections see earlier
+  indices) makes binding placement clause-position-dependent; bounds are
+  small in practice. v2 (§11).
+- **User-defined function applications inside candidates**: ineligible in
+  Phase 1 (§5.2 G1b). Purity inference for user definitions is documented
+  **dependency-order-unsound** (`docs/EFFECTS-MODEL.md` §"Dependency-order
+  inference is unsound": `f() := g()` defined before an effectful `g` stays
+  marked pure), so `isPure` cannot be trusted for them. A sound transitive
+  effect-row check is v2 (§11). This costs little: per §1, Tycho's
+  duplication arrives pre-inlined as built-in operators.
+- **Cross-region and cross-term hoisting** (PRE, LICM, sharing across
+  unrolled terms): v2 (§11).
+- **Alpha-invariant merging**: `Sum(x², x)` and `Sum(y², y)` do not merge.
+  `isSame` is binding-identity by name; the region rules make name-keyed
+  matching capture-sound. Not worth the alpha-invariant hash migration for
+  this corpus.
+
+## 3. Design overview
+
+CSE runs **at emission level**, not as a boxed-tree rewrite. No `Block` /
+`Declare` nodes are constructed, no scopes are created, and the compiled
+tree is the same object graph the existing pipeline produces:
+`expr.unknowns`, `withReferences`, `symbolDeps`, and
+`assertRealOnlyComponents` see the original tree; structural consumers that
+read `.ops` directly (e.g. `extractLimits`) are unaffected because only
+value-position compilation consults the CSE machinery.
+
+Three cooperating pieces:
+
+1. **A naming context and a CSE session** (§4): shared mutable state
+   objects per root compilation, threaded by reference through the
+   compiler's `{...target}` spread copies.
+2. **A harvest pass** (§5): one DFS over the (angular-unit-rewritten) tree,
+   computing static regions, occurrences (per *path*, not per node object —
+   the tree may be a DAG), and candidates, with the soundness gates applied.
+3. **Emission integration** (§6): during recursive compilation, region
+   *instances* are pushed/popped at the same sites harvest derived its
+   regions from (one shared inventory — §5.1), candidate occurrences
+   resolve to temps via an explicit per-instance state machine, and each
+   region instance's bindings are wrapped around its body via `cseBind`.
+
+## 4. Contexts, entry points, and option plumbing
+
+### 4.1 Two state objects
+
+```ts
+/** Always present, all targets, regardless of `cse`. */
+type NamingContext = {
+  counter: number;                  // _tvN and _cseN numbering
+  usedNames: ReadonlySet<string>;   // collision inventory (§6.3)
+};
+
+/** Present only when CSE is enabled for this compilation. */
+type CseSession = {
+  regions: …;                       // static harvest output (§5)
+  instanceStack: …;                 // emission-time region instances (§6.1)
+};
+```
+
+Both are stored as single fields holding **shared object references**
+(`target.naming`, `target.cse?`) — the `userFunctions`-registry pattern,
+which survives the compiler's pervasive `{...target}` spread copies because
+copies share the referenced object. State MUST NOT be plain scalar fields on
+the target (spreads would fork them). `tempVar()` and the CSE temp allocator
+both draw from `target.naming` — which requires threading the target into
+`tempVar()`'s call sites (part of the §2 naming change).
+
+The `usedNames` inventory is collected **unconditionally** (it serves
+`_tvN` allocation even with `cse: false`): a dedicated O(n) symbol-name
+sweep at each boundary (piggybacking the harvest DFS when CSE is enabled).
+It also includes any `_cse`/`_tv`-prefixed tokens found in caller-supplied
+source strings (`functions` strings, string `vars`, `preamble`), so temps
+never capture names a splice introduces (§5.2 G1b, §6.3).
+
+### 4.2 Compilation boundaries (exhaustive)
+
+A fresh naming context (always) and CSE session (when enabled) are created
+at every **root compilation boundary**:
+
+| entry | mechanism |
+| --- | --- |
+| `JavaScriptTarget.compile()` (expression route and the `Function`-literal route in `compileToTarget`) | created in the per-call `createTarget()`; harvest on the post-`rewriteAngularUnit` tree |
+| `PythonTarget` public entries — `compile`, `compileFunction`, `compileToSource`, `compileVectorized`, `compileLambda` (exhaustive list; entries that delegate to another boundary are noted in code) | same. `compileFunction`/`compileLambda` currently take no options bag: they get a default-enabled session; callers needing `cse: false` use `compile()`. Stated as a v1 option gap. |
+| `IntervalJavaScriptTarget.compile()` | same |
+| Direct custom-target route (`compile-expression.ts`) | **`compile-expression.ts` stamps the state onto the caller's target before calling `compileRoot`**: `target.naming` fresh, `target.cse` fresh with `enabled = (options.cse ?? true) && target.cseBind !== undefined`. Stamping-per-call means a reused caller target never carries stale state from a prior compilation; `beginCompilation` additionally resets for callers invoking `compileRoot` directly. (`compileRoot`'s `(expr, target, prec)` signature is unchanged — the options channel is the stamp, not a new parameter.) |
+| GPU targets (`glsl`/`wgsl` via `compileRoot`/`beginCompilation`, and `compileShaderBody`, which deliberately spans several root compiles to keep counters distinct) | naming context only — created/reset exactly where GPU random numbering resets today, preserving that mechanism's semantics |
+| `buildInterpreterFallback` | nothing — no emission |
+| User-function definition bodies (`ensureUserFunctionEmitted`) | nested harvest scope, same session and naming context (§5.4) |
+
+The r1 assumption that everything flows through `compileRoot` was wrong —
+registered targets call `BaseCompiler.compile` directly — hence this table.
+
+### 4.3 Option surface
+
+`CompileExpressionOptions` / `CompilationOptions` gain `cse?: boolean`
+(default `true`), consumed where the session is created (table above). With
+`cse: false`, output is **byte-identical to the deterministic-naming
+baseline** — i.e. this change-set minus CSE. It is *not* byte-identical to
+pre-change output: the `tempVar()` naming migration applies unconditionally
+(a deliberate part of §2, with its snapshot churn measured in §8). A target
+without `cseBind` behaves as `cse: false`.
+
+## 5. Harvest
+
+One DFS over the tree **by edges**: a node object reachable through two
+parent positions is visited twice, producing two occurrences (paths, never
+bare node objects — this is what makes DAG-shaped trees safe). During the
+walk: sizes are computed bottom-up and memoized per node object; symbol
+names accumulate into `usedNames`; subtrees are bucketed by the cached
+structural `hash` and verified with `isSame` against the bucket
+representative (expected O(occurrences); worst case bounded by the size gate
+and per-region cap); each occurrence records its DFS enter/exit interval so
+containment queries are O(1).
+
+### 5.1 Regions — one inventory for harvest and emission
+
+Regions form a tree over the expression. **Harvest and emission share one
+declarative inventory** so the two passes cannot drift:
+
+- A static table in `base-compiler.ts` — `LAZY_OPERANDS` — maps an operator
+  (plus shape, e.g. "relational with > 2 operands") to the operand
+  positions its emission evaluates conditionally. Harvest consults it
+  during the DFS to open static regions.
+- Emission sites for those constructs compile lazy operands through an
+  edge-aware helper (`BaseCompiler.compileOp(parent, opIndex, target,
+  prec)`) that pushes/pops the matching region instance; non-lazy positions
+  need no edge and inherit the current instance from `instanceStack`. Only
+  the bounded set of lazy/binder emission sites needs the interposition.
+- Drift between the table and an emitter's actual laziness is caught by the
+  per-construct conditionality tests (§8): every entry in the table has a
+  test pinning both the laziness and the region behavior. Adding a lazy
+  construct to a target means adding a table entry + test — stated in
+  `types.ts` next to `cseBind` as part of the emitter-author contract.
+
+**Region-opening sites:**
+
+**(a) Binder sites** — the body of every operator whose definition carries
+a `scoped` binding-site selector (the sanctioned inventory,
+`docs/plans/2026-07-26-binder-mechanism-design.md`: `Sum`/`Product`,
+`Integrate`, `D`, comprehensions, any future `scoped:` operator — derived
+from the flag, never hand-listed). Also `Function`-literal bodies (covers
+`Reduce`/`Accumulate` combiners, which are `Function` literals — there is
+no separate "Fold" construct) and `Block`. **Binder clause expressions**
+(bounds, indexing-set collections) open their own regions and are **inert**
+in Phase 1 (§2): `clauseLocal` gives clauses sequential index visibility,
+so a clause candidate's correct binding point depends on clause position —
+deferred rather than approximated.
+
+**(b) Lazy emission edges** (the `LAZY_OPERANDS` table):
+
+- `Which`/`If`/`When` value arms and every condition after the first
+  (ternary chains; `_SYS.select` passes thunks — lazy there too);
+- `And`/`Or` operands after the first;
+- each comparison after the first in a **chained relation** (`a < m < b`
+  lowers to `(a<m) && (m<b)` with *no* `And` node in the boxed tree — this
+  edge exists only at the emission layer, which is exactly why the
+  inventory is emission-derived);
+- `Coalesce` (and the absence-capability `coalesce` axis): operands after
+  the first (compiled coalescing evaluates the default lazily; ratified
+  missing-value semantics are left-to-right lazy);
+- `Match`: opens regions and is **fully inert** in Phase 1 (§2).
+
+**(c) Statement lists.** `Block` statement lists and imperative `Loop`
+bodies open **inert** regions — no binding is placed at the statement-list
+level, so `Return`/`Break`/`Continue` reachability and inter-statement
+ordering are out of the picture. **But each statement's value expressions
+are their own bindable child regions**: an `Assign` RHS, a `Declare`
+initializer, a `Return` value, a statement-form `If` condition (its
+branches are statement lists again), a bare expression statement.
+`Assign(x, f(y) + f(y))` inside a loop therefore deduplicates `f(y)`
+within the RHS. This matters doubly because a canonical `Function`-literal
+body IS a scoped `Block` (the single-statement form is unwrapped at
+compilation, `javascript-target.ts:525-530`, and lands in the lambda-body
+region; multi-statement bodies get per-statement regions). Region push/pop
+for these sites lives in the statement emitters
+(`compileBlock`, `compileLoopBody`, `compilePythonStatements`).
+
+Everything that binds is an expression-position region: root, conditional
+arms, guard tails, expression-shaped binder bodies (loop-form
+`Sum`/`Product` bodies; Python's `sum(… for …)`), lambda bodies,
+per-statement value expressions, and unrolled-term instances (§6.1).
+
+### 5.2 Gates
+
+Occurrences attribute to their **innermost enclosing region** (by DFS
+interval). The candidate pipeline, in order:
+
+1. **G1 — purity.** `expr.isPure` must be true. Excludes random draws
+   structurally: two occurrences of one `RandomChoice(…)` subtree are
+   *different draws* (counter-based streams) and must never merge.
+2. **G1b — emission purity.** `isPure` describes the boxed operator, not
+   the emitted code. Ineligible:
+   - any subtree containing a node that resolves through a caller-supplied
+     `functions` entry, `operators` entry, or *string* `vars` entry (live
+     source splices; non-string `vars` are baked constants, safe);
+   - any occurrence **below** a caller-mapped operator (a harvest DFS flag:
+     the custom emitter controls how often — or whether — everything
+     beneath it evaluates, so those occurrences do not count toward any
+     candidate);
+   - any subtree containing a **user-defined function application** —
+     purity inference for user definitions is dependency-order-unsound
+     (`docs/EFFECTS-MODEL.md`, §2), so a stale `pure` marking could merge
+     effectful calls. v2 restores these behind a sound transitive
+     effect-row check (§11);
+   - any application whose operator position is not a fixed built-in
+     (e.g. `Apply` with a symbolic head, a parameter used as a function) —
+     the EFFECTS-MODEL higher-order optimism.
+   Net: Phase 1 candidates are built-in-operator subtrees — which is what
+   the corpus consists of (§1).
+3. **G2 — same-region rule.** ≥ 2 occurrences attributed to the **same
+   region**; binds at that region's top; occurrences elsewhere emit inline
+   (or join that region's own candidate). No binding crosses a region
+   boundary. This makes name-keyed matching capture-sound and selection
+   laziness free.
+4. **G3 — mutation.** Drop a candidate if any of its free symbols is the
+   target of `Assign`/`Declare` anywhere in the candidate's region subtree,
+   **including all descendant regions**. Deliberately conservative
+   (any-assign-anywhere); an ordering-aware relaxation is v2 (§11).
+5. **Subsumption.** Drop candidate A when every occurrence of A sits inside
+   an occurrence of candidate B with the same per-region count (O(1)
+   interval containment). Different counts: keep both.
+6. **Re-check region counts.** Drop candidates whose surviving per-region
+   count fell below 2 (no single-use temps).
+7. **G4 — benefit threshold.** Function expressions only;
+   `size ≥ CSE_MIN_SIZE` and `(regionCount − 1) × size ≥ CSE_MIN_SCORE`
+   where **`regionCount` is the per-region count after steps 3–6, never the
+   global bucket total**. Proposed `CSE_MIN_SIZE = 4`, `CSE_MIN_SCORE = 8`
+   (admits the corpus's dominant size-4–7 patterns, skips `Negate(x)`
+   trivia); named constants, tuned before landing (§8).
+
+### 5.3 Non-scalar candidates and aliasing
+
+Candidates are not restricted to scalar-valued expressions — the corpus's
+highest-value repeats are `PointList`/`List`-shaped. Binding one makes every
+occurrence reference **one shared runtime object**. This is an existing
+sharing mode, not a new one (a `vars`-supplied collection referenced at two
+sites is already one object today). The invariant it rests on — no
+JS/interval helper mutates its input or relies on input identity — becomes
+an explicit **landing gate**: audit `_SYS.*` and the interval runtime for
+in-place mutation before enabling; a helper found mutating copies first
+(a pre-existing hazard for `vars`-backed collections regardless of CSE).
+Pinned by test (§8).
+
+### 5.4 Harvest boundary
+
+Harvest covers the root expression tree (post `rewriteAngularUnit`).
+Emission-time trees:
+
+- **User-function definition bodies** (`ensureUserFunctionEmitted`): each
+  body gets its own nested harvest scope in the same session (own regions
+  and candidates; shared naming context so names never collide across the
+  artifact). Duplication inside a called definition is recovered once, in
+  the emitted named function. (The *call sites* remain CSE-ineligible per
+  G1b; the *body interior* is built-in-operator code and fully eligible.)
+- **Unrolled `Sum`/`Product` terms**: region instances, §6.1.
+- **`Match` plan closures** and other synthesized structure (destructuring
+  desugar): not harvested; `Match` is inert (§2).
+
+## 6. Emission
+
+### 6.1 Region instances and the occurrence state machine
+
+Static regions describe the tree; **instances** exist at emission time.
+Entering a region site (via `compileOp` or a statement emitter, §5.1)
+pushes `{ bindings: [], state: Map<candidate, 'defining' | 'bound'> }`;
+leaving pops it and, if bindings survive, wraps the region's compiled body
+with `cseBind`.
+
+When compilation reaches a node that is an occurrence of a candidate **of
+the current innermost static region** (harvest attribution decides — the
+same shared node object under a different region isn't in that region's
+candidate set, which resolves the DAG ambiguity):
+
+- **no entry** → set `'defining'`, compile the RHS normally (`'defining'`
+  suppresses *this candidate's own* hit so its RHS compiles through instead
+  of self-referencing; nested candidates still resolve), then set
+  `'bound'` and append `[name, rhsCode]` to the instance's binding list.
+  Appending *after* RHS compilation means any temps the RHS referenced were
+  appended first — **dependency order is automatic**.
+- **`'defining'`** → compile through (inside this candidate's own RHS).
+- **`'bound'`** → emit the temp name (an identifier — atomic at any
+  precedence, so `prec` needs no handling).
+
+**Why instances matter — the unroll case.** Unrolled `Sum`/`Product`
+(`emitSumProduct`, ≤ 100 constant terms) compiles the **same body node
+objects once per index value**, varying only the index `var` mapping — it
+does *not* create fresh substituted copies. A bare node-keyed map would emit
+iteration 1's temp for every later iteration: **silent wrong values**. Each
+unrolled term opens a **fresh instance** of the body's static region, so
+index-dependent candidates deduplicate *within* a term and recompute *per*
+term. Cross-term sharing of index-free subtrees is v2 (§11).
+Interpreter-parity regression test: `Sum(sin(i)·sin(i) + i, i, 1, 5)`.
+
+The instance mechanism serves every re-entrant emission of shared
+structure: bindings are per-instance, so one can never leak to a context
+where it is not in scope.
+
+### 6.2 The `cseBind` capability
+
+```ts
+/**
+ * Bind a dependency-ordered list of temporaries around an expression-position
+ * body: each temp evaluated exactly once, later RHSes and the body able to
+ * reference earlier temps. Absent ⇒ CSE inactive for this target.
+ * Emitter-author contract: a construct with conditionally-evaluated operand
+ * positions needs a LAZY_OPERANDS entry + conditionality test (§5.1).
+ */
+cseBind?: (bindings: ReadonlyArray<[name: string, code: string]>, body: string)
+  => string;
+```
+
+Deliberately not the existing `bindExpr`: its parallel-application shape
+cannot express dependent temps.
+
+- **javascript** — sequential-`const` IIFE (the complex-power-chain shape):
+  `(() => { const _cse1 = …; const _cse2 = …(_cse1)…; return body; })()`.
+  Flat; no nesting growth.
+- **interval-js** — same IIFE; `{lo, hi}` values are `const`-bindable.
+  Net-new capability (§2); the same change adds `bindExpr` so chained
+  relations stop double-evaluating middle operands on this target.
+- **python** — a **flat** sequential binding comprehension (not nested
+  lambdas, whose depth would grow with candidate count and could break a
+  previously-compilable expression, violating §7.5):
+  `[body for _cse1 in [rhs1] for _cse2 in [rhs2]][0]`
+  Later `for` clauses see earlier names; depth is constant; each RHS
+  evaluates exactly once. Python CSE covers expression-position regions
+  (including its `sum(… for …)` loop lowerings and per-statement value
+  expressions inside `compilePythonStatements`-emitted bodies).
+- **glsl / wgsl** — capability absent in Phase 1.
+
+**Per-region binding cap.** `CSE_MAX_BINDINGS_PER_REGION` (proposed 32)
+bounds emitted-code growth: beyond it, keep the highest-scoring candidates
+(ties by first-occurrence order — deterministic), inline the rest. Pinned
+by a stress test (§8).
+
+### 6.3 Temp naming and determinism
+
+CSE temps are `_cse1, _cse2, …`; `tempVar()` becomes `_tv1, _tv2, …` — both
+from the naming context's counter (§4.1). **Neither prefix is "reserved" —
+collisions are prevented, not assumed away**: MathJSON accepts
+underscore-initial symbols, and lambda parameters, `Block` locals, and
+`Match` captures emit as *bare* identifiers, so a user symbol literally
+named `_cse1` (or `_tv1` — determinism makes that collision *reproducible*
+where it used to be improbable) would otherwise self-capture. **Both**
+allocators skip any name in `usedNames` — which is collected
+unconditionally (§4.1), including with `cse: false`, and includes
+`_cse`/`_tv` tokens appearing in caller-supplied source strings. Skipping
+is deterministic for a given expression (§7.6). Collision tests cover
+params, loop indices, Block locals, and Match captures named `_cseN` AND
+`_tvN`, with CSE on and off.
+
+## 7. What CSE must NOT change (invariants)
+
+1. **Values, bit-for-bit** — same float operations, executed once instead
+   of n times; no reassociation. Non-scalar values: identical contents;
+   object identity per §5.3's audited aliasing contract.
+2. **Draw streams.** Same draw sequence with CSE on or off (G1 + G1b's
+   user-function exclusion — the sound gate, not optimistic inference).
+   Pinned by test, including the EFFECTS-MODEL dependency-order
+   counterexample (`f() := g()` with `g` later defined effectful: `f`
+   applications are ineligible, so no merge).
+3. **Selection laziness.** An unselected arm, a failed guard's body, a
+   short-circuited `And`/`Or`/chained-relation tail, and a non-taken
+   `Coalesce` default evaluate nothing, with CSE on or off (§5.1).
+4. **Error behavior — precise statement.** No code that was previously
+   exception-free begins throwing: bindings appear only in regions that
+   were entered, containing only code the region already contained. Not
+   preserved: when several **distinct** pure subtrees within one region can
+   throw, hoisting reorders their evaluation relative to sibling code, so
+   *which* exception surfaces first may change. (Guard patterns are safe by
+   §5.1's lazy edges, including the no-`And`-node chained-relation case:
+   in `x !== 0 && f(1/x) && f(1/x)` the `f(1/x)` occurrences sit in
+   post-guard regions — pinned by test.)
+5. **Compilation success envelope.** CSE never causes a compilation to fail
+   that succeeded before (only emission changes; Python's flat binding form
+   and the per-region cap keep source within parser limits) and never
+   causes one to succeed that failed.
+6. **Determinism.** Two `compile()` calls on one expression emit
+   byte-identical source — for the whole artifact on every target,
+   because the naming context covers all `tempVar()` call sites including
+   GPU (§2, §4.2).
+
+## 8. Testing and measurement
+
+### Test matrix (new `test/compute-engine/compile-cse.test.ts`)
+
+Assertion kinds: **value** (run the artifact against `evaluate()` — box and
+parse routes), **shape** (emitted-source structure), **pyexec** (Python
+only: `ast.parse`/`py_compile` validation of emitted source, and — when a
+`python3` is available to the test environment, else skipped with reason —
+subprocess execution with side-effect counters proving sequential temp
+visibility and evaluate-once).
+
+| category | javascript | interval-js | python |
+| --- | --- | --- | --- |
+| dedup (single occurrence of repeated code + value parity) | value+shape | value+shape | shape+pyexec |
+| purity / draw-stream (`WithRandomSeed`, cse on/off/interpreter; EFFECTS-MODEL dependency-order counterexample) | value | — | — |
+| emission purity (custom `functions`/`operators`/string-`vars` → no CSE through OR below the mapping; user-fn application ineligible; splice containing `_cse1` doesn't collide) | shape | — | shape |
+| capture (same-named subtree under different binders incl. `Integrate`, `D`; in/out of binder) | value+shape | shape | shape |
+| conditionality (arm-only candidates not hoisted; Coalesce default; chained-relation tail; §7.4 guard probe at `x = 0`) — one test per `LAZY_OPERANDS` entry | value+shape | shape | shape |
+| `Match` inert (JS: no `_cse` inside Match emission; interval-js/python: existing fail-closed contract asserted) | shape | shape | shape |
+| statement regions (Assign-RHS dedup inside a Loop body; no cross-statement binding; candidate after conditional Return not hoisted; multi-statement lambda body) | value+shape | — | shape+pyexec |
+| unroll parity (`Sum(sin(i)·sin(i)+i, i, 1, 5)`; loop-form variant; clause expressions inert) | value | value | shape |
+| DAG sharing (one node object in two regions; twice within one) | value+shape | — | — |
+| mutation (G3) | value | — | — |
+| subsumption + post-filter (nested same-count → outer only; surviving < 2 → no temp) | shape | — | — |
+| name collision (params/locals/captures named `_cse1` and `_tv1`, cse on AND off) | value+shape | — | shape |
+| determinism (two compiles byte-identical: candidate-bearing + chained-relation expression; a GPU compile via `tempVar()` path) | shape | shape | shape (+GPU shape) |
+| threshold + per-region cap (sub-threshold inline; > cap keeps top-scoring deterministically) | shape | — | shape+pyexec (stress: source stays parseable) |
+| options (`cse: false` byte-identical to the deterministic-naming baseline; reused caller-built direct target across two compiles; zero-candidate expression; Python no-options entries get default sessions) | shape | shape | shape |
+| non-scalar aliasing (helper-mutation audit pin) | value | value | — |
+| user-function body dedup (duplicated subtree inside a called `f(x) := …` definition; call sites not merged) | value+shape | shape | — |
+
+### Performance and complexity
+
+- Harvest: one edge-DFS, memoized sizes, cached hashes, interval
+  containment — expected linear in edges; worst case (adversarial hash
+  collisions in `isSame` verification) bounded by the size gate and region
+  cap. Asserted by benchmark, not assumed: (a) no-candidate control,
+  (b) the probe expression, (c) corpus-extreme shapes (~65k-node
+  deep-repeat synthetic; a 100+-occurrence candidate). Acceptance:
+  compile time within 10% of `cse: false` on (a) and (c).
+- Run-time win measured on (b) and a corpus-shaped piecewise, cse on/off.
+
+### Landing gates
+
+- §5.3 helper-mutation audit, test pinned.
+- **Snapshot blast radius** measured and surfaced — both CSE churn and the
+  unconditional `tempVar()` naming churn (which hits GPU/Match/chained
+  snapshots even where CSE is off) — never absorbed silently, per policy.
+- Corpus validation: Tycho re-runs their census driver; `savings` should
+  collapse for js-target members; before/after frame-time profiles
+  requested on their top-25 examples.
+
+## 9. Phase 2 — GPU targets (separate implementation, agreed direction)
+
+1. **User-function emission for GLSL/WGSL** — the higher-value piece:
+   inlining-driven duplication dominates the corpus, and a definition
+   emitted once as a real GLSL/WGSL function eliminates it at the source
+   *and* shrinks shader source structurally. GLSL forbids recursion (fail
+   closed with a diagnostic, unlike the JS stack-error contract);
+   signatures need static types, synthesized with the `Block`-local
+   shape/complexness inference; the `userFunctions` registry pattern
+   carries over. Once this exists Tycho can stop pre-inlining **on all
+   targets** (js/interval-js already possible today).
+2. **Statement-context CSE for shader bodies** — requires GPU root emission
+   to produce statements (today: an expression string Tycho splices), i.e.
+   a shader-body contract conversation with Tycho. Honest framing: drivers
+   already CSE, so this buys compile-time and source-size headroom, not
+   per-frame arithmetic.
+
+## 10. Phase 3 — interpreted-mode CSE (sketch only; own design doc required)
+
+Per-top-level-`evaluate()` memo: key = structural hash + `isSame` verify,
+value = evaluated result, gated on `isPure`, size-thresholded. Hazards
+recorded so they aren't rediscovered:
+
+- `isPure` ≠ environment-independent: **Sum-index assigns are value
+  writes** (the item-38 element-memo trap) — epoch invalidation hooked to
+  symbol-value writes required.
+- Exactness contract: `evaluate()` vs `.N()` differ; memo keyed per mode.
+- Overhead is paid by every evaluation to benefit duplicated ones: validate
+  against the box-microloop canary (~0.02 ms/iter); engine-flag gated
+  initially.
+- The served population is the interpreted residue (~400 corpus members
+  failing JS compile). **Bucket why they fail first**; if most are
+  compile-target gaps, fixing those beats optimizing the interpreter.
+  (`ce.jit` already routes hot interpreted paths to the JS target, where
+  Phase 1 applies.)
+
+## 11. v2 candidate list (explicitly not in Phase 1)
+
+- Cross-statement binding in `Block`/`Loop` statement lists, with regions
+  split at abrupt-control-flow boundaries and an ordering-aware G3.
+- `Match` CSE via nested harvest scopes over the plan's closure trees.
+- Binder clause-sequence binding honoring `clauseLocal` visibility.
+- User-defined function applications as candidates, behind a sound
+  transitive effect-row check (per `docs/EFFECTS-MODEL.md`).
+- Per-mapping purity attestation for caller-supplied `functions`.
+- Cross-term sharing of index-free subtrees across unrolled terms.
+- Loop-invariant hoisting; cross-arm binding at conditional entry (both
+  need a throw-free argument or a guard for the not-taken case).
+- GPU `cseBind` (§9.2), pending the shader-body contract.
+
+## 12. Files touched (Phase 1)
+
+- `src/compute-engine/compilation/base-compiler.ts` — naming context +
+  session, harvest pass, `LAZY_OPERANDS` table, `compileOp` edge helper,
+  region instances/state machine, `tempVar()` conversion (signature change
+  threading the target), region push/pop in statement emitters
+  (`compileBlock`, `compileLoopBody`) and lazy-construct emitters.
+- `src/compute-engine/compilation/types.ts` — `cseBind` + emitter-author
+  contract, `cse` option, context/session types.
+- `src/compute-engine/compilation/javascript-target.ts` — `cseBind`,
+  context/session creation, `tempVar` call-site updates.
+- `src/compute-engine/compilation/interval-javascript-target.ts` —
+  `cseBind` **and** net-new `bindExpr`, context/session creation.
+- `src/compute-engine/compilation/python-target.ts` — comprehension-form
+  `cseBind`, context/session creation on all five public entries, region
+  push/pop in `compilePythonStatements`.
+- `src/compute-engine/compilation/gpu-target.ts` — naming-context creation
+  alongside the existing `beginCompilation` random-numbering reset;
+  `tempVar` call-site update (`gpu-target.ts:1016`). **No CSE on GPU.**
+- `src/compute-engine/compilation/compile-expression.ts` — option
+  passthrough + direct-route state stamping (§4.2).
+- `test/compute-engine/compile-cse.test.ts` — new (§8 matrix).
+- `CHANGELOG.md` — feature entry (CSE + deterministic temp naming, noting
+  the naming change affects all targets).
+
+No boxed-expression, canonicalization, or library changes. No new module
+dependencies (madge budget unaffected).

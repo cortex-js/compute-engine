@@ -345,6 +345,11 @@ intermittently wrong, in whatever cases the sampling is too sparse. That is the
 right trade — a reproducible wrong answer is debuggable — but it should not
 arrive as a surprise.
 
+Cross-reference (2026-07-28): `docs/EFFECTS-MODEL.md` (v3) adopts this
+section's ruling as its normative **noise-floor convention** —
+nondeterminism confined below the reported error bound of an approximation
+is approximation error, not an effect.
+
 ---
 
 ## 7. What stays outside the frame
@@ -355,6 +360,11 @@ and keeps `drawsRandom: false`. It is a fuzzer harness that generates random
 `6b15aced` because it is nondeterministic, but it owes the seed frame nothing
 and nothing in the model promises it replays. Bringing it in would be scope
 creep with no consumer.
+
+Cross-reference (2026-07-28): `docs/EFFECTS-MODEL.md` (v3) adopts this
+ruling — an earlier draft's proposal to migrate `RandomExpression` onto the
+stream was withdrawn in its favor — and represents this state as the
+`entropy` effect label: impure, not frame-owing, not replayable.
 
 ---
 
