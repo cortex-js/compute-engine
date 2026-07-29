@@ -1,5 +1,6 @@
 import type { Expression } from '../global-types.js';
 import { CancellationError } from '../../common/interruptible.js';
+import { mixTags } from '../numerics/random.js';
 
 // Lazy reference to break circular dependency:
 // compare → stochastic-equal → compile-expression → base-compiler → utils → ...
@@ -126,11 +127,20 @@ export function stochasticEqual(
     if (result === false) return false;
   }
 
-  // Test random points (independent value per unknown)
+  // Test random points (independent value per unknown).
+  //
+  // Sampled from a sub-stream derived from the ambient `WithRandomSeed` frame
+  // (live outside one), so a seeded `isEqual` VERDICT replays — this probe
+  // decides true/false/undefined, and which points it happened to draw is what
+  // determines whether a near-miss is caught. The tag is symmetric in `a` and
+  // `b` because `stochasticEqual(a, b)` and `stochasticEqual(b, a)` are the
+  // same question and must not sample differently. It consumes no frame
+  // indices, so an `isEqual` in a seeded block does not shift a sibling
+  // `Random()` draw. See `docs/plans/2026-07-28-derived-substreams.md`.
+  const draw = ce._substream(mixTags(a.hash ^ b.hash));
   for (let i = 0; i < NUM_RANDOM; i++) {
     const vars: Record<string, number> = {};
-    for (const u of unknowns)
-      vars[u] = (Math.random() - 0.5) * 2 * RANDOM_RANGE;
+    for (const u of unknowns) vars[u] = (draw() - 0.5) * 2 * RANDOM_RANGE;
     const result = testPoint(vars);
     if (result === false) return false;
   }

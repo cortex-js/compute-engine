@@ -71,6 +71,36 @@ import { typeMembership } from './sets.js';
 export const DEFAULT_LINSPACE_COUNT = 50;
 
 /**
+ * Tri-state read of an integer PARAMETER of a collection handler, for the
+ * operators whose fallback would be a DIFFERENT collection rather than
+ * "unknown":
+ *
+ * - a `number` — the parameter resolved (see {@link toIntegerOperand}: the
+ *   operand may not have been evaluated yet).
+ * - `undefined` — the parameter is ABSENT (omitted, so the slot holds
+ *   `Nothing`); apply the operator's own default.
+ * - `null` — the parameter is PRESENT but does not resolve to an integer (a
+ *   free symbol, a `NaN`). The handler must bail to its indeterminate channel
+ *   (`count`/`at` → `undefined`, an empty iterator) instead of substituting a
+ *   default, or the expression silently answers a collection it does not
+ *   denote: `Take(xs, n)` → `[]`, `Drop(xs, n)` → all of `xs`,
+ *   `RotateLeft(xs, n)` → rotated by one. This is the `undefined → value`
+ *   collapse class `hasSymbolicRangeBounds` guards for `Range`.
+ *
+ * `NaN` is deliberately NOT read as absence here, unlike `isAbsentValue`: an
+ * operator whose parameter is typed `number` (`Take`, `Slice`, `Fill`) admits
+ * `NaN` through its signature, and treating it as "omitted" put `Take(xs, NaN)`
+ * back on the default — answering `[]`. It is a present value that is not an
+ * integer, which is exactly the `null` case. (`RotateLeft`/`RotateRight` type
+ * the slot `integer`, so `NaN` never reaches here: canonicalization rejects it
+ * with `incompatible-type`.)
+ */
+function integerParam(op: Expression | undefined): number | undefined | null {
+  if (op === undefined || isSymbol(op, 'Nothing')) return undefined;
+  return toIntegerOperand(op);
+}
+
+/**
  * True when an operand's type rules out its being a collection, so a compile
  * target may treat it as a single scalar slot.
  *
@@ -350,6 +380,20 @@ function mapResultType(
 /** How many actual elements `absenceMarker()` probes when a collection's
  *  element type is statically indeterminate. */
 const MAX_ABSENCE_MARKER_PROBE = 10;
+
+/**
+ * The target languages `PointList`'s compile handler lowers (a point value with
+ * scalar components). On any OTHER language the handler declines by returning
+ * `undefined` — it has no opinion there, so a custom target's own `PointList`
+ * mapping still applies. Used to decide whether an operand-shape decline may
+ * fail closed with a specific diagnostic (Tycho item 109a) or must stay silent.
+ */
+const POINT_LIST_COMPILE_LANGUAGES: ReadonlySet<string> = new Set([
+  'javascript',
+  'python',
+  'glsl',
+  'wgsl',
+]);
 
 /**
  * The TYPE-LEVEL absence marker for a value of type `t` (§3.C):
@@ -1072,7 +1116,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return t.types.some(isProvablyNonScalar);
         return isSubtype(t, 'collection');
       };
-      if (args.some((a) => isProvablyNonScalar(a.type.type))) return undefined;
+      const nonScalar = args.findIndex((a) =>
+        isProvablyNonScalar(a.type.type)
+      );
+      if (nonScalar >= 0) {
+        // The decline is about the operand SHAPE, not the head: say so, rather
+        // than falling through to a generic "no lowering" (which reads as if
+        // `PointList` were unsupported on the target — Tycho item 109a). Only
+        // for the languages this handler otherwise lowers: on any other
+        // language the handler has no opinion and must fall through, so a
+        // custom target can still map `PointList` itself.
+        if (POINT_LIST_COMPILE_LANGUAGES.has(language))
+          throw new Error(
+            `PointList: cannot compile — component ${nonScalar + 1} is ` +
+              `collection-valued (type \`${args[nonScalar].type.toString()}\`), ` +
+              `and a point value on target '${language}' has scalar components ` +
+              `only. A list of points is not an expression-level value here: ` +
+              `project the components (\`PointX\`/\`PointY\`) or evaluate it in ` +
+              `the interpreter. Fail closed (D6).`
+          );
+        return undefined;
+      }
       // Emit byte-identically to the equivalent `Tuple(...)`. Targets with no
       // `Tuple` lowering (`interval-javascript`) are not enumerated, so
       // `PointList` fails closed there too — matching `Tuple`.
@@ -3390,8 +3454,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         const [xs, op2] = expr.ops;
         if (xs.isEmptyCollection) return true;
-        if (xs.isFiniteCollection === false) return false;
-        const n = Math.max(0, toIntegerOperand(op2) ?? 0);
+        // The bound is read BEFORE the infinite-source branch: taking a
+        // symbolic `n` from an infinite source is not known non-empty either
+        // (`n = 0` makes it empty), so answering `false` there would be a
+        // definitive wrong answer for exactly the input this guard is about.
+        const bound = integerParam(op2);
+        if (bound === null) return undefined; // symbolic bound
+        if (xs.isFiniteCollection === false) return (bound ?? 0) <= 0;
+        const n = Math.max(0, bound ?? 0);
         // A known non-empty source with n ≥ 1 gives a non-empty Take even
         // when the source's count is unknown (e.g. Dedup of an infinite
         // Iterate) — required for the generic materializer, which keeps the
@@ -3406,8 +3476,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         // A non-positive bound yields an empty (finite) collection regardless
         // of the source.
-        const n = toIntegerOperand(expr.op2);
-        if (n !== null && n <= 0) return true;
+        const n = integerParam(expr.op2);
+        if (n === null) return undefined; // symbolic bound
+        if (n !== undefined && n <= 0) return true;
         // Otherwise the result is finite when its own element count is
         // known-finite — i.e. a finite bound over a source that is finite or
         // provably infinite (`Take(Range(1,∞), 3)` → count 3). When the
@@ -3424,7 +3495,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ): undefined | Expression => {
         if (typeof index !== 'number' || index === 0) return undefined;
         if (!isFunction(expr)) return undefined;
-        const n = Math.max(0, toIntegerOperand(expr.op2) ?? 0);
+        const bound = integerParam(expr.op2);
+        if (bound === null) return undefined; // symbolic bound
+        const n = Math.max(0, bound ?? 0);
         if (n === 0) return undefined;
 
         if (index > 0) {
@@ -3457,12 +3530,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (count === undefined) return undefined;
         if (!Number.isFinite(count)) return Infinity;
         if (xs.isEmptyCollection) return 0;
-        const nValue = toIntegerOperand(n) ?? 0;
+        const dropped = integerParam(n);
+        if (dropped === null) return undefined; // symbolic bound
+        const nValue = dropped ?? 0;
         if (nValue >= count) return 0;
         return Math.max(0, count - nValue);
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
+        // Every facet bails together on a symbolic bound: a coherent
+        // unknown is what keeps a consumer (`ListFrom`, a broadcast) from
+        // reading the empty iterator as an empty collection.
+        if (integerParam(expr.op2) === null) return undefined;
         return expr.op1.isFiniteCollection;
       },
       iterator: (expr) => {
@@ -3470,7 +3549,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return { next: () => ({ value: undefined, done: true }) };
         const [xs, nExpr] = expr.ops;
 
-        const n = toIntegerOperand(nExpr) ?? 0;
+        const dropped = integerParam(nExpr);
+        if (dropped === null)
+          return { next: () => ({ value: undefined, done: true }) };
+        const n = dropped ?? 0;
         if (n <= 0) return xs.each();
 
         const count = xs.count;
@@ -3497,7 +3579,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         const [xs, nExpr] = expr.ops;
 
-        const n = toIntegerOperand(nExpr) ?? 0;
+        const dropped = integerParam(nExpr);
+        if (dropped === null) return undefined; // symbolic bound
+        const n = dropped ?? 0;
         // Dropping <= 0 elements is the identity (matches the iterator, which
         // returns `xs.each()` for n <= 0).
         if (n <= 0) return xs.at(index);
@@ -4123,18 +4207,36 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(indexed_collection, integer?) -> indexed_collection',
     collection: {
       isLazy: (_expr) => true,
+      // A rotation is a permutation, so length/emptiness/finiteness are
+      // offset-INVARIANT and knowable here. They are nonetheless suppressed
+      // when the offset has no value, because `at`/`iterator` cannot answer
+      // then: this is the house rule `permutationsCount` states for the same
+      // situation — "report `undefined` … rather than a count no consumer can
+      // back up" (`library/combinatorics.ts`). A count a consumer cannot back
+      // up is what makes a broadcast zip positions no element arrives for.
+      // `contains` is deliberately NOT gated: `false` there means definitively
+      // absent, so suppressing it would answer a wrong question rather than
+      // decline one.
       count: (expr) => {
-        if (!isFunction(expr)) return undefined;
+        if (!isFunction(expr) || integerParam(expr.op2) === null)
+          return undefined;
         return expr.op1.count;
       },
       isEmpty: (expr) => {
-        if (!isFunction(expr)) return undefined;
+        if (!isFunction(expr) || integerParam(expr.op2) === null)
+          return undefined;
         return expr.op1.isEmptyCollection;
       },
       isFinite: (expr) => {
-        if (!isFunction(expr)) return undefined;
+        if (!isFunction(expr) || integerParam(expr.op2) === null)
+          return undefined;
         return expr.op1.isFiniteCollection;
       },
+      // NOT gated on the offset: a rotation is a permutation, so membership is
+      // offset-INVARIANT. `false` here is the DEFINITIVE "not a member" answer
+      // (the indeterminate one is `undefined`), so gating it made
+      // `Contains(RotateLeft(xs, n), x)` answer False for an element that is in
+      // every rotation.
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
         return expr.op1.contains(target) ?? false;
@@ -4145,7 +4247,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const l = expr.op1.count;
         if (l === undefined || l <= 0)
           return { next: () => ({ value: undefined, done: true }) };
-        let n = toIntegerOperand(expr.op2) ?? 1;
+        const offset = integerParam(expr.op2);
+        if (offset === null)
+          return { next: () => ({ value: undefined, done: true }) };
+        let n = offset ?? 1;
         n = ((n % l) + l) % l; // Normalize shift
 
         let index = 1;
@@ -4171,7 +4276,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (l === undefined || l <= 0) return undefined;
         if (index < 1) index = l + 1 + index;
         if (index < 1 || index > l) return undefined;
-        let n = toIntegerOperand(expr.op2) ?? 1;
+        const offset = integerParam(expr.op2);
+        if (offset === null) return undefined; // symbolic offset
+        let n = offset ?? 1;
         n = ((n % l) + l) % l; // Normalize shift
 
         return expr.op1.at(((index - 1 + n) % l) + 1);
@@ -4186,10 +4293,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(indexed_collection, integer?) -> indexed_collection',
     collection: {
       isLazy: (_expr) => true,
+      // See `RotateLeft`: knowable, but suppressed while `at`/`iterator`
+      // cannot back it up.
       count: (expr) => {
-        if (!isFunction(expr)) return undefined;
+        if (!isFunction(expr) || integerParam(expr.op2) === null)
+          return undefined;
         return expr.op1.count;
       },
+      // NOT gated on the offset: a rotation is a permutation, so membership is
+      // offset-INVARIANT. `false` here is the DEFINITIVE "not a member" answer
+      // (the indeterminate one is `undefined`), so gating it made
+      // `Contains(RotateLeft(xs, n), x)` answer False for an element that is in
+      // every rotation.
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
         return expr.op1.contains(target) ?? false;
@@ -4200,7 +4315,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const l = expr.op1.count;
         if (l === undefined || l <= 0)
           return { next: () => ({ value: undefined, done: true }) };
-        let n = toIntegerOperand(expr.op2) ?? 1;
+        const offset = integerParam(expr.op2);
+        if (offset === null)
+          return { next: () => ({ value: undefined, done: true }) };
+        let n = offset ?? 1;
         n = ((n % l) + l) % l; // Normalize shift
 
         let index = 1;
@@ -4226,7 +4344,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (l === undefined || l <= 0) return undefined;
         if (index < 1) index = l + 1 + index;
         if (index < 1 || index > l) return undefined;
-        let n = toIntegerOperand(expr.op2) ?? 1;
+        const offset = integerParam(expr.op2);
+        if (offset === null) return undefined; // symbolic offset
+        let n = offset ?? 1;
         n = ((n % l) + l) % l; // Normalize shift
         const i = ((index - 1 + (l - n)) % l) + 1;
         return expr.op1.at(i);
@@ -4935,6 +5055,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return ce.function('List', result);
       }
 
+      // The size form with a size that has no value yet (`Partition(xs, n)`
+      // with `n` a free integer) is NOT a predicate: stay unevaluated until
+      // `n` binds. Without this it fell into the predicate arm below and threw
+      // a raw `Error` out of `evaluate()` — the operand is typed `integer`,
+      // so no spell-check hint was ever going to help.
+      if (arg.type.matches('number')) return undefined;
+
       // Partition(collection, predicate)
       const fn = applicable(arg);
       if (!fn) return undefined;
@@ -4942,9 +5069,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const trueGroup: Expression[] = [];
       const falseGroup: Expression[] = [];
       for (const item of xs.each()) {
-        const pred = sym(fn([item]));
+        const applied = fn([item]);
+        const pred = sym(applied);
         if (pred === 'True') trueGroup.push(item);
         else if (pred === 'False') falseGroup.push(item);
+        else if (
+          applied === undefined ||
+          applied.type.isUnknown ||
+          applied.type.matches('boolean')
+        )
+          // An UNDECIDED predicate, in either of its two shapes: unresolved —
+          // a symbol declared `function` with no value applies to a symbolic
+          // `g(x)` typed `unknown` — or resolved but not decidable yet, an
+          // unevaluated relation already typed `boolean` (`x |-> x > n` with
+          // `n` free, which is neither `True` nor `False`). Both are undecided,
+          // not wrong: stay unevaluated, mirroring `If`, which reserves its
+          // throw for a condition that is not boolean at all. The throw below
+          // keeps the case the spell-check hint was written for: a predicate
+          // that resolves to a concrete non-boolean (`x |-> x + 1`).
+          return undefined;
         else
           throw new Error(
             `Partition predicate must return "True" or "False". ${spellCheckMessage(
@@ -5472,7 +5615,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (!isFunction(expr.op2)) return undefined;
-        const dims = expr.op2.ops.map((op) => toIntegerOperand(op) ?? 0);
+        const dims = fillDims(expr.op2);
+        if (dims === null) return undefined; // symbolic dimension
         return dims[0] ?? 0;
       },
       iterator: (expr) => {
@@ -5482,7 +5626,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!f) return { next: () => ({ value: undefined, done: true }) };
         if (!isFunction(expr.op2))
           return { next: () => ({ value: undefined, done: true }) };
-        const dims = expr.op2.ops.map((op) => toIntegerOperand(op) ?? 0);
+        const dims = fillDims(expr.op2);
+        if (dims === null)
+          return { next: () => ({ value: undefined, done: true }) };
         const rows = dims[0] ?? 0;
         const cols = dims[1] ?? 0;
         const last = rows;
@@ -5511,7 +5657,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const f = applicable(expr.op1);
         if (!f) return undefined;
         if (!isFunction(expr.op2)) return undefined;
-        const dims = expr.op2.ops.map((op) => toIntegerOperand(op) ?? 0);
+        const dims = fillDims(expr.op2);
+        if (dims === null) return undefined; // symbolic dimension
         const rows = dims[0] ?? 0;
         const cols = dims[1] ?? 0;
         if (index > rows * cols) return undefined;
@@ -6552,13 +6699,18 @@ function sliceBounds(
   if (!isFunction(expr)) return undefined;
   const count = expr.op1.count;
   if (count === undefined) return undefined;
-  let start = toIntegerOperand(expr.op2) ?? 1;
+  const startParam = integerParam(expr.op2);
+  const endParam = integerParam(expr.op3);
+  // A symbolic bound is indeterminate, not a default: every facet that reads
+  // `sliceBounds` reports `undefined` when it returns `undefined`.
+  if (startParam === null || endParam === null) return undefined;
+  let start = startParam ?? 1;
   if (start < 1) {
     if (!Number.isFinite(count)) return undefined;
     start = count + 1 + start;
   }
   if (start < 1) start = 1;
-  let end = toIntegerOperand(expr.op3) ?? count;
+  let end = endParam ?? count;
   if (end < 1) end = count + 1 + end;
   if (end < 1) end = 1;
   if (end > count) end = count;
@@ -6636,8 +6788,13 @@ function isEvaluatedElement(
 function takeIterator(expr: Expression): Iterator<Expression> {
   if (!isFunction(expr))
     return { next: () => ({ value: undefined, done: true }) };
-  // Number of elements to take
-  const count = Math.max(0, toIntegerOperand(expr.op2) ?? 0);
+  // Number of elements to take. A symbolic bound has no indeterminate
+  // channel here (an iterator either yields or does not), so it yields
+  // nothing — the count/at facets report `undefined`, which is what keeps
+  // the expression from materializing at all.
+  const bound = integerParam(expr.op2);
+  if (bound === null) return { next: () => ({ value: undefined, done: true }) };
+  const count = Math.max(0, bound ?? 0);
 
   if (count === 0) return { next: () => ({ value: undefined, done: true }) };
 
@@ -6661,9 +6818,31 @@ function takeCount(expr: Expression): number | undefined {
   const [xs, op2] = expr.ops;
   const count = xs.count;
   if (count === undefined) return undefined;
-  const n = Math.max(0, toIntegerOperand(op2) ?? 0);
+  const bound = integerParam(op2);
+  if (bound === null) return undefined; // symbolic bound
+  const n = Math.max(0, bound ?? 0);
   if (!Number.isFinite(n)) return Infinity;
   return Math.min(count, n);
+}
+
+/**
+ * The integer dimensions of a `Fill`'s shape tuple, or `null` if any of them
+ * is present but does not resolve to an integer.
+ *
+ * An unresolvable dimension used to read as `0`, so `Fill(f, (n, 3))`
+ * answered the empty matrix and `Fill(f, (2, n))` answered two empty rows —
+ * the same silent-substitution class as `Take(xs, n)` → `[]`. Every facet
+ * bails together on `null`; see {@link integerParam}.
+ */
+function fillDims(shape: Expression): number[] | null {
+  if (!isFunction(shape)) return null;
+  const dims: number[] = [];
+  for (const op of shape.ops) {
+    const d = integerParam(op);
+    if (d === null) return null;
+    dims.push(d ?? 0);
+  }
+  return dims;
 }
 
 /** The integer dimensions of a `Tabulate`, or `null` if any is missing,

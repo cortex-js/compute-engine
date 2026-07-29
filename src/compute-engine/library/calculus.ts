@@ -39,6 +39,7 @@ import {
   canonicalFunctionLiteralArguments,
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
+import { mixTags } from '../numerics/random.js';
 import {
   adaptiveQuadrature,
   initialPanelsForDimensions,
@@ -314,6 +315,13 @@ function nIntegrateMultiple(
   const argv = new Array<number>(vars.length).fill(NaN);
   const outerVals = new Array<number>(vars.length).fill(NaN);
   const last = limits.length - 1;
+
+  // ONE sub-stream for the whole iterated integral, allocated here rather than
+  // per level: a level allocating its own would make the number of sub-streams
+  // depend on the integrand's dimension, and the inner levels re-run once per
+  // outer quadrature node — so per-level allocation would also make the tag
+  // depend on how many nodes the outer level happened to use.
+  const draw = ce._substream(mixTags(f.hash, ...limits.map((l) => l.hash)));
   const integrateDim = (dim: number): { estimate: number; error: number } => {
     const g = (t: number): number => {
       argv[slots[dim]] = t;
@@ -331,7 +339,7 @@ function nIntegrateMultiple(
       initialPanels: initialPanelsForDimensions(limits.length),
     });
     if (gk.converged && Number.isFinite(gk.estimate)) return gk;
-    return monteCarloEstimate(g, lower, upper, 1e4, ce._deadline);
+    return monteCarloEstimate(g, lower, upper, 1e4, ce._deadline, draw);
   };
 
   // The reported uncertainty is the outermost level's own error estimate:
@@ -1098,6 +1106,13 @@ volumes
       ],
       wikidata: 'Q80091',
       broadcastable: false,
+      // Its Monte-Carlo fallback samples through a derived sub-stream, so it
+      // READS the ambient `WithRandomSeed` frame while consuming none of its
+      // indices. Not `drawsRandom` (that would shift every sibling draw), but
+      // the pending gate must still keep the frame around an estimate that
+      // could not finish — otherwise deferring it converts a seeded estimate
+      // to a live one. See `docs/plans/2026-07-28-derived-substreams.md` §6.
+      readsRandomFrame: true,
 
       lazy: true,
       // The integration variable(s) live in the `Limits` operands, which
@@ -1244,7 +1259,8 @@ volumes
             lower,
             upper,
             compiled?.success ? 1e7 : 1e4,
-            ce._deadline
+            ce._deadline,
+            ce._substream(mixTags(f.hash, firstLimit.hash))
           );
           // KNOWN LIMITATION (CORRECTNESS_FINDINGS #29 / C15): the reported
           // error bar is the Monte-Carlo standard error, which is *optimistic*
@@ -1440,6 +1456,13 @@ volumes
     NIntegrate: {
       description: 'Numerical approximation of a definite integral.',
       broadcastable: false,
+      // Its Monte-Carlo fallback samples through a derived sub-stream, so it
+      // READS the ambient `WithRandomSeed` frame while consuming none of its
+      // indices. Not `drawsRandom` (that would shift every sibling draw), but
+      // the pending gate must still keep the frame around an estimate that
+      // could not finish — otherwise deferring it converts a seeded estimate
+      // to a live one. See `docs/plans/2026-07-28-derived-substreams.md` §6.
+      readsRandomFrame: true,
       lazy: true,
       signature: '(function, limits:(tuple|symbol)?) -> number',
       canonical: (ops, { engine }) => {
@@ -1479,7 +1502,8 @@ volumes
             lower,
             upper,
             compiled?.success ? 1e7 : 1e4,
-            engine._deadline
+            engine._deadline,
+            engine._substream(mixTags(f.hash, a.hash, b.hash))
           ).estimate
         );
       },

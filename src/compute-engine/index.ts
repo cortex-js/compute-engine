@@ -120,7 +120,12 @@ import './boxed-expression/serialize.js';
 import { SIMPLIFY_RULES } from './symbolic/simplify-rules.js';
 
 import { bigint } from './numerics/bigint.js';
-import { frameDraw, type RandomSeedFrame } from './numerics/random.js';
+import {
+  deriveSubstream,
+  frameDraw,
+  type RandomSeedFrame,
+  type RandomSubstream,
+} from './numerics/random.js';
 import { isValidSymbol } from '../math-json/symbols.js';
 
 import { getFunctionProperties } from './function-properties/index.js';
@@ -1034,6 +1039,24 @@ export class ComputeEngine implements IComputeEngine {
       return frameDraw(frame.seedLo, frame.seedHi, n);
     }
     return Math.random();
+  }
+
+  /** @internal A private stream derived from the ambient `WithRandomSeed`
+   * frame, for the stochastic ESTIMATORS (Monte-Carlo integration, the
+   * sampled equality probe).
+   *
+   * Unlike `_random()`, this consumes NO indices from the frame: an estimator
+   * that samples 1e7 points must not shift a sibling `Random()` draw, and its
+   * sample count is deadline-dependent, so charging it to the frame would make
+   * replay depend on wall-clock time. See
+   * `docs/plans/2026-07-28-derived-substreams.md`.
+   *
+   * `tag` selects which sub-stream — pass a structural hash (`expr.hash`) so
+   * the same expression samples the same points wherever it appears in the
+   * frame. Outside a frame the result is `Math.random` (live).
+   */
+  _substream(tag: number): RandomSubstream {
+    return deriveSubstream(this._runtimeState.randomFrame, tag);
   }
 
   /** Replace a number that is close to 0 with the exact integer 0.

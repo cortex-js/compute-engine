@@ -159,7 +159,16 @@ function hasPendingImpureApplication(
   const h = expr.operator;
   if (h === 'Hold') return false;
   if (h === 'Function' && !underEagerSurvivor) return false;
-  if (expr.operatorDefinition?.drawsRandom === true) return true;
+  // Two ways a surviving application still needs the frame: it CONSUMES
+  // indices (`drawsRandom` — `Random`, `RandomShuffle`, a nested
+  // `WithRandomSeed`), or it READS the frame through a derived sub-stream
+  // without consuming indices (`readsRandomFrame` — the stochastic
+  // estimators). Both must keep the frame: an estimator that could not finish
+  // (`NIntegrate(f, 0, n)` with `n` unbound) would otherwise be completed
+  // later against a live stream, the same silent seeded→unseeded conversion
+  // for estimates that item 104 fixed for draws.
+  const def = expr.operatorDefinition;
+  if (def?.drawsRandom === true || def?.readsRandomFrame === true) return true;
   // Value position propagates through a lazy view and through the literal
   // containers; every other surviving application puts its whole subtree —
   // lambdas included — in eager-survivor position.

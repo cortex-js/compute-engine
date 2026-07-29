@@ -1231,6 +1231,26 @@ export type OperatorDefinitionFlags = {
    * **Default:** `false`
    */
   drawsRandom: boolean;
+
+  /** If `true`, evaluating this operator READS the engine's random frame
+   * without consuming any of its indices — the stochastic estimators
+   * (Monte-Carlo integration), which sample through a derived sub-stream
+   * (`ce._substream`).
+   *
+   * Orthogonal to `drawsRandom`, and both are consulted by `WithRandomSeed`'s
+   * pending gate: an estimator that could NOT finish (a bound or parameter is
+   * still unbound) must keep the seed frame, or the deferred completion
+   * samples live — the same silent seeded→unseeded conversion `drawsRandom`
+   * prevents for `Random`. It must not be spelled `drawsRandom: true`, which
+   * would additionally make the estimator consume frame indices and shift
+   * every sibling draw.
+   *
+   * An estimator that COMPLETED owes the frame nothing; its node is gone, so
+   * the gate never sees it.
+   *
+   * **Default:** `false`
+   */
+  readsRandomFrame: boolean;
 };
 
 /**

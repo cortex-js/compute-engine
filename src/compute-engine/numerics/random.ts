@@ -122,6 +122,86 @@ export function frameDraw(seedLo: number, seedHi: number, n: number): number {
   return (w0 * 2 ** 21 + (w1 >>> 11)) * 2 ** -53;
 }
 
+//
+// ─── Derived sub-streams ────────────────────────────────────────────────────
+//
+// `docs/plans/2026-07-28-derived-substreams.md`. The stochastic ESTIMATORS —
+// Monte-Carlo integration, the sampled equality probe — need to replay under a
+// `WithRandomSeed` frame without drawing FROM it: they consume 1e4–1e7
+// samples, and the sampling loop is deadline-truncated, so routing them
+// through `ce._random()` would make the frame's own counter depend on how many
+// samples happened to run, i.e. on wall-clock time.
+//
+// A derived sub-stream is therefore a PRIVATE counter whose seed is a pure
+// function of the frame's seed and a caller-supplied tag. The frame's `next`
+// is READ, never advanced: an integral consumes ZERO frame indices, so adding
+// or removing one cannot shift a sibling `Random()` draw.
+//
+
+/**
+ * Successive uniforms in `[0, 1)`. Deterministic when derived from a frame,
+ * live (`Math.random`) when derived outside one.
+ */
+export type RandomSubstream = () => number;
+
+/**
+ * A private counter-based stream seeded from `frame` and `tag`.
+ *
+ * - **Framed**: the sub-stream's seed words are `pcg3dWords(seedLo, seedHi,
+ *   tag)`, and its draws are `frameDraw(lo', hi', n)` for a private `n`
+ *   starting at 0. The frame is not mutated — `next` is not even read, so two
+ *   sub-streams derived with the same tag from the same frame are IDENTICAL
+ *   regardless of how many draws the frame has taken. That is the
+ *   reordering-insensitivity the design is for.
+ * - **Unframed**: `Math.random`. There is no ambient seed to derive from, so
+ *   an unframed estimator stays live — `RANDOMNESS-MODEL.md` §1, and the §8
+ *   ruling that the unseeded arm is exempt from parity.
+ *
+ * `tag` identifies WHICH sub-stream: callers pass a structural hash of the
+ * expression being estimated (`expr.hash`), so the same integral in the same
+ * frame always samples the same points. Only the low 32 bits matter (`>>> 0`).
+ *
+ * **Stability**: the `(seed, tag) → stream` mapping is a persistence surface,
+ * pinned by `random-vectors.test.ts` for fixed literal inputs — changing any
+ * operation here re-randomizes every seeded estimate. The TAG VALUES are
+ * deliberately NOT pinned: `expr.hash` is free to change, and a hash change is
+ * accepted to shift seeded estimates (design doc §3.1). Never write a test
+ * that hardcodes what a seeded estimate evaluates to.
+ */
+export function deriveSubstream(
+  frame: RandomSeedFrame | undefined,
+  tag: number
+): RandomSubstream {
+  if (frame === undefined) return Math.random;
+  const [lo, hi] = pcg3dWords(frame.seedLo, frame.seedHi, tag >>> 0);
+  let n = 0;
+  return () => frameDraw(lo, hi, n++ >>> 0);
+}
+
+/**
+ * Combine several structural hashes into one sub-stream tag.
+ *
+ * An estimator is usually identified by more than one expression — an
+ * integrand plus its limits, the two sides of an equality probe — and every
+ * call site must combine them the SAME way, or "the same integral samples the
+ * same points" quietly stops holding between paths. This is that one way.
+ *
+ * Order-sensitive (`31 * h + x`, the conventional polynomial mix), so
+ * `∫f dx dy` and `∫f dy dx` get distinct streams — they are distinct
+ * computations.
+ *
+ * Lives here, in a leaf module with no engine imports, rather than in
+ * `boxed-expression/utils.ts`: `stochastic-equal.ts` deliberately avoids
+ * importing `utils.ts` to stay out of the `compare → stochastic-equal →
+ * compile-expression → base-compiler → utils` cycle, and it is one of the two
+ * callers.
+ */
+export function mixTags(...hashes: number[]): number {
+  let h = 0;
+  for (const x of hashes) h = (Math.imul(h, 31) + (x | 0)) | 0;
+  return h >>> 0;
+}
+
 /**
  * Fold a seed into the two u32 words of a `RandomSeedFrame` — **normative**
  * (§4), pinned by the §8 stability vectors.

@@ -48,12 +48,30 @@ function roundEstimateToError(
   return { estimate: roundedEstimate, error: roundedError };
 }
 
+/**
+ * @param draw the source of uniform `[0, 1)` reals. Defaults to `Math.random`,
+ * which keeps every existing caller — including external ones, since this
+ * function is published through `src/numerics.ts` — behaving exactly as before.
+ *
+ * The engine passes `ce._substream(tag)` instead: a private stream derived
+ * from the ambient `WithRandomSeed` frame that consumes NO indices from it, so
+ * a seeded integral replays without shifting a sibling `Random()` draw. It has
+ * to be a sub-stream rather than `ce._random` because the sampling loop below
+ * is deadline-truncated — charging its samples to the frame would make replay
+ * depend on wall-clock time. See
+ * `docs/plans/2026-07-28-derived-substreams.md`.
+ *
+ * The 32-sample all-non-finite probe draws from the same source, deliberately:
+ * it is part of the estimator's deterministic behavior, and excluding it would
+ * make replay depend on whether the probe bailed early.
+ */
 export function monteCarloEstimate(
   f: (x: number) => number,
   a: number,
   b: number,
   n = 1e5,
-  deadline?: number
+  deadline?: number,
+  draw: () => number = Math.random
 ): { estimate: number; error: number } {
   // Nested integration: a call reached through compiled code (e.g. the
   // inner integral of a double integral, via `_SYS.integrate`) has no
@@ -67,7 +85,7 @@ export function monteCarloEstimate(
     // |dx/du| = π(1 + x²)
     // Estimator: f(x) * |dx/du| = f(x) * π(1 + x²)
     sampler = () => {
-      const u = Math.random();
+      const u = draw();
       const x = Math.tan(Math.PI * (u - 0.5));
       return f(x) * Math.PI * (1 + x * x);
     };
@@ -76,7 +94,7 @@ export function monteCarloEstimate(
     // |dx/du| = 1/u
     // Estimator: f(x) * |dx/du| = f(x) / u
     sampler = () => {
-      const u = Math.random();
+      const u = draw();
       return f(b + Math.log(u)) / u;
     };
   } else if (b === Infinity) {
@@ -84,12 +102,12 @@ export function monteCarloEstimate(
     // |dx/du| = 1/u
     // Estimator: f(x) * |dx/du| = f(x) / u
     sampler = () => {
-      const u = Math.random();
+      const u = draw();
       return f(a - Math.log(u)) / u;
     };
   } else {
     // Finite interval [a, b]: standard uniform sampling
-    sampler = () => f(a + Math.random() * (b - a));
+    sampler = () => f(a + draw() * (b - a));
   }
 
   // Fail fast on an integrand that is non-finite EVERYWHERE. The usual cause

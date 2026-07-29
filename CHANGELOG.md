@@ -2,6 +2,42 @@
 
 ### Bug Fixes
 
+- **Monte-Carlo integration and stochastic equality now replay under
+  `WithRandomSeed()`.** Both sampled `Math.random()` directly, so a seeded block
+  did not reproduce: `WithRandomSeed(42, \int_0^1 \sin(1/x) dx)` returned a
+  different estimate on every evaluation, and a seeded `isEqual()` verdict could
+  not be replayed at all.
+
+  They now draw from a _derived sub-stream_ — a private stream seeded from the
+  ambient frame that consumes **none** of its indices. This matters because an
+  integral takes up to 1e7 samples and the sampling loop is deadline-truncated:
+  charging those to the frame would make adding an integral shift every later
+  `Random()` draw in the block, and would make replay depend on wall-clock time.
+  Adding or removing an integral now leaves sibling draws untouched, and the
+  same integral samples the same points wherever it appears in the frame.
+
+  Outside a frame both remain live, as before. `monteCarloEstimate()` (exported
+  from `@cortex-js/compute-engine/numerics`) gains an optional trailing `draw`
+  parameter defaulting to `Math.random`, so existing callers are unaffected.
+
+  **This applies to evaluation, not to compiled code.** An integral inside a
+  compiled function still samples live, even within a seed frame, and that is
+  deliberate: the generated code emits one independent quadrature call per
+  limit, so a sub-stream would restart at the same sample points on every outer
+  node of a nested integral — trading reproducibility for a biased estimate. In
+  practice a smooth integrand never reaches the stochastic estimator anyway (it
+  folds to a constant at compile time, or converges under deterministic
+  Gauss–Kronrod); only a pathological one does. Use `.N()` when a seeded
+  integral has to reproduce. See `docs/plans/2026-07-28-derived-substreams.md`
+  §5.1.
+
+  An integral that cannot finish inside a seed frame — a bound or parameter is
+  still unbound — now keeps the frame, so completing it later reproduces the
+  estimate the frame would have produced. Operator definitions gain a
+  `readsRandomFrame` flag for this: it means "reads the seed frame, consumes
+  none of its indices", and is inferred for a user function whose body reaches
+  an estimator. Unlike `drawsRandom`, it does not make the operator impure.
+
 - **A collection operator now resolves an unevaluated numeric argument.**
   Collection handlers are consulted on the canonical expression — `.at()`,
   `.each()` and `.count` are available on any canonical expression, and the
@@ -13,6 +49,33 @@
   were never affected. Fixed for `Take`, `Drop`, `RotateLeft`, `RotateRight`,
   `Repeat`, `Fill`, `Partition`, `Tabulate`, `Insert`, `DeleteAt`, `ReplaceAt`,
   `Slice`, `Permutations` and `Combinations`.
+
+- **`Take`, `Drop`, `RotateLeft`, `RotateRight` and `Slice` now stay symbolic
+  when their numeric argument has no value.** An argument that is absent and one
+  that is present but unresolved (a free variable) were treated alike, so each
+  operator answered a collection it does not denote: `Take(S, n)` returned `[]`,
+  `Drop(S, n)` returned all of `S`, and `RotateLeft(S, n)` and
+  `RotateRight(S, n)` rotated by one. They now report an unknown count and
+  evaluate to themselves until `n` has a value — matching `Repeat`, `Insert`,
+  `DeleteAt`, `ReplaceAt`, `Permutations`, `Combinations`, `Tabulate`, `Chunk`
+  and `Range`, which already did. An omitted argument still takes the operator's
+  default, so `RotateLeft(S)` still rotates by one; a `NaN` argument counts as
+  unresolved, not omitted. `Fill` joins them: `Fill(f, (n, 3))` used to produce
+  an empty matrix and `Fill(f, (2, n))` two empty rows. `IsEmpty` of such a
+  `Take` over an infinite collection no longer answers `False` either — a zero
+  count would make it empty.
+
+  Membership is deliberately unaffected: `Contains(RotateLeft(xs, n), x)` still
+  answers, because a rotation is a permutation.
+
+- **`Partition(xs, n)` with an unbound `n` no longer throws.** `Partition`
+  accepts either a chunk size or a predicate, and chose the arm by whether the
+  size read as an integer — so an argument that is _typed_ `integer` but has no
+  value yet was applied as a predicate, and the resulting exception escaped
+  `evaluate()`. The arm is now chosen by type, and an unresolved predicate (a
+  symbol declared `function` with no value) leaves the expression unevaluated as
+  well. A predicate that does resolve, to something other than a boolean, still
+  reports the error with its spelling hint.
 
 - **`WithRandomSeed(seed, [… for …])` draws again.** A comprehension is a lazy
   view, like `Map`: its body draws per element when the collection is
@@ -109,60 +172,72 @@
 ### Issues Resolved
 
 - **Partially evaluated `WithRandomSeed` expressions now retain their seed**, so
-  later substitutions produce the same result as substituting before
-  evaluation.
+  later substitutions produce the same result as substituting before evaluation.
 
-- **Nested `N` and `Evaluate` expressions now preserve numeric approximation
-  and precision.** For example, `N(Evaluate(pi))` now returns a numeric value
+- **Nested `N` and `Evaluate` expressions now preserve numeric approximation and
+  precision.** For example, `N(Evaluate(pi))` now returns a numeric value
   instead of the symbolic `pi`.
 
 ### Benchmarks
 
 #### Numeric performance (200-digit precision)
 
-Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
 
-| Expression | CE (current) | CE 0.97.0 | SymPy | math.js | Mathematica |
-| --- | --: | --: | --: | --: | --: |
-| $\pi^2$ | 7.9 | 8.5 | 203 | 288 | 4.5 |
-| $\sin 1$ | 23 | 23 | 253 | 598 | 6.0 |
-| $\cos 1$ | 21 | 22 | 253 | 781 | 8.1 |
-| $\ln 2$ | 16 | 16 | 386 | 5,471 | 4.7 |
-| $e^{\pi}$ | 15 | 15 | 273 | 7,477 | 5.9 |
-| $\zeta(3)$ | 1,738 | 1,702 | 337 | — | 56 |
-| $\Gamma(\tfrac13)$ | 924 | 913 | 407 | — | 268 |
-| $\psi(\tfrac13)$ | 781 | 790 | 3,496 | — | 199 |
+| Expression         | CE (current) | CE 0.97.0 | SymPy | math.js | Mathematica |
+| ------------------ | -----------: | --------: | ----: | ------: | ----------: |
+| $\pi^2$            |          7.9 |       8.5 |   203 |     288 |         4.5 |
+| $\sin 1$           |           23 |        23 |   253 |     598 |         6.0 |
+| $\cos 1$           |           21 |        22 |   253 |     781 |         8.1 |
+| $\ln 2$            |           16 |        16 |   386 |   5,471 |         4.7 |
+| $e^{\pi}$          |           15 |        15 |   273 |   7,477 |         5.9 |
+| $\zeta(3)$         |        1,738 |     1,702 |   337 |       — |          56 |
+| $\Gamma(\tfrac13)$ |          924 |       913 |   407 |       — |         268 |
+| $\psi(\tfrac13)$   |          781 |       790 | 3,496 |       — |         199 |
 
 #### Symbolic capability & performance
 
-Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.97.0** columns to see what is *new this release* (a `—` under `0.97.0` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE (current)** and **CE 0.97.0** columns to see
+what is _new this release_ (a `—` under `0.97.0` next to a number under the
+current build). The **CE + R/F** column is the current build with the opt-in
+Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
 
-| Operation | CE (current) | CE + R/F | CE 0.97.0 | SymPy | math.js | Mathematica |
-| --- | :--: | :--: | :--: | :--: | :--: | :--: |
-| **Antiderivatives** |  |  |  |  |  |  |
-| $\int\frac{1}{\sqrt x}\,dx$ | 4.5× | 2.2× | 3.5× | 0.5× | — | 1× |
-| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 8.1× | 1.6× | 6.8× | 0.08× | — | 1× |
-| $\int\frac{1}{x^3+1}\,dx$ | 4.9× | 0.6× | 3.7× | 0.3× | — | 1× |
-| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 1.7× | — | 0.08× | — | 1× |
-| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 1.0× | — | 0.008× | — | 1× |
-| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 1.0× | — | 0.006× | — | 1× |
-| **Derivatives** |  |  |  |  |  |  |
-| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.04× | 0.03× | 0.03× | 0.001× | 0.004× | 1× |
-| **Simplification** |  |  |  |  |  |  |
-| $\sqrt{3+2\sqrt2}$ | 37× | 27× | 31× | — | — | 1× |
-| $\sqrt6\,x+\sqrt2\,x$ | 74× | 42× | 44× | 3.1× | 17× | 1× |
-| **Evaluation** |  |  |  |  |  |  |
-| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 41× | 17× | 38× | 2.9× | — | 1× |
-| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 7.2× | 4.6× | 6.8× | 1.9× | — | 1× |
-| $\int_1^2\tfrac1x\,dx$ | 5778× | 6836× | 5520× | 107× | — | 1× |
-| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 352× | 146× | 298× | 2.7× | — | 1× |
-| **Solving** |  |  |  |  |  |  |
-| $x^4+x^2-1=0$ | 0.3× | 0.3× | 0.3× | 0.05× | — | 1× |
-| $x^3-x-1=0$ | 2.2× | 2.4× | 1.9× | 0.05× | — | 1× |
+| Operation                              | CE (current) | CE + R/F | CE 0.97.0 | SymPy  | math.js | Mathematica |
+| -------------------------------------- | :----------: | :------: | :-------: | :----: | :-----: | :---------: |
+| **Antiderivatives**                    |              |          |           |        |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |     4.5×     |   2.2×   |   3.5×    |  0.5×  |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |     8.1×     |   1.6×   |   6.8×    | 0.08×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |     4.9×     |   0.6×   |   3.7×    |  0.3×  |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |      —       |   1.7×   |     —     | 0.08×  |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |      —       |   1.0×   |     —     | 0.008× |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |      —       |   1.0×   |     —     | 0.006× |    —    |     1×      |
+| **Derivatives**                        |              |          |           |        |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |    0.04×     |  0.03×   |   0.03×   | 0.001× | 0.004×  |     1×      |
+| **Simplification**                     |              |          |           |        |         |             |
+| $\sqrt{3+2\sqrt2}$                     |     37×      |   27×    |    31×    |   —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |     74×      |   42×    |    44×    |  3.1×  |   17×   |     1×      |
+| **Evaluation**                         |              |          |           |        |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |     41×      |   17×    |    38×    |  2.9×  |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |     7.2×     |   4.6×   |   6.8×    |  1.9×  |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |    5778×     |  6836×   |   5520×   |  107×  |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |     352×     |   146×   |   298×    |  2.7×  |    —    |     1×      |
+| **Solving**                            |              |          |           |        |         |             |
+| $x^4+x^2-1=0$                          |     0.3×     |   0.3×   |   0.3×    | 0.05×  |    —    |     1×      |
+| $x^3-x-1=0$                            |     2.2×     |   2.4×   |   1.9×    | 0.05×  |    —    |     1×      |
 
-Across the cases both solve, Compute Engine is a **median 4.9× faster than Mathematica** (up to 5778×) — in the browser, not a proprietary kernel.
+Across the cases both solve, Compute Engine is a **median 4.9× faster than
+Mathematica** (up to 5778×) — in the browser, not a proprietary kernel.
 
-<sub>Measured 2026-07-28 · Compute Engine `0.97.0` @ `bff3c3b1` (current build) · published `0.97.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+<sub>Measured 2026-07-28 · Compute Engine `0.97.0` @ `bff3c3b1` (current build)
+· published `0.97.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
 </sub>
 
 ## 0.97.0 _2026-07-27_

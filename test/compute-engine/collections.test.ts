@@ -3751,3 +3751,259 @@ describe('A collection parameter that is not yet evaluated (Tycho item 107)', ()
     ).toBe('[6,8,10,12]');
   });
 });
+
+describe('A collection parameter that does not resolve stays indeterminate', () => {
+  // A parameter that is present but has no integer value (a free symbol) is
+  // NOT the same as an absent one. Conflating them made five operators answer
+  // a collection they do not denote — `Take(S, n)` → `[]`, `Drop(S, n)` → all
+  // of `S`, `RotateLeft(S, n)` → rotated by one. The rest of the family
+  // (`Repeat`, `Insert`, `DeleteAt`, `ReplaceAt`, `Permutations`,
+  // `Combinations`, `Tabulate`, `Chunk`, `Range`) already bailed to the
+  // indeterminate channel; these five were the outliers.
+
+  function fresh() {
+    const ce = new ComputeEngine();
+    ce.assign('Sx', ce.box(['List', 1, 2, 3, 4, 5, 6]));
+    ce.declare('nx', 'integer');
+    return ce;
+  }
+
+  const CALLS: [string, Expression][] = [
+    ['Take', ['Take', 'Sx', 'nx']],
+    ['Drop', ['Drop', 'Sx', 'nx']],
+    ['RotateLeft', ['RotateLeft', 'Sx', 'nx']],
+    ['RotateRight', ['RotateRight', 'Sx', 'nx']],
+    ['Slice', ['Slice', 'Sx', 'nx', 4]],
+  ];
+
+  test.each(CALLS)('%s stays symbolic and reports no count', (_name, call) => {
+    const e = fresh().box(call);
+    expect(e.count).toBeUndefined();
+    expect(e.evaluate().operator).toBe(e.operator);
+  });
+
+  test.each(CALLS)(
+    '%s does not collapse through a consumer',
+    (_name, call) => {
+      const ce = fresh();
+      // `ListFrom` must not read the indeterminate iterator as an empty
+      // collection, and `Count` must not answer a length no element backs.
+      expect(ce.box(['ListFrom', call]).evaluate().operator).toBe('ListFrom');
+      expect(ce.box(['Count', call]).evaluate().operator).toBe('Count');
+    }
+  );
+
+  test.each(CALLS)(
+    '%s survives a broadcast instead of throwing',
+    (_name, call) => {
+      // Facet incoherence — an honest `count` beside an indeterminate
+      // iterator — made the broadcast zip positions no element arrived for,
+      // and a raw TypeError escaped `evaluate()`.
+      const ce = fresh();
+      expect(() =>
+        ce.box(['Add', call, call] as Expression).evaluate()
+      ).not.toThrow();
+    }
+  );
+
+  test('an ABSENT parameter still takes the operator default', () => {
+    const ce = fresh();
+    expect(ce.box(['RotateLeft', 'Sx']).evaluate().toString()).toBe(
+      '[2,3,4,5,6,1]'
+    );
+    expect(ce.box(['RotateRight', 'Sx']).evaluate().toString()).toBe(
+      '[6,1,2,3,4,5]'
+    );
+  });
+
+  test('a parameter with an assigned value still resolves', () => {
+    const ce = fresh();
+    ce.assign('mx', 3);
+    expect(ce.box(['Take', 'Sx', 'mx']).evaluate().toString()).toBe('[1,2,3]');
+    expect(ce.box(['Drop', 'Sx', 'mx']).evaluate().toString()).toBe('[4,5,6]');
+    expect(ce.box(['RotateLeft', 'Sx', 'mx']).evaluate().toString()).toBe(
+      '[4,5,6,1,2,3]'
+    );
+    expect(ce.box(['Slice', 'Sx', 'mx', 5]).evaluate().toString()).toBe(
+      '[3,4,5]'
+    );
+  });
+
+  test('infinite and lazy sources are unaffected', () => {
+    const ce = fresh();
+    const inf: Expression = ['Range', 1, { num: '+Infinity' }];
+    expect(ce.box(['Take', inf, 3]).evaluate().toString()).toBe('[1,2,3]');
+    expect(ce.box(['Take', ['Drop', inf, 2], 3]).evaluate().toString()).toBe(
+      '[3,4,5]'
+    );
+    expect(
+      ce.box(['Take', ['Cycle', ['List', 1, 2]], 5]).evaluate().toString()
+    ).toBe('[1,2,1,2,1]');
+    expect(
+      ce.box(['Take', ['Slice', inf, 5, -1], 3]).evaluate().toString()
+    ).toBe('[5,6,7]');
+  });
+});
+
+describe('Partition and Fill with an unresolved argument', () => {
+  function fresh() {
+    const ce = new ComputeEngine();
+    ce.assign('Sy', ce.box(['List', 1, 2, 3, 4, 5, 6]));
+    ce.declare('ny', 'integer');
+    ce.declare('gy', 'function');
+    return ce;
+  }
+
+  test('Partition with a symbolic chunk size stays symbolic (was: threw)', () => {
+    // The operand is typed `integer`, but the size arm keyed on "did
+    // `toInteger` succeed", so it fell through to the PREDICATE arm and threw
+    // a raw Error out of `evaluate()`.
+    const ce = fresh();
+    const e = ce.box(['Partition', 'Sy', 'ny']);
+    expect(() => e.evaluate()).not.toThrow();
+    expect(e.evaluate().operator).toBe('Partition');
+  });
+
+  test('Partition with an unresolved predicate stays symbolic (was: threw)', () => {
+    const ce = fresh();
+    for (const pred of ['gy', 'undeclaredPredicateY']) {
+      const e = ce.box(['Partition', 'Sy', pred]);
+      expect(() => e.evaluate()).not.toThrow();
+      expect(e.evaluate().operator).toBe('Partition');
+    }
+  });
+
+  test('Partition still rejects a predicate that resolves to a non-boolean', () => {
+    // The throw carries a spell-check hint and is reserved for this case —
+    // a predicate that DID resolve, to the wrong kind of value.
+    const ce = fresh();
+    expect(() =>
+      ce.box(['Partition', 'Sy', ['Function', ['Add', 'x', 1], 'x']]).evaluate()
+    ).toThrow(/must return "True" or "False"/);
+  });
+
+  test('Partition forms with resolved arguments are unchanged', () => {
+    const ce = fresh();
+    ce.assign('isEvenY', ce.parse('x \\mapsto \\mathrm{Mod}(x,2)=0'));
+    expect(ce.box(['Partition', 'Sy', 2]).evaluate().toString()).toBe(
+      '[[1,2],[3,4],[5,6]]'
+    );
+    expect(ce.box(['Partition', 'Sy', 2, 3]).evaluate().toString()).toBe(
+      '[[1,2],[4,5]]'
+    );
+    expect(ce.box(['Partition', 'Sy', 'isEvenY']).evaluate().toString()).toBe(
+      '[[2,4,6],[1,3,5]]'
+    );
+  });
+
+  test('Fill with a symbolic dimension stays symbolic (was: an empty matrix)', () => {
+    const ce = fresh();
+    const f = ce.parse('(i,j) \\mapsto i \\cdot j').json as Expression;
+    // `Fill(f, (n, 3))` answered `[]` and `Fill(f, (2, n))` answered two
+    // EMPTY rows — an unresolvable dimension read as 0.
+    for (const shape of [
+      ['Tuple', 'ny', 3],
+      ['Tuple', 2, 'ny'],
+    ] as Expression[]) {
+      const e = ce.box(['Fill', f, shape]);
+      expect(e.count).toBeUndefined();
+      expect(e.evaluate().operator).toBe('Fill');
+      expect(ce.box(['ListFrom', ['Fill', f, shape]]).evaluate().operator).toBe(
+        'ListFrom'
+      );
+    }
+  });
+
+  test('Fill with resolved dimensions is unchanged', () => {
+    const ce = fresh();
+    const f = ce.parse('(i,j) \\mapsto i \\cdot j').json as Expression;
+    expect(
+      ce.box(['Fill', f, ['Tuple', 2, 3]]).evaluate().toString()
+    ).toBe('[[1,2,3],[2,4,6]]');
+  });
+});
+
+describe('Indeterminate collection facets stay coherent (review round)', () => {
+  function fresh() {
+    const ce = new ComputeEngine();
+    ce.assign('Sz', ce.box(['List', 1, 2, 3]));
+    ce.declare('nz', 'integer');
+    return ce;
+  }
+
+  test('membership is offset-invariant: a symbolic rotation does not answer False', () => {
+    // `false` from a `contains` handler means DEFINITIVELY not a member (the
+    // indeterminate answer is `undefined`). Gating it on the offset made
+    // `Contains(RotateLeft(xs, n), x)` answer False for an element that is in
+    // every rotation — a wrong answer, worse than the default-substitution bug
+    // the gating was added for.
+    const ce = fresh();
+    for (const op of ['RotateLeft', 'RotateRight']) {
+      expect(
+        ce.box(['Contains', [op, 'Sz', 'nz'], 1] as Expression).evaluate().symbol
+      ).toBe('True');
+      expect(
+        ce
+          .box(['Contains', [op, 'Sz', 'nz'], 99] as Expression)
+          .evaluate().symbol
+      ).toBe('False');
+    }
+  });
+
+  test('a zip never splices an undefined cell when a count outruns its iterator', () => {
+    // A lazy view can know its length while its `at`/`iterator` decline. The
+    // zip trusted `count` and built a `List` whose cells were `undefined`;
+    // every later reader crashed with a raw TypeError far from the cause.
+    const ce = fresh();
+    const sum = ce.box(['Add', ['RotateLeft', 'Sz', 'nz'], ['RotateLeft', 'Sz', 'nz']]);
+    const v = sum.evaluate();
+    expect(() => v.toString()).not.toThrow();
+    for (const cell of v.ops ?? []) expect(cell).toBeDefined();
+  });
+
+  test('Take over an INFINITE source with a symbolic bound is not known non-empty', () => {
+    // `n = 0` makes it empty, so `False` was a definitive wrong answer. The
+    // bound is now read before the infinite-source branch.
+    const ce = fresh();
+    const inf: Expression = ['Range', 1, { num: '+Infinity' }];
+    expect(ce.box(['IsEmpty', ['Take', inf, 'nz']]).evaluate().operator).toBe(
+      'IsEmpty'
+    );
+    expect(ce.box(['IsEmpty', ['Take', inf, 3]]).evaluate().symbol).toBe(
+      'False'
+    );
+    expect(ce.box(['IsEmpty', ['Take', inf, 0]]).evaluate().symbol).toBe('True');
+  });
+
+  test('a NaN parameter is unresolved, not absent', () => {
+    // `NaN` passes a `number`-typed slot, and reading it as "omitted" put
+    // `Take` back on its default — answering `[]`.
+    const ce = fresh();
+    expect(ce.box(['Take', 'Sz', { num: 'NaN' }]).evaluate().operator).toBe(
+      'Take'
+    );
+    // An OMITTED optional parameter still takes the default.
+    expect(ce.box(['RotateLeft', 'Sz']).evaluate().toString()).toBe('[2,3,1]');
+  });
+
+  test('Partition stays symbolic for an UNDECIDED boolean predicate', () => {
+    // `x |-> x > n` with `n` free resolves and is typed `boolean`, but is
+    // neither True nor False — undecided, not wrong. Only a predicate that
+    // resolves to a non-boolean earns the throw.
+    const ce = fresh();
+    expect(
+      ce
+        .box(['Partition', 'Sz', ['Function', ['Greater', 'x', 'nz'], 'x']])
+        .evaluate().operator
+    ).toBe('Partition');
+    expect(
+      ce
+        .box(['Partition', 'Sz', ['Function', ['Greater', 'x', 2], 'x']])
+        .evaluate()
+        .toString()
+    ).toBe('[[3],[1,2]]');
+    expect(() =>
+      ce.box(['Partition', 'Sz', ['Function', ['Add', 'x', 1], 'x']]).evaluate()
+    ).toThrow(/must return "True" or "False"/);
+  });
+});

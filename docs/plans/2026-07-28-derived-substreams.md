@@ -1,12 +1,17 @@
 # Derived sub-streams — bringing the stochastic estimators under the seed frame
 
-**Status**: design proposal, 2026-07-28. Not implemented. The one open
-decision — how a sub-stream is identified (§3) — was **ruled 2026-07-28:
-Option A, using the engine's `.hash` directly**, accepting that a future change
-to the hash function shifts seeded estimates. The rest of the document is
-awaiting implementation, not further design. Written after the purity-flag
-audit of the random family (committed `6b15aced`), which is what surfaced the
-gap.
+**Status**: **COMPLETE.** Steps 1–5 implemented 2026-07-28 — the interpreted
+path is done and both §1 witnesses are fixed. Step 6 (the compiled tier) was
+**declined 2026-07-29**: compiled integrals sample live even inside a frame,
+as a ruled exception rather than an open item. The reasoning is in §5.1. There
+is no outstanding work in this document.
+
+The tag decision (§3) was **ruled 2026-07-28: Option A, using the engine's
+`.hash` directly**, accepting that a future change to the hash function shifts
+seeded estimates.
+
+Written after the purity-flag audit of the random family (committed
+`6b15aced`), which is what surfaced the gap.
 
 **Scope**: `numerics/monte-carlo.ts` (Monte-Carlo integration) and
 `boxed-expression/stochastic-equal.ts` (the sampled equality probe) — the two
@@ -279,46 +284,110 @@ happened to bail early.
 | `calculus.ts` iterated-integral inner level | yes (`ce`) | yes | Inner levels of one integral should share **one** sub-stream, allocated at the outermost level — otherwise the count of sub-streams depends on the integrand's dimension |
 | `calculus.ts` `Integrate` numeric path | yes (`ce`) | yes | The main witness |
 | `calculus.ts` semi-infinite path | yes (`engine`) | yes | Falls through to `monteCarloEstimate` after the oscillatory attempt |
-| `javascript-target.ts` `_SYS.integrate` | **no** | **no** | See below |
-| `javascript-target.ts` `_SYS.integrateMC` | **no** | **no** | Same |
+| `javascript-target.ts` `_SYS.integrate` | **no** | **no** | NOT WIRED — ruled, §5.1 |
+| `javascript-target.ts` `_SYS.integrateMC` | **no** | **no** | NOT WIRED — ruled, §5.1 |
 | `stochastic-equal.ts` sample loop | yes (`a.engine`) | yes (`a.hash ^ b.hash`) | Well-known points are already deterministic and stay outside the sub-stream |
 
-### The compiled tier needs a structural change
+### Why the compiled tier could not be wired cheaply
+
+Recorded because it is the background to the §5.1 ruling, and because anyone
+revisiting that ruling needs it.
 
 `integrate` and `integrateMC` live on `SYS_HELPERS`, a **module-level** object
 (`javascript-target.ts:3512`). They have no `ce` in scope, so they cannot reach
 the ambient frame at all. Only `makeRandomHelpers(ce)` is per-engine, spliced
 onto the prototype-derived object by `makeSysHelpers(ce)`
-(`javascript-target.ts:3854`).
+(`javascript-target.ts:3854`). Wiring them would mean moving both out of the
+static prototype into the per-engine factory — the move `drawNextRandomNumber`
+already represents.
 
-Bringing the compiled tier under the frame therefore requires moving
-`integrate` / `integrateMC` out of the static prototype and into the per-engine
-helper factory — the same move `drawNextRandomNumber` already represents. This
-is mechanical but it is not a one-liner, and it is the reason the compiled tier
-should be **phase 2** rather than part of the first cut.
+They would additionally need the tag **baked as a literal at compile time**:
+`compileIntegrate` has the expression and could emit `expr.hash` into the
+generated call, but the runtime helper cannot recover it.
 
-The compiled tier additionally needs its tag **baked as a literal at compile
-time**: `compileIntegrate` has the expression and can emit `expr.hash` into the
-generated call, but the runtime helper cannot recover it. This is the one real
-cost of the Option A ruling, and it lands entirely in phase 2 — steps 1–5 are
-unaffected.
+And baking the hash would give a compiled artifact a seed derived from the
+expression it was compiled from. Recompiling the same expression reproduces it
+(the hash is structural), but an artifact cached across an engine upgrade that
+changed `hashCode` would disagree with a freshly compiled one — the §3.1 drift
+reaching the compile cache.
 
-A knock-on worth noting before implementing phase 2: baking the hash means a
-compiled artifact carries a seed derived from the expression it was compiled
-from. Recompiling the same expression reproduces it (the hash is structural),
-but an artifact cached across an engine upgrade that changed `hashCode` would
-disagree with a freshly compiled one. That is the accepted drift of §3.1
-reaching the compile cache; it is not a new decision, just a place it surfaces.
+None of this is prohibitive on its own. It is the nested-restart problem in
+§5.1, not this plumbing, that decided the ruling.
 
-**Interpreter/compiler parity is not automatic here** and must be pinned by
-test: an integral evaluated through `.N()` and the same integral through a
-compiled artifact must produce the same estimate under the same frame, or the
-"compiled and interpreted agree under a frame" contract of §8 is broken for
-integrals specifically. Note the sample budgets already differ between the two
-paths (1e4 / 1e7 / 10e6), so **parity here means "same sub-stream seed", not
-"same value"** — the test must assert replay-within-a-path, plus that both
-paths are deterministic, not that they agree numerically. This is worth
-stating in the model note, because it is a weaker guarantee than the family's.
+### 5.1 The compiled tier stays live — RULED
+
+> **Ruling, 2026-07-29: step 6 is declined.** An integral inside a compiled
+> artifact samples `Math.random()` even within a `WithRandomSeed` frame. This
+> is a deliberate, documented exception to the interpreted/compiled bit-parity
+> claim of `RANDOMNESS-MODEL.md` — the second one, after the GPU tier — not a
+> deferred task. A seeded integral that must reproduce is evaluated, not
+> compiled. The finding that motivated the ruling follows.
+
+The verified split:
+
+```
+∫₀¹ sin(1/x) dx, seed 42, twice
+
+  interpreted  .N()      →  0.50426 ± 0.00020   0.50426 ± 0.00020    replays
+  compiled     compile() →  0.50404             0.50405             does not
+```
+
+**Why not simply fix it.** The naive fix is worse than the status quo, which is
+the crux of the ruling.
+
+The interpreted path allocates **one** sub-stream in `nIntegrateMultiple` and
+threads it through every level, so the stream keeps advancing as the inner
+estimator is re-run once per outer quadrature node. Compiled code has no such
+place to put it: `compileIntegrate` emits one **independent** `_SYS.integrate`
+call per limit, and the inner one is invoked afresh at every outer node.
+
+If each call derives its own sub-stream from its tag, the inner estimator
+restarts at `n = 0` on **every** outer node — sampling the identical points
+each time. That is not merely a different stream; it changes the numerics. The
+inner estimate's error stops being independent noise across nodes and becomes a
+fixed offset, which the outer quadrature then integrates as if it were signal.
+Today's `Math.random()` does not have this problem (it never restarts), so
+shipping the naive version would make framed nested integrals *numerically
+worse* while making them reproducible — a bad trade made silently.
+
+Three ways out were considered, and **all three were declined**:
+
+- **Thread the sub-stream through generated code.** The outermost call
+  allocates and passes a handle down to the nested calls (something like
+  `_SYS.integrateNest(tag, (sub) => …)`). Faithful to the interpreter, but it
+  changes the shape of the emitted code and adds a helper — too much machinery
+  for the exposure below.
+- **Memoize per frame.** Keep one sub-stream per `(frame, tag)` in a
+  `WeakMap` keyed on the frame object. Simple — but it **breaks the Option A
+  property**: the second of two identical integrals in one frame would continue
+  the first one's stream instead of repeating it, which is exactly the
+  reordering-insensitivity §3 was chosen for. Rejected outright.
+- **Bring only the single-limit compiled case under the frame** (it has one
+  call, so no restart problem), leaving nested compiled integrals live.
+  Cheapest, and offered — but declined, because it makes framedness depend on
+  the integrand's dimension, which is harder to explain than a clean tier
+  boundary.
+
+**Why the exposure is small enough to accept.** A smooth integrand never
+reaches the stochastic estimator in compiled code at all: `∫₀¹ x² dx` folds to
+the literal `0.3333333333333333` at compile time, and anything else smooth
+converges under deterministic Gauss–Kronrod (GK15). Monte Carlo is reached only
+on a pathological integrand, or when `quadrature: 'monte-carlo'` is explicitly
+requested.
+
+**The residual sharp edge, stated plainly.** Because only hard integrands fall
+through, the non-reproducibility appears exactly when a user's integrand
+happens to be difficult — which from their side is unpredictable. Someone who
+moves a working seeded computation into `compile()` for speed, or edits an
+integrand until it stops converging, loses replay with no diagnostic. That is
+the accepted cost. `RANDOMNESS-MODEL.md` carries the guidance that pays it
+down: a seeded integral that must reproduce is evaluated, not compiled.
+
+Consequently there is **no interpreted/compiled parity test for integrals**,
+and none should be added: the tiers are not expected to agree here. (Even if
+step 6 were ever revisited, parity would mean "same sub-stream seed", not "same
+value" — the sample budgets already differ between the paths at 1e4 / 1e7 /
+10e6.)
 
 ---
 
@@ -329,6 +398,24 @@ from the ambient frame", which is exactly what a derived sub-stream does *not*
 do — and `hasPendingImpureApplication` (`library/core.ts:147`) uses it to
 decide whether a surviving application still owes the frame draws. An
 `Integrate` that completed owes nothing.
+
+**But one that did NOT complete does** (found in review, 2026-07-29). The
+sub-stream is derived when the estimator actually runs, so an estimator left
+unevaluated — `NIntegrate(f, 0, n)` with `n` unbound — is completed later,
+against whatever frame is active *then*. With the gate keyed on `drawsRandom`
+alone, `WithRandomSeed` stripped its wrapper and the deferred completion
+sampled live: `e.evaluate().subs({n:1}).N()` drifted run to run while
+`e.subs({n:1}).N()` was stable — the seeded→unseeded conversion of item 104,
+for estimates instead of draws.
+
+The fix is a second flag, `readsRandomFrame`, meaning **"reads the frame,
+consumes no indices"**. `Integrate` and `NIntegrate` carry it;
+`hasPendingImpureApplication` keeps the frame for either flag. It is
+deliberately NOT spelled `drawsRandom: true`, which would also make an
+estimator consume indices and shift every sibling draw — the property §5 pins.
+`inferLambdaFlags` propagates it, so `g(u) := NIntegrate(…, 0, u)` keeps the
+frame too; unlike `drawsRandom` it does **not** imply `pure: false`, since a
+framed estimate is reproducible, which is what `pure` claims.
 
 `Integrate` also stays `pure: true`. Under a frame it becomes genuinely
 reproducible, which is what purity claims; unframed it is stochastic, but so is
@@ -382,18 +469,43 @@ stream was withdrawn in its favor — and represents this state as the
 4. The three `calculus.ts` sites pass `ce._substream(tag)`. **Witness 1
    replays after this step**, for the interpreted path.
 5. `stochastic-equal.ts` passes a sub-stream. Witness 2 replays.
-6. *(Phase 2)* Move `integrate` / `integrateMC` into the per-engine helper
-   factory and thread the sub-stream through the compiled tier.
+6. ~~*(Phase 2)* Move `integrate` / `integrateMC` into the per-engine helper
+   factory and thread the sub-stream through the compiled tier.~~
+   **DECLINED 2026-07-29 — see §5.1.** Compiled integrals sample live, by
+   ruling. Do not implement this without revisiting that ruling first.
 
-Steps 1–5 are independently shippable and leave the compiled tier exactly as
-it is today. Step 6 is where the structural cost sits.
+Steps 1–5 shipped and leave the compiled tier exactly as it was.
 
-## 9. Tests owed
+## 9. Tests — as built
 
-Every assertion below is a **property**, never a pinned numeric value — see
-§3.1. A test that hardcodes what a seeded integral evaluates to would be
-correct on the day it was written and a false alarm the next time a hash
-changes.
+In `test/compute-engine/derived-substreams.test.ts`, with the `deriveSubstream`
+stability vectors in `random-vectors.test.ts`.
+
+Every assertion is a **property**, never a pinned numeric value — see §3.1. A
+test that hardcodes what a seeded integral evaluates to would be correct on the
+day it was written and a false alarm the next time a hash changes.
+
+**Two corrections to what this section originally planned**, both found while
+building it:
+
+- **Deadline behavior is not what was assumed.** The plan said a short
+  `withTimeLimit` truncates the estimate, which then still replays. It does
+  not: the budget is enforced by **throwing**, and where the sampling loop
+  *does* truncate, the sample count varies, so the estimate genuinely does not
+  replay. Only the frame's untouched counter is invariant. The test now
+  asserts the real property — that the estimator's draw count is
+  deadline-dependent, which is precisely *why* those draws must not be charged
+  to the frame — against `monteCarloEstimate` directly.
+- **Cost forced a cheaper witness.** A real Monte-Carlo integral is seconds
+  (1e7 samples once the integrand compiles); an iterated one is effectively
+  unbounded. The suite uses an integrand that is non-finite everywhere
+  (`√(−1−x²)`), which reaches the estimator and derives its sub-stream, then
+  bails at the 32-sample viability probe — same wiring, ~18ms. The full-cost
+  `∫₀¹ sin(1/x)` witness is kept as a single `it.skip` with instructions. Two
+  traps are recorded in the test file's header: never put a real or iterated MC
+  integral in that file, and never spy on `_substream` by assigning to the
+  engine **instance** (it changes the object's shape and costs the engine its
+  fast paths — it took the file from ~5s to ~26s; patch the prototype instead).
 
 - Replay: the §1 witness (`∫₀¹ sin(1/x)`) returns bit-identical values across
   repeated evaluations under one seed, and different values under different
@@ -403,9 +515,11 @@ changes.
   yields the **same two draws** as `WithRandomSeed(s, (Random(), Random()))`.
   This is the assertion that fails under the naive `ce._random()` fix and is
   therefore the one that proves the design.
-- Deadline independence: the same integral replays under a frame when the
-  sampling loop is truncated by a short `withTimeLimit`, i.e. a truncated
-  estimate is still deterministic and still consumes zero frame indices.
+- Deadline: the estimator's draw count is deadline-dependent (generous budget →
+  thousands of draws; already-expired deadline → it throws before taking a
+  sample), which is why those draws are not charged to the frame. Asserted
+  against `monteCarloEstimate`, not through an integral — see the correction
+  above.
 - Unframed liveness: outside a frame, repeated evaluation still varies.
 - `stochasticEqual`: a seeded `isEqual` verdict replays.
 - Public-API compatibility: `monteCarloEstimate` called with the old
@@ -415,6 +529,7 @@ changes.
   contents differ. This is what the structural tag buys and the counter option
   would not.
 - Hash-drift tolerance, as a guard on ourselves: the suite must still pass if
-  `hashCode` is perturbed. Worth confirming once by hand during
-  implementation — if any test fails under a perturbed hash, it pinned a value
-  it should not have.
+  `hashCode` is perturbed. Worth confirming once by hand — if any test fails
+  under a perturbed hash, it pinned a value it should not have.
+- **Not tested, deliberately**: interpreted/compiled agreement for integrals.
+  The tiers are not expected to agree (§5.1). Do not add such a test.

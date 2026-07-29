@@ -15,7 +15,7 @@ import type {
   NumericValueData,
 } from './numeric-value/types.js';
 import type { BigNum, Rational } from './numerics/types.js';
-import type { RandomSeedFrame } from './numerics/random.js';
+import type { RandomSeedFrame, RandomSubstream } from './numerics/random.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type {
@@ -306,6 +306,12 @@ export interface IComputeEngine {
   /** @internal Draw the next uniform in [0, 1) — from the innermost
    *  `WithRandomSeed` frame when one is active, otherwise `Math.random()`. */
   _random(): number;
+
+  /** @internal A private stream for the stochastic ESTIMATORS, derived from
+   *  the ambient `WithRandomSeed` frame but consuming NO indices from it.
+   *  `tag` (a structural hash) selects which sub-stream. Live outside a frame.
+   *  See `docs/plans/2026-07-28-derived-substreams.md`. */
+  _substream(tag: number): RandomSubstream;
 
   angularUnit: AngularUnit;
 

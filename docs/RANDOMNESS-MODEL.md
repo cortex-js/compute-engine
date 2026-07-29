@@ -128,10 +128,42 @@ for *inside* the frame, so its draws are owed and the frame is kept. A body
 that evaluates to a structured error passes the error through (§5: an error
 consumed zero draws), rather than hiding it behind an inert wrapper.
 
-Pending-ness is keyed on the `drawsRandom` operator flag — the operators
-that consume the stream — not on impurity in general: a surviving `Assign`
-or `Declare` is impure but owes nothing to the frame, and does not keep the
-expression wrapped.
+Pending-ness is keyed on two operator flags — never on impurity in general, so
+a surviving `Assign` or `Declare` is impure but owes nothing to the frame and
+does not keep the expression wrapped:
+
+- **`drawsRandom`** — the operator consumes indices from the stream (`Random`,
+  `RandomShuffle`, a nested `WithRandomSeed`).
+- **`readsRandomFrame`** — the operator reads the frame through a derived
+  sub-stream while consuming **no** indices: the stochastic estimators. A
+  *completed* estimate owes nothing (its node is gone), but one that could not
+  finish — `NIntegrate(f, 0, n)` with `n` unbound — derives its sub-stream only
+  when it finally runs, so the frame must survive to that point or the deferred
+  completion samples live.
+
+The stochastic **estimators** — Monte-Carlo integration, the sampled equality
+probe — are `drawsRandom: false` for the same reason, and deliberately so.
+They replay under a frame, but through a *derived sub-stream*: a private
+counter seeded from the frame that consumes **none** of its indices (see
+[`docs/plans/2026-07-28-derived-substreams.md`](./plans/2026-07-28-derived-substreams.md)).
+An integral may take 1e7 samples and its sampling loop is deadline-truncated,
+so charging them to the frame would both shift every later `Random()` draw and
+make replay depend on wall-clock time. Because a completed estimate owes the
+frame nothing, it must not pin one. One consequence worth knowing: the same
+integral samples the same points wherever it sits in a frame, so `∫f - ∫f` is
+exactly `0` under a seed.
+
+**Compiled integrals are a ruled exception to the bit-parity claim above**
+(ruled 2026-07-29). An integral inside a compiled artifact samples live even
+within a frame. The reason is structural: the generated code emits one
+independent quadrature call per limit, and the inner call of a nested integral
+runs afresh at every outer quadrature node — a per-call sub-stream would
+restart at `n = 0` each time, sampling identical points, which converts
+independent noise into a bias the outer quadrature integrates as signal. That
+is a worse trade than staying live. The exposure is narrow: a smooth integrand
+folds to a constant at compile time or converges under deterministic
+Gauss–Kronrod, so only a pathological integrand reaches the estimator at all.
+**A seeded integral that must reproduce should be evaluated, not compiled.**
 
 **A user-defined function carries the flag too.** `f() := Random()` gives `f`
 an inferred `pure: false, drawsRandom: true`, derived from the heads its body

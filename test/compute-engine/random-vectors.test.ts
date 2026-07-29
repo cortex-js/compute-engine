@@ -1,7 +1,9 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import {
+  deriveSubstream,
   foldSeed,
   frameDraw,
+  mixTags,
   pcg3d,
   pcg3dWords,
 } from '../../src/compute-engine/numerics/random';
@@ -354,4 +356,114 @@ describe('draws are IEEE float64 regardless of precision mode', () => {
       }
     });
   }
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  DERIVED SUB-STREAMS — ALSO A BREAKING-CHANGE CONTRACT. DO NOT REGENERATE.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * `docs/plans/2026-07-28-derived-substreams.md`. The stochastic estimators
+ * (Monte-Carlo integration, the sampled equality probe) replay under a
+ * `WithRandomSeed` frame through a PRIVATE stream derived from the frame's
+ * seed and a tag, consuming no frame indices. The `(seed, tag) → stream`
+ * mapping below is a persistence surface on exactly the same footing as the
+ * table above: a diff here re-randomizes every seeded estimate.
+ *
+ * WHAT IS **NOT** PINNED, DELIBERATELY: the tag VALUES. Callers derive a tag
+ * from `expr.hash`, and the design ruling (§3.1) accepts that a future change
+ * to the engine's hash shifts seeded estimates. So these vectors pin
+ * `deriveSubstream` for FIXED LITERAL inputs only — never "what ∫f evaluates
+ * to under seed 42". A test that hardcodes such a value would be a false
+ * alarm the next time anyone touches a hash.
+ */
+describe('deriveSubstream — pinned streams (DO NOT REGENERATE)', () => {
+  const SUBSTREAM_VECTORS: {
+    seed: number | string;
+    seedLo: number;
+    seedHi: number;
+    tag: number;
+    draws: [number, number, number];
+  }[] = [
+    // prettier-ignore
+    { seed: 0, seedLo: 0x00000000, seedHi: 0x00000000, tag: 0,
+      draws: [0.48277456076884684, 0.7449266978748034, 0.05468459068883269] },
+    // prettier-ignore
+    { seed: 0, seedLo: 0x00000000, seedHi: 0x00000000, tag: 1,
+      draws: [0.5871077075031939, 0.2587462533059086, 0.41230250728583195] },
+    // prettier-ignore
+    { seed: 0, seedLo: 0x00000000, seedHi: 0x00000000, tag: 0x9e3779b9,
+      draws: [0.39855651386249613, 0.36917766398279717, 0.5168045885528407] },
+    // prettier-ignore
+    { seed: 42, seedLo: 0x40450000, seedHi: 0x00000000, tag: 0,
+      draws: [0.9351393583162575, 0.20841724673012585, 0.9169261644595369] },
+    // prettier-ignore
+    { seed: 42, seedLo: 0x40450000, seedHi: 0x00000000, tag: 1,
+      draws: [0.38246719198246637, 0.1400606052362139, 0.33350099504447905] },
+    // prettier-ignore
+    { seed: 42, seedLo: 0x40450000, seedHi: 0x00000000, tag: 0x9e3779b9,
+      draws: [0.9194616171456494, 0.7864070948874912, 0.11843759014992394] },
+    // prettier-ignore
+    { seed: 'cell-a7', seedLo: 0x1163a2f4, seedHi: 0x96eac847, tag: 0,
+      draws: [0.8044733318739551, 0.49458983817009483, 0.5339111374776794] },
+    // prettier-ignore
+    { seed: 'cell-a7', seedLo: 0x1163a2f4, seedHi: 0x96eac847, tag: 1,
+      draws: [0.04281194359556573, 0.8491803340192384, 0.6529605426228822] },
+    // prettier-ignore
+    { seed: 'cell-a7', seedLo: 0x1163a2f4, seedHi: 0x96eac847, tag: 0x9e3779b9,
+      draws: [0.8872937454483155, 0.3247221050539796, 0.055655826412079556] },
+  ];
+
+  for (const v of SUBSTREAM_VECTORS) {
+    it(`deriveSubstream(${label(v.seed)}, tag=0x${v.tag.toString(16)})`, () => {
+      // The seed words come from the SAME `foldSeed` the frames use — pinned
+      // by the table above, restated here so a fold change fails both.
+      expect(foldSeed(v.seed)).toEqual([v.seedLo, v.seedHi]);
+      const s = deriveSubstream(
+        { seedLo: v.seedLo, seedHi: v.seedHi, next: 0 },
+        v.tag
+      );
+      expect([s(), s(), s()]).toEqual(v.draws);
+    });
+  }
+
+  it('does not read or advance the frame counter', () => {
+    // The whole point: an estimator consumes ZERO frame indices, so a frame
+    // that has already drawn yields the same sub-stream as a fresh one.
+    const fresh = { seedLo: 0x40450000, seedHi: 0, next: 0 };
+    const advanced = { seedLo: 0x40450000, seedHi: 0, next: 37 };
+    const a = deriveSubstream(fresh, 1);
+    const b = deriveSubstream(advanced, 1);
+    expect([a(), a(), a()]).toEqual([b(), b(), b()]);
+    expect(fresh.next).toBe(0);
+    expect(advanced.next).toBe(37);
+  });
+
+  it('is live outside a frame', () => {
+    expect(deriveSubstream(undefined, 1)).toBe(Math.random);
+  });
+
+  it('distinct tags give distinct streams', () => {
+    const frame = { seedLo: 0x40450000, seedHi: 0, next: 0 };
+    const a = deriveSubstream(frame, 1);
+    const b = deriveSubstream(frame, 2);
+    expect(a()).not.toBe(b());
+  });
+
+  it('all draws lie in [0, 1)', () => {
+    const s = deriveSubstream({ seedLo: 0x40450000, seedHi: 0, next: 0 }, 7);
+    for (let n = 0; n < 500; n++) {
+      const u = s();
+      expect(u).toBeGreaterThanOrEqual(0);
+      expect(u).toBeLessThan(1);
+    }
+  });
+
+  it('mixTags is order-sensitive and pinned', () => {
+    // Order matters so `∫f dx dy` and `∫f dy dx` get distinct streams.
+    expect(mixTags()).toBe(0);
+    expect(mixTags(1)).toBe(1);
+    expect(mixTags(1, 2)).toBe(33);
+    expect(mixTags(2, 1)).toBe(63);
+  });
 });

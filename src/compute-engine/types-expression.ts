@@ -142,6 +142,7 @@ type OperatorDefinitionFlags = {
   involution: boolean;
   pure: boolean;
   drawsRandom: boolean;
+  readsRandomFrame: boolean;
 };
 
 type LambdaDefinition = {

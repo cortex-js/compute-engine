@@ -51,6 +51,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'involution',
   'pure',
   'drawsRandom',
+  'readsRandomFrame',
 
   'inferredSignature',
   'signature',
@@ -138,6 +139,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   involution = false;
   pure = true;
   drawsRandom = false;
+
+  readsRandomFrame = false;
 
   complexity = DEFAULT_COMPLEXITY;
 
@@ -292,6 +295,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     result.involution = this.involution;
     result.pure = this.pure;
     result.drawsRandom = this.drawsRandom;
+    result.readsRandomFrame = this.readsRandomFrame;
     result.lazy = this.lazy;
     result.complexity = this.complexity;
     result.scoped = this.scoped;
@@ -422,6 +426,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
     this.pure = def.pure ?? this.pure;
     this.drawsRandom = def.drawsRandom ?? this.drawsRandom;
+    this.readsRandomFrame = def.readsRandomFrame ?? this.readsRandomFrame;
     this.complexity = def.complexity ?? this.complexity;
 
     if (def.signature) {
@@ -534,11 +539,21 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         // `WithRandomSeed`'s pending-draw gate is keyed on `drawsRandom`, so a
         // partially-evaluated body calling `f` loses its frame and silently
         // resumes with LIVE draws (the Tycho item 104 failure).
-        if (def.pure === undefined || def.drawsRandom === undefined) {
+        // `readsRandomFrame` is inferred alongside them, for the same gate: a
+        // body calling a stochastic ESTIMATOR (`Integrate`) depends on the
+        // frame without consuming its indices, so a call that could not finish
+        // must keep the frame too.
+        if (
+          def.pure === undefined ||
+          def.drawsRandom === undefined ||
+          def.readsRandomFrame === undefined
+        ) {
           const inferred = inferLambdaFlags(this.engine, boxedFn);
           if (def.pure === undefined) this.pure = inferred.pure;
           if (def.drawsRandom === undefined)
             this.drawsRandom = inferred.drawsRandom;
+          if (def.readsRandomFrame === undefined)
+            this.readsRandomFrame = inferred.readsRandomFrame;
         }
       }
 
@@ -601,23 +616,29 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 function inferLambdaFlags(
   ce: ComputeEngine,
   literal: Expression
-): { pure: boolean; drawsRandom: boolean } {
+): { pure: boolean; drawsRandom: boolean; readsRandomFrame: boolean } {
   // A parameter shadows any same-named operator for the whole body, so
   // `f(Random) := Random` must not be read as a draw.
   const params = new Set(functionLiteralParameters(literal).map((p) => p.name));
 
   let pure = true;
   let drawsRandom = false;
+  // `f(a) := Integrate(...)` must keep the seed frame for the same reason the
+  // built-in estimator does: a call that could not finish still depends on it.
+  // Unlike `drawsRandom`, this does NOT imply impurity — a framed estimate is
+  // reproducible, which is exactly what `pure` claims.
+  let readsRandomFrame = false;
 
   const visit = (expr: Expression): void => {
     // Saturated: nothing further can change the answer.
-    if (!pure && drawsRandom) return;
+    if (!pure && drawsRandom && readsRandomFrame) return;
     if (!isFunction(expr)) return;
 
     const head = expr.operator;
     if (head !== 'Function' && !params.has(head)) {
       const def = expr.operatorDefinition ?? operatorDefinitionOf(ce, head);
       if (def?.pure === false) pure = false;
+      if (def?.readsRandomFrame === true) readsRandomFrame = true;
       if (def?.drawsRandom === true) {
         drawsRandom = true;
         pure = false;
@@ -628,7 +649,7 @@ function inferLambdaFlags(
   };
 
   visit(literal);
-  return { pure, drawsRandom };
+  return { pure, drawsRandom, readsRandomFrame };
 }
 
 /** The operator definition bound to `name`, or `undefined` when `name` is

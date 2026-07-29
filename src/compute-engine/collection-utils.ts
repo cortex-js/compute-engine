@@ -1136,6 +1136,17 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
         return { done: true, value: undefined };
       }
       const values = iterators.map((x) => x.next());
+      // An iterator that runs dry BEFORE the advertised `shortest` — a lazy
+      // view whose `count` is knowable while its `at`/`iterator` cannot answer
+      // (a `RotateLeft` with an unresolved offset) — ends the zip here. The
+      // previous `x.value!` trusted `count` and spliced `undefined` into the
+      // result, building a `List` whose cells were `undefined`: every later
+      // reader of that list (`.toString()` first) crashed on a raw
+      // `TypeError`, far from the cause. Ending early is the documented
+      // shortest-zip semantics and cannot change a well-formed zip, where
+      // every iterator yields `shortest` elements.
+      if (values.some((x) => x.done === true || x.value === undefined))
+        return { done: true, value: undefined };
       count += 1;
       return { done: false, value: values.map((x) => x.value!) };
     },
