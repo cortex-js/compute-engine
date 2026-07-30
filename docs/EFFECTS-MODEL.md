@@ -168,7 +168,18 @@ bare arrow — one spelling round-trips); duplicate labels are a parse error;
 `any` is exclusive (`{any, random}` errors); canonical serialization orders
 labels alphabetically, parsing accepts any order; whitespace inside braces
 is insignificant; in the AST, "no effect set" and "empty set" are the
-**same state** (one optional field, absent = pure).
+**same state** (one optional field, absent = pure). **Reserved**: `!`
+inside the braces is a parse error today, reserved for the complement form
+(see "Requiring absence" under Subtyping) so it can be admitted later
+without a breaking grammar change.
+
+Syntax provenance: the arrow-attached brace set follows **Unison**'s
+ability annotations (`a ->{IO} b`) exactly; **Koka** places its effect row
+in the same position with angle brackets (`int -> <exc,div> int`), which
+are taken here by type constructors, and **Eff**'s `A -> B ! Δ` postfix
+uses `!`, taken here by negation. Among effect-typed languages the
+arrow-attached set is the established convention; Unison's spelling is the
+one whose tokens survive CE's existing grammar unchanged.
 
 **The `function` primitive.** The bare primitive type `function` (used
 today by e.g. `Map: '(collection, function) -> list'`) is
@@ -283,6 +294,42 @@ pass a pure function", checked at the call boundary as parameter types are
 today — an `incompatible-type` error value, with the **same timing** as
 existing argument validation, including its non-strict/lazy carve-outs
 (deferred validation defers the effect check identically; no new timing).
+
+**Requiring absence.** A bound is how an operator requires an argument
+*not* to have an effect; three forms, by strictness:
+
+1. Bare arrow — the empty bound: no effects at all. The common case.
+2. A positive bound listing what *is* tolerated: `g: (real) ->{write}
+   real` means "deterministic; mutation tolerated" — which is usually what
+   a replay- or cache-sensitive consumer actually wants, since `entropy`
+   is nondeterministic too and excluding only `random` rarely matches real
+   intent.
+3. The literal complement, by enumerating the other labels:
+   `->{entropy, write}` means "anything except `random`" — expressible
+   because the enumeration is closed, but *extensional*: it does not
+   auto-extend when a future label is admitted (a `{host}` callback would
+   be rejected until the author widens the bound — fail-closed, safe, but
+   the written bound drifts from the intent at each label addition).
+
+All three are ordinary contravariant subset checks; an `{any}` operand
+fails every finite bound (an opaque function that won't state its effects
+cannot prove absence — conservative, intended). Note the distinction from
+**discharge**: a bound says "don't bring the effect"; a discharge says
+"bring it, I contain it" (`WithRandomSeed`). Pick by whether the operator
+has a containment mechanism.
+
+**Complement form (designed, not admitted — syntax reserved).** The drift
+in form 3 has a clean fix: a co-finite bound written `->{!random}` — "every
+label, current and future, except those negated" — the closed-world analog
+of the row-literature *lacks constraint*. It stays inside the sets-not-rows
+boundary: bounds become finite sets, co-finite sets, or `any`, and every
+subtype test remains a trivial stateless comparison (finite ⊆ co-finite(N)
+iff the positives avoid N; co-finite(N₁) ⊆ co-finite(N₂) iff N₂ ⊆ N₁;
+co-finite ⊄ any finite set, since it is version-open). Mixing positive and
+negated labels in one set is a parse error; `{!}` is not a spelling of
+`any`. Admission trigger: the first real consumer of an "all but X" bound —
+until then the `!` is merely reserved in the grammar, and forms 1–3 cover
+current needs.
 
 **Overloads.** Per-application effects use the **resolved arm**, obtained
 by invoking the same (write-free) resolver used for typing at

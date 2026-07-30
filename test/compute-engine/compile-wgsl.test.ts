@@ -654,13 +654,16 @@ describe('WGSL COMPILATION', () => {
 
   // CO-P1-2: a loop-form Sum is a bare statement block — fail closed rather
   // than splice it mid-expression.
-  describe('CO-P1-2 loop-form Sum cannot be spliced (D6)', () => {
+  // Tycho item 110 — same hoisting contract as GLSL.
+  describe('loop-form Sum composes by hoisting (Tycho item 110)', () => {
     const bigSum = ['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 1000]];
 
-    it('fails closed when a loop-form Sum is used mid-expression', () => {
-      expect(() => wgsl.compile(ce.box(['Add', bigSum, 1]))).toThrow(
-        /multi-statement construct.*sub-expression/
-      );
+    it('hoists the loop when a loop-form Sum is used mid-expression', () => {
+      const code = wgsl.compile(ce.box(['Add', bigSum, 1])).code;
+      expect(code).toContain('for (var i: i32 = 1; i <= 1000; i++)');
+      const acc = /var (_\w+): f32 = 0\.0;/.exec(code)?.[1];
+      expect(acc).toBeDefined();
+      expect(code.trimEnd().endsWith(`return ${acc} + 1.0;`)).toBe(true);
     });
 
     it('still compiles a loop-form Sum as a top-level function body', () => {

@@ -307,7 +307,10 @@ describe('A1 — Loop / Integrate JS compile', () => {
   });
 
   test('Integrate in GLSL surfaces a diagnostic', () => {
-    // GLSL target has no Integrate handler — throws 'Unknown operator `Integrate`'
+    // GLSL target has no Integrate lowering — throws 'Integrate: cannot
+    // compile — the operator is known to the engine but target 'glsl' has no
+    // lowering for it.' (Tycho item 109a: a known head that this target cannot
+    // lower is NOT reported as an unknown operator.)
     const ce = new ComputeEngine();
     const expr = ce.parse('\\int_{0}^{1} x^2 \\, dx');
     const target = new GLSLTarget();
@@ -320,7 +323,7 @@ describe('A1 — Loop / Integrate JS compile', () => {
     } catch (e) {
       observed = `throw: ${(e as Error).message}`;
     }
-    // Observed: 'throw: Unknown operator `Integrate`'
+    // Observed: 'throw: Integrate: cannot compile — … no lowering for it.'
     expect(observed).not.toEqual('unexpected success');
     expect(observed).toMatch(/Integrate/i);
   });
@@ -441,15 +444,26 @@ describe('GammaRegularized / BetaRegularized compile', () => {
     }
   });
 
+  // The diagnostic names the head and the target gap. `Unknown operator` is
+  // reserved for a head the engine has no operator definition for at all
+  // (Tycho item 109a) — these two have kernels on other targets.
   test('GammaRegularized fails closed (no kernel) in GLSL and WGSL', () => {
     const expr = ce.box(['GammaRegularized', 3, 'x']);
-    expect(() => new GLSLTarget().compile(expr)).toThrow(/Unknown operator/);
-    expect(() => new WGSLTarget().compile(expr)).toThrow(/Unknown operator/);
+    expect(() => new GLSLTarget().compile(expr)).toThrow(
+      /GammaRegularized: cannot compile .* target 'glsl' has no lowering/
+    );
+    expect(() => new WGSLTarget().compile(expr)).toThrow(
+      /GammaRegularized: cannot compile .* target 'wgsl' has no lowering/
+    );
   });
 
   test('BetaRegularized fails closed (no kernel) in GLSL and WGSL', () => {
     const expr = ce.box(['BetaRegularized', 'x', 2, 3]);
-    expect(() => new GLSLTarget().compile(expr)).toThrow(/Unknown operator/);
-    expect(() => new WGSLTarget().compile(expr)).toThrow(/Unknown operator/);
+    expect(() => new GLSLTarget().compile(expr)).toThrow(
+      /BetaRegularized: cannot compile .* target 'glsl' has no lowering/
+    );
+    expect(() => new WGSLTarget().compile(expr)).toThrow(
+      /BetaRegularized: cannot compile .* target 'wgsl' has no lowering/
+    );
   });
 });

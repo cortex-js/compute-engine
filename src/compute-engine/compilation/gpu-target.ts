@@ -1012,11 +1012,19 @@ function compileGPUSumProduct(
     return `(${terms.join(` ${op} `)})`;
   }
 
-  // For-loop block (multi-line) — usable as compileFunction body
+  // For-loop form. A shader has no expression-level loop, so this emits
+  // STATEMENTS. When the enclosing position accepts hoisted statements (Tycho
+  // item 110) they go to the sink and the loop's accumulator is returned as an
+  // ordinary expression — so `1 + \sum…` and `0.03\sum…` compose. Otherwise the
+  // legacy bare block is returned, valid only as a top-level function body.
   const acc = BaseCompiler.tempVar(target);
   const floatType = isWGSL ? 'f32' : 'float';
   const intType = isWGSL ? 'i32' : 'int';
 
+  // The body binds `index`, so it gets its OWN sink: a statement it hoists
+  // belongs inside this loop (a nested Sum), not ahead of it.
+  const bodyBoundVars = BaseCompiler.withBoundNames(target, [index]);
+  const bodySink = { stmts: [] as string[], boundVars: bodyBoundVars };
   const bodyTarget: CompileTarget<Expression> = {
     ...target,
     var: (id) =>
@@ -1025,10 +1033,13 @@ function compileGPUSumProduct(
           ? `f32(${index})`
           : `float(${index})`
         : target.var(id),
-    boundVars: BaseCompiler.withBoundNames(target, [index]),
+    boundVars: bodyBoundVars,
+    hoist: bodySink,
   };
   const body = BaseCompiler.compile(args[0], bodyTarget);
 
+  // Compiled BEFORE the loop statements are pushed, so anything the bounds
+  // themselves hoist lands ahead of the loop that consumes them.
   const lowerStr =
     lowerNum !== undefined
       ? String(lowerNum)
@@ -1044,14 +1055,24 @@ function compileGPUSumProduct(
   const accDecl = isWGSL ? `var ${acc}: ${floatType}` : `${floatType} ${acc}`;
   const indexDecl = isWGSL ? `var ${index}: ${intType}` : `${intType} ${index}`;
 
-  const lines = [
+  const loop = [
     `${accDecl} = ${identity};`,
     `for (${indexDecl} = ${lowerStr}; ${index} <= ${upperStr}; ${index}++) {`,
+    ...bodySink.stmts.map((s) =>
+      s
+        .split('\n')
+        .map((l) => `  ${l}`)
+        .join('\n')
+    ),
     `  ${acc} ${op}= ${body};`,
     `}`,
-    `return ${acc};`,
   ];
-  return lines.join('\n');
+
+  if (BaseCompiler.canHoist(target)) {
+    BaseCompiler.hoistStatement(target, loop.join('\n'));
+    return acc;
+  }
+  return [...loop, `return ${acc};`].join('\n');
 }
 
 /**
@@ -4745,7 +4766,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // rather than silently draw a different stream than the host.
     if (vars) gpuRandomState(target).varNames = new Set(Object.keys(vars));
 
-    const code = BaseCompiler.compile(expr, target);
+    // A statement position: the emitted `code` is a function body, so a
+    // loop-form `Sum`/`Product` nested anywhere inside may hoist its loop ahead
+    // of the value (Tycho item 110). With nothing hoisted this is byte-identical
+    // to a plain `compile()`.
+    const code = BaseCompiler.compileFunctionBody(expr, target);
     const result: CompilationResult = {
       target: this.languageId,
       success: true,
@@ -4906,7 +4931,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   protected compileShaderBody(
     body: ReadonlyArray<{ variable: string; expression: Expression }>,
     stage: string
-  ): Array<{ variable: string; code: string }> {
+  ): Array<{ variable: string; code: string; stmts: string[] }> {
     // ONE naming context for the whole body too, seeded from EVERY statement:
     // the counter must stay distinct across statements (same reason as the
     // random counters), and a `_tv`-named symbol in any statement is a
@@ -4914,9 +4939,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const target = this.createTargetFor(body[0]?.expression, stage, {
       naming: BaseCompiler.newNamingContext(body.map((a) => a.expression)),
     });
-    return body.map((assignment) => ({
-      variable: assignment.variable,
-      code: BaseCompiler.compile(assignment.expression, target),
-    }));
+    // Each assignment is a statement position of its own, so a loop-form
+    // `Sum`/`Product` inside it hoists its loop into `stmts`, which the shader
+    // assembly emits ahead of the assignment (Tycho item 110).
+    return body.map((assignment) => {
+      const { stmts, code } = BaseCompiler.compileStatementBody(
+        assignment.expression,
+        target
+      );
+      return { variable: assignment.variable, code, stmts };
+    });
   }
 }

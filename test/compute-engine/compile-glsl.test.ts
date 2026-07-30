@@ -859,13 +859,46 @@ describe('GLSL COMPILATION', () => {
   // CO-P1-2: a loop-form Sum (non-constant / large bounds) is a bare statement
   // block, valid only as a top-level function body — never spliced into a
   // sub-expression (which produced invalid `return _acc; + 1.0`). Fail closed.
-  describe('CO-P1-2 loop-form Sum cannot be spliced (D6)', () => {
+  // Tycho item 110: a loop-form Sum/Product emits STATEMENTS (a shader has no
+  // expression-level loop), which used to make it un-composable — `1 + \sum…`
+  // failed closed. It now HOISTS: the loop is emitted ahead of the value and
+  // the accumulator is referenced as an ordinary expression. (CO-P1-2 pinned
+  // the old fail-closed contract; the invariant it protected — never splice a
+  // bare `return _acc;` mid-expression — is still pinned below.)
+  describe('loop-form Sum composes by hoisting (Tycho item 110)', () => {
     const bigSum = ['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 1000]];
 
-    it('fails closed when a loop-form Sum is used mid-expression', () => {
-      expect(() => glsl.compile(ce.box(['Add', bigSum, 1]))).toThrow(
-        /multi-statement construct.*sub-expression/
-      );
+    it('hoists the loop when a loop-form Sum is used mid-expression', () => {
+      const code = glsl.compile(ce.box(['Add', bigSum, 1])).code;
+      expect(code).toContain('for (int i = 1; i <= 1000; i++)');
+      // The loop precedes the value, and the value references the accumulator.
+      const acc = /float (_\w+) = 0\.0;/.exec(code)?.[1];
+      expect(acc).toBeDefined();
+      expect(code.trimEnd().endsWith(`return ${acc} + 1.0;`)).toBe(true);
+      expect(code.indexOf('for (')).toBeLessThan(code.lastIndexOf('return '));
+    });
+
+    it('scales a hoisted Sum (the item-110 witness shape)', () => {
+      const code = glsl.compile(
+        ce.box(['Multiply', 0.03, bigSum]) as any
+      ).code;
+      expect(code).toContain('for (int i = 1; i <= 1000; i++)');
+      expect(code).toMatch(/return 0\.03 \* _\w+;$/m);
+    });
+
+    it('scopes a NESTED loop inside its enclosing loop body', () => {
+      // Symbolic bounds: constant bounds under the unroll limit inline.
+      const inner = ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'm']];
+      const outer = ['Sum', ['Multiply', 'i', inner], ['Limits', 'i', 1, 'n']];
+      const code = glsl.compile(ce.box(outer as any)).code;
+      const outerAt = code.indexOf('for (int i =');
+      const innerAt = code.indexOf('for (int j =');
+      const closeAt = code.lastIndexOf('}');
+      // The inner loop is emitted BETWEEN the outer `for` and its closing
+      // brace — hoisting it out would strand a reference to `i`.
+      expect(outerAt).toBeGreaterThanOrEqual(0);
+      expect(innerAt).toBeGreaterThan(outerAt);
+      expect(innerAt).toBeLessThan(closeAt);
     });
 
     it('never emits a spliced `return _acc; +`', () => {
@@ -873,7 +906,7 @@ describe('GLSL COMPILATION', () => {
       try {
         code = glsl.compile(ce.box(['Add', bigSum, 1])).code;
       } catch {
-        /* fail-closed is the expected path */
+        /* fail-closed is an acceptable path too */
       }
       expect(code).not.toMatch(/return\s+\w+;\s*\+/);
     });
@@ -882,6 +915,13 @@ describe('GLSL COMPILATION', () => {
       const fn = glsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', []);
       expect(fn).toContain('for (int i = 1; i <= 1000; i++)');
       expect(fn).toContain('sin(float(i))');
+    });
+
+    it('a Block still fails closed as a sub-expression', () => {
+      const blk = ['Block', ['Declare', 'q'], ['Assign', 'q', 2], 'q'];
+      expect(() => glsl.compile(ce.box(['Add', blk, 1] as any))).toThrow(
+        /multi-statement construct.*sub-expression/
+      );
     });
   });
 

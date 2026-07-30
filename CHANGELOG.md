@@ -124,6 +124,35 @@
   made `isConstant` true for a generator that returns a different expression on
   every call, and admitted it to common-subexpression elimination.
 
+### Improvements
+
+- **A loop-form `Sum`/`Product` can now be a sub-expression in GLSL and WGSL.**
+  A shader has no expression-level loop, so a `Sum` with a symbolic bound was
+  emitted as statements — valid as a whole function body, but nothing more:
+  `\sum_{k=0}^{n}kx` compiled while `1 + \sum_{k=0}^{n}kx` and
+  `0.03\sum_{k=0}^{n}kx` failed closed, which demoted the whole class to the CPU
+  path (corpus rows are almost never a bare sum). The loop is now **hoisted**
+  ahead of the value it feeds and referenced through its accumulator, so these
+  compose. Constant bounds still unroll to an expression as before. Nested sums
+  hoist into their enclosing loop body, not out of it. One consequence worth
+  knowing: a loop inside a conditional arm runs whichever branch is selected —
+  the shader targets already compute every arm of a selection (the domain is
+  pure, so this is a cost, not a semantic, difference).
+
+  `Loop` and `Block` still fail closed as sub-expressions on these targets.
+
+- **A compile decline now names its actual cause.** `Unknown operator \`X\``
+  was reported for three different situations, so a failing compile band could
+  not be triaged by message. They are now distinct: an operator whose compile
+  handler declined a particular _operand shape_ says which operand and why
+  (`PointList: cannot compile — component 1 is collection-valued …`); a head the
+  engine knows but the target cannot lower says so (`Integrate: cannot compile —
+  the operator is known to the engine but target 'glsl' has no lowering for
+  it.`); and `Unknown operator` is now reserved for a head with no operator
+  definition at all. The reason reaches callers as `CompilationResult.error` on
+  the `success: false` paths, and as the thrown message on the direct-target
+  path.
+
 ## 0.98.0 _2026-07-28_
 
 ### New Features

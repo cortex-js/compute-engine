@@ -68,7 +68,12 @@ export class GLSLTarget extends GPUShaderTarget {
     returnType: string,
     parameters: Array<[name: string, type: string]>
   ): string {
-    const body = BaseCompiler.compile(expr, this.createTargetFor(expr));
+    // A function body is a statement position: a nested loop-form
+    // `Sum`/`Product` hoists its loop ahead of the `return` (Tycho item 110).
+    const body = BaseCompiler.compileFunctionBody(
+      expr,
+      this.createTargetFor(expr)
+    );
 
     const params = parameters
       .map(([name, type]) => `${type} ${name}`)
@@ -146,11 +151,21 @@ export class GLSLTarget extends GPUShaderTarget {
     // fragment shader has.) The whole body compiles against ONE target, so
     // random frames in different statements get DISTINCT counters.
     const statements = this.compileShaderBody(body, type);
-    const preamble = this.preambleFor(statements.map((s) => s.code).join('\n'));
+    // Over the FULL emission: a helper may be referenced only from inside a
+    // hoisted loop (Tycho item 110), and an undeclared helper is a shader that
+    // fails to compile on the GPU.
+    const preamble = this.preambleFor(
+      statements.map((s) => [...s.stmts, s.code].join('\n')).join('\n')
+    );
     if (preamble) code += `${preamble}\n`;
 
     code += 'void main() {\n';
     for (const s of statements) {
+      for (const stmt of s.stmts)
+        code += stmt
+          .split('\n')
+          .map((l) => `  ${l}\n`)
+          .join('');
       code += `  ${s.variable} = ${s.code};\n`;
     }
     code += '}\n';
