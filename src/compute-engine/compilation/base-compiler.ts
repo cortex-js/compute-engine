@@ -3049,6 +3049,67 @@ export class BaseCompiler {
   static readonly LOCAL_SCALAR = -1;
 
   /**
+   * `_localVector`: the name holds a BOOLEAN, not a number.
+   *
+   * The frame's third channel (alongside "aggregate of width n" and
+   * "scalar"): a shader `bool` is not an aggregate — so
+   * `aggregateComponentCount` reads it back as "not an aggregate", like every
+   * other negative sentinel — but it is not a float either, and a declared
+   * `bool` name carries its boolean-ness NOWHERE else (a bare `b` is an
+   * undeclared engine symbol, whose `type` is `unknown` = shader scalar).
+   * Without this channel a `bool` argument flowed into a synthesized `float`
+   * parameter behind a reported success.
+   */
+  static readonly LOCAL_BOOLEAN = -3;
+
+  /**
+   * `_localVector`: declared with a type whose SHAPE this analysis cannot
+   * express — a matrix, an array, a struct, a target-specific alias.
+   *
+   * Reads back as "not an aggregate" like every other negative sentinel, which
+   * is also what an UNFRAMED name answers; what the entry adds is the record
+   * that the name IS declared. That is what lets a target consult its own
+   * per-frame channel (the GPU targets carry the caller-declared shader TYPE,
+   * which a width cannot express) and fail closed on it, instead of letting
+   * the name pass for the untyped default.
+   */
+  static readonly LOCAL_UNSHAPED = -4;
+
+  /**
+   * The innermost local shape frame that mentions `name`, or `undefined`.
+   *
+   * The frame IDENTITY, for a target that keeps a parallel per-frame channel
+   * of its own. Returning the frame rather than its entry gives that channel
+   * the same innermost-frame-wins shadowing for free: a `Block` local
+   * shadowing a declared parameter answers with the BLOCK's frame, which
+   * carries no declared type.
+   */
+  static localShapeFrameOf(
+    name: string
+  ): ReadonlyMap<string, number> | undefined {
+    for (let i = BaseCompiler._localVector.length - 1; i >= 0; i--)
+      if (BaseCompiler._localVector[i].has(name))
+        return BaseCompiler._localVector[i];
+    return undefined;
+  }
+
+  /**
+   * Is `name` framed as a boolean by the innermost local shape frame that
+   * mentions it?
+   *
+   * Innermost-frame-wins, like every other frame query: a `Block` local
+   * shadowing a `bool` parameter enters its own (non-boolean) entry and so
+   * answers `false`.
+   */
+  static isLocalBoolean(name: string): boolean {
+    for (let i = BaseCompiler._localVector.length - 1; i >= 0; i--) {
+      const known = BaseCompiler._localVector[i].get(name);
+      if (known !== undefined) return known === BaseCompiler.LOCAL_BOOLEAN;
+    }
+    return false;
+  }
+
+  /**
    * Run `fn` with an extra lexical frame of inferred local SHAPES — the
    * mechanism `compileBlock` uses for its own locals (`_localComplex` /
    * `_localVector`), exposed for the other binding forms that must declare a

@@ -5,7 +5,6 @@ import {
   compileGPUMatrix,
   assertGPUScalarComponents,
 } from './gpu-target.js';
-import { BaseCompiler } from './base-compiler.js';
 
 /**
  * WGSL-specific function overrides.
@@ -103,12 +102,9 @@ export class WGSLTarget extends GPUShaderTarget {
     returnType: string,
     parameters: Array<[name: string, type: string]>
   ): string {
-    // A function body is a statement position: a nested loop-form
-    // `Sum`/`Product` hoists its loop ahead of the `return` (Tycho item 110).
-    const body = BaseCompiler.compileFunctionBody(
-      expr,
-      this.createTargetFor(expr)
-    );
+    // Compiled under the caller's declared parameter shapes, so the body
+    // analysis agrees with the signature emitted below.
+    const body = this.compileDeclaredFunctionBody(expr, parameters);
 
     const params = parameters
       .map(([name, type]) => `${name}: ${toWGSLType(type)}`)
@@ -229,7 +225,20 @@ export class WGSLTarget extends GPUShaderTarget {
     // matching comment in the GLSL target). The whole body compiles against
     // ONE target, so random frames in different statements get DISTINCT
     // counters.
-    const statements = this.compileShaderBody(body, type);
+    // The declared inputs and uniforms are framed and bound for the body
+    // analysis: nothing but these declarations carries their shader types (see
+    // `compileShaderBody`). An INPUT is a field of the `VertexInput` struct the
+    // entry point binds as `input`, so it is referenced `input.<name>` — a bare
+    // `v` names nothing in a WGSL shader. A uniform is a module-scope global
+    // and stays bare.
+    const statements = this.compileShaderBody(body, type, [
+      ...inputs.map((d) => ({
+        name: d.name,
+        type: d.type,
+        ref: `input.${d.name}`,
+      })),
+      ...uniforms,
+    ]);
     // Over the FULL emission: a helper may be referenced only from inside a
     // hoisted loop (Tycho item 110), and an undeclared helper is a shader that
     // fails to compile on the GPU.

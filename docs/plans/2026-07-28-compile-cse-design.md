@@ -681,6 +681,11 @@ recorded so they aren't rediscovered:
 - Per-mapping purity attestation for caller-supplied `functions`, and a
   target-level emission-purity attestation re-enabling CSE on direct
   custom targets (§4.2).
+- GPU user functions: argument-shape inference for COMPOUND arguments
+  (`h(v+w)` against a declared `vec2` parameter is currently rejected —
+  shape classification answers only for bare symbols; needs
+  expression-level shape synthesis with the Block-local disagreement
+  rule).
 - Cross-term sharing of index-free subtrees across unrolled terms.
 - Loop-invariant hoisting; cross-arm binding at conditional entry (both
   need a throw-free argument or a guard for the not-taken case).

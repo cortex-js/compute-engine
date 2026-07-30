@@ -5,7 +5,6 @@ import {
   compileGPUMatrix,
   assertGPUScalarComponents,
 } from './gpu-target.js';
-import { BaseCompiler } from './base-compiler.js';
 
 /**
  * GLSL-specific function overrides.
@@ -68,12 +67,9 @@ export class GLSLTarget extends GPUShaderTarget {
     returnType: string,
     parameters: Array<[name: string, type: string]>
   ): string {
-    // A function body is a statement position: a nested loop-form
-    // `Sum`/`Product` hoists its loop ahead of the `return` (Tycho item 110).
-    const body = BaseCompiler.compileFunctionBody(
-      expr,
-      this.createTargetFor(expr)
-    );
+    // Compiled under the caller's declared parameter shapes, so the body
+    // analysis agrees with the signature emitted below.
+    const body = this.compileDeclaredFunctionBody(expr, parameters);
 
     const params = parameters
       .map(([name, type]) => `${type} ${name}`)
@@ -160,7 +156,13 @@ export class GLSLTarget extends GPUShaderTarget {
     // `Random()` lowers to `gl_FragCoord`-derived spatial noise, which only a
     // fragment shader has.) The whole body compiles against ONE target, so
     // random frames in different statements get DISTINCT counters.
-    const statements = this.compileShaderBody(body, type);
+    // The declared inputs and uniforms are framed and bound for the body
+    // analysis: nothing but these declarations carries their shader types, and
+    // GLSL references both kinds bare (see `compileShaderBody`).
+    const statements = this.compileShaderBody(body, type, [
+      ...inputs,
+      ...uniforms,
+    ]);
     // Over the FULL emission: a helper may be referenced only from inside a
     // hoisted loop (Tycho item 110), and an undeclared helper is a shader that
     // fails to compile on the GPU.

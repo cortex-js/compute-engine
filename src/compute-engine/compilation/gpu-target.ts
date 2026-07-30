@@ -4647,6 +4647,205 @@ function gpuVecType(n: number, isWGSL: boolean): string {
 }
 
 /**
+ * A caller-declared shader name: its declared type, plus the identifier the
+ * emitted body must REFERENCE it by when that is not the bare name.
+ *
+ * `ref` exists for the WGSL shader inputs, which are FIELDS of the entry
+ * point's `input: VertexInput` struct — a body referencing a bare `v` names
+ * nothing at all. Uniforms (both languages) and the GLSL `in` varyings are
+ * bare globals and leave it unset.
+ */
+export type GPUShaderDeclaration = {
+  name: string;
+  type: string;
+  ref?: string;
+};
+
+/**
+ * The ELEMENT kind of a shader value type — float, signed integer, unsigned
+ * integer, boolean — the axis a component count cannot express.
+ */
+type GPUElementKind = 'f' | 'i' | 'u' | 'b';
+
+/**
+ * A shader value type normalized into ONE comparison space: an element kind ×
+ * a component count (`1` for a scalar).
+ *
+ * Both languages' spellings collapse into it — `vec2`, `vec2f` and `vec2<f32>`
+ * are all `{f, 2}`; `bvec3` and `vec3<bool>` are both `{b, 3}` — which is what
+ * lets a caller's GLSL-flavored declaration on the WGSL route (`toWGSLType`
+ * maps it) be compared against a WGSL-spelled synthesized parameter.
+ *
+ * The element axis is load-bearing: `vec2<bool>`, `vec2<i32>` and `vec2<f32>`
+ * are all two components, and neither language converts between them — a
+ * width-only frame reported all three as `vec2f` and let a `vec2<bool>`
+ * argument "match" a `vec2<f32>` parameter.
+ */
+type GPUValueType = { element: GPUElementKind; width: number };
+
+/** A caller-declared name's type, as written and as normalized. */
+type GPUDeclaredType = {
+  /** The spelling the caller wrote, for diagnostics. */
+  spelling: string;
+  /**
+   * The normalized type, or `undefined` when the spelling names no static
+   * shader VALUE type here (a matrix, an array, a struct, a `#define` alias).
+   * Such a name classifies as nothing — in particular not as a float — and
+   * fails closed when it reaches a user-function call boundary.
+   */
+  value?: GPUValueType;
+};
+
+/**
+ * Normalize a shader type SPELLING of EITHER language, or `undefined` for one
+ * that names no scalar/vector value type here.
+ *
+ * Both languages' spellings are accepted whatever the target: `compileFunction`
+ * takes GLSL-flavored names on the WGSL route too (`toWGSLType` maps them).
+ */
+function gpuNormalizeShaderType(type: string): GPUValueType | undefined {
+  const t = type.trim();
+  // Every float width collapses to the ONE float element: the emission has a
+  // single float precision, so `double`/`f16`/`f64` are the same value type
+  // here as `float`/`f32`.
+  if (/^(float|double|half|f16|f32|f64)$/.test(t))
+    return { element: 'f', width: 1 };
+  if (/^(int|i32)$/.test(t)) return { element: 'i', width: 1 };
+  if (/^(uint|u32)$/.test(t)) return { element: 'u', width: 1 };
+  // Both languages spell it `bool`.
+  if (t === 'bool') return { element: 'b', width: 1 };
+  // GLSL: `vecN` (float), plus the `ivecN`/`uvecN`/`bvecN` element prefixes.
+  const glsl = /^([ibu]?)vec([234])$/.exec(t);
+  if (glsl)
+    return {
+      element: (glsl[1] || 'f') as GPUElementKind,
+      width: Number(glsl[2]),
+    };
+  // WGSL: the `vecNf`/`vecNh`/`vecNi`/`vecNu` aliases…
+  const alias = /^vec([234])([fhiu])$/.exec(t);
+  if (alias)
+    return {
+      element: (alias[2] === 'h' ? 'f' : alias[2]) as GPUElementKind,
+      width: Number(alias[1]),
+    };
+  // …and the explicit `vecN<T>` form, whose element is a scalar spelling.
+  const wgsl = /^vec([234])<\s*([a-z0-9]+)\s*>$/.exec(t);
+  if (wgsl) {
+    const element = gpuNormalizeShaderType(wgsl[2]);
+    if (element === undefined || element.width !== 1) return undefined;
+    return { element: element.element, width: Number(wgsl[1]) };
+  }
+  return undefined;
+}
+
+/** The target language's spelling of a normalized shader value type. */
+function gpuSpellValueType(t: GPUValueType, isWGSL: boolean): string {
+  if (t.width === 1) {
+    if (t.element === 'b') return 'bool';
+    if (t.element === 'i') return isWGSL ? 'i32' : 'int';
+    if (t.element === 'u') return isWGSL ? 'u32' : 'uint';
+    return gpuScalarType(isWGSL);
+  }
+  if (t.element === 'f') return gpuVecType(t.width, isWGSL);
+  if (!isWGSL) return `${t.element}vec${t.width}`;
+  return `vec${t.width}<${
+    t.element === 'b' ? 'bool' : t.element === 'i' ? 'i32' : 'u32'
+  }>`;
+}
+
+/**
+ * The declared TYPES of the names in a local shape frame, keyed by the frame
+ * itself — the GPU-local companion channel of `BaseCompiler`'s shape frames.
+ *
+ * A shape frame records a WIDTH (plus the scalar/boolean sentinels), which
+ * cannot express an element type: `ivec2` and `vec2` are both "2 components",
+ * and a shader converts between them no more than between `vec2` and `float`.
+ * This channel carries the complete normalized type, so `gpuTypeOfValue`
+ * answers with the type the caller actually declared.
+ *
+ * Keyed by the FRAME rather than kept as a stack of its own so that
+ * `withLocalShapeFrame`'s lifetime, isolation and innermost-wins shadowing all
+ * apply to it unchanged (see `BaseCompiler.localShapeFrameOf`).
+ */
+const gpuDeclaredTypes = new WeakMap<
+  ReadonlyMap<string, number>,
+  Map<string, GPUDeclaredType>
+>();
+
+/**
+ * The local shape frame for a set of caller-declared shader declarations — a
+ * `compileFunction` parameter list, or a shader's `in`/`uniform` declarations
+ * — with their complete declared types registered alongside it.
+ *
+ * Those declarations ARE the shader types of those names in the source about
+ * to be emitted, and nothing else carries them, so they must be framed for the
+ * shape analysis to agree with the emission (see `compileDeclaredFunctionBody`).
+ * A spelling with no static value type here is entered as `LOCAL_UNSHAPED`:
+ * shape-wise that is what an unframed name already answered, but the entry
+ * records that the name is declared, so a call site fails closed on it rather
+ * than taking it for a float.
+ */
+function gpuDeclaredShapeFrame(
+  declarations: ReadonlyArray<GPUShaderDeclaration>
+): Map<string, number> {
+  const frame = new Map<string, number>();
+  const types = new Map<string, GPUDeclaredType>();
+  for (const { name, type } of declarations) {
+    const value = gpuNormalizeShaderType(type);
+    types.set(name, { spelling: type.trim(), value });
+    frame.set(
+      name,
+      value === undefined
+        ? BaseCompiler.LOCAL_UNSHAPED
+        : value.width >= 2
+          ? value.width
+          : value.element === 'b'
+            ? BaseCompiler.LOCAL_BOOLEAN
+            : BaseCompiler.LOCAL_SCALAR
+    );
+  }
+  gpuDeclaredTypes.set(frame, types);
+  return frame;
+}
+
+/**
+ * The caller-declared type of the name `expr`, when the shape frame that
+ * decides its shape carries one.
+ */
+function gpuDeclaredTypeOf(expr: Expression): GPUDeclaredType | undefined {
+  if (!isSymbol(expr)) return undefined;
+  const frame = BaseCompiler.localShapeFrameOf(expr.symbol);
+  if (frame === undefined) return undefined;
+  return gpuDeclaredTypes.get(frame)?.get(expr.symbol);
+}
+
+/**
+ * `target`, with the caller-declared names BOUND: each resolves to the
+ * identifier the emitted source references it by — its own name, or a WGSL
+ * input's field of the entry point's `input` struct — and joins `boundVars`.
+ *
+ * Framing the declared SHAPES is only half the job: without the binding the
+ * declared name is still a free engine symbol, so a same-named assigned value
+ * or user-function literal folds over the declaration the emitter is about to
+ * write, and the analysis then describes a parameter the emission ignores.
+ * `boundVars` carries the binding for the resolutions that are NOT the bare
+ * identifier (finding A2) — `input.v` would otherwise read as a free
+ * user-function reference.
+ */
+function gpuDeclaredBodyTarget(
+  target: CompileTarget<Expression>,
+  declarations: ReadonlyArray<GPUShaderDeclaration>
+): CompileTarget<Expression> {
+  if (declarations.length === 0) return target;
+  const refs = new Map(declarations.map((d) => [d.name, d.ref ?? d.name]));
+  return {
+    ...target,
+    var: (id) => refs.get(id) ?? target.var(id),
+    boundVars: BaseCompiler.withBoundNames(target, [...refs.keys()]),
+  };
+}
+
+/**
  * Is `t` a component a shader `vecN` can hold? A `vecN` is N REAL floats: a
  * boolean, a string, a complex value (itself a `vec2`) and a nested aggregate
  * all have a lowering of their own that does not fit a component slot.
@@ -4718,6 +4917,18 @@ function gpuTypeOfDeclaredType(
  * parameter or return slot accepts here.
  */
 function gpuTypeOfValue(expr: Expression, isWGSL: boolean): string | undefined {
+  // A name whose shader type the CALLER declared (a `compileFunction`
+  // parameter, a shader input/uniform). Asked FIRST and answered in full:
+  // nothing else carries that type — `expr.type` for such a name is the
+  // undeclared engine symbol's `unknown`, i.e. a float — and the shape frame
+  // alone carries a width, which cannot tell `ivec2`/`bvec2` from `vec2`. A
+  // declared spelling with no static value type here answers `undefined`: it
+  // is not a float, and its call sites fail closed naming it.
+  const declared = gpuDeclaredTypeOf(expr);
+  if (declared !== undefined)
+    return declared.value && gpuSpellValueType(declared.value, isWGSL);
+  // A name framed `bool` by a synthesized user-function signature.
+  if (isSymbol(expr) && BaseCompiler.isLocalBoolean(expr.symbol)) return 'bool';
   if (BaseCompiler.isComplexValued(expr)) return gpuVecType(2, isWGSL);
   const n = BaseCompiler.aggregateComponentCount(expr);
   if (n !== undefined) {
@@ -5038,13 +5249,24 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             // Record the parameter's inferred shape so the body analysis
             // agrees with the declaration just synthesized (and so a
             // parameter is never resolved against a same-named engine
-            // symbol). Scalars use the `LOCAL_SCALAR` sentinel.
+            // symbol). Scalars use the `LOCAL_SCALAR` sentinel, booleans the
+            // `LOCAL_BOOLEAN` one — a `(boolean) -> …` parameter is `bool` in
+            // the emitted signature, so the body must classify it `bool` too
+            // (a body that RETURNS it would otherwise synthesize a `float`
+            // return type for a `bool` value).
             const complex = t !== undefined && isNonRealNumber(t);
             const n = complex
               ? 2
               : (gpuDeclaredComponentCount(t ?? 'unknown') ?? 0);
             complexFrame.set(p, complex);
-            vectorFrame.set(p, n >= 2 ? n : BaseCompiler.LOCAL_SCALAR);
+            vectorFrame.set(
+              p,
+              shader === 'bool'
+                ? BaseCompiler.LOCAL_BOOLEAN
+                : n >= 2
+                  ? n
+                  : BaseCompiler.LOCAL_SCALAR
+            );
             return shader;
           });
 
@@ -5100,6 +5322,23 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             );
           const code = args.map((arg, i) => {
             const t = gpuTypeOfValue(arg, isWGSL);
+            // A name the CALLER declared with a spelling this analysis has no
+            // value type for (a matrix, an array, a struct, an alias). It is
+            // NOT a float — classifying it as one is how a `mat4` uniform
+            // reached a synthesized `float` parameter behind a reported
+            // success — and the declared spelling is the only thing that
+            // points at the fix, so it is named.
+            const badDecl =
+              t === undefined ? gpuDeclaredTypeOf(arg) : undefined;
+            if (badDecl !== undefined)
+              throw new Error(
+                `${id}: argument ${i + 1} \`${arg.toString()}\` is declared ` +
+                  `"${badDecl.spelling}" by the caller — a type with no ` +
+                  `static ${language.toUpperCase()} value shape here (only ` +
+                  `scalars, booleans and 2–4 component vectors have one), so ` +
+                  `it cannot be matched against parameter "${sig.names[i]}" ` +
+                  `(declared "${sig.params[i]}"). Fail closed (D6).`
+              );
             // A collection argument beyond the static vec2–vec4 shapes: the
             // JS target answers this with the `_SYS.bcastFn` runtime
             // broadcast dispatch, which a shader has no analog for. Scalar
@@ -5113,7 +5352,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               );
             if (t !== sig.params[i])
               throw new Error(
-                `${id}: argument ${i + 1} lowers to "${t}" but parameter ` +
+                // The argument is named as well as numbered: the mismatch is
+                // often between a `compileFunction` parameter the CALLER
+                // declared and a callee signature it never saw, and the
+                // position alone does not point at either.
+                `${id}: argument ${i + 1} \`${arg.toString()}\` lowers to "${t}" but parameter ` +
                   `"${sig.names[i]}" is declared "${sig.params[i]}" — ` +
                   `${language.toUpperCase()} has no implicit conversion ` +
                   `between them. Declare a matching signature for "${id}". ` +
@@ -5171,6 +5414,52 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       return `${signature} {\n${indented}\n}`;
     }
     return `${signature} {\n  return ${body};\n}`;
+  }
+
+  /**
+   * Compile the body of a `compileFunction` declaration with the CALLER's
+   * parameter list visible to the shape analysis.
+   *
+   * The `[name, type]` pairs a `compileFunction` caller supplies ARE the
+   * shader types of those names in the source about to be emitted — nothing
+   * else carries them (a bare `v` is an undeclared engine symbol, which the
+   * analysis reads as a scalar). Without the frame the analysis and the
+   * emitted signature can disagree: `compileFunction(h(v), …, [['v','vec2']])`
+   * against an undeclared `h` synthesized `float _fn_h(float w)` and passed
+   * the `vec2 v` into it behind a reported success. Framing the declared
+   * shapes lets the existing call-site check see the mismatch and fail closed
+   * (D6).
+   *
+   * The complete declared TYPE is carried (element × width, both languages'
+   * spellings normalized), not just a width: `ivec2` and `bvec2` are two
+   * components each and convert to `vec2` in neither language. A spelling with
+   * no static value type here (a matrix, an array, a struct, a `#define`
+   * alias) is recorded as such and fails closed if it reaches a user-function
+   * call. Complex-ness is deliberately NOT framed: a `vec2` parameter may be a
+   * point or a complex number, the caller's type does not say which, and the
+   * existing inference already answers `vec2` either way.
+   *
+   * The parameters are also BOUND (`gpuDeclaredBodyTarget`), so a same-named
+   * engine symbol cannot fold over the parameter the signature declares.
+   */
+  protected compileDeclaredFunctionBody(
+    expr: Expression,
+    parameters: ReadonlyArray<[name: string, type: string]>
+  ): string {
+    const declarations = parameters.map(([name, type]) => ({ name, type }));
+    const target = gpuDeclaredBodyTarget(
+      this.createTargetFor(expr),
+      declarations
+    );
+    return BaseCompiler.withLocalShapeFrame(
+      new Map(),
+      gpuDeclaredShapeFrame(declarations),
+      () =>
+        // A function body is a statement position: a nested loop-form
+        // `Sum`/`Product` hoists its loop ahead of the `return` (Tycho item
+        // 110).
+        BaseCompiler.compileFunctionBody(expr, target)
+    );
   }
 
   compile(
@@ -5428,11 +5717,38 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * fragment shader, so a non-fragment stage throws at CE compile time rather
    * than emitting code that fails later at GPU shader-compile time. It is a
    * property of the SHADER, not of the statement.
+   *
+   * `declarations` are the shader's own typed names — its `in`/varying inputs
+   * and its uniforms. They are the exact analog of a `compileFunction`
+   * parameter list (see `compileDeclaredFunctionBody`) and are both framed and
+   * BOUND the same way: without the frame a `uniform vec2 v` fed to an
+   * undeclared user function classified as a scalar, agreed with the
+   * synthesized `float` parameter, and passed a `vec2` into a `float` slot
+   * behind a reported success; without the binding a same-named engine symbol
+   * folded over the declaration, and a WGSL input — a FIELD of the entry
+   * point's `input` struct — emitted a bare identifier that names nothing
+   * (each declaration's `ref` supplies the identifier to emit).
    */
   protected compileShaderBody(
     body: ReadonlyArray<{ variable: string; expression: Expression }>,
-    stage: string
+    stage: string,
+    declarations: ReadonlyArray<GPUShaderDeclaration> = []
   ): Array<{ variable: string; code: string; stmts: string[] }> {
+    // One name, two declarations (an input AND a uniform) is a redeclaration
+    // neither language accepts — and on WGSL the two do not even resolve to
+    // the same identifier (`input.v` vs the global `v`), so there is no
+    // reading of the body to pick. Fail closed naming the collision (D6).
+    const seen = new Set<string>();
+    for (const d of declarations) {
+      if (seen.has(d.name))
+        throw new Error(
+          `Shader declaration "${d.name}" is declared more than once (as an ` +
+            `input and as a uniform): two storage classes cannot share one ` +
+            `name, and a body referencing it names neither unambiguously. ` +
+            `Rename one of them. Fail closed (D6).`
+        );
+      seen.add(d.name);
+    }
     // ONE naming context for the whole body too, seeded from EVERY statement:
     // the counter must stay distinct across statements (same reason as the
     // random counters), and a `_tv`-named symbol in any statement is a
@@ -5440,21 +5756,31 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // seeded as source text as well: a hoisted loop declares its accumulator
     // ahead of the assignment, so a shader output spelled `_tv1` would
     // otherwise be shadowed and left unwritten (`_tv1 = _tv1`).
-    const target = this.createTargetFor(body[0]?.expression, stage, {
-      naming: BaseCompiler.newNamingContext(
-        body.map((a) => a.expression),
-        body.map((a) => a.variable)
-      ),
-    });
+    const target = gpuDeclaredBodyTarget(
+      this.createTargetFor(body[0]?.expression, stage, {
+        naming: BaseCompiler.newNamingContext(
+          body.map((a) => a.expression),
+          body.map((a) => a.variable)
+        ),
+      }),
+      declarations
+    );
     // Each assignment is a statement position of its own, so a loop-form
     // `Sum`/`Product` inside it hoists its loop into `stmts`, which the shader
-    // assembly emits ahead of the assignment (Tycho item 110).
-    return body.map((assignment) => {
-      const { stmts, code } = BaseCompiler.compileStatementBody(
-        assignment.expression,
-        target
-      );
-      return { variable: assignment.variable, code, stmts };
-    });
+    // assembly emits ahead of the assignment (Tycho item 110). The whole body
+    // compiles under the shader's declared shapes: the declarations are in
+    // scope for every statement.
+    return BaseCompiler.withLocalShapeFrame(
+      new Map(),
+      gpuDeclaredShapeFrame(declarations),
+      () =>
+        body.map((assignment) => {
+          const { stmts, code } = BaseCompiler.compileStatementBody(
+            assignment.expression,
+            target
+          );
+          return { variable: assignment.variable, code, stmts };
+        })
+    );
   }
 }

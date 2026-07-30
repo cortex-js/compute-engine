@@ -502,7 +502,9 @@ without redefinition.
   *operator* is inherently asynchronous; then sync entry points reject
   `{async}` statically, and an awaiting wrapper *discharges* it. Metadata:
   **not an impurity** — an async pure function's settled value caches
-  soundly, which "pure ≙ no impurity label" accommodates.
+  soundly, which "pure ≙ no impurity label" accommodates. The
+  representation question — effect vs. promise-typed value — is **ruled:
+  effect** (see below).
 - **`time`** (clock reads): unseeded nondeterminism — folds into
   **`entropy`** unless a virtual-clock mechanism (`WithClock`?) ever gives
   it its own consumer, the same way `random` earned its label.
@@ -512,6 +514,65 @@ Rejected as effects: **`diverge`/nontermination** (handled dynamically,
 compilability** (a capability of an operator, not an effect of applying it);
 and **`error`/partiality** — expanded below, because the reasoning is
 load-bearing for planned Cortex ergonomics.
+
+### `async` will be an effect, not a promise type (ruled 2026-07-29)
+
+The symmetric ruling to the `error` rejection below, decided by the same
+razor and landing on the opposite side: **what a consumer inspects goes in
+the lattice; what a scheduler handles goes on the arrow.** A failure *is*
+the result — consumers `match` on it and narrow around it, so it lives in
+the lattice. Suspension is a *circumstance of computing*, never a result:
+nothing ever inspects a pending value mathematically — the only operation
+on it is waiting — so there is nothing for the lattice to represent.
+
+Why a `promise<T>` value type is rejected outright, not merely deferred:
+
+1. **Promise values poison the rewrite machinery.** Canonicalization,
+   simplification, and pattern matching assume operands are inspectable
+   *now* and cannot await. `Simplify(p + 2)` with `p` pending is
+   incoherent; either every operator must exclude promise operands (an
+   infection across the whole library) or evaluation auto-awaits
+   everywhere (at which point the value carries no information and the
+   effect has been rebuilt, expensively). Languages that tolerate
+   promises-as-values never subjected their values to algebraic
+   rewriting; CE does.
+2. **CE already reifies "computation not yet performed" — the expression
+   itself.** An unevaluated expression is a description of a pending
+   computation; `Hold(expr)` is the thunk; evaluation is the await. The
+   combinator use-cases that motivate promise values elsewhere are
+   operators over held operands — a future `Race(Hold(a), Hold(b))` or
+   `Parallel(…)` evaluates operands concurrently and **discharges**
+   `async` — with zero new value kinds. A `promise<T>` would be a second,
+   redundant deferred-computation representation beside the one the
+   engine is built on.
+3. **The effect slots into the v3 machinery without extension**: static
+   rejection by sync entry points *before* evaluation (the admission-test
+   consumer); per-target compile policy (GPU refuses, JS lowers to
+   `async`/`await`); **discharge is `await`** — the internally-awaiting
+   host wrapper that motivated position-discharge, with `evaluateAsync`
+   as the outermost discharger; and caching stays sound via "pure ≙ no
+   impurity label" (a promise *value* would instead pose pending-handle
+   identity questions to every cache).
+4. **The function-color tax is already paid.** The classic objection to
+   effect-async — every caller must be annotated — is priced for
+   opaque-body languages. CE's transparency means inference stamps the
+   color; only opaque boundaries annotate, the same bargain every other
+   label makes.
+
+Two boundaries of the ruling, stated so it is not over-read:
+
+- **Promises stay at the host API seam.** `evaluateAsync()` returning a
+  JS `Promise<Expression>` is correct and untouched — that is where CE's
+  value space meets a runtime that genuinely has promise values. The
+  doctrine is promise *at the boundary*, effect *inside the lattice*,
+  entry points as the meeting seam.
+- **Colorless remains the status quo.** Today's engine-wide
+  `evaluateAsync` is the Go/Loom model — no annotation anywhere, the
+  evaluation act is async as a whole — and it stands until a genuinely
+  *per-operator* asynchrony (a host-call operator, a remote solver)
+  supplies the admission-test consumer. Ranking: colorless (now) → the
+  `async` effect with discharge-as-await (on demand) → promise values in
+  the lattice (never).
 
 ### Rejected: `error`/partiality — failure is a value, and narrowing needs it that way
 
