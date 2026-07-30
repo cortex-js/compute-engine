@@ -57,6 +57,14 @@
 
 ### Bug Fixes
 
+- **A Leibniz derivative no longer swallows the comparison that follows it.**
+  `\frac{d}{dx}x^2 > 0` parsed as `D(x^2 > 0, x)` — the derivative of a
+  *boolean* — which then evaluated to an `incompatible-type` error. The operand
+  of `\frac{d}{dx}` / `\frac{\partial}{\partial x}` is now parsed as a term: it
+  still takes a trailing sum (`\frac{d}{dx}x^2 + 1`, matching the `\int … dx`
+  integrand convention), but stops before a relational, assignment or arrow
+  operator, so the expression parses as `D(x^2, x) > 0`.
+
 - **Monte-Carlo integration and stochastic equality now replay under
   `WithRandomSeed()`.** Both sampled `Math.random()` directly, so a seeded block
   did not reproduce: `WithRandomSeed(42, \int_0^1 \sin(1/x) dx)` returned a

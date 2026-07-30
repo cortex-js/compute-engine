@@ -270,6 +270,58 @@ describe('DERIVATIVE ROUND-TRIP', () => {
   });
 });
 
+// The operand of a Leibniz fraction is a *term*: it takes the sum that follows
+// it (matching the `\int … dx` integrand convention) but stops before a
+// relational, assignment or arrow operator. Otherwise `\frac{d}{dx}x^2 > 0`
+// parses as the derivative of a *boolean*, which then fails to type-check.
+describe('LEIBNIZ DERIVATIVE OPERAND EXTENT', () => {
+  test('stops before a comparison operator', () => {
+    expect(ce.parse('\\frac{d}{dx}x^{2}>0').json).toEqual([
+      'Less',
+      0,
+      ['D', ['Power', 'x', 2], 'x'],
+    ]);
+  });
+
+  test('stops before a comparison operator (partial derivative)', () => {
+    expect(ce.parse('\\frac{\\partial}{\\partial x}x^{2}>0').json).toEqual([
+      'Less',
+      0,
+      ['D', ['Power', 'x', 2], 'x'],
+    ]);
+  });
+
+  test('stops before a comparison operator (higher order)', () => {
+    expect(ce.parse('\\frac{d^2}{dx^2}x^{3}\\ge 0').json).toEqual([
+      'LessEqual',
+      0,
+      ['D', ['D', ['Power', 'x', 3], 'x'], 'x'],
+    ]);
+  });
+
+  test('stops before an equation', () => {
+    expect(ce.parse('\\frac{d}{dx}x^{2}=2x').json).toEqual([
+      'Equal',
+      ['D', ['Power', 'x', 2], 'x'],
+      ['Multiply', 2, 'x'],
+    ]);
+  });
+
+  test('the derivative of a comparison evaluates as a comparison', () => {
+    expect(ce.parse('\\frac{d}{dx}x^{2}>0').evaluate().toString()).not.toMatch(
+      /incompatible-type/
+    );
+  });
+
+  test('takes a trailing sum (integrand convention)', () => {
+    expect(ce.parse('\\frac{d}{dx}x^{2}+1').json).toEqual([
+      'D',
+      ['Add', ['Power', 'x', 2], 1],
+      'x',
+    ]);
+  });
+});
+
 describe('DERIVATIVE EVALUATION', () => {
   test('D of x^2 evaluates to 2x', () => {
     const expr = ce.parse('\\frac{d}{dx} x^2');

@@ -804,6 +804,17 @@ function parseFractionArgument(parser: Parser): MathJsonExpression {
   return isEmptySequence(group) ? parser.error('missing', parser.index) : group;
 }
 
+/**
+ * The extent of the operand that follows a Leibniz derivative fraction
+ * (`\frac{d}{dx} f`, `\frac{\partial}{\partial x} f`).
+ *
+ * The operand is a *term*: it takes the sum that follows it (matching the
+ * integrand convention of `\int … dx`), but stops before a relational,
+ * assignment or arrow operator, so `\frac{d}{dx}x^2 > 0` is a comparison of the
+ * derivative against 0 — not the derivative of a comparison.
+ */
+const DERIVATIVE_OPERAND_PRECEDENCE = ADDITION_PRECEDENCE;
+
 function parseFraction(parser: Parser): MathJsonExpression | null {
   const numer = parseFractionArgument(parser);
   const denom = parseFractionArgument(parser);
@@ -827,7 +838,11 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     let fn: MathJsonExpression | null =
       operator(numer) === 'PartialDerivative' ? operand(numer, 1) : null;
     if (fn === null || fn === undefined || fn === 'Nothing')
-      fn = unwrapSingleItemList(missingIfEmpty(parser.parseExpression()));
+      fn = unwrapSingleItemList(
+        missingIfEmpty(
+          parser.parseExpression({ minPrec: DERIVATIVE_OPERAND_PRECEDENCE })
+        )
+      );
 
     // Differentiation variables from the denominator's ∂ markers. Each marker
     // carries either a single variable or a `List` of them (a `∂x ∂y` chain).
@@ -943,7 +958,11 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
       // (`\frac{d^n f}{dx^n}`) or follows the fraction (`\frac{d^n}{dx^n} f`).
       const fn =
         numerFn ??
-        unwrapSingleItemList(missingIfEmpty(parser.parseExpression()));
+        unwrapSingleItemList(
+          missingIfEmpty(
+            parser.parseExpression({ minPrec: DERIVATIVE_OPERAND_PRECEDENCE })
+          )
+        );
       // Build the nested `D` form, e.g. `D(D(f, x), x)` for a second
       // derivative. This matches the Lagrange (`f''(x)`) parse and the `D`
       // serializer, which recovers the order by counting nested `D`s (a flat

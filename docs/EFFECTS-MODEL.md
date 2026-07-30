@@ -167,8 +167,10 @@ Normalization (normative): `->{}` is a parse error (pure is spelled with a
 bare arrow — one spelling round-trips); duplicate labels are a parse error;
 `any` is exclusive (`{any, random}` errors); canonical serialization orders
 labels alphabetically, parsing accepts any order; whitespace inside braces
-is insignificant; in the AST, "no effect set" and "empty set" are the
-**same state** (one optional field, absent = pure). **Reserved**: `!`
+is insignificant, and whitespace **between the arrow and the opening
+brace** is permitted (`-> {random}` parses; canonical serialization always
+emits the attached form `->{random}`); in the AST, "no effect set" and
+"empty set" are the **same state** (one optional field, absent = pure). **Reserved**: `!`
 inside the braces is a parse error today, reserved for the complement form
 (see "Requiring absence" under Subtyping) so it can be admitted later
 without a breaking grammar change.
@@ -180,6 +182,32 @@ are taken here by type constructors, and **Eff**'s `A -> B ! Δ` postfix
 uses `!`, taken here by negation. Among effect-typed languages the
 arrow-attached set is the established convention; Unison's spelling is the
 one whose tokens survive CE's existing grammar unchanged.
+
+**Considered and rejected (2026-07-29): a postfix separator**, e.g.
+`(a: integer) -> boolean :: random` (the trailing-position shape of Flix's
+`\ IO` and Eff's `! Δ`; `::` itself is unclaimed in both the type and
+Cortex grammars). Rejected for three reasons, the first decisive:
+
+1. **Postfix trailers don't nest, and CE's dominant use site is nested** —
+   parameter bounds inside another signature. Compare:
+   `(g: (real) ->{random} real, x: real) ->{write} boolean` vs.
+   `(g: ((real) -> real :: random), x: real) -> boolean :: write` — the
+   trailing form *requires* the inner parentheses (without them the
+   annotation floats ambiguously to the enclosing signature), forfeiting
+   its flat-case readability exactly where effects matter most. Flix gets
+   away with trailing position because its effects annotate non-nesting
+   top-level `def`s.
+2. **Trailing position needs precedence rules the attached form makes
+   unnecessary**: in `(a) -> (b) -> c :: random` or
+   `(real) -> real | error :: random` the attachment point must be ruled,
+   serialized, and remembered; with braces on the arrow, a misplaced
+   effect annotation is unrepresentable rather than misparsed.
+3. **`::` arrives pre-loaded with the wrong meaning** — "has type"
+   (Haskell) or "namespace path" (Rust/C++) — where the brace form carries
+   no competing intuition.
+
+The flat-case readability motive is served instead by the whitespace
+allowance above (`-> {random}`).
 
 **The `function` primitive.** The bare primitive type `function` (used
 today by e.g. `Map: '(collection, function) -> list'`) is
