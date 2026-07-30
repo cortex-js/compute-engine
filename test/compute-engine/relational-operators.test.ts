@@ -503,3 +503,85 @@ describe('Absence in comparisons: IEEE over NaN, Kleene over Missing (§3.D)', (
     );
   });
 });
+
+describe('An undecidable comparison keeps its evaluated operands', () => {
+  // `Equal`/`NotEqual`/`Less`/`LessEqual` are `lazy`, so they evaluate their own
+  // operands and used to discard that work by returning `undefined` ("unchanged")
+  // when the comparison itself could not be decided: `d/dx x^2 > 0` reported
+  // `0 < D(x^2, x)` instead of `0 < 2x`. The comparison still stays inert — only
+  // the operands are now the evaluated ones. See `inertRelation`.
+  const u = new ComputeEngine();
+
+  test('Less', () => {
+    expect(u.parse('x^2+x^2>0').evaluate().json).toEqual([
+      'Less',
+      0,
+      ['Multiply', 2, ['Power', 'x', 2]],
+    ]);
+  });
+
+  test('LessEqual', () => {
+    expect(u.parse('x^2+x^2 \\le 0').evaluate().json).toEqual([
+      'LessEqual',
+      ['Multiply', 2, ['Power', 'x', 2]],
+      0,
+    ]);
+  });
+
+  test('Equal', () => {
+    expect(u.parse('x^2 = 2+2').evaluate().json).toEqual([
+      'Equal',
+      ['Power', 'x', 2],
+      4,
+    ]);
+  });
+
+  test('NotEqual', () => {
+    expect(u.parse('x \\ne 3\\cdot 3').evaluate().json).toEqual([
+      'NotEqual',
+      'x',
+      9,
+    ]);
+  });
+
+  test('a Leibniz derivative operand is evaluated', () => {
+    expect(u.parse('\\frac{d}{dx}x^{2}>0').evaluate().toString()).toBe(
+      '0 < 2x'
+    );
+  });
+
+  test('a chained relation keeps its shape', () => {
+    expect(u.parse('1 < x < 2+2').evaluate().json).toEqual(['Less', 1, 'x', 4]);
+  });
+
+  test('evaluation is a fixpoint (no rebuild when nothing changed)', () => {
+    const once = u.parse('x^2+x^2>0').evaluate();
+    expect(once.evaluate().isSame(once)).toBe(true);
+    // An already-evaluated undecidable comparison is returned unchanged.
+    const stable = u.parse('x > 0');
+    expect(stable.evaluate().isSame(stable)).toBe(true);
+  });
+
+  test('the comparison itself still stays inert, not collapsed', () => {
+    // `x^2 = 4` is a *condition*, not a falsity (Tycho 0.72.0 item 8).
+    expect(u.parse('x^2 = 4').evaluate().operator).toBe('Equal');
+    expect(u.parse('x > 0').evaluate().operator).toBe('Less');
+  });
+
+  test('decidable comparisons are unaffected', () => {
+    expect(u.parse('2+2 = 4').evaluate().symbol).toBe('True');
+    expect(u.parse('x \\ne x').evaluate().symbol).toBe('False');
+    expect(u.parse('1 < 2 < 3').evaluate().symbol).toBe('True');
+  });
+
+  test('matches the non-lazy relations, which already did this', () => {
+    // `Approx`/`Tilde`/`Precedes` are not `lazy`: the framework substitutes
+    // their evaluated operands on an `undefined` return. The four lazy
+    // comparisons now agree.
+    expect(u.parse('x^2+x^2 \\approx 0').evaluate().json).toEqual([
+      'Approx',
+      ['Multiply', 2, ['Power', 'x', 2]],
+      0,
+    ]);
+  });
+});

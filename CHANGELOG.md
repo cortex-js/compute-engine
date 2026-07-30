@@ -65,6 +65,18 @@
   integrand convention), but stops before a relational, assignment or arrow
   operator, so the expression parses as `D(x^2, x) > 0`.
 
+- **An undecidable comparison no longer discards its evaluated operands.**
+  `x^2 + x^2 > 0` evaluated to `0 < x^2 + x^2` and
+  `\frac{d}{dx}x^2 > 0` to `0 < D(x^2, x)`: `Equal`, `NotEqual`, `Less` and
+  `LessEqual` evaluate their own operands (they are lazy, so their `canonical`
+  handlers can see raw operands for chain decomposition), then threw that work
+  away when the comparison itself could not be decided. They now report the
+  evaluated operands — `0 < 2x^2` and `0 < 2x` — which is what the non-lazy
+  relations (`Approx`, `Tilde`, `Precedes`…) already did. The comparison itself
+  is unchanged: an undecidable one still stays inert, since `x^2 = 4` is a
+  *condition* rather than a falsity, and decidable ones still fold to
+  `True`/`False`.
+
 - **Monte-Carlo integration and stochastic equality now replay under
   `WithRandomSeed()`.** Both sampled `Math.random()` directly, so a seeded block
   did not reproduce: `WithRandomSeed(42, \int_0^1 \sin(1/x) dx)` returned a

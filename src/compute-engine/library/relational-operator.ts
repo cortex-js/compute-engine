@@ -140,6 +140,36 @@ function compareFromAssumedBounds(
 //   // greater-than: Q47035128  243
 //   // less-than: Q52834024 245
 
+/**
+ * Keep an undecidable comparison inert — but over the *evaluated* operands
+ * rather than the raw ones.
+ *
+ * `Equal`/`NotEqual`/`Less`/`LessEqual` are `lazy` (their `canonical` handlers
+ * need raw, direction-intact operands for chain decomposition), so each
+ * evaluates its operands itself at the top of the handler. Returning
+ * `undefined` from there means "unchanged", which makes the framework keep the
+ * ORIGINAL expression and throw that operand evaluation away: `d/dx x^2 > 0`
+ * reported `0 < D(x^2, x)` rather than `0 < 2x`. The non-lazy relations
+ * (`Approx`, `Tilde`, `Precedes`…) never had the problem, because for them the
+ * framework substitutes the evaluated operands on an `undefined` return — this
+ * brings the four lazy ones in line.
+ *
+ * The comparison itself still stays inert when undecidable (`x^2 = 4` is a
+ * *condition*, not a falsity — see the `Equal` handler): only the operands
+ * change. `undefined` is returned when evaluation changed nothing, which keeps
+ * this a fixpoint and avoids allocating on the hot rule-guard path.
+ */
+function inertRelation(
+  ce: ComputeEngine,
+  op: string,
+  rawOps: ReadonlyArray<Expression>,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (ops.length !== rawOps.length) return undefined;
+  if (ops.every((x, i) => x.isSame(rawOps[i]))) return undefined;
+  return ce._fn(op, ops);
+}
+
 export const RELOP_LIBRARY: SymbolDefinitions = {
   Congruent: {
     description: 'Indicate that two expressions are congruent modulo a number',
@@ -366,8 +396,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           // pragmatic collapse-to-False, which silently ruined equations
           // that were later piped into `Solve` (Tycho 0.72.0 report,
           // item 8). Three-valued verification mode (`ce.isVerifying`)
-          // behaves identically.
-          if (test === undefined) return undefined;
+          // behaves identically. `inertRelation` keeps the *evaluated*
+          // operands (`x^2 = 2+2` → `x^2 = 4`).
+          if (test === undefined)
+            return inertRelation(ce, 'Equal', rawOps, ops);
         }
       }
       return ce.True;
@@ -460,7 +492,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
             const distinct =
               compareFromAssumedBounds(lhs, arg, true) === true ||
               compareFromAssumedBounds(arg, lhs, true) === true;
-            if (!distinct) return undefined;
+            if (!distinct) return inertRelation(ce, 'NotEqual', rawOps, ops);
           }
           // Continue the loop - if all comparisons are not equal, return True
         }
@@ -515,7 +547,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         const qcmp = quantityCompare(lhs, rhs);
         if (qcmp !== null) return qcmp < 0 ? ce.True : ce.False;
         const cmp = lhs.isLess(rhs) ?? compareFromAssumedBounds(lhs, rhs, true);
-        if (cmp === undefined) return undefined;
+        if (cmp === undefined) return inertRelation(ce, 'Less', rawOps, ops);
         return cmp ? ce.True : ce.False;
       }
       if (ops.length < 2) return ce.True;
@@ -530,7 +562,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           } else {
             const cmp =
               lhs.isLess(arg) ?? compareFromAssumedBounds(lhs, arg, true);
-            if (cmp === undefined) return undefined;
+            if (cmp === undefined)
+              return inertRelation(ce, 'Less', rawOps, ops);
             if (cmp === false) return ce.False;
           }
           lhs = arg;
@@ -613,7 +646,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
         if (qcmp !== null) return qcmp <= 0 ? ce.True : ce.False;
         const cmp =
           lhs.isLessEqual(rhs) ?? compareFromAssumedBounds(lhs, rhs, false);
-        if (cmp === undefined) return undefined;
+        if (cmp === undefined)
+          return inertRelation(ce, 'LessEqual', rawOps, ops);
         return cmp ? ce.True : ce.False;
       }
       if (ops.length < 2) return ce.True;
@@ -628,7 +662,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
           } else {
             const cmp =
               lhs.isLessEqual(arg) ?? compareFromAssumedBounds(lhs, arg, false);
-            if (cmp === undefined) return undefined;
+            if (cmp === undefined)
+              return inertRelation(ce, 'LessEqual', rawOps, ops);
             if (cmp === false) return ce.False;
           }
           lhs = arg;

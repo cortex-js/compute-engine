@@ -6,7 +6,7 @@ describe('STYLE - MATH MODE', () => {
   // `Annotated` carrying the color.
   test('\\textcolor', () => {
     expect(check('x = \\textcolor{red}{y + 1} - z')).toMatchInlineSnapshot(`
-      [
+      box       = [
         "Equal",
         "x",
         [
@@ -15,6 +15,7 @@ describe('STYLE - MATH MODE', () => {
           "z"
         ]
       ]
+      eval-auto = x === y - z + 1
     `);
   });
 
@@ -327,6 +328,10 @@ describe('MATH STYLE SWITCHES', () => {
         "a",
         ["Annotated", ["Rational", 1, 2], {dict: {mathStyle: "normal"}}]
       ]
+      eval-auto = a === 1/2
+      eval-mach = a === 1/2
+      N-auto    = a === 0.5
+      N-mach    = a === 0.5
     `);
   });
 
