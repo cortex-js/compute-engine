@@ -114,17 +114,27 @@ export class WGSLTarget extends GPUShaderTarget {
       .map(([name, type]) => `${name}: ${toWGSLType(type)}`)
       .join(', ');
 
+    // A user-defined function the body calls is emitted once as its own WGSL
+    // declaration. This route returns a complete declaration with no preamble
+    // channel, so the whole preamble is prepended (WGSL needs no forward
+    // declarations, but one ordering is kept across both shader languages).
+    // `preambleFor` (NOT a raw `userFunctionDefs()` prepend) is what declares
+    // the `_gpu_*` helpers the DEFINITION BODIES reference, and it already
+    // folds the definitions in exactly once, after those helpers.
+    const rawDefs = this.preambleFor(body);
+    const userDefs = rawDefs ? `${rawDefs}\n` : '';
+
     if (body.includes('\n')) {
       // Block — body already has `return` on the last line
       const indented = body
         .split('\n')
         .map((l) => `  ${l}`)
         .join('\n');
-      return `fn ${functionName}(${params}) -> ${toWGSLType(
+      return `${userDefs}fn ${functionName}(${params}) -> ${toWGSLType(
         returnType
       )} {\n${indented}\n}`;
     }
-    return `fn ${functionName}(${params}) -> ${toWGSLType(returnType)} {
+    return `${userDefs}fn ${functionName}(${params}) -> ${toWGSLType(returnType)} {
   return ${body};
 }`;
   }

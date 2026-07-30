@@ -1,6 +1,48 @@
 ## [Unreleased]
 
+### New Features
+
+- **User-defined functions now compile to GLSL and WGSL.** A function
+  declared in the engine (`f(u,v) := …`) and called from a GPU-compiled
+  expression is emitted **once** as a real shader function and called by
+  name — matching what the JavaScript and interval targets already did —
+  instead of failing as an unknown operator and forcing callers to inline
+  the body at every call site. Definitions arrive on the compilation
+  result's preamble alongside the `_gpu_*` helpers, so existing shader
+  assembly keeps working; when `f` calls `g`, `g` is declared first.
+  Signatures are synthesized statically (declared parameter types, or the
+  body's inferred shape: `float`, `bool`, `vec2`–`vec4`, complex as
+  `vec2`); anything a shader cannot express fails closed with a diagnostic
+  naming the parameter — including recursion (GLSL/WGSL forbid it; it
+  still compiles on the JavaScript target), collection-valued arguments
+  beyond the static `vec2`–`vec4` shapes, and argument shapes that
+  disagree with the declared parameter type. Undeclared parameters default
+  to `float`.
+
 ### Performance
+
+- **Compiled code now shares repeated subexpressions** (common-subexpression
+  elimination) on the `javascript`, `interval-js`, and `python` targets: a
+  pure subtree occurring several times inside one compiled expression is
+  bound to a temporary once and reused, instead of being recomputed at every
+  site. Corpus-extreme shapes (a 500-node subtree repeated 128×) compile
+  ~50% faster because the emitted source collapses, and run up to ~1.9×
+  faster when the repeats involve runtime helpers the JS engine cannot
+  eliminate itself. Sharing is conservative by construction: random draws,
+  user-defined function applications, named callbacks, caller-supplied
+  custom lowerings, and anything inside a conditionally-evaluated position
+  (unselected `Which`/`If` arms, short-circuited `And`/`Or` tails) are never
+  merged, so values, draw streams, and selection laziness are unchanged.
+  Opt out per call with `compile(expr, { cse: false })`. Design notes:
+  `docs/plans/2026-07-28-compile-cse-design.md`.
+
+- **Compiled output is now byte-for-byte deterministic on every target**:
+  compiler-generated temporaries (chained-relation operand bindings, loop
+  accumulators, complex power chains — and the new CSE temps) draw
+  deterministic `_tvN`/`_cseN` names from a per-compilation counter instead
+  of `Math.random()`, and the allocator avoids capture against every symbol
+  in the expression. Two compilations of the same expression now emit
+  identical source, on the GPU targets included.
 
 - **Random draws are up to 100x faster when the engine runs inside a secondary
   JavaScript realm** — a `vm` context, a sandboxed worker, or an
@@ -133,11 +175,16 @@
   `0.03\sum_{k=0}^{n}kx` failed closed, which demoted the whole class to the CPU
   path (corpus rows are almost never a bare sum). The loop is now **hoisted**
   ahead of the value it feeds and referenced through its accumulator, so these
-  compose. Constant bounds still unroll to an expression as before. Nested sums
-  hoist into their enclosing loop body, not out of it. One consequence worth
-  knowing: a loop inside a conditional arm runs whichever branch is selected —
-  the shader targets already compute every arm of a selection (the domain is
-  pure, so this is a cost, not a semantic, difference).
+  compose. Constant bounds still unroll to an expression as before, and a loop
+  nested inside an unrolled term hoists alongside it. Nested sums hoist into
+  their enclosing loop body, not out of it.
+
+  A loop inside a **conditionally-evaluated branch** (an `If`/`When`/`Which`/
+  `Match` arm) still fails closed, with a diagnostic that says so. A shader
+  conditional is an expression, not a statement, so hoisting the loop out of the
+  branch would run it unconditionally — and because a compiled `Random()`
+  advances a counter at run time, a loop stranded ahead of a branch it never
+  feeds would change the value of every later draw.
 
   `Loop` and `Block` still fail closed as sub-expressions on these targets.
 

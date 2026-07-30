@@ -4173,6 +4173,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         ...(vars ? Object.values(vars) : []),
       ]),
     });
+    // The compilation root: a user-function definition body is emitted into the
+    // preamble, so it compiles against THIS target plus its own parameters —
+    // never against whichever nested target requested the emission (see
+    // `CompileTarget.userFunctions.root`).
+    target.userFunctions!.root = target;
 
     // Common-subexpression elimination (design §4.2). Harvest the SAME tree
     // the emitters walk (post `rewriteAngularUnit`). The G1b provenance

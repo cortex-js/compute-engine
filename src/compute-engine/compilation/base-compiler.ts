@@ -580,6 +580,10 @@ export class BaseCompiler {
           s,
           target
         );
+        // A target whose language has no function VALUES (the shader targets)
+        // decides what this reference means — in practice, fails closed (D6).
+        if (userFn !== undefined && registry.lowering)
+          return registry.lowering.value({ id: s, name: userFn, target });
         if (userFn !== undefined) return userFn;
         // Memoize the negative lookup so a repeated free symbol doesn't re-hit
         // `lookupDefinition` on every occurrence during this compile.
@@ -3042,7 +3046,56 @@ export class BaseCompiler {
   private static readonly LOCAL_UNSET = -2;
 
   /** `_localVector`: every binding seen so far was a scalar. */
-  private static readonly LOCAL_SCALAR = -1;
+  static readonly LOCAL_SCALAR = -1;
+
+  /**
+   * Run `fn` with an extra lexical frame of inferred local SHAPES — the
+   * mechanism `compileBlock` uses for its own locals (`_localComplex` /
+   * `_localVector`), exposed for the other binding forms that must declare a
+   * static type for a name they bind.
+   *
+   * Its user is the GPU user-function emission: a parameter's lowering comes
+   * from the DECLARED signature (`f: (complex) -> complex` ⇒ `vec2`), which is
+   * not carried by the parameter symbol's own type, so without a frame the
+   * body analysis would disagree with the declaration the emitter just wrote.
+   * Entering EVERY parameter (scalars as `LOCAL_SCALAR`) also shields them
+   * from `isComplexValued`'s engine-value fallback, the same way a `Block`
+   * local is shielded.
+   *
+   * Compilation is synchronous, so a static stack is safe (see
+   * `_localComplex`).
+   *
+   * `isolate` replaces the enclosing frames instead of stacking on them, for a
+   * body that is NOT lexically nested in them — a user-function definition is
+   * emitted at module level, so when one definition's body triggers the
+   * emission of another, the callee's body must not see the caller's parameter
+   * shapes (a same-named global would take the caller's width).
+   */
+  static withLocalShapeFrame<T>(
+    complex: Map<string, boolean>,
+    vector: Map<string, number>,
+    fn: () => T,
+    isolate = false
+  ): T {
+    const savedComplex = BaseCompiler._localComplex;
+    const savedVector = BaseCompiler._localVector;
+    if (isolate) {
+      BaseCompiler._localComplex = [];
+      BaseCompiler._localVector = [];
+    }
+    BaseCompiler._localComplex.push(complex);
+    BaseCompiler._localVector.push(vector);
+    try {
+      return fn();
+    } finally {
+      BaseCompiler._localVector = savedVector;
+      BaseCompiler._localComplex = savedComplex;
+      if (!isolate) {
+        BaseCompiler._localVector.pop();
+        BaseCompiler._localComplex.pop();
+      }
+    }
+  }
 
   /**
    * Number of components a value expression occupies when lowered on a GPU
@@ -3681,6 +3734,14 @@ export class BaseCompiler {
       eq: string;
       noMatch: string;
       allowStrings: boolean;
+      /**
+       * Wrap a CONDITIONALLY-evaluated piece — a case body, a case guard, or a
+       * condition past the first — so a target that forbids hoisting out of a
+       * branch can fail closed on exactly those pieces. The SUBJECT is compiled
+       * outside it: it is evaluated unconditionally, before any case. Defaults
+       * to running the piece unwrapped.
+       */
+      arm?: (compiled: () => string) => string;
     }
   ): TargetSource {
     const plan = getMatchPlan(engine, args);
@@ -3689,33 +3750,46 @@ export class BaseCompiler {
         `Match: an or-alternative binds the name '${plan.errorAlt.toString()}'; not compilable. Fail closed (D6).`
       );
 
+    // The subject is UNCONDITIONAL — compiled once, before any case — so it is
+    // deliberately outside `opts.arm`: whatever it hoists runs on every path.
     const subj = BaseCompiler.compile(args[0], target);
     const cases = plan.segments.flatMap((seg) => seg.cases);
+    const run = opts.arm ?? ((f: () => string) => f());
 
     const build = (i: number): string => {
       if (i >= cases.length) return opts.noMatch;
       const cc = cases[i];
+      // Only a leading irrefutable case is unconditional; anything reached past
+      // an earlier condition sits behind a branch.
+      const armed = i === 0 ? (f: () => string) => f() : run;
       if (BaseCompiler.isIrrefutableCase(cc)) {
         const acc =
           cc.captureNames.length === 1
             ? new Map([[cc.captureNames[0], subj]])
             : undefined;
-        return BaseCompiler.compileMatchBody(cc, acc, target);
+        return armed(() => BaseCompiler.compileMatchBody(cc, acc, target));
       }
       if (cc.tier === 0 || cc.tier === 1) {
-        const cond = BaseCompiler.matchLeafCondition(
-          engine,
-          cc,
-          subj,
-          opts.eq,
-          opts.allowStrings,
-          target
+        const cond = armed(() =>
+          BaseCompiler.matchLeafCondition(
+            engine,
+            cc,
+            subj,
+            opts.eq,
+            opts.allowStrings,
+            target
+          )
         );
-        const guard = BaseCompiler.compileMatchGuard(cc, undefined, target);
+        // The guard sits behind `&&` (short-circuiting) and the body behind the
+        // branch, so both are conditional even in the FIRST case.
+        const guard =
+          cc.hasGuard && cc.guard !== undefined
+            ? run(() => BaseCompiler.compileMatchGuard(cc, undefined, target)!)
+            : undefined;
         const full = guard === undefined ? cond : `(${cond}) && (${guard})`;
         return opts.ternary(
           full,
-          BaseCompiler.compileMatchBody(cc, undefined, target),
+          run(() => BaseCompiler.compileMatchBody(cc, undefined, target)),
           build(i + 1)
         );
       }
@@ -3846,6 +3920,14 @@ export class BaseCompiler {
     const name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
     if (name === undefined) return undefined;
 
+    // A target with its own call-site lowering (the shader targets, which must
+    // check the argument shapes against the statically synthesized signature)
+    // owns the whole call site: none of the JS convention handling below —
+    // complex `{re, im}` coercion, the `_SYS.bcastFn` runtime broadcast — has
+    // an analog there.
+    const lowering = target.userFunctions?.lowering;
+    if (lowering) return lowering.call({ id: h, name, args, target });
+
     // A real-analyzed argument bound to a complex-typed parameter is coerced
     // to the `{ re, im }` convention (the call-boundary face of the Tycho
     // item-60 convention-mismatch class): the body consumes such a parameter
@@ -3961,7 +4043,7 @@ export class BaseCompiler {
    * definition's signature (required, then optional, then variadic).
    * `undefined` when no signature is known.
    */
-  private static userFunctionParamType(
+  static userFunctionParamType(
     engine: ComputeEngine,
     h: string,
     i: number
@@ -4026,7 +4108,21 @@ export class BaseCompiler {
       // recursion is backstopped by the JS call stack — a catchable
       // `RangeError` within milliseconds — consistent with compiled
       // unbounded `Loop`, which is likewise unguarded at run time.
-      if (registry.compiling.has(name)) return name;
+      //
+      // Where the target language forbids recursion outright — GLSL and WGSL
+      // both do — there is no such call to emit: the name is not declared yet
+      // and no shader compiler would accept it. Fail closed (D6) naming the
+      // function instead.
+      if (registry.compiling.has(name)) {
+        if (registry.lowering?.noRecursion)
+          throw new Error(
+            `${h}: a recursive (or mutually recursive) user-defined function ` +
+              `has no lowering on target '${target.language ?? 'unknown'}' — ` +
+              `the shader languages forbid recursion. Rewrite ${h} as a ` +
+              `bounded loop (Sum/Product/Loop) before compiling. Fail closed (D6).`
+          );
+        return name;
+      }
       registry.compiling.add(name);
       try {
         const params = literal.ops
@@ -4043,10 +4139,19 @@ export class BaseCompiler {
         // degree-mode compile of `t ↦ f(t)` emitted radian-based trig inside
         // `f`'s definition while `t ↦ sin(t)` correctly scaled.
         const bodyExpr = rewriteAngularUnit(literal.ops[0].canonical);
+        // Against the ROOT target — the one the registry was installed on —
+        // NOT the requesting one. An emitted definition is a module-level
+        // (preamble) function, so it must see only the compilation's own
+        // var/fold rules plus its own parameters. Chaining through the
+        // requester leaked that caller's bindings into this body: emitting
+        // `g` (whose body reads a global `z`) from inside `f(z) := g(1)`
+        // resolved `z` to `f`'s parameter. The registry, naming context and
+        // capture set are shared objects, so they survive the switch.
+        const root = registry.root ?? target;
         const bodyTarget: CompileTarget<Expression> = {
-          ...target,
-          var: (id) => (params.includes(id) ? id : target.var(id)),
-          boundVars: BaseCompiler.withBoundNames(target, params),
+          ...root,
+          var: (id) => (params.includes(id) ? id : root.var(id)),
+          boundVars: BaseCompiler.withBoundNames(root, params),
         };
         // The body is emitted into the artifact, so its symbols join the
         // compilation's collision inventory UNCONDITIONALLY — a `_tv1` in a
@@ -4054,6 +4159,28 @@ export class BaseCompiler {
         // CSE is off (the nested harvest below merges the same names, but only
         // when a session is enabled).
         BaseCompiler.mergeUsedNames(target, collectUsedNames(bodyExpr));
+        // A target with its own definition lowering (the shader targets)
+        // synthesizes the signature and compiles the body itself — a shader
+        // function body is a STATEMENT position and its declaration needs
+        // static parameter/return types, neither of which the JS arrow form
+        // below can express. The `defs` entry still lands here, AFTER the body
+        // compiled, so a nested dependency it emitted precedes it (GLSL
+        // requires declaration before use).
+        const lowering = registry.lowering;
+        if (lowering) {
+          registry.defs.set(
+            name,
+            lowering.define({
+              id: h,
+              name,
+              params,
+              body: bodyExpr,
+              literal,
+              target: bodyTarget,
+            })
+          );
+          return name;
+        }
         // Each emitted definition body gets its OWN nested harvest scope in
         // the same session (§5.4): its own regions and candidates — the body
         // is not part of the root tree — but the same naming counter, so temp

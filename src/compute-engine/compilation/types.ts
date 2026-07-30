@@ -516,21 +516,103 @@ export interface CompileTarget<Expr = unknown> {
    * preamble; its call sites compile to `_fn_f(arg)`. Stored as an object so it
    * survives the `{ ...target }` spreads the compiler makes while recursing.
    *
-   * A target opts in by providing this registry (the executable JS targets do,
-   * in their `compile()`); a target that leaves it undefined keeps the historic
-   * `Unknown operator` throw for a user-function head (raw direct-target /
-   * GPU / source-only paths). `defs` is keyed by the generated local name, in
-   * insertion order, so a dependency (`f`) is emitted before a dependent
-   * (`g(x) := f(x)+1`). `compiling` is the in-progress stack used to fail
-   * closed (D6) on recursive / mutually-recursive definitions.
+   * A target opts in by providing this registry (the executable JS targets and
+   * the GPU shader targets do, in their `compile()` / `createTargetFor()`); a
+   * target that leaves it undefined keeps the historic `Unknown operator` throw
+   * for a user-function head (raw direct-target / source-only paths). `defs` is
+   * keyed by the generated local name, in insertion order, so a dependency
+   * (`f`) is emitted before a dependent (`g(x) := f(x)+1`) — which is also what
+   * GLSL's declaration-before-use rule requires. `compiling` is the in-progress
+   * stack: a re-entrant name is a (mutually) recursive reference, compiled as a
+   * call by name on the JS targets and failed closed (D6) where the language
+   * forbids recursion (`lowering.noRecursion`).
    */
   userFunctions?: {
     defs: Map<string, string>;
     compiling: Set<string>;
+    /**
+     * The target this registry was INSTALLED on — the root of the compilation.
+     *
+     * An emitted definition is a module-level (preamble) function: it sees the
+     * compilation's own `var`/fold rules plus its own parameters, and nothing
+     * else. Without this, a definition emitted *while another definition's
+     * body was compiling* inherited the requesting target — that caller's
+     * parameter shadowing, its `Sum` index substitution, its hoist sink — so a
+     * global the nested body references could resolve to the caller's
+     * parameter. `ensureUserFunctionEmitted` compiles every body against this
+     * target instead of the requesting one.
+     */
+    root?: CompileTarget<Expr>;
     /** Symbols proven (this compile) NOT to name a user-defined function, so a
      * repeated bare free symbol in value position doesn't re-hit
      * `lookupDefinition` on every occurrence. Populated lazily. */
     misses?: Set<string>;
+    /**
+     * Language hooks for a target whose user-defined functions are NOT JS
+     * arrow functions — the GLSL/WGSL shader targets, where a definition is a
+     * statically typed function declaration. Absent ⇒ the historic JS
+     * lowering (`const _fn_f = (x) => …;`, call `_fn_f(a)`, value position
+     * `_fn_f`, recursion by name).
+     *
+     * The hooks own everything language-specific: `define` synthesizes the
+     * signature and compiles the body, `call` emits (and shape-checks) a call
+     * site, `value` decides what a user function used as a VALUE means. They
+     * live on the registry rather than on the target so they travel with the
+     * `defs` map they populate.
+     */
+    lowering?: {
+      /**
+       * Emit the complete definition of `name` — declaration syntax plus the
+       * compiled body. Called once per function, with the body's parameters
+       * already shadowed on `target`. Anything it cannot type statically it
+       * must fail closed on (D6).
+       */
+      define: (ctx: {
+        /** The engine symbol being emitted (`f`). */
+        id: MathJsonSymbol;
+        /** The generated definition name (`_fn_f`). */
+        name: string;
+        /** Formal parameter names, in order. */
+        params: ReadonlyArray<string>;
+        /** The body to compile (canonical, angular-unit rewritten). */
+        body: Expr;
+        /** The whole `["Function", body, …params]` literal. */
+        literal: Expr;
+        /** Target with the parameters shadowed and bound. */
+        target: CompileTarget<Expr>;
+      }) => string;
+
+      /**
+       * Emit a call site. Also the place to fail closed on an argument whose
+       * static shape does not match the synthesized parameter type — a shader
+       * has no runtime broadcast dispatch to fall back on.
+       */
+      call: (ctx: {
+        id: MathJsonSymbol;
+        name: string;
+        args: ReadonlyArray<Expr>;
+        target: CompileTarget<Expr>;
+      }) => string;
+
+      /**
+       * A user function referenced in VALUE position (a higher-order operand
+       * such as `Map(xs, f)`). The shader languages have no function values,
+       * so their implementation fails closed (D6).
+       */
+      value: (ctx: {
+        id: MathJsonSymbol;
+        name: string;
+        target: CompileTarget<Expr>;
+      }) => string;
+
+      /**
+       * The target language forbids recursion (GLSL and WGSL both do): a
+       * re-entrant reference fails closed (D6) instead of emitting a call to a
+       * name that is not yet declared. The JS stack-exhaustion contract
+       * deliberately does NOT carry over.
+       */
+      noRecursion?: boolean;
+    };
   };
 }
 

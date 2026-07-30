@@ -952,6 +952,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         ...(vars ? Object.values(vars) : []),
       ]),
     });
+    // The compilation root: a user-function definition body compiles against
+    // THIS target plus its own parameters, never against a nested requesting
+    // one (see `CompileTarget.userFunctions.root`).
+    target.userFunctions!.root = target;
 
     // Common-subexpression elimination (design §4.2), on the same
     // post-`rewriteAngularUnit` tree the emitters walk. The G1b provenance

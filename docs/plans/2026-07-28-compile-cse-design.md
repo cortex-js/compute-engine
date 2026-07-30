@@ -607,7 +607,25 @@ visibility and evaluate-once).
   collapse for js-target members; before/after frame-time profiles
   requested on their top-25 examples.
 
-## 9. Phase 2 — GPU targets (separate implementation, agreed direction)
+## 9. Phase 2 — GPU targets (§9.1 IMPLEMENTED 2026-07-29; §9.2 blocked on Tycho)
+
+**§9.1 status: implemented.** The `userFunctions` registry gained a
+per-target `lowering` hook (`define`/`call`/`value`/`noRecursion`,
+`types.ts`); GPU targets install it in `createTargetFor` and deliver
+definitions through `preambleFor` — the same channel as the `_gpu_*`
+helpers — on the bare-expression and shader routes, prepended on the
+`compileFunction` route, and explicitly opted out on `compileToSource`
+(an expression string cannot carry a declaration). Callee-before-caller
+ordering falls out of the registry's post-body-compile `defs.set`
+insertion order — no prototypes needed. Ratified deviations from the
+sketch below: **no `int`/`i32` synthesis** (`formatGPUNumber` always emits
+a decimal point, so an int parameter would disagree with its own call
+sites — the same rule Block locals follow); **array shapes beyond vec4
+fail closed** (no `float[n]` parameter lowering in v1); call-site
+argument-shape inference not attempted (the machinery does not offer call
+shapes; first-call-site inference with the Block-local disagreement rule
+is the follow-up if declared-signature friction shows in Tycho's corpus).
+Tests: `test/compute-engine/compile-gpu-user-functions.test.ts`.
 
 1. **User-function emission for GLSL/WGSL** — the higher-value piece:
    inlining-driven duplication dominates the corpus, and a definition

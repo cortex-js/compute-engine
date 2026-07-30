@@ -79,15 +79,25 @@ export class GLSLTarget extends GPUShaderTarget {
       .map(([name, type]) => `${type} ${name}`)
       .join(', ');
 
+    // A user-defined function the body calls is emitted once as its own GLSL
+    // declaration. This route returns a complete declaration with no preamble
+    // channel, so the whole preamble is prepended — GLSL requires declaration
+    // before use, and the registry orders a callee ahead of its caller.
+    // `preambleFor` (NOT a raw `userFunctionDefs()` prepend) is what declares
+    // the `_gpu_*` helpers the DEFINITION BODIES reference, and it already
+    // folds the definitions in exactly once, after those helpers.
+    const rawDefs = this.preambleFor(body);
+    const userDefs = rawDefs ? `${rawDefs}\n` : '';
+
     if (body.includes('\n')) {
       // Block — body already has `return` on the last line
       const indented = body
         .split('\n')
         .map((l) => `  ${l}`)
         .join('\n');
-      return `${returnType} ${functionName}(${params}) {\n${indented}\n}`;
+      return `${userDefs}${returnType} ${functionName}(${params}) {\n${indented}\n}`;
     }
-    return `${returnType} ${functionName}(${params}) {
+    return `${userDefs}${returnType} ${functionName}(${params}) {
   return ${body};
 }`;
   }

@@ -23,6 +23,9 @@ import type {
   CompilationResult,
 } from './types.js';
 import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
+import { isNonRealNumber } from '../../common/type/utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import type { Type } from '../../common/type/types.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { foldSeed } from '../numerics/random.js';
@@ -432,6 +435,49 @@ function gpuNaNFor(
   if (n === undefined) return gpuNaN(target);
   const ctor = target?.language === 'wgsl' ? `vec${n}f` : `vec${n}`;
   return `${ctor}(${gpuNaN(target)})`;
+}
+
+/**
+ * Compile a **conditionally-evaluated** operand of a GPU conditional — an
+ * `If`/`When`/`Which`/`Match` arm, or a `Which` condition past the first —
+ * with hoisting forbidden.
+ *
+ * GLSL's `?:` short-circuits: an arm runs only when it is selected. A lowering
+ * that hoists statements (the loop form of `Sum`/`Product`, Tycho item 110)
+ * would move that work OUT of the conditional, where it runs unconditionally.
+ * That is not merely a cost: `_gpu_rnd_draw(seed, inout uint n)` advances a
+ * RUNTIME counter, so a loop stranded ahead of a ternary it never feeds shifts
+ * the value of every later draw in the shader — a silent disagreement with the
+ * interpreter, which evaluates only the taken branch. Fail closed (D6); the
+ * caller falls back to interpretation, exactly as it did before hoisting
+ * existed.
+ *
+ * (WGSL's `select` is a function, so both operands ARE evaluated there — but
+ * the emission is shared and the counter-ordering hazard is the same, so the
+ * guard is not language-gated.)
+ */
+function compileGPUConditionalArm(
+  head: string,
+  compiled: () => string,
+  target: CompileTarget<Expression>
+): string {
+  const sink = BaseCompiler.canHoist(target) ? target.hoist : undefined;
+  const before = sink?.stmts.length ?? 0;
+  const code = compiled();
+  if (sink !== undefined && sink.stmts.length > before) {
+    // Drop the escaped statements: the throw is recoverable (the engine-level
+    // `compile()` catches it to build the interpreter fallback) and a caller
+    // reusing the target must not inherit orphaned code.
+    sink.stmts.length = before;
+    throw new Error(
+      `${head}: a conditionally-evaluated branch contains a multi-statement ` +
+        `construct (a loop-form Sum/Product). Hoisting it out of the branch ` +
+        `would run it unconditionally — a shader conditional is an expression, ` +
+        `not a statement — which changes the result whenever the branch draws ` +
+        `from the random stream. Fail closed (D6).`
+    );
+  }
+  return code;
 }
 
 /**
@@ -1000,14 +1046,46 @@ function compileGPUSumProduct(
   // Unroll small constant ranges — pure inline expression
   if (bothConstant && upperNum - lowerNum + 1 <= GPU_UNROLL_LIMIT) {
     const terms: string[] = [];
+    // Statements a term hoists (a nested loop-form Sum with a symbolic bound)
+    // are drained into the ENCLOSING sink: the index is substituted as a
+    // literal in `var` below, so nothing a term emits refers to the bound name,
+    // and the statements are valid where the unrolled expression itself is.
+    // Without an enclosing sink they have nowhere to go, and the term falls
+    // back to the legacy multi-line block — which `compileValueOperand` then
+    // rejects, as before (fail closed, D6).
+    //
+    // A term that hoists is drained IMMEDIATELY and its remaining value bound
+    // to a temporary, which is what enters the combined expression. Collecting
+    // every term's statements first and draining them at the end reordered the
+    // unroll — term1-loop, term2-loop, term1-rest, term2-rest — and
+    // `_gpu_rnd_draw` advances a runtime counter, so a draw in term2's loop
+    // would move ahead of a draw in term1's remainder and every later value in
+    // the shader would shift.
     for (let k = lowerNum; k <= upperNum; k++) {
       const kStr = formatGPUNumber(k);
+      const termBoundVars = BaseCompiler.withBoundNames(target, [index]);
+      const termSink = { stmts: [] as string[], boundVars: termBoundVars };
       const innerTarget: CompileTarget<Expression> = {
         ...target,
         var: (id) => (id === index ? kStr : target.var(id)),
-        boundVars: BaseCompiler.withBoundNames(target, [index]),
+        boundVars: termBoundVars,
+        hoist: BaseCompiler.canHoist(target) ? termSink : undefined,
       };
-      terms.push(`(${BaseCompiler.compile(args[0], innerTarget)})`);
+      const code = BaseCompiler.compile(args[0], innerTarget);
+      if (termSink.stmts.length === 0) {
+        terms.push(`(${code})`);
+        continue;
+      }
+      // The sink is non-empty only when `canHoist(target)` held above.
+      const tv = BaseCompiler.tempVar(target);
+      const scalar = isWGSL ? 'f32' : 'float';
+      const decl = isWGSL ? `var ${tv}: ${scalar}` : `${scalar} ${tv}`;
+      BaseCompiler.hoistStatement(
+        target,
+        ...termSink.stmts,
+        `${decl} = ${code};`
+      );
+      terms.push(`(${tv})`);
     }
     return `(${terms.join(` ${op} `)})`;
   }
@@ -1302,10 +1380,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // expressible here.
   If: (args, compile, target) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
+    // The condition is evaluated unconditionally, so it may hoist; the two arms
+    // are selected and must not (see `compileGPUConditionalArm`).
     return gpuConditional(
       compile(args[0]),
-      compile(args[1]),
-      compile(args[2]),
+      compileGPUConditionalArm('If', () => compile(args[1]), target),
+      compileGPUConditionalArm('If', () => compile(args[2]), target),
       target
     );
   },
@@ -1322,7 +1402,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (isSymbol(args[1], 'False')) return gpuNaNFor(args[0], target);
     return gpuConditional(
       compile(args[1]),
-      compile(args[0]),
+      compileGPUConditionalArm('When', () => compile(args[0]), target),
       gpuNaNFor(args[0], target),
       target
     );
@@ -1340,9 +1420,21 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (i >= args.length) return gpuNaNFor(shapeRef, target);
       const cond = args[i];
       const val = args[i + 1];
+      // Only the FIRST condition is evaluated unconditionally. Every value, and
+      // every LATER condition, sits behind a branch and must not hoist out of
+      // it. (`build(i + 2)` needs no wrapper of its own: it guards its own
+      // pieces on the next turn of the recursion.)
+      const armed = (f: () => string): string =>
+        i === 0 ? f() : compileGPUConditionalArm('Which', f, target);
       // `True` marks the default branch.
-      if (isSymbol(cond, 'True')) return `(${compile(val)})`;
-      return gpuConditional(compile(cond), compile(val), build(i + 2), target);
+      if (isSymbol(cond, 'True'))
+        return `(${armed(() => compile(val))})`;
+      return gpuConditional(
+        armed(() => compile(cond)),
+        compileGPUConditionalArm('Which', () => compile(val), target),
+        build(i + 2),
+        target
+      );
     };
     return build(0);
   },
@@ -1350,12 +1442,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // `==` comparisons, the subject inlined into each comparison (deterministic on
   // GPU). Tier-2 destructuring, refutable tier-3, and string constants (no
   // string type) fail closed (D6). See BaseCompiler.compileMatchTernary.
+  // `compileMatchTernary` compiles the pieces itself, so the no-hoist guard is
+  // handed to it (`arm`) and applied PER PIECE — each case body, each case
+  // guard, and each condition past the first — the way the `If`/`Which`
+  // lowerings do. The SUBJECT stays outside it: it is compiled first and
+  // evaluated unconditionally, so a loop-form `Sum` there is safe to hoist.
   Match: (args, _compile, target) =>
     BaseCompiler.compileMatchTernary(args[0]!.engine, args, target, {
       ternary: (c, t, e) => gpuConditional(c, t, e, target),
       eq: '==',
       noMatch: gpuNaN(target),
       allowStrings: false,
+      arm: (f) => compileGPUConditionalArm('Match', f, target),
     }),
   Power: (args, compile, target) => {
     const base = args[0];
@@ -4525,6 +4623,142 @@ export function formatGPUNumber(n: number): string {
   return str;
 }
 
+// ---------------------------------------------------------------------------
+// User-defined function emission (Phase 2 of the compile-CSE design, §9.1 of
+// `docs/plans/2026-07-28-compile-cse-design.md`).
+//
+// A user-defined function literal (`f(x) := …`) called from a shader-compiled
+// expression used to fail as an unknown operator, forcing consumers to inline
+// the body at every call site. The GPU targets now host the same
+// `userFunctions` registry the JS targets do (`base-compiler.ts`), with a
+// `lowering` hook supplying what the shader languages need and the JS form
+// cannot express: STATIC parameter/return types, a statement-position body,
+// declaration-before-use ordering, and fail-closed recursion.
+// ---------------------------------------------------------------------------
+
+/** The shader scalar type. Always float: see `gpuTypeOfDeclaredType`. */
+function gpuScalarType(isWGSL: boolean): string {
+  return isWGSL ? 'f32' : 'float';
+}
+
+/** The `vecN` type of the language (`vec2` / `vec2f`). */
+function gpuVecType(n: number, isWGSL: boolean): string {
+  return isWGSL ? `vec${n}f` : `vec${n}`;
+}
+
+/**
+ * Is `t` a component a shader `vecN` can hold? A `vecN` is N REAL floats: a
+ * boolean, a string, a complex value (itself a `vec2`) and a nested aggregate
+ * all have a lowering of their own that does not fit a component slot.
+ *
+ * Without this, a `tuple<boolean, boolean>` declared `vec2f` and emitted
+ * `vec2f(true, false)` — source no driver accepts, behind a reported success.
+ */
+function gpuIsVectorComponentType(t: Type): boolean {
+  // Exactly the types `gpuTypeOfDeclaredType` lowers to the shader SCALAR —
+  // including the untyped (`unknown`) case, which is a float by that same
+  // convention. The language is irrelevant to the predicate, so it asks in
+  // GLSL spelling.
+  return gpuTypeOfDeclaredType(t, false) === gpuScalarType(false);
+}
+
+/**
+ * Static component count of a declared aggregate type, if it has one — and
+ * only when every component fits a `vecN` slot (`gpuIsVectorComponentType`),
+ * so a heterogeneous or non-numeric aggregate answers `undefined` and its
+ * caller fails closed (D6).
+ */
+function gpuDeclaredComponentCount(t: Type): number | undefined {
+  if (typeof t === 'string') return undefined;
+  if (t.kind === 'tuple')
+    return t.elements.every((e) => gpuIsVectorComponentType(e.type))
+      ? t.elements.length
+      : undefined;
+  if (t.kind === 'list' && t.dimensions?.length === 1)
+    return gpuIsVectorComponentType(t.elements) ? t.dimensions[0] : undefined;
+  return undefined;
+}
+
+/**
+ * The shader type a value of DECLARED type `t` lowers to, or `undefined` when
+ * it has no single static shader type (a matrix/tensor, an unsized or
+ * over-wide list, a function value).
+ *
+ * No declared type — the common `x ↦ …` case, whose parameters type as
+ * `unknown` — is a shader scalar. Deliberately never `int`/`i32`: GPU number
+ * literals are always emitted with a decimal point (`formatGPUNumber`) and
+ * scalar shader arithmetic is float, so an integer-typed parameter would
+ * disagree with its own call sites and poison every downstream use in float
+ * math. This is the same rule `compileBlock` applies to block locals.
+ */
+function gpuTypeOfDeclaredType(
+  t: Type | undefined,
+  isWGSL: boolean
+): string | undefined {
+  if (t === undefined || t === 'unknown' || t === 'any')
+    return gpuScalarType(isWGSL);
+  // Complex lowers to `vec2(re, im)` — the target's existing convention.
+  if (isNonRealNumber(t)) return gpuVecType(2, isWGSL);
+  if (isSubtype(t, 'boolean')) return 'bool';
+  if (isSubtype(t, 'number')) return gpuScalarType(isWGSL);
+  const n = gpuDeclaredComponentCount(t);
+  if (n !== undefined && n >= 2 && n <= 4) return gpuVecType(n, isWGSL);
+  return undefined;
+}
+
+/**
+ * The shader type the VALUE `expr` lowers to, or `undefined` when it has no
+ * single static shader type.
+ *
+ * The value-side mirror of `gpuTypeOfDeclaredType`, built on the same
+ * shape/complex-ness inference `compileBlock` uses for block locals — so a
+ * function's return type and its call sites' argument types are decided by one
+ * analysis. Widths outside 2–4 answer `undefined`: the list compilers lower
+ * those to an array constructor, which is not a value a shader function
+ * parameter or return slot accepts here.
+ */
+function gpuTypeOfValue(expr: Expression, isWGSL: boolean): string | undefined {
+  if (BaseCompiler.isComplexValued(expr)) return gpuVecType(2, isWGSL);
+  const n = BaseCompiler.aggregateComponentCount(expr);
+  if (n !== undefined) {
+    if (n < 2 || n > 4) return undefined;
+    // Width alone is not enough: every component must also fit a `vecN` slot,
+    // or the emission is `vec2f(true, false)` — see `gpuIsVectorComponentType`.
+    return gpuValueHasVectorComponents(expr) ? gpuVecType(n, isWGSL) : undefined;
+  }
+  if (BaseCompiler.isNonScalarShape(expr)) return undefined;
+  if (expr.type.matches('boolean')) return 'bool';
+  return gpuScalarType(isWGSL);
+}
+
+/**
+ * Do the components of the AGGREGATE value `expr` each fit a `vecN` slot?
+ *
+ * The value-side mirror of the component check `gpuDeclaredComponentCount`
+ * performs: structural for a `Tuple`/`List` literal (whose element types the
+ * declared type may not carry), type-based otherwise. A width that came from a
+ * local shape frame was validated when the frame was built, so an expression
+ * with no aggregate type of its own answers `true`.
+ */
+function gpuValueHasVectorComponents(expr: Expression): boolean {
+  if (isFunction(expr, 'Tuple') || isFunction(expr, 'List'))
+    return expr.ops.every((op) => gpuIsVectorComponentType(op.type.type));
+  const t = expr.type.type;
+  if (typeof t !== 'string' && (t.kind === 'tuple' || t.kind === 'list'))
+    return gpuDeclaredComponentCount(t) !== undefined;
+  return true;
+}
+
+/** The synthesized signature of an emitted user-function definition. */
+type GPUUserFunctionSignature = {
+  /** Formal parameter names, for diagnostics. */
+  names: ReadonlyArray<string>;
+  /** Shader type of each parameter, in order. */
+  params: ReadonlyArray<string>;
+  /** Shader return type. */
+  ret: string;
+};
+
 /**
  * Abstract base class for GPU shader compilation targets.
  *
@@ -4693,7 +4927,250 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // than one expression, or the caller's `vars` source).
     if (options.naming === undefined)
       target.naming = BaseCompiler.newNamingContext(expr, [target.preamble]);
+    // User-defined function support is opt-in per target (see
+    // `CompileTarget.userFunctions`), and opting in is only sound where the
+    // emitted DEFINITIONS have a delivery channel. Every route that reaches
+    // `createTargetFor` has one (`preambleFor` — the expression, shader, AND
+    // `compileFunction` routes, so helpers referenced only inside a
+    // definition body are declared too); a caller that has
+    // none opts out by passing `userFunctions: undefined` explicitly, which
+    // restores the historic `Unknown operator` throw. The raw `createTarget()`
+    // route (direct custom targets, the interpreter fallback) never gets a
+    // registry at all.
+    this.currentUserFunctions = undefined;
+    if (!('userFunctions' in options)) {
+      const registry = this.newUserFunctions()!;
+      // The compilation root: every definition body is compiled against THIS
+      // target, never against whichever nested target requested the emission
+      // (see `CompileTarget.userFunctions.root`).
+      registry.root = target;
+      target.userFunctions = registry;
+      this.currentUserFunctions = registry;
+    }
     return target;
+  }
+
+  /**
+   * The user-defined function registry of the compilation currently in
+   * flight, i.e. the one the most recent `createTargetFor` created.
+   *
+   * This is how the emitted definitions reach `preambleFor` — the single
+   * channel that delivers the `_gpu_*` helpers today — which is called with
+   * the emitted code but not with the target that produced it. Safe as
+   * instance state because GPU compilation is synchronous and non-reentrant:
+   * every route creates its target, compiles, and reads the definitions back
+   * within one call, before any other route can run.
+   */
+  private currentUserFunctions?: CompileTarget<Expression>['userFunctions'];
+
+  /**
+   * The user-defined function definitions emitted during the current
+   * compilation, in dependency order (a callee precedes its caller — which is
+   * also what GLSL's declaration-before-use rule requires), or `''`.
+   */
+  protected userFunctionDefs(): string {
+    const defs = this.currentUserFunctions?.defs;
+    if (!defs || defs.size === 0) return '';
+    return [...defs.values()].join('\n\n') + '\n';
+  }
+
+  /**
+   * A fresh user-defined function registry for one compilation, with the
+   * shader-language lowering hooks installed (§9.1).
+   *
+   * The synthesized signatures live in this closure, so `call` can check a
+   * call site's argument shapes against the declaration `define` wrote, and
+   * both die with the registry.
+   */
+  private newUserFunctions(): CompileTarget<Expression>['userFunctions'] {
+    const language = this.languageId;
+    const isWGSL = language === 'wgsl';
+    const signatures = new Map<string, GPUUserFunctionSignature>();
+    const declareFn = (
+      name: string,
+      ret: string,
+      params: ReadonlyArray<[name: string, type: string]>,
+      body: string
+    ) => this.declareGPUFunction(name, ret, params, body);
+
+    return {
+      defs: new Map<string, string>(),
+      compiling: new Set<string>(),
+      lowering: {
+        // GLSL and WGSL both forbid recursion outright.
+        noRecursion: true,
+
+        define: ({ id, name, params, body, literal, target }) => {
+          // The generated name is emitted bare; a shader reserved word here
+          // would be source no driver accepts (D6).
+          gpuCheckIdentifier(name, language);
+          // The formal parameters are spliced verbatim into the signature and
+          // referenced bare in the body, so they need the same check — the
+          // convention the loop indices of `Sum`/`Product`/`Loop` follow.
+          // `f(discard) := discard + 1` would otherwise emit
+          // `float _fn_f(float discard)` behind a reported success.
+          for (const p of params) gpuCheckIdentifier(p, language);
+
+          // PARAMETER TYPES. The declared signature is authoritative — a
+          // parameter symbol's own type does not carry it (`f: (complex) ->
+          // complex` leaves `z` typed `number`) — with the parameter symbol's
+          // type as the fallback for an undeclared/`unknown` slot.
+          const engine = literal.engine;
+          const paramSymbols = isFunction(literal)
+            ? literal.ops.slice(1)
+            : ([] as ReadonlyArray<Expression>);
+          const complexFrame = new Map<string, boolean>();
+          const vectorFrame = new Map<string, number>();
+          const paramTypes = params.map((p, i) => {
+            const declared = BaseCompiler.userFunctionParamType(engine, id, i);
+            const own = paramSymbols[i]?.type?.type;
+            const t =
+              declared === undefined || declared === 'unknown' ? own : declared;
+            const shader = gpuTypeOfDeclaredType(t, isWGSL);
+            if (shader === undefined)
+              throw new Error(
+                `${id}: parameter "${p}" has no static ${language.toUpperCase()} ` +
+                  `type — only scalars, booleans, complex values and 2–4 ` +
+                  `component vectors have one, and a shader function ` +
+                  `signature must be fully typed. Declare a narrower ` +
+                  `signature for "${id}". Fail closed (D6).`
+              );
+            // Record the parameter's inferred shape so the body analysis
+            // agrees with the declaration just synthesized (and so a
+            // parameter is never resolved against a same-named engine
+            // symbol). Scalars use the `LOCAL_SCALAR` sentinel.
+            const complex = t !== undefined && isNonRealNumber(t);
+            const n = complex
+              ? 2
+              : (gpuDeclaredComponentCount(t ?? 'unknown') ?? 0);
+            complexFrame.set(p, complex);
+            vectorFrame.set(p, n >= 2 ? n : BaseCompiler.LOCAL_SCALAR);
+            return shader;
+          });
+
+          // RETURN TYPE and BODY, both under the parameter shape frame — and
+          // under that frame ONLY (`isolate`): an emitted definition is a
+          // module-level function, so when this emission was triggered from
+          // inside ANOTHER definition's body, that caller's parameter shapes
+          // must not reach here (they would give a same-named global the
+          // caller's width). A shader function body is a STATEMENT position: a
+          // loop-form `Sum`/`Product` inside it hoists its loop ahead of the
+          // `return`.
+          const { ret, code } = BaseCompiler.withLocalShapeFrame(
+            complexFrame,
+            vectorFrame,
+            () => {
+              const ret = gpuTypeOfValue(body, isWGSL);
+              if (ret === undefined)
+                throw new Error(
+                  `${id}: the return value has no static ` +
+                    `${language.toUpperCase()} type — only scalars, booleans, ` +
+                    `complex values and 2–4 component vectors have one. Fail ` +
+                    `closed (D6).`
+                );
+              return {
+                ret,
+                code: BaseCompiler.compileFunctionBody(body, target),
+              };
+            },
+            true
+          );
+
+          signatures.set(name, { names: params, params: paramTypes, ret });
+          return declareFn(
+            name,
+            ret,
+            params.map((p, i): [string, string] => [p, paramTypes[i]]),
+            code
+          );
+        },
+
+        call: ({ id, name, args, target }) => {
+          const sig = signatures.get(name);
+          // `define` always runs before the first `call`
+          // (`ensureUserFunctionEmitted`), so this cannot be reached.
+          if (sig === undefined)
+            throw new Error(`Internal: no synthesized signature for "${id}"`);
+          if (args.length !== sig.params.length)
+            throw new Error(
+              `${id}: called with ${args.length} argument(s) but declared ` +
+                `with ${sig.params.length} — a ${language.toUpperCase()} call ` +
+                `must match its declaration exactly (there are no optional or ` +
+                `variadic parameters). Fail closed (D6).`
+            );
+          const code = args.map((arg, i) => {
+            const t = gpuTypeOfValue(arg, isWGSL);
+            // A collection argument beyond the static vec2–vec4 shapes: the
+            // JS target answers this with the `_SYS.bcastFn` runtime
+            // broadcast dispatch, which a shader has no analog for. Scalar
+            // applying it silently would compute a different value.
+            if (t === undefined)
+              throw new Error(
+                `${id}: argument ${i + 1} is a collection with no static ` +
+                  `${language.toUpperCase()} shape (only 2–4 component ` +
+                  `vectors have one), and a shader has no runtime broadcast ` +
+                  `dispatch to apply "${id}" element-wise. Fail closed (D6).`
+              );
+            if (t !== sig.params[i])
+              throw new Error(
+                `${id}: argument ${i + 1} lowers to "${t}" but parameter ` +
+                  `"${sig.names[i]}" is declared "${sig.params[i]}" — ` +
+                  `${language.toUpperCase()} has no implicit conversion ` +
+                  `between them. Declare a matching signature for "${id}". ` +
+                  `Fail closed (D6).`
+              );
+            return BaseCompiler.compileValueOperand(arg, target);
+          });
+          return `${name}(${code.join(', ')})`;
+        },
+
+        value: ({ id }) => {
+          throw new Error(
+            `${id}: a user-defined function cannot be used as a VALUE on ` +
+              `target '${language}' — the shader languages have no function ` +
+              `values (no higher-order operands, no function pointers). Call ` +
+              `it instead. Fail closed (D6).`
+          );
+        },
+      },
+    };
+  }
+
+  /**
+   * Assemble a function declaration in the target language from an
+   * ALREADY-COMPILED body.
+   *
+   * The declaration-syntax half of `compileFunction`, split out because the
+   * user-function emission must compile the body itself (parameters shadowed,
+   * shapes framed, same registry and naming context) rather than against a
+   * fresh target of its own. `params`/`ret` are already language-specific
+   * types (`float`/`vec2` vs `f32`/`vec2f`).
+   */
+  protected declareGPUFunction(
+    name: string,
+    returnType: string,
+    params: ReadonlyArray<[name: string, type: string]>,
+    body: string
+  ): string {
+    const signature =
+      this.languageId === 'wgsl'
+        ? `fn ${name}(${params
+            .map(([n, t]) => `${n}: ${t}`)
+            .join(', ')}) -> ${returnType}`
+        : `${returnType} ${name}(${params
+            .map(([n, t]) => `${t} ${n}`)
+            .join(', ')})`;
+    // A multi-line body already carries its own `return` on the last line (the
+    // block convention, and what `compileFunctionBody` emits once anything
+    // hoisted); a single-line one is an expression.
+    if (body.includes('\n')) {
+      const indented = body
+        .split('\n')
+        .map((l) => `  ${l}`)
+        .join('\n');
+      return `${signature} {\n${indented}\n}`;
+    }
+    return `${signature} {\n  return ${body};\n}`;
   }
 
   compile(
@@ -4796,6 +5273,16 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * shader with no separate preamble channel).
    */
   protected preambleFor(code: string): string {
+    // The user-defined function definitions this compilation emitted travel to
+    // the consumer on the SAME channel as the `_gpu_*` helpers — the returned
+    // preamble — so every route that delivers helpers delivers definitions
+    // too, with no second channel to wire up. They are folded into `code`
+    // first so the helper scans below see what the DEFINITION BODIES
+    // reference (a `_gpu_powi` used only inside `f` is still a helper the
+    // shader must declare), and appended AFTER the helpers so a definition
+    // that calls one is declared second (GLSL: declaration before use).
+    const userDefs = this.userFunctionDefs();
+    if (userDefs) code = `${code}\n${userDefs}`;
     let preamble = '';
     preamble += buildComplexPreamble(code, this.languageId);
     // Only GLSL emits `_gpu_nan()` (WGSL uses an inline bit pattern); the helper
@@ -4902,14 +5389,28 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           ? GPU_COLOR_PREAMBLE_WGSL
           : GPU_COLOR_PREAMBLE_GLSL;
     }
-    return preamble;
+    if (!userDefs) return preamble;
+    return preamble ? `${preamble}\n${userDefs}` : userDefs;
   }
 
   compileToSource(
     expr: Expression,
     _options: CompilationOptions<Expression> = {}
   ): string {
-    return BaseCompiler.compile(expr, this.createTargetFor(expr));
+    // This route answers with a bare EXPRESSION string and has no preamble
+    // channel — neither for the `_gpu_*` helpers nor for a user-function
+    // definition, and a function declaration is not an expression. Opt out of
+    // the registry explicitly, so a user-function head keeps failing closed
+    // here instead of compiling to a call whose definition is dropped.
+    //
+    // Deliberately NOT `compileFunctionBody`: this is not a statement position,
+    // so there is nowhere to put a hoisted loop (Tycho item 110). With no sink
+    // installed, a loop-form `Sum` falls back to the legacy block exactly as it
+    // did before hoisting existed.
+    return BaseCompiler.compile(
+      expr,
+      this.createTargetFor(expr, undefined, { userFunctions: undefined })
+    );
   }
 
   /**
@@ -4935,9 +5436,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // ONE naming context for the whole body too, seeded from EVERY statement:
     // the counter must stay distinct across statements (same reason as the
     // random counters), and a `_tv`-named symbol in any statement is a
-    // collision for all of them.
+    // collision for all of them. The caller-supplied assignment TARGETS are
+    // seeded as source text as well: a hoisted loop declares its accumulator
+    // ahead of the assignment, so a shader output spelled `_tv1` would
+    // otherwise be shadowed and left unwritten (`_tv1 = _tv1`).
     const target = this.createTargetFor(body[0]?.expression, stage, {
-      naming: BaseCompiler.newNamingContext(body.map((a) => a.expression)),
+      naming: BaseCompiler.newNamingContext(
+        body.map((a) => a.expression),
+        body.map((a) => a.variable)
+      ),
     });
     // Each assignment is a statement position of its own, so a loop-form
     // `Sum`/`Product` inside it hoists its loop into `stmts`, which the shader

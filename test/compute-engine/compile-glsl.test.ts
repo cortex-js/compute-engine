@@ -917,6 +917,79 @@ describe('GLSL COMPILATION', () => {
       expect(fn).toContain('sin(float(i))');
     });
 
+    it('scopes a nested loop inside an UNROLLED outer term', () => {
+      // The outer bounds are constant and small, so it unrolls; each term's
+      // hoisted loop must still be emitted (once per term) ahead of the value.
+      const inner = ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'm']];
+      const outer = ['Sum', ['Multiply', 'i', inner], ['Limits', 'i', 1, 2]];
+      const code = glsl.compile(ce.box(outer as any)).code;
+      expect(code.match(/for \(int j =/g)?.length).toBe(2);
+      // A term that hoists is finished off into a temporary right after its own
+      // statements, so the unroll stays in per-term order (a draw in term 2's
+      // loop can never overtake term 1's remainder). The combined expression
+      // then reads those temporaries.
+      expect(code).toMatch(/float _\w+ = 1\.0 \* _\w+;$/m);
+      expect(code).toMatch(/float _\w+ = 2\.0 \* _\w+;$/m);
+      expect(code).toMatch(/return \(\(_\w+\) \+ \(_\w+\)\);$/m);
+    });
+
+    // A shader conditional is an EXPRESSION (a ternary), so an arm has no
+    // statement position of its own. Hoisting the loop out would run it
+    // whichever branch is selected — and a compiled `Random()` advances a
+    // runtime counter, so a loop stranded ahead of a branch it never feeds
+    // would shift every later draw. Fail closed (D6) instead.
+    describe('a conditionally-evaluated branch fails closed', () => {
+      for (const [label, expr] of [
+        ['If', ['If', ['Greater', 'x', 0], bigSum, 0]],
+        ['Which', ['Which', ['Greater', 'x', 0], bigSum, 'True', 0]],
+        ['When', ['When', bigSum, ['Greater', 'x', 0]]],
+      ] as [string, any][]) {
+        it(`${label} arm containing a loop-form Sum`, () => {
+          expect(() => glsl.compile(ce.box(expr))).toThrow(
+            /conditionally-evaluated branch contains a multi-statement construct/
+          );
+        });
+      }
+
+      it('the loop is never emitted ahead of the conditional', () => {
+        let code = '';
+        try {
+          code = glsl.compile(
+            ce.box(['If', ['Greater', 'x', 0], bigSum, 0] as any)
+          ).code;
+        } catch {
+          /* fail-closed is the expected path */
+        }
+        expect(code).not.toContain('for (');
+      });
+
+      it('a conditional with scalar arms is unaffected', () => {
+        const code = glsl.compile(
+          ce.box(['If', ['Greater', 'x', 0], 1, 2] as any)
+        ).code;
+        expect(code).toBe('((0.0 < x) ? (1.0) : (2.0))');
+      });
+    });
+
+    it('a hoisted accumulator does not collide with a shader assignment target', () => {
+      // The hoisted declaration is emitted ahead of the caller's assignment, so
+      // the caller's own `_tv`-spelled target must be off-limits to the
+      // generated name — otherwise the assignment becomes `_tv1 = _tv1` and the
+      // output is never written.
+      const shader = glsl.compileShader({
+        type: 'fragment',
+        uniforms: [{ name: 'n', type: 'int' }],
+        body: [
+          {
+            variable: 'float _tv1',
+            expression: ce.box(['Add', bigSum, 1] as any),
+          },
+        ],
+      });
+      expect(shader).not.toMatch(/_tv1\s*=\s*_tv1\b/);
+      expect(shader).toMatch(/float _tv\d+ = 0\.0;/);
+    });
+
     it('a Block still fails closed as a sub-expression', () => {
       const blk = ['Block', ['Declare', 'q'], ['Assign', 'q', 2], 'q'];
       expect(() => glsl.compile(ce.box(['Add', blk, 1] as any))).toThrow(
