@@ -17,7 +17,13 @@
   still compiles on the JavaScript target), collection-valued arguments
   beyond the static `vec2`–`vec4` shapes, and argument shapes that
   disagree with the declared parameter type. Undeclared parameters default
-  to `float`.
+  to `float`. Caller-declared types on `compileFunction` parameters and on
+  shader inputs/uniforms are authoritative for these checks, with
+  element-aware matching across both languages' spellings (`bvecN`,
+  `ivecN`, `vec2<i32>`, …) — a `vec2<bool>` argument no longer passes for a
+  `vec2<f32>` parameter. A WGSL body referencing a declared input now
+  correctly emits `input.<name>` (previously a bare, undeclared
+  identifier).
 
 ### Performance
 
@@ -219,6 +225,55 @@
   definition at all. The reason reaches callers as `CompilationResult.error` on
   the `success: false` paths, and as the thrown message on the direct-target
   path.
+
+### Benchmarks
+
+#### Numeric performance (200-digit precision)
+
+Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+
+| Expression | CE (current) | CE 0.98.0 | SymPy | math.js | Mathematica |
+| --- | --: | --: | --: | --: | --: |
+| $\pi^2$ | 6.8 | 7.4 | 173 | 106 | 3.9 |
+| $\sin 1$ | 20 | 21 | 218 | 442 | 5.3 |
+| $\cos 1$ | 20 | 21 | 219 | 573 | 7.1 |
+| $\ln 2$ | 14 | 14 | 332 | 4,344 | 3.8 |
+| $e^{\pi}$ | 12 | 13 | 216 | 4,751 | 4.7 |
+| $\zeta(3)$ | 1,511 | 1,547 | 265 | — | 49 |
+| $\Gamma(\tfrac13)$ | 831 | 812 | 346 | — | 213 |
+| $\psi(\tfrac13)$ | 712 | 712 | 2,762 | — | 171 |
+
+#### Symbolic capability & performance
+
+Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.98.0** columns to see what is *new this release* (a `—` under `0.98.0` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+
+| Operation | CE (current) | CE + R/F | CE 0.98.0 | SymPy | math.js | Mathematica |
+| --- | :--: | :--: | :--: | :--: | :--: | :--: |
+| **Antiderivatives** |  |  |  |  |  |  |
+| $\int\frac{1}{\sqrt x}\,dx$ | 4.6× | 2.5× | 3.5× | 0.5× | — | 1× |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 8.3× | 1.5× | 6.6× | 0.09× | — | 1× |
+| $\int\frac{1}{x^3+1}\,dx$ | 5.3× | 0.9× | 4.2× | 0.3× | — | 1× |
+| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 1.9× | — | 0.1× | — | 1× |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 1.1× | — | 0.01× | — | 1× |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 1.1× | — | 0.007× | — | 1× |
+| **Derivatives** |  |  |  |  |  |  |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.04× | 0.04× | 0.03× | 0.001× | 0.004× | 1× |
+| **Simplification** |  |  |  |  |  |  |
+| $\sqrt{3+2\sqrt2}$ | 41× | 28× | 31× | — | — | 1× |
+| $\sqrt6\,x+\sqrt2\,x$ | 79× | 45× | 48× | 3.1× | 19× | 1× |
+| **Evaluation** |  |  |  |  |  |  |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 39× | 16× | 34× | 3.0× | — | 1× |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 5.2× | 4.0× | 6.9× | 2.1× | — | 1× |
+| $\int_1^2\tfrac1x\,dx$ | 4458× | 4875× | 4193× | 77× | — | 1× |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 316× | 128× | 274× | 2.5× | — | 1× |
+| **Solving** |  |  |  |  |  |  |
+| $x^4+x^2-1=0$ | 0.3× | 0.3× | 0.3× | 0.07× | — | 1× |
+| $x^3-x-1=0$ | 1.6× | 1.8× | 1.4× | 0.04× | — | 1× |
+
+Across the cases both solve, Compute Engine is a **median 5.2× faster than Mathematica** (up to 4458×) — in the browser, not a proprietary kernel.
+
+<sub>Measured 2026-07-30 · Compute Engine `0.98.0` @ `ef394659` (current build) · published `0.98.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+</sub>
 
 ## 0.98.0 _2026-07-28_
 

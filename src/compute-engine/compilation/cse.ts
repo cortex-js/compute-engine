@@ -743,12 +743,7 @@ class Harvester {
     // A nested block or loop is its own statement list; the abrupt-control
     // heads carry no bindable value of their own beyond their operand, which
     // the generic walk reaches inside the (inert) list region.
-    if (
-      op === 'Block' ||
-      op === 'Loop' ||
-      op === 'Break' ||
-      op === 'Continue'
-    )
+    if (op === 'Block' || op === 'Loop' || op === 'Break' || op === 'Continue')
       return false;
 
     // A bare expression statement is its own bindable region.
@@ -919,7 +914,8 @@ class Harvester {
     const names = new Set<string>();
     if (isSymbol(node)) names.add(node.symbol);
     else if (isFunction(node))
-      for (const op of node.ops) for (const n of this.symbolsOf(op)) names.add(n);
+      for (const op of node.ops)
+        for (const n of this.symbolsOf(op)) names.add(n);
     this.symbolsMemo.set(node, names);
     return names;
   }
@@ -971,8 +967,7 @@ class Harvester {
     for (const operand of node.ops)
       if (this.isOpaqueCallableOperand(operand)) return false;
 
-    for (const operand of node.ops)
-      if (!this.isEligible(operand)) return false;
+    for (const operand of node.ops) if (!this.isEligible(operand)) return false;
 
     return true;
   }

@@ -1116,9 +1116,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return t.types.some(isProvablyNonScalar);
         return isSubtype(t, 'collection');
       };
-      const nonScalar = args.findIndex((a) =>
-        isProvablyNonScalar(a.type.type)
-      );
+      const nonScalar = args.findIndex((a) => isProvablyNonScalar(a.type.type));
       if (nonScalar >= 0) {
         // The decline is about the operand SHAPE, not the head: say so, rather
         // than falling through to a generic "no lowering" (which reads as if

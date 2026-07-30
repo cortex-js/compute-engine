@@ -363,7 +363,9 @@ export class BaseCompiler {
   ): string {
     const { stmts, code } = BaseCompiler.compileStatementBody(expr, target);
     if (stmts.length === 0) return code;
-    return [...stmts, code.includes('\n') ? code : `return ${code};`].join('\n');
+    return [...stmts, code.includes('\n') ? code : `return ${code};`].join(
+      '\n'
+    );
   }
 
   /**
@@ -5172,9 +5174,7 @@ export class BaseCompiler {
     // precedence is what this position needs, so mirror the `'defining'`
     // branch and recompile when they differ.
     if (target.bareStatementBlocks === true && rhs.includes('\n'))
-      return prec === 0
-        ? rhs
-        : BaseCompiler._compileInner(expr, target, prec);
+      return prec === 0 ? rhs : BaseCompiler._compileInner(expr, target, prec);
 
     const name = BaseCompiler.cseTempVar(target);
     top.state.set(candidate, 'bound');

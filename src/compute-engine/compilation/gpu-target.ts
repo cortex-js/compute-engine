@@ -1427,8 +1427,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const armed = (f: () => string): string =>
         i === 0 ? f() : compileGPUConditionalArm('Which', f, target);
       // `True` marks the default branch.
-      if (isSymbol(cond, 'True'))
-        return `(${armed(() => compile(val))})`;
+      if (isSymbol(cond, 'True')) return `(${armed(() => compile(val))})`;
       return gpuConditional(
         armed(() => compile(cond)),
         compileGPUConditionalArm('Which', () => compile(val), target),
@@ -4935,7 +4934,9 @@ function gpuTypeOfValue(expr: Expression, isWGSL: boolean): string | undefined {
     if (n < 2 || n > 4) return undefined;
     // Width alone is not enough: every component must also fit a `vecN` slot,
     // or the emission is `vec2f(true, false)` — see `gpuIsVectorComponentType`.
-    return gpuValueHasVectorComponents(expr) ? gpuVecType(n, isWGSL) : undefined;
+    return gpuValueHasVectorComponents(expr)
+      ? gpuVecType(n, isWGSL)
+      : undefined;
   }
   if (BaseCompiler.isNonScalarShape(expr)) return undefined;
   if (expr.type.matches('boolean')) return 'bool';
