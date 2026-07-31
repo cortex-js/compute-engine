@@ -275,6 +275,19 @@ CI-executed doc examples and the agents card + MCP server. Worth taking:
   `Assert`/`AssertEqual` builtins (errors-as-values on failure) and a
   `cortex test` CLI subcommand, letting agents write self-checking programs —
   directly serves the feedback-loop goal from the 2026-07-24 agent eval.
+- **Error propagation & rescue (M — design doc written 2026-07-31,
+  awaiting rulings).** Probing Hica's pipeline-failure question exposed
+  that errors are currently *unhandleable in-language*: `f(err)` freezes to
+  an inert tree, and even `match err { _ => … }` stays inert (violating
+  match's pinned totality) — which also blocks the `if let` refutable-
+  binding design below. Design:
+  `docs/plans/2026-07-31-error-propagation-design.md` — error as absorbing
+  element under strict evaluation (`f(⊥) = ⊥`, bubbling not freezing),
+  Match/`IsError` as the non-strict observers, `|>` stays application
+  sugar (NaN short-circuit explicitly rejected), `Nothing` route-parity
+  ruling, static type errors reclassified to `cortex check`, staged
+  rungs 1–3, and the reconciliation with `docs/EFFECTS-MODEL.md` (rung 1
+  is a prerequisite of that doc's own narrowing argument).
 - **Exhaustiveness lint.** Already a v2 deferral in the match design (§7);
   Hica shipping it in a language this small is evidence it earns its keep —
   raise its priority when the type system tightens.
