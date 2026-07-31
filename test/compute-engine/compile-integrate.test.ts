@@ -101,7 +101,10 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       ]);
 
     test("quadrature: 'monte-carlo' emits integrateMC and runs", () => {
-      const r = compile(piecewise(), { realOnly: true, quadrature: 'monte-carlo' });
+      const r = compile(piecewise(), {
+        realOnly: true,
+        quadrature: 'monte-carlo',
+      });
       expect(r.code).toContain('integrateMC');
       expect(r.run() as number).toBeCloseTo(3, 2); // MC: ~1e-2 tolerance
     });
@@ -393,7 +396,11 @@ describe('sharply-peaked integrands (Tycho item 97)', () => {
 
   test.each([
     ['moment 0', (x: number) => phi(x), 1],
-    ['moment 1 (|x|)', (x: number) => Math.abs(x) * phi(x), Math.sqrt(2 / Math.PI)],
+    [
+      'moment 1 (|x|)',
+      (x: number) => Math.abs(x) * phi(x),
+      Math.sqrt(2 / Math.PI),
+    ],
     ['moment 2', (x: number) => x * x * phi(x), 1],
     ['moment 4', (x: number) => x ** 4 * phi(x), 3],
     ['moment 6', (x: number) => x ** 6 * phi(x), 15],
@@ -407,7 +414,9 @@ describe('sharply-peaked integrands (Tycho item 97)', () => {
     // Closed form: (2π)^(-175)·√(π/175). The peak has width ~1/√175 ≈ 0.076
     // over an interval of width 30, so this stays a hard problem — pinned at
     // the accuracy the initial subdivision actually achieves, not exactness.
-    const closed = Math.exp(-175 * Math.log(2 * Math.PI) + 0.5 * Math.log(Math.PI / 175));
+    const closed = Math.exp(
+      -175 * Math.log(2 * Math.PI) + 0.5 * Math.log(Math.PI / 175)
+    );
     const r = adaptiveQuadrature((x) => Math.pow(phi(x), 350), -15, 15);
     expect(Math.abs(r.estimate - closed) / closed).toBeLessThan(0.01);
   });
@@ -476,8 +485,12 @@ describe('adaptive quadrature — review follow-ups', () => {
     // matched, so the last panel ran past `b` and the routine integrated the
     // wrong interval: ∫₀¹1 read 1.2 and ∫₀¹x read 0.72.
     for (const maxIntervals of [0.5, 1, 2.5, 3.7, 17.9]) {
-      expect(adaptiveQuadrature(() => 1, 0, 1, { maxIntervals }).estimate).toBeCloseTo(1, 10);
-      expect(adaptiveQuadrature((x) => x, 0, 1, { maxIntervals }).estimate).toBeCloseTo(0.5, 10);
+      expect(
+        adaptiveQuadrature(() => 1, 0, 1, { maxIntervals }).estimate
+      ).toBeCloseTo(1, 10);
+      expect(
+        adaptiveQuadrature((x) => x, 0, 1, { maxIntervals }).estimate
+      ).toBeCloseTo(0.5, 10);
     }
   });
 
@@ -489,12 +502,21 @@ describe('adaptive quadrature — review follow-ups', () => {
     expect(initialPanelsForDimensions(2)).toBe(4);
     expect(initialPanelsForDimensions(3)).toBe(3);
     // Never one panel — that is the item-97 defect.
-    for (const d of [1, 2, 3, 4, 8]) expect(initialPanelsForDimensions(d)).toBeGreaterThanOrEqual(2);
+    for (const d of [1, 2, 3, 4, 8])
+      expect(initialPanelsForDimensions(d)).toBeGreaterThanOrEqual(2);
 
     const count = (panels: number) => {
       let n = 0;
       const inner = (y: number) =>
-        adaptiveQuadrature((x) => { n++; return Math.sin(x * y); }, 0, 1, { initialPanels: panels }).estimate;
+        adaptiveQuadrature(
+          (x) => {
+            n++;
+            return Math.sin(x * y);
+          },
+          0,
+          1,
+          { initialPanels: panels }
+        ).estimate;
       const r = adaptiveQuadrature(inner, 0, 1, { initialPanels: panels });
       return { estimate: r.estimate, evals: n };
     };
@@ -521,10 +543,146 @@ describe('adaptive quadrature — review follow-ups', () => {
     expect(r.toString()).not.toContain('NaN');
 
     // The well-formed unary literal still evaluates.
-    const ok = local.function('Integrate', [
-      local.function('Function', [local.parse('x^2'), local.symbol('x')]),
-      limits,
-    ]).N();
+    const ok = local
+      .function('Integrate', [
+        local.function('Function', [local.parse('x^2'), local.symbol('x')]),
+        limits,
+      ])
+      .N();
     expect(ok.re).toBeCloseTo(1 / 3, 10);
+  });
+});
+
+describe('COMPILE Integrate — engine hygiene', () => {
+  // Compiling an integral must not mutate the caller's engine. The
+  // antiderivative attempt canonicalizes and evaluates the integral, and an
+  // integrand with a free single-uppercase-letter symbol (`D`, `N`) devolves
+  // that unapplied operator to a variable by SHADOWING the builtin in the
+  // current scope (`devolveUnappliedOperator`, intentional — see
+  // `unapplied-operator-fallback.test.ts`). Without an isolation scope around
+  // the attempt, "the current scope" is the engine's global one and `D` stays a
+  // variable for the life of the engine. All four rows below leaked before the
+  // fix.
+  describe.each([
+    ['indefinite', '\\int D x^2 dx'],
+    ['definite', '\\int_0^1 D x^2 dx'],
+  ])('%s', (_form, latex) => {
+    test.each(['parse', 'box'])('%s route', (route) => {
+      const local = new ComputeEngine();
+      const expr =
+        route === 'parse'
+          ? local.parse(latex)
+          : local.box(local.parse(latex).json);
+      expect(Object.keys(local.lookupDefinition('D')!)).toEqual(['operator']);
+
+      const r = compile(expr, { realOnly: true });
+      expect(r.success).toBe(true);
+
+      // Still the builtin operator definition, not a devolved variable.
+      expect(Object.keys(local.lookupDefinition('D')!)).toEqual(['operator']);
+      expect(local.parse('D(x^2, x)').evaluate().toString()).toBe('2x');
+    });
+  });
+
+  test('the isolated attempt still finds the closed form', () => {
+    // The closed form outlives the isolation scope: `D` is a free variable of
+    // the emitted code, resolved by name against the target's bindings.
+    const local = new ComputeEngine();
+    const r = compile(local.parse('\\int_0^1 D x^2 dx'), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run({ D: 3 })).toBeCloseTo(1, 10);
+  });
+});
+
+describe('COMPILE Integrate — indefinite with no closed form fails closed', () => {
+  // An indefinite integral whose antiderivative does not close has no numeric
+  // value at a point: it denotes a function, not a number. `extractLimits`
+  // hands the quadrature emitter the `Limits` bounds, which for an indefinite
+  // integral are the `Nothing` symbol; `Nothing` compiled like any free symbol
+  // to a `vars`-object lookup (`_.Nothing`), and at run time
+  // `adaptiveQuadrature(f, undefined, undefined)` reported CONVERGED and
+  // returned 0 — so `∫ e^{x³} sin x dx` "compiled" and answered 0 for every x.
+  test('∫ e^{x³} sin(x) dx declines instead of fabricating 0', () => {
+    const r = compile(ce.parse('\\int e^{x^3}\\sin(x) dx'), { realOnly: true });
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/Fail closed \(D6\)/);
+    expect(r.error).toMatch(/indefinite integral/);
+    expect(String((r as any).code ?? '')).not.toContain('_.Nothing');
+  });
+
+  test.each([
+    ['\\int x^2 dx', { x: 3 }, 9],
+    ['\\int \\sin(x) dx', { x: 1 }, -Math.cos(1)],
+    ['\\int e^{2x} dx', { x: 1 }, 0.5 * Math.exp(2)],
+    ['\\int D x^2 dx', { D: 2, x: 3 }, 18],
+  ])(
+    'an indefinite integral WITH a closed form still compiles: %s',
+    (latex, args, expected) => {
+      const r = compile(ce.parse(latex), { realOnly: true });
+      expect(r.success).toBe(true);
+      expect(r.run(args as Record<string, number>) as number).toBeCloseTo(
+        expected as number,
+        10
+      );
+    }
+  );
+
+  test('a DEFINITE integral with no closed form still uses quadrature', () => {
+    // A free coefficient keeps the antiderivative-first path from folding it,
+    // so this is the quadrature emitter, not a baked closed form.
+    const r = compile(ce.parse('\\int_0^1 e^{-a x^2} dx'), {
+      realOnly: true,
+      vars: { a: '_.a' },
+    });
+    expect(r.success).toBe(true);
+    expect(String(r.code)).toContain('_SYS.integrate');
+    expect(r.run({ a: 1 }) as number).toBeCloseTo(0.7468241328124271, 8);
+  });
+
+  test.each([
+    ['\\int_0^1 e^{-x^2} dx', {}, 0.7468241328124271],
+    ['\\int_0^1 \\sin(x) dx', {}, 0.4596976941318603],
+    ['\\int_0^1 x^2 dx', {}, 1 / 3],
+    ['\\int_{-3}^{3}\\sin(t)dt', {}, 0],
+    ['\\int_0^b \\sin(x) dx', { b: 1 }, 0.4596976941318603],
+  ])('definite integrals are untouched: %s', (latex, args, expected) => {
+    const r = compile(ce.parse(latex), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run(args as Record<string, number>) as number).toBeCloseTo(
+      expected as number,
+      8
+    );
+  });
+});
+
+describe('COMPILE — `Nothing` is never emitted as a variable reference', () => {
+  // `Nothing` is the engine's ERASURE marker, not a variable. Any emitter that
+  // splices it in as an ordinary operand produces `_.Nothing`, which reads
+  // `undefined` at run time and degrades silently rather than throwing.
+  test.each([
+    // Unbounded Sum: `Math.floor(_.Nothing)` → NaN trip count → returns 0.
+    ['unbounded Sum bound', ['Sum', 'x', ['Limits', 'i', 1, 'Nothing']]],
+    // Open-ended Range: `_.Nothing` → an empty array.
+    ['open-ended Range', ['Range', 1, 'Nothing']],
+    // An `If` whose else-arm is the erasure marker.
+    ['If else-arm', ['If', 'True', 1, 'Nothing']],
+  ])('%s fails closed', (_label, json) => {
+    const r = compile(ce.box(json as any), { realOnly: true });
+    expect(r.success).toBe(false);
+    expect(String((r as any).code ?? '')).not.toContain('_.Nothing');
+  });
+
+  test('a variable legitimately NAMED `Nothing` in `vars` still compiles', () => {
+    // The `vars` lookup precedes the guard, so a caller that really pins a
+    // runtime input called `Nothing` keeps it.
+    const r = compile(
+      ce.box(['Sum', 'x', ['Limits', 'i', 1, 'Nothing']] as any),
+      {
+        realOnly: true,
+        vars: { Nothing: '_.Nothing', x: '_.x' },
+      }
+    );
+    expect(r.success).toBe(true);
+    expect(r.run({ Nothing: 3, x: 2 }) as number).toBe(6);
   });
 });

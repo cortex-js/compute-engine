@@ -509,6 +509,103 @@ function bareFunctionSystem(
   return { params, bodies: lambdas.map((l) => l.body) };
 }
 
+/** The heads whose presence in a result means "no closed form was found". */
+const DERIVATIVE_HEADS = ['D', 'Derivative', 'ND'] as const;
+
+/**
+ * Target-agnostic compile lowering for the derivative heads (`D`,
+ * `Derivative`, `ND`): the differentiation itself is a symbolic operation with
+ * no runtime counterpart on any target, but its *result* is an ordinary
+ * expression the normal compiler already handles. So obtain the closed form
+ * and compile that instead.
+ *
+ * `.evaluate()`, never `.simplify()`: evaluate is what produces the closed
+ * form here, and `.simplify()` inside a compile path invites the recursion
+ * hazards documented in CLAUDE.md.
+ *
+ * Only a PURE derivative node is evaluated: evaluating happens at COMPILE
+ * time, so an impure body (`ND(Function(Random(), x), 1.5)` runs the numerical
+ * stencil during compilation) would consume its random draws once and freeze
+ * the sampled result into the emitted code. Decline instead, so the draw
+ * timing and the run-time semantics are left intact.
+ *
+ * Purity is not enough, though: canonicalizing and evaluating can also
+ * DECLARE. `devolveUnappliedOperator` (`boxed-expression/validate.ts`) turns a
+ * single-uppercase-letter builtin used as a bare operand into a variable by
+ * shadowing the builtin — `D` in `D(D·x², x)` is a legitimate free variable —
+ * and that shadow persists in whatever scope is current. Left to the caller's
+ * scope it would replace the engine's `D` *operator* definition for the
+ * engine's lifetime, so every later derivative compilation would report
+ * ``Unknown operator `D` ``. Compiling must not mutate the engine, so the
+ * whole closed-form computation runs in a throwaway child scope; any
+ * declaration it makes dies with the scope.
+ *
+ * The node is BUILT inside that scope, not merely evaluated there: the scope a
+ * binder's `localScope` descends from is fixed when the node is canonicalized,
+ * and evaluating a binder re-enters that parent (`rebindEscapingCurrentScope`).
+ * A node canonicalized outside would declare outside, whatever scope is
+ * current at `.evaluate()`.
+ *
+ * Declines (returns `undefined`, never throws) when no closed form is
+ * available — the result is unchanged, or still carries a derivative head
+ * (an opaque user function differentiates to `Apply(Derivative(f,1), x)`;
+ * `ND` at a symbolic point stays put). Declining lets the standard
+ * `noLoweringMessage` report it, and leaves the door open for a custom target
+ * that does map the head — a thrown error here would pre-empt it, since a
+ * per-operator handler is consulted BEFORE the target's function table.
+ */
+function compileDerivative(
+  operator: (typeof DERIVATIVE_HEADS)[number],
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string
+): string | undefined {
+  if (args.length === 0) return undefined;
+
+  const ce = args[0].engine;
+  let node: Expression;
+  let value: Expression;
+  // Isolation scope — see the note above. A child of the caller's scope, so
+  // every declaration the caller made is still visible; only what this
+  // evaluation declares is confined, and discarded on the way out. The closed
+  // form outlives the scope: `compile()` below resolves its free symbols by
+  // name against the target's bindings, not against this scope.
+  ce.pushScope();
+  try {
+    node = ce.function(operator, args as Expression[]);
+    // An impure node (`ND` of a body drawing random values, say) must not be
+    // evaluated here: that would happen at compile time and bake one sample
+    // into the emitted code.
+    if (!node.isPure) return undefined;
+    value = node.evaluate();
+  } catch {
+    return undefined;
+  } finally {
+    ce.popScope();
+  }
+  if (!value.isValid) return undefined;
+  // Re-entry guard: an unchanged result would compile straight back into this
+  // handler.
+  if (value.isSame(node)) return undefined;
+  // No closed form: a derivative head survived the evaluation. Head-aware:
+  // `has()` would also match a plain symbol named `D`, which is a legitimate
+  // free variable in a closed form.
+  if (DERIVATIVE_HEADS.some((h) => value.getSubexpressions(h).length > 0))
+    return undefined;
+
+  try {
+    return compile(value) || undefined;
+  } catch {
+    // The closed form contains a head this target cannot lower (`Digamma` on
+    // glsl, say). Decline rather than let the inner error escape: a
+    // per-operator handler runs BEFORE the target's function table, so
+    // throwing would pre-empt a custom target that does map that head. The
+    // trade-off is deliberate — the inner message names the offending head and
+    // is more informative than the generic decline the fallthrough produces,
+    // but contract-correctness wins. Do not "restore" the throw.
+    return undefined;
+  }
+}
+
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
   {
     /* @todo
@@ -712,6 +809,8 @@ volumes
 
         return ce._fn('Derivative', [op, ...orders.map((n) => ce.number(n))]);
       },
+      compile: (args, compile) =>
+        compileDerivative('Derivative', args, compile),
     },
 
     //
@@ -888,6 +987,7 @@ volumes
           ? undefined
           : rebindEscapingCurrentScope(ce, result);
       },
+      compile: (args, compile) => compileDerivative('D', args, compile),
     },
 
     // Evaluate a numerical approximation of a derivative at point x
@@ -914,6 +1014,7 @@ volumes
           (compiled?.run as (x: number) => number) ?? applicableN1(body);
         return new BoxedNumber(engine, centeredDiff8thOrder(fn, xValue));
       },
+      compile: (args, compile) => compileDerivative('ND', args, compile),
     },
 
     JacobianMatrix: {

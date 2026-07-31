@@ -318,6 +318,72 @@ export interface CompileTarget<Expr = unknown> {
   ) => TargetSource | null;
 
   /**
+   * Apply a `broadcastable` head's SCALAR element lowering across a single
+   * finite indexed collection operand (`Sin([1,2,3])`, `-[1,2,3]`).
+   *
+   * `lowering.collection()` compiles the collection operand in the enclosing
+   * target; `lowering.element(code)` re-invokes the head's OWN scalar codegen
+   * with `code` spliced in as the (bare) element operand, so complex handling
+   * and constant folding stay identical to the scalar path.
+   *
+   * Targets differ in KIND here, not just in syntax, which is why this is a
+   * hook rather than a default: Python fans the scalar lowering out over the
+   * elements (a list comprehension), while GLSL/WGSL do not fan out at all —
+   * shader builtins and operators are already componentwise on a `vecN`, so
+   * `lowering.element(lowering.collection())` (`sin(vec4(…))`, `-vec4(…)`) is
+   * the correct lowering, gated on the operand having a static `vec2`–`vec4`
+   * shape. (Before this hook the base compiler emitted a JavaScript
+   * `.map((v) => …)` arrow into GLSL, WGSL and Python alike, behind
+   * `success: true`.)
+   *
+   * Return `undefined` to decline; the base compiler then fails closed (D6)
+   * naming the head and the target. A target may also throw to fail closed
+   * with its own diagnostic (the GPU targets do, for a shape with no vector
+   * lowering). The JavaScript target deliberately leaves this undefined: its
+   * broadcasts are intercepted earlier by `_SYS.bcast`, and the only forms
+   * that reach here are the complex-element operands its broadcast closure
+   * documents as deferred.
+   */
+  broadcastUnary?: (
+    head: MathJsonSymbol,
+    operand: Expr,
+    lowering: {
+      /** The collection operand, compiled in the enclosing target. */
+      collection: () => TargetSource;
+      /** The head's own scalar codegen, applied to compiled source. */
+      element: (code: TargetSource) => TargetSource;
+    },
+    target: CompileTarget<Expr>
+  ) => TargetSource | undefined;
+
+  /**
+   * Inspect an emitted lowering — the head's own function codegen, or the
+   * `name(args…)` call of a string-mapped helper — BEFORE it is spliced into
+   * the output, and THROW to fail closed (D6) when the operand shapes are ones
+   * that lowering cannot accept.
+   *
+   * The complement of `broadcastUnary`: that hook owns the single-collection
+   * fan-out, this one covers every OTHER emission a non-scalar operand can
+   * reach — a second operand (`Arctan2([1,2,3], 1)`), a matrix
+   * (`Sin(Matrix(…))`), a head whose canonical form is not unary
+   * (`Exp([1,2,3])` → `Power(e, […])`). The GPU targets implement it because
+   * a shader has a static type system that such a lowering silently violates
+   * (`atan(vec3, float)`, `pow(float, vec3)`, `sin(mat2)` are not valid source
+   * in either language, but were emitted behind `success: true`); targets
+   * whose runtime broadcasts or coerces leave it undefined and are unaffected.
+   *
+   * A hook, not a base-compiler rule, because the answer is a fact about the
+   * target's TYPE SYSTEM: GLSL promotes a scalar into `max(genType, float)`
+   * where WGSL does not, and the two disagree again on matrix arithmetic.
+   */
+  checkOperandShapes?: (
+    head: MathJsonSymbol,
+    args: ReadonlyArray<Expr>,
+    code: TargetSource,
+    target: CompileTarget<Expr>
+  ) => void;
+
+  /**
    * Wrap a compiled `Which`/`When` condition that is **not** provably boolean so
    * that a non-boolean value (notably `NaN`) fails closed at run time, matching
    * the interpreter — which throws `Condition must evaluate to "True" or

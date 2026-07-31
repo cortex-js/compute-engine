@@ -3,7 +3,11 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression } from '../global-types.js';
 import { SMALL_INTEGER, machineNthRoot } from '../numerics/numeric.js';
-import { rationalize, reduceRationalRoot } from '../numerics/rationals.js';
+import {
+  rationalize,
+  reduceRationalRoot,
+  reducedRational,
+} from '../numerics/rationals.js';
 import type { Rational } from '../numerics/types.js';
 
 import { asRational } from './numerics.js';
@@ -36,6 +40,53 @@ function maximalPerfectPower(
       return { base, exponent };
   }
   return undefined;
+}
+
+/**
+ * The reduced terms `[p, q]` of a real exponent, for deciding the branch of a
+ * NEGATIVE base — or `undefined` when no faithful rational is available.
+ *
+ * CE's convention: `p/q` in lowest terms with an **odd** `q` has a real
+ * principal value (`(−8)^(2/3) = 4`, matching `Root(−8, 3) = −2`); an even `q`
+ * — or an exponent that is not a rational at all — takes the principal complex
+ * value.
+ *
+ * The decision is made from the EXACT rational whenever the caller has one.
+ * Recovering `p/q` from the double instead is not equivalent: `100/3` rounds to
+ * a double whose continued-fraction expansion terminates at the dyadic
+ * `4691249611844267/140737488355328`, whose denominator is EVEN — so a
+ * float-first decision reports `(−2)^(100/3)` complex even though the exact
+ * exponent has an odd denominator and the value is real.
+ *
+ * When only the double is available — under `.N()` the exponent reaches the
+ * numeric path already numericized — the reconstruction is given an ULP-scale
+ * tolerance, so a double that IS an exact rational rounded to nearest recovers
+ * that rational (`33.333333333333336` → `100/3`) while a genuine decimal
+ * (`0.3333333333`) stays at its own, far-from-`1/3`, terms. That keeps the two
+ * routes — and the compiled constant fold, which shares this helper — deciding
+ * the same branch for the same node.
+ */
+export function realPowerBranchTerms(
+  exact: Rational | undefined,
+  value: number
+): [p: number, q: number] | undefined {
+  if (exact !== undefined) {
+    const [rp, rq] = reducedRational(exact);
+    const p = Number(rp);
+    const q = Number(rq);
+    if (!Number.isFinite(p) || !Number.isFinite(q) || q === 0) return undefined;
+    return [p, q];
+  }
+
+  if (!Number.isFinite(value)) return undefined;
+  const tol = Math.max(Number.MIN_VALUE, Math.abs(value) * 4 * Number.EPSILON);
+  const r = rationalize(value, tol);
+  if (!Array.isArray(r)) return undefined;
+  const [p, q] = r;
+  if (!Number.isFinite(p) || !Number.isFinite(q) || q === 0) return undefined;
+  // Only a faithful reconstruction is trusted.
+  if (Math.abs(p / q - value) > 1e-12) return undefined;
+  return [p, q];
 }
 
 // If the expression is of the form
@@ -663,27 +714,17 @@ export function pow(
         ) {
           // |x|^e, computed on the positive base (no re-entry: base > 0).
           const absPow = pow(x.neg(), exp, { numericApproximation: true });
-          // Recover the exponent's rational p/q. Under .N() the exponent
-          // reaches here already numericized to a float, so asRational sees no
-          // exact value — reconstruct p/q from the float via continued
-          // fractions (faithful for the rationals that produced it).
+          // Recover the exponent's rational p/q — from its EXACT terms when it
+          // still has them, otherwise from the float. Under .N() the exponent
+          // reaches here already numericized, so the float reconstruction is
+          // the only handle; `realPowerBranchTerms` makes it recover the
+          // rational the double came from, so `(−2)^(100/3)` decides the same
+          // (real) branch on both routes and in the compiled fold.
           const exact = typeof exp === 'number' ? undefined : asRational(exp);
-          let p: number | undefined;
-          let q: number | undefined;
-          if (exact !== undefined) {
-            p = Number(exact[0]);
-            q = Number(exact[1]);
-          } else {
-            const rr = rationalize(eVal);
-            if (Array.isArray(rr)) [p, q] = rr;
-          }
-          if (
-            q !== undefined &&
-            q % 2 !== 0 &&
-            Math.abs((p as number) / q - eVal) < 1e-12
-          ) {
+          const terms = realPowerBranchTerms(exact, eVal);
+          if (terms !== undefined && terms[1] % 2 !== 0) {
             // Odd denominator: real root. Sign from the numerator's parity.
-            return (p as number) % 2 !== 0 ? absPow.neg() : absPow;
+            return terms[0] % 2 !== 0 ? absPow.neg() : absPow;
           }
           // Even denominator or inexact exponent: principal complex value.
           // The phase cos(eπ) is computed at working precision: a machine

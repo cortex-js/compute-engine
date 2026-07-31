@@ -95,24 +95,182 @@ function poleReciprocalType(ops: ReadonlyArray<Expression>): Type {
 }
 
 /**
- * Inverse trig with a bounded real domain. `inDomain(r)` decides whether the
- * real value `r` is inside the operator's domain (`|r| ≤ 1` for arcsin/arccos,
- * `|r| ≥ 1` for arcsec/arccsc). A literal outside the domain (or any non-real /
- * ±∞ argument) yields a complex/NaN value; a symbolic real of unknown value
- * keeps the generic-real convention.
+ * A real interval, with per-end closedness. Use `±Infinity` for an unbounded
+ * end (its closedness is then irrelevant).
  */
+type RealInterval = {
+  lo: number;
+  loClosed: boolean;
+  hi: number;
+  hiClosed: boolean;
+};
+
+const iv = (
+  lo: number,
+  loClosed: boolean,
+  hi: number,
+  hiClosed: boolean
+): RealInterval => ({ lo, loClosed, hi, hiClosed });
+
+/**
+ * The real-domain structure of an inverse trig / inverse hyperbolic head with a
+ * *bounded* real domain (`Arcsin`, `Arcosh`, `Artanh`, …).
+ *
+ * These heads take a **complex** value outside their real domain
+ * (`arcsin(−2) = −π/2 + 1.3169…i`, `arcosh(−2) = 1.3169… + iπ`), so claiming
+ * `finite_real` for an argument that is not provably in-domain is unsound —
+ * `finite_complex` does not match `finite_real`. The handler below therefore
+ * decides three ways (user ruling 2026-07-30):
+ *
+ * - argument provably in `real`    → `finite_real`  (tight)
+ * - argument provably in `complex` → `finite_complex`
+ * - argument provably at a `pole`  → `poleType`
+ * - otherwise                      → the join of what is still possible
+ *
+ * `real` and `complex` must be written **open** at every pole: a proof of
+ * membership in a closed interval whose endpoint is a pole would not exclude
+ * the non-finite value there.
+ */
+type RealDomain = {
+  /** Intervals on which the head is finite-real-valued. */
+  real: readonly RealInterval[];
+  /** Intervals on which the head takes a finite, *non-real* value. */
+  complex: readonly RealInterval[];
+  /** Isolated real points where the value is not finite. */
+  poles: readonly number[];
+  /**
+   * The type of the value at a pole: `non_finite_number` for a signed `±∞`
+   * (`artanh(1) = +∞`), `number` for `~oo`/NaN (neither is representable by
+   * `non_finite_number`).
+   */
+  poleType: Type;
+};
+
+/** Is the real number `r` inside one of `intervals`? */
+function containsNumber(
+  intervals: readonly RealInterval[],
+  r: number
+): boolean {
+  return intervals.some(
+    ({ lo, loClosed, hi, hiClosed }) =>
+      (loClosed ? r >= lo : r > lo) && (hiClosed ? r <= hi : r < hi)
+  );
+}
+
+/**
+ * Is `x` **provably** inside one of `intervals`? Uses the numeric predicates,
+ * which consult the assumptions system (`x ≥ 2` ⊢ `x.isGreater(1) === true`).
+ * An undecidable predicate answers `undefined` and must not count as a proof,
+ * hence the `=== true` comparisons.
+ */
+function provablyIn(
+  x: Expression,
+  intervals: readonly RealInterval[]
+): boolean {
+  return intervals.some(({ lo, loClosed, hi, hiClosed }) => {
+    if (
+      lo !== -Infinity &&
+      (loClosed ? x.isGreaterEqual(lo) : x.isGreater(lo)) !== true
+    )
+      return false;
+    if (
+      hi !== Infinity &&
+      (hiClosed ? x.isLessEqual(hi) : x.isLess(hi)) !== true
+    )
+      return false;
+    return true;
+  });
+}
+
 function boundedInverseTrigType(
   ops: ReadonlyArray<Expression>,
-  inDomain: (r: number) => boolean
+  domain: RealDomain
 ): Type {
   const x = ops[0];
   if (!x || x.isNaN || x.isFinite === false) return 'number';
   if (x.isReal !== true) return 'number';
+
+  // Fast path: a (finite) real value classifies by arithmetic alone, without
+  // going through the comparison/assumptions machinery.
   const r = x.re;
-  if (typeof r === 'number' && Number.isFinite(r))
-    return inDomain(r) ? 'finite_real' : 'number';
-  return 'finite_real';
+  if (typeof r === 'number' && Number.isFinite(r)) {
+    if (domain.poles.includes(r)) return domain.poleType;
+    if (containsNumber(domain.real, r)) return 'finite_real';
+    if (containsNumber(domain.complex, r)) return 'finite_complex';
+    return domain.poleType;
+  }
+
+  // Symbolic argument: refine with the numeric predicates.
+  if (domain.poles.some((p) => x.isEqual(p) === true)) return domain.poleType;
+  if (provablyIn(x, domain.real)) return 'finite_real';
+  if (provablyIn(x, domain.complex)) return 'finite_complex';
+  // Magnitude unknown: the join of what remains. A pole that is provably
+  // avoided (or a head with no real pole) drops the non-finite arm.
+  if (domain.poles.every((p) => x.isEqual(p) === false)) return 'finite_complex';
+  return domain.poleType === 'non_finite_number' ? 'complex' : 'number';
 }
+
+/** `Arcsin`/`Arccos`: real on `[−1, 1]`, finite complex outside, no real pole. */
+const ARCSIN_DOMAIN: RealDomain = {
+  real: [iv(-1, true, 1, true)],
+  complex: [iv(-Infinity, false, -1, false), iv(1, false, Infinity, false)],
+  poles: [],
+  poleType: 'number',
+};
+
+/** `Arcsec`/`Arccsc`: real on `|x| ≥ 1`, finite complex on `0 < |x| < 1`, NaN at 0. */
+const ARCSEC_DOMAIN: RealDomain = {
+  real: [iv(-Infinity, false, -1, true), iv(1, true, Infinity, false)],
+  complex: [iv(-1, false, 0, false), iv(0, false, 1, false)],
+  poles: [0],
+  poleType: 'number',
+};
+
+/** `Artanh`: real on `(−1, 1)`, finite complex on `|x| > 1`, `±∞` at `±1`. */
+const ARTANH_DOMAIN: RealDomain = {
+  real: [iv(-1, false, 1, false)],
+  complex: [iv(-Infinity, false, -1, false), iv(1, false, Infinity, false)],
+  poles: [-1, 1],
+  poleType: 'non_finite_number',
+};
+
+/** `Arcoth`: real on `|x| > 1`, finite complex on `(−1, 1)`, `±∞` at `±1`. */
+const ARCOTH_DOMAIN: RealDomain = {
+  real: [iv(-Infinity, false, -1, false), iv(1, false, Infinity, false)],
+  complex: [iv(-1, false, 1, false)],
+  poles: [-1, 1],
+  poleType: 'non_finite_number',
+};
+
+/** `Arsech`: real on `(0, 1]`, finite complex elsewhere, `+∞` at 0. */
+const ARSECH_DOMAIN: RealDomain = {
+  real: [iv(0, false, 1, true)],
+  complex: [iv(-Infinity, false, 0, false), iv(1, false, Infinity, false)],
+  poles: [0],
+  poleType: 'non_finite_number',
+};
+
+/** `Arcosh`: real on `[1, +∞)`, finite complex below (`arcosh(0) = iπ/2`). */
+const ARCOSH_DOMAIN: RealDomain = {
+  real: [iv(1, true, Infinity, false)],
+  complex: [iv(-Infinity, false, 1, false)],
+  poles: [],
+  poleType: 'number',
+};
+
+/**
+ * `Arcsch`: real-valued on every *non-zero* real, `~oo` at 0. The real
+ * interval is deliberately written as the whole line: the pole is checked
+ * first (so a literal 0 still widens to `number`), and a symbolic real of
+ * unknown value keeps the documented generic-point convention — matching the
+ * behavior of the other real-closed heads rather than the bounded ones.
+ */
+const ARCSCH_DOMAIN: RealDomain = {
+  real: [iv(-Infinity, false, Infinity, false)],
+  complex: [],
+  poles: [0],
+  poleType: 'number',
+};
 
 /**
  * `Arctan`/`Arccot`: real-closed on the *extended* reals (`arctan(±∞) = ±π/2`),
@@ -259,11 +417,11 @@ export function elementaryFunctionType(
 
     case 'Arcsin':
     case 'Arccos':
-      return boundedInverseTrigType(ops, (r) => Math.abs(r) <= 1);
+      return boundedInverseTrigType(ops, ARCSIN_DOMAIN);
 
     case 'Arcsec':
     case 'Arccsc':
-      return boundedInverseTrigType(ops, (r) => Math.abs(r) >= 1);
+      return boundedInverseTrigType(ops, ARCSEC_DOMAIN);
 
     case 'Arctan':
     case 'Arccot':
@@ -271,20 +429,18 @@ export function elementaryFunctionType(
 
     // Inverse hyperbolic functions with real poles / restricted real domains.
     // `artanh(±1) = ±∞`, `arcoth(±1) = ±∞`, `arsech(0) = +∞`, `arcsch(0) = ~oo`
-    // are non-finite, so a literal at a pole (or outside the real domain, where
-    // the value is complex) must not claim `finite_real`.
+    // are non-finite, and outside the real domain the value is complex, so
+    // neither may claim `finite_real`.
     case 'Artanh':
-      // Real on |x| < 1; ±∞ at ±1; complex for |x| > 1.
-      return boundedInverseTrigType(ops, (r) => Math.abs(r) < 1);
+      return boundedInverseTrigType(ops, ARTANH_DOMAIN);
     case 'Arcoth':
-      // Real on |x| > 1; ±∞ at ±1; complex for |x| < 1.
-      return boundedInverseTrigType(ops, (r) => Math.abs(r) > 1);
+      return boundedInverseTrigType(ops, ARCOTH_DOMAIN);
     case 'Arsech':
-      // Real on (0, 1]; +∞ at 0; complex elsewhere.
-      return boundedInverseTrigType(ops, (r) => r > 0 && r <= 1);
+      return boundedInverseTrigType(ops, ARSECH_DOMAIN);
     case 'Arcsch':
-      // Real for every non-zero real; ~oo at 0.
-      return boundedInverseTrigType(ops, (r) => r !== 0);
+      return boundedInverseTrigType(ops, ARCSCH_DOMAIN);
+    case 'Arcosh':
+      return boundedInverseTrigType(ops, ARCOSH_DOMAIN);
 
     default:
       return numericTypeHandler(ops);

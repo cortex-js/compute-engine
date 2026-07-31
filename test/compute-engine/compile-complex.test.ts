@@ -112,13 +112,35 @@ describe('COMPILE COMPLEX - _SYS helpers (execution)', () => {
     expect(val.im).toBeCloseTo(1.1752011936438014, 10);
   });
 
-  it('fails closed on Sqrt of a negative real constant', () => {
-    // sqrt(-1) has no real value. Per the fail-closed policy (D6), a real
-    // target refuses to fold it to a literal `NaN`: with `fallback: false` the
-    // compile throws; with the default fallback it reports `success: false`.
+  // POLICY CHANGE 2026-07-30 — do NOT "restore" the old throw. `Sqrt(-1)` used
+  // to be REFUSED ("no real value") at the constant-fold site, while every
+  // sibling head in the same mathematical situation compiled and returned
+  // `NaN` at run time (`Ln(-2)` → `Math.log(-2)`, `Arcsin(2)` →
+  // `Math.asin(2)`), and while the SAME expression compiled fine when the
+  // operand was a variable (`√x` at `x = -2` → `NaN`, `√a` with `a ⩴ -2` →
+  // `Math.sqrt((-2))`). Fail-closed (D6) exists to prevent silently WRONG
+  // output, not to prevent a non-real one: `NaN` is the correct,
+  // self-describing answer for "no real value", and refusing only the
+  // provable-constant case bought no safety, because the runtime-variable
+  // case cannot be caught in principle — the caller must handle `NaN` either
+  // way.
+  it('folds Sqrt of a negative real constant to the complex value', () => {
+    // No `realOnly`: the target supports complex values, and a canonical
+    // `Sqrt(negative)` is typed `complex`, so the fold is the complex
+    // principal value the interpreter returns — the same shape `1 + i` and
+    // `Sqrt(Complex(0, 1))` already compile to.
     const expr = ce.expr(['Sqrt', -1]);
-    expect(() => compile(expr, { fallback: false })).toThrow(/no real value/);
-    expect(compile(expr).success).toBe(false);
+    const result = compile(expr, { fallback: false });
+    expect(result.success).toBe(true);
+    expect(result.code).toBe('({ re: 0, im: 1 })');
+    expect(result.run!()).toEqual({ re: 0, im: 1 });
+  });
+
+  it('folds Sqrt of a negative real constant to NaN under realOnly', () => {
+    const expr = ce.expr(['Sqrt', -1]);
+    const result = compile(expr, { fallback: false, realOnly: true });
+    expect(result.success).toBe(true);
+    expect(result.run!() as number).toBeNaN();
   });
 
   it('should execute csqrt on complex input', () => {
@@ -911,24 +933,31 @@ describe('COMPILE COMPLEX - binder index named `i` (Tycho item 65)', () => {
 // Tycho item 62 counter-ask: `realOnly: true` was silently inert for a complex
 // tuple/list COMPONENT — the top-level coercion inspects only the result
 // itself, so a `{re, im}` in a component slot reached the consumer in a number
-// slot. The component TYPE cannot decide this (with `t` undeclared,
-// `(t, i t)` and `(t, t^2)` both infer `finite_number`), so the check uses
-// `isComplexValued` — the same predicate the GPU targets fail closed on.
-describe('realOnly rejects complex tuple components (Tycho item 62)', () => {
+// slot.
+//
+// POLICY CHANGE 2026-07-30 — do NOT "restore" the throw. The original fix
+// added a compile-time REFUSAL for a provably complex component on top of the
+// runtime coercion. The refusal is retired: `wrapRealOnly` recurses into array
+// results, so a provably complex component is projected to `NaN` in its slot,
+// exactly like a component that only becomes complex when the compiled
+// function is called (`(t, √t)` at `t = -4` → `[-4, NaN]`, which no static
+// check can catch). Refusing only the provable case bought no safety and made
+// `(1, i)` behave differently from `(1, √x)` at `x = -4`.
+describe('realOnly projects complex tuple components to NaN (Tycho item 62)', () => {
   const jsTarget = () =>
     (
       ce as unknown as { getCompilationTarget: (t: string) => any }
     ).getCompilationTarget('javascript');
 
   test.each([
-    ['(t, i t)', 2],
-    ['(t, 2+3i)', 2],
-    ['(i t, t)', 1],
-  ])('%s fails closed under realOnly (component %i)', (src, component) => {
-    const expr = ce.parse(src, { strict: false });
-    expect(() => jsTarget().compile(expr, { realOnly: true })).toThrow(
-      new RegExp(`component ${component} is complex-valued`)
-    );
+    ['(t, i t)', [0.5, NaN]],
+    ['(t, 2+3i)', [0.5, NaN]],
+    ['(i t, t)', [NaN, 0.5]],
+  ])('%s compiles under realOnly, complex component → NaN', (src, expected) => {
+    const expr = ce.parse(src as string, { strict: false });
+    const r = jsTarget().compile(expr, { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run({ t: 0.5 })).toEqual(expected);
   });
 
   test('the same expression still compiles WITHOUT realOnly', () => {
@@ -965,7 +994,7 @@ describe('realOnly rejects complex tuple components (Tycho item 62)', () => {
     expect(v.every((x) => Number.isFinite(x))).toBe(true);
   });
 
-  // The runtime backstop, for values that only become complex when called.
+  // The same coercion, for values that only become complex when called.
   test('realOnly coercion recurses into array results', () => {
     const r = jsTarget().compile(ce.parse('(t, \\sqrt{t})', { strict: false }), {
       realOnly: true,
@@ -975,10 +1004,11 @@ describe('realOnly rejects complex tuple components (Tycho item 62)', () => {
   });
 });
 
-// Review finding: the realOnly component check must follow only positions that
-// can PRODUCE the result. Walking every intermediate rejected compiles that are
-// correct — `At([i, 2], 2)` reads the real component and returns a real value.
-describe('realOnly component check is result-flow-aware (review follow-up)', () => {
+// A complex operand that never reaches the result must not colour the result:
+// `At([i, 2], 2)` reads the real component and returns a real value. (This
+// used to guard a static component check; since that check was retired
+// 2026-07-30 it pins the same invariant on the runtime projection.)
+describe('realOnly leaves an unused complex operand alone', () => {
   const jsTarget = () =>
     (
       ce as unknown as { getCompilationTarget: (t: string) => any }
@@ -995,12 +1025,14 @@ describe('realOnly component check is result-flow-aware (review follow-up)', () 
     expect(r.run({ t: 0.5 })).toEqual(expected);
   });
 
-  test.each(['(t, i t)', '(t, 2+3i)'])(
-    '%s is still rejected — the complex component IS the result',
-    (src) => {
-      expect(() =>
-        jsTarget().compile(ce.parse(src, { strict: false }), { realOnly: true })
-      ).toThrow(/is complex-valued/);
-    }
-  );
+  test.each([
+    ['(t, i t)', [0.5, NaN]],
+    ['(t, 2+3i)', [0.5, NaN]],
+  ])('%s → NaN in the complex slot — the complex component IS the result', (src, expected) => {
+    const r = jsTarget().compile(ce.parse(src as string, { strict: false }), {
+      realOnly: true,
+    });
+    expect(r.success).toBe(true);
+    expect(r.run({ t: 0.5 })).toEqual(expected);
+  });
 });

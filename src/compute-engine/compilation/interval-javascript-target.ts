@@ -515,6 +515,30 @@ function extractIntervalLimits(limitsExpr: Expression): {
 }
 
 /**
+ * Fail closed (D6) on a Sum/Product bound that is statically non-finite (a
+ * `±∞`/`NaN` literal, or an expression typed `non_finite_number`), so
+ * `compile()` reports failure and the caller falls back to the interpreter.
+ * `for (i = 1; i <= Infinity; i++)` never terminates and `-Infinity + 1` never
+ * advances, so such a bound would lock the caller's thread. Mirrors
+ * `assertFiniteBound` in the JavaScript target.
+ */
+function assertFiniteIntervalBound(
+  kind: 'Sum' | 'Product',
+  expr: Expression,
+  which: 'lower' | 'upper'
+): void {
+  const nonFinite =
+    (isNumber(expr) && !Number.isFinite(expr.re)) ||
+    expr.type.matches('non_finite_number');
+  if (!nonFinite) return;
+  throw new Error(
+    `${kind}: the ${which} bound \`${expr.toString()}\` is not a finite ` +
+      `number — an infinite or NaN bound has no terminating loop. ` +
+      `Fail closed (D6).`
+  );
+}
+
+/**
  * Compile a bound expression to a scalar JavaScript value for use as a loop
  * counter. For the interval target, bounds must be plain numbers (not intervals).
  *
@@ -571,6 +595,12 @@ function compileIntervalSumProduct(
 
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } =
     extractIntervalLimits(args[1]);
+
+  // Before ANY lowering decision — the unroll path included, which a
+  // non-finite bound would otherwise skip on its way to the loop arm.
+  assertFiniteIntervalBound(kind, lowerExpr, 'lower');
+  assertFiniteIntervalBound(kind, upperExpr, 'upper');
+
   const isSum = kind === 'Sum';
   const iaOp = isSum ? '_IA.add' : '_IA.mul';
   const identity = isSum ? '_IA.point(0)' : '_IA.point(1)';
@@ -612,6 +642,15 @@ function compileIntervalSumProduct(
     var: (id) => (id === index ? `_IA.point(${index})` : target.var(id)),
     boundVars: BaseCompiler.withBoundNames(target, [index]),
   });
+
+  // A SYMBOLIC bound can still be `±∞`/`NaN` at run time — the same
+  // non-terminating loop. Guard once at loop entry (never per iteration);
+  // `entire` is the interval target's "cannot bound this" answer. Constant
+  // bounds are statically finite by `assertFiniteIntervalBound` above, so they
+  // take the unguarded template and their code is unchanged.
+  if (lowerNum === undefined || upperNum === undefined) {
+    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isFinite(_upper) || !Number.isFinite(_lower)) return { kind: 'entire' }; for (let ${index} = _lower; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+  }
 
   return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; for (let ${index} = ${lowerCode}; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
 }

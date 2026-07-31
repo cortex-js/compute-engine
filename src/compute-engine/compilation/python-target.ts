@@ -14,6 +14,7 @@ import { tryGetConstant } from './constant-folding.js';
 import {
   isFunction,
   isNumber,
+  isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
@@ -496,6 +497,111 @@ function compilePythonExtremum(
 }
 
 /**
+ * Compile `Transpose`/`ConjugateTranspose`, optionally wrapping the operand in
+ * `wrap` (`np.conjugate`).
+ *
+ * The interpreter honors the explicit axes ONLY in the three-operand form
+ * (`ops.length === 3`); with one or two operands it swaps the last two axes and
+ * IGNORES a lone `axis1` — so dropping that operand here matches the
+ * interpreter rather than diverging from it. The three-operand form used to
+ * emit `np.transpose(m, i, j)`, whose second parameter is a whole permutation
+ * (`axes`), not an axis index: a runtime TypeError for `Transpose`, and for
+ * `ConjugateTranspose` a silently un-swapped result. `np.swapaxes` is the exact
+ * analog of the 1-based axis pair.
+ */
+function compilePythonTranspose(
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string,
+  wrap?: string
+): string {
+  if (args[0] == null) throw new Error('Transpose: missing argument');
+  const x = wrap ? `${wrap}(${compile(args[0])})` : compile(args[0]);
+  if (args.length < 3) return `np.transpose(${x})`;
+  if (args.length > 3 || args[1] == null || args[2] == null)
+    throw new Error(
+      `Transpose: only the (value) and (value, axis1, axis2) forms compile. ` +
+        `Fail closed (D6).`
+    );
+  return `np.swapaxes(${x}, int(${compile(args[1])}) - 1, int(${compile(
+    args[2]
+  )}) - 1)`;
+}
+
+/**
+ * Compile a statistic over the interpreter's flattened SAMPLE. `Mean`, `Median`,
+ * `Variance` and `StandardDeviation` are variadic
+ * (`((collection|number|distribution)+) -> number`) and the interpreter
+ * flattens EVERY operand into a single sample (`Mean([2,3],[5,7])` is 4.25,
+ * `Mean(2,3,7)` is 4). The bare `'np.mean'`/… string mappings emitted
+ * `np.mean(a, b, …)`, whose second and third positional parameters are numpy's
+ * `axis` and `dtype` — a runtime TypeError, or a silently different reduction.
+ * More than one operand is therefore spliced into one list.
+ */
+function compilePythonSample(
+  fn: string,
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string,
+  kwargs = ''
+): string {
+  if (args.length === 0 || args[0] == null)
+    throw new Error(`${fn}: no argument`);
+  if (args.length === 1) return `${fn}(${compile(args[0])}${kwargs})`;
+  const parts = args.map((a) =>
+    isPyCollectionOperand(a) ? `*${compile(a)}` : compile(a)
+  );
+  return `${fn}([${parts.join(', ')}]${kwargs})`;
+}
+
+/**
+ * Compile the FUNCTION form of a chained relation (`Less(a, b, c)`) — reached
+ * when an operand is a collection; the scalar case goes through the infix
+ * operator route and its `chainOp`.
+ *
+ * `np.less`/`np.greater_equal`/… are strictly BINARY ufuncs whose third
+ * positional parameter is `out`, so the bare string mappings turned
+ * `Less(a, b, c)` into `np.less(a, b, c)`: a TypeError on lists and, on
+ * ndarrays, `a < b` written INTO `c` — the chain's third operand silently
+ * dropped AND clobbered. Chain pairwise with `np.logical_and` instead, matching
+ * the interpreter's element-wise `Less([1,9],[3,4],[5,6]) → [True, False]`. The
+ * shared middle operands are bound once in an immediately-applied lambda, so
+ * each is evaluated exactly once (as the infix route does through `bindExpr`).
+ */
+function compilePythonRelation(
+  fn: string,
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string
+): string {
+  if (args.length < 2) throw new Error(`${fn}: expected at least two operands`);
+  if (args.length === 2)
+    return `${fn}(${compile(args[0])}, ${compile(args[1])})`;
+  const names = args.map((_, i) => `_r${i}`);
+  let body = `${fn}(${names[0]}, ${names[1]})`;
+  for (let i = 1; i < args.length - 1; i++)
+    body = `np.logical_and(${body}, ${fn}(${names[i]}, ${names[i + 1]}))`;
+  return `(lambda ${names.join(', ')}: ${body})(${args
+    .map((a) => compile(a))
+    .join(', ')})`;
+}
+
+/**
+ * Compile the FUNCTION form of `And`/`Or` (reached for a collection operand).
+ * `np.logical_and`/`np.logical_or` are binary ufuncs whose third positional
+ * parameter is `out` — see `compilePythonRelation`. These are associative, so a
+ * plain pairwise fold suffices (no operand is shared between pairs).
+ */
+function compilePythonLogical(
+  fn: string,
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string
+): string {
+  if (args.length === 0 || args[0] == null) throw new Error(`${fn}: no operand`);
+  let result = compile(args[0]);
+  for (let i = 1; i < args.length; i++)
+    result = `${fn}(${result}, ${compile(args[i])})`;
+  return result;
+}
+
+/**
  * Python/NumPy function implementations
  *
  * Maps mathematical functions to their NumPy equivalents.
@@ -564,6 +670,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 1) return compile(args[0]);
     return args.map((x) => compile(x)).join(' * ');
   },
+  // `Negate` lowers through the prefix `-` operator for a scalar operand; this
+  // handler covers the paths the operator mapping declines — chiefly an
+  // element-wise broadcast over a collection (`Negate([1,2,3])`), where it
+  // supplies the SCALAR ELEMENT lowering that `broadcastUnary` fans out into a
+  // comprehension. Without it the head has no function codegen and the fan-out
+  // is unreachable. The operand is parenthesized unconditionally: Python's
+  // unary `-` binds tighter than `+`, and the function-codegen path these
+  // operands come back through is precedence-blind (`Add` joins with ' + '),
+  // so `Negate(z + 1)` would otherwise emit `-z + 1`.
+  Negate: (args, compile) => `(-(${compile(args[0])}))`,
   // No Subtract handler — canonicalizes to Add+Negate before compilation.
   Divide: (args, compile) => {
     if (args.length === 0) return '1';
@@ -761,10 +877,38 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // The interpreter rounds half away from zero (Round(-2.5) = -3, Round(2.5) =
   // 3); `np.round` uses banker's rounding (Round(2.5) = 2). Reconstruct
   // half-away as `sign(x)·floor(|x| + 0.5)`.
-  Round: ([x], compile) => {
-    if (x === null) throw new Error('Round: no argument');
-    const c = compile(x);
-    return `(np.sign(${c}) * np.floor(np.abs(${c}) + 0.5))`;
+  Round: (args, compile) => {
+    const x = args[0];
+    if (x == null) throw new Error('Round: no argument');
+    const halfAway = (c: string): string =>
+      `(np.sign(${c}) * np.floor(np.abs(${c}) + 0.5))`;
+    if (args.length < 2) return halfAway(compile(x));
+    // The SECOND operand is a PRECISION: `Round(x, n)` rounds to `n` decimal
+    // places (the signature is `(number, integer?)`), i.e. `Round(x·10ⁿ)/10ⁿ`
+    // — what the interpreter, the JavaScript target and the interval target
+    // all compute — and a negative `n` rounds to tens/hundreds/…
+    // (`Round(1234.5678, -2)` is 1200). This lowering used to consume only
+    // `args[0]`, so `Round(3.14159, 2)` reported success on code computing 3
+    // where the interpreter answers 157/50.
+    //
+    // Unlike the GPU targets, Python needs neither a compile-time-constant
+    // guard nor a |n| range guard: `10 ** n` is an exact arbitrary-precision
+    // integer for n ≥ 0 and a correctly-rounded float for n < 0 — never the
+    // shader's `exp2(n·log2(10))` approximation, which moves the very tie
+    // boundary the rounding depends on. A RUNTIME `n` therefore lowers
+    // soundly.
+    const n = tryGetConstant(args[1]);
+    if (n !== undefined && Number.isInteger(n)) {
+      const factor = `10 ** ${n}`;
+      const scaled = `((${compile(x)}) * ${factor})`;
+      return `(${halfAway(scaled)} / ${factor})`;
+    }
+    // A runtime precision: bind the factor and the scaled value once each, so
+    // neither operand's code is evaluated twice.
+    return (
+      `(lambda _p: (lambda _t: ${halfAway('_t')} / _p)` +
+      `((${compile(x)}) * _p))(10 ** (${compile(args[1])}))`
+    );
   },
   Truncate: 'np.trunc',
 
@@ -842,27 +986,39 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Sum: (args, _compile, target) => compilePythonSumProduct('Sum', args, target),
   Product: (args, _compile, target) =>
     compilePythonSumProduct('Product', args, target),
-  Mean: 'np.mean',
-  Median: 'np.median',
-  Variance: 'np.var',
-  StandardDeviation: 'np.std',
+  // Mean/Median/Variance/StandardDeviation are VARIADIC and reduce over the
+  // flattened sample — see `compilePythonSample`.
+  Mean: (args, compile) => compilePythonSample('np.mean', args, compile),
+  Median: (args, compile) => compilePythonSample('np.median', args, compile),
+  // CE `Variance`/`StandardDeviation` are the SAMPLE statistics (there are
+  // separate `PopulationVariance`/`PopulationStandardDeviation` heads), so the
+  // numpy calls need `ddof=1`: the default `ddof=0` is the population form and
+  // was a silent wrong value (`Variance([2,3,7])` is 7, `np.var` gives 14/3).
+  Variance: (args, compile) =>
+    compilePythonSample('np.var', args, compile, ', ddof=1'),
+  StandardDeviation: (args, compile) =>
+    compilePythonSample('np.std', args, compile, ', ddof=1'),
   // Covariance/Correlation: two-collection form only. numpy `np.cov` defaults
   // to ddof=1 (sample) and returns the 2×2 covariance matrix — the off-diagonal
   // entry [0][1] is Cov(x, y). `np.corrcoef` returns the correlation matrix.
+  // `== null`, not `=== null`: the SECOND operand is optional in the signature,
+  // so a one-operand `Covariance([1,2])` arrives as `undefined` — which slipped
+  // past a `=== null` guard and emitted `np.cov([1, 2], )`, a Python
+  // SyntaxError reported as a successful compilation.
   Covariance: ([x, y], compile) => {
-    if (x === null || y === null)
+    if (x == null || y == null)
       throw new Error('Covariance: expected two collection arguments');
     return `np.cov(${compile(x)}, ${compile(y)})[0][1]`;
   },
   PopulationCovariance: ([x, y], compile) => {
-    if (x === null || y === null)
+    if (x == null || y == null)
       throw new Error(
         'PopulationCovariance: expected two collection arguments'
       );
     return `np.cov(${compile(x)}, ${compile(y)}, ddof=0)[0][1]`;
   },
   Correlation: ([x, y], compile) => {
-    if (x === null || y === null)
+    if (x == null || y == null)
       throw new Error('Correlation: expected two collection arguments');
     return `np.corrcoef(${compile(x)}, ${compile(y)})[0][1]`;
   },
@@ -870,15 +1026,36 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Linear algebra
   Dot: 'np.dot',
   Cross: 'np.cross',
-  Norm: 'np.linalg.norm',
+  // A STRING norm type (`Norm(v, "Infinity")`, `Norm(m, "Frobenius")`) is
+  // spelled differently by numpy — `np.linalg.norm(v, "Infinity")` is a
+  // ValueError. Map the two spellings the interpreter recognizes; anything else
+  // fails closed (D6). (The `Infinity` SYMBOL already folds to `np.inf`.)
+  Norm: (args, compile) => {
+    if (args[0] == null) throw new Error('Norm: missing argument');
+    if (args.length < 2) return `np.linalg.norm(${compile(args[0])})`;
+    const p = args[1];
+    if (isString(p)) {
+      const ord: string | undefined = {
+        Infinity: 'np.inf',
+        Frobenius: "'fro'",
+      }[p.string];
+      if (ord === undefined)
+        throw new Error(
+          `Norm: the norm type "${p.string}" has no numpy spelling. ` +
+            `Fail closed (D6).`
+        );
+      return `np.linalg.norm(${compile(args[0])}, ${ord})`;
+    }
+    return `np.linalg.norm(${compile(args[0])}, ${compile(p)})`;
+  },
   Determinant: 'np.linalg.det',
   Inverse: 'np.linalg.inv',
-  Transpose: 'np.transpose',
+  Transpose: (args, compile) => compilePythonTranspose(args, compile),
   MatrixMultiply: 'np.matmul',
   // Conjugate transpose: conjugate then transpose (a vector conjugates in
   // place, matching the interpreter and `np.transpose`).
   ConjugateTranspose: (args, compile) =>
-    `np.transpose(np.conjugate(${compile(args[0])}))`,
+    compilePythonTranspose(args, compile, 'np.conjugate'),
   // `np.diag` is rank-dispatched exactly like the interpreter's `Diagonal`: a
   // matrix → its main-diagonal vector; a vector → the diagonal matrix.
   Diagonal: 'np.diag',
@@ -899,12 +1076,17 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // PYTHON_OPERATORS; their function forms below serve the collection path.
   Equal: (args, compile) => compilePythonEquality('Equal', args, compile),
   NotEqual: (args, compile) => compilePythonEquality('NotEqual', args, compile),
-  Less: 'np.less',
-  LessEqual: 'np.less_equal',
-  Greater: 'np.greater',
-  GreaterEqual: 'np.greater_equal',
-  And: 'np.logical_and',
-  Or: 'np.logical_or',
+  // Chained (3+ operand) forms fold pairwise — a bare `np.less(a, b, c)` would
+  // consume the third operand as numpy's `out`. See `compilePythonRelation`.
+  Less: (args, compile) => compilePythonRelation('np.less', args, compile),
+  LessEqual: (args, compile) =>
+    compilePythonRelation('np.less_equal', args, compile),
+  Greater: (args, compile) =>
+    compilePythonRelation('np.greater', args, compile),
+  GreaterEqual: (args, compile) =>
+    compilePythonRelation('np.greater_equal', args, compile),
+  And: (args, compile) => compilePythonLogical('np.logical_and', args, compile),
+  Or: (args, compile) => compilePythonLogical('np.logical_or', args, compile),
   Not: 'np.logical_not',
 
   // Control flow — the base compiler's default emits JS ternaries and a bare
@@ -984,7 +1166,35 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Special functions
   Erf: 'scipy.special.erf',
   Erfc: 'scipy.special.erfc',
-  Gamma: 'scipy.special.gamma',
+  // `Gamma(z)` is the complete Γ; the TWO-operand `Gamma(s, z)` is the UPPER
+  // INCOMPLETE gamma `∫_z^∞ tˢ⁻¹e⁻ᵗ dt` — a different function, not a variant
+  // (Γ(5, 2) = 22.736…, Γ(5) = 24). The bare `'scipy.special.gamma'` mapping
+  // passed the second operand to a one-argument routine, a runtime TypeError
+  // reported as a successful compilation. scipy has no direct upper incomplete
+  // gamma, but `gammaincc` is the REGULARIZED one, Q(s, z) = Γ(s, z)/Γ(s), so
+  // `gammaincc(s, z)·gamma(s)` recovers it (verified against the interpreter:
+  // Γ(5, 2) → 22.736327583750935).
+  Gamma: (args, compile) => {
+    const s = args[0];
+    if (s == null) throw new Error('Gamma: no argument');
+    if (args.length < 2) return `scipy.special.gamma(${compile(s)})`;
+    // scipy's incomplete-gamma family is defined for `s >= 0` only, and the
+    // Γ(s) factor is a pole at the non-positive integers — the product is
+    // `nan` there, where the interpreter still has a finite value
+    // (Γ(-1, 2) = 0.01876…). A statically non-positive `s` therefore fails
+    // closed (D6) rather than compiling to a guaranteed `nan`.
+    const sConst = tryGetConstant(s);
+    if (sConst !== undefined && sConst <= 0)
+      throw new Error(
+        `Gamma: the upper incomplete gamma Γ(s, z) lowers through the ` +
+          `REGULARIZED \`scipy.special.gammaincc\`, which is defined for ` +
+          `s > 0 only (s = ${sConst}). Fail closed (D6).`
+      );
+    const cs = compile(s);
+    return `(scipy.special.gammaincc(${cs}, ${compile(
+      args[1]
+    )}) * scipy.special.gamma(${cs}))`;
+  },
   GammaLn: 'scipy.special.loggamma',
   // `x! = Γ(x+1)`, matching the interpreter and the JavaScript target.
   // `scipy.special.factorial` is integer-only — it returns 0 for a negative or
@@ -1453,6 +1663,16 @@ export class PythonTarget implements LanguageTarget<Expression> {
         `[${body} ${bindings
           .map(([name, code]) => `for ${name} in [${code}]`)
           .join(' ')}][0]`,
+      // A `broadcastable` unary head over a collection (`Sin([1,2,3])`) fans
+      // out as a LIST COMPREHENSION — always valid Python, and it preserves
+      // the element-wise semantics exactly, without assuming the caller bound
+      // a NumPy array (`np.sin` of a plain list happens to work, but `-L`
+      // negates only an ndarray; the comprehension is uniform for both, and
+      // for a head with no NumPy vectorization at all).
+      broadcastUnary: (_head, _operand, lowering, bcTarget) => {
+        const v = BaseCompiler.tempVar(bcTarget);
+        return `[${lowering.element(v)} for ${v} in ${lowering.collection()}]`;
+      },
       operators: (op) => PYTHON_OPERATORS[op],
       functions: (id) => PYTHON_FUNCTIONS[id],
       // Resolve a mathematical constant; otherwise return `undefined` so

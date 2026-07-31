@@ -4,6 +4,7 @@ import {
   foldTerms,
   tryGetComplexParts,
   formatFloat,
+  principalComplexPow,
 } from '../../src/compute-engine/compilation/constant-folding';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
@@ -209,9 +210,9 @@ describe('GPU HANDLER CONSTANT FOLDING', () => {
     });
 
     it('should fold x + Complex(0, 3) to vec2(x, 3.0)', () => {
-      expect(
-        glsl.compile(ce.expr(['Add', 'x', ['Complex', 0, 3]])).code
-      ).toBe('vec2(x, 3.0)');
+      expect(glsl.compile(ce.expr(['Add', 'x', ['Complex', 0, 3]])).code).toBe(
+        'vec2(x, 3.0)'
+      );
     });
   });
 
@@ -223,9 +224,9 @@ describe('GPU HANDLER CONSTANT FOLDING', () => {
     });
 
     it('should fold 3 * i to vec2(0.0, 3.0)', () => {
-      expect(
-        glsl.compile(ce.expr(['Multiply', 3, 'ImaginaryUnit'])).code
-      ).toBe('vec2(0.0, 3.0)');
+      expect(glsl.compile(ce.expr(['Multiply', 3, 'ImaginaryUnit'])).code).toBe(
+        'vec2(0.0, 3.0)'
+      );
     });
   });
 
@@ -270,9 +271,9 @@ describe('GPU HANDLER CONSTANT FOLDING', () => {
 
   describe('GPU Negate — folding', () => {
     it('should fold Negate(ImaginaryUnit) to vec2(0.0, -1.0)', () => {
-      expect(
-        glsl.compile(ce.expr(['Negate', 'ImaginaryUnit'])).code
-      ).toBe('vec2(0.0, -1.0)');
+      expect(glsl.compile(ce.expr(['Negate', 'ImaginaryUnit'])).code).toBe(
+        'vec2(0.0, -1.0)'
+      );
     });
 
     it('should compile Negate(x) as -x via operator path', () => {
@@ -300,9 +301,7 @@ describe('GPU HANDLER CONSTANT FOLDING', () => {
     it('should compile Power(x, 3) as repeated multiplication (not pow)', () => {
       // GLSL `pow(x, 3.0)` is undefined for x < 0 (returns +8 for -2, wrong
       // sign). Repeated multiplication is exact and sign-correct.
-      expect(glsl.compile(ce.expr(['Power', 'x', 3])).code).toBe(
-        '(x * x * x)'
-      );
+      expect(glsl.compile(ce.expr(['Power', 'x', 3])).code).toBe('(x * x * x)');
     });
   });
 
@@ -360,9 +359,7 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
     });
 
     it('JS: Floor(x) still calls Math.floor() for real x', () => {
-      expect(js.compile(ce.expr(['Floor', 'x'])).code).toBe(
-        'Math.floor(_.x)'
-      );
+      expect(js.compile(ce.expr(['Floor', 'x'])).code).toBe('Math.floor(_.x)');
     });
 
     it('JS: Ceil(n) is a no-op for integer n', () => {
@@ -418,9 +415,7 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
     });
 
     it('JS: Power(x, 2) uses x * x for simple operand', () => {
-      expect(js.compile(ce.expr(['Power', 'x', 2])).code).toBe(
-        '(_.x * _.x)'
-      );
+      expect(js.compile(ce.expr(['Power', 'x', 2])).code).toBe('(_.x * _.x)');
     });
 
     it('JS: Power(Sin(x), 2) uses Math.pow for complex operand', () => {
@@ -468,12 +463,47 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
       expect(glsl.compile(ce.expr(['Root', -8, 3])).code).toBe('-2.0');
     });
 
-    it('even root of a negative constant fails closed (no literal NaN)', () => {
+    it('even root of a negative constant folds, never a literal NaN', () => {
       // Since D12-A a perfect-square radicand canonicalizes to an exact
       // complex literal, which GLSL emits as a vec2 constant:
       expect(glsl.compile(ce.expr(['Sqrt', -4])).code).toBe('vec2(0.0, 2.0)');
-      // A non-square radicand still reaches the fold path and fails closed:
-      expect(() => glsl.compile(ce.expr(['Sqrt', -5]))).toThrow(/non-finite/);
+      // A non-square radicand reaches the fold path. `Sqrt(negative)` is typed
+      // `complex`, so it folds to the complex principal value — the same
+      // vec2(re, im) convention, and the same ruling as the JS target's
+      // `complexSqrtLiteral` — rather than declining.
+      expect(glsl.compile(ce.expr(['Sqrt', -5])).code).toBe(
+        `vec2(0.0, ${Math.sqrt(5)})`
+      );
+      // SUPERSEDED CONTRACT (2026-07-30 ruling). These two used to assert
+      // `_gpu_nan()`, on the then-true grounds that a `Root`/`Power` with no
+      // real value was typed `finite_number`. The type handlers now narrow an
+      // EVEN root degree (or an even reduced-rational exponent denominator)
+      // over a negative base to `finite_complex`, so the enclosing emission is
+      // the same `vec2(re, im)` convention as `Sqrt(-5)` above and the fold
+      // must match it. A scalar NaN there is silently scalar-broadcast into
+      // `vec2(NaN, NaN)`. Do NOT restore the `_gpu_nan()` assertion.
+      const r = principalComplexPow(-8, 0.25);
+      expect(glsl.compile(ce.expr(['Root', -8, 4])).code).toBe(
+        `vec2(${r.re}, ${r.im})`
+      );
+      const p = principalComplexPow(-2, 0.3);
+      expect(glsl.compile(ce.expr(['Power', -2, 0.3])).code).toBe(
+        `vec2(${p.re}, ${p.im})`
+      );
+      // An ODD denominator keeps a real principal root and stays
+      // `finite_number`, so it folds to that real value — `pow` alone yields
+      // only NaN for a negative base.
+      expect(glsl.compile(ce.expr(['Power', -8, ['Divide', 2, 3]])).code).toBe(
+        '4.0'
+      );
+      // …including one whose EXACT denominator is odd but whose double
+      // reconstructs to an even one (`100/3` → the dyadic
+      // `4691249611844267/140737488355328`). The branch is decided by the exact
+      // rational, so this folds to the real `+2^(100/3)`, matching the type
+      // (`finite_number`) and `.N()`. It used to fold to `_gpu_nan()`.
+      expect(
+        glsl.compile(ce.expr(['Power', -2, ['Divide', 100, 3]])).code
+      ).toBe(`${Math.pow(2, 100 / 3)}`);
     });
   });
 });

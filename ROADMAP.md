@@ -126,6 +126,366 @@ operators, shortest for explicit PAIRING constructors (`Zip`, variadic `Map`,
   mismatch ruling for the heads it does cover (`ElementMax`/`ElementMin`/
   `Clamp`).
 
+### Compile-target coverage (ledger opened 2026-07-30)
+
+Until now, "which heads have no lowering on which target" was tracked _nowhere
+in this repo_ — it lived only in the consumer's census markdown, which meant
+every gap was rediscovered from the outside. This is the ledger. It is **sized
+by an external corpus** (Tycho's 684-document Desmos corpus, 3 096 compiled fn
+members, CE 0.99.0) because that is the only population data we have; the counts
+are `members / states` of that corpus and are a proxy for importance, not a
+target.
+
+A compile decline is not a slow path — the consumer's JS wrapper installs a
+`() => NaN` stub, so a declining row **draws nothing**. Treat these as
+correctness gaps with a performance-shaped symptom.
+
+**JavaScript band** (230 members / 81 states fail). Per the consumer's
+per-bucket provenance rules, **82 members / 25 states are our target gaps**; the
+other 148/61 are their own unexpanded user-function heads, unparsed LaTeX, and
+document-defined function heads. (Their first pass called the whole remainder
+ours — 202/69 — and they corrected it in review. Use 82/25.)
+
+- **`D` / `Derivative` (18 states / 50 members) — the largest single bucket, and
+  we are closing it even though they attribute it to themselves.** They classify
+  it as their `lowerDerivatives` pre-pass not firing, which is fair, but the
+  engine-side gap is the root cause: a derivative declines on every target
+  though `.evaluate()` yields a compilable closed form (`D(x^2,x).evaluate()` →
+  `2x`). Lowering it here retires the pre-pass for _every_ consumer instead of
+  each writing its own. _In progress 2026-07-30._
+- **Scalar arithmetic over a list-valued operand** (~4 states / 11 members):
+  string-mapped broadcastable heads (`Sign`, `Arctan2`, `Hypot`, `Sinc`) fail
+  closed where function-mapped ones (`Sin`, `Abs`, `Floor`, `Ln`) broadcast. _In
+  progress 2026-07-30._
+
+**GLSL/WGSL band** (204 members / 90 states compile on JS but not GPU — the
+GPU→CPU demotion class). Buckets triaged below.
+
+#### Triage (2026-07-30, one probe per bucket against a bare engine)
+
+Every bucket the consumer attributes to us, classified. This is the pass that
+must precede any implementation session — it moved four buckets out of "work"
+entirely (8 members / 5 states of the JS band, plus a GPU bucket) and split the
+rest by what they actually need.
+
+**A. Design question first — a missing _convention_, not missing code.** These
+are the ones worth a session, and each wants a design pass before an implementer
+touches it.
+
+| bucket                                                                      | target   |                         pop | the question                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------------------------------- | -------- | --------------------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PointList` w/ collection-valued component **+** `PointZ` over a point list | js, glsl |   **11 st / 36 mem** + 2 st | Is a list of points an expression-level value on a scalar/GPU target, or must the consumer project components first? **Same question, one design pass covers both.** Also gates the biggest measured CSE win — the flagship shape fails JS compile for exactly this reason, so no compile-target optimization can reach it. **Rank 1.** |
+| `At`                                                                        | glsl     | **26 st — largest GPU gap** | A dynamic index into a `vecN` has no direct GLSL form; needs a ternary/switch chain or a fixed-size array, and a convention for out-of-range. **Rank 2.**                                                                                                                                                                               |
+| `Integrate`                                                                 | glsl     |                       22 st | Quadrature inside a shader — which rule, what iteration budget, what happens on non-convergence. Large; do not start without deciding the budget question.                                                                                                                                                                              |
+
+**A′. RULED 2026-07-30 — retire the refusal, fold to `NaN`. DONE (JS target).**
+The `realOnly` constant-fold refusal was applied at exactly two sites
+(`Sqrt(-N)` 2/2, `Tuple` w/ a complex component 1/1). It was a **deliberate**
+policy, pinned by `compile-complex.test.ts` § _"fails closed on Sqrt of a
+negative real constant"_, whose comment reads: _"a real target refuses to fold
+it to a literal `NaN`"_. But it is enforced only in `javascript-target.ts` (the
+`Power`/`Root` constant paths, ~1675/1757, and the `Tuple` component check
+~4263). Probed — every sibling case in the same mathematical situation compiles
+and yields `NaN` at run time:
+
+| expression                  | realOnly       | result                                                              |
+| --------------------------- | -------------- | ------------------------------------------------------------------- |
+| `Sqrt(-2)` literal          | ✗ **declines** | —                                                                   |
+| `Ln(-2)` literal            | ✓ compiles     | `Math.log(-2)` → `NaN`                                              |
+| `Arcsin(2)` literal         | ✓ compiles     | `Math.asin(2)` → `NaN`                                              |
+| `Sqrt(a)`, `a := -2`        | ✓ compiles     | `Math.sqrt((-2))` → `NaN`                                           |
+| `Sqrt(x)`, `run({x:-2})`    | ✓ compiles     | `NaN`                                                               |
+| `Tuple(1, i)` literal       | ✗ **declines** | —                                                                   |
+| `Tuple(1, Sqrt(x))`, `x=-4` | ✓ compiles     | `[1, NaN]`                                                          |
+| bare `i`, `1 + i`           | ✓ compiles     | `{re,im}` — complex literal is fine _unless_ it is inside a `Tuple` |
+
+The policy was unreachable as a guarantee: the variable case cannot be caught,
+so refusing only the provable-constant case bought no safety and cost
+consistency. D6 fail-closed exists to prevent _silently wrong output_ (the GLSL
+`.map` defect — garbage wearing `success: true`); `NaN` is not garbage, it is
+the correct, self-describing answer, and it is already what every sibling head
+returns. **Ruling: `realOnly` → `NaN`; without `realOnly` → the complex value**
+(`Sqrt(-2)` declined even in complex mode, which was plainly wrong given `1 + i`
+compiles). Three pinned tests rewritten, none deleted. Four decline sites, not
+three — `Sqrt` (~1913) is the one `Sqrt(-2)` and `Power(-2, 1/2)` actually
+reach, since both canonicalize to `Sqrt`.
+
+**The refinement, and why it is not a half-measure:** only `Sqrt` folds to a
+complex literal; `Power`/`Root` that stay non-real fold to `NaN`.
+`isComplexValued` is a **type** query and it decides whether the _enclosing_
+expression emits real or complex arithmetic. `Sqrt(-5).type` is `complex`, so a
+parent routes through `_SYS.cadd`/`cmul` and `1 + √-5` gives
+`{re: 1, im: 2.236}`. But `Power(-2, 0.3).type` and `Root(-4, 4).type` are
+`finite_number` — the type handlers do not track a negative base under a
+fractional exponent — so folding those to `({re, im})` made `1 + (-2)^{0.3}`
+compile to `1 + ({re…})` and **run to the string `"1[object Object]"`**. That is
+silently-wrong output, which is what D6 is actually for. `NaN` there matches
+what the same expression already yields once the base is a variable. If we want
+those complex too, the fix belongs in the `Power`/`Root` **type handlers**, not
+the emitter — an interpreter-visible change, not attempted.
+
+**Two follow-ups this created:**
+
+- **JS and GPU now diverge** — `gpu-target.ts` (~1576, ~1638) still declines the
+  analogous cases. Consistency across targets is exactly the kind of pushback
+  that stays valid, so this should land with the GPU non-finite work below.
+- **A pre-existing bug is slightly widened**: a complex literal under a
+  _non-canonical_ parent already miscompiled on main
+  (`ce.box(['Add', 1, ['Root', -4, 2]], {canonical: false})` →
+  `"1[object Object]"`), because D12-A folds while the unbound parent's
+  `isComplexValued` is `false`. Canonical and structural routes are correct. Not
+  caused here and not fixed here; recorded so it is not rediscovered as new.
+
+**A″. Standing sweep — audit the other compile-time refusals for the same
+inconsistency.** The `realOnly` finding (A′) was not a one-off, it was an
+instance of a class: _a deliberate refusal enforced at some sites but not at the
+sibling sites_. A rationale comment and a passing test establish **intent**;
+neither establishes **consistency**. The check is cheap — for each refusal,
+probe the same mathematical situation reached a different way (via a variable,
+an assigned symbol, a different head in the same family, a different target) and
+see whether it is refused there too.
+
+Known candidates, all currently defended as "documented and deliberate":
+
+- **Python's arithmetic-infix D6 guard** (`base-compiler.ts` ~869) still fails
+  `Negate([1,2,3])` closed, even though the comprehension fan-out added in the
+  same round makes `[-_tv1 for _tv1 in L]` expressible. The guard may simply
+  have outlived its reason.
+- **`Sin(Tuple(1,2))` broadcasts when compiled but stays inert in the
+  interpreter** (`isBroadcastParticipant` excludes tuples). This one is a
+  _consistency_ defect — compiled and interpreted disagree — so it needs
+  resolving in one direction, not defending.
+- **`Sin(L)` for an unknown-length `list<number>` on GPU emits `sin(L)`**, valid
+  only if the caller happens to bind `L` to a `vecN` uniform. We assert a shape
+  we cannot see.
+- The `Multiply` ≥2-arrayish carve-out and the complex-element deferral —
+  preserved verbatim through the broadcast rework, never re-examined.
+- **`Sqrt(a)` with `a := -2` folds to a real `NaN`, not the complex value** —
+  `Math.sqrt((-2))` on JS, `sqrt((-2.0))` on GPU — because `compile()`
+  substitutes the assigned value past the handler's constant check. Both targets
+  agree, so this is not a cross-target divergence; it is the **literal-vs-
+  assigned-symbol** split, the same shape as the `realOnly` finding one layer
+  down. Fixing it changes JS behaviour too, so it wants its own ruling.
+
+**A‴. GPU invalid-source escapes — mostly closed 2026-07-30, three left.** The
+broadcast rework (item 112) plus a follow-up round closed the unary fan-out and
+the generic function-codegen/string-helper paths, deriving the decision from
+emitted source, the languages' own builtin tables, and the existing shape
+helpers — `gpuIsComponentwise` / `gpuOperandShape` / `gpuCheckOperandShapes`,
+with per-language `GLSL_SHAPE_RULES` / `WGSL_SHAPE_RULES` defaulting to their
+**intersection** so a new subclass fails closed. Two subtleties worth keeping:
+`_gpu_*` helpers are **not** all scalar-only (`_gpu_color_mix(vec3,vec3,float)`,
+`_gpu_apca`, `_gpu_cdiv`), so the gate reads the declaration the target itself
+emits rather than assuming; and a lowering may legitimately **destructure** a
+collection into scalars (`Median([1,5,3,2,4])` → `_gpu_median_5(…)`),
+distinguished by argument count vs operand count.
+
+A separate wrong-value defect in the same file was fixed alongside:
+**`Max`/`Min` over a single collection returned the operand verbatim** —
+`Max([1,2,3])` → `vec3(1.0, 2.0, 3.0)` where the interpreter and JS both reduce
+to `3`. It now folds pairwise to a scalar (`(max(max(1.0, 2.0), 3.0))`),
+destructuring an aggregate constructor or swizzling a static `vecN`, and failing
+closed on a matrix or runtime-length array. `ElementMax`/`ElementMin` are
+genuinely componentwise and correctly untouched. Note for maintainers: **the
+reduced emission is parenthesized on purpose** — that is what makes
+`gpuTopLevelCall` return `undefined` so the shape gate steps aside for a head
+that consumes a collection deliberately. Dropping the parens fails _closed_, not
+open.
+
+Reduction-family heads that still decline on GPU while JS and the interpreter
+compute a value — each needs its own lowering, all fail closed: `Sum([1,2,3])`,
+`Product([1,2,3])`, `LCM`, `GCD`, `Length`. Also `Max([])`/`Min([])` decline in
+the empty-constructor guard where JS gives `NaN` — now that `_gpu_nan()` is
+reachable for literals, that guard could answer instead.
+
+Still open, in rough priority:
+
+- **The infix `target.operators` path is unhooked** — the hottest shared path,
+  deliberately not gated. `Matrix` and list-_typed symbols_ report
+  `isCollection === false` and so route through it:
+  `Add(P: vector<real^3>, Q: vector<real^2>)` still emits `P + Q`, and WGSL
+  `Add(Matrix, 2)` emits `2.0 + mat2x2f(…)` (invalid WGSL, valid GLSL). Gating
+  it is a perf-sensitive change and wants its own scoped pass.
+- **Complex-element collections** — `gpuOperandShape` reads a list of complex
+  elements as `scalar` (via `isComplexValued`'s operand fallback), so the
+  generic gate is inert for them. The fan-out path declines them explicitly; the
+  generic path needs a separate complex-element rule.
+- **Argument POSITION within a builtin signature is not modelled** — GLSL
+  `step(float, genType)` takes its scalar first, `mod(genType, float)` last, so
+  a wrong-position scalar (`mod(float, vec3)`) is admitted. Deliberate
+  conservatism; tightening needs per-builtin arity/position tables.
+
+**`.N()` loses the odd-denominator real-root convention on large-term rational
+exponents** (found 2026-07-30 by a 649-pair sweep). For a negative base and an
+exact rational exponent `p/q` in lowest terms with **odd** `q`, the real
+principal root exists — CE applies this correctly at `(-8)^(2/3) → 4` and
+`Root(-8, 3) → -2`. But `.N()` numericizes the exponent to a double *before*
+applying the convention and recovers `p/q` from that double, so an exponent
+whose reconstruction has an even denominator silently takes the complex branch:
+
+```
+(-2)^(100/3)   exact:  q = 3 is odd, p = 100 is even  ⇒  +2^(100/3) ≈ 1.0823e10  (REAL)
+               .N():   -5411319704.84 - 9372680664.78i          (same magnitude, rotated 240°)
+```
+
+**The type handler is on the correct side here** — it reads the exact rational
+and types the node real. It is `.N()` that is wrong, and the disagreement is a
+floating-point artifact, not two defensible conventions. The compile path
+sidesteps it by declining whenever the exact and float readings disagree, so
+nothing emits a wrong value; the underlying `.N()` branch selection is
+unfixed. Fixing it means deciding the branch from the exact rational when one
+is available, in `arithmetic-power.ts`.
+
+**A negative VARIABLE base has no sign-corrected `Power` lowering.** With
+`a := -2`, `a^(2/3)` interprets to `1.5874` but compiles to `NaN`
+(`Math.pow(-2, 0.666…)`). The odd-denominator correction exists only in the
+constant-fold path and in `Root` (which is why `\sqrt[3]{a}` works). Closing it
+means emitting `sign(x)^p · |x|^(p/q)` for every `Power(realvar, p/q)` — a
+broader emission change with real snapshot risk.
+
+**Follow-ups from the 2026-07-30 review round** (each found while fixing
+something else; none is a regression):
+
+- **A type/value disagreement at the source:** `Arcosh(a)` with `a := -2` is
+  typed `finite_real`, but `.N()` is `1.3169… + 3.1415…i`. Compilation is
+  self-consistent (parent and child both emit real, both `NaN`), so it is not a
+  lowering split — the _type_ is simply wrong. Fixing it is type-handler work.
+- **`Power`/`Root` still yield `NaN` where the interpreter returns a complex
+  value.** This is the ratified `finite_number` policy, not a defect, but it is
+  the same user-visible surprise the `realOnly` retirement removed for `Sqrt`.
+  Resolvable only by making those type handlers track the negative-base /
+  fractional-exponent case — which would then let the emitter fold them complex.
+- **`resultIsComplexValued` is duplicated** in `javascript-target.ts` and
+  `gpu-target.ts` (~12 identical lines) because neither fixer could touch
+  `base-compiler.ts`. `python-target.ts` very likely has the same `Sqrt`/`Ln`/
+  `Log` split. Consolidate into `BaseCompiler` when fixing Python.
+- **Evaluating a derivative can shadow the `D` operator for the engine's
+  lifetime**: `D(D·x², x).evaluate()` declares the free symbol `D` as a _value_
+  definition, after which `isOperatorDef(lookupDefinition('D'))` is false and
+  `compile()` reports `` Unknown operator `D` ``. Same family as the
+  bare-assign-over-a-builtin shadowing fixed 2026-07-27; this route was missed.
+- **GPU: a builtin whose scalar slot is MANDATORY is unchecked when no scalar is
+  present.** `Refract(V3, W3, X3)` emits `refract(vec3, vec3, vec3)`, which no
+  driver accepts — the positional gate only runs when a scalar IS present.
+  Closing it means the slot sets become obligations, not just permissions.
+- **GPU: residual fail-open in the variadic fold path** — `ElementMax(2, v, w)`
+  over declared `vector<3>` symbols folds to `max(max(2.0, v), w)`, where no
+  argument is recognizable as a vector from source, so the tree walk steps
+  aside. Needs the emitter to hand the gate a fold-aware position mapping.
+- **Python's `Add`/`Multiply`/`Divide` lowerings are precedence-blind**
+  (`args.map(compile).join(' + ')`), so any path that declines the infix route —
+  chiefly complex operands — can emit `z + 1 * 2` for `Multiply(Add(z,1), 2)`.
+
+_Unverified, recorded so it is not lost:_ a decline thrown mid-compile may not
+unwind `BaseCompiler._localVector` / `_localComplex` if those pushes are not
+`finally`-protected, which would let one fail-closed throw leave stale frames
+for later compilations in the same process. **Probed and could NOT reproduce**
+(three declines between two identical compiles gave byte-identical output), and
+every existing GPU decline throws the same way, so it is pre-existing if real.
+Worth a `finally` audit rather than a bug hunt.
+
+**B. Plain missing codegen — no design needed, small.** Good first-session
+material if someone wants a quick win.
+
+- **`Repeat` on javascript** (1/1) — `Repeat(7,3)` → `[7,7,7]`; trivial.
+- **`Choose` (`nCr`) on glsl** (4 st) — a loop or an `lgamma`-based form.
+- ~~**Non-finite literals on GPU** (5 st)~~ — **DONE 2026-07-30.** One spelling
+  now serves both a literal and a masked `When`/`Which` branch
+  (`gpuNonFiniteLiteral` in `constant-folding.ts`; `gpuNaN` delegates to it), so
+  they cannot drift apart. GLSL gets `_gpu_inf()` alongside `_gpu_nan()` —
+  `intBitsToFloat(0x7F800000)` behind an overridable preamble helper, emitted
+  only when referenced; WGSL inlines the bitcast. **No `1.0 / 0.0` anywhere**,
+  pinned by a test, because that is the form fast-math folds. Original note kept
+  for the reasoning: **the mechanism already existed.** `gpuNaN()`
+  (`gpu-target.ts` ~356) emits `_gpu_nan()` on GLSL (an overridable preamble
+  helper) and `bitcast<f32>(0x7fc00000u)` on WGSL, and is already used for
+  masked `When`/`Which` branches. The literal path cannot reach it only because
+  `formatGPUNumber(n: number)` takes no target and so cannot know the language —
+  it throws instead (two sites: `gpu-target.ts` ~4715 and `constant-folding.ts`
+  ~29). Make the formatter target-aware and add the infinity counterpart
+  (`uintBitsToFloat(0x7F800000u)` / WGSL bitcast; there is no `gpuInf` today).
+  _Blocked on the in-flight GPU work; then in progress._ Note when doing it: the
+  fast-math caveat is real — ANGLE→Metal fast-math already destroys compensated
+  arithmetic in our high-precision work — so route through the overridable
+  helper rather than inlining `1.0/0.0`, which a driver is licensed to fold.
+
+**C. Correct fail-closed — NOT work.** The consumer's provenance rule is "first
+match wins, everything else is CE", so its catch-all sweeps deliberate refusals
+into our column. Verified by probe:
+
+- Collection-valued branch condition (2/5) — the ruled fail-closed of the
+  item-105/111 family. _(Re-triage note: a list-valued `Which` condition now
+  compiles on JS via elementwise selection, so their bucket must be a shape
+  outside that gate. Get the witness before treating this as settled.)_ **So 82
+  members / 25 states is an upper bound on our gaps — but a much weaker upper
+  bound than this triage first claimed.** Of the four buckets initially filed
+  here as "not work", three turned out to be work (see A′ and B); only the
+  branch-condition one survives, and it carries a caveat. Treat "correct
+  fail-closed" as a claim requiring a probe, not a default.
+
+**D. Needs a witness — cannot classify without seeing their shape.** Ask before
+building; the compiled _meaning_ is genuinely unclear.
+
+- `Set` (3/4), `Polygon` (3/16), `Sphere` (1/1), `GeometricVector` (1/3) —
+  geometry/collection heads. What is `compile(Polygon(…))` supposed to _return_
+  at run time? If the real need is membership (`x ∈ S`) rather than the
+  aggregate as a value, that is a different and much smaller fix.
+- `Subscript` (1/1) — **probe COMPILES**: `['Subscript','a','k']` canonicalizes
+  to the fused symbol `a_k` → `_.a_k`. Their bucket is either stale or a shape
+  where the fusion does not happen (cf. the G5 note in _Review residue_, where a
+  binder-bound index severs the binding). Get the witness before assuming a gap.
+- `Loop: Element index must be a symbol` (1/1) — reproduced only by handing
+  `Loop` a malformed index (a literal where a symbol belongs), i.e. CE correctly
+  rejecting bad input. Likely their expansion emitting a malformed `Loop`.
+- **`Comprehension` on glsl** (2 st) — the existing `TODO(E3-GLSL)`: needs loop
+  unrolling or fixed-size arrays. Real, documented, and blocked on the same
+  width ceiling as everything else on this target.
+- **Width ceiling, accepted by both sides**: an expression-level shader value
+  _is_ a vec2–4, so arbitrary-width rows (a 10-curve family, a 900-element
+  board) have no `vecN` to live in. Un-fanning those is a consumer-side
+  mechanism (instanced draw), not a CE change. If profiles ever justify
+  one-shader-body arbitrary-width rows, the ask is _array-uniform loop codegen_,
+  and it requires witnesses first.
+
+**Interval-js band** (526 members / 152 states): the domain is deliberately
+scalar — one interval per quantity — so a collection-valued condition or operand
+declines by design. See _interval-array support_ below.
+
+**How to work this ledger.** It is a ledger, not a work item — do not open a
+session against the section as a whole. The triage (step 1) is **done**, below.
+Scope a session to **one group-A entry**, and give it a design pass first:
+`PointList`/`PointZ` is rank 1 (36+ members _and_ it gates the biggest measured
+CSE win), `At` on GLSL is rank 2 (largest GPU gap). Group B is quick-win
+material. Group C is not work. Group D needs a question asked, not code.
+
+**Caveat on the numbers throughout this section.** They come from a single
+consumer's Desmos-derived corpus. That is the only population data we have, and
+it is genuinely informative, but it is one workload: a head that is rare there
+may be common elsewhere, and prioritizing strictly by these counts over-fits CE
+to one consumer. Treat them as evidence of _demand_, not as a ranking of
+_importance_.
+
+**Ruled, not gaps:**
+
+- **Interval-array support — DECLINED 2026-07-30, condition re-armed.** The
+  reopening condition (a list-valued piecewise inside a single implicit body
+  falling to sampling) was met by exactly **one document / 2 members**, and the
+  consumer's own read is that the row should have been fanned into scalar
+  members on their side. Supporting it means an interval-_vector_ value type
+  through the whole IA target, not a lowering tweak. Re-arm: ≥5 documents, or a
+  witness that survives the consumer's fan-out fix.
+- **Loop-form `Sum`/`Product` inside a conditionally-evaluated arm** stays
+  fail-closed (7 members / 1 state). The carve-out is a correctness boundary,
+  not conservatism: GLSL's `?:` short-circuits, so hoisting a loop out of an arm
+  it never feeds would shift every later `Random()` draw in the shader. The
+  escalation route (an `if`/`else`-with-temporary lowering) needs a second
+  witness; the count starts at one.
+- **Interpreted-mode evaluation memo (CSE Phase 3) — NOT PURSUED.** Its gate was
+  "bucket the interpreted residue first"; the bucketing says the residue is
+  target gaps, not memoizable work. See
+  [`docs/plans/2026-07-28-compile-cse-design.md`](./docs/plans/2026-07-28-compile-cse-design.md)
+  §10.
+
 ### Complex values in compiled scalar comparisons (deferred 2026-07-22)
 
 A compiled scalar comparison whose operand is merely `number`- or

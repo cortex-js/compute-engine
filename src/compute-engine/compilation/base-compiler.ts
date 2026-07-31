@@ -5,6 +5,7 @@ import type {
 } from '../global-types.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
+import { lookupApplicable } from '../function-utils.js';
 import {
   isFiniteIndexedCollection,
   isNumericTuple,
@@ -48,6 +49,7 @@ import type {
 import type {
   CompileTarget,
   CompilationResult,
+  CompiledFunction,
   CompiledRunner,
   CseRegionInstance,
   NamingContext,
@@ -727,7 +729,14 @@ export class BaseCompiler {
     // is not reported as `Unknown operator` (Tycho item 109a).
     let declinedByCustomHandler = false;
     if (!BaseCompiler.CONTROL_FLOW_HEADS.has(h)) {
-      const customDef = engine.lookupDefinition(h);
+      // `lookupApplicable`, not `lookupDefinition`: `h` is by construction in
+      // OPERATOR position, and a user value that shadows a builtin of the same
+      // name — `D` as a diffusion coefficient, `N` as a count — must not hide
+      // the builtin's lowering. That is the same rule binding already follows
+      // (`BoxedFunction` resolves its def with `lookupApplicable`), so without
+      // it a `D(x^2, x)` that EVALUATES fine would fail to compile with
+      // ``Unknown operator `D` ``.
+      const customDef = lookupApplicable(h, engine.context.lexicalScope);
       if (
         isOperatorDef(customDef) &&
         typeof customDef.operator.compile === 'function'
@@ -776,25 +785,30 @@ export class BaseCompiler {
     // A broadcastable head with a list/collection-typed operand that
     // `tryCompileBroadcast` did NOT handle would otherwise fall through to the
     // legacy scalar path and silently return garbage behind a `success: true`.
-    // Two cases reach here:
+    // What reaches here is the residue the broadcast closure DECLINES:
     //   - Arithmetic (`SCALAR_ARITHMETIC_HEADS`): the built-in symbolic lowering
     //     emits element-wise-impossible JS (`[1,2,3] + x` → the *string*
     //     "1,2,31"; `list * scalar` → NaN), and a complex-valued list is
     //     declined by the broadcast closure (can't carry complex scalar
     //     codegen).
-    //   - Any *other* broadcastable numeric head that is *string*-mapped to a
-    //     scalar helper with no array codegen (`Arctan2` → `Math.atan2`,
-    //     `Hypot` → `Math.hypot`, `Sinc` → `_SYS.sinc`): handed an array it
-    //     returns `NaN`/`null`. These are not in `SCALAR_ARITHMETIC_HEADS`, so
-    //     without this widened net they escape the guard entirely.
+    //   - Any *other* broadcastable numeric head whose operands the closure
+    //     declined — the `Multiply` ≥2-arrayish matrix-divergence carve-out, or
+    //     a complex element type. (A *string*-mapped scalar helper — `Arctan2` →
+    //     `Math.atan2`, `Hypot` → `Math.hypot`, `Sinc` → `_SYS.sinc` — used to
+    //     land here too, because it has no array codegen of its own; it now
+    //     broadcasts through the same `_SYS.bcast` closure, wrapping the scalar
+    //     CALL. The widened net stays: those heads are not in
+    //     `SCALAR_ARITHMETIC_HEADS`, and a complex-element operand still has to
+    //     fail closed rather than call `Math.atan2` on a `{re, im}` object.)
     // Fail closed (D6) with the offending head so the engine-level `compile()`
     // reports `success: false` and falls back to the interpreter (which
     // broadcasts correctly).
     //
     // Deliberately narrow, to avoid false positives on genuinely supported list
     // forms:
-    //   - GLSL/WGSL/GPU targets have native vector types (`vec3 + vec3`), so the
-    //     guard is scoped to `javascript` only.
+    //   - GLSL/WGSL/GPU targets have native vector types (`vec3 + vec3`) and
+    //     express their own element-wise lowering through the target's
+    //     `broadcastUnary` hook, so this guard is scoped to `javascript` only.
     //   - Relational (`Equal`/`Less`/…) and logical (`And`/`Or`/…) heads are
     //     excluded — they return booleans and are handled by their own codegen
     //     (`compileJSEquality` fails closed on collection operands).
@@ -802,20 +816,12 @@ export class BaseCompiler {
     //     (an identifier like `add`, not a symbolic infix `+`) takes
     //     responsibility for list operands (Issue #240) — only the built-in
     //     symbolic lowering (`+`, `*`, `_SYS.pow`) produces garbage.
-    //   - A unary broadcast over a single *concrete* finite indexed collection
-    //     whose head has *function* codegen (`-[1,2,3]`, `\sqrt{[1,4,9]}`) is
-    //     handled below via `.map` (a string-mapped unary head has no such
-    //     path, so it must fail closed).
     // The operand check is type-based (not just `isCollection`) so a symbolic
     // list *parameter* fails closed too, rather than silently emitting garbage.
     // It also matches a possibly-collection-typed operand
     // (`isPossiblyCollectionTyped`: a `broadcastable<T>` node or a top-typed
     // application). After the F1 widening, most such operands compile through
-    // `_SYS.bcast` and never reach here; the residue that `tryCompileBroadcast`
-    // DECLINED — the `Multiply` ≥2-arrayish carve-out, a complex-element
-    // deferral, or a head with no function codegen — would otherwise fall
-    // through to scalar codegen and return array garbage behind `success:true`,
-    // so it must fail closed too.
+    // `_SYS.bcast` and never reach here.
     if (target.language === 'javascript') {
       const def = engine.lookupDefinition(h);
       const isBroadcastableHead =
@@ -837,13 +843,7 @@ export class BaseCompiler {
         const opMap = target.operators?.(h);
         const lowersToScalarInfix =
           opMap === undefined || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]);
-        const isUnaryBroadcast =
-          args.length === 1 &&
-          isOperatorDef(def) &&
-          def.operator.broadcastable === true &&
-          typeof target.functions?.(h) === 'function' &&
-          isFiniteIndexedCollection(args[0]);
-        if (lowersToScalarInfix && !isUnaryBroadcast)
+        if (lowersToScalarInfix)
           throw new Error(
             `${h}: cannot compile scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Fail closed (D6). Materialize the list with evaluate() and compile a scalar element function instead.`
           );
@@ -877,9 +877,30 @@ export class BaseCompiler {
       const opMap = target.operators?.(h);
       const lowersToInfix =
         opMap !== undefined && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]);
+      // One shape IS soundly expressible and must reach its lowering: a UNARY
+      // broadcastable head over a FINITE INDEXED collection (`Negate([1,2,3])`).
+      // No infix arithmetic over a list is emitted for it at all — the target's
+      // `broadcastUnary` hook fans it out as a list comprehension
+      // (`[(-_tv1) for _tv1 in [1, 2, 3]]`), which is element-wise for a plain
+      // Python list exactly as for an ndarray. The predicate mirrors the
+      // dispatch site in the function-codegen path below one for one, so the
+      // guard only stands aside when that dispatch will actually fire; if the
+      // hook then declines, that path fails closed (D6) on its own. Everything
+      // else keeps failing closed: every binary/n-ary shape (`[1,2] + [3,4]`,
+      // `2 * [1,2]`, `[1,2] ** 2`) — which the unary hook cannot express — and
+      // a merely collection-TYPED operand, whose runtime binding (list vs
+      // ndarray) the compiled artifact cannot constrain.
+      const isUnaryBroadcastOverCollection =
+        target.broadcastUnary !== undefined &&
+        args.length === 1 &&
+        isOperatorDef(def) &&
+        def.operator.broadcastable === true &&
+        isFiniteIndexedCollection(args[0]) &&
+        typeof target.functions?.(h) === 'function';
       if (
         isArithmeticInfixHead &&
         lowersToInfix &&
+        !isUnaryBroadcastOverCollection &&
         args.some(
           (a) =>
             a.isCollection ||
@@ -1090,6 +1111,15 @@ export class BaseCompiler {
                 })
                 .join(` ${op[0]} `);
             }
+            // Same shape gate as the function-codegen and string-helper paths
+            // (see `CompileTarget.checkOperandShapes`): the infix arithmetic
+            // operators of a shader language are genType-polymorphic with
+            // their own overload table, and a typed-symbol or `Matrix` operand
+            // — for which `.isCollection` is false — reaches this path with
+            // shapes the operator may have no overload for (`vec3 + vec2`,
+            // `2.0 + mat2x2f(…)` on WGSL). Throws to fail closed (D6).
+            // No hook (JavaScript, Python, interval-js): unchanged.
+            target.checkOperandShapes?.(h, args, resultStr, target);
             return op[1] < prec ? `(${resultStr})` : resultStr;
           }
         }
@@ -1537,7 +1567,15 @@ export class BaseCompiler {
     }
 
     if (typeof fn === 'function') {
-      // Handle broadcastable operators
+      // A `broadcastable` head over a single finite indexed collection:
+      // apply the head's scalar element lowering across the collection. How
+      // that is spelled is a property of the TARGET LANGUAGE, not of the base
+      // compiler — Python fans out with a comprehension, the shader languages
+      // are already componentwise on a `vecN` and do not fan out at all — so
+      // it is delegated to the target's `broadcastUnary` hook. A target
+      // without one fails closed (D6); the base compiler used to emit a
+      // JavaScript `.map((v) => …)` arrow here for EVERY target, which is not
+      // valid GLSL, WGSL or Python.
       const def = engine.lookupDefinition(h);
       if (
         isOperatorDef(def) &&
@@ -1545,27 +1583,33 @@ export class BaseCompiler {
         args.length === 1 &&
         isFiniteIndexedCollection(args[0])
       ) {
-        const v = BaseCompiler.tempVar(target);
-        // Inside the map callback the element variable is the callback
-        // parameter — shadow `target.var` so it compiles bare, not as a
-        // `_.<name>` vars-object lookup (same pattern as the Sum/Product
-        // loop index).
-        const innerTarget = {
-          ...target,
-          var: (id: string) => (id === v ? v : target.var(id)),
-          boundVars: BaseCompiler.withBoundNames(target, [v]),
-        };
-        return `(${BaseCompiler.compile(args[0], target)}).map((${v}) => ${fn(
-          [args[0].engine.expr(v)],
-          (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
-          innerTarget
-        )})`;
+        const broadcast = BaseCompiler.compileBroadcastUnary(
+          engine,
+          h,
+          args[0],
+          fn,
+          target
+        );
+        if (broadcast !== undefined) return broadcast;
+        throw new Error(
+          `${h}: cannot compile an element-wise broadcast over the collection ` +
+            `\`${args[0].toString()}\` on the ${
+              target.language ?? 'javascript'
+            } target — it has no \`broadcastUnary\` lowering for this shape. ` +
+            `Fail closed (D6). Materialize the collection with evaluate() and ` +
+            `compile a scalar element function instead.`
+        );
       }
       // The index-aware operand compiler (`OperandCompiler`): a handler that
       // lowers a construct with conditionally-evaluated operand positions
       // passes the index for those positions and gets the matching CSE region
       // instance. A handler that omits it compiles exactly as before.
-      return fn(args, BaseCompiler.operandCompiler(node, target), target);
+      const code = fn(args, BaseCompiler.operandCompiler(node, target), target);
+      // A target with a static type system gets to reject the emission for the
+      // operand shapes it was given (`CompileTarget.checkOperandShapes`); it
+      // throws to fail closed (D6). No hook: unchanged.
+      target.checkOperandShapes?.(h, args, code, target);
+      return code;
     }
 
     // `fn` is a plain string: the target maps this head to a real-only helper
@@ -1585,9 +1629,15 @@ export class BaseCompiler {
       );
     }
 
-    return `${fn}(${args
+    const call = `${fn}(${args
       .map((x) => BaseCompiler.compileValueOperand(x, target))
       .join(', ')})`;
+    // Same shape gate as the function-codegen path above: a string-mapped
+    // helper is a scalar/genType signature too (`atan`, `clamp`, `mod`), and
+    // handing it a `vecN`/`matN` operand it has no overload for is invalid
+    // source, not a runtime concern.
+    target.checkOperandShapes?.(h, args, call, target);
+    return call;
   }
 
   /**
@@ -1651,8 +1701,8 @@ export class BaseCompiler {
   /**
    * Scalar arithmetic operator heads whose codegen would emit
    * element-wise-impossible scalar JS if handed a list-valued operand. Guarded
-   * in `compileExpr`: such a form fails closed (D6) unless it is the supported
-   * unary broadcast (e.g. `Negate([1,2,3])`), which lowers via `.map`.
+   * in `compileExpr`: such a form fails closed (D6) unless `tryCompileBroadcast`
+   * already lowered it element-wise (e.g. `Negate([1,2,3])` → `_SYS.bcast`).
    */
   private static readonly SCALAR_ARITHMETIC_HEADS: ReadonlySet<string> =
     new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power']);
@@ -1893,8 +1943,15 @@ export class BaseCompiler {
       }
     }
 
+    // A head with NO codegen at all has nothing to broadcast — decline (the
+    // caller's fail-closed guard covers it). A *string*-mapped head (a scalar
+    // helper such as `Sign` → `Math.sign`, `Arctan2` → `Math.atan2`, `Hypot` →
+    // `Math.hypot`, `Sinc` → `_SYS.sinc`) has no array codegen of its own, but
+    // it does have a scalar call form — the closure below wraps that call the
+    // same way it wraps function codegen, so those heads broadcast too instead
+    // of failing closed.
     const fn = target.functions?.(h);
-    if (typeof fn !== 'function') return null;
+    if (fn === undefined) return null;
 
     // An operand lowers to a JS array at run time when it is a concrete
     // collection, is statically list/collection-typed (a symbolic list
@@ -1927,16 +1984,62 @@ export class BaseCompiler {
       var: (id: string) => (params.includes(id) ? id : target.var(id)),
       boundVars: BaseCompiler.withBoundNames(target, params),
     };
-    const scalarBody = fn(
-      params.map((p) => engine.expr(p)),
-      (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
-      innerTarget
-    );
+    const scalarBody =
+      typeof fn === 'function'
+        ? fn(
+            params.map((p) => engine.expr(p)),
+            (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
+            innerTarget
+          )
+        : `${fn}(${params.join(', ')})`;
     const compiledArgs = args
       .map((a) => BaseCompiler.compile(a, target))
       .join(', ');
     const body = BaseCompiler.guardConnectiveAbsence(h, params, scalarBody);
     return `_SYS.bcast((${params.join(', ')}) => ${body}, ${compiledArgs})`;
+  }
+
+  /**
+   * Ask the TARGET to apply a `broadcastable` head's scalar element lowering
+   * across a single finite indexed collection operand — see
+   * `CompileTarget.broadcastUnary`. Returns `undefined` when the target has no
+   * such hook, or its hook declines; the caller then fails closed (D6).
+   *
+   * `element(code)` splices already-compiled target source in as the element
+   * operand: it binds a fresh placeholder name and shadows `target.var` so the
+   * source emits BARE, never as a `_.<name>` vars-object lookup (the same
+   * pattern as the Sum/Product loop index). A target that fans out therefore
+   * gets its loop variable back verbatim; one that is natively componentwise
+   * passes the whole compiled vector instead.
+   */
+  private static compileBroadcastUnary(
+    engine: ComputeEngine,
+    h: string,
+    operand: Expression,
+    fn: Exclude<CompiledFunction<Expression>, string>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    if (target.broadcastUnary === undefined) return undefined;
+    const element = (code: TargetSource): TargetSource => {
+      const v = BaseCompiler.tempVar(target);
+      const innerTarget: CompileTarget<Expression> = {
+        ...target,
+        var: (id: string) => (id === v ? code : target.var(id)),
+        boundVars: BaseCompiler.withBoundNames(target, [v]),
+      };
+      return fn(
+        [engine.expr(v)],
+        (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
+        innerTarget
+      );
+    };
+    const out = target.broadcastUnary(
+      h,
+      operand,
+      { collection: () => BaseCompiler.compile(operand, target), element },
+      target
+    );
+    return out === undefined || out === '' ? undefined : out;
   }
 
   /**

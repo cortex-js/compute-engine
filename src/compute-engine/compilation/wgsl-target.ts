@@ -4,6 +4,7 @@ import {
   GPUShaderTarget,
   compileGPUMatrix,
   assertGPUScalarComponents,
+  type GPUShapeRules,
 } from './gpu-target.js';
 
 /**
@@ -83,6 +84,63 @@ function toWGSLType(type: string): string {
 }
 
 /**
+ * Where WGSL admits a SCALAR among otherwise-`vecN` operands — a much shorter
+ * list than GLSL's.
+ *
+ * WGSL has no implicit scalar→vector promotion in its builtins: `min`, `max`,
+ * `clamp`, `step` and `smoothstep` are declared as `(T, T)` / `(vecN<T>,
+ * vecN<T>)` with no mixed form, so `max(vec3f, 2.0)` — valid GLSL — is not
+ * valid WGSL. Only the two builtins whose scalar argument is part of the
+ * signature survive: `mix(vecN<T>, vecN<T>, T)` and `refract(vecN<T>,
+ * vecN<T>, T)`. (`Mod` is not affected: the WGSL target lowers it to the `%`
+ * operator, which IS mixed-shape polymorphic.)
+ *
+ * In both of those the scalar is the THIRD argument and nowhere else, which is
+ * what the 0-based slot sets record: `mix(vec3f, vec3f, 0.5)` compiles,
+ * `mix(0.5, vec3f, vec3f)` does not. Strictly narrower than GLSL's table, as a
+ * WGSL rule set must be.
+ *
+ * Arithmetic: WGSL defines `matN * matN`, `matN * vecN` and `matN * scalar`,
+ * but matrix addition and subtraction ONLY between two matrices — `mat2x2f +
+ * 2.0` has no overload, where GLSL applies it componentwise. Unary negation
+ * (WGSL §8.7, "Unary arithmetic expressions") is declared over scalars and
+ * `vecN` only, so `-mat2x2f(…)` is not valid source either — where GLSL
+ * negates a matrix componentwise.
+ */
+const WGSL_SHAPE_RULES: GPUShapeRules = {
+  scalarGenTypeSlots: new Map([
+    ['mix', new Set([2])],
+    ['refract', new Set([2])],
+  ]),
+  // `mix` has an all-genType overload (`mix(e1: vecN<T>, e2: vecN<T>, e3:
+  // vecN<T>)`, WGSL §17.5) so its scalar third argument is a permission;
+  // `refract` is declared ONLY `refract(e1: vecN<T>, e2: vecN<T>, e3: T)`, so
+  // its third argument is an obligation.
+  mandatoryScalarSlots: new Map([['refract', new Set([2])]]),
+  // WGSL's geometric functions have no all-scalar form, where GLSL's genType
+  // includes `float`: §17.5 declares `cross(e1: vec3<T>, e2: vec3<T>)`,
+  // `dot(e1: vecN<T>, e2: vecN<T>)`, `faceForward(e1: vecN<T>, e2: vecN<T>,
+  // e3: vecN<T>)`, `normalize(e: vecN<T>)`, `reflect(e1: vecN<T>, e2:
+  // vecN<T>)` and `refract(e1: vecN<T>, e2: vecN<T>, e3: T)` — and nothing
+  // else. So `refract(1.0, 2.0, 0.5)`, which GLSL accepts, is not WGSL source
+  // at all. (`length` and `distance` ARE declared over a scalar as well as a
+  // `vecN`, so they are absent. `faceForward` has no CE head today; it is
+  // tabulated because the entry is a fact of the language, not of the
+  // lowerings.)
+  vectorOnlySlots: new Map([
+    ['cross', new Set([0, 1])],
+    ['dot', new Set([0, 1])],
+    ['faceForward', new Set([0, 1, 2])],
+    ['normalize', new Set([0])],
+    ['reflect', new Set([0, 1])],
+    ['refract', new Set([0, 1])],
+  ]),
+  matrixArithmetic: (sym, allMatrix) =>
+    sym === '*' || (allMatrix && (sym === '+' || sym === '-')),
+  matrixNegate: false,
+};
+
+/**
  * WGSL (WebGPU Shading Language) compilation target.
  *
  * Extends the shared GPU base class with WGSL-specific function names,
@@ -94,6 +152,10 @@ export class WGSLTarget extends GPUShaderTarget {
 
   protected getLanguageSpecificFunctions(): CompiledFunctions<Expression> {
     return WGSL_FUNCTIONS;
+  }
+
+  protected getShapeRules(): GPUShapeRules {
+    return WGSL_SHAPE_RULES;
   }
 
   compileFunction(

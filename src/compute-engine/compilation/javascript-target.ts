@@ -11,9 +11,14 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { Complex } from 'complex-esm';
-import { tryGetConstant } from './constant-folding.js';
+import {
+  tryGetConstant,
+  negativeBaseRealPow,
+  principalComplexPow,
+} from './constant-folding.js';
 import {
   collectionElementType,
+  isNonRealNumber,
   stripMissingFromType,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -703,9 +708,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Arccos: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.cacos(${compile(args[0])})`;
+    // Real operand, complex result (`Arccos(2)`, or `Arccos(x)` for a real
+    // symbol of unknown magnitude): the node is typed `finite_complex`, so the
+    // parent emits `{re, im}` arithmetic and `Math.acos` — a `NaN` number —
+    // must not be the lowering. See `resultIsComplexValued`.
+    if (resultIsComplexValued('Arccos', args))
+      return `_SYS.cacos(${complexOperandCode(args[0], compile)})`;
     return `Math.acos(${compile(args[0])})`;
   },
-  Arcosh: 'Math.acosh',
+  Arcosh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.cacosh(${compile(args[0])})`;
+    if (resultIsComplexValued('Arcosh', args))
+      return `_SYS.cacosh(${complexOperandCode(args[0], compile)})`;
+    return `Math.acosh(${compile(args[0])})`;
+  },
   Arccot: ([x], compile) => {
     if (x === null) throw new Error('Arccot: no argument');
     if (BaseCompiler.isComplexValued(x)) return `_SYS.cacot(${compile(x)})`;
@@ -717,11 +734,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Arcoth: ([x], compile) => {
     if (x === null) throw new Error('Arcoth: no argument');
     if (BaseCompiler.isComplexValued(x)) return `_SYS.cacoth(${compile(x)})`;
+    if (resultIsComplexValued('Arcoth', [x]))
+      return `_SYS.cacoth(${complexOperandCode(x, compile)})`;
     return `Math.atanh(1 / (${compile(x)}))`;
   },
   Arccsc: ([x], compile) => {
     if (x === null) throw new Error('Arccsc: no argument');
     if (BaseCompiler.isComplexValued(x)) return `_SYS.cacsc(${compile(x)})`;
+    if (resultIsComplexValued('Arccsc', [x]))
+      return `_SYS.cacsc(${complexOperandCode(x, compile)})`;
     return `Math.asin(1 / (${compile(x)}))`;
   },
   Arcsch: ([x], compile) => {
@@ -732,16 +753,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Arcsec: ([x], compile) => {
     if (x === null) throw new Error('Arcsec: no argument');
     if (BaseCompiler.isComplexValued(x)) return `_SYS.casec(${compile(x)})`;
+    if (resultIsComplexValued('Arcsec', [x]))
+      return `_SYS.casec(${complexOperandCode(x, compile)})`;
     return `Math.acos(1 / (${compile(x)}))`;
   },
   Arsech: ([x], compile) => {
     if (x === null) throw new Error('Arsech: no argument');
     if (BaseCompiler.isComplexValued(x)) return `_SYS.casech(${compile(x)})`;
+    if (resultIsComplexValued('Arsech', [x]))
+      return `_SYS.casech(${complexOperandCode(x, compile)})`;
     return `Math.acosh(1 / (${compile(x)}))`;
   },
   Arcsin: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.casin(${compile(args[0])})`;
+    if (resultIsComplexValued('Arcsin', args))
+      return `_SYS.casin(${complexOperandCode(args[0], compile)})`;
     return `Math.asin(${compile(args[0])})`;
   },
   Arsinh: 'Math.asinh',
@@ -750,7 +777,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.catan(${compile(args[0])})`;
     return `Math.atan(${compile(args[0])})`;
   },
-  Artanh: 'Math.atanh',
+  Artanh: (args, compile) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return `_SYS.catanh(${compile(args[0])})`;
+    if (resultIsComplexValued('Artanh', args))
+      return `_SYS.catanh(${complexOperandCode(args[0], compile)})`;
+    return `Math.atanh(${compile(args[0])})`;
+  },
   Ceil: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `Math.ceil(${compile(args[0])})`;
@@ -830,6 +863,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Ln: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.cln(${compile(args[0])})`;
+    // Real operand, complex result (`a := -2` → `Ln(a)` is `finite_complex`):
+    // the parent emits `{re, im}` arithmetic, so `Math.log` — a `NaN` number —
+    // must not be the lowering. See `resultIsComplexValued`.
+    if (resultIsComplexValued('Ln', args))
+      return `_SYS.cln(${complexOperandCode(args[0], compile)})`;
     return `Math.log(${compile(args[0])})`;
   },
   List: (args, compile) => `[${args.map((x) => compile(x)).join(', ')}]`,
@@ -1504,7 +1542,31 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.reshape(${coll}, [${dims.ops.map((d) => compile(d)).join(', ')}])`;
   },
-  Log: (args, compile) => {
+  // `Log(x)` is base 10; `Log(x, b)` is base `b`. `Log2`/`Log10`/`Lb`
+  // canonicalize into this head, so this is the only place they are lowered.
+  Log: (args, compile, target) => {
+    // Complex either because an operand is, or because the RESULT is (a real
+    // but negative argument: `a := -2` makes `Log(a)` `finite_complex`). Either
+    // way the enclosing expression reads `{re, im}`, so `Math.log10` — a `NaN`
+    // number — must not be the lowering. See `resultIsComplexValued`.
+    if (
+      args.some((a) => BaseCompiler.isComplexValued(a)) ||
+      resultIsComplexValued('Log', args)
+    ) {
+      const n = BaseCompiler.tempVar(target);
+      const num = `const ${n} = _SYS.cln(${complexOperandCode(args[0], compile)});`;
+      if (args.length === 1)
+        return `(() => { ${num} return { re: ${n}.re / Math.LN10, im: ${n}.im / Math.LN10 }; })()`;
+      // `ln(x) / ln(b)`, as a complex quotient: the base may itself be complex,
+      // or real-but-negative (whose own `ln` is complex).
+      const d = BaseCompiler.tempVar(target);
+      const m = BaseCompiler.tempVar(target);
+      return (
+        `(() => { ${num} const ${d} = _SYS.cln(${complexOperandCode(args[1], compile)}); ` +
+        `const ${m} = ${d}.re * ${d}.re + ${d}.im * ${d}.im; ` +
+        `return { re: (${n}.re * ${d}.re + ${n}.im * ${d}.im) / ${m}, im: (${n}.im * ${d}.re - ${n}.re * ${d}.im) / ${m} }; })()`
+      );
+    }
     if (args.length === 1) return `Math.log10(${compile(args[0])})`;
     return `(Math.log(${compile(args[0])}) / Math.log(${compile(args[1])}))`;
   },
@@ -1667,15 +1729,29 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const eConst = tryGetConstant(exp);
     if (bConst !== undefined && eConst !== undefined) {
       const r = Math.pow(bConst, eConst);
-      // A NaN fold means the real-valued result does not exist (e.g. a negative
-      // base with a fractional exponent → complex). Fail closed (D6) instead of
-      // emitting a literal `NaN` program with `success: true`.
-      if (Number.isNaN(r))
-        throw new Error(
-          `Power(${bConst}, ${eConst}) has no real value; cannot compile to a real target`
-        );
+      // `Math.pow` is NaN for every negative base with a non-integer exponent —
+      // narrower than CE's branch convention. WHICH value is folded is decided
+      // by the node's TYPE (see `NO_REAL_VALUE_FOLD`): an even
+      // reduced-rational denominator is the complex branch and the node is
+      // typed `finite_complex`, so it folds to the principal complex value; an
+      // ODD denominator has a real root (`(−8)^(2/3) = 4`) that `Math.pow`
+      // misses; anything unprovable keeps the `NaN` fold.
+      if (Number.isNaN(r)) {
+        if (resultIsComplexValued('Power', args))
+          return complexPowLiteral(bConst, eConst);
+        const real = negativeBaseRealPow(bConst, exp, eConst);
+        if (real !== undefined) return String(real);
+        return NO_REAL_VALUE_FOLD;
+      }
       return String(r);
     }
+    // The operands are real-emitted but the RESULT is typed complex (a
+    // negative base on the even-denominator branch, e.g. `a^{0.3}` with
+    // `a ⩴ -2`). The enclosing expression reads `{re, im}` off this node, so
+    // the real `Math.pow` lowering — a `NaN` *number* — would NaN-poison it.
+    // See `resultIsComplexValued`.
+    if (resultIsComplexValued('Power', args))
+      return `_SYS.cpow(${complexOperandCode(base, compile)}, ${complexOperandCode(exp, compile)})`;
     if (eConst === 0) return '1';
     if (eConst === 1) return compile(base);
     if (eConst === 2 && (isSymbol(base) || isNumber(base))) {
@@ -1748,17 +1824,29 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (aConst !== undefined && nConst !== undefined && nConst !== 0) {
       const r = Math.pow(aConst, 1 / nConst);
       if (Number.isNaN(r)) {
-        // Negative base. An odd integer degree has a real root (the
-        // interpreter's convention, e.g. Root(-8, 3) = -2); an even degree is
-        // complex, so fail closed (D6).
+        // Negative base. WHICH value is folded is decided by the node's TYPE
+        // — see `NO_REAL_VALUE_FOLD`. An ODD integer degree has a real root
+        // (the interpreter's convention, e.g. Root(-8, 3) = -2) and stays
+        // `finite_number`. An EVEN degree is the complex branch: as of the
+        // 2026-07-30 ruling the node is typed `finite_complex`, so it folds to
+        // the principal complex value the interpreter returns
+        // (`Root(-8, 4)` → `1.1892… + 1.1892…i`) rather than to `NaN` — the
+        // enclosing expression reads `{re, im}` off it. (A canonical even root
+        // of a negative already folds to an exact complex literal before
+        // compile: `√-4` → `2i`.)
         if (Number.isInteger(nConst) && nConst % 2 !== 0 && aConst < 0)
           return String(-Math.pow(-aConst, 1 / nConst));
-        throw new Error(
-          `Root(${aConst}, ${nConst}) has no real value; cannot compile to a real target`
-        );
+        if (resultIsComplexValued('Root', [arg, exp]))
+          return complexPowLiteral(aConst, 1 / nConst);
+        return NO_REAL_VALUE_FOLD;
       }
       return String(r);
     }
+    // Real-emitted operands but a complex RESULT type (an even degree over a
+    // negative base, e.g. `\sqrt[4]{a}` with `a ⩴ -2`). The parent reads
+    // `{re, im}` off this node. See `resultIsComplexValued`.
+    if (resultIsComplexValued('Root', [arg, exp]))
+      return `_SYS.cpow(${complexOperandCode(arg, compile)}, (1 / (${compile(exp)})))`;
     if (nConst === 2) return `Math.sqrt(${compile(arg)})`;
     if (nConst === 3) return `Math.cbrt(${compile(arg)})`;
     // Odd integer degree: `Math.pow` is NaN for a negative base, but the real
@@ -1906,14 +1994,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const c = tryGetConstant(args[0]);
     if (c !== undefined) {
       const r = Math.sqrt(c);
-      // A negative constant has no real square root (interpreter returns a
-      // complex value). Fail closed (D6) rather than fold to a literal `NaN`.
-      if (Number.isNaN(r))
-        throw new Error(
-          `Sqrt(${c}) has no real value; cannot compile to a real target`
-        );
+      // A negative constant has no real square root. `Sqrt(negative)` is typed
+      // `complex`, so fold to the complex principal value the interpreter
+      // returns (`√-2` → `1.414…i`) rather than decline; under `realOnly` the
+      // runtime wrapper projects it to `NaN`. See `NO_REAL_VALUE_FOLD`.
+      if (Number.isNaN(r)) return complexSqrtLiteral(c);
       return String(r);
     }
+    // The operand is real-emitted but the RESULT is typed complex (a symbol
+    // with an assigned negative value: `a := -2`). The enclosing expression
+    // reads `{re, im}` off this node, so `Math.sqrt` — which yields a `NaN`
+    // *number* there — would NaN-poison it. See `resultIsComplexValued`.
+    if (resultIsComplexValued('Sqrt', args))
+      return `_SYS.csqrt(${complexOperandCode(args[0], compile)})`;
     return `Math.sqrt(${compile(args[0])})`;
   },
   Tan: (args, compile) => {
@@ -2343,6 +2436,117 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 /** Convert a Complex instance to a plain {re, im} object */
 function toRI(c: Complex): { re: number; im: number } {
   return { re: c.re, im: c.im };
+}
+
+/**
+ * Folding a constant that has NO REAL VALUE (`√-2`, `(-2)^0.3`).
+ *
+ * Policy (2026-07-30): such a constant is FOLDED, never refused. Fail-closed
+ * (D6) exists to prevent silently WRONG output, not to prevent a non-real
+ * one. `NaN` is the correct, self-describing answer for "no real value", it
+ * is what every sibling head already returns (`Ln(-2)` → `Math.log(-2)`,
+ * `Arcsin(2)` → `Math.asin(2)`), and it is what the SAME expression returns
+ * when the operand is a variable (`Sqrt(x)` at `x = -2`, `Sqrt(a)` with
+ * `a ⩴ -2`). Refusing only the provable-constant case bought no safety: the
+ * runtime-variable case cannot be caught in principle, so the caller must
+ * handle `NaN` either way.
+ *
+ * WHICH value is folded is decided by the node's TYPE, not by the ruling:
+ * `BaseCompiler.isComplexValued` — a type query — is what makes the enclosing
+ * expression emit real (`a + b`) or complex (`{re, im}`) arithmetic, so the
+ * emitted constant must agree with it.
+ * - A canonical `Sqrt(negative)` is typed `complex`, so it folds to the
+ *   complex principal value (`√-2` → `1.414…i`, matching the interpreter) —
+ *   `complexSqrtLiteral` below.
+ * - A `Power`/`Root` on the COMPLEX branch of a negative base — the exponent's
+ *   reduced-rational denominator is even (`(−2)^0.3`), or the root degree is
+ *   even (`Root(−8, 4)`) — is typed `finite_complex` as of the 2026-07-30
+ *   ruling, so it folds to the principal complex value (`complexPowLiteral`).
+ *   It previously folded to `NaN` on the (then-true) grounds that the type was
+ *   the coarser `finite_number`; once the type narrowed, that fold became a
+ *   regression — the parent emits `{re, im}` arithmetic and read `.re`/`.im`
+ *   off a `NaN` *number*, yielding `{re: NaN, im: undefined}`.
+ * - A `Power`/`Root` on the REAL branch of a negative base — an ODD
+ *   reduced-rational denominator or root degree, where a real principal root
+ *   exists (`(−8)^(2/3) = 4`, `Root(−8, 3) = −2`) — stays `finite_number` and
+ *   folds to that real value, which `Math.pow` alone misses. See
+ *   `negativeBaseRealPow`.
+ * - Only when the branch is UNPROVABLE (a float exponent with no faithful
+ *   rational reconstruction) does a `Power`/`Root` fold to `NaN` — exactly what
+ *   its own `Math.pow` lowering yields once the base is a runtime variable. A
+ *   `{re, im}` object there would be consumed as a number by the enclosing real
+ *   arithmetic (`1 + {…}` → `"1[object Object]"`).
+ */
+const NO_REAL_VALUE_FOLD = 'NaN';
+
+/**
+ * The complex principal square root of a negative real constant, as a JS
+ * complex-object literal. `Complex.sqrt` (not the polar `pow`) so the folded
+ * constant is digit-exact with `_SYS.csqrt` and the interpreter — `pow(x, 0.5)`
+ * leaves ~1e-16 of real dust on a pure-imaginary result.
+ */
+function complexSqrtLiteral(c: number): string {
+  const r = new Complex(c, 0).sqrt();
+  return `({ re: ${r.re}, im: ${r.im} })`;
+}
+
+/**
+ * The principal complex power of two real constants, as a JS complex-object
+ * literal — the fold for a `Power`/`Root` node whose TYPE is complex (a
+ * negative base whose reduced-rational exponent has an even denominator).
+ *
+ * `Complex.pow` is the same routine `_SYS.cpow` and the interpreter's numeric
+ * path use, so the folded constant is digit-identical with the value the
+ * uncompiled expression produces.
+ */
+function complexPowLiteral(base: number, exp: number): string {
+  const r = principalComplexPow(base, exp);
+  return `({ re: ${r.re}, im: ${r.im} })`;
+}
+
+/**
+ * Whether applying `head` to `args` produces a complex value — the SAME signal
+ * `BaseCompiler.isComplexValued` reports to the ENCLOSING expression for this
+ * node.
+ *
+ * A handler that picks its real-vs-complex lowering from the ARGUMENT alone can
+ * disagree with its own parent. With `a := -2`, `Sqrt(a)` is typed `complex`
+ * (the type handler reads the assigned value's sign) while the operand `a` is
+ * typed `integer`: the parent emits `{re, im}` arithmetic around a
+ * `Math.sqrt(-2)` — a `NaN` *number* — and reads `.re`/`.im` off it
+ * (`{re: NaN, im: undefined}` behind `success: true`).
+ *
+ * The node is rebuilt STRUCTURALLY (bound, not canonicalized) so its head and
+ * operands are the ones being lowered, and its type is therefore the type the
+ * parent read. Mirrors the function branch of `isComplexValued`: a wide result
+ * type (`number`, as `Power`/`Root`/`Arcsin` have) is NOT complex — those fold
+ * to `NaN`, which is what their real lowering yields anyway.
+ */
+function resultIsComplexValued(
+  head: MathJsonSymbol,
+  args: ReadonlyArray<Expression>
+): boolean {
+  const engine = args[0]?.engine;
+  if (engine === undefined) return false;
+  try {
+    const t = engine.function(head, [...args], { structural: true }).type;
+    return isNonRealNumber(t.type);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An operand as complex-object source, lifting a real-emitted operand to
+ * `{ re, im: 0 }`. The `_SYS.c…` helpers read `.re`/`.im`, so handing one a
+ * plain number silently yields `NaN`.
+ */
+function complexOperandCode(
+  x: Expression,
+  compile: OperandCompiler<Expression>
+): string {
+  if (BaseCompiler.isComplexValued(x)) return compile(x);
+  return `({ re: ${compile(x)}, im: 0 })`;
 }
 
 /**
@@ -3672,6 +3876,8 @@ const SYS_HELPERS = {
   cacoth: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acoth()),
   casech: (z: ComplexResult) => toRI(new Complex(z.re, z.im).asech()),
   cacsch: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acsch()),
+  cacosh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acosh()),
+  catanh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).atanh()),
   cabs: (z: ComplexResult) => new Complex(z.re, z.im).abs(),
   carg: (z: ComplexResult) => new Complex(z.re, z.im).arg(),
   cconj: (z: ComplexResult) => toRI(new Complex(z.re, z.im).conjugate()),
@@ -4123,6 +4329,19 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
           const v = vars[id];
           return typeof v === 'string' ? v : JSON.stringify(v);
         }
+        // `Nothing` is the engine's ERASURE marker, not a variable (contrast
+        // `Missing`/`NaN`, which are position-preserving). Reaching here means
+        // some emitter is about to splice it in as an ordinary operand, where
+        // the `_.Nothing` vars-object lookup reads `undefined` at run time and
+        // silently degrades: an indefinite integral's missing bounds made
+        // quadrature "converge" to 0, an unbounded `Sum` bound makes the trip
+        // count NaN so the loop returns its identity. Fail closed (D6) instead.
+        // (A caller that genuinely pins a variable named `Nothing` in `vars` is
+        // served by the lookup above, which runs first.)
+        if (id === 'Nothing')
+          throw new Error(
+            'Nothing: the erasure marker is not a value and cannot be compiled as a variable reference. Fail closed (D6).'
+          );
         const result = {
           Pi: 'Math.PI',
           ExponentialE: 'Math.E',
@@ -4205,27 +4424,49 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
 /**
  * Wrap a compiled result so non-real values are projected to a real number or,
  * when they are not representable as one, `NaN` (fail closed, D6):
- * - A complex `{ re, im }` collapses to `re` when `im === 0`, else `NaN`.
+ * - A complex `{ re, im }` collapses to `re` when the imaginary part chops to
+ *   zero at the engine's `tolerance`, else `NaN`.
  * - A boolean is NOT a real number — the interpreter never numericizes a
  *   boolean-valued expression to 0/1 (`True.N()` stays `True`) — so it maps to
  *   `NaN` rather than silently passing through as a non-number (CO-P2-25).
+ *
+ * `tolerance` is the engine's configured `ce.tolerance`, snapshotted at
+ * compile time like every other engine fact the generated code closes over
+ * (folded constants, symbol values). See the `chop` call in
+ * `coerceComponents`.
  */
 function wrapRealOnly(
-  result: CompilationResult<'javascript'>
+  result: CompilationResult<'javascript'>,
+  tolerance: number
 ): CompilationResult<'javascript', number> {
   const origRun = result.run;
   // Recurses into arrays: a tuple/list result carries its components in
-  // number slots, so a `{ re, im }` there must be coerced too. The static
-  // `assertRealOnlyComponents` check catches provably-complex components at
-  // compile time; this is the runtime backstop for values that only become
-  // complex when the compiled function is called.
+  // number slots, so a `{ re, im }` there must be coerced too. This is the
+  // ONLY `realOnly` component check — a provably-complex component is folded
+  // like any other and projected here, exactly as a component that only
+  // becomes complex when the compiled function is called.
   // Only complex values are coerced inside a collection: a boolean ELEMENT is
   // a legitimate result (`Equal` over a collection yields `[false, …]`), so
   // the top-level boolean → NaN rule below must not recurse.
+  //
+  // The imaginary part is CHOPPED, not compared to zero exactly — the engine's
+  // own "is this zero?" convention (`chop`/`ce.tolerance`, as in
+  // `apply.ts`'s `ce._numericValue({re: ce.chop(…), im: ce.chop(…)})` and
+  // `relational-operator.ts`'s `ce.chop(n) === 0`). An exact test was a
+  // REGRESSION source (2026-07-30): the bounded inverse trig / inverse
+  // hyperbolic heads type as `complex` for an argument of unknown magnitude,
+  // so an IN-domain call is routed through `_SYS.casin` & co., and
+  // `Complex(0.5, 0).asin()` returns `im: 5.55e-17` — dust from the complex
+  // log/sqrt formulation. Projected exactly, that dust made `y = arcsin(x)`
+  // compile to `NaN` at every point of its domain. A genuinely complex value
+  // is nowhere near the tolerance (`arcsin(2)` has `im = -1.317`) and still
+  // fails closed to `NaN`.
   const coerceComponents = (r: unknown): unknown => {
     if (Array.isArray(r)) return r.map(coerceComponents);
     if (typeof r === 'object' && r !== null && 'im' in r)
-      return (r as ComplexResult).im === 0 ? (r as ComplexResult).re : NaN;
+      return chop((r as ComplexResult).im, tolerance) === 0
+        ? (r as ComplexResult).re
+        : NaN;
     return r;
   };
   const realRun = ((...args: unknown[]) => {
@@ -4240,69 +4481,17 @@ function wrapRealOnly(
   } as CompilationResult<'javascript', number>;
 }
 
-/**
- * Under `realOnly`, reject a complex-valued tuple/list COMPONENT.
- *
- * The top-level `realOnly` coercion inspects only the result itself, so a
- * `{ re, im }` object sitting in a component slot passed straight through and
- * reached the consumer in a number slot — `realOnly` was silently inert for
- * anything but a scalar (Tycho item 62). The component's TYPE cannot decide
- * this: with `t` undeclared, `(t, i t)` and `(t, t²)` both infer
- * `finite_number`. `isComplexValued` distinguishes them, and it is the same
- * predicate the GPU targets fail closed on, so every target now rejects the
- * same shapes. Mirrors `Sqrt(-1)`'s "no real value" compile error rather than
- * inventing a real lowering for a complex component.
- */
-function assertRealOnlyComponents(expr: Expression): void {
-  if (!isFunction(expr)) return;
-  const op = expr.operator;
-  if (op === 'Tuple' || op === 'List') {
-    for (const [i, component] of expr.ops.entries()) {
-      if (BaseCompiler.isComplexValued(component))
-        throw new Error(
-          `${op}: component ${i + 1} is complex-valued and has no real lowering under \`realOnly\`. Fail closed.`
-        );
-    }
-    return;
-  }
-
-  // Only positions that can PRODUCE the compiled result are followed. A
-  // collection is an intermediate everywhere else — `At([i, 2], 2)` reads the
-  // real component and compiles to a real value, so rejecting its unused
-  // complex component would fail a compile that is correct today.
-  for (const result of resultPositions(expr)) assertRealOnlyComponents(result);
-}
-
-/** The operands of `expr` whose value can become the compiled result. */
-function resultPositions(expr: Expression): readonly Expression[] {
-  if (!isFunction(expr)) return [];
-  const ops: readonly Expression[] = expr.ops;
-  if (ops.length === 0) return [];
-  switch (expr.operator) {
-    // The body is the result; the trailing operands are parameters/limits.
-    case 'Function':
-      return [ops[0]];
-    // A block's value is its last statement.
-    case 'Block':
-      return [ops[ops.length - 1]];
-    // Every arm can be the result.
-    case 'When':
-      return [ops[0]];
-    case 'If':
-      return ops.slice(1);
-    case 'Which':
-      return ops.filter((_, i: number) => i % 2 === 1);
-    default:
-      return [];
-  }
-}
-
 function compileToTarget(
   expr: Expression,
   target: CompileTarget<Expression>,
   realOnly?: boolean
 ): CompilationResult<'javascript'> {
-  if (realOnly) assertRealOnlyComponents(expr);
+  // A provably complex tuple/list COMPONENT used to be refused here (Tycho
+  // item 62). Retired 2026-07-30: `wrapRealOnly`'s `coerceComponents`
+  // recurses into array results, so `(1, i)` now runs to `[1, NaN]` — the
+  // same answer `(t, √t)` already gives at `t = -4`, where nothing can be
+  // caught statically. Fail-closed (D6) is about silently WRONG output, not
+  // about `NaN`.
 
   if (isFunction(expr, 'Function')) {
     const args = expr.ops;
@@ -4338,7 +4527,7 @@ function compileToTarget(
       calling: 'lambda' as const,
       run: fn as unknown as CompiledRunner,
     };
-    return realOnly ? wrapRealOnly(result) : result;
+    return realOnly ? wrapRealOnly(result, expr.engine.tolerance) : result;
   }
 
   if (isSymbol(expr)) {
@@ -4355,7 +4544,7 @@ function compileToTarget(
         calling: 'lambda' as const,
         run: fn as unknown as CompiledRunner,
       };
-      return realOnly ? wrapRealOnly(result) : result;
+      return realOnly ? wrapRealOnly(result, expr.engine.tolerance) : result;
     }
   }
 
@@ -4378,7 +4567,7 @@ function compileToTarget(
     calling: 'expression' as const,
     run: fn as unknown as CompiledRunner,
   };
-  return realOnly ? wrapRealOnly(result) : result;
+  return realOnly ? wrapRealOnly(result, expr.engine.tolerance) : result;
 }
 
 /**
@@ -4423,6 +4612,48 @@ function extractLimits(limitsExpr: Expression): {
         ? Math.floor(upperRe)
         : undefined,
   };
+}
+
+/**
+ * Whether a Sum/Product bound is KNOWN at compile time not to be a finite
+ * number: a `±∞`/`NaN` literal, or an expression typed `non_finite_number`.
+ *
+ * Such a bound cannot be lowered to a counted loop — `i <= Infinity` never
+ * fails, and `-Infinity + 1 === -Infinity` never advances the counter — so the
+ * compiled function would lock the caller's thread with no timeout and no way
+ * out. A symbolic bound (`n`) is not decided here: it is guarded at run time
+ * (see `emitSumProduct`).
+ */
+function isNonFiniteBound(expr: Expression): boolean {
+  if (isNumber(expr) && !Number.isFinite(expr.re)) return true;
+  return expr.type.matches('non_finite_number');
+}
+
+/**
+ * Fail closed (D6) on a Sum/Product bound that is statically non-finite, so
+ * `compile()` reports failure and the caller falls back to the interpreter
+ * (which evaluates a convergent series symbolically/numerically) instead of
+ * running a loop that cannot terminate.
+ *
+ * EXEMPT under an explicit `iterationBudget`: the budget guard emitted at loop
+ * entry (`!(_upper - i < budget)`) is false for an infinite or NaN bound, so
+ * the loop returns NaN without running — the terminating behavior the numeric
+ * limit ladder opts into (see `COMPILE Sum - iterationBudget` in
+ * `compile-sum-product.test.ts`).
+ */
+function assertFiniteBound(
+  kind: 'Sum' | 'Product',
+  expr: Expression,
+  which: 'lower' | 'upper',
+  target: CompileTarget<Expression>
+): void {
+  if (target.iterationBudget !== undefined) return;
+  if (!isNonFiniteBound(expr)) return;
+  throw new Error(
+    `${kind}: the ${which} bound \`${expr.toString()}\` is not a finite ` +
+      `number — an infinite or NaN bound has no terminating loop. ` +
+      `Fail closed (D6).`
+  );
 }
 
 /**
@@ -4872,6 +5103,14 @@ function emitSumProduct(
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(
     clauses[0]
   );
+
+  // Before ANY lowering decision: a statically non-finite bound fails closed.
+  // This precedes the unroll path too — `lowerNum`/`upperNum` are `undefined`
+  // for a non-finite literal, so it would otherwise fall through to the loop
+  // arm and emit `while (i <= Infinity)`.
+  assertFiniteBound(kind, lowerExpr, 'lower', target);
+  assertFiniteBound(kind, upperExpr, 'upper', target);
+
   const rest = clauses.slice(1);
   const isSum = kind === 'Sum';
   const op = isSum ? '+' : '*';
@@ -4964,11 +5203,24 @@ function emitSumProduct(
   // comparison also fails — evaluates to NaN instead of running the loop.
   // At the guard point `index` holds the lower bound, so the trip count is
   // `_upper - index + 1`.
+  //
+  // With no budget, a SYMBOLIC bound still gets a finiteness guard: it can be
+  // `±∞`/`NaN` at run time, which would make the loop guard never fail
+  // (`i <= Infinity`) or the counter never advance (`-Infinity + 1` is
+  // `-Infinity`) — a hung caller thread. The guard runs once at loop entry
+  // (never per iteration) and rejects no finite range however large, so it
+  // imposes no trip-count policy. Constant bounds are statically finite by
+  // `assertFiniteBound` above and emit no guard at all: their code is
+  // unchanged.
   const budget = target.iterationBudget;
-  const guardNaN = (nan: string): string =>
-    budget !== undefined
-      ? `if (!(_upper - ${index} < ${budget})) return ${nan}; `
-      : '';
+  const symbolicBound = lowerNum === undefined || upperNum === undefined;
+  const guardNaN = (nan: string): string => {
+    if (budget !== undefined)
+      return `if (!(_upper - ${index} < ${budget})) return ${nan}; `;
+    if (symbolicBound)
+      return `if (!Number.isFinite(_upper) || !Number.isFinite(${index})) return ${nan}; `;
+    return '';
+  };
 
   if (elementwiseBody) {
     const val = BaseCompiler.tempVar(target);
@@ -5087,27 +5339,69 @@ function compileIntegrate(
   // Antiderivative-first: compile a closed form when the integral resolves to
   // one (and does not reference a `vars`-mapped symbol, which must not fold).
   if (!referencesVarsSymbol(args, target)) {
+    const engine = args[0].engine;
+    let closed: Expression | undefined;
+    // Isolation scope — a child of the caller's scope, so everything the
+    // caller declared stays visible; only what this attempt declares is
+    // confined, and discarded on the way out. Without it, an integrand with a
+    // free single-uppercase-letter symbol (`∫ D x² dx`) devolves the unapplied
+    // operator into a variable and shadows the builtin in the caller's engine
+    // for good. The node must be BUILT inside the scope, not merely evaluated:
+    // `Integrate` is a binder, and its evaluate handler re-enters the parent of
+    // the scope its integrand literal owns — the scope fixed when that literal
+    // was canonicalized (`rebindEscapingCurrentScope`). Re-boxing the operands
+    // from MathJSON is what re-roots them here; `_fn` of the already-canonical
+    // operands would keep the caller's scope. The closed form outlives the
+    // scope: `compile()` below resolves its free symbols by name against the
+    // target's bindings.
+    engine.pushScope();
     try {
-      const engine = args[0].engine;
-      const closed = engine.withTimeLimit(
+      const ops = args.map((x) => x.json);
+      closed = engine.withTimeLimit(
         {
           ms: ANTIDERIVATIVE_ATTEMPT_BUDGET_MS,
           label: 'compile:antiderivative',
         },
-        () => engine._fn('Integrate', [...args]).evaluate()
+        () => engine.function('Integrate', ops).evaluate()
       );
-      if (!closed.has('Integrate') && closed.isValid && closed.isNaN !== true)
+    } catch {
+      // Non-elementary / deadline: fall through to quadrature below.
+    } finally {
+      engine.popScope();
+    }
+    if (
+      closed !== undefined &&
+      !closed.has('Integrate') &&
+      closed.isValid &&
+      closed.isNaN !== true
+    ) {
+      try {
         // Parenthesize: the closed form can be a low-precedence expression
         // (e.g. an `Add`), whereas the caller splices this handler's result as
         // an atomic operand (like the `_SYS.integrate(…)` call it replaces).
         return `(${compile(closed)})`;
-    } catch {
-      // Non-elementary / deadline / unlowerable head: fall through to
-      // quadrature below.
+      } catch {
+        // Unlowerable head: fall through to quadrature below.
+      }
     }
   }
 
   const limits = args.slice(1).map(extractLimits);
+
+  // An INDEFINITE integral (`\int f dx` — the `Limits` clause carries `Nothing`
+  // for its bounds) that did not close to an antiderivative above has no
+  // numeric value at a point: it denotes a function, not a number. The
+  // quadrature emitter below would compile the `Nothing` bounds like any other
+  // free symbol, to a `vars`-object lookup (`_.Nothing`), and at run time
+  // `adaptiveQuadrature(f, undefined, undefined)` reports "converged" and
+  // yields `0` for every input — a silent wrong value. Fail closed (D6) so the
+  // caller falls back to the interpreter, which keeps the integral symbolic.
+  const isUnbounded = (e: Expression | undefined) =>
+    e === undefined || isSymbol(e, 'Nothing');
+  if (limits.some((l) => isUnbounded(l.lowerExpr) || isUnbounded(l.upperExpr)))
+    throw new Error(
+      'Integrate: an indefinite integral with no closed-form antiderivative is a function, not a number — it has no value to compute at a point, and quadrature needs bounds. Fail closed (D6). Provide bounds for a definite integral, or evaluate symbolically instead.'
+    );
 
   // Unwrap a `Function(body, …params)` integrand to its body, binding the
   // lambdas to the function's own parameters (one per limit, in limit order,

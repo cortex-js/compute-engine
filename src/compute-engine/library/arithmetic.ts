@@ -106,6 +106,7 @@ import {
   canonicalPower,
   canonicalRoot,
   pow,
+  realPowerBranchTerms,
   root,
 } from '../boxed-expression/arithmetic-power.js';
 import { parseType } from '../../common/type/parse.js';
@@ -263,6 +264,36 @@ function lnSign(x: Expression): Sign | undefined {
   if (x.isSame(1)) return 'zero';
   if (x.isNegative || x.isReal === false) return 'unsigned';
   return undefined;
+}
+
+/**
+ * Whether `(negative base)^exp` provably takes the principal *complex* branch
+ * rather than a real root.
+ *
+ * Mirrors the branch convention implemented in
+ * `boxed-expression/arithmetic-power.ts`: for a negative real base an exponent
+ * that is a rational `p/q` in lowest terms with an **odd** denominator takes
+ * the real root — `(−8)^(2/3) = 4`, matching `Root(−8, 3) = −2` — while an
+ * **even** denominator takes the principal complex value
+ * (`(−2)^0.3 = 0.7236… + 0.9960…i`).
+ *
+ * Returns `true` only when the complex branch is PROVABLE. An exponent whose
+ * value cannot be pinned down (a symbol, or a float with no faithful rational
+ * reconstruction) returns `false`, so the caller keeps its honest
+ * `finite_number` hedge rather than over-claiming complex.
+ */
+function negativeBaseIsComplexBranch(exp: Expression): boolean {
+  // `=== true` / `=== false`: a symbolic operand has `isReal`/`isInteger ===
+  // undefined, which must not be read as a proof either way.
+  if (exp.isReal !== true || exp.isInteger !== false) return false;
+
+  // The exponent's exact (reduced) denominator when it has one, otherwise the
+  // float reconstruction — `realPowerBranchTerms` is the single source of the
+  // branch decision, shared with the numeric path and the compiled constant
+  // fold so type, `.N()` and compiled code cannot tell different stories.
+  const terms = realPowerBranchTerms(asRational(exp), exp.re);
+  if (terms === undefined) return false;
+  return terms[1] % 2 === 0;
 }
 
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
@@ -1933,8 +1964,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (base.isRational && exp.isInteger) return 'finite_rational';
         // A real result needs a non-negative base or an integer exponent;
         // otherwise the result may be complex (e.g. (−2)^0.5).
-        if (base.isReal && exp.isReal && (base.isNonNegative || exp.isInteger))
-          return 'finite_real';
+        if (base.isReal && exp.isReal) {
+          if (base.isNonNegative || exp.isInteger) return 'finite_real';
+          // A *provably negative* base with an exponent that provably lands on
+          // the complex branch (`(−2)^0.3`) is a finite complex value — the
+          // `finite_number` default below is true but too coarse for the
+          // compiler, which then guesses real and emits NaN. `=== true`, and
+          // an exponent whose branch cannot be proven keeps the wider default.
+          // (Nested under the `isReal` guard so a complex-typed base never
+          // pays for the extra sign query.)
+          if (base.isNegative === true && negativeBaseIsComplexBranch(exp))
+            return 'finite_complex';
+        }
         // A pure-imaginary base (non-zero by type: `imaginary ∩ real =
         // nothing` in the lattice, and 0 is real) raised to an integer power:
         // (bi)^n = bⁿ·iⁿ, so an even n is real, an odd n is pure imaginary
@@ -2180,6 +2221,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (base.isReal && exp.isReal) {
           // A positive base always gives a positive real root.
           if (base.isPositive === true) return 'finite_real';
+          // A negative real base with a provably *even* degree has no real
+          // value: Root(−8, 4) = 1.1892… + 1.1892…i. (An *odd* degree keeps
+          // CE's real-root convention — Root(−8, 3) = −2 — and a degree of
+          // unknown parity keeps the `finite_number` hedge below.) `=== true`
+          // throughout: a symbolic degree has `isEven === undefined`.
+          if (
+            base.isNegative === true &&
+            exp.isEven === true &&
+            exp.isPositive === true
+          )
+            return 'finite_complex';
           // A negative real base: a positive index yields a finite (real or
           // complex) value; a non-positive index can numericize to NaN in the
           // current evaluate path (e.g. Root(−2,−2)), so widen to `number`.

@@ -948,25 +948,60 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
     expect(compile(ce.box(['Root', -8, 3]))!.code).toBe('-2');
   });
 
-  it('non-real constant folds fail closed (P0-42, D6)', () => {
+  it('non-real constants are folded, not refused (P0-42; policy change 2026-07-30)', () => {
     // Since D12-A, a perfect-square negative radicand canonicalizes to an
     // EXACT complex literal before compile (√-4 → 2i), which the JS target
     // compiles as a complex constant — correct, interpreter-parity value:
     const folded = compile(ce.box(['Sqrt', -4]));
     expect(folded.success).toBe(true);
     expect(folded.run!()).toEqual({ re: 0, im: 2 });
-    // A non-square radicand still reaches the real fold path symbolically
-    // and must keep failing closed (no literal NaN):
+    // A non-square radicand reaches the real fold path symbolically. It used
+    // to fail closed there; since 2026-07-30 it folds like every sibling head
+    // instead. D6 guards against silently WRONG output, not against a
+    // non-real one, and the same expression over a VARIABLE has always
+    // compiled (`Math.sqrt(x)` → NaN) — which no static check can catch.
     for (const src of [
       ['Sqrt', -5],
       ['Root', -5, 2],
     ]) {
-      const result = compile(ce.box(src as any));
-      expect(result.success).toBe(false);
-      expect(() => compile(ce.box(src as any), { fallback: false })).toThrow(
-        /no real value/
-      );
+      const result = compile(ce.box(src as any), { fallback: false });
+      expect(result.success).toBe(true);
+      expect(result.run!()).toEqual({ re: 0, im: Math.sqrt(5) });
+      // …and `realOnly` projects that to NaN.
+      expect(
+        compile(ce.box(src as any), { fallback: false, realOnly: true }).run!()
+      ).toBeNaN();
     }
+    // SUPERSEDED CONTRACT (2026-07-30 ruling). These two used to assert a
+    // `'NaN'` fold, on the then-true grounds that a non-real `Power`/`Root` was
+    // typed `finite_number`. The type handlers now narrow a negative base with
+    // an EVEN reduced-rational exponent denominator (or an even root degree) to
+    // `finite_complex`, so the enclosing expression emits `{re, im}` arithmetic
+    // and the fold must be the complex principal value — a `NaN` *number*
+    // there is read as `{re: NaN, im: undefined}` by the parent. Do NOT restore
+    // the `'NaN'` assertion.
+    for (const [src, exp] of [
+      [['Power', -2, 0.3], { re: 0.7236485296064105, im: 0.9960167529258122 }],
+      [['Root', -4, 4], { re: 1, im: 0.9999999999999998 }],
+    ] as const) {
+      const expr = ce.box(src as any);
+      expect(expr.type.toString()).toBe('finite_complex');
+      const result = compile(expr, { fallback: false });
+      expect(result.run!()).toEqual(exp);
+      // …matching the interpreter, which is the point of the ruling.
+      expect(expr.N().re).toBeCloseTo(exp.re, 12);
+      expect(expr.N().im).toBeCloseTo(exp.im, 12);
+      // …and `realOnly` still projects it to NaN.
+      expect(
+        compile(expr, { fallback: false, realOnly: true }).run!()
+      ).toBeNaN();
+    }
+    // The REAL branch of a negative base is unchanged in kind but was folding
+    // wrong: an ODD denominator has a real principal root that `Math.pow`
+    // misses, so `(-8)^(2/3)` compiled to `NaN` while the interpreter gave 4.
+    expect(
+      compile(ce.box(['Power', -8, ['Divide', 2, 3]]), { fallback: false }).code
+    ).toBe('4');
   });
 
   it('non-canonical right-associative grouping is preserved (P0-45)', () => {

@@ -642,7 +642,41 @@ Tests: `test/compute-engine/compile-gpu-user-functions.test.ts`.
    already CSE, so this buys compile-time and source-size headroom, not
    per-frame arithmetic.
 
-## 10. Phase 3 — interpreted-mode CSE (sketch only; own design doc required)
+## 10. Phase 3 — interpreted-mode CSE (NOT PURSUED — the gate below was measured and failed, 2026-07-30)
+
+**Ruling (2026-07-30): do not build this.** The last bullet of this section made
+Phase 3 conditional on first bucketing *why* the interpreted residue fails to
+compile — "if most are compile-target gaps, fixing those beats optimizing the
+interpreter." Tycho ran that bucketing on the 0.99.0 full-corpus census
+(`docs/scratch/2026-07-30-census-099-ce-audit.md` §4 in their repo) and the
+condition fails decisively:
+
+| the 230-member JS-compile-failure residue | members | states |
+| --- | ---: | ---: |
+| **theirs** — unexpanded user-function heads, unparsed LaTeX, document-defined function heads | **148** | **61** |
+| compile-target gaps (ours) | 82 | 25 |
+
+(Their first pass attributed the whole non-`Unknown operator` remainder to us —
+202 / 69 — and they corrected it in review with a per-bucket provenance rule.
+Use 82 / 25. Our own triage then found that figure to be an *upper* bound: its
+catch-all sweeps deliberate refusals into our column. See `ROADMAP.md`
+§ "Compile-target coverage" → Triage group C.)
+
+**The correction strengthens the conclusion rather than weakening it.** On the
+pre-correction reading the residue was mostly our target gaps; on the corrected
+one it is *majority theirs* — parse and classifier failures that never reach a
+CE target at all. Under neither reading is it work a memo would rescue, and the
+corrected split makes the "fix the gaps instead" alternative look even better,
+since the gaps are a smaller and more tractable set than we thought. The residue
+also shrank 402 → 230 members across one release with no interpreter work. Our
+share is tracked in [`ROADMAP.md`](../../ROADMAP.md) § "Compile-target
+coverage".
+
+**Reopening condition:** a profile showing interpreted-path *cost* (not
+compile-failure population) dominating a real workload, on expressions that
+genuinely cannot be compiled. Population alone does not reopen it.
+
+The sketch is kept below because the hazards are worth not rediscovering.
 
 Per-top-level-`evaluate()` memo: key = structural hash + `isSame` verify,
 value = evaluated result, gated on `isPure`, size-thresholded. Hazards

@@ -11,12 +11,16 @@ import {
   foldTerms,
   tryGetComplexParts,
   formatFloat,
+  gpuNonFiniteLiteral,
   parenthesizeFactor,
+  negativeBaseRealPow,
+  principalComplexPow,
 } from './constant-folding.js';
 
 import type {
   CompileTarget,
   CompiledOperators,
+  CompiledFunction,
   CompiledFunctions,
   LanguageTarget,
   CompilationOptions,
@@ -337,9 +341,95 @@ function gpuVec2(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? 'vec2f' : 'vec2';
 }
 
+/**
+ * The principal complex power of two real constants, as a shader `vec2(re, im)`
+ * literal — the fold for a `Power`/`Root` node whose TYPE is complex (a
+ * negative base whose reduced-rational exponent has an even denominator).
+ *
+ * `Complex.pow` is the routine `_gpu_cpow`'s host-side counterpart and the
+ * interpreter both use, so the folded constant is the value the uncompiled
+ * expression produces (down to shader float precision).
+ */
+function gpuComplexPowLiteral(
+  base: number,
+  exp: number,
+  target?: CompileTarget<Expression>
+): string {
+  const r = principalComplexPow(base, exp);
+  return `${gpuVec2(target)}(${formatFloat(r.re, target?.language)}, ${formatFloat(
+    r.im,
+    target?.language
+  )})`;
+}
+
 /** Return the vec3 constructor name for the target language. */
 function gpuVec3(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? 'vec3f' : 'vec3';
+}
+
+/**
+ * Whether applying `head` to `args` produces a complex value — the SAME signal
+ * `BaseCompiler.isComplexValued` reports to the ENCLOSING expression for this
+ * node.
+ *
+ * A handler that picks its real-vs-complex lowering from the ARGUMENT alone can
+ * disagree with its own parent. With `a := -2`, `Sqrt(a)` is typed `complex`
+ * (the type handler reads the assigned value's sign) while the operand `a` is
+ * typed `integer`: the parent emits the `vec2(re, im)` convention around a
+ * scalar `sqrt(-2.0)`, and shader scalar-broadcast makes that a silent
+ * `vec2(NaN, NaN)` rather than a compile error.
+ *
+ * The node is rebuilt STRUCTURALLY (bound, not canonicalized) so its head and
+ * operands are the ones being lowered, and its type is therefore the type the
+ * parent read. A wide result type (`number`, as `Power`/`Root`/`Arcsin` have)
+ * is NOT complex — those project to NaN, matching their real lowering.
+ */
+function gpuResultIsComplexValued(
+  head: string,
+  args: ReadonlyArray<Expression>
+): boolean {
+  const engine = args[0]?.engine;
+  if (engine === undefined) return false;
+  try {
+    const t = engine.function(head, [...args], { structural: true }).type;
+    return isNonRealNumber(t.type);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An operand as `vec2(re, im)` source, lifting a real-emitted operand to
+ * `vec2(x, 0.0)`. The `_gpu_c…` helpers take a `vec2`; handing one a scalar is
+ * not valid shader source.
+ */
+function gpuComplexOperand(
+  x: Expression,
+  compile: (expr: Expression) => string,
+  target?: CompileTarget<Expression>
+): string {
+  if (BaseCompiler.isComplexValued(x)) return compile(x);
+  return `${gpuVec2(target)}(${compile(x)}, 0.0)`;
+}
+
+/**
+ * The complex lowering of a RECIPROCAL inverse head (`Arcsec`, `Arccsc`,
+ * `Arsech`, `Arcoth`), as `helper(1 / z)`.
+ *
+ * There is no direct `_gpu_casec`/`_gpu_cacsc`/`_gpu_casech`/`_gpu_cacoth`
+ * preamble helper, so this is the complex lift of the head's OWN real lowering
+ * (`acos(1/x)`, `asin(1/x)`, `acosh(1/x)`, `atanh(1/x)`). The composition is
+ * the principal value — checked against `Complex.asec`/`acsc`/`asech`/`acoth`
+ * at real in-domain, real out-of-domain and general complex points.
+ */
+function gpuReciprocalComplex(
+  helper: string,
+  x: Expression,
+  compile: (expr: Expression) => string,
+  target?: CompileTarget<Expression>
+): string {
+  const v2 = gpuVec2(target);
+  return `${helper}(_gpu_cdiv(${v2}(1.0, 0.0), ${gpuComplexOperand(x, compile, target)}))`;
 }
 
 /**
@@ -352,11 +442,13 @@ function gpuVec3(target?: CompileTarget<Expression>): string {
  * `GPU_NAN_PREAMBLE_GLSL`): a masked (`When`/`Which` else) branch's NaN is thus
  * centralized in one overridable symbol, so a host can redefine what a masked
  * branch produces without touching the generated code.
+ *
+ * The spelling itself lives in `gpuNonFiniteLiteral` (`constant-folding.ts`),
+ * shared with the non-finite LITERAL path (`formatGPUNumber`/`formatFloat`) so
+ * a `NaN` constant and a masked branch produce the same symbol.
  */
 function gpuNaN(target?: CompileTarget<Expression>): string {
-  return target?.language === 'wgsl'
-    ? 'bitcast<f32>(0x7fc00000u)'
-    : '_gpu_nan()';
+  return gpuNonFiniteLiteral(NaN, target?.language);
 }
 
 /**
@@ -900,23 +992,1125 @@ function compileGPUSelection(
 }
 
 /**
+ * Lower a `broadcastable` unary head applied to a collection operand
+ * (`Sin([1,2,3,4])`, `-[1,2,3,4]`) on a shader target — WITHOUT fanning out.
+ *
+ * GLSL and WGSL builtins and operators are already componentwise on a vector
+ * (`sin(vec4)` is a `vec4`, `-vec4` is a `vec4`), so the faithful lowering is
+ * the head's OWN scalar form applied directly to the vector operand. There is
+ * no element loop, no callback and no temporary — the base compiler's former
+ * default emitted a JavaScript `.map((v) => …)` arrow here, which no shader
+ * compiler accepts.
+ *
+ * Gated on the operand having a static `vec2`–`vec4` shape — the same
+ * activation gate as the element-wise selection lowering
+ * (`BaseCompiler.vectorComponentCount`). Anything else (an unknown-length
+ * list, a matrix, a 5+-element list) has no shader vector value at all, so it
+ * fails closed (D6) rather than emitting source a driver would reject.
+ *
+ * The EMITTED lowering is then checked for componentwise safety: most scalar
+ * lowerings are built from genType-polymorphic pieces (`sin(v)`, `-v`,
+ * `1.0 / sin(v)`, `log(v) / log(10.0)`) and stay valid verbatim on a `vecN`,
+ * but three constructs do not — see `gpuIsComponentwise`.
+ */
+function compileGPUBroadcastUnary(
+  head: string,
+  operand: Expression,
+  lowering: {
+    collection: () => string;
+    element: (code: string) => string;
+  }
+): string {
+  const decline = (reason: string): never => {
+    throw new Error(`${head}: ${reason} Fail closed (D6).`);
+  };
+  // A complex value is ALSO lowered as a `vec2` (of re, im), so it must be
+  // recognized BEFORE the width or it masquerades as a 2-cell collection —
+  // the same ordering the selection lowering depends on.
+  if (BaseCompiler.isComplexValued(operand))
+    decline(
+      `a complex-valued operand (\`${operand.toString()}\`) is lowered as a ` +
+        `\`vec2\` of (re, im), which has no element-wise reading — a ` +
+        `componentwise shader builtin would treat its real and imaginary ` +
+        `parts as two independent elements.`
+    );
+  if (BaseCompiler.vectorComponentCount(operand) === undefined)
+    decline(
+      `the operand \`${operand.toString()}\` has no static vec2–vec4 shape ` +
+        `(an unknown-length list, a matrix, or a 5+-element list), so it is ` +
+        `not a shader vector and the componentwise builtins do not apply to it.`
+    );
+  const vector = lowering.collection();
+  const code = lowering.element(vector);
+  const unsafe = gpuIsComponentwise(code, vector);
+  if (unsafe !== undefined)
+    decline(
+      `the scalar shader lowering \`${code}\` is not componentwise — ` +
+        `${unsafe} A shader has no element loop, so a non-componentwise ` +
+        `lowering cannot be broadcast over a \`vecN\` at all.`
+    );
+  return code;
+}
+
+/**
+ * Why an emitted scalar lowering canNOT be reused verbatim on a `vecN`, or
+ * `undefined` when it can.
+ *
+ * The shader builtins (`sin`, `sqrt`, `abs`, …) and the arithmetic operators
+ * are genType-polymorphic, including the mixed scalar/vector forms
+ * (`1.0 / vec3`, `vec3 / log(10.0)`), so the overwhelming majority of the
+ * scalar lowerings are already componentwise. The exceptions are recognized
+ * from the SHAPE OF THE EMITTED SOURCE — not from a list of operator names,
+ * which would go stale the moment a lowering changed:
+ *
+ *  - a `_gpu_…` PREAMBLE HELPER (`_gpu_sinc`, `_gpu_gamma`, `_gpu_heaviside`,
+ *    `_gpu_fresnelC`, `_gpu_powi`, …). Every helper reachable from a SCALAR
+ *    element lowering is declared with scalar `float`/`f32` parameters, so
+ *    `_gpu_sinc` of a `vec3` is source no driver accepts. The `_gpu_` prefix
+ *    IS the property being tested. (A few helpers ARE aggregate-aware — the
+ *    complex arithmetic and the colour converters take `vec2`/`vec3` — which
+ *    is why the generic gate `gpuCheckOperandShapes` consults the emitted
+ *    DECLARATION, `gpuHelperIsScalarOnly`, before reusing this verdict.)
+ *  - a COMPARISON or a TERNARY (`Argument(x)` → `((x >= 0.0) ? 0.0 : π)`):
+ *    GLSL has no `vecN >= float`, and both languages require a scalar `bool`
+ *    condition, so there is no componentwise reading of either.
+ *  - a lowering that DROPS the operand (`Imaginary(x)` → `0.0` for a real
+ *    `x`): the result is a scalar where the caller is owed a `vecN`, which is
+ *    a silent SHAPE error rather than a driver error.
+ *
+ * The last two are only decidable when the caller can name the operand's own
+ * compiled source (`vector`) — i.e. on the fan-out route, where the WHOLE
+ * emission derives from the element lowering. A caller with no such handle
+ * (the generic gate, which sees a lowering over several independently
+ * compiled operands) passes none, and gets the helper verdict alone: there,
+ * a comparison may perfectly well be over an unrelated scalar operand
+ * (`ContrastingColor` → `(_gpu_apca(…) > 50.0) ? … : …`).
+ */
+function gpuIsComponentwise(code: string, vector?: string): string | undefined {
+  const helper = /_gpu_[A-Za-z0-9_]+\s*\(/.exec(code);
+  if (helper !== null)
+    return (
+      `it calls the preamble helper \`${helper[0].slice(0, -1).trim()}\`, ` +
+      `which is declared with scalar float/f32 parameters.`
+    );
+  if (vector === undefined) return undefined;
+  if (/\?|[<>]=?|[=!]=/.test(code))
+    return (
+      `it branches on a comparison, which a shader requires to be a scalar ` +
+      `bool.`
+    );
+  if (!code.includes(vector))
+    return `it does not use the operand at all, so its result is a scalar.`;
+  return undefined;
+}
+
+/**
+ * The SHADER shape an operand lowers to: a scalar, a `vecN` (reported as its
+ * width), a `matN`, or an array (`float[N]` / `array<f32, N>`).
+ *
+ * Derived from the shape helpers the rest of the GPU analysis already uses —
+ * `isNonScalarShape` ("is this a scalar at all?") and `vectorComponentCount`
+ * ("does it have a `vec2`–`vec4` lowering?") — so it stays in step with them
+ * rather than re-deciding shape from scratch.
+ *
+ * A COMPLEX value reads as a scalar here, even though it lowers to a `vec2` of
+ * (re, im): the complex convention is its own, carried by the complex codegen
+ * (`_gpu_cmul`, `_gpu_cdiv`, …), and reading it as a 2-cell vector would make
+ * every complex lowering look like a shape error. This is the same ordering
+ * the fan-out and selection lowerings depend on.
+ */
+function gpuOperandShape(
+  expr: Expression
+): 'scalar' | 'matrix' | 'array' | 2 | 3 | 4 {
+  if (BaseCompiler.isComplexValued(expr)) return 'scalar';
+  if (!BaseCompiler.isNonScalarShape(expr)) return 'scalar';
+  const width = BaseCompiler.vectorComponentCount(expr);
+  if (width !== undefined) return width;
+  if (isFunction(expr, 'Matrix')) return 'matrix';
+  const t = expr.type.type;
+  if (
+    typeof t !== 'string' &&
+    t.kind === 'list' &&
+    (t.dimensions?.length ?? 0) >= 2
+  )
+    return 'matrix';
+  // A non-scalar with no `vecN` and no matrix reading: a 1-element or
+  // 5+-element list, or a list of unknown length — a shader ARRAY.
+  return 'array';
+}
+
+/** How `gpuCheckOperandShapes` names a shape in a diagnostic. */
+function gpuShapeName(shape: ReturnType<typeof gpuOperandShape>): string {
+  return typeof shape === 'number' ? `vec${shape}` : shape;
+}
+
+/**
+ * The `[rows, cols]` of a matrix-shaped operand, or `undefined` when they are
+ * not statically known. The kind alone is not enough for the operator gate:
+ * `mat2 + mat3` and `mat2 * vec3` are as invalid as `vec2 + vec3`, so the
+ * dimensions must be read — structurally for a `Matrix` literal, from the
+ * declared list dimensions otherwise (an unknown extent is reported as a
+ * negative count there, and answers `undefined` here).
+ */
+function gpuMatrixDims(
+  expr: Expression
+): readonly [rows: number, cols: number] | undefined {
+  if (isFunction(expr, 'Matrix')) {
+    const body = expr.ops[0];
+    if (!isFunction(body) || body.nops === 0) return undefined;
+    const rows = body.ops;
+    const cols = isFunction(rows[0]) ? rows[0].nops : 0;
+    if (cols > 0 && rows.every((r) => isFunction(r) && r.nops === cols))
+      return [rows.length, cols];
+    return undefined;
+  }
+  const t = expr.type.type;
+  if (typeof t !== 'string' && t.kind === 'list') {
+    const dims = t.dimensions;
+    if (dims?.length === 2 && dims[0] > 0 && dims[1] > 0)
+      return [dims[0], dims[1]];
+  }
+  return undefined;
+}
+
+/**
+ * The callee and top-level argument count of `code` when the WHOLE emission is
+ * a single call. `undefined` for an infix/compound emission (`a + b`,
+ * `(c ? a : b)`, `log(a) / log(10.0)`), which is what tells the gate below
+ * that no single builtin signature governs the operand shapes.
+ *
+ * The argument count is what distinguishes a lowering that passes its operands
+ * THROUGH (`_gpu_powi(x, n)`, one argument per operand) from one that
+ * DESTRUCTURES a collection operand into scalars (`Median([1,5,3,2,4])` →
+ * `_gpu_median_5(1.0, 5.0, 3.0, 2.0, 4.0)`, five arguments for one operand) —
+ * a reduction the shape gate must leave alone.
+ *
+ * `operands` are those arguments' own sources, which is what lets a reduction
+ * read the components back out of an aggregate CONSTRUCTOR
+ * (`gpuScalarComponents`).
+ */
+function gpuTopLevelCall(
+  code: string
+): { callee: string; argCount: number; operands: string[] } | undefined {
+  const s = code.trim();
+  // `sin`, `_gpu_powi`, `vec3f`, `mat2x2f`, `float[5]`, `array<f32, 5>`
+  const m = /^([A-Za-z_]\w*(?:\s*<[^<>()]*>)?(?:\s*\[\d+\])?)\s*\(/.exec(s);
+  if (m === null) return undefined;
+  let depth = 0;
+  let start = m[0].length;
+  const operands: string[] = [];
+  for (let i = m[0].length - 1; i < s.length; i++) {
+    if (s[i] === '(') {
+      if (++depth === 1) start = i + 1;
+    } else if (s[i] === ',' && depth === 1) {
+      operands.push(s.slice(start, i).trim());
+      start = i + 1;
+    } else if (s[i] === ')' && --depth === 0) {
+      if (i !== s.length - 1) return undefined;
+      const last = s.slice(start, i).trim();
+      // `f()` has no arguments; `f(a)` has one, even when `a` is empty text.
+      if (last !== '' || operands.length > 0) operands.push(last);
+      return { callee: m[1].trim(), argCount: operands.length, operands };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * An aggregate CONSTRUCTOR of either shader language (`vec3`, `bvec2`,
+ * `mat2x2f`, `float[5]`, `array<f32, 5>`). Such a lowering BUILDS a shape from
+ * its operands instead of acting on them, so the componentwise gate does not
+ * apply to it; the constructors have their own guards
+ * (`assertGPUScalarComponents`, `gpuValueHasVectorComponents`). The spellings
+ * of the two languages are disjoint, so one predicate serves both.
+ */
+const GPU_AGGREGATE_CONSTRUCTOR =
+  /^(?:[iub]?vec[234]|mat[234]|array\s*<|(?:float|f32|int|i32|uint|u32|bool)\s*\[)/;
+
+/**
+ * `GPU_AGGREGATE_CONSTRUCTOR` unanchored: does an aggregate constructor appear
+ * ANYWHERE in this source? Used to tell a scalar component apart from a nested
+ * aggregate one when a reduction reads an operand's components back out.
+ */
+const GPU_AGGREGATE_CONSTRUCTOR_ANYWHERE =
+  /\b(?:[iub]?vec[234]|mat[234]|array\s*<|(?:float|f32|int|i32|uint|u32|bool)\s*\[)/;
+
+/**
+ * Is the preamble helper `name` declared with SCALAR parameters only?
+ *
+ * Read off the declaration the target itself emits for it, rather than
+ * assumed: most helpers are scalar (`float _gpu_powi(float x, float n)`), but
+ * the complex arithmetic takes `vec2` and the colour converters take `vec3`,
+ * and handing those an aggregate is exactly what they are for.
+ *
+ * A helper with no declaration in the preamble answers `false` (permissive) —
+ * the gate then leaves the call alone rather than declining a lowering it
+ * cannot see.
+ */
+function gpuHelperIsScalarOnly(name: string, preamble: string): boolean {
+  // GLSL: `float _gpu_powi(float x, float n) {`
+  // WGSL: `fn _gpu_powi(x: f32, n: f32) -> f32 {`
+  // Anchored to a declaration (a return type or `fn` at the head of a line) so
+  // a CALL of the same helper inside another body cannot be read as one.
+  const decl = new RegExp(
+    `(?:^|\\n)[^\\S\\n]*(?:fn[^\\S\\n]+|[A-Za-z_]\\w*(?:\\[\\d+\\])?[^\\S\\n]+)` +
+      `${name}[^\\S\\n]*\\(([^)]*)\\)`
+  ).exec(preamble);
+  if (decl === null) return false;
+  return !/[iub]?vec[234]|mat[234]|array\s*<|\[\s*\d+\s*\]/.test(decl[1]);
+}
+
+/**
+ * A VECTOR constructor in `code` whose own arguments contain another aggregate
+ * constructor — `length(vec2(vec3(…), vec3(…)))`, `length(vec2(float[1](3.0),
+ * 4.0))` — or `undefined` when there is none.
+ *
+ * Such a lowering RESHAPES its operands (it packs them into a vector) instead
+ * of acting on them componentwise, so it is only correct for the scalar
+ * operands it was written for: `Hypot(x, y)` → `length(vec2(x, y))` is
+ * `√(x²+y²)` for scalars, but `vec2(vec3, vec3)` is not source a driver
+ * accepts, and the element-wise hypotenuse it was asked for is not what it
+ * would mean. Only `vecN(` heads are scanned — a `matN(` constructor takes
+ * `vecN` columns BY DESIGN, and the aggregate constructors are exempt from the
+ * gate entirely (they build a shape rather than consume one).
+ */
+function gpuReshapesOperands(code: string): string | undefined {
+  const ctor = /\b([iub]?vec[234][fhiu]?)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = ctor.exec(code)) !== null) {
+    let depth = 0;
+    for (let i = m.index + m[0].length - 1; i < code.length; i++) {
+      if (code[i] === '(') depth++;
+      else if (code[i] === ')' && --depth === 0) {
+        const inner = code.slice(m.index + m[0].length, i);
+        const nested =
+          /\b(?:[iub]?vec[234]|mat[234]|array\s*<|(?:float|f32)\s*\[)/.exec(
+            inner
+          );
+        if (nested !== null)
+          return (
+            `it packs its operands into a \`${m[1]}\` constructor, which ` +
+            `has no room for the aggregate \`${nested[0].trim()}\` value ` +
+            `standing in each slot.`
+          );
+        break;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Does this emission APPLY nothing — a bare identifier (possibly swizzled or
+ * indexed) or a bare numeric literal?
+ *
+ * Such a lowering passes ONE operand through (`Real(m)` → `m`, a
+ * `WithRandomSeed` body) or answers a constant (`Imaginary(x)` → `0.0`)
+ * instead of combining its operands with a componentwise builtin, so the
+ * shapes of the operands it did NOT use constrain it in no way. Read off the
+ * source rather than from a list of heads: anything with a call or an operator
+ * in it is a genuine compound emission and is judged as one.
+ */
+function gpuIsAtomicEmission(code: string): boolean {
+  const s = code.trim();
+  return (
+    /^[A-Za-z_]\w*(?:\.\w+|\[\d+\])*$/.test(s) ||
+    /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(s)
+  );
+}
+
+/**
+ * Per-language shape rules for `gpuCheckOperandShapes`. GLSL and WGSL agree on
+ * the broad strokes — the builtins and the arithmetic operators are
+ * genType-polymorphic — but not on where a SCALAR may stand in for a `vecN`,
+ * so each target supplies its own table (see `GPUShaderTarget.getShapeRules`).
+ */
+export type GPUShapeRules = {
+  /**
+   * Shader builtins that accept a scalar where their other genType arguments
+   * are a `vecN`, and — crucially — WHERE. The scalar-tailed overloads
+   * constrain the POSITION as well as the presence: GLSL declares
+   * `mod(genType, float)` (scalar only LAST), `step(float, genType)` (scalar
+   * only FIRST), `mix(genType, genType, float)` and `refract(genType, genType,
+   * float)` (scalar only third), `clamp(genType, float, float)` (scalars in
+   * slots 2–3). So the value is the set of 0-based argument positions at which
+   * a scalar may stand; a scalar anywhere else is as invalid as one in a
+   * builtin with no such overload at all.
+   *
+   * A builtin ABSENT from the map requires MATCHING genTypes throughout, so
+   * `atan(vec3, float)` and `pow(float, vec3)` are not valid source in either
+   * language.
+   *
+   * These are shader BUILTIN names — a fact of each language's specification,
+   * not a list of CE heads — so tabulating them is what keeps the two
+   * languages' genuinely different overload sets apart.
+   */
+  readonly scalarGenTypeSlots: ReadonlyMap<string, ReadonlySet<number>>;
+  /**
+   * Shader builtins with an argument that is ALWAYS a scalar — an OBLIGATION,
+   * where `scalarGenTypeSlots` records a PERMISSION.
+   *
+   * The distinction is the overload SET, not the presence of a scalar-tailed
+   * signature. `mix` is declared BOTH `mix(genType, genType, float)` AND
+   * `mix(genType, genType, genType)`, so its third argument MAY be a scalar;
+   * `refract` is declared ONLY `refract(genType I, genType N, float eta)`
+   * (GLSL ES 3.00 §8.4 / GLSL 4.60 §8.5 / WGSL §17.5, `refract(e1: vecN<T>,
+   * e2: vecN<T>, e3: T)`), so its third argument MUST be one. Every other
+   * builtin in `scalarGenTypeSlots` — `min`, `max`, `clamp`, `step`,
+   * `smoothstep`, `mod` — has a matched all-genType overload alongside its
+   * scalar-tailed one, so none of them belongs here.
+   *
+   * Checked independently of `scalarGenTypeSlots`, and in particular when NO
+   * operand is a scalar: `refract(vec3, vec3, vec3)` has no overload at all,
+   * but the permission table is only consulted once a scalar is present, so an
+   * all-vector call used to slip through behind `success: true`.
+   */
+  readonly mandatoryScalarSlots: ReadonlyMap<string, ReadonlySet<number>>;
+  /**
+   * Shader builtins with an argument that is ALWAYS a `vecN` — the mirror of
+   * `mandatoryScalarSlots`, and the other obligation an ALL-SCALAR call can
+   * fail.
+   *
+   * GLSL declares its geometric functions over the genType, which INCLUDES
+   * `float`: `refract(float, float, float)`, `dot(float, float)` and
+   * `normalize(float)` are all valid GLSL (§8.4 / §8.5 — "genType" is
+   * `float`, `vec2`, `vec3`, `vec4`). WGSL does not: `refract(e1: vecN<T>,
+   * e2: vecN<T>, e3: T)`, `dot(e1: vecN<T>, e2: vecN<T>)`,
+   * `faceForward(e1: vecN<T>, e2: vecN<T>, e3: vecN<T>)`,
+   * `normalize(e: vecN<T>)` and `reflect(e1: vecN<T>, e2: vecN<T>)` (§17.5)
+   * have no all-scalar form at all, so `refract(1.0, 2.0, 0.5)` — perfectly
+   * good GLSL — is source no WebGPU driver accepts. `cross` is narrower still
+   * and vector-only in BOTH languages (`vec3` only). `length` and `distance`
+   * are declared over both a scalar and a `vecN` in either language and are
+   * therefore absent.
+   *
+   * The all-scalar case is exactly the one the rest of the gate never sees: it
+   * returns early on operands that are all scalars, which is why this check
+   * runs first.
+   */
+  readonly vectorOnlySlots: ReadonlyMap<string, ReadonlySet<number>>;
+  /**
+   * Does the arithmetic operator `sym` accept a `matN` operand? `allMatrix` is
+   * true when EVERY operand is a matrix (`mat2 * mat2`, `mat2 + mat2`) and
+   * false when a scalar is mixed in (`mat2 * 2.0`). Admissibility of the
+   * KIND pairing only — the dimension constraints (same size under the
+   * componentwise operators, agreeing sizes under `*`) are language-shared
+   * facts checked by the gate itself.
+   */
+  matrixArithmetic(sym: string, allMatrix: boolean): boolean;
+  /**
+   * Does the language define unary negation on a `matN`? GLSL does — its
+   * unary operators "operate on integer or floating-point values (including
+   * vectors and matrices)" (GLSL 4.60 §5.9) — but WGSL's negation (§8.7,
+   * "Unary arithmetic expressions") is declared over scalars and `vecN` only,
+   * so `-mat2x2f(…)` is not valid WGSL source.
+   */
+  readonly matrixNegate: boolean;
+};
+
+/**
+ * The GPU targets' extension of `CompileTarget`: the language's own shape
+ * rules, carried on the target so a LOWERING — not just the generic gate —
+ * can judge the calls it generates against the same table
+ * (`foldNaryBuiltin`). Written once by `createTarget()`; a hand-rolled target
+ * that never went through it simply has none, and those lowerings then fall
+ * back on the generic gate alone.
+ */
+type GPUShapeRulesTarget = CompileTarget<Expression> & {
+  gpuShapeRules?: GPUShapeRules;
+};
+
+/** The shape rules `target` was created with, if any. */
+function gpuShapeRules(
+  target: CompileTarget<Expression> | undefined
+): GPUShapeRules | undefined {
+  return (target as GPUShapeRulesTarget | undefined)?.gpuShapeRules;
+}
+
+/**
+ * Lowerings that CONSUME their aggregate operands — destructuring a collection
+ * into scalars and combining those — rather than handing the aggregate to a
+ * componentwise builtin. The `Max`/`Min` reduction (`compileGPUExtremum`),
+ * `Median`'s sorting network and `Variance`'s inline mean/deviation sum are
+ * the three. The operand shapes such a lowering was handed are no longer in
+ * its emission at all, so judging the emission against them declines a
+ * perfectly good reduction.
+ *
+ * The capability is DECLARED, at the handler's own definition site
+ * (`markAggregateConsuming`) — never a table of CE head names kept elsewhere,
+ * and never inferred from the shape of the emitted source. The gate used to
+ * read "is not a single call and the head is absent from `GPU_OPERATORS`" as
+ * the signal, which let every ORDINARY compound lowering (WGSL's `Mod` →
+ * `(((a % b) + b) % b)`) past as well.
+ *
+ * The value is a PREDICATE over the operands, not a flag, because a handler
+ * that destructures a LITERAL collection still passes scalar operands straight
+ * through in its other form: `Variance([1,2,3,4,5])` consumes an aggregate,
+ * `Variance(v, w)` does not, and only the first should step the gate aside.
+ */
+const GPU_AGGREGATE_CONSUMING = new WeakMap<
+  object,
+  (args: ReadonlyArray<Expression>) => boolean
+>();
+
+/**
+ * Declare `fn` an aggregate-consuming lowering for the calls `when` accepts
+ * (every call, by default) — see `GPU_AGGREGATE_CONSUMING`.
+ */
+function markAggregateConsuming<T extends CompiledFunction<Expression>>(
+  fn: T,
+  when: (args: ReadonlyArray<Expression>) => boolean = () => true
+): T {
+  if (typeof fn === 'function') GPU_AGGREGATE_CONSUMING.set(fn, when);
+  return fn;
+}
+
+/**
+ * `Median` and `Variance` destructure a SINGLE `List` operand into its
+ * elements; given N scalar arguments instead they use them one for one, and
+ * the gate must go on judging that form.
+ */
+const gpuDestructuresListOperand = (
+  args: ReadonlyArray<Expression>
+): boolean => args.length === 1 && isFunction(args[0], 'List');
+
+/** `{1}` → "in argument 2"; `{1, 2}` → "in arguments 2 and 3". */
+function gpuSlotNames(slots: ReadonlySet<number>): string {
+  const ns = [...slots].sort((a, b) => a - b).map((n) => `${n + 1}`);
+  if (ns.length === 0) return 'nowhere';
+  if (ns.length === 1) return `in argument ${ns[0]}`;
+  return `in arguments ${ns.slice(0, -1).join(', ')} and ${ns[ns.length - 1]}`;
+}
+
+/**
+ * Does this emitted argument source read as a `vecN` VALUE?
+ *
+ * Source-level, and deliberately conservative. Once a lowering has folded
+ * several operands into NESTED calls (`ElementMax(a, b, c)` →
+ * `max(max(a, b), c)`) the CE operand positions no longer line up with the
+ * emitted argument positions, so the call tree is all there is to judge. A
+ * vector is recognized as an aggregate CONSTRUCTOR, or as a genType-polymorphic
+ * builtin call (one carrying scalar-slot rules) over a vector. Everything else
+ * — including a bare identifier declared `vector<3>` — reads as a scalar, so an
+ * argument list with no recognizable vector is left alone rather than judged on
+ * a guess. (The one-for-one case is judged on the CE operand shapes instead,
+ * which ARE exact; see `gpuCheckOperandShapes`.)
+ */
+function gpuSourceIsVector(
+  code: string,
+  slots: ReadonlyMap<string, ReadonlySet<number>>
+): boolean {
+  const call = gpuTopLevelCall(code);
+  if (call === undefined) return false;
+  if (GPU_AGGREGATE_CONSTRUCTOR.test(call.callee)) return true;
+  if (!slots.has(call.callee)) return false;
+  return call.operands.some((o) => gpuSourceIsVector(o, slots));
+}
+
+/**
+ * A scalar argument standing where the emitted builtin's overload requires the
+ * `vecN` genType, anywhere in the emitted call TREE — or `undefined` when there
+ * is none.
+ *
+ * The counterpart of the one-for-one positional check in
+ * `gpuCheckOperandShapes`, for a lowering that does NOT pass its operands
+ * through: `ElementMax([1,2,3], [4,5,6], 2)` folds to
+ * `max(max(vec3(…), vec3(…)), 2.0)` — valid GLSL — while
+ * `ElementMax(2, [1,2,3], [4,5,6])` folds to `max(max(2.0, vec3(…)), vec3(…))`,
+ * whose INNER call puts the scalar first, where GLSL's `max(genType, float)`
+ * has no overload.
+ */
+function gpuMisplacedScalarArgument(
+  code: string,
+  slots: ReadonlyMap<string, ReadonlySet<number>>
+): string | undefined {
+  const call = gpuTopLevelCall(code);
+  if (call === undefined) return undefined;
+  const allowed = slots.get(call.callee);
+  if (allowed !== undefined) {
+    const isVector = call.operands.map((o) => gpuSourceIsVector(o, slots));
+    if (isVector.some((v) => v)) {
+      const bad = isVector.findIndex((v, i) => !v && !allowed.has(i));
+      if (bad >= 0)
+        return (
+          `the shader builtin \`${call.callee}\` takes a scalar only ` +
+          `${gpuSlotNames(allowed)}, but the emitted call \`${code.trim()}\` ` +
+          `has a scalar in argument ${bad + 1}, where the overload requires ` +
+          `the \`vecN\` genType; the scalar is not promoted to a vector.`
+        );
+    }
+  }
+  for (const o of call.operands) {
+    const why = gpuMisplacedScalarArgument(o, slots);
+    if (why !== undefined) return why;
+  }
+  return undefined;
+}
+
+/**
+ * Fail closed (D6) when a non-scalar operand — a collection, a matrix, an
+ * array — reaches a lowering whose shader type system cannot accept it.
+ *
+ * The counterpart of `compileGPUBroadcastUnary` for every emission that does
+ * NOT go through the fan-out hook: the generic function-codegen and
+ * string-mapped-helper paths, which the base compiler splices verbatim. Those
+ * used to emit `atan(vec3, 1.0)`, `pow(2.71828182846, vec3(…))`,
+ * `length(vec2(float[1](3.0), 4.0))` and `sin(mat2(…))` behind `success:
+ * true` — mixed genTypes, an array constructor inside a vector constructor,
+ * and a matrix handed to a scalar builtin, none of which a driver accepts.
+ *
+ * Every decision is derived from the operands' shapes (`gpuOperandShape`) and
+ * from the SHAPE OF THE EMITTED SOURCE (`gpuTopLevelCall`,
+ * `gpuIsComponentwise`), never from a list of head names: a head that changes
+ * its lowering is re-judged on the new source. The one exception is DECLARED
+ * rather than inferred — a lowering that consumes its aggregate operands
+ * (`GPU_AGGREGATE_CONSUMING`) steps the gate aside, because the shapes it was
+ * handed are no longer in its emission.
+ */
+function gpuCheckOperandShapes(
+  head: string,
+  args: ReadonlyArray<Expression>,
+  code: string,
+  rules: GPUShapeRules,
+  preambleFor: (code: string) => string,
+  lowering?: CompiledFunction<Expression>
+): void {
+  const shapes = args.map(gpuOperandShape);
+
+  // A lowering that DESTRUCTURED its aggregate operands (`Max`/`Min`, whose
+  // reduction folds every collection down to one scalar) has an emission the
+  // operand shapes no longer describe. It says so explicitly, at its own
+  // definition site; nothing about the shape of its emitted source is read as
+  // that claim.
+  if (typeof lowering === 'function') {
+    const consumes = GPU_AGGREGATE_CONSUMING.get(lowering);
+    if (consumes?.(args) === true) return;
+  }
+
+  // Annotated (rather than inferred) so a `decline(…)` call narrows what
+  // follows it: the positional check below reads a rule the preceding
+  // `decline` has already ruled out as absent.
+  const decline: (reason: string) => never = (reason) => {
+    throw new Error(`${head}: ${reason} Fail closed (D6).`);
+  };
+
+  // A slot with no SCALAR overload at all — the mirror of
+  // `mandatoryScalarSlots`, and the only fault an ALL-SCALAR call can have.
+  // WGSL declares `refract(e1: vecN<T>, e2: vecN<T>, e3: T)` and no all-scalar
+  // form, where GLSL's genType includes `float`, so `Refract(1, 2, 0.5)`
+  // emitted `refract(1.0, 2.0, 0.5)` — good GLSL, and source no WebGPU driver
+  // accepts. Positional, so it needs the lowering to pass its operands through
+  // one for one; and only SCALARS are judged here, because a `matN` or array
+  // in such a slot gets a more specific verdict from the branches below.
+  const topCall = gpuTopLevelCall(code);
+  const declineVectorOnly = (): void => {
+    if (topCall === undefined || topCall.argCount !== args.length) return;
+    const vectorOnly = rules.vectorOnlySlots.get(topCall.callee);
+    if (vectorOnly === undefined) return;
+    const bad = shapes.findIndex((s, i) => vectorOnly.has(i) && s === 'scalar');
+    if (bad >= 0)
+      decline(
+        `the shader builtin \`${topCall.callee}\` is declared over the ` +
+          `\`vecN\` genType ${gpuSlotNames(vectorOnly)} in this language — it ` +
+          `has no scalar overload there — but argument ${bad + 1} lowers to a ` +
+          `scalar; the scalar is not promoted to a vector.`
+      );
+  };
+
+  // Nothing but scalars: the overwhelmingly common case, left untouched apart
+  // from the vector-only obligations, which are exactly the rule that a call
+  // with no non-scalar operand anywhere can still break.
+  if (shapes.every((s) => s === 'scalar')) {
+    declineVectorOnly();
+    return;
+  }
+
+  const widths = new Set(
+    shapes.filter((s): s is 2 | 3 | 4 => typeof s === 'number')
+  );
+  const declineWidths = (): void => {
+    if (widths.size > 1)
+      decline(
+        `its operands lower to shader vectors of different widths ` +
+          `(${[...widths].map((w) => `vec${w}`).join(', ')}); the ` +
+          `componentwise builtins and operators require ONE genType.`
+      );
+  };
+  const hasMatrix = shapes.includes('matrix');
+  const hasArray = shapes.includes('array');
+  const call = topCall;
+
+  if (call === undefined) {
+    // Not a single call: an infix operator emission, or an ORDINARY COMPOUND
+    // lowering (WGSL's `Mod` → `(((a % b) + b) % b)`, `Log10` →
+    // `log(a) / log(10.0)`). A lowering that consumes its aggregate operands
+    // has already returned above, on its own DECLARED capability — this branch
+    // used to infer that from "is not a single call and the head is absent
+    // from `GPU_OPERATORS`", which waved every compound lowering through:
+    // `Mod(P, Q)` over a `vector<3>` and a `vector<2>` emitted
+    // `(((P % Q) + Q) % Q)` behind `success: true` on WGSL, while GLSL — whose
+    // `Mod` IS a single `mod(…)` call — declined it correctly.
+    const sym = GPU_OPERATORS[head]?.[0];
+    if (sym === undefined || !/^[-+*/]$/.test(sym)) {
+      // An emission that COMBINES nothing constrains nothing: a lowering that
+      // passes ONE operand through (`Real(m)` → `m`, `WithRandomSeed(m, s)` →
+      // the body) or answers a constant (`Imaginary(x)` → `0.0`) says nothing
+      // about the shapes of the operands it did not use, and judging it
+      // against all of them is a false decline.
+      if (gpuIsAtomicEmission(code)) return;
+      // No ONE signature governs a compound emission, but its pieces are the
+      // same genType-polymorphic builtins and operators, which require ONE
+      // genType across the whole expression and have no `matN` or array
+      // reading at all. (A scalar mixed with same-width vectors stays
+      // admissible: the arithmetic operators broadcast it in both languages,
+      // and a compound lowering is built from those.)
+      if (hasArray || hasMatrix)
+        decline(
+          `the compound shader lowering \`${code}\` is built from the ` +
+            `genType-polymorphic builtins and operators, which have no ` +
+            `${hasMatrix ? '`matN`' : 'array'} reading, so the operand ` +
+            `shapes (${shapes.map(gpuShapeName).join(', ')}) have no lowering.`
+        );
+      declineWidths();
+      const packs = gpuReshapesOperands(code);
+      if (packs !== undefined)
+        decline(
+          `the shader lowering \`${code}\` cannot take the non-scalar operand ` +
+            `shapes (${shapes.map(gpuShapeName).join(', ')}) — ${packs}`
+        );
+      return;
+    }
+    if (hasArray)
+      decline(
+        `an operand lowers to a shader ARRAY (\`float[N]\` / ` +
+          `\`array<f32, N>\`), which has no arithmetic operators — only ` +
+          `scalars, \`vecN\` and \`matN\` values do.`
+      );
+    if (!hasMatrix) {
+      declineWidths();
+      // A scalar mixed with (same-width) vectors is valid in BOTH languages
+      // under every arithmetic operator: GLSL 4.60 §5.9 ("one operand is a
+      // scalar, and the other is a vector or matrix"), WGSL §8.7 ("Binary
+      // arithmetic expressions with mixed scalar and vector operands", which
+      // lists `+ - * / %` in both orders).
+      return;
+    }
+
+    // A matrix operand enters infix arithmetic only through its NATIVE shader
+    // form: the square `matN` (N = 2–4) the `Matrix` lowering emits, or — for
+    // an N×1 column `Matrix` literal — the `vecN` it flattens to
+    // (`compileGPUMatrix`). Everything else (non-square, 5+ rows, unknown
+    // dimensions) lowers to nested arrays, which have no operators. And the
+    // DIMENSIONS matter, not just the kind: `mat2 + mat3` and `mat2 * vec3`
+    // are as invalid as `vec2 + vec3`.
+    const eff: Array<number | 'scalar' | { mat: number }> = [];
+    for (let i = 0; i < shapes.length; i++) {
+      const s = shapes[i];
+      if (s !== 'matrix') {
+        eff.push(s as number | 'scalar');
+        continue;
+      }
+      const dims = gpuMatrixDims(args[i]);
+      if (
+        dims !== undefined &&
+        dims[1] === 1 &&
+        dims[0] >= 2 &&
+        dims[0] <= 4 &&
+        isFunction(args[i], 'Matrix')
+      ) {
+        eff.push(dims[0]);
+        continue;
+      }
+      if (
+        dims === undefined ||
+        dims[0] !== dims[1] ||
+        dims[0] < 2 ||
+        dims[0] > 4
+      )
+        decline(
+          `its operand \`${args[i].toString()}\` lowers to a matrix with no ` +
+            `native square \`matN\` (N = 2–4) shader type` +
+            (dims !== undefined
+              ? ` (its dimensions are ${dims[0]}×${dims[1]})`
+              : ` (its dimensions are not statically known)`) +
+            `, so the shader operator \`${sym}\` has no overload for it.`
+        );
+      eff.push({ mat: dims[0] });
+    }
+    const effName = (e: number | 'scalar' | { mat: number }): string =>
+      typeof e === 'number' ? `vec${e}` : e === 'scalar' ? e : `mat${e.mat}`;
+    const shapeList = `(${eff.map(effName).join(', ')})`;
+    // The single size every non-scalar operand must share: with only SQUARE
+    // native matrices, the componentwise same-genType rule, the matrix
+    // same-dimensions rule and the `*` inner-dimension rule (`matCxR * vecC`,
+    // `vecR * matCxR`, `matKxR * matCxK`) all collapse to one size.
+    const sizes = new Set<number>(
+      eff.flatMap((e) =>
+        e === 'scalar' ? [] : [typeof e === 'number' ? e : e.mat]
+      )
+    );
+    if (!eff.some((e) => typeof e === 'object')) {
+      // Every matrix was an N×1 column literal: plain vector arithmetic.
+      if (sizes.size > 1)
+        decline(
+          `its operands lower to shader vectors of different widths ` +
+            `${shapeList}; the componentwise operators require ONE genType.`
+        );
+      return;
+    }
+    if (args.length === 1) {
+      // Unary negation of a matrix — the one arity where the two languages
+      // split on the KIND itself (see `GPUShapeRules.matrixNegate`).
+      if (!rules.matrixNegate)
+        decline(
+          `the shader unary \`-\` is declared over scalars and \`vecN\` ` +
+            `only in this language; it has no overload for the ` +
+            `${effName(eff[0])} operand.`
+        );
+      return;
+    }
+    if (sym !== '*') {
+      if (eff.some((e) => typeof e === 'number'))
+        decline(
+          `a \`matN\` and a \`vecN\` operand combine only under \`*\` ` +
+            `(matrix-vector product), not \`${sym}\`.`
+        );
+      if (
+        !rules.matrixArithmetic(
+          sym,
+          eff.every((e) => typeof e === 'object')
+        )
+      )
+        decline(
+          `the shader operator \`${sym}\` has no overload for the operand ` +
+            `shapes ${shapeList}.`
+        );
+      if (sizes.size > 1)
+        decline(
+          `the componentwise \`${sym}\` requires matrices of the SAME ` +
+            `dimensions, but the operand shapes are ${shapeList}.`
+        );
+      return;
+    }
+    // `*`: matrix-scalar scaling and the linear-algebraic products. The inner
+    // dimensions must agree; with square `matN` types that is ONE size across
+    // every non-scalar operand.
+    if (sizes.size > 1)
+      decline(
+        `under \`*\` the matrix and vector dimensions must agree ` +
+          `(\`matCxR * vecC\`, \`matKxR * matCxK\`), but the operand shapes ` +
+          `${shapeList} do not.`
+      );
+    return;
+  }
+
+  const { callee, argCount } = call;
+
+  // An aggregate constructor BUILDS a shape from its operands (`List`,
+  // `Tuple`, `Matrix`); its own guards own that check.
+  if (GPU_AGGREGATE_CONSTRUCTOR.test(callee)) return;
+
+  // A preamble helper. The aggregate-aware ones (complex arithmetic, colour
+  // conversion) own their operand shapes, so the gate steps aside; a
+  // scalar-only one cannot take an aggregate — unless the lowering DESTRUCTURED
+  // the collection into one scalar argument per element (`Median` →
+  // `_gpu_median_5(…)`), which the argument count reveals.
+  if (callee.startsWith('_gpu_')) {
+    if (argCount !== args.length) return;
+    if (!gpuHelperIsScalarOnly(callee, preambleFor(callee))) return;
+    const why = gpuIsComponentwise(code);
+    if (why !== undefined)
+      decline(
+        `the shader lowering \`${code}\` cannot take the non-scalar operand ` +
+          `shapes (${shapes.map(gpuShapeName).join(', ')}) — ${why}`
+      );
+    return;
+  }
+
+  if (hasMatrix || hasArray)
+    decline(
+      `the shader builtin \`${callee}\` is declared over scalar and \`vecN\` ` +
+        `genTypes; it has no ${hasMatrix ? '`matN`' : 'array'} overload, so ` +
+        `the operand shapes (${shapes.map(gpuShapeName).join(', ')}) have no ` +
+        `lowering.`
+    );
+  declineWidths();
+  const reshapes = gpuReshapesOperands(code);
+  if (reshapes !== undefined)
+    decline(
+      `the shader lowering \`${code}\` cannot take the non-scalar operand ` +
+        `shapes (${shapes.map(gpuShapeName).join(', ')}) — ${reshapes}`
+    );
+  if (widths.size === 1 && shapes.includes('scalar')) {
+    const slots = rules.scalarGenTypeSlots.get(callee);
+    if (slots === undefined)
+      decline(
+        `the shader builtin \`${callee}\` requires MATCHING genType ` +
+          `arguments, but it is applied to a vec${[...widths][0]} operand and ` +
+          `a scalar one; the scalar is not promoted to a vector.`
+      );
+    // The overload says WHERE a scalar may stand, not merely that one may:
+    // `mod(genType, float)` admits it only LAST, `step(float, genType)` only
+    // FIRST, `mix(genType, genType, float)` only third. When the lowering
+    // passes its operands through ONE FOR ONE the CE operand shapes give the
+    // positions exactly — including for an operand with no constructor in its
+    // source (a symbol declared `vector<3>`).
+    if (argCount === args.length) {
+      const bad = shapes.findIndex((s, i) => s === 'scalar' && !slots.has(i));
+      if (bad >= 0)
+        decline(
+          `the shader builtin \`${callee}\` takes a scalar only ` +
+            `${gpuSlotNames(slots)}, but here the scalar stands in argument ` +
+            `${bad + 1}, where the overload requires the vec${
+              [...widths][0]
+            } genType; the scalar is not promoted to a vector.`
+        );
+    }
+    // A lowering that does NOT pass its operands through (the variadic
+    // `min`/`max` fold) is judged on the emitted call TREE, where each nested
+    // call has its own argument positions.
+    const misplaced = gpuMisplacedScalarArgument(code, rules.scalarGenTypeSlots);
+    if (misplaced !== undefined) decline(misplaced);
+  }
+  // The OBLIGATIONS, last: a slot that must be scalar is violated by a `vecN`
+  // standing in it, so — unlike everything above — this check does not depend
+  // on a scalar being present ANYWHERE, and is the only one an ALL-VECTOR call
+  // can fail. `refract(vec3, vec3, vec3)` is not a signature either language
+  // declares, but the permission table above is consulted only once
+  // `shapes.includes('scalar')`, so such a call used to reach a driver.
+  // Positional, so it needs the lowering to pass its operands through one for
+  // one; and reported after the permission verdict, which names the more
+  // specific fault when a scalar is ALSO misplaced.
+  const mandatory = rules.mandatoryScalarSlots.get(callee);
+  if (mandatory !== undefined && argCount === args.length) {
+    const bad = shapes.findIndex((s, i) => mandatory.has(i) && s !== 'scalar');
+    if (bad >= 0)
+      decline(
+        `the shader builtin \`${callee}\` requires a SCALAR ` +
+          `${gpuSlotNames(mandatory)} — that argument is not ` +
+          `genType-polymorphic, so there is no overload with a ` +
+          `${gpuShapeName(shapes[bad])} standing there — but argument ` +
+          `${bad + 1} lowers to a ${gpuShapeName(shapes[bad])}.`
+      );
+  }
+  // And the mirror obligation, for a scalar the checks above left standing (a
+  // builtin whose permission table admits a scalar in a slot the language
+  // nonetheless declares `vecN`). Defensive: with today's tables every mixed
+  // scalar/`vecN` call already declines above, and the ALL-SCALAR calls — the
+  // ones this rule exists for — returned before reaching here.
+  declineVectorOnly();
+}
+
+/**
  * Fold a variadic application of a 2-argument shader builtin (`min`/`max`)
  * into a left-nested tree of 2-argument calls: `max(max(a, b), c)`. GLSL and
  * WGSL do not accept a 3+-argument `min`/`max`, so emitting `max(a, b, c)`
  * would be invalid shader source.
+ *
+ * Each GENERATED call is validated as it is produced, against the ORIGINAL
+ * operand shapes (`gpuOperandShape`) rather than against the emitted source:
+ * once the fold has nested the calls, the CE operand positions no longer line
+ * up with the emitted argument positions, and the generic gate's source-level
+ * reconstruction (`gpuSourceIsVector`) cannot see a vector in a BARE
+ * IDENTIFIER at all — so `ElementMax(2, v, w)` over two declared `vector<3>`
+ * symbols emitted `max(max(2.0, v), w)`, which no GLSL driver accepts, behind
+ * `success: true`. The accumulator's shape is exact by construction: it is a
+ * vector as soon as any operand folded into it is one.
+ *
+ * With TWO operands the emission passes them through ONE FOR ONE, so the
+ * generic gate already judges it on the same exact shapes (and phrases the
+ * diagnostic in its own positional terms); only the nested calls of a longer
+ * fold need the shapes carried in here.
  */
 function foldNaryBuiltin(
   name: string,
+  head: string,
   args: ReadonlyArray<Expression>,
-  compile: (e: Expression) => string
+  compile: (e: Expression) => string,
+  rules: GPUShapeRules | undefined
 ): string {
   if (args.length === 0)
     throw new Error(`${name}: needs at least one argument`);
   if (args.length === 1) return compile(args[0]);
+  const shapes = args.map(gpuOperandShape);
+  const slots = rules?.scalarGenTypeSlots.get(name);
+  // A builtin the language gives no scalar/genType overload AT ALL is judged
+  // exactly by the generic gate already (it compares the CE operand shapes, not
+  // the source, to reach its `requires MATCHING genType` verdict), so the fold
+  // leaves that case — and the one-for-one two-operand case — to it.
+  const check = slots !== undefined && args.length > 2;
   let acc = `${name}(${compile(args[0])}, ${compile(args[1])})`;
-  for (let i = 2; i < args.length; i++)
-    acc = `${name}(${acc}, ${compile(args[i])})`;
+  let accShape = shapes[0];
+  for (let i = 1; i < args.length; i++) {
+    if (i > 1) acc = `${name}(${acc}, ${compile(args[i])})`;
+    if (check) {
+      const pair = [accShape, shapes[i]];
+      const bad = pair.findIndex(
+        (s, k) => s === 'scalar' && !slots!.has(k) && pair[1 - k] !== 'scalar'
+      );
+      if (bad >= 0)
+        throw new Error(
+          `${head}: the shader builtin \`${name}\` takes a scalar only ` +
+            `${gpuSlotNames(slots!)}, but the emitted call \`${acc}\` has a ` +
+            `scalar in argument ${bad + 1}, where the overload requires the ` +
+            `\`vecN\` genType; the scalar is not promoted to a vector. ` +
+            `Fail closed (D6).`
+        );
+    }
+    // The accumulator is a vector as soon as any operand folded into it is.
+    if (accShape === 'scalar') accShape = shapes[i];
+  }
   return acc;
+}
+
+/**
+ * The SCALAR component sources of a NON-SCALAR operand, or `undefined` when it
+ * has none — what a shader reduction needs in order to consume a collection.
+ *
+ * Two routes, both derived from the emitted source and from the shape helpers
+ * the rest of this file already uses, never from a list of head names:
+ *
+ *  - the operand lowers to an aggregate CONSTRUCTOR (`vec3(1.0, 2.0, 3.0)`,
+ *    `float[5](…)`, `array<f32, 5>(…)`) — a `List`/`Tuple`/`Range` literal, and
+ *    any other head that builds one. Its top-level arguments ARE the
+ *    components. (`assertGPUScalarComponents` already guarantees a vector
+ *    constructor's arguments are scalars; an argument that is itself an
+ *    aggregate — a `matN`'s `vecN` columns — is refused here rather than folded
+ *    into nonsense.)
+ *  - the operand has a static `vec2`–`vec4` shape but no constructor to read (a
+ *    declared `vector<3>` symbol, an expression over one): reduce over its
+ *    swizzles. That repeats the operand's source once per component, so it is
+ *    used verbatim only for a BARE identifier; anything compound is bound to a
+ *    hoisted temporary first, and where there is no statement sink (inside a
+ *    conditional arm — see `compileGPUConditionalArm`) there is no safe reading
+ *    and this declines. Repeating a compound source is not merely slow:
+ *    `_gpu_rnd_draw` advances a runtime counter, so a repeated draw shifts
+ *    every later value in the shader.
+ *
+ * A matrix, or an array of unknown/runtime length, has no compile-time
+ * component list at all, and a shader has no dynamic iteration to fall back on.
+ */
+function gpuScalarComponents(
+  expr: Expression,
+  code: string,
+  target: CompileTarget<Expression>
+): string[] | undefined {
+  const call = gpuTopLevelCall(code);
+  if (call !== undefined && GPU_AGGREGATE_CONSTRUCTOR.test(call.callee)) {
+    if (call.operands.some((o) => GPU_AGGREGATE_CONSTRUCTOR_ANYWHERE.test(o)))
+      return undefined;
+    return call.operands.length > 0 ? call.operands : undefined;
+  }
+  const width = gpuOperandShape(expr);
+  if (typeof width !== 'number') return undefined;
+  const comps = ['x', 'y', 'z', 'w'].slice(0, width);
+  if (/^[A-Za-z_]\w*$/.test(code)) return comps.map((c) => `${code}.${c}`);
+  if (!BaseCompiler.canHoist(target)) return undefined;
+  const tv = BaseCompiler.tempVar(target);
+  const type = target.language === 'wgsl' ? `vec${width}f` : `vec${width}`;
+  const decl =
+    target.language === 'wgsl' ? `var ${tv}: ${type}` : `${type} ${tv}`;
+  BaseCompiler.hoistStatement(target, `${decl} = ${code};`);
+  return comps.map((c) => `${tv}.${c}`);
+}
+
+/**
+ * Compile `Max`/`Min`.
+ *
+ * These are REDUCTIONS: the interpreter (`evaluateMinMax`) and the JavaScript
+ * target (`compileExtremum`) both FLATTEN every collection operand and fold the
+ * lot to ONE scalar — `Max([1,2,3])` is `3`, `Max([1,2,3], 5)` is `5`. The
+ * shader `max`/`min` builtins are COMPONENTWISE, so reusing the scalar variadic
+ * fold on a collection operand returned an AGGREGATE where a scalar was owed:
+ * `Max([1,2,3])` emitted `vec3(1.0, 2.0, 3.0)` and `Max([1,2,3], 5)` emitted
+ * `max(vec3(1.0, 2.0, 3.0), 5.0)` — valid shader source, wrong value, behind
+ * `success: true`.
+ *
+ * With every operand a scalar nothing changes (`foldNaryBuiltin`). Otherwise
+ * each non-scalar operand is destructured into its scalar components
+ * (`gpuScalarComponents`) and everything is folded pairwise down to one scalar;
+ * an operand with no compile-time component list fails closed (D6).
+ *
+ * An EMPTY collection operand contributes NO components, and is recognized
+ * before its constructor is compiled: an empty list has no shader lowering at
+ * all (neither language has a zero-length array type), so compiling it would
+ * decline a reduction that has a perfectly good answer. `Max([], 5)` is `5`,
+ * and `Max([])` — nothing left to fold — is the target NaN, which is what both
+ * the interpreter and the JavaScript target return.
+ *
+ * The gate must not judge this emission against the operand shapes, which it no
+ * longer contains: `Max([1,2,3,4,5])` (an `array` operand, no array overload)
+ * and, on WGSL, `Max([1,2,3], 5)` (a scalar mixed with a `vec3f`, which WGSL's
+ * `max` has no overload for) would both be declined although both reduce
+ * correctly — as would the empty-collection NaN, whose WGSL spelling is a
+ * `bitcast<f32>(…)` CALL over an `array`-shaped `[]` operand. That is why the
+ * `Max`/`Min` entries in `GPU_FUNCTIONS` are wrapped in
+ * `markAggregateConsuming`, which DECLARES the capability
+ * (`GPU_AGGREGATE_CONSUMING`); `compile-gpu-extremum.test.ts` pins it. The
+ * parentheses around the emission are ordinary precedence hygiene and carry no
+ * part of that claim — the gate used to infer it from them, which let every
+ * unrelated compound lowering past as well.
+ */
+function compileGPUExtremum(
+  name: 'max' | 'min',
+  head: string,
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  if (args.length === 0)
+    throw new Error(`${head}: needs at least one argument`);
+  const shapes = args.map(gpuOperandShape);
+  // An EMPTY collection contributes nothing to the fold. Recognized BEFORE the
+  // operand is compiled: `[]` lowers to `float[0]()` / `array<f32, 0>()`, which
+  // `assertGPUScalarComponents` refuses outright, so compiling it first would
+  // decline the whole reduction.
+  const isEmpty = args.map((a) => a.isCollection && a.count === 0);
+  // Each operand is compiled EXACTLY ONCE: a second `compile()` of the same
+  // operand would re-advance the `_gpu_rnd_draw` counter.
+  const codes = args.map((a, i) => (isEmpty[i] ? '' : compile(a)));
+  // Non-scalar by the shape analysis, OR by the emitted source: a `Range` types
+  // only as `indexed_collection` (no `list` dimensions), which
+  // `gpuOperandShape` reads as a scalar, but it lowers to an array
+  // CONSTRUCTOR — and a constructor is exactly what a reduction can consume.
+  const isAggregate = codes.map((c, i) => {
+    if (isEmpty[i]) return true;
+    if (shapes[i] !== 'scalar') return true;
+    const call = gpuTopLevelCall(c);
+    return call !== undefined && GPU_AGGREGATE_CONSTRUCTOR.test(call.callee);
+  });
+  const fold = (parts: ReadonlyArray<string>): string => {
+    let acc = parts[0];
+    for (let i = 1; i < parts.length; i++) acc = `${name}(${acc}, ${parts[i]})`;
+    return acc;
+  };
+  // Every operand a scalar: the componentwise variadic fold, byte-identical to
+  // what `foldNaryBuiltin` emitted.
+  if (!isAggregate.some((x) => x)) return fold(codes);
+
+  const parts: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (isEmpty[i]) continue;
+    if (!isAggregate[i]) {
+      parts.push(codes[i]);
+      continue;
+    }
+    const comps = gpuScalarComponents(args[i], codes[i], target);
+    if (comps === undefined)
+      throw new Error(
+        `${head}: the operand \`${args[i].toString()}\` lowers to a shader ` +
+          `${gpuShapeName(shapes[i])} with no compile-time component list, so ` +
+          `there is nothing for the reduction to fold over — a shader has no ` +
+          `dynamic iteration here, and the \`${name}\` builtin is ` +
+          `componentwise, not a reduction. Fail closed (D6).`
+      );
+    parts.push(...comps);
+  }
+  // Nothing left to fold — every operand was an empty collection. The
+  // interpreter and the JavaScript target both answer NaN here (an empty
+  // reduction has no extremum), and the shader NaN is reachable for a literal.
+  if (parts.length === 0) return `(${gpuNaN(target)})`;
+  return `(${fold(parts)})`;
 }
 
 /**
@@ -1174,11 +2368,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return foldTerms(
         args.map((x) => compile(x)),
         '0.0',
-        '+'
+        '+',
+        target.language
       );
     }
     // Try to decompose all operands into re/im parts
-    const parts = args.map((a) => tryGetComplexParts(a, compile));
+    const parts = args.map((a) =>
+      tryGetComplexParts(a, compile, target.language)
+    );
     if (parts.some((p) => p === null)) {
       // Opaque complex operand — fall back to promote-and-add
       const v2 = gpuVec2(target);
@@ -1196,8 +2393,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (p!.re !== null) reParts.push(p!.re);
       if (p!.im !== null) imParts.push(p!.im);
     }
-    const reSum = foldTerms(reParts, '0.0', '+');
-    const imSum = foldTerms(imParts, '0.0', '+');
+    const reSum = foldTerms(reParts, '0.0', '+', target.language);
+    const imSum = foldTerms(imParts, '0.0', '+', target.language);
     return `${gpuVec2(target)}(${reSum}, ${imSum})`;
   },
   Multiply: (args, compile, target) => {
@@ -1208,7 +2405,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return foldTerms(
         args.map((x) => compile(x)),
         '1.0',
-        '*'
+        '*',
+        target.language
       );
     }
     // Special case: scalars * imaginary_factor → vec2(0.0, product)
@@ -1225,10 +2423,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         : (iFactor as any).im;
       const realFactors = args.filter((_, i) => i !== iIndex);
       const v2 = gpuVec2(target);
-      if (realFactors.length === 0) return `${v2}(0.0, ${formatFloat(iScale)})`;
+      if (realFactors.length === 0)
+        return `${v2}(0.0, ${formatFloat(iScale, target.language)})`;
       const factors = realFactors.map((f) => parenthesizeFactor(f, compile(f)));
-      if (iScale !== 1) factors.unshift(formatFloat(iScale));
-      const imCode = foldTerms(factors, '1.0', '*');
+      if (iScale !== 1) factors.unshift(formatFloat(iScale, target.language));
+      const imCode = foldTerms(factors, '1.0', '*', target.language);
       return `${v2}(0.0, ${imCode})`;
     }
     // General complex multiply: separate real scalars and complex operands
@@ -1238,7 +2437,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (BaseCompiler.isComplexValued(a)) complexCodes.push(compile(a));
       else realCodes.push(parenthesizeFactor(a, compile(a)));
     }
-    const scalarCode = foldTerms(realCodes, '1.0', '*');
+    const scalarCode = foldTerms(realCodes, '1.0', '*', target.language);
     // Pairwise reduce complex operands
     let result = complexCodes[0];
     for (let i = 1; i < complexCodes.length; i++) {
@@ -1260,7 +2459,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         const a = tryGetConstant(args[0]);
         const b = tryGetConstant(args[1]);
         if (a !== undefined && b !== undefined && b !== 0)
-          return formatFloat(a / b);
+          return formatFloat(a / b, target.language);
         if (b === 1) return compile(args[0]);
         return `${compile(args[0])} / ${compile(args[1])}`;
       }
@@ -1278,9 +2477,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Negate: ([x], compile, target) => {
     if (x === null) throw new Error('Negate: no argument');
     const c = tryGetConstant(x);
-    if (c !== undefined) return formatFloat(-c);
+    if (c !== undefined) return formatFloat(-c, target.language);
     if (isNumber(x) && x.im !== 0) {
-      return `${gpuVec2(target)}(${formatFloat(-x.re)}, ${formatFloat(-x.im)})`;
+      return `${gpuVec2(target)}(${formatFloat(
+        -x.re,
+        target.language
+      )}, ${formatFloat(-x.im, target.language)})`;
     }
     if (isSymbol(x, 'ImaginaryUnit')) return `${gpuVec2(target)}(0.0, -1.0)`;
     return `(-${compile(x)})`;
@@ -1296,14 +2498,23 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isNonNegative(args[0])) return compile(args[0]);
     return `abs(${compile(args[0])})`;
   },
-  Arccos: (args, compile) => {
+  Arccos: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_cacos(${compile(args[0])})`;
+    // Real operand, complex RESULT (`Arccos(2)`, or a real symbol of unknown
+    // magnitude): outside `[−1, 1]` the value is complex, so the node is typed
+    // `finite_complex` and the parent emits the `vec2` convention — a scalar
+    // `acos` there is broadcast against a `vec2` and yields garbage. See
+    // `gpuResultIsComplexValued`.
+    if (gpuResultIsComplexValued('Arccos', args))
+      return `_gpu_cacos(${gpuComplexOperand(args[0], compile, target)})`;
     return `acos(${compile(args[0])})`;
   },
-  Arcsin: (args, compile) => {
+  Arcsin: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_casin(${compile(args[0])})`;
+    if (gpuResultIsComplexValued('Arcsin', args))
+      return `_gpu_casin(${gpuComplexOperand(args[0], compile, target)})`;
     return `asin(${compile(args[0])})`;
   },
   Arctan: (args, compile) => {
@@ -1351,22 +2562,38 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `floor(${compile(args[0])})`;
   },
   Fract: 'fract',
-  Ln: (args, compile) => {
+  Ln: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_cln(${compile(args[0])})`;
+    // Real operand, complex result (`a := -2` → `Ln(a)` is `finite_complex`):
+    // the parent emits the `vec2` convention. See `gpuResultIsComplexValued`.
+    if (gpuResultIsComplexValued('Ln', args))
+      return `_gpu_cln(${gpuComplexOperand(args[0], compile, target)})`;
     return `log(${compile(args[0])})`;
   },
   Log2: 'log2',
   // GLSL/WGSL `min`/`max` are strictly 2-argument builtins; a variadic
   // `max(a, b, c)` is invalid shader source. Fold 3+ arguments into a nest of
-  // 2-argument calls: `max(max(a, b), c)`.
-  Max: (args, compile) => foldNaryBuiltin('max', args, compile),
-  Min: (args, compile) => foldNaryBuiltin('min', args, compile),
-  // Element-wise max/min. On a scalar (per-pixel) GPU value these are the same
-  // native `max`/`min` fold as `Max`/`Min`; a collection operand is unsupported
-  // on the GPU by design. (`Clamp` is mapped to the native `clamp` above.)
-  ElementMax: (args, compile) => foldNaryBuiltin('max', args, compile),
-  ElementMin: (args, compile) => foldNaryBuiltin('min', args, compile),
+  // 2-argument calls: `max(max(a, b), c)`. A COLLECTION operand makes these a
+  // reduction rather than a componentwise fold — see `compileGPUExtremum`.
+  // `markAggregateConsuming`: the reduction DESTRUCTURES its collection
+  // operands, so the generic shape gate must not judge the emission against
+  // operand shapes the emission no longer contains (`GPU_AGGREGATE_CONSUMING`).
+  Max: markAggregateConsuming((args, compile, target) =>
+    compileGPUExtremum('max', 'Max', args, compile, target)
+  ),
+  Min: markAggregateConsuming((args, compile, target) =>
+    compileGPUExtremum('min', 'Min', args, compile, target)
+  ),
+  // Element-wise max/min — genuinely COMPONENTWISE, unlike `Max`/`Min` above,
+  // so the native fold is the right lowering for a `vecN` operand too. Both
+  // require at least two operands (a lone collection is a `Max`/`Min`, and CE
+  // rejects `ElementMax([1,2,3])` as missing an argument), so the reduction
+  // case does not arise. (`Clamp` is mapped to the native `clamp` above.)
+  ElementMax: (args, compile, target) =>
+    foldNaryBuiltin('max', 'ElementMax', args, compile, gpuShapeRules(target)),
+  ElementMin: (args, compile, target) =>
+    foldNaryBuiltin('min', 'ElementMin', args, compile, gpuShapeRules(target)),
   Mix: 'mix',
   // Control-flow forms — the base compiler's default emits a JS ternary and a
   // bare `NaN`, neither of which is valid GPU code (WGSL has no `?:`, and no
@@ -1474,8 +2701,38 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     const bConst = tryGetConstant(base);
     const eConst = tryGetConstant(exp);
-    if (bConst !== undefined && eConst !== undefined)
-      return formatFloat(Math.pow(bConst, eConst));
+    if (bConst !== undefined && eConst !== undefined) {
+      const r = Math.pow(bConst, eConst);
+      // `Math.pow` (like the shader `pow`) is NaN for every negative base with
+      // a non-integer exponent, which is narrower than CE's branch convention.
+      // WHICH value is folded is decided by the node's TYPE — the same ruling
+      // as the JavaScript target's `NO_REAL_VALUE_FOLD`, and as of 2026-07-30
+      // the type distinguishes the two branches:
+      // - An EVEN reduced-rational denominator is the complex branch and the
+      //   node is typed `finite_complex`, so the enclosing emission is the
+      //   `vec2(re, im)` convention. Fold the principal complex value; a
+      //   scalar NaN there would be silently scalar-broadcast into a
+      //   `vec2(NaN, NaN)` (valid shader source, wrong value).
+      // - An ODD denominator has a real root (`(−8)^(2/3) = 4`) that `pow`
+      //   misses; the node stays `finite_number` and folds to that real value.
+      // - An unprovable branch keeps the shader NaN fold: it is exactly what
+      //   this head's OWN `pow` lowering yields once the base is a runtime
+      //   variable (`pow(x, 0.3)` at `x = -2`), so refusing only the
+      //   provable-constant case buys no safety.
+      if (Number.isNaN(r)) {
+        if (gpuResultIsComplexValued('Power', args))
+          return gpuComplexPowLiteral(bConst, eConst, target);
+        const real = negativeBaseRealPow(bConst, exp, eConst);
+        if (real !== undefined) return formatFloat(real, target.language);
+      }
+      return formatFloat(r, target.language);
+    }
+    // Real-emitted operands but a complex RESULT type (a negative base on the
+    // even-denominator branch, e.g. `a^{0.3}` with `a ⩴ -2`). The enclosing
+    // emission is `vec2(re, im)`; a scalar `pow` here would scalar-broadcast
+    // into a silent `vec2(NaN, NaN)`. See `gpuResultIsComplexValued`.
+    if (gpuResultIsComplexValued('Power', args))
+      return `_gpu_cpow(${gpuComplexOperand(base, compile, target)}, ${gpuComplexOperand(exp, compile, target)})`;
     if (eConst === 0) return '1.0';
     if (eConst === 1) return compile(base);
     if (eConst === 0.5) return `sqrt(${compile(base)})`;
@@ -1516,13 +2773,54 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `pow(${compile(base)}, ${compile(exp)})`;
   },
   Radians: 'radians',
-  Round: (args, compile) => {
-    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+  Round: (args, compile, target) => {
     // GLSL/WGSL `round()` rounds half to even (implementation-defined ties);
     // the interpreter rounds half away from zero (Round(-2.5) = -3).
     // Reconstruct half-away as `sign(x)·floor(|x| + 0.5)`.
-    const c = compile(args[0]);
-    return `(sign(${c}) * floor(abs(${c}) + 0.5))`;
+    const halfAway = (c: string): string =>
+      `(sign(${c}) * floor(abs(${c}) + 0.5))`;
+    if (args.length < 2) {
+      if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+      return halfAway(compile(args[0]));
+    }
+    // The SECOND operand is a precision: `Round(x, n)` rounds to `n` DECIMAL
+    // PLACES (the Desmos/spreadsheet form the signature `(number, integer?)`
+    // declares) — `Round(x·10ⁿ)/10ⁿ`, which is what the interpreter and the
+    // JavaScript and interval targets all compute. This lowering used to
+    // consume only `args[0]`, so `Round(3.14159, 2)` emitted the round-to-
+    // integer form and reported success on a shader computing `3` where the
+    // interpreter answers `157/50`.
+    //
+    // The factor must be a compile-time constant. A shader `pow(10.0, n)` for
+    // a RUNTIME `n` is spec-defined as `exp2(n·log2(10.0))`, which is not
+    // exactly a power of ten — it moves the very tie boundary the rounding it
+    // scales for depends on — and neither language has an integer `pow` to
+    // fall back on. A non-constant precision therefore fails closed (D6), as
+    // it already does on the interval target.
+    const n = tryGetConstant(args[1]);
+    if (n === undefined || !Number.isInteger(n))
+      throw new Error(
+        `Round: rounding to \`n\` decimal places compiles on the ` +
+          `${target.language ?? 'GPU'} target only for a compile-time ` +
+          `INTEGER precision — the factor 10ⁿ has to be folded, because a ` +
+          `shader \`pow(10.0, n)\` is \`exp2(n·log2(10.0))\` and is not ` +
+          `exactly a power of ten. Fail closed (D6).`
+      );
+    // 10ⁿ and its reciprocal must both be representable as a shader float
+    // (f32 normals stop at ~3.4e38 / ~1.2e-38); past that the emitted literal
+    // is an infinity and the whole expression collapses to 0 or NaN.
+    if (Math.abs(n) > 37)
+      throw new Error(
+        `Round: the rounding factor 10^${n} is outside the shader float ` +
+          `range. Fail closed (D6).`
+      );
+    // An integer-valued operand is unchanged by rounding to a NON-NEGATIVE
+    // number of decimal places (it is not, for a negative `n`, which rounds
+    // to tens, hundreds, …).
+    if (n >= 0 && BaseCompiler.isIntegerValued(args[0]))
+      return compile(args[0]);
+    const factor = formatFloat(Math.pow(10, n), target.language);
+    return `(${halfAway(`(${compile(args[0])} * ${factor})`)} / ${factor})`;
   },
   Sign: 'sign',
   Sin: (args, compile) => {
@@ -1531,11 +2829,31 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `sin(${compile(args[0])})`;
   },
   Smoothstep: 'smoothstep',
-  Sqrt: (args, compile) => {
+  Sqrt: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_csqrt(${compile(args[0])})`;
     const c = tryGetConstant(args[0]);
-    if (c !== undefined) return formatFloat(Math.sqrt(c));
+    if (c !== undefined) {
+      // A NEGATIVE constant has no real square root, and a canonical
+      // `Sqrt(negative)` is typed `complex` — so the enclosing emission is the
+      // vec2(re, im) complex codegen, and the folded constant must agree with
+      // it. Fold the complex principal value (the interpreter's answer, and the
+      // JS target's `complexSqrtLiteral`), never a scalar NaN, which the
+      // surrounding complex arithmetic would consume as a real.
+      if (c < 0)
+        return `${gpuVec2(target)}(0.0, ${formatFloat(
+          Math.sqrt(-c),
+          target.language
+        )})`;
+      return formatFloat(Math.sqrt(c), target.language);
+    }
+    // The operand is real-emitted but the RESULT is typed complex (a symbol
+    // with an assigned negative value: `a := -2`). The enclosing emission is
+    // the `vec2(re, im)` convention, and shader scalar-broadcast would silently
+    // turn a `sqrt(-2.0)` NaN into `vec2(NaN, NaN)`. See
+    // `gpuResultIsComplexValued`.
+    if (gpuResultIsComplexValued('Sqrt', args))
+      return `_gpu_csqrt(${gpuComplexOperand(args[0], compile, target)})`;
     return `sqrt(${compile(args[0])})`;
   },
   Step: 'step',
@@ -1622,12 +2940,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // branch-free and matches the interpreter's (0, π) range for all real x.
     return `(1.5707963267948966 - atan(${compile(x)}))`;
   },
-  Arccsc: ([x], compile) => {
+  Arccsc: ([x], compile, target) => {
     if (x === null) throw new Error('Arccsc: no argument');
+    if (
+      BaseCompiler.isComplexValued(x) ||
+      gpuResultIsComplexValued('Arccsc', [x])
+    )
+      return gpuReciprocalComplex('_gpu_casin', x, compile, target);
     return `asin(1.0 / (${compile(x)}))`;
   },
-  Arcsec: ([x], compile) => {
+  Arcsec: ([x], compile, target) => {
     if (x === null) throw new Error('Arcsec: no argument');
+    if (
+      BaseCompiler.isComplexValued(x) ||
+      gpuResultIsComplexValued('Arcsec', [x])
+    )
+      return gpuReciprocalComplex('_gpu_cacos', x, compile, target);
     return `acos(1.0 / (${compile(x)}))`;
   },
 
@@ -1674,9 +3002,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Inverse hyperbolic functions with complex dispatch
-  Arcosh: (args, compile) => {
+  Arcosh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_cacosh(${compile(args[0])})`;
+    if (gpuResultIsComplexValued('Arcosh', args))
+      return `_gpu_cacosh(${gpuComplexOperand(args[0], compile, target)})`;
     return `acosh(${compile(args[0])})`;
   },
   Arsinh: (args, compile) => {
@@ -1684,23 +3014,35 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_casinh(${compile(args[0])})`;
     return `asinh(${compile(args[0])})`;
   },
-  Artanh: (args, compile) => {
+  Artanh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_catanh(${compile(args[0])})`;
+    if (gpuResultIsComplexValued('Artanh', args))
+      return `_gpu_catanh(${gpuComplexOperand(args[0], compile, target)})`;
     return `atanh(${compile(args[0])})`;
   },
 
   // Inverse hyperbolic (reciprocal)
-  Arcoth: ([x], compile) => {
+  Arcoth: ([x], compile, target) => {
     if (x === null) throw new Error('Arcoth: no argument');
+    if (
+      BaseCompiler.isComplexValued(x) ||
+      gpuResultIsComplexValued('Arcoth', [x])
+    )
+      return gpuReciprocalComplex('_gpu_catanh', x, compile, target);
     return `atanh(1.0 / (${compile(x)}))`;
   },
   Arcsch: ([x], compile) => {
     if (x === null) throw new Error('Arcsch: no argument');
     return `asinh(1.0 / (${compile(x)}))`;
   },
-  Arsech: ([x], compile) => {
+  Arsech: ([x], compile, target) => {
     if (x === null) throw new Error('Arsech: no argument');
+    if (
+      BaseCompiler.isComplexValued(x) ||
+      gpuResultIsComplexValued('Arsech', [x])
+    )
+      return gpuReciprocalComplex('_gpu_cacosh', x, compile, target);
     return `acosh(1.0 / (${compile(x)}))`;
   },
 
@@ -1723,8 +3065,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Special functions
-  Gamma: ([x], compile) => {
-    if (x === null) throw new Error('Gamma: no argument');
+  Gamma: (args, compile, target) => {
+    const x = args[0];
+    if (!x) throw new Error('Gamma: no argument');
+    // The TWO-operand form is the upper incomplete gamma
+    // `Γ(s, z) = ∫_z^∞ tˢ⁻¹e⁻ᵗ dt` (the signature is `(number, number?)`) — a
+    // different function from `Γ(z)`, not a variant of it: `Γ(5, 2)` is
+    // 22.736…, `Γ(5)` is 24. `_gpu_gamma` is the COMPLETE Γ, so consuming
+    // only the first operand reported success on a shader computing the wrong
+    // value. There is no shader builtin for the incomplete form and no
+    // preamble helper for it, so it fails closed (D6).
+    if (args.length > 1)
+      throw new Error(
+        `Gamma: the two-operand form is the upper incomplete gamma Γ(s, z), ` +
+          `which has no ${target.language ?? 'GPU'} lowering ` +
+          `(\`_gpu_gamma\` is the COMPLETE Γ). Fail closed (D6).`
+      );
     return `_gpu_gamma(${compile(x)})`;
   },
   GammaLn: ([x], compile) => {
@@ -1778,8 +3134,23 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Additional math functions
   Lb: 'log2',
-  Log: (args, compile) => {
+  Log: (args, compile, target) => {
     if (args.length === 0) throw new Error('Log: no argument');
+    // Complex either because an operand is, or because the RESULT is (a real
+    // but negative argument: `a := -2` makes `Log(a)` `finite_complex`). Either
+    // way the enclosing emission is the `vec2` convention. See
+    // `gpuResultIsComplexValued`.
+    if (
+      args.some((a) => BaseCompiler.isComplexValued(a)) ||
+      gpuResultIsComplexValued('Log', args)
+    ) {
+      const num = `_gpu_cln(${gpuComplexOperand(args[0], compile, target)})`;
+      // `ln(x) / ln(b)`: the base may itself be complex, or real-but-negative
+      // (whose own `ln` is complex). Base 10 divides by a real, so it stays a
+      // componentwise scalar multiply.
+      if (args.length === 1) return `(${num} * 0.4342944819032518)`;
+      return `_gpu_cdiv(${num}, _gpu_cln(${gpuComplexOperand(args[1], compile, target)}))`;
+    }
     if (args.length === 1) return `(log(${compile(args[0])}) / log(10.0))`;
     return `(log(${compile(args[0])}) / log(${compile(args[1])}))`;
   },
@@ -1802,7 +3173,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // the base subexpression once instead of duplicating it.
     return `_gpu_powi(${compile(x)}, 2.0)`;
   },
-  Root: ([x, n], compile) => {
+  Root: ([x, n], compile, target) => {
     if (x === null) throw new Error('Root: no argument');
     if (n === null || n === undefined) return `sqrt(${compile(x)})`;
     const nConst = tryGetConstant(n);
@@ -1810,23 +3181,37 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const xConst = tryGetConstant(x);
     if (xConst !== undefined && nConst !== undefined) {
       const r = Math.pow(xConst, 1 / nConst);
-      // Negative base with an odd integer degree has a real root (interpreter
-      // convention, e.g. Root(-8, 3) = -2). An even degree is complex, so let
-      // `formatFloat` reject the NaN (fail closed, D6).
-      if (
-        Number.isNaN(r) &&
-        Number.isInteger(nConst) &&
-        nConst % 2 !== 0 &&
-        xConst < 0
-      )
-        return formatFloat(-Math.pow(-xConst, 1 / nConst));
-      return formatFloat(r);
+      // Negative base. WHICH value is folded is decided by the node's TYPE —
+      // the same ruling as the JS target's `NO_REAL_VALUE_FOLD`. An ODD
+      // integer degree has a real root (interpreter convention, e.g.
+      // Root(-8, 3) = -2) and stays `finite_number`. An EVEN degree is the
+      // complex branch: as of the 2026-07-30 ruling the node is typed
+      // `finite_complex`, so the enclosing emission is `vec2(re, im)` and the
+      // fold must be the principal complex value — a scalar NaN there would be
+      // silently scalar-broadcast into `vec2(NaN, NaN)`. (A canonical even root
+      // of a negative already folds to an exact complex literal before
+      // compile: `√-4` → `2i`.)
+      if (Number.isNaN(r)) {
+        if (Number.isInteger(nConst) && nConst % 2 !== 0 && xConst < 0)
+          return formatFloat(-Math.pow(-xConst, 1 / nConst), target.language);
+        if (gpuResultIsComplexValued('Root', [x, n]))
+          return gpuComplexPowLiteral(xConst, 1 / nConst, target);
+      }
+      return formatFloat(r, target.language);
     }
+    // Real-emitted operands but a complex RESULT type (an even degree over a
+    // negative base, e.g. `\sqrt[4]{a}` with `a ⩴ -2`). See
+    // `gpuResultIsComplexValued`.
+    if (gpuResultIsComplexValued('Root', [x, n]))
+      return `_gpu_cpow(${gpuComplexOperand(x, compile, target)}, ${gpuVec2(target)}(1.0 / (${compile(n)}), 0.0))`;
     // Odd integer degree: GPU has no `cbrt`, and `pow` is NaN for a negative
     // base. Emit the sign-corrected form `sign(x)·|x|^(1/n)`.
     if (nConst !== undefined && Number.isInteger(nConst) && nConst % 2 !== 0) {
       const c = compile(x);
-      return `(sign(${c}) * pow(abs(${c}), ${formatFloat(1 / nConst)}))`;
+      return `(sign(${c}) * pow(abs(${c}), ${formatFloat(
+        1 / nConst,
+        target.language
+      )}))`;
     }
     return `pow(${compile(x)}, 1.0 / ${compile(n)})`;
   },
@@ -2107,7 +3492,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     for (let i = 0; i < count; i++) values.push(lo + i * step);
     const isWGSL = target.language === 'wgsl';
     const arrayType = isWGSL ? `array<f32, ${count}>` : `float[${count}]`;
-    return `${arrayType}(${values.map(formatGPUNumber).join(', ')})`;
+    return `${arrayType}(${values
+      .map((v) => formatGPUNumber(v, target.language))
+      .join(', ')})`;
   },
 
   // Loop — GPU for-loop (no IIFE, no let)
@@ -2181,8 +3568,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    * Accepts either a single `List(...)` argument or N scalar arguments.
    * Generates fully inline code: computes mean then sum of squared deviations,
    * divided by (N-1) for sample variance (matches JS `_SYS.variance`).
+   *
+   * `markAggregateConsuming`: with a single `List` operand the elements are
+   * DESTRUCTURED into scalars, so the emission contains no aggregate at all
+   * and must not be judged against the operand's `array`/`vecN` shape. The
+   * N-scalar-argument form passes its operands through and stays gated.
    */
-  Variance: (args, compile) => {
+  Variance: markAggregateConsuming((args, compile) => {
     // Normalise: if single List arg, use its elements; else use args directly.
     let elems: ReadonlyArray<Expression>;
     if (args.length === 1 && isFunction(args[0], 'List')) {
@@ -2206,7 +3598,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       .join(' + ');
     // sample variance: sum / (N - 1)
     return `((${sqDiffs}) / ${formatGPUNumber(n - 1)})`;
-  },
+  }, gpuDestructuresListOperand),
 
   /**
    * Median of a compile-time-known list.
@@ -2217,8 +3609,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    *
    * The sorting network uses the "odd-even merge sort" comparator pattern
    * inlined as `min`/`max` calls — no GPU statements required.
+   *
+   * `markAggregateConsuming`: a single `List` operand is DESTRUCTURED into one
+   * scalar per element (`_gpu_median_5(1.0, 5.0, …)`), so the emission carries
+   * none of the operand's aggregate shape. The N-scalar-argument form passes
+   * its operands through and stays gated.
    */
-  Median: (args, compile) => {
+  Median: markAggregateConsuming((args, compile) => {
     // Normalise to element list
     let elems: ReadonlyArray<Expression>;
     if (args.length === 1 && isFunction(args[0], 'List')) {
@@ -2270,7 +3667,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // We emit a per-size preamble (GPU_MEDIAN_PREAMBLE_N_GLSL / WGSL)
     // and return a call to `_gpu_median_N(v0, v1, ..., vN-1)`.
     return `_gpu_median_${n}(${compiled.join(', ')})`;
-  },
+  }, gpuDestructuresListOperand),
 
   /**
    * One draw from the counter-based PCG3D stream — the GPU tier of the
@@ -4563,6 +5960,23 @@ float _gpu_nan() {
 `;
 
 /**
+ * GLSL infinity helper preamble — the `+∞` counterpart of
+ * `GPU_NAN_PREAMBLE_GLSL`, structured identically so a host can redefine it in
+ * the same way.
+ *
+ * `intBitsToFloat(0x7F800000)` is the IEEE-754 `+∞` bit pattern (same
+ * GLSL ES 3.00 builtin the NaN helper uses, so no extra version requirement).
+ * Deliberately NOT `1.0 / 0.0`: fast-math is licensed to fold a division by a
+ * constant zero, and this project has already been bitten by ANGLE→Metal
+ * fast-math. A bit pattern is not foldable.
+ */
+const GPU_INF_PREAMBLE_GLSL = `
+float _gpu_inf() {
+  return intBitsToFloat(0x7F800000);
+}
+`;
+
+/**
  * Sign-preserving integer power (GLSL syntax). GLSL `pow(x, n)` is
  * `exp2(n·log2(x))`, undefined for a negative base — it returns `+8` for
  * `pow(-2.0, 3.0)` (wrong sign) and NaN for even powers of a negative. Compute
@@ -4604,17 +6018,15 @@ const GPU_CONSTANTS: Record<string, string> = {
  * Format a number as a GPU float literal.
  *
  * Both GLSL and WGSL require float literals to have a decimal point.
+ *
+ * A NON-FINITE value has no literal spelling in either language, but both can
+ * MAKE the value from a bit pattern — which is what the masked-branch NaN
+ * already does (`gpuNaN`). A `NaN` / `±∞` constant therefore routes through the
+ * same `gpuNonFiniteLiteral` symbols instead of failing the compilation, which
+ * is why this formatter needs to know the language.
  */
-export function formatGPUNumber(n: number): string {
-  // GLSL and WGSL have no infinity or NaN literals (WGSL forbids them in
-  // const-expressions outright). Emitting `Infinity.0` / `NaN.0` produces a
-  // shader that silently fails to compile on the GPU, so reject it here — the
-  // error propagates to `compile()`, which surfaces a diagnostic / falls back
-  // to interpretation instead of returning broken code with `success: true`.
-  if (!Number.isFinite(n))
-    throw new Error(
-      `Cannot compile the non-finite value \`${n}\` to a GPU shader: GLSL/WGSL have no infinity or NaN literals.`
-    );
+export function formatGPUNumber(n: number, language?: string): string {
+  if (!Number.isFinite(n)) return gpuNonFiniteLiteral(n, language);
   const str = n.toString();
   if (!str.includes('.') && !str.includes('e') && !str.includes('E')) {
     return `${str}.0`;
@@ -5018,14 +6430,60 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     return GPU_CONSTANTS;
   }
 
+  /**
+   * Where this shader language admits a SCALAR among otherwise-`vecN`
+   * operands — the one place GLSL and WGSL genuinely differ, so each target
+   * overrides it (`GLSL_SHAPE_RULES`, `WGSL_SHAPE_RULES`).
+   *
+   * The default is the INTERSECTION of the two, so a further subclass that
+   * forgets to override it fails closed rather than open: only the builtins
+   * whose scalar argument is admitted in BOTH languages (`mix`'s blend
+   * factor, `refract`'s index) — and, within those, only the SLOT both
+   * languages declare scalar (the third) — and only the matrix arithmetic both
+   * define (no unary matrix negation: GLSL has it, WGSL does not).
+   *
+   * `mandatoryScalarSlots` and `vectorOnlySlots` are OBLIGATIONS, so their
+   * fail-closed default is the UNION rather than the intersection — more
+   * obligations is stricter, where more permissions is laxer. Both languages
+   * oblige `refract`'s third argument and nothing else, so the two coincide
+   * for `mandatoryScalarSlots`; the vector-only table is WGSL's plus `cross`,
+   * which both languages declare over `vec3` alone.
+   */
+  protected getShapeRules(): GPUShapeRules {
+    return {
+      scalarGenTypeSlots: new Map([
+        ['mix', new Set([2])],
+        ['refract', new Set([2])],
+      ]),
+      mandatoryScalarSlots: new Map([['refract', new Set([2])]]),
+      vectorOnlySlots: new Map([
+        ['cross', new Set([0, 1])],
+        ['dot', new Set([0, 1])],
+        ['faceForward', new Set([0, 1, 2])],
+        ['normalize', new Set([0])],
+        ['reflect', new Set([0, 1])],
+        ['refract', new Set([0, 1])],
+      ]),
+      matrixArithmetic: (sym, allMatrix) =>
+        sym === '*' || (allMatrix && (sym === '+' || sym === '-')),
+      matrixNegate: false,
+    };
+  }
+
   createTarget(
     options: Partial<CompileTarget<Expression>> = {}
   ): CompileTarget<Expression> {
     const functions = this.getFunctions();
     const constants = this.getConstants();
     const v2 = this.languageId === 'wgsl' ? 'vec2f' : 'vec2';
-    const target: GPURandomTarget = {
+    const rules = this.getShapeRules();
+    const target: GPURandomTarget & GPUShapeRulesTarget = {
       language: this.languageId,
+      // Carried on the target so a LOWERING can validate the calls it
+      // generates against the same table the generic gate uses — the variadic
+      // `min`/`max` fold, whose nested calls no longer line up with the CE
+      // operand positions (`foldNaryBuiltin`).
+      gpuShapeRules: rules,
       // Restart the random-counter numbering at each compilation boundary, so
       // a target the CALLER reuses across two `compile()` calls emits the same
       // source both times (§7). Target-specific: only the GPU languages number
@@ -5048,6 +6506,30 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // emission below byte-identical — when every condition is a scalar.
       selection: (args, compile, selTarget) =>
         compileGPUSelection(args, compile, selTarget),
+      // A `broadcastable` unary head over a statically shaped (vec2–vec4)
+      // collection needs NO fan-out: the shader builtins and operators are
+      // already componentwise on a vector, so the scalar form applies directly
+      // to the vector operand. Fails closed (D6) on anything with no static
+      // vector shape.
+      broadcastUnary: (head, operand, lowering) =>
+        compileGPUBroadcastUnary(head, operand, lowering),
+      // The same defect class on every emission that does NOT go through the
+      // fan-out hook (the generic function-codegen and string-helper paths):
+      // a collection, matrix or array operand reaching a lowering the shader
+      // type system cannot give it to. Fails closed (D6) instead of emitting
+      // source no driver accepts.
+      checkOperandShapes: (h, opArgs, emitted) =>
+        gpuCheckOperandShapes(
+          h,
+          opArgs,
+          emitted,
+          rules,
+          (c) => this.preambleFor(c),
+          // The head's own lowering, so a DECLARED aggregate-consuming one
+          // (`Max`/`Min`) can step the gate aside — see
+          // `GPU_AGGREGATE_CONSUMING`.
+          functions[h]
+        ),
       operators: (op) => GPU_OPERATORS[op],
       functions: (id) => functions[id],
       var: (id) => {
@@ -5061,9 +6543,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         return undefined;
       },
       string: (str) => JSON.stringify(str),
-      number: formatGPUNumber,
+      // Bound to the language so a NON-FINITE literal (`NaN`, `±∞`,
+      // `ComplexInfinity`) reaches the right `gpuNonFiniteLiteral` spelling
+      // rather than the GLSL default.
+      number: (n) => formatGPUNumber(n, this.languageId),
       complex: (re, im) =>
-        `${v2}(${formatGPUNumber(re)}, ${formatGPUNumber(im)})`,
+        `${v2}(${formatGPUNumber(re, this.languageId)}, ${formatGPUNumber(
+          im,
+          this.languageId
+        )})`,
       // Absence capability (§3.F): a shader can MAKE `NaN` (propagation is free
       // — IEEE hardware is the gate), but `isnan` is not reliable under
       // fast-math, so `isAbsent`/`coalesce` are DELIBERATELY omitted and no
@@ -5575,9 +7063,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     if (userDefs) code = `${code}\n${userDefs}`;
     let preamble = '';
     preamble += buildComplexPreamble(code, this.languageId);
-    // Only GLSL emits `_gpu_nan()` (WGSL uses an inline bit pattern); the helper
-    // is ES 1.00-compatible, so it is safe for either GLSL version.
+    // Only GLSL emits `_gpu_nan()` / `_gpu_inf()` (WGSL uses an inline bit
+    // pattern); both helpers are built the same way, from the ES 3.00
+    // `intBitsToFloat` this target already assumes.
     if (code.includes('_gpu_nan')) preamble += GPU_NAN_PREAMBLE_GLSL;
+    if (code.includes('_gpu_inf')) preamble += GPU_INF_PREAMBLE_GLSL;
     if (code.includes('_gpu_powi'))
       preamble +=
         this.languageId === 'wgsl'

@@ -1,87 +1,160 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **A broadcast over a literal list no longer emits JavaScript into GLSL, WGSL
+  or Python.** A `broadcastable` operator applied to a literal or assigned
+  finite list was fanned out with a JavaScript `.map((v) => …)` arrow — for
+  every target, because the fan-out was never gated by language — so
+  `Sin([1,2,3,4])` produced `(vec4(…)).map((_tv1) => sin(_tv1))` on GLSL behind
+  `success: true`. The fan-out is now target-mediated
+  (`CompileTarget.broadcastUnary`): the shader targets apply the scalar form
+  straight to the vector, since builtins and operators are already componentwise
+  over matching genTypes (`sin(vec4)`, `-vec4`), and Python emits a list
+  comprehension. **This is a band shift, not a regression** — rows that
+  previously "succeeded" into a shader no driver would accept now decline
+  honestly. Shape alone is not sufficient to lower componentwise, so a scalar-
+  only preamble helper (`_gpu_sinc`, `_gpu_gamma`), a lowering that branches on
+  a comparison (`Argument`), and one that drops its operand (`Imaginary`) fail
+  closed with a diagnostic.
+
+- **The `realOnly` constant-fold refusal is retired.** A provably non-real
+  constant refused to compile at a handful of sites — `Sqrt(-2)` threw "has no
+  real value" — while every sibling case (`Ln(-2)`, `\arcsin(2)`, an assigned
+  symbol, a runtime variable) compiled and returned `NaN`. The refusal was
+  unreachable as a guarantee, since the runtime-variable case cannot be caught
+  in principle. Now, under `realOnly` a non-real constant folds to `NaN`;
+  without it, `Sqrt` of a negative folds to the complex principal value
+  (`Sqrt(-2)` previously declined even in complex mode, though `1 + i` compiled
+  fine). `Power`/`Root` that stay non-real fold to `NaN` rather than a complex
+  literal, because their canonical type is `finite_number` — the type handlers
+  do not track a negative base under a fractional exponent — so a complex
+  literal there would make the enclosing real arithmetic produce garbage. Fail
+  closed exists to prevent silently-wrong output; `NaN` is the correct,
+  self-describing answer. The GPU targets follow the same ruling on both halves.
+
+### New Features
+
+- **`D`, `Derivative` and `ND` now compile** on every target. A derivative
+  declined everywhere even though evaluating it first yields a compilable closed
+  form (`D(x^2, x).evaluate()` is `2x`); the lowering now obtains that form and
+  compiles it, declining cleanly when there is none (an opaque user function, or
+  `ND` at a symbolic point). Consumers no longer need their own
+  differentiate-before-compile pre-pass.
+
+- **Non-finite literals compile to GPU targets.** `NaN` and `±∞` threw, because
+  the GPU number formatter had no way to reach the `gpuNaN()` mechanism the
+  masked `When`/`Which` branches already used. A literal and a masked branch now
+  share one spelling, so they cannot drift apart. GLSL gains `_gpu_inf()`
+  alongside `_gpu_nan()` — a bit pattern behind an overridable preamble helper,
+  emitted only when referenced — and WGSL inlines the equivalent bitcast.
+  Deliberately not `1.0 / 0.0`, which a fast-math driver is licensed to fold.
+
+### Bug Fixes
+
+- **`Max`/`Min` over a single collection returned a vector on GPU targets
+  instead of reducing.** `Max([1,2,3])` compiled to `vec3(1.0, 2.0, 3.0)` where
+  the interpreter and the JavaScript target both give `3` — valid shader source
+  computing the wrong value. It now folds pairwise to a scalar, destructuring an
+  aggregate constructor or swizzling a static `vecN`, and fails closed on a
+  matrix or a runtime-length array. `ElementMax`/`ElementMin` are genuinely
+  componentwise and are unchanged.
+
+- **String-mapped broadcastable heads no longer fail closed over a list on the
+  JavaScript target.** `Sign`, `Arctan2`, `Hypot` and `Sinc` are mapped to a
+  scalar helper (`Math.sign`, `Math.atan2`) with no array codegen, so a list
+  operand was refused, while function-mapped heads (`Sin`, `Abs`, `Floor`, `Ln`)
+  broadcast normally. They now broadcast through a synthesized closure.
+
+- **Invalid shader source is no longer emitted for mismatched operand shapes.**
+  A collection or matrix operand reaching a builtin that cannot accept it
+  produced source no driver accepts, behind `success: true` — `atan(vec3, 1.0)`,
+  `pow(float, vec3)`, `length(vec2(float[1](3.0), 4.0))`, `sin(mat2(…))`. These
+  now fail closed, per-language: GLSL's scalar-tailed overloads
+  (`min`/`max`/`clamp`/`mix`/`step`/`smoothstep`/`mod`) are accepted where WGSL,
+  which lacks them, declines.
+
 ## 0.99.0 _2026-07-30_
 
 ### New Features
 
-- **User-defined functions now compile to GLSL and WGSL.** A function
-  declared in the engine (`f(u,v) := …`) and called from a GPU-compiled
-  expression is emitted **once** as a real shader function and called by
-  name — matching what the JavaScript and interval targets already did —
-  instead of failing as an unknown operator and forcing callers to inline
-  the body at every call site. Definitions arrive on the compilation
-  result's preamble alongside the `_gpu_*` helpers, so existing shader
-  assembly keeps working; when `f` calls `g`, `g` is declared first.
-  Signatures are synthesized statically (declared parameter types, or the
-  body's inferred shape: `float`, `bool`, `vec2`–`vec4`, complex as
-  `vec2`); anything a shader cannot express fails closed with a diagnostic
-  naming the parameter — including recursion (GLSL/WGSL forbid it; it
-  still compiles on the JavaScript target), collection-valued arguments
-  beyond the static `vec2`–`vec4` shapes, and argument shapes that
-  disagree with the declared parameter type. Undeclared parameters default
-  to `float`. Caller-declared types on `compileFunction` parameters and on
-  shader inputs/uniforms are authoritative for these checks, with
-  element-aware matching across both languages' spellings (`bvecN`,
-  `ivecN`, `vec2<i32>`, …) — a `vec2<bool>` argument no longer passes for a
-  `vec2<f32>` parameter. A WGSL body referencing a declared input now
-  correctly emits `input.<name>` (previously a bare, undeclared
-  identifier).
+- **User-defined functions now compile to GLSL and WGSL.** A function declared
+  in the engine (`f(u,v) := …`) and called from a GPU-compiled expression is
+  emitted **once** as a real shader function and called by name — matching what
+  the JavaScript and interval targets already did — instead of failing as an
+  unknown operator and forcing callers to inline the body at every call site.
+  Definitions arrive on the compilation result's preamble alongside the `_gpu_*`
+  helpers, so existing shader assembly keeps working; when `f` calls `g`, `g` is
+  declared first. Signatures are synthesized statically (declared parameter
+  types, or the body's inferred shape: `float`, `bool`, `vec2`–`vec4`, complex
+  as `vec2`); anything a shader cannot express fails closed with a diagnostic
+  naming the parameter — including recursion (GLSL/WGSL forbid it; it still
+  compiles on the JavaScript target), collection-valued arguments beyond the
+  static `vec2`–`vec4` shapes, and argument shapes that disagree with the
+  declared parameter type. Undeclared parameters default to `float`.
+  Caller-declared types on `compileFunction` parameters and on shader
+  inputs/uniforms are authoritative for these checks, with element-aware
+  matching across both languages' spellings (`bvecN`, `ivecN`, `vec2<i32>`, …) —
+  a `vec2<bool>` argument no longer passes for a `vec2<f32>` parameter. A WGSL
+  body referencing a declared input now correctly emits `input.<name>`
+  (previously a bare, undeclared identifier).
 
 ### Performance
 
 - **Compiled code now shares repeated subexpressions** (common-subexpression
-  elimination) on the `javascript`, `interval-js`, and `python` targets: a
-  pure subtree occurring several times inside one compiled expression is
-  bound to a temporary once and reused, instead of being recomputed at every
-  site. Corpus-extreme shapes (a 500-node subtree repeated 128×) compile
-  ~50% faster because the emitted source collapses, and run up to ~1.9×
-  faster when the repeats involve runtime helpers the JS engine cannot
-  eliminate itself. Sharing is conservative by construction: random draws,
-  user-defined function applications, named callbacks, caller-supplied
-  custom lowerings, and anything inside a conditionally-evaluated position
-  (unselected `Which`/`If` arms, short-circuited `And`/`Or` tails) are never
-  merged, so values, draw streams, and selection laziness are unchanged.
-  Opt out per call with `compile(expr, { cse: false })`. Design notes:
+  elimination) on the `javascript`, `interval-js`, and `python` targets: a pure
+  subtree occurring several times inside one compiled expression is bound to a
+  temporary once and reused, instead of being recomputed at every site.
+  Corpus-extreme shapes (a 500-node subtree repeated 128×) compile ~50% faster
+  because the emitted source collapses, and run up to ~1.9× faster when the
+  repeats involve runtime helpers the JS engine cannot eliminate itself. Sharing
+  is conservative by construction: random draws, user-defined function
+  applications, named callbacks, caller-supplied custom lowerings, and anything
+  inside a conditionally-evaluated position (unselected `Which`/`If` arms,
+  short-circuited `And`/`Or` tails) are never merged, so values, draw streams,
+  and selection laziness are unchanged. Opt out per call with
+  `compile(expr, { cse: false })`. Design notes:
   `docs/plans/2026-07-28-compile-cse-design.md`.
 
 - **Compiled output is now byte-for-byte deterministic on every target**:
   compiler-generated temporaries (chained-relation operand bindings, loop
-  accumulators, complex power chains — and the new CSE temps) draw
-  deterministic `_tvN`/`_cseN` names from a per-compilation counter instead
-  of `Math.random()`, and the allocator avoids capture against every symbol
-  in the expression. Two compilations of the same expression now emit
-  identical source, on the GPU targets included.
+  accumulators, complex power chains — and the new CSE temps) draw deterministic
+  `_tvN`/`_cseN` names from a per-compilation counter instead of
+  `Math.random()`, and the allocator avoids capture against every symbol in the
+  expression. Two compilations of the same expression now emit identical source,
+  on the GPU targets included.
 
 - **Random draws are up to 100x faster when the engine runs inside a secondary
   JavaScript realm** — a `vm` context, a sandboxed worker, or an
   embedder-supplied global. V8 compiles `Math.imul(...)` down to a single
   machine instruction only when `Math` is the host realm's; reached through
-  another realm's global it becomes a property lookup plus a call, and the
-  PCG3D hash behind every draw performs six of them. Binding the function once
-  at module scope removes the lookup. Measured on node 22: 10 million draws
-  went from ~880 ms to ~40 ms in a `vm` context (and from ~36 s to ~0.5 s for a
-  10-million-sample Monte-Carlo integral under Jest). Draw values are
-  unchanged — the stability vectors are untouched.
+  another realm's global it becomes a property lookup plus a call, and the PCG3D
+  hash behind every draw performs six of them. Binding the function once at
+  module scope removes the lookup. Measured on node 22: 10 million draws went
+  from ~880 ms to ~40 ms in a `vm` context (and from ~36 s to ~0.5 s for a
+  10-million-sample Monte-Carlo integral under Jest). Draw values are unchanged
+  — the stability vectors are untouched.
 
 ### Bug Fixes
 
 - **A Leibniz derivative no longer swallows the comparison that follows it.**
   `\frac{d}{dx}x^2 > 0` parsed as `D(x^2 > 0, x)` — the derivative of a
-  *boolean* — which then evaluated to an `incompatible-type` error. The operand
+  _boolean_ — which then evaluated to an `incompatible-type` error. The operand
   of `\frac{d}{dx}` / `\frac{\partial}{\partial x}` is now parsed as a term: it
   still takes a trailing sum (`\frac{d}{dx}x^2 + 1`, matching the `\int … dx`
   integrand convention), but stops before a relational, assignment or arrow
   operator, so the expression parses as `D(x^2, x) > 0`.
 
 - **An undecidable comparison no longer discards its evaluated operands.**
-  `x^2 + x^2 > 0` evaluated to `0 < x^2 + x^2` and
-  `\frac{d}{dx}x^2 > 0` to `0 < D(x^2, x)`: `Equal`, `NotEqual`, `Less` and
-  `LessEqual` evaluate their own operands (they are lazy, so their `canonical`
-  handlers can see raw operands for chain decomposition), then threw that work
-  away when the comparison itself could not be decided. They now report the
-  evaluated operands — `0 < 2x^2` and `0 < 2x` — which is what the non-lazy
-  relations (`Approx`, `Tilde`, `Precedes`…) already did. The comparison itself
-  is unchanged: an undecidable one still stays inert, since `x^2 = 4` is a
-  *condition* rather than a falsity, and decidable ones still fold to
-  `True`/`False`.
+  `x^2 + x^2 > 0` evaluated to `0 < x^2 + x^2` and `\frac{d}{dx}x^2 > 0` to
+  `0 < D(x^2, x)`: `Equal`, `NotEqual`, `Less` and `LessEqual` evaluate their
+  own operands (they are lazy, so their `canonical` handlers can see raw
+  operands for chain decomposition), then threw that work away when the
+  comparison itself could not be decided. They now report the evaluated operands
+  — `0 < 2x^2` and `0 < 2x` — which is what the non-lazy relations (`Approx`,
+  `Tilde`, `Precedes`…) already did. The comparison itself is unchanged: an
+  undecidable one still stays inert, since `x^2 = 4` is a _condition_ rather
+  than a falsity, and decidable ones still fold to `True`/`False`.
 
 - **Monte-Carlo integration and stochastic equality now replay under
   `WithRandomSeed()`.** Both sampled `Math.random()` directly, so a seeded block
@@ -214,65 +287,75 @@
 
   `Loop` and `Block` still fail closed as sub-expressions on these targets.
 
-- **A compile decline now names its actual cause.** `Unknown operator \`X\``
-  was reported for three different situations, so a failing compile band could
-  not be triaged by message. They are now distinct: an operator whose compile
-  handler declined a particular _operand shape_ says which operand and why
-  (`PointList: cannot compile — component 1 is collection-valued …`); a head the
-  engine knows but the target cannot lower says so (`Integrate: cannot compile —
-  the operator is known to the engine but target 'glsl' has no lowering for
-  it.`); and `Unknown operator` is now reserved for a head with no operator
-  definition at all. The reason reaches callers as `CompilationResult.error` on
-  the `success: false` paths, and as the thrown message on the direct-target
-  path.
+- **A compile decline now names its actual cause.**
+  `Unknown operator \`X\`` was reported for three different situations, so a failing compile band could not be triaged by message. They are now distinct: an operator whose compile handler declined a particular _operand shape_ says which operand and why (`PointList:
+  cannot compile — component 1 is collection-valued
+  …`); a head the engine knows but the target cannot lower says so (`Integrate:
+  cannot compile — the operator is known to the engine but target 'glsl' has no
+  lowering for it.`); and `Unknown
+  operator`is now reserved for a head with no operator definition at all. The reason reaches callers as`CompilationResult.error`on the`success:
+  false` paths, and as the thrown message on the direct-target path.
 
 ### Benchmarks
 
 #### Numeric performance (200-digit precision)
 
-Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
 
-| Expression | CE (current) | CE 0.98.0 | SymPy | math.js | Mathematica |
-| --- | --: | --: | --: | --: | --: |
-| $\pi^2$ | 6.8 | 7.4 | 173 | 106 | 3.9 |
-| $\sin 1$ | 20 | 21 | 218 | 442 | 5.3 |
-| $\cos 1$ | 20 | 21 | 219 | 573 | 7.1 |
-| $\ln 2$ | 14 | 14 | 332 | 4,344 | 3.8 |
-| $e^{\pi}$ | 12 | 13 | 216 | 4,751 | 4.7 |
-| $\zeta(3)$ | 1,511 | 1,547 | 265 | — | 49 |
-| $\Gamma(\tfrac13)$ | 831 | 812 | 346 | — | 213 |
-| $\psi(\tfrac13)$ | 712 | 712 | 2,762 | — | 171 |
+| Expression         | CE (current) | CE 0.98.0 | SymPy | math.js | Mathematica |
+| ------------------ | -----------: | --------: | ----: | ------: | ----------: |
+| $\pi^2$            |          6.8 |       7.4 |   173 |     106 |         3.9 |
+| $\sin 1$           |           20 |        21 |   218 |     442 |         5.3 |
+| $\cos 1$           |           20 |        21 |   219 |     573 |         7.1 |
+| $\ln 2$            |           14 |        14 |   332 |   4,344 |         3.8 |
+| $e^{\pi}$          |           12 |        13 |   216 |   4,751 |         4.7 |
+| $\zeta(3)$         |        1,511 |     1,547 |   265 |       — |          49 |
+| $\Gamma(\tfrac13)$ |          831 |       812 |   346 |       — |         213 |
+| $\psi(\tfrac13)$   |          712 |       712 | 2,762 |       — |         171 |
 
 #### Symbolic capability & performance
 
-Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.98.0** columns to see what is *new this release* (a `—` under `0.98.0` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE (current)** and **CE 0.98.0** columns to see
+what is _new this release_ (a `—` under `0.98.0` next to a number under the
+current build). The **CE + R/F** column is the current build with the opt-in
+Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
 
-| Operation | CE (current) | CE + R/F | CE 0.98.0 | SymPy | math.js | Mathematica |
-| --- | :--: | :--: | :--: | :--: | :--: | :--: |
-| **Antiderivatives** |  |  |  |  |  |  |
-| $\int\frac{1}{\sqrt x}\,dx$ | 4.6× | 2.5× | 3.5× | 0.5× | — | 1× |
-| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 8.3× | 1.5× | 6.6× | 0.09× | — | 1× |
-| $\int\frac{1}{x^3+1}\,dx$ | 5.3× | 0.9× | 4.2× | 0.3× | — | 1× |
-| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 1.9× | — | 0.1× | — | 1× |
-| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 1.1× | — | 0.01× | — | 1× |
-| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 1.1× | — | 0.007× | — | 1× |
-| **Derivatives** |  |  |  |  |  |  |
-| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.04× | 0.04× | 0.03× | 0.001× | 0.004× | 1× |
-| **Simplification** |  |  |  |  |  |  |
-| $\sqrt{3+2\sqrt2}$ | 41× | 28× | 31× | — | — | 1× |
-| $\sqrt6\,x+\sqrt2\,x$ | 79× | 45× | 48× | 3.1× | 19× | 1× |
-| **Evaluation** |  |  |  |  |  |  |
-| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 39× | 16× | 34× | 3.0× | — | 1× |
-| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 5.2× | 4.0× | 6.9× | 2.1× | — | 1× |
-| $\int_1^2\tfrac1x\,dx$ | 4458× | 4875× | 4193× | 77× | — | 1× |
-| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 316× | 128× | 274× | 2.5× | — | 1× |
-| **Solving** |  |  |  |  |  |  |
-| $x^4+x^2-1=0$ | 0.3× | 0.3× | 0.3× | 0.07× | — | 1× |
-| $x^3-x-1=0$ | 1.6× | 1.8× | 1.4× | 0.04× | — | 1× |
+| Operation                              | CE (current) | CE + R/F | CE 0.98.0 | SymPy  | math.js | Mathematica |
+| -------------------------------------- | :----------: | :------: | :-------: | :----: | :-----: | :---------: |
+| **Antiderivatives**                    |              |          |           |        |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |     4.6×     |   2.5×   |   3.5×    |  0.5×  |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |     8.3×     |   1.5×   |   6.6×    | 0.09×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |     5.3×     |   0.9×   |   4.2×    |  0.3×  |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |      —       |   1.9×   |     —     |  0.1×  |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |      —       |   1.1×   |     —     | 0.01×  |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |      —       |   1.1×   |     —     | 0.007× |    —    |     1×      |
+| **Derivatives**                        |              |          |           |        |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |    0.04×     |  0.04×   |   0.03×   | 0.001× | 0.004×  |     1×      |
+| **Simplification**                     |              |          |           |        |         |             |
+| $\sqrt{3+2\sqrt2}$                     |     41×      |   28×    |    31×    |   —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |     79×      |   45×    |    48×    |  3.1×  |   19×   |     1×      |
+| **Evaluation**                         |              |          |           |        |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |     39×      |   16×    |    34×    |  3.0×  |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |     5.2×     |   4.0×   |   6.9×    |  2.1×  |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |    4458×     |  4875×   |   4193×   |  77×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |     316×     |   128×   |   274×    |  2.5×  |    —    |     1×      |
+| **Solving**                            |              |          |           |        |         |             |
+| $x^4+x^2-1=0$                          |     0.3×     |   0.3×   |   0.3×    | 0.07×  |    —    |     1×      |
+| $x^3-x-1=0$                            |     1.6×     |   1.8×   |   1.4×    | 0.04×  |    —    |     1×      |
 
-Across the cases both solve, Compute Engine is a **median 5.2× faster than Mathematica** (up to 4458×) — in the browser, not a proprietary kernel.
+Across the cases both solve, Compute Engine is a **median 5.2× faster than
+Mathematica** (up to 4458×) — in the browser, not a proprietary kernel.
 
-<sub>Measured 2026-07-30 · Compute Engine `0.98.0` @ `ef394659` (current build) · published `0.98.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+<sub>Measured 2026-07-30 · Compute Engine `0.98.0` @ `ef394659` (current build)
+· published `0.98.0` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`14.3.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
 </sub>
 
 ## 0.98.0 _2026-07-28_

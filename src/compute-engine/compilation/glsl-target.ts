@@ -4,6 +4,7 @@ import {
   GPUShaderTarget,
   compileGPUMatrix,
   assertGPUScalarComponents,
+  type GPUShapeRules,
 } from './gpu-target.js';
 
 /**
@@ -47,6 +48,59 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
 };
 
 /**
+ * Where GLSL admits a SCALAR among otherwise-`vecN` operands.
+ *
+ * The GLSL ES specification gives a second, scalar-tailed overload to exactly
+ * these builtins — `genType min(genType, float)`, `genType clamp(genType,
+ * float, float)`, `genType mix(genType, genType, float)`, `genType
+ * step(float, genType)`, `genType smoothstep(float, float, genType)`,
+ * `genType mod(genType, float)` — plus the two whose scalar argument is
+ * mandatory (`refract`'s index of refraction, and `mix`'s blend factor).
+ * Everything else (`pow`, `atan`, `distance`, …) is declared over ONE genType,
+ * so `atan(vec3, float)` does not compile.
+ *
+ * Each overload also fixes WHERE the scalar stands, which is what the 0-based
+ * slot sets record: LAST for `min`/`max`/`mod`, FIRST for `step`, the two
+ * BOUNDS for `clamp`, the two EDGES for `smoothstep`, the trailing blend
+ * factor / index for `mix` and `refract`. `mod(vec3, 1.0)` compiles;
+ * `mod(1.0, vec3)` does not.
+ *
+ * Arithmetic: GLSL defines every `matN op scalar` combination componentwise,
+ * so a matrix mixes with a scalar under any of `+ - * /` (the `matN`/`vecN`
+ * pairing is separately restricted to `*` by the shared gate), and the unary
+ * operators "operate on integer or floating-point values (including vectors
+ * and matrices)" (GLSL 4.60 §5.9), so `-matN` is valid source — where WGSL's
+ * negation is declared over scalars and `vecN` only.
+ */
+const GLSL_SHAPE_RULES: GPUShapeRules = {
+  scalarGenTypeSlots: new Map([
+    ['min', new Set([1])],
+    ['max', new Set([1])],
+    ['clamp', new Set([1, 2])],
+    ['mix', new Set([2])],
+    ['step', new Set([0])],
+    ['smoothstep', new Set([0, 1])],
+    ['mod', new Set([1])],
+    ['refract', new Set([2])],
+  ]),
+  // `refract` is the only one of the above with no all-genType overload: GLSL
+  // declares `genType refract(genType I, genType N, float eta)` and nothing
+  // else, so its third argument is an OBLIGATION rather than a permission.
+  // Every other entry above has a matched `(genType, genType[, genType])` form
+  // alongside its scalar-tailed one.
+  mandatoryScalarSlots: new Map([['refract', new Set([2])]]),
+  // GLSL's geometric functions are declared over the genType, and the genType
+  // INCLUDES `float` (GLSL ES 3.00 §8.4, GLSL 4.60 §8.5): `refract(float,
+  // float, float)`, `dot(float, float)`, `normalize(float)` and
+  // `faceforward(float, float, float)` are all valid GLSL. The one exception
+  // is `cross`, declared `vec3 cross(vec3 x, vec3 y)` and nothing else — so it
+  // is the only vector-only entry here, where WGSL's table has six.
+  vectorOnlySlots: new Map([['cross', new Set([0, 1])]]),
+  matrixArithmetic: () => true,
+  matrixNegate: true,
+};
+
+/**
  * GLSL (OpenGL Shading Language) compilation target.
  *
  * Extends the shared GPU base class with GLSL-specific function names,
@@ -59,6 +113,10 @@ export class GLSLTarget extends GPUShaderTarget {
 
   protected getLanguageSpecificFunctions(): CompiledFunctions<Expression> {
     return GLSL_FUNCTIONS;
+  }
+
+  protected getShapeRules(): GPUShapeRules {
+    return GLSL_SHAPE_RULES;
   }
 
   compileFunction(

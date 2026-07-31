@@ -13,8 +13,9 @@
  *
  * Also covers two adjacent issues in the same failure class:
  *  - folding on the direct-target `compile(expr, { target })` path; and
- *  - rejecting non-finite numbers (`∞`, `NaN`) on GPU targets, which have no
- *    such literals, instead of emitting a non-compilable shader.
+ *  - emitting non-finite numbers (`∞`, `NaN`) on GPU targets, which have no
+ *    such LITERALS but can make the values from a bit pattern, through the same
+ *    overridable symbols a masked `When`/`Which` branch already used.
  *
  * See `TYCHO_ISSUE.md` for the original report.
  */
@@ -93,9 +94,9 @@ describe('COMPILE: assigned-symbol folding', () => {
     it('emits an integer assignment as a float literal', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 3);
-      expect(ce.getCompilationTarget('glsl')!.compile(ce.parse('a x')).code).toBe(
-        '3.0 * x'
-      );
+      expect(
+        ce.getCompilationTarget('glsl')!.compile(ce.parse('a x')).code
+      ).toBe('3.0 * x');
     });
 
     it('keeps a free symbol declarable (and listed in unknowns)', () => {
@@ -122,9 +123,9 @@ describe('COMPILE: assigned-symbol folding', () => {
     it('folds an assigned value', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
-      expect(ce.getCompilationTarget('wgsl')!.compile(ce.parse('a x')).code).toBe(
-        '1.5 * x'
-      );
+      expect(
+        ce.getCompilationTarget('wgsl')!.compile(ce.parse('a x')).code
+      ).toBe('1.5 * x');
     });
   });
 
@@ -222,29 +223,59 @@ describe('COMPILE: assigned-symbol folding', () => {
 });
 
 describe('COMPILE: non-finite numbers on GPU targets', () => {
-  // GLSL/WGSL have no infinity or NaN literals; emitting `Infinity.0` / `NaN.0`
-  // yields a shader that silently fails to compile. compile() must reject it.
+  // GLSL/WGSL have no infinity or NaN LITERAL — but both can MAKE those values
+  // from a bit pattern, which is what the masked (`When`/`Which` else) branch
+  // already does. A non-finite CONSTANT is the same value reached by another
+  // route, so it goes through the same symbols (`gpuNonFiniteLiteral`) instead
+  // of failing the compilation: GLSL through the overridable `_gpu_nan()` /
+  // `_gpu_inf()` preamble helpers, WGSL through an inline `bitcast`.
+  const NAN_CODE = {
+    glsl: '_gpu_nan()',
+    wgsl: 'bitcast<f32>(0x7fc00000u)',
+  } as const;
+  const INF_CODE = {
+    glsl: '_gpu_inf()',
+    wgsl: 'bitcast<f32>(0x7f800000u)',
+  } as const;
+
   for (const target of ['glsl', 'wgsl'] as const) {
     describe(target, () => {
-      it('throws on +∞ from target.compile()', () => {
+      it('emits +∞ as a bit pattern, never a `1.0 / 0.0` a driver may fold', () => {
         const ce = new ComputeEngine();
         const t = ce.getCompilationTarget(target)!;
-        expect(() => t.compile(ce.parse('x + \\infty'))).toThrow(/non-finite/);
+        const r = t.compile(ce.parse('x + \\infty'));
+        expect(r.code).toBe(`x + ${INF_CODE[target]}`);
+        expect(r.code).not.toContain('/ 0.0');
       });
 
-      it('throws on NaN', () => {
+      it('emits −∞ as the negation of the same symbol', () => {
         const ce = new ComputeEngine();
         const t = ce.getCompilationTarget(target)!;
-        expect(() => t.compile(ce.box('NaN'))).toThrow(/non-finite/);
+        expect(t.compile(ce.parse('x - \\infty')).code).toBe(
+          `x + (-${INF_CODE[target]})`
+        );
       });
 
-      it('the free compile() reports success:false (with fallback)', () => {
+      it('emits NaN through the same mechanism as a masked branch', () => {
+        const ce = new ComputeEngine();
+        const t = ce.getCompilationTarget(target)!;
+        expect(t.compile(ce.box('NaN')).code).toBe(NAN_CODE[target]);
+      });
+
+      it('the free compile() reports success:true', () => {
         const ce = new ComputeEngine();
         const r = compile(ce.parse('x + \\infty'), { to: target });
-        expect(r.success).toBe(false);
+        expect(r.success).toBe(true);
       });
     });
   }
+
+  it('GLSL declares the `_gpu_inf()` helper in the preamble (host-overridable)', () => {
+    const ce = new ComputeEngine();
+    const r = ce.getCompilationTarget('glsl')!.compile(ce.parse('x + \\infty'));
+    expect(r.preamble ?? '').toContain('float _gpu_inf()');
+    expect(r.preamble ?? '').toContain('intBitsToFloat(0x7F800000)');
+  });
 
   it('JavaScript still emits Infinity (a valid global)', () => {
     const ce = new ComputeEngine();
