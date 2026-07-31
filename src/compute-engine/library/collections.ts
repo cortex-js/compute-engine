@@ -1724,7 +1724,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Contains: {
     description:
-      'Return True if the collection contains the given element, False otherwise.',
+      'Return True if the collection contains the given element (structural identity, like `===`), False otherwise.\n\nEquivalent to `Any(xs, (e) |-> e === v)`; use `Any` to test an arbitrary predicate instead of a specific value.',
     complexity: 8200,
     signature: '(collection, element: any) -> boolean',
     // Peek through membership-preserving wrappers (incl. `Unique`) so an eager
@@ -1862,7 +1862,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // like Julia's `any(itr)`.
   Any: {
     description:
-      'Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).',
+      'Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) |-> e === v)`.',
     complexity: 8200,
     lazy: true,
     signature: '(collection, function?) -> boolean',

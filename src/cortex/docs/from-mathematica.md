@@ -266,7 +266,7 @@ Surface forms that look like Wolfram but behave differently.
 | `%` for the last result | `%` is the `Mod` operator | bind results with `let` |
 | `x = 4` inside `Solve` | `=` is assignment: `Solve(x^2 = 4, x)` is silently `[]` | `Solve(x^2 == 4, x)` |
 | `expr;` to suppress | `;` only separates statements | *(nothing to suppress)* |
-| `Total`, `Select`, `Cases`, `MemberQ`, `Accumulate`, `Nest` | Unknown names: the call stays **symbolic and inert**, with a did-you-mean warning naming the Cortex operator | `Sum`, `Filter`, `Filter`, `Element(v, xs)`, `Scan`, `Iterate` |
+| `Total`, `Select`, `Cases`, `MemberQ`, `Accumulate`, `Nest` | Unknown names: the call stays **symbolic and inert**, with a did-you-mean warning naming the Cortex operator | `Sum`, `Filter`, `Filter`, `Contains(xs, v)`, `Scan`, `Iterate` |
 | `Ceiling`, `Quotient`, `IntegerPart` | Inert (with a did-you-mean warning) | `Ceil`, `Floor(a/b)`, `Floor` |
 | `StringLength`, `ToUpperCase` | Inert — the string library is small | `Length(Characters(s))`; decompose and rebuild |
 | `RandomReal[]`, `RandomInteger[n]` | Inert (with a did-you-mean warning) | `Random()`, `Random(Range(1, n))` |
@@ -285,8 +285,9 @@ The most-reached-for Wolfram names are curated into that warning, so
 `Total(xs)` reports `did you mean Sum` and `Select(xs, f)` reports
 `did you mean Filter`. The suggestion is only a pointer to the right
 neighborhood — it is **not** an alias, and the call shape may differ
-(`MemberQ[xs, v]` becomes `Element(v, xs)`, with the arguments the other way
-round).
+(`Accumulate[xs]` becomes `Scan(xs, Add)`, with an explicit combining
+function). `MemberQ[xs, v]` maps directly to `Contains(xs, v)`, same
+argument order.
 
 Also worth knowing: lazy collection operators (`Range`, `Map`, `Filter`,
 `Take`, `Table`) enumerate only when materialized, and a tuple does **not**

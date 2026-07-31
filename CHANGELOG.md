@@ -288,12 +288,15 @@
 
 ### Improvements
 
-- **Did-you-mean suggestions for Wolfram Language names.** An unknown call
-  to `Total`, `Select`, `Cases`, `MemberQ`, `Accumulate`, `RandomReal`,
-  `Nest` or `NestList` now names the closest Cortex operator (`Sum`,
-  `Filter`, `Element`, `Scan`, `Random`, `Iterate`) in the
-  `unknown-function` warning — pointers, not aliases: the library
-  namespace stays Cortex-native.
+- **Did-you-mean suggestions for Wolfram Language and JavaScript names.**
+  An unknown call to `Total`, `Select`, `Cases`, `MemberQ`, `Accumulate`,
+  `RandomReal`, `RandomInteger`, `Nest`, `NestList` — or to the JavaScript
+  Array methods `some` and `every` — now names the closest Cortex operator
+  (`Sum`, `Filter`, `Contains`, `Scan`, `Random`, `Iterate`, `Any`, `All`)
+  in the `unknown-function` warning — pointers, not aliases: the library
+  namespace stays Cortex-native. The `Contains` and `Any` descriptions now
+  cross-reference each other (`Contains(xs, v)` is the structural-identity
+  specialization `Any(xs, (e) |-> e === v)`).
 
 - **Tighter static result types where the value is provably real** (type
   audit). `Tan`/`Sec`/`Csc`/`Cot`/`Coth`/`Csch` claimed the top type `number`

@@ -89,6 +89,9 @@ describe('curated did-you-mean synonyms', () => {
     expect(ce.suggestOperatorName('split')).toBe('StringSplit');
     expect(ce.suggestOperatorName('push')).toBe('Append');
     expect(ce.suggestOperatorName('Ceiling')).toBe('Ceil');
+    // JavaScript Array method names
+    expect(ce.suggestOperatorName('some')).toBe('Any');
+    expect(ce.suggestOperatorName('every')).toBe('All');
   });
 
   test('the suggestion reaches the Cortex boundary diagnostic', () => {
@@ -103,14 +106,14 @@ describe('curated did-you-mean synonyms', () => {
 
 describe('curated did-you-mean synonyms — Wolfram Language names', () => {
   // Suggestions ONLY: no aliases are created, and the call shape often
-  // differs from Wolfram's (`MemberQ[xs, v]` vs `Element(v, xs)`). The
+  // differs from Wolfram's (`Accumulate[xs]` vs `Scan(xs, Add)`). The
   // namespace stays Cortex-native — the call itself remains inert.
   test('Wolfram names suggest their Cortex neighborhood', () => {
     const ce = new ComputeEngine();
     expect(ce.suggestOperatorName('Total')).toBe('Sum');
     expect(ce.suggestOperatorName('Select')).toBe('Filter');
     expect(ce.suggestOperatorName('Cases')).toBe('Filter');
-    expect(ce.suggestOperatorName('MemberQ')).toBe('Element');
+    expect(ce.suggestOperatorName('MemberQ')).toBe('Contains');
     expect(ce.suggestOperatorName('Accumulate')).toBe('Scan');
     expect(ce.suggestOperatorName('RandomReal')).toBe('Random');
     expect(ce.suggestOperatorName('RandomInteger')).toBe('Random');
@@ -126,7 +129,7 @@ describe('curated did-you-mean synonyms — Wolfram Language names', () => {
       ['unknown-function', 'Select', 'Filter'],
     ]);
     expect(execDiagnostics('MemberQ([1, 2], 1)')).toEqual([
-      ['unknown-function', 'MemberQ', 'Element'],
+      ['unknown-function', 'MemberQ', 'Contains'],
     ]);
   });
 

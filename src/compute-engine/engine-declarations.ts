@@ -263,14 +263,16 @@ const CURATED_SYNONYMS: Record<string, string> = {
   split: 'StringSplit',
   push: 'Append',
   ceiling: 'Ceil',
+  // JavaScript Array method names.
+  some: 'Any',
+  every: 'All',
   // Wolfram Language names. These are SUGGESTIONS, not aliases: the operator
   // they point at is the right neighborhood, but the call shape often differs
-  // (`MemberQ[xs, v]` vs `Element(v, xs)`; `Accumulate[xs]` vs
-  // `Scan(xs, Add)`). The namespace stays Cortex-native.
+  // (`Accumulate[xs]` vs `Scan(xs, Add)`). The namespace stays Cortex-native.
   total: 'Sum',
   select: 'Filter',
   cases: 'Filter',
-  memberq: 'Element',
+  memberq: 'Contains',
   accumulate: 'Scan',
   randomreal: 'Random',
   randominteger: 'Random',
