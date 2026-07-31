@@ -658,6 +658,73 @@ fall back to floating or arbitrary precision when needed.
   and numeric integration/extrapolation. Complex numbers use the `complex-esm`
   package.
 
+### Chopping and the `im === 0` convention
+
+There are two distinct "is this zero?" questions in the engine, and they call
+for two different tolerances:
+
+1. **Roundoff dust** — is this tiny value floating-point noise? A
+   transcendental kernel evaluated over `Complex` produces a
+   mathematically-real result with a dust-sized imaginary part (e.g.
+   `Complex(0.5, 0).asin()` → `im: 5.55e-17`, from the complex log/sqrt
+   formulation). Whether that is noise is a property of the _arithmetic_ — the
+   scale is machine roundoff (the `numeric-value/` classes use a fixed
+   `1e-14`) — and does not depend on any user setting.
+2. **Comparison tolerance** — should two values be considered equal _for the
+   user_? That is `ce.tolerance` (default `1e-10`, user-configurable), used by
+   `Equal`, the relational operators, `.is()`, and the `Chop` operator.
+
+The invariant for complex values:
+
+- **Chop dust at creation, at kernel boundaries only.** Every path that
+  manufactures a complex float from a transcendental kernel chops the dust
+  components before the value escapes: `boxed-expression/apply.ts`
+  (`apply`/`apply2`/`applyN`), the `pow`/`exp` complex branches of
+  `MachineNumericValue`/`BigNumericValue`, and the compiled JavaScript
+  target's `wrapRealOnly` projection.
+- **Never chop in ring arithmetic or constructors.** Results of
+  `add`/`mul`/`div` can be legitimately tiny (`(10⁻⁶ i)²`, user input
+  `1e-12i`); `chop()` is an _absolute_-tolerance test and would destroy them.
+  Only transcendental kernels produce dust at a known scale. (See the comment
+  in `apply2` in `boxed-expression/apply.ts` for the real-part version of this
+  principle: a legitimately small real result is not chopped either.)
+- **Read sites compare exactly.** Because dust is removed where it is created,
+  a stored `im ≠ 0` is significant by construction. The many library dispatch
+  checks (`x.im === 0` / `x.im !== 0`) are therefore correct as written — do
+  not "fix" them to `ce.chop(x.im)`. A read-time chop would make a value
+  dispatch as real while still typing, printing, and serializing as complex,
+  and would tie expression identity to the mutable `ce.tolerance`.
+  (`ce._numericValue`'s exact `im === 0` collapse to a real value is likewise
+  correct by construction.)
+
+The roundoff scale is `ROUNDOFF_TOLERANCE` (`1e-14`) in `numerics/numeric.ts`
+— complex kernels run at machine precision regardless of `ce.precision`, so
+their dust is machine-scale. All kernel-boundary chops use it (`apply.ts`,
+`wrapRealOnly` in `compilation/javascript-target.ts`, the angular-unit
+conversion in `boxed-expression/trigonometry.ts`, the `numeric-value/`
+classes). Using `ce.tolerance` there miscoupled the user knob — tightening it
+below dust scale re-introduced the 2026-07-30 regression where
+`realOnly`-compiled `arcsin` returned `NaN` across its whole domain, and
+loosening it silently projected genuinely complex results to real (fixed
+2026-07-31).
+
+Two related cases that are neither kernel dust nor comparison:
+
+- **Numericization dust** — `.N()` substitutes a precision-limited
+  approximation for a symbolic constant, so `Sin(π)` at bignum precision
+  computes sin of π-to-`precision`-digits ≈ 10^−precision. The bignum
+  `Sin`/`Cos` kernels chop this _real_ dust at the bignum roundoff scale,
+  10^(2−precision) (`chopBignumDust` in `boxed-expression/trigonometry.ts`) —
+  a chop at `ce.tolerance` here destroyed legitimately-computed small results
+  (`sin(3.141592653588793)` ≈ 1.0e−12 returned 0; the #231 failure class).
+  The machine path does not chop (`Sin(3.141592653589793).N()` →
+  `1.22e-16`, matching Mathematica's `Sin[N[π]]`).
+- **Numeric-algorithm residual cleanup** — `NullSpace`/eigenvector results in
+  `library/linear-algebra.ts` chop components at `ce.tolerance`. Elimination
+  residuals scale with the algorithm and conditioning, not machine eps, and
+  the basis is a user-facing answer, so the user's tolerance is the right
+  knob there.
+
 ## Compilation
 
 `src/compute-engine/compilation/` turns a boxed expression into source code in a

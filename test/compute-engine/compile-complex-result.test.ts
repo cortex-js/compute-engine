@@ -318,11 +318,13 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
  * arcsin(x)` therefore compiled to a curve that was `NaN` at every point of
  * its domain.
  *
- * The projection now CHOPS the imaginary part at the engine's `ce.tolerance`,
- * the engine's own "is this zero?" convention (`apply.ts` chops both
- * components of an interpreted complex result; `relational-operator.ts` tests
- * `ce.chop(n) === 0`). A genuinely complex value is nowhere near the tolerance
- * and still fails closed to `NaN` — pinned below.
+ * The projection now CHOPS the imaginary part at the kernel-roundoff scale
+ * (`ROUNDOFF_TOLERANCE`, matching `apply.ts`'s complex-result chop) — NOT at
+ * `ce.tolerance`: whether the dust is noise is a property of the arithmetic,
+ * so the projection must not change when the user tunes their comparison
+ * tolerance (see ARCHITECTURE.md § "Chopping and the `im === 0` convention").
+ * A genuinely complex value is nowhere near the roundoff scale and still
+ * fails closed to `NaN` — pinned below.
  *
  * Both shapes are pinned: the BARE head, and the head under a parent that
  * emits `{re, im}` arithmetic around it (`1 + …`) — the compound form is what a
@@ -371,14 +373,17 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
   }
 
   it('chopping has not swallowed a genuinely complex value', () => {
-    // The tolerance is a ZERO test, not a "close enough to real" test: an
-    // imaginary part above `ce.tolerance` must still fail closed to `NaN`.
+    // The chop is a ROUNDOFF-DUST test, not a "close enough to real" test: an
+    // imaginary part above the roundoff scale (1e-14) must still fail closed
+    // to `NaN` — including one well below `ce.tolerance` (1e-10), which the
+    // old `ce.tolerance`-based projection silently realized.
     const ce = new ComputeEngine();
     expect(ce.tolerance).toBe(1e-10);
     for (const expr of [
       ['Arcsin', 2], // im = -1.3169…
       ['Sqrt', -4], // im = 2
-      ['Complex', 1, 1e-9], // an order of magnitude ABOVE the tolerance
+      ['Complex', 1, 1e-9], // above ce.tolerance
+      ['Complex', 1, 1e-11], // BELOW ce.tolerance, above roundoff — genuine
     ] as const) {
       const result = compile(ce.box(expr as any), {
         realOnly: true,
@@ -386,15 +391,15 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
       });
       expect(result.run!()).toBeNaN();
     }
-    // …and one BELOW it projects, exactly as `ce.chop` would.
-    const below = compile(ce.box(['Complex', 1, 1e-11]), {
+    // …and one below the roundoff scale projects.
+    const below = compile(ce.box(['Complex', 1, 1e-15]), {
       realOnly: true,
       fallback: false,
     });
     expect(below.run!()).toBe(1);
   });
 
-  it('dust from a head with no real branch projects, and the tolerance is the ENGINE’s', () => {
+  it('dust from a head with no real branch projects, independent of ce.tolerance', () => {
     // `realDomainComplexFn` gives the eight bounded heads an exact real
     // branch; the chop is the systemic net beneath it, for every head that has
     // no such branch. `Exp(Ln(-2))` is exactly `-2` interpreted, but the
@@ -423,15 +428,24 @@ describe('COMPILE: realOnly over an in-domain bounded inverse-trig argument', ()
     expect(tuple[0]).toBe(-2);
     expect(tuple[1]).toBeNaN();
 
-    // The tolerance is the engine's configured `ce.tolerance`, not the
-    // hardcoded default. At `tolerance = 0` the chop degenerates to the EXACT
-    // `im === 0` test this replaced — the negative control for the two
-    // assertions above.
+    // The chop scale is the FIXED kernel-roundoff scale, decoupled from
+    // `ce.tolerance`: tightening the user tolerance to 0 must NOT re-break
+    // the projection (under the old `ce.tolerance`-based chop it degenerated
+    // to the exact `im === 0` test and this returned `NaN`), and loosening it
+    // must not swallow a genuinely complex value.
     const strict = new ComputeEngine();
     strict.tolerance = 0;
     const strictExpr = strict.box(['Exp', ['Ln', -2]]);
     expect(
       compile(strictExpr, { realOnly: true, fallback: false }).run!()
+    ).toBe(-2);
+    const loose = new ComputeEngine();
+    loose.tolerance = 1e-3;
+    expect(
+      compile(loose.box(['Complex', 1, 1e-4]), {
+        realOnly: true,
+        fallback: false,
+      }).run!()
     ).toBeNaN();
   });
 

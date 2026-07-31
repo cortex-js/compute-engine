@@ -4,7 +4,7 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression, IComputeEngine } from '../global-types.js';
 
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
-import { SMALL_INTEGER } from '../numerics/numeric.js';
+import { chop, ROUNDOFF_TOLERANCE, SMALL_INTEGER } from '../numerics/numeric.js';
 import { bignumPreferred } from './utils.js';
 import { isNumber } from './type-guards.js';
 
@@ -192,8 +192,14 @@ export function applyN(
   if (result === undefined) return undefined;
   if (result instanceof Complex) {
     if (Number.isNaN(result.re) || Number.isNaN(result.im)) return undefined;
+    // Chop kernel roundoff dust at the machine-roundoff scale, NOT
+    // `ce.tolerance` — whether a component is noise from the complex kernel is
+    // a property of the arithmetic, not of the user's comparison tolerance.
     return ce.number(
-      ce._numericValue({ re: ce.chop(result.re), im: ce.chop(result.im) })
+      ce._numericValue({
+        re: chop(result.re, ROUNDOFF_TOLERANCE),
+        im: chop(result.im, ROUNDOFF_TOLERANCE),
+      })
     );
   }
   if (typeof result === 'number') {
@@ -250,8 +256,12 @@ export function apply2(
 
   if (result === undefined) return undefined;
   if (result instanceof Complex)
+    // Roundoff scale, not `ce.tolerance` — see the single-argument `apply`.
     return ce.number(
-      ce._numericValue({ re: ce.chop(result.re), im: ce.chop(result.im) })
+      ce._numericValue({
+        re: chop(result.re, ROUNDOFF_TOLERANCE),
+        im: chop(result.im, ROUNDOFF_TOLERANCE),
+      })
     );
   // Do not chop a real result: a legitimately-small value (e.g. 10^-100 from
   // `Power(10, -100)`) is not roundoff noise, and chopping it to 0 is both

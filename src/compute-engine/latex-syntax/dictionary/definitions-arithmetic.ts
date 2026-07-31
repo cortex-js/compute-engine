@@ -220,16 +220,20 @@ function serializeRoot(
 ): string {
   if (base === null || base === undefined) return '\\sqrt{}';
   degree = degree ?? 2;
+  // `supsub` braces a base that itself contains '^': a `Power` base is not
+  // wrapped by `wrapShort`, and bare `x^2^{1/2}` is unparsable LaTeX —
+  // `{x^2}^{1/2}` round-trips (same rule as the generic Power path).
   if (style === 'solidus') {
-    return (
-      serializer.wrapShort(base) + '^{1/' + serializer.serialize(degree) + '}'
+    return supsub(
+      '^',
+      serializer.wrapShort(base),
+      '1/' + serializer.serialize(degree)
     );
   } else if (style === 'quotient') {
-    return (
-      serializer.wrapShort(base) +
-      '^{\\frac{1}{' +
-      serializer.serialize(degree) +
-      '}}'
+    return supsub(
+      '^',
+      serializer.wrapShort(base),
+      '\\frac{1}{' + serializer.serialize(degree) + '}'
     );
   }
 

@@ -27,6 +27,13 @@ export const MACHINE_PRECISION = Math.floor(
 // Numpy has a default absolute tolerance of 1e-8 (1e-5 for relative)
 export const DEFAULT_TOLERANCE = 1e-10;
 
+// Scale of IEEE-754 roundoff dust from a machine-precision kernel (e.g. the
+// residual imaginary part of `Complex(0.5, 0).asin()`, ~5.6e-17). Used to
+// chop kernel dust at creation — a property of the arithmetic, deliberately
+// independent of the user-facing `ce.tolerance`. See ARCHITECTURE.md
+// § "Chopping and the `im === 0` convention".
+export const ROUNDOFF_TOLERANCE = 1e-14;
+
 // When applying simplifications, only considers integers whose absolute value
 // is less than SMALL_INTEGER. This avoid loss of precision by preventing
 // simplification for `1e199 + 1`.

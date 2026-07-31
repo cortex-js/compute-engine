@@ -6,7 +6,7 @@ import { numberToString } from '../numerics/strings.js';
 import { numberToExpression } from '../numerics/expression.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
 import { ExactNumericValue } from './exact-numeric-value.js';
-import { machineNthRoot } from '../numerics/numeric.js';
+import { machineNthRoot, ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
 
 export class MachineNumericValue extends NumericValue {
   declare __brand: 'MachineNumericValue';
@@ -618,6 +618,8 @@ export class MachineNumericValue extends NumericValue {
   }
 }
 
+// Kernel roundoff dust (see ARCHITECTURE.md § "Chopping and the `im === 0`
+// convention"): scale of machine roundoff, not `ce.tolerance`.
 function chop(n: number): number {
-  return Math.abs(n) <= 1e-14 ? 0 : n;
+  return Math.abs(n) <= ROUNDOFF_TOLERANCE ? 0 : n;
 }

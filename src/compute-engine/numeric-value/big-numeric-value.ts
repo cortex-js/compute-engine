@@ -7,6 +7,7 @@ import { MathJsonExpression } from '../../math-json/types.js';
 import { numberToExpression } from '../numerics/expression.js';
 import { numberToString } from '../numerics/strings.js';
 import { bigint } from '../numerics/bigint.js';
+import { ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
 
 export class BigNumericValue extends NumericValue {
@@ -740,6 +741,9 @@ function decimalToString(num: BigDecimal): string {
 /* Use with trig functions to avoid rounding errors.
    Note that we use 1e14 as the tolerance, as this is applied to a machine
    number and is independent of the compute engine tolerance */
+// Kernel roundoff dust (see ARCHITECTURE.md § "Chopping and the `im === 0`
+// convention"): complex kernels run at machine precision, so the scale is
+// machine roundoff, not `ce.tolerance`.
 function chop(n: number): number {
-  return Math.abs(n) <= 1e-14 ? 0 : n;
+  return Math.abs(n) <= ROUNDOFF_TOLERANCE ? 0 : n;
 }

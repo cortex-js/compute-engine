@@ -25,6 +25,7 @@ import { isSubtype } from '../../common/type/subtype.js';
 
 import {
   chop,
+  ROUNDOFF_TOLERANCE,
   factorial,
   factorial2,
   realGcd as gcd,
@@ -4449,19 +4450,13 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
  * Wrap a compiled result so non-real values are projected to a real number or,
  * when they are not representable as one, `NaN` (fail closed, D6):
  * - A complex `{ re, im }` collapses to `re` when the imaginary part chops to
- *   zero at the engine's `tolerance`, else `NaN`.
+ *   zero at the roundoff scale (`ROUNDOFF_TOLERANCE`), else `NaN`.
  * - A boolean is NOT a real number — the interpreter never numericizes a
  *   boolean-valued expression to 0/1 (`True.N()` stays `True`) — so it maps to
  *   `NaN` rather than silently passing through as a non-number (CO-P2-25).
- *
- * `tolerance` is the engine's configured `ce.tolerance`, snapshotted at
- * compile time like every other engine fact the generated code closes over
- * (folded constants, symbol values). See the `chop` call in
- * `coerceComponents`.
  */
 function wrapRealOnly(
-  result: CompilationResult<'javascript'>,
-  tolerance: number
+  result: CompilationResult<'javascript'>
 ): CompilationResult<'javascript', number> {
   const origRun = result.run;
   // Recurses into arrays: a tuple/list result carries its components in
@@ -4473,22 +4468,23 @@ function wrapRealOnly(
   // a legitimate result (`Equal` over a collection yields `[false, …]`), so
   // the top-level boolean → NaN rule below must not recurse.
   //
-  // The imaginary part is CHOPPED, not compared to zero exactly — the engine's
-  // own "is this zero?" convention (`chop`/`ce.tolerance`, as in
-  // `apply.ts`'s `ce._numericValue({re: ce.chop(…), im: ce.chop(…)})` and
-  // `relational-operator.ts`'s `ce.chop(n) === 0`). An exact test was a
-  // REGRESSION source (2026-07-30): the bounded inverse trig / inverse
-  // hyperbolic heads type as `complex` for an argument of unknown magnitude,
-  // so an IN-domain call is routed through `_SYS.casin` & co., and
-  // `Complex(0.5, 0).asin()` returns `im: 5.55e-17` — dust from the complex
-  // log/sqrt formulation. Projected exactly, that dust made `y = arcsin(x)`
-  // compile to `NaN` at every point of its domain. A genuinely complex value
-  // is nowhere near the tolerance (`arcsin(2)` has `im = -1.317`) and still
-  // fails closed to `NaN`.
+  // The imaginary part is CHOPPED, not compared to zero exactly, at the
+  // kernel-roundoff scale — matching `apply.ts`'s complex-result chop, NOT
+  // `ce.tolerance` (kernel dust is a property of the arithmetic; using the
+  // user tolerance both re-broke this under a tightened tolerance and, being
+  // snapshotted at compile time, diverged from the interpreter after a
+  // tolerance change). An exact test was a REGRESSION source (2026-07-30):
+  // the bounded inverse trig / inverse hyperbolic heads type as `complex` for
+  // an argument of unknown magnitude, so an IN-domain call is routed through
+  // `_SYS.casin` & co., and `Complex(0.5, 0).asin()` returns `im: 5.55e-17` —
+  // dust from the complex log/sqrt formulation. Projected exactly, that dust
+  // made `y = arcsin(x)` compile to `NaN` at every point of its domain. A
+  // genuinely complex value is nowhere near the roundoff scale (`arcsin(2)`
+  // has `im = -1.317`) and still fails closed to `NaN`.
   const coerceComponents = (r: unknown): unknown => {
     if (Array.isArray(r)) return r.map(coerceComponents);
     if (typeof r === 'object' && r !== null && 'im' in r)
-      return chop((r as ComplexResult).im, tolerance) === 0
+      return chop((r as ComplexResult).im, ROUNDOFF_TOLERANCE) === 0
         ? (r as ComplexResult).re
         : NaN;
     return r;
@@ -4551,7 +4547,7 @@ function compileToTarget(
       calling: 'lambda' as const,
       run: fn as unknown as CompiledRunner,
     };
-    return realOnly ? wrapRealOnly(result, expr.engine.tolerance) : result;
+    return realOnly ? wrapRealOnly(result) : result;
   }
 
   if (isSymbol(expr)) {
@@ -4568,7 +4564,7 @@ function compileToTarget(
         calling: 'lambda' as const,
         run: fn as unknown as CompiledRunner,
       };
-      return realOnly ? wrapRealOnly(result, expr.engine.tolerance) : result;
+      return realOnly ? wrapRealOnly(result) : result;
     }
   }
 
@@ -4591,7 +4587,7 @@ function compileToTarget(
     calling: 'expression' as const,
     run: fn as unknown as CompiledRunner,
   };
-  return realOnly ? wrapRealOnly(result, expr.engine.tolerance) : result;
+  return realOnly ? wrapRealOnly(result) : result;
 }
 
 /**

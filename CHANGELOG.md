@@ -27,6 +27,29 @@
 
 ### Issues Resolved
 
+- **Kernel roundoff dust is now chopped at a fixed roundoff scale (`1e-14`),
+  decoupled from `ce.tolerance`.** Whether a dust-sized component of a
+  complex kernel result (e.g. the `im: 5.6e-17` residue of `asin(0.5)`
+  computed via the complex formulation) is noise is a property of the
+  arithmetic, not of the user's comparison tolerance. Previously these chops
+  used `ce.tolerance` (default `1e-10`): tightening the tolerance below the
+  dust scale made `realOnly`-compiled `arcsin(x)` return `NaN` across its
+  whole domain, loosening it silently projected genuinely complex values to
+  real, and — because the compiled projection snapshotted the tolerance at
+  compile time — compiled and interpreted results could diverge after a
+  tolerance change. Comparison sites (`Equal`, relational operators, the
+  `Chop` operator) still honor `ce.tolerance`. See ARCHITECTURE.md
+  § "Chopping and the `im === 0` convention".
+
+- **`sin`/`cos` of a bignum argument near a zero crossing no longer collapse
+  legitimately-small results to `0`.** The bignum kernels chopped their real
+  result at `ce.tolerance`, so `\sin(3.141592653588793)` — true value
+  ≈ `1.0e-12`, computable exactly at the default 21-digit precision —
+  returned `0` (the same failure class as issue #231, whose fix introduced
+  the chop). The chop now uses the bignum roundoff scale, `10^(2−precision)`,
+  which still clears numericization dust (`\sin\pi` under `.N()` → `0`) while
+  preserving every result representable at the working precision.
+
 - **A compile decline's interpreter fallback now returns the numeric value
   instead of `NaN` for expressions whose `evaluate()` stays symbolic.**
   `compile('\sum_{i=1}^{\infty} 2^{-i}')` correctly declines (no terminating

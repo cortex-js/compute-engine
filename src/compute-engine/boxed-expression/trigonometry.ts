@@ -16,6 +16,7 @@ import type {
 import { asLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { isNumber, isSymbol, isFunction } from './type-guards.js';
+import { chop, ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
@@ -287,10 +288,25 @@ export function radiansToAngle(
   // The unit conversion is linear, so it applies to the whole complex value:
   // reading only `.re` silently returned a wrong REAL angle for a complex
   // one (`arcsin(2.5)` in deg mode gave `90`, dropping the imaginary part).
-  // A dust-sized imaginary part (within tolerance) chops to the real path.
-  if (!Number.isNaN(n.im) && ce.chop(n.im) !== 0)
+  // A dust-sized imaginary part (kernel roundoff, not `ce.tolerance`) chops
+  // to the real path.
+  if (!Number.isNaN(n.im) && chop(n.im, ROUNDOFF_TOLERANCE) !== 0)
     return ce.number(ce.complex(theta * scale, n.im * scale));
   return ce.number(theta * scale);
+}
+
+/**
+ * Chop numericization dust from a bignum trig kernel. `.N()` substitutes a
+ * precision-limited approximation for a symbolic zero-crossing argument
+ * (`Sin(π)` becomes sin of π-to-`precision`-digits ≈ 10^−precision), so the
+ * dust scale is the BIGNUM roundoff, 10^(2−precision) — NOT `ce.tolerance`,
+ * which destroyed legitimately-computed small results (`sin(3.141592653588793)`
+ * ≈ 1.0e−12 chopped to 0 at the default 1e-10 tolerance; the #231 failure
+ * class). See ARCHITECTURE.md § "Chopping and the `im === 0` convention".
+ */
+function chopBignumDust(ce: ComputeEngine, value: BigDecimal): BigDecimal | 0 {
+  if (value.abs().lte(new BigDecimal(`1e${2 - ce.precision}`))) return 0;
+  return value;
 }
 
 export function evalTrig(
@@ -439,7 +455,7 @@ export function evalTrig(
       return applyAngle(
         op,
         Math.cos,
-        (x) => ce.chop(x.cos()),
+        (x) => chopBignumDust(ce, x.cos()),
         (x) => x.cos()
       );
 
@@ -531,7 +547,7 @@ export function evalTrig(
       return applyAngle(
         op,
         Math.sin,
-        (x) => ce.chop(x.sin()),
+        (x) => chopBignumDust(ce, x.sin()),
         (x) => x.sin()
       );
     case 'Sinh':

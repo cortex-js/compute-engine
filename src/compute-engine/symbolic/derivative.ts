@@ -11,6 +11,7 @@ import {
   sym,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { isOperatorDef } from '../boxed-expression/utils.js';
 
 /**
  * Maximum recursion depth for differentiation.
@@ -260,7 +261,21 @@ const DERIVATIVES_TABLE = {
  * instead of converting to an operator definition.
  */
 function isUserFunction(sym: Expression): boolean {
-  if (sym.operatorDefinition !== undefined) return true;
+  const opDef = sym.operatorDefinition;
+  if (opDef !== undefined) {
+    // A BUILTIN — its definition owned by the system scope (compared by
+    // scope identity, so a user definition SHADOWING a builtin name still
+    // qualifies) — is not a user function: applying it to wildcard symbols
+    // and evaluating is at best a no-op, and for control structures it runs
+    // an evaluate handler on nonsense operands (`Which(_1, …)` throws on a
+    // non-boolean condition; `Loop(_1)` would spin until the deadline).
+    const systemScope = sym.engine.contextStack[0]?.lexicalScope;
+    const systemDef = isSymbol(sym)
+      ? systemScope?.bindings.get(sym.symbol)
+      : undefined;
+    if (isOperatorDef(systemDef) && systemDef.operator === opDef) return false;
+    return true;
+  }
   const value = sym.valueDefinition?.value;
   return value !== undefined && isFunction(value, 'Function');
 }
@@ -934,6 +949,14 @@ export function differentiate(
         return differentiate(bodyWithArgs, v, depth + 1, trace);
       }
     }
+
+    // A LAZY operator (`Which`, `Sum`, `Integrate`, `Loop`, …) holds its
+    // operands unevaluated: its slots are binders, conditions or statements,
+    // not scalar function arguments, so the slot-wise chain rule below is
+    // meaningless for it (it would differentiate with respect to a boolean
+    // condition or a bound index). Decline instead — the enclosing `D`
+    // stays inert and symbolic.
+    if (opSym.operatorDefinition?.lazy) return undefined;
 
     // Unknown function of one or more arguments: keep the outer derivative
     // symbolic and apply the (multivariate) chain rule. The partial with
