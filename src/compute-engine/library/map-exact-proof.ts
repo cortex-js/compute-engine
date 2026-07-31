@@ -45,7 +45,7 @@ import type { LoweredLevel, Slot } from './map-broadcast-shape.js';
  */
 
 /** A closed integer interval; both endpoints are safe integers. */
-interface Interval {
+export interface Interval {
   lo: number;
   hi: number;
 }
@@ -62,6 +62,16 @@ export interface ExactTierShape {
   level: LoweredLevel;
   /** The level's element `Function` literal — the compile unit. */
   fn: Expression;
+  /** The proven element interval of each source, in row order. The runner
+   * re-checks every element against these at RUNTIME: the proof is taken at
+   * drain start, and the values it read (a symbol source's list, R6) can in
+   * principle move under a still-compiled function without passing through
+   * `stillEligible()` — the compiled body does not reference the source
+   * symbol, so `symbolDeps` is empty and `validCompiled` re-stamps. Today a
+   * live iterator captures its source, so that route is not reachable; this
+   * check makes the exactness contract independent of that fact instead of
+   * resting on it. */
+  sourceBounds: Interval[];
   /** Statically-proven element count of the level's source stream(s). */
   count: number;
 }
@@ -69,7 +79,7 @@ export interface ExactTierShape {
 /**
  * Minimum statically-proven element count for an exact-tier compile attempt.
  *
- * UNRATIFIED iteration detail (2026-07-31), pending user review. R4 makes the
+ * RATIFIED 2026-07-31 (user ruling: "use 64 for now"). R4 makes the
  * exact tier fire at the DEFAULT (bignum-preferred) engine precision, so the
  * exposure is *every* exact broadcast drain — including the many two- and
  * three-element ones a document performs. A compile costs ~1 ms; below this
@@ -298,8 +308,35 @@ function proveSource(
     ctx.depth--;
     return r;
   }
-  // Symbols, unknown-length streams, non-literal `Range` bounds: no bounds,
-  // no proof.
+  if (isSymbol(x)) {
+    // Amendment R6 (ruled 2026-07-31): a SYMBOL source — the motivating
+    // consumer's dominant firing shape, `L ↦ f(L)` over a document variable,
+    // which produces a `Map` whose source operand is the bare symbol. Resolve
+    // it through its current value and recurse: the value may be a literal
+    // `Range`, a `List` of integer literals, a nested broadcast `Map`, or a
+    // further symbol (a chain, bounded by the depth guard — a cycle simply
+    // runs out of depth and declines).
+    //
+    // REACTIVITY, and why `dynamic` is load-bearing here: the compiled body
+    // never references this symbol (it names the SOURCE, not an operand), so
+    // it never lands in the compiler's `symbolDeps` and the compiled-cache
+    // dependency validation cannot see it change. The proof memo's
+    // generation revalidation — armed by `ctx.dynamic` — plus the
+    // `stillEligible()` re-ask on every `attemptCompile` path are the ONLY
+    // guard against a reassignment that widens the source bounds. Any
+    // `assign` bumps `ce._mutationGeneration`, so that guard is complete.
+    ctx.dynamic = true;
+    if (ctx.depth >= MAX_SPINE_DEPTH) return undefined;
+    const value = ctx.ce._getSymbolValue(x.symbol);
+    // No value: decline — but the outcome stays `dynamic`, so assigning one
+    // re-proves on the next generation bump.
+    if (value === undefined) return undefined;
+    ctx.depth++;
+    const r = proveSource(ctx, value);
+    ctx.depth--;
+    return r;
+  }
+  // Unknown-length streams, non-literal `Range` bounds: no bounds, no proof.
   return undefined;
 }
 
@@ -373,7 +410,10 @@ function probesIntegerClosed(
  * through them). */
 function proveLevel(
   ctx: ProofContext,
-  level: LoweredLevel
+  level: LoweredLevel,
+  /** Out-parameter: the top-level caller collects the per-source bounds it
+   * needs for the runtime element check. */
+  sourcesOut?: SourceBounds[]
 ): SourceBounds | undefined {
   // The `Block(N(…))` marker belongs to the float tier; an identity level is
   // a pass-through the compiler cannot improve on.
@@ -389,6 +429,7 @@ function proveLevel(
     sources.push(b);
   }
   if (sources.length !== level.arity) return undefined;
+  if (sourcesOut !== undefined) sourcesOut.push(...sources);
 
   const args: Interval[] = [];
   const probeSlots: ProbeSlot[] = [];
@@ -454,13 +495,16 @@ export function exactTierShape(
 
   const level = isFunction(expr, 'Map') ? lowerLevel(expr) : undefined;
   const ctx: ProofContext = { ce, dynamic: false, depth: 0 };
-  const proof = level === undefined ? undefined : proveLevel(ctx, level);
+  const sources: SourceBounds[] = [];
+  const proof =
+    level === undefined ? undefined : proveLevel(ctx, level, sources);
   const shape: ExactTierShape | undefined =
     proof === undefined || level === undefined || !isFunction(expr, 'Map')
       ? undefined
       : {
           level,
           fn: expr.ops[expr.nops - 1],
+          sourceBounds: sources.map((s) => s.interval),
           count: proof.count,
         };
   exactProofMemo.set(expr, {

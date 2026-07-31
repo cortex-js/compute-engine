@@ -4,13 +4,17 @@ Status: **RATIFIED 2026-07-31 (R1–R5 as recommended, per "execute" directive)
 — IMPLEMENTED same day** (`library/map-exact-proof.ts` +
 `library/map-broadcast-shape.ts` + `mapAutoCompileRunner` tier split;
 adversarially reviewed, one confirmed proof/compile value-skew hole fixed —
-`stillEligible()` now gates every `attemptCompile` path). Two iteration
-details await rulings: `MIN_EXACT_COMPILE_COUNT = 64` (size floor — R4 makes
+`stillEligible()` now gates every `attemptCompile` path).
+`MIN_EXACT_COMPILE_COUNT = 64` (size floor) RATIFIED 2026-07-31 — R4 makes
 the tier fire at default bignum-preferred precision, so without a floor every
-tiny exact broadcast drain pays a ~1 ms compile), and attempt accounting (the
-proof is an eligibility gate that runs BEFORE any attempt is recorded, so
-declines don't count as `attempts` — this preserved every existing
-`attempts === 0` pin).
+tiny exact broadcast drain would pay a ~1 ms compile. Attempt accounting
+RATIFIED as built 2026-07-31: the proof is an ELIGIBILITY GATE that runs
+BEFORE any attempt is recorded — a proof decline bumps no counter and writes
+no cache record (its memo re-proves on engine mutation), and
+`_mapAutoCompileStats.attempts` keeps its historical meaning "the compiler
+was invoked" (this is what preserved every pre-existing `attempts === 0`
+pin). If v2 (runtime-guarded codegen, R5) ever wants near-miss telemetry,
+add a separate `exactProofDeclines` counter — do not overload `attempts`.
 Prior art: `docs/plans/2026-07-27-map-fusion-design.md` (§3 recorded this as
 the deferred "next lever"), `docs/plans/2026-07-19-map-auto-compile-design.md`
 (the `.N()` float tier this design extends).
@@ -156,3 +160,22 @@ raw numbers across a lowered spine (the map-fusion R4 follow-up, orthogonal).
    `number`). Pinned in `type-handler-audit.test.ts` ("TYPE AUDIT: Mod"),
    including the witness-body chain `1 + Mod(k + 29, 900) → finite_integer`
    that R2 keys on.
+
+## 6. Amendment R6 — symbol-valued sources (RULED 2026-07-31, post-landing)
+
+The v1 proof read bounds only from LITERAL `Range`/`List` sources, which
+missed the motivating consumer's dominant shape: a firing rule `L → f(L)`
+over a document variable produces a lazy `Map` whose source is the SYMBOL
+`L` (probe-verified: zero compile attempts on `L + 1`,
+`1 + Mod(L + 29, 900)` over a 200-integer list). Ruling: **extend
+`proveSource` to resolve a symbol source through its current value** —
+recurse into the value (literal `Range`, `List` of integer literals, nested
+broadcast `Map`, or a further symbol, depth-guarded), scanning `List` values
+for integer element bounds. The proof outcome is marked `dynamic`, so the
+existing generation-revalidated memo and the `stillEligible()` gates carry
+the reactivity; the compiled body never references the source symbol (it is
+not in `symbolDeps`), so the proof memo is the ONLY guard — which is exactly
+what it was built for. Per-tick economics: a fresh `Map` instance per firing
+tick pays a cold compile (~1 ms), a clear win from ~10² elements (the size
+floor covers the low end). This closes the firing-capacity gap for
+document-list state evolution, not just literal-`Range` index vectors.

@@ -17,6 +17,7 @@ import { lookup } from '../function-utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { exactTierShape, MIN_EXACT_COMPILE_COUNT } from './map-exact-proof.js';
+import type { Interval } from './map-exact-proof.js';
 
 /**
  * Auto-compilation of lazy-`Map` element lambdas on numeric drains.
@@ -549,6 +550,7 @@ export function mapAutoCompileRunner(
   let tier: MapCompileTier;
   let fn: Expression;
   let inner: Expression | undefined;
+  let sourceBounds: ReadonlyArray<Interval> = [];
   if (marked !== undefined) {
     if (bignumPreferred(ce)) return undefined;
     tier = 'marked';
@@ -567,6 +569,7 @@ export function mapAutoCompileRunner(
     tier = 'exact';
     fn = shape.fn;
     inner = undefined;
+    sourceBounds = shape.sourceBounds;
   }
 
   const existing = mapCompileCaches.get(expr);
@@ -666,22 +669,35 @@ export function mapAutoCompileRunner(
     // function keeps serving other rows).
     //
     // The exact tier additionally re-checks at RUNTIME what its static proof
-    // established — every input is an exact integer float64 can hold exactly.
-    // The proof reads the instance's own sources, so this can only fire on a
-    // proof gap; it costs one predicate per element and keeps the exactness
-    // contract from depending on that proof being airtight.
+    // established — every input is an exact real integer float64 can hold
+    // exactly, AND lies inside the interval the proof propagated bounds from.
+    // The bounds half matters because the proof is taken at DRAIN START while
+    // the compiled function is used per element: a symbol source's list (R6)
+    // is not in `symbolDeps`, so `validCompiled` re-stamps a reassignment
+    // rather than routing it through `stillEligible()`. A live iterator
+    // captures its source today, so nothing reaches this check — it is what
+    // makes the exactness contract independent of that, instead of resting on
+    // it. Two comparisons per element, below the boxing noise floor.
     const args: unknown[] = [];
-    for (const item of items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
       if (!isNumber(item)) {
         _mapAutoCompileStats.elementFallbacks++;
         return undefined;
       }
-      if (
-        tier === 'exact' &&
-        (item.im !== 0 || !item.isExact || !Number.isSafeInteger(item.re))
-      ) {
-        _mapAutoCompileStats.elementFallbacks++;
-        return undefined;
+      if (tier === 'exact') {
+        const b = sourceBounds[i];
+        if (
+          b === undefined ||
+          item.im !== 0 ||
+          !item.isExact ||
+          !Number.isSafeInteger(item.re) ||
+          item.re < b.lo ||
+          item.re > b.hi
+        ) {
+          _mapAutoCompileStats.elementFallbacks++;
+          return undefined;
+        }
       }
       args.push(item.im !== 0 ? { re: item.re, im: item.im } : item.re);
     }

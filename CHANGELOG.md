@@ -37,15 +37,21 @@
   stays within ±(2^53 − 1) — float64 integer arithmetic in that range is
   exact, so compiled elements re-box as exact integer literals bit-identical
   to the interpreter's, at any engine precision including the default
-  bignum-preferred one. Bounds are read from literal `Range`/`List` sources
-  (and nested broadcast `Map`s over them); anything the proof cannot bound —
-  float or symbolic bodies, `Divide`/`Power`/`Remainder`, symbol-valued
-  sources, possible overflow — silently stays on the interpreter, and
-  per-element runtime guards keep the exactness contract independent of the
-  proof. The 900-element witness `1 + Mod(Range(0,899) + 29, 900)` drains
-  ~6× faster (~12 → ~1.8 µs/element). Drains below 64 statically-proven
-  elements skip the tier (a compile cannot pay itself back). Design:
-  `docs/plans/2026-07-31-exact-map-drain-compile-design.md`.
+  bignum-preferred one. Bounds are read from literal `Range`/`List` sources,
+  nested broadcast `Map`s over them, and **symbols whose current value is
+  such a source** (a document variable holding an integer list: `L + 1` and
+  `1 + Mod(L + 29, 900)` compile) — a symbol-sourced proof revalidates when
+  the engine mutates, and every element is additionally checked at runtime
+  against the proven source interval, so reassigning the variable can never
+  serve stale compiled results. Anything the proof cannot bound — float or
+  symbolic bodies, `Divide`/`Power`/`Remainder`, unknown-length sources,
+  possible overflow — silently stays on the interpreter. The 900-element
+  witness `1 + Mod(Range(0,899) + 29, 900)` drains ~6× faster (~12 → ~1.8
+  µs/element); a 10 000-element symbol-list drain of the same rule takes
+  ~12 ms cold (compile included) vs ~95 ms interpreted. Drains below 64
+  statically-proven elements skip the tier (a compile cannot pay itself
+  back). Design: `docs/plans/2026-07-31-exact-map-drain-compile-design.md`
+  (R1–R5 + amendment R6).
 
 ### Issues Resolved
 

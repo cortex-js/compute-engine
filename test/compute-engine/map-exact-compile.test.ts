@@ -3,6 +3,7 @@ import { BigDecimal } from '../../src/big-decimal';
 import {
   _mapAutoCompileStats as stats,
   _resetMapAutoCompileStats,
+  mapAutoCompileRunner,
 } from '../../src/compute-engine/library/map-auto-compile';
 import { MIN_EXACT_COMPILE_COUNT } from '../../src/compute-engine/library/map-exact-proof';
 
@@ -347,6 +348,200 @@ describe('exact Map compile — closed operands', () => {
   });
 });
 
+describe('exact Map compile — symbol-valued sources (amendment R6)', () => {
+  // R6 (ruled 2026-07-31, design §6): the motivating consumer's dominant
+  // firing shape is a rule over a DOCUMENT VARIABLE holding a list, which
+  // produces a `Map` whose source operand is the bare symbol. The v1 proof
+  // read bounds only from literal `Range`/`List` sources and declined every
+  // one of them.
+  const integers = (n: number, from = 0) =>
+    Array.from({ length: n }, (_, i) => from + i);
+
+  test('the firing shape `L + 1` over a symbol list compiles', () => {
+    const ce = new ComputeEngine() as any;
+    ce.assign('L6', ce.box(['List', ...integers(200)]));
+    const m = ce.box(['Add', 'L6', 1]).evaluate();
+    expect(m.operator).toBe('Map');
+    expect(m.op1.symbol).toBe('L6'); // the source really is the SYMBOL
+
+    const compiled = drain(m);
+    expect(stats.attempts).toBe(1);
+    expect(stats.compiledHits).toBe(200);
+
+    ce.jit = 'off';
+    const interpreted = drain(ce.box(['Add', 'L6', 1]).evaluate());
+    ce.jit = 'auto';
+    for (let i = 0; i < compiled.length; i++)
+      expect([i, compiled[i].isSame(interpreted[i])]).toEqual([i, true]);
+    expect(compiled.map((x) => x.re)).toEqual(integers(200, 1));
+  });
+
+  test('the GoL-ish chain `1 + Mod(L + 29, 900)` over a symbol list compiles', () => {
+    const ce = new ComputeEngine() as any;
+    ce.assign('L6b', ce.box(['List', ...integers(200)]));
+    const json = ['Add', 1, ['Mod', ['Add', 'L6b', 29], 900]];
+
+    ce.jit = 'off';
+    const interpreted = drain(ce.box(json).evaluate());
+    _resetMapAutoCompileStats();
+    ce.jit = 'auto';
+    const compiled = drain(ce.box(json).evaluate());
+
+    expect(stats.attempts).toBe(3); // three stacked levels
+    expect(stats.compiledHits).toBe(600);
+    for (let i = 0; i < compiled.length; i++)
+      expect([i, compiled[i].isSame(interpreted[i])]).toEqual([i, true]);
+    expect(compiled.map((x) => x.re)).toEqual(
+      integers(200).map((i) => 1 + ((i + 29) % 900))
+    );
+  });
+
+  test('a symbol whose value is a literal Range compiles', () => {
+    const ce = new ComputeEngine() as any;
+    ce.assign('R6', ce.box(['Range', 1, 300]));
+    const els = drain(ce.box(['Add', 'R6', 1]).evaluate());
+    expect(stats.compiledHits).toBe(300);
+    expect(els[0].isSame(2)).toBe(true);
+    expect(els[299].isSame(301)).toBe(true);
+  });
+
+  test('a symbol → symbol → List chain resolves', () => {
+    const ce = new ComputeEngine() as any;
+    ce.assign('A6', ce.box(['List', ...integers(200)]));
+    ce.assign('B6', ce.symbol('A6'));
+    const els = drain(ce.box(['Add', 'B6', 1]).evaluate());
+    expect(stats.compiledHits).toBe(200);
+    expect(els.map((x) => x.re)).toEqual(integers(200, 1));
+  });
+
+  test('an unassigned symbol source, a non-integer list, and a cycle decline', () => {
+    const ce = new ComputeEngine() as any;
+    ce.declare('U6', 'collection<integer>');
+    drain(ce.box(['Map', 'U6', ['Function', ['Add', '_1', 1], '_1']]));
+    expect(stats.attempts).toBe(0);
+
+    // One inexact element is enough: `literalInteger` rejects it, so the whole
+    // scan declines rather than bounding a list it cannot bound.
+    ce.assign('F6', ce.box(['List', 1, 2.5, ...integers(200)]));
+    _resetMapAutoCompileStats();
+    const bad = ce.box(['Add', 'F6', 1]).evaluate();
+    expect(bad.at(2).re).toBe(3.5);
+    expect(stats.attempts).toBe(0);
+
+    // A symbol cycle just runs out of the depth guard.
+    ce.assign('C6a', ce.symbol('C6b'));
+    ce.assign('C6b', ce.symbol('C6a'));
+    _resetMapAutoCompileStats();
+    ce.box(['Map', 'C6a', ['Function', ['Add', '_1', 1], '_1']]).at(1);
+    expect(stats.attempts).toBe(0);
+  });
+
+  // ── SOURCE reactivity: the guard `symbolDeps` does NOT provide ──────────
+  //
+  // The compiled body never references the source symbol (it names the
+  // SOURCE, not an operand), so it never enters the compiler's `symbolDeps`
+  // and `validCompiled` cannot see the source change — it walks an EMPTY dep
+  // list and re-stamps. The proof memo's `dynamic` generation revalidation
+  // plus the `stillEligible()` gates are the only guard, and the per-element
+  // source-bounds check is the backstop under them. Tested explicitly here
+  // because the closed-operand reactivity tests above do NOT cover it.
+  const SMALL = Array.from({ length: 200 }, (_, i) => 50_000_000 + i); // ² safe
+  const LARGE = Array.from({ length: 200 }, (_, i) => 500_000_000 + i); // ² > 2^53
+
+  function squareRig(jit: 'auto' | 'off') {
+    const ce = new ComputeEngine() as any;
+    ce.jit = jit;
+    ce.assign('S6', ce.box(['List', ...SMALL]));
+    const m = ce.box([
+      'Map',
+      'S6',
+      ['Function', ['Multiply', '_1', '_1'], '_1'],
+    ]);
+    return { ce, m, widen: () => ce.assign('S6', ce.box(['List', ...LARGE])) };
+  }
+
+  test('a FRESH drain after the source is widened declines', () => {
+    const go = (jit: 'auto' | 'off') => {
+      const { m, widen } = squareRig(jit);
+      const before = drain(m).map((x) => x.toString());
+      widen();
+      return { before, after: drain(m).map((x) => x.toString()) };
+    };
+    _resetMapAutoCompileStats();
+    const compiled = go('auto');
+    const snapshot = { ...stats };
+    const interpreted = go('off');
+
+    expect(compiled.before).toEqual(interpreted.before);
+    expect(compiled.after).toEqual(interpreted.after);
+    // The first drain compiled all 200; the widened one compiled NONE — the
+    // revoked proof declined it, and 5·10^8 squared is beyond float64's exact
+    // integers, so the interpreter's exact value is the only correct one.
+    expect(snapshot.compiledHits).toBe(200);
+    expect(compiled.after[0]).toBe(interpreted.after[0]);
+  });
+
+  test('a mid-drain source reassignment keeps interpreter parity', () => {
+    // A live iterator captures its source, so BOTH paths keep serving the
+    // original list — the point of the pin is that they agree, whatever the
+    // capture semantics are.
+    const go = (jit: 'auto' | 'off') => {
+      const { m, widen } = squareRig(jit);
+      const it = m.each();
+      const out: any[] = [];
+      for (let i = 0; i < 3; i++) out.push(it.next().value.toString());
+      widen();
+      for (let i = 0; i < 5; i++) out.push(it.next().value.toString());
+      return out;
+    };
+    _resetMapAutoCompileStats();
+    const compiled = go('auto');
+    const interpreted = go('off');
+    expect(compiled).toEqual(interpreted);
+    expect(compiled[0]).toBe('2500000000000000'); // (5·10^7)², exact
+  });
+
+  test('an element outside the proven source interval declines per element', () => {
+    // The backstop under the memo, exercised directly on the runner: the proof
+    // bounded this source at [0, 199], so a row carrying anything else — or
+    // anything inexact — hands the element back to the interpreter instead of
+    // running compiled code the proof never covered.
+    const ce = new ComputeEngine() as any;
+    ce.assign('G6', ce.box(['List', ...integers(200)]));
+    const m = ce.box([
+      'Map',
+      'G6',
+      ['Function', ['Multiply', '_1', '_1'], '_1'],
+    ]);
+    const run = mapAutoCompileRunner(m, { drainStart: true })!;
+    expect(run).toBeDefined();
+    expect(run([ce.box(99)]).isSame(9801)).toBe(true); // in bounds
+    expect(run([ce.box(300000000)])).toBeUndefined(); // out of bounds
+    expect(run([ce.box(5.5)])).toBeUndefined(); // not an integer
+    expect(stats.compiledHits).toBe(1);
+    expect(stats.elementFallbacks).toBe(2);
+  });
+
+  test('a bignum-precision (default) engine keeps element parity', () => {
+    const ce = new ComputeEngine() as any;
+    expect(ce.precision).toBeGreaterThan(15); // default = bignum-preferred
+    ce.assign('P6', ce.box(['List', ...integers(200, -100)]));
+    const json = ['Add', 1, ['Mod', ['Add', 'P6', 29], 900]];
+
+    ce.jit = 'off';
+    const interpreted = drain(ce.box(json).evaluate());
+    _resetMapAutoCompileStats();
+    ce.jit = 'auto';
+    const compiled = drain(ce.box(json).evaluate());
+
+    expect(stats.compiledHits).toBe(600);
+    for (let i = 0; i < compiled.length; i++)
+      expect([i, compiled[i].isSame(interpreted[i])]).toEqual([i, true]);
+    expect(compiled[0].type.toString()).toBe('finite_integer');
+    expect(compiled[0].isExact).toBe(true);
+  });
+});
+
 describe('exact Map compile — the proof declines', () => {
   /** Build a lazy `Map` directly (below the broadcast laziness threshold the
    * engine would evaluate eagerly). */
@@ -483,10 +678,10 @@ describe('exact Map compile — the proof declines', () => {
 });
 
 describe('exact Map compile — the size floor', () => {
-  // PINS AN UNRATIFIED ITERATION DETAIL (`MIN_EXACT_COMPILE_COUNT`, 2026-07-31,
-  // pending user review): below the floor the tier does not even attempt,
-  // because a ~1 ms compile cannot pay itself back over a handful of elements.
-  // If the floor is re-ruled, this whole block moves with it.
+  // Pins `MIN_EXACT_COMPILE_COUNT` (RATIFIED 2026-07-31): below the floor the
+  // tier does not even attempt, because a ~1 ms compile cannot pay itself back
+  // over a handful of elements. If the floor is re-ruled, this whole block
+  // moves with it.
   test('the floor is exactly MIN_EXACT_COMPILE_COUNT elements', () => {
     expect(MIN_EXACT_COMPILE_COUNT).toBe(64);
     const ce = new ComputeEngine() as any;
