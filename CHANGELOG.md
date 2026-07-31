@@ -25,6 +25,28 @@
   `complex`. The compiled complex dispatch now treats all eight bounded heads
   uniformly.
 
+### Performance
+
+- **Exact `evaluate()` drains of broadcast-shaped lazy `Map`s now
+  auto-compile when provably safe.** Previously only `.N()` drains at machine
+  precision compiled (the numeric-marked tier); exact drains ran at the
+  interpreted floor at every precision. An unmarked broadcast lambda now
+  compiles when a static proof establishes that its element function is
+  integer-closed (derived from the operators' own type handlers, never an
+  operator list) and that every operand and emitted intermediate provably
+  stays within ±(2^53 − 1) — float64 integer arithmetic in that range is
+  exact, so compiled elements re-box as exact integer literals bit-identical
+  to the interpreter's, at any engine precision including the default
+  bignum-preferred one. Bounds are read from literal `Range`/`List` sources
+  (and nested broadcast `Map`s over them); anything the proof cannot bound —
+  float or symbolic bodies, `Divide`/`Power`/`Remainder`, symbol-valued
+  sources, possible overflow — silently stays on the interpreter, and
+  per-element runtime guards keep the exactness contract independent of the
+  proof. The 900-element witness `1 + Mod(Range(0,899) + 29, 900)` drains
+  ~6× faster (~12 → ~1.8 µs/element). Drains below 64 statically-proven
+  elements skip the tier (a compile cannot pay itself back). Design:
+  `docs/plans/2026-07-31-exact-map-drain-compile-design.md`.
+
 ### Issues Resolved
 
 - **Kernel roundoff dust is now chopped at a fixed roundoff scale (`1e-14`),
@@ -215,6 +237,30 @@
   no longer matchable structurally at the top level of a pattern (nested
   positions keep the structural meaning).
 
+- **The `Same` operator (`===` in Cortex) now evaluates.** It was parsed
+  but never defined, so `1 === 1.0` stayed inert. `Same` is the total,
+  structural complement of the semantic `Equal`: operands evaluate, then
+  compare pairwise with structural identity — `Sqrt(2) === Sqrt(2)` is
+  `True`, `Sqrt(2) === 1.4142135623730951` is `False` where `==` is `True`
+  (tolerant), and `x === y` on free symbols is `False` where `==` stays
+  inert. Number leaves compare by exact value (`0.5 === 1/2` is `True` —
+  unlike Wolfram's `SameQ[1, 1.]`, as documented in the Mathematica
+  on-ramp guide), `Missing === Missing` and `NaN === NaN` are `True`
+  (totality — `==` on `NaN` remains `False`), and the form is n-ary
+  (`1 === 1 === 1`). Not compilable (fails closed).
+
+- **`Count` accepts a value or a predicate.** `Count(xs, v)` counts the
+  elements structurally identical to `v` (`Count([1, 1, 2], 1)` is `2`),
+  and `Count(xs, f)` with a function literal counts the elements for which
+  the predicate holds (`Count(xs, k |-> k > 2)`), sharing `Filter`'s
+  predicate contract. The one-argument cardinality form is unchanged.
+
+- **`Table` accepts tuple iterator specs.** `Table(k^2, (k, 1, 5))` and
+  stepped/descending forms now work like the brace spelling `{k, 1, 5}`.
+  Note that for `Sum`/`Product`/`Integrate`/`D` the tuple spelling carries
+  only `(index, lower, upper)` — a fourth (step) element is silently
+  ignored there, so the stepped tuple form is `Table`-only for now.
+
 - **On-ramp guides for Python and Mathematica users.** Two new Cortex doc
   pages — `/cortex/from-python/` and `/cortex/from-mathematica/` — map
   familiar idioms to Cortex side by side (variables, collections, control
@@ -241,6 +287,13 @@
   Deliberately not `1.0 / 0.0`, which a fast-math driver is licensed to fold.
 
 ### Improvements
+
+- **Did-you-mean suggestions for Wolfram Language names.** An unknown call
+  to `Total`, `Select`, `Cases`, `MemberQ`, `Accumulate`, `RandomReal`,
+  `Nest` or `NestList` now names the closest Cortex operator (`Sum`,
+  `Filter`, `Element`, `Scan`, `Random`, `Iterate`) in the
+  `unknown-function` warning — pointers, not aliases: the library
+  namespace stays Cortex-native.
 
 - **Tighter static result types where the value is provably real** (type
   audit). `Tan`/`Sec`/`Csc`/`Cot`/`Coth`/`Csch` claimed the top type `number`

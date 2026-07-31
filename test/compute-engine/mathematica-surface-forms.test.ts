@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { executeCortex } from '../../src/cortex/execute-cortex';
 
 /**
  * Mathematica-style surface forms (Tier 1):
@@ -145,6 +146,118 @@ describe('Table (alias for Tabulate) with iterator specs', () => {
     const expr = ce.box(['Table', 'i', ['Set', 'i', 5]]);
     expect(expr.operator).toBe('Table');
     expect(expr.evaluate().operator).toBe('Table');
+  });
+});
+
+describe('Table also accepts the TUPLE spelling of an iterator spec', () => {
+  // `Sum`/`Product`/`Integrate`/`D` accept both `{i, lo, hi}` and
+  // `(i, lo, hi)`; `Table` used to accept only the brace form and sent the
+  // tuple to `Tabulate`, which rejected it with `incompatible-type … tuple<…>`.
+  //
+  // `Table` is `lazy`, so its operands arrive HELD (raw, unbound) on the
+  // `ce.box` and Cortex routes and pre-boxed on the `ce.function` route — all
+  // three are probed here (see CLAUDE.md, "lazy: true operators").
+
+  /** Materialize the (lazy) collection a `Table` canonicalizes to. */
+  const table = (...ops: any[]) =>
+    ce.box(['Table', ...ops] as any).evaluate().toString();
+
+  test('box route: `(k, 1, 5)` matches `{k, 1, 5}`', () => {
+    expect(table(['Power', 'k', 2], ['Tuple', 'k', 1, 5])).toBe(
+      '[1,4,9,16,25]'
+    );
+    expect(table(['Power', 'k', 2], ['Tuple', 'k', 1, 5])).toBe(
+      table(['Power', 'k', 2], ['Set', 'k', 1, 5])
+    );
+  });
+
+  test('the index symbol is not canonicalized (`i` stays an index, not `i`)', () => {
+    // The whole reason `Table` is lazy: a canonicalized `i` would fold to the
+    // imaginary unit before the handler could read it as an iterator index.
+    expect(table(['Power', 'i', 2], ['Tuple', 'i', 1, 5])).toBe(
+      '[1,4,9,16,25]'
+    );
+  });
+
+  test('with a step: `(k, 1, 10, 2)`', () => {
+    expect(table('k', ['Tuple', 'k', 1, 10, 2])).toBe('[1,3,5,7,9]');
+  });
+
+  test('descending, mirroring the Set form', () => {
+    expect(table(['Power', 'k', 2], ['Tuple', 'k', 5, 1, -1])).toBe(
+      '[25,16,9,4,1]'
+    );
+    // A `hi < lo` triple counts down in the Set form too.
+    expect(table(['Power', 'k', 2], ['Tuple', 'k', 5, 1])).toBe(
+      table(['Power', 'k', 2], ['Set', 'k', 5, 1])
+    );
+  });
+
+  test('the arity-named tuple aliases work too', () => {
+    expect(table(['Power', 'i', 2], ['Triple', 'i', 1, 4])).toBe('[1,4,9,16]');
+  });
+
+  test('a multi-iterator call may MIX the Set and Tuple spellings', () => {
+    expect(
+      table(['Multiply', 'i', 'j'], ['Set', 'i', 1, 2], ['Tuple', 'j', 1, 3])
+    ).toBe('[[1,2,3],[2,4,6]]');
+    expect(
+      table(['Multiply', 'i', 'j'], ['Tuple', 'i', 1, 2], ['Set', 'j', 1, 3])
+    ).toBe('[[1,2,3],[2,4,6]]');
+  });
+
+  test('a malformed tuple spec stays inert, exactly like a malformed Set', () => {
+    // Non-symbol first element.
+    for (const head of ['Set', 'Tuple']) {
+      const bad = ce.box(['Table', ['Power', 'k', 2], [head, 5, 1, 2]] as any);
+      expect(bad.operator).toBe('Table');
+      expect(bad.evaluate().operator).toBe('Table');
+    }
+    // Wrong arity (the two-element shorthand is not guessed).
+    for (const head of ['Set', 'Tuple']) {
+      const bad = ce.box(['Table', ['Power', 'k', 2], [head, 'k', 1]] as any);
+      expect(bad.operator).toBe('Table');
+      expect(bad.evaluate().operator).toBe('Table');
+    }
+  });
+
+  test('`Pair`/`Single` are NOT iterator-spec heads — the type error is kept', () => {
+    // An iterator spec needs 3 or 4 operands, which a `Pair` (always 2) or a
+    // `Single` (always 1) can never have. Recognizing those heads would only
+    // downgrade a clear `Tabulate` type error to a silently inert `Table`.
+    for (const spec of [['Pair', 'k', 1], ['Single', 'k']] as any[]) {
+      const bad = ce.box(['Table', ['Power', 'k', 2], spec] as any);
+      expect(bad.operator).toBe('Tabulate');
+      expect(bad.isValid).toBe(false);
+    }
+  });
+
+  test('the plain alias form is untouched: an integer is NOT an iterator spec', () => {
+    const fn = ['Function', ['Square', '_'], '_'];
+    expect(ce.box(['Table', fn, 5]).operator).toBe('Tabulate');
+    expect(ce.box(['Table', fn, 5, 2]).operator).toBe('Tabulate');
+  });
+
+  test('ce.function route (pre-boxed operands)', () => {
+    const body = ce.box(['Power', 'k', 2], { canonical: false });
+    const spec = ce.box(['Tuple', 'k', 1, 5], { canonical: false });
+    expect(ce.function('Table', [body, spec]).evaluate().toString()).toBe(
+      '[1,4,9,16,25]'
+    );
+  });
+
+  test('Cortex route: `Table(k^2, (k,1,5))`', () => {
+    const cx = (source: string) => {
+      const e = new ComputeEngine();
+      const { value, diagnostics } = executeCortex(e, source);
+      expect(diagnostics).toEqual([]);
+      return value.toString();
+    };
+    expect(cx('Table(k^2, (k,1,5))')).toBe('[1,4,9,16,25]');
+    expect(cx('Table(k^2, (k,1,10,2))')).toBe('[1,9,25,49,81]');
+    // Parity with the brace spelling and with the plain alias form.
+    expect(cx('Table(k^2, {k,1,5})')).toBe('[1,4,9,16,25]');
+    expect(cx('Table(k^2, 5)')).toBe('[1,4,9,16,25]');
   });
 });
 

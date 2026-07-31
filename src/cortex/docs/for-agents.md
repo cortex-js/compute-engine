@@ -235,6 +235,7 @@ Verified operator names, so you don't have to guess (search for more with
 - **Lists**: `Length`, `First`, `Last`, `Rest`, `Take`, `Drop`, `Reverse`,
   `Sort` (optional comparator — see below), `IndexOf`, `Join`, `Append`,
   `Sum`, `Mean`, `StandardDeviation` (sample, n−1), `Map`, `Filter`,
+  `Count(xs)` / `Count(xs, v)` / `Count(xs, pred)`,
   `Reduce(list, f, init)`, `Range(a, b)` inclusive, `Range(a, b, step)`.
 - **Strings**: `Characters`, `StringJoin`, `StringSplit(s)` (splits on
   whitespace by default), `String(x)`.

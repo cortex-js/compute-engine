@@ -111,6 +111,17 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-31 — **On-ramp findings fix round (landed).** Four of the five
+  findings from writing the on-ramp pages resolved same day: the engine
+  defines `Same` (`===` — total structural identity, variadic, `Missing`/
+  `NaN` handled for totality, compile fails closed); `Table` accepts tuple
+  iterator specs like the other iterator operators (LaTeX-route residual
+  recorded); `Count` gained user-ruled 2-arg value (`isSame`) and predicate
+  (delegates to `Filter`) forms, with its `sgn` handler corrected for the
+  new forms; eight Wolfram-name `CURATED_SYNONYMS` did-you-mean entries
+  (user-ruled: no real aliases). `from-mathematica.md` updated and
+  CI-executed throughout. Remaining open: string-library thinness, dict
+  `.toString()` rendering; `Nothing` rendering ruled document-don't-change.
 - 2026-07-31 — **Range patterns in `match` (landed).** From the Hica
   language review: a two-operand `Range` at the top level of a case pattern
   (`0..90 => "acute"`, or `["Range", lo, hi]` in raw MathJSON) is an

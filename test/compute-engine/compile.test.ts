@@ -1260,6 +1260,19 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toThrow(/Fail closed/);
   });
 
+  it('Same (Cortex `===`) has no lowering and fails closed (D6)', () => {
+    // `Same` is a STRUCTURAL predicate: there is no sound numeric lowering of
+    // it, and it must never borrow `Equal`'s tolerant `_SYS.eq` (which would
+    // silently answer `true` for `sqrt(2) === 1.4142135623730951`). No target
+    // declares a handler for it, so compilation fails closed with the head.
+    const e = new ComputeEngine();
+    e.declare('x', 'number');
+    const js = new JavaScriptTarget();
+    expect(() => js.compile(e.box(['Same', 'x', 1]))).toThrow(
+      /Same.*no lowering.*Fail closed/s
+    );
+  });
+
   it('Which with a collection condition selects element-wise (was fail-closed)', () => {
     // `d = m` broadcasts to `[False, False, False]`, so every position takes
     // the default arm. Element-wise selection landed 2026-07-27

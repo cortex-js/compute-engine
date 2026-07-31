@@ -406,6 +406,48 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     },
   } as OperatorDefinition,
 
+  Same: {
+    description: [
+      'Structural identity comparison (Cortex `===`).',
+      'True iff every adjacent pair of operands is structurally identical.',
+    ],
+    complexity: 11000,
+
+    // Variadic (the Cortex parser emits a chained `a === b === c` as a single
+    // n-ary `Same`). `Equal` gets away with a fixed `(any, any)` signature
+    // only because it is `lazy`, which skips argument validation.
+    signature: '(any, any+) -> boolean',
+
+    // Deliberately NOT `lazy`: unlike `IsSame` (which compares raw,
+    // uncanonicalized operands), `Same` compares the *values* its operands
+    // evaluate to — so `x === x` with `x := 1+1` is `True`, and a compound
+    // operand folds before the structural test.
+    //
+    // Deliberately NOT `broadcastable`: `Same` is a structural predicate, so a
+    // list operand is compared as a whole (`[1,2] === [1,2]` is the scalar
+    // `True`, not a list of booleans). This is the point of the operator —
+    // `Equal` is the broadcasting, tolerant, possibly-inert comparison.
+    //
+    // `handle` (rather than the default absence propagation) because `Same` is
+    // TOTAL: it always decides. A `Missing` operand is just another structure
+    // to compare — `Missing === Missing` is `True`, `Missing === 1` is `False`
+    // — never a Kleene `Missing` result.
+    missingBehavior: 'handle',
+
+    // Total structural complement of `Equal`: where `Equal` may stay inert
+    // (`x = y` is a *condition*) and compares numerically within tolerance
+    // (`sqrt(2) = 1.4142135623730951` is `True`), `Same` always answers, uses
+    // no tolerance, and never evaluates a radical to a float
+    // (`sqrt(2) === 1.4142135623730951` is `False`). Same philosophy as the
+    // structural totality of `match`.
+    evaluate: (ops, { engine: ce }) => {
+      if (ops.length < 2) return ce.True;
+      for (let i = 1; i < ops.length; i++)
+        if (!ops[i - 1].isSame(ops[i])) return ce.False;
+      return ce.True;
+    },
+  },
+
   NotEqual: {
     description: 'Inequality comparison (not equal to).',
     wikidata: 'Q28113351',

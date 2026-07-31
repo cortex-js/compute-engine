@@ -44,6 +44,7 @@ import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
 import type {
   Expression,
+  FunctionInterface,
   OperatorDefinition,
   ExpressionInput,
   SymbolDefinitions,
@@ -223,7 +224,7 @@ const peekMembershipPreserving = (
 // respective definitions) for the count/membership canonical handlers to
 // delegate operand validation to `validateArguments`.
 const LENGTH_SIGNATURE = parseType('(any) -> integer');
-const COUNT_SIGNATURE = parseType('(collection) -> integer');
+const COUNT_SIGNATURE = parseType('(collection, any?) -> integer');
 const ISEMPTY_SIGNATURE = parseType('(collection) -> boolean');
 const CONTAINS_SIGNATURE = parseType('(collection, element: any) -> boolean');
 
@@ -1753,17 +1754,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   },
 
   Count: {
-    description: ['Return the number of elements in the collection.'],
-    keywords: ['cardinality'],
+    description: [
+      '`Count(xs)`: the number of elements in the collection.',
+      '`Count(xs, v)`: how many elements are structurally the same as `v`.',
+      '`Count(xs, p)`: how many elements satisfy the predicate `p`.',
+    ],
+    keywords: ['cardinality', 'tally', 'occurrences'],
     complexity: 8200,
-    signature: '(collection) -> integer',
+    signature: '(collection, any?) -> integer',
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
-    // materialized just to read a count (see `peekCountPreserving`).
+    // materialized just to read a count (see `peekCountPreserving`). Only the
+    // 1-arg cardinality form is safe to strip: the 2-arg forms may carry an
+    // impure predicate (one drawing from `Random`), whose result depends on the
+    // element ORDER the wrapper establishes, so `ops[0]` is kept as written.
     canonical: (ops, { engine: ce }) => {
       // Run the framework's default flatten step (Sequence-splice + Nothing-
       // drop) that this custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
-      const stripped = withFirst(peekCountPreserving(ops[0]), ops);
+      const stripped =
+        ops.length === 1 ? withFirst(peekCountPreserving(ops[0]), ops) : ops;
       const adjusted = validateArguments(
         ce,
         stripped,
@@ -1773,18 +1782,46 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       return ce._fn('Count', adjusted ?? stripped);
     },
-    evaluate: ([xs], { engine }) => {
+    evaluate: ([xs, what], { engine }) => {
       if (xs.isEmptyCollection) return engine.Zero;
-      // An indeterminate count (e.g. a set-builder over a symbolic domain)
-      // stays symbolic
-      const n = xs.count;
-      if (n === undefined) return undefined;
+
+      // 1-arg cardinality form. An indeterminate count (e.g. a set-builder
+      // over a symbolic domain) stays symbolic.
+      if (what === undefined) {
+        const n = xs.count;
+        if (n === undefined) return undefined;
+        return engine.number(n);
+      }
+
+      // 2-arg PREDICATE form: delegate to `Filter` and read its count, so the
+      // predicate semantics are `Filter`'s by construction — including the
+      // hard error on a predicate that returns something other than `True`/
+      // `False` (an inert `x > 1` over a symbolic element), the iteration
+      // limit, and the unknown count of a non-finite source.
+      // `.isFunction` is the TYPE property (a function literal, or a symbol
+      // bound to one), not the `isFunction()` structural guard.
+      if (what.isFunction === true) {
+        const n = engine.function('Filter', [xs, what]).count;
+        return n === undefined ? undefined : engine.number(n);
+      }
+
+      // 2-arg VALUE form: how many elements are structurally the same as
+      // `what` (`.isSame` semantics, matching the `Same`/`===` operator —
+      // number leaves compare by exact value, so `0.5` counts as `1/2`).
+      // Only a finite collection has a knowable count; anything else stays
+      // symbolic, mirroring the 1-arg form.
+      if (xs.isFiniteCollection !== true) return undefined;
+      let n = 0;
+      for (const x of xs.each()) if (x.isSame(what)) n += 1;
       return engine.number(n);
     },
-    sgn: ([xs]) => {
+    sgn: ([xs, what]) => {
       const empty = xs.isEmptyCollection;
       if (empty === true) return 'zero';
-      if (empty === false) return 'positive';
+      // A non-empty collection has a POSITIVE cardinality, but a matching
+      // count over one may still be zero (nothing matches).
+      if (empty === false)
+        return what === undefined ? 'positive' : 'non-negative';
       return undefined;
     },
   },
@@ -4767,11 +4804,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: [
       'An alias for `Tabulate` (the preferred name) that additionally accepts',
       'Mathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or',
-      '`Table(i, {i, lo, hi, step})`.',
+      '`Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling',
+      '`Table(i^2, (i, 1, n))`.',
     ],
     complexity: 8200,
 
-    // Lazy so the iterator `Set`s are held (raw): their index symbols are not
+    // Lazy so the iterator specs are held (raw): their index symbols are not
     // canonicalized (which would fold `i` to the imaginary unit) before this
     // handler can reinterpret them as iterator specs.
     lazy: true,
@@ -4779,18 +4817,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: (ops, { engine: ce }) => {
       const specs = ops.slice(1);
 
-      // Alias form: no iterator `Set` present (e.g. `Table(fn, 5)`). Delegate
+      // Alias form: no iterator spec present (e.g. `Table(fn, 5)`). Delegate
       // to `Tabulate`, which — also being lazy — canonicalizes the raw held
-      // ops through its own canonical handler.
-      if (!specs.some((op) => isFunction(op, 'Set')))
+      // ops through its own canonical handler. A bare integer (or pair of
+      // integers) is NOT an iterator spec.
+      if (!specs.some((op) => isIteratorSpecShape(op)))
         return ce.function('Tabulate', ops);
 
       // Iterator form: EVERY operand after the body must be a valid iterator
-      // triple `{sym, lo, hi}` or `{sym, lo, hi, step}` — the same shape
-      // validation as the `Set` branch of `canonicalIndexingSet`. A malformed
-      // spec (non-symbol first element, wrong arity, or a mix of `Set` and
-      // non-`Set` operands) keeps the strict posture: return `null` so the
-      // expression stays inert rather than guessing a bound.
+      // triple `{sym, lo, hi}` / `(sym, lo, hi)` or `{sym, lo, hi, step}` /
+      // `(sym, lo, hi, step)` — the same shape validation as the `Set` and
+      // `Tuple` branches of `canonicalIndexingSet`. A malformed spec
+      // (non-symbol first element, wrong arity, or a mix of spec and non-spec
+      // operands) keeps the strict posture: return `null` so the expression
+      // stays inert rather than guessing a bound.
       type Spec = {
         index: Expression;
         lo: Expression;
@@ -4799,7 +4839,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       };
       const parsed: Spec[] = [];
       for (const op of specs) {
-        if (!isFunction(op, 'Set')) return null;
+        if (!isIteratorSpecShape(op)) return null;
         const setOps = op.ops ?? [];
         const idx = setOps[0];
         if (!idx || !isSymbol(idx) || setOps.length < 3 || setOps.length > 4)
@@ -6841,6 +6881,31 @@ function fillDims(shape: Expression): number[] | null {
     dims.push(d ?? 0);
   }
   return dims;
+}
+
+/**
+ * The heads a `Table` iterator spec can wear. The brace spelling
+ * `{i, lo, hi}` parses as a `Set`, the paren spelling `(i, lo, hi)` as a
+ * `Tuple` (or one of its arity-named aliases).
+ *
+ * Deliberately NARROWER than `canonicalIndexingSet`'s head set: that one also
+ * accepts `Pair` and `Single`, for which it has degenerate `Limits` meanings.
+ * `Table` has none — its iterator spec needs 3 or 4 operands, which a `Pair`
+ * (always 2) or a `Single` (always 1) can never have. Listing them here would
+ * only turn a `Pair`-shaped second operand from a clear `Tabulate` type error
+ * into a silently inert `Table`.
+ *
+ * This is a *positional* reinterpretation: it applies only in `Table`'s
+ * iterator slot. The operand is held (raw), so its index symbol has not been
+ * canonicalized (`i` has not folded to the imaginary unit) and a `Set`'s
+ * operands have not been sorted or de-duplicated.
+ */
+const TABLE_ITERATOR_SPEC_OPERATORS = new Set(['Set', 'Tuple', 'Triple']);
+
+function isIteratorSpecShape(
+  expr: Expression | undefined
+): expr is Expression & FunctionInterface {
+  return isFunction(expr) && TABLE_ITERATOR_SPEC_OPERATORS.has(expr.operator);
 }
 
 /** The integer dimensions of a `Tabulate`, or `null` if any is missing,

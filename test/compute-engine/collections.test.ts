@@ -243,6 +243,107 @@ describe('COUNT', () => {
     ).toMatchInlineSnapshot(`["Count", ["Linspace", 0, 1, "n"]]`));
 });
 
+describe('COUNT — 2-argument value and predicate forms', () => {
+  // `Count(xs, v)` counts elements structurally the same as `v`;
+  // `Count(xs, p)` counts elements satisfying the predicate `p`. The forms
+  // are dispatched on the second operand's TYPE (`.isFunction`), so a value
+  // that happens to be callable is a predicate and everything else is a value.
+  const count = (...ops: Expression[]) => evaluate(['Count', ...ops] as any);
+
+  test('value form counts structurally identical elements', () => {
+    expect(count(['List', 1, 1, 2], 1)).toEqual('2');
+    expect(count(['List', 1, 1, 2, 1], 1)).toEqual('3');
+    expect(count(['List', 'a', 'b', 'a'], 'a')).toEqual('2');
+  });
+
+  test('value form uses `.isSame` semantics, like `===`', () => {
+    // `0.5` IS `1/2` at the number leaf; `1/3` is not.
+    expect(count(['List', 0.5, ['Divide', 1, 3]], ['Divide', 1, 2])).toEqual(
+      '1'
+    );
+    // Structural, with no tolerance: an unevaluated radical does not match
+    // its float approximation.
+    expect(count(['List', ['Sqrt', 2]], 1.4142135623730951)).toEqual('0');
+    expect(count(['List', ['Sqrt', 2]], ['Sqrt', 2])).toEqual('1');
+  });
+
+  test('no match is 0, and an empty collection is 0 in every form', () => {
+    expect(count(['List', 1, 2, 3], 9)).toEqual('0');
+    expect(count(emptyList, 1)).toEqual('0');
+    expect(count(emptyList, ['Function', ['Greater', '_', 1], '_'])).toEqual(
+      '0'
+    );
+  });
+
+  test('predicate form counts satisfying elements', () => {
+    expect(count(['List', 1, 2, 3], ['Function', ['Greater', '_', 1], '_'])).toEqual('2');
+    expect(count(['Range', 1, 10], ['Function', ['Greater', '_', 5], '_'])).toEqual('5');
+    // Same answer as the long way round.
+    expect(
+      count(['Range', 1, 10], ['Function', ['Greater', '_', 5], '_'])
+    ).toEqual(
+      evaluate([
+        'Count',
+        ['Filter', ['Range', 1, 10], ['Function', ['Greater', '_', 5], '_']],
+      ])
+    );
+  });
+
+  test('a non-boolean predicate result is a hard error, exactly as in Filter', () => {
+    // Delegating to `Filter` means the predicate contract is Filter's by
+    // construction: an inert `x > 1` over a symbolic element throws rather
+    // than being silently counted or skipped.
+    const pred: Expression = ['Function', ['Greater', '_', 1], '_'];
+    expect(() =>
+      engine.expr(['Count', ['List', 1, 'x', 3], pred]).evaluate()
+    ).toThrow(/must return "True" or "False"/);
+    expect(() =>
+      engine.expr(['Filter', ['List', 1, 'x', 3], pred]).evaluate().count
+    ).toThrow(/must return "True" or "False"/);
+  });
+
+  test('an indeterminate-count collection stays symbolic, as in the 1-arg form', () => {
+    expect(
+      exprToString(engine.expr(['Count', ['Range', 1, 'n'], 1]).evaluate())
+    ).toEqual('["Count", ["Range", 1, "n"], 1]');
+    expect(
+      exprToString(
+        engine
+          .expr(['Count', ['Range', 1, 'n'], ['Function', ['Greater', '_', 5], '_']])
+          .evaluate()
+      )
+    ).toContain('"Count"');
+  });
+
+  test('a wrapped collection still counts correctly (the wrapper is KEPT)', () => {
+    // The count-preserving-wrapper peek is deliberately restricted to the
+    // 1-arg cardinality form: a 2-arg predicate may be impure (drawing from
+    // `Random`), and its result then depends on the element ORDER the wrapper
+    // establishes. So the wrapper is preserved here — it merely materializes —
+    // and the answer is unchanged since these are permutations.
+    expect(count(['Sort', ['List', 2, 1, 1]], 1)).toEqual('2');
+    expect(count(['Reverse', ['List', 2, 1, 1]], 1)).toEqual('2');
+    expect(engine.expr(['Count', ['Sort', ['List', 2, 1, 1]], 1]).op1.operator).toEqual('Sort');
+    // ...while the 1-arg form still strips it.
+    expect(engine.expr(['Count', ['Sort', ['List', 2, 1, 1]]]).op1.operator).toEqual('List');
+  });
+
+  test('sgn: a matching count over a non-empty collection may be zero', () => {
+    // The 1-arg cardinality of a non-empty collection is positive...
+    expect(engine.expr(['Count', ['List', 1, 2, 3]]).sgn).toEqual('positive');
+    // ...but a matching count is only non-negative (nothing need match).
+    expect(engine.expr(['Count', ['List', 1, 2, 3], 9]).sgn).toEqual(
+      'non-negative'
+    );
+    expect(engine.expr(['Count', emptyList, 9]).sgn).toEqual('zero');
+  });
+
+  test('1-argument cardinality form is unchanged', () => {
+    expect(count(list)).toEqual('7');
+    expect(count(emptyList)).toEqual('0');
+  });
+});
+
 describe('TAKE', () => {
   test('empty list', () =>
     expect(evaluate(['Take', emptyList, 1])).toMatchInlineSnapshot(`["List"]`));
@@ -3636,12 +3737,24 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
     expect(length.isValid).toBe(false);
   });
 
-  test('Count(Sequence(...)) splices like a non-peeked operator (First)', () => {
+  test('Count(Sequence(...)) splices like a non-peeked operator (Contains)', () => {
+    // `Count` is 2-ary since the value/predicate forms landed, so the second
+    // spliced operand is now a legitimate argument — compare against the
+    // 2-ary peeked operator `Contains`, not the 1-ary `First`. What is being
+    // tested is unchanged: the custom canonical handler still runs the
+    // default flatten step, so the `Sequence` is spliced away.
     const count = ce.box(['Count', ['Sequence', ['List', 1, 2], 'b']]);
-    const first = ce.box(['First', ['Sequence', ['List', 1, 2], 'b']]);
-    // The Sequence is spliced by flatten, exposing the extra arg as an error.
-    expect(args(count)).toEqual(args(first));
-    expect(count.isValid).toBe(false);
+    const contains = ce.box(['Contains', ['Sequence', ['List', 1, 2], 'b']]);
+    expect(args(count)).toEqual(args(contains));
+    expect(count.operator).toBe('Count');
+    expect(count.nops).toBe(2);
+
+    // One operand past the arity is still an `unexpected-argument` error.
+    const over = ce.box(['Count', ['Sequence', ['List', 1, 2], 'b', 'c']]);
+    expect(args(over)).toEqual(
+      args(ce.box(['Contains', ['Sequence', ['List', 1, 2], 'b', 'c']]))
+    );
+    expect(over.isValid).toBe(false);
   });
 
   // An INVALID wrapper argument (e.g. a non-function `Sort` comparator) must

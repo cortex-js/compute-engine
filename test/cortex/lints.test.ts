@@ -100,3 +100,39 @@ describe('curated did-you-mean synonyms', () => {
     ]);
   });
 });
+
+describe('curated did-you-mean synonyms — Wolfram Language names', () => {
+  // Suggestions ONLY: no aliases are created, and the call shape often
+  // differs from Wolfram's (`MemberQ[xs, v]` vs `Element(v, xs)`). The
+  // namespace stays Cortex-native — the call itself remains inert.
+  test('Wolfram names suggest their Cortex neighborhood', () => {
+    const ce = new ComputeEngine();
+    expect(ce.suggestOperatorName('Total')).toBe('Sum');
+    expect(ce.suggestOperatorName('Select')).toBe('Filter');
+    expect(ce.suggestOperatorName('Cases')).toBe('Filter');
+    expect(ce.suggestOperatorName('MemberQ')).toBe('Element');
+    expect(ce.suggestOperatorName('Accumulate')).toBe('Scan');
+    expect(ce.suggestOperatorName('RandomReal')).toBe('Random');
+    expect(ce.suggestOperatorName('RandomInteger')).toBe('Random');
+    expect(ce.suggestOperatorName('Nest')).toBe('Iterate');
+    expect(ce.suggestOperatorName('NestList')).toBe('Iterate');
+  });
+
+  test('the suggestions reach the Cortex boundary diagnostic', () => {
+    expect(execDiagnostics('Total([1, 2, 3])')).toEqual([
+      ['unknown-function', 'Total', 'Sum'],
+    ]);
+    expect(execDiagnostics('Select([1, 2, 3], x |-> x > 1)')).toEqual([
+      ['unknown-function', 'Select', 'Filter'],
+    ]);
+    expect(execDiagnostics('MemberQ([1, 2], 1)')).toEqual([
+      ['unknown-function', 'MemberQ', 'Element'],
+    ]);
+  });
+
+  test('a suggestion is only a warning — the call stays inert', () => {
+    const ce = new ComputeEngine();
+    const { value } = executeCortex(ce, 'Total([1, 2, 3])');
+    expect(value.operator).toBe('Total');
+  });
+});

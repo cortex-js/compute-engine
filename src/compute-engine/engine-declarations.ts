@@ -263,6 +263,19 @@ const CURATED_SYNONYMS: Record<string, string> = {
   split: 'StringSplit',
   push: 'Append',
   ceiling: 'Ceil',
+  // Wolfram Language names. These are SUGGESTIONS, not aliases: the operator
+  // they point at is the right neighborhood, but the call shape often differs
+  // (`MemberQ[xs, v]` vs `Element(v, xs)`; `Accumulate[xs]` vs
+  // `Scan(xs, Add)`). The namespace stays Cortex-native.
+  total: 'Sum',
+  select: 'Filter',
+  cases: 'Filter',
+  memberq: 'Element',
+  accumulate: 'Scan',
+  randomreal: 'Random',
+  randominteger: 'Random',
+  nest: 'Iterate',
+  nestlist: 'Iterate',
 };
 
 export function suggestOperatorName(

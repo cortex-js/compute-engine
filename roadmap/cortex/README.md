@@ -301,23 +301,36 @@ design decision or small feature, not a bug):
   `StringLength`, case conversion, replace/find/trim, and no string→number
   parse (`Number("42")` is inert). The on-ramp pages must teach
   "decompose to characters and rebuild" for anything nontrivial.
-- **Wolfram-familiar aliases (S — decide alias vs. did-you-mean).** `Total`,
-  `Select`, `Cases`, `Nest`/`NestList`, `MemberQ`, `Accumulate`, `Riffle`
-  don't exist; several are trivial aliases (`Total`→`Sum`,
-  `Select`→`Filter`) that would erase most of the `from-mathematica.md` trap
-  table. Decide per name between a real alias (the `Arg`→`Argument`
-  canonical-rewrite precedent) and a `CURATED_SYNONYMS` did-you-mean entry.
-  Also: `Count(list, value)` rejects its second argument
-  (`unexpected-argument`).
-- **`===` (`Same`) is inert on numeric literals** — `1 === 1.0` evaluates to
-  `Same(1, 1)`, not a boolean. Decide the intended semantics and make it
-  evaluate (or diagnose).
-- **`Table` accepts only the brace iterator** (`{k,1,n}`), while
-  `Sum`/`Product`/`Integrate`/`D` accept both the brace and tuple spellings —
-  inconsistent surface (S).
-- Cosmetic: a dictionary as the final program value renders as raw MathJSON
-  (`{"dict":{…}}`), and `let a = Nothing; a` renders as `a` rather than
-  `Nothing`.
+- **Wolfram-familiar names — RESOLVED 2026-07-31 (user-ruled: did-you-mean
+  only, no real aliases).** Eight `CURATED_SYNONYMS` entries added
+  (`total`→`Sum`, `select`/`cases`→`Filter`, `memberq`→`Element`,
+  `accumulate`→`Scan`, `randomreal`→`Random`, `nest`/`nestlist`→`Iterate`);
+  the namespace stays Cortex-native. And `Count` gained the 2-arg forms
+  (user-ruled): `Count(xs, v)` counts `isSame` matches, `Count(xs, f)`
+  counts predicate-True elements by delegating to `Filter` (inheriting its
+  strict non-boolean-result throw).
+- **`===` (`Same`) — RESOLVED 2026-07-31.** The engine now defines `Same`
+  (total, structural, n-ary): `1 === 1.0` → True (value identity at number
+  leaves — the lexer folds `1.0` to `1`, and `isSame(0.5, 1/2)` is true by
+  exact value; deliberately unlike Wolfram's `SameQ[1, 1.]`, documented in
+  `from-mathematica.md`), `x === y` → False where `==` stays inert,
+  `Missing === Missing`/`NaN === NaN` → True. Compile fails closed.
+- **`Table` iterator asymmetry — RESOLVED 2026-07-31.** `Table` now accepts
+  tuple iterator specs `(k, lo, hi[, step])` like `Sum`/`Product`/
+  `Integrate`/`D`. Two residuals (both pre-existing, found at review):
+  (1) the **LaTeX** route `\mathrm{Sum}(i^2, (i, 1, 5))` hands the held
+  spec over as `["Delimiter", ["Sequence", …]]`, not a `Tuple`, so tuple
+  specs through LaTeX stay inert for all iterator operators (S);
+  (2) **`canonicalIndexingSet`'s Tuple branch silently drops a fourth
+  (step) element** — `Sum(k, (k, 1, 10, 2))` evaluates to `55` (the
+  unstepped 1..10 sum, not `25`), a silent-wrong-answer trap; decide
+  between supporting the step there (matching the `Set` branch and now
+  `Table`) or erroring on 4-element tuples (S–M).
+- Cosmetic (open): a dictionary as the final program value renders as raw
+  MathJSON (`{"dict":{…}}`) — engine `.toString()` has no dictionary case;
+  small serializer item. And `let a = Nothing; a` renders as `a` — this is
+  the documented Nothing-as-erasure semantics (assigning `Nothing` stores
+  no value), recommend documenting rather than changing.
 
 **Declined from the review** (recorded so we don't re-derive): UFCS
 dot-call `a.f(b)` ≡ `f(a, b)` — `|>` already covers left-to-right

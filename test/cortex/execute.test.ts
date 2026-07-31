@@ -496,3 +496,62 @@ describe('CORTEX EXECUTE — did-you-mean for unknown functions', () => {
     );
   });
 });
+
+describe('CORTEX EXECUTE — `===` (Same), structural identity', () => {
+  const sym = (source: string) => {
+    const { value, diagnostics } = run(source);
+    expect(diagnostics).toEqual([]);
+    return value.symbol;
+  };
+
+  test('`===` decides; `==` may stay a condition', () => {
+    expect(sym('1 === 1')).toBe('True');
+    // Two distinct free symbols are structurally different, so `===` is
+    // False — it is TOTAL. `==` on the same pair is an unresolved condition.
+    expect(sym('x === y')).toBe('False');
+    expect(run('x == y').value.operator).toBe('Equal');
+    expect(sym('x === x')).toBe('True');
+  });
+
+  test('`1 === 1.0` is True (the lexer folds `1.0` to the integer 1)', () => {
+    expect(sym('1 === 1.0')).toBe('True');
+  });
+
+  test('no tolerance and no numeric evaluation, unlike `==`', () => {
+    expect(sym('Sqrt(2) === Sqrt(2)')).toBe('True');
+    expect(sym('Sqrt(2) === 1.4142135623730951')).toBe('False');
+    expect(sym('Sqrt(2) == 1.4142135623730951')).toBe('True');
+  });
+
+  test('strings and lists', () => {
+    expect(sym('"a" === "a"')).toBe('True');
+    expect(sym('"a" === "b"')).toBe('False');
+    expect(sym('[1, 2] === [1, 2]')).toBe('True');
+    expect(sym('[1, 2] === [2, 1]')).toBe('False');
+  });
+
+  test('a chained `===` is n-ary and pairwise-adjacent', () => {
+    expect(sym('1 === 1 === 1')).toBe('True');
+    expect(sym('1 === 1 === 2')).toBe('False');
+  });
+});
+
+describe('CORTEX EXECUTE — Count(xs, v) and Count(xs, p)', () => {
+  test('the value form counts structurally identical elements', () => {
+    expect(run('Count([1, 1, 2, 1], 1)').value.re).toBe(3);
+    expect(run('Count([1, 2, 3], 9)').value.re).toBe(0);
+    expect(run('Count(["a", "b", "a"], "a")').value.re).toBe(2);
+  });
+
+  test('the predicate form counts satisfying elements', () => {
+    expect(run('Count([1, 2, 3], x |-> x > 1)').value.re).toBe(2);
+    // A symbol bound to a function literal is a predicate too — the forms
+    // dispatch on the operand's TYPE, not on its syntax.
+    expect(run('let p = x |-> x > 1\nCount([1, 2, 3], p)').value.re).toBe(2);
+  });
+
+  test('the 1-argument cardinality form is unchanged', () => {
+    expect(run('Count([1, 2, 3])').value.re).toBe(3);
+    expect(run('Count([])').value.re).toBe(0);
+  });
+});

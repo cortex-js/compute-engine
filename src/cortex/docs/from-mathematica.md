@@ -43,6 +43,7 @@ operators all keep their names; `{k, 1, n}` iterator triples work in `Sum`,
 | `f = Function[x, x^2]` | `f = x \|-> x^2` |
 | `#^2 &` | `x \|-> x^2` — no slot/`&` syntax |
 | `expr /. x -> 3` | `ReplaceAll(expr, Rule(x, 3))` |
+| `a == b`, `SameQ[a, b]` | `a == b`, `a === b` — see below |
 | `expr // N` | `expr \|> N` (or `~>`) |
 | `N[expr]`, `N[expr, 25]` | `N(expr)`, `N(expr, 25)` |
 | `Hold[expr]` | `HoldValues(expr)` — evaluate with assigned symbols kept symbolic |
@@ -61,6 +62,23 @@ Only the value of the **last** statement is returned; an earlier statement
 that evaluates to an error value also raises a diagnostic, so nothing vanishes
 silently.
 
+### `==` vs `===` (Wolfram's `SameQ`)
+
+`==` is the semantic comparison: it evaluates, compares within tolerance, and
+may stay an unresolved *condition* (`x == y` is what you hand to `Solve`).
+`===` is `SameQ`: structural identity, no tolerance, and **total** — it always
+answers `True` or `False`.
+
+```cortex
+(Sqrt(2) == 1.4142135623730951, Sqrt(2) === 1.4142135623730951, x === y, 1 === 1.0)
+// ➔ (True, False, False, True)
+```
+
+One caveat for Wolfram users: `SameQ[1, 1.]` is `False` there, because `1` and
+`1.` are different *kinds* of number. In Cortex `1 === 1.0` is `True` — the
+lexer folds `1.0` to the integer literal `1`, and `===` compares number leaves
+by exact value, so `0.5 === 1/2` is `True` too.
+
 ## Lists and Parts
 
 | Wolfram | Cortex |
@@ -74,6 +92,7 @@ silently.
 | `Length`, `Sort`, `Reverse`, `Flatten` | same names |
 | `Total[xs]` | `Sum(xs)` |
 | `Select[xs, f]` | `Filter(xs, f)` |
+| `Count[xs, v]`, `Count[xs, f]` | `Count(xs, v)`, `Count(xs, f)` — `Count(xs)` is the length |
 | `Map[f, xs]`, `f /@ xs` | `Map(xs, f)` — collection **first** |
 | `Fold[f, init, xs]` | `Fold(f, init, xs)` |
 | `Apply[f, {a, b}]`, `f @@ t` | `Apply(f, (a, b))`, or spread: `f(...t)` |
@@ -87,6 +106,15 @@ silently.
 let xs = [3, 1, 4, 1, 5]
 (xs[1], xs[-1], xs[2..4], Length(xs), Sort(xs))
 // ➔ (3, 5, [1,4,1], 5, [1,1,3,4,5])
+```
+
+`Count` covers all three Wolfram spellings — the plain length, a value to
+match, and a predicate:
+
+```cortex
+let xs = [3, 1, 4, 1, 5, 1]
+(Count(xs), Count(xs, 1), Count(xs, k |-> k > 2))
+// ➔ (6, 3, 3)
 ```
 
 Lists and sets are genuinely different types, so the brace/bracket distinction
@@ -125,9 +153,13 @@ let squares = Table(k^2, {k, 1, 5})
 // ➔ (55, 1/6 * pi^2, 120)
 ```
 
-`Sum`, `Product` and `Integrate` also accept the tuple spelling
-`(k, 1, 5)`; `Table` currently accepts only the brace form. `D(expr, {x, 2})`
-takes a second derivative.
+`Sum`, `Product`, `Integrate` and `Table` all accept the tuple spelling
+`(k, 1, 5)` as well. `D(expr, {x, 2})` takes a second derivative.
+
+```cortex
+Sum(Table(k^2, (k, 1, 5)))
+// ➔ 55
+```
 
 `Table` is a lazy generator, so the value above is materialized by `Sum`. When
 you want an ordinary list, index it, aggregate it, or build it with `Map`:
@@ -234,11 +266,11 @@ Surface forms that look like Wolfram but behave differently.
 | `%` for the last result | `%` is the `Mod` operator | bind results with `let` |
 | `x = 4` inside `Solve` | `=` is assignment: `Solve(x^2 = 4, x)` is silently `[]` | `Solve(x^2 == 4, x)` |
 | `expr;` to suppress | `;` only separates statements | *(nothing to suppress)* |
-| `Total`, `Select`, `Nest`, `Cases`, `MemberQ` | Unknown names: the call stays **symbolic and inert** | `Sum`, `Filter`, a loop, `Filter`, `in` |
+| `Total`, `Select`, `Cases`, `MemberQ`, `Accumulate`, `Nest` | Unknown names: the call stays **symbolic and inert**, with a did-you-mean warning naming the Cortex operator | `Sum`, `Filter`, `Filter`, `Element(v, xs)`, `Scan`, `Iterate` |
 | `Ceiling`, `Quotient`, `IntegerPart` | Inert (with a did-you-mean warning) | `Ceil`, `Floor(a/b)`, `Floor` |
 | `StringLength`, `ToUpperCase` | Inert — the string library is small | `Length(Characters(s))`; decompose and rebuild |
-| `RandomReal[]`, `RandomInteger[n]` | Inert | `Random()`, `Random(Range(1, n))` |
-| `Table(e, (k, 1, n))` | Type error — `Table` wants the brace form | `Table(e, {k, 1, n})` |
+| `RandomReal[]`, `RandomInteger[n]` | Inert (with a did-you-mean warning) | `Random()`, `Random(Range(1, n))` |
+| `SameQ[1, 1.]` | `1 === 1.0` is `True` — the lexer folds `1.0` to `1` | *(nothing — but don't read `===` as type-aware)* |
 | `3!^2` | Diagnostic — the lexer reads `!^` as one token | `3! ^ 2` |
 | `a +b` | Diagnostic — an infix operator needs spaces on both sides or neither | `a + b` or `a+b` |
 
@@ -248,6 +280,13 @@ when a close library name exists), exactly the way Wolfram leaves `Foo[1]`
 unevaluated. A program that calls `Total(xs)` therefore returns the unevaluated
 `Total([…])` rather than a number — when a result looks unfinished, check for
 an inert head.
+
+The most-reached-for Wolfram names are curated into that warning, so
+`Total(xs)` reports `did you mean Sum` and `Select(xs, f)` reports
+`did you mean Filter`. The suggestion is only a pointer to the right
+neighborhood — it is **not** an alias, and the call shape may differ
+(`MemberQ[xs, v]` becomes `Element(v, xs)`, with the arguments the other way
+round).
 
 Also worth knowing: lazy collection operators (`Range`, `Map`, `Filter`,
 `Take`, `Table`) enumerate only when materialized, and a tuple does **not**

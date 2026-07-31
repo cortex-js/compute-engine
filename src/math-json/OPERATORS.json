@@ -1410,14 +1410,14 @@
     {
       "name": "Count",
       "category": "Collections",
-      "arity": "1",
-      "signature": "(collection) -> integer",
+      "arity": "optional",
+      "signature": "(collection, any?) -> integer",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the number of elements in the collection."
+      "description": "`Count(xs)`: the number of elements in the collection.\n\n`Count(xs, v)`: how many elements are structurally the same as `v`.\n\n`Count(xs, p)`: how many elements satisfy the predicate `p`."
     },
     {
       "name": "CountIf",
@@ -3099,7 +3099,7 @@
       "name": "InverseHaversine",
       "category": "Trigonometry",
       "arity": "1",
-      "signature": "(real) -> real",
+      "signature": "(real) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5817,6 +5817,18 @@
       "description": "Pattern replacement rule."
     },
     {
+      "name": "Same",
+      "category": "Relational Operators",
+      "arity": "variadic",
+      "signature": "(any, any+) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Structural identity comparison (Cortex `===`).\n\nTrue iff every adjacent pair of operands is structurally identical."
+    },
+    {
       "name": "Scan",
       "category": "Collections",
       "arity": "optional",
@@ -6475,7 +6487,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "An alias for `Tabulate` (the preferred name) that additionally accepts\n\nMathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or\n\n`Table(i, {i, lo, hi, step})`."
+      "description": "An alias for `Tabulate` (the preferred name) that additionally accepts\n\nMathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or\n\n`Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling\n\n`Table(i^2, (i, 1, n))`."
     },
     {
       "name": "Tabulate",

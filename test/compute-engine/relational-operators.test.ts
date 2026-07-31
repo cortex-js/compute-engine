@@ -585,3 +585,72 @@ describe('An undecidable comparison keeps its evaluated operands', () => {
     ]);
   });
 });
+
+describe('Same (Cortex `===`) — total structural identity', () => {
+  const s = (...ops: any[]) =>
+    ce.box(['Same', ...ops] as any).evaluate().symbol;
+
+  test('number leaves compare by exact value, not by notation', () => {
+    // `{num: "1.0"}` and the integer `1` are the same number leaf.
+    expect(s(1, { num: '1.0' })).toBe('True');
+    // `0.5` IS exactly `1/2` — a machine float and a rational naming the same
+    // value are structurally the same number leaf.
+    expect(s(0.5, ['Divide', 1, 2])).toBe('True');
+  });
+
+  test('structural, with no tolerance and no numeric evaluation', () => {
+    expect(s(['Sqrt', 2], ['Sqrt', 2])).toBe('True');
+    // The radical is NOT evaluated to a float, and no tolerance is applied.
+    expect(s(['Sqrt', 2], 1.4142135623730951)).toBe('False');
+    // ... whereas the tolerant, semantic `Equal` says these ARE equal. This
+    // contrast is the whole point of having both operators.
+    expect(
+      ce.box(['Equal', ['Sqrt', 2], 1.4142135623730951]).evaluate().symbol
+    ).toBe('True');
+  });
+
+  test('TOTAL: two distinct free symbols are False, never inert', () => {
+    // `Equal(x, y)` stays inert (it is a *condition*); `Same` always decides.
+    expect(s('x', 'x')).toBe('True');
+    expect(s('x', 'y')).toBe('False');
+    expect(ce.box(['Equal', 'x', 'y']).evaluate().operator).toBe('Equal');
+  });
+
+  test('operands are evaluated first (not held like `IsSame`)', () => {
+    expect(s(['Add', 1, 1], 2)).toBe('True');
+    // `IsSame` is the raw/unevaluated counterpart.
+    expect(ce.box(['IsSame', ['Add', 1, 1], 2]).evaluate().symbol).toBe(
+      'False'
+    );
+  });
+
+  test('strings', () => {
+    expect(s({ str: 'a' }, { str: 'a' })).toBe('True');
+    expect(s({ str: 'a' }, { str: 'b' })).toBe('False');
+  });
+
+  test('n-ary chain: every ADJACENT pair must match', () => {
+    expect(s(1, 1, 1)).toBe('True');
+    expect(s(1, 1, 2)).toBe('False');
+  });
+
+  test('collections compare as a whole (no broadcast), order-sensitively', () => {
+    expect(s(['List', 1, 2], ['List', 1, 2])).toBe('True');
+    expect(s(['List', 1, 2], ['List', 2, 1])).toBe('False');
+    expect(
+      s(
+        ['Dictionary', ['Tuple', { str: 'a' }, 1]],
+        ['Dictionary', ['Tuple', { str: 'a' }, 1]]
+      )
+    ).toBe('True');
+  });
+
+  test('absence is just another structure (no Kleene, no IEEE)', () => {
+    // `Equal` is Kleene over `Missing` and IEEE over `NaN`; `Same` is neither
+    // — it is total and structural.
+    expect(s('Missing', 'Missing')).toBe('True');
+    expect(s('Missing', 1)).toBe('False');
+    expect(s('NaN', 'NaN')).toBe('True');
+    expect(ce.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('False');
+  });
+});
