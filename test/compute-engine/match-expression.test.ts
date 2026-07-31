@@ -615,3 +615,93 @@ describe('MATCH — range patterns (membership)', () => {
     expect(fnOut.evaluate().toString()).toBe('"out"');
   });
 });
+
+/**
+ * Rung 1 of the error-propagation design
+ * (`docs/plans/2026-07-31-error-propagation-design.md` §2/§6): `Match` is the
+ * RESCUE construct, so it must decide on an error subject instead of freezing
+ * with it — restoring the "always decides" totality pinned in §1 of the match
+ * design. Wider coverage (bubbling, `IsError`) lives in
+ * `error-propagation.test.ts`.
+ */
+describe('MATCH — error subjects (rung 1)', () => {
+  /** An `Error`-headed subject. */
+  const ERR: MathJsonExpression = ['Error', { str: 'oops' }];
+  /** A subject whose canonical form merely EMBEDS an error (`"a" + 1`). */
+  const BAD: MathJsonExpression = ['Add', { str: 'a' }, 1];
+
+  it('an error subject falls through literal cases to `_`', () => {
+    expect(m(zeroOrOther(BAD))).toBe('"other"');
+    expect(m(zeroOrOther(ERR))).toBe('"other"');
+  });
+
+  it('a bare binding binds the error value', () => {
+    expect(
+      m(['Match', BAD, ['MatchCase', '_v', ['Type', 'v']]])
+    ).toBe('"error"');
+  });
+
+  it('a sequence wildcard catches it too', () => {
+    expect(m(['Match', ERR, ['MatchCase', '___r', { str: 'rest' }]])).toBe(
+      '"rest"'
+    );
+  });
+
+  it('a guard may call `IsError`', () => {
+    expect(
+      m([
+        'Match',
+        BAD,
+        ['MatchCase', '_v', ['IsError', 'v'], { str: 'caught' }],
+        ['MatchCase', '_', { str: 'fell' }],
+      ])
+    ).toBe('"caught"');
+  });
+
+  it('a typed pattern does NOT bind an error subject', () => {
+    // Typed patterns lower to a wildcard plus an `Element(name, type)` guard.
+    // `number` is a simple named type and resolves; the design's `x: !error`
+    // spelling does NOT — a negation type is not among the annotations the
+    // typed-pattern path resolves today (§3 Phase-3 note: "Only simple named
+    // types resolve"), so such a case falls through rather than binding.
+    const typed = (subj: MathJsonExpression): MathJsonExpression => [
+      'Match',
+      subj,
+      ['MatchCase', '_v', ['Element', 'v', 'number'], { str: 'num' }],
+      ['MatchCase', '_', { str: 'fell' }],
+    ];
+    expect(m(typed(5))).toBe('"num"');
+    expect(m(typed(BAD))).toBe('"fell"');
+    expect(m(typed(ERR))).toBe('"fell"');
+  });
+
+  it('`match-no-case` is unchanged for an error subject', () => {
+    expect(m(['Match', ERR, ['MatchCase', 0, 1]])).toBe(
+      'Error("match-no-case", Error("oops"))'
+    );
+  });
+
+  it('N() selects the same case as evaluate() for an error subject', () => {
+    const expr = ce.box([
+      'Match',
+      BAD,
+      ['MatchCase', 0, { str: 'zero' }],
+      ['MatchCase', '_', ['Ln', 2]],
+    ]);
+    expect(expr.evaluate().toString()).toBe('ln(2)');
+    expect(expr.N().re).toBeCloseTo(Math.LN2, 12);
+  });
+
+  it('route parity: box and `ce.function()` agree on an error subject', () => {
+    expect(m(zeroOrOther(BAD))).toBe('"other"');
+    const fn = ce.function('Match', [
+      ce.box(BAD),
+      ce.function('MatchCase', [ce.box(0), ce.string('zero')]),
+      ce.function('MatchCase', [
+        ce.symbol('_', { canonical: false }),
+        ce.string('other'),
+      ]),
+    ]);
+    expect(fn.evaluate().toString()).toBe('"other"');
+  });
+});

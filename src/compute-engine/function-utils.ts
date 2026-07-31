@@ -26,6 +26,7 @@ import {
   functionLiteralParameterName,
   functionLiteralParameterType,
 } from './boxed-expression/function-literal.js';
+import { errorValue } from './boxed-expression/error-value.js';
 import type { Type } from '../common/type/types.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
@@ -634,6 +635,31 @@ export function canonicalWithFreshPlaceholders(expr: Expression): Expression {
 }
 
 /**
+ * How an application treats an argument whose value is — or embeds — an
+ * `Error`. See `docs/plans/2026-07-31-error-propagation-design.md` §2.
+ *
+ * - `'bubble'` (the default): error is the absorbing element of strict
+ *   evaluation, so the application evaluates to that error value and the body
+ *   never runs.
+ * - `'bind'`: the error is an ordinary value, bound to the parameter. Reserved
+ *   for the non-strict OBSERVERS — the `Match` case guards and bodies, which
+ *   have already decided on the error subject and are the rescue construct.
+ */
+export type ErrorArgPolicy = 'bubble' | 'bind';
+
+/** The first argument that is — or embeds — an `Error`, as its error value.
+ * A plain loop: this runs on every application. */
+function firstErrorArg(
+  args: ReadonlyArray<Expression>
+): Expression | undefined {
+  for (const a of args) {
+    const err = errorValue(a);
+    if (err !== undefined) return err;
+  }
+  return undefined;
+}
+
+/**
  * Apply arguments to an expression which is either:
  * - a `["Function"]` expression
  * - the symbol for a function, e.g. `Sin`.
@@ -641,8 +667,22 @@ export function canonicalWithFreshPlaceholders(expr: Expression): Expression {
 export function apply(
   fn: Expression,
   args: ReadonlyArray<Expression>,
-  options?: Partial<EvaluateOptions>
+  options?: Partial<EvaluateOptions>,
+  errorPolicy: ErrorArgPolicy = 'bubble'
 ): Expression {
+  // Rung 2: applying something that IS an error bubbles it (`err(x)`), as does
+  // applying a function literal to an error argument.
+  //
+  // A bare SYMBOL callee is deliberately excluded here: it is dispatched below
+  // through `ce.function(sym, args).evaluate()`, where the direct-call route
+  // decides — bubbling for a user function, freezing for a built-in operator
+  // (`err |> Sin` must stay `Sin(err)`, exactly like `Sin(err)`; operators are
+  // rung 3). That is what keeps `x |> f` ≡ `f(x)` for every callee.
+  if (errorPolicy === 'bubble' && !isSymbol(fn)) {
+    const err = errorValue(fn) ?? firstErrorArg(args);
+    if (err !== undefined) return err;
+  }
+
   // A function-valued expression that is not itself a `Function` literal
   // DENOTES a function (e.g. `Derivative(f, n)`, `InverseFunction(f)`); it
   // cannot be beta-reduced and must stay symbolic when applied. Letting
@@ -667,7 +707,7 @@ export function apply(
   if (isFunction(fn, 'Apply') && denotesFunction(fn.op1))
     return fn.engine._fn('Apply', [fn.op1, ...args]);
 
-  const result = makeLambda(fn)?.(args, options);
+  const result = makeLambda(fn, errorPolicy)?.(args, options);
   if (result) return result;
   return fn.engine.function('Apply', [fn, ...args]);
 }
@@ -1029,7 +1069,8 @@ function wrapRecursion(
 }
 
 function makeLambda(
-  expr: Expression
+  expr: Expression,
+  errorPolicy: ErrorArgPolicy = 'bubble'
 ):
   | ((
       params: ReadonlyArray<Expression>,
@@ -1147,9 +1188,21 @@ function makeLambda(
     }
 
     //
-    // 2/ If an argument is invalid, exit
+    // 2/ An argument that is — or embeds — an `Error` (rung 2 of the
+    //    error-propagation design): the application evaluates to that error
+    //    value, and the body never runs. Under the `'bind'` policy the caller
+    //    is an observer that has already decided on the error (a `Match` case),
+    //    so it is bound like any other value.
     //
-    if (ce.strict && !args.every((x) => x.isValid)) return undefined;
+    if (errorPolicy === 'bubble') {
+      const err = firstErrorArg(args);
+      if (err !== undefined) return err;
+      // Not dead: `errorValue` does NOT descend into collection values, so an
+      // argument like `[1, "a" + 1]` is invalid without yielding an error to
+      // bubble. This keeps the body from running for it (the result would be
+      // discarded by the `result.isValid` gate at the end of `invoke` anyway).
+      if (ce.strict && !args.every((x) => x.isValid)) return undefined;
+    }
 
     //
     // 3/ If there are fewer arguments than expected, curry the function
@@ -1190,6 +1243,13 @@ function makeLambda(
 
       // Evaluate body with known args in a fresh scope
       let evaluatedKnownArgs = args.map((a) => a.evaluate());
+
+      // An argument that only became an error when EVALUATED (`f(g(1))` with
+      // `g(1)` failing) bubbles like a literal one — see step 2.
+      if (errorPolicy === 'bubble') {
+        const err = firstErrorArg(evaluatedKnownArgs);
+        if (err !== undefined) return err;
+      }
 
       // Validate the applied prefix against the declared parameter types
       // (§6.4/§6.5). On mismatch, return the inert application with the
@@ -1278,6 +1338,13 @@ function makeLambda(
     // 4/ Evaluate arguments in the calling scope before switching context
     //
     let evaluatedArgs = args.map((a) => a.evaluate());
+
+    // An argument that only became an error when EVALUATED (`f(g(1))` with
+    // `g(1)` failing) bubbles like a literal one — see step 2.
+    if (errorPolicy === 'bubble') {
+      const err = firstErrorArg(evaluatedArgs);
+      if (err !== undefined) return err;
+    }
 
     //
     // 4b/ In strict mode, validate the evaluated arguments against the

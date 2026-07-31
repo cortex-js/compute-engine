@@ -3192,6 +3192,18 @@
       "description": "Return True if the collection is empty, False otherwise."
     },
     {
+      "name": "IsError",
+      "category": "Core",
+      "arity": "1",
+      "signature": "(any) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "True if the expression is an `Error` value, or a frozen expression embedding one (`\"a\" + 1`). False otherwise. Total."
+    },
+    {
       "name": "IsEven",
       "category": "Arithmetic",
       "arity": "1",

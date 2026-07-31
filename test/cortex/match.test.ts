@@ -523,3 +523,82 @@ describe('CORTEX MATCH — range patterns (execute)', () => {
     ).toBe('"wide"');
   });
 });
+
+/**
+ * Rung 1 of the error-propagation design
+ * (`docs/plans/2026-07-31-error-propagation-design.md`): `match` is the rescue
+ * construct at the Cortex surface too. The MathJSON-level pins are in
+ * `test/compute-engine/match-expression.test.ts`.
+ */
+describe('CORTEX MATCH — error subjects (rung 1)', () => {
+  test('an error subject falls through literal cases to `_`', () => {
+    expect(
+      run('match ("a" + 1) {\n  0 => "zero"\n  _ => "rescued"\n}').value.toString()
+    ).toBe('"rescued"');
+  });
+
+  test('a bare binding binds the error, and a guard can call `IsError`', () => {
+    expect(
+      run('match ("a" + 1) {\n  v if IsError(v) => "caught"\n  _ => "no"\n}').value.toString()
+    ).toBe('"caught"');
+    expect(
+      run('match 5 {\n  v if IsError(v) => "caught"\n  _ => "no"\n}').value.toString()
+    ).toBe('"no"');
+  });
+
+  test('an error subject does not match a SHAPE pattern', () => {
+    // `"a" + 1` canonicalizes to an invalid `Add`, so `a + b` would otherwise
+    // "successfully" destructure a failure. Only `_`, a bare binding, a
+    // sequence wildcard, a typed pattern, and an explicit `Error(…)` pattern
+    // may match an error subject.
+    expect(
+      run('match "a" + 1 {\n  a + b => "shape-matched"\n  _ => "wildcard"\n}').value.toString()
+    ).toBe('"wildcard"');
+    // A VALID `Add` subject still matches.
+    expect(
+      run('match x + y {\n  a + b => "shape-matched"\n  _ => "wildcard"\n}').value.toString()
+    ).toBe('"shape-matched"');
+  });
+
+  test('an `Error(…)` pattern destructures the error deliberately', () => {
+    expect(
+      run('match Error("oops") {\n  Error(c) => c\n  _ => "wildcard"\n}').value.toString()
+    ).toBe('"oops"');
+  });
+
+  test('a typed pattern does not bind an error subject', () => {
+    expect(
+      run('match ("a" + 1) {\n  v: number => "num"\n  _ => "fell"\n}').value.toString()
+    ).toBe('"fell"');
+    expect(
+      run('match 5 {\n  v: number => "num"\n  _ => "fell"\n}').value.toString()
+    ).toBe('"num"');
+  });
+
+  test('GAP: `v: !error` is not a resolvable type annotation yet', () => {
+    // The design's §7 refutable-binding lowering wants `x: !error`. A negation
+    // type is NOT among the annotations the typed-pattern path resolves (§3
+    // Phase-3 note: "Only simple named types resolve"), so the guard stays
+    // symbolic and the case falls through for EVERY subject — including a
+    // non-error one. The FALLTHROUGH is still the pinned behavior (resolution
+    // is the if-let prerequisite); what is fixed is the SILENCE: a non-simple
+    // annotation now reports `type-pattern-unsupported` at parse time.
+    expect(diagnostics('match 5 {\n  v: !error => "bound"\n  _ => "fell"\n}')).toEqual(
+      ['type-pattern-unsupported']
+    );
+    // A compound (non-negation) annotation is diagnosed the same way; a simple
+    // named type stays silent.
+    expect(
+      diagnostics('match 5 {\n  v: list<integer> => "L"\n  _ => "fell"\n}')
+    ).toEqual(['type-pattern-unsupported']);
+    expect(
+      diagnostics('match 5 {\n  v: number => "num"\n  _ => "fell"\n}')
+    ).toEqual([]);
+    expect(
+      run('match 5 {\n  v: !error => "bound"\n  _ => "fell"\n}').value.toString()
+    ).toBe('"fell"');
+    expect(
+      run('match ("a" + 1) {\n  v: !error => "bound"\n  _ => "fell"\n}').value.toString()
+    ).toBe('"fell"');
+  });
+});

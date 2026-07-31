@@ -24,6 +24,7 @@ export type DiagnosticCode =
   | 'host-pragma-disabled' // %0 = pragma name (host-state pragmas gated off)
   | 'error-directive' // %0 = message from a `#error` pragma
   | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value)
+  | 'static-type-error' // %0 = error description, %1 = offending statement in Cortex form (a type error the engine detects at canonicalization time, before anything runs)
   | 'evaluation-canceled' // %0 = machine-readable CancellationCause, %1 = error description (non-final statement hit a cap breach: timeout/iteration/recursion)
   | 'unknown-function' // %0 = called name, %1 = suggested known operator ("did you mean")
   | 'print-not-available' // %0 = called name — there is no print; a program's output is its last statement's value
@@ -35,6 +36,7 @@ export type DiagnosticCode =
   | 'match-alternative-binding' // a named binding appears inside an or-alternative
   | 'match-multiple-rest' // more than one `...rest` in a single list/tuple pattern
   | 'match-irrefutable-case' // %0 = binding name — a non-final case that matches anything
+  | 'type-pattern-unsupported' // %0 = annotation text — a typed pattern's annotation is not a simple named type (it never resolves, so the case can never match)
   | 'range-pattern-bounds' // a range pattern bound is not a numeric literal
   | 'range-pattern-step' // a stepped / non-binary range in pattern position
   | 'range-pattern-empty' // %0 = lo, %1 = hi — an empty range pattern (lo > hi)

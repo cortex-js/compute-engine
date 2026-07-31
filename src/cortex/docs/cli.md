@@ -92,7 +92,12 @@ use the Compute Engine's ordinary textual representation.
 `cortex check` parses a program and reports its diagnostics — syntax errors,
 malformed strings, invalid type annotations, `match` shape problems, and the
 trap lints (`=` inside a call argument, a literal index `0`, a `//` comment
-that reads as floor division) — without evaluating anything. It accepts the same source forms as evaluation: a file,
+that reads as floor division) — without evaluating anything. It also
+canonicalizes the program (still without running it) and reports the problems
+that surface there — type errors such as `"a" + 1`, but also a wrong argument
+count — as `static-type-error` diagnostics anchored to the offending statement.
+An `Error(…)` value the program itself builds is not reported: errors are
+values. It accepts the same source forms as evaluation: a file,
 `--eval`, or standard input.
 
 ```shell

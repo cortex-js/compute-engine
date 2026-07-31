@@ -1299,6 +1299,18 @@ export class Parser {
       const annotation = this.parseTypeAnnotation();
       if (annotation !== null) {
         const typeText = stringValue(annotation.node) ?? '';
+        // The guard below lowers to `Element(name, <type name>)`, which only
+        // resolves SIMPLE NAMED types. A compound annotation (`!error`,
+        // `number | string`, `list<integer>`, a signature) parses fine but
+        // never resolves, so the case silently becomes unreachable for every
+        // subject. Diagnose it rather than let it fail quietly; the guard is
+        // still emitted, so the fallthrough behavior is unchanged.
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(typeText))
+          this.error(
+            ['type-pattern-unsupported', typeText],
+            start,
+            annotation.end
+          );
         this.matchTypeGuards.push(
           this.wrap(
             [

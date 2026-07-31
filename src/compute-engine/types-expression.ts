@@ -133,6 +133,7 @@ type OperatorDefinitionFlags = {
   lazy: boolean;
   scoped: boolean;
   broadcastable: boolean;
+  inspectsErrors: boolean;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
   missingStrip: 'all' | number[];
   associative: boolean;

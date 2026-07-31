@@ -1,7 +1,16 @@
 # Error, NaN, Nothing: propagation through application and `|>` (design)
 
-**Status:** design 2026-07-31, from the Hica-review discussion of pipeline
-failure semantics. **Scope:** (1) what a strict operation does when an
+**Status:** design 2026-07-31; **all four §8 rulings RATIFIED by the user
+same day** — (1) rung-2 scope = application/`|>` only, operators stay
+inert until rung 3; (2) `Nothing` = argument-list erasure, route parity;
+(3) `IsError(expr)` holding its operand; (4) `cortex check` owns
+canonicalization-time type errors as diagnostics. Rungs 1–2 + ruling 2 +
+ruling 4 in implementation as of 2026-07-31; rung 3 remains a gated
+future round. One spec refinement fixed at implementation kickoff: an
+application operand whose evaluated value *embeds* an error (an invalid
+frozen tree like `Error(…) + 1`, not just an `Error`-headed value)
+bubbles its **first embedded error** — otherwise rung 2 would not cover
+the motivating `("a"+1) |> f` case until rung 3. **Scope:** (1) what a strict operation does when an
 operand is an `Error` value, (2) whether `|>` should short-circuit — and on
 what, (3) the `Nothing`-in-argument-position asymmetry, (4) reconciliation
 with `docs/EFFECTS-MODEL.md` (whose "Rejected: `error`/partiality" section
@@ -197,6 +206,86 @@ design interacts with:
 No effect labels, signatures, or discharge rules change. The
 `WithRandomSeed` pending-draw walk is unaffected (bubbling only replaces
 results that were already non-progressing inert trees).
+
+## 8a. Implementation notes (rungs 1–2, landed 2026-07-31)
+
+Conventions fixed during implementation — binding on later rungs:
+
+- **The inertness gate was `BoxedFunction._computeValue`'s
+  `if (!this.isValid || …) return this;`** — `isValid` is false exactly
+  when a tree embeds an `Error`. `Type(err)` worked only by accident of
+  laziness (its held operand is never canonicalized on the box route).
+  Replaced by `_invalidValue()`: bubble (application) / run the handler
+  (observer) / freeze (everything else, unchanged).
+- **Observers are a definition flag, `inspectsErrors`** (`Match`, `Type`,
+  `IsError`, `Apply`, `Pipe`) — a derived gate, not a name list. The flag
+  is needed even on lazy operators: via `Pipe`/`Apply` the operand arrives
+  already canonical (and thus invalid), so laziness alone does not save
+  the observer. Not emitted by the definition's `toJSON()`.
+- **Bubbling keys on the CALLEE, not the route.** User functions (value
+  defs / `_isLambda` operator defs, `Function` literals) bubble on every
+  route; built-in operators are not applications, so `Sin(err)` AND
+  `err |> Sin` both stay frozen (rung 3). Bubbling unconditionally in
+  `apply()` would have made `err |> Sin` bubble while `Sin(err)` froze —
+  breaking the §3 equivalence. Pinned in `error-propagation.test.ts`.
+- **`(err) |> IsError` is `True`** — same-callee keying means the observer
+  sees the error identically on both routes; the §3 law holds for
+  observers too.
+- **Embedded-error extraction** reuses the `.errors` walk (the
+  `runtime-error` diagnostic's machinery) via a new leaf module
+  `boxed-expression/error-value.ts` (placed to avoid closing the
+  documented `utils → boxed-operator-definition → function-utils` cycle).
+- **Nothing parity resolved toward the spec, changing the pipe route:**
+  the pre-existing divergence was callee-spelling, not route
+  (`f(Nothing)` on a named `f` was already `f()` everywhere). Under §4
+  all five routes now erase, so `Nothing |> (x |-> x+1)` returns the
+  curried literal (the nullary-application result), where it previously
+  bound the argument and returned `1`.
+- **Known gap (pinned as a test):** typed patterns cannot express
+  `x: !error` — the annotation parses but `Element` resolves only simple
+  named types, so the case falls through for every subject. Blocks the §7
+  refutable-binding lowering until compound/negation types resolve in
+  typed patterns. Simple named types (`v: number`) correctly exclude
+  error subjects.
+- **Blast radius:** 2 inline snapshots (`Pipe(5, 3)`, `Pipe(5, "abc")` —
+  the frozen `Pipe(…Error…)` became the bare error, since the callee
+  itself is the error); zero doc-output churn.
+- **Known residue (recorded at review): the §3 equivalence is restored
+  only for the five `inspectsErrors` operators.** Some other *lazy*
+  built-ins still route-diverge on error operands — measured:
+  `Simplify`, `Expand`, `Factor`, `Together`, `Hold`, `Assume` diverge
+  (`Simplify("a"+1)` on the raw box route runs while
+  `("a"+1) |> Simplify` freezes; `Assume` even THROWS on the direct
+  route — ticket-worthy on its own), while `Evaluate`/`N`/`Which`/
+  `Block`/`String` and most others agree on both routes. Built-in
+  operators are rung 3 either way; the principled rung-3 companion fix
+  is to derive the observer exemption from `lazy` for held positions,
+  rather than growing the per-operator flag list. Pinned by a
+  `Simplify` divergence test in `error-propagation.test.ts`.
+- **Review-round refinements (2026-07-31):** error subjects match only
+  irrefutable patterns (`_`, bindings, typed patterns) and **explicit
+  `Error(...)` patterns** — deliberate error destructuring
+  (`Error(c) => c` binds the payload); shape/literal/pin/range cases
+  reject, identically on the laddered and reference paths. Bubbling
+  does not fire for errors embedded inside COLLECTION values
+  (`f([1, err])` freezes — a collection containing an error is a
+  well-formed collection, not a failed value; consequence:
+  `IsError([1, err])` is `False`). A non-function value-def callee
+  reports the callee type error rather than swallowing the argument's
+  error. The `ce.strict` invalid-argument guard in `makeLambda` remains
+  LIVE (the collection carve-out reaches it), so the earlier note that
+  it became dead code is retracted; in non-strict mode, non-collection
+  invalid arguments now bubble where they previously flowed into the
+  body.
+- **§4 Nothing ruling, refined at review:** erasure is a property of the
+  LITERAL `Nothing` symbol at canonicalization, on every route
+  (`f(Nothing)`, `Apply`, `|>`, literal callees). A value that merely
+  *evaluates* to `Nothing` (`f(g())` with `g() → Nothing`) BINDS, on
+  every route. Both directions are route-uniform — the previously
+  prescribed "evaluated-Nothing erases in Pipe" fix was rejected at
+  implementation because it re-broke §3 on the named-callee route.
+  Static erasure also shifts later `Apply` arguments left
+  (`Apply(f, Nothing, 5)` ≡ `Apply(f, 5)`), pinned.
 
 ## 8. Open rulings
 

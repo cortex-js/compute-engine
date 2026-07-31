@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { ComputeEngine, serializeCortex, version } from '../cortex.js';
 
 import { CliUsageError, parseMcpArguments } from './arguments.js';
-import { parseSource } from './check.js';
+import { checkSource, parseSource } from './check.js';
 import { lookupDoc } from './doc.js';
 import { diagnosticToJson, formatValue, hasErrors } from './format.js';
 import type { CliIo } from './io.js';
@@ -68,7 +68,7 @@ const TOOLS = [
   {
     name: 'check',
     description:
-      'Parse a Cortex program and report diagnostics without evaluating it. This is the fast validation loop: it catches syntax, string and type-annotation errors, but not runtime problems (unknown functions, type mismatches at call sites).',
+      'Parse and canonicalize a Cortex program and report diagnostics without evaluating it. This is the fast validation loop: it catches syntax, string and type-annotation errors, and the type errors detected at canonicalization time (e.g. "a" + 1), but not genuinely dynamic problems (an out-of-range index, a match with no matching case).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -503,7 +503,7 @@ class McpServer {
 
   private static check(args: Record<string, unknown>): unknown {
     const source = requireString(args, 'source');
-    const { diagnostics } = parseSource(source);
+    const { diagnostics } = checkSource(source);
     return toolResult({
       ok: !diagnostics.some((x) => x.severity === 'error'),
       diagnostics: diagnostics.map((x) => diagnosticToJson(x, source)),

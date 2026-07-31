@@ -362,34 +362,24 @@ describe('Pipe', () => {
     `);
   });
 
+  // The rhs error is BUBBLED, not frozen into the `Pipe`: applying something
+  // that is itself an `Error` evaluates to that error (rung 2 of
+  // `docs/plans/2026-07-31-error-propagation-design.md` §2).
   test('a number literal rhs is rejected (evaluate route)', () =>
     expect(evaluate(['Pipe', 5, 3])).toMatchInlineSnapshot(`
       [
-        "Pipe",
-        5,
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "incompatible-type",
-            "'function'",
-            "'finite_integer'"
-          ],
-          "'3'"
-        ]
+        "Error",
+        ["ErrorCode", "incompatible-type", "'function'", "'finite_integer'"],
+        "'3'"
       ]
     `));
 
   test('a string literal rhs is rejected without crashing', () =>
     expect(evaluate(['Pipe', 5, { str: 'abc' }])).toMatchInlineSnapshot(`
       [
-        "Pipe",
-        5,
-        [
-          "Error",
-          ["ErrorCode", "incompatible-type", "'function'", "'string'"],
-          ""abc""
-        ]
+        "Error",
+        ["ErrorCode", "incompatible-type", "'function'", "'string'"],
+        ""abc""
       ]
     `));
 

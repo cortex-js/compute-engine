@@ -10,6 +10,7 @@ import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
 
 import { FatalParsingError, ParsingDiagnostic } from './diagnostics.js';
 import { parseCortex } from './parse-cortex.js';
+import { staticDiagnostics } from './static-diagnostics.js';
 
 export interface ExecuteCortexOptions {
   /** Source URL (for `#url`/`#filename` pragmas and diagnostic origins). */
@@ -26,7 +27,9 @@ export interface ExecuteCortexResult {
    * surface here as `["Error", …]` values, never as thrown exceptions. */
   value: BoxedExpression;
   /** Parse-time (and a few execution-time) problems: unparseable syntax, gated
-   * host pragmas, a `#error` directive — plus a `runtime-error` diagnostic for
+   * host pragmas, a `#error` directive — plus a `static-type-error` diagnostic
+   * for each type error the engine detects when the program is canonicalized
+   * (reported *before* evaluation), and a `runtime-error` diagnostic for
    * each *non-final* statement that evaluated to an error value (its value is
    * discarded, so the problem would otherwise be invisible). */
   diagnostics: ParsingDiagnostic[];
@@ -35,11 +38,12 @@ export interface ExecuteCortexResult {
 /**
  * Parse and execute a Cortex program against a compute engine.
  *
- * Flow (plan §1): parse → evaluate each top-level statement **sequentially in
- * `ce`'s current scope** (so a notebook cell-chain's declarations persist — no
- * scope is pushed around the whole program; engine `Block`/`Function` still
- * scope themselves). The returned `value` is the last statement's evaluated
- * value.
+ * Flow (plan §1): parse → report canonicalization-time type errors (nothing
+ * runs; see `staticDiagnostics()`) → evaluate each top-level statement
+ * **sequentially in `ce`'s current scope** (so a notebook cell-chain's
+ * declarations persist — no scope is pushed around the whole program; engine
+ * `Block`/`Function` still scope themselves). The returned `value` is the last
+ * statement's evaluated value.
  *
  * Two invariants (`docs/principles.md`, plan §5):
  *  - **Symbolic-by-default.** Evaluation uses the engine's exactness contract:
@@ -85,6 +89,22 @@ export function executeCortex(
   // (Set/Dictionary), statement blocks parse only in keyword position, and a
   // single-statement program is returned unwrapped.
   const statements = operator(ast) === 'Block' ? [...operands(ast)] : [ast];
+
+  // Static (canonicalization-time) type errors, reported *before* anything
+  // runs — `"a" + 1` is a static failure, not a runtime one (plan §5). The
+  // program then evaluates exactly as it otherwise would: the same mistake
+  // may surface a second time as a `runtime-error` diagnostic or as an error
+  // value, and that duplication is accepted (a static diagnostic never
+  // suppresses evaluation). Skipped when parsing produced errors: the AST of
+  // an unparseable program is a guess, and canonicalizing it sprays noise.
+  //
+  // Cost: the pass boxes each statement, and the loop below boxes it again.
+  // The two boxings are deliberately not shared — the loop boxes a statement
+  // only after the previous ones have *evaluated*, so its canonical form can
+  // depend on declarations this pass cannot see. Programs are small and
+  // canonicalization is cheap next to evaluation.
+  if (!diagnostics.some((x) => x.severity === 'error'))
+    diagnostics.push(...staticDiagnostics(ce, ast, source));
 
   let value: BoxedExpression = ce.Nothing;
 

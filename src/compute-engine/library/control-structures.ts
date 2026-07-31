@@ -431,6 +431,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'falls through to a wildcard case. No matching case yields ' +
         '`Error("match-no-case", subject)`.',
       lazy: true,
+      // `Match` is the rescue construct (error-propagation design §2, rung 1):
+      // it decides on an ERROR subject instead of freezing with it, restoring
+      // the pinned "always decides" totality. The subject is matched
+      // structurally on whatever it evaluated to, so an error fails every
+      // literal/shape case and falls through to `_`, a binding, or `...`.
+      inspectsErrors: true,
       signature: '(expression, expression+) -> unknown',
       type: (ops) => {
         // Result is the widened type of the case bodies (the last operand of

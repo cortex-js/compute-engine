@@ -95,6 +95,7 @@ import {
   isValueDef,
   normalizedUnknownsForSolve,
 } from './utils.js';
+import { errorValue } from './error-value.js';
 import { match } from './match.js';
 import { factor } from './factor.js';
 import { holdMap, holdMapAsync } from './hold.js';
@@ -1535,6 +1536,65 @@ export class BoxedFunction
     return spliced;
   }
 
+  /**
+   * The value of an INVALID expression — one whose tree embeds an `Error` —
+   * or `undefined` to let the `evaluate` handler run anyway.
+   * See `docs/plans/2026-07-31-error-propagation-design.md`.
+   *
+   * Three outcomes:
+   *
+   * - **Rung 2, function application**: a direct call `f(err)` of a USER
+   *   function — a symbol bound to a `Function` literal (a value definition)
+   *   or to an operator definition built from one (`f(x) := …`) — evaluates
+   *   to the error itself (the first embedded one, for an operand that merely
+   *   *embeds* an error like `"a" + 1`). `Apply`/`Pipe` reach the same rule
+   *   through `apply()`. A built-in operator (`Sin(err)`, `err + 1`) is
+   *   deliberately NOT an application: it stays inert until rung 3, which is
+   *   also what keeps `x |> f` ≡ `f(x)` for every callee.
+   * - **Observers** (`inspectsErrors`): the handler runs — `Match` decides on
+   *   an error subject, `Type`/`IsError` report on it.
+   * - **Everything else**: freeze to this inert expression, as before.
+   */
+  private _invalidValue(): Expression | undefined {
+    const def = this._def ?? undefined;
+    if (def === undefined) return this;
+
+    if (isValueDef(def)) {
+      // A value-def head is a callee only when its value is a FUNCTION — the
+      // same test `applyFunctionLiteral` makes. When it is not (`a := 5;
+      // a(err)`), this is not an application at all: let the handler run so
+      // the CALLEE problem is reported (`applyFunctionLiteral`'s `typeError`
+      // path) rather than the argument's error.
+      const value = def.value.isConstant
+        ? def.value.value
+        : this.engine._getSymbolValue(this._operator);
+      if (!value?.type.matches('function')) return undefined;
+      return this._firstOperandError() ?? this;
+    }
+
+    if (
+      isOperatorDef(def) &&
+      def.operator instanceof _BoxedOperatorDefinition &&
+      def.operator._isLambda
+    ) {
+      const err = this._firstOperandError();
+      if (err !== undefined) return err;
+    }
+
+    if (isOperatorDef(def) && def.operator.inspectsErrors) return undefined;
+
+    return this;
+  }
+
+  /** The error carried by the first operand that is — or embeds — one. */
+  private _firstOperandError(): Expression | undefined {
+    for (const op of this._ops) {
+      const err = errorValue(op);
+      if (err !== undefined) return err;
+    }
+    return undefined;
+  }
+
   _computeValue(options?: Partial<EvaluateOptions>): () => Expression {
     return () => {
       // Cooperative deadline checkpoint on the per-node evaluation path.
@@ -1547,7 +1607,11 @@ export class BoxedFunction
       if ((++_evalTick & 0x3ff) === 0)
         checkDeadline(this.engine._deadlineFrame);
 
-      if (!this.isValid || !this._def) return this;
+      if (!this._def) return this;
+      if (!this.isValid) {
+        const invalid = this._invalidValue();
+        if (invalid !== undefined) return invalid;
+      }
 
       //
       // 0/ Splice spread arguments — `f(...p)` — before any application,
@@ -1920,7 +1984,11 @@ export class BoxedFunction
       if ((++_evalTick & 0x3ff) === 0)
         checkDeadline(this.engine._deadlineFrame);
 
-      if (!this.isValid || !this._def) return this;
+      if (!this._def) return this;
+      if (!this.isValid) {
+        const invalid = this._invalidValue();
+        if (invalid !== undefined) return invalid;
+      }
 
       // 0/ Splice spread arguments — mirrors the sync path (the spread
       // argument itself resolves synchronously; the rebuilt call continues

@@ -500,3 +500,90 @@ describe('MATCH ladder — property: laddered result ≡ tier-3 reference', () =
     expect(runs).toBe(400);
   });
 });
+
+/**
+ * Rung 1 of the error-propagation design
+ * (`docs/plans/2026-07-31-error-propagation-design.md` §2): an error subject
+ * must DECIDE, but it must not be destructured by a shape it does not really
+ * have. The gate lives in `match-dispatch.ts` and is enforced on BOTH the
+ * laddered path (tiers 0–2 reject outright; tier 3 goes through
+ * `matchPattern`) and the tier-3 reference path — the two must stay
+ * observationally identical.
+ */
+describe('MATCH ladder — error subjects reject shape patterns (both tiers)', () => {
+  /** An expression whose canonical form is an invalid `Add` embedding an
+   * `incompatible-type` error. */
+  const BAD: MathJsonExpression = ['Add', { str: 'a' }, 1];
+  const ERR: MathJsonExpression = ['Error', { str: 'oops' }];
+
+  const bothTiers = (expr: MathJsonExpression, expected: string): void => {
+    expect(ladder(expr)).toBe(expected);
+    expect(reference(expr)).toBe(expected);
+  };
+
+  it('an operator pattern (`_a + _b`) does not match an error subject', () => {
+    bothTiers(
+      [
+        'Match',
+        BAD,
+        ['MatchCase', ['Add', '_a', '_b'], { str: 'shape-matched' }],
+        ['MatchCase', '_', { str: 'wildcard' }],
+      ],
+      '"wildcard"'
+    );
+  });
+
+  it('a VALID `Add` subject still matches `_a + _b`', () => {
+    bothTiers(
+      [
+        'Match',
+        ['Add', 'x', 'y'],
+        ['MatchCase', ['Add', '_a', '_b'], { str: 'shape-matched' }],
+        ['MatchCase', '_', { str: 'wildcard' }],
+      ],
+      '"shape-matched"'
+    );
+  });
+
+  it('literal (tier 0/1) and collection-shape (tier 2) cases reject it', () => {
+    bothTiers(
+      [
+        'Match',
+        BAD,
+        ['MatchCase', 0, { str: 'zero' }],
+        ['MatchCase', 0.5, { str: 'half' }],
+        ['MatchCase', ['List', '_a', '_b'], { str: 'list' }],
+        ['MatchCase', '_', { str: 'wildcard' }],
+      ],
+      '"wildcard"'
+    );
+    // A list subject that merely CONTAINS an error is an error subject too
+    // (`isValid` is false), so it does not destructure either.
+    bothTiers(
+      [
+        'Match',
+        ['List', 1, BAD],
+        ['MatchCase', ['List', '_a', '_b'], { str: 'list' }],
+        ['MatchCase', '_', { str: 'wildcard' }],
+      ],
+      '"wildcard"'
+    );
+  });
+
+  it('an explicitly `Error`-headed pattern destructures the payload', () => {
+    bothTiers(
+      [
+        'Match',
+        ERR,
+        ['MatchCase', ['Error', '_c'], ['Type', 'c']],
+        ['MatchCase', '_', { str: 'wildcard' }],
+      ],
+      '"string"'
+    );
+  });
+
+  it('wildcards and sequence wildcards still catch it', () => {
+    bothTiers(['Match', BAD, ['MatchCase', '_v', ['Type', 'v']]], '"error"');
+    bothTiers(['Match', ERR, ['MatchCase', '___r', { str: 'rest' }]], '"rest"');
+  });
+});

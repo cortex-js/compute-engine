@@ -163,6 +163,17 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `"//" starts a comment, not floor division; use Floor(a / b) for the integer quotient`;
     case 'runtime-error':
       return `Runtime error: ${args[0]}`;
+    case 'static-type-error': {
+      // The canonicalization walk collects more than type errors (`missing`,
+      // `unexpected-argument`, …), so the label follows the error code
+      // (`args[2]`) instead of claiming "Type error" for all of them. The
+      // diagnostic *code* stays `static-type-error` for consumer stability.
+      const label =
+        args[2] === 'incompatible-type' ? 'Type error' : 'Static error';
+      return args[1]
+        ? `${label}: ${args[0]} in \`${args[1]}\``
+        : `${label}: ${args[0]}`;
+    }
     case 'evaluation-canceled':
       return `Evaluation canceled (${args[0]}): ${args[1]}`;
     case 'host-pragma-disabled':

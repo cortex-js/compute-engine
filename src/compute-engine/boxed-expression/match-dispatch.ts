@@ -292,7 +292,7 @@ export function evaluateMatchReference(
         ...names.map((n) => ce.symbol(n, { canonical: false })),
       ]);
       if (guardClosure === undefined) continue;
-      if (sym(apply(guardClosure, args)) !== 'True') continue;
+      if (sym(apply(guardClosure, args, undefined, 'bind')) !== 'True') continue;
     }
 
     const bodyClosure = canonicalFunctionLiteralArguments(ce, [
@@ -300,7 +300,7 @@ export function evaluateMatchReference(
       ...names.map((n) => ce.symbol(n, { canonical: false })),
     ]);
     if (bodyClosure === undefined) return ce.Nothing;
-    return apply(bodyClosure, args, options);
+    return apply(bodyClosure, args, options, 'bind');
   }
 
   return noCaseError(ce, subject);
@@ -325,11 +325,12 @@ function runCase(
 
   if (cc.hasGuard) {
     if (cc.guardClosure === undefined) return undefined;
-    if (sym(apply(cc.guardClosure, args)) !== 'True') return undefined;
+    if (sym(apply(cc.guardClosure, args, undefined, 'bind')) !== 'True')
+      return undefined;
   }
 
   if (cc.bodyClosure === undefined) return ce.Nothing;
-  return apply(cc.bodyClosure, args, options);
+  return apply(cc.bodyClosure, args, options, 'bind');
 }
 
 /** Attempt to match a compiled case; return the capture substitution (possibly
@@ -341,6 +342,13 @@ function matchCompiled(
   subject: Expression,
   _options: HandlerOptions
 ): Substitution | null {
+  // Rung 1 (error-propagation design §2): an error subject may only match a
+  // wildcard or an explicitly `Error`-headed pattern (see
+  // `errorSubjectMayMatch`). Both classify as tier 3, so tiers 0–2 — literal,
+  // pin, range and fixed-shape tests — reject it outright; the tier-3 gate is
+  // in `matchPattern`, shared with the reference path.
+  if (cc.tier !== 3 && isErrorSubject(subject)) return null;
+
   switch (cc.tier) {
     case 0:
       return {};
@@ -927,6 +935,37 @@ function noCaseError(ce: ComputeEngine, subject: Expression): Expression {
 }
 
 /**
+ * An **error subject**: an `Error`-headed value, or an invalid tree — one that
+ * embeds an `Error` node anywhere (`isValid` is false exactly then, and it is
+ * cached per boxed function).
+ */
+function isErrorSubject(subject: Expression): boolean {
+  return !subject.isValid || isFunction(subject, 'Error');
+}
+
+/**
+ * Whether an error subject is allowed to match `pattern` at all.
+ *
+ * `Match` is the rescue construct and must DECIDE on an error subject (rung 1
+ * of the error-propagation design), but it must not pretend the failure has
+ * the shape a pattern asks for: the canonical form of `"a" + 1` is an `Add`,
+ * so `match "a" + 1 { a + b => … }` would otherwise hand the case a
+ * "successful" destructuring of a failure. Only these patterns may match:
+ *
+ * - a wildcard — `_`, a bare binding `_x`, a sequence wildcard. A typed
+ *   pattern (`v: number`) lowers to a bare binding plus an `Element` guard, so
+ *   it is admitted here and decided by its guard (an error subject has type
+ *   `error`, which no simple named type admits);
+ * - an explicitly `Error`-headed pattern — `Error(c) => c` is deliberate error
+ *   destructuring, and it binds the payload through the generic matcher.
+ *
+ * Literal, operator/algebraic and collection-shape patterns fail.
+ */
+function errorSubjectMayMatch(pattern: Expression): boolean {
+  return isWildcard(pattern) || isFunction(pattern, 'Error');
+}
+
+/**
  * The reference-path matcher, range- and dict-aware. Takes the **raw** (held)
  * pattern and resolves its `Pin` nodes itself, so a top-level range pattern is
  * recognized before pin resolution could turn a pinned `Range` *value* into one.
@@ -950,6 +989,11 @@ function matchPattern(
   subject: Expression,
   raw: Expression
 ): Substitution | null {
+  // Rung 1: the error-subject gate. Applied here so the laddered tier-3 path
+  // and the tier-3 reference path (`evaluateMatchReference`, which routes
+  // EVERY case through this function) stay observationally identical.
+  if (isErrorSubject(subject) && !errorSubjectMayMatch(raw)) return null;
+
   // Range membership is decided on the raw pattern (v1: at the top level of a
   // case pattern / of an or-alternative; a `Range` nested inside a list, tuple
   // or dictionary pattern keeps its structural meaning).

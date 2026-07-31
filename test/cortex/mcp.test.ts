@@ -233,6 +233,21 @@ describe('MCP server tools', () => {
     expect(payload(responses[1]).ok).toBe(false);
   });
 
+  test('check reports canonicalization-time type errors', async () => {
+    const [response] = await runServer([
+      callTool(1, 'check', { source: 'let x = 5\nx + "a"' }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]).toMatchObject({
+      severity: 'error',
+      code: 'static-type-error',
+      line: 2,
+    });
+    expect(result.diagnostics[0].message).toContain('expected number');
+  });
+
   test('doc looks up a symbol by name', async () => {
     const [response] = await runServer([callTool(1, 'doc', { query: 'Sin' })]);
     const result = payload(response);

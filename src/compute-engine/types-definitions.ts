@@ -1129,6 +1129,23 @@ export type OperatorDefinitionFlags = {
   broadcastable: boolean;
 
   /**
+   * If `true`, this operator's `evaluate` handler runs even when the
+   * expression is **invalid** — that is, when an operand is, or embeds, an
+   * `Error` value.
+   *
+   * These are the non-strict *observers* of the error-propagation design
+   * (`docs/plans/2026-07-31-error-propagation-design.md` §2): operators that
+   * INSPECT their operands (`Match`, `Type`, `IsError`) or that are
+   * application plumbing deciding what to do with an error operand (`Apply`,
+   * `Pipe`). Every other operator freezes to its inert self when an operand
+   * carries an error, which is what stops an error at the first strict
+   * consumer.
+   *
+   * **Default**: `false`
+   */
+  inspectsErrors: boolean;
+
+  /**
    * How this operator treats an absent (`Missing`) operand, per the
    * missing-value typing design
    * (`docs/plans/2026-07-22-missing-value-typing-design.md`, §3.A). The

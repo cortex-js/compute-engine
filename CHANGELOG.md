@@ -2,6 +2,21 @@
 
 ### Breaking Changes
 
+- **`Nothing` in an argument position now erases uniformly on every
+  application route.** `f(Nothing)`, `Apply(f, Nothing)`, and
+  `Nothing |> f` all behave as `f()`. Previously a pipe (or `Apply`) into
+  a *function literal* bound the argument — `Nothing |> (x |-> x + 1)`
+  returned `1`; it now returns the unapplied curried literal
+  `(_) |-> _ + 1`, the nullary-application result. Named-function routes
+  are unchanged (they already erased). Erasure applies to the *literal*
+  `Nothing` at canonicalization; an argument that merely *evaluates* to
+  `Nothing` binds normally — uniformly on every route.
+
+- **`Pipe` with an invalid right-hand side returns the bare error value.**
+  `Pipe(5, 3)` and `Pipe(5, "abc")` previously evaluated to a frozen
+  `Pipe(…, Error(…))` expression; under error bubbling the callee itself
+  is the error, so the result is now the `Error` value directly.
+
 - **`Sqrt`, `Ln` and `Log` no longer claim a real type for an operand of
   unknown sign.** `Sqrt(x)` for a bare real-typed symbol now types
   `finite_complex` (`√−2 = 1.414…i`), and `Ln(x)`/`Log(x, b)` type `complex`
@@ -242,6 +257,37 @@
   (`s >= lo && s <= hi`). Deliberate carve-out: a literal `Range` _value_ is
   no longer matchable structurally at the top level of a pattern (nested
   positions keep the structural meaning).
+
+- **Errors can now be handled in-language.** Previously an `Error` value
+  poisoned every enclosing expression into staying inert — even
+  `match err { _ => "rescued" }` froze, so a failure could be produced but
+  never observed or recovered from. Three coordinated changes (design:
+  `docs/plans/2026-07-31-error-propagation-design.md`):
+  - **`match` decides on error subjects**, restoring its "always decides"
+    totality: literal and shape cases structurally fail against an error,
+    and `_`, bindings, and guards catch it — `match` is now the rescue
+    construct.
+  - **New `IsError(x)` predicate** — holds its operand and returns `True`
+    for an error (or an expression embedding one), `False` otherwise.
+  - **Errors bubble through function application and `|>`**: applying a
+    user function to an error yields the bare error value instead of a
+    frozen call — `("a" + 1) |> f |> g` returns the underlying type error
+    without invoking `f` or `g`, and `f(err)` behaves identically (the
+    `x |> f` ≡ `f(x)` equivalence is preserved by construction). Built-in
+    operators deliberately keep the previous freezing behavior
+    (`err + 1`, `Sin(err)` stay symbolic), and `NaN` is *not* affected —
+    it is an ordinary number, and `NaN |> f` still invokes `f` (so
+    NaN-rescue idioms keep working).
+  (See also the Breaking Changes entry for the `Nothing`-argument and
+  error-valued-`Pipe` result-shape changes that accompany this.)
+
+- **Static type diagnostics in `cortex check` and at run time.**
+  Canonicalization-time type errors (`"a" + 1`) are now reported as
+  `static-type-error` diagnostics — by `cortex check` (which canonicalizes
+  without evaluating: no random draws, no loop iterations) and by the run
+  path/MCP before evaluation begins, anchored to the offending statement.
+  The program still evaluates afterwards (errors-as-values is unchanged);
+  `check` exits non-zero on static errors.
 
 - **The `Same` operator (`===` in Cortex) now evaluates.** It was parsed
   but never defined, so `1 === 1.0` stayed inert. `Same` is the total,

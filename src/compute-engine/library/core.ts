@@ -70,6 +70,7 @@ import {
   withRandomSeedFrame,
   withDrawRollback,
 } from '../boxed-expression/utils.js';
+import { errorValue } from '../boxed-expression/error-value.js';
 import {
   isNumber,
   isSymbol,
@@ -1014,12 +1015,30 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
   {
     Apply: {
       description: 'Apply a function to a list of arguments',
+      // An application route: it decides what an `Error` argument means
+      // (rung 2 — `apply()` bubbles it) instead of freezing with it.
+      inspectsErrors: true,
       signature: '(name:symbol, arguments:expression*) -> unknown',
       type: ([fn]) => functionResult(fn.type.type) ?? 'unknown',
       canonical: (args, { engine: ce }) => {
         const s = sym(args[0]);
         if (s) return ce.function(s, args.slice(1));
-        return ce._fn('Apply', args);
+        // `Nothing` is ERASED from the call argument list, uniformly on every
+        // application route (error-propagation design §4): `Apply(f, Nothing)`
+        // is `f()`. The `f(Nothing)` route erases at canonicalization
+        // (`flattenOps`); this is the same ruling for a callee that is not a
+        // bare symbol (a `Function` literal), which never reaches that path.
+        //
+        // Erasure belongs HERE, on the written argument, not in `evaluate`:
+        // `Apply` is strict, so by evaluation time an argument that merely
+        // *evaluated* to `Nothing` (`Apply(f, g())`) is indistinguishable
+        // from a literal one, and erasing it would make `Apply(f, g())` —
+        // and therefore `g() |> f`, which `Pipe` holds — differ from
+        // `f(g())`, which binds it. §3 pins `x |> f ≡ f(x)`.
+        return ce._fn('Apply', [
+          args[0],
+          ...args.slice(1).filter((x) => !isSymbol(x, 'Nothing')),
+        ]);
       },
       evaluate: (ops, { numericApproximation }) => {
         const result = apply(ops[0], ops.slice(1));
@@ -1049,6 +1068,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // eagerly here broke `F |> JacobianMatrix` — a bare function `F` came
       // through stripped of its definition.
       lazy: true,
+      // An application route, like `Apply`: it decides what an `Error` topic
+      // means (rung 2 — `apply()` bubbles it) instead of freezing with it.
+      inspectsErrors: true,
       signature: '(value, function) -> unknown',
       type: ([_x, f]) =>
         f ? (functionResult(f.type.type) ?? 'unknown') : undefined,
@@ -1107,7 +1129,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // stays inert (returns `undefined`).
         if (isRefutablePipeTarget(f))
           return ce.typeError('function', f.type, f.toString());
-        const result = apply(f, [x]);
+        // `Nothing` is ERASED from the call argument list, uniformly on every
+        // application route (error-propagation design §4): `Nothing |> f` is
+        // `f()`, exactly like `f(Nothing)`. Erasure is a rule on the WRITTEN
+        // argument (like `flattenOps` on the direct route and `Apply`'s
+        // canonical handler): a topic that merely *evaluates* to `Nothing` is
+        // bound, as it is by `f(g())`.
+        const result = apply(f, isSymbol(x, 'Nothing') ? [] : [x]);
 
         if (!numericApproximation) return result;
         // Mirror `Apply`: under N(), numericize the applied result unless it
@@ -1556,6 +1584,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Type: {
       description: 'Return the type of an expression as a string.',
       lazy: true,
+      // An observer: `Type("a" + 1)` is `"error"`. Holding the operand is what
+      // makes that work on the box/parse routes (the raw operand carries no
+      // `Error` node yet); the flag makes it work on the routes that hand over
+      // an already-canonical operand — `("a" + 1) |> Type`, `Apply(Type, …)`.
+      inspectsErrors: true,
       signature: '(any) -> string',
       // The operand is lazy (Type reports the static type, without
       // evaluating), but a *non-canonical* expression has no type — a lazy
@@ -1563,6 +1596,48 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // for a symbol bound to an integer. Canonicalize, don't evaluate.
       evaluate: ([x], { engine: ce }) =>
         ce.string(x.canonical.type.toString() ?? 'unknown'),
+    },
+
+    /** True if an expression is (or embeds) an error value */
+    IsError: {
+      description:
+        'True if the expression is an `Error` value, or a frozen expression ' +
+        'embedding one (`"a" + 1`). False otherwise. Total.',
+      // Holds its operand — the whole point: a strict position would bubble
+      // the error away before it could be inspected (error-propagation design
+      // §2, rung 1). `inspectsErrors` extends that to the routes that hand
+      // over an already-canonical operand (`("a" + 1) |> IsError`), so
+      // `IsError(err)` and `err |> IsError` agree.
+      lazy: true,
+      inspectsErrors: true,
+      // Purity follows the `N`/`Evaluate` convention for lazy evaluating
+      // wrappers: neither declares `pure`, so both take the definition default
+      // (`pure: true`) even though they evaluate their held operand. `IsError`
+      // mirrors that verbatim rather than inventing a third rule.
+      signature: '(any) -> boolean',
+      canonical: (ops, { engine: ce }) => {
+        // Arity is enforced HERE, not by the signature: `inspectsErrors` makes
+        // the evaluate handler run even on an invalid node, so `IsError()`
+        // would otherwise answer a boolean ABOUT ITS OWN missing-operand
+        // marker (`True`). Surface the arity error itself instead of wrapping
+        // it. Only the malformed-arity case is inspected — a well-formed
+        // `IsError(<already-invalid operand>)` must still report `True`.
+        if (ops.length !== 1) {
+          const xs = checkArity(ce, ops, 1);
+          return (
+            xs.find((x) => isFunction(x, 'Error')) ?? ce._fn('IsError', xs)
+          );
+        }
+        return ce._fn('IsError', ops);
+      },
+      // Canonicalize the held operand (like `Type`: a raw operand carries no
+      // `Error` node yet — the validation error is minted BY canonicalization),
+      // then evaluate it, so a failure that only happens at evaluation
+      // (`match-no-case`) is reported too.
+      evaluate: ([x], { engine: ce }) =>
+        x !== undefined && errorValue(x.canonical.evaluate()) !== undefined
+          ? ce.True
+          : ce.False,
     },
 
     Evaluate: {

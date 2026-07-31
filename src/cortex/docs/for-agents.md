@@ -242,7 +242,8 @@ Verified operator names, so you don't have to guess (search for more with
 - **Dictionaries**: `Keys`, `Values`.
 - **Symbolic**: `Simplify`, `HoldValues(body)` (evaluate `body` with its
   assigned symbols kept symbolic), `Solve(eq == v, x)`, `D(expr, x)`,
-  `Derivative(f)`, `Integrate`, `N`, `Type`.
+  `Derivative(f)`, `Integrate`, `N`, `Type`, `IsError(x)` (true for an error
+  value, or an expression carrying one).
 
 Caution: `Head` and `Tail` exist but are **structural** operators
 (`Head([1,2,3])` is the *operator name* `"List"`, not the first element) —

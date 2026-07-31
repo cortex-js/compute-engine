@@ -130,6 +130,124 @@ describe('Cortex CLI check command', () => {
   });
 });
 
+describe('Cortex CLI check: canonicalization-time type errors', () => {
+  test('reports a static type error, anchored to its statement', async () => {
+    const { io, stderr } = makeIo();
+    expect(await main(['check', '-e', '"a" + 1'], io)).toBe(1);
+    expect(stderr()).toContain(
+      '1:1 error: Type error: incompatible-type (expected number, got string) in `"a" + 1`'
+    );
+  });
+
+  test('anchors to the offending statement of a multi-statement program', async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(['check', '-e', 'let x = 5\nx + "a"', '--json'], io)
+    ).toBe(1);
+    const envelope = JSON.parse(stdout());
+    expect(envelope.ok).toBe(false);
+    expect(envelope.diagnostics).toHaveLength(1);
+    expect(envelope.diagnostics[0]).toMatchObject({
+      severity: 'error',
+      code: 'static-type-error',
+      line: 2,
+      column: 1,
+      start: 10,
+      end: 17,
+    });
+    expect(envelope.diagnostics[0].message).toContain('x + "a"');
+  });
+
+  test('reports one diagnostic per problem, not per cascade', async () => {
+    // The error is embedded deep in a larger expression, and the same
+    // mistake appears twice in the second statement.
+    const { io, stdout } = makeIo();
+    expect(
+      await main(
+        ['check', '-e', 'Sqrt("a") * 2 + 1\n"b" + 1 + "c"', '--json'],
+        io
+      )
+    ).toBe(1);
+    const { diagnostics } = JSON.parse(stdout());
+    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics.map((x: { line: number }) => x.line)).toEqual([1, 2]);
+  });
+
+  test('checks a well-formed program clean', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(
+      await main(['check', '-e', 'f(n) = n^2 + 1\nf(3) + Sqrt(2)'], io)
+    ).toBe(0);
+    expect(stdout()).toBe('');
+    expect(stderr()).toBe('');
+  });
+
+  test('checks an errors-as-values program clean', async () => {
+    // `Error(…)` in the source is a value the program builds, not a
+    // canonicalization failure — final, non-final and `let`-bound alike.
+    for (const source of [
+      'Error("boom")',
+      'Error("boom")\n2',
+      'let e = Error("boom")\ne',
+      'let e = Error(ErrorCode("incompatible-type", "number", "string"))\ne',
+    ]) {
+      const { io, stdout } = makeIo();
+      expect(await main(['check', '-e', source, '--json'], io)).toBe(0);
+      const { diagnostics } = JSON.parse(stdout());
+      expect(
+        diagnostics.filter(
+          (x: { code: string }) => x.code === 'static-type-error'
+        )
+      ).toEqual([]);
+    }
+  });
+
+  test('labels a non-type canonicalization error as a static error', async () => {
+    // The walk collects every canonicalization error, not only type errors:
+    // the rendered label follows the code (the diagnostic *code* stays
+    // `static-type-error`).
+    const { io, stderr } = makeIo();
+    expect(await main(['check', '-e', 'Sqrt(1, 2, 3)'], io)).toBe(1);
+    expect(stderr()).toContain('Static error: unexpected-argument');
+  });
+
+  test('keeps the readable form of a three-operand type error', async () => {
+    // `ce.typeError()` mints `["Error", ["ErrorCode", code, expected, actual],
+    // where]`: the `where` operand must not crowd out "expected X, got Y".
+    const { io, stderr } = makeIo();
+    expect(await main(['check', '-e', '1 |> 2'], io)).toBe(1);
+    expect(stderr()).toContain(
+      'Type error: incompatible-type (expected function, got finite_integer; at 2)'
+    );
+  });
+
+  test('skips the canonicalization pass when parsing failed', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['check', '-e', '1 +', '--json'], io)).toBe(1);
+    const { diagnostics } = JSON.parse(stdout());
+    expect(
+      diagnostics.every((x: { code: string }) => x.code !== 'static-type-error')
+    ).toBe(true);
+  });
+
+  test('does not execute the program it checks', async () => {
+    // Nothing here may run: the loop is infinite, the draw would consume
+    // randomness, and the `print` call would have to be applied. Boxing
+    // canonicalizes all three without evaluating them.
+    const source = [
+      'let x = RandomInteger(1, 10)',
+      'let i = 0',
+      'while true { i = i + 1 }',
+      'print("hi")',
+      'x + i',
+    ].join('\n');
+    const { io } = makeIo();
+    const start = Date.now();
+    expect(await main(['check', '-e', source], io)).toBe(0);
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+});
+
 describe('Cortex CLI doc command', () => {
   test('shows an exact entry, case-insensitively', async () => {
     for (const name of ['Sin', 'sin']) {
@@ -182,11 +300,50 @@ describe('Cortex CLI JSON diagnostics for evaluation', () => {
       )
     ).toBe(1);
     const diagnostics = JSON.parse(stderr());
-    expect(diagnostics[0]).toMatchObject({
+    // The static pass reports the statement first (it is rejected at
+    // canonicalization time); the run reports it again. Both are kept.
+    expect(diagnostics.map((x: { code: string }) => x.code)).toEqual([
+      'static-type-error',
+      'runtime-error',
+    ]);
+    expect(diagnostics[1]).toMatchObject({
       severity: 'error',
       code: 'runtime-error',
       line: 2,
     });
+  });
+
+  test('reports static type errors before evaluating, and still evaluates', async () => {
+    const { io, stdout, stderr } = makeIo();
+    // `"a" + 1` is a canonicalization-time type error; the program still runs
+    // (errors are values), so the final statement's value is produced.
+    expect(
+      await main(['-e', '"a" + 1\n2', '--diagnostics', 'json', '--json'], io)
+    ).toBe(1);
+    const diagnostics = JSON.parse(stderr());
+    expect(diagnostics[0]).toMatchObject({
+      severity: 'error',
+      code: 'static-type-error',
+      line: 1,
+      column: 1,
+    });
+    // Accepted duplication: the same mistake also surfaces at run time
+    // (the offending statement is not the final one).
+    expect(diagnostics.map((x: { code: string }) => x.code)).toEqual([
+      'static-type-error',
+      'runtime-error',
+    ]);
+    // The CLI withholds the value when there are error diagnostics.
+    expect(stdout()).toBe('');
+  });
+
+  test('a clean program gets no static diagnostics', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(
+      await main(['-e', 'let x = 5\nx + 1', '--diagnostics', 'json'], io)
+    ).toBe(0);
+    expect(stderr()).toBe('');
+    expect(stdout()).toBe('6\n');
   });
 });
 
@@ -209,8 +366,9 @@ describe('Cortex CLI evaluation', () => {
 
   test('JSON output materializes finite lazy collections', () => {
     const session = makeCortexSession(0);
-    expect(JSON.parse(formatValue(session.evaluate('Range(1, 15)'), 'json')))
-      .toEqual(['List', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    expect(
+      JSON.parse(formatValue(session.evaluate('Range(1, 15)'), 'json'))
+    ).toEqual(['List', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     expect(
       JSON.parse(
         formatValue(
@@ -224,7 +382,10 @@ describe('Cortex CLI evaluation', () => {
     // Materialization descends into containers.
     expect(
       JSON.parse(
-        formatValue(session.evaluate('([10,20,30,40] |> Take(_, 3), 1)'), 'json')
+        formatValue(
+          session.evaluate('([10,20,30,40] |> Take(_, 3), 1)'),
+          'json'
+        )
       )
     ).toEqual(['Pair', ['List', 10, 20, 30], 1]);
     // An infinite collection keeps its structural form.

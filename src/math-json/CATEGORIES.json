@@ -342,6 +342,7 @@
       "IndexedSequence",
       "IntegerString",
       "InvisibleOperator",
+      "IsError",
       "IsMissing",
       "Latex",
       "LatexString",

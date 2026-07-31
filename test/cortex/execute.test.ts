@@ -1,6 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { executeCortex } from '../../src/cortex/execute-cortex';
+import { parseCortex } from '../../src/cortex/parse-cortex';
+import { staticDiagnostics } from '../../src/cortex/static-diagnostics';
 
 //
 // Cortex execution (Phase 4, Stage 2). `executeCortex` parses a program and
@@ -17,7 +19,8 @@ function run(
   options?: { allowHostPragmas?: boolean }
 ): ReturnType<typeof executeCortex> {
   const ce = new ComputeEngine();
-  const parseLatex = (latex: string): MathJsonExpression => ce.parse(latex).json;
+  const parseLatex = (latex: string): MathJsonExpression =>
+    ce.parse(latex).json;
   return executeCortex(ce, source, { parseLatex, ...options });
 }
 
@@ -220,13 +223,17 @@ describe('CORTEX EXECUTE — errors are values', () => {
 describe('CORTEX EXECUTE — while', () => {
   test('a while loop runs to completion (lowered to Loop + Break)', () => {
     // Count `c` down from 3 to 0; the loop value is Nothing (for-effect).
-    const { value, diagnostics } = run('let c = 3\nwhile c > 0 { c = c - 1 }\nc');
+    const { value, diagnostics } = run(
+      'let c = 3\nwhile c > 0 { c = c - 1 }\nc'
+    );
     expect(diagnostics).toHaveLength(0);
     expect(value.re).toBe(0);
   });
 
   test('a while whose condition is initially false does not run the body', () => {
-    const { value, diagnostics } = run('let c = 0\nwhile c > 0 { c = c - 1 }\nc');
+    const { value, diagnostics } = run(
+      'let c = 0\nwhile c > 0 { c = c - 1 }\nc'
+    );
     expect(diagnostics).toHaveLength(0);
     expect(value.re).toBe(0);
   });
@@ -327,10 +334,17 @@ describe('CORTEX EXECUTE — runtime problems in non-final statements', () => {
 
   test('an indexed assignment (unsupported) surfaces as a diagnostic', () => {
     const { value, diagnostics } = run('let xs = [1, 2, 3]\nxs[2] = 9\nxs');
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0].message[0]).toBe('runtime-error');
-    // The diagnostic points at the offending statement
-    expect(diagnostics[0].range).toEqual([19, 28]);
+    // The engine rejects the assignment at canonicalization time, so the
+    // statement is reported twice: once by the static pass (before anything
+    // runs) and once by the run of the statement itself. The duplication is
+    // accepted — a static diagnostic never suppresses evaluation.
+    expect(diagnostics.map((x) => x.message[0])).toEqual([
+      'static-type-error',
+      'runtime-error',
+    ]);
+    // Both diagnostics point at the offending statement
+    expect(diagnostics[0].range.slice(0, 2)).toEqual([19, 28]);
+    expect(diagnostics[1].range).toEqual([19, 28]);
     // The list is unchanged
     expect(value.toString()).toBe('[1,2,3]');
   });
@@ -346,6 +360,119 @@ describe('CORTEX EXECUTE — runtime problems in non-final statements', () => {
     const { value, diagnostics } = run('const c = 1\nc = 2');
     expect(diagnostics).toEqual([]);
     expect(value.operator).toBe('Error');
+  });
+});
+
+describe('CORTEX EXECUTE — static (canonicalization-time) type errors', () => {
+  // `"a" + 1` is detectable before anything runs: it canonicalizes to a tree
+  // embedding an `["Error", …]` node. `executeCortex` reports those as
+  // `static-type-error` diagnostics up front, then evaluates the program
+  // exactly as it otherwise would (plan §5).
+
+  test('reports the error and still evaluates the program', () => {
+    const { value, diagnostics } = run('"a" + 1\n2');
+    expect(diagnostics[0].message[0]).toBe('static-type-error');
+    expect(diagnostics[0].message[1]).toBe(
+      'incompatible-type (expected number, got string)'
+    );
+    // Anchored to the offending statement.
+    expect(diagnostics[0].range.slice(0, 2)).toEqual([0, 7]);
+    // Evaluation proceeded: the final statement's value is unchanged.
+    expect(value.re).toBe(2);
+  });
+
+  test('a clean program gets no static diagnostics', () => {
+    const { value, diagnostics } = run('f(n) = n^2 + 1\nf(3)');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(10);
+  });
+
+  test('the check does not perturb the session it checks', () => {
+    // Canonicalizing auto-declares the symbols an expression mentions; the
+    // static pass must not leak those into the program's own scope (a
+    // pre-declared `x` would make `let x = 2047` narrow to `finite_integer`).
+    const { value } = run('let x = 2047\nType(x)');
+    expect(value.string).toBe('integer');
+  });
+
+  test('skips the static pass when parsing failed', () => {
+    const { diagnostics } = run('1 +');
+    expect(diagnostics.every((x) => x.message[0] !== 'static-type-error')).toBe(
+      true
+    );
+  });
+
+  test('an author-built Error value is not a static problem', () => {
+    // Errors are values: `Error(…)` written in the source survives
+    // canonicalization unchanged, and reporting it would fail every
+    // errors-as-values program. Only the pre-existing runtime behavior fires
+    // (a non-final statement whose value is an error).
+    const final = run('Error("boom")');
+    expect(final.diagnostics).toEqual([]);
+    expect(final.value.operator).toBe('Error');
+
+    const nonFinal = run('Error("boom")\n2');
+    expect(nonFinal.diagnostics.map((x) => x.message[0])).toEqual([
+      'runtime-error',
+    ]);
+    expect(nonFinal.value.re).toBe(2);
+
+    // A payload whitelist alone would not do this: a program can author the
+    // very code canonicalization mints. Provenance is what rules it out.
+    const authored = run(
+      'let e = Error(ErrorCode("incompatible-type", "number", "string"))\ne'
+    );
+    expect(
+      authored.diagnostics.filter((x) => x.message[0] === 'static-type-error')
+    ).toEqual([]);
+  });
+
+  test('an author-built Error does not mask a real one', () => {
+    const { diagnostics } = run(
+      'Error(ErrorCode("incompatible-type", "number", "string"))\n"a" + 1'
+    );
+    expect(
+      diagnostics.filter((x) => x.message[0] === 'static-type-error')
+    ).toHaveLength(1);
+  });
+
+  test('an error inside a `let` initializer is found', () => {
+    // The canonical `Declare` carries its initializer inside a MathJSON
+    // dictionary literal, which the walk must descend into. Two cases: an
+    // ordinary type error in an initializer, and the `->` / `|->` typo (`->`
+    // builds a `KeyValuePair`, whose key must be a string).
+    for (const source of ['let g = "a" + 1', 'let f = (n) -> n^2 + 1']) {
+      const { diagnostics } = run(source);
+      expect(diagnostics.map((x) => x.message[0])).toContain(
+        'static-type-error'
+      );
+    }
+  });
+
+  test('a dictionary literal built with `->` stays clean', () => {
+    const { diagnostics } = run('let d = {"a" -> 1, "b" -> 2}\nd');
+    expect(
+      diagnostics.filter((x) => x.message[0] === 'static-type-error')
+    ).toEqual([]);
+  });
+
+  test('a repeated check leaves a declared symbol typed as it was', () => {
+    // The pushed scope contains the *declarations* canonicalization creates.
+    // This pins the definition of a symbol a previous cell declared: running
+    // the pass over it (twice) must not retype it. The scope does NOT shield
+    // an outer definition from type inference in general — see the
+    // `staticDiagnostics()` doc comment.
+    const ce = new ComputeEngine();
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    executeCortex(ce, 'let x = 5', { parseLatex });
+    expect(ce.box('x').type.toString()).toBe('integer');
+
+    const source = 'x + 1.5';
+    const [ast] = parseCortex(source, undefined, { parseLatex });
+    staticDiagnostics(ce, ast!, source);
+    staticDiagnostics(ce, ast!, source);
+    expect(ce.box('x').type.toString()).toBe('integer');
   });
 });
 
@@ -380,12 +507,9 @@ describe('CORTEX EXECUTE — structured cancellation cause', () => {
   });
 
   test('iteration-limit-exceeded on the final-statement Error value', () => {
-    const { value } = runWith(
-      'let c = 0\nwhile c >= 0 { c = c + 1 }',
-      (ce) => {
-        ce.iterationLimit = 100;
-      }
-    );
+    const { value } = runWith('let c = 0\nwhile c >= 0 { c = c + 1 }', (ce) => {
+      ce.iterationLimit = 100;
+    });
     expect(value.operator).toBe('Error');
     expect(value.op2?.string).toBe('iteration-limit-exceeded');
     // Legacy default message operand is unchanged
@@ -553,5 +677,66 @@ describe('CORTEX EXECUTE — Count(xs, v) and Count(xs, p)', () => {
   test('the 1-argument cardinality form is unchanged', () => {
     expect(run('Count([1, 2, 3])').value.re).toBe(3);
     expect(run('Count([])').value.re).toBe(0);
+  });
+});
+
+/**
+ * Rungs 1–2 of the error-propagation design
+ * (`docs/plans/2026-07-31-error-propagation-design.md`), through the Cortex
+ * execution route. The engine-level pins are in
+ * `test/compute-engine/error-propagation.test.ts`.
+ */
+describe('CORTEX EXECUTE — error propagation', () => {
+  test('an error argument bubbles out of a call and out of a pipe', () => {
+    const expected =
+      'Error(ErrorCode("incompatible-type", "number", "string"))';
+    expect(run('let f = x |-> x + 1\nf("a" + 1)').value.toString()).toBe(
+      expected
+    );
+    expect(run('let f = x |-> x + 1\n("a" + 1) |> f').value.toString()).toBe(
+      expected
+    );
+    // A chain short-circuits at the first stage.
+    expect(
+      run(
+        'let f = x |-> x + 1\nlet g = y |-> y * 2\n("a" + 1) |> f |> g'
+      ).value.toString()
+    ).toBe(expected);
+  });
+
+  test('`err + 1` stays an inert frozen sum (rung-3 boundary)', () => {
+    const { value } = run('("a" + 1) + 1');
+    expect(value.operator).toBe('Add');
+    expect(value.isValid).toBe(false);
+  });
+
+  test('`match` rescues an error and `IsError` observes it', () => {
+    expect(run('match ("a" + 1) {\n  _ => "rescued"\n}').value.toString()).toBe(
+      '"rescued"'
+    );
+    expect(run('IsError("a" + 1)').value.symbol).toBe('True');
+    expect(run('IsError(5)').value.symbol).toBe('False');
+    // `|>` is application sugar (§3), so the OBSERVER sees the error on the
+    // pipe route too — `x |> f` never means something different from `f(x)`.
+    expect(run('("a" + 1) |> IsError').value.symbol).toBe('True');
+  });
+
+  test('NaN does not short-circuit a pipe', () => {
+    expect(run('NaN |> IsMissing').value.symbol).toBe('True');
+    const { value } = run('let f = x |-> 99\nNaN |> f');
+    expect(value.re).toBe(99);
+  });
+
+  test('`Nothing` is erased from the argument list on every route', () => {
+    const nullary = run('let f = x |-> x + 1\nf()').value.toString();
+    expect(run('let f = x |-> x + 1\nf(Nothing)').value.toString()).toBe(
+      nullary
+    );
+    expect(run('let f = x |-> x + 1\nNothing |> f').value.toString()).toBe(
+      nullary
+    );
+    expect(run('let f = x |-> x + 1\nApply(f, Nothing)').value.toString()).toBe(
+      nullary
+    );
   });
 });
