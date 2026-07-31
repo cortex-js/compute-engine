@@ -198,6 +198,23 @@ describe('TYPE AUDIT: Erf family and elliptic integrals', () => {
     expect(ce.box(['EllipticK', 2]).N().im).not.toBe(0);
   });
 
+  it('EllipticF/EllipticPi/AGM hedge where real args can be complex', () => {
+    // F(1.5|2) is complex (m·sin²φ > 1): the claim must admit it.
+    const f = ce.box(['EllipticF', 1.5, 2]);
+    expect(f.type.toString()).toBe('finite_number');
+    expect(f.N().type.matches(f.type)).toBe(true);
+    // Π has a +∞ pole at n = 1; away from it the finite hedge applies.
+    expect(typeOf(['EllipticPi', 1, 0.5])).toBe('number');
+    expect(ce.box(['EllipticPi', 1, 0.5]).N().isInfinity).toBe(true);
+    expect(typeOf(['EllipticPi', 1.5, 0.5])).toBe('finite_number');
+    // AGM: real for non-negative reals, complex for a negative operand.
+    expect(typeOf(['AGM', 1, 2])).toBe('finite_real');
+    const agmNeg = ce.box(['AGM', 1, -2]);
+    expect(agmNeg.type.toString()).toBe('finite_number');
+    expect(agmNeg.N().type.matches(agmNeg.type)).toBe(true);
+    expect(typeOf(['AGM', 1, 'PositiveInfinity'])).toBe('number');
+  });
+
   it('EllipticE: real on m ≤ 1, complex above; 2-arg form hedges finite', () => {
     expect(typeOf(['EllipticE', 1])).toBe('finite_real');
     expect(typeOf(['EllipticE', 2])).toBe('finite_complex');

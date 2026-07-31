@@ -95,7 +95,10 @@
   `Erfc`/`Erfi` and the `SinIntegral`/`CosIntegral` family for operands not
   provably real; `ErfInv` outside `(−1, 1)` (NaN, claimed `real`) and at the
   ±1 poles (±∞, now the provable `non_finite_number`); `EllipticK`/
-  `EllipticE` above m = 1 (finite complex, claimed `finite_real`);
+  `EllipticE` above m = 1 (finite complex, claimed `finite_real`), and
+  likewise `EllipticF`/`EllipticPi` on the complex side of their real domains
+  (`F(1.5|2)`), `EllipticPi` at its n = 1 pole (`Π(1|m) = +∞`), and `AGM`
+  with a negative operand (`AGM(1, −2)` is complex);
   `InverseHaversine` outside `[0, 1]`; `Binomial` — and its alias `Choose`,
   which shares the evaluator and now shares the type handler — for real,
   infinite, or Γ-pole arguments (both claimed `finite_integer`

@@ -168,7 +168,13 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       broadcastable: true,
       signature: '(number, number) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      // Incomplete F(φ|m) is complex whenever m·sin²φ > 1 — a condition on
+      // both operands (`F(1.5|2) = 1.311… − 1.240…i`) — so real operands only
+      // support the finite generic-point hedge, not a real claim.
+      type: (ops) =>
+        ops.some((x) => x.isNaN || x.isFinite === false)
+          ? 'number'
+          : 'finite_number',
       evaluate: ([phi, m], { numericApproximation, engine }) => {
         // F(0|m) = 0 exactly
         if (isNumber(phi) && phi.im === 0 && phi.isSame(0)) return engine.Zero;
@@ -187,7 +193,18 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       broadcastable: true,
       signature: '(number, number, number?) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      // Π has a +∞ pole at the characteristic n = 1 (`Π(1|m)`), and the
+      // incomplete form is complex outside the real domain (a condition on
+      // several operands), so the claim is the finite generic-point hedge
+      // away from the provable pole. Exact `isSame` for a literal n — the
+      // tolerance-based `isEqual` would put `1 + 10⁻²⁰` at the pole.
+      type: (ops) => {
+        const n = ops[0];
+        if (!n || ops.some((x) => x.isNaN || x.isFinite === false))
+          return 'number';
+        if (isNumber(n) ? n.isSame(1) : n.isEqual(1) === true) return 'number';
+        return 'finite_number';
+      },
       evaluate: (ops, { numericApproximation, engine }) => {
         if (ops.length === 3) {
           const [n, phi, m] = ops;
@@ -220,7 +237,14 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       complexity: 8500,
       broadcastable: true,
       signature: '(number, number?) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      // Real and finite for non-negative real operands; a negative operand
+      // takes the complex AGM (`AGM(1, −2) = −0.4229… + 0.6612…i`).
+      type: (ops) => {
+        if (ops.some((x) => x.isNaN || x.isFinite === false)) return 'number';
+        if (ops.every((x) => x.isReal === true && x.isNonNegative === true))
+          return 'finite_real';
+        return 'finite_number';
+      },
       evaluate: (ops, { numericApproximation, engine }) => {
         if (!shouldNumericize(numericApproximation, ...ops)) return undefined;
         const args = ops.length === 1 ? [engine.One, ops[0]] : [...ops];
