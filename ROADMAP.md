@@ -452,12 +452,12 @@ New residues recorded by that round:
   is gated to symbols/literals, which are pure). NOT audited: the remaining
   handlers of all four targets — grep for templates using an operand string
   twice.
-- **`Norm(matrix, "Infinity")` / `Norm(matrix, 1)` on Python are unverified**
-  against numpy's matrix semantics (`ord=inf` = max row sum, `ord=1` = max
-  column sum): if the interpreter's rank-2 branch treats these orders the
-  vector way, they are the same silent-divergence class as the runtime-ord-2
-  case (now fixed via the `('fro' if p == 2 else p)` runtime substitution) —
-  not probed.
+- **`Norm(matrix, "Infinity")` / `Norm(matrix, 1)` on Python: PROBED, faithful**
+  (2026-07-31). The interpreter's rank-2 branch computes max row sum / max
+  column sum — exactly numpy's matrix `ord=inf` / `ord=1`. The probe also
+  showed any OTHER literal matrix order (`3`, `-1`, …) stays symbolic in the
+  interpreter while numpy raises or diverges — those now fail closed (D6),
+  pinned in `compile-python.test.ts` § "Norm order guards".
 
 **`Equal`/`NotEqual` over collections on Python — RULED and SHIPPED
 2026-07-31.** User ruling: scalar, matching the interpreter. Probing showed

@@ -1226,6 +1226,25 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
             `in \`np.linalg.norm\`. Fail closed (D6).`
         );
     }
+    // A literal numeric order on a statically rank-2 operand: the
+    // interpreter's matrix branch (`library/linear-algebra.ts`) defines only
+    // orders 1 (max column sum), 2/Frobenius (respelled above) and
+    // +Infinity (max row sum) — 1 and +Infinity verified against numpy's
+    // matrix semantics (probed 2026-07-31: both agree). Any OTHER literal
+    // order stays SYMBOLIC in the interpreter, while numpy either raises
+    // (`ord=3` on a matrix is a ValueError) or computes a norm the
+    // interpreter does not define (`-inf`), so fail closed (D6).
+    if (
+      rank === 2 &&
+      isNumber(p) &&
+      !p.isSame(1) &&
+      !(p.isInfinity && p.isPositive === true)
+    )
+      throw new Error(
+        `Norm: the interpreter defines matrix norms only for orders 1, ` +
+          `2/Frobenius and +Infinity — \`np.linalg.norm\` would raise or ` +
+          `diverge for this order. Fail closed (D6).`
+      );
     return `np.linalg.norm(${compile(args[0])}, ${compile(p)})`;
   },
   Determinant: 'np.linalg.det',

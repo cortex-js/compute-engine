@@ -788,6 +788,33 @@ describe('PYTHON TARGET', () => {
       ).toBe("np.linalg.norm([[3, 4], [5, 12]], 'fro')");
     });
 
+    it('matrix orders 1 and +Infinity compile (verified faithful to numpy)', () => {
+      // Interpreter: `Norm(M, 1)` = max column sum, `Norm(M, "Infinity")` =
+      // max row sum — exactly numpy's matrix `ord=1` / `ord=inf` (probed
+      // 2026-07-31 on [[1,2],[3,4]]: 6 and 7).
+      expect(python.compile(ce.box(['Norm', M, 1] as any)).code).toBe(
+        'np.linalg.norm([[3, 4], [5, 12]], 1)'
+      );
+      expect(
+        python.compile(ce.box(['Norm', M, { num: '+Infinity' }] as any)).code
+      ).toBe('np.linalg.norm([[3, 4], [5, 12]], np.inf)');
+    });
+
+    it('any other literal matrix order fails closed (D6)', () => {
+      // The interpreter's matrix branch defines only 1, 2/Frobenius and
+      // +Infinity; `np.linalg.norm(M, 3)` raises a ValueError at run time.
+      expect(() => python.compile(ce.box(['Norm', M, 3] as any))).toThrow(
+        /matrix norms only for orders.*Fail closed/s
+      );
+      expect(() => python.compile(ce.box(['Norm', M, -1] as any))).toThrow(
+        /Fail closed/
+      );
+      // A vector operand is unaffected: numeric orders are faithful on 1-D.
+      expect(
+        python.compile(ce.box(['Norm', ['List', 3, 4], 3] as any)).code
+      ).toBe('np.linalg.norm([3, 4], 3)');
+    });
+
     it('a run-time order over a matrix respells ord 2 as Frobenius', () => {
       const scoped = new ComputeEngine();
       scoped.declare('normP', 'real');
