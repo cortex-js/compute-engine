@@ -1037,3 +1037,43 @@ describe('D over List literals (elementwise)', () => {
     expect(result.json).toEqual(['Multiply', 2, 't']);
   });
 });
+
+describe('D over lazy operators stays symbolic (Tycho item 115)', () => {
+  // A lazy operator's slots are binders, conditions or statements, not
+  // scalar function arguments: the slot-wise chain-rule fallback is
+  // meaningless for them, and applying the head to wildcard symbols runs
+  // its evaluate handler on nonsense operands (`Which` used to THROW
+  // "Condition must evaluate to..." out of evaluate() on the symbolic
+  // condition). Expected: the `D` stays inert.
+  it('D over Which with a symbolic condition does not throw', () => {
+    const expr = engine.expr([
+      'D',
+      ['Which', ['Less', 'x', 0], ['Power', 'x', 2], 'True', ['Power', 'x', 3]],
+      'x',
+    ]);
+    expect(() => expr.evaluate()).not.toThrow();
+    expect(expr.evaluate().operator).toEqual('D');
+  });
+
+  it('D over an explicit Sum stays inert (no bound-variable leak)', () => {
+    const result = engine
+      .expr(['D', ['Sum', ['Power', 'x', 'm'], ['Triple', 'm', 0, 4]], 'x'])
+      .evaluate();
+    expect(result.operator).toEqual('D');
+  });
+
+  it('a user function whose body is a piecewise stays inert by reference', () => {
+    const ce = new ComputeEngine();
+    ce.parse(
+      'f_0(x) := \\begin{cases} 0 & x \\le 0 \\\\ 1 & x \\ge 1 \\\\ 3x^2-2x^3 & \\end{cases}'
+    ).evaluate();
+    expect(() =>
+      ce.parse('\\frac{\\mathrm{d}}{\\mathrm{d}x} f_0(x)').evaluate()
+    ).not.toThrow();
+  });
+
+  it('a non-lazy unknown head keeps the chain-rule Apply(Derivative…) form', () => {
+    const result = engine.expr(['D', ['Zeta', 'x'], 'x']).evaluate();
+    expect(result.operator).toEqual('Apply');
+  });
+});

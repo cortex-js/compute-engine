@@ -766,6 +766,27 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
     expect(val.hi).toBeCloseTo(5, 10);
   });
 
+  test('Chop bakes the engine tolerance, matching the interpreter', () => {
+    // `Chop` is a comparison-tolerance operator: the compiled form must honor
+    // the engine's configured `ce.tolerance` (baked at compile time, like
+    // compiled `Equal`), not the static default — `Chop(1e-7)` at
+    // `tolerance = 1e-6` is `0` interpreted, and used to compile to `1e-7`.
+    const loose = new ComputeEngine();
+    loose.tolerance = 1e-6;
+    const expr = loose.expr(['Chop', 1e-7]);
+    expect(expr.evaluate().isSame(0)).toBe(true);
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const val = unwrapInterval(fn.run!());
+    expect(val.lo).toBe(0);
+    expect(val.hi).toBe(0);
+    // …and a value above the tolerance passes through unchanged.
+    const above = compile(loose.expr(['Chop', 1e-5]), { to: 'interval-js' });
+    const aval = unwrapInterval(above.run!());
+    expect(aval.lo).toBeCloseTo(1e-5, 12);
+    expect(aval.hi).toBeCloseTo(1e-5, 12);
+  });
+
   test('Erf(1) ≈ 0.8427', () => {
     const expr = ce.expr(['Erf', 1]);
     const fn = compile(expr, { to: 'interval-js' });

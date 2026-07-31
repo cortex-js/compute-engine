@@ -41,6 +41,13 @@
   `Chop` operator) still honor `ce.tolerance`. See ARCHITECTURE.md
   § "Chopping and the `im === 0` convention".
 
+- **Compiled `Chop` now honors the engine's configured tolerance.** The
+  JavaScript and interval targets emitted a bare `chop(x)` call that fell
+  back to the static default (`1e-10`), so at any non-default `ce.tolerance`
+  the compiled result diverged from the interpreter (`Chop(1e-7)` at
+  `tolerance = 1e-6`: `0` interpreted, `1e-7` compiled). Both targets now
+  bake the engine's tolerance at compile time, like compiled `Equal`.
+
 - **`sin`/`cos` of a bignum argument near a zero crossing no longer collapse
   legitimately-small results to `0`.** The bignum kernels chopped their real
   result at `ce.tolerance`, so `\sin(3.141592653588793)` — true value
@@ -133,6 +140,31 @@
   inputs — where it previously returned a plain number in-domain and could
   not represent the out-of-domain value at all. The GPU targets keep the real
   lowering (NaN out of domain), like the rest of the family.
+
+- **A root serialized in the `solidus` or `quotient` root style now delimits
+  a `Power` base.** `Sqrt(Power(x, 2))` serialized as `x^2^{1/2}` — an
+  unparsable nested superscript (`unexpected-superscript` on re-parse) — while
+  every sibling base shape was correctly parenthesized. The base is now braced
+  exactly as the generic `Power` path does (`{x^2}^{1/2}`, which round-trips).
+  The default root style is only `solidus` at nesting depth > 2, so
+  radical-style output (the common case) is unchanged.
+
+- **`D` over a control or binding operator stays symbolic instead of throwing
+  or producing a slot-wise chain-rule form.** `D(Which(x < 0, x², True, x³),
+  x).evaluate()` threw `Condition must evaluate to "True" or "False"` — an
+  exception escaping a public API on ordinary symbolic input (a derivative of
+  a piecewise reaches it through any by-reference callee). Two causes, both
+  fixed: the derivative engine treated ANY operator definition as a
+  user-defined function to expand (applying builtin `Which` to wildcard
+  symbols and evaluating it); builtins are now recognized by system-scope
+  identity, so a user definition shadowing a builtin name still expands. And
+  the slot-wise chain-rule fallback (`Apply(Derivative(f, eᵢ), …)`) no longer
+  applies to a `lazy` operator — its slots are binders, conditions or
+  statements, not scalar function arguments — so `D` over `Which`, an explicit
+  `Sum` (which previously leaked its bound index into the result), or
+  `Integrate` now returns the inert derivative unevaluated, and `D` over
+  `Loop` no longer evaluates the loop body to the deadline. Non-lazy unknown
+  heads (`Zeta`, `ElementMax`) keep the chain-rule form.
 
 ### New Features
 

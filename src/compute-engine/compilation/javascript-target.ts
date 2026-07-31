@@ -789,7 +789,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `Math.ceil(${compile(args[0])})`;
   },
-  Chop: '_SYS.chop',
+  // Bake the engine's configured tolerance, like compiled `Equal`
+  // (`compileJSEquality`): a bare `_SYS.chop(x)` fell back to the static
+  // default (1e-10) and diverged from the interpreter's `Chop` at any
+  // non-default `ce.tolerance`.
+  Chop: (args, compile) =>
+    `_SYS.chop(${compile(args[0])}, ${args[0]?.engine?.tolerance ?? 1e-10})`,
   Cos: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.ccos(${compile(args[0])})`;

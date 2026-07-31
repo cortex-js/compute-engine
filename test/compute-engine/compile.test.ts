@@ -1056,6 +1056,19 @@ describe('COMPILE Equal/NotEqual tolerance (CO-P1-4)', () => {
     expect(r.run!({ x: 0.4 })).toBe(false);
     expect(r.run!({ x: 0.3 })).toBe(true);
   });
+
+  it('compiled Chop bakes the engine tolerance, matching the interpreter', () => {
+    // `Chop` is a comparison-tolerance operator like `Equal`: a bare
+    // `_SYS.chop(x)` fell back to the static default (1e-10) and diverged
+    // from the interpreter at any non-default `ce.tolerance` — `Chop(1e-7)`
+    // at `tolerance = 1e-6` is `0` interpreted but compiled to `1e-7`.
+    const loose = new ComputeEngine();
+    loose.tolerance = 1e-6;
+    const r = compile(loose.box(['Chop', 'x']), { fallback: false });
+    expect(r.run!({ x: 1e-7 })).toBe(0);
+    expect(r.run!({ x: 1e-5 })).toBe(1e-5);
+    expect(loose.box(['Chop', 1e-7]).evaluate().isSame(0)).toBe(true);
+  });
 });
 
 // CO-P1-3: a complex-typed argument into a real-only helper (`_SYS.erf`)

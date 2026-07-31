@@ -1014,13 +1014,23 @@ export function lcm(
 
 /**
  * Chop: replace small values with zero.
- * Monotonic (identity except near zero).
+ * Monotonic (identity except near zero), so endpoint evaluation yields the
+ * exact hull of the pointwise image and containment is preserved.
+ * `tolerance` is baked in by the compile target (the engine's configured
+ * `ce.tolerance`, matching the interpreter's `Chop`); it defaults to the
+ * scalar chop's static default.
  */
-export function chop(x: Interval | IntervalResult): IntervalResult {
+export function chop(
+  x: Interval | IntervalResult,
+  tolerance?: number
+): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  return ok({ lo: scalarChop(xVal.lo), hi: scalarChop(xVal.hi) });
+  return ok({
+    lo: scalarChop(xVal.lo, tolerance),
+    hi: scalarChop(xVal.hi, tolerance),
+  });
 }
 
 /**

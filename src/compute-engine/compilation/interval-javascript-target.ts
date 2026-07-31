@@ -369,7 +369,10 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     `_IA.binomial(${compile(args[0])}, ${compile(args[1])})`,
   GCD: (args, compile) => `_IA.gcd(${compile(args[0])}, ${compile(args[1])})`,
   LCM: (args, compile) => `_IA.lcm(${compile(args[0])}, ${compile(args[1])})`,
-  Chop: (args, compile) => `_IA.chop(${compile(args[0])})`,
+  // Tolerance baked at compile time from the engine, matching the
+  // interpreter's `Chop` and the JS target (see `javascript-target.ts`).
+  Chop: (args, compile) =>
+    `_IA.chop(${compile(args[0])}, ${args[0]?.engine?.tolerance ?? 1e-10})`,
   Erf: (args, compile) => `_IA.erf(${compile(args[0])})`,
   Erfc: (args, compile) => `_IA.erfc(${compile(args[0])})`,
   Exp2: (args, compile) => `_IA.exp2(${compile(args[0])})`,

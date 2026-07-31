@@ -156,3 +156,36 @@ describe('latexOptions threads through MathJSON metadata serialization', () => {
     expect(latex).toContain('x');
   });
 });
+
+describe('solidus/quotient root style over a Power base (Tycho item 113)', () => {
+  // The exponent-spelled root styles must delimit a base that is itself a
+  // Power: bare `x^2^{1/2}` is unparsable LaTeX (`unexpected-superscript`),
+  // so the base is braced — `{x^2}^{1/2}` — like the generic Power path.
+  const shapes: [string, unknown][] = [
+    ['Sqrt(Power)', ['Sqrt', ['Power', 'x', 2]]],
+    ['Root(Power, 3)', ['Root', ['Power', 'x', 2], 3]],
+    ['nested Sqrt', ['Sqrt', ['Sqrt', ['Power', 'x', 2]]]],
+  ];
+  for (const style of ['solidus', 'quotient'] as const) {
+    for (const [label, json] of shapes) {
+      test(`${label} round-trips under rootStyle '${style}'`, () => {
+        const ce = new ComputeEngine();
+        ce.latexOptions = { rootStyle: () => style };
+        const expr = ce.box(json as any, { canonical: false });
+        // The reparse spells the root as a fractional Power; compare
+        // canonically (`x^2^{1/2}` used to reparse as an Error instead).
+        const reparsed = ce.parse(expr.toLatex());
+        expect(reparsed.isValid).toBe(true);
+        expect(reparsed.isSame(expr.canonical)).toBe(true);
+      });
+    }
+  }
+
+  test('the solidus witness braces the Power base', () => {
+    const ce = new ComputeEngine();
+    ce.latexOptions = { rootStyle: () => 'solidus' };
+    expect(
+      ce.box(['Sqrt', ['Power', 'x', 2]], { canonical: false }).toLatex()
+    ).toEqual('{x^2}^{1/2}');
+  });
+});
