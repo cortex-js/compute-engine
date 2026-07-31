@@ -26,12 +26,25 @@
   in principle. Now, under `realOnly` a non-real constant folds to `NaN`;
   without it, `Sqrt` of a negative folds to the complex principal value
   (`Sqrt(-2)` previously declined even in complex mode, though `1 + i` compiled
-  fine). `Power`/`Root` that stay non-real fold to `NaN` rather than a complex
-  literal, because their canonical type is `finite_number` — the type handlers
-  do not track a negative base under a fractional exponent — so a complex
-  literal there would make the enclosing real arithmetic produce garbage. Fail
-  closed exists to prevent silently-wrong output; `NaN` is the correct,
-  self-describing answer. The GPU targets follow the same ruling on both halves.
+  fine). `Power`/`Root` fold to the complex principal value only when the
+  complex branch is PROVABLE from the type — a provably negative base whose
+  reduced-rational exponent has an even denominator now types `finite_complex`
+  and folds accordingly (`(−2)^{0.3}` → `0.7236… + 0.9960…i`); when the branch
+  cannot be proven the type stays the `finite_number` hedge and the fold is
+  `NaN`, so a complex literal never lands inside enclosing real arithmetic
+  unannounced. Fail closed exists to prevent silently-wrong output; `NaN` is
+  the correct, self-describing answer there. The GPU targets follow the same
+  ruling on both halves.
+
+- **Compiled `InverseHaversine` of a symbolic argument returns a complex
+  value.** The head is real only on `[0, 1]` — `hav⁻¹(z) = 2·arcsin(√z)` is
+  complex outside — and now carries the same honest static type as the
+  `Arcsin` family (`finite_complex` for an unconstrained real). The
+  JavaScript target gains the matching complex lowering (`_SYS.cinvhav`), so
+  a compiled symbolic call returns `{re, im}` — with `im: 0` for in-domain
+  inputs — where it previously returned a plain number in-domain and could
+  not represent the out-of-domain value at all. The GPU targets keep the real
+  lowering (NaN out of domain), like the rest of the family.
 
 ### New Features
 
@@ -50,7 +63,72 @@
   emitted only when referenced — and WGSL inlines the equivalent bitcast.
   Deliberately not `1.0 / 0.0`, which a fast-math driver is licensed to fold.
 
+### Improvements
+
+- **Tighter static result types where the value is provably real** (type
+  audit). `Tan`/`Sec`/`Csc`/`Cot`/`Coth`/`Csch` claimed the top type `number`
+  unconditionally. A number literal cannot land on a nonzero pole — the poles
+  are irrational multiples of π — so literals now claim `finite_real`
+  (`Tan(2)`, `Csc(2)`), with the literal-reachable pole at 0 still widening
+  the zero-pole four (`Csc(0)`) and π-multiple constants staying `number`
+  (`Tan(π/2)` is `~oo`). A symbolic real follows the generic-point
+  convention: `Tan(r)`/`Sec(r)` claim `finite_real`; `Csc(r)` narrows only
+  once the sign is known (`r > 0`). Also narrowed: `Max`/`Min`/`Supremum`/
+  `Infimum` join their operand types when every operand is a scalar number
+  (`Max(r, k)` with `r: real`, `k: integer` is `real`, was `number` — a
+  collection operand still widens, per the missing-data absorption ruling);
+  `Sinh`/`Cosh` at a real ±∞ claim the provable `non_finite_number` while
+  `Tanh`/`Sech` (limits ±1, 0) and `Coth`/`Csch` claim `finite_real` there;
+  `Pochhammer` with a non-negative integer count claims
+  integer/rational/real following its base; `Rank` always claims
+  `finite_integer`.
+
 ### Bug Fixes
+
+- **A sweep of unsound static type claims** (type audit): several operators
+  claimed a result type that excludes values they actually produce, so
+  compiled code guessed real and emitted NaN. Fixed: `Haversine`/`Degrees`/
+  `DMS`/`Hypot` on non-finite or non-real arguments (`Hypot(∞, 2) = +∞` under
+  a `finite_real` claim — and a point operand with a non-finite component was
+  dropped from the computation entirely); `Real`/`Imaginary`/`Argument`
+  (`Re(±∞) = ±∞`, `Arg(~oo)` is NaN — all claimed `finite_real`); `Erf`/
+  `Erfc`/`Erfi` and the `SinIntegral`/`CosIntegral` family for operands not
+  provably real; `ErfInv` outside `(−1, 1)` (NaN, claimed `real`) and at the
+  ±1 poles (±∞, now the provable `non_finite_number`); `EllipticK`/
+  `EllipticE` above m = 1 (finite complex, claimed `finite_real`);
+  `InverseHaversine` outside `[0, 1]`; `Binomial` — and its alias `Choose`,
+  which shares the evaluator and now shares the type handler — for real,
+  infinite, or Γ-pole arguments (both claimed `finite_integer`
+  unconditionally, though `Binomial(0.5, 2.5)` is real and `Binomial(∞, 2)`
+  is NaN).
+
+- **Domain classification is exact at boundary values.** Two rounding hazards
+  in the bounded-domain type machinery: the machine `.re` of an exact value
+  just past a boundary rounds onto it (`EllipticK(1 + 10⁻²⁰)` classified as
+  the +∞ pole), and the tolerance-based `isEqual` placed such values "at" a
+  pole as well. Number literals now classify with exact comparisons —
+  `Artanh(1 + 10⁻²⁰)` types `finite_complex`, `Artanh(1)` stays
+  `non_finite_number`.
+
+- **Angle-unit conversion no longer drops the imaginary part of a complex
+  angle.** In `deg`/`grad`/`turn` mode the radians conversion read only the
+  real part: `arcsin(2.5)` in degree mode returned the real `90`, silently
+  discarding `−89.77…i`. The conversion is linear, so it now scales the whole
+  complex value (an imaginary part within tolerance still chops to the real
+  path), and interpreted and compiled results agree again.
+
+- **`LCM(0, 0)` is `0`** — it went through `0·0/gcd(0, 0)` and returned NaN
+  (or threw, on the bigint kernel), contradicting `lcm(0, n) = 0`.
+
+- **`SigmaMinus1` honors the exactness contract**: `SigmaMinus1(2)` returned
+  the float `1.5` under plain `evaluate()`; it now returns the exact `3/2`
+  (and `217/100` for 100), numericizing only under `.N()`.
+
+- **`Chop` keeps exact operands exact.** `Chop(2/3)` returned
+  `0.6666666666666…`; an exact operand now passes through unchanged under
+  `evaluate()` unless something actually chops (`Chop(10⁻²⁰)` is still `0`,
+  and a mixed exact complex with one tiny component falls through to the
+  component-wise numeric chop).
 
 - **`Max`/`Min` over a single collection returned a vector on GPU targets
   instead of reducing.** `Max([1,2,3])` compiled to `vec3(1.0, 2.0, 3.0)` where

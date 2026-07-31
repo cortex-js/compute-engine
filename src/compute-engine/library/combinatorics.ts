@@ -4,6 +4,7 @@ import {
   toIntegerOperand,
 } from '../boxed-expression/numerics.js';
 import type { Expression, SymbolDefinitions } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { apply2 } from '../boxed-expression/apply.js';
 import { gamma, bigGamma, gammaln } from '../numerics/special-functions.js';
@@ -114,6 +115,29 @@ function binomialBigint(
  * - Complex or non-numeric (symbolic) operands: stay symbolic (no closed
  *   form implemented for complex args; symbolic args can't be evaluated).
  */
+/**
+ * Result type shared by `Binomial` and `Choose` (they share
+ * `evaluateBinomial` and must agree). Integer n, k → an integer (also for
+ * negative n, via the falling factorial). Real arguments go through the Γ
+ * ratio: finite real unless the numerator Γ(n+1) sits on a pole (negative
+ * integer n with a non-integer k) — there, and for non-finite or non-real
+ * arguments, nothing narrower than `number` is sound (`Binomial(∞, 2)` is
+ * NaN).
+ */
+function binomialType(
+  n: Expression | undefined,
+  k: Expression | undefined
+): Type {
+  if (!n || !k || n.isNaN || k.isNaN) return 'number';
+  if (n.isFinite === false || k.isFinite === false) return 'number';
+  if (n.isInteger === true && k.isInteger === true) return 'finite_integer';
+  if (n.isReal === true && k.isReal === true) {
+    if (n.isInteger === true && n.isNegative === true) return 'number';
+    return 'finite_real';
+  }
+  return 'number';
+}
+
 function evaluateBinomial(
   nExpr: Expression,
   kExpr: Expression,
@@ -246,7 +270,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Binomial coefficient: number of ways to choose k items from n. Agrees with Binomial for all defined values.',
       complexity: 1200,
       signature: '(n:number, m:number) -> number',
-      type: () => 'finite_integer',
+      type: ([n, k]) => binomialType(n, k),
 
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
         evaluateBinomial(n, k, numericApproximation, ce),
@@ -305,7 +329,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // into an Error() at canonicalization time, before `evaluate` ever
       // ran. Binomial is well-defined (via Gamma) for real n, k.
       signature: '(number, number) -> number',
-      type: () => 'finite_integer',
+      type: ([n, k]) => binomialType(n, k),
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
         evaluateBinomial(n, k, numericApproximation, ce),
     },
@@ -314,6 +338,20 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Rising factorial (Pochhammer symbol) (a)_k = a(a+1)…(a+k-1).',
       wikidata: 'Q2367490',
       signature: '(number, number) -> number',
+      // (a)_k with a provably non-negative integer k is a finite product of
+      // k terms: integer for integer a, real for real a. Any other k reaches
+      // the Γ-ratio continuation, which can hit poles (→ `~oo`) or complex
+      // values.
+      type: ([a, k]) => {
+        if (!a || !k || a.isNaN || k.isNaN) return 'number';
+        if (a.isFinite === false || k.isFinite === false) return 'number';
+        if (k.isInteger === true && k.isNonNegative === true) {
+          if (a.isInteger === true) return 'finite_integer';
+          if (a.isRational === true) return 'finite_rational';
+          if (a.isReal === true) return 'finite_real';
+        }
+        return 'number';
+      },
       evaluate: ([a, k], { engine: ce }) => evaluatePochhammer(a, k, ce),
     },
     CartesianProduct: {

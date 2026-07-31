@@ -30,7 +30,13 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { isTuple } from '../collection-utils.js';
 import { pointNormType } from './utils.js';
-import { numericTypeHandler, elementaryFunctionType } from './type-handlers.js';
+import {
+  numericTypeHandler,
+  elementaryFunctionType,
+  boundedInverseTrigType,
+  iv,
+  type RealDomain,
+} from './type-handlers.js';
 import { isMeasurement, measurementTrig } from './measurement-arithmetic.js';
 import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite.js';
 import { getUnitScale } from './unit-data.js';
@@ -91,7 +97,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Convert an angle in degrees.',
       /* = Pi / 180 */
       signature: '(real) -> real',
-      type: () => 'finite_real',
+      // A non-real or non-finite argument flows through the linear conversion
+      // (`Degrees(i) = iπ/180`), so the claim must follow the operand.
+      type: (ops) => numericTypeHandler(ops),
       canonical: (ops, { engine }) => {
         const ce = engine;
         if (ce.angularUnit === 'deg') return ops[0];
@@ -141,7 +149,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     DMS: {
       description: 'Construct an angle from degrees, minutes, and seconds.',
       signature: '(real, real?, real?) -> real',
-      type: () => 'finite_real',
+      type: (ops) => numericTypeHandler(ops),
       canonical: (ops, { engine: ce }) => {
         const deg = ops[0]?.re ?? NaN;
         const min = ops[1]?.re ?? 0;
@@ -184,11 +192,32 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // A point argument with a broadcasting component zips into one result
       // per element (via its norm below) — report the honest list type, not
       // a decided-but-wrong scalar (the Tycho item-44 class).
-      type: ([x, y]) =>
-        (x && isTuple(x) && pointNormType(x) !== 'number') ||
-        (y && isTuple(y) && pointNormType(y) !== 'number')
-          ? 'list<number>'
-          : 'finite_real',
+      type: ([x, y]) => {
+        if (
+          (x && isTuple(x) && pointNormType(x) !== 'number') ||
+          (y && isTuple(y) && pointNormType(y) !== 'number')
+        )
+          return 'list<number>';
+        // A point with a non-finite component has a non-finite norm
+        // (`Hypot((∞, 3), 2) = +∞`), so it must widen like a non-finite
+        // scalar rather than be dropped from the computation.
+        if (
+          [x, y].some(
+            (o) =>
+              o &&
+              isTuple(o) &&
+              isFunction(o) &&
+              o.ops.some((el) => el.isFinite === false)
+          )
+        )
+          return 'number';
+        // Fixed-arity points square through their (finite real) norm; the
+        // scalar operands decide the rest — a non-finite one makes the result
+        // non-finite (`Hypot(∞, 2) = +∞`), a complex one makes it complex.
+        return numericTypeHandler(
+          [x, y].filter((o): o is Expression => o !== undefined && !isTuple(o))
+        );
+      },
       sgn: () => 'non-negative',
       // Evaluate the constructed √(x²+y²) so `.N()` returns a number, not an
       // unevaluated expression (the handler result is not re-driven otherwise).
@@ -396,7 +425,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q2528380',
       broadcastable: true,
       signature: '(real) -> number',
-      type: () => 'finite_real',
+      // hav is entire (½(1−cos z)): finite real → [0,1] ⊂ finite real, but
+      // `hav(±∞)` is NaN and a complex argument gives a complex value.
+      type: (ops) => numericTypeHandler(ops),
       // Evaluate the constructed ½(1−cos z) so `.N()` returns a number, not the
       // unevaluated expression; exact arguments still stay symbolic under
       // `evaluate()` (e.g. `Haversine(2) → ½(1−cos 2)`).
@@ -411,8 +442,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       description: 'Inverse haversine function.',
       //  Range ['Interval', [['Negate', 'Pi'], 'Pi'],
       broadcastable: true,
-      signature: '(real) -> real',
-      type: () => 'finite_real',
+      signature: '(real) -> number',
+      // Real only on [0, 1] (`hav⁻¹(z) = 2·arcsin(√z)`): outside, the value
+      // is finite complex (`hav⁻¹(−1) = 1.7627…i`); no real pole. Same
+      // honest-join treatment as the Arcsin family (user ruling 2026-07-30):
+      // a symbolic real of unknown magnitude claims `finite_complex`, and
+      // the compiled path emits complex code accordingly.
+      type: (ops) => boundedInverseTrigType(ops, INVERSE_HAVERSINE_DOMAIN),
       // Evaluate the constructed 2·arcsin(√z): under `.N()` it numericizes,
       // and under `evaluate()` the exact fold applies (`InverseHaversine(1/2) →
       // 2·arcsin(√2/2) → 2·(π/4) → π/2`).
@@ -578,14 +614,20 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       complexity: 5200,
       broadcastable: true,
       signature: '(number) -> number',
-      // Si is entire and odd: a real argument → finite real; a finite complex
-      // argument → finite complex value.
+      // Si is entire and odd: a real argument → finite real (including ±∞:
+      // Si(±∞) = ±π/2); a finite complex argument → finite complex value. An
+      // operand of unproven realness (a `number`-typed symbol) must not claim
+      // real — it keeps the generic finite-point hedge.
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        return 'finite_real';
+        if (x.isReal === true) return 'finite_real';
+        // Unknown realness: a non-finite value (~oo) escapes the finite
+        // hedge, so it must be excluded before claiming it.
+        if (x.isFinite === false) return 'number';
+        return 'finite_number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -614,13 +656,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       // Real argument → real (not finite_real: Ci(0) = −∞); a finite complex
-      // argument → finite complex value.
+      // argument → finite complex value. Unproven realness → `number` (the
+      // value may be complex, and −∞ rules out the finite hedge).
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        return 'real';
+        return x.isReal === true ? 'real' : 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -646,13 +689,16 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       // Shi is entire and odd: a finite real → finite real, a finite complex
-      // argument → finite complex value.
+      // argument → finite complex value, Shi(±∞) = ±∞. Unproven realness →
+      // `number` (Shi is unbounded, so no finite hedge is available).
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        return x.isFinite === true ? 'finite_real' : 'real';
+        if (x.isReal === true)
+          return x.isFinite === true ? 'finite_real' : 'real';
+        return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -680,13 +726,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(number) -> number',
       // Real argument → real (not finite_real: Chi(0) = −∞); a finite complex
-      // argument → finite complex value.
+      // argument → finite complex value. Unproven realness → `number`.
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        return 'real';
+        return x.isReal === true ? 'real' : 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -774,6 +820,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     },
   },
 ];
+
+/** `InverseHaversine`: real on `[0, 1]`, finite complex outside, no real pole. */
+const INVERSE_HAVERSINE_DOMAIN: RealDomain = {
+  real: [iv(0, true, 1, true)],
+  complex: [iv(-Infinity, false, 0, false), iv(1, false, Infinity, false)],
+  poles: [],
+  poleType: 'number',
+};
 
 const ANGULAR_UNITS = new Set([
   'deg',

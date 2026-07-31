@@ -141,13 +141,18 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 7500,
       signature: '(number) -> number',
       // Erf is entire and bounded on the reals (Erf(±∞) = ±1); a finite
-      // complex argument gives a finite complex value.
+      // complex argument gives a finite complex value. An operand of unproven
+      // realness (a `number`-typed symbol) keeps the generic finite hedge —
+      // its value may be complex, so it must not claim real.
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        return 'finite_real';
+        if (x.isReal === true) return 'finite_real';
+        // Unknown realness: exclude a non-finite value (~oo) before hedging.
+        if (x.isFinite === false) return 'number';
+        return 'finite_number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -172,7 +177,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Complementary error function: 1 - Erf(x)',
       complexity: 7500,
       signature: '(number) -> number',
-      type: () => 'finite_real',
+      // Same shape as Erf: entire, bounded on the reals (Erfc(±∞) = 2, 0).
+      type: (ops) => {
+        const x = ops[0];
+        if (!x || x.isNaN) return 'number';
+        if (x.isReal === false)
+          return x.isFinite === true ? 'finite_complex' : 'number';
+        if (x.isReal === true) return 'finite_real';
+        // Unknown realness: exclude a non-finite value (~oo) before hedging.
+        if (x.isFinite === false) return 'number';
+        return 'finite_number';
+      },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation
@@ -191,8 +206,24 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Inverse of the error function',
       complexity: 7500,
       signature: '(number) -> number',
-      // Not finite_real: ErfInv(±1) = ±∞
-      type: () => 'real',
+      // Real domain (−1, 1) → finite real; ±1 are the ±∞ poles; outside the
+      // domain (or non-real / ±∞ argument) the evaluate handler yields NaN,
+      // so nothing narrower than `number` is sound there.
+      type: ([x]) => {
+        if (!x || x.isNaN || x.isFinite === false) return 'number';
+        if (x.isReal !== true) return 'number';
+        if (x.isGreater(-1) === true && x.isLess(1) === true)
+          return 'finite_real';
+        // Exact pole check for literals: `isEqual` is tolerance-based and
+        // would put `1 + 10⁻²⁰` (whose value is NaN, not ±∞) at the pole.
+        if (
+          isNumber(x)
+            ? x.isSame(1) || x.isSame(-1)
+            : x.isEqual(1) === true || x.isEqual(-1) === true
+        )
+          return 'non_finite_number';
+        return 'number';
+      },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation
@@ -214,13 +245,16 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 7500,
       signature: '(number) -> number',
       // Not finite_real on the reals: Erfi(±∞) = ±∞. A finite complex
-      // argument gives a finite complex value.
+      // argument gives a finite complex value. Unproven realness → `number`
+      // (Erfi is unbounded, so no finite hedge is available).
       type: (ops) => {
         const x = ops[0];
         if (!x || x.isNaN) return 'number';
         if (x.isReal === false)
           return x.isFinite === true ? 'finite_complex' : 'number';
-        return x.isFinite === true ? 'finite_real' : 'real';
+        if (x.isReal === true)
+          return x.isFinite === true ? 'finite_real' : 'real';
+        return 'number';
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;

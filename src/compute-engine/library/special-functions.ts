@@ -6,7 +6,12 @@ import type {
 import { applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
-import { numericTypeHandler } from './type-handlers.js';
+import {
+  numericTypeHandler,
+  boundedInverseTrigType,
+  iv,
+  type RealDomain,
+} from './type-handlers.js';
 import {
   ellipticK,
   ellipticE,
@@ -60,6 +65,23 @@ import {
  *   only evaluated for r = 0.
  * - `DedekindEta(tau)` = e^{iπτ/12}·∏(1 − e^{2πikτ}) (Fungrim 1dc520).
  */
+
+/** `EllipticK`: real for m < 1, `+∞` pole at m = 1, finite complex for m > 1. */
+const ELLIPTIC_K_DOMAIN: RealDomain = {
+  real: [iv(-Infinity, false, 1, false)],
+  complex: [iv(1, false, Infinity, false)],
+  poles: [1],
+  poleType: 'non_finite_number',
+};
+
+/** Complete `EllipticE`: real for m ≤ 1 (E(1) = 1), finite complex for m > 1. */
+const ELLIPTIC_E_DOMAIN: RealDomain = {
+  real: [iv(-Infinity, false, 1, true)],
+  complex: [iv(1, false, Infinity, false)],
+  poles: [],
+  poleType: 'number',
+};
+
 export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
   {
     EllipticK: {
@@ -69,13 +91,10 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       broadcastable: true,
       signature: '(number) -> number',
-      // K(1) = +∞ exactly — a *provably* non-finite (±∞) value, claimed as
-      // `non_finite_number` per the non-finite typing convention (mirrors the
-      // `evaluate` special case below).
-      type: ([m]) =>
-        isNumber(m) && m.im === 0 && m.isSame(1)
-          ? 'non_finite_number'
-          : numericTypeHandler([m]),
+      // Real for m < 1, the +∞ pole at m = 1 (mirroring the `evaluate`
+      // special case below), and a finite complex value for m > 1
+      // (`K(2) = 1.311… − 1.311…i`).
+      type: (ops) => boundedInverseTrigType(ops, ELLIPTIC_K_DOMAIN),
       evaluate: ([m], { numericApproximation, engine }) => {
         // K(1) = +∞ exactly (Fungrim 45b157)
         if (isNumber(m) && m.im === 0 && m.isSame(1))
@@ -100,7 +119,17 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       broadcastable: true,
       signature: '(number, number?) -> number',
-      type: (ops) => numericTypeHandler(ops),
+      // Complete E(m): real on m ≤ 1 (E(1) = 1), finite complex for m > 1.
+      // Incomplete E(φ|m): the value is complex whenever m·sin²φ > 1, a
+      // condition on both operands — hedge with the finite generic point
+      // (`finite_number` admits both real and complex) and widen on a
+      // non-finite operand.
+      type: (ops) =>
+        ops.length === 1
+          ? boundedInverseTrigType(ops, ELLIPTIC_E_DOMAIN)
+          : ops.some((x) => x.isNaN || x.isFinite === false)
+            ? 'number'
+            : 'finite_number',
       evaluate: (ops, { numericApproximation, engine }) => {
         if (ops.length === 2) {
           // Incomplete E(φ|m): E(0|m) = 0 exactly

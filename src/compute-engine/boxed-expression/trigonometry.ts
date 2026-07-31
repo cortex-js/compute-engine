@@ -272,12 +272,25 @@ export function radiansToAngle(
   const angularUnit = ce.angularUnit;
   if (angularUnit === 'rad') return x;
 
-  const theta = x.N().re;
+  const n = x.N();
+  const theta = n.re;
   if (Number.isNaN(theta)) return x;
-  if (angularUnit === 'deg') return ce.number(theta * (180 / Math.PI));
-  if (angularUnit === 'grad') return ce.number(theta * (200 / Math.PI));
-  if (angularUnit === 'turn') return ce.number(theta / (2 * Math.PI));
-  return x;
+  const scale =
+    angularUnit === 'deg'
+      ? 180 / Math.PI
+      : angularUnit === 'grad'
+        ? 200 / Math.PI
+        : angularUnit === 'turn'
+          ? 1 / (2 * Math.PI)
+          : null;
+  if (scale === null) return x;
+  // The unit conversion is linear, so it applies to the whole complex value:
+  // reading only `.re` silently returned a wrong REAL angle for a complex
+  // one (`arcsin(2.5)` in deg mode gave `90`, dropping the imaginary part).
+  // A dust-sized imaginary part (within tolerance) chops to the real path.
+  if (!Number.isNaN(n.im) && ce.chop(n.im) !== 0)
+    return ce.number(ce.complex(theta * scale, n.im * scale));
+  return ce.number(theta * scale);
 }
 
 export function evalTrig(

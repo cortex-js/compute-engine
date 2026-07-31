@@ -47,7 +47,22 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
-      type: () => 'finite_real',
+      // Re follows the operand's finiteness: a finite number has a finite
+      // real part, `Re(±∞) = ±∞`, and `~oo`/NaN (typed `number`) stay
+      // unrepresentable by a finite claim.
+      type: ([z]) => {
+        if (!z) return 'number';
+        const t = z.type;
+        if (t.matches('finite_number')) return 'finite_real';
+        if (t.matches('non_finite_number')) return 'non_finite_number';
+        if (isNumber(z)) return 'number'; // NaN or ~oo literal
+        // Collection operand: scalar claim for the broadcast lift — elements
+        // keep the generic finite-point convention (list-broadcast-typing).
+        if (t.matches('indexed_collection')) return 'finite_real';
+        // A real-typed operand is its own real part (`real` excludes NaN);
+        // a `number`-typed one may be NaN/~oo, which `real` cannot admit.
+        return t.matches('real') ? 'real' : 'number';
+      },
       sgn: ([op], { engine: ce }) => {
         const re = op.re;
         // Symbol with no value: fall back to assumed bounds on `re:op`
@@ -71,7 +86,19 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
-      type: () => 'finite_real',
+      // Im of a finite number is a finite real, and a real ±∞ has a zero
+      // imaginary part; `~oo`/NaN (typed `number`) do not admit a finite claim.
+      type: ([z]) => {
+        if (!z) return 'number';
+        const t = z.type;
+        if (t.matches('finite_number') || t.matches('non_finite_number'))
+          return 'finite_real';
+        if (isNumber(z)) return 'number'; // NaN or ~oo literal
+        if (t.matches('indexed_collection')) return 'finite_real';
+        // A real-typed operand has Im = 0; a `number`-typed one may be
+        // NaN/~oo, whose imaginary part is not a (finite) real.
+        return t.matches('real') ? 'finite_real' : 'number';
+      },
       sgn: ([op], { engine: ce }) => {
         const im = op.im;
         // Symbol with no value: fall back to assumed bounds on `im:op`
@@ -92,7 +119,19 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       complexity: 1200,
       signature: '(number) -> real',
-      type: () => 'finite_real',
+      // Arg of a finite number — or of a real ±∞ (0 or π) — is a finite
+      // real; `Arg(~oo)`/`Arg(NaN)` (typed `number`) are NaN.
+      type: ([z]) => {
+        if (!z) return 'number';
+        const t = z.type;
+        if (t.matches('finite_number') || t.matches('non_finite_number'))
+          return 'finite_real';
+        if (isNumber(z)) return 'number'; // NaN or ~oo literal
+        if (t.matches('indexed_collection')) return 'finite_real';
+        // A real-typed operand has Arg ∈ {0, π}; a `number`-typed one may be
+        // NaN/~oo, where Arg is NaN.
+        return t.matches('real') ? 'finite_real' : 'number';
+      },
       // Sign from assumed bounds on `arg:op` (design §5.1b); values are
       // handled by `evaluate`
       sgn: ([op], { engine: ce }) => signFromAssumedPart(ce, op, 'arg'),

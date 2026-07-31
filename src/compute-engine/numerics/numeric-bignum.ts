@@ -9,6 +9,8 @@ export function gcd(a: BigNum, b: BigNum): BigNum {
 }
 
 export function lcm(a: BigNum, b: BigNum): BigNum {
+  // `lcm(0, n) = 0`: the general formula would divide by `gcd(0, 0) = 0`.
+  if (a.isZero() || b.isZero()) return BigDecimal.ZERO;
   // The least common multiple is non-negative by convention.
   return a.mul(b).div(gcd(a, b)).abs();
 }

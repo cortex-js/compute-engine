@@ -2178,6 +2178,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   InverseHaversine: ([x], compile) => {
     if (x === null) throw new Error('InverseHaversine: no argument');
+    // Same complex discipline as the Arcsin family: hav⁻¹ = 2·arcsin(√z) is
+    // complex outside [0, 1], and the node's TYPE (which the enclosing
+    // expression's codegen reads) claims complex for an unconstrained real.
+    if (BaseCompiler.isComplexValued(x))
+      return `_SYS.cinvhav(${compile(x)})`;
+    if (resultIsComplexValued('InverseHaversine', [x]))
+      return `_SYS.cinvhav(${complexOperandCode(x, compile)})`;
     return `(2 * Math.asin(Math.sqrt(${compile(x)})))`;
   },
 
@@ -3855,6 +3862,9 @@ const SYS_HELPERS = {
   ccosh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).cosh()),
   ctanh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).tanh()),
   csqrt: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sqrt()),
+  // hav⁻¹(z) = 2·arcsin(√z), continued to the complex plane
+  cinvhav: (z: ComplexResult) =>
+    toRI(new Complex(z.re, z.im).sqrt().asin().mul(2)),
   cexp: (z: ComplexResult) => toRI(new Complex(z.re, z.im).exp()),
   cln: (z: ComplexResult) => toRI(new Complex(z.re, z.im).log()),
   cpow: (z: number | ComplexResult, w: number | ComplexResult) => {

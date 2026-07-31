@@ -953,3 +953,16 @@ describe('factorization is interruptible (Finding 1)', () => {
     ).toBe('[(999983, 1),(999999999989, 1)]');
   });
 });
+
+describe('SigmaMinus1 is exact under evaluate', () => {
+  // σ₋₁(n) = σ₁(n)/n is a rational; the exactness contract keeps it exact
+  // under `evaluate()` (it used to fold to a float).
+  it('returns an exact rational', () => {
+    expect(ce.box(['SigmaMinus1', 2]).evaluate().toString()).toBe('3/2');
+    expect(ce.box(['SigmaMinus1', 12]).evaluate().toString()).toBe('7/3');
+    expect(ce.box(['SigmaMinus1', 100]).evaluate().toString()).toBe('217/100');
+  });
+  it('numericizes under N()', () => {
+    expect(ce.box(['SigmaMinus1', 2]).N().re).toBeCloseTo(1.5, 12);
+  });
+});

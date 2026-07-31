@@ -158,6 +158,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         'The length of the shape of the expression. Note this is not the matrix rank (the number of linearly independent rows or columns in the matrix)',
       complexity: 8200,
       signature: '(value) -> number',
+      // Always a small non-negative machine integer. Without the explicit
+      // handler, signature inference passed the OPERAND's type through
+      // (`Rank(i)` claimed `imaginary` while evaluating to 0).
+      type: () => 'finite_integer',
       // The rank (number of dimensions) of a scalar is 0.
       sgn: (): Sign => 'non-negative',
       evaluate: ([xs], { engine: ce }) => ce.number(xs.rank),

@@ -80,17 +80,47 @@ function logType(ops: ReadonlyArray<Expression>): Type {
 }
 
 /**
- * `Tan`/`Sec`/`Csc`/`Cot` (and the hyperbolic reciprocals with a pole at 0):
- * a finite real argument can land on a pole (→ `~oo`, e.g. `Csc(0)`,
- * `Tan(π/2)`) or give a finite value, and a ±∞ argument gives NaN. Since
- * `~oo` is representable only by the top type (the lattice's
- * `non_finite_number` is ±∞ only), the sound claim is `number` per the
- * non-finite typing convention. (Previously claimed `complex`, which does
- * not admit `~oo`.)
+ * `Tan`/`Sec`/`Csc`/`Cot` (and the hyperbolic reciprocals `Coth`/`Csch`,
+ * poles at 0): a pole value is `~oo`, representable only by the top type
+ * (the lattice's `non_finite_number` is ±∞ only), so an argument that may
+ * sit on a pole claims `number`.
+ *
+ * The poles of Tan/Sec are the odd multiples of π/2 and those of Csc/Cot the
+ * multiples of π — all irrational except 0 (a Csc/Cot/Csch/Coth pole only).
+ * A number literal therefore never lands on a nonzero pole, and a symbolic
+ * real keeps the generic-point convention (the pole set has measure zero) —
+ * with zero-ness, the one *provable* pole, required to be disproven (sgn)
+ * for the zero-pole operators.
+ *
+ * ±∞: the circular functions give NaN (→ `number`), while `coth(±∞) = ±1`
+ * and `csch(±∞) = 0` are finite reals.
  */
-function poleReciprocalType(ops: ReadonlyArray<Expression>): Type {
+function poleReciprocalType(
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): Type {
   const x = ops[0];
-  if (!x || x.isNaN || x.isFinite === false) return 'number';
+  if (!x || x.isNaN) return 'number';
+  const hyperbolic = operator === 'Coth' || operator === 'Csch';
+  if (x.isFinite === false)
+    return hyperbolic && x.isReal === true ? 'finite_real' : 'number';
+  if (x.isReal !== true) return 'number';
+  // Only the pole at 0 is reachable by a number literal (every other pole is
+  // an irrational multiple of π, which no literal — rational, float, or
+  // radical — equals).
+  const poleAtZero = operator !== 'Tan' && operator !== 'Sec';
+  if (isNumber(x))
+    return poleAtZero && x.isSame(0) ? 'number' : 'finite_real';
+  // A non-literal CONSTANT (π/2, 2π/3, …) can sit exactly on a circular pole
+  // — `Tan(π/2) = ~oo`, `Csc(π) = ~oo` — so it keeps `number` (pinned by
+  // non-finite-typing.test.ts). The hyperbolic poles are only at 0, where the
+  // sgn check below decides.
+  if (!hyperbolic && x.isConstant) return 'number';
+  if (!poleAtZero) return 'finite_real';
+  // Zero-pole operators on a symbolic real: the pole at 0 — the one provable
+  // pole — must be disproven; the rest of the pole set has measure zero
+  // (generic-point convention).
+  if (x.isPositive === true || x.isNegative === true) return 'finite_real';
   return 'number';
 }
 
@@ -98,14 +128,14 @@ function poleReciprocalType(ops: ReadonlyArray<Expression>): Type {
  * A real interval, with per-end closedness. Use `±Infinity` for an unbounded
  * end (its closedness is then irrelevant).
  */
-type RealInterval = {
+export type RealInterval = {
   lo: number;
   loClosed: boolean;
   hi: number;
   hiClosed: boolean;
 };
 
-const iv = (
+export const iv = (
   lo: number,
   loClosed: boolean,
   hi: number,
@@ -131,7 +161,7 @@ const iv = (
  * membership in a closed interval whose endpoint is a pole would not exclude
  * the non-finite value there.
  */
-type RealDomain = {
+export type RealDomain = {
   /** Intervals on which the head is finite-real-valued. */
   real: readonly RealInterval[];
   /** Intervals on which the head takes a finite, *non-real* value. */
@@ -182,7 +212,7 @@ function provablyIn(
   });
 }
 
-function boundedInverseTrigType(
+export function boundedInverseTrigType(
   ops: ReadonlyArray<Expression>,
   domain: RealDomain
 ): Type {
@@ -191,17 +221,37 @@ function boundedInverseTrigType(
   if (x.isReal !== true) return 'number';
 
   // Fast path: a (finite) real value classifies by arithmetic alone, without
-  // going through the comparison/assumptions machinery.
+  // going through the comparison/assumptions machinery. Rounding to machine
+  // precision can land an exact value (`1 + 10⁻²⁰`, a bignum `1 − 10⁻³⁰`)
+  // EXACTLY ON a pole or interval endpoint — never strictly past one
+  // (round-to-nearest moves a value at most half an ulp, so the only double
+  // reachable across a representable boundary is the boundary itself). So
+  // the arithmetic verdict is trusted unless `r` sits exactly on a boundary;
+  // there, fall through to the exact predicates (`x.isEqual(1)`
+  // distinguishes `1` from `1 + 10⁻²⁰`, where `.re` cannot).
   const r = x.re;
   if (typeof r === 'number' && Number.isFinite(r)) {
-    if (domain.poles.includes(r)) return domain.poleType;
-    if (containsNumber(domain.real, r)) return 'finite_real';
-    if (containsNumber(domain.complex, r)) return 'finite_complex';
-    return domain.poleType;
+    const onBoundary =
+      domain.poles.includes(r) ||
+      domain.real.some(({ lo, hi }) => r === lo || r === hi) ||
+      domain.complex.some(({ lo, hi }) => r === lo || r === hi);
+    if (!onBoundary) {
+      if (containsNumber(domain.real, r)) return 'finite_real';
+      if (containsNumber(domain.complex, r)) return 'finite_complex';
+      return domain.poleType;
+    }
   }
 
-  // Symbolic argument: refine with the numeric predicates.
-  if (domain.poles.some((p) => x.isEqual(p) === true)) return domain.poleType;
+  // Refine with the numeric predicates. Pole membership must be EXACT for a
+  // number literal: `isEqual` compares within the engine tolerance, which
+  // would put `1 + 10⁻²⁰` "at" the pole 1 (the inequality predicates used
+  // below are exact).
+  if (
+    isNumber(x)
+      ? domain.poles.some((p) => x.isSame(p))
+      : domain.poles.some((p) => x.isEqual(p) === true)
+  )
+    return domain.poleType;
   if (provablyIn(x, domain.real)) return 'finite_real';
   if (provablyIn(x, domain.complex)) return 'finite_complex';
   // Magnitude unknown: the join of what remains. A pole that is provably
@@ -362,6 +412,29 @@ export function absFunctionType(x: Expression | undefined): Type {
 }
 
 /**
+ * `Max`/`Min`/`Supremum`/`Infimum`. These are data-consuming aggregates
+ * (§3.C: an absent datum or empty input evaluates to NaN), so the base claim
+ * is `number`. When every operand is a *scalar* number, though, no
+ * empty/missing datum is possible — the result is one of the operands — and
+ * the claim narrows to the join tier of the operand types. A collection
+ * operand (which may be empty or contain `Missing`) keeps `number`.
+ */
+export function extremumType(ops: ReadonlyArray<Expression>): Type {
+  if (ops.length === 0) return 'number';
+  if (!ops.every((x) => x.type.matches('number'))) return 'number';
+  for (const t of [
+    'finite_integer',
+    'finite_rational',
+    'finite_real',
+    'integer',
+    'rational',
+    'real',
+  ] as const)
+    if (ops.every((x) => x.type.matches(t))) return t;
+  return 'number';
+}
+
+/**
  * `Measurement(value, error)` — a nominal value carrying a 1σ absolute error.
  * The type is the nominal's scalar type (typically `real`); the error bar does
  * not widen it.
@@ -413,7 +486,22 @@ export function elementaryFunctionType(
     case 'Cot':
     case 'Coth':
     case 'Csch':
-      return poleReciprocalType(ops);
+      return poleReciprocalType(operator, ops);
+
+    // Pole-free hyperbolics at a provably real ±∞: `sinh`/`cosh` send it to
+    // a PROVABLE ±∞/+∞ (`non_finite_number`), while `tanh(±∞) = ±1` and
+    // `sech(±∞) = 0` are finite reals. (The circular Sin/Cos give NaN at ±∞
+    // and correctly keep `number` via `numericTypeHandler`.)
+    case 'Sinh':
+    case 'Cosh':
+      if (ops[0]?.isFinite === false && ops[0].isReal === true)
+        return 'non_finite_number';
+      return numericTypeHandler(ops);
+    case 'Tanh':
+    case 'Sech':
+      if (ops[0]?.isFinite === false && ops[0].isReal === true)
+        return 'finite_real';
+      return numericTypeHandler(ops);
 
     case 'Arcsin':
     case 'Arccos':

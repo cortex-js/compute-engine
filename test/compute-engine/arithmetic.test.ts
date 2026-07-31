@@ -2028,6 +2028,15 @@ describe('GCD/LCM', () => {
     expect(ce.expr(['GCD', -8]).evaluate().toString()).toBe('8');
   });
 
+  // `lcm(0, n) = 0`, including `lcm(0, 0)`: the general formula divides by
+  // `gcd(0, 0) = 0`, which used to yield NaN.
+  it('LCM is zero as soon as an argument is zero', () => {
+    expect(ce.expr(['LCM', 0, 0]).evaluate().toString()).toBe('0');
+    expect(ce.expr(['LCM', 0, 4]).evaluate().toString()).toBe('0');
+    expect(ce.expr(['LCM', 4, 0]).evaluate().toString()).toBe('0');
+    expect(ce.expr(['GCD', 0, 0]).evaluate().toString()).toBe('0');
+  });
+
   it('should compute the GCD of some integers and other stuff', () =>
     expect(
       ce.expr(['GCD', 60, 'foo', 12]).evaluate().toString()
@@ -2802,5 +2811,26 @@ describe('Round with an optional precision argument (Desmos/spreadsheet)', () =>
   });
   it('does not manufacture an Error operand for the 2-arg form', () => {
     expect(ce.parse('\\operatorname{round}(2.567, 2)').isValid).toBe(true);
+  });
+});
+
+describe('Chop preserves exact operands', () => {
+  // Chop replaces near-zero FLOATS with zero; an exact operand that does not
+  // chop to zero keeps its exact form (its type claim is the operand's type).
+  it('leaves an exact rational exact under evaluate', () => {
+    expect(ce.expr(['Chop', ['Rational', 2, 3]]).evaluate().toString()).toBe(
+      '2/3'
+    );
+    expect(ce.expr(['Chop', ['Sqrt', 2]]).evaluate().toString()).toBe('sqrt(2)');
+  });
+  it('still chops tiny floats and passes larger floats through', () => {
+    expect(ce.expr(['Chop', 1e-15]).evaluate().toString()).toBe('0');
+    expect(ce.expr(['Chop', 0.5]).evaluate().toString()).toBe('0.5');
+  });
+  it('numericizes an exact operand under N()', () => {
+    expect(ce.expr(['Chop', ['Rational', 2, 3]]).N().re).toBeCloseTo(
+      2 / 3,
+      12
+    );
   });
 });

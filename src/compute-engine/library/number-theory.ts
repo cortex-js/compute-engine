@@ -1001,13 +1001,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description: 'Sum of reciprocals of positive divisors of n.',
       signature: '(integer) -> number',
       type: () => 'finite_rational',
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: ([n], { engine: ce, numericApproximation }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
         // Σ 1/d over d | n is σ₁(n)/n: the divisors pair up as d ↔ n/d.
-        return ce.number(
-          ce.bignum(sigma1(k, ce._deadlineFrame)).div(ce.bignum(k))
-        );
+        // Exactness contract: an exact rational under `evaluate`, a float
+        // only under `.N()`.
+        const r = ce.number([sigma1(k, ce._deadlineFrame), k]);
+        return numericApproximation ? r.N() : r;
       },
     },
 

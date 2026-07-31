@@ -7,6 +7,8 @@ export function gcd(a: bigint, b: bigint): bigint {
 }
 
 export function lcm(a: bigint, b: bigint): bigint {
+  // `lcm(0, n) = 0`: the general formula would divide by `gcd(0, 0) = 0`.
+  if (a === 0n || b === 0n) return 0n;
   return (a * b) / gcd(a, b);
 }
 

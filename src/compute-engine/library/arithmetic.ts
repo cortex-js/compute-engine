@@ -118,6 +118,7 @@ import {
 import {
   numericTypeHandler,
   elementaryFunctionType,
+  extremumType,
   gammaPoleType,
   roundingFunctionType,
   absFunctionType,
@@ -482,9 +483,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(number) -> number',
       type: ([x]) => x.type,
-      evaluate: (ops) => {
+      evaluate: (ops, { numericApproximation }) => {
         const op = ops[0];
         const ce = op.engine;
+        // Exactness contract: an exact operand keeps its exact form under
+        // `evaluate` unless something actually chops. A mixed exact complex
+        // (one tiny component, one not — `1/3 + 10⁻²⁰i`) has no exact way to
+        // drop a single component, so it falls through to the numeric chop,
+        // matching the float path's component-wise behavior.
+        if (!numericApproximation && isNumber(op) && op.isExact) {
+          const reChops = ce.chop(op.re) === 0;
+          const imChops = ce.chop(op.im ?? 0) === 0;
+          if (reChops && imChops) return ce.Zero;
+          const tinyRe = op.re !== 0 && reChops;
+          const tinyIm = (op.im ?? 0) !== 0 && imChops;
+          if (!tinyRe && !tinyIm) return op;
+        }
         return apply(
           op,
           (x) => ce.chop(x),
@@ -3005,6 +3019,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // input evaluates to `NaN` (I6 absorption). `missingStrip: 'all'` (the
       // default) lets a `Missing` operand validate against `(value*)`.
       missingBehavior: 'handle',
+      type: (ops) => extremumType(ops),
       sgn: (ops) => {
         if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
         if (ops.some((x) => x.isReal == false || x.isNaN !== false))
@@ -3036,6 +3051,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // including collections
       signature: '(value+) -> number',
       missingBehavior: 'handle',
+      type: (ops) => extremumType(ops),
       sgn: (ops) => {
         if (ops.some((x) => x.isReal == false || x.isNaN)) return 'unsigned';
         if (ops.some((x) => x.isReal == false || x.isNaN !== false))
@@ -3101,6 +3117,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(value*) -> number',
       missingBehavior: 'handle',
+      type: (ops) => extremumType(ops),
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Supremum'),
     },
 
@@ -3112,6 +3129,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(value*) -> number',
       missingBehavior: 'handle',
+      type: (ops) => extremumType(ops),
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Infimum'),
     },
 
