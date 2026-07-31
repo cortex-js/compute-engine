@@ -16,6 +16,7 @@ import { functionLiteralParameterName } from '../boxed-expression/function-liter
 import { lookup } from '../function-utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { exactTierShape, MIN_EXACT_COMPILE_COUNT } from './map-exact-proof.js';
 
 /**
  * Auto-compilation of lazy-`Map` element lambdas on numeric drains.
@@ -34,6 +35,22 @@ import { checkDeadline } from '../../common/interruptible.js';
  * is stable per logical Map because `lazyMapNumericApproximation` memoizes
  * the rewrap (see `collection-utils.ts`); `subs()`/re-box copies are new
  * originals and run cold (item-40 contract).
+ *
+ * ## Two tiers
+ *
+ * - the **marked** (float) tier above, gated on the `Block(N(…))` marker and
+ *   restricted to machine precision;
+ * - the **exact** tier (`docs/plans/2026-07-31-exact-map-drain-compile-design.md`,
+ *   ratified 2026-07-31): an UNMARKED broadcast-shaped lambda whose element
+ *   function is provably integer-closed and overflow-free
+ *   (`map-exact-proof.ts`) compiles too, and its results are re-boxed as
+ *   EXACT integer literals. Float64 integer arithmetic within ±2^53 is exact,
+ *   so this tier is sound at any precision — the `bignumPreferred` bail-out
+ *   applies only to the marked tier (R4).
+ *
+ * Everything else — the per-instance cache, the drain-start/attempt bounding,
+ * the dependency snapshot and validation, the stats counters, the
+ * per-element decline-to-interpreter fallback — is shared (R1).
  */
 
 /** A dependency of a compiled element function: the resolution snapshot of a
@@ -58,8 +75,14 @@ interface MapCompileDep {
   operatorDef: unknown;
 }
 
+/** Which tier produced this record. Fixed per instance (the marker is a
+ * structural property of the lambda), but carried on the record so the
+ * result-handling path cannot drift from the compile path. */
+type MapCompileTier = 'marked' | 'exact';
+
 interface MapCompileCache {
   state: 'compiled' | 'no-compile';
+  tier: MapCompileTier;
   /** The compiled element runner (positional args, one per Map source). */
   fn?: (...args: unknown[]) => unknown;
   /** The compiled code's capture set (from the compiler's `symbolDeps`
@@ -407,8 +430,9 @@ function validCompiled(ce: ComputeEngine, cache: MapCompileCache): boolean {
  */
 function attemptCompile(
   ce: ComputeEngine,
+  tier: MapCompileTier,
   fn: Expression,
-  inner: Expression
+  inner: Expression | undefined
 ): MapCompileCache | undefined {
   _mapAutoCompileStats.attempts++;
 
@@ -416,27 +440,38 @@ function attemptCompile(
     reason: 'structural' | 'abi' | MapCompileDep
   ): MapCompileCache => ({
     state: 'no-compile',
+    tier,
     reason,
     generation: ce._mutationGeneration,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
   });
 
-  // Purity/boundedness gate (transitive through called user functions).
-  if (!fnLiteralEligible(ce, fn, new Set())) return noCompile('structural');
+  let literal: Expression;
+  if (tier === 'marked') {
+    // Purity/boundedness gate (transitive through called user functions).
+    if (!fnLiteralEligible(ce, fn, new Set())) return noCompile('structural');
 
-  // Rebuild the stripped literal from MathJSON (the same idiom as the item-39
-  // rewrap: never re-host a canonical body under a new `Function`, which
-  // would split its parameter-scope bindings). The compiled code is already
-  // numeric, so the `N` marker is dropped.
-  const fnJson = fn.json;
-  if (!Array.isArray(fnJson)) return noCompile('structural');
-  const literal = ce.box([
-    'Function',
-    inner.json,
-    ...(fnJson as unknown[]).slice(2),
-  ] as Parameters<ComputeEngine['box']>[0]);
-  if (!literal.isValid) return noCompile('structural');
+    // Rebuild the stripped literal from MathJSON (the same idiom as the
+    // item-39 rewrap: never re-host a canonical body under a new `Function`,
+    // which would split its parameter-scope bindings). The compiled code is
+    // already numeric, so the `N` marker is dropped.
+    const fnJson = fn.json;
+    if (inner === undefined || !Array.isArray(fnJson))
+      return noCompile('structural');
+    literal = ce.box([
+      'Function',
+      inner.json,
+      ...(fnJson as unknown[]).slice(2),
+    ] as Parameters<ComputeEngine['box']>[0]);
+    if (!literal.isValid) return noCompile('structural');
+  } else {
+    // The exact tier's body carries no marker to strip, and the eligibility
+    // proof already established that its single application is an
+    // integer-closed, bounded arithmetic head: compile the ORIGINAL canonical
+    // literal, whose parameter-scope bindings are intact.
+    literal = fn;
+  }
 
   const deps = new Set<string>();
   // `implicitCompile` honors the `ce.jit` flag, performs the engine-wide CSP
@@ -474,6 +509,7 @@ function attemptCompile(
 
   return {
     state: 'compiled',
+    tier,
     fn: result.run as (...args: unknown[]) => unknown,
     deps: [...deps].map((name) => resolveDep(ce, name)),
     generation: ce._mutationGeneration,
@@ -503,12 +539,35 @@ export function mapAutoCompileRunner(
 ): ((items: ReadonlyArray<Expression>) => Expression | undefined) | undefined {
   const ce = expr.engine;
   if (ce.jit === 'off') return undefined;
-  // Machine-precision precondition: at bignum precision the interpreter
-  // produces digits float64 cannot match. (The default engine precision is
-  // bignum-preferred; the plot/analyze consumers run machine.)
-  if (bignumPreferred(ce)) return undefined;
+
+  // ── Tier selection ───────────────────────────────────────────────────
+  // A marked (`Block(N(…))`) lambda takes the float tier, which stays gated
+  // on machine precision: at bignum precision the interpreter produces digits
+  // float64 cannot match. (The default engine precision is bignum-preferred;
+  // the plot/analyze consumers run machine.)
   const marked = markedMapLambda(expr);
-  if (marked === undefined) return undefined;
+  let tier: MapCompileTier;
+  let fn: Expression;
+  let inner: Expression | undefined;
+  if (marked !== undefined) {
+    if (bignumPreferred(ce)) return undefined;
+    tier = 'marked';
+    fn = marked.fn;
+    inner = marked.inner;
+  } else {
+    // The exact tier (R1/R4): an unmarked broadcast-shaped lambda that the
+    // static proof shows integer-closed and overflow-free. No precision gate
+    // — a proven-safe integer has the same value in float64 and Decimal. The
+    // proof runs BEFORE any attempt is recorded, so a declining instance
+    // never counts as a compile attempt.
+    const shape = exactTierShape(ce, expr);
+    if (shape === undefined) return undefined;
+    // Size floor: see `MIN_EXACT_COMPILE_COUNT`.
+    if (shape.count < MIN_EXACT_COMPILE_COUNT) return undefined;
+    tier = 'exact';
+    fn = shape.fn;
+    inner = undefined;
+  }
 
   const existing = mapCompileCaches.get(expr);
   if (drainStart && existing) existing.attemptedThisDrain = false;
@@ -520,6 +579,16 @@ export function mapAutoCompileRunner(
   )
     return undefined;
 
+  // The exact tier's eligibility is VALUE-dependent (a closed operand may be
+  // a symbol whose integer value the proof read), so it must be re-asked
+  // before every recompile: a reassignment to a non-integer or unbounded
+  // value revokes the proof, and the instance must fall back to the
+  // interpreter rather than compile against the stale one. `exactTierShape`
+  // memoizes on `ce._mutationGeneration`, so this is a pointer compare unless
+  // something actually changed.
+  const stillEligible = (): boolean =>
+    tier !== 'exact' || exactTierShape(ce, expr) !== undefined;
+
   // Resolve (or build) a usable compiled cache record; `undefined` → the
   // caller's interpreter path serves this element.
   const ensure = (): MapCompileCache | undefined => {
@@ -528,11 +597,15 @@ export function mapAutoCompileRunner(
 
     if (cache?.state === 'compiled') {
       if (validCompiled(ce, cache)) return cache;
+      if (!stillEligible()) {
+        mapCompileCaches.delete(expr);
+        return undefined;
+      }
       // A genuine dependency change: discard and recompile — a fresh
       // attempt, not a failure. Not bounded by `attemptedThisDrain`, so a
       // mid-drain reassignment is honored on the very next element.
       _mapAutoCompileStats.recompiles++;
-      const fresh = attemptCompile(ce, marked.fn, marked.inner);
+      const fresh = attemptCompile(ce, tier, fn, inner);
       if (fresh === undefined) {
         mapCompileCaches.delete(expr);
         return undefined;
@@ -548,8 +621,9 @@ export function mapAutoCompileRunner(
       // `{symbol}`: cleared when that symbol's resolution changes.
       if (reason === undefined || !depChanged(ce, reason)) return undefined;
       if (cache.attemptedThisDrain) return undefined;
+      if (!stillEligible()) return undefined;
       cache.attemptedThisDrain = true;
-      const fresh = attemptCompile(ce, marked.fn, marked.inner);
+      const fresh = attemptCompile(ce, tier, fn, inner);
       if (fresh === undefined) {
         mapCompileCaches.delete(expr);
         return undefined;
@@ -559,8 +633,17 @@ export function mapAutoCompileRunner(
       return fresh.state === 'compiled' ? fresh : undefined;
     }
 
-    // No cache: first attempt for this instance.
-    const fresh = attemptCompile(ce, marked.fn, marked.inner);
+    // No cache: first attempt for this instance. The gate that selected the
+    // exact tier ran at DRAIN START; `attemptCompile` bakes symbol values
+    // (`tryFoldKnownSymbol`) at COMPILE time, and those two moments are not
+    // the same one — an interleaved reassignment between iterator creation and
+    // the first element would otherwise be compiled against bounds the proof
+    // never established (a partial sum can then overflow 2^53 while the final
+    // result is still a safe integer, so every runtime guard stays silent).
+    // Re-ask here too. This is also what stops the cached-compiled branch's
+    // `delete` above from handing a revoked shape straight back to this path.
+    if (!stillEligible()) return undefined;
+    const fresh = attemptCompile(ce, tier, fn, inner);
     if (fresh === undefined) return undefined;
     fresh.attemptedThisDrain = true;
     mapCompileCaches.set(expr, fresh);
@@ -581,9 +664,22 @@ export function mapAutoCompileRunner(
     // reals pass their machine float, complex `{re, im}`. A row with any
     // non-convertible element falls back to the interpreter (the compiled
     // function keeps serving other rows).
+    //
+    // The exact tier additionally re-checks at RUNTIME what its static proof
+    // established — every input is an exact integer float64 can hold exactly.
+    // The proof reads the instance's own sources, so this can only fire on a
+    // proof gap; it costs one predicate per element and keeps the exactness
+    // contract from depending on that proof being airtight.
     const args: unknown[] = [];
     for (const item of items) {
       if (!isNumber(item)) {
+        _mapAutoCompileStats.elementFallbacks++;
+        return undefined;
+      }
+      if (
+        tier === 'exact' &&
+        (item.im !== 0 || !item.isExact || !Number.isSafeInteger(item.re))
+      ) {
         _mapAutoCompileStats.elementFallbacks++;
         return undefined;
       }
@@ -620,10 +716,27 @@ export function mapAutoCompileRunner(
         _mapAutoCompileStats.nanDoubleChecks++;
         return fallback();
       }
-      _mapAutoCompileStats.compiledHits++;
-      return ce.number(r);
+      // The exact tier's contract (R3): a safe integer re-boxes as an EXACT
+      // integer literal, `isSame`-identical to the interpreter's. Anything
+      // else falls through to the ABI path below — unreachable under a sound
+      // proof, but the exactness contract must not rest on that alone.
+      if (tier === 'exact') {
+        if (Number.isSafeInteger(r)) {
+          _mapAutoCompileStats.compiledHits++;
+          return ce.number(r);
+        }
+      } else {
+        _mapAutoCompileStats.compiledHits++;
+        return ce.number(r);
+      }
     }
-    if (typeof r === 'object' && r !== null && 're' in r && 'im' in r) {
+    if (
+      tier !== 'exact' &&
+      typeof r === 'object' &&
+      r !== null &&
+      're' in r &&
+      'im' in r
+    ) {
       const re = (r as { re: unknown }).re;
       const im = (r as { im: unknown }).im;
       if (typeof re === 'number' && typeof im === 'number') {

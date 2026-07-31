@@ -117,8 +117,7 @@ function poleReciprocalType(
   // an irrational multiple of π, which no literal — rational, float, or
   // radical — equals).
   const poleAtZero = operator !== 'Tan' && operator !== 'Sec';
-  if (isNumber(x))
-    return poleAtZero && x.isSame(0) ? 'number' : 'finite_real';
+  if (isNumber(x)) return poleAtZero && x.isSame(0) ? 'number' : 'finite_real';
   // A non-literal CONSTANT (π/2, 2π/3, …) can sit exactly on a circular pole
   // — `Tan(π/2) = ~oo`, `Csc(π) = ~oo` — so it keeps `number` (pinned by
   // non-finite-typing.test.ts). The hyperbolic poles are only at 0, where the
@@ -265,7 +264,8 @@ export function boundedInverseTrigType(
   if (provablyIn(x, domain.complex)) return 'finite_complex';
   // Magnitude unknown: the join of what remains. A pole that is provably
   // avoided (or a head with no real pole) drops the non-finite arm.
-  if (domain.poles.every((p) => x.isEqual(p) === false)) return 'finite_complex';
+  if (domain.poles.every((p) => x.isEqual(p) === false))
+    return 'finite_complex';
   // The join of `finite_complex` with the pole value: ±∞ and ~oo are both
   // members of `complex` (D10 lattice: `complex` admits `non_finite_number`
   // and `~oo`), so only a NaN-capable pole (`poleType: 'number'`) forces the
@@ -431,8 +431,21 @@ export function absFunctionType(x: Expression | undefined): Type {
   // only a literal's `isNaN` is a cheap field read).
   if (isNumber(x) && x.isNaN) return 'number';
   const t = x.type;
-  if (t.matches('finite_number')) return 'finite_real';
+  // |x| also preserves the numeric TIER of a real operand: the magnitude of
+  // an integer is an integer, of a rational a rational (`|−1/2| = 1/2`). The
+  // finiteness rungs come first, so a *complex* finite operand — whose
+  // magnitude is real but neither rational nor integer — still lands on
+  // `finite_real`, and a provably non-finite one keeps `non_finite_number`.
+  if (t.matches('finite_number')) {
+    for (const tier of ['finite_integer', 'finite_rational'] as const)
+      if (t.matches(tier)) return tier;
+    return 'finite_real';
+  }
   if (t.matches('non_finite_number')) return 'non_finite_number';
+  // Unknown finiteness: the tier still carries (`integer`/`rational`/`real`
+  // admit ±∞, and |±∞| = +∞ stays inside them).
+  for (const tier of ['integer', 'rational', 'real'] as const)
+    if (t.matches(tier)) return tier;
   return 'real';
 }
 

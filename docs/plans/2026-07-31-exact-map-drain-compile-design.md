@@ -1,6 +1,16 @@
 # Exact-mode auto-compilation of `Map` `evaluate()` drains
 
-Status: **DRAFT — rulings requested**
+Status: **RATIFIED 2026-07-31 (R1–R5 as recommended, per "execute" directive)
+— IMPLEMENTED same day** (`library/map-exact-proof.ts` +
+`library/map-broadcast-shape.ts` + `mapAutoCompileRunner` tier split;
+adversarially reviewed, one confirmed proof/compile value-skew hole fixed —
+`stillEligible()` now gates every `attemptCompile` path). Two iteration
+details await rulings: `MIN_EXACT_COMPILE_COUNT = 64` (size floor — R4 makes
+the tier fire at default bignum-preferred precision, so without a floor every
+tiny exact broadcast drain pays a ~1 ms compile), and attempt accounting (the
+proof is an eligibility gate that runs BEFORE any attempt is recorded, so
+declines don't count as `attempts` — this preserved every existing
+`attempts === 0` pin).
 Prior art: `docs/plans/2026-07-27-map-fusion-design.md` (§3 recorded this as
 the deferred "next lever"), `docs/plans/2026-07-19-map-auto-compile-design.md`
 (the `.N()` float tier this design extends).

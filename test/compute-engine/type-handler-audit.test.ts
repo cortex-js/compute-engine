@@ -279,6 +279,80 @@ describe('TYPE AUDIT: integral special functions with unproven-real operands', (
   });
 });
 
+describe('TYPE AUDIT: Abs (magnitude)', () => {
+  // |x| preserves the numeric TIER of a real operand as well as its
+  // finiteness. Before the 2026-07-31 co-fix the handler only tracked
+  // finiteness, so `|k|` claimed `real` for an integer `k` — which blocked
+  // the exact-mode Map compile tier's integer-closedness probe.
+  ce.declare('aq', 'rational');
+  ce.declare('afq', 'finite_rational');
+  ce.declare('afk', 'finite_integer');
+  ce.declare('afr', 'finite_real');
+  ce.declare('az', 'complex');
+
+  it('preserves the integer/rational/real tier of a real operand', () => {
+    expect(typeOf(['Abs', 'afk'])).toBe('finite_integer');
+    expect(typeOf(['Abs', 'k'])).toBe('integer');
+    expect(typeOf(['Abs', 'afq'])).toBe('finite_rational');
+    expect(typeOf(['Abs', 'aq'])).toBe('rational');
+    expect(typeOf(['Abs', 'afr'])).toBe('finite_real');
+    expect(typeOf(['Abs', 'r'])).toBe('real');
+  });
+
+  it('narrows literals to their own tier', () => {
+    expect(typeOf(['Abs', 2])).toBe('finite_integer');
+    expect(typeOf(['Abs', -2])).toBe('finite_integer');
+    expect(typeOf(['Abs', ['Rational', -1, 2]])).toBe('finite_rational');
+    expect(typeOf(['Abs', -2.5])).toBe('finite_real');
+    expect(
+      ce
+        .box(['Abs', ['Rational', -1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('1/2');
+    expectSound(['Abs', -2]);
+    expectSound(['Abs', -2.5]);
+  });
+
+  it('keeps the finiteness rungs (complex magnitude, ±∞, ~oo, NaN)', () => {
+    // A finite COMPLEX magnitude is real but neither rational nor integer.
+    expect(typeOf(['Abs', 'ImaginaryUnit'])).toBe('finite_real');
+    expect(typeOf(['Abs', 'az'])).toBe('real');
+    expect(typeOf(['Abs', 'PositiveInfinity'])).toBe('non_finite_number');
+    expect(typeOf(['Abs', 'ComplexInfinity'])).toBe('real');
+    expect(typeOf(['Abs', { num: 'NaN' }])).toBe('number');
+    expect(typeOf(['Abs', 'u'])).toBe('real');
+    expectSound(['Abs', 'ImaginaryUnit']);
+    expectSound(['Abs', 'PositiveInfinity']);
+  });
+});
+
+describe('TYPE AUDIT: Ceil (and the inert `Ceiling` alias)', () => {
+  // NOT a handler gap: `Ceil` already narrows exactly like `Floor`/`Round`/
+  // `Truncate`. The 2026-07-31 review reported `Ceiling(k) → unknown` as a
+  // missing narrowing; the real cause is that `Ceiling` is not an operator at
+  // all — it is a deliberately INERT Mathematica alias (see
+  // `src/cortex/docs/from-mathematica.md`). Pinned so the next reader does not
+  // "fix" a handler that is already correct, and so the exact-mode Map compile
+  // tier's interval table keeps keying on the name that exists.
+  ce.declare('cfk', 'finite_integer');
+  ce.declare('cfr', 'finite_real');
+
+  it('Ceil narrows to integer like the other rounding functions', () => {
+    for (const op of ['Floor', 'Ceil', 'Round', 'Truncate']) {
+      expect([op, typeOf([op, 'cfk'])]).toEqual([op, 'finite_integer']);
+      expect([op, typeOf([op, 'cfr'])]).toEqual([op, 'finite_integer']);
+      expect([op, typeOf([op, 2.5])]).toEqual([op, 'finite_integer']);
+    }
+    expect(ce.box(['Ceil', 2.5]).evaluate().re).toBe(3);
+  });
+
+  it('`Ceiling` has no definition — it is inert, not a narrowing gap', () => {
+    expect(ce.lookupDefinition('Ceiling')).toBeUndefined();
+    expect(typeOf(['Ceiling', 'cfk'])).toBe('unknown');
+  });
+});
+
 describe('TYPE AUDIT: Mod (floored remainder)', () => {
   // `Mod`'s only reachable pole is a zero modulus (NaN), and any non-finite
   // operand also yields NaN, so narrowing requires provably-finite operand
