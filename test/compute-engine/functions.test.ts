@@ -868,3 +868,29 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
     expect(ce.box('i').type.toString()).toBe('imaginary');
   });
 });
+
+describe('CANONICAL-SUGAR HEADS KEEP ARITY ERRORS ON THE INERT HEAD', () => {
+  // Regression (2026-07-31): `Exp2`'s canonical handler spliced the flagged
+  // args into its `Power` sugar, so `['Exp2', 11, 12]` canonicalized to a
+  // malformed 3-operand `Power(2, 11, Error(…))` with a double-wrapped error.
+  // The error must stay on the inert head, as `Exp` and `Rational` do.
+  test('Exp2 with an extra argument stays an inert Exp2', () => {
+    const expr = engine.box(['Exp2', 11, 12]);
+    expect(expr.isValid).toBe(false);
+    expect(expr.json).toEqual([
+      'Exp2',
+      11,
+      ['Error', "'unexpected-argument'", "'12'"],
+    ]);
+  });
+
+  test('Exp with an extra argument stays an inert Exp', () => {
+    const expr = engine.box(['Exp', 11, 12]);
+    expect(expr.isValid).toBe(false);
+    expect(expr.operator).toBe('Exp');
+  });
+
+  test('valid Exp2 still canonicalizes to its Power sugar', () => {
+    expect(engine.box(['Exp2', 11]).evaluate().toString()).toBe('2048');
+  });
+});

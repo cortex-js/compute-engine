@@ -437,6 +437,21 @@ New residues recorded by that round:
   not a drive-by.
 - **`Norm(scalar, 2)` on Python now declines** (was a runtime
   `ValueError`) — intentional side effect, flagged.
+- **Multi-splice templates × impure operands — 7 sites fixed 2026-07-31,
+  audit open.** Any lowering that splices a compiled operand more than once
+  (or calls `compile()` twice on the same operand) re-evaluates an impure
+  (Random-family) operand at run time. Fixed: JS `Mod`/`Remainder` (IIFE
+  temp binding), GPU `Remainder`/`Cot` (both branches — the complex branch's
+  early return had bypassed the guard)/`Coth`/`Beta` (hoisted temp via the
+  shared `gpuOperandOnce` helper, decline when `!canHoist`), and the
+  standalone `WGSLTarget` `Mod` (`wgsl-target.ts`, spliced its divisor 3×) —
+  probed REACHABLE via a framed draw (`WithRandomSeed(7, Mod(10, Random()))`
+  compiled with three `_gpu_rnd_draw` calls) and fixed the same way in the
+  same round. JS `Cot`/`Coth` were already safe via `inlineExpression`
+  (which binds compound operands); GPU `Square` is safe (its double-splice
+  is gated to symbols/literals, which are pure). NOT audited: the remaining
+  handlers of all four targets — grep for templates using an operand string
+  twice.
 - **`Norm(matrix, "Infinity")` / `Norm(matrix, 1)` on Python are unverified**
   against numpy's matrix semantics (`ord=inf` = max row sum, `ord=1` = max
   column sum): if the interpreter's rank-2 branch treats these orders the
@@ -444,17 +459,17 @@ New residues recorded by that round:
   case (now fixed via the `('fro' if p == 2 else p)` runtime substitution) —
   not probed.
 
-**Open question needing a SEMANTICS RULING before code — `Equal`/`NotEqual`
-over collections on the Python target.** The interpreter returns a **scalar**
-`"False"` for `Equal([1,2],[3,4],[5,6])`, contradicting the in-file comment
-claiming the `abs(a-b) <= tol` form "also serves the collection-operand path"
-element-wise. On plain lists `abs([1,2] - [3,4])` is a `TypeError`; on
-ndarrays the chained `and` at arity ≥3 raises "truth value of an array is
-ambiguous". Which semantics is intended — scalar whole-collection equality
-(matching the interpreter) or elementwise? Ask before building. (Interim:
-`compilePythonEquality` now FAILS CLOSED on any statically collection-valued
-operand instead of emitting source that raises at runtime — the decline
-implements no semantics, so the ruling stays open.)
+**`Equal`/`NotEqual` over collections on Python — RULED and SHIPPED
+2026-07-31.** User ruling: scalar, matching the interpreter. Probing showed
+the interpreter's actual gate is `ops.filter(isCollection).length < 2`:
+**≥2 collection operands → a scalar pairwise-adjacent chain** (now compiled
+via the `_ce_eqcoll` helper — shape-guarded `np.all`, length mismatch is
+`False`, string elements fall back to `==`, tolerance baked); **≤1
+collection operand → element-wise broadcast to a `list<boolean>`**
+(`Equal([1,2], 5)` → `["False","False"]`), which **stays fail-closed by a
+second ruling (2026-07-31)** — the interpreter fallback returns the correct
+list, and a compiled lowering (ndarray-valued boolean expression + parity
+harness support for list results) waits for a consumer witness.
 
 _Unverified, recorded so it is not lost:_ a decline thrown mid-compile may not
 unwind `BaseCompiler._localVector` / `_localComplex` if those pushes are not

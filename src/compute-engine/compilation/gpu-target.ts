@@ -436,6 +436,44 @@ function gpuComplexOperand(
 }
 
 /**
+ * Compile an operand the caller will splice MORE THAN ONCE into its emitted
+ * source. A pure operand compiles directly (byte-identical to `compile(x)`
+ * for the common case); an IMPURE one (the Random family — `_gpu_rnd_draw`
+ * advances a runtime counter, so a repeated splice re-draws and shifts every
+ * later value in the shader) is bound to a hoisted temporary, or the head
+ * declines where no statement sink is available. `complex` selects a
+ * `vec2`/`vec2f` temporary (a complex operand has no scalar shape, so the
+ * scalar-shape gate is skipped there — `canHoist` is the applicable gate).
+ */
+function gpuOperandOnce(
+  head: string,
+  x: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>,
+  complex = false
+): string {
+  if (x.isPure !== false) return compile(x);
+  if (
+    !BaseCompiler.canHoist(target) ||
+    (!complex && gpuOperandShape(x) !== 'scalar')
+  )
+    throw new Error(
+      `${head}: an impure (Random) operand cannot be bound to a temporary ` +
+        'at this position — a repeated draw would shift every later value ' +
+        'in the shader. Fail closed (D6).'
+    );
+  const t = BaseCompiler.tempVar(target);
+  const type = complex
+    ? gpuVec2(target)
+    : target.language === 'wgsl'
+      ? 'f32'
+      : 'float';
+  const decl = target.language === 'wgsl' ? `var ${t}: ${type}` : `${type} ${t}`;
+  BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
+  return t;
+}
+
+/**
  * The complex lowering of a RECIPROCAL inverse head (`Arcsec`, `Arccsc`,
  * `Arsech`, `Arcoth`), as `helper(1 / z)`.
  *
@@ -1142,7 +1180,7 @@ function gpuIsComponentwise(code: string, vector?: string): string | undefined {
  * every complex lowering look like a shape error. This is the same ordering
  * the fan-out and selection lowerings depend on.
  */
-function gpuOperandShape(
+export function gpuOperandShape(
   expr: Expression
 ): 'scalar' | 'matrix' | 'array' | 2 | 3 | 4 {
   if (BaseCompiler.isComplexValued(expr)) return 'scalar';
@@ -2956,9 +2994,37 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return compile(args[0]);
   },
 
-  Remainder: ([a, b], compile) => {
+  Remainder: ([a, b], compile, target) => {
     if (a === null || b === null)
       throw new Error('Remainder: missing argument');
+    // An IMPURE operand (the Random family) must be evaluated exactly once:
+    // both operands are spliced twice, and `_gpu_rnd_draw` advances a runtime
+    // counter, so a repeated draw returns a different value AND shifts every
+    // later draw in the shader. Bind scalars to hoisted temporaries; where
+    // there is no statement sink (a conditional arm), or the operand is not
+    // a scalar, there is no safe reading — decline.
+    if (a.isPure === false || b.isPure === false) {
+      if (
+        !BaseCompiler.canHoist(target) ||
+        gpuOperandShape(a) !== 'scalar' ||
+        gpuOperandShape(b) !== 'scalar'
+      )
+        throw new Error(
+          'Remainder: an impure (Random) operand cannot be bound to a ' +
+            'temporary at this position — a repeated draw would shift every ' +
+            'later value in the shader. Fail closed (D6).'
+        );
+      const ta = BaseCompiler.tempVar(target);
+      const tb = BaseCompiler.tempVar(target);
+      const decl = (n: string) =>
+        target.language === 'wgsl' ? `var ${n}: f32` : `float ${n}`;
+      BaseCompiler.hoistStatement(
+        target,
+        `${decl(ta)} = ${compile(a)};`,
+        `${decl(tb)} = ${compile(b)};`
+      );
+      return `(${ta} - ${tb} * round(${ta} / ${tb}))`;
+    }
     // `compile()` emits sub-expressions without outer parentheses, and
     // `*`/`/` bind tighter than `+` — wrap before splicing.
     const ca = `(${compile(a)})`;
@@ -2967,10 +3033,49 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Reciprocal trigonometric functions (no GPU built-ins)
-  Cot: ([x], compile) => {
+  Cot: ([x], compile, target) => {
     if (x === null) throw new Error('Cot: no argument');
-    if (BaseCompiler.isComplexValued(x))
-      return `_gpu_cdiv(_gpu_ccos(${compile(x)}), _gpu_csin(${compile(x)}))`;
+    if (BaseCompiler.isComplexValued(x)) {
+      // The operand is spliced TWICE below, so an IMPURE one must first be
+      // bound to a hoisted temporary — compiling it once is not enough, since
+      // `_gpu_rnd_draw` advances its counter on every evaluation of the
+      // spliced text (see the real branch and `Remainder`).
+      if (x.isPure === false) {
+        if (!BaseCompiler.canHoist(target))
+          throw new Error(
+            'Cot: an impure (Random) complex operand cannot be bound to a ' +
+              'temporary at this position — a repeated draw would shift ' +
+              'every later value in the shader. Fail closed (D6).'
+          );
+        const t = BaseCompiler.tempVar(target);
+        const decl =
+          target.language === 'wgsl'
+            ? `var ${t}: ${gpuVec2(target)}`
+            : `${gpuVec2(target)} ${t}`;
+        BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
+        return `_gpu_cdiv(_gpu_ccos(${t}), _gpu_csin(${t}))`;
+      }
+      // Compile the operand ONCE: two `compile()` calls would allocate two
+      // distinct `_gpu_rnd` sites for an impure operand.
+      const z = compile(x);
+      return `_gpu_cdiv(_gpu_ccos(${z}), _gpu_csin(${z}))`;
+    }
+    // An IMPURE operand (Random) is spliced twice below, and `_gpu_rnd_draw`
+    // advances a runtime counter — bind it to a hoisted temporary, or decline
+    // where there is no statement sink (see `Remainder`).
+    if (x.isPure === false) {
+      if (!BaseCompiler.canHoist(target) || gpuOperandShape(x) !== 'scalar')
+        throw new Error(
+          'Cot: an impure (Random) operand cannot be bound to a temporary ' +
+            'at this position — a repeated draw would shift every later ' +
+            'value in the shader. Fail closed (D6).'
+        );
+      const t = BaseCompiler.tempVar(target);
+      const decl =
+        target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
+      BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
+      return `(cos(${t}) / sin(${t}))`;
+    }
     const arg = compile(x);
     return `(cos(${arg}) / sin(${arg}))`;
   },
@@ -3035,11 +3140,15 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Reciprocal hyperbolic functions
-  Coth: ([x], compile) => {
+  Coth: ([x], compile, target) => {
     if (x === null) throw new Error('Coth: no argument');
-    if (BaseCompiler.isComplexValued(x))
-      return `_gpu_cdiv(_gpu_ccosh(${compile(x)}), _gpu_csinh(${compile(x)}))`;
-    const arg = compile(x);
+    // Both branches splice the operand twice — an impure one is bound to a
+    // hoisted temporary (see `gpuOperandOnce` and the `Cot` handler).
+    if (BaseCompiler.isComplexValued(x)) {
+      const z = gpuOperandOnce('Coth', x, compile, target, true);
+      return `_gpu_cdiv(_gpu_ccosh(${z}), _gpu_csinh(${z}))`;
+    }
+    const arg = gpuOperandOnce('Coth', x, compile, target);
     return `(cosh(${arg}) / sinh(${arg}))`;
   },
   Csch: ([x], compile, target) => {
@@ -3149,10 +3258,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Factorial: no argument');
     return `_gpu_gamma(${compile(x)} + 1.0)`;
   },
-  Beta: ([a, b], compile) => {
+  Beta: ([a, b], compile, target) => {
     if (a === null || b === null) throw new Error('Beta: need two arguments');
-    const ca = compile(a);
-    const cb = compile(b);
+    // Each operand is spliced twice — an impure one is bound to a hoisted
+    // temporary (see `gpuOperandOnce`).
+    const ca = gpuOperandOnce('Beta', a, compile, target);
+    const cb = gpuOperandOnce('Beta', b, compile, target);
     return `(_gpu_gamma(${ca}) * _gpu_gamma(${cb}) / _gpu_gamma(${ca} + ${cb}))`;
   },
   Erf: ([x], compile) => {

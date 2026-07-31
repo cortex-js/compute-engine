@@ -4,8 +4,10 @@ import {
   GPUShaderTarget,
   compileGPUMatrix,
   assertGPUScalarComponents,
+  gpuOperandShape,
   type GPUShapeRules,
 } from './gpu-target.js';
+import { BaseCompiler } from './base-compiler.js';
 
 /**
  * WGSL-specific function overrides.
@@ -36,13 +38,40 @@ function compileWGSLList(
 const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
   Inversesqrt: 'inverseSqrt',
 
-  Mod: ([a, b], compile) => {
+  Mod: ([a, b], compile, target) => {
     if (a === null || b === null) throw new Error('Mod: missing argument');
     // WGSL `%` on floats is the *truncated* remainder (sign of the dividend);
     // the interpreter's `Mod` is *floored* (sign of the divisor, D1). Convert
     // truncated → floored with `((a % b) + b) % b`, matching the JS target.
     // `compile()` emits sub-expressions without outer parentheses, and `%`
     // binds tighter than `+` — wrap before splicing next to `%`.
+    // An IMPURE operand (the Random family) must be evaluated exactly once:
+    // the divisor is spliced three times and `_gpu_rnd_draw` advances a
+    // runtime counter, so a repeated draw returns a different value AND
+    // shifts every later draw in the shader. Bind scalars to hoisted
+    // temporaries; where there is no statement sink (a conditional arm), or
+    // an operand is not a scalar, there is no safe reading — decline
+    // (see `Remainder` in the shared GPU target).
+    if (a.isPure === false || b.isPure === false) {
+      if (
+        !BaseCompiler.canHoist(target) ||
+        gpuOperandShape(a) !== 'scalar' ||
+        gpuOperandShape(b) !== 'scalar'
+      )
+        throw new Error(
+          'Mod: an impure (Random) operand cannot be bound to a ' +
+            'temporary at this position — a repeated draw would shift every ' +
+            'later value in the shader. Fail closed (D6).'
+        );
+      const ta = BaseCompiler.tempVar(target);
+      const tb = BaseCompiler.tempVar(target);
+      BaseCompiler.hoistStatement(
+        target,
+        `var ${ta}: f32 = ${compile(a)};`,
+        `var ${tb}: f32 = ${compile(b)};`
+      );
+      return `(((${ta} % ${tb}) + ${tb}) % ${tb})`;
+    }
     const ca = `(${compile(a)})`;
     const cb = `(${compile(b)})`;
     return `(((${ca} % ${cb}) + ${cb}) % ${cb})`;

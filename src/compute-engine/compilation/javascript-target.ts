@@ -2037,28 +2037,46 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   PointX: (args, compile) => compilePointComponent(args[0], 0, compile),
   PointY: (args, compile) => compilePointComponent(args[0], 1, compile),
   PointZ: (args, compile) => compilePointComponent(args[0], 2, compile),
-  Mod: ([a, b], compile) => {
+  Mod: ([a, b], compile, target) => {
     if (a === null || b === null) throw new Error('Mod: missing argument');
+    // An IMPURE operand (the Random family) must be evaluated exactly once:
+    // the floored-modulo template splices `b` three times, so a spliced draw
+    // re-draws at run time (`Mod(x, Random())` consumed three draws). Bind
+    // both operands to temps, preserving the interpreter's a-then-b draw
+    // order. Pure operands keep the direct emission byte-identical.
+    const impure = a.isPure === false || b.isPure === false;
+    const ta = impure ? BaseCompiler.tempVar(target) : '';
+    const tb = impure ? BaseCompiler.tempVar(target) : '';
     // `compile()` emits sub-expressions without outer parentheses (`x + 29`),
     // and `%` binds tighter than `+` — wrap before splicing next to `%`.
-    const ca = `(${compile(a)})`;
-    const cb = `(${compile(b)})`;
+    const ca = impure ? ta : `(${compile(a)})`;
+    const cb = impure ? tb : `(${compile(b)})`;
     // For non-negative integers, plain % is correct Euclidean modulo
-    if (
+    const core =
       BaseCompiler.isIntegerValued(a) &&
       BaseCompiler.isIntegerValued(b) &&
       BaseCompiler.isNonNegative(a)
-    )
-      return `(${ca} % ${cb})`;
-    return `(((${ca} % ${cb}) + ${cb}) % ${cb})`;
+        ? `(${ca} % ${cb})`
+        : `(((${ca} % ${cb}) + ${cb}) % ${cb})`;
+    if (!impure) return core;
+    return `(() => { const ${ta} = ${compile(a)}, ${tb} = ${compile(b)}; return ${core}; })()`;
   },
   Truncate: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `Math.trunc(${compile(args[0])})`;
   },
-  Remainder: ([a, b], compile) => {
+  Remainder: ([a, b], compile, target) => {
     if (a === null || b === null)
       throw new Error('Remainder: missing argument');
+    // An IMPURE operand must be evaluated exactly once: both operands are
+    // spliced twice by the template, so a spliced draw re-draws at run time
+    // (`Remainder(Random(), 2)` consumed two draws). Bind to temps; pure
+    // operands keep the direct emission byte-identical (see `Mod`).
+    if (a.isPure === false || b.isPure === false) {
+      const ta = BaseCompiler.tempVar(target);
+      const tb = BaseCompiler.tempVar(target);
+      return `(() => { const ${ta} = ${compile(a)}, ${tb} = ${compile(b)}; return (${ta} - ${tb} * Math.round(${ta} / ${tb})); })()`;
+    }
     // `compile()` emits sub-expressions without outer parentheses, and
     // `*`/`/` bind tighter than `+` — wrap before splicing.
     const ca = `(${compile(a)})`;

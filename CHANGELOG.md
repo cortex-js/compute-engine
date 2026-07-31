@@ -91,6 +91,36 @@
   emitting an unbounded loop (`for (int i = 1; i <= _gpu_inf(); i++)` —
   invalid shader source). Mirrors the JavaScript/interval-js guard.
 
+- **A Random-family operand of a compiled `Mod`/`Remainder` (and GPU
+  `Cot`/`Coth`/`Beta`, including the WGSL `Mod` and the complex `Cot`/`Coth`
+  branches) is no longer drawn more than once.** The lowering templates
+  splice their compiled operands two or three times, so
+  `Remainder(Random(), 2)` emitted two `_SYS.drawNextRandomNumber()` calls
+  on JavaScript (two stateful `_gpu_rnd_draw` calls on GLSL, and
+  `WithRandomSeed(7, Mod(10, Random()))` drew three times on WGSL) — a wrong
+  value that also shifted every later draw. An impure operand is now bound
+  to a temporary (an IIFE on JavaScript, a hoisted statement on the GPU
+  targets — declining where no statement sink is available); pure operands
+  keep the previous emission byte-for-byte.
+
+- **`['Exp2', 11, 12]` no longer canonicalizes to a malformed `Power`.** The
+  `Exp`/`Exp2` canonical handlers spliced arity-flagged arguments into their
+  `Power` sugar, producing a 3-operand `Power(2, 11, Error(…))` with a
+  double-wrapped error. The error now stays on the inert head, as `Rational`
+  does.
+
+- **Python: `Equal`/`NotEqual` over collection operands now compile** (ruled
+  2026-07-31: scalar semantics, matching the interpreter). Two or more
+  collection operands lower to a whole-collection tolerance helper
+  (`_ce_eqcoll`, shape-guarded numpy `np.all` — length mismatch is `False`,
+  string elements compare with `==`), chained pairwise-adjacent with the
+  scalar `and`; `NotEqual` negates it. The scalar/scalar path is
+  byte-identical, and the engine's tolerance is baked like compiled `Equal`.
+  The MIXED case (exactly one collection operand), which the interpreter
+  BROADCASTS element-wise (`Equal([1,2], 5)` → `["False","False"]`), stays
+  fail-closed by ruling (2026-07-31) — the interpreter fallback returns the
+  correct list; a compiled lowering waits for a consumer witness.
+
 - **Python: `Norm(matrix, 2)` now lowers to the Frobenius norm
   (`np.linalg.norm(m, 'fro')`), matching the interpreter.** numpy's ord-2 on
   a matrix is the spectral norm, so the old emission was a silent wrong value

@@ -214,6 +214,189 @@ const CASES: Case[] = [
     params: ['x'],
     inputs: [{ x: 10 }, { x: 2 }],
   },
+
+  // Collection equality (2+ collection operands) — the interpreter returns a
+  // SCALAR boolean (whole-collection equality within tolerance; a length or
+  // shape mismatch is `False`, never an error). The emitted `_ce_eqcoll`
+  // helper must agree on every shape below. Before the fix these compiled to
+  // `abs([1, 2] - [3, 4]) <= 1e-10`, a `TypeError` at run time.
+  {
+    name: 'eq_coll_pair_equal',
+    expr: ['Equal', ['List', 1, 2], ['List', 1, 2]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_pair_unequal',
+    expr: ['Equal', ['List', 1, 2], ['List', 3, 4]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_chain3_true',
+    expr: ['Equal', ['List', 1, 2], ['List', 1, 2], ['List', 1, 2]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_chain3_false',
+    expr: ['Equal', ['List', 1, 2], ['List', 1, 2], ['List', 3, 4]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    // A scalar operand inside a 2+-collection chain: no broadcast, the
+    // collection-vs-scalar pair is simply False.
+    name: 'eq_coll_chain_mixed_scalar',
+    expr: ['Equal', ['List', 1, 2], ['List', 1, 2], 5],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_length_mismatch',
+    expr: ['Equal', ['List', 1, 2], ['List', 1, 2, 3]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_within_tolerance',
+    expr: ['Equal', ['List', 1, 2], ['List', 1, 2.0000000000001]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_outside_tolerance',
+    expr: ['Equal', ['List', 1, 2], ['List', 1, 2.1]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_matrix',
+    expr: [
+      'Equal',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      ['List', ['List', 1, 2], ['List', 3, 5]],
+    ],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    // Ragged inner rows: `np.asarray` raises, so the helper must fall through
+    // to its recursive path instead of propagating the exception.
+    name: 'eq_coll_ragged_rows',
+    expr: [
+      'Equal',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      ['List', ['List', 1, 2, 9], ['List', 3, 4]],
+    ],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    // A `list<string>` operand also routes to the helper; `np.asarray(...,
+    // dtype=float)` and `abs(a - b)` both raise on strings, so the helper must
+    // fall back to `==` rather than propagating a `TypeError`.
+    name: 'eq_coll_strings_equal',
+    expr: [
+      'Equal',
+      ['List', { str: 'a' }, { str: 'b' }],
+      ['List', { str: 'a' }, { str: 'b' }],
+    ],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_strings_unequal',
+    expr: ['Equal', ['List', { str: 'a' }], ['List', { str: 'c' }]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    // Numeric-looking STRINGS: `np.asarray(..., dtype=float)` parses them, so
+    // this answered True while the interpreter compares the strings (verified:
+    // `Equal(["1"],["1.0"])` → False). The helper now picks the tolerance path
+    // from the uncoerced dtype.
+    name: 'eq_coll_numeric_strings',
+    expr: ['Equal', ['List', { str: '1' }], ['List', { str: '1.0' }]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_numeric_strings_same',
+    expr: ['Equal', ['List', { str: '1' }], ['List', { str: '1' }]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    // `abs(inf - inf)` is NaN, so matching infinities compared UNEQUAL while
+    // the interpreter answers True.
+    name: 'eq_coll_inf_match',
+    expr: [
+      'Equal',
+      ['List', { num: '+Infinity' }],
+      ['List', { num: '+Infinity' }],
+    ],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_neg_inf_match',
+    expr: [
+      'Equal',
+      ['List', { num: '-Infinity' }],
+      ['List', { num: '-Infinity' }],
+    ],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_inf_opposite_signs',
+    expr: [
+      'Equal',
+      ['List', { num: '+Infinity' }],
+      ['List', { num: '-Infinity' }],
+    ],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    // NaN is equal to nothing, itself included — the exact `==` disjunct must
+    // not resurrect it (interpreter: `Equal([NaN],[NaN])` → False).
+    name: 'eq_coll_nan',
+    expr: ['Equal', ['List', { num: 'NaN' }], ['List', { num: 'NaN' }]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'neq_coll_nan',
+    expr: ['NotEqual', ['List', { num: 'NaN' }], ['List', { num: 'NaN' }]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    // Infinities reached through the RECURSIVE (ragged) path, which lands on
+    // the scalar branch — same `abs(inf - inf)` trap.
+    name: 'eq_coll_ragged_inf',
+    expr: [
+      'Equal',
+      ['List', ['List', { num: '+Infinity' }, 1], ['List', 2]],
+      ['List', ['List', { num: '+Infinity' }, 1], ['List', 2]],
+    ],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'neq_coll_pair',
+    expr: ['NotEqual', ['List', 1, 2], ['List', 3, 4]],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'neq_coll_chain3',
+    expr: ['NotEqual', ['List', 1, 2], ['List', 1, 2], ['List', 3, 4]],
+    params: [],
+    inputs: [{}],
+  },
 ];
 
 const describeMaybe = venvHasNumpy() ? describe : describe.skip;

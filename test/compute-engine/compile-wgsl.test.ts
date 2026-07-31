@@ -915,3 +915,23 @@ describe('WGSL zero-width aggregates fail closed', () => {
     );
   });
 });
+
+// Regression: the floored-modulo template splices its divisor THREE times.
+// With an impure (Random) divisor that emitted three `_gpu_rnd_draw` calls —
+// a wrong value that also shifted every later draw in the shader. The operand
+// must be bound to a hoisted temporary and drawn exactly once.
+describe('WGSL Mod with an impure operand draws once', () => {
+  it('a framed Random divisor emits a single draw', () => {
+    const target = ce.getCompilationTarget('wgsl')!;
+    const code = target.compile(
+      ce.box(['WithRandomSeed', 7, ['Mod', 10, ['Random']]])
+    ).code;
+    expect((code.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
+  });
+
+  it('a pure Mod emission is unchanged', () => {
+    const target = ce.getCompilationTarget('wgsl')!;
+    const code = target.compile(ce.box(['Mod', ['Add', 'x', 29], 900])).code;
+    expect(code).toBe('((((x + 29.0) % (900.0)) + (900.0)) % (900.0))');
+  });
+});

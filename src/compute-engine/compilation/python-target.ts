@@ -44,6 +44,25 @@ const PYTHON_CONSTANTS: Record<string, string> = {
  * (default 1e-10) — so `0.1 + 0.2 == 0.3` is *true* — while a raw `==` on
  * floats is exact and would disagree. `kind` selects Equal (`<=`) vs NotEqual
  * (`>`). Chained (N-ary) forms are conjoined pairwise with `and`.
+ *
+ * Collection operands follow the interpreter's gate (see the `Equal`/`NotEqual`
+ * evaluate handlers in `library/relational-operator.ts`), which switches on how
+ * many operands are collections:
+ *
+ * - **two or more** collection operands: whole-collection equality, a SCALAR
+ *   boolean (`Equal([1,2],[3,4],[5,6])` → `False`). Lowered to the
+ *   `_ce_eqcoll` runtime helper, which compares within tolerance element-wise
+ *   but folds to one `bool` — a length/shape mismatch is `False`, not an
+ *   error. (The old `abs(a - b) <= tol` form was wrong for this shape: it
+ *   raises `TypeError` on a plain Python list, and an n-ary chain over
+ *   ndarrays conjoins arrays with the scalar `and` — a `ValueError`.)
+ * - **exactly one** collection operand: the interpreter BROADCASTS, returning a
+ *   *list* of booleans (`Equal([1,2],5)` → `["False","False"]`), a different
+ *   result kind than the scalar the 2026-07-31 ruling covers. Declined (D6)
+ *   rather than guessed at.
+ *
+ * An operand whose type does not statically pin it as a collection is treated
+ * as scalar (today's emission), as everywhere else on this target.
  */
 function compilePythonEquality(
   kind: 'Equal' | 'NotEqual',
@@ -52,23 +71,36 @@ function compilePythonEquality(
 ): string {
   if (args.length < 2)
     throw new Error(`${kind}: expected at least two arguments`);
-  // A collection operand has no faithful lowering here: `abs(a - b)` raises on
-  // a plain Python list, and an n-ary chain over ndarrays conjoins arrays with
-  // the scalar `and` (a ValueError). What collection equality SHOULD mean on
-  // this target is an open design ruling, so decline rather than emit code that
-  // raises under `success: true`.
-  if (args.some(isPyCollectionOperand))
-    throw new Error(
-      `${kind}: a collection operand does not compile — collection equality ` +
-        `semantics are not yet implemented on the Python target. ` +
-        `Fail closed (D6).`
-    );
   const tol = args[0]?.engine?.tolerance ?? 1e-10;
+  const collCount = args.filter(isPyCollectionOperand).length;
+  if (collCount === 1)
+    throw new Error(
+      `${kind}: a single collection operand broadcasts element-wise in the ` +
+        `interpreter (a list of booleans, not a boolean); that shape is not ` +
+        `yet implemented on the Python target. Fail closed (D6).`
+    );
+  if (collCount >= 2) {
+    // Whole-collection equality per adjacent pair, folded with the scalar
+    // `and` — every pair is a Python `bool` here, so the chain is well-formed.
+    const collPair = (a: Expression, b: Expression): string => {
+      const eq = `_ce_eqcoll(${compile(a)}, ${compile(b)}, ${tol})`;
+      return kind === 'Equal' ? eq : `(not ${eq})`;
+    };
+    if (args.length === 2) return collPair(args[0], args[1]);
+    const collParts: string[] = [];
+    // NOTE: a shared middle operand is compiled TWICE (as pair i's `b` and pair
+    // i+1's `a`); that is only safe while this target has no impure lowering
+    // (`Random` and friends decline today) — emit a temporary if that changes.
+    for (let i = 0; i < args.length - 1; i++)
+      collParts.push(collPair(args[i], args[i + 1]));
+    return `(${collParts.join(' and ')})`;
+  }
   const cmp = kind === 'Equal' ? '<=' : '>';
   const pair = (a: Expression, b: Expression): string =>
     `(abs((${compile(a)}) - (${compile(b)})) ${cmp} ${tol})`;
   if (args.length === 2) return pair(args[0], args[1]);
   const parts: string[] = [];
+  // Same double-compile-of-the-middle-operand caveat as the collection chain.
   for (let i = 0; i < args.length - 1; i++)
     parts.push(pair(args[i], args[i + 1]));
   return `(${parts.join(' and ')})`;
@@ -495,6 +527,65 @@ const PYTHON_RREF_HELPER = `def _ce_rref(_m):
     return _a
 `;
 
+/**
+ * Whole-collection equality within tolerance — the runtime side of the
+ * `Equal`/`NotEqual` lowering when two or more operands are collections. The
+ * interpreter returns a SCALAR boolean there (see `compilePythonEquality`), so
+ * this folds to one Python `bool`.
+ *
+ * Semantics reproduced (each verified against `.evaluate()`):
+ * - a collection compared to a scalar (at any nesting depth) is `False` —
+ *   never an exception;
+ * - a length or shape mismatch is `False` (`Equal([1,2],[1,2,3])` → `False`),
+ *   including ragged inner rows;
+ * - numbers compare within the baked engine tolerance, element-wise and
+ *   recursively (`Equal([[1,2]],[[1,2+1e-13]])` → `True`);
+ * - two empty collections are `True`;
+ * - a NON-numeric element (a `list<string>` operand also routes here) compares
+ *   with `==`, since tolerance is meaningless there — and, crucially, must not
+ *   raise;
+ * - two MATCHING infinities are equal (`Equal([Infinity],[Infinity])` → `True`,
+ *   opposite signs → `False`) while `NaN` is equal to nothing, itself included
+ *   (`Equal([NaN],[NaN])` → `False`).
+ *
+ * The vectorized `np.asarray` path is a fast path for the common rectangular
+ * numeric case, and is taken ONLY when BOTH operands coerce to a genuinely
+ * numeric dtype (`kind` in `iuf`). It must not coerce with `dtype=float`:
+ * numpy happily parses numeric-looking STRINGS, so `Equal(["1"],["1.0"])` would
+ * answer `True` where the interpreter compares the strings and answers `False`.
+ * Anything else — strings, mixed or `object` dtype (ragged input), complex —
+ * falls through to the recursive element-wise comparison.
+ *
+ * On both the vectorized and the scalar path, exact `==` is tried BEFORE the
+ * tolerance test: `abs(inf - inf)` is `NaN`, so the tolerance test alone would
+ * report matching infinities unequal. `NaN` fails both tests, which is the
+ * interpreter's answer.
+ */
+const PYTHON_EQCOLL_HELPER = `def _ce_eqcoll(_a, _b, _tol):
+    _al = isinstance(_a, (list, tuple, np.ndarray))
+    _bl = isinstance(_b, (list, tuple, np.ndarray))
+    if _al != _bl:
+        return False
+    if not _al:
+        try:
+            return bool(_a == _b or abs(_a - _b) <= _tol)
+        except TypeError:
+            return bool(_a == _b)
+    try:
+        _x = np.asarray(_a)
+        _y = np.asarray(_b)
+        if _x.dtype.kind in 'iuf' and _y.dtype.kind in 'iuf':
+            if _x.shape != _y.shape:
+                return False
+            with np.errstate(invalid='ignore'):
+                return bool(np.all((_x == _y) | (np.abs(_x - _y) <= _tol)))
+    except (ValueError, TypeError):
+        pass
+    if len(_a) != len(_b):
+        return False
+    return all(_ce_eqcoll(_x, _y, _tol) for _x, _y in zip(_a, _b))
+`;
+
 /** Prepend any referenced runtime helper definitions to the compiled `code`.
  * Idempotent per emission unit; a redefinition (if two units are concatenated)
  * is harmless in Python. */
@@ -502,6 +593,7 @@ function withPythonHelpers(code: string): string {
   let out = code;
   if (out.includes('_ce_rref(')) out = `${PYTHON_RREF_HELPER}\n${out}`;
   if (out.includes('_ce_bcast(')) out = `${PYTHON_BCAST_HELPER}\n${out}`;
+  if (out.includes('_ce_eqcoll(')) out = `${PYTHON_EQCOLL_HELPER}\n${out}`;
   return out;
 }
 
@@ -1158,10 +1250,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   RowReduce: (args, compile) => `_ce_rref(${compile(args[0])})`,
 
   // Comparison — tolerance-aware equality (see compilePythonEquality). The
-  // `abs(a - b) <= tol` form is element-wise for NumPy arrays too, so it also
-  // serves the collection-operand path (where the base compiler skips the infix
-  // operator). Less/Greater stay as the infix relational operators from
-  // PYTHON_OPERATORS; their function forms below serve the collection path.
+  // `abs(a - b) <= tol` form is SCALAR-ONLY: it raises `TypeError` on a plain
+  // Python list, and while it would be element-wise on ndarrays, the
+  // interpreter's collection equality is a whole-collection *scalar* boolean,
+  // not an element-wise one — so a collection operand routes to the
+  // `_ce_eqcoll` helper instead. Less/Greater stay as the infix relational
+  // operators from PYTHON_OPERATORS; their function forms below serve the
+  // collection path.
   Equal: (args, compile) => compilePythonEquality('Equal', args, compile),
   NotEqual: (args, compile) => compilePythonEquality('NotEqual', args, compile),
   // Chained (3+ operand) forms fold pairwise — a bare `np.less(a, b, c)` would
@@ -2001,6 +2096,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // through them.
     if (body.includes('_ce_rref(')) code += `${PYTHON_RREF_HELPER}\n`;
     if (body.includes('_ce_bcast(')) code += `${PYTHON_BCAST_HELPER}\n`;
+    if (body.includes('_ce_eqcoll(')) code += `${PYTHON_EQCOLL_HELPER}\n`;
 
     code += `def ${functionName}(${params}):\n`;
 

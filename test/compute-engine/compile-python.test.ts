@@ -626,17 +626,139 @@ describe('PYTHON TARGET', () => {
       expect(code).toBe('(abs((x) - (0.3)) > 1e-10)');
     });
 
-    // Collection equality fails closed pending the semantics ruling: the
-    // `abs(a - b)` form raises on a plain Python list, and an n-ary chain over
-    // ndarrays conjoins arrays with the scalar `and`.
-    it('a collection operand fails closed (D6)', () => {
+    // The scalar/scalar emission is the hot path — pinned byte-identical so the
+    // collection branch below cannot perturb it.
+    it('the scalar/scalar emission is unchanged by the collection branch', () => {
+      expect(python.compile(ce.box(['Equal', 'x', 'y'])).code).toBe(
+        '(abs((x) - (y)) <= 1e-10)'
+      );
+      expect(python.compile(ce.box(['NotEqual', 'x', 'y'])).code).toBe(
+        '(abs((x) - (y)) > 1e-10)'
+      );
+      // N-ary scalar chain: adjacent pairs conjoined with the scalar `and`.
+      expect(python.compile(ce.box(['Equal', 'x', 'y', 'z'])).code).toBe(
+        '((abs((x) - (y)) <= 1e-10) and (abs((y) - (z)) <= 1e-10))'
+      );
+    });
+
+    // Two-or-more collection operands: the interpreter returns a SCALAR
+    // boolean (whole-collection equality within tolerance, length mismatch →
+    // False), so the lowering routes to the `_ce_eqcoll` runtime helper rather
+    // than the scalar `abs(a - b)` form (which raises on a plain Python list).
+    describe('collection equality (2+ collection operands)', () => {
+      it('a pair of collections lowers to the whole-collection helper', () => {
+        const code = python.compile(
+          ce.box(['Equal', ['List', 1, 2], ['List', 3, 4]] as any)
+        ).code;
+        expect(code).toContain('def _ce_eqcoll(');
+        expect(code.split('\n').at(-1)).toBe(
+          '_ce_eqcoll([1, 2], [3, 4], 1e-10)'
+        );
+        // The scalar element-wise form must NOT appear.
+        expect(code).not.toContain('abs(([1, 2])');
+      });
+
+      it('NotEqual negates the helper', () => {
+        const code = python.compile(
+          ce.box(['NotEqual', ['List', 1, 2, 3], ['List', 1, 2]] as any)
+        ).code;
+        expect(code.split('\n').at(-1)).toBe(
+          '(not _ce_eqcoll([1, 2, 3], [1, 2], 1e-10))'
+        );
+      });
+
+      it('an n-ary chain conjoins adjacent pairs with the scalar `and`', () => {
+        const code = python.compile(
+          ce.box([
+            'Equal',
+            ['List', 1, 2],
+            ['List', 1, 2],
+            ['List', 1, 2],
+          ] as any)
+        ).code;
+        expect(code.split('\n').at(-1)).toBe(
+          '(_ce_eqcoll([1, 2], [1, 2], 1e-10) and ' +
+            '_ce_eqcoll([1, 2], [1, 2], 1e-10))'
+        );
+      });
+
+      it('a scalar inside a 2+-collection chain stays on the helper path', () => {
+        // `Equal([1,2],[1,2],5)` has two collection operands, so the
+        // interpreter does NOT broadcast: it chains `eq` pairwise and the
+        // collection-vs-scalar pair is False. `_ce_eqcoll` answers False for
+        // that pair too (never raises).
+        const code = python.compile(
+          ce.box(['Equal', ['List', 1, 2], ['List', 1, 2], 5] as any)
+        ).code;
+        expect(code.split('\n').at(-1)).toBe(
+          '(_ce_eqcoll([1, 2], [1, 2], 1e-10) and _ce_eqcoll([1, 2], 5, 1e-10))'
+        );
+      });
+
+      it('bakes a non-default engine tolerance', () => {
+        const scoped = new ComputeEngine();
+        scoped.tolerance = 1e-4;
+        const code = python.compile(
+          scoped.box(['Equal', ['List', 1, 2], ['List', 1, 2]] as any)
+        ).code;
+        expect(code.split('\n').at(-1)).toBe(
+          '_ce_eqcoll([1, 2], [1, 2], 0.0001)'
+        );
+      });
+
+      // The tolerance path must be selected from the UNCOERCED dtypes.
+      // `np.asarray(..., dtype=float)` parses numeric-looking STRINGS, so
+      // `Equal(["1"], ["1.0"])` answered True while the interpreter compares
+      // the strings and answers False.
+      it('the helper decides the numeric path from the uncoerced dtype', () => {
+        const code = python.compile(
+          ce.box([
+            'Equal',
+            ['List', { str: '1' }],
+            ['List', { str: '1.0' }],
+          ] as any)
+        ).code;
+        expect(code).toContain('def _ce_eqcoll(');
+        // No float coercion — the dtype gate decides instead.
+        expect(code).not.toContain('dtype=float');
+        expect(code).toContain("if _x.dtype.kind in 'iuf' and _y.dtype.kind in 'iuf':");
+        expect(code.split('\n').at(-1)).toBe(
+          '_ce_eqcoll(["1"], ["1.0"], 1e-10)'
+        );
+      });
+
+      // `abs(inf - inf)` is NaN, so the tolerance test alone reported matching
+      // infinities UNEQUAL. Exact `==` is tried first; NaN still fails both
+      // tests, which is the interpreter's answer (`Equal([NaN],[NaN])` → False).
+      it('the helper compares exactly before applying the tolerance', () => {
+        const code = python.compile(
+          ce.box([
+            'Equal',
+            ['List', { num: '+Infinity' }],
+            ['List', { num: '+Infinity' }],
+          ] as any)
+        ).code;
+        expect(code).toContain(
+          'return bool(np.all((_x == _y) | (np.abs(_x - _y) <= _tol)))'
+        );
+        // …and on the scalar (recursive) path too.
+        expect(code).toContain('return bool(_a == _b or abs(_a - _b) <= _tol)');
+        expect(code.split('\n').at(-1)).toBe(
+          '_ce_eqcoll([np.inf], [np.inf], 1e-10)'
+        );
+      });
+    });
+
+    // Exactly ONE collection operand: the interpreter BROADCASTS element-wise
+    // and returns a *list* of booleans (`Equal([1,2],5)` → `["False","False"]`)
+    // — a different result kind than the scalar the collection branch above
+    // implements. Still fails closed rather than guessing.
+    it('a single (broadcasting) collection operand fails closed (D6)', () => {
       expect(() =>
         python.compile(ce.box(['Equal', ['List', 1, 2, 3], 2] as any))
-      ).toThrow(/Equal.*Fail closed/s);
+      ).toThrow(/Equal.*broadcasts element-wise.*Fail closed/s);
       expect(() =>
-        python.compile(
-          ce.box(['NotEqual', ['List', 1, 2, 3], ['List', 1, 2]] as any)
-        )
+        python.compile(ce.box(['NotEqual', 2, ['List', 1, 2, 3]] as any))
       ).toThrow(/NotEqual.*Fail closed/s);
       const scoped = new ComputeEngine();
       scoped.declare('eqList', 'list<real>');

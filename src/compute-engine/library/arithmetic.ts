@@ -661,6 +661,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       canonical: (args, { engine }) => {
         // The canonical handler is responsible for arg validation
         args = checkNumericArgs(engine, args, 1);
+        // An arity/type error stays on the inert head: splicing the flagged
+        // args into `Power` would produce a malformed 3-operand `Power` with
+        // a double-wrapped error (cf. the `Rational` guard).
+        if (args.length !== 1 || !args.every((x) => x.isValid))
+          return engine._fn('Exp', args);
         return engine.function('Power', [engine.E, ...args]);
       },
     },
@@ -672,6 +677,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args, 1);
+        // See the `Exp` guard above: `['Exp2', 11, 12]` used to canonicalize
+        // to `Power(2, 11, Error(…))`.
+        if (args.length !== 1 || !args.every((x) => x.isValid))
+          return engine._fn('Exp2', args);
         return engine.function('Power', [engine.number(2), ...args]);
       },
     },

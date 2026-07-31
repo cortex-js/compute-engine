@@ -470,3 +470,89 @@ describe('auto-compiled Map bodies draw from the interpreter frame (§6)', () =>
     expect(probe.trailing).toBe(draw(11, 150));
   });
 });
+
+describe('an impure operand spliced by a multi-use template draws exactly once', () => {
+  // Regression (2026-07-31): the `Mod`/`Remainder` templates splice their
+  // compiled operands two or three times, and the GPU `Cot` splices its
+  // operand into `cos(…)/sin(…)` — so a Random-family operand was re-drawn
+  // at run time (`Remainder(Random(), 2)` consumed TWO draws, and on GPU
+  // shifted every later `_gpu_rnd_draw` in the shader). Impure operands are
+  // now bound to a temporary (IIFE on JS, hoisted statement on GPU); pure
+  // operands keep the direct emission byte-identical.
+  const ce = new ComputeEngine();
+
+  test('JS: Remainder(Random(), 2) emits a single draw', () => {
+    const r = compile(ce.box(['Remainder', ['Random'], 2]), {
+      fallback: false,
+    });
+    expect((r.code!.match(/drawNextRandomNumber/g) ?? []).length).toBe(1);
+    expect(typeof r.run!({})).toBe('number');
+  });
+
+  test('JS: Mod(10·Random(), 3) emits a single draw and stays in range', () => {
+    const r = compile(ce.box(['Mod', ['Multiply', 10, ['Random']], 3]), {
+      fallback: false,
+    });
+    expect((r.code!.match(/drawNextRandomNumber/g) ?? []).length).toBe(1);
+    for (let i = 0; i < 20; i++) {
+      const v = r.run!({}) as number;
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(3);
+    }
+  });
+
+  test('JS: pure operands keep the direct emission (byte-identical pins)', () => {
+    expect(
+      compile(ce.box(['Mod', ['Add', 'x', 29], 900]), { fallback: false })
+        .code
+    ).toBe('((((_.x + 29) % (900)) + (900)) % (900))');
+    expect(
+      compile(ce.box(['Remainder', 'x', 2]), { fallback: false }).code
+    ).toBe('((_.x) - (2) * Math.round((_.x) / (2)))');
+  });
+
+  test('GLSL: Remainder(Random(), 2) hoists the draw to a single temporary', () => {
+    const g = ce.getCompilationTarget('glsl')!;
+    const r = g.compile(ce.box(['Remainder', ['Random'], 2]) as any);
+    expect((r.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
+    expect(r.code).toContain('float _tv1 =');
+  });
+
+  test('GLSL: Cot(Random()) hoists the draw to a single temporary', () => {
+    const g = ce.getCompilationTarget('glsl')!;
+    const r = g.compile(ce.box(['Cot', ['Random']]) as any);
+    expect((r.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
+  });
+
+  test('GLSL: Cot of a COMPLEX impure operand hoists the draw too', () => {
+    const g = ce.getCompilationTarget('glsl')!;
+    const r = g.compile(
+      ce.box(['Cot', ['Add', 'ImaginaryUnit', ['Random']]]) as any
+    );
+    expect((r.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
+  });
+
+  test('GLSL: Coth and Beta hoist an impure operand too (same template class)', () => {
+    const g = ce.getCompilationTarget('glsl')!;
+    const coth = g.compile(ce.box(['Coth', ['Random']]) as any);
+    expect((coth.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
+    const beta = g.compile(ce.box(['Beta', ['Random'], 2]) as any);
+    expect((beta.code!.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
+  });
+
+  test('GLSL: pure operands keep the direct emission (byte-identical pins)', () => {
+    const g = ce.getCompilationTarget('glsl')!;
+    expect(g.compile(ce.box(['Cot', 'x']) as any).code).toBe(
+      '(cos(x) / sin(x))'
+    );
+    expect(g.compile(ce.box(['Remainder', 'x', 2]) as any).code).toBe(
+      '((x) - (2.0) * round((x) / (2.0)))'
+    );
+    expect(g.compile(ce.box(['Coth', 'x']) as any).code).toBe(
+      '(cosh(x) / sinh(x))'
+    );
+    expect(g.compile(ce.box(['Beta', 'x', 2]) as any).code).toBe(
+      '(_gpu_gamma(x) * _gpu_gamma(2.0) / _gpu_gamma(x + 2.0))'
+    );
+  });
+});
