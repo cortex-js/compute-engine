@@ -418,3 +418,200 @@ describe('MATCH — exactness contract', () => {
     expect(expr.N().re).toBeCloseTo(Math.PI / 2, 12);
   });
 });
+
+/**
+ * Range patterns (§8 of the design, 2026-07-31 addendum). A two-operand
+ * `["Range", lo, hi]` in **pattern position** is an inclusive numeric
+ * membership test, not a structural match.
+ */
+describe('MATCH — range patterns (membership)', () => {
+  const inOut = (subj: MathJsonExpression): MathJsonExpression => [
+    'Match',
+    subj,
+    ['MatchCase', ['Range', 1, 10], { str: 'in' }],
+    ['MatchCase', '_', { str: 'out' }],
+  ];
+
+  it('selects on an interior subject and on both endpoints (inclusive)', () => {
+    expect(m(inOut(5))).toBe('"in"');
+    expect(m(inOut(1))).toBe('"in"');
+    expect(m(inOut(10))).toBe('"in"');
+  });
+
+  it('falls through just outside either endpoint', () => {
+    expect(m(inOut(0))).toBe('"out"');
+    expect(m(inOut(11))).toBe('"out"');
+    expect(m(inOut(0.5))).toBe('"out"');
+    expect(m(inOut(10.5))).toBe('"out"');
+  });
+
+  it('endpoints compare with the matcher tolerance (leafEquals semantics)', () => {
+    // Just outside an endpoint but within `ce.tolerance` (1e-10) → selected.
+    expect(m(inOut({ num: '0.9999999999999' }))).toBe('"in"');
+    expect(m(inOut({ num: '10.0000000000001' }))).toBe('"in"');
+    // Comfortably outside → not selected.
+    expect(m(inOut({ num: '0.99' }))).toBe('"out"');
+  });
+
+  it('accepts float, rational and radical number-literal subjects', () => {
+    expect(m(inOut(2.5))).toBe('"in"');
+    expect(m(inOut(['Rational', 3, 2]))).toBe('"in"');
+    expect(m(inOut(['Rational', 1, 3]))).toBe('"out"'); // 0.333 < 1
+    expect(m(inOut(['Sqrt', 2]))).toBe('"in"'); // √2 ≈ 1.414
+  });
+
+  it('handles negative and infinite bounds', () => {
+    const neg: MathJsonExpression = [
+      'Match',
+      -2,
+      ['MatchCase', ['Range', -3, -1], { str: 'neg' }],
+      ['MatchCase', '_', { str: 'out' }],
+    ];
+    expect(m(neg)).toBe('"neg"');
+
+    const nonNegative = (subj: MathJsonExpression): MathJsonExpression => [
+      'Match',
+      subj,
+      ['MatchCase', ['Range', 0, { num: '+Infinity' }], { str: 'nonneg' }],
+      ['MatchCase', '_', { str: 'out' }],
+    ];
+    expect(m(nonNegative(0))).toBe('"nonneg"');
+    expect(m(nonNegative(1e12))).toBe('"nonneg"');
+    expect(m(nonNegative({ num: '+Infinity' }))).toBe('"nonneg"');
+    expect(m(nonNegative(-1))).toBe('"out"');
+  });
+
+  it('does NOT match a non-number subject (the documented carve-out)', () => {
+    expect(m(inOut('x'))).toBe('"out"'); // symbolic
+    expect(m(inOut('Pi'))).toBe('"out"'); // a constant symbol is not a literal
+    expect(m(inOut(['List', 1, 2]))).toBe('"out"'); // collection
+    expect(m(inOut(['Range', 1, 10]))).toBe('"out"'); // an actual Range value
+    expect(m(inOut({ str: 'a' }))).toBe('"out"'); // string
+    expect(m(inOut(['Complex', 1, 2]))).toBe('"out"'); // complex
+    expect(m(inOut(NaN))).toBe('"out"'); // NaN
+  });
+
+  it('keeps a `Range` with non-literal bounds structural', () => {
+    // Not a membership test: the pattern still matches the Range *expression*
+    // structurally (here binding `n` to the subject's lower bound).
+    expect(
+      m([
+        'Match',
+        ['Range', 'a', 10],
+        ['MatchCase', ['Range', '_n', 10], 'n'],
+        ['MatchCase', '_', { str: 'out' }],
+      ])
+    ).toBe('a');
+    // A three-operand Range is not a range pattern either.
+    expect(
+      m([
+        'Match',
+        5,
+        ['MatchCase', ['Range', 1, 10, 2], { str: 'stepped' }],
+        ['MatchCase', '_', { str: 'out' }],
+      ])
+    ).toBe('"out"');
+  });
+
+  it('a pin of a Range value still compares values, not membership', () => {
+    expect(
+      m([
+        'Match',
+        ['Range', 1, 10],
+        ['MatchCase', ['Pin', ['Range', 1, 10]], { str: 'pinned' }],
+        ['MatchCase', '_', { str: 'out' }],
+      ])
+    ).toBe('"pinned"');
+    // …and a number inside the pinned range does NOT select it.
+    expect(
+      m([
+        'Match',
+        5,
+        ['MatchCase', ['Pin', ['Range', 1, 10]], { str: 'pinned' }],
+        ['MatchCase', '_', { str: 'out' }],
+      ])
+    ).toBe('"out"');
+  });
+
+  it('is binding-free, so it is legal inside or-alternatives', () => {
+    const alt = (subj: MathJsonExpression): MathJsonExpression => [
+      'Match',
+      subj,
+      [
+        'MatchCase',
+        ['Alternatives', ['Range', 0, 9], ['Range', 100, 109]],
+        { str: 'in' },
+      ],
+      ['MatchCase', '_', { str: 'out' }],
+    ];
+    expect(m(alt(5))).toBe('"in"');
+    expect(m(alt(105))).toBe('"in"');
+    expect(m(alt(50))).toBe('"out"');
+  });
+
+  it('supports a guard after a range (over outer-scope names only)', () => {
+    // A range pattern binds nothing, so its guard can only reference
+    // outer-scope names — the binding-free-alternative machinery still applies.
+    ce.assign('matchRangeOn', 3);
+    ce.assign('matchRangeOff', -1);
+    const guarded = (limit: string): MathJsonExpression => [
+      'Match',
+      5,
+      ['MatchCase', ['Range', 0, 100], ['Greater', limit, 0], { str: 'in' }],
+      ['MatchCase', '_', { str: 'out' }],
+    ];
+    expect(m(guarded('matchRangeOn'))).toBe('"in"');
+    expect(m(guarded('matchRangeOff'))).toBe('"out"'); // guard fails
+  });
+
+  it('first-match-wins across overlapping ranges', () => {
+    expect(
+      m([
+        'Match',
+        5,
+        ['MatchCase', ['Range', 0, 10], { str: 'wide' }],
+        ['MatchCase', ['Range', 5, 6], { str: 'narrow' }],
+        ['MatchCase', '_', { str: 'out' }],
+      ])
+    ).toBe('"wide"');
+  });
+
+  it('N() selects the same case as evaluate() (subject evaluates exactly)', () => {
+    const expr = ce.box([
+      'Match',
+      ['Divide', 22, 7],
+      ['MatchCase', ['Range', 3, 4], ['Ln', 2]],
+      ['MatchCase', '_', { str: 'out' }],
+    ]);
+    expect(expr.evaluate().toString()).toBe('ln(2)');
+    expect(expr.N().re).toBeCloseTo(Math.LN2, 12);
+  });
+
+  it('route parity: box, parse-free function route, and raw MathJSON agree', () => {
+    const cases = (): MathJsonExpression[] => [
+      ['MatchCase', ['Range', 1, 10], { str: 'in' }],
+      ['MatchCase', '_', { str: 'out' }],
+    ];
+    // Box route (held raw operands).
+    expect(m(['Match', 5, ...cases()])).toBe('"in"');
+    // `ce.function()` route (pre-boxed, canonical, operands).
+    const fn = ce.function('Match', [
+      ce.box(5),
+      ce.function('MatchCase', [ce.box(['Range', 1, 10]), ce.string('in')]),
+      ce.function('MatchCase', [
+        ce.symbol('_', { canonical: false }),
+        ce.string('out'),
+      ]),
+    ]);
+    expect(fn.evaluate().toString()).toBe('"in"');
+    const fnOut = ce.function('Match', [
+      ce.box(50),
+      ce.function('MatchCase', [ce.box(['Range', 1, 10]), ce.string('in')]),
+      ce.function('MatchCase', [
+        ce.symbol('_', { canonical: false }),
+        ce.string('out'),
+      ]),
+    ]);
+    expect(fnOut.evaluate().toString()).toBe('"out"');
+  });
+});

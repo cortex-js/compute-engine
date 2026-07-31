@@ -153,6 +153,12 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `"=" in an argument is assignment; use "==" for an equation or comparison`;
     case 'zero-index':
       return `Indexing is 1-based: xs[1] is the first element (index 0 yields NaN)`;
+    case 'range-pattern-bounds':
+      return `Range pattern bounds must be numeric literals; use a guard (e.g. "n if n >= lo && n <= hi => …") to test against a computed bound`;
+    case 'range-pattern-step':
+      return `A stepped range is not a pattern; write "lo..hi" (two numeric bounds), or use a guard`;
+    case 'range-pattern-empty':
+      return `Range pattern "${args[0]}..${args[1]}" is empty (the lower bound is greater than the upper bound); this case can never match`;
     case 'floor-division-comment':
       return `"//" starts a comment, not floor division; use Floor(a / b) for the integer quotient`;
     case 'runtime-error':

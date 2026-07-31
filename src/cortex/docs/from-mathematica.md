@@ -1,0 +1,271 @@
+---
+title: Cortex for Mathematica Users
+sidebar_label: From Mathematica
+slug: /cortex/from-mathematica/
+description: "A translation guide from the Wolfram Language to Cortex: idiom-by-idiom mappings for expressions, lists, iterators, pattern matching and calculus, plus the surface forms that look alike but differ."
+hide_title: true
+date: Last Modified
+---
+# Cortex for Mathematica Users
+
+A working translation guide for anyone coming from the Wolfram Language. Every
+Cortex example on this page is executed by the documentation test suite and
+its `// ➔` output verified.
+
+**What carries over.** Almost all of the mental model. Values are symbolic
+expressions; evaluation is exact unless you ask for a number; capitalized
+names are the library and lowercase names are yours; `Simplify`, `Solve`, `D`,
+`Integrate`, `Limit`, `Series`, `Factor`, `Expand`, `N` and the linear-algebra
+operators all keep their names; `{k, 1, n}` iterator triples work in `Sum`,
+`Product`, `Integrate`, `D` and `Table`; `Range(5)` starts at 1; indexing is
+1-based and `-1` is the last element; arithmetic threads over lists the way a
+`Listable` function does.
+
+**What to unlearn.** Four things:
+
+1. **Function application uses parentheses**: `f(x)`, not `f[x]`. Square
+   brackets are indexing (Wolfram's `[[…]]`).
+2. **`{…}` is a set, not a list.** A Cortex list is `[1, 2, 3]`. The braces
+   survive in iterator triples, where they read positionally, but a bare
+   `{1, 2, 2}` is the *set* `{1, 2}`.
+3. **`=` is assignment and `->` is a key/value pair.** Equations use `==`
+   (as in Wolfram), but replacement rules must be written `Rule(x, 3)`.
+4. **There is no `%`**, no `Out[]`, and no notebook history. `%` is the
+   remainder operator.
+
+## Expressions and Evaluation
+
+| Wolfram | Cortex |
+|:--|:--|
+| `f[x]`, `Sin[x]` | `f(x)`, `Sin(x)` |
+| `x = 5` | `let x = 5` |
+| `f[x_] := x^2` | `f(x) = x^2` |
+| `f = Function[x, x^2]` | `f = x \|-> x^2` |
+| `#^2 &` | `x \|-> x^2` — no slot/`&` syntax |
+| `expr /. x -> 3` | `ReplaceAll(expr, Rule(x, 3))` |
+| `expr // N` | `expr \|> N` (or `~>`) |
+| `N[expr]`, `N[expr, 25]` | `N(expr)`, `N(expr, 25)` |
+| `Hold[expr]` | `HoldValues(expr)` — evaluate with assigned symbols kept symbolic |
+| `Print[x]` | *(no printing)* — the program's value is its **last statement** |
+| `%`, `Out[3]` | *(no history)* — bind with `let` |
+| `(* comment *)` | `// comment` or `/* comment */` |
+| `expr;` to suppress output | `;` is a statement separator, nothing is suppressed |
+
+```cortex
+f(x) = x^2 + 1
+(f(3), D(f(x), x), Integrate(f(x), {x, 0, 1}))
+// ➔ (10, 2x, 4/3)
+```
+
+Only the value of the **last** statement is returned; an earlier statement
+that evaluates to an error value also raises a diagnostic, so nothing vanishes
+silently.
+
+## Lists and Parts
+
+| Wolfram | Cortex |
+|:--|:--|
+| `{1, 2, 3}` (list) | `[1, 2, 3]` — braces make a **set** |
+| `xs[[i]]` | `xs[i]` — 1-based, as in Wolfram |
+| `xs[[-1]]`, `First`, `Last`, `Rest` | `xs[-1]`, `First(xs)`, `Last(xs)`, `Rest(xs)` |
+| `xs[[2 ;; 4]]` | `xs[2..4]` |
+| `m[[i, j]]` | `m[i, j]` (or `m[i][j]`) |
+| `Range[5]`, `Range[2, 10, 2]` | `Range(5)` or `1..5`; `Range(2, 10, 2)` |
+| `Length`, `Sort`, `Reverse`, `Flatten` | same names |
+| `Total[xs]` | `Sum(xs)` |
+| `Select[xs, f]` | `Filter(xs, f)` |
+| `Map[f, xs]`, `f /@ xs` | `Map(xs, f)` — collection **first** |
+| `Fold[f, init, xs]` | `Fold(f, init, xs)` |
+| `Apply[f, {a, b}]`, `f @@ t` | `Apply(f, (a, b))`, or spread: `f(...t)` |
+| `Position[xs, v]` | `IndexOf(xs, v)` |
+| `Append[xs, v]`, `Join` | `Append(xs, v)`, `Join(xs, ys)` |
+| `Tally`, `Partition` | same names (`Tally` returns a `(values, counts)` pair) |
+| `<\|"a" -> 1\|>` (association) | `{"a" -> 1}`; read with `d["a"]`, enumerate with `Keys`/`Values` |
+| `Union`, `Intersection` | same names, returning a set |
+
+```cortex
+let xs = [3, 1, 4, 1, 5]
+(xs[1], xs[-1], xs[2..4], Length(xs), Sort(xs))
+// ➔ (3, 5, [1,4,1], 5, [1,1,3,4,5])
+```
+
+Lists and sets are genuinely different types, so the brace/bracket distinction
+is not cosmetic:
+
+```cortex
+(Type({1, 2, 3}), Type([1, 2, 3]))
+// ➔ ("set<finite_integer>", "vector<finite_integer^3>")
+```
+
+### Threading over lists
+
+Arithmetic and the elementary functions thread over lists, so a `Listable`
+habit transfers directly. Matrices multiply as matrices:
+
+```cortex
+([1, 2, 3] + 1, [1, 2, 3] * [4, 5, 6], Sin([0, Pi]))
+// ➔ ([2,3,4], [4,10,18], [0,0])
+```
+
+```cortex
+let A = [[2, 1], [1, 3]]
+(Determinant(A), Inverse(A), A * [1, 1])
+// ➔ (5, [[3/5,-1/5],[-1/5,2/5]], [3,4])
+```
+
+## Iterators and Table
+
+Iterator triples in braces work exactly as in Wolfram — `Sum`, `Product`,
+`Integrate`, `D` and `Table` all read `{var, lo, hi}` (and `{var, lo, hi,
+step}`) positionally:
+
+```cortex
+let squares = Table(k^2, {k, 1, 5})
+(Sum(squares), Sum(1/k^2, {k, 1, Infinity}), Product(k, {k, 1, 5}))
+// ➔ (55, 1/6 * pi^2, 120)
+```
+
+`Sum`, `Product` and `Integrate` also accept the tuple spelling
+`(k, 1, 5)`; `Table` currently accepts only the brace form. `D(expr, {x, 2})`
+takes a second derivative.
+
+`Table` is a lazy generator, so the value above is materialized by `Sum`. When
+you want an ordinary list, index it, aggregate it, or build it with `Map`:
+
+```cortex
+let g = x |-> x^2 + 1
+(g(3), Sum(Map(1..4, g)))
+// ➔ (10, 34)
+```
+
+## Control Flow and Pattern Matching
+
+| Wolfram | Cortex |
+|:--|:--|
+| `If[c, a, b]` | `if c { a } else { b }` — an expression |
+| `Which[c1, a, c2, b, True, z]` | `if c1 { a } else if c2 { b } else { z }` |
+| `Switch[x, 0, "zero", _, "other"]` | `match x { 0 => "zero"; _ => "other" }` |
+| `Cases[xs, patt]` | `Filter` with a predicate, or `Map` over a `match` |
+| `Do[body, {k, 1, n}]` | `for k in 1..n { body }` |
+| `While[c, body]` | `while c { body }` |
+| `Module[{t}, body]` | `do { let t = …; body }`, or a `function` block |
+| `With[{t = v}, body]` | `do { const t = v; body }` |
+| `Block[{x}, body]` | *(no dynamic scoping)* — Cortex is lexically scoped |
+
+`match` replaces the whole `Switch`/`Which`/`Cases` family. It is structural
+and total: it always selects a case, and a bare identifier in pattern position
+**binds** rather than compares. Guards use `if`, and `== expr` pins a value.
+
+```cortex
+classify(z) = match z {
+  0 => "zero"
+  n if n > 0 => "positive"
+  _ => "negative"
+}
+Map([-2, 0, 5], classify)
+// ➔ ["negative", "zero", "positive"]
+```
+
+Because a pattern is parsed as an ordinary expression, matching on operator
+structure comes for free — a case pattern `a + b` destructures an `Add` and
+captures its operands, the Wolfram `Plus[a_, b_]` idiom. Blank patterns are
+spelled differently: `_` is the wildcard, `name` is a named capture (Wolfram's
+`name_`), `name: type` adds a type guard (`name_Integer`), and `...rest`
+captures the remainder of a list (`___`). See
+[Control Flow](/cortex/control-flow/#match) for the full pattern grammar.
+
+Scoping constructs are blocks:
+
+```cortex
+function area(r) {
+  let c = Pi
+  c * r^2
+}
+(area(2), area(3))
+// ➔ (4pi, 9pi)
+```
+
+## Symbolic Mathematics
+
+This is the part that needs the least translation:
+
+| Wolfram | Cortex |
+|:--|:--|
+| `Simplify`, `Expand`, `Factor` | same names |
+| `Solve[x^2 == 4, x]` | `Solve(x^2 == 4, x)` |
+| `Solve[{e1, e2}, {x, y}]` | `Solve([e1, e2], [x, y])` — lists in brackets |
+| `D[f, x]`, `D[f, {x, 2}]` | `D(f, x)`, `D(f, {x, 2})` |
+| `Integrate[f, x]`, `Integrate[f, {x, a, b}]` | same, with parentheses |
+| `Limit[f, x -> 0]` | `Limit(f, x, 0)` |
+| `Series[f, {x, 0, n}]` | `Series(f, x, 0)` — the tail is a `BigO` term |
+| `Det`, `Inverse`, `Transpose`, `Eigenvalues` | `Determinant`, `Inverse`, `Transpose`, `Eigenvalues` |
+| `Dot`, `Cross`, `LinearSolve` | same names |
+| `Pi`, `Infinity`, `I`, `E` | `Pi`, `Infinity`, **`i`**, **`e`** — lowercase |
+| `PrimeQ`, `NextPrime`, `FactorInteger`, `Divisors` | `IsPrime`, `NextPrime`, `FactorInteger`, `Divisors` |
+| `Binomial`, `GCD`, `LCM`, `n!` | same |
+
+```cortex
+(Solve(x^2 - 5x + 6 == 0, x), Simplify((x^2 - 1)/(x - 1)), Factor(x^2 - 4))
+// ➔ ([3,2], x + 1, (x - 2) * (x + 2))
+```
+
+```cortex
+(Limit((1 + 1/n)^n, n, Infinity), Series(Cos(x), x, 0))
+// ➔ (e, 1 - 1/2 * x^2 + 1/24 * x^4 + BigO(x^6))
+```
+
+`N` takes an optional precision, and the engine works to arbitrary precision:
+
+```cortex
+N(Pi, 25)
+// ➔ 3.141592653589793238462643
+```
+
+## Traps
+
+Surface forms that look like Wolfram but behave differently.
+
+| You write | What actually happens | Write instead |
+|:--|:--|:--|
+| `f[x]` | `f` *indexed* at `x` — an `incompatible-type` error value, not a call | `f(x)` |
+| `{1, 2, 3}` for a list | A **set**: unordered, deduplicated, not indexable by position | `[1, 2, 3]` |
+| `E`, `I` | Ordinary undeclared symbols — they stay symbolic, silently | `e`, `i` |
+| `expr /. x -> 3` | `->` builds a `KeyValuePair`, not a `Rule` | `ReplaceAll(expr, Rule(x, 3))` |
+| `%` for the last result | `%` is the `Mod` operator | bind results with `let` |
+| `x = 4` inside `Solve` | `=` is assignment: `Solve(x^2 = 4, x)` is silently `[]` | `Solve(x^2 == 4, x)` |
+| `expr;` to suppress | `;` only separates statements | *(nothing to suppress)* |
+| `Total`, `Select`, `Nest`, `Cases`, `MemberQ` | Unknown names: the call stays **symbolic and inert** | `Sum`, `Filter`, a loop, `Filter`, `in` |
+| `Ceiling`, `Quotient`, `IntegerPart` | Inert (with a did-you-mean warning) | `Ceil`, `Floor(a/b)`, `Floor` |
+| `StringLength`, `ToUpperCase` | Inert — the string library is small | `Length(Characters(s))`; decompose and rebuild |
+| `RandomReal[]`, `RandomInteger[n]` | Inert | `Random()`, `Random(Range(1, n))` |
+| `Table(e, (k, 1, n))` | Type error — `Table` wants the brace form | `Table(e, {k, 1, n})` |
+| `3!^2` | Diagnostic — the lexer reads `!^` as one token | `3! ^ 2` |
+| `a +b` | Diagnostic — an infix operator needs spaces on both sides or neither | `a + b` or `a+b` |
+
+The rows about inert names deserve emphasis: **an unknown capitalized name is
+not an error.** Cortex leaves the call symbolic (with a did-you-mean warning
+when a close library name exists), exactly the way Wolfram leaves `Foo[1]`
+unevaluated. A program that calls `Total(xs)` therefore returns the unevaluated
+`Total([…])` rather than a number — when a result looks unfinished, check for
+an inert head.
+
+Also worth knowing: lazy collection operators (`Range`, `Map`, `Filter`,
+`Take`, `Table`) enumerate only when materialized, and a tuple does **not**
+materialize its operands — `(Table(k, {k, 1, 3}), 5)` keeps the unevaluated
+`Tabulate(…)`. Aggregate or index where you stand.
+
+## Next
+
+<ReadMore path="/cortex/examples/">
+**~70 complete programs**, all verified — number theory, calculus, linear
+algebra, units, strings, and reproducible randomness.
+</ReadMore>
+
+<ReadMore path="/cortex/control-flow/">
+**Control flow** in full — the complete `match` pattern grammar, blocks,
+loops, and function forms.
+</ReadMore>
+
+<ReadMore path="/cortex/for-agents/">
+The **condensed language card** — the same material at reference density.
+</ReadMore>

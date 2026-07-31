@@ -643,6 +643,18 @@ export function serializeCortex(
       });
       return fmt.line(...parts);
     }
+    // A two-operand `Range` in pattern position is the range-membership pattern
+    // `lo..hi` (see the `match` design §8), so it keeps its infix spelling here
+    // even though `Range` serializes in call form in expression position. The
+    // `..` is spaced like any other infix operator, which also keeps a negative
+    // upper bound (`0 .. -1`) re-parsable — maximal munch would otherwise glue
+    // `..-` into one token.
+    if (h === 'Range' && operands(p).length === 2)
+      return fmt.line(
+        serializePattern(operand(p, 1) ?? 'Nothing'),
+        fmt.infixOperator('..'),
+        serializePattern(operand(p, 2) ?? 'Nothing')
+      );
     if (h === 'List')
       return fmt.fencedList(
         '[',

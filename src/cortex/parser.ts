@@ -927,6 +927,7 @@ export class Parser {
     const start = this.current.start;
     this.matchTypeGuards = [];
     const pattern = this.parseCasePattern();
+    if (pattern !== null) this.checkRangePatterns(pattern);
     if (pattern === null) {
       if (!(this.current.diagnostics && this.current.diagnostics.length))
         this.error(
@@ -1082,6 +1083,49 @@ export class Parser {
       precededByWhitespace: false,
       precededByLinebreak: false,
     };
+  }
+
+  /**
+   * Validate every `Range` node in a case pattern (v1 range patterns — see the
+   * `match` design §8). In pattern position `lo..hi` is an inclusive numeric
+   * membership test, so its bounds must be **numeric literals** (negated
+   * literals and `Infinity`/`-Infinity` included). A bare identifier bound
+   * would otherwise patternize into a binding, which is nonsensical here; a
+   * computed or pinned bound has no compile-time value. A stepped range has no
+   * membership meaning at all in v1, and `lo > hi` is an always-dead case.
+   *
+   * `Pin` operands are ordinary value expressions (`== Range(1, 10)` pins the
+   * range *value*), so they are not visited.
+   */
+  private checkRangePatterns(pattern: MathJsonExpression): void {
+    const ops = fnOps(pattern);
+    if (ops === null) return;
+    if (ops[0] === 'Pin') return;
+
+    if (ops[0] === 'Range') {
+      const bounds = ops.slice(1);
+      const at = (node: MathJsonExpression): [number, number] => {
+        const o = nodeOffsets(node) ?? nodeOffsets(pattern);
+        return o
+          ? [o[0] - this.baseOffset, o[1] - this.baseOffset]
+          : [this.current.start, this.current.end];
+      };
+      if (bounds.length !== 2 || bounds.some((b) => operatorOf(b) === 'Range')) {
+        this.error(['range-pattern-step'], ...at(pattern));
+        return;
+      }
+      const lo = rangeBoundValue(bounds[0]);
+      const hi = rangeBoundValue(bounds[1]);
+      if (lo === undefined)
+        this.error(['range-pattern-bounds'], ...at(bounds[0]));
+      if (hi === undefined)
+        this.error(['range-pattern-bounds'], ...at(bounds[1]));
+      if (lo !== undefined && hi !== undefined && lo > hi)
+        this.error(['range-pattern-empty', lo, hi], ...at(pattern));
+      return;
+    }
+
+    for (const op of ops.slice(1)) this.checkRangePatterns(op);
   }
 
   //
@@ -2980,6 +3024,28 @@ function isLiteralNode(expr: MathJsonExpression): boolean {
   if (typeof expr === 'string' && /^'[\s\S]*'$/.test(expr)) return true;
   const s = symbolNameOf(expr) ?? (typeof expr === 'string' ? expr : null);
   return s === 'True' || s === 'False';
+}
+
+/** The operator head of a function node (`{fn: [head, …]}`), or `null`. */
+function operatorOf(expr: MathJsonExpression): string | null {
+  const ops = fnOps(expr);
+  if (ops === null) return null;
+  return typeof ops[0] === 'string' ? ops[0] : (symbolNameOf(ops[0]) ?? null);
+}
+
+/**
+ * The machine value of a **range-pattern bound**: a numeric literal node, with
+ * `Infinity`/`-Infinity` allowed and `NaN` rejected. Returns `undefined` for
+ * anything that is not a usable literal bound (a binding, a computed
+ * expression, a pin, a string, `NaN`), which is what the `range-pattern-bounds`
+ * diagnostic keys on. The Cortex lexer normalizes every numeric literal to a
+ * plain decimal/exponent spelling, so `Number()` round-trips them all.
+ */
+function rangeBoundValue(expr: MathJsonExpression): number | undefined {
+  if (!isNumberNode(expr)) return undefined;
+  const raw = (expr as { num: string | number }).num;
+  const value = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  return Number.isNaN(value) ? undefined : value;
 }
 
 /** Whether a pattern is irrefutable on its own: a lone binding (`_name`) or the

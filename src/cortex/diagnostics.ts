@@ -35,6 +35,9 @@ export type DiagnosticCode =
   | 'match-alternative-binding' // a named binding appears inside an or-alternative
   | 'match-multiple-rest' // more than one `...rest` in a single list/tuple pattern
   | 'match-irrefutable-case' // %0 = binding name — a non-final case that matches anything
+  | 'range-pattern-bounds' // a range pattern bound is not a numeric literal
+  | 'range-pattern-step' // a stepped / non-binary range in pattern position
+  | 'range-pattern-empty' // %0 = lo, %1 = hi — an empty range pattern (lo > hi)
   | 'invalid-escape-sequence' // %0 = escape sequence char
   | 'invalid-unicode-codepoint-string' // %0 = codepoint string
   | 'invalid-unicode-codepoint-value' // %0 = codepoint

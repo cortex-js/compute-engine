@@ -240,6 +240,93 @@ describe('MATCH ladder — closures are cached but keep lexical late binding', (
   });
 });
 
+describe('MATCH ladder — range patterns classify tier 1', () => {
+  it('classifies a range case as a binding-free tier-1 predicate', () => {
+    const plan = planOf([
+      'Match',
+      'x',
+      ['MatchCase', ['Range', 1, 10], { str: 'in' }],
+      ['MatchCase', '_', { str: 'out' }],
+    ]);
+    const cases = plan.segments.flatMap((s) => s.cases);
+    expect(cases[0].tier).toBe(1);
+    expect(cases[0].captureKeys).toEqual([]);
+    expect(cases[0].tests).toEqual([
+      { kind: 'range', lo: expect.anything(), hi: expect.anything() },
+    ]);
+  });
+
+  it('does not degrade a preceding tier-0 dispatch prefix', () => {
+    // The three integer constants stay one tier-0 dispatch segment; the range
+    // case opens a following tier-1 chain segment.
+    const plan = planOf([
+      'Match',
+      'x',
+      ['MatchCase', 1, { str: 'a' }],
+      ['MatchCase', 2, { str: 'b' }],
+      ['MatchCase', 3, { str: 'c' }],
+      ['MatchCase', ['Range', 10, 20], { str: 'r' }],
+      ['MatchCase', '_', { str: 'z' }],
+    ]);
+    expect(plan.segments.map((s) => s.kind)).toEqual(['dispatch', 'chain']);
+    const dispatch = plan.segments[0];
+    expect(dispatch.kind).toBe('dispatch');
+    if (dispatch.kind === 'dispatch') expect(dispatch.table.size).toBe(3);
+    expect(plan.segments[1].cases.map((c) => c.tier)).toEqual([1, 3]);
+  });
+
+  it('an or-alternative of ranges is one tier-1 case with two tests', () => {
+    const plan = planOf([
+      'Match',
+      'x',
+      [
+        'MatchCase',
+        ['Alternatives', ['Range', 0, 9], ['Range', 100, 109]],
+        { str: 'in' },
+      ],
+    ]);
+    const cases = plan.segments.flatMap((s) => s.cases);
+    expect(cases[0].tier).toBe(1);
+    expect(cases[0].tests).toHaveLength(2);
+    expect(cases[0].tests!.every((t) => t.kind === 'range')).toBe(true);
+  });
+
+  it('a `Range` with non-literal bounds stays a tier-3 structural pattern', () => {
+    const plan = planOf([
+      'Match',
+      'x',
+      ['MatchCase', ['Range', '_a', 10], 'a'],
+    ]);
+    expect(plan.segments.flatMap((s) => s.cases)[0].tier).toBe(3);
+  });
+
+  it('the laddered result equals the tier-3 reference on range cases', () => {
+    const expr = (subj: MathJsonExpression): MathJsonExpression => [
+      'Match',
+      subj,
+      ['MatchCase', ['Range', 1, 10], { str: 'in' }],
+      ['MatchCase', '_', { str: 'out' }],
+    ];
+    for (const s of [
+      0,
+      1,
+      5,
+      10,
+      11,
+      0.5,
+      ['Rational', 3, 2],
+      ['Sqrt', 2],
+      'x',
+      'Pi',
+      ['List', 1, 2],
+      ['Range', 1, 10],
+      NaN,
+      { num: '+Infinity' },
+    ] as MathJsonExpression[])
+      expect(ladder(expr(s))).toBe(reference(expr(s)));
+  });
+});
+
 // ─── Property test: laddered ≡ tier-3 reference ──────────────────────────────
 
 describe('MATCH ladder — property: laddered result ≡ tier-3 reference', () => {
@@ -280,6 +367,10 @@ describe('MATCH ladder — property: laddered result ≡ tier-3 reference', () =
       'x',
       { str: 'foo' },
       { str: 'bar' },
+      ['Rational', 3, 2],
+      ['Sqrt', 2],
+      { num: '+Infinity' },
+      ['Range', 1, 10],
       ['List', 0, 9],
       ['List', 1, 2, 3],
       ['List'],
@@ -307,6 +398,25 @@ describe('MATCH ladder — property: laddered result ≡ tier-3 reference', () =
       () => ({ pattern: ['Alternatives', 0, 0.5], body: { str: 'altf' } }),
       // tier 1: float, pins
       () => ({ pattern: pick([0.5, 1.5, 2.0]), body: { str: 'flt' } }),
+      // tier 1: range patterns (membership), incl. negative and infinite bounds
+      () => ({
+        pattern: pick([
+          ['Range', 0, 3],
+          ['Range', 1, 10],
+          ['Range', -2, 0],
+          ['Range', 0, { num: '+Infinity' }],
+          ['Range', { num: '-Infinity' }, 2],
+          ['Range', 2, 2],
+        ] as MathJsonExpression[]),
+        body: { str: 'rng' },
+      }),
+      () => ({
+        pattern: ['Alternatives', ['Range', 0, 1], ['Range', 5, 6]],
+        body: { str: 'rngalt' },
+      }),
+      // a `Range` with non-literal bounds is NOT a range pattern: it stays a
+      // structural (tier-3) operator pattern on both paths
+      () => ({ pattern: ['Range', '_a', 10], body: 'a' }),
       () => ({ pattern: ['Pin', 'matchPinA'], body: { str: 'pinA' } }),
       () => ({ pattern: ['Pin', 'matchPinB'], body: { str: 'pinB' } }),
       () => ({ pattern: ['Pin', ['Add', 2, 4]], body: { str: 'pin6' } }),

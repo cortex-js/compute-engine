@@ -155,7 +155,9 @@ describe('CORTEX DOCUMENTATION', () => {
       (block) =>
         block.language === 'cortex-live' ||
         basename(block.file) === 'examples.md' ||
-        basename(block.file) === 'for-agents.md'
+        basename(block.file) === 'for-agents.md' ||
+        basename(block.file) === 'from-python.md' ||
+        basename(block.file) === 'from-mathematica.md'
     );
     const failures: string[] = [];
 

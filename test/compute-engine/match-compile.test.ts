@@ -323,3 +323,74 @@ describe('COMPILE Match — reference analysis (compile probe)', () => {
     expect(r.freeSymbols?.sort()).toEqual(['lim', 'y']);
   });
 });
+
+/**
+ * Range patterns (§8, 2026-07-31 addendum). A tier-1 range case emits two
+ * native comparisons on the subject local: `(s >= lo && s <= hi)`.
+ *
+ * FLOAT SEAM: those comparisons are exact, while the interpreter compares the
+ * *endpoints* tolerantly (`leafEquals`/`isEqual`). A subject within
+ * `engine.tolerance` just outside an endpoint therefore selects the case
+ * interpreted but not compiled — the same seam the `===` leaf comparisons
+ * carry. The tests below use bounds/subjects where the two paths coincide.
+ */
+describe('COMPILE Match — range patterns', () => {
+  const expr: MathJsonExpression = [
+    'Match',
+    'x',
+    ['MatchCase', ['Range', 1, 10], 1],
+    ['MatchCase', ['Alternatives', ['Range', 20, 29], 100], 2],
+    ['MatchCase', ['Range', 0, { num: '+Infinity' }], 3],
+    ['MatchCase', '_', -1],
+  ];
+
+  it('emits `s >= lo && s <= hi` on the subject local and matches the interpreter', () => {
+    const r = compile(ce.box(expr), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('>= 1');
+    expect(r.code).toContain('<= 10');
+    // Infinity bounds emit the JS `Infinity` literal.
+    expect(r.code).toContain('Infinity');
+
+    for (const x of [5, 1, 10, 0, 11, 25, 100, 50, -1, 2.5]) {
+      const interpreted = ce
+        .box(['Match', x, ...(expr as MathJsonExpression[]).slice(2)])
+        .evaluate().re;
+      expect(r.run!({ x })).toBe(interpreted);
+    }
+  });
+
+  it('a NaN subject falls through every range (both paths)', () => {
+    const r = compile(ce.box(expr), { fallback: false });
+    expect(r.run!({ x: NaN })).toBe(-1);
+    expect(
+      ce
+        .box(['Match', NaN, ...(expr as MathJsonExpression[]).slice(2)])
+        .evaluate().re
+    ).toBe(-1);
+  });
+
+  it('compiles to GLSL and WGSL (Infinity bounds included)', () => {
+    const glsl = compile(ce.box(expr), { to: 'glsl', fallback: false });
+    expect(glsl.success).toBe(true);
+    expect(glsl.code).toContain('>= 1.0');
+    expect(glsl.code).toContain('<= 10.0');
+
+    const wgsl = compile(ce.box(expr), { to: 'wgsl', fallback: false });
+    expect(wgsl.success).toBe(true);
+    expect(wgsl.code).toContain('select');
+    expect(wgsl.code).toContain('>= 1.0');
+  });
+
+  it('fails closed on a `Range` with non-literal bounds (a tier-3 pattern)', () => {
+    const structural: MathJsonExpression = [
+      'Match',
+      'x',
+      ['MatchCase', ['Range', '_a', 10], 'a'],
+      ['MatchCase', '_', 0],
+    ];
+    expect(() => compile(ce.box(structural), { fallback: false })).toThrow(
+      /not compilable/
+    );
+  });
+});

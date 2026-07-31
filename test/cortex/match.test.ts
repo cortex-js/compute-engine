@@ -240,6 +240,10 @@ describe('CORTEX MATCH — round-trip (parse → serialize → parse fixpoint)',
     'match x {\n  == limit => 1\n  _ => 0\n}',
     'match p {\n  (x, y) => x\n}',
     'match z {\n  a + b if a > 0 => a\n  _ => 0\n}',
+    'match x {\n  1 .. 10 => "in"\n  _ => "out"\n}',
+    'match x {\n  0 .. 9 | 100 .. 109 => "in"\n  _ => "out"\n}',
+    'match x {\n  0 .. Infinity => "nonneg"\n  _ => "out"\n}',
+    'match x {\n  -3 .. -1 => "neg"\n  _ => "out"\n}',
   ];
 
   test.each(SOURCES)('%s', (src) => {
@@ -328,5 +332,194 @@ describe('CORTEX MATCH — reserved-word interaction', () => {
     // any keyword head used out of position.
     const diags = diagnostics('y = match');
     expect(diags.length).toBeGreaterThan(0);
+  });
+});
+
+//
+// Range patterns (§8 of the design, 2026-07-31 addendum): `lo..hi` in pattern
+// position is an inclusive numeric membership test.
+//
+
+describe('CORTEX MATCH — range patterns (parse)', () => {
+  test('`lo..hi` lowers to a held two-operand Range pattern', () => {
+    expect(
+      validCortex('match x {\n  1..10 => "in"\n  _ => "out"\n}')
+    ).toEqual([
+      'Match',
+      'x',
+      ['MatchCase', ['Range', 1, 10], { str: 'in' }],
+      ['MatchCase', '_', { str: 'out' }],
+    ]);
+  });
+
+  test('the call form `Range(lo, hi)` lowers identically (patternize keys on the operator)', () => {
+    expect(
+      validCortex('match x {\n  Range(1, 10) => "in"\n  _ => "out"\n}')
+    ).toEqual([
+      'Match',
+      'x',
+      ['MatchCase', ['Range', 1, 10], { str: 'in' }],
+      ['MatchCase', '_', { str: 'out' }],
+    ]);
+  });
+
+  test('negated and infinite bounds are numeric literals', () => {
+    expect(
+      validCortex('match x {\n  -3 .. -1 => "neg"\n  _ => "out"\n}')
+    ).toEqual([
+      'Match',
+      'x',
+      ['MatchCase', ['Range', -3, -1], { str: 'neg' }],
+      ['MatchCase', '_', { str: 'out' }],
+    ]);
+    expect(
+      validCortex('match x {\n  0..Infinity => "nonneg"\n  _ => "out"\n}')
+    ).toEqual([
+      'Match',
+      'x',
+      ['MatchCase', ['Range', 0, 'PositiveInfinity'], { str: 'nonneg' }],
+      ['MatchCase', '_', { str: 'out' }],
+    ]);
+  });
+
+  test('a range pattern serializes back to `lo .. hi` (call form in expression position)', () => {
+    const [value] = parseCortex('match x {\n  1..10 => "in"\n  _ => "out"\n}');
+    expect(serializeCortex(value)).toBe(
+      'match x {\n  1 .. 10 => "in"\n  _ => "out"\n}'
+    );
+    // Expression position is unchanged: `Range` keeps its call spelling.
+    expect(serializeCortex(parseCortex('let xs = 1..10')[0])).toContain(
+      'Range(1, 10)'
+    );
+  });
+
+  test('ranges are binding-free, so they are legal in or-alternatives', () => {
+    expect(
+      validCortex('match x {\n  0..9 | 100..109 => "in"\n  _ => "out"\n}')
+    ).toEqual([
+      'Match',
+      'x',
+      [
+        'MatchCase',
+        ['Alternatives', ['Range', 0, 9], ['Range', 100, 109]],
+        { str: 'in' },
+      ],
+      ['MatchCase', '_', { str: 'out' }],
+    ]);
+  });
+});
+
+describe('CORTEX MATCH — range-pattern diagnostics', () => {
+  test('a bare-identifier bound is flagged (it would otherwise bind)', () => {
+    expect(diagnostics('match x {\n  n..10 => 1\n  _ => 0\n}')).toContain(
+      'range-pattern-bounds'
+    );
+  });
+
+  test('a computed bound is flagged', () => {
+    expect(diagnostics('match x {\n  (1+1)..10 => 1\n  _ => 0\n}')).toContain(
+      'range-pattern-bounds'
+    );
+  });
+
+  test('a NaN bound is flagged', () => {
+    expect(diagnostics('match x {\n  NaN..10 => 1\n  _ => 0\n}')).toContain(
+      'range-pattern-bounds'
+    );
+  });
+
+  test('a stepped range is flagged (unsupported in v1)', () => {
+    expect(
+      diagnostics('match x {\n  Range(1, 10, 2) => 1\n  _ => 0\n}')
+    ).toContain('range-pattern-step');
+    // `1..10..2` parses as `Range(Range(1, 10), 2)` — also a stepped range.
+    expect(diagnostics('match x {\n  1..10..2 => 1\n  _ => 0\n}')).toContain(
+      'range-pattern-step'
+    );
+  });
+
+  test('an empty range (lo > hi) is flagged as an always-dead case', () => {
+    expect(diagnostics('match x {\n  10..1 => 1\n  _ => 0\n}')).toContain(
+      'range-pattern-empty'
+    );
+  });
+
+  test('a well-formed range is diagnostic-free (incl. lo == hi)', () => {
+    expect(diagnostics('match x {\n  1..10 => 1\n  _ => 0\n}')).toEqual([]);
+    expect(diagnostics('match x {\n  2..2 => 1\n  _ => 0\n}')).toEqual([]);
+    expect(
+      diagnostics('match x {\n  -Infinity..Infinity => 1\n  _ => 0\n}')
+    ).toEqual([]);
+  });
+
+  test('a `Range` outside pattern position is untouched', () => {
+    expect(diagnostics('let xs = n..10\nxs')).toEqual([]);
+    // …including a pinned range value, whose operand is an ordinary expression.
+    expect(diagnostics('match x {\n  == Range(1, 10) => 1\n  _ => 0\n}')).toEqual(
+      []
+    );
+  });
+});
+
+describe('CORTEX MATCH — range patterns (execute)', () => {
+  const inOut = (subject: string): string =>
+    run(`match ${subject} {\n  1..10 => "in"\n  _ => "out"\n}`).value.toString();
+
+  test('interior and endpoint subjects select; outside falls through', () => {
+    expect(inOut('5')).toBe('"in"');
+    expect(inOut('1')).toBe('"in"');
+    expect(inOut('10')).toBe('"in"');
+    expect(inOut('0')).toBe('"out"');
+    expect(inOut('11')).toBe('"out"');
+  });
+
+  test('float and rational subjects work; non-numbers fall through', () => {
+    expect(inOut('2.5')).toBe('"in"');
+    expect(inOut('3/2')).toBe('"in"');
+    expect(inOut('x')).toBe('"out"'); // symbolic
+    expect(inOut('[1, 2]')).toBe('"out"'); // list
+    expect(inOut('Range(1, 10)')).toBe('"out"'); // an actual Range value
+    expect(inOut('NaN')).toBe('"out"');
+    expect(inOut('"a"')).toBe('"out"');
+  });
+
+  test('negative and infinite bounds', () => {
+    expect(
+      run('match -2 {\n  -3 .. -1 => "neg"\n  _ => "out"\n}').value.toString()
+    ).toBe('"neg"');
+    expect(
+      run('match 5 {\n  0..Infinity => "nonneg"\n  _ => "out"\n}').value.toString()
+    ).toBe('"nonneg"');
+    expect(
+      run('match -5 {\n  0..Infinity => "nonneg"\n  _ => "out"\n}').value.toString()
+    ).toBe('"out"');
+  });
+
+  test('or-alternatives of ranges', () => {
+    const src = 'match SUBJ {\n  0..9 | 100..109 => "in"\n  _ => "out"\n}';
+    expect(run(src.replace('SUBJ', '5')).value.toString()).toBe('"in"');
+    expect(run(src.replace('SUBJ', '105')).value.toString()).toBe('"in"');
+    expect(run(src.replace('SUBJ', '50')).value.toString()).toBe('"out"');
+  });
+
+  test('a guard after a range reads outer-scope names (a range binds nothing)', () => {
+    expect(
+      run(
+        'let lim = 3\nmatch 5 {\n  0..100 if lim > 0 => "in"\n  _ => "out"\n}'
+      ).value.toString()
+    ).toBe('"in"');
+    expect(
+      run(
+        'let lim = 3\nmatch 5 {\n  0..100 if lim > 10 => "in"\n  _ => "out"\n}'
+      ).value.toString()
+    ).toBe('"out"');
+  });
+
+  test('first-match order wins across overlapping ranges', () => {
+    expect(
+      run(
+        'match 5 {\n  0..10 => "wide"\n  5..6 => "narrow"\n  _ => "out"\n}'
+      ).value.toString()
+    ).toBe('"wide"');
   });
 });

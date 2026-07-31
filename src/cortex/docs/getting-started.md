@@ -126,3 +126,12 @@ limits.
 Use the **language reference** for syntax, operators, declarations, types, and
 control flow.
 </ReadMore>
+
+<ReadMore path="/cortex/from-python/">
+Already know **Python**? Start from the idiom-by-idiom translation guide.
+</ReadMore>
+
+<ReadMore path="/cortex/from-mathematica/">
+Already know **Mathematica**? Start from the Wolfram Language translation
+guide.
+</ReadMore>

@@ -111,6 +111,30 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-31 — **Range patterns in `match` (landed).** From the Hica
+  language review: a two-operand `Range` at the top level of a case pattern
+  (`0..90 => "acute"`, or `["Range", lo, hi]` in raw MathJSON) is an
+  inclusive numeric membership test; non-number subjects fall through.
+  Bounds are numeric literals incl. negatives and `±Infinity`
+  (`range-pattern-bounds` / `range-pattern-empty` diagnostics otherwise);
+  binding-free, so composes with `|` alternatives and guards; classifies
+  tier 1 on the dispatch ladder with the tier-3 reference path kept
+  observationally identical; compiles on all targets as
+  `s >= lo && s <= hi`; serializer round-trips `lo .. hi` in pattern
+  position. Spec recorded as §8 of
+  `docs/plans/2026-07-12-cortex-match-design.md`. Carve-out: a literal
+  `Range` value is no longer structurally matchable at pattern top level
+  (nested positions stay structural). Known papercut (pre-existing lexer
+  maximal-munch, same as `3!^2`): a negative upper bound needs spacing
+  (`-5 .. -1`).
+- 2026-07-31 — **On-ramp pages for Python and Mathematica users (landed).**
+  From the Hica docs review: `src/cortex/docs/from-python.md` and
+  `from-mathematica.md` — side-by-side idiom mapping plus verified
+  "familiar"/"traps" sections, cross-linked from `cortex.md` and
+  `getting-started.md`. Both pages are on the `documentation.test.ts`
+  execute+output-check list, so every example's `// ➔` output is
+  CI-verified. Gaps found while probing are recorded in the README's Hica
+  section ("Findings from writing the on-ramp pages").
 - 2026-07-24 — **`cortex mcp` — Model Context Protocol server (landed).**
   Final item of the LLM-friendliness initiative (card → CLI → eval pass →
   idiom diagnostics → MCP). A new `mcp` subcommand starts an MCP server over

@@ -276,6 +276,117 @@ named binding inside an alternative (`a | 2 => …`) is a
 `match-alternative-binding` diagnostic, since there is no single value for
 the body to bind `a` to when the alternatives disagree on shape.
 
+### Range patterns
+
+`lo..hi` in pattern position is an **inclusive numeric membership test**: the
+case is selected when the subject is a real number and `lo ≤ subject ≤ hi`.
+The call spelling `Range(lo, hi)` means exactly the same thing — the pattern
+form keys on the operator, not on how it was written:
+
+```cortex
+match x {
+  0..9 => "digit"
+  10..99 => "two digits"
+  _ => "big"
+}
+```
+
+```json
+[
+  "Match",
+  "x",
+  ["MatchCase", ["Range", 0, 9], {"str": "digit"}],
+  ["MatchCase", ["Range", 10, 99], {"str": "two digits"}],
+  ["MatchCase", "_", {"str": "big"}]
+]
+```
+
+Both endpoints are included, and they are compared with the same tolerance
+`match` uses for every other number leaf, so a subject a hair outside an
+endpoint still selects the case. Only a **number** matches: a symbol, a
+collection, a string, a complex number and `NaN` all fall through to the next
+case.
+
+Bounds must be **numeric literals** — negated literals and `Infinity` /
+`-Infinity` included, so `0..Infinity` reads as "any nonnegative number":
+
+```cortex
+match x {
+  0..Infinity => "nonnegative"
+  _ => "negative"
+}
+```
+
+```json
+[
+  "Match",
+  "x",
+  ["MatchCase", ["Range", 0, "PositiveInfinity"], {"str": "nonnegative"}],
+  ["MatchCase", "_", {"str": "negative"}]
+]
+```
+
+A bound that is a bare identifier (which would otherwise *bind*, like any
+identifier in pattern position), a computed expression, or `NaN` is a
+`range-pattern-bounds` diagnostic; a stepped range is a `range-pattern-step`
+diagnostic; and a range whose lower bound exceeds its upper bound is a
+`range-pattern-empty` diagnostic (that case can never match). Use a guard when
+a bound is not a literal:
+
+<!-- cortex-test: expect-diagnostics -->
+
+```cortex
+match x {
+  0..limit => "in"
+  _ => "out"
+}
+```
+
+Write instead:
+
+```cortex
+match x {
+  n if n >= 0 && n <= limit => "in"
+  _ => "out"
+}
+```
+
+A range pattern binds nothing, so it is legal inside an or-alternative, and a
+guard on a range case can only reference names from the enclosing scope:
+
+```cortex
+match x {
+  0..9 | 100..109 => "in"
+  _ => "out"
+}
+```
+
+```json
+[
+  "Match",
+  "x",
+  [
+    "MatchCase",
+    ["Alternatives", ["Range", 0, 9], ["Range", 100, 109]],
+    {"str": "in"}
+  ],
+  ["MatchCase", "_", {"str": "out"}]
+]
+```
+
+Two consequences worth knowing. First, this is a **carve-out**: a `Range`
+*value* can no longer be matched structurally in pattern position — write
+`== Range(1, 10)` (a pin) to compare against the range value itself. Second,
+a range nested inside a list, tuple or dictionary pattern keeps its ordinary
+structural meaning; membership applies at the top level of a case pattern (or
+of an or-alternative). A `Range` whose bounds are not literals is likewise
+still an ordinary structural pattern.
+
+Because a run of operator characters lexes as one token, a **negative upper
+bound needs a space**: write `0 .. -1`, not `0..-1` (the same maximal-munch
+rule that makes `3! ^ 2` require its space). The formatter always spaces `..`
+in pattern position for this reason.
+
 ### Guards
 
 `pattern if guard => body` adds a boolean condition, checked after the

@@ -198,6 +198,33 @@
 
 ### New Features
 
+- **Cortex `match` gains range patterns.** A two-operand range in pattern
+  position — `0..90 => "acute"` in Cortex, `["Range", lo, hi]` in MathJSON —
+  is an inclusive numeric membership test rather than a structural shape: the
+  case selects when the subject is a real number with `lo ≤ s ≤ hi`
+  (endpoints compared with the matcher's tolerant number semantics), and any
+  non-number subject falls through. Bounds are numeric literals, including
+  negative bounds (`-5 .. -1`) and infinities (`0..Infinity` — "any
+  non-negative number"); an identifier or computed bound is a
+  `range-pattern-bounds` diagnostic suggesting a guard instead, and an
+  inverted range (`10..1`) diagnoses as a dead case (`range-pattern-empty`).
+  Range cases are binding-free, so they compose with `|` alternatives
+  (`0..9 | 100..109 => …`) and guards, classify on the fast tier of the
+  match dispatch ladder, and compile on every target as two comparisons
+  (`s >= lo && s <= hi`). Deliberate carve-out: a literal `Range` _value_ is
+  no longer matchable structurally at the top level of a pattern (nested
+  positions keep the structural meaning).
+
+- **On-ramp guides for Python and Mathematica users.** Two new Cortex doc
+  pages — `/cortex/from-python/` and `/cortex/from-mathematica/` — map
+  familiar idioms to Cortex side by side (variables, collections, control
+  flow and pattern matching, symbolic math, strings), with explicit
+  "familiar" and "traps" sections (1-based indexing, `//` is a comment,
+  `=` vs `==`, symbolic-by-default, errors-as-values, `->` is
+  `KeyValuePair` so `ReplaceAll` takes `Rule(x, 3)`). Every Cortex example
+  on both pages is executed and output-checked in CI by the documentation
+  test, so the guides cannot drift from the implementation.
+
 - **`D`, `Derivative` and `ND` now compile** on every target. A derivative
   declined everywhere even though evaluating it first yields a compilable closed
   form (`D(x^2, x).evaluate()` is `2x`); the lowering now obtains that form and

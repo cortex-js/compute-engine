@@ -502,3 +502,86 @@ early if wanted.
 - **Semantic match mode**: an opt-in variant that consults assumptions
   (`match` staying inert like `Which`) is rejected for the core construct;
   if demand appears, it should be a different spelling, not a mode flag.
+
+## 8. Range patterns (2026-07-31 addendum)
+
+**Status:** IMPLEMENTED 2026-07-31. v1 of range patterns in the Cortex/engine
+`match`. Before this, `match 5 { 1..10 => "in", _ => "out" }` produced a parse
+diagnostic (`,` is not a case separator) and the range case fell through — the
+`Range` node was matched structurally against the numeric subject and never
+matched.
+
+**Surface + semantics.** A two-operand `Range` in **pattern position** —
+surface `lo..hi` or call-form `Range(lo, hi)`; patternize keys on the operator,
+not on the spelling — is an **inclusive numeric membership test**: the case
+matches iff the subject is a real number literal and `lo ≤ s ≤ hi`. Endpoint
+comparisons follow the matcher's number semantics (tolerant, consistent with
+`leafEquals`/`isEqual`), so a subject within `engine.tolerance` of an endpoint
+selects the case; the interior comparison is the engine's own
+`isGreaterEqual`/`isLessEqual`. Non-number subjects — symbols (including
+constant symbols such as `Pi`, which are not *literals*), operator expressions,
+collections (including actual `Range` values), strings, complex numbers and
+`NaN` — do NOT match; they fall through.
+
+**Carve-out.** The consequence, of the same kind the dedicated dictionary
+matcher already has (§4 Phase-2 notes): a literal `Range` **value** can no
+longer be matched structurally in pattern position. `== Range(1, 10)` (a pin)
+still compares values — range detection runs on the **raw held pattern**,
+before `Pin` resolution, precisely so that a pin resolving to a `Range` value
+is not re-read as a membership test.
+
+**Bounds, v1.** Numeric literals only, including negated literals and
+`Infinity`/`-Infinity` (both are numeric literals in Cortex — §3 Phase-3
+notes); `0..Infinity` means "nonnegative number". A `Range` that is not a
+well-formed range pattern keeps its ordinary **structural** meaning on every
+path — this is what makes the carve-out narrow. Cortex parse diagnostics:
+
+- `range-pattern-bounds` — a bound that is not a numeric literal: a bare
+  identifier (which patternize rule 2 would otherwise turn into a binding —
+  nonsensical here), a computed expression, or `NaN`. The message suggests a
+  guard as the fix.
+- `range-pattern-step` — a three-operand `Range(lo, hi, step)`, or the nested
+  `Range(Range(lo, hi), step)` that `lo..hi..step` parses to. Unsupported in
+  v1.
+- `range-pattern-empty` — `lo > hi`. Cheap to detect (both bounds are
+  literals), and the case is always dead, so it is diagnosed like the
+  irrefutable-non-final-case check.
+
+A **pin bound** (`== k..10`) is not syntactically reachable: `parsePin` reads a
+primary/postfix operand and returns, so the `..` never joins it. Nothing to
+diagnose.
+
+**Scope, v1.** Membership applies at the **top level** of a case pattern and of
+each or-alternative. A `Range` nested inside a `List`/`Tuple`/`Dictionary`
+pattern keeps its structural meaning — on the laddered path and on the tier-3
+reference path alike, so the two stay observationally identical. Lifting this
+is a compatible extension.
+
+**Classification.** A range case is a binding-free two-comparison predicate →
+**tier 1** (never tier 0: it covers a span, not a dispatch key). It therefore
+does not degrade a preceding tier-0 dispatch prefix, per the existing per-case
+prefix rules, and it composes with or-alternatives (a case of all-range
+alternatives is one tier-1 case with N range tests). Membership is also
+implemented in the tier-3 reference path (`matchPattern`, which now takes the
+raw pattern and resolves pins itself), and the tiers≡tier-3 property test
+generates range cases.
+
+**Compile.** Tier-0/1 emission gains a range arm in the shared
+`matchLeafCondition` (`base-compiler.ts`): `(s >= lo && s <= hi)` on the
+subject local, alongside the existing `s === c` comparisons, with `||` for
+or-alternatives. All current targets can express an infinity literal
+(`Infinity` on JS, `_gpu_inf()` on GLSL, `bitcast<f32>(0x7f800000u)` on WGSL,
+`np.inf` on Python), so no target needs a fail-closed arm for infinite bounds.
+Python-target and interval-target `Match` stay fail-closed in v1; a `Range`
+with non-literal bounds is a tier-3 pattern and fails closed, naming it. The
+compiled comparisons are exact where the interpreter compares the *endpoints*
+tolerantly — the same float seam the `===` leaf comparisons already carry,
+documented in `match-compile.test.ts`.
+
+**Serialization.** `serialize-cortex.ts` serializes a two-operand `Range` in
+pattern position as `lo .. hi` (expression position keeps the call form
+`Range(a, b)`, which also serves the three-operand form). The `..` is spaced
+like every other infix operator, which also keeps a negative upper bound
+(`0 .. -1`) re-parsable: maximal munch would otherwise glue `..-` into one
+token — the same documented adjacency rule as `3! ^ 2`. Parse → serialize →
+parse is a fixpoint (tested).

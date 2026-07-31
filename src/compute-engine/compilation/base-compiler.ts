@@ -41,6 +41,7 @@ import {
 } from '../boxed-expression/match-dispatch.js';
 import type {
   CompiledCase,
+  LeafTest,
   Segment,
   ShapeNode,
   ElementPlan,
@@ -3518,8 +3519,12 @@ export class BaseCompiler {
   // Compiled-vs-interpreted seam (accepted, §4 Phase-2 note): number leaves are
   // compared with the target's native `===`/`==`, not the interpreter's
   // tolerant `isEqual` — the same float-equality seam compiled `Which` already
-  // has. No-match falls through to `NaN` (matching compiled `Which`), not the
-  // interpreter's `["Error", "match-no-case", …]` value.
+  // has. A range pattern (§8) carries the same seam on its endpoints: compiled
+  // it is `s >= lo && s <= hi` (exact), interpreted an endpoint match is
+  // tolerant, so a subject within `engine.tolerance` *outside* an endpoint
+  // selects the case interpreted but not compiled. No-match falls through to
+  // `NaN` (matching compiled `Which`), not the interpreter's
+  // `["Error", "match-no-case", …]` value.
   // ───────────────────────────────────────────────────────────────────────
 
   /** Above this many integer-constant tier-0 cases, a dispatch run is emitted
@@ -3544,11 +3549,7 @@ export class BaseCompiler {
   /** The ordered comparison targets of a tier-0/1 case: a constant to compare
    * the subject against (`{kind:'literal'}`) or a pin to resolve (`{kind:'pin'}`).
    * Unifies tier-0 (`dispatchKeys`) and tier-1 (`tests`). */
-  private static matchCaseComparisons(
-    cc: CompiledCase
-  ): Array<
-    { kind: 'literal'; value: Expression } | { kind: 'pin'; expr: Expression }
-  > {
+  private static matchCaseComparisons(cc: CompiledCase): LeafTest[] {
     if (cc.tier === 0)
       return (cc.dispatchKeys ?? []).map((d) => ({
         kind: 'literal' as const,
@@ -3593,7 +3594,8 @@ export class BaseCompiler {
     return BaseCompiler.compile(expr, target);
   }
 
-  /** The OR-chain condition for a tier-0/1 case: `s === c1 || s === c2 || …`. */
+  /** The OR-chain condition for a tier-0/1 case: `s === c1 || s === c2 || …`,
+   * with a range pattern contributing `(s >= lo && s <= hi)`. */
   private static matchLeafCondition(
     engine: ComputeEngine,
     cc: CompiledCase,
@@ -3602,10 +3604,18 @@ export class BaseCompiler {
     allowStrings: boolean,
     target: CompileTarget<Expression>
   ): string {
-    const parts = BaseCompiler.matchCaseComparisons(cc).map(
-      (cmp) =>
-        `${subject} ${eq} ${BaseCompiler.compileMatchConstant(engine, cmp, allowStrings, target)}`
-    );
+    const parts = BaseCompiler.matchCaseComparisons(cc).map((cmp) => {
+      // A range pattern is a pair of native comparisons on the subject — the
+      // same float seam as the `===` leaf comparisons around it (the
+      // interpreter compares the endpoints tolerantly). `Infinity` bounds emit
+      // the target's own infinity literal (`Infinity`, `_gpu_inf()`, …).
+      if (cmp.kind === 'range')
+        return (
+          `(${subject} >= ${BaseCompiler.compile(cmp.lo, target)} && ` +
+          `${subject} <= ${BaseCompiler.compile(cmp.hi, target)})`
+        );
+      return `${subject} ${eq} ${BaseCompiler.compileMatchConstant(engine, cmp, allowStrings, target)}`;
+    });
     if (parts.length === 0) return 'false';
     return parts.length === 1 ? parts[0] : `(${parts.join(' || ')})`;
   }

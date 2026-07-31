@@ -252,6 +252,82 @@ bug — decide when Tycho demand appears:
   never needed because this leaves the shared canon-scope model intact
   everywhere else.
 
+### Candidates from the Hica language review (2026-07-31)
+
+A review of [hica.dev](https://www.hica.dev) (a small immutable-by-default
+functional language with an unusually strong doc site) confirmed Cortex
+already covers most of its language surface — `match` with pins/guards/rest/
+dict patterns, destructuring `let`, if-as-expression, `|>`, interpolation,
+lazy pipelines, errors-as-values, `_` digit separators — and is ahead on
+CI-executed doc examples and the agents card + MCP server. Worth taking:
+
+- **Range patterns in `match` — landed 2026-07-31** (see the completed log
+  in `STATUS_REPORT.md`; spec = §8 of
+  `docs/plans/2026-07-12-cortex-match-design.md`).
+- **Effect surfacing in `cortex check` (S–M).** Hica marks any function
+  using `random()` with an `ndet` effect reported by `hica check` — an
+  independent validation of the paused effects model
+  (`docs/EFFECTS-MODEL.md`). A cheap rung available before resuming the full
+  model: `cortex check` reports nondeterminism/impurity derived from the
+  existing `pure: false` operator metadata.
+- **`cortex test` + assertion builtins (M).** Hica's
+  `test "name" { assert_eq(…) }` blocks plus `hica test`. For Cortex:
+  `Assert`/`AssertEqual` builtins (errors-as-values on failure) and a
+  `cortex test` CLI subcommand, letting agents write self-checking programs —
+  directly serves the feedback-loop goal from the 2026-07-24 agent eval.
+- **Exhaustiveness lint.** Already a v2 deferral in the match design (§7);
+  Hica shipping it in a language this small is evidence it earns its keep —
+  raise its priority when the type system tightens.
+- **Documentation program** (from the doc-site review):
+  - **On-ramp comparison pages — landed 2026-07-31**
+    (`from-python.md`/`from-mathematica.md`, CI-executed; see the completed
+    log in `STATUS_REPORT.md` and the probing findings below).
+  - **REPL/CLI playbook (S).** Workflow-oriented doc (check-before-run,
+    `cortex doc` lookup flow, MCP loop, lazy-display/`//`/`xs[0]` traps) —
+    a distinct genre from the `cli.md` reference.
+  - **Standard-library reference tables (M).** Human-facing categorized
+    three-column tables (name / signature / one-liner) with one runnable
+    example per category; the for-agents Quick Roster is the seed.
+  - **User-facing style guide (S).** One canonical idiomatic-Cortex page,
+    promoted from the idioms scattered across `examples.md` and test
+    headers (recursion pre-declare, `m[i,j]`, tuples-eager/lists-lazy).
+
+**Findings from writing the on-ramp pages (2026-07-31).** Probing every
+idiom for `from-python.md`/`from-mathematica.md` surfaced these gaps (each a
+design decision or small feature, not a bug):
+
+- **String library thinness (M).** Only `String`/`StringJoin`/`StringSplit`/
+  `Characters`/`GraphemeClusters`/`UnicodeScalars`/`StringFrom` exist — no
+  `StringLength`, case conversion, replace/find/trim, and no string→number
+  parse (`Number("42")` is inert). The on-ramp pages must teach
+  "decompose to characters and rebuild" for anything nontrivial.
+- **Wolfram-familiar aliases (S — decide alias vs. did-you-mean).** `Total`,
+  `Select`, `Cases`, `Nest`/`NestList`, `MemberQ`, `Accumulate`, `Riffle`
+  don't exist; several are trivial aliases (`Total`→`Sum`,
+  `Select`→`Filter`) that would erase most of the `from-mathematica.md` trap
+  table. Decide per name between a real alias (the `Arg`→`Argument`
+  canonical-rewrite precedent) and a `CURATED_SYNONYMS` did-you-mean entry.
+  Also: `Count(list, value)` rejects its second argument
+  (`unexpected-argument`).
+- **`===` (`Same`) is inert on numeric literals** — `1 === 1.0` evaluates to
+  `Same(1, 1)`, not a boolean. Decide the intended semantics and make it
+  evaluate (or diagnose).
+- **`Table` accepts only the brace iterator** (`{k,1,n}`), while
+  `Sum`/`Product`/`Integrate`/`D` accept both the brace and tuple spellings —
+  inconsistent surface (S).
+- Cosmetic: a dictionary as the final program value renders as raw MathJSON
+  (`{"dict":{…}}`), and `let a = Nothing; a` renders as `a` rather than
+  `Nothing`.
+
+**Declined from the review** (recorded so we don't re-derive): UFCS
+dot-call `a.f(b)` ≡ `f(a, b)` — `|>` already covers left-to-right
+composition, and `.` is loaded (`..`, decimals; dictionary `.key` access was
+already not adopted). `?` error propagation — already declined under
+refutable binding above; Hica needs it to unwrap `Maybe`/`Result` wrapper
+types, while Cortex errors-as-values propagate through evaluation without
+unwrapping. Structs/enums/ADTs — a different language direction; tuples +
+dictionaries + the engine type system cover the notebook use case.
+
 ### Serializer / compile-target polish
 
 - **Python compile-target tails (M).** The Cortex→engine lowering currently

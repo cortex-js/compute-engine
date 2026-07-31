@@ -31,6 +31,15 @@ import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
  * - `["Pin", expr]` nodes inside a pattern are resolved once per match
  *   evaluation: `expr` is evaluated in the current lexical scope and its value
  *   is compared verbatim to the subject.
+ * - `["Range", lo, hi]` (exactly two operands, both real non-NaN number
+ *   literals) in **pattern position** is an inclusive numeric **membership
+ *   test**, not a structural match: the case is selected iff the subject is a
+ *   real number literal with `lo ≤ subject ≤ hi` (endpoints compared with the
+ *   matcher's tolerant number semantics — see `leafEquals`). Consequence
+ *   (a deliberate carve-out, the same kind the dedicated dictionary matcher
+ *   has): a literal `Range` **value** can no longer be matched structurally in
+ *   pattern position. Any other `Range` — a different arity, or a bound that is
+ *   not a numeric literal — keeps its structural meaning.
  * - `["Alternatives", p₁, …, pₙ]` at the top level of a case pattern behaves
  *   like `n` consecutive virtual cases sharing the case's guard and body.
  *   Alternatives are binding-free by contract; a named wildcard inside an
@@ -88,7 +97,8 @@ export type Tier = 0 | 1 | 2 | 3;
 /** A tier-0/1 leaf comparison target. */
 export type LeafTest =
   | { kind: 'literal'; value: Expression } // compare with `leafEquals`
-  | { kind: 'pin'; expr: Expression }; // resolve in scope, then compare
+  | { kind: 'pin'; expr: Expression } // resolve in scope, then compare
+  | { kind: 'range'; lo: Expression; hi: Expression }; // inclusive membership
 
 /** One positional element of a tier-2 `List`/`Tuple` shape (also the value slot
  * of a tier-2 `Dictionary` shape). */
@@ -255,15 +265,16 @@ export function evaluateMatchReference(
     const guard = cops.length >= 3 ? cops[1] : undefined;
     const body = cops[cops.length - 1];
 
+    // Patterns stay RAW here — `matchPattern` resolves pins itself, so a range
+    // pattern is recognized before a pin can resolve to a `Range` value.
     if (isFunction(patternRaw, 'Alternatives')) {
       for (const alt of patternRaw.ops) {
-        const resolved = resolvePins(ce, alt);
-        if (collectCaptures(resolved).length > 0)
+        if (collectCaptures(alt).length > 0)
           return ce._fn('Error', [ce.string('match-alternative-binding'), alt]);
-        cases.push({ pattern: resolved, guard, body });
+        cases.push({ pattern: alt, guard, body });
       }
     } else {
-      cases.push({ pattern: resolvePins(ce, patternRaw), guard, body });
+      cases.push({ pattern: patternRaw, guard, body });
     }
   }
 
@@ -337,6 +348,8 @@ function matchCompiled(
       for (const t of cc.tests!) {
         if (t.kind === 'literal') {
           if (leafEquals(subject, t.value)) return {};
+        } else if (t.kind === 'range') {
+          if (rangeContains(subject, t.lo, t.hi)) return {};
         } else if (subject.match(resolvePin(t.expr)) !== null) return {};
       }
       return null;
@@ -346,10 +359,10 @@ function matchCompiled(
       return matchShape(ce, cc.shape!, subject, sub) ? sub : null;
     }
     default: {
-      // Tier 3: resolve pins per evaluation, then the dict-aware matcher (which
-      // delegates dict-free patterns to the generic matcher).
+      // Tier 3: the range-aware, dict-aware matcher (which resolves pins per
+      // evaluation and delegates plain patterns to the generic matcher).
       for (const raw of cc.rawPatterns!) {
-        const s = matchPattern(ce, subject, resolvePins(ce, raw));
+        const s = matchPattern(ce, subject, raw);
         if (s !== null) return s;
       }
       return null;
@@ -475,6 +488,54 @@ function leafEquals(subject: Expression, value: Expression): boolean {
   if (isSymbol(value))
     return isSymbol(subject) && subject.symbol === value.symbol;
   return subject.match(value) !== null;
+}
+
+/**
+ * The bounds of a **range pattern** — a `["Range", lo, hi]` node whose two
+ * operands are both real, non-`NaN` number literals — or `undefined` when the
+ * node is not one (a different arity, or a bound that is not a numeric literal:
+ * such a `Range` keeps its ordinary structural meaning in a pattern).
+ *
+ * Note this is deliberately checked on the **raw held pattern**, before any
+ * `Pin` resolution: `== Range(1, 10)` pins the range *value* and must keep
+ * comparing values, not become a membership test.
+ */
+export function rangePatternBounds(
+  p: Expression
+): { lo: Expression; hi: Expression } | undefined {
+  if (!isFunction(p, 'Range') || p.nops !== 2) return undefined;
+  const [lo, hi] = p.ops;
+  if (!isRangeBound(lo) || !isRangeBound(hi)) return undefined;
+  return { lo, hi };
+}
+
+/** A usable range-pattern bound: a real, non-`NaN` number literal (`Infinity`
+ * and `-Infinity` qualify — `0..Infinity` is "any nonnegative number"). */
+function isRangeBound(e: Expression | undefined): boolean {
+  return e !== undefined && isNumber(e) && e.isReal === true && !e.isNaN;
+}
+
+/**
+ * The range-pattern membership test: `true` iff `subject` is a real, non-`NaN`
+ * number literal within `[lo, hi]`. Non-number subjects (symbols, operator
+ * expressions, collections — including actual `Range` values — complex numbers,
+ * `NaN`) never match and fall through to the next case.
+ *
+ * The endpoints use the matcher's number semantics (tolerant `isEqual`, via
+ * `leafEquals`), so a subject within `engine.tolerance` of an endpoint selects
+ * the case — consistent with how tiers 0–2 compare number leaves.
+ */
+function rangeContains(
+  subject: Expression,
+  lo: Expression,
+  hi: Expression
+): boolean {
+  if (!isNumber(subject) || subject.isReal !== true || subject.isNaN)
+    return false;
+  if (leafEquals(subject, lo) || leafEquals(subject, hi)) return true;
+  return (
+    subject.isGreaterEqual(lo) === true && subject.isLessEqual(hi) === true
+  );
 }
 
 //
@@ -663,6 +724,12 @@ function classifyLeaf(
       };
     return { test: { kind: 'pin', expr: inner } };
   }
+
+  // A range pattern is a binding-free two-comparison predicate: tier 1 (never
+  // dispatch-safe — it covers a span of values, not one key).
+  const range = rangePatternBounds(p);
+  if (range !== undefined)
+    return { test: { kind: 'range', lo: range.lo, hi: range.hi } };
 
   if (isWildcard(p)) return {}; // a binding, never a leaf constant
 
@@ -860,7 +927,9 @@ function noCaseError(ce: ComputeEngine, subject: Expression): Expression {
 }
 
 /**
- * The reference-path matcher, dict-aware.
+ * The reference-path matcher, range- and dict-aware. Takes the **raw** (held)
+ * pattern and resolves its `Pin` nodes itself, so a top-level range pattern is
+ * recognized before pin resolution could turn a pinned `Range` *value* into one.
  *
  * The generic matcher (`subject.match`) cannot align a **function-form**
  * `Dictionary(...)` pattern with a **native** dictionary value: a `Dictionary`
@@ -879,8 +948,16 @@ function noCaseError(ce: ComputeEngine, subject: Expression): Expression {
 function matchPattern(
   ce: ComputeEngine,
   subject: Expression,
-  pattern: Expression
+  raw: Expression
 ): Substitution | null {
+  // Range membership is decided on the raw pattern (v1: at the top level of a
+  // case pattern / of an or-alternative; a `Range` nested inside a list, tuple
+  // or dictionary pattern keeps its structural meaning).
+  const range = rangePatternBounds(raw);
+  if (range !== undefined)
+    return rangeContains(subject, range.lo, range.hi) ? {} : null;
+
+  const pattern = resolvePins(ce, raw);
   if (!patternHasDict(pattern))
     return subject.match(pattern) as Substitution | null;
   const sub: Substitution = {};

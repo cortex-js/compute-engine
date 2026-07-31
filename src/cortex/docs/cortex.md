@@ -76,6 +76,16 @@ calculus, linear algebra, strings, and more.
 Use the **CLI and interactive REPL** from a terminal.
 </ReadMore>
 
+<ReadMore path="/cortex/from-python/">
+Coming from **Python**? Translate your idioms — and learn the three reflexes
+that silently do the wrong thing.
+</ReadMore>
+
+<ReadMore path="/cortex/from-mathematica/">
+Coming from **Mathematica**? Most of the mental model carries over; here is
+what changes.
+</ReadMore>
+
 <ReadMore path="/cortex/for-agents/">
 Writing Cortex with an LLM? Give it the **language card for AI agents** — a
 condensed, machine-verified reference.
