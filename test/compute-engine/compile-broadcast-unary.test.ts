@@ -59,10 +59,10 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
 
     it('applies a prefix operator directly to a static vec4 operand', () => {
       expect(g(['Negate', ['List', 1, 2, 3, 4]])).toBe(
-        '(-vec4(1.0, 2.0, 3.0, 4.0))'
+        '(-(vec4(1.0, 2.0, 3.0, 4.0)))'
       );
       expect(w(['Negate', ['List', 1, 2, 3, 4]])).toBe(
-        '(-vec4f(1.0, 2.0, 3.0, 4.0))'
+        '(-(vec4f(1.0, 2.0, 3.0, 4.0)))'
       );
     });
 

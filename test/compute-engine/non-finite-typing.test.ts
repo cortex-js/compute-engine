@@ -50,6 +50,24 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Add', 'x_r', 'PositiveInfinity'])).toBe(
         'non_finite_number'
       ));
+
+    // A provably non-finite TERM may be visible only in its static type:
+    // `Ln(0)` types `non_finite_number` while its structural `isFinite` stays
+    // `undefined`. The Add/Multiply/Divide handlers must consult the type —
+    // without it, `1 + Ln(0)` widened to `integer` and `2·Ln(0)` claimed
+    // `finite_integer` (unsound; the value is −∞). Fixed 2026-07-31.
+    test('a type-only-provable −∞ term: 1 + Ln(0)', () => {
+      expect(typeOf(['Add', 1, ['Ln', 0]])).toBe('non_finite_number');
+      expect(typeOf(['Add', 1, ['Artanh', 1]])).toBe('non_finite_number');
+    });
+
+    test('a type-only-provable −∞ factor stays sound (sign unproven → number)', () => {
+      // `2·Ln(0)` is provably −∞ but the Multiply handler requires a proven
+      // sign on every factor for the tight claim; `number` is the sound widen
+      // (it was `finite_integer` before the fix).
+      expect(typeOf(['Multiply', 2, ['Ln', 0]])).toBe('number');
+      expect(typeOf(['Divide', ['Ln', 0], 2])).toBe('number');
+    });
   });
 
   describe('possible (or provable) ~oo / NaN → number', () => {

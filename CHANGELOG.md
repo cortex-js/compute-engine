@@ -2,6 +2,71 @@
 
 ### Breaking Changes
 
+- **`Sqrt`, `Ln` and `Log` no longer claim a real type for an operand of
+  unknown sign.** `Sqrt(x)` for a bare real-typed symbol now types
+  `finite_complex` (`√−2 = 1.414…i`), and `Ln(x)`/`Log(x, b)` type `complex`
+  (`ln(−2) = 0.693… + iπ`, `ln(0) = −∞`; `complex` admits ±∞ but not NaN, so
+  a NaN-capable `number`-typed operand keeps `number`). A provably
+  non-negative (Sqrt) or positive (Ln/Log) operand — by literal value or by
+  assumption — keeps `finite_real`, and literals are unchanged. This is the
+  same soundness ruling applied to the eight bounded inverse-trig heads in
+  0.99.0. **Compiled output for a free real symbol is unchanged on every
+  target** (`Math.sqrt(_.x)`, `sqrt(x)` — the hot plotted path keeps its real
+  kernels and yields `NaN` out of domain), while a provably NEGATIVE operand
+  (a literal or an assigned symbol like `a := -2`) now routes through the
+  complex helpers on both the JavaScript and GPU targets and returns the
+  interpreter's complex value — it previously ran to a real `NaN`.
+
+- **`Arcsec`/`Arccsc` of an unknown-magnitude real now type `complex`** (was
+  the top type `number`), aligning them with the other six bounded
+  inverse-trig heads: their pole value `arcsec(0) = ~oo` is a member of
+  `complex` in the lattice, so nothing forced the NaN-capable top type. A
+  provable pole argument (`Arcsec(0)`) also tightens from `number` to
+  `complex`. The compiled complex dispatch now treats all eight bounded heads
+  uniformly.
+
+### Issues Resolved
+
+- **A compile decline's interpreter fallback now returns the numeric value
+  instead of `NaN` for expressions whose `evaluate()` stays symbolic.**
+  `compile('\sum_{i=1}^{\infty} 2^{-i}')` correctly declines (no terminating
+  loop), but the fallback `run({})` returned `NaN` — `evaluate()` stays
+  symbolic per the exactness contract and `.re` of a symbolic expression is
+  `NaN` — while `.N()` gives `1`. The fallback now numericizes at the leaves,
+  in both the expression and the lambda calling conventions, so declining is
+  always at least as good as interpreting.
+
+- **An `interval-js` decline now provides an interpreter-backed `run`.** The
+  interval target's primary failure class reports `success: false` without
+  throwing, which bypassed the free `compile()`'s fallback entirely — the
+  result had no `run` at all. The fallback option is now passed through to
+  the registered target, which normalizes both failure shapes to the
+  documented interval-shaped fallback (`{lo: v, hi: v}`).
+
+- **A sum/product/quotient with a term that is provably non-finite by TYPE
+  alone is no longer mis-typed.** `(1 + Ln(0)).type` was `integer` and
+  `(2·Ln(0)).type` was `finite_integer` (unsound; both values are −∞):
+  `Ln(0)` types `non_finite_number` but its structural `isFinite` is
+  `undefined`, so the handlers' non-finite branches never fired. `Add` now
+  claims the tight `non_finite_number` (`1 + Ln(0)`, `1 + Artanh(1)`);
+  `Multiply`/`Divide` widen soundly to `number`.
+
+- **GPU colour constructors fail closed on an alpha operand.**
+  `Rgb/Hsl/Hsv/Oklab/Oklch(r, g, b, a)` on the GLSL/WGSL targets silently
+  discarded the 4th operand (the colour chain is `vec3` end to end); they now
+  decline with a diagnostic. The JavaScript target continues to preserve
+  alpha; 3-operand forms are unchanged.
+
+- **GPU `Sum`/`Product` with a non-finite bound fail closed** instead of
+  emitting an unbounded loop (`for (int i = 1; i <= _gpu_inf(); i++)` —
+  invalid shader source). Mirrors the JavaScript/interval-js guard.
+
+- **Python: `Norm(matrix, 2)` now lowers to the Frobenius norm
+  (`np.linalg.norm(m, 'fro')`), matching the interpreter.** numpy's ord-2 on
+  a matrix is the spectral norm, so the old emission was a silent wrong value
+  (`13.8806` vs the interpreter's `13.9284` on `[[3,4],[5,12]]`). A rank-1
+  operand keeps ord 2; an operand of unknown static rank declines.
+
 - **A broadcast over a literal list no longer emits JavaScript into GLSL, WGSL
   or Python.** A `broadcastable` operator applied to a literal or assigned
   finite list was fanned out with a JavaScript `.map((v) => …)` arrow — for
@@ -84,6 +149,21 @@
   `finite_integer`.
 
 ### Bug Fixes
+
+- **Compiled `Mod` and `Remainder` tore compound dividends by operator
+  precedence** (JavaScript, WGSL and Python targets). The emission templates
+  spliced the compiled dividend unparenthesized next to `%`, so
+  `Mod(x + 29, 900)` compiled to `x + 29 % 900` — i.e. `(x + 929) % 900`,
+  which is congruent to the correct Euclidean result for `x ≥ −929` (why
+  non-negative parity sweeps never caught it) and wrong below. Compiled
+  `Remainder` with a compound dividend was wrong for essentially all inputs
+  (`Remainder(x + 29, 9)` emitted `x + 29 - 9 * Math.round(x + 29 / 9)`; the
+  Python target had the same template). Operands are now parenthesized before
+  splicing; regression pins straddle the `x = −929` boundary and compare
+  against the interpreter. The same hardening was applied to the sibling
+  `Divide`-chain and `Negate` fallback handlers on the JS/GPU/Python targets
+  (the GPU `Divide` handler is reachable for vector division, where a
+  compound numerator would have torn the same way).
 
 - **A sweep of unsound static type claims** (type audit): several operators
   claimed a result type that excludes values they actually produce, so

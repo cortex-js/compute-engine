@@ -522,7 +522,7 @@ describe('PYTHON TARGET', () => {
     it('Remainder is round-to-nearest, not np.remainder (P0-7)', () => {
       const code = python.compile(ce.box(['Remainder', 'a', 'b'])).code;
       expect(code).not.toContain('np.remainder');
-      expect(code).toBe('(a - b * np.round(a / b))');
+      expect(code).toBe('((a) - (b) * np.round((a) / (b)))');
     });
 
     it('Round is half-away-from-zero, not np.round banker (P0-41)', () => {
@@ -624,6 +624,63 @@ describe('PYTHON TARGET', () => {
     it('NotEqual uses the tolerance complement', () => {
       const code = python.compile(ce.box(['NotEqual', 'x', 0.3])).code;
       expect(code).toBe('(abs((x) - (0.3)) > 1e-10)');
+    });
+
+    // Collection equality fails closed pending the semantics ruling: the
+    // `abs(a - b)` form raises on a plain Python list, and an n-ary chain over
+    // ndarrays conjoins arrays with the scalar `and`.
+    it('a collection operand fails closed (D6)', () => {
+      expect(() =>
+        python.compile(ce.box(['Equal', ['List', 1, 2, 3], 2] as any))
+      ).toThrow(/Equal.*Fail closed/s);
+      expect(() =>
+        python.compile(
+          ce.box(['NotEqual', ['List', 1, 2, 3], ['List', 1, 2]] as any)
+        )
+      ).toThrow(/NotEqual.*Fail closed/s);
+      const scoped = new ComputeEngine();
+      scoped.declare('eqList', 'list<real>');
+      expect(() =>
+        python.compile(scoped.box(['Equal', 'eqList', 2] as any))
+      ).toThrow(/Fail closed/);
+    });
+  });
+
+  // A norm ORDER that numpy spells differently, or that only becomes known at
+  // run time (see the `Norm` handler): `'fro'` is matrix-only, and ord 2 is the
+  // Frobenius norm in the interpreter but the SPECTRAL norm in numpy.
+  describe('Norm order guards', () => {
+    const M = ['List', ['List', 3, 4], ['List', 5, 12]];
+
+    it('a matrix-only string order over a vector fails closed (D6)', () => {
+      expect(() =>
+        python.compile(
+          ce.box(['Norm', ['List', 3, 4], { str: 'Frobenius' }] as any)
+        )
+      ).toThrow(/matrix-only.*Fail closed/s);
+    });
+
+    it('a string Frobenius order over a matrix still compiles', () => {
+      expect(
+        python.compile(ce.box(['Norm', M, { str: 'Frobenius' }] as any)).code
+      ).toBe("np.linalg.norm([[3, 4], [5, 12]], 'fro')");
+    });
+
+    it('a run-time order over a matrix respells ord 2 as Frobenius', () => {
+      const scoped = new ComputeEngine();
+      scoped.declare('normP', 'real');
+      expect(python.compile(scoped.box(['Norm', M, 'normP'] as any)).code).toBe(
+        "np.linalg.norm([[3, 4], [5, 12]], ('fro' if (normP) == 2 else (normP)))"
+      );
+    });
+
+    it('a run-time order over an operand of unknown rank fails closed (D6)', () => {
+      const scoped = new ComputeEngine();
+      scoped.declare('normP2', 'real');
+      scoped.declare('normOpaque2', 'unknown');
+      expect(() =>
+        python.compile(scoped.box(['Norm', 'normOpaque2', 'normP2'] as any))
+      ).toThrow(/run-time norm order.*Fail closed/s);
     });
   });
 

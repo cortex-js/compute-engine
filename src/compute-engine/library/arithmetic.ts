@@ -532,8 +532,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (den.isSame(0)) return 'number';
         // A non-finite operand: `x/±∞ = 0`, `±∞/finite = ±∞`, but `∞/∞`,
         // `∞/i`, `i/∞` give NaN/~oo. Widen to the top type (the old
-        // `non_finite_number` mis-typed `∞/i` and `∞/∞`).
-        if (den.isFinite === false || num.isFinite === false) return 'number';
+        // `non_finite_number` mis-typed `∞/i` and `∞/∞`). The static type
+        // check catches operands like `Ln(0)` whose provable non-finiteness
+        // is visible only in the type (`isFinite` stays `undefined`).
+        if (
+          den.isFinite === false ||
+          num.isFinite === false ||
+          den.type.matches('non_finite_number') ||
+          num.type.matches('non_finite_number')
+        )
+          return 'number';
         if (den.isInteger && num.isInteger) return 'finite_rational';
         if (den.isReal && num.isReal) return 'finite_real';
         // Real/pure-imaginary quotients (mirrors the Multiply type handler;
@@ -1437,22 +1445,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(number, number) -> number',
       type: ([a, b]) => {
-        if (!a || !b || a.isNaN || b.isNaN) return 'number';
+        if (!a || !b) return 'number';
         // A floored remainder is defined only for a finite real dividend and a
         // finite, non-zero real modulus. A zero/complex/infinite modulus, or an
         // infinite dividend, yields NaN (the old `widen(...)` claimed e.g.
         // `finite_rational` for `Mod(1/2, 0)` and `imaginary` for `Mod(i, i)`).
-        if (b.isSame(0)) return 'number';
-        if (
-          a.isReal === true &&
-          b.isReal === true &&
-          a.isFinite === true &&
-          b.isFinite === true
-        ) {
-          if (a.isInteger && b.isInteger) return 'finite_integer';
-          if (a.isRational && b.isRational) return 'finite_rational';
+        // The 0-pole needs sgn-nonzero (the `poleReciprocalType` idiom): a
+        // `finite_integer` modulus MAY be zero, so `b.isSame(0)` alone was
+        // unsound (`Mod(k, m)` claimed `finite_integer` while `m = 0` yields
+        // NaN). Operand tests read the STATIC type — the value predicates
+        // (`isFinite`, `isInteger`) are type-blind on compound operands like
+        // `Mod(k + 29, 900)`.
+        const bNonZero = isNumber(b)
+          ? !b.isSame(0)
+          : b.isPositive === true || b.isNegative === true;
+        if (!bNonZero) return 'number';
+        const ta = a.type;
+        const tb = b.type;
+        if (ta.matches('finite_integer') && tb.matches('finite_integer'))
+          return 'finite_integer';
+        if (ta.matches('finite_rational') && tb.matches('finite_rational'))
+          return 'finite_rational';
+        if (ta.matches('finite_real') && tb.matches('finite_real'))
           return 'finite_real';
-        }
         return 'number';
       },
       sgn: (ops) => {
@@ -1654,7 +1669,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.some((x) => isPossiblyCollectionTyped(x)))
           return broadcastableResultTypeOf(ops);
         if (ops.some((x) => x.isNaN)) return 'number';
-        if (ops.some((x) => x.isFinite === false)) {
+        // A provably non-finite factor may be visible only in its static
+        // TYPE: `Ln(0)` types `non_finite_number` while its structural
+        // `isFinite` stays `undefined` — without the type check `2·Ln(0)`
+        // fell through to the "every operand is finite" tail and claimed
+        // `finite_integer` (unsound; the value is −∞).
+        if (
+          ops.some(
+            (x) =>
+              x.isFinite === false || x.type.matches('non_finite_number')
+          )
+        ) {
           // 0 · ±∞ = NaN (indeterminate).
           if (ops.some((x) => x.isSame(0))) return 'number';
           // real · ±∞ = ±∞ (a non-finite real); a non-real factor (i, complex)
@@ -2458,7 +2483,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (x.isNonNegative === true) return 'non_finite_number';
           return 'number';
         }
-        if (x.isReal) return x.isNegative ? 'complex' : 'finite_real';
+        if (x.isReal) {
+          // √x of a provably non-negative real is real; otherwise the value
+          // may be a finite pure-imaginary (`√−2 = 1.414…i`), so an
+          // unknown-sign real must not claim `finite_real` (same ruling as
+          // the bounded inverse-trig heads, 2026-07-30). Finite operand
+          // (checked above) ⇒ finite result: `finite_complex`, not `complex`.
+          if (x.isNonNegative === true) return 'finite_real';
+          return 'finite_complex';
+        }
         return 'finite_number';
       },
       // @fastpath: canonicalization is done in the function

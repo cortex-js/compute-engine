@@ -74,9 +74,17 @@ function logType(ops: ReadonlyArray<Expression>): Type {
     return 'number';
   // Provably negative finite argument (see note above): finite complex.
   if (x.isNegative === true) return 'finite_complex';
-  // Positive, or unknown-sign real (generic-real convention for a symbol).
-  if (x.type.matches('real')) return 'finite_real';
-  return 'finite_number';
+  // Provably positive (hence real, and finite per the check above): real.
+  if (x.isPositive === true) return 'finite_real';
+  // Sign unknown: the value may be real (x > 0), −∞ (x = 0) or finite
+  // complex (x < 0) — the join is `complex`, which admits ±∞ (D10 lattice).
+  // The old claim of `finite_real` for an unknown-sign real operand was
+  // unsound (`ln(−2) = 0.693… + iπ`, `ln(0) = −∞`); same ruling as the
+  // bounded inverse-trig heads (2026-07-30). `complex` excludes NaN, so it
+  // is only sound when the operand's type does too (`ln(NaN) = NaN`): an
+  // operand that may be NaN (`number`, `finite_number` — the latter is not
+  // a lattice subtype of `complex`) keeps the top type.
+  return x.type.matches('complex') ? 'complex' : 'number';
 }
 
 /**
@@ -170,8 +178,9 @@ export type RealDomain = {
   poles: readonly number[];
   /**
    * The type of the value at a pole: `non_finite_number` for a signed `±∞`
-   * (`artanh(1) = +∞`), `number` for `~oo`/NaN (neither is representable by
-   * `non_finite_number`).
+   * (`artanh(1) = +∞`), `complex` for `~oo` (a member of `complex` per the
+   * D10 lattice, though not of `non_finite_number`), `number` when the pole
+   * value may be NaN.
    */
   poleType: Type;
 };
@@ -257,7 +266,11 @@ export function boundedInverseTrigType(
   // Magnitude unknown: the join of what remains. A pole that is provably
   // avoided (or a head with no real pole) drops the non-finite arm.
   if (domain.poles.every((p) => x.isEqual(p) === false)) return 'finite_complex';
-  return domain.poleType === 'non_finite_number' ? 'complex' : 'number';
+  // The join of `finite_complex` with the pole value: ±∞ and ~oo are both
+  // members of `complex` (D10 lattice: `complex` admits `non_finite_number`
+  // and `~oo`), so only a NaN-capable pole (`poleType: 'number'`) forces the
+  // top type.
+  return domain.poleType === 'number' ? 'number' : 'complex';
 }
 
 /** `Arcsin`/`Arccos`: real on `[−1, 1]`, finite complex outside, no real pole. */
@@ -268,7 +281,19 @@ const ARCSIN_DOMAIN: RealDomain = {
   poleType: 'number',
 };
 
-/** `Arcsec`/`Arccsc`: real on `|x| ≥ 1`, finite complex on `0 < |x| < 1`, NaN at 0. */
+/**
+ * `Arcsec`/`Arccsc`: real on `|x| ≥ 1`, finite complex on `0 < |x| < 1`,
+ * `~oo` at 0.
+ *
+ * Mathematically the pole value is `~oo`, and `~oo` IS a member of `complex`
+ * (D10 lattice), which would make `complex` the tight pole claim. But the
+ * numeric evaluator currently yields **NaN** at 0 (`arcsec(0).N() → NaN`;
+ * exact `evaluate()` stays symbolic), and NaN is a member only of `number`.
+ * A type claim must not exclude a value the operator actually produces, so
+ * the sound pole claim — and hence the unknown-magnitude join — is `number`.
+ * Restoring `complex` requires first changing `Arcsec`/`Arccsc` evaluation to
+ * produce `~oo` at the pole.
+ */
 const ARCSEC_DOMAIN: RealDomain = {
   real: [iv(-Infinity, false, -1, true), iv(1, true, Infinity, false)],
   complex: [iv(-1, false, 0, false), iv(0, false, 1, false)],

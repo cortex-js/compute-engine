@@ -138,8 +138,15 @@ export function compile<T extends string = 'javascript'>(
       );
     }
 
-    // Use the language target to compile
+    // Use the language target to compile. `fallback` is passed through so the
+    // target normalizes its own failures — this matters for interval-js, whose
+    // primary failure class returns `success: false` WITHOUT throwing (so the
+    // catch below never sees it); without the pass-through such a decline
+    // reached the caller with no `run` at all, violating the fallback
+    // contract. The catch below remains for custom registered targets and
+    // pre-compile errors.
     return languageTarget.compile(expr, {
+      fallback: options?.fallback ?? true,
       operators: options?.operators,
       functions: options?.functions,
       vars: options?.vars,

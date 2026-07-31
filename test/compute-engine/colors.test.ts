@@ -890,6 +890,73 @@ describe('GPU compile: typed color heads', () => {
     expect(compiled.code).toContain('_gpu_srgb_to_oklch');
   });
 
+  // Alpha is orthogonal to color-space conversion and the whole `_gpu_*`
+  // chain is vec3 end to end, so a 4th operand has nowhere to go. Emitting
+  // the 3-component form would SILENTLY drop the alpha the JS target
+  // preserves ('compile Rgb with alpha to JS' above), so decline instead.
+  test.each([
+    ['Rgb', ['Rgb', 1, 0, 0, 0.5]],
+    ['Hsv', ['Hsv', 0, 1, 1, 0.5]],
+    ['Hsl', ['Hsl', 0, 1, 0.5, 0.25]],
+    ['Oklab', ['Oklab', 0.628, 0.225, 0.126, 0.5]],
+    ['Oklch', ['Oklch', 0.628, 0.258, 29.23, 0.5]],
+  ] as const)('%s with alpha fails closed on GLSL and WGSL', (head, json) => {
+    for (const to of ['glsl', 'wgsl'] as const) {
+      const compiled = compile(ce.expr(json as any), { to });
+      expect(compiled.success).toBe(false);
+      expect(compiled.error).toMatch(
+        new RegExp(`${head}: an alpha \\(4th\\) operand is not representable`)
+      );
+      expect(compiled.error).toMatch(/Fail closed \(D6\)\./);
+    }
+  });
+
+  // Same fail-closed policy through the two routes that used to bypass it:
+  // a 4-component `ColorFromColorspace` tuple (compiled into a vec4 that then
+  // flowed into vec3 helpers), and a CSS literal whose alpha byte was parsed
+  // and then silently dropped by the RGB-only lowering.
+  test('ColorFromColorspace with a 4-component tuple fails closed', () => {
+    for (const to of ['glsl', 'wgsl'] as const) {
+      const compiled = compile(
+        ce.expr(['ColorFromColorspace', ['Tuple', 1, 0, 0, 0.5], "'rgb'"]),
+        { to }
+      );
+      expect(compiled.success).toBe(false);
+      expect(compiled.error).toMatch(
+        /ColorFromColorspace: an alpha \(4th\) operand is not representable/
+      );
+      expect(compiled.error).toMatch(/Fail closed \(D6\)\./);
+    }
+  });
+
+  test('Color(literal) with a non-opaque alpha fails closed', () => {
+    for (const to of ['glsl', 'wgsl'] as const) {
+      const compiled = compile(ce.expr(['Color', "'#ff000080'"]), { to });
+      expect(compiled.success).toBe(false);
+      expect(compiled.error).toMatch(/carries an alpha channel/);
+      expect(compiled.error).toMatch(/Fail closed \(D6\)\./);
+    }
+  });
+
+  test('Color(literal) with a fully opaque alpha still compiles', () => {
+    // `#rrggbbff` is opaque — no alpha to drop, so it lowers like `#rrggbb`.
+    const compiled = compile(ce.expr(['Color', "'#ff0000ff'"]), { to: 'glsl' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toMatch(/vec3\(0\.62[^,]*, 0\.25[^,]*, 29\./);
+  });
+
+  test('3-operand color heads still compile on GLSL and WGSL', () => {
+    expect(compile(ce.expr(['Rgb', 0.1, 0.2, 0.3]), { to: 'glsl' }).code).toBe(
+      '_gpu_srgb_to_oklch(vec3(0.1, 0.2, 0.3))'
+    );
+    expect(compile(ce.expr(['Rgb', 0.1, 0.2, 0.3]), { to: 'wgsl' }).code).toBe(
+      '_gpu_srgb_to_oklch(vec3f(0.1, 0.2, 0.3))'
+    );
+    expect(compile(ce.expr(['Oklch', 0.1, 0.2, 0.3]), { to: 'glsl' }).code).toBe(
+      'vec3(0.1, 0.2, 0.3)'
+    );
+  });
+
   test('Typed heads compose with ColorMix', () => {
     // Two Oklch literals mixed — the middle of red and blue.
     const expr = ce.expr([

@@ -3111,7 +3111,27 @@ export class BaseCompiler {
     if (isFunction(expr)) {
       // Check the function's return type from its operator definition
       const t = expr.type;
-      if (isNonRealNumber(t.type)) return true;
+      if (isNonRealNumber(t.type)) {
+        // Sqrt/Ln/Log carve-out (2026-07-31): their type handlers now widen
+        // to `finite_complex`/`complex` for a real operand of UNKNOWN sign
+        // (type soundness: `√−2 = 1.414…i`), but the pinned compile contract
+        // keeps the real kernel for that case — these are the hottest plotted
+        // heads, and `Math.sqrt(-2)`/`sqrt(r)` yield a real-shaped `NaN` at
+        // run time. Only a provably negative or provably complex operand
+        // routes complex. The heads' own emitters use the same predicate
+        // (`resultIsComplexValued(head, args) && a provably negative
+        // operand`), so parent and child always agree on the value SHAPE —
+        // the invariant that matters for compiled correctness.
+        if (
+          expr.operator === 'Sqrt' ||
+          expr.operator === 'Ln' ||
+          expr.operator === 'Log'
+        )
+          return expr.ops.some(
+            (a) => a.isNegative === true || BaseCompiler.isComplexValued(a)
+          );
+        return true;
+      }
       if (t.matches('real')) return false;
 
       // Return type is unknown — fall back to checking whether any
@@ -4724,12 +4744,16 @@ export class BaseCompiler {
   ): CompilationResult<T> {
     const ce = expr.engine;
 
-    // Materialize an interpreted result matching `evaluate()`: a scalar yields
-    // its real part (the compiled-runner numeric contract), a finite indexed
-    // collection becomes a nested JS array of element values.
+    // Materialize an interpreted result matching the compiled-runner numeric
+    // contract: a scalar yields its real part as a float, a finite indexed
+    // collection becomes a nested JS array of element values. A scalar leaf is
+    // numericized first — `evaluate()` correctly stays symbolic for an exact
+    // argument (`ln(2)` evaluates to `Ln(2)`), and `.re` of a symbolic
+    // expression is NaN, so without `.N()` every decline whose expression has
+    // no non-symbolic evaluation would run to NaN instead of its value.
     const interpretedRunValue = (e: Expression): number | unknown[] => {
       if (e.isCollection) return [...e.each()].map(interpretedRunValue);
-      return e.re;
+      return e.N().re;
     };
 
     // Declarative reference analysis so the (success: false) result still tells
@@ -4752,8 +4776,9 @@ export class BaseCompiler {
     // positional arguments are silently dropped.
     if (isFunction(expr, 'Function')) {
       const lambdaRun = ((...args: number[]) =>
-        ce.function('Apply', [expr, ...args.map((a) => ce.expr(a))]).evaluate()
-          .re) as unknown as CompiledRunner;
+        interpretedRunValue(
+          ce.function('Apply', [expr, ...args.map((a) => ce.expr(a))]).evaluate()
+        )) as unknown as CompiledRunner;
       return {
         target: targetName,
         success: false,

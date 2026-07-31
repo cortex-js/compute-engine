@@ -368,6 +368,29 @@ function gpuVec3(target?: CompileTarget<Expression>): string {
 }
 
 /**
+ * Fail closed (D6) on a color constructor given a 4th (alpha) operand.
+ *
+ * The whole `_gpu_*` color chain — `srgb_to_oklch`, `oklch_to_srgb`,
+ * `hsl_to_rgb`, `hsv_to_rgb`, `oklab_to_oklch`, … — is `vec3` end to end, and
+ * alpha is orthogonal to color-space conversion, so there is no vec4 form to
+ * lower to. Emitting the 3-component value would silently DROP the alpha the
+ * JavaScript target preserves, so decline instead and let the caller pass
+ * alpha separately.
+ */
+function assertNoGPUAlpha(
+  head: string,
+  args: ReadonlyArray<Expression>
+): void {
+  if (args.length <= 3) return;
+  throw new Error(
+    `${head}: an alpha (4th) operand is not representable on the GPU target — ` +
+      `color values are \`vec3\` (OKLCh) end to end, with no alpha channel. ` +
+      `Drop the alpha operand and pass it separately (e.g. as a uniform) at ` +
+      `the framebuffer boundary. Fail closed (D6).`
+  );
+}
+
+/**
  * Whether applying `head` to `args` produces a complex value — the SAME signal
  * `BaseCompiler.isComplexValued` reports to the ENCLOSING expression for this
  * node.
@@ -2164,6 +2187,30 @@ function compileIntArg(
 const GPU_UNROLL_LIMIT = 100;
 
 /**
+ * Fail closed (D6) on a Sum/Product bound that is statically non-finite (a
+ * `±∞`/`NaN` literal, or an expression typed `non_finite_number`), so
+ * `compile()` reports failure and the caller falls back to the interpreter.
+ * `for (int i = 1; i <= _gpu_inf(); i++)` has no terminating condition (and is
+ * a shader type error besides), so such a bound must never be emitted. Mirrors
+ * `assertFiniteBound` in the JavaScript target.
+ */
+function assertFiniteGPUBound(
+  kind: 'Sum' | 'Product',
+  expr: Expression,
+  which: 'lower' | 'upper'
+): void {
+  const nonFinite =
+    (isNumber(expr) && !Number.isFinite(expr.re)) ||
+    expr.type.matches('non_finite_number');
+  if (!nonFinite) return;
+  throw new Error(
+    `${kind}: the ${which} bound \`${expr.toString()}\` is not a finite ` +
+      `number — an infinite or NaN bound has no terminating loop. ` +
+      `Fail closed (D6).`
+  );
+}
+
+/**
  * Maximum absolute exponent for inlining an integer `Power` as repeated
  * multiplication (`x*x*x`), for a *simple* base only (symbol or number, so the
  * base subexpression can be safely repeated). Larger exponents — or any
@@ -2218,6 +2265,8 @@ function compileGPUSumProduct(
 
   const limitsOps = limitsExpr.ops;
   const index = isSymbol(limitsOps[0]) ? limitsOps[0].symbol : '_';
+  assertFiniteGPUBound(kind, limitsOps[1], 'lower');
+  assertFiniteGPUBound(kind, limitsOps[2], 'upper');
   const lowerRe = limitsOps[1].re;
   const upperRe = limitsOps[2].re;
   const lowerNum =
@@ -2461,16 +2510,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         if (a !== undefined && b !== undefined && b !== 0)
           return formatFloat(a / b, target.language);
         if (b === 1) return compile(args[0]);
-        return `${compile(args[0])} / ${compile(args[1])}`;
+        // `compile()` emits sub-expressions without outer parentheses — wrap
+        // before splicing next to `/`.
+        return `(${compile(args[0])}) / (${compile(args[1])})`;
       }
-      let result = compile(args[0]);
+      let result = `(${compile(args[0])})`;
       for (let i = 1; i < args.length; i++)
-        result = `${result} / ${compile(args[i])}`;
+        result = `${result} / (${compile(args[i])})`;
       return result;
     }
     // Complex division
     if (ac && bc) return `_gpu_cdiv(${compile(args[0])}, ${compile(args[1])})`;
-    if (ac && !bc) return `(${compile(args[0])} / ${compile(args[1])})`;
+    if (ac && !bc) return `((${compile(args[0])}) / (${compile(args[1])}))`;
     const v2 = gpuVec2(target);
     return `_gpu_cdiv(${v2}(${compile(args[0])}, 0.0), ${compile(args[1])})`;
   },
@@ -2485,7 +2536,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       )}, ${formatFloat(-x.im, target.language)})`;
     }
     if (isSymbol(x, 'ImaginaryUnit')) return `${gpuVec2(target)}(0.0, -1.0)`;
-    return `(-${compile(x)})`;
+    return `(-(${compile(x)}))`;
   },
 
   // Standard math functions with complex dispatch
@@ -2565,9 +2616,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Ln: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_cln(${compile(args[0])})`;
-    // Real operand, complex result (`a := -2` → `Ln(a)` is `finite_complex`):
-    // the parent emits the `vec2` convention. See `gpuResultIsComplexValued`.
-    if (gpuResultIsComplexValued('Ln', args))
+    // PROVABLY negative real operand, complex result (`a := -2` → `Ln(a)` is
+    // `finite_complex`): the parent emits the `vec2` convention. An operand of
+    // merely UNKNOWN sign keeps the scalar `log` (pinned; the
+    // `isComplexValued` Sqrt/Ln/Log carve-out makes the parent agree). See
+    // `gpuResultIsComplexValued`.
+    if (args[0]?.isNegative === true && gpuResultIsComplexValued('Ln', args))
       return `_gpu_cln(${gpuComplexOperand(args[0], compile, target)})`;
     return `log(${compile(args[0])})`;
   },
@@ -2847,12 +2901,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         )})`;
       return formatFloat(Math.sqrt(c), target.language);
     }
-    // The operand is real-emitted but the RESULT is typed complex (a symbol
-    // with an assigned negative value: `a := -2`). The enclosing emission is
-    // the `vec2(re, im)` convention, and shader scalar-broadcast would silently
-    // turn a `sqrt(-2.0)` NaN into `vec2(NaN, NaN)`. See
-    // `gpuResultIsComplexValued`.
-    if (gpuResultIsComplexValued('Sqrt', args))
+    // The operand is real-emitted but PROVABLY negative (a symbol with an
+    // assigned negative value: `a := -2`), so the result is complex. The
+    // enclosing emission is the `vec2(re, im)` convention, and shader
+    // scalar-broadcast would silently turn a `sqrt(-2.0)` NaN into
+    // `vec2(NaN, NaN)`. An operand of merely UNKNOWN sign keeps the scalar
+    // `sqrt` (pinned; the `isComplexValued` Sqrt/Ln/Log carve-out makes the
+    // parent agree). See `gpuResultIsComplexValued`.
+    if (args[0]?.isNegative === true && gpuResultIsComplexValued('Sqrt', args))
       return `_gpu_csqrt(${gpuComplexOperand(args[0], compile, target)})`;
     return `sqrt(${compile(args[0])})`;
   },
@@ -2903,9 +2959,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Remainder: ([a, b], compile) => {
     if (a === null || b === null)
       throw new Error('Remainder: missing argument');
-    return `(${compile(a)} - ${compile(b)} * round(${compile(a)} / ${compile(
-      b
-    )}))`;
+    // `compile()` emits sub-expressions without outer parentheses, and
+    // `*`/`/` bind tighter than `+` — wrap before splicing.
+    const ca = `(${compile(a)})`;
+    const cb = `(${compile(b)})`;
+    return `(${ca} - ${cb} * round(${ca} / ${cb}))`;
   },
 
   // Reciprocal trigonometric functions (no GPU built-ins)
@@ -3136,13 +3194,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Lb: 'log2',
   Log: (args, compile, target) => {
     if (args.length === 0) throw new Error('Log: no argument');
-    // Complex either because an operand is, or because the RESULT is (a real
-    // but negative argument: `a := -2` makes `Log(a)` `finite_complex`). Either
-    // way the enclosing emission is the `vec2` convention. See
-    // `gpuResultIsComplexValued`.
+    // Complex either because an operand is, or because the RESULT is complex
+    // from a PROVABLY negative argument (`a := -2` makes `Log(a)`
+    // `finite_complex`). Either way the enclosing emission is the `vec2`
+    // convention. An operand of merely UNKNOWN sign keeps the scalar kernel
+    // (pinned; the `isComplexValued` Sqrt/Ln/Log carve-out makes the parent
+    // agree). See `gpuResultIsComplexValued`.
     if (
       args.some((a) => BaseCompiler.isComplexValued(a)) ||
-      gpuResultIsComplexValued('Log', args)
+      (args.some((a) => a.isNegative === true) &&
+        gpuResultIsComplexValued('Log', args))
     ) {
       const num = `_gpu_cln(${gpuComplexOperand(args[0], compile, target)})`;
       // `ln(x) / ln(b)`: the base may itself be complex, or real-but-negative
@@ -3281,6 +3342,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const spaceName = readStringLiteral(space);
     if (spaceName === null)
       throw new Error('ColorFromColorspace: space must be a string literal');
+    // A 4-component tuple carries alpha. Same fail-closed policy as the typed
+    // color heads: the `_gpu_*` chain is `vec3` end to end, so a `vec4` here
+    // would either not type-check or silently drop the alpha downstream.
+    if (
+      isFunction(components) &&
+      (components.operator === 'Tuple' || components.operator === 'List')
+    )
+      assertNoGPUAlpha('ColorFromColorspace', components.ops);
     const c = compile(components);
     switch (spaceName) {
       case 'oklch':
@@ -3303,8 +3372,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // ---------------------------------------------------------------------------
   // Color literals. Each typed head compiles to a canonical OKLCh vec3.
-  // Alpha (4th argument) is dropped — GPU color values are vec3 only. Pass
-  // alpha as a separate uniform if it's needed at the framebuffer boundary.
+  // An alpha (4th) argument is DECLINED (`assertNoGPUAlpha`) — GPU color
+  // values are vec3 only, so there is nowhere to carry it. Pass alpha as a
+  // separate uniform if it's needed at the framebuffer boundary.
   // ---------------------------------------------------------------------------
 
   Color: ([s], _compile, target) => {
@@ -3317,6 +3387,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const packed = parseColor(str);
     if (packed === 0 && str.trim().toLowerCase() !== 'transparent')
       throw new Error(`Color: invalid color string "${str}"`);
+    // `parseColor()` returns 0xrrggbbaa. Only the RGB is lowered below, so a
+    // literal carrying a non-opaque alpha would silently become opaque.
+    // Decline instead, matching `assertNoGPUAlpha`.
+    if ((packed & 0xff) !== 0xff)
+      throw new Error(
+        `Color: the color string "${str}" carries an alpha channel, which is ` +
+          `not representable on the GPU target — color values are \`vec3\` ` +
+          `(OKLCh) end to end, with no alpha channel. Use a fully opaque ` +
+          `color and pass the alpha separately (e.g. as a uniform) at the ` +
+          `framebuffer boundary. Fail closed (D6).`
+      );
     const r = (packed >>> 24) & 0xff;
     const g = (packed >>> 16) & 0xff;
     const b = (packed >>> 8) & 0xff;
@@ -3326,6 +3407,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   Rgb: (args, compile, target) => {
     if (args.length < 3) throw new Error('Rgb: need 3 components');
+    assertNoGPUAlpha('Rgb', args);
     const v3 = gpuVec3(target);
     // Channels are 0-1 sRGB — no scaling needed.
     return `_gpu_srgb_to_oklch(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])}))`;
@@ -3333,24 +3415,28 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   Hsv: (args, compile, target) => {
     if (args.length < 3) throw new Error('Hsv: need 3 components');
+    assertNoGPUAlpha('Hsv', args);
     const v3 = gpuVec3(target);
     return `_gpu_srgb_to_oklch(_gpu_hsv_to_rgb(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})))`;
   },
 
   Hsl: (args, compile, target) => {
     if (args.length < 3) throw new Error('Hsl: need 3 components');
+    assertNoGPUAlpha('Hsl', args);
     const v3 = gpuVec3(target);
     return `_gpu_srgb_to_oklch(_gpu_hsl_to_rgb(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})))`;
   },
 
   Oklab: (args, compile, target) => {
     if (args.length < 3) throw new Error('Oklab: need 3 components');
+    assertNoGPUAlpha('Oklab', args);
     const v3 = gpuVec3(target);
     return `_gpu_oklab_to_oklch(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])}))`;
   },
 
   Oklch: (args, compile, target) => {
     if (args.length < 3) throw new Error('Oklch: need 3 components');
+    assertNoGPUAlpha('Oklch', args);
     // Already in canonical form — no conversion needed.
     const v3 = gpuVec3(target);
     return `${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;

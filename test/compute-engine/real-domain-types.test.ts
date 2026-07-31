@@ -156,7 +156,9 @@ describe('TYPE: Power/Root of a negative base', () => {
     [['Power', 'r', 'n'], 'finite_number'],
     [['Power', -2, 'n'], 'finite_number'], // unprovable exponent
     [['Power', -2, 'k'], 'finite_rational'], // integer exponent: real
-    [['Sqrt', -2], 'complex'],
+    // Tightened 2026-07-31: √−2 = i√2 is FINITE, so `finite_complex` (was
+    // the looser `complex`) — part of the Sqrt unknown-sign ruling.
+    [['Sqrt', -2], 'finite_complex'],
     [['Root', 8, 4], 'finite_real'],
     [['Root', 'r', 4], 'finite_number'],
     [['Root', -8, 'n'], 'number'],

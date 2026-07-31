@@ -499,8 +499,17 @@ describe('other targets keep their existing lowering', () => {
     expect(r!.code).toMatch(/np\.less/);
   });
 
-  test('Python equality keeps its tolerance-aware lowering', () => {
+  test('Python equality over a collection fails closed', () => {
+    // Collection equality fails closed on the Python target pending the
+    // semantics ruling (the `abs(a - b)` form raises on a Python list).
     const r = compile(engine.box(['Equal', ['List', 1, 2], 2] as any), {
+      to: 'python',
+    });
+    expect(r?.success).toBe(false);
+  });
+
+  test('Python equality keeps its tolerance-aware lowering on scalars', () => {
+    const r = compile(engine.box(['Equal', ['Add', 0.1, 0.2], 0.3] as any), {
       to: 'python',
     });
     expect(r?.success).toBe(true);

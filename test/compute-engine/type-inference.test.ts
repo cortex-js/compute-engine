@@ -133,18 +133,32 @@ describe('TYPE INFERENCE FOR STATISTICS FUNCTIONS', () => {
 });
 
 describe('TYPE INFERENCE FOR LOG FUNCTIONS', () => {
-  it('Ln of real → finite_real', () => {
+  // An unknown-sign real may be negative (`ln(−2) = 0.693… + iπ`) or zero
+  // (`ln(0) = −∞`), so `finite_real` was unsound — the sound join is
+  // `complex` (which admits ±∞ but not NaN). Ruled 2026-07-30, same ruling
+  // as the bounded inverse-trig heads.
+  it('Ln of unknown-sign real → complex', () => {
     const localCe = new ComputeEngine();
     localCe.declare('x', { type: 'real' });
     const expr = localCe.parse('\\ln(x)');
+    expect(expr.type.toString()).toBe('complex');
+  });
+
+  it('Ln of provably-positive real → finite_real', () => {
+    const localCe = new ComputeEngine();
+    localCe.declare('p', { type: 'real' });
+    localCe.assume(localCe.parse('p > 0'));
+    const expr = localCe.parse('\\ln(p)');
     expect(expr.type.toString()).toBe('finite_real');
   });
 
-  it('Ln of number → finite_number', () => {
+  // A `number`-typed operand may be NaN (`ln(NaN) = NaN`), which `complex`
+  // excludes — only the top type is sound.
+  it('Ln of number → number', () => {
     const localCe = new ComputeEngine();
     localCe.declare('z', { type: 'number' });
     const expr = localCe.parse('\\ln(z)');
-    expect(expr.type.toString()).toBe('finite_number');
+    expect(expr.type.toString()).toBe('number');
   });
 });
 

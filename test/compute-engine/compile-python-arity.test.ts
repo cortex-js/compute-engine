@@ -152,12 +152,48 @@ describe('PYTHON ARITY — Norm / Covariance operand guards', () => {
     expect(src(['Norm', ['List', 3, -4], { str: 'Infinity' }])).toBe(
       'np.linalg.norm([3, -4], np.inf)'
     );
-    expect(src(['Norm', ['List', 3, 4], { str: 'Frobenius' }])).toBe(
-      "np.linalg.norm([3, 4], 'fro')"
-    );
+    // `'fro'` is matrix-only in numpy: on a 1-D input `np.linalg.norm(v,
+    // 'fro')` raises ValueError, so a vector Frobenius order fails closed
+    // instead of emitting source that cannot run.
+    expect(() =>
+      src(['Norm', ['List', 3, 4], { str: 'Frobenius' }])
+    ).toThrow(/Fail closed/);
     expect(() =>
       src(['Norm', ['List', 3, 4], { str: 'bogus' }])
     ).toThrow(/Fail closed/);
+  });
+
+  // `Norm(m, 2)` is the FROBENIUS norm in the interpreter
+  // (`library/linear-algebra.ts`), but `np.linalg.norm(m, 2)` is the SPECTRAL
+  // norm: on `[[3,4],[5,12]]` the interpreter answers 13.9283882771841…, the
+  // old emission 13.8806092198653… — a silent wrong value (D6).
+  const M = ['List', ['List', 3, 4], ['List', 5, 12]];
+
+  it('order 2 on a MATRIX lowers to the Frobenius norm, not numpy’s spectral norm', () => {
+    expect(src(['Norm', M, 2])).toBe(
+      "np.linalg.norm([[3, 4], [5, 12]], 'fro')"
+    );
+  });
+
+  it('order 2 on a VECTOR is unchanged (the two systems agree at rank 1)', () => {
+    expect(src(['Norm', ['List', 3, 4], 2])).toBe('np.linalg.norm([3, 4], 2)');
+    // A dimension-less `list<number>` (the `vector` spelling) is still
+    // provably rank 1, so it must not fall into the decline below.
+    ce.declare('normVec1', 'list<number>');
+    expect(src(['Norm', 'normVec1', 2])).toBe('np.linalg.norm(normVec1, 2)');
+  });
+
+  it('order 2 on an operand of unknown rank fails closed', () => {
+    ce.declare('normOpaque1', 'unknown');
+    expect(() => src(['Norm', 'normOpaque1', 2])).toThrow(/Fail closed/);
+  });
+
+  it('the other matrix orders are unchanged', () => {
+    expect(src(['Norm', M])).toBe('np.linalg.norm([[3, 4], [5, 12]])');
+    expect(src(['Norm', M, 1])).toBe('np.linalg.norm([[3, 4], [5, 12]], 1)');
+    expect(src(['Norm', ['List', 3, 4], { str: 'Infinity' }])).toBe(
+      'np.linalg.norm([3, 4], np.inf)'
+    );
   });
 
   it('a one-operand Covariance/Correlation fails closed instead of emitting `np.cov(x, )`', () => {
@@ -213,6 +249,18 @@ const EXEC_CASES: Array<{ name: string; expr: any; expected: any }> = [
     expected: 2.6457513110645907,
   },
   { name: 'norm_inf_string', expr: ['Norm', ['List', 3, -4], { str: 'Infinity' }], expected: 4 },
+  // Frobenius (13.9283…), NOT numpy's spectral norm for ord 2 (13.8806…).
+  {
+    name: 'norm_matrix_ord2',
+    expr: ['Norm', ['List', ['List', 3, 4], ['List', 5, 12]], 2],
+    expected: 13.928388277184119,
+  },
+  {
+    name: 'norm_matrix_ord1',
+    expr: ['Norm', ['List', ['List', 3, 4], ['List', 5, 12]], 1],
+    expected: 16,
+  },
+  { name: 'norm_vector_ord2', expr: ['Norm', ['List', 3, 4], 2], expected: 5 },
   {
     name: 'less_chain',
     expr: ['Less', ['List', 1, 9], ['List', 3, 4], ['List', 5, 6]],

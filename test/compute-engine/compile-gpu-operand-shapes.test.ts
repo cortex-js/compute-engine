@@ -134,7 +134,7 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
     // `*` and `/` broadcast a scalar over a vector in both languages.
     expect(g(['Multiply', V3, 2])).toBe('2.0 * vec3(1.0, 2.0, 3.0)');
     expect(w(['Multiply', V3, 2])).toBe('2.0 * vec3f(1.0, 2.0, 3.0)');
-    expect(g(['Divide', 2, V3])).toBe('2.0 / vec3(1.0, 2.0, 3.0)');
+    expect(g(['Divide', 2, V3])).toBe('(2.0) / (vec3(1.0, 2.0, 3.0))');
   });
 
   it('matrix arithmetic GLSL and WGSL both define', () => {
@@ -153,8 +153,8 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
   it('the unary fan-out lowerings are unaffected', () => {
     expect(g(['Sin', V4])).toBe('sin(vec4(1.0, 2.0, 3.0, 4.0))');
     expect(w(['Sin', V4])).toBe('sin(vec4f(1.0, 2.0, 3.0, 4.0))');
-    expect(g(['Negate', V4])).toBe('(-vec4(1.0, 2.0, 3.0, 4.0))');
-    expect(w(['Negate', V4])).toBe('(-vec4f(1.0, 2.0, 3.0, 4.0))');
+    expect(g(['Negate', V4])).toBe('(-(vec4(1.0, 2.0, 3.0, 4.0)))');
+    expect(w(['Negate', V4])).toBe('(-(vec4f(1.0, 2.0, 3.0, 4.0)))');
   });
 
   it('a lowering that DESTRUCTURES its collection operand is left alone', () => {
@@ -207,7 +207,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     // WGSL is unaffected: it lowers `Mod` to `%`, whose scalar/vector mixed
     // forms ARE defined, so there is no builtin overload to violate.
     expect(w(['Mod', 1, V3])).toBe(
-      '(((1.0 % vec3f(1.0, 2.0, 3.0)) + vec3f(1.0, 2.0, 3.0)) % vec3f(1.0, 2.0, 3.0))'
+      '((((1.0) % (vec3f(1.0, 2.0, 3.0))) + (vec3f(1.0, 2.0, 3.0))) % (vec3f(1.0, 2.0, 3.0)))'
     );
   });
 

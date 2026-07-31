@@ -41,8 +41,10 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
     // WGSL `%` on floats is the *truncated* remainder (sign of the dividend);
     // the interpreter's `Mod` is *floored* (sign of the divisor, D1). Convert
     // truncated → floored with `((a % b) + b) % b`, matching the JS target.
-    const ca = compile(a);
-    const cb = compile(b);
+    // `compile()` emits sub-expressions without outer parentheses, and `%`
+    // binds tighter than `+` — wrap before splicing next to `%`.
+    const ca = `(${compile(a)})`;
+    const cb = `(${compile(b)})`;
     return `(((${ca} % ${cb}) + ${cb}) % ${cb})`;
   },
 

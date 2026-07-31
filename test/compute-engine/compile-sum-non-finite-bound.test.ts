@@ -107,6 +107,56 @@ describe('Sum/Product with a non-finite bound fails closed (D6)', () => {
   });
 });
 
+describe('the GPU targets decline a non-finite bound too', () => {
+  // A shader `for (int i = 1; i <= _gpu_inf(); i++)` is a type error rather
+  // than a hang, but the fail-closed rule is the same: never emit a loop with
+  // no terminating condition.
+  it.each([
+    ['Sum', 'upper', ['Sum', 'i', ['Limits', 'i', 1, 'PositiveInfinity']]],
+    ['Sum', 'lower', ['Sum', 'i', ['Limits', 'i', 'NegativeInfinity', 10]]],
+    ['Sum', 'upper', ['Sum', 'i', ['Limits', 'i', 1, 'NaN']]],
+    ['Sum', 'lower', ['Sum', 'i', ['Limits', 'i', 'NaN', 5]]],
+    [
+      'Product',
+      'upper',
+      ['Product', 'i', ['Limits', 'i', 1, 'PositiveInfinity']],
+    ],
+    [
+      'Product',
+      'lower',
+      ['Product', 'i', ['Limits', 'i', 'NegativeInfinity', 5]],
+    ],
+    ['Product', 'upper', ['Product', 'i', ['Limits', 'i', 1, 'NaN']]],
+  ] as const)('%s with a non-finite %s bound', (kind, which, json) => {
+    for (const to of ['glsl', 'wgsl'] as const) {
+      const result = compile(ce.box(json as any), { to });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(
+        new RegExp(`${kind}: the ${which} bound .* is not a finite number`)
+      );
+      expect(result.error).toMatch(/Fail closed \(D6\)\./);
+    }
+  });
+
+  it.each(['glsl', 'wgsl'] as const)(
+    'the parsed infinite series declines on %s',
+    (to) => {
+      const result = compile(INFINITE_SUM(), { to });
+      expect(result.success).toBe(false);
+      expect(result.code).not.toMatch(/_gpu_inf\(\)|bitcast<f32>/);
+    }
+  );
+
+  it.each([
+    ['glsl', '((1.0) + (2.0) + (3.0) + (4.0) + (5.0) + (6.0) + (7.0) + (8.0) + (9.0) + (10.0))'],
+    ['wgsl', '((1.0) + (2.0) + (3.0) + (4.0) + (5.0) + (6.0) + (7.0) + (8.0) + (9.0) + (10.0))'],
+  ] as const)('a finite sum still compiles unchanged on %s', (to, code) => {
+    const result = compile(ce.parse('\\sum_{i=1}^{10} i'), { to });
+    expect(result.success).toBe(true);
+    expect(result.code).toBe(code);
+  });
+});
+
 describe('finite Sum/Product still compiles and runs', () => {
   it('sum_{i=1}^{10} i = 55', () => {
     const result = compile(ce.parse('\\sum_{i=1}^{10} i'));

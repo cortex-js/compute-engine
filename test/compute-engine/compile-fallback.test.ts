@@ -143,3 +143,73 @@ describe('Compilation of scalar↔list arithmetic (broadcast + complex fail-clos
     expect(out[1]).toBeCloseTo(Math.sin(1));
   });
 });
+
+describe('Compilation fallback — numeric value of a symbolic evaluation', () => {
+  let warn: jest.SpyInstance;
+  beforeAll(() => {
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterAll(() => warn.mockRestore());
+
+  // `evaluate()` correctly stays symbolic for an exact argument (the
+  // exactness contract), and `.re` of a symbolic expression is NaN. The
+  // fallback runner must numericize (`.N()`) so a decline still returns the
+  // interpreter's value — that is the entire point of declining instead of
+  // emitting wrong code.
+  test('declined infinite Sum runs to its numeric value, not NaN', () => {
+    const e = ce.parse('\\sum_{i=1}^{\\infty} 2^{-i}');
+    const r = compile(e);
+    expect(r.success).toBe(false);
+    expect(r.run!({})).toBe(1);
+  });
+
+  test('scalar fallback whose evaluation stays symbolic numericizes', () => {
+    // Forced fallback: evaluate() → Ln(2) (symbolic); run must give the float
+    const r = compile(ce.parse('\\ln(2)'), FORCE);
+    expect(r.success).toBe(false);
+    expect(r.run!({})).toBeCloseTo(Math.LN2, 12);
+  });
+
+  test('collection fallback numericizes symbolic elements', () => {
+    const r = compile(ce.box(['List', ['Ln', 2], ['Sqrt', 2]]), FORCE);
+    expect(r.success).toBe(false);
+    const out = r.run!({}) as unknown as number[];
+    expect(out[0]).toBeCloseTo(Math.LN2, 12);
+    expect(out[1]).toBeCloseTo(Math.SQRT2, 12);
+  });
+
+  test('lambda fallback numericizes a symbolic application', () => {
+    // Apply(Function(Ln(x)), 2).evaluate() → Ln(2), symbolic
+    const r = compile(ce.expr(['Function', ['Ln', 'x'], 'x']), FORCE);
+    expect(r.calling).toBe('lambda');
+    expect(r.run!(2)).toBeCloseTo(Math.LN2, 12);
+  });
+});
+
+describe('Compilation fallback — interval-js declines still provide `run`', () => {
+  let warn: jest.SpyInstance;
+  beforeAll(() => {
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterAll(() => warn.mockRestore());
+
+  // The interval target's primary failure class returns `success: false`
+  // WITHOUT throwing, so the free function must pass `fallback` through for
+  // the target to normalize it — otherwise the result had no `run` at all.
+  test('declined infinite Sum yields an interval-shaped interpreter run', () => {
+    const e = ce.parse('\\sum_{i=1}^{\\infty} 2^{-i}');
+    const r = compile(e, { to: 'interval-js' });
+    expect(r.success).toBe(false);
+    expect(typeof r.run).toBe('function');
+    expect(r.run!({})).toEqual({ lo: 1, hi: 1 });
+  });
+
+  test('fallback: false surfaces the raw decline (no interpreter run)', () => {
+    // The interval target's primary failure class reports `success: false`
+    // without throwing; opting out of the fallback surfaces that raw shape.
+    const e = ce.parse('\\sum_{i=1}^{\\infty} 2^{-i}');
+    const r = compile(e, { to: 'interval-js', fallback: false });
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/not a finite number/);
+  });
+});

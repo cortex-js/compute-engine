@@ -260,12 +260,15 @@ Known candidates, all currently defended as "documented and deliberate":
   we cannot see.
 - The `Multiply` ≥2-arrayish carve-out and the complex-element deferral —
   preserved verbatim through the broadcast rework, never re-examined.
-- **`Sqrt(a)` with `a := -2` folds to a real `NaN`, not the complex value** —
-  `Math.sqrt((-2))` on JS, `sqrt((-2.0))` on GPU — because `compile()`
-  substitutes the assigned value past the handler's constant check. Both targets
-  agree, so this is not a cross-target divergence; it is the **literal-vs-
-  assigned-symbol** split, the same shape as the `realOnly` finding one layer
-  down. Fixing it changes JS behaviour too, so it wants its own ruling.
+- ~~**`Sqrt(a)` with `a := -2` folds to a real `NaN`, not the complex value**~~
+  — **RESOLVED 2026-07-31** by the Sqrt/Ln/Log dispatch rework: a PROVABLY
+  negative operand (literal or assigned) now routes through the complex
+  helper on both JS (`_SYS.csqrt` → `{re: 0, im: 1.414…}`) and GPU
+  (`_gpu_csqrt`), matching the interpreter; a free real symbol of unknown
+  sign keeps the real kernel (pinned in `compile-complex-result.test.ts`).
+  The dispatch predicate lives in the `isComplexValued` Sqrt/Ln/Log
+  carve-out (`base-compiler.ts`) and is mirrored by the three head emitters
+  in each target, so parent and child always agree on the value shape.
 
 **A‴. GPU invalid-source escapes — mostly closed 2026-07-30, three left.** The
 broadcast rework (item 112) plus a follow-up round closed the unary fan-out and
@@ -346,10 +349,11 @@ broader emission change with real snapshot risk.
 **Follow-ups from the 2026-07-30 review round** (each found while fixing
 something else; none is a regression):
 
-- **A type/value disagreement at the source:** `Arcosh(a)` with `a := -2` is
-  typed `finite_real`, but `.N()` is `1.3169… + 3.1415…i`. Compilation is
-  self-consistent (parent and child both emit real, both `NaN`), so it is not a
-  lowering split — the _type_ is simply wrong. Fixing it is type-handler work.
+- ~~**A type/value disagreement at the source:** `Arcosh(a)` with `a := -2`
+  typed `finite_real` while `.N()` is complex.~~ — **RESOLVED as of
+  2026-07-31**: probes now give `finite_complex` (the assumptions/value
+  predicates reach the `boundedInverseTrigType` complex arm), consistent with
+  `.N()`.
 - **`Power`/`Root` still yield `NaN` where the interpreter returns a complex
   value.** This is the ratified `finite_number` policy, not a defect, but it is
   the same user-visible surprise the `realOnly` retirement removed for `Sqrt`.
@@ -375,6 +379,82 @@ something else; none is a regression):
 - **Python's `Add`/`Multiply`/`Divide` lowerings are precedence-blind**
   (`args.map(compile).join(' + ')`), so any path that declines the infix route —
   chiefly complex operands — can emit `z + 1 * 2` for `Multiply(Add(z,1), 2)`.
+
+**Closed in the 2026-07-31 round** (the priority list from the 2026-07-30
+handoff, all verified by probe + full suite, zero snapshot churn):
+
+- **The interpreter fallback returned `NaN` for any expression whose
+  `evaluate()` stays symbolic** (the exactness contract: `Σ 2^{-i}` declines,
+  falls back, and `run({})` gave `NaN` while `.N()` gives `1`).
+  `buildInterpreterFallback` (`base-compiler.ts`) now numericizes at the
+  leaves (`e.N().re`) in both the expression and lambda branches — this is
+  what makes every compile decline actually pay off. Regression tests in
+  `compile-fallback.test.ts`.
+- **An interval-js decline produced no `run` at all**: the target's primary
+  failure class returns `success: false` WITHOUT throwing, so the free
+  `compile()`'s catch-based fallback never saw it. `compile-expression.ts`
+  now passes `fallback` through to the registered target, which normalizes
+  both failure shapes (`buildIntervalFallback` → degenerate `{lo, hi}`
+  interval run). With `fallback: false` the raw no-`run` decline shape still
+  surfaces (pinned).
+- **Sqrt/Ln/Log type claims** (the P2 ruling): an unknown-sign real operand
+  now types `finite_complex` (Sqrt) / `complex` (Ln, Log with a valid base);
+  a provably-positive operand keeps `finite_real`; a `number`-typed operand
+  (NaN-capable) keeps `number`. Compile emission is UNCHANGED for a free
+  real symbol on every target (real kernels, pinned) via the
+  `isComplexValued` Sqrt/Ln/Log carve-out + operand-negativity dispatch in
+  the JS and GPU emitters; a provably negative operand (literal or assigned)
+  routes complex on both. `Log(2, -2)` still `number`/`NaN` everywhere — the
+  interpreter gap stands, recorded below.
+- **`Add`/`Multiply`/`Divide` over a type-only-provable non-finite operand**:
+  `1 + Ln(0)` typed `integer` (lattice-sound but missing the provable
+  `non_finite_number`), `2·Ln(0)` typed `finite_integer` (unsound). The three
+  handlers now treat `type ⊆ non_finite_number` as provably non-finite. Root
+  cause NOT fixed (recorded below): `BoxedFunction.isFinite` never consults
+  the static type.
+- **`Arcsec`/`Arccsc` aligned with the other six bounded heads**: pole value
+  `~oo` is a member of `complex` (D10), so `poleType: 'complex'` and the
+  unknown-magnitude join is `complex` (was `number`); the compiled complex
+  dispatch now treats all eight heads uniformly.
+- **GPU colour constructors decline a 4th (alpha) operand** on GLSL and WGSL
+  (`assertNoGPUAlpha`, `gpu-target.ts`) instead of silently dropping it; the
+  vec3 colour chain is unchanged for 3-operand forms (byte-identical).
+- **GPU `Sum`/`Product` decline a non-finite bound** (`assertFiniteGPUBound`)
+  instead of emitting `for (int i = 1; i <= _gpu_inf(); i++)`; mirrors the
+  JS/interval-js guard and message.
+- **Python `Norm(matrix, 2)` lowers to `np.linalg.norm(m, 'fro')`** (CE's
+  Frobenius semantics; numpy's ord-2 is spectral — a silent wrong value:
+  13.8806 vs 13.9284 on `[[3,4],[5,12]]`). Static rank 1 keeps ord 2;
+  unknown rank fails closed (`pyStaticRank`, `python-target.ts`).
+
+New residues recorded by that round:
+
+- **`BoxedFunction.isFinite` is type-blind**: `Ln(0).type` is
+  `non_finite_number` yet `Ln(0).isFinite` is `undefined`. Consulting the
+  type in the getter would fix the whole class at the root, but `isFinite`
+  is documented perf-sensitive territory (the `Abs` type handler measured a
+  2.5× whole-suite slowdown from a similar coupling) — wants a measured pass,
+  not a drive-by.
+- **`Norm(scalar, 2)` on Python now declines** (was a runtime
+  `ValueError`) — intentional side effect, flagged.
+- **`Norm(matrix, "Infinity")` / `Norm(matrix, 1)` on Python are unverified**
+  against numpy's matrix semantics (`ord=inf` = max row sum, `ord=1` = max
+  column sum): if the interpreter's rank-2 branch treats these orders the
+  vector way, they are the same silent-divergence class as the runtime-ord-2
+  case (now fixed via the `('fro' if p == 2 else p)` runtime substitution) —
+  not probed.
+
+**Open question needing a SEMANTICS RULING before code — `Equal`/`NotEqual`
+over collections on the Python target.** The interpreter returns a **scalar**
+`"False"` for `Equal([1,2],[3,4],[5,6])`, contradicting the in-file comment
+claiming the `abs(a-b) <= tol` form "also serves the collection-operand path"
+element-wise. On plain lists `abs([1,2] - [3,4])` is a `TypeError`; on
+ndarrays the chained `and` at arity ≥3 raises "truth value of an array is
+ambiguous". Which semantics is intended — scalar whole-collection equality
+(matching the interpreter) or elementwise? Ask before building. (Interim:
+`compilePythonEquality` now FAILS CLOSED on any statically collection-valued
+operand instead of emitting source that raises at runtime — the decline
+implements no semantics, so the ruling stays open.)
 
 _Unverified, recorded so it is not lost:_ a decline thrown mid-compile may not
 unwind `BaseCompiler._localVector` / `_localComplex` if those pushes are not

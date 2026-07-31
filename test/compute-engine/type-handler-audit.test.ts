@@ -278,3 +278,41 @@ describe('TYPE AUDIT: integral special functions with unproven-real operands', (
     expect(typeOf(['CosIntegral', 'r'])).toBe('real');
   });
 });
+
+describe('TYPE AUDIT: Mod (floored remainder)', () => {
+  // `Mod`'s only reachable pole is a zero modulus (NaN), and any non-finite
+  // operand also yields NaN, so narrowing requires provably-finite operand
+  // TYPES and a provably nonzero modulus (the zero-pole sgn convention).
+  ce.declare('fk', 'finite_integer');
+  ce.declare('fm', 'finite_integer');
+  ce.declare('fr', 'finite_real');
+
+  it('narrows finite-typed operands over a provably nonzero modulus', () => {
+    expect(typeOf(['Mod', 'fk', 900])).toBe('finite_integer');
+    expect(typeOf(['Mod', 'fr', 2])).toBe('finite_real');
+    expect(typeOf(['Mod', 'fk', ['Rational', 5, 2]])).toBe('finite_rational');
+  });
+
+  it('narrows compound operands from their STATIC type', () => {
+    // The value predicates (`isFinite`, `isInteger`) are type-blind on
+    // compound operands; the handler must read `.type`. This chain is the
+    // broadcast witness body — the exact-mode compile tier keys on it.
+    expect(typeOf(['Mod', ['Add', 'fk', 29], 900])).toBe('finite_integer');
+    expect(typeOf(['Add', 1, ['Mod', ['Add', 'fk', 29], 900]])).toBe(
+      'finite_integer'
+    );
+  });
+
+  it('a possibly-zero symbolic modulus keeps number (Mod(k, 0) is NaN)', () => {
+    expect(typeOf(['Mod', 'fk', 'fm'])).toBe('number');
+  });
+
+  it('NaN outcomes keep number: zero/complex modulus, non-finite operands', () => {
+    expect(typeOf(['Mod', ['Rational', 1, 2], 0])).toBe('number');
+    expect(typeOf(['Mod', 'ImaginaryUnit', 'ImaginaryUnit'])).toBe('number');
+    expect(typeOf(['Mod', 'fk', { num: 'NaN' }])).toBe('number');
+    expect(typeOf(['Mod', { num: '+Infinity' }, 5])).toBe('number');
+    // A merely-`integer` operand admits ±∞ and does not narrow.
+    expect(typeOf(['Mod', 'k', 900])).toBe('number');
+  });
+});

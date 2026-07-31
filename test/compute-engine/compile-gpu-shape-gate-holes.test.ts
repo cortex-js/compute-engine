@@ -219,10 +219,10 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // WGSL §8.7 defines the mixed scalar/vector arithmetic operators, so this
     // is valid source and must not be "fixed".
     expect(w(['Mod', 1, V3])).toBe(
-      '(((1.0 % vec3f(1.0, 2.0, 3.0)) + vec3f(1.0, 2.0, 3.0)) % vec3f(1.0, 2.0, 3.0))'
+      '((((1.0) % (vec3f(1.0, 2.0, 3.0))) + (vec3f(1.0, 2.0, 3.0))) % (vec3f(1.0, 2.0, 3.0)))'
     );
     expect(w(['Mod', V3, 1])).toBe(
-      '(((vec3f(1.0, 2.0, 3.0) % 1.0) + 1.0) % 1.0)'
+      '((((vec3f(1.0, 2.0, 3.0)) % (1.0)) + (1.0)) % (1.0))'
     );
   });
 
@@ -326,7 +326,7 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
     expect(g(['Add', V3, W3])).toBe('vec3(1.0, 2.0, 3.0) + vec3(4.0, 5.0, 6.0)');
     expect(g(['Multiply', V3, 2])).toBe('2.0 * vec3(1.0, 2.0, 3.0)');
     expect(g(['Sin', V4])).toBe('sin(vec4(1.0, 2.0, 3.0, 4.0))');
-    expect(g(['Negate', V4])).toBe('(-vec4(1.0, 2.0, 3.0, 4.0))');
+    expect(g(['Negate', V4])).toBe('(-(vec4(1.0, 2.0, 3.0, 4.0)))');
     expect(g(['Mix', V3, W3, 0.5])).toBe(
       'mix(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), 0.5)'
     );

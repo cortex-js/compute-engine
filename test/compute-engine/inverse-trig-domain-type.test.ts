@@ -89,6 +89,9 @@ const LITERAL_CASES: [string, number, string][] = [
   ['Arcsec', -2, 'finite_real'],
   ['Arcsec', 0.5, 'finite_complex'],
   ['Arcsec', -0.5, 'finite_complex'],
+  // Mathematically `arcsec(0) = ~oo`, which IS a member of `complex`, but the
+  // evaluator currently yields NaN at 0 (`arcsec(0).N() → NaN`) and NaN is a
+  // member only of `number`. The claim must not exclude the produced value.
   ['Arcsec', 0, 'number'],
   ['Arccsc', 1, 'finite_real'],
   ['Arccsc', -2, 'finite_real'],
@@ -101,8 +104,11 @@ const LITERAL_CASES: [string, number, string][] = [
  * `[head, bare real symbol, `w ≥ 2`, `0 < v < 1`]`.
  *
  * The bare-symbol column is the JOIN: `finite_complex` for a head with no real
- * pole, `complex` for one whose pole value is `±∞` (`complex` admits
- * `non_finite_number`), `number` for one whose pole value is NaN.
+ * pole, `complex` for one whose pole value is `±∞` (a member of `complex` —
+ * D10 lattice), `number` when the pole value may be NaN.
+ * (Arcsec/Arccsc join to `number`: their pole value is mathematically `~oo`,
+ * but the evaluator produces NaN at 0, so `complex` would exclude a value the
+ * head actually produces.)
  */
 const SYMBOLIC_CASES: [string, string, string, string][] = [
   ['Arcsin', 'finite_complex', 'finite_complex', 'finite_real'],

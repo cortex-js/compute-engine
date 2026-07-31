@@ -38,7 +38,7 @@ describe('WGSL COMPILATION', () => {
       // target emits `((a % b) + b) % b` to convert truncated → floored.
       const expr = ce.expr(['Mod', 'x', 'y']);
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`(((x % y) + y) % y)`);
+      expect(code).toMatchInlineSnapshot(`((((x) % (y)) + (y)) % (y))`);
     });
   });
 

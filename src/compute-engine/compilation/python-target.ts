@@ -18,6 +18,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { requirePrimitiveElements } from './javascript-target.js';
 
 /**
@@ -51,6 +52,17 @@ function compilePythonEquality(
 ): string {
   if (args.length < 2)
     throw new Error(`${kind}: expected at least two arguments`);
+  // A collection operand has no faithful lowering here: `abs(a - b)` raises on
+  // a plain Python list, and an n-ary chain over ndarrays conjoins arrays with
+  // the scalar `and` (a ValueError). What collection equality SHOULD mean on
+  // this target is an open design ruling, so decline rather than emit code that
+  // raises under `success: true`.
+  if (args.some(isPyCollectionOperand))
+    throw new Error(
+      `${kind}: a collection operand does not compile — collection equality ` +
+        `semantics are not yet implemented on the Python target. ` +
+        `Fail closed (D6).`
+    );
   const tol = args[0]?.engine?.tolerance ?? 1e-10;
   const cmp = kind === 'Equal' ? '<=' : '>';
   const pair = (a: Expression, b: Expression): string =>
@@ -358,6 +370,30 @@ const PYTHON_OPERATORS: CompiledOperators = {
 function isPyCollectionOperand(e: Expression): boolean {
   const t = e.type;
   return t.matches('list') || t.matches('indexed_collection');
+}
+
+/**
+ * The statically-known tensor RANK of an operand, or `undefined` when its type
+ * does not pin one down.
+ *
+ * `.rank` is the engine's static rank — the length of the `dimensions` read off
+ * the type (`matrix` → 2, `vector<3>` → 1) — but it answers `0` both for a
+ * scalar and for a dimension-less list. A dimension-less `list<T>` whose
+ * element type is a NUMBER is still provably rank 1 (the `vector` spelling
+ * parses to `list<number>`), so that case is recovered here; everything else
+ * with no dimensions is reported as not statically known.
+ */
+function pyStaticRank(e: Expression): number | undefined {
+  const rank = e.rank;
+  if (rank > 0) return rank;
+  const t = e.type.type;
+  if (
+    typeof t === 'object' &&
+    t.kind === 'list' &&
+    isSubtype(t.elements, 'number')
+  )
+    return 1;
+  return undefined;
 }
 
 /**
@@ -684,11 +720,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Divide: (args, compile) => {
     if (args.length === 0) return '1';
     if (args.length === 1) return compile(args[0]);
-    if (args.length === 2) return `${compile(args[0])} / ${compile(args[1])}`;
+    // `compile()` emits sub-expressions without outer parentheses — wrap
+    // before splicing next to `/`.
+    if (args.length === 2)
+      return `(${compile(args[0])}) / (${compile(args[1])})`;
     // For more than 2 args, fold left
-    let result = compile(args[0]);
+    let result = `(${compile(args[0])})`;
     for (let i = 1; i < args.length; i++) {
-      result = `${result} / ${compile(args[i])}`;
+      result = `${result} / (${compile(args[i])})`;
     }
     return result;
   },
@@ -968,8 +1007,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Remainder: ([a, b], compile) => {
     if (a === null || b === null)
       throw new Error('Remainder: missing argument');
-    const ca = compile(a);
-    const cb = compile(b);
+    // `compile()` emits sub-expressions without outer parentheses, and
+    // `*`/`/` bind tighter than `+` — wrap before splicing.
+    const ca = `(${compile(a)})`;
+    const cb = `(${compile(b)})`;
     return `(${ca} - ${cb} * np.round(${ca} / ${cb}))`;
   },
 
@@ -1034,6 +1075,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args[0] == null) throw new Error('Norm: missing argument');
     if (args.length < 2) return `np.linalg.norm(${compile(args[0])})`;
     const p = args[1];
+    const rank = pyStaticRank(args[0]);
     if (isString(p)) {
       const ord: string | undefined = {
         Infinity: 'np.inf',
@@ -1044,7 +1086,53 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           `Norm: the norm type "${p.string}" has no numpy spelling. ` +
             `Fail closed (D6).`
         );
+      // `'fro'` is a MATRIX-only order: `np.linalg.norm(v, 'fro')` raises a
+      // ValueError on a 1-D input, so it may only be emitted for a statically
+      // rank-2 operand. A rank-1 or statically-unknown operand fails closed
+      // rather than compile "successfully" to code that raises at run time.
+      if (p.string === 'Frobenius' && rank !== 2)
+        throw new Error(
+          `Norm: the "Frobenius" norm type is matrix-only — ` +
+            `\`np.linalg.norm(v, 'fro')\` raises a ValueError unless the ` +
+            `operand is statically rank 2. Fail closed (D6).`
+        );
       return `np.linalg.norm(${compile(args[0])}, ${ord})`;
+    }
+    // Order 2 names a DIFFERENT norm on a matrix in each system: the
+    // interpreter's rank-2 branch treats `2` as the FROBENIUS norm
+    // (`library/linear-algebra.ts`), while `np.linalg.norm(m, 2)` is the
+    // SPECTRAL norm (largest singular value) — on `[[3,4],[5,12]]` that is
+    // 13.9283… vs 13.8806…, a silent wrong value. The two agree on a vector,
+    // so only a statically rank-2 operand is respelled `'fro'`. When the rank
+    // is not statically 1 or 2 there is no single numpy order that matches the
+    // interpreter for both ranks, so this fails closed (D6).
+    if (p.isSame(2)) {
+      if (rank === 2) return `np.linalg.norm(${compile(args[0])}, 'fro')`;
+      if (rank !== 1)
+        throw new Error(
+          `Norm: the order-2 norm of an operand whose rank is not statically ` +
+            `known has no numpy spelling — the interpreter's \`Norm(m, 2)\` is ` +
+            `the Frobenius norm ("fro"), but \`np.linalg.norm(m, 2)\` is the ` +
+            `spectral norm. Fail closed (D6).`
+        );
+    } else if (!isNumber(p) && !p.isInfinity) {
+      // The order is only known at RUN time, so the respelling above cannot be
+      // decided statically. On a matrix, substitute at run time so order 2
+      // still selects the Frobenius norm; when the rank is not statically known
+      // there is no faithful emission (a numeric order is fine on a vector, but
+      // that cannot be established here), so fail closed (D6).
+      if (rank === 2) {
+        const m = compile(args[0]);
+        const ord = compile(p);
+        return `np.linalg.norm(${m}, ('fro' if (${ord}) == 2 else (${ord})))`;
+      }
+      if (rank !== 1)
+        throw new Error(
+          `Norm: a run-time norm order over an operand whose rank is not ` +
+            `statically known has no numpy spelling — order 2 is the ` +
+            `Frobenius norm ("fro") in the interpreter but the spectral norm ` +
+            `in \`np.linalg.norm\`. Fail closed (D6).`
+        );
     }
     return `np.linalg.norm(${compile(args[0])}, ${compile(p)})`;
   },

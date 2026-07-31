@@ -863,10 +863,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Ln: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.cln(${compile(args[0])})`;
-    // Real operand, complex result (`a := -2` → `Ln(a)` is `finite_complex`):
-    // the parent emits `{re, im}` arithmetic, so `Math.log` — a `NaN` number —
-    // must not be the lowering. See `resultIsComplexValued`.
-    if (resultIsComplexValued('Ln', args))
+    // PROVABLY negative real operand, complex result (`Ln(-2)`, or `a := -2`
+    // → `Ln(a)` is `finite_complex`): the parent emits `{re, im}` arithmetic,
+    // so `Math.log` — a `NaN` number — must not be the lowering. An operand
+    // of merely UNKNOWN sign keeps the real kernel (pinned; see the
+    // `isComplexValued` Sqrt/Ln/Log carve-out, which makes the parent agree).
+    if (args[0]?.isNegative === true && resultIsComplexValued('Ln', args))
       return `_SYS.cln(${complexOperandCode(args[0], compile)})`;
     return `Math.log(${compile(args[0])})`;
   },
@@ -1545,13 +1547,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `Log(x)` is base 10; `Log(x, b)` is base `b`. `Log2`/`Log10`/`Lb`
   // canonicalize into this head, so this is the only place they are lowered.
   Log: (args, compile, target) => {
-    // Complex either because an operand is, or because the RESULT is (a real
-    // but negative argument: `a := -2` makes `Log(a)` `finite_complex`). Either
-    // way the enclosing expression reads `{re, im}`, so `Math.log10` — a `NaN`
-    // number — must not be the lowering. See `resultIsComplexValued`.
+    // Complex either because an operand is, or because the RESULT is complex
+    // from a PROVABLY negative argument (`Log(-2)`, or `a := -2` making
+    // `Log(a)` `finite_complex`). Either way the enclosing expression reads
+    // `{re, im}`, so `Math.log10` — a `NaN` number — must not be the
+    // lowering. An operand of merely UNKNOWN sign keeps the real kernel
+    // (pinned; the `isComplexValued` Sqrt/Ln/Log carve-out makes the parent
+    // agree on the real shape).
     if (
       args.some((a) => BaseCompiler.isComplexValued(a)) ||
-      resultIsComplexValued('Log', args)
+      (args.some((a) => a.isNegative === true) &&
+        resultIsComplexValued('Log', args))
     ) {
       const n = BaseCompiler.tempVar(target);
       const num = `const ${n} = _SYS.cln(${complexOperandCode(args[0], compile)});`;
@@ -2001,11 +2007,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (Number.isNaN(r)) return complexSqrtLiteral(c);
       return String(r);
     }
-    // The operand is real-emitted but the RESULT is typed complex (a symbol
-    // with an assigned negative value: `a := -2`). The enclosing expression
-    // reads `{re, im}` off this node, so `Math.sqrt` — which yields a `NaN`
-    // *number* there — would NaN-poison it. See `resultIsComplexValued`.
-    if (resultIsComplexValued('Sqrt', args))
+    // The operand is real-emitted but PROVABLY negative, so the result is
+    // complex (`a := -2` → `Sqrt(a)` is `finite_complex`). The enclosing
+    // expression reads `{re, im}` off this node, so `Math.sqrt` — which
+    // yields a `NaN` *number* there — would NaN-poison it. An operand of
+    // merely UNKNOWN sign keeps `Math.sqrt` (pinned; the `isComplexValued`
+    // Sqrt/Ln/Log carve-out makes the parent agree on the real shape).
+    if (args[0]?.isNegative === true && resultIsComplexValued('Sqrt', args))
       return `_SYS.csqrt(${complexOperandCode(args[0], compile)})`;
     return `Math.sqrt(${compile(args[0])})`;
   },
@@ -2025,8 +2033,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   PointZ: (args, compile) => compilePointComponent(args[0], 2, compile),
   Mod: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Mod: missing argument');
-    const ca = compile(a);
-    const cb = compile(b);
+    // `compile()` emits sub-expressions without outer parentheses (`x + 29`),
+    // and `%` binds tighter than `+` — wrap before splicing next to `%`.
+    const ca = `(${compile(a)})`;
+    const cb = `(${compile(b)})`;
     // For non-negative integers, plain % is correct Euclidean modulo
     if (
       BaseCompiler.isIntegerValued(a) &&
@@ -2043,9 +2053,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Remainder: ([a, b], compile) => {
     if (a === null || b === null)
       throw new Error('Remainder: missing argument');
-    return `(${compile(a)} - ${compile(b)} * Math.round(${compile(
-      a
-    )} / ${compile(b)}))`;
+    // `compile()` emits sub-expressions without outer parentheses, and
+    // `*`/`/` bind tighter than `+` — wrap before splicing.
+    const ca = `(${compile(a)})`;
+    const cb = `(${compile(b)})`;
+    return `(${ca} - ${cb} * Math.round(${ca} / ${cb}))`;
   },
 
   // No Subtract function handler — Subtract canonicalizes to Add+Negate.
@@ -2060,7 +2072,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (ca !== undefined && cb !== undefined && cb !== 0)
         return String(ca / cb);
       if (cb === 1) return compile(a);
-      return `(${compile(a)} / ${compile(b)})`;
+      // `compile()` emits sub-expressions without outer parentheses — wrap
+      // before splicing next to `/`.
+      return `((${compile(a)}) / (${compile(b)}))`;
     }
 
     if (ac && bc) {
@@ -2082,7 +2096,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (!BaseCompiler.isComplexValued(x)) {
       const c = tryGetConstant(x);
       if (c !== undefined) return String(-c);
-      return `(-${compile(x)})`;
+      return `(-(${compile(x)}))`;
     }
     return `_SYS.cneg(${compile(x)})`;
   },

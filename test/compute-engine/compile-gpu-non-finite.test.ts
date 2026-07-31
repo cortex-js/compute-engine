@@ -82,10 +82,11 @@ describe('GPU non-finite LITERALS route through the bit-pattern mechanism', () =
 
 describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () => {
   it('a `complex`-typed Sqrt folds to the complex principal value', () => {
-    // `Sqrt(negative)` is typed `complex`, so the enclosing emission is the
+    // `Sqrt(negative)` is typed complex (tightened to `finite_complex`
+    // 2026-07-31: √−5 = i√5 is finite), so the enclosing emission is the
     // vec2(re, im) complex codegen and the fold must agree with it — a scalar
     // NaN would be consumed as a real by the surrounding complex arithmetic.
-    expect(ce.box(['Sqrt', -5]).type.toString()).toBe('complex');
+    expect(ce.box(['Sqrt', -5]).type.toString()).toBe('finite_complex');
     expect(g(['Sqrt', -5])).toBe(`vec2(0.0, ${Math.sqrt(5)})`);
     expect(w(['Sqrt', -5])).toBe(`vec2f(0.0, ${Math.sqrt(5)})`);
     // …and it composes as a complex value.
