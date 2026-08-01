@@ -136,14 +136,75 @@ describe('Anonymous function with too many params', () => {
 });
 
 describe('Anonymous function with anonymous parameters', () => {
+  // f5/f6 are the `["Function", body]` spelling (no explicit parameter list);
+  // f8/f9 are the bare-expression shorthand. The two must agree: the
+  // anonymous parameters used by the body ARE the parameter list.
+  // These two snapshots read `11` until 0e8c11b9 replaced
+  // `canonicalFunctionExpression` (which derived the wildcard parameters from
+  // the body) with `canonicalFunctionLiteral`; they then absorbed the
+  // regression as `["Add", "_", 1]` — the literal had become a NULLARY
+  // function that never bound its argument.
   test('Anon Param: F5', () =>
-    expect(evaluate(['f5', 10])).toMatchInlineSnapshot(`["Add", "_", 1]`));
+    expect(evaluate(['f5', 10])).toMatchInlineSnapshot(`11`));
   test('Anon Param: F6', () =>
-    expect(evaluate(['f6', 10])).toMatchInlineSnapshot(`["Add", "_1", 1]`));
+    expect(evaluate(['f6', 10])).toMatchInlineSnapshot(`11`));
   test('Anon Param: F8', () =>
     expect(evaluate(['f8', 10])).toMatchInlineSnapshot(`11`));
   test('Anon Param: F9', () =>
     expect(evaluate(['f9', 10])).toMatchInlineSnapshot(`11`));
+
+  test('`["Function", body]` ≡ the bare shorthand, on every route', () => {
+    const ce = new ComputeEngine();
+    // A body with wildcards makes them the parameters...
+    expect(ce.box(['Apply', ['Function', ['Add', '_', 1]], 10]).evaluate().re).toBe(
+      11
+    );
+    expect(
+      ce.box(['Apply', ['Function', ['Add', '_1', '_2']], 3, 4]).evaluate().re
+    ).toBe(7);
+    // ...but a body with NO wildcard stays a nullary thunk (`["Function", 42]`
+    // and `["Function", ["Add", "x", 1]]` are not unary functions).
+    expect(ce.box(['Function', 42]).type.toString()).toBe(
+      '() -> finite_integer'
+    );
+    expect(ce.box(['Apply', ['Function', ['Add', 'x', 1]]]).evaluate().toString()).toBe(
+      'x + 1'
+    );
+  });
+
+  test('a wildcard lambda round-trips through its own serialization', () => {
+    // `toMathJson()` serializes a wildcard-parameter lambda by DROPPING the
+    // parameter list, so `["Function", body]` is the engine's OWN output and
+    // has to canonicalize back to the same lambda.
+    const ce = new ComputeEngine();
+    const f = ce.box(['Function', ['Greater', '_1', 5], '_1']);
+    const json = f.toMathJson();
+    expect(JSON.stringify(json)).toMatchInlineSnapshot(
+      `["Function",["Less",5,"_1"]]`
+    );
+    expect(ce.box(['Apply', ce.box(json as Expression), 7]).evaluate().symbol).toBe(
+      'True'
+    );
+  });
+
+  test('collection predicates accept the `["Function", body]` spelling', () => {
+    const ce = new ComputeEngine();
+    const xs: Expression = ['List', 5, 2, 10, 18];
+    const pred: Expression = ['Function', ['Greater', '_', 5]];
+    expect(ce.box(['CountIf', xs, pred]).evaluate().re).toBe(2);
+    expect(ce.box(['Position', xs, pred]).evaluate().toString()).toBe('[3,4]');
+    expect(ce.box(['Find', xs, pred]).evaluate().re).toBe(10);
+    expect(ce.box(['IndexWhere', xs, pred]).evaluate().re).toBe(3);
+    expect(
+      ce.box(['Filter', xs, ['Function', ['Less', '_', 10]]]).evaluate().toString()
+    ).toBe('[5,2]');
+    expect(ce.box(['Any', xs, ['Function', ['Greater', '_', 15]]]).evaluate().symbol).toBe(
+      'True'
+    );
+    expect(ce.box(['All', xs, ['Function', ['Greater', '_', 5]]]).evaluate().symbol).toBe(
+      'False'
+    );
+  });
 });
 
 describe('Currying', () => {

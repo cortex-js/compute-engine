@@ -338,9 +338,12 @@
 
 - **`Table` accepts tuple iterator specs.** `Table(k^2, (k, 1, 5))` and
   stepped/descending forms now work like the brace spelling `{k, 1, 5}`.
-  Note that for `Sum`/`Product`/`Integrate`/`D` the tuple spelling carries
-  only `(index, lower, upper)` — a fourth (step) element is silently
-  ignored there, so the stepped tuple form is `Table`-only for now.
+  The tuple and brace spellings are now interchangeable for every iterator
+  operator: the step in `(index, lower, upper, step)` is honored by
+  `Sum`/`Product` (`Sum(k, (k, 1, 10, 2))` → `25`, matching
+  `Sum(k, {k, 1, 10, 2})`), and a 4-element spec handed to `Integrate` — which
+  has no step slot — goes inert in both spellings instead of silently
+  computing a wrong (sign-flipped) definite integral.
 
 - **On-ramp guides for Python and Mathematica users.** Two new Cortex doc
   pages — `/cortex/from-python/` and `/cortex/from-mathematica/` — map

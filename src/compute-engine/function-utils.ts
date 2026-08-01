@@ -207,7 +207,7 @@ export function canonicalFunctionLiteral(
   // If this is a function literal, split the body and the parameters
   // For example, `["Function", ["Add", "x", 1], "x"]`
   if (isFunction(expr, 'Function'))
-    return canonicalFunctionLiteralArguments(expr.engine, expr.ops);
+    return canonicalFunctionLiteralOperands(expr.engine, expr.ops);
 
   //
   // 6/ Shorthand function literal,
@@ -216,18 +216,7 @@ export function canonicalFunctionLiteral(
   console.assert(expr.operator !== 'Function');
 
   const ce = expr.engine;
-  // Replace '_' with '_1'
-  let body = expr.subs({ _: '_1' });
-
-  // We need to extract the wildcards from the body. The wildcards can
-  // be `_`, `_1`, `_2`, etc.
-  let i = 1;
-  let params: Expression[] = [];
-  while (i < 10) {
-    if (body.has(`_${i}`))
-      params.push(body.engine.symbol(`_${i}`, { canonical: false }));
-    i++;
-  }
+  let [body, params] = anonymousParameters(expr);
 
   if (params.length === 0) {
     // There are no wildcards
@@ -245,6 +234,72 @@ export function canonicalFunctionLiteral(
   }
 
   return canonicalFunctionLiteralArguments(ce, [body, ...params]);
+}
+
+/**
+ * Canonicalize the operands of a `["Function", …]` literal — the body followed
+ * by its parameter list.
+ *
+ * This is `canonicalFunctionLiteralArguments` plus the anonymous-parameter
+ * rule, and it is what every route that canonicalizes a *user-written*
+ * `Function` literal must use (the `Function` operator's own `canonical`
+ * handler, and `canonicalFunctionLiteral` for a function-slot operand).
+ * Callers that synthesize a closure from a body and a known binder list (a
+ * `Match` arm, `D`) deliberately use `canonicalFunctionLiteralArguments`
+ * directly: their body's `_` is not a parameter.
+ *
+ * The rule: in `["Function", body]` — no explicit parameter list — anonymous
+ * parameters used by the body (`_`, `_1`, …) ARE the parameter list, exactly
+ * as in the shorthand spelling, so `["Function", ["Add", "_", 1]]` and
+ * `["Add", "_", 1]` denote the same lambda. Without it the literal becomes a
+ * NULLARY function that never binds its argument (`() ↦ _ + 1`), and
+ * `Filter(xs, ["Function", ["Less", "_", 10]])` throws instead of filtering.
+ *
+ * This form is also the engine's OWN serialization: `toMathJson()` emits a
+ * wildcard-parameter lambda by DROPPING the parameter list (see the `Function`
+ * case of `serializePrettyJsonFunction`), so `["Function", ["Greater", "_1", 5]]`
+ * has to round-trip back to the unary lambda it came from.
+ *
+ * A body with no wildcard keeps the literal nullary — `["Function", 42]` and
+ * `["Function", ["Add", "x", 1]]` are thunks, not unary functions.
+ *
+ * Regressed in 0e8c11b9, which replaced `canonicalFunctionExpression` (it
+ * derived the wildcard parameters from the body) with
+ * `canonicalFunctionLiteral`, whose `Function` branch forwarded the operands
+ * unchanged.
+ */
+export function canonicalFunctionLiteralOperands(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (ops.length === 1) {
+    const [body, params] = anonymousParameters(ops[0]);
+    if (params.length > 0)
+      return canonicalFunctionLiteralArguments(ce, [body, ...params]);
+  }
+  return canonicalFunctionLiteralArguments(ce, ops);
+}
+
+/**
+ * The anonymous ("wildcard") parameters `_`, `_1`, … `_9` that `expr` uses, in
+ * index order, together with the body in which the bare `_` has been
+ * normalized to `_1`. The parameter list is empty when the expression uses no
+ * wildcard — the caller then decides what the parameters are (the shorthand
+ * path falls back to the body's unknowns; the `["Function", body]` path keeps
+ * the literal nullary).
+ */
+function anonymousParameters(
+  expr: Expression
+): [body: Expression, params: Expression[]] {
+  // Replace '_' with '_1'
+  const body = expr.subs({ _: '_1' });
+
+  const params: Expression[] = [];
+  for (let i = 1; i < 10; i++)
+    if (body.has(`_${i}`))
+      params.push(body.engine.symbol(`_${i}`, { canonical: false }));
+
+  return [body, params];
 }
 
 /** Assuming that ops has the following form:

@@ -727,6 +727,14 @@ describe('CORTEX EXECUTE — error propagation', () => {
     expect(run('("a" + 1) |> IsError').value.symbol).toBe('True');
   });
 
+  test('`NaN === NaN` is True (total structural identity), `==` is False', () => {
+    // `===`/`Same` is total and structural, so it is reflexive on NaN. The
+    // Cortex route attaches `sourceOffsets` to each literal, which defeats
+    // the engine's interning of `NaN` — the answer must not depend on that.
+    expect(run('NaN === NaN').value.symbol).toBe('True');
+    expect(run('NaN == NaN').value.symbol).toBe('False');
+  });
+
   test('NaN does not short-circuit a pipe', () => {
     expect(run('NaN |> IsMissing').value.symbol).toBe('True');
     const { value } = run('let f = x |-> 99\nNaN |> f');

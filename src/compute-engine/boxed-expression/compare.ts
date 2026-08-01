@@ -340,6 +340,17 @@ export function same(
     const av = a.numericValue;
     const bv = b.numericValue;
     if (av === bv) return true;
+    // Two NaN literals are structurally the same number leaf, whether or not
+    // they happen to be the same interned object. `isSame` is a dedup/matching
+    // key and must stay an equivalence relation (reflexive on NaN), so it
+    // cannot inherit IEEE's `NaN !== NaN` — otherwise `NaN === NaN` in Cortex
+    // answers `True` or `False` depending only on whether the operands carried
+    // `sourceOffsets` metadata (which defeats interning). This mirrors the
+    // explicit NaN check in the primitive overload of `BoxedNumber.isSame`
+    // (#15). Tolerant `Equal` is unaffected and keeps IEEE semantics.
+    const aNaN = typeof av === 'number' ? Number.isNaN(av) : av.isNaN;
+    const bNaN = typeof bv === 'number' ? Number.isNaN(bv) : bv.isNaN;
+    if (aNaN || bNaN) return aNaN && bNaN;
     if (typeof av === 'number') {
       if (typeof bv === 'number') return av === bv;
       return bv.eq(av);

@@ -52,6 +52,60 @@ describe('Iterator-triple Sets in the iterator slot', () => {
     expect(evalStr('\\int_0^1 x^2 dx')).toBe('1/3');
   });
 
+  test('the tuple spelling carries the step, exactly like the Set spelling', () => {
+    // `canonicalIndexingSet`'s Tuple branch used to read only the first three
+    // operands, silently DROPPING a step: `Sum(k, (k,1,10,2))` answered 55
+    // (the unstepped sum) where `{k,1,10,2}` answered 25.
+    const both = (spec: (string | number)[], expected: string) => {
+      const [, ...rest] = spec;
+      for (const head of ['Set', 'Tuple', 'Triple']) {
+        if (head === 'Triple' && rest.length !== 3) continue;
+        expect(
+          ce.box(['Sum', 'k', [head, ...rest] as any] as any).evaluate().toString()
+        ).toBe(expected);
+      }
+    };
+    both(['_', 'k', 1, 10, 2], '25');
+    both(['_', 'k', 10, 1, -2], '30');
+    // The unstepped triple is unchanged.
+    both(['_', 'k', 1, 10], '55');
+
+    expect(
+      ce.box(['Product', 'k', ['Tuple', 'k', 1, 4, 2]]).evaluate().toString()
+    ).toBe(
+      ce.box(['Product', 'k', ['Set', 'k', 1, 4, 2]]).evaluate().toString()
+    );
+    expect(
+      ce.box(['Product', 'k', ['Tuple', 'k', 1, 4, 2]]).evaluate().re
+    ).toBe(3);
+  });
+
+  test('a 4-element integration spec goes inert in BOTH spellings', () => {
+    // Integration bounds have no step slot. The `Set` spelling was already
+    // unrecognized (→ indefinite integral); the `Tuple` spelling fell through
+    // `canonicalLimits`'s arity chain to `Limits(Nothing, Nothing, lo)` and
+    // produced a SIGN-FLIPPED `-1/3`.
+    const indefinite = ce
+      .box(['Integrate', ['Square', 'x'], ['Set', 'x', 0, 1, 5]])
+      .evaluate()
+      .toString();
+    expect(
+      ce
+        .box(['Integrate', ['Square', 'x'], ['Tuple', 'x', 0, 1, 5]])
+        .evaluate()
+        .toString()
+    ).toBe(indefinite);
+    expect(indefinite).toBe('int(x^2 dx)');
+    // The 3-element definite form is unchanged in both spellings.
+    for (const head of ['Set', 'Tuple'])
+      expect(
+        ce
+          .box(['Integrate', ['Square', 'x'], [head, 'x', 0, 1] as any])
+          .evaluate()
+          .toString()
+      ).toBe('1/3');
+  });
+
   test('malformed Set in the iterator slot keeps today’s behavior', () => {
     // First element not a symbol → not a triple → stays an error, not a guess.
     const j = ce.parse('\\mathrm{Sum}(i^2, \\{1, 2, 3\\})').json as unknown[];

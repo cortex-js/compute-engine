@@ -306,7 +306,9 @@ describe('FUNCTIONS', () => {
   it('should correctly serialize function expressions', () => {
     expect(check(['Function'])).toMatchInlineSnapshot(`() |-> "Nothing"`);
     expect(check(['Function', 1])).toMatchInlineSnapshot(`() |-> 1`);
-    expect(check(['Function', '_'])).toMatchInlineSnapshot(`() |-> _`);
+    // A body that uses anonymous parameters makes them the parameter list, so
+    // `["Function", "_"]` is the identity, not a nullary returning a free `_`.
+    expect(check(['Function', '_'])).toMatchInlineSnapshot(`(_) |-> _`);
 
     expect(check(['Function', 'x', 'x'])).toMatchInlineSnapshot(`(x) |-> x`);
 

@@ -653,4 +653,23 @@ describe('Same (Cortex `===`) — total structural identity', () => {
     expect(s('NaN', 'NaN')).toBe('True');
     expect(ce.box(['Equal', 'NaN', 'NaN']).evaluate().symbol).toBe('False');
   });
+
+  test('NaN identity does not depend on interning', () => {
+    // `"NaN"` and a bare `{num:"NaN"}` box to the interned `ce.NaN`, so
+    // `isSame` used to succeed by object identity alone. Attaching metadata
+    // (`sourceOffsets`, as the Cortex parser does) defeats interning and
+    // produced a *fresh* number literal — and `Same` then answered `False`,
+    // making the answer depend on provenance rather than on the value.
+    const nan = (offsets: [number, number]) =>
+      ({ num: 'NaN', sourceOffsets: offsets }) as any;
+    expect(s(nan([0, 3]), nan([8, 11]))).toBe('True');
+    expect(ce.box(nan([0, 3])).isSame(ce.box(nan([8, 11])))).toBe(true);
+    // ...and `Equal` still says `False` (IEEE, unchanged).
+    expect(
+      ce.box(['Equal', nan([0, 3]), nan([8, 11])]).evaluate().symbol
+    ).toBe('False');
+    // NaN is not the same as any other number leaf.
+    expect(s(nan([0, 3]), 1)).toBe('False');
+    expect(s(nan([0, 3]), 'PositiveInfinity')).toBe('False');
+  });
 });

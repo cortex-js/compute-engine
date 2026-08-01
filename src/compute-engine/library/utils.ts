@@ -1279,7 +1279,15 @@ export function canonicalLimitsSequence(
       // ["Hold", "x"]
       const fnOp = op as Expression &
         import('../global-types.js').FunctionInterface;
-      result.push(canonicalLimits(fnOp.ops, options) ?? ce.error('missing'));
+      // A 4-operand spec `(x, lo, hi, step)` is a *stepped* iterator, and
+      // integration bounds have no step slot. Leave it unrecognized — exactly
+      // as the `Set` spelling below does, which requires a proper triple — so
+      // the integral stays indefinite. Without this guard the operand fell
+      // through `canonicalLimits`'s arity chain, which left `index`/`lower` at
+      // `Nothing` and `upper` at its `ops[1]` initializer, yielding the
+      // nonsense `Limits(Nothing, Nothing, lo)` (and a sign-flipped result).
+      if (fnOp.ops.length <= 3)
+        result.push(canonicalLimits(fnOp.ops, options) ?? ce.error('missing'));
     } else if (op.operator === 'Set') {
       // Mathematica-style definite-integral bounds: `{x, lo, hi}`. POSITIONAL —
       // only recognized here, in the bounds slot. The `Set` is held (raw), so
@@ -1500,6 +1508,34 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     expr.operator === 'Single'
   ) {
     if (!isFunction(expr)) return undefined;
+    // The paren spelling of the Mathematica-style iterator set handled by the
+    // `Set` branch above: `(i, lo, hi)` and, with a step, `(i, lo, hi, step)`.
+    // The step operand MUST be read here — the branch used to look at the
+    // first three operands only, silently dropping it, so
+    // `Sum(k, (k, 1, 10, 2))` answered 55 while the equivalent
+    // `Sum(k, {k, 1, 10, 2})` answered 25. Mirror the `Set` branch exactly,
+    // including its arity guard, so the two spellings are interchangeable.
+    const tupleOps = expr.ops;
+    if (tupleOps.length > 4) return undefined;
+    if (tupleOps.length === 4) {
+      let idx = tupleOps[0];
+      if (isFunction(idx, 'Hold')) idx = idx.op1;
+      if (!isSymbol(idx)) return undefined;
+      if (
+        idx.symbol !== 'Nothing' &&
+        !ce.context.lexicalScope.bindings.has(idx.symbol)
+      )
+        ce.declare(idx.symbol, 'integer');
+      // With a step, use the Range/Element form: `Limits` has no step slot.
+      return ce.function('Element', [
+        idx.canonical,
+        ce.function('Range', [
+          tupleOps[1].canonical,
+          tupleOps[2].canonical,
+          tupleOps[3].canonical,
+        ]),
+      ]);
+    }
     index = expr.op1;
     lower = checkBound(expr.ops[1]?.canonical ?? null);
     upper = checkBound(expr.ops[2]?.canonical ?? null);

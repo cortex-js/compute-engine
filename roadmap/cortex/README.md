@@ -355,11 +355,15 @@ design decision or small feature, not a bug):
   (1) the **LaTeX** route `\mathrm{Sum}(i^2, (i, 1, 5))` hands the held
   spec over as `["Delimiter", ["Sequence", …]]`, not a `Tuple`, so tuple
   specs through LaTeX stay inert for all iterator operators (S);
-  (2) **`canonicalIndexingSet`'s Tuple branch silently drops a fourth
-  (step) element** — `Sum(k, (k, 1, 10, 2))` evaluates to `55` (the
-  unstepped 1..10 sum, not `25`), a silent-wrong-answer trap; decide
-  between supporting the step there (matching the `Set` branch and now
-  `Table`) or erroring on 4-element tuples (S–M).
+  (2) **`canonicalIndexingSet`'s Tuple branch silently dropped a fourth
+  (step) element** — RESOLVED 2026-07-31, by supporting the step there
+  (matching the `Set` branch and `Table`). `Sum(k, (k, 1, 10, 2))` now
+  evaluates to `25`, and `Product(k, (k, 1, 4, 2))` to `3`, identically to
+  the brace spelling. The same arity guard applies, so a 4-element spec
+  reaching `Integrate`'s bounds slot — which has no step — is left
+  unrecognized in both spellings (indefinite integral) rather than falling
+  through to the malformed `Limits(Nothing, Nothing, lower)` that had
+  produced a sign-flipped `-1/3` for `Integrate(x^2, (x, 0, 1, 5))`.
 - Cosmetic (open): a dictionary as the final program value renders as raw
   MathJSON (`{"dict":{…}}`) — engine `.toString()` has no dictionary case;
   small serializer item. And `let a = Nothing; a` renders as `a` — this is
