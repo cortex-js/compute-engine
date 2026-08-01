@@ -19,7 +19,7 @@ import {
 import {
   apply,
   canonicalFunctionLiteral,
-  canonicalFunctionLiteralArguments,
+  canonicalFunctionLiteralOperands,
   canonicalWithFreshPlaceholders,
 } from '../function-utils.js';
 
@@ -1159,8 +1159,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'current scope chain. When used inside a `Block`, the assignment is ' +
         'visible to subsequent statements in the block (sequential semantics).',
       lazy: true,
-      pure: false,
-      signature: '(symbol | expression, any) -> any',
+      // Mutates a binding that outlives the application: the `scope` label,
+      // assigned explicitly (the `pure: false` sugar it replaces would only
+      // have said "unclassified impurity"). Impure, but owing the random
+      // stream nothing — a surviving `Assign` must not pin a seed frame.
+      signature: '(symbol | expression, any) scope -> any',
       type: ([_symbol, value]) => value.type,
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return null;
@@ -1346,11 +1349,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'a string: "ok", "tautology", "contradiction", "not-a-predicate" ' +
         'or "internal-error".',
       lazy: true,
-      pure: false,
+      // Writes the assumptions of a scope that outlives the application: the
+      // `scope` label (see `Assign`).
       // A string, not a symbol: two of the outcomes ("not-a-predicate",
       // "internal-error") are not valid symbol names, so a symbol result
       // rendered as an invalid-symbol Error for exactly the failure cases.
-      signature: '(any) -> string',
+      signature: '(any) scope -> string',
       evaluate: (ops, { engine: ce }) => ce.string(ce.assume(ops[0])),
     },
 
@@ -1362,9 +1366,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'describe the definition, e.g. to declare a constant. With a value, ' +
         'evaluates to that value; otherwise evaluates to `Nothing`.',
       lazy: true,
-      pure: false,
+      // Introduces a binding in a scope that outlives the application: the
+      // `scope` label (see `Assign`).
       signature:
-        '(symbol, type: (string | symbol)?, value: any?, attributes: dictionary?) -> any',
+        '(symbol, type: (string | symbol)?, value: any?, attributes: dictionary?) scope -> any',
       // With a positional value operand, `Declare` evaluates to the value;
       // otherwise to `Nothing`. (A trailing dictionary operand is the
       // attributes bag, not a value.)
@@ -1770,7 +1775,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         `(${args.map((x) => x.type.type)}) -> ${body.type.type}`,
 
       canonical: (args, { engine }) =>
-        canonicalFunctionLiteralArguments(engine, args) ?? null,
+        canonicalFunctionLiteralOperands(engine, args) ?? null,
 
       evaluate: (_args) => {
         // "evaluating" a function literal is not the same as applying
@@ -1916,9 +1921,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         "parent's subsequent draws.",
         'Outside any frame, draws are live (non-deterministic).',
       ],
-      // Consumes draws from the frame's counter: not a pure expression.
+      // DELIMITS the seed frame rather than drawing from it: the runtime role
+      // is the kind-valued `frameProtocol` field, not the `random` label —
+      // that conflation is exactly what `docs/EFFECTS-MODEL.md` unpicks. The
+      // derived `drawsRandom` getter reads `frameProtocol === 'seed'`, so the
+      // pending-draw walk keeps working unchanged.
+      frameProtocol: 'seed',
+      // Its own Stage 1 effect set is `any` (via the `pure: false` sugar), not
+      // `{random}`: the effects of the HELD body are unknowable until Stage 2.
+      // Stage 2 replaces this with a bound of `{any}` plus a discharge of
+      // `{random}` on the body position, at which point
+      // `WithRandomSeed(42, Random())` computes the empty set.
       pure: false,
-      drawsRandom: true,
       // Hold the body: it must NOT evaluate before the frame exists.
       lazy: true,
       signature: '(finite_real | string, any) -> expression',
@@ -2182,11 +2196,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Random(Range(...)): an element of the range',
         'Random(xs): an element of the finite collection `xs`',
       ],
-      pure: false,
-      drawsRandom: true,
       // One plain signature: it accepts `Random()` and `Random(xs)`, and
-      // rejects `Random(5)` and `Random(5, 7)`.
-      signature: '((collection | set<real>)?) -> any',
+      // rejects `Random(5)` and `Random(5, 7)`. The `random` specifier is the
+      // effect set: it consumes draws from the ambient seeded stream, hence
+      // impure (the derived `pure`/`drawsRandom` getters read it).
+      signature: '((collection | set<real>)?) random -> any',
       type: ([domain]) => {
         if (domain === undefined) return 'finite_real';
         return randomElementType(domain);
@@ -2252,12 +2266,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           '`domain`, with replacement. `k` may exceed the size of the ' +
           'domain — that is what replacement means.',
       ],
-      pure: false,
-      drawsRandom: true,
       // `k` is typed `number`, not `integer`: a caller who computes a count
       // (`Count(xs)/2`, a fitted value, `4N` for a slider `N`) should not have
       // to round it first. It is rounded on evaluation.
-      signature: '(collection | set<real>, number) -> list<any>',
+      signature: '(collection | set<real>, number) random -> list<any>',
       type: ([domain, k]) => randomListType(domain, k),
       evaluate: ([domain, kOp], { engine: ce }) => {
         // Domain validity is checked FIRST, by KIND, before any `k` test.
@@ -2980,10 +2992,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `isPure` — and therefore `isConstant` — is true for a generator that
       // returns something different on every call, making it a candidate for
       // common-subexpression elimination and for the `Map` lowering gate.
-      // NOT `drawsRandom`: it samples `Math.random()` directly rather than the
-      // `WithRandomSeed` frame, so it owes that frame nothing.
-      pure: false,
-      signature: '() -> expression',
+      // The label is `entropy`, NOT `random`: it samples `Math.random()`
+      // directly rather than the `WithRandomSeed` frame, so it owes that frame
+      // nothing and nothing promises it replays (the three-shapes taxonomy of
+      // `docs/EFFECTS-MODEL.md`). `entropy` is an impurity, so `pure` is still
+      // false, but `drawsRandom` is false and the frame is never pinned.
+      signature: '() entropy -> expression',
       evaluate: (_ops, { engine }) => engine.expr(randomExpression()),
     },
   },

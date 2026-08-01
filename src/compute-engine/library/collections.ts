@@ -786,6 +786,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   //
   List: {
     description: 'An ordered collection of elements (a list).',
+    // A pure container: it STORES its operands, and no position ever invokes
+    // a function-valued one (`List(randomF)` is pure to build). See the
+    // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
+    invokes: false,
     complexity: 8200,
 
     signature: '(any*) -> list',
@@ -835,6 +839,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // substituted bodies over the (filtered) domain.
   Set: {
     description: 'An unordered collection of distinct elements (a set).',
+    // A pure container: it STORES its operands, and no position ever invokes
+    // a function-valued one (`List(randomF)` is pure to build). See the
+    // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
+    invokes: false,
     complexity: 8200,
 
     signature: '(any*) -> set',
@@ -992,6 +1000,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Tuple: {
     description: 'A fixed number of heterogeneous elements',
+    // A pure container: it STORES its operands, and no position ever invokes
+    // a function-valued one (`List(randomF)` is pure to build). See the
+    // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
+    invokes: false,
     complexity: 8200,
     signature: '(any*) -> tuple',
     type: (ops) => parseType(`tuple<${ops.map((op) => op.type).join(', ')}>`),
@@ -1158,6 +1170,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   KeyValuePair: {
     description: 'A key/value pair',
+    // A pure container: it STORES its operands, and no position ever invokes
+    // a function-valued one (`List(randomF)` is pure to build). See the
+    // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
+    invokes: false,
     complexity: 8200,
     signature: '(key: string, value: any) -> tuple<string, unknown>',
     type: ([_key, value]) => parseType(`tuple<string, ${value.type}>`),
@@ -1212,6 +1228,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Single: {
     description: 'A tuple with a single element',
+    // A pure container: it STORES its operands, and no position ever invokes
+    // a function-valued one (`List(randomF)` is pure to build). See the
+    // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
+    invokes: false,
     complexity: 8200,
     signature: '(value: any) -> tuple<any>',
     type: ([value]) => parseType(`tuple<${value.type}>`),
@@ -1220,6 +1240,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Pair: {
     description: 'A tuple of two elements',
+    // A pure container: it STORES its operands, and no position ever invokes
+    // a function-valued one (`List(randomF)` is pure to build). See the
+    // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
+    invokes: false,
     complexity: 8200,
     signature: '(first: any, second: any) -> tuple<any, any>',
     type: ([first, second]) =>
@@ -1229,6 +1253,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Triple: {
     description: 'A tuple of three elements',
+    // A pure container: it STORES its operands, and no position ever invokes
+    // a function-valued one (`List(randomF)` is pure to build). See the
+    // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
+    invokes: false,
     complexity: 8200,
     signature: '(first: any, second: any, third: any) -> tuple<any, any, any>',
     type: ([first, second, third]) =>
@@ -4687,12 +4715,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Wrap the call in `WithRandomSeed(seed, ...)` to make it deterministic.',
     complexity: 8200,
     // `RandomShuffle(xs)` draws from the engine stream, so the operator must
-    // declare itself impure (as `Random` does). Without this, `isPure` — and
-    // therefore `isConstant` — is true for a shuffle of a literal list, and
-    // the `pure: false` backstop in `map-auto-compile.ts` does not gate it.
-    pure: false,
-    drawsRandom: true,
-    signature: '(indexed_collection) -> indexed_collection',
+    // declare the `random` label (as `Random` does) — which makes it impure.
+    // Without it, `isPure` — and therefore `isConstant` — is true for a
+    // shuffle of a literal list, and the impurity backstop in
+    // `map-auto-compile.ts` does not gate it.
+    signature: '(indexed_collection) random -> indexed_collection',
     // The result always rebuilds as a `List` (see `evaluate`), so the static
     // type must be `list<elt>`, not the source's (possibly indexed/Range) type.
     type: ([xs]) =>

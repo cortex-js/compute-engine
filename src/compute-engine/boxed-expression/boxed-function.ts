@@ -52,7 +52,10 @@ import {
 } from './type-guards.js';
 import { overloadArms, resolveOverload } from './overload.js';
 import { candidateShape } from './tensor-view.js';
-import type { NumericPrimitiveType } from '../../common/type/types.js';
+import type {
+  FunctionSignature,
+  NumericPrimitiveType,
+} from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
@@ -260,21 +263,28 @@ export class BoxedFunction
       // left untouched.)
       if (inferenceMode !== 'narrow' && isSubtype(oldSig.result, t))
         return true;
-      def.signature = new BoxedType(
-        {
-          kind: 'signature',
-          args: oldSig.args,
-          optArgs: oldSig.optArgs,
-          variadicArg: oldSig.variadicArg,
-          variadicMin: oldSig.variadicMin,
-          result:
-            inferenceMode === 'narrow'
-              ? narrow(oldSig.result, t)
-              : widen(oldSig.result, t),
-        },
-        this.engine._typeResolver
-      );
+      const nextSig: FunctionSignature = {
+        kind: 'signature',
+        args: oldSig.args,
+        optArgs: oldSig.optArgs,
+        variadicArg: oldSig.variadicArg,
+        variadicMin: oldSig.variadicMin,
+        result:
+          inferenceMode === 'narrow'
+            ? narrow(oldSig.result, t)
+            : widen(oldSig.result, t),
+      };
+      // The effect specifier is part of the arrow and is not re-derivable from
+      // the result-type inference: carry it across the rebuild.
+      if (oldSig.effects !== undefined) nextSig.effects = oldSig.effects;
+      def.signature = new BoxedType(nextSig, this.engine._typeResolver);
     }
+
+    // The signature OBJECT was replaced. Re-attach the definition's effect set
+    // so the arrow and the cached `_effects` the derived `pure`/`drawsRandom`
+    // getters read stay in lockstep — otherwise an inferred `random` lambda
+    // serializes pure the moment its result type is inferred.
+    def._resyncEffects();
 
     this.engine._generation += 1;
     // Signature inference mutates a SHARED operator definition in place: a

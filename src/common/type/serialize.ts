@@ -1,4 +1,5 @@
 import { NUMERIC_TYPES_SET } from './primitive.js';
+import { effectSetToString } from './effects.js';
 import type { NamedElement, NumericPrimitiveType, Type } from './types.js';
 
 // Binding tightness, ascending. A node is parenthesized when the context it is
@@ -206,7 +207,16 @@ export function typeToString(type: Type, precedence = 0): string {
           : `${namedElement(type.variadicArg)}+`
         : '';
       const argsList = [args, optArgs, varArg].filter((s) => s).join(', ');
-      result = `(${argsList}) -> ${typeToString(type.result)}`;
+      // The effect specifier slot. A pure signature (absent effect set) has an
+      // empty slot and serializes byte-identically to an unannotated one.
+      // An empty array is not a canonical effect set, but a hand-built
+      // signature may carry one: treat it as absent rather than emitting an
+      // empty (double-space) slot.
+      const effects =
+        type.effects === 'any' || (type.effects && type.effects.length > 0)
+          ? ` ${effectSetToString(type.effects)}`
+          : '';
+      result = `(${argsList})${effects} -> ${typeToString(type.result)}`;
       break;
 
     default:

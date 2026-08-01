@@ -709,9 +709,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     RandomPrime: {
       description:
         'Return a random prime. `RandomPrime(n)` draws a prime in [2, n]; `RandomPrime(m, n)` draws a prime in [m, n]. Undefined if the range contains no prime.',
-      pure: false,
-      drawsRandom: true,
-      signature: '(integer, integer?) -> integer',
+      // Draws from the ambient seeded stream: the `random` label.
+      signature: '(integer, integer?) random -> integer',
       type: () => 'finite_integer',
       examples: ['RandomPrime(100)  // e.g. 47'],
       evaluate: ([aOp, bOp], { engine: ce }) => {

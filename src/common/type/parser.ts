@@ -28,8 +28,9 @@ import {
   ArgumentNode,
   DimensionNode,
 } from './ast-nodes.js';
-import { TypeResolver } from './types.js';
+import { EffectLabel, EffectSet, TypeResolver } from './types.js';
 import { PRIMITIVE_TYPES_SET } from './primitive.js';
+import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 
 /**
  * BNF grammar for the type parser:
@@ -62,7 +63,20 @@ import { PRIMITIVE_TYPES_SET } from './primitive.js';
 
 (* --- Function Signatures --- *)
 
-<function_signature> ::= <arguments> " -> " <type>
+<function_signature> ::= <arguments> ( " " <effects> )? " -> " <type>
+
+(* The effect specifier slot. It exists ONLY between the closing paren of the
+   (mandatorily parenthesized) argument list and its arrow, so it is
+   positionally isolated: an identifier there can only be an effect label.
+   An empty slot means "pure" — absent and empty are the same state, and the
+   empty specifier LIST is unwritable. Labels may be written in any order;
+   the canonical (serialized) order is alphabetical. `any` is exclusive, a
+   repeated label is an error, and `!` is reserved for the future complement
+   form (a parse error today). See `docs/EFFECTS-MODEL.md`. *)
+<effects> ::= "any" | <effect_label> ( " " <effect_label> )*
+
+<effect_label> ::= "console" | "entropy" | "environment" | "fs_read"
+                 | "fs_write" | "network" | "random" | "scope" | "time"
 
 <arguments> ::= "()"
               | "(" <argument_list>? ")"
@@ -298,6 +312,16 @@ export class Parser {
         this.error(
           'Function signatures must be enclosed in parentheses',
           'For example `(x: number) -> number`'
+        );
+      } else if (
+        this.current.type === 'IDENTIFIER' &&
+        isEffectLabel(this.current.value)
+      ) {
+        // An effect specifier slot only exists after a *parenthesized*
+        // argument list, so `real random -> real` is a naked signature.
+        this.error(
+          'Function signatures must be enclosed in parentheses',
+          'For example `(real) random -> real`'
         );
       } else if (this.current.type === '(') {
         // Check if this looks like invalid syntax like set(integer) or collection(integer)
@@ -558,12 +582,88 @@ export class Parser {
       this.advance();
     }
 
-    // After exiting, we've consumed the matching ')'. Check for '->'
+    // After exiting, we've consumed the matching ')'. Skip over an effect
+    // specifier slot (bare identifiers, or a reserved `!`) before checking for
+    // '->'. The slot's contents are validated in `parseEffectSpecifiers()`;
+    // here we only need to know whether an arrow follows. If it does not, the
+    // fall-through (group/tuple) parse produces the same diagnostic it always
+    // has for a stray token after `)`.
+    while (
+      (this.current as Token).type === 'IDENTIFIER' ||
+      (this.current as Token).type === '!'
+    )
+      this.advance();
+
     const isSignature = (this.current as Token).type === '->';
 
     this.lexer.restoreState(savedLexerState);
     this.current = savedCurrent;
     return isSignature;
+  }
+
+  /**
+   * Parse the effect specifier slot: bare, space-separated labels between the
+   * closing paren of the argument list and the `->` (the Swift specifier-slot
+   * placement). Returns `undefined` for an empty slot — a pure signature.
+   *
+   * The slot is positionally isolated, so an identifier here can only be an
+   * effect label: every rule below fails closed.
+   */
+  private parseEffectSpecifiers(): EffectSet | undefined {
+    // Fast path: the overwhelmingly common (pure) case allocates nothing.
+    if (this.current.type !== 'IDENTIFIER' && this.current.type !== '!')
+      return undefined;
+
+    let sawAny = false;
+    const labels: EffectLabel[] = [];
+
+    while (this.current.type === 'IDENTIFIER' || this.current.type === '!') {
+      if (this.current.type === '!') {
+        this.error(
+          'The `!` effect complement form is reserved and not yet supported',
+          'Enumerate the effect labels instead, for example `(real) console scope -> real`'
+        );
+      }
+
+      const token = this.current;
+      const name = token.value;
+      this.advance();
+
+      if (name === 'any') {
+        if (labels.length > 0 || sawAny)
+          this.errorAtToken(
+            token,
+            '`any` cannot be combined with other effect labels',
+            'Use `any` alone to mean "unknown effects"'
+          );
+        sawAny = true;
+        continue;
+      }
+
+      if (sawAny)
+        this.errorAtToken(
+          token,
+          '`any` cannot be combined with other effect labels',
+          'Use `any` alone to mean "unknown effects"'
+        );
+
+      if (!isEffectLabel(name))
+        this.errorAtToken(
+          token,
+          `Unknown effect label \`${name}\``,
+          `The effect labels are ${EFFECT_LABELS.join(', ')}`
+        );
+
+      if (labels.includes(name))
+        this.errorAtToken(token, `Duplicate effect label \`${name}\``);
+
+      labels.push(name);
+    }
+
+    if (sawAny) return 'any';
+    // The slot only exists when a label was read, so `labels` is non-empty
+    // here: absent and empty are the same state.
+    return labels.sort();
   }
 
   private parseFunctionSignature(): FunctionSignatureNode | undefined {
@@ -587,6 +687,9 @@ export class Parser {
 
       this.expect(')');
     }
+
+    // The effect specifier slot, between the argument list and the arrow
+    const effects = this.parseEffectSpecifiers();
 
     // We know '->' is present from the lookahead
     this.expect('->');
@@ -617,6 +720,7 @@ export class Parser {
 
     return this.createNode<FunctionSignatureNode>('function_signature', {
       arguments: args,
+      effects,
       returnType,
     });
   }

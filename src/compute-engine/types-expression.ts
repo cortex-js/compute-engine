@@ -9,7 +9,7 @@ import type {
   MathJsonSymbol,
   MathJsonDictionaryObject,
 } from '../math-json.js';
-import type { Type, TypeString } from '../common/type/types.js';
+import type { EffectSet, Type, TypeString } from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { NumericValue } from './numeric-value/types.js';
 import type { BigNum } from './numerics/types.js';
@@ -142,6 +142,9 @@ type OperatorDefinitionFlags = {
   idempotent: boolean;
   involution: boolean;
   pure: boolean;
+  effects: EffectSet | undefined;
+  frameProtocol: 'seed' | undefined;
+  invokes: boolean;
   drawsRandom: boolean;
   readsRandomFrame: boolean;
 };
@@ -204,6 +207,9 @@ interface BoxedOperatorDefinition
   ) => Expression;
   compile?: OperatorCompileHandler;
   update(def: unknown): void;
+  /** Re-attach the definition's effect set to its signature after the
+   * signature object was replaced by type inference. @internal */
+  _resyncEffects(): void;
 }
 
 type BoxedDefinition =

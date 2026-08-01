@@ -928,9 +928,12 @@ surface):
   signature string) is the precise surface; if it and legacy flags are both
   given and disagree, **registration errors** — never silent precedence.
 - **As readable state, the flags become derived getters**: `pure` ≙ no
-  impurity label; `drawsRandom` ≙ `random ∈ effects ∨ frameProtocol` (with
-  `any` reporting conservatively for both). Every existing consumer keeps
-  working.
+  impurity label; `drawsRandom` ≙ `random` **explicitly** `∈ effects ∨
+  frameProtocol`. `any` reports conservatively for `pure` (impure) but does
+  **not** satisfy `drawsRandom`: frame participation requires explicit
+  declaration, per the `any` ruling under "Labels and lattice" — unknown is
+  *impure* for `isPure` yet *not* frame-relevant for the walk, which is the
+  shipped `?? false` semantics. Every existing consumer keeps working.
 - `inferLambdaFlags` stops writing `this.pure`/`this.drawsRandom` and
   stamps the inferred effect set on the definition's signature; the getters
   make that transparent.
@@ -1275,7 +1278,16 @@ Each stage is useful without the next; per-stage pinning tests named.
   `test/common/type/effects.test.ts` (grammar round-trip incl. every
   malformed form; subtype partial order incl. pairwise-incomparable
   singletons), extension of `user-function-purity.test.ts` (getters,
-  truth-table conflicts).
+  truth-table conflicts). *Mixed-body draws (resolved, 2026-07-31)*: a
+  lambda body mixing an `{any}` head (legacy `pure: false` declaration)
+  with an explicit draw still infers `{any}` — the top absorbs — but the
+  inference RETAINS the frame participation it positively observed in an
+  internal definition bit that survives the collapse, and the derived
+  `drawsRandom` reads it. Such a body therefore pins its frame, at Stage 0
+  parity. `{any}` alone still never pins: only an observed draw does. The
+  bit is inference-only, is never set by a declaration, and dissolves into
+  Stage 2's `effectsOf` — the lattice gains no carrier for "definitely
+  draws *and* unknown else".
 - **Stage 2 — contracts + runtime channel**: the shared literal-
   construction seam + guard test; literal-boundary inference;
   annotated-parameter contribution; call-boundary and definition-annotation

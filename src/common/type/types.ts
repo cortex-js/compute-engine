@@ -102,12 +102,54 @@ export type NamedElement = {
   type: Type;
 };
 
+/**
+ * An effect label: a member of a closed, engine-versioned enumeration.
+ *
+ * Each label carries fixed metadata (impurity, observation vs action, frame
+ * kind, handler-backed); consumers key on that metadata, never on the label
+ * name. See `docs/EFFECTS-MODEL.md`.
+ *
+ * The labels bear no implication relations to each other: the order on effect
+ * sets is plain powerset inclusion, so the singletons are pairwise
+ * incomparable (in particular `fs_write` does not imply `fs_read`).
+ */
+export type EffectLabel =
+  | 'console'
+  | 'entropy'
+  | 'environment'
+  | 'fs_read'
+  | 'fs_write'
+  | 'network'
+  | 'random'
+  | 'scope'
+  | 'time';
+
+/**
+ * The effect set carried by a signature's arrow.
+ *
+ * - `'any'` is the distinguished **top**: "unknown effects". Under union it
+ *   absorbs, and no finite bound admits it.
+ * - Otherwise a **non-empty**, duplicate-free, alphabetically sorted list of
+ *   labels.
+ *
+ * "No effect set" and "the empty set" are the **same state**: an absent
+ * (`undefined`) `effects` field. An empty array is never a valid value — use
+ * `normalizeEffectSet()` to build one.
+ */
+export type EffectSet = 'any' | EffectLabel[];
+
 export type FunctionSignature = {
   kind: 'signature';
   args?: NamedElement[];
   optArgs?: NamedElement[];
   variadicArg?: NamedElement;
   variadicMin?: 0 | 1; // If variadicArg is present, this indicates whether it can be empty or not
+  /** The latent effects of applying this function.
+   *
+   * Absent means **pure** (the empty set) — the two are the same state, and
+   * the pure signature serializes with an empty specifier slot, exactly as an
+   * unannotated signature always has. */
+  effects?: EffectSet;
   result: Type;
 };
 
@@ -297,10 +339,14 @@ export type Type =
  *
  * <named_tuple_elements> ::= <name> <type> ("," <name> <type>)*
  *
- * <signature> ::=  <arguments> " -> " <type>
+ * <signature> ::=  <arguments> (" " <effects>)? " -> " <type>
+ *
+ * <effects> ::= "any" | <effect-label> (" " <effect-label>)*
+ *
+ * <effect-label> ::= "console" | "entropy" | "environment" | "fs_read"
+ *            | "fs_write" | "network" | "random" | "scope" | "time"
  *
  * <arguments> ::= "()"
- *            | <argument>
  *            | "(" <argument-list> ")"
  *
  * <argument> ::= <type>
@@ -364,6 +410,9 @@ export type Type =
  * - `"(number, y:number?) -> number"` -- a signature with an optional named argument (can have several optional arguments, at the end)
  * - `"(number, number+) -> number"` -- a signature with a rest argument (can have only one, and no optional arguments if there is a rest argument).
  * - `"() -> number"` -- a signature with an empty argument list
+ * - `"(number) random -> number"` -- a signature that may draw from the seeded random stream
+ * - `"(number) random scope -> number"` -- a signature with two effect labels
+ * - `"(number) any -> number"` -- a signature with unknown effects
  * - `"number | boolean"` -- a union type
  * - `"(x: number) & (y: number)"` -- an intersection type
  * - `"number | ((x: number) & (y: number))"` -- a union type with an intersection type

@@ -21,6 +21,7 @@ import type {
   RecordType,
 } from './types.js';
 import { isValidPrimitiveType, NUMERIC_TYPES_SET } from './primitive.js';
+import { normalizeEffectSet } from './effects.js';
 
 /**
  * Reduce the input type
@@ -539,6 +540,11 @@ function reduceSignatureType(type: FunctionSignature): Type {
     optArgs: reducedOptArgs,
     variadicArg: reducedVarArg,
     variadicMin: reducedVarArg ? type.variadicMin : undefined,
+    // Canonicalize the effect set (sorted, de-duplicated; an empty set becomes
+    // `undefined`, since absent and empty are the same state). Nothing is
+    // allocated for a pure signature — the overwhelmingly common case.
+    effects:
+      type.effects === undefined ? undefined : normalizeEffectSet(type.effects),
     result: reducedResult,
   });
 }

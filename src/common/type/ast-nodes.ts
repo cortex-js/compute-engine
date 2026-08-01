@@ -1,3 +1,5 @@
+import type { EffectSet } from './types.js';
+
 export interface ASTNode {
   kind: string;
   position: number;
@@ -20,6 +22,9 @@ export interface ArgumentNode extends ASTNode {
 export interface FunctionSignatureNode extends ASTNode {
   kind: 'function_signature';
   arguments: ArgumentNode[];
+  /** The effect specifier slot, between the argument list and the arrow.
+   * Absent when the slot is empty (a pure signature). */
+  effects?: EffectSet;
   returnType: TypeNode;
 }
 

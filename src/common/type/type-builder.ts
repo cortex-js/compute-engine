@@ -80,6 +80,9 @@ export class TypeBuilder implements ASTVisitor<Type> {
       result,
     };
 
+    // Absent means pure: only attach the field when the specifier slot was
+    // non-empty (an empty effect set is not representable).
+    if (node.effects !== undefined) signature.effects = node.effects;
     if (optArgs.length > 0) signature.optArgs = optArgs;
     if (variadicArg) {
       signature.variadicArg = variadicArg;

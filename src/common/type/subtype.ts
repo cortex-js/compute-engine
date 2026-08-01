@@ -22,6 +22,7 @@ import type {
   TypeString,
 } from './types.js';
 import { parseType } from './parse.js';
+import { isEffectSubset } from './effects.js';
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
@@ -844,6 +845,14 @@ export function isSubtype(
   // Handle function signatures
   //
   if (lhs.kind === 'signature' && rhs.kind === 'signature') {
+    // Covariant in the effect set, by subset inclusion: `(real) -> real` <:
+    // `(real) random -> real` <: `(real) any -> real`. Absent is the empty
+    // set (pure), below everything; `any` is the top. Singletons are pairwise
+    // incomparable. The contravariant flip in argument position falls out of
+    // the argument rules below, which already flip. Stateless — `matches()`
+    // stays write-free.
+    if (!isEffectSubset(lhs.effects, rhs.effects)) return false;
+
     // Check the result match covariantly
     if (!isSubtype(lhs.result, rhs.result)) return false;
 

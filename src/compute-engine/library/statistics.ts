@@ -771,17 +771,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'RandomSample([1, 1, 2], 2) can return [1, 1]. Wrap the call in ' +
         '`WithRandomSeed(seed, ...)` to make it deterministic.',
       complexity: 8200,
-      // Impure for the same reason as `RandomShuffle`: it draws from the
-      // engine stream. Without this, `isConstant` is true for a sample of a
-      // literal list.
-      pure: false,
-      drawsRandom: true,
+      // Carries `random` for the same reason as `RandomShuffle`: it draws from
+      // the engine stream, hence impure. Without it, `isConstant` is true for
+      // a sample of a literal list.
       // `k` is typed `number`, not `integer`: a caller who computes a count
       // should not have to round it first (it is rounded on evaluation).
       // The domain gate is `indexed_collection` — an `Interval` and a `Set`
       // are invalid, while a lazy indexed view (`Filter` over a `Range`)
       // passes.
-      signature: '(indexed_collection, number) -> list',
+      signature: '(indexed_collection, number) random -> list',
       evaluate: ([xs, kOp], { engine: ce }) => {
         if (!xs.isIndexedCollection) return undefined;
         const n = xs.count;

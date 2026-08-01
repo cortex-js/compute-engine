@@ -1,5 +1,5 @@
 import type { OneOf } from '../common/one-of.js';
-import type { Type, TypeString } from '../common/type/types.js';
+import type { EffectSet, Type, TypeString } from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { LatexString } from './latex-syntax/types.js';
 import type {
@@ -1232,8 +1232,59 @@ export type OperatorDefinitionFlags = {
    * This information may be used to cache the value of expressions.
    *
    * **Default:** `true`
+   *
+   * As an **authoring input** this flag is sugar for an effect set, translated
+   * once at registration (see {@link OperatorDefinitionFlags.effects} and the
+   * truth table in `docs/EFFECTS-MODEL.md`, "One source of truth"). As
+   * **readable state on a boxed definition** it is a *derived* getter: "no
+   * impurity label is present in the operator's effect set".
    */
   pure: boolean;
+
+  /**
+   * The latent effects of applying this operator — the precise surface the
+   * `pure` / `drawsRandom` flags are sugar for. See `docs/EFFECTS-MODEL.md`.
+   *
+   * `'any'` is the top ("unknown effects"); an array of labels is a finite
+   * set; absent means **pure** (the empty set). May equivalently be written in
+   * the specifier slot of a signature string —
+   * `'(integer) random -> integer'`.
+   *
+   * Giving both this field (or an effect-annotated signature) and legacy
+   * `pure` / `drawsRandom` flags that disagree is a **registration error**,
+   * never silent precedence.
+   */
+  effects: EffectSet | undefined;
+
+  /**
+   * The **frame protocol** this operator delimits — the runtime role that is
+   * NOT an effect of its own (a delimiter absorbs the effects of its body
+   * rather than emitting them). Kind-valued, not boolean: `'seed'` — the
+   * random-stream frame delimited by `WithRandomSeed` — is the only kind
+   * today, and a future `WithClock` would name its own.
+   *
+   * Consumed by the frame kind's obligation protocol (for `'seed'`: the
+   * pending-draw walk in `library/core.ts`), and by the derived
+   * {@link OperatorDefinitionFlags.drawsRandom} getter.
+   *
+   * **Default:** none
+   */
+  frameProtocol: 'seed' | undefined;
+
+  /**
+   * If `false`, **no operand position invokes a function-valued operand**: the
+   * operator merely stores the value (`List`, `Tuple`, the structural
+   * constructors). Such a position contributes only the effects of *producing*
+   * the operand, never the operand's latent (arrow) effects — `List(randomF)`
+   * is pure to build, and the effect surfaces at whatever application later
+   * invokes an element.
+   *
+   * Recorded at Stage 1; consumed by the projection rule (Stage 2). The
+   * per-position form of this metadata arrives with that consumer.
+   *
+   * **Default:** `true`
+   */
+  invokes: boolean;
 
   /** If `true`, evaluating this operator consumes draws from the engine's
    * random stream (`Random`, `RandomShuffle`, …, and `WithRandomSeed`, which
@@ -1246,6 +1297,10 @@ export type OperatorDefinitionFlags = {
    * stream.
    *
    * **Default:** `false`
+   *
+   * As an **authoring input** this flag is sugar for the `random` effect
+   * label. As **readable state on a boxed definition** it is a *derived*
+   * getter: `random ∈ effects ∨ frameProtocol === 'seed'`.
    */
   drawsRandom: boolean;
 
@@ -1261,6 +1316,11 @@ export type OperatorDefinitionFlags = {
    * prevents for `Random`. It must not be spelled `drawsRandom: true`, which
    * would additionally make the estimator consume frame indices and shift
    * every sibling draw.
+   *
+   * A **peer runtime field, untouched by the effect-flag migration**: an
+   * estimator's nondeterminism is confined below its reported error bound, so
+   * it is approximation error, not an effect (the noise-floor convention). It
+   * is neither translated to a label nor derived from one.
    *
    * An estimator that COMPLETED owes the frame nothing; its node is gone, so
    * the gate never sees it.
@@ -1406,4 +1466,10 @@ export interface BoxedOperatorDefinition
 
   /** @internal */
   update(def: OperatorDefinition): void;
+
+  /** Re-attach the definition's effect set to its signature after the
+   * signature object was REPLACED by type inference. The two are one source of
+   * truth and must never disagree.
+   * @internal */
+  _resyncEffects(): void;
 }
