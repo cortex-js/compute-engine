@@ -68,17 +68,16 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 (* The effect specifier slot. It exists ONLY between the closing paren of the
    (mandatorily parenthesized) argument list and its arrow, so it is
    positionally isolated: an identifier there can only be an effect label.
-   An empty slot means "pure" — absent and empty are the same state, and the
+   An empty slot means "pure" — absent and empty are the same set, and the
    empty specifier LIST is unwritable. Labels may be written in any order;
    the canonical (serialized) order is alphabetical. `any` is exclusive, a
    repeated label is an error, and `!` is reserved for the future complement
    form (a parse error today).
-   `pure` is accepted AUTHORING sugar for the empty set — exclusive with every
-   label and with `any`, not repeatable — and is never serialized: the
-   canonical spelling of a pure arrow is the empty slot. It parses to the same
-   `Type` as the bare form; the "the author wrote `pure`" fact travels to the
-   definition boundary as AST provenance (`FunctionSignatureNode.effectsStated`).
-   See `docs/EFFECTS-MODEL.md`. *)
+   `pure` is the keyword for the explicitly STATED empty set — exclusive with
+   every label and with `any`, not repeatable. It builds `effects: []`, the
+   same set as the bare arrow but a distinct spelling: it serializes back as
+   ` pure`, so an explicit purity contract survives a round trip (ruled
+   2026-08-01). See `docs/EFFECTS-MODEL.md`. *)
 <effects> ::= "pure" | "any" | <effect_label> ( " " <effect_label> )*
 
 <effect_label> ::= "console" | "entropy" | "environment" | "fs_read"
@@ -612,22 +611,18 @@ export class Parser {
    * closing paren of the argument list and the `->` (the Swift specifier-slot
    * placement).
    *
-   * Returns the effect set the slot denotes plus whether the author WROTE a
-   * specifier: an empty slot is `{ effects: undefined, stated: false }`, the
-   * `pure` keyword is `{ effects: undefined, stated: true }` — the same
-   * (empty) set, explicitly stated. `pure` is authoring sugar only: it is
-   * never serialized, and the built `Type` is byte-identical to the bare form.
+   * Returns the effect set the slot denotes: `undefined` for an EMPTY slot
+   * (effects unstated), `[]` for the `pure` keyword — the same (empty) set,
+   * explicitly stated, and the only spelling that serializes back as ` pure`.
    *
    * The slot is positionally isolated, so an identifier here can only be an
    * effect label (or `any`/`pure`): every rule below fails closed.
    */
-  private parseEffectSpecifiers(): {
-    effects: EffectSet | undefined;
-    stated: boolean;
-  } {
-    // Fast path: the overwhelmingly common (pure) case allocates nothing.
+  private parseEffectSpecifiers(): EffectSet | undefined {
+    // Fast path: the overwhelmingly common (unannotated) case allocates
+    // nothing.
     if (this.current.type !== 'IDENTIFIER' && this.current.type !== '!')
-      return { effects: undefined, stated: false };
+      return undefined;
 
     let sawAny = false;
     let sawPure = false;
@@ -696,11 +691,13 @@ export class Parser {
       labels.push(name);
     }
 
-    if (sawPure) return { effects: undefined, stated: true };
-    if (sawAny) return { effects: 'any', stated: true };
+    // `pure` is the STATED empty set: representable, and serialization-
+    // distinct from the empty slot (`undefined`).
+    if (sawPure) return [];
+    if (sawAny) return 'any';
     // The slot only exists when a label was read, so `labels` is non-empty
-    // here: absent and empty are the same state.
-    return { effects: labels.sort(), stated: true };
+    // here.
+    return labels.sort();
   }
 
   private parseFunctionSignature(): FunctionSignatureNode | undefined {
@@ -726,7 +723,7 @@ export class Parser {
     }
 
     // The effect specifier slot, between the argument list and the arrow
-    const { effects, stated: effectsStated } = this.parseEffectSpecifiers();
+    const effects = this.parseEffectSpecifiers();
 
     // We know '->' is present from the lookahead
     this.expect('->');
@@ -758,7 +755,6 @@ export class Parser {
     return this.createNode<FunctionSignatureNode>('function_signature', {
       arguments: args,
       effects,
-      effectsStated,
       returnType,
     });
   }

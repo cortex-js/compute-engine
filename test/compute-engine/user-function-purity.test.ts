@@ -637,7 +637,15 @@ describe('The failures the inference prevents', () => {
  * > accordingly.
  */
 describe('Literals are inference boundaries', () => {
-  /** The effect specifier on an arrow, or `''` for a pure one. */
+  /**
+   * The effect specifier on an arrow, or `''` for a pure one.
+   *
+   * Reports the SET, so both spellings of ∅ — an absent specifier and the
+   * stated-pure `[]` — read `''` (decided 2026-08-01). A literal's arrow is
+   * always inference-produced and therefore never stated-pure anyway; the
+   * spelling distinction is pinned where it matters, on serialization
+   * (`declaredEffects`, and `test/common/type/effects.test.ts`).
+   */
   const specifier = (e: { type: { type: unknown } }) => {
     // Read the OUTER arrow's specifier off the type AST: a regex over the
     // serialized string is ambiguous when a parameter (or result) is itself
@@ -646,6 +654,25 @@ describe('Literals are inference boundaries', () => {
     if (typeof t === 'string' || t.kind !== 'signature') return '';
     return t.effects === 'any' ? 'any' : (t.effects ?? []).join(' ');
   };
+
+  it('an inferred pure literal keeps the UNSTATED spelling', () => {
+    // Inference never produces the stated-pure `[]`: a pure body's arrow is
+    // bare, and serializes byte-identically to how it always has.
+    const ce = new ComputeEngine();
+    const literal = ce.box(['Function', ['Add', 'x', 1], 'x']);
+    const t = literal.type.type as { effects?: unknown };
+    expect(t.effects).toBeUndefined();
+    expect(literal.type.toString()).not.toContain('pure');
+    // Even when the body APPLIES a stated-pure callback, whose `[]` the walk
+    // would otherwise union in.
+    ce.declare('purecb9m', { type: '(number) pure -> number' });
+    ce.assign('purecb9m', ce.box(['Function', ['Add', 'y', 1], 'y']));
+    const applier = ce.box(['Function', ['purecb9m', 'x'], 'x']);
+    expect(
+      (applier.type.type as { effects?: unknown }).effects
+    ).toBeUndefined();
+    expect(applier.type.toString()).not.toContain('pure');
+  });
 
   it('a literal that merely PRODUCES a drawing callback is pure', () => {
     // The spec's own example. The nested literal's `{random}` lives on the
@@ -777,7 +804,9 @@ describe('Dependency order: an unresolved named head infers `any`', () => {
       evaluate: ce.box(['Function', ['undeclared9y']]),
     } as any);
     const def = ce.lookupDefinition('trusted9x')!['operator'];
-    expect(def.effects).toBe(undefined);
+    // `effects: []` is the STATED empty set (ruled 2026-08-01) — stored as
+    // `[]`, the same set as `undefined` but the spelling that round-trips.
+    expect(def.effects).toEqual([]);
     expect(def.pure).toBe(true);
     expect(def.effectsDeclared).toBe(true);
   });
@@ -1195,9 +1224,10 @@ describe('The declared effects track (an explicit statement)', () => {
 
   //
   // `pure` in the specifier slot — an explicitly-stated EMPTY effect set. It
-  // is accepted authoring input only: the type it builds is identical to the
-  // bare form (`test/common/type/effects.test.ts`), and the statement travels
-  // to the definition as provenance.
+  // is the same SET as a bare arrow but a distinct spelling: the arrow carries
+  // `effects: []` and serializes back as ` pure` (ruled 2026-08-01,
+  // `test/common/type/effects.test.ts`), which is what makes the contract
+  // survive a serialize → re-declare round trip.
   //
   for (const [label, declare] of [
     [
@@ -1251,12 +1281,39 @@ describe('The declared effects track (an explicit statement)', () => {
       expect(ce.box('counter9w').evaluate().toString()).toBe('0');
     });
 
-    it(`the same contract still serializes with an EMPTY slot (${label})`, () => {
-      // `pure` is never emitted: the canonical spelling of a pure arrow is the
-      // empty slot, whichever way the author stated it.
+    it(`the contract serializes back as \`pure\` (${label})`, () => {
+      // REVERSED pin (ruled 2026-08-01): a stated-pure arrow used to serialize
+      // with an empty slot, deleting a token the author wrote and demoting the
+      // contract to the inferred track on re-declaration. It now round-trips —
+      // whichever way the author stated it, including `effects: []`.
       const ce = new ComputeEngine();
       declare(ce, 'pur9y');
-      expect(declaredEffects(ce, 'pur9y')).toBe('');
+      expect(declaredEffects(ce, 'pur9y')).toBe('pure');
+    });
+
+    it(`the contract survives a serialize → re-declare round trip (${label})`, () => {
+      // The end-to-end ask: regenerate the signature string, re-declare it on
+      // a FRESH engine, and the purity contract still rejects a drawing body.
+      const ce = new ComputeEngine();
+      declare(ce, 'pur9r');
+      const def = ce.lookupDefinition('pur9r')!;
+      const serialized = (
+        'operator' in def ? def.operator.signature : def.value.type
+      ).toString();
+      expect(serialized).toContain('pure');
+
+      const ce2 = new ComputeEngine();
+      ce2.declare('pur9r', serialized);
+      expect(() =>
+        ce2.assign(
+          'pur9r',
+          ce2.box(['Function', ['Add', 'n', ['Random']], 'n'])
+        )
+      ).toThrow(/do not cover/);
+      // ... while a pure body is still accepted.
+      expect(() =>
+        ce2.assign('pur9r', ce2.box(['Function', ['Add', 'n', 1], 'n']))
+      ).not.toThrow();
     });
   }
 
@@ -1277,6 +1334,35 @@ describe('The declared effects track (an explicit statement)', () => {
     expect(ce.lookupDefinition('pur9w')!['operator'].effectsDeclared).toBe(
       false
     );
+  });
+
+  it('a PRE-BOXED `ce.type(...)` states it too — the dissolved blind spot', () => {
+    // Before the 2026-08-01 ruling `pure` was a parse-time side channel, so an
+    // already-boxed `BoxedType` had lost it and a pre-boxed declaration
+    // silently fell back to the inferred track. The statement now lives in the
+    // type (`effects: []`), so every route reads it.
+    const ce = new ComputeEngine();
+    expect(ce.type('(n: number) pure -> number').toString()).toBe(
+      '(n: number) pure -> number'
+    );
+
+    ce.declare('pur9t', { type: ce.type('(n: number) pure -> number').type });
+    expect(ce.lookupDefinition('pur9t')!['value'].effectsDeclared).toBe(true);
+    ce.declare('counter9t', { type: 'number', value: 0 });
+    expect(() =>
+      ce.assign(
+        'pur9t',
+        ce.box([
+          'Function',
+          ['Block', ['Assign', 'counter9t', ['Add', 'counter9t', 1]], 'n'],
+          'n',
+        ])
+      )
+    ).toThrow(/do not cover/);
+
+    // ... and the bare pre-boxed form still does not.
+    ce.declare('pur9s', { type: ce.type('(n: number) -> number').type });
+    expect(ce.lookupDefinition('pur9s')!['value'].effectsDeclared).toBe(false);
   });
 
   it('`pure` conflicts with a disagreeing `effects:` field or legacy flag', () => {

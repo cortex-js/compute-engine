@@ -129,12 +129,20 @@ export type EffectLabel =
  *
  * - `'any'` is the distinguished **top**: "unknown effects". Under union it
  *   absorbs, and no finite bound admits it.
- * - Otherwise a **non-empty**, duplicate-free, alphabetically sorted list of
- *   labels.
+ * - Otherwise a duplicate-free, alphabetically sorted list of labels, possibly
+ *   **empty**.
  *
- * "No effect set" and "the empty set" are the **same state**: an absent
- * (`undefined`) `effects` field. An empty array is never a valid value — use
- * `normalizeEffectSet()` to build one.
+ * An absent (`undefined`) `effects` field and `[]` denote the **same set**, ∅:
+ * every semantic operation — subtyping, `pure`, the label predicates, union,
+ * `matches()` — treats them identically. They differ only in **serialization**
+ * (ruled 2026-08-01): absent is an empty specifier slot (effects were never
+ * stated, and stay on the inferred track), while `[]` is the author's `pure`
+ * and serializes back as ` pure`, so an explicit purity contract survives a
+ * parse → serialize → re-declare round trip.
+ *
+ * Build one with `normalizeEffectSet()` (inference: an empty result collapses
+ * to `undefined`) or `normalizeStatedEffectSet()` (a stated set: an empty
+ * result stays `[]`).
  */
 export type EffectSet = 'any' | EffectLabel[];
 
@@ -146,9 +154,9 @@ export type FunctionSignature = {
   variadicMin?: 0 | 1; // If variadicArg is present, this indicates whether it can be empty or not
   /** The latent effects of applying this function.
    *
-   * Absent means **pure** (the empty set) — the two are the same state, and
-   * the pure signature serializes with an empty specifier slot, exactly as an
-   * unannotated signature always has. */
+   * Absent means **pure** (the empty set), and serializes with an empty
+   * specifier slot, exactly as an unannotated signature always has. The
+   * stated-pure `[]` is the same set, spelled ` pure`. See {@link EffectSet}. */
   effects?: EffectSet;
   result: Type;
 };
@@ -343,8 +351,8 @@ export type Type =
  *
  * <effects> ::= "pure" | "any" | <effect-label> (" " <effect-label>)*
  *
- * (`pure` is accepted authoring sugar for the empty set and is never
- * serialized: a pure arrow's canonical spelling is the empty slot.)
+ * (`pure` is the STATED empty set: the same set as an empty slot, and the
+ * spelling that round-trips through serialization. See {@link EffectSet}.)
  *
  * <effect-label> ::= "console" | "entropy" | "environment" | "fs_read"
  *            | "fs_write" | "network" | "random" | "scope" | "time"

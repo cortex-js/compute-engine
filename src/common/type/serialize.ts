@@ -25,6 +25,33 @@ const COLLECTION_PRECEDENCE = 9;
 const TUPLE_PRECEDENCE = 10;
 const VALUE_PRECEDENCE = 11;
 
+/**
+ * While set, {@link typeToString} elides the ` pure` specifier of a STATED
+ * empty effect set, emitting the bare arrow instead. See
+ * {@link typeToDedupKey}. Read only by the `signature` case below; set and
+ * restored around one synchronous, non-reentrant call.
+ */
+let ELIDE_STATED_PURE = false;
+
+/**
+ * The structural de-duplication key of a type: its serialization, with every
+ * stated-pure arrow (`effects: []`) written as a bare arrow.
+ *
+ * `(int) pure -> int` and `(int) -> int` are the SAME type — the two spellings
+ * of ∅ are semantically one state (ruled 2026-08-01, see `EffectSet` in
+ * `types.ts`) — so union reduction, which keys members by their serialized
+ * form, has to merge them. Serialization alone would not.
+ */
+export function typeToDedupKey(type: Type): string {
+  if (typeof type === 'string') return type;
+  ELIDE_STATED_PURE = true;
+  try {
+    return typeToString(type);
+  } finally {
+    ELIDE_STATED_PURE = false;
+  }
+}
+
 export function typeToString(type: Type, precedence = 0): string {
   // Primitive types are already strings
   if (typeof type === 'string') return type;
@@ -207,15 +234,15 @@ export function typeToString(type: Type, precedence = 0): string {
           : `${namedElement(type.variadicArg)}+`
         : '';
       const argsList = [args, optArgs, varArg].filter((s) => s).join(', ');
-      // The effect specifier slot. A pure signature (absent effect set) has an
-      // empty slot and serializes byte-identically to an unannotated one.
-      // An empty array is not a canonical effect set, but a hand-built
-      // signature may carry one: treat it as absent rather than emitting an
-      // empty (double-space) slot.
+      // The effect specifier slot. An ABSENT effect set has an empty slot and
+      // serializes byte-identically to an unannotated signature. A STATED
+      // empty set (`[]`) is the same set spelled `pure`, and round-trips as
+      // such (ruled 2026-08-01) — see `EffectSet` in `types.ts`.
       const effects =
-        type.effects === 'any' || (type.effects && type.effects.length > 0)
-          ? ` ${effectSetToString(type.effects)}`
-          : '';
+        type.effects === undefined ||
+        (ELIDE_STATED_PURE && type.effects !== 'any' && !type.effects.length)
+          ? ''
+          : ` ${effectSetToString(type.effects)}`;
       result = `(${argsList})${effects} -> ${typeToString(type.result)}`;
       break;
 

@@ -1137,10 +1137,13 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
     } as any);
     const def = ce.lookupDefinition('trusted10')!['operator'];
     // The check could not run — the head was opaque — so the author's word is
-    // installed, with the provenance bit set.
-    expect(def.effects).toBe(undefined);
+    // installed, with the provenance bit set. `effects: []` is the STATED
+    // empty set (ruled 2026-08-01), so it is stored as `[]`, not collapsed to
+    // `undefined`: same set, and the spelling the signature round-trips.
+    expect(def.effects).toEqual([]);
     expect(def.pure).toBe(true);
     expect(def.effectsDeclared).toBe(true);
+    expect(def.signature.toString()).toBe('() pure -> number');
   });
 
   it('the trusted contract is NOT revalidated when the head later resolves', () => {
@@ -1155,7 +1158,7 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
     ce.box(['Assign', 'later10b', ['Function', ['Random']]]).evaluate();
 
     const def = ce.lookupDefinition('trusted10b')!['operator'];
-    expect(def.effects).toBe(undefined);
+    expect(def.effects).toEqual([]);
     expect(def.pure).toBe(true);
     expect(ce.box(['trusted10b']).isPure).toBe(true);
   });
@@ -1183,8 +1186,8 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
         'n',
       ]),
     } as any);
-    expect(ce.lookupDefinition('isEven10')!['operator'].effects).toBe(undefined);
-    expect(ce.lookupDefinition('isOdd10')!['operator'].effects).toBe(undefined);
+    expect(ce.lookupDefinition('isEven10')!['operator'].effects).toEqual([]);
+    expect(ce.lookupDefinition('isOdd10')!['operator'].effects).toEqual([]);
     expect(ce.box(['isEven10', 4]).isPure).toBe(true);
   });
 });

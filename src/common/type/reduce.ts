@@ -1,4 +1,4 @@
-import { typeToString } from './serialize.js';
+import { typeToDedupKey, typeToString } from './serialize.js';
 import {
   COVERING_UNION_MAP,
   isSubtype,
@@ -21,7 +21,7 @@ import type {
   RecordType,
 } from './types.js';
 import { isValidPrimitiveType, NUMERIC_TYPES_SET } from './primitive.js';
-import { normalizeEffectSet } from './effects.js';
+import { normalizeStatedEffectSet } from './effects.js';
 
 /**
  * Reduce the input type
@@ -121,21 +121,74 @@ function decorate(t: Type): Type {
 }
 
 /**
+ * True when `t` carries a STATED-pure arrow (`effects: []`) anywhere in its
+ * structure — exactly the case where its serialization differs from its
+ * de-duplication key, since the key is what elides the ` pure` token.
+ */
+function carriesStatedPure(t: Type): boolean {
+  if (typeof t === 'string') return false;
+  return typeToString(t) !== typeToDedupKey(t);
+}
+
+/**
+ * Record `member` into `result`, merging it with an equal member that was
+ * already seen. `key` MUST be `typeToDedupKey(member)` — the tie-break below
+ * reuses it instead of re-serializing.
+ *
+ * The two spellings of ∅ share a de-duplication key, so a bare arrow and its
+ * stated-pure twin COLLIDE. Keeping "first seen" would make the reduced
+ * serialization depend on member ORDER — contradicting the insertion-order
+ * independence union reduction guarantees (SYM P2-20) — and would silently
+ * erase an `effects: []`, and with it the `effectsDeclared` a declaration
+ * derives from a reduced type.
+ *
+ * The deterministic tie-break: the member that CARRIES a stated `[]` wins, so
+ * `(integer) pure -> integer` survives in either order. Residual, deliberately
+ * accepted: when BOTH colliding members carry a marker (stated `[]` at
+ * *different* positions inside the type) the first such member is kept — a
+ * recursive per-arrow spelling merge is overkill for a pair that already
+ * denotes the same type, and the rule stays deterministic either way.
+ *
+ * Collisions are the common case (`integer | integer`), so the tie-break is
+ * ordered to cost nothing on the path that has no stated `pure` to preserve:
+ * a primitive member exits on the `typeof` test, and any other member on the
+ * key comparison, which re-uses the key already in hand. Only when the
+ * INCOMING member carries a marker is the stored one serialized.
+ */
+function addDedupedMember(
+  result: Type[],
+  seen: Map<string, number>,
+  key: string,
+  member: Type
+): void {
+  const at = seen.get(key);
+  if (at === undefined) {
+    seen.set(key, result.length);
+    result.push(member);
+    return;
+  }
+  if (
+    typeof member !== 'string' &&
+    typeToString(member) !== key &&
+    !carriesStatedPure(result[at])
+  )
+    result[at] = member;
+}
+
+/**
  * Reduce and structurally de-duplicate the member types of an algebraic
  * type. The key of each member is computed once (a string for primitive
  * types, the serialized form otherwise) — no `typeToString` → `parseType`
- * round-trip.
+ * round-trip. The key is `typeToDedupKey`, not the serialization: a
+ * stated-pure arrow and a bare one are the same type and must merge, with the
+ * order-independent tie-break of {@link addDedupedMember}.
  */
 function reduceMembers(types: Readonly<Type[]>): Type[] {
   const result: Type[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
   for (const t of types) {
     const reduced = reduceType(t);
-    const key = typeof reduced === 'string' ? reduced : typeToString(reduced);
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(reduced);
-    }
+    addDedupedMember(result, seen, typeToDedupKey(reduced), reduced);
   }
   return result;
 }
@@ -172,17 +225,16 @@ function reduceNegationType(type: NegationType): Type {
  */
 function flattenUnionMembers(types: Readonly<Type[]>): Type[] {
   const result: Type[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
   const add = (t: Type): void => {
     if (typeof t === 'object' && t.kind === 'union') {
       for (const m of t.types) add(m);
       return;
     }
-    const key = typeof t === 'string' ? t : typeToString(t);
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(t);
-    }
+    // De-duplicate by `typeToDedupKey`: `(integer) pure -> integer` and
+    // `(integer) -> integer` are the same type (one is the stated spelling of
+    // ∅), so they merge — order-independently, see `addDedupedMember`.
+    addDedupedMember(result, seen, typeToDedupKey(t), t);
   };
   for (const t of types) add(reduceType(t));
   return result;
@@ -540,11 +592,15 @@ function reduceSignatureType(type: FunctionSignature): Type {
     optArgs: reducedOptArgs,
     variadicArg: reducedVarArg,
     variadicMin: reducedVarArg ? type.variadicMin : undefined,
-    // Canonicalize the effect set (sorted, de-duplicated; an empty set becomes
-    // `undefined`, since absent and empty are the same state). Nothing is
-    // allocated for a pure signature — the overwhelmingly common case.
+    // Canonicalize the effect set (sorted, de-duplicated). A STATED empty set
+    // stays `[]` — reduction must not rewrite `(int) pure -> int` into
+    // `(int) -> int`, which would delete a token the author wrote (ruled
+    // 2026-08-01). Nothing is allocated for an absent specifier — the
+    // overwhelmingly common case.
     effects:
-      type.effects === undefined ? undefined : normalizeEffectSet(type.effects),
+      type.effects === undefined
+        ? undefined
+        : normalizeStatedEffectSet(type.effects),
     result: reducedResult,
   });
 }

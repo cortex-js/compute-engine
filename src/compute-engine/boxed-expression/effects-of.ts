@@ -293,6 +293,22 @@ function isQuote(expr: Expression): expr is Expression & { ops: Expression[] } {
  * contribution at all in operand position (a bare value is not invoked). */
 const NOT_CALLABLE = Symbol('not-callable');
 
+/** Callable, but its arrow is UNSTATED and no value implements it — so nothing
+ * has said what it does. The two positions answer this differently, which is
+ * the polarity the model already commits to:
+ *
+ * - **operand**: the declared bare arrow IS the bound the operator will invoke
+ *   against, and an opaque declaration is trusted there (`Map(xs, opaquePure)`
+ *   is pure — the residual trust class of any opaque host declaration, pinned
+ *   by `effects-contracts.test.ts`). Contribution: nothing;
+ * - **head**: evaluating an application of something with no implementation is
+ *   not a contract at all — a bare arrow is the INFERRED track — so there is
+ *   nothing to be optimistic about and the answer is `'any'`. That is the
+ *   pre-value-binding answer for this sub-case, and it keeps the channel from
+ *   over-claiming purity to caching consumers. (`'any'` never pins a seed
+ *   frame, so no frame behavior rides on this.) */
+const UNIMPLEMENTED = Symbol('unimplemented');
+
 /**
  * The arrow effects of a name bound to a function VALUE rather than to an
  * operator — the `ce.declare(name, { type: '(…) -> …' })` +
@@ -314,32 +330,71 @@ const NOT_CALLABLE = Symbol('not-callable');
  */
 function valueBindingEffects(
   def: BoxedValueDefinition
-): ComputedEffects | typeof NOT_CALLABLE {
+): ComputedEffects | typeof NOT_CALLABLE | typeof UNIMPLEMENTED {
   const declared = def.type?.type;
-  let callable = false;
-  let effects: ComputedEffects = undefined;
-  if (declared !== undefined && signatureArms(declared) !== undefined) {
-    callable = true;
-    effects = signatureEffects(declared);
+  const declaredCallable = hasSignatureArm(declared);
+
+  // 1. A STATED contract is trusted — implemented or not. `signatureEffects`
+  //    distinguishes the two tracks by itself: a STATED set is a set (possibly
+  //    the empty one, the `pure` slot), an UNSTATED arrow reads `undefined`.
+  //    This is the declared-contract half of the model's polarity — optimistic
+  //    in declared contracts, conservative in runtime accounting.
+  if (declaredCallable) {
+    const stated = signatureEffects(declared);
+    if (stated !== undefined) return stated;
   }
+
+  // 2. An actual function VALUE: its own arrow, which the construction seam
+  //    stamped from the body it currently holds. It supersedes an unstated
+  //    declared arrow — assigning a drawing body to a bare-arrow binding leaves
+  //    that arrow pure (the definition-annotation check does not run on this
+  //    route), and reporting the body pure would silently release a seed frame.
+  //    The stored value is consulted only when the declared type could be
+  //    callable, so an ordinary `x: number` binding is never materialized.
   if (couldBeCallable(declared)) {
     const valueType = def.value?.type?.type;
-    if (valueType !== undefined && signatureArms(valueType) !== undefined) {
-      callable = true;
-      effects = unionComputedEffects(effects, signatureEffects(valueType));
-    }
+    if (hasSignatureArm(valueType)) return signatureEffects(valueType);
   }
-  return callable ? effects : NOT_CALLABLE;
+
+  // 3. Declared callable, but UNSTATED and UNIMPLEMENTED: nothing has told us
+  //    what it does. Position-dependent — see {@link UNIMPLEMENTED}.
+  if (declaredCallable) return UNIMPLEMENTED;
+
+  return NOT_CALLABLE;
+}
+
+/**
+ * True when `t` denotes something callable whose arrow effects
+ * {@link signatureEffects} can read — kept in LOCKSTEP with that reader, which
+ * is what makes the gate safe to short-circuit on:
+ *
+ * - a signature;
+ * - a UNION with at least one signature member (`((real) random -> real) |
+ *   nothing` — the shape an `At` over a list of callbacks produces). The reader
+ *   unions across members and non-signature ones contribute nothing, so a
+ *   mixed union is callable, not opaque;
+ * - an INTERSECTION, which is the overload-set representation, only when every
+ *   member is a signature (`signatureArms`' own rule) — a mixed intersection is
+ *   not a callable overload set and the reader declines it too.
+ */
+function hasSignatureArm(t: Type | undefined): boolean {
+  if (t === undefined || typeof t === 'string') return false;
+  if (t.kind === 'signature') return true;
+  if (t.kind === 'union') return (t.types as Type[]).some(hasSignatureArm);
+  if (t.kind === 'intersection') return signatureArms(t) !== undefined;
+  return false;
 }
 
 /** {@link valueBindingEffects} for the HEAD of an application whose name has no
- * operator definition. */
+ * operator definition. An unimplemented declaration answers `'any'` here — see
+ * {@link UNIMPLEMENTED} for why the two positions differ. */
 function valueHeadEffects(
   expr: Expression & { operator: string }
 ): ComputedEffects | typeof NOT_CALLABLE {
   const def = expr.engine.lookupDefinition(expr.operator);
   if (def === undefined || !('value' in def)) return NOT_CALLABLE;
-  return valueBindingEffects(def.value);
+  const effects = valueBindingEffects(def.value);
+  return effects === UNIMPLEMENTED ? 'any' : effects;
 }
 
 /**
@@ -364,9 +419,13 @@ function latentEffectsOf(op: Expression): ComputedEffects {
     if ('operator' in def) return def.operator.effects;
     // A value binding: a stored literal, or an opaque function declared with a
     // full signature (`Declare(f, "(real) random -> real")`). Nothing callable
-    // contributes no latent set — a bare value operand is not invoked.
+    // contributes no latent set — a bare value operand is not invoked — and an
+    // unimplemented declaration is trusted at its bare arrow here (see
+    // {@link UNIMPLEMENTED}).
     const effects = valueBindingEffects(def.value);
-    return effects === NOT_CALLABLE ? undefined : effects;
+    return effects === NOT_CALLABLE || effects === UNIMPLEMENTED
+      ? undefined
+      : effects;
   }
 
   // A number, a string, a boolean, a dictionary — nothing callable.

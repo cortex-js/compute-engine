@@ -56,6 +56,9 @@ export function isImpurityLabel(label: EffectLabel): boolean {
  * definition of `pure`. NOT set-emptiness: see {@link isImpurityLabel}.
  *
  * `'any'` means "unknown effects" and is conservative here: not pure.
+ *
+ * `undefined` (unstated) and `[]` (stated pure) are the same set — see
+ * {@link EffectSet} — so both report `true`.
  */
 export function isPureEffectSet(effects: EffectSet | undefined): boolean {
   if (effects === undefined) return true;
@@ -88,13 +91,22 @@ export function hasDeclaredEffectLabel(
   return effects.includes(label);
 }
 
+/** True when `effects` denotes the empty set — `undefined` (unstated) or the
+ * stated-pure `[]`. The two are ONE set; only serialization tells them apart
+ * (ruled 2026-08-01, see {@link EffectSet}). */
+function isEmptyEffectSet(effects: EffectSet | undefined): boolean {
+  return effects === undefined || (effects !== 'any' && effects.length === 0);
+}
+
 /**
  * Normalize a collection of labels into the canonical {@link EffectSet}
- * representation: `undefined` for the empty set (≡ pure), `'any'` for the top,
- * and otherwise a de-duplicated, alphabetically sorted array.
+ * representation: `'any'` for the top, otherwise a de-duplicated,
+ * alphabetically sorted array. The empty set collapses to `undefined`.
  *
- * This is the only supported way to build an effect set: an empty array is
- * never a valid `effects` value, and "absent" and "empty" are the same state.
+ * This is the **inference** entry point: a computed effect set that turns out
+ * empty is "unstated" (the bare arrow), never the stated-pure `[]`. For a
+ * write that must PRESERVE an author's stated empty set, use
+ * {@link normalizeStatedEffectSet}.
  *
  * The label enumeration is closed, so this **fails closed**: an unknown label
  * (or a value that is not `'any'` or a collection of labels) throws, matching
@@ -104,6 +116,28 @@ export function hasDeclaredEffectLabel(
  */
 export function normalizeEffectSet(
   effects: EffectSet | Iterable<EffectLabel> | undefined
+): EffectSet | undefined {
+  return normalizeEffectSetCore(effects, false);
+}
+
+/**
+ * {@link normalizeEffectSet} for a **stated** effect set: an empty collection
+ * normalizes to `[]` — "explicitly pure" — rather than collapsing to
+ * `undefined`. Semantically the same set; it differs only in that it
+ * serializes as ` pure` (ruled 2026-08-01, see {@link EffectSet}).
+ *
+ * An `undefined` input still yields `undefined`: absent input states nothing.
+ * Validation is identical, and equally fail-closed.
+ */
+export function normalizeStatedEffectSet(
+  effects: EffectSet | Iterable<EffectLabel> | undefined
+): EffectSet | undefined {
+  return normalizeEffectSetCore(effects, true);
+}
+
+function normalizeEffectSetCore(
+  effects: EffectSet | Iterable<EffectLabel> | undefined,
+  keepEmpty: boolean
 ): EffectSet | undefined {
   if (effects === undefined) return undefined;
   if (effects === 'any') return 'any';
@@ -121,31 +155,42 @@ export function normalizeEffectSet(
       throw new Error(
         `Unknown effect label \`${label}\`. The effect labels are ${EFFECT_LABELS.join(', ')}`
       );
-  return labels.length === 0 ? undefined : labels;
+  if (labels.length > 0) return labels;
+  return keepEmpty ? [] : undefined;
 }
 
 /**
  * True when `lhs` is a subset of `rhs` — the (covariant) order on effect sets.
  *
- * `undefined` is the empty set, below everything; `'any'` is the top, above
- * everything. Singleton labels are pairwise incomparable. Stateless: no
- * allocation, no memo, no mutation.
+ * `undefined` (and the stated-pure `[]`, its serialization-distinct twin) is
+ * the empty set, below everything; `'any'` is the top, above everything.
+ * Singleton labels are pairwise incomparable. Stateless: no allocation, no
+ * memo, no mutation.
  */
 export function isEffectSubset(
   lhs: EffectSet | undefined,
   rhs: EffectSet | undefined
 ): boolean {
-  // ∅ ⊆ anything
-  if (lhs === undefined) return true;
+  // ∅ ⊆ anything — whether the empty set is spelled absent or `[]`
+  if (isEmptyEffectSet(lhs)) return true;
   // anything ⊆ any (the top absorbs)
   if (rhs === 'any') return true;
   // `any` is above every finite set, so it fits none of them
   if (lhs === 'any') return false;
-  if (rhs === undefined) return false;
-  return lhs.every((label) => rhs.includes(label));
+  // `lhs` is non-empty here, so no empty `rhs` can hold it
+  if (isEmptyEffectSet(rhs)) return false;
+  return (lhs as EffectLabel[]).every((label) =>
+    (rhs as EffectLabel[]).includes(label)
+  );
 }
 
-/** True when two effect sets denote the same set (order-insensitive). */
+/**
+ * True when two effect sets denote the same SET (order-insensitive).
+ *
+ * **Semantic**, not structural: `undefined` and the stated-pure `[]` are the
+ * same set, so this reports `true` for the pair. The one place that needs the
+ * spelling apart is {@link sameEffectSetSpelling}.
+ */
 export function sameEffectSet(
   a: EffectSet | undefined,
   b: EffectSet | undefined
@@ -154,7 +199,30 @@ export function sameEffectSet(
 }
 
 /**
+ * True when two effect sets have the same **spelling** — the serialization
+ * distinction {@link sameEffectSet} deliberately ignores: `undefined` (an
+ * empty specifier slot) and `[]` (` pure`) are the same set but not the same
+ * text.
+ *
+ * Used where a rewrite must be performed for the spelling alone — installing a
+ * stated-pure set onto a bare arrow so it serializes back as the author wrote
+ * it (`_setEffects`, `boxed-operator-definition.ts`).
+ */
+export function sameEffectSetSpelling(
+  a: EffectSet | undefined,
+  b: EffectSet | undefined
+): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  if (a === 'any' || b === 'any') return a === b;
+  return a.length === b.length && a.every((label, i) => b[i] === label);
+}
+
+/**
  * The union of two effect sets, in canonical form. `'any'` absorbs.
+ *
+ * Stated-ness survives: `[] ∪ [] = []` and `[] ∪ ∅ = []`, while
+ * `[] ∪ {random} = {random}` — a union that acquires a label no longer needs
+ * the empty-set spelling.
  *
  * (There is deliberately no intersection operation: nothing in the effects
  * model intersects effect sets — projection unions, discharge subtracts, and
@@ -167,7 +235,7 @@ export function unionEffectSets(
   if (a === undefined) return b === undefined ? undefined : b;
   if (b === undefined) return a;
   if (a === 'any' || b === 'any') return 'any';
-  return normalizeEffectSet([...a, ...b]);
+  return normalizeStatedEffectSet([...a, ...b]);
 }
 
 //
@@ -282,7 +350,8 @@ export function isComputedEffectSubset(
   if (rhs === 'any') return true;
   if (isCoFiniteEffects(rhs)) {
     if (lhs === 'any') return false;
-    if (isCoFiniteEffects(lhs)) return rhs.not.every((l) => lhs.not.includes(l));
+    if (isCoFiniteEffects(lhs))
+      return rhs.not.every((l) => lhs.not.includes(l));
     return lhs.every((l) => !rhs.not.includes(l));
   }
   // `rhs` is finite (or empty): a version-open co-finite value never fits.
@@ -321,12 +390,18 @@ export function isPureComputedEffects(effects: ComputedEffects): boolean {
 }
 
 /**
- * The canonical serialization of an effect set: `any`, or the labels in
- * alphabetical order separated by single spaces. The empty set has no
- * spelling — it is written as an empty specifier slot, i.e. nothing at all.
+ * The canonical serialization of an effect set: `any`, `pure` for the STATED
+ * empty set (`[]`), or the labels in alphabetical order separated by single
+ * spaces.
+ *
+ * The empty set has two spellings, and they are the same set (ruled
+ * 2026-08-01, see {@link EffectSet}): an absent (`undefined`) effect set is an
+ * empty specifier slot — nothing at all, and not this function's business —
+ * while `[]` records that the author WROTE `pure` and round-trips as `pure`.
  */
 export function effectSetToString(effects: EffectSet): string {
   if (effects === 'any') return 'any';
+  if (effects.length === 0) return 'pure';
   // Defensive sort: a hand-built signature may not have gone through
   // `normalizeEffectSet()`, and the serialized form is used as the structural
   // key for union de-duplication (`reduce.ts`).

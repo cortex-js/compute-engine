@@ -11,10 +11,7 @@ import {
   signatureArms,
   widen,
 } from '../common/type/utils.js';
-import {
-  parseType,
-  parseTypeWithEffectsProvenance,
-} from '../common/type/parse.js';
+import { parseType } from '../common/type/parse.js';
 import { isEffectSubset } from '../common/type/effects.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import {
@@ -555,12 +552,10 @@ export function declareFn(
     // inference does not trip the covariant compatibility check. Genuine
     // conflicts still throw in the value-definition constructor.
     // Effects-axis provenance (`docs/EFFECTS-MODEL.md`, "Annotation
-    // provenance"): `(number) pure -> number` parses to the SAME type as
-    // `(number) -> number`, so the "the author wrote `pure`" fact is read off
-    // the parse and recorded on the definition. A non-empty specifier is
-    // visible in the type itself and counts too; a bare slot leaves effects on
-    // the inferred track. An explicit `effectsDeclared` on the incoming
-    // definition wins.
+    // provenance"): the statement lives in the TYPE — a non-empty specifier,
+    // or `pure`, which builds the stated-empty `effects: []`. A bare slot
+    // leaves effects on the inferred track. An explicit `effectsDeclared` on
+    // the incoming definition wins.
     const effectsDeclared =
       def.effectsDeclared ?? declaredTypeStatesEffects(ce, def.type);
 
@@ -608,11 +603,7 @@ export function declareFn(
   // `ce.declare("n", "integer")`
   //
   {
-    // The provenance-carrying parse: see the `isValidValueDef` branch above.
-    const { type, effectsStated } = parseTypeWithEffectsProvenance(
-      def as Type | TypeString,
-      ce._typeResolver
-    );
+    const type = parseType(def as Type | TypeString, ce._typeResolver);
     if (!isValidType(type)) {
       throw Error(
         [
@@ -627,7 +618,7 @@ export function declareFn(
       id,
       {
         type,
-        effectsDeclared: effectsStated || signatureEffects(type) !== undefined,
+        effectsDeclared: signatureEffects(type) !== undefined,
       },
       scope
     );
@@ -1089,25 +1080,21 @@ function assertFunctionLiteralArity(
 
 /**
  * Whether a declaration's type STATES its arrow's effects — a non-empty
- * specifier, or the `pure` keyword, which builds a type indistinguishable from
- * a bare arrow and is therefore only observable through the parse
- * (`parseTypeWithEffectsProvenance`).
- *
- * An already-boxed `BoxedType` has lost the keyword (nothing downstream of the
- * parser can recover it), so only its non-empty specifier counts.
+ * specifier, or the `pure` keyword, which builds the stated-empty `effects: []`
+ * (ruled 2026-08-01). Either way the statement is IN the type, so this is just
+ * "the arrow carries an effect set", and it reads the same off a type string
+ * and off an already-boxed `BoxedType`.
  */
 function declaredTypeStatesEffects(
   ce: IComputeEngine,
   declared: Type | TypeString | BoxedType | undefined
 ): boolean {
   if (declared === undefined) return false;
-  if (declared instanceof BoxedType)
-    return signatureEffects(declared.type) !== undefined;
-  const { type, effectsStated } = parseTypeWithEffectsProvenance(
-    declared,
-    ce._typeResolver
-  );
-  return effectsStated || signatureEffects(type) !== undefined;
+  const type =
+    declared instanceof BoxedType
+      ? declared.type
+      : parseType(declared, ce._typeResolver);
+  return signatureEffects(type) !== undefined;
 }
 
 /**
@@ -1116,12 +1103,13 @@ function declaredTypeStatesEffects(
  * annotation is a contract, accepted iff `inferred ⊆ declared` — over-declaring
  * allowed.
  *
- * "Explicit" is the per-axis provenance of "Annotation provenance": a
- * non-empty specifier on the declared arrow, or `effectsDeclared` — the bit
- * that records the one statement the type cannot carry, an author-written
- * `pure` (equivalently the `effects: []` field), which declares the EMPTY set
- * as a contract. A **bare** specifier slot states nothing: effects stay on the
- * inferred track and every assigned body is accepted and re-stamped.
+ * "Explicit" is the per-axis provenance of "Annotation provenance": any effect
+ * set on the declared arrow — a non-empty specifier, or the stated-empty `[]`
+ * an author-written `pure` builds (equivalently the `effects: []` field),
+ * which declares the EMPTY set as a contract — or `effectsDeclared` for a
+ * declaration that stated it some other way. A **bare** specifier slot states
+ * nothing: effects stay on the inferred track and every assigned body is
+ * accepted and re-stamped.
  *
  * Raising {@link EffectContractError} (rather than letting the generic "not
  * compatible with the type" check below fire) routes the failure through the

@@ -11,7 +11,9 @@ import {
   isEffectSubset,
   isPureEffectSet,
   normalizeEffectSet,
+  normalizeStatedEffectSet,
   sameEffectSet,
+  sameEffectSetSpelling,
 } from '../../common/type/effects.js';
 import {
   EffectContractError,
@@ -43,7 +45,7 @@ import {
   functionLiteralParameters,
 } from './function-literal.js';
 import { functionResult, signatureArms } from '../../common/type/utils.js';
-import { parseTypeWithEffectsProvenance } from '../../common/type/parse.js';
+import { parseType } from '../../common/type/parse.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { defaultCollectionHandlers } from '../collection-utils.js';
@@ -194,8 +196,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * stated the effect set — an effect-bearing signature specifier, the `pure`
    * keyword in the specifier slot, or the `effects:` field (including
    * `effects: []`, "stated as pure") — rather than the body inference having
-   * produced it. It is a DEFINITION-level bit: the type AST keeps its single
-   * optional `effects` field ("absent = pure") and carries no provenance.
+   * produced it. It is a cache of the one fact the SIGNATURE now records:
+   * `signatureEffects(signature.type) !== undefined`, where the stated-pure
+   * arrow carries `[]` and the unstated one carries nothing.
    *
    * What it gates: the definition-annotation check, and with it the revision
    * gate. `false` is the INFERRED track — a body assignment stamps, and a
@@ -211,8 +214,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * contract. */
   effectsDeclared = false;
 
-  /** The latent effects of applying this operator. `undefined` is the empty
-   * set (pure); `'any'` is the top ("unknown effects"). */
+  /** The latent effects of applying this operator. `undefined` (and its
+   * stated-pure twin `[]`) is the empty set (pure); `'any'` is the top
+   * ("unknown effects"). */
   get effects(): EffectSet | undefined {
     return this._effects;
   }
@@ -468,13 +472,18 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * The signature `Type` is REBUILT, never mutated: types may be interned or
    * shared, so an in-place write would leak this operator's effects into every
    * other holder of the same object.
+   *
+   * The skip-rebuild guard compares SPELLINGS, not sets: a stated-pure `[]`
+   * and an absent specifier denote the same set but serialize differently
+   * (`(n) pure -> n` vs `(n) -> n`), so installing one over the other is a
+   * real change the arrow has to record.
    * @internal
    */
   private _setEffects(effects: EffectSet | undefined): void {
     this._effects = effects;
     const t = this.signature.type;
     if (typeof t === 'string' || t.kind !== 'signature') return;
-    if (sameEffectSet(t.effects, effects)) return;
+    if (sameEffectSetSpelling(t.effects, effects)) return;
     const next: FunctionSignature = { ...t };
     if (effects === undefined) delete next.effects;
     else next.effects = effects;
@@ -595,10 +604,13 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // both are given and disagree this is a registration error, never silent
     // precedence.
     const legacy = legacyFlagEffects(this.name, def.pure, def.drawsRandom);
+    // `effects: []` is the programmatic twin of the `pure` keyword: it states
+    // the empty set, so it normalizes to `[]` (not `undefined`) and reaches
+    // the signature as the stated spelling.
     let effects: StatedEffects =
       def.effects === undefined
         ? UNSTATED_EFFECTS
-        : { stated: true, effects: normalizeEffectSet(def.effects) };
+        : { stated: true, effects: normalizeStatedEffectSet(def.effects) };
     // Whether the body inference below positively observed a draw. Only the
     // inference sets it: an explicit declaration is authoritative on its own.
     let inferredDraws = false;
@@ -619,13 +631,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
     if (def.signature) {
       const oldSig = normalizeSignatureField(def.signature);
-      // Parse through the provenance-carrying entry: `(x) pure -> y` builds the
-      // same type as `(x) -> y`, and only the parser can report that the author
-      // wrote the keyword (`docs/EFFECTS-MODEL.md`, "Annotation provenance").
-      const { type: sigType, effectsStated } = parseTypeWithEffectsProvenance(
-        oldSig,
-        this.engine._typeResolver
-      );
+      const sigType = parseType(oldSig, this.engine._typeResolver);
       const newSig = this.engine.type(sigType);
       if (oldSig && !newSig.matches(this.engine.type(oldSig))) {
         throw new Error(
@@ -642,12 +648,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // definition built by spreading a boxed one survive the spread: the
       // derived `pure`/`drawsRandom` getters live on the prototype and are not
       // copied, but the effect-bearing `signature` is.)
-      // `pure` in the slot is the explicitly-stated EMPTY set, so a stated
-      // specifier with no labels is still a CONTRACT — the same input as
-      // `effects: []`, which `normalizeEffectSet` also collapses to
-      // `undefined`. `effectsStated` covers both spellings.
+      // `pure` in the slot is the explicitly-stated EMPTY set — `effects: []`
+      // on the arrow — so a stated specifier with no labels is still a
+      // CONTRACT, the same input as the `effects: []` field. Stated-ness is
+      // therefore just "the arrow carries an effect set at all".
       const sigEffects = signatureEffects(this.signature.type);
-      if (sigEffects !== undefined || effectsStated) {
+      if (sigEffects !== undefined) {
         if (effects.stated && !sameEffectSet(effects.effects, sigEffects))
           throw new Error(
             `Operator Definition "${this.name}": the 'effects' field and the effects on the signature "${this.signature}" disagree`

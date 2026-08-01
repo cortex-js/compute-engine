@@ -1,7 +1,4 @@
-import {
-  parseType,
-  parseTypeWithEffectsProvenance,
-} from '../../../src/common/type/parse';
+import { parseType } from '../../../src/common/type/parse';
 import { typeToString } from '../../../src/common/type/serialize';
 import { isSubtype } from '../../../src/common/type/subtype';
 import { reduceType } from '../../../src/common/type/reduce';
@@ -10,6 +7,7 @@ import {
   coFiniteEffects,
   computedEffectsInclude,
   EFFECT_LABELS,
+  effectSetToString,
   hasDeclaredEffectLabel,
   isCoFiniteEffects,
   isComputedEffectSubset,
@@ -17,7 +15,9 @@ import {
   isEffectSubset,
   isPureComputedEffects,
   normalizeEffectSet,
+  normalizeStatedEffectSet,
   sameEffectSet,
+  sameEffectSetSpelling,
   subtractEffects,
   unionComputedEffects,
   unionEffectSets,
@@ -157,60 +157,121 @@ describe('grammar: accepted forms', () => {
   });
 
   //
-  // `pure` (ruled 2026-08-01) — SYNTACTIC SUGAR in the specifier slot for the
-  // explicitly-stated EMPTY effect set. It is parse-accepted but NEVER
-  // serialized: the canonical spelling of a pure arrow remains the empty slot,
-  // the same in-not-out asymmetry as label ordering. The `Type` it builds is
-  // identical to the bare form — provenance lives on the DEFINITION, never in
-  // the type (see `user-function-purity.test.ts` for the contract half).
+  // `pure` (ruled 2026-08-01) — the STATED empty effect set, `effects: []` on
+  // the arrow. Semantically it is the same set as an absent specifier (∅), but
+  // it is a distinct SPELLING and it round-trips: `parseType` →
+  // `typeToString` gives the author's `pure` back, so re-declaring from a
+  // serialized signature re-establishes the purity contract instead of
+  // silently demoting it to the inferred track (the Cortex round-trip
+  // argument). See `user-function-purity.test.ts` for the contract half.
   //
-  describe('`pure` — accepted authoring input, never serialized', () => {
-    test('it builds exactly the bare-arrow type', () => {
-      expect(sig('(real) pure -> real').effects).toBeUndefined();
-      expect(sig('(real) pure -> real')).toEqual(sig('(real) -> real'));
-      // No `effects: []` state leaks into the built type.
-      expect('effects' in sig('(real) pure -> real')).toBe(false);
+  describe('`pure` — the stated empty set, and it round-trips', () => {
+    test('it builds the same SET as the bare arrow, spelled `[]`', () => {
+      expect(sig('(real) pure -> real').effects).toEqual([]);
+      expect(sig('(real) -> real').effects).toBeUndefined();
+      // The stated spelling is a real, observable field.
+      expect('effects' in sig('(real) pure -> real')).toBe(true);
     });
 
-    test('it serializes back to the empty slot', () => {
-      expect(roundTrip('(real) pure -> real')).toBe('(real) -> real');
-      expect(roundTrip('() pure -> nothing')).toBe('() -> nothing');
+    test('it serializes back as `pure` — the user`s round trip', () => {
+      expect(roundTrip('(integer) pure -> integer')).toBe(
+        '(integer) pure -> integer'
+      );
+      expect(roundTrip('(integer) -> integer')).toBe('(integer) -> integer');
+      expect(roundTrip('(real) pure -> real')).toBe('(real) pure -> real');
+      expect(roundTrip('() pure -> nothing')).toBe('() pure -> nothing');
       expect(roundTrip('(x: number, y: number?) pure -> number')).toBe(
-        '(x: number, y: number?) -> number'
+        '(x: number, y: number?) pure -> number'
+      );
+    });
+
+    test('an unstated pure arrow still serializes as the empty slot', () => {
+      // Byte compatibility: every previously-expressible type is unchanged.
+      expect(roundTrip('(real) -> real')).toBe('(real) -> real');
+      expect(roundTrip('() -> nothing')).toBe('() -> nothing');
+      expect(roundTrip('(number, number) -> number')).toBe(
+        '(number, number) -> number'
       );
     });
 
     test('the slot anchors per-arrow, so `pure` nests too', () => {
       expect(roundTrip('(g: (real) pure -> real) scope -> boolean')).toBe(
+        '(g: (real) pure -> real) scope -> boolean'
+      );
+      expect(roundTrip('(g: (real) -> real) scope -> boolean')).toBe(
         '(g: (real) -> real) scope -> boolean'
       );
     });
 
-    test('the parse reports the author`s statement, out of band', () => {
-      // The ONE mechanism that carries "the author wrote `pure`" past the
-      // parser: the type itself cannot, by design.
+    test('stated and unstated pure are the SAME set for subtyping', () => {
+      // `undefined ⊆ []` and `[] ⊆ undefined` both hold: the distinction is
+      // serialization only, never semantics.
+      const stated = '(integer) pure -> integer';
+      const bare = '(integer) -> integer';
+      expect(isSubtype(parseType(stated), parseType(bare))).toBe(true);
+      expect(isSubtype(parseType(bare), parseType(stated))).toBe(true);
+      // ... and neither admits an effect-bearing arrow.
       expect(
-        parseTypeWithEffectsProvenance('(real) pure -> real').effectsStated
-      ).toBe(true);
-      expect(
-        parseTypeWithEffectsProvenance('(real) -> real').effectsStated
+        isSubtype(parseType('(integer) random -> integer'), parseType(stated))
       ).toBe(false);
       expect(
-        parseTypeWithEffectsProvenance('(real) random -> real').effectsStated
+        isSubtype(parseType(stated), parseType('(integer) random -> integer'))
       ).toBe(true);
-      expect(
-        parseTypeWithEffectsProvenance('(real) any -> real').effectsStated
-      ).toBe(true);
-      expect(parseTypeWithEffectsProvenance('real').effectsStated).toBe(false);
-      // Only the TOP-LEVEL arrow's slot is provenance: a nested one is a type.
-      expect(
-        parseTypeWithEffectsProvenance('(g: (real) pure -> real) -> boolean')
-          .effectsStated
-      ).toBe(false);
-      // Byte-identical types, whatever the provenance says.
-      expect(
-        typeToString(parseTypeWithEffectsProvenance('(real) pure -> real').type)
-      ).toBe('(real) -> real');
+    });
+
+    test('a union of the two spellings reduces to ONE member, order-independently', () => {
+      // Union de-duplication keys members by their serialized form, so the
+      // key normalizes the stated-pure spelling away (`typeToDedupKey`) —
+      // otherwise the semantically-identical pair would stop merging.
+      //
+      // Reduction is independent of member ORDER (SYM P2-20), so the colliding
+      // pair cannot be resolved "first seen": the member CARRYING the stated
+      // `[]` wins either way. Otherwise reversing the operands would erase an
+      // `effects: []` — and with it the `effectsDeclared` a declaration
+      // derives from the reduced type.
+      const reduceUnion = (a: string, b: string): string =>
+        typeToString(
+          reduceType({
+            kind: 'union',
+            types: [parseType(a), parseType(b)],
+          } as Type)
+        );
+      const stated = '(integer) pure -> integer';
+      const bare = '(integer) -> integer';
+      expect(reduceUnion(stated, bare)).toBe(stated);
+      expect(reduceUnion(bare, stated)).toBe(stated);
+    });
+
+    test('an intersection of the two spellings does the same', () => {
+      // The intersection path shares `reduceMembers`, and — unlike the union —
+      // does not re-sort its members, so it is the order-sensitive one.
+      const reduceIntersection = (a: string, b: string): string =>
+        typeToString(
+          reduceType({
+            kind: 'intersection',
+            types: [parseType(a), parseType(b)],
+          } as Type)
+        );
+      const stated = '(integer) pure -> integer';
+      const bare = '(integer) -> integer';
+      expect(reduceIntersection(stated, bare)).toBe(stated);
+      expect(reduceIntersection(bare, stated)).toBe(stated);
+    });
+
+    test('the tie-break sees a stated `pure` NESTED in a member', () => {
+      // The marker is "serialization differs from the de-dup key", so it fires
+      // wherever the stated `[]` sits — here on a parameter's arrow.
+      const stated = '(g: (real) pure -> real) -> boolean';
+      const bare = '(g: (real) -> real) -> boolean';
+      const reduceUnion = (a: string, b: string): string =>
+        typeToString(
+          reduceType({
+            kind: 'union',
+            types: [parseType(a), parseType(b)],
+          } as Type)
+        );
+      expect(reduceUnion(stated, bare)).toBe(stated);
+      expect(reduceUnion(bare, stated)).toBe(stated);
     });
   });
 
@@ -495,7 +556,7 @@ describe('effect-aware structural equality', () => {
 
   test('reduceType canonicalizes a hand-built effect set', () => {
     // WP2 builds signatures programmatically; `reduceType` sorts and
-    // de-duplicates, and collapses an empty set to "absent" (≡ pure).
+    // de-duplicates.
     const unsorted = reduceType({
       kind: 'signature',
       args: [{ type: 'real' }],
@@ -505,14 +566,18 @@ describe('effect-aware structural equality', () => {
     expect(unsorted.effects).toEqual(['random', 'scope']);
     expect(typeToString(unsorted)).toBe('(real) random scope -> real');
 
+    // REVERSED pin (ruled 2026-08-01): reduction used to collapse a hand-built
+    // `effects: []` to "absent". It must not — `[]` is the STATED empty set
+    // and its spelling (` pure`) is the author's, so collapsing it would
+    // delete a token they wrote.
     const empty = reduceType({
       kind: 'signature',
       args: [{ type: 'real' }],
       effects: [],
       result: 'real',
     } as Type) as FunctionSignature;
-    expect(empty.effects).toBeUndefined();
-    expect(typeToString(empty)).toBe('(real) -> real');
+    expect(empty.effects).toEqual([]);
+    expect(typeToString(empty)).toBe('(real) pure -> real');
   });
 
   test('`matches()` is effect-aware and write-free', () => {
@@ -528,7 +593,8 @@ describe('effect-aware structural equality', () => {
 });
 
 describe('effect-set helpers', () => {
-  test('normalizeEffectSet: absent and empty are the same state', () => {
+  test('normalizeEffectSet: the INFERENCE write collapses `[]` to absent', () => {
+    // Inference produces an UNSTATED set: an empty result is the bare arrow.
     expect(normalizeEffectSet(undefined)).toBeUndefined();
     expect(normalizeEffectSet([])).toBeUndefined();
     expect(normalizeEffectSet(['random'])).toEqual(['random']);
@@ -568,10 +634,55 @@ describe('effect-set helpers', () => {
     ]);
   });
 
-  test('a hand-built empty effect set serializes as absent', () => {
-    // An empty array is not a canonical effect set, but a hand-built signature
-    // (one that never went through `normalizeEffectSet`/`reduceType`) may
-    // carry one — it must not emit an empty specifier slot (double space).
+  test('normalizeStatedEffectSet: the STATED write preserves `[]`', () => {
+    // The split personality (ruled 2026-08-01): a stated empty set keeps its
+    // spelling so the arrow serializes ` pure`. Absent input still states
+    // nothing.
+    expect(normalizeStatedEffectSet(undefined)).toBeUndefined();
+    expect(normalizeStatedEffectSet([])).toEqual([]);
+    expect(normalizeStatedEffectSet(new Set([]))).toEqual([]);
+    expect(normalizeStatedEffectSet(['scope', 'random'])).toEqual([
+      'random',
+      'scope',
+    ]);
+    expect(normalizeStatedEffectSet('any')).toBe('any');
+    // Equally fail-closed
+    expect(() => normalizeStatedEffectSet(['bogus'] as any)).toThrow(
+      /Unknown effect label `bogus`/
+    );
+    expect(() => normalizeStatedEffectSet('random' as any)).toThrow(
+      /Invalid effect set/
+    );
+  });
+
+  test('effectSetToString: `[]` spells `pure`', () => {
+    expect(effectSetToString([])).toBe('pure');
+    expect(effectSetToString('any')).toBe('any');
+    expect(effectSetToString(['scope', 'random'])).toBe('random scope');
+  });
+
+  test('sameEffectSet is SEMANTIC, sameEffectSetSpelling is not', () => {
+    // The two spellings of ∅ are one set...
+    expect(sameEffectSet(undefined, [])).toBe(true);
+    expect(sameEffectSet([], undefined)).toBe(true);
+    expect(sameEffectSet([], [])).toBe(true);
+    // ...but not one string, which is what the signature rebuild keys on.
+    expect(sameEffectSetSpelling(undefined, [])).toBe(false);
+    expect(sameEffectSetSpelling([], undefined)).toBe(false);
+    expect(sameEffectSetSpelling([], [])).toBe(true);
+    expect(sameEffectSetSpelling(undefined, undefined)).toBe(true);
+    expect(sameEffectSetSpelling('any', 'any')).toBe(true);
+    expect(sameEffectSetSpelling('any', [])).toBe(false);
+    expect(sameEffectSetSpelling(['random'], ['random'])).toBe(true);
+    expect(sameEffectSetSpelling(['random'], ['scope'])).toBe(false);
+  });
+
+  test('a hand-built empty effect set serializes as `pure`', () => {
+    // REVERSED pin (ruled 2026-08-01). An earlier review fix treated a
+    // hand-built `effects: []` as absent, to avoid emitting an empty
+    // (double-space) slot. `[]` is now the STATED empty set and has a real
+    // spelling — ` pure` — so it emits that; only an ABSENT field emits
+    // nothing.
     const pure = {
       kind: 'signature',
       args: [{ type: 'real' }],
@@ -583,8 +694,27 @@ describe('effect-set helpers', () => {
       effects: [],
       result: 'real',
     } as Type;
-    expect(typeToString(emptyEffects)).toBe(typeToString(pure));
-    expect(typeToString(emptyEffects)).toBe('(real) -> real');
+    expect(typeToString(pure)).toBe('(real) -> real');
+    expect(typeToString(emptyEffects)).toBe('(real) pure -> real');
+  });
+
+  test('isEffectSubset treats `[]` and absent as the same empty set', () => {
+    expect(isEffectSubset(undefined, [])).toBe(true);
+    expect(isEffectSubset([], undefined)).toBe(true);
+    expect(isEffectSubset([], [])).toBe(true);
+    expect(isEffectSubset([], ['random'])).toBe(true);
+    expect(isEffectSubset(['random'], [])).toBe(false);
+    expect(isEffectSubset([], 'any')).toBe(true);
+    expect(isEffectSubset('any', [])).toBe(false);
+  });
+
+  test('unionEffectSets keeps the stated spelling when the union stays empty', () => {
+    expect(unionEffectSets([], [])).toEqual([]);
+    expect(unionEffectSets([], undefined)).toEqual([]);
+    expect(unionEffectSets(undefined, [])).toEqual([]);
+    expect(unionEffectSets([], ['random'])).toEqual(['random']);
+    expect(unionEffectSets(['random'], [])).toEqual(['random']);
+    expect(unionEffectSets([], 'any')).toBe('any');
   });
 
   test('isEffectSubset is the stateless subset test', () => {

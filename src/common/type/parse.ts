@@ -1,9 +1,4 @@
-import type {
-  FunctionSignature,
-  Type,
-  TypeResolver,
-  TypeString,
-} from './types.js';
+import type { Type, TypeResolver, TypeString } from './types.js';
 
 import { isValidType } from './primitive.js';
 import { Parser } from './parser.js';
@@ -75,58 +70,6 @@ export function parseType(
     }
 
     return type;
-  } catch (error) {
-    throw new Error(
-      `Failed to parse type "${s}": ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-  }
-}
-
-/**
- * {@link parseType}, plus the one fact the resulting {@link Type} cannot carry:
- * whether the author WROTE an effect specifier on the top-level arrow.
- *
- * `(number) -> number` and `(number) pure -> number` build the *same* type —
- * the AST keeps one optional `effects` field, absent ≡ pure ≡ empty, and
- * provenance deliberately does not live in the type
- * (`docs/EFFECTS-MODEL.md`, "Annotation provenance"). But the definition
- * boundary has to tell them apart: the bare form leaves effects on the
- * INFERRED track (re-stamped on every body assignment), while `pure` is an
- * explicit purity CONTRACT, exactly like the `effects: []` authoring field.
- *
- * `effectsStated` is therefore true for any non-empty slot — labels, `any`, or
- * `pure`. It is the only supported way to observe the `pure` keyword; nothing
- * downstream of the parser can recover it.
- *
- * Not cached (unlike {@link parseType}): the definition boundary is the only
- * caller, and it runs once per declaration.
- */
-export function parseTypeWithEffectsProvenance(
-  s: TypeString | Type,
-  typeResolver?: TypeResolver
-): { type: Type; effectsStated: boolean } {
-  // A `Type` value carries no provenance: only a non-empty specifier is
-  // visible on it, and it is visible in the type itself.
-  if (typeof s !== 'string' || isValidType(s))
-    return {
-      type: s as Type,
-      effectsStated:
-        typeof s === 'object' &&
-        s !== null &&
-        (s as FunctionSignature).kind === 'signature' &&
-        (s as FunctionSignature).effects !== undefined,
-    };
-
-  try {
-    const parser = new Parser(s, { typeResolver });
-    const ast = parser.parseType();
-    return {
-      type: buildTypeFromAST(ast, typeResolver),
-      effectsStated:
-        ast.kind === 'function_signature' && ast.effectsStated === true,
-    };
   } catch (error) {
     throw new Error(
       `Failed to parse type "${s}": ${

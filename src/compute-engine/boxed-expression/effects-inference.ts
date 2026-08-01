@@ -6,6 +6,7 @@ import { signatureArms } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   effectSetToString,
+  normalizeEffectSet,
   unionEffectSets,
 } from '../../common/type/effects.js';
 
@@ -120,7 +121,10 @@ export function describeEffects(effects: EffectSet | undefined): string {
 }
 
 /**
- * The effects attached to a signature type's arrow, if any.
+ * The effects attached to a signature type's arrow, if any. `undefined` means
+ * the arrow states nothing; the stated-empty `[]` (an author-written `pure`)
+ * is PRESERVED, since "states the empty set" is exactly what distinguishes a
+ * purity contract from the inferred track.
  *
  * An INTERSECTION of signatures is the overload-set representation (see
  * `overloadArms` in `overload.ts` — matched here through `signatureArms`
@@ -193,9 +197,9 @@ export function stripArrowEffects(t: Type): Type {
  *   value's inferred top-level specifier removed. (Those closures are shipped,
  *   pinned idioms: `scope.test.ts`'s recursive-with-outer-variable function,
  *   `lambda-capture.test.ts`'s mutable closure.)
- * - `effectsDeclared === true`, or a non-empty specifier on the declared
- *   arrow: the effect set is a CONTRACT and is checked covariantly here too,
- *   `inferred ⊆ declared`.
+ * - `effectsDeclared === true`, or ANY effect set on the declared arrow
+ *   (including the stated-empty `[]` a `pure` keyword builds): the effect set
+ *   is a CONTRACT and is checked covariantly here too, `inferred ⊆ declared`.
  *
  * Only the TOP-LEVEL specifier is inferred; a nested arrow (an annotated
  * parameter's `(real) random -> real`) is the author's and is never stripped.
@@ -266,8 +270,10 @@ export function functionLiteralSignatureType(expr: Expression): Type {
     )
     .join(', ');
 
-  // The effect specifier slot. The empty set has no spelling — it is written
-  // as an empty slot, i.e. nothing at all.
+  // The effect specifier slot. An INFERRED empty set is written as an empty
+  // slot, i.e. nothing at all — the author's `pure` spelling is a statement,
+  // and inference states nothing (`inferFunctionLiteralEffects` collapses a
+  // `[]` accumulated from an applied stated-pure callback).
   const effects = inferFunctionLiteralEffects(ce, expr).effects;
   const specifier =
     effects === undefined ? '' : ` ${effectSetToString(effects)}`;
@@ -343,6 +349,12 @@ export function inferFunctionLiteralEffects(
     unresolvedHead: false,
   };
   walkLiteral(ce, literal, state, options?.selfName, 0);
+  // Inference produces an UNSTATED set: an empty result is the bare arrow,
+  // never the author's `pure`. The walk can accumulate a stated `[]` from an
+  // applied `(…) pure -> …` callback, so collapse it here — the one place the
+  // inference/stated split is decided (`normalizeEffectSet` vs
+  // `normalizeStatedEffectSet`, `common/type/effects.ts`).
+  state.effects = normalizeEffectSet(state.effects);
   return state;
 }
 

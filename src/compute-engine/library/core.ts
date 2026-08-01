@@ -42,10 +42,7 @@ import {
   stripMissingFromType,
   widen,
 } from '../../common/type/utils.js';
-import {
-  parseType,
-  parseTypeWithEffectsProvenance,
-} from '../../common/type/parse.js';
+import { parseType } from '../../common/type/parse.js';
 import { canonicalMultiply } from '../boxed-expression/arithmetic-mul-div.js';
 import {
   canonicalSolve,
@@ -1504,21 +1501,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const typeSource = typeOp ?? attrs?.get('type');
         const hasType = typeSource !== undefined;
         let type: Type | undefined;
-        // Effects-axis provenance: `(number) pure -> number` builds the same
-        // type as `(number) -> number`, so the author's `pure` has to be read
-        // off the parse (`docs/EFFECTS-MODEL.md`, "Annotation provenance").
+        // Effects-axis provenance (`docs/EFFECTS-MODEL.md`, "Annotation
+        // provenance"): the statement is in the TYPE — a non-empty specifier,
+        // or the stated-empty `effects: []` that `pure` builds.
         let effectsDeclared = false;
         if (hasType) {
           const t = typeSource!.canonical.evaluate();
           const source =
             (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined;
           if (source === undefined) return undefined;
-          const { type: parsed, effectsStated } =
-            parseTypeWithEffectsProvenance(source);
+          const parsed = parseType(source);
           if (!isValidType(parsed)) return undefined;
           type = parsed;
-          effectsDeclared =
-            effectsStated || signatureEffects(parsed) !== undefined;
+          effectsDeclared = signatureEffects(parsed) !== undefined;
         }
 
         // Resolve the effective value: a positional value wins over the

@@ -338,21 +338,28 @@
   `fs_read`, `fs_write`, `network`, `random` (draws from the ambient seeded
   stream), `scope` (mutates a binding that outlives the call), and `time` (reads
   the host clock). `any` is the top — "unknown effects" — and an **empty slot
-  means pure**, so every existing type string keeps its meaning. `pure` is
-  accepted as authoring sugar for the explicitly-stated empty set and is never
-  serialized; canonical serialization orders labels alphabetically, and parsing
-  accepts any order. The grammar fails closed: an unknown label, a duplicate
-  label, or `any`/`pure` mixed with other labels is a type error rather than a
-  silently weakened contract. The slot sits between a mandatorily parenthesized
-  argument list and its arrow, so it is positionally isolated and can never
-  change the parse of an existing type string.
+  means pure**, so every existing type string keeps its meaning. `pure` is the
+  keyword for the explicitly-stated empty set and it **round-trips**: a
+  declared-pure signature serializes as `(real) pure -> real`, so re-declaring
+  from a serialized signature re-establishes the purity contract instead of
+  demoting it to the inferred track. An _inferred_ pure signature has no
+  statement to preserve and still serializes as `(real) -> real`. Canonical
+  serialization orders labels alphabetically, and parsing accepts any order.
+  The grammar fails closed: an unknown label, a duplicate label, or
+  `any`/`pure` mixed with other labels is a type error rather than a silently
+  weakened contract. The slot sits between a mandatorily parenthesized argument
+  list and its arrow, so it is positionally isolated and can never change the
+  parse of an existing type string.
 
   ```js
   ce.type("(real) scope random -> real").toString();
   // ➔ "(real) random scope -> real"    (canonical, alphabetical)
 
   ce.type("(real) pure -> real").toString();
-  // ➔ "(real) -> real"                 (pure has one canonical spelling)
+  // ➔ "(real) pure -> real"            (a stated purity contract round-trips)
+
+  ce.type("(real) -> real").toString();
+  // ➔ "(real) -> real"                 (unstated: effects stay inferred)
 
   ce.type("(real) rndm -> real");
   // ➔ throws: Unknown effect label `rndm`

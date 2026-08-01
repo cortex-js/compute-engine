@@ -480,8 +480,8 @@ set, attached to the arrow:
 ```
 
 ```
-(real) -> real                // pure (empty slot ≡ empty set)
-(real) pure -> real           // the SAME type, stated explicitly
+(real) -> real                // pure (empty slot ≡ empty set), unstated
+(real) pure -> real           // the SAME set, stated explicitly
 (real) random -> real         // may draw from the seeded stream
 () entropy -> expression      // unseeded nondeterminism (RandomExpression)
 () scope -> nothing           // may mutate an enclosing scope
@@ -490,29 +490,33 @@ set, attached to the arrow:
 (real) any -> real            // opaque: unknown effects
 ```
 
-Normalization (normative): pure has exactly one **canonical** spelling —
-an **empty slot** (nothing between the argument list and the arrow); an
-empty specifier *list* is unwritable, so no degenerate spelling exists
-to outlaw. Duplicate labels are a parse error; `any` is exclusive
+Normalization (normative): pure has **two** spellings, an **empty slot**
+(nothing between the argument list and the arrow) and the keyword `pure`;
+the empty specifier *list* is unwritable, so no degenerate spelling
+exists to outlaw. Duplicate labels are a parse error; `any` is exclusive
 (`any random` errors); canonical serialization orders labels
 alphabetically, separated by single spaces, and parsing accepts any
 order.
 
-**`pure` is accepted authoring input** *(ruled 2026-08-01)*: a keyword
-in the slot, distinct from the label enumeration, meaning the
-explicitly-stated empty set. It follows `any`'s grammar rules — exclusive
-with every label and with `any` (`pure random`, `pure any` are parse
-errors), not repeatable (`pure pure` errors) — and it is **never
-serialized**: the canonical serialization of a pure arrow remains the
-empty slot, the same in-not-out asymmetry as label ordering. `(real) pure
--> real` and `(real) -> real` build the *same* `Type`; `pure` introduces
-no `effects: []` state, because the one thing it adds is not a type fact
-but an **annotation-provenance** fact (see "Annotation provenance"), and
-provenance never lives in the type. It therefore travels out of band: the
-definition boundary parses signature strings through a provenance-bearing
-entry (`parseTypeWithEffectsProvenance`, returning `{ type, effectsStated
-}`) and stores the bit on the *definition* — the same `stated: true` path
-the programmatic twin `effects: []` already takes.
+**`pure` is the STATED empty set** *(ruled 2026-08-01)*: a keyword in the
+slot, distinct from the label enumeration. It follows `any`'s grammar
+rules — exclusive with every label and with `any` (`pure random`, `pure
+any` are parse errors), not repeatable (`pure pure` errors) — and it
+builds `effects: []` on the arrow. `[]` and an absent `effects` field are
+**semantically one state**, the empty set ∅: every semantic operation
+(subtyping, the `pure`/`drawsRandom` getters, union, `matches()`, the
+call-boundary bounds) treats them identically, and `undefined ⊆ []` and
+`[] ⊆ undefined` both hold. They are **serialization-distinct**: `[]`
+prints ` pure`, an absent field prints nothing.
+
+The reason the empty-but-stated set is representable at all is
+**round-tripping**: `let f : (int) pure -> int` must survive parse →
+serialize → re-declare. Erasing the keyword would delete a token the
+author wrote and silently demote an explicit purity CONTRACT to the
+inferred track — and `pure` was the only stated effect set whose spelling
+was erased (labels and `any` always survived). An *inferred* pure arrow
+still serializes as the empty slot, so every previously-expressible type
+string is byte-identical to before.
 
 The slot exists only between a **parenthesized argument list**
 and its arrow — argument lists are already mandatorily parenthesized in
@@ -520,8 +524,9 @@ this grammar, so the slot is positionally isolated: an identifier there
 can only be an effect label. Hence no collision with type names, current
 or future; a typo diagnoses cleanly as "unknown effect label"; and
 admitting a future label can never change the parse of an existing type
-string. In the AST, "no effect set" and "empty set" are the **same
-state** (one optional field, absent = pure). **Reserved**: `!` in the
+string. In the AST, "no effect set" and "empty set" denote the **same
+set** — one optional field, absent = `[]` = pure — and differ only in how
+they serialize (above). **Reserved**: `!` in the
 slot is a parse error today, reserved for the complement form (see
 "Requiring absence" under Subtyping) so it can be admitted later without
 a breaking grammar change.
@@ -1040,8 +1045,13 @@ surface):
   *enforceable contract*. Effects take the same polarity, on their own
   axis, through a **definition-level provenance bit,
   `effectsDeclared`** — the effects-axis analog of `inferredSignature`.
-  The type AST keeps its single optional field ("absent ≡ pure ≡
-  empty"): provenance lives on the *definition*, never in the type.
+  Since the 2026-08-01 round-trip ruling the bit is **derived from the
+  signature at the declare route** — `signatureEffects(type) !==
+  undefined`, where an author-written `pure` (and the `effects: []`
+  field) attaches the stated-empty `[]` — so the parse-time side channel
+  that used to carry the keyword out of band is gone. The bit remains as
+  the *stored* form of that read, so a definition can also be handed it
+  directly.
 
   Provenance is therefore **per axis**. An ascribed full signature with
   an **empty specifier slot** — `ce.declare('fib', { type: '(number) ->
@@ -1056,8 +1066,9 @@ surface):
 
   An **explicit statement** is a contract: a non-empty specifier
   (`(number) scope -> number`), the `effects:` authoring field, or the
-  `pure` keyword in the slot — an explicitly-stated *empty* set, and the
-  exact twin of `effects: []`. Every assigned body must then satisfy
+  `pure` keyword in the slot — an explicitly-stated *empty* set, `[]` on
+  the arrow, and the exact twin of `effects: []`. Every assigned body
+  must then satisfy
   `inferred ⊆ declared` (over-declaring is allowed: a pure body under a
   `scope` contract is fine); a violation is an `incompatible-type` error
   and the definition is not installed; and the stored arrow keeps the

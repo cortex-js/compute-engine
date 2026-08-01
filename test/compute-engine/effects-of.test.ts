@@ -214,6 +214,95 @@ describe('A head bound to a function VALUE (declare-then-assign)', () => {
     ).toBe(once.toString());
   });
 
+  it('a MIXED callable union keeps its latent set', () => {
+    // `At` over a list of callbacks types as `((…) random -> …) | missing` —
+    // a union with one signature member and one that is not. The callable gate
+    // must stay in lockstep with the reader, which unions across members:
+    // bailing on the union would silently report a drawing callback pure.
+    const ce = new ComputeEngine();
+    ce.assign('rf', ce.parse('x \\mapsto \\mathrm{Random}()'));
+    ce.assign('picked', ce.box(['At', ['List', 'rf'], 1]));
+    const def = ce.lookupDefinition('picked');
+    const t = def !== undefined && 'value' in def ? def.value.type.toString() : '';
+    expect(t).toContain('|');
+    expect(t).toContain('random');
+
+    expect(eff(ce.box(['Map', ['List', 1, 2], 'picked']))).toEqual(['random']);
+    expect(ce.box(['Map', ['List', 1, 2], 'picked']).isPure).toBe(false);
+    expect(eff(ce.box(['picked', 3]))).toEqual(['random']);
+
+    // The control: same shape, pure member.
+    ce.assign('pf', ce.parse('x \\mapsto x + 1'));
+    ce.assign('pickedPure', ce.box(['At', ['List', 'pf'], 1]));
+    expect(eff(ce.box(['Map', ['List', 1, 2], 'pickedPure']))).toBe(undefined);
+    expect(eff(ce.box(['pickedPure', 3]))).toBe(undefined);
+
+    // …and a DECLARED mixed union is read the same way.
+    ce.declare('unionDecl', { type: '((real) random -> real) | nothing' });
+    expect(eff(ce.box(['unionDecl', 3]))).toEqual(['random']);
+  });
+
+  describe('declared but UNIMPLEMENTED', () => {
+    // The model's polarity: optimistic in DECLARED contracts, conservative in
+    // runtime accounting. A bare arrow is the INFERRED track — unstated, not a
+    // contract — so with no body to inspect there is nothing to be optimistic
+    // about. (Stated pure is spelled `pure` in the slot and reads as the empty
+    // set; an unstated arrow reads `undefined`.)
+    it('an unstated arrow with no value is `{any}`, not pure', () => {
+      const ce = new ComputeEngine();
+      ce.declare('unimpl', { type: '(number) -> number' });
+      const e = ce.box(['unimpl', 3]);
+      expect(eff(e)).toBe('any');
+      expect(e.isPure).toBe(false);
+      // OPERAND position deliberately differs: there the declared bare arrow
+      // IS the bound the operator invokes against, and an opaque declaration
+      // is trusted at it (`effects-contracts.test.ts` pins that as the case
+      // the design exists for). Applying something with no implementation is
+      // the case with no contract to trust.
+      expect(eff(ce.box(['Map', ['List', 1, 2], 'unimpl']))).toBe(undefined);
+      // `any` never pins a frame, so this costs a cache, not a frame.
+      expect(
+        ce.box(['WithRandomSeed', 5, ['unimpl', 'unboundN']]).evaluate().operator
+      ).not.toBe('WithRandomSeed');
+    });
+
+    it('a STATED contract is trusted, body or not', () => {
+      const ce = new ComputeEngine();
+      ce.declare('claimsPure', { type: '(number) pure -> number' });
+      expect(eff(ce.box(['claimsPure', 3]))).toEqual([]);
+      expect(ce.box(['claimsPure', 3]).isPure).toBe(true);
+
+      ce.declare('claimsRandom', { type: '(number) random -> number' });
+      expect(eff(ce.box(['claimsRandom', 3]))).toEqual(['random']);
+      expect(ce.box(['claimsRandom', 3]).isPure).toBe(false);
+    });
+
+    it('assigning a value later switches to the value read (generation guard)', () => {
+      const ce = new ComputeEngine();
+      ce.declare('later', { type: '(number) -> number' });
+      const e = ce.box(['later', 3]);
+      expect(eff(e)).toBe('any');
+
+      ce.assign('later', ce.parse('x \\mapsto x + 1'));
+      expect(eff(e)).toBe(undefined);
+      expect(e.isPure).toBe(true);
+
+      ce.assign('later', ce.parse('x \\mapsto \\mathrm{Random}()'));
+      expect(eff(e)).toEqual(['random']);
+    });
+
+    it('the `signature:` spelling is an OPERATOR definition — unchanged', () => {
+      // It never reached the value-binding path: a declared operator with a
+      // bare arrow is the documented "bare `->` means pure" default, and every
+      // library signature relies on it.
+      const ce = new ComputeEngine();
+      ce.declare('sigDecl', { signature: '(number) -> number' });
+      const def = ce.lookupDefinition('sigDecl');
+      expect(def !== undefined && 'operator' in def).toBe(true);
+      expect(eff(ce.box(['sigDecl', 3]))).toBe(undefined);
+    });
+  });
+
   it('a pure value-def head does NOT pin the frame', () => {
     const ce = new ComputeEngine();
     ce.declare('purefn', { type: '(number) -> number' });
