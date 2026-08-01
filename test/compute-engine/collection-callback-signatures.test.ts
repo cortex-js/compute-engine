@@ -5,9 +5,9 @@ import { ComputeEngine } from '../../src/compute-engine';
  *
  * Every collection operator that takes a callback declares that slot as the
  * bare `function` primitive (`predicate:`, `key:`, `mapping:`, `reducer:`,
- * `order:`, `generator:` — named uniformly, typed identically). `Product` is
- * the sole exception: it spells the slot as a function SIGNATURE (it is the
- * enumeration pinned in `effects-call-boundary.test.ts`).
+ * `order:`, `generator:` — named uniformly, typed identically). No library
+ * operator spells such a slot as a function SIGNATURE — that enumeration is
+ * pinned empty in `effects-call-boundary.test.ts`.
  *
  * These tests pin WHY the rest stay on the primitive. Narrowing
  * `function` to a signature — e.g. `(unknown) any -> boolean` for a predicate
@@ -77,8 +77,8 @@ describe('a callback whose result type is unknown is a valid operand', () => {
 
 /**
  * The lazy/eager asymmetry: a `function` slot is only enforced on the operators
- * that do NOT hold their operands. This is the same carve-out that leaves
- * `Product`'s signature bound inert.
+ * that do NOT hold their operands. This is the same carve-out that would leave
+ * any bound on a lazy operator's held slot inert.
  */
 describe('the `function` slot enforces only on the eager operators', () => {
   const eager = [

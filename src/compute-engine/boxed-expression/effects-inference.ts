@@ -548,10 +548,18 @@ class Walker {
    *   collapsing every literal with a free variable to the top.
    *
    * Gated throughout on the head's `invokes` metadata, exactly as `effectsOf`
-   * gates the latent half of a contribution: an `invokes: false` operator only
-   * STORES the value, so `(g) ↦ List(g)` and `List(x ↦ Random())` stay pure.
-   * An unresolved head keeps the conservative default (`invokes: true`) — and
-   * has already contributed `{any}` through {@link applyNamed}.
+   * gates the latent half of a contribution: a non-invoking position only
+   * STORES or SELECTS the value, so `(g) ↦ List(g)` and `List(x ↦ Random())`
+   * stay pure. The operator-level `invokesNone` is a cheap pre-gate; the
+   * per-position `invokesAt` is what the loop consults, so an operator that
+   * invokes at some positions and stores at others is handled exactly. An
+   * unresolved head keeps the conservative default (`invokes: true`) — and has
+   * already contributed `{any}` through {@link applyNamed}.
+   *
+   * (The `acceptsCallable` gate below stays position-INSENSITIVE by design —
+   * see its own note: it answers "could an operand of this operator be a
+   * callback at all", which is a different question from "does THIS position
+   * invoke".)
    *
    * @param start First operand index to consider — 1 for `Apply`, whose callee
    * is handled by {@link visit} itself.
@@ -562,9 +570,10 @@ class Walker {
     start: number
   ): void {
     const def = operatorDefinitionOf(this.ce, head);
-    if (def !== undefined && def.invokes === false) return;
+    if (def !== undefined && def.invokesNone) return;
 
     for (let i = start; i < ops.length; i++) {
+      if (def !== undefined && !def.invokesAt(i)) continue;
       const op = ops[i];
 
       // An inline literal in an invoking position: project its latent set.

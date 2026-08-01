@@ -372,6 +372,186 @@ describe('`invokes: false` — a container is pure to build', () => {
   });
 });
 
+describe('Per-position `invokes` — a map, missing indices default to `true`', () => {
+  const ce = new ComputeEngine();
+  ce.assign('randomF', ce.parse('x \\mapsto \\mathrm{Random}()'));
+  // Position 0 INVOKES its callback, position 1 only STORES it.
+  ce.declare('CallThenStore', {
+    // `any` parameters: the point of the fixture is the POSITION metadata, and
+    // a `function`-typed parameter would reject the non-callable operands the
+    // control cases below need.
+    signature: '(any, any) -> number',
+    invokes: { 1: false },
+  });
+
+  it('the invoking position contributes the latent set', () => {
+    expect(eff(ce.box(['CallThenStore', 'randomF', 'randomF']))).toEqual([
+      'random',
+    ]);
+    // …and it is the position, not the operand, that decides: a pure callback
+    // in the invoking position contributes nothing.
+    expect(eff(ce.box(['CallThenStore', 'randomF', 1]))).toEqual(['random']);
+  });
+
+  it('the storing position does NOT', () => {
+    const e = ce.box(['CallThenStore', 1, 'randomF']);
+    expect(eff(e)).toBe(undefined);
+    expect(e.isPure).toBe(true);
+  });
+
+  it('a stored operand still carries its PRODUCTION effects', () => {
+    expect(eff(ce.box(['CallThenStore', 1, ['Random']]))).toEqual(['random']);
+  });
+
+  it('the normalized metadata reads through the accessor', () => {
+    const def = ce.box(['CallThenStore', 1, 1]).operatorDefinition!;
+    expect(def.invokesAt(0)).toBe(true);
+    expect(def.invokesAt(1)).toBe(false);
+    // An index the map says nothing about defaults to the conservative answer.
+    expect(def.invokesAt(2)).toBe(true);
+    // A map never claims "no position invokes" — only `invokes: false` does.
+    expect(def.invokesNone).toBe(false);
+    expect(ce.box(['List', 1]).operatorDefinition!.invokesNone).toBe(true);
+  });
+
+  it('an all-`true` map collapses to the uniform default', () => {
+    ce.declare('AllTrueMap', {
+      signature: '(function) -> number',
+      invokes: { 0: true },
+    });
+    const def = ce.box(['AllTrueMap', 1]).operatorDefinition!;
+    expect(def.invokes).toBe(true);
+    expect(def.invokesAt(0)).toBe(true);
+  });
+
+  it('an invalid `invokes` declaration is a registration error', () => {
+    expect(() =>
+      new ComputeEngine().declare('BadIndex', {
+        signature: '(function) -> number',
+        invokes: { '-1': false } as any,
+      })
+    ).toThrow(/'invokes' field is keyed by operand index/);
+    expect(() =>
+      new ComputeEngine().declare('BadIndex2', {
+        signature: '(function) -> number',
+        invokes: { 1.5: false } as any,
+      })
+    ).toThrow(/'invokes' field is keyed by operand index/);
+    expect(() =>
+      new ComputeEngine().declare('BadValue', {
+        signature: '(function) -> number',
+        invokes: { 0: 'no' } as any,
+      })
+    ).toThrow(/'invokes' entry at operand 0 must be a boolean/);
+  });
+});
+
+describe('Selecting and storing heads drop the LATENT half', () => {
+  function engine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.assign('randomF', ce.parse('x \\mapsto \\mathrm{Random}()'));
+    ce.assign('pureF', ce.parse('x \\mapsto x + 1'));
+    return ce;
+  }
+
+  it('`If` SELECTS a branch — it never applies one', () => {
+    const ce = engine();
+    const e = ce.box(['If', 'True', 'randomF', 'pureF']);
+    expect(eff(e)).toBe(undefined);
+    expect(e.isPure).toBe(true);
+    // The effect surfaces at whatever invokes the SELECTED result.
+    expect(eff(ce.box(['Apply', ['If', 'True', 'randomF', 'pureF'], 0]))).toEqual([
+      'random',
+    ]);
+  });
+
+  it('…but a held branch still contributes its own (production) effects', () => {
+    const ce = engine();
+    expect(eff(ce.box(['If', 'True', ['Random'], 0]))).toEqual(['random']);
+    expect(eff(ce.box(['Which', 'True', ['Random']]))).toEqual(['random']);
+  });
+
+  it('`Which` selects too', () => {
+    const ce = engine();
+    const e = ce.box(['Which', 'True', 'randomF', 'False', 'pureF']);
+    expect(eff(e)).toBe(undefined);
+    expect(e.isPure).toBe(true);
+  });
+
+  it('`Assign` STORES its value — `{scope}`, not `{scope, random}`', () => {
+    const ce = engine();
+    expect(eff(ce.box(['Assign', 'g', 'randomF']))).toEqual(['scope']);
+    // Production effects are untouched: evaluating the RHS really does draw.
+    expect(eff(ce.box(['Assign', 'x', ['Random']]))).toEqual([
+      'random',
+      'scope',
+    ]);
+  });
+
+  it('…and the stored function keeps its arrow — the INFERENCE is unaffected', () => {
+    const ce = engine();
+    ce.box(['Assign', 'stored', 'randomF']).evaluate();
+    expect(ce.box('stored').type.effects).toEqual(['random']);
+    expect(eff(ce.box(['Map', ['List', 1, 2], 'stored']))).toEqual(['random']);
+  });
+
+  it('`Declare` stores too', () => {
+    const ce = engine();
+    expect(eff(ce.box(['Declare', 'd', 'function', 'randomF']))).toEqual([
+      'scope',
+    ]);
+  });
+
+  it('`Block` SEQUENCES and RETURNS — a bare function value is not applied', () => {
+    const ce = engine();
+    for (const [route, e] of Object.entries({
+      'literal/box': ce.box(['Block', ['Function', ['Random']]]),
+      'symbol/box': ce.box(['Block', 'randomF']),
+      'symbol/parse': ce.parse('\\mathrm{Block}(\\mathrm{randomF})'),
+      'symbol/function': ce.function('Block', [ce.symbol('randomF')]),
+    })) {
+      expect([route, eff(e)]).toEqual([route, undefined]);
+      expect([route, e.isPure]).toEqual([route, true]);
+    }
+  });
+
+  it('…while a statement APPLICATION is untouched — it flows through the recursion', () => {
+    const ce = engine();
+    // The suppressed term is the LATENT one; an operand's own effects still
+    // reach the block through `effectsOf`.
+    expect(eff(ce.box(['Block', ['Assign', 'x', 1], ['Random']]))).toEqual([
+      'random',
+      'scope',
+    ]);
+    expect(eff(ce.box(['Block', ['Map', ['List', 1, 2], 'randomF']]))).toEqual([
+      'random',
+    ]);
+    // …and the frame still discharges those draws, not the scope write.
+    expect(
+      eff(
+        ce.box([
+          'WithRandomSeed',
+          42,
+          ['Block', ['Assign', 'x', 1], ['Random']],
+        ])
+      )
+    ).toEqual(['scope']);
+  });
+
+  it('the two channels now AGREE on a build-and-return block', () => {
+    // Before the annotation they disagreed: the runtime channel reported
+    // `{random}` for `Block(() ↦ Random())` while the inference already typed
+    // the enclosing literal's arrow PURE (it treats `Block` as non-projecting).
+    const ce = engine();
+    const built = ce.box(['Block', ['Function', ['Random']]]);
+    expect(built.isPure).toBe(true);
+    const outer = ce.box(['Function', ['Block', ['Function', ['Random']]]]);
+    expect(outer.type.effects).toBe(undefined);
+    // The draw is still on the INNER arrow — it fires when that value is applied.
+    expect(built.type.effects).toEqual(['random']);
+  });
+});
+
 describe('Quote positions: `Hold` is inert, `ReleaseHold` resurfaces', () => {
   const ce = new ComputeEngine();
 

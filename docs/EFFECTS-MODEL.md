@@ -647,7 +647,20 @@ The **contribution** of operand `aᵢ` separates *producing* the operand from
   `Tuple`, the structural operators; audited at Stage 1) — contributes
   the production effects `effectsOf(aᵢ)` only, no latent: `List(randomF)`
   is pure to build; the effect surfaces at whatever application later
-  invokes an element.
+  invokes an element. *(Shipped shape)* the metadata is
+  `boolean | { [operandIndex]: boolean }` — an **operand-index map**
+  (missing indices default to `true`), mirroring `discharges`'
+  convention, with the boolean as the uniform spelling; besides the
+  containers it now also carries the **storing** writers (`Assign`,
+  `Declare` — a stored callback's latent set drops, its *production*
+  effects do not: `Assign(x, Random())` is still `{random, scope}`) and
+  the **selecting** conditionals (`If`, `Which` — a branch is returned,
+  never applied) and the **sequencer** (`Block` — the last value is
+  returned, not applied; this also makes the two channels agree, the
+  inference having always treated `Block` as non-projecting). All three
+  classes are held may-evaluate positions, so the held-evaluation
+  contribution below is unaffected: `Block(Assign(x, 1), Random())` is
+  still `{random, scope}`.
 - **Held (lazy) operand position** — two classes *(v5, finding 8)*:
   - **May-evaluate** (the default for `lazy` positions: a `Sum` body, the
     `WithRandomSeed` body): the operand is not evaluated at application
@@ -724,7 +737,15 @@ existing consumers become views of it:
   existing exception structure** — lazy views in value position and
   binder handling per `RANDOMNESS-MODEL.md` §2 and §6, with the Hold
   exception now *derived* from the quote-position rule above rather than
-  special-cased. Per the `any` ruling ("Labels and lattice"), `any` does
+  special-cased. A third exception is likewise derived from the
+  per-position `invokes` metadata: a `Function` **value** in a
+  non-invoking position is a value boundary — the walk does not scan its
+  body for pending draws (the head only stores/selects/returns it; the
+  draws fire at a later application, outside the frame's obligation) —
+  while an inline lambda in an *invoking* position (a `Map` callback)
+  still pins, and application operands in non-invoking positions still
+  scan (a surviving `If(c, Random(), 0)` owes its frame). Per the `any`
+  ruling ("Labels and lattice"), `any` does
   **not** satisfy the first term — unknown operators never pin frames.
 
 This closes hole 1 for *both* consumers (v2 fixed only the boolean).
@@ -1445,13 +1466,17 @@ Each stage is useful without the next; per-stage pinning tests named.
   no currently-passing impure-callback idiom breaks
   (`Map(xs, x ↦ Random())` keeps working: `Map`'s bound is the `function`
   primitive, effect-top by definition above). **Result** (pinned by
-  `effects-call-boundary.test.ts`, "blast radius"): exactly one library
-  operator declares a function-*signature* parameter — `Product` — and it
-  newly rejects nothing, so the enumeration is green with zero behavior
-  change. Its bound is nonetheless **unenforced**: `Product` is
-  `lazy: true`, so the non-strict/lazy carve-out defers the check on its
-  held body indefinitely, and an impure body is accepted there today
-  rather than rejected. (`Iterate` was in this enumeration until its
+  `effects-call-boundary.test.ts`, "blast radius"): **zero** library
+  operators declare a function-*signature* parameter, so the enumeration is
+  green with zero behavior change and there is no bound to enforce
+  anywhere. `Product` was the last entry: its body slot is a *held
+  expression* — the multiplicand of `Product(k^2, (k, 1, 10))` — not a
+  function value, and it is now declared `any` exactly as `Sum`'s is, the
+  two big ops describing the same role with the same shape. The bound it
+  used to carry was in any case **unenforced**: `Product` is `lazy: true`,
+  so the non-strict/lazy carve-out deferred the check on its held body
+  indefinitely, and an impure body is accepted there today rather than
+  rejected. (`Iterate` was in this enumeration until its
   callback slot was returned to the `function` primitive: its contract is
   parametric — `((integer, T) -> T, T?) -> list<T>`, the accumulator type
   being the callback's own result type — which the grammar cannot express

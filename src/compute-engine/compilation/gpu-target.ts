@@ -28,7 +28,8 @@ import type {
 } from './types.js';
 import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
 import { isNonRealNumber } from '../../common/type/utils.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { couldMatch, isSubtype } from '../../common/type/subtype.js';
+import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -2348,6 +2349,709 @@ function compilePointSwizzle(
   return `${compile(arg)}.${comp}`;
 }
 
+// ---------------------------------------------------------------------------
+// `At` — positional access on a shader target.
+// See `docs/plans/2026-08-01-at-gpu-compile-design.md`.
+//
+// CE's `At` is 1-based, counts a negative index from the end, and yields the
+// position-preserving absence marker for `0`, an out-of-range index or a
+// non-integer one; a non-numeric index leaves `At` unevaluated (no value at
+// all). The NUMERIC-TARGET PROJECTION of both outcomes is `NaN` (`_SYS.at`,
+// the parity oracle), and the shader lowering targets that projection — never
+// the raw interpreter output.
+//
+// Admissible only against a base whose element COUNT is static and whose
+// elements are provably scalar numeric: a shader value has a shape, and a
+// runtime-length list has none. Every other shape declines with its OWN
+// reason (Tycho item 109a) rather than a shared "no lowering" text.
+//
+// Point-list bases are DEFERRED (design § D3): `At(PL, k)` types
+// `missing | tuple`, which the §3.F object-domain-absence gate intercepts
+// ahead of any target function table, so an entry here would be unreachable
+// for that shape.
+// ---------------------------------------------------------------------------
+
+/** The static element count of an `At` base, or why it has no shader shape. */
+type GPUAtBase = { count: number } | { decline: string };
+
+/**
+ * Is every element of `base` provably a SCALAR NUMERIC value? Returns the
+ * decline reason when not.
+ *
+ * Structural for a literal `List`/`Tuple` (the element expressions are right
+ * there), type-based otherwise. A non-numeric element has no `float` reading,
+ * and an aggregate one (a complex value, a nested tuple) is not a component of
+ * the `vecN`/`float[N]` the base lowers to — indexing either would emit source
+ * a driver rejects.
+ *
+ * The type-based readings ask `gpuIsVectorComponentType`, the same predicate
+ * `gpuDeclaredComponentCount` uses, NOT "is it a number?": `complex` is a
+ * number and lowers to a `vec2`, so a `tuple<complex, complex, complex>` base
+ * emitted `tc.x` — a driver-rejected component of a component — behind a
+ * reported success.
+ */
+function gpuAtNonScalarElement(base: Expression): string | undefined {
+  if (isFunction(base, 'List') || isFunction(base, 'Tuple')) {
+    const ops = base.ops!;
+    for (let i = 0; i < ops.length; i++) {
+      if (BaseCompiler.isNonScalarShape(ops[i]))
+        return (
+          `element ${i + 1} of the base is itself an aggregate ` +
+          `(type \`${ops[i].type.toString()}\`), so it is not one component ` +
+          `of a shader vector`
+        );
+      if (!isSubtype(ops[i].type.type, 'number'))
+        return (
+          `element ${i + 1} of the base (type \`${ops[i].type.toString()}\`) ` +
+          `is not provably scalar numeric, and a shader value has no other ` +
+          `element domain here`
+        );
+    }
+    return undefined;
+  }
+  const t = base.type.type;
+  if (typeof t !== 'string') {
+    if (t.kind === 'tuple') {
+      for (let i = 0; i < t.elements.length; i++)
+        if (!gpuIsVectorComponentType(t.elements[i].type))
+          return (
+            `slot ${i + 1} of the base tuple (type ` +
+            `\`${typeToString(t.elements[i].type)}\`) is not a REAL scalar — ` +
+            `a shader vector's components are single floats, and a shader ` +
+            `value has no other element domain here`
+          );
+      return undefined;
+    }
+    if (t.kind === 'list') {
+      if (!gpuIsVectorComponentType(t.elements))
+        return (
+          `the base's element type \`${typeToString(t.elements)}\` is not a ` +
+          `REAL scalar — a shader vector's components are single floats, and ` +
+          `a shader value has no other element domain here`
+        );
+      return undefined;
+    }
+  }
+  return (
+    `the base (type \`${base.type.toString()}\`) states no element type, so ` +
+    `its elements are not provably scalar numeric`
+  );
+}
+
+/**
+ * The GPU DECLARATION FRAME's reading of the elements of a base whose
+ * component count that frame supplied: `undefined` when they are shader
+ * floats, the decline reason when they are not, and `'unframed'` when no frame
+ * decides the name — in which case the boxed type is the only reading there
+ * is (`gpuAtNonScalarElement`).
+ *
+ * A `compileShader` input and a `compileFunction` parameter are undeclared
+ * ENGINE symbols: nothing but the caller's declaration carries their shader
+ * type (`gpuTypeOfValue` asks the frame FIRST for exactly this reason), and
+ * `aggregateComponentCount` already reads their WIDTH off the frame. Judging
+ * their elements by the boxed type instead declined every such base — the
+ * census witness's own shape.
+ */
+function gpuAtFramedBaseElements(
+  base: Expression
+): string | undefined | 'unframed' {
+  if (!isSymbol(base)) return 'unframed';
+  if (BaseCompiler.localShapeFrameOf(base.symbol) === undefined)
+    return 'unframed';
+  const declared = gpuDeclaredTypeOf(base);
+  // A `Block` local's width was inferred from the value bound to it, whose
+  // components are already shader floats; only a CALLER-declared spelling can
+  // name a non-float component type (`ivec3`, `bvec2`).
+  if (declared?.value !== undefined && declared.value.element !== 'f')
+    return (
+      `the base is declared "${declared.spelling}" by the caller, whose ` +
+      `components are not floats — a positional shader access reads one ` +
+      `float component, and neither language converts between the component ` +
+      `types`
+    );
+  return undefined;
+}
+
+/**
+ * How the GPU DECLARATION FRAME reads a scalar index: `undefined` when it is
+ * (or passes for) a shader float, `{ cast: true }` when it is an INTEGER that
+ * must be converted before it reaches the helper's `float` parameter, and a
+ * decline reason when it is no index at all.
+ *
+ * The same blind spot as `gpuAtFramedBaseElements`, on the other operand: a
+ * caller-declared name's boxed type is `unknown`, which the
+ * unknown-as-numeric-parameter rule reads as a float — so a `bool` or `i32`
+ * shader input sailed into `_gpu_atN(v, i)` as a shader type error behind a
+ * reported success.
+ */
+function gpuAtFramedIndex(
+  index: Expression
+): { decline: string } | { cast: true } | undefined {
+  const declared = gpuDeclaredTypeOf(index);
+  if (declared === undefined) {
+    // A name framed `bool` by a synthesized user-function signature carries
+    // its boolean-ness nowhere else either (`BaseCompiler.LOCAL_BOOLEAN`).
+    if (isSymbol(index) && BaseCompiler.isLocalBoolean(index.symbol))
+      return {
+        decline:
+          'the index is a shader `bool`, and a positional access indexes by ' +
+          'a number — neither language converts a boolean to one',
+      };
+    return undefined;
+  }
+  const v = declared.value;
+  if (v === undefined || v.width > 1 || v.element === 'b')
+    return {
+      decline:
+        `the index is declared "${declared.spelling}" by the caller, which ` +
+        `is not a scalar number — a positional shader access indexes by a ` +
+        `float, and neither language converts to one implicitly`,
+    };
+  return v.element === 'f' ? undefined : { cast: true };
+}
+
+/**
+ * The static element count of an admissible `At` base — a declared
+ * `vector<N>`, a parameterized `tuple<…>`, or a literal `List`/`Tuple` — or a
+ * DISCRIMINATED decline reason.
+ *
+ * Bases whose elements are object-domain (`list<string>`) never reach here:
+ * the §3.F absence gate in `BaseCompiler.compile` pre-empts them with its own
+ * diagnostic, so no reason is owed for them.
+ */
+function gpuAtBaseShape(base: Expression | null): GPUAtBase {
+  if (base === null) return { decline: 'it has no base operand' };
+  const t = base.type.type;
+
+  if (isSymbol(base, 'Missing') || t === 'missing')
+    return {
+      decline:
+        'the base is the absence marker `Missing`, which has no shader ' +
+        'value to index into',
+    };
+
+  // A complex value lowers to `vec2(re, im)` — a NUMBER in the shader's
+  // complex convention, not an indexable collection. Asked only of a
+  // NON-literal base: `isComplexValued` reads a literal `List` with a complex
+  // ELEMENT as complex-valued, and that shape's honest fault is the element
+  // one (reported below), not "the base is a complex number".
+  if (
+    !isFunction(base, 'List') &&
+    !isFunction(base, 'Tuple') &&
+    BaseCompiler.isComplexValued(base)
+  )
+    return {
+      decline:
+        'the base is a complex value (lowered as `vec2(re, im)` by the ' +
+        'complex convention), not an indexable collection',
+    };
+
+  if (
+    isFunction(base, 'Dictionary') ||
+    (typeof t !== 'string' && t.kind === 'dictionary')
+  )
+    return {
+      decline:
+        `the base is a dictionary (type \`${base.type.toString()}\`) and a ` +
+        `shader has no keyed lookup — only positional access into a value ` +
+        `of static shape`,
+    };
+
+  if (t === 'tuple')
+    return {
+      decline:
+        'the base is an unparameterized `tuple`, which states no arity, so ' +
+        'there is no static element count to index against',
+    };
+
+  const n = BaseCompiler.aggregateComponentCount(base);
+  if (n === undefined) {
+    if (typeof t !== 'string' && t.kind === 'list') {
+      // Belt over suspenders: no spelling reaches this arm today. A multi-axis
+      // base makes `At` answer a COLLECTION element (`missing | vector<3>`),
+      // which the §3.F object-domain-absence gate intercepts ahead of any
+      // target function table — the same pre-emption the header describes for
+      // `list<string>`. Kept because the gate's typing is not this entry's to
+      // depend on.
+      if ((t.dimensions?.length ?? 0) >= 2)
+        return {
+          decline:
+            `the base (type \`${base.type.toString()}\`) is multi-axis; only ` +
+            `a one-dimensional base has a positional shader lowering`,
+        };
+      return {
+        decline:
+          `the base (type \`${base.type.toString()}\`) has no statically ` +
+          `known length, and a shader value must have one`,
+      };
+    }
+    return {
+      decline:
+        `the base (type \`${base.type.toString()}\`) is not a statically ` +
+        `counted collection`,
+    };
+  }
+  // A NEGATIVE count is the type builder's encoding of an UNKNOWN extent
+  // (`list<number^?>` → `dimensions: [-1]`), not a width: without this the
+  // count flowed on and emitted `_gpu_at-1(…)`, a call to a helper no
+  // preamble generates. Same reading as the unsized `list` above.
+  if (n < 0)
+    return {
+      decline:
+        `the base (type \`${base.type.toString()}\`) has no statically ` +
+        `known length, and a shader value must have one`,
+    };
+  if (n === 0)
+    return {
+      decline:
+        'the base is empty, and neither shader language has a zero-length ' +
+        'value type',
+    };
+  if (n === 1)
+    return {
+      decline:
+        'the base has 1 element: there is no `vec1`, and a 1-element ' +
+        'aggregate has no shader value shape of its own',
+    };
+
+  // The elements. A name whose COUNT came from the GPU declaration frame is
+  // judged against the shape the CALLER declared — its boxed type states no
+  // element type at all.
+  const framed = gpuAtFramedBaseElements(base);
+  if (framed !== 'unframed')
+    return framed === undefined ? { count: n } : { decline: framed };
+
+  const bad = gpuAtNonScalarElement(base);
+  if (bad !== undefined) return { decline: bad };
+  return { count: n };
+}
+
+/**
+ * The 0-based slot a 1-based CE index `i` selects in a base of `n` elements,
+ * or `null` when it selects nothing — `0`, out of range, or not an integer.
+ * `null` is the absence marker, which projects to the target's NaN spelling.
+ */
+function gpuAtSlot(i: number, n: number): number | null {
+  if (!Number.isInteger(i) || i === 0) return null;
+  const j = i > 0 ? i - 1 : n + i;
+  return j >= 0 && j < n ? j : null;
+}
+
+/**
+ * The emitted source for element `j` (0-based) of an admissible base of `n`
+ * elements.
+ *
+ * A literal base folds to the element's own compiled source (`At([10,20,30],
+ * 2)` → `20.0`, not `vec3(…).y`) — zero runtime cost. Otherwise a base of
+ * width 2–4 is a `vecN` and takes a component swizzle; a wider one is a
+ * `float[N]` / `array<f32, N>` and takes a direct subscript. The
+ * atomic-emission rule (the sibling point-list as-built note) keeps a bare
+ * identifier unparenthesized so the emission stays atomic for the operand-
+ * shape gate; anything else is parenthesized and judged as the compound it is.
+ */
+function gpuAtElement(
+  base: Expression,
+  j: number,
+  n: number,
+  compile: (e: Expression) => string
+): string {
+  if (isFunction(base, 'List') || isFunction(base, 'Tuple'))
+    return compile(base.ops![j]);
+  const code = compile(base);
+  const access = n <= 4 ? `.${'xyzw'[j]}` : `[${j}]`;
+  return gpuIsAtomicEmission(code) ? `${code}${access}` : `(${code})${access}`;
+}
+
+/**
+ * Does `gpuAtGather` fold `slots` to a SINGLE swizzle of the base? Stated once
+ * so the emission and the reference count below cannot drift apart.
+ */
+function gpuAtIsSwizzleGather(
+  base: Expression,
+  slots: ReadonlyArray<number | null>,
+  n: number
+): boolean {
+  const isLiteral = isFunction(base, 'List') || isFunction(base, 'Tuple');
+  return !isLiteral && n <= 4 && slots.every((s) => s !== null);
+}
+
+/**
+ * How many times the emission `gpuAtGather` will actually CHOOSE references
+ * the base source — one for a swizzle however many components it selects, one
+ * per in-range slot for a constructor.
+ *
+ * Counting the non-null slots instead described a constructor that a
+ * swizzling gather never emits, and so declined `At(impure, [1, 3])`, whose
+ * emission evaluates its base exactly once.
+ */
+function gpuAtBaseRefs(
+  base: Expression,
+  slots: ReadonlyArray<number | null>,
+  n: number
+): number {
+  if (gpuAtIsSwizzleGather(base, slots, n)) return 1;
+  return slots.filter((s) => s !== null).length;
+}
+
+/**
+ * The `vecK` gather of `slots` (0-based positions, `null` = out of range) out
+ * of `base`. All-in-range over a `vecN` base folds to a single swizzle
+ * (`v.xz`) — one reference to the base; anything else is a constructor whose
+ * slots are the folded components (`vec2(v.x, _gpu_nan())`).
+ */
+function gpuAtGather(
+  base: Expression,
+  slots: ReadonlyArray<number | null>,
+  n: number,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  if (gpuAtIsSwizzleGather(base, slots, n)) {
+    const code = compile(base);
+    const sw = slots.map((s) => 'xyzw'[s!]).join('');
+    return gpuIsAtomicEmission(code) ? `${code}.${sw}` : `(${code}).${sw}`;
+  }
+  const ctor =
+    target.language === 'wgsl' ? `vec${slots.length}f` : `vec${slots.length}`;
+  const parts = slots.map((s) =>
+    s === null ? gpuNaN(target) : gpuAtElement(base, s, n, compile)
+  );
+  return `${ctor}(${parts.join(', ')})`;
+}
+
+/**
+ * How a literal index-list entry classifies. The tiers are decided from the
+ * ENTRIES, not from the list's type: a literal integer gather folds at compile
+ * time, a literal boolean mask is statically a gather, and a runtime-valued
+ * mask has no static result length at all (design ruling 2).
+ */
+type GPUAtEntry = 'int' | 'bool' | 'other-literal' | 'dyn-bool' | 'dyn';
+
+function gpuAtEntryKind(e: Expression): GPUAtEntry {
+  if (isSymbol(e, 'True') || isSymbol(e, 'False')) return 'bool';
+  if (isNumber(e))
+    return e.im === 0 && Number.isInteger(e.re) ? 'int' : 'other-literal';
+  if (isSubtype(e.type.type, 'boolean')) return 'dyn-bool';
+  return 'dyn';
+}
+
+/**
+ * `At` on a shader target. Returns the emitted source or throws the
+ * fail-closed (D6) decline, which names the shape that has no lowering.
+ */
+function compileGPUAt(
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  // Annotated (rather than inferred) so a `decline(…)` call narrows what
+  // follows it — the `gpuCheckOperandShapes` convention.
+  const decline: (reason: string) => never = (reason) => {
+    throw new Error(`At: ${reason}. Fail closed (D6).`);
+  };
+
+  if (args.length < 2) decline('it has no index operand');
+  if (args.length > 2)
+    decline(
+      `a multi-index access (${args.length - 1} indices) walks a nested ` +
+        `collection, and only a one-dimensional base has a shader value shape`
+    );
+
+  const base = args[0];
+  const index = args[1];
+
+  const shape = gpuAtBaseShape(base);
+  if ('decline' in shape) decline(shape.decline);
+  const n = shape.count;
+
+  // Evaluate-once. A shader language does not specify the evaluation ORDER of
+  // a call's arguments, so two impure operands could commute between drivers.
+  if (!base.isPure && !index.isPure)
+    decline(
+      'both the base and the index are impure, and neither shader language ' +
+        'specifies the order in which a call evaluates its arguments'
+    );
+  // An emission that DISCARDS the base's operands (the literal-base element
+  // fold) or references the base source MORE THAN ONCE (a mixed gather
+  // constructor) needs the base to be pure.
+  const isLiteralBase = isFunction(base, 'List') || isFunction(base, 'Tuple');
+  const requirePureBase = (why: string): void => {
+    if (!base.isPure) decline(why);
+  };
+  // A fold to the NaN spelling omits an operand from the OUTPUT ENTIRELY, so
+  // it must not omit an impure one: the dropped draw never happens, which
+  // shifts the shader's random stream (the `gpuConditionalOperand` rationale).
+  const requirePureFold = (what: 'base' | 'index'): void => {
+    if ((what === 'base' ? base : index).isPure) return;
+    decline(
+      `the access folds to the NaN spelling, which would DISCARD the impure ` +
+        `${what} unevaluated`
+    );
+  };
+
+  // ---- Collection index: the gather / mask tiers (design § D2) ------------
+  if (isFunction(index, 'List')) {
+    const entries = index.ops!;
+    const kinds = entries.map(gpuAtEntryKind);
+
+    const bad = kinds.indexOf('other-literal');
+    if (bad >= 0)
+      decline(
+        `entry ${bad + 1} of the index list ` +
+          `(\`${entries[bad].toString()}\`) is a literal that is not an ` +
+          `integer, so it selects no element and the list is not an index ` +
+          `gather at all`
+      );
+
+    const set = new Set(kinds);
+    const numeric = set.has('int') || set.has('dyn');
+    const boolean = set.has('bool') || set.has('dyn-bool');
+    if (numeric && boolean)
+      decline(
+        'the index list mixes integer entries with boolean ones, so it is ' +
+          'neither a gather nor a mask'
+      );
+    if (set.has('dyn-bool'))
+      decline(
+        'the index is a boolean mask with runtime-valued entries: its ' +
+          'result LENGTH depends on how many of them are true at run time, ' +
+          'so it has no static shader value shape. This shape has no shader ' +
+          'lowering at all — it is not a missing tier'
+      );
+
+    // Resolve the selected 0-based slots. A literal mask is statically a
+    // gather (its length must EQUAL the base's, as the interpreter requires);
+    // a literal integer list gathers position-preservingly.
+    let slots: (number | null)[];
+    if (set.has('bool')) {
+      if (entries.length !== n)
+        decline(
+          `the index is a boolean mask of length ${entries.length}, but the ` +
+            `base has ${n} elements — a mask's length must equal the ` +
+            `collection's`
+        );
+      slots = [];
+      entries.forEach((e, i) => {
+        if (isSymbol(e, 'True')) slots.push(i);
+      });
+    } else if (set.has('dyn')) {
+      decline(
+        `the index list has ${entries.length} runtime-valued integer ` +
+          `entries; a static-count DYNAMIC gather is not lowered in this ` +
+          `version (no witness requested it yet) — the helpers it needs are ` +
+          `the same ones the scalar form already emits`
+      );
+      slots = [];
+    } else {
+      slots = entries.map((e) => gpuAtSlot((e as any).re as number, n));
+    }
+
+    const w = slots.length;
+    if (w === 0)
+      decline(
+        'the index selects 0 elements, and neither shader language has a ' +
+          'zero-length value type'
+      );
+    if (w === 1)
+      decline(
+        'the index selects exactly 1 element, which CE types as a 1-element ' +
+          'LIST (pinned: `At(L, [2])` → `[20]`), and no shader value has ' +
+          'that shape — there is no `vec1`'
+      );
+    if (w > 4)
+      decline(
+        `the index selects ${w} elements, so the RESULT would be a ` +
+          `\`vec${w}\`, and a shader vector holds 2 to 4`
+      );
+
+    if (isLiteralBase)
+      requirePureBase(
+        'the base is a literal collection with an impure element, and ' +
+          'folding the gather would discard it unevaluated'
+      );
+    else {
+      // Judged on the emission `gpuAtGather` will actually take: a swizzle
+      // references the base once whatever it selects, a constructor once per
+      // in-range slot — and an ALL-out-of-range gather not at all.
+      const refs = gpuAtBaseRefs(base, slots, n);
+      if (refs === 0)
+        requirePureBase(
+          'the gather selects no element of the base, so its emission would ' +
+            'DISCARD the impure base unevaluated'
+        );
+      else if (refs > 1)
+        requirePureBase(
+          'the gather emits a constructor that references the impure base ' +
+            'more than once, which would evaluate it more than once'
+        );
+    }
+
+    return gpuAtGather(base, slots, n, compile, target);
+  }
+
+  // ---- Scalar index (design § D1) ----------------------------------------
+  const it = index.type.type;
+
+  // The absence marker itself: the interpreter has no value to index with, and
+  // the numeric projection of "no value" is NaN. The fold emits neither
+  // operand, so neither may be impure.
+  if (isSymbol(index, 'Missing') || isSubtype(it, 'missing')) {
+    requirePureFold('base');
+    requirePureFold('index');
+    return gpuNaN(target);
+  }
+
+  // A string KEY. Only a dictionary base takes one (and that base has already
+  // declined above), so on a positional base it is the wrong index domain
+  // outright — named separately from the type-based decline below, which
+  // covers a symbol merely DECLARED `string`.
+  if (isString(index))
+    decline(
+      'the index is a string key, and only a dictionary base takes one — a ' +
+        'positional shader access indexes by number'
+    );
+
+  if (BaseCompiler.isComplexValued(index))
+    decline(
+      'the index is a complex value, which lowers to a `vec2(re, im)`; the ' +
+        'interpreter reads its real part, and a shader has no such reading ' +
+        'of a vector in an index position'
+    );
+
+  // A CALLER-DECLARED name, whose declared shader type is the only reading of
+  // it there is — asked ahead of the type-based readings below, which see the
+  // undeclared engine symbol's type.
+  const framedIndex = gpuAtFramedIndex(index);
+  if (framedIndex !== undefined && 'decline' in framedIndex)
+    decline(framedIndex.decline);
+
+  // A literal real index resolves against N at compile time — zero runtime
+  // cost, and `0` / out of range / non-integer / non-finite fold straight to
+  // the NaN spelling.
+  if (isNumber(index)) {
+    const j = gpuAtSlot(index.re, n);
+    if (j === null) {
+      // The fold emits neither operand (the index is a literal, so pure).
+      requirePureFold('base');
+      return gpuNaN(target);
+    }
+    if (isLiteralBase)
+      requirePureBase(
+        'the base is a literal collection with an impure element, and ' +
+          'folding the access would discard it unevaluated'
+      );
+    return gpuAtElement(base, j, n, compile);
+  }
+
+  // A collection-typed index that is NOT a literal list: there is no tier for
+  // it (its entries are not readable at compile time).
+  if (isSubtype(it, 'collection')) {
+    const k = BaseCompiler.aggregateComponentCount(index);
+    if (k === undefined)
+      decline(
+        `the index is a collection (type \`${index.type.toString()}\`) with ` +
+          `no statically known length, so there is no static count to emit ` +
+          `a result shape against`
+      );
+    decline(
+      `the index is a collection of ${k} runtime-valued entries; a ` +
+        `static-count DYNAMIC gather is not lowered in this version (no ` +
+        `witness requested it yet)`
+    );
+  }
+
+  // `unknown`/`value`-typed parameters are numeric on this target (the
+  // compile model's unknown-as-numeric-parameter rule — the witness's loop
+  // variable routinely types as a wide union). Only a PROVABLY non-numeric
+  // index declines, and it names the type.
+  if (!couldMatch(it, 'number'))
+    decline(
+      `the index (type \`${index.type.toString()}\`) is provably not a ` +
+        `number, so it selects no element and \`At\` has no value to project`
+    );
+
+  // Dynamic index: one call, so the base and the index are each evaluated
+  // exactly once. The guard inside the helper is what makes both languages'
+  // out-of-bounds rules unreachable. A caller-declared INTEGER index is
+  // converted at the call site — the guard runs entirely in float space.
+  const isWGSL = target.language === 'wgsl';
+  const idx = compile(index);
+  return `_gpu_at${n}(${compile(base)}, ${
+    framedIndex === undefined ? idx : `${isWGSL ? 'f32' : 'float'}(${idx})`
+  })`;
+}
+
+/**
+ * The `_gpu_atN` positional-access helper preamble, in the language of
+ * `isWGSL`. Generated per N on demand (`preambleFor` scans the emitted code
+ * for `_gpu_at(\d+)`), so a `vector<7>` base gets a `_gpu_at7` over a
+ * `float[7]` with the same body shape as the `vecN` forms.
+ *
+ * The guard runs ENTIRELY IN FLOAT SPACE and is the load-bearing part: `int()`
+ * is undefined outside the int range, so nothing may be cast before the range
+ * test, and the negated compound (`!(i >= -N && i <= N)`) swallows `NaN` and
+ * `±∞` — which `floor` alone would not.
+ */
+function gpuAtPreamble(n: number, isWGSL: boolean): string {
+  const lang = isWGSL ? 'wgsl' : 'glsl';
+  const nan = gpuNonFiniteLiteral(NaN, lang);
+  const b = formatFloat(n, lang);
+  const guard = `!(i >= -${b} && i <= ${b}) || i != floor(i) || i == 0.0`;
+  const doc =
+    `  // 1-based; negative counts from the end; anything else → NaN.\n` +
+    `  // The guard runs entirely in float space: it rejects NaN, ±∞, huge\n` +
+    `  // finite values, non-integers and 0 BEFORE the int cast (undefined\n` +
+    `  // outside int range), and makes both languages' out-of-bounds rules\n` +
+    `  // (GLSL UB / WGSL indeterminate) unreachable.`;
+  if (isWGSL) {
+    // A value-typed `array` PARAMETER is not reliably indexable by a runtime
+    // expression (the restriction WGSL has never applied to a `vecN`), so the
+    // array forms copy to a local `var` — a reference — first. A vector form
+    // indexes its parameter directly.
+    const param = n <= 4 ? `v: vec${n}f` : `v: array<f32, ${n}>`;
+    const copy = n <= 4 ? '' : '  var a = v;\n';
+    const src = n <= 4 ? 'v' : 'a';
+    return `
+fn _gpu_at${n}(${param}, i: f32) -> f32 {
+${doc}
+  if (${guard}) {
+    return ${nan};
+  }
+  let k = i32(i);
+${copy}  return ${src}[select(${n} + k, k - 1, k > 0)];
+}
+`;
+  }
+  const param = n <= 4 ? `vec${n} v` : `float v[${n}]`;
+  return `
+float _gpu_at${n}(${param}, float i) {
+${doc}
+  if (${guard})
+    return ${nan};
+  int k = int(i);
+  return v[(k > 0) ? k - 1 : ${n} + k];
+}
+`;
+}
+
+/**
+ * The widths of the `_gpu_atN` helpers `code` calls — ascending and
+ * deduplicated, so a helper used many times is declared once. Read off the
+ * EMITTED source rather than kept in a per-compilation table, like every other
+ * `preambleFor` scan.
+ *
+ * Anchored on a CALL SITE with a name boundary on both ends: a bare
+ * `/_gpu_at(\d+)/` matched a user symbol spelled `_gpu_at5`, and the
+ * "helper" it then generated redeclared that name.
+ */
+function gpuAtHelperWidths(code: string): number[] {
+  const widths = new Set<number>();
+  const re = /(?<![\w$])_gpu_at(\d+)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) widths.add(Number(m[1]));
+  return [...widths].sort((a, b) => a - b);
+}
+
 /**
  * Extract a lowercase string literal from a boxed expression, or `null`
  * if it isn't a string literal. Operators that need to switch on a
@@ -2762,6 +3466,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_catan(${compile(args[0])})`;
     return `atan(${compile(args[0])})`;
   },
+  // Positional access. The lowering CONSUMES its aggregate base — it indexes
+  // INTO it — so the operand shapes it was handed are no longer in the
+  // emission (a `vec3` base becomes a scalar `v.y`, a `float[7]` base a
+  // `_gpu_at7(…)` call), and it declares that with `markAggregateConsuming`
+  // rather than letting the gate infer it. See `compileGPUAt`.
+  At: markAggregateConsuming((args, compile, target) =>
+    compileGPUAt(args, compile, target)
+  ),
   Ceil: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `ceil(${compile(args[0])})`;
@@ -7417,8 +8129,21 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // Only GLSL emits `_gpu_nan()` / `_gpu_inf()` (WGSL uses an inline bit
     // pattern); both helpers are built the same way, from the ES 3.00
     // `intBitsToFloat` this target already assumes.
-    if (code.includes('_gpu_nan')) preamble += GPU_NAN_PREAMBLE_GLSL;
+    //
+    // The `_gpu_at*` positional-access helpers call `_gpu_nan()` from their
+    // BODIES, which these scans never see — they read the EMITTED code, never
+    // a helper body — so an `At` lowering FORCES the GLSL NaN helper: a
+    // compilation whose code contains only `_gpu_at3(…)` must still get it.
+    // WGSL has no `_gpu_nan` at all, so only GLSL is forced.
+    const isWGSL = this.languageId === 'wgsl';
+    const atWidths = gpuAtHelperWidths(code);
+    if (code.includes('_gpu_nan') || (!isWGSL && atWidths.length > 0))
+      preamble += GPU_NAN_PREAMBLE_GLSL;
     if (code.includes('_gpu_inf')) preamble += GPU_INF_PREAMBLE_GLSL;
+    // AFTER the NaN branches, and that ORDER is load-bearing: GLSL requires a
+    // declaration before its use, and these bodies call `_gpu_nan()`. The
+    // order test in `at-gpu-compile.test.ts` is the tripwire.
+    for (const w of atWidths) preamble += gpuAtPreamble(w, isWGSL);
     if (code.includes('_gpu_powi'))
       preamble +=
         this.languageId === 'wgsl'

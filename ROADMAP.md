@@ -174,8 +174,31 @@ touches it.
 
 | bucket                                                                      | target   |                         pop | the question                                                                                                                                                                                                                                                                                                                            |
 | --------------------------------------------------------------------------- | -------- | --------------------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `At`                                                                        | glsl     | **26 st — largest GPU gap** | A dynamic index into a `vecN` has no direct GLSL form; needs a ternary/switch chain or a fixed-size array, and a convention for out-of-range. **Rank 1** (was rank 2; the former rank 1 — `PointList`/`PointZ` — landed 2026-07-31, residual below).                                                                                     |
-| `Integrate`                                                                 | glsl     |                       22 st | Quadrature inside a shader — which rule, what iteration budget, what happens on non-convergence. Large; do not start without deciding the budget question.                                                                                                                                                                              |
+| `Integrate`                                                                 | glsl     |                       22 st | Quadrature inside a shader — which rule, what iteration budget, what happens on non-convergence. Large; do not start without deciding the budget question. **The remaining design-first entry** (former ranks 1 — `PointList`/`PointZ` and `At` — landed 2026-07-31/08-01, residuals below).                                             |
+
+**A-2 residual — `At` on GPU (landed 2026-08-01; design + rulings in
+`docs/plans/2026-08-01-at-gpu-compile-design.md`).** Scalar-index and
+literal-gather tiers over statically-sized numeric bases shipped (any
+N ≥ 2 via per-N `_gpu_atN` helpers; the `p_0[i]` census witness shape).
+Remaining, per the D4 disposition table — do not re-derive:
+
+- **Point-list bases: blocked on §3.F** (the node types `missing | tuple`
+  and the object-domain-absence gate intercepts before any GPU table
+  entry). Unblocking needs its own ruling: a per-operator absence
+  projection (Missing point → NaN-component vector), or in-range type
+  narrowing. Filed with the consumer item.
+- Demand-gated: static-count dynamic gather (near-zero cost to flip —
+  the same helpers in a constructor; witness count requested from the
+  consumer), gather K > 4 (width ceiling), gather K 0/1 (the pinned
+  1-element-list contract has no shader shape), dictionary/string-key/
+  multi-index forms.
+- Permanent (not TODOs): runtime-valued boolean masks (result length is
+  not static — no shader value shape), unknown-length bases/index lists.
+- Latent observation from the round (own look, out of scope):
+  `BaseCompiler.isComplexValued` answers `true` for a literal `List`
+  containing one complex element, skewing `aggregateComponentCount` for
+  other callers.
+- No retirement of the 26-state count without the consumer re-measure.
 
 **A-1 residual — `PointList`/`PointZ` (main design pass landed 2026-07-31;
 rulings + design in `docs/plans/2026-07-31-pointlist-compile-design.md`).**

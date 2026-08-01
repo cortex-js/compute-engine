@@ -231,7 +231,28 @@ function hasPendingImpureApplication(
         (op, i) => clauses.has(i) && hasPendingImpureApplication(op, under)
       );
   }
-  return expr.ops.some((op) => hasPendingImpureApplication(op, under));
+  return expr.ops.some((op, i) => {
+    // A function LITERAL in a NON-INVOKING position is a completed value, not
+    // work this evaluation owed the frame: the operator stores, selects or
+    // returns it (`If(c, x ↦ Random(), …)`, `Block(x ↦ Random())`,
+    // `List(x ↦ Random())`), so its body draws at whatever later APPLIES it,
+    // under whatever frame is active then — the same §6 value-position ruling
+    // that skips a lazy view's `Function` subtree above. Without this, the
+    // walk contradicted the projection channel and split on spelling: a
+    // named callback (`If(c, rf, …)`) released the frame while the very same
+    // lambda written inline pinned it.
+    //
+    // Deliberately narrow. It applies only to a `Function` VALUE: an
+    // application operand in the same position keeps scanning, because a
+    // non-invoking operator still EVALUATES it under itself
+    // (`If(c, Random(), 0)`, a `Block` statement). And it applies only where
+    // the definition says the position does not invoke: `invokesAt` defaults
+    // TRUE for a missing map index, and an unresolved head has no definition
+    // at all, so both fall through to the conservative descend — which is
+    // what keeps the item-104 case (`ListFrom(Map(u, x ↦ Random()))`) pinned.
+    if (def?.invokesAt(i) === false && isFunction(op, 'Function')) return false;
+    return hasPendingImpureApplication(op, under);
+  });
 }
 
 /**
@@ -1223,6 +1244,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // have said "unclassified impurity"). Impure, but owing the random
       // stream nothing — a surviving `Assign` must not pin a seed frame.
       signature: '(symbol | expression, any) scope -> any',
+      // A STORING writer: the target is written, the value is stored, and
+      // neither position ever applies a function-valued operand. So
+      // `Assign(f, randomLambda)` is `{scope}`, not `{scope, random}` — the
+      // draw fires at whatever later invokes `f`. The operand's PRODUCTION
+      // effects still count: `Assign(x, Random())` stays `{random, scope}`.
+      invokes: false,
       type: ([_symbol, value]) => value.type,
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return null;
@@ -1439,6 +1466,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `scope` label (see `Assign`).
       signature:
         '(symbol, type: (string | symbol)?, value: any?, attributes: dictionary?) scope -> any',
+      // A STORING writer, like `Assign`: no position applies a function-valued
+      // operand, so `Declare(f, "function", randomLambda)` is `{scope}`. The
+      // value's PRODUCTION effects still count.
+      invokes: false,
       // With a positional value operand, `Declare` evaluates to the value;
       // otherwise to `Nothing`. (A trailing dictionary operand is the
       // attributes bag, not a value.)

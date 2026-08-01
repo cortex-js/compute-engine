@@ -185,7 +185,7 @@ describe('the narrowing branch does not narrow AWAY an effect', () => {
  * bound, and a bare arrow there declares "callers must pass a pure function".
  */
 describe('blast radius: which library parameters carry an effect bound', () => {
-  it('only `Product` declares a function-SIGNATURE parameter', () => {
+  it('no library operator declares a function-SIGNATURE callback parameter', () => {
     const ce = new ComputeEngine();
     const scope = (ce as any).contextStack[0].lexicalScope;
 
@@ -213,10 +213,10 @@ describe('blast radius: which library parameters carry an effect bound', () => {
       }
     }
 
-    expect([...new Set(bounded)].sort()).toEqual(['Product']);
+    expect([...new Set(bounded)].sort()).toEqual([]);
   });
 
-  it('it does not newly reject an impure callback today', () => {
+  it('the callback slots do not newly reject an impure callback today', () => {
     const ce = new ComputeEngine();
     // `Iterate` used to be in this enumeration. Its callback slot is now the
     // bare `function` primitive — effect-top by definition, so there is no
@@ -233,8 +233,11 @@ describe('blast radius: which library parameters carry an effect bound', () => {
     expect(iterate.isValid).toBe(true);
     expect([...iterate.evaluate().each()]).toHaveLength(2);
 
-    // `Product` is `lazy: true` — the non-strict/lazy carve-out: its held body
-    // is pushed through untouched, and the effect check defers with it.
+    // `Product` takes a HELD EXPRESSION (the multiplicand body), not a
+    // function value: its body slot is `any`, aligned with `Sum`, so there is
+    // no bound to enforce at all. It is also `lazy: true` — the non-strict
+    // carve-out: the held body is pushed through untouched, and any effect
+    // check defers with it.
     const product = ce.box(['Product', ['Random'], ['Tuple', 'i', 1, 3]]);
     expect(product.isValid).toBe(true);
     expect(product.evaluate().isValid).toBe(true);

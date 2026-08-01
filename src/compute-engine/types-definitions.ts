@@ -1318,19 +1318,26 @@ export type OperatorDefinitionFlags = {
   frameProtocol: 'seed' | undefined;
 
   /**
-   * If `false`, **no operand position invokes a function-valued operand**: the
-   * operator merely stores the value (`List`, `Tuple`, the structural
-   * constructors). Such a position contributes only the effects of *producing*
-   * the operand, never the operand's latent (arrow) effects — `List(randomF)`
-   * is pure to build, and the effect surfaces at whatever application later
-   * invokes an element.
+   * Which operand positions may **invoke** a function-valued operand
+   * (`docs/EFFECTS-MODEL.md`, "Projection and discharge"). A position that
+   * does not invoke merely *stores* or *selects* the value, so it contributes
+   * only the effects of *producing* the operand, never the operand's latent
+   * (arrow) effects — `List(randomF)` is pure to build, and the effect
+   * surfaces at whatever application later invokes an element.
    *
-   * Recorded at Stage 1; consumed by the projection rule (Stage 2). The
-   * per-position form of this metadata arrives with that consumer.
+   * Two spellings, mirroring {@link discharges}' operand-index-map convention:
+   *
+   * - a **boolean**, uniform over every position: `false` for the pure
+   *   containers and constructors (`List`, `Tuple`, the structural
+   *   constructors), for the storing writers (`Assign`, `Declare`) and for the
+   *   selecting conditionals (`If`, `Which`);
+   * - a **map** from 0-based operand index to a boolean, for an operator that
+   *   invokes at some positions and stores at others. **Missing indices
+   *   default to `true`** — the conservative answer.
    *
    * **Default:** `true`
    */
-  invokes: boolean;
+  invokes: boolean | { readonly [operandIndex: number]: boolean };
 
   /**
    * The effects this operator **absorbs** rather than re-emits, per operand
@@ -1494,6 +1501,16 @@ export interface BoxedOperatorDefinition
    * validation (§3.A). Only `propagate`/`handle` operators strip; `missingStrip`
    * selects the positions. */
   stripsMissingAt(i: number): boolean;
+
+  /** True if operand position `i` may INVOKE a function-valued operand — the
+   * per-position reader for {@link OperatorDefinitionFlags.invokes}. Missing
+   * map indices default to `true`. Every consumer of the metadata goes
+   * through this accessor (or {@link invokesNone}), never the raw field. */
+  invokesAt(i: number): boolean;
+
+  /** True when NO operand position invokes — the cheap operator-level
+   * pre-gate for the latent half of the projection rule. */
+  readonly invokesNone: boolean;
 
   /** If this operator definition was created from a user-defined function
    * literal (`f(x) := …`, `x ↦ …`, `ce.assign('f', lambda)`), a structured

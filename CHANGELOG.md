@@ -552,6 +552,25 @@
   symbolic-by-default, errors-as-values, `->` is `KeyValuePair` so `ReplaceAll`
   takes `Rule(x, 3)`).
 
+- **`At` now compiles on the GPU targets** (GLSL and WGSL). A scalar index
+  over any statically-sized numeric base — a declared `vector<N>` (any
+  N ≥ 2, `float[N]`/`array<f32, N>` past 4), a numeric tuple, a literal
+  list — lowers to a guarded dynamic index (`_gpu_atN` preamble helpers)
+  honoring the full contract: 1-based, negative counts from the end, and
+  `0`/out-of-range/non-integer/NaN/±∞ answer the target's NaN spelling —
+  never a clamp, and never GLSL's undefined out-of-bounds access (the
+  guard runs entirely in float space, so the `int` cast is unreachable
+  for anything unrepresentable). A literal index folds to a swizzle
+  (`v.y`) or, over a literal base, to the element itself; a literal
+  integer gather folds to a swizzle (`At(v, [1,3])` → `v.xz`) or a
+  constructor with NaN slots, and a literal boolean mask of matching
+  length folds the same way. Because `At`'s result type is a scalar,
+  the lowering composes under arithmetic (`At(v, k) * 2`,
+  `Sin(At(v, k))`) with no shape-gate friction. Runtime-valued masks
+  (result length is not static), dynamic gathers, and point-list bases
+  stay fail-closed with discriminated reasons.
+  Design: `docs/plans/2026-08-01-at-gpu-compile-design.md`.
+
 - **CSE now binds repeated subtrees headed by built-in lowerings** such as
   `PointList`. The emission-purity gate (G1b) excluded any subtree whose
   operator definition carries a `compile` handler — the right call for the

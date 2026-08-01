@@ -638,6 +638,11 @@ describe('4 — `Hold` is inert; `ReleaseHold` resurfaces', () => {
 // > contributes the production effects `effectsOf(aᵢ)` only, no latent:
 // > `List(randomF)` is pure to build; the effect surfaces at whatever
 // > application later invokes an element.
+//
+// The metadata is per POSITION (a boolean is the uniform spelling): the
+// selecting conditionals (`If`, `Which`), the storing writers (`Assign`,
+// `Declare`) and the sequencer (`Block`) are non-invoking too — see the last
+// cases below.
 // ───────────────────────────────────────────────────────────────────────────
 describe('5 — `invokes: false` containers are pure to build', () => {
   function engine(): ComputeEngine {
@@ -714,6 +719,206 @@ describe('5 — `invokes: false` containers are pure to build', () => {
     expect(eff(ce.box(['List', ['Random']]))).toEqual(['random']);
     expect(eff(ce.box(['Tuple', ['Random'], 1]))).toEqual(['random']);
     expect(ce.box(['List', ['Random']]).isPure).toBe(false);
+  });
+
+  // ── The metadata is PER POSITION ─────────────────────────────────────────
+  // The shipped shape is `boolean | { [operandIndex]: boolean }`, missing
+  // indices defaulting to `true`; the operator-level boolean is the uniform
+  // spelling. The heads below are uniform, so they use the boolean — the map
+  // is exercised on a synthetic operator in `effects-of.test.ts`.
+
+  it('a SELECTING head — `If`/`Which` branches — drops the latent half', () => {
+    const ce = engine();
+    ce.assign('storedPure', ce.box(PURE_LAMBDA));
+    for (const [route, e] of Object.entries({
+      'If/box': ce.box(['If', 'True', 'storedDraw', 'storedPure']),
+      'If/parse': ce.parse(
+        '\\mathrm{If}(\\mathrm{True}, \\mathrm{storedDraw}, \\mathrm{storedPure})'
+      ),
+      'Which/box': ce.box(['Which', 'True', 'storedDraw']),
+    })) {
+      expect([route, eff(e)]).toEqual([route, undefined]);
+      expect([route, e.isPure]).toEqual([route, true]);
+    }
+    // The branches are HELD may-evaluate positions: their own effects are
+    // unaffected — only the latent set of a function VALUE drops.
+    expect(eff(ce.box(['If', 'True', ['Random'], 0]))).toEqual(['random']);
+    // And the effect surfaces at whatever invokes the SELECTED result.
+    expect(
+      eff(ce.box(['Apply', ['If', 'True', 'storedDraw', 'storedPure'], 0]))
+    ).toEqual(['random']);
+  });
+
+  it('a STORING head — `Assign`/`Declare` values — drops the latent half', () => {
+    const ce = engine();
+    // `{scope}` exactly: the write, not the draw the stored callback will make.
+    expect(eff(ce.box(['Assign', 'g', 'storedDraw']))).toEqual(['scope']);
+    expect(eff(ce.box(['Declare', 'h', 'function', 'storedDraw']))).toEqual([
+      'scope',
+    ]);
+    // Production effects still count — the RHS is evaluated eagerly.
+    expect(eff(ce.box(['Assign', 'k', ['Random']]))).toEqual([
+      'random',
+      'scope',
+    ]);
+    // …and the INFERENCE is untouched: the assigned definition still carries
+    // `random` on its arrow, so invoking it is `{random}`.
+    ce.box(['Assign', 'g', 'storedDraw']).evaluate();
+    expect(ce.box('g').type.effects).toEqual(['random']);
+    expect(eff(ce.box(['Map', ['List', 1, 2], 'g']))).toEqual(['random']);
+  });
+
+  it('a SEQUENCING head — `Block` — returns its last value, it does not apply it', () => {
+    const ce = engine();
+    for (const [route, e] of Object.entries({
+      'literal/box': ce.box(['Block', DRAWING_LAMBDA]),
+      'symbol/box': ce.box(['Block', 'storedDraw']),
+      'symbol/parse': ce.parse('\\mathrm{Block}(\\mathrm{storedDraw})'),
+      'symbol/function': ce.function('Block', [ce.symbol('storedDraw')]),
+    })) {
+      expect([route, eff(e)]).toEqual([route, undefined]);
+      expect([route, e.isPure]).toEqual([route, true]);
+    }
+    // CONTROL — statement APPLICATIONS are untouched: their effects reach the
+    // block through the `effectsOf` recursion, not the latent term.
+    expect(eff(ce.box(['Block', ['Assign', 'x', 1], ['Random']]))).toEqual([
+      'random',
+      'scope',
+    ]);
+    // …and the frame still absorbs the draws but not the scope write.
+    expect(
+      eff(
+        ce.box(['WithRandomSeed', 42, ['Block', ['Assign', 'x', 1], ['Random']]])
+      )
+    ).toEqual(['scope']);
+  });
+
+  it('the two CHANNELS agree on a build-and-return block', () => {
+    // They disagreed before the annotation: the runtime channel called
+    // `Block(() ↦ Random())` impure while the inference already typed the
+    // enclosing literal's arrow PURE — it treats `Block` as non-projecting.
+    const ce = engine();
+    expect(ce.box(['Block', DRAWING_LAMBDA]).isPure).toBe(true);
+    expect(ce.box(['Function', ['Block', DRAWING_LAMBDA]]).type.effects).toBe(
+      undefined
+    );
+    // The draw lives on the INNER arrow, where it fires when applied.
+    expect(ce.box(['Block', DRAWING_LAMBDA]).type.effects).toEqual(['random']);
+  });
+
+  it('the pending-draw walk: a surviving build-and-return block RELEASES the frame', () => {
+    // `u` is unbound, so the `ListFrom` never finishes and every node beneath
+    // it — the lambda included — is scanned by the walk. The surviving tree
+    // carries a `Block` whose only "random" content is a stored callback: no
+    // draw is owed to this frame, so the frame is released.
+    const ce = engine();
+    const released = ce.box([
+      'WithRandomSeed',
+      7,
+      ['ListFrom', ['Map', 'u', ['Function', ['Block', 'storedDraw'], 'x']]],
+    ]);
+    expect(released.evaluate().operator).toBe('ListFrom');
+
+    // The mirror: the same survivor shape with a REAL pending draw inside the
+    // block keeps the frame, exactly as before.
+    const kept = ce.box([
+      'WithRandomSeed',
+      7,
+      ['ListFrom', ['Map', 'u', ['Function', ['Block', ['Random']], 'x']]],
+    ]);
+    expect(kept.evaluate().operator).toBe('WithRandomSeed');
+  });
+
+  // ── The walk agrees with the projection — for a LITERAL too ──────────────
+  // The walk passes its eager-survivor flag to every operand, so it used to
+  // descend into an INLINE `Function` sitting in a non-invoking position and
+  // count its body's `Random()` as pending — pinning the frame although the
+  // operator only stores or returns the lambda. The verdict then split on
+  // SPELLING: `If(c, storedDraw, …)` released while the identical lambda
+  // written inline pinned. A function VALUE in a non-invoking position is now
+  // a value boundary for the walk, exactly as §6 makes a lazy view's own
+  // `Function` subtree one.
+
+  /** A survivor: `u` is unbound, so the `ListFrom` never finishes and every
+   * node beneath it — lambdas included — is scanned by the walk. `body` is the
+   * lambda body under test. Returns the operator of the evaluated result:
+   * `'WithRandomSeed'` = frame kept, anything else = released. */
+  function survivor(ce: ComputeEngine, body: unknown): string {
+    return ce
+      .box([
+        'WithRandomSeed',
+        7,
+        ['ListFrom', ['Map', 'u', ['Function', body, 'y']]],
+      ] as any)
+      .evaluate().operator;
+  }
+
+  it('an INLINE lambda in a non-invoking position releases the frame', () => {
+    const ce = engine();
+    for (const [head, body] of Object.entries({
+      If: ['If', 'True', DRAWING_LAMBDA, ['Function', 0, 'x']],
+      Block: ['Block', DRAWING_LAMBDA],
+      List: ['List', DRAWING_LAMBDA],
+      Tuple: ['Tuple', DRAWING_LAMBDA, 1],
+    }))
+      expect([head, survivor(ce, body)]).toEqual([head, 'ListFrom']);
+  });
+
+  it('…on the PARSE route too', () => {
+    const ce = engine();
+    for (const [head, latex] of Object.entries({
+      If: '\\mathrm{WithRandomSeed}(7, \\mathrm{ListFrom}(\\mathrm{Map}(u, y \\mapsto \\mathrm{If}(\\mathrm{True}, x \\mapsto \\mathrm{Random}(), x \\mapsto 0))))',
+      Block:
+        '\\mathrm{WithRandomSeed}(7, \\mathrm{ListFrom}(\\mathrm{Map}(u, y \\mapsto \\mathrm{Block}(x \\mapsto \\mathrm{Random}()))))',
+      List: '\\mathrm{WithRandomSeed}(7, \\mathrm{ListFrom}(\\mathrm{Map}(u, y \\mapsto \\lbrack x \\mapsto \\mathrm{Random}() \\rbrack)))',
+    }))
+      expect([head, ce.parse(latex).evaluate().operator]).toEqual([
+        head,
+        'ListFrom',
+      ]);
+  });
+
+  it('literal and bound symbol give the SAME verdict — no split on spelling', () => {
+    const ce = engine();
+    for (const head of ['If', 'Block', 'List'] as const) {
+      const inline =
+        head === 'If'
+          ? ['If', 'True', DRAWING_LAMBDA, ['Function', 0, 'x']]
+          : [head, DRAWING_LAMBDA];
+      const named =
+        head === 'If'
+          ? ['If', 'True', 'storedDraw', 'storedDraw']
+          : [head, 'storedDraw'];
+      expect([head, survivor(ce, inline)]).toEqual([
+        head,
+        survivor(ce, named),
+      ]);
+    }
+  });
+
+  it('CONTROL — an INVOKING position still pins (the item-104 case)', () => {
+    // `Map` invokes its callback per element, so the draws are still owed.
+    const ce = engine();
+    expect(
+      ce
+        .box([
+          'WithRandomSeed',
+          7,
+          ['ListFrom', ['Map', 'u', DRAWING_LAMBDA]],
+        ])
+        .evaluate().operator
+    ).toBe('WithRandomSeed');
+  });
+
+  it('CONTROL — an APPLICATION operand in a non-invoking position still pins', () => {
+    // The carve-out is for function VALUES only: a non-invoking operator still
+    // EVALUATES an application operand under itself, so that draw IS pending.
+    const ce = engine();
+    expect(survivor(ce, ['If', 'True', ['Random'], 0])).toBe('WithRandomSeed');
+    expect(survivor(ce, ['Block', ['Assign', 'z', 1], ['Random']])).toBe(
+      'WithRandomSeed'
+    );
+    expect(survivor(ce, ['List', ['Random']])).toBe('WithRandomSeed');
   });
 });
 

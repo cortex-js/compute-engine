@@ -3224,13 +3224,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // operator's BOUND variable, declared `integer` in its own scope.
       scoped: indexingSetSites(1, 'integer'),
       lazy: true,
-      // The `any` effect specifier keeps the body bound effect-top: an
-      // effectful body (`Product(Random(), (i, 1, 3))`) is admitted today —
-      // the operator is `lazy`, so the bound never runs — and a bare arrow
-      // here would declare a pure-callback requirement the engine does not
-      // (and must not) enforce.
-      signature:
-        '((number+) any -> number, (tuple<integer>|tuple<integer, integer>)+) -> number',
+      signature: '(any, tuple*) -> number',
       type: bigOpResultType,
 
       canonical: ([body, ...bounds], { scope }) =>

@@ -158,7 +158,11 @@ type OperatorDefinitionFlags = {
    * produced it. See `types-definitions.ts`. */
   effectsDeclared: boolean;
   frameProtocol: 'seed' | undefined;
-  invokes: boolean;
+  /** Which operand positions may INVOKE a function-valued operand: a uniform
+   * boolean, or a map from 0-based operand index to a boolean whose missing
+   * indices default to `true`. Read it through `invokesAt`/`invokesNone`. See
+   * `types-definitions.ts`. */
+  invokes: boolean | { readonly [operandIndex: number]: boolean };
   /** Per operand position (0-based index), the effects this operator ABSORBS
    * rather than re-emits. See `types-definitions.ts`. */
   discharges:
@@ -199,6 +203,12 @@ interface BoxedOperatorDefinition
     | 'handle'
     | 'pass-through';
   stripsMissingAt(i: number): boolean;
+  /** True if operand position `i` may INVOKE a function-valued operand.
+   * See `types-definitions.ts`. */
+  invokesAt(i: number): boolean;
+  /** True when NO operand position invokes — the operator-level pre-gate.
+   * See `types-definitions.ts`. */
+  readonly invokesNone: boolean;
   readonly lambda: LambdaDefinition | undefined;
   type?: (
     ops: ReadonlyArray<Expression>,

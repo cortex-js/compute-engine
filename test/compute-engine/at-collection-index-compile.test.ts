@@ -18,6 +18,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
 const ce = new ComputeEngine();
 
@@ -378,5 +379,77 @@ describe('At with a CHAINED (multi-)index — result type follows the chain', ()
 describe('Last (shares `_SYS.at`) — regression', () => {
   test('still compiles and matches interpretation', () => {
     expect(parity(ce.box(['Last', P] as any))).toBe(30);
+  });
+});
+
+describe('Route parity with the GLSL lowering (`At` on the GPU)', () => {
+  // `docs/plans/2026-08-01-at-gpu-compile-design.md` § D5: the shader lowering
+  // is new, the interpreter and `_SYS.at` are untouched, and `_SYS.at` remains
+  // the PARITY ORACLE — the GPU targets the same projection, so the two must
+  // agree on every shape both can answer. Only fully constant-folded GPU
+  // emissions can be compared here (jest runs no shader), which is exactly the
+  // set of literal-base/literal-index shapes.
+  const glsl = new GLSLTarget();
+
+  /**
+   * The value a constant-folded GLSL emission denotes.
+   *
+   * Anything else THROWS: falling through to `Number(s)` answered `NaN` for
+   * every unrecognized emission, and the NaN-projection parities below would
+   * then have passed against arbitrary source.
+   */
+  function glslFold(src: string): number | number[] {
+    const s = src.trim();
+    if (s === '_gpu_nan()') return NaN;
+    const ctor = /^vec[234]\((.*)\)$/.exec(s);
+    // Every component here is a float literal or `_gpu_nan()` — neither
+    // contains a comma, so a flat split is enough.
+    if (ctor !== null)
+      return ctor[1].split(',').map((c) => glslFold(c) as number);
+    if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(s))
+      throw new Error(
+        `Not a constant-folded GLSL emission: \`${src}\` — the parity oracle ` +
+          `can only compare a fold, and \`Number(…)\` would answer NaN for ` +
+          `this and agree with the NaN projection by accident`
+      );
+    return Number(s);
+  }
+
+  /** Compiled JS === interpreted projection === the folded GLSL emission. */
+  function tripleParity(expr: BoxedExpression): void {
+    expect(glslFold(glsl.compile(expr).code!)).toEqual(parity(expr));
+  }
+
+  test('a scalar index agrees on both routes', () => {
+    tripleParity(at(2)); // GLSL folds to `20.0`
+    tripleParity(at(-1));
+  });
+
+  test('an out-of-band scalar index agrees on the NaN projection', () => {
+    tripleParity(at(0));
+    tripleParity(at(4));
+  });
+
+  // The interpreter leaves `At` UNEVALUATED here (no value at all). Parity is
+  // against the PROJECTION of that — NaN — on both targets, never against the
+  // unevaluated form.
+  test('a non-integer scalar index agrees on the NaN projection', () => {
+    expect(at(1.5).evaluate().operator).toBe('At');
+    tripleParity(at(1.5));
+  });
+
+  test('a literal gather agrees, position-preservingly', () => {
+    tripleParity(at(['List', 1, 3]));
+    tripleParity(at(['List', 2, -1]));
+    tripleParity(at(['List', 1, 9])); // → [10, NaN] / `vec2(10.0, _gpu_nan())`
+  });
+
+  test('a literal mask agrees', () => {
+    tripleParity(at(['List', 'False', 'True', 'True']));
+  });
+
+  test('the JS route still lowers through `_SYS.at` (unchanged)', () => {
+    expect(compile(at(2))!.code).toMatch(/_SYS\.at\(/);
+    expect(compile(at(['List', 1, 3]))!.code).toMatch(/_SYS\.at\(/);
   });
 });

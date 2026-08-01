@@ -252,9 +252,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * `WithRandomSeed`), or `undefined`. Kind-valued, not boolean. */
   frameProtocol: 'seed' | undefined = undefined;
 
-  /** `false` when no operand position invokes a function-valued operand — the
-   * pure containers and constructors, which only store the value. */
-  invokes = true;
+  /** Which operand positions may INVOKE a function-valued operand: a uniform
+   * boolean (`false` for the pure containers and constructors, the storing
+   * writers and the selecting conditionals), or a normalized map from 0-based
+   * operand index to a boolean whose missing indices default to `true`. Read
+   * through {@link invokesAt} / {@link invokesNone}, never directly. */
+  invokes: boolean | { readonly [operandIndex: number]: boolean } = true;
 
   /** Per operand position (0-based), the effects this operator ABSORBS rather
    * than re-emits — `WithRandomSeed`'s `{ 1: ['random'] }` on its held body.
@@ -464,6 +467,21 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     return this.missingStrip === 'all' || this.missingStrip.includes(i);
   }
 
+  /** True if operand position `i` may INVOKE a function-valued operand.
+   * A map's missing indices default to `true` — the conservative answer. */
+  invokesAt(i: number): boolean {
+    const invokes = this.invokes;
+    if (typeof invokes === 'boolean') return invokes;
+    return invokes[i] ?? true;
+  }
+
+  /** True when NO position invokes. The only sound uniform answer: a map does
+   * not know how many operands an application has, so it can never claim
+   * "none" — `invokes: false` is the spelling for that. */
+  get invokesNone(): boolean {
+    return this.invokes === false;
+  }
+
   /**
    * Install `effects` as the definition's effect set, attaching it to the
    * signature — the one source of truth — and refreshing the cache the derived
@@ -610,7 +628,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     if (def.effects !== undefined) this.effectsDeclared = true;
 
     this.frameProtocol = def.frameProtocol ?? this.frameProtocol;
-    this.invokes = def.invokes ?? this.invokes;
+    if (def.invokes !== undefined)
+      this.invokes = normalizeInvokes(this.name, def.invokes);
     if (def.discharges !== undefined)
       this.discharges = normalizeDischarges(this.name, def.discharges);
     this.holdClass = def.holdClass ?? this.holdClass;
@@ -916,6 +935,43 @@ function assertArmsDistinguishableWithoutEffects(
             arms[j]
           )}" differ only by their effects; overload arms must be distinguishable by their argument types`
         );
+}
+
+/**
+ * Validate and canonicalize an `invokes:` declaration — a uniform boolean, or
+ * a map from 0-based operand index to a boolean.
+ *
+ * Fails closed, like {@link normalizeDischarges}: a non-integer or negative
+ * index, or a non-boolean value, is a registration error rather than a
+ * silently ignored declaration that would leave the operator over- (or worse,
+ * under-) reporting the latent half of its operands' effects.
+ *
+ * Entries that are `true` are the default and are dropped; a map that says
+ * nothing else collapses to the uniform `true`.
+ */
+function normalizeInvokes(
+  name: string,
+  invokes: boolean | { readonly [operandIndex: number]: boolean }
+): boolean | { readonly [operandIndex: number]: boolean } {
+  if (typeof invokes === 'boolean') return invokes;
+  const result: { [operandIndex: number]: boolean } = {};
+  let count = 0;
+  for (const key of Object.keys(invokes)) {
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0)
+      throw new Error(
+        `Operator Definition "${name}": the 'invokes' field is keyed by operand index; "${key}" is not one`
+      );
+    const value = invokes[index];
+    if (typeof value !== 'boolean')
+      throw new Error(
+        `Operator Definition "${name}": the 'invokes' entry at operand ${index} must be a boolean`
+      );
+    if (value) continue;
+    result[index] = false;
+    count += 1;
+  }
+  return count === 0 ? true : result;
 }
 
 /**

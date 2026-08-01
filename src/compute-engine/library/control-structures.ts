@@ -63,6 +63,22 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       scoped: true,
       signature: '(unknown*) -> unknown',
+      // A SEQUENCER that RETURNS its last value: a statement is evaluated, a
+      // bare function value is not auto-applied, so no position ever applies a
+      // function-valued operand. Statement APPLICATIONS are untouched — their
+      // effects reach the block through the `effectsOf` recursion into the
+      // operand's own effects, not through the latent term this suppresses, so
+      // `Block(Assign(x, 1), Random())` is still `{random, scope}`.
+      //
+      // The only term that changes is the latent half of a build-and-return
+      // block, where the two channels DISAGREED: `Block(() ↦ Random())`
+      // reported `{random}` at runtime while `(() ↦ Block(() ↦ Random()))`
+      // already typed a PURE outer arrow — the inference treats `Block` as
+      // non-projecting through its `acceptsCallable` gate. Annotating aligns
+      // the runtime channel with the inference, matches the store/select/return
+      // precedent (`List`, `If`, `Which`, `Assign`, `Declare`), and releases a
+      // seed frame that a surviving build-and-return block owes no draws to.
+      invokes: false,
       type: (args) => {
         if (args.length === 0) return 'nothing';
         return args[args.length - 1].type;
@@ -95,6 +111,13 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       description: 'Conditional branch: evaluate one of two expressions.',
       lazy: true,
       signature: '(expression, expression, expression?) -> any',
+      // A SELECTOR: the condition is tested and one branch is evaluated and
+      // RETURNED — no position ever applies a function-valued operand. So
+      // `If(c, randomF, pureF)` has no `random`: the draw fires at whatever
+      // invokes the selected result. The branches are held may-evaluate
+      // positions, so their own (production) effects still contribute
+      // unchanged — `If(c, Random(), 0)` is still `{random}`.
+      invokes: false,
       // The else branch is optional: `If(cond, expr)` evaluates to `Nothing`
       // when the condition is false.
       type: ([cond, ifTrue, ifFalse]) => {
@@ -380,6 +403,10 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       keywords: ['piecewise'],
       lazy: true,
       signature: '(expression+) -> unknown',
+      // A SELECTOR, like `If`: conditions are tested, the first matching arm is
+      // evaluated and RETURNED, and no position applies a function-valued
+      // operand. Held-position (production) effects are unaffected.
+      invokes: false,
       type: (args) => {
         if (args.length % 2 !== 0) return 'nothing';
         let arms = args.filter((_, i) => i % 2 === 1);

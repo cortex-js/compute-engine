@@ -38,8 +38,9 @@ import { signatureEffects } from './effects-inference.js';
  *   function): `effectsOf(aᵢ) ∪ (latent(aᵢ) − discharge(op, i))`. Production
  *   effects are never discharged: the draw behind `Use(MakeCallback())` fires
  *   when the operand is evaluated, whatever `Use` then does with the result.
- *   The latent half is gated by the `invokes` metadata: an `invokes: false`
- *   position only STORES the value, so `List(randomF)` is pure to build;
+ *   The latent half is gated PER POSITION by the `invokes` metadata (read
+ *   through `invokesAt`): a non-invoking position only STORES or SELECTS the
+ *   value, so `List(randomF)` and `If(c, randomF, pureF)` are pure to build;
  * - **held, may-evaluate** (the default for `lazy` positions — a `Sum` body,
  *   the `WithRandomSeed` body): `effectsOf(aᵢ) − discharge(op, i)`;
  * - **held, quote/store** (`holdClass: 'quote'` — `Hold`): ∅. The effects
@@ -204,8 +205,10 @@ export function applicationEffects(expr: Expression): ComputedEffects {
     // The LATENT half: what fires if the operator invokes a function-valued
     // operand. Held-ness is orthogonal — `Map` is `lazy` yet invokes its
     // callback per element — so this applies to both classes, and is always
-    // subject to the position's discharge.
-    if (!def.invokes) continue;
+    // subject to the position's discharge. Gated PER POSITION: a position that
+    // only stores or selects the value (an `Assign` value, an `If` branch)
+    // contributes the production effects above and no latent set.
+    if (!def.invokesAt(i)) continue;
     effects = unionComputedEffects(
       effects,
       subtractEffects(latentEffectsOf(op), discharge)
@@ -245,11 +248,12 @@ export function shallowApplicationEffects(expr: Expression): ComputedEffects {
   }
 
   let effects: ComputedEffects = ownEffects(expr.engine, expr.ops, def);
-  if (def.holdClass === 'quote' || !def.invokes) return effects;
+  if (def.holdClass === 'quote' || def.invokesNone) return effects;
 
   const ops = expr.ops;
   for (let i = 0; i < ops.length; i++) {
     if (effects === 'any') return 'any';
+    if (!def.invokesAt(i)) continue;
     effects = unionComputedEffects(
       effects,
       subtractEffects(latentEffectsOf(ops[i]), def.discharges?.[i])
