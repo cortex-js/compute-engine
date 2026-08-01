@@ -283,13 +283,43 @@ describe('At — evaluate-once', () => {
     expect(count(g(['At', 'v', ['List', 1, 3]]), 'v')).toBe(1);
   });
 
-  test('a gather over an IMPURE literal base declines', () => {
-    // Folding per element would discard the impure slot unevaluated.
+  // A literal base folds PER ELEMENT — the selected element is emitted, the
+  // siblings are dropped — so the purity accounting is per element too. Asking
+  // it of the whole literal over-declined `At([Random(), 1, 2], 1)`, whose
+  // emission evaluates the draw exactly once, which is what the source says.
+  describe('an IMPURE element of a literal base is accounted per element', () => {
     const impure: any = ['List', ['Random'], 1, 2];
-    expect(why(['At', impure, ['List', 1, 9]])).toMatch(
-      /discard it unevaluated/
-    );
-    expect(why(['At', impure, 2])).toMatch(/discard it unevaluated/);
+
+    test('selecting the impure element compiles, emitting the draw ONCE', () => {
+      expect(count(g(['At', impure, 1]), '_gpu_rnd_draw')).toBe(1);
+      // Same accounting through the gather tier.
+      const gather = g(['At', ['List', ['Random'], 2, 3], ['List', 1, 2]]);
+      expect(count(gather, '_gpu_rnd_draw')).toBe(1);
+      expect(gather).toMatch(/^vec2\(_gpu_rnd_draw\(.*\), 2\.0\)$/);
+    });
+
+    test('DISCARDING the impure element declines', () => {
+      expect(why(['At', impure, 2])).toMatch(
+        /element 1 of the literal base is impure and the access does not select it/
+      );
+      expect(why(['At', impure, ['List', 2, 3]])).toMatch(
+        /element 1 of the literal base is impure and the gather does not select it/
+      );
+    });
+
+    test('selecting the impure element TWICE declines', () => {
+      // One element of the source, two evaluations of the draw.
+      expect(why(['At', ['List', ['Random'], 2], ['List', 1, 1]])).toMatch(
+        /impure and the gather selects it 2 times/
+      );
+    });
+
+    test('a PURE sibling may be discarded freely', () => {
+      // The out-of-range slot drops nothing that had to happen.
+      expect(g(['At', impure, ['List', 1, 9]])).toMatch(
+        /^vec2\(_gpu_rnd_draw\(.*\), _gpu_nan\(\)\)$/
+      );
+    });
   });
 
   test('an impure base AND an impure index decline', () => {
@@ -401,6 +431,29 @@ describe('At — literal integer gather (D2)', () => {
     expect(m).not.toMatch(/DYNAMIC gather/);
   });
 
+  test('a NON-NUMERIC literal entry gets the same literal reason', () => {
+    // Any literal that is not an integer selects no element. Classifying these
+    // as runtime-valued handed them the demand-gated dynamic-gather text,
+    // which describes something the caller did not write (D2).
+    for (const entry of [{ str: 'a' }, ['List', 2, 3], 'Missing'] as any[]) {
+      const m = why(['At', 'v', ['List', 1, entry]]);
+      expect(m).toMatch(
+        /entry 2 of the index list .* is a literal that is not/
+      );
+      expect(m).not.toMatch(/DYNAMIC gather/);
+    }
+  });
+
+  test('the dynamic-gather reason counts the RUNTIME-VALUED entries', () => {
+    // Not the list's length: `[1, k]` has one runtime-valued entry.
+    expect(why(['At', 'v', ['List', 1, 'k']])).toMatch(
+      /index list has 1 runtime-valued integer entry;/
+    );
+    expect(why(['At', 'v', ['List', 'k', ['Add', 'k', 1]]])).toMatch(
+      /index list has 2 runtime-valued integer entries;/
+    );
+  });
+
   test('a literal list mixing integers with booleans declines', () => {
     expect(why(['At', 'v', ['List', 1, 'True']])).toMatch(
       /mixes integer entries with boolean ones/
@@ -505,6 +558,15 @@ describe('At — every declining shape names its OWN cause', () => {
       'unknown-extent list base',
       ['At', 'vq', 'k'],
       /base \(type `vector`\) has no statically known length/,
+    ],
+    // The INDEX side of the same sentinel. Untreated, `-1` skipped the
+    // no-static-count arm and described "a collection of -1 runtime-valued
+    // entries" in the demand-gated text — where D4 makes an unknown-length
+    // index list a PERMANENT decline.
+    [
+      'unknown-extent list index',
+      ['At', 'v', 'vq'],
+      /index is a collection \(type `vector`\) with no statically known length/,
     ],
   ];
 
@@ -648,5 +710,68 @@ describe('At — bases and indices the CALLER declared', () => {
         ['ii', 'i32'],
       ])
     ).toContain('return _gpu_at3(vv, f32(ii));');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. LOCALLY FRAMED names. The other half of the frame story: a `Block` local
+//     and a parameter of a SYNTHESIZED user-function signature carry a WIDTH in
+//     the shape frame and nothing else — no caller-declared type registers
+//     alongside them. Their boxed type is `unknown`, which the
+//     unknown-as-numeric-parameter rule reads as a float, so an
+//     aggregate-valued one used as an INDEX emitted `_gpu_atN(v, p)` — a shader
+//     type error behind a reported success, the same fail-open the declared
+//     `bool` channel closes.
+// ---------------------------------------------------------------------------
+
+describe('At — an aggregate index whose shape lives only in a local frame', () => {
+  test('a vector-valued `Block` local index declines, naming the width', () => {
+    const m = why([
+      'Block',
+      ['Declare', 'p'],
+      ['Assign', 'p', ['Tuple', 1, 2, 3]],
+      ['At', 'v', 'p'],
+    ]);
+    expect(m).toMatch(/index is the local name "p", which holds an aggregate/);
+    expect(m).toMatch(/of 3 components/);
+  });
+
+  test('a SCALAR `Block` local index still compiles', () => {
+    // The frame's scalar sentinel is not an aggregate: the decline must be
+    // about the width, not about being framed at all.
+    expect(
+      g(['Block', ['Declare', 'q'], ['Assign', 'q', 2], ['At', 'v', 'q']])
+    ).toContain('_gpu_at3(v, q)');
+  });
+
+  test('a vector-typed user-function parameter index declines', () => {
+    // A SYNTHESIZED signature: `gpuDeclaredTypeOf` has nothing for `p`, so the
+    // frame's width is the only reading of it there is.
+    const cef = new ComputeEngine();
+    cef.declare('v', 'vector<3>');
+    cef.declare('f', '(vector<3>) -> number');
+    cef.assign('f', cef.box(['Function', ['At', 'v', 'p'], 'p']));
+    let msg = '';
+    try {
+      new GLSLTarget().compile(cef.box(['f', 'v']));
+    } catch (e: any) {
+      msg = e.message;
+    }
+    expect(msg).toMatch(
+      /index is the local name "p", which holds an aggregate/
+    );
+  });
+
+  test('a vector-valued `Block` local BASE is still admissible', () => {
+    // The base side reads the same frame for its WIDTH; only the index side
+    // was fail-open.
+    expect(
+      g([
+        'Block',
+        ['Declare', 'p'],
+        ['Assign', 'p', ['Tuple', 1, 2, 3]],
+        ['At', 'p', 2],
+      ])
+    ).toContain('return p.y');
   });
 });

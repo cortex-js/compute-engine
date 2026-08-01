@@ -2497,6 +2497,24 @@ function gpuAtFramedIndex(
           'the index is a shader `bool`, and a positional access indexes by ' +
           'a number — neither language converts a boolean to one',
       };
+    // A name whose WIDTH lives in the shape frame and nowhere else: a `Block`
+    // local bound to a vector, or a parameter of a SYNTHESIZED user-function
+    // signature (only a caller-declared frame registers a type alongside the
+    // width). Its boxed type is `unknown`, which the
+    // unknown-as-numeric-parameter rule reads as a float — so an
+    // aggregate-valued one sailed into `_gpu_atN(v, p)` as a shader type error
+    // behind a reported success, the same fail-open the `bool` channel closes.
+    if (isSymbol(index) && BaseCompiler.localShapeFrameOf(index.symbol)) {
+      const width = BaseCompiler.aggregateComponentCount(index);
+      if (width !== undefined)
+        return {
+          decline:
+            `the index is the local name "${index.symbol}", which holds an ` +
+            `aggregate of ${width} components, not a scalar number — a ` +
+            `positional shader access indexes by a float, and neither ` +
+            `language converts an aggregate to one`,
+        };
+    }
     return undefined;
   }
   const v = declared.value;
@@ -2731,6 +2749,19 @@ function gpuAtEntryKind(e: Expression): GPUAtEntry {
   if (isSymbol(e, 'True') || isSymbol(e, 'False')) return 'bool';
   if (isNumber(e))
     return e.im === 0 && Number.isInteger(e.re) ? 'int' : 'other-literal';
+  // Every OTHER literal is likewise an entry that selects no element — a
+  // string, a nested collection, the absence marker. Classifying them 'dyn'
+  // handed them the demand-gated dynamic-gather text, which describes a
+  // runtime-valued integer they are not: D2 requires a literal non-integer to
+  // carry its own reason.
+  if (
+    isString(e) ||
+    isSymbol(e, 'Missing') ||
+    isFunction(e, 'List') ||
+    isFunction(e, 'Tuple') ||
+    isFunction(e, 'Dictionary')
+  )
+    return 'other-literal';
   if (isSubtype(e.type.type, 'boolean')) return 'dyn-bool';
   return 'dyn';
 }
@@ -2771,12 +2802,43 @@ function compileGPUAt(
       'both the base and the index are impure, and neither shader language ' +
         'specifies the order in which a call evaluates its arguments'
     );
-  // An emission that DISCARDS the base's operands (the literal-base element
-  // fold) or references the base source MORE THAN ONCE (a mixed gather
-  // constructor) needs the base to be pure.
-  const isLiteralBase = isFunction(base, 'List') || isFunction(base, 'Tuple');
+  // An emission that DISCARDS the base entirely (an all-out-of-range gather)
+  // or references the base source MORE THAN ONCE (a mixed gather constructor)
+  // needs the base to be pure.
+  const literalOps =
+    isFunction(base, 'List') || isFunction(base, 'Tuple')
+      ? base.ops!
+      : undefined;
+  const isLiteralBase = literalOps !== undefined;
   const requirePureBase = (why: string): void => {
     if (!base.isPure) decline(why);
+  };
+  // A LITERAL base folds PER ELEMENT — the selected element is emitted, the
+  // siblings are dropped — so the purity question is per element too. Asking
+  // it of the whole literal over-declined `At([Random(), 1, 2], 1)`, whose
+  // emission evaluates the draw exactly once, which is what the source says.
+  // An element the emission omits must be pure (a dropped draw shifts the
+  // shader's random stream), and an impure one may not be selected twice (that
+  // would evaluate it twice, where the source has one element).
+  const requireLiteralBaseElements = (
+    selected: ReadonlyArray<number>,
+    what: 'access' | 'gather'
+  ): void => {
+    const ops = literalOps!;
+    for (let i = 0; i < ops.length; i++) {
+      if (ops[i].isPure) continue;
+      const refs = selected.filter((s) => s === i).length;
+      if (refs === 0)
+        decline(
+          `element ${i + 1} of the literal base is impure and the ${what} ` +
+            `does not select it, so folding would discard it unevaluated`
+        );
+      if (refs > 1)
+        decline(
+          `element ${i + 1} of the literal base is impure and the ${what} ` +
+            `selects it ${refs} times, which would evaluate it more than once`
+        );
+    }
   };
   // A fold to the NaN spelling omits an operand from the OUTPUT ENTIRELY, so
   // it must not omit an impure one: the dropped draw never happens, which
@@ -2835,11 +2897,15 @@ function compileGPUAt(
         if (isSymbol(e, 'True')) slots.push(i);
       });
     } else if (set.has('dyn')) {
+      // The count is of the RUNTIME-VALUED entries, not of the list: a mixed
+      // `[1, k]` has one, and reporting the list's length described a shape
+      // the caller did not write.
+      const dyn = kinds.filter((k) => k === 'dyn').length;
       decline(
-        `the index list has ${entries.length} runtime-valued integer ` +
-          `entries; a static-count DYNAMIC gather is not lowered in this ` +
-          `version (no witness requested it yet) — the helpers it needs are ` +
-          `the same ones the scalar form already emits`
+        `the index list has ${dyn} runtime-valued integer ` +
+          `${dyn === 1 ? 'entry' : 'entries'}; a static-count DYNAMIC gather ` +
+          `is not lowered in this version (no witness requested it yet) — the ` +
+          `helpers it needs are the same ones the scalar form already emits`
       );
       slots = [];
     } else {
@@ -2865,9 +2931,9 @@ function compileGPUAt(
       );
 
     if (isLiteralBase)
-      requirePureBase(
-        'the base is a literal collection with an impure element, and ' +
-          'folding the gather would discard it unevaluated'
+      requireLiteralBaseElements(
+        slots.filter((s): s is number => s !== null),
+        'gather'
       );
     else {
       // Judged on the emission `gpuAtGather` will actually take: a swizzle
@@ -2935,11 +3001,7 @@ function compileGPUAt(
       requirePureFold('base');
       return gpuNaN(target);
     }
-    if (isLiteralBase)
-      requirePureBase(
-        'the base is a literal collection with an impure element, and ' +
-          'folding the access would discard it unevaluated'
-      );
+    if (isLiteralBase) requireLiteralBaseElements([j], 'access');
     return gpuAtElement(base, j, n, compile);
   }
 
@@ -2947,7 +3009,13 @@ function compileGPUAt(
   // it (its entries are not readable at compile time).
   if (isSubtype(it, 'collection')) {
     const k = BaseCompiler.aggregateComponentCount(index);
-    if (k === undefined)
+    // A NEGATIVE count is the type builder's encoding of an UNKNOWN extent
+    // (`list<number^?>` → `dimensions: [-1]`), not a width — the same reading
+    // the base side already takes. Without this it flowed on as a count and
+    // described "a collection of -1 runtime-valued entries" in a
+    // demand-gated text, when the shape is the PERMANENT no-static-count
+    // decline (design § D4).
+    if (k === undefined || k < 0)
       decline(
         `the index is a collection (type \`${index.type.toString()}\`) with ` +
           `no statically known length, so there is no static count to emit ` +

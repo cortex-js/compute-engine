@@ -337,6 +337,34 @@ re-open was refuted as a ratified ruling):
 - Test-harness hardening: `glslFold` throws on unrecognized source (the
   NaN-parity assertions previously passed for arbitrary emissions).
 
+Round 2 (4 applied, 1 refuted; Codex's third re-open of the
+dynamic-gather ruling refuted again):
+
+- **A locally framed aggregate index declines** (`gpuAtFramedIndex` now
+  consults `aggregateComponentCount`): a Block local or synthesized
+  user-fn parameter carries its vector width only in the local frame
+  (boxed type `unknown`) and previously emitted `_gpu_atN(v, vec3val)` —
+  a shader type error behind `success: true`. Scalar locals unaffected.
+- **The unknown-extent (−1) guard now covers the index side too**, taking
+  the PERMANENT no-static-count reason (D4), not the demand-gated
+  dynamic-gather text with a nonsense "−1 entries" count.
+- **Literal non-integer index entries** (strings, nested lists,
+  `Missing`) get the mixed-literal reason, not the dynamic-gather text;
+  the dynamic-gather message counts actual runtime-valued entries.
+- **The literal-base purity rule is now PER-ELEMENT** (supersedes the
+  round-1 "impure literal base in any folding path" note): an omitted
+  element must be pure; an impure element may be *selected* — it is
+  emitted exactly once (`At([Random(),1,2], 1)` compiles, the draw
+  appears once; discarding or double-selecting the impure element
+  declines). `requirePureFold` still governs whole-base NaN folds.
+- **Refuted with a counter-probe**: hardening
+  `gpuAtFramedBaseElements`'s no-declared-type admit would break the
+  working user-fn vec-param and Block-local base shapes — the width-only
+  frame's admit is load-bearing (widths there are inferred from bound
+  shader-float values), and the caller-declared frame always writes both
+  maps, so the imagined fail-open case is unreachable by construction.
+  Both shapes are now pinned.
+
 ## Landing notes
 
 - Snapshot blast radius expected 0 (new GPU entry + preamble branches);
