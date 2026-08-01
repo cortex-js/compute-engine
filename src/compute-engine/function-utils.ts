@@ -27,6 +27,8 @@ import {
   functionLiteralParameterType,
 } from './boxed-expression/function-literal.js';
 import { errorValue } from './boxed-expression/error-value.js';
+import { effectsOf } from './boxed-expression/effects-of.js';
+import { isPureComputedEffects } from '../common/type/effects.js';
 import type { Type } from '../common/type/types.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
@@ -1339,6 +1341,40 @@ function makeLambda(
           }
         }
       }
+      // Purity-gated pre-evaluation (`docs/EFFECTS-MODEL.md`, "Currying /
+      // partial application"). Evaluating the body with the applied prefix is
+      // an optimization: the residual literal carries an already-reduced body.
+      // It is only sound for a PURE body — an effectful one would fire its
+      // effects at partial application, and again at saturation. So an
+      // effectful body is CAPTURED WITHOUT EVALUATION, as a residual that
+      // re-applies the ORIGINAL literal to the prefix once the last argument
+      // arrives: `(a, b) ↦ body` applied to `1` becomes
+      // `(_1) ↦ Apply((a, b) ↦ body, 1, _1)`.
+      //
+      // Substituting the prefix VALUES into the body instead would be the
+      // obvious encoding and is wrong: `subs()` is not capture-avoiding, so a
+      // nested literal that rebinds a parameter name has its own parameter
+      // symbol overwritten (`(a) ↦ a * 2` becomes `(1) ↦ 2`). Re-application
+      // keeps the body untouched, and binding goes through the same scope
+      // machinery as a saturated call.
+      //
+      // The prefix ARGUMENTS are evaluated either way (above): producing an
+      // operand is not the body's effect, and eager operands are evaluated at
+      // the call that supplies them.
+      if (!isPureComputedEffects(effectsOf(body))) {
+        const deferred = ce._fn(
+          'Apply',
+          [fnExpr, ...evaluatedKnownArgs, ...extraSymbols],
+          { canonical: false }
+        );
+        return ce.function('Function', [
+          returnTypeOp !== undefined
+            ? ce._fn('Typed', [deferred, returnTypeOp], { canonical: false })
+            : deferred,
+          ...extras,
+        ]);
+      }
+
       const capturedScope =
         bodyFn.localScope!.parent ?? ce.context.lexicalScope;
       const freshScope: Scope = {

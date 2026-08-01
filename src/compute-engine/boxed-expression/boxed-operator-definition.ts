@@ -1,4 +1,5 @@
 import type {
+  EffectLabel,
   EffectSet,
   FunctionSignature,
   Type,
@@ -7,11 +8,17 @@ import type {
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   hasDeclaredEffectLabel,
+  isEffectSubset,
   isPureEffectSet,
   normalizeEffectSet,
   sameEffectSet,
-  unionEffectSets,
 } from '../../common/type/effects.js';
+import {
+  EffectContractError,
+  inferFunctionLiteralEffects,
+  signatureEffects,
+  stripArrowEffects,
+} from './effects-inference.js';
 
 import type {
   OperatorDefinition,
@@ -36,6 +43,8 @@ import {
   functionLiteralParameters,
 } from './function-literal.js';
 import { functionResult, signatureArms } from '../../common/type/utils.js';
+import { parseTypeWithEffectsProvenance } from '../../common/type/parse.js';
+import { typeToString } from '../../common/type/serialize.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { defaultCollectionHandlers } from '../collection-utils.js';
 
@@ -64,8 +73,11 @@ const OPERATOR_DEF_KEYS = new Set([
   'involution',
   'pure',
   'effects',
+  'effectsDeclared',
   'frameProtocol',
   'invokes',
+  'discharges',
+  'holdClass',
   'drawsRandom',
   'readsRandomFrame',
 
@@ -177,6 +189,28 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * @internal */
   private _inferredDraws = false;
 
+  /** Annotation provenance (`docs/EFFECTS-MODEL.md`, "Annotation provenance"):
+   * the EFFECTS-axis analog of {@link inferredSignature}. True when the AUTHOR
+   * stated the effect set — an effect-bearing signature specifier, the `pure`
+   * keyword in the specifier slot, or the `effects:` field (including
+   * `effects: []`, "stated as pure") — rather than the body inference having
+   * produced it. It is a DEFINITION-level bit: the type AST keeps its single
+   * optional `effects` field ("absent = pure") and carries no provenance.
+   *
+   * What it gates: the definition-annotation check, and with it the revision
+   * gate. `false` is the INFERRED track — a body assignment stamps, and a
+   * re-assignment freely RE-stamps, whatever the walk infers. `true` makes the
+   * set a CONTRACT: every assigned body must satisfy `inferred ⊆ declared`,
+   * and the stored arrow keeps the DECLARED set rather than being re-stamped
+   * to the tighter inferred one.
+   *
+   * The legacy `pure`/`drawsRandom` flags deliberately do NOT set it — they
+   * are an override ("not pure"), not a contract, and a `pure: true`
+   * declaration over a drawing body stays the documented escape hatch. A
+   * return-type-only `Typed(body, T)` ascription likewise carries no effect
+   * contract. */
+  effectsDeclared = false;
+
   /** The latent effects of applying this operator. `undefined` is the empty
    * set (pure); `'any'` is the top ("unknown effects"). */
   get effects(): EffectSet | undefined {
@@ -217,6 +251,20 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /** `false` when no operand position invokes a function-valued operand — the
    * pure containers and constructors, which only store the value. */
   invokes = true;
+
+  /** Per operand position (0-based), the effects this operator ABSORBS rather
+   * than re-emits — `WithRandomSeed`'s `{ 1: ['random'] }` on its held body.
+   * `undefined` (the default) discharges nothing, which is the sound default:
+   * propagation is what gives `Map(xs, f)` per-call-site precision. */
+  discharges:
+    | { readonly [operandIndex: number]: readonly EffectLabel[] }
+    | undefined = undefined;
+
+  /** How a HELD operand position is treated by the projection rule:
+   * `'evaluate'` (may-evaluate — the operator may evaluate the operand under
+   * itself, so it contributes, minus any discharge) or `'quote'` (`Hold` —
+   * never evaluated, contribution ∅). */
+  holdClass: 'evaluate' | 'quote' | 'release' = 'evaluate';
 
   readsRandomFrame = false;
 
@@ -554,15 +602,31 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // Whether the body inference below positively observed a draw. Only the
     // inference sets it: an explicit declaration is authoritative on its own.
     let inferredDraws = false;
+    // Annotation provenance (`docs/EFFECTS-MODEL.md`, "Annotation provenance").
+    // The `effects:` field is one of the two spellings that make the effect set
+    // a CONTRACT; the other — an effect-bearing specifier on the signature — is
+    // detected below. Deliberately NOT set by the legacy `pure`/`drawsRandom`
+    // sugar, which promises only "not pure" and is an override, not a contract.
+    if (def.effects !== undefined) this.effectsDeclared = true;
 
     this.frameProtocol = def.frameProtocol ?? this.frameProtocol;
     this.invokes = def.invokes ?? this.invokes;
+    if (def.discharges !== undefined)
+      this.discharges = normalizeDischarges(this.name, def.discharges);
+    this.holdClass = def.holdClass ?? this.holdClass;
     this.readsRandomFrame = def.readsRandomFrame ?? this.readsRandomFrame;
     this.complexity = def.complexity ?? this.complexity;
 
     if (def.signature) {
       const oldSig = normalizeSignatureField(def.signature);
-      const newSig = this.engine.type(oldSig);
+      // Parse through the provenance-carrying entry: `(x) pure -> y` builds the
+      // same type as `(x) -> y`, and only the parser can report that the author
+      // wrote the keyword (`docs/EFFECTS-MODEL.md`, "Annotation provenance").
+      const { type: sigType, effectsStated } = parseTypeWithEffectsProvenance(
+        oldSig,
+        this.engine._typeResolver
+      );
+      const newSig = this.engine.type(sigType);
       if (oldSig && !newSig.matches(this.engine.type(oldSig))) {
         throw new Error(
           `Operator Definition "${this.name}": signature "${newSig}" does not match "${oldSig}"`
@@ -578,14 +642,21 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // definition built by spreading a boxed one survive the spread: the
       // derived `pure`/`drawsRandom` getters live on the prototype and are not
       // copied, but the effect-bearing `signature` is.)
+      // `pure` in the slot is the explicitly-stated EMPTY set, so a stated
+      // specifier with no labels is still a CONTRACT — the same input as
+      // `effects: []`, which `normalizeEffectSet` also collapses to
+      // `undefined`. `effectsStated` covers both spellings.
       const sigEffects = signatureEffects(this.signature.type);
-      if (sigEffects !== undefined) {
+      if (sigEffects !== undefined || effectsStated) {
         if (effects.stated && !sameEffectSet(effects.effects, sigEffects))
           throw new Error(
             `Operator Definition "${this.name}": the 'effects' field and the effects on the signature "${this.signature}" disagree`
           );
         effects = { stated: true, effects: sigEffects };
+        this.effectsDeclared = true;
       }
+
+      assertArmsDistinguishableWithoutEffects(this.name, this.signature.type);
     }
 
     if (legacy.stated) {
@@ -698,15 +769,47 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         // body calling a stochastic ESTIMATOR (`Integrate`) depends on the
         // frame without consuming its indices, so a call that could not finish
         // must keep the frame too.
-        if (!effects.stated || def.readsRandomFrame === undefined) {
-          const inferred = inferLambdaFlags(this.engine, boxedFn);
-          if (!effects.stated) {
-            effects = { stated: true, effects: inferred.effects };
-            inferredDraws = inferred.draws;
-          }
-          if (def.readsRandomFrame === undefined)
-            this.readsRandomFrame = inferred.readsRandomFrame;
+        const inferred = inferFunctionLiteralEffects(this.engine, boxedFn, {
+          selfName: this.name,
+        });
+        // The definition-annotation CHECK. An explicit effect annotation is a
+        // contract, accepted iff `inferred ⊆ declared` (over-declaring
+        // weakens, and is allowed). The contract is the set the AUTHOR stated
+        // — this update's, or the one a previous update declared and this one
+        // says nothing about (re-`Assign`ing a body must not silently rewrite
+        // a declared contract into whatever the new body infers).
+        //
+        // The trusted-annotation escape (v5): when the walk saw an UNRESOLVED
+        // named head the check cannot run — the head is opaque at this moment,
+        // the same residual trust class as an opaque host declaration — so the
+        // annotation installs as stated and is NOT revalidated when the head
+        // later resolves (no dependency tracking).
+        const declared: StatedEffects | undefined = this.effectsDeclared
+          ? effects.stated
+            ? effects
+            : { stated: true, effects: this._effects }
+          : undefined;
+        if (declared !== undefined) {
+          if (
+            !inferred.unresolvedHead &&
+            !isEffectSubset(inferred.effects, declared.effects)
+          )
+            throw new EffectContractError(
+              this.name,
+              declared.effects,
+              inferred.effects
+            );
+          effects = declared;
+          // A declared contract is authoritative on frame participation too,
+          // but a draw the walk positively SAW is retained: an `any` contract
+          // absorbs `{random}`, and `drawsRandom` requires an explicit label.
+          inferredDraws = inferred.draws;
+        } else if (!effects.stated) {
+          effects = { stated: true, effects: inferred.effects };
+          inferredDraws = inferred.draws;
         }
+        if (def.readsRandomFrame === undefined)
+          this.readsRandomFrame = inferred.readsRandomFrame;
       }
 
       const fn = applicable(boxedFn);
@@ -746,28 +849,6 @@ type StatedEffects = { stated: boolean; effects: EffectSet | undefined };
 const UNSTATED_EFFECTS: StatedEffects = { stated: false, effects: undefined };
 
 /**
- * The effects attached to a signature type's arrow, if any.
- *
- * An INTERSECTION of signatures is the overload-set representation (see
- * `overloadArms` in `overload.ts` — matched here rather than imported, which
- * would close a cycle through `boxed-expression/utils.ts`). The definition-wide
- * derived getters read the UNION of the arms' effects ("One source of truth"
- * and "Overloads" in `docs/EFFECTS-MODEL.md`): an overload with one
- * effect-bearing arm is not a pure definition. A MIXED intersection is not a
- * callable overload set and still contributes nothing.
- */
-function signatureEffects(t: Type): EffectSet | undefined {
-  if (typeof t === 'string') return undefined;
-  if (t.kind === 'signature') return t.effects;
-  if (t.kind !== 'intersection') return undefined;
-  const arms = signatureArms(t);
-  if (arms === undefined) return undefined;
-  let effects: EffectSet | undefined = undefined;
-  for (const arm of arms) effects = unionEffectSets(effects, arm.effects);
-  return effects;
-}
-
-/**
  * Translate the legacy `pure` / `drawsRandom` authoring flags into an effect
  * set. The normative truth table (`docs/EFFECTS-MODEL.md`, "One source of
  * truth — and the flag migration"):
@@ -804,110 +885,75 @@ function legacyFlagEffects(
 }
 
 /**
- * Infer the effect set of an operator definition backed by a user `Function`
- * literal, from the heads its body applies, plus the peer `readsRandomFrame`
- * runtime field (which is NOT an effect — see the noise-floor convention in
- * `docs/EFFECTS-MODEL.md`).
+ * Arms of an overload set that differ **only** by their effect specifier are a
+ * definition error (`docs/EFFECTS-MODEL.md`, "Overloads").
  *
- * The rule is a one-way accumulation: a body starts pure (the empty set) and
- * unions in the effects of every head with a KNOWN definition. The derived
- * `pure` / `drawsRandom` getters then read out of the stamped set, so the
- * relationships they used to encode by hand hold structurally: `{random}`
- * makes the definition both drawing and impure, `{scope}` impure but owing the
- * stream nothing.
+ * Selection is a typing concern driven by the ARGUMENT types; effects merely
+ * break a tie between arms already equally specific there. Two arms identical
+ * modulo effects therefore leave the tie-break as the only discriminator, and
+ * it would silently pick the pure one at every call site — an overload set that
+ * cannot express what its author wrote. Rejected at registration, like every
+ * other definition contradiction.
  *
- * Three deliberate limits, all failing in the OPTIMISTIC direction (a
- * definition that stays pure when it should not), which is why they are worth
- * stating rather than hiding:
- *
- * - **A head with no operator definition is treated as pure.** That covers the
- *   higher-order case — `f(g) := g()` cannot know what `g` will be — and an
- *   as-yet-undeclared name. Treating unknown heads as impure would instead
- *   mark most user functions impure, losing `isConstant`, the `Map` lowering
- *   fast path, and the type/sgn caches for them.
- * - **Flags are read from the callee's definition, not re-derived from its
- *   body**, so composition works only when definitions are made in dependency
- *   order: `f() := g()` written BEFORE `g` is defined sees no definition for
- *   `g` and stays pure. Redefining `f` after `g` re-runs the inference.
- * - **A self-call is neutral** — the definition being constructed still holds
- *   the defaults — so a recursive function is classified by the rest of its
- *   body, which is where any draw or write actually appears.
- *
- * `Hold` is NOT skipped: `Hold(Random())` marks the definition as drawing even
- * though nothing draws until `Release`. That is the conservative direction
- * (the cost is a lost optimization) and it keeps the walk a plain structural
- * scan.
- *
- * The literal arrives in `'raw'` form, so its nodes are UNBOUND and
- * `operatorDefinition` is `undefined` throughout — the lookup by name is the
- * load-bearing path here, not a fallback (same shape as `isImpureHead` in
- * `library/map-lowering.ts`).
+ * Only an INTERSECTION is an overload set (see `overloadArms`); a plain
+ * signature has a single arm, and a union of signatures is not resolved to one.
  */
-function inferLambdaFlags(
-  ce: ComputeEngine,
-  literal: Expression
-): {
-  effects: EffectSet | undefined;
-  readsRandomFrame: boolean;
-  draws: boolean;
-} {
-  // A parameter shadows any same-named operator for the whole body, so
-  // `f(Random) := Random` must not be read as a draw.
-  const params = new Set(functionLiteralParameters(literal).map((p) => p.name));
-
-  let effects: EffectSet | undefined = undefined;
-  // `f(a) := Integrate(...)` must keep the seed frame for the same reason the
-  // built-in estimator does: a call that could not finish still depends on it.
-  // A peer runtime field, not an effect: a framed estimate is reproducible,
-  // which is exactly what `pure` claims.
-  let readsRandomFrame = false;
-  // Frame participation the walk POSITIVELY observed, kept separately from the
-  // union because `any` absorbs `{random}` and the derived `drawsRandom` reads
-  // only EXPLICIT labels: a body calling both an `{any}` head and a real draw
-  // collapses to `{any}` and would otherwise report no draw at all. Stored on
-  // the definition as `_inferredDraws` (an inference-only Stage 1 bridge).
-  let draws = false;
-
-  const visit = (expr: Expression): void => {
-    // Saturated: nothing further can change the answer.
-    if (effects === 'any' && readsRandomFrame && draws) return;
-    if (!isFunction(expr)) return;
-
-    const head = expr.operator;
-    if (head !== 'Function' && !params.has(head)) {
-      const def = expr.operatorDefinition ?? operatorDefinitionOf(ce, head);
-      if (def?.readsRandomFrame === true) readsRandomFrame = true;
-      // Read from the callee's DERIVED getter, so an explicit `random`, a
-      // frame-protocol head, and a callee whose own inference saw a draw all
-      // propagate — the same composition rule as the effect union.
-      if (def?.drawsRandom === true) draws = true;
-      // A head that participates in the seed frame through a FRAME PROTOCOL
-      // rather than through its own effect set (`WithRandomSeed`) still makes
-      // this body owe the outer frame. Its Stage 1 effect set is the
-      // placeholder `any` — standing in for its HELD body, whose effects are
-      // unknowable until Stage 2 projection — so `{random}` is contributed in
-      // its place. Unioning the placeholder instead would DEFEAT the
-      // propagation: `any` absorbs, and the derived `drawsRandom` requires an
-      // EXPLICIT `random` (frame participation requires explicit
-      // declaration — see the `any` ruling).
-      if (def?.frameProtocol === 'seed')
-        effects = unionEffectSets(effects, ['random']);
-      else if (def) effects = unionEffectSets(effects, def.effects);
-    }
-
-    for (const op of expr.ops) visit(op);
-  };
-
-  visit(literal);
-  return { effects, readsRandomFrame, draws };
+function assertArmsDistinguishableWithoutEffects(
+  name: string,
+  type: Type
+): void {
+  if (typeof type === 'string' || type.kind !== 'intersection') return;
+  const arms = signatureArms(type);
+  if (arms === undefined || arms.length < 2) return;
+  // Pairwise, on the arms with their effect specifier stripped: identical
+  // shapes are a conflict exactly when the effect sets differ (identical arms
+  // are a plain duplicate, which the type reducer already collapses).
+  const stripped = arms.map((arm) => typeToString(stripArrowEffects(arm)));
+  for (let i = 0; i < arms.length; i++)
+    for (let j = i + 1; j < arms.length; j++)
+      if (
+        stripped[i] === stripped[j] &&
+        !sameEffectSet(arms[i].effects, arms[j].effects)
+      )
+        throw new Error(
+          `Operator Definition "${name}": the overload arms "${typeToString(
+            arms[i]
+          )}" and "${typeToString(
+            arms[j]
+          )}" differ only by their effects; overload arms must be distinguishable by their argument types`
+        );
 }
 
-/** The operator definition bound to `name`, or `undefined` when `name` is
- * undeclared or holds a value rather than an operator. */
-function operatorDefinitionOf(
-  ce: ComputeEngine,
-  name: string
-): BoxedOperatorDefinition | undefined {
-  const def = ce.lookupDefinition(name);
-  return def && 'operator' in def ? def.operator : undefined;
+/**
+ * Validate and canonicalize a `discharges:` declaration — a map from 0-based
+ * operand index to the labels the operator absorbs at that position.
+ *
+ * Fails closed, like {@link normalizeEffectSet}: a non-integer index, a
+ * negative index, an unknown label or `'any'` (the top is not dischargeable —
+ * a discharge set is finite by construction) is a registration error, never a
+ * silently ignored declaration that would leave the operator propagating what
+ * it claims to absorb.
+ */
+function normalizeDischarges(
+  name: string,
+  discharges: { readonly [operandIndex: number]: readonly EffectLabel[] }
+): { readonly [operandIndex: number]: readonly EffectLabel[] } | undefined {
+  const result: { [operandIndex: number]: readonly EffectLabel[] } = {};
+  let count = 0;
+  for (const key of Object.keys(discharges)) {
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0)
+      throw new Error(
+        `Operator Definition "${name}": the 'discharges' field is keyed by operand index; "${key}" is not one`
+      );
+    const labels = normalizeEffectSet(discharges[index]);
+    if (labels === undefined) continue;
+    if (labels === 'any')
+      throw new Error(
+        `Operator Definition "${name}": 'any' cannot be discharged at operand ${index}; a discharge set is a finite set of labels`
+      );
+    result[index] = labels;
+    count += 1;
+  }
+  return count === 0 ? undefined : result;
 }

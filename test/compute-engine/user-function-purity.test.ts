@@ -2,8 +2,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * A user-defined function derives its `pure` and `drawsRandom` flags from the
- * heads its body applies (`inferLambdaFlags` in
- * `boxed-expression/boxed-operator-definition.ts`).
+ * heads its body applies (`inferFunctionLiteralEffects` in
+ * `boxed-expression/effects-inference.ts` — the Stage 2 construction seam).
  *
  * Without the inference a definition is born with the DEFAULTS — `pure: true`,
  * `drawsRandom: false` — so `f() := Random()` claims to be a pure, hence
@@ -13,9 +13,12 @@ import { ComputeEngine } from '../../src/compute-engine';
  * gate loses the frame, silently resuming a seeded computation with LIVE
  * draws.
  *
- * The inference is a one-way downgrade from heads with a KNOWN definition; an
- * unknown head (a higher-order parameter, an undeclared name) stays pure by
- * ruling. See the doc comment on `inferLambdaFlags` for the three limits.
+ * The inference is a one-way accumulation over the heads the body APPLIES. The
+ * Stage 2 rulings that shape it (`docs/EFFECTS-MODEL.md`, "Inference"):
+ * an unannotated higher-order PARAMETER stays optimistically pure (ruling (c));
+ * an UNRESOLVED named head infers `{any}` (the v5 dependency-order ruling —
+ * this AMENDS the Stage 0 "unknown head stays pure" limit); a nested `Function`
+ * literal is a BOUNDARY, contributing only where the body applies it.
  */
 
 /** The `pure` / `drawsRandom` a symbol's operator definition ended up with. */
@@ -279,8 +282,16 @@ describe('Effect flags: the library carriers', () => {
     // The runtime role is the kind-valued `frameProtocol` field; the derived
     // `drawsRandom` getter reads it, so the pending-draw walk is unchanged.
     expect(def('WithRandomSeed').frameProtocol).toBe('seed');
-    expect(def('WithRandomSeed').pure).toBe(false);
     expect(def('WithRandomSeed').drawsRandom).toBe(true);
+    // Its OWN effects are empty since Stage 2: it draws nothing, it DELIMITS,
+    // and it DISCHARGES `random` on its held body position. (Stage 1 stood in
+    // with the `pure: false` sugar — `{any}` — because the effects of the held
+    // body were not computable until the runtime channel existed.) The
+    // application-level answer is now the precise one: see
+    // `effects-of.test.ts`.
+    expect(def('WithRandomSeed').effects).toBe(undefined);
+    expect(def('WithRandomSeed').pure).toBe(true);
+    expect(def('WithRandomSeed').discharges).toEqual({ 1: ['random'] });
   });
 
   for (const name of ['Integrate', 'NIntegrate']) {
@@ -610,5 +621,740 @@ describe('The failures the inference prevents', () => {
     const seen = new Set<string>();
     for (let i = 0; i < 20; i++) seen.add(ce.box(['f']).evaluate().toString());
     expect(seen.size).toBeGreaterThan(1);
+  });
+});
+
+/**
+ * Stage 2 (`docs/EFFECTS-MODEL.md`, "Inference" → *Literals are inference
+ * boundaries*):
+ *
+ * > A nested `Function` literal's effects go on **its own arrow** (its latent
+ * > set); the enclosing body adds them only where the body *applies* (or
+ * > projects) the literal. So `makeCallback() := (() ↦ Random())` is itself
+ * > pure with result type `() random -> …`. This **amends Stage 0's shipped
+ * > behavior** — the current `inferLambdaFlags` recurses into nested literal
+ * > bodies (conservative) — and `user-function-purity.test.ts` updates
+ * > accordingly.
+ */
+describe('Literals are inference boundaries', () => {
+  /** The effect specifier on an arrow, or `''` for a pure one. */
+  const specifier = (e: { type: { type: unknown } }) => {
+    // Read the OUTER arrow's specifier off the type AST: a regex over the
+    // serialized string is ambiguous when a parameter (or result) is itself
+    // an annotated arrow — it reads the inner specifier back.
+    const t = e.type.type as { kind?: string; effects?: 'any' | string[] };
+    if (typeof t === 'string' || t.kind !== 'signature') return '';
+    return t.effects === 'any' ? 'any' : (t.effects ?? []).join(' ');
+  };
+
+  it('a literal that merely PRODUCES a drawing callback is pure', () => {
+    // The spec's own example. The nested literal's `{random}` lives on the
+    // RESULT arrow, not on the producer's.
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'makeCallback',
+      ['Function', ['Function', ['Random']]],
+    ]).evaluate();
+    const def = ce.lookupDefinition('makeCallback')!['operator'];
+    expect(def.effects).toBe(undefined);
+    expect(def.pure).toBe(true);
+    expect(def.drawsRandom).toBe(false);
+    expect(def.signature.toString()).toContain('() random ->');
+  });
+
+  it('STORING a nested literal in a local contributes nothing', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      ['Block', ['Declare', 'cb', ['Function', ['Random']]], 1],
+    ]);
+    expect(specifier(literal)).toBe('');
+  });
+
+  it('an immediately APPLIED literal contributes its latent set', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box(['Function', ['Apply', ['Function', ['Random']]]]);
+    expect(specifier(literal)).toBe('random');
+  });
+
+  it('APPLYING a locally-bound literal contributes its latent set', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      ['Block', ['Declare', 'cb', ['Function', ['Random']]], ['cb']],
+    ]);
+    expect(specifier(literal)).toBe('random');
+  });
+
+  it('an APPLIED drawing callee still sets the draws bit', () => {
+    // The `_inferredDraws` bridge must survive the boundary change: producing
+    // no longer draws, but applying still does — including through the `any`
+    // collapse, which is what the bridge exists for.
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'useCallback',
+      [
+        'Function',
+        ['Block', ['Declare', 'cb', ['Function', ['Random']]], ['cb']],
+      ],
+    ]).evaluate();
+    const def = ce.lookupDefinition('useCallback')!['operator'];
+    expect(def.effects).toEqual(['random']);
+    expect(def.drawsRandom).toBe(true);
+  });
+});
+
+/**
+ * Stage 2, ruling (c) (`docs/EFFECTS-MODEL.md`, "Inference" → *Applied
+ * parameters*):
+ *
+ * > an **annotated** function parameter contributes its declared arrow effects
+ * > to body inference […]. An **unannotated** parameter (declared `unknown`,
+ * > `function-utils.ts`) keeps the optimistic ruling: treated pure, no boundary
+ * > check — deliberate residual optimism; soundness is opt-in via annotation.
+ */
+describe('Applied parameters: annotated contributes, unannotated stays optimistic', () => {
+  const specifier = (e: { type: { type: unknown } }) => {
+    // Read the OUTER arrow's specifier off the type AST: a regex over the
+    // serialized string is ambiguous when a parameter (or result) is itself
+    // an annotated arrow — it reads the inner specifier back.
+    const t = e.type.type as { kind?: string; effects?: 'any' | string[] };
+    if (typeof t === 'string' || t.kind !== 'signature') return '';
+    return t.effects === 'any' ? 'any' : (t.effects ?? []).join(' ');
+  };
+
+  it('an ANNOTATED function parameter contributes its declared effects', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      ['g'],
+      ['Typed', 'g', { str: '() random -> real' }],
+    ]);
+    expect(specifier(literal)).toBe('random');
+  });
+
+  it('an UNANNOTATED function parameter is treated pure', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box(['Function', ['g'], 'g']);
+    expect(specifier(literal)).toBe('');
+  });
+
+  it('a parameter shadows a same-named operator', () => {
+    // `f(Random) := Random()` must not be read as a draw.
+    const ce = new ComputeEngine();
+    const literal = ce.box(['Function', ['Random'], 'Random']);
+    expect(specifier(literal)).toBe('');
+  });
+});
+
+/**
+ * Stage 2, the dependency-order split (`docs/EFFECTS-MODEL.md`, "Inference"):
+ *
+ * > an **unresolved named head** infers `{any}` — sound; the cost is caching
+ * > for forward references — while **applied unannotated parameters** keep the
+ * > optimistic ruling (c). […] an **explicit** annotation on a definition whose
+ * > inference saw an unresolved head is installed as a **trusted contract** […]
+ * > and is *not* revalidated when the head later resolves.
+ */
+describe('Dependency order: an unresolved named head infers `any`', () => {
+  it('`f() := g()` before `g` exists infers `any` (honest)', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'fwd9x', ['Function', ['undeclared9x']]]).evaluate();
+    const def = ce.lookupDefinition('fwd9x')!['operator'];
+    expect(def.effects).toBe('any');
+    expect(def.pure).toBe(false);
+    // `any` alone never pins a seed frame.
+    expect(def.drawsRandom).toBe(false);
+  });
+
+  it('an explicit annotation over an unresolved head installs as TRUSTED', () => {
+    const ce = new ComputeEngine();
+    ce.declare('trusted9x', {
+      signature: '() -> number',
+      effects: [],
+      evaluate: ce.box(['Function', ['undeclared9y']]),
+    } as any);
+    const def = ce.lookupDefinition('trusted9x')!['operator'];
+    expect(def.effects).toBe(undefined);
+    expect(def.pure).toBe(true);
+    expect(def.effectsDeclared).toBe(true);
+  });
+
+  it('a RESOLVED head is read from its definition, not treated as unknown', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'src9x', ['Function', ['Random']]]).evaluate();
+    ce.box(['Assign', 'dst9x', ['Function', ['src9x']]]).evaluate();
+    expect(ce.lookupDefinition('dst9x')!['operator'].effects).toEqual([
+      'random',
+    ]);
+  });
+
+  it('a self-call is neutral, not an unresolved head', () => {
+    // Otherwise every recursive definition would infer `{any}`.
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'rec9x',
+      [
+        'Function',
+        ['If', ['Less', 'n', 1], 1, ['rec9x', ['Subtract', 'n', 1]]],
+        'n',
+      ],
+    ]).evaluate();
+    const def = ce.lookupDefinition('rec9x')!['operator'];
+    expect(def.effects).toBe(undefined);
+    expect(def.pure).toBe(true);
+  });
+});
+
+/**
+ * Stage 2, dominance-based confinement (`docs/EFFECTS-MODEL.md`, "Scope
+ * writes"):
+ *
+ * > an `Assign` is confined iff **every static path from the literal's entry to
+ * > the `Assign` passes through a `Declare` of that symbol within the literal**,
+ * > **and** the symbol is not referenced by any nested `Function` literal
+ * > (closure capture ⇒ escaping). […] `Assume` is **never** confined.
+ * > Destructuring and compound targets are judged per target symbol; any target
+ * > the analysis cannot resolve ⇒ `scope`. […] **not provably confined ⇒
+ * > `scope`.**
+ *
+ * The approximation: a `Declare(n, …)` STATEMENT dominates the statements that
+ * follow it in the same straight-line sequence, and nothing else. The frontier
+ * is copied per sequence, so a `Declare` inside a nested `Block` or an `If` arm
+ * never leaks outward.
+ *
+ * The three cases are worked example 3.
+ */
+describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
+  const specifier = (e: { type: { type: unknown } }) => {
+    // Read the OUTER arrow's specifier off the type AST: a regex over the
+    // serialized string is ambiguous when a parameter (or result) is itself
+    // an annotated arrow — it reads the inner specifier back.
+    const t = e.type.type as { kind?: string; effects?: 'any' | string[] };
+    if (typeof t === 'string' || t.kind !== 'signature') return '';
+    return t.effects === 'any' ? 'any' : (t.effects ?? []).join(' ');
+  };
+
+  it('a Declare that DOMINATES the Assign is confined → pure', () => {
+    // f() := Block(Declare(n, 0), Assign(n, n + 1), n)
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'confined9x',
+      [
+        'Function',
+        ['Block', ['Declare', 'n', 0], ['Assign', 'n', ['Add', 'n', 1]], 'n'],
+      ],
+    ]).evaluate();
+    const def = ce.lookupDefinition('confined9x')!['operator'];
+    expect(def.effects).toBe(undefined);
+    expect(def.pure).toBe(true);
+  });
+
+  it('a write through to an OUTER binding is escaping → `scope`', () => {
+    // Declare(counter, 0); g() := Block(Assign(counter, counter + 1), counter)
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'counter9x', 0]).evaluate();
+    ce.box([
+      'Assign',
+      'escaping9x',
+      [
+        'Function',
+        [
+          'Block',
+          ['Assign', 'counter9x', ['Add', 'counter9x', 1]],
+          'counter9x',
+        ],
+      ],
+    ]).evaluate();
+    const def = ce.lookupDefinition('escaping9x')!['operator'];
+    expect(def.effects).toEqual(['scope']);
+    expect(def.pure).toBe(false);
+    // Impure, but owing the random stream nothing.
+    expect(def.drawsRandom).toBe(false);
+  });
+
+  it('a CONDITIONAL Declare does not dominate → `scope`', () => {
+    // h() := Block(If(flag, Declare(n, 0)), Assign(n, 5), n)
+    // On the flag-false path the Assign writes through.
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      ['Block', ['If', 'flag9x', ['Declare', 'n', 0]], ['Assign', 'n', 5], 'n'],
+    ]);
+    expect(specifier(literal)).toBe('scope');
+  });
+
+  it('a Declare in a NESTED Block does not dominate the outer Assign', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      ['Block', ['Block', ['Declare', 'n', 0]], ['Assign', 'n', 5]],
+    ]);
+    expect(specifier(literal)).toBe('scope');
+  });
+
+  it('CLOSURE CAPTURE by a nested literal makes the write escaping', () => {
+    // The closure may outlive the declaring application.
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      ['Block', ['Declare', 'n', 0], ['Assign', 'n', 1], ['Function', 'n']],
+    ]);
+    expect(specifier(literal)).toBe('scope');
+  });
+
+  it('`Assume` is NEVER confined', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      ['Block', ['Declare', 'x9x', 0], ['Assume', ['Greater', 'x9x', 0]]],
+    ]);
+    expect(specifier(literal)).toBe('scope');
+  });
+
+  it('a COMPOUND target the analysis cannot resolve ⇒ `scope`', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Declare', 'L9x', ['List', 1, 2]],
+        ['Assign', ['Subscript', 'L9x', 1], 5],
+      ],
+    ]);
+    expect(specifier(literal)).toBe('scope');
+  });
+
+  it('a DESTRUCTURING Declare dominates each of its target symbols', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Declare', ['Tuple', 'p9x', 'q9x'], ['Tuple', 1, 2]],
+        ['Assign', 'p9x', 5],
+      ],
+    ]);
+    expect(specifier(literal)).toBe('');
+  });
+
+  it('confinement is INFERENCE-only: a bare Block still reports `scope`', () => {
+    // The channel split (v5): the runtime accounting stays conservative, and
+    // `Assign`'s own definition keeps its `{scope}` label unconditionally.
+    const ce = new ComputeEngine();
+    expect(ce.lookupDefinition('Assign')!['operator'].effects).toEqual([
+      'scope',
+    ]);
+  });
+});
+
+/**
+ * Stage 2, the definition-annotation check (`docs/EFFECTS-MODEL.md`,
+ * "Inference"):
+ *
+ * > An explicit effect annotation on a defined function is a contract:
+ * > accepted iff `inferred ⊆ declared` (over-declaring weakens, allowed). On
+ * > violation the definition is **not installed** and the `Assign`/`Declare`
+ * > yields an `incompatible-type` error value — same shape and channel as the
+ * > call-boundary check.
+ */
+describe('The definition-annotation check', () => {
+  it('over-declaring is allowed', () => {
+    const ce = new ComputeEngine();
+    ce.declare('over9x', {
+      signature: '() any -> number',
+      evaluate: ce.box(['Function', ['Random']]),
+    });
+    expect(ce.lookupDefinition('over9x')!['operator'].effects).toBe('any');
+  });
+
+  it('an exactly-matching annotation is accepted', () => {
+    const ce = new ComputeEngine();
+    ce.declare('exact9x', {
+      signature: '() random -> number',
+      evaluate: ce.box(['Function', ['Random']]),
+    });
+    expect(ce.lookupDefinition('exact9x')!['operator'].effects).toEqual([
+      'random',
+    ]);
+  });
+
+  it('a violated contract throws on the `ce.declare` API route', () => {
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.declare('viol9x', {
+        signature: '() scope -> number',
+        evaluate: ce.box(['Function', ['Random']]),
+      })
+    ).toThrow(/do not cover/);
+  });
+
+  it('the `Assign` operator route yields an `incompatible-type` error value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('viol9y', {
+      signature: '() scope -> number',
+      evaluate: ce.box(['Function', 1]),
+    });
+    const result = ce
+      .box(['Assign', 'viol9y', ['Function', ['Random']]])
+      .evaluate();
+    expect(result.operator).toBe('Error');
+    expect(result.toString()).toContain('incompatible-type');
+    // NOT installed: the previous contract survives.
+    expect(ce.lookupDefinition('viol9y')!['operator'].effects).toEqual([
+      'scope',
+    ]);
+  });
+
+  it('the `Declare` operator route yields an `incompatible-type` error value', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .box([
+        'Declare',
+        'viol9z',
+        { str: '() scope -> number' },
+        ['Function', ['Random']],
+      ])
+      .evaluate();
+    expect(result.operator).toBe('Error');
+    expect(result.toString()).toContain('incompatible-type');
+    expect(ce.lookupDefinition('viol9z')).toBeUndefined();
+  });
+
+  it('a BARE specifier is the INFERRED track, not a purity contract', () => {
+    // Ruled 2026-08-01: effects take the same inferred-vs-explicit polarity the
+    // type system already has for types. An ascribed full signature with an
+    // EMPTY slot declares the type axes (params, result) but leaves effects
+    // inferred and revisable — so any body is accepted, whatever it does.
+    // Only an explicit statement (a non-empty specifier, `pure`, or
+    // `effects:`) is a contract.
+    const ce = new ComputeEngine();
+    ce.declare('bare9x', { type: '() -> number' });
+    expect(() =>
+      ce.assign('bare9x', ce.box(['Function', ['Random']]))
+    ).not.toThrow();
+  });
+});
+
+/**
+ * The **inferred track** (ruled 2026-08-01, `docs/EFFECTS-MODEL.md`,
+ * "Annotation provenance"): a bare specifier slot is the effects-axis analog of
+ * an inferred type — flexible, and re-stamped whenever better information
+ * arrives. The canonical arc is `fib`: declare bare, assign a counter-writing
+ * body (revised to `{scope}`), reassign a pure body (revised back). No errors
+ * anywhere.
+ */
+describe('The inferred effects track (a bare specifier slot)', () => {
+  /** The effect specifier on the arrow of the body stored for `name`, as a
+   * string ('' when pure). Reads the DEFINITION, whichever slot it landed in. */
+  const bodyEffects = (ce: ComputeEngine, name: string): string => {
+    const def = ce.lookupDefinition(name)!;
+    const t = (
+      'operator' in def ? def.operator.signature : def.value.value!.type
+    ).toString();
+    const m = /\)\s*([a-z_ ]*?)\s*->/.exec(t);
+    return m ? m[1] : `NO ARROW in "${t}"`;
+  };
+
+  it('the fib arc: declared bare, revised by each body assigned to it', () => {
+    const ce = new ComputeEngine();
+    ce.declare('counter9x', { type: 'number', value: 0 });
+    ce.declare('fib9x', { type: '(number) -> number' });
+
+    // Declared, unassigned: optimistically pure, and NOT a contract.
+    const def = ce.lookupDefinition('fib9x')!;
+    expect('value' in def && def.value.effectsDeclared).toBe(false);
+
+    // A counter-writing body: accepted, and the effects are revised to
+    // `{scope}` — the very idiom `scope.test.ts` / `lambda-capture.test.ts`
+    // pin (a mutable closure under a bare-arrow declaration).
+    ce.assign(
+      'fib9x',
+      ce.box([
+        'Function',
+        ['Block', ['Assign', 'counter9x', ['Add', 'counter9x', 1]], 'n'],
+        'n',
+      ])
+    );
+    expect(bodyEffects(ce, 'fib9x')).toBe('scope');
+    // ... and the call still works, writing the counter.
+    expect(ce.box(['fib9x', 3]).evaluate().toString()).toBe('3');
+    expect(ce.box('counter9x').evaluate().toString()).toBe('1');
+
+    // Reassigning a pure body revises the effects BACK: the inferred track is
+    // re-stamped, never merely widened.
+    ce.assign('fib9x', ce.box(['Function', ['Add', 'n', 1], 'n']));
+    expect(bodyEffects(ce, 'fib9x')).toBe('');
+    expect(ce.box(['fib9x', 3]).evaluate().toString()).toBe('4');
+  });
+
+  it('the same arc through the operator slot (`{ signature: … }`)', () => {
+    // The two documented declare spellings must stay equivalent.
+    const ce = new ComputeEngine();
+    ce.declare('counter9y', { type: 'number', value: 0 });
+    ce.declare('fib9y', { signature: '(number) -> number' });
+    expect(ce.lookupDefinition('fib9y')!['operator'].effectsDeclared).toBe(
+      false
+    );
+
+    ce.assign(
+      'fib9y',
+      ce.box([
+        'Function',
+        ['Block', ['Assign', 'counter9y', ['Add', 'counter9y', 1]], 'n'],
+        'n',
+      ])
+    );
+    expect(bodyEffects(ce, 'fib9y')).toBe('scope');
+    expect(ce.box(['fib9y', 3]).evaluate().toString()).toBe('3');
+
+    ce.assign('fib9y', ce.box(['Function', ['Add', 'n', 1], 'n']));
+    expect(bodyEffects(ce, 'fib9y')).toBe('');
+  });
+
+  it('an inference-produced definition re-stamps freely too', () => {
+    // No declaration at all: `effectsDeclared` stays false and each assignment
+    // replaces the inferred set.
+    const ce = new ComputeEngine();
+    ce.assign('rev9x', ce.box(['Function', ['Random']]));
+    expect(ce.lookupDefinition('rev9x')!['operator'].effects).toEqual([
+      'random',
+    ]);
+    ce.assign('rev9x', ce.box(['Function', 1]));
+    expect(ce.lookupDefinition('rev9x')!['operator'].effects).toBeUndefined();
+    expect(ce.lookupDefinition('rev9x')!['operator'].effectsDeclared).toBe(
+      false
+    );
+  });
+});
+
+/**
+ * The **declared track**: an explicit statement — a non-empty specifier, the
+ * `pure` keyword, or the `effects:` field — is a CONTRACT. Every assigned body
+ * must satisfy `inferred ⊆ declared` (over-declaring allowed); a violation is
+ * an `incompatible-type` error and the definition is not installed.
+ */
+describe('The declared effects track (an explicit statement)', () => {
+  const declaredEffects = (ce: ComputeEngine, name: string): string => {
+    const def = ce.lookupDefinition(name)!;
+    const t = (
+      'operator' in def ? def.operator.signature : def.value.type
+    ).toString();
+    const m = /\)\s*([a-z_ ]*?)\s*->/.exec(t);
+    return m ? m[1] : `NO ARROW in "${t}"`;
+  };
+
+  for (const [label, declare] of [
+    [
+      'value slot',
+      (ce: ComputeEngine, id: string) =>
+        ce.declare(id, { type: '(number) scope -> number' }),
+    ],
+    [
+      'operator slot',
+      (ce: ComputeEngine, id: string) =>
+        ce.declare(id, { signature: '(number) scope -> number' }),
+    ],
+  ] as [string, (ce: ComputeEngine, id: string) => void][]) {
+    it(`a \`scope\` contract accepts a ⊆ body and rejects a wider one (${label})`, () => {
+      const ce = new ComputeEngine();
+      ce.declare('counter9z', { type: 'number', value: 0 });
+      declare(ce, 'con9x');
+
+      // A PURE body is a subset of `{scope}` — over-declaring is allowed.
+      expect(() =>
+        ce.assign('con9x', ce.box(['Function', ['Add', 'n', 1], 'n']))
+      ).not.toThrow();
+      // The declaration keeps the DECLARED set; it is not re-stamped to the
+      // tighter inferred one.
+      expect(declaredEffects(ce, 'con9x')).toBe('scope');
+      expect(ce.box(['con9x', 3]).evaluate().toString()).toBe('4');
+
+      // A `random` body is NOT a subset: rejected, definition not installed.
+      expect(() =>
+        ce.assign('con9x', ce.box(['Function', ['Add', 'n', ['Random']], 'n']))
+      ).toThrow(/do not cover/);
+      expect(declaredEffects(ce, 'con9x')).toBe('scope');
+      expect(ce.box(['con9x', 3]).evaluate().toString()).toBe('4');
+    });
+  }
+
+  it('the `Assign` operator route reports it as an `incompatible-type` value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('con9y', { type: '(number) scope -> number' });
+    const result = ce
+      .box(['Assign', 'con9y', ['Function', ['Add', 'n', ['Random']], 'n']])
+      .evaluate();
+    expect(result.operator).toBe('Error');
+    expect(result.toString()).toContain('incompatible-type');
+  });
+
+  //
+  // `pure` in the specifier slot — an explicitly-stated EMPTY effect set. It
+  // is accepted authoring input only: the type it builds is identical to the
+  // bare form (`test/common/type/effects.test.ts`), and the statement travels
+  // to the definition as provenance.
+  //
+  for (const [label, declare] of [
+    [
+      'value slot, `pure` keyword',
+      (ce: ComputeEngine, id: string) =>
+        ce.declare(id, { type: '(number) pure -> number' }),
+    ],
+    [
+      'value slot, `pure` keyword, string form',
+      (ce: ComputeEngine, id: string) =>
+        ce.declare(id, '(number) pure -> number'),
+    ],
+    [
+      'operator slot, `pure` keyword',
+      (ce: ComputeEngine, id: string) =>
+        ce.declare(id, { signature: '(number) pure -> number' }),
+    ],
+    [
+      'operator slot, `effects: []`',
+      (ce: ComputeEngine, id: string) =>
+        ce.declare(id, {
+          signature: '(number) -> number',
+          effects: [],
+        } as any),
+    ],
+  ] as [string, (ce: ComputeEngine, id: string) => void][]) {
+    it(`an explicit purity contract rejects a scope-writing body (${label})`, () => {
+      const ce = new ComputeEngine();
+      ce.declare('counter9w', { type: 'number', value: 0 });
+      declare(ce, 'pur9x');
+
+      // A pure body is fine.
+      expect(() =>
+        ce.assign('pur9x', ce.box(['Function', ['Add', 'n', 1], 'n']))
+      ).not.toThrow();
+      expect(ce.box(['pur9x', 3]).evaluate().toString()).toBe('4');
+
+      // A scope-writing body violates the stated EMPTY set.
+      expect(() =>
+        ce.assign(
+          'pur9x',
+          ce.box([
+            'Function',
+            ['Block', ['Assign', 'counter9w', ['Add', 'counter9w', 1]], 'n'],
+            'n',
+          ])
+        )
+      ).toThrow(/do not cover/);
+      // Not installed: the pure body survives, and the counter never moved.
+      expect(ce.box(['pur9x', 3]).evaluate().toString()).toBe('4');
+      expect(ce.box('counter9w').evaluate().toString()).toBe('0');
+    });
+
+    it(`the same contract still serializes with an EMPTY slot (${label})`, () => {
+      // `pure` is never emitted: the canonical spelling of a pure arrow is the
+      // empty slot, whichever way the author stated it.
+      const ce = new ComputeEngine();
+      declare(ce, 'pur9y');
+      expect(declaredEffects(ce, 'pur9y')).toBe('');
+    });
+  }
+
+  it('`pure` in the slot sets the `effectsDeclared` provenance bit', () => {
+    const ce = new ComputeEngine();
+    ce.declare('pur9z', {
+      signature: '(number) pure -> number',
+      evaluate: ([x]) => x,
+    });
+    expect(ce.lookupDefinition('pur9z')!['operator'].effectsDeclared).toBe(
+      true
+    );
+    // ... and the bare form does not.
+    ce.declare('pur9w', {
+      signature: '(number) -> number',
+      evaluate: ([x]) => x,
+    });
+    expect(ce.lookupDefinition('pur9w')!['operator'].effectsDeclared).toBe(
+      false
+    );
+  });
+
+  it('`pure` conflicts with a disagreeing `effects:` field or legacy flag', () => {
+    // Never silent precedence: a contradiction is a registration error, the
+    // same rule the `effects:`/signature pair already follows.
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.declare('pur9v', {
+        signature: '(number) pure -> number',
+        effects: ['scope'],
+        evaluate: ([x]) => x,
+      })
+    ).toThrow(/disagree/);
+    expect(() =>
+      ce.declare('pur9u', {
+        signature: '(number) pure -> number',
+        pure: false,
+        evaluate: ([x]) => x,
+      })
+    ).toThrow(/disagree/);
+  });
+});
+
+/**
+ * Stage 2, annotation provenance (`docs/EFFECTS-MODEL.md`, "Inference" →
+ * *Annotation provenance*): "a **definition-level provenance bit,
+ * `effectsDeclared`** — set when the author supplied an effects-bearing
+ * signature string, the `effects:` authoring field, or a full-signature
+ * ascription; left unset on inference-produced signatures."
+ */
+describe('The `effectsDeclared` provenance bit', () => {
+  const declaredBit = (flags: Record<string, unknown>): boolean => {
+    const ce = new ComputeEngine();
+    ce.declare('prov9x', {
+      signature: '(number) -> number',
+      evaluate: ([x]) => x,
+      ...flags,
+    } as any);
+    return ce.lookupDefinition('prov9x')!['operator'].effectsDeclared;
+  };
+
+  it('an effect-bearing signature specifier sets it', () => {
+    expect(declaredBit({ signature: '(number) random -> number' })).toBe(true);
+  });
+
+  it('the `effects:` field sets it', () => {
+    expect(declaredBit({ effects: ['scope'] })).toBe(true);
+  });
+
+  it('a bare signature does NOT set it', () => {
+    expect(declaredBit({})).toBe(false);
+  });
+
+  it('the legacy `pure`/`drawsRandom` sugar does NOT set it', () => {
+    // The flags are an OVERRIDE ("not pure"), not a contract — which is what
+    // keeps `pure: true` a working escape hatch over a drawing body.
+    expect(declaredBit({ pure: false })).toBe(false);
+    expect(declaredBit({ drawsRandom: true })).toBe(false);
+  });
+
+  it('an inference-produced signature does NOT set it', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'inf9x', ['Function', ['Random']]]).evaluate();
+    const def = ce.lookupDefinition('inf9x')!['operator'];
+    expect(def.effects).toEqual(['random']);
+    expect(def.effectsDeclared).toBe(false);
+  });
+
+  it('a return-type-only ascription carries NO effect contract', () => {
+    // `Typed(body, T)` is return-type-only and leaves inference in charge.
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'ret9x',
+      ['Function', ['Typed', ['Random'], { str: 'number' }]],
+    ]).evaluate();
+    const def = ce.lookupDefinition('ret9x')!['operator'];
+    expect(def.effects).toEqual(['random']);
+    expect(def.effectsDeclared).toBe(false);
   });
 });

@@ -111,10 +111,10 @@ import {
 } from './sgn.js';
 import { cachedValue, CachedValue } from './cache.js';
 import { apply, lookupApplicable } from '../function-utils.js';
-import {
-  functionLiteralParameters,
-  functionLiteralReturnType,
-} from './function-literal.js';
+import { functionLiteralSignatureType } from './effects-inference.js';
+import { applicationEffects } from './effects-of.js';
+import type { ComputedEffects } from '../../common/type/effects.js';
+import { isPureComputedEffects } from '../../common/type/effects.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import {
@@ -168,8 +168,6 @@ export class BoxedFunction
    */
   private _localScope: Scope | undefined;
 
-  private _isPure: boolean | undefined;
-
   private _isStructural: boolean;
 
   private _hash: number | undefined;
@@ -195,6 +193,16 @@ export class BoxedFunction
     generation: -1,
   };
   private _type: CachedValue<BoxedType | undefined> = {
+    value: null,
+    generation: -1,
+  };
+  /** The runtime effect channel (`effects-of.ts`). Generation-guarded like
+   * `_type` and `_sgn`, and for a reason beyond speed: the projection resolves
+   * a symbol operand through its CURRENT binding, so a reassignment — which
+   * bumps `ce._generation` — must invalidate the answer. (`reset()` is an inert
+   * stub and is NOT the invalidation mechanism.) `undefined` is a legitimate
+   * cached value (the empty set); `null` is the miss marker. */
+  private _effects: CachedValue<ComputedEffects> = {
     value: null,
     generation: -1,
   };
@@ -317,17 +325,26 @@ export class BoxedFunction
     return this._def !== undefined && this._def !== null && !this._isStructural;
   }
 
+  /**
+   * The runtime effect channel for this application — the projection rule of
+   * `docs/EFFECTS-MODEL.md`, memoized behind the generation guard.
+   * @internal
+   */
+  _effectsOf(): ComputedEffects {
+    return cachedValue(this._effects, this.engine._generation, () =>
+      applicationEffects(this)
+    );
+  }
+
+  /** A VIEW of the effect channel: "no impurity label in `effectsOf(expr)`"
+   * (`docs/EFFECTS-MODEL.md`, "Runtime counterpart"). No longer independently
+   * computed — the projection is strictly more precise than the old
+   * `def.pure && every operand pure` rule: it resolves a symbol operand through
+   * its binding (so `Map(xs, randomF)` is impure), and it stops at the two
+   * boundaries where nothing is evaluated — a quote position (`Hold`) and a
+   * `Function` literal, whose effects live on its own arrow. */
   get isPure(): boolean {
-    if (this._isPure !== undefined) return this._isPure;
-
-    let pure = this.operatorDefinition?.pure ?? false;
-
-    // The function expression might be pure. Let's check that all its
-    // arguments are pure.
-    if (pure) pure = this._ops.every((x) => x.isPure);
-
-    this._isPure = pure;
-    return pure;
+    return isPureComputedEffects(this._effectsOf());
   }
 
   get isConstant(): boolean {
@@ -2623,45 +2640,12 @@ function type(expr: BoxedFunction): Type {
   if (!expr.isValid) return 'error';
 
   // Is this a 'Function' expression?
-  if (expr.operator === 'Function') {
-    // What is the type of the body of the function?
-    const body = expr.ops[0];
-    const params = functionLiteralParameters(expr);
-
-    // Result type: an explicit return-type ascription (the §4.2 marker) is
-    // used verbatim, bypassing the widening rule. A Block's type is its last
-    // statement's type, so `body.type` already surfaces the ascribed return.
-    const ascribedReturn = functionLiteralReturnType(expr);
-    let bodyType: Type | string = `${body.type}`;
-    // The parameters of a bare function literal have unknown type, so a
-    // finite-numeric body claim is unsound: the lambda may later be applied to
-    // a non-finite argument — `(x ↦ x²)(∞) = +∞` — so widen a finite-numeric
-    // result to the top numeric type `number`. (A nullary function has no such
-    // parameter, so its exact body type is kept.) Suppress the widening only
-    // when EVERY parameter type is provably finite (`finite_number`); in this
-    // type system `integer`/`rational`/`real` all admit non-finite values, so
-    // a param annotated `integer` still widens. A bare param (type undefined)
-    // never suppresses widening.
-    if (
-      ascribedReturn === undefined &&
-      params.length > 0 &&
-      body.type.matches('finite_number') &&
-      !params.every(
-        (p) => p.type !== undefined && isSubtype(p.type, 'finite_number')
-      )
-    )
-      bodyType = 'number';
-
-    // Parameter slots: an annotated param emits its declared type, named
-    // (`x: integer`); a bare param stays `unknown` as today.
-    const paramSig = params
-      .map((p) =>
-        p.type !== undefined ? `${p.name}: ${typeToString(p.type)}` : 'unknown'
-      )
-      .join(', ');
-
-    return parseType(`(${paramSig}) -> ${bodyType}`, expr.engine._typeResolver);
-  }
+  // The arrow — parameters, result AND effect specifier — is built by the
+  // single Stage 2 construction seam (`effects-inference.ts`). Nothing else in
+  // the engine may assemble a `Function` literal's signature: a second builder
+  // silently reintroduces the inline-callback gap. Guarded by
+  // `test/compute-engine/effects-seam.test.ts`.
+  if (expr.operator === 'Function') return functionLiteralSignatureType(expr);
 
   // Is there a definition associated with the operator of the function?
   const def = expr.operatorDefinition;

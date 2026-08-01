@@ -11,6 +11,7 @@ import { isSubtype } from '../../common/type/subtype.js';
 import {
   broadcastableBaseMatches,
   couldBeNonRealNumber,
+  narrowingPreservesEffects,
   overlapsForDeferredValidation,
   stripMissingFromType,
   typeContainsMissing,
@@ -677,7 +678,12 @@ export function validateArguments(
     // a subtype of the current inferred type. Narrowing is sound, so narrow
     // the symbol's type rather than erroring (e.g. `B` inferred as `value`
     // from `SetMinus(A, B)`, later required as `set` in `SetMinus(B, A)`).
-    if (op.valueDefinition?.inferredType && isSubtype(param, op.type.type)) {
+    // NOT on the effect axis: see `narrowingPreservesEffects`.
+    if (
+      op.valueDefinition?.inferredType &&
+      isSubtype(param, op.type.type) &&
+      narrowingPreservesEffects(op.type.type, param)
+    ) {
       op.infer(param, 'narrow');
       result.push(op);
       continue;
@@ -783,8 +789,13 @@ export function validateArguments(
       continue;
     }
     // Inferred (not declared) symbol type, and the required type is a subtype
-    // of the current inferred type: narrow rather than error.
-    if (op.valueDefinition?.inferredType && isSubtype(param, op.type.type)) {
+    // of the current inferred type: narrow rather than error. NOT on the
+    // effect axis: see `narrowingPreservesEffects`.
+    if (
+      op.valueDefinition?.inferredType &&
+      isSubtype(param, op.type.type) &&
+      narrowingPreservesEffects(op.type.type, param)
+    ) {
       op.infer(param, 'narrow');
       result.push(op);
       i += 1;
@@ -852,10 +863,12 @@ export function validateArguments(
         continue;
       }
       // Inferred (not declared) symbol type, and the required variadic type is
-      // a subtype of the current inferred type: narrow rather than error.
+      // a subtype of the current inferred type: narrow rather than error. NOT
+      // on the effect axis: see `narrowingPreservesEffects`.
       if (
         op.valueDefinition?.inferredType &&
-        isSubtype(varParam, op.type.type)
+        isSubtype(varParam, op.type.type) &&
+        narrowingPreservesEffects(op.type.type, varParam)
       ) {
         op.infer(varParam, 'narrow');
         result.push(op);

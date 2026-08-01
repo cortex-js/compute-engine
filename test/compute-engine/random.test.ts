@@ -670,7 +670,15 @@ describe('Declaration flags — every nondeterministic head is impure', () => {
     ['RandomSample', false, true],
     ['RandomShuffle', false, true],
     ['RandomPrime', false, true],
-    ['WithRandomSeed', false, true],
+    // `WithRandomSeed` is the exception that proves the rule: it draws
+    // nothing, it DELIMITS the frame (`frameProtocol: 'seed'`, which is what
+    // `drawsRandom` reads) and DISCHARGES `random` on its held body. Its own
+    // effects are therefore empty — and an application of it genuinely IS
+    // referentially transparent: `WithRandomSeed(42, Random())` replays. The
+    // expression-level answer comes from the projection, not from this flag
+    // (`effects-of.test.ts`); the Stage 1 `pure: false` placeholder stood in
+    // only until that channel existed.
+    ['WithRandomSeed', true, true],
     ['RandomExpression', false, false],
   ];
 

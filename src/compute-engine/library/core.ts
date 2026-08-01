@@ -42,7 +42,10 @@ import {
   stripMissingFromType,
   widen,
 } from '../../common/type/utils.js';
-import { parseType } from '../../common/type/parse.js';
+import {
+  parseType,
+  parseTypeWithEffectsProvenance,
+} from '../../common/type/parse.js';
 import { canonicalMultiply } from '../boxed-expression/arithmetic-mul-div.js';
 import {
   canonicalSolve,
@@ -71,6 +74,17 @@ import {
   withDrawRollback,
 } from '../boxed-expression/utils.js';
 import { errorValue } from '../boxed-expression/error-value.js';
+import {
+  effectContractErrorValue,
+  functionLiteralSignatureType,
+  isEffectContractError,
+  signatureEffects,
+} from '../boxed-expression/effects-inference.js';
+import {
+  operatorDefinitionOf,
+  shallowApplicationEffects,
+} from '../boxed-expression/effects-of.js';
+import { hasDeclaredEffectLabel } from '../../common/type/effects.js';
 import {
   isNumber,
   isSymbol,
@@ -120,15 +134,36 @@ function holdValuesShieldNames(spec: Expression): string[] {
  * to the enclosing seed frame: an application of a stream-drawing operator
  * (`drawsRandom` — `Random`, `RandomShuffle`, a nested `WithRandomSeed`…)
  * survived evaluation in a position this evaluation was supposed to finish.
- * Used by `WithRandomSeed` to keep the frame (Tycho item 104). Keyed on the
- * `drawsRandom` definition flag, NOT on `pure` — `Assign`/`Assume`/`Declare`
- * are impure but owe nothing to the stream, and a surviving one must not pin
- * the frame forever.
+ * Used by `WithRandomSeed` to keep the frame (Tycho item 104).
+ *
+ * **Keyed on all three seed-frame participation modes** (`docs/EFFECTS-MODEL.md`,
+ * "Runtime counterpart"), never on impurity in general — `Assign`/`Assume`/
+ * `Declare` are impure but owe the stream nothing, and a surviving one must not
+ * pin the frame forever:
+ *
+ * 1. the node DRAWS — `random` explicitly in the node's own projected effects
+ *    (which includes the LATENT effects of a callback it invokes, e.g.
+ *    `Map(xs, randomF)` beneath a survivor), or the derived `drawsRandom`
+ *    getter, which additionally carries the frame protocol and the inference's
+ *    positively-observed-draw bit;
+ * 2. the node DELIMITS — `frameProtocol === 'seed'` (a nested
+ *    `WithRandomSeed`), folded into `drawsRandom`;
+ * 3. the node READS the frame without consuming indices —
+ *    `readsRandomFrame`, the stochastic estimators.
+ *
+ * **`any` never pins.** Per the `any` ruling under "Labels and lattice",
+ * conservatism inverts on the frame axis — pinning a frame forever is the harm
+ * — so frame participation requires an EXPLICIT `random` label:
+ * `hasDeclaredEffectLabel` reports `false` for `'any'` and for a co-finite
+ * value ¬D (which can only have arisen from discharging an *unknown* body, so
+ * `random ∈ ¬D` is a fact about the complement, not a declaration).
  *
  * The walk distinguishes VALUE position from a surviving EAGER application:
  *
- * - `Hold` content never counts — inert until `Release`, under whatever
- *   frame is active then.
+ * - Quote content (`holdClass: 'quote'` — `Hold`) never counts: inert until
+ *   `Release`, under whatever frame is active then. DERIVED from the
+ *   definition flag, not a name check — it is the same quote-position rule the
+ *   projection uses to make `effectsOf(Hold(Random()))` empty.
  * - A lazy collection VIEW in value position — `Map(xs, x |-> Random())`
  *   escaping as the result, directly or inside `List`/`Tuple` cells — is a
  *   COMPLETED value: its lambda draws at materialization (the §6 escape
@@ -158,17 +193,18 @@ function hasPendingImpureApplication(
 ): boolean {
   if (!isFunction(expr)) return false;
   const h = expr.operator;
-  if (h === 'Hold') return false;
+  const def = operatorDefinitionOf(expr);
+  // A quote position is never evaluated by its operator, so nothing beneath it
+  // is owed to this frame.
+  if (def?.holdClass === 'quote') return false;
   if (h === 'Function' && !underEagerSurvivor) return false;
-  // Two ways a surviving application still needs the frame: it CONSUMES
-  // indices (`drawsRandom` — `Random`, `RandomShuffle`, a nested
-  // `WithRandomSeed`), or it READS the frame through a derived sub-stream
-  // without consuming indices (`readsRandomFrame` — the stochastic
-  // estimators). Both must keep the frame: an estimator that could not finish
-  // (`NIntegrate(f, 0, n)` with `n` unbound) would otherwise be completed
-  // later against a live stream, the same silent seeded→unseeded conversion
-  // for estimates that item 104 fixed for draws.
-  const def = expr.operatorDefinition;
+  // Modes 1–3. `drawsRandom` covers an explicit `random` label, the frame
+  // protocol of a nested `WithRandomSeed`, and the inference's
+  // positively-observed-draw bridge for a symbol-headed application whose
+  // effect set collapsed to `any`; `readsRandomFrame` is the reader mode — an
+  // estimator that could not finish (`NIntegrate(f, 0, n)` with `n` unbound)
+  // would otherwise be completed later against a live stream, the same silent
+  // seeded→unseeded conversion for estimates that item 104 fixed for draws.
   if (def?.drawsRandom === true || def?.readsRandomFrame === true) return true;
   // Value position propagates through a lazy view and through the literal
   // containers; every other surviving application puts its whole subtree —
@@ -177,6 +213,18 @@ function hasPendingImpureApplication(
     !underEagerSurvivor &&
     (expr.isLazyCollection || h === 'List' || h === 'Tuple' || h === 'Pair');
   const under = underEagerSurvivor || !isValueNode;
+  // Mode 1, the LATENT half: a surviving application that INVOKES a
+  // function-valued operand which draws (`Map(xs, randomF)` beneath an
+  // unfinished consumer, `Apply(randomF, x)`) still owes those draws. Only in
+  // eager-survivor position: a lazy view in VALUE position draws at
+  // materialization instead (§6), which is the same reason its `Function`
+  // subtree is skipped above. The node's own effects, not its subtree's — the
+  // recursion below is what visits the operands, with these exceptions.
+  if (
+    under &&
+    hasDeclaredEffectLabel(shallowApplicationEffects(expr), 'random')
+  )
+    return true;
   // A binder lazy view in value position: only the clause operands are
   // scanned; the body is per-element work performed at materialization.
   if (!under && expr.isLazyCollection) {
@@ -786,6 +834,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it',
       lazy: true,
+      // QUOTE, not may-evaluate: `Hold` never evaluates its content, so the
+      // content contributes NO effects — `effectsOf(Hold(Random()))` is the
+      // empty set and `Hold(Random())` is pure (`docs/EFFECTS-MODEL.md`, the
+      // held-operand clause; `RANDOMNESS-MODEL.md` §2's inert-content ruling).
+      // The effects resurface at `ReleaseHold`, which evaluates the content
+      // under whatever frame is active then. The pending-draw walk's `Hold`
+      // exception is DERIVED from this flag.
+      holdClass: 'quote',
       // An observer: `Hold` never looks INSIDE its operand, so a failed one is
       // held like any other (rung 3 would otherwise bubble it away on the
       // routes that hand over an already-canonical operand — `("a" + 1) |>
@@ -815,6 +871,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     ReleaseHold: {
       description: 'Release an expression held by `Hold`',
       lazy: true,
+      // FORCES a quote: the effects `Hold` deferred resurface here (the
+      // held-operand clause of `docs/EFFECTS-MODEL.md`), so the projection
+      // strips one `Hold` layer and recurses into the content —
+      // `effectsOf(ReleaseHold(Hold(Random())))` is `{random}` while
+      // `effectsOf(Hold(Random()))` is empty.
+      holdClass: 'release',
       signature: '(any) -> unknown',
       type: ([x]) => (isFunction(x, 'Hold') ? x.op1.type : x.type),
       // Note: the operator is lazy and doesn't have a canonical handler:
@@ -1338,7 +1400,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const symbolName = sym(symbol);
         if (!symbolName) return undefined;
         const val = op2.evaluate();
-        ce.assign(symbolName, val);
+        // A violated definition-annotation contract (an explicit effect
+        // annotation the body's inferred effects do not fit) is not installed
+        // and surfaces as an `incompatible-type` error VALUE — the same shape
+        // and channel as the call-boundary type check. See "Definition-
+        // annotation check" in `docs/EFFECTS-MODEL.md`.
+        try {
+          ce.assign(symbolName, val);
+        } catch (e) {
+          if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+          throw e;
+        }
         return val;
       },
     },
@@ -1432,13 +1504,21 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const typeSource = typeOp ?? attrs?.get('type');
         const hasType = typeSource !== undefined;
         let type: Type | undefined;
+        // Effects-axis provenance: `(number) pure -> number` builds the same
+        // type as `(number) -> number`, so the author's `pure` has to be read
+        // off the parse (`docs/EFFECTS-MODEL.md`, "Annotation provenance").
+        let effectsDeclared = false;
         if (hasType) {
           const t = typeSource!.canonical.evaluate();
-          const parsed = parseType(
-            (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined
-          );
+          const source =
+            (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined;
+          if (source === undefined) return undefined;
+          const { type: parsed, effectsStated } =
+            parseTypeWithEffectsProvenance(source);
           if (!isValidType(parsed)) return undefined;
           type = parsed;
+          effectsDeclared =
+            effectsStated || signatureEffects(parsed) !== undefined;
         }
 
         // Resolve the effective value: a positional value wins over the
@@ -1505,6 +1585,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             if (hasType) {
               existingValueDef.value.type = ce.type(type!);
               existingValueDef.value.inferredType = false;
+              existingValueDef.value.effectsDeclared = effectsDeclared;
             }
             if (holdUntil) existingValueDef.value.holdUntil = holdUntil;
             if (boundHasValue) ce.assign(symbolName, boundValue!); // assign while mutable
@@ -1524,8 +1605,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           } else {
             // Fresh declaration.
             const def: Partial<SymbolDefinition> = {};
-            if (hasType) def.type = type;
-            else if (!boundHasValue) {
+            if (hasType) {
+              def.type = type;
+              // Only ever set it TRUE: `ce.declare` reads a non-empty
+              // specifier off the type itself, and an explicit `false` here
+              // would suppress that.
+              if (effectsDeclared)
+                (def as { effectsDeclared?: boolean }).effectsDeclared = true;
+            } else if (!boundHasValue) {
               // Preserve the bare-declare default (inferred `unknown`). When a
               // value is present without a type, leave the type unset so
               // `ce.declare` infers it from the value.
@@ -1592,7 +1679,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const symbolName = sym(ops[0].evaluate());
         if (!symbolName) return undefined;
 
-        declareOne(symbolName, hasValue ? value : undefined);
+        // See the `Assign` handler: a violated definition-annotation contract
+        // is not installed and surfaces as an `incompatible-type` error value.
+        try {
+          declareOne(symbolName, hasValue ? value : undefined);
+        } catch (e) {
+          if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+          throw e;
+        }
         return hasValue ? value : ce.Nothing;
       },
     },
@@ -1768,11 +1862,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // A parameter is a bare symbol or an annotated `["Typed", symbol, type]`
       // expression, so parameters are `symbol | function`.
       signature: '(expression, (symbol | function)*) -> function',
-      // NOTE: for a `Function` *expression* the type is actually computed by the
-      // special case in `boxed-function.ts` (`type()`), which bypasses this
-      // handler; the finite-numeric widening for unknown params lives there.
-      type: ([body, ...args]) =>
-        `(${args.map((x) => x.type.type)}) -> ${body.type.type}`,
+      // NOTE: for a `Function` *expression* the type is actually computed by
+      // the special case in `boxed-function.ts` (`type()`), which bypasses this
+      // handler. Both go through the SAME construction seam
+      // (`effects-inference.ts`) so a literal's arrow — parameters, result and
+      // effect specifier — has exactly one builder; see the guard test
+      // `test/compute-engine/effects-seam.test.ts`.
+      type: (ops, { engine: ce }) =>
+        functionLiteralSignatureType(
+          ce._fn('Function', ops, { canonical: false })
+        ),
 
       canonical: (args, { engine }) =>
         canonicalFunctionLiteralOperands(engine, args) ?? null,
@@ -1927,12 +2026,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // derived `drawsRandom` getter reads `frameProtocol === 'seed'`, so the
       // pending-draw walk keeps working unchanged.
       frameProtocol: 'seed',
-      // Its own Stage 1 effect set is `any` (via the `pure: false` sugar), not
-      // `{random}`: the effects of the HELD body are unknowable until Stage 2.
-      // Stage 2 replaces this with a bound of `{any}` plus a discharge of
-      // `{random}` on the body position, at which point
-      // `WithRandomSeed(42, Random())` computes the empty set.
-      pure: false,
+      // The canonical DISCHARGER (`docs/EFFECTS-MODEL.md`, "Projection and
+      // discharge"). Its OWN effects are empty: it draws nothing, it delimits.
+      // The held body position (operand 1) has a bound of `{any}` and
+      // discharges `random`, so `WithRandomSeed(42, Random())` computes the
+      // empty set — referentially transparent, as it truly is — while
+      // `WithRandomSeed(42, Block(Assign(x, 1), Random()))` computes `{scope}`:
+      // the frame absorbs the draws, not the scope write. Discharging from an
+      // opaque `{any}` body computes the internal co-finite value ¬{random} —
+      // provably not-random (so the frame gate can release) yet still impure.
+      discharges: { 1: ['random'] },
       // Hold the body: it must NOT evaluate before the frame exists.
       lazy: true,
       signature: '(finite_real | string, any) -> expression',

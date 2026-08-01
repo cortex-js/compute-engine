@@ -1,14 +1,25 @@
-import { parseType } from '../../../src/common/type/parse';
+import {
+  parseType,
+  parseTypeWithEffectsProvenance,
+} from '../../../src/common/type/parse';
 import { typeToString } from '../../../src/common/type/serialize';
 import { isSubtype } from '../../../src/common/type/subtype';
 import { reduceType } from '../../../src/common/type/reduce';
 import { BoxedType } from '../../../src/common/type/boxed-type';
 import {
+  coFiniteEffects,
+  computedEffectsInclude,
   EFFECT_LABELS,
+  hasDeclaredEffectLabel,
+  isCoFiniteEffects,
+  isComputedEffectSubset,
   isEffectLabel,
   isEffectSubset,
+  isPureComputedEffects,
   normalizeEffectSet,
   sameEffectSet,
+  subtractEffects,
+  unionComputedEffects,
   unionEffectSets,
 } from '../../../src/common/type/effects';
 import type { FunctionSignature, Type } from '../../../src/common/type/types';
@@ -145,6 +156,64 @@ describe('grammar: accepted forms', () => {
     );
   });
 
+  //
+  // `pure` (ruled 2026-08-01) — SYNTACTIC SUGAR in the specifier slot for the
+  // explicitly-stated EMPTY effect set. It is parse-accepted but NEVER
+  // serialized: the canonical spelling of a pure arrow remains the empty slot,
+  // the same in-not-out asymmetry as label ordering. The `Type` it builds is
+  // identical to the bare form — provenance lives on the DEFINITION, never in
+  // the type (see `user-function-purity.test.ts` for the contract half).
+  //
+  describe('`pure` — accepted authoring input, never serialized', () => {
+    test('it builds exactly the bare-arrow type', () => {
+      expect(sig('(real) pure -> real').effects).toBeUndefined();
+      expect(sig('(real) pure -> real')).toEqual(sig('(real) -> real'));
+      // No `effects: []` state leaks into the built type.
+      expect('effects' in sig('(real) pure -> real')).toBe(false);
+    });
+
+    test('it serializes back to the empty slot', () => {
+      expect(roundTrip('(real) pure -> real')).toBe('(real) -> real');
+      expect(roundTrip('() pure -> nothing')).toBe('() -> nothing');
+      expect(roundTrip('(x: number, y: number?) pure -> number')).toBe(
+        '(x: number, y: number?) -> number'
+      );
+    });
+
+    test('the slot anchors per-arrow, so `pure` nests too', () => {
+      expect(roundTrip('(g: (real) pure -> real) scope -> boolean')).toBe(
+        '(g: (real) -> real) scope -> boolean'
+      );
+    });
+
+    test('the parse reports the author`s statement, out of band', () => {
+      // The ONE mechanism that carries "the author wrote `pure`" past the
+      // parser: the type itself cannot, by design.
+      expect(
+        parseTypeWithEffectsProvenance('(real) pure -> real').effectsStated
+      ).toBe(true);
+      expect(
+        parseTypeWithEffectsProvenance('(real) -> real').effectsStated
+      ).toBe(false);
+      expect(
+        parseTypeWithEffectsProvenance('(real) random -> real').effectsStated
+      ).toBe(true);
+      expect(
+        parseTypeWithEffectsProvenance('(real) any -> real').effectsStated
+      ).toBe(true);
+      expect(parseTypeWithEffectsProvenance('real').effectsStated).toBe(false);
+      // Only the TOP-LEVEL arrow's slot is provenance: a nested one is a type.
+      expect(
+        parseTypeWithEffectsProvenance('(g: (real) pure -> real) -> boolean')
+          .effectsStated
+      ).toBe(false);
+      // Byte-identical types, whatever the provenance says.
+      expect(
+        typeToString(parseTypeWithEffectsProvenance('(real) pure -> real').type)
+      ).toBe('(real) -> real');
+    });
+  });
+
   test('signatures with effects inside unions and intersections', () => {
     expect(roundTrip('((real) random -> real) | integer')).toBe(
       '((real) random -> real) | integer'
@@ -174,6 +243,28 @@ describe('grammar: rejected forms (all fail closed)', () => {
     [
       '(real) any any -> real',
       /`any` cannot be combined with other effect labels/,
+    ],
+    // `pure` is exclusive with every label AND with `any`, and is not
+    // repeatable — the same rules `any` follows.
+    [
+      '(real) pure random -> real',
+      /`pure` cannot be combined with other effect labels/,
+    ],
+    [
+      '(real) random pure -> real',
+      /`pure` cannot be combined with other effect labels/,
+    ],
+    [
+      '(real) pure any -> real',
+      /`pure` cannot be combined with other effect labels/,
+    ],
+    [
+      '(real) any pure -> real',
+      /`pure` cannot be combined with other effect labels/,
+    ],
+    [
+      '(real) pure pure -> real',
+      /`pure` cannot be combined with other effect labels/,
     ],
     // `!` is reserved for the future complement form
     ['(real) !random -> real', /complement form is reserved/],
@@ -525,5 +616,100 @@ describe('effect-set helpers', () => {
     expect(unionEffectSets('any', ['random'])).toBe('any');
     expect(unionEffectSets(['random'], 'any')).toBe('any');
     expect(unionEffectSets(undefined, 'any')).toBe('any');
+  });
+});
+
+//
+// Stage 2 (`docs/EFFECTS-MODEL.md`, "Discharge from `any`"): the INTERNAL
+// co-finite value `any − D = ¬D`. It is a computed value only — never surface
+// syntax, never stored on an arrow, never serialized — so these are algebra
+// tests, and the comparison rules are the stateless ones given under
+// "Complement form" (Subtyping).
+//
+describe('co-finite effect values (internal, computed)', () => {
+  test('the representation cannot collide with an effect set', () => {
+    expect(isCoFiniteEffects(coFiniteEffects(['random']))).toBe(true);
+    expect(isCoFiniteEffects(undefined)).toBe(false);
+    expect(isCoFiniteEffects('any')).toBe(false);
+    expect(isCoFiniteEffects(['random'])).toBe(false);
+  });
+
+  test('¬∅ normalizes to the top, and the complement is canonical', () => {
+    expect(coFiniteEffects([])).toBe('any');
+    expect(coFiniteEffects(['scope', 'random', 'random'])).toEqual({
+      not: ['random', 'scope'],
+    });
+  });
+
+  test('subtraction: only `any` produces a co-finite value', () => {
+    expect(subtractEffects('any', ['random'])).toEqual({ not: ['random'] });
+    // The complement GROWS as more is discharged.
+    expect(subtractEffects({ not: ['random'] }, ['scope'])).toEqual({
+      not: ['random', 'scope'],
+    });
+    // A finite set is plain set difference; the empty set stays empty.
+    expect(subtractEffects(['random', 'scope'], ['random'])).toEqual(['scope']);
+    expect(subtractEffects(['random'], ['random'])).toBeUndefined();
+    expect(subtractEffects(undefined, ['random'])).toBeUndefined();
+    // Discharging nothing changes nothing.
+    expect(subtractEffects('any', undefined)).toBe('any');
+    expect(subtractEffects('any', [])).toBe('any');
+  });
+
+  test('union: `any` absorbs; a finite set SHRINKS a complement', () => {
+    expect(unionComputedEffects({ not: ['random'] }, 'any')).toBe('any');
+    expect(unionComputedEffects({ not: ['random'] }, undefined)).toEqual({
+      not: ['random'],
+    });
+    expect(unionComputedEffects({ not: ['random'] }, ['scope'])).toEqual({
+      not: ['random'],
+    });
+    // Adding back exactly what was removed returns the top.
+    expect(unionComputedEffects({ not: ['random'] }, ['random'])).toBe('any');
+    // Two complements INTERSECT.
+    expect(
+      unionComputedEffects({ not: ['random', 'scope'] }, { not: ['scope'] })
+    ).toEqual({ not: ['scope'] });
+  });
+
+  test('subset: the three complement-form rules', () => {
+    // finite ⊆ ¬N iff the positives avoid N
+    expect(isComputedEffectSubset(['scope'], { not: ['random'] })).toBe(true);
+    expect(isComputedEffectSubset(['random'], { not: ['random'] })).toBe(false);
+    expect(isComputedEffectSubset(undefined, { not: ['random'] })).toBe(true);
+    // ¬N₁ ⊆ ¬N₂ iff N₂ ⊆ N₁
+    expect(
+      isComputedEffectSubset({ not: ['random', 'scope'] }, { not: ['scope'] })
+    ).toBe(true);
+    expect(
+      isComputedEffectSubset({ not: ['scope'] }, { not: ['random', 'scope'] })
+    ).toBe(false);
+    // co-finite ⊄ any finite set — it is version-open
+    expect(isComputedEffectSubset({ not: ['random'] }, ['scope'])).toBe(false);
+    expect(isComputedEffectSubset({ not: ['random'] }, undefined)).toBe(false);
+    expect(isComputedEffectSubset({ not: ['random'] }, 'any')).toBe(true);
+    // …and the top fits no complement
+    expect(isComputedEffectSubset('any', { not: ['random'] })).toBe(false);
+  });
+
+  test('membership: mathematical vs. DECLARED (the frame axis)', () => {
+    // Mathematically, ¬{random} contains every other label.
+    expect(computedEffectsInclude({ not: ['random'] }, 'scope')).toBe(true);
+    expect(computedEffectsInclude({ not: ['random'] }, 'random')).toBe(false);
+    expect(computedEffectsInclude('any', 'random')).toBe(true);
+    // But frame participation requires an EXPLICIT declaration: a co-finite
+    // value arose from discharging an UNKNOWN body, so it never pins a frame —
+    // the same ruling that makes `any` not pin.
+    expect(hasDeclaredEffectLabel({ not: ['scope'] }, 'random')).toBe(false);
+    expect(hasDeclaredEffectLabel('any', 'random')).toBe(false);
+    expect(hasDeclaredEffectLabel(['random'], 'random')).toBe(true);
+  });
+
+  test('a co-finite value is never pure', () => {
+    expect(isPureComputedEffects(undefined)).toBe(true);
+    expect(isPureComputedEffects('any')).toBe(false);
+    expect(isPureComputedEffects({ not: ['random'] })).toBe(false);
+    // Even a complement of every current impurity: it is version-open.
+    expect(isPureComputedEffects({ not: [...EFFECT_LABELS] })).toBe(false);
   });
 });

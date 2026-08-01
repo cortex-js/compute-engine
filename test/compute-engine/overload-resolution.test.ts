@@ -343,3 +343,49 @@ describe('overload resolution: non-overload intersections are untouched', () => 
     expect(b.type.toString()).toBe('unknown');
   });
 });
+
+/**
+ * Effects and overload arms (`docs/EFFECTS-MODEL.md`, "Subtyping" —
+ * *Overloads*):
+ *
+ * > **Specificity**: effect sets are consulted only to break ties among arms
+ * > already equally specific by argument type; a subset is more specific;
+ * > **incomparable effect sets are not compared** and fall through to the
+ * > existing tie-break. […] Arms distinguishable *only* by effect set are a
+ * > definition error.
+ */
+describe('overload resolution: effects break ties, and only ties', () => {
+  it('a SUBSET effect set is more specific among arms equal by argument type', () => {
+    // Both arms bind `number`, so neither is more specific by argument type.
+    // The EFFECTFUL arm is declared FIRST, so declaration order alone would
+    // select it; the pure arm wins on the effect tie-break instead.
+    const ce = engine('((number) scope -> rational) & ((number) -> integer)');
+    expect(ce.box(['Rnd', 5]).type.toString()).toBe('integer');
+  });
+
+  it('argument specificity still outranks effects', () => {
+    // Arm 2 is more specific by argument type (`integer <: number`) even
+    // though its effect set is larger. Effects never overturn that.
+    const ce = engine('((number) -> rational) & ((integer) scope -> integer)');
+    expect(ce.box(['Rnd', 5]).type.toString()).toBe('integer');
+  });
+
+  it('INCOMPARABLE effect sets fall through to declaration order', () => {
+    // `{random}` and `{scope}` are pairwise incomparable singletons: no
+    // comparison is made, and the first arm wins as it does today.
+    const ce = engine('((number) random -> rational) & ((number) scope -> integer)');
+    expect(ce.box(['Rnd', 5]).type.toString()).toBe('rational');
+  });
+
+  it('arms distinguishable ONLY by effects are a definition error', () => {
+    expect(() =>
+      engine('((number) scope -> integer) & ((number) -> integer)')
+    ).toThrow(/differ only by their effects/);
+  });
+
+  it('arms distinguishable by argument type may of course differ in effects', () => {
+    expect(() =>
+      engine('((integer) random -> integer) & ((string) -> string)')
+    ).not.toThrow();
+  });
+});

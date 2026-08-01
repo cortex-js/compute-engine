@@ -16,6 +16,7 @@ import { defaultCollectionHandlers } from '../collection-utils.js';
 import type { LatexString } from '../latex-syntax/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
+import { matchesDeclaredTypeAxes } from './effects-inference.js';
 import { isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
@@ -77,6 +78,14 @@ export class _BoxedValueDefinition
 
   // If true, the `_type` is inferred
   inferredType = false;
+
+  // Annotation provenance on the EFFECTS axis of a function-typed declaration
+  // — the effects-axis analog of `inferredType` (`docs/EFFECTS-MODEL.md`,
+  // "Annotation provenance"). True when the declaration STATED the arrow's
+  // effects (a non-empty specifier, or the `pure` keyword, which the type
+  // itself cannot record). False — the default — leaves effects on the
+  // inferred track.
+  effectsDeclared = false;
 
   // If `true`, the value or type cannot be changed
   _isConstant = false;
@@ -163,6 +172,8 @@ export class _BoxedValueDefinition
       this.inferredType = def.inferred ?? false;
     }
 
+    this.effectsDeclared = def.effectsDeclared ?? false;
+
     this._value = dynamicValue(this._engine, def.value);
     this._isSelfReferential = isSelfReferentialValue(this.name, this._value);
 
@@ -179,8 +190,24 @@ export class _BoxedValueDefinition
           this.inferredType = true;
         }
       } else {
-        // If the value is not compatible with the type, throw
-        if (!this._value.type.matches(this._type)) {
+        // If the value is not compatible with the type, throw.
+        //
+        // Judged PER AXIS (`docs/EFFECTS-MODEL.md`, "Annotation provenance"):
+        // parameters and result are the declared axes, but the effects axis is
+        // judged by its own provenance. A `Function` literal's arrow always
+        // carries the effects the body walk INFERRED, so a `{scope}` closure
+        // stored under a declaration written `(number) -> number` — a bare
+        // slot, i.e. the inferred track — must not fail the covariant
+        // `matches()`. When the declaration STATED effects (a non-empty
+        // specifier, or `pure`) they are a contract and are checked here too.
+        if (
+          !matchesDeclaredTypeAxes(
+            ce,
+            this._value.type,
+            this._type,
+            this.effectsDeclared
+          )
+        ) {
           throw new Error(
             [
               `Symbol "${this.name}"`,

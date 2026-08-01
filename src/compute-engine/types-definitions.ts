@@ -1,5 +1,10 @@
 import type { OneOf } from '../common/one-of.js';
-import type { EffectSet, Type, TypeString } from '../common/type/types.js';
+import type {
+  EffectLabel,
+  EffectSet,
+  Type,
+  TypeString,
+} from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { LatexString } from './latex-syntax/types.js';
 import type {
@@ -49,6 +54,22 @@ export type ValueDefinition = BaseDefinition & {
    * declared.
    */
   inferred: boolean;
+
+  /** Annotation provenance on the EFFECTS axis of a function-typed
+   * declaration (`docs/EFFECTS-MODEL.md`, "Annotation provenance") — the
+   * effects-axis analog of `inferred`.
+   *
+   * True when the author STATED the arrow's effects: a non-empty specifier
+   * (`(number) scope -> number`), or the `pure` keyword — which denotes the
+   * same empty set a bare arrow does, so the type alone cannot tell them
+   * apart. A bare arrow leaves effects on the inferred track: assigning a
+   * body re-stamps them freely. A stated set is a CONTRACT: every assigned
+   * body must satisfy `inferred ⊆ declared`.
+   *
+   * Set by `ce.declare()` from the parsed declaration; not normally written
+   * by hand.
+   */
+  effectsDeclared: boolean;
 
   /** `value` can be a JS function since for some constants, such as
    * `Pi`, the actual value depends on the `precision` setting of the
@@ -1016,6 +1037,15 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    */
   inferredType: boolean;
 
+  /** Annotation provenance on the EFFECTS axis — the effects-axis analog of
+   * {@link inferredType} (`docs/EFFECTS-MODEL.md`, "Annotation provenance").
+   *
+   * True when the declaration STATED the arrow's effects (a non-empty
+   * specifier, or the `pure` keyword). False for a bare arrow, which leaves
+   * effects on the inferred track: an assigned body's inferred effects are
+   * accepted and re-stamped, never checked against the declaration. */
+  effectsDeclared: boolean;
+
   type: BoxedType;
 
   /**
@@ -1257,6 +1287,22 @@ export type OperatorDefinitionFlags = {
   effects: EffectSet | undefined;
 
   /**
+   * Annotation provenance (`docs/EFFECTS-MODEL.md`, "Annotation provenance"):
+   * `true` when the AUTHOR supplied {@link OperatorDefinitionFlags.effects} or
+   * an effect-bearing signature specifier, `false` when the effect set came
+   * from the body inference.
+   *
+   * A **declared** set is a contract: a user function's inferred effects must
+   * be a subset of it, or the definition is not installed. An inferred set is
+   * not checked against itself. The legacy `pure` / `drawsRandom` flags do NOT
+   * set this — they are an override, not a contract.
+   *
+   * The bit lives on the definition, not in the type AST, which keeps its
+   * single optional `effects` field ("absent = pure").
+   */
+  effectsDeclared: boolean;
+
+  /**
    * The **frame protocol** this operator delimits — the runtime role that is
    * NOT an effect of its own (a delimiter absorbs the effects of its body
    * rather than emitting them). Kind-valued, not boolean: `'seed'` — the
@@ -1285,6 +1331,57 @@ export type OperatorDefinitionFlags = {
    * **Default:** `true`
    */
   invokes: boolean;
+
+  /**
+   * The effects this operator **absorbs** rather than re-emits, per operand
+   * position: a map from 0-based operand index to the labels discharged at
+   * that position (`docs/EFFECTS-MODEL.md`, "Projection and discharge").
+   *
+   * `WithRandomSeed` is the canonical discharger: `{ 1: ['random'] }` on its
+   * held body position, so `WithRandomSeed(42, Random())` computes the empty
+   * set while `WithRandomSeed(42, Block(Assign(x, 1), Random()))` computes
+   * `{scope}`.
+   *
+   * The discharge set must be a subset of the position's accepted-effects
+   * **bound** — a function parameter's signature arrow, or (for a held
+   * position) a declared bound on the held evaluation, which defaults to
+   * `{any}`, making every finite discharge admissible today.
+   *
+   * What is discharged, and what is not: only the **latent** set of an eager
+   * function-valued operand (the effects that fire if the operator invokes it)
+   * and the effects of a **held, may-evaluate** operand — evaluation that
+   * happens *under* the operator. The effects of *producing* an eager operand
+   * are never dischargeable: they fire when the operand is evaluated,
+   * whatever the operator then does with the result.
+   *
+   * Discharging from an operand whose effects are `'any'` yields an internal
+   * **co-finite** value ¬D (see `common/type/effects.ts`).
+   *
+   * **Default:** discharge nothing — propagation is the sound default.
+   */
+  discharges:
+    | { readonly [operandIndex: number]: readonly EffectLabel[] }
+    | undefined;
+
+  /**
+   * How a **held** (`lazy`) operand position is treated by the projection rule
+   * (`docs/EFFECTS-MODEL.md`, "Projection and discharge", the held-operand
+   * clause):
+   *
+   * - `'evaluate'` (the default for `lazy` positions) — **may-evaluate**: the
+   *   operand is not evaluated at application time, but the operator may
+   *   evaluate it *under* itself (a `Sum` body, the `WithRandomSeed` body), so
+   *   it contributes its own effects, minus whatever the position discharges.
+   * - `'quote'` — the operator **never** evaluates the content (`Hold`):
+   *   contribution ∅, so `Hold(Random())` is pure.
+   * - `'release'` — the operator **forces** a quote (`ReleaseHold`): the
+   *   projection strips one quote layer and recurses into the content, which
+   *   is where the effects `Hold` deferred resurface. A symbol operand is
+   *   resolved through its current binding.
+   *
+   * **Default:** `'evaluate'`
+   */
+  holdClass: 'evaluate' | 'quote' | 'release';
 
   /** If `true`, evaluating this operator consumes draws from the engine's
    * random stream (`Random`, `RandomShuffle`, …, and `WithRandomSeed`, which

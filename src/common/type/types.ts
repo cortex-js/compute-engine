@@ -341,7 +341,10 @@ export type Type =
  *
  * <signature> ::=  <arguments> (" " <effects>)? " -> " <type>
  *
- * <effects> ::= "any" | <effect-label> (" " <effect-label>)*
+ * <effects> ::= "pure" | "any" | <effect-label> (" " <effect-label>)*
+ *
+ * (`pure` is accepted authoring sugar for the empty set and is never
+ * serialized: a pure arrow's canonical spelling is the empty slot.)
  *
  * <effect-label> ::= "console" | "entropy" | "environment" | "fs_read"
  *            | "fs_write" | "network" | "random" | "scope" | "time"

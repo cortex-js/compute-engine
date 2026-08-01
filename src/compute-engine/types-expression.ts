@@ -9,7 +9,13 @@ import type {
   MathJsonSymbol,
   MathJsonDictionaryObject,
 } from '../math-json.js';
-import type { EffectSet, Type, TypeString } from '../common/type/types.js';
+import type {
+  EffectLabel,
+  EffectSet,
+  Type,
+  TypeString,
+} from '../common/type/types.js';
+import type { ComputedEffects } from '../common/type/effects.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { NumericValue } from './numeric-value/types.js';
 import type { BigNum } from './numerics/types.js';
@@ -119,6 +125,10 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   neq?: (a: Expression) => boolean | undefined;
   cmp?: (a: Expression) => '=' | '>' | '<' | undefined;
   inferredType: boolean;
+  /** True when the declaration STATED the arrow's effects (a non-empty
+   * specifier, or the `pure` keyword) rather than leaving them on the inferred
+   * track. See `types-definitions.ts`. */
+  effectsDeclared: boolean;
   type: BoxedType;
   subscriptEvaluate?: (
     subscript: Expression,
@@ -143,8 +153,22 @@ type OperatorDefinitionFlags = {
   involution: boolean;
   pure: boolean;
   effects: EffectSet | undefined;
+  /** True when the author DECLARED the effect set (an effect-bearing signature
+   * specifier or the `effects:` field) rather than the body inference having
+   * produced it. See `types-definitions.ts`. */
+  effectsDeclared: boolean;
   frameProtocol: 'seed' | undefined;
   invokes: boolean;
+  /** Per operand position (0-based index), the effects this operator ABSORBS
+   * rather than re-emits. See `types-definitions.ts`. */
+  discharges:
+    | { readonly [operandIndex: number]: readonly EffectLabel[] }
+    | undefined;
+  /** How a HELD operand position is treated by the projection rule:
+   * `'evaluate'` (may-evaluate, the default), `'quote'` (`Hold` — never
+   * evaluated, contribution ∅) or `'release'` (`ReleaseHold` — forces a quote,
+   * so the projection recurses into the content). See `types-definitions.ts`. */
+  holdClass: 'evaluate' | 'quote' | 'release';
   drawsRandom: boolean;
   readsRandomFrame: boolean;
 };
@@ -952,8 +976,22 @@ export interface Expression {
    * :::info[Note]
    * Applicable to canonical expressions only
    * :::
+   *
+   * Since Stage 2 of the effects model this is a **view** of the runtime
+   * effect channel: "no impurity label in `effectsOf(expr)`" (see
+   * `boxed-expression/effects-of.ts`).
    */
   readonly isPure: boolean;
+
+  /**
+   * The memoized runtime effect channel of a function expression — the
+   * projection rule of `docs/EFFECTS-MODEL.md` ("Projection and discharge"),
+   * cached with a generation guard. Present only on function expressions; use
+   * `effectsOf()` (`boxed-expression/effects-of.ts`) rather than calling it.
+   *
+   * @internal
+   */
+  _effectsOf?(): ComputedEffects;
 
   /**
    * `True` if evaluating this expression always returns the same value.

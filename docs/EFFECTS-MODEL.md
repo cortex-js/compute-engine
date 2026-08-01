@@ -1,6 +1,7 @@
 # Effects Model — Effects in the Type System
 
-**Status**: DRAFT v5 (2026-07-31). Design proposal, not implemented.
+**Status**: DRAFT v5 (2026-07-31). Stages 0–2 implemented; Stages 3–4
+remain proposal (see "Migration and sequencing").
 v5 folds in the round-3 dual review
 (`docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R3.md`, 16 findings — all 16
 rulings validated). Headline v5 rulings, each specified in its section:
@@ -472,7 +473,7 @@ set, attached to the arrow:
 
 ```
 <signature> ::= <arguments> [" " <effects>] " -> " <type>
-<effects>   ::= "any" | <label> (" " <label>)*
+<effects>   ::= "pure" | "any" | <label> (" " <label>)*
 <label>     ::= "console" | "entropy" | "environment" | "fs_read"
               | "fs_write" | "network" | "random" | "scope" | "time"
                                                  // closed, versioned
@@ -480,6 +481,7 @@ set, attached to the arrow:
 
 ```
 (real) -> real                // pure (empty slot ≡ empty set)
+(real) pure -> real           // the SAME type, stated explicitly
 (real) random -> real         // may draw from the seeded stream
 () entropy -> expression      // unseeded nondeterminism (RandomExpression)
 () scope -> nothing           // may mutate an enclosing scope
@@ -488,13 +490,31 @@ set, attached to the arrow:
 (real) any -> real            // opaque: unknown effects
 ```
 
-Normalization (normative): pure has exactly one spelling — an **empty
-slot** (nothing between the argument list and the arrow); an empty
-specifier *list* is unwritable, so no degenerate spelling exists to
-outlaw. Duplicate labels are a parse error; `any` is exclusive
+Normalization (normative): pure has exactly one **canonical** spelling —
+an **empty slot** (nothing between the argument list and the arrow); an
+empty specifier *list* is unwritable, so no degenerate spelling exists
+to outlaw. Duplicate labels are a parse error; `any` is exclusive
 (`any random` errors); canonical serialization orders labels
 alphabetically, separated by single spaces, and parsing accepts any
-order. The slot exists only between a **parenthesized argument list**
+order.
+
+**`pure` is accepted authoring input** *(ruled 2026-08-01)*: a keyword
+in the slot, distinct from the label enumeration, meaning the
+explicitly-stated empty set. It follows `any`'s grammar rules — exclusive
+with every label and with `any` (`pure random`, `pure any` are parse
+errors), not repeatable (`pure pure` errors) — and it is **never
+serialized**: the canonical serialization of a pure arrow remains the
+empty slot, the same in-not-out asymmetry as label ordering. `(real) pure
+-> real` and `(real) -> real` build the *same* `Type`; `pure` introduces
+no `effects: []` state, because the one thing it adds is not a type fact
+but an **annotation-provenance** fact (see "Annotation provenance"), and
+provenance never lives in the type. It therefore travels out of band: the
+definition boundary parses signature strings through a provenance-bearing
+entry (`parseTypeWithEffectsProvenance`, returning `{ type, effectsStated
+}`) and stores the bit on the *definition* — the same `stated: true` path
+the programmatic twin `effects: []` already takes.
+
+The slot exists only between a **parenthesized argument list**
 and its arrow — argument lists are already mandatorily parenthesized in
 this grammar, so the slot is positionally isolated: an identifier there
 can only be an effect label. Hence no collision with type names, current
@@ -585,6 +605,15 @@ encoding: see "Cortex surface").
 
 The polarity asymmetry with the runtime layer stays: **optimistic in
 declared contracts, conservative in runtime accounting**.
+
+What a bare arrow *asserts* depends on whose it is, and that distinction
+is provenance, not syntax (see "Annotation provenance"): on an **opaque**
+declaration — a host function, or a symbol declared but not yet assigned
+a body — it reads pure, which is the residual trust of point 3. On a
+**defined** function it is the inferred track: the body walk owns the
+slot and re-derives it on every assignment. `pure` in the slot is how an
+author asks for the first meaning where the second would otherwise
+apply.
 
 ### Projection and discharge — how applications get their effects
 
@@ -925,8 +954,10 @@ surface):
   | `true` | `true` | **registration error** (contradiction) |
 
 - A new explicit `effects:` authoring field (or an effect-annotated
-  signature string) is the precise surface; if it and legacy flags are both
-  given and disagree, **registration errors** — never silent precedence.
+  signature string, `pure` included) is the precise surface; if it and
+  legacy flags are both given and disagree, **registration errors** —
+  never silent precedence. `effects: []` and `pure` in the specifier slot
+  are the same input: an explicitly stated empty set.
 - **As readable state, the flags become derived getters**: `pure` ≙ no
   impurity label; `drawsRandom` ≙ `random` **explicitly** `∈ effects ∨
   frameProtocol`. `any` reports conservatively for `pure` (impure) but does
@@ -975,6 +1006,19 @@ surface):
   *not* revalidated when the head later resolves (no dependency
   tracking). So `f() := g()` before `g` exists: unannotated → `{any}`
   (honest); annotated → author-stated, trusted.
+- **The declared-but-unassigned window stays optimistic** *(ruled
+  2026-08-01)*. Between `ce.declare('fib', { type: '(number) -> number'
+  })` and the first body assignment there is no body to walk, so the
+  symbol reads **inferred pure**, and a forward reference compiled in
+  that window snapshots that optimistically. This is the same residual
+  optimism as an unannotated applied parameter, and it is bounded the
+  same way: the runtime channel (`effectsOf`) recomputes through the
+  CURRENT binding, so the accounting stays honest once a body is there.
+  An operator that cannot tolerate the window has a second lever:
+  **runtime enforcement is available per operator** — an evaluate handler
+  may call `effectsOf()` on the operand it is about to invoke and reject
+  at evaluation time. The static walk stays optimistic; an operator that
+  needs certainty pays for it where it can actually observe the answer.
 - **Definition-annotation check.** An explicit effect annotation on a
   defined function is a contract: accepted iff `inferred ⊆ declared`
   (over-declaring weakens, allowed). On violation the definition is **not
@@ -982,17 +1026,58 @@ surface):
   error value — same shape and channel as the call-boundary check.
   *(v5)* When inference saw an unresolved named head, the check cannot
   run and the annotation installs as **trusted** (previous bullet).
-- **Annotation provenance** *(v5, finding 11)*. "Explicit annotation" is
-  a **definition-level provenance bit, `effectsDeclared`** — set when
-  the author supplied an effects-bearing signature string, the
-  `effects:` authoring field, or a full-signature ascription; left unset
-  on inference-produced signatures. The type AST keeps its single
-  optional field ("absent = pure") — provenance lives on the
-  *definition*, not in the type. A bare specifier slot inside an
-  **explicitly ascribed full signature** IS a declared-pure contract
-  (checked); an inferred bare arrow is not. A return-type-only
-  `Typed(body, T)` ascription remains return-type-only: it carries **no
-  effect contract** and leaves inference in charge.
+  The check is a **revision gate**, and it runs on every assignment, not
+  only the first: re-assigning a body to a declared symbol re-checks the
+  contract (which the new body must also satisfy) and leaves the declared
+  set on the arrow. On the inferred track — `effectsDeclared` false —
+  there is nothing to check, and the re-assignment simply re-stamps the
+  newly inferred set, in either direction.
+- **Annotation provenance** *(v5, finding 11; the inferred-effects model
+  ruled 2026-08-01)*. Effects are a **second axis of the mechanism the
+  type system already has for types**. A declaration's type axes carry
+  `inferredSignature` / `inferredType` — inferred means *flexible*,
+  revisable when better information arrives; explicit means an
+  *enforceable contract*. Effects take the same polarity, on their own
+  axis, through a **definition-level provenance bit,
+  `effectsDeclared`** — the effects-axis analog of `inferredSignature`.
+  The type AST keeps its single optional field ("absent ≡ pure ≡
+  empty"): provenance lives on the *definition*, never in the type.
+
+  Provenance is therefore **per axis**. An ascribed full signature with
+  an **empty specifier slot** — `ce.declare('fib', { type: '(number) ->
+  number' })` — declares the TYPE axes (parameters, result: a contract,
+  as before) while leaving EFFECTS on the **inferred track**:
+  `effectsDeclared` stays false, and inference stamps, and freely
+  RE-stamps, the effect set on every body assignment. The canonical arc:
+  declare bare → inferred pure; assign a counter-writing body → revised
+  to `{scope}`; reassign a pure body → revised back. No errors anywhere.
+  *(This REPLACES the earlier reading of a bare slot as a declared-pure
+  contract.)*
+
+  An **explicit statement** is a contract: a non-empty specifier
+  (`(number) scope -> number`), the `effects:` authoring field, or the
+  `pure` keyword in the slot — an explicitly-stated *empty* set, and the
+  exact twin of `effects: []`. Every assigned body must then satisfy
+  `inferred ⊆ declared` (over-declaring is allowed: a pure body under a
+  `scope` contract is fine); a violation is an `incompatible-type` error
+  and the definition is not installed; and the stored arrow keeps the
+  **declared** set — it is never re-stamped down to the tighter inferred
+  one. The legacy `pure` / `drawsRandom` flags deliberately do NOT set
+  the bit: they are an override ("not pure"), not a contract. A
+  return-type-only `Typed(body, T)` ascription likewise remains
+  return-type-only: it carries **no effect contract** and leaves
+  inference in charge.
+
+  The same per-axis split governs the assignment boundary's
+  compatibility check (`matchesDeclaredTypeAxes`, shared by
+  `engine-declarations.ts` and the value-definition constructor):
+  parameters and result are judged against the declaration
+  unconditionally; the effects axis is judged only where its own
+  provenance says it was declared. Without that split every Stage 2
+  literal — each one carrying its inferred specifier — would fail the
+  covariant `matches()` against a bare-arrow declaration, rejecting
+  shipped, pinned idioms (a mutable closure declared `(number) ->
+  number`; see `scope.test.ts`, `lambda-capture.test.ts`).
 
 ## Sets, not rows
 
@@ -1255,7 +1340,8 @@ Each stage is useful without the next; per-stage pinning tests named.
   (`inferLambdaFlags`), pinned by
   `test/compute-engine/user-function-purity.test.ts`. Amended by Stage 2:
   nested-literal boundary semantics (above).
-- **Stage 1 — representation**: effect sets in `src/common/type/`
+- **Stage 1 — shipped (`9c1f4128`)**: representation — effect sets in
+  `src/common/type/`
   (lexer/parser/serializer/`subtype.ts`/`reduce.ts`), `BoxedType`,
   effect-aware `matches()`; `function`-primitive bound semantics; flag
   truth-table translation + derived getters + `frameProtocol` field
@@ -1288,8 +1374,8 @@ Each stage is useful without the next; per-stage pinning tests named.
   bit is inference-only, is never set by a declaration, and dissolves into
   Stage 2's `effectsOf` — the lattice gains no carrier for "definitely
   draws *and* unknown else".
-- **Stage 2 — contracts + runtime channel**: the shared literal-
-  construction seam + guard test; literal-boundary inference;
+- **Stage 2 — implemented**: contracts + runtime channel — the shared
+  literal-construction seam + guard test; literal-boundary inference;
   annotated-parameter contribution; call-boundary and definition-annotation
   checks; `effectsOf` runtime computation with generation-guarded memo;
   pending-draw walk re-keyed on it (all three seed-frame modes, incl.
@@ -1308,7 +1394,17 @@ Each stage is useful without the next; per-stage pinning tests named.
   `{scope}`-passthrough and the ¬{random} co-finite case; overload arms
   incl. incomparable-effects tie-break; partial-application effect
   timing; confined vs escaping vs conditional-declare `Assign`
-  inference; forward-reference `{any}` + trusted-annotation install).
+  inference; forward-reference `{any}` + trusted-annotation install),
+  with depth pinned by `effects-of.test.ts` (the projection rule),
+  `effects-seam.test.ts` (the construction seam),
+  `effects-call-boundary.test.ts` (bounds, blast-radius enumeration),
+  `effects-currying.test.ts`, `user-function-purity.test.ts` (inference,
+  confinement, provenance) and `overload-resolution.test.ts` (the effect
+  tie-break). The bare-slot clause of "Annotation provenance" was ruled
+  2026-08-01 (the inferred-effects model, plus `pure` in the slot) and
+  is pinned by the inferred-track / declared-track describes in
+  `user-function-purity.test.ts` and the `pure` grammar block in
+  `test/common/type/effects.test.ts`.
 - **Stage 3 — Cortex**: type-literal effects in the parser/serializer
   pair; the definition-form full-signature encoding. Tests:
   `test/cortex/effects.test.ts` (round-trip of all three surface
@@ -1337,7 +1433,15 @@ Each stage is useful without the next; per-stage pinning tests named.
   `function` primitive — which is effect-top and never rejects) and confirm
   no currently-passing impure-callback idiom breaks
   (`Map(xs, x ↦ Random())` keeps working: `Map`'s bound is the `function`
-  primitive, effect-top by definition above).
+  primitive, effect-top by definition above). **Result** (pinned by
+  `effects-call-boundary.test.ts`, "blast radius"): exactly two library
+  operators declare a function-*signature* parameter — `Iterate` and
+  `Product` — and neither newly rejects anything, so the enumeration is
+  green with zero behavior change. One known unenforced contract follows
+  from that: `Iterate` installs its operands through its own `canonical`
+  handler, which bypasses `validateArguments` entirely, so its bare-arrow
+  parameter bound is **inert** — an impure callback is accepted there
+  today rather than rejected.
 
 ## Open questions
 

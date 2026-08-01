@@ -72,8 +72,14 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
    empty specifier LIST is unwritable. Labels may be written in any order;
    the canonical (serialized) order is alphabetical. `any` is exclusive, a
    repeated label is an error, and `!` is reserved for the future complement
-   form (a parse error today). See `docs/EFFECTS-MODEL.md`. *)
-<effects> ::= "any" | <effect_label> ( " " <effect_label> )*
+   form (a parse error today).
+   `pure` is accepted AUTHORING sugar for the empty set — exclusive with every
+   label and with `any`, not repeatable — and is never serialized: the
+   canonical spelling of a pure arrow is the empty slot. It parses to the same
+   `Type` as the bare form; the "the author wrote `pure`" fact travels to the
+   definition boundary as AST provenance (`FunctionSignatureNode.effectsStated`).
+   See `docs/EFFECTS-MODEL.md`. *)
+<effects> ::= "pure" | "any" | <effect_label> ( " " <effect_label> )*
 
 <effect_label> ::= "console" | "entropy" | "environment" | "fs_read"
                  | "fs_write" | "network" | "random" | "scope" | "time"
@@ -604,17 +610,27 @@ export class Parser {
   /**
    * Parse the effect specifier slot: bare, space-separated labels between the
    * closing paren of the argument list and the `->` (the Swift specifier-slot
-   * placement). Returns `undefined` for an empty slot — a pure signature.
+   * placement).
+   *
+   * Returns the effect set the slot denotes plus whether the author WROTE a
+   * specifier: an empty slot is `{ effects: undefined, stated: false }`, the
+   * `pure` keyword is `{ effects: undefined, stated: true }` — the same
+   * (empty) set, explicitly stated. `pure` is authoring sugar only: it is
+   * never serialized, and the built `Type` is byte-identical to the bare form.
    *
    * The slot is positionally isolated, so an identifier here can only be an
-   * effect label: every rule below fails closed.
+   * effect label (or `any`/`pure`): every rule below fails closed.
    */
-  private parseEffectSpecifiers(): EffectSet | undefined {
+  private parseEffectSpecifiers(): {
+    effects: EffectSet | undefined;
+    stated: boolean;
+  } {
     // Fast path: the overwhelmingly common (pure) case allocates nothing.
     if (this.current.type !== 'IDENTIFIER' && this.current.type !== '!')
-      return undefined;
+      return { effects: undefined, stated: false };
 
     let sawAny = false;
+    let sawPure = false;
     const labels: EffectLabel[] = [];
 
     while (this.current.type === 'IDENTIFIER' || this.current.type === '!') {
@@ -628,6 +644,26 @@ export class Parser {
       const token = this.current;
       const name = token.value;
       this.advance();
+
+      // `pure` is the explicitly-stated EMPTY set: exclusive with every label
+      // and with `any`, exactly as `any` is, and not repeatable.
+      if (name === 'pure') {
+        if (labels.length > 0 || sawAny || sawPure)
+          this.errorAtToken(
+            token,
+            '`pure` cannot be combined with other effect labels',
+            'Use `pure` alone to mean "no effects", or omit it entirely'
+          );
+        sawPure = true;
+        continue;
+      }
+
+      if (sawPure)
+        this.errorAtToken(
+          token,
+          '`pure` cannot be combined with other effect labels',
+          'Use `pure` alone to mean "no effects", or omit it entirely'
+        );
 
       if (name === 'any') {
         if (labels.length > 0 || sawAny)
@@ -660,10 +696,11 @@ export class Parser {
       labels.push(name);
     }
 
-    if (sawAny) return 'any';
+    if (sawPure) return { effects: undefined, stated: true };
+    if (sawAny) return { effects: 'any', stated: true };
     // The slot only exists when a label was read, so `labels` is non-empty
     // here: absent and empty are the same state.
-    return labels.sort();
+    return { effects: labels.sort(), stated: true };
   }
 
   private parseFunctionSignature(): FunctionSignatureNode | undefined {
@@ -689,7 +726,7 @@ export class Parser {
     }
 
     // The effect specifier slot, between the argument list and the arrow
-    const effects = this.parseEffectSpecifiers();
+    const { effects, stated: effectsStated } = this.parseEffectSpecifiers();
 
     // We know '->' is present from the lookahead
     this.expect('->');
@@ -721,6 +758,7 @@ export class Parser {
     return this.createNode<FunctionSignatureNode>('function_signature', {
       arguments: args,
       effects,
+      effectsStated,
       returnType,
     });
   }

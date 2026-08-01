@@ -1,3 +1,4 @@
+import { isEffectSubset, unionEffectSets } from './effects.js';
 import { parseType } from './parse.js';
 import { isValidType } from './primitive.js';
 import { typeToString } from './serialize.js';
@@ -10,7 +11,13 @@ export { isValidType };
 // subtype ↔ utils cycle; they depend on isSubtype)
 export { widen, narrow } from './subtype.js';
 
-import type { Type, ListType, FunctionSignature, TypeString } from './types.js';
+import type {
+  EffectSet,
+  Type,
+  ListType,
+  FunctionSignature,
+  TypeString,
+} from './types.js';
 
 export function isSignatureType(
   type: Readonly<Type> | TypeString
@@ -48,6 +55,42 @@ export function signatureArms(
     return arms.length > 0 ? arms : undefined;
   }
   return undefined;
+}
+
+/**
+ * True when narrowing an operand of type `from` to the parameter type `to`
+ * would not silently DROP effects (`docs/EFFECTS-MODEL.md`, "Subtyping").
+ *
+ * Argument validation narrows an INFERRED symbol type to the parameter when the
+ * parameter is a subtype of it (`isSubtype(param, op.type)`) rather than
+ * erroring. On the effect axis that test is inverted: effect sets are
+ * COVARIANT, so a pure parameter is a subtype of a `random` operand — and
+ * narrowing on its strength would both admit an effectful callback at a
+ * pure-arrow bound and rewrite the symbol's type to claim the absence of an
+ * effect it has. The narrowing is admissible only when the operand's arrow
+ * effects are already within the parameter's bound.
+ *
+ * Non-callable types have no arrow, so they are unaffected: the check is a
+ * no-op unless both types are callable with a known shape.
+ */
+export function narrowingPreservesEffects(
+  from: Readonly<Type> | undefined,
+  to: Readonly<Type> | undefined
+): boolean {
+  const fromArms = signatureArms(from);
+  if (fromArms === undefined) return true;
+  const toArms = signatureArms(to);
+  if (toArms === undefined) return true;
+  return isEffectSubset(armsEffects(fromArms), armsEffects(toArms));
+}
+
+/** The union of the arms' effect specifiers. */
+function armsEffects(
+  arms: ReadonlyArray<FunctionSignature>
+): EffectSet | undefined {
+  let effects: EffectSet | undefined = undefined;
+  for (const arm of arms) effects = unionEffectSets(effects, arm.effects);
+  return effects;
 }
 
 /**

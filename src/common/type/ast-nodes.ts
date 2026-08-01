@@ -23,8 +23,18 @@ export interface FunctionSignatureNode extends ASTNode {
   kind: 'function_signature';
   arguments: ArgumentNode[];
   /** The effect specifier slot, between the argument list and the arrow.
-   * Absent when the slot is empty (a pure signature). */
+   * Absent when the slot is empty (a pure signature) — and also when the slot
+   * held the `pure` keyword, which denotes the same (empty) set. */
   effects?: EffectSet;
+  /** True when the author WROTE a specifier — labels, `any`, or the `pure`
+   * keyword. The distinction `effects` cannot carry is `pure` vs. an empty
+   * slot: both denote ∅, but only the former is an author statement.
+   *
+   * Parse-time provenance only: {@link buildTypeFromAST} drops it, so the
+   * `Type` AST keeps its single optional `effects` field ("absent ≡ pure ≡
+   * empty") and carries no provenance. The definition boundary is the only
+   * consumer — see `parseTypeWithEffectsProvenance` in `./parse.ts`. */
+  effectsStated?: boolean;
   returnType: TypeNode;
 }
 

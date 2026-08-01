@@ -11,8 +11,18 @@ import {
   signatureArms,
   widen,
 } from '../common/type/utils.js';
-import { parseType } from '../common/type/parse.js';
+import {
+  parseType,
+  parseTypeWithEffectsProvenance,
+} from '../common/type/parse.js';
+import { isEffectSubset } from '../common/type/effects.js';
 import { BoxedType } from '../common/type/boxed-type.js';
+import {
+  EffectContractError,
+  matchesDeclaredTypeAxes,
+  signatureEffects,
+  stripArrowEffects,
+} from './boxed-expression/effects-inference.js';
 import { osaDistance } from '../common/fuzzy-string-match.js';
 
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
@@ -544,7 +554,19 @@ export function declareFn(
     // return type onto the literal (if it lacks its own) so a merely-wider body
     // inference does not trip the covariant compatibility check. Genuine
     // conflicts still throw in the value-definition constructor.
-    let valueDef: Partial<ValueDefinition> = def;
+    // Effects-axis provenance (`docs/EFFECTS-MODEL.md`, "Annotation
+    // provenance"): `(number) pure -> number` parses to the SAME type as
+    // `(number) -> number`, so the "the author wrote `pure`" fact is read off
+    // the parse and recorded on the definition. A non-empty specifier is
+    // visible in the type itself and counts too; a bare slot leaves effects on
+    // the inferred track. An explicit `effectsDeclared` on the incoming
+    // definition wins.
+    const effectsDeclared =
+      def.effectsDeclared ?? declaredTypeStatesEffects(ce, def.type);
+
+    let valueDef: Partial<ValueDefinition> = effectsDeclared
+      ? { ...def, effectsDeclared }
+      : def;
     if (
       def.type !== undefined &&
       isFunction(def.value as Expression | undefined, 'Function')
@@ -561,14 +583,13 @@ export function declareFn(
           declaredType,
           ce.type(declaredType).toString()
         );
-        valueDef = {
-          ...def,
-          value: reconcileFunctionLiteralReturn(
-            ce,
-            def.value as Expression,
-            declaredType
-          ),
-        };
+        const reconciled = reconcileFunctionLiteralReturn(
+          ce,
+          def.value as Expression,
+          declaredType
+        );
+        assertDeclaredEffects(id, reconciled, declaredType, effectsDeclared);
+        valueDef = { ...valueDef, value: reconciled };
       }
     }
     ce._declareSymbolValue(id, valueDef, scope);
@@ -587,7 +608,11 @@ export function declareFn(
   // `ce.declare("n", "integer")`
   //
   {
-    const type = parseType(def, ce._typeResolver);
+    // The provenance-carrying parse: see the `isValidValueDef` branch above.
+    const { type, effectsStated } = parseTypeWithEffectsProvenance(
+      def as Type | TypeString,
+      ce._typeResolver
+    );
     if (!isValidType(type)) {
       throw Error(
         [
@@ -598,7 +623,14 @@ export function declareFn(
       );
     }
 
-    ce._declareSymbolValue(id, { type }, scope);
+    ce._declareSymbolValue(
+      id,
+      {
+        type,
+        effectsDeclared: effectsStated || signatureEffects(type) !== undefined,
+      },
+      scope
+    );
   }
 
   return ce;
@@ -691,7 +723,19 @@ export function assignFn(
         literal,
         declaredType.type
       );
-      if (!reconciled.type.matches(declaredType))
+      // The effects axis is judged by its own provenance: a bare specifier is
+      // the INFERRED track (the body's effects are simply re-stamped on every
+      // assignment), a stated one is a contract.
+      const effectsDeclared = def.value.effectsDeclared;
+      assertDeclaredEffects(id, reconciled, declaredType.type, effectsDeclared);
+      if (
+        !matchesDeclaredTypeAxes(
+          ce,
+          reconciled.type,
+          declaredType,
+          effectsDeclared
+        )
+      )
         throw new Error(
           [
             `Symbol "${id}"`,
@@ -777,7 +821,25 @@ export function assignFn(
           literal,
           declaredType.type
         );
-        if (!reconciled.type.matches(declaredType))
+        // The effects axis is judged by its own provenance. The operator
+        // definition carries the bit (`effectsDeclared`), and it has to travel
+        // with the value definition this route installs: the declared type
+        // alone cannot record an author-written `pure`.
+        const effectsDeclared = def.operator.effectsDeclared;
+        assertDeclaredEffects(
+          id,
+          reconciled,
+          declaredType.type,
+          effectsDeclared
+        );
+        if (
+          !matchesDeclaredTypeAxes(
+            ce,
+            reconciled.type,
+            declaredType,
+            effectsDeclared
+          )
+        )
           throw new Error(
             [
               `Symbol "${id}"`,
@@ -797,12 +859,14 @@ export function assignFn(
           ce._declareSymbolValue(id, {
             value: reconciled,
             type: declaredType.type,
+            effectsDeclared,
           });
           return ce;
         }
         updateDef(ce, id, def, {
           value: reconciled,
           type: declaredType.type,
+          effectsDeclared,
         });
         ce._setSymbolValue(id, reconciled);
         return ce;
@@ -921,8 +985,12 @@ function assignValueAsOperatorDef(
   // parameter types and carry the ascribed return type — exactly as the
   // `Declare(f, "(…) -> any", Function(…))` workaround does. This flips
   // `inferredSignature = false` for the operator.
+  // The derived signature is INFERENCE-produced, so its arrow specifier must
+  // not read as an author-stated effect contract (which would set
+  // `effectsDeclared` and make the engine check its own inference against
+  // itself). Strip the top-level specifier; the body walk re-derives it.
   if (functionLiteralHasAnnotation(body))
-    return { evaluate: body, signature: body.type };
+    return { evaluate: body, signature: stripArrowEffects(body.type.type) };
 
   // Untyped literal: don't set an explicit signature - let it be inferred from
   // the body. This ensures inferredSignature = true, which allows the return
@@ -1017,6 +1085,60 @@ function assertFunctionLiteralArity(
       `The function literal "${literal.toString()}" takes ${literalArity} parameter(s), but the declared signature "${declaredDisplay}" accepts ${accepted}`,
     ].join('\n|   ')
   );
+}
+
+/**
+ * Whether a declaration's type STATES its arrow's effects — a non-empty
+ * specifier, or the `pure` keyword, which builds a type indistinguishable from
+ * a bare arrow and is therefore only observable through the parse
+ * (`parseTypeWithEffectsProvenance`).
+ *
+ * An already-boxed `BoxedType` has lost the keyword (nothing downstream of the
+ * parser can recover it), so only its non-empty specifier counts.
+ */
+function declaredTypeStatesEffects(
+  ce: IComputeEngine,
+  declared: Type | TypeString | BoxedType | undefined
+): boolean {
+  if (declared === undefined) return false;
+  if (declared instanceof BoxedType)
+    return signatureEffects(declared.type) !== undefined;
+  const { type, effectsStated } = parseTypeWithEffectsProvenance(
+    declared,
+    ce._typeResolver
+  );
+  return effectsStated || signatureEffects(type) !== undefined;
+}
+
+/**
+ * The definition-annotation check on the declared-signature routes
+ * (`docs/EFFECTS-MODEL.md`, "Definition-annotation check"): an explicit effect
+ * annotation is a contract, accepted iff `inferred ⊆ declared` — over-declaring
+ * allowed.
+ *
+ * "Explicit" is the per-axis provenance of "Annotation provenance": a
+ * non-empty specifier on the declared arrow, or `effectsDeclared` — the bit
+ * that records the one statement the type cannot carry, an author-written
+ * `pure` (equivalently the `effects: []` field), which declares the EMPTY set
+ * as a contract. A **bare** specifier slot states nothing: effects stay on the
+ * inferred track and every assigned body is accepted and re-stamped.
+ *
+ * Raising {@link EffectContractError} (rather than letting the generic "not
+ * compatible with the type" check below fire) routes the failure through the
+ * same `incompatible-type` error-value channel the `Assign` / `Declare`
+ * operators use for the object-form declaration.
+ */
+function assertDeclaredEffects(
+  id: MathJsonSymbol,
+  literal: Expression,
+  declaredType: Type,
+  effectsDeclared: boolean
+): void {
+  const declared = signatureEffects(declaredType);
+  if (declared === undefined && !effectsDeclared) return;
+  const inferred = signatureEffects(literal.type.type);
+  if (!isEffectSubset(inferred, declared))
+    throw new EffectContractError(id, declared, inferred);
 }
 
 /**

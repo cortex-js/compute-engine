@@ -1010,17 +1010,19 @@ describe('COMPILE CSE — draw streams', () => {
     expect((on.run as (v: any) => number[])({ u: 0.3 })).toEqual(a);
   });
 
-  it('does not merge applications of a dependency-order-unsound definition', () => {
-    // `docs/EFFECTS-MODEL.md` §"Dependency-order inference is unsound":
-    // `f() := g()` declared BEFORE an effectful `g` stays marked pure. G1b
-    // excludes user-defined function applications outright, so the stale
-    // marking can never merge two effectful calls.
+  it('does not merge applications of a forward-referencing definition', () => {
+    // `docs/EFFECTS-MODEL.md` §"Dependency-order inference is unsound", RULED
+    // in v5 and implemented by the Stage 2 inference: `f() := g()` declared
+    // BEFORE `g` exists sees an UNRESOLVED named head and infers `{any}` —
+    // honest, at the cost of caching for forward references. (Stage 0 marked
+    // it pure; that was hole 3.) Either way G1b excludes user-defined function
+    // applications outright, so two effectful calls can never merge.
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('() \\mapsto g()'));
     engine.assign('g', engine.parse('() \\mapsto \\operatorname{Random}()'));
 
-    // The unsound marking is still there — this is the hazard, not a bug:
-    expect(engine.box(['f']).isPure).toBe(true);
+    // No longer falsely pure — the forward reference infers `{any}`:
+    expect(engine.box(['f']).isPure).toBe(false);
 
     const expr = engine.box([
       'Add',

@@ -72,12 +72,19 @@ export function isPureEffectSet(effects: EffectSet | undefined): boolean {
  * participation requires explicit declaration**. Unknown is *impure* (see
  * {@link isPureEffectSet}) yet *not* frame-relevant, which is exactly the
  * shipped `?? false` semantics of the pending-draw walk.
+ *
+ * A **co-finite** value reports `false` for the same reason, and it is the
+ * reason the parameter is widened to {@link ComputedEffects}: ¬D can only have
+ * arisen from discharge-from-`any` — an *unknown* body — so `random ∈ ¬D`
+ * whenever `random ∉ D` is a fact about the complement, never an explicit
+ * declaration. Only an explicitly labelled set pins a frame.
  */
 export function hasDeclaredEffectLabel(
-  effects: EffectSet | undefined,
+  effects: ComputedEffects,
   label: EffectLabel
 ): boolean {
   if (effects === undefined || effects === 'any') return false;
+  if (isCoFiniteEffects(effects)) return false;
   return effects.includes(label);
 }
 
@@ -161,6 +168,156 @@ export function unionEffectSets(
   if (b === undefined) return a;
   if (a === 'any' || b === 'any') return 'any';
   return normalizeEffectSet([...a, ...b]);
+}
+
+//
+// ── Co-finite effect values — INTERNAL, COMPUTED, NEVER SERIALIZED ──────────
+//
+// `docs/EFFECTS-MODEL.md`, "Discharge from `any`": discharging `D` from the top
+// yields `any − D`, the co-finite set ¬D — "every label, current and future,
+// except those in `D`". It is admitted as an **internal computed value only**:
+// never surface syntax (the reserved `!` stays unadmitted), never stored on an
+// arrow (signatures are constants; application effects are computed), never
+// serialized. Its payoff is that `WithRandomSeed(42, opaqueAnyBody)` computes
+// ¬{random} — provably not-random, so the frame gate can release — where a
+// stays-`any` rule would make discharge around any opaque body a no-op.
+//
+
+/**
+ * The co-finite effect value ¬`not` (see the section comment above). The shape
+ * cannot collide with {@link EffectSet}, which is the string `'any'` or an
+ * array: this is a plain object with a `not` field.
+ *
+ * `not` is non-empty, canonical (de-duplicated, alphabetically sorted): ¬∅ is
+ * `'any'`, and {@link coFiniteEffects} normalizes to it.
+ */
+export type CoFiniteEffectSet = { readonly not: readonly EffectLabel[] };
+
+/**
+ * The values the **runtime effect channel** computes (`effectsOf`): a finite
+ * effect set, the top `'any'`, the empty set `undefined`, or an internal
+ * co-finite value. Deliberately distinct from {@link EffectSet}, the
+ * declarable/serializable type: nothing may store a co-finite value on a
+ * signature or in a definition's `effects` field.
+ */
+export type ComputedEffects = EffectSet | CoFiniteEffectSet | undefined;
+
+/** True when `effects` is the internal co-finite form. */
+export function isCoFiniteEffects(
+  effects: ComputedEffects
+): effects is CoFiniteEffectSet {
+  return (
+    typeof effects === 'object' && effects !== null && !Array.isArray(effects)
+  );
+}
+
+/**
+ * The co-finite value ¬`not`, normalized: an empty complement is the top
+ * `'any'` (¬∅ = every label).
+ */
+export function coFiniteEffects(
+  not: Iterable<EffectLabel>
+): EffectSet | CoFiniteEffectSet {
+  const labels = normalizeEffectSet(not);
+  if (labels === undefined) return 'any';
+  if (labels === 'any')
+    throw new Error('A co-finite complement cannot contain `any`');
+  return { not: labels };
+}
+
+/**
+ * `effects − discharge` — what an operator re-emits after absorbing the
+ * `discharge` labels declared on an operand position.
+ *
+ * The only producer of co-finite values: `any − D = ¬D`. On a co-finite value
+ * the complement grows (¬N − D = ¬(N ∪ D)); on a finite set it is plain set
+ * difference; the empty set stays empty.
+ */
+export function subtractEffects(
+  effects: ComputedEffects,
+  discharge: readonly EffectLabel[] | undefined
+): ComputedEffects {
+  if (effects === undefined) return undefined;
+  if (discharge === undefined || discharge.length === 0) return effects;
+  if (effects === 'any') return coFiniteEffects(discharge);
+  if (isCoFiniteEffects(effects))
+    return coFiniteEffects([...effects.not, ...discharge]);
+  return normalizeEffectSet(effects.filter((l) => !discharge.includes(l)));
+}
+
+/**
+ * The union of two computed effect values. `'any'` absorbs; a co-finite value
+ * absorbs a finite one by SHRINKING its complement (¬N ∪ F = ¬(N ∖ F)), and two
+ * co-finite values intersect their complements (¬N₁ ∪ ¬N₂ = ¬(N₁ ∩ N₂)).
+ */
+export function unionComputedEffects(
+  a: ComputedEffects,
+  b: ComputedEffects
+): ComputedEffects {
+  if (a === 'any' || b === 'any') return 'any';
+  const aCo = isCoFiniteEffects(a);
+  const bCo = isCoFiniteEffects(b);
+  if (!aCo && !bCo) return unionEffectSets(a, b);
+  if (aCo && bCo)
+    return coFiniteEffects(a.not.filter((l) => b.not.includes(l)));
+  const co = (aCo ? a : b) as CoFiniteEffectSet;
+  const finite = (aCo ? b : a) as EffectSet | undefined;
+  if (finite === undefined) return co;
+  return coFiniteEffects(co.not.filter((l) => !finite.includes(l)));
+}
+
+/**
+ * `lhs ⊆ rhs` over computed effect values — the stateless comparison rules of
+ * "Complement form" (`docs/EFFECTS-MODEL.md`, Subtyping):
+ *
+ * - finite ⊆ ¬N iff the positives avoid `N`;
+ * - ¬N₁ ⊆ ¬N₂ iff `N₂ ⊆ N₁`;
+ * - a co-finite value fits **no** finite set — it is version-open.
+ */
+export function isComputedEffectSubset(
+  lhs: ComputedEffects,
+  rhs: ComputedEffects
+): boolean {
+  if (lhs === undefined) return true;
+  if (rhs === 'any') return true;
+  if (isCoFiniteEffects(rhs)) {
+    if (lhs === 'any') return false;
+    if (isCoFiniteEffects(lhs)) return rhs.not.every((l) => lhs.not.includes(l));
+    return lhs.every((l) => !rhs.not.includes(l));
+  }
+  // `rhs` is finite (or empty): a version-open co-finite value never fits.
+  if (isCoFiniteEffects(lhs)) return false;
+  return isEffectSubset(lhs, rhs);
+}
+
+/**
+ * **Mathematical** membership of `label` in a computed effect value: `'any'`
+ * contains every label, ¬N contains every label not in `N`.
+ *
+ * NOT the frame-participation test — that one requires an EXPLICIT declaration,
+ * see {@link hasDeclaredEffectLabel}.
+ */
+export function computedEffectsInclude(
+  effects: ComputedEffects,
+  label: EffectLabel
+): boolean {
+  if (effects === undefined) return false;
+  if (effects === 'any') return true;
+  if (isCoFiniteEffects(effects)) return !effects.not.includes(label);
+  return effects.includes(label);
+}
+
+/**
+ * True when a computed effect value contains **no impurity label** — the
+ * runtime `isPure` view (`docs/EFFECTS-MODEL.md`, "Runtime counterpart").
+ *
+ * A co-finite value is never pure: every current label is an impurity, so ¬N
+ * contains impurities unless `N` swallows all of them — and even then it is
+ * version-open over labels not yet admitted. `'any'` is likewise not pure.
+ */
+export function isPureComputedEffects(effects: ComputedEffects): boolean {
+  if (isCoFiniteEffects(effects)) return false;
+  return isPureEffectSet(effects);
 }
 
 /**

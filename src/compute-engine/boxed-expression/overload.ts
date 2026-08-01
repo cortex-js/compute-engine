@@ -1,6 +1,8 @@
 import { isSubtype, widen } from '../../common/type/subtype.js';
+import { isEffectSubset } from '../../common/type/effects.js';
 import {
   broadcastableBaseMatches,
+  narrowingPreservesEffects,
   overlapsForDeferredValidation,
   signatureArms,
   stripMissingFromType,
@@ -12,7 +14,6 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
 } from '../global-types.js';
-import { isOperatorDef, isValueDef } from './utils.js';
 import { isSymbol } from './type-guards.js';
 
 /**
@@ -140,8 +141,11 @@ function isRepairableOperatorSymbol(
   let scope: Scope | null = ce.context.lexicalScope;
   while (scope && !scope.bindings.has(name)) scope = scope.parent;
   if (!scope) return false;
+  // The tagged-definition guards, inline: importing them from `./utils.js`
+  // would close a cycle through `boxed-operator-definition.ts` (the runtime
+  // effect channel calls this resolver, and definitions call `function-utils`).
   const def = scope.bindings.get(name)!;
-  return scope.parent ? isValueDef(def) : isOperatorDef(def);
+  return scope.parent ? 'value' in def : 'operator' in def;
 }
 
 /** The caller policies the filter must mirror to stay faithful to
@@ -198,8 +202,14 @@ function operandAdmits(
   if (policies?.threadable && policies.couldBeCollection?.(op)) return true;
   if (op.type.matches(param)) return true;
 
-  // An inferred (not declared) symbol type that the parameter would narrow.
-  if (op.valueDefinition?.inferredType && isSubtype(param, op.type.type))
+  // An inferred (not declared) symbol type that the parameter would narrow —
+  // except on the effect axis, where `validateArguments` declines to narrow
+  // (`narrowingPreservesEffects`).
+  if (
+    op.valueDefinition?.inferredType &&
+    isSubtype(param, op.type.type) &&
+    narrowingPreservesEffects(op.type.type, param)
+  )
     return true;
 
   // Mirrors `validateArguments`: an inferred SIGNATURE is admitted only when
@@ -236,26 +246,54 @@ function operandAdmits(
 }
 
 /**
- * True when `a` is strictly more specific than `b`: every position's parameter
- * is a subtype of `b`'s, and the two are not mutually interchangeable. A
- * partial order — incomparable arms are ordered by declaration instead.
+ * How `a`'s ARGUMENT types compare to `b`'s at this call:
+ *
+ * - `'more'` — every position is a subtype of `b`'s and at least one is
+ *   strictly so: `a` is more specific;
+ * - `'equal'` — every position is mutually interchangeable: a tie;
+ * - `undefined` — incomparable (a position where neither is a subtype, or a
+ *   slot only one arm binds).
  */
-function isMoreSpecific(
+function argSpecificity(
   a: FunctionSignature,
   b: FunctionSignature,
   arity: number
-): boolean {
+): 'more' | 'equal' | undefined {
   let strict = false;
   for (let i = 0; i < arity; i++) {
     const pa = paramAt(a, i);
     const pb = paramAt(b, i);
     // A missing slot on either side means the arms bind this call differently;
     // they are not comparable on specificity.
-    if (pa === undefined || pb === undefined) return false;
-    if (!isSubtype(pa, pb)) return false;
+    if (pa === undefined || pb === undefined) return undefined;
+    if (!isSubtype(pa, pb)) return undefined;
     if (!isSubtype(pb, pa)) strict = true;
   }
-  return strict;
+  return strict ? 'more' : 'equal';
+}
+
+/**
+ * True when `a` is strictly more specific than `b`: every position's parameter
+ * is a subtype of `b`'s, and the two are not mutually interchangeable. A
+ * partial order — incomparable arms are ordered by declaration instead.
+ *
+ * **Effects break ties only** (`docs/EFFECTS-MODEL.md`, "Overloads"): when the
+ * two arms are already equally specific by ARGUMENT type, a subset effect set
+ * is more specific. Incomparable effect sets (`{random}` vs `{scope}`) are not
+ * compared and fall through to the existing declaration-order tie-break — which
+ * is why this returns `false` for them rather than an ordering.
+ */
+function isMoreSpecific(
+  a: FunctionSignature,
+  b: FunctionSignature,
+  arity: number
+): boolean {
+  const byArgs = argSpecificity(a, b, arity);
+  if (byArgs === 'more') return true;
+  if (byArgs !== 'equal') return false;
+  return (
+    isEffectSubset(a.effects, b.effects) && !isEffectSubset(b.effects, a.effects)
+  );
 }
 
 /**
