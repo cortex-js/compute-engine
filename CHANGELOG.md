@@ -138,6 +138,22 @@
 
 ### Issues Resolved
 
+- **Numeric use of a list-valued function no longer corrupts its inferred
+  signature — which made compiled `Sum`s over list-valued terms emit scalar
+  `+`/`*` on arrays (string concatenation / `NaN`) behind `success: true`.**
+  Numeric-argument validation inferred the scalar numeric context (`real`)
+  onto every operand, including a function application whose inferred result
+  signature was already a collection (`a(i·t)` with `a: () -> vector<2>`),
+  widening the shared definition to `real | vector<2>`. Any function *defined
+  afterwards* whose body called `a` then inferred a scalar result, and the
+  compiled `Sum` took the unrolled scalar arm instead of the element-wise
+  `_SYS.bcast` fold. The corruption was definition-order-dependent (it
+  required a pre-existing global binding for a parameter name, which forces
+  the definition's binder rewrite to re-validate the body), which made it
+  look nondeterministic across documents. Possibly-collection operands are
+  now exempt from scalar numeric inference, matching the guard the
+  signature-validation route already had.
+
 - **A `Range` (or `Linspace`) with an exact symbolic bound or step —
   `Range(0, 50π, 0.05)` — is now countable and enumerable.** Previously such a
   collection was inert on `evaluate()`: `count` was `undefined` and `each()`

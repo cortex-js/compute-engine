@@ -194,8 +194,16 @@ export function checkNumericArgs(
         inferredType = 'number';
         break;
       }
-    for (const x of xs)
-      if (!isFiniteIndexedCollection(x)) x.infer(inferredType);
+    // Numeric operators are threadable: an operand that could be a collection
+    // at runtime (a `vector<n>`-returning application, `number | list`, a
+    // tuple) is consumed by BROADCAST, so the scalar numeric context must not
+    // be inferred onto it — `x.infer('real')` on a call whose inferred result
+    // signature is already `vector<2>` WIDENS the shared definition to
+    // `real | vector<2>`, and every later use of that function then types as
+    // `number` (Tycho item 121: the compiled Sum then emits scalar `+` over
+    // arrays). Mirrors the `couldBeCollectionOperand` guard on the
+    // signature-validation route (`validateSignature`).
+    for (const x of xs) if (!couldBeCollectionOperand(x)) x.infer(inferredType);
     return xs;
   }
 
@@ -378,7 +386,12 @@ export function checkNumericArgs(
         // inferred function call still needs the walk.
         if (x.isLazyCollection) continue;
         for (const y of x.each()) y.infer(inferredType);
-      } else x.infer(inferredType);
+      } else if (!couldBeCollectionOperand(x)) x.infer(inferredType);
+      // A possibly-collection operand (a `vector<n>`-returning application,
+      // `number | list`, a tuple) is consumed by broadcast: inferring the
+      // scalar numeric context onto it would WIDEN a shared inferred result
+      // signature to `real | vector<…>` (Tycho item 121) — same guard as the
+      // signature-validation route above.
   }
 
   return xs;
