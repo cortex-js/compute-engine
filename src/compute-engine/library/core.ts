@@ -1341,11 +1341,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     },
 
     Assume: {
-      description: 'Assume a type for a symbol',
+      description:
+        'Record an assumption about a symbol. Evaluates to the outcome as ' +
+        'a string: "ok", "tautology", "contradiction", "not-a-predicate" ' +
+        'or "internal-error".',
       lazy: true,
       pure: false,
-      signature: '(any) -> symbol',
-      evaluate: (ops, { engine: ce }) => ce.symbol(ce.assume(ops[0])),
+      // A string, not a symbol: two of the outcomes ("not-a-predicate",
+      // "internal-error") are not valid symbol names, so a symbol result
+      // rendered as an invalid-symbol Error for exactly the failure cases.
+      signature: '(any) -> string',
+      evaluate: (ops, { engine: ce }) => ce.string(ce.assume(ops[0])),
     },
 
     Declare: {

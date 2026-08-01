@@ -609,6 +609,17 @@ describe('ERROR PROPAGATION — rung 3: the §8a route-divergence residue is clo
     expect(() => ce.box(['Assume', 5]).evaluate()).not.toThrow();
     expect(ce.assume(ce.box(['Ln', { str: 'a' }]))).toBe('not-a-predicate');
     expect(cortex('Assume(Ln("a"))')).not.toContain('Unsupported assumption');
+    // The operator reports the outcome as a STRING: two AssumeResult values
+    // ("not-a-predicate", "internal-error") are not valid symbol names, so
+    // the previous `-> symbol` contract rendered exactly the failure cases
+    // as invalid-symbol Errors.
+    expect(ce.box(['Assume', ['Ln', { str: 'a' }]]).evaluate().string).toBe(
+      'not-a-predicate'
+    );
+    const ok = new ComputeEngine();
+    expect(
+      ok.box(['Assume', ['Greater', 'x', 0]]).evaluate().string
+    ).toBe('ok');
   });
 });
 

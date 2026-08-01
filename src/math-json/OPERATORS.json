@@ -578,13 +578,13 @@
       "name": "Assume",
       "category": "Core",
       "arity": "1",
-      "signature": "(any) -> symbol",
+      "signature": "(any) -> string",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Assume a type for a symbol"
+      "description": "Record an assumption about a symbol. Evaluates to the outcome as a string: \"ok\", \"tautology\", \"contradiction\", \"not-a-predicate\" or \"internal-error\"."
     },
     {
       "name": "At",

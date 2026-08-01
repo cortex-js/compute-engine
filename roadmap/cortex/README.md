@@ -279,11 +279,11 @@ CI-executed doc examples and the agents card + MCP server. Worth taking:
   2026-07-31** (rung 3 = operator-level bubbling + `ErrorTrace`
   breadcrumb per the measured §6a revision: no lazy gate,
   definition-derived collection carve-out, audited `inspectsErrors`
-  widening, `Assume` errors-as-values). Remaining follow-ups:
-  `Assume`'s `not-a-predicate` outcome renders as an invalid-symbol
-  error (pre-existing result-type wart, §8a); breadcrumb sibling-value
-  carry (deliberately out of v1); silent-NaN sites revisit (`xs[10]` →
-  `Error`?) now unblocked since errors are rescuable. Landed: Match decides on
+  widening, `Assume` errors-as-values; `Assume` result type fixed to
+  string same day — `(any) -> string`, see §8a). Remaining follow-ups:
+  breadcrumb sibling-value carry (deliberately out of v1); silent-NaN
+  sites revisit (`xs[10]` → `Error`?) now unblocked since errors are
+  rescuable. Landed: Match decides on
   error subjects, `IsError` observer, error bubbling at application/`|>`
   (callee-keyed — built-in operators stay frozen per the rung-3 boundary),
   `Nothing` argument-list erasure with route parity, and

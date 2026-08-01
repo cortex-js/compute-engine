@@ -9,7 +9,11 @@
   are exempt (`[1, Ln("a"), 3]` and `(1, err)` stay collections with the
   error in place), lazy observers (`Match`, `Type`, `IsError`, `Hold`,
   `Simplify`, `Expand`, `Factor`, `Together`) run their handlers, and
-  `Assume` no longer throws a host exception on a non-predicate operand.
+  `Assume` no longer throws a host exception on a non-predicate operand,
+  and it now reports its outcome as a *string* (`"ok"`,
+  `"not-a-predicate"`, …) instead of a symbol — two of its outcomes were
+  never valid symbol names, so the failure cases used to render as
+  `invalid-symbol` errors.
   String operators are unchanged in *semantics* (still no coercion) but
   their failed result is now the bare type error rather than a frozen
   call.

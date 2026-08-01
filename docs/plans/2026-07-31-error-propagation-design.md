@@ -433,12 +433,15 @@ Conventions fixed during implementation — binding on later rungs:
   (`!isFunction(proposition)`, `!fact.isValid` already report malformed input
   that way). It escaped to the host on the `ce.box` route while Cortex turned
   it into a value — the two routes disagreed on whether an unassumable
-  proposition is catastrophic. Known wart, PRE-EXISTING and untouched:
-  `Assume` returns `ce.symbol(result)`, and `not-a-predicate` is not a valid
-  symbol name, so the outcome renders as
-  `Error(ErrorCode("invalid-symbol", "invalid-char"), "not-a-predicate")` —
-  exactly what `Assume(Or(…))` has always produced. Worth a follow-up (report
-  the outcome as a string), out of scope here.
+  proposition is catastrophic. The pre-existing result-type wart was FIXED
+  same day (user ruling: fixing issues discovered while implementing is
+  not scope creep): the operator's contract is now `(any) -> string` —
+  `ce.string(ce.assume(op))` — because two `AssumeResult` values
+  (`not-a-predicate`, `internal-error`) are not valid symbol names, so the
+  old `-> symbol` contract rendered exactly the failure outcomes as
+  `invalid-symbol` Errors. All outcomes now report uniformly as strings
+  (`"ok"`, `"tautology"`, `"contradiction"`, `"not-a-predicate"`,
+  `"internal-error"`); the TS-level `ce.assume()` API is unchanged.
 - **Known residue (recorded at review): the §3 equivalence is restored
   only for the five `inspectsErrors` operators.** *(Closed for the transformer
   family by the rung-3 widening above; `Assume`'s own route difference remains,
