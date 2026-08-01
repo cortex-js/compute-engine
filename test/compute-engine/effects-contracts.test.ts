@@ -1719,3 +1719,61 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
     });
   });
 });
+
+/**
+ * The effects memo is re-entrancy-safe (review finding on item 120). The
+ * projection follows bindings, so a self-recursive definition's body reaches
+ * its own nodes re-entrantly. The shared `cachedValue` helper stamps the
+ * generation BEFORE computing, so the re-entrant read returned the PREVIOUS
+ * generation's value (the assign-time in-flight `'any'`) as fresh — freezing
+ * it at the current generation and making `isPure` depend on which node was
+ * read first.
+ */
+describe('effects memo re-entrancy (recursive definition bodies)', () => {
+  const setup = () => {
+    const ce = new ComputeEngine();
+    ce.declare('S_9', '(number, number, number) -> number');
+    ce.assign('S_9', ce.parse('(x,y,r)\\mapsto\\sin(xy)+0.1r'));
+    ce.declare('R_9', '(number, number, number) -> number');
+    ce.assign(
+      'R_9',
+      ce.parse(
+        '(i,x,y)\\mapsto\\begin{cases}0&i=0\\\\R_9(i-1,x,y)+0.5S_9(x,y,R_9(i-1,x,y))&\\text{otherwise}\\end{cases}'
+      )
+    );
+    return ce;
+  };
+
+  it('a pure recursive body reports pure when the body root is read FIRST', () => {
+    const ce = setup();
+    const body = (ce.box('R_9').value as Expression).op1;
+    expect(body.isPure).toBe(true);
+  });
+
+  it('…and when a CHILD is read first (the order that froze the stale any)', () => {
+    const ce = setup();
+    const body = (ce.box('R_9').value as Expression).op1;
+    void body.op1.isPure;
+    expect(body.isPure).toBe(true);
+  });
+
+  it('an impure recursive body reports impure in both orders', () => {
+    const ce = setup();
+    ce.declare('Q_9', '(number) -> number');
+    ce.assign(
+      'Q_9',
+      ce.parse('(n)\\mapsto\\begin{cases}0&n=0\\\\Q_9(n-1)+\\operatorname{Random}()&\\text{otherwise}\\end{cases}')
+    );
+    const body = (ce.box('Q_9').value as Expression).op1;
+    void body.op1.isPure;
+    expect(body.isPure).toBe(false);
+    const ce2 = setup();
+    ce2.declare('Q_9', '(number) -> number');
+    ce2.assign(
+      'Q_9',
+      ce2.parse('(n)\\mapsto\\begin{cases}0&n=0\\\\Q_9(n-1)+\\operatorname{Random}()&\\text{otherwise}\\end{cases}')
+    );
+    const body2 = (ce2.box('Q_9').value as Expression).op1;
+    expect(body2.isPure).toBe(false);
+  });
+});

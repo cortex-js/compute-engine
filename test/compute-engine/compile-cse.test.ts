@@ -1175,6 +1175,140 @@ describe('COMPILE CSE — user-function body dedup', () => {
 });
 
 /**
+ * Item 120 — a repeated PURE user-function call inside an emitted definition
+ * body binds once (`admitPureUserFunctions`, nested harvests only). The
+ * flagship shape is a recursive definition: `R(i-1,…) + 0.5·S(…, R(i-1,…))`
+ * evaluates 2^depth calls without the binding, `depth` calls with it. The
+ * size/score heuristics do not apply to admitted calls (a call's runtime
+ * cost is unrelated to its syntactic size), purity is the G1 gate (an
+ * application of a `Random`-drawing function stays inert), and the binding
+ * lands INSIDE the conditional arm, so a base case never evaluates the
+ * recursive call.
+ */
+describe('COMPILE CSE — repeated pure calls in definition bodies (item 120)', () => {
+  const engineWithR = () => {
+    const engine = new ComputeEngine();
+    engine.declare('S_0', '(number, number, number) -> number');
+    engine.assign('S_0', engine.parse('(x,y,r)\\mapsto\\sin(xy)+0.1r'));
+    engine.declare('R_0', '(number, number, number) -> number');
+    engine.assign(
+      'R_0',
+      engine.parse(
+        '(i,x,y)\\mapsto\\begin{cases}0&i=0\\\\R_0(i-1,x,y)+0.5S_0(x,y,R_0(i-1,x,y))&\\text{otherwise}\\end{cases}'
+      )
+    );
+    return engine;
+  };
+
+  it('binds a repeated recursive self-call once, inside the conditional arm', () => {
+    const engine = engineWithR();
+    const result = compile(engine.parse('(t)\\mapsto R_0(20,t,0.7)'), {
+      fallback: false,
+    });
+
+    // ONE self-call site in the emitted definition (plus the root call site).
+    const def = result.code
+      .split('\n')
+      .find((l) => l.includes('const _fn_R_0'))!;
+    expect(occurrences(def, '_fn_R_0(')).toBe(1);
+    // The binding sits INSIDE the ternary's recursive arm: the base case
+    // must not evaluate the recursive call.
+    expect(def.indexOf('?')).toBeLessThan(def.indexOf('const _cse'));
+
+    // Sharing makes depth 20 linear: 2^20 calls would be milliseconds; the
+    // base case terminates (finite value, not a stack overflow).
+    const v = (result.run as (t: number) => number)(0.3);
+    expect(Number.isFinite(v)).toBe(true);
+
+    // Value parity at a depth the un-CSE'd form can still afford.
+    const parity = compile(engineWithR().parse('(t)\\mapsto R_0(10,t,0.7)'), {
+      fallback: false,
+    });
+    const parityOff = compile(
+      engineWithR().parse('(t)\\mapsto R_0(10,t,0.7)'),
+      { fallback: false, cse: false }
+    );
+    expect((parity.run as (t: number) => number)(0.3)).toBeCloseTo(
+      (parityOff.run as (t: number) => number)(0.3),
+      12
+    );
+  });
+
+  it('does not bind a repeated IMPURE call (two draws stay two draws)', () => {
+    const engine = new ComputeEngine();
+    engine.declare('D_0', '(number) -> number');
+    engine.assign('D_0', engine.parse('(n)\\mapsto n+\\operatorname{Random}()'));
+    engine.declare('W_0', '(number) -> number');
+    engine.assign('W_0', engine.parse('(t)\\mapsto D_0(t)+D_0(t)'));
+    const result = compile(engine.parse('(u)\\mapsto W_0(u)'), {
+      fallback: false,
+    });
+    const def = result.code
+      .split('\n')
+      .find((l) => l.includes('const _fn_W_0'))!;
+    expect(occurrences(def, '_fn_D_0(')).toBe(2);
+    expect(def).not.toContain('_cse');
+  });
+
+  it('binds a repeated pure call in a NON-recursive coloneq-defined body', () => {
+    const engine = new ComputeEngine();
+    engine.parse('h(i)\\coloneq\\operatorname{mod}(10^4\\sin(10^4i),1)').evaluate();
+    engine.parse('g(t)\\coloneq h(t)+h(t)^2').evaluate();
+    const result = compile(engine.parse('(u)\\mapsto g(u)'), {
+      fallback: false,
+    });
+    const def = result.code
+      .split('\n')
+      .find((l) => l.includes('const _fn_g'))!;
+    // The two h(t) occurrences share one binding.
+    expect(occurrences(def, 'const _cse')).toBe(1);
+  });
+
+  it('does not merge a call whose callee body splices a string-`vars` entry', () => {
+    // The call site is engine-pure, but the emitted `_fn_f_1` BODY contains
+    // the live `next()` source the caller spliced through `vars` — merging
+    // the two calls would evaluate it once instead of twice. The admission
+    // gate must validate the resolved callee body, not just the call site.
+    const engine = new ComputeEngine();
+    engine.assign('f_1', engine.parse('(t)\\mapsto u+t'));
+    engine.assign('g_1', engine.parse('(t)\\mapsto f_1(t)+f_1(t)^2'));
+    const result = compile(engine.parse('(w)\\mapsto g_1(w)'), {
+      vars: { u: 'next()' },
+      functions: {},
+      fallback: false,
+    });
+    const def = result.code
+      .split('\n')
+      .find((l) => l.includes('const _fn_g_1'))!;
+    expect(occurrences(def, '_fn_f_1(')).toBe(2);
+    expect(def).not.toContain('_cse');
+  });
+
+  it('does not merge through a stale installed signature (callee reassigned to draw)', () => {
+    // `h_1`'s installed signature was inferred while `k_1` was pure; after
+    // `k_1` is reassigned to draw, the `h_1`-APPLICATION node still reports
+    // `isPure: true` (install-time staleness, one level removed). The
+    // admission gate re-derives the callee body's purity against CURRENT
+    // bindings, so the two `h_1` calls — each drawing through `k_1` — stay
+    // two calls.
+    const engine = new ComputeEngine();
+    engine.assign('k_1', engine.parse('(n)\\mapsto n+1'));
+    engine.assign('h_1', engine.parse('(t)\\mapsto k_1(t)+1'));
+    engine.assign('m_1', engine.parse('(t)\\mapsto h_1(t)+h_1(t)^2'));
+    engine.assign('k_1', engine.parse('(n)\\mapsto n+\\operatorname{Random}()'));
+    const result = compile(engine.parse('(w)\\mapsto m_1(w)'), {
+      functions: {},
+      fallback: false,
+    });
+    const def = result.code
+      .split('\n')
+      .find((l) => l.includes('const _fn_m_1'))!;
+    expect(occurrences(def, '_fn_h_1(')).toBe(2);
+    expect(def).not.toContain('_cse');
+  });
+});
+
+/**
  * §7.4 — error behavior at a guard edge. In `x ≠ 0 && f(1/x) && f(1/x)` the
  * repeated occurrences sit in a POST-GUARD region (`And`'s operands after the
  * first are lazy edges), so the binding is emitted behind the guard and the

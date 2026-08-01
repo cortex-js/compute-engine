@@ -329,6 +329,21 @@ export interface CseHarvestOptions {
    * `vars` are baked constants and are safe.) */
   readonly isStringVar?: (name: string) => boolean;
 
+  /**
+   * Admit PURE user-defined function applications as candidates (Tycho item
+   * 120). Off by default — the G1b conservative stance for root harvests —
+   * and set by the NESTED harvest over an emitted `_fn_*` definition body,
+   * where a repeated self-call (`R(i-1,x,y)` twice in one body) makes the
+   * compiled recursion exponential. Purity is enforced by the record-time G1
+   * gate (`node.isPure`, the effects-model projection, which resolves
+   * through the definition and its operands), so an application of a
+   * drawing/writing function stays inert. An admitted application is also
+   * exempt from the size/score heuristics: a call's runtime cost is
+   * unrelated to its syntactic size, and binding a twice-occurring call
+   * always halves the calls (exponentially so under recursion).
+   */
+  readonly admitPureUserFunctions?: boolean;
+
   // Thresholds — defaulted from the exported constants; overridable so tests
   // and tuning runs need not restate the pipeline.
   readonly minSize?: number;
@@ -423,6 +438,7 @@ class Harvester {
   private readonly engine: ComputeEngine;
   private readonly isOverriddenOperator: (name: string) => boolean;
   private readonly isStringVar: (name: string) => boolean;
+  private readonly admitPureUserFunctions: boolean;
   private readonly minSize: number;
   private readonly minScore: number;
   private readonly maxBindingsPerRegion: number;
@@ -436,6 +452,12 @@ class Harvester {
   private readonly sizeMemo = new Map<Expression, number>();
   private readonly eligibleMemo = new Map<Expression, boolean>();
   private readonly userFnMemo = new Map<string, boolean>();
+  private readonly calleeVerdictMemo = new Map<string, boolean>();
+  private readonly calleeBodyCleanMemo = new Map<Expression, boolean>();
+  private readonly calleeInProgress = new Set<string>();
+  /** Count of neutral (re-entrant) callee edges taken — monotonic, compared
+   * before/after a computation to decide whether its result may memoize. */
+  private calleeNeutralEdges = 0;
   private readonly compileHandlerMemo = new Map<string, boolean>();
   private readonly opaqueOperandMemo = new Map<Expression, boolean>();
   private readonly opaqueSymbolMemo = new Map<string, boolean>();
@@ -459,6 +481,7 @@ class Harvester {
     this.engine = root.engine as ComputeEngine;
     this.isOverriddenOperator = options.isOverriddenOperator ?? (() => false);
     this.isStringVar = options.isStringVar ?? (() => false);
+    this.admitPureUserFunctions = options.admitPureUserFunctions === true;
     this.minSize = options.minSize ?? CSE_MIN_SIZE;
     this.minScore = options.minScore ?? CSE_MIN_SCORE;
     this.maxBindingsPerRegion =
@@ -610,7 +633,7 @@ class Harvester {
       isFunction(node) &&
       !underMapped &&
       node.isPure &&
-      this.sizeOf(node) >= this.minSize &&
+      (this.sizeOf(node) >= this.minSize || this.isAdmittedUserFnApp(node)) &&
       this.isEligible(node)
     ) {
       this.occurrences.push({
@@ -621,6 +644,22 @@ class Harvester {
         size: this.sizeOf(node),
       });
     }
+  }
+
+  /**
+   * An admitted pure user-function application (see
+   * `CseHarvestOptions.admitPureUserFunctions`). Exempt from the size/score
+   * heuristics: a call's runtime cost is unrelated to its syntactic size —
+   * `F(n)` is 2 nodes, and under recursion a repeated call is an exponential
+   * blowup (item 120) — so a twice-occurring pure call is always worth
+   * binding. Purity itself is the caller's `node.isPure` check (G1).
+   */
+  private isAdmittedUserFnApp(node: Expression): boolean {
+    return (
+      this.admitPureUserFunctions &&
+      isFunction(node) &&
+      this.isUserFunctionApplication(node)
+    );
   }
 
   /** Record `Assign`/`Declare` targets into every region on the stack: a
@@ -931,8 +970,13 @@ class Harvester {
    *   source); a BUILT-IN definition's `compile` handler is exempt — it is
    *   engine-authored emission, the same trust class as the built-in table
    *   mappings;
-   * - a user-defined function application (purity inference for user
-   *   definitions is dependency-order-unsound, `docs/EFFECTS-MODEL.md`);
+   * - a user-defined function application — unless the harvest opts in via
+   *   `admitPureUserFunctions` (nested definition-body harvests, item 120),
+   *   in which case the resolved callee's BODY is validated transitively
+   *   (`isAdmissibleUserFnCallee`): the same emission-purity gates plus a
+   *   fresh per-level semantic-purity check, because the application node's
+   *   own `isPure` can be install-time stale one level removed
+   *   (`docs/EFFECTS-MODEL.md`);
    * - an application whose operator position is not a fixed built-in;
    * - an application with a function-valued operand that is not an inline
    *   `Function` literal (a named callback is invisible to purity inference,
@@ -964,10 +1008,23 @@ class Harvester {
     // the definition itself defaults to `pure: true`. A built-in definition's
     // handler is exempt (see `hasCallerCompileHandler`).
     if (this.hasCallerCompileHandler(node)) return false;
+    // A user-defined function application is admissible only where the
+    // harvest opts in (`admitPureUserFunctions` — nested definition-body
+    // harvests, Tycho item 120) AND its resolved callee's body validates
+    // transitively (`isAdmissibleUserFnCallee` — the call site alone proves
+    // nothing about what the emitted body splices or draws). Root harvests
+    // keep the conservative Phase-1 stance. Checked BEFORE the
+    // fixed-built-in gate below: the declare-then-assign route stores the
+    // lambda as a VALUE definition, so its application nodes carry no
+    // *operator* definition — the gate below would reject them before this
+    // clause ever admitted one.
+    if (this.isUserFunctionApplication(node)) {
+      if (!this.admitPureUserFunctions) return false;
+      if (!this.isAdmissibleUserFnCallee(node.operator)) return false;
+    }
     // Not a fixed built-in: `Apply` with a symbolic head, a parameter used as
     // a function, an unbound application.
-    if (node.operatorDefinition === undefined) return false;
-    if (this.isUserFunctionApplication(node)) return false;
+    else if (node.operatorDefinition === undefined) return false;
 
     for (const operand of node.ops)
       if (this.isOpaqueCallableOperand(operand)) return false;
@@ -1049,6 +1106,121 @@ class Harvester {
     }
     this.compileHandlerMemo.set(id, result);
     return result;
+  }
+
+  /**
+   * Is `id` safe to ADMIT as a merged call target? The call site alone
+   * proves nothing about what the emitted `_fn_id` BODY does, so the
+   * resolved literal body is validated transitively (review findings on
+   * item 120, both confirmed by reproduction):
+   *
+   * - **Emission purity**: the body is walked through the same
+   *   `isEligible` gates as the harvested tree — a string-`vars` symbol,
+   *   an overridden operator, or a caller compile handler INSIDE the body
+   *   splices live source into `_fn_id`, and merging two calls would merge
+   *   two live evaluations (`f(t) := u+t` with `vars: {u: 'next()'}`).
+   * - **Fresh semantic purity**: `body.isPure` is re-derived per level —
+   *   the application node's own `isPure` consults the caller's INSTALLED
+   *   signature, which goes stale one level removed (`h` calling a `k`
+   *   later reassigned to draw: the `k`-application is impure, but `h`'s
+   *   installed signature still says pure). Nested user-fn applications in
+   *   the body recurse back through this gate, so each level's body is
+   *   checked against CURRENT bindings.
+   *
+   * Recursion: a re-entrant edge to a name already being validated is
+   * NEUTRAL (report admissible and let the enclosing walk finish — the
+   * plain self-recursive case, item 120's flagship). A verdict that leaned
+   * on a neutral edge to a partner still in flight (mutual recursion) is
+   * PROVISIONAL and not memoized, so a later standalone query recomputes it
+   * against the partner's final verdict; the outermost verdict of a cycle
+   * is final and memoizes.
+   */
+  private isAdmissibleUserFnCallee(id: string): boolean {
+    const cached = this.calleeVerdictMemo.get(id);
+    if (cached !== undefined) return cached;
+    if (this.calleeInProgress.has(id)) {
+      this.calleeNeutralEdges += 1;
+      return true;
+    }
+    const body = this.userFnLiteralBody(id);
+    if (body === undefined) {
+      // No resolvable literal — fail closed.
+      this.calleeVerdictMemo.set(id, false);
+      return false;
+    }
+    this.calleeInProgress.add(id);
+    const before = this.calleeNeutralEdges;
+    let result: boolean;
+    try {
+      // `calleeBodyClean`, not `isEligible`: the candidate application node
+      // may itself SIT in the body being validated (a self-call candidate in
+      // a nested definition-body harvest), and `isEligible`'s node-level
+      // provisional-`false` cycle guard would read that in-flight marker and
+      // reject the whole body. The dedicated walker applies the same gates
+      // with name-level cycle handling instead.
+      result = body.isPure && this.calleeBodyClean(body);
+    } finally {
+      this.calleeInProgress.delete(id);
+    }
+    if (this.calleeNeutralEdges === before || this.calleeInProgress.size === 0)
+      this.calleeVerdictMemo.set(id, result);
+    return result;
+  }
+
+  /**
+   * The emission-purity scan over a callee's BODY — the same gates as
+   * `computeEligible` (string-`vars` symbols, overridden operators, caller
+   * compile handlers, unbound applications, opaque callable operands, and
+   * recursive validation of nested user-function callees), but WITHOUT
+   * `isEligible`'s node-level provisional-`false` cycle guard: the body of a
+   * self-recursive callee contains the very application node whose
+   * eligibility triggered this scan, and reading its in-flight marker would
+   * fail-close every recursive callee. The boxed tree is acyclic, so plain
+   * structural recursion terminates; recursion through DEFINITIONS is
+   * handled at the name level by `isAdmissibleUserFnCallee`.
+   */
+  private calleeBodyClean(node: Expression): boolean {
+    const cached = this.calleeBodyCleanMemo.get(node);
+    if (cached !== undefined) return cached;
+    const before = this.calleeNeutralEdges;
+    let result: boolean;
+    if (isSymbol(node)) result = !this.isStringVar(node.symbol);
+    else if (!isFunction(node)) result = true;
+    else if (this.isOverriddenOperator(node.operator)) result = false;
+    else if (this.hasCallerCompileHandler(node)) result = false;
+    else if (
+      this.isUserFunctionApplication(node)
+        ? !this.isAdmissibleUserFnCallee(node.operator)
+        : node.operatorDefinition === undefined
+    )
+      result = false;
+    else
+      result =
+        !node.ops.some((op) => this.isOpaqueCallableOperand(op)) &&
+        node.ops.every((op) => this.calleeBodyClean(op));
+    // A verdict that leaned on a neutral (re-entrant) callee edge is
+    // provisional — same discipline as `calleeVerdictMemo`.
+    if (this.calleeNeutralEdges === before)
+      this.calleeBodyCleanMemo.set(node, result);
+    return result;
+  }
+
+  /**
+   * The body of the `Function` literal `id` resolves to, or `undefined`.
+   * Same resolution as `isUserFunctionApplication` below.
+   */
+  private userFnLiteralBody(id: string): Expression | undefined {
+    const def = this.engine.lookupDefinition(id);
+    if (def !== undefined && isOperatorDef(def)) {
+      const literal = (def.operator as { _lambdaLiteral?: Expression })
+        ._lambdaLiteral;
+      if (literal !== undefined && isFunction(literal, 'Function'))
+        return literal.ops[0];
+    }
+    const value = this.engine._getSymbolValue(id);
+    if (value !== undefined && isFunction(value, 'Function'))
+      return value.ops[0];
+    return undefined;
   }
 
   /**
@@ -1263,9 +1435,12 @@ class Harvester {
     }
     const afterSubsumption = afterMutation.filter((c) => !subsumed.has(c));
 
-    // Re-check per-region counts (no single-use temps), then G4.
+    // Re-check per-region counts (no single-use temps), then G4. An admitted
+    // user-function application is exempt from the size/score heuristics
+    // (see `isAdmittedUserFnApp`).
     const surviving = afterSubsumption.filter((c) => {
       if (c.occurrences.length < 2) return false;
+      if (this.isAdmittedUserFnApp(c.representative)) return true;
       const count = c.occurrences.length;
       if (c.size < this.minSize || (count - 1) * c.size < this.minScore) {
         this.droppedByThreshold += 1;
@@ -1293,10 +1468,16 @@ class Harvester {
 
     const all: CseCandidate[] = [];
     for (const [region, list] of byRegion) {
-      // Highest score first; ties by first occurrence — deterministic.
+      // Admitted user-function calls first (their runtime benefit is
+      // unrelated to the syntactic `score` — an unbound recursive self-call
+      // is an exponential blowup, so the binding cap must never starve one);
+      // then highest score; ties by first occurrence — deterministic.
       list.sort(
         (a, b) =>
-          b.score - a.score || a.occurrences[0].enter - b.occurrences[0].enter
+          Number(this.isAdmittedUserFnApp(b.representative)) -
+            Number(this.isAdmittedUserFnApp(a.representative)) ||
+          b.score - a.score ||
+          a.occurrences[0].enter - b.occurrences[0].enter
       );
       const kept = list.slice(0, this.maxBindingsPerRegion);
       this.droppedByRegionCap += list.length - kept.length;

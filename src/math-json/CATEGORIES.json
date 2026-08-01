@@ -324,6 +324,7 @@
       "Coalesce",
       "Colon",
       "Declare",
+      "DeclareType",
       "Delimiter",
       "DigitsFrom",
       "Error",

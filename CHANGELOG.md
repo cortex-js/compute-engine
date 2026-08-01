@@ -138,6 +138,22 @@
 
 ### Issues Resolved
 
+- **A repeated pure user-function call inside a compiled function body is now
+  bound once — collapsing exponential compiled recursion to linear.**
+  `R(i) := R(i-1) + 0.5·S(x, y, R(i-1))` evaluated **both** `R(i-1)`
+  occurrences per level: 2^20 calls at depth 20 (~200–350 ms per scalar
+  sample). The nested CSE harvest that already runs over each emitted
+  `_fn_*` definition body now admits pure user-function applications as
+  candidates, so the repeated self-call binds once per level (depth-20 ≈
+  0.005 ms). Guardrails: purity comes from the effects model (an application
+  of a drawing/writing function is never merged — two `Random()` calls stay
+  two draws); the binding lands inside the conditional arm, so a base case
+  never evaluates the recursive call; admitted calls are exempt from the
+  size/score heuristics (a call's runtime cost is unrelated to its syntactic
+  size); and top-level expressions keep the conservative Phase-1 stance —
+  call sites are never merged across an expression, only within an emitted
+  definition body.
+
 - **`FindFit`/`FindRoot` under an ambient `withTimeLimit` now return
   best-so-far instead of overrunning the budget by whole iterations — or
   throwing away completed work.** The per-iteration deadline checkpoint left
@@ -357,6 +373,31 @@
   form.
 
 ### New Features
+
+- **Programs can now declare their own types.** A new Cortex `type` statement —
+  `type point = tuple<number, number>` — declares a **structural type alias**
+  in the current scope, usable by any later annotation of the same program
+  (and by later cells on the same engine): `let p: point = (1, 2)`,
+  `function dist(a: point, b: point) { … }`. `type` is a **contextual
+  keyword**: only the statement-position shapes `type name =` and `type name<`
+  claim it, so existing uses of `type` as an ordinary identifier
+  (`let type = 5`, `type: integer = 4`) are untouched. Re-running a `type`
+  statement for the same name replaces the earlier statement's definition, so
+  notebook cells re-execute cleanly; a type declared inside a block stays in
+  the block. The statement lowers to a new **`DeclareType`** operator — the
+  MathJSON mirror of `ce.declareType()`: `["DeclareType", "point",
+  "'tuple<number, number>'"]` declares a nominal type, and a trailing
+  attributes dictionary with `alias -> True` (what the Cortex statement emits)
+  declares a structural alias. The generic-alias syntax is **reserved**:
+  `type point<T> = tuple<T, T>` parses and reports a dedicated
+  `type-variables-unsupported` diagnostic, so type variables can arrive
+  additively in a later release. Two fixes ride along: Cortex type
+  annotations now resolve types declared on the host engine
+  (`ce.declareType('point', …)` followed by `let p: point = (1, 2)` used to
+  fail at parse time with `Unknown type "point"`), and the `Declare`
+  operator's evaluate path now resolves user-declared types (a box-route
+  `["Declare", "p", "'point'"]` used to throw). A malformed type body no
+  longer leaves a dangling unresolvable type reference behind in the scope.
 
 - **A `PointList` with collection-valued components now compiles on the
   JavaScript target**, emitting a shortest-zip construction (`Math.min` over the

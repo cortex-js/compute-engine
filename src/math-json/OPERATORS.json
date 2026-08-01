@@ -1516,6 +1516,18 @@
       "description": "Declare a symbol in the current scope, optionally assigning a type and an initial value. An optional trailing attributes dictionary (with keys `type`, `value`, `constant` and `holdUntil`) can further describe the definition, e.g. to declare a constant. With a value, evaluates to that value; otherwise evaluates to `Nothing`."
     },
     {
+      "name": "DeclareType",
+      "category": "Core",
+      "arity": "optional",
+      "signature": "(symbol|string, type: string|symbol, attributes: dictionary?) scope -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Declare a type in the current scope. The name is a symbol (or a string) and the type a string holding a type expression, e.g. `\"tuple<x: integer, y: integer>\"`. The type is nominal by default; an optional trailing attributes dictionary with `alias -> True` makes it a structural alias instead. Evaluates to `Nothing`."
+    },
+    {
       "name": "DedekindEta",
       "category": "special-functions",
       "arity": "1",

@@ -135,6 +135,11 @@ const DEFAULT_MATERIALIZATION: [number, number] = [5, 5] as const;
  * paces how often `Date.now()` is consulted. */
 let _evalTick = 0;
 
+/** Count of provisional (re-entrant) `_effectsOf` reads — see the cycle note
+ * on `_effectsOf`. A computation that consumed one must not be frozen into
+ * the memo. Monotonic; only ever compared before/after a computation. */
+let _effectsProvisionalReads = 0;
+
 /**
  * A boxed function expression represent an expression composed of an operator
  * (the name of the function) and a list of arguments. For example:
@@ -202,11 +207,20 @@ export class BoxedFunction
    * a symbol operand through its CURRENT binding, so a reassignment — which
    * bumps `ce._generation` — must invalidate the answer. (`reset()` is an inert
    * stub and is NOT the invalidation mechanism.) `undefined` is a legitimate
-   * cached value (the empty set); `null` is the miss marker. */
+   * cached value (the empty set); `null` is the miss marker.
+   *
+   * NOT managed through the shared `cachedValue` helper — see `_effectsOf`:
+   * the projection can re-enter the same node through a binding cycle, and
+   * `cachedValue`'s stamp-then-compute order returned the PREVIOUS
+   * generation's value as current on the re-entrant read, freezing an
+   * in-flight answer at the current generation. */
   private _effects: CachedValue<ComputedEffects> = {
     value: null,
     generation: -1,
   };
+
+  /** Re-entrancy marker for `_effectsOf` — see the cycle note there. */
+  private _effectsInFlight = false;
 
   constructor(
     ce: ComputeEngine,
@@ -329,12 +343,50 @@ export class BoxedFunction
   /**
    * The runtime effect channel for this application — the projection rule of
    * `docs/EFFECTS-MODEL.md`, memoized behind the generation guard.
+   *
+   * Cycle-safe by construction, which the shared `cachedValue` helper is NOT:
+   * the projection follows bindings, so a self-recursive definition's body
+   * reaches its own nodes re-entrantly (body → self-application → the
+   * binding's literal → body). `cachedValue` stamps the generation BEFORE
+   * computing, so the re-entrant read saw a current-generation stamp with
+   * the PREVIOUS generation's value still in the slot and returned it as
+   * fresh — freezing an assign-time in-flight `'any'` (or, the unsound
+   * direction, a stale pure) at the current generation, with the answer
+   * depending on which node was read first. Here instead:
+   *
+   * - a re-entrant read answers `'any'` provisionally and marks the pass —
+   *   conservative, never cached;
+   * - the value is stamped only AFTER computing, and only when the
+   *   computation consumed no provisional edge — a value derived from an
+   *   in-flight `'any'` is returned but not frozen, so the next read
+   *   recomputes it against settled answers.
+   *
+   * Nodes on a genuine cycle therefore recompute per read (bounded by the
+   * body size); everything else caches exactly as before.
    * @internal
    */
   _effectsOf(): ComputedEffects {
-    return cachedValue(this._effects, this.engine._generation, () =>
-      applicationEffects(this)
-    );
+    const generation = this.engine._generation;
+    if (this._effects.generation === generation && this._effects.value !== null)
+      return this._effects.value;
+
+    if (this._effectsInFlight) {
+      _effectsProvisionalReads += 1;
+      return 'any';
+    }
+
+    this._effectsInFlight = true;
+    const before = _effectsProvisionalReads;
+    try {
+      const value = applicationEffects(this);
+      if (_effectsProvisionalReads === before) {
+        this._effects.generation = generation;
+        this._effects.value = value;
+      }
+      return value;
+    } finally {
+      this._effectsInFlight = false;
+    }
   }
 
   /** A VIEW of the effect channel: "no impurity label in `effectsOf(expr)`"

@@ -5215,7 +5215,15 @@ export class BaseCompiler {
     const session = target.cse;
     if (session === undefined || !session.enabled) return fn();
     const outer = session.harvest;
-    const nested = harvestCse(expr, session.harvestOptions ?? {});
+    // Definition bodies additionally admit PURE user-function applications as
+    // candidates (item 120): a repeated self-call in a recursive body —
+    // `R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` — makes the compiled recursion
+    // exponential (2^depth calls), and binding it once per level collapses
+    // that to linear. Root harvests keep the conservative Phase-1 stance.
+    const nested = harvestCse(expr, {
+      ...(session.harvestOptions ?? {}),
+      admitPureUserFunctions: true,
+    });
     BaseCompiler.mergeUsedNames(target, nested.usedNames);
     session.harvest = nested;
     try {
