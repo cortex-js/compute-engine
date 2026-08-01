@@ -1445,14 +1445,23 @@ Each stage is useful without the next; per-stage pinning tests named.
   no currently-passing impure-callback idiom breaks
   (`Map(xs, x ↦ Random())` keeps working: `Map`'s bound is the `function`
   primitive, effect-top by definition above). **Result** (pinned by
-  `effects-call-boundary.test.ts`, "blast radius"): exactly two library
-  operators declare a function-*signature* parameter — `Iterate` and
-  `Product` — and neither newly rejects anything, so the enumeration is
-  green with zero behavior change. One known unenforced contract follows
-  from that: `Iterate` installs its operands through its own `canonical`
-  handler, which bypasses `validateArguments` entirely, so its bare-arrow
-  parameter bound is **inert** — an impure callback is accepted there
-  today rather than rejected.
+  `effects-call-boundary.test.ts`, "blast radius"): exactly one library
+  operator declares a function-*signature* parameter — `Product` — and it
+  newly rejects nothing, so the enumeration is green with zero behavior
+  change. Its bound is nonetheless **unenforced**: `Product` is
+  `lazy: true`, so the non-strict/lazy carve-out defers the check on its
+  held body indefinitely, and an impure body is accepted there today
+  rather than rejected. (`Iterate` was in this enumeration until its
+  callback slot was returned to the `function` primitive: its contract is
+  parametric — `((integer, T) -> T, T?) -> list<T>`, the accumulator type
+  being the callback's own result type — which the grammar cannot express
+  without type variables, so every concrete bound rejected a legitimate
+  callback shape. The general lesson, recorded in
+  `collection-callback-signatures.test.ts`: a signature parameter is also a
+  *domain* narrowing, checked contravariantly, and it rejects three operand
+  classes the `function` primitive admits — a narrower-domain callback such
+  as a named library predicate `(number) -> boolean`, a `function`-typed
+  symbol, and a callback whose result type is `unknown`.)
 
 ## Open questions
 

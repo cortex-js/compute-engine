@@ -844,10 +844,11 @@ describe('PointList — CSE now reaches a point-list-bearing artifact', () => {
       'List',
       ['PointList', sin6(), 'n'],
       ['PointList', sin6(), 'n'],
+      ['PointList', sin6(), 'n'],
       ['Add', ['Square', sin6()], sin6(), sin6()],
     ] as any);
 
-  it('the artifact compiles, a repeated non-PointList subtree is CSE-bound, the PointList subtree is not', () => {
+  it('the artifact compiles, and BOTH the repeated scalar subtree and the repeated PointList subtree are CSE-bound', () => {
     const ce = new ComputeEngine();
     ce.declare('u', 'number');
     ce.declare('n', 'list<number>');
@@ -860,16 +861,40 @@ describe('PointList — CSE now reaches a point-list-bearing artifact', () => {
     expect(on.code).toMatch(/const _cse\d+ = Math\.sin\(6 \* _\.u\)/);
     expect(off.code).not.toContain('_cse');
 
-    // …but the repeated `PointList` subtree does NOT (gate G1b: a subtree
-    // containing a node whose operator definition carries a `compile` handler
-    // is CSE-ineligible). Pinned as the documented residual, so lifting G1b
-    // for attested built-ins is a deliberate act.
-    const zips = on.code.split('new Array(').length - 1;
-    expect(zips).toBe(2);
+    // …and so does the repeated `PointList` subtree. This flips the residual
+    // pinned when CSE landed: G1b's definition-`compile`-handler clause is
+    // about CALLER-supplied handlers (`ce.declare(name, { compile })`, whose
+    // emitted source is unknowable); a BUILT-IN handler such as `PointList`'s
+    // is engine-authored emission — the same trust class as the built-in
+    // TABLE mappings, which were never under-mapped. G1 (`isPure`) still
+    // excludes impure heads. See the design doc §5.2 (2026-08-01).
+    expect(on.code).toMatch(/const _cse\d+ = \(\(\) => \{[\s\S]*PointList:/);
+
+    // One zip loop emitted instead of three.
+    expect(on.code.split('new Array(').length - 1).toBe(1);
+    expect(off.code.split('new Array(').length - 1).toBe(3);
 
     // Run parity, CSE on vs off.
     const a = (on.run as (s: any) => unknown)({ u: 0.25, n: [1, 2, 3] });
     const b = (off.run as (s: any) => unknown)({ u: 0.25, n: [1, 2, 3] });
     expect(a).toEqual(b);
+    expect(a).toEqual([
+      [
+        [Math.sin(1.5), 1],
+        [Math.sin(1.5), 2],
+        [Math.sin(1.5), 3],
+      ],
+      [
+        [Math.sin(1.5), 1],
+        [Math.sin(1.5), 2],
+        [Math.sin(1.5), 3],
+      ],
+      [
+        [Math.sin(1.5), 1],
+        [Math.sin(1.5), 2],
+        [Math.sin(1.5), 3],
+      ],
+      Math.sin(1.5) + Math.sin(1.5) + Math.pow(Math.sin(1.5), 2),
+    ]);
   });
 });

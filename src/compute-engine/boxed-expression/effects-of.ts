@@ -1,6 +1,7 @@
-import type { Type } from '../../common/type/types.js';
+import type { EffectLabel, Type } from '../../common/type/types.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import {
+  isCoFiniteEffects,
   sameEffectSet,
   subtractEffects,
   unionComputedEffects,
@@ -76,6 +77,35 @@ export function effectsOf(expr: Expression): ComputedEffects {
   // The memo lives on `BoxedFunction` (generation-guarded, like `type` and
   // `sgn`); a raw/unbound function expression may not have it.
   return expr._effectsOf?.() ?? applicationEffects(expr);
+}
+
+/**
+ * The **public boundary** of the runtime effect channel: the value behind
+ * `expr.effects`.
+ *
+ * Two internal distinctions are deliberately erased here, because neither is
+ * something a consumer can act on:
+ *
+ * - a **co-finite** value ¬N — "provably lacks the labels in `N`, but carries
+ *   unknown others" — maps to `'any'`. It is an internal computed form, never
+ *   surface syntax and never serialized, and the honest public summary of it
+ *   is "unknown effects": every consumer question a public caller can ask
+ *   ("may I cache this?", "is this pure?") gets the same answer from `'any'`
+ *   as from ¬N. (The one consumer that *does* profit from the precision — the
+ *   seed-frame gate — reads the internal channel directly, and does so
+ *   through `hasDeclaredEffectLabel`, for which ¬N and `'any'` already agree.)
+ * - the **stated-pure `[]`** maps to `undefined`. This getter reports
+ *   BEHAVIOR, not provenance: `[]` and `undefined` are the same set, and only
+ *   a signature's serialization distinguishes them. Provenance lives on the
+ *   type — `expr.type.effects`.
+ */
+export function publicEffects(
+  effects: ComputedEffects
+): ReadonlyArray<EffectLabel> | 'any' | undefined {
+  if (effects === undefined) return undefined;
+  if (effects === 'any') return 'any';
+  if (isCoFiniteEffects(effects)) return 'any';
+  return effects.length === 0 ? undefined : effects;
 }
 
 /** Nesting limit for quote-forcing positions — see the cycle note in

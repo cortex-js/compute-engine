@@ -94,6 +94,65 @@ function armsEffects(
 }
 
 /**
+ * The effects attached to a callable type's arrow, if any. `undefined` means
+ * the arrow states nothing — and is also the answer for a type that is not
+ * callable at all. The stated-empty `[]` (an author-written `pure`) is
+ * PRESERVED: "states the empty set" is what distinguishes a purity contract
+ * from the inferred track.
+ *
+ * An INTERSECTION of signatures is the overload-set representation; the
+ * effects of an overload set are the UNION of the arms' ("One source of
+ * truth"): an overload with one effect-bearing arm is not a pure definition. A
+ * MIXED intersection is not a callable overload set and contributes nothing.
+ *
+ * A UNION is the shape an EXTRACTION produces: `At(list<(…) random -> …>, i)`
+ * types as `((…) random -> …) | missing`, and the element really may be that
+ * arrow — so the effects of a union are the union of its members', with
+ * non-signature members (`missing`, `nothing`) contributing nothing.
+ *
+ * This is the reader behind `BoxedType.effects`, and the compute-engine
+ * layer's `effects-inference.ts` re-exports it: there is ONE implementation.
+ */
+export function signatureEffects(
+  type: Readonly<Type> | undefined
+): EffectSet | undefined {
+  if (type === undefined || typeof type === 'string') return undefined;
+  if (type.kind === 'signature') return canonicalEffectSet(type.effects);
+  if (type.kind === 'union') {
+    let effects: EffectSet | undefined = undefined;
+    for (const member of type.types)
+      effects = unionEffectSets(effects, signatureEffects(member));
+    return effects;
+  }
+  if (type.kind !== 'intersection') return undefined;
+  const arms = signatureArms(type);
+  return arms === undefined ? undefined : canonicalEffectSet(armsEffects(arms));
+}
+
+/**
+ * `effects` in canonical form: de-duplicated and alphabetically sorted.
+ *
+ * `ce.type()` accepts a hand-built `Type` object as-is, so an arrow's `effects`
+ * array can reach a reader unsorted (`['scope', 'random']`) — yet the sorted
+ * labels are what `BoxedType.effects` promises its callers. Extraction
+ * therefore normalizes defensively, for the same reason `effectSetToString`
+ * sorts.
+ *
+ * `undefined`, `'any'` and the stated-pure `[]` are preserved exactly, and an
+ * already-canonical array is returned unchanged (no allocation).
+ */
+function canonicalEffectSet(
+  effects: EffectSet | undefined
+): EffectSet | undefined {
+  if (effects === undefined || effects === 'any' || effects.length <= 1)
+    return effects;
+  // `>=` catches an out-of-order label and a duplicate in the same pass
+  for (let i = 1; i < effects.length; i++)
+    if (effects[i - 1] >= effects[i]) return [...new Set(effects)].sort();
+  return effects;
+}
+
+/**
  * True when `type` is callable with a known shape: the bare `function` type, a
  * signature, or a union/intersection of signatures.
  *

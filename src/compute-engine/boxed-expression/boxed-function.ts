@@ -53,6 +53,7 @@ import {
 import { overloadArms, resolveOverload } from './overload.js';
 import { candidateShape } from './tensor-view.js';
 import type {
+  EffectLabel,
   FunctionSignature,
   NumericPrimitiveType,
 } from '../../common/type/types.js';
@@ -112,7 +113,7 @@ import {
 import { cachedValue, CachedValue } from './cache.js';
 import { apply, lookupApplicable } from '../function-utils.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
-import { applicationEffects } from './effects-of.js';
+import { applicationEffects, publicEffects } from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -345,6 +346,13 @@ export class BoxedFunction
    * `Function` literal, whose effects live on its own arrow. */
   get isPure(): boolean {
     return isPureComputedEffects(this._effectsOf());
+  }
+
+  /** The public view of the effect channel — see `publicEffects()`, which
+   * erases the two internal distinctions (the co-finite form maps to `'any'`,
+   * the stated-pure `[]` to `undefined`). */
+  get effects(): ReadonlyArray<EffectLabel> | 'any' | undefined {
+    return publicEffects(this._effectsOf());
   }
 
   get isConstant(): boolean {

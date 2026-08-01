@@ -1,8 +1,8 @@
-import type { Type, TypeResolver, TypeString } from './types.js';
+import type { EffectSet, Type, TypeResolver, TypeString } from './types.js';
 import { couldMatch, isSubtype, provablyDisjoint } from './subtype.js';
 import { typeToString } from './serialize.js';
 import { parseType } from './parse.js';
-import { narrow, widen } from './utils.js';
+import { narrow, signatureEffects, widen } from './utils.js';
 
 /** @category Type */
 export class BoxedType {
@@ -130,6 +130,32 @@ export class BoxedType {
     if (typeof this.type === 'object' && this.type.kind === 'union')
       return this.type.types.map((t) => new BoxedType(t));
     return [this];
+  }
+
+  /**
+   * The **latent** effects on this type's arrow: what fires if a value of this
+   * type is invoked. `undefined` when the type is not callable, or when its
+   * arrow states nothing (the inferred track); `[]` when it states `pure`;
+   * `'any'` for "unknown effects"; otherwise the labels, alphabetically
+   * sorted.
+   *
+   * This is how an operator asks "what happens if I call this operand?" —
+   * `op.type.effects`, which resolves through symbol bindings because `.type`
+   * does. It is the *invoking* half of the effects model; the *producing*
+   * half — what evaluating an expression does — is `expr.effects`.
+   *
+   * For an overload set (an intersection of signatures) the answer is the
+   * union of the arms': an overload with one effect-bearing arm is not pure.
+   *
+   * ```ts
+   * ce.type('(real) random -> real').effects;  // ➔ ['random']
+   * ce.type('(real) pure -> real').effects;    // ➔ []
+   * ce.type('(real) -> real').effects;         // ➔ undefined
+   * ce.type('number').effects;                 // ➔ undefined
+   * ```
+   */
+  get effects(): EffectSet | undefined {
+    return signatureEffects(this.type);
   }
 
   get isUnknown(): boolean {

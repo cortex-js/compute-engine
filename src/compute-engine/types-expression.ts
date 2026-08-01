@@ -984,6 +984,35 @@ export interface Expression {
   readonly isPure: boolean;
 
   /**
+   * The effects of **evaluating** this expression: `undefined` when there are
+   * none (the expression is pure), `'any'` when the effects are not known, or
+   * the effect labels in alphabetical order.
+   *
+   * This is the set `isPure` summarizes — `isPure` is "no impurity label in
+   * here" — but it says *which* effects, so a consumer can act on them: a
+   * `scope` write invalidates a memo, `random` means the value will differ on
+   * re-evaluation, `network` means evaluating may be slow or may fail.
+   *
+   * It reports what evaluating this expression **does**, not what the value it
+   * produces **can do** if you later invoke it. A symbol bound to a drawing
+   * function has no effects — evaluating it just yields the function — while
+   * its *type* carries the draw:
+   *
+   * ```ts
+   * ce.assign('rf', ce.box(['Function', ['Random'], 'x']));
+   * ce.box('rf').effects;           // ➔ undefined  (producing the value)
+   * ce.box('rf').isPure;            // ➔ true
+   * ce.box('rf').type.effects;      // ➔ ['random'] (invoking it)
+   * ce.box(['Map', xs, 'rf']).effects; // ➔ ['random'] (Map invokes it)
+   * ```
+   *
+   * Numbers, strings, symbols and dictionaries have no effects. See
+   * `docs/EFFECTS-MODEL.md` ("Projection and discharge") for how an
+   * application's effects are computed from its operator and operands.
+   */
+  readonly effects: ReadonlyArray<EffectLabel> | 'any' | undefined;
+
+  /**
    * The memoized runtime effect channel of a function expression — the
    * projection rule of `docs/EFFECTS-MODEL.md` ("Projection and discharge"),
    * cached with a generation guard. Present only on function expressions; use

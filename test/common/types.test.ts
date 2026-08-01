@@ -374,6 +374,22 @@ describe('Collection Type Parser', () => {
   });
 });
 
+describe('Nullary signature vs variadic bound', () => {
+  // Regression: a nullary signature has no `args` field, and the
+  // signature-subtype rule used to crash on `lhs.args!.length` when the
+  // bound carried a variadic parameter.
+  it('a nullary signature fails a `+`-variadic bound (min 1)', () => {
+    expect(
+      isSubtype(parseType('() -> number'), parseType('(unknown+) -> unknown'))
+    ).toBe(false);
+  });
+  it('a nullary signature satisfies a `*`-variadic bound (min 0)', () => {
+    expect(
+      isSubtype(parseType('() -> number'), parseType('(unknown*) -> unknown'))
+    ).toBe(true);
+  });
+});
+
 describe('Signature Type Parser Tests', () => {
   it('should parse a function signature with named arguments', () => {
     expect(parseType('(x: integer, y: boolean) -> string'))

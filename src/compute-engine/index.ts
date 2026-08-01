@@ -388,6 +388,10 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal Fu trigonometric simplification algorithm */
   _fuAlgorithm = _fu;
 
+  /** @internal Names installed by a CALLER-supplied library (see
+   * `engine-library-bootstrap.ts`). Fixed once the constructor returns. */
+  readonly _customLibraryOperators = new Set<string>();
+
   /** @internal */
   private _commonSymbols: CommonSymbolTable = {
     Pi: null,

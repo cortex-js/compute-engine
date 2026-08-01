@@ -430,6 +430,36 @@
   contribute nothing latent either, so `List(randomF)` is pure to build and the
   effect surfaces at whatever later invokes the element.
 
+- **New `expr.effects` and `type.effects` properties.** `isPure` answers
+  yes-or-no; these say _which_ effects, so a consumer can act on them — a
+  `scope` write invalidates a memo, `random` means the value will differ on
+  re-evaluation, `network` means evaluating may be slow or may fail. The two
+  properties are the two channels of the model. `expr.effects` is what
+  **evaluating** the expression does: `undefined` (no effects), `'any'`
+  (unknown), or the labels in alphabetical order. `type.effects` is the
+  **latent** set on an arrow — what fires if a value of that type is invoked —
+  reported as `undefined` (a bare arrow, on the inferred track), `[]` (a stated
+  `pure` contract), `'any'`, or the labels; an overload set reports the union of
+  its arms, and a non-callable type reports `undefined`.
+
+  The distinction is producing versus invoking: evaluating a symbol bound to a
+  drawing function merely _yields_ the function, so it has no effects and stays
+  pure, while its type carries the draw. This is what keeps `List(randomF)` pure
+  to build, and it is why an operator that wants to reject an effectful
+  **callback** reads `op.type.effects`, while one that wants to reject an
+  effectful **operand it is about to evaluate** reads `op.effects`.
+
+  ```js
+  ce.parse("1 + x^2").effects;                     // ➔ undefined
+  ce.box(["Random"]).effects;                      // ➔ ["random"]
+  ce.box(["Assign", "q", 1]).effects;              // ➔ ["scope"]
+
+  ce.assign("rf", ce.box(["Function", ["Random"], "x"]));
+  ce.box("rf").effects;                            // ➔ undefined (producing)
+  ce.box("rf").type.effects;                       // ➔ ["random"] (invoking)
+  ce.box(["Map", ["List", 1, 2], "rf"]).effects;   // ➔ ["random"]
+  ```
+
 - **Cortex `match` gains range patterns.** A two-operand range in pattern
   position — `0..90 => "acute"` in Cortex, `["Range", lo, hi]` in MathJSON — is
   an inclusive numeric membership test rather than a structural shape: the case
@@ -521,6 +551,19 @@
   sections (1-based indexing, `//` is a comment, `=` vs `==`,
   symbolic-by-default, errors-as-values, `->` is `KeyValuePair` so `ReplaceAll`
   takes `Rule(x, 3)`).
+
+- **CSE now binds repeated subtrees headed by built-in lowerings** such as
+  `PointList`. The emission-purity gate (G1b) excluded any subtree whose
+  operator definition carries a `compile` handler — the right call for the
+  caller-supplied `ce.declare(name, { compile })` channel, whose emitted
+  code's purity is unknowable, but over-broad for engine-authored built-in
+  handlers, which are the same trust class as the built-in table mappings
+  (`Sin`, `Add`) that were never excluded. A definition now counts as
+  caller-supplied only when it is not the system-scope binding (by
+  identity), so a user handler — including one shadowing a built-in name —
+  stays ineligible, and impure subtrees remain excluded by the purity gate
+  regardless. With this, the corpus's highest-value repeats
+  (`PointList`-shaped, per the CSE design §5.3) actually bind.
 
 - **`D`, `Derivative` and `ND` now compile** on every target. A derivative
   declined everywhere even though evaluating it first yields a compilable closed

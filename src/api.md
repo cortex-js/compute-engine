@@ -1083,6 +1083,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
+  `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
   `eq`: (`a`) => `boolean` \| `undefined`;
@@ -1165,6 +1166,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
+  `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
   `eq`: (`a`) => `boolean` \| `undefined`;
@@ -1280,6 +1282,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
+  `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
   `eq`: (`a`) => `boolean` \| `undefined`;
@@ -1362,6 +1365,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
+  `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
   `eq`: (`a`) => `boolean` \| `undefined`;
@@ -2716,6 +2720,7 @@ type ValueDefinition = BaseDefinition & {
      | TypeString
      | BoxedType;
   inferred: boolean;
+  effectsDeclared: boolean;
   value:   | LatexString
      | ExpressionInput
      | ((ce) => Expression | null);
@@ -2739,6 +2744,26 @@ inferred: boolean;
 If true, the type is inferred, and could be adjusted later
 as more information becomes available or if the symbol is explicitly
 declared.
+
+#### ValueDefinition.effectsDeclared
+
+```ts
+effectsDeclared: boolean;
+```
+
+Annotation provenance on the EFFECTS axis of a function-typed
+declaration (`docs/EFFECTS-MODEL.md`, "Annotation provenance") — the
+effects-axis analog of `inferred`.
+
+True when the author STATED the arrow's effects: a non-empty specifier
+(`(number) scope -> number`), or the `pure` keyword — which denotes the
+same empty set a bare arrow does, so the type alone cannot tell them
+apart. A bare arrow leaves effects on the inferred track: assigning a
+body re-stamps them freely. A stated set is a CONTRACT: every assigned
+body must satisfy `inferred ⊆ declared`.
+
+Set by `ce.declare()` from the parsed declaration; not normally written
+by hand.
 
 #### ValueDefinition.value
 
@@ -3984,6 +4009,24 @@ A type that is not inferred, but has been set explicitly, cannot be updated.
 
 <MemberCard>
 
+##### BoxedValueDefinition.effectsDeclared
+
+```ts
+effectsDeclared: boolean;
+```
+
+Annotation provenance on the EFFECTS axis — the effects-axis analog of
+[inferredType](#inferredtype) (`docs/EFFECTS-MODEL.md`, "Annotation provenance").
+
+True when the declaration STATED the arrow's effects (a non-empty
+specifier, or the `pure` keyword). False for a bare arrow, which leaves
+effects on the inferred track: an assigned body's inferred effects are
+accepted and re-stamped, never checked against the declaration.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedValueDefinition.type
 
 ```ts
@@ -4067,6 +4110,7 @@ type OperatorDefinitionFlags = {
   lazy: boolean;
   scoped: boolean | BindingSiteSelector;
   broadcastable: boolean;
+  inspectsErrors: boolean;
   missingBehavior: "reject" | "propagate" | "handle";
   missingStrip: "all" | number[];
   associative: boolean;
@@ -4075,6 +4119,12 @@ type OperatorDefinitionFlags = {
   idempotent: boolean;
   involution: boolean;
   pure: boolean;
+  effects: EffectSet | undefined;
+  effectsDeclared: boolean;
+  frameProtocol: "seed" | undefined;
+  invokes: boolean;
+  discharges: {} | undefined;
+  holdClass: "evaluate" | "quote" | "release";
   drawsRandom: boolean;
   readsRandomFrame: boolean;
 };
@@ -8499,6 +8549,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
+  `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
   `eq`: (`a`) => `boolean` \| `undefined`;
@@ -8581,6 +8632,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
+  `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
   `eq`: (`a`) => `boolean` \| `undefined`;
@@ -8696,6 +8748,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
+  `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
   `eq`: (`a`) => `boolean` \| `undefined`;
@@ -8778,6 +8831,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
+  `effectsDeclared`: `boolean`;
   `value`:   \| [`ExpressionInput`](#expressioninput)
      \| ((`ce`) => [`Expression`](#expression-5) \| `null`);
   `eq`: (`a`) => `boolean` \| `undefined`;
@@ -9958,6 +10012,49 @@ constant, because `x` is not constant.
 :::info[Note]
 Applicable to canonical expressions only
 :::
+
+Since Stage 2 of the effects model this is a **view** of the runtime
+effect channel: "no impurity label in `effectsOf(expr)`" (see
+`boxed-expression/effects-of.ts`).
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.effects
+
+```ts
+readonly effects: 
+  | "any"
+  | readonly EffectLabel[]
+  | undefined;
+```
+
+The effects of **evaluating** this expression: `undefined` when there are
+none (the expression is pure), `'any'` when the effects are not known, or
+the effect labels in alphabetical order.
+
+This is the set `isPure` summarizes — `isPure` is "no impurity label in
+here" — but it says *which* effects, so a consumer can act on them: a
+`scope` write invalidates a memo, `random` means the value will differ on
+re-evaluation, `network` means evaluating may be slow or may fail.
+
+It reports what evaluating this expression **does**, not what the value it
+produces **can do** if you later invoke it. A symbol bound to a drawing
+function has no effects — evaluating it just yields the function — while
+its *type* carries the draw:
+
+```ts
+ce.assign('rf', ce.box(['Function', ['Random'], 'x']));
+ce.box('rf').effects;           // ➔ undefined  (producing the value)
+ce.box('rf').isPure;            // ➔ true
+ce.box('rf').type.effects;      // ➔ ['random'] (invoking it)
+ce.box(['Map', xs, 'rf']).effects; // ➔ ['random'] (Map invokes it)
+```
+
+Numbers, strings, symbols and dictionaries have no effects. See
+`docs/EFFECTS-MODEL.md` ("Projection and discharge") for how an
+application's effects are computed from its operator and operands.
 
 </MemberCard>
 
@@ -13418,6 +13515,33 @@ usually what an arm walk was reaching for.
 
 <MemberCard>
 
+##### BoxedType.effects
+
+The **latent** effects on this type's arrow: what fires if a value of this
+type is invoked. `undefined` when the type is not callable, or when its
+arrow states nothing (the inferred track); `[]` when it states `pure`;
+`'any'` for "unknown effects"; otherwise the labels, alphabetically
+sorted.
+
+This is how an operator asks "what happens if I call this operand?" —
+`op.type.effects`, which resolves through symbol bindings because `.type`
+does. It is the *invoking* half of the effects model; the *producing*
+half — what evaluating an expression does — is `expr.effects`.
+
+For an overload set (an intersection of signatures) the answer is the
+union of the arms': an overload with one effect-bearing arm is not pure.
+
+```ts
+ce.type('(real) random -> real').effects;  // ➔ ['random']
+ce.type('(real) pure -> real').effects;    // ➔ []
+ce.type('(real) -> real').effects;         // ➔ undefined
+ce.type('number').effects;                 // ➔ undefined
+```
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedType.isUnknown
 
 </MemberCard>
@@ -13941,6 +14065,64 @@ type NamedElement = {
 
 <MemberCard>
 
+### EffectLabel
+
+```ts
+type EffectLabel = 
+  | "console"
+  | "entropy"
+  | "environment"
+  | "fs_read"
+  | "fs_write"
+  | "network"
+  | "random"
+  | "scope"
+  | "time";
+```
+
+An effect label: a member of a closed, engine-versioned enumeration.
+
+Each label carries fixed metadata (impurity, observation vs action, frame
+kind, handler-backed); consumers key on that metadata, never on the label
+name. See `docs/EFFECTS-MODEL.md`.
+
+The labels bear no implication relations to each other: the order on effect
+sets is plain powerset inclusion, so the singletons are pairwise
+incomparable (in particular `fs_write` does not imply `fs_read`).
+
+</MemberCard>
+
+<MemberCard>
+
+### EffectSet
+
+```ts
+type EffectSet = "any" | EffectLabel[];
+```
+
+The effect set carried by a signature's arrow.
+
+- `'any'` is the distinguished **top**: "unknown effects". Under union it
+  absorbs, and no finite bound admits it.
+- Otherwise a duplicate-free, alphabetically sorted list of labels, possibly
+  **empty**.
+
+An absent (`undefined`) `effects` field and `[]` denote the **same set**, ∅:
+every semantic operation — subtyping, `pure`, the label predicates, union,
+`matches()` — treats them identically. They differ only in **serialization**
+(ruled 2026-08-01): absent is an empty specifier slot (effects were never
+stated, and stay on the inferred track), while `[]` is the author's `pure`
+and serializes back as ` pure`, so an explicit purity contract survives a
+parse → serialize → re-declare round trip.
+
+Build one with `normalizeEffectSet()` (inference: an empty result collapses
+to `undefined`) or `normalizeStatedEffectSet()` (a stated set: an empty
+result stays `[]`).
+
+</MemberCard>
+
+<MemberCard>
+
 ### FunctionSignature
 
 ```ts
@@ -13950,6 +14132,7 @@ type FunctionSignature = {
   optArgs: NamedElement[];
   variadicArg: NamedElement;
   variadicMin: 0 | 1;
+  effects: EffectSet;
   result: Type;
 };
 ```
@@ -14264,10 +14447,17 @@ Types are described using the following BNF grammar:
 
 <named_tuple_elements> ::= <name> <type> ("," <name> <type>)*
 
-<signature> ::=  <arguments> " -> " <type>
+<signature> ::=  <arguments> (" " <effects>)? " -> " <type>
+
+<effects> ::= "pure" | "any" | <effect-label> (" " <effect-label>)*
+
+(`pure` is the STATED empty set: the same set as an empty slot, and the
+spelling that round-trips through serialization. See {@link EffectSet}.)
+
+<effect-label> ::= "console" | "entropy" | "environment" | "fs_read"
+           | "fs_write" | "network" | "random" | "scope" | "time"
 
 <arguments> ::= "()"
-           | <argument>
            | "(" <argument-list> ")"
 
 <argument> ::= <type>
@@ -14331,6 +14521,9 @@ Examples of types strings:
 - `"(number, y:number?) -> number"` -- a signature with an optional named argument (can have several optional arguments, at the end)
 - `"(number, number+) -> number"` -- a signature with a rest argument (can have only one, and no optional arguments if there is a rest argument).
 - `"() -> number"` -- a signature with an empty argument list
+- `"(number) random -> number"` -- a signature that may draw from the seeded random stream
+- `"(number) random scope -> number"` -- a signature with two effect labels
+- `"(number) any -> number"` -- a signature with unknown effects
 - `"number | boolean"` -- a union type
 - `"(x: number) & (y: number)"` -- an intersection type
 - `"number | ((x: number) & (y: number))"` -- a union type with an intersection type

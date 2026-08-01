@@ -590,6 +590,39 @@ describe('effect-aware structural equality', () => {
     expect(typeToString(t.type)).toBe(before);
     expect(typeToString(parseType('(real) -> real'))).toBe('(real) -> real');
   });
+
+  test('`BoxedType.effects` normalizes a hand-built signature defensively', () => {
+    // `ce.type()` accepts a raw `Type` object without normalizing it, so an
+    // unsorted (or duplicated) label array can reach the reader. The sorted
+    // labels are the documented contract, so extraction sorts.
+    const unsorted = new BoxedType({
+      kind: 'signature',
+      args: [{ type: 'real' }],
+      effects: ['scope', 'random'],
+      result: 'real',
+    } as Type);
+    expect(unsorted.effects).toEqual(['random', 'scope']);
+
+    const dup = new BoxedType({
+      kind: 'signature',
+      args: [{ type: 'real' }],
+      effects: ['random', 'random'],
+      result: 'real',
+    } as Type);
+    expect(dup.effects).toEqual(['random']);
+
+    // The two spellings of the empty set, and the top, pass through EXACTLY
+    expect(
+      new BoxedType({
+        kind: 'signature',
+        args: [{ type: 'real' }],
+        effects: [],
+        result: 'real',
+      } as Type).effects
+    ).toEqual([]);
+    expect(new BoxedType('(real) -> real').effects).toBeUndefined();
+    expect(new BoxedType('(real) any -> real').effects).toBe('any');
+  });
 });
 
 describe('effect-set helpers', () => {

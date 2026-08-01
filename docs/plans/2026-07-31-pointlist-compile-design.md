@@ -31,8 +31,10 @@ PointList-bearing document at all. Removing it opens the artifact — every
 themselves remain CSE-ineligible under gate G1b
 (`2026-07-28-compile-cse-design.md` §5.2: a subtree containing a node whose
 operator definition carries a `compile` handler is excluded, built-in or
-not). Exempting attested built-in handlers from G1b is a **follow-up to the
-CSE design**, filed in the ROADMAP residual row — not claimed here.
+not). Exempting attested built-in handlers from G1b was a **follow-up to the
+CSE design** — landed 2026-08-01 (system-scope binding identity; CSE design
+§5.2 amended), so PointList-shaped repeats now bind and the flagship claim
+holds end to end.
 
 ## Rulings (user, 2026-07-31 — settled, do not re-litigate)
 

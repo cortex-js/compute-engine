@@ -20,6 +20,7 @@ import type {
   FunctionInterface,
   IComputeEngine as ComputeEngine,
   BoxedOperatorDefinition,
+  BoxedDefinition,
 } from '../global-types.js';
 
 import {
@@ -585,7 +586,7 @@ class Harvester {
       const nextUnderMapped =
         underMapped ||
         this.isOverriddenOperator(node.operator) ||
-        this.hasCompileHandler(node);
+        this.hasCallerCompileHandler(node);
 
       if (asStatement && this.walkStatement(node, region, nextUnderMapped)) {
         // handled as a statement
@@ -925,8 +926,11 @@ class Harvester {
    * the emitted code. A subtree is eligible when NOTHING in it is:
    *
    * - a node resolving through a caller-supplied `functions`/`operators`
-   *   entry, a per-operator `compile` handler on its definition, or a
-   *   *string*-valued `vars` symbol (all three splice live source);
+   *   entry, a caller-supplied per-operator `compile` handler on its
+   *   definition, or a *string*-valued `vars` symbol (all three splice live
+   *   source); a BUILT-IN definition's `compile` handler is exempt — it is
+   *   engine-authored emission, the same trust class as the built-in table
+   *   mappings;
    * - a user-defined function application (purity inference for user
    *   definitions is dependency-order-unsound, `docs/EFFECTS-MODEL.md`);
    * - an application whose operator position is not a fixed built-in;
@@ -954,11 +958,12 @@ class Harvester {
     if (!isFunction(node)) return true;
 
     if (this.isOverriddenOperator(node.operator)) return false;
-    // A per-operator `compile` handler is the definition-level twin of a
-    // caller-supplied `functions` entry: `BaseCompiler.compileExpr` consults it
+    // A CALLER-supplied per-operator `compile` handler is the definition-level
+    // twin of a `functions` entry: `BaseCompiler.compileExpr` consults it
     // before any built-in mapping and splices whatever source it returns, while
-    // the definition itself defaults to `pure: true`.
-    if (this.hasCompileHandler(node)) return false;
+    // the definition itself defaults to `pure: true`. A built-in definition's
+    // handler is exempt (see `hasCallerCompileHandler`).
+    if (this.hasCallerCompileHandler(node)) return false;
     // Not a fixed built-in: `Apply` with a symbolic head, a parameter used as
     // a function, an unbound application.
     if (node.operatorDefinition === undefined) return false;
@@ -973,7 +978,8 @@ class Harvester {
   }
 
   /**
-   * Does this head carry a per-operator `compile` handler (§5.2 G1b)?
+   * Does this head carry a **caller-supplied** per-operator `compile` handler
+   * (§5.2 G1b)?
    *
    * `BaseCompiler.compileExpr` consults `def.operator.compile` BEFORE any
    * built-in mapping and emits whatever source it returns, so the handler is a
@@ -982,21 +988,64 @@ class Harvester {
    * are checked: the node's own definition, and (for a head whose node did not
    * bind) the engine lookup the compiler itself performs.
    *
-   * Memoized per operator NAME, like `isUserFunctionApplication`: engine state
-   * is constant for the duration of one harvest.
+   * **Built-in exemption (2026-08-01).** The clause exists because
+   * `ce.declare(name, { compile })` is the same caller-supplied splice channel
+   * as a `functions` entry: the emitted code's purity is unknowable. A
+   * BUILT-IN definition's handler is engine-authored, deterministic,
+   * effect-free emission — exactly like the built-in TABLE mappings (`Sin`,
+   * `Add`), which were never under-mapped nor ineligible. Hoisting a pure
+   * subtree across a built-in table emission is already sanctioned; a built-in
+   * definition handler is the same trust class. G1 (`node.isPure`)
+   * independently excludes impure operators, so the exemption rides on the
+   * same purity guarantee the table path always relied on. Provenance test:
+   * the definition carrying the handler IS the system-scope binding for that
+   * name (object identity — the sanctioned test, mirroring
+   * `engine-declarations.ts`). A user `ce.declare(name, { compile })` in any
+   * non-system scope, and a user definition SHADOWING a built-in name (not
+   * identity-equal to the system binding), both stay ineligible. So is a
+   * definition installed by a CALLER-supplied library (constructor `libraries`
+   * option): those land in the system scope as well, and are told apart by the
+   * provenance recorded at bootstrap (`engine._customLibraryOperators`).
+   *
+   * Memoized per operator NAME, like `isUserFunctionApplication`: the memo
+   * lives on the `Harvester` instance (one per harvest) and engine scope state
+   * is constant for the duration of one harvest, so name-keying is sound even
+   * though the classification now consults the scope chain.
    */
-  private hasCompileHandler(node: Expression & FunctionInterface): boolean {
+  private hasCallerCompileHandler(
+    node: Expression & FunctionInterface
+  ): boolean {
     const id = node.operator;
     const cached = this.compileHandlerMemo.get(id);
     if (cached !== undefined) return cached;
 
-    let result = typeof node.operatorDefinition?.compile === 'function';
+    // A CALLER-supplied library passed to the constructor's `libraries` option
+    // is installed in the SYSTEM scope too (bootstrap runs between
+    // `pushScope('system')` and `pushScope('global')`), so scope identity alone
+    // would misclassify a caller-authored handler as engine-authored. The
+    // provenance recorded at bootstrap overrides the scope test: no system
+    // binding is offered for such a name, so both channels below classify it as
+    // a caller handler. The set is fixed once the engine is constructed, so the
+    // memo stays valid.
+    const systemDef = this.engine._customLibraryOperators.has(id)
+      ? undefined
+      : (this.engine.contextStack[0]?.lexicalScope.bindings.get(id) as
+          | BoxedDefinition
+          | undefined);
+
+    let result = false;
+    const ownDef = node.operatorDefinition;
+    if (typeof ownDef?.compile === 'function') {
+      // Exempt only when the definition the handler sits on IS the built-in.
+      result = !(isOperatorDef(systemDef) && systemDef.operator === ownDef);
+    }
     if (!result) {
       const def = this.engine.lookupDefinition(id);
       result =
         def !== undefined &&
         isOperatorDef(def) &&
-        typeof def.operator.compile === 'function';
+        typeof def.operator.compile === 'function' &&
+        def !== systemDef;
     }
     this.compileHandlerMemo.set(id, result);
     return result;

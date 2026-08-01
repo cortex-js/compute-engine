@@ -205,10 +205,25 @@ axis). Remaining, all demand-gated:
   the operand-shape gates even though the emission is a legal `vecN`. Fix =
   a dimensioned projection type — an interpreter-visible type-handler change,
   wants its own measured pass.
-- CSE gate G1b still excludes PointList subtrees (any definition carrying a
-  `compile` handler); exempting attested built-in handlers is a follow-up to
-  `docs/plans/2026-07-28-compile-cse-design.md`, so the corpus's
-  PointList-shaped repeats bind.
+- ~~CSE gate G1b still excludes PointList subtrees~~ — **LANDED 2026-08-01**:
+  built-in `compile` handlers are exempt (system-scope binding identity;
+  design amended in `2026-07-28-compile-cse-design.md` §5.2). Remaining CSE
+  residue for binder bodies (`Integrate` integrands) is the §11 emission
+  wiring, no longer the gate.
+- **CSE for user-function applications and named callbacks — UNBLOCKED
+  2026-08-01, not yet designed.** G1b's other half kept these inert on two
+  grounds that the effects model's Stage 2 has since closed: dependency-order
+  unsoundness (a forward-referenced head could be marked pure and then turn
+  out to draw — unresolved heads now infer `{any}`, pinned in
+  `compile-cse.test.ts`) and callback invisibility (`isPure` stopped at a bare
+  symbol — `effectsOf` now resolves through the current binding with a
+  generation-guarded memo). Un-inerting is no longer a soundness question but
+  still wants a short measured design pass: harvest-time `effectsOf` cost on
+  large trees, the generation guard's interaction with the harvest cache, and
+  a stated staleness rule (a compiled artifact snapshots bindings at compile
+  time — consistent with the compile-wide policy, but CSE merging makes the
+  snapshot observable in new ways). See `2026-07-28-compile-cse-design.md`
+  G1b and `docs/EFFECTS-MODEL.md` "Inference".
 - No corpus re-measure yet: how much of the 11 st / 36 mem + 2 st actually
   closed is the consumer's count to re-run — do not mark this bucket resolved
   on our numbers.

@@ -25,9 +25,14 @@ import type { Type } from '../../src/common/type/types';
 
 /** An engine with `integ(f: (any) -> number, real, real)` — form 1 of
  * "Requiring absence": the bare arrow, i.e. the empty bound. */
-function engine(bound = '((any) -> number, real, real) -> real'): ComputeEngine {
+function engine(
+  bound = '((any) -> number, real, real) -> real'
+): ComputeEngine {
   const ce = new ComputeEngine();
-  ce.declare('integ', { signature: bound, evaluate: (_ops, { engine }) => engine.number(1) });
+  ce.declare('integ', {
+    signature: bound,
+    evaluate: (_ops, { engine }) => engine.number(1),
+  });
   return ce;
 }
 
@@ -35,7 +40,9 @@ const PURE_CALLBACK = ['Function', ['Add', 'x', 1], 'x'];
 const RANDOM_CALLBACK = ['Function', ['Random'], 'x'];
 
 /** The `incompatible-type` marker an operand carries when it fails its bound. */
-function rejectedOperand(e: ReturnType<ComputeEngine['box']>): string | undefined {
+function rejectedOperand(
+  e: ReturnType<ComputeEngine['box']>
+): string | undefined {
   const bad = e.ops?.find((op) => !op.isValid);
   return bad?.toString();
 }
@@ -178,7 +185,7 @@ describe('the narrowing branch does not narrow AWAY an effect', () => {
  * bound, and a bare arrow there declares "callers must pass a pure function".
  */
 describe('blast radius: which library parameters carry an effect bound', () => {
-  it('only `Iterate` and `Product` declare a function-SIGNATURE parameter', () => {
+  it('only `Product` declares a function-SIGNATURE parameter', () => {
     const ce = new ComputeEngine();
     const scope = (ce as any).contextStack[0].lexicalScope;
 
@@ -206,14 +213,18 @@ describe('blast radius: which library parameters carry an effect bound', () => {
       }
     }
 
-    expect([...new Set(bounded)].sort()).toEqual(['Iterate', 'Product']);
+    expect([...new Set(bounded)].sort()).toEqual(['Product']);
   });
 
-  it('neither newly rejects an impure callback today', () => {
+  it('it does not newly reject an impure callback today', () => {
     const ce = new ComputeEngine();
-    // `Iterate` installs its operands through its own `canonical` handler, so
-    // no argument validation runs on them at all. (It is an INFINITE
-    // collection: never materialize it — take a prefix.)
+    // `Iterate` used to be in this enumeration. Its callback slot is now the
+    // bare `function` primitive — effect-top by definition, so there is no
+    // bound to enforce or defer. The contract is parametric (`((integer, T) ->
+    // T, T?) -> list<T>`), which the grammar cannot express; see
+    // `collection-callback-signatures.test.ts`. Its acceptance of an effectful
+    // body stays pinned here. (It is an INFINITE collection: never materialize
+    // it — take a prefix.)
     const iterate = ce.box([
       'Take',
       ['Iterate', ['Function', ['Random'], 'i', 'acc'], 0],
@@ -224,11 +235,7 @@ describe('blast radius: which library parameters carry an effect bound', () => {
 
     // `Product` is `lazy: true` — the non-strict/lazy carve-out: its held body
     // is pushed through untouched, and the effect check defers with it.
-    const product = ce.box([
-      'Product',
-      ['Random'],
-      ['Tuple', 'i', 1, 3],
-    ]);
+    const product = ce.box(['Product', ['Random'], ['Tuple', 'i', 1, 3]]);
     expect(product.isValid).toBe(true);
     expect(product.evaluate().isValid).toBe(true);
   });

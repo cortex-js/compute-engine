@@ -903,31 +903,35 @@ export function isSubtype(
       }
 
       let i = 0;
+      // A nullary signature has no `args` field at all: treat it as an
+      // empty list rather than crashing on `lhs.args!` (a nullary lhs vs a
+      // variadic rhs used to throw here).
+      const lhsArgs = lhs.args ?? [];
       if (rhs.args) {
         // If lhs doesn't have enough arguments, it is not a subtype
-        if (lhs.args!.length < rhs.args.length) return false;
+        if (lhsArgs.length < rhs.args.length) return false;
         // Check all the required arguments match contravariantly
         while (i < rhs.args!.length) {
-          if (!isSubtype(rhs.args[i].type, lhs.args![i].type)) return false;
+          if (!isSubtype(rhs.args[i].type, lhsArgs[i].type)) return false;
           i += 1;
         }
       }
       if (rhs.optArgs) {
-        if (i >= lhs.args!.length) return true;
+        if (i >= lhsArgs.length) return true;
         // Check all the optional arguments match contravariantly
         for (let j = 0; j < rhs.optArgs.length; j++) {
-          if (!isSubtype(rhs.optArgs[j].type, lhs.args![i].type)) return false;
+          if (!isSubtype(rhs.optArgs[j].type, lhsArgs[i].type)) return false;
           i += 1;
-          if (i >= lhs.args!.length) return true;
+          if (i >= lhsArgs.length) return true;
         }
       }
       if (rhs.variadicArg) {
-        if (i >= lhs.args!.length && rhs.variadicMin === 0) return true;
+        if (i >= lhsArgs.length && rhs.variadicMin === 0) return true;
         // Check the remaining arguments match the variadic argument contravariantly
-        if (rhs.variadicMin! > 0 && i + rhs.variadicMin! > lhs.args!.length)
+        if (rhs.variadicMin! > 0 && i + rhs.variadicMin! > lhsArgs.length)
           return false;
-        while (i < lhs.args!.length) {
-          if (!isSubtype(rhs.variadicArg.type, lhs.args![i].type)) return false;
+        while (i < lhsArgs.length) {
+          if (!isSubtype(rhs.variadicArg.type, lhsArgs[i].type)) return false;
           i += 1;
         }
       }

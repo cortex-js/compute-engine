@@ -441,7 +441,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * The *resolved* missing-value behavior (§3.A of the missing-value typing
    * design). Computed from the declared {@link missingBehavior} and the current
    * signature on every access — never cached, so a signature mutation
-   * (`infer()`/`update()`) is reflected immediately.
+   * (`update()`, `BoxedFunction.infer()`) is reflected immediately.
    */
   get resolvedMissingBehavior():
     | 'reject'
@@ -492,8 +492,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   /**
    * Re-attach the definition's current effect set to the signature after the
-   * signature object was REPLACED by type inference (here, or in
-   * `BoxedFunction.infer()`). The cached `_effects` is authoritative in that
+   * signature object was REPLACED by type inference
+   * (`BoxedFunction.infer()`). The cached `_effects` is authoritative in that
    * situation: a rebuilt signature is assembled from the type-inference fields
    * alone, so without this the arrow would serialize pure while the definition
    * still reports its effects — the two must never disagree.
@@ -501,18 +501,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    */
   _resyncEffects(): void {
     this._setEffects(this._effects);
-  }
-
-  infer(sig: Type): void {
-    const newSig = new BoxedType(sig, this.engine._typeResolver);
-    if (!newSig.matches(this.signature))
-      throw new Error(
-        `Operator Definition "${this.name}": inferred signature "${newSig}" does not match current signature "${this.signature}"`
-      );
-    if (this.inferredSignature) {
-      this.signature = newSig;
-      this._resyncEffects();
-    }
   }
 
   update(def: OperatorDefinition): void {

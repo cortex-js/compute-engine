@@ -1654,6 +1654,9 @@ describe('COMPILE CSE — emission purity (G1b), caller mappings', () => {
  * `functions` entry — while an operator definition defaults to `pure: true`,
  * so G1 does not catch it. The head is therefore ineligible AND everything
  * beneath it is under-mapped.
+ *
+ * The clause is about CALLER-supplied handlers only — see the built-in
+ * exemption block below (2026-08-01).
  */
 describe('COMPILE CSE — emission purity (G1b), per-operator compile handlers', () => {
   /** A fresh engine whose `Quadrance` carries a custom compile handler. */
@@ -1690,5 +1693,153 @@ describe('COMPILE CSE — emission purity (G1b), per-operator compile handlers',
 
     expect(result.code).not.toMatch(/_cse\d/);
     expect(occurrences(result.code, 'Math.sin(6 * _.u)')).toBe(3);
+  });
+});
+
+/**
+ * §5.2 G1b — the BUILT-IN exemption (2026-08-01).
+ *
+ * The definition-`compile`-handler clause above exists because
+ * `ce.declare(name, { compile })` is the same caller-supplied splice channel
+ * as a `functions` entry: the emitted code's purity is unknowable. A BUILT-IN
+ * definition's handler (`PointList`, `ListFrom`, …) is engine-authored,
+ * deterministic, effect-free emission — exactly like the built-in TABLE
+ * mappings (`Sin`, `Add`), which were never under-mapped nor ineligible.
+ * Hoisting a pure subtree across a built-in table emission is already
+ * sanctioned; a built-in definition handler is the same trust class. G1
+ * (`isPure`) independently excludes impure heads, so the exemption rides on
+ * the same purity guarantee the table path always relied on.
+ *
+ * Provenance is decided by OBJECT IDENTITY against the system-scope binding,
+ * never by name — a user definition shadowing a built-in name is not the
+ * system binding, so it stays ineligible.
+ */
+describe('COMPILE CSE — emission purity (G1b), built-in compile handlers', () => {
+  const listEngine = (): ComputeEngine => {
+    const e = new ComputeEngine();
+    e.declare('u', 'number');
+    e.declare('n', 'list<number>');
+    return e;
+  };
+
+  it('binds a repeated subtree whose head carries a BUILT-IN `compile` handler', () => {
+    const e = listEngine();
+    const pl = (): any => ['PointList', sin6('u'), 'n'];
+    const expr = e.box(['List', pl(), pl(), pl()] as any);
+    const on = compile(expr, { fallback: false });
+    const off = compile(expr, { fallback: false, cse: false });
+
+    // The whole `PointList` construction is bound once…
+    expect(on.code).toMatch(/const _cse\d+ = \(\(\) => \{[\s\S]*PointList:/);
+    // …so exactly ONE zip loop is emitted instead of three.
+    expect(occurrences(on.code, 'new Array(')).toBe(1);
+    expect(occurrences(off.code, 'new Array(')).toBe(3);
+    expect(off.code).not.toContain('_cse');
+
+    const state = { u: 0.25, n: [1, 2, 3] };
+    expect((on.run as (s: any) => unknown)(state)).toEqual(
+      (off.run as (s: any) => unknown)(state)
+    );
+  });
+
+  it('harvests occurrences BELOW a built-in `compile` handler', () => {
+    // No longer under-mapped: the repeated `sin(6u)` inside the point lists
+    // counts toward a candidate.
+    const e = listEngine();
+    const pl = (): any => ['PointList', probe3('u'), 'n'];
+    const on = compile(e.box(['List', pl(), 0] as any), { fallback: false });
+
+    expect(on.code).toMatch(/const _cse\d+ = Math\.sin\(6 \* _\.u\)/);
+    expect(occurrences(on.code, 'Math.sin(6 * _.u)')).toBe(1);
+  });
+
+  it('a user `compile` handler SHADOWING a built-in NAME is still ineligible', () => {
+    // The identity test, not a name test: `Sin` is a built-in name, but the
+    // definition carrying the handler is the user's, declared in a non-system
+    // scope — so it is NOT the system-scope binding and stays ineligible.
+    const e = new ComputeEngine();
+    e.declare('u', 'number');
+    e.declare('Sin', {
+      signature: '(number) -> number',
+      compile: (args, c, { language }) =>
+        language === 'javascript' ? `mySin(${c(args[0])})` : undefined,
+    });
+
+    const result = compile(e.box(probe3('u')), { fallback: false });
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, 'mySin(6 * _.u)')).toBe(3);
+  });
+
+  it('an IMPURE subtree under a built-in `compile` handler still never binds', () => {
+    // The load-bearing interaction: the exemption relies entirely on G1. Three
+    // `PointList`s over four draws each stay three independent draw sequences.
+    const e = listEngine();
+    const draws = (): any => ['Add', ['Random'], ['Random'], ['Random'], ['Random']];
+    const pl = (): any => ['PointList', draws(), 'n'];
+    const result = compile(e.box(['List', pl(), pl(), pl()] as any), {
+      fallback: false,
+    });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, '_SYS.drawNextRandomNumber()')).toBe(12);
+    expect(occurrences(result.code, 'new Array(')).toBe(3);
+  });
+});
+
+/**
+ * §5.2 G1b — the built-in exemption vs. a CALLER-supplied library.
+ *
+ * A `LibraryDefinition` object passed to the constructor's `libraries` option
+ * is installed in the SYSTEM scope, exactly like a standard library
+ * (`bootstrapLibraries` runs between `pushScope('system')` and
+ * `pushScope('global')`). Scope identity alone would therefore classify a
+ * caller-authored `compile` handler as engine-authored and exempt it — the
+ * exact unsoundness G1b prevents. Provenance is recorded at bootstrap
+ * (`engine._customLibraryOperators`) by OBJECT IDENTITY against
+ * `STANDARD_LIBRARIES`, so re-passing a standard entry (by reference or by
+ * name) stays standard while a caller's own library is custom.
+ */
+describe('COMPILE CSE — emission purity (G1b), caller-supplied libraries', () => {
+  /** A caller-authored library whose `Quadrance` splices custom source. */
+  const customLibrary = (): any => ({
+    name: 'cse-caller-library',
+    definitions: {
+      Quadrance: {
+        signature: '(number, number) -> number',
+        compile: (args: any, c: any, { language }: any) =>
+          language === 'javascript'
+            ? `((${c(args[0])})**2 + (${c(args[1])})**2)`
+            : undefined,
+      },
+    },
+  });
+
+  it('never binds a subtree whose head comes from a CALLER-supplied library', () => {
+    const e = new ComputeEngine({
+      libraries: [...ComputeEngine.getStandardLibrary(), customLibrary()],
+    });
+    e.declare('u', 'number');
+    const call = (): any => ['Quadrance', ['Multiply', 6, 'u'], 'u'];
+    const result = compile(e.box(['Add', call(), call(), call()]), {
+      fallback: false,
+    });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, '((6 * _.u)**2 + (_.u)**2)')).toBe(3);
+  });
+
+  it('keeps built-ins exempt when the standard libraries are named explicitly', () => {
+    const e = new ComputeEngine({
+      libraries: ComputeEngine.getStandardLibrary().map((lib) => lib.name),
+    });
+    e.declare('u', 'number');
+    e.declare('n', 'list<number>');
+    const pl = (): any => ['PointList', sin6('u'), 'n'];
+    const on = compile(e.box(['List', pl(), pl(), pl()] as any), {
+      fallback: false,
+    });
+
+    expect(on.code).toMatch(/const _cse\d+ = \(\(\) => \{[\s\S]*PointList:/);
+    expect(occurrences(on.code, 'new Array(')).toBe(1);
   });
 });

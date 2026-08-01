@@ -2,7 +2,7 @@ import type { EffectSet, Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { typeToString } from '../../common/type/serialize.js';
-import { signatureArms } from '../../common/type/utils.js';
+import { signatureArms, signatureEffects } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   effectSetToString,
@@ -121,42 +121,13 @@ export function describeEffects(effects: EffectSet | undefined): string {
 }
 
 /**
- * The effects attached to a signature type's arrow, if any. `undefined` means
- * the arrow states nothing; the stated-empty `[]` (an author-written `pure`)
- * is PRESERVED, since "states the empty set" is exactly what distinguishes a
- * purity contract from the inferred track.
- *
- * An INTERSECTION of signatures is the overload-set representation (see
- * `overloadArms` in `overload.ts` — matched here through `signatureArms`
- * rather than imported, which would close a cycle). The effects of an overload
- * set are the UNION of the arms' effects ("One source of truth"): an overload
- * with one effect-bearing arm is not a pure definition. A MIXED intersection is
- * not a callable overload set and contributes nothing.
- *
- * A UNION is the shape an EXTRACTION produces: `At(list<(…) random -> …>, i)`
- * types as `((…) random -> …) | missing`, and the element really may be that
- * arrow — so the effects of a union are the union of its members' effects, with
- * non-signature members (`missing`, `nothing`) contributing nothing. Reading
- * `undefined` there would under-approximate in the unsound direction: the
- * runtime channel would call `Apply(At(List(randomF), 1), 0)` pure while
- * evaluating it draws.
+ * The effects attached to a signature type's arrow, if any — the compute-engine
+ * layer's entry point for the question. ONE implementation lives in
+ * `common/type/utils.ts` (the reader behind `BoxedType.effects`); this module
+ * re-exports it so the two layers cannot drift. See that function for the
+ * union / intersection / stated-empty rules.
  */
-export function signatureEffects(t: Type | undefined): EffectSet | undefined {
-  if (t === undefined || typeof t === 'string') return undefined;
-  if (t.kind === 'signature') return t.effects;
-  if (t.kind === 'union') {
-    let effects: EffectSet | undefined = undefined;
-    for (const member of t.types as Type[])
-      effects = unionEffectSets(effects, signatureEffects(member));
-    return effects;
-  }
-  if (t.kind !== 'intersection') return undefined;
-  const arms = signatureArms(t);
-  if (arms === undefined) return undefined;
-  let effects: EffectSet | undefined = undefined;
-  for (const arm of arms) effects = unionEffectSets(effects, arm.effects);
-  return effects;
-}
+export { signatureEffects };
 
 /**
  * `t` with the TOP-LEVEL arrow's effect specifier removed.
@@ -734,12 +705,13 @@ function isCallableType(t: Type): boolean {
  * Whether `def` takes a callback in ANY parameter position — see
  * {@link isCallableType}; any arm of an overload set suffices.
  *
- * Deliberately position-INSENSITIVE. An operand's index need not line up with
- * the declared parameter it satisfies: `Map`'s signature is
- * `(function, collection+) -> indexed_collection` while the boxed form is
- * `Map(collection, function)`, so an index-keyed test would read `collection`
- * for the callback and miss it. The question this gate answers is only "could
- * an operand of this operator be a callback at all" — enough to keep the
+ * Deliberately position-INSENSITIVE, as a simplification rather than out of
+ * necessity: no operand-order mismatch forces it (`Map`'s declared signature,
+ * `(collection+, function) -> indexed_collection`, lines up with its boxed
+ * form `Map(collection, function)`), and a per-position variant — testing the
+ * declared parameter an operand's index resolves to — is perfectly feasible if
+ * a case ever calls for it. The question this gate answers is only "could an
+ * operand of this operator be a callback at all" — enough to keep the
  * unresolved-operand `{any}` rule off `Add`, `Total` and every other
  * callback-free operator, which is what it exists for.
  */

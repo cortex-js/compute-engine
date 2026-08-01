@@ -228,6 +228,16 @@ export interface IComputeEngine {
    */
   _timeRemaining: number;
 
+  /** Names defined by a library that was NOT one of the engine's standard
+   * libraries, i.e. a `LibraryDefinition` object supplied by the caller to the
+   * constructor's `libraries` option. Caller-supplied libraries are installed
+   * into the SYSTEM scope (bootstrap runs between `pushScope('system')` and
+   * `pushScope('global')`), so scope identity alone cannot tell an
+   * engine-authored definition from a caller-authored one; this set records the
+   * provenance. Populated once, at bootstrap.
+   * @internal */
+  readonly _customLibraryOperators: Set<string>;
+
   /** @internal */
   _generation: number;
 

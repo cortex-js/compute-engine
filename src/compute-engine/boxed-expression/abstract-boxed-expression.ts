@@ -8,7 +8,11 @@ import type {
 // To avoid circular dependency issues we have to import the following
 // function *after* the class definition
 
-import type { Type, TypeString } from '../../common/type/types.js';
+import type {
+  EffectLabel,
+  Type,
+  TypeString,
+} from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 
 import type {
@@ -487,8 +491,24 @@ export abstract class _BoxedExpression implements Expression {
     return true;
   }
 
+  /** Derived from the effect channel below, so the two views of the same
+   * question cannot contradict each other: purity is "this expression fires
+   * nothing when evaluated", i.e. an empty computed effect set. Producing an
+   * effectful function is not invoking it, which is exactly what the `effects`
+   * default encodes. Every concrete subclass overrides this today; the
+   * derivation is what keeps a future one honest. */
   get isPure(): boolean {
-    return false;
+    return this.effects === undefined;
+  }
+
+  /** The default answer for everything that is not an application: evaluating
+   * a number, a string, a symbol or a dictionary merely PRODUCES a value, and
+   * producing a value fires nothing — even when the value is an effectful
+   * function (`docs/EFFECTS-MODEL.md`, worked example 4: the latent set lives
+   * on the arrow, reachable as `.type.effects`). `BoxedFunction` overrides
+   * this with the projection rule. */
+  get effects(): ReadonlyArray<EffectLabel> | 'any' | undefined {
+    return undefined;
   }
 
   get isConstant(): boolean {

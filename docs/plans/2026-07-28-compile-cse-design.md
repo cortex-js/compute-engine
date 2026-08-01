@@ -329,12 +329,46 @@ interval). The candidate pipeline, in order:
      `functions` entry, `operators` entry, or *string* `vars` entry (live
      source splices; non-string `vars` are baked constants, safe);
    - any subtree containing a node whose operator DEFINITION carries a
-     per-operator `compile` handler (`ce.declare(name, { compile })`).
-     `compileExpr` consults it before every built-in mapping and splices
-     whatever source it returns, while the definition defaults to
-     `pure: true` — so this is the same channel as a `functions` entry,
-     reached through the engine instead of the options bag. Like a
-     caller-mapped operator, it also under-maps its whole subtree;
+     **caller-supplied** per-operator `compile` handler
+     (`ce.declare(name, { compile })`). `compileExpr` consults it before
+     every built-in mapping and splices whatever source it returns, while
+     the definition defaults to `pure: true` — so this is the same channel
+     as a `functions` entry, reached through the engine instead of the
+     options bag. Like a caller-mapped operator, it also under-maps its
+     whole subtree.
+
+     **Built-in exemption (amended 2026-08-01).** A BUILT-IN definition's
+     `compile` handler (`PointList`, `ListFrom`, `Tuple`, …) is *not*
+     caught by this clause: neither the head nor anything beneath it is
+     under-mapped, and the head is eligible. Rationale: the clause exists
+     because `ce.declare(name, { compile })` is the same caller-supplied
+     splice channel as a `functions` entry — the emitted code's purity is
+     unknowable. A built-in definition's handler is engine-authored,
+     deterministic, effect-free emission, exactly like the built-in TABLE
+     mappings (`Sin`, `Add`), which were never under-mapped nor
+     ineligible. Consistency: hoisting a pure subtree across a built-in
+     table emission is already sanctioned, and a built-in definition
+     handler is the same trust class — the split between "lowered by the
+     table" and "lowered by a handler on the definition" is an internal
+     implementation detail of the library, not a trust boundary. G1
+     (`node.isPure`) independently excludes impure operators (`Random`,
+     …), so the exemption rides on the same purity guarantee the table
+     path always relied on. Consequence: collection-bearing built-ins
+     such as `PointList` become CSE-bindable (§5.3 covers the shared-object
+     aliasing this introduces).
+
+     *Provenance mechanism*: the definition object carrying the handler
+     must be **identity-equal** to the system-scope binding for that name —
+     `engine.contextStack[0].lexicalScope.bindings.get(name)`, the same
+     test `engine-declarations.ts` uses to recognize a built-in before
+     shadowing it. Identity, never name: a user
+     `ce.declare(name, { compile })` in any non-system scope is a
+     different object and stays ineligible, and so does a user definition
+     *shadowing* a built-in name (the scope lookup resolves to the user's
+     def, which is not the system binding). Implemented in
+     `Harvester.hasCallerCompileHandler` (`compilation/cse.ts`), memoized
+     per operator name on the per-harvest `Harvester` instance — sound
+     because engine scope state is constant for the duration of a harvest;
    - any occurrence **below** a caller-mapped operator (a harvest DFS flag:
      the custom emitter controls how often — or whether — everything
      beneath it evaluates, so those occurrences do not count toward any

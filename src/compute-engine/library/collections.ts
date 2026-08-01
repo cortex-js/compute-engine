@@ -2051,7 +2051,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return True if the predicate holds for at least one element of the collection (or if any element is True when no predicate is given).\n\nTo test membership of a specific value, use `Contains(xs, v)` — the structural-identity specialization `Any(xs, (e) |-> e === v)`.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, function?) -> boolean',
+    signature: '(collection, predicate: function?) -> boolean',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
@@ -2073,7 +2073,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return True if the predicate holds for every element of the collection (or if every element is True when no predicate is given).',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, function?) -> boolean',
+    signature: '(collection, predicate: function?) -> boolean',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
@@ -2099,7 +2099,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    signature: '(collection+, function) -> indexed_collection',
+    signature: '(collection+, mapping: function) -> indexed_collection',
     // The mapped collection keeps the source's shape/indexed-ness, but its
     // elements are the lambda's RESULT type — not the source element type.
     // (If the input collection is indexed, the output collection is indexed.)
@@ -2583,7 +2583,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, function, initial:value?) -> value',
+    signature: '(collection, reducer: function, initial:value?) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
@@ -2680,7 +2680,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value.',
     complexity: 8200,
     lazy: true,
-    signature: '(function, value, collection) -> value',
+    signature: '(reducer: function, initial: value, collection) -> value',
     canonical: (ops, { engine }) => {
       const fn = canonicalFunctionLiteral(ops[0]);
       const initial = ops[1]?.canonical;
@@ -2700,7 +2700,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value).',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, function, initial:value?) -> indexed_collection',
+    signature:
+      '(collection, reducer: function, initial:value?) -> indexed_collection',
     // Same shape/indexed-ness as the source, but elements are the fold's
     // result type (mirrors Map).
     type: (ops) => {
@@ -3033,7 +3034,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     lazy: true,
-    signature: '(collection, function) -> list',
+    signature: '(collection, mapping: function) -> list',
     type: (ops) => {
       const resultType = functionResult(ops[1].type.type);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
@@ -4597,7 +4598,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the 1-based index of the first element satisfying the predicate, or 0 if not found.',
     complexity: 8200,
-    signature: '(collection, function) -> integer',
+    signature: '(collection, predicate: function) -> integer',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'IndexWhere', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -4622,7 +4623,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the first element of the collection satisfying the predicate, or Nothing if none found.',
     complexity: 8200,
-    signature: '(collection, function) -> any',
+    signature: '(collection, predicate: function) -> any',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1),
     type: (ops) => ops[0].type,
@@ -4647,7 +4648,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the number of elements in the collection satisfying the predicate.',
     complexity: 8200,
-    signature: '(collection, function) -> integer',
+    signature: '(collection, predicate: function) -> integer',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'CountIf', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -4676,7 +4677,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return a list of indexes of elements in the collection satisfying the predicate.',
     complexity: 8200,
-    signature: '(collection, function) -> list<integer>',
+    signature: '(collection, predicate: function) -> list<integer>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Position', ops, 1),
     type: () => 'list<integer>',
@@ -4710,7 +4711,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Ordering: {
     description: 'Return the indexes that would sort the collection.',
     complexity: 8200,
-    signature: '(indexed_collection, function?) -> list<integer>',
+    signature: '(indexed_collection, order: function?) -> list<integer>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Ordering', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -4727,7 +4728,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the elements of the collection sorted according to the given comparison function.',
     complexity: 8200,
-    signature: '(indexed_collection, function?) -> indexed_collection',
+    signature: '(indexed_collection, order: function?) -> indexed_collection',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Sort', ops, 1),
     // The result always rebuilds as a `List` (see `evaluate`), so the static
@@ -4756,7 +4757,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the element of the collection that maximizes the given key function.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, function) -> value',
+    signature: '(collection, key: function) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
@@ -4780,7 +4781,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the element of the collection that minimizes the given key function.',
     complexity: 8200,
     lazy: true,
-    signature: '(collection, function) -> value',
+    signature: '(collection, key: function) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalFunctionLiteral(ops[1]);
@@ -4808,7 +4809,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
-    signature: '(indexed_collection, function?) -> integer',
+    signature: '(indexed_collection, key: function?) -> integer',
     canonical: (ops, { engine }) => {
       // Optimization form `ArgMax(f, domain)` (Wolfram/Fungrim convention:
       // the locations maximizing f over a set). The engine does not evaluate
@@ -4849,7 +4850,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given).',
     complexity: 8200,
     lazy: true,
-    signature: '(indexed_collection, function?) -> integer',
+    signature: '(indexed_collection, key: function?) -> integer',
     canonical: (ops, { engine }) => {
       // Optimization form `ArgMin(f, domain)` — see the ArgMax note.
       const optForm = canonicalOptimumForm(engine, 'ArgMin', ops);
@@ -4951,7 +4952,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
 
     lazy: true,
-    signature: '(function, integer, integer?) -> indexed_collection',
+    signature: '(generator: function, integer, integer?) -> indexed_collection',
     // Tabulate is an INDEXED collection (ordered, `at`-addressable). Report the
     // element type so it serializes as a list `[…]`, not a set `{…}`: for a 1-D
     // tabulation the element is the function's result; for higher rank each
@@ -5395,7 +5396,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Returns a list of lists. Unlike `GroupBy`, only adjacent elements are grouped, so a key value that recurs after a different run starts a new chunk.',
     ],
     complexity: 8200,
-    signature: '(collection, function) -> list<list>',
+    signature: '(collection, key: function) -> list<list>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1),
     // Element types flow through from the source: list<list<elt>>.
@@ -5538,7 +5539,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Partition the collection into a dictionary of lists based on the key returned by the function.',
     ],
     complexity: 8200,
-    signature: '(collection, function) -> dictionary<list>',
+    signature: '(collection, key: function) -> dictionary<list>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'GroupBy', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
@@ -5667,10 +5668,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   //
   // A UNARY function is applied to the accumulator alone — see `iterateArgs`.
   Iterate: {
-    description:
+    description: [
       'Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value.',
+      'The function is invoked as `f(index, acc)`: `index` is the 1-based position of the element being produced, and `acc` is the previous element — the `initial` value when producing element 1. Element `k` is therefore `f(k, element(k-1))`.',
+      'A function whose type says it is UNARY is applied to the accumulator alone (`Iterate(2 * _, 1)` produces `[2, 4, 8, 16, …]`); a statically-unknown arity keeps the two-argument form.',
+    ],
     complexity: 8200,
-    signature: '((index: integer, acc:any) -> any, initial: any?) -> list',
+    // The callback slot is the bare `function` PRIMITIVE, not a signature —
+    // deliberately, and for the same reason as `Map`. The true contract is
+    // parametric: `((integer, T) -> T, T?) -> list<T>`, where the accumulator
+    // type `T` IS the callback's own result type. The signature grammar has no
+    // type variables, so it cannot relate the two; every concrete spelling
+    // gets it wrong in one direction or the other (`acc: any` rejects a typed
+    // accumulator such as `(integer, integer) -> integer`, `acc: never` is
+    // uncallable). The primitive is shape-top and effect-top, which is the
+    // honest statement of what is checkable here.
+    signature: '(function, initial: any?) -> list',
     canonical: ([f, initialExpr], { engine }) => {
       const fn = canonicalFunctionLiteral(f);
       if (!fn) return null;
