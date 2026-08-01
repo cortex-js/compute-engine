@@ -138,6 +138,21 @@
 
 ### Issues Resolved
 
+- **`FindFit`/`FindRoot` under an ambient `withTimeLimit` now return
+  best-so-far instead of overrunning the budget by whole iterations — or
+  throwing away completed work.** The per-iteration deadline checkpoint left
+  `rows × (params + 1)` compiled model evaluations as the indivisible unit
+  (compiled model functions are deadline-blind, unlike the interpreted
+  fallback): an expensive model overran a 250 ms ambient budget by seconds.
+  The residual/Jacobian row loops now check the deadline per row, and a
+  timeout during the solve returns the best parameters seen with
+  `converged: False` and a new `timedOut: True` record entry rather than
+  throwing — a bounded re-solve keeps a usable answer. A timeout before the
+  solve begins (data evaluation, differentiation, compilation) still
+  propagates the standard cancellation, and non-timeout cancellations (abort
+  signals, iteration limits) propagate unchanged. The record shape is
+  unchanged when no timeout occurred.
+
 - **Numeric use of a list-valued function no longer corrupts its inferred
   signature — which made compiled `Sum`s over list-valued terms emit scalar
   `+`/`*` on arrays (string concatenation / `NaN`) behind `success: true`.**

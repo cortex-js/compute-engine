@@ -21,6 +21,14 @@ export interface LMResult {
   /** ‖r(θ̂)‖₂ at the returned point. */
   residualNorm: number;
   iterations: number;
+  /**
+   * True when the solve was cut short by an evaluation deadline (a timeout
+   * `CancellationError` thrown from `onIteration` or from inside a
+   * `residual`/`jacobian` callback). `theta` then holds the best point seen
+   * before the budget expired — a bounded re-solve keeps a usable
+   * (`converged: false`) answer instead of nothing.
+   */
+  timedOut?: boolean;
 }
 
 export interface LMOptions {
@@ -144,9 +152,6 @@ export function levenbergMarquardt(
   let bestF = F;
   let bestR = r;
 
-  // Jacobian, gradient g = Jᵀr, and normal matrix A = JᵀJ.
-  let J = jacobian(theta);
-
   const gradient = (JJ: number[][], rr: number[]): number[] => {
     const g = new Array(p).fill(0);
     for (let i = 0; i < JJ.length; i++)
@@ -163,9 +168,6 @@ export function levenbergMarquardt(
     return A;
   };
 
-  let g = gradient(J, r);
-  let A = normalMatrix(J);
-
   // Projected-gradient ∞-norm: components blocked by an active bound in the
   // descent (−g) direction are zeroed.
   const projGradNorm = (t: number[], gg: number[]): number => {
@@ -179,130 +181,159 @@ export function levenbergMarquardt(
     return mx;
   };
 
-  // λ is dimensionless: the damping term is λ·diag(A) (Marquardt scaling), so
-  // λ carries no problem-scale factor — scaling it by max(diag A) would
-  // double-count the residual scale (the damping would then grow quadratically
-  // with the data scale, breaking parameter-scale invariance). Start at 1e-3.
-  let lambda = 1e-3;
-  let nu = 2;
-
-  let converged = projGradNorm(theta, g) < gradTol;
+  let converged = false;
   let iterations = 0;
+  let timedOut = false;
 
-  while (!converged && iterations < maxIterations) {
-    if (onIteration) onIteration(iterations);
-    iterations++;
+  // The solve proper runs under a deadline-abort net: a timeout
+  // `CancellationError` thrown by `onIteration` — or from INSIDE a
+  // `residual`/`jacobian` callback (the per-row deadline checks in
+  // `nonlinear-fit.ts`) — ends the solve and returns best-so-far with
+  // `converged: false` and `timedOut: true`, rather than propagating. A
+  // bounded re-solve then keeps a usable answer (the caller's ask in Tycho
+  // item 118). Every other throw — an abort signal, an iteration-limit
+  // breach, a genuine error — propagates unchanged: only an expired time
+  // budget licenses fabricating a partial result. Identified by name, not
+  // `instanceof` (cross-bundle identity hazard).
+  try {
+    // Jacobian, gradient g = Jᵀr, and normal matrix A = JᵀJ.
+    let J = jacobian(theta);
+    let g = gradient(J, r);
+    let A = normalMatrix(J);
 
-    // Active-set projection: a parameter sitting on a bound whose descent
-    // (−g) direction points outside is held fixed (δ=0) this step, and the
-    // Marquardt system is solved over the remaining FREE parameters only.
-    // Without this, a pinned parameter's coupling freezes the free ones.
-    const free: number[] = [];
-    for (let j = 0; j < p; j++) {
-      if (theta[j] <= lo[j] && g[j] > 0) continue;
-      if (theta[j] >= hi[j] && g[j] < 0) continue;
-      free.push(j);
-    }
-    if (free.length === 0) {
-      // Every parameter is blocked at a bound: a projected minimizer.
-      converged = true;
-      break;
-    }
+    // λ is dimensionless: the damping term is λ·diag(A) (Marquardt scaling),
+    // so λ carries no problem-scale factor — scaling it by max(diag A) would
+    // double-count the residual scale (the damping would then grow
+    // quadratically with the data scale, breaking parameter-scale
+    // invariance). Start at 1e-3.
+    let lambda = 1e-3;
+    let nu = 2;
 
-    // Reduced Marquardt-scaled system over the free set:
-    //   (A + λ·diag(A))·δ = −g.
-    const nf = free.length;
-    const M: number[][] = Array.from({ length: nf }, () =>
-      new Array(nf).fill(0)
-    );
-    const negG = new Array(nf).fill(0);
-    for (let a = 0; a < nf; a++) {
-      const ja = free[a];
-      negG[a] = -g[ja];
-      for (let b = 0; b < nf; b++) M[a][b] = A[ja][free[b]];
-      M[a][a] += lambda * A[ja][ja];
-    }
+    converged = projGradNorm(theta, g) < gradTol;
 
-    const reduced = solveWithInflation(M, negG);
-    if (!reduced) {
-      // Give up on a linear-solve failure: return best-so-far, not converged.
-      break;
-    }
-    const delta = new Array(p).fill(0);
-    for (let a = 0; a < nf; a++) delta[free[a]] = reduced[a];
+    while (!converged && iterations < maxIterations) {
+      if (onIteration) onIteration(iterations);
+      iterations++;
 
-    // Projected trial step.
-    const thetaNew = clampVec(theta.map((v, j) => v + delta[j]));
-    const step = thetaNew.map((v, j) => v - theta[j]);
-    const stepNorm = norm2(step);
-    // Whether the (projected) step is negligible relative to θ. This is NOT a
-    // convergence test on its own: it fires on the PROPOSED step, before the
-    // trial point is evaluated or accepted, so on the rejection path (λ growing,
-    // or the box projection zeroing the step) it would otherwise flag
-    // `converged` at a point that never improved. It is used only as a
-    // post-acceptance stall check (and a trust-region-collapse exit on
-    // rejection), both below.
-    const stepStalled = stepNorm < stepTol * (norm2(theta) + stepTol);
-
-    const rNew = residual(thetaNew);
-    const FNew = cost(rNew);
-
-    // Predicted reduction of the quadratic model at the (projected) step:
-    //   ½·δᵀ(λ·diag(A)·δ − g).
-    let predicted = 0;
-    for (let j = 0; j < p; j++)
-      predicted += step[j] * (lambda * A[j][j] * step[j] - g[j]);
-    predicted *= 0.5;
-
-    const actual = F - FNew;
-    const rho =
-      Number.isFinite(FNew) && predicted > 0 ? actual / predicted : -1;
-
-    if (rho > 0) {
-      // Accept the step.
-      theta = thetaNew;
-      r = rNew;
-      F = FNew;
-      J = jacobian(theta);
-      g = gradient(J, r);
-      A = normalMatrix(J);
-
-      if (F < bestF) {
-        bestF = F;
-        bestTheta = theta.slice();
-        bestR = r;
+      // Active-set projection: a parameter sitting on a bound whose descent
+      // (−g) direction points outside is held fixed (δ=0) this step, and the
+      // Marquardt system is solved over the remaining FREE parameters only.
+      // Without this, a pinned parameter's coupling freezes the free ones.
+      const free: number[] = [];
+      for (let j = 0; j < p; j++) {
+        if (theta[j] <= lo[j] && g[j] > 0) continue;
+        if (theta[j] >= hi[j] && g[j] < 0) continue;
+        free.push(j);
       }
-
-      // Primary convergence test: the projected gradient is stationary.
-      if (projGradNorm(theta, g) < gradTol) {
+      if (free.length === 0) {
+        // Every parameter is blocked at a bound: a projected minimizer.
         converged = true;
         break;
       }
 
-      // Secondary (stall) convergence test — applied ONLY here, after an
-      // accepted improving step: the step we just took, and accepted, is
-      // negligible relative to θ, so we have settled at a (local) minimum.
-      // Because this only fires post-acceptance, it can no longer report
-      // convergence on the rejection path (where λ growth or the box projection
-      // shrink the PROPOSED step at a point that never improved) — the original
-      // bug.
-      if (stepStalled) {
-        converged = true;
-        break;
+      // Reduced Marquardt-scaled system over the free set:
+      //   (A + λ·diag(A))·δ = −g.
+      const nf = free.length;
+      const M: number[][] = Array.from({ length: nf }, () =>
+        new Array(nf).fill(0)
+      );
+      const negG = new Array(nf).fill(0);
+      for (let a = 0; a < nf; a++) {
+        const ja = free[a];
+        negG[a] = -g[ja];
+        for (let b = 0; b < nf; b++) M[a][b] = A[ja][free[b]];
+        M[a][a] += lambda * A[ja][ja];
       }
 
-      lambda *= Math.max(1 / 3, 1 - (2 * rho - 1) ** 3);
-      nu = 2;
-    } else {
-      // Reject: the trial point did not improve. If the step has already
-      // collapsed (trust region underflow) we cannot find an acceptable step —
-      // exit as NON-converged. Otherwise increase damping; λ overflow is the
-      // same collapse and also exits non-converged.
-      if (stepStalled) break;
-      lambda *= nu;
-      nu *= 2;
-      if (!Number.isFinite(lambda)) break;
+      const reduced = solveWithInflation(M, negG);
+      if (!reduced) {
+        // Give up on a linear-solve failure: return best-so-far, not converged.
+        break;
+      }
+      const delta = new Array(p).fill(0);
+      for (let a = 0; a < nf; a++) delta[free[a]] = reduced[a];
+
+      // Projected trial step.
+      const thetaNew = clampVec(theta.map((v, j) => v + delta[j]));
+      const step = thetaNew.map((v, j) => v - theta[j]);
+      const stepNorm = norm2(step);
+      // Whether the (projected) step is negligible relative to θ. This is NOT a
+      // convergence test on its own: it fires on the PROPOSED step, before the
+      // trial point is evaluated or accepted, so on the rejection path (λ growing,
+      // or the box projection zeroing the step) it would otherwise flag
+      // `converged` at a point that never improved. It is used only as a
+      // post-acceptance stall check (and a trust-region-collapse exit on
+      // rejection), both below.
+      const stepStalled = stepNorm < stepTol * (norm2(theta) + stepTol);
+
+      const rNew = residual(thetaNew);
+      const FNew = cost(rNew);
+
+      // Predicted reduction of the quadratic model at the (projected) step:
+      //   ½·δᵀ(λ·diag(A)·δ − g).
+      let predicted = 0;
+      for (let j = 0; j < p; j++)
+        predicted += step[j] * (lambda * A[j][j] * step[j] - g[j]);
+      predicted *= 0.5;
+
+      const actual = F - FNew;
+      const rho =
+        Number.isFinite(FNew) && predicted > 0 ? actual / predicted : -1;
+
+      if (rho > 0) {
+        // Accept the step.
+        theta = thetaNew;
+        r = rNew;
+        F = FNew;
+        J = jacobian(theta);
+        g = gradient(J, r);
+        A = normalMatrix(J);
+
+        if (F < bestF) {
+          bestF = F;
+          bestTheta = theta.slice();
+          bestR = r;
+        }
+
+        // Primary convergence test: the projected gradient is stationary.
+        if (projGradNorm(theta, g) < gradTol) {
+          converged = true;
+          break;
+        }
+
+        // Secondary (stall) convergence test — applied ONLY here, after an
+        // accepted improving step: the step we just took, and accepted, is
+        // negligible relative to θ, so we have settled at a (local) minimum.
+        // Because this only fires post-acceptance, it can no longer report
+        // convergence on the rejection path (where λ growth or the box projection
+        // shrink the PROPOSED step at a point that never improved) — the original
+        // bug.
+        if (stepStalled) {
+          converged = true;
+          break;
+        }
+
+        lambda *= Math.max(1 / 3, 1 - (2 * rho - 1) ** 3);
+        nu = 2;
+      } else {
+        // Reject: the trial point did not improve. If the step has already
+        // collapsed (trust region underflow) we cannot find an acceptable step —
+        // exit as NON-converged. Otherwise increase damping; λ overflow is the
+        // same collapse and also exits non-converged.
+        if (stepStalled) break;
+        lambda *= nu;
+        nu *= 2;
+        if (!Number.isFinite(lambda)) break;
+      }
     }
+  } catch (e) {
+    if (
+      !(e instanceof Error) ||
+      e.name !== 'CancellationError' ||
+      (e as { cause?: unknown }).cause !== 'timeout'
+    )
+      throw e;
+    timedOut = true;
   }
 
   // `bestR`/`bestTheta` hold the lowest-cost point seen; on convergence that is
@@ -312,5 +343,6 @@ export function levenbergMarquardt(
     converged,
     residualNorm: norm2(bestR),
     iterations,
+    ...(timedOut ? { timedOut } : {}),
   };
 }

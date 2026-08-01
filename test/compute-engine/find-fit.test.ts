@@ -461,7 +461,13 @@ describe('FindFit Jacobian fallback (§ 7.8)', () => {
 // --- § 7.9 Deadline --------------------------------------------------------
 
 describe('FindFit deadline (§ 7.9)', () => {
-  test('withTimeLimit cancels a long fit with the standard cancellation', () => {
+  // Layered deadline contract (Tycho item 118): a timeout during the
+  // PRE-solve phase (data evaluation, differentiation, compilation) still
+  // propagates as the standard cancellation — there is nothing useful to
+  // return. A timeout during the SOLVE (starting-point evaluation onward)
+  // returns a best-so-far record with `converged: false` and
+  // `timedOut: True` instead of throwing.
+  test('a pre-solve timeout propagates the standard cancellation', () => {
     const rnd = lcg(42);
     const pts: [number, number][] = [];
     for (let i = 0; i < 400; i++) pts.push([i * 0.03, rnd() * 2 - 1]);
@@ -494,6 +500,51 @@ describe('FindFit deadline (§ 7.9)', () => {
     expect((err as CancellationError).cause).toBe('timeout');
     expect((err as CancellationError).attribution).toBe('test:fit-deadline');
     expect(Date.now() - t0).toBeLessThan(3000);
+  });
+
+  test('a solve-phase timeout returns best-so-far with timedOut: True (item 118)', () => {
+    // Force the interpreted per-row path so each residual pass is slow enough
+    // that the budget expires DURING the solve, not before it. Whether the
+    // deadline lands in the starting-point evaluation (theta0 record, NaN
+    // norm) or mid-iteration (genuine best-so-far), the contract is the same:
+    // a record, not a throw.
+    (ce as any).jit = 'off';
+    const rnd = lcg(7);
+    const pts: [number, number][] = [];
+    for (let i = 0; i < 300; i++) {
+      const x = i * 0.02;
+      pts.push([x, 2.5 * Math.exp(0.3 * x) + (rnd() - 0.5) * 0.1]);
+    }
+    const data = dataset(pts);
+    const model = ce.box(['Multiply', 'a', ['Exp', ['Multiply', 'b', 'x']]]);
+    const params = ce.box(['List', ['Tuple', 'a', 1], ['Tuple', 'b', 1]]);
+
+    const t0 = Date.now();
+    const r = ce.withTimeLimit({ ms: 100, label: 'test:fit-budget' }, () =>
+      ce.function('FindFit', [data, model, params, ce.symbol('x')]).evaluate()
+    );
+    // Returned (did not throw), promptly: the per-row checks bound the
+    // overrun to one row's evaluation, not one LM iteration.
+    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(r.operator).toBe('Dictionary');
+    expect(r.get('timedOut')?.symbol).toBe('True');
+    expect(r.get('converged')?.symbol).toBe('False');
+    const fitted = r.get('parameters');
+    expect(typeof fitted?.get('a')?.re).toBe('number');
+    expect(typeof fitted?.get('b')?.re).toBe('number');
+  });
+
+  test('an untimed fit record has no timedOut key', () => {
+    const pts: [number, number][] = [];
+    for (let i = 0; i < 20; i++) pts.push([i, 3 * i + 1]);
+    const r = findFit(
+      dataset(pts),
+      ['Add', ['Multiply', 'a', 'x'], 'b'],
+      ['List', ['Tuple', 'a', 1], ['Tuple', 'b', 0]],
+      'x'
+    );
+    expect(r.get('converged')?.symbol).toBe('True');
+    expect(r.get('timedOut')).toBeUndefined();
   });
 });
 

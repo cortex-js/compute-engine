@@ -322,12 +322,18 @@ function buildRecord(
     ce.tuple(ce.string(name), ce.number(result.theta[j]))
   );
   const paramsDict = ce.function('Dictionary', paramEntries);
-  return ce.function('Dictionary', [
+  const entries = [
     ce.tuple(ce.string('parameters'), paramsDict),
     ce.tuple(ce.string('converged'), result.converged ? TRUE_(ce) : FALSE_(ce)),
     ce.tuple(ce.string('residualNorm'), ce.number(result.residualNorm)),
     ce.tuple(ce.string('iterations'), ce.number(result.iterations)),
-  ]);
+  ];
+  // Present ONLY when the solve was cut short by an evaluation deadline
+  // (best-so-far result, Tycho item 118) — the normal-path record is
+  // unchanged, so existing consumers see no new key.
+  if (result.timedOut)
+    entries.push(ce.tuple(ce.string('timedOut'), TRUE_(ce)));
+  return ce.function('Dictionary', entries);
 }
 
 /** Assemble the global residual/Jacobian callbacks over all units and run LM. */
@@ -351,11 +357,21 @@ function solve(
 
   const record: Record<string, number> = {};
 
+  // Per-ROW deadline checks (Tycho item 118): a COMPILED model function is
+  // deadline-blind (unlike the interpreted `subs`+`.N()` fallback, whose
+  // evaluation loop self-checks), so for an expensive model the per-ITERATION
+  // `onIteration` checkpoint alone leaves rows×(params+1) model calls as the
+  // indivisible unit — measured seconds of overrun against a 250 ms ambient
+  // budget. Checking per row shrinks that unit to one row's calls. The check
+  // is a Date.now() compare — noise next to any real model call. The
+  // resulting timeout throw is caught by `levenbergMarquardt`, which returns
+  // best-so-far (`converged: false`, `timedOut: true`).
   const residual = (theta: number[]): number[] => {
     for (let j = 0; j < p; j++) record[pFresh[j]] = theta[j];
     const out: number[] = [];
     for (const unit of units) {
       for (const row of unit.rows) {
+        checkDeadline(ce._deadlineFrame);
         for (let k = 0; k < unit.varFresh.length; k++)
           record[unit.varFresh[k]] = row.x[k];
         out.push(unit.fn(record) - row.y);
@@ -369,6 +385,7 @@ function solve(
     const rowsJ: number[][] = [];
     for (const unit of units) {
       for (const row of unit.rows) {
+        checkDeadline(ce._deadlineFrame);
         for (let k = 0; k < unit.varFresh.length; k++)
           record[unit.varFresh[k]] = row.x[k];
         const base = unit.fn(record);
@@ -406,16 +423,39 @@ function solve(
     return rowsJ;
   };
 
-  // NaN at the starting point is a hard failure (§ 3.3).
-  const r0 = residual(theta0.map((v, j) => clamp(v, lo[j], hi[j])));
-  if (r0.some((v) => !Number.isFinite(v)))
-    return ce.error('unexpected-argument', 'starting point is not finite');
+  // A deadline expiring during the starting-point evaluation or the solver's
+  // own initial residual/Jacobian — before any iteration completed — still
+  // answers a record: the (clamped) start point, `converged: false`,
+  // `timedOut: true`, with a NaN residual norm (it was never computed).
+  // Later-phase timeouts are caught INSIDE `levenbergMarquardt`, which
+  // returns genuine best-so-far. Non-timeout throws propagate unchanged.
+  let result: LMResult;
+  try {
+    // NaN at the starting point is a hard failure (§ 3.3).
+    const r0 = residual(theta0.map((v, j) => clamp(v, lo[j], hi[j])));
+    if (r0.some((v) => !Number.isFinite(v)))
+      return ce.error('unexpected-argument', 'starting point is not finite');
 
-  const result = levenbergMarquardt(residual, jacobian, theta0, {
-    lo,
-    hi,
-    onIteration: () => checkDeadline(ce._deadlineFrame),
-  });
+    result = levenbergMarquardt(residual, jacobian, theta0, {
+      lo,
+      hi,
+      onIteration: () => checkDeadline(ce._deadlineFrame),
+    });
+  } catch (e) {
+    if (
+      !(e instanceof Error) ||
+      e.name !== 'CancellationError' ||
+      (e as { cause?: unknown }).cause !== 'timeout'
+    )
+      throw e;
+    result = {
+      theta: theta0.map((v, j) => clamp(v, lo[j], hi[j])),
+      converged: false,
+      residualNorm: NaN,
+      iterations: 0,
+      timedOut: true,
+    };
+  }
 
   return buildRecord(
     ce,
