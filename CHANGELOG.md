@@ -138,6 +138,24 @@
 
 ### Issues Resolved
 
+- **A `Range` (or `Linspace`) with an exact symbolic bound or step —
+  `Range(0, 50π, 0.05)` — is now countable and enumerable.** Previously such a
+  collection was inert on `evaluate()`: `count` was `undefined` and `each()`
+  yielded zero elements — silently, with `isCollection: true` the whole way —
+  while `.N()` fully recovered it. A bound that is exact but numerically known
+  (`50π`, `√2`, or `N·π` after `N := 2`) now reads through `.N()` in the
+  collection handlers (count, iteration, membership, indexing, extrema);
+  iteration was already float-based, so the numericization is lossless. A bound
+  with unknowns (`Range(1, n)`) correctly stays indeterminate. Additionally,
+  the bracketed-list range parse now fuses a two-sample form whose second
+  anchor is an exact arithmetic expression over a numeric start:
+  `[0, \frac{2}{d}\pi ... (2-\frac{2}{d})\pi]` parses as a stepped `Range`
+  (step `2π/d`, exact) instead of collapsing to a two-element `List`; the same
+  applies to `[0, \frac{\pi}{4} ... 2\pi]` and float-denominator fractions
+  (`[0, \frac{1}{1.5} ... 4]`). Generic-sequence notation
+  (`[x_1, x_2, ..., x_n]`, `[f(1), f(2), ..., f(n)]`) and symbolic-anchor
+  shapes with ambiguous progressions still parse as placeholder lists.
+
 - **Kernel roundoff dust is now chopped at a fixed roundoff scale (`1e-14`),
   decoupled from `ce.tolerance`.** Whether a dust-sized component of a complex
   kernel result (e.g. the `im: 5.6e-17` residue of `asin(0.5)` computed via the

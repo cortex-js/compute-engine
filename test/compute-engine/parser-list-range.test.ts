@@ -395,6 +395,59 @@ describe('Parser: list range ellipsis', () => {
     });
   });
 
+  // Two-sample fusion over a NUMERIC start with an exact symbolic second
+  // anchor (item 117, the `tpalesypcc` class): the step is the second sample
+  // itself (start 0) or `s1 - s0`, evaluated exactly at canonicalization.
+  describe('two-sample form with exact symbolic second anchor', () => {
+    test('`[0, \\frac{\\pi}{4}...2\\pi]` → Range(0, 2π, π/4)', () => {
+      expect(parse('\\left[0,\\frac{\\pi}{4}...2\\pi\\right]')).toEqual([
+        'Range',
+        0,
+        ['Multiply', 2, 'Pi'],
+        ['Multiply', ['Rational', 1, 4], 'Pi'],
+      ]);
+    });
+
+    test('`[0, \\frac{2}{d}\\pi...(2-\\frac{2}{d})\\pi]` → Range with symbolic step', () => {
+      expect(
+        parse('\\left[0,\\frac{2}{d}\\pi...(2-\\frac{2}{d})\\pi\\right]')
+      ).toEqual([
+        'Range',
+        0,
+        ['Multiply', 'Pi', ['Add', ['Divide', -2, 'd'], 2]],
+        ['Divide', ['Multiply', 2, 'Pi'], 'd'],
+      ]);
+    });
+
+    test('`[0, \\frac{1}{1.5}...4]` (float-denominator fraction) fuses', () => {
+      const result = parse('\\left[0,\\frac{1}{1.5}...4\\right]');
+      expect(operatorOf(result)).toBe('Range');
+    });
+
+    test('non-zero numeric start: step is s1 - s0', () => {
+      expect(parse('\\left[1,\\frac{3}{2}\\pi...9\\right]')).toEqual([
+        'Range',
+        1,
+        9,
+        ['Add', -1, ['Multiply', ['Rational', 3, 2], 'Pi']],
+      ]);
+    });
+
+    // Negative: function applications are sequence notation, not a
+    // progression — the raw apply shape (symbol followed by Delimiter
+    // inside InvisibleOperator) is excluded.
+    test('`[f(1), f(2), ..., f(n)]` stays a placeholder List', () => {
+      const result = parse('\\left[f(1),f(2),\\ldots,f(n)\\right]');
+      expect(operatorOf(result)).toBe('List');
+    });
+
+    // Negative: a bare-symbol second sample stays sequence notation.
+    test('`[0, x_2, ..., x_n]` stays a placeholder List', () => {
+      const result = parse('\\left[0,x_2,\\ldots,x_n\\right]');
+      expect(operatorOf(result)).toBe('List');
+    });
+  });
+
   // An explicit `\operatorname{Range}(a,b)` element is a literal list entry,
   // NOT an ellipsis/`..` continuation: the range-inference normalization must
   // fire only for infix-produced (`..`/`...`/`\ldots`/`\dots`) ranges.

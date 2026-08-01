@@ -234,6 +234,75 @@ describe('COUNT', () => {
     ).toMatchInlineSnapshot(`["Count", ["Linspace", 0, 1, "n"]]`));
 });
 
+describe('EXACT NUMERICALLY-KNOWN BOUNDS (item 117)', () => {
+  // A Range bound that is exact but numerically known (`50π`, `2π/3`) used
+  // to read as NaN through `.re` and trip the symbolic-bound guards: the
+  // collection was BOTH uncountable (`count` undefined) and unenumerable
+  // (`each()` empty) while `.N()` fully recovered it. Such bounds now read
+  // through `.N()`; only bounds with unknowns stay indeterminate.
+
+  test('exact constant bound counts and enumerates (parse route)', () => {
+    const v = engine.parse('\\left[0,0.05...50\\pi\\right]').evaluate();
+    expect(v.count).toEqual(3142);
+    const els = [...v.each()];
+    expect(els.length).toEqual(3142);
+    expect(els[0].re).toEqual(0);
+    expect(els[1].re).toEqual(0.05);
+    expect(els[3141].re).toBeCloseTo(157.05, 10);
+  });
+
+  test('exact constant bound counts and enumerates (box route)', () => {
+    const v = engine
+      .expr(['Range', 0, ['Multiply', 50, 'Pi'], 0.05])
+      .evaluate();
+    expect(v.count).toEqual(3142);
+    expect(v.contains(engine.number(0.1))).toEqual(true);
+  });
+
+  test('exact symbolic step enumerates', () => {
+    const v = engine
+      .expr([
+        'Range',
+        0,
+        ['Multiply', 2, 'Pi'],
+        ['Divide', ['Multiply', 2, 'Pi'], 3],
+      ])
+      .evaluate();
+    expect(v.count).toEqual(3);
+    expect([...v.each()].map((e) => e.re)).toEqual([
+      0,
+      2.0943951023931957,
+      4.188790204786391,
+    ]);
+  });
+
+  test('bound known by substitution counts and enumerates', () => {
+    const ce = new ComputeEngine();
+    ce.assign('N_0', 2);
+    const v = ce.parse('\\left[0,0.5...N_0\\pi\\right]').evaluate();
+    expect(v.count).toEqual(13);
+    expect([...v.each()].pop()?.re).toEqual(6);
+  });
+
+  test('a bound with unknowns still stays indeterminate', () => {
+    const v = engine.expr(['Range', 1, 'n']);
+    expect(v.count).toBeUndefined();
+    expect([...v.each()]).toEqual([]);
+  });
+
+  test('Linspace with exact endpoints counts and enumerates', () => {
+    const v = engine
+      .expr(['Linspace', 0, ['Multiply', 2, 'Pi'], 5])
+      .evaluate();
+    expect(v.count).toEqual(5);
+    const els = [...v.each()].map((e) => e.re);
+    expect(els.length).toEqual(5);
+    expect(els[0]).toEqual(0);
+    // Both endpoints included
+    expect(els[4]).toBeCloseTo(2 * Math.PI, 12);
+  });
+});
+
 describe('COUNT — 2-argument value and predicate forms', () => {
   // `Count(xs, v)` counts elements structurally the same as `v`;
   // `Count(xs, p)` counts elements satisfying the predicate `p`. The forms

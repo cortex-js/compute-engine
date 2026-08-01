@@ -1493,8 +1493,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (target.im !== 0) return false;
         if (!isFinite(t)) return false;
         // Symbolic bounds (e.g. Range(1, n)) cannot be decided structurally
-        if (isFunction(expr) && expr.ops.some((op) => Number.isNaN(op.re)))
-          return undefined;
+        if (hasSymbolicRangeBounds(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return false;
         // Directional bounds check: t must lie between lower and upper in
@@ -1789,7 +1788,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // A symbolic count (e.g. Linspace(0, 1, m)) is indeterminate; only a
         // *missing* count selects the default.
         if (isSymbolicOperand(expr.op3)) return undefined;
-        let count = expr.op3.re;
+        let count = operandNumericValue(expr.op3);
         if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
         return Math.max(0, Math.floor(count));
       },
@@ -1801,9 +1800,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         // Symbolic count: whether the index is in range is indeterminate
         if (isSymbolicOperand(expr.op3)) return undefined;
-        const lower = expr.op1.re;
-        const upper = expr.op2.re;
-        let count = expr.op3.re;
+        const lower = operandNumericValue(expr.op1);
+        const upper = operandNumericValue(expr.op2);
+        let count = operandNumericValue(expr.op3);
         if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
         count = Math.floor(count);
         if (!isFinite(lower) || !isFinite(upper)) return undefined;
@@ -1822,17 +1821,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // below would yield NaN literals) — no iterator; consumers keep the
         // lazy form. Missing (`Nothing`) operands still select the defaults.
         if (expr.ops.some((op) => isSymbolicOperand(op))) return undefined;
-        let lower = expr.op1.re;
-        let upper = expr.op2.re;
+        let lower = operandNumericValue(expr.op1);
+        let upper = operandNumericValue(expr.op2);
         let totalCount: number;
         if (!isFinite(upper)) {
           upper = lower;
           lower = 1;
           totalCount = DEFAULT_LINSPACE_COUNT;
         } else {
+          const count = operandNumericValue(expr.op3);
           totalCount = Math.max(
             0,
-            !isFinite(expr.op3.re) ? DEFAULT_LINSPACE_COUNT : expr.op3.re
+            !isFinite(count) ? DEFAULT_LINSPACE_COUNT : count
           );
         }
         totalCount = Math.floor(totalCount);
@@ -1866,15 +1866,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (target.im !== 0) return false;
         if (!isFinite(t)) return false;
         if (!isFunction(expr)) return undefined;
-        const lower = expr.op1.re;
-        const upper = expr.op2.re;
+        const lower = operandNumericValue(expr.op1);
+        const upper = operandNumericValue(expr.op2);
         // Symbolic bounds cannot be decided structurally
         if (Number.isNaN(lower) || Number.isNaN(upper)) return undefined;
         if (t < lower || t > upper) return false;
         // A symbolic count: the sample grid is indeterminate (the bounds
         // check above may still have refuted membership definitively)
         if (isSymbolicOperand(expr.op3)) return undefined;
-        let count = expr.op3.re;
+        let count = operandNumericValue(expr.op3);
         if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
         count = Math.floor(count);
         if (count === 0) return false;
@@ -6182,20 +6182,36 @@ function targetPosition(expr: Expression): number | undefined {
 }
 
 /**
- * Does this `Range` expression have a bound with no concrete numeric value
- * (e.g. `Range(1, n)` with symbolic `n`)? Such a bound reads as NaN through
- * `.re`, and `range()` silently coerces it to 1 — so every handler that
- * consumes `range()` must first bail to its indeterminate channel, or a
- * symbolic range collapses to the 1-element range [1, 1, 1] (the
- * `undefined → value` collapse class: `Count(Range(1, n))` evaluated to 1).
+ * The numeric reading of a `Range`/`Linspace` operand. A number literal
+ * reads directly (`.re`). An exact symbolic expression with no unknowns
+ * (`50π`, `√2`, `N·π` after `N := 2`) is numerically known: read it through
+ * `.N()` — collection iteration is float-based, so numericizing the bound
+ * is lossless here. An expression with unknowns (`Range(1, n)`) reads as
+ * NaN; the `.unknowns` gate keeps `.N()` off expressions whose value cannot
+ * resolve (the discarded-`.N()` cost class).
+ */
+function operandNumericValue(op: Expression): number {
+  const v = op.re;
+  if (!Number.isNaN(v)) return v;
+  if (op.unknowns.length > 0) return NaN;
+  return op.N().re;
+}
+
+/**
+ * Does this `Range` expression have a bound with no numerically-known value
+ * (e.g. `Range(1, n)` with unknown `n`)? Such a bound reads as NaN through
+ * `operandNumericValue()`, and `range()` propagates the NaN — so every
+ * handler that consumes `range()` must first bail to its indeterminate
+ * channel, or a symbolic range collapses (the `undefined → value` collapse
+ * class: `Count(Range(1, n))` evaluated to 1).
  *
- * Note the `iterator` handler is *not* guarded: iteration has no
- * indeterminate channel, and its consumers (Reduce, each) predate this
- * guard. A symbolic range still iterates as the collapsed [1] there.
+ * An *exact but numerically known* bound (`50π`, or `N·π` after `N := 2`)
+ * is NOT symbolic: it reads through `.N()` and the range counts and
+ * enumerates normally.
  */
 export function hasSymbolicRangeBounds(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
-  return expr.ops.some((op) => Number.isNaN(op.re));
+  return expr.ops.some((op) => Number.isNaN(operandNumericValue(op)));
 }
 
 /**
@@ -6207,7 +6223,7 @@ export function hasSymbolicRangeBounds(expr: Expression): boolean {
 function isSymbolicOperand(op: Expression | undefined): boolean {
   if (op === undefined) return false;
   if (isSymbol(op) && op.symbol === 'Nothing') return false;
-  return Number.isNaN(op.re);
+  return Number.isNaN(operandNumericValue(op));
 }
 
 /**
@@ -6275,17 +6291,18 @@ export function range(
   if (!isFunction(expr)) return [1, 0, 0];
   if (expr.nops === 0) return [1, 0, 0];
 
-  // A symbolic (non-numeric) operand reads as NaN and propagates: callers
-  // must check `hasSymbolicRangeBounds()` first. (These used to be coerced
-  // to 1, which collapsed every symbolic range to [1, 1, 1] — the
-  // `Count(Range(1, n)) → 1` class of wrong scalars.)
-  const op1 = expr.op1.re;
+  // An operand with no numerically-known value reads as NaN and propagates:
+  // callers must check `hasSymbolicRangeBounds()` first. (These used to be
+  // coerced to 1, which collapsed every symbolic range to [1, 1, 1] — the
+  // `Count(Range(1, n)) → 1` class of wrong scalars.) An exact bound with a
+  // known value (`50π`) reads through `.N()`.
+  const op1 = operandNumericValue(expr.op1);
   if (expr.nops === 1) return [1, op1, 1];
 
-  const op2 = expr.op2.re;
+  const op2 = operandNumericValue(expr.op2);
   if (expr.nops === 2) return [op1, op2, op2 >= op1 ? 1 : -1];
 
-  return [op1, op2, expr.op3.re];
+  return [op1, op2, operandNumericValue(expr.op3)];
 }
 
 /** Return the last value in the range

@@ -3547,8 +3547,13 @@ export function tryInferRangeFromElements(
   if (pairs.some((p) => p === null)) {
     // Not a `(coefficient · symbol)` progression. Try the additive-base class
     // (`[m+n, m+n+15, ..., m+n+60]`): identical non-numeric base, numeric
-    // offsets. Any other shape stays a placeholder List.
-    return tryInferAdditiveBaseRange(samples, endExpr, tol);
+    // offsets — then the two-sample arithmetic-compound class
+    // (`[0, \frac{2}{d}\pi ... end]`). Any other shape stays a placeholder
+    // List.
+    return (
+      tryInferAdditiveBaseRange(samples, endExpr, tol) ??
+      tryTwoSampleSymbolicRange(samples, endExpr)
+    );
   }
   const coeffs = (pairs as { coeff: number; sym: string }[]).map(
     (p) => p.coeff
@@ -3574,6 +3579,77 @@ export function tryInferRangeFromElements(
     endExpr,
     coeffTimesSymbol(stepCoeff, sym),
   ];
+}
+
+/**
+ * Raw parse shapes that denote arithmetic on their operands — the sample
+ * shapes eligible for the two-sample symbolic-step fusion. A bare symbol is
+ * deliberately NOT eligible: `[x_1, x_2, ..., x_n]` is generic-sequence
+ * notation, not an arithmetic progression, and must keep falling through to
+ * a placeholder List. Function applications (`[f(1), f(2), ..., f(n)]`) are
+ * excluded for the same reason.
+ */
+const ARITHMETIC_SAMPLE_OPERATORS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'InvisibleOperator',
+  'Divide',
+  'Rational',
+  'Power',
+  'Square',
+  'Sqrt',
+  'Root',
+]);
+
+function isArithmeticSampleShape(expr: MathJsonExpression): boolean {
+  if (machineValue(expr) !== null) return true;
+  const h = operator(expr);
+  if (h === null || !ARITHMETIC_SAMPLE_OPERATORS.has(h)) return false;
+  // At the raw parse level, function application is also spelled
+  // `InvisibleOperator`: `f(1)` is `InvisibleOperator(f, Delimiter(1))`. A
+  // bare symbol directly followed by a `Delimiter` operand is that (possibly
+  // ambiguous) application shape — exclude it, so `[f(1), f(2), ..., f(n)]`
+  // stays sequence notation. A `Delimiter` after a non-symbol
+  // (`(2-\frac{2}{d})\pi`, `2(x+1)`) is unambiguous grouping and stays
+  // eligible.
+  if (h === 'InvisibleOperator') {
+    const args = operands(expr);
+    for (let i = 0; i + 1 < args.length; i++) {
+      if (symbol(args[i]) !== null && operator(args[i + 1]) === 'Delimiter')
+        return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Two-sample fusion for exact symbolic anchors over a NUMERIC start:
+ * `[0, \frac{2}{d}\pi ... end]` (the item-117 `tpalesypcc` class),
+ * `[0, \frac{\pi}{4} ... 2\pi]`, `[0, \frac{1}{1.5} ... 4]`. With exactly
+ * two samples there is no spacing to validate; the step is `s1 - s0`,
+ * emitted symbolically — the `Range` canonical handler evaluates its step
+ * operand, so an exact symbolic step stays exact.
+ *
+ * Two deliberate gates: the FIRST sample must be a numeric literal (a
+ * symbolic first anchor is the ambiguous-progression territory the
+ * additive-base pass adjudicates — `[m+n, m+k+15, ...]` and
+ * `[m+n, m+n+x, ...]` stay placeholder Lists, as pinned), and the second
+ * must be an arithmetic COMPOUND shape so generic-sequence notation stays a
+ * placeholder List (see `ARITHMETIC_SAMPLE_OPERATORS`).
+ */
+function tryTwoSampleSymbolicRange(
+  samples: readonly MathJsonExpression[],
+  endExpr: MathJsonExpression
+): MathJsonExpression | null {
+  if (samples.length !== 2) return null;
+  const [s0, s1] = samples;
+  const start = machineValue(s0);
+  if (start === null) return null;
+  if (!isArithmeticSampleShape(s1)) return null;
+  const step: MathJsonExpression = start === 0 ? s1 : ['Subtract', s1, s0];
+  return ['Range', s0, endExpr, step];
 }
 
 /**
