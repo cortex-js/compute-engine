@@ -1,7 +1,20 @@
 # Effects Model — Effects in the Type System
 
-**Status**: DRAFT v3 (2026-07-28). Design proposal, not implemented.
-v3 incorporates the round-2 review
+**Status**: DRAFT v5 (2026-07-31). Design proposal, not implemented.
+v5 folds in the round-3 dual review
+(`docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R3.md`, 16 findings — all 16
+rulings validated). Headline v5 rulings, each specified in its section:
+the seed frame has **three participation modes** (draws / delimits /
+reads — `readsRandomFrame` survives as the third); the `random` kernel is
+**index-addressed** (`draw(seed, n)`, compile fails closed on non-default
+kernels); confinement is **inference-only** (runtime accounting stays
+conservative); `any` **never pins frames**; per-position **`invokes`**
+metadata; quote positions are **inert**; discharge from `any` yields an
+**internal co-finite** result; the **dependency-order ruling is made**
+(unresolved named head → `{any}`; explicit annotation → trusted);
+**`effectsDeclared`** provenance; `ce.effects` is **snapshot-scoped** with
+**`null` = denial**; `environment` pragmas stay parse-time.
+v3 incorporated the round-2 review
 (`docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R2.md`). Ratified decisions:
 **(a)** application effects come from *projection with declared discharge*
 (v3 respecifies the mechanism per review findings 2–4);
@@ -10,7 +23,30 @@ and is represented by the new `entropy` label — the v2 ruling to migrate it
 onto the seeded stream is **withdrawn**, deferring to
 `docs/plans/2026-07-28-derived-substreams.md` §7 (see "Randomness shapes");
 **(c)** unannotated function parameters keep the optimistic ruling —
-*annotation gets the contract*. Stage 0 (assignment-time flag inference,
+*annotation gets the contract*.
+
+v4 (2026-07-31) adds the capability round:
+**(d)** the state label is renamed `write` → `scope` and narrowed to
+*escaping* writes — mutation of a scope that outlives the application —
+resolving v3's local/global open question by confinement inference (see
+"Scope writes");
+**(e)** six host-capability labels are admitted — `network`, `fs_read`,
+`fs_write`, `time`, `environment`, `console` — their admission-test
+consumer being the new `ce.effects` capability registry (see "Host
+capabilities"); the speculative `host` label is superseded by this split
+and `time` no longer folds into `entropy`;
+**(f)** `assert` is examined and **rejected** as a label;
+**(g)** syntax **ruled**: the Swift-style specifier slot — bare labels
+between the argument list and the arrow, `(int) random -> int` — is
+adopted; the v3 arrow-attached brace form `->{random}` is superseded
+(see "Grammar and AST");
+**(h)** the frame axis is generalized — `frameProtocol` names a **frame
+kind** (sole kind today: `seed`; `clock` anticipated) — and `random` is
+ruled **handler-backed** at the kernel boundary
+(`ce.effects.random`), revising the earlier internal-only note (see
+"Label kinds" and "Host capabilities").
+
+Stage 0 (assignment-time flag inference,
 `inferLambdaFlags`) shipped in `503728ed` (implementation + pinning tests,
 verified). Companions: `RANDOMNESS-MODEL.md` (frames, replay, lazy
 materialization) and `docs/plans/2026-07-28-derived-substreams.md` (the
@@ -19,8 +55,9 @@ integration, `stochasticEqual`, and `RandomExpression`).
 
 ## Purpose and scope
 
-Represent computational effects — randomness, unseeded entropy, and engine
-state writes — in **function signature types**, so that:
+Represent computational effects — randomness, unseeded entropy, scope
+writes, and host-capability access (network, filesystem, clock,
+environment, console) — in **function signature types**, so that:
 
 - an **opaque declaration** (`ce.declare('f', …)`, a host-provided function,
   a serialized contract crossing the Tycho boundary) can state its effects
@@ -43,13 +80,15 @@ Effects live entirely outside the type system today, in three mechanisms:
 
 | Mechanism | Where | Behavior |
 |---|---|---|
-| Definition flags | `pure`, `drawsRandom` (`types-definitions.ts`) | Per-operator declarations; `pure` defaults `true`, `drawsRandom` defaults `false` |
+| Definition flags | `pure`, `drawsRandom`, `readsRandomFrame` (`types-definitions.ts`) | Per-operator declarations; `pure` defaults `true`, the other two default `false`. `readsRandomFrame` (set by `Integrate`/`NIntegrate`, `library/calculus.ts`) marks frame-*reading* without drawing — the derived-sub-stream shape — and is consulted by the pending-draw walk with equal weight (`library/core.ts` ~172) |
 | Expression recursion | `BoxedFunction.isPure` (`boxed-expression/boxed-function.ts`) | Application pure iff operator flag pure **and** every operand pure; unknown operator ⇒ impure (`?? false`); bare symbols always pure |
 | Assignment-time inference | `inferLambdaFlags` (`boxed-expression/boxed-operator-definition.ts`, `503728ed`) | When `Assign`/`Declare` binds a `Function` literal, flags derive from the heads its body applies, unless the caller stated them |
 
 Consumers: `isConstant` and derived caches; `Add`/`Multiply` keeping impure
 operands evaluated under `.N()` (`library/arithmetic.ts`); the `Map`
-lowering gate (`isImpureHead`, `library/map-lowering.ts`); GPU compile
+lowering gate (`isImpureHead`, `library/map-broadcast-shape.ts` — note
+the stale comment at `boxed-operator-definition.ts` ~616 citing
+`map-lowering.ts`; fix in passing during Stage 1); GPU compile
 failing closed on impure seeds/endpoints (`compilation/gpu-target.ts`); and
 `WithRandomSeed`'s pending-draw gate (`hasPendingImpureApplication`,
 `library/core.ts`).
@@ -68,24 +107,28 @@ Three known holes, each addressed below:
    turns the assumption into a checked boundary.)
 3. **Dependency-order inference is unsound** — `f() := g()` defined before
    an impure `g` keeps a falsely-pure installed signature; only reassigning
-   `f` itself re-runs inference. Current ruling: keep, with the
-   declared-signature escape hatch. A finer alternative is on the table and
-   **awaits a ruling** (see Open Questions): infer `{any}` for an
-   *unresolved named head* (global state that will change) while keeping
-   optimism for *applied unannotated parameters* (caller-bound, closable by
-   annotation).
+   `f` itself re-runs inference. **Ruled in v5** (see "Inference"): an
+   *unresolved named head* infers `{any}` (sound; loses caching for
+   forward references), while *applied unannotated parameters* keep
+   optimism; an **explicit** annotation on a definition whose inference
+   saw an unresolved head is installed as a *trusted* contract (same
+   trust class as an opaque declaration), enabling mutual recursion with
+   stated effects.
 
-## Randomness shapes — and why there are three labels, not two
+## Randomness shapes — three shapes, two labels
 
 The doc set contains **three** distinct randomness shapes (the third
 surfaced by `derived-substreams.md`, which is authoritative for the
-estimator and fuzzer rulings):
+estimator and fuzzer rulings). Only **two** of them carry a label — a
+frame-stream operator carries `random`, unseeded entropy carries
+`entropy`, and a derived sub-stream carries **no label at all** (it is
+pure, by the noise-floor convention below):
 
-| Shape | Ambient frame draws? | Reproducible under a frame? | Example |
-|---|---|---|---|
-| Frame stream | yes — owes draws, replays | yes | `Random`, `RandomChoice`, `RandomPrime`, `RandomSample`, `RandomShuffle` |
-| Derived sub-stream | no — frame-independent indices | yes | Monte-Carlo `Integrate` fallback, `stochasticEqual` (per `derived-substreams.md` §§2–6) |
-| Unseeded entropy | no | no — nothing promises replay | `RandomExpression` (fuzzer harness, `derived-substreams.md` §7) |
+| Shape | Label | Ambient frame draws? | Reproducible under a frame? | Example |
+|---|---|---|---|---|
+| Frame stream | `random` | yes — owes draws, replays | yes | `Random`, `RandomChoice`, `RandomPrime`, `RandomSample`, `RandomShuffle` |
+| Derived sub-stream | — none (pure; noise-floor convention) — but carries the `readsRandomFrame` definition field (below) | no — frame-independent indices | yes | Monte-Carlo `Integrate` fallback, `stochasticEqual` (per `derived-substreams.md` §§2–6) |
+| Unseeded entropy | `entropy` | no | no — nothing promises replay | `RandomExpression` (fuzzer harness, `derived-substreams.md` §7) |
 
 Rulings adopted from `derived-substreams.md` (cross-referenced there):
 
@@ -93,6 +136,20 @@ Rulings adopted from `derived-substreams.md` (cross-referenced there):
   label below. v2's migration ruling is withdrawn: a fuzzer owes the frame
   nothing, nothing promises it replays, and frame draws from a fuzzer would
   shift the replay indices of surrounding seeded code.
+- **The sub-stream estimators are not effects — but they are frame
+  participants** *(v5, review R3 finding 1)*. The seed frame has **three
+  participation modes**: *draws* (the `random` label), *delimits* (the
+  `frameProtocol: 'seed'` field, `WithRandomSeed`), and *reads without
+  drawing* (the existing `readsRandomFrame: true` definition field, set
+  by `Integrate`/`NIntegrate` — an **incomplete** estimator, e.g.
+  `NIntegrate(f, 0, n)` with `n` unbound, must keep the frame alive even
+  though it consumes no indices, per `derived-substreams.md` §6). The
+  reading mode stays a **field, not a label**: estimators sit at
+  (frame-participating: yes, impure: no), and the noise-floor convention
+  deliberately keeps them contract-invisible. `inferLambdaFlags` already
+  infers and propagates `readsRandomFrame` through user functions and
+  continues to; the field is boolean today and becomes kind-valued if a
+  second frame kind ever needs a reader mode.
 - **The sub-stream estimators are not effects.** Per `derived-substreams.md`
   §6, `Integrate` stays `pure: true` and not `drawsRandom`; this document
   adopts that as the **noise-floor convention**, stated normatively:
@@ -104,6 +161,194 @@ Rulings adopted from `derived-substreams.md` (cross-referenced there):
   nondeterminism is *not* confined below a reported error bound does not
   qualify and must carry a label.
 
+## Scope writes — the `scope` label
+
+*(v4 decision (d): renamed from v3's `write`. The filesystem labels made
+the old name ambiguous — `write` vs `fs_write` — and the new name says
+what it tracks: the ambient scope chain.)*
+
+The label means: **may mutate a scope that outlives the application** —
+`Assign`, `Declare`, `Assume` targeting a binding not declared within the
+evaluated body itself.
+
+**What it is not — binding structure.** An operator that *creates* a scope
+to bind an index (`Sum`, `D`, `Integrate`) has binder structure, declared
+by the `scoped:` definition flag with binding-site selectors (the binder
+mechanism). That is statically known and observationally pure —
+`Sum(i, 1, 10, i^2)` is a pure function of its operands, cacheable and
+replayable — and no consumer distinguishes "creates an internal scope"
+from "doesn't", so it fails the admission test. `Add` and `Sum` differ in
+binding structure, not in effects; the `scoped:` flag and the `scope`
+label are disjoint mechanisms.
+
+**Confinement (resolves v3's local/global open question).** v3 left open
+whether the state label should split local/global. v4 resolves it without
+a second label: **inference does not emit `scope` for confined writes.** A
+body whose writes provably target bindings the literal itself declares
+infers pure — such a body is deterministic and observationally pure from
+outside, so no consumer distinguishes it from pure and the label would
+carry no information. Only *escaping* writes emit `scope`.
+
+**The confinement rule is a dominance condition** *(v5, review R3
+finding 6 — a bare containment check is not enough)*: an `Assign` is
+confined iff **every static path from the literal's entry to the
+`Assign` passes through a `Declare` of that symbol within the literal**,
+**and** the symbol is not referenced by any nested `Function` literal
+(closure capture ⇒ escaping — the closure may outlive the declaring
+application). `Assume` is **never** confined. Destructuring and compound
+targets are judged per target symbol; any target the analysis cannot
+resolve ⇒ `scope`. The explicit fallback, stated normatively: **not
+provably confined ⇒ `scope`.** Consequences:
+
+- An opaque declaration cannot prove confinement, so it declares `scope`
+  conservatively — consistent with annotation-gets-the-contract.
+- The rule is written against `Assign`'s write-through semantics: an
+  `Assign` to a symbol with an existing outer binding mutates that outer
+  binding (pushing and popping a scope does not undo it) — hence the
+  dominance requirement on the `Declare`, not mere lexical containment:
+  `Block(If(flag, Declare(n, 0)), Assign(n, 5))` is **not** confined
+  (on the `flag`-false path the `Assign` writes through).
+
+**Confinement is inference-only; runtime accounting stays conservative**
+*(v5, finding 3)*. The runtime `effectsOf` walk contributes `{scope}`
+for **every** writer application (`Assign`/`Declare`/`Assume`), with no
+binding analysis — the projection formula's `ownEffects(op)` is a
+constant, and it stays one. This is sound by direction: the runtime
+channel may *over*-approximate what inference proved, never under- —
+the polarity this document already commits to ("optimistic in declared
+contracts, conservative in runtime accounting"). Concretely: a bare
+`Block(Declare(n, 0), Assign(n, n+1), n)` reports `{scope}` from
+`effectsOf`; the *same body as a function literal* infers a pure
+signature, and every application of that function projects through the
+pure arrow — so nothing downstream of a definition is pessimized. The
+divergence is visible only on un-abstracted expressions, where
+conservatism costs a cache, not correctness.
+
+**Reads of non-local scope are not an effect.** Every expression with a
+free symbol reads the ambient scope; a label would infect essentially
+every arrow while carrying no information (the checked-exceptions failure
+mode, per the `error` rejection). The consumers that care — memo
+invalidation, compile-time dependency tracking — already have
+per-expression, precise channels (generation guards;
+free-symbol/`symbolDeps` tracking); an arrow bit is per-function and
+lossy.
+
+## Host capabilities — the `ce.effects` registry
+
+*(v4 decision (e).)* Six labels represent access to host capabilities:
+`network`, `fs_read`, `fs_write`, `time`, `environment`, `console`. Their
+admission-test consumer — the thing that *distinguishes* each from
+generic impurity, which v3's single speculative `host` label lacked — is
+a per-capability **handler registry** on the engine instance:
+
+```ts
+ce.effects.network      // { fetch(…): Promise<…> }
+ce.effects.filesystem   // read methods (fs_read) and write methods (fs_write)
+ce.effects.time         // { now(): … }
+ce.effects.environment  // navigator/locale/env reads (#env(), #navigator())
+ce.effects.console      // { log(…), … }  (future Print)
+ce.effects.entropy      // unseeded randomness source; default Math.random
+ce.effects.random       // seeded draw kernel: draw(seed, n); default PCG3D (RANDOMNESS-MODEL §4)
+```
+
+**This is dependency injection at the host seam, not algebraic effect
+handlers.** Overriding an implementation is an engine-API operation —
+assignment, or a scoped helper (`ce.withEffects({network: mock}, …)`) —
+never an *expression form*. There is no `Handle(expr, handler)`: that
+would be delimited-control algebraic effects, which this design scopes
+out ("Sets, not rows"). Mocking for tests — e.g. a `network`
+implementation returning predefined responses — needs only DI; it stays
+at the API surface.
+
+**Snapshot scoping (v5, findings 5/15).** The registry is an **immutable
+object, swapped wholesale**; every evaluation (`evaluate`, `.N()`,
+`evaluateAsync`) captures the current registry **at entry** and uses that
+snapshot throughout. `ce.withEffects(overrides, fn)` installs a derived
+snapshot for evaluations *started within* `fn` and restores on exit via
+try/finally — for a Promise-returning `fn`, restoration happens after the
+promise settles. Concurrent evaluations each hold their own snapshot, so
+an override installed for one in-flight evaluation is never observable
+from another — the frame-stack bleed hazard `RANDOMNESS-MODEL.md` §2
+documents for concurrent async does **not** apply to capabilities
+(engine state outside the registry still inherits that standing caveat).
+**Denial**: an override value of **`null` is an explicit denial** — the
+needing operator yields an error value, overriding even a present
+default (`ce.withEffects({network: null, console: null}, …)` sandboxes
+an untrusted sub-evaluation). Combined with snapshotting, denial is
+race-free; this is the documented sandboxing primitive.
+
+**Coupling rule (normative).** An operator implementation may call
+`ce.effects.X` methods iff the corresponding label is in its declared
+effect set (for `filesystem`, per method group: read methods require
+`fs_read`, write methods `fs_write`). This is mechanically auditable —
+grep handler-namespace usage against declared arrows — the same
+one-source-of-truth discipline as the flag migration.
+
+**Defaults fail closed for the dangerous capabilities.** `network` and
+`filesystem` have **no default implementation**: evaluating an operator
+that needs them without a host-granted handler yields an error value.
+`console` defaults to the real console; `time` to the real clock;
+`entropy` to `Math.random` (this is where `RandomExpression`'s raw
+`Math.random()` lands — ruling (b′) unchanged, now behind a mockable
+seam); `random` to the builtin PCG3D kernel (below). For `environment`
+*(v5, finding 12)*: the existing `#env()`/`#navigator()` **pragmas stay
+parse-time**, gated by `allowHostPragmas`, unchanged — the `environment`
+label and `ce.effects.environment` gate only **evaluation-time**
+surfaces (host-declared functions today; a possible future
+`Environment(key)` operator), since a parse-time pragma lowers to a
+value before any application exists for a label to attach to. The
+registry thus doubles as the evaluation-time trust gate v3's `host`
+sketch gestured at, and per-target compile policy stays fail-closed on
+all six labels.
+
+**The label↔handler mapping is deliberately not 1:1.** `scope` is an
+internal-accounting label with no host handler, and a future `async` has
+none either — its discharge is `await`.
+
+**`random` — ruling revised (2026-07-31): handler-backed at the
+draw-kernel boundary.** An earlier draft kept `random` internal on the
+ground that swapping the seeded stream's PRNG breaks the replay
+contract. That conflated the **stream machinery** with the **generator
+beneath it**. The handler is the kernel, not a per-draw tap — and *(v5,
+review R3 finding 2)* the kernel is **index-addressed to match the
+ratified stream contract**: `RANDOMNESS-MODEL.md` §4 defines the *n*-th
+framed draw as the stateless `hash(seed, n)`, so the interface is
+`ce.effects.random = { draw(seed, n) }` — a **pure function of seed and
+index** (no stream object, no mutable state), default PCG3D per §4. The
+engine retains ownership of everything above it — frames, draw-index
+accounting, sub-stream *seed derivation* (a derived sub-stream is a
+derived seed fed to the same `draw`), and the pending-draw protocol.
+Use cases: mocking (a constant kernel); **pinning** a stable generator
+so replay archives stay valid across engine versions — an archive is
+valid relative to the *(seed, kernel)* pair rather than to an engine
+version's builtin; and compliance-mandated generators. Contract points:
+a kernel that is not a pure function of `(seed, n)` forfeits replay —
+the same trust class as a wrong declared type; the kernel is captured
+**at frame entry**, so a swap affects only subsequently entered frames
+(mid-frame swap is unrepresentable). **Compile fails closed** *(v1)*:
+compiled targets (JS/GPU) inline the builtin PCG3D — when a non-default
+kernel is installed, compiling any expression whose effect set includes
+`random` declines with a diagnostic; custom kernels are
+interpreted-only until a target learns to thread them. Distinct
+interfaces for distinct labels: `ce.effects.entropy` is the *unseeded*
+source, `ce.effects.random` the *seeded, deterministic* kernel beneath
+the frame machinery.
+
+**Sequencing.** The labels enter the grammar at Stage 1 — immediately
+useful, since an opaque *host-declared* function that fetches can state
+`(string) network -> string` before any builtin capability operator
+exists. The registry itself ships with the first capability operator
+(Stage 4). Standing consequence: a builtin `Fetch` is unavoidably
+Promise-returning — the first genuinely *per-operator* asynchrony, i.e.
+the admission-test consumer the `async` label has been waiting for (see
+"`async` will be an effect"). `Fetch` would be
+`(string) async network -> string`, rejected statically by sync entry
+points, discharged by `evaluateAsync` at the boundary. **Interval
+semantics** *(v5, finding 13)*: between Stage 1 (labels in the grammar)
+and Stage 4 (the registry), capability annotations are **descriptive
+contracts, not enforced gates** — no builtin carrier exists, and the
+coupling rule and fail-closed defaults activate with the registry.
+
 ## Design: effect sets on signatures
 
 ### Labels and lattice
@@ -112,36 +357,113 @@ An **effect set** is a subset of a closed, engine-versioned enumeration.
 Each label carries fixed metadata; consumers read the metadata, never the
 label name:
 
-| Label | Meaning | Impurity? | Owes seed frame? |
-|---|---|---|---|
-| `random` | May consume draws from the ambient seeded stream (replays under a frame) | yes | yes |
-| `entropy` | Unseeded, non-replayable nondeterminism from the host environment (`Math.random()`, future clock reads) | yes | no |
-| `write` | May mutate engine state (`Assign`, `Declare`, `Assume`, …) | yes | no |
+| Label | Meaning | Impurity? | Frame kind | Safe to re-run? | Handler |
+|---|---|---|---|---|---|
+| `random` | May consume draws from the ambient seeded stream (replays under a frame) | yes | `seed` | yes (replays) | `ce.effects.random` — the draw kernel (see "Host capabilities") |
+| `entropy` | Unseeded, non-replayable nondeterminism (`RandomExpression`) | yes | — | yes (non-reproducible) | `ce.effects.entropy` |
+| `scope` | May mutate a scope that outlives the application (`Assign`, `Declare`, `Assume` to non-local bindings — see "Scope writes") | yes | — | no | — internal |
+| `network` | Host network I/O (future `Fetch`) | yes | — | no (a request may be a remote write) | `ce.effects.network` |
+| `fs_read` | Reads the host filesystem | yes | — | yes (non-reproducible) | `ce.effects.filesystem` |
+| `fs_write` | Writes the host filesystem | yes | — | no | `ce.effects.filesystem` |
+| `time` | Reads the host clock | yes | — | yes (non-reproducible) | `ce.effects.time` |
+| `environment` | Reads host environment data — navigator, locale, env vars (the `#env()`/`#navigator()` surface) | yes | — | yes (non-reproducible) | `ce.effects.environment` |
+| `console` | Emits host console/diagnostic output (future `Print`) | yes | — | no (re-running duplicates output) | `ce.effects.console` |
 
 - **`pure` means "no impurity label present"** — NOT literally
   `effects = ∅`. Normative because a future non-impurity label (e.g.
   `async`) must not break caching by mere set-nonemptiness.
 - The order is powerset inclusion — a **partial order**, not a chain: the
-  singletons `{random}`, `{entropy}`, `{write}` are pairwise
-  **incomparable**; none implies another.
-- Admission of `entropy` under the three-part test ("Future effect labels"):
+  singleton labels are pairwise **incomparable**; none implies another. In
+  particular `fs_write` does not imply `fs_read` (a log appender writes
+  without reading); read/write filesystem access carries both labels
+  (`fs_read fs_write` in the slot), and an authoring-surface sugar
+  `effects: ['filesystem']` may expand to exactly that pair — the type
+  grammar itself carries only the closed labels.
+- Admission of `entropy` under the three-part test ("Label admission"):
   its distinguishing consumers are (i) the pending-draw gate, which must
   *not* pin frames for it (vs `random`), and (ii) re-evaluation policy,
-  for which it is safe to re-run but non-reproducible (vs `write`, which
+  for which it is safe to re-run but non-reproducible (vs `scope`, which
   must not be re-run casually at all). Serialized-contract truthfulness
-  rides on (ii): stamping `RandomExpression` `{write}` would tell a
+  rides on (ii): stamping `RandomExpression` `{scope}` would tell a
   consumer the opposite of the truth on both counts.
+- Admission of the six capability labels (v4): their distinguishing
+  consumer is the per-capability handler registry `ce.effects` (see "Host
+  capabilities") together with evaluation-time trust policy and per-target
+  compile fail-closed — v3's merged `host` sketch had no consumer that
+  told its surfaces apart; the registry is precisely that consumer.
+  `time` is the case v3 anticipated verbatim: it folds into `entropy`
+  "unless a virtual-clock mechanism ever gives it its own consumer" — a
+  mockable `ce.effects.time` is that mechanism.
 - A distinguished **top**, written `any`, means "unknown effects". For
   **every** derived view and every consumer, `any` behaves as if every
   label (current and future) were present — conservative in all
-  directions. Under union `any` absorbs. (No intersection operation is
-  defined: nothing in this model intersects effect sets — projection
-  unions, discharge subtracts, subtyping subset-tests.)
+  directions, **with one ruled exception** *(v5, review R3 finding 4)*:
+  **frame participation requires explicit declaration** — `any` (and an
+  unknown operator) never pins a seed frame. On every other axis
+  over-approximation is the safe direction; for frames it inverts
+  (pinning forever is the harm), and not-pinning matches the shipped
+  explicit-flag semantics of the pending-draw walk (`?? false` /
+  `library/core.ts` ~172): unknown is *impure* for `isPure` yet *not*
+  frame-relevant for the walk. Under union `any` absorbs. (No
+  intersection operation is defined: nothing in this model intersects
+  effect sets — projection unions, discharge subtracts, subtyping
+  subset-tests.)
 - An **unknown label** while parsing a type is a type error (fail closed).
   Version-skew consequence at the serialization boundary: an older engine
   receiving a newer engine's type string hard-errors rather than silently
   weakening the contract — the accepted trade; adding a label is a visible
   minor-version event.
+
+### Label kinds — the metadata axes
+
+The labels are not homogeneous, and the split a reader may sense between
+"purity-related" labels and others is real — but it is **metadata, not
+structure**. There are **four independent axes**; every label declares
+its position on each at admission (the columns of the table above), and
+**consumers key on axis predicates, never on label names**. The one
+apparent exception proves the rule: the pending-draw gate "keys on
+`random`" only in the sense that `random` is currently the sole label
+with a frame kind — the gate's true key is the axis.
+
+| Axis | Predicate | "Yes" side today | Consumer |
+|---|---|---|---|
+| **Impurity** | breaks referential transparency | all nine current labels (`async`, when admitted, will be the first "no") | caching, `isConstant`, the derived `pure` getter ("no impurity label present") |
+| **Observation vs action** | safe to re-run — an *observation* of the outside world; re-running merely re-asks | observations: `random`, `entropy`, `time`, `environment`, `fs_read`; actions: `scope`, `fs_write`, `console`, `network` (conservatively an action — a request may write) | re-evaluation policy |
+| **Frame kind** | participates in a delimiting frame protocol — the metadata names *which*, and the mode: draws (label), delimits (`frameProtocol`), or reads (`readsRandomFrame`) | `random` → `seed` draws; `WithRandomSeed` delimits; `Integrate`/`NIntegrate` read (the sole kind today) | the frame kind's obligation protocol (for `seed`: the pending-draw gate, keyed on all three modes) |
+| **Handler-backed** | has a `ce.effects` namespace | the six capability labels, `entropy`, and `random` (at the draw-kernel boundary — "Host capabilities"); internal: `scope` | the registry coupling rule; evaluation-time trust policy |
+
+Why this split is sound — and why it must stay **out of the lattice**:
+the axes are consumer-facing metadata, and different consumers care
+about different axes, so no axis may privilege the subtype order. The
+ordering stays uniform, axis-blind powerset inclusion: a bound excludes
+a label the same way whether or not that label is an impurity. The
+future `async` shows why folding them would be wrong: an async-but-pure
+function caches soundly (the impurity axis says so), yet
+`(real) async -> real` is still **not** a subtype of `(real) -> real` —
+a sync-only entry point's bare-arrow bound must exclude it (the lattice
+says so). One axis answers the caching consumer, the other the
+scheduling one; merging them would answer one question by corrupting
+the other. Likewise the labels bear **no implication relations to each
+other** on any axis — kinds classify labels; they never order them.
+
+**Frame kinds, generalized.** A frame kind bundles four things: the
+label(s) it virtualizes, its discharging delimiter operator(s), its
+runtime obligation protocol for partially-evaluated survivors, and its
+**reader field** — the definition flag marking operators that read the
+frame without consuming from it. `seed` = (`{random}`, `WithRandomSeed`,
+the pending-draw walk, `readsRandomFrame`). The anticipated
+second kind is `clock` — (`{time}`, a future `WithClock`, and whatever
+obligation an *advancing* virtual clock declares; a frozen clock needs
+none). Accordingly the definition field is **kind-valued, not boolean**:
+`WithRandomSeed` carries `frameProtocol: 'seed'`, and a future delimiter
+names its own kind — new kinds arrive without redefining the axis,
+exactly as the admission test demands of metadata.
+
+`any` is conservative on the impurity, action, and handler axes — but
+**not** on the frame axis, where conservatism inverts (pinning frames
+forever is the harm): frame participation requires explicit declaration,
+and `any` never pins (ruled, v5 — see the `any` bullet under "Labels and
+lattice").
 
 ### Grammar and AST
 
@@ -149,39 +471,68 @@ label name:
 set, attached to the arrow:
 
 ```
-<signature> ::= <arguments> " ->" [<effects>] " " <type>
-<effects>   ::= "{" ( "any" | <label> ("," <label>)* ) "}"
-<label>     ::= "random" | "entropy" | "write"   // closed, versioned
+<signature> ::= <arguments> [" " <effects>] " -> " <type>
+<effects>   ::= "any" | <label> (" " <label>)*
+<label>     ::= "console" | "entropy" | "environment" | "fs_read"
+              | "fs_write" | "network" | "random" | "scope" | "time"
+                                                 // closed, versioned
 ```
 
 ```
-(real) -> real              // pure (no effect set ≡ empty set)
-(real) ->{random} real      // may draw from the seeded stream
-() ->{entropy} expression   // unseeded nondeterminism (RandomExpression)
-() ->{write} nothing        // may mutate state
-(real) ->{random, write} real
-(real) ->{any} real         // opaque: unknown effects
+(real) -> real                // pure (empty slot ≡ empty set)
+(real) random -> real         // may draw from the seeded stream
+() entropy -> expression      // unseeded nondeterminism (RandomExpression)
+() scope -> nothing           // may mutate an enclosing scope
+(string) network -> string    // host network I/O (opaque host function)
+(real) random scope -> real
+(real) any -> real            // opaque: unknown effects
 ```
 
-Normalization (normative): `->{}` is a parse error (pure is spelled with a
-bare arrow — one spelling round-trips); duplicate labels are a parse error;
-`any` is exclusive (`{any, random}` errors); canonical serialization orders
-labels alphabetically, parsing accepts any order; whitespace inside braces
-is insignificant, and whitespace **between the arrow and the opening
-brace** is permitted (`-> {random}` parses; canonical serialization always
-emits the attached form `->{random}`); in the AST, "no effect set" and
-"empty set" are the **same state** (one optional field, absent = pure). **Reserved**: `!`
-inside the braces is a parse error today, reserved for the complement form
-(see "Requiring absence" under Subtyping) so it can be admitted later
-without a breaking grammar change.
+Normalization (normative): pure has exactly one spelling — an **empty
+slot** (nothing between the argument list and the arrow); an empty
+specifier *list* is unwritable, so no degenerate spelling exists to
+outlaw. Duplicate labels are a parse error; `any` is exclusive
+(`any random` errors); canonical serialization orders labels
+alphabetically, separated by single spaces, and parsing accepts any
+order. The slot exists only between a **parenthesized argument list**
+and its arrow — argument lists are already mandatorily parenthesized in
+this grammar, so the slot is positionally isolated: an identifier there
+can only be an effect label. Hence no collision with type names, current
+or future; a typo diagnoses cleanly as "unknown effect label"; and
+admitting a future label can never change the parse of an existing type
+string. In the AST, "no effect set" and "empty set" are the **same
+state** (one optional field, absent = pure). **Reserved**: `!` in the
+slot is a parse error today, reserved for the complement form (see
+"Requiring absence" under Subtyping) so it can be admitted later without
+a breaking grammar change.
 
-Syntax provenance: the arrow-attached brace set follows **Unison**'s
-ability annotations (`a ->{IO} b`) exactly; **Koka** places its effect row
-in the same position with angle brackets (`int -> <exc,div> int`), which
-are taken here by type constructors, and **Eff**'s `A -> B ! Δ` postfix
-uses `!`, taken here by negation. Among effect-typed languages the
-arrow-attached set is the established convention; Unison's spelling is the
-one whose tokens survive CE's existing grammar unchanged.
+Syntax provenance — **ruled 2026-07-31: the Swift specifier slot.**
+**Swift** places effect specifiers as bare keywords between the parameter
+list and the arrow — `(Int) async throws -> Int`, order fixed by fiat
+(SE-0296) — and CE adopts that placement, with alphabetical canonical
+order and the closed, versioned label enumeration in place of Swift's
+fixed keyword pair. The verified fact that makes it sound here: argument
+lists are already **mandatorily parenthesized** (`real -> real` is a
+parse error today), so the `)` … `->` slot is positionally isolated (see
+Normalization above for the consequences), and the slot anchors
+per-arrow, so the nested-bounds exhibit below reads fine. Beyond being
+lighter, it leans on the most widely-known effect-annotation syntax in
+existence — relevant to Cortex's LLM-friendliness goal. (Swift's
+`rethrows`/`reasync` — effect *polymorphism* — is the corner "Sets, not
+rows" deliberately gives up, and does not need, since projection always
+sees the actual operand.)
+
+**Superseded (the v3–v4.0 provisional form): Unison-style arrow-attached
+braces**, `a ->{IO} b`, spelled here `(real) ->{random} real` — the
+established convention among effect-typed languages (**Koka** uses the
+same position with angle brackets, `int -> <exc,div> int`, taken here by
+type constructors; **Eff**'s postfix `A -> B ! Δ` uses `!`, taken here
+by negation). Both forms are sound; the braces' residual advantages —
+visually explicit set-ness at three-plus labels, slightly tidier exotic
+spellings (`->{any}`, `->{!random}` vs `(int) any -> int`,
+`(int) !random -> int`) — were judged not worth the weight. The brace
+spelling survives only in review artifacts and earlier drafts; it is not
+part of the proposal.
 
 **Considered and rejected (2026-07-29): a postfix separator**, e.g.
 `(a: integer) -> boolean :: random` (the trailing-position shape of Flix's
@@ -190,8 +541,8 @@ Cortex grammars). Rejected for three reasons, the first decisive:
 
 1. **Postfix trailers don't nest, and CE's dominant use site is nested** —
    parameter bounds inside another signature. Compare:
-   `(g: (real) ->{random} real, x: real) ->{write} boolean` vs.
-   `(g: ((real) -> real :: random), x: real) -> boolean :: write` — the
+   `(g: (real) random -> real, x: real) scope -> boolean` vs.
+   `(g: ((real) -> real :: random), x: real) -> boolean :: scope` — the
    trailing form *requires* the inner parentheses (without them the
    annotation floats ambiguously to the enclosing signature), forfeiting
    its flat-case readability exactly where effects matter most. Flix gets
@@ -200,14 +551,12 @@ Cortex grammars). Rejected for three reasons, the first decisive:
 2. **Trailing position needs precedence rules the attached form makes
    unnecessary**: in `(a) -> (b) -> c :: random` or
    `(real) -> real | error :: random` the attachment point must be ruled,
-   serialized, and remembered; with braces on the arrow, a misplaced
-   effect annotation is unrepresentable rather than misparsed.
+   serialized, and remembered; with the specifier slot pinned between the
+   argument list and its arrow, a misplaced effect annotation is
+   unrepresentable rather than misparsed.
 3. **`::` arrives pre-loaded with the wrong meaning** — "has type"
-   (Haskell) or "namespace path" (Rust/C++) — where the brace form carries
-   no competing intuition.
-
-The flat-case readability motive is served instead by the whitespace
-allowance above (`-> {random}`).
+   (Haskell) or "namespace path" (Rust/C++) — where the specifier slot
+   carries exactly the right intuition (Swift's).
 
 **The `function` primitive.** The bare primitive type `function` (used
 today by e.g. `Map: '(collection, function) -> list'`) is
@@ -217,8 +566,9 @@ signature (contravariance would reject fixed-arity callbacks). Projection
 is unaffected by the looseness of the bound — it always reads the *actual*
 operand's signature, so `Map(xs, pureF)` is still computed pure.
 
-`!` and `&` are taken in the type grammar; braces on the arrow are
-unambiguous. Types travel as strings in MathJSON, so effect annotations
+`!` and `&` are taken in the type grammar (negation, intersection); the
+specifier slot is positionally isolated from both, so no collision
+arises. Types travel as strings in MathJSON, so effect annotations
 round-trip wherever a **full signature** is carried (definition-form
 encoding: see "Cortex surface").
 
@@ -255,11 +605,30 @@ The **contribution** of operand `aᵢ` separates *producing* the operand from
   *producing* the value (e.g. `Use(MakeCallback())` where `MakeCallback`
   draws) are never discharged; only the **latent** set — the operand's
   signature arrow effects, which fire if the operator invokes it — is
-  subject to discharge.
-- **Held (lazy) operand position**: the operand is not evaluated at
-  application time; its contribution is `(effectsOf(aᵢ) − discharge(op, i))`
-  — the whole held evaluation happens *under* the operator, so the operator
-  may discharge it.
+  subject to discharge. *(v5, finding 7)* Whether the latent set counts
+  at all is governed by per-position **`invokes` metadata**, default
+  `true` (the conservative formula above, and the standing rule for
+  every opaque operator). A position declared `invokes: false` — pure
+  containers and constructors that only *store* the value (`List`,
+  `Tuple`, the structural operators; audited at Stage 1) — contributes
+  the production effects `effectsOf(aᵢ)` only, no latent: `List(randomF)`
+  is pure to build; the effect surfaces at whatever application later
+  invokes an element.
+- **Held (lazy) operand position** — two classes *(v5, finding 8)*:
+  - **May-evaluate** (the default for `lazy` positions: a `Sum` body, the
+    `WithRandomSeed` body): the operand is not evaluated at application
+    time but the operator may evaluate it *under* itself; contribution
+    `(effectsOf(aᵢ) − discharge(op, i))` — held evaluation happens under
+    the operator, so the operator may discharge it.
+  - **Quote/store** (`Hold`): the operator **never** evaluates the
+    content; contribution **∅** — `effectsOf(Hold(Random())) = ∅`, and
+    `isPure` holds, matching `RANDOMNESS-MODEL.md` §2's inert-content
+    ruling. The effects resurface at forcing: `Release(h)` (or any
+    evaluation of the held content) is itself an application, and
+    `effectsOf` recurses into the content *there* — for a symbol-bound
+    held value, resolving through the binding like any callback. A
+    pleasant consequence: the pending-draw walk's Hold exception becomes
+    a *derived* fact of this classification rather than a special case.
 
 **Discharge** is declared on the operator definition per operand
 **position** (not only function parameters):
@@ -279,29 +648,50 @@ The **contribution** of operand `aᵢ` separates *producing* the operand from
   held (`lazy: true`), bound `{any}`, **discharges `random`** on the body
   position. So `WithRandomSeed(42, Random())` computes `∅` — referentially
   transparent, as it truly is — while `WithRandomSeed(42, Block(Assign(x,1),
-  Random()))` computes `{write}`: the frame absorbs the draws, not the
-  write.
+  Random()))` computes `{scope}`: the frame absorbs the draws, not the
+  scope write. (Per the confinement rule of "Scope writes", this example
+  assumes `x` resolves to a binding outside the block — an escaping
+  write; a block-confined write would not surface at all.)
 - **The runtime frame-protocol role is a separate field**, not the arrow:
-  the definition gains `frameProtocol: true` (today's conflated second
-  meaning of `drawsRandom`), consumed by the pending-draw walk (a surviving
-  nested `WithRandomSeed` owes the outer frame) exactly as today. The
-  derived `drawsRandom` getter is
-  `random ∈ ownEffects ∪ projected` **∨ `frameProtocol`**, so every current
-  consumer keeps working.
+  the definition gains `frameProtocol: 'seed'` (kind-valued — see "Frame
+  kinds" under Label kinds; this is today's conflated second meaning of
+  `drawsRandom`), consumed by the pending-draw walk (a surviving nested
+  `WithRandomSeed` owes the outer frame) exactly as today. The derived
+  `drawsRandom` getter is
+  `random ∈ ownEffects ∪ projected` **∨ `frameProtocol === 'seed'`**, so
+  every current consumer keeps working. The `readsRandomFrame` field is
+  a **peer runtime field, untouched by the flag migration** — neither
+  translated to a label nor derived from one (see "Randomness shapes").
+
+**Discharge from `any`** *(v5, finding 9)*: `any − D` is the
+**co-finite set** ¬D — admitted as an **internal computed value only**,
+never surface syntax (the reserved `!` stays unadmitted, and since
+signatures are constants — application effects are never stored on an
+arrow — nothing ever serializes a co-finite value). Subset tests on
+co-finite values follow the stateless comparison rules already given
+under "Complement form" (Subtyping). Payoff: `WithRandomSeed(42,
+opaqueAnyBody)` computes ¬{random} — provably not-random, so the frame
+gate can release — where a stays-`any` rule would make discharge around
+any opaque body a no-op.
 
 **Runtime counterpart — one label-aware channel (in scope, required).**
 The runtime gains a single expression-level computation
 `effectsOf(expr) → EffectSet` implementing the projection rule above,
 resolving symbol operands through their bound definitions (the
-`isImpureHead` by-name pattern, `library/map-lowering.ts`). Both existing
-consumers become views of it:
+`isImpureHead` by-name pattern, `library/map-broadcast-shape.ts`). Both
+existing consumers become views of it:
 
 - `isPure` ≙ no impurity label in `effectsOf(expr)` — a boolean projection,
   no longer independently computed;
-- the pending-draw walk keys on `random ∈ effectsOf(…)` (plus
-  `frameProtocol`), **preserving its existing exception structure
-  unchanged** — Hold content, lazy views in value position, and binder
-  handling per `RANDOMNESS-MODEL.md` §2 and §6.
+- the pending-draw walk keys on **all three seed-frame participation
+  modes**: `random ∈ effectsOf(…)` ∨ `frameProtocol === 'seed'` ∨
+  `readsRandomFrame` *(v5 — the third term preserves frame retention for
+  incomplete estimators, `derived-substreams.md` §6)*, **preserving its
+  existing exception structure** — lazy views in value position and
+  binder handling per `RANDOMNESS-MODEL.md` §2 and §6, with the Hold
+  exception now *derived* from the quote-position rule above rather than
+  special-cased. Per the `any` ruling ("Labels and lattice"), `any` does
+  **not** satisfy the first term — unknown operators never pin frames.
 
 This closes hole 1 for *both* consumers (v2 fixed only the boolean).
 Memoization: `effectsOf` results on `BoxedFunction` are cached with a
@@ -310,10 +700,134 @@ two existing generation-checked memos in `boxed-function.ts` (~714, ~1242).
 (`reset()` is currently an inert stub; it is *not* the invalidation
 mechanism.)
 
+### Worked examples
+
+**1 — `Map(xs, f)` with `f` bound to an effectful function.** First, what
+this is *not*: the operator's `type` handler. The **type** of
+`Map(xs, f)` is `list` — unchanged whether `f` is pure or `random`.
+Effects never appear in a *value* type; they live only on arrows, and an
+application's result is a value — so there is nothing effect-shaped for
+the `type` handler to compute, and it is unchanged by this design. The
+place the effect *does* become visible in a type is one level up: the
+literal `(xs) ↦ Map(xs, f)` has type `(list) random -> list` — the
+application's effects, stamped onto the enclosing literal's own arrow by
+the static walk. The application's effects flow through two channels, one
+dynamic and one static:
+
+- **Runtime — `effectsOf`, computed dynamically.**
+  `effectsOf(Map(xs, f)) = ownEffects(Map) (= ∅) ∪ contribution(xs) ∪
+  contribution(f)`. `f` is a symbol operand, so `effectsOf` resolves it
+  **through its current binding** to a function value and reads that
+  value's signature arrow — its latent set — *at query time*. `Map`
+  declares no discharge, so the latent set is re-emitted: if `f` is
+  currently bound to `(x: real) random -> real`, the application computes
+  `{random}`. The generation-guarded memo is what makes "current" honest:
+  reassigning `f` bumps `ce._generation` and invalidates the cached
+  answer. This dynamic resolve-through-the-binding is precisely what
+  closes hole 1 — today's `isPure` sees a bare symbol and stops.
+- **Inference-time — the static walk.** When `Map(xs, f)` sits inside a
+  `Function` literal's body, the effect walk performs the same projection
+  with what is knowable at construction: an *annotated parameter* `f`
+  contributes its declared arrow effects; an *unannotated parameter* is
+  treated pure (ruling (c) — optimism, closable by annotation); a *named
+  global* `f` is the dependency-order case — ruled in v5: unresolved at
+  construction ⇒ `{any}`, resolved ⇒ its binding's arrow (see
+  "Inference"). The static walk stamps the enclosing literal's arrow;
+  the runtime channel answers for the expression as bound *now*.
+
+**Does the signature vary with the arguments, then? No — signatures are
+constants; variance lives at applications.** Two cases:
+
+- When `f` is a **captured free symbol** (as above), the literal's
+  signature is a **construction-time snapshot**: stamped once, from
+  `f`'s then-current binding, when the literal's signature is built. It
+  does not re-stamp when `f` is later reassigned — that staleness is
+  exactly hole 3. The v5 dependency-order ruling closes its
+  forward-reference half (an *unresolved* `f` snapshots as `{any}`,
+  which later resolution can only improve on); reassignment of an
+  already-resolved binding still leaves the installed signature stale —
+  there, the runtime `effectsOf` channel, which does resolve through
+  *current* bindings, keeps the accounting consumers honest.
+- When the function arrives as a **parameter** — `(xs, g) ↦ Map(xs, g)`
+  — the signature never varies per call site: unannotated `g` infers
+  optimistically pure (ruling (c)); annotated `g` contributes its
+  declared bound, fixed. There is no effect variable to instantiate per
+  call — the sets-not-rows trade, made deliberately. Per-call-site
+  precision is recovered **at the application, not the signature**:
+  projection unions the *actual* operand's latent effects into each
+  application expression's effect set (default discharge: nothing), so
+  the expression `Map(xs, pureF)` computes `∅` and `Map(xs, randomF)`
+  computes `{random}` while `Map`'s one signature stays fixed at its
+  effect-top `function` bound.
+
+**2 — `Sum(i, 1, 10, f(i))`: binding structure is not an effect.** `Sum`
+creates a scope to bind `i` — that is the `scoped:` definition flag
+(binder machinery), and it contributes **no label**: with `f` pure the
+whole application is pure and cacheable despite the internal scope. With
+`f` bound to `(n: integer) random -> real`, projection carries the
+body's `{random}` through (`Sum` discharges nothing) — and *still* no
+`scope` label: the index binding is internal, and nothing escapes.
+
+**3 — confinement: three counters.**
+
+```
+f() := Block(Declare(n, 0), Assign(n, n + 1), n)
+// Declare dominates the Assign inside the literal → confined.
+// f : () -> integer — pure; no observer outside can see the mutation.
+
+Declare(counter, 0)
+g() := Block(Assign(counter, counter + 1), counter)
+// counter's declaration is outside; Assign writes through to it.
+// g : () scope -> integer — an escaping write.
+
+h() := Block(If(flag, Declare(n, 0)), Assign(n, 5), n)
+// The Declare does NOT dominate the Assign (flag-false path writes
+// through) → not provably confined → h : () scope -> integer.
+```
+
+The distinction is static — dominance of the `Declare` over the
+`Assign`, per "Scope writes" — so inference computes it without running
+anything. Note the channel split (ruled, v5): these verdicts are the
+**installed signatures**; the runtime `effectsOf` of a *bare*,
+un-abstracted `Block(Declare(n,0), …)` expression is conservatively
+`{scope}` — sound over-approximation, and invisible to any caller of
+`f`, whose applications project through `f`'s pure arrow.
+
+**4 — producing vs. invoking: `Use(MakeCallback())`.** Let
+`MakeCallback : () random -> ((real) -> real)` — it *draws* in order to
+*build* a pure callback. The operand's contribution to `Use(…)` is
+`effectsOf(operand) ∪ (latent − discharge)`: producing the value
+contributes `{random}` — **never dischargeable**, since the draw happens
+when the operand is evaluated regardless of what `Use` does with the
+result — while the produced value's latent set is `∅`. The mirror image:
+`h : () -> ((real) random -> real)` produces a callback *purely*;
+`Map(xs, h())` is then `{random}` via the latent set — which a
+discharging operator *could* absorb. Same shapes, opposite channels.
+
+**5 — a bound at the call boundary.** `integrate(f: (real) -> real, a,
+b)` declares a pure-callback bound (form 1 under "Requiring absence").
+`integrate((x) ↦ Random(), 0, 1)` is rejected — an `incompatible-type`
+error value, with the same timing as existing argument validation.
+Contrast `Map`, whose parameter is the bare `function` primitive —
+effect-top by definition — so `Map(xs, (x) ↦ Random())` keeps working,
+projecting `{random}` instead of rejecting.
+
+**6 — an incomplete estimator keeps the frame without any label.**
+`WithRandomSeed(42, NIntegrate(f, 0, n))` with `n` unbound: the
+Monte-Carlo estimator is a derived sub-stream — *pure*, no label, per
+the noise-floor convention — so `effectsOf` of the whole expression is
+`∅`. Yet the partially-evaluated survivor must keep the seed frame
+pinned so a later completion (binding `n`) replays. That retention rides
+`NIntegrate`'s `readsRandomFrame: true` — the pending-draw walk's third
+key — not any effect label. This is the case that shows why the walk
+cannot be a pure view of `effectsOf`: frame participation and impurity
+are different axes, and the reading mode is deliberately
+contract-invisible.
+
 ### Subtyping
 
 - **Covariant in the effect set**: `(real) -> real` <:
-  `(real) ->{random} real` <: `(real) ->{any} real`.
+  `(real) random -> real` <: `(real) any -> real`.
 - **Contravariant flip in argument position**: a function accepting an
   effectful callback is a subtype of one accepting only pure callbacks.
 
@@ -327,17 +841,25 @@ existing argument validation, including its non-strict/lazy carve-outs
 *not* to have an effect; three forms, by strictness:
 
 1. Bare arrow — the empty bound: no effects at all. The common case.
-2. A positive bound listing what *is* tolerated: `g: (real) ->{write}
-   real` means "deterministic; mutation tolerated" — which is usually what
-   a replay- or cache-sensitive consumer actually wants, since `entropy`
-   is nondeterministic too and excluding only `random` rarely matches real
-   intent.
-3. The literal complement, by enumerating the other labels:
-   `->{entropy, write}` means "anything except `random`" — expressible
-   because the enumeration is closed, but *extensional*: it does not
-   auto-extend when a future label is admitted (a `{host}` callback would
-   be rejected until the author widens the bound — fail-closed, safe, but
-   the written bound drifts from the intent at each label addition).
+2. A positive bound listing what *is* tolerated: `g: (real) scope ->
+   real` means "no probabilistic nondeterminism (`random` and `entropy`
+   excluded); scope mutation tolerated" — which is usually what a
+   replay-sensitive consumer actually wants, since `entropy` is
+   nondeterministic too and excluding only `random` rarely matches real
+   intent. Note *(v5, finding 14)*: this bound does **not** make the
+   callback safe to re-run or cache — `scope` is on the *action* side of
+   the observation/action axis; the bound only excludes the two
+   randomness labels.
+3. The literal complement, by enumerating the other labels — with the v4
+   roster, "anything except `random`" is an **eight-label enumeration**
+   (`console entropy environment fs_read fs_write network scope time`
+   in the slot) — expressible because the enumeration is closed, but
+   *extensional*: it does not auto-extend when a future label is admitted
+   (an `{async}`-bearing callback would be rejected until the author
+   widens the bound — fail-closed, safe, but the written bound drifts
+   from the intent at each label addition, and the v4 label expansion
+   makes this form markedly worse — strengthening the reserved
+   complement below).
 
 All three are ordinary contravariant subset checks; an `{any}` operand
 fails every finite bound (an opaque function that won't state its effects
@@ -347,17 +869,18 @@ cannot prove absence — conservative, intended). Note the distinction from
 has a containment mechanism.
 
 **Complement form (designed, not admitted — syntax reserved).** The drift
-in form 3 has a clean fix: a co-finite bound written `->{!random}` — "every
-label, current and future, except those negated" — the closed-world analog
-of the row-literature *lacks constraint*. It stays inside the sets-not-rows
-boundary: bounds become finite sets, co-finite sets, or `any`, and every
-subtype test remains a trivial stateless comparison (finite ⊆ co-finite(N)
-iff the positives avoid N; co-finite(N₁) ⊆ co-finite(N₂) iff N₂ ⊆ N₁;
-co-finite ⊄ any finite set, since it is version-open). Mixing positive and
-negated labels in one set is a parse error; `{!}` is not a spelling of
-`any`. Admission trigger: the first real consumer of an "all but X" bound —
-until then the `!` is merely reserved in the grammar, and forms 1–3 cover
-current needs.
+in form 3 has a clean fix: a co-finite bound written `!random` in the
+slot (`g: (real) !random -> real`) — "every label, current and future,
+except those negated" — the closed-world analog of the row-literature
+*lacks constraint*. It stays inside the sets-not-rows boundary: bounds
+become finite sets, co-finite sets, or `any`, and every subtype test
+remains a trivial stateless comparison (finite ⊆ co-finite(N) iff the
+positives avoid N; co-finite(N₁) ⊆ co-finite(N₂) iff N₂ ⊆ N₁; co-finite
+⊄ any finite set, since it is version-open). Mixing positive and negated
+labels in one slot is a parse error; a bare `!` is not a spelling of
+`any`. Admission trigger: the first real consumer of an "all but X"
+bound — until then the `!` is merely reserved in the grammar, and forms
+1–3 cover current needs.
 
 **Overloads.** Per-application effects use the **resolved arm**, obtained
 by invoking the same (write-free) resolver used for typing at
@@ -379,7 +902,7 @@ application): Stage 2 gates that pre-evaluation on purity — a body whose
 `effectsOf` is pure keeps today's evaluate-then-curry optimization; an
 effectful body is **captured without evaluation** and fires exactly once,
 at saturation. Tests must pin: zero effects at partial application, exactly
-one at saturation, for `random` and `write`.
+one at saturation, for `random` and `scope`.
 
 `matches()` needs the effect-aware signature rule and **must stay
 write-free**; subset tests are stateless.
@@ -398,7 +921,7 @@ surface):
   | `true` / omitted | `false` / omitted | ∅ (bare arrow) |
   | `false` | `true` | `{random}` |
   | omitted | `true` | `{random}` |
-  | `false` | `false` / omitted | **`{any}`** — unclassified legacy impurity. NOT `{write}`: the flag promises only "not pure" (an opaque host function may be entropy/IO; `RandomExpression` is the live counterexample). `{write}` is only ever assigned **explicitly** — via an effects-bearing signature or the new `effects:` authoring field — or by the audited Stage 1 list. |
+  | `false` | `false` / omitted | **`{any}`** — unclassified legacy impurity. NOT `{scope}`: the flag promises only "not pure" (an opaque host function may be entropy/IO; `RandomExpression` is the live counterexample). `{scope}` — and every capability label — is only ever assigned **explicitly**, via an effects-bearing signature or the new `effects:` authoring field, or by the audited Stage 1 list. |
   | `true` | `true` | **registration error** (contradiction) |
 
 - A new explicit `effects:` authoring field (or an effect-annotated
@@ -427,7 +950,7 @@ surface):
   effects go on **its own arrow** (its latent set); the enclosing body adds
   them only where the body *applies* (or projects) the literal. So
   `makeCallback() := (() ↦ Random())` is itself pure with result type
-  `() ->{random} …`. This **amends Stage 0's shipped behavior** — the
+  `() random -> …`. This **amends Stage 0's shipped behavior** — the
   current `inferLambdaFlags` recurses into nested literal bodies
   (conservative) — and `user-function-purity.test.ts` updates accordingly.
 - **Applied parameters** *(ruling (c))*: an **annotated** function
@@ -438,18 +961,56 @@ surface):
   opt-in via annotation. (Rejected: synthesizing a pure contract from
   usage — breaking; synthesizing `{any}` — forfeits the caching the
   optimistic ruling protects.)
-- **Dependency order**: unchanged pending the open ruling (hole 3 above).
+- **Dependency order — ruled (v5, review R3 finding 10).** The split is
+  adopted: an **unresolved named head** infers `{any}` — sound; the cost
+  is caching for forward references — while **applied unannotated
+  parameters** keep the optimistic ruling (c). One refinement keeps
+  mutual recursion workable: an **explicit** annotation on a definition
+  whose inference saw an unresolved head is installed as a **trusted
+  contract** — the head is effectively opaque at that moment, so this is
+  the same residual trust class as an opaque host declaration — and is
+  *not* revalidated when the head later resolves (no dependency
+  tracking). So `f() := g()` before `g` exists: unannotated → `{any}`
+  (honest); annotated → author-stated, trusted.
 - **Definition-annotation check.** An explicit effect annotation on a
   defined function is a contract: accepted iff `inferred ⊆ declared`
   (over-declaring weakens, allowed). On violation the definition is **not
   installed** and the `Assign`/`Declare` yields an `incompatible-type`
   error value — same shape and channel as the call-boundary check.
+  *(v5)* When inference saw an unresolved named head, the check cannot
+  run and the annotation installs as **trusted** (previous bullet).
+- **Annotation provenance** *(v5, finding 11)*. "Explicit annotation" is
+  a **definition-level provenance bit, `effectsDeclared`** — set when
+  the author supplied an effects-bearing signature string, the
+  `effects:` authoring field, or a full-signature ascription; left unset
+  on inference-produced signatures. The type AST keeps its single
+  optional field ("absent = pure") — provenance lives on the
+  *definition*, not in the type. A bare specifier slot inside an
+  **explicitly ascribed full signature** IS a declared-pure contract
+  (checked); an inferred bare arrow is not. A return-type-only
+  `Typed(body, T)` ascription remains return-type-only: it carries **no
+  effect contract** and leaves inference in charge.
 
 ## Sets, not rows
 
-This design stops at effect **sets** — no effect *rows*, no effect
-variables (Koka-style `map : (list<a>, a -> e b) -> e list<b>`, where the
-variable `e` propagates the callback's effect by unification).
+This design stops at effect **sets** — closed, ground, variable-free.
+
+**What a "row" is.** In the effect-typing literature (Koka is the
+canonical example) a function's effect is not a set but a **row**: a
+list of labels that may end in a **row variable** — `⟨exc, div | e⟩`
+reads "`exc`, `div`, and whatever `e` turns out to be". The row variable
+is the point: signatures become **polymorphic over effects**, quantified
+over `e`, so a higher-order function can state "my effect is my
+callback's effect plus my own" — `map : (list<a>, a -> e b) -> e
+list<b>` — and each call site *instantiates* `e` by unification. Rows
+are thus *open terms* that participate in inference: unification state,
+substitution, and (in Koka) duplicate/scoped labels with their own
+equational theory. Sets, by contrast, are *closed values* that
+participate only in subset tests. Everything this document calls an
+effect set is ground — no variables, no unification, no per-call
+instantiation; that entire apparatus is what is being declined, and
+"variance lives at applications, not signatures" (Worked examples) is
+what replaces it.
 
 **Why rows exist elsewhere**: in separately-compiled languages a function
 value is opaque at the use site; the type is the only channel for the
@@ -483,35 +1044,51 @@ bodiless contracts), or (b) library operators need effect-parametric
 signatures that projection over actual operands cannot cover. Neither is
 foreseeable.
 
-## Future effect labels (speculative)
+## Label admission — the test, the one future label, and dispositions
 
 Admission test (all three must hold): (1) a **consumer must distinguish**
 the label from the rest of impurity; (2) it is **inferable** or declarable
-at an opaque boundary; (3) subset ordering stays meaningful. New labels
-declare their metadata (impurity? frame-owing?) so derived views extend
-without redefinition.
+at an opaque boundary; (3) subset ordering stays meaningful. A new label
+declares its position on **every metadata axis** ("Label kinds":
+impurity, observation/action, frame protocol, handler-backed) so derived
+views extend without redefinition.
 
-- **`host`** (I/O with the host environment): `#env()`/`#navigator()` —
-  today parse-time pragmas gated by `allowHostPragmas` — and future
-  `Print`/file/network surfaces. Consumer: the trust gate, generalized to
-  an evaluation-time policy; compile targets fail closed. Metadata: impure,
-  not frame-owing. Distinct from `entropy` (reading data vs consuming
-  randomness); merge only if no consumer ever distinguishes them.
+**The only label still speculative is `async`:**
+
 - **`async`** (application may suspend): fails criterion 1 today
   (asynchrony is engine-wide, `evaluateAsync`). Becomes real when an
-  *operator* is inherently asynchronous; then sync entry points reject
+  *operator* is inherently asynchronous — which the first capability
+  operator (`Fetch`, Stage 4) will be, so this is no longer indefinitely
+  deferred (see "Host capabilities"). Then sync entry points reject
   `{async}` statically, and an awaiting wrapper *discharges* it. Metadata:
   **not an impurity** — an async pure function's settled value caches
   soundly, which "pure ≙ no impurity label" accommodates. The
   representation question — effect vs. promise-typed value — is **ruled:
   effect** (see below).
-- **`time`** (clock reads): unseeded nondeterminism — folds into
-  **`entropy`** unless a virtual-clock mechanism (`WithClock`?) ever gives
-  it its own consumer, the same way `random` earned its label.
+
+**Dispositions of earlier candidates (v4) — no longer speculative:**
+
+- **`time`** (clock reads) — **admitted**, now in the main roster: v3
+  folded it into `entropy` "unless a virtual-clock mechanism
+  (`WithClock`?) ever gives it its own consumer, the same way `random`
+  earned its label". A mockable `ce.effects.time` is exactly that
+  mechanism.
+- **`host`** — **superseded** by the capability split (`network`,
+  `fs_read`, `fs_write`, `environment`, `console`): the merged label
+  failed criterion 1 in a subtle way — no consumer told its surfaces
+  apart — until the `ce.effects` registry supplied a *per-surface*
+  consumer, at which point the honest representation is one label per
+  handler namespace (see "Host capabilities").
 
 Rejected as effects: **`diverge`/nontermination** (handled dynamically,
 `TIMEOUT-MODEL.md`; not inferable; no consumer); **GPU/target
 compilability** (a capability of an operator, not an effect of applying it);
+**`assert`** (v4) — it fails the admission test on every prong: a
+*failing* assert produces an `Error` value, which lives in the lattice
+per the `error` rejection below; a *passing* assert is pure; and no
+consumer distinguishes "may assert" from "total". The underlying want —
+a test harness collecting assertion reports — is a reporting
+*capability* (a `ce.effects` interface), not a label;
 and **`error`/partiality** — expanded below, because the reasoning is
 load-bearing for planned Cortex ergonomics.
 
@@ -581,7 +1158,8 @@ Two boundaries of the ruling, stated so it is not over-read:
    *separate* from return values — exceptions, i.e. non-local control flow
    (Koka's `exc`, Swift's `throws`, Java's checked exceptions annotate the
    bypass path). CE has no bypass channel: an `Error` expression flows
-   through the ordinary compositional value path. `->{error}` would track a
+   through the ordinary compositional value path. An `error` specifier
+   would track a
    channel that does not exist.
 2. **The type lattice already represents it — strictly better.** `error`
    and `nothing` are primitive types, and the lattice has unions and
@@ -620,9 +1198,12 @@ Cortex's expression-`Block` model deliberately lacks; deep chains are
 - **`WithRandomSeed`'s pending-draw walk**: whether a partially-evaluated
   body still owes draws depends on *how far evaluation got* — a runtime
   fact no static annotation sees. The walk's inputs are upgraded (it keys
-  on the label-aware `effectsOf` plus `frameProtocol`), but its exception
-  structure — the Hold and value-position rulings of `RANDOMNESS-MODEL.md`
-  **§2**, the lazy-materialization ruling of **§6** — stands untouched.
+  on the label-aware `effectsOf`, `frameProtocol === 'seed'`, **and**
+  `readsRandomFrame` — all three participation modes), but its exception
+  structure — the value-position rulings of `RANDOMNESS-MODEL.md` **§2**,
+  the lazy-materialization ruling of **§6** — stands untouched; the Hold
+  ruling of §2 is now *derived* from the quote-position contribution rule
+  rather than special-cased, with identical observable behavior.
 - **The conservative unknown-operator default** in runtime accounting
   (`?? false`) — correct where no contract exists.
 - **Broadcast draw-once semantics** (`BROADCAST-MODEL.md`).
@@ -634,9 +1215,9 @@ Cortex's expression-`Block` model deliberately lacks; deep chains are
 Effects ride the type literal:
 
 ```cortex
-let f: (real) ->{random} real            // opaque declaration
+let f: (real) random -> real             // opaque declaration
 integrate(f: (real) -> real, a, b) = …   // pure-callback bound, checked at call
-function roll(n) ->{random} integer { Random(Range(1, n)) }  // checked vs body
+function roll(n) random -> integer { Random(Range(1, n)) }   // checked vs body
 ```
 
 Scoping of the "no new grammar" claim:
@@ -647,7 +1228,7 @@ Scoping of the "no new grammar" claim:
   grammar and encoding work. **Normative encoding (resolving v2's
   either/or): the full signature.** The parser builds the complete
   `FunctionSignature` — parameter types from the parameter list, arrow
-  effects from the post-parameter-list `{effects}`, return type from the
+  effects from the post-parameter-list specifier slot, return type from the
   ascription — and the lowering carries that signature as the literal's
   declared type (the `Typed` ascription holds the full signature type, not
   a bare return type). `desugarSignatureString()` decomposition keeps
@@ -675,14 +1256,22 @@ Each stage is useful without the next; per-stage pinning tests named.
   (lexer/parser/serializer/`subtype.ts`/`reduce.ts`), `BoxedType`,
   effect-aware `matches()`; `function`-primitive bound semantics; flag
   truth-table translation + derived getters + `frameProtocol` field
-  split; annotate the current `drawsRandom` operators — authoritative list
+  split (kind-valued: `'seed'`); annotate the current `drawsRandom`
+  operators — authoritative list
   by grep (currently `Random`, `RandomChoice`, `RandomPrime`,
   `RandomSample`, `RandomShuffle`; `WithRandomSeed` becomes
   discharge + `frameProtocol`) — `RandomExpression` gets
-  `() ->{entropy} expression`; `{write}` assigned only by the **audited
+  `() entropy -> expression`; `{scope}` assigned only by the **audited
   list** (`Assign`, `Declare`, `Assume`, and whatever the audit of
   `pure: false` residuals confirms as engine-state writers — everything
-  unaudited translates to `{any}`, never `{write}`). Tests:
+  unaudited translates to `{any}`, never `{scope}`). `Integrate`/
+  `NIntegrate` keep `readsRandomFrame` **unchanged** — the field is
+  outside the flag migration (v5). Audit the pure container/constructor
+  positions for `invokes: false` (`List`, `Tuple`, structural
+  operators). The lexer carries
+  the full v4 nine-label enumeration — the capability labels have no
+  library carriers yet but are declarable at opaque boundaries from day
+  one. Tests:
   `test/common/type/effects.test.ts` (grammar round-trip incl. every
   malformed form; subtype partial order incl. pairwise-incomparable
   singletons), extension of `user-function-purity.test.ts` (getters,
@@ -691,17 +1280,41 @@ Each stage is useful without the next; per-stage pinning tests named.
   construction seam + guard test; literal-boundary inference;
   annotated-parameter contribution; call-boundary and definition-annotation
   checks; `effectsOf` runtime computation with generation-guarded memo;
-  pending-draw walk re-keyed on it; discharge declarations (function
-  parameters AND held positions); purity-gated currying pre-evaluation.
+  pending-draw walk re-keyed on it (all three seed-frame modes, incl.
+  `readsRandomFrame`); discharge declarations (function parameters AND
+  held positions, with the may-evaluate/quote split); internal co-finite
+  results for discharge-from-`any`; purity-gated currying
+  pre-evaluation; dominance-based confinement analysis for `scope`
+  (inference-only, per "Scope writes"); the dependency-order split
+  (unresolved head → `{any}`; trusted-annotation escape) and the
+  `effectsDeclared` provenance bit.
   Tests: `test/compute-engine/effects-contracts.test.ts` (inline /
   assigned / opaque `{random}` callbacks, direct and through another HOF;
-  named-callback pending-draw case; discharge incl. `WithRandomSeed`
-  `{write}`-passthrough; overload arms incl. incomparable-effects
-  tie-break; partial-application effect timing).
+  named-callback pending-draw case; incomplete-estimator frame retention
+  (worked example 6); `Hold` inertness + `Release` resurfacing;
+  `invokes: false` container positions; discharge incl. `WithRandomSeed`
+  `{scope}`-passthrough and the ¬{random} co-finite case; overload arms
+  incl. incomparable-effects tie-break; partial-application effect
+  timing; confined vs escaping vs conditional-declare `Assign`
+  inference; forward-reference `{any}` + trusted-annotation install).
 - **Stage 3 — Cortex**: type-literal effects in the parser/serializer
   pair; the definition-form full-signature encoding. Tests:
   `test/cortex/effects.test.ts` (round-trip of all three surface
   positions).
+- **Stage 4 — capabilities (on demand)**: the `ce.effects` registry
+  (interfaces, fail-closed defaults, `ce.withEffects` scoped override),
+  shipping with the first capability operator (`Fetch` / `Print` / file
+  surfaces); `async` admission rides the first Promise-returning
+  operator per "Host capabilities". Tests: handler mock round-trip (mock
+  `network` → predefined responses; mock `time` → frozen clock);
+  coupling-rule audit (handler-namespace usage ⊆ declared labels);
+  fail-closed defaults yield error values, not throws; snapshot
+  isolation (two concurrent async evaluations, one under `withEffects`,
+  no bleed; restoration after throw and after promise rejection);
+  `null`-denial overriding a present default; `random` kernel swap
+  (`draw(seed, n)` mock → deterministic interpreted replay; compile of a
+  `random`-bearing expression declines while a non-default kernel is
+  installed).
 
 **Blast-radius protocol** — two audits, per the standing snapshot policy:
 
@@ -716,17 +1329,16 @@ Each stage is useful without the next; per-stage pinning tests named.
 
 ## Open questions
 
-- **Dependency-order refinement (awaiting ruling)**: adopt the split —
-  unresolved *named head* infers `{any}` until it resolves (sound, loses
-  caching for forward references), while applied unannotated *parameters*
-  keep optimism? Or keep the current uniform optimism + escape hatch?
-- Should `write` split local/global — a `Block`-scoped `Assign` that
-  cannot escape is observationally pure from outside? No consumer
-  distinguishes today; leave unified until one does. (Ready test case: the
-  pending-draw gate + `Block`-scoped `Assign`.)
 - Should discharge declarations get Cortex surface syntax, or remain
   definition-API-only (sufficient for builtins/hosts, the only foreseeable
   dischargers)? Lean: API-only until a user-level handler story exists.
-- `host` vs `entropy`: kept distinct on the reading-data vs
-  consuming-randomness axis; merge if, by the time `host` is admitted, no
-  consumer distinguishes them.
+
+Resolved since v3: the `write` local/global split (v4: confinement
+inference, "Scope writes"); `host` vs `entropy` (v4: `host` superseded by
+the capability split — `environment` reads data, `entropy` consumes
+randomness, `time` reads the clock); the syntax final form (v4, ruled
+2026-07-31: the Swift specifier slot; the brace form is superseded —
+"Grammar and AST"); and **dependency order** (v5, ruled 2026-07-31:
+unresolved named head → `{any}`, unannotated parameters stay optimistic,
+explicit annotation over an unresolved head installs as trusted — see
+"Inference").

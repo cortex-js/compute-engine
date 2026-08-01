@@ -276,6 +276,18 @@ GLSL/WGSL, so a 64-bit algorithm would be emulated on both sides; PCG3D fails
 which matters because per-cell seeds are commonly derived (`base + cellIndex`);
 and it is published and citable, so a third party can verify a stored document.
 
+**Kernel injection point** (EFFECTS-MODEL v5, "Host capabilities"): `hash` is
+the *default implementation* of the index-addressed kernel
+`ce.effects.random.draw(seed, n)`. A host may install a replacement — for
+mocking, for pinning a generator so replay archives stay valid across engine
+versions, or for compliance-mandated generators — under the same contract this
+section states: a pure function of `(seed, n)`, captured at frame entry.
+Everything above the kernel (frames, draw indices, sub-stream seed derivation)
+is engine-owned and unaffected by a swap. Compiled targets inline PCG3D
+verbatim, so while a non-default kernel is installed, compiling a
+`random`-bearing expression **fails closed** (declines with a diagnostic);
+custom kernels are interpreted-only.
+
 ### Parity is tiered — the GPU cannot be bit-equal
 
 GLSL and WGSL have no f64, and GLSL ES float ops are not IEEE-pinned. A flat
