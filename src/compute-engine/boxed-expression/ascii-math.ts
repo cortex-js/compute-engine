@@ -13,6 +13,7 @@ import {
   roundMeasurementForDisplay,
 } from '../numerics/strings.js';
 import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
+import { errorOpsWithoutTrace } from './error-value.js';
 
 /** Helper type for expressions known to be function expressions (in operator/function callbacks) */
 type FnExpr = Expression & FunctionInterface;
@@ -623,13 +624,17 @@ const FUNCTIONS: Record<
   Domain: (expr: Expression) => JSON.stringify(expr.json),
   Error: (expr_: Expression, serialize) => {
     const expr = expr_ as FnExpr;
-    if (expr.nops === 1) return `Error(${serialize(expr.op1)})`;
-    if (expr.nops === 2) {
-      if (isString(expr.op1))
-        return `Error("${expr.op1.string}", ${serialize(expr.op2)})`;
-      return `Error(${serialize(expr.op1)}, ${serialize(expr.op2)})`;
+    // The `ErrorTrace` breadcrumb (design §2a) is provenance DATA, reachable
+    // via `.ops`/`errorFrames()`; it is deliberately not rendered — an error
+    // reads the same whether or not it bubbled.
+    const ops = errorOpsWithoutTrace(expr);
+    if (ops.length === 1) return `Error(${serialize(ops[0])})`;
+    if (ops.length === 2) {
+      if (isString(ops[0]))
+        return `Error("${ops[0].string}", ${serialize(ops[1])})`;
+      return `Error(${serialize(ops[0])}, ${serialize(ops[1])})`;
     }
-    return `Error(${expr.ops.map((x) => serialize(x)).join(', ')})`;
+    return `Error(${ops.map((x) => serialize(x)).join(', ')})`;
   },
   LatexString: (expr_: Expression) => {
     const expr = expr_ as FnExpr;

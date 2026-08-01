@@ -135,7 +135,7 @@ exports[`DIVIDE Divide 6/3 1`] = `2`;
 
 exports[`DIVIDE Divide with many arguments 1`] = `-0.123517786561264822134387351778656126482213438735177865612648221343873517786561264822134387351778656125`;
 
-exports[`DIVIDE Divide with single argument 1`] = `["Divide", 2.5, ["Error", "'missing'"]]`;
+exports[`DIVIDE Divide with single argument 1`] = `["Error", "'missing'", ["ErrorTrace", ["ErrorFrame", "'Divide'", 2]]]`;
 
 exports[`EXACT EVALUATION Add: All exact 1`] = `
 box       = ["Add", 6, ["Divide", 10, 14], ["Sqrt", ["Divide", 18, 9]]]
@@ -349,20 +349,34 @@ N-auto    = 0.792481250360578090727
 N-mach    = 0.792481250360578
 `;
 
-exports[`INVALID NEGATE INVALID Negate 1`] = `["Negate", 2.5, ["Error", "unexpected-argument", "'1.1'"]]`;
-
-exports[`INVALID NEGATE INVALID Negate 2`] = `
+exports[`INVALID NEGATE INVALID Negate 1`] = `
 [
-  "Negate",
-  2.5,
-  ["Error", "unexpected-argument", "'-1.1'"],
-  ["Error", "unexpected-argument", "'18.4'"]
+  "Error",
+  "unexpected-argument",
+  "'1.1'",
+  ["ErrorTrace", ["ErrorFrame", "'Negate'", 2]]
 ]
 `;
 
-exports[`INVALID ROOT Too few args 1`] = `["Root", 2.5, ["Error", "'missing'"]]`;
+exports[`INVALID NEGATE INVALID Negate 2`] = `
+[
+  "Error",
+  "unexpected-argument",
+  "'-1.1'",
+  ["ErrorTrace", ["ErrorFrame", "'Negate'", 2]]
+]
+`;
 
-exports[`INVALID ROOT Too many args 1`] = `["Root", 2.5, -1.1, ["Error", "unexpected-argument", "'18.4'"]]`;
+exports[`INVALID ROOT Too few args 1`] = `["Error", "'missing'", ["ErrorTrace", ["ErrorFrame", "'Root'", 2]]]`;
+
+exports[`INVALID ROOT Too many args 1`] = `
+[
+  "Error",
+  "unexpected-argument",
+  "'18.4'",
+  ["ErrorTrace", ["ErrorFrame", "'Root'", 3]]
+]
+`;
 
 exports[`LB Lb 'Pi' 1`] = `
 box       = ["Lb", "Pi"]
@@ -922,9 +936,16 @@ box       = ["Negate", "NaN"]
 canonical = NaN
 `;
 
-exports[`POWER INVALID Power 1`] = `["Power", 2.5, ["Error", "'missing'"]]`;
+exports[`POWER INVALID Power 1`] = `["Error", "'missing'", ["ErrorTrace", ["ErrorFrame", "'Power'", 2]]]`;
 
-exports[`POWER INVALID Power 2`] = `["Power", 2.5, -1.1, ["Error", "unexpected-argument", "'18.4'"]]`;
+exports[`POWER INVALID Power 2`] = `
+[
+  "Error",
+  "unexpected-argument",
+  "'18.4'",
+  ["ErrorTrace", ["ErrorFrame", "'Power'", 3]]
+]
+`;
 
 exports[`POWER Power with negative exponent 1`] = `0.064`;
 

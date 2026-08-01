@@ -5,8 +5,11 @@ same day** — (1) rung-2 scope = application/`|>` only, operators stay
 inert until rung 3; (2) `Nothing` = argument-list erasure, route parity;
 (3) `IsError(expr)` holding its operand; (4) `cortex check` owns
 canonicalization-time type errors as diagnostics. Rungs 1–2 + ruling 2 +
-ruling 4 in implementation as of 2026-07-31; rung 3 remains a gated
-future round. One spec refinement fixed at implementation kickoff: an
+ruling 4 in implementation as of 2026-07-31. **Rung 3 landed the same
+day** (operator-level bubbling + the `ErrorTrace` breadcrumb of §2a, the
+collection carve-out of §6b, the `inspectsErrors` widening and the
+`Assume` errors-as-values fix of §8a). One spec refinement fixed at
+implementation kickoff: an
 application operand whose evaluated value *embeds* an error (an invalid
 frozen tree like `Error(…) + 1`, not just an `Error`-headed value)
 bubbles its **first embedded error** — otherwise rung 2 would not cover
@@ -83,6 +86,59 @@ already makes `Type(err)` work:
 as payload. Bubbling loses the *surrounding* frozen context; where that
 matters (see the display trade-off, §6 rung 3), the payload can grow a
 breadcrumb — out of scope for rungs 1–2.
+
+## 2a. The breadcrumb: `ErrorTrace` (rung 3, landed 2026-07-31)
+
+Bubbling loses the *surrounding* frozen context — the operator chain from the
+failure site to the root, and the sibling values already computed (§6a). The
+ratified middle ground is a **breadcrumb**: the bubbled `Error` carries the
+chain of `(operator, operand index)` frames it passed through, so a host
+(Tycho) can still say *where* the failure sits. v1 carries the chain only;
+sibling values are deliberately not carried (the expensive half).
+
+**Shape.**
+
+```json
+["Error", <code>, <where>?, ["ErrorTrace", ["ErrorFrame", "'Ln'", 1],
+                                            ["ErrorFrame", "'Add'", 2]]]
+```
+
+- The trace is the **last** operand of `Error` and is identified by its
+  `ErrorTrace` **head, never by position**. An error that never bubbled keeps
+  its historical 1- or 2-operand shape byte for byte; a traced error whose
+  `where` slot is empty is `["Error", code, ["ErrorTrace", …]]`, so any
+  consumer that reads operand 2 as the context must skip an `ErrorTrace` there
+  (`errorWhere()` does).
+- Each frame is `["ErrorFrame", <operator name : string>, <operand index :
+  1-based integer>]`.
+- Frames read **innermost first** — from the failure site outwards — and
+  accumulate across hops: the structural walk that finds the embedded error
+  contributes the frames inside the operand, then the bubbling node appends
+  itself. Rung-2 user-function bubbling pushes frames through the same path
+  (`f("a" + 1)` → `ErrorTrace(ErrorFrame("Add", 1), ErrorFrame("f", 1))`).
+
+**Why this shape.** Three constraints drove it: the breadcrumb had to be
+expression structure (metadata is stripped by `box()`, so it would not survive
+a round trip); the historical `Error` shapes had to stay byte-identical when
+nothing bubbled; and `Error(c) => c` destructuring had to keep working. A
+distinctly-headed trailing operand satisfies all three — an `ErrorTrace` node
+cannot be confused with a code or a context, so every existing reader can skip
+it positionally, and `match` strips it before handing the subject to the
+pattern matcher (the breadcrumb is provenance, not payload).
+
+**Display stays compact.** `toString()`/AsciiMath and the LaTeX serializer
+render a traced error exactly as an untraced one — the breadcrumb is data, not
+display noise. It is reachable from `.ops`/`.json`, or through the helpers in
+`boxed-expression/error-value.ts`: `errorTrace()`, `errorFrames()` (decoded
+`{operator, index}[]`), `errorWhere()` and `errorOpsWithoutTrace()`.
+
+**How a host reads it.** From MathJSON: take the last operand of the `Error`
+node, check its head is `ErrorTrace`, and read each `ErrorFrame`'s string +
+integer. `src/cortex/execute-cortex.ts` does exactly that (it cannot import the
+engine) and renders `in Ln argument 1, in Add argument 2` as `%1` of the
+`runtime-error` diagnostic, alongside the existing statement-range anchoring —
+that anchoring **is** the source-span half of breadcrumb v1. Engine trees carry
+no spans, and none were invented.
 
 ## 3. The `|>` question: the pipe must remain application sugar
 
@@ -170,17 +226,119 @@ rescuing.
   Hica; operator-level behavior unchanged. Measure snapshot blast radius
   before landing (expected small: today's result is inert, so only
   already-failing expressions change shape).
-- **Rung 3 (gated design round):** operator-level bubbling
-  (`err + 1` → err) and the display trade-off — a half-frozen formula
-  shows *where* the error sits (valuable in Tycho formula cells); a
-  bubbled error shows *what* failed. Needs a blast-radius measurement, a
-  provenance-breadcrumb decision, and a Tycho consult. Not blocking
-  rungs 1–2.
+- **Rung 3 (RULED 2026-07-31: bubbling WITH provenance breadcrumb):**
+  operator-level bubbling (`err + 1` → err), with the `Error` value
+  carrying a breadcrumb (the failure's context/path within the larger
+  expression) so Tycho can still render *where* the failure sits — the
+  user ruled for the middle ground over freeze-in-place. Riders folded
+  into the round: derive the observer exemption from `lazy` for held
+  positions (absorbs the `Simplify`/`Expand`/`Factor`/`Together`/`Hold`
+  divergence residue) and the `Assume`-throws fix. Sequencing: blast-
+  radius measurement first (prototype in an isolated worktree, full
+  suite, categorized churn + before/after cell examples), then the
+  breadcrumb shape design, then implementation.
+  **LANDED 2026-07-31** — with two amendments the measurement forced: the
+  `lazy`-derived observer exemption was DROPPED (§6a.1) in favor of
+  per-operator `inspectsErrors` opt-ins (audit table in §8a), and a
+  collection carve-out was added (§6a.2, implemented per §6b). The
+  breadcrumb is §2a.
 - **Follow-on (decide after rung 2):** revisit silent-NaN sites — e.g.
   out-of-range `xs[10]` → `Error` instead of silent NaN becomes defensible
   once errors are rescuable. Breaking change; own round.
 - **`cortex check` static reclassification (§5):** independent of the
   rungs; can proceed anytime.
+
+## 6a. Rung-3 blast-radius measurement (2026-07-31, prototype in-tree, reverted)
+
+Naive prototype = final-arm bubbling + the `lazy`-derived observer gate.
+Full suite: 42 failures / 10 suites — **33 tests (44 snapshot blocks) pure
+shape change** (frozen `Operator(…Error…)` → bare error; top suites:
+linear-algebra 11, collections 8, arithmetic 5), 3 boundary pins that
+correctly flipped, and **5 genuine surprises that redirect the design**:
+
+1. **The `lazy` rider is wrong for this engine.** `lazy` here means
+   evaluation-order control, not "observer": `Add`, `Multiply`, `Equal`,
+   `Greater`, `Less`, `List`, `Set`, `Sum`, `If`, `Integrate`, `Solve`,
+   `D` are all lazy. The gate therefore (i) exempts exactly the operators
+   rung 3 targets — `err + 1` stayed frozen while `err - 1` bubbled, an
+   incoherent split — and (ii) converts "freeze" into "run a handler on
+   raw uncanonicalized operands" (the documented lazy-held-operands trap,
+   now on the error path): a `Not canonical` throw escaped to the host
+   from `Integrate`, `If` threw `Condition must evaluate…` on the box
+   route, `Sum` hit console.asserts. `inspectsErrors` is a deliberate
+   per-operator opt-in precisely because its five members have handlers
+   audited for invalid nodes. **Ruling: the lazy rider is DROPPED.**
+   The `Simplify`/`Expand`/`Factor`/`Together`/`Hold` divergence closes
+   instead by widening `inspectsErrors` to those operators after auditing
+   each handler.
+2. **Collections need their own non-bubbling rule.** The `errorValue()`
+   carve-out governs descent into *arguments*; it says nothing about a
+   collection-headed node bubbling its own operand's error. Today `List`
+   survives only because it happens to be lazy; **`Tuple(1, err)`
+   bubbled to the bare error**. Rule for implementation: a
+   collection-headed node never bubbles its operands' errors — keyed on
+   collection-ness, not laziness. (`Dictionary` has no operator def and
+   is unreachable via this path — verify at implementation.)
+3. **Bubbling alone (no lazy gate) is coherent**: `err + 1` → err,
+   route parity holds (`Sin(err)` ≡ `err |> Sin`), no host-escaping
+   throws, the calculus crash does not occur.
+4. **`Assume`'s direct-route throw is orthogonal** — its held operand is
+   raw and valid on the box route, so the invalid-gate is never
+   consulted; the throw is inside its own handler. Separate fix.
+5. **Contract-pin caveat:** three `string-and-type.test.ts` tests pin
+   "a non-string operand leaves it unevaluated" as deliberate
+   non-coercion. Bubbling preserves the non-coercion (nothing is
+   coerced; the validation error propagates) but flips the *frozen*
+   result shape — flagged for explicit sign-off rather than absorbed.
+
+Perf: not measurable (machine variance 123–288 s on identical code);
+mechanistically unconcerning — the gate sits behind the cached
+`isValid === false` test, so valid-tree evaluation is untouched.
+
+**Breadcrumb design input** (what the bare error loses, per probes): the
+operator chain from the error node to the root, and sibling values
+already computed (`~oo + ln(err)` → the `~oo` vanishes; a list's valid
+elements vanish). A breadcrumb of `(operator, operand-index)` frames
+plus the top-level source span recovers the chain; carrying sibling
+values is the expensive open half.
+
+## 6b. Rung-3 implementation notes (landed 2026-07-31)
+
+- **Bubbling is the final arm of `_invalidValue()`**
+  (`boxed-expression/boxed-function.ts`, shared by the sync and async compute
+  paths): `return this._firstOperandError() ?? this;`. The `?? this` matters —
+  an invalid node whose error sits inside a COLLECTION operand yields no error
+  to bubble and still freezes (`Length([1, err, 3])` is unchanged by rung 3).
+  The `lazy`-derived observer gate measured in §6a was **not** implemented, per
+  the ruling.
+- **The collection carve-out is keyed on the DEFINITION**: a node whose
+  operator definition carries a `collection` handler block returns `this`
+  instead of bubbling (`isCollectionHead()` in
+  `boxed-expression/error-value.ts`). Not `expr.isCollection`, which is
+  hard-wired to `false` for an invalid expression — the only case that reaches
+  here. Two structural containers have no such block and are named explicitly:
+  `Dictionary` (no operator definition at all) and `KeyValuePair` (it
+  canonicalizes to a `Tuple` when valid, so only its INVALID nodes survive —
+  exactly the case the rule must cover). Consequence, deliberate: every
+  collection-producing operator freezes, including `Take`/`Drop`/`Slice`/`Map`
+  — which is why the `TAKE`/`DROP`/`SLICE` "invalid argument" tests in §6a's
+  fallout list did NOT flip.
+- **`Dictionary` resolved** (§6a.2's open question): a dictionary literal is a
+  `BoxedDictionary`, not a `BoxedFunction`, so `_invalidValue()` never runs for
+  it. Its VALUES are evaluated one by one, so an invalid value bubbles *within
+  its cell* and the dictionary survives — the collection semantics, reached by
+  a different road. Pinned.
+- **`errorValue()`'s non-descent set is deliberately NOT the same predicate.**
+  It governs descent into an *application's arguments* (rung 2, a landed
+  contract: `f([1, err])` freezes); `isCollectionHead()` governs a node
+  bubbling its *own* operands. Widening the former to match would silently
+  change rung-2 behavior, so the two are separate and cross-documented.
+- **Blast radius, measured**: 33 tests / 32 snapshot blocks across 9 suites,
+  all category-(a) shape churn (frozen `Operator(…Error…)` → bare error, plus
+  the new `ErrorTrace` operand in MathJSON snapshots). No behavior surprises,
+  no host-escaping throws, no `@fixme` snapshot touched. The naive prototype's
+  42 failures shrank because the collection rule reverted the `Take`/`Drop`/
+  `Slice` flips and the dropped `lazy` gate removed the calculus/`Sum` crashes.
 
 ## 7. Reconciliation with `docs/EFFECTS-MODEL.md`
 
@@ -250,8 +408,41 @@ Conventions fixed during implementation — binding on later rungs:
 - **Blast radius:** 2 inline snapshots (`Pipe(5, 3)`, `Pipe(5, "abc")` —
   the frozen `Pipe(…Error…)` became the bare error, since the callee
   itself is the error); zero doc-output churn.
+- **Rung-3 `inspectsErrors` widening — the per-operator audit.** Each
+  candidate was probed on BOTH routes (`Op(bad)` via `ce.box`, and
+  `Pipe(bad, Op)`/`Apply(Op, bad)`) against an operand embedding a validation
+  error, before the flag was set:
+
+  | Operator | Flag | Audit finding |
+  |---|---|---|
+  | `Simplify` | **on** | Handler evaluates its operand, so it bubbles on its own terms: both routes give the bare error. Flag pins the parity (without it the pipe route bubbles from the gate, the direct route from inside the handler — same value, different reason). No throw, no assert. |
+  | `Expand` | **on** | Rewrites in place and returns the still-invalid expression (`Error(…) + 1`) on both routes. Safe. |
+  | `ExpandAll` | **on** | Same handler family as `Expand`; same result. (Not in the ruled five — folded in for consistency.) |
+  | `Factor` | **on** | Same; `factorPolynomial` leaves an invalid target alone. |
+  | `Together` | **on, after a handler fix** | MISBEHAVED: `togetherReduced` read the embedded `Error` node as a missing operand and returned `1 / Error("missing")` — dropping the real error and inventing a new one. Fixed minimally (return the target untouched when it is invalid), then flagged. |
+  | `Distribute` | **on** | Same family as `Expand`. (Not in the ruled five — folded in.) |
+  | `Hold` | **on** | Handler is `engine.hold(x)`, total on any operand. Without the flag `("a"+1) \|> Hold` bubbled while `Hold("a"+1)` held. The residual difference between routes (the piped operand arrives canonical) is the ordinary `Pipe` canonicalization, not error-specific. |
+
+  Every one of these operators is a **transformer or a holder**: it reports on
+  the expression it is given rather than consuming its value, which is the
+  principle behind the flag. Operators that genuinely consume a value
+  (`Assume`, `Evaluate`, `N`, arithmetic, …) stay off it and bubble.
+- **`Assume`'s throw is now a value** (§6a.4). `assumeDispatch`'s final
+  `throw new Error('Unsupported assumption…')` became
+  `return 'not-a-predicate'`, matching every sub-dispatcher above it
+  (`!isFunction(proposition)`, `!fact.isValid` already report malformed input
+  that way). It escaped to the host on the `ce.box` route while Cortex turned
+  it into a value — the two routes disagreed on whether an unassumable
+  proposition is catastrophic. Known wart, PRE-EXISTING and untouched:
+  `Assume` returns `ce.symbol(result)`, and `not-a-predicate` is not a valid
+  symbol name, so the outcome renders as
+  `Error(ErrorCode("invalid-symbol", "invalid-char"), "not-a-predicate")` —
+  exactly what `Assume(Or(…))` has always produced. Worth a follow-up (report
+  the outcome as a string), out of scope here.
 - **Known residue (recorded at review): the §3 equivalence is restored
-  only for the five `inspectsErrors` operators.** Some other *lazy*
+  only for the five `inspectsErrors` operators.** *(Closed for the transformer
+  family by the rung-3 widening above; `Assume`'s own route difference remains,
+  and is now benign — both routes return a value.)* Some other *lazy*
   built-ins still route-diverge on error operands — measured:
   `Simplify`, `Expand`, `Factor`, `Together`, `Hold`, `Assume` diverge
   (`Simplify("a"+1)` on the raw box route runs while

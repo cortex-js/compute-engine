@@ -1,5 +1,11 @@
 import type { MathJsonExpression } from '../math-json/types.js';
-import { operator, operands } from '../math-json/utils.js';
+import {
+  operator,
+  operands,
+  operand,
+  stringValue,
+  machineValue,
+} from '../math-json/utils.js';
 import type { CancellationCause } from '../common/interruptible.js';
 
 // Type-only imports: `src/cortex` never statically imports the engine, so this
@@ -146,11 +152,18 @@ export function executeCortex(
     if (i < statements.length - 1) {
       const errors = value.errors;
       if (errors.length > 0) {
+        // An error that BUBBLED out of a subexpression carries a breadcrumb
+        // of `(operator, operand index)` frames (engine design §2a). Rendered
+        // compactly as `%1`, it recovers the context the bare error lost; the
+        // statement range below supplies the source anchoring.
+        const frames = errorFrameChain(errors[0].json);
         diagnostics.push(
           makeDiagnostic(
             cancellation !== undefined
               ? ['evaluation-canceled', cancellation, errors[0].toString()]
-              : ['runtime-error', errors[0].toString()],
+              : frames
+                ? ['runtime-error', errors[0].toString(), frames]
+                : ['runtime-error', errors[0].toString()],
             statementRange(stmt, source)
           )
         );
@@ -175,6 +188,31 @@ export function executeCortex(
   }
 
   return { value, diagnostics };
+}
+
+/**
+ * A compact rendering of an error value's `ErrorTrace` breadcrumb —
+ * `in Ln argument 1, in Add argument 2` — or `''` when it carries none.
+ *
+ * The breadcrumb is the LAST operand of an `["Error", …]` value and is
+ * identified by its `ErrorTrace` head, never by position (engine design §2a):
+ * `["ErrorTrace", ["ErrorFrame", "'Ln'", 1], ["ErrorFrame", "'Add'", 2]]`,
+ * innermost frame first. Read here from MathJSON rather than through an
+ * engine helper: `src/cortex` never statically imports the engine.
+ */
+function errorFrameChain(error: MathJsonExpression): string {
+  const ops = [...operands(error)];
+  const trace = ops[ops.length - 1];
+  if (trace === undefined || operator(trace) !== 'ErrorTrace') return '';
+  const frames: string[] = [];
+  for (const frame of operands(trace)) {
+    if (operator(frame) !== 'ErrorFrame') continue;
+    const name = stringValue(operand(frame, 1));
+    const index = machineValue(operand(frame, 2));
+    if (name === null || index === null) continue;
+    frames.push(`in ${name} argument ${index}`);
+  }
+  return frames.join(', ');
 }
 
 /** The source range of a statement AST node, falling back to the whole

@@ -188,27 +188,18 @@ describe('COUNT', () => {
   test('Count expression', () =>
     expect(evaluate(['Count', expression])).toMatchInlineSnapshot(`
       [
-        "Count",
-        [
-          "Error",
-          [
-            "ErrorCode",
-            "incompatible-type",
-            "'collection'",
-            "'finite_number'"
-          ]
-        ]
+        "Error",
+        ["ErrorCode", "incompatible-type", "'collection'", "'finite_number'"],
+        ["ErrorTrace", ["ErrorFrame", "'Count'", 1]]
       ]
     `));
 
   test('Count symbol', () =>
     expect(evaluate(['Count', symbol])).toMatchInlineSnapshot(`
       [
-        "Count",
-        [
-          "Error",
-          ["ErrorCode", "incompatible-type", "'collection'", "'number'"]
-        ]
+        "Error",
+        ["ErrorCode", "incompatible-type", "'collection'", "'number'"],
+        ["ErrorTrace", ["ErrorFrame", "'Count'", 1]]
       ]
     `));
 

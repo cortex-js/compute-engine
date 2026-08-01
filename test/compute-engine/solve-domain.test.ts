@@ -214,11 +214,12 @@ describe('SOLVE OVER A DOMAIN — API surface', () => {
     expect(solutions(p)).toEqual([2]);
   });
 
-  test('an invalid spec leaves the expression inert', () => {
-    // A number where a symbol/Element spec is expected → error operand →
-    // unevaluated.
+  test('an invalid spec reports the error, it does not solve', () => {
+    // A number where a symbol/Element spec is expected → error operand. Rung
+    // 3 of the error-propagation design bubbles it out of the frozen
+    // `Solve(…Error…)` tree; what is pinned is that no solving happens.
     const expr = ce.box(['Solve', ['Equal', ['Power', 'x', 2], 4], 42]);
-    expect(expr.evaluate().operator).toBe('Solve');
+    expect(expr.evaluate().operator).toBe('Error');
   });
 });
 

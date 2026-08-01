@@ -95,7 +95,7 @@ import {
   isValueDef,
   normalizedUnknownsForSolve,
 } from './utils.js';
-import { errorValue } from './error-value.js';
+import { errorValue, isCollectionHead } from './error-value.js';
 import { match } from './match.js';
 import { factor } from './factor.js';
 import { holdMap, holdMapAsync } from './hold.js';
@@ -1553,7 +1553,16 @@ export class BoxedFunction
    *   also what keeps `x |> f` ≡ `f(x)` for every callee.
    * - **Observers** (`inspectsErrors`): the handler runs — `Match` decides on
    *   an error subject, `Type`/`IsError` report on it.
-   * - **Everything else**: freeze to this inert expression, as before.
+   * - **Rung 3, every other operator**: bubble as well (`err + 1` → err,
+   *   `Sin(err)` → err) — error is the absorbing element of strict evaluation,
+   *   and the bubbled value carries a breadcrumb of the frames it passed
+   *   through (§2a).
+   * - **Collections**: a collection-headed node — `List`, `Tuple`, `Set`,
+   *   `Range`, `Take`, … — never bubbles its own operands' errors. An error
+   *   in an element is a failure of that CELL, not of the container, so the
+   *   collection freezes with the error in place and stays iterable. Keyed on
+   *   collection-ness (the definition's `collection` handler block), not on
+   *   laziness — see §6a.2.
    */
   private _invalidValue(): Expression | undefined {
     const def = this._def ?? undefined;
@@ -1583,13 +1592,21 @@ export class BoxedFunction
 
     if (isOperatorDef(def) && def.operator.inspectsErrors) return undefined;
 
-    return this;
+    // Rung 3: a collection freezes with the failed cell in place; everything
+    // else bubbles.
+    if (isCollectionHead(this)) return this;
+
+    return this._firstOperandError() ?? this;
   }
 
-  /** The error carried by the first operand that is — or embeds — one. */
+  /** The error carried by the first operand that is — or embeds — one, with
+   * this node pushed onto its breadcrumb (§2a). */
   private _firstOperandError(): Expression | undefined {
-    for (const op of this._ops) {
-      const err = errorValue(op);
+    for (let i = 0; i < this._ops.length; i++) {
+      const err = errorValue(this._ops[i], {
+        operator: this._operator,
+        index: i + 1,
+      });
       if (err !== undefined) return err;
     }
     return undefined;

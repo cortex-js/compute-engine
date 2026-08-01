@@ -786,6 +786,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description:
         'Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it',
       lazy: true,
+      // An observer: `Hold` never looks INSIDE its operand, so a failed one is
+      // held like any other (rung 3 would otherwise bubble it away on the
+      // routes that hand over an already-canonical operand — `("a" + 1) |>
+      // Hold`, `Apply(Hold, …)`). Audited: the handler is `engine.hold(x)`,
+      // total on any operand.
+      inspectsErrors: true,
       signature: '(any) -> unknown',
       // Note: the operator is lazy and doesn't have a canonical handler:
       // the argument is not canonicalized.
@@ -1787,6 +1793,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'hold only for the duration of the simplification.',
       ],
       lazy: true,
+      // A transformer, not a strict consumer: it reports on the expression it
+      // is given. Without the flag it would bubble on the routes that hand
+      // over an already-canonical operand (`("a" + 1) |> Simplify`) while
+      // running on the direct one, the §8a route-divergence residue. Audited:
+      // the handler evaluates the operand (which bubbles on its own terms) and
+      // simplifies the result — no throw, no assert.
+      inspectsErrors: true,
       signature: '(any, any?) -> expression',
       type: ([x]) => x?.type ?? undefined,
       canonical: (ops, { engine: ce }) => {

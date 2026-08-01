@@ -150,10 +150,15 @@ function assumeDispatch(proposition: Expression): AssumeResult {
   // guard dischargeability in bulk (design §4.1, §9).
   if (UNSUPPORTED_PREDICATE_OPERATORS.has(op)) return 'not-a-predicate';
 
-  // Outright malformed input (not a predicate operator at all) still throws.
-  throw new Error(
-    'Unsupported assumption. Use `Element`, `NotElement`, `Equal`, `NotEqual`, `And` or an inequality'
-  );
+  // Outright malformed input (not a predicate operator at all) reports
+  // `'not-a-predicate'` too — errors are VALUES (error-propagation design
+  // §8a): the throw escaped to the host on the direct route (`Assume(Ln("a"))`
+  // via `ce.box`), while the same program run through Cortex became an
+  // `["Error", …]` value, so the two routes disagreed on whether an
+  // unassumable proposition is catastrophic. Every sub-dispatcher below
+  // already reports malformed input this way (`!isFunction(proposition)`,
+  // `!fact.isValid`); the fallthrough now matches them.
+  return 'not-a-predicate';
 }
 
 /**

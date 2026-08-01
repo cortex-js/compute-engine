@@ -14,6 +14,7 @@ import {
   sym,
 } from './type-guards.js';
 import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
+import { errorOpsWithoutTrace, errorTrace } from './error-value.js';
 
 /**
  * `Match` dispatch — Cortex structural pattern matching
@@ -965,6 +966,14 @@ function errorSubjectMayMatch(pattern: Expression): boolean {
   return isWildcard(pattern) || isFunction(pattern, 'Error');
 }
 
+/** An `Error` value with its `ErrorTrace` breadcrumb removed (§2a); any other
+ * value unchanged. */
+function withoutErrorTrace(subject: Expression): Expression {
+  if (!isFunction(subject, 'Error') || errorTrace(subject) === undefined)
+    return subject;
+  return subject.engine._fn('Error', [...errorOpsWithoutTrace(subject)]);
+}
+
 /**
  * The reference-path matcher, range- and dict-aware. Takes the **raw** (held)
  * pattern and resolves its `Pin` nodes itself, so a top-level range pattern is
@@ -992,7 +1001,14 @@ function matchPattern(
   // Rung 1: the error-subject gate. Applied here so the laddered tier-3 path
   // and the tier-3 reference path (`evaluateMatchReference`, which routes
   // EVERY case through this function) stay observationally identical.
-  if (isErrorSubject(subject) && !errorSubjectMayMatch(raw)) return null;
+  if (isErrorSubject(subject)) {
+    if (!errorSubjectMayMatch(raw)) return null;
+    // Rung 3: an error that BUBBLED carries a breadcrumb operand (design
+    // §2a). It is provenance, not payload — `Error(c) => c` must destructure
+    // a bubbled error exactly as it destructures a hand-written one, so the
+    // pattern is matched against the historical `Error` shape.
+    subject = withoutErrorTrace(subject);
+  }
 
   // Range membership is decided on the raw pattern (v1: at the top level of a
   // case pattern / of an or-alternative; a `Range` nested inside a list, tuple

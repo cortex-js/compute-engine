@@ -108,8 +108,8 @@ describe('Anonymous function with missing param', () => {
     expect(evaluate(['f3'])).toMatchInlineSnapshot(`NaN`)); // NaN is correct
   test('Missing Param Declared JS Function', () =>
     expect(evaluate(['f4'])).toMatchInlineSnapshot(
-      `["f4", ["Error", "'missing'"]]`
-    )); // Error is correct
+      `["Error", "'missing'", ["ErrorTrace", ["ErrorFrame", "'f4'", 1]]]`
+    )); // Error is correct (rung 3: the missing-argument error bubbles out)
 });
 
 describe('Anonymous function with too many params', () => {
@@ -125,9 +125,14 @@ describe('Anonymous function with too many params', () => {
     expect(evaluate(['f3', 10, 20])).toMatchInlineSnapshot(`11`));
 
   test('Too many params: Declared JS Function: arguments are checked by Compute Engine', () =>
-    expect(evaluate(['f4', 10, 20])).toMatchInlineSnapshot(
-      `["f4", 10, ["Error", "unexpected-argument", "'20'"]]`
-    )); // Error is correct
+    expect(evaluate(['f4', 10, 20])).toMatchInlineSnapshot(`
+      [
+        "Error",
+        "unexpected-argument",
+        "'20'",
+        ["ErrorTrace", ["ErrorFrame", "'f4'", 2]]
+      ]
+    `)); // Error is correct (rung 3: the arity error bubbles out)
 });
 
 describe('Anonymous function with anonymous parameters', () => {

@@ -23,7 +23,7 @@ export type DiagnosticCode =
   | 'type-annotation-error' // %0 = message from the type subparser
   | 'host-pragma-disabled' // %0 = pragma name (host-state pragmas gated off)
   | 'error-directive' // %0 = message from a `#error` pragma
-  | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value)
+  | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value), %1 = breadcrumb frame chain, if the error bubbled (e.g. "in Ln argument 1, in Add argument 2")
   | 'static-type-error' // %0 = error description, %1 = offending statement in Cortex form (a type error the engine detects at canonicalization time, before anything runs)
   | 'evaluation-canceled' // %0 = machine-readable CancellationCause, %1 = error description (non-final statement hit a cap breach: timeout/iteration/recursion)
   | 'unknown-function' // %0 = called name, %1 = suggested known operator ("did you mean")

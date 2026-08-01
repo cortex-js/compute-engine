@@ -704,10 +704,16 @@ describe('CORTEX EXECUTE — error propagation', () => {
     ).toBe(expected);
   });
 
-  test('`err + 1` stays an inert frozen sum (rung-3 boundary)', () => {
+  test('`err + 1` bubbles to the bare error (rung 3)', () => {
+    // Rung 3: operators bubble too, so the frozen `Add(…Error…, 1)` becomes
+    // the error itself — carrying a breadcrumb of the frames it passed
+    // through (design §2a), which `toString()` does not display.
     const { value } = run('("a" + 1) + 1');
-    expect(value.operator).toBe('Add');
+    expect(value.operator).toBe('Error');
     expect(value.isValid).toBe(false);
+    expect(value.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "number", "string"))'
+    );
   });
 
   test('`match` rescues an error and `IsError` observes it', () => {

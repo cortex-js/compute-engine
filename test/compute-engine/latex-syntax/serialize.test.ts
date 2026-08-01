@@ -250,23 +250,33 @@ describe('LATEX', () => {
   test('INVALID LatexString', () => {
     expect(ce.expr(['LatexString']).evaluate().json).toMatchInlineSnapshot(`
       [
-        LatexString,
+        Error,
+        'missing',
         [
-          Error,
-          'missing',
+          ErrorTrace,
+          [
+            ErrorFrame,
+            'LatexString',
+            1,
+          ],
         ],
       ]
     `);
     expect(ce.expr(['LatexString', 22]).evaluate().json).toMatchInlineSnapshot(`
       [
-        LatexString,
+        Error,
         [
-          Error,
+          ErrorCode,
+          'incompatible-type',
+          'string',
+          'finite_integer',
+        ],
+        [
+          ErrorTrace,
           [
-            ErrorCode,
-            'incompatible-type',
-            'string',
-            'finite_integer',
+            ErrorFrame,
+            'LatexString',
+            1,
           ],
         ],
       ]
@@ -274,12 +284,16 @@ describe('LATEX', () => {
     expect(ce.expr(['LatexString', "'\\sqrt{x}'", "'+1'"]).evaluate().json)
       .toMatchInlineSnapshot(`
       [
-        LatexString,
-        '\\sqrt{x}',
+        Error,
+        'unexpected-argument',
+        '"+1"',
         [
-          Error,
-          'unexpected-argument',
-          '"+1"',
+          ErrorTrace,
+          [
+            ErrorFrame,
+            'LatexString',
+            2,
+          ],
         ],
       ]
     `);
@@ -288,10 +302,15 @@ describe('LATEX', () => {
   test('Valid ParseLatex', () => {
     expect(ce.expr(['Parse']).evaluate().json).toMatchInlineSnapshot(`
       [
-        Parse,
+        Error,
+        'missing',
         [
-          Error,
-          'missing',
+          ErrorTrace,
+          [
+            ErrorFrame,
+            'Parse',
+            1,
+          ],
         ],
       ]
     `);
@@ -312,14 +331,19 @@ describe('LATEX', () => {
     expect(ce.expr(['Parse', ['Add', 2, 'Pi']]).evaluate().json)
       .toMatchInlineSnapshot(`
       [
-        Parse,
+        Error,
         [
-          Error,
+          ErrorCode,
+          'incompatible-type',
+          'string',
+          'finite_real',
+        ],
+        [
+          ErrorTrace,
           [
-            ErrorCode,
-            'incompatible-type',
-            'string',
-            'finite_real',
+            ErrorFrame,
+            'Parse',
+            1,
           ],
         ],
       ]

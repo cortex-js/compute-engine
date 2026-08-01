@@ -162,7 +162,11 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
     case 'floor-division-comment':
       return `"//" starts a comment, not floor division; use Floor(a / b) for the integer quotient`;
     case 'runtime-error':
-      return `Runtime error: ${args[0]}`;
+      // `%1` is the breadcrumb frame chain of a bubbled error (engine design
+      // §2a); absent when the error was raised in place.
+      return args[1]
+        ? `Runtime error: ${args[0]} (${args[1]})`
+        : `Runtime error: ${args[0]}`;
     case 'static-type-error': {
       // The canonicalization walk collects more than type errors (`missing`,
       // `unexpected-argument`, …), so the label follows the error code

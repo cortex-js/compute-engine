@@ -2,6 +2,18 @@
 
 ### Breaking Changes
 
+- **Errors now bubble through built-in operators.** Completing the error
+  round: an expression with a failed strict operand — `err + 1`,
+  `Sin("a" + 1)`, `Sum(Ln("a"), {k,1,3})` — now evaluates to the bare
+  `Error` value instead of a frozen inert tree. Collection constructors
+  are exempt (`[1, Ln("a"), 3]` and `(1, err)` stay collections with the
+  error in place), lazy observers (`Match`, `Type`, `IsError`, `Hold`,
+  `Simplify`, `Expand`, `Factor`, `Together`) run their handlers, and
+  `Assume` no longer throws a host exception on a non-predicate operand.
+  String operators are unchanged in *semantics* (still no coercion) but
+  their failed result is now the bare type error rather than a frozen
+  call.
+
 - **`Nothing` in an argument position now erases uniformly on every
   application route.** `f(Nothing)`, `Apply(f, Nothing)`, and
   `Nothing |> f` all behave as `f()`. Previously a pipe (or `Apply`) into
@@ -280,6 +292,19 @@
     NaN-rescue idioms keep working).
   (See also the Breaking Changes entry for the `Nothing`-argument and
   error-valued-`Pipe` result-shape changes that accompany this.)
+
+- **Bubbled errors carry a provenance breadcrumb.** A bubbled `Error`'s
+  last operand is an `ErrorTrace` — the chain of
+  `ErrorFrame(operator, operand-index)` frames from the failure site to
+  the root, innermost first — so a host can still report *where* the
+  failure sat (`x^2 + Ln("a") + 2x` → the error, with
+  `ErrorTrace(ErrorFrame("Ln", 1), ErrorFrame("Add", 2))`). Display
+  stays compact (`toString`/LaTeX render a traced error exactly as an
+  untraced one); read it via `.json` or the `errorTrace()`/
+  `errorFrames()` helpers. Errors that never bubbled keep their
+  historical 1- and 2-operand shapes byte for byte, and `Error(c)`
+  match patterns are unaffected. The Cortex `runtime-error` diagnostic
+  now includes the chain ("in `Ln` argument 1, in `Add` term 2").
 
 - **Static type diagnostics in `cortex check` and at run time.**
   Canonicalization-time type errors (`"a" + 1`) are now reported as

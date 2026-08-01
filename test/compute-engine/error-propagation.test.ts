@@ -2,6 +2,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { executeCortex } from '../../src/cortex/execute-cortex';
 
 import type { MathJsonExpression } from '../../src/math-json/types';
+import {
+  errorFrames,
+  errorWhere,
+} from '../../src/compute-engine/boxed-expression/error-value';
 
 /**
  * Rungs 1 and 2 of the error-propagation design
@@ -13,8 +17,10 @@ import type { MathJsonExpression } from '../../src/math-json/types';
  * - **Rung 2** — a FUNCTION APPLICATION whose strict argument is, or embeds,
  *   an `Error` evaluates to that error: `f(err)`, `Apply(f, err)` and
  *   `err |> f` all yield the bare error and never run the body.
- * - **Rung 3 is NOT in scope**: an OPERATOR (`err + 1`, `Sin(err)`) keeps
- *   today's freeze-to-inert behavior. The pins below are the boundary guard.
+ * - **Rung 3** — an OPERATOR bubbles too (`err + 1` → err, `Sin(err)` → err),
+ *   and the bubbled error carries a BREADCRUMB of `(operator, operand index)`
+ *   frames (§2a). Two carve-outs: a COLLECTION head freezes with the failed
+ *   cell in place, and the `inspectsErrors` observers still run.
  */
 
 /** A fresh engine with a call counter, a user function `f` and `g` whose
@@ -146,24 +152,155 @@ describe('ERROR PROPAGATION — rung 2: bubbling at application', () => {
   });
 });
 
-describe('ERROR PROPAGATION — rung-3 boundary: operators stay inert', () => {
-  test('`err + 1` stays a frozen inert Add (rung 3, not this round)', () => {
+describe('ERROR PROPAGATION — rung 3: operators bubble', () => {
+  test('`err + 1` bubbles to the bare error', () => {
     const ce = new ComputeEngine();
     const sum = ce.box(['Add', ERR, 1]);
-    expect(sum.evaluate().operator).toBe('Add');
-    expect(sum.evaluate().toString()).toBe('Error("oops") + 1');
+    expect(sum.evaluate().operator).toBe('Error');
+    expect(sum.evaluate().toString()).toBe('Error("oops")');
   });
 
-  test('a built-in operator freezes on both the direct and the pipe route', () => {
-    // `x |> f ≡ f(x)` must hold for EVERY callee (§3): a built-in operator is
-    // not an application for rung-2 purposes, so neither spelling bubbles.
+  test('a built-in operator bubbles on both the direct and the pipe route', () => {
+    // `x |> f ≡ f(x)` must hold for EVERY callee (§3): rung 3 makes both
+    // spellings bubble, exactly as rung 2 already did for user functions.
     const ce = new ComputeEngine();
-    expect(ce.box(['Sin', ERR]).evaluate().toString()).toBe(
-      'sin(Error("oops"))'
-    );
+    expect(ce.box(['Sin', ERR]).evaluate().toString()).toBe('Error("oops")');
     expect(ce.box(['Pipe', ERR, 'Sin']).evaluate().toString()).toBe(
-      'sin(Error("oops"))'
+      'Error("oops")'
     );
+  });
+
+  test('an operator bubbles an error EMBEDDED in an operand', () => {
+    const ce = new ComputeEngine();
+    // `"a" + 1` is an invalid frozen `Add`; `Sin` of it bubbles the embedded
+    // validation error, not the frozen tree.
+    expect(ce.box(['Sin', BAD]).evaluate().toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "number", "string"))'
+    );
+  });
+});
+
+describe('ERROR PROPAGATION — rung 3: the breadcrumb (§2a)', () => {
+  test('a bubbled error carries an `ErrorTrace` of frames, innermost first', () => {
+    const ce = new ComputeEngine();
+    const err = ce
+      .box(['Add', ['Power', 'x', 2], ['Ln', { str: 'a' }], ['Multiply', 2, 'x']])
+      .evaluate();
+    expect(err.json).toEqual([
+      'Error',
+      ['ErrorCode', "'incompatible-type'", "'number'", "'string'"],
+      ['ErrorTrace', ['ErrorFrame', "'Ln'", 1], ['ErrorFrame', "'Add'", 2]],
+    ]);
+  });
+
+  test('frames accumulate across nested bubbling hops', () => {
+    const ce = new ComputeEngine();
+    // `Sin("a" + 1)`: the walk records `Add` argument 1, the bubbling `Sin`
+    // node records itself.
+    expect(ce.box(['Sin', BAD]).evaluate().json).toEqual([
+      'Error',
+      ['ErrorCode', "'incompatible-type'", "'number'", "'string'"],
+      ['ErrorTrace', ['ErrorFrame', "'Add'", 1], ['ErrorFrame', "'Sin'", 1]],
+    ]);
+  });
+
+  test('`errorFrames()`/`errorWhere()` decode the breadcrumb', () => {
+    const ce = new ComputeEngine();
+    const err = ce.box(['Sin', BAD]).evaluate();
+    expect(errorFrames(err)).toEqual([
+      { operator: 'Add', index: 1 },
+      { operator: 'Sin', index: 1 },
+    ]);
+    // The `where` slot is EMPTY here: the breadcrumb occupies operand 2, and
+    // reading it positionally would misreport it as the error context.
+    expect(errorWhere(err)).toBeUndefined();
+    const withWhere = ce.expr(['Negate', 2.5, 1.1]).evaluate();
+    expect(errorWhere(withWhere)?.toString()).toBe('"1.1"');
+  });
+
+  test('an error raised in place carries NO breadcrumb (historical shape)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(ERR).evaluate().json).toEqual(['Error', "'oops'"]);
+  });
+
+  test('the breadcrumb survives a `box()`/`evaluate()` round trip', () => {
+    const ce = new ComputeEngine();
+    const err = ce.box(['Sin', BAD]).evaluate();
+    expect(ce.box(err.json).evaluate().json).toEqual(err.json);
+  });
+
+  test('the breadcrumb is not displayed: `toString()` and LaTeX stay compact', () => {
+    const ce = new ComputeEngine();
+    const bubbled = ce.box(['Sin', ERR]).evaluate();
+    const raw = ce.box(ERR);
+    expect(bubbled.toString()).toBe(raw.toString());
+    expect(bubbled.latex).toBe(raw.latex);
+  });
+
+  test('an `Error(c)` pattern destructures a bubbled error like a raw one', () => {
+    // The breadcrumb is provenance, not payload: it must not change how a
+    // `match` case sees the error.
+    expect(
+      cortex('match Sin("a" + 1) {\n  Error(c) => "caught"\n  _ => "no"\n}')
+    ).toBe('"caught"');
+  });
+
+  test('the Cortex runtime-error diagnostic renders the frame chain', () => {
+    const ce = new ComputeEngine();
+    const { diagnostics } = executeCortex(
+      ce,
+      'let y = Sin("a" + 1)\n1 + 1',
+      {}
+    );
+    const runtime = diagnostics
+      .map((x) => x.message)
+      .filter((m): m is string[] => Array.isArray(m) && m[0] === 'runtime-error');
+    expect(runtime.length).toBe(1);
+    expect(runtime[0][2]).toBe('in Add argument 1, in Sin argument 1');
+  });
+});
+
+describe('ERROR PROPAGATION — rung 3: collections freeze, they never bubble', () => {
+  test('a `List` keeps the failed cell in place', () => {
+    const ce = new ComputeEngine();
+    const list = ce.box(['List', 1, ['Ln', { str: 'a' }], 3]).evaluate();
+    expect(list.operator).toBe('List');
+    expect(list.count).toBe(3);
+    expect(list.toString()).toBe(
+      '[1,ln(Error(ErrorCode("incompatible-type", "number", "string"))),3]'
+    );
+  });
+
+  test('a `Tuple` keeps the failed cell in place', () => {
+    // Measured regression of the naive rung-3 prototype (§6a.2): `Tuple`
+    // bubbled because its exemption had ridden on laziness.
+    const ce = new ComputeEngine();
+    const tuple = ce.box(['Tuple', 1, ['Ln', { str: 'a' }]]).evaluate();
+    expect(tuple.operator).toBe('Tuple');
+    expect(tuple.count).toBe(2);
+  });
+
+  test('a dictionary keeps the failed VALUE in place', () => {
+    // `Dictionary` has no operator definition (§6a.2 open question): its
+    // values take the ordinary per-value evaluation path, so the error
+    // bubbles WITHIN the cell and the dictionary survives.
+    const ce = new ComputeEngine();
+    const dict = ce
+      .box(['Dictionary', ['KeyValuePair', { str: 'k' }, BAD]])
+      .evaluate();
+    expect(dict.get('k')?.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "number", "string"))'
+    );
+  });
+
+  test('`Length` of a list with a failed cell is unchanged by rung 3', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Length', ['List', 1, ['Ln', { str: 'a' }], 3]]).evaluate().json
+    ).toEqual([
+      'Length',
+      ['List', 1, ['Ln', ['Error', ['ErrorCode', "'incompatible-type'", "'number'", "'string'"]]], 3],
+    ]);
   });
 });
 
@@ -382,10 +519,14 @@ describe('ERROR PROPAGATION — async, first-error and partial application', () 
     expect((await ce.box(['Pipe', ERR, 'f']).evaluateAsync()).toString()).toBe(
       'Error("oops")'
     );
-    // Freeze: a built-in operator is not an application (rung 3).
+    // Rung 3: a built-in operator bubbles too, on the async route as well.
     expect((await ce.box(['Sin', ERR]).evaluateAsync()).toString()).toBe(
-      'sin(Error("oops"))'
+      'Error("oops")'
     );
+    // Freeze: a collection keeps the failed cell in place.
+    expect(
+      (await ce.box(['List', 1, ERR]).evaluateAsync()).operator
+    ).toBe('List');
     expect(calls()).toBe(0);
   });
 
@@ -416,26 +557,58 @@ describe('ERROR PROPAGATION — async, first-error and partial application', () 
   });
 });
 
-describe('ERROR PROPAGATION — §8a residue: non-observer lazy built-ins diverge', () => {
+describe('ERROR PROPAGATION — rung 3: the §8a route-divergence residue is closed', () => {
   /**
-   * The §3 equivalence `x |> f ≡ f(x)` is restored only for the five
-   * `inspectsErrors` operators (`Match`, `Type`, `IsError`, `Apply`, `Pipe`).
-   * Every OTHER lazy built-in still diverges by route, because its held
+   * The §3 equivalence `x |> f ≡ f(x)` used to hold only for the five
+   * original `inspectsErrors` operators (`Match`, `Type`, `IsError`, `Apply`,
+   * `Pipe`): every other lazy built-in diverged by route, because its held
    * operand is raw (and therefore valid) on the `ce.box`/parse route but
-   * arrives already canonical — and thus invalid — through `Pipe`. See the
-   * §8a note in `docs/plans/2026-07-31-error-propagation-design.md`.
+   * arrives already canonical — and thus invalid — through `Pipe`.
    *
-   * Pinned so the residue is visible; NOT an endorsement. Closing it is a
-   * rung-3 (or `inspectsErrors`-widening) decision, not this round's.
+   * Rung 3 closes it for the TRANSFORMERS by opting them into
+   * `inspectsErrors` (audited one by one, see the design's §8a table): they
+   * report on the expression they are given rather than consuming it, so the
+   * handler must run on both routes.
    */
-  test('`Simplify("a" + 1)` runs while `("a" + 1) |> Simplify` freezes', () => {
+  const embedded =
+    'Error(ErrorCode("incompatible-type", "number", "string")) + 1';
+
+  test.each([
+    ['Expand', embedded],
+    ['ExpandAll', embedded],
+    ['Factor', embedded],
+    ['Together', embedded],
+    ['Distribute', embedded],
+  ])('`%s` agrees on the direct and the pipe route', (op, expected) => {
     const ce = new ComputeEngine();
-    const embedded =
-      'Error(ErrorCode("incompatible-type", "number", "string")) + 1';
-    expect(ce.box(['Simplify', BAD]).evaluate().toString()).toBe(embedded);
-    expect(ce.box(['Pipe', BAD, 'Simplify']).evaluate().toString()).toBe(
-      `Simplify(${embedded})`
-    );
+    expect(ce.box([op, BAD]).evaluate().toString()).toBe(expected);
+    expect(ce.box(['Pipe', BAD, op]).evaluate().toString()).toBe(expected);
+  });
+
+  test('`Simplify` agrees on both routes (it evaluates, so it bubbles)', () => {
+    // `Simplify`'s handler EVALUATES its operand before simplifying, and that
+    // evaluation bubbles on its own terms — so both routes yield the bare
+    // error rather than the frozen tree.
+    const ce = new ComputeEngine();
+    const bare = 'Error(ErrorCode("incompatible-type", "number", "string"))';
+    expect(ce.box(['Simplify', BAD]).evaluate().toString()).toBe(bare);
+    expect(ce.box(['Pipe', BAD, 'Simplify']).evaluate().toString()).toBe(bare);
+  });
+
+  test('`Hold` holds a failed expression on both routes', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Hold', BAD]).evaluate().operator).toBe('Hold');
+    expect(ce.box(['Pipe', BAD, 'Hold']).evaluate().operator).toBe('Hold');
+  });
+
+  test('`Assume` of a non-predicate is a VALUE, not a throw', () => {
+    // §6a.4: the throw was inside `assume()`'s own dispatcher, so it escaped
+    // to the host on the direct route while Cortex turned it into a value.
+    const ce = new ComputeEngine();
+    expect(() => ce.box(['Assume', ['Ln', { str: 'a' }]]).evaluate()).not.toThrow();
+    expect(() => ce.box(['Assume', 5]).evaluate()).not.toThrow();
+    expect(ce.assume(ce.box(['Ln', { str: 'a' }]))).toBe('not-a-predicate');
+    expect(cortex('Assume(Ln("a"))')).not.toContain('Unsupported assumption');
   });
 });
 

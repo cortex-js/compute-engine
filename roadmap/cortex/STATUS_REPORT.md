@@ -111,6 +111,18 @@ Snapshot from the audit — line counts and roles predate the Phase 1–5 work
 
 ## Completed log
 
+- 2026-07-31 — **Error propagation rung 3 (landed).** Operator-level
+  bubbling: an expression with a failed strict operand evaluates to the
+  bare `Error` (was: frozen inert tree), carrying an `ErrorTrace`
+  breadcrumb of `(operator, operand-index)` frames (innermost first) so
+  hosts recover *where* the failure sat; display stays compact.
+  Collection heads exempt (definition-derived, fixing the measured
+  `Tuple(1, err)` bug); `Hold`/`Simplify`/`Expand`/`ExpandAll`/`Factor`/
+  `Together`/`Distribute` opted into `inspectsErrors` after per-handler
+  audits (one real handler bug found and fixed in `Together`); `Assume`
+  no longer throws to the host. The measured-dead lazy-gate rider was
+  dropped (design-doc §6a records why). ~33 tests/44 snapshots updated
+  deliberately per the pre-approved blast radius; full suite green.
 - 2026-07-31 — **On-ramp findings fix round (landed).** Four of the five
   findings from writing the on-ramp pages resolved same day: the engine
   defines `Same` (`===` — total structural identity, variadic, `Missing`/

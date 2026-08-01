@@ -26,6 +26,14 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     Expand: {
       description: 'Expand out products and positive integer powers',
       lazy: true,
+      // Transformers report on the expression they are given: an invalid
+      // operand is rewritten in place (the embedded `Error` survives), it is
+      // not consumed. `inspectsErrors` keeps the routes that hand over an
+      // already-canonical operand (`("a" + 1) |> Expand`, `Apply(Expand, …)`)
+      // running the handler instead of bubbling — see the design's §8a
+      // route-divergence residue. Audited on invalid canonical operands: no
+      // throw, result is the (still invalid) rewritten expression.
+      inspectsErrors: true,
       signature: '(value)-> value',
       evaluate: ([x]) => expand(reduceTransformerOperand(x.canonical)),
     },
@@ -34,6 +42,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Recursively expand out products and positive integer powers',
       lazy: true,
+      inspectsErrors: true, // see `Expand`
       signature: '(value)-> value',
       evaluate: ([x]) => expandAll(reduceTransformerOperand(x.canonical)),
     },
@@ -44,6 +53,7 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Supports perfect square trinomials, difference of squares, and quadratic factoring with rational roots. ' +
         'Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²',
       lazy: true,
+      inspectsErrors: true, // see `Expand`
       signature: '(value, symbol?) -> value',
       evaluate: ([x, varExpr]) => {
         if (!x) return x;
@@ -64,13 +74,23 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     Together: {
       description: 'Combine rational expressions into a single fraction',
       lazy: true,
+      inspectsErrors: true, // see `Expand`
       signature: '(value)-> value',
-      evaluate: ([x]) => togetherReduced(reduceTransformerOperand(x.canonical)),
+      evaluate: ([x]) => {
+        const target = reduceTransformerOperand(x.canonical);
+        // An INVALID target has no rational form to combine: `togetherReduced`
+        // reads the embedded `Error` node as a missing operand and returns
+        // `1 / Error("missing")`, dropping the real error. Stay inert, like
+        // the sibling transformers.
+        if (!target.isValid) return target;
+        return togetherReduced(target);
+      },
     },
 
     Distribute: {
       description: 'Distribute multiplication over addition',
       lazy: true,
+      inspectsErrors: true, // see `Expand`
       signature: '(value)-> value',
       evaluate: ([x]) =>
         !x ? x : distribute(reduceTransformerOperand(x.canonical)),

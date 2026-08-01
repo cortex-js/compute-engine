@@ -35,27 +35,26 @@ describe('ELEMENT', () => {
   });
 
   test('INVALID', () => {
+    // Rung 3 of the error-propagation design: the validation error bubbles
+    // out of the frozen `Element(…Error…)` tree, carrying the breadcrumb of
+    // the operand position it came from.
     expect(ce.expr(['Element']).evaluate()).toMatchInlineSnapshot(
-      `["Element", ["Error", "'missing'"], ["Error", "'missing'"]]`
+      `["Error", "'missing'", ["ErrorTrace", ["ErrorFrame", "'Element'", 1]]]`
     );
     expect(ce.expr(['Element', 2]).evaluate()).toMatchInlineSnapshot(
-      `["Element", 2, ["Error", "'missing'"]]`
+      `["Error", "'missing'", ["ErrorTrace", ["ErrorFrame", "'Element'", 2]]]`
     );
     expect(ce.expr(['Element', 2, 'Integers', 'Numbers']).evaluate())
       .toMatchInlineSnapshot(`
       [
-        "Element",
-        2,
-        "Integers",
+        "Error",
         [
-          "Error",
-          [
-            "ErrorCode",
-            "incompatible-type",
-            "'boolean'",
-            "set<finite_integer>"
-          ]
-        ]
+          "ErrorCode",
+          "incompatible-type",
+          "'boolean'",
+          "set<finite_integer>"
+        ],
+        ["ErrorTrace", ["ErrorFrame", "'Element'", 3]]
       ]
     `);
     expect(ce.expr(['Element', 2, 3]).evaluate()).toMatchInlineSnapshot(

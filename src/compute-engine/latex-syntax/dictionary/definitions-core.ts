@@ -3050,7 +3050,10 @@ function errorContextAsLatex(
   error: MathJsonExpression
 ): string {
   const arg = operand(error, 2);
-  if (!arg) return '';
+  // The `ErrorTrace` breadcrumb (design §2a) is the LAST operand and may sit
+  // in the context slot when the error has no context. It is provenance data,
+  // never rendered.
+  if (!arg || operator(arg) === 'ErrorTrace') return '';
 
   if (operator(arg) === 'LatexString')
     return stringValue(operand(arg, 1)) ?? '';

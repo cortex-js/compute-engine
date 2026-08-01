@@ -275,8 +275,15 @@ CI-executed doc examples and the agents card + MCP server. Worth taking:
   `Assert`/`AssertEqual` builtins (errors-as-values on failure) and a
   `cortex test` CLI subcommand, letting agents write self-checking programs —
   directly serves the feedback-loop goal from the 2026-07-24 agent eval.
-- **Error propagation & rescue (M — rulings RATIFIED and rungs 1–2
-  LANDED 2026-07-31; rung 3 remains gated).** Landed: Match decides on
+- **Error propagation & rescue — COMPLETE: rungs 1–3 ALL LANDED
+  2026-07-31** (rung 3 = operator-level bubbling + `ErrorTrace`
+  breadcrumb per the measured §6a revision: no lazy gate,
+  definition-derived collection carve-out, audited `inspectsErrors`
+  widening, `Assume` errors-as-values). Remaining follow-ups:
+  `Assume`'s `not-a-predicate` outcome renders as an invalid-symbol
+  error (pre-existing result-type wart, §8a); breadcrumb sibling-value
+  carry (deliberately out of v1); silent-NaN sites revisit (`xs[10]` →
+  `Error`?) now unblocked since errors are rescuable. Landed: Match decides on
   error subjects, `IsError` observer, error bubbling at application/`|>`
   (callee-keyed — built-in operators stay frozen per the rung-3 boundary),
   `Nothing` argument-list erasure with route parity, and

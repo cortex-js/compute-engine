@@ -1,9 +1,45 @@
-import type { Expression } from '../global-types.js';
-import { isFunction } from './type-guards.js';
+import type { Expression, FunctionInterface } from '../global-types.js';
+import { isFunction, isNumber, isString } from './type-guards.js';
+
+/**
+ * Structural containers whose contents are DATA, not the structure of a
+ * failing computation, and which carry NO `collection` handler block (so
+ * `isCollectionHead()` cannot derive them from the definition):
+ *
+ * - `Dictionary` has no operator definition at all — a dictionary literal
+ *   canonicalizes to the engine's compact `BoxedDictionary` representation;
+ * - `KeyValuePair` canonicalizes to a `Tuple` when both operands are valid, so
+ *   the only `KeyValuePair` NODES that survive are the invalid ones — exactly
+ *   the case this set has to cover.
+ */
+const STRUCTURAL_CONTAINERS = new Set(['Dictionary', 'KeyValuePair']);
+
+/**
+ * True if `expr`'s head denotes a COLLECTION — a container whose operands are
+ * elements, not the structure of a computation.
+ *
+ * Derived from the DEFINITION (the `collection` handler block the engine uses
+ * to decide collection-ness everywhere else), not from a name list; the
+ * literal set above only fills in the two structural containers that have no
+ * such block. Deliberately NOT `expr.isCollection`, which is hard-wired to
+ * `false` for an invalid expression — the only case that reaches here.
+ */
+export function isCollectionHead(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (STRUCTURAL_CONTAINERS.has(expr.operator)) return true;
+  return expr.baseDefinition?.collection !== undefined;
+}
 
 /**
  * Collection heads whose contents are DATA, not the structure of a failing
  * computation. `errorValue()` does not descend into them — see below.
+ *
+ * This is deliberately the rung-2 list, NOT `isCollectionHead()`: it governs
+ * descent into an APPLICATION's arguments (`f([1, err])`), a landed contract,
+ * whereas `isCollectionHead()` governs the rung-3 rule about a node bubbling
+ * its OWN operands. The latter is a superset (it also covers `Take`, `Map`, …,
+ * which produce collections); widening the descent set would silently change
+ * rung-2 behavior.
  */
 const COLLECTION_OPERATORS = new Set([
   'List',
@@ -14,8 +50,14 @@ const COLLECTION_OPERATORS = new Set([
 ]);
 
 /**
+ * One breadcrumb frame: the error sat in operand `index` (1-based) of an
+ * application of `operator`.
+ */
+export type ErrorFrame = { operator: string; index: number };
+
+/**
  * The error carried by a value, per the error-propagation design
- * (`docs/plans/2026-07-31-error-propagation-design.md` §2 and the
+ * (`docs/plans/2026-07-31-error-propagation-design.md` §2, §2a and the
  * implementation refinement in its Status block):
  *
  * - an `Error`-headed value **is** its own error;
@@ -23,6 +65,12 @@ const COLLECTION_OPERATORS = new Set([
  *   the canonical form of `"a" + 1` — yields its **first** embedded `Error`
  *   subexpression;
  * - anything else yields `undefined`.
+ *
+ * The returned error carries a **breadcrumb** (§2a): the chain of
+ * `(operator, operand index)` frames from the failure site outwards, walked
+ * here plus the optional `frame` describing the hop that CONSUMED `expr` (the
+ * bubbling node itself). Frames already on the error — from an earlier hop —
+ * are kept, with the new ones appended (innermost first).
  *
  * **Collections are not descended into.** An error inside a collection
  * literal is an error in one ELEMENT, not a failure of the collection: making
@@ -42,22 +90,121 @@ const COLLECTION_OPERATORS = new Set([
  * upstream of `function-utils.ts`.
  */
 export function errorValue(
-  expr: Expression | undefined | null
+  expr: Expression | undefined | null,
+  frame?: ErrorFrame
 ): Expression | undefined {
   if (!expr || expr.isValid) return undefined;
-  if (isFunction(expr, 'Error')) return expr;
-  return firstEmbeddedError(expr);
+  const path: ErrorFrame[] = [];
+  const err = firstEmbeddedError(expr, path);
+  if (err === undefined) return undefined;
+  // `path` is collected outermost-first on the way down; the breadcrumb reads
+  // innermost (failure site) first.
+  path.reverse();
+  if (frame !== undefined) path.push(frame);
+  return withErrorFrames(err, path);
 }
 
-/** The first `Error` node in `expr`, not descending into collection values. */
-function firstEmbeddedError(expr: Expression): Expression | undefined {
+/** The first `Error` node in `expr`, not descending into collection values.
+ * `path` accumulates the frames traversed to reach it, outermost first. */
+function firstEmbeddedError(
+  expr: Expression,
+  path: ErrorFrame[]
+): Expression | undefined {
   if (isFunction(expr, 'Error')) return expr;
   if (!isFunction(expr) || COLLECTION_OPERATORS.has(expr.operator))
     return undefined;
-  for (const op of expr.ops) {
+  const ops = expr.ops;
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
     if (op === undefined || op.isValid) continue;
-    const err = firstEmbeddedError(op);
+    path.push({ operator: expr.operator, index: i + 1 });
+    const err = firstEmbeddedError(op, path);
     if (err !== undefined) return err;
+    path.pop();
   }
   return undefined;
+}
+
+//
+// ─── Breadcrumb (design §2a) ──────────────────────────────────────────────
+//
+// `["Error", code, where?, ["ErrorTrace", ["ErrorFrame", "'Add'", 2], …]]`
+//
+// The trace is the LAST operand and is identified by its `ErrorTrace` HEAD,
+// never by position: an `Error` without a breadcrumb keeps its historical
+// 1- and 2-operand shape byte for byte. Read `where` with `errorWhere()`.
+//
+
+/** The `ErrorTrace` operand of an `Error` value, if it carries one. */
+export function errorTrace(
+  err: Expression
+): (Expression & FunctionInterface) | undefined {
+  if (!isFunction(err, 'Error')) return undefined;
+  const last = err.ops[err.nops - 1];
+  return isFunction(last, 'ErrorTrace') ? last : undefined;
+}
+
+/** The breadcrumb frames of an `Error` value, innermost (failure site) first. */
+export function errorFrames(err: Expression): ErrorFrame[] {
+  const trace = errorTrace(err);
+  if (trace === undefined) return [];
+  const frames: ErrorFrame[] = [];
+  for (const f of trace.ops) {
+    if (!isFunction(f, 'ErrorFrame')) continue;
+    const operator = isString(f.op1) ? f.op1.string : undefined;
+    const index = isNumber(f.op2) ? f.op2.re : undefined;
+    if (
+      operator === undefined ||
+      index === undefined ||
+      !Number.isFinite(index)
+    )
+      continue;
+    frames.push({ operator, index });
+  }
+  return frames;
+}
+
+/** The `Error` operands that are not the breadcrumb — `[code]` or
+ * `[code, where]`, i.e. the historical shape. */
+export function errorOpsWithoutTrace(
+  err: Expression
+): ReadonlyArray<Expression> {
+  if (!isFunction(err)) return [];
+  const ops = err.ops;
+  if (ops.length === 0) return ops;
+  const last = ops[ops.length - 1];
+  return isFunction(last, 'ErrorTrace') ? ops.slice(0, -1) : ops;
+}
+
+/** The context/location operand of an `Error` (`["Error", code, where]`),
+ * skipping a breadcrumb that may occupy the same position. */
+export function errorWhere(err: Expression): Expression | undefined {
+  return errorOpsWithoutTrace(err)[1];
+}
+
+/** `err` with `frames` appended to its breadcrumb (a no-op for an empty
+ * chain). The historical operands are preserved untouched. */
+function withErrorFrames(
+  err: Expression,
+  frames: ReadonlyArray<ErrorFrame>
+): Expression {
+  if (frames.length === 0) return err;
+  if (!isFunction(err, 'Error')) return err;
+  const ce = err.engine;
+  const trace = errorTrace(err);
+  const items = [
+    ...(trace?.ops ?? []),
+    ...frames.map((f) =>
+      ce._fn('ErrorFrame', [ce.string(f.operator), ce.number(f.index)], {
+        canonical: false,
+      })
+    ),
+  ];
+  // `Error` holds its operands raw (see `box.ts`), so the trace is built
+  // non-canonically — `ErrorTrace`/`ErrorFrame` are pure data heads with no
+  // operator definition.
+  return ce._fn('Error', [
+    ...errorOpsWithoutTrace(err),
+    ce._fn('ErrorTrace', items, { canonical: false }),
+  ]);
 }

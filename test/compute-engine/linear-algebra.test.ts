@@ -966,7 +966,7 @@ describe('Determinant', () => {
     const result = ce.expr(['Determinant', 42]).evaluate();
     // Type checking rejects scalar before evaluation can return the scalar
     expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "finite_integer")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"))`
     );
   });
 
@@ -976,7 +976,7 @@ describe('Determinant', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"))`
     );
   });
 
@@ -994,14 +994,14 @@ describe('Determinant', () => {
     const result = ce.expr(['Determinant', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"))`
     );
   });
 
   it('should calculate the determinant of a tensor with unknowns', () => {
     const result = ce.expr(['Determinant', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Determinant(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"))`
     );
   });
 });
@@ -1140,7 +1140,7 @@ describe('Inverse', () => {
     const result = ce.expr(['Inverse', 42]).evaluate();
     // Type checking rejects scalar before evaluation can return 1/scalar
     expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "finite_integer")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"))`
     );
   });
 
@@ -1150,7 +1150,7 @@ describe('Inverse', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"))`
     );
   });
 
@@ -1170,14 +1170,14 @@ describe('Inverse', () => {
     const result = ce.expr(['Inverse', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"))`
     );
   });
 
   it('should calculate the inverse of a numeric tensor', () => {
     const result = ce.expr(['Inverse', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `Inverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"))`
     );
   });
 
@@ -1298,7 +1298,7 @@ describe('PseudoInverse', () => {
     const result = ce.expr(['PseudoInverse', 42]).evaluate();
     // Type checking rejects scalar before evaluation can return 1/scalar
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "finite_integer")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "finite_integer"))`
     );
   });
 
@@ -1308,7 +1308,7 @@ describe('PseudoInverse', () => {
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "vector<finite_integer^7>"))`
     );
   });
 
@@ -1332,14 +1332,14 @@ describe('PseudoInverse', () => {
     const result = ce.expr(['PseudoInverse', t234_n]).evaluate();
     // Type checking rejects tensor (not a 2D matrix)
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<finite_integer^(2x3x4)>"))`
     );
   });
 
   it('should calculate the pseudo inverse of a numeric tensor', () => {
     const result = ce.expr(['PseudoInverse', t234_x]).evaluate();
     expect(result.toString()).toMatchInlineSnapshot(
-      `PseudoInverse(Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>")))`
+      `Error(ErrorCode("incompatible-type", "matrix", "list<number^(3x4x2)>"))`
     );
   });
 });
@@ -1422,7 +1422,7 @@ describe('IdentityMatrix', () => {
     const result = ce.expr(['IdentityMatrix', 2.5]).evaluate();
     // Type signature validation catches this before evaluate runs
     expect(result.toString()).toMatchInlineSnapshot(
-      `IdentityMatrix(Error(ErrorCode("incompatible-type", "integer", "finite_real")))`
+      `Error(ErrorCode("incompatible-type", "integer", "finite_real"))`
     );
   });
 });

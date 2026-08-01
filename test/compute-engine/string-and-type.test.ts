@@ -63,13 +63,16 @@ describe('StringJoin concatenates strings', () => {
     expect(ce.box(['StringJoin']).evaluate().string).toBe('');
   });
 
-  test('a non-string operand leaves it unevaluated (stays a StringJoin)', () => {
+  test('a non-string operand is NOT coerced (it reports the type error)', () => {
     const ce = new ComputeEngine();
     // Unlike `String`, `StringJoin` does not coerce: the operand `3` is not a
-    // string, so the expression does not reduce to a string value.
-    expect(ce.box(['StringJoin', { str: 'a' }, 3]).evaluate().operator).toBe(
-      'StringJoin'
-    );
+    // string, so the expression never reduces to a string value. Rung 3 of
+    // the error-propagation design keeps the non-coercion and changes only
+    // the SHAPE of the refusal: the validation error bubbles out of the
+    // frozen `StringJoin(…Error…)` tree as a bare error value.
+    const result = ce.box(['StringJoin', { str: 'a' }, 3]).evaluate();
+    expect(result.operator).toBe('Error');
+    expect(result.string).toBeUndefined();
   });
 
   test('a single list of strings is joined', () => {
@@ -181,9 +184,11 @@ describe('Characters splits a string into grapheme clusters', () => {
     expect(chars(ce, 'a👨‍👩‍👧é')).toEqual(viaSynonym);
   });
 
-  test('a non-string operand leaves it unevaluated', () => {
+  test('a non-string operand is NOT coerced (it reports the type error)', () => {
+    // Non-coercion survives rung 3; only the shape of the refusal changes
+    // (the validation error bubbles out instead of freezing in place).
     const ce = new ComputeEngine();
-    expect(ce.box(['Characters', 3]).evaluate().operator).toBe('Characters');
+    expect(ce.box(['Characters', 3]).evaluate().operator).toBe('Error');
   });
 });
 
@@ -225,12 +230,14 @@ describe('StringSplit splits a string into substrings', () => {
     ]);
   });
 
-  test('a non-string operand leaves it unevaluated', () => {
+  test('a non-string operand is NOT coerced (it reports the type error)', () => {
+    // Non-coercion survives rung 3; only the shape of the refusal changes
+    // (the validation error bubbles out instead of freezing in place).
     const ce = new ComputeEngine();
-    expect(ce.box(['StringSplit', 3]).evaluate().operator).toBe('StringSplit');
-    expect(
-      ce.box(['StringSplit', { str: 'a' }, 3]).evaluate().operator
-    ).toBe('StringSplit');
+    expect(ce.box(['StringSplit', 3]).evaluate().operator).toBe('Error');
+    expect(ce.box(['StringSplit', { str: 'a' }, 3]).evaluate().operator).toBe(
+      'Error'
+    );
   });
 });
 
