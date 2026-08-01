@@ -21,7 +21,8 @@ import {
   isNonRealNumber,
   stripMissingFromType,
 } from '../../common/type/utils.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { couldMatch, isSubtype } from '../../common/type/subtype.js';
+import type { Type } from '../../common/type/types.js';
 
 import {
   chop,
@@ -583,6 +584,13 @@ function scalarIfScalarBody(
  * the coordinate over the array — matching the interpreter's `pointComponentAt`
  * and Desmos semantics. The tuple case is checked first because a tuple type
  * also matches `indexed_collection`.
+ *
+ * An out-of-range coordinate (`PointZ` over 2-arity points) answers `NaN`, not
+ * `undefined`: the interpreter answers the `NaN` absence marker there (verified
+ * for both the single-point and list-of-points routes), and `undefined` would
+ * leak a JS-ism into the compiled ABI. That marker is NUMERIC, though, so it is
+ * only emitted when the accessed coordinate could hold a number — see
+ * `pointComponentAbsence`.
  */
 function compilePointComponent(
   arg: Expression,
@@ -592,14 +600,45 @@ function compilePointComponent(
   const compiled = compile(arg);
   const t = arg.type.type;
   // A single point (tuple): index the coordinate directly.
-  if (typeof t !== 'string' && t.kind === 'tuple') return `${compiled}[${idx}]`;
+  if (typeof t !== 'string' && t.kind === 'tuple')
+    return `(${compiled}[${idx}]${pointComponentAbsence(tupleElementType(t, idx))})`;
   // A list of points broadcasts the coordinate — but only when the operand is
   // confirmably a list of points, matching the interpreter's `pointComponentAt`
   // (which inspects concrete elements rather than trusting the declared element
   // type). Any other collection is element-indexing, like First/Second/Third,
   // which is the same `[idx]` access as the single-point case.
-  if (isPointListOperand(arg)) return `(${compiled}).map((_pt) => _pt[${idx}])`;
-  return `${compiled}[${idx}]`;
+  const eltType = collectionElementType(t);
+  if (isPointListOperand(arg)) {
+    const coord =
+      eltType !== undefined && typeof eltType !== 'string'
+        ? tupleElementType(eltType, idx)
+        : undefined;
+    return `(${compiled}).map((_pt) => _pt[${idx}]${pointComponentAbsence(coord)})`;
+  }
+  return `(${compiled}[${idx}]${pointComponentAbsence(eltType)})`;
+}
+
+/** The type of a tuple's `idx`-th element, or `undefined` when `t` is not a
+ *  parameterized tuple or the index is out of range. */
+function tupleElementType(t: Type, idx: number): Type | undefined {
+  if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
+  return t.elements[idx]?.type;
+}
+
+/**
+ * The absence suffix for a coordinate access, by the coordinate's DOMAIN.
+ *
+ * `NaN` is the ABI's absence marker (matching the interpreter's
+ * `pointComponentAt`), but it is a *numeric* value: on an object-domain
+ * coordinate — a `tuple<string, string>` point — `NaN` would be the leak the
+ * marker exists to prevent, and the ABI's absence value there is `undefined`,
+ * i.e. the bare access. So the coalesce is emitted unless the coordinate type
+ * is statically known AND provably non-numeric; an unknown or indeterminate
+ * coordinate type keeps `?? NaN`.
+ */
+function pointComponentAbsence(coord: Type | undefined): string {
+  if (coord !== undefined && !couldMatch(coord, 'number')) return '';
+  return ' ?? NaN';
 }
 
 /**
@@ -612,7 +651,13 @@ function compilePointComponent(
  */
 function isPointListOperand(e: Expression): boolean {
   const elt = collectionElementType(e.type.type);
-  if (elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple')
+  // `'tuple'` (the bare, unparameterized type name) is a plain string, not a
+  // `{ kind: 'tuple' }` node — and it is exactly what the `PointList` type
+  // handler answers (`list<tuple>`), so both spellings must read as a point.
+  if (
+    elt !== undefined &&
+    (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
+  )
     return true;
   if (e.isFiniteCollection) {
     const first = e.at(1);
@@ -624,6 +669,159 @@ function isPointListOperand(e: Expression): boolean {
     );
   }
   return false;
+}
+
+/**
+ * True when a `PointList` component is a *source* — a zip participant, rather
+ * than a per-point scalar slot.
+ *
+ * THE shared source predicate: an `indexed_collection` type that is neither a
+ * tuple (a tuple is a single point, and a tuple type also matches
+ * `indexed_collection`) nor a union (statically ambiguous role). Kept local
+ * here — not imported — for the module-init reordering hazard noted on
+ * `isPointListOperand` above.
+ *
+ * DELIBERATE DIVERGENCE from the `PointList` TYPE handler's `isListType`
+ * (`library/collections.ts`): that predicate reads a bare `tuple` and a union
+ * whose members all match `indexed_collection` (`list<number> |
+ * tuple<number, number>`) as sources. Narrowing it there is
+ * interpreter-visible, so the compile route narrows on its own: both shapes
+ * fall to the retained decline below (per-point value not statically known),
+ * matching the spec's Shared-predicate table.
+ */
+function isPointListSource(e: Expression): boolean {
+  const t = e.type.type;
+  // `'tuple'` (the bare, unparameterized name) is a plain string, not a
+  // `{ kind: 'tuple' }` node — both spellings are a single point.
+  if (t === 'tuple') return false;
+  if (typeof t !== 'string' && (t.kind === 'tuple' || t.kind === 'union'))
+    return false;
+  return e.type.matches('indexed_collection');
+}
+
+/**
+ * A type that is provably a collection — directly, or through any member of a
+ * union. Mirrors the guard in the `PointList` definition handler
+ * (`library/collections.ts`): such a component is not a scalar slot.
+ */
+function isProvablyNonScalarType(t: Type): boolean {
+  if (typeof t !== 'string' && t.kind === 'union')
+    return t.types.some(isProvablyNonScalarType);
+  return isSubtype(t, 'collection');
+}
+
+/**
+ * Lower a `PointList` with one or more list SOURCES to the zipped list of
+ * points — an array of arrays, exactly the value an evaluated `PointList`
+ * compiles to when it is reached the other way round. Reached only when the
+ * definition handler declined (it keeps the all-scalar, `Tuple`-identical
+ * path); see `docs/plans/2026-07-31-pointlist-compile-design.md` § D1.
+ *
+ * ```js
+ * (() => { const _tv2 = <source>; const _tv3 = <slot>;
+ *          const _tv4 = Math.min(_tv2.length); const _tv5 = new Array(_tv4);
+ *          for (let _tv1 = 0; _tv1 < _tv4; _tv1++) _tv5[_tv1] = [_tv2[_tv1], _tv3];
+ *          return _tv5; })()
+ * ```
+ *
+ * - **Shortest zip** falls out of `Math.min` — the ratified PAIRING-family
+ *   contract (`docs/BROADCAST-MODEL.md`; Tycho item 52), not the strict
+ *   LIFTED-broadcast length rule.
+ * - **Every component is hoisted and evaluated exactly once, in operand
+ *   order** — sources and slots alike — matching the interpreter (a non-lazy
+ *   handler receives evaluated operands) and keeping an impure component from
+ *   being re-run per point or per splice.
+ * - An **opaque** slot (`unknown`/`value`) that holds an array at run time
+ *   yields `NaN` components — the self-describing absence marker — rather than
+ *   splicing a whole array into every point. Divergence, deliberate: the
+ *   interpreter would transpose that slot as a source; the compiled form
+ *   cannot know to, and silently-wrong points are worse than `NaN`.
+ * - A **statically infinite** source and a component that is neither a source
+ *   nor a scalar slot (tuple/set/map, or a union with a collection member)
+ *   throw: they have no per-point value. Fail closed (D6).
+ * - `target.iterationBudget`, when set, joins the `Math.min` (floored — the
+ *   option validator admits fractional values and `new Array(2.5)` throws), so
+ *   the zip length is capped. It bounds the zip only: materializing the
+ *   sources is the source lowering's own, pre-existing behavior. Truncation
+ *   semantics all the way down: a budget below 1 (`0.5`) floors to `0`, so the
+ *   compiled point list is empty.
+ * - Each hoisted source is checked with `Array.isArray` and throws a loud
+ *   `RangeError` naming the component when it is not an array: a `vars`-splice
+ *   type-contract breach fails fast, deliberately unmasked. (`Math.min` alone
+ *   does not catch it — a string or an array-like has a `.length` and would
+ *   zip into garbage.)
+ */
+function compileJSPointList(
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const idx = BaseCompiler.tempVar(target);
+  const bindings: string[] = [];
+  const sources: string[] = [];
+  // The per-point component expressions, in operand order.
+  const parts: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (isPointListSource(a)) {
+      if (a.isCollection && a.isFiniteCollection === false)
+        throw new Error(
+          `PointList: source component ${i + 1} is an infinite collection — ` +
+            `an infinite point list has no compiled value. Fail closed (D6).`
+        );
+      const name = BaseCompiler.tempVar(target);
+      bindings.push(`const ${name} = ${compile(a)};`);
+      // A source MUST be an array: a string (or any array-like) has a
+      // `.length`, so `Math.min` would happily zip it into garbage. Check once
+      // per call, right after hoisting, and fail loudly instead.
+      bindings.push(
+        `if (!Array.isArray(${name})) throw new RangeError('PointList: ` +
+          `source component ${i + 1} is not an array at run time');`
+      );
+      sources.push(name);
+      parts.push(`${name}[${idx}]`);
+      continue;
+    }
+    if (isProvablyNonScalarType(a.type.type))
+      throw new Error(
+        `PointList: cannot compile — component ${i + 1} (type ` +
+          `\`${a.type.toString()}\`) is neither a scalar slot nor a list ` +
+          `source; its per-point value cannot be determined at compile time. ` +
+          `Fail closed (D6).`
+      );
+    const name = BaseCompiler.tempVar(target);
+    if (a.type.matches('number')) {
+      // Provably scalar numeric: the slot value, verbatim.
+      bindings.push(`const ${name} = ${compile(a)};`);
+    } else {
+      // Opaque (`unknown`, `value`, any other non-collection type): guarded.
+      const raw = BaseCompiler.tempVar(target);
+      bindings.push(`const ${raw} = ${compile(a)};`);
+      bindings.push(`const ${name} = Array.isArray(${raw}) ? NaN : ${raw};`);
+    }
+    parts.push(name);
+  }
+
+  // No source: the definition handler owns the all-scalar path, so this is
+  // unreachable today. Emit the plain point anyway rather than invalid source —
+  // through the IIFE, since `parts` names the temporaries `bindings` declares.
+  if (sources.length === 0)
+    return `(() => { ${bindings.join(' ')} return [${parts.join(', ')}]; })()`;
+
+  const lengths = sources.map((s) => `${s}.length`);
+  const budget = target.iterationBudget;
+  if (budget !== undefined) lengths.push(String(Math.floor(budget)));
+  const n = BaseCompiler.tempVar(target);
+  const out = BaseCompiler.tempVar(target);
+  return (
+    `(() => { ${bindings.join(' ')} ` +
+    `const ${n} = Math.min(${lengths.join(', ')}); ` +
+    `const ${out} = new Array(${n}); ` +
+    `for (let ${idx} = 0; ${idx} < ${n}; ${idx}++) ` +
+    `${out}[${idx}] = [${parts.join(', ')}]; ` +
+    `return ${out}; })()`
+  );
 }
 
 /**
@@ -2037,6 +2235,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   PointX: (args, compile) => compilePointComponent(args[0], 0, compile),
   PointY: (args, compile) => compilePointComponent(args[0], 1, compile),
   PointZ: (args, compile) => compilePointComponent(args[0], 2, compile),
+  // Reached only when the `PointList` definition handler declines — i.e. for
+  // every shape but the all-scalar plain point (which it lowers itself,
+  // byte-identically to `Tuple`). See `compileJSPointList`.
+  PointList: (args, compile, target) =>
+    compileJSPointList(args, compile, target),
   Mod: ([a, b], compile, target) => {
     if (a === null || b === null) throw new Error('Mod: missing argument');
     // An IMPURE operand (the Random family) must be evaluated exactly once:

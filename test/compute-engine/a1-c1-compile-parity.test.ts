@@ -19,7 +19,10 @@ describe('A1 — PointX/PointY/PointZ compile', () => {
       ce.declare('p', 'tuple<number, number>');
       const result = compile(ce.parse('p.x'));
       expect(result?.success).toBe(true);
-      expect(result?.code).toBe('_.p[0]');
+      // `?? NaN`: an out-of-range coordinate answers the interpreter's `NaN`
+      // absence marker rather than leaking `undefined` into the ABI (see
+      // `docs/plans/2026-07-31-pointlist-compile-design.md` § D4).
+      expect(result?.code).toBe('(_.p[0] ?? NaN)');
       expect(result?.run?.({ p: [10, 20] })).toEqual(10);
     });
 
@@ -28,7 +31,7 @@ describe('A1 — PointX/PointY/PointZ compile', () => {
       ce.declare('p', 'tuple<number, number>');
       const result = compile(ce.parse('p.y'));
       expect(result?.success).toBe(true);
-      expect(result?.code).toBe('_.p[1]');
+      expect(result?.code).toBe('(_.p[1] ?? NaN)');
       expect(result?.run?.({ p: [10, 20] })).toEqual(20);
     });
 
@@ -37,7 +40,7 @@ describe('A1 — PointX/PointY/PointZ compile', () => {
       ce.declare('p', 'tuple<number, number, number>');
       const result = compile(ce.parse('p.z'));
       expect(result?.success).toBe(true);
-      expect(result?.code).toBe('_.p[2]');
+      expect(result?.code).toBe('(_.p[2] ?? NaN)');
       expect(result?.run?.({ p: [10, 20, 30] })).toEqual(30);
     });
 

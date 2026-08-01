@@ -24,14 +24,26 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
   const ce = new ComputeEngine();
 
   describe('a handler that declines on operand SHAPE says so', () => {
-    // `PointList` lowers to a point value with scalar components; a
-    // collection-valued component has no expression-level representation.
+    // `PointList` on a shader target lowers to a point value with scalar
+    // components; a collection-valued component has no expression-level
+    // representation there.
     const listComponent = () =>
       ce.box(['PointList', ['List', 1, 2, 3], 'x'] as any);
 
+    // On JavaScript a list COMPONENT is now a zip source (it lowers to the
+    // list of points), so the JS diagnostic re-pins on the shape that still
+    // declines there: a union component, which is neither a scalar slot nor a
+    // list source. Same 109a guarantee, different witness.
+    const unionComponent = () => {
+      const e = new ComputeEngine();
+      e.declare('x', 'number');
+      e.declare('U', 'number | list<number>');
+      return e.box(['PointList', 'x', 'U'] as any);
+    };
+
     it('javascript names the offending component and its type', () => {
-      expect(() => new JavaScriptTarget().compile(listComponent())).toThrow(
-        /PointList: cannot compile — component 1 is collection-valued/
+      expect(() => new JavaScriptTarget().compile(unionComponent())).toThrow(
+        /PointList: cannot compile — component 2 \(type `[^`]*list<number>[^`]*`\) is neither a scalar slot nor a list source/
       );
     });
 
@@ -44,15 +56,21 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
     it('never reports the head as an unknown operator', () => {
       let msg = '';
       try {
-        new JavaScriptTarget().compile(listComponent());
+        new JavaScriptTarget().compile(unionComponent());
       } catch (e) {
         msg = (e as Error).message;
       }
       expect(msg).not.toMatch(/Unknown operator/);
+      expect(msg).toMatch(/Fail closed \(D6\)/);
     });
 
     it('an all-scalar PointList still compiles (the decline is shape-only)', () => {
       const r = new JavaScriptTarget().compile(ce.box(['PointList', 'x', 'y']));
+      expect(r.success).toBe(true);
+    });
+
+    it('javascript: a list-SOURCE component is no longer a decline — it zips', () => {
+      const r = new JavaScriptTarget().compile(listComponent());
       expect(r.success).toBe(true);
     });
   });

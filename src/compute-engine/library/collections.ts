@@ -1167,17 +1167,33 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // component fails closed (stays inert, no hang) via
   // `broadcastOverIndexedCollections` returning `undefined`.
   //
-  // Compile handler (v1): when no component is provably non-scalar (a subtype
-  // of `collection`), a `PointList` is a plain point and compiles
+  // Compile handler: when no component is provably non-scalar (a subtype of
+  // `collection`), a `PointList` is a plain point and compiles
   // byte-identically to the equivalent `Tuple(...)` on each target — a JS array
   // on the `javascript` target, a `vecN`/`float[N]` on `glsl` (and `vecNf`/
   // `array<f32,N>` on `wgsl`). This includes free plot variables (typed
   // `unknown`), which the compile model treats as numeric parameters exactly as
-  // `Tuple` does. A provably non-scalar component (list/set/tuple, or a union
-  // with such a member), and every other target (e.g. `interval-javascript`,
-  // `python`, which have no `Tuple` lowering either), fail closed — the handler
-  // returns `undefined` and the default compilation reports `PointList` as
-  // uncompilable.
+  // `Tuple` does. That all-scalar path lives HERE, on every language.
+  //
+  // Any other shape is the TARGET's business. On `javascript` the handler
+  // declines by fall-through (returns `undefined`, which runs BEFORE
+  // `target.functions` — Tycho item 109a mechanics) so the zip lowering in
+  // `JAVASCRIPT_FUNCTIONS.PointList` takes over: a list of points IS an
+  // expression-level value on JS (nested arrays), so a `PointList` with one or
+  // more list SOURCES compiles to an IIFE zip (shortest-zip, scalars
+  // broadcast), and the shapes that still have no lowering throw from there
+  // with a per-component diagnostic. On every other language (`glsl`, `wgsl`,
+  // `python`) a provably non-scalar component keeps failing closed here, and
+  // `interval-javascript` (no `Tuple` lowering at all) keeps returning
+  // `undefined`.
+  //
+  // The retained declines are DELIBERATELY NARROWER THAN THE TYPING: the type
+  // handler answers `list<tuple>` whenever ≥1 component is a list source,
+  // whatever the other components are — but a non-source, non-scalar slot
+  // (tuple/set/map, or a union with a collection member) has no statically
+  // known PER-POINT representation, so lowering it would splice a whole
+  // aggregate into every point. Lowering narrower than typing is intended.
+  // See `docs/plans/2026-07-31-pointlist-compile-design.md` § Shared predicate.
   PointList: {
     description:
       'A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.',
@@ -1236,7 +1252,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `PointList(1,2)` unequal to the `Tuple(1,2)` it evaluates to; the
     // generic compare path evaluates both sides instead.
     compile: (args, compile, { language }) => {
-      // v1: fail closed only for a *provably non-scalar* component — one whose
+      // Fail closed only for a *provably non-scalar* component — one whose
       // type (or any member of a union) is a subtype of `collection` (a list,
       // set, tuple, map, …). Everything else — `unknown`, `value`, and every
       // numeric type — is a scalar slot that `Tuple` compiles as
@@ -1254,6 +1270,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       };
       const nonScalar = args.findIndex((a) => isProvablyNonScalar(a.type.type));
       if (nonScalar >= 0) {
+        // On `javascript`, every non-all-scalar shape is lowered (or declined,
+        // with its own diagnostic) by `JAVASCRIPT_FUNCTIONS.PointList`: a list
+        // of points is an expression-level value there. Decline by
+        // fall-through so the target table is consulted.
+        if (language === 'javascript') return undefined;
         // The decline is about the operand SHAPE, not the head: say so, rather
         // than falling through to a generic "no lowering" (which reads as if
         // `PointList` were unsupported on the target — Tycho item 109a). Only

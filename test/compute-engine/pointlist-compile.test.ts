@@ -13,10 +13,12 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * point and compiles byte-identically to the equivalent `Tuple(...)` on each
  * target — including the load-bearing case of *free* plot variables (typed
  * `unknown`), which the compile model treats as numeric parameters exactly as
- * it does for `Tuple`. A provably non-scalar component (a subtype of
- * `collection`: list, set, tuple, or a union containing such a member) fails
- * closed exactly as before (throw by default, `success: false` with
- * `{ fallback: true }`). The evaluate path is unchanged.
+ * it does for `Tuple`. A component that is a list SOURCE lowers on JavaScript
+ * to the zipped list of points (see `pointlist-compile-zip.test.ts`); on every
+ * other target, and for a component that is neither a scalar slot nor a source
+ * (a tuple, set, map, or a union with a collection member), it fails closed
+ * (throw by default, `success: false` with `{ fallback: true }`). The evaluate
+ * path is unchanged.
  */
 
 function freshEngine(): ComputeEngine {
@@ -227,21 +229,30 @@ describe('PointList compile — scalar-slot type coverage', () => {
   });
 });
 
-describe('PointList compile — non-scalar component fails closed', () => {
+describe('PointList compile — non-scalar component', () => {
   const ce = freshEngine();
   ce.declare('U', 'number | list<number>');
 
-  it('javascript: a list-typed component throws by default', () => {
+  // A list-typed component is a zip SOURCE on JavaScript: a list of points is
+  // an expression-level value there (nested arrays), so it compiles to the
+  // zip rather than failing closed. (It stays a decline on the shader targets
+  // — ruling 3: no runtime-length expression values.)
+  it('javascript: a list-typed component compiles to the zipped point list', () => {
     const js = new JavaScriptTarget();
-    expect(() =>
-      js.compile(ce.box(['PointList', 'x', 'L']), { realOnly: true })
-    ).toThrow();
+    const r = js.compile(ce.box(['PointList', 'x', 'L']), { realOnly: true });
+    expect(r.success).toBe(true);
+    const run = r.run as (s: Record<string, unknown>) => unknown;
+    expect(run({ x: -6, L: [1, 2, 3] })).toEqual([
+      [-6, 1],
+      [-6, 2],
+      [-6, 3],
+    ]);
   });
 
-  it('javascript: a list-typed component yields success:false with { fallback: true }', () => {
+  it('javascript: a list-typed component runs without a fallback', () => {
     const js = new JavaScriptTarget();
     const r = js.compile(ce.box(['PointList', 'x', 'L']), { fallback: true });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
     expect(typeof r.run).toBe('function');
   });
 
@@ -249,7 +260,9 @@ describe('PointList compile — non-scalar component fails closed', () => {
     const js = new JavaScriptTarget();
     expect(() =>
       js.compile(ce.box(['PointList', 'x', 'U']), { realOnly: true })
-    ).toThrow();
+    ).toThrow(
+      /PointList: cannot compile — component 2 \(type `[^`]+`\) is neither a scalar slot nor a list source; its per-point value cannot be determined at compile time\. Fail closed \(D6\)\./
+    );
     const r = js.compile(ce.box(['PointList', 'x', 'U']), { fallback: true });
     expect(r.success).toBe(false);
   });

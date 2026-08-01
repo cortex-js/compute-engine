@@ -2175,24 +2175,175 @@ function compileGPUExtremum(
 }
 
 /**
+ * True when a `PointList` component is a *source* — a zip participant rather
+ * than a per-point scalar slot: an `indexed_collection` type that is neither a
+ * tuple nor a union. THE shared source predicate on the compile route, the same
+ * one the JavaScript zip lowering uses. Kept local (not imported) for the
+ * module-init reordering hazard.
+ *
+ * DELIBERATE DIVERGENCE from the `PointList` TYPE handler's `isListType`
+ * (`library/collections.ts`): that predicate reads a bare `tuple` and a union
+ * whose members all match `indexed_collection` (`list<number> |
+ * tuple<number, number>`) as sources. Narrowing it there is
+ * interpreter-visible, so the compile route narrows on its own: both shapes are
+ * declined here (their per-point value is not statically known), matching the
+ * spec's Shared-predicate table.
+ */
+function isPointListSource(e: Expression): boolean {
+  const t = e.type.type;
+  // `'tuple'` (the bare, unparameterized name) is a plain string, not a
+  // `{ kind: 'tuple' }` node — both spellings are a single point.
+  if (t === 'tuple') return false;
+  if (typeof t !== 'string' && (t.kind === 'tuple' || t.kind === 'union'))
+    return false;
+  return e.type.matches('indexed_collection');
+}
+
+/**
+ * Project one coordinate out of a *symbolic* `PointList` application, as a
+ * `vecN` — the GPU's half of the point-list story. Construction stays fail
+ * closed on the shader targets (there is no runtime-length expression value:
+ * const-size arrays, `vec` ≤ 4, WGSL runtime arrays are storage-buffer-only),
+ * but the PROJECTION of a point list is an ordinary vector, and the point-list
+ * dimension stays the consumer's instancing axis. See
+ * `docs/plans/2026-07-31-pointlist-compile-design.md` § D3.
+ *
+ * Returns the emitted code, or `{ decline }` — so the caller can name the
+ * actual cause in its fail-closed throw rather than blaming the operand shape
+ * for every refusal (Tycho item 109a: a decline must say why). Every
+ * admissibility condition must hold:
+ * - the coordinate index is within the point arity (`PointZ` on a 2-arity
+ *   `PointList` stays declined);
+ * - at least one component is a source, and EVERY source has a statically
+ *   known vec-emittable length 2–4 (a literal `List`, or a declared
+ *   `vector<N>`); an unknown length would be asserting a shape we do not know;
+ * - every non-source slot is provably scalar numeric (`vecW(<aggregate>)` is
+ *   invalid or wrong);
+ * - every NON-SELECTED component is pure — projection never evaluates them,
+ *   and discarding an effectful operand (`Random()`) would break the
+ *   evaluate-once contract.
+ *
+ * The emitted width is the shortest source length (statically evaluated
+ * shortest-zip); a longer source is swizzle-truncated (`(v).xy`), a scalar slot
+ * broadcasts as `vecW(slot)` (`vecWf` on WGSL).
+ */
+function compilePointListProjection(
+  arg: Expression,
+  k: number,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string | { decline: string } {
+  if (!isFunction(arg, 'PointList'))
+    return {
+      decline:
+        `the operand is not a symbolic \`PointList\` application, and only ` +
+        `that shape has a statically known point count`,
+    };
+  const ops = arg.ops;
+  if (k >= ops.length)
+    return {
+      decline:
+        `the points have arity ${ops.length}, so there is no coordinate ` +
+        `${k + 1}`,
+    };
+
+  let width: number | undefined = undefined;
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    if (isPointListSource(op)) {
+      const n = BaseCompiler.aggregateComponentCount(op);
+      // Unknown length, or a length with no `vecN`: decline.
+      if (n === undefined)
+        return {
+          decline:
+            `source component ${i + 1} (type \`${op.type.toString()}\`) has ` +
+            `no statically known length, and a shader vector must have one`,
+        };
+      if (n < 2 || n > 4)
+        return {
+          decline:
+            `source component ${i + 1} has ${n} elements, and a shader ` +
+            `vector holds 2 to 4`,
+        };
+      width = width === undefined ? n : Math.min(width, n);
+    } else if (!isSubtype(op.type.type, 'number')) {
+      // A non-source slot must be provably scalar numeric.
+      return {
+        decline:
+          `component ${i + 1} (type \`${op.type.toString()}\`) is neither a ` +
+          `list source nor a provably scalar numeric slot, so it has no ` +
+          `\`vecN\` broadcast`,
+      };
+    }
+  }
+  if (width === undefined)
+    return {
+      decline: 'no component is a list source, so this is not a point LIST',
+    };
+
+  // Every discarded component must be pure: the projection never evaluates it.
+  for (let i = 0; i < ops.length; i++)
+    if (i !== k && !ops[i].isPure)
+      return {
+        decline:
+          `component ${i + 1} is impure, and the projection would discard it ` +
+          `unevaluated`,
+      };
+
+  const slot = ops[k];
+  if (!isPointListSource(slot)) {
+    const ctor = target.language === 'wgsl' ? `vec${width}f` : `vec${width}`;
+    return `${ctor}(${compile(slot)})`;
+  }
+  const n = BaseCompiler.aggregateComponentCount(slot)!;
+  const code = compile(slot);
+  if (n === width) return code;
+  // Swizzle-truncate to the shortest source. A bare identifier takes the
+  // suffix directly (`v.xy`), which keeps the emission ATOMIC for the shape
+  // gate; anything else is parenthesized and is judged as the compound
+  // emission it is.
+  const sw = 'xyzw'.slice(0, width);
+  return gpuIsAtomicEmission(code) ? `${code}.${sw}` : `(${code}).${sw}`;
+}
+
+/**
  * Compile a point-coordinate accessor (`PointX`/`PointY`/`PointZ`) as a GPU
  * swizzle. A single point is a `vec2`/`vec3`/`vec4`, so `.x`/`.y`/`.z` is
  * valid. A *list* of points is not a GPU value — a swizzle on it is invalid
  * shader source, so a list-of-points operand fails closed (D6) rather than
- * silently emitting garbage. A tuple type also matches `indexed_collection`, so
- * the single-point case is checked first.
+ * silently emitting garbage; the one exception is a symbolic `PointList`
+ * application, whose coordinate IS a `vecN` (`compilePointListProjection`). A
+ * tuple type also matches `indexed_collection`, so the single-point case is
+ * checked first.
  */
 function compilePointSwizzle(
   arg: Expression,
   comp: 'x' | 'y' | 'z',
-  compile: (e: Expression) => string
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
 ): string {
   const t = arg.type.type;
+  const idx = comp === 'x' ? 0 : comp === 'y' ? 1 : 2;
   const isSinglePoint = typeof t !== 'string' && t.kind === 'tuple';
-  if (!isSinglePoint && arg.type.matches('indexed_collection'))
+  if (!isSinglePoint && arg.type.matches('indexed_collection')) {
+    const projected = compilePointListProjection(arg, idx, compile, target);
+    if (typeof projected === 'string') return projected;
     throw new Error(
       `Point${comp.toUpperCase()}: a list of points has no GPU lowering ` +
-        `(a point must be a single vec2/vec3/vec4). Fail closed.`
+        `(a point must be a single vec2/vec3/vec4): ${projected.decline}. ` +
+        `Fail closed.`
+    );
+  }
+  // A parameterized tuple type states the point arity, so an out-of-range
+  // coordinate is a static error: `p.z` on a `vec2` is invalid shader source.
+  // Symmetric with the list route's arity decline in
+  // `compilePointListProjection`. An unparameterized `tuple` states no arity
+  // and keeps the emission.
+  if (isSinglePoint && t.elements.length <= idx)
+    throw new Error(
+      `Point${comp.toUpperCase()}: the point has arity ${t.elements.length} ` +
+        `— no ${['first', 'second', 'third'][idx]} coordinate. ` +
+        `Fail closed (D6).`
     );
   return `${compile(arg)}.${comp}`;
 }
@@ -2643,9 +2794,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // points is not a GPU value: emitting a swizzle on it produces invalid shader
   // source, so a list-of-points operand fails closed (D6) rather than compiling
   // to garbage behind `success: true`.
-  PointX: (args, compile) => compilePointSwizzle(args[0], 'x', compile),
-  PointY: (args, compile) => compilePointSwizzle(args[0], 'y', compile),
-  PointZ: (args, compile) => compilePointSwizzle(args[0], 'z', compile),
+  PointX: (args, compile, target) =>
+    compilePointSwizzle(args[0], 'x', compile, target),
+  PointY: (args, compile, target) =>
+    compilePointSwizzle(args[0], 'y', compile, target),
+  PointZ: (args, compile, target) =>
+    compilePointSwizzle(args[0], 'z', compile, target),
   Floor: (args, compile) => {
     if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
     return `floor(${compile(args[0])})`;

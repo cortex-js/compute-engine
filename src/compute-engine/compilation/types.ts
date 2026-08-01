@@ -462,6 +462,9 @@ export interface CompileTarget<Expr = unknown> {
    * stays cheap enough for the engine deadline to be honored between calls;
    * it is never set on user-facing `compile()` paths, whose loops remain
    * unguarded (zero overhead).
+   *
+   * It also caps (floors, then truncates to) the `PointList` zip length on the
+   * JavaScript target — a capped point list is truncated, not `NaN`-poisoned.
    */
   iterationBudget?: number;
 
@@ -852,7 +855,10 @@ export interface CompilationOptions<Expr = unknown> {
   /**
    * Cap the trip count of emitted `Sum`/`Product` loops: a loop whose
    * iteration count would exceed the budget (including infinite bounds)
-   * evaluates to `NaN` instead of running. See `CompileTarget.iterationBudget`.
+   * evaluates to `NaN` instead of running. It also caps (floors, then
+   * truncates to) the `PointList` zip length on the JavaScript target — a
+   * capped point list is truncated, not `NaN`-poisoned. See
+   * `CompileTarget.iterationBudget`.
    */
   iterationBudget?: number;
 

@@ -1,5 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { effectsOf } from '../../src/compute-engine/boxed-expression/effects-of';
+import {
+  effectsOf,
+  shallowApplicationEffects,
+} from '../../src/compute-engine/boxed-expression/effects-of';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 /**
@@ -96,6 +99,128 @@ describe('Resolve through the CURRENT binding (hole 1)', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Map', ['List', 1, 2], ['Function', ['Random'], 'x']]);
     expect(eff(e)).toEqual(['random']);
+  });
+});
+
+describe('A head bound to a function VALUE (declare-then-assign)', () => {
+  // `ce.assign(name, fn)` alone creates an OPERATOR definition, but the
+  // documented declare-then-assign idiom leaves a VALUE definition holding a
+  // function. The head position must resolve through it exactly as an operand
+  // position does — otherwise `fib(3)` reports `{any}` forever, even after a
+  // provably pure body is assigned.
+  for (const [spelling, declaration] of [
+    ['type', { type: '(number) -> number' }],
+    ['signature', { signature: '(number) -> number' }],
+  ] as const) {
+    describe(`declared with \`${spelling}:\``, () => {
+      it('a pure body makes the application pure — on the box AND parse routes', () => {
+        const ce = new ComputeEngine();
+        ce.declare('fib', declaration);
+        ce.assign('fib', ce.parse('x \\mapsto x + 1'));
+        // The binding really is a value definition, not an operator one — that
+        // is the shape this whole block is about.
+        const def = ce.lookupDefinition('fib');
+        expect(def !== undefined && 'value' in def).toBe(true);
+
+        for (const e of [ce.box(['fib', 3]), ce.parse('\\mathrm{fib}(3)')]) {
+          expect(eff(e)).toBe(undefined);
+          expect(e.isPure).toBe(true);
+        }
+        // …and in operand position, which never had the blind spot.
+        expect(eff(ce.box(['Map', ['List', 1, 2], 'fib']))).toBe(undefined);
+      });
+
+      it('a scope-writing body surfaces `{scope}`', () => {
+        const ce = new ComputeEngine();
+        ce.declare('bump', declaration);
+        ce.assign(
+          'bump',
+          ce.parse('x \\mapsto \\mathrm{Assign}(\\mathrm{tally}, x)')
+        );
+        for (const e of [ce.box(['bump', 3]), ce.parse('\\mathrm{bump}(3)')]) {
+          expect(eff(e)).toEqual(['scope']);
+          expect(e.isPure).toBe(false);
+        }
+      });
+
+      it('a drawing body surfaces `{random}` — including against a pure-declared arrow', () => {
+        const ce = new ComputeEngine();
+        ce.declare('draws', declaration);
+        ce.assign('draws', ce.parse('x \\mapsto \\mathrm{Random}() + x'));
+        // The DECLARED arrow stays pure on this route (the
+        // definition-annotation check does not run here), so reading it alone
+        // would report the body pure and silently release a seed frame. The
+        // stored value's own arrow is what carries the truth, and the two are
+        // unioned.
+        for (const e of [ce.box(['draws', 3]), ce.parse('\\mathrm{draws}(3)')]) {
+          expect(eff(e)).toEqual(['random']);
+          expect(e.isPure).toBe(false);
+        }
+      });
+    });
+  }
+
+  it('reassignment revises the answer (the generation guard)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('revised', { type: '(number) -> number' });
+    ce.assign('revised', ce.parse('x \\mapsto x + 1'));
+    const e = ce.box(['revised', 3]);
+    expect(e.isPure).toBe(true);
+
+    // The SAME boxed expression, after the binding changes.
+    ce.assign('revised', ce.parse('x \\mapsto \\mathrm{Random}()'));
+    expect(eff(e)).toEqual(['random']);
+    expect(e.isPure).toBe(false);
+
+    ce.assign('revised', ce.parse('x \\mapsto x + 2'));
+    expect(eff(e)).toBe(undefined);
+    expect(e.isPure).toBe(true);
+  });
+
+  it('a head bound to a non-callable value is still `{any}`', () => {
+    const ce = new ComputeEngine();
+    ce.assign('notAFunction', 5);
+    expect(eff(ce.box(['notAFunction', 3], { canonical: false }))).toBe('any');
+  });
+
+  it('a drawing value-def head participates in the seed frame', () => {
+    const ce = new ComputeEngine();
+    ce.declare('shuf', { type: '(number) -> list' });
+    ce.assign(
+      'shuf',
+      ce.parse('n \\mapsto \\mathrm{RandomShuffle}(\\mathrm{Range}(1, n))')
+    );
+    // The walk's key is the node's OWN effects, and `{random}` is now visible
+    // through the value binding — where a bare `{any}` head never pins.
+    expect(shallowApplicationEffects(ce.box(['shuf', 'unboundN']))).toEqual([
+      'random',
+    ]);
+    // End to end: a body that could not finish its draws keeps the frame, on
+    // both routes.
+    for (const e of [
+      ce.box(['WithRandomSeed', 5, ['shuf', 'unboundN']]),
+      ce.parse(
+        '\\mathrm{WithRandomSeed}(5, \\mathrm{shuf}(\\mathrm{unboundN}))'
+      ),
+    ])
+      expect(e.evaluate().operator).toBe('WithRandomSeed');
+
+    // A completed application owes nothing: the frame is released and the
+    // result replays.
+    const once = ce.box(['WithRandomSeed', 5, ['shuf', 3]]).evaluate();
+    expect(once.operator).not.toBe('WithRandomSeed');
+    expect(
+      ce.box(['WithRandomSeed', 5, ['shuf', 3]]).evaluate().toString()
+    ).toBe(once.toString());
+  });
+
+  it('a pure value-def head does NOT pin the frame', () => {
+    const ce = new ComputeEngine();
+    ce.declare('purefn', { type: '(number) -> number' });
+    ce.assign('purefn', ce.parse('x \\mapsto x + 1'));
+    expect(
+      ce.box(['WithRandomSeed', 5, ['purefn', 'unboundN']]).evaluate().operator
+    ).not.toBe('WithRandomSeed');
   });
 });
 

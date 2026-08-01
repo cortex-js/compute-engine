@@ -5,12 +5,13 @@ import {
   subtractEffects,
   unionComputedEffects,
 } from '../../common/type/effects.js';
-import { functionResult } from '../../common/type/utils.js';
+import { functionResult, signatureArms } from '../../common/type/utils.js';
 import { couldBeCollectionOperand } from '../collection-utils.js';
 import { overloadArms, resolveOverload } from './overload.js';
 
 import type {
   BoxedOperatorDefinition,
+  BoxedValueDefinition,
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
@@ -98,11 +99,29 @@ export function applicationEffects(expr: Expression): ComputedEffects {
   if (expr.operator === 'Function') return undefined;
 
   const def = operatorDefinitionOf(expr);
-  // An unknown head — an undeclared name, or a symbol holding a value rather
-  // than an operator — is `{any}`: conservative on every axis EXCEPT frames,
-  // where `any` never pins (see the `any` ruling under "Labels and lattice").
-  // `hasDeclaredEffectLabel` is what enforces that asymmetry for the walk.
-  if (def === undefined) return 'any';
+  if (def === undefined) {
+    // No OPERATOR definition — but the head may still be bound to a function
+    // VALUE: `ce.declare('fib', { type: '(number) -> number' })` followed by
+    // `ce.assign('fib', body)` leaves a value definition, and the documented
+    // declare-then-assign idiom would otherwise report `{any}` forever, even
+    // for a provably pure body. Resolve through the CURRENT binding, exactly as
+    // an operand position does, and project the operands with the DEFAULT
+    // metadata a plain function value has (eager, invoking, discharging
+    // nothing).
+    const own = valueHeadEffects(expr);
+    // A head that resolves to nothing callable stays `{any}`: conservative on
+    // every axis EXCEPT frames, where `any` never pins (see the `any` ruling
+    // under "Labels and lattice"). `hasDeclaredEffectLabel` is what enforces
+    // that asymmetry for the walk.
+    if (own === NOT_CALLABLE) return 'any';
+    let effects: ComputedEffects = own;
+    for (const op of expr.ops) {
+      if (effects === 'any') return 'any';
+      effects = unionComputedEffects(effects, effectsOf(op));
+      effects = unionComputedEffects(effects, latentEffectsOf(op));
+    }
+    return effects;
+  }
 
   // `ownEffects(op)`: the definition's effect set — the RESOLVED ARM's when the
   // definition is an overload set. For the writer operators (`Assign`,
@@ -181,7 +200,19 @@ export function shallowApplicationEffects(expr: Expression): ComputedEffects {
   if (!isFunction(expr)) return undefined;
   if (expr.operator === 'Function') return undefined;
   const def = operatorDefinitionOf(expr);
-  if (def === undefined) return 'any';
+  if (def === undefined) {
+    // A function-VALUE head (the declare-then-assign idiom): its arrow is what
+    // this node does — so a value-def head bound to a drawing function pins the
+    // seed frame, exactly as the operator-definition route does.
+    const own = valueHeadEffects(expr);
+    if (own === NOT_CALLABLE) return 'any';
+    let effects: ComputedEffects = own;
+    for (const op of expr.ops) {
+      if (effects === 'any') return 'any';
+      effects = unionComputedEffects(effects, latentEffectsOf(op));
+    }
+    return effects;
+  }
 
   let effects: ComputedEffects = ownEffects(expr.engine, expr.ops, def);
   if (def.holdClass === 'quote' || !def.invokes) return effects;
@@ -257,6 +288,60 @@ function isQuote(expr: Expression): expr is Expression & { ops: Expression[] } {
   return isFunction(expr) && operatorDefinitionOf(expr)?.holdClass === 'quote';
 }
 
+/** The head, or operand, resolves to nothing callable — the caller decides what
+ * that means: `{any}` in head position (an unknown operator), and no latent
+ * contribution at all in operand position (a bare value is not invoked). */
+const NOT_CALLABLE = Symbol('not-callable');
+
+/**
+ * The arrow effects of a name bound to a function VALUE rather than to an
+ * operator — the `ce.declare(name, { type: '(…) -> …' })` +
+ * `ce.assign(name, body)` idiom, and the `{ signature: … }` spelling of it.
+ *
+ * Both arrows are read and UNIONED, because they can disagree: the binding's
+ * declared arrow is the author's contract, while the stored value's arrow is
+ * what the construction seam inferred from the body it currently holds.
+ * Assigning a drawing body to a pure-declared binding leaves the declared arrow
+ * pure (the definition-annotation check does not run on this route), and
+ * reporting that body pure would silently release a seed frame. Taking the
+ * union keeps the answer honest in the only direction that matters, and keeps
+ * head position and operand position in agreement.
+ *
+ * `NOT_CALLABLE` when the name denotes no arrow at all — an undeclared name, or
+ * a binding holding a plain value. Write-free: the stored value is consulted
+ * only when the declared type could be callable, so an ordinary `x: number`
+ * binding is never materialized.
+ */
+function valueBindingEffects(
+  def: BoxedValueDefinition
+): ComputedEffects | typeof NOT_CALLABLE {
+  const declared = def.type?.type;
+  let callable = false;
+  let effects: ComputedEffects = undefined;
+  if (declared !== undefined && signatureArms(declared) !== undefined) {
+    callable = true;
+    effects = signatureEffects(declared);
+  }
+  if (couldBeCallable(declared)) {
+    const valueType = def.value?.type?.type;
+    if (valueType !== undefined && signatureArms(valueType) !== undefined) {
+      callable = true;
+      effects = unionComputedEffects(effects, signatureEffects(valueType));
+    }
+  }
+  return callable ? effects : NOT_CALLABLE;
+}
+
+/** {@link valueBindingEffects} for the HEAD of an application whose name has no
+ * operator definition. */
+function valueHeadEffects(
+  expr: Expression & { operator: string }
+): ComputedEffects | typeof NOT_CALLABLE {
+  const def = expr.engine.lookupDefinition(expr.operator);
+  if (def === undefined || !('value' in def)) return NOT_CALLABLE;
+  return valueBindingEffects(def.value);
+}
+
 /**
  * The **latent** effects of an operand: the effects on the arrow of the
  * function value it denotes — what fires if the operator invokes it.
@@ -278,8 +363,10 @@ function latentEffectsOf(op: Expression): ComputedEffects {
     if (def === undefined) return undefined;
     if ('operator' in def) return def.operator.effects;
     // A value binding: a stored literal, or an opaque function declared with a
-    // full signature (`Declare(f, "(real) random -> real")`).
-    return signatureEffects(def.value.type?.type as Type | undefined);
+    // full signature (`Declare(f, "(real) random -> real")`). Nothing callable
+    // contributes no latent set — a bare value operand is not invoked.
+    const effects = valueBindingEffects(def.value);
+    return effects === NOT_CALLABLE ? undefined : effects;
   }
 
   // A number, a string, a boolean, a dictionary — nothing callable.

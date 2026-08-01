@@ -90,8 +90,15 @@ Corollary rules for the strict regime:
 - Compiled lowering: `_SYS.bcast` on the JavaScript target mirrors the
   interpreter per POSITION (an empty or mismatched position projects to NaN
   without poisoning siblings).
+- Compiled pairing site (2026-07-31): the JavaScript `PointList` zip lowering
+  (`JAVASCRIPT_FUNCTIONS.PointList`, `javascript-target.ts`) emits
+  shortest-zip via `Math.min` over the source lengths — the pairing-regime
+  contract carried into compiled code. Design:
+  `docs/plans/2026-07-31-pointlist-compile-design.md`.
 - Pins: `compiled-elementwise-boolean.test.ts` ("the mismatch ruling reaches
   every broadcast path", including the `PointList` opt-out),
+  `pointlist-compile-zip.test.ts` (compiled shortest-zip — the pairing
+  contract in emitted JavaScript),
   `points-arithmetic.test.ts` (zip-to-shorter),
   `pointlist-lazy-broadcast.test.ts` (ragged lazy transpose),
   `multiply-mixed-collection-kinds.test.ts` (mixed-kind operands join the

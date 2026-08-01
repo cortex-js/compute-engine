@@ -174,9 +174,44 @@ touches it.
 
 | bucket                                                                      | target   |                         pop | the question                                                                                                                                                                                                                                                                                                                            |
 | --------------------------------------------------------------------------- | -------- | --------------------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PointList` w/ collection-valued component **+** `PointZ` over a point list | js, glsl |   **11 st / 36 mem** + 2 st | Is a list of points an expression-level value on a scalar/GPU target, or must the consumer project components first? **Same question, one design pass covers both.** Also gates the biggest measured CSE win — the flagship shape fails JS compile for exactly this reason, so no compile-target optimization can reach it. **Rank 1.** |
-| `At`                                                                        | glsl     | **26 st — largest GPU gap** | A dynamic index into a `vecN` has no direct GLSL form; needs a ternary/switch chain or a fixed-size array, and a convention for out-of-range. **Rank 2.**                                                                                                                                                                               |
+| `At`                                                                        | glsl     | **26 st — largest GPU gap** | A dynamic index into a `vecN` has no direct GLSL form; needs a ternary/switch chain or a fixed-size array, and a convention for out-of-range. **Rank 1** (was rank 2; the former rank 1 — `PointList`/`PointZ` — landed 2026-07-31, residual below).                                                                                     |
 | `Integrate`                                                                 | glsl     |                       22 st | Quadrature inside a shader — which rule, what iteration budget, what happens on non-convergence. Large; do not start without deciding the budget question.                                                                                                                                                                              |
+
+**A-1 residual — `PointList`/`PointZ` (main design pass landed 2026-07-31;
+rulings + design in `docs/plans/2026-07-31-pointlist-compile-design.md`).**
+JS construction (shortest-zip lowering, `iterationBudget` truncation cap),
+JS/GPU coordinate projection, and the `?? NaN` missing-coordinate fix all
+landed; GPU *construction* stays fail-closed **by ruling** (no runtime-length
+GPU expression values — the point-list dimension is the consumer's instancing
+axis). Remaining, all demand-gated:
+
+- Non-`isListType` components (tuple/set/union-with-collection) still decline
+  on JS — lowering is deliberately narrower than typing (no per-point
+  representation for such a slot).
+- The **type handler's** `isListType` (`collections.ts`) classifies a bare
+  `tuple`-typed or all-collection-union component as a list — so
+  `PointList(k, P)` with `P: tuple` *types* `list<tuple>` while `evaluate`
+  (value-level `isTuple`) answers a single point. The compile predicates were
+  hardened against this (staged review 2026-07-31); aligning the type handler
+  is interpreter-visible and wants its own pass. Same-family holes, same
+  pass: `hasPointElementType` (`collections.ts` ~684) accepts only
+  `{kind:'tuple'}` nodes, not the bare `'tuple'` string; and projecting an
+  **empty** point list diverges (compiled `[]`, interpreter absence — the
+  evaluated empty transpose types `list<never>`, so the point-ness is
+  unrecoverable; pinned as a known parity edge in
+  `pointlist-compile-zip.test.ts`).
+- A GPU projection **composed under arithmetic** (`PointX(…) * 2`) still
+  declines: the projection's type (`list<number>`, no static dimension) fails
+  the operand-shape gates even though the emission is a legal `vecN`. Fix =
+  a dimensioned projection type — an interpreter-visible type-handler change,
+  wants its own measured pass.
+- CSE gate G1b still excludes PointList subtrees (any definition carrying a
+  `compile` handler); exempting attested built-in handlers is a follow-up to
+  `docs/plans/2026-07-28-compile-cse-design.md`, so the corpus's
+  PointList-shaped repeats bind.
+- No corpus re-measure yet: how much of the 11 st / 36 mem + 2 st actually
+  closed is the consumer's count to re-run — do not mark this bucket resolved
+  on our numbers.
 
 **A′. RULED 2026-07-30 — retire the refusal, fold to `NaN`. DONE (JS target).**
 The `realOnly` constant-fold refusal was applied at exactly two sites
@@ -258,6 +293,12 @@ Known candidates, all currently defended as "documented and deliberate":
 - **`Sin(L)` for an unknown-length `list<number>` on GPU emits `sin(L)`**, valid
   only if the caller happens to bind `L` to a `vecN` uniform. We assert a shape
   we cannot see.
+- **An all-scalar `PointList(u, v)` with an `unknown`-typed component bound to
+  a list at run time compiles as a plain point** and produces a malformed
+  value (filed 2026-07-31 from the PointList design pass). The zip lowering
+  guards its opaque slots at run time (`Array.isArray → NaN`); the all-scalar
+  path has no such guard because `unknown`-as-scalar is load-bearing for free
+  plot variables — same static-type-assertion class as `Sin(L)` above.
 - The `Multiply` ≥2-arrayish carve-out and the complex-element deferral —
   preserved verbatim through the broadcast rework, never re-examined.
 - ~~**`Sqrt(a)` with `a := -2` folds to a real `NaN`, not the complex value**~~
