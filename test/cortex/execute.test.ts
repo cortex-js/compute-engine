@@ -754,3 +754,26 @@ describe('CORTEX EXECUTE — error propagation', () => {
     );
   });
 });
+
+describe('CORTEX EXECUTE — the bare `_` identity shorthand', () => {
+  // A bare `_` in a function slot is the identity function (`x |-> x`). The
+  // Cortex parser accepts `_` in argument position (it is an ordinary symbol
+  // token there), so the shorthand has to work on this route too.
+  test('Map([1,2,3], _) yields the elements unchanged', () => {
+    const { value, diagnostics } = run('Map([1, 2, 3], _)');
+    expect(diagnostics).toEqual([]);
+    expect(value.toString()).toBe('[1,2,3]');
+  });
+
+  test('an eager function-slot operator takes it as well', () => {
+    const { value, diagnostics } = run('ChunkBy([1, 1, 2, 2, 3], _)');
+    expect(diagnostics).toEqual([]);
+    expect(value.toString()).toBe('[[1,1],[2,2],[3]]');
+  });
+
+  test('Filter([True, False], _) keeps the truthy elements', () => {
+    const { value, diagnostics } = run('Filter([True, False], _)');
+    expect(diagnostics).toEqual([]);
+    expect(value.toString()).toBe('["True"]');
+  });
+});

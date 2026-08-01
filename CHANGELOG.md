@@ -2,6 +2,14 @@
 
 ### Breaking Changes
 
+- **`First`, `Second`, `Third` and `Last` require an indexed collection**,
+  matching `Rest`/`Most`/`Take`/`Drop`/`At` and their own documented
+  signatures. A set-kind operand (`Set(1,2,3)`, `Integers`) now reports
+  `incompatible-type` — `First(Integers)` previously returned a silent
+  `NaN`. Positional absence is unchanged: `First([])` is still `Missing`
+  (an indexed collection with no element at that position is a different
+  situation from a collection with no positions at all).
+
 - **Errors now bubble through built-in operators.** Completing the error
   round: an expression with a failed strict operand — `err + 1`,
   `Sin("a" + 1)`, `Sum(Ln("a"), {k,1,3})` — now evaluates to the bare
@@ -401,6 +409,20 @@
   `finite_integer`.
 
 ### Bug Fixes
+
+- **A bounded `Take` knows it is finite.** `Take(xs, n)` with a finite
+  literal `n` reports itself finite even when the source's count is
+  unknown, so `ListFrom(Take(Filter(Range(1, Infinity), IsPrime), 10))`
+  now materializes to the first ten primes under plain `evaluate()`
+  instead of staying symbolic. The exact count remains unknown until
+  enumeration (the source may exhaust early) — finiteness and count are
+  separate questions. Previews of finite-but-unknown-length collections
+  also render correctly (a latent placeholder bug in materialization).
+
+- **The bare wildcard `_` is the identity function** in a function slot:
+  `Map(xs, _)` returns the elements unchanged, `ChunkBy(xs, _)` groups
+  runs of equal elements, `Sort(xs, _)` sorts by identity key. Only the
+  bare `_` desugars; `_1`/`_2`/named wildcards are unchanged.
 
 - **Bare predicate shorthand now works on every function-slot operator.**
   A wildcard-bodied expression like `["Greater", "_", 5]` was accepted as

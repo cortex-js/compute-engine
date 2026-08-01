@@ -14,14 +14,26 @@ import { ComputeEngine } from '../../src/compute-engine';
 // a cycle silently resolved to a definite answer.
 //
 
-/** The cycle shapes that used to overflow the stack. */
-const CYCLES: [string, (ce: ComputeEngine) => void][] = [
+/** The cycle shapes that used to overflow the stack.
+ *
+ * The third element lists the admissible `isFiniteCollection` answers. It is
+ * `[undefined, false]` — the fail-closed answers — for every cycle whose
+ * finiteness can only be learned by walking the cycle. `Take(b, n)` is the
+ * exception: a finite literal bound caps the result at `n` elements whatever
+ * `b` is, so `true` is derived WITHOUT resolving `b` (its exact `count` still
+ * fails closed, below). */
+const CYCLES: [
+  string,
+  (ce: ComputeEngine) => void,
+  (boolean | undefined)[],
+][] = [
   [
     'a := b, b := a',
     (ce) => {
       ce.assign('a', ce.parse('b'));
       ce.assign('b', ce.parse('a'));
     },
+    [undefined, false],
   ],
   [
     'a := Take(b, 2), b := Drop(a, 1)',
@@ -29,6 +41,7 @@ const CYCLES: [string, (ce: ComputeEngine) => void][] = [
       ce.assign('a', ce.box(['Take', 'b', 2]));
       ce.assign('b', ce.box(['Drop', 'a', 1]));
     },
+    [true],
   ],
   [
     'a := Append(b, 1), b := a',
@@ -36,6 +49,7 @@ const CYCLES: [string, (ce: ComputeEngine) => void][] = [
       ce.assign('a', ce.box(['Append', 'b', 1]));
       ce.assign('b', ce.parse('a'));
     },
+    [undefined, false],
   ],
   [
     'a := b, b := c, c := a',
@@ -44,11 +58,12 @@ const CYCLES: [string, (ce: ComputeEngine) => void][] = [
       ce.assign('b', ce.parse('c'));
       ce.assign('c', ce.parse('a'));
     },
+    [undefined, false],
   ],
 ];
 
 describe('indirect symbol reference cycles do not overflow the stack', () => {
-  for (const [name, setup] of CYCLES) {
+  for (const [name, setup, finiteAnswers] of CYCLES) {
     describe(name, () => {
       const ce = new ComputeEngine();
       setup(ce);
@@ -57,7 +72,7 @@ describe('indirect symbol reference cycles do not overflow the stack', () => {
       test('collection-shape queries fail closed', () => {
         // `isFiniteCollection` is the getter the defect was reported against.
         expect(() => a.isFiniteCollection).not.toThrow();
-        expect([undefined, false]).toContain(a.isFiniteCollection);
+        expect(finiteAnswers).toContain(a.isFiniteCollection);
 
         expect(() => a.isCollection).not.toThrow();
         expect(() => a.isIndexedCollection).not.toThrow();

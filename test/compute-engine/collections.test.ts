@@ -4328,3 +4328,182 @@ describe('ITERATE APPLIES A UNARY FUNCTION TO THE ACCUMULATOR ALONE', () => {
     ).toBe('[1,2,6,24,120]');
   });
 });
+
+describe('TAKE IS FINITE WHEN ITS BOUND IS (regression)', () => {
+  // `Take(xs, n)` yields at most `n` elements, so a finite literal bound makes
+  // it a FINITE collection whatever the source is — including a source whose
+  // own length is unknown. Finiteness and exact count are separate questions:
+  // the count stays `undefined` because the source may exhaust early.
+  const primes: Expression = [
+    'Take',
+    ['Filter', ['Range', 1, 'Infinity'], ['IsPrime', '_']],
+    10,
+  ];
+
+  test('a bounded Take of an unknown-length source is finite', () => {
+    const e = engine.box(primes);
+    expect(e.op1.count).toBeUndefined(); // the Filter's length is unknown
+    expect(e.op1.isFiniteCollection).toBeUndefined();
+    expect(e.isFiniteCollection).toBe(true);
+    // Honest: finite, but the exact count is NOT claimed.
+    expect(e.count).toBeUndefined();
+  });
+
+  test('ListFrom materializes it (the finiteness gate is satisfied)', () => {
+    // The materializer, `isFiniteCollection` and `ListFrom` all gate on
+    // finiteness; before the fix this stayed symbolic under plain evaluate().
+    expect(engine.box(['ListFrom', primes]).evaluate().toString()).toBe(
+      '[2,3,5,7,11,13,17,19,23,29]'
+    );
+  });
+
+  test('a known-length source still reports its exact count', () => {
+    const e = engine.box(['Take', ['Range', 1, 'Infinity'], 5]);
+    expect(e.isFiniteCollection).toBe(true);
+    expect(e.count).toBe(5);
+  });
+
+  test('a source that exhausts early reports its TRUE count, not the bound', () => {
+    const e = engine.box(['Take', ['List', 1, 2], 5]);
+    expect(e.isFiniteCollection).toBe(true);
+    expect(e.count).toBe(2);
+    expect(e.evaluate().toString()).toBe('[1,2]');
+  });
+
+  test('an infinite bound does NOT claim finite', () => {
+    const e = engine.box(['Take', ['Range', 1, 'Infinity'], 'Infinity']);
+    expect(e.isFiniteCollection).not.toBe(true);
+  });
+
+  test('a symbolic bound stays indeterminate', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    expect(ce.box(['Take', ['Range', 1, 'Infinity'], 'n']).isFiniteCollection)
+      .toBeUndefined();
+  });
+});
+
+describe('FIRST/SECOND/THIRD/LAST REQUIRE AN INDEXED COLLECTION (regression)', () => {
+  // `First(Integers)` used to answer a silent `NaN` — the position-preserving
+  // absence marker — as if ℤ merely had no first element. A set has no
+  // POSITIONS at all, so the family now refuses set-kind operands the same way
+  // `Take`/`Drop`/`At`/`Rest`/`Most` already did: `incompatible-type`.
+  const COMPONENTS = ['First', 'Second', 'Third', 'Last'];
+  const NON_INDEXED: [string, Expression][] = [
+    ['a finite Set', ['Set', 1, 2, 3]],
+    ['EmptySet', 'EmptySet'],
+    ['Integers', 'Integers'],
+    ['a Dictionary', ['Dictionary', ['KeyValuePair', { str: 'a' }, 1]]],
+  ];
+
+  for (const [label, xs] of NON_INDEXED) {
+    for (const op of COMPONENTS) {
+      test(`${op} of ${label} is an incompatible-type error`, () => {
+        const e = engine.box([op, xs] as Expression);
+        expect(e.toString()).toMatch(
+          /incompatible-type", "indexed_collection"/
+        );
+        expect(e.evaluate().operator).toBe('Error');
+      });
+    }
+    test(`Take/Drop of ${label} refuse identically (the family it matches)`, () => {
+      expect(engine.box(['Take', xs, 2] as Expression).toString()).toMatch(
+        /incompatible-type", "indexed_collection"/
+      );
+      expect(engine.box(['Drop', xs, 2] as Expression).toString()).toMatch(
+        /incompatible-type", "indexed_collection"/
+      );
+    });
+  }
+
+  test('a set reaching the handler at RUNTIME is refused too', () => {
+    // Overlap-deferred validation: the static gate admits an operand whose
+    // type does not refute `indexed_collection`, so the evaluate handler is
+    // the re-validation (see the add-operator checklist).
+    const ce = new ComputeEngine();
+    ce.assign('s', ce.box(['Set', 1, 2, 3]));
+    expect(ce.box(['First', 's']).evaluate().operator).toBe('Error');
+  });
+
+  test('indexed collections are unaffected', () => {
+    expect(engine.box(['First', ['List', 7, 13, 5]]).evaluate().toString()).toBe(
+      '7'
+    );
+    expect(engine.box(['Last', ['List', 7, 13, 5]]).evaluate().toString()).toBe(
+      '5'
+    );
+    expect(engine.box(['Second', ['Range', 1, 10]]).evaluate().toString()).toBe(
+      '2'
+    );
+    // A tuple IS indexed (`First` of a point is its x-coordinate).
+    expect(engine.box(['First', ['Tuple', 'x', 'y']]).evaluate().toString()).toBe(
+      'x'
+    );
+  });
+
+  test('the ABSENCE marker is unchanged for a genuinely missing position', () => {
+    // An indexed collection that simply has no element there still answers the
+    // position-preserving marker — NOT an error (Nothing-vs-Missing).
+    expect(engine.box(['First', ['List']]).evaluate().symbol).toBe('Missing');
+    expect(engine.box(['Last', ['List']]).evaluate().symbol).toBe('Missing');
+    // No last element of an infinite indexed collection: NaN for a numeric one.
+    expect(
+      engine.box(['Last', ['Range', 1, 'Infinity']]).evaluate().isNaN
+    ).toBe(true);
+  });
+});
+
+describe('BARE `_` IS THE IDENTITY FUNCTION SHORTHAND (regression)', () => {
+  // `_` alone in a function slot means `x |-> x`. Only the BARE `_` qualifies:
+  // `_1`/`_2`/… are positional parameters of an enclosing shorthand and a
+  // named symbol may name a function, so both stay pass-through.
+  const xs: Expression = ['List', 3, 1, 2];
+
+  test('the slot desugars to a canonical identity literal', () => {
+    expect(JSON.stringify(engine.box(['Map', xs, '_']).json)).toContain(
+      '["Function",["Block","_1"],"_1"]'
+    );
+  });
+
+  test('Map(xs, _) yields the elements unchanged', () => {
+    expect(engine.box(['Map', xs, '_']).evaluate().toString()).toBe('[3,1,2]');
+  });
+
+  test('ChunkBy(xs, _) groups by the element itself (eager operator)', () => {
+    expect(
+      engine
+        .box(['ChunkBy', ['List', 1, 1, 2, 2, 3], '_'])
+        .evaluate()
+        .toString()
+    ).toBe('[[1,1],[2,2],[3]]');
+  });
+
+  test('Filter(xs, _) keeps the truthy elements', () => {
+    expect(
+      engine
+        .box(['Filter', ['List', 'True', 'False', ['Greater', 1, 0]], '_'])
+        .evaluate()
+        .toString()
+    ).toBe('["True","True"]');
+  });
+
+  test('Sort(xs, _) sorts by the identity KEY (a unary function is a key)', () => {
+    // A unary function in `Sort`'s second slot is a key extractor, not a
+    // comparator (the `sortedIndices` convention), so the identity key is a
+    // plain sort — a clean meaning, not garbage.
+    expect(engine.box(['Sort', xs, '_']).evaluate().toString()).toBe('[1,2,3]');
+    expect(engine.box(['Ordering', xs, '_']).evaluate().toString()).toBe(
+      '[2,3,1]'
+    );
+  });
+
+  test('a NUMBERED or named wildcard is NOT the identity shorthand', () => {
+    // `_1` stays a symbol naming a (here undefined) function.
+    expect(engine.box(['Map', xs, '_1']).evaluate().toString()).toBe(
+      '[_1(3),_1(1),_1(2)]'
+    );
+    expect(engine.box(['Map', xs, '_a']).evaluate().toString()).toBe(
+      '[_a(3),_a(1),_a(2)]'
+    );
+  });
+});

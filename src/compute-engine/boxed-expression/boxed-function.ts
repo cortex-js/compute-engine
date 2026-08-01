@@ -3266,9 +3266,17 @@ function materialize(
   const xs: Expression[] = [];
 
   if (!expr.isEmptyCollection) {
-    if (!isIndexed || !isFinite) {
+    // The head+tail rendering needs the exact `count` (it indexes the tail
+    // from the end). A collection can be provably FINITE without knowing its
+    // count — `Take(xs, 10)` over a source that may exhaust early, a `Filter`
+    // of a finite list — and there the head+tail branch fabricated a trailing
+    // `ContinuationPlaceholder` for a collection that had already ended.
+    // Finiteness and exact count are separate questions: fall back to the
+    // head-only walk, which probes the iterator for a genuine continuation.
+    if (!isIndexed || !isFinite || expr.count === undefined) {
       //
-      // If we're not indexed, or not finite, we can only materialize the head
+      // If we're not indexed, or not finite (or of unknown length), we can
+      // only materialize the head
       //
       const last =
         typeof materialization === 'number'

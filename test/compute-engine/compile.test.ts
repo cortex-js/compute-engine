@@ -2156,11 +2156,13 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   it('a non-indexed / non-collection operand fails closed', () => {
     const e = mkEngine();
     const js = new JavaScriptTarget();
-    // `Last` accepts any collection by signature, but a non-indexed `set`
-    // cannot lower to a JS array — the handler's own check fires.
+    // A non-indexed `set` cannot lower to a JS array. It no longer reaches
+    // the compile handler's own check: `Last` declares an `indexed_collection`
+    // parameter (like `Take`/`Drop`/`At`), so the set is refused at
+    // canonicalization and the operand is an `Error`. Either way, closed.
     expect(() =>
       js.compile(e.box(['Last', ['Set', 1, 2, 3]]), { realOnly: true })
-    ).toThrow(/Fail closed/);
+    ).toThrow(/incompatible-type/);
     // A scalar operand is rejected earlier by the type system (still closed).
     expect(() =>
       js.compile(e.box(['Reverse', 'm']), { realOnly: true })

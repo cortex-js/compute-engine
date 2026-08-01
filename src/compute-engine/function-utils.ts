@@ -172,7 +172,14 @@ export function canonicalFunctionLiteral(
   //    When evaluating, the type of the symbol need to be checked to
   //    make sure it's a function
   //
-  if (isSymbol(expr)) return expr;
+  //    Exception: the BARE wildcard `_` is the identity-function shorthand
+  //    (`Map(xs, _)` ≡ `Map(xs, x ↦ x)`). It falls through to the shorthand
+  //    path below, which turns it into `(_1) ↦ _1`. Only the bare `_`
+  //    qualifies: `_1`/`_2`/… are positional parameters of an ENCLOSING
+  //    shorthand, and a named wildcard is a pattern variable — neither is an
+  //    identity function.
+  //
+  if (isSymbol(expr) && !isSymbol(expr, '_')) return expr;
 
   //
   // 3/ `BuiltinFunction`, e.g. ["BuiltinFunction", "Sin"]

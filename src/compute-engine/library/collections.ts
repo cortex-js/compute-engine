@@ -640,9 +640,27 @@ function componentAt(
   position: number,
   ce: ComputeEngine
 ): Expression | undefined {
-  if (xs.isCollection) return xs.at(position) ?? absenceMarker(ce, xs);
+  if (xs.isCollection) {
+    // Runtime re-validation of the `indexed_collection` parameter (the static
+    // gate is overlap-deferred, so an `unknown`-typed operand can arrive
+    // holding a set-kind collection — `Integers`, `Set(…)`, a dictionary).
+    // Those have no positions at all: refuse them the way `Take`/`Drop`/`At`
+    // do, rather than answering the position-preserving absence marker, which
+    // would read as "that position is empty".
+    if (!xs.isIndexedCollection)
+      return ce.error([
+        'incompatible-type',
+        'indexed_collection',
+        xs.type.toString(),
+      ]);
+    return xs.at(position) ?? absenceMarker(ce, xs);
+  }
   if (xs.type.matches('indexed_collection')) return undefined;
-  return ce.error(['incompatible-type', `'collection'`, xs.type.toString()]);
+  return ce.error([
+    'incompatible-type',
+    'indexed_collection',
+    xs.type.toString(),
+  ]);
 }
 
 // A point is a tuple (its coordinates are its elements). The `.x`/`.y`/`.z`
@@ -3660,12 +3678,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // of the source.
         const n = integerParam(expr.op2);
         if (n === null) return undefined; // symbolic bound
-        if (n !== undefined && n <= 0) return true;
-        // Otherwise the result is finite when its own element count is
-        // known-finite — i.e. a finite bound over a source that is finite or
-        // provably infinite (`Take(Range(1,∞), 3)` → count 3). When the
-        // source's length is genuinely unknown, `takeCount` is `undefined`
-        // and the result's finiteness is unknown too: defer to the source.
+        // A finite bound caps the result at `n` elements, so the `Take` is
+        // finite whatever the source is — including a source whose own length
+        // is unknown (`Take(Filter(Range(1, ∞), IsPrime), 10)`). Finiteness
+        // and exact count are separate questions: `count` stays `undefined`
+        // there because the source may exhaust before `n` elements.
+        if (n !== undefined && Number.isFinite(n)) return true;
+        // Otherwise (an infinite bound, or a missing one) the result is finite
+        // when its own element count is known-finite. When the source's length
+        // is genuinely unknown, `takeCount` is `undefined` and the result's
+        // finiteness is unknown too: defer to the source.
         const count = takeCount(expr);
         if (count !== undefined && Number.isFinite(count)) return true;
         return expr.op1.isFiniteCollection;
@@ -3785,7 +3807,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   First: {
     description: 'The first element of a collection.',
     complexity: 8200,
-    signature: '(any) -> any',
+    signature: '(xs: indexed_collection) -> any',
     type: ([xs]) => componentResultType(xs, 1),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 1, ce),
   },
@@ -3793,7 +3815,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Second: {
     description: 'The second element of a collection.',
     complexity: 8200,
-    signature: '(any) -> any',
+    signature: '(xs: indexed_collection) -> any',
     type: ([xs]) => componentResultType(xs, 2),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 2, ce),
   },
@@ -3801,7 +3823,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Third: {
     description: 'The third element of a collection.',
     complexity: 8200,
-    signature: '(any) -> any',
+    signature: '(xs: indexed_collection) -> any',
     type: ([xs]) => componentResultType(xs, 3),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 3, ce),
   },
@@ -3843,7 +3865,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Last: {
     description: 'The last element of a collection.',
     complexity: 8200,
-    signature: '(collection) -> any',
+    signature: '(xs: indexed_collection) -> any',
     type: ([xs]) => componentResultType(xs, -1),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, -1, ce),
   },
