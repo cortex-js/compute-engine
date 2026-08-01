@@ -1,5 +1,12 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { effectsOf } from '../../src/compute-engine/boxed-expression/effects-of';
+import { isEffectContractError } from '../../src/compute-engine/boxed-expression/effects-inference';
+import {
+  functionLiteralDeclaredEffects,
+  functionLiteralDeclaredSignature,
+  functionLiteralReturnType,
+} from '../../src/compute-engine/boxed-expression/function-literal';
+import { typeToString } from '../../src/common/type/serialize';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 /**
@@ -1394,5 +1401,321 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
     expect(ce.lookupDefinition('isEven10')!['operator'].effects).toEqual([]);
     expect(ce.lookupDefinition('isOdd10')!['operator'].effects).toEqual([]);
     expect(ce.box(['isEven10', 4]).isPure).toBe(true);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// STAGE 3 — full-signature `Typed` markers.
+//
+// `docs/EFFECTS-MODEL.md`, "Cortex surface": the block-form definition return
+// annotation is encoded as **the full signature**. A `Function` literal's §4.2
+// return marker may hold a complete `FunctionSignature` — parameter types
+// mirrored from the parameter list, arrow effects from the post-parameter-list
+// specifier slot, result from the ascription — and that signature is the
+// literal's declared type.
+//
+// Decomposition predicate: a marker's type decomposes as a full signature iff
+// it parses to a signature AND carries an effect set (the stated-empty `[]` a
+// `pure` keyword builds counts). A signature WITHOUT effects keeps its
+// historical reading — a function whose RESULT is a function — so existing
+// bare `Typed(body, returnType)` ascriptions are untouched.
+//
+// Wide-result convention (mirrors `desugarSignatureString`'s `isWide`): a
+// result of `unknown`/`any` declares NO return type; only the effects are
+// declared, and the return stays inferred. That is what
+// `function tick() scope { … }` lowers to.
+// ───────────────────────────────────────────────────────────────────────────
+describe('STAGE 3 — full-signature `Typed` markers', () => {
+  /** `(n) ↦ Random(Range(1, n))` — the drawing body every case below reuses. */
+  const DRAWING_BODY = ['Random', ['Range', 1, 'n']];
+
+  describe('the literal carries the declared arrow', () => {
+    it('box route: effects AND result come off a full-signature marker', () => {
+      const ce = new ComputeEngine();
+      const f = ce.box([
+        'Function',
+        ['Typed', DRAWING_BODY, { str: '(n: unknown) random -> integer' }],
+        'n',
+      ]);
+      expect(f.type.toString()).toBe('(unknown) random -> integer');
+      // The declared RESULT is `integer`, not the whole signature: the marker
+      // decomposed.
+      expect(typeToString(functionLiteralReturnType(f)!)).toBe('integer');
+      expect(functionLiteralDeclaredEffects(f)).toEqual(['random']);
+    });
+
+    it('the param operands stay the parameters of record', () => {
+      // The marker signature's argument list is a MIRROR: never read for
+      // parameter types. Here it says `n: unknown` while the parameter operand
+      // is annotated `integer` — the parameter operand wins.
+      const ce = new ComputeEngine();
+      const f = ce.box([
+        'Function',
+        ['Typed', DRAWING_BODY, { str: '(n: unknown) random -> integer' }],
+        ['Typed', 'n', { str: 'integer' }],
+      ]);
+      expect(f.type.toString()).toBe('(n: integer) random -> integer');
+    });
+
+    it('a STATED-pure marker round-trips as ` pure`', () => {
+      const ce = new ComputeEngine();
+      const f = ce.box([
+        'Function',
+        ['Typed', 'x', { str: '(x: unknown) pure -> real' }],
+        'x',
+      ]);
+      // `[]` is the stated empty set, not `undefined` — the spelling survives.
+      expect(functionLiteralDeclaredEffects(f)).toEqual([]);
+      expect(f.type.toString()).toBe('(unknown) pure -> real');
+      expect(f.isPure).toBe(true);
+    });
+
+    it('a wide result declares effects ONLY; the return stays inferred', () => {
+      const ce = new ComputeEngine();
+      const f = ce.box([
+        'Function',
+        [
+          'Typed',
+          ['Block', ['Assign', 'w3', 'x'], ['Add', 'x', 1]],
+          { str: '(x: unknown) scope -> unknown' },
+        ],
+        'x',
+      ]);
+      expect(functionLiteralDeclaredEffects(f)).toEqual(['scope']);
+      // No declared return type at all…
+      expect(functionLiteralReturnType(f)).toBe(undefined);
+      // …so inference supplies it (and the finite-numeric widening rule still
+      // applies over the last statement's own type) — `unknown` is NOT forced.
+      expect(f.type.toString()).toBe('(unknown) scope -> number');
+    });
+
+    it('the inferred effects UNION with the declared ones', () => {
+      // Over-declaring is allowed and the union equals the declared set; the
+      // literal's arrow is a sound over-approximation either way.
+      const ce = new ComputeEngine();
+      const f = ce.box([
+        'Function',
+        ['Typed', ['Add', 'n', 1], { str: '(n: unknown) random scope -> integer' }],
+        'n',
+      ]);
+      expect(f.type.toString()).toBe('(unknown) random scope -> integer');
+    });
+  });
+
+  describe('regression — a marker WITHOUT effects is not decomposed', () => {
+    it('a pure signature stays a plain return-type ascription', () => {
+      const ce = new ComputeEngine();
+      const f = ce.box([
+        'Function',
+        ['Typed', ['Add', 'x', 1], { str: '(integer) -> integer' }],
+        'x',
+      ]);
+      expect(functionLiteralDeclaredSignature(f)).toBe(undefined);
+      expect(functionLiteralDeclaredEffects(f)).toBe(undefined);
+      // The declared RETURN type is the whole signature: a function returning
+      // a function, today's meaning.
+      expect(typeToString(functionLiteralReturnType(f)!)).toBe(
+        '(integer) -> integer'
+      );
+      expect(f.type.toString()).toBe('(unknown) -> (integer) -> integer');
+    });
+
+    it('a bare return-type ascription is unchanged', () => {
+      const ce = new ComputeEngine();
+      const f = ce.box([
+        'Function',
+        ['Typed', ['Add', 'x', 1], { str: 'integer' }],
+        'x',
+      ]);
+      expect(functionLiteralDeclaredEffects(f)).toBe(undefined);
+      expect(f.type.toString()).toBe('(unknown) -> integer');
+    });
+
+    it('a PARENTHESIZED effect-bearing signature is a grouped RETURN type, not a contract (ruled 2026-08-01)', () => {
+      // Grouping does not survive parsing, so the marker's TEXT is the
+      // authority: `-> ((real) random -> real)` ascribes an effectful-arrow
+      // RETURN type, while the ungrouped spelling declares the literal's own
+      // contract. See `isGroupedTypeText` (`common/type/utils.ts`).
+      const ce = new ComputeEngine();
+      const f = ce.box([
+        'Function',
+        ['Typed', 'x', { str: '((real) random -> real)' }],
+        'x',
+      ]);
+      expect(functionLiteralDeclaredEffects(f)).toBe(undefined);
+      expect(f.type.toString()).toBe('(unknown) -> (real) random -> real');
+    });
+  });
+
+  describe('the marker is a CONTRACT at install', () => {
+    it('a violation is an `incompatible-type` error VALUE on the `Assign` route', () => {
+      const ce = new ComputeEngine();
+      const r = ce
+        .box([
+          'Assign',
+          'v3',
+          [
+            'Function',
+            ['Typed', DRAWING_BODY, { str: '(n: unknown) pure -> integer' }],
+            'n',
+          ],
+        ])
+        .evaluate();
+      expect(r.operator).toBe('Error');
+      expect(r.toString()).toContain('incompatible-type');
+      // Not installed: the symbol was auto-declared while the `Assign` was
+      // canonicalized, but no operator definition was created for it.
+      expect(ce.lookupDefinition('v3')?.['operator']).toBeUndefined();
+    });
+
+    it('a failed install leaves a USABLE definition record (no crash on call)', () => {
+      // `updateDef` swaps a definition record's value/operator halves; the
+      // operator constructor throwing (this contract check) used to fire
+      // AFTER the old half was deleted, leaving a record with neither — and
+      // applying the symbol then crashed in `makeCanonicalFunction`
+      // (`def.operator.scoped` on undefined). The swap is now transactional.
+      const ce = new ComputeEngine();
+      ce.box([
+        'Assign',
+        'v3c',
+        [
+          'Function',
+          ['Typed', DRAWING_BODY, { str: '(n: unknown) pure -> integer' }],
+          'n',
+        ],
+      ]).evaluate();
+      // The pre-declared placeholder survives; the call is inert, not a throw.
+      expect(ce.box(['v3c', 1]).toString()).toBe('v3c(1)');
+    });
+
+    it('the same violation THROWS through the JS `ce.assign` API', () => {
+      const ce = new ComputeEngine();
+      const literal = ce.box([
+        'Function',
+        ['Typed', DRAWING_BODY, { str: '(n: unknown) pure -> integer' }],
+        'n',
+      ]);
+      let caught: unknown;
+      try {
+        ce.assign('v3b', literal);
+      } catch (e) {
+        caught = e;
+      }
+      expect(isEffectContractError(caught)).toBe(true);
+      expect((caught as Error).message).toContain('random');
+    });
+
+    it('a contract that HOLDS installs, and the definition keeps the declared set', () => {
+      const ce = new ComputeEngine();
+      ce.box([
+        'Assign',
+        'h3',
+        [
+          'Function',
+          ['Typed', DRAWING_BODY, { str: '(n: unknown) random -> integer' }],
+          'n',
+        ],
+      ]).evaluate();
+      const def = ce.lookupDefinition('h3')!['operator'];
+      expect(def.signature.toString()).toBe('(unknown) random -> integer');
+      expect(def.effects).toEqual(['random']);
+      // The marker is AUTHOR-stated, so it sets the provenance bit (an
+      // inference-produced arrow is stripped instead).
+      expect(def.effectsDeclared).toBe(true);
+      expect(def.pure).toBe(false);
+      expect(ce.box('h3').type.toString()).toBe('(unknown) random -> integer');
+      expect(eff(ce.box(['h3', 5]))).toEqual(['random']);
+      expect(ce.box(['h3', 5]).isPure).toBe(false);
+    });
+
+    it('OVER-declaring installs and the declared set is what is stored', () => {
+      const ce = new ComputeEngine();
+      ce.box([
+        'Assign',
+        'o3',
+        [
+          'Function',
+          [
+            'Typed',
+            ['Add', 'n', 1],
+            { str: '(n: unknown) random scope -> integer' },
+          ],
+          'n',
+        ],
+      ]).evaluate();
+      const def = ce.lookupDefinition('o3')!['operator'];
+      expect(def.effects).toEqual(['random', 'scope']);
+      expect(def.effectsDeclared).toBe(true);
+      expect(def.signature.toString()).toBe(
+        '(unknown) random scope -> integer'
+      );
+    });
+
+    it('an effects-ONLY marker still installs an explicit signature', () => {
+      // Wide result, no annotated parameter: nothing a return-type ascription
+      // or an annotated param would catch, yet it IS an annotation.
+      const ce = new ComputeEngine();
+      ce.box([
+        'Assign',
+        'tick3',
+        ['Function', ['Typed', ['Assign', 'ctr3', 1], { str: '() scope -> unknown' }]],
+      ]).evaluate();
+      const def = ce.lookupDefinition('tick3')!['operator'];
+      expect(def.inferredSignature).toBe(false);
+      expect(def.effects).toEqual(['scope']);
+      expect(def.effectsDeclared).toBe(true);
+      expect(def.signature.toString()).toBe('() scope -> finite_integer');
+    });
+
+    it('a stated-pure marker over a pure body installs as a purity CONTRACT', () => {
+      const ce = new ComputeEngine();
+      ce.box([
+        'Assign',
+        'p3',
+        [
+          'Function',
+          ['Typed', ['Add', 'n', 1], { str: '(n: unknown) pure -> integer' }],
+          'n',
+        ],
+      ]).evaluate();
+      const def = ce.lookupDefinition('p3')!['operator'];
+      expect(def.effects).toEqual([]);
+      expect(def.effectsDeclared).toBe(true);
+      expect(def.pure).toBe(true);
+      expect(def.signature.toString()).toBe('(unknown) pure -> integer');
+    });
+  });
+
+  describe('the `desugarSignatureString` sugar route preserves arrow effects', () => {
+    it('a signature-string parameter keeps its effects on the literal', () => {
+      const ce = new ComputeEngine();
+      const f = ce.function('Function', [
+        ce.box(['Add', 'n', ['Random']]),
+        ce.string('(n: integer) random -> integer'),
+      ]);
+      expect(f.type.toString()).toBe('(n: integer) random -> integer');
+      expect(functionLiteralDeclaredEffects(f)).toEqual(['random']);
+    });
+
+    it('a wide result under the sugar declares effects only', () => {
+      const ce = new ComputeEngine();
+      const f = ce.function('Function', [
+        ce.box(['Assign', 's3', 'n']),
+        ce.string('(n: integer) scope -> unknown'),
+      ]);
+      expect(functionLiteralDeclaredEffects(f)).toEqual(['scope']);
+      expect(functionLiteralReturnType(f)).toBe(undefined);
+      expect(f.type.toString()).toBe('(n: integer) scope -> integer');
+    });
+
+    it('an effect-free signature string is unchanged (result-only ascription)', () => {
+      const ce = new ComputeEngine();
+      const f = ce.function('Function', [
+        ce.box(['Add', 'n', 1]),
+        ce.string('(n: integer) -> integer'),
+      ]);
+      expect(functionLiteralDeclaredEffects(f)).toBe(undefined);
+      expect(f.type.toString()).toBe('(n: integer) -> integer');
+    });
   });
 });

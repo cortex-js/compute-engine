@@ -1364,6 +1364,61 @@ definition-annotation rule (installed iff `inferred ⊆ declared`,
 `incompatible-type` error value otherwise) — unlike return types, which
 remain retained-not-validated for now.
 
+**Encoding rulings (implemented 2026-08-01, Stage 3):**
+
+- **Decomposition predicate.** A §4.2 marker (the `Typed` wrapping the
+  body Block's last statement, or the authoring-form body ascription)
+  decomposes as the literal's declared full signature **iff its type
+  parses to a signature CARRYING an effect set** — a non-empty specifier,
+  or the stated-empty `[]` that `pure` builds. A signature type
+  *without* an effect set keeps today's return-type-only reading (a
+  function that returns a function). **Parentheses disambiguate the
+  remaining case** (ruled 2026-08-01): to ascribe an *effect-bearing
+  arrow* as a RETURN type, group it —
+  `function mk(x) -> ((real) random -> real) { … }`. Grouping does not
+  survive parsing, so the gate is textual (`isGroupedTypeText`,
+  `common/type/utils.ts`, applied by both the engine's
+  `functionLiteralDeclaredSignature` and the Cortex serializer): a
+  fully parenthesized marker spelling is a grouped type, never the
+  literal's own contract. The ungrouped spelling declares the contract.
+- **Wide-result convention** (mirrors `desugarSignatureString`): a
+  declared signature whose result is `unknown`/`any` declares no return
+  type — the return stays inferred — so the block form supports
+  effects-only annotations (`function tick() scope { … }`, lowered with
+  result `unknown`).
+- **The literal's own arrow** carries `declared ∪ inferred`: equal to
+  the declared set whenever the contract holds (over-declaring included),
+  and a sound over-approximation when it is violated — the violation
+  itself surfaces at definition install, through the same
+  `EffectContractError` → `incompatible-type` channel as the
+  `declare`-then-assign routes (`assignValueAsOperatorDef` hands the
+  declared set to the operator-definition constructor instead of
+  stripping the arrow, which sets `effectsDeclared` and runs the check).
+- **The marker's argument list is a cosmetic mirror.** The literal's
+  parameter operands remain the parameters-of-record; nothing reads
+  parameter types out of the marker signature. The Cortex lowering
+  spells them named (`(n: unknown) random -> integer`), falling back to
+  positional spelling when a parameter name is not a plain identifier.
+- **Math-style definitions require the arrow** — `f(x) random ->
+  integer = …` is claimed, `f(x) random = 5` stays an ordinary
+  expression (the specifier run is only recognized when `->` follows;
+  juxtaposition would otherwise be ambiguous). The block form has no
+  such ambiguity (`{` follows) and supports both specifier-with-arrow
+  and specifier-only.
+- `desugarSignatureString()` **preserves arrow-level effects** by
+  ascribing the *full* signature string onto the body whenever the sugar
+  signature carries an effect set (the body's own explicit `Typed`
+  ascription still wins); the effect-free path is unchanged.
+- **Anonymous contract literals serialize losslessly** (option B, ruled
+  2026-08-01): a specifier-carrying anonymous literal has no lambda
+  spelling, so the Cortex serializer keeps the contract as an explicit
+  `Typed(body, "‹sig›")` call inside the generic `Function(…)` form —
+  which re-parses to the same MathJSON. Effect-free ascriptions and
+  grouped (return-type) spellings stay transparent as before. A lambda
+  specifier slot (`(x) random |-> …`) was considered and deferred until
+  authoring demand exists — the declaration form (`let f: (real) random
+  -> real = …`) covers authoring today.
+
 ## Migration and sequencing
 
 Each stage is useful without the next; per-stage pinning tests named.
@@ -1437,10 +1492,20 @@ Each stage is useful without the next; per-stage pinning tests named.
   is pinned by the inferred-track / declared-track describes in
   `user-function-purity.test.ts` and the `pure` grammar block in
   `test/common/type/effects.test.ts`.
-- **Stage 3 — Cortex**: type-literal effects in the parser/serializer
-  pair; the definition-form full-signature encoding. Tests:
-  `test/cortex/effects.test.ts` (round-trip of all three surface
-  positions).
+- **Stage 3 — Cortex (implemented 2026-08-01)**: type-literal effects in
+  the parser/serializer pair; the definition-form full-signature
+  encoding, per the "Encoding rulings" of "Cortex surface" (decomposition
+  predicate, wide-result convention, arrow-required math form,
+  declared ∪ inferred arrow). The declaration form and parameter
+  annotations rode along for free (the type subparser gained the
+  specifier slot in Stage 1); the new grammar is the definition-form
+  specifier slot only. Tests: `test/cortex/effects.test.ts` (round-trip
+  of all three surface positions, execution-route contract checks) and
+  the "STAGE 3 — full-signature `Typed` markers" block of
+  `test/compute-engine/effects-contracts.test.ts` (engine encoding:
+  box/`ce.function`/`Assign`/`ce.assign` routes, stated-pure
+  round-trip, wide-result, violation channel, sugar-string
+  preservation, pure-signature-not-decomposed control).
 - **Stage 4 — capabilities (on demand)**: the `ce.effects` registry
   (interfaces, fail-closed defaults, `ce.withEffects` scoped override),
   shipping with the first capability operator (`Fetch` / `Print` / file

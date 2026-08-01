@@ -1,12 +1,14 @@
 import { MathJsonExpression, MathJsonSymbol } from '../math-json/types.js';
 import { Origin } from '../common/debug.js';
-import { parseTypePrefix } from '../common/type/parse.js';
+import { parseType, parseTypePrefix } from '../common/type/parse.js';
+import { EFFECT_LABELS } from '../common/type/effects.js';
 import {
   isStringObject,
   mapArgs,
   operand,
   operator,
   stringValue,
+  symbol,
 } from '../math-json/utils.js';
 import { DIGITS, FANCY_UNICODE, HEX_DIGITS } from './characters.js';
 import {
@@ -34,6 +36,25 @@ const MULTIPLY_PRECEDENCE = infixOperatorForSymbol('*')!.precedence;
 
 /** The characters that can head a prefix operator run (`-x`, `!a`, `+3`). */
 const PREFIX_SIGILS = new Set(['!', '-', '+']);
+
+/** The bare words admitted in a definition's **effect specifier slot** — the
+ * Swift-style position between the parameter list and `->`
+ * (`function roll(n) random -> integer { … }`). The nine effect labels plus the
+ * two set spellings `any` (unknown effects) and `pure` (stated-empty). See
+ * `docs/EFFECTS-MODEL.md`, "Cortex surface". */
+const EFFECT_SPECIFIER_WORDS: ReadonlySet<string> = new Set<string>([
+  ...EFFECT_LABELS,
+  'any',
+  'pure',
+]);
+
+/** A plain identifier — the names that can be spelled in a signature's named
+ * argument list (`(n: integer)`). */
+const PLAIN_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** The effect words of a definition's specifier slot, with their source span
+ * (used to place a diagnostic on an invalid specifier). */
+type EffectSpecifier = { words: string[]; start: number; end: number };
 
 //
 // The Cortex parser turns a `Token[]` (from the Cortex `Lexer`) into a MathJSON
@@ -1502,7 +1523,12 @@ export class Parser {
    * parameters, and a return type (`… -> real { … }`) is ascribed onto the body
    * as `["Typed", body, type]` (the engine normalizes it into the Block). Both
    * annotations are then enforced by the engine's typed-function-literal
-   * machinery; no `Declare` side-channel is needed. */
+   * machinery; no `Declare` side-channel is needed.
+   *
+   * An **effect specifier** may sit between the parameter list and `->`
+   * (`function roll(n) random -> integer { … }`); the ascription then carries
+   * the FULL signature instead of the bare return type — see
+   * {@link definitionAscription}. */
   private parseFunctionDefinition(): MathJsonExpression | null {
     const kw = this.advance(); // 'function'
     const nameTok = this.current;
@@ -1526,12 +1552,17 @@ export class Parser {
     }
     const params = this.parseParameterList();
 
+    // Optional effect specifier `random`, `scope`, `pure`, … (bare words
+    // between the parameter list and `->`).
+    const spec = this.parseEffectSpecifier();
+
     // Optional return type `-> Type` (ascribed onto the body below).
     let returnType: MathJsonExpression | null = null;
     if (this.check('OPERATOR') && this.current.text === '->') {
       this.advance(); // '->'
       returnType = this.parseHeldType();
     }
+    const ascription = this.definitionAscription(params, spec, returnType);
 
     if (!this.check('OPEN_BRACE')) {
       this.error(
@@ -1545,9 +1576,9 @@ export class Parser {
     const end = this.localEnd(body) ?? this.previousEnd();
 
     const ascribedBody =
-      returnType !== null
+      ascription !== null
         ? this.wrap(
-            ['Typed', body, returnType] as MathJsonExpression[],
+            ['Typed', body, ascription] as MathJsonExpression[],
             this.localStart(body) ?? nameTok.start,
             end
           )
@@ -1567,8 +1598,10 @@ export class Parser {
 
   /** Whether the statement at the cursor is a math-style function definition
    * `f( … ) = …` or `f( … ) -> Type = …`: a bare symbol, an abutting `(`, its
-   * matching `)`, then either `=` or an `-> Type =` return ascription. A
-   * lookahead only — it consumes nothing. */
+   * matching `)`, then either `=` or an `-> Type =` return ascription. An
+   * effect specifier may precede the arrow (`f(x) random -> integer = …`) but
+   * only WITH it: `f(x) random = 5` stays an expression. A lookahead only — it
+   * consumes nothing. */
   private isMathFunctionDef(): boolean {
     if (this.current.type !== 'SYMBOL') return false;
     const paren = this.peek(1);
@@ -1585,14 +1618,25 @@ export class Parser {
         if (depth === 0) break;
       } else if (t === 'EOF') return false;
     }
-    const after = this.tokens[i + 1];
+    // Skip an optional effect specifier: a run of bare effect words.
+    let k = i + 1;
+    while (
+      this.tokens[k] !== undefined &&
+      this.tokens[k].type === 'SYMBOL' &&
+      EFFECT_SPECIFIER_WORDS.has(this.tokens[k].text)
+    )
+      k += 1;
+    const after = this.tokens[k];
     if (after === undefined) return false;
-    if (after.type === 'OPERATOR' && after.text === '=') return true;
+    // The bare `=` form is claimed only WITHOUT a specifier: `f(x) random = 5`
+    // is an expression (an invisible multiply), not a definition.
+    if (k === i + 1 && after.type === 'OPERATOR' && after.text === '=')
+      return true;
     // Optional return type `-> Type =`: past `->`, scan for the `=` that ends
     // the (type) prefix, stopping at a statement boundary. Type spellings never
     // contain `=`, so the first `=` on the line closes the definition head.
     if (after.type === 'OPERATOR' && after.text === '->') {
-      for (let j = i + 2; j < this.tokens.length; j++) {
+      for (let j = k + 1; j < this.tokens.length; j++) {
         const t = this.tokens[j];
         if (t.type === 'EOF' || t.type === 'SEMICOLON') return false;
         if (t.precededByLinebreak) return false;
@@ -1608,7 +1652,12 @@ export class Parser {
    * parameters, and a return type (`f(x: integer) -> real = …`) is ascribed
    * onto the body as `["Typed", body, type]` (the engine normalizes it). Both
    * annotations are enforced by the engine's typed-function-literal machinery;
-   * no `Declare` side-channel is needed. */
+   * no `Declare` side-channel is needed.
+   *
+   * An **effect specifier** may sit between the parameter list and `->`
+   * (`f(x) random -> integer = …`); the ascription then carries the FULL
+   * signature instead of the bare return type — see
+   * {@link definitionAscription}. */
   private parseMathFunctionDef(): MathJsonExpression | null {
     const nameTok = this.advance(); // SYMBOL
     this.harvest(nameTok);
@@ -1619,12 +1668,17 @@ export class Parser {
     );
     const params = this.parseParameterList();
 
+    // Optional effect specifier — supported here only WITH the arrow (the
+    // lookahead does not claim `f(x) random = 5`).
+    const spec = this.parseEffectSpecifier();
+
     // Optional return type `-> Type` (ascribed onto the body below).
     let returnType: MathJsonExpression | null = null;
     if (this.check('OPERATOR') && this.current.text === '->') {
       this.advance(); // '->'
       returnType = this.parseHeldType();
     }
+    const ascription = this.definitionAscription(params, spec, returnType);
 
     if (!(this.check('OPERATOR') && this.current.text === '=')) {
       this.error(
@@ -1643,9 +1697,9 @@ export class Parser {
     const end = this.localEnd(rhs) ?? this.previousEnd();
 
     const ascribedBody =
-      returnType !== null
+      ascription !== null
         ? this.wrap(
-            ['Typed', rhs, returnType] as MathJsonExpression[],
+            ['Typed', rhs, ascription] as MathJsonExpression[],
             this.localStart(rhs) ?? nameTok.start,
             end
           )
@@ -1661,6 +1715,135 @@ export class Parser {
       nameTok.start,
       end
     );
+  }
+
+  /**
+   * Collect a definition's **effect specifier**: the run of bare effect words
+   * between the parameter list and `->` (`function roll(n) random -> integer`).
+   * Returns `null` — consuming nothing — when the cursor is not on such a word,
+   * which is exactly today's behavior for every existing definition.
+   *
+   * A word that is not in {@link EFFECT_SPECIFIER_WORDS} stops the run and is
+   * left for the caller's `->` / `{` / `=` expectation to diagnose
+   * (`function f(x) bogus { x }` keeps its `opening-bracket-expected` report).
+   */
+  private parseEffectSpecifier(): EffectSpecifier | null {
+    if (
+      this.current.type !== 'SYMBOL' ||
+      !EFFECT_SPECIFIER_WORDS.has(this.current.text)
+    )
+      return null;
+
+    const start = this.current.start;
+    const words: string[] = [];
+    let end = start;
+    while (
+      this.current.type === 'SYMBOL' &&
+      EFFECT_SPECIFIER_WORDS.has(this.current.text)
+    ) {
+      words.push(this.current.text);
+      end = this.current.end;
+      this.advance();
+    }
+    return { words, start, end };
+  }
+
+  /**
+   * The type node ascribed onto a definition's body.
+   *
+   * With no effect specifier this is the parsed return type — byte for byte
+   * today's `["Typed", body, {str: returnType}]` ascription (or `null` for no
+   * ascription at all).
+   *
+   * With a specifier the ascription carries the **full signature** (the
+   * normative encoding of `docs/EFFECTS-MODEL.md`, "Cortex surface"):
+   * parameter types from the parameter list, effects from the specifier slot,
+   * and the return type — `unknown` when no `->` was given, the wide-result
+   * convention that leaves the return inferred while still declaring the
+   * effects (`function tick() scope { … }`).
+   *
+   * The signature is validated by the engine's type parser; a rejected
+   * specifier (e.g. `pure random`, mutually exclusive in the type grammar) is
+   * diagnosed on the specifier words and the definition falls back to the
+   * no-specifier ascription.
+   */
+  private definitionAscription(
+    params: MathJsonExpression[],
+    spec: EffectSpecifier | null,
+    returnType: MathJsonExpression | null
+  ): MathJsonExpression | null {
+    if (spec === null) return returnType;
+
+    const retText =
+      (returnType !== null ? stringValue(returnType) : null) ?? 'unknown';
+    const sig = this.specifierSignature(params, spec, retText);
+    if (sig === null) return returnType; // Diagnosed; keep the plain ascription.
+    const end =
+      (returnType !== null ? this.localEnd(returnType) : undefined) ?? spec.end;
+    return this.wrap({ str: sig }, spec.start, end);
+  }
+
+  /**
+   * Assemble and validate the full marker signature for an effect specifier,
+   * or `null` after emitting a `type-annotation-error` spanning the specifier
+   * words.
+   *
+   * Parameter names are cosmetic — the marker signature's argument list is a
+   * mirror; the literal's parameter operands stay the parameters of record —
+   * so a name that is not a plain identifier (or a named spelling the type
+   * grammar rejects) falls back to an all-positional argument list rather than
+   * failing the definition.
+   *
+   * The diagnostic spans the specifier tokens rather than offset-shifting the
+   * type parser's position (as `parseTypeAnnotation` does): the signature is
+   * assembled, not a slice of the source, so its offsets do not map back.
+   */
+  private specifierSignature(
+    params: MathJsonExpression[],
+    spec: EffectSpecifier,
+    retText: string
+  ): string | null {
+    const parts = params.map((p) => {
+      if (operator(p) === 'Typed') {
+        const t = operand(p, 2);
+        return {
+          name: symbol(operand(p, 1)),
+          type:
+            (t !== null ? (stringValue(t) ?? symbol(t)) : null) ?? 'unknown',
+        };
+      }
+      return { name: symbol(p), type: 'unknown' };
+    });
+
+    const effects = spec.words.join(' ');
+    const build = (named: boolean): string =>
+      `(${parts
+        .map((p) =>
+          named && p.name !== null ? `${p.name}: ${p.type}` : p.type
+        )
+        .join(', ')}) ${effects} -> ${retText}`;
+
+    const nameable = parts.every(
+      (p) => p.name !== null && PLAIN_IDENTIFIER.test(p.name)
+    );
+    const candidates = nameable ? [build(true), build(false)] : [build(false)];
+
+    let message = '';
+    for (const candidate of candidates) {
+      try {
+        parseType(candidate);
+        return candidate;
+      } catch (e) {
+        const err = e as { rawMessage?: string };
+        // Report the FIRST failure: it is the named spelling, the one that
+        // mirrors what the author wrote.
+        if (message === '')
+          message =
+            err.rawMessage ?? (e instanceof Error ? e.message : String(e));
+      }
+    }
+    this.error(['type-annotation-error', message], spec.start, spec.end);
+    return null;
   }
 
   /** Parse a `( param, … )` parameter list. Each param is a symbol with an

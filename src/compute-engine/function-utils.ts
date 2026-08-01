@@ -32,6 +32,7 @@ import { isPureComputedEffects } from '../common/type/effects.js';
 import type { Type } from '../common/type/types.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
+import { signatureEffects } from '../common/type/utils.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
 // A static import would create a cycle: `validate.ts → utils.ts →
@@ -591,7 +592,17 @@ function desugarSignatureString(
         })
   );
   let newBody = body;
-  if (!isWide(type.result) && !isFunction(body, 'Typed'))
+  if (isFunction(body, 'Typed')) {
+    // The body's own ascription wins over the signature string's result.
+  } else if (signatureEffects(type) !== undefined) {
+    // Arrow-level effects are PRESERVED onto the constructed signature
+    // (`docs/EFFECTS-MODEL.md`, "Cortex surface"), so the FULL signature is
+    // ascribed — regardless of `isWide(type.result)`, since the wide-result
+    // convention keeps the return inferred downstream.
+    newBody = ce._fn('Typed', [body, ce.string(typeToString(type))], {
+      canonical: false,
+    });
+  } else if (!isWide(type.result))
     newBody = ce._fn('Typed', [body, ce.string(typeToString(type.result))], {
       canonical: false,
     });

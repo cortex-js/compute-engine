@@ -19,6 +19,7 @@ import {
   matchesDeclaredTypeAxes,
   signatureEffects,
   stripArrowEffects,
+  withArrowEffects,
 } from './boxed-expression/effects-inference.js';
 import { osaDistance } from '../common/fuzzy-string-match.js';
 
@@ -48,6 +49,7 @@ import {
 import { canonicalFunctionLiteral, lookup } from './function-utils.js';
 import { isFunction } from './boxed-expression/type-guards.js';
 import {
+  functionLiteralDeclaredEffects,
   functionLiteralParameters,
   functionLiteralReturnType,
 } from './boxed-expression/function-literal.js';
@@ -980,8 +982,22 @@ function assignValueAsOperatorDef(
   // not read as an author-stated effect contract (which would set
   // `effectsDeclared` and make the engine check its own inference against
   // itself). Strip the top-level specifier; the body walk re-derives it.
-  if (functionLiteralHasAnnotation(body))
-    return { evaluate: body, signature: stripArrowEffects(body.type.type) };
+  // EXCEPT when the literal carries a full-signature return marker
+  // (`docs/EFFECTS-MODEL.md`, "Cortex surface"): those effects are
+  // AUTHOR-stated, so they ride onto the derived signature — which makes the
+  // operator-def constructor set `effectsDeclared` and run the
+  // definition-annotation check (`inferred ⊆ declared`) on its own.
+  if (functionLiteralHasAnnotation(body)) {
+    const stripped = stripArrowEffects(body.type.type);
+    const declared = functionLiteralDeclaredEffects(body);
+    return {
+      evaluate: body,
+      signature:
+        declared === undefined
+          ? stripped
+          : withArrowEffects(stripped, declared),
+    };
+  }
 
   // Untyped literal: don't set an explicit signature - let it be inferred from
   // the body. This ensures inferredSignature = true, which allows the return
@@ -992,9 +1008,14 @@ function assignValueAsOperatorDef(
 /** True if a canonical `Function` literal carries at least one type annotation
  * — an annotated parameter or a return-type ascription (the Phase-1 §4.2
  * marker). Untyped literals return `false` and keep the inferred-signature
- * behavior. */
+ * behavior.
+ *
+ * A full-signature marker with a WIDE result (`(…) scope -> unknown`) declares
+ * no return type and may annotate no parameter, yet IS an annotation: the
+ * effects it states are the author's contract. */
 function functionLiteralHasAnnotation(literal: Expression): boolean {
   if (functionLiteralReturnType(literal) !== undefined) return true;
+  if (functionLiteralDeclaredEffects(literal) !== undefined) return true;
   return functionLiteralParameters(literal).some((p) => p.type !== undefined);
 }
 
@@ -1151,8 +1172,11 @@ function reconcileFunctionLiteralReturn(
   const declaredResult = functionResult(declaredType);
   if (declaredResult === undefined) return literal;
 
-  // Respect an author-supplied return ascription.
+  // Respect an author-supplied return ascription. A full-signature marker with
+  // a wide result declares no return type but is still the author's ascription
+  // — never overwrite it with the declaration's return type.
   if (functionLiteralReturnType(literal) !== undefined) return literal;
+  if (functionLiteralDeclaredEffects(literal) !== undefined) return literal;
 
   // Only ascribe when the inferred body result would otherwise fail the
   // covariant check (e.g. inferred `number` vs declared `integer`). When it

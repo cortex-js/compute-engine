@@ -130,6 +130,35 @@ export function signatureEffects(
 }
 
 /**
+ * True when a type's SOURCE TEXT is fully parenthesized — the whole spelling
+ * is a single `(…)` group, e.g. `((real) random -> real)` (whereas
+ * `(real) random -> real` opens with the ARGUMENT list, whose group closes
+ * before the arrow).
+ *
+ * Grouping does not survive parsing — a {@link Type} records no parentheses —
+ * so a consumer that gives grouped spellings a distinct reading must test the
+ * text. The consumer (ruled 2026-08-01): the `Function`-literal return marker,
+ * where the ungrouped spelling of an effect-bearing signature declares the
+ * LITERAL's own effect contract, and the grouped spelling is an ordinary
+ * return-type ascription whose return happens to be an effectful arrow
+ * (`function mk(x) -> ((real) random -> real) { … }`).
+ */
+export function isGroupedTypeText(text: string): boolean {
+  const s = text.trim();
+  if (!s.startsWith('(')) return false;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(') depth += 1;
+    else if (c === ')') {
+      depth -= 1;
+      if (depth === 0) return i === s.length - 1;
+    }
+  }
+  return false;
+}
+
+/**
  * `effects` in canonical form: de-duplicated and alphabetically sorted.
  *
  * `ce.type()` accepts a hand-built `Type` object as-is, so an arrow's `effects`

@@ -1156,18 +1156,26 @@ export function updateDef(
     operator?: BoxedOperatorDefinition;
   };
 
+  // Construct BEFORE swapping the record's halves: the definition
+  // constructors validate and can throw (a registration conflict, a violated
+  // effect contract). Deleting first left the record with NEITHER `value` nor
+  // `operator` on a failed update, and applying the symbol then crashed in
+  // `makeCanonicalFunction` (`def.operator.scoped` on undefined). A failed
+  // update must leave the previous definition in place.
   if (newDef instanceof _BoxedValueDefinition) {
     delete mutableDef.operator;
     mutableDef.value = newDef;
   } else if (isValidValueDef(newDef)) {
+    const built = new _BoxedValueDefinition(ce, name, newDef);
     delete mutableDef.operator;
-    mutableDef.value = new _BoxedValueDefinition(ce, name, newDef);
+    mutableDef.value = built;
   } else if (newDef instanceof _BoxedOperatorDefinition) {
     delete mutableDef.value;
     mutableDef.operator = newDef;
   } else if (isValidOperatorDef(newDef)) {
+    const built = new _BoxedOperatorDefinition(ce, name, newDef);
     delete mutableDef.value;
-    mutableDef.operator = new _BoxedOperatorDefinition(ce, name, newDef);
+    mutableDef.operator = built;
   }
 }
 

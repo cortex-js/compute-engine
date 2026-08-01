@@ -13,6 +13,13 @@ import {
   matchesString,
 } from '../math-json/utils.js';
 import { splitGraphemes } from '../common/grapheme-splitter.js';
+import { parseType } from '../common/type/parse.js';
+import { typeToString } from '../common/type/serialize.js';
+import {
+  isGroupedTypeText,
+  signatureEffects,
+} from '../common/type/utils.js';
+import { effectSetToString } from '../common/type/effects.js';
 import { NumberSerializationFormat } from '../compute-engine/latex-syntax/types.js';
 import { MathJsonExpression } from '../math-json/types.js';
 import {
@@ -459,7 +466,16 @@ export function serializeCortex(
       if (!hasTypedParam && !hasReturn) return serializeGenericFunction(expr);
       // The return type has no anonymous-mapsto spelling; drop it (the body is
       // serialized without the ascription).
-      const { bodyExpr } = fnLiteralParts(expr);
+      const { bodyExpr, specifier } = fnLiteralParts(expr);
+      // An effect specifier has no anonymous-mapsto spelling EITHER, but unlike
+      // a return type it is a contract (`docs/EFFECTS-MODEL.md`, "Cortex
+      // surface"): dropping it would silently weaken the literal. The specifier
+      // slot exists only on the named definition forms, so a specifier-carrying
+      // anonymous literal falls back to the generic `Function(…)` spelling —
+      // and the `Typed` handler below keeps the contract-bearing ascription as
+      // an explicit `Typed(body, "‹sig›")` call (option B, ruled 2026-08-01),
+      // so the round-trip is lossless.
+      if (specifier !== null) return serializeGenericFunction(expr);
       const arrow = options?.fancySymbols ? '↦' : '|->';
       return fmt.line(
         serializeParamList(params),
@@ -474,8 +490,32 @@ export function serializeCortex(
     // function literal; the `Function`/`Assign` handlers read the annotation
     // directly.
     //
-    Typed: (expr: MathJsonExpression): FormattingBlock =>
-      serializeExpression(operand(expr, 1)),
+    // EXCEPTION (option B, ruled 2026-08-01): an UNGROUPED effect-bearing
+    // signature ascription is an effect CONTRACT (`docs/EFFECTS-MODEL.md`,
+    // "Cortex surface"), and dropping it would silently weaken the literal —
+    // the one thing the effects model promises not to do. It has no surface
+    // spelling outside the named definition forms, so it keeps the explicit
+    // call form `Typed(body, "‹sig›")`, which re-parses to this very node. A
+    // GROUPED spelling (`((real) random -> real)`) is an ordinary return-type
+    // ascription and stays transparent, like every effect-free ascription.
+    //
+    Typed: (expr: MathJsonExpression): FormattingBlock => {
+      const text = typeText(operand(expr, 2));
+      if (text !== null && !isGroupedTypeText(text)) {
+        try {
+          const t = parseType(text);
+          if (
+            typeof t !== 'string' &&
+            t.kind === 'signature' &&
+            signatureEffects(t) !== undefined
+          )
+            return serializeGenericFunction(expr);
+        } catch {
+          // Not a parseable type: keep the transparent reading.
+        }
+      }
+      return serializeExpression(operand(expr, 1));
+    },
 
     //
     // Assignment — and named function definitions (Phase 4)
@@ -742,17 +782,57 @@ export function serializeCortex(
     return symbol(t);
   };
 
-  // Split a `Function` literal's body slot into its (un-ascribed) body and the
-  // ascribed return type. Only the authoring form `["Typed", body, type]` is
-  // recognized here; the engine's canonical Block-embedded ascription is not
-  // produced by the Cortex parser.
+  // Split a `Function` literal's body slot into its (un-ascribed) body, the
+  // ascribed return type, and the effect specifier. Only the authoring form
+  // `["Typed", body, type]` is recognized here; the engine's canonical
+  // Block-embedded ascription is not produced by the Cortex parser.
+  //
+  // A marker holding a FULL SIGNATURE that carries an effect set decomposes
+  // back into the surface `(params) ‹effects› -> ‹result›` — the same
+  // decomposition predicate the engine applies in
+  // `boxed-expression/function-literal.ts`, so the two never disagree about
+  // what a marker means. A signature WITHOUT effects keeps its historical
+  // reading: a return type that happens to be a function. Under the wide-result
+  // convention a result of `unknown`/`any` declares no return type at all
+  // (`function tick() scope { … }`), so it serializes with no arrow.
   const fnLiteralParts = (
     fn: MathJsonExpression
-  ): { bodyExpr: MathJsonExpression | null; retType: string | null } => {
+  ): {
+    bodyExpr: MathJsonExpression | null;
+    retType: string | null;
+    specifier: string | null;
+  } => {
     const op1 = operand(fn, 1);
-    if (operator(op1) === 'Typed')
-      return { bodyExpr: operand(op1, 1), retType: typeText(operand(op1, 2)) };
-    return { bodyExpr: op1, retType: null };
+    if (operator(op1) !== 'Typed')
+      return { bodyExpr: op1, retType: null, specifier: null };
+    const bodyExpr = operand(op1, 1);
+    const text = typeText(operand(op1, 2));
+    // A fully parenthesized spelling is a GROUPED type (ruled 2026-08-01):
+    // an ordinary return-type ascription whose return happens to be an
+    // effect-bearing arrow — `-> ((real) random -> real)` — never the
+    // literal's own contract. Mirrors the engine's gate in
+    // `functionLiteralDeclaredSignature`; the text (parens included)
+    // serializes back verbatim through the plain return-type path below.
+    if (text !== null && !isGroupedTypeText(text)) {
+      try {
+        const t = parseType(text);
+        if (typeof t !== 'string' && t.kind === 'signature') {
+          const effects = signatureEffects(t);
+          if (effects !== undefined) {
+            const result = t.result;
+            const isWide = result === 'unknown' || result === 'any';
+            return {
+              bodyExpr,
+              retType: isWide ? null : typeToString(result),
+              specifier: effectSetToString(effects),
+            };
+          }
+        }
+      } catch {
+        // Not a parseable type: keep the plain return-type reading.
+      }
+    }
+    return { bodyExpr, retType: text, specifier: null };
   };
 
   // A single function-literal parameter: `x` (bare) or `x: integer` (typed).
@@ -768,8 +848,10 @@ export function serializeCortex(
     fmt.fencedList('(', fmt.separator(','), ')', params.map(serializeParam));
 
   // Reconstruct a named function definition from `f` and its `Function`
-  // literal: `f(params) -> ret = body`, or `function f(params) -> ret { … }`
-  // for a `Block` body.
+  // literal: `f(params) ‹effects› -> ret = body`, or
+  // `function f(params) ‹effects› -> ret { … }` for a `Block` body. The effect
+  // specifier sits between the parameter list and the arrow (Swift-style); it
+  // is omitted, along with its space, when the literal declares no effects.
   const serializeNamedDef = (
     name: MathJsonExpression,
     fn: MathJsonExpression
@@ -777,13 +859,14 @@ export function serializeCortex(
     const nameSym = symbol(name);
     const nameStr = nameSym !== null ? escapeSymbol(nameSym) : '';
     const params = operands(fn).slice(1);
-    const { bodyExpr, retType } = fnLiteralParts(fn);
+    const { bodyExpr, retType, specifier } = fnLiteralParts(fn);
+    const specPart = specifier !== null ? ` ${specifier}` : '';
     const retPart = retType !== null ? ` -> ${retType}` : '';
     if (operator(bodyExpr) === 'Block') {
       return fmt.line(
         `function ${nameStr}`,
         serializeParamList(params),
-        `${retPart} `,
+        `${specPart}${retPart} `,
         fmt.fencedList(
           '{',
           fmt.separator(';'),
@@ -792,10 +875,15 @@ export function serializeCortex(
         )
       );
     }
+    // The math form has no specifier-without-arrow spelling — `f(x) random = 5`
+    // is an expression, not a definition — so a wide result is spelled out
+    // (`-> unknown`, which re-parses to the same marker signature).
+    const mathRetPart =
+      retType !== null ? retPart : specifier !== null ? ' -> unknown' : '';
     return fmt.line(
       nameStr,
       serializeParamList(params),
-      `${retPart} = `,
+      `${specPart}${mathRetPart} = `,
       serializeExpression(bodyExpr)
     );
   };

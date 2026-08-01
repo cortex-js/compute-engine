@@ -19,7 +19,10 @@ import type {
 import { isFunction, isSymbol, sym } from './type-guards.js';
 import {
   functionLiteralBody,
+  functionLiteralDeclaredEffects,
+  functionLiteralDeclaredSignature,
   functionLiteralParameters,
+  functionLiteralReturnMarker,
   functionLiteralReturnType,
 } from './function-literal.js';
 
@@ -154,6 +157,20 @@ export function stripArrowEffects(t: Type): Type {
 }
 
 /**
+ * `t` with `effects` set on its TOP-LEVEL arrow — the counterpart of
+ * {@link stripArrowEffects}, a no-op when `t` is not a signature.
+ *
+ * Used where an AUTHOR-STATED effect set (a `Function` literal's
+ * full-signature return marker) must ride onto a signature otherwise derived
+ * from the inference-produced literal type, so that the operator definition
+ * records it as a contract rather than as its own inference.
+ */
+export function withArrowEffects(t: Type, effects: EffectSet): Type {
+  if (typeof t === 'string' || t.kind !== 'signature') return t;
+  return { ...t, effects };
+}
+
+/**
  * The declared-type compatibility check, judged **per axis**
  * (`docs/EFFECTS-MODEL.md`, "Annotation provenance").
  *
@@ -213,7 +230,20 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   // used verbatim, bypassing the widening rule. A Block's type is its last
   // statement's type, so `body.type` already surfaces the ascribed return.
   const ascribedReturn = functionLiteralReturnType(expr);
-  let bodyType: Type | string = `${body.type}`;
+  // A FULL-SIGNATURE marker (`docs/EFFECTS-MODEL.md`, "Cortex surface") is the
+  // trap here: `Typed`'s type handler surfaces the ascribed type verbatim, and
+  // a Block's type is its last statement's, so `body.type` IS that whole
+  // signature — meaningless as a body type. The last statement's OWN type
+  // lives on the marker's first operand.
+  const declaredSignature = functionLiteralDeclaredSignature(expr);
+  const bodyTypeSource =
+    declaredSignature === undefined
+      ? body.type
+      : functionLiteralReturnMarker(expr)!.op1.type;
+  let bodyType: Type | string =
+    declaredSignature !== undefined && ascribedReturn !== undefined
+      ? typeToString(ascribedReturn)
+      : `${bodyTypeSource}`;
   // The parameters of a bare function literal have unknown type, so a
   // finite-numeric body claim is unsound: the lambda may later be applied to
   // a non-finite argument — `(x ↦ x²)(∞) = +∞` — so widen a finite-numeric
@@ -226,7 +256,7 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   if (
     ascribedReturn === undefined &&
     params.length > 0 &&
-    body.type.matches('finite_number') &&
+    bodyTypeSource.matches('finite_number') &&
     !params.every(
       (p) => p.type !== undefined && isSubtype(p.type, 'finite_number')
     )
@@ -245,7 +275,19 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   // slot, i.e. nothing at all — the author's `pure` spelling is a statement,
   // and inference states nothing (`inferFunctionLiteralEffects` collapses a
   // `[]` accumulated from an applied stated-pure callback).
-  const effects = inferFunctionLiteralEffects(ce, expr).effects;
+  //
+  // A full-signature marker STATES the arrow's effects, so they join the
+  // inferred set: the union preserves a stated `[]` (`[] ∪ undefined = []`,
+  // spelled ` pure`) and, where the contract holds (`inferred ⊆ declared`),
+  // equals the declared set. Where it is violated the union is a sound
+  // over-approximation and the violation surfaces at install time, through the
+  // definition-annotation check.
+  const declaredEffects = functionLiteralDeclaredEffects(expr);
+  const inferredEffects = inferFunctionLiteralEffects(ce, expr).effects;
+  const effects =
+    declaredEffects === undefined
+      ? inferredEffects
+      : unionEffectSets(declaredEffects, inferredEffects);
   const specifier =
     effects === undefined ? '' : ` ${effectSetToString(effects)}`;
 

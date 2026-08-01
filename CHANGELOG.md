@@ -420,6 +420,35 @@
   by consulting `isPure` on the operand they are about to evaluate and returning
   an error.
 
+- **Cortex definitions can state their effects** (Stage 3 of the effects
+  model). Effect labels sit in the specifier slot between the parameter list
+  and the arrow, in every definition form:
+
+  ```cortex
+  let f: (real) random -> real                       // opaque declaration
+  g(f: (real) random -> real) = f(1)                 // parameter bound
+  function roll(n) random -> integer { Random(Range(1, n)) }
+  d(x) random -> integer = Random(Range(1, x))       // math-style definition
+  function tick() scope { count = count + 1 }        // effects only, return inferred
+  function sq(x) pure -> real { x * x }              // explicitly-pure contract
+  ```
+
+  The declaration and parameter positions are ordinary type literals, so they
+  ride the existing type grammar; the definition forms lower the specifier onto
+  the function literal as a full-signature `Typed` ascription, and the effect
+  set is a checked contract — `function bad() pure -> integer
+  { Random(Range(1, 6)) }` reports an `incompatible-type` error value rather
+  than installing. Definitions round-trip through the Cortex serializer,
+  including the `pure` keyword; pure definitions serialize byte-identically to
+  before. To ascribe an effect-bearing function type as a plain _return_ type,
+  group it: `function mk(x) -> ((real) random -> real) { … }` returns a drawing
+  function, while the ungrouped spelling declares the definition's own
+  contract. An _anonymous_ literal carrying an effect contract — which has no
+  lambda spelling — serializes losslessly as an explicit
+  `Typed(body, "(x: unknown) random -> real")` call. In MathJSON,
+  `["Function", body, "'(n: integer) random -> integer'"]` signature-string
+  sugar now preserves the arrow's effects instead of discarding them.
+
 - **Effect-discharging operators.** An operator can declare that it _absorbs_ an
   effect rather than re-emitting it. `WithRandomSeed` is the canonical case: it
   discharges `random` on its body, so `WithRandomSeed(42, Random())` is a pure
