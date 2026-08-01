@@ -402,6 +402,25 @@
 
 ### Bug Fixes
 
+- **Bare predicate shorthand now works on every function-slot operator.**
+  A wildcard-bodied expression like `["Greater", "_", 5]` was accepted as
+  a predicate by the lazy collection operators (`Filter`, `Map`, `Any`, …)
+  but rejected with a type error by the eager ones — `CountIf`,
+  `IndexWhere`, `Find`, `Position`, `Sort`, `Ordering`, `GroupBy`,
+  `ChunkBy`, `Fill` and `Partition`. All now desugar the shorthand
+  identically. `Count(xs, pred)` also dispatches a wildcard-bearing
+  boolean expression as a predicate rather than counting occurrences of
+  it as a value (`Count(xs, True)` still counts values).
+
+- **`Iterate` no longer throws on a unary function.** Its function is
+  applied `f(index, acc)`, and a one-parameter function (the documented
+  `Iterate(2_, x)` shorthand) hit a host-escaping arity throw from every
+  access path; unary functions now receive the accumulator alone. Also
+  fixed: `Iterate`'s indexed access was off by one relative to its
+  iterator — `at(1)` returned the initial value while iteration's first
+  element was `f(1, initial)`; both now agree (the initial value is not
+  emitted), which changes `Take(Iterate(f, x), n)` results accordingly.
+
 - **Compiled `Mod` and `Remainder` tore compound dividends by operator
   precedence** (JavaScript, WGSL and Python targets). The emission templates
   spliced the compiled dividend unparenthesized next to `%`, so

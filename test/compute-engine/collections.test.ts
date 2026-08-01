@@ -4111,3 +4111,220 @@ describe('Indeterminate collection facets stay coherent (review round)', () => {
     ).toThrow(/must return "True" or "False"/);
   });
 });
+
+describe('BARE SHORTHAND PREDICATE ON THE EAGER FUNCTION-SLOT OPERATORS', () => {
+  // `["Greater", "_", 5]` without a `Function` wrapper is a shorthand function
+  // literal. It already worked on the lazy operators (`Filter`, `Map`, `Any`,
+  // `All`, `MaxBy`, …), whose canonical handlers route the operand through
+  // `canonicalFunctionLiteral`; the eager ones had no canonical handler and
+  // reported `incompatible-type function/boolean` instead.
+  const xs: Expression = ['List', 5, 2, 10, 18];
+
+  // [operator, bare operand, wrapped operand, expected]
+  const cases: [string, Expression, Expression, string][] = [
+    ['CountIf', ['Greater', '_', 5], ['Function', ['Greater', '_', 5]], '2'],
+    ['IndexWhere', ['Greater', '_', 9], ['Function', ['Greater', '_', 9]], '3'],
+    ['Find', ['Greater', '_', 9], ['Function', ['Greater', '_', 9]], '10'],
+    [
+      'Position',
+      ['Greater', '_', 5],
+      ['Function', ['Greater', '_', 5]],
+      '[3,4]',
+    ],
+    ['Sort', ['Negate', '_'], ['Function', ['Negate', '_']], '[18,10,5,2]'],
+    ['Ordering', ['Negate', '_'], ['Function', ['Negate', '_']], '[4,3,1,2]'],
+    [
+      'ChunkBy',
+      ['IsEven', '_'],
+      ['Function', ['IsEven', '_']],
+      '[[5],[2,10,18]]',
+    ],
+    [
+      'Partition',
+      ['Greater', '_', 5],
+      ['Function', ['Greater', '_', 5]],
+      '[[10,18],[5,2]]',
+    ],
+  ];
+
+  for (const [op, bare, wrapped, expected] of cases) {
+    test(`${op} accepts the bare shorthand (box route)`, () => {
+      expect(engine.box([op, xs, bare]).evaluate().toString()).toBe(expected);
+    });
+    test(`${op} bare shorthand agrees with the explicit Function`, () => {
+      expect(engine.box([op, xs, wrapped]).evaluate().toString()).toBe(
+        expected
+      );
+    });
+  }
+
+  test('GroupBy accepts the bare shorthand', () => {
+    expect(
+      engine
+        .box(['GroupBy', ['List', 1, 2, 3, 4], ['IsEven', '_']])
+        .evaluate()
+        .toString()
+    ).toBe(
+      engine
+        .box([
+          'GroupBy',
+          ['List', 1, 2, 3, 4],
+          ['Function', ['IsEven', 'q'], 'q'],
+        ])
+        .evaluate()
+        .toString()
+    );
+  });
+
+  test('Fill accepts the bare shorthand in its function slot', () => {
+    expect(
+      engine
+        .box(['Fill', ['Add', '_1', '_2'], ['Tuple', 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[[2,3,4],[3,4,5]]');
+  });
+
+  // Parse (Cortex/LaTeX) route: the shorthand and an explicit `\mapsto` lambda
+  // reach the same canonical form and the same value.
+  test('parse route: bare shorthand and a lambda agree', () => {
+    expect(
+      engine
+        .parse('\\mathrm{CountIf}(\\lbrack 5,2,10,18\\rbrack, \\_ > 5)')
+        .evaluate()
+        .toString()
+    ).toBe('2');
+    expect(
+      engine
+        .parse(
+          '\\mathrm{CountIf}(\\lbrack 5,2,10,18\\rbrack, u \\mapsto u > 5)'
+        )
+        .evaluate()
+        .toString()
+    ).toBe('2');
+    expect(
+      engine
+        .parse('\\mathrm{Position}(\\lbrack 5,2,10,18\\rbrack, \\_ > 5)')
+        .evaluate()
+        .toString()
+    ).toBe('[3,4]');
+    expect(
+      engine
+        .parse('\\mathrm{Find}(\\lbrack 5,2,10,18\\rbrack, \\_ > 9)')
+        .evaluate()
+        .toString()
+    ).toBe('10');
+  });
+
+  // A shorthand must contribute a PARAMETER (a wildcard, or a free unknown).
+  // A plain value operand is still reported against the declared signature
+  // rather than silently becoming a constant function.
+  test('a value operand in a function slot is still a type error', () => {
+    expect(engine.box(['CountIf', xs, 5]).isValid).toBe(false);
+    expect(engine.box(['CountIf', xs, 5]).evaluate().toString()).toContain(
+      'incompatible-type'
+    );
+    expect(engine.box(['Sort', xs, 5]).isValid).toBe(false);
+  });
+
+  test('arity errors survive the new canonical handlers', () => {
+    expect(engine.box(['CountIf', xs]).isValid).toBe(false);
+    expect(
+      engine.box(['CountIf', xs, ['Greater', '_', 5], ['Greater', '_', 5]])
+        .isValid
+    ).toBe(false);
+  });
+
+  // `Count(xs, arg)` is overloaded on the operand's TYPE: a function is a
+  // predicate, anything else is a value to match. A wildcard-bearing boolean
+  // operand is a predicate; a plain boolean value is not.
+  test('Count: a wildcard predicate shorthand dispatches as a PREDICATE', () => {
+    expect(
+      engine
+        .box(['Count', ['List', 1, 2, 3, 4, 5], ['Greater', '_', 2]])
+        .evaluate()
+        .toString()
+    ).toBe('3');
+    expect(
+      engine
+        .box([
+          'Count',
+          ['List', 1, 2, 3, 4, 5],
+          ['Function', ['Greater', 'q', 2], 'q'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('3');
+  });
+
+  test('Count: a literal boolean value still dispatches as a VALUE', () => {
+    expect(
+      engine
+        .box(['Count', ['List', 'True', 'False', 'True'], 'True'])
+        .evaluate()
+        .toString()
+    ).toBe('2');
+    expect(
+      engine
+        .box(['Count', ['List', 1, 2, 2, 3, 2], 2])
+        .evaluate()
+        .toString()
+    ).toBe('3');
+  });
+});
+
+describe('ITERATE APPLIES A UNARY FUNCTION TO THE ACCUMULATOR ALONE', () => {
+  // `Iterate` applies `f(index, acc)`. A unary function — the documented
+  // shorthand `Iterate(2 * _, 1)` — used to throw `Too many arguments …` out
+  // of the collection handlers, escaping to the host on every route.
+  const doubling: Expression = ['Iterate', ['Multiply', '_', 2], 1];
+
+  test('no host throw on the .at(), each() or Take routes', () => {
+    const e = engine.box(doubling);
+    expect(() => e.at(4)).not.toThrow();
+    expect(e.at(4)!.toString()).toBe('16');
+    // NEVER `Array.from(e.each())` here — the source is infinite.
+    expect(() => e.each()[Symbol.iterator]().next()).not.toThrow();
+  });
+
+  test('every route agrees on the elements', () => {
+    const e = engine.box(doubling);
+    const byAt = [1, 2, 3, 4, 5].map((i) => e.at(i)!.toString());
+    const byEach: string[] = [];
+    for (const x of e.each()) {
+      byEach.push(x.toString());
+      if (byEach.length >= 5) break;
+    }
+    expect(byAt).toEqual(['2', '4', '8', '16', '32']);
+    expect(byEach).toEqual(byAt);
+    expect(
+      engine
+        .box(['Take', doubling, 5])
+        .evaluate({ materialization: 10 })
+        .toString()
+    ).toBe('[2,4,8,16,32]');
+  });
+
+  test('the parse route yields elements, not an arity error', () => {
+    // Before the fix this evaluated to the `Too many arguments …` message
+    // rather than throwing, so the value — not just the absence of a throw —
+    // is what pins the behavior.
+    expect(
+      engine.parse('\\mathrm{Iterate}(2\\_, 1)').evaluate().toString()
+    ).toBe('[2,4,8,16,32,...]');
+  });
+
+  test('a two-parameter function still receives (index, acc)', () => {
+    // Factorials: element k is k * element(k-1), starting from 1.
+    expect(
+      engine
+        .box([
+          'Take',
+          ['Iterate', ['Function', ['Multiply', 'n', 'acc'], 'n', 'acc'], 1],
+          5,
+        ])
+        .evaluate({ materialization: 10 })
+        .toString()
+    ).toBe('[1,2,6,24,120]');
+  });
+});

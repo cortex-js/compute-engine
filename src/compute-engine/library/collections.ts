@@ -267,6 +267,111 @@ function checkCollectionOperand(
   return checkType(engine, x, type);
 }
 
+/** An anonymous (wildcard) parameter name: `_`, `_1`, … `_9`. */
+const ANONYMOUS_PARAMETER_RE = /^_\d?$/;
+
+/**
+ * A boolean-shaped operand carrying at least one anonymous parameter — the
+ * bare shorthand for a predicate (`_ > 5`). Used by `Count`, whose second
+ * operand is overloaded between a VALUE to match and a PREDICATE to apply:
+ * the wildcard is what tells the two apart, so a plain boolean value
+ * (`Count(xs, True)`) is still a value.
+ */
+function isPredicateShorthand(op: Expression): boolean {
+  return (
+    op.type.matches('boolean') &&
+    op.symbols.some((x) => ANONYMOUS_PARAMETER_RE.test(x))
+  );
+}
+
+/**
+ * A function operand written in the wrapper-free shorthand form
+ * (`["Greater", "_", 5]` instead of `["Function", ["Greater", "_", 5]]`),
+ * converted to a canonical function literal — or `undefined` when the operand
+ * is not a shorthand and should be left for the signature check to judge.
+ *
+ * The lazy higher-order operators (`Filter`, `Map`, `Any`, `All`, `MaxBy`, …)
+ * route their function operand through `canonicalFunctionLiteral`, which is
+ * what makes the shorthand work there. The eager ones (`CountIf`, `Find`,
+ * `IndexWhere`, `Position`, `Sort`, …) had no `canonical` handler at all, so
+ * the default signature validation saw a `boolean` where a `function` was
+ * declared and reported `incompatible-type function/boolean`.
+ *
+ * Two kinds of operand are deliberately NOT converted:
+ * - one that is already function-typed (a literal, or a symbol bound to one):
+ *   there is nothing to desugar;
+ * - one that yields a PARAMETERLESS literal (`5` → `() ↦ 5`, `True` → `True`):
+ *   that is a plain value, and turning it into a constant function would
+ *   silently accept `Sort(xs, 5)` instead of reporting it.
+ */
+function shorthandFunctionOperand(
+  op: Expression | undefined
+): Expression | undefined {
+  if (op === undefined) return undefined;
+  if (op.type.matches('function')) return undefined;
+  const fn = canonicalFunctionLiteral(op);
+  // `["Function", body, ...params]`: a shorthand must have contributed at
+  // least one parameter (from a wildcard `_`/`_1`, or a free unknown).
+  if (fn === undefined || !isFunction(fn, 'Function') || fn.nops < 2)
+    return undefined;
+  return fn;
+}
+
+/**
+ * Canonical handler for an EAGER operator with a `function` parameter slot at
+ * `index`: desugar a shorthand function operand (see
+ * `shorthandFunctionOperand`), then run the same flatten + signature
+ * validation the default canonicalization would have run.
+ *
+ * These operators are deliberately kept non-`lazy`: their `evaluate` handlers
+ * read pre-evaluated operands, and a held operand arrives UNBOUND on the
+ * `ce.box`/parse routes (see the lazy-operator trap in CLAUDE.md).
+ */
+function canonicalFunctionSlot(
+  ce: ComputeEngine,
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  index: number
+): Expression {
+  const xs = flatten(ops);
+  const fn = shorthandFunctionOperand(xs[index]);
+  const args = fn === undefined ? xs : xs.map((x, i) => (i === index ? fn : x));
+
+  // The declared signature, read from the definition rather than restated
+  // here, so the two can't drift apart.
+  const def = ce.lookupDefinition(operator);
+  const sig =
+    def && 'operator' in def ? def.operator.signature.type : undefined;
+  const adjusted = sig
+    ? validateArguments(ce, args, sig, false, false)
+    : undefined;
+
+  return ce._fn(operator, adjusted ?? args);
+}
+
+/**
+ * The argument list `Iterate` applies its function to, at step `n` with
+ * accumulator `acc`.
+ *
+ * The declared contract is `f(index, acc)`. A function whose TYPE says it is
+ * unary — the documented shorthand `Iterate(2 * _, 1)` — is applied to the
+ * accumulator alone. Without this the surplus argument threw
+ * `Too many arguments …` out of the collection handlers, escaping to the host
+ * on every route (`.at()`, `each()`, `Take`, materialization). A
+ * statically-unknown arity keeps the two-argument form, so nothing existing
+ * changes meaning — the same convention `sortedIndices` uses to tell a
+ * `Sort` key from a `Sort` comparator.
+ */
+function iterateArgs(
+  ce: ComputeEngine,
+  fn: Expression,
+  n: number,
+  acc: Expression
+): Expression[] {
+  if (functionArity(fn.type.type) === 1) return [acc];
+  return [ce.number(n), acc];
+}
+
 /**
  * A source operand for `Map`, with an *eager* collection resolved to its
  * evaluated form.
@@ -1799,6 +1904,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Run the framework's default flatten step (Sequence-splice + Nothing-
       // drop) that this custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
+
+      // The 2-arg form is overloaded on the operand's TYPE (`evaluate` below):
+      // a function is a predicate, anything else is a value to match. A bare
+      // shorthand predicate (`Count(xs, _ > 5)`) is boolean-typed, so without
+      // this it dispatched as a VALUE and counted occurrences of the inert
+      // `_ > 5`. Desugar it to a function literal here, BEFORE the dispatch.
+      // The wildcard is what distinguishes it: a plain boolean value
+      // (`Count([True, False, True], True)`) has none and still counts as a
+      // value.
+      if (ops.length === 2 && isPredicateShorthand(ops[1])) {
+        const fn = canonicalFunctionLiteral(ops[1]);
+        if (fn) ops = [ops[0], fn];
+      }
+
       const stripped =
         ops.length === 1 ? withFirst(peekCountPreserving(ops[0]), ops) : ops;
       const adjusted = validateArguments(
@@ -4436,6 +4555,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the 1-based index of the first element satisfying the predicate, or 0 if not found.',
     complexity: 8200,
     signature: '(collection, function) -> integer',
+    canonical: (ops, { engine }) =>
+      canonicalFunctionSlot(engine, 'IndexWhere', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Zero;
@@ -4459,6 +4580,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the first element of the collection satisfying the predicate, or Nothing if none found.',
     complexity: 8200,
     signature: '(collection, function) -> any',
+    canonical: (ops, { engine }) =>
+      canonicalFunctionSlot(engine, 'Find', ops, 1),
     type: (ops) => ops[0].type,
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
@@ -4482,6 +4605,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the number of elements in the collection satisfying the predicate.',
     complexity: 8200,
     signature: '(collection, function) -> integer',
+    canonical: (ops, { engine }) =>
+      canonicalFunctionSlot(engine, 'CountIf', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Zero;
@@ -4509,6 +4634,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return a list of indexes of elements in the collection satisfying the predicate.',
     complexity: 8200,
     signature: '(collection, function) -> list<integer>',
+    canonical: (ops, { engine }) =>
+      canonicalFunctionSlot(engine, 'Position', ops, 1),
     type: () => 'list<integer>',
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
@@ -4541,6 +4668,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'Return the indexes that would sort the collection.',
     complexity: 8200,
     signature: '(indexed_collection, function?) -> list<integer>',
+    canonical: (ops, { engine }) =>
+      canonicalFunctionSlot(engine, 'Ordering', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
       // Stay inert on non-finite or unknown-length input, aligning with Sort:
       // an empty List would falsely claim a complete ordering.
@@ -4556,6 +4685,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Return the elements of the collection sorted according to the given comparison function.',
     complexity: 8200,
     signature: '(indexed_collection, function?) -> indexed_collection',
+    canonical: (ops, { engine }) =>
+      canonicalFunctionSlot(engine, 'Sort', ops, 1),
     // The result always rebuilds as a `List` (see `evaluate`), so the static
     // type must be `list<elt>`, not the source's (possibly indexed/Range) type.
     type: ([xs]) =>
@@ -5083,6 +5214,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     wikidata: 'Q381060',
     complexity: 8200,
     signature: '(collection, integer | function, integer?) -> list',
+    // A shorthand predicate (`Partition(xs, _ > 5)`) desugars to a function
+    // literal; a size operand (a number, or a symbol holding one) yields no
+    // parameter and is left alone, so the size arm is unaffected.
+    canonical: (ops, { engine }) =>
+      canonicalFunctionSlot(engine, 'Partition', ops, 1),
     type: ([xs]) =>
       `list<list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>>`,
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
@@ -5217,6 +5353,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature: '(collection, function) -> list<list>',
+    canonical: (ops, { engine }) =>
+      canonicalFunctionSlot(engine, 'ChunkBy', ops, 1),
     // Element types flow through from the source: list<list<elt>>.
     type: (ops) =>
       parseType(
@@ -5358,6 +5496,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature: '(collection, function) -> dictionary<list>',
+    canonical: (ops, { engine }) =>
+      canonicalFunctionSlot(engine, 'GroupBy', ops, 1),
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = applicable(fn);
@@ -5481,6 +5621,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // Iterate(fn, init) -> [fn(1, init), fn(2, fn(1, init)), ...]
   // Iterate(fn) -> [fn(1), fn(2), ...]
   // Infinite series. Can use Take(Iterate(fn), n) to get a finite series
+  //
+  // A UNARY function is applied to the accumulator alone — see `iterateArgs`.
   Iterate: {
     description:
       'Produce an infinite sequence by repeatedly applying a function to the previous value, starting with an initial value.',
@@ -5507,7 +5649,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           next: () => {
             n += 1;
             acc =
-              f([expr.engine.number(n), acc]) ??
+              f(iterateArgs(expr.engine, expr.op1, n, acc)) ??
               absenceMarker(expr.engine, expr);
             return { value: acc, done: false };
           },
@@ -5519,10 +5661,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         const f = applicable(expr.op1);
         if (!f) return undefined;
+        // Element k is `f(k, element(k-1))`, with `element(0)` the initial
+        // value — the contract the head comment and the iterator state. The
+        // loop used to stop one step early, so `at(1)` handed back the INITIAL
+        // value and every `at`-served route (`Take`, indexing,
+        // materialization) was shifted one element against `each()`.
         let acc = expr.op2 ?? expr.engine.Nothing;
-        for (let i = 1; i < index; i++) {
+        for (let i = 1; i <= index; i++) {
           acc =
-            f([expr.engine.number(i), acc]) ?? absenceMarker(expr.engine, expr);
+            f(iterateArgs(expr.engine, expr.op1, i, acc)) ??
+            absenceMarker(expr.engine, expr);
         }
         return acc;
       },
@@ -5675,6 +5823,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Produce a 2D list (matrix) by applying a function to each pair of row and column indexes.',
     complexity: 8200,
     signature: '(function, tuple) -> list',
+    canonical: (ops, { engine }) =>
+      canonicalFunctionSlot(engine, 'Fill', ops, 0),
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
