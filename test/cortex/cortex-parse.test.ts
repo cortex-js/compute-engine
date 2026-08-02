@@ -464,8 +464,14 @@ describe('CORTEX PARSING FANCY SYMBOLS', () => {
       5,
     ]);
     // `3πⅈ` is invisible multiplication — Stage B.
-    // ∈ → in (Element). Fancy constant symbols (ℝ) stay literal in Stage A.
-    expect(validCortex('3.1 ∈ ℝ')).toStrictEqual(['Element', 3.1, 'ℝ']);
+    // ∈ → in (Element); fancy constant symbols canonicalize to their ASCII
+    // symbol at the lexer (ℝ → RealNumbers), so the membership test is
+    // against the engine's actual set constant.
+    expect(validCortex('3.1 ∈ ℝ')).toStrictEqual([
+      'Element',
+      3.1,
+      'RealNumbers',
+    ]);
   });
 });
 

@@ -162,11 +162,19 @@ describe('parameter-shadows-constant lint', () => {
     expect(execDiagnostics('m(x) = x + 1\nm(1)')).toEqual([]);
   });
 
-  test('non-constant and literal parameters stay quiet', () => {
-    // `π` is an ordinary Cortex identifier (not bound to the constant), and
-    // `Infinity`/`NaN` are literal parameters, not names.
-    expect(execDiagnostics('f(π) = π + 1\nf(3)')).toEqual([]);
+  test('glyph aliases warn like their ASCII spelling', () => {
+    // `π` canonicalizes to `Pi` at the lexer, so `f(π)` shadows the
+    // constant exactly like `f(Pi)`.
+    expect(execDiagnostics('f(π) = π + 1\nf(3)')).toEqual([
+      ['parameter-shadows-constant', 'Pi'],
+    ]);
+  });
+
+  test('literal parameters stay quiet', () => {
+    // `Infinity`/`NaN` (and the glyph `∞`) are literal parameters, not
+    // names — nothing is shadowed.
     expect(execDiagnostics('f(Infinity) = 1\nf(Infinity)')).toEqual([]);
+    expect(execDiagnostics('f(∞) = 1\nf(∞)')).toEqual([]);
     expect(execDiagnostics('f(NaN) = 1\nf(NaN)')).toEqual([]);
   });
 

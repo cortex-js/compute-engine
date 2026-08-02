@@ -1,5 +1,6 @@
 import {
   DIGITS,
+  FANCY_UNICODE,
   HEX_DIGITS,
   REVERSED_ESCAPED_CHARS,
   isWhitespace,
@@ -10,6 +11,25 @@ import {
   codePointLength,
 } from './characters.js';
 import { isValidSymbol } from '../math-json/symbols.js';
+
+/**
+ * The canonical symbol a single-codepoint glyph aliases — the CAPITALIZED
+ * identifier entries of {@link FANCY_UNICODE}: `π` → `Pi`, `∞` → `Infinity`,
+ * `ℝ` → `RealNumbers`, `ⅈ` → `ImaginaryUnit`, … Canonicalizing at the lexer
+ * makes every position — expression, parameter, binding, match pattern —
+ * treat the glyph exactly like its ASCII spelling (so `∞` is the Infinity
+ * LITERAL wherever `Infinity` is, and `f(π)` draws the same
+ * shadows-constant diagnostic as `f(Pi)`); the verbatim `` `π` `` form
+ * still names the raw symbol. The table's operator aliases (`×` → `*`,
+ * word operators) are deliberately excluded — those resolve in operator
+ * position (`fancyOperator` in the parser), and only the capitalized
+ * entries are symbol names.
+ */
+function fancySymbolAlias(text: string): string | undefined {
+  if ([...text].length !== 1) return undefined;
+  const alias = FANCY_UNICODE.get(text.codePointAt(0)!);
+  return alias !== undefined && /^[A-Z]/.test(alias) ? alias : undefined;
+}
 import { DiagnosticMessage } from './diagnostics.js';
 import {
   DocComment,
@@ -391,6 +411,13 @@ export class Lexer {
     // Consume at least the current code point, then a maximal run of other
     // characters that cannot start a token and are not whitespace.
     this.pos += codePointLength(this.cp());
+    // A glyph that is not an identifier character can still be a SYMBOL
+    // alias (`∞` → `Infinity`, `∅` → `EmptySet`, `⧝` → `ComplexInfinity`)
+    // — see `fancySymbolAlias`. Checked on the FIRST code point only: a
+    // glyph inside a longer unrecognized run stays part of the error.
+    const alias = fancySymbolAlias(this.source.slice(start, this.pos));
+    if (alias !== undefined)
+      return this.makeToken('SYMBOL', start, { text: alias });
     while (!this.atEnd()) {
       const c = this.cp();
       if (isWhitespace(c) || this.canStartToken(c)) break;
@@ -413,6 +440,13 @@ export class Lexer {
       if (isBreak(c) || isIdentifierContinueProhibited(c)) break;
       this.pos += codePointLength(c);
     }
+    // A glyph alias (`π` → `Pi`, `ⅈ` → `ImaginaryUnit`, `ℝ` →
+    // `RealNumbers`) canonicalizes to its ASCII symbol — see
+    // `fancySymbolAlias`. Source offsets are untouched, so diagnostics
+    // still point at the glyph the author wrote.
+    const alias = fancySymbolAlias(this.source.slice(start, this.pos));
+    if (alias !== undefined)
+      return this.makeToken('SYMBOL', start, { text: alias });
     return this.makeToken('SYMBOL', start);
   }
 

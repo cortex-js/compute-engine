@@ -513,3 +513,34 @@ describe('CORTEX LEXER — offsets and trivia flags', () => {
     expect(new Lexer(source).tokenize()).toEqual(tokenize(source));
   });
 });
+
+describe('FANCY-UNICODE SYMBOL ALIASES', () => {
+  const { tokenize: lex } = require('../../src/cortex/lexer');
+  const first = (src: string) => {
+    const t = lex(src)[0];
+    return `${t.type}:${t.text}`;
+  };
+
+  test('glyphs canonicalize to their ASCII symbol at the lexer', () => {
+    // Identifier-shaped glyphs (scanSymbol path)…
+    expect(first('π')).toBe('SYMBOL:Pi');
+    expect(first('ⅈ')).toBe('SYMBOL:ImaginaryUnit');
+    expect(first('ⅇ')).toBe('SYMBOL:ExponentialE');
+    expect(first('ℝ')).toBe('SYMBOL:RealNumbers');
+    // …and non-identifier glyphs (previously ERROR tokens).
+    expect(first('∞')).toBe('SYMBOL:Infinity');
+    expect(first('∅')).toBe('SYMBOL:EmptySet');
+    expect(first('⧝')).toBe('SYMBOL:ComplexInfinity');
+  });
+
+  test('operator aliases are NOT rewritten to symbols', () => {
+    // `×` resolves in operator position (fancyOperator), not here.
+    const t = lex('×')[0];
+    expect(t.text).toBe('×');
+  });
+
+  test('source offsets still span the glyph', () => {
+    const t = lex('π')[0];
+    expect([t.start, t.end]).toEqual([0, 1]);
+  });
+});

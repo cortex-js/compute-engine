@@ -496,7 +496,16 @@
   alias for `Infinity` in both expression and parameter position, matching
   the type grammar's spelling — serialization always emits the canonical
   `Infinity`, now unsigned in expression position too, where it used to
-  print `+Infinity`. All three spellings are now **reserved words** in the
+  print `+Infinity`. The **glyph aliases** of the fancy-Unicode table are
+  now live in symbol position, canonicalized at the lexer: `π` → `Pi`
+  (so `N(π)` finally is 3.14159…, and `f(π) = …` draws the same
+  shadows-constant diagnostic as `f(Pi)`), `∞` → `Infinity` (a literal
+  everywhere `Infinity` is, including literal parameters `f(∞) = 1`),
+  `ⅈ` → `ImaginaryUnit`, `ⅇ` → `ExponentialE`, `∅` → `EmptySet`,
+  `⧝` → `ComplexInfinity`, and the number-set glyphs `ℝ ℤ ℚ ℕ ℂ` — so
+  `3.1 ∈ ℝ` now evaluates to `True` where the glyph used to stay an
+  inert unknown symbol. The verbatim `` `π` `` form still names the raw
+  symbol. All three non-finite spellings are now **reserved words** in the
   literal class alongside `true`/`false`: `let Infinity = 5`,
   `let oo = 5` and `let NaN = 1` are rejected with a `reserved-word`
   diagnostic — the verbatim `` `oo` `` form still names a binding — and a

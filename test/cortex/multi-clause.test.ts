@@ -402,3 +402,27 @@ describe('CORTEX MULTI-CLAUSE — serialization round-trip (§4.5)', () => {
     expect(strip(expr2)).toEqual(strip(expr));
   });
 });
+
+describe('CORTEX MULTI-CLAUSE — glyph aliases (π, ∞)', () => {
+  test('∞ is the Infinity literal in every position', () => {
+    const { text, diagnostics } = run(`
+f(∞) = 1
+f(-∞) = 2
+f(x: number) = 0
+f(∞) + 10 * f(-∞) + 100 * f(7)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('21');
+    // Serialization is canonical.
+    const [e] = parseCortex('f(∞) = 1');
+    expect(serializeCortex(e)).toBe('f(Infinity) = 1');
+    // Reserved like the ASCII spelling.
+    const [, d] = parseCortex('let ∞ = 5');
+    expect(d.map((x) => x.message[0] ?? x.message)).toContain('reserved-word');
+  });
+
+  test('π resolves to the constant in expression position', () => {
+    const { value, diagnostics } = run('N(π)');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBeCloseTo(Math.PI, 12);
+  });
+});
