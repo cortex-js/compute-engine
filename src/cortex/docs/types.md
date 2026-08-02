@@ -199,15 +199,60 @@ pair(1, 2)
 // ➔ (1, 2)
 ```
 
-A `record` definition declares **no** constructor: a record's fields are
-named, so building one from positional arguments would silently depend on the
-order the fields happen to be written in. Calling such a name reports a
-`type-not-callable` warning; annotate a value with the type instead.
+A `record` definition auto-declares **no** constructor: a record's fields
+are named, so building one from positional arguments would silently depend
+on the order the fields happen to be written in. Write one instead — see
+[constructor functions](#constructor-functions) below. Until one is
+declared, calling the name reports a `type-not-callable` warning.
 
-```cortex
-type place = record<x: number, y: number>
-place(1, 2)
+### Constructor functions
+
+A `function` with a declared type's name — in the same scope, after the
+`type` statement — is that type's **constructor function**. The body
+computes the *payload*: a value that must satisfy the type's definition
+(for a record, exactly the definition's keys, each field matching its
+type). The engine checks the payload and tags it; the result is a value of
+the type. This is how a `record`-bodied type gets its constructor:
+
+```cortex-live
+type circle = record<x: number, y: number, r: number>
+function circle(x, y, r) { {x -> x, y -> y, r -> r} }
+Type(circle(1, 2, 3))
+// ➔ "circle"
 ```
+
+Constructor functions are not record-specific: one may be written for any
+definition, replacing the automatic constructor — the *smart constructor*
+idiom of validating or normalizing on the way in:
+
+```cortex-live
+type frac = record<n: integer, d: integer>
+function frac(n: integer, d: integer) {
+  {n -> n / GCD(n, d), d -> d / GCD(n, d)}
+}
+frac(2, 4) == frac(1, 2)
+// ➔ True
+```
+
+A value that already satisfies the definition can be handed to the
+constructor directly — one argument, checked and tagged, body skipped.
+That raw spelling is also how a constructed value prints and reads back
+(`circle(1, 2, 3)` prints as `circle({x -> 1, y -> 2, r -> 3})`), so a
+round trip injects the payload unchanged and a normalizing constructor's
+values stay equal after it.
+
+Because the payload spelling must construct unchanged, a constructor's
+parameters have to be *distinguishable* from the payload itself: a
+`function` whose parameters could also be a valid payload — same number of
+arguments, types the definition overlaps — is rejected when it is
+declared. Use a different number of arguments, or annotate the parameters
+with types the definition body cannot mistake.
+
+A constructor function may call itself, and returning its own constructed
+value passes it through unchanged. A `function` with a type's name declared
+*before* the type is an ordinary function — the later `type` statement then
+reports the usual conflict. And for an **alias**, a same-name function is
+just an ordinary function: there is no tag to apply.
 
 ### Values of a new type are opaque
 
@@ -240,8 +285,24 @@ match p {
 // ➔ 7
 ```
 
-There is no `p.x` field-access syntax: `match` is how a value of a declared
-type is taken apart.
+To read a single **named field**, use the `.` accessor. It works on values
+of a declared type whose definition has named fields — a record body or a
+named-tuple body — and on records and dictionaries generally:
+
+```cortex-live
+type point = tuple<x: number, y: number>
+let p = point(3, 4)
+p.x + p.y
+// ➔ 7
+```
+
+On a dictionary, `d.x` is exactly `d["x"]`, absent-key behavior included.
+The accessor reads one named field through the type's definition; it does
+not make the value a collection — `First(p)`, `p["x"]` and destructuring
+keep rejecting, and `match` remains the way to take the whole value apart
+at once. (The dot must touch the value it reads: `p.x` is a field access,
+`p .x` is not; and a number never takes a field — `2.x` is a
+multiplication.)
 
 An **alias** has none of this reserve — it *is* its definition, so an
 alias-typed value works anywhere the underlying shape works:
@@ -281,9 +342,12 @@ do {
 ```
 
 Re-running a `type` statement for a name that an earlier `type` statement
-declared **replaces** the earlier definition, constructor included, so
-re-executing a notebook cell after editing a type works. A name declared some
-other way — a `function` of that name, or a type declared by the host
+declared **replaces** the earlier definition, constructor included —
+[constructor functions](#constructor-functions) too, since an edited
+definition may invalidate the old body; re-running the whole cell restores
+both. Re-running a `function` statement that declares a constructor
+replaces the constructor. A name declared some other way — a `function` of
+that name *predating* the type, or a type declared by the host
 application — is not replaced: the statement reports an error value and
 declares nothing.
 

@@ -1,11 +1,12 @@
 # Nominal types: `type` / `type alias`, and value constructors
 
-Status: **v6 — ALL DECISIONS RULED; phases 0–2 IMPLEMENTED 2026-08-01
-(unstaged; full suite green, zero snapshot churn). D9 amended
-(injectivity `eq`), D6 moved to v2 (`.`/`Field` surface + lowering),
-bootstrap minting unconditional — all ratified. Remaining: phase 3
-(docs incl. `src/cortex/docs/`, CHANGELOG). §4.5 constructor functions
-are v2 with the shape and D12 representation pinned.**
+Status: **v7 — v1 (phases 0–3) SHIPPED 2026-08-01. v2 milestone
+(§4.5 constructor functions + D6 `.`/`Field` surface) in progress:
+mechanics addendum §4.5b added 2026-08-01; D13–D16 ALL RULED (author,
+2026-08-01, recommended options adopted: D13 assignFn recognition +
+record namespace claim; D14a raw-first + install-time overlap
+rejection; D14b exact-key payload validation; D16 accessor package as
+specced). v2 implementation may proceed.**
 Date: 2026-08-01
 Related: `docs/plans/2026-08-01-type-variables-design.md` (§9.2 scoped the
 base `type` statement; its generic-alias slot and the `forall` machinery
@@ -367,6 +368,311 @@ Compilation composes with D11 either way: the body compiles as an
 ordinary user function, the tag erases, boundary re-tagging comes from
 the static signature.
 
+### 4.5b v2 mechanics addendum (phase 0 of the v2 milestone)
+
+§4.5 rules the *shape*; this addendum rules the *mechanics*, probed
+against the shipped v1 code (2026-08-01). Four decision clusters,
+D13–D16; each records the probe facts it rests on.
+
+#### D13 — recognition and lowering of the constructor declaration
+
+**Probe facts.** A Cortex `function circle(x, y, r) { … }` lowers to
+`["Assign", "circle", ["Function", …]]` (`parser.ts`
+`parseFunctionDefinition`); both the `Assign` operator route and the
+host `ce.assign()` route funnel into `assignFn()`
+(`engine-declarations.ts`). That function already contains the
+minted-constructor refusal (`engine-declarations.ts:839`,
+`isMintedConstructor` → `constructorAssignmentError`) — added by the v1
+review round precisely so nothing could silently clobber a constructor.
+Record-bodied nominal types currently mint **nothing**
+(`deriveConstructorSignature` returns `undefined`), so their name has
+no binding at all after declaration.
+
+**Ruling (recommend adopt).** Recognition is **engine-side, in
+`assignFn()`, at install time** — never in the Cortex parser. The
+parser keeps lowering `function` statements to plain `Assign`; the box
+route (`ce.assign`, `ce.box(["Assign", …]).evaluate()`) and the Cortex
+route therefore agree by construction (standing route-parity pin).
+
+The recognition condition, checked where the assigned value is a
+function literal: the **current lexical scope's own** `scope.types`
+(not the parent chain — §4.5 says *same scope*) holds a type record
+named `id`. Then:
+
+- **nominal, record body** (no minted binding): install the
+  constructor-function overload set (D14) and set the
+  `_mintedTypeConstructor` marker (a new `'constructor'` value, so
+  introspection can tell an auto-mint from a user constructor).
+- **nominal, auto-minted constructor exists** (tuple/scalar/list/…
+  bodies): this is the sanctioned carve-out through the
+  `assignFn:839` guard — the same condition that proves "constructor
+  declaration" (function literal + same-scope type) licenses replacing
+  the minted def with the overload set. Everything else (assigning a
+  non-function value, assigning from an inner scope, no same-scope
+  type) keeps today's refusal.
+- **alias, identity constructor exists**: replace with a **plain user
+  function**, marker dropped (§4.5 ruled: no tagging for aliases). A
+  later re-run of the `type alias` statement re-mints over it only via
+  the whole-scope re-execution flow (statement order restores both).
+
+Consequences pinned with the ruling:
+
+- **Ordering** falls out of execution order: at `Assign` time the type
+  either is in `scope.types` (declared earlier → constructor) or is
+  not (plain function; a *later* same-scope `type` statement then hits
+  the D5 collision against a real operator def — §4.5's "before"
+  case). No lookahead, no source-position bookkeeping.
+- **Re-declaration**: re-running the `function` statement satisfies
+  the same recognition condition and replaces the constructor
+  (notebook re-run). Re-running the `type` statement removes the
+  marked binding (`removeMintedTypeConstructor`) with the rest of the
+  statement-replace flow; the notebook host re-executes the whole
+  scope, so the `function` statement re-installs. A `type` re-run
+  *without* re-running the function statement leaves the type
+  uninhabited — correct, since the body may have changed shape.
+- **D5 for record bodies (sub-ruling, recommend adopt): a
+  record-bodied nominal declaration claims the value namespace like
+  every other body** — `checkTypeConstructorNamespace` runs even
+  though nothing is minted. This makes "`function circle` before
+  `type circle`" the same collision error in the same place for every
+  body kind, and reserves the name the constructor function will
+  claim. (v1 left this deliberately open for exactly this ruling.)
+- **Host route**: `ce.declare(name, {…})` over a minted constructor
+  keeps its "already declared" error — the sanctioned constructor
+  route is assignment of a function literal (statement or
+  `ce.assign`), nothing else.
+
+**Implementation findings (2026-08-01, recorded after landing):**
+
+- **Recognition also runs at `Assign` CANONICALIZATION** (the `Assign`
+  canonical handler in `library/core.ts`), mirroring `DeclareType`'s
+  canonical-time registration: the static pre-pass (and Block
+  canonicalization) canonicalizes *later* statements before anything
+  evaluates, and their calls must validate against the constructor's
+  overload signature, not the auto-minted one. The evaluate-time
+  `assignFn` path re-runs the same install idempotently; conflicts stay
+  silent at canonical time and are diagnosed on the evaluate route.
+- **The pre-install loosening** (`loosenMintedConstructor`): a
+  constructor-function body's SELF-call canonicalizes before the overload
+  set exists, so the minted def's signature is temporarily widened to
+  `'function'` while the literal canonicalizes (both routes), restored
+  immediately after — otherwise the self-call bakes an
+  `incompatible-type` error against the strict auto-mint signature.
+- **Recognition requires an EXPLICIT `Function` literal**:
+  `canonicalFunctionLiteral` lifts any expression into a constant lambda,
+  so testing with it alone would have routed `point := 5` into the
+  install path past the constructor-assignment guard.
+
+#### D14 — the overload set: user arm(s) + the raw-injection arm
+
+**Probe facts.** Intersection-of-signatures overload sets are
+implemented and write-free (`overload.ts`; resolution most-specific-
+wins, inference per-position JOIN — the 2026-07-25 design). Operator
+definitions accept an intersection `signature`, and both
+`validate.ts` and `boxed-function.ts` resolve through
+`overloadArms`/`resolveOverload`. Record-aware dictionary-literal
+typing **shipped** (`boxed-dictionary.ts`: identifier keys synthesize
+`record<k: T, …>`; exotic/keyword keys fall back to
+`dictionary<V>`), and record subtyping is **width-based**
+(`subtype.ts:1085` — extra lhs keys pass).
+
+**Ruling (recommend adopt).** The minted operator's static signature
+is the **intersection** of the user arm(s) and one automatic
+**raw-injection arm**:
+
+- raw arm, record/scalar/list/… body `B`: `(B) -> T` (unary);
+- raw arm, tuple body: the n-ary spread arm — **identical to the v1
+  auto-mint signature** (D12: tuple payloads spread inline). "The
+  user constructor overrides the auto-mint" (§4.5) therefore means:
+  the overload set replaces the auto-mint as the callable surface,
+  and the auto-mint arm *survives inside it* as the raw arm.
+
+The static machinery then needs nothing new: validation, diagnostics
+and per-position JOIN inference come from the existing resolver, and
+every arm's result is the nominal reference, so the result JOIN is
+trivial. Runtime dispatch lives in the single `evaluate` handler and
+mirrors the static rule: if the operands inhabit the raw arm's domain,
+tag directly (return `undefined` → the application is already the
+inert tagged value); otherwise run the user body, validate the
+payload, tag.
+
+**D14a — arm overlap (the one genuine tension; recommend (i)).** The
+raw arm must win on its own domain or D12's round-trip breaks
+(serialization emits the raw spelling; reparsing must *not* re-run the
+body). But raw-first makes any user arm whose domain overlaps the raw
+arm's partially or wholly unreachable — and for a tuple body a
+same-arity numeric user arm (`type point = tuple<x: number,
+y: number>` + `function point(r, theta) {…}`) is **domain-identical**
+to the raw arm. The options:
+
+- **(i) Raw-first + install-time rejection of overlap (recommended).**
+  Installing a constructor function errors (`constructor-arm-overlap`
+  error value, naming both signatures) when a user arm's domain is not
+  provably disjoint from the raw arm's — same arity range intersecting
+  AND no position provably disjoint (`provablyDisjoint`, the same
+  predicate the type layer already exports). This is the
+  reject-over-surprise principle (D5 of the function-polymorphism
+  spec): the alternative silences are both bad — see (ii)/(iii). The
+  user's fix is a different parameterization (different arity, or a
+  record body). Undecidable overlap (symbolic types) counts as
+  overlap: reject, loudly.
+- **(ii) Raw-first, silent shadowing — rejected.** The overlapping
+  user arm silently never runs; worse, *anyone* can bypass a smart
+  constructor's validation by handing a pre-shaped payload — a
+  validation hole shaped exactly like the one D10 closed.
+- **(iii) User-first, raw as fallback — rejected.** Reparsing a
+  serialized value re-runs the body whenever the payload inhabits a
+  user arm; round-trip stability then depends on body idempotence,
+  which the engine cannot check. A value that mutates under
+  serialize/parse is a false-negative factory for equality.
+
+Note the deliberate consequence of (i): a **unary** user arm over the
+body's own type (`type frac = rational` + `function frac(x: rational)
+{normalize(x)}`) is rejected — normalization of the payload type
+itself belongs in a distinctly-typed parameterization
+(`frac(n: integer, d: integer)`), because a raw payload must inject
+unchanged for round-trips to close. A second consequence
+(implementation, 2026-08-01): an **unannotated** parameter types
+`unknown`, which is undecidable-overlap, so a unary constructor over
+*any* unary-raw-arm body must annotate its parameter — §4.5's
+alternate-parameterization example is spelled
+`function circle(d: number) { … }`, not `function circle(d) { … }`.
+Arity-disjoint arms (the common case) need no annotations.
+
+**D14b — record payload validation (recommend adopt).** The check is
+"exact key set, per-field types" (§4.5 ruled). Width subtyping means
+a pure type-level `payload.type <: B` would silently admit **extra**
+keys, and the `dictionary<V>` fallback for exotic keys carries no key
+names at all — so the exact-key comparison is **value-shape-aware**
+(the payload dictionary's actual keys against the definition's field
+map), with per-field *types* checked via the ordinary subtype relation
+(the shipped record-aware synthesis makes those precise for
+identifier keys). A failing payload yields the standard
+`incompatible-type` error value naming the constructor.
+
+#### D15 — self-reference in the constructor body (resolved, no ruling needed)
+
+**Probe facts.** `assignFn()` already ties the recursion knot for
+self-referencing function literals (pre-declares `id` function-typed,
+re-canonicalizes the literal — `engine-declarations.ts:728`). For
+non-record bodies the self-call binds to the existing minted def via
+the stable `BoxedDefinition` record, which `updateDef` mutates in
+place — the bound reference sees the replacement.
+
+**Recorded.** The ordinary declare-then-assign recursion idiom covers
+constructor bodies; no new machinery beyond the D13 loosening. A
+recursive call inside the body dispatches through the **full overload
+set**, and a body that returns its OWN constructed value (the common
+recursive shape `if (k < 0) { pt(-k, flag) } else { … }`) passes it
+through un-nested — the evaluate wrapper recognizes an already-tagged
+value of the same type and never re-wraps. Runaway recursion is the
+user's ordinary recursion error (existing limits apply). Pinned by
+test.
+
+**Pre-existing engine defect found while testing (2026-08-01, NOT
+fixed here — binding/closure territory):** a *recursive* function whose
+`if`-branch returns a **dictionary literal** leaks the raw parameter
+symbol — `function dic(x: integer) { if (x < 0) { dic(0) } else {
+{v -> x} } }; dic(3)` yields `{v -> x}` with a dangling `x`. The
+non-recursive shape and scalar/tuple recursive shapes are all fine;
+the trigger is self-reference + dictionary-in-held-branch (the
+knot-tying re-canonicalization interacts with raw dictionary entries).
+This predates this milestone (reproducible with no types involved) but
+constrains recursive RECORD constructors: compute fields with
+`If(...)` *inside* the record literal (`{v -> If(x < 0, -x, x)}`), or
+recurse with tuple/scalar bodies, until the engine defect is fixed.
+**Defensive gate (added at review):** the constructor's evaluate wrapper
+refuses to tag a payload that still references one of the literal's own
+parameter NAMES (inside the body the parameters shadow everything, so
+such a payload is never a legitimate symbolic construction) — the
+application stays inert instead of tagging a dangling value.
+
+#### D16 — the `.` accessor surface and the `Field` operator
+
+**Probe facts.** The Cortex lexer already treats `.` as an operator
+char (needed for the `..` range; `OPERATOR_CHARS`, `lexer.ts:99`) and
+emits a bare `.` OPERATOR token that no grammar rule claims — so the
+surface is a **parser-only** addition, no lexer change. Numeric
+literals still munch a trailing dot (`2.x` lexes as the number `2.`
+then `x` — invisible multiply), so a number literal can never take a
+field. `Field` is unclaimed in the library and in Cortex. The postfix
+loop (`parser.ts:2621`) chains call and index clauses and breaks on
+preceding whitespace.
+
+**Ruling (recommend adopt).**
+
+- **Grammar**: a field clause joins the postfix loop —
+  `postfix = primary (call | index | field)*`, where `field` is an
+  **abutting** `.` (same whitespace rule as call/index: `p .x` ends
+  the expression, exactly as `p [1]` and `p (x)` do) followed by a
+  SYMBOL or VERBATIM_SYMBOL. Whitespace *after* the dot is tolerated
+  (`p. x` — the dot itself is the anchor). Lowering:
+  `p.x` → `["Field", p, "'x'"]`; chains left-associate,
+  `a.b.c` → `Field(Field(a, "b"), "c")`; `p.x(…)` is a call on the
+  field value → `["Apply", ["Field", p, "'x'"], …]` (falls out of the
+  existing loop, nothing special). `.` followed by anything else is a
+  `field-name-expected` diagnostic. **Not claimed**: positional access
+  (`t.1`) — fields are names; positions stay `t[1]`-territory (and
+  the lexer gives `.1` to numbers anyway).
+- **The `Field` operator** (per the add-operator checklist):
+  signature `(value: any, field: string) -> unknown`; pure,
+  `invokes: false`, `lazy: false` (the operand must be a value; the
+  field name is a string literal). Behavior by the **operand's static
+  type**, which is the D3 boundary made precise:
+  - **nominal reference with a named-field body** (record body, or
+    named tuple body): the field map comes from the *minted
+    definition* — record payload key lookup, or tuple **position**
+    lookup. The result type is the field's declared type. A field
+    name not in the definition is a static `incompatible-type`-class
+    error. This dispatch reads the definition's field map only — it
+    does **not** claim any collection kind for the nominal type, so
+    `First(p)`, `p["x"]` (`At` gates on static type), and
+    destructuring keep rejecting exactly as v1 pinned. (D3 upheld:
+    `Field` is the *sanctioned* window, not a general unlocking.)
+  - **record / dictionary static types**: `d.x` behaves as `d["x"]`
+    (`At` semantics, including the absence axis: statically-present
+    record key → exact type; dictionary key → `V` with the
+    absence marker). Implementation may canonicalize `Field` to `At`
+    for these operands — observable behavior is the pin, not the
+    node.
+  - **anything else** (unknown/symbolic operand): `Field` stays
+    inert-symbolic; a *known* non-field-bearing type (e.g. `number`)
+    is a static error.
+- **Compile lowering** (rides §4.6): `Field` on a **named-tuple-
+  bodied nominal** operand lowers to positional access into the
+  compiled tuple representation — element index on JS, component
+  access on the GPU targets, **by position, not by name** (fields
+  named `u, v` on a 2-field body still compile to the target's
+  first/second component). `Field` on record-bodied nominals and on
+  plain dictionaries lowers exactly where the equivalent `At` lowers
+  today, and declines where it declines — no new representation
+  claims. Serialization: Cortex prints `base.name` when the field is
+  an identifier-shaped string, the `Field(base, "…")` call form
+  otherwise; MathJSON is the plain application either way.
+
+#### Addendum test additions (extends §9)
+
+- Recognition: constructor installs on all three routes (Cortex
+  statement / `ce.assign` / boxed `Assign` evaluate); inner-scope
+  function over an outer type = plain function; function-before-type
+  = D5 collision (all body kinds, per the D13 sub-ruling); alias
+  same-name function = plain function, marker dropped.
+- Overload set: raw injection round-trips (serialize → parse →
+  equal); normalizing constructor yields D9-equal values;
+  `constructor-arm-overlap` fires for a same-arity tuple-body arm and
+  for a unary arm over the body type; disjoint arms dispatch
+  correctly both statically and at runtime; record payload with an
+  extra key rejects (width-subtype admission would be the bug).
+- Self-reference: recursive normalizing constructor (record and
+  non-record bodies); runaway recursion errors ordinarily.
+- Field: `p.x` and chains on record- and named-tuple-bodied nominals;
+  static error on unknown field; `d.x` ≡ `d["x"]` on dictionaries
+  and records; opacity re-pins (`First(p)`, `p["x"]`, destructuring
+  still reject); parse pins (`p .x` breaks the chain, `2.x` is
+  multiplication, `1..5` unchanged, `t.1` rejected); compile: swizzle/
+  index on named-tuple nominal, decline parity with `At` elsewhere;
+  route parity.
+
 ### 4.6 Compilation is type erasure
 
 Nominal vs structural is **irrelevant to the compiled representation**:
@@ -630,6 +936,29 @@ phase 1) while **nominal** parameterized types remain out of scope
     `["circle", 1, 2, 3]` verbatim) recorded and not recommended:
     normalization impossible, equal-by-construction values compare
     unequal.
+13. **D13 — constructor recognition is engine-side in `assignFn()` at
+    install time (§4.5b): RULED** (author, 2026-08-01), through a
+    carve-out of the minted-constructor guard keyed on (function
+    literal + same-scope type); record-bodied declarations claim the
+    value namespace (D5 check) like every other body.
+14. **D14 — the minted operator is an overload set: user arm(s) ∧ the
+    auto raw-injection arm (§4.5b): RULED** (author, 2026-08-01),
+    riding the shipped write-free overload machinery; **D14a RULED
+    (i)**: raw-first dispatch with **install-time rejection of
+    overlapping user arms** (`constructor-arm-overlap`;
+    reject-over-surprise); **D14b RULED**: record payload validation
+    is value-shape-aware exact-key (width subtyping must not admit
+    extra keys).
+15. **D15 — self-reference in constructor bodies: the existing
+    declare-then-assign knot-tying covers it; no new machinery
+    (§4.5b)** — recorded as resolved.
+16. **D16 — `.` accessor (§4.5b): RULED** (author, 2026-08-01):
+    abutting postfix field clause (parser-only; lexer untouched)
+    lowering to a new `Field` operator; nominal dispatch off the
+    minted definition's field map (D3 upheld — collection access stays
+    rejected); `d.x` ≡ `d["x"]` on records/dictionaries; compile =
+    positional index/swizzle for named-tuple nominals, `At`-parity
+    elsewhere.
 
 ## 9. Test plan
 

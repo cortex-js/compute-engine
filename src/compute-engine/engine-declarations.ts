@@ -53,7 +53,9 @@ import {
 import { canonicalFunctionLiteral, lookup } from './function-utils.js';
 import {
   checkTypeConstructorNamespace,
+  installConstructorFunction,
   isMintedConstructor,
+  loosenMintedConstructor,
   mintTypeConstructor,
 } from './type-constructors.js';
 import { isFunction } from './boxed-expression/type-guards.js';
@@ -725,6 +727,23 @@ export function assignFn(
   // @todo: could have a 'locked' attribute on the definition
   if (id === 'Nothing') return ce;
 
+  // §4.5b D13/D15: when `id` names a type in the CURRENT scope and its minted
+  // constructor is bound, loosen the constructor's signature while the
+  // assigned literal canonicalizes (both here in the knot-tying re-box and in
+  // the recognition block below) — a self-call in a constructor-function body
+  // must not validate against the strict pre-install signature. Restored
+  // right after canonicalization; the install then replaces the definition.
+  let restoreCtor: (() => void) | undefined = undefined;
+  {
+    const scope = ce.context.lexicalScope;
+    if (
+      scope.types?.[id]?.def !== undefined &&
+      arg2 !== null &&
+      typeof arg2 === 'object'
+    )
+      restoreCtor = loosenMintedConstructor(ce, scope, id);
+  }
+
   // Tie the recursion knot for a programmatic box-then-assign (mirroring the
   // `Assign` operator's canonicalization): when the assigned value is a
   // `Function` literal whose body references `id`, the literal may have been
@@ -735,25 +754,70 @@ export function assignFn(
   // collection guard fail-closes on the top-typed self-call). Pre-declare
   // `id` as function-typed, then re-canonicalize the literal from its JSON so
   // the self-reference binds and types against the real definition.
-  if (arg2 !== null && typeof arg2 === 'object') {
-    const boxedFn = isFunction(arg2 as Expression, 'Function')
-      ? (arg2 as Expression)
-      : undefined;
-    const rawFn =
-      boxedFn === undefined && Array.isArray(arg2) && arg2[0] === 'Function';
-    if (
-      (boxedFn || rawFn) &&
-      JSON.stringify(boxedFn ? boxedFn.json : arg2).includes(`"${id}"`)
-    ) {
-      if (!ce.lookupDefinition(id)) ce.symbol(id);
-      const selfDef = ce.lookupDefinition(id);
-      if (selfDef && isValueDef(selfDef) && selfDef.value.inferredType)
-        selfDef.value.type = ce.type('function');
-      if (boxedFn) arg2 = ce.box(boxedFn.json) as AssignValue;
+  const ctorScope = ce.context.lexicalScope;
+  const ctorType = ctorScope.types?.[id];
+  let ctorLiteral: Expression | undefined = undefined;
+  try {
+    if (arg2 !== null && typeof arg2 === 'object') {
+      const boxedFn = isFunction(arg2 as Expression, 'Function')
+        ? (arg2 as Expression)
+        : undefined;
+      const rawFn =
+        boxedFn === undefined && Array.isArray(arg2) && arg2[0] === 'Function';
+      if (
+        (boxedFn || rawFn) &&
+        JSON.stringify(boxedFn ? boxedFn.json : arg2).includes(`"${id}"`)
+      ) {
+        if (!ce.lookupDefinition(id)) ce.symbol(id);
+        const selfDef = ce.lookupDefinition(id);
+        if (selfDef && isValueDef(selfDef) && selfDef.value.inferredType)
+          selfDef.value.type = ce.type('function');
+        if (boxedFn) arg2 = ce.box(boxedFn.json) as AssignValue;
+      }
     }
+
+    // §4.5b D13 (nominal-types design) — constructor-function recognition. A
+    // function literal assigned to a name that the CURRENT scope's own
+    // `scope.types` declares as a NOMINAL type is that type's constructor
+    // function: recognized here, at install time, so the Cortex `function`
+    // statement and the box/host routes agree by construction. Ordering falls
+    // out of execution order — at Assign time the type either is already
+    // declared (→ constructor) or is not (→ plain function; a LATER
+    // same-scope type declaration then hits the D5 collision against a real
+    // definition). An ALIAS type's same-name function is an ordinary function
+    // (§4.5): it installs no constructor, but it IS licensed to replace the
+    // alias's minted identity constructor (the guard carve-out below).
+    if (
+      ctorType?.def !== undefined &&
+      arg2 !== undefined &&
+      arg2 !== null &&
+      typeof arg2 !== 'function' &&
+      typeof arg2 !== 'boolean'
+    ) {
+      // Only an EXPLICIT `Function` literal is a constructor declaration —
+      // `canonicalFunctionLiteral` would wrap any expression as a thunk, and
+      // `point := 5` must keep hitting the constructor-assignment guard.
+      const expr2 = ce.expr(arg2);
+      if (isFunction(expr2, 'Function'))
+        ctorLiteral = canonicalFunctionLiteral(expr2);
+    }
+  } finally {
+    // Canonicalization is done: put the strict definition back. A nominal
+    // install below replaces it wholesale; every other path (alias plain
+    // function, non-literal value, error) proceeds against the real
+    // definition.
+    restoreCtor?.();
   }
 
   const def = ce.lookupDefinition(id);
+
+  if (ctorLiteral !== undefined && ctorType !== undefined && !ctorType.alias) {
+    // Same eligibility as the type declaration's own namespace claim (D5): an
+    // explicit non-constructor binding in this scope is a genuine conflict.
+    checkTypeConstructorNamespace(ctorScope, id, 'constructor-function');
+    installConstructorFunction(ce, ctorScope, id, ctorType, ctorLiteral);
+    return ce;
+  }
 
   // Phase 3 §6.3 — declared-signature reconciliation (assign path).
   // Assigning a function literal to a symbol that carries an EXPLICIT declared
@@ -837,7 +901,14 @@ export function assignFn(
     // operator route surfaces it as an `Error` value.
     // A SHADOWING assignment is fine: it binds a new name in the current
     // scope and leaves the declaration's own scope untouched.
-    if (!shadowBuiltin && isMintedConstructor(def))
+    // Carve-outs (§4.5b D13): a NOMINAL constructor-function install returned
+    // above before reaching here; an ALIAS type's same-name function literal
+    // is an ordinary function that deliberately replaces the minted identity
+    // constructor (the marker drops with the inner def — the binding stops
+    // being ours, per §4.5).
+    const aliasFunctionOverride =
+      ctorLiteral !== undefined && ctorType?.alias === true;
+    if (!shadowBuiltin && isMintedConstructor(def) && !aliasFunctionOverride)
       throw constructorAssignmentError(id, def.operator.signature);
 
     const value = assignValueAsValue(ce, arg2);
@@ -1056,7 +1127,12 @@ function assignValueAsValue(
   return expr;
 }
 
-function assignValueAsOperatorDef(
+/** Convert an assigned value into an operator definition (a function literal
+ * or a JS evaluate function). Exported for the `Assign` operator's
+ * CANONICAL-time constructor-function recognition (§4.5b D13): an alias
+ * type's same-name function replaces the minted identity constructor at
+ * canonicalization so later statements validate against the real signature. */
+export function assignValueAsOperatorDef(
   ce: IComputeEngine,
   value: AssignValue
 ): OperatorDefinition | undefined {

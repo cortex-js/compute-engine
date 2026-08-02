@@ -165,7 +165,12 @@ _argument_ → \[**`...`**\] _expression_
 
 _index-clause_ → **`[`** (_expression_)#**`,`** **`]`**
 
-_postfix-expression_ → _primary_ (_call-clause_ | _index-clause_ | **`!`**)\*
+_field-clause_ → **`.`** _symbol_
+&nbsp;&nbsp;&nbsp;&nbsp;— the `.` must abut the base; not after a number
+literal
+
+_postfix-expression_ → _primary_ (_call-clause_ | _index-clause_ |
+_field-clause_ | **`!`**)\*
 
 _expression_ → _primary_ | _prefix-expression_ | _infix-expression_ |
 _postfix-expression_
@@ -274,8 +279,9 @@ call/index applies to. The primary forms are:
   [LaTeX Islands](/cortex/literals/#latex-islands)
 - a function call: `f(x, y)`
 - an index expression: `xs[i]`
+- a field access: `p.x`
 
-## Calls and indexing
+## Calls, indexing and field access
 
 A call is a symbol (or another primary) immediately followed — with **no**
 whitespace — by a parenthesized, comma-separated argument list:
@@ -311,10 +317,25 @@ xs[i]       // ["At", "xs", "i"]
 f(x)[0]     // ["At", ["f", "x"], 0]
 ```
 
-In both cases the `(` or `[` must directly abut the callee/indexed
-expression: whitespace before it means the parenthesized/bracketed form is a
-separate primary (a parenthesized expression or a list literal), not a
-call/index — the same whitespace-sensitivity that governs operators.
+Field access is a primary immediately followed — with no whitespace — by a
+`.` and a symbol, and lowers to `Field`. Chains associate left, and a call
+on a field value lowers through `Apply` like any non-symbol callee:
+
+```cortex
+p.x         // ["Field", "p", "x"]
+a.b.c       // ["Field", ["Field", "a", "b"], "c"]
+p.x(2)      // ["Apply", ["Field", "p", "x"], 2]
+```
+
+A number literal never takes a field: the lexer folds a trailing dot into
+the number, so `2.x` is the multiplication `2. * x`, and `1..5` stays a
+range. See [Types](/cortex/types/#values-of-a-new-type-are-opaque) for what
+`p.x` means on values of declared types, records and dictionaries.
+
+In all three cases the `(`, `[` or `.` must directly abut the
+callee/indexed expression: whitespace before it means the form is a
+separate primary (or, for `.`, a diagnosed stray token), not a
+call/index/field — the same whitespace-sensitivity that governs operators.
 
 ## Collections, tuples, and dictionaries
 

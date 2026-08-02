@@ -267,11 +267,20 @@ describe('a MINTED type constructor cannot be assigned over (D5)', () => {
     expect(ce.box(['pt', 1, 2]).evaluate().toString()).toBe('(1, 2)');
   });
 
-  test('the FUNCTION-LITERAL reassignment branch is refused too', () => {
+  // §4.5b (v2): a FUNCTION LITERAL assigned to a type's name is no longer a
+  // refused reassignment — it is the sanctioned CONSTRUCTOR-FUNCTION
+  // declaration (D13). An arm that overlaps the raw-injection arm is
+  // rejected at install (D14a) and the auto-minted constructor survives;
+  // a disjoint arm installs the overload set (see
+  // constructor-functions.test.ts for the full matrix).
+  test('a FUNCTION-LITERAL assignment is a constructor declaration (D13/D14a)', () => {
     const ce = engine();
+    // Same arity as the raw-injection (auto-mint) arm, numeric params — the
+    // domains overlap, so the install is rejected loudly…
     expect(() =>
       ce.assign('point', ce.box(['Function', ['Add', '_1', '_2'], '_1', '_2']))
-    ).toThrow(/Cannot assign a value to the constructor of type "point"/);
+    ).toThrow(/overlaps the type's raw-injection constructor/);
+    // …and the auto-minted constructor is untouched.
     expect(ce.box(['point', 1, 2]).evaluate().toString()).toBe('point(1, 2)');
   });
 

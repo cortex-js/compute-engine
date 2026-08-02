@@ -353,6 +353,29 @@ export function serializeCortex(
     },
 
     //
+    // Field access: `["Field", base, "'name'"]` → `base.name` when the field
+    // is an identifier-shaped string; the generic call form otherwise.
+    //
+    Field: (expr: MathJsonExpression): FormattingBlock => {
+      const base = operand(expr, 1);
+      const field = operand(expr, 2);
+      const name = field === null ? null : stringValue(field);
+      if (
+        base === null ||
+        name === null ||
+        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
+      )
+        return serializeGenericFunction(expr);
+      // Parenthesize a base that is itself an operator expression, so the
+      // postfix `.name` binds to the whole thing (mirrors `At`).
+      const baseBlock =
+        OPERATORS[operator(base)] !== undefined
+          ? fmt.line('(', serializeExpression(base), ')')
+          : serializeExpression(base);
+      return fmt.line(baseBlock, fmt.text('.' + name));
+    },
+
+    //
     // Dictionary
     //
     // `["Dictionary", ["KeyValuePair", key, value], …]` → `{key -> value, …}`;

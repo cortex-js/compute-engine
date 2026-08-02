@@ -466,14 +466,49 @@
   the arguments are checked against that signature. An **alias** declaration
   mints a checked *identity* constructor instead: `pair(1, 2)` validates
   `(1, 2)` and hands back the plain tuple, so a call site keeps working if a
-  type migrates between the two forms. A **`record`** definition mints
+  type migrates between the two forms. A **`record`** definition auto-mints
   nothing — building one positionally would silently depend on the order its
   fields are written in — and calling such a name reports a
   `type-not-callable` warning, which is also what a declared type name in call
   position used to produce silently: an inert application that *looked* like a
-  working constructor. Nominal values are **opaque**: `let q: point = (1, 2)`
+  working constructor. Records are inhabited through **constructor
+  functions** instead: a `function` sharing a nominal type's name, declared
+  in the same scope after the type, is that type's constructor —
+  `type circle = record<x: number, y: number, r: number>` +
+  `function circle(x, y, r) { {x -> x, y -> y, r -> r} }` makes
+  `circle(1, 2, 3)` a value of type `circle`. The body computes the
+  *payload*, which the engine checks against the definition (for a record:
+  exactly the definition's keys, each field against its type) and tags. Not
+  record-specific — a constructor function replaces the automatic
+  constructor for any definition (the smart-constructor idiom: validation,
+  normalization, alternate parameterizations), and the installed operator is
+  an overload set of the user's arm plus an automatic **raw-injection** arm:
+  a single argument that already satisfies the definition tags directly,
+  body skipped, which is the spelling serialization emits — so round trips
+  inject the payload unchanged and a *normalizing* constructor's values
+  (`frac(2, 4)`, `frac(1, 2)`) construct **equal**. A user arm that is not
+  distinguishable from the payload (same arity, overlapping — or
+  unannotated — parameter types) is rejected at install rather than
+  silently shadowed. Recursive constructor bodies work (a constructed value
+  returned from the body passes through un-nested) — with one recorded
+  limitation inherited from a pre-existing engine defect: a *recursive* body
+  that returns a **record literal from an `if` branch** can leak the raw
+  parameter symbol, so such a payload is left unevaluated rather than
+  tagged; compute the fields with `If(…)` inside the record literal instead.
+  An alias's same-name function is just an ordinary function, and re-running
+  either statement replaces cleanly. Nominal values are **opaque**: `let q: point = (1, 2)`
   is refused, and `First(p)` or `let (x, y) = p` do not pierce the tag —
-  values come back out through `match p { point(x, y) => x + y }`. Equality is
+  named fields come back out through the new **`.` accessor** and values
+  through `match p { point(x, y) => x + y }`. `p.x` — a new postfix field
+  clause lowering to a new **`Field`** operator — reads one named field
+  through the type's definition (record bodies via the payload, named-tuple
+  bodies by position), and on plain records and dictionaries `d.x` is
+  exactly `d["x"]`, absence marker included; it deliberately does *not*
+  unlock collection access on nominal values, numbers never take a field
+  (`2.x` stays a multiplication, `1..5` stays a range), and `Field` compiles
+  where the underlying access compiles (a named-tuple nominal lowers to a
+  positional component access — a GLSL/WGSL swizzle, a JavaScript index —
+  and everything else keeps `At` parity, declines included). Equality is
   structural over the tag and constructors are injective, so
   `point(1, 2) == point(1, 2)` is `True` while `point(1, 2) == (1, 2)` and
   `polar(1, 2) == point(1, 2)` are `False`. The tag is **erased when

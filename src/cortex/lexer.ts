@@ -92,9 +92,10 @@ const RBRACE_ESCAPE = 0x7d; // }
 // or assign precedence (Phase 2). Comment sequences (`//`, `/*`) and the
 // number/string/bracket starters are handled before this set is consulted, so
 // including `/` here is safe. `.` is included so the range operator `..` lexes
-// as a single OPERATOR token; a bare `.` is not currently a valid operator (it
-// is diagnosed by the parser), and decimal literals are handled by `scanNumber`
-// before this set is consulted.
+// as a single OPERATOR token; a bare `.` is the field-access clause (`p.x`,
+// claimed by the parser's postfix loop), and decimal literals are handled by
+// `scanNumber` before this set is consulted (so `2.x` is the number `2.`
+// followed by `x` — a number never takes a field).
 const OPERATOR_CHARS = new Set(
   [...'+-*/^=<>!&|~:?%.'].map((c) => c.codePointAt(0)!)
 );

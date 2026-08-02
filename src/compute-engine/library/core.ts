@@ -68,7 +68,15 @@ import {
   withValueShield,
   withRandomSeedFrame,
   withDrawRollback,
+  updateDef,
 } from '../boxed-expression/utils.js';
+import {
+  checkTypeConstructorNamespace,
+  installConstructorFunction,
+  isMintedConstructor,
+  loosenMintedConstructor,
+} from '../type-constructors.js';
+import { assignValueAsOperatorDef } from '../engine-declarations.js';
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
   effectContractErrorValue,
@@ -1354,7 +1362,65 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             def.value.type = ce.type('function');
         }
 
-        const canonRhs = args[1].canonical;
+        // §4.5b D13/D15: loosen a minted constructor while the literal body
+        // canonicalizes — a constructor-function body's SELF-call must not
+        // validate against the strict pre-install signature (see
+        // `loosenMintedConstructor`). Restored immediately after; the install
+        // below then replaces the definition.
+        let restoreCtor: (() => void) | undefined = undefined;
+        if (symbolName !== undefined && isFunction(args[1], 'Function')) {
+          const scope = ce.context.lexicalScope;
+          if (scope.types?.[symbolName]?.def !== undefined)
+            restoreCtor = loosenMintedConstructor(ce, scope, symbolName);
+        }
+
+        let canonRhs: Expression;
+        try {
+          canonRhs = args[1].canonical;
+        } finally {
+          restoreCtor?.();
+        }
+
+        // §4.5b D13 (nominal-types design) — constructor-function recognition
+        // must ALSO run at canonicalization time, mirroring `DeclareType`'s
+        // canonical-time registration: the static pre-pass (and Block
+        // canonicalization) canonicalizes LATER statements before anything
+        // evaluates, and their calls must validate against the constructor's
+        // overload signature, not the auto-minted one. The evaluate-time
+        // assign path re-runs the same installation idempotently.
+        if (symbolName !== undefined && isFunction(canonRhs, 'Function')) {
+          const scope = ce.context.lexicalScope;
+          const t = scope.types?.[symbolName];
+          if (t?.def !== undefined) {
+            try {
+              if (t.alias !== true) {
+                checkTypeConstructorNamespace(
+                  scope,
+                  symbolName,
+                  'constructor-function'
+                );
+                installConstructorFunction(ce, scope, symbolName, t, canonRhs);
+              } else {
+                // An alias's same-name function is an ordinary function
+                // (§4.5); replacing the minted identity constructor early
+                // keeps later statements' arities honest.
+                const binding = scope.bindings.get(symbolName);
+                if (binding !== undefined && isMintedConstructor(binding)) {
+                  const fnDef = assignValueAsOperatorDef(ce, canonRhs);
+                  if (fnDef !== undefined) {
+                    updateDef(ce, symbolName, binding, fnDef);
+                    ce._mutationGeneration += 1;
+                  }
+                }
+              }
+            } catch {
+              // A conflict (D5 collision, D14a overlap) is diagnosed on the
+              // evaluate route, which runs the same recognition and throws
+              // with the full message; canonicalization stays silent.
+            }
+          }
+        }
+
         const result = ce._fn('Assign', [symbol, canonRhs]);
 
         return result;

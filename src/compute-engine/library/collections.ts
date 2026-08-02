@@ -25,7 +25,13 @@ import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // (collections → compile-expression → base-compiler → library/utils → collections)
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { ListType, Type } from '../../common/type/types.js';
+import {
+  DictionaryType,
+  ListType,
+  RecordType,
+  TupleType,
+  Type,
+} from '../../common/type/types.js';
 import {
   collectionElementType,
   functionResult,
@@ -510,6 +516,50 @@ const POINT_LIST_COMPILE_LANGUAGES: ReadonlySet<string> = new Set([
   'glsl',
   'wgsl',
 ]);
+
+/**
+ * The field-bearing shape behind a `Field` operand's static type: a `record`,
+ * a `dictionary`, or a tuple with NAMED elements — reached through type
+ * REFERENCES, both alias and nominal. Unfolding a nominal reference here is
+ * deliberate and is the whole point of `Field`: it is the nominal-types
+ * design's sanctioned accessor window (D6/§4.5b D16), dispatching off the
+ * type's definition body WITHOUT claiming any collection kind for the value
+ * (`First(p)`, `p["x"]`, destructuring keep rejecting).
+ */
+/** `'none'` = the type is SETTLED and bears no named fields (`number`, a
+ * list, an unnamed tuple, a scalar-bodied nominal…) — a static defect at a
+ * `Field` site, per the design ruling. `undefined` = genuinely indeterminate
+ * (`unknown`, an unresolved reference, an algebraic type) — stay symbolic. */
+function fieldBearingType(
+  t: Type
+): RecordType | TupleType | DictionaryType | 'none' | undefined {
+  const seen = new Set<Type>();
+  while (typeof t === 'object' && t.kind === 'reference') {
+    if (t.def === undefined || seen.has(t)) return undefined;
+    seen.add(t);
+    t = t.def;
+  }
+  if (typeof t === 'string') {
+    if (
+      t === 'unknown' ||
+      t === 'any' ||
+      t === 'expression' ||
+      t === 'missing' ||
+      // The BARE kinds are field-bearing but carry no field information.
+      t === 'record' ||
+      t === 'dictionary' ||
+      t === 'tuple'
+    )
+      return undefined;
+    return 'none';
+  }
+  if (t.kind === 'record' || t.kind === 'dictionary') return t;
+  if (t.kind === 'tuple')
+    return t.elements.some((x) => x.name !== undefined) ? t : 'none';
+  if (t.kind === 'union' || t.kind === 'intersection' || t.kind === 'negation')
+    return undefined;
+  return 'none';
+}
 
 /**
  * The TYPE-LEVEL absence marker for a value of type `t` (§3.C):
@@ -3278,6 +3328,127 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   //
   // Operations on indexed collections
   //
+
+  Field: {
+    description: [
+      'Access a named field of a value: `p.x` in Cortex.',
+      'On a record or dictionary value, `Field(d, "x")` behaves exactly as `d["x"]` (`At` semantics, including the absence marker for a key a dictionary may not have).',
+      'On a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p["x"]` keep rejecting.',
+      'A field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic.',
+    ],
+    complexity: 8200,
+    signature: '(value: any, field: string) -> unknown',
+    type: (ops) => {
+      const rt = fieldBearingType(ops[0].type.type);
+      if (rt === undefined) return 'unknown';
+      // A settled non-field-bearing operand type is a static defect.
+      if (rt === 'none') return 'error';
+      const name = isString(ops[1]) ? ops[1].string : undefined;
+      if (rt.kind === 'record') {
+        if (name !== undefined) {
+          // A record's key set is fixed: a known-absent field is a static
+          // defect, not an out-of-band access.
+          return rt.elements[name] ?? 'error';
+        }
+        return withMarker(widen(...Object.values(rt.elements)) as Type);
+      }
+      if (rt.kind === 'tuple') {
+        if (name !== undefined)
+          return rt.elements.find((x) => x.name === name)?.type ?? 'error';
+        return widen(...rt.elements.map((x) => x.type)) as Type;
+      }
+      // Dictionary: the key set is not part of the type — absence marker
+      // (`At` parity).
+      return withMarker(rt.values);
+    },
+    evaluate: ([base, field], { engine: ce }) => {
+      if (!isString(field)) return undefined;
+      const name = field.string;
+
+      // An ABSENT base propagates the marker, exactly as a chained `At` does
+      // (`d.zz.x` ≡ `d["zz"]["x"]` even through the miss).
+      if (isAbsentValue(base)) return base;
+
+      // A plain dictionary/record VALUE: exactly `d["x"]` — delegate to `At`
+      // so the two surfaces can never drift (absence markers included).
+      if (isDictionary(base)) return ce.function('At', [base, field]).evaluate();
+
+      const rt = fieldBearingType(base.type.type);
+      if (rt === undefined) return undefined; // unknown operand: stay symbolic
+      // A settled non-field-bearing operand: a static defect, surfaced as an
+      // error value on the evaluation route.
+      if (rt === 'none')
+        return ce.typeError(
+          parseType('record | dictionary | tuple'),
+          base.type,
+          base
+        );
+
+      if (rt.kind === 'record') {
+        // A tagged nominal value: the payload is the single dictionary
+        // operand of the tagged application.
+        if (isFunction(base) && base.ops.length === 1) {
+          const payload = base.ops[0];
+          if (isDictionary(payload)) {
+            // Dictionary entries are stored raw: canonicalize before
+            // evaluating.
+            const v = payload.get(name);
+            if (v !== undefined) return v.canonical.evaluate();
+            return ce.error(['unknown-field', name], base.toString());
+          }
+        }
+        return undefined;
+      }
+      if (rt.kind === 'tuple') {
+        const i = rt.elements.findIndex((x) => x.name === name);
+        if (i < 0) return ce.error(['unknown-field', name], base.toString());
+        // A tagged nominal value spreads its tuple payload inline
+        // (`["pt", 1, 2]`); a plain `Tuple` value has the same shape.
+        if (isFunction(base) && i < base.ops.length) return base.ops[i];
+        return undefined;
+      }
+      return undefined;
+    },
+    // §4.6/D16 compile lowering: positional index/swizzle for named-tuple
+    // NOMINAL operands; `At` parity for plain dictionary/record values; the
+    // dictionary payload of a record-bodied nominal has no compiled
+    // representation — decline.
+    compile: (args, compile, { language }) => {
+      const [base, field] = args;
+      if (base === undefined || !isString(field)) return undefined;
+      const name = field.string;
+      const t = base.type.type;
+      const rt = fieldBearingType(t);
+      if (rt === undefined || rt === 'none') return undefined;
+
+      const isNominal =
+        typeof t === 'object' && t.kind === 'reference' && t.alias !== true;
+      if (!isNominal) {
+        // Plain (or alias-typed) structural value: lower exactly as the
+        // equivalent `At` — same emissions, same declines. A named-tuple
+        // field lowers by POSITION (1-based `At`).
+        if (rt.kind === 'tuple') {
+          const i = rt.elements.findIndex((x) => x.name === name);
+          if (i < 0) return undefined;
+          return compile(base.engine.function('At', [base, base.engine.number(i + 1)]));
+        }
+        return compile(base.engine.function('At', [base, field]));
+      }
+
+      // Nominal named-tuple body: component access by POSITION — the nominal
+      // operand cannot route through `At` (its static gate rejects a
+      // non-collection), but its compiled representation IS the tuple's.
+      if (rt.kind === 'tuple') {
+        const i = rt.elements.findIndex((x) => x.name === name);
+        if (i < 0) return undefined;
+        if (language === 'javascript' || language === 'python')
+          return `${compile(base)}[${i}]`;
+        if ((language === 'glsl' || language === 'wgsl') && i < 4)
+          return `${compile(base)}.${'xyzw'[i]}`;
+      }
+      return undefined;
+    },
+  },
 
   At: {
     description: [

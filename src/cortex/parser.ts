@@ -77,7 +77,7 @@ type EffectSpecifier = { words: string[]; start: number; end: number };
 //
 //   primary    = number | symbol | verbatim-symbol | string | pragma
 //              | parenthesized | tuple | list | set | dictionary
-//   postfix    = primary ( call-clause | index-clause )*   // tightest
+//   postfix    = primary ( call-clause | index-clause | field-clause )*   // tightest
 //   unary      = prefix-op unary | postfix
 //   expression = unary (postfix-op | infix-op expression | invisible-multiply)*
 //   program    = shebang? (statement separator?)* EOF
@@ -2631,6 +2631,17 @@ export class Parser {
         expr = this.parseCall(expr);
       } else if (t.type === 'OPEN_BRACKET') {
         expr = this.parseIndex(expr);
+      } else if (
+        t.type === 'OPERATOR' &&
+        t.text === '.' &&
+        !isNumberNode(expr)
+      ) {
+        // A field clause `.name` — the dot must abut the base, exactly like
+        // the call and index clauses (`p .x` ends the expression). A number
+        // base never takes a field: the lexer folds a first trailing dot into
+        // the numeric literal (`2.x` is `2. * x`), and a second dot
+        // (`1.2.3`) keeps its historical unexpected-symbol diagnostic.
+        expr = this.parseField(expr);
       } else break;
     }
     return expr;
@@ -2666,6 +2677,29 @@ export class Parser {
       ['Apply', callee, ...values] as MathJsonExpression[],
       start,
       end
+    );
+  }
+
+  /** A field clause `.name` applied to `base` → `["Field", base, "name"]`.
+   * The field name is a symbol (or verbatim symbol); whitespace after the
+   * dot is tolerated (`p. x`), the dot itself must abut the base. Chains
+   * left-associate: `a.b.c` → `Field(Field(a, "b"), "c")`. Positional access
+   * (`t.1`) is NOT claimed — fields are names; positions are `t[1]`. */
+  private parseField(base: MathJsonExpression): MathJsonExpression {
+    const start = this.localStart(base) ?? this.current.start;
+    this.advance(); // '.'
+    const nameTok = this.current;
+    if (nameTok.type !== 'SYMBOL' && nameTok.type !== 'VERBATIM_SYMBOL') {
+      this.error(['symbol-expected'], nameTok.start, nameTok.end);
+      return base;
+    }
+    this.advance();
+    const name =
+      nameTok.type === 'VERBATIM_SYMBOL' ? (nameTok.value ?? '') : nameTok.text;
+    return this.wrap(
+      ['Field', base, { str: name }] as MathJsonExpression[],
+      start,
+      nameTok.end
     );
   }
 

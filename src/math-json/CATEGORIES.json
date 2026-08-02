@@ -148,6 +148,7 @@
       "Drop",
       "DropWhile",
       "Element",
+      "Field",
       "Fill",
       "Filter",
       "Find",

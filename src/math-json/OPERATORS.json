@@ -2341,6 +2341,18 @@
       "wikidata": "Q47577"
     },
     {
+      "name": "Field",
+      "category": "Collections",
+      "arity": "2",
+      "signature": "(value: any, field: string) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Access a named field of a value: `p.x` in Cortex.\n\nOn a record or dictionary value, `Field(d, \"x\")` behaves exactly as `d[\"x\"]` (`At` semantics, including the absence marker for a key a dictionary may not have).\n\nOn a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p[\"x\"]` keep rejecting.\n\nA field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic."
+    },
+    {
       "name": "Fill",
       "category": "Collections",
       "arity": "2",
