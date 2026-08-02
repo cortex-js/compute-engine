@@ -34,6 +34,9 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { multiClauseState } from '../multi-clause.js';
+import type { FunctionClause } from '../multi-clause.js';
+import { isMoreSpecific } from '../boxed-expression/overload.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
@@ -4322,7 +4325,10 @@ export class BaseCompiler {
     if (!registry) return undefined;
 
     const literal = BaseCompiler.userFunctionLiteral(engine, h);
-    if (literal === undefined) return undefined;
+    // A multi-clause function has no single literal — it compiles to a guard
+    // chain over its clause set (function-polymorphism design §8).
+    if (literal === undefined)
+      return BaseCompiler.tryEmitMultiClauseFunction(engine, h, target);
 
     // The generated code bakes this user function's current definition: record
     // it in the capture set (see `CompileTarget.symbolDeps`). Symbols its body
@@ -4358,40 +4364,8 @@ export class BaseCompiler {
       }
       registry.compiling.add(name);
       try {
-        const params = literal.ops
-          .slice(1)
-          .map((x) => functionLiteralParameterName(x) || '_');
-        // Compile the body with the parameters shadowing the target's `var`
-        // resolution (matching the `Function`-literal handler), so a parameter
-        // compiles to its bare name rather than a folded value or `_.<name>`.
-        // Compiling the body here may register nested user-function
-        // dependencies first, so they are emitted before this definition.
-        // The angular-unit rewrite is applied per emitted body: the entry
-        // points rewrite only the TOP-LEVEL expression tree, and this literal
-        // comes from the engine definition — without the rewrite here, a
-        // degree-mode compile of `t ↦ f(t)` emitted radian-based trig inside
-        // `f`'s definition while `t ↦ sin(t)` correctly scaled.
-        const bodyExpr = rewriteAngularUnit(literal.ops[0].canonical);
-        // Against the ROOT target — the one the registry was installed on —
-        // NOT the requesting one. An emitted definition is a module-level
-        // (preamble) function, so it must see only the compilation's own
-        // var/fold rules plus its own parameters. Chaining through the
-        // requester leaked that caller's bindings into this body: emitting
-        // `g` (whose body reads a global `z`) from inside `f(z) := g(1)`
-        // resolved `z` to `f`'s parameter. The registry, naming context and
-        // capture set are shared objects, so they survive the switch.
-        const root = registry.root ?? target;
-        const bodyTarget: CompileTarget<Expression> = {
-          ...root,
-          var: (id) => (params.includes(id) ? id : root.var(id)),
-          boundVars: BaseCompiler.withBoundNames(root, params),
-        };
-        // The body is emitted into the artifact, so its symbols join the
-        // compilation's collision inventory UNCONDITIONALLY — a `_tv1` in a
-        // definition body must not be shadowed by a generated temp even when
-        // CSE is off (the nested harvest below merges the same names, but only
-        // when a session is enabled).
-        BaseCompiler.mergeUsedNames(target, collectUsedNames(bodyExpr));
+        const { params, bodyExpr, bodyTarget } =
+          BaseCompiler.prepareUserFunctionBody(literal, target, registry);
         // A target with its own definition lowering (the shader targets)
         // synthesizes the signature and compiles the body itself — a shader
         // function body is a STATEMENT position and its declaration needs
@@ -4434,6 +4408,273 @@ export class BaseCompiler {
     }
 
     return name;
+  }
+
+  /**
+   * Prepare a function literal's body for emission as a preamble definition:
+   * the parameter names, the angular-unit-rewritten body, and the body's
+   * compile target.
+   *
+   * The body compiles with the parameters shadowing the target's `var`
+   * resolution (matching the `Function`-literal handler), so a parameter
+   * compiles to its bare name rather than a folded value or `_.<name>`.
+   * The angular-unit rewrite is applied per emitted body: the entry points
+   * rewrite only the TOP-LEVEL expression tree, and this literal comes from
+   * the engine definition — without the rewrite here, a degree-mode compile
+   * of `t ↦ f(t)` emitted radian-based trig inside `f`'s definition while
+   * `t ↦ sin(t)` correctly scaled.
+   *
+   * The body target chains to the ROOT target — the one the registry was
+   * installed on — NOT the requesting one. An emitted definition is a
+   * module-level (preamble) function, so it must see only the compilation's
+   * own var/fold rules plus its own parameters. Chaining through the
+   * requester leaked that caller's bindings into this body: emitting `g`
+   * (whose body reads a global `z`) from inside `f(z) := g(1)` resolved `z`
+   * to `f`'s parameter. The registry, naming context and capture set are
+   * shared objects, so they survive the switch.
+   *
+   * The body is emitted into the artifact, so its symbols join the
+   * compilation's collision inventory UNCONDITIONALLY — a `_tv1` in a
+   * definition body must not be shadowed by a generated temp even when CSE
+   * is off (the nested harvest merges the same names, but only when a
+   * session is enabled).
+   */
+  private static prepareUserFunctionBody(
+    literal: Expression & FunctionInterface,
+    target: CompileTarget<Expression>,
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>
+  ): {
+    params: string[];
+    bodyExpr: Expression;
+    bodyTarget: CompileTarget<Expression>;
+  } {
+    const params = literal.ops
+      .slice(1)
+      .map((x) => functionLiteralParameterName(x) || '_');
+    const bodyExpr = rewriteAngularUnit(literal.ops[0].canonical);
+    const root = registry.root ?? target;
+    const bodyTarget: CompileTarget<Expression> = {
+      ...root,
+      var: (id) => (params.includes(id) ? id : root.var(id)),
+      boundVars: BaseCompiler.withBoundNames(root, params),
+    };
+    BaseCompiler.mergeUsedNames(target, collectUsedNames(bodyExpr));
+    return { params, bodyExpr, bodyTarget };
+  }
+
+  /**
+   * Emit a **multi-clause** user function (function-polymorphism design §8)
+   * as a guard chain: one helper definition per clause plus a variadic
+   * dispatcher that tests the clauses in the **deterministic linearization**
+   * — more specific first, declaration order breaking ties, the same total
+   * order the runtime selector induces — and throws `no-matching-clause`
+   * (D7) when every clause refuses.
+   *
+   * v1 is JavaScript-only: the interval target shares this emission path but
+   * its runtime values are intervals (an `=== 0` guard is meaningless
+   * there), and lowering targets (the shader languages) cannot express the
+   * variadic dispatcher. A clause with any guard the target cannot express
+   * declines the WHOLE function — `undefined`, never a partial compilation
+   * (partial dispatch would silently change tie behavior). Declining
+   * surfaces the caller's standard fail-closed diagnostic and falls back to
+   * interpreted dispatch.
+   */
+  private static tryEmitMultiClauseFunction(
+    engine: ComputeEngine,
+    h: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const registry = target.userFunctions;
+    if (!registry) return undefined;
+
+    const state = multiClauseState(engine.lookupDefinition(h));
+    if (state === undefined) return undefined; // genuinely unknown operator
+
+    if (target.language !== 'javascript' || registry.lowering)
+      return undefined; // fail closed on non-JS targets (§8)
+
+    const name = BaseCompiler.userFunctionName(h);
+    if (registry.defs.has(name) || registry.compiling.has(name)) return name;
+
+    // ── Plan the chain BEFORE emitting anything (whole-function decline) ──
+    const clauses = state.clauses;
+    type ClausePlan = {
+      clause: FunctionClause;
+      literal: Expression & FunctionInterface;
+      arity: number;
+      /** Per-parameter guard sources over `a`, `null` = no test needed. */
+      guards: (string | null)[];
+    };
+    const plans: ClausePlan[] = [];
+    for (const clause of clauses) {
+      const sig = clause.signature;
+      // Optional/variadic clauses have no v1 guard spelling.
+      if ((sig.optArgs?.length ?? 0) > 0 || sig.variadicArg !== undefined)
+        return undefined;
+      if (!isFunction(clause.literal, 'Function')) return undefined;
+      const arity = sig.args?.length ?? 0;
+      if (clause.literal.ops.length - 1 !== arity) return undefined;
+      const guards: (string | null)[] = [];
+      for (let i = 0; i < arity; i++) {
+        const g = BaseCompiler.jsClauseParamGuard(sig.args![i].type, `_$a[${i}]`);
+        if (g === undefined) return undefined;
+        guards.push(g);
+      }
+      plans.push({ clause, literal: clause.literal, arity, guards });
+    }
+
+    // ── Deterministic linearization (§8): stable insertion, more specific
+    // first. Clauses of different arity are separated by the arity guard,
+    // and `isMoreSpecific` reports incomparable for them, so their relative
+    // (declaration) order is preserved. ──
+    const order: number[] = [];
+    for (let i = 0; i < plans.length; i++) {
+      let at = order.length;
+      for (let k = 0; k < order.length; k++) {
+        const j = order[k];
+        if (
+          plans[j].arity === plans[i].arity &&
+          isMoreSpecific(
+            plans[i].clause.signature,
+            plans[j].clause.signature,
+            plans[i].arity
+          )
+        ) {
+          at = k;
+          break;
+        }
+      }
+      order.splice(at, 0, i);
+    }
+
+    // The generated code bakes this function's current clause set: record it
+    // in the capture set (see `CompileTarget.symbolDeps`).
+    target.symbolDeps?.add(h);
+
+    registry.compiling.add(name);
+    try {
+      // One helper per clause, in declaration order. `$` cannot appear in a
+      // MathJSON symbol, so `_fn_f$c1` can never collide with the emitted
+      // name of another user function (`userFunctionName` sanitizes to
+      // `[\w$]` but user symbols never contain `$`).
+      const helperNames = plans.map((_, i) => `${name}$c${i + 1}`);
+      for (let i = 0; i < plans.length; i++) {
+        const { params, bodyExpr, bodyTarget } =
+          BaseCompiler.prepareUserFunctionBody(
+            plans[i].literal,
+            target,
+            registry
+          );
+        // A recursive clause body references `h` while `name` is in
+        // `compiling`, so the self-call emits `name` — bound by the time any
+        // call runs, since every def executes in the preamble first.
+        const body = BaseCompiler.withNestedCseHarvest(bodyExpr, bodyTarget, () =>
+          BaseCompiler.compile(bodyExpr, bodyTarget)
+        );
+        registry.defs.set(
+          helperNames[i],
+          `const ${helperNames[i]} = (${params.join(', ')}) => ${body};`
+        );
+      }
+
+      const branches = order.map((i) => {
+        const { arity, guards } = plans[i];
+        const tests = [
+          `_$a.length === ${arity}`,
+          ...guards.filter((g): g is string => g !== null),
+        ];
+        const args = Array.from({ length: arity }, (_, k) => `_$a[${k}]`);
+        return `if (${tests.join(' && ')}) return ${helperNames[i]}(${args.join(', ')});`;
+      });
+      registry.defs.set(
+        name,
+        `const ${name} = (..._$a) => { ${branches.join(' ')} throw new Error(${JSON.stringify(`no-matching-clause: ${h}`)}); };`
+      );
+    } finally {
+      registry.compiling.delete(name);
+    }
+    return name;
+  }
+
+  /**
+   * The JavaScript guard testing that `a` satisfies parameter type `t`:
+   * a source string, `null` when no test is needed (the parameter admits
+   * anything), or `undefined` when the type has **no faithful JS test** —
+   * the §8 whole-function decline. Guard kinds mirror the runtime admission
+   * (`typeAcceptsValue`/`admissionOf`) on the target's value model:
+   * value types → `===` (faithful for the machine numbers, strings and
+   * booleans compiled code traffics in; `NaN` inhabits no value type, so a
+   * NaN-valued type is the constant `false`); numeric ranges → base guard
+   * plus inclusive bound checks (a NaN argument fails `>=`, as it should);
+   * primitives → `typeof`/`Number.isInteger` where JS can express them.
+   * Note `number` admits the engine's complex values, which the JS calling
+   * convention represents as `{re, im}` objects that a `typeof` test
+   * refuses — complex-valued dispatch is not compiled in v1.
+   */
+  private static jsClauseParamGuard(
+    t: Type,
+    a: string
+  ): string | null | undefined {
+    if (typeof t === 'string') {
+      switch (t) {
+        case 'unknown':
+        case 'any':
+          return null;
+        case 'integer':
+        case 'finite_integer':
+          return `Number.isInteger(${a})`;
+        case 'real':
+          return `(typeof ${a} === "number" && !Number.isNaN(${a}))`;
+        case 'finite_real':
+          return `Number.isFinite(${a})`;
+        case 'number':
+          return `typeof ${a} === "number"`;
+        case 'string':
+          return `typeof ${a} === "string"`;
+        case 'boolean':
+          return `typeof ${a} === "boolean"`;
+        default:
+          return undefined;
+      }
+    }
+    switch (t.kind) {
+      case 'value': {
+        const v = t.value;
+        if (typeof v === 'number') {
+          if (Number.isNaN(v)) return 'false'; // D1: NaN inhabits no value type
+          return `${a} === ${v === Infinity ? 'Infinity' : v === -Infinity ? '-Infinity' : String(v)}`;
+        }
+        if (typeof v === 'string') return `${a} === ${JSON.stringify(v)}`;
+        if (typeof v === 'boolean') return `${a} === ${v}`;
+        return undefined;
+      }
+      case 'numeric': {
+        let base: string;
+        if (t.type === 'integer' || t.type === 'finite_integer')
+          base = `Number.isInteger(${a})`;
+        else if (t.type === 'real' || t.type === 'finite_real')
+          base = `typeof ${a} === "number"`;
+        else return undefined; // rational &c.: no faithful JS test
+        const parts = [base];
+        if (typeof t.lower === 'number' && t.lower !== -Infinity)
+          parts.push(`${a} >= ${String(t.lower)}`);
+        if (typeof t.upper === 'number' && t.upper !== Infinity)
+          parts.push(`${a} <= ${String(t.upper)}`);
+        return `(${parts.join(' && ')})`;
+      }
+      case 'union': {
+        const parts: string[] = [];
+        for (const branch of t.types) {
+          const g = BaseCompiler.jsClauseParamGuard(branch, a);
+          if (g === undefined) return undefined;
+          if (g === null) return null; // a branch admits everything
+          parts.push(g);
+        }
+        return `(${parts.join(' || ')})`;
+      }
+      default:
+        return undefined;
+    }
   }
 
   /**

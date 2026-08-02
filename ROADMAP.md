@@ -158,6 +158,13 @@ ours — 202/69 — and they corrected it in review. Use 82/25.)
   closed where function-mapped ones (`Sin`, `Abs`, `Floor`, `Ln`) broadcast. _In
   progress 2026-07-30._
 
+- **Multi-clause user functions** (feature-parity note, 2026-08-02, no corpus
+  sizing yet): the §8 guard chain compiles on the **JavaScript target only**.
+  The interval, GLSL/WGSL and Python targets decline the whole function (fail
+  closed, interpreted fallback). Interval needs interval-aware guards; the
+  shader targets need a monomorphized (per-call-site arity) lowering since
+  they have no variadic dispatch.
+
 **GLSL/WGSL band** (204 members / 90 states compile on JS but not GPU — the
 GPU→CPU demotion class). Buckets triaged below.
 

@@ -503,6 +503,20 @@
   unreachable by more specific clauses covering their whole finite
   domain ("unreachable (covered)").
 
+  Multi-clause functions also **compile** (JavaScript target): the clause
+  set lowers to a guard chain — one emitted helper per clause plus a
+  dispatcher testing arity, value equality, numeric-range bounds and
+  primitive type guards in most-specific-first order (declaration order
+  breaking ties, the same total order the runtime selector uses), so
+  compiled and interpreted dispatch agree by construction. Recursive
+  clause sets (`fib`) compile to true self-reference through the
+  dispatcher. A compiled call that no clause admits throws
+  `no-matching-clause` (the compiled face of the interpreter's error
+  value). A clause with a guard the target cannot express — e.g. a
+  `rational` parameter — declines the **whole** function to the
+  interpreted fallback (no partial compilation, which would change tie
+  behavior), and the interval, shader and Python targets fail closed.
+
 - **Programs can now declare their own types — and inhabit them.** A new
   Cortex `type` statement comes in two forms:
   `type point = tuple<x: number, y: number>` declares a **nominal** type — a

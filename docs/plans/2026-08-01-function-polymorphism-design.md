@@ -601,6 +601,29 @@ and D8 (no partial application), and offered as the alternative in D4.1
   type-compatibility errors from the delegated assign convert to error
   VALUES in `DefineFunction`'s evaluate, same as the `Assign` operator.
 - **Phase 3 — compile**: guard-chain emission (§8) + parity tests.
+  **IMPLEMENTED 2026-08-02** (JavaScript target). Notes: (1) emission lives
+  in `base-compiler.ts` (`tryEmitMultiClauseFunction`, reached from
+  `ensureUserFunctionEmitted` when the definition has no single literal):
+  one preamble helper per clause (`_fn_f$c1`, … — `$` cannot occur in a
+  MathJSON symbol, so helper names cannot collide with other emitted user
+  functions) plus a variadic dispatcher `_fn_f = (..._$a) => …` testing
+  arity + per-parameter guards in the stable-insertion linearization;
+  recursion works through the dispatcher via the existing
+  `registry.compiling` mechanism. (2) Guard kinds: value types → `===`
+  (NaN-valued type → constant `false`, infinities → `=== Infinity`);
+  numeric ranges → base guard + inclusive bounds; `integer`/`real`/
+  `finite_*`/`number`/`string`/`boolean` → `typeof`/`Number.isInteger`
+  guards; `unknown`/`any` → no guard; unions of the above; anything else
+  (e.g. `rational`, collections) declines the WHOLE function — which
+  surfaces as the standard fail-closed diagnostic and interpreted
+  fallback. (3) Non-JS targets decline: the interval target shares the
+  generic emission path but its values are intervals (a `===` guard is
+  meaningless), shader targets have no variadic dispatch, Python has no
+  user-function registry — see the ROADMAP compile-coverage ledger.
+  (4) Call-site machinery degrades safely: `userFunctionParamType`
+  returns `undefined` on the intersection signature, so complex coercion
+  and the broadcast wrapper simply don't engage; the higher-order
+  value-position path (`Map(list, f)`) references the shared dispatcher.
 
 Sequencing: after the Cortex `type` statement (shipped, unstaged);
 independent of the generics phases (but see D4). §4.7's constructor
