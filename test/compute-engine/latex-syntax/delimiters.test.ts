@@ -271,11 +271,9 @@ describe('DELIMITERS', () => {
     // A trig-function application is likewise indexable (was an error before).
     expect(raw('\\sin(x)[1]')).toEqual('["At",["Sin","x"],1]');
 
-    // Chained indexing stays unsupported, matching the symbol path `x[1][2]`:
-    // the second bracket falls on an `At` LHS and is left unexpected.
-    expect(raw('f(x)[1][2]')).toEqual(
-      '["Sequence",["At",["f","x"],1],["Error","\'unexpected-operator\'",["LatexString","\'[\'"]]]'
-    );
+    // Chained indexing nests: the second bracket applies to the `At` LHS,
+    // matching the symbol path `x[1][2]`.
+    expect(raw('f(x)[1][2]')).toEqual('["At",["At",["f","x"],1],2]');
 
     // Guard-rail: an UNDECLARED juxtaposition (`g(x)`) is NOT a function
     // application — it parses to `InvisibleOperator` and the bracket binds to

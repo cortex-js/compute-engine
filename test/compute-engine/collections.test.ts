@@ -864,10 +864,15 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
   test('At with negative index', () =>
     expect(evaluate(['At', list, -2])).toMatchInlineSnapshot(`3`));
 
-  test('At with multi-index on 1D list (stays symbolic)', () =>
-    expect(evaluate(['At', list, 1, 2])).toMatchInlineSnapshot(
-      `["At", ["List", 7, 13, 5, 19, 2, 3, 11], 1, 2]`
-    )); // 1D list can't be double-indexed, stays symbolic
+  test('At with multi-index on 1D list errors (incompatible-dimensions)', () =>
+    expect(evaluate(['At', list, 1, 2])).toMatchInlineSnapshot(`
+      [
+        "Error",
+        "incompatible-dimensions",
+        "2 indices vs 1-dimensional collection"
+      ]
+    `)); // BREAKING (Tycho item 129): a 1D list can't be double-indexed. This
+  // used to stay inert (silently wrong values downstream); it now fails fast.
 
   test('At with multi-index on 2D matrix', () =>
     expect(evaluate(['At', matrix, 1, 2])).toMatchInlineSnapshot(`3`)); // Row 1, Column 2 → 3

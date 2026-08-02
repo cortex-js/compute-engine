@@ -31,6 +31,68 @@ describe('Parser: list range ellipsis', () => {
     });
   });
 
+  // The range infixes (`..`, `...`, `\ldots`, `\dots`) bind above `+` so that a
+  // sign or coefficient attaches to the anchor. That makes a COMPOUND first
+  // anchor mis-bind: `[m+n...m+n+4]` parses as `Add(m, Range(n, m+n+4))`. Inside
+  // a bracket the single-element body is repaired back to the intended two
+  // anchors (Tycho item 129).
+  describe('endpoint-only form with a compound first anchor', () => {
+    test('`[m+n...m+n+4]` → Range(m+n, m+n+4)', () => {
+      expect(parse('\\left[m+n...m+n+4\\right]')).toEqual([
+        'Range',
+        ['Add', 'm', 'n'],
+        ['Add', 'm', 'n', 4],
+      ]);
+    });
+
+    test('`[n+1...10]` → Range(n+1, 10)', () => {
+      expect(parse('\\left[n+1...10\\right]')).toEqual([
+        'Range',
+        ['Add', 'n', 1],
+        10,
+      ]);
+    });
+
+    test('`[m-1...m+3]` (subtraction anchor) → Range(m-1, m+3)', () => {
+      expect(parse('\\left[m-1...m+3\\right]')).toEqual([
+        'Range',
+        ['Add', 'm', -1],
+        ['Add', 'm', 3],
+      ]);
+    });
+
+    test('the `..` infix variant repairs the same way', () => {
+      expect(parse('\\left[m+n..m+n+4\\right]')).toEqual([
+        'Range',
+        ['Add', 'm', 'n'],
+        ['Add', 'm', 'n', 4],
+      ]);
+    });
+
+    // Provenance guard: an explicit `\operatorname{Range}(…)` in an additive
+    // tail is a literal element, not a continuation — no repair.
+    test('`[m+\\operatorname{Range}(1,5)]` stays a List', () => {
+      expect(parse('\\left[m+\\operatorname{Range}(1,5)\\right]')).toEqual([
+        'List',
+        ['Add', 'm', ['Range', 1, 5]],
+      ]);
+    });
+
+    // Unchanged: plain numeric anchors never went through the repair.
+    test('`[2...8]` → Range(2, 8)', () => {
+      expect(parse('\\left[2...8\\right]')).toEqual(['Range', 2, 8]);
+    });
+
+    test('`[-9...9]` → Range(-9, 9)', () => {
+      expect(parse('[-9...9]')).toEqual(['Range', -9, 9]);
+    });
+
+    // Unchanged: a single-element bracket with no range at all stays a List.
+    test('`[x+1]` stays a one-element List', () => {
+      expect(parse('\\left[x+1\\right]')).toEqual(['List', ['Add', 'x', 1]]);
+    });
+  });
+
   // Comma-less forms with a compound first sample: the prose ellipsis binds
   // looser than a prefix sign or implicit multiplication, so `[-9...9]` is
   // Range(-9, 9), not List(Negate(Range(9, 9))). (Desmos emits these

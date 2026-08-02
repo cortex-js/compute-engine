@@ -292,13 +292,16 @@ describe('CONTRACT 2b: non-canonical .latex round-trip fidelity', () => {
     });
   });
 
-  // --- exception class (ii): a[2][3] fails loudly at nc parse ------------
-  test('exception (ii): a[2][3] fails loudly (produces an Error node) at nc parse', () => {
+  // --- former exception class (ii): a[2][3] round-trips ------------------
+  // CLOSED by chained postfix indexing: a bracket group following an `At`
+  // nests (`a[2][3]` → `At(At(a,2),3)`) and serializes back to `a[2][3]`.
+  test('former exception (ii): a[2][3] parses to a nested At and round-trips', () => {
     const ce = new ComputeEngine();
     const e = ce.parse('a[2][3]', { canonical: false });
-    // The failure is visible in the parse output, not silently accepted.
-    expect(J(e.json)).toContain('Error');
-    expect(e.errors.length).toBeGreaterThan(0);
+    expect(J(e.json)).toBe(J(['At', ['At', 'a', 2], 3]));
+    expect(e.errors.length).toBe(0);
+    expect(e.latex).toBe('a[2][3]');
+    expect(J(ce.parse(e.latex, { canonical: false }).json)).toBe(J(e.json));
   });
 
   // --- exception class (iii): stable fixed point after one round-trip ----

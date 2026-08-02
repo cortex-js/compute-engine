@@ -122,7 +122,10 @@ import {
   variance,
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
-import { adaptiveQuadrature } from '../numerics/gauss-kronrod.js';
+import {
+  adaptiveQuadrature,
+  quadratureBeatsMonteCarlo,
+} from '../numerics/gauss-kronrod.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { interval } from '../numerics/interval.js';
 import { withRandomSeedFrame } from '../boxed-expression/utils.js';
@@ -4000,11 +4003,14 @@ const SYS_HELPERS = {
   },
   // Definite integral via deterministic adaptive Gauss–Kronrod (GK15) — near
   // machine precision on smooth integrands, µs-scale. On non-convergence
-  // (pathological integrand), fall back to the Monte-Carlo estimator. See
-  // `compileIntegrate`.
+  // (pathological integrand), fall back to the Monte-Carlo estimator — but only
+  // when sampling could actually improve on the quadrature bound
+  // (`quadratureBeatsMonteCarlo`): an inner level of an iterated integral pays
+  // this fallback once per OUTER node, so 1e7 samples of a stalled-but-accurate
+  // result is minutes spent making the answer worse. See `compileIntegrate`.
   integrate: (f: (x: number) => number, a: number, b: number) => {
     const r = adaptiveQuadrature(f, a, b);
-    if (r.converged) return r.estimate;
+    if (r.converged || quadratureBeatsMonteCarlo(r, 10e6)) return r.estimate;
     return monteCarloEstimate(f, a, b, 10e6).estimate;
   },
   // Definite integral via Monte-Carlo (1e7 uniform samples). STOCHASTIC and

@@ -176,6 +176,44 @@ export function initialPanelsForDimensions(dimensions: number): number {
 }
 
 /**
+ * Whether a NON-converged adaptive-quadrature result should still be preferred
+ * over the Monte-Carlo fallback that every caller keeps for it.
+ *
+ * `converged: false` means "GK15 did not reach `rtol` (1e-10) within its panel
+ * budget" — it does NOT mean the result is bad. A budget-exhausted panel set
+ * routinely carries a residual error bound many orders of magnitude tighter
+ * than anything sampling can reach: the Monte-Carlo estimator's own noise floor
+ * is its standard error, ~`1/√n` relative (≈3e-4 at `n = 1e7`, ≈1e-2 at
+ * `n = 1e4`). Handing such a result to Monte Carlo replaces a MORE accurate
+ * answer with a less accurate one, and pays `n` integrand evaluations to do it.
+ *
+ * That trade is merely wasteful when one integrand evaluation is a few
+ * nanoseconds of compiled arithmetic, and catastrophic when it is itself a
+ * quadrature: for an iterated integral whose outer level stalls at 1e-8, the
+ * fallback runs 1e7 inner quadratures — ~8 minutes — to turn a `± 3e-8` answer
+ * into a `± 1e-3` one. The sample budget is picked from whether the integrand
+ * COMPILED, never from what one sample costs, so nesting multiplies it.
+ *
+ * So reserve the fallback for results Monte Carlo could actually improve: a
+ * non-finite estimate, or an error bound no better than the sampler's floor.
+ * A near-zero estimate has no relative scale to compare against and keeps the
+ * historical fallback.
+ *
+ * @param monteCarloSamples the sample count the caller would spend on the
+ * fallback — the floor is `1/√n` relative, so a smaller budget accepts a looser
+ * quadrature bound.
+ */
+export function quadratureBeatsMonteCarlo(
+  r: { estimate: number; error: number },
+  monteCarloSamples: number
+): boolean {
+  if (!Number.isFinite(r.estimate) || !Number.isFinite(r.error)) return false;
+  const scale = Math.abs(r.estimate);
+  if (!(scale > 0)) return false;
+  return r.error <= scale / Math.sqrt(monteCarloSamples);
+}
+
+/**
  * Adaptive GK15 over a finite interval `[a, b]`.
  */
 function adaptiveFinite(

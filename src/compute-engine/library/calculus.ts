@@ -43,6 +43,7 @@ import { mixTags } from '../numerics/random.js';
 import {
   adaptiveQuadrature,
   initialPanelsForDimensions,
+  quadratureBeatsMonteCarlo,
 } from '../numerics/gauss-kronrod.js';
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
 import {
@@ -339,6 +340,10 @@ function nIntegrateMultiple(
       initialPanels: initialPanelsForDimensions(limits.length),
     });
     if (gk.converged && Number.isFinite(gk.estimate)) return gk;
+    // A stalled level whose error bound already beats the sampler keeps its
+    // quadrature result: sampling it would be both less accurate and, since
+    // every inner level re-runs per outer node, far more expensive.
+    if (quadratureBeatsMonteCarlo(gk, 1e4)) return gk;
     return monteCarloEstimate(g, lower, upper, 1e4, ce._deadline, draw);
   };
 
@@ -1418,10 +1423,17 @@ volumes
           // transformable (semi-infinite / doubly-infinite) bounds — near
           // machine precision on smooth integrands, and matches the compiled
           // integration path. Falls through to Monte Carlo only when it fails
-          // to converge (endpoint singularities, oscillatory tails).
+          // to converge (endpoint singularities, oscillatory tails) AND the
+          // sampler could actually do better — a stalled panel budget still
+          // routinely carries a tighter bound than 1e7 samples can reach, and
+          // for an expensive integrand (an inner quadrature, a compiled model)
+          // those samples cost minutes.
           if (compiled?.success) {
             const gk = adaptiveQuadrature(jsf, lower, upper);
-            if (gk.converged && Number.isFinite(gk.estimate))
+            if (
+              (gk.converged || quadratureBeatsMonteCarlo(gk, 1e7)) &&
+              Number.isFinite(gk.estimate)
+            )
               return ce.expr([
                 'Measurement',
                 ce.number(gk.estimate),

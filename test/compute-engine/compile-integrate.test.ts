@@ -4,6 +4,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import {
   adaptiveQuadrature,
   initialPanelsForDimensions,
+  quadratureBeatsMonteCarlo,
 } from '../../src/compute-engine/numerics/gauss-kronrod';
 
 /** Compile a parsed LaTeX definite integral to a real-valued runner. */
@@ -684,5 +685,66 @@ describe('COMPILE — `Nothing` is never emitted as a variable reference', () =>
     );
     expect(r.success).toBe(true);
     expect(r.run({ Nothing: 3, x: 2 }) as number).toBe(6);
+  });
+});
+
+// Regression (Tycho item 128): a nested numeric quadrature ran ~300 s where the
+// honest cost is ~1 s. `converged: false` from adaptive GK15 means only "did
+// not reach rtol = 1e-10 within the panel budget", but every caller read it as
+// "GK failed" and replaced the result with a Monte-Carlo estimate — whose own
+// noise floor (~1/√n) is orders of magnitude WORSE than the bound GK reported,
+// and which costs `n` integrand evaluations. When one evaluation is itself a
+// quadrature (an iterated integral), that is 1e7 inner quadratures to make the
+// answer less accurate.
+describe('quadratureBeatsMonteCarlo (Tycho item 128)', () => {
+  test('a stalled-but-tight result is preferred over sampling', () => {
+    // The witness: GK stalls at 1e-8 relative on an integrand Monte Carlo can
+    // only reach ~3e-4 on.
+    expect(
+      quadratureBeatsMonteCarlo({ estimate: 4.0621, error: 3e-8 }, 1e7)
+    ).toBe(true);
+  });
+
+  test('a bound no better than the sampler floor still falls back', () => {
+    // 1e7 samples ⇒ ~3.2e-4 relative floor; a 1e-2 relative bound is worse.
+    expect(
+      quadratureBeatsMonteCarlo({ estimate: 4.0621, error: 4e-2 }, 1e7)
+    ).toBe(false);
+    // The threshold tracks the sample count — a larger budget is a finer floor,
+    // so it is strictly harder to beat. A 1e-3 relative bound clears a
+    // 1e4-sample fallback (floor 1e-2) but not a 1e7-sample one (floor 3.2e-4).
+    expect(quadratureBeatsMonteCarlo({ estimate: 1, error: 1e-3 }, 1e4)).toBe(
+      true
+    );
+    expect(quadratureBeatsMonteCarlo({ estimate: 1, error: 1e-3 }, 1e7)).toBe(
+      false
+    );
+  });
+
+  test('a non-finite result always falls back', () => {
+    expect(quadratureBeatsMonteCarlo({ estimate: NaN, error: 1e-12 }, 1e7)).toBe(
+      false
+    );
+    expect(
+      quadratureBeatsMonteCarlo({ estimate: 1, error: Infinity }, 1e7)
+    ).toBe(false);
+  });
+
+  test('a near-zero estimate has no relative scale and keeps the fallback', () => {
+    expect(quadratureBeatsMonteCarlo({ estimate: 0, error: 0.5 }, 1e7)).toBe(
+      false
+    );
+  });
+
+  test('∫₀¹ sin(1/x) dx keeps the accurate quadrature value', () => {
+    // GK15 cannot reach 1e-10 on this infinitely-oscillating integrand and
+    // reports `converged: false` with a ±5e-5 bound around a value good to
+    // 6e-7. The Monte-Carlo fallback it used to trigger returned ±2e-4 (and a
+    // DIFFERENT value each run) after ~800 ms of sampling.
+    const exact = Math.sin(1) - 0.3374039229009681; // sin(1) − Ci(1)
+    const local = new ComputeEngine();
+    const r = local.parse('\\int_0^1 \\sin(1/x)\\,dx').N();
+    const value = r.operator === 'Measurement' ? r.op1.re : r.re;
+    expect(value).toBeCloseTo(exact, 5);
   });
 });

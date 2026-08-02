@@ -3783,7 +3783,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
         const def = expr.baseDefinition;
         const at = def?.collection?.at;
-        if (!at) return undefined;
+        if (!at) {
+          // The current value offers no element access. When at least one
+          // index has already been consumed and the value is PROVABLY not
+          // indexable — `At([10,20,30], 1, 2)`, whose first step yields the
+          // scalar `10` — the remaining indices can never be consumed. Report
+          // a dimension mismatch instead of silently returning the inert
+          // expression, which let a mis-parse flow on as a plausible value.
+          // A value that could still resolve to a collection at runtime (an
+          // unbound symbol, an `unknown`-typed intermediate) keeps `At`
+          // unevaluated, as before.
+          if (
+            index > 1 &&
+            !expr.type.couldMatch('indexed_collection') &&
+            !expr.type.couldMatch('dictionary')
+          )
+            return ce.error(
+              'incompatible-dimensions',
+              `${ops.length - 1} indices vs ${index - 1}-dimensional collection`
+            );
+          return undefined;
+        }
 
         // Case A: string key (dictionary-style access).
         const s = isString(opAtIndex) ? opAtIndex.string : undefined;

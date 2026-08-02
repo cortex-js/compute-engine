@@ -538,14 +538,17 @@ describe('Comprehension (interpreter)', () => {
     expect([...comp.each()].map((e) => e.json)).toEqual([100, 200, 300, 400, 500]);
   });
 
-  test('multi-index At(flatList, i, range) is inert (no second dimension) — standalone and in a comprehension', () => {
+  // BREAKING (Tycho item 129): indexing a 1-dimensional collection with two or
+  // more indices used to stay inert, which silently produced wrong values
+  // downstream. It now fails fast with an `incompatible-dimensions` error.
+  test('multi-index At(flatList, i, range) errors (no second dimension) — standalone and in a comprehension', () => {
     ce.assign('P', ce.box(['Range', 1, 30]));
     // Standalone: a flat list has no second dimension for the range, so `At`
-    // correctly declines to reduce and stays symbolic.
+    // reports the dimension mismatch instead of staying symbolic.
     const standalone = ce.box(['At', 'P', 1, ['Range', 3, 8]]).evaluate();
-    expect(standalone.operator).toBe('At');
-    // In a comprehension, the index `n` is substituted but the multi-index
-    // `At` stays inert for the same reason — matching the standalone form.
+    expect(standalone.operator).toBe('Error');
+    // In a comprehension, the index `n` is substituted and each element hits
+    // the same dimension mismatch — matching the standalone form.
     const comp = ce.box([
       'Comprehension',
       ['At', 'P', 'n', ['Add', 'n', ['Range', 2, ['Add', 'n', 6]]]],
@@ -553,6 +556,6 @@ describe('Comprehension (interpreter)', () => {
     ]);
     const els = [...comp.each()];
     expect(els.length).toBe(3);
-    expect(els.every((e) => e.operator === 'At')).toBe(true);
+    expect(els.every((e) => e.operator === 'Error')).toBe(true);
   });
 });

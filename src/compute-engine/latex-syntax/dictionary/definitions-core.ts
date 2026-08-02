@@ -3264,6 +3264,17 @@ function parseBrackets(
     }
   }
 
+  // A single-element body with a two-anchor continuation range mis-bound into
+  // an additive chain: `[m+n...m+n+4]` parses as `Add(m, Range(n, m+n+4))`
+  // because the range infix binds tighter than `+` on its LHS. Recover the
+  // intended `Range(m+n, m+n+4)`. The `continuationRanges` provenance guard
+  // inside `stripEmbeddedContinuationRange` keeps an explicit
+  // `\operatorname{Range}(…)` in an additive tail a literal `List` entry.
+  if (body !== null && body !== undefined) {
+    const stripped = stripEmbeddedContinuationRange(body);
+    if (stripped) return ['Range', stripped.sample, stripped.end];
+  }
+
   return ['List', body];
 }
 
@@ -4721,11 +4732,9 @@ function isParenGroupDelimiter(lhs: MathJsonExpression): boolean {
 }
 
 /** Compound heads that can reach `parseAt` as an LHS but are NOT function
- * applications, so they must not be indexed here. `Delimiter` and `List` are
- * accepted through their own gates; the rest are structural: a bare
- * `Sequence`, an `InvisibleOperator` juxtaposition product, an `Error`, or an
- * already-built `At` (chained indexing is unsupported, matching the symbol
- * path `x[1][2]`). */
+ * applications, so they must not be indexed here. `Delimiter`, `List` and
+ * `At` are accepted through their own gates; the rest are structural: a bare
+ * `Sequence`, an `InvisibleOperator` juxtaposition product, or an `Error`. */
 const NON_APPLICATION_HEADS = new Set([
   'Delimiter',
   'List',
@@ -4766,9 +4775,12 @@ function parseAt(
     // `x+1[2]` binds the bracket to its last operand via precedence, so
     // `Add(x,1)` never reaches us. The Delimiter is left intact and unwrapped
     // to a `Tuple`/inner expression by canonicalization.
+    // An already-built `At` is also indexable: postfix index chains nest,
+    // `X[a][b]` → `At(At(X, a), b)`, to any depth.
     if (
       !symbol(lhs) &&
       operator(lhs) !== 'List' &&
+      operator(lhs) !== 'At' &&
       !isParenGroupDelimiter(lhs) &&
       !isFunctionApplication(lhs)
     )

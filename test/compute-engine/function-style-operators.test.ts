@@ -274,6 +274,79 @@ describe('Distance', () => {
   });
 });
 
+// Tycho item 130: a symbol declared at the point-or-point-list union (how
+// imported Desmos point values are typed) must pass `Distance`'s call
+// boundary, as it already does for `Norm`/`PointX`. Declared-type checking
+// stays strict (item 92: no narrowing through the assigned value), so the
+// parameter type itself has to admit the union.
+describe('Distance accepts a union-declared point (item 130)', () => {
+  const T3 = 'tuple<number, number, number>';
+  const UNION3 = `${T3} | list<${T3}>`;
+
+  // A fresh engine: these declarations must not leak into the shared `ce`.
+  // NOTE: do not name the symbol with a single uppercase letter — such a name
+  // is devolved by `devolveUnappliedOperator` and skips the check entirely.
+  const makeEngine = () => {
+    const e = new ComputeEngine();
+    e.declare('pt', UNION3 as any);
+    e.assign('pt', e.box(['Tuple', 3, 4, 12]));
+    e.declare('qt', UNION3 as any);
+    e.assign('qt', e.box(['Tuple', 0, 0, 0]));
+    return e;
+  };
+
+  test('Distance(pt, qt) with both operands union-declared', () => {
+    const e = makeEngine();
+    expect(e.box(['Distance', 'pt', 'qt']).evaluate().re).toBe(13);
+  });
+
+  test('Distance(pt, (0,0,0)) with a union-declared operand', () => {
+    const e = makeEngine();
+    expect(
+      e.box(['Distance', 'pt', ['Tuple', 0, 0, 0]]).evaluate().re
+    ).toBe(13);
+  });
+
+  test('Norm and PointX still accept the union', () => {
+    const e = makeEngine();
+    expect(e.box(['Norm', 'pt']).evaluate().re).toBe(13);
+    expect(e.box(['PointX', 'pt']).evaluate().re).toBe(3);
+  });
+
+  test('plain tuple operands are unaffected', () => {
+    const e = makeEngine();
+    expect(
+      e
+        .box(['Distance', ['Tuple', 3, 4, 12], ['Tuple', 0, 0, 0]])
+        .evaluate().re
+    ).toBe(13);
+    // 2-D, and the exact path
+    expect(
+      e.box(['Distance', ['Tuple', 0, 0], ['Tuple', 3, 4]]).evaluate().re
+    ).toBe(5);
+    expect(
+      e.box(['Distance', ['Tuple', 0, 0], ['Tuple', 1, 1]]).evaluate().toString()
+    ).toBe('sqrt(2)');
+  });
+
+  test('an actual list of points is a clean runtime error, not a crash', () => {
+    const e = makeEngine();
+    e.declare('ptl', `list<${T3}>` as any);
+    e.assign(
+      'ptl',
+      e.box(['List', ['Tuple', 3, 4, 12], ['Tuple', 1, 2, 2]])
+    );
+    expect(
+      e.box(['Distance', 'ptl', ['Tuple', 0, 0, 0]]).evaluate().operator
+    ).toBe('Error');
+  });
+
+  test('non-point operands are still rejected at the call boundary', () => {
+    const e = makeEngine();
+    expect(e.box(['Distance', 3, 4]).evaluate().operator).toBe('Error');
+  });
+});
+
 describe('Geometric primitive heads (opaque)', () => {
   test('Triangle is recognized but not evaluated', () => {
     const expr = ce.expr(['Triangle', 1, 2, 3]);

@@ -3182,7 +3182,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     Distance: {
       description: 'Euclidean distance between two points (tuples of numbers).',
       complexity: 6000,
-      signature: '(tuple, tuple) -> number',
+      // The parameter admits `list<tuple>` as well as `tuple` so that a symbol
+      // declared at the point-or-point-list union (how imported Desmos point
+      // values are typed) passes the call-boundary check, as it already does
+      // for `Norm`/`PointX` (Tycho item 130). Only a pair of tuples has a
+      // distance: an actual list of points is rejected by the evaluate handler
+      // at runtime.
+      signature: '(tuple | list<tuple>, tuple | list<tuple>) -> number',
       evaluate: ([a, b], { engine: ce, numericApproximation }) => {
         if (!isFunction(a) || !isFunction(b))
           return ce.error('incompatible-type');

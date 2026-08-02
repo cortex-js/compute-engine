@@ -124,6 +124,23 @@
 
 ### Performance
 
+- **Nested numeric quadrature no longer discards an accurate outer estimate
+  for a Monte-Carlo re-run** (Tycho item 128). `converged: false` from the
+  adaptive Gauss–Kronrod pass only means the 1e-10 relative-tolerance target
+  was not reached within the panel budget, but every fallback site read it
+  as "quadrature failed" and re-estimated with up to 10⁷ Monte-Carlo
+  samples — catastrophic when each outer sample is itself a full inner
+  quadrature. The motivating double integral (a piecewise integrand over a
+  near-singular denominator) ran ~318 s to return a stochastic estimate
+  ~10⁴× less accurate than the one it had discarded; it now returns the
+  quadrature estimate in ~1.3 s, deterministic and closer to the
+  independently-computed reference value. A non-converged estimate is now
+  kept whenever its reported error bound already beats the sampler's own
+  1/√n noise floor — at all three fallback sites (single-limit and iterated
+  `Integrate` under `.N()`, and the compiled `_SYS.integrate` runtime
+  helper); a genuinely failed quadrature (non-finite or near-zero estimate)
+  still falls back to Monte-Carlo.
+
 - **Element-memo invalidation is now dependency-precise** (Tycho item 127):
   re-assigning a symbol invalidates only the memoized collections that
   transitively depend on it, instead of every memo in the engine. A new
@@ -213,6 +230,49 @@
   amendment R6).
 
 ### Issues Resolved
+
+- **Chained postfix bracket indexes now parse as nested `At` for every base
+  shape** (Tycho item 124). `parseAt` refused any left-hand side that was
+  already an `At` ("chained indexing is unsupported"), so the second bracket
+  group of `P_{a}\left[1...3\right]\left[1\right]` — or of a bracket-literal
+  base chain like `\left[1...9\right]\left[c=0\right]\left[1\right]` —
+  recovered as `Sequence(At(…), Error("unexpected-operator"))`, while after a
+  bare-symbol base the second group re-parsed as a function application,
+  producing `Apply(At(P, Range(1,3)), List(1))`. Chains now parse uniformly
+  as `At(At(X, a), b)` for subscripted, bare, and literal bases, to any
+  depth, on both the canonical and `{canonical: false}` routes.
+
+- **`At` with more indices than the collection has dimensions now fails
+  fast** (Tycho item 129). `At([10,20,30], 1, 2)` evaluated to itself — no
+  error, no `Nothing` — which let an upstream mis-parse flow through
+  `evaluate()` unmarked and surface as an unrelated-looking failure
+  downstream. When an index remains to be consumed and the current value's
+  type cannot be a collection, `At` now returns
+  `Error("incompatible-dimensions", "2 indices vs 1-dimensional
+  collection")`. Matrix and dictionary multi-indexing, gather indices,
+  absence absorption (`Missing`), and staying inert over unbound or
+  unknown-typed intermediates are all unchanged.
+
+- **A bracketed two-anchor range with a compound first anchor no longer
+  captures the anchor's additive tail** (Tycho item 129). The range infix
+  deliberately binds above `+` (so a leading sign or coefficient attaches to
+  the anchor), which made `\left[m+n...m+n+4\right]` parse as
+  `List(Add(m, Range(n, m+n+4)))` while the comma-separated three-anchor
+  form `\left[m+n,m+n+15...m+n+60\right]` already repaired the mis-binding.
+  The single-element bracket body now runs the same recovery and yields
+  `Range(m+n, m+n+4)`. The bare unbracketed spelling (`n+1..n+10`) is
+  unchanged and remains a recorded limitation.
+
+- **`Distance` now accepts the point-or-point-list union its siblings
+  accept** (Tycho item 130). Its parameters were typed bare `tuple`, so a
+  symbol declared
+  `tuple<number,number,number> | list<tuple<number,number,number>>` — the
+  natural declaration for an imported point that may turn out to be a point
+  list — failed the strict call-boundary check even though `Norm` and
+  `PointX/Y/Z` accept the same argument. The parameters are now
+  `tuple | list<tuple>`: the union passes the boundary, scalars and strings
+  are still rejected there, and an actual point list reaching the evaluate
+  handler gets a clean `incompatible-type` error at runtime.
 
 - **A `WithRandomSeed`-framed body no longer stamps `random` on the enclosing
   function literal's arrow.** Effects are computed by two channels — the
