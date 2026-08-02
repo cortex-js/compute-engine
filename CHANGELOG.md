@@ -2,1286 +2,291 @@
 
 ### Breaking Changes
 
-- **Assignments now enforce a symbol's declared type on every route.** A
-  declared, non-inferred type was previously a declaration-time-only
-  contract: `ce.declare('n', 'integer')` followed by `ce.assign('n', 3.5)`
-  (or the `Assign` operator) silently installed the value while `n`'s type
-  kept reading `integer`. All three routes — declare-with-value, the
-  `Assign` operator, and `ce.assign` — now apply the same per-axis
-  compatibility check and reject an incompatible value. Inferred types keep
-  their widening behavior, structural aliases keep accepting matching
-  values, and the effects axis keeps its own provenance rules. Also fixed
-  on the way: `ce.declare(name, { type, value })` failed for any
-  user-declared type (resolver-less parse) and threw
-  `The type "…" is invalid` for any `BoxedType`-valued `type` field.
+- **Assignments now enforce declared types consistently.** Declare-with-value,
+  `Assign`, and `ce.assign()` all reject values incompatible with an explicit
+  symbol type. Inferred types retain their widening behavior.
 
-- **`expr.isPure` is now computed by projecting effects through the actual
-  operands and their current bindings**, replacing the older rule "the operator
-  is pure and every operand is pure". Four answers change. `Hold(Random())` is
-  now **pure**: `Hold` never evaluates its content, so the draw contributes
-  nothing — it resurfaces at `ReleaseHold`, which is impure.
-  `WithRandomSeed(42, Random())` is now **pure**: the frame _discharges_ the
-  draws it delimits, and the block genuinely replays identically on
-  re-evaluation, which is exactly what purity claims (a write is not discharged
-  — `WithRandomSeed(42, Block(Assign(x, 1), Random()))` is still impure). A
-  function **literal** with an impure body — `(x) |-> Random()` — is now
-  **pure**, because the effect belongs to its _arrow_
-  (`(unknown) random -> number`) and fires when the literal is applied, not when
-  it is built. And conversely `Map(xs, f)` with `f` a symbol **bound** to a
-  drawing function is now **impure** where it was reported pure: a bare symbol
-  used to stop the walk, and purity now resolves through the symbol's current
-  binding, so the answer moves when the binding does. Consumers that gate
-  caching or re-evaluation on `isPure` become both more precise (framed and held
-  work is now cacheable) and more conservative (a callback reached through a
-  name is not).
+- **Purity and effects reporting is more precise.** `expr.isPure` and
+  `expr.effects` now account for which operands an operator evaluates and for
+  the current bindings of referenced functions. Consequently, held expressions
+  and seeded-random blocks can be pure, function literals do not inherit the
+  effects of calling them, and named effectful callbacks are no longer reported
+  as pure. Unresolved forward references conservatively have unknown effects.
 
-- **A forward-referencing function definition now infers unknown effects.**
-  `f() := g()` written _before_ `g` exists sees an unresolved head and infers
-  `any`, so `ce.box(["f"]).isPure` is now `false` where it was `true`. The old
-  answer was a claim of purity that survived `g` later turning out to draw from
-  the random stream; the new one is honest, at the cost of caching and
-  common-subexpression elimination for forward references. **Results are
-  unaffected** — only what the engine may share and cache. Stating the effects
-  explicitly (`effects: []`, or a specifier in the signature) restores the
-  optimism as a trusted contract, which is what makes mutually recursive
-  definitions practical.
+- **Effects from partially applied functions occur only when all required
+  arguments have been supplied.** Partial application no longer evaluates an
+  effectful body early or repeats its effects.
 
-- **The effects of a partially applied function now fire at saturation, and
-  exactly once.** Applying `(a, b) |-> { n := n + 1; a + b }` to a single
-  argument used to evaluate the body with the supplied prefix before currying,
-  so the write happened at _partial_ application and again at each saturation.
-  An effectful body is now captured without being evaluated: the partial
-  application performs no write and consumes no draw from the random stream, and
-  each saturating call performs exactly one. A pure body keeps the
-  evaluate-then-curry optimization unchanged. Code that relied on the early
-  firing — using a partial application as a way to trigger a side effect — will
-  observe it later than before.
+- **Contradictory operator declarations are rejected.** In particular,
+  `pure: true` cannot be combined with `drawsRandom: true`; inconsistent legacy
+  flags, effect annotations, and `effects:` declarations also fail registration.
 
-- **`pure: true` together with `drawsRandom: true` in an operator definition is
-  now a registration error.** The two flags were independent fields, both
-  accepted, with one side silently winning; the combination is a contradiction
-  (a draw from the random stream is not pure) and `ce.declare()` now throws
-  `the 'pure' and 'drawsRandom' flags are contradictory`. Each flag on its own
-  remains a supported shorthand, and agreeing combinations
-  (`{ pure: false, drawsRandom: true }`) are unchanged.
+- **Errors now propagate through strict built-in operators and function
+  application.** An invalid operand generally produces the underlying `Error`
+  value instead of leaving an inert expression. Collection constructors and
+  error-observing or lazy operators can still contain or inspect errors.
+  `Assume` returns string status values such as `"ok"` and `"not-a-predicate"`.
 
-- **`First`, `Second`, `Third` and `Last` require an indexed collection**,
-  matching `Rest`/`Most`/`Take`/`Drop`/`At` and their own documented signatures.
-  A set-kind operand (`Set(1,2,3)`, `Integers`) now reports `incompatible-type`
-  — `First(Integers)` previously returned a silent `NaN`. Positional absence is
-  unchanged: `First([])` is still `Missing` (an indexed collection with no
-  element at that position is a different situation from a collection with no
-  positions at all).
+- **Literal `Nothing` arguments are removed consistently.** `f(Nothing)`,
+  `Apply(f, Nothing)`, and `Nothing |> f` now all behave like `f()`. An
+  expression that evaluates to `Nothing` is still passed as an argument. Invalid
+  `Pipe` callees now return the error directly.
 
-- **Errors now bubble through built-in operators.** Completing the error round:
-  an expression with a failed strict operand — `err + 1`, `Sin("a" + 1)`,
-  `Sum(Ln("a"), {k,1,3})` — now evaluates to the bare `Error` value instead of a
-  frozen inert tree. Collection constructors are exempt (`[1, Ln("a"), 3]` and
-  `(1, err)` stay collections with the error in place), lazy observers (`Match`,
-  `Type`, `IsError`, `Hold`, `Simplify`, `Expand`, `Factor`, `Together`) run
-  their handlers, and `Assume` no longer throws a host exception on a
-  non-predicate operand, and it now reports its outcome as a _string_ (`"ok"`,
-  `"not-a-predicate"`, …) instead of a symbol — two of its outcomes were never
-  valid symbol names, so the failure cases used to render as `invalid-symbol`
-  errors. String operators are unchanged in _semantics_ (still no coercion) but
-  their failed result is now the bare type error rather than a frozen call.
+- **Positional collection operators require indexed collections.** `First`,
+  `Second`, `Third`, and `Last` now reject sets and other non-indexed
+  collections. Empty indexed collections still return `Missing`.
 
-- **`Nothing` in an argument position now erases uniformly on every application
-  route.** `f(Nothing)`, `Apply(f, Nothing)`, and `Nothing |> f` all behave as
-  `f()`. Previously a pipe (or `Apply`) into a _function literal_ bound the
-  argument — `Nothing |> (x |-> x + 1)` returned `1`; it now returns the
-  unapplied curried literal `(_) |-> _ + 1`, the nullary-application result.
-  Named-function routes are unchanged (they already erased). Erasure applies to
-  the _literal_ `Nothing` at canonicalization; an argument that merely
-  _evaluates_ to `Nothing` binds normally — uniformly on every route.
-
-- **`Pipe` with an invalid right-hand side returns the bare error value.**
-  `Pipe(5, 3)` and `Pipe(5, "abc")` previously evaluated to a frozen
-  `Pipe(…, Error(…))` expression; under error bubbling the callee itself is the
-  error, so the result is now the `Error` value directly.
-
-- **`Sqrt`, `Ln` and `Log` no longer claim a real type for an operand of unknown
-  sign.** `Sqrt(x)` for a bare real-typed symbol now types `finite_complex`
-  (`√−2 = 1.414…i`), and `Ln(x)`/`Log(x, b)` type `complex`
-  (`ln(−2) = 0.693… + iπ`, `ln(0) = −∞`; `complex` admits ±∞ but not NaN, so a
-  NaN-capable `number`-typed operand keeps `number`). A provably non-negative
-  (Sqrt) or positive (Ln/Log) operand — by literal value or by assumption —
-  keeps `finite_real`, and literals are unchanged. This is the same soundness
-  ruling applied to the eight bounded inverse-trig heads in 0.99.0. **Compiled
-  output for a free real symbol is unchanged on every target**
-  (`Math.sqrt(_.x)`, `sqrt(x)` — the hot plotted path keeps its real kernels and
-  yields `NaN` out of domain), while a provably NEGATIVE operand (a literal or
-  an assigned symbol like `a := -2`) now routes through the complex helpers on
-  both the JavaScript and GPU targets and returns the interpreter's complex
-  value — it previously ran to a real `NaN`.
-
-- **`Arcsec`/`Arccsc` of an unknown-magnitude real now type `complex`** (was the
-  top type `number`), aligning them with the other six bounded inverse-trig
-  heads: their pole value `arcsec(0) = ~oo` is a member of `complex` in the
-  lattice, so nothing forced the NaN-capable top type. A provable pole argument
-  (`Arcsec(0)`) also tightens from `number` to `complex`. The compiled complex
-  dispatch now treats all eight bounded heads uniformly.
-
-### Performance
-
-- **Nested numeric quadrature no longer discards an accurate outer estimate
-  for a Monte-Carlo re-run** (Tycho item 128). `converged: false` from the
-  adaptive Gauss–Kronrod pass only means the 1e-10 relative-tolerance target
-  was not reached within the panel budget, but every fallback site read it
-  as "quadrature failed" and re-estimated with up to 10⁷ Monte-Carlo
-  samples — catastrophic when each outer sample is itself a full inner
-  quadrature. The motivating double integral (a piecewise integrand over a
-  near-singular denominator) ran ~318 s to return a stochastic estimate
-  ~10⁴× less accurate than the one it had discarded; it now returns the
-  quadrature estimate in ~1.3 s, deterministic and closer to the
-  independently-computed reference value. A non-converged estimate is now
-  kept whenever its reported error bound already beats the sampler's own
-  1/√n noise floor — at all three fallback sites (single-limit and iterated
-  `Integrate` under `.N()`, and the compiled `_SYS.integrate` runtime
-  helper); a genuinely failed quadrature (non-finite or near-zero estimate)
-  still falls back to Monte-Carlo.
-
-- **Element-memo invalidation is now dependency-precise** (Tycho item 127):
-  re-assigning a symbol invalidates only the memoized collections that
-  transitively depend on it, instead of every memo in the engine. A new
-  rarely-bumped `_semanticEpoch` counter carries the deliberately-global
-  invalidators (`assume`/`forget`, operator/type redefinition, signature
-  inference, engine reset, configuration changes); value writes are carried
-  entirely by the per-dependency axis (binding identity, write versions,
-  scope-aware name resolution, followed transitively through helpers). The
-  motivating shape — a slider animating at frame rate next to collections
-  that don't reference it — goes from a full re-derivation per tick to a
-  warm ~0.1 ms serve, while reassigning a symbol the collection DOES read
-  still refills (measured: a 200-element symbolic-`Sum` body, cold ~2 s →
-  warm 0.1 ms across four unrelated ticks → cold again on the related
-  assign). Also: budget- or deadline-abandoned walks now commit their
-  drained prefix (served by `at()` reads), a consumer mutating an unrelated
-  symbol between pulls of a suspended walk no longer prevents the commit,
-  and the compiled-`Map` cache now recompiles after `assume`/`forget` or an
-  operator redefinition instead of re-stamping potentially stale code. A
-  `CE_MEMO_PARANOID=1` soak mode cross-checks every warm serve against a
-  live re-walk. Design:
-  `docs/plans/2026-08-02-dependency-precise-memo-invalidation.md`.
-
-- **Fixed: `ce.tolerance = …` and `ce.jit = …` did not bump any
-  invalidation counter.** Tolerance-sensitive cached results could be
-  served stale after a tolerance change (latently reachable through the
-  shipped `Comprehension` element memo), and toggling `jit` could serve
-  compiled-era cached elements on the interpreter route — wrong by ~1 ulp
-  in the documented unit-scaled cases, and contrary to `jit = 'off'`'s
-  diagnostic purpose. Both now detect actual change and bump the
-  invalidation counters, without the full engine reset the `precision`/
-  `angularUnit` siblings perform (`jit` becomes a get/set accessor with
-  unchanged type).
-
-- **Lazy `Map`, `Filter`, `Tabulate` (and other function-applying lazy
-  operators) now memoize their elements per instance** (Tycho item 126),
-  extending the element memo `Comprehension` has had since item 38. A
-  complete walk of an unmodified instance commits its elements to a
-  per-instance cache; later walks — and `at()` reads covered by the cached
-  prefix — are served from memory instead of re-evaluating the element
-  function (a 200-element `Map` whose body is a 40-term symbolic `Sum`:
-  ~854 ms per walk → ~0 ms warm). Opted in via the `elementMemo`
-  collection-handler flag on `Map` (single-source and variadic zipWith,
-  which covers elementwise broadcast), `Filter`, `FlatMap`, `Scan`,
-  `TakeWhile`, `DropWhile`, `Tabulate`, `Iterate`, and `ChunkBy`; structural
-  reindexers (`Take`, `Reverse`, `Zip`, …) stay un-memoized — their source's
-  own memo already absorbs the cost. Invalidation is two-axis, as for
-  `Comprehension`: the engine's semantic-mutation counter plus
-  per-dependency binding identity and write versions — resolved through
-  each free symbol's own binding and followed transitively through stored
-  values and user-defined function bodies — with engine-configuration
-  stamps (`tolerance`, `precision`, `angularUnit`), so unrelated scoped
-  evaluations stay warm while reassigning anything the elements depend on
-  (directly or through a helper) refills. An instance whose meaning the
-  cache cannot track (a still-unassigned free symbol, a dictionary operand)
-  is simply never memoized. By ruling, the memo applies to impure element
-  bodies too: repeated walks of one instance are one draw set — see
-  `docs/RANDOMNESS-MODEL.md` §6 ("One instance, one draw set").
-  `Comprehension`'s bespoke element memo (items 23.1/38) is unified onto the
-  same machinery — same per-instance contract and fill-to-`n` prefix
-  behavior, now with the stronger invalidation the shared memo carries
-  (transitive dependencies through helpers, ambient-scope shadowing,
-  mid-walk mutation detection, configuration stamps).
-
-- **Exact `evaluate()` drains of broadcast-shaped lazy `Map`s now auto-compile
-  when provably safe.** Previously only `.N()` drains at machine precision
-  compiled (the numeric-marked tier); exact drains ran at the interpreted floor
-  at every precision. An unmarked broadcast lambda now compiles when a static
-  proof establishes that its element function is integer-closed (derived from
-  the operators' own type handlers, never an operator list) and that every
-  operand and emitted intermediate provably stays within ±(2^53 − 1) — float64
-  integer arithmetic in that range is exact, so compiled elements re-box as
-  exact integer literals bit-identical to the interpreter's, at any engine
-  precision including the default bignum-preferred one. Bounds are read from
-  literal `Range`/`List` sources, nested broadcast `Map`s over them, and
-  **symbols whose current value is such a source** (a document variable holding
-  an integer list: `L + 1` and `1 + Mod(L + 29, 900)` compile) — a
-  symbol-sourced proof revalidates when the engine mutates, and every element is
-  additionally checked at runtime against the proven source interval, so
-  reassigning the variable can never serve stale compiled results. Anything the
-  proof cannot bound — float or symbolic bodies, `Divide`/`Power`/`Remainder`,
-  unknown-length sources, possible overflow — silently stays on the interpreter.
-  The 900-element witness `1 + Mod(Range(0,899) + 29, 900)` drains ~6× faster
-  (~12 → ~1.8 µs/element); a 10 000-element symbol-list drain of the same rule
-  takes ~12 ms cold (compile included) vs ~95 ms interpreted. Drains below 64
-  statically-proven elements skip the tier (a compile cannot pay itself back).
-  Design: `docs/plans/2026-07-31-exact-map-drain-compile-design.md` (R1–R5 +
-  amendment R6).
-
-### Issues Resolved
-
-- **Chained postfix bracket indexes now parse as nested `At` for every base
-  shape** (Tycho item 124). `parseAt` refused any left-hand side that was
-  already an `At` ("chained indexing is unsupported"), so the second bracket
-  group of `P_{a}\left[1...3\right]\left[1\right]` — or of a bracket-literal
-  base chain like `\left[1...9\right]\left[c=0\right]\left[1\right]` —
-  recovered as `Sequence(At(…), Error("unexpected-operator"))`, while after a
-  bare-symbol base the second group re-parsed as a function application,
-  producing `Apply(At(P, Range(1,3)), List(1))`. Chains now parse uniformly
-  as `At(At(X, a), b)` for subscripted, bare, and literal bases, to any
-  depth, on both the canonical and `{canonical: false}` routes.
-
-- **`At` with more indices than the collection has dimensions now fails
-  fast** (Tycho item 129). `At([10,20,30], 1, 2)` evaluated to itself — no
-  error, no `Nothing` — which let an upstream mis-parse flow through
-  `evaluate()` unmarked and surface as an unrelated-looking failure
-  downstream. When an index remains to be consumed and the current value's
-  type cannot be a collection, `At` now returns
-  `Error("incompatible-dimensions", "2 indices vs 1-dimensional
-  collection")`. Matrix and dictionary multi-indexing, gather indices,
-  absence absorption (`Missing`), and staying inert over unbound or
-  unknown-typed intermediates are all unchanged.
-
-- **A bracketed two-anchor range with a compound first anchor no longer
-  captures the anchor's additive tail** (Tycho item 129). The range infix
-  deliberately binds above `+` (so a leading sign or coefficient attaches to
-  the anchor), which made `\left[m+n...m+n+4\right]` parse as
-  `List(Add(m, Range(n, m+n+4)))` while the comma-separated three-anchor
-  form `\left[m+n,m+n+15...m+n+60\right]` already repaired the mis-binding.
-  The single-element bracket body now runs the same recovery and yields
-  `Range(m+n, m+n+4)`. The bare unbracketed spelling (`n+1..n+10`) is
-  unchanged and remains a recorded limitation.
-
-- **`Distance` now accepts the point-or-point-list union its siblings
-  accept** (Tycho item 130). Its parameters were typed bare `tuple`, so a
-  symbol declared
-  `tuple<number,number,number> | list<tuple<number,number,number>>` — the
-  natural declaration for an imported point that may turn out to be a point
-  list — failed the strict call-boundary check even though `Norm` and
-  `PointX/Y/Z` accept the same argument. The parameters are now
-  `tuple | list<tuple>`: the union passes the boundary, scalars and strings
-  are still rejected there, and an actual point list reaching the evaluate
-  handler gets a clean `incompatible-type` error at runtime.
-
-- **A `WithRandomSeed`-framed body no longer stamps `random` on the enclosing
-  function literal's arrow.** Effects are computed by two channels — the
-  runtime `effectsOf` and the construction-time inference that stamps a
-  `Function` literal's signature — and they disagreed: the runtime channel
-  applied the frame's discharge and called `WithRandomSeed(42, Random())`
-  pure, while the inference contributed `{random}` to the arrow of any literal
-  containing a frame-protocol head. `EFFECTS-MODEL.md` ("Randomness shapes")
-  rules that role "a separate field, **not** the arrow". The visible cost was
-  an asymmetry between collection operators: `Map`, which reads its callback's
-  arrow, reported a seeded body impure, while `Comprehension`, which sees the
-  body directly, reported it pure. The inference now honors a held position's
-  `discharges` (as the runtime channel already did) and no longer contributes
-  the label. The frame obligation itself is unchanged — it rides
-  `drawsRandom`, which the pending-draw walk consults and which still reports
-  `true`. An unframed draw is unaffected. **Behavior change:** `isPure` is now
-  `true` for a `Map` over a seeded body (previously `false`).
-
-- **A big operator whose bound is a closed expression — `Σ_{j=1}^{length(P)}
-  P[j]` — now evaluates instead of staying inert.** Domain classification and
-  indexing-set normalization both read the bound *as written*; an unevaluated
-  function expression has no machine value there (it reads `NaN`), so the
-  domain was classified symbolic and the whole operator stayed unevaluated
-  even though `length(P)` on its own returned a number. A bound that is closed
-  (no free symbols) and pure is now evaluated first. All three spellings —
-  `length(P)`, `count(P)`, and the dot form `P.length` — parse to the same
-  `Length` node and are covered, as are compound bounds (`P.length - 1`), and
-  `Product` behaves like `Sum`. This affected `evaluate()`/`.N()` only; the
-  compiled path already handled such a bound, since it lowers the bound as an
-  expression rather than reading a machine value from it. The evaluation
-  happens when the operator RUNS, never at canonicalization, so the bound
-  tracks a later reassignment of `P`. A genuinely free bound (`Σ_{k=1}^{n}`)
-  still keeps the operator symbolic — the guard that stops `n` from being read
-  as the default iteration window — and so does an impure one, which must not
-  be re-drawn once per consumer.
-
-- **A compiled function literal whose body has an unbound free symbol no
-  longer throws a raw `ReferenceError: _ is not defined` out of `.N()`.** A
-  compiled *expression* with unknowns is called with a vars object, so a free
-  symbol compiles to a lookup on it; a compiled *lambda* is called with its
-  declared parameters only, leaving that lookup dangling. Numeric quadrature
-  reached this by compiling the integrand as a lambda: its free-symbol guard
-  read the integrand's surface symbols, which do not include a symbol living
-  inside a called user function's body (`∫ n(x) dx` where `n = x ↦ q + x`),
-  nor one reachable only through an assigned value (`b = c + 1`). The guard
-  now follows both, so such an integral stays symbolic — the answer the
-  equivalent inline integrand already gave — and the compiler independently
-  declines to emit a lambda it cannot bind. Callers can pass a
-  `varsObjectRefs` set to read back the offending symbols after a declined
-  compile, which is how `Map` auto-compilation still distinguishes "retry
-  once the symbol is assigned" from "structurally uncompilable".
-
-- **A function returning a dictionary literal no longer loses its parameter
-  binding across a MathJSON round-trip — which made recursive functions with
-  dictionary results silently wrong.** `f(3)` for
-  `function f(x: integer) { if (x < 0) { f(0) } else { {v -> x} } }` returned
-  `{v -> x}` — the raw parameter symbol, dangling — instead of `{v -> 3}`.
-  Root cause: `BoxedDictionary` serialized every dictionary to the
-  `{dict: …}` JSON shorthand, and re-boxing that shorthand constructs the
-  dictionary **eagerly, in the ambient scope**; since a dictionary value is
-  always-canonical, nothing later re-binds its entries, so a round-trip
-  through `.json` — which the engine itself performs when tying the
-  recursion knot for a self-referencing function definition — detached the
-  entries from the function's parameter scope. The `{dict: …}` shorthand is
-  now reserved for **plain-data** entries (strings, numbers, booleans, and
-  lists/dictionaries of the same, which are scope-independent); a dictionary
-  holding an unevaluated *expression* entry serializes in the
-  `["Dictionary", ["KeyValuePair", …]]` operator form, which re-boxes lazily
-  and canonicalizes — binding its entries — in the enclosing scope. Also on
-  the way: `Dictionary` now has an operator definition (it was the only
-  structural head without one, so `ce.operatorInfo('Dictionary')` returned
-  `undefined` and the Cortex unknown-function lint mistakenly suggested
-  `DictionaryFrom` for round-tripped dictionary expressions).
-
-- **Value (literal) types are now inhabitable.** A type such as `0`,
-  `"red"`, or `true` — and bounded numeric refinements such as
-  `integer<0..10>` — previously rejected its own witness values: only the
-  value's *synthesized* type was consulted (`ce.box(0).type` is
-  `finite_integer`, which is not a subtype of the value type `0`), so
-  `ce.declare('z', '0'); ce.assign('z', 0)` threw, and with
-  `g: (0) -> integer` the call `g(0)` errored `incompatible-type`. A
-  value-membership check (`typeAcceptsValue`) now tests the concrete value
-  itself wherever one is at hand: argument validation, declared-type
-  assignment/declare-with-value compatibility, and overload-arm filtering.
-  Membership is exact (the engine's value identity; `NaN` inhabits no value
-  type), range endpoints are inclusive, and symbolic expressions are
-  unaffected. Also fixed on the way: a finite number literal's value type
-  is now a subtype of the *finite* base type (`0 <: finite_integer` was
-  `false`).
-
-- **A `match` inside a function body no longer replays the first call's
-  arguments on every later call.** The dispatch plan cached per `Match`
-  included the case guard/body closures, which were canonicalized inside the
-  first invocation's frame — so a case body referencing an enclosing
-  parameter (`function f(n) { match n { 0 => 1; _ => n + 100 } }`) returned
-  the first call's answer forever (`f(5)` → 105, then `f(7)` → 105), and a
-  recursive definition whose first call only hit the base case then
-  recursed past it without terminating (`recursion-depth-exceeded`).
-  Guard and body closures are now built per evaluation, in the current
-  frame — matching the reference semantics — while the classification plan
-  (dispatch tables, tiers, capture keys) stays cached. Compiled `match` is
-  unaffected (the compiler consumes only the value-safe canonical
-  structure, now built at emission time).
-
-- **User-declared types now resolve everywhere a type can flow.** A batch of
-  sites parsed type strings without the engine's type resolver, so a
-  declared type name (`ce.declareType('point', …)`) threw
-  `Unknown type "point"` once it reached them: `expr.type.matches('point')`
-  and the other string-pattern predicates on `BoxedType`; the result-type
-  handlers of `Sequence`, `List`/`Set`/`Tuple`, `KeyValuePair`,
-  `Slice`/`Insert`/`Tally`/`ChunkBy` and ~20 other collection operators
-  (which re-serialized operand types into template strings and reparsed
-  them — they now build the type structurally); `Typed` annotations; and
-  signature-string sugar. Ground-type strings keep their cached fast path.
-
-- **A repeated pure user-function call inside a compiled function body is now
-  bound once — collapsing exponential compiled recursion to linear.**
-  `R(i) := R(i-1) + 0.5·S(x, y, R(i-1))` evaluated **both** `R(i-1)`
-  occurrences per level: 2^20 calls at depth 20 (~200–350 ms per scalar
-  sample). The nested CSE harvest that already runs over each emitted
-  `_fn_*` definition body now admits pure user-function applications as
-  candidates, so the repeated self-call binds once per level (depth-20 ≈
-  0.005 ms). Guardrails: purity comes from the effects model (an application
-  of a drawing/writing function is never merged — two `Random()` calls stay
-  two draws); the binding lands inside the conditional arm, so a base case
-  never evaluates the recursive call; admitted calls are exempt from the
-  size/score heuristics (a call's runtime cost is unrelated to its syntactic
-  size); and top-level expressions keep the conservative Phase-1 stance —
-  call sites are never merged across an expression, only within an emitted
-  definition body. Post-review hardening: the admission gate validates the
-  resolved callee's BODY transitively, not just the call site — a body that
-  splices a string-`vars` entry (live source such as `next()`) or reaches an
-  impure function through a definition reassigned after the caller was
-  defined is never merged (both were reproducible unsound merges; pinned).
-
-- **The effects memo (`isPure`/`effects` on applications) is now
-  re-entrancy-safe: a self-recursive definition's body no longer reports a
-  wrong, read-order-dependent purity.** The effects projection follows
-  bindings, so the body of a recursive definition reaches its own nodes
-  re-entrantly — and the generation-guarded memo stamped the generation
-  BEFORE computing, so the re-entrant read returned the previous
-  generation's value (the assign-time in-flight `'any'` — or, the unsound
-  direction, a stale pure) as current, freezing it. Whether `isPure`
-  answered true or false depended on which node was read first. Re-entrant
-  reads now answer `'any'` provisionally without caching, and a value
-  computed from a provisional edge is returned but not frozen — the next
-  read recomputes it against settled answers. No behavior change for
-  non-recursive expressions.
-
-- **`FindFit`/`FindRoot` under an ambient `withTimeLimit` now return
-  best-so-far instead of overrunning the budget by whole iterations — or
-  throwing away completed work.** The per-iteration deadline checkpoint left
-  `rows × (params + 1)` compiled model evaluations as the indivisible unit
-  (compiled model functions are deadline-blind, unlike the interpreted
-  fallback): an expensive model overran a 250 ms ambient budget by seconds.
-  The residual/Jacobian row loops now check the deadline per row, and a
-  timeout during the solve returns the best parameters seen with
-  `converged: False` and a new `timedOut: True` record entry rather than
-  throwing — a bounded re-solve keeps a usable answer. A timeout before the
-  solve begins (data evaluation, differentiation, compilation) still
-  propagates the standard cancellation, and non-timeout cancellations (abort
-  signals, iteration limits) propagate unchanged. The record shape is
-  unchanged when no timeout occurred.
-
-- **Numeric use of a list-valued function no longer corrupts its inferred
-  signature — which made compiled `Sum`s over list-valued terms emit scalar
-  `+`/`*` on arrays (string concatenation / `NaN`) behind `success: true`.**
-  Numeric-argument validation inferred the scalar numeric context (`real`)
-  onto every operand, including a function application whose inferred result
-  signature was already a collection (`a(i·t)` with `a: () -> vector<2>`),
-  widening the shared definition to `real | vector<2>`. Any function *defined
-  afterwards* whose body called `a` then inferred a scalar result, and the
-  compiled `Sum` took the unrolled scalar arm instead of the element-wise
-  `_SYS.bcast` fold. The corruption was definition-order-dependent (it
-  required a pre-existing global binding for a parameter name, which forces
-  the definition's binder rewrite to re-validate the body), which made it
-  look nondeterministic across documents. Possibly-collection operands are
-  now exempt from scalar numeric inference, matching the guard the
-  signature-validation route already had.
-
-- **A `Range` (or `Linspace`) with an exact symbolic bound or step —
-  `Range(0, 50π, 0.05)` — is now countable and enumerable.** Previously such a
-  collection was inert on `evaluate()`: `count` was `undefined` and `each()`
-  yielded zero elements — silently, with `isCollection: true` the whole way —
-  while `.N()` fully recovered it. A bound that is exact but numerically known
-  (`50π`, `√2`, or `N·π` after `N := 2`) now reads through `.N()` in the
-  collection handlers (count, iteration, membership, indexing, extrema);
-  iteration was already float-based, so the numericization is lossless. A bound
-  with unknowns (`Range(1, n)`) correctly stays indeterminate. Additionally,
-  the bracketed-list range parse now fuses a two-sample form whose second
-  anchor is an exact arithmetic expression over a numeric start:
-  `[0, \frac{2}{d}\pi ... (2-\frac{2}{d})\pi]` parses as a stepped `Range`
-  (step `2π/d`, exact) instead of collapsing to a two-element `List`; the same
-  applies to `[0, \frac{\pi}{4} ... 2\pi]` and float-denominator fractions
-  (`[0, \frac{1}{1.5} ... 4]`). Generic-sequence notation
-  (`[x_1, x_2, ..., x_n]`, `[f(1), f(2), ..., f(n)]`) and symbolic-anchor
-  shapes with ambiguous progressions still parse as placeholder lists.
-
-- **Kernel roundoff dust is now chopped at a fixed roundoff scale (`1e-14`),
-  decoupled from `ce.tolerance`.** Whether a dust-sized component of a complex
-  kernel result (e.g. the `im: 5.6e-17` residue of `asin(0.5)` computed via the
-  complex formulation) is noise is a property of the arithmetic, not of the
-  user's comparison tolerance. Previously these chops used `ce.tolerance`
-  (default `1e-10`): tightening the tolerance below the dust scale made
-  `realOnly`-compiled `arcsin(x)` return `NaN` across its whole domain,
-  loosening it silently projected genuinely complex values to real, and —
-  because the compiled projection snapshotted the tolerance at compile time —
-  compiled and interpreted results could diverge after a tolerance change.
-  Comparison sites (`Equal`, relational operators, the `Chop` operator) still
-  honor `ce.tolerance`. See ARCHITECTURE.md § "Chopping and the `im === 0`
-  convention".
-
-- **Compiled `Chop` now honors the engine's configured tolerance.** The
-  JavaScript and interval targets emitted a bare `chop(x)` call that fell back
-  to the static default (`1e-10`), so at any non-default `ce.tolerance` the
-  compiled result diverged from the interpreter (`Chop(1e-7)` at
-  `tolerance = 1e-6`: `0` interpreted, `1e-7` compiled). Both targets now bake
-  the engine's tolerance at compile time, like compiled `Equal`.
-
-- **`sin`/`cos` of a bignum argument near a zero crossing no longer collapse
-  legitimately-small results to `0`.** The bignum kernels chopped their real
-  result at `ce.tolerance`, so `\sin(3.141592653588793)` — true value ≈
-  `1.0e-12`, computable exactly at the default 21-digit precision — returned `0`
-  (the same failure class as issue #231, whose fix introduced the chop). The
-  chop now uses the bignum roundoff scale, `10^(2−precision)`, which still
-  clears numericization dust (`\sin\pi` under `.N()` → `0`) while preserving
-  every result representable at the working precision.
-
-- **A compile decline's interpreter fallback now returns the numeric value
-  instead of `NaN` for expressions whose `evaluate()` stays symbolic.**
-  `compile('\sum_{i=1}^{\infty} 2^{-i}')` correctly declines (no terminating
-  loop), but the fallback `run({})` returned `NaN` — `evaluate()` stays symbolic
-  per the exactness contract and `.re` of a symbolic expression is `NaN` — while
-  `.N()` gives `1`. The fallback now numericizes at the leaves, in both the
-  expression and the lambda calling conventions, so declining is always at least
-  as good as interpreting.
-
-- **An `interval-js` decline now provides an interpreter-backed `run`.** The
-  interval target's primary failure class reports `success: false` without
-  throwing, which bypassed the free `compile()`'s fallback entirely — the result
-  had no `run` at all. The fallback option is now passed through to the
-  registered target, which normalizes both failure shapes to the documented
-  interval-shaped fallback (`{lo: v, hi: v}`).
-
-- **A sum/product/quotient with a term that is provably non-finite by TYPE alone
-  is no longer mis-typed.** `(1 + Ln(0)).type` was `integer` and
-  `(2·Ln(0)).type` was `finite_integer` (unsound; both values are −∞): `Ln(0)`
-  types `non_finite_number` but its structural `isFinite` is `undefined`, so the
-  handlers' non-finite branches never fired. `Add` now claims the tight
-  `non_finite_number` (`1 + Ln(0)`, `1 + Artanh(1)`); `Multiply`/`Divide` widen
-  soundly to `number`.
-
-- **GPU colour constructors fail closed on an alpha operand.**
-  `Rgb/Hsl/Hsv/Oklab/Oklch(r, g, b, a)` on the GLSL/WGSL targets silently
-  discarded the 4th operand (the colour chain is `vec3` end to end); they now
-  decline with a diagnostic. The JavaScript target continues to preserve alpha;
-  3-operand forms are unchanged.
-
-- **GPU `Sum`/`Product` with a non-finite bound fail closed** instead of
-  emitting an unbounded loop (`for (int i = 1; i <= _gpu_inf(); i++)` — invalid
-  shader source). Mirrors the JavaScript/interval-js guard.
-
-- **A Random-family operand of a compiled `Mod`/`Remainder` (and GPU
-  `Cot`/`Coth`/`Beta`, including the WGSL `Mod` and the complex `Cot`/`Coth`
-  branches) is no longer drawn more than once.** The lowering templates splice
-  their compiled operands two or three times, so `Remainder(Random(), 2)`
-  emitted two `_SYS.drawNextRandomNumber()` calls on JavaScript (two stateful
-  `_gpu_rnd_draw` calls on GLSL, and `WithRandomSeed(7, Mod(10, Random()))` drew
-  three times on WGSL) — a wrong value that also shifted every later draw. An
-  impure operand is now bound to a temporary (an IIFE on JavaScript, a hoisted
-  statement on the GPU targets — declining where no statement sink is
-  available); pure operands keep the previous emission byte-for-byte.
-
-- **`['Exp2', 11, 12]` no longer canonicalizes to a malformed `Power`.** The
-  `Exp`/`Exp2` canonical handlers spliced arity-flagged arguments into their
-  `Power` sugar, producing a 3-operand `Power(2, 11, Error(…))` with a
-  double-wrapped error. The error now stays on the inert head, as `Rational`
-  does.
-
-- **Python: `Equal`/`NotEqual` over collection operands now compile** (ruled
-  2026-07-31: scalar semantics, matching the interpreter). Two or more
-  collection operands lower to a whole-collection tolerance helper
-  (`_ce_eqcoll`, shape-guarded numpy `np.all` — length mismatch is `False`,
-  string elements compare with `==`), chained pairwise-adjacent with the scalar
-  `and`; `NotEqual` negates it. The scalar/scalar path is byte-identical, and
-  the engine's tolerance is baked like compiled `Equal`. The MIXED case (exactly
-  one collection operand), which the interpreter BROADCASTS element-wise
-  (`Equal([1,2], 5)` → `["False","False"]`), stays fail-closed by ruling
-  (2026-07-31) — the interpreter fallback returns the correct list; a compiled
-  lowering waits for a consumer witness.
-
-- **Python: `Norm(matrix, 2)` now lowers to the Frobenius norm
-  (`np.linalg.norm(m, 'fro')`), matching the interpreter.** numpy's ord-2 on a
-  matrix is the spectral norm, so the old emission was a silent wrong value
-  (`13.8806` vs the interpreter's `13.9284` on `[[3,4],[5,12]]`). A rank-1
-  operand keeps ord 2; an operand of unknown static rank declines.
-
-- **A broadcast over a literal list no longer emits JavaScript into GLSL, WGSL
-  or Python.** A `broadcastable` operator applied to a literal or assigned
-  finite list was fanned out with a JavaScript `.map((v) => …)` arrow — for
-  every target, because the fan-out was never gated by language — so
-  `Sin([1,2,3,4])` produced `(vec4(…)).map((_tv1) => sin(_tv1))` on GLSL behind
-  `success: true`. The fan-out is now target-mediated
-  (`CompileTarget.broadcastUnary`): the shader targets apply the scalar form
-  straight to the vector, since builtins and operators are already componentwise
-  over matching genTypes (`sin(vec4)`, `-vec4`), and Python emits a list
-  comprehension. **This is a band shift, not a regression** — rows that
-  previously "succeeded" into a shader no driver would accept now decline
-  honestly. Shape alone is not sufficient to lower componentwise, so a scalar-
-  only preamble helper (`_gpu_sinc`, `_gpu_gamma`), a lowering that branches on
-  a comparison (`Argument`), and one that drops its operand (`Imaginary`) fail
-  closed with a diagnostic.
-
-- **The `realOnly` constant-fold refusal is retired.** A provably non-real
-  constant refused to compile at a handful of sites — `Sqrt(-2)` threw "has no
-  real value" — while every sibling case (`Ln(-2)`, `\arcsin(2)`, an assigned
-  symbol, a runtime variable) compiled and returned `NaN`. The refusal was
-  unreachable as a guarantee, since the runtime-variable case cannot be caught
-  in principle. Now, under `realOnly` a non-real constant folds to `NaN`;
-  without it, `Sqrt` of a negative folds to the complex principal value
-  (`Sqrt(-2)` previously declined even in complex mode, though `1 + i` compiled
-  fine). `Power`/`Root` fold to the complex principal value only when the
-  complex branch is PROVABLE from the type — a provably negative base whose
-  reduced-rational exponent has an even denominator now types `finite_complex`
-  and folds accordingly (`(−2)^{0.3}` → `0.7236… + 0.9960…i`); when the branch
-  cannot be proven the type stays the `finite_number` hedge and the fold is
-  `NaN`, so a complex literal never lands inside enclosing real arithmetic
-  unannounced. Fail closed exists to prevent silently-wrong output; `NaN` is the
-  correct, self-describing answer there. The GPU targets follow the same ruling
-  on both halves.
-
-- **Compiled `InverseHaversine` of a symbolic argument returns a complex
-  value.** The head is real only on `[0, 1]` — `hav⁻¹(z) = 2·arcsin(√z)` is
-  complex outside — and now carries the same honest static type as the `Arcsin`
-  family (`finite_complex` for an unconstrained real). The JavaScript target
-  gains the matching complex lowering (`_SYS.cinvhav`), so a compiled symbolic
-  call returns `{re, im}` — with `im: 0` for in-domain inputs — where it
-  previously returned a plain number in-domain and could not represent the
-  out-of-domain value at all. The GPU targets keep the real lowering (NaN out of
-  domain), like the rest of the family.
-
-- **A root serialized in the `solidus` or `quotient` root style now delimits a
-  `Power` base.** `Sqrt(Power(x, 2))` serialized as `x^2^{1/2}` — an unparsable
-  nested superscript (`unexpected-superscript` on re-parse) — while every
-  sibling base shape was correctly parenthesized. The base is now braced exactly
-  as the generic `Power` path does (`{x^2}^{1/2}`, which round-trips). The
-  default root style is only `solidus` at nesting depth > 2, so radical-style
-  output (the common case) is unchanged.
-
-- **`D` over a control or binding operator stays symbolic instead of throwing or
-  producing a slot-wise chain-rule form.**
-  `D(Which(x < 0, x², True, x³), x).evaluate()` threw
-  `Condition must evaluate to "True" or "False"` — an exception escaping a
-  public API on ordinary symbolic input (a derivative of a piecewise reaches it
-  through any by-reference callee). Two causes, both fixed: the derivative
-  engine treated ANY operator definition as a user-defined function to expand
-  (applying builtin `Which` to wildcard symbols and evaluating it); builtins are
-  now recognized by system-scope identity, so a user definition shadowing a
-  builtin name still expands. And the slot-wise chain-rule fallback
-  (`Apply(Derivative(f, eᵢ), …)`) no longer applies to a `lazy` operator — its
-  slots are binders, conditions or statements, not scalar function arguments —
-  so `D` over `Which`, an explicit `Sum` (which previously leaked its bound
-  index into the result), or `Integrate` now returns the inert derivative
-  unevaluated, and `D` over `Loop` no longer evaluates the loop body to the
-  deadline. Non-lazy unknown heads (`Zeta`, `ElementMax`) keep the chain-rule
-  form.
+- **Several elementary functions now report complex result types when their
+  real-valued domain cannot be proven.** This includes `Sqrt`, `Ln`, `Log`,
+  `Arcsec`, and `Arccsc`. Provably in-domain operands retain a real type;
+  provably negative operands use complex helpers when compiled.
 
 ### New Features
 
-- **Multi-clause function definitions (function polymorphism).** A new
-  `DefineFunction` operator ACCUMULATES clauses on a symbol instead of
-  replacing it: `["DefineFunction", "fib", ["Function", 0, param0]]`
-  followed by clauses for `1` and `n: integer` defines a function
-  dispatching by argument value and type — `fib(0)` and `fib(1)` take the
-  literal clauses, `fib(10)` recurses through the general clause (→ 55).
-  Dispatch is most-specific-wins with declaration order breaking ties
-  between equally-specific clauses; a clause with the same parameter
-  domain REPLACES the earlier one in place (notebook re-run semantics),
-  and `Assign` keeps its full-replace behavior. Calls commit only when
-  dispatch is decided: a symbolic argument that leaves a more specific
-  value clause open stays inert (and its static type is the union of the
-  possible clauses' results); arguments that miss every clause produce a
-  `no-matching-clause` error value. All clauses share one effect row —
-  the join of their bodies' effects, or an explicitly stated specifier,
-  with conflicting specifiers rejected (`incompatible-clause-effects`).
-  Partial application is not supported across a clause set (an
-  unsaturated call is a no-match, never a curry).
+#### Functions, types, and effects
 
-  The **Cortex surface** is included: both definition forms accept
-  **literal parameters** (`fib(0) = 0`, `function f("yes") { … }`,
-  `f(true) = 1` — numbers, strings, booleans, and the non-finite numeric
-  literals `Infinity`, `-Infinity` and `NaN`, which dispatch "match only
-  themselves": `f(NaN) = 0` handles exactly NaN, and a `real`- or
-  `integer`-typed clause never captures it; `oo` is accepted as an input
-  alias for `Infinity` in both expression and parameter position, matching
-  the type grammar's spelling — serialization always emits the canonical
-  `Infinity`, now unsigned in expression position too, where it used to
-  print `+Infinity`. The **glyph aliases** of the fancy-Unicode table are
-  now live in symbol position, canonicalized at the lexer: `π` → `Pi`
-  (so `N(π)` finally is 3.14159…, and `f(π) = …` draws the same
-  shadows-constant diagnostic as `f(Pi)`), `∞` → `Infinity` (a literal
-  everywhere `Infinity` is, including literal parameters `f(∞) = 1`),
-  `ⅈ` → `ImaginaryUnit`, `ⅇ` → `ExponentialE`, `∅` → `EmptySet`,
-  `⧝` → `ComplexInfinity`, and the number-set glyphs `ℝ ℤ ℚ ℕ ℂ` — so
-  `3.1 ∈ ℝ` now evaluates to `True` where the glyph used to stay an
-  inert unknown symbol. The verbatim `` `π` `` form still names the raw
-  symbol. All three non-finite spellings are now **reserved words** in the
-  literal class alongside `true`/`false`: `let Infinity = 5`,
-  `let oo = 5` and `let NaN = 1` are rejected with a `reserved-word`
-  diagnostic — the verbatim `` `oo` `` form still names a binding — and a
-  bare symbol named `Infinity`/`oo`/`NaN` serializes in verbatim form so
-  it can never be re-read as the literal). A constant *name* stays a
-  parameter name — `f(Pi) = Pi + 1` binds a parameter named `Pi`, the same
-  shadowing convention as match patterns — and a new advisory
-  `parameter-shadows-constant` diagnostic flags it when the name is a
-  multi-character engine constant (`Pi`, `GoldenRatio`; single-letter
-  names like `e` and `i` are the ordinary variable namespace and stay
-  quiet). Literal parameters are lowered to anonymous
-  value-typed parameters with generated, reserved-prefix names that never
-  surface (serialization renders the literal spelling back). Definition
-  statements now lower to `DefineFunction` — so a second `function f`
-  with a different parameter list *adds a clause* where it previously
-  replaced the binding wholesale; a plain assignment (`f = x |-> …`)
-  still full-replaces, and a definition statement naming a same-scope
-  declared type still means that type's constructor function. `About(f)`
-  on a multi-clause function lists the clause set — one signature per
-  line, declaration order — annotating equal-specificity overlaps
-  ("declaration order decides in the overlap") and clauses made
-  unreachable by more specific clauses covering their whole finite
-  domain ("unreachable (covered)").
+- **Multi-clause function definitions** can dispatch by arity, literal value,
+  and parameter type. The most specific clause wins, declaration order breaks
+  ties, and redefining the same parameter domain replaces that clause. Recursive
+  clause sets compile to JavaScript. Partial application of a clause set is not
+  supported.
 
-  Multi-clause functions also **compile** (JavaScript target): the clause
-  set lowers to a guard chain — one emitted helper per clause plus a
-  dispatcher testing arity, value equality, numeric-range bounds and
-  primitive type guards in most-specific-first order (declaration order
-  breaking ties, the same total order the runtime selector uses), so
-  compiled and interpreted dispatch agree by construction. Recursive
-  clause sets (`fib`) compile to true self-reference through the
-  dispatcher. A compiled call that no clause admits throws
-  `no-matching-clause` (the compiled face of the interpreter's error
-  value). A clause with a guard the target cannot express — e.g. a
-  `rational` parameter — declines the **whole** function to the
-  interpreted fallback (no partial compilation, which would change tie
-  behavior), and the interval, shader and Python targets fail closed.
+- **Cortex programs can declare nominal types and structural aliases** with
+  `type name = …` and `type alias name = …`. Declarations provide checked
+  constructors where appropriate; nominal values are opaque, support structural
+  equality by tag and payload, and can expose named fields with `value.field`.
+  Record-shaped nominal types can use a same-name constructor function for
+  validation or normalization. Type tags are erased by compiled output.
 
-- **Programs can now declare their own types — and inhabit them.** A new
-  Cortex `type` statement comes in two forms:
-  `type point = tuple<x: number, y: number>` declares a **nominal** type — a
-  new, distinct type — while `type alias pair = tuple<number, number>`
-  declares a **structural alias**, compatible with any value matching the
-  definition. Either is usable by any later annotation of the same program
-  (and by later cells on the same engine): `let a: pair = (1, 2)`,
-  `function dist(a: pair, b: pair) { … }`. Neither `type` nor `alias` is a
-  reserved word: only the statement-position shapes `type name =`,
-  `type name<`, `type alias name =` and `type alias name<` claim them, so
-  existing uses of `type` as an ordinary identifier (`let type = 5`,
-  `type: integer = 4`) are untouched — and `type alias = …` still declares a
-  type *named* `alias`. A declaration also declares a **value constructor** of
-  the same name — `point(1, 2)`, an inert tagged value whose type is `point` —
-  which is what makes a nominal type inhabitable: a `tuple` definition gives
-  one argument per element (named, when the elements are named), any other
-  definition gives one argument (`type meters = number` → `meters(5)`), and
-  the arguments are checked against that signature. An **alias** declaration
-  mints a checked *identity* constructor instead: `pair(1, 2)` validates
-  `(1, 2)` and hands back the plain tuple, so a call site keeps working if a
-  type migrates between the two forms. A **`record`** definition auto-mints
-  nothing — building one positionally would silently depend on the order its
-  fields are written in — and calling such a name reports a
-  `type-not-callable` warning, which is also what a declared type name in call
-  position used to produce silently: an inert application that *looked* like a
-  working constructor. Records are inhabited through **constructor
-  functions** instead: a `function` sharing a nominal type's name, declared
-  in the same scope after the type, is that type's constructor —
-  `type circle = record<x: number, y: number, r: number>` +
-  `function circle(x, y, r) { {x -> x, y -> y, r -> r} }` makes
-  `circle(1, 2, 3)` a value of type `circle`. The body computes the
-  *payload*, which the engine checks against the definition (for a record:
-  exactly the definition's keys, each field against its type) and tags. Not
-  record-specific — a constructor function replaces the automatic
-  constructor for any definition (the smart-constructor idiom: validation,
-  normalization, alternate parameterizations), and the installed operator is
-  an overload set of the user's arm plus an automatic **raw-injection** arm:
-  a single argument that already satisfies the definition tags directly,
-  body skipped, which is the spelling serialization emits — so round trips
-  inject the payload unchanged and a *normalizing* constructor's values
-  (`frac(2, 4)`, `frac(1, 2)`) construct **equal**. A user arm that is not
-  distinguishable from the payload (same arity, overlapping — or
-  unannotated — parameter types) is rejected at install rather than
-  silently shadowed. Recursive constructor bodies work (a constructed value
-  returned from the body passes through un-nested), an alias's same-name
-  function is just an ordinary function, and re-running either statement
-  replaces cleanly. Nominal values are **opaque**: `let q: point = (1, 2)`
-  is refused, and `First(p)` or `let (x, y) = p` do not pierce the tag —
-  named fields come back out through the new **`.` accessor** and values
-  through `match p { point(x, y) => x + y }`. `p.x` — a new postfix field
-  clause lowering to a new **`Field`** operator — reads one named field
-  through the type's definition (record bodies via the payload, named-tuple
-  bodies by position), and on plain records and dictionaries `d.x` is
-  exactly `d["x"]`, absence marker included; it deliberately does *not*
-  unlock collection access on nominal values, numbers never take a field
-  (`2.x` stays a multiplication, `1..5` stays a range), and `Field` compiles
-  where the underlying access compiles (a named-tuple nominal lowers to a
-  positional component access — a GLSL/WGSL swizzle, a JavaScript index —
-  and everything else keeps `At` parity, declines included). Equality is
-  structural over the tag and constructors are injective, so
-  `point(1, 2) == point(1, 2)` is `True` while `point(1, 2) == (1, 2)` and
-  `polar(1, 2) == point(1, 2)` are `False`. The tag is **erased when
-  compiling**: `meters(x)` compiles to exactly the compiled `x`, and
-  `point(x, y)` compiles wherever a `Tuple` does, to the same code (a
-  JavaScript pair, a GLSL `vec2`) — a new type costs nothing at run time.
-  Declaring a type claims the type name and the value name **atomically**: a
-  collision with an existing binding in the same scope registers nothing and
-  returns an error value, an outer binding is shadowed, and re-running a
-  `type` statement replaces both halves, so notebook cells re-execute cleanly;
-  a type declared inside a block stays in the block. The statement lowers to a
-  new **`DeclareType`** operator — the MathJSON mirror of `ce.declareType()`:
-  `["DeclareType", "point", "'tuple<number, number>'"]` declares a nominal
-  type, and a trailing attributes dictionary with `alias -> True` (what
-  `type alias` emits) declares a structural alias; the host API takes a
-  `{ mint: false }` option for a declaration that must not claim the value
-  name. The generic-alias syntax is **reserved** in both forms:
-  `type point<T> = tuple<T, T>` parses and reports a dedicated
-  `type-variables-unsupported` diagnostic, so type variables can arrive
-  additively in a later release. Three fixes ride along: a **structural alias
-  is now usable, not just assignable** — an alias reference on the *left* of
-  a subtype question unfolds to its definition, so `m + 1` with
-  `m: meters` (an alias of `number`) and `First(p)` with `p: pt` (an alias of
-  a tuple) work instead of failing `incompatible-type` at canonicalization
-  (a **nominal** type stays opaque: it is deliberately not a subtype of its
-  definition); Cortex type annotations now resolve types declared on the host
-  engine (`ce.declareType('point', …)` followed by `let p: point = (1, 2)`
-  used to fail at parse time with `Unknown type "point"`); and the `Declare`
-  operator's evaluate path now resolves user-declared types (a box-route
-  `["Declare", "p", "'point'"]` used to throw). A malformed type body no
-  longer leaves a dangling unresolvable type reference behind in the scope.
-  Guard rails: because nominal identity is the type *name*, a `type`
-  statement inside a block that shadows an existing type reports a
-  `type-shadow` warning (the two would be indistinguishable) — a top-level
-  redeclaration stays silent, since that is how a re-run notebook cell
-  replaces its own definition; a constructor cannot be clobbered by
-  assignment (`point = 5` is refused like reassigning a constant); and a
-  type declared inside a function body survives escaping as the function's
-  inferred result type (the inferred signature now carries the resolved
-  type instead of re-parsing its name out of scope).
+- **Function signatures can declare effects.** Types and Cortex definitions
+  accept `pure`, `any`, or effect labels including `random`, `scope`, `network`,
+  `time`, and file-system effects. Inferred effects follow the function body;
+  explicit effects are checked contracts. Callback parameters can use effect
+  annotations to restrict accepted functions.
 
-- **A `PointList` with collection-valued components now compiles on the
-  JavaScript target**, emitting a shortest-zip construction (`Math.min` over the
-  source lengths — the ratified pairing-regime contract) with every component
-  hoisted and evaluated exactly once. An `unknown`-typed component that turns
-  out to hold a list at run time yields `NaN` components (the self-describing
-  absence convention) instead of malformed points; a statically infinite source
-  fails closed at compile time; when `iterationBudget` is set it also caps
-  (truncates) the zip length — a partial point list draws, unlike
-  `Sum`/`Product`'s `NaN` poisoning. On the GPU targets, where a runtime-length
-  list of points has no expression-level representation, the coordinate
-  accessors instead **project**: `PointY(PointList(-6, v))` with `v` a
-  `vector<3>` compiles to `v`, and a scalar slot broadcasts (`vec3(-6.0)`);
-  mixed source lengths truncate by swizzle. On the JavaScript target, `PointZ`
-  (and `PointX`/`PointY`) over a point missing that coordinate now yields `NaN`,
-  matching the interpreter's absence marker; on the GPU targets a missing
-  coordinate stays a compile-time decline (fail closed, by design). This opens
-  whole-artifact compilation (and CSE) for point-list-bearing documents that
-  previously failed compile outright. Design:
-  `docs/plans/2026-07-31-pointlist-compile-design.md`.
+- **Operator definitions accept an `effects:` field.** The existing `pure` and
+  `drawsRandom` properties remain supported as shorthand.
 
-- **Function signatures can now state their effects.** A function type accepts
-  an **effect specifier** between the argument list and the arrow —
-  `(real) random -> real`, `(string) network scope -> string`,
-  `(real) any -> real`. The labels are a closed, versioned set of nine:
-  `console` (host console output), `entropy` (unseeded, non-replayable
-  nondeterminism), `environment` (host environment data — navigator, locale),
-  `fs_read`, `fs_write`, `network`, `random` (draws from the ambient seeded
-  stream), `scope` (mutates a binding that outlives the call), and `time` (reads
-  the host clock). `any` is the top — "unknown effects" — and an **empty slot
-  means pure**, so every existing type string keeps its meaning. `pure` is the
-  keyword for the explicitly-stated empty set and it **round-trips**: a
-  declared-pure signature serializes as `(real) pure -> real`, so re-declaring
-  from a serialized signature re-establishes the purity contract instead of
-  demoting it to the inferred track. An _inferred_ pure signature has no
-  statement to preserve and still serializes as `(real) -> real`. Canonical
-  serialization orders labels alphabetically, and parsing accepts any order.
-  The grammar fails closed: an unknown label, a duplicate label, or
-  `any`/`pure` mixed with other labels is a type error rather than a silently
-  weakened contract. The slot sits between a mandatorily parenthesized argument
-  list and its arrow, so it is positionally isolated and can never change the
-  parse of an existing type string.
+- **Expressions and function types expose effects directly** through
+  `expr.effects` and `type.effects`. Effect-discharging operators such as
+  `WithRandomSeed` can absorb an effect, while `Hold` defers the effects of its
+  contents until release.
 
-  ```js
-  ce.type("(real) scope random -> real").toString();
-  // ➔ "(real) random scope -> real"    (canonical, alphabetical)
+#### Cortex language
 
-  ce.type("(real) pure -> real").toString();
-  // ➔ "(real) pure -> real"            (a stated purity contract round-trips)
+- **Function definitions accept literal parameters**, including strings,
+  booleans, finite numbers, `NaN`, and infinities. Unicode mathematical symbols
+  such as `π`, `∞`, `ⅈ`, and `ℝ` now resolve to their standard constants or
+  sets. Non-finite literal names are reserved; verbatim identifiers remain
+  available when those spellings are needed as names.
 
-  ce.type("(real) -> real").toString();
-  // ➔ "(real) -> real"                 (unstated: effects stay inferred)
+- **`match` supports inclusive numeric range patterns**, including negative and
+  infinite bounds. Range patterns can be combined with alternatives and guards
+  and compile on every target.
 
-  ce.type("(real) rndm -> real");
-  // ➔ throws: Unknown effect label `rndm`
-  ```
+- **Errors can be handled in Cortex.** `match` can catch error values, and the
+  new held predicate `IsError(x)` detects errors without propagating them.
+  Propagated errors include a non-rendered trace available through MathJSON and
+  the error-trace APIs.
 
-- **Effects are inferred from a function's body, and an explicit statement is a
-  checked contract.** A **bare arrow** puts effects on the _inferred_ track, the
-  effects-axis analog of an inferred type: the engine derives them from the body
-  and re-derives them on every re-assignment. Declaring
-  `ce.declare("fib", { type: "(number) -> number" })` fixes the parameter and
-  result types as a contract while leaving effects free, so assigning a body
-  that increments an outer counter is accepted and revises the stored effects to
-  `scope`; assigning a pure body afterwards revises them back. An **explicit
-  statement** — a non-empty specifier, the `pure` keyword, or the new `effects:`
-  definition field — is instead a contract every assigned body must satisfy
-  (`inferred ⊆ declared`; over-declaring is allowed, so a pure body under a
-  `scope` contract is fine). A violation yields an `incompatible-type` error and
-  the definition is not installed:
+- **The structural equality operator `===` now evaluates.** It performs total,
+  exact structural comparison, including for symbolic expressions, `Missing`,
+  and `NaN`.
 
-  ```js
-  ce.declare("g", { type: "(number) pure -> number" });
-  ce.box(["Assign", "g",
-    ["Function", ["Block", ["Assign", "c", ["Add", "c", 1]], "n"], "n"]
-  ]).evaluate();
-  // ➔ Error(ErrorCode("incompatible-type", "pure effects", "scope effects"))
-  ```
+- **`Count` accepts either a value or a predicate**, and **`Table` accepts tuple
+  iterator specifications**. Tuple and brace iterator forms now behave
+  consistently for `Sum`, `Product`, and `Integrate`.
 
-- **New `effects:` field for operator definitions**, taking an array of labels
-  or `'any'`. It is the precise counterpart of the legacy `pure` / `drawsRandom`
-  flags, which remain valid sugar and are now _derived getters_ over the effect
-  set: `pure` means "no impurity label", and `drawsRandom` means `random` was
-  explicitly declared. The translation is exact — `drawsRandom: true` becomes
-  `{random}`, and a bare `pure: false` becomes `any` (the flag promises only
-  "not pure", so it cannot invent a specific label). Effects supplied either way
-  land on the definition's signature, so
-  `{ signature: "(number) -> number", effects: ["scope"] }` reports
-  `(number) scope -> number`. Declarations that disagree with themselves fail
-  closed rather than picking a winner: an `effects:` field or an
-  effect-annotated signature that contradicts the legacy flags throws
-  `the declared effects and the 'pure'/'drawsRandom' flags disagree`, and
-  overload arms that differ _only_ by their effects are rejected, since
-  resolution dispatches on argument types and no call site could tell them
-  apart. Among arms that are equally specific by argument type, a smaller effect
-  set now wins the tie-break; per-application effects are the resolved arm's, so
-  `Roll(6)` and `Roll("a")` can differ in purity.
+- **Static type errors are reported by `cortex check` and before program
+  evaluation.** Checking canonicalizes without executing effects.
 
-- **A signature-typed parameter enforces an effect bound at the call boundary.**
-  Declaring `integ(f: (any) -> number, a, b)` states "callers pass a pure
-  callback": `integ(x |-> Random(), 0, 1)` is rejected with an
-  `incompatible-type` error value, with the same timing as ordinary argument
-  validation, and so is a symbol bound to a drawing function or an opaque
-  function typed `(any) any -> number` (an opaque function that will not state
-  its effects cannot prove absence). A tolerant bound lists what it accepts —
-  `f: (any) random -> number` admits both a drawing and a pure callback. The
-  bare `function` primitive is effect-top by definition, so operators that use
-  it are unaffected: `Map(xs, x |-> Random())` keeps working and simply projects
-  `random` onto the application. Operators can also enforce at run time instead,
-  by consulting `isPure` on the operand they are about to evaluate and returning
-  an error.
+#### Compilation
 
-- **Cortex definitions can state their effects** (Stage 3 of the effects
-  model). Effect labels sit in the specifier slot between the parameter list
-  and the arrow, in every definition form:
+- **`PointList` with collection-valued components compiles to JavaScript.** GPU
+  coordinate accessors can also project compatible point-list components.
 
-  ```cortex
-  let f: (real) random -> real                       // opaque declaration
-  g(f: (real) random -> real) = f(1)                 // parameter bound
-  function roll(n) random -> integer { Random(Range(1, n)) }
-  d(x) random -> integer = Random(Range(1, x))       // math-style definition
-  function tick() scope { count = count + 1 }        // effects only, return inferred
-  function sq(x) pure -> real { x * x }              // explicitly-pure contract
-  ```
+- **`At` compiles to GLSL and WGSL** for statically sized numeric collections,
+  including guarded dynamic scalar indexes and literal gathers or masks.
 
-  The declaration and parameter positions are ordinary type literals, so they
-  ride the existing type grammar; the definition forms lower the specifier onto
-  the function literal as a full-signature `Typed` ascription, and the effect
-  set is a checked contract — `function bad() pure -> integer
-  { Random(Range(1, 6)) }` reports an `incompatible-type` error value rather
-  than installing. Definitions round-trip through the Cortex serializer,
-  including the `pure` keyword; pure definitions serialize byte-identically to
-  before. To ascribe an effect-bearing function type as a plain _return_ type,
-  group it: `function mk(x) -> ((real) random -> real) { … }` returns a drawing
-  function, while the ungrouped spelling declares the definition's own
-  contract. An _anonymous_ literal carrying an effect contract — which has no
-  lambda spelling — serializes losslessly as an explicit
-  `Typed(body, "(x: unknown) random -> real")` call. In MathJSON,
-  `["Function", body, "'(n: integer) random -> integer'"]` signature-string
-  sugar now preserves the arrow's effects instead of discarding them.
+- **`D`, `Derivative`, and `ND` compile on all targets** when they can be
+  reduced to a compilable form.
 
-- **Effect-discharging operators.** An operator can declare that it _absorbs_ an
-  effect rather than re-emitting it. `WithRandomSeed` is the canonical case: it
-  discharges `random` on its body, so `WithRandomSeed(42, Random())` is a pure
-  expression — it really does replay identically — while a `scope` write inside
-  the frame passes straight through. `Hold` sits at the other end: its content
-  is never evaluated, so it contributes no effects at all, and they resurface at
-  `ReleaseHold`. Pure containers that only _store_ a function (`List`, `Tuple`)
-  contribute nothing latent either, so `List(randomF)` is pure to build and the
-  effect surfaces at whatever later invokes the element.
+- **Non-finite numeric literals compile to GLSL and WGSL.**
 
-- **New `expr.effects` and `type.effects` properties.** `isPure` answers
-  yes-or-no; these say _which_ effects, so a consumer can act on them — a
-  `scope` write invalidates a memo, `random` means the value will differ on
-  re-evaluation, `network` means evaluating may be slow or may fail. The two
-  properties are the two channels of the model. `expr.effects` is what
-  **evaluating** the expression does: `undefined` (no effects), `'any'`
-  (unknown), or the labels in alphabetical order. `type.effects` is the
-  **latent** set on an arrow — what fires if a value of that type is invoked —
-  reported as `undefined` (a bare arrow, on the inferred track), `[]` (a stated
-  `pure` contract), `'any'`, or the labels; an overload set reports the union of
-  its arms, and a non-callable type reports `undefined`.
+- **Python compilation supports collection equality and inequality.**
+  `Norm(matrix, 2)` now compiles with the interpreter's Frobenius-norm
+  semantics.
 
-  The distinction is producing versus invoking: evaluating a symbol bound to a
-  drawing function merely _yields_ the function, so it has no effects and stays
-  pure, while its type carries the draw. This is what keeps `List(randomF)` pure
-  to build, and it is why an operator that wants to reject an effectful
-  **callback** reads `op.type.effects`, while one that wants to reject an
-  effectful **operand it is about to evaluate** reads `op.effects`.
-
-  ```js
-  ce.parse("1 + x^2").effects;                     // ➔ undefined
-  ce.box(["Random"]).effects;                      // ➔ ["random"]
-  ce.box(["Assign", "q", 1]).effects;              // ➔ ["scope"]
-
-  ce.assign("rf", ce.box(["Function", ["Random"], "x"]));
-  ce.box("rf").effects;                            // ➔ undefined (producing)
-  ce.box("rf").type.effects;                       // ➔ ["random"] (invoking)
-  ce.box(["Map", ["List", 1, 2], "rf"]).effects;   // ➔ ["random"]
-  ```
-
-- **Cortex `match` gains range patterns.** A two-operand range in pattern
-  position — `0..90 => "acute"` in Cortex, `["Range", lo, hi]` in MathJSON — is
-  an inclusive numeric membership test rather than a structural shape: the case
-  selects when the subject is a real number with `lo ≤ s ≤ hi` (endpoints
-  compared with the matcher's tolerant number semantics), and any non-number
-  subject falls through. Bounds are numeric literals, including negative bounds
-  (`-5 .. -1`) and infinities (`0..Infinity` — "any non-negative number"); an
-  identifier or computed bound is a `range-pattern-bounds` diagnostic suggesting
-  a guard instead, and an inverted range (`10..1`) diagnoses as a dead case
-  (`range-pattern-empty`). Range cases are binding-free, so they compose with
-  `|` alternatives (`0..9 | 100..109 => …`) and guards, classify on the fast
-  tier of the match dispatch ladder, and compile on every target as two
-  comparisons (`s >= lo && s <= hi`). Deliberate carve-out: a literal `Range`
-  _value_ is no longer matchable structurally at the top level of a pattern
-  (nested positions keep the structural meaning).
-
-- **Errors can now be handled in-language.** Previously an `Error` value
-  poisoned every enclosing expression into staying inert — even
-  `match err { _ => "rescued" }` froze, so a failure could be produced but never
-  observed or recovered from. Three coordinated changes (design:
-  `docs/plans/2026-07-31-error-propagation-design.md`):
-  - **`match` decides on error subjects**, restoring its "always decides"
-    totality: literal and shape cases structurally fail against an error, and
-    `_`, bindings, and guards catch it — `match` is now the rescue construct.
-  - **New `IsError(x)` predicate** — holds its operand and returns `True` for an
-    error (or an expression embedding one), `False` otherwise.
-  - **Errors bubble through function application and `|>`**: applying a user
-    function to an error yields the bare error value instead of a frozen call —
-    `("a" + 1) |> f |> g` returns the underlying type error without invoking `f`
-    or `g`, and `f(err)` behaves identically (the `x |> f` ≡ `f(x)` equivalence
-    is preserved by construction). Built-in operators deliberately keep the
-    previous freezing behavior (`err + 1`, `Sin(err)` stay symbolic), and `NaN`
-    is _not_ affected — it is an ordinary number, and `NaN |> f` still invokes
-    `f` (so NaN-rescue idioms keep working). (See also the Breaking Changes
-    entry for the `Nothing`-argument and error-valued-`Pipe` result-shape
-    changes that accompany this.)
-
-- **Bubbled errors carry a provenance breadcrumb.** A bubbled `Error`'s last
-  operand is an `ErrorTrace` — the chain of
-  `ErrorFrame(operator, operand-index)` frames from the failure site to the
-  root, innermost first — so a host can still report _where_ the failure sat
-  (`x^2 + Ln("a") + 2x` → the error, with
-  `ErrorTrace(ErrorFrame("Ln", 1), ErrorFrame("Add", 2))`). Display stays
-  compact (`toString`/LaTeX render a traced error exactly as an untraced one);
-  read it via `.json` or the `errorTrace()`/ `errorFrames()` helpers. Errors
-  that never bubbled keep their historical 1- and 2-operand shapes byte for
-  byte, and `Error(c)` match patterns are unaffected. The Cortex `runtime-error`
-  diagnostic now includes the chain ("in `Ln` argument 1, in `Add` term 2").
-
-- **Static type diagnostics in `cortex check` and at run time.**
-  Canonicalization-time type errors (`"a" + 1`) are now reported as
-  `static-type-error` diagnostics — by `cortex check` (which canonicalizes
-  without evaluating: no random draws, no loop iterations) and by the run
-  path/MCP before evaluation begins, anchored to the offending statement. The
-  program still evaluates afterwards (errors-as-values is unchanged); `check`
-  exits non-zero on static errors.
-
-- **The `Same` operator (`===` in Cortex) now evaluates.** It was parsed but
-  never defined, so `1 === 1.0` stayed inert. `Same` is the total, structural
-  complement of the semantic `Equal`: operands evaluate, then compare pairwise
-  with structural identity — `Sqrt(2) === Sqrt(2)` is `True`,
-  `Sqrt(2) === 1.4142135623730951` is `False` where `==` is `True` (tolerant),
-  and `x === y` on free symbols is `False` where `==` stays inert. Number leaves
-  compare by exact value (`0.5 === 1/2` is `True` — unlike Wolfram's
-  `SameQ[1, 1.]`, as documented in the Mathematica on-ramp guide),
-  `Missing === Missing` and `NaN === NaN` are `True` (totality — `==` on `NaN`
-  remains `False`), and the form is n-ary (`1 === 1 === 1`). Not compilable
-  (fails closed).
-
-- **`Count` accepts a value or a predicate.** `Count(xs, v)` counts the elements
-  structurally identical to `v` (`Count([1, 1, 2], 1)` is `2`), and
-  `Count(xs, f)` with a function literal counts the elements for which the
-  predicate holds (`Count(xs, k |-> k > 2)`), sharing `Filter`'s predicate
-  contract. The one-argument cardinality form is unchanged.
-
-- **`Table` accepts tuple iterator specs.** `Table(k^2, (k, 1, 5))` and
-  stepped/descending forms now work like the brace spelling `{k, 1, 5}`. The
-  tuple and brace spellings are now interchangeable for every iterator operator:
-  the step in `(index, lower, upper, step)` is honored by `Sum`/`Product`
-  (`Sum(k, (k, 1, 10, 2))` → `25`, matching `Sum(k, {k, 1, 10, 2})`), and a
-  4-element spec handed to `Integrate` — which has no step slot — goes inert in
-  both spellings instead of silently computing a wrong (sign-flipped) definite
-  integral.
-
-- **On-ramp guides for Python and Mathematica users.** Two new Cortex doc pages
-  — `/cortex/from-python/` and `/cortex/from-mathematica/` — map familiar idioms
-  to Cortex side by side (variables, collections, control flow and pattern
-  matching, symbolic math, strings), with explicit "familiar" and "traps"
-  sections (1-based indexing, `//` is a comment, `=` vs `==`,
-  symbolic-by-default, errors-as-values, `->` is `KeyValuePair` so `ReplaceAll`
-  takes `Rule(x, 3)`).
-
-- **`At` now compiles on the GPU targets** (GLSL and WGSL). A scalar index
-  over any statically-sized numeric base — a declared `vector<N>` (any
-  N ≥ 2, `float[N]`/`array<f32, N>` past 4), a numeric tuple, a literal
-  list — lowers to a guarded dynamic index (`_gpu_atN` preamble helpers)
-  honoring the full contract: 1-based, negative counts from the end, and
-  `0`/out-of-range/non-integer/NaN/±∞ answer the target's NaN spelling —
-  never a clamp, and never GLSL's undefined out-of-bounds access (the
-  guard runs entirely in float space, so the `int` cast is unreachable
-  for anything unrepresentable). A literal index folds to a swizzle
-  (`v.y`) or, over a literal base, to the element itself; a literal
-  integer gather folds to a swizzle (`At(v, [1,3])` → `v.xz`) or a
-  constructor with NaN slots, and a literal boolean mask of matching
-  length folds the same way. Because `At`'s result type is a scalar,
-  the lowering composes under arithmetic (`At(v, k) * 2`,
-  `Sin(At(v, k))`) with no shape-gate friction. Runtime-valued masks
-  (result length is not static), dynamic gathers, and point-list bases
-  stay fail-closed with discriminated reasons.
-  Design: `docs/plans/2026-08-01-at-gpu-compile-design.md`.
-
-- **CSE now binds repeated subtrees headed by built-in lowerings** such as
-  `PointList`. The emission-purity gate (G1b) excluded any subtree whose
-  operator definition carries a `compile` handler — the right call for the
-  caller-supplied `ce.declare(name, { compile })` channel, whose emitted
-  code's purity is unknowable, but over-broad for engine-authored built-in
-  handlers, which are the same trust class as the built-in table mappings
-  (`Sin`, `Add`) that were never excluded. A definition now counts as
-  caller-supplied only when it is not the system-scope binding (by
-  identity), so a user handler — including one shadowing a built-in name —
-  stays ineligible, and impure subtrees remain excluded by the purity gate
-  regardless. With this, the corpus's highest-value repeats
-  (`PointList`-shaped, per the CSE design §5.3) actually bind.
-
-- **`D`, `Derivative` and `ND` now compile** on every target. A derivative
-  declined everywhere even though evaluating it first yields a compilable closed
-  form (`D(x^2, x).evaluate()` is `2x`); the lowering now obtains that form and
-  compiles it, declining cleanly when there is none (an opaque user function, or
-  `ND` at a symbolic point). Consumers no longer need their own
-  differentiate-before-compile pre-pass.
-
-- **Non-finite literals compile to GPU targets.** `NaN` and `±∞` threw, because
-  the GPU number formatter had no way to reach the `gpuNaN()` mechanism the
-  masked `When`/`Which` branches already used. A literal and a masked branch now
-  share one spelling, so they cannot drift apart. GLSL gains `_gpu_inf()`
-  alongside `_gpu_nan()` — a bit pattern behind an overridable preamble helper,
-  emitted only when referenced — and WGSL inlines the equivalent bitcast.
-  Deliberately not `1.0 / 0.0`, which a fast-math driver is licensed to fold.
+- Added Cortex transition guides for Python and Mathematica users.
 
 ### Improvements
 
-- **Did-you-mean suggestions for Wolfram Language and JavaScript names.** An
-  unknown call to `Total`, `Select`, `Cases`, `MemberQ`, `Accumulate`,
-  `RandomReal`, `RandomInteger`, `Nest`, `NestList` — or to the JavaScript Array
-  methods `some` and `every` — now names the closest Cortex operator (`Sum`,
-  `Filter`, `Contains`, `Scan`, `Random`, `Iterate`, `Any`, `All`) in the
-  `unknown-function` warning — pointers, not aliases: the library namespace
-  stays Cortex-native. The `Contains` and `Any` descriptions now cross-reference
-  each other (`Contains(xs, v)` is the structural-identity specialization
-  `Any(xs, (e) |-> e === v)`).
+- Unknown Wolfram Language and JavaScript collection-function names now suggest
+  the corresponding Cortex operators.
 
-- **Tighter static result types where the value is provably real** (type audit).
-  `Tan`/`Sec`/`Csc`/`Cot`/`Coth`/`Csch` claimed the top type `number`
-  unconditionally. A number literal cannot land on a nonzero pole — the poles
-  are irrational multiples of π — so literals now claim `finite_real` (`Tan(2)`,
-  `Csc(2)`), with the literal-reachable pole at 0 still widening the zero-pole
-  four (`Csc(0)`) and π-multiple constants staying `number` (`Tan(π/2)` is
-  `~oo`). A symbolic real follows the generic-point convention:
-  `Tan(r)`/`Sec(r)` claim `finite_real`; `Csc(r)` narrows only once the sign is
-  known (`r > 0`). Also narrowed: `Max`/`Min`/`Supremum`/ `Infimum` join their
-  operand types when every operand is a scalar number (`Max(r, k)` with
-  `r: real`, `k: integer` is `real`, was `number` — a collection operand still
-  widens, per the missing-data absorption ruling); `Sinh`/`Cosh` at a real ±∞
-  claim the provable `non_finite_number` while `Tanh`/`Sech` (limits ±1, 0) and
-  `Coth`/`Csch` claim `finite_real` there; `Pochhammer` with a non-negative
-  integer count claims integer/rational/real following its base; `Rank` always
-  claims `finite_integer`.
+- Static result types are tighter for trigonometric, hyperbolic, extrema,
+  Pochhammer, and collection-rank operations when the result can be proven real
+  or finite.
 
-### Bug Fixes
+- User-declared type names now resolve consistently in annotations, signatures,
+  type predicates, collection operators, and MathJSON declarations. Literal
+  value types and bounded numeric refinements now accept their own values.
 
-- **A bounded `Take` knows it is finite.** `Take(xs, n)` with a finite literal
-  `n` reports itself finite even when the source's count is unknown, so
-  `ListFrom(Take(Filter(Range(1, Infinity), IsPrime), 10))` now materializes to
-  the first ten primes under plain `evaluate()` instead of staying symbolic. The
-  exact count remains unknown until enumeration (the source may exhaust early) —
-  finiteness and count are separate questions. Previews of
-  finite-but-unknown-length collections also render correctly (a latent
-  placeholder bug in materialization).
+- `Range` and `Linspace` can enumerate exact symbolic bounds and steps that have
+  a numeric value, such as multiples of π. Bracket range syntax also recognizes
+  more exact arithmetic progressions.
 
-- **The bare wildcard `_` is the identity function** in a function slot:
-  `Map(xs, _)` returns the elements unchanged, `ChunkBy(xs, _)` groups runs of
-  equal elements, `Sort(xs, _)` sorts by identity key. Only the bare `_`
-  desugars; `_1`/`_2`/named wildcards are unchanged.
+- `Sum` and `Product` evaluate pure, closed bound expressions such as
+  `Length(P)` while retaining symbolic behavior for genuinely free bounds.
 
-- **Bare predicate shorthand now works on every function-slot operator.** A
-  wildcard-bodied expression like `["Greater", "_", 5]` was accepted as a
-  predicate by the lazy collection operators (`Filter`, `Map`, `Any`, …) but
-  rejected with a type error by the eager ones — `CountIf`, `IndexWhere`,
-  `Find`, `Position`, `Sort`, `Ordering`, `GroupBy`, `ChunkBy`, `Fill` and
-  `Partition`. All now desugar the shorthand identically. `Count(xs, pred)` also
-  dispatches a wildcard-bearing boolean expression as a predicate rather than
-  counting occurrences of it as a value (`Count(xs, True)` still counts values).
+- `Distance` accepts the same point-or-point-list union types as related point
+  operators and reports a clear error if a point list reaches scalar distance
+  evaluation, in both interpreted and compiled code.
 
-- **`Iterate` no longer throws on a unary function.** Its function is applied
-  `f(index, acc)`, and a one-parameter function (the documented `Iterate(2_, x)`
-  shorthand) hit a host-escaping arity throw from every access path; unary
-  functions now receive the accumulator alone. Also fixed: `Iterate`'s indexed
-  access was off by one relative to its iterator — `at(1)` returned the initial
-  value while iteration's first element was `f(1, initial)`; both now agree (the
-  initial value is not emitted), which changes `Take(Iterate(f, x), n)` results
-  accordingly.
+### Performance
 
-- **Compiled `Mod` and `Remainder` tore compound dividends by operator
-  precedence** (JavaScript, WGSL and Python targets). The emission templates
-  spliced the compiled dividend unparenthesized next to `%`, so
-  `Mod(x + 29, 900)` compiled to `x + 29 % 900` — i.e. `(x + 929) % 900`, which
-  is congruent to the correct Euclidean result for `x ≥ −929` (why non-negative
-  parity sweeps never caught it) and wrong below. Compiled `Remainder` with a
-  compound dividend was wrong for essentially all inputs (`Remainder(x + 29, 9)`
-  emitted `x + 29 - 9 * Math.round(x + 29 / 9)`; the Python target had the same
-  template). Operands are now parenthesized before splicing; regression pins
-  straddle the `x = −929` boundary and compare against the interpreter. The same
-  hardening was applied to the sibling `Divide`-chain and `Negate` fallback
-  handlers on the JS/GPU/Python targets (the GPU `Divide` handler is reachable
-  for vector division, where a compound numerator would have torn the same way).
+- Numeric integration retains a sufficiently accurate deterministic quadrature
+  estimate instead of replacing it with a much slower Monte Carlo estimate. This
+  substantially improves nested and difficult integrals.
 
-- **A sweep of unsound static type claims** (type audit): several operators
-  claimed a result type that excludes values they actually produce, so compiled
-  code guessed real and emitted NaN. Fixed: `Haversine`/`Degrees`/ `DMS`/`Hypot`
-  on non-finite or non-real arguments (`Hypot(∞, 2) = +∞` under a `finite_real`
-  claim — and a point operand with a non-finite component was dropped from the
-  computation entirely); `Real`/`Imaginary`/`Argument` (`Re(±∞) = ±∞`,
-  `Arg(~oo)` is NaN — all claimed `finite_real`); `Erf`/ `Erfc`/`Erfi` and the
-  `SinIntegral`/`CosIntegral` family for operands not provably real; `ErfInv`
-  outside `(−1, 1)` (NaN, claimed `real`) and at the ±1 poles (±∞, now the
-  provable `non_finite_number`); `EllipticK`/ `EllipticE` above m = 1 (finite
-  complex, claimed `finite_real`), and likewise `EllipticF`/`EllipticPi` on the
-  complex side of their real domains (`F(1.5|2)`), `EllipticPi` at its n = 1
-  pole (`Π(1|m) = +∞`), and `AGM` with a negative operand (`AGM(1, −2)` is
-  complex); `InverseHaversine` outside `[0, 1]`; `Binomial` — and its alias
-  `Choose`, which shares the evaluator and now shares the type handler — for
-  real, infinite, or Γ-pole arguments (both claimed `finite_integer`
-  unconditionally, though `Binomial(0.5, 2.5)` is real and `Binomial(∞, 2)` is
-  NaN).
+- Lazy function-applying collections, including `Map`, `Filter`, `FlatMap`,
+  `Scan`, `Tabulate`, and `Iterate`, memoize evaluated elements per instance.
+  Cache invalidation now follows actual symbol and configuration dependencies,
+  so unrelated assignments no longer discard cached collection elements.
 
-- **Domain classification is exact at boundary values.** Two rounding hazards in
-  the bounded-domain type machinery: the machine `.re` of an exact value just
-  past a boundary rounds onto it (`EllipticK(1 + 10⁻²⁰)` classified as the +∞
-  pole), and the tolerance-based `isEqual` placed such values "at" a pole as
-  well. Number literals now classify with exact comparisons —
-  `Artanh(1 + 10⁻²⁰)` types `finite_complex`, `Artanh(1)` stays
-  `non_finite_number`.
+- Exact evaluation of sufficiently large, bounded integer `Map` broadcasts can
+  use compiled float64 arithmetic when exactness is statically guaranteed.
 
-- **Angle-unit conversion no longer drops the imaginary part of a complex
-  angle.** In `deg`/`grad`/`turn` mode the radians conversion read only the real
-  part: `arcsin(2.5)` in degree mode returned the real `90`, silently discarding
-  `−89.77…i`. The conversion is linear, so it now scales the whole complex value
-  (an imaginary part within tolerance still chops to the real path), and
-  interpreted and compiled results agree again.
+- Compiled function bodies reuse repeated pure user-function calls, avoiding
+  exponential work in recursive definitions. Common-subexpression elimination
+  now also recognizes engine-provided compiled operators.
 
-- **`LCM(0, 0)` is `0`** — it went through `0·0/gcd(0, 0)` and returned NaN (or
-  threw, on the bigint kernel), contradicting `lcm(0, n) = 0`.
+### Issues Resolved
 
-- **`SigmaMinus1` honors the exactness contract**: `SigmaMinus1(2)` returned the
-  float `1.5` under plain `evaluate()`; it now returns the exact `3/2` (and
-  `217/100` for 100), numericizing only under `.N()`.
+#### Parsing and serialization
 
-- **`Chop` keeps exact operands exact.** `Chop(2/3)` returned
-  `0.6666666666666…`; an exact operand now passes through unchanged under
-  `evaluate()` unless something actually chops (`Chop(10⁻²⁰)` is still `0`, and
-  a mixed exact complex with one tiny component falls through to the
-  component-wise numeric chop).
+- Chained postfix indexes parse uniformly as nested `At` expressions for
+  symbols, subscripted expressions, and literal collections.
 
-- **`Max`/`Min` over a single collection returned a vector on GPU targets
-  instead of reducing.** `Max([1,2,3])` compiled to `vec3(1.0, 2.0, 3.0)` where
-  the interpreter and the JavaScript target both give `3` — valid shader source
-  computing the wrong value. It now folds pairwise to a scalar, destructuring an
-  aggregate constructor or swizzling a static `vecN`, and fails closed on a
-  matrix or a runtime-length array. `ElementMax`/`ElementMin` are genuinely
-  componentwise and are unchanged.
+- Ranges with compound first anchors, such as `n+1..n+10`, `[2n..3n]`, or
+  `x = m+n...m+n+4`, bind the whole anchor expression instead of absorbing part
+  of it into the surrounding addition, multiplication, or negation. This applies
+  in brackets, bare expressions, and relations. A parenthesized range opts out:
+  `n+(1..10)` remains a broadcast addition.
 
-- **String-mapped broadcastable heads no longer fail closed over a list on the
-  JavaScript target.** `Sign`, `Arctan2`, `Hypot` and `Sinc` are mapped to a
-  scalar helper (`Math.sign`, `Math.atan2`) with no array codegen, so a list
-  operand was refused, while function-mapped heads (`Sin`, `Abs`, `Floor`, `Ln`)
-  broadcast normally. They now broadcast through a synthesized closure.
+- Dictionary-valued function results preserve parameter bindings through
+  MathJSON round trips, including in recursive functions.
 
-- **Invalid shader source is no longer emitted for mismatched operand shapes.**
-  A collection or matrix operand reaching a builtin that cannot accept it
-  produced source no driver accepts, behind `success: true` — `atan(vec3, 1.0)`,
-  `pow(float, vec3)`, `length(vec2(float[1](3.0), 4.0))`, `sin(mat2(…))`. These
-  now fail closed, per-language: GLSL's scalar-tailed overloads
-  (`min`/`max`/`clamp`/`mix`/`step`/`smoothstep`/`mod`) are accepted where WGSL,
-  which lacks them, declines.
+- Roots serialized with solidus or quotient notation now delimit a `Power` base
+  correctly.
+
+- Invalid multi-argument `Exp` and `Exp2` expressions remain well-formed inert
+  expressions with an arity error.
+
+#### Evaluation and functions
+
+- `At` reports incompatible dimensions when more indexes are supplied than a
+  collection can consume.
+
+- `match` inside a function uses the current call's parameters rather than
+  retaining values from the first call.
+
+- Seeded-random frames no longer incorrectly mark enclosing function literals or
+  `Map` callbacks as random.
+
+- Purity and effect results for recursive functions are stable and no longer
+  depend on which expression is queried first.
+
+- Compiled lambdas with unbound symbols, including symbols reached through
+  assigned values or function bodies, decline cleanly instead of throwing a
+  JavaScript `ReferenceError`. Interpreter fallback numericizes symbolic results
+  and is also available for failed interval compilation.
+
+- Numeric use of a list-valued function no longer widens its inferred result to
+  a scalar or causes compiled reductions to use scalar arithmetic on arrays.
+
+- `FindFit` and `FindRoot` observe ambient time limits during expensive
+  iterations and return their best result with `timedOut: True` when possible.
+
+- Differentiating control-flow or binding operators such as `Which`, `Sum`, and
+  `Integrate` stays symbolic instead of throwing or producing an invalid
+  slot-wise derivative.
+
+#### Collections
+
+- Bounded `Take` expressions are recognized as finite even when the source
+  length is unknown, allowing finite prefixes of infinite filtered collections
+  to materialize.
+
+- Bare `_` works as the identity function in function slots, and wildcard
+  predicate shorthand is accepted consistently by eager and lazy collection
+  operators.
+
+- Unary `Iterate` functions receive the accumulator, and indexed access now
+  agrees with iteration about the first emitted value.
+
+- Collection operators resolve evaluable numeric arguments such as `N-1`. They
+  remain symbolic, rather than using a default, when a required numeric argument
+  is unresolved.
+
+- `Partition` distinguishes unresolved integer sizes from predicates and no
+  longer throws on an unbound size.
+
+- Seeded comprehensions materialize consistently with other lazy collections.
+
+#### Numerical evaluation and types
+
+- Numeric roundoff cleanup is independent of `ce.tolerance`; comparison and
+  explicit `Chop` operations continue to honor the configured tolerance.
+  Compiled `Chop` now uses that tolerance, and exact operands remain exact.
+
+- The reported uncertainty of an iterated numeric integral includes inner-level
+  quadrature error. Previously only the outermost level's own estimate was
+  reported, which could present a result with inner error as exact.
+
+- Bignum `Sin` and `Cos` preserve small representable values near zero
+  crossings.
+
+- Static types for non-finite, complex, and out-of-domain results were corrected
+  across arithmetic, special functions, elliptic functions, inverse
+  trigonometric functions, and complex component operators.
+
+- Domain boundaries are classified with exact comparisons for exact literals.
+
+- Non-radian angle conversion preserves the imaginary component of complex
+  results.
+
+- `LCM(0, 0)` returns `0`, and `SigmaMinus1` preserves exact results under
+  `evaluate()`.
+
+#### Compilers
+
+- Compiled `Mod`, `Remainder`, division, and negation now parenthesize compound
+  operands correctly across JavaScript, GPU, and Python targets.
+
+- Impure operands used by compiled remainder, modulus, and selected GPU
+  functions are evaluated exactly once.
+
+- Broadcasts over literal lists emit target-appropriate code for JavaScript,
+  Python, GLSL, and WGSL instead of leaking JavaScript syntax into other
+  targets.
+
+- GPU compilation rejects unsupported alpha colour constructors, non-finite loop
+  bounds, mismatched shapes, and scalar-only operations on vectors or matrices
+  instead of emitting invalid or silently incorrect shaders.
+
+- GPU `Max` and `Min` over one collection reduce to a scalar instead of
+  returning the input vector.
+
+- JavaScript compilation now broadcasts `Sign`, `Arctan2`, `Hypot`, and `Sinc`
+  over lists.
+
+- Complex constant folding is consistent with `realOnly`: non-real constants
+  produce `NaN` in real-only mode and principal complex values when complex
+  compilation is supported.
+
+- Compiled `InverseHaversine` supports complex results on JavaScript and reports
+  an appropriate complex static type for symbolic inputs.
 
 ## 0.99.0 _2026-07-30_
 
