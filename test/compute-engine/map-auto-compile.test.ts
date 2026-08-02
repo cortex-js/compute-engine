@@ -5,6 +5,7 @@ import {
   _resetMapAutoCompileStats,
 } from '../../src/compute-engine/library/map-auto-compile';
 import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
+import { _clearElementMemoForTest } from '../../src/compute-engine/boxed-expression/collection-element-memo';
 
 /**
  * Auto-compilation of lazy-`Map` element lambdas on numeric drains
@@ -82,6 +83,10 @@ describe('Map auto-compile', () => {
     expect(stats.attempts).toBe(1);
 
     _resetMapAutoCompileStats();
+    // Defeat the element memo (the layer ABOVE this one — item 126), which
+    // would otherwise serve the second drain without consulting the compiled
+    // function at all.
+    _clearElementMemoForTest(m.N());
     drainRe(m.N());
     expect(stats.attempts).toBe(0); // cache hit — no fresh compile
     expect(stats.compiledHits).toBe(150);
@@ -201,6 +206,10 @@ describe('Map auto-compile', () => {
     );
 
     _resetMapAutoCompileStats();
+    // Defeat the element memo (item 126), which also survives the
+    // interleaved Sum and would serve the drain without touching the
+    // compiled function; this test pins the COMPILE cache's behavior.
+    _clearElementMemoForTest(m.N());
     drainRe(m.N());
     expect(stats.attempts).toBe(0);
     expect(stats.recompiles).toBe(0);

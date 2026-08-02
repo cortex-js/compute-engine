@@ -78,6 +78,9 @@ interface BaseCollectionHandlers {
   isEmpty?: (collection: Expression) => boolean | undefined;
   isFinite?: (collection: Expression) => boolean | undefined;
   isLazy?: (collection: Expression) => boolean;
+  /** Opt-in to per-instance element memoization (mirror of the flag in
+   * `types-definitions.ts`, where it is documented). */
+  elementMemo?: boolean;
   contains?: (
     collection: Expression,
     target: Expression

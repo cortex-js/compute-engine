@@ -44,6 +44,11 @@ import {
 } from '../collection-utils.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
+  validElementMemo,
+  elementMemoRecordingStream,
+  elementMemoAt,
+} from './collection-element-memo.js';
+import {
   isNumber,
   isFunction,
   isString,
@@ -1510,6 +1515,27 @@ export class BoxedFunction
     // inert handlers: enumerate nothing rather than iterate a scalar.
     if (this._optedOutOfCollection) return (function* () {})();
 
+    // Element memo (Tycho item 126): a flagged lazy operator serves a
+    // repeated walk of an unmodified instance from its cached elements
+    // instead of re-evaluating the element function.
+    const memoized = this.operatorDefinition?.collection?.elementMemo === true;
+    const memoEngine = this.engine;
+    if (memoized) {
+      const cached = validElementMemo(this);
+      if (cached) {
+        const elements = cached.elements;
+        return (function* () {
+          let i = 0;
+          for (const el of elements) {
+            // Match the live path's deadline cadence — a capped cache can
+            // still hold 100k elements.
+            if ((++i & 0xff) === 0) checkDeadline(memoEngine._deadlineFrame);
+            yield el;
+          }
+        })();
+      }
+    }
+
     let iter = this.operatorDefinition?.collection?.iterator?.(this);
 
     if (!iter) {
@@ -1529,7 +1555,7 @@ export class BoxedFunction
     }
 
     const engine = this.engine;
-    return (function* () {
+    const source: Iterator<Expression, undefined> = (function* () {
       let result = iter.next();
       let i = 0;
       while (!result.done) {
@@ -1539,7 +1565,18 @@ export class BoxedFunction
         yield result.value;
         result = iter.next();
       }
+      return undefined;
     })();
+
+    // A memoized instance records this walk and commits it as the element
+    // cache if (and only if) it is drained to completion. A provably
+    // infinite instance (`Iterate`, a `Map` over an infinite `Range`) can
+    // never complete a drain, so recording would be pure buffering waste —
+    // skip it. (`undefined` finiteness still records: the drain may finish.)
+    if (memoized && this.isFiniteCollection !== false)
+      return elementMemoRecordingStream(this, source);
+
+    return source as Generator<Expression>;
   }
 
   at(index: number): Expression | undefined {
@@ -1553,6 +1590,7 @@ export class BoxedFunction
     // normalize negatives themselves. Normalizing here makes negative indexing
     // uniform (so `Last`, `At(xs, -1)`, and `Reverse`'s back-to-front walk all
     // work) without materializing infinite or unknown-length sources.
+    let idx = index;
     if (index < 0) {
       // A negative index only makes sense for a finite collection with a known
       // count. Infinite or unknown-count sources stay undefined (no
@@ -1560,12 +1598,22 @@ export class BoxedFunction
       if (this.isFiniteCollection !== true) return undefined;
       const count = this.count;
       if (count === undefined || !Number.isFinite(count)) return undefined;
-      const normalized = count + 1 + index;
-      if (normalized < 1) return undefined;
-      return handler(this, normalized);
+      idx = count + 1 + index;
+      if (idx < 1) return undefined;
     }
 
-    return handler(this, index);
+    // Element memo: serve from a covering cached prefix — AFTER negative
+    // normalization, so `at(-1)` on a walked impure instance returns the
+    // memoized last element rather than re-deriving (a fresh draw would
+    // break one-instance-one-draw-set coherence). On a miss (or an
+    // uncovered index) fall through to the handler's own random-access path
+    // unchanged — a first `at(n)` is never converted into an O(n) fill.
+    if (idx >= 1 && this.operatorDefinition?.collection?.elementMemo === true) {
+      const cached = elementMemoAt(this, idx);
+      if (cached !== undefined) return cached;
+    }
+
+    return handler(this, idx);
   }
 
   get(index: Expression | string): Expression | undefined {

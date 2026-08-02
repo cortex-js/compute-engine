@@ -2245,6 +2245,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      elementMemo: true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.nops > 2)
@@ -2489,6 +2490,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      elementMemo: true,
       // Structural, O(1), never walks the source: a filter of a finite source
       // is finite; a filter of an infinite/unknown source may be finite or
       // infinite, so the finiteness is unknown (`undefined`). Providing an
@@ -2806,6 +2808,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      elementMemo: true,
       count: (expr) => (isFunction(expr) ? expr.op1.count : undefined),
       isEmpty: (expr) =>
         isFunction(expr) ? expr.op1.isEmptyCollection : undefined,
@@ -2944,6 +2947,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      elementMemo: true,
       // Length is unknown without enumeration. For a finite source we can count
       // the taken prefix (bounded); an infinite source stays unknown.
       count: (expr) => {
@@ -3058,6 +3062,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      elementMemo: true,
       // For a finite source we can count the retained suffix (bounded); an
       // infinite/unknown source stays unknown.
       count: (expr) => {
@@ -3140,6 +3145,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      elementMemo: true,
       count: (expr) =>
         isFunction(expr) && expr.op1.isEmptyCollection === true ? 0 : undefined,
       isEmpty: (expr) =>
@@ -5187,6 +5193,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // a million-element list.
     collection: {
       isLazy: () => true,
+      elementMemo: true,
       count: (expr) => tabulateCount(expr),
       isEmpty: (expr) => {
         const c = tabulateCount(expr);
@@ -5657,6 +5664,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // source.
     collection: {
       isLazy: (_expr) => true,
+      elementMemo: true,
       // Number of runs: for a finite source, walk our own iterator (bounded);
       // an infinite/unknown source stays unknown.
       count: (expr) => {
@@ -5900,6 +5908,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      elementMemo: true,
       count: () => Infinity,
       iterator: (expr) => {
         if (!isFunction(expr))

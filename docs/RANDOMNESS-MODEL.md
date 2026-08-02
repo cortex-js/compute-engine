@@ -442,6 +442,38 @@ different matter — a clause collection is the view's source, the counterpart
 of a `Map`'s source operand, so `Comprehension(k, Element(k,
 RandomShuffle(Range(1, n))))` with `n` unbound does keep the frame.
 
+### One instance, one draw set (element memo)
+
+**Ruling (2026-08-02, Tycho item 126): the per-instance element memo applies
+to IMPURE element bodies too.** The first complete walk of a lazy view
+materializes its elements — drawing then, from whatever frame is active, per
+the rule above — and later walks of the SAME instance are served from the
+instance's element memo: same elements, no further draws. A distinct instance
+(a re-parse, a re-box, a re-derived view) fills its own memo with fresh
+draws.
+
+This is the resolution of two principles that pull in opposite directions:
+
+- **Site identity** (the CSE and hoisting guardrails): two `Random()` call
+  sites are never merged into one draw. Compilation and simplification
+  preserve *how many times the program draws*.
+- **Value coherence**: a collection read twice is one value. Two readers of
+  the same list — a plot and a mean — must see the same numbers. One call
+  site read twice is ONE draw.
+
+The memo delivers coherence as a consequence of memoization, not as a
+special case for randomness.
+
+**The coherence window is bounded by the memo's own invalidation.** The
+element memo is a cache keyed on the engine's semantic-mutation state: any
+semantic mutation (an `assign` — even to an unrelated symbol —, `assume`/
+`forget`, a redefinition) invalidates it, and the next walk of a
+random-bodied instance draws fresh values. "One instance = one draw set"
+therefore holds *between semantic mutations*. It is a read-coherence
+property, not replay determinism — for guaranteed replay, seed and
+materialize inside a frame (`WithRandomSeed(s, ListFrom(…))`), exactly as
+before.
+
 ## 7. Crossing the interpret↔compile boundary
 
 Dynamic scoping has to survive compilation, or it silently becomes lexical at the

@@ -124,6 +124,31 @@
 
 ### Performance
 
+- **Lazy `Map`, `Filter`, `Tabulate` (and other function-applying lazy
+  operators) now memoize their elements per instance** (Tycho item 126),
+  extending the element memo `Comprehension` has had since item 38. A
+  complete walk of an unmodified instance commits its elements to a
+  per-instance cache; later walks — and `at()` reads covered by the cached
+  prefix — are served from memory instead of re-evaluating the element
+  function (a 200-element `Map` whose body is a 40-term symbolic `Sum`:
+  ~854 ms per walk → ~0 ms warm). Opted in via the `elementMemo`
+  collection-handler flag on `Map` (single-source and variadic zipWith,
+  which covers elementwise broadcast), `Filter`, `FlatMap`, `Scan`,
+  `TakeWhile`, `DropWhile`, `Tabulate`, `Iterate`, and `ChunkBy`; structural
+  reindexers (`Take`, `Reverse`, `Zip`, …) stay un-memoized — their source's
+  own memo already absorbs the cost. Invalidation is two-axis, as for
+  `Comprehension`: the engine's semantic-mutation counter plus
+  per-dependency binding identity and write versions — resolved through
+  each free symbol's own binding and followed transitively through stored
+  values and user-defined function bodies — with engine-configuration
+  stamps (`tolerance`, `precision`, `angularUnit`), so unrelated scoped
+  evaluations stay warm while reassigning anything the elements depend on
+  (directly or through a helper) refills. An instance whose meaning the
+  cache cannot track (a still-unassigned free symbol, a dictionary operand)
+  is simply never memoized. By ruling, the memo applies to impure element
+  bodies too: repeated walks of one instance are one draw set — see
+  `docs/RANDOMNESS-MODEL.md` §6 ("One instance, one draw set").
+
 - **Exact `evaluate()` drains of broadcast-shaped lazy `Map`s now auto-compile
   when provably safe.** Previously only `.N()` drains at machine precision
   compiled (the numeric-marked tier); exact drains ran at the interpreted floor

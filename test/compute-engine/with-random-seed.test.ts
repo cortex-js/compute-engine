@@ -474,21 +474,30 @@ describe('WithRandomSeed — draw-index assignment', () => {
   // materialize — dynamic scoping applied consistently, not a defect. A
   // caller who wants framed values materializes inside the frame (the test
   // above); a view that escapes its frame and materializes later draws live.
-  it('a Map materialized OUTSIDE its frame draws live', () => {
+  //
+  // REFINED 2026-08-02 (item 126, element memo): the FIRST materialization
+  // draws live (outside the frame), and the instance's element memo then
+  // makes later walks of the SAME instance replay that draw set — one
+  // instance, one draw set. A fresh instance (re-derive, re-box) draws fresh.
+  it('a Map materialized OUTSIDE its frame draws live, once per instance', () => {
     // `evaluate()` returns the lazy `Map` view; the frame pops before any
     // element materializes. (`view.ops` would be the Map's OPERANDS — the
     // list and the lambda — not its elements; `each()` is materialization.)
-    const view = boxed([
-      'WithRandomSeed',
-      11,
-      ['Map', ['List', 1, 2, 3], ['Function', ['Random'], 'x']],
-    ]).evaluate();
+    const mkView = () =>
+      boxed([
+        'WithRandomSeed',
+        11,
+        ['Map', ['List', 1, 2, 3], ['Function', ['Random'], 'x']],
+      ]).evaluate();
+    const view = mkView();
     const mk = () => Array.from(view.each()).map((x) => x.re);
     const first = mk();
-    // Not the framed stream…
+    // Not the framed stream (the draws happened after the frame popped)…
     expect(first).not.toEqual([draw(11, 0), draw(11, 1), draw(11, 2)]);
-    // …and live: a second materialization draws different values.
-    expect(mk()).not.toEqual(first);
+    // …stable on re-walk of the same instance (item-126 element memo)…
+    expect(mk()).toEqual(first);
+    // …and live per instance: a fresh view draws different values.
+    expect(Array.from(mkView().each()).map((x) => x.re)).not.toEqual(first);
   });
 });
 

@@ -849,6 +849,21 @@ export interface BaseCollectionHandlers {
   isLazy?: (collection: Expression) => boolean;
 
   /**
+   * Opt this operator's instances into per-instance element memoization: a
+   * complete walk of an unmodified instance is served from a cached prefix
+   * on subsequent walks (`boxed-expression/collection-element-memo.ts`).
+   *
+   * Set it on lazy operators that evaluate a function per element (`Map`,
+   * `Filter`, `Tabulate`, …), where re-deriving an element is expensive.
+   * Leave it off structural reindexers (`Take`, `Reverse`, `Zip`, …), which
+   * re-serve their source's elements cheaply — when the source is itself a
+   * flagged instance, the source's own memo already absorbs the cost.
+   *
+   * Default: `false`
+   */
+  elementMemo?: boolean;
+
+  /**
    * Return `true` if the target expression is in the collection,
    * `false` otherwise.
    *
