@@ -3,9 +3,11 @@ import type {
   BoxedDefinition,
   BoxedValueDefinition,
   IComputeEngine,
+  Scope,
 } from '../global-types';
 
 import { isDictionary, isFunction, isSymbol } from './type-guards';
+import { isValueDef } from './utils';
 
 /**
  * Element memoization for lazy collection operators (Tycho item 126).
@@ -55,14 +57,19 @@ interface ElementMemoDep {
   valueDef: BoxedValueDefinition;
   /** `valueDef._writeVersion` at fill time. */
   version: number;
-  /** The binding the AMBIENT scope chain resolved `name` to at fill time
-   * (`undefined` when the chain has no such binding). Non-constant symbol
-   * VALUES resolve by name through the engine's current scope
+  /** The binding the instance's RESOLUTION scope chain resolved `name` to
+   * at fill time (`undefined` when the chain has no such binding).
+   * Non-constant symbol VALUES resolve by name through a scope chain
    * (`BoxedSymbol._value` → `_getSymbolValue`), not through the occurrence's
-   * pinned binding — so a shadowing declaration in a pushed scope changes
-   * what a walk computes while bumping no counter and touching no tracked
-   * definition. Re-resolving at validation catches it. */
-  ambient: BoxedDefinition | undefined;
+   * pinned binding — so a shadowing declaration changes what a walk computes
+   * while bumping no counter and touching no tracked definition.
+   * Re-resolving at validation catches it. Which chain matters: a SCOPED
+   * instance (`Comprehension`) walks under its own captured `localScope`, so
+   * an ambient shadow is invisible to it and must not invalidate (a
+   * spurious refill re-draws an impure body); an unscoped instance (`Map`)
+   * resolves through the ambient chain at walk time. See
+   * `depResolutionScope`. */
+  resolved: BoxedDefinition | undefined;
 }
 
 interface ElementMemoCache {
@@ -76,7 +83,12 @@ interface ElementMemoCache {
   tolerance: number;
   precision: number;
   angularUnit: string;
-  /** Always a COMPLETE drain — partial walks never commit. */
+  /** True when `elements` is the whole collection. `each()` serves only
+   * complete entries; `at()` serves any covering prefix. Partial entries are
+   * written only by `elementMemoFillTo` (the fill-to-n path operators
+   * without random access use, e.g. `Comprehension`); the recording stream
+   * commits only complete drains. */
+  complete: boolean;
   elements: Expression[];
 }
 
@@ -85,11 +97,11 @@ interface ElementMemoCache {
 const elementMemoCaches = new WeakMap<Expression, ElementMemoCache>();
 
 /**
- * Cap the memoized prefix, matching the Comprehension memo: beyond this many
- * elements the walk stops buffering and never commits, so an enormous finite
- * domain cannot pin an arbitrarily large array in memory.
+ * Cap the memoized prefix: beyond this many elements the walk stops
+ * buffering and never commits, so an enormous finite domain cannot pin an
+ * arbitrarily large array in memory.
  */
-const ELEMENT_MEMO_CAP = 100_000;
+export const ELEMENT_MEMO_CAP = 100_000;
 
 /**
  * Collect the value definitions of every `Function` literal's PARAMETER
@@ -122,20 +134,33 @@ function collectParameterDefs(
   for (const op of expr.ops) collectParameterDefs(op, out);
 }
 
-/** The binding the engine's CURRENT scope chain resolves `name` to — the
- * same resolution `_getSymbolValue` performs for a non-constant symbol's
- * value. Inline chain walk (importing `lookup` from `function-utils` would
- * cycle). */
-function resolveAmbientBinding(
+/**
+ * The scope chain an instance's WALK resolves free names through. A scoped
+ * instance (`Comprehension`) pushes its own captured `localScope` around
+ * every element (`ComprehensionIndexFrame`), so its resolution environment
+ * is that chain — stable across callers, blind to ambient shadows. An
+ * unscoped instance (`Map` — a canonical `Map` carries no scope of its own)
+ * resolves through whatever chain is current at walk time, i.e. the ambient
+ * one, signalled here by `undefined`.
+ */
+function depResolutionScope(expr: Expression): Scope | undefined {
+  return isFunction(expr) && expr.isScoped ? expr.localScope : undefined;
+}
+
+/** The binding `scope`'s chain — or, when `scope` is `undefined`, the
+ * engine's CURRENT chain — resolves `name` to; the same resolution
+ * `_getSymbolValue` performs for a non-constant symbol's value. Inline
+ * chain walk (importing `lookup` from `function-utils` would cycle). */
+function resolveDepBinding(
   ce: IComputeEngine,
+  scope: Scope | undefined,
   name: string
 ): BoxedDefinition | undefined {
-  let scope: (typeof ce.context)['lexicalScope'] | undefined =
-    ce.context?.lexicalScope;
-  while (scope) {
-    const def = scope.bindings.get(name);
+  let s: Scope | undefined = scope ?? ce.context?.lexicalScope;
+  while (s) {
+    const def = s.bindings.get(name);
     if (def) return def;
-    scope = scope.parent ?? undefined;
+    s = s.parent ?? undefined;
   }
   return undefined;
 }
@@ -152,6 +177,7 @@ function resolveAmbientBinding(
  */
 function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
   const ce = expr.engine;
+  const depScope = depResolutionScope(expr);
   const excluded = new Set<BoxedValueDefinition>();
   collectParameterDefs(expr, excluded);
 
@@ -169,24 +195,30 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
     valueDef: BoxedValueDefinition,
     skipNames?: ReadonlySet<string>
   ): void => {
-    // A binding with no stored value resolves DYNAMICALLY at walk time (an
-    // auto-declared unknown, a declared-but-unassigned symbol): a later
-    // `assign` can install a value in a DIFFERENT definition — the one the
-    // ambient scope resolves the name to — without ever writing this one,
-    // so neither the version axis nor the global counter would cold the
-    // cache. Such an instance is ineligible.
+    const name = isSymbol(occurrence) ? occurrence.symbol : occurrence.operator;
+    // A valueless, non-constant binding is trackable ONLY when it is the
+    // definition the instance's resolution chain resolves its name to (a
+    // declared symbol used symbolically, e.g. under assumptions): a later
+    // `assign` then writes THIS definition (version bump), and a chain
+    // change is caught by the resolution axis. A valueless def the chain
+    // cannot reach (an auto-declared unknown inside a literal's body scope)
+    // is the hazard: `assign` takes the DECLARE path and installs the value
+    // in a DIFFERENT definition, bumping neither the tracked version nor
+    // `_mutationGeneration` — such an instance is ineligible.
     if (valueDef.value === undefined && !valueDef.isConstant) {
-      eligible = false;
-      return;
+      const resolved = resolveDepBinding(ce, depScope, name);
+      if (!isValueDef(resolved) || resolved.value !== valueDef) {
+        eligible = false;
+        return;
+      }
     }
     seen.add(valueDef);
-    const name = isSymbol(occurrence) ? occurrence.symbol : occurrence.operator;
     deps.push({
       occurrence,
       name,
       valueDef,
       version: valueDef._writeVersion,
-      ambient: resolveAmbientBinding(ce, name),
+      resolved: resolveDepBinding(ce, depScope, name),
     });
     // TRANSITIVE dependencies: a symbol bound by reference to a stored
     // value (a helper function literal, a bound list) pulls that value's
@@ -230,6 +262,22 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
       return;
     }
     if (isFunction(e)) {
+      // A BINDER's declared binding sites (a Comprehension's indices, a
+      // Series' expansion variable) are the walk's own machinery, not
+      // dependencies: their definitions are written during the walk and
+      // RESTORED to valueless afterwards (`ComprehensionIndexFrame`
+      // save→install→restore), so tracking one would either churn or trip
+      // the valueless gate. The operator's own `bindingSites` selector is
+      // the authority on which operands those are.
+      const sites = e.operatorDefinition?.bindingSites?.(e.ops, 'post');
+      if (sites)
+        for (const s of sites) {
+          let node: Expression | undefined = e;
+          for (const p of s.path)
+            node = isFunction(node) ? node.ops[p] : undefined;
+          if (isSymbol(node) && node.valueDefinition !== undefined)
+            excluded.add(node.valueDefinition);
+        }
       // An application whose HEAD is a symbol bound to a value definition
       // (`Map(xs, f)` applied with `f` a stored literal) reaches that
       // binding through operator position, where no symbol operand appears —
@@ -266,11 +314,12 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
   return eligible ? deps : undefined;
 }
 
-/** The still-valid cache for this instance, or `undefined`. The cached
- * elements are always a complete drain. */
+/** The still-valid cache for this instance, or `undefined`. Check
+ * `complete` before serving a whole-collection read — a partial prefix
+ * (from `elementMemoFillTo`) covers only `at()`-style reads. */
 export function validElementMemo(
   expr: Expression
-): { elements: ReadonlyArray<Expression> } | undefined {
+): { elements: ReadonlyArray<Expression>; complete: boolean } | undefined {
   const entry = elementMemoCaches.get(expr);
   if (!entry) return undefined;
   const ce = expr.engine;
@@ -281,13 +330,15 @@ export function validElementMemo(
     entry.angularUnit !== ce.angularUnit
   )
     return undefined;
+  const depScope = depResolutionScope(expr);
   for (const d of entry.deps) {
     if (d.occurrence.valueDefinition !== d.valueDef) return undefined;
     if (d.valueDef._writeVersion !== d.version) return undefined;
-    // Ambient axis: shadowing declarations bump no counter and touch no
+    // Resolution axis: shadowing declarations bump no counter and touch no
     // tracked definition, but change what a walk computes (see
-    // `ElementMemoDep.ambient`).
-    if (resolveAmbientBinding(ce, d.name) !== d.ambient) return undefined;
+    // `ElementMemoDep.resolved`).
+    if (resolveDepBinding(ce, depScope, d.name) !== d.resolved)
+      return undefined;
   }
   return entry;
 }
@@ -353,8 +404,67 @@ export function* elementMemoRecordingStream(
     tolerance: ce.tolerance,
     precision: ce.precision,
     angularUnit: ce.angularUnit,
+    complete: true,
     elements: buffer,
   });
+}
+
+/**
+ * Ensure the instance's memo holds at least the first `n` elements (or the
+ * whole collection, if shorter) and return the prefix. The fill path for
+ * operators with NO random access of their own (`Comprehension`): without a
+ * prefix cache, `at(i)` called for i = 1…n costs O(n²) walks (Tycho item
+ * 23.1). The stream is not resumable, so extending a valid-but-short prefix
+ * restarts from scratch — fine for the reported pattern (repeated reads at
+ * stable indices).
+ *
+ * Fills at most `ELEMENT_MEMO_CAP` elements; a caller asking beyond the cap
+ * should stream directly instead. The drain is synchronous (no yields), so
+ * the suspended-mutation hazard of the recording stream does not apply; the
+ * stamp and dependency snapshot are taken AFTER the fill, absorbing the
+ * walk's own bumps. An ineligible instance (see `snapshotDeps`) fills and
+ * returns the prefix without committing anything.
+ */
+export function elementMemoFillTo(
+  expr: Expression,
+  n: number,
+  makeStream: () => Iterator<Expression, undefined>
+): ReadonlyArray<Expression> {
+  const cached = validElementMemo(expr);
+  if (cached && (cached.complete || cached.elements.length >= n))
+    return cached.elements;
+
+  const limit = Math.min(n, ELEMENT_MEMO_CAP);
+  const elements: Expression[] = [];
+  let complete = false;
+  const iter = makeStream();
+  try {
+    while (elements.length < limit) {
+      const r = iter.next();
+      if (r.done) {
+        complete = true;
+        break;
+      }
+      elements.push(r.value);
+    }
+  } finally {
+    if (!complete) iter.return?.();
+  }
+
+  const deps = snapshotDeps(expr);
+  if (deps !== undefined) {
+    const ce = expr.engine;
+    elementMemoCaches.set(expr, {
+      mutationGeneration: ce._mutationGeneration,
+      deps,
+      tolerance: ce.tolerance,
+      precision: ce.precision,
+      angularUnit: ce.angularUnit,
+      complete,
+      elements,
+    });
+  }
+  return elements;
 }
 
 /** TEST-ONLY: drop an instance's element memo, so a test of a layer BELOW

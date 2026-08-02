@@ -148,6 +148,11 @@
   is simply never memoized. By ruling, the memo applies to impure element
   bodies too: repeated walks of one instance are one draw set — see
   `docs/RANDOMNESS-MODEL.md` §6 ("One instance, one draw set").
+  `Comprehension`'s bespoke element memo (items 23.1/38) is unified onto the
+  same machinery — same per-instance contract and fill-to-`n` prefix
+  behavior, now with the stronger invalidation the shared memo carries
+  (transitive dependencies through helpers, ambient-scope shadowing,
+  mid-walk mutation detection, configuration stamps).
 
 - **Exact `evaluate()` drains of broadcast-shaped lazy `Map`s now auto-compile
   when provably safe.** Previously only `.N()` drains at machine precision

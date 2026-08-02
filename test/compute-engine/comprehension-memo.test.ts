@@ -70,6 +70,36 @@ describe('Comprehension element memo', () => {
     expect(c).toBe(20); // cold refill under the new binding
   });
 
+  it('is NOT invalidated by a caller-scope shadow it cannot see', () => {
+    // A scoped comprehension walks under its own captured chain, so a
+    // shadowing declaration in the CALLER's scope is invisible to it. The
+    // memo's resolution axis must resolve through the instance's own chain
+    // (`depResolutionScope`) — an ambient-chain check here would refill
+    // spuriously, re-drawing an impure body with no semantic mutation.
+    ce.assign('kshadow', 2);
+    ce.assign(
+      'gshadow',
+      ce.box([
+        'Comprehension',
+        ['tick', ['Multiply', 'kshadow', 'n']],
+        ['Element', 'n', ['Range', 1, 4]],
+      ])
+    );
+    const [v1, c1] = counting(() => walkSum('gshadow'));
+    expect(v1).toBe(2 * 10);
+    expect(c1).toBe(4);
+
+    ce.pushScope();
+    ce.declare('kshadow', { value: 99 });
+    const [v2, c2] = counting(() => walkSum('gshadow'));
+    expect(v2).toBe(2 * 10); // captured chain: the shadow is invisible
+    expect(c2).toBe(0); // …so the memo stays warm
+    ce.popScope();
+
+    const [, c3] = counting(() => walkSum('gshadow'));
+    expect(c3).toBe(0); // and warm again outside the shadow
+  });
+
   it('is invalidated by a transitive dependency (helper body)', () => {
     ce.assign('cmemo', 3);
     ce.assign('hmemo', ce.box(['Function', ['Multiply', 'cmemo', 'x'], 'x']));
@@ -109,7 +139,8 @@ describe('Comprehension element memo', () => {
 
   it('bumps _mutationGeneration when a symbol-bound operator signature is inferred', () => {
     // The memo's `_mutationGeneration` axis relies on every operator-definition
-    // change bumping the counter (see `comprehensionDeps`). A symbol bound to an
+    // change bumping the counter (see `snapshotDeps` in
+    // `collection-element-memo.ts`). A symbol bound to an
     // operator definition whose (generic) signature is narrowed by inference is
     // such a change: `BoxedSymbol.infer()`'s operator-def branch must bump too,
     // mirroring `BoxedFunction.infer()`.
@@ -127,11 +158,11 @@ describe('Comprehension element memo', () => {
   });
 
   it('never serves the memo for a non-scoped (structural) comprehension', () => {
-    // A structural comprehension has no lexical scope of its own, so the memo
-    // has no stable key: `comprehensionScope()` returns `undefined` and the
-    // cache paths treat it as "always invalid". Each read must therefore
-    // re-walk the body rather than serve a memo keyed off the incidental
-    // ambient scope.
+    // A structural comprehension has no lexical scope of its own, so its
+    // body symbols carry no stable bindings the shared memo could track
+    // (`snapshotDeps` marks such an instance ineligible). Each read must
+    // therefore re-walk the body rather than serve a memo keyed off the
+    // incidental ambient scope.
     ce.assign('kstruct', 2);
     const structural = ce.box(
       [

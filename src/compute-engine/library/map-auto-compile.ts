@@ -56,7 +56,8 @@ import type { Interval } from './map-exact-proof.js';
 
 /** A dependency of a compiled element function: the resolution snapshot of a
  * symbol whose value or function-literal definition the compiler consulted
- * (mirrors `ComprehensionCacheDep` in `control-structures.ts`). */
+ * (mirrors `ElementMemoDep` in
+ * `boxed-expression/collection-element-memo.ts`). */
 interface MapCompileDep {
   name: string;
   /** Binding wrapper resolved by name in the ambient engine scope at compile

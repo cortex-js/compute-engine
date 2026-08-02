@@ -1522,7 +1522,9 @@ export class BoxedFunction
     const memoEngine = this.engine;
     if (memoized) {
       const cached = validElementMemo(this);
-      if (cached) {
+      // Serve only a COMPLETE cache — a partial prefix (fill-to-n path)
+      // covers `at()` reads, not a whole-collection walk.
+      if (cached?.complete) {
         const elements = cached.elements;
         return (function* () {
           let i = 0;

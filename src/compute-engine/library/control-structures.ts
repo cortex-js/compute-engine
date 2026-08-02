@@ -1,6 +1,5 @@
 import {
   evaluateStatements,
-  lookup,
   resolveEscapingLambda,
 } from '../function-utils.js';
 import { checkConditions } from '../boxed-expression/rules.js';
@@ -32,7 +31,6 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
   CollectionHandlers,
-  BoxedDefinition,
   BoxedValueDefinition,
 } from '../global-types.js';
 import { spellCheckMessage } from '../boxed-expression/validate.js';
@@ -43,6 +41,10 @@ import {
   sym,
 } from '../boxed-expression/type-guards.js';
 import { isValueDef } from '../boxed-expression/utils.js';
+import {
+  elementMemoFillTo,
+  ELEMENT_MEMO_CAP,
+} from '../boxed-expression/collection-element-memo.js';
 import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
 import { assignLoopIndex } from './utils.js';
 
@@ -1625,217 +1627,27 @@ function comprehensionIsFinite(expr: Expression): boolean | undefined {
 }
 
 /**
- * Prefix element cache for a materialized `Comprehension` (Tycho item 23.1).
- *
- * Without memoization, every `at(n)` and every `each()` re-walks the whole
- * domain, so a document that reads a comprehension's elements repeatedly pays
- * O(domain) per read (`at(100)` called 100× on a 200-element body ≈ 5 s here).
- * `elements` holds the materialized prefix (`elements[i-1]` is the 1-based
- * `at(i)`); `complete` is set once the whole finite domain has been drained.
- */
-interface ComprehensionCacheDep {
-  name: string;
-  /** Binding wrapper resolved through the comprehension's scope chain at
-   * fill time. An identity change means the name now resolves elsewhere
-   * (shadowing declaration, redeclaration). */
-  binding: BoxedDefinition | undefined;
-  /** The inner value definition at fill time — `updateDef` swaps this on the
-   * same wrapper. */
-  valueDef: BoxedValueDefinition | undefined;
-  /** `valueDef._writeVersion` at fill time. */
-  version: number;
-}
-
-interface ComprehensionCache {
-  /** `ce._mutationGeneration` snapshot taken AFTER the prefix was filled. */
-  mutationGeneration: number;
-  /** The comprehension's free-symbol dependencies at fill time (see
-   * `comprehensionDeps`). */
-  deps: ComprehensionCacheDep[];
-  elements: Expression[];
-  complete: boolean;
-}
-
-/**
- * Keyed on the boxed comprehension instance. A `WeakMap` so an unreferenced
- * comprehension (and its cached elements) is collectable.
- */
-const comprehensionCaches = new WeakMap<Expression, ComprehensionCache>();
-
-/**
- * Cap the memoized prefix. Beyond this many elements we stop caching and fall
- * back to streaming, so an enormous (or effectively unbounded) finite domain
- * cannot pin an arbitrarily large array in memory.
- */
-const COMPREHENSION_CACHE_CAP = 100_000;
-
-/**
- * The scope the comprehension's free symbols resolve against: its own
- * `localScope` (whose parent chain is the canonical lexical chain). A
- * non-scoped (non-canonical / structural) instance has no stable lexical scope
- * of its own, so it returns `undefined` — matching the sibling walkers
- * (`comprehensionStream`, `comprehensionEnumeratedCount`,
- * `scanIndependentClauses`). Falling back to the ambient call-time scope would
- * key the memo off an incidental context (fill-time and validation-time may run
- * under different ambient scopes), so `undefined` instead signals the cache
- * paths (`comprehensionDeps` / `comprehensionValidCache`) to treat such an
- * instance as "do not cache / always invalid".
- */
-function comprehensionScope(expr: Expression): Scope | undefined {
-  if (!isFunction(expr)) return undefined;
-  return expr.isScoped ? expr.localScope : undefined;
-}
-
-/**
- * Snapshot the comprehension's free-symbol dependencies: every operand
- * symbol except its own indices, resolved through its scope chain. Only
- * OPERAND symbols matter — a change to an operator (redeclaration, signature
- * inference) always bumps `ce._mutationGeneration`, while ephemeral
- * loop-index writes (the one mutation class that does NOT bump it) can only
- * target symbols that appear as operands.
- */
-function comprehensionDeps(expr: Expression): ComprehensionCacheDep[] {
-  if (!isFunction(expr)) return [];
-  const scope = comprehensionScope(expr);
-  if (!scope) return [];
-  const indexNames = new Set(comprehensionIndexNames(expr.ops.slice(1)));
-  const deps: ComprehensionCacheDep[] = [];
-  for (const name of expr.symbols) {
-    if (indexNames.has(name)) continue;
-    const binding = lookup(name, scope);
-    const valueDef =
-      binding !== undefined && isValueDef(binding) ? binding.value : undefined;
-    deps.push({
-      name,
-      binding,
-      valueDef,
-      version: valueDef?._writeVersion ?? 0,
-    });
-  }
-  return deps;
-}
-
-/**
- * Correctness (Tycho item 38): the cache is validated on TWO axes.
- *
- * - `ce._mutationGeneration` — bumped by every semantic mutation (value/type
- *   writes, `assume`/`forget` and their silent revert on a dirty scope pop,
- *   operator redefinition, signature inference) but NOT by plain scope
- *   push/pop or by ephemeral loop-index writes. So an unrelated scoped
- *   evaluation (`\sum_{i=1}^{5} i^2`) between two reads no longer
- *   invalidates the memo, while rebinding a free variable the comprehension
- *   reads (the `[k*n for n in 1..3]` → reassign `k` case) still does.
- *
- * - Per-dependency versions — ephemeral index writes bump only the index
- *   definition's `_writeVersion`, so a memoized comprehension that
- *   REFERENCES an enclosing binder's index (nested in a `Sum`, say) is
- *   still refilled per iteration. Binding identity is re-resolved to catch
- *   shadowing declarations, which bump no counter at all.
- *
- * The stamp is taken AFTER a (re)fill, so any bump the walk itself causes
- * (a side-effecting body) is absorbed, as before.
- */
-function comprehensionValidCache(
-  expr: Expression
-): ComprehensionCache | undefined {
-  const entry = comprehensionCaches.get(expr);
-  if (!entry) return undefined;
-  if (entry.mutationGeneration !== expr.engine._mutationGeneration)
-    return undefined;
-  const scope = comprehensionScope(expr);
-  if (!scope) return undefined;
-  for (const d of entry.deps) {
-    const binding = lookup(d.name, scope);
-    if (binding !== d.binding) return undefined;
-    const valueDef =
-      binding !== undefined && isValueDef(binding) ? binding.value : undefined;
-    if (valueDef !== d.valueDef) return undefined;
-    if (valueDef && valueDef._writeVersion !== d.version) return undefined;
-  }
-  return entry;
-}
-
-/**
- * Ensure the cache holds at least the first `n` elements (or the whole domain,
- * if shorter). Re-walks from the start on a miss or an invalidation; the stream
- * is not resumable, so extending a valid-but-short prefix also restarts — fine
- * for the reported pattern (repeated reads at a stable index). Returns the
- * (possibly still short, if capped) cache entry.
- */
-function comprehensionFillTo(expr: Expression, n: number): ComprehensionCache {
-  const ce = expr.engine;
-  let entry = comprehensionValidCache(expr);
-  if (entry && (entry.complete || entry.elements.length >= n)) return entry;
-
-  const limit = Math.min(n, COMPREHENSION_CACHE_CAP);
-  const elements: Expression[] = [];
-  let complete = false;
-  const stream = comprehensionStream(expr);
-  while (elements.length < limit) {
-    const r = stream.next();
-    if (r.done) {
-      complete = true;
-      break;
-    }
-    elements.push(r.value);
-  }
-  // Stamp AFTER the walk, so a bump caused by the walk itself (a
-  // side-effecting body) is absorbed.
-  entry = {
-    mutationGeneration: ce._mutationGeneration,
-    deps: comprehensionDeps(expr),
-    elements,
-    complete,
-  };
-  comprehensionCaches.set(expr, entry);
-  return entry;
-}
-
-/**
- * Iterate a comprehension's elements, serving from (and populating) the prefix
- * cache. A complete, still-valid cache streams straight from memory; otherwise
- * the underlying stream is walked once, buffered up to the cap, and committed
- * as `complete` only if fully drained without overflowing. Early abandonment
- * (e.g. `Take`/`First`) suspends before the commit, so it never caches a
- * partial buffer as complete.
- */
-function* comprehensionCachedStream(
-  expr: Expression
-): Generator<Expression, undefined, any> {
-  const cached = comprehensionValidCache(expr);
-  if (cached?.complete) {
-    yield* cached.elements;
-    return;
-  }
-  const ce = expr.engine;
-  const buffer: Expression[] = [];
-  let overflow = false;
-  for (const el of comprehensionStream(expr)) {
-    if (buffer.length < COMPREHENSION_CACHE_CAP) buffer.push(el);
-    else overflow = true;
-    yield el;
-  }
-  if (!overflow)
-    comprehensionCaches.set(expr, {
-      mutationGeneration: ce._mutationGeneration,
-      deps: comprehensionDeps(expr),
-      elements: buffer,
-      complete: true,
-    });
-}
-
-/**
  * Lazy indexed-collection handlers for `Comprehension`. `count`/`isEmpty`/
  * `isFinite` are answered from the (independent) clause counts without walking
- * elements; iteration STREAMS one element at a time (serving a memoized prefix,
- * see `comprehensionCachedStream`) and a positive `at(n)` fills the prefix cache
- * up to `n`. A negative index needs the length, so it materializes — but only
- * once the comprehension is known finite. An unread comprehension touches none
- * of these, so binding it is O(1).
+ * elements; iteration STREAMS one element at a time and a positive `at(n)`
+ * fills the shared element-memo prefix up to `n`. A negative index needs the
+ * length, so it materializes — but only once the comprehension is known
+ * finite. An unread comprehension touches none of these, so binding it is
+ * O(1).
+ *
+ * Element memoization (Tycho items 23.1/38, generalized in item 126) is NOT
+ * implemented here: the `elementMemo` flag opts into the shared per-instance
+ * memo applied at the `BoxedFunction.each()`/`at()` seam
+ * (`boxed-expression/collection-element-memo.ts`) — two-axis invalidation,
+ * transitive dependencies, impure-body draw-set coherence. Only the
+ * fill-to-n prefix path is invoked directly, because a comprehension has no
+ * random access of its own (`at(i)` for i = 1…n without a prefix cache is
+ * O(n²), the original item-23 regression).
  */
 function comprehensionCollectionHandlers(): CollectionHandlers {
   return {
     isLazy: () => true,
+    elementMemo: true,
 
     count: (expr) => comprehensionCount(expr),
 
@@ -1846,7 +1658,7 @@ function comprehensionCollectionHandlers(): CollectionHandlers {
 
     isFinite: (expr) => comprehensionIsFinite(expr),
 
-    iterator: (expr) => comprehensionCachedStream(expr),
+    iterator: (expr) => comprehensionStream(expr),
 
     at: (expr, index) => {
       if (typeof index !== 'number' || !Number.isInteger(index) || index === 0)
@@ -1854,20 +1666,33 @@ function comprehensionCollectionHandlers(): CollectionHandlers {
       if (index > 0) {
         // Beyond the cache cap: stream directly rather than pinning a huge
         // prefix in memory.
-        if (index > COMPREHENSION_CACHE_CAP) {
+        if (index > ELEMENT_MEMO_CAP) {
           let i = 0;
-          for (const el of comprehensionStream(expr))
-            if (++i === index) return el;
-          return undefined;
+          const iter = comprehensionStream(expr);
+          try {
+            let r = iter.next();
+            while (!r.done) {
+              if (++i === index) return r.value;
+              r = iter.next();
+            }
+            return undefined;
+          } finally {
+            // Close the stream (and its nested source iterators) when the
+            // element was found before exhaustion.
+            if (i === index) iter.return?.(undefined);
+          }
         }
-        const entry = comprehensionFillTo(expr, index);
-        return entry.elements[index - 1];
+        const elements = elementMemoFillTo(expr, index, () =>
+          comprehensionStream(expr)
+        );
+        return elements[index - 1];
       }
       // Negative index (from the end) needs the length: decline unless the
       // comprehension is provably finite, so we never try to materialize an
-      // infinite domain just to index from the end.
+      // infinite domain just to index from the end. `each()` serves (and, on
+      // a full drain, commits) the shared element memo.
       if (comprehensionIsFinite(expr) !== true) return undefined;
-      const all = [...comprehensionCachedStream(expr)];
+      const all = [...expr.each()];
       const target = all.length + index;
       return target >= 0 ? all[target] : undefined;
     },
