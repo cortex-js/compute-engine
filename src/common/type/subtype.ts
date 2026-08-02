@@ -90,7 +90,9 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   set: [],
   tuple: [],
   record: [],
-  dictionary: [],
+  // `record` is a `dictionary` with statically-known keys — the type tree in
+  // `doc/08-guide-types.md` nests it under `dictionary`.
+  dictionary: ['record'],
   function: [],
   symbol: [],
   boolean: [],
@@ -806,8 +808,11 @@ export function isSubtype(
     // A record is a subtype of `record`
     if (rhs === 'record') return lhs.kind === 'record';
 
-    // A dictionary is a subtype of `dictionary`
-    if (rhs === 'dictionary') return lhs.kind === 'dictionary';
+    // A dictionary is a subtype of `dictionary`. So is a record: a record is
+    // a dictionary with statically-known keys (`doc/08-guide-types.md`, the
+    // type tree places `record` under `dictionary`).
+    if (rhs === 'dictionary')
+      return lhs.kind === 'dictionary' || lhs.kind === 'record';
 
     // Other composite types are not subtypes of primitive types
     return false;
@@ -1094,6 +1099,12 @@ export function isSubtype(
     // Check that the type of values match
     return isSubtype(lhs.values, rhs.values);
   }
+
+  // A record is a dictionary whose keys are statically known: it is a subtype
+  // of `dictionary<T>` when every one of its field types is a subtype of `T`.
+  // (`doc/08-guide-types.md` §Dictionary and Record, "Compatibility".)
+  if (lhs.kind === 'record' && rhs.kind === 'dictionary')
+    return Object.values(lhs.elements).every((t) => isSubtype(t, rhs.values));
 
   //
   // Handle collections

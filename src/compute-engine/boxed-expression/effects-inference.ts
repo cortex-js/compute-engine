@@ -1,7 +1,5 @@
 import type { EffectSet, Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
-import { parseType } from '../../common/type/parse.js';
-import { typeToString } from '../../common/type/serialize.js';
 import { signatureArms, signatureEffects } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
@@ -240,10 +238,10 @@ export function functionLiteralSignatureType(expr: Expression): Type {
     declaredSignature === undefined
       ? body.type
       : functionLiteralReturnMarker(expr)!.op1.type;
-  let bodyType: Type | string =
+  let bodyType: Type =
     declaredSignature !== undefined && ascribedReturn !== undefined
-      ? typeToString(ascribedReturn)
-      : `${bodyTypeSource}`;
+      ? ascribedReturn
+      : bodyTypeSource.type;
   // The parameters of a bare function literal have unknown type, so a
   // finite-numeric body claim is unsound: the lambda may later be applied to
   // a non-finite argument — `(x ↦ x²)(∞) = +∞` — so widen a finite-numeric
@@ -263,13 +261,21 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   )
     bodyType = 'number';
 
-  // Parameter slots: an annotated param emits its declared type, named
-  // (`x: integer`); a bare param stays `unknown` as today.
-  const paramSig = params
-    .map((p) =>
-      p.type !== undefined ? `${p.name}: ${typeToString(p.type)}` : 'unknown'
-    )
-    .join(', ');
+  // Parameter slots: an annotated param carries its declared type, named
+  // (`x: integer`); a bare param stays `unknown` as today. The Type OBJECT is
+  // carried through — never serialized and re-parsed: an annotation may name
+  // a SCOPE-LOCAL type (resolved when the literal was canonicalized), and a
+  // text round-trip here — possibly after that scope popped — either threw
+  // `Unknown type` or silently dropped the annotation. Same hazard class as
+  // the inferred-signature fix in `boxed-operator-definition.ts`.
+  const args =
+    params.length > 0
+      ? params.map((p) =>
+          p.type !== undefined
+            ? { name: p.name, type: p.type }
+            : { type: 'unknown' as Type }
+        )
+      : undefined;
 
   // The effect specifier slot. An INFERRED empty set is written as an empty
   // slot, i.e. nothing at all — the author's `pure` spelling is a statement,
@@ -288,13 +294,13 @@ export function functionLiteralSignatureType(expr: Expression): Type {
     declaredEffects === undefined
       ? inferredEffects
       : unionEffectSets(declaredEffects, inferredEffects);
-  const specifier =
-    effects === undefined ? '' : ` ${effectSetToString(effects)}`;
 
-  return parseType(
-    `(${paramSig})${specifier} -> ${bodyType}`,
-    ce._typeResolver
-  );
+  return {
+    kind: 'signature',
+    ...(args !== undefined ? { args } : {}),
+    ...(effects !== undefined ? { effects } : {}),
+    result: bodyType,
+  };
 }
 
 //

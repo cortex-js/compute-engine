@@ -480,7 +480,10 @@ describe('CORTEX TYPE DECLARATIONS (end-to-end)', () => {
     const messages = r.diagnostics.map((d) => d.message);
     expect(messages).toHaveLength(1);
     expect(messages[0][0]).toBe('runtime-error');
-    expect(String(messages[0][1])).toContain('is not compatible with the type');
+    // The declared-type rejection is an `incompatible-type` error VALUE (the
+    // `Declare` operator route does not throw), so the diagnostic quotes the
+    // coded error rather than an opaque host message.
+    expect(String(messages[0][1])).toContain('incompatible-type');
     expect(String(messages[0][1])).toContain('point');
     // The type itself IS registered — only the annotation is refused.
     expect(ce.type('point').matches('point')).toBe(true);
@@ -708,7 +711,11 @@ describe('CORTEX TYPE CONSTRUCTORS', () => {
       'type point = tuple<x: number, y: number>\nlet q: point = (1, 2)\nq'
     );
     expect(r.diagnostics.length).toBeGreaterThan(0);
-    expect(JSON.stringify(r.diagnostics)).toContain('not compatible');
+    // The rejection travels as an `incompatible-type` error VALUE, not a
+    // host throw, so the diagnostic carries the code (see the channel note in
+    // `test/compute-engine/nominal-assign.test.ts`).
+    expect(JSON.stringify(r.diagnostics)).toContain('incompatible-type');
+    expect(JSON.stringify(r.diagnostics)).toContain('point');
   });
 
   test('opacity: `First` and destructuring do not pierce (D3)', () => {
@@ -845,6 +852,34 @@ describe('CORTEX TYPE CONSTRUCTORS', () => {
     const r = executeCortex(ce, 'point(7, 8)');
     expect(r.diagnostics).toEqual([]);
     expect(r.value.type.toString()).toBe('point');
+  });
+
+  // A dictionary literal synthesizes `record<x: …, y: …>` (its keys are
+  // statically known), so a `record`-bodied ALIAS is inhabitable from a
+  // literal. Before record-aware synthesis the literal typed as
+  // `dictionary<finite_integer>` and this annotation failed `incompatible-type`
+  // even though the shape matched exactly.
+  test('a record-bodied alias is inhabited by a dictionary literal', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      'type alias pt = record<x: number, y: number>\nconst p: pt = {x -> 1, y -> 2}\np'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.type.toString()).toBe(
+      'record<x: finite_integer, y: finite_integer>'
+    );
+  });
+
+  test('a record-bodied alias still rejects a mismatched literal', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      'type alias pt = record<x: number, y: number>\nconst p: pt = {x -> 1, z -> 2}\np'
+    );
+    const messages = r.diagnostics.map((d) => d.message);
+    expect(messages).toHaveLength(1);
+    expect(String(messages[0][1])).toContain('incompatible-type');
   });
 
   test('equality is structural over the tag (D9)', () => {

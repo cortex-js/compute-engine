@@ -25,6 +25,31 @@ import { isFunction, isString, sym } from './type-guards.js';
  * These helpers are the single source of truth for reading that shape.
  */
 
+/**
+ * The resolution of a `Typed` type operand, keyed by the operand NODE.
+ *
+ * A type operand is stored as TEXT (`["Typed", "x", "'pt'"]`), but a name
+ * declared by a `type` statement only resolves while its declaring scope is
+ * current: `ce._typeResolver` walks the CURRENT lexical scope. A literal
+ * outlives that scope whenever it escapes the block that declared the type —
+ * assigned to an outer symbol, returned, stored in a collection — and every
+ * later read of its parameter types re-parses the text from wherever the
+ * reader happens to stand. That re-parse throws `Unknown type`, the annotation
+ * silently reads as absent, and argument-type validation stops firing.
+ *
+ * Same hazard, same fix as the operator-definition signature
+ * (`boxed-operator-definition.ts`, "assembled as a Type OBJECT, never as a
+ * string that is re-parsed"): `typeToString` discards the resolution, so carry
+ * the resolved `Type` — a `TypeReference` carries its own `def` and stays
+ * usable wherever it escapes to. Here the text is what the expression stores,
+ * so the resolution is remembered against the operand node instead, recorded
+ * the first time the name resolves. `canonicalFunctionLiteralArguments` forces
+ * that first resolution (`resolveFunctionLiteralTypes`) while the declaring
+ * scope is still current, rather than leaving it to whichever consumer reads
+ * the literal first.
+ */
+const RESOLVED_TYPE_OPERANDS = new WeakMap<Expression, Type>();
+
 /** Parse a `Typed` type operand (a string literal or a type-name symbol) into
  * a {@link Type}, returning `undefined` if it cannot be parsed. */
 function parseTypeOperand(t: Expression | undefined): Type | undefined {
@@ -38,11 +63,29 @@ function parseTypeOperand(t: Expression | undefined): Type | undefined {
     // which only the engine's resolver can read. Tried second, so the
     // resolver-less (memo-cached) parse still carries the common case.
     try {
-      return parseType(s, t.engine._typeResolver);
+      const resolved = parseType(s, t.engine._typeResolver);
+      RESOLVED_TYPE_OPERANDS.set(t, resolved);
+      return resolved;
     } catch {
-      return undefined;
+      // Out of scope now: fall back to the resolution recorded while the
+      // declaring scope was current (see `RESOLVED_TYPE_OPERANDS`).
+      return RESOLVED_TYPE_OPERANDS.get(t);
     }
   }
+}
+
+/**
+ * Force the resolution of a canonical `Function` literal's type operands while
+ * the scope that declares those type names is still current.
+ *
+ * Called once, at the end of `canonicalFunctionLiteralArguments`: the literal
+ * may escape that scope, and after it does the operand text no longer resolves
+ * (see {@link RESOLVED_TYPE_OPERANDS}). The reads are pure; they are made for
+ * the resolution they record.
+ */
+export function resolveFunctionLiteralTypes(expr: Expression): void {
+  functionLiteralParameters(expr);
+  functionLiteralReturnType(expr);
 }
 
 /** The name of a single `Function` parameter operand, unwrapping a `Typed`

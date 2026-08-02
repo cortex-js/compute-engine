@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { BoxedExpression } from '../../src/compute-engine';
 import { executeCortex } from '../../src/cortex/execute-cortex';
+import { isTypeCompatibilityError } from '../../src/compute-engine/boxed-expression/type-compatibility-error';
 
 //
 // Route parity for the DECLARED-TYPE compatibility check.
@@ -22,6 +24,12 @@ import { executeCortex } from '../../src/cortex/execute-cortex';
 //
 // All three routes now apply the same per-axis check.
 //
+// The CHANNEL differs by route, though: the host routes (`ce.declare`,
+// `ce.assign`) THROW, like every other registration-time conflict, while the
+// `Declare` / `Assign` OPERATOR routes return an `incompatible-type` error
+// VALUE — errors are values for a program (same split as the effect-contract
+// check, `effects-inference.ts`).
+//
 
 const ALIAS = ['Dictionary', ['KeyValuePair', 'alias', 'True']] as any;
 
@@ -37,6 +45,20 @@ function engine(): ComputeEngine {
 /** The outcome of a route, as a string, so the three routes can be compared
  * side by side. Either `'ok'`, the operator route's error-value string, or
  * `'throw: <first line of the message>'`. */
+/** The `ErrorCode` head of an `["Error", ["ErrorCode", code, …], where?]`. */
+function errorCode(e: BoxedExpression): string | undefined {
+  const cause = e.op1;
+  if (cause.operator !== 'ErrorCode') return undefined;
+  return cause.op1.string ?? undefined;
+}
+
+/** The `ErrorCode` payload, after the code. */
+function errorPayload(e: BoxedExpression): string[] {
+  const cause = e.op1;
+  if (cause.operator !== 'ErrorCode') return [];
+  return cause.ops.slice(1).map((x) => x.string ?? x.toString());
+}
+
 function outcome(f: () => string | void): string {
   try {
     return f() || 'ok';
@@ -48,12 +70,14 @@ function outcome(f: () => string | void): string {
 describe('NOMINAL declared type rejects a structurally-similar value', () => {
   test('route 1 — declare with value (operator)', () => {
     const ce = engine();
-    expect(
-      outcome(() =>
-        ce.box(['Declare', 'w', { str: 'point' }, ['Tuple', 1, 2]]).evaluate()
-          .json as any
-      )
-    ).toMatchInlineSnapshot(`"throw: Symbol "w""`);
+    const result = ce
+      .box(['Declare', 'w', { str: 'point' }, ['Tuple', 1, 2]])
+      .evaluate();
+    // An error VALUE, not a throw — and coded `incompatible-type`.
+    expect(result.operator).toBe('Error');
+    expect(outcome(() => result.toString())).toMatchInlineSnapshot(
+      `"Error(ErrorCode("incompatible-type", "point", "tuple<finite_integer, finite_integer>"), "w")"`
+    );
     // No value was installed.
     expect(ce.box('w').evaluate().toString()).toBe('w');
   });
@@ -76,9 +100,11 @@ describe('NOMINAL declared type rejects a structurally-similar value', () => {
   test('route 2 — the `Assign` operator', () => {
     const ce = engine();
     ce.declare('p', 'point');
-    expect(
-      outcome(() => ce.box(['Assign', 'p', ['Tuple', 1, 2]]).evaluate().json as any)
-    ).toMatchInlineSnapshot(`"throw: Symbol "p""`);
+    const result = ce.box(['Assign', 'p', ['Tuple', 1, 2]]).evaluate();
+    expect(result.operator).toBe('Error');
+    expect(outcome(() => result.toString())).toMatchInlineSnapshot(
+      `"Error(ErrorCode("incompatible-type", "point", "tuple<finite_integer, finite_integer>"), "p")"`
+    );
     // The value was NOT installed: `p` is still valueless.
     expect(ce.box('p').evaluate().toString()).toBe('p');
   });
@@ -258,10 +284,12 @@ describe('a MINTED type constructor cannot be assigned over (D5)', () => {
 
   test('route 2 — the `Assign` operator surfaces it as an Error value', () => {
     const ce = engine();
-    expect(
-      outcome(() => ce.box(['Assign', 'point', 5]).evaluate().json as any)
-    ).toMatchInlineSnapshot(
-      `"throw: Cannot assign a value to the constructor of type "point""`
+    const result = ce.box(['Assign', 'point', 5]).evaluate();
+    expect(result.operator).toBe('Error');
+    // The `expected` slot is the constructor's own signature: nothing else
+    // may be installed under that name.
+    expect(outcome(() => result.toString())).toMatchInlineSnapshot(
+      `"Error(ErrorCode("incompatible-type", "(integer, integer) -> point"), "point")"`
     );
   });
 
@@ -272,7 +300,7 @@ describe('a MINTED type constructor cannot be assigned over (D5)', () => {
       'type point = tuple<x: number, y: number>\npoint = 5'
     );
     expect(r.value.toString()).toBe(
-      'Error("Cannot assign a value to the constructor of type \\"point\\"")'
+      'Error(ErrorCode("incompatible-type", "(x: number, y: number) -> point"), "point")'
     );
     // The type half is untouched.
     expect(
@@ -308,5 +336,76 @@ describe('the effects axis keeps its own provenance', () => {
     );
     ce.assign('n', 3);
     expect(ce.box('n').evaluate().toString()).toBe('3');
+  });
+});
+
+//
+// The CHANNEL split: the OPERATOR routes yield an `incompatible-type` error
+// VALUE (errors are values for a program); the HOST routes keep throwing.
+//
+describe('the throw/value channel split for a declared-type rejection', () => {
+  test('the `Assign` operator route returns an incompatible-type Error value', () => {
+    const ce = engine();
+    ce.declare('p', 'point');
+    const r = ce.box(['Assign', 'p', ['Tuple', 1, 2]]).evaluate();
+    expect(r.operator).toBe('Error');
+    expect(errorCode(r)).toBe('incompatible-type');
+    // The payload names both types, and the `where` names the symbol.
+    expect(errorPayload(r)).toEqual([
+      'point',
+      'tuple<finite_integer, finite_integer>',
+    ]);
+    expect(ce.box('p').evaluate().toString()).toBe('p');
+  });
+
+  test('the `Declare`-with-value operator route does the same', () => {
+    const ce = engine();
+    const r = ce
+      .box(['Declare', 'w', { str: 'point' }, ['Tuple', 1, 2]])
+      .evaluate();
+    expect(r.operator).toBe('Error');
+    expect(errorCode(r)).toBe('incompatible-type');
+    expect(ce.box('w').evaluate().toString()).toBe('w');
+  });
+
+  test('the minted-constructor guard becomes an Error value too', () => {
+    const ce = engine();
+    const r = ce.box(['Assign', 'point', 5]).evaluate();
+    expect(r.operator).toBe('Error');
+    expect(errorCode(r)).toBe('incompatible-type');
+    // The constructor half is intact.
+    expect(ce.box(['point', 1, 2]).evaluate().toString()).toBe('point(1, 2)');
+  });
+
+  test('the HOST routes still throw — a `TypeCompatibilityError`', () => {
+    const ce = engine();
+    ce.declare('p', 'point');
+    for (const f of [
+      () => ce.assign('p', ce.box(['Tuple', 1, 2])),
+      () => ce.declare('w', { type: 'point', value: ce.box(['Tuple', 1, 2]) }),
+      () => ce.assign('point', 5),
+    ]) {
+      let caught: unknown;
+      try {
+        f();
+      } catch (e) {
+        caught = e;
+      }
+      expect(isTypeCompatibilityError(caught)).toBe(true);
+    }
+  });
+
+  test('an `executeCortex` program gets the error VALUE, unchanged behavior', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      'type point = tuple<x: number, y: number>\nlet p: point = (1, 2)'
+    );
+    expect(r.value.operator).toBe('Error');
+    expect(errorCode(r.value)).toBe('incompatible-type');
+    // Nothing was installed, and the type half is untouched.
+    expect(
+      executeCortex(ce, 'let q: point = point(1, 2)\nq').value.toString()
+    ).toBe('point(1, 2)');
   });
 });

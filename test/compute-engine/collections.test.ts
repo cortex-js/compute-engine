@@ -477,7 +477,7 @@ describe('TAKE', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "dictionary<finite_integer>"
+            "record<x: finite_integer, y: finite_integer, z: finite_integer>"
           ]
         ],
         1
@@ -493,7 +493,7 @@ describe('TAKE', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "dictionary<finite_integer>"
+            "record<x: finite_integer, y: finite_integer, z: finite_integer>"
           ]
         ],
         1
@@ -617,7 +617,7 @@ describe('DROP 2', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "dictionary<finite_integer>"
+            "record<x: finite_integer, y: finite_integer, z: finite_integer>"
           ]
         ],
         2
@@ -750,7 +750,7 @@ describe('SLICE (2,3)', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "dictionary<finite_integer>"
+            "record<x: finite_integer, y: finite_integer, z: finite_integer>"
           ]
         ],
         2,
@@ -843,7 +843,7 @@ describe('SLICE -1,1', () => {
             "ErrorCode",
             "incompatible-type",
             "'indexed_collection'",
-            "dictionary<finite_integer>"
+            "record<x: finite_integer, y: finite_integer, z: finite_integer>"
           ]
         ],
         -1,
@@ -960,9 +960,12 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // that `collectionElementType` reports for iteration. Otherwise `d["a"] + 10`
     // fails with `incompatible-type`.
     const at = engine.box(['At', dict, { str: 'x' }]);
-    // §3.C: `At(dictionary<T>, key) : T | marker(T)`; a numeric `T` absorbs
-    // its absence value (I6/Q2), so the type widens to `number`.
-    expect(at.type.toString()).toMatchInlineSnapshot(`number`);
+    // §3.C: the literal `dict` synthesizes `record<x: …, y: …, z: …>`, so a
+    // LITERAL key that names an existing field is statically present — the
+    // "present literal → exact" arm applies and the result carries no absence
+    // marker. (A key-blind `dictionary<T>` base instead gives `T | marker(T)`,
+    // which for a numeric `T` absorbs to `number`.)
+    expect(at.type.toString()).toMatchInlineSnapshot(`finite_integer`);
     expect(
       engine.box(['Add', ['At', dict, { str: 'x' }], 10]).evaluate().toString()
     ).toMatchInlineSnapshot(`11`);
@@ -2514,6 +2517,67 @@ describe('DICTIONARY LITERAL VALUE EVALUATION', () => {
     const ce = new ComputeEngine();
     const m = ce.box({ dict: { a: 3, b: 'x' } });
     expect(m.evaluate() === m).toBe(true);
+  });
+});
+
+//
+// A dictionary literal always knows its keys, so it synthesizes the narrower
+// `record<k: T, …>` rather than the key-blind `dictionary<T>`. This is what
+// makes a `record`-bodied type inhabitable from a literal; `record <:
+// dictionary` keeps every `dictionary<T>` consumer matching.
+//
+describe('DICTIONARY LITERAL TYPE SYNTHESIS', () => {
+  test('synthesizes a record type naming the keys', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box({ dict: { x: 1, y: 2 } }).type.toString()).toBe(
+      'record<x: finite_integer, y: finite_integer>'
+    );
+  });
+
+  test('the boxed Dictionary/KeyValuePair route agrees', () => {
+    const ce = new ComputeEngine();
+    const d = ce.box([
+      'Dictionary',
+      ['KeyValuePair', { str: 'x' }, 1],
+      ['KeyValuePair', { str: 'y' }, 2],
+    ]);
+    expect(d.type.toString()).toBe(
+      'record<x: finite_integer, y: finite_integer>'
+    );
+  });
+
+  test('the synthesized record still satisfies a dictionary annotation', () => {
+    const ce = new ComputeEngine();
+    const t = ce.box({ dict: { x: 1, y: 2 } }).type;
+    expect(t.matches('dictionary<integer>')).toBe(true);
+    expect(t.matches('dictionary')).toBe(true);
+    expect(t.matches('collection')).toBe(true);
+    // ...and now also the record shape it structurally matches.
+    expect(t.matches('record<x: number, y: number>')).toBe(true);
+  });
+
+  test('a non-identifier key falls back to `dictionary<T>`', () => {
+    // `typeToString` does not backtick-escape record keys, so a record type
+    // built from such a key would not round-trip through `parseType`.
+    const ce = new ComputeEngine();
+    expect(ce.box({ dict: { 'a b': 1 } }).type.toString()).toBe(
+      'dictionary<finite_integer>'
+    );
+    // A word the type lexer reads as a keyword, not an identifier.
+    expect(ce.box({ dict: { true: 1 } }).type.toString()).toBe(
+      'dictionary<finite_integer>'
+    );
+  });
+
+  test('every synthesized record type round-trips through parseType', () => {
+    const ce = new ComputeEngine();
+    const s = ce.box({ dict: { x: 1, y: 2 } }).type.toString();
+    expect(ce.type(s).toString()).toBe(s);
+  });
+
+  test('an empty dictionary keeps its `dictionary<never>` typing', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box({ dict: {} }).type.toString()).toBe('dictionary<never>');
   });
 });
 

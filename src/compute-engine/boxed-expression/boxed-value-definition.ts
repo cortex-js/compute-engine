@@ -17,6 +17,7 @@ import type { LatexString } from '../latex-syntax/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { matchesDeclaredTypeAxes } from './effects-inference.js';
+import { declaredTypeError } from './type-compatibility-error.js';
 import { isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
@@ -215,14 +216,7 @@ export class _BoxedValueDefinition
             this.effectsDeclared
           )
         ) {
-          throw new Error(
-            [
-              `Symbol "${this.name}"`,
-              `The value "${this._value.toString()}" of type "${
-                this._value.type
-              }" is not compatible with the type "${this._type}"`,
-            ].join('\n|   ')
-          );
+          throw declaredTypeError(this.name, this._value, this._type);
         }
       }
     }

@@ -77,6 +77,10 @@ import {
   signatureEffects,
 } from '../boxed-expression/effects-inference.js';
 import {
+  isTypeCompatibilityError,
+  typeCompatibilityErrorValue,
+} from '../boxed-expression/type-compatibility-error.js';
+import {
   operatorDefinitionOf,
   shallowApplicationEffects,
 } from '../boxed-expression/effects-of.js';
@@ -1490,10 +1494,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // and surfaces as an `incompatible-type` error VALUE — the same shape
         // and channel as the call-boundary type check. See "Definition-
         // annotation check" in `docs/EFFECTS-MODEL.md`.
+        //
+        // A declared-TYPE mismatch (and the minted-constructor guard) takes
+        // the same channel: errors are values for a program, even though the
+        // host `ce.assign` keeps throwing.
         try {
           ce.assign(symbolName, val);
         } catch (e) {
           if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+          if (isTypeCompatibilityError(e))
+            return typeCompatibilityErrorValue(ce, e);
           throw e;
         }
         return val;
@@ -1769,11 +1779,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (!symbolName) return undefined;
 
         // See the `Assign` handler: a violated definition-annotation contract
-        // is not installed and surfaces as an `incompatible-type` error value.
+        // — or a declared-type mismatch — is not installed and surfaces as an
+        // `incompatible-type` error value.
         try {
           declareOne(symbolName, hasValue ? value : undefined);
         } catch (e) {
           if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+          if (isTypeCompatibilityError(e))
+            return typeCompatibilityErrorValue(ce, e);
           throw e;
         }
         return hasValue ? value : ce.Nothing;

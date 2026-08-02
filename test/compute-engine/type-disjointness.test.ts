@@ -97,9 +97,15 @@ describe('BoxedType.isDisjointFrom', () => {
         .isDisjointFrom('list<tuple<number, number>>')
     ).toBe(true);
     expect(ce.type('set<integer>').isDisjointFrom('list<integer>')).toBe(true);
+    // `record` is NOT a sibling of `dictionary` — it is its named-shape
+    // SUBTYPE (the documented hierarchy nests record under dictionary, and a
+    // record value IS a dictionary value): not disjoint. An earlier pin here
+    // claimed disjointness; it was added in a batch of sibling-composite
+    // examples and contradicted both the type-hierarchy doc and the runtime,
+    // which handles record in every dictionary-kind branch.
     expect(
       ce.type('record<red: integer>').isDisjointFrom('dictionary<integer>')
-    ).toBe(true);
+    ).toBe(false);
     // The unit types are distinct from each other and from everything else.
     expect(ce.type('nothing').isDisjointFrom('missing')).toBe(true);
     expect(ce.type('nothing').isDisjointFrom('boolean')).toBe(true);

@@ -21,6 +21,10 @@ import {
   stripArrowEffects,
   withArrowEffects,
 } from './boxed-expression/effects-inference.js';
+import {
+  constructorAssignmentError,
+  declaredTypeError,
+} from './boxed-expression/type-compatibility-error.js';
 import { osaDistance } from '../common/fuzzy-string-match.js';
 
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
@@ -801,14 +805,7 @@ export function assignFn(
           effectsDeclared
         )
       )
-        throw new Error(
-          [
-            `Symbol "${id}"`,
-            `The value "${reconciled.toString()}" of type "${
-              reconciled.type
-            }" is not compatible with the type "${declaredType}"`,
-          ].join('\n|   ')
-        );
+        throw declaredTypeError(id, reconciled, declaredType);
       ce._setSymbolValue(id, reconciled);
       return ce;
     }
@@ -840,7 +837,7 @@ export function assignFn(
     // A SHADOWING assignment is fine: it binds a new name in the current
     // scope and leaves the declaration's own scope untouched.
     if (!shadowBuiltin && isMintedConstructor(def))
-      throw Error(`Cannot assign a value to the constructor of type "${id}"`);
+      throw constructorAssignmentError(id, def.operator.signature);
 
     const value = assignValueAsValue(ce, arg2);
     if (value !== undefined) {
@@ -917,14 +914,7 @@ export function assignFn(
             effectsDeclared
           )
         )
-          throw new Error(
-            [
-              `Symbol "${id}"`,
-              `The value "${reconciled.toString()}" of type "${
-                reconciled.type
-              }" is not compatible with the type "${declaredType}"`,
-            ].join('\n|   ')
-          );
+          throw declaredTypeError(id, reconciled, declaredType);
 
         // Store the reconciled literal as a VALUE under the declared signature
         // — the SAME representation the string-form (value-slot) declaration
@@ -1010,14 +1000,7 @@ export function assignFn(
           def.value.effectsDeclared
         )
       )
-        throw new Error(
-          [
-            `Symbol "${id}"`,
-            `The value "${value.toString()}" of type "${
-              value.type
-            }" is not compatible with the type "${def.value.type}"`,
-          ].join('\n|   ')
-        );
+        throw declaredTypeError(id, value, def.value.type);
     }
 
     // ... and set the value

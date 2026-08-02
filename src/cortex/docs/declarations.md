@@ -181,5 +181,6 @@ lexical scope, so a `let`/`const` inside a block does not leak into the
 enclosing scope.
 
 `let` and `const` are the binding keywords. There is currently no compound
-assignment (`+=`) or destructuring declaration.
+assignment (`+=`); destructuring declarations (`let (x, y) = t`) are
+described above.
 

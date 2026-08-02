@@ -334,6 +334,39 @@ describe('Collection Type Parser', () => {
     `);
   });
 
+  // A `record` is a `dictionary` whose keys are statically known — the type
+  // tree in `doc/08-guide-types.md` nests `record` under `dictionary`, and the
+  // guide's "Compatibility" examples pin both the parameterized and the bare
+  // direction. Load-bearing for dictionary literals, which synthesize a
+  // `record<…>` and must still satisfy a `dictionary<T>` annotation.
+  it('makes a record a subtype of a dictionary', () => {
+    expect(
+      isSubtype(
+        parseType('record<red: integer, green: integer, blue: integer>'),
+        parseType('dictionary<integer>')
+      )
+    ).toBe(true);
+    // ...but only when every field type fits the dictionary's value type.
+    expect(
+      isSubtype(
+        parseType('record<user: string, age: integer>'),
+        parseType('dictionary<integer>')
+      )
+    ).toBe(false);
+    // The bare primitives, per the same tree.
+    expect(
+      isSubtype(parseType('record<red: integer>'), parseType('dictionary'))
+    ).toBe(true);
+    // The converse does NOT hold: a dictionary states no keys, so it cannot
+    // stand in for a record that requires them.
+    expect(
+      isSubtype(parseType('dictionary<integer>'), parseType('record<x: integer>'))
+    ).toBe(false);
+    expect(
+      isSubtype(parseType('dictionary'), parseType('record'))
+    ).toBe(false);
+  });
+
   it('should parse a record with exotic keys', () => {
     expect(
       parseType('record<`直径`: string, `نصف القطر`: integer, `durée`: number>')

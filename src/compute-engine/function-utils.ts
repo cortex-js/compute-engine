@@ -25,6 +25,7 @@ import {
 import {
   functionLiteralParameterName,
   functionLiteralParameterType,
+  resolveFunctionLiteralTypes,
 } from './boxed-expression/function-literal.js';
 import { errorValue } from './boxed-expression/error-value.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
@@ -445,10 +446,19 @@ export function canonicalFunctionLiteralArguments(
   // the body moves.
   block = rebindParameters(block, params);
 
-  return ce._fn('Function', [
+  const literal = ce._fn('Function', [
     block,
     ...bindParameterOperands(ce, block, params),
   ]);
+
+  // Resolve the annotations NOW, while the scope that declares any
+  // user-declared type name they use is still current: the literal can escape
+  // it (assigned outward, returned, stored in a collection) and its type
+  // operands are TEXT, which no longer resolves from where a later reader
+  // stands. See `RESOLVED_TYPE_OPERANDS` (`function-literal.ts`).
+  resolveFunctionLiteralTypes(literal);
+
+  return literal;
 }
 
 /**
@@ -566,7 +576,19 @@ function rebindParameters(
  * §3.2 sugar) into structural operands `[body, ...params]`, or `undefined`
  * when the string is not a fully-named, non-variadic signature type. An
  * `unknown`/`any` argument or result type stays unannotated; an explicit
- * `Typed` body ascription is kept over the signature's result type. */
+ * `Typed` body ascription is kept over the signature's result type.
+ *
+ * The `typeToString` round-trips below re-serialize a type that was just
+ * resolved, which DISCARDS the resolution of a user-declared type name (a
+ * `TypeReference` serializes to its bare name) — the hazard the
+ * operator-definition signature had (`boxed-operator-definition.ts`,
+ * "assembled as a Type OBJECT, never as a string that is re-parsed"). It is
+ * safe HERE only because the text goes straight back into
+ * `canonicalFunctionLiteralArguments`, in this same scope, which re-parses it
+ * with the resolver and records the resolution against the operand node
+ * (`RESOLVED_TYPE_OPERANDS`, `function-literal.ts`) before the literal can
+ * escape. Do not move this serialization anywhere the declaring scope may
+ * already have popped. */
 function desugarSignatureString(
   ce: ComputeEngine,
   body: Expression,

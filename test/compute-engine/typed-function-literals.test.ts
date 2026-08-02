@@ -1,4 +1,9 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import {
+  functionLiteralParameters,
+  functionLiteralReturnType,
+} from '../../src/compute-engine/boxed-expression/function-literal';
+import { typeToString } from '../../src/common/type/serialize';
 
 /**
  * Phase 1 of the typed-function-literals design
@@ -487,16 +492,19 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
 
   test('a genuine param conflict is still rejected (Declare-evaluate path)', () => {
     const ce = new ComputeEngine();
-    expect(() =>
-      ce
-        .box([
-          'Declare',
-          'f',
-          "'(string) -> string'",
-          ['Function', ['Add', 'x', 1], ['Typed', 'x', "'integer'"]],
-        ])
-        .evaluate()
-    ).toThrow();
+    // The OPERATOR route does not throw: errors are values for a program. The
+    // rejection surfaces as an `incompatible-type` Error value (the host
+    // `ce.assign` above keeps throwing).
+    const r = ce
+      .box([
+        'Declare',
+        'f',
+        "'(string) -> string'",
+        ['Function', ['Add', 'x', 1], ['Typed', 'x', "'integer'"]],
+      ])
+      .evaluate();
+    expect(r.operator).toBe('Error');
+    expect(r.op1.op1.string).toBe('incompatible-type');
   });
 
   test('Tycho 19.1 — a tuple-param declaration stays enforced after `:=` registration', () => {
@@ -862,5 +870,72 @@ describe('Signature-string sugar (§3.2/§10)', () => {
     );
     expect(ce.box(['halve', 7]).evaluate().json).toEqual(['Rational', 7, 2]);
     expect(ce.box(['halve', 7]).type.toString()).toBe('real');
+  });
+});
+
+//
+// A type operand is stored as TEXT, but a name declared with `ce.declareType()`
+// inside a pushed scope only resolves while that scope is current. A literal
+// outlives it whenever it escapes — assigned outward, returned, stored in a
+// collection — and every later read re-parses the text from wherever the
+// reader stands. Before the fix that re-parse threw `Unknown type` and the
+// annotation silently read as ABSENT, so apply-time enforcement (§6.4), which
+// is gated on "carries at least one annotated parameter", stopped firing.
+//
+// Same hazard, same fix as the operator-definition signature
+// (`boxed-operator-definition.ts`, "assembled as a Type OBJECT, never as a
+// string that is re-parsed"): the resolution is carried rather than
+// round-tripped through text.
+//
+describe('Annotations naming a SCOPE-LOCAL type survive the scope', () => {
+  test('a parameter annotation still reads after the declaring scope popped', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declareType('inner', 'tuple<number, number>', { alias: true });
+    const f = ce.box(['Function', 1, ['Typed', 'p', "'inner'"]]);
+    ce.popScope();
+    const [p] = functionLiteralParameters(f);
+    expect(p.name).toBe('p');
+    expect(p.type && typeToString(p.type)).toBe('inner');
+  });
+
+  test('a return ascription still reads after the declaring scope popped', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declareType('ret', 'tuple<number, number>', { alias: true });
+    const f = ce.box(['Function', ['Typed', 1, "'ret'"], 'x']);
+    ce.popScope();
+    const t = functionLiteralReturnType(f);
+    expect(t && typeToString(t)).toBe('ret');
+  });
+
+  test('the resolution is per-OPERAND, so a re-used name does not leak', () => {
+    // Two scopes declare `dup` differently. Each literal keeps the definition
+    // that was in scope where IT was built — a resolution recorded by name
+    // would hand the second definition to both.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declareType('dup', 'tuple<number, number>', { alias: true });
+    const a = ce.box(['Function', 1, ['Typed', 'p', "'dup'"]]);
+    ce.popScope();
+    ce.pushScope();
+    ce.declareType('dup', 'string', { alias: true });
+    const b = ce.box(['Function', 1, ['Typed', 'p', "'dup'"]]);
+    ce.popScope();
+    const defOf = (f: ReturnType<ComputeEngine['box']>) => {
+      const t = functionLiteralParameters(f)[0].type;
+      return typeof t === 'object' && t.kind === 'reference'
+        ? typeToString(t.def!)
+        : undefined;
+    };
+    expect(defOf(a)).toBe('tuple<number, number>');
+    expect(defOf(b)).toBe('string');
+  });
+
+  test('a genuinely unknown type name still reads as unannotated', () => {
+    // The carried resolution must not paper over a name that never resolved.
+    const ce = new ComputeEngine();
+    const f = ce.box(['Function', 1, ['Typed', 'p', "'nosuchtype'"]]);
+    expect(functionLiteralParameters(f)[0].type).toBeUndefined();
   });
 });
