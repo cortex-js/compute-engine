@@ -92,6 +92,13 @@ interface MapCompileCache {
   deps?: MapCompileDep[];
   /** `ce._mutationGeneration` stamp for the cheap per-invocation check. */
   generation: number;
+  /** `ce._semanticEpoch` at compile time. An epoch event — assumptions
+   * (`assume`/`forget`), operator/type redefinition, signature inference,
+   * engine-config changes, reset — invalidates unconditionally: unlike a value
+   * write, it cannot be re-stamped away by `validCompiled`'s dep walk, because
+   * compile-time canonicalization may have consulted global semantics no dep
+   * snapshot records. */
+  epoch: number;
   /** `ce.tolerance` stamp — baked into the code by the equality codegen, so a
    * change forces a recompile (never a re-stamp). */
   tolerance: number;
@@ -398,11 +405,11 @@ function depChanged(ce: ComputeEngine, dep: MapCompileDep): boolean {
 /**
  * Per-invocation validation (D3). Cheap check first (`_mutationGeneration` +
  * `ce.tolerance` stamps); on mismatch, the full dependency walk. If every
- * dep is unchanged (and the tolerance still matches — it is baked into the
- * generated code, so a change can never be re-stamped away), **re-stamp and
- * keep** the compiled function: an unrelated per-frame `ce.assign` bumping
- * the global axis must not thrash the cache (review 13). A genuine dep
- * change returns `false` → recompile.
+ * dep is unchanged (and the tolerance, angularUnit and `_semanticEpoch` still
+ * match — those are never re-stamped away), **re-stamp and keep** the
+ * compiled function: an unrelated per-frame `ce.assign` bumping the global
+ * axis must not thrash the cache (review 13). A genuine dep change returns
+ * `false` → recompile.
  */
 function validCompiled(ce: ComputeEngine, cache: MapCompileCache): boolean {
   if (
@@ -417,6 +424,15 @@ function validCompiled(ce: ComputeEngine, cache: MapCompileCache): boolean {
   // code, so it can never be re-stamped away — always recompile.
   if (cache.tolerance !== ce.tolerance) return false;
   if (cache.angularUnit !== ce.angularUnit) return false;
+  // Global-semantics axis (2026-08-02 dependency-precise invalidation design,
+  // §4): an `assume`/`forget`, an operator/type redefinition or a signature
+  // inference bumps `_mutationGeneration` too, but the dep walk below sees no
+  // dep change and RE-STAMPS the bump away — while compile-time
+  // canonicalization may have consulted exactly those global semantics. The
+  // epoch is bumped only by those rare events (never by a value write), so
+  // ANDing it here forces a recompile in precisely that case and costs
+  // nothing otherwise.
+  if (cache.epoch !== ce._semanticEpoch) return false;
   for (const d of cache.deps ?? []) if (depChanged(ce, d)) return false;
   cache.generation = ce._mutationGeneration;
   return true;
@@ -445,6 +461,7 @@ function attemptCompile(
     tier,
     reason,
     generation: ce._mutationGeneration,
+    epoch: ce._semanticEpoch,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
   });
@@ -515,6 +532,7 @@ function attemptCompile(
     fn: result.run as (...args: unknown[]) => unknown,
     deps: [...deps].map((name) => resolveDep(ce, name)),
     generation: ce._mutationGeneration,
+    epoch: ce._semanticEpoch,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
   };

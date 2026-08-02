@@ -707,6 +707,7 @@ export function installConstructorFunction(
   if (existing !== undefined) {
     updateDef(ce, name, existing, def);
     ce._mutationGeneration += 1;
+    ce._semanticEpoch += 1;
   } else {
     ce.declare(name, def);
   }

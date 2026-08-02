@@ -1446,6 +1446,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             if (fnDef !== undefined) {
               updateDef(ce, symbolName, binding, fnDef);
               ce._mutationGeneration += 1;
+              ce._semanticEpoch += 1;
             }
           }
         }
@@ -1581,6 +1582,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                   if (fnDef !== undefined) {
                     updateDef(ce, symbolName, binding, fnDef);
                     ce._mutationGeneration += 1;
+                    ce._semanticEpoch += 1;
                   }
                 }
               }

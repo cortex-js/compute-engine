@@ -188,6 +188,36 @@ describe('Comprehension element memo', () => {
     expect(c2).toBe(5); // re-walked, not served from a memo
   });
 
+  it('stays warm across unrelated assigns, colds on a related one', () => {
+    // Tycho item 127: the memo is keyed on what the instance DEPENDS on, so
+    // a per-frame `assign` of an unrelated symbol must not cold it.
+    ce.assign('kslide', 2);
+    ce.assign('tslide', 0);
+    ce.assign(
+      'dslide',
+      ce.box([
+        'Comprehension',
+        ['tick', ['Multiply', 'kslide', 'n']],
+        ['Element', 'n', ['Range', 1, 10]],
+      ])
+    );
+
+    const [v1, c1] = counting(() => walkSum('dslide'));
+    expect(v1).toBe(2 * 55);
+    expect(c1).toBe(10); // cold fill
+
+    for (const t of [1, 2, 3]) ce.assign('tslide', t);
+
+    const [v2, c2] = counting(() => walkSum('dslide'));
+    expect(v2).toBe(2 * 55);
+    expect(c2).toBe(0); // warm
+
+    ce.assign('kslide', 4);
+    const [v3, c3] = counting(() => walkSum('dslide'));
+    expect(v3).toBe(4 * 55);
+    expect(c3).toBe(10); // cold
+  });
+
   it('is invalidated by assume() and forget()', () => {
     ce.declare('amemo', 'real');
     ce.assign(

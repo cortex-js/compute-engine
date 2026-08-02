@@ -47,6 +47,9 @@ import {
   validElementMemo,
   elementMemoRecordingStream,
   elementMemoAt,
+  elementMemoParanoid,
+  enterParanoidCheck,
+  exitParanoidCheck,
 } from './collection-element-memo.js';
 import {
   isNumber,
@@ -323,6 +326,7 @@ export class BoxedFunction
     // Signature inference mutates a SHARED operator definition in place: a
     // semantic change other expressions may depend on.
     this.engine._mutationGeneration += 1;
+    this.engine._semanticEpoch += 1;
 
     return true;
   }
@@ -1525,6 +1529,43 @@ export class BoxedFunction
       // Serve only a COMPLETE cache — a partial prefix (fill-to-n path)
       // covers `at()` reads, not a whole-collection walk.
       if (cached?.complete) {
+        // Paranoid canary (design §3, dependency-precise invalidation):
+        // under CE_MEMO_PARANOID, cross-check the served cache against a
+        // live re-walk. A divergence means a dependency-closure leak —
+        // under precise invalidation that is a stale-serve correctness
+        // bug, not a spurious refill. Pure bodies only: an impure body
+        // (Random) legitimately differs on a re-walk by ruling. The
+        // enter/exit latch prevents re-entry (the re-walk, `isPure`, or a
+        // diagnostic serialization can reach `each()` again — `toString()`
+        // MATERIALIZES a collection); messages deliberately avoid
+        // serializing `this` for the same reason.
+        if (elementMemoParanoid() && enterParanoidCheck()) {
+          try {
+            if (this.isPure) {
+              const live =
+                this.operatorDefinition?.collection?.iterator?.(this);
+              if (live) {
+                const cachedEls = cached.elements;
+                let i = 0;
+                let r = live.next();
+                while (!r.done && i < cachedEls.length) {
+                  console.assert(
+                    r.value.isSame(cachedEls[i]),
+                    `CE_MEMO_PARANOID: element memo diverged at index ${i + 1} of a ${this.operator} instance`
+                  );
+                  i++;
+                  r = live.next();
+                }
+                console.assert(
+                  r.done === true && i === cachedEls.length,
+                  `CE_MEMO_PARANOID: element memo length diverged for a ${this.operator} instance`
+                );
+              }
+            }
+          } finally {
+            exitParanoidCheck();
+          }
+        }
         const elements = cached.elements;
         return (function* () {
           let i = 0;

@@ -510,6 +510,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // Signature inference mutates a SHARED operator definition in place: a
         // semantic change other expressions may depend on.
         this.engine._mutationGeneration += 1;
+        this.engine._semanticEpoch += 1;
         return true;
       }
       // The type is no longer a function, use a value definition

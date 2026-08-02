@@ -12,6 +12,7 @@ type ResetHooks = {
 export class EngineConfigurationLifecycle {
   private _generation = 0;
   private _mutationGeneration = 0;
+  private _semanticEpoch = 0;
   private _ephemeralWriteDepth = 0;
   private _tracker = new ConfigurationChangeTracker();
 
@@ -31,6 +32,14 @@ export class EngineConfigurationLifecycle {
     this._mutationGeneration = value;
   }
 
+  get semanticEpoch(): number {
+    return this._semanticEpoch;
+  }
+
+  set semanticEpoch(value: number) {
+    this._semanticEpoch = value;
+  }
+
   get ephemeralWriteDepth(): number {
     return this._ephemeralWriteDepth;
   }
@@ -42,6 +51,7 @@ export class EngineConfigurationLifecycle {
   reset(hooks: ResetHooks): void {
     this._generation += 1;
     this._mutationGeneration += 1;
+    this._semanticEpoch += 1;
     hooks.refreshNumericConstants();
     hooks.resetCommonSymbols();
     hooks.purgeCaches();

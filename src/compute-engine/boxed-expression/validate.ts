@@ -1113,6 +1113,7 @@ function repairFreshMatrixInference(
   }
   ce._generation += 1;
   ce._mutationGeneration += 1;
+  ce._semanticEpoch += 1;
 
   const repaired = ce.box(op.json);
   if (repaired.type.matches(expected)) {
@@ -1132,6 +1133,7 @@ function repairFreshMatrixInference(
   }
   ce._generation += 1;
   ce._mutationGeneration += 1;
+  ce._semanticEpoch += 1;
   return null;
 }
 

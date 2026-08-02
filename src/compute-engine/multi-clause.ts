@@ -437,6 +437,7 @@ function installClauseList(
       effectRow,
     };
   ce._mutationGeneration += 1;
+  ce._semanticEpoch += 1;
 }
 
 //

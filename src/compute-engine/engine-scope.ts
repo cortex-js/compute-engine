@@ -120,7 +120,10 @@ function discardEvalContext(
   // that revert is the one semantic change a pop can make. A clean pop leaves
   // it untouched so mutation-keyed caches survive unrelated scoped
   // evaluations (Tycho item 38).
-  if (context?._assumptionsDirty) ce._mutationGeneration += 1;
+  if (context?._assumptionsDirty) {
+    ce._mutationGeneration += 1;
+    ce._semanticEpoch += 1;
+  }
 }
 
 export function inScope<T>(
@@ -143,7 +146,10 @@ export function inScope<T>(
     const popped = ce._evalContextStack.pop();
     // Mirror popEvalContext: reverting assumptions modified inside the
     // temporary context is a semantic change.
-    if (popped?._assumptionsDirty) ce._mutationGeneration += 1;
+    if (popped?._assumptionsDirty) {
+      ce._mutationGeneration += 1;
+      ce._semanticEpoch += 1;
+    }
   }
 }
 

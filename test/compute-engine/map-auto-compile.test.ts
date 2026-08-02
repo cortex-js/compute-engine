@@ -160,6 +160,11 @@ describe('Map auto-compile', () => {
 
     ce.assign('unrelated5', 42); // bumps the global mutation axis
     _resetMapAutoCompileStats();
+    // Defeat the element memo (the layer above, item 126): since it became
+    // dependency-precise it too survives an unrelated assign and would serve
+    // this drain without consulting the compiled function. This test pins the
+    // COMPILE cache's re-stamp behavior.
+    _clearElementMemoForTest(m.N());
     drainRe(m.N());
     expect(stats.revalidations).toBeGreaterThan(0); // cheap check missed…
     expect(stats.recompiles).toBe(0); // …but deps unchanged: kept
@@ -214,6 +219,32 @@ describe('Map auto-compile', () => {
     expect(stats.attempts).toBe(0);
     expect(stats.recompiles).toBe(0);
     expect(stats.compiledHits).toBe(120);
+  });
+
+  test('an assume() between drains forces a recompile (semantic epoch)', () => {
+    ce.assign('f6c', ce.box(['Function', ['Sin', 'x'], 'x']));
+    const m = broadcast('f6c', 120);
+    const v1 = drainRe(m.N());
+    expect(stats.attempts).toBe(1);
+
+    // A global-semantics event on a symbol NO dep of the compiled function
+    // mentions. The dep walk therefore sees nothing changed and would
+    // re-stamp the `_mutationGeneration` bump away — but compile-time
+    // canonicalization may have consulted assumptions, so the compiled code
+    // is potentially stale. `ce._semanticEpoch` is what forces the recompile
+    // (2026-08-02 dependency-precise invalidation design, §4).
+    // UPPERCASE per the boolean-retyping convention: this file's engine is
+    // shared across tests.
+    ce.assume(ce.parse('A_{6c} > 0'));
+
+    _resetMapAutoCompileStats();
+    // Defeat the element memo (the layer above), which would otherwise serve
+    // the drain without consulting the compiled function.
+    _clearElementMemoForTest(m.N());
+    const v2 = drainRe(m.N());
+    expect(stats.recompiles).toBe(1);
+    expect(stats.compiledHits).toBe(120);
+    expect(v2).toEqual(v1);
   });
 
   // ── 7. Randomness is ELIGIBLE (the purity gate is gone) ────────────────

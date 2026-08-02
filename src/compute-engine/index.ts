@@ -529,6 +529,26 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * Bumped only on RARE global-semantics events: `assume()`/`forget()` and
+   * popping an eval context that added assumptions, operator/type
+   * redefinition, signature inference on a shared definition,
+   * matrix-inference repair, `reset()`, and engine-configuration changes
+   * (tolerance, precision, angular unit). NOT bumped by value writes or by
+   * fresh declarations — unlike `_mutationGeneration`. A cache whose
+   * dependency tracking already covers value writes (the collection element
+   * memo) requires equality on THIS counter instead, so that an unrelated
+   * `assign()` does not cold it.
+   * @internal
+   */
+  get _semanticEpoch(): number {
+    return this._configurationLifecycle.semanticEpoch;
+  }
+
+  set _semanticEpoch(value: number) {
+    this._configurationLifecycle.semanticEpoch = value;
+  }
+
+  /**
    * When > 0, value writes are ephemeral loop-index writes: they bump
    * `_generation` and the definition's `_writeVersion` but not
    * `_mutationGeneration`. Incremented/decremented (try/finally) around the
@@ -596,8 +616,27 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Explicit `compile()` calls are exempt: a direct user request keeps
    * failing loudly with the environment's own error, regardless of this flag.
+   *
+   * Toggling it is an engine-configuration change, like `tolerance`: it
+   * bumps the invalidation counters so caches whose entries were produced
+   * on the other route (compiled vs interpreted values can differ by the
+   * documented ~1 ulp on unit-scaled arguments) are not served across the
+   * flip — and so `jit = 'off'` as a diagnostic actually re-runs the
+   * interpreter instead of serving compiled-era cached results.
    */
-  jit: 'auto' | 'off';
+  get jit(): 'auto' | 'off' {
+    return this._jit;
+  }
+
+  set jit(value: 'auto' | 'off') {
+    if (value === this._jit) return;
+    this._jit = value;
+    this._generation += 1;
+    this._mutationGeneration += 1;
+    this._semanticEpoch += 1;
+  }
+
+  private _jit: 'auto' | 'off' = 'auto';
 
   /**
    * Return symbol tables suitable for the specified categories, or `"all"`
@@ -1022,7 +1061,15 @@ export class ComputeEngine implements IComputeEngine {
    * equal to `a`.
    */
   set tolerance(val: number | 'auto') {
-    this._numericConfiguration.setTolerance(val);
+    if (this._numericConfiguration.setTolerance(val)) {
+      // The tolerance is a global evaluation input (equality and comparisons
+      // are within tolerance), so a change is a semantic mutation AND an
+      // epoch event. Deliberately not a full `_reset()`: unlike precision, no
+      // stored value needs to be recomputed.
+      this._generation += 1;
+      this._mutationGeneration += 1;
+      this._semanticEpoch += 1;
+    }
   }
 
   /** The innermost active `WithRandomSeed` frame, or `undefined` when draws

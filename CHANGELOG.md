@@ -124,6 +124,39 @@
 
 ### Performance
 
+- **Element-memo invalidation is now dependency-precise** (Tycho item 127):
+  re-assigning a symbol invalidates only the memoized collections that
+  transitively depend on it, instead of every memo in the engine. A new
+  rarely-bumped `_semanticEpoch` counter carries the deliberately-global
+  invalidators (`assume`/`forget`, operator/type redefinition, signature
+  inference, engine reset, configuration changes); value writes are carried
+  entirely by the per-dependency axis (binding identity, write versions,
+  scope-aware name resolution, followed transitively through helpers). The
+  motivating shape — a slider animating at frame rate next to collections
+  that don't reference it — goes from a full re-derivation per tick to a
+  warm ~0.1 ms serve, while reassigning a symbol the collection DOES read
+  still refills (measured: a 200-element symbolic-`Sum` body, cold ~2 s →
+  warm 0.1 ms across four unrelated ticks → cold again on the related
+  assign). Also: budget- or deadline-abandoned walks now commit their
+  drained prefix (served by `at()` reads), a consumer mutating an unrelated
+  symbol between pulls of a suspended walk no longer prevents the commit,
+  and the compiled-`Map` cache now recompiles after `assume`/`forget` or an
+  operator redefinition instead of re-stamping potentially stale code. A
+  `CE_MEMO_PARANOID=1` soak mode cross-checks every warm serve against a
+  live re-walk. Design:
+  `docs/plans/2026-08-02-dependency-precise-memo-invalidation.md`.
+
+- **Fixed: `ce.tolerance = …` and `ce.jit = …` did not bump any
+  invalidation counter.** Tolerance-sensitive cached results could be
+  served stale after a tolerance change (latently reachable through the
+  shipped `Comprehension` element memo), and toggling `jit` could serve
+  compiled-era cached elements on the interpreter route — wrong by ~1 ulp
+  in the documented unit-scaled cases, and contrary to `jit = 'off'`'s
+  diagnostic purpose. Both now detect actual change and bump the
+  invalidation counters, without the full engine reset the `precision`/
+  `angularUnit` siblings perform (`jit` becomes a get/set accessor with
+  unchanged type).
+
 - **Lazy `Map`, `Filter`, `Tabulate` (and other function-applying lazy
   operators) now memoize their elements per instance** (Tycho item 126),
   extending the element memo `Comprehension` has had since item 38. A

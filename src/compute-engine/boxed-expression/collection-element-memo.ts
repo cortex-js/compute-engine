@@ -19,14 +19,23 @@ import { isValueDef } from './utils';
  * applied at the single consumption seam, `BoxedFunction.each()`/`at()`, so
  * the operators' own iterator handlers stay untouched.
  *
- * Invalidation is two-axis, mirroring the Comprehension memo:
+ * Invalidation is DEPENDENCY-PRECISE (2026-08-02,
+ * `docs/plans/2026-08-02-dependency-precise-memo-invalidation.md`). Every
+ * engine input that can change what an element evaluates to now bumps a
+ * counter — including the configuration inputs (`tolerance` bumps directly,
+ * `precision`/`angularUnit` through `_reset()`) — so the memo needs exactly
+ * two axes and nothing else:
  *
- * - `ce._mutationGeneration` — bumped by every semantic mutation but not by
- *   plain scope push/pop or ephemeral loop-index writes, so unrelated scoped
- *   evaluations between two walks stay warm.
- * - Per-dependency versions — ephemeral index writes bump only the index
- *   definition's `_writeVersion`, so a memoized instance that references an
- *   ENCLOSING binder's index (nested in a `Sum`) still refills per iteration.
+ * - `ce._semanticEpoch` equality — the RARE global events for which no
+ *   per-dependency tracking exists: `assume`/`forget` (and assumption-dirty
+ *   scope pops), operator/type redefinition, signature inference, `reset()`,
+ *   and configuration changes. Deliberately NOT bumped by value writes, so an
+ *   unrelated `assign()` (a per-frame slider tick, Tycho item 127) does not
+ *   cold every memo in the engine.
+ * - Per-dependency checks — value writes, including ephemeral index writes,
+ *   which bump only the index definition's `_writeVersion`, so a memoized
+ *   instance that references an ENCLOSING binder's index (nested in a `Sum`)
+ *   still refills per iteration.
  *
  * Where the Comprehension memo resolves dependencies by name through the
  * instance's own lexical scope, the flagged operators are not scoped (a
@@ -73,21 +82,16 @@ interface ElementMemoDep {
 }
 
 interface ElementMemoCache {
-  /** `ce._mutationGeneration` snapshot taken AFTER the fill, so any bump the
-   * walk itself causes (a side-effecting body) is absorbed. */
-  mutationGeneration: number;
+  /** `ce._semanticEpoch` snapshot taken AFTER the fill, so any bump the walk
+   * itself causes is absorbed. Covers the rare global events AND every
+   * engine-configuration input (tolerance/precision/angular unit), which is
+   * why no separate configuration stamps are kept. */
+  semanticEpoch: number;
   deps: ElementMemoDep[];
-  /** Engine-configuration stamps: none of these bump `_mutationGeneration`,
-   * but each can change what an element evaluates to, so a change must cold
-   * the memo (mirrors the map-auto-compile cache's tolerance stamp). */
-  tolerance: number;
-  precision: number;
-  angularUnit: string;
   /** True when `elements` is the whole collection. `each()` serves only
-   * complete entries; `at()` serves any covering prefix. Partial entries are
-   * written only by `elementMemoFillTo` (the fill-to-n path operators
-   * without random access use, e.g. `Comprehension`); the recording stream
-   * commits only complete drains. */
+   * complete entries; `at()`/`elementMemoFillTo` serve any covering prefix.
+   * Partial entries are written by the fill-to-n path (`Comprehension`) and
+   * by a recording walk that was abandoned or overflowed the cap. */
   complete: boolean;
   elements: Expression[];
 }
@@ -95,6 +99,43 @@ interface ElementMemoCache {
 /** Keyed on the boxed instance. A `WeakMap` so an unreferenced collection
  * (and its cached elements) is collectable. */
 const elementMemoCaches = new WeakMap<Expression, ElementMemoCache>();
+
+/**
+ * Debug canary (design §3): under `CE_MEMO_PARANOID=1`, the `each()` seam
+ * cross-checks every served complete cache against a live re-walk (pure
+ * bodies only) and `console.assert`s on divergence — a dependency-closure
+ * leak that precise invalidation would otherwise convert into a silent
+ * stale serve. Environment-gated like `CE_DEBUG_BINDINGS`; a testing aid,
+ * not a semantic mode.
+ */
+export function elementMemoParanoid(): boolean {
+  return (
+    !paranoidCheckActive &&
+    typeof process !== 'undefined' &&
+    process.env?.CE_MEMO_PARANOID !== undefined &&
+    process.env.CE_MEMO_PARANOID !== '0'
+  );
+}
+
+/** Re-entrancy latch for the canary. The cross-check's own work can reach
+ * `each()` again — an element body reading another memoized collection, or
+ * anything that serializes the instance (`toString()` MATERIALIZES a
+ * collection to render it) — and a canary-within-a-canary recurses
+ * exponentially. While a check is running, `elementMemoParanoid()` reports
+ * false. */
+let paranoidCheckActive = false;
+
+/** Begin a canary cross-check; returns false when one is already active
+ * (caller must then skip). Pair with `exitParanoidCheck` in a `finally`. */
+export function enterParanoidCheck(): boolean {
+  if (paranoidCheckActive) return false;
+  paranoidCheckActive = true;
+  return true;
+}
+
+export function exitParanoidCheck(): void {
+  paranoidCheckActive = false;
+}
 
 /**
  * Cap the memoized prefix: beyond this many elements the walk stops
@@ -168,8 +209,8 @@ function resolveDepBinding(
 /**
  * Snapshot the instance's free-symbol dependencies, one per distinct value
  * definition. Only value-definition bindings are versioned: an operator
- * redefinition or signature inference always bumps `ce._mutationGeneration`,
- * so operator-bound symbols are covered by the global axis.
+ * redefinition or signature inference always bumps `ce._semanticEpoch`, so
+ * operator-bound symbols are covered by the global axis.
  *
  * Returns `undefined` when the instance is ineligible for memoization: a
  * symbol occurrence with no binding at all resolves dynamically through the
@@ -204,7 +245,7 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
     // cannot reach (an auto-declared unknown inside a literal's body scope)
     // is the hazard: `assign` takes the DECLARE path and installs the value
     // in a DIFFERENT definition, bumping neither the tracked version nor
-    // `_mutationGeneration` — such an instance is ineligible.
+    // `_semanticEpoch` — such an instance is ineligible.
     if (valueDef.value === undefined && !valueDef.isConstant) {
       const resolved = resolveDepBinding(ce, depScope, name);
       if (!isValueDef(resolved) || resolved.value !== valueDef) {
@@ -224,17 +265,24 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
     // value (a helper function literal, a bound list) pulls that value's
     // own free symbols into the instance's meaning — `Map(xs, f)` with
     // `f(x) = x + q` depends on `q`, which appears nowhere in the tree.
-    // Reassigning `q` when it was never declared takes the DECLARE path,
-    // which does not bump `_mutationGeneration` (item-38: parameter
-    // activation declares per element), so the global axis cannot be
-    // relied on — the value must be walked. The `seen` set terminates
-    // self- and mutually-recursive definitions.
+    // No global counter tracks a reassignment of `q` (a plain value write
+    // never bumps `_semanticEpoch`; the DECLARE path a never-declared `q`
+    // takes bumps nothing relevant either), so the value must be walked.
+    // The `seen` set terminates self- and mutually-recursive definitions.
     const stored = valueDef.value;
     if (stored !== undefined) {
       // The stored value's own binding sites (a helper literal's
       // parameters) are as excluded as the instance's own.
       collectParameterDefs(stored, excluded);
-      visit(stored, skipNames);
+      // DEFINITION BOUNDARY: a stored value is an independently defined
+      // expression that resolves names in ITS OWN environment — the
+      // caller's parameter names must NOT be inherited, or a helper reading
+      // a global that happens to share a caller-parameter's spelling would
+      // have that dependency silently dropped (a stale serve under
+      // epoch-only validation). The stored literal's own parameters are
+      // covered by the SITE-def exclusion above, so no name skips are
+      // needed here at all.
+      visit(stored, undefined);
     }
   };
 
@@ -287,7 +335,7 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
         visitValueDef(e, headDef, skipNames);
       // A USER-DEFINED operator head (`f8(x)` after `ce.assign('f8', x ↦ …)`
       // creates an operator definition) needs no dep entry — redefinition and
-      // signature inference always bump `_mutationGeneration` — but its
+      // signature inference always bump `_semanticEpoch` — but its
       // lambda BODY carries transitive symbol dependencies exactly like a
       // stored value, so walk it (with its parameter names skipped: their
       // occurrences bind to valueless body-scope definitions, which are the
@@ -302,7 +350,11 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
         // own lazy collection is not wrongly disqualified by the valueless
         // gate seeing an inner literal's parameter binding.
         collectParameterDefs(lambda.body, excluded);
-        const bodySkip = new Set(skipNames);
+        // DEFINITION BOUNDARY (see the stored-value branch): the skip set
+        // is built FRESH from this lambda's OWN parameters — never seeded
+        // from the caller's, whose spellings mean something else in this
+        // definition's environment.
+        const bodySkip = new Set<string>();
         for (const p of lambda.parameters) bodySkip.add(p.name);
         visit(lambda.body, bodySkip);
       }
@@ -315,21 +367,22 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
 }
 
 /** The still-valid cache for this instance, or `undefined`. Check
- * `complete` before serving a whole-collection read — a partial prefix
- * (from `elementMemoFillTo`) covers only `at()`-style reads. */
+ * `complete` before serving a whole-collection read — a partial prefix (from
+ * `elementMemoFillTo`, or from an abandoned/overflowed recording walk) covers
+ * only `at()`-style reads. */
 export function validElementMemo(
   expr: Expression
 ): { elements: ReadonlyArray<Expression>; complete: boolean } | undefined {
   const entry = elementMemoCaches.get(expr);
   if (!entry) return undefined;
   const ce = expr.engine;
-  if (entry.mutationGeneration !== ce._mutationGeneration) return undefined;
-  if (
-    entry.tolerance !== ce.tolerance ||
-    entry.precision !== ce.precision ||
-    entry.angularUnit !== ce.angularUnit
-  )
-    return undefined;
+  if (entry.semanticEpoch !== ce._semanticEpoch) return undefined;
+  // NO `_mutationGeneration` fast path here: an ephemeral loop-index write
+  // bumps the index definition's `_writeVersion` but NOT
+  // `_mutationGeneration`, so generation equality does NOT prove the
+  // dependencies are unchanged. The loop below IS the ephemeral-write
+  // detector — it is what makes a memoized instance nested under a `Sum`
+  // refill per iteration. Do not "optimize" it away.
   const depScope = depResolutionScope(expr);
   for (const d of entry.deps) {
     if (d.occurrence.valueDefinition !== d.valueDef) return undefined;
@@ -343,28 +396,101 @@ export function validElementMemo(
   return entry;
 }
 
-/** The engine state a SUSPENDED walk can be corrupted by: a semantic
- * mutation or a configuration change made by the CONSUMER between two
- * pulls. Sampled after every `iter.next()` and compared on resume. */
-function externalStamp(ce: IComputeEngine): string {
-  return `${ce._mutationGeneration}|${ce.tolerance}|${ce.precision}|${ce.angularUnit}`;
+/**
+ * Did none of `endDeps` move relative to `startDeps`? Requires a start
+ * snapshot, the same dependency count, and — for every end dependency — a
+ * start dependency on the SAME `valueDef` object with an equal `version` and
+ * an identical resolved binding. (Dependencies are one per distinct value
+ * definition, so matching on `valueDef` identity is unambiguous.)
+ */
+function depsUnmoved(
+  startDeps: ElementMemoDep[] | undefined,
+  endDeps: ElementMemoDep[]
+): boolean {
+  if (startDeps === undefined) return false;
+  if (startDeps.length !== endDeps.length) return false;
+  for (const d of endDeps) {
+    const s = startDeps.find((x) => x.valueDef === d.valueDef);
+    if (s === undefined) return false;
+    if (s.version !== d.version) return false;
+    if (s.resolved !== d.resolved) return false;
+  }
+  return true;
 }
 
 /**
- * Buffer a walk of `iter` and commit it as this instance's element memo on a
- * COMPLETE drain. An early-abandoned walk (`Take`, `First`, a thrown
- * deadline) never reaches the commit, so a partial buffer is never cached as
- * complete; a walk that overflows the cap streams through without caching.
+ * Commit a recorded walk's buffer, if the walk is certifiable.
  *
- * The dependency snapshot and the generation stamp are both taken AFTER the
- * drain: bumps caused by the walk itself (parameter activations, a
- * side-effecting body) are absorbed, exactly as in the Comprehension memo.
- * Bumps made by the CONSUMER while the generator is suspended are a
- * different matter — a mutation between two pulls splits the buffer into a
- * before/after mix that the post-drain stamp would wrongly certify as
- * uniform, so the stamp is sampled after every `next()` and a change
- * observed across a yield boundary marks the walk dirty (streams through,
- * never commits).
+ * `suspendedWrite` means the consumer bumped `_mutationGeneration` while the
+ * generator was suspended between two pulls. That alone does not condemn the
+ * buffer: a write to a NON-dependency cannot mix it (a consumer loop that
+ * assigns an unrelated accumulator between pulls must not permanently block
+ * commits), so we diff the dependency snapshot taken before the walk against
+ * the one taken after. A suspended write that DID move a dependency is
+ * indistinguishable from a genuinely mixed before/after buffer — decline. A
+ * body's own self-writes to a dependency raise no suspended flag and keep
+ * committing, preserving the ruled absorb behavior.
+ *
+ * `suspendedEpochChange` — the consumer changed the world globally
+ * (`assume`, a redefinition, a tolerance/precision change) between two pulls.
+ * That has NO per-dependency counterpart to diff against, and the entry would
+ * be stamped with the POST-change epoch, certifying a mixed buffer as valid
+ * under the new world. Unconditionally fatal.
+ */
+function commitRecordedWalk(
+  expr: Expression,
+  buffer: Expression[],
+  startDeps: ElementMemoDep[] | undefined,
+  suspendedWrite: boolean,
+  suspendedEpochChange: boolean,
+  complete: boolean
+): void {
+  // A partial entry with nothing in it would only churn the cache.
+  if (!complete && buffer.length === 0) return;
+  // PARTIAL entries are for PURE instances only. `each()` refuses partials,
+  // so a later complete walk of an impure instance re-draws from scratch and
+  // replaces the prefix — an `at(1)` read before and after that walk would
+  // observe two different draws for the same element of the same instance,
+  // breaking one-instance/one-draw-set coherence. A COMPLETE commit of an
+  // impure walk is fine: it IS the instance's draw set.
+  if (!complete && !expr.isPure) return;
+  if (suspendedEpochChange) return;
+  const endDeps = snapshotDeps(expr);
+  if (endDeps === undefined) return;
+  if (suspendedWrite && !depsUnmoved(startDeps, endDeps)) return;
+  // Never shrink coverage: a still-valid entry that already covers at least
+  // as much (or is complete) outranks a prefix. A complete drain always wins.
+  if (!complete) {
+    const existing = validElementMemo(expr);
+    if (
+      existing &&
+      (existing.complete || existing.elements.length >= buffer.length)
+    )
+      return;
+  }
+  elementMemoCaches.set(expr, {
+    semanticEpoch: expr.engine._semanticEpoch,
+    deps: endDeps,
+    complete,
+    elements: buffer,
+  });
+}
+
+/**
+ * Buffer a walk of `iter` and commit it as this instance's element memo.
+ *
+ * A walk drained to completion without overflowing the cap commits a
+ * `complete` entry. An abandoned walk (`Take`, `First`, a consumer `break`, a
+ * thrown deadline) or one that overflowed the cap commits its buffer as a
+ * `complete: false` PREFIX (Tycho item 127, ask 2): `each()` still re-walks —
+ * it serves only complete entries — but `at()` and `elementMemoFillTo` serve
+ * any covering prefix, so a budget-bounded sampling walk's work is not lost.
+ *
+ * The dependency snapshot and the epoch stamp are taken AFTER the drain:
+ * bumps caused by the walk itself (parameter activations, a side-effecting
+ * body) are absorbed, exactly as in the Comprehension memo. Writes made by
+ * the CONSUMER while the generator is suspended are a different matter — see
+ * `commitRecordedWalk`; the boundary flag below is what detects them.
  */
 export function* elementMemoRecordingStream(
   expr: Expression,
@@ -373,40 +499,64 @@ export function* elementMemoRecordingStream(
   const ce = expr.engine;
   const buffer: Expression[] = [];
   let overflow = false;
-  let dirty = false;
+  let suspendedWrite = false;
+  let suspendedEpochChange = false;
   let drained = false;
+  // Dependencies are static in the tree, so a pre-walk snapshot is valid; it
+  // is the baseline the end-of-walk snapshot is diffed against.
+  const startDeps = snapshotDeps(expr);
+  // The boundary samples live OUTSIDE the try: an abrupt closure (a `break`
+  // jumps from the yield straight into the `finally`) skips the loop's
+  // post-yield comparison, so the `finally` must re-compare against the last
+  // sample or a pull-mutate-break consumer would commit a prefix stamped
+  // with the post-mutation state (the second reviewer-round catch).
+  let gen = ce._mutationGeneration;
+  let epoch = ce._semanticEpoch;
   try {
     let result = iter.next();
-    let stamp = externalStamp(ce);
+    // Bumps INSIDE `next()` are the walk's own and are absorbed; only a bump
+    // observed across a yield boundary is the consumer's. Configuration
+    // changes (tolerance/precision/angular unit/jit) bump
+    // `_mutationGeneration` too, so a mid-walk config change also raises
+    // these flags.
+    gen = ce._mutationGeneration;
+    epoch = ce._semanticEpoch;
     while (!result.done) {
       if (buffer.length < ELEMENT_MEMO_CAP) buffer.push(result.value);
       else overflow = true;
       yield result.value;
       // Resumed: anything that moved while we were suspended was the
       // consumer, not the element body.
-      if (externalStamp(ce) !== stamp) dirty = true;
+      if (ce._mutationGeneration !== gen) suspendedWrite = true;
+      if (ce._semanticEpoch !== epoch) suspendedEpochChange = true;
       result = iter.next();
-      stamp = externalStamp(ce);
+      gen = ce._mutationGeneration;
+      epoch = ce._semanticEpoch;
     }
     drained = true;
   } finally {
+    // The final boundary: covers the suspended gap between the last yield
+    // and this `finally` (abrupt closure), and — conservatively — a bump
+    // made by an element evaluation that THREW (a deadline mid-`next()`);
+    // declining that prefix loses nothing of value.
+    if (ce._mutationGeneration !== gen) suspendedWrite = true;
+    if (ce._semanticEpoch !== epoch) suspendedEpochChange = true;
     // Forward early abandonment (`break`, `Take`, `.return()`) to the
     // wrapped iterator so a future handler with cleanup semantics is closed
     // deterministically rather than left suspended until GC.
     if (!drained) iter.return?.();
+    // Runs during exception unwinding too (a thrown deadline): the elements
+    // produced so far are valid, so they are committed as a prefix. Nothing
+    // here returns or throws, so a propagating exception is not swallowed.
+    commitRecordedWalk(
+      expr,
+      buffer,
+      startDeps,
+      suspendedWrite,
+      suspendedEpochChange,
+      drained && !overflow
+    );
   }
-  if (overflow || dirty) return;
-  const deps = snapshotDeps(expr);
-  if (deps === undefined) return;
-  elementMemoCaches.set(expr, {
-    mutationGeneration: ce._mutationGeneration,
-    deps,
-    tolerance: ce.tolerance,
-    precision: ce.precision,
-    angularUnit: ce.angularUnit,
-    complete: true,
-    elements: buffer,
-  });
 }
 
 /**
@@ -420,10 +570,14 @@ export function* elementMemoRecordingStream(
  *
  * Fills at most `ELEMENT_MEMO_CAP` elements; a caller asking beyond the cap
  * should stream directly instead. The drain is synchronous (no yields), so
- * the suspended-mutation hazard of the recording stream does not apply; the
- * stamp and dependency snapshot are taken AFTER the fill, absorbing the
+ * the suspended-write hazard of the recording stream does not apply; the
+ * epoch stamp and dependency snapshot are taken AFTER the fill, absorbing the
  * walk's own bumps. An ineligible instance (see `snapshotDeps`) fills and
  * returns the prefix without committing anything.
+ *
+ * Coverage never shrinks: the early return above already keeps a valid entry
+ * that is complete or at least `n` long, and any entry we do replace was
+ * shorter than the `n` elements this fill produces (or was invalid).
  */
 export function elementMemoFillTo(
   expr: Expression,
@@ -451,15 +605,15 @@ export function elementMemoFillTo(
     if (!complete) iter.return?.();
   }
 
-  const deps = snapshotDeps(expr);
+  // Same purity gate as `commitRecordedWalk`: a PARTIAL prefix of an impure
+  // instance would be replaced by a later re-drawing complete walk, so
+  // `at()` reads before and after would disagree — partials are pure-only.
+  const deps = complete || expr.isPure ? snapshotDeps(expr) : undefined;
   if (deps !== undefined) {
     const ce = expr.engine;
     elementMemoCaches.set(expr, {
-      mutationGeneration: ce._mutationGeneration,
+      semanticEpoch: ce._semanticEpoch,
       deps,
-      tolerance: ce.tolerance,
-      precision: ce.precision,
-      angularUnit: ce.angularUnit,
       complete,
       elements,
     });

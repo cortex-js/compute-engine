@@ -245,6 +245,11 @@ export interface IComputeEngine {
    * @internal */
   _mutationGeneration: number;
 
+  /** Rarely-bumped global-semantics counter (see
+   * `ComputeEngine._semanticEpoch`).
+   * @internal */
+  _semanticEpoch: number;
+
   /** When > 0, value writes are ephemeral loop-index writes.
    * @internal */
   _ephemeralWriteDepth: number;

@@ -109,7 +109,7 @@ describe('Map element memo', () => {
     expect(c2).toBe(0);
   });
 
-  it('an early-abandoned walk commits nothing', () => {
+  it('an early-abandoned walk never commits a COMPLETE entry', () => {
     const m = ce
       .box(['Map', ['Range', 1, 10], ['Function', ['tick', 'n'], 'n']])
       .evaluate();
@@ -123,8 +123,9 @@ describe('Map element memo', () => {
     });
     expect(cPartial).toBe(3);
 
-    // Still cold: the partial walk must not have cached 3 elements as the
-    // whole collection.
+    // Still cold for a WALK: the partial walk commits a 3-element prefix
+    // (see the prefix-commit test below), which `each()` must not serve as
+    // the whole collection.
     const [v, cFull] = counting(() => walkSum(m));
     expect(v).toBe(55);
     expect(cFull).toBe(10);
@@ -158,7 +159,11 @@ describe('Map element memo', () => {
         'Sum',
         [
           'Sum',
-          ['Map', ['Range', 1, 2], ['Function', ['tick', ['Multiply', 'i', 'n']], 'n']],
+          [
+            'Map',
+            ['Range', 1, 2],
+            ['Function', ['tick', ['Multiply', 'i', 'n']], 'n'],
+          ],
         ],
         ['Tuple', 'i', 1, 3],
       ])
@@ -190,12 +195,13 @@ describe('eligibility gates', () => {
 
   it('tracks a transitive dependency through a bound helper', () => {
     ce.assign('ktrans', 2);
-    ce.assign(
-      'htrans',
-      ce.box(['Function', ['Multiply', 'ktrans', 'x'], 'x'])
-    );
+    ce.assign('htrans', ce.box(['Function', ['Multiply', 'ktrans', 'x'], 'x']));
     const m = ce
-      .box(['Map', ['Range', 1, 4], ['Function', ['tick', ['htrans', 'n']], 'n']])
+      .box([
+        'Map',
+        ['Range', 1, 4],
+        ['Function', ['tick', ['htrans', 'n']], 'n'],
+      ])
       .evaluate();
 
     const [v1, c1] = counting(() => walkSum(m));
@@ -309,6 +315,298 @@ describe('review fixes (2026-08-02)', () => {
     const [v, c] = counting(() => walkSum(m));
     expect(v).toBe(10 * 10);
     expect(c).toBe(4);
+  });
+});
+
+describe('dependency-precise invalidation (Tycho item 127)', () => {
+  it('stays warm across unrelated assigns, colds on a related one', () => {
+    // The headline: a per-frame `assign` of a symbol the instance cannot
+    // reference must not cold it. Under the old `_mutationGeneration`
+    // equality requirement every one of these assigns refilled the memo.
+    ce.assign('kslider', 2);
+    ce.assign('tslider', 0);
+    const m = ce
+      .box([
+        'Map',
+        ['Range', 1, 8],
+        ['Function', ['tick', ['Multiply', 'kslider', 'n']], 'n'],
+      ])
+      .evaluate();
+
+    const [v1, c1] = counting(() => walkSum(m));
+    expect(v1).toBe(2 * 36);
+    expect(c1).toBe(8); // cold fill
+
+    for (const t of [1, 2, 3]) ce.assign('tslider', t);
+
+    const [v2, c2] = counting(() => walkSum(m));
+    expect(v2).toBe(2 * 36);
+    expect(c2).toBe(0); // warm: `tslider` is not a dependency
+
+    ce.assign('kslider', 5);
+    const [v3, c3] = counting(() => walkSum(m));
+    expect(v3).toBe(5 * 36);
+    expect(c3).toBe(8); // cold: `kslider` is
+  });
+
+  it('a transitive helper dependency has the same asymmetry', () => {
+    ce.assign('cwarm', 3);
+    ce.assign('hwarm', ce.box(['Function', ['Multiply', 'cwarm', 'x'], 'x']));
+    ce.assign('twarm', 0);
+    const m = ce
+      .box([
+        'Map',
+        ['Range', 1, 5],
+        ['Function', ['tick', ['hwarm', 'n']], 'n'],
+      ])
+      .evaluate();
+
+    const [v1, c1] = counting(() => walkSum(m));
+    expect(v1).toBe(3 * 15);
+    expect(c1).toBe(5);
+
+    for (const t of [1, 2, 3]) ce.assign('twarm', t);
+    const [v2, c2] = counting(() => walkSum(m));
+    expect(v2).toBe(3 * 15);
+    expect(c2).toBe(0); // warm through the helper's body too
+
+    // The helper's OWN dependency is tracked transitively: reassigning it
+    // colds.
+    ce.assign('cwarm', 7);
+    const [v3, c3] = counting(() => walkSum(m));
+    expect(v3).toBe(7 * 15);
+    expect(c3).toBe(5);
+  });
+
+  it('a suspended write to a NON-dependency still commits', () => {
+    // A consumer that assigns an unrelated accumulator between two pulls
+    // cannot have mixed the buffer, so the walk must still commit. The
+    // start/end dependency diff is what distinguishes this from the mixed
+    // case pinned by 'a mutation while the walk is suspended…'.
+    ce.assign('kpull', 2);
+    ce.assign('accpull', 0);
+    const m = ce
+      .box([
+        'Map',
+        ['Range', 1, 6],
+        ['Function', ['tick', ['Multiply', 'kpull', 'n']], 'n'],
+      ])
+      .evaluate();
+
+    const it1 = m.each();
+    const got: number[] = [it1.next().value!.re, it1.next().value!.re];
+    ce.assign('accpull', 99);
+    let r = it1.next();
+    while (!r.done) {
+      got.push(r.value!.re);
+      r = it1.next();
+    }
+    expect(got).toEqual([2, 4, 6, 8, 10, 12]); // uniform, not mixed
+
+    const [v, c] = counting(() => walkSum(m));
+    expect(v).toBe(2 * 21);
+    expect(c).toBe(0); // committed despite the suspended write
+  });
+
+  it('a suspended EPOCH change refuses the commit', () => {
+    // A global-semantics change between two pulls has no per-dependency
+    // counterpart to diff, and the entry would be stamped with the POST-change
+    // epoch — certifying a straddling buffer as valid in the new world.
+    const saved = ce.tolerance;
+    const m = ce
+      .box(['Map', ['Range', 1, 5], ['Function', ['tick', 'n'], 'n']])
+      .evaluate();
+
+    const it1 = m.each();
+    it1.next();
+    it1.next();
+    ce.tolerance = saved * 10;
+    let r = it1.next();
+    while (!r.done) r = it1.next();
+
+    const [v, c] = counting(() => walkSum(m));
+    expect(v).toBe(15);
+    expect(c).toBe(5); // nothing was committed
+
+    ce.tolerance = saved;
+  });
+
+  it('an abandoned walk commits a prefix that at() serves', () => {
+    const m = ce
+      .box(['Map', ['Range', 1, 10], ['Function', ['tick', 'n'], 'n']])
+      .evaluate();
+
+    const [, cPartial] = counting(() => {
+      let taken = 0;
+      for (const el of m.each()) {
+        void el;
+        if (++taken === 3) break;
+      }
+    });
+    expect(cPartial).toBe(3);
+
+    // Inside the committed prefix: free.
+    const [v2, c2] = counting(() => m.at(2)!.re);
+    expect(v2).toBe(2);
+    expect(c2).toBe(0);
+
+    // Outside it: the handler's own random access, at its own cost.
+    const [v5, c5] = counting(() => m.at(5)!.re);
+    expect(v5).toBe(5);
+    expect(c5).toBe(1);
+
+    // A partial entry never serves a WALK, and the complete drain upgrades it.
+    const [vFull, cFull] = counting(() => walkSum(m));
+    expect(vFull).toBe(55);
+    expect(cFull).toBe(10);
+
+    expect(counting(() => walkSum(m))[1]).toBe(0);
+    expect(counting(() => m.at(9)!.re)).toEqual([9, 0]);
+  });
+
+  it('a tolerance change colds the memo (epoch, not a config stamp)', () => {
+    const saved = ce.tolerance;
+    const m = ce
+      .box(['Map', ['Range', 1, 4], ['Function', ['tick', 'n'], 'n']])
+      .evaluate();
+
+    expect(counting(() => walkSum(m))[1]).toBe(4);
+    expect(counting(() => walkSum(m))[1]).toBe(0);
+
+    ce.tolerance = saved * 10;
+    expect(counting(() => walkSum(m))[1]).toBe(4); // cold: the world changed
+
+    ce.tolerance = saved; // shared engine: restore
+  });
+});
+
+describe('review-round pins (2026-08-02, round 3)', () => {
+  it('a nested helper reading a global spelled like a caller parameter still tracks it', () => {
+    // C1: skip sets must not cross definition boundaries. `houter(q)` calls
+    // `ginner(y)`; `ginner`'s body reads the GLOBAL `qglobal9`… spelled `q`
+    // is the trap, so use the exact collision: houter's parameter is named
+    // `qcol` and ginner reads a global `qcol`.
+    ce.assign('qcol', 5);
+    ce.assign('ginner', ce.box(['Function', ['Multiply', 'qcol', 'y'], 'y']));
+    ce.assign(
+      'houter',
+      ce.box(['Function', ['ginner', ['Add', 'qcol', 0]], 'qcol'])
+    );
+    const m = ce
+      .box([
+        'Map',
+        ['Range', 1, 3],
+        ['Function', ['tick', ['houter', 'n']], 'n'],
+      ])
+      .evaluate();
+
+    const [v1, c1] = counting(() => walkSum(m));
+    expect(v1).toBe(5 * (1 + 2 + 3)); // houter(n) = ginner(n) = qcol·n
+    expect(c1).toBe(3);
+
+    // Reassigning the GLOBAL qcol must refill — under the inherited-skip
+    // bug this dependency was silently dropped and the memo served stale.
+    ce.assign('qcol', 7);
+    const [v2, c2] = counting(() => walkSum(m));
+    expect(v2).toBe(7 * 6);
+    expect(c2).toBe(3);
+  });
+
+  it('a pull-mutate-break consumer does not certify a stale prefix', () => {
+    // C2: the final yield→finally jump skips the loop's boundary check; the
+    // finally must re-sample. Pull one element, mutate the DEP, break — the
+    // committed-would-be prefix holds a value computed under the old
+    // binding but would be stamped with the new state.
+    ce.assign('kbrk', 2);
+    const m = ce
+      .box([
+        'Map',
+        ['Range', 1, 6],
+        ['Function', ['tick', ['Multiply', 'kbrk', 'n']], 'n'],
+      ])
+      .evaluate();
+
+    const it1 = m.each();
+    expect(it1.next().value!.re).toBe(2); // computed under kbrk = 2
+    ce.assign('kbrk', 10);
+    it1.return?.(undefined); // abrupt closure — the C2 gap
+
+    // A covered indexed read must NOT see the stale 2.
+    const first = m.at(1)!;
+    expect(first.re).toBe(10);
+  });
+
+  it('impure partial prefixes are not cached (draw coherence)', () => {
+    // C4: a partial prefix of a drawing body would be replaced by a later
+    // complete walk's fresh draws — at(1) before/after would disagree.
+    const r = ce
+      .box(['Map', ['Range', 1, 5], ['Function', ['Random'], 'n']])
+      .evaluate();
+    const it1 = r.each();
+    const firstDraw = it1.next().value!.re;
+    it1.return?.(undefined); // abandon — must NOT commit a prefix
+
+    const walked = [...r.each()].map((el) => el.re); // complete walk = the draw set
+    expect(r.at(1)!.re).toBe(walked[0]); // coherent with the committed set
+    void firstDraw; // the abandoned draw is simply discarded, never served
+  });
+
+  it('an impure instance stays one draw set across UNRELATED assigns', () => {
+    // C3 (revised ruling, RANDOMNESS-MODEL §6): the coherence window is
+    // dependency-precise — an unrelated write no longer re-draws.
+    const r = ce
+      .box(['Map', ['Range', 1, 5], ['Function', ['Random'], 'n']])
+      .evaluate();
+    const draws = [...r.each()].map((el) => el.re);
+    ce.assign('unrelatedDrawTick', 1);
+    ce.assign('unrelatedDrawTick', 2);
+    expect([...r.each()].map((el) => el.re)).toEqual(draws); // same draw set
+  });
+});
+
+describe('paranoid canary (CE_MEMO_PARANOID)', () => {
+  // The canary re-walks every warm serve (pure bodies only) and asserts
+  // element-wise agreement with the cache — a dependency-closure leak shows
+  // up here as a stale-serve divergence. It re-evaluates element bodies, so
+  // it cannot run under the count-asserting suites; this smoke test manages
+  // the flag itself. Soak usage: run any suite with CE_MEMO_PARANOID=1
+  // (expect the warm-count pins in THIS file to fail by construction).
+  it('cross-checks a warm serve cleanly and skips impure bodies', () => {
+    const savedEnv = process.env.CE_MEMO_PARANOID;
+    const savedAssert = console.assert;
+    const failures: unknown[][] = [];
+    console.assert = ((cond: unknown, ...msg: unknown[]) => {
+      if (!cond) failures.push(msg);
+    }) as typeof console.assert;
+    try {
+      process.env.CE_MEMO_PARANOID = '1';
+      ce.assign('kcanary', 3);
+      const m = ce
+        .box([
+          'Map',
+          ['Range', 1, 6],
+          ['Function', ['tick', ['Multiply', 'kcanary', 'n']], 'n'],
+        ])
+        .evaluate();
+      const w1 = [...m.each()].map((el) => el.re);
+      const w2 = [...m.each()].map((el) => el.re); // canary active here
+      expect(w2).toEqual(w1);
+      expect(failures).toEqual([]); // no divergence
+
+      // Impure body: the canary must SKIP (a re-walk legitimately differs
+      // by the draw-set ruling) and the walk stays coherent.
+      const r = ce
+        .box(['Map', ['Range', 1, 4], ['Function', ['Random'], 'n']])
+        .evaluate();
+      const r1 = [...r.each()].map((el) => el.re);
+      const r2 = [...r.each()].map((el) => el.re);
+      expect(r2).toEqual(r1);
+      expect(failures).toEqual([]);
+    } finally {
+      if (savedEnv === undefined) delete process.env.CE_MEMO_PARANOID;
+      else process.env.CE_MEMO_PARANOID = savedEnv;
+      console.assert = savedAssert;
+    }
   });
 });
 

@@ -73,16 +73,20 @@ export class EngineNumericConfiguration {
     return this._tolerance;
   }
 
-  setTolerance(value: number | 'auto'): void {
+  /** Returns `true` when the (normalized) tolerance actually changed. */
+  setTolerance(value: number | 'auto'): boolean {
     let tolerance = value;
     if (tolerance === 'auto') tolerance = DEFAULT_TOLERANCE;
 
     if (!Number.isFinite(tolerance) || tolerance < 0)
       tolerance = Math.pow(10, -this._precision + 2);
 
+    if (tolerance === this._tolerance) return false;
+
     this._tolerance = tolerance;
     this._bignumTolerance = new BigDecimal(tolerance);
     this._negBignumTolerance = new BigDecimal(-tolerance);
+    return true;
   }
 
   get bignumTolerance(): BigDecimal {

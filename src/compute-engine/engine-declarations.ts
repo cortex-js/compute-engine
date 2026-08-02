@@ -1022,8 +1022,10 @@ export function assignFn(
     }
     updateDef(ce, id, def, fnDef);
     // Redefining an existing operator is a semantic mutation (no value-setter
-    // write happens on this path, so bump explicitly).
+    // write happens on this path, so bump explicitly) — and a global-semantics
+    // event, not a value write, so the epoch bumps too.
     ce._mutationGeneration += 1;
+    ce._semanticEpoch += 1;
     return ce;
   }
 
@@ -1097,6 +1099,7 @@ export function assignFn(
     // _setSymbolValue call needed to clear the old value.
     updateDef(ce, id, def, fnDef);
     ce._mutationGeneration += 1;
+    ce._semanticEpoch += 1;
   } else {
     // No previous definition: create a new one
     ce.declare(id, fnDef);

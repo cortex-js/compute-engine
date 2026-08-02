@@ -464,15 +464,28 @@ This is the resolution of two principles that pull in opposite directions:
 The memo delivers coherence as a consequence of memoization, not as a
 special case for randomness.
 
-**The coherence window is bounded by the memo's own invalidation.** The
-element memo is a cache keyed on the engine's semantic-mutation state: any
-semantic mutation (an `assign` — even to an unrelated symbol —, `assume`/
-`forget`, a redefinition) invalidates it, and the next walk of a
-random-bodied instance draws fresh values. "One instance = one draw set"
-therefore holds *between semantic mutations*. It is a read-coherence
-property, not replay determinism — for guaranteed replay, seed and
-materialize inside a frame (`WithRandomSeed(s, ListFrom(…))`), exactly as
-before.
+**The coherence window is bounded by the memo's own invalidation — which is
+dependency-precise (revised 2026-08-02, Tycho item 127).** The memo is
+invalidated by: a write to a symbol the instance *transitively depends on*,
+an `assume`/`forget`, an operator or type redefinition, or an
+engine-configuration change (tolerance, precision, angular unit, `jit`).
+After any of those, the next walk of a random-bodied instance draws fresh
+values. A write to an UNRELATED symbol no longer invalidates — the draw set
+survives it (this *widens* the coherence window over the original item-126
+wording, which ended it at any assign; superseded). Two consequences worth
+stating: "one instance = one draw set" holds until the instance's own
+dependencies (or the world's global semantics) change; and it remains a
+read-coherence property, not replay determinism — for guaranteed replay,
+seed and materialize inside a frame (`WithRandomSeed(s, ListFrom(…))`),
+exactly as before.
+
+One asymmetry for impure instances: PARTIAL element caches (an abandoned or
+over-cap walk's prefix, a fill-to-n) are kept for pure bodies only. A
+partial cache of a drawing body would be replaced wholesale by a later
+complete walk's fresh draws, so an indexed read before and after that walk
+would observe two different values for the same element — the memo refuses
+the partial instead. A COMPLETE walk of an impure instance is cached as
+usual: it is the instance's draw set.
 
 ## 7. Crossing the interpret↔compile boundary
 
