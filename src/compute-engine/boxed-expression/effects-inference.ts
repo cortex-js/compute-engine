@@ -1,10 +1,12 @@
-import type { EffectSet, Type } from '../../common/type/types.js';
+import type { EffectLabel, EffectSet, Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { signatureArms, signatureEffects } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   effectSetToString,
+  isCoFiniteEffects,
   normalizeEffectSet,
+  subtractEffects,
   unionEffectSets,
 } from '../../common/type/effects.js';
 
@@ -572,7 +574,69 @@ class Walker {
     this.applyNamed(head);
     this.projectOperands(head, expr.ops, 0);
 
-    for (const op of expr.ops) this.visit(op, ctx);
+    // DISCHARGE, mirroring the runtime channel (`effectsOf`, which applies
+    // `subtractEffects(own, discharge)` at a held position of a `lazy`
+    // definition). Without this the static walk stamps a literal's arrow with
+    // labels the operator provably absorbs, so `(i) ↦ WithRandomSeed(42,
+    // Random())` came out `random` — and every operator that reads a lambda's
+    // LATENT set rather than the body directly inherited that: `Map` reported
+    // impure for a body `Comprehension` reported pure.
+    const def = operatorDefinitionOf(this.ce, head);
+    const discharges = def?.lazy ? def.discharges : undefined;
+    if (discharges === undefined) {
+      for (const op of expr.ops) this.visit(op, ctx);
+      return;
+    }
+    for (let i = 0; i < expr.ops.length; i++) {
+      const op = expr.ops[i];
+      const discharge = discharges[i];
+      if (discharge === undefined || discharge.length === 0) {
+        this.visit(op, ctx);
+        continue;
+      }
+      this.visitDischarged(op, ctx, discharge);
+    }
+  }
+
+  /**
+   * Walk a held operand whose position DISCHARGES some labels, and merge back
+   * only what survives the discharge.
+   *
+   * The accumulator is shared and mutable, so "what did this subtree add" is
+   * not otherwise recoverable: swap in a fresh state for the sub-walk, subtract
+   * there, then union. Only the EFFECT SET is filtered — `draws` /
+   * `readsRandomFrame` are the randomness bookkeeping the pending-draw walk and
+   * `RANDOMNESS-MODEL.md` key on (a seeded frame still draws, it just draws
+   * reproducibly), and `unresolvedHead` is a resolution fact, not an effect.
+   */
+  private visitDischarged(
+    op: Expression,
+    ctx: WalkContext,
+    discharge: readonly EffectLabel[]
+  ): void {
+    const outer = this.state;
+    const inner: WalkState = {
+      effects: undefined,
+      readsRandomFrame: false,
+      draws: false,
+      unresolvedHead: false,
+    };
+    this.state = inner;
+    try {
+      this.visit(op, ctx);
+    } finally {
+      this.state = outer;
+    }
+    const kept = subtractEffects(inner.effects, discharge);
+    // `subtractEffects` works on the runtime `ComputedEffects` lattice, whose
+    // co-finite form has no spelling in the inference walk's plain
+    // `EffectSet`. A held body is never `'any'` here (the walk only ever
+    // accumulates finite sets), so this is a narrowing, not a loss.
+    if (kept !== undefined && kept !== 'any' && !isCoFiniteEffects(kept))
+      outer.effects = unionEffectSets(outer.effects, kept);
+    outer.readsRandomFrame ||= inner.readsRandomFrame;
+    outer.draws ||= inner.draws;
+    outer.unresolvedHead ||= inner.unresolvedHead;
   }
 
   /**
@@ -711,16 +775,21 @@ class Walker {
     if (def.readsRandomFrame === true) this.state.readsRandomFrame = true;
     // Read from the callee's DERIVED getter, so an explicit `random`, a
     // frame-protocol head, and a callee whose own inference saw a draw all
-    // propagate — the same composition rule as the effect union.
+    // propagate — the same composition rule as the effect union. This is the
+    // pending-draw obligation ("a surviving nested `WithRandomSeed` owes the
+    // outer frame"), and it rides the `draws` BIT.
     if (def.drawsRandom === true) this.state.draws = true;
-    // A head that participates in the seed frame through a FRAME PROTOCOL
-    // rather than through its own effect set (`WithRandomSeed`) still makes
-    // this body owe the outer frame. Its effect set is the placeholder `any` —
-    // standing in for its HELD body — so `{random}` is contributed in its
-    // place; unioning the placeholder would DEFEAT the propagation.
-    if (def.frameProtocol === 'seed')
-      this.state.effects = unionEffectSets(this.state.effects, ['random']);
-    else this.state.effects = unionEffectSets(this.state.effects, def.effects);
+    // …and it rides ONLY that bit: "the runtime frame-protocol role is a
+    // separate field, NOT THE ARROW" (`docs/EFFECTS-MODEL.md`, "Randomness
+    // shapes"). Contributing `{random}` to the enclosing literal's arrow here
+    // put the frame-protocol role on the arrow, which stamped
+    // `(i) ↦ WithRandomSeed(42, Random())` as `random` while the runtime
+    // channel called the same expression PURE — and every operator that reads
+    // a lambda's LATENT set inherited the disagreement (`Map` impure where
+    // `Comprehension`, which sees the body directly, was pure). The body's own
+    // draw is removed by the position's DISCHARGE in `visit`, mirroring
+    // `effectsOf`; nothing needs to be added in its place.
+    this.state.effects = unionEffectSets(this.state.effects, def.effects);
   }
 
   /** An `Assign`: `{scope}` unless provably confined. */

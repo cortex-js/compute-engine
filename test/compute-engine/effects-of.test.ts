@@ -538,6 +538,48 @@ describe('Selecting and storing heads drop the LATENT half', () => {
     ).toEqual(['scope']);
   });
 
+  it('the two channels AGREE on a seeded frame inside a literal', () => {
+    // `frameProtocol: 'seed'` is "a separate field, NOT THE ARROW"
+    // (EFFECTS-MODEL.md, "Randomness shapes"). The inference used to contribute
+    // `{random}` to the enclosing literal's arrow for a frame-protocol head, so
+    // the arrow said `random` while the runtime channel called the very same
+    // expression pure. Everything that reads a lambda's LATENT set inherited
+    // that disagreement — `Map` reported impure for a body `Comprehension`
+    // reported pure, which cost the element memo its prefix cache on exactly
+    // the per-site-seeded rows a consumer lowers to `Map`.
+    const ce = engine();
+    const framed = ce.box(['WithRandomSeed', 42, ['Random']]);
+    expect(framed.isPure).toBe(true); // runtime channel
+    const lambda = ce.box(['Function', ['WithRandomSeed', 42, ['Random']], 'i']);
+    expect(lambda.type.effects).toBe(undefined); // inference channel: agrees
+
+    // …and the two collection operators now agree with each other.
+    const body = ['Function', ['WithRandomSeed', 42, ['Random']], 'i'];
+    expect(ce.box(['Map', ['Range', 1, 5], body]).isPure).toBe(true);
+    expect(
+      ce.box(['Comprehension', ['WithRandomSeed', 42, ['Random']], ['Limits', 'i', 1, 5]])
+        .isPure
+    ).toBe(true);
+
+    // CONTROL: an UNFRAMED draw is still random on both channels.
+    expect(ce.box(['Function', ['Random'], 'i']).type.effects).toEqual([
+      'random',
+    ]);
+    expect(
+      ce.box(['Map', ['Range', 1, 5], ['Function', ['Random'], 'i']]).isPure
+    ).toBe(false);
+
+    // CONTROL: the frame discharges `random` only — a scope write survives it,
+    // on the inference channel exactly as the runtime channel already pinned.
+    expect(
+      ce.box([
+        'Function',
+        ['WithRandomSeed', 42, ['Block', ['Assign', 'x', 1], ['Random']]],
+        'i',
+      ]).type.effects
+    ).toEqual(['scope']);
+  });
+
   it('the two channels now AGREE on a build-and-return block', () => {
     // Before the annotation they disagreed: the runtime channel reported
     // `{random}` for `Block(() ↦ Random())` while the inference already typed

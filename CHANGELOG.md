@@ -214,6 +214,23 @@
 
 ### Issues Resolved
 
+- **A `WithRandomSeed`-framed body no longer stamps `random` on the enclosing
+  function literal's arrow.** Effects are computed by two channels — the
+  runtime `effectsOf` and the construction-time inference that stamps a
+  `Function` literal's signature — and they disagreed: the runtime channel
+  applied the frame's discharge and called `WithRandomSeed(42, Random())`
+  pure, while the inference contributed `{random}` to the arrow of any literal
+  containing a frame-protocol head. `EFFECTS-MODEL.md` ("Randomness shapes")
+  rules that role "a separate field, **not** the arrow". The visible cost was
+  an asymmetry between collection operators: `Map`, which reads its callback's
+  arrow, reported a seeded body impure, while `Comprehension`, which sees the
+  body directly, reported it pure. The inference now honors a held position's
+  `discharges` (as the runtime channel already did) and no longer contributes
+  the label. The frame obligation itself is unchanged — it rides
+  `drawsRandom`, which the pending-draw walk consults and which still reports
+  `true`. An unframed draw is unaffected. **Behavior change:** `isPure` is now
+  `true` for a `Map` over a seeded body (previously `false`).
+
 - **A big operator whose bound is a closed expression — `Σ_{j=1}^{length(P)}
   P[j]` — now evaluates instead of staying inert.** Domain classification and
   indexing-set normalization both read the bound *as written*; an unevaluated

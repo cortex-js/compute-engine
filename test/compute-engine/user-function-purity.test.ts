@@ -545,10 +545,26 @@ describe('The inference stamps an effect set on the signature', () => {
     expect(def.drawsRandom).toBe(false);
   });
 
-  it('a body containing WithRandomSeed still unions `random`', () => {
-    // A frame DELIMITER head propagates the frame obligation even though its
-    // own Stage 1 effect set is the `any` placeholder for its held body — a
-    // plain union of that placeholder would absorb and lose the propagation.
+  it('a body containing WithRandomSeed propagates the frame obligation, but does NOT stamp `random` on the arrow', () => {
+    // AMENDED 2026-08-02. This pinned `effects === ['random']`, because a frame
+    // DELIMITER head had to propagate the frame obligation and its own Stage 1
+    // effect set was the `any` placeholder for its held body — "a plain union
+    // of that placeholder would absorb and lose the propagation."
+    //
+    // That premise is gone. Post-v5, `WithRandomSeed` carries `effects:
+    // undefined` (it delimits, it does not draw) plus `discharges: {1:
+    // ['random']}`, so unioning its own set absorbs nothing and the held body's
+    // draw is removed by the discharge — exactly as the runtime channel
+    // (`effectsOf`) already did. Contributing `{random}` in its place put the
+    // frame-protocol role ON THE ARROW, which EFFECTS-MODEL.md ("Randomness
+    // shapes") rules against: "the runtime frame-protocol role is a separate
+    // field, NOT the arrow". The cost was a channel disagreement — the arrow
+    // said `random` where `effectsOf` on the same expression said pure — which
+    // every operator reading a lambda's LATENT set inherited (`Map` impure for
+    // a body `Comprehension` called pure).
+    //
+    // The obligation itself is unchanged and still asserted below: it rides
+    // `drawsRandom`, the field the pending-draw walk consults.
     const ce = new ComputeEngine();
     ce.box([
       'Assign',
@@ -556,8 +572,16 @@ describe('The inference stamps an effect set on the signature', () => {
       ['Function', ['WithRandomSeed', 1, ['Random']]],
     ]).evaluate();
     const def = ce.lookupDefinition('w9x')!['operator'];
-    expect(def.effects).toEqual(['random']);
-    expect(def.drawsRandom).toBe(true);
+    expect(def.effects).toBe(undefined);
+    expect(def.drawsRandom).toBe(true); // the frame obligation, preserved
+    // A seeded frame IS referentially transparent — same value every call.
+    expect(def.pure).toBe(true);
+
+    // CONTROL: an UNFRAMED draw still stamps `random` on the arrow.
+    ce.box(['Assign', 'u9x', ['Function', ['Random']]]).evaluate();
+    const unframed = ce.lookupDefinition('u9x')!['operator'];
+    expect(unframed.effects).toEqual(['random']);
+    expect(unframed.pure).toBe(false);
   });
 
   it('an arithmetic body stays pure — an empty specifier slot', () => {
