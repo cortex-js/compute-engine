@@ -1,0 +1,323 @@
+import { ComputeEngine } from '../../src/compute-engine';
+import type { MathJsonExpression } from '../../src/math-json/types';
+
+/**
+ * Phase 1 of the function-polymorphism design
+ * (docs/plans/2026-08-01-function-polymorphism-design.md §4.2–§4.4, D5–D8;
+ * implementation plan …-phase1-plan.md): multi-clause function definitions
+ * via the `DefineFunction` head — clause accumulation, tri-state dispatch,
+ * inert-on-undecidable, `no-matching-clause`, symbol-level effect row.
+ *
+ * Box/programmatic routes only (the Cortex surface is Phase 2).
+ */
+
+let ce: ComputeEngine;
+beforeEach(() => {
+  ce = new ComputeEngine();
+});
+
+/** Define one clause: `DefineFunction(name, Function(body, …params))`. */
+function clause(name: string, fn: MathJsonExpression): string {
+  return ce.box(['DefineFunction', name, fn]).evaluate().toString();
+}
+
+/** A `Typed` parameter carrying a type annotation. */
+function p(name: string, type: string): MathJsonExpression {
+  return ['Typed', name, { str: type }];
+}
+
+// ─── The §1 acceptance case ─────────────────────────────────────────────────
+
+describe('DEFINE FUNCTION — multi-clause fib (spec §1)', () => {
+  beforeEach(() => {
+    clause('fib', ['Function', 0, p('z', '0')]);
+    clause('fib', ['Function', 1, p('o', '1')]);
+    clause('fib', [
+      'Function',
+      [
+        'Add',
+        ['fib', ['Subtract', 'n', 1]],
+        ['fib', ['Subtract', 'n', 2]],
+      ],
+      p('n', 'integer'),
+    ]);
+  });
+
+  it('declares the overload-set type', () => {
+    expect(ce.box('fib').type.toString()).toMatchInlineSnapshot(
+      `"((z: 0) -> finite_integer) & ((o: 1) -> finite_integer) & ((n: integer) -> broadcastable<number>)"`
+    );
+  });
+
+  it('dispatches base cases and recursion', () => {
+    expect(ce.box(['fib', 0]).evaluate().toString()).toBe('0');
+    expect(ce.box(['fib', 1]).evaluate().toString()).toBe('1');
+    expect(ce.box(['fib', 10]).evaluate().toString()).toBe('55');
+  });
+
+  it('repeated calls with different arguments see each frame', () => {
+    // The Match staleness-bug test class: same engine, different args.
+    expect(ce.box(['fib', 5]).evaluate().toString()).toBe('5');
+    expect(ce.box(['fib', 7]).evaluate().toString()).toBe('13');
+    expect(ce.box(['fib', 5]).evaluate().toString()).toBe('5');
+    expect(ce.box(['fib', 0]).evaluate().toString()).toBe('0');
+    expect(ce.box(['fib', 7]).evaluate().toString()).toBe('13');
+  });
+});
+
+// ─── Accumulation: replace vs append (§4.3) ─────────────────────────────────
+
+describe('DEFINE FUNCTION — accumulation', () => {
+  it('same parameter domain replaces in place; new domain appends', () => {
+    clause('g', ['Function', 100, p('a', '0')]);
+    clause('g', ['Function', ['Add', 'x', 1], p('x', 'integer')]);
+    // Same domain (`0`), different parameter NAME and body: replaces.
+    clause('g', ['Function', 999, p('b', '0')]);
+    expect(ce.box(['g', 0]).evaluate().toString()).toBe('999');
+    expect(ce.box(['g', 5]).evaluate().toString()).toBe('6');
+    // Still two clauses (replace, not append): the type has two arms.
+    const arms = ce.box('g').type.toString().split('&');
+    expect(arms).toHaveLength(2);
+  });
+
+  it('replacement preserves clause position (tie-break order stable)', () => {
+    clause('g', ['Function', 1, p('a', '0')]);
+    clause('g', ['Function', 2, p('x', 'integer')]);
+    clause('g', ['Function', 3, p('b', '0')]); // replaces clause 1 in place
+    const arms = ce.box('g').type.toString().split(' & ');
+    expect(arms[0]).toContain('0');
+  });
+
+  it('a body edit changing the inferred result type still replaces', () => {
+    clause('g', ['Function', 1, p('a', '0')]);
+    clause('g', ['Function', { str: 'now a string' }, p('b', '0')]);
+    expect(ce.box(['g', 0]).evaluate().toString()).toBe('"now a string"');
+    expect(ce.box('g').type.toString()).not.toContain('&');
+  });
+
+  it('re-running an identical clause set is idempotent', () => {
+    for (let round = 0; round < 2; round++) {
+      clause('g', ['Function', 7, p('a', '0')]);
+      clause('g', ['Function', ['Add', 'x', 1], p('x', 'integer')]);
+    }
+    expect(ce.box('g').type.toString().split('&')).toHaveLength(2);
+    expect(ce.box(['g', 0]).evaluate().toString()).toBe('7');
+  });
+
+  it('Assign after DefineFunction discards the clause list (D6)', () => {
+    clause('g', ['Function', 7, p('a', '0')]);
+    clause('g', ['Function', ['Add', 'x', 1], p('x', 'integer')]);
+    ce.assign('g', ce.box(['Function', ['Multiply', 'x', 2], 'x']).canonical);
+    expect(ce.box(['g', 0]).evaluate().toString()).toBe('0');
+    expect(ce.box(['g', 5]).evaluate().toString()).toBe('10');
+  });
+
+  it('DefineFunction accumulates onto an Assign-defined function', () => {
+    ce.assign(
+      'g',
+      ce.box(['Function', ['Multiply', 'x', 2], p('x', 'integer')]).canonical
+    );
+    clause('g', ['Function', 999, p('a', '0')]);
+    expect(ce.box(['g', 0]).evaluate().toString()).toBe('999');
+    expect(ce.box(['g', 5]).evaluate().toString()).toBe('10');
+  });
+
+  it('a non-Function operand is rejected with an error value', () => {
+    const r = clause('bad', 5 as unknown as MathJsonExpression);
+    expect(r).toContain('invalid-clause-definition');
+  });
+
+  it('a builtin name is shadowed, not accumulated onto', () => {
+    clause('Sin', ['Function', 999, p('a', '0')]);
+    expect(ce.box(['Sin', 0]).evaluate().toString()).toBe('999');
+    // The builtin is untouched in a fresh engine.
+    const ce2 = new ComputeEngine();
+    expect(ce2.box(['Sin', 0]).evaluate().toString()).toBe('0');
+  });
+
+  it('a RECURSIVE clause on a builtin name recurses through the shadow', () => {
+    // The self-call must bind the shadowing definition, not the builtin:
+    // without the pre-shadow shell, `Sin(n-1)` inside the clause body
+    // canonicalizes against builtin Sin and never recurses.
+    clause('Sin', ['Function', 0, p('z', '0')]);
+    clause('Sin', [
+      'Function',
+      ['Add', ['Sin', ['Subtract', 'n', 1]], 1],
+      p('n', 'integer'),
+    ]);
+    expect(ce.box(['Sin', 3]).evaluate().toString()).toBe('3');
+  });
+
+  it('a rejected clause leaves the installed definition unchanged', () => {
+    // The effect-row state must not be mutated by a REJECTED accumulation
+    // (a phantom established row would poison later definitions).
+    clause('v', ['Function', 1, p('a', '0')]);
+    // Reject: a clause whose STATED effects (pure) are exceeded by its own
+    // body is refused…
+    const r = clause('v', [
+      'Function',
+      ['Typed', ['Block', ['Random']], { str: '(x: integer) pure -> real' }],
+      'x',
+    ]);
+    expect(r).toContain('incompatible-clause-effects');
+    // …and the surviving definition still accepts a compatible clause with
+    // NO phantom row established: an effectful clause joins fine.
+    const ok = clause('v', ['Function', ['Random'], p('x', 'integer')]);
+    expect(ok).toBe('"Nothing"');
+    expect(ce.box(['v', 0]).evaluate().toString()).toBe('1');
+  });
+
+  it('an explicit row narrower than an existing clause is rejected', () => {
+    // Establishing `pure` over an already-registered effectful clause must
+    // fail — not silently re-stamp the effectful arm as pure.
+    clause('w2', ['Function', ['Random'], p('a', '0')]);
+    const r = clause('w2', [
+      'Function',
+      ['Typed', ['Block', 'x'], { str: '(x: integer) pure -> integer' }],
+      'x',
+    ]);
+    expect(r).toContain('incompatible-clause-effects');
+    // The effectful clause still carries its row.
+    expect(ce.box('w2').type.toString()).toContain('random');
+  });
+
+  it('a type constructor name is refused (spec §4.7)', () => {
+    ce.declareType('point', 'tuple<integer, integer>');
+    const r = clause('point', ['Function', 1, p('a', '0')]);
+    expect(r).toContain('invalid-clause-definition');
+    // The constructor is intact.
+    expect(ce.box(['point', 1, 2]).evaluate().type.toString()).toBe('point');
+  });
+});
+
+// ─── Dispatch (§4.4) ────────────────────────────────────────────────────────
+
+describe('DEFINE FUNCTION — tri-state dispatch', () => {
+  beforeEach(() => {
+    clause('j', ['Function', { str: 'zero!' }, p('a', '0')]);
+    clause('j', ['Function', ['Add', 'x', 1], p('x', 'integer')]);
+  });
+
+  it('a concrete literal dispatches to the most specific clause', () => {
+    expect(ce.box(['j', 0]).evaluate().toString()).toBe('"zero!"');
+    expect(ce.box(['j', 3]).evaluate().toString()).toBe('4');
+  });
+
+  it('declaration order breaks ties only; specificity wins regardless', () => {
+    // The general clause is declared FIRST here; the value clause must
+    // still win on its point.
+    clause('k', ['Function', ['Add', 'x', 1], p('x', 'integer')]);
+    clause('k', ['Function', 999, p('a', '0')]);
+    expect(ce.box(['k', 0]).evaluate().toString()).toBe('999');
+  });
+
+  it('a symbolic argument stays inert while a value clause is undecidable', () => {
+    ce.declare('q', 'integer');
+    const call = ce.box(['j', 'q']);
+    // The general clause ADMITS q — but the more-specific value clause is
+    // undecidable, so dispatch must NOT commit (the blocking rule).
+    expect(call.evaluate().toString()).toBe('j(q)');
+  });
+
+  it('assigning the symbol later dispatches correctly', () => {
+    ce.declare('q', 'integer');
+    ce.assign('q', 0);
+    expect(ce.box(['j', 'q']).evaluate().toString()).toBe('"zero!"');
+    const ce2 = ce; // same engine, different value
+    ce2.assign('q2', 5);
+    expect(ce2.box(['j', 'q2']).evaluate().toString()).toBe('6');
+  });
+
+  it('static result type: JOIN when blocked, exact arm when decided', () => {
+    ce.declare('q', 'integer');
+    expect(ce.box(['j', 'q']).type.toString()).toBe('integer | string');
+    expect(ce.box(['j', 0]).type.toString()).toBe('string');
+    expect(ce.box(['j', 3]).type.toString()).toBe('integer');
+  });
+
+  it('a symbol DECLARED with a value type statically admits (no over-join)', () => {
+    // `z: 0` (no value assigned) statically satisfies the `0` clause —
+    // dispatch is DECIDED, not undecidable: exact arm result, and the call
+    // dispatches to the value clause.
+    ce.declare('z', '0');
+    expect(ce.box(['j', 'z']).type.toString()).toBe('string');
+    expect(ce.box(['j', 'z']).evaluate().toString()).toBe('"zero!"');
+  });
+
+  it('a direct literal miss is statically invalid (§4.4 static refutation)', () => {
+    clause('only', ['Function', 1, p('a', '0')]);
+    clause('only', ['Function', 2, p('b', '1')]);
+    // 5 refutes every clause STATICALLY: the call is invalid at
+    // validation (not the runtime no-matching-clause path).
+    expect(ce.box(['only', 5]).isValid).toBe(false);
+  });
+
+  it('a miss revealed only after evaluation is no-matching-clause (D7)', () => {
+    clause('only', ['Function', 1, p('a', '0')]);
+    clause('only', ['Function', 2, p('b', '1')]);
+    ce.declare('w', 'integer'); // statically undecidable against 0|1
+    const call = ce.box(['only', 'w']); // boxed BEFORE the value is known
+    expect(call.isValid).toBe(true);
+    ce.assign('w', 7); // evaluation reveals the miss
+    expect(call.evaluate().toString()).toContain('no-matching-clause');
+    // Re-BOXING after the assignment sees the concrete value through the
+    // symbol and refutes statically instead (§4.4 static consumption).
+    expect(ce.box(['only', 'w']).isValid).toBe(false);
+  });
+
+  it('mixed arity is allowed (D2); unsaturated calls do not curry (D8)', () => {
+    clause('m', ['Function', ['Add', 'x', 'y'], 'x', 'y']);
+    clause('m', ['Function', 0, p('a', '0')]);
+    expect(ce.box(['m', 1, 2]).evaluate().toString()).toBe('3');
+    expect(ce.box(['m', 0]).evaluate().toString()).toBe('0');
+    // Arity 1 with a non-0 argument: the unary clause refutes on value,
+    // the binary clause refutes on arity — no partial application.
+    const miss = ce.box(['m', 9]);
+    expect(miss.isValid).toBe(false);
+  });
+});
+
+// ─── Effects (D5) ───────────────────────────────────────────────────────────
+
+describe('DEFINE FUNCTION — symbol-level effect row', () => {
+  it('the row is the join of the clauses’ inferred effects', () => {
+    clause('r', ['Function', ['Random'], p('a', '0')]);
+    clause('r', ['Function', 5, p('x', 'integer')]);
+    // Both arms carry the joined row; the pure clause adopts it.
+    const t = ce.box('r').type.toString();
+    expect(t.split('&').every((arm) => arm.includes('random'))).toBe(true);
+  });
+
+  it('a pure multi-clause function stays pure', () => {
+    clause('s', ['Function', 1, p('a', '0')]);
+    clause('s', ['Function', 2, p('x', 'integer')]);
+    expect(ce.box('s').type.toString()).not.toContain('random');
+    expect(ce.box(['s', 3]).isPure).toBe(true);
+  });
+
+  it('arguments are evaluated exactly once per call', () => {
+    // An effectful ARGUMENT: admission and application must consume the
+    // same evaluated value (one draw per call, not two), and the draw must
+    // fire (the identity body returns the drawn literal, not the
+    // unevaluated Random application).
+    clause('t', ['Function', 'x', p('x', 'real')]);
+    const a = ce.box(['t', ['Random']]).evaluate();
+    expect(a.isNumberLiteral).toBe(true);
+  });
+});
+
+// ─── Route parity ───────────────────────────────────────────────────────────
+
+describe('DEFINE FUNCTION — route parity (box vs pre-boxed)', () => {
+  it('pre-boxed ce.function route behaves like raw MathJSON', () => {
+    const fn = ce.box(['Function', 42, p('a', '0')]).canonical;
+    ce.function('DefineFunction', [ce.symbol('u'), fn]).evaluate();
+    ce.box([
+      'DefineFunction',
+      'u',
+      ['Function', ['Add', 'x', 1], p('x', 'integer')],
+    ]).evaluate();
+    expect(ce.box(['u', 0]).evaluate().toString()).toBe('42');
+    expect(ce.box(['u', 9]).evaluate().toString()).toBe('10');
+  });
+});

@@ -1,5 +1,5 @@
 import type { Type } from '../../common/type/types.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 
 import type { Expression } from '../global-types.js';
 
@@ -43,6 +43,53 @@ export function typeAcceptsValue(
   if (v === undefined) return false;
 
   return accepts(v, type);
+}
+
+/**
+ * Tri-state admission of one operand against one parameter type
+ * (`docs/plans/2026-08-01-function-polymorphism-design.md` §4.4) — ONE
+ * implementation consumed by both static resolution and the runtime clause
+ * selector, so the two can never disagree.
+ *
+ * - `'admit'` — the operand certainly satisfies the parameter: a concrete
+ *   value passing membership on a value-component parameter, or a static
+ *   type that is a subtype of the parameter.
+ * - `'refute'` — certainly not: a concrete value failing membership on a
+ *   value-component parameter, or a static type PROVABLY disjoint from the
+ *   parameter. Refutation uses `provablyDisjoint` — `couldMatch` answers
+ *   "could be" and `!isDisjointFrom` is not the same claim; only proven
+ *   disjointness refutes.
+ * - `'undecidable'` — neither: e.g. a symbolic operand against a value-type
+ *   parameter. Unknown/`any` operands are always undecidable (an unknown
+ *   operand never refutes — same rule as `validateArguments`).
+ *
+ * Write-free: never infers or narrows.
+ */
+export type Admission = 'admit' | 'refute' | 'undecidable';
+
+export function admissionOf(op: Expression, param: Type): Admission {
+  if (!op.isValid) return 'refute';
+
+  const opType = op.type;
+  if (opType.isUnknown || opType.type === 'any') return 'undecidable';
+
+  // A static subtype match admits regardless of value components: a symbol
+  // DECLARED type `0` (no value yet) statically satisfies parameter `0` —
+  // classifying it undecidable would needlessly block dispatch and widen
+  // result types.
+  if (opType.matches(param)) return 'admit';
+
+  if (hasValueComponent(param)) {
+    // A concrete value decides membership exactly; without one the value
+    // component keeps the answer open unless the STATIC types are already
+    // disjoint (an operand typed `string` can never inhabit `0`).
+    if (typeAcceptsValue(op, param)) return 'admit';
+    if (concreteValueOf(op) !== undefined) return 'refute';
+    return provablyDisjoint(opType.type, param) ? 'refute' : 'undecidable';
+  }
+
+  if (provablyDisjoint(opType.type, param)) return 'refute';
+  return 'undecidable';
 }
 
 /** Does `type` contain a component whose membership depends on the VALUE

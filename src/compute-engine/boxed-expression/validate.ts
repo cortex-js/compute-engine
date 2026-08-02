@@ -8,7 +8,7 @@ import {
 
 import { flatten } from './flatten.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { hasValueComponent, typeAcceptsValue } from './value-membership.js';
+import { admissionOf, hasValueComponent } from './value-membership.js';
 import {
   broadcastableBaseMatches,
   couldBeNonRealNumber,
@@ -418,10 +418,11 @@ export function checkType(
 
   if (arg.type.matches(type)) return arg;
 
-  // A concrete value inhabiting a value-component type (`0`, `integer<0..10>`)
-  // — synthesized-type matching cannot witness this (`ce.box(0).type` is
-  // `finite_integer`, not `0`). See `value-membership.ts`.
-  if (typeAcceptsValue(arg, type)) return arg;
+  // Value-component type (`0`, `integer<0..10>`): tri-state admission —
+  // membership or undecidability admits; only proven refutation errors.
+  // See `value-membership.ts`.
+  if (hasValueComponent(type) && admissionOf(arg, type) !== 'refute')
+    return arg;
 
   // Broadcastable operand: could be a plain scalar at runtime, admit it.
   if (broadcastableBaseMatches(arg.type.type, type)) return arg;
@@ -726,13 +727,16 @@ export function validateArguments(
     }
 
     if (!op.type.matches(param)) {
-      // A concrete value inhabiting a value-component parameter (`0`,
-      // `integer<0..10>`) — the synthesized type cannot witness membership
-      // in a value type. Mirrored in `paramMatches` (overload.ts). Deferred
-      // like the other provisional admissions: the final `infer(param)` pass
-      // must not narrow a symbol's type to the VALUE type (`k := 0; g(k)`
-      // would otherwise pin `k: 0`).
-      if (typeAcceptsValue(op, param)) {
+      // Value-component parameter (`0`, `integer<0..10>`): tri-state
+      // admission (§4.4). A concrete value passing membership ADMITS; a
+      // symbolic operand that is not provably disjoint is UNDECIDABLE and
+      // is provisionally admitted (the call could be fine — dispatch stays
+      // open until the value is known); only proven refutation errors.
+      // Mirrored in `paramMatches` (overload.ts). Deferred like the other
+      // provisional admissions: the final `infer(param)` pass must not
+      // narrow a symbol's type to the VALUE type (`k := 0; g(k)` would
+      // otherwise pin `k: 0`).
+      if (hasValueComponent(param) && admissionOf(op, param) !== 'refute') {
         result.push(op);
         deferredIdx.add(result.length - 1);
         continue;
@@ -845,9 +849,10 @@ export function validateArguments(
       continue;
     }
     if (!op.type.matches(param)) {
-      // Value membership — see the required-param gate (deferred: the final
-      // inference pass must not narrow a symbol to the value type).
-      if (typeAcceptsValue(op, param)) {
+      // Value-component tri-state admission — see the required-param gate
+      // (deferred: the final inference pass must not narrow a symbol to the
+      // value type).
+      if (hasValueComponent(param) && admissionOf(op, param) !== 'refute') {
         result.push(op);
         deferredIdx.add(result.length - 1);
         i += 1;
@@ -927,9 +932,13 @@ export function validateArguments(
         continue;
       }
       if (!op.type.matches(varParam)) {
-        // Value membership — see the required-param gate (deferred: the final
-        // inference pass must not narrow a symbol to the value type).
-        if (typeAcceptsValue(op, varParam)) {
+        // Value-component tri-state admission — see the required-param gate
+        // (deferred: the final inference pass must not narrow a symbol to
+        // the value type).
+        if (
+          hasValueComponent(varParam) &&
+          admissionOf(op, varParam) !== 'refute'
+        ) {
           result.push(op);
           deferredIdx.add(result.length - 1);
           continue;

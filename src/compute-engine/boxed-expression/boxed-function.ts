@@ -50,7 +50,12 @@ import {
   isSymbol,
   isContinuationOperand,
 } from './type-guards.js';
-import { overloadArms, resolveOverload } from './overload.js';
+import {
+  armHasValueParam,
+  overloadArms,
+  resolveOverload,
+  triStateSelect,
+} from './overload.js';
 import { candidateShape } from './tensor-view.js';
 import type {
   EffectLabel,
@@ -3175,11 +3180,34 @@ function resolvedArm(
   const arms = overloadArms(sig);
   if (!arms) return undefined;
   const def = expr.operatorDefinition;
-  return resolveOverload(expr.engine, expr.ops, arms, {
+  const selected = resolveOverload(expr.engine, expr.ops, arms, {
     lazy: def?.lazy,
     threadable: def?.broadcastable,
     couldBeCollection: couldBeCollectionOperand,
   }).selected;
+  if (selected === undefined) return undefined;
+
+  // Value-arm JOIN (function-polymorphism design §4.4): when an arm
+  // dispatches on VALUES, the boolean filter drops arms a symbolic operand
+  // leaves genuinely open (`f(0) -> string` & `f(n: integer) -> integer`
+  // called on an operand typed `integer`: runtime may take either arm).
+  // `triStateSelect` — the SAME decision procedure the runtime selector
+  // runs — says whether dispatch is decided: `selected` keeps that arm's
+  // exact result (`f(0)` types `string`); `blocked` joins the results of
+  // every non-refuted arm. Gated on value components — declared overload
+  // sets without them keep the boolean-selected arm byte-identically.
+  // Skipped for lazy operators (operands unbound; their types refute
+  // nothing meaningful).
+  if (!def?.lazy && arms.some(armHasValueParam)) {
+    const verdict = triStateSelect(expr.ops, arms);
+    if (verdict.kind === 'selected') return arms[verdict.index];
+    if (verdict.kind === 'blocked')
+      return {
+        ...selected,
+        result: widen(...verdict.nonRefuted.map((i) => arms[i].result)),
+      };
+  }
+  return selected;
 }
 
 /** Returns true when every formal parameter of a signature is a scalar

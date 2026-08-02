@@ -468,6 +468,27 @@
 
 ### New Features
 
+- **Multi-clause function definitions (function polymorphism).** A new
+  `DefineFunction` operator ACCUMULATES clauses on a symbol instead of
+  replacing it: `["DefineFunction", "fib", ["Function", 0, param0]]`
+  followed by clauses for `1` and `n: integer` defines a function
+  dispatching by argument value and type — `fib(0)` and `fib(1)` take the
+  literal clauses, `fib(10)` recurses through the general clause (→ 55).
+  Dispatch is most-specific-wins with declaration order breaking ties
+  between equally-specific clauses; a clause with the same parameter
+  domain REPLACES the earlier one in place (notebook re-run semantics),
+  and `Assign` keeps its full-replace behavior. Calls commit only when
+  dispatch is decided: a symbolic argument that leaves a more specific
+  value clause open stays inert (and its static type is the union of the
+  possible clauses' results); arguments that miss every clause produce a
+  `no-matching-clause` error value. All clauses share one effect row —
+  the join of their bodies' effects, or an explicitly stated specifier,
+  with conflicting specifiers rejected (`incompatible-clause-effects`).
+  Partial application is not supported across a clause set (an
+  unsaturated call is a no-match, never a curry). Engine/MathJSON surface
+  only for now; the Cortex `function f(0) = 1` statement syntax is the
+  next phase.
+
 - **Programs can now declare their own types — and inhabit them.** A new
   Cortex `type` statement comes in two forms:
   `type point = tuple<x: number, y: number>` declares a **nominal** type — a

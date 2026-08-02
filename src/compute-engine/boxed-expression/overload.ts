@@ -15,7 +15,11 @@ import type {
   Scope,
 } from '../global-types.js';
 import { isSymbol } from './type-guards.js';
-import { hasValueComponent, typeAcceptsValue } from './value-membership.js';
+import {
+  admissionOf,
+  hasValueComponent,
+  type Admission,
+} from './value-membership.js';
 
 /**
  * Overload resolution for an **intersection of function signatures** — the
@@ -203,10 +207,12 @@ function operandAdmits(
   if (policies?.threadable && policies.couldBeCollection?.(op)) return true;
   if (op.type.matches(param)) return true;
 
-  // A concrete value inhabiting a value-component parameter — MIRRORS the
-  // `typeAcceptsValue` fallback in `validateArguments` (the filter must
-  // admit exactly what validation admits, both ways).
-  if (typeAcceptsValue(op, param)) return true;
+  // Value-component parameter: tri-state admission — MIRRORS the
+  // `validateArguments` fallback (the filter must admit exactly what
+  // validation admits, both ways): membership or undecidability admits,
+  // only proven refutation drops the arm.
+  if (hasValueComponent(param) && admissionOf(op, param) !== 'refute')
+    return true;
 
   // An inferred (not declared) symbol type that the parameter would narrow —
   // except on the effect axis, where `validateArguments` declines to narrow
@@ -292,7 +298,7 @@ function argSpecificity(
  * compared and fall through to the existing declaration-order tie-break — which
  * is why this returns `false` for them rather than an ordering.
  */
-function isMoreSpecific(
+export function isMoreSpecific(
   a: FunctionSignature,
   b: FunctionSignature,
   arity: number
@@ -341,6 +347,92 @@ export function resolveOverload(
     if (isMoreSpecific(candidate, selected, arity)) selected = candidate;
 
   return { selected, viable };
+}
+
+/**
+ * Tri-state admission of a whole arm for a call
+ * (function-polymorphism design §4.4): refuted on arity, else the fold of
+ * per-position `admissionOf`. ONE implementation shared by static result
+ * typing (`resolvedArm`'s value-arm JOIN) and the runtime clause selector
+ * (`multi-clause.ts`), so the two cannot diverge. Write-free.
+ */
+export function armAdmission(
+  ops: ReadonlyArray<Expression>,
+  arm: FunctionSignature
+): Admission {
+  if (!arityAdmits(arm, ops.length)) return 'refute';
+  let undecidable = false;
+  for (let i = 0; i < ops.length; i++) {
+    const param = paramAt(arm, i);
+    if (param === undefined) return 'refute';
+    const a = admissionOf(ops[i], param);
+    if (a === 'refute') return 'refute';
+    if (a === 'undecidable') undecidable = true;
+  }
+  return undecidable ? 'undecidable' : 'admit';
+}
+
+/** Does any PARAMETER of this arm carry a value-kind/bounded-numeric
+ * component (so tri-state admission can answer differently from the boolean
+ * filter)? */
+export function armHasValueParam(arm: FunctionSignature): boolean {
+  return [
+    ...(arm.args ?? []),
+    ...(arm.optArgs ?? []),
+    ...(arm.variadicArg ? [arm.variadicArg] : []),
+  ].some((p) => hasValueComponent(p.type));
+}
+
+/**
+ * Tri-state selection over a set of arms (function-polymorphism design
+ * §4.4) — THE shared dispatch decision, consumed by static result typing
+ * (`resolvedArm`) and the runtime clause selector (`multi-clause.ts`):
+ *
+ * - `{ kind: 'selected', index }` — dispatch is DECIDED: the most-specific
+ *   admitted arm (declaration order breaks ties), and no undecidable arm
+ *   could outrank or tie it.
+ * - `{ kind: 'blocked', nonRefuted }` — some undecidable arm could outrank
+ *   or tie the best admitted arm (or nothing is admitted but something is
+ *   undecidable): the call cannot commit; any non-refuted arm may win at
+ *   runtime.
+ * - `{ kind: 'none' }` — every arm is refuted.
+ *
+ * Write-free.
+ */
+export function triStateSelect(
+  ops: ReadonlyArray<Expression>,
+  arms: ReadonlyArray<FunctionSignature>
+):
+  | { kind: 'selected'; index: number }
+  | { kind: 'blocked'; nonRefuted: number[] }
+  | { kind: 'none' } {
+  const admissions = arms.map((a) => armAdmission(ops, a));
+
+  let best = -1;
+  for (let i = 0; i < arms.length; i++) {
+    if (admissions[i] !== 'admit') continue;
+    if (best < 0 || isMoreSpecific(arms[i], arms[best], ops.length)) best = i;
+  }
+
+  // An undecidable arm blocks unless the best admitted arm is STRICTLY more
+  // specific than it (dispatching a fallback while a more-specific value
+  // arm is unresolved is the symbolic-divergence failure the design
+  // rejects).
+  let blocked = false;
+  for (let i = 0; i < arms.length; i++) {
+    if (admissions[i] !== 'undecidable') continue;
+    if (best < 0 || !isMoreSpecific(arms[best], arms[i], ops.length)) {
+      blocked = true;
+      break;
+    }
+  }
+
+  if (!blocked && best >= 0) return { kind: 'selected', index: best };
+  const nonRefuted: number[] = [];
+  for (let i = 0; i < arms.length; i++)
+    if (admissions[i] !== 'refute') nonRefuted.push(i);
+  if (nonRefuted.length === 0) return { kind: 'none' };
+  return { kind: 'blocked', nonRefuted };
 }
 
 /**

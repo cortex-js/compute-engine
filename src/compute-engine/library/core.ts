@@ -76,6 +76,11 @@ import {
   isMintedConstructor,
   loosenMintedConstructor,
 } from '../type-constructors.js';
+import {
+  ClauseDefinitionError,
+  defineFunctionClause,
+  loosenForClauseDefinition,
+} from '../multi-clause.js';
 import { assignValueAsOperatorDef } from '../engine-declarations.js';
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
@@ -1302,6 +1307,81 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // would recurse forever).
         if (isFunction(result, 'Apply')) return result;
         return result.N();
+      },
+    },
+
+    DefineFunction: {
+      description:
+        'Define one clause of a (possibly multi-clause) function: ' +
+        '`DefineFunction(f, Function(body, params…))`. Unlike `Assign` — ' +
+        'which replaces the binding wholesale — `DefineFunction` ' +
+        'ACCUMULATES: a clause with the same parameter domain replaces the ' +
+        'earlier clause in place, any other clause is appended, and calls ' +
+        'dispatch to the most specific clause admitting the arguments.',
+      lazy: true,
+      signature: '(symbol, function) scope -> nothing',
+      invokes: false,
+      canonical: (args, { engine: ce }) => {
+        if (args.length !== 2) return null;
+        const symbol = isSymbol(args[0])
+          ? args[0]
+          : checkType(ce, args[0], 'symbol');
+        // The clause operand must be an explicit `Function` literal — the
+        // shorthand lift (`canonicalFunctionLiteral(5)` → constant lambda)
+        // must NOT apply here, or any value would silently become a clause.
+        if (!isFunction(args[1], 'Function'))
+          return ce._fn('DefineFunction', [symbol, args[1].canonical]);
+        // Tie the recursion knot (same as `Assign`): pre-declare the target
+        // as function-typed so a self-reference in the body binds here.
+        // A visible SYSTEM-SCOPE builtin is pre-shadowed with a
+        // current-scope shell first: `defineFunctionClause` will shadow the
+        // builtin at install, and without the shell a recursive clause's
+        // self-call would canonicalize against — and keep — the builtin.
+        const symbolName = sym(symbol);
+        if (symbolName !== undefined) {
+          const existing = ce.lookupDefinition(symbolName);
+          const systemScope = ce.contextStack[0]?.lexicalScope;
+          const isBuiltin =
+            existing !== undefined &&
+            systemScope !== undefined &&
+            systemScope.bindings.get(symbolName) === existing &&
+            ce.context.lexicalScope !== systemScope;
+          if (existing === undefined) ce.symbol(symbolName);
+          else if (isBuiltin) ce.declare(symbolName, 'function');
+          const def = ce.lookupDefinition(symbolName);
+          if (def && isValueDef(def) && def.value.inferredType)
+            def.value.type = ce.type('function');
+        }
+        // Loosen the accumulation target while the clause body canonicalizes
+        // (mirrors the minted-constructor loosening): a recursive clause's
+        // self-call must not validate against the PREVIOUS clauses'
+        // signature — the new intersection does not exist yet.
+        let restoreClause: (() => void) | undefined = undefined;
+        if (symbolName !== undefined)
+          restoreClause = loosenForClauseDefinition(ce, symbolName);
+        let canonFn: Expression;
+        try {
+          canonFn = args[1].canonical;
+        } finally {
+          restoreClause?.();
+        }
+        return ce._fn('DefineFunction', [symbol, canonFn]);
+      },
+      evaluate: ([op1, op2], { engine: ce }) => {
+        const name = sym(op1);
+        if (name === undefined)
+          return ce._fn('Error', [
+            ce.string('invalid-clause-definition'),
+            op1 ?? ce.Nothing,
+          ]);
+        try {
+          defineFunctionClause(ce, name, op2);
+        } catch (e) {
+          if (e instanceof ClauseDefinitionError)
+            return ce._fn('Error', [ce.string(e.code), ce.string(e.message)]);
+          throw e;
+        }
+        return ce.Nothing;
       },
     },
 

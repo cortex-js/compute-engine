@@ -1,6 +1,7 @@
 # Function polymorphism — Phase 1 implementation plan
 
-Status: draft plan (2026-08-01). Spec authority:
+Status: **implemented 2026-08-01** (see the two recorded deviations at the
+end). Spec authority:
 `docs/plans/2026-08-01-function-polymorphism-design.md` (v2, D1–D8 all
 ruled). Phase 0 (value membership + lattice fix) landed in `60eb9ff0`.
 
@@ -225,6 +226,32 @@ zero — Phase 1 adds a new head and changes behavior only for defs with
 - The selector adds per-call admission cost for multi-clause defs only;
   single-clause defs keep the exact current path (no regression risk on
   the hot path — assert with the box-microloop canary if in doubt).
+
+## Implementation deviations (recorded at landing)
+
+1. **The runtime backstop assert (step 5.7) is unstatable and was not
+   implemented.** A statically-admitted call LEGITIMATELY reaches
+   all-refuted at runtime when evaluation reveals a concrete value — the
+   design's own "miss revealed only after evaluation" case (D7). The
+   anti-drift guarantee is enforced by construction instead: ONE shared
+   decision procedure (`triStateSelect` in `overload.ts`, built on
+   `armAdmission`/`admissionOf`) is consumed by both static result typing
+   and the runtime selector.
+2. **A direct literal miss is a STATIC error, not the runtime
+   `no-matching-clause` value** (*ratified by user 2026-08-02*). `f(5)` against clauses `0`/`1` is
+   statically refuted everywhere (§4.4 static consumption) and errors at
+   validation with per-arm blame — consistent with every other operator.
+   D7's error value fires exactly for misses statically undecidable and
+   revealed at evaluation. (The design doc's §9 blanket phrasing should be
+   amended to match.)
+
+Also of note: recognition needed a `loosenForClauseDefinition` (mirroring
+`loosenMintedConstructor`) — a recursive clause body canonicalizes before
+the new intersection exists and must not validate against the PREVIOUS
+clauses' signature. And the static §4.4 rule required upgrading the
+Phase 0 membership fallbacks in `validate.ts`/`checkType`/`paramMatches`
+from boolean membership to tri-state (undecidable = provisional admit,
+deferred).
 
 ## Suggested execution order
 

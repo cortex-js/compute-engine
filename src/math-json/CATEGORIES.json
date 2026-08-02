@@ -327,6 +327,7 @@
       "Colon",
       "Declare",
       "DeclareType",
+      "DefineFunction",
       "Delimiter",
       "DigitsFrom",
       "Error",

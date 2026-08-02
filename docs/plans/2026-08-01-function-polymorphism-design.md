@@ -601,8 +601,17 @@ fail closed.
 - Static/runtime coherence: a broadly-typed operand that evaluates to the
   literal case and to the fallback case (result typed as the JOIN); the
   backstop assert (statically admitted ⇒ ≥1 non-refuted clause at runtime).
-- No-match: direct literal miss, miss revealed only after evaluation, and
-  unsaturated-arity call (D8) all yield `no-matching-clause`.
+- No-match (*amended at Phase 1 implementation; ratified by user
+  2026-08-02*): a DIRECT literal miss —
+  and an unsaturated-arity call with concrete arguments (D8) — is
+  statically refuted everywhere and errors at validation (per-arm blame,
+  §4.4 static consumption), like any other operator; the runtime
+  `no-matching-clause` error value (D7) fires for misses that were
+  statically undecidable and are revealed only at evaluation. Note the
+  boxing seam: re-boxing a call after the symbol gains a value refutes
+  STATICALLY (the membership predicate follows the symbol hop) — the
+  runtime path is exercised by evaluating a call boxed before the value
+  was known.
 - Effects: exactly-once argument evaluation with an effectful argument;
   D5 conflict rejection, omission-adopts-row acceptance (both declaration
   orders), inferred-effect overflow rejection, row survival across clause

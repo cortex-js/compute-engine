@@ -1553,6 +1553,18 @@
       "description": "Return the collection with consecutive duplicate elements collapsed to a single element.\n\nOnly immediately-adjacent equal elements are removed; unlike `Unique`, a value that recurs after a different element is kept."
     },
     {
+      "name": "DefineFunction",
+      "category": "Core",
+      "arity": "2",
+      "signature": "(symbol, function) scope -> nothing",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Define one clause of a (possibly multi-clause) function: `DefineFunction(f, Function(body, params…))`. Unlike `Assign` — which replaces the binding wholesale — `DefineFunction` ACCUMULATES: a clause with the same parameter domain replaces the earlier clause in place, any other clause is appended, and calls dispatch to the most specific clause admitting the arguments."
+    },
+    {
       "name": "Degree",
       "category": "Linear Algebra",
       "arity": "1",
