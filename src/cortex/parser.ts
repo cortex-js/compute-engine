@@ -1,4 +1,5 @@
 import { MathJsonExpression, MathJsonSymbol } from '../math-json/types.js';
+import { LITERAL_PARAM_PREFIX, isLiteralParamName } from '../math-json/symbols.js';
 import { Origin } from '../common/debug.js';
 import { parseType, parseTypePrefix } from '../common/type/parse.js';
 import { EFFECT_LABELS } from '../common/type/effects.js';
@@ -1714,7 +1715,11 @@ export class Parser {
   //
 
   /** Block form `function f(x) { … }` →
-   * `["Assign", "f", ["Function", ["Block", …], …params]]`. Typed params
+   * `["DefineFunction", "f", ["Function", ["Block", …], …params]]`. Definition
+   * statements ACCUMULATE clauses (function-polymorphism design, D6): a
+   * second `function f` with a different parameter domain appends a clause,
+   * the same domain replaces it in place; only a plain assignment
+   * (`f = …`, `Assign`) replaces the whole binding. Typed params
    * (`function f(x: real) { … }`) are carried inline as `["Typed", sym, type]`
    * parameters, and a return type (`… -> real { … }`) is ascribed onto the body
    * as `["Typed", body, type]` (the engine normalizes it into the Block). Both
@@ -1786,7 +1791,7 @@ export class Parser {
       end
     );
     return this.wrap(
-      ['Assign', nameNode, fnNode] as MathJsonExpression[],
+      ['DefineFunction', nameNode, fnNode] as MathJsonExpression[],
       kw.start,
       end
     );
@@ -1843,7 +1848,9 @@ export class Parser {
   }
 
   /** Math-style `f(x) = expr` →
-   * `["Assign", "f", ["Function", expr, …params]]`. Typed params
+   * `["DefineFunction", "f", ["Function", expr, …params]]` (definition
+   * statements accumulate clauses — see {@link parseFunctionDefinition}).
+   * Typed params
    * (`f(x: integer) = …`) are carried inline as `["Typed", sym, type]`
    * parameters, and a return type (`f(x: integer) -> real = …`) is ascribed
    * onto the body as `["Typed", body, type]` (the engine normalizes it). Both
@@ -1907,7 +1914,7 @@ export class Parser {
       end
     );
     return this.wrap(
-      ['Assign', nameNode, fnNode] as MathJsonExpression[],
+      ['DefineFunction', nameNode, fnNode] as MathJsonExpression[],
       nameTok.start,
       end
     );
@@ -2019,8 +2026,13 @@ export class Parser {
         )
         .join(', ')}) ${effects} -> ${retText}`;
 
+    // A generated literal-parameter name must not leak into the marker
+    // signature: fall back to the all-positional spelling.
     const nameable = parts.every(
-      (p) => p.name !== null && PLAIN_IDENTIFIER.test(p.name)
+      (p) =>
+        p.name !== null &&
+        PLAIN_IDENTIFIER.test(p.name) &&
+        !isLiteralParamName(p.name)
     );
     const candidates = nameable ? [build(true), build(false)] : [build(false)];
 
@@ -2047,7 +2059,13 @@ export class Parser {
    * function-literal parameter `["Typed", sym, {str: type}]` (the engine's
    * native form); a bare param is the plain symbol node. The `Function` literal
    * built from these carries its parameter types inline, so no separate
-   * signature side-channel is needed. */
+   * signature side-channel is needed.
+   *
+   * A **literal parameter** (multi-clause definitions: `function f(0) = 1`) —
+   * a number, string, or boolean literal in parameter position — lowers to an
+   * anonymous value-typed parameter `["Typed", <generated>, {str: "<value>"}]`
+   * where `<generated>` is a reserved-prefix name the body cannot reference
+   * (see {@link parseLiteralParam}). */
   private parseParameterList(): MathJsonExpression[] {
     const open = this.advance(); // '('
     this.brackets.push(open);
@@ -2056,6 +2074,17 @@ export class Parser {
     if (!this.check('CLOSE_PAREN')) {
       for (;;) {
         const tok = this.current;
+        if (this.startsLiteralParam()) {
+          const p = this.parseLiteralParam(params.length + 1);
+          if (p === null) {
+            this.recoverInBracket();
+            break;
+          }
+          params.push(p);
+          if (!this.match('COMMA')) break;
+          if (this.check('CLOSE_PAREN')) break; // trailing comma
+          continue;
+        }
         if (tok.type !== 'SYMBOL' && tok.type !== 'VERBATIM_SYMBOL') {
           this.error(['symbol-expected'], tok.start, tok.end);
           this.recoverInBracket();
@@ -2065,6 +2094,12 @@ export class Parser {
         this.harvest(tok);
         const pname =
           tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
+        // The generated literal-parameter namespace is RESERVED: a
+        // user-written parameter of that shape would be indistinguishable
+        // from a generated one, and serialization/diagnostics would drop
+        // its name.
+        if (isLiteralParamName(pname))
+          this.error(['reserved-word', pname], tok.start, tok.end);
         const symNode = this.wrap({ sym: pname }, tok.start, tok.end);
 
         // Optional `: Type` — an annotated param is a typed function-literal
@@ -2095,6 +2130,70 @@ export class Parser {
     else this.error(['closing-bracket-expected', ')'], open.start, open.end);
 
     return params;
+  }
+
+  /** Whether the current token begins a **literal parameter**: a number
+   * (optionally signed), a string, or a boolean literal in parameter
+   * position. */
+  private startsLiteralParam(): boolean {
+    const tok = this.current;
+    if (tok.type === 'NUMBER' || tok.type === 'STRING') return true;
+    if (
+      tok.type === 'OPERATOR' &&
+      (tok.text === '-' || tok.text === '+') &&
+      this.peek(1).type === 'NUMBER'
+    )
+      return true;
+    return (
+      tok.type === 'SYMBOL' && (tok.text === 'true' || tok.text === 'false')
+    );
+  }
+
+  /** Parse one literal parameter (`0`, `-1.5`, `"yes"`, `true`) and lower it
+   * to an anonymous value-typed parameter
+   * `["Typed", "literalParam_<position>", {str: "<value-type>"}]` — the §4.5
+   * pinned encoding of the function-polymorphism design. The generated name
+   * (1-based parameter position, reserved prefix) never surfaces: clause
+   * identity uses parameter TYPES, and serialization renders the literal
+   * spelling back. Returns `null` (diagnosed) for a literal that has no
+   * value-type spelling — an interpolated string. */
+  private parseLiteralParam(position: number): MathJsonExpression | null {
+    const start = this.current.start;
+    let negative = false;
+    if (this.current.type === 'OPERATOR') {
+      negative = this.current.text === '-';
+      this.advance(); // '-' / '+'
+    }
+    const tok = this.advance();
+    this.harvest(tok);
+
+    let typeText: string;
+    if (tok.type === 'NUMBER') {
+      typeText = numberPayload(tok.text, negative);
+    } else if (tok.type === 'STRING') {
+      // Only a plain string is a literal — an interpolation hole is an
+      // expression, and expressions are not parameters.
+      const parts = tok.parts ?? [''];
+      if (parts.some((p) => typeof p !== 'string')) {
+        this.error(['literal-expected'], tok.start, tok.end);
+        return null;
+      }
+      const cooked = parts.join('');
+      typeText = `"${cooked.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    } else {
+      // SYMBOL `true` / `false` (guaranteed by `startsLiteralParam`).
+      typeText = tok.text;
+    }
+
+    return this.wrap(
+      [
+        'Typed',
+        this.wrap({ sym: `${LITERAL_PARAM_PREFIX}${position}` }, start, tok.end),
+        this.wrap({ str: typeText }, start, tok.end),
+      ] as MathJsonExpression[],
+      start,
+      tok.end
+    );
   }
 
   /** Consume a `Type` starting at the current token (a return type after

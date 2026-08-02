@@ -103,7 +103,7 @@ describe('CORTEX REASSIGNMENT VS DECLARATION', () => {
 describe('CORTEX FUNCTION DEFINITIONS', () => {
   test('math-style `f(x) = expr`', () => {
     expect(validCortex('f(x) = x + 1')).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'f',
       ['Function', ['Add', 'x', 1], 'x'],
     ]);
@@ -111,7 +111,7 @@ describe('CORTEX FUNCTION DEFINITIONS', () => {
 
   test('math-style with multiple params', () => {
     expect(validCortex('f(x, y) = x + y')).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'f',
       ['Function', ['Add', 'x', 'y'], 'x', 'y'],
     ]);
@@ -119,10 +119,10 @@ describe('CORTEX FUNCTION DEFINITIONS', () => {
 
   test('math-style with typed params (annotated function literal)', () => {
     // A typed parameter is carried inline as a `["Typed", sym, {str}]` node,
-    // so the def is a plain `Assign` of an annotated `Function` literal (the
+    // so the def is a `DefineFunction` of an annotated `Function` literal (the
     // engine enforces the parameter types).
     expect(validCortex('f(x: real) = x + 1')).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'f',
       ['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'real' }]],
     ]);
@@ -130,7 +130,7 @@ describe('CORTEX FUNCTION DEFINITIONS', () => {
 
   test('math-style with a return type (ascribed onto the body)', () => {
     expect(validCortex('f(x: integer) -> real = x + 1')).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'f',
       [
         'Function',
@@ -142,7 +142,7 @@ describe('CORTEX FUNCTION DEFINITIONS', () => {
 
   test('block-style `function f(x) { … }`', () => {
     expect(validCortex('function f(x) { x + 1 }')).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'f',
       ['Function', ['Block', ['Add', 'x', 1]], 'x'],
     ]);
@@ -150,7 +150,7 @@ describe('CORTEX FUNCTION DEFINITIONS', () => {
 
   test('block-style with a return type (ascribed onto the body)', () => {
     expect(validCortex('function f(x) -> real { x + 1 }')).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'f',
       [
         'Function',

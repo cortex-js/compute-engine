@@ -329,6 +329,13 @@ Extend the parameter grammar (both definition-statement forms) to accept
 that have value types (§4.1's pinned lexical forms). No destructuring/shape
 patterns in parameter position — that remains `match`'s job inside a body.
 
+*(Ruled 2026-08-02: the v1 literal-parameter grammar is exactly numbers,
+strings, and booleans — `Infinity` is NOT a literal parameter. `f(Infinity)`
+keeps the ordinary symbol-parameter reading (a parameter *named* `Infinity`,
+the general constant-shadowing pattern). Supporting infinity clauses first
+requires the type grammar to accept infinity value-type spellings, which it
+currently rejects; queued for a future type-grammar round.)*
+
 **Lowering (encoding pinned):** a literal parameter lowers to an anonymous
 typed parameter `["Typed", <fresh>, {str: "<value-type>"}]` where `<fresh>`
 is a **generated binding symbol** with a reserved, non-colliding prefix,
@@ -394,6 +401,28 @@ eventually accumulate, they must compose with that synthetic arm
 the synthetic arm all need rules). In v1 of *this* spec, a **second**
 same-name constructor definition is a deterministic error, and the nominal
 spec's "arm(s)" plural is deferred to that reconciliation.
+
+*(Amended at Phase 2, 2026-08-02: the shipped nominal-v2 implementation
+gives a re-definition of a constructor function **replacement** semantics —
+the notebook re-run behavior its own test suite pins
+(`constructor-functions.test.ts`, "re-running the function statement
+replaces the constructor") — and `DefineFunction`'s delegation preserves
+that. The "deterministic error" sentence above described the pre-nominal-v2
+interim and is superseded; erroring here would also break every
+canonical+evaluate dual-install, which re-runs the same recognition
+idempotently. Also clarified: the §4.7 precedence — and this delegation —
+applies to **nominal** types only; an alias's same-name function is an
+ordinary function (nominal spec §4.5) and its definition statements
+accumulate clauses like any other function, with the alias's minted
+identity constructor replaced by the first definition. Known limitation:
+because that replacement installs clause 1's CONCRETE signature at
+canonical time — load-bearing for the alias "arities honest" behavior its
+test pins — a call in the SAME program admitted only by a later clause
+(`type alias flag = boolean; flag(true)=1; flag(false)=0; flag(false)`)
+evaluates correctly but draws a spurious `static-type-error` diagnostic
+from the pre-pass; across cells the accumulated signature is visible and
+no diagnostic fires. This is the §4.4 deviation-2 boundary, not a
+dispatch defect.)*
 
 ## 5. Open decision points
 
@@ -553,6 +582,24 @@ and D8 (no partial application), and offered as the alternative in D4.1
 - **Phase 2 — Cortex surface**: literal parameters in both definition forms,
   lowering (§4.5), `About` clause listing (§4.6), docs
   (`doc/06-guide-augmenting.md`, reference entries).
+  **IMPLEMENTED 2026-08-02.** Notes: (1) generated literal-parameter names
+  use the reserved prefix `literalParam_<position>`
+  (`src/math-json/symbols.ts`, shared by parser, serializer and `About`);
+  (2) the §4.2 "single clause keeps today's representation" rule is
+  enforced in `defineFunctionClause` by delegating a 1-clause install to
+  `ce.assign` — required once ALL Cortex definitions lowered through
+  `DefineFunction` (differentiation and closure-capture consumers read the
+  single-function representation); (3) §4.7's constructor precedence is
+  ACTIVE (nominal-types v2 constructor functions shipped): `DefineFunction`
+  onto a same-scope type name delegates to the assignment route's
+  constructor recognition — at CANONICAL time too, mirroring `Assign`'s
+  D13 pre-pass block — replacing Phase 1's interim collision error;
+  (4) clause ACCUMULATION itself stays evaluate-time — the canonical-time
+  knot-tying (loose `'function'` pre-declaration) is enough for later
+  statements in one program to validate, so the plan's "canonical-time
+  registration" revisit was not needed; (5) host-thrown effect-contract /
+  type-compatibility errors from the delegated assign convert to error
+  VALUES in `DefineFunction`'s evaluate, same as the `Assign` operator.
 - **Phase 3 — compile**: guard-chain emission (§8) + parity tests.
 
 Sequencing: after the Cortex `type` statement (shipped, unstaged);

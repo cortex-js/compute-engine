@@ -1,3 +1,24 @@
+/**
+ * Reserved prefix for parser-generated parameter names.
+ *
+ * A **literal parameter** in a Cortex function definition (`function f(0) =
+ * 1`, `f("yes") = …`) lowers to an anonymous value-typed parameter
+ * `["Typed", "literalParam_1", {str: "0"}]` — the name is generated (1-based
+ * parameter position), never written by the author, and the body cannot
+ * reference it. The prefix is reserved: diagnostic and serialization
+ * surfaces render such a parameter by its value type alone (`f(0)`), so the
+ * generated name never surfaces. (`_` is NOT used for these: it collides
+ * with the wildcard/implicit-parameter conventions, and repeated literal
+ * parameters would collide with each other.)
+ */
+export const LITERAL_PARAM_PREFIX = 'literalParam_';
+
+/** Whether a symbol is a parser-generated literal-parameter name (reserved
+ * prefix — see {@link LITERAL_PARAM_PREFIX}). */
+export function isLiteralParamName(s: string): boolean {
+  return s.startsWith(LITERAL_PARAM_PREFIX);
+}
+
 let recommendedScriptsRegex: RegExp;
 
 function isRecommendedScripts(text: string): boolean {

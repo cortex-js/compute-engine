@@ -80,7 +80,7 @@ describe('CORTEX EFFECTS — declaration form', () => {
 describe('CORTEX EFFECTS — parameter annotation', () => {
   test('an effectful callback parameter', () => {
     expect(validCortex('g(f: (real) random -> real) = f(1)')).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'g',
       ['Function', ['f', 1], ['Typed', 'f', { str: '(real) random -> real' }]],
     ]);
@@ -97,7 +97,7 @@ describe('CORTEX EFFECTS — definition form (block)', () => {
     expect(
       validCortex('function roll(n) random -> integer { Random(Range(1, n)) }')
     ).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'roll',
       [
         'Function',
@@ -115,7 +115,7 @@ describe('CORTEX EFFECTS — definition form (block)', () => {
     expect(
       validCortex('function m(x: integer, y) random scope -> real { x }')
     ).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'm',
       [
         'Function',
@@ -136,7 +136,7 @@ describe('CORTEX EFFECTS — definition form (block)', () => {
     expect(
       validCortex('function tick() scope { count = count + 1 }')
     ).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'tick',
       [
         'Function',
@@ -151,7 +151,7 @@ describe('CORTEX EFFECTS — definition form (block)', () => {
 
   test('`pure` is a stated-empty effect set and survives the marker', () => {
     expect(validCortex('function h(x) pure -> real { x + 1 }')).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'h',
       [
         'Function',
@@ -178,7 +178,7 @@ describe('CORTEX EFFECTS — definition form (math)', () => {
     expect(
       validCortex('f(x) random -> integer = Random(Range(1, x))')
     ).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'f',
       [
         'Function',
@@ -199,13 +199,14 @@ describe('CORTEX EFFECTS — definition form (math)', () => {
     // exactly as before the specifier slot existed).
     const [expr] = parseCortex('f(x) random = 5');
     expect(JSON.stringify(expr)).not.toContain('Assign');
+    expect(JSON.stringify(expr)).not.toContain('DefineFunction');
   });
 });
 
 describe('CORTEX EFFECTS — regressions (no specifier anywhere)', () => {
   test('a return-type-only block definition is unchanged', () => {
     expect(validCortex('function g(x) -> real { x + 1 }')).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'g',
       ['Function', ['Typed', ['Block', ['Add', 'x', 1]], { str: 'real' }], 'x'],
     ]);
@@ -214,7 +215,7 @@ describe('CORTEX EFFECTS — regressions (no specifier anywhere)', () => {
 
   test('a typed-parameter block definition is unchanged', () => {
     expect(validCortex('function g2(x: integer) -> real { x }')).toStrictEqual([
-      'Assign',
+      'DefineFunction',
       'g2',
       [
         'Function',
@@ -242,7 +243,7 @@ describe('CORTEX EFFECTS — regressions (no specifier anywhere)', () => {
     expectRoundTrip('function mk(x) -> ((real) random -> real) {x}');
     expect(validCortex('function mk(x) -> ((real) random -> real) { x }'))
       .toStrictEqual([
-        'Assign',
+        'DefineFunction',
         'mk',
         [
           'Function',

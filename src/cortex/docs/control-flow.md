@@ -11,7 +11,7 @@ date: Last Modified
 ## Functions
 
 A function can be defined in two forms, both lowering to the same shape:
-`["Assign", name, ["Function", body, …params]]`.
+`["DefineFunction", name, ["Function", body, …params]]`.
 
 The **math style** is a single expression:
 
@@ -20,7 +20,7 @@ f(x) = x + 1
 ```
 
 ```json
-["Assign", "f", ["Function", ["Add", "x", 1], "x"]]
+["DefineFunction", "f", ["Function", ["Add", "x", 1], "x"]]
 ```
 
 ```cortex
@@ -28,7 +28,7 @@ f(x, y) = x + y
 ```
 
 ```json
-["Assign", "f", ["Function", ["Add", "x", "y"], "x", "y"]]
+["DefineFunction", "f", ["Function", ["Add", "x", "y"], "x", "y"]]
 ```
 
 The **block style** wraps the body in a statement block, whose value is its
@@ -39,7 +39,7 @@ function f(x) { x + 1 }
 ```
 
 ```json
-["Assign", "f", ["Function", ["Block", ["Add", "x", 1]], "x"]]
+["DefineFunction", "f", ["Function", ["Block", ["Add", "x", 1]], "x"]]
 ```
 
 Parameters can carry a type annotation (`f(x: real) = …`), and the block
@@ -54,9 +54,53 @@ f(x: real) = x + 1
 ```
 
 ```json
-["Assign", "f",
+["DefineFunction", "f",
   ["Function", ["Add", "x", 1], ["Typed", "x", {"str": "real"}]]]
 ```
+
+### Multiple clauses (literal parameters)
+
+A parameter can be a **literal** — a number, string, or boolean. Definition
+statements **accumulate**: defining the same name again with a different
+parameter list adds a *clause* rather than replacing the function, and a
+call dispatches to the most specific clause that matches its arguments
+(declaration order only breaks ties between equally specific clauses).
+
+```cortex
+fib(0) = 0
+fib(1) = 1
+fib(n: integer) = fib(n - 1) + fib(n - 2)
+fib(10)
+// ➔ 55
+```
+
+Redefining a clause with the *same* parameter list replaces just that
+clause — so re-running an edited definition behaves as expected. A plain
+assignment (`f = x |-> …`) still replaces the whole binding, clauses and
+all.
+
+A literal parameter lowers to an anonymous parameter constrained to that
+exact value (a *value type*):
+
+```json
+["DefineFunction", "fib",
+  ["Function", 0, ["Typed", "literalParam_1", {"str": "0"}]]]
+```
+
+If no clause matches the evaluated arguments, the call is a
+`no-matching-clause` error. To inspect the clause set of a function, use
+`About`:
+
+```cortex
+f(0) = 1
+f(n: integer) = n + 1
+About(f)
+```
+
+The listing shows one line per clause, in declaration order, and annotates
+clauses that overlap an earlier one of equal specificity as well as clauses
+made unreachable by more specific ones covering their whole (finite)
+domain.
 
 ### Anonymous functions
 

@@ -13,6 +13,7 @@ import {
   matchesString,
 } from '../math-json/utils.js';
 import { splitGraphemes } from '../common/grapheme-splitter.js';
+import { isLiteralParamName } from '../math-json/symbols.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
 import {
@@ -682,6 +683,25 @@ export function serializeCortex(
       return serializeOperator(expr) ?? serializeGenericFunction(expr);
     },
 
+    // A definition statement — one clause of a (possibly multi-clause)
+    // function. `["DefineFunction", "f", ‹Function literal›]` reconstructs
+    // the Cortex definition syntax it lowered from: `f(0) = 1` for an
+    // expression body, `function f(x: integer) { … }` for a `Block` body.
+    // Any other shape falls back to the generic call form.
+    DefineFunction: (expr: MathJsonExpression): FormattingBlock => {
+      const name = operand(expr, 1);
+      const rhs = operand(expr, 2);
+      if (
+        nops(expr) === 2 &&
+        name !== null &&
+        symbol(name) !== null &&
+        rhs !== null &&
+        operator(rhs) === 'Function'
+      )
+        return serializeNamedDef(name, rhs);
+      return serializeGenericFunction(expr);
+    },
+
     //
     // Match (structural pattern matching): the keyword-led block form
     //
@@ -898,12 +918,40 @@ export function serializeCortex(
     return { bodyExpr, retType: text, specifier: null };
   };
 
-  // A single function-literal parameter: `x` (bare) or `x: integer` (typed).
+  // A single function-literal parameter: `x` (bare), `x: integer` (typed), or
+  // — for a generated literal parameter (`["Typed", "literalParam_1",
+  // {str: "0"}]`) — the literal spelling alone (`0`), which is exactly its
+  // value type's text. The generated name never surfaces (function-
+  // polymorphism design §4.5).
+  // The spelling of a value type — what a literal parameter's type text
+  // looks like: a (signed) number, a quoted string, or a boolean. Guards
+  // the name suppression below so a non-value-typed parameter that merely
+  // wears the reserved prefix (box route) keeps its name.
+  const isValueTypeText = (t: string): boolean =>
+    /^-?[0-9.]/.test(t) || t.startsWith('"') || t === 'true' || t === 'false';
+
   const serializeParam = (p: MathJsonExpression): FormattingBlock => {
     const typed = operator(p) === 'Typed';
     const nameSym = typed ? symbol(operand(p, 1)) : symbol(p);
-    const nameStr = nameSym !== null ? escapeSymbol(nameSym) : '';
     const t = typed ? typeText(operand(p, 2)) : null;
+    if (
+      nameSym !== null &&
+      isLiteralParamName(nameSym) &&
+      t !== null &&
+      isValueTypeText(t)
+    ) {
+      // A string value type carries its content RAW (the type grammar
+      // resolves only `\"` and `\\`, and control characters are stored
+      // as-is) — re-escape it for the single-line Cortex string spelling,
+      // or a parameter like `f("a\nb")` would serialize with a raw line
+      // break the lexer rejects.
+      if (t.startsWith('"') && t.endsWith('"')) {
+        const inner = t.slice(1, -1).replace(/\\(["\\])/g, '$1');
+        return fmt.text(`"${escapeString(inner)}"`);
+      }
+      return fmt.text(t);
+    }
+    const nameStr = nameSym !== null ? escapeSymbol(nameSym) : '';
     return fmt.text(t !== null ? `${nameStr}: ${t}` : nameStr);
   };
 

@@ -485,9 +485,23 @@
   the join of their bodies' effects, or an explicitly stated specifier,
   with conflicting specifiers rejected (`incompatible-clause-effects`).
   Partial application is not supported across a clause set (an
-  unsaturated call is a no-match, never a curry). Engine/MathJSON surface
-  only for now; the Cortex `function f(0) = 1` statement syntax is the
-  next phase.
+  unsaturated call is a no-match, never a curry).
+
+  The **Cortex surface** is included: both definition forms accept
+  **literal parameters** (`fib(0) = 0`, `function f("yes") { … }`,
+  `f(true) = 1` — numbers, strings, booleans), lowered to anonymous
+  value-typed parameters with generated, reserved-prefix names that never
+  surface (serialization renders the literal spelling back). Definition
+  statements now lower to `DefineFunction` — so a second `function f`
+  with a different parameter list *adds a clause* where it previously
+  replaced the binding wholesale; a plain assignment (`f = x |-> …`)
+  still full-replaces, and a definition statement naming a same-scope
+  declared type still means that type's constructor function. `About(f)`
+  on a multi-clause function lists the clause set — one signature per
+  line, declaration order — annotating equal-specificity overlaps
+  ("declaration order decides in the overlap") and clauses made
+  unreachable by more specific clauses covering their whole finite
+  domain ("unreachable (covered)").
 
 - **Programs can now declare their own types — and inhabit them.** A new
   Cortex `type` statement comes in two forms:

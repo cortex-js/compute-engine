@@ -19,7 +19,15 @@ import type {
 } from './global-types.js';
 
 import { isFunction } from './boxed-expression/type-guards.js';
-import { triStateSelect } from './boxed-expression/overload.js';
+import {
+  armAdmission,
+  isMoreSpecific,
+  triStateSelect,
+} from './boxed-expression/overload.js';
+import { hasValueComponent } from './boxed-expression/value-membership.js';
+import { provablyDisjoint } from '../common/type/subtype.js';
+import { typeToString } from '../common/type/serialize.js';
+import { isLiteralParamName } from '../math-json/symbols.js';
 import { isOperatorDef, isValueDef, updateDef } from './boxed-expression/utils.js';
 import { functionLiteralDeclaredEffects } from './boxed-expression/function-literal.js';
 import { apply, lookup } from './function-utils.js';
@@ -183,14 +191,19 @@ export function defineFunctionClause(
 
   const scope = ce.context.lexicalScope;
 
-  // Constructor precedence (spec §4.7): a same-scope type declaration owns
-  // the name. `DefineFunction` never accumulates onto a constructor — the
-  // constructor interpretation wins, and v1 has no constructor clauses.
-  if (scope.types?.[id]?.def !== undefined)
-    throw new ClauseDefinitionError(
-      'invalid-clause-definition',
-      `"${id}" is the constructor of a type declared in this scope; a type's constructor cannot be defined by clauses`
-    );
+  // Constructor precedence (spec §4.7): a same-scope NOMINAL type
+  // declaration owns the name — the CONSTRUCTOR interpretation wins, and
+  // v1 has no constructor clauses. Delegate to assignment: its
+  // constructor-function recognition installs the smart constructor
+  // (nominal-types v2); re-defining it replaces the constructor, the
+  // notebook re-run semantics that implementation pins. An ALIAS's
+  // same-name function is an ordinary function (nominal spec §4.5), so it
+  // falls through to normal clause accumulation below.
+  const sameScopeType = scope.types?.[id];
+  if (sameScopeType?.def !== undefined && sameScopeType.alias !== true) {
+    ce.assign(id, literal);
+    return;
+  }
 
   // Resolve the existing binding. A builtin (system-scope) definition is
   // SHADOWED in the current scope, never accumulated onto (same rule as
@@ -204,11 +217,19 @@ export function defineFunctionClause(
     scope !== systemScope;
   if (isBuiltin) existing = undefined;
 
-  if (existing !== undefined && isMintedConstructor(existing))
-    throw new ClauseDefinitionError(
-      'invalid-clause-definition',
-      `"${id}" is the constructor of a declared type; a type's constructor cannot be defined by clauses`
-    );
+  if (existing !== undefined && isMintedConstructor(existing)) {
+    // A same-scope ALIAS's minted identity constructor is a placeholder:
+    // the first clause replaces it (the single-clause `ce.assign` below
+    // takes assignment's alias branch). Any OTHER minted constructor — an
+    // outer scope's, or a nominal type's reached without the §4.7
+    // delegation — cannot hold clauses.
+    if (sameScopeType?.alias === true) existing = undefined;
+    else
+      throw new ClauseDefinitionError(
+        'invalid-clause-definition',
+        `"${id}" is the constructor of a declared type; a type's constructor cannot be defined by clauses`
+      );
+  }
 
   const incoming: FunctionClause = {
     signature: clauseSignatureOf(literal),
@@ -255,6 +276,17 @@ export function defineFunctionClause(
   );
   if (at >= 0) clauses[at] = incoming;
   else clauses.push(incoming);
+
+  // §4.2: a SINGLE clause keeps today's single-function representation —
+  // no behavior change until a second clause exists. Assignment installs
+  // the ordinary user-function definition (operator slot, `_lambdaLiteral`),
+  // so every consumer of that representation (differentiation, closure
+  // capture, compile) is untouched; conversion to clause storage happens
+  // when the second clause arrives.
+  if (clauses.length === 1 && multiClauseState(existing) === undefined) {
+    ce.assign(id, literal);
+    return;
+  }
 
   // ── Effect-row state machine (D5) ──
   if (incomingExplicit !== undefined) {
@@ -384,7 +416,9 @@ function installClauseList(
 
   const frozen = [...clauses];
   const def: OperatorDefinition = {
-    description: `Multi-clause function (${clauses.length} clause${clauses.length === 1 ? '' : 's'})`,
+    // ≥2 clauses by construction: a single clause installs via `ce.assign`
+    // (§4.2) and never reaches this list.
+    description: `Multi-clause function (${clauses.length} clauses)`,
     ...(row !== undefined && !isPureEffectSet(row)
       ? { effects: row }
       : { pure: true }),
@@ -456,4 +490,158 @@ function selectAndApply(
     ce.string('no-matching-clause'),
     ce.function(id, [...ops], { form: 'raw' }),
   ]);
+}
+
+//
+// ─── Clause listing (§4.6, `About`) ───────────────────────────────────────
+//
+
+/**
+ * The clause listing of a multi-clause function — the `About` diagnostic
+ * surface (design §4.6): one line per clause, signature in declaration
+ * order (= tie-break order), with the two v1 annotations:
+ *
+ * - **tie overlap** — an earlier clause of equal specificity (incomparable
+ *   parameter domains) whose domain overlaps: declaration order decides in
+ *   the overlap;
+ * - **finite coverage** — a clause whose domain is entirely covered by
+ *   strictly more specific clauses over a finite/enumerable domain
+ *   (boolean and value-type domains only; no general set-containment).
+ *
+ * Returns `undefined` when `id` is not bound to a multi-clause function in
+ * the current scope chain.
+ */
+export function clauseListing(
+  ce: IComputeEngine,
+  id: string
+): string[] | undefined {
+  const state = multiClauseState(lookupInScope(ce, id));
+  if (state === undefined) return undefined;
+
+  const sigs = state.clauses.map((c) => c.signature);
+  const lines: string[] = [];
+  for (let j = 0; j < sigs.length; j++) {
+    const notes: string[] = [];
+    for (let i = 0; i < j; i++)
+      if (tieOverlaps(sigs[i], sigs[j])) {
+        notes.push(
+          `overlaps clause ${i + 1}; declaration order decides in the overlap`
+        );
+        break;
+      }
+    if (coveredByMoreSpecific(ce, sigs, j)) notes.push('unreachable (covered)');
+
+    lines.push(
+      `clause ${j + 1}: ${clauseSignatureToString(sigs[j])}` +
+        (notes.length > 0 ? ` — ${notes.join('; ')}` : '')
+    );
+  }
+  return lines;
+}
+
+/** Render a clause signature, suppressing generated literal-parameter names
+ * (`(literalParam_1: 0) -> integer` reads `(0) -> integer` — the literal
+ * spelling IS the value type's text). Only value-typed parameters are
+ * anonymized: a non-value-typed parameter merely wearing the reserved
+ * prefix (box route) keeps its name. */
+function clauseSignatureToString(sig: FunctionSignature): string {
+  const anon: FunctionSignature = {
+    ...sig,
+    args: sig.args?.map((a) =>
+      a.name !== undefined &&
+      isLiteralParamName(a.name) &&
+      hasValueComponent(a.type)
+        ? { type: a.type }
+        : a
+    ),
+  };
+  return typeToString(anon);
+}
+
+/** Two clauses of equal specificity (incomparable parameter domains) whose
+ * domains overlap — the §4.6 tie-overlap annotation. Restricted to plain
+ * fixed-arity clauses; a position that is not PROVABLY disjoint counts as
+ * overlapping (this is a diagnostic surface, not a dispatch decision). */
+function tieOverlaps(a: FunctionSignature, b: FunctionSignature): boolean {
+  const n = a.args?.length ?? 0;
+  if ((b.args?.length ?? 0) !== n || n === 0) return false;
+  if (
+    (a.optArgs?.length ?? 0) > 0 ||
+    (b.optArgs?.length ?? 0) > 0 ||
+    a.variadicArg !== undefined ||
+    b.variadicArg !== undefined
+  )
+    return false;
+  // Comparable domains are ranked by specificity, not declaration order.
+  if (isMoreSpecific(a, b, n) || isMoreSpecific(b, a, n)) return false;
+  for (let i = 0; i < n; i++)
+    if (provablyDisjoint(a.args![i].type, b.args![i].type)) return false;
+  return true;
+}
+
+/** Whether clause `j`'s domain is entirely covered by strictly more specific
+ * clauses — detected only over finite/enumerable domains (boolean, value
+ * types, and unions of them; enumeration capped). */
+function coveredByMoreSpecific(
+  ce: IComputeEngine,
+  sigs: ReadonlyArray<FunctionSignature>,
+  j: number
+): boolean {
+  const sig = sigs[j];
+  const args = sig.args ?? [];
+  if (args.length === 0) return false;
+  if ((sig.optArgs?.length ?? 0) > 0 || sig.variadicArg !== undefined)
+    return false;
+
+  const domains: Expression[][] = [];
+  let total = 1;
+  for (const a of args) {
+    const d = enumerateFiniteDomain(ce, a.type);
+    if (d === undefined) return false;
+    total *= d.length;
+    if (total > 32) return false; // enumeration cap — stay cheap
+    domains.push(d);
+  }
+
+  const covering = sigs.filter(
+    (s, i) => i !== j && isMoreSpecific(s, sig, args.length)
+  );
+  if (covering.length === 0) return false;
+
+  let tuples: Expression[][] = [[]];
+  for (const d of domains)
+    tuples = tuples.flatMap((t) => d.map((v) => [...t, v]));
+
+  return tuples.every((tuple) =>
+    covering.some((s) => armAdmission(tuple, s) === 'admit')
+  );
+}
+
+/** The finite enumeration of a parameter type: `boolean` → the two booleans,
+ * a value type → its value, a union → the concatenation of its branches'
+ * enumerations. `undefined` when the type is not finitely enumerable in v1. */
+function enumerateFiniteDomain(
+  ce: IComputeEngine,
+  t: Type
+): Expression[] | undefined {
+  if (t === 'boolean') return [ce.True, ce.False];
+  if (typeof t === 'object') {
+    if (t.kind === 'value') {
+      const v = t.value;
+      if (typeof v === 'number') return [ce.number(v)];
+      if (typeof v === 'string') return [ce.string(v)];
+      if (typeof v === 'boolean') return [v ? ce.True : ce.False];
+      return undefined;
+    }
+    if (t.kind === 'union') {
+      const out: Expression[] = [];
+      for (const branch of t.types) {
+        const d = enumerateFiniteDomain(ce, branch);
+        if (d === undefined) return undefined;
+        out.push(...d);
+      }
+      return out;
+    }
+  }
+  return undefined;
 }

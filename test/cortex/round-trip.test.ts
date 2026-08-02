@@ -207,12 +207,12 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   // `(x: integer) |-> …`).
   [
     'typed math-style def',
-    ['Assign', 'f', ['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'integer' }]]],
+    ['DefineFunction', 'f', ['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'integer' }]]],
   ],
   [
     'typed math-style def with return type',
     [
-      'Assign',
+      'DefineFunction',
       'f',
       [
         'Function',
@@ -224,9 +224,17 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   [
     'typed block def with return type',
     [
-      'Assign',
+      'DefineFunction',
       'f',
       ['Function', ['Typed', ['Block', ['Add', 'x', 1]], { str: 'real' }], 'x'],
+    ],
+  ],
+  [
+    'literal-parameter def (multi-clause clause)',
+    [
+      'DefineFunction',
+      'f',
+      ['Function', 1, ['Typed', 'literalParam_1', { str: '0' }]],
     ],
   ],
   [

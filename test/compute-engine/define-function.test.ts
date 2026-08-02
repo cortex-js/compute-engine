@@ -181,11 +181,20 @@ describe('DEFINE FUNCTION — accumulation', () => {
     expect(ce.box('w2').type.toString()).toContain('random');
   });
 
-  it('a type constructor name is refused (spec §4.7)', () => {
+  it('a type constructor name takes the CONSTRUCTOR interpretation (spec §4.7)', () => {
+    // With nominal-types v2 constructor functions live, a definition
+    // statement targeting a same-scope type name is a smart-constructor
+    // definition — the constructor interpretation wins over clause
+    // accumulation. (Cortex: `type frac = …; function frac(…) { … }`.)
     ce.declareType('point', 'tuple<integer, integer>');
-    const r = clause('point', ['Function', 1, p('a', '0')]);
-    expect(r).toContain('invalid-clause-definition');
-    // The constructor is intact.
+    const r = clause('point', [
+      'Function',
+      ['Tuple', 'a', 'a'],
+      p('a', 'integer'),
+    ]);
+    expect(r).toBe('"Nothing"');
+    // The user's arm constructs; the raw-injection arm is intact.
+    expect(ce.box(['point', 7]).evaluate().type.toString()).toBe('point');
     expect(ce.box(['point', 1, 2]).evaluate().type.toString()).toBe('point');
   });
 });
@@ -303,6 +312,52 @@ describe('DEFINE FUNCTION — symbol-level effect row', () => {
     clause('t', ['Function', 'x', p('x', 'real')]);
     const a = ce.box(['t', ['Random']]).evaluate();
     expect(a.isNumberLiteral).toBe(true);
+  });
+});
+
+// ─── About clause listing (§4.6, Phase 2) ───────────────────────────────────
+
+describe('DEFINE FUNCTION — About clause listing', () => {
+  it('lists clauses in declaration order', () => {
+    clause('f', ['Function', 100, p('a', '0')]);
+    clause('f', ['Function', ['Add', 'n', 1], p('n', 'integer')]);
+    const about = ce.box(['About', 'f']).evaluate().toString();
+    expect(about).toContain('multi-clause function (2 clauses)');
+    expect(about).toContain('clause 1: (a: 0) ->');
+    expect(about).toContain('clause 2: (n: integer) ->');
+  });
+
+  it('suppresses GENERATED literal-parameter names (§4.5)', () => {
+    // The Cortex lowering's generated names (`literalParam_<n>`) render by
+    // their value type alone; a user-chosen name (above) is kept.
+    clause('f', ['Function', 100, p('literalParam_1', '0')]);
+    clause('f', ['Function', ['Add', 'n', 1], p('n', 'integer')]);
+    const about = ce.box(['About', 'f']).evaluate().toString();
+    expect(about).toContain('clause 1: (0) ->');
+    expect(about).not.toContain('literalParam');
+  });
+
+  it('annotates a boolean clause covered by true/false clauses', () => {
+    clause('f', ['Function', 1, p('a', 'true')]);
+    clause('f', ['Function', 0, p('b', 'false')]);
+    clause('f', ['Function', 2, p('c', 'boolean')]);
+    const about = ce.box(['About', 'f']).evaluate().toString();
+    expect(about).toContain('unreachable (covered)');
+  });
+
+  it('annotates a tie overlap between incomparable clauses', () => {
+    clause('g', ['Function', 1, p('x', 'integer'), p('y', 'number')]);
+    clause('g', ['Function', 2, p('x', 'number'), p('y', 'integer')]);
+    const about = ce.box(['About', 'g']).evaluate().toString();
+    expect(about).toContain(
+      'overlaps clause 1; declaration order decides in the overlap'
+    );
+  });
+
+  it('a single-clause definition keeps today’s About', () => {
+    clause('f', ['Function', ['Add', 'x', 1], 'x']);
+    const about = ce.box(['About', 'f']).evaluate().toString();
+    expect(about).not.toContain('multi-clause function');
   });
 });
 

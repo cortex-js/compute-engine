@@ -78,6 +78,7 @@ import {
 } from '../type-constructors.js';
 import {
   ClauseDefinitionError,
+  clauseListing,
   defineFunctionClause,
   loosenForClauseDefinition,
 } from '../multi-clause.js';
@@ -1087,7 +1088,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         if (isString(x)) s.push('string');
         else if (isSymbol(x)) {
-          if (x.valueDefinition) {
+          // A multi-clause function: list the clause set — signature per
+          // clause, declaration order, with overlap/coverage annotations
+          // (function-polymorphism design §4.6). This is the `methods(f)`
+          // equivalent: "what does `f` currently dispatch to?".
+          const clauses = clauseListing(ce, x.symbol);
+          if (clauses !== undefined) {
+            // ≥2 clauses by construction (§4.2): a single clause installs
+            // as an ordinary function and has no clause listing.
+            s.push(`multi-clause function (${clauses.length} clauses)`);
+            s.push(...clauses);
+          } else if (x.valueDefinition) {
             const def = x.valueDefinition;
 
             if (def.isConstant) s.push('constant');
@@ -1331,14 +1342,29 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // must NOT apply here, or any value would silently become a clause.
         if (!isFunction(args[1], 'Function'))
           return ce._fn('DefineFunction', [symbol, args[1].canonical]);
+        // Constructor precedence (function-polymorphism §4.7): a same-scope
+        // NOMINAL type declaration owns the name — the definition statement
+        // is a smart-CONSTRUCTOR definition (nominal-types v2), handled
+        // below with the same canonical-time recognition as `Assign`. An
+        // ALIAS's same-name function is an ordinary function (nominal spec
+        // §4.5): it takes the clause path, with the minted identity
+        // constructor replaced by the FIRST definition (alias block below).
+        const symbolName = sym(symbol);
+        const ctorScope = ce.context.lexicalScope;
+        const ctorType =
+          symbolName !== undefined ? ctorScope.types?.[symbolName] : undefined;
+        const isCtorTarget =
+          ctorType?.def !== undefined && ctorType.alias !== true;
+        const isAliasTarget =
+          ctorType?.def !== undefined && ctorType.alias === true;
+
         // Tie the recursion knot (same as `Assign`): pre-declare the target
         // as function-typed so a self-reference in the body binds here.
         // A visible SYSTEM-SCOPE builtin is pre-shadowed with a
         // current-scope shell first: `defineFunctionClause` will shadow the
         // builtin at install, and without the shell a recursive clause's
         // self-call would canonicalize against — and keep — the builtin.
-        const symbolName = sym(symbol);
-        if (symbolName !== undefined) {
+        if (symbolName !== undefined && !isCtorTarget) {
           const existing = ce.lookupDefinition(symbolName);
           const systemScope = ce.contextStack[0]?.lexicalScope;
           const isBuiltin =
@@ -1352,18 +1378,76 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (def && isValueDef(def) && def.value.inferredType)
             def.value.type = ce.type('function');
         }
-        // Loosen the accumulation target while the clause body canonicalizes
-        // (mirrors the minted-constructor loosening): a recursive clause's
-        // self-call must not validate against the PREVIOUS clauses'
-        // signature — the new intersection does not exist yet.
+        // Loosen the target while the clause body canonicalizes: a recursive
+        // clause's self-call must not validate against the PREVIOUS clauses'
+        // signature (the new intersection does not exist yet) — nor, for a
+        // constructor definition, against the strict pre-install minted
+        // signature (§4.5b D13/D15).
         let restoreClause: (() => void) | undefined = undefined;
-        if (symbolName !== undefined)
-          restoreClause = loosenForClauseDefinition(ce, symbolName);
+        if (symbolName !== undefined) {
+          const binding = ctorScope.bindings.get(symbolName);
+          const stillMinted =
+            binding !== undefined && isMintedConstructor(binding);
+          restoreClause =
+            isCtorTarget || (isAliasTarget && stillMinted)
+              ? loosenMintedConstructor(ce, ctorScope, symbolName)
+              : loosenForClauseDefinition(ce, symbolName);
+        }
         let canonFn: Expression;
         try {
           canonFn = args[1].canonical;
         } finally {
           restoreClause?.();
+        }
+
+        // §4.5b D13 (nominal-types design) — constructor-function recognition
+        // must ALSO run at canonicalization time (mirrors `Assign`): the
+        // static pre-pass canonicalizes LATER statements before anything
+        // evaluates, and their calls must validate against the constructor's
+        // overload signature, not the auto-minted one. The evaluate route
+        // re-runs the same installation idempotently (via `ce.assign`).
+        if (
+          isCtorTarget &&
+          symbolName !== undefined &&
+          isFunction(canonFn, 'Function')
+        ) {
+          try {
+            checkTypeConstructorNamespace(
+              ctorScope,
+              symbolName,
+              'constructor-function'
+            );
+            installConstructorFunction(
+              ce,
+              ctorScope,
+              symbolName,
+              ctorType!,
+              canonFn
+            );
+          } catch {
+            // A conflict (D5 collision, D14a overlap) is diagnosed on the
+            // evaluate route, which runs the same recognition and throws
+            // with the full message; canonicalization stays silent.
+          }
+        }
+        // An alias's same-name function is an ordinary function (nominal
+        // §4.5); its FIRST definition replaces the minted identity
+        // constructor early so later statements' arities are honest.
+        // Later definitions accumulate as ordinary clauses (evaluate
+        // route) — the binding is no longer minted, so this is a no-op.
+        if (
+          isAliasTarget &&
+          symbolName !== undefined &&
+          isFunction(canonFn, 'Function')
+        ) {
+          const binding = ctorScope.bindings.get(symbolName);
+          if (binding !== undefined && isMintedConstructor(binding)) {
+            const fnDef = assignValueAsOperatorDef(ce, canonFn);
+            if (fnDef !== undefined) {
+              updateDef(ce, symbolName, binding, fnDef);
+              ce._mutationGeneration += 1;
+            }
+          }
         }
         return ce._fn('DefineFunction', [symbol, canonFn]);
       },
@@ -1379,6 +1463,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         } catch (e) {
           if (e instanceof ClauseDefinitionError)
             return ce._fn('Error', [ce.string(e.code), ce.string(e.message)]);
+          // The single-clause and constructor paths delegate to the host
+          // `ce.assign`, which THROWS on a violated definition contract;
+          // for a program those are error VALUES — the same conversion as
+          // the `Assign` operator's evaluate.
+          if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+          if (isTypeCompatibilityError(e))
+            return typeCompatibilityErrorValue(ce, e);
           throw e;
         }
         return ce.Nothing;
