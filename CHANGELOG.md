@@ -151,6 +151,22 @@
 
 ### Issues Resolved
 
+- **Value (literal) types are now inhabitable.** A type such as `0`,
+  `"red"`, or `true` — and bounded numeric refinements such as
+  `integer<0..10>` — previously rejected its own witness values: only the
+  value's *synthesized* type was consulted (`ce.box(0).type` is
+  `finite_integer`, which is not a subtype of the value type `0`), so
+  `ce.declare('z', '0'); ce.assign('z', 0)` threw, and with
+  `g: (0) -> integer` the call `g(0)` errored `incompatible-type`. A
+  value-membership check (`typeAcceptsValue`) now tests the concrete value
+  itself wherever one is at hand: argument validation, declared-type
+  assignment/declare-with-value compatibility, and overload-arm filtering.
+  Membership is exact (the engine's value identity; `NaN` inhabits no value
+  type), range endpoints are inclusive, and symbolic expressions are
+  unaffected. Also fixed on the way: a finite number literal's value type
+  is now a subtype of the *finite* base type (`0 <: finite_integer` was
+  `false`).
+
 - **A `match` inside a function body no longer replays the first call's
   arguments on every later call.** The dispatch plan cached per `Match`
   included the case guard/body closures, which were canonicalized inside the

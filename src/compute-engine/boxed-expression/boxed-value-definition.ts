@@ -213,7 +213,8 @@ export class _BoxedValueDefinition
             ce,
             this._value.type,
             this._type,
-            this.effectsDeclared
+            this.effectsDeclared,
+            this._value
           )
         ) {
           throw declaredTypeError(this.name, this._value, this._type);

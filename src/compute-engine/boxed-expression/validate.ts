@@ -8,6 +8,7 @@ import {
 
 import { flatten } from './flatten.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { hasValueComponent, typeAcceptsValue } from './value-membership.js';
 import {
   broadcastableBaseMatches,
   couldBeNonRealNumber,
@@ -417,6 +418,11 @@ export function checkType(
 
   if (arg.type.matches(type)) return arg;
 
+  // A concrete value inhabiting a value-component type (`0`, `integer<0..10>`)
+  // — synthesized-type matching cannot witness this (`ce.box(0).type` is
+  // `finite_integer`, not `0`). See `value-membership.ts`.
+  if (typeAcceptsValue(arg, type)) return arg;
+
   // Broadcastable operand: could be a plain scalar at runtime, admit it.
   if (broadcastableBaseMatches(arg.type.type, type)) return arg;
 
@@ -691,10 +697,15 @@ export function validateArguments(
     // a subtype of the current inferred type. Narrowing is sound, so narrow
     // the symbol's type rather than erroring (e.g. `B` inferred as `value`
     // from `SetMinus(A, B)`, later required as `set` in `SetMinus(B, A)`).
-    // NOT on the effect axis: see `narrowingPreservesEffects`.
+    // NOT on the effect axis: see `narrowingPreservesEffects`. NOT to a
+    // value-component type (`0`, `integer<0..10>`): one call requiring the
+    // value does not prove the symbol always holds it — pinning `k: 0` from
+    // `g(k)` would over-constrain every later use. Membership (below)
+    // admits the concrete-witness case instead, without the write.
     if (
       op.valueDefinition?.inferredType &&
       isSubtype(param, op.type.type) &&
+      !hasValueComponent(param) &&
       narrowingPreservesEffects(op.type.type, param)
     ) {
       op.infer(param, 'narrow');
@@ -715,6 +726,17 @@ export function validateArguments(
     }
 
     if (!op.type.matches(param)) {
+      // A concrete value inhabiting a value-component parameter (`0`,
+      // `integer<0..10>`) — the synthesized type cannot witness membership
+      // in a value type. Mirrored in `paramMatches` (overload.ts). Deferred
+      // like the other provisional admissions: the final `infer(param)` pass
+      // must not narrow a symbol's type to the VALUE type (`k := 0; g(k)`
+      // would otherwise pin `k: 0`).
+      if (typeAcceptsValue(op, param)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        continue;
+      }
       // Strip-before-validate (§3.B): admit an operand carrying a `missing`
       // arm whose stripped type still matches the parameter. Accepted
       // provisionally (added to `deferredIdx`) so the final `infer(param)`
@@ -803,10 +825,12 @@ export function validateArguments(
     }
     // Inferred (not declared) symbol type, and the required type is a subtype
     // of the current inferred type: narrow rather than error. NOT on the
-    // effect axis: see `narrowingPreservesEffects`.
+    // effect axis (`narrowingPreservesEffects`); NOT to a value-component
+    // type (see the required-param gate).
     if (
       op.valueDefinition?.inferredType &&
       isSubtype(param, op.type.type) &&
+      !hasValueComponent(param) &&
       narrowingPreservesEffects(op.type.type, param)
     ) {
       op.infer(param, 'narrow');
@@ -821,6 +845,14 @@ export function validateArguments(
       continue;
     }
     if (!op.type.matches(param)) {
+      // Value membership — see the required-param gate (deferred: the final
+      // inference pass must not narrow a symbol to the value type).
+      if (typeAcceptsValue(op, param)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        i += 1;
+        continue;
+      }
       // Strip-before-validate (§3.B) — see the required-param gate.
       if (strippedMatchesParam(op, param, i, stripMissing)) {
         result.push(op);
@@ -877,10 +909,12 @@ export function validateArguments(
       }
       // Inferred (not declared) symbol type, and the required variadic type is
       // a subtype of the current inferred type: narrow rather than error. NOT
-      // on the effect axis: see `narrowingPreservesEffects`.
+      // on the effect axis (`narrowingPreservesEffects`); NOT to a
+      // value-component type (see the required-param gate).
       if (
         op.valueDefinition?.inferredType &&
         isSubtype(varParam, op.type.type) &&
+        !hasValueComponent(varParam) &&
         narrowingPreservesEffects(op.type.type, varParam)
       ) {
         op.infer(varParam, 'narrow');
@@ -893,6 +927,13 @@ export function validateArguments(
         continue;
       }
       if (!op.type.matches(varParam)) {
+        // Value membership — see the required-param gate (deferred: the final
+        // inference pass must not narrow a symbol to the value type).
+        if (typeAcceptsValue(op, varParam)) {
+          result.push(op);
+          deferredIdx.add(result.length - 1);
+          continue;
+        }
         // Strip-before-validate (§3.B) — see the required-param gate. The
         // operand index is `i - 1` (already incremented at the loop top).
         if (strippedMatchesParam(op, varParam, i - 1, stripMissing)) {

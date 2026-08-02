@@ -15,6 +15,7 @@ import type {
   Scope,
 } from '../global-types.js';
 import { isSymbol } from './type-guards.js';
+import { hasValueComponent, typeAcceptsValue } from './value-membership.js';
 
 /**
  * Overload resolution for an **intersection of function signatures** — the
@@ -202,12 +203,20 @@ function operandAdmits(
   if (policies?.threadable && policies.couldBeCollection?.(op)) return true;
   if (op.type.matches(param)) return true;
 
+  // A concrete value inhabiting a value-component parameter — MIRRORS the
+  // `typeAcceptsValue` fallback in `validateArguments` (the filter must
+  // admit exactly what validation admits, both ways).
+  if (typeAcceptsValue(op, param)) return true;
+
   // An inferred (not declared) symbol type that the parameter would narrow —
   // except on the effect axis, where `validateArguments` declines to narrow
-  // (`narrowingPreservesEffects`).
+  // (`narrowingPreservesEffects`), and except a value-component parameter,
+  // to which `validateArguments` also declines to narrow (a call does not
+  // prove the symbol always holds the value).
   if (
     op.valueDefinition?.inferredType &&
     isSubtype(param, op.type.type) &&
+    !hasValueComponent(param) &&
     narrowingPreservesEffects(op.type.type, param)
   )
     return true;

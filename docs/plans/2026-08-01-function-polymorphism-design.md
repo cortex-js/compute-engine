@@ -131,10 +131,17 @@ statically (refuted if the static type is disjoint, otherwise undecidable).
 Error values are never members of any value type.
 
 **Lexical forms pinned:** integer, decimal, and exact-rational literals,
-string literals, `True`/`False`. `NaN` is not equal to itself under isSame —
-`NaN` is a member of no value type. Signed zero: `-0.0` follows the D1
-isSame rule against `0` (i.e., not a member — it is a float). Infinities may
-appear in value types and match only themselves.
+string literals, `True`/`False`. `NaN` is a member of no value type — an
+explicit rule (empirically, the engine's `isSame(NaN, NaN)` is `true`, so
+this does NOT follow from isSame and must be guarded). Zeros
+(*amended at Phase 0 implementation, 2026-08-01*): the engine normalizes
+`0.0` and `-0.0` to the exact integer `0` **at boxing** — it has no distinct
+float zero — so both ARE members of the value type `0` under the D1 isSame
+rule. (The v1 draft listed `-0.0 ∉ 0` as a test case; that assumed a
+representation the engine does not have. D1's "floats do not inhabit
+integer value types" bites only for values that stay non-integer after
+boxing, e.g. `0.5 ∉ 0`.) Infinities may appear in value types and match
+only themselves.
 
 **Do not** change literal type synthesis (`ce.box(0).type` stays
 `finite_integer`) — synthesizing value types would churn every `.type`
@@ -366,6 +373,17 @@ same-name `function` after a `type` in the same scope remains that spec's
 same-scope collision error — §4.7's precedence rule activates only with
 nominal v2 (noted in §7 Phasing).
 
+**Minted constructors (nominal phase 0, in flight 2026-08-01):** a type
+declaration already mints a same-name value-level constructor operator
+(`type-constructors.ts`, `_mintedTypeConstructor` marker; `assignFn` gains a
+guard so a plain assignment cannot silently replace it and desynchronize
+the two namespaces the declaration claims). `DefineFunction` must apply the
+**same guard**: a definition statement targeting a name whose binding is a
+minted constructor is the deterministic collision error — it never
+accumulates a clause onto the minted operator. Sequencing note: Phase 1
+should land *after* the minted-constructor work (both modify the
+`assignFn`/definition-replacement seams); Phase 0 is independent of it.
+
 When both features are live: **the constructor interpretation wins** when
 the same-scope preceding `type` exists; clause accumulation applies
 otherwise. Reconciliation obligation (tracked, not resolved here): the
@@ -524,8 +542,9 @@ and D8 (no partial application), and offered as the alternative in D4.1
   into validation/assign + `0 <: finite_integer` fix + tests
   (`z: 0; z := 0` works; `g: (0) -> integer; g(0)` valid, `g(1)` invalid;
   plus string- and boolean-value-type membership probes, range-endpoint
-  inclusivity, and the §4.1 non-member cases: NaN, `-0.0` vs `0`, error
-  values, symbol-with-value extraction).
+  inclusivity, and the §4.1 non-member cases: NaN, error values,
+  symbol-with-value extraction — and the §4.1 zero-normalization members:
+  `0.0`/`-0.0` ∈ `0`, per the amended lexical-forms ruling).
 - **Phase 1 — engine clauses**: `DefineFunction` head, canonical clause
   storage + per-route conversion (§4.2), accumulation + identity +
   effect-row state machine (§4.3), tri-state selector with backstop assert

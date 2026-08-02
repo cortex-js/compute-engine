@@ -15,6 +15,7 @@ import type {
 } from '../global-types.js';
 
 import { isFunction, isSymbol, sym } from './type-guards.js';
+import { typeAcceptsValue } from './value-membership.js';
 import {
   functionLiteralBody,
   functionLiteralDeclaredEffects,
@@ -194,9 +195,15 @@ export function matchesDeclaredTypeAxes(
   ce: ComputeEngine,
   value: BoxedType,
   declared: BoxedType,
-  effectsDeclared: boolean
+  effectsDeclared: boolean,
+  valueExpr?: Expression
 ): boolean {
   if (value.matches(declared)) return true;
+  // A concrete value inhabiting a value-component declared type (`z: 0` with
+  // `z := 0`): the synthesized type (`finite_integer`) cannot witness
+  // membership in the value type. See `value-membership.ts`.
+  if (valueExpr !== undefined && typeAcceptsValue(valueExpr, declared.type))
+    return true;
   if (effectsDeclared || signatureEffects(declared.type) !== undefined)
     return false;
   return ce.type(stripArrowEffects(value.type)).matches(declared);

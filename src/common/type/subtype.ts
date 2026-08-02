@@ -736,15 +736,20 @@ export function isSubtype(
     if (lhs.kind === 'value') {
       if (typeof lhs.value === 'boolean') return rhs === 'boolean';
       if (typeof lhs.value === 'number') {
+        // A *finite* number literal is a subtype of the finite base type
+        // (`value 0 <: finite_integer`, not merely `integer` — the literal
+        // cannot be ±∞/NaN). `finite_* <: *`, so every previously-true
+        // answer is preserved. Matches the value-vs-bounded-numeric path.
         if (Number.isInteger(lhs.value))
-          return isPrimitiveSubtype('integer', rhs as PrimitiveType);
+          return isPrimitiveSubtype('finite_integer', rhs as PrimitiveType);
         // A non-integer number literal (e.g. 3.5) is a real number, not just
         // `number` — `number ⊄ real`, so the old `'number'` made it fail
         // `value 3.5 <: real`. Matches the symmetric path below.
-        return isPrimitiveSubtype('real', rhs as PrimitiveType);
+        return isPrimitiveSubtype(
+          Number.isFinite(lhs.value) ? 'finite_real' : 'real',
+          rhs as PrimitiveType
+        );
       }
-      if (typeof lhs.value === 'boolean')
-        return isPrimitiveSubtype('boolean', rhs as PrimitiveType);
       if (typeof lhs.value === 'string')
         return isPrimitiveSubtype('string', rhs as PrimitiveType);
       return false;
@@ -1281,8 +1286,13 @@ export function isSubtype(
   if (lhs.kind === 'value') {
     if (typeof lhs.value === 'boolean') return isSubtype('boolean', rhs);
     if (typeof lhs.value === 'number') {
-      if (Number.isInteger(lhs.value)) return isSubtype('integer', rhs);
-      return isSubtype('real', rhs);
+      // Finite literals claim the finite base type (see the value-vs-primitive
+      // path above): `value 0 <: finite_integer`.
+      if (Number.isInteger(lhs.value)) return isSubtype('finite_integer', rhs);
+      return isSubtype(
+        Number.isFinite(lhs.value) ? 'finite_real' : 'real',
+        rhs
+      );
     }
     if (typeof lhs.value === 'string') return isSubtype('string', rhs);
   }
