@@ -3223,6 +3223,8 @@ const colorHelpers = {
     if (a.length !== b.length) throw new Error('Distance: dimension mismatch');
     let sumSq = 0;
     for (let i = 0; i < a.length; i++) {
+      if (typeof a[i] !== 'number' || typeof b[i] !== 'number')
+        throw new Error('Distance: expected points (flat numeric arrays)');
       const d = a[i] - b[i];
       sumSq += d * d;
     }

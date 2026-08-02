@@ -747,4 +747,32 @@ describe('quadratureBeatsMonteCarlo (Tycho item 128)', () => {
     const value = r.operator === 'Measurement' ? r.op1.re : r.re;
     expect(value).toBeCloseTo(exact, 5);
   });
+
+  test('an iterated integral reports its INNER stall in the uncertainty', () => {
+    // Keeping a stalled-but-tight inner result (the policy above) means the
+    // iterated result carries that inner bias. When the inner integrand does
+    // not vary with the outer variable, the outer estimator cannot see it: the
+    // same biased value returns at every outer node, the integrand looks
+    // perfectly smooth, and the outer error collapses to exactly 0 — which
+    // canonicalizes the `Measurement` away and claims an exact answer. The
+    // inner error is now propagated explicitly.
+    const exact = Math.sin(1) - 0.3374039229009681; // ∫₀¹ sin(1/x) dx, ×∫₀¹dy
+    const local = new ComputeEngine();
+    const r = local
+      .box([
+        'Integrate',
+        ['Sin', ['Divide', 1, 'x']],
+        ['Limits', 'y', 0, 1],
+        ['Limits', 'x', 0, 1],
+      ])
+      .N();
+    expect(r.operator).toBe('Measurement');
+    const [value, error] = [r.op1.re, r.op2.re];
+    expect(value).toBeCloseTo(exact, 5);
+    // Measured ≈ 5.1e-5 (the inner ±5e-5 bound over an outer range of 1);
+    // floored well below that so the pin is "not ~0", not a tight value.
+    expect(error).toBeGreaterThan(1e-9);
+    // The bound must actually cover the error it exists to report.
+    expect(error).toBeGreaterThan(Math.abs(value - exact));
+  });
 });

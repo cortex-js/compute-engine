@@ -384,6 +384,31 @@ describe('COMPILE', () => {
       });
     });
 
+    describe('Distance compilation', () => {
+      it('should compile and run Distance on two tuples', () => {
+        const expr = ce.expr([
+          'Distance',
+          ['Tuple', 3, 4],
+          ['Tuple', 0, 0],
+        ]);
+        const r = compile(expr);
+        expect(r?.success).toBe(true);
+        expect(r?.run?.()).toEqual(5);
+      });
+
+      it('should throw rather than return a bogus number for Distance over a list<tuple> operand (widened signature)', () => {
+        const e = new ComputeEngine();
+        e.declare('P', 'list<tuple<number, number>>');
+        e.declare('Q', 'list<tuple<number, number>>');
+        const expr = e.box(['Distance', 'P', 'Q']);
+        const r = compile(expr);
+        expect(r?.success).toBe(true);
+        expect(() => r?.run?.({ P: [[1, 2]], Q: [[0, 0]] })).toThrow(
+          /Distance: expected points/
+        );
+      });
+    });
+
     describe('Matrix compilation', () => {
       it('should compile a column vector matrix from LaTeX', () => {
         const expr = ce.parse(

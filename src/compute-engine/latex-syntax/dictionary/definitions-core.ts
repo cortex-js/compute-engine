@@ -3181,6 +3181,14 @@ function parseParenDelimiter(
   if (isEmptySequence(body)) return ['Delimiter'];
 
   const h = operator(body);
+
+  // An explicitly parenthesized range opts OUT of the compound-anchor repair:
+  // `n+(1..10)` is a broadcast add, not `Range(n+1, 10)`. Drop the
+  // continuation provenance so no enclosing anchor chain can claim it (the
+  // surviving `Delimiter` wrapper already blocks the shape match; clearing the
+  // tag keeps that true for any path that unwraps the group first).
+  if (h === 'Range') continuationRanges.delete(body as object);
+
   // We have a Delimiter inside parens: e.g. `(a, b, c)` with `a, b, c` the
   // Delimiter function.
   if (h === 'Delimiter' && operand(body, 2) !== null) {
@@ -3234,7 +3242,14 @@ function parseBrackets(
   // `count: 1` and index to the comprehension itself, so any consumer indexing
   // or aggregating the bracket would break. Mirrors the `Range`/`Linspace`
   // passthrough — those are lazy collections too.
-  if (h === 'Range' || h === 'Linspace' || h === 'Comprehension') return body;
+  if (h === 'Range' || h === 'Linspace' || h === 'Comprehension') {
+    // A bracket is an explicit delimiter, so — like a paren group — the range
+    // it yields opts OUT of the compound-anchor repair: in
+    // `\frac{2}{20}\cdot[0\ldots20]` the coefficient scales the list, it is
+    // not the mis-split start of `\frac{2}{20}\cdot0 .. 20`.
+    if (h === 'Range') continuationRanges.delete(body as object);
+    return body;
+  }
   if (h === 'Sequence') {
     const elems = operands(body);
     const inferred = tryInferRangeFromElements(elems, parser);
@@ -3352,33 +3367,124 @@ function gcdInt(a: number, b: number): number {
 }
 
 /**
- * Strip a continuation `Range` embedded as the LAST term of an additive
+ * Heads whose LAST operand can swallow a range start that really belonged to
+ * the compound first anchor. The range infixes bind above `+` (`..` at 800)
+ * and, for `..`, above implicit multiplication and the prefix minus, so a
+ * compound anchor is split: `m+n+15...m+n+60` →
+ * `Add(m, n, Range(15, Add(m, n, 60)))`, `2n..3n` →
+ * `InvisibleOperator(2, Range(n, 3n))`, `-3..9` → `Negate(Range(3, 9))`.
+ *
+ * `Divide` is deliberately NOT in this set: `1/2...5` is broadcast division
+ * (`Divide(1, Range(2, 5))`), a pinned behavior.
+ */
+const CONTINUATION_ANCHOR_HEADS = new Set([
+  'Add',
+  'Subtract',
+  'Multiply',
+  'InvisibleOperator',
+  'Negate',
+]);
+
+/**
+ * Read a tagged 2-operand continuation `Range`, or recover one embedded in an
+ * anchor chain (`2n` in `-2n..3n` sits between the `Negate` and the `Range`).
+ */
+function takeContinuationRangeTail(
+  expr: MathJsonExpression
+): { start: MathJsonExpression; end: MathJsonExpression } | null {
+  if (
+    operator(expr) === 'Range' &&
+    operands(expr).length === 2 &&
+    continuationRanges.has(expr as object)
+  )
+    return { start: operand(expr, 1)!, end: operand(expr, 2)! };
+  const nested = stripEmbeddedContinuationRange(expr);
+  return nested === null ? null : { start: nested.sample, end: nested.end };
+}
+
+/**
+ * Strip a continuation `Range` embedded as the LAST operand of an anchor
  * chain. In `[m+n, m+n+15...m+n+60]` the tail parses as
  * `Add(m, n, Range(15, Add(m, n, 60)))` — the `..`/`...` infix binds its LHS
  * tight (just `15`) while its end absorbs the full additive endpoint — so the
- * actual second sample is `m+n+15` and the end anchor `m+n+60`. Only fires on
- * a provenance-tagged 2-operand continuation `Range` (the same guard as the
- * bare-`Range` normalization arm). Returns the recovered
- * `{ sample, end }`, or `null` when `expr` does not carry an embedded
- * continuation range.
+ * actual second sample is `m+n+15` and the end anchor `m+n+60`. The same
+ * mis-binding affects multiplicative and negated anchors of the tight `..`
+ * spelling (`2n..3n`, `-3..9`) — see `CONTINUATION_ANCHOR_HEADS`.
+ *
+ * Only fires on a provenance-tagged 2-operand continuation `Range` (the same
+ * guard as the bare-`Range` normalization arm), so an explicit
+ * `\operatorname{Range}(…)` in tail position is left alone, and so is a
+ * parenthesized range (`n+(1..10)`), whose `Delimiter` wrapper both blocks the
+ * shape match and clears the tag. Returns the recovered `{ sample, end }`, or
+ * `null` when `expr` does not carry an embedded continuation range.
  */
 function stripEmbeddedContinuationRange(
   expr: MathJsonExpression
 ): { sample: MathJsonExpression; end: MathJsonExpression } | null {
   const h = operator(expr);
-  if (h !== 'Add' && h !== 'Subtract') return null;
+  if (!CONTINUATION_ANCHOR_HEADS.has(h)) return null;
   const args = operands(expr);
+  // `Negate` is unary: the whole operand is the anchor chain.
+  if (h === 'Negate') {
+    if (args.length !== 1) return null;
+    const inner = takeContinuationRangeTail(args[0]);
+    if (inner === null) return null;
+    return { sample: ['Negate', inner.start], end: inner.end };
+  }
   if (args.length < 2) return null;
-  const tail = args[args.length - 1];
-  if (
-    operator(tail) !== 'Range' ||
-    operands(tail).length !== 2 ||
-    !continuationRanges.has(tail as object)
-  )
-    return null;
+  const inner = takeContinuationRangeTail(args[args.length - 1]);
+  if (inner === null) return null;
   const rest = args.slice(0, -1);
-  const sample: MathJsonExpression = [h, ...rest, operand(tail, 1)!];
-  return { sample, end: operand(tail, 2)! };
+  const sample: MathJsonExpression = [h, ...rest, inner.start];
+  return { sample, end: inner.end };
+}
+
+/**
+ * Rebuild `expr` as the repaired `Range(sample, end)`, preserving the
+ * continuation provenance so an enclosing anchor chain can repair in turn.
+ */
+function repairedContinuationRange(
+  sample: MathJsonExpression,
+  end: MathJsonExpression
+): MathJsonExpression {
+  const range: MathJsonExpression = ['Range', sample, end];
+  continuationRanges.add(range);
+  return range;
+}
+
+/**
+ * Post-parse normalization: repair every range infix whose compound first
+ * anchor was split by the infix precedence (see
+ * `stripEmbeddedContinuationRange`).
+ *
+ * `parseBrackets` / `tryInferRangeFromElements` only see bracket bodies, so
+ * the bare (`n+1..n+10`) and relation-embedded (`x = n+1..n+10`) forms need a
+ * whole-tree pass. Runs on the raw MathJSON produced by the parser, where a
+ * parenthesized range is still wrapped in its `Delimiter` — that is what makes
+ * `n+(1..10)` an explicit broadcast add and keeps it unrepaired.
+ */
+export function normalizeContinuationRanges(
+  expr: MathJsonExpression
+): MathJsonExpression {
+  const h = operator(expr);
+  if (!h) return expr;
+  const args = operands(expr);
+  if (args.length === 0) return expr;
+
+  let normalized = expr;
+  const newArgs = args.map(normalizeContinuationRanges);
+  if (newArgs.some((arg, i) => arg !== args[i])) {
+    normalized = [h, ...newArgs];
+    // Rebuilding loses the WeakSet identity: carry the tag over.
+    if (continuationRanges.has(expr as object))
+      continuationRanges.add(normalized as object);
+  }
+
+  const stripped = stripEmbeddedContinuationRange(normalized);
+  if (stripped !== null)
+    return repairedContinuationRange(stripped.sample, stripped.end);
+
+  return normalized;
 }
 
 /**

@@ -68,15 +68,15 @@ describe('RANGE', () => {
 
   test('range with expressions', () => {
     expect(parse('n+1..n+10')).toMatchInlineSnapshot(
-      `["Add", "n", ["Range", 1, ["Add", "n", 10]]]`
+      `["Range", ["Add", "n", 1], ["Add", "n", 10]]`
     );
-  }); // @fixme
+  });
 
   test('range with expressions with multiplication', () => {
     expect(parse('2n..3n')).toMatchInlineSnapshot(
-      `["Multiply", 2, ["Range", "n", ["Multiply", 3, "n"]]]`
+      `["Range", ["Multiply", 2, "n"], ["Multiply", 3, "n"]]`
     );
-  }); // @fixme
+  });
 
   test('range with expressions with addition and multiplication', () => {
     expect(parse('(2n + 1)..(3n + 10)')).toMatchInlineSnapshot(`
@@ -90,9 +90,9 @@ describe('RANGE', () => {
 
   test('range with equality', () => {
     expect(parse('x = n+1..n+10')).toMatchInlineSnapshot(
-      `["Equal", "x", ["Add", "n", ["Range", 1, ["Add", "n", 10]]]]`
+      `["Equal", "x", ["Range", ["Add", "n", 1], ["Add", "n", 10]]]`
     );
-  }); // @fixme
+  });
 
   test('range with assignment', () => {
     expect(parse('x := 5..13')).toMatchInlineSnapshot(

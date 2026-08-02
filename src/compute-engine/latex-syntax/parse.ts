@@ -51,6 +51,7 @@ import {
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { TypeString } from '../types.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
+import { normalizeContinuationRanges } from './dictionary/definitions-core.js';
 
 /**
  * A collected parse diagnostic with its internal monotonic sequence id. The
@@ -3989,6 +3990,14 @@ export function parse(
   }
 
   expr ??= 'Nothing';
+
+  // The range infixes bind above `+` (and, for `..`, above implicit
+  // multiplication and the prefix minus), so a compound first anchor is split:
+  // `n+1..n+10` parses as `Add(n, Range(1, n+10))`. `parseBrackets` repairs
+  // that inside brackets; this pass covers the bare and relation-embedded
+  // forms. Runs on the raw parse output, where a parenthesized range still
+  // carries its `Delimiter` — `n+(1..10)` stays a broadcast add.
+  expr = normalizeContinuationRanges(expr);
 
   // Forward collected diagnostics to the sink before the `preserveLatex` block
   // (which has early returns). Order: symbol/juxtaposition diagnostics from the

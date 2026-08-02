@@ -324,32 +324,64 @@ function nIntegrateMultiple(
   // depend on how many nodes the outer level happened to use.
   const draw = ce._substream(mixTags(f.hash, ...limits.map((l) => l.hash)));
   const integrateDim = (dim: number): { estimate: number; error: number } => {
+    // Inner-level error accumulated over this level-invocation's quadrature
+    // nodes (the recursion is strictly sequential, so plain locals suffice).
+    let innerErrSum = 0;
+    let innerErrN = 0;
     const g = (t: number): number => {
       argv[slots[dim]] = t;
       outerVals[dim] = t;
-      return dim === last ? jsf(...argv) : integrateDim(dim + 1).estimate;
+      if (dim === last) return jsf(...argv);
+      const r = integrateDim(dim + 1);
+      if (Number.isFinite(r.error)) {
+        innerErrSum += r.error;
+        innerErrN++;
+      }
+      return r.estimate;
     };
     const outer = outerVals.slice(0, dim);
     const lower = boundFns[dim][0](outer);
     const upper = boundFns[dim][1](outer);
     if (isNaN(lower) || isNaN(upper)) return { estimate: NaN, error: NaN };
+    // This level's own estimator sees a node-VARYING inner error as integrand
+    // noise, but a node-INDEPENDENT one is invisible to it: the same biased
+    // inner value returns at every node, the integrand looks perfectly smooth
+    // and the reported error collapses to ~0 while the true error is the inner
+    // bound times this level's range. Add that systematic component explicitly.
+    // Each level inflates before returning to its caller, so it compounds.
+    // The range factor is only meaningful on a finite interval: over an
+    // infinite one it is vacuous (∞ · any inner bound), and would report ±∞ on
+    // an otherwise good answer, so such a level propagates nothing extra.
+    const span = Math.abs(upper - lower);
+    const inflate = (r: {
+      estimate: number;
+      error: number;
+    }): { estimate: number; error: number } => ({
+      estimate: r.estimate,
+      error:
+        r.error +
+        (innerErrN && Number.isFinite(span)
+          ? (innerErrSum / innerErrN) * span
+          : 0),
+    });
     // The starting-panel floor multiplies across levels — one full quadrature
     // runs per outer node — so a per-level 16 would cost 16^dimensions. Reduce
     // it so the floor applies to the whole iterated integral, not each level.
     const gk = adaptiveQuadrature(g, lower, upper, {
       initialPanels: initialPanelsForDimensions(limits.length),
     });
-    if (gk.converged && Number.isFinite(gk.estimate)) return gk;
+    if (gk.converged && Number.isFinite(gk.estimate)) return inflate(gk);
     // A stalled level whose error bound already beats the sampler keeps its
     // quadrature result: sampling it would be both less accurate and, since
     // every inner level re-runs per outer node, far more expensive.
-    if (quadratureBeatsMonteCarlo(gk, 1e4)) return gk;
-    return monteCarloEstimate(g, lower, upper, 1e4, ce._deadline, draw);
+    if (quadratureBeatsMonteCarlo(gk, 1e4)) return inflate(gk);
+    return inflate(
+      monteCarloEstimate(g, lower, upper, 1e4, ce._deadline, draw)
+    );
   };
 
-  // The reported uncertainty is the outermost level's own error estimate:
-  // inner-level quadrature error reaches the outer estimator as integrand
-  // noise, so it is already reflected there.
+  // The reported uncertainty is the outermost level's error estimate, inflated
+  // by the propagated inner-level error (see `inflate` above).
   const r = integrateDim(0);
   return ce.expr(['Measurement', ce.number(r.estimate), ce.number(r.error)]);
 }

@@ -759,3 +759,139 @@ describe('fused ranges with fraction/compound second anchor (Tycho item 47 resid
     expect(operatorOf(result)).toBe('List');
   });
 });
+
+// The range infixes bind above `+` (`..` also above implicit multiplication
+// and the prefix minus), so a compound FIRST anchor is split by the parse:
+// `n+1..n+10` → `Add(n, Range(1, n+10))`, `2n..3n` →
+// `InvisibleOperator(2, Range(n, 3n))`. A provenance-tagged post-parse pass
+// rebuilds the intended anchor. Unlike the bracket repair, this one runs on
+// the whole parse tree, so the BARE and relation-embedded forms work too.
+describe('compound first anchor outside a bracket', () => {
+  test('`n+1..n+10` (bare additive anchor) → Range(n+1, n+10)', () => {
+    expect(parse('n+1..n+10')).toEqual([
+      'Range',
+      ['Add', 'n', 1],
+      ['Add', 'n', 10],
+    ]);
+  });
+
+  test('`n+1...n+10` (`...` spelling) → Range(n+1, n+10)', () => {
+    expect(parse('n+1...n+10')).toEqual([
+      'Range',
+      ['Add', 'n', 1],
+      ['Add', 'n', 10],
+    ]);
+  });
+
+  test('`x = n+1..n+10` (relation-embedded) → Equal(x, Range(n+1, n+10))', () => {
+    expect(parse('x = n+1..n+10')).toEqual([
+      'Equal',
+      'x',
+      ['Range', ['Add', 'n', 1], ['Add', 'n', 10]],
+    ]);
+  });
+
+  test('`n+1..10` (compound start, plain end) → Range(n+1, 10)', () => {
+    expect(parse('n+1..10')).toEqual(['Range', ['Add', 'n', 1], 10]);
+  });
+
+  test('`m-1..m+3` (subtractive anchor) → Range(m-1, m+3)', () => {
+    expect(parse('m-1..m+3')).toEqual([
+      'Range',
+      ['Add', 'm', -1],
+      ['Add', 'm', 3],
+    ]);
+  });
+
+  test('`2n..3n` (bare multiplicative anchor) → Range(2n, 3n)', () => {
+    expect(parse('2n..3n')).toEqual([
+      'Range',
+      ['Multiply', 2, 'n'],
+      ['Multiply', 3, 'n'],
+    ]);
+  });
+
+  test('`-3..9` (prefix minus anchor) → Range(-3, 9)', () => {
+    expect(parse('-3..9')).toEqual(['Range', -3, 9]);
+  });
+
+  test('`-2n..3n` (signed coefficient anchor) → Range(-2n, 3n)', () => {
+    expect(parse('-2n..3n')).toEqual([
+      'Range',
+      ['Multiply', -2, 'n'],
+      ['Multiply', 3, 'n'],
+    ]);
+  });
+
+  // Bracketed multiplicative anchors: the `...` spelling already worked
+  // (it binds below implicit multiplication); `..` needed the repair.
+  test('`[2n..3n]` → Range(2n, 3n)', () => {
+    expect(parse('\\left[2n..3n\\right]')).toEqual([
+      'Range',
+      ['Multiply', 2, 'n'],
+      ['Multiply', 3, 'n'],
+    ]);
+  });
+
+  test('`[2n+1..3n+10]` (mixed anchor) → Range(2n+1, 3n+10)', () => {
+    expect(parse('\\left[2n+1..3n+10\\right]')).toEqual([
+      'Range',
+      ['Add', ['Multiply', 2, 'n'], 1],
+      ['Add', ['Multiply', 3, 'n'], 10],
+    ]);
+  });
+
+  // Opt-out: an explicitly parenthesized range is a broadcast operation, not
+  // a mis-bound anchor. The `Delimiter` blocks the shape match AND the
+  // continuation provenance is cleared when the group is parsed.
+  test('`n+(1..10)` stays a broadcast Add', () => {
+    expect(parse('n+(1..10)')).toEqual(['Add', 'n', ['Range', 1, 10]]);
+  });
+
+  test('`2(1..5)` stays a broadcast Multiply', () => {
+    expect(parse('2(1..5)')).toEqual(['Multiply', 2, ['Range', 1, 5]]);
+  });
+
+  // A BRACKET is a delimiter too: the range it yields is a list operand, not
+  // a mis-split anchor. `\frac{2}{20}\cdot[0…20] - 1` must stay the scaled
+  // list (21 rationals from -1 to 1), not `Range(0, 20) - 1`.
+  test('a bracket-delimited range is a broadcast operand, not an anchor', () => {
+    const e = ce.parse(
+      '\\frac{2}{20}\\cdot\\lbrack0\\ldots20\\rbrack - 1'
+    );
+    expect(operatorOf(e.json)).not.toBe('Range');
+    const v = e.evaluate();
+    expect(v.count).toBe(21);
+    expect(v.at(1)!.is(-1)).toBe(true);
+    expect(v.at(21)!.is(1)).toBe(true);
+  });
+
+  // Pinned: `Divide` is not an anchor head, so broadcast division survives.
+  test('`1/2...5` stays Divide(1, Range(2, 5))', () => {
+    expect(parse('1/2...5')).toEqual(['Divide', 1, ['Range', 2, 5]]);
+  });
+
+  // Round-trips: the TEXT `n+1..10` now means `Range(n+1, 10)`, so a genuine
+  // `Add(n, Range(1, 10))` must serialize with explicit parens.
+  test('Range(n+1, 10) → LaTeX → same Range', () => {
+    const e = ce.box(['Range', ['Add', 'n', 1], 10]);
+    expect(ce.parse(e.latex).json).toEqual(['Range', ['Add', 'n', 1], 10]);
+  });
+
+  test('Add(n, Range(1, 10)) → LaTeX → same Add', () => {
+    const e = ce.box(['Add', 'n', ['Range', 1, 10]]);
+    expect(e.latex).toBe('n+(1..10)');
+    expect(ce.parse(e.latex).json).toEqual(['Add', 'n', ['Range', 1, 10]]);
+  });
+
+  test('Range(2n, 3n) and Multiply(2, Range(1, 5)) round-trip distinctly', () => {
+    const r = ce.box(['Range', ['Multiply', 2, 'n'], ['Multiply', 3, 'n']]);
+    expect(ce.parse(r.latex).json).toEqual([
+      'Range',
+      ['Multiply', 2, 'n'],
+      ['Multiply', 3, 'n'],
+    ]);
+    const m = ce.box(['Multiply', 2, ['Range', 1, 5]]);
+    expect(ce.parse(m.latex).json).toEqual(['Multiply', 2, ['Range', 1, 5]]);
+  });
+});
