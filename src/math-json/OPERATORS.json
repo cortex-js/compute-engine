@@ -1649,6 +1649,18 @@
       "description": "Extract a matrix diagonal or build a diagonal matrix."
     },
     {
+      "name": "Dictionary",
+      "category": "Collections",
+      "arity": "variadic",
+      "signature": "(tuple<string, unknown>*) -> dictionary",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "A collection of key -> value entries with string keys (`{x -> 1, y -> 2}` in Cortex)."
+    },
+    {
       "name": "DictionaryFrom",
       "category": "Collections",
       "arity": "1",

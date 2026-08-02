@@ -151,6 +151,28 @@
 
 ### Issues Resolved
 
+- **A function returning a dictionary literal no longer loses its parameter
+  binding across a MathJSON round-trip — which made recursive functions with
+  dictionary results silently wrong.** `f(3)` for
+  `function f(x: integer) { if (x < 0) { f(0) } else { {v -> x} } }` returned
+  `{v -> x}` — the raw parameter symbol, dangling — instead of `{v -> 3}`.
+  Root cause: `BoxedDictionary` serialized every dictionary to the
+  `{dict: …}` JSON shorthand, and re-boxing that shorthand constructs the
+  dictionary **eagerly, in the ambient scope**; since a dictionary value is
+  always-canonical, nothing later re-binds its entries, so a round-trip
+  through `.json` — which the engine itself performs when tying the
+  recursion knot for a self-referencing function definition — detached the
+  entries from the function's parameter scope. The `{dict: …}` shorthand is
+  now reserved for **plain-data** entries (strings, numbers, booleans, and
+  lists/dictionaries of the same, which are scope-independent); a dictionary
+  holding an unevaluated *expression* entry serializes in the
+  `["Dictionary", ["KeyValuePair", …]]` operator form, which re-boxes lazily
+  and canonicalizes — binding its entries — in the enclosing scope. Also on
+  the way: `Dictionary` now has an operator definition (it was the only
+  structural head without one, so `ce.operatorInfo('Dictionary')` returned
+  `undefined` and the Cortex unknown-function lint mistakenly suggested
+  `DictionaryFrom` for round-tripped dictionary expressions).
+
 - **Value (literal) types are now inhabitable.** A type such as `0`,
   `"red"`, or `true` — and bounded numeric refinements such as
   `integer<0..10>` — previously rejected its own witness values: only the
@@ -490,13 +512,9 @@
   distinguishable from the payload (same arity, overlapping — or
   unannotated — parameter types) is rejected at install rather than
   silently shadowed. Recursive constructor bodies work (a constructed value
-  returned from the body passes through un-nested) — with one recorded
-  limitation inherited from a pre-existing engine defect: a *recursive* body
-  that returns a **record literal from an `if` branch** can leak the raw
-  parameter symbol, so such a payload is left unevaluated rather than
-  tagged; compute the fields with `If(…)` inside the record literal instead.
-  An alias's same-name function is just an ordinary function, and re-running
-  either statement replaces cleanly. Nominal values are **opaque**: `let q: point = (1, 2)`
+  returned from the body passes through un-nested), an alias's same-name
+  function is just an ordinary function, and re-running either statement
+  replaces cleanly. Nominal values are **opaque**: `let q: point = (1, 2)`
   is refused, and `First(p)` or `let (x, y) = p` do not pierce the tag —
   named fields come back out through the new **`.` accessor** and values
   through `match p { point(x, y) => x + y }`. `p.x` — a new postfix field

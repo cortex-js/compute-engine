@@ -632,3 +632,59 @@ describe('Dictionary serialization boundary (Tycho 0.72.0 report)', () => {
     expect(ce.box('dictTypeProbe').latex).toEqual('\\mathrm{dictTypeProbe}');
   });
 });
+
+describe('Dictionary `.json` serialization and scope round-trip', () => {
+  test('all-plain-data entries keep the `{dict: …}` shorthand', () => {
+    const ce = new ComputeEngine();
+    const d = ce.box([
+      'Dictionary',
+      ['KeyValuePair', { str: 'a' }, 1],
+      ['KeyValuePair', { str: 's' }, { str: 'hi' }],
+      ['KeyValuePair', { str: 'b' }, 'True'],
+      ['KeyValuePair', { str: 'l' }, ['List', 1, 2]],
+    ]);
+    expect(d.json).toEqual({
+      dict: { a: 1, s: 'hi', b: true, l: [1, 2] },
+    });
+  });
+
+  test('an expression-valued entry serializes in the operator form', () => {
+    // The `{dict: …}` shorthand re-boxes EAGERLY in the ambient scope, and a
+    // BoxedDictionary is always-canonical, so an expression entry would lose
+    // its lexical binding on any json round-trip. The operator form re-boxes
+    // lazily and canonicalizes — binding its entries — in the enclosing
+    // scope.
+    const ce = new ComputeEngine();
+    const d = ce.box([
+      'Dictionary',
+      ['KeyValuePair', { str: 'v' }, 'someSymbol'],
+    ]);
+    expect(d.json).toEqual([
+      'Dictionary',
+      ['KeyValuePair', { str: 'v' }, 'someSymbol'],
+    ]);
+  });
+
+  test('a function literal with a dictionary body survives a json round-trip', () => {
+    // Regression: `ce.box(literal.json)` used to produce a literal whose
+    // dictionary entries no longer bound to the parameter — applying the
+    // round-tripped literal returned `{v -> x}` instead of `{v -> 3}`. The
+    // recursion knot-tying in `assignFn` performs exactly this round-trip,
+    // which broke every recursive function returning a dictionary from an
+    // `if` branch.
+    const ce = new ComputeEngine();
+    const lit = ce.box([
+      'Function',
+      [
+        'If',
+        ['Less', 'x', 0],
+        ['Dictionary', ['KeyValuePair', { str: 'v' }, 0]],
+        ['Dictionary', ['KeyValuePair', { str: 'v' }, 'x']],
+      ],
+      'x',
+    ]);
+    const rt = ce.box(lit.json);
+    const applied = ce.function('Apply', [rt, ce.number(3)]).evaluate();
+    expect(applied.json).toEqual({ dict: { v: 3 } });
+  });
+});

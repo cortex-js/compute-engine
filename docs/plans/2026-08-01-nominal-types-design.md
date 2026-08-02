@@ -569,23 +569,29 @@ value of the same type and never re-wraps. Runaway recursion is the
 user's ordinary recursion error (existing limits apply). Pinned by
 test.
 
-**Pre-existing engine defect found while testing (2026-08-01, NOT
-fixed here — binding/closure territory):** a *recursive* function whose
-`if`-branch returns a **dictionary literal** leaks the raw parameter
-symbol — `function dic(x: integer) { if (x < 0) { dic(0) } else {
-{v -> x} } }; dic(3)` yields `{v -> x}` with a dangling `x`. The
-non-recursive shape and scalar/tuple recursive shapes are all fine;
-the trigger is self-reference + dictionary-in-held-branch (the
-knot-tying re-canonicalization interacts with raw dictionary entries).
-This predates this milestone (reproducible with no types involved) but
-constrains recursive RECORD constructors: compute fields with
-`If(...)` *inside* the record literal (`{v -> If(x < 0, -x, x)}`), or
-recurse with tuple/scalar bodies, until the engine defect is fixed.
-**Defensive gate (added at review):** the constructor's evaluate wrapper
-refuses to tag a payload that still references one of the literal's own
-parameter NAMES (inside the body the parameters shadow everything, so
-such a payload is never a legitimate symbolic construction) — the
-application stays inert instead of tagging a dangling value.
+**Pre-existing engine defect found while testing — FIXED 2026-08-01
+(follow-up round, same day):** a *recursive* function whose `if`-branch
+returns a **dictionary literal** leaked the raw parameter symbol —
+`function dic(x: integer) { if (x < 0) { dic(0) } else { {v -> x} } };
+dic(3)` yielded `{v -> x}` with a dangling `x`. Root cause was NOT the
+binding machinery: `BoxedDictionary.json` serialized every dictionary
+to the `{dict: …}` shorthand, whose re-boxing constructs the (always-
+canonical) dictionary eagerly in the ambient scope — so the recursion
+knot-tying re-box in `assignFn` (`ce.box(literal.json)`) detached the
+entries from the parameter scope, and nothing downstream ever re-bound
+them. Minimal repro needed no recursion at all: `ce.box(literal.json)`
+of ANY function literal with a dictionary in a held branch produced a
+broken literal. Fix: the `{dict: …}` shorthand is reserved for
+plain-data entries (scope-independent under re-boxing); an
+expression-valued entry serializes in the
+`["Dictionary", ["KeyValuePair", …]]` operator form, which re-boxes
+lazily and canonicalizes inside the enclosing scope. `Dictionary` also
+gained a (handler-inert) operator definition so the Cortex
+unknown-function lint recognizes the operator form. Recursive RECORD
+constructors now work end to end (pinned). **Defensive gate (added at
+review, retained):** the constructor's evaluate wrapper still refuses
+to tag a payload that references one of the literal's own parameter
+NAMES — dormant insurance now that the root cause is fixed.
 
 #### D16 — the `.` accessor surface and the `Field` operator
 

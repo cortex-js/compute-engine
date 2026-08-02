@@ -1400,6 +1400,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
+  Dictionary: {
+    description:
+      'A collection of key -> value entries with string keys (`{x -> 1, y -> 2}` in Cortex).',
+    // Boxing intercepts `["Dictionary", …]` structurally and constructs the
+    // dictionary VALUE directly (`box.ts`), BEFORE definition lookup — so no
+    // handler on this definition ever runs. It exists so `Dictionary` is a
+    // KNOWN operator: introspection (`ce.operatorInfo`), the Cortex
+    // unknown-function lint, and the generated operator inventory all key on
+    // a definition's existence, and the name genuinely appears in MathJSON —
+    // a dictionary with an unevaluated-expression entry serializes in this
+    // operator form rather than the plain-data `{dict: …}` shorthand (see
+    // `BoxedDictionary.json`).
+    invokes: false,
+    lazy: true,
+    complexity: 8200,
+    signature: '(tuple<string, unknown>*) -> dictionary',
+  },
+
   Keys: {
     description: 'Return a list of the keys of a dictionary.',
     complexity: 8200,

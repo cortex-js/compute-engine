@@ -147,14 +147,30 @@ export class BoxedDictionary
   }
 
   get json(): MathJsonExpression {
-    return {
-      dict: Object.fromEntries(
-        Object.entries(this._keyValues).map(([k, v]) => [
-          k,
-          boxedExpressionToDictionaryValue(v),
-        ])
+    // The `{dict: …}` shorthand is a VALUE serialization: re-boxing it
+    // constructs the dictionary eagerly, in whatever scope is ambient — and a
+    // `BoxedDictionary` is always-canonical, so nothing downstream ever
+    // re-binds its entries. That is exactly right for plain data, and exactly
+    // wrong for an entry that is an unevaluated EXPRESSION: `{v -> x}` inside
+    // a function body, round-tripped through `.json` (e.g. the recursion
+    // knot-tying re-box in `assignFn`), would re-box with `x` bound outside
+    // the body scope, and the parameter reference would dangle at every later
+    // application. So the shorthand is reserved for all-plain-data entries;
+    // anything else serializes in the `["Dictionary", ["KeyValuePair", …]]`
+    // OPERATOR form, which re-boxes lazily and canonicalizes — binding its
+    // entries — inside whatever scope the expression lands in.
+    const entries = Object.entries(this._keyValues).map(
+      ([k, v]) => [k, boxedExpressionToDictionaryValue(v)] as const
+    );
+    if (entries.every(([, v]) => isPlainDataValue(v)))
+      return { dict: Object.fromEntries(entries) };
+    return [
+      'Dictionary',
+      ...Object.entries(this._keyValues).map(
+        ([k, v]) =>
+          ['KeyValuePair', { str: k }, v.json] as MathJsonExpression
       ),
-    };
+    ] as MathJsonExpression;
   }
 
   // Note: `toMathJson()` is inherited from `_BoxedExpression`, which resolves
@@ -309,6 +325,26 @@ export class BoxedDictionary
     }
     return result;
   }
+}
+
+/** Is this serialized dictionary value PLAIN DATA — scope-independent under
+ * re-boxing? Strings, numbers and booleans are; so are lists and nested
+ * dictionaries of plain data, and `{num}`/`{str}` nodes. A `{sym}` or `{fn}`
+ * node is an EXPRESSION: re-boxing it binds/canonicalizes in the ambient
+ * scope, so a dictionary holding one must not serialize to the `{dict: …}`
+ * shorthand (see `get json()`). */
+function isPlainDataValue(v: DictionaryValue): boolean {
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')
+    return true;
+  if (Array.isArray(v)) return v.every(isPlainDataValue);
+  if (v !== null && typeof v === 'object') {
+    if ('num' in v || 'str' in v) return true;
+    if ('dict' in v)
+      return Object.values(
+        (v as { dict: Record<string, DictionaryValue> }).dict
+      ).every(isPlainDataValue);
+  }
+  return false;
 }
 
 function boxedExpressionToDictionaryValue(value: Expression): DictionaryValue {

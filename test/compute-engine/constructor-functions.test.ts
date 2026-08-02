@@ -101,13 +101,20 @@ describe('record-body constructor function (host route)', () => {
   test('DECLARED symbolic operands construct a symbolic payload', () => {
     // `a` is declared `number`: the payload is well-typed even though it is
     // symbolic, so construction proceeds and the tag wraps the symbolic
-    // payload.
+    // payload. (A dictionary with an EXPRESSION entry serializes in the
+    // `["Dictionary", …]` operator form — the `{dict: …}` shorthand is
+    // reserved for plain data, whose re-boxing is scope-independent.)
     const ce = circleEngine();
     ce.declare('a', 'number');
     const c = ce.box(['circle', 'a', 2, 3]).evaluate();
     expect(c.json).toEqual([
       'circle',
-      { dict: { x: { sym: 'a' }, y: 2, r: 3 } },
+      [
+        'Dictionary',
+        ['KeyValuePair', { str: 'x' }, 'a'],
+        ['KeyValuePair', { str: 'y' }, 2],
+        ['KeyValuePair', { str: 'r' }, 3],
+      ],
     ]);
     expect(c.type.toString()).toBe('circle');
   });
@@ -229,19 +236,25 @@ describe('runtime arm dispatch — refutations produce clean errors', () => {
     expect(r.operator).toBe('Error');
   });
 
-  test('a payload leaking the body´s own parameter symbol is never tagged', () => {
-    // Pre-existing engine defect (spec §4.5b D15): a recursive body returning
-    // a record literal from an `if` branch leaks the raw parameter symbol.
-    // The constructor refuses to tag such a payload — inert, not garbage.
+  test('a recursive RECORD constructor works end to end (dictionary json round-trip fix)', () => {
+    // This shape used to leak the raw parameter symbol (`{v -> x}`): the
+    // recursion knot-tying re-box round-tripped the literal through `.json`,
+    // and the `{dict: …}` shorthand re-boxed the entries outside the body
+    // scope. `BoxedDictionary.json` now serializes expression-valued entries
+    // in the `["Dictionary", …]` operator form, which re-binds correctly.
     const ce = new ComputeEngine();
     const r = executeCortex(
       ce,
       `type nat = record<v: integer>
-function nat(x: integer) { if (x < 0) { nat(0) } else { {v -> x} } }
-nat(3)`
+function nat(x: integer) { if (x < 0) { nat(-x) } else { {v -> x} } }
+(nat(3), nat(-5))`
     );
-    // Stays the inert application — NOT a tagged `nat({v -> x})`.
-    expect(r.value!.json).toEqual(['nat', 3]);
+    expect(r.diagnostics ?? []).toEqual([]);
+    expect(r.value!.json).toEqual([
+      'Tuple',
+      ['nat', { dict: { v: 3 } }],
+      ['nat', { dict: { v: 5 } }],
+    ]);
   });
 });
 
