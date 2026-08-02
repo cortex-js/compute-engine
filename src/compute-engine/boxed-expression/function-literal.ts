@@ -162,7 +162,8 @@ export function functionLiteralDeclaredSignature(
   // effect-bearing arrow — never the literal's own contract. Grouping does
   // not survive parsing, so the test is on the marker's text.
   const op = marker.op2;
-  const text = op === undefined ? undefined : isString(op) ? op.string : sym(op);
+  const text =
+    op === undefined ? undefined : isString(op) ? op.string : sym(op);
   if (text !== undefined && isGroupedTypeText(text)) return undefined;
   const t = parseTypeOperand(marker.op2);
   if (t === undefined || typeof t === 'string' || t.kind !== 'signature')

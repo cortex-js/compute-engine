@@ -79,7 +79,9 @@ function arityFromSignature(sig: unknown): string {
   // An effect specifier may sit between the argument list and the arrow —
   // a space-separated word list (`(any) scope -> string`, or `any` for the
   // any-set; see `effectSetToString()` in common/type/effects.ts).
-  const match = sig.trim().match(/^\((.*)\)\s*(?:[a-z_]+(?:\s+[a-z_]+)*\s*)?->/);
+  const match = sig
+    .trim()
+    .match(/^\((.*)\)\s*(?:[a-z_]+(?:\s+[a-z_]+)*\s*)?->/);
   if (!match) return 'unknown';
   const args = match[1].trim();
   if (args === '') return '0';

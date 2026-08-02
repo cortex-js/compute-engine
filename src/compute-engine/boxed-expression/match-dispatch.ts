@@ -295,7 +295,8 @@ export function evaluateMatchReference(
         ...names.map((n) => ce.symbol(n, { canonical: false })),
       ]);
       if (guardClosure === undefined) continue;
-      if (sym(apply(guardClosure, args, undefined, 'bind')) !== 'True') continue;
+      if (sym(apply(guardClosure, args, undefined, 'bind')) !== 'True')
+        continue;
     }
 
     const bodyClosure = canonicalFunctionLiteralArguments(ce, [

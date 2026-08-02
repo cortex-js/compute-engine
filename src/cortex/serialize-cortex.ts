@@ -16,10 +16,7 @@ import { splitGraphemes } from '../common/grapheme-splitter.js';
 import { isLiteralParamName } from '../math-json/symbols.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
-import {
-  isGroupedTypeText,
-  signatureEffects,
-} from '../common/type/utils.js';
+import { isGroupedTypeText, signatureEffects } from '../common/type/utils.js';
 import { effectSetToString } from '../common/type/effects.js';
 import { NumberSerializationFormat } from '../compute-engine/latex-syntax/types.js';
 import { MathJsonExpression } from '../math-json/types.js';
@@ -937,14 +934,14 @@ export function serializeCortex(
   // (`typeToString` writes `Infinity`/`-Infinity`/`NaN`, which box-route
   // markers carry) map to the Cortex literal.
   const CORTEX_VALUE_SPELLING: Record<string, string> = {
-    oo: 'Infinity',
+    'oo': 'Infinity',
     '+oo': 'Infinity',
     '-oo': '-Infinity',
-    nan: 'NaN',
-    Infinity: 'Infinity',
+    'nan': 'NaN',
+    'Infinity': 'Infinity',
     '+Infinity': 'Infinity',
     '-Infinity': '-Infinity',
-    NaN: 'NaN',
+    'NaN': 'NaN',
   };
 
   const isValueTypeText = (t: string): boolean =>

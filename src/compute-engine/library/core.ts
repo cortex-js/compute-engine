@@ -545,13 +545,13 @@ function declareTypeStatement(
 ): Expression | null {
   // The name and the type are read off the RAW operands: a symbol or a string.
   const name = nameOp
-    ? (isString(nameOp) ? nameOp.string : sym(nameOp)) ?? undefined
+    ? ((isString(nameOp) ? nameOp.string : sym(nameOp)) ?? undefined)
     : undefined;
   if (!name)
     return ce.error(['invalid-type-declaration', 'Expected a type name']);
 
   const typeStr = typeOp
-    ? (isString(typeOp) ? typeOp.string : sym(typeOp)) ?? undefined
+    ? ((isString(typeOp) ? typeOp.string : sym(typeOp)) ?? undefined)
     : undefined;
   if (!typeStr)
     return ce.error(

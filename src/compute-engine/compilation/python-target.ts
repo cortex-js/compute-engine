@@ -724,7 +724,8 @@ function compilePythonLogical(
   args: ReadonlyArray<Expression>,
   compile: (e: Expression) => string
 ): string {
-  if (args.length === 0 || args[0] == null) throw new Error(`${fn}: no operand`);
+  if (args.length === 0 || args[0] == null)
+    throw new Error(`${fn}: no operand`);
   let result = compile(args[0]);
   for (let i = 1; i < args.length; i++)
     result = `${fn}(${result}, ${compile(args[i])})`;

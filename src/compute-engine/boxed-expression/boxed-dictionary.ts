@@ -167,8 +167,7 @@ export class BoxedDictionary
     return [
       'Dictionary',
       ...Object.entries(this._keyValues).map(
-        ([k, v]) =>
-          ['KeyValuePair', { str: k }, v.json] as MathJsonExpression
+        ([k, v]) => ['KeyValuePair', { str: k }, v.json] as MathJsonExpression
       ),
     ] as MathJsonExpression;
   }

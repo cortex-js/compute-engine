@@ -4,7 +4,11 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression, IComputeEngine } from '../global-types.js';
 
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
-import { chop, ROUNDOFF_TOLERANCE, SMALL_INTEGER } from '../numerics/numeric.js';
+import {
+  chop,
+  ROUNDOFF_TOLERANCE,
+  SMALL_INTEGER,
+} from '../numerics/numeric.js';
 import { bignumPreferred } from './utils.js';
 import { isNumber } from './type-guards.js';
 

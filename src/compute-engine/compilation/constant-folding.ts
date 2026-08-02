@@ -109,7 +109,8 @@ export function negativeBaseRealPow(
   expValue: number
 ): number | undefined {
   if (!(base < 0) || !Number.isFinite(base)) return undefined;
-  if (!Number.isFinite(expValue) || Number.isInteger(expValue)) return undefined;
+  if (!Number.isFinite(expValue) || Number.isInteger(expValue))
+    return undefined;
 
   // The branch is decided by the exponent's EXACT rational when it has one,
   // and only otherwise by the (ulp-tolerant) float reconstruction — sharing

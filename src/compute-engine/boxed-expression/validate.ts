@@ -388,11 +388,11 @@ export function checkNumericArgs(
         if (x.isLazyCollection) continue;
         for (const y of x.each()) y.infer(inferredType);
       } else if (!couldBeCollectionOperand(x)) x.infer(inferredType);
-      // A possibly-collection operand (a `vector<n>`-returning application,
-      // `number | list`, a tuple) is consumed by broadcast: inferring the
-      // scalar numeric context onto it would WIDEN a shared inferred result
-      // signature to `real | vector<…>` (Tycho item 121) — same guard as the
-      // signature-validation route above.
+    // A possibly-collection operand (a `vector<n>`-returning application,
+    // `number | list`, a tuple) is consumed by broadcast: inferring the
+    // scalar numeric context onto it would WIDEN a shared inferred result
+    // signature to `real | vector<…>` (Tycho item 121) — same guard as the
+    // signature-validation route above.
   }
 
   return xs;

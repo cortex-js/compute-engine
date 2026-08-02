@@ -1,5 +1,8 @@
 import { MathJsonExpression, MathJsonSymbol } from '../math-json/types.js';
-import { LITERAL_PARAM_PREFIX, isLiteralParamName } from '../math-json/symbols.js';
+import {
+  LITERAL_PARAM_PREFIX,
+  isLiteralParamName,
+} from '../math-json/symbols.js';
 import { Origin } from '../common/debug.js';
 import { parseType, parseTypePrefix } from '../common/type/parse.js';
 import { EFFECT_LABELS } from '../common/type/effects.js';
@@ -838,10 +841,7 @@ export class Parser {
       this.diagnostics.push({
         severity: 'warning',
         message: ['type-shadow', name],
-        range: [
-          this.baseOffset + nameTok.start,
-          this.baseOffset + nameTok.end,
-        ],
+        range: [this.baseOffset + nameTok.start, this.baseOffset + nameTok.end],
       });
     }
     this.knownTypeNames.add(name);
@@ -1346,7 +1346,10 @@ export class Parser {
           ? [o[0] - this.baseOffset, o[1] - this.baseOffset]
           : [this.current.start, this.current.end];
       };
-      if (bounds.length !== 2 || bounds.some((b) => operatorOf(b) === 'Range')) {
+      if (
+        bounds.length !== 2 ||
+        bounds.some((b) => operatorOf(b) === 'Range')
+      ) {
         this.error(['range-pattern-step'], ...at(pattern));
         return;
       }
@@ -2237,7 +2240,11 @@ export class Parser {
     return this.wrap(
       [
         'Typed',
-        this.wrap({ sym: `${LITERAL_PARAM_PREFIX}${position}` }, start, tok.end),
+        this.wrap(
+          { sym: `${LITERAL_PARAM_PREFIX}${position}` },
+          start,
+          tok.end
+        ),
         this.wrap({ str: typeText }, start, tok.end),
       ] as MathJsonExpression[],
       start,

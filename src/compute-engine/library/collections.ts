@@ -3395,7 +3395,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       // A plain dictionary/record VALUE: exactly `d["x"]` — delegate to `At`
       // so the two surfaces can never drift (absence markers included).
-      if (isDictionary(base)) return ce.function('At', [base, field]).evaluate();
+      if (isDictionary(base))
+        return ce.function('At', [base, field]).evaluate();
 
       const rt = fieldBearingType(base.type.type);
       if (rt === undefined) return undefined; // unknown operand: stay symbolic
@@ -3454,7 +3455,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (rt.kind === 'tuple') {
           const i = rt.elements.findIndex((x) => x.name === name);
           if (i < 0) return undefined;
-          return compile(base.engine.function('At', [base, base.engine.number(i + 1)]));
+          return compile(
+            base.engine.function('At', [base, base.engine.number(i + 1)])
+          );
         }
         return compile(base.engine.function('At', [base, field]));
       }

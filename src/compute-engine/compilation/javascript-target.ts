@@ -1164,7 +1164,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       eltT !== undefined &&
       eltT !== 'unknown' &&
       eltT !== 'any' &&
-      !isSubtype(stripMissingFromType(resolveTypeForCompilation(eltT)), 'number');
+      !isSubtype(
+        stripMissingFromType(resolveTypeForCompilation(eltT)),
+        'number'
+      );
     if (objectDomain && scalarIndex)
       return `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(${base})`;
     return base;
@@ -2440,8 +2443,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // Same complex discipline as the Arcsin family: hav⁻¹ = 2·arcsin(√z) is
     // complex outside [0, 1], and the node's TYPE (which the enclosing
     // expression's codegen reads) claims complex for an unconstrained real.
-    if (BaseCompiler.isComplexValued(x))
-      return `_SYS.cinvhav(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x)) return `_SYS.cinvhav(${compile(x)})`;
     if (resultIsComplexValued('InverseHaversine', [x]))
       return `_SYS.cinvhav(${complexOperandCode(x, compile)})`;
     return `(2 * Math.asin(Math.sqrt(${compile(x)})))`;

@@ -745,10 +745,7 @@ export function isSubtype(
         if (Number.isNaN(lhs.value))
           return isPrimitiveSubtype('number', rhs as PrimitiveType);
         if (!Number.isFinite(lhs.value))
-          return isPrimitiveSubtype(
-            'non_finite_number',
-            rhs as PrimitiveType
-          );
+          return isPrimitiveSubtype('non_finite_number', rhs as PrimitiveType);
         if (Number.isInteger(lhs.value))
           return isPrimitiveSubtype('finite_integer', rhs as PrimitiveType);
         // A non-integer number literal (e.g. 3.5) is a real number, not just

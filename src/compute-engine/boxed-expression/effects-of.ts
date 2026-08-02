@@ -308,7 +308,8 @@ function releasedContent(op: Expression): Expression {
   const name = sym(op);
   if (name !== undefined) {
     const def = op.engine.lookupDefinition(name);
-    const value = def !== undefined && 'value' in def ? def.value.value : undefined;
+    const value =
+      def !== undefined && 'value' in def ? def.value.value : undefined;
     if (value !== undefined && isQuote(value)) return value.ops[0] ?? op;
     return op;
   }

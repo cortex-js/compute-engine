@@ -8,11 +8,7 @@ import type {
 // To avoid circular dependency issues we have to import the following
 // function *after* the class definition
 
-import type {
-  EffectLabel,
-  Type,
-  TypeString,
-} from '../../common/type/types.js';
+import type { EffectLabel, Type, TypeString } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 
 import type {

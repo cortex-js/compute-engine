@@ -1684,8 +1684,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `finite_integer` (unsound; the value is −∞).
         if (
           ops.some(
-            (x) =>
-              x.isFinite === false || x.type.matches('non_finite_number')
+            (x) => x.isFinite === false || x.type.matches('non_finite_number')
           )
         ) {
           // 0 · ±∞ = NaN (indeterminate).

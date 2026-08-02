@@ -381,10 +381,7 @@ function gpuVec3(target?: CompileTarget<Expression>): string {
  * JavaScript target preserves, so decline instead and let the caller pass
  * alpha separately.
  */
-function assertNoGPUAlpha(
-  head: string,
-  args: ReadonlyArray<Expression>
-): void {
+function assertNoGPUAlpha(head: string, args: ReadonlyArray<Expression>): void {
   if (args.length <= 3) return;
   throw new Error(
     `${head}: an alpha (4th) operand is not representable on the GPU target — ` +
@@ -472,7 +469,8 @@ function gpuOperandOnce(
     : target.language === 'wgsl'
       ? 'f32'
       : 'float';
-  const decl = target.language === 'wgsl' ? `var ${t}: ${type}` : `${type} ${t}`;
+  const decl =
+    target.language === 'wgsl' ? `var ${t}: ${type}` : `${type} ${t}`;
   BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
   return t;
 }
@@ -1545,9 +1543,8 @@ function markAggregateConsuming<T extends CompiledFunction<Expression>>(
  * elements; given N scalar arguments instead they use them one for one, and
  * the gate must go on judging that form.
  */
-const gpuDestructuresListOperand = (
-  args: ReadonlyArray<Expression>
-): boolean => args.length === 1 && isFunction(args[0], 'List');
+const gpuDestructuresListOperand = (args: ReadonlyArray<Expression>): boolean =>
+  args.length === 1 && isFunction(args[0], 'List');
 
 /** `{1}` → "in argument 2"; `{1, 2}` → "in arguments 2 and 3". */
 function gpuSlotNames(slots: ReadonlySet<number>): string {
@@ -1944,7 +1941,10 @@ function gpuCheckOperandShapes(
     // A lowering that does NOT pass its operands through (the variadic
     // `min`/`max` fold) is judged on the emitted call TREE, where each nested
     // call has its own argument positions.
-    const misplaced = gpuMisplacedScalarArgument(code, rules.scalarGenTypeSlots);
+    const misplaced = gpuMisplacedScalarArgument(
+      code,
+      rules.scalarGenTypeSlots
+    );
     if (misplaced !== undefined) decline(misplaced);
   }
   // The OBLIGATIONS, last: a slot that must be scalar is violated by a `vecN`
@@ -4021,8 +4021,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
             'value in the shader. Fail closed (D6).'
         );
       const t = BaseCompiler.tempVar(target);
-      const decl =
-        target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
+      const decl = target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
       BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
       return `(cos(${t}) / sin(${t}))`;
     }

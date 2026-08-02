@@ -307,7 +307,8 @@ export function isMoreSpecific(
   if (byArgs === 'more') return true;
   if (byArgs !== 'equal') return false;
   return (
-    isEffectSubset(a.effects, b.effects) && !isEffectSubset(b.effects, a.effects)
+    isEffectSubset(a.effects, b.effects) &&
+    !isEffectSubset(b.effects, a.effects)
   );
 }
 

@@ -186,7 +186,10 @@ function accepts(v: Expression, t: Type): boolean {
       // or rational onto a double and could round it onto an endpoint
       // (e.g. 2^53 + 1 admitted by an upper bound of 2^53).
       const ce = v.engine;
-      if (t.lower !== undefined && v.isGreaterEqual(ce.number(t.lower)) !== true)
+      if (
+        t.lower !== undefined &&
+        v.isGreaterEqual(ce.number(t.lower)) !== true
+      )
         return false;
       if (t.upper !== undefined && v.isLessEqual(ce.number(t.upper)) !== true)
         return false;
@@ -215,8 +218,7 @@ function accepts(v: Expression, t: Type): boolean {
       // dimensions are the nested lists' own membership problem.
       if (t.dimensions !== undefined && t.dimensions.length > 0) {
         const d0 = t.dimensions[0];
-        if (Number.isFinite(d0) && d0 >= 0 && v.ops.length !== d0)
-          return false;
+        if (Number.isFinite(d0) && d0 >= 0 && v.ops.length !== d0) return false;
         if (t.dimensions.length > 1) return isSubtype(v.type.type, t);
       }
       return v.ops.every((op) => {

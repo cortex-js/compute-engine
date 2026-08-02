@@ -423,7 +423,8 @@ function tupleInhabits(
     if (typeof t === 'object' && t.kind === 'tuple')
       elementTypes = t.elements.map((x) => x.type);
     else if (t === 'unknown' || t === 'any') return 'maybe';
-    else return provablyDisjoint(t, { kind: 'tuple', elements: [...elements] })
+    else
+      return provablyDisjoint(t, { kind: 'tuple', elements: [...elements] })
         ? 'no'
         : 'maybe';
   }
@@ -687,8 +688,7 @@ export function installConstructorFunction(
       const engine = args[0].engine;
       const verdict = rawArmMatch(args as ReadonlyArray<Expression>, raw);
       if (verdict === 'yes') {
-        if (!nAryRaw)
-          return args.length === 1 ? compile(args[0]) : undefined;
+        if (!nAryRaw) return args.length === 1 ? compile(args[0]) : undefined;
         return compile(engine.function('Tuple', args as Expression[]));
       }
       if (verdict === 'no')

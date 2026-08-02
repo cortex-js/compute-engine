@@ -4490,8 +4490,7 @@ export class BaseCompiler {
     const state = multiClauseState(engine.lookupDefinition(h));
     if (state === undefined) return undefined; // genuinely unknown operator
 
-    if (target.language !== 'javascript' || registry.lowering)
-      return undefined; // fail closed on non-JS targets (§8)
+    if (target.language !== 'javascript' || registry.lowering) return undefined; // fail closed on non-JS targets (§8)
 
     const name = BaseCompiler.userFunctionName(h);
     if (registry.defs.has(name) || registry.compiling.has(name)) return name;
@@ -4516,7 +4515,10 @@ export class BaseCompiler {
       if (clause.literal.ops.length - 1 !== arity) return undefined;
       const guards: (string | null)[] = [];
       for (let i = 0; i < arity; i++) {
-        const g = BaseCompiler.jsClauseParamGuard(sig.args![i].type, `_$a[${i}]`);
+        const g = BaseCompiler.jsClauseParamGuard(
+          sig.args![i].type,
+          `_$a[${i}]`
+        );
         if (g === undefined) return undefined;
         guards.push(g);
       }
@@ -4568,8 +4570,10 @@ export class BaseCompiler {
         // A recursive clause body references `h` while `name` is in
         // `compiling`, so the self-call emits `name` — bound by the time any
         // call runs, since every def executes in the preamble first.
-        const body = BaseCompiler.withNestedCseHarvest(bodyExpr, bodyTarget, () =>
-          BaseCompiler.compile(bodyExpr, bodyTarget)
+        const body = BaseCompiler.withNestedCseHarvest(
+          bodyExpr,
+          bodyTarget,
+          () => BaseCompiler.compile(bodyExpr, bodyTarget)
         );
         registry.defs.set(
           helperNames[i],
@@ -5068,7 +5072,9 @@ export class BaseCompiler {
     if (isFunction(expr, 'Function')) {
       const lambdaRun = ((...args: number[]) =>
         interpretedRunValue(
-          ce.function('Apply', [expr, ...args.map((a) => ce.expr(a))]).evaluate()
+          ce
+            .function('Apply', [expr, ...args.map((a) => ce.expr(a))])
+            .evaluate()
         )) as unknown as CompiledRunner;
       return {
         target: targetName,

@@ -9,7 +9,7 @@ import {
   sameEffectSet,
   unionEffectSets,
 } from '../common/type/effects.js';
-import { isSubtype } from '../common/type/subtype.js';
+import { isSubtype, provablyDisjoint } from '../common/type/subtype.js';
 
 import type {
   BoxedDefinition,
@@ -25,10 +25,13 @@ import {
   triStateSelect,
 } from './boxed-expression/overload.js';
 import { hasValueComponent } from './boxed-expression/value-membership.js';
-import { provablyDisjoint } from '../common/type/subtype.js';
 import { typeToString } from '../common/type/serialize.js';
 import { isLiteralParamName } from '../math-json/symbols.js';
-import { isOperatorDef, isValueDef, updateDef } from './boxed-expression/utils.js';
+import {
+  isOperatorDef,
+  isValueDef,
+  updateDef,
+} from './boxed-expression/utils.js';
 import { functionLiteralDeclaredEffects } from './boxed-expression/function-literal.js';
 import { apply, lookup } from './function-utils.js';
 import { isMintedConstructor } from './type-constructors.js';
@@ -239,8 +242,7 @@ export function defineFunctionClause(
 
   // Existing clause state, or the conversion of a pre-existing single
   // user-function definition into its 1-clause equivalent.
-  const state =
-    multiClauseState(existing) ?? convertToClauseState(existing);
+  const state = multiClauseState(existing) ?? convertToClauseState(existing);
 
   if (state === undefined && existing !== undefined && !isBuiltin) {
     // The name is bound to something that cannot hold clauses (an opaque
@@ -323,7 +325,8 @@ export function defineFunctionClause(
 function convertToClauseState(
   def: BoxedDefinition | undefined
 ): MultiClauseState | undefined {
-  if (def === undefined) return { clauses: [], effectRow: { explicit: undefined } };
+  if (def === undefined)
+    return { clauses: [], effectRow: { explicit: undefined } };
 
   let literal: Expression | undefined;
   if (isOperatorDef(def))

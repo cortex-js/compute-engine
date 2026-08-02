@@ -331,8 +331,7 @@ function buildRecord(
   // Present ONLY when the solve was cut short by an evaluation deadline
   // (best-so-far result, Tycho item 118) — the normal-path record is
   // unchanged, so existing consumers see no new key.
-  if (result.timedOut)
-    entries.push(ce.tuple(ce.string('timedOut'), TRUE_(ce)));
+  if (result.timedOut) entries.push(ce.tuple(ce.string('timedOut'), TRUE_(ce)));
   return ce.function('Dictionary', entries);
 }
 
