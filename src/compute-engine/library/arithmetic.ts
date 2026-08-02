@@ -109,7 +109,6 @@ import {
   realPowerBranchTerms,
   root,
 } from '../boxed-expression/arithmetic-power.js';
-import { parseType } from '../../common/type/parse.js';
 import {
   broadcastResultType,
   isNonRealNumber,
@@ -1969,7 +1968,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (args.length === 0) return ce.error('missing');
         return ce._fn('PlusMinus', [args[0], args[1].abs()]);
       },
-      type: ([x, y]) => parseType(`tuple<${x.type}, ${y.type}>`),
+      // Built structurally, not via a serialize-and-reparse round trip: a
+      // resolver-less `parseType()` cannot read back a user-declared type.
+      type: ([x, y]) => ({
+        kind: 'tuple',
+        elements: [{ type: x.type.type }, { type: y.type.type }],
+      }),
       evaluate: ([x, y], { engine }) => engine.tuple(x.add(y.neg()), x.add(y)),
     },
 

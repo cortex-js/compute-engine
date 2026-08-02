@@ -25,34 +25,78 @@ export class BoxedType {
 
   type: Type;
 
+  /** The resolver this type was created with, if any.
+   *
+   * Kept so that a string argument handed to `matches()`, `is()`,
+   * `isDisjointFrom()` or `couldMatch()` can name a user-declared type: such
+   * a name is only meaningful relative to a resolver. */
+  private _typeResolver: TypeResolver | undefined;
+
+  /** The resolver of the first boxed operand that has one, so a combined type
+   * can still be compared against a user-declared type name. */
+  private static _resolverOf(
+    types: ReadonlyArray<BoxedType | Type>
+  ): TypeResolver | undefined {
+    for (const x of types)
+      if (x instanceof BoxedType && x._typeResolver !== undefined)
+        return x._typeResolver;
+    return undefined;
+  }
+
   static widen(...types: ReadonlyArray<BoxedType | Type>): BoxedType {
     return new BoxedType(
-      widen(...types.map((x) => (x instanceof BoxedType ? x.type : x)))
+      widen(...types.map((x) => (x instanceof BoxedType ? x.type : x))),
+      BoxedType._resolverOf(types)
     );
   }
 
   static narrow(...types: ReadonlyArray<BoxedType | Type>): BoxedType {
     return new BoxedType(
-      narrow(...types.map((x) => (x instanceof BoxedType ? x.type : x)))
+      narrow(...types.map((x) => (x instanceof BoxedType ? x.type : x))),
+      BoxedType._resolverOf(types)
     );
   }
 
   constructor(type: Type | TypeString, typeResolver?: TypeResolver) {
     // super(typeof type === 'string' ? type : typeToString(type));
+    this._typeResolver = typeResolver;
     if (typeof type === 'string') this.type = parseType(type, typeResolver);
     else this.type = type;
   }
 
-  matches(other: Type | TypeString | BoxedType): boolean {
-    if (other instanceof BoxedType) return isSubtype(this.type, other.type);
-    // `isSubtype` parses any non-primitive `TypeString` (e.g. `'matrix'`,
-    // `'vector'`, `'list<number>'`), so a bare string type name is accepted
-    // here just like the `BoxedType` constructor accepts one — no need to box.
-    return isSubtype(this.type, other);
+  /**
+   * Resolve an argument of one of the comparison predicates to a `Type`.
+   *
+   * A `TypeString` argument may name a user-declared type (`'point'`), which
+   * only a resolver can make sense of. The predicates in `subtype.ts` are
+   * engine-independent and parse without one, so the resolution has to happen
+   * here, at the boundary.
+   *
+   * Two steps on purpose: `parseType()` memo-caches only resolver-less calls,
+   * and that cache carries the hot path (ground types such as `'number'` or
+   * `'list<integer>'`). A resolver-less parse either succeeds — with the same
+   * result a resolver-aware one would give, since a user type name can never
+   * shadow built-in type syntax — or throws on the user name, which is the
+   * only case that needs the (uncached) resolver-aware parse.
+   */
+  private _resolve(other: Type | TypeString | BoxedType): Type {
+    if (other instanceof BoxedType) return other.type;
+    if (typeof other !== 'string') return other;
+    try {
+      return parseType(other);
+    } catch (e) {
+      if (this._typeResolver === undefined) throw e;
+      return parseType(other, this._typeResolver);
+    }
   }
 
-  is(other: Type): boolean {
-    return isSubtype(this.type, other) && isSubtype(other, this.type);
+  matches(other: Type | TypeString | BoxedType): boolean {
+    return isSubtype(this.type, this._resolve(other));
+  }
+
+  is(other: Type | TypeString | BoxedType): boolean {
+    const t = this._resolve(other);
+    return isSubtype(this.type, t) && isSubtype(t, this.type);
   }
 
   /**
@@ -71,12 +115,7 @@ export class BoxedType {
    * Throws if `other` is a string that is not a valid type.
    */
   isDisjointFrom(other: Type | TypeString | BoxedType): boolean {
-    if (other instanceof BoxedType)
-      return provablyDisjoint(this.type, other.type);
-    return provablyDisjoint(
-      this.type,
-      typeof other === 'string' ? parseType(other) : other
-    );
+    return provablyDisjoint(this.type, this._resolve(other));
   }
 
   /**
@@ -111,11 +150,7 @@ export class BoxedType {
    * Throws if `other` is a string that is not a valid type.
    */
   couldMatch(other: Type | TypeString | BoxedType): boolean {
-    if (other instanceof BoxedType) return couldMatch(this.type, other.type);
-    return couldMatch(
-      this.type,
-      typeof other === 'string' ? parseType(other) : other
-    );
+    return couldMatch(this.type, this._resolve(other));
   }
 
   /**
@@ -128,7 +163,7 @@ export class BoxedType {
    */
   get unionMembers(): BoxedType[] {
     if (typeof this.type === 'object' && this.type.kind === 'union')
-      return this.type.types.map((t) => new BoxedType(t));
+      return this.type.types.map((t) => new BoxedType(t, this._typeResolver));
     return [this];
   }
 

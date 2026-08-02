@@ -62,6 +62,23 @@ Destructuring lowers to the same `Declare` primitive with the pattern in the
 name position: `["Declare", ["Tuple", "q", "r"], ["Dictionary",
 ["KeyValuePair", "value", …]]]`.
 
+## Declaring a type
+
+A third declaration keyword, `type`, introduces a **type** name rather than a
+symbol — and, with it, a constructor of the same name:
+
+```cortex
+type point = tuple<x: number, y: number>
+type alias pair = tuple<number, number>
+let p = point(1, 2)
+let a: pair = (1, 2)
+```
+
+`type` declares a new, distinct type; `type alias` declares another name for
+an existing one. Unlike `let` and `const`, `type` is not a reserved word —
+only these statement shapes claim it. See
+[Declaring a type](/cortex/types/#declaring-a-type) for the whole story.
+
 ## Reassignment vs. declaration
 
 A bare `x = 5` — no `let`/`const` keyword, no type annotation — is not

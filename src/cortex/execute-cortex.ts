@@ -73,6 +73,9 @@ export function executeCortex(
     const [parsed, parseDiagnostics] = parseCortex(source, options?.url, {
       parseLatex: options?.parseLatex,
       allowHostPragmas: options?.allowHostPragmas ?? false,
+      // The engine's already-declared type names, so an annotation naming a
+      // host type resolves at parse time. `names` walks the scope chain.
+      typeNames: ce._typeResolver.names,
     });
     ast = parsed;
     diagnostics.push(...parseDiagnostics);
@@ -241,6 +244,9 @@ const PRINT_LIKE = new Set(['print', 'println', 'printf', 'puts', 'echo']);
  * emit a `warning` diagnostic suggesting a close known operator — but only when
  * a suggestion exists (an intentionally symbolic `f(x)` with no near match is
  * never nagged).
+ *
+ * Two names get a dedicated diagnostic instead of the did-you-mean path: a
+ * print-like name, and a name that is a DECLARED TYPE (`type-not-callable`).
  */
 function scanUnknownFunctions(
   ce: ComputeEngine,
@@ -255,7 +261,24 @@ function scanUnknownFunctions(
 
   if (!reported.has(head) && ce.operatorInfo(head) === undefined) {
     reported.add(head);
-    if (PRINT_LIKE.has(head.toLowerCase())) {
+    if (ce._typeResolver.resolve(head) !== undefined) {
+      // A DECLARED TYPE name in call position: `type alias pt = tuple<…>`
+      // followed by `pt(1, 2)`. Without this, the call stays a silent inert
+      // application `["pt", 1, 2]` that looks like a working constructor —
+      // untyped, unchecked and unrelated to the type (nominal-types design
+      // §4.1b). The did-you-mean path never covers it (there is no close
+      // known operator to suggest).
+      //
+      // The check keys on "no operator definition exists", so when a nominal
+      // declaration starts minting a value-level constructor operator, the
+      // call resolves like any other and this branch stops firing on its own —
+      // no name table to retire.
+      diagnostics.push({
+        severity: 'warning',
+        message: ['type-not-callable', head],
+        range: statementRange(stmt, source),
+      });
+    } else if (PRINT_LIKE.has(head.toLowerCase())) {
       // `print(...)` deserves better than a fuzzy suggestion: there is no
       // print in Cortex — the value of the last statement is the output.
       diagnostics.push({

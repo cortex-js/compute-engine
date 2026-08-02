@@ -15,6 +15,7 @@ import {
 import {
   collectionElementType,
   isNonRealNumber,
+  resolveTypeForCompilation,
   stripMissingFromType,
   typeContainsMissing,
   widen,
@@ -128,9 +129,22 @@ function collectUsedNames(
  * is unknown. Admitting those would misroute plain scalar arithmetic through
  * `_SYS.bcast` / the fail-closed guard, so require the application to be bound.
  */
+/**
+ * The type a compile-time **representation** question about `expr` is answered
+ * from (nominal-types design §4.6 step 1): a `reference` type — a `type alias`
+ * or a nominal `type` — unfolds to its definition, because compilation is type
+ * erasure and the tag carries no layout. Identity for every other type.
+ *
+ * Exported for the compile targets, which ask the same layout questions
+ * (`gpuType` in gpu-target.ts).
+ */
+export function compilationType(expr: Expression): Type {
+  return resolveTypeForCompilation(expr.type.type);
+}
+
 function isBoundPossiblyCollectionTyped(a: Expression): boolean {
   if (!isPossiblyCollectionTyped(a)) return false;
-  const t = a.type.type;
+  const t = compilationType(a);
   if (typeof t !== 'string' && t.kind === 'broadcastable') return true;
   return a.isCanonical || a.isStructural;
 }
@@ -271,7 +285,14 @@ export class BaseCompiler {
         `${opName}: target '${target.language ?? 'unknown'}' has no absence ` +
           `capability. Fail closed (§3.F).`
       );
-    const stripped = stripMissingFromType(t);
+    // Unfold a declared type reference BEFORE the strip: `stripMissingFromType`
+    // is structural and does not see through a `reference`, so an alias such as
+    // `type alias maybe_n = number | missing` would survive the strip intact and
+    // mis-select the object axis. Resolve again afterwards, in case removing the
+    // `missing` arm collapsed the union down to a single reference arm.
+    const stripped = resolveTypeForCompilation(
+      stripMissingFromType(resolveTypeForCompilation(t))
+    );
     const numeric = stripped === 'never' || isSubtype(stripped, 'number');
     if (numeric) return target.absence.numeric;
     if (target.absence.object === undefined)
@@ -437,9 +458,9 @@ export class BaseCompiler {
     // no object axis, so it is exempt. Only object-axis-less targets pay the
     // check (JS/Python declare `object`, so the guard short-circuits).
     if (target.absence !== undefined && target.absence.object === undefined) {
-      const t = expr.type.type;
+      const t = compilationType(expr);
       if (typeContainsMissing(t)) {
-        const stripped = stripMissingFromType(t);
+        const stripped = resolveTypeForCompilation(stripMissingFromType(t));
         if (
           stripped !== 'never' &&
           stripped !== 'unknown' &&
@@ -498,7 +519,7 @@ export class BaseCompiler {
         ops.push(...arg.ops);
         continue;
       }
-      const t = arg.type.type;
+      const t = compilationType(arg);
       if (typeof t !== 'string' && t.kind === 'tuple') {
         for (let i = 1; i <= t.elements.length; i++)
           ops.push(ce.function('At', [arg, ce.number(i)]));
@@ -936,7 +957,7 @@ export class BaseCompiler {
     ) {
       const isTupleShaped = (a: Expression): boolean => {
         if (isFunction(a, 'Tuple')) return true;
-        const t = a.type.type;
+        const t = compilationType(a);
         return typeof t !== 'string' && t.kind === 'tuple';
       };
       const tupleEquality =
@@ -1412,10 +1433,14 @@ export class BaseCompiler {
         throw new Error('Coalesce: expected at least one argument');
       // The result's domain (its widened type — `T₁° | … | Tₙ₋₁° | Tₙ`, §3.D)
       // picks the axis: numeric → NaN-coalesce, object → null-coalesce.
+      // Unfold each operand's declared type reference before the strip — the
+      // strip is structural and does not see through a `reference` (an alias of
+      // `T | missing` would keep its `missing` arm and mis-select the axis).
       const resultType = widen(
-        ...args.map((a, i) =>
-          i < args.length - 1 ? stripMissingFromType(a.type.type) : a.type.type
-        )
+        ...args.map((a, i) => {
+          const t = compilationType(a);
+          return i < args.length - 1 ? stripMissingFromType(t) : t;
+        })
       );
       const axis = BaseCompiler.absenceAxisForType(
         resultType,
@@ -1452,9 +1477,9 @@ export class BaseCompiler {
     // boolean is an OBJECT-domain value, so a target without the object axis
     // (GPU) fails closed.
     const isObjectDomainMissing = (a: Expression): boolean => {
-      const t = a.type.type;
+      const t = compilationType(a);
       if (!typeContainsMissing(t)) return false;
-      const stripped = stripMissingFromType(t);
+      const stripped = resolveTypeForCompilation(stripMissingFromType(t));
       return !(stripped === 'never' || isSubtype(stripped, 'number'));
     };
     if (
@@ -1850,7 +1875,7 @@ export class BaseCompiler {
     // `_SYS.mul` runtime helper cannot carry complex elements, so a complex
     // operand there must defer to the fail-closed path.
     const hasComplexElement = (a: Expression): boolean => {
-      const elt = collectionElementType(a.type.type);
+      const elt = collectionElementType(compilationType(a));
       if (elt === undefined) return false;
       return isNonRealNumber(elt);
     };
@@ -3312,7 +3337,7 @@ export class BaseCompiler {
         if (known !== undefined) return known < 0 ? undefined : known;
       }
     }
-    const t = expr.type.type;
+    const t = compilationType(expr);
     if (typeof t !== 'string') {
       if (t.kind === 'tuple') return t.elements.length;
       if (t.kind === 'list' && t.dimensions?.length === 1)
@@ -3343,7 +3368,7 @@ export class BaseCompiler {
     if (expr === null) return false;
     if (BaseCompiler.aggregateComponentCount(expr) !== undefined) return true;
     if (isFunction(expr, 'Matrix')) return true;
-    const t = expr.type.type;
+    const t = compilationType(expr);
     // A `list` type that `aggregateComponentCount` declined to size: either
     // multi-axis (a matrix/tensor) or of unknown length. Non-scalar either way.
     if (typeof t !== 'string' && t.kind === 'list') return true;

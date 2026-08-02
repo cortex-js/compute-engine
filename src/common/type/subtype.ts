@@ -19,6 +19,7 @@ import type {
   SetType,
   Type,
   TypeCompatibility,
+  TypeReference,
   TypeString,
 } from './types.js';
 import { parseType } from './parse.js';
@@ -290,6 +291,55 @@ function unionCoveringMembers(types: Readonly<Type[]>): Readonly<Type[]> {
 }
 
 /**
+ * The structural-alias reference records `isSubtype` / `provablyDisjoint` are
+ * currently unfolding — one entry per live unfold frame.
+ *
+ * This is cycle DETECTION, not a depth cutoff. A `TypeReference` is the stable
+ * record stored in the lexical scope (`engine-type-resolver.ts` hands the very
+ * same object back for every occurrence of the name), so re-entering a record
+ * that is already being unfolded means the alias graph has a cycle — either
+ * self-referential (`type alias json = list<json> | integer`) or mutual
+ * (`a = list<b>`, `b = list<a>`), where lhs/rhs unfolds alternate forever and
+ * no same-name short-circuit ever fires. There we answer conservatively; an
+ * ACYCLIC alias chain unfolds all the way to its body no matter how long.
+ *
+ * Module-level (not a parameter) so the recursive `isSubtype` calls made by
+ * every other rule participate too — the cycle runs through them, and
+ * `provablyDisjoint` shares the state because its unfolds interleave with
+ * `isSubtype`'s.
+ *
+ * INVARIANTS
+ * - Each unfold site adds ITS OWN record before recursing and deletes THAT
+ *   record in a `finally` — never a wholesale clear. So the set is exactly the
+ *   frames currently on the stack, and a nested question asked mid-unfold
+ *   (e.g. a union arm's own subtype check) restores the set correctly on the
+ *   way out.
+ * - A record can never be present twice: `beginUnfold` refuses re-entry, so
+ *   the matching `endUnfold` can never delete an entry an outer frame still
+ *   owns.
+ * - Allocation is lazy and released at depth zero, so the hot ground-type path
+ *   (types with no reference in them at all) allocates nothing.
+ */
+let unfoldingRefs: Set<TypeReference> | null = null;
+
+/** Enter an unfold frame for `ref`. Returns `false` when `ref` is already
+ * being unfolded further up the stack — a cycle; the caller must then answer
+ * conservatively rather than recurse. */
+function beginUnfold(ref: TypeReference): boolean {
+  if (unfoldingRefs === null) unfoldingRefs = new Set();
+  else if (unfoldingRefs.has(ref)) return false;
+  unfoldingRefs.add(ref);
+  return true;
+}
+
+/** Leave the unfold frame for `ref` (pair with a successful `beginUnfold` in a
+ * `finally`). */
+function endUnfold(ref: TypeReference): void {
+  unfoldingRefs!.delete(ref);
+  if (unfoldingRefs!.size === 0) unfoldingRefs = null;
+}
+
+/**
  * True when `a` and `b` are *provably* disjoint (no value inhabits both).
  * Used for `A <: !B` (a subtype of a negation iff it is disjoint from the
  * negated type), and exposed to consumers as `BoxedType.isDisjointFrom()`.
@@ -303,6 +353,35 @@ function unionCoveringMembers(types: Readonly<Type[]>): Readonly<Type[]> {
 export function provablyDisjoint(a: Type, b: Type): boolean {
   if (a === 'never' || b === 'never') return true; // empty set
   if (a === 'any' || b === 'any') return false;
+
+  // A STRUCTURAL alias IS its definition, on either side — the same rule as
+  // the LHS unfold in `isSubtype`. Without it the category test below sees a
+  // `reference` (no bucket) and falls through to the conservative "may
+  // overlap", so `id` (an alias of `integer`) was not provably disjoint from
+  // `string`. A NOMINAL reference keeps that conservative answer: its
+  // inhabitants are not the definition's.
+  //
+  // Guarded by the same cycle detection as `isSubtype` (an alias whose
+  // definition is another alias can cycle); on a cycle we answer `false` —
+  // "may overlap" — which is this predicate's safe direction.
+  if (typeof a === 'object' && a.kind === 'reference') {
+    if (a.alias !== true || a.def === undefined) return false;
+    if (!beginUnfold(a)) return false;
+    try {
+      return provablyDisjoint(a.def, b);
+    } finally {
+      endUnfold(a);
+    }
+  }
+  if (typeof b === 'object' && b.kind === 'reference') {
+    if (b.alias !== true || b.def === undefined) return false;
+    if (!beginUnfold(b)) return false;
+    try {
+      return provablyDisjoint(a, b.def);
+    } finally {
+      endUnfold(b);
+    }
+  }
   // `unknown` absorbs every type, and its lattice entry has no subtypes — so
   // it must short-circuit before the category test below, which would
   // otherwise read that empty entry as "shares nothing".
@@ -551,6 +630,52 @@ export function isSubtype(
   if (typeof rhs === 'string' && !PRIMITIVE_TYPES_SET.has(rhs as PrimitiveType))
     rhs = parseType(rhs);
 
+  //
+  // A structural alias reference on the LHS unfolds to its definition
+  //
+  // A `{alias: true}` type IS its definition, so it must behave like it in
+  // operand position: `meters <: number` when `type alias meters = number`.
+  // Without this, an alias-typed operand is rejected everywhere structure is
+  // required (`m + 1`, `First(p)`) — the rhs unfold below only makes alias
+  // types *assignable*, not *usable*.
+  //
+  // A NOMINAL reference (`alias === false`) stays OPAQUE: a nominal type is
+  // deliberately not a subtype of its definition.
+  //
+  // Placed first so it also applies against a primitive rhs (`number`), which
+  // the block below short-circuits. Skipped when the rhs is a reference with
+  // the SAME name, so the reference-vs-reference reflexivity check further
+  // down (`lhs.name === rhs.name`) still answers first — that short-circuit is
+  // what terminates a self-referential alias
+  // (`type alias json = list<json> | integer`).
+  //
+  if (
+    typeof lhs !== 'string' &&
+    lhs.kind === 'reference' &&
+    lhs.alias === true &&
+    lhs.def !== undefined &&
+    !(
+      typeof rhs !== 'string' &&
+      rhs.kind === 'reference' &&
+      rhs.name === lhs.name
+    )
+  ) {
+    // Conservative cycle cutoff. MUTUALLY recursive aliases (`a = list<b>`,
+    // `b = list<a>`) alternate lhs and rhs unfolds forever, and no same-name
+    // short-circuit ever fires. Re-entering a reference record already on the
+    // unfold stack is exactly that situation; we answer `false` ("not provably
+    // a subtype") instead of looping. This is a cycle guard, not a coinductive
+    // decision procedure, so a subtype relation that only holds *coinductively*
+    // (through the cycle) is under-reported — but an acyclic alias chain of any
+    // length is answered exactly.
+    if (!beginUnfold(lhs)) return false;
+    try {
+      return isSubtype(lhs.def, rhs);
+    } finally {
+      endUnfold(lhs);
+    }
+  }
+
   // Every type is a subtype of `any`, the top type
   if (rhs === 'any') return true;
 
@@ -787,21 +912,27 @@ export function isSubtype(
     );
   }
 
-  // A primitive type is not a subtype of a composite type (except a union)
-  if (typeof lhs === 'string') return false;
-
   //
   // Handle type references
   //
   // Note: we support both nominal and structural subtyping
   //
+  // Checked BEFORE the primitive fall-through below: a primitive lhs must
+  // still unfold a structural-alias rhs (`integer <: id` for
+  // `type alias id = integer`), which is the mirror of the LHS unfold at the
+  // top of this function.
+  //
   if (rhs.kind === 'reference') {
-    if (lhs.kind === 'reference') return lhs.name === rhs.name;
+    if (typeof lhs !== 'string' && lhs.kind === 'reference')
+      return lhs.name === rhs.name;
     if (rhs.alias === true && rhs.def) {
       // The rhs is a structural type, so we need to check if the lhs is a subtype of the rhs definition
       return isSubtype(lhs, rhs.def);
     }
   }
+
+  // A primitive type is not a subtype of a composite type (except a union)
+  if (typeof lhs === 'string') return false;
 
   //
   // Handle algebraic types (union or intersection)

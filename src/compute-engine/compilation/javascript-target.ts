@@ -19,10 +19,22 @@ import {
 import {
   collectionElementType,
   isNonRealNumber,
+  resolveTypeForCompilation,
   stripMissingFromType,
 } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
+
+/**
+ * The type a compile-time **representation** question about `expr` is answered
+ * from: a `type alias` / nominal `type` reference unfolds to its definition
+ * (compilation is type erasure — nominal-types design §4.6 step 1). Identity
+ * for every other type. Kept local (not imported from `base-compiler`) for the
+ * module-init ordering reason noted on `isIndexedCollectionOperand`.
+ */
+function jsType(expr: Expression): Type {
+  return resolveTypeForCompilation(expr.type.type);
+}
 
 import {
   chop,
@@ -399,7 +411,7 @@ function compileJSSelection(
  * dictionary, string) are excluded: see `compileJSCollectionBoolean`.
  */
 function admitsRuntimeBroadcast(a: Expression): boolean {
-  const t = a.type.type;
+  const t = jsType(a);
   if ((typeof t !== 'string' && t.kind === 'tuple') || isFunction(a, 'Tuple'))
     return false;
   if (!a.isCollection && !a.type.matches('collection')) return true;
@@ -453,7 +465,7 @@ function isIndexedCollectionOperand(e: Expression): boolean {
  * the arithmetic broadcast path (see `isIndexedCollectionOperand`).
  */
 function isPossiblyCollectionTypedJS(e: Expression): boolean {
-  const t = e.type.type;
+  const t = jsType(e);
   // A top-typed APPLICATION is a genuine possibly-collection signal only when
   // bound: an UNBOUND (non-canonical, non-structural) arithmetic subexpression
   // (e.g. the `{ canonical: false }` grouping-preservation path) types
@@ -598,7 +610,7 @@ function compilePointComponent(
   compile: (e: Expression) => string
 ): string {
   const compiled = compile(arg);
-  const t = arg.type.type;
+  const t = jsType(arg);
   // A single point (tuple): index the coordinate directly.
   if (typeof t !== 'string' && t.kind === 'tuple')
     return `(${compiled}[${idx}]${pointComponentAbsence(tupleElementType(t, idx))})`;
@@ -650,7 +662,7 @@ function pointComponentAbsence(coord: Type | undefined): string {
  * module-init reordering hazard noted on `isIndexedCollectionOperand`.
  */
 function isPointListOperand(e: Expression): boolean {
-  const elt = collectionElementType(e.type.type);
+  const elt = collectionElementType(jsType(e));
   // `'tuple'` (the bare, unparameterized type name) is a plain string, not a
   // `{ kind: 'tuple' }` node — and it is exactly what the `PointList` type
   // handler answers (`list<tuple>`), so both spellings must read as a point.
@@ -662,7 +674,7 @@ function isPointListOperand(e: Expression): boolean {
   if (e.isFiniteCollection) {
     const first = e.at(1);
     if (first === undefined) return false;
-    const ft = first.type.type;
+    const ft = jsType(first);
     return (
       (typeof ft !== 'string' && ft.kind === 'tuple') ||
       first.operator === 'Tuple'
@@ -690,7 +702,7 @@ function isPointListOperand(e: Expression): boolean {
  * matching the spec's Shared-predicate table.
  */
 function isPointListSource(e: Expression): boolean {
-  const t = e.type.type;
+  const t = jsType(e);
   // `'tuple'` (the bare, unparameterized name) is a plain string, not a
   // `{ kind: 'tuple' }` node — both spellings are a single point.
   if (t === 'tuple') return false;
@@ -783,7 +795,7 @@ function compileJSPointList(
       parts.push(`${name}[${idx}]`);
       continue;
     }
-    if (isProvablyNonScalarType(a.type.type))
+    if (isProvablyNonScalarType(jsType(a)))
       throw new Error(
         `PointList: cannot compile — component ${i + 1} (type ` +
           `\`${a.type.toString()}\`) is neither a scalar slot nor a list ` +
@@ -1139,14 +1151,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // absence must instead be the target null (`undefined`, I6) so the object
     // discharge (`Coalesce`, `IsMissing`) sees it — map the marker across. Only
     // the scalar-index case: a gather yields an array, handled position-wise.
-    const eltT = collectionElementType(coll.type.type);
+    // The extracted element type can itself be a reference (`list<maybe_n>`
+    // with `maybe_n = number | missing`) — unfold it before the missing-strip,
+    // or the strip is a no-op and the axis test misclassifies the domain.
+    const eltT = collectionElementType(jsType(coll));
     const scalarIndex =
       !isIndexedCollectionOperand(index) && !index.type.matches('collection');
     const objectDomain =
       eltT !== undefined &&
       eltT !== 'unknown' &&
       eltT !== 'any' &&
-      !isSubtype(stripMissingFromType(eltT), 'number');
+      !isSubtype(stripMissingFromType(resolveTypeForCompilation(eltT)), 'number');
     if (objectDomain && scalarIndex)
       return `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(${base})`;
     return base;
@@ -5159,7 +5174,7 @@ function customCombiner(
  * operands).
  */
 export function requirePrimitiveElements(kind: string, arg: Expression): void {
-  const elt = collectionElementType(arg.type.type);
+  const elt = collectionElementType(jsType(arg));
   const primitive =
     elt !== undefined &&
     (elt === 'number' ||
@@ -5319,7 +5334,7 @@ function emitCollectionReduce(
  */
 function isElementwiseBigOpBody(body: Expression): boolean {
   if (isFunction(body, 'Tuple')) return false;
-  const tt = body.type.type;
+  const tt = jsType(body);
   if (typeof tt !== 'string' && tt.kind === 'tuple') return false;
   if (BaseCompiler.isComplexValued(body)) return false;
   return (

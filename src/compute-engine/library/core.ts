@@ -30,7 +30,6 @@ import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { randomCount } from './random-utils.js';
 import { interval } from '../numerics/interval.js';
 import { range, rangeLast } from './collections.js';
-import { typeToString } from '../../common/type/serialize.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
 import { randomExpression } from './random-expression.js';
@@ -499,11 +498,67 @@ function randomListType(
   domain: Expression | undefined,
   kOp: Expression | undefined
 ): Type {
-  const elt = domain ? typeToString(randomElementType(domain)) : 'any';
+  // Built STRUCTURALLY, not by serializing the element type into a `list<…>`
+  // string and reparsing it: the element type may name a user-declared type,
+  // which a resolver-less `parseType()` cannot read back.
+  const elt: Type = domain ? randomElementType(domain) : 'any';
   const count = kOp ? asSmallInteger(kOp) : null;
   if (count !== null && count > 0 && count <= MAX_RANDOM_ELEMENT_COUNT)
-    return parseType(`list<${elt}^${count}>`);
-  return parseType(`list<${elt}>`);
+    return { kind: 'list', elements: elt, dimensions: [count] };
+  return { kind: 'list', elements: elt };
+}
+
+/**
+ * Register the type declared by a `DeclareType` statement in the current
+ * lexical scope. Returns an `Error` value on failure, `null` on success.
+ *
+ * Called from both the canonical and the evaluate handler: the canonical pass
+ * makes the type visible to the statements canonicalized after it (a `Block`
+ * canonicalizes its statements in order, in the scope that is also the
+ * runtime frame), and the evaluate pass makes it visible on routes that skip
+ * canonicalization. Both passes are idempotent thanks to the
+ * `fromStatement` replace rule in `ce.declareType()`.
+ */
+function declareTypeStatement(
+  ce: ComputeEngine,
+  nameOp: Expression | undefined,
+  typeOp: Expression | undefined,
+  attrs: Expression | undefined
+): Expression | null {
+  // The name and the type are read off the RAW operands: a symbol or a string.
+  const name = nameOp
+    ? (isString(nameOp) ? nameOp.string : sym(nameOp)) ?? undefined
+    : undefined;
+  if (!name)
+    return ce.error(['invalid-type-declaration', 'Expected a type name']);
+
+  const typeStr = typeOp
+    ? (isString(typeOp) ? typeOp.string : sym(typeOp)) ?? undefined
+    : undefined;
+  if (!typeStr)
+    return ce.error(
+      ['invalid-type-declaration', 'Expected a type expression'],
+      name
+    );
+
+  // Nominal by default (mirrors `ce.declareType()`); `alias -> True` makes it
+  // a structural alias.
+  const alias =
+    attrs !== undefined && isDictionary(attrs)
+      ? sym(attrs.get('alias')) === 'True'
+      : false;
+
+  // Errors are values: an invalid name, a malformed type expression or a
+  // conflict with a host declaration must not throw to the host.
+  try {
+    ce.declareType(name, typeStr, { alias, fromStatement: true });
+  } catch (e) {
+    return ce.error(
+      ['invalid-type-declaration', e instanceof Error ? e.message : String(e)],
+      name
+    );
+  }
+  return null;
 }
 
 export const CORE_LIBRARY: SymbolDefinitions[] = [
@@ -637,7 +692,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       type: (args) => {
         if (args.length === 0) return 'nothing';
         if (args.length === 1) return args[0].type;
-        return parseType(`tuple<${args.map((a) => a.type).join(', ')}>`);
+        // Built STRUCTURALLY: serializing the operand types into a
+        // `tuple<…>` string and reparsing it loses any user-declared type
+        // name (a resolver-less `parseType()` cannot read it back).
+        return {
+          kind: 'tuple',
+          elements: args.map((a) => ({ type: a.type.type })),
+        };
       },
       canonical: (args, { engine: ce }) => {
         const xs = flatten(args);
@@ -1541,7 +1602,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const source =
             (isString(t) ? t.string : undefined) ?? sym(t) ?? undefined;
           if (source === undefined) return undefined;
-          const parsed = parseType(source);
+          // Parse WITH the resolver: the source is user-supplied and may name
+          // a user-declared type (`ce.declareType()` / `DeclareType`).
+          const parsed = parseType(source, ce._typeResolver);
           if (!isValidType(parsed)) return undefined;
           type = parsed;
           effectsDeclared = signatureEffects(parsed) !== undefined;
@@ -1714,6 +1777,50 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           throw e;
         }
         return hasValue ? value : ce.Nothing;
+      },
+    },
+
+    DeclareType: {
+      description:
+        'Declare a type in the current scope. The name is a symbol (or a ' +
+        'string) and the type a string holding a type expression, e.g. ' +
+        '`"tuple<x: integer, y: integer>"`. The type is nominal by default; ' +
+        'an optional trailing attributes dictionary with `alias -> True` ' +
+        'makes it a structural alias instead. The declaration also mints a ' +
+        'value constructor of the same name — `["point", 1, 2]`, an inert ' +
+        'tagged value for a nominal type, a checked identity for an alias — ' +
+        'except for a `record` body, which mints none. Evaluates to ' +
+        '`Nothing`.',
+      lazy: true,
+      // Introduces a type binding in a scope that outlives the application:
+      // the `scope` label (see `Declare`).
+      signature:
+        '(symbol|string, type: string|symbol, attributes: dictionary?) scope -> nothing',
+      // A STORING writer, like `Declare`: no position applies a
+      // function-valued operand.
+      invokes: false,
+      canonical: (args, { engine: ce }) => {
+        // The name and type operands are kept RAW: canonicalizing the name
+        // would auto-declare it as a variable (or bind a library constant),
+        // and canonicalizing the type would do the same to a type-name symbol
+        // such as `real`. Only a trailing attributes dictionary is
+        // canonicalized, so that its `.get(...)` accessor works.
+        const attrs = args[2]?.canonical;
+
+        // Register during the canonical pass, so that the statements
+        // canonicalized after this one (in the same `Block`) see the type.
+        const err = declareTypeStatement(ce, args[0], args[1], attrs);
+        if (err) return err;
+
+        const ops = [args[0], args[1]];
+        if (attrs) ops.push(attrs);
+        return ce._fn('DeclareType', ops);
+      },
+      evaluate: (ops, { engine: ce }) => {
+        // Idempotent: the canonical pass normally already registered the type
+        // in this same scope object, and `fromStatement` lets us replace our
+        // own record (with a possibly edited body).
+        return declareTypeStatement(ce, ops[0], ops[1], ops[2]) ?? ce.Nothing;
       },
     },
 

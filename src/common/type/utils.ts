@@ -16,6 +16,7 @@ import type {
   Type,
   ListType,
   FunctionSignature,
+  TypeReference,
   TypeString,
 } from './types.js';
 
@@ -311,6 +312,51 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
 
 export function isValidTypeName(name: string): boolean {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
+}
+
+/**
+ * The type a **representation** question should be answered from
+ * (`docs/plans/2026-08-01-nominal-types-design.md` §4.6 step 1).
+ *
+ * Compilation is type erasure: the nominal/structural distinction is static
+ * information, fully discharged by the checker before any code is emitted, so
+ * *layout* questions — is this numeric? how many vector components? is it a
+ * tuple? — must be answered by a type reference's DEFINITION, for aliases and
+ * nominal types alike. Admissibility is a different question and stays opaque
+ * for a nominal type (D3, `isSubtype`); this helper is only ever used where the
+ * compiler is asking about layout.
+ *
+ * A non-reference type is returned unchanged (identity for the overwhelming
+ * majority of calls), so this is safe to drop in at any compile type gate. An
+ * unresolved reference (`def === undefined`) is returned as-is: nothing is
+ * known about its layout, and every gate already treats an unrecognized type
+ * conservatively.
+ *
+ * A self-referential alias (`type alias json = list<json> | integer`) must not
+ * spin, so the walk is cycle-guarded: it remembers the reference RECORDS it has
+ * unfolded (the resolver hands back the same stable object for every occurrence
+ * of a name, so identity is the cycle test) and stops on the first repeat,
+ * returning that reference unresolved. An ACYCLIC chain of references unfolds
+ * to its body no matter how long. The guard state is local to this call — the
+ * loop is flat, so there is no re-entrancy to reason about, and no guard state
+ * is shared with `subtype.ts` (which must not import this module). The set is
+ * allocated only once a reference is actually unfolded, so the identity path
+ * (a non-reference type) allocates nothing.
+ */
+export function resolveTypeForCompilation(t: Readonly<Type>): Type {
+  let seen: Set<TypeReference> | undefined;
+  let result: Type = t as Type;
+  while (
+    typeof result === 'object' &&
+    result.kind === 'reference' &&
+    result.def !== undefined
+  ) {
+    seen ??= new Set();
+    if (seen.has(result)) return result;
+    seen.add(result);
+    result = result.def;
+  }
+  return result;
 }
 
 /**

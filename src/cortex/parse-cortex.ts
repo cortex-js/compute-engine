@@ -55,6 +55,11 @@ export function analyzeErrors(
  * `options.allowHostPragmas` (default `false`) gates the host-state pragmas
  * `#env`/`#navigator`: when off they emit a `host-pragma-disabled` diagnostic
  * instead of reading the host environment.
+ *
+ * `options.typeNames` seeds the type names an annotation may refer to (the
+ * host's already-declared types — `executeCortex` passes the engine's). A
+ * `type` statement in the program extends the set. A name in neither is still a
+ * parse-time `type-annotation-error`, so typos are caught early.
  */
 export function parseCortex(
   source: string,
@@ -62,12 +67,14 @@ export function parseCortex(
   options?: {
     parseLatex?: (latex: string) => MathJsonExpression;
     allowHostPragmas?: boolean;
+    typeNames?: readonly string[];
   }
 ): [MathJsonExpression, ParsingDiagnostic[]] {
   const parser = new Parser(source, {
     url,
     parseLatex: options?.parseLatex,
     allowHostPragmas: options?.allowHostPragmas,
+    typeNames: options?.typeNames,
   });
 
   const value: MathJsonExpression | null = parser.parseProgram();

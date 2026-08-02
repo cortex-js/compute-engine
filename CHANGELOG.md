@@ -2,6 +2,19 @@
 
 ### Breaking Changes
 
+- **Assignments now enforce a symbol's declared type on every route.** A
+  declared, non-inferred type was previously a declaration-time-only
+  contract: `ce.declare('n', 'integer')` followed by `ce.assign('n', 3.5)`
+  (or the `Assign` operator) silently installed the value while `n`'s type
+  kept reading `integer`. All three routes — declare-with-value, the
+  `Assign` operator, and `ce.assign` — now apply the same per-axis
+  compatibility check and reject an incompatible value. Inferred types keep
+  their widening behavior, structural aliases keep accepting matching
+  values, and the effects axis keeps its own provenance rules. Also fixed
+  on the way: `ce.declare(name, { type, value })` failed for any
+  user-declared type (resolver-less parse) and threw
+  `The type "…" is invalid` for any `BoxedType`-valued `type` field.
+
 - **`expr.isPure` is now computed by projecting effects through the actual
   operands and their current bindings**, replacing the older rule "the operator
   is pure and every operand is pure". Four answers change. `Hold(Random())` is
@@ -138,6 +151,17 @@
 
 ### Issues Resolved
 
+- **User-declared types now resolve everywhere a type can flow.** A batch of
+  sites parsed type strings without the engine's type resolver, so a
+  declared type name (`ce.declareType('point', …)`) threw
+  `Unknown type "point"` once it reached them: `expr.type.matches('point')`
+  and the other string-pattern predicates on `BoxedType`; the result-type
+  handlers of `Sequence`, `List`/`Set`/`Tuple`, `KeyValuePair`,
+  `Slice`/`Insert`/`Tally`/`ChunkBy` and ~20 other collection operators
+  (which re-serialized operand types into template strings and reparsed
+  them — they now build the type structurally); `Typed` annotations; and
+  signature-string sugar. Ground-type strings keep their cached fast path.
+
 - **A repeated pure user-function call inside a compiled function body is now
   bound once — collapsing exponential compiled recursion to linear.**
   `R(i) := R(i-1) + 0.5·S(x, y, R(i-1))` evaluated **both** `R(i-1)`
@@ -152,7 +176,25 @@
   size/score heuristics (a call's runtime cost is unrelated to its syntactic
   size); and top-level expressions keep the conservative Phase-1 stance —
   call sites are never merged across an expression, only within an emitted
-  definition body.
+  definition body. Post-review hardening: the admission gate validates the
+  resolved callee's BODY transitively, not just the call site — a body that
+  splices a string-`vars` entry (live source such as `next()`) or reaches an
+  impure function through a definition reassigned after the caller was
+  defined is never merged (both were reproducible unsound merges; pinned).
+
+- **The effects memo (`isPure`/`effects` on applications) is now
+  re-entrancy-safe: a self-recursive definition's body no longer reports a
+  wrong, read-order-dependent purity.** The effects projection follows
+  bindings, so the body of a recursive definition reaches its own nodes
+  re-entrantly — and the generation-guarded memo stamped the generation
+  BEFORE computing, so the re-entrant read returned the previous
+  generation's value (the assign-time in-flight `'any'` — or, the unsound
+  direction, a stale pure) as current, freezing it. Whether `isPure`
+  answered true or false depended on which node was read first. Re-entrant
+  reads now answer `'any'` provisionally without caching, and a value
+  computed from a provisional edge is returned but not frozen — the next
+  read recomputes it against settled answers. No behavior change for
+  non-recursive expressions.
 
 - **`FindFit`/`FindRoot` under an ambient `withTimeLimit` now return
   best-so-far instead of overrunning the budget by whole iterations — or
@@ -374,27 +416,62 @@
 
 ### New Features
 
-- **Programs can now declare their own types.** A new Cortex `type` statement —
-  `type point = tuple<number, number>` — declares a **structural type alias**
-  in the current scope, usable by any later annotation of the same program
-  (and by later cells on the same engine): `let p: point = (1, 2)`,
-  `function dist(a: point, b: point) { … }`. `type` is a **contextual
-  keyword**: only the statement-position shapes `type name =` and `type name<`
-  claim it, so existing uses of `type` as an ordinary identifier
-  (`let type = 5`, `type: integer = 4`) are untouched. Re-running a `type`
-  statement for the same name replaces the earlier statement's definition, so
-  notebook cells re-execute cleanly; a type declared inside a block stays in
-  the block. The statement lowers to a new **`DeclareType`** operator — the
-  MathJSON mirror of `ce.declareType()`: `["DeclareType", "point",
-  "'tuple<number, number>'"]` declares a nominal type, and a trailing
-  attributes dictionary with `alias -> True` (what the Cortex statement emits)
-  declares a structural alias. The generic-alias syntax is **reserved**:
+- **Programs can now declare their own types — and inhabit them.** A new
+  Cortex `type` statement comes in two forms:
+  `type point = tuple<x: number, y: number>` declares a **nominal** type — a
+  new, distinct type — while `type alias pair = tuple<number, number>`
+  declares a **structural alias**, compatible with any value matching the
+  definition. Either is usable by any later annotation of the same program
+  (and by later cells on the same engine): `let a: pair = (1, 2)`,
+  `function dist(a: pair, b: pair) { … }`. Neither `type` nor `alias` is a
+  reserved word: only the statement-position shapes `type name =`,
+  `type name<`, `type alias name =` and `type alias name<` claim them, so
+  existing uses of `type` as an ordinary identifier (`let type = 5`,
+  `type: integer = 4`) are untouched — and `type alias = …` still declares a
+  type *named* `alias`. A declaration also declares a **value constructor** of
+  the same name — `point(1, 2)`, an inert tagged value whose type is `point` —
+  which is what makes a nominal type inhabitable: a `tuple` definition gives
+  one argument per element (named, when the elements are named), any other
+  definition gives one argument (`type meters = number` → `meters(5)`), and
+  the arguments are checked against that signature. An **alias** declaration
+  mints a checked *identity* constructor instead: `pair(1, 2)` validates
+  `(1, 2)` and hands back the plain tuple, so a call site keeps working if a
+  type migrates between the two forms. A **`record`** definition mints
+  nothing — building one positionally would silently depend on the order its
+  fields are written in — and calling such a name reports a
+  `type-not-callable` warning, which is also what a declared type name in call
+  position used to produce silently: an inert application that *looked* like a
+  working constructor. Nominal values are **opaque**: `let q: point = (1, 2)`
+  is refused, and `First(p)` or `let (x, y) = p` do not pierce the tag —
+  values come back out through `match p { point(x, y) => x + y }`. Equality is
+  structural over the tag and constructors are injective, so
+  `point(1, 2) == point(1, 2)` is `True` while `point(1, 2) == (1, 2)` and
+  `polar(1, 2) == point(1, 2)` are `False`. The tag is **erased when
+  compiling**: `meters(x)` compiles to exactly the compiled `x`, and
+  `point(x, y)` compiles wherever a `Tuple` does, to the same code (a
+  JavaScript pair, a GLSL `vec2`) — a new type costs nothing at run time.
+  Declaring a type claims the type name and the value name **atomically**: a
+  collision with an existing binding in the same scope registers nothing and
+  returns an error value, an outer binding is shadowed, and re-running a
+  `type` statement replaces both halves, so notebook cells re-execute cleanly;
+  a type declared inside a block stays in the block. The statement lowers to a
+  new **`DeclareType`** operator — the MathJSON mirror of `ce.declareType()`:
+  `["DeclareType", "point", "'tuple<number, number>'"]` declares a nominal
+  type, and a trailing attributes dictionary with `alias -> True` (what
+  `type alias` emits) declares a structural alias; the host API takes a
+  `{ mint: false }` option for a declaration that must not claim the value
+  name. The generic-alias syntax is **reserved** in both forms:
   `type point<T> = tuple<T, T>` parses and reports a dedicated
   `type-variables-unsupported` diagnostic, so type variables can arrive
-  additively in a later release. Two fixes ride along: Cortex type
-  annotations now resolve types declared on the host engine
-  (`ce.declareType('point', …)` followed by `let p: point = (1, 2)` used to
-  fail at parse time with `Unknown type "point"`), and the `Declare`
+  additively in a later release. Three fixes ride along: a **structural alias
+  is now usable, not just assignable** — an alias reference on the *left* of
+  a subtype question unfolds to its definition, so `m + 1` with
+  `m: meters` (an alias of `number`) and `First(p)` with `p: pt` (an alias of
+  a tuple) work instead of failing `incompatible-type` at canonicalization
+  (a **nominal** type stays opaque: it is deliberately not a subtype of its
+  definition); Cortex type annotations now resolve types declared on the host
+  engine (`ce.declareType('point', …)` followed by `let p: point = (1, 2)`
+  used to fail at parse time with `Unknown type "point"`); and the `Declare`
   operator's evaluate path now resolves user-declared types (a box-route
   `["Declare", "p", "'point'"]` used to throw). A malformed type body no
   longer leaves a dangling unresolvable type reference behind in the scope.

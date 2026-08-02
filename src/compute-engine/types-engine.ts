@@ -671,7 +671,11 @@ export interface IComputeEngine {
     arg2?: AssignValue
   ): IComputeEngine;
 
-  declareType(name: string, type: Type, options?: { alias?: boolean }): void;
+  declareType(
+    name: string,
+    type: Type | TypeString | BoxedType,
+    options?: { alias?: boolean; fromStatement?: boolean; mint?: boolean }
+  ): void;
 
   declare(symbols: {
     [id: MathJsonSymbol]: Type | TypeString | Partial<SymbolDefinition>;

@@ -467,11 +467,21 @@ export class ComputeEngine implements IComputeEngine {
    *
    * By default, types are nominal. To declare a structural type, set
    * `alias` to `true`.
+   *
+   * `fromStatement` marks the declaration as coming from a `DeclareType`
+   * statement: such a declaration may be replaced by a later `DeclareType`
+   * statement for the same name in the same scope (a re-run of the program).
+   *
+   * A declaration also mints a value-level **constructor** operator of the
+   * same name in the same scope (nominal-types design §4.1): `point(1, 2)` is
+   * how a nominal type is inhabited. Minting is unconditional per the design;
+   * `mint: false` is an internal escape hatch for a declaration that must not
+   * claim the value name (no caller uses it today).
    */
   declareType(
     name: string,
     type: BoxedType | Type | TypeString,
-    options?: { alias?: boolean }
+    options?: { alias?: boolean; fromStatement?: boolean; mint?: boolean }
   ): void {
     declareTypeImpl(this, name, type, options);
   }

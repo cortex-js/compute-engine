@@ -2,6 +2,7 @@ import { MathJsonExpression, MathJsonSymbol } from '../math-json/types.js';
 import { Origin } from '../common/debug.js';
 import { parseType, parseTypePrefix } from '../common/type/parse.js';
 import { EFFECT_LABELS } from '../common/type/effects.js';
+import type { TypeResolver } from '../common/type/types.js';
 import {
   isStringObject,
   mapArgs,
@@ -164,6 +165,28 @@ export class Parser {
    * guard. See `parseMatch`. */
   private matchTypeGuards: MathJsonExpression[] = [];
 
+  /** Type names this program may refer to in an annotation: the host-supplied
+   * names (`typeNames`, seeded from the engine's type resolver) plus every name
+   * declared by a `type` statement parsed so far. Consulted by `typeResolver`,
+   * which is handed to every type subparse — without it even a host-declared
+   * type name would fail at parse time with `Unknown type`. */
+  private readonly knownTypeNames: Set<string>;
+
+  /** Resolver shim over `knownTypeNames`, handed to every `parseTypePrefix` /
+   * `parseType` call. The built `Type` is discarded by this parser (parse-time
+   * typing is only a syntax check), so resolving a name to the bare name is
+   * enough to make the reference parse. */
+  private readonly typeResolver: TypeResolver;
+
+  /** Statement-block nesting depth (incremented by `parseBlock`). A `type`
+   * statement at depth > 0 whose name is already known SHADOWS an existing
+   * type — nominal identity is the type NAME, so values of the two would be
+   * indistinguishable; the `type-shadow` warning makes the accident loud
+   * (ruled 2026-08-01, nominal-types design). Depth 0 stays silent: a
+   * top-level redeclaration is the legitimate statement-replace flow
+   * (re-running a notebook cell). */
+  private blockDepth = 0;
+
   constructor(
     source: string,
     options?: {
@@ -171,6 +194,7 @@ export class Parser {
       offset?: number;
       parseLatex?: (latex: string) => MathJsonExpression;
       allowHostPragmas?: boolean;
+      typeNames?: readonly string[];
     }
   ) {
     this.source = source;
@@ -178,6 +202,15 @@ export class Parser {
     this.baseOffset = options?.offset ?? 0;
     this.parseLatex = options?.parseLatex;
     this.allowHostPragmas = options?.allowHostPragmas ?? false;
+    this.knownTypeNames = new Set(options?.typeNames ?? []);
+    const names = this.knownTypeNames;
+    this.typeResolver = {
+      get names(): string[] {
+        return [...names];
+      },
+      forward: () => undefined,
+      resolve: (name: string) => (names.has(name) ? (name as any) : undefined),
+    };
     this.tokens = tokenize(source);
   }
 
@@ -362,6 +395,13 @@ export class Parser {
           return this.parseFor();
         case 'match':
           return this.parseMatch();
+        case 'type':
+          // `type` is a CONTEXTUAL keyword: it stays a legal identifier
+          // everywhere (`type = 5`, `type: integer = 4`, `let type = 5`, a bare
+          // `type`). Only the unambiguous statement shape — `type Name =` or
+          // the reserved generic slot `type Name<` — claims it as a head.
+          if (this.isTypeStatement()) return this.parseTypeStatement();
+          break;
       }
     }
 
@@ -386,6 +426,14 @@ export class Parser {
   private parseBlock(): MathJsonExpression {
     const open = this.advance(); // '{'
     this.brackets.push(open);
+
+    // Type names declared inside a block scope LEXICALLY at parse time:
+    // snapshot the known names on entry and restore them on exit, so a `type`
+    // statement in a block is not visible to annotations after it. The set is
+    // mutated in place (never replaced): `typeResolver` closes over the Set
+    // itself. Nested blocks each keep their own snapshot.
+    const outerTypeNames = new Set(this.knownTypeNames);
+    this.blockDepth += 1;
 
     const stmts: MathJsonExpression[] = [];
     for (;;) {
@@ -432,6 +480,10 @@ export class Parser {
       end = this.current.start;
       if (isCloseToken(this.current.type)) this.advance();
     }
+
+    this.blockDepth -= 1;
+    this.knownTypeNames.clear();
+    for (const n of outerTypeNames) this.knownTypeNames.add(n);
 
     return this.wrap(
       ['Block', ...stmts] as MathJsonExpression[],
@@ -689,6 +741,150 @@ export class Parser {
       start,
       end
     );
+  }
+
+  //
+  // ─── Type declarations (`type name = …` / `type alias name = …`) ──────────
+  //
+  // Two forms, mirroring the engine's `DeclareType` primitive:
+  //
+  //   type point = tuple<x: integer, y: integer>       // NOMINAL
+  //     → ["DeclareType", "point", {str: "tuple<x: integer, y: integer>"}]
+  //
+  //   type alias pair = tuple<number, number>          // STRUCTURAL alias
+  //     → ["DeclareType", "pair", {str: "tuple<number, number>"},
+  //          ["Dictionary", ["KeyValuePair", "alias", "True"]]]
+  //
+  // The name is a symbol and the body is the *trimmed source text* of the type
+  // (like every other Cortex type position — the parsed Type is discarded).
+  // The bare form declares a new, distinct type (nominal-by-default is already
+  // `DeclareType`'s contract, so it needs no attributes); the `alias` word —
+  // matching the `alias -> True` attribute and `ce.declareType`'s
+  // `{alias: true}` — declares a structural abbreviation.
+  //
+  // `alias` is NOT reserved: the disambiguation is pure lookahead. `type alias
+  // point = …` is an alias statement because a NAME and `=`/`<` follow
+  // `alias`; `type alias = tuple<…>` (only `=` after `alias`) declares a
+  // nominal type literally named `alias` — legal, discouraged, pinned in a
+  // test.
+  //
+  // `type name<…> = …` (a generic alias) is reserved syntax: recognized, then
+  // rejected with a `type-variables-unsupported` diagnostic. Both forms.
+  //
+
+  /** Does the current `type` SYMBOL token head a `type` statement? Only the
+   * shapes `type Name =` / `type Name<` and `type alias Name =` /
+   * `type alias Name<` claim it; everything else leaves `type` an ordinary
+   * identifier. */
+  private isTypeStatement(): boolean {
+    // `type alias Name =` / `type alias Name<`: probed FIRST, and it requires
+    // a NAME after `alias` — so `type alias = …` falls through to the bare
+    // form below, declaring a nominal type named `alias` (D8).
+    if (this.isTypeAliasAt(1)) return true;
+
+    const name = this.peek(1);
+    if (name.type !== 'SYMBOL') return false;
+    const next = this.peek(2);
+    return next.type === 'OPERATOR' && (next.text === '=' || next.text === '<');
+  }
+
+  /** Is the token `n` ahead of the current one the `alias` word of a
+   * `type alias Name =` / `type alias Name<` statement? */
+  private isTypeAliasAt(n: number): boolean {
+    const alias = this.peek(n);
+    if (alias.type !== 'SYMBOL' || alias.text !== 'alias') return false;
+    if (this.peek(n + 1).type !== 'SYMBOL') return false;
+    const next = this.peek(n + 2);
+    return next.type === 'OPERATOR' && (next.text === '=' || next.text === '<');
+  }
+
+  private parseTypeStatement(): MathJsonExpression | null {
+    const kw = this.advance(); // 'type'
+    // `alias` is consumed only in the `type alias Name =`/`<` shape (checked
+    // relative to the CURRENT token, now that `type` is consumed).
+    const isAlias = this.isTypeAliasAt(0);
+    if (isAlias) this.advance(); // 'alias'
+    const nameTok = this.advance(); // the type name
+    this.harvest(nameTok);
+    const name = nameTok.text;
+    if (RESERVED_WORDS.has(name)) {
+      this.error(['reserved-word', name], nameTok.start, nameTok.end);
+      return null;
+    }
+
+    // Record the name BEFORE the body is parsed: a type alias may refer to
+    // itself (`type json = list<json> | integer`), and later annotations in the
+    // same program must see it too.
+    const wasKnown = this.knownTypeNames.has(name);
+    // Shadowing an existing type inside a block merges nominal identities
+    // (identity is the NAME) — warn, but parse normally. Top level (depth 0)
+    // is the statement-replace flow and stays silent.
+    if (wasKnown && this.blockDepth > 0) {
+      this.diagnostics.push({
+        severity: 'warning',
+        message: ['type-shadow', name],
+        range: [
+          this.baseOffset + nameTok.start,
+          this.baseOffset + nameTok.end,
+        ],
+      });
+    }
+    this.knownTypeNames.add(name);
+    // …but undo that seeding on every failure path below: a declaration that
+    // did not parse declares nothing, and leaving the name in the set makes a
+    // later annotation parse cleanly only to fail at evaluation with a
+    // confusing `Unknown type`. A name that was ALREADY known (host-supplied,
+    // or an earlier `type` statement) is left alone.
+    const unseed = (): void => {
+      if (!wasKnown) this.knownTypeNames.delete(name);
+    };
+
+    // The reserved generic-alias slot.
+    if (this.check('OPERATOR') && this.current.text === '<') {
+      this.error(
+        ['type-variables-unsupported', name],
+        this.current.start,
+        this.current.end
+      );
+      unseed();
+      // Return `null`: `parseProgram`/`parseBlock` recover at the next
+      // statement boundary, so the rest of the program still parses.
+      return null;
+    }
+
+    const eq = this.advance(); // '='
+    const body = this.parseTypeBody(eq.end);
+    if (body === null) {
+      unseed();
+      return null;
+    }
+
+    const start = kw.start;
+    const end = body.end;
+    const parts: MathJsonExpression[] = [
+      'DeclareType',
+      this.wrap({ sym: name }, nameTok.start, nameTok.end),
+      body.node,
+    ];
+    // Only the `alias` form carries attributes: the bare form is nominal, and
+    // nominal is `DeclareType`'s default.
+    if (isAlias)
+      parts.push(
+        this.wrap(
+          [
+            'Dictionary',
+            this.kvPair(
+              'alias',
+              this.wrap({ sym: 'True' }, start, end),
+              start,
+              end
+            ),
+          ] as MathJsonExpression[],
+          start,
+          end
+        )
+      );
+    return this.wrap(parts, start, end);
   }
 
   //
@@ -1831,7 +2027,7 @@ export class Parser {
     let message = '';
     for (const candidate of candidates) {
       try {
-        parseType(candidate);
+        parseType(candidate, this.typeResolver);
         return candidate;
       } catch (e) {
         const err = e as { rawMessage?: string };
@@ -1908,7 +2104,10 @@ export class Parser {
   private parseHeldType(): MathJsonExpression | null {
     const start = this.current.start;
     try {
-      const { end } = parseTypePrefix(this.source.slice(start));
+      const { end } = parseTypePrefix(
+        this.source.slice(start),
+        this.typeResolver
+      );
       const typeString = this.source.slice(start, start + end).trim();
       this.advanceToOffset(start + end);
       return this.wrap({ str: typeString }, start, start + end);
@@ -1964,13 +2163,27 @@ export class Parser {
     end: number;
   } | null {
     const colonTok = this.advance(); // ':'
+    return this.parseTypeBody(colonTok.end);
+  }
 
-    // Parse the type from the remaining source (local offsets).
-    const typeSourceStart = colonTok.end;
+  /** Parse a type starting at the (local) source offset `typeSourceStart` —
+   * the raw text after a `:` annotation marker or a `type name =` head. The
+   * type is parsed by the engine's `common/type` prefix subparser (with this
+   * parser's known-type-name resolver), then parsing resumes in Cortex just
+   * past the type. Returns the held `{str}` type node and its end offset, or
+   * `null` on a malformed type (after emitting a `type-annotation-error`
+   * diagnostic and recovering at top level). */
+  private parseTypeBody(typeSourceStart: number): {
+    node: MathJsonExpression;
+    end: number;
+  } | null {
     let typeEnd: number;
     let typeString: string;
     try {
-      const { end } = parseTypePrefix(this.source.slice(typeSourceStart));
+      const { end } = parseTypePrefix(
+        this.source.slice(typeSourceStart),
+        this.typeResolver
+      );
       typeEnd = typeSourceStart + end;
       typeString = this.source.slice(typeSourceStart, typeEnd).trim();
       this.advanceToOffset(typeEnd);

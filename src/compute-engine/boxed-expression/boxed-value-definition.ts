@@ -159,8 +159,15 @@ export class _BoxedValueDefinition
     if (def.type) {
       // Note: the type can be narrowed or widened. The canonicalization
       // handlers cannot make assumptions based on the type.
+      // A type STRING may name a type declared in this engine's scopes, so it
+      // has to be parsed against the resolver — without it `{ type: "point" }`
+      // fails to parse and reports the user type as invalid. And `isValidType`
+      // takes a `Type`, not a `BoxedType`: handing it the wrapper made every
+      // `{ type: ce.type(…) }` declaration report "invalid".
       const type =
-        def.type instanceof BoxedType ? def.type : parseType(def.type);
+        def.type instanceof BoxedType
+          ? def.type.type
+          : parseType(def.type, ce._typeResolver);
       if (!isValidType(type))
         throw new Error(
           [`Symbol "${this.name}"`, `The type "${def.type}" is invalid `].join(

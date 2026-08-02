@@ -606,6 +606,46 @@ export function serializeCortex(
       return fmt.line(...parts);
     },
 
+    //
+    // Type declarations: reconstruct the `type` statement syntax (both forms,
+    // mirroring the parser's lowering).
+    //
+    //   ["DeclareType", "point", {str:"tuple<number, number>"}]
+    //                                → type point = tuple<number, number>
+    //   ["DeclareType", "pair", {str:"tuple<number, number>"},
+    //     ["Dictionary", ["KeyValuePair", "alias", "True"]]]
+    //                                → type alias pair = tuple<number, number>
+    //
+    // A bare `type` declares a NOMINAL type (no attributes needed — nominal is
+    // `DeclareType`'s default); `type alias` declares a structural alias. Any
+    // other attributes bag falls back to the generic function form.
+    //
+    DeclareType: (expr: MathJsonExpression): FormattingBlock => {
+      const args = operands(expr);
+      if (args.length !== 2 && args.length !== 3)
+        return serializeGenericFunction(expr);
+
+      const name = symbol(args[0]) ?? stringValue(args[0]);
+      const body = stringValue(args[1]) ?? symbol(args[1]);
+      if (name === null || body === null) return serializeGenericFunction(expr);
+
+      if (args.length === 2) return fmt.line('type ', name, ' = ', body);
+
+      const attrs = args[2];
+      if (operator(attrs) !== 'Dictionary')
+        return serializeGenericFunction(expr);
+      const entries = operands(attrs);
+      if (entries.length !== 1) return serializeGenericFunction(expr);
+      const entry = entries[0];
+      if (operator(entry) !== 'KeyValuePair')
+        return serializeGenericFunction(expr);
+      const key = stringValue(operand(entry, 1)) ?? symbol(operand(entry, 1));
+      if (key !== 'alias' || symbol(operand(entry, 2)) !== 'True')
+        return serializeGenericFunction(expr);
+
+      return fmt.line('type alias ', name, ' = ', body);
+    },
+
     Assign: (expr: MathJsonExpression): FormattingBlock => {
       const name = operand(expr, 1);
       const rhs = operand(expr, 2);

@@ -47,6 +47,11 @@ import {
   updateDef,
 } from './boxed-expression/utils.js';
 import { canonicalFunctionLiteral, lookup } from './function-utils.js';
+import {
+  checkTypeConstructorNamespace,
+  isMintedConstructor,
+  mintTypeConstructor,
+} from './type-constructors.js';
 import { isFunction } from './boxed-expression/type-guards.js';
 import {
   functionLiteralDeclaredEffects,
@@ -446,14 +451,47 @@ export function declareType(
   ce: IComputeEngine,
   name: string,
   type: BoxedType | Type | TypeString,
-  { alias }: { alias?: boolean } = {}
+  {
+    alias,
+    fromStatement,
+    mint,
+  }: { alias?: boolean; fromStatement?: boolean; mint?: boolean } = {}
 ): void {
   if (!isValidTypeName(name)) throw Error(`The type name "${name}" is invalid`);
 
+  // A type declaration claims BOTH namespaces: the type record, and a
+  // value-level constructor of the same name (nominal-types design §4.1/D5).
+  // Minting is unconditional per the design — including for the engine's own
+  // bootstrap declarations, which therefore put `limits(…)`/`distribution(…)`
+  // in the system scope. `mint: false` is an INTERNAL escape hatch kept for a
+  // declaration that must not claim the value name; no caller uses it today.
+  mint ??= true;
+
   // Is the type already defined in this scope?
   const scope = ce.context.lexicalScope;
-  if (scope.types?.[name])
-    throw Error(`The type "${name}" is already defined in the current scope`);
+  const existing = scope.types?.[name];
+  if (existing) {
+    // A record this scope created from a `DeclareType` statement (marked
+    // `_declaredByStatement`, mirroring the `Declare` operator handler) is
+    // ours to replace: the same program may be canonicalized then evaluated,
+    // or re-run in a notebook with an edited definition. Any other conflict
+    // (a host `ce.declareType()`, a builtin) still throws.
+    if (
+      !fromStatement ||
+      (existing as { _declaredByStatement?: boolean })._declaredByStatement !==
+        true
+    )
+      throw Error(`The type "${name}" is already defined in the current scope`);
+  }
+
+  // D5, atomicity: the value half is checked BEFORE anything is mutated, so a
+  // collision leaves neither namespace touched — not the existing type record,
+  // not the recursion placeholder below. An outer-scope binding is shadowed,
+  // not conflicted; an inferred (valueless, auto-declared) binding upgrades; a
+  // constructor we minted earlier is ours to replace.
+  if (mint) checkTypeConstructorNamespace(scope, name);
+
+  if (existing) delete scope.types![name];
 
   scope.types ??= {};
 
@@ -461,18 +499,52 @@ export function declareType(
 
   // First, add a placeholder record to allow recursive types
   scope.types[name] = { kind: 'reference', name, alias, def: undefined };
+  if (fromStatement)
+    (
+      scope.types[name] as { _declaredByStatement?: boolean }
+    )._declaredByStatement = true;
 
-  // Parse the type (which may reference itself)
-  const def =
-    type instanceof BoxedType
-      ? type.type
-      : typeof type === 'string'
-        ? parseType(type, ce._typeResolver)
-        : type;
+  // Parse the type (which may reference itself). If it is malformed, leave
+  // the scope as it was: a placeholder with no `def` is a dangling reference
+  // that later resolves to a broken type.
+  let def: Type;
+  try {
+    def =
+      type instanceof BoxedType
+        ? type.type
+        : typeof type === 'string'
+          ? parseType(type, ce._typeResolver)
+          : type;
+  } catch (e) {
+    delete scope.types[name];
+    if (existing) scope.types[name] = existing;
+    throw e;
+  }
 
   // Adjust the definition (the type references in the type will point to
   // the placeholder record)
   scope.types[name].def = def;
+
+  // Mint the value-level constructor (§4.1, D4/D4b/D10). If it cannot be
+  // declared, roll BOTH halves back: the registration is atomic across the two
+  // namespaces. The value half needs its own snapshot because minting is not
+  // atomic internally — it drops a previously minted constructor first, then
+  // `ce.declare()` installs a placeholder binding BEFORE `updateDef()` builds
+  // the real definition, and that construction can throw. Without the restore
+  // a failure leaves the old constructor gone and a dead placeholder bound.
+  if (mint) {
+    const existingBinding = scope.bindings.get(name);
+    try {
+      mintTypeConstructor(ce, scope, name, scope.types[name], def);
+    } catch (e) {
+      delete scope.types[name];
+      if (existing) scope.types[name] = existing;
+      if (existingBinding !== undefined)
+        scope.bindings.set(name, existingBinding);
+      else scope.bindings.delete(name);
+      throw e;
+    }
+  }
 }
 
 export function declareFn(
@@ -758,6 +830,18 @@ export function assignFn(
       systemScope.bindings.get(id) === def &&
       ce.context.lexicalScope !== systemScope;
 
+    // A minted type constructor is one half of a type declaration's claim on
+    // BOTH namespaces (nominal-types design, D5). Every branch below replaces
+    // the inner operator definition wholesale — which drops the minted marker
+    // — so an in-place assignment would leave the type still resolving with
+    // nothing able to build a value of it. Refuse it, in the shape of the
+    // constant-reassignment error: the host route throws, the `Assign`
+    // operator route surfaces it as an `Error` value.
+    // A SHADOWING assignment is fine: it binds a new name in the current
+    // scope and leaves the declaration's own scope untouched.
+    if (!shadowBuiltin && isMintedConstructor(def))
+      throw Error(`Cannot assign a value to the constructor of type "${id}"`);
+
     const value = assignValueAsValue(ce, arg2);
     if (value !== undefined) {
       if (shadowBuiltin) {
@@ -907,6 +991,33 @@ export function assignFn(
       def.value.type = ce.type(
         typeof widened === 'object' && widened.kind === 'union' ? vt : widened
       );
+    } else if (!def.value.type.isUnknown) {
+      // ... or, when the type was DECLARED (not on the inferred track), hold
+      // the assigned value to it — the same per-axis check the
+      // declare-with-value route applies in the `_BoxedValueDefinition`
+      // constructor. Without it a declared type was a contract only at
+      // declaration time: `ce.declare('p', 'point')` followed by an assignment
+      // of a merely structurally-similar value silently installed a value the
+      // `Declare(p, "point", …)` spelling rejects. `matchesDeclaredTypeAxes`
+      // (rather than a bare `matches()`) keeps the effects axis judged by its
+      // own provenance, so a `{scope}`-inferred closure still fits a
+      // bare-specifier declared arrow.
+      if (
+        !matchesDeclaredTypeAxes(
+          ce,
+          value.type,
+          def.value.type,
+          def.value.effectsDeclared
+        )
+      )
+        throw new Error(
+          [
+            `Symbol "${id}"`,
+            `The value "${value.toString()}" of type "${
+              value.type
+            }" is not compatible with the type "${def.value.type}"`,
+          ].join('\n|   ')
+        );
     }
 
     // ... and set the value

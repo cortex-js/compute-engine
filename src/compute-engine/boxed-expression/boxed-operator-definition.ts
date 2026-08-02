@@ -753,12 +753,21 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       ) {
         const body = boxedFn.ops[0];
         const params = boxedFn.ops.slice(1);
-        const bodyType = body.type.toString();
-        const paramTypes = params.map(() => 'unknown').join(', ');
-        this.signature = new BoxedType(
-          `(${paramTypes}) -> ${bodyType}`,
-          this.engine._typeResolver
-        );
+        // The signature is assembled as a Type OBJECT, never as a string that
+        // is re-parsed: a body type may REFERENCE a type declared inside the
+        // body's own scope (`function f(a) { type inner = …; inner(a, a) }`),
+        // and that name is not resolvable from the declaration site the
+        // definition is installed at — serializing it to `"(unknown) -> inner"`
+        // and re-parsing here threw "Unknown type". The `TypeReference` object
+        // carries its own `def`, so it stays usable wherever it escapes to.
+        const signature: Type = {
+          kind: 'signature',
+          ...(params.length > 0
+            ? { args: params.map(() => ({ type: 'unknown' as Type })) }
+            : {}),
+          result: body.type.type,
+        };
+        this.signature = new BoxedType(signature, this.engine._typeResolver);
       }
 
       // Mark this operator definition as backed by a user-defined function

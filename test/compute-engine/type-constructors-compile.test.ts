@@ -1,0 +1,412 @@
+import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+
+//
+// Phase 2 of the nominal-types design
+// (`docs/plans/2026-08-01-nominal-types-design.md` §4.6, D11): COMPILATION IS
+// TYPE ERASURE.
+//
+// The governing equivalence rule: a constructor application compiles exactly
+// where the equivalent plain value compiles, per target, to the same emission.
+//   - `meters(x)` compiles wherever `x` does, to exactly the compiled `x`;
+//   - `point(1, 2)` compiles wherever `Tuple(1, 2)` does, to the same emission
+//     (JS pair, GLSL `vec2`);
+//   - where the plain shape declines, the constructor declines identically.
+// No more, no less. Alias identity constructors erase the same way.
+//
+// "Wherever the plain value compiles" is bounded by OPACITY (D3), upstream:
+// `Sin(meters(x))` never reaches the compiler at all — it is an
+// `incompatible-type` error at canonicalization, because a `meters` is not a
+// number. That static discipline is exactly what makes erasing the tag sound,
+// so the larger contexts exercised here are the ones the checker admits
+// (`Tuple`, `List`, `If`, the root).
+//
+// The other half of the phase is reference unfolding at the compile type
+// gates (§4.6 step 1): a `type alias` / nominal `type` reference answers a
+// REPRESENTATION question (numeric? how many vector components? tuple?) as its
+// DEFINITION — for aliases, where it is also the admissibility answer, and for
+// nominal types, whose admissibility stays opaque.
+//
+
+/** A `CompilationResult` that declined reports empty code. */
+function jsCode(ce: ComputeEngine, expr: unknown): string {
+  return compile(ce.box(expr as never))?.code ?? '';
+}
+
+/** GLSL source, or `'DECLINE'` when the target failed closed. A fresh target
+ * per call, so generated-name numbering never leaks between assertions. */
+function glslCode(ce: ComputeEngine, expr: unknown): string {
+  try {
+    return new GLSLTarget().compile(ce.box(expr as never)).code;
+  } catch {
+    return 'DECLINE';
+  }
+}
+
+describe('SCALAR NEWTYPE — pure erasure (D11 step A)', () => {
+  test('a nominal constructor compiles to exactly its compiled operand', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('meters', 'number');
+    ce.declare('x', 'number');
+    const body = ce.box(['Add', ['Sin', 'x'], ['Power', 'x', 2]]);
+    expect(jsCode(ce, ['meters', body])).toBe(jsCode(ce, body));
+    expect(jsCode(ce, ['meters', body])).toBe('(_.x * _.x) + Math.sin(_.x)');
+  });
+
+  test('inside a larger compiled expression', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('meters', 'number');
+    ce.declare('x', 'number');
+    ce.declare('y', 'number');
+    const tagged = ['If', ['Greater', 'x', 0], ['meters', 'x'], ['meters', 'y']];
+    const plain = ['If', ['Greater', 'x', 0], 'x', 'y'];
+    expect(jsCode(ce, tagged)).toBe(jsCode(ce, plain));
+    expect(jsCode(ce, tagged)).toBe('((0 < _.x) ? (_.x) : (_.y))');
+    expect(glslCode(ce, tagged)).toBe(glslCode(ce, plain));
+    expect(glslCode(ce, tagged)).toBe('((0.0 < x) ? (x) : (y))');
+  });
+
+  test('the erased kernel agrees with the tagless one, numerically', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('meters', 'number');
+    ce.declare('x', 'number');
+    const body = ce.box(['Add', ['Sin', 'x'], ['Power', 'x', 2]]);
+    const plain = compile(body).run!;
+    const tagged = compile(ce.box(['meters', body])).run!;
+    for (const v of [0.3, 1.7, -2.1]) {
+      // Against the tagless compilation…
+      expect(tagged({ x: v })).toBe(plain({ x: v }));
+      // …and against an INDEPENDENT numeric evaluation (verify empirically).
+      const n = ce
+        .box([
+          'Block',
+          ['Declare', 'x', 'number'],
+          ['Assign', 'x', v],
+          ['Add', ['Sin', 'x'], ['Power', 'x', 2]],
+        ])
+        .N();
+      expect(tagged({ x: v })).toBeCloseTo(n.re, 12);
+    }
+  });
+
+  test('a scalar newtype erases on the GLSL target too', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('meters', 'number');
+    ce.declare('x', 'number');
+    ce.declare('y', 'number');
+    expect(glslCode(ce, ['Tuple', ['meters', 'x'], ['meters', 'y']])).toBe(
+      glslCode(ce, ['Tuple', 'x', 'y'])
+    );
+    expect(glslCode(ce, ['Tuple', ['meters', 'x'], ['meters', 'y']])).toBe(
+      'vec2(x, y)'
+    );
+  });
+
+  test('an ALIAS identity constructor erases the same way', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('mm', 'number', { alias: true });
+    ce.declare('x', 'number');
+    // `mm(x)` evaluates to the plain `x`, but it can appear UN-evaluated
+    // inside a compiled expression — it must erase there too.
+    expect(jsCode(ce, ['Add', ['mm', 'x'], 1])).toBe(
+      jsCode(ce, ['Add', 'x', 1])
+    );
+    expect(jsCode(ce, ['Add', ['mm', 'x'], 1])).toBe('_.x + 1');
+  });
+
+  test('a non-scalar (list) body erases to its operand', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('ids', 'list<integer>');
+    ce.declare('L', 'list<integer>');
+    expect(jsCode(ce, ['ids', 'L'])).toBe(jsCode(ce, 'L'));
+    expect(jsCode(ce, ['ids', 'L'])).toBe('_.L');
+  });
+});
+
+describe('REFERENCE UNFOLDING at the compile type gates (§4.6 step 1)', () => {
+  test('an alias-typed scalar symbol compiles in arithmetic', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('meters', 'number', { alias: true });
+    ce.declare('m', 'meters');
+    const expr = ce.box(['Add', 'm', 1]);
+    expect(expr.isValid).toBe(true);
+    expect(jsCode(ce, ['Add', 'm', 1])).toBe('_.m + 1');
+    expect(compile(expr).run!({ m: 4 })).toBe(5);
+    expect(glslCode(ce, ['Add', 'm', 1])).toBe('m + 1.0');
+  });
+
+  test('an alias of a tuple derives the same shader WIDTH as the tuple', () => {
+    // Before the unfold, `At(p, 1)` failed closed on GLSL with "the base
+    // (type `pt`) is not a statically counted collection" while the
+    // structurally identical `q` compiled to `q.x`.
+    const ce = new ComputeEngine();
+    ce.declareType('pt', 'tuple<number, number>', { alias: true });
+    ce.declare('p', 'pt');
+    ce.declare('q', 'tuple<number, number>');
+    // Same emission up to the operand's own name.
+    expect(glslCode(ce, ['At', 'p', 1])).toBe(
+      glslCode(ce, ['At', 'q', 1]).replace('q', 'p')
+    );
+    expect(glslCode(ce, ['At', 'p', 1])).toBe('p.x');
+    expect(glslCode(ce, ['Norm', 'p'])).toBe(
+      glslCode(ce, ['Norm', 'q']).replace('q', 'p')
+    );
+    expect(glslCode(ce, ['Norm', 'p'])).toBe('length(p)');
+  });
+
+  test('a NOMINAL tuple-typed symbol: representation unfolds, admissibility does not', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('point', 'tuple<number, number>');
+    ce.declare('n', 'point');
+    ce.declare('q', 'tuple<number, number>');
+    // A `vecN` component must be a scalar, so a vec2-valued component has no
+    // shader lowering: both fail closed, identically. (Before the unfold, the
+    // nominal one emitted `vec2(n, n)` — invalid shader source behind
+    // `success: true`.)
+    expect(glslCode(ce, ['Tuple', 'n', 'n'])).toBe('DECLINE');
+    expect(glslCode(ce, ['Tuple', 'q', 'q'])).toBe('DECLINE');
+    // Opacity (D3) is untouched: a `point` is not an indexed collection, so
+    // `At(n, 1)` never reaches the compiler at all.
+    expect(ce.box(['At', 'n', 1]).isValid).toBe(false);
+    expect(ce.box(['At', 'q', 1]).isValid).toBe(true);
+  });
+});
+
+describe('TUPLE-BODY CONSTRUCTOR — follows `Tuple` (D11 step B)', () => {
+  test('JS: compiles where `Tuple` compiles, to the same emission', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('point', 'tuple<x: number, y: number>');
+    ce.declare('x', 'number');
+    ce.declare('y', 'number');
+    expect(jsCode(ce, ['point', 1, 2])).toBe(jsCode(ce, ['Tuple', 1, 2]));
+    expect(jsCode(ce, ['point', 1, 2])).toBe('[1, 2]');
+    expect(jsCode(ce, ['point', 'x', 'y'])).toBe(
+      jsCode(ce, ['Tuple', 'x', 'y'])
+    );
+    expect(jsCode(ce, ['point', 'x', 'y'])).toBe('[_.x, _.y]');
+    expect(compile(ce.box(['point', 'x', 'y'])).run!({ x: 3, y: 4 })).toEqual([
+      3, 4,
+    ]);
+  });
+
+  test('GLSL: a fixed-width numeric tuple body is the target `vecN`', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('point', 'tuple<x: number, y: number>');
+    ce.declareType('rgb', 'tuple<number, number, number>');
+    ce.declare('x', 'number');
+    ce.declare('y', 'number');
+    ce.declare('z', 'number');
+    expect(glslCode(ce, ['point', 'x', 'y'])).toBe(
+      glslCode(ce, ['Tuple', 'x', 'y'])
+    );
+    expect(glslCode(ce, ['point', 'x', 'y'])).toBe('vec2(x, y)');
+    expect(glslCode(ce, ['rgb', 'x', 'y', 'z'])).toBe(
+      glslCode(ce, ['Tuple', 'x', 'y', 'z'])
+    );
+    expect(glslCode(ce, ['rgb', 'x', 'y', 'z'])).toBe('vec3(x, y, z)');
+  });
+
+  test('the compiled point agrees with the interpreter, numerically', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('point', 'tuple<x: number, y: number>');
+    ce.declare('x', 'number');
+    const run = compile(ce.box(['point', 'x', ['Sin', 'x']])).run!;
+    for (const v of [0.3, 1.7, -2.1]) {
+      const n = ce
+        .box([
+          'Block',
+          ['Declare', 'x', 'number'],
+          ['Assign', 'x', v],
+          ['Tuple', 'x', ['Sin', 'x']],
+        ])
+        .N();
+      const expected = [n.op1.re, n.op2.re];
+      const got = run({ x: v }) as number[];
+      expect(got[0]).toBeCloseTo(expected[0], 12);
+      expect(got[1]).toBeCloseTo(expected[1], 12);
+    }
+  });
+
+  test('an ALIAS tuple constructor emits the same tuple', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('pt', 'tuple<number, number>', { alias: true });
+    expect(jsCode(ce, ['pt', 1, 2])).toBe(jsCode(ce, ['Tuple', 1, 2]));
+    expect(jsCode(ce, ['pt', 1, 2])).toBe('[1, 2]');
+  });
+
+  test('JS: DECLINES exactly where `Tuple` declines', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('point', 'tuple<number, number>');
+    ce.declare('x', 'number');
+    // An operand with no lowering takes the whole construction down — for the
+    // plain tuple and for the constructor alike.
+    expect(jsCode(ce, ['Tuple', 1, ['Unknown9', 'x']])).toBe('');
+    expect(jsCode(ce, ['point', 1, ['Unknown9', 'x']])).toBe('');
+  });
+
+  test('GLSL: DECLINES exactly where `Tuple` declines', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('pair', 'tuple<tuple<number,number>, tuple<number,number>>');
+    ce.declare('q', 'tuple<number, number>');
+    // A `vecN` component must be a scalar: a tuple of tuples has no shader
+    // lowering. Both fail closed.
+    expect(glslCode(ce, ['Tuple', 'q', 'q'])).toBe('DECLINE');
+    expect(glslCode(ce, ['pair', 'q', 'q'])).toBe('DECLINE');
+    // The very same body DOES compile on JS, where a tuple is a plain array —
+    // "wherever the plain shape compiles" is answered per target.
+    expect(jsCode(ce, ['pair', 'q', 'q'])).toBe(
+      jsCode(ce, ['Tuple', 'q', 'q'])
+    );
+    expect(jsCode(ce, ['pair', 'q', 'q'])).toBe('[_.q, _.q]');
+  });
+});
+
+describe('DECLINES CLEANLY — never throws', () => {
+  test('a record body has no constructor at all (D4b)', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('rec', 'record<x: number, y: number>');
+    expect(ce.lookupDefinition('rec')).toBeUndefined();
+    // Nothing minted, so `rec(…)` is an unknown operator: it declines with no
+    // code, and does not throw out of `compile()`.
+    expect(() => compile(ce.box(['rec', 1]))).not.toThrow();
+    expect(jsCode(ce, ['rec', 1])).toBe('');
+  });
+
+  test('an uncompilable payload declines like the payload does', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('bag', 'dictionary<number>');
+    const d = ce.box(['Dictionary', ['KeyValuePair', "'a'", 1]]);
+    expect(() => compile(ce.box(['bag', d]))).not.toThrow();
+    expect(jsCode(ce, ['bag', d])).toBe(jsCode(ce, d));
+  });
+});
+
+describe('ERASURE IS FLAG-DRIVEN, never a name table', () => {
+  test('an ordinary operator named like a type is unaffected', () => {
+    const ce = new ComputeEngine();
+    // Not minted by a type declaration: no `_mintedTypeConstructor` marker,
+    // so no erasure — it keeps the ordinary "no lowering" decline.
+    ce.declare('meters', { signature: '(number) -> number' });
+    expect(jsCode(ce, ['meters', 5])).toBe('');
+  });
+
+  test('a user operator shaped like a tuple constructor is unaffected', () => {
+    const ce = new ComputeEngine();
+    ce.declare('point', {
+      signature: '(number, number) -> tuple<number,number>',
+    });
+    expect(jsCode(ce, ['point', 1, 2])).toBe('');
+  });
+});
+
+describe('ABSENCE AXIS — the reference unfolds BEFORE the missing-strip', () => {
+  // `stripMissingFromType` is structural: it does not see through a
+  // `reference`, so an alias of `T | missing` survives the strip intact. If the
+  // strip runs first, the still-unstripped union is not `<: number` and the
+  // JavaScript target picks the OBJECT (null) absence axis for what is a
+  // numeric-domain hole — compiled `IsMissing`/`Coalesce` then disagree with
+  // the interpreter (`IsMissing(NaN)` came out `false`). Unfolding first makes
+  // the alias spelling indistinguishable from the inline one, which is the
+  // erasure rule of this phase.
+  test('an alias of `number | missing` selects the NaN axis, like the inline spelling', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('maybe_n', 'number | missing', { alias: true });
+    ce.declare('x', 'maybe_n');
+    ce.declare('y', 'number | missing');
+
+    expect(jsCode(ce, ['IsMissing', 'x'])).toBe('Number.isNaN(_.x)');
+    expect(jsCode(ce, ['IsMissing', 'x'])).toBe(
+      jsCode(ce, ['IsMissing', 'y']).replace(/_\.y/g, '_.x')
+    );
+    // …and it agrees with the interpreter, which reads a numeric-slot hole as
+    // `NaN` (I6).
+    const isMissing = compile(ce.box(['IsMissing', 'x'])).run!;
+    expect(isMissing({ x: NaN })).toBe(true);
+    expect(isMissing({ x: 5 })).toBe(false);
+    expect(ce.box(['IsMissing', 'NaN']).evaluate().symbol).toBe('True');
+  });
+
+  test('`Coalesce` over an alias of `number | missing` discharges on the NaN axis', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('maybe_n', 'number | missing', { alias: true });
+    ce.declare('x', 'maybe_n');
+    ce.declare('y', 'number | missing');
+
+    expect(jsCode(ce, ['Coalesce', 'x', 0])).toBe(
+      jsCode(ce, ['Coalesce', 'y', 0]).replace(/_\.y/g, '_.x')
+    );
+    // NOT the `??` object axis: `NaN ?? 0` is `NaN`, which would disagree.
+    expect(jsCode(ce, ['Coalesce', 'x', 0])).not.toMatch(/\?\?/);
+    const coalesce = compile(ce.box(['Coalesce', 'x', 0])).run!;
+    expect(coalesce({ x: NaN })).toBe(0);
+    expect(coalesce({ x: 5 })).toBe(5);
+  });
+
+  test('an OBJECT-domain alias still picks the object (null) axis', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('maybe_s', 'string | missing', { alias: true });
+    ce.declare('s', 'maybe_s');
+    ce.declare('t', 'string | missing');
+    expect(jsCode(ce, ['IsMissing', 's'])).toBe('(_.s === undefined)');
+    expect(jsCode(ce, ['IsMissing', 's'])).toBe(
+      jsCode(ce, ['IsMissing', 't']).replace(/_\.t/g, '_.s')
+    );
+    expect(jsCode(ce, ['Coalesce', 's', { str: 'd' }])).toBe(
+      jsCode(ce, ['Coalesce', 't', { str: 'd' }]).replace(/_\.t/g, '_.s')
+    );
+  });
+
+  test('a NOMINAL reference answers the axis from its definition too (D3 is admissibility, not layout)', () => {
+    // Reachable: `IsMissing`/`Coalesce` accept `any`, so opacity does not
+    // reject the operand upstream — the compiler really does get asked the
+    // layout question about a nominal reference.
+    const ce = new ComputeEngine();
+    ce.declareType('mn', 'number | missing');
+    ce.declare('x', 'mn');
+    expect(ce.box('x').type.toString()).toBe('mn');
+    expect(jsCode(ce, ['IsMissing', 'x'])).toBe('Number.isNaN(_.x)');
+    expect(compile(ce.box(['IsMissing', 'x'])).run!({ x: NaN })).toBe(true);
+  });
+});
+
+describe('BOUNDARY MARSHALLING — the current world (§4.6 step 4)', () => {
+  // FINDING (2026-08-01): no compiled-kernel seam can carry a nominal type
+  // end to end today, so no unwrap/re-tag machinery is built.
+  //
+  //   - `CompilationResult` carries no signature: `calling`, `run`, `code`,
+  //     `freeSymbols`, `unsupported`, `error` — a consumer holding one has no
+  //     static result type to re-tag FROM.
+  //   - Every boxed→raw seam is runtime-shape driven and numeric-only: the
+  //     auto-compile/drain paths require `isNumber(item)` and push `item.re`
+  //     (`library/map-auto-compile.ts`), or are gated on
+  //     `type.matches('collection<real>')` (`library/collections.ts` Reduce).
+  //     A tagged value is an APPLICATION, and a nominal type matches neither
+  //     `real` nor `number` (opacity, D3), so neither gate ever admits one.
+  //
+  // ACTIVATION POINT: when a compiled entry point gains a declared signature
+  // whose parameter or result type is nominal, unwrap-on-input /
+  // re-tag-on-result belongs at that seam — skipping it would silently
+  // launder a `point` into a tuple across the compile boundary. The pins
+  // below record what the boundary does until then.
+  test('a compiled kernel yields the RAW payload; the tag lives on the engine side', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('meters', 'number');
+    ce.declareType('point', 'tuple<number, number>');
+    // Engine side: the tag survives evaluation (that IS nominal-ness).
+    expect(ce.box(['meters', 5]).evaluate().toString()).toBe('meters(5)');
+    expect(ce.box(['point', 1, 2]).evaluate().toString()).toBe('point(1, 2)');
+    // Compiled side: erased, and NOT re-tagged on the way out.
+    expect(compile(ce.box(['meters', 5])).run!({})).toBe(5);
+    expect(compile(ce.box(['point', 1, 2])).run!({})).toEqual([1, 2]);
+  });
+
+  test('a nominal-typed collection is not admitted by the auto-compile seam', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('meters', 'number');
+    const list = ce.box(['List', ['meters', 1], ['meters', 2]]);
+    // The drain/auto-compile gates are numeric: a tagged element is not a
+    // number literal, so the interpreter keeps the values (tags intact).
+    expect(list.evaluate().toString()).toBe('[meters(1),meters(2)]');
+  });
+});

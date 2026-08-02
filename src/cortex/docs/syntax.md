@@ -190,12 +190,16 @@ _function-definition_ → _symbol_ _parameters_
 \[**`->`** _type_\] **`=`** _expression_ |
 **`function`** _symbol_ _parameters_ \[**`->`** _type_\] _block_
 
+_type-declaration_ → **`type`** \[**`alias`**\] _symbol_
+\[**`<`** (_symbol_)#**`,`** **`>`**\] **`=`** _type_
+&nbsp;&nbsp;&nbsp;&nbsp;— the `<…>` slot is reserved and rejected
+
 _while-statement_ → **`while`** _expression_ _block_
 
 _for-statement_ → **`for`** _symbol_ **`in`** _expression_ _block_
 
-_statement_ → _declaration_ | _function-definition_ | _while-statement_ |
-_for-statement_ | _expression_
+_statement_ → _declaration_ | _type-declaration_ | _function-definition_ |
+_while-statement_ | _for-statement_ | _expression_
 
 _statement-separator_ → **`;`** | _linebreak_
 

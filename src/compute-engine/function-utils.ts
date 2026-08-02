@@ -576,7 +576,13 @@ function desugarSignatureString(
   try {
     type = parseType(signature);
   } catch {
-    return undefined;
+    // The signature may name a user-declared type; retry with the engine's
+    // resolver (second, so the memo-cached parse carries the common case).
+    try {
+      type = parseType(signature, ce._typeResolver);
+    } catch {
+      return undefined;
+    }
   }
   if (typeof type === 'string' || type.kind !== 'signature') return undefined;
   if (type.optArgs || type.variadicArg) return undefined;

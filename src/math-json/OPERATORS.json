@@ -1525,7 +1525,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare a type in the current scope. The name is a symbol (or a string) and the type a string holding a type expression, e.g. `\"tuple<x: integer, y: integer>\"`. The type is nominal by default; an optional trailing attributes dictionary with `alias -> True` makes it a structural alias instead. Evaluates to `Nothing`."
+      "description": "Declare a type in the current scope. The name is a symbol (or a string) and the type a string holding a type expression, e.g. `\"tuple<x: integer, y: integer>\"`. The type is nominal by default; an optional trailing attributes dictionary with `alias -> True` makes it a structural alias instead. The declaration also mints a value constructor of the same name — `[\"point\", 1, 2]`, an inert tagged value for a nominal type, a checked identity for an alias — except for a `record` body, which mints none. Evaluates to `Nothing`."
     },
     {
       "name": "DedekindEta",

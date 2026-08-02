@@ -34,7 +34,14 @@ function parseTypeOperand(t: Expression | undefined): Type | undefined {
   try {
     return parseType(s);
   } catch {
-    return undefined;
+    // The annotation may name a user-declared type (`ce.declareType()`),
+    // which only the engine's resolver can read. Tried second, so the
+    // resolver-less (memo-cached) parse still carries the common case.
+    try {
+      return parseType(s, t.engine._typeResolver);
+    } catch {
+      return undefined;
+    }
   }
 }
 

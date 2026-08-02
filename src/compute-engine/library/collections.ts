@@ -457,15 +457,13 @@ function mapResultType(
   elementType: Readonly<Type>
 ): Type {
   if (typeof source === 'string') {
-    if (
-      source === 'indexed_collection' ||
-      source === 'list' ||
-      source === 'set' ||
-      source === 'collection'
-    )
-      return parseType(`${source}<${typeToString(elementType)}>`);
+    if (source === 'list')
+      return { kind: 'list', elements: elementType as Type };
+    if (source === 'set') return { kind: 'set', elements: elementType as Type };
+    if (source === 'indexed_collection' || source === 'collection')
+      return { kind: source, elements: elementType as Type };
     // dictionary/record/tuple/etc.: yield a plain collection of the results.
-    return parseType(`collection<${typeToString(elementType)}>`);
+    return { kind: 'collection', elements: elementType as Type };
   }
   if (source.kind === 'list') {
     const t: ListType = { kind: 'list', elements: elementType as Type };
@@ -480,7 +478,19 @@ function mapResultType(
     return { kind: 'collection', elements: elementType as Type };
   // tuple/dictionary/record and anything else: fall back to a plain
   // collection of the lambda results.
-  return parseType(`collection<${typeToString(elementType)}>`);
+  return { kind: 'collection', elements: elementType as Type };
+}
+
+/**
+ * A `tuple<…>` result type, built STRUCTURALLY from the operand types.
+ *
+ * Never serialize operand types into a `tuple<…>` string and reparse it: a
+ * resolver-less `parseType()` cannot read back a user-declared type name
+ * (`ce.declareType('point', …)`), and the type handlers have no resolver in
+ * hand. Building the node directly is both resolver-proof and cheaper.
+ */
+function tupleTypeOf(ops: ReadonlyArray<Expression>): Type {
+  return { kind: 'tuple', elements: ops.map((op) => ({ type: op.type.type })) };
 }
 
 /** How many actual elements `absenceMarker()` probes when a collection's
@@ -917,8 +927,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
     signature: '(any*) -> list',
     type: (ops, { engine: _ce }) =>
-      shapedListType(ops) ??
-      parseType(`list<${BoxedType.widen(...ops.map((op) => op.type))}>`),
+      shapedListType(ops) ?? {
+        kind: 'list',
+        elements: BoxedType.widen(...ops.map((op) => op.type)).type,
+      },
     canonical: canonicalList,
     lazy: true,
     evaluate: (ops, { engine, numericApproximation, materialization }) => {
@@ -973,7 +985,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // A comprehension's element type is not the type of its syntactic
       // operands (body + indexing set)
       if (parseSetComprehension(ops) !== null) return parseType('set');
-      return parseType(`set<${BoxedType.widen(...ops.map((op) => op.type))}>`);
+      return {
+        kind: 'set',
+        elements: BoxedType.widen(...ops.map((op) => op.type)).type,
+      };
     },
 
     canonical: canonicalSet,
@@ -1129,7 +1144,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(any*) -> tuple',
-    type: (ops) => parseType(`tuple<${ops.map((op) => op.type).join(', ')}>`),
+    type: (ops) => tupleTypeOf(ops),
     // `Nothing` is an ERASURE marker: it is spliced out of a collection
     // literal, exactly as for `List` and `Set`. Splicing changes the ARITY of
     // the tuple — `(1, Nothing, 3)` is the 2-tuple `(1, 3)`, typed
@@ -1208,7 +1223,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return !isTupleKind && op.type.matches('indexed_collection');
       };
       if (ops.some(isListType)) return parseType('list<tuple>');
-      return parseType(`tuple<${ops.map((op) => op.type).join(', ')}>`);
+      return tupleTypeOf(ops);
     },
     evaluate: (ops, { engine: ce, numericApproximation }) => {
       const isListComponent = (op: Expression): boolean =>
@@ -1320,7 +1335,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(key: string, value: any) -> tuple<string, unknown>',
-    type: ([_key, value]) => parseType(`tuple<string, ${value.type}>`),
+    type: ([_key, value]) => ({
+      kind: 'tuple',
+      elements: [{ type: 'string' }, { type: value.type.type }],
+    }),
 
     canonical: (args, { engine }) => {
       const [key, value] = checkTypes(engine, args, ['string', 'any']);
@@ -1356,11 +1374,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: ([dict]) => {
       const t = dict.type.type;
       if (typeof t === 'object' && t.kind === 'dictionary')
-        return parseType(`list<${typeToString(t.values)}>`);
+        return { kind: 'list', elements: t.values };
       if (typeof t === 'object' && t.kind === 'record')
-        return parseType(
-          `list<${typeToString(widen(...Object.values(t.elements)))}>`
-        );
+        return { kind: 'list', elements: widen(...Object.values(t.elements)) };
       return parseType('list<any>');
     },
     evaluate: ([dict], { engine: ce }) => {
@@ -1378,7 +1394,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(value: any) -> tuple<any>',
-    type: ([value]) => parseType(`tuple<${value.type}>`),
+    type: ([value]) => tupleTypeOf([value]),
     canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 1)),
   },
 
@@ -1390,8 +1406,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(first: any, second: any) -> tuple<any, any>',
-    type: ([first, second]) =>
-      parseType(`tuple<${first.type}, ${second.type}>`),
+    type: ([first, second]) => tupleTypeOf([first, second]),
     canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 2)),
   },
 
@@ -1403,8 +1418,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(first: any, second: any, third: any) -> tuple<any, any, any>',
-    type: ([first, second, third]) =>
-      parseType(`tuple<${first.type}, ${second.type}, ${third.type}>`),
+    type: ([first, second, third]) => tupleTypeOf([first, second, third]),
 
     canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 3)),
   },
@@ -2792,7 +2806,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection) -> indexed_collection',
     type: (ops) => {
       const elt = collectionElementType(ops[0].type.type) ?? 'number';
-      return parseType(`list<${typeToString(elt)}>`);
+      return { kind: 'list', elements: elt };
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -3040,7 +3054,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!resultType || resultType === 'unknown' || resultType === 'any')
         return parseType('list');
       const inner = collectionElementType(resultType);
-      return parseType(`list<${typeToString(inner ?? resultType)}>`);
+      return { kind: 'list', elements: inner ?? resultType };
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -4018,10 +4032,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature:
       '(value: indexed_collection, start: number, end: number) -> list',
-    type: ([xs]) =>
-      parseType(
-        `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`
-      ),
+    type: ([xs]) => ({
+      kind: 'list',
+      elements: collectionElementType(xs.type.type) ?? 'any',
+    }),
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -4146,15 +4160,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(indexed_collection, integer, value) -> list',
     // Element type widens to include the inserted value's type.
-    type: (ops) =>
-      parseType(
-        `list<${typeToString(
-          widen(
-            collectionElementType(ops[0].type.type) ?? 'any',
-            ops[2].type.type
-          )
-        )}>`
+    type: (ops) => ({
+      kind: 'list',
+      elements: widen(
+        collectionElementType(ops[0].type.type) ?? 'any',
+        ops[2].type.type
       ),
+    }),
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);
@@ -4254,10 +4266,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature: '(indexed_collection, integer) -> list',
-    type: (ops) =>
-      parseType(
-        `list<${typeToString(collectionElementType(ops[0].type.type) ?? 'any')}>`
-      ),
+    type: (ops) => ({
+      kind: 'list',
+      elements: collectionElementType(ops[0].type.type) ?? 'any',
+    }),
     evaluate: ([xs, idx], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
@@ -4345,15 +4357,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(indexed_collection, integer, value) -> list',
     // Element type widens to include the replacement value's type.
-    type: (ops) =>
-      parseType(
-        `list<${typeToString(
-          widen(
-            collectionElementType(ops[0].type.type) ?? 'any',
-            ops[2].type.type
-          )
-        )}>`
+    type: (ops) => ({
+      kind: 'list',
+      elements: widen(
+        collectionElementType(ops[0].type.type) ?? 'any',
+        ops[2].type.type
       ),
+    }),
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
@@ -4961,7 +4971,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (ops.length <= 1) return parseType('indexed_collection');
       if (ops.length === 2) {
         const elt = functionResult(ops[0].type.type) ?? 'any';
-        return parseType(`indexed_collection<${typeToString(elt)}>`);
+        return { kind: 'indexed_collection', elements: elt };
       }
       return parseType('indexed_collection<list>');
     },
@@ -5098,11 +5108,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const t = xs.type.type;
       if (t === 'string')
         return parseType(`tuple<list<string>, list<integer>>`);
-      return parseType(
-        `tuple<list<${typeToString(
-          collectionElementType(t) ?? 'any'
-        )}>, list<integer>>`
-      );
+      return {
+        kind: 'tuple',
+        elements: [
+          {
+            type: {
+              kind: 'list',
+              elements: collectionElementType(t) ?? 'any',
+            },
+          },
+          { type: { kind: 'list', elements: 'integer' } },
+        ],
+      };
     },
     evaluate: (ops, { engine: ce }) => {
       if (!ops[0].isFiniteCollection) return undefined;
@@ -5400,12 +5417,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1),
     // Element types flow through from the source: list<list<elt>>.
-    type: (ops) =>
-      parseType(
-        `list<list<${typeToString(
-          collectionElementType(ops[0].type.type) ?? 'any'
-        )}>>`
-      ),
+    type: (ops) => ({
+      kind: 'list',
+      elements: {
+        kind: 'list',
+        elements: collectionElementType(ops[0].type.type) ?? 'any',
+      },
+    }),
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);
@@ -5957,7 +5975,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (xs.isCollection && !xs.isFiniteCollection) return 'list';
         type = widen(type, collectionElementType(xs.type.type) ?? type);
       }
-      return parseType(`list<${typeToString(type)}>`);
+      return { kind: 'list', elements: type };
     },
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
@@ -6022,7 +6040,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (xs.isCollection && !xs.isFiniteCollection) return 'set';
         type = widen(type, collectionElementType(xs.type.type) ?? type);
       }
-      return parseType(`set<${typeToString(type)}>`);
+      return { kind: 'set', elements: type };
     },
     evaluate: (ops, { engine: ce }) => {
       const elements: Expression[] = [];
@@ -6792,7 +6810,7 @@ function joinResultType(ops: ReadonlyArray<Expression>): Type {
     eltTypes.push(elt);
   }
   if (eltTypes.length === 0) return 'list';
-  return parseType(`list<${typeToString(widen(...eltTypes))}>`);
+  return { kind: 'list', elements: widen(...eltTypes) };
 }
 
 function defaultCollectionEq(a: Expression, b: Expression) {

@@ -149,6 +149,10 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `Unknown function "${args[0]}"; did you mean "${args[1]}"?`;
     case 'print-not-available':
       return `There is no "${args[0]}" function: a program's output is the value of its last statement`;
+    case 'type-not-callable':
+      return `"${args[0]}" is a type, not a function: types have no constructor; annotate instead, e.g. "const p: ${args[0]} = …"`;
+    case 'type-shadow':
+      return `The type "${args[0]}" shadows an existing type of the same name; the two are not distinguished — values of one satisfy the other`;
     case 'assign-in-argument':
       return `"=" in an argument is assignment; use "==" for an equation or comparison`;
     case 'zero-index':

@@ -19,6 +19,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { resolveTypeForCompilation } from '../../common/type/utils.js';
 import { requirePrimitiveElements } from './javascript-target.js';
 
 /**
@@ -418,7 +419,8 @@ function isPyCollectionOperand(e: Expression): boolean {
 function pyStaticRank(e: Expression): number | undefined {
   const rank = e.rank;
   if (rank > 0) return rank;
-  const t = e.type.type;
+  // A type reference answers layout questions as its definition (§4.6 step 1).
+  const t = resolveTypeForCompilation(e.type.type);
   if (
     typeof t === 'object' &&
     t.kind === 'list' &&

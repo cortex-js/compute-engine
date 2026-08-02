@@ -21,6 +21,8 @@ export type DiagnosticCode =
   | 'hexadecimal-number-expected'
   | 'invalid-symbol-name' // %0 = symbol name
   | 'type-annotation-error' // %0 = message from the type subparser
+  | 'type-variables-unsupported' // %0 = type name — the `type name<…>` generic-alias slot is reserved but not yet supported
+  | 'type-shadow' // %0 = type name — a block-local `type` declaration shadows an existing type of the same name; nominal identity is the name, so values of the two are indistinguishable
   | 'host-pragma-disabled' // %0 = pragma name (host-state pragmas gated off)
   | 'error-directive' // %0 = message from a `#error` pragma
   | 'runtime-error' // %0 = error description (non-final statement evaluated to an error value), %1 = breadcrumb frame chain, if the error bubbled (e.g. "in Ln argument 1, in Add argument 2")
@@ -28,6 +30,7 @@ export type DiagnosticCode =
   | 'evaluation-canceled' // %0 = machine-readable CancellationCause, %1 = error description (non-final statement hit a cap breach: timeout/iteration/recursion)
   | 'unknown-function' // %0 = called name, %1 = suggested known operator ("did you mean")
   | 'print-not-available' // %0 = called name — there is no print; a program's output is its last statement's value
+  | 'type-not-callable' // %0 = type name — a type name used as a function; types have no constructor yet; annotate instead: `const p: %0 = …`
   | 'assign-in-argument' // `=` (Assign) as a call argument; `==` was probably meant
   | 'zero-index' // literal index 0 — indexing is 1-based
   | 'floor-division-comment' // `//` after code on the same line looks like floor division; it starts a comment

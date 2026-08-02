@@ -246,7 +246,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // Result is an indexed collection of body.type values. The body's
         // type may itself be parametric (e.g. a tuple) — wrap in
         // indexed_collection<...>.
-        return parseType(`indexed_collection<${String(body.type)}>`);
+        return { kind: 'indexed_collection', elements: body.type.type };
       },
       canonical: (ops, options) =>
         canonicalLoopLike('Comprehension', ops, options),

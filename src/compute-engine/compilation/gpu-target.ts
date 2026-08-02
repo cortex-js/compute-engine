@@ -27,7 +27,10 @@ import type {
   CompilationResult,
 } from './types.js';
 import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
-import { isNonRealNumber } from '../../common/type/utils.js';
+import {
+  isNonRealNumber,
+  resolveTypeForCompilation,
+} from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
@@ -679,10 +682,20 @@ function gpuFVec(n: number, target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? `vec${n}f` : `vec${n}`;
 }
 
+/**
+ * The type a shader **representation** question about `expr` is answered from:
+ * a `type alias` / nominal `type` reference unfolds to its definition, because
+ * compilation is type erasure (nominal-types design §4.6 step 1). Identity for
+ * every other type.
+ */
+function gpuType(expr: Expression): Type {
+  return resolveTypeForCompilation(expr.type.type);
+}
+
 /** True when `expr` is a `Tuple` literal or is tuple-typed. */
 function gpuIsTupleShaped(expr: Expression): boolean {
   if (isFunction(expr, 'Tuple')) return true;
-  const t = expr.type.type;
+  const t = gpuType(expr);
   return typeof t !== 'string' && t.kind === 'tuple';
 }
 
@@ -1189,7 +1202,7 @@ export function gpuOperandShape(
   const width = BaseCompiler.vectorComponentCount(expr);
   if (width !== undefined) return width;
   if (isFunction(expr, 'Matrix')) return 'matrix';
-  const t = expr.type.type;
+  const t = gpuType(expr);
   if (
     typeof t !== 'string' &&
     t.kind === 'list' &&
@@ -1226,7 +1239,7 @@ function gpuMatrixDims(
       return [rows.length, cols];
     return undefined;
   }
-  const t = expr.type.type;
+  const t = gpuType(expr);
   if (typeof t !== 'string' && t.kind === 'list') {
     const dims = t.dimensions;
     if (dims?.length === 2 && dims[0] > 0 && dims[1] > 0)
@@ -2191,7 +2204,7 @@ function compileGPUExtremum(
  * spec's Shared-predicate table.
  */
 function isPointListSource(e: Expression): boolean {
-  const t = e.type.type;
+  const t = gpuType(e);
   // `'tuple'` (the bare, unparameterized name) is a plain string, not a
   // `{ kind: 'tuple' }` node — both spellings are a single point.
   if (t === 'tuple') return false;
@@ -2267,7 +2280,7 @@ function compilePointListProjection(
             `vector holds 2 to 4`,
         };
       width = width === undefined ? n : Math.min(width, n);
-    } else if (!isSubtype(op.type.type, 'number')) {
+    } else if (!isSubtype(gpuType(op), 'number')) {
       // A non-source slot must be provably scalar numeric.
       return {
         decline:
@@ -2323,7 +2336,7 @@ function compilePointSwizzle(
   compile: (e: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  const t = arg.type.type;
+  const t = gpuType(arg);
   const idx = comp === 'x' ? 0 : comp === 'y' ? 1 : 2;
   const isSinglePoint = typeof t !== 'string' && t.kind === 'tuple';
   if (!isSinglePoint && arg.type.matches('indexed_collection')) {
@@ -2400,7 +2413,7 @@ function gpuAtNonScalarElement(base: Expression): string | undefined {
           `(type \`${ops[i].type.toString()}\`), so it is not one component ` +
           `of a shader vector`
         );
-      if (!isSubtype(ops[i].type.type, 'number'))
+      if (!isSubtype(gpuType(ops[i]), 'number'))
         return (
           `element ${i + 1} of the base (type \`${ops[i].type.toString()}\`) ` +
           `is not provably scalar numeric, and a shader value has no other ` +
@@ -2409,7 +2422,7 @@ function gpuAtNonScalarElement(base: Expression): string | undefined {
     }
     return undefined;
   }
-  const t = base.type.type;
+  const t = gpuType(base);
   if (typeof t !== 'string') {
     if (t.kind === 'tuple') {
       for (let i = 0; i < t.elements.length; i++)
@@ -2539,7 +2552,7 @@ function gpuAtFramedIndex(
  */
 function gpuAtBaseShape(base: Expression | null): GPUAtBase {
   if (base === null) return { decline: 'it has no base operand' };
-  const t = base.type.type;
+  const t = gpuType(base);
 
   if (isSymbol(base, 'Missing') || t === 'missing')
     return {
@@ -2762,7 +2775,7 @@ function gpuAtEntryKind(e: Expression): GPUAtEntry {
     isFunction(e, 'Dictionary')
   )
     return 'other-literal';
-  if (isSubtype(e.type.type, 'boolean')) return 'dyn-bool';
+  if (isSubtype(gpuType(e), 'boolean')) return 'dyn-bool';
   return 'dyn';
 }
 
@@ -2956,7 +2969,7 @@ function compileGPUAt(
   }
 
   // ---- Scalar index (design § D1) ----------------------------------------
-  const it = index.type.type;
+  const it = gpuType(index);
 
   // The absence marker itself: the interpreter has no value to index with, and
   // the numeric projection of "no value" is NaN. The fold emits neither
@@ -7410,6 +7423,9 @@ function gpuIsVectorComponentType(t: Type): boolean {
  * caller fails closed (D6).
  */
 function gpuDeclaredComponentCount(t: Type): number | undefined {
+  // A `type alias` / nominal `type` reference answers layout questions as its
+  // definition (§4.6 step 1).
+  t = resolveTypeForCompilation(t);
   if (typeof t === 'string') return undefined;
   if (t.kind === 'tuple')
     return t.elements.every((e) => gpuIsVectorComponentType(e.type))
@@ -7438,6 +7454,10 @@ function gpuTypeOfDeclaredType(
 ): string | undefined {
   if (t === undefined || t === 'unknown' || t === 'any')
     return gpuScalarType(isWGSL);
+  // A `type alias` / nominal `type` reference lowers to its DEFINITION's
+  // shader type: compilation is type erasure (§4.6 step 1). Covers both a
+  // nominal-typed value and a nominal declared parameter type.
+  t = resolveTypeForCompilation(t);
   // Complex lowers to `vec2(re, im)` — the target's existing convention.
   if (isNonRealNumber(t)) return gpuVecType(2, isWGSL);
   if (isSubtype(t, 'boolean')) return 'bool';
@@ -7497,8 +7517,8 @@ function gpuTypeOfValue(expr: Expression, isWGSL: boolean): string | undefined {
  */
 function gpuValueHasVectorComponents(expr: Expression): boolean {
   if (isFunction(expr, 'Tuple') || isFunction(expr, 'List'))
-    return expr.ops.every((op) => gpuIsVectorComponentType(op.type.type));
-  const t = expr.type.type;
+    return expr.ops.every((op) => gpuIsVectorComponentType(gpuType(op)));
+  const t = gpuType(expr);
   if (typeof t !== 'string' && (t.kind === 'tuple' || t.kind === 'list'))
     return gpuDeclaredComponentCount(t) !== undefined;
   return true;
