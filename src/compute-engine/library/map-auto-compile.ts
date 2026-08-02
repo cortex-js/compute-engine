@@ -493,11 +493,35 @@ function attemptCompile(
   }
 
   const deps = new Set<string>();
+  // Free symbols the compiler emitted as vars-object lookups. Collected even
+  // when the compile is DECLINED — compiling a lambda whose body has one is
+  // refused outright (there is no `_` in a lambda's scope; Tycho item 131) —
+  // so the free-symbol gate below can still tell that case apart from a
+  // structural refusal.
+  const varsObjectRefs = new Set<string>();
   // `implicitCompile` honors the `ce.jit` flag, performs the engine-wide CSP
   // `EvalError` latch, and propagates `CancellationError` (a deadline expiry
   // leaves no mark — D4). A latch is distinguished from an ordinary compile
   // failure by the flag having flipped.
-  const result = implicitCompile(ce, literal, { symbolDeps: deps });
+  const result = implicitCompile(ce, literal, {
+    symbolDeps: deps,
+    varsObjectRefs,
+  });
+
+  // Free-symbol gate: a valueless symbol has no channel into the positional
+  // call ABI (the interpreter would return a symbolic element). The offending
+  // symbol's resolution snapshot is the `no-compile` reason: assigning it
+  // re-enables one fresh attempt (D4). Checked BEFORE the structural gates:
+  // a declined compile (`undefined`) is a free-symbol refusal when the set is
+  // non-empty, and `structural` — which is PERMANENT — would wrongly retire
+  // an instance that a later `assign` makes compilable.
+  const free =
+    result?.freeSymbols !== undefined && result.freeSymbols.length > 0
+      ? result.freeSymbols
+      : [...varsObjectRefs];
+  if (free.length > 0 && ce.jit !== 'off')
+    return noCompile(resolveDep(ce, free[0]));
+
   if (result === undefined)
     return ce.jit === 'off' ? undefined : noCompile('structural');
 
@@ -505,13 +529,6 @@ function attemptCompile(
     return noCompile('structural');
   if (result.unsupported !== undefined && result.unsupported.length > 0)
     return noCompile('structural');
-
-  // Free-symbol gate: a valueless symbol has no channel into the positional
-  // call ABI (the interpreter would return a symbolic element). The offending
-  // symbol's resolution snapshot is the `no-compile` reason: assigning it
-  // re-enables one fresh attempt (D4).
-  const free = result.freeSymbols ?? [];
-  if (free.length > 0) return noCompile(resolveDep(ce, free[0]));
 
   // Scope discipline (D3): every consulted capture must resolve identically
   // through the lambda's own scope chain and the ambient engine scope — the

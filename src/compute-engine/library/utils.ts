@@ -106,6 +106,43 @@ export function convertInfiniteSetToLimits(
  *                    beyond the index (e.g. `Σ xⁿ` over ℤ⁺), where a truncated
  *                    partial value would be meaningless.
  */
+/**
+ * The machine value of a big-operator bound (`Limits`' lower/upper operand).
+ *
+ * A bound is consumed as a machine number in three places — `symbolicBound`
+ * below, `normalizeIndexingSet`, and the compiler's loop lowering — all of
+ * which read `.re` on the bound AS WRITTEN. That reads `NaN` for an
+ * unevaluated function expression, so `Σ_{j=1}^{Length(P)} P[j]` classified as
+ * a symbolic domain and the whole operator stayed inert, even though
+ * `Length(P)` on its own evaluates to a number (Tycho item 125 — a common
+ * Desmos spelling; `length(P)`, `count(P)` and the dot form `P.length` all
+ * parse to this same `Length` node, so they are one bug, not three).
+ *
+ * Only a CLOSED bound is evaluated — one with no free symbols. A genuinely
+ * free bound (`n` in `Σ_{k=1}^{n}`) keeps reading `NaN` and so keeps
+ * classifying as symbolic: that is the guard which stops `Sum(k, [k, 1, n])`
+ * from being read as if `n` were the default iteration window (→ 50015001).
+ *
+ * Only a PURE bound is evaluated. Closed does not imply safe to evaluate
+ * repeatedly: this is consulted once by classification and again by
+ * normalization (and normalization runs again to drive the reduction), so an
+ * effectful bound would be re-drawn each time and could classify against one
+ * trip count and iterate another. An impure bound keeps reading `NaN` and
+ * stays symbolic, which is what it already did before closed bounds were
+ * evaluated at all.
+ *
+ * Deliberately at evaluate time, never at canonicalization: `Length(P)` must
+ * see the value `P` holds when the operator RUNS, not when it was parsed.
+ */
+export function bigopBoundValue(bound: Expression): number {
+  const r = bound.re;
+  if (!Number.isNaN(r)) return r;
+  // A free symbol (or an expression over one) has no value to read.
+  if (bound.unknowns.length > 0) return r;
+  if (!bound.isPure) return r;
+  return bound.evaluate({ numericApproximation: true }).re;
+}
+
 export function classifyBigopDomain(
   body: Expression | undefined,
   indexes: ReadonlyArray<Expression>,
@@ -139,7 +176,8 @@ export function classifyBigopDomain(
       // substitutes its default iteration window for the unusable bound, so
       // `Sum(k, [k, 1, n])` evaluated as if `n` were 10001 (→ 50015001).
       const symbolicBound = (b: Expression) =>
-        !(isSymbol(b) && b.symbol === 'Nothing') && Number.isNaN(b.re);
+        !(isSymbol(b) && b.symbol === 'Nothing') &&
+        Number.isNaN(bigopBoundValue(b));
       if (symbolicBound(idx.op2) || symbolicBound(idx.op3)) return 'symbolic';
       if (!normalizeIndexingSet(idx).isFinite) infinite = true;
     }
@@ -1116,7 +1154,9 @@ export function normalizeIndexingSet(indexingSet: Expression): IndexingSet {
   const op1 = fn.op1;
   index = isSymbol(op1) ? op1.symbol : undefined;
   console.assert(index !== undefined, 'Indexing set must have an index');
-  lower = Math.floor(fn.op2.re);
+  // `bigopBoundValue`, not `.re`: a closed bound expression (`Length(P)`) has
+  // no machine value until it is evaluated. See item 125 there.
+  lower = Math.floor(bigopBoundValue(fn.op2));
   if (isNaN(lower)) lower = 1;
 
   if (!Number.isFinite(lower)) isFinite = false;
@@ -1127,7 +1167,8 @@ export function normalizeIndexingSet(indexingSet: Expression): IndexingSet {
     isFinite = false;
     upper = Infinity;
   } else {
-    if (!isNaN(op3.re)) upper = Math.floor(op3.re ?? upper);
+    const op3Value = bigopBoundValue(op3);
+    if (!isNaN(op3Value)) upper = Math.floor(op3Value);
     if (!Number.isFinite(upper)) isFinite = false;
   }
 

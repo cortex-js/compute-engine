@@ -350,6 +350,72 @@ function nIntegrateMultiple(
 }
 
 /**
+ * The free symbols of `expr`, INCLUDING those reachable only through the
+ * bodies of the user-defined functions it calls.
+ *
+ * `expr.unknowns` is a SURFACE property: for `n(x)` where `n = x ↦ q + x` it
+ * reports nothing, because `q` occurs in `n`'s body, not in the integrand as
+ * written. The numeric integration path still needs a value for `q`, so the
+ * surface set is the wrong question to ask before numericizing (Tycho item
+ * 131: the compiled body emitted a `_.q` vars-object lookup that has no `_`
+ * in scope, and the raw `ReferenceError` escaped out of `.N()`).
+ *
+ * **A name means something different on each side of a definition boundary**,
+ * so `bound` is never carried across one. `bound` — the caller's binders, an
+ * integration variable — applies to the SURFACE expression only. Crossing into
+ * a user function's body re-establishes it from that callee's OWN parameter
+ * names; crossing into an assigned value clears it entirely (a value has no
+ * parameters, and its free variables answer to the scope it was assigned in).
+ *
+ * Filtering the flattened result by the caller's binders instead would discard
+ * a callee's capture that merely SHARES a binder's spelling: for
+ * `n = t ↦ x + t` with `x` unassigned, `∫ n(x) dx` would drop `n`'s free `x`
+ * as if it were the integration variable, numericize, and return `NaN` where
+ * the honest answer is symbolic.
+ *
+ * `seen` (shared across the whole walk, keyed on the definition) terminates
+ * recursive definitions and self-referential bindings.
+ */
+function transitiveUnknowns(
+  expr: Expression,
+  bound: ReadonlySet<string>
+): string[] {
+  const out = new Set<string>();
+  const seen = new Set<object>();
+  const collect = (root: Expression, names: ReadonlySet<string>): void => {
+    for (const s of root.unknowns) if (!names.has(s)) out.add(s);
+    const visit = (node: Expression): void => {
+      // An ASSIGNED value can itself hold a free symbol (`c` in `b = c + 1`):
+      // `b` is known, so neither `unknowns` nor the compiler's fold reports
+      // `c`, yet the folded code still references it.
+      if (isSymbol(node)) {
+        const valueDef = node.valueDefinition;
+        const value = valueDef?.value;
+        if (value !== undefined && !seen.has(valueDef as object)) {
+          seen.add(valueDef as object);
+          collect(value, NO_BOUND_NAMES);
+        }
+        return;
+      }
+      if (!isFunction(node)) return;
+      const opDef = node.operatorDefinition;
+      const lambda = opDef?.lambda;
+      if (lambda !== undefined && !seen.has(opDef as object)) {
+        seen.add(opDef as object);
+        collect(lambda.body, new Set(lambda.parameters.map((p) => p.name)));
+      }
+      for (const op of node.ops) visit(op);
+    };
+    visit(root);
+  };
+  collect(expr, bound);
+  return [...out];
+}
+
+/** No names are bound: used at a definition boundary that binds none. */
+const NO_BOUND_NAMES: ReadonlySet<string> = new Set<string>();
+
+/**
  * Collect the dependent-function symbol name(s) from the second argument of
  * `DSolve`/`NDSolve` (a symbol or a `List` of symbols).
  */
@@ -1279,7 +1345,15 @@ volumes
             const v = isFunction(l) ? sym(l.op1) : undefined;
             if (v) boundVars.add(v);
           }
-          if (f.unknowns.some((s) => !boundVars.has(s))) return undefined;
+          // `unknowns` is a SURFACE property: for `∫ n(x) dx` where
+          // `n = x ↦ q + x`, it reports nothing, because `q` lives in `n`'s
+          // body. Look through user-defined operator heads (Tycho item 131 —
+          // the shape that actually reached the `ReferenceError` the comment
+          // above describes, since the surface guard never fired on it).
+          // `boundVars` is passed IN rather than used to filter the result: it
+          // binds the surface only, so a callee's capture that happens to share
+          // an integration variable's name is not mistaken for it.
+          if (transitiveUnknowns(f, boundVars).length > 0) return undefined;
 
           // Multiple limits (`Integrate(f, Limits(x,…), Limits(y,…))`):
           // iterated quadrature over every limit. The single-limit path below

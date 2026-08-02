@@ -214,6 +214,40 @@
 
 ### Issues Resolved
 
+- **A big operator whose bound is a closed expression — `Σ_{j=1}^{length(P)}
+  P[j]` — now evaluates instead of staying inert.** Domain classification and
+  indexing-set normalization both read the bound *as written*; an unevaluated
+  function expression has no machine value there (it reads `NaN`), so the
+  domain was classified symbolic and the whole operator stayed unevaluated
+  even though `length(P)` on its own returned a number. A bound that is closed
+  (no free symbols) and pure is now evaluated first. All three spellings —
+  `length(P)`, `count(P)`, and the dot form `P.length` — parse to the same
+  `Length` node and are covered, as are compound bounds (`P.length - 1`), and
+  `Product` behaves like `Sum`. This affected `evaluate()`/`.N()` only; the
+  compiled path already handled such a bound, since it lowers the bound as an
+  expression rather than reading a machine value from it. The evaluation
+  happens when the operator RUNS, never at canonicalization, so the bound
+  tracks a later reassignment of `P`. A genuinely free bound (`Σ_{k=1}^{n}`)
+  still keeps the operator symbolic — the guard that stops `n` from being read
+  as the default iteration window — and so does an impure one, which must not
+  be re-drawn once per consumer.
+
+- **A compiled function literal whose body has an unbound free symbol no
+  longer throws a raw `ReferenceError: _ is not defined` out of `.N()`.** A
+  compiled *expression* with unknowns is called with a vars object, so a free
+  symbol compiles to a lookup on it; a compiled *lambda* is called with its
+  declared parameters only, leaving that lookup dangling. Numeric quadrature
+  reached this by compiling the integrand as a lambda: its free-symbol guard
+  read the integrand's surface symbols, which do not include a symbol living
+  inside a called user function's body (`∫ n(x) dx` where `n = x ↦ q + x`),
+  nor one reachable only through an assigned value (`b = c + 1`). The guard
+  now follows both, so such an integral stays symbolic — the answer the
+  equivalent inline integrand already gave — and the compiler independently
+  declines to emit a lambda it cannot bind. Callers can pass a
+  `varsObjectRefs` set to read back the offending symbols after a declined
+  compile, which is how `Map` auto-compilation still distinguishes "retry
+  once the symbol is assigned" from "structurally uncompilable".
+
 - **A function returning a dictionary literal no longer loses its parameter
   binding across a MathJSON round-trip — which made recursive functions with
   dictionary results silently wrong.** `f(3)` for

@@ -577,6 +577,26 @@ export interface CompileTarget<Expr = unknown> {
   symbolDeps?: Set<MathJsonSymbol>;
 
   /**
+   * When provided, the compiler records into this set the id of every free
+   * symbol it emits as a **vars-object lookup** (`_.<id>` in the JS targets).
+   * That lookup only resolves in a wrapper that actually takes the vars object
+   * as a parameter — `ComputeEngineFunction`, whose compiled expression is
+   * called as `f({ x: 1 })`. A `ComputeEngineFunctionLiteral` (a compiled
+   * `["Function", …]` lambda) is called with its declared parameters ONLY, so
+   * any `_.<id>` in its body or preamble is a dangling reference that throws
+   * `ReferenceError: _ is not defined` at call time — reported by Tycho as
+   * item 131, reached through the quadrature path, which compiles the
+   * integrand as a lambda.
+   *
+   * Emission-time recording rather than a pre-pass over `expr.unknowns`: a
+   * free symbol can be reachable only through a folded value (`c` in
+   * `b = c + 1`), which a surface scan misses.
+   *
+   * Survives the compiler's `{ ...target }` spreads by reference.
+   */
+  varsObjectRefs?: Set<MathJsonSymbol>;
+
+  /**
    * Mutable per-compile registry for user-defined functions — a symbol whose
    * engine definition is a `Function` literal (`f(x) := …`, `x ↦ …`, or an
    * `ce.assign(name, lambda)`) encountered as an *operator* (`f(2)`). Each such
@@ -879,6 +899,19 @@ export interface CompilationOptions<Expr = unknown> {
    * generated code's capture set). See `CompileTarget.symbolDeps`.
    */
   symbolDeps?: Set<MathJsonSymbol>;
+
+  /**
+   * When provided, the compiler records the id of every free symbol it emitted
+   * as a vars-object lookup. See `CompileTarget.varsObjectRefs`.
+   *
+   * Readable by the caller even when the compilation FAILS, which is the point:
+   * compiling a `Function` literal whose body has such a symbol is declined
+   * (the lambda ABI has nowhere to bind it), and a caller that must tell
+   * "blocked on a free symbol, retry once it is assigned" from "structurally
+   * uncompilable, never retry" reads this set to do so. `map-auto-compile`'s
+   * `{symbol}` no-compile mark (D4) is that caller.
+   */
+  varsObjectRefs?: Set<MathJsonSymbol>;
 
   /**
    * Common-subexpression elimination (default `true`).

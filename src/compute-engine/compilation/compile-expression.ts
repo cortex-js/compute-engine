@@ -156,6 +156,7 @@ export function compile<T extends string = 'javascript'>(
       iterationBudget: options?.iterationBudget,
       quadrature: options?.quadrature,
       symbolDeps: options?.symbolDeps,
+      varsObjectRefs: options?.varsObjectRefs,
       cse: options?.cse,
     }) as CompilationResult<T>;
   } catch (e) {

@@ -308,4 +308,13 @@ export function assertCompilationOptionsContract(
       'Invalid compilation option "symbolDeps": expected a Set of symbol ids'
     );
   }
+
+  if (
+    options.varsObjectRefs !== undefined &&
+    !(options.varsObjectRefs instanceof Set)
+  ) {
+    throw new Error(
+      'Invalid compilation option "varsObjectRefs": expected a Set of symbol ids'
+    );
+  }
 }

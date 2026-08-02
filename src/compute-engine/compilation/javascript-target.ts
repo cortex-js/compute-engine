@@ -4583,8 +4583,15 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       return JAVASCRIPT_OPERATORS[op];
     };
 
+    // Free symbols emitted as `_.<id>` vars-object lookups (see
+    // `CompileTarget.varsObjectRefs`). Recorded here, checked by
+    // `compileToTarget` before it wraps a lambda, which has no `_` in scope.
+    // The caller may supply the set to read it back after a declined compile.
+    const varsObjectRefs = options.varsObjectRefs ?? new Set<MathJsonSymbol>();
+
     const target = this.createTarget({
       operators: operatorLookup,
+      varsObjectRefs,
       functions: (id) =>
         namedFunctions?.[id] ? namedFunctions[id] : JAVASCRIPT_FUNCTIONS[id],
       var: (id) => {
@@ -4625,7 +4632,10 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
           EulerGamma: '0.57721566490153286',
         }[id];
         if (result !== undefined) return result;
-        if (unknowns.includes(id)) return `_.${id}`;
+        if (unknowns.includes(id)) {
+          varsObjectRefs.add(id);
+          return `_.${id}`;
+        }
         // An assigned value / declared constant: returning `undefined` lets
         // BaseCompiler fold it (the way evaluate() does) rather than emitting a
         // bare `a` global, which would throw `ReferenceError` at run time.
@@ -4634,6 +4644,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         // folded value (e.g. `c` in `b = c + 1`), so `unknowns` — computed on
         // the surface expression — can miss it. Emit the vars-object lookup
         // anyway, not a bare global. (`freeSymbols` on the result lists it.)
+        varsObjectRefs.add(id);
         return `_.${id}`;
       },
       preamble: (preamble ?? '') + preambleImports,
@@ -4773,6 +4784,21 @@ function compileToTarget(
     // A lambda body may call user-defined functions (`t ↦ f(t)`); emit their
     // definitions as a preamble inside the lambda's own body.
     const userDefs = BaseCompiler.userFunctionsPreamble(target);
+    // A compiled lambda is called with its declared parameters only — there is
+    // no vars object in scope — so a free symbol emitted as `_.<id>` (here or
+    // in the user-function preamble, which shares this target) would throw
+    // `ReferenceError: _ is not defined` at call time instead of producing a
+    // value (Tycho item 131; reached via quadrature, which compiles the
+    // integrand as a lambda). Decline: the low-level contract is to throw, so
+    // `implicitCompile` degrades to the interpreter and the expression stays
+    // symbolic — which is the right answer for a body with a free variable.
+    const dangling = target.varsObjectRefs;
+    if (dangling && dangling.size > 0)
+      throw new Error(
+        `Cannot compile a function literal whose body has unbound free ${
+          dangling.size === 1 ? 'symbol' : 'symbols'
+        } ${[...dangling].map((s) => `"${s}"`).join(', ')}: a compiled lambda takes only its declared parameters, so there is no value to bind them to. Assign a value, or pass one via \`vars\`.`
+      );
     const fn = new ComputeEngineFunctionLiteral(
       expr.engine,
       body,
