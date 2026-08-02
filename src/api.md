@@ -1013,11 +1013,35 @@ declareType(name, type, options?): void
 
 ####### type
 
-[`Type`](#type-3)
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeReference`](#typereference)
+  \| [`BoxedType`](#boxedtype)
 
 ####### options?
 
 ####### alias?
+
+`boolean`
+
+####### fromStatement?
+
+`boolean`
+
+####### mint?
 
 `boolean`
 
@@ -3713,6 +3737,28 @@ Default: `true`
 
 <MemberCard>
 
+##### BaseCollectionHandlers.elementMemo?
+
+```ts
+optional elementMemo?: boolean;
+```
+
+Opt this operator's instances into per-instance element memoization: a
+complete walk of an unmodified instance is served from a cached prefix
+on subsequent walks (`boxed-expression/collection-element-memo.ts`).
+
+Set it on lazy operators that evaluate a function per element (`Map`,
+`Filter`, `Tabulate`, …), where re-deriving an element is expensive.
+Leave it off structural reindexers (`Take`, `Reverse`, `Zip`, …), which
+re-serve their source's elements cheaply — when the source is itself a
+flagged instance, the source's own memo already absorbs the cost.
+
+Default: `false`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BaseCollectionHandlers.contains?
 
 ```ts
@@ -4122,7 +4168,7 @@ type OperatorDefinitionFlags = {
   effects: EffectSet | undefined;
   effectsDeclared: boolean;
   frameProtocol: "seed" | undefined;
-  invokes: boolean;
+  invokes: boolean | {};
   discharges: {} | undefined;
   holdClass: "evaluate" | "quote" | "release";
   drawsRandom: boolean;
@@ -4242,6 +4288,19 @@ design): the declared [missingBehavior](#missingbehavior) when present, otherwis
 `'propagate'` for a declared all-numeric signature and `'pass-through'`
 for everything else. Recomputed from the current signature — never cached
 across a signature mutation.
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.invokesNone
+
+```ts
+readonly invokesNone: boolean;
+```
+
+True when NO operand position invokes — the cheap operator-level
+pre-gate for the latent half of the projection rule.
 
 </MemberCard>
 
@@ -4398,6 +4457,25 @@ stripsMissingAt(i): boolean
 True if a `missing` arm is stripped from parameter position `i` before
 validation (§3.A). Only `propagate`/`handle` operators strip; `missingStrip`
 selects the positions.
+
+####### i
+
+`number`
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.invokesAt()
+
+```ts
+invokesAt(i): boolean
+```
+
+True if operand position `i` may INVOKE a function-valued operand — the
+per-position reader for [OperatorDefinitionFlags.invokes](#invokes). Missing
+map indices default to `true`. Every consumer of the metadata goes
+through this accessor (or [invokesNone](#invokesnone)), never the raw field.
 
 ####### i
 
@@ -8479,11 +8557,35 @@ declareType(name, type, options?): void
 
 ####### type
 
-[`Type`](#type-3)
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeReference`](#typereference)
+  \| [`BoxedType`](#boxedtype)
 
 ####### options?
 
 ####### alias?
+
+`boolean`
+
+####### fromStatement?
+
+`boolean`
+
+####### mint?
 
 `boolean`
 
@@ -13614,7 +13716,23 @@ is(other): boolean
 
 ####### other
 
-[`Type`](#type-3)
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeReference`](#typereference)
+  \| [`BoxedType`](#boxedtype)
 
 </MemberCard>
 
