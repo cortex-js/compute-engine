@@ -15,6 +15,7 @@ import type {
   Scope,
 } from '../global-types.js';
 import { isSymbol } from './type-guards.js';
+import { isDevolvedShadow } from './devolved-shadows.js';
 import {
   admissionOf,
   hasValueComponent,
@@ -135,6 +136,10 @@ function arityBounds(sig: FunctionSignature): { min: number; max: number } {
  * variable. `validateArguments` repairs such an operand (by declaring a
  * shadow), so the filter must not refute an arm on its account — but the
  * filter cannot perform the declaration itself (§4.2).
+ *
+ * Stays in lockstep with `devolveUnappliedOperator`: the operand must be bound
+ * to an OPERATOR definition, and a value binding counts only when the repair
+ * itself created it (a user-declared symbol keeps its declared-type check).
  */
 function isRepairableOperatorSymbol(
   ce: ComputeEngine,
@@ -143,6 +148,7 @@ function isRepairableOperatorSymbol(
   if (!isSymbol(op)) return false;
   const name = op.symbol;
   if (!/^[A-Z]$/.test(name)) return false;
+  if (!op.operatorDefinition) return false;
   let scope: Scope | null = ce.context.lexicalScope;
   while (scope && !scope.bindings.has(name)) scope = scope.parent;
   if (!scope) return false;
@@ -150,7 +156,8 @@ function isRepairableOperatorSymbol(
   // would close a cycle through `boxed-operator-definition.ts` (the runtime
   // effect channel calls this resolver, and definitions call `function-utils`).
   const def = scope.bindings.get(name)!;
-  return scope.parent ? 'value' in def : 'operator' in def;
+  if (!scope.parent) return 'operator' in def;
+  return 'value' in def && isDevolvedShadow(def);
 }
 
 /** The caller policies the filter must mirror to stay faithful to

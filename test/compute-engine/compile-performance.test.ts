@@ -392,13 +392,14 @@ describe('COMPILATION PERFORMANCE', () => {
       log(`  GLSL memory for 100 compilations: ${(memory / 1024).toFixed(2)} KB`);
       log(`  Per compilation: ${(memory / 100 / 1024).toFixed(2)} KB`);
 
-      // Same leak-guard-not-drift-guard contract as above: ~1.3MB observed
-      // under load with the (transient) naming-context inventory included.
-      // Recalibrated 4MB → 8MB (matching the sibling budget) 2026-08-02:
-      // ambient heap grew to ~6.1MB — flaky pass/fail on identical code —
-      // after the element-memo/effects work. Where the ~2MB went is an open
-      // follow-up; this guard is for leaks (order-of-magnitude), not drift.
-      expect(memory).toBeLessThan(8 * 1024 * 1024);
+      // Same leak-guard-not-drift-guard contract as above: ~1.3–1.5MB
+      // observed under load with the (transient) naming-context inventory
+      // included. History: briefly read ~6.1MB when GPU_FUNCTIONS hit
+      // exactly 128 entries and the per-call `{...GPU_FUNCTIONS, ...}`
+      // merge in getFunctions() crossed V8's fast-property cliff into
+      // dictionary mode (~45KB/compile of rehash garbage, no retention);
+      // fixed by memoizing the merged table on the target instance.
+      expect(memory).toBeLessThan(4 * 1024 * 1024);
     });
   });
 

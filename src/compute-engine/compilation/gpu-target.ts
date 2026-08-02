@@ -7575,8 +7575,30 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     return GPU_OPERATORS;
   }
 
+  /**
+   * Memo for the merged function table, keyed on the IDENTITY of the
+   * language-specific table (a subclass that swaps its table gets a fresh
+   * merge). Both sources are module constants, so the merge is invariant —
+   * but it is not free: `GPU_FUNCTIONS` holds exactly V8's
+   * `kMaxFastProperties` (128) entries, so merging the 5 language-specific
+   * entries on top normalizes the result to DICTIONARY mode, ~22KB of
+   * transient garbage per call. `compile()` calls this twice (once directly,
+   * once via `createTarget`), which is ~45KB per compilation.
+   */
+  private _functionsMemo?: {
+    languageSpecific: CompiledFunctions<Expression>;
+    merged: CompiledFunctions<Expression>;
+  };
+
   getFunctions(): CompiledFunctions<Expression> {
-    return { ...GPU_FUNCTIONS, ...this.getLanguageSpecificFunctions() };
+    const languageSpecific = this.getLanguageSpecificFunctions();
+    if (this._functionsMemo?.languageSpecific !== languageSpecific) {
+      this._functionsMemo = {
+        languageSpecific,
+        merged: { ...GPU_FUNCTIONS, ...languageSpecific },
+      };
+    }
+    return this._functionsMemo.merged;
   }
 
   getConstants(): Record<string, string> {

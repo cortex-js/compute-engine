@@ -34,6 +34,7 @@ import type {
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isTensorValue } from './tensor-view.js';
+import { isDevolvedShadow, markDevolvedShadow } from './devolved-shadows.js';
 import { isSymbol, isFunction, isContinuationOperand } from './type-guards.js';
 
 // Parsed once: the type of an indexed collection whose every element is a
@@ -111,6 +112,11 @@ export function checkArity(
  * the variable, not the builtin (same convention as type inference, which is
  * also use-order dependent).
  *
+ * The repair applies only to an operand that is itself bound to an OPERATOR
+ * definition — an un-applied operator. A symbol bound to a value definition
+ * has a type of its own, and re-boxing it here would silently launder the
+ * parameter check it just failed.
+ *
  * Returns the re-boxed symbol, or `null` if the fallback does not apply.
  */
 function devolveUnappliedOperator(
@@ -120,6 +126,11 @@ function devolveUnappliedOperator(
   if (!isSymbol(op)) return null;
   const name = op.symbol;
   if (!/^[A-Z]$/.test(name)) return null;
+  // An un-applied OPERATOR is what devolves. A symbol already bound to a
+  // value (a user declaration such as `V: tuple<number,number,number>`) is
+  // not repairable: its declared type is the answer, and the failed check
+  // must surface as `incompatible-type` like it does for any other name.
+  if (!op.operatorDefinition) return null;
 
   // Find the scope where the name is currently bound
   let scope: Scope | null = ce.context.lexicalScope;
@@ -131,11 +142,21 @@ function devolveUnappliedOperator(
     // Bound to the standard library: shadow it in the current scope
     if (!isOperatorDef(def)) return null;
     ce.declare(name, 'unknown');
+    // Remember the shadow we just created: a later operand of the same
+    // expression still carries the stale operator binding and has to be
+    // rebound to it (see below).
+    let shadowScope: Scope | null = ce.context.lexicalScope;
+    while (shadowScope && !shadowScope.bindings.has(name))
+      shadowScope = shadowScope.parent;
+    const shadow = shadowScope?.bindings.get(name);
+    if (shadow && isValueDef(shadow)) markDevolvedShadow(shadow);
     return ce.box(name);
   }
-  // The name was already shadowed with a value (e.g. by a previous operand
-  // of the same expression): rebind this occurrence to the shadow.
-  if (isValueDef(def)) return ce.box(name);
+  // The name was already shadowed with a value BY THIS REPAIR (e.g. by a
+  // previous operand of the same expression): rebind this occurrence to the
+  // shadow. Any other value definition — in particular a user declaration —
+  // is not a repair target.
+  if (isValueDef(def) && isDevolvedShadow(def)) return ce.box(name);
   return null;
 }
 

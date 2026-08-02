@@ -668,6 +668,20 @@ describe('COMPILE', () => {
         expect(missing).toEqual([]);
       });
     }
+
+    // The GPU targets MERGE their language-specific table onto GPU_FUNCTIONS.
+    // That merge is invariant, and it must be computed once per target: the
+    // shared table sits exactly at V8's fast-property limit (128 entries), so
+    // re-merging on every `compile()` normalizes the result to dictionary
+    // mode — ~22KB of transient garbage per call, twice per compilation.
+    it('gpu targets memoize their merged function table', () => {
+      for (const target of [new GLSLTarget(), new WGSLTarget()]) {
+        const first = target.getFunctions();
+        expect(target.getFunctions()).toBe(first);
+        target.compile(ce.parse('\\sin(x)'));
+        expect(target.getFunctions()).toBe(first);
+      }
+    });
   });
 
   describe('Reverse cross-reference: CE math functions have target coverage', () => {

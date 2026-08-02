@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- Declared types are enforced for symbols named with a single uppercase
+  letter. An argument-validation repair intended for bare standard-library
+  operator symbols such as `N` and `D` used in value position also fired for
+  any user-declared single-letter symbol that failed a parameter type check,
+  silently skipping the declared-type check. The repair is now gated on the
+  provenance of the shadow it rebinds to.
+
+### Performance
+
+- GPU compilation no longer re-merges its function table on every compile.
+  The table reached V8's fast-property limit, so the per-call object spread
+  allocated ~45 KB of transient dictionary-mode garbage per compilation; the
+  merged table is now memoized per target instance.
+
 ## 0.100.0 _2026-08-02_
 
 ### Breaking Changes

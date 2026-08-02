@@ -284,8 +284,8 @@ describe('Distance accepts a union-declared point (item 130)', () => {
   const UNION3 = `${T3} | list<${T3}>`;
 
   // A fresh engine: these declarations must not leak into the shared `ce`.
-  // NOTE: do not name the symbol with a single uppercase letter — such a name
-  // is devolved by `devolveUnappliedOperator` and skips the check entirely.
+  // (Single-uppercase names used to skip declared-type checks via
+  // `devolveUnappliedOperator`; fixed — see single-uppercase-declared-type.test.ts.)
   const makeEngine = () => {
     const e = new ComputeEngine();
     e.declare('pt', UNION3 as any);
