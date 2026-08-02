@@ -137,13 +137,15 @@ export interface CompiledCase {
   captureKeys: string[]; // wildcard keys, in capture order
   captureNames: string[]; // bare parameter names, parallel to `captureKeys`
   hasGuard: boolean;
-  // Raw (held) case operands — used by the compiler (`compile()`), which emits
-  // the guard/body directly rather than applying the interpreted closures. The
-  // closures below stay the interpreted path's beta-reduction machinery.
+  // Raw (held) case operands. Both the interpreter and the compiler build
+  // their guard/body closures from these — PER USE, never cached on the plan
+  // (see `buildCaseClosure`): under the frame-is-scope model a closure
+  // canonicalized inside a live invocation frame captures that frame's
+  // bindings, so a plan-cached closure would replay the first caller's frame
+  // on every later evaluation (silent stale results, unbounded recursion —
+  // fixed 2026-08-01).
   guard: Expression | undefined; // raw guard operand (undefined if no guard)
   body: Expression; // raw body operand
-  guardClosure: Expression | undefined; // built once (undefined if build failed)
-  bodyClosure: Expression | undefined; // built once (undefined ⇒ Nothing)
   // Tier 0: dispatch keys (also used to seed the segment table/fallback scan).
   dispatchKeys?: { key: string; value: Expression }[];
   // Tier 1: any-of leaf tests.
@@ -311,6 +313,29 @@ export function evaluateMatchReference(
 // ─── Case execution ───────────────────────────────────────────────────────
 //
 
+/** Build the closure for a case's guard or body: a canonical function literal
+ * over the case's capture names, canonicalized in the CURRENT scope.
+ *
+ * Never cache the result across evaluations. Under the frame-is-scope model,
+ * canonicalizing inside a live invocation frame captures that frame's
+ * bindings — a cached closure replays the first caller's frame on every later
+ * call (silent stale results for `match` bodies referencing an enclosing
+ * parameter; unbounded recursion when the first call only hit the base case —
+ * regression fixed 2026-08-01). The reference path (`evaluateMatchReference`)
+ * has always built per evaluation; this helper mirrors it, and the compiler
+ * uses it at emission time (only the value-safe canonical STRUCTURE, `.op1`,
+ * is consumed there). */
+export function buildCaseClosure(
+  ce: ComputeEngine,
+  operand: Expression,
+  names: ReadonlyArray<string>
+): Expression | undefined {
+  return canonicalFunctionLiteralArguments(ce, [
+    operand,
+    ...names.map((n) => ce.symbol(n, { canonical: false })),
+  ]);
+}
+
 /** Run a compiled case against `subject`; return the body value if the case is
  * selected, or `undefined` to fall through to the next case. */
 function runCase(
@@ -324,14 +349,19 @@ function runCase(
 
   const args = cc.captureKeys.map((k) => sub[k] ?? ce.Nothing);
 
+  // Closures are built per evaluation (see `buildCaseClosure`) — only after
+  // the pattern has matched, so non-selected cases pay nothing.
   if (cc.hasGuard) {
-    if (cc.guardClosure === undefined) return undefined;
-    if (sym(apply(cc.guardClosure, args, undefined, 'bind')) !== 'True')
+    if (cc.guard === undefined) return undefined;
+    const guardClosure = buildCaseClosure(ce, cc.guard, cc.captureNames);
+    if (guardClosure === undefined) return undefined;
+    if (sym(apply(guardClosure, args, undefined, 'bind')) !== 'True')
       return undefined;
   }
 
-  if (cc.bodyClosure === undefined) return ce.Nothing;
-  return apply(cc.bodyClosure, args, options, 'bind');
+  const bodyClosure = buildCaseClosure(ce, cc.body, cc.captureNames);
+  if (bodyClosure === undefined) return ce.Nothing;
+  return apply(bodyClosure, args, options, 'bind');
 }
 
 /** Attempt to match a compiled case; return the capture substitution (possibly
@@ -586,26 +616,15 @@ function buildMatchPlan(
     const names = captures.map((c) => c.name);
     const captureKeys = captures.map((c) => c.key);
 
-    const guardClosure =
-      guard !== undefined
-        ? canonicalFunctionLiteralArguments(ce, [
-            guard,
-            ...names.map((n) => ce.symbol(n, { canonical: false })),
-          ])
-        : undefined;
-    const bodyClosure = canonicalFunctionLiteralArguments(ce, [
-      body,
-      ...names.map((n) => ce.symbol(n, { canonical: false })),
-    ]);
-
+    // NOTE: no closures are built here. The plan is cached for the lifetime
+    // of the Match expression, but closure canonicalization is scope-sensitive
+    // (frame-is-scope) — closures are built per use by `buildCaseClosure`.
     const base: Omit<CompiledCase, 'tier'> = {
       captureKeys,
       captureNames: names,
       hasGuard,
       guard,
       body,
-      guardClosure,
-      bodyClosure,
     };
 
     // Alternatives: binding check + weakest-tier classification.

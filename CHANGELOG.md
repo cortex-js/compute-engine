@@ -151,6 +151,20 @@
 
 ### Issues Resolved
 
+- **A `match` inside a function body no longer replays the first call's
+  arguments on every later call.** The dispatch plan cached per `Match`
+  included the case guard/body closures, which were canonicalized inside the
+  first invocation's frame — so a case body referencing an enclosing
+  parameter (`function f(n) { match n { 0 => 1; _ => n + 100 } }`) returned
+  the first call's answer forever (`f(5)` → 105, then `f(7)` → 105), and a
+  recursive definition whose first call only hit the base case then
+  recursed past it without terminating (`recursion-depth-exceeded`).
+  Guard and body closures are now built per evaluation, in the current
+  frame — matching the reference semantics — while the classification plan
+  (dispatch tables, tiers, capture keys) stays cached. Compiled `match` is
+  unaffected (the compiler consumes only the value-safe canonical
+  structure, now built at emission time).
+
 - **User-declared types now resolve everywhere a type can flow.** A batch of
   sites parsed type strings without the engine's type resolver, so a
   declared type name (`ce.declareType('point', …)`) threw
@@ -475,6 +489,15 @@
   operator's evaluate path now resolves user-declared types (a box-route
   `["Declare", "p", "'point'"]` used to throw). A malformed type body no
   longer leaves a dangling unresolvable type reference behind in the scope.
+  Guard rails: because nominal identity is the type *name*, a `type`
+  statement inside a block that shadows an existing type reports a
+  `type-shadow` warning (the two would be indistinguishable) — a top-level
+  redeclaration stays silent, since that is how a re-run notebook cell
+  replaces its own definition; a constructor cannot be clobbered by
+  assignment (`point = 5` is refused like reassigning a constant); and a
+  type declared inside a function body survives escaping as the function's
+  inferred result type (the inferred signature now carries the resolved
+  type instead of re-parsing its name out of scope).
 
 - **A `PointList` with collection-valued components now compiles on the
   JavaScript target**, emitting a shortest-zip construction (`Math.min` over the

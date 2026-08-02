@@ -587,3 +587,116 @@ describe('MATCH ladder — error subjects reject shape patterns (both tiers)', (
     bothTiers(['Match', ERR, ['MatchCase', '___r', { str: 'rest' }]], '"rest"');
   });
 });
+
+// ─── Per-evaluation closures (regression, 2026-08-01) ───────────────────────
+//
+// The dispatch plan is cached per Match, but guard/body closures must be built
+// PER EVALUATION: a closure canonicalized inside a live invocation frame
+// captures that frame's bindings (frame-is-scope), so a plan-cached closure
+// replayed the FIRST call's frame on every later call. Symptoms locked in
+// below: stale results on repeated calls with different arguments, and — when
+// the first call only hit the base case — unbounded recursion past it.
+
+describe('MATCH in a function body — closures are per evaluation', () => {
+  it('a wildcard arm referencing the enclosing parameter sees each frame', () => {
+    ce.box([
+      'Assign',
+      'clfr_h',
+      [
+        'Function',
+        [
+          'Block',
+          [
+            'Match',
+            'n',
+            ['MatchCase', 0, 1],
+            ['MatchCase', '_', ['Add', 'n', 100]],
+          ],
+        ],
+        'n',
+      ],
+    ]).evaluate();
+    // Was: 105, 105, 105 — the first frame (n = 5) baked into the plan.
+    expect(ce.box(['clfr_h', 5]).evaluate().toString()).toBe('105');
+    expect(ce.box(['clfr_h', 7]).evaluate().toString()).toBe('107');
+    expect(ce.box(['clfr_h', 9]).evaluate().toString()).toBe('109');
+    expect(ce.box(['clfr_h', 0]).evaluate().toString()).toBe('1');
+  });
+
+  it('recursion terminates after a base-case-only first call', () => {
+    ce.box([
+      'Assign',
+      'clfr_t',
+      [
+        'Function',
+        [
+          'Block',
+          [
+            'Match',
+            'n',
+            ['MatchCase', 0, 999],
+            ['MatchCase', '_', ['clfr_t', ['Subtract', 'n', 1]]],
+          ],
+        ],
+        'n',
+      ],
+    ]).evaluate();
+    // The base-case-first order poisoned the plan: the arm's stale `n = 0`
+    // made t(1) descend past 0 forever (recursion-depth-exceeded).
+    expect(ce.box(['clfr_t', 0]).evaluate().toString()).toBe('999');
+    expect(ce.box(['clfr_t', 1]).evaluate().toString()).toBe('999');
+    expect(ce.box(['clfr_t', 3]).evaluate().toString()).toBe('999');
+  });
+
+  it('recursive results are not stale after a recursive first call', () => {
+    ce.box([
+      'Assign',
+      'clfr_fac',
+      [
+        'Function',
+        [
+          'Block',
+          [
+            'Match',
+            'n',
+            ['MatchCase', 0, 1],
+            [
+              'MatchCase',
+              '_',
+              ['Multiply', 'n', ['clfr_fac', ['Subtract', 'n', 1]]],
+            ],
+          ],
+        ],
+        'n',
+      ],
+    ]).evaluate();
+    // Was: 1, 1, 1 — every call computed 1 · fac(0) with the stale n = 1.
+    expect(ce.box(['clfr_fac', 1]).evaluate().toString()).toBe('1');
+    expect(ce.box(['clfr_fac', 3]).evaluate().toString()).toBe('6');
+    expect(ce.box(['clfr_fac', 5]).evaluate().toString()).toBe('120');
+  });
+
+  it('a guard referencing the enclosing parameter sees each frame', () => {
+    // The guard closure was cached alongside the body closure — a guard
+    // reading the enclosing `n` froze at the first call's value.
+    ce.box([
+      'Assign',
+      'clfr_g',
+      [
+        'Function',
+        [
+          'Block',
+          [
+            'Match',
+            0,
+            ['MatchCase', '_', ['Greater', 'n', 10], 1],
+            ['MatchCase', '_', 0],
+          ],
+        ],
+        'n',
+      ],
+    ]).evaluate();
+    expect(ce.box(['clfr_g', 20]).evaluate().toString()).toBe('1');
+    expect(ce.box(['clfr_g', 5]).evaluate().toString()).toBe('0');
+  });
+});

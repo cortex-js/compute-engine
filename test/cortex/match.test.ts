@@ -602,3 +602,29 @@ describe('CORTEX MATCH — error subjects (rung 1)', () => {
     ).toBe('"fell"');
   });
 });
+
+describe('CORTEX MATCH — per-evaluation closures (regression, 2026-08-01)', () => {
+  // Guard/body closures used to be cached on the dispatch plan at FIRST
+  // evaluation, baking that call's frame into every later call: repeated
+  // calls returned stale values, and a base-case-only first call made later
+  // recursion descend past the base case forever.
+
+  it('repeated calls of a match-bodied function see each frame', () => {
+    const r = run(
+      'function ff(n) { match n { 0 => 1; _ => n + 100 } }\n' +
+        '[ff(5), ff(7), ff(9), ff(0)]'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.toString()).toBe('[105,107,109,1]');
+  });
+
+  it('recursive fib works after a base-case-only first call', () => {
+    const r = run(
+      'function fib(n: integer) -> integer { match n { 0 => 0; 1 => 1; _ => fib(n-1) + fib(n-2) } }\n' +
+        'fib(0)\n' +
+        'fib(10)'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.toString()).toBe('55');
+  });
+});

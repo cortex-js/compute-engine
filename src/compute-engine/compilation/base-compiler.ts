@@ -37,6 +37,7 @@ import { functionLiteralParameterName } from '../boxed-expression/function-liter
 import { rewriteAngularUnit } from './angular-unit.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
+  buildCaseClosure,
   getMatchPlan,
   matchPatternReferences,
 } from '../boxed-expression/match-dispatch.js';
@@ -3648,8 +3649,9 @@ export class BaseCompiler {
   /** Compile a case body, substituting each captured name with its target
    * accessor code. Bodies with no captures compile directly (the common
    * tier-0/1 case); bodies with captures compile the shadow-correct canonical
-   * body held on the case's closure, with the capture names rebound to their
-   * accessors. */
+   * body of a closure built at EMISSION time (`buildCaseClosure` — the plan no
+   * longer caches closures; only the value-safe canonical structure `.op1` is
+   * consumed here), with the capture names rebound to their accessors. */
   private static compileMatchBody(
     cc: CompiledCase,
     accessors: Map<string, string> | undefined,
@@ -3657,10 +3659,15 @@ export class BaseCompiler {
   ): string {
     if (cc.captureNames.length === 0)
       return BaseCompiler.compile(cc.body.canonical, target);
-    if (cc.bodyClosure === undefined || !isFunction(cc.bodyClosure))
+    const bodyClosure = buildCaseClosure(
+      cc.body.engine,
+      cc.body,
+      cc.captureNames
+    );
+    if (bodyClosure === undefined || !isFunction(bodyClosure))
       throw new Error('Match: case body is not compilable. Fail closed (D6).');
     return BaseCompiler.compile(
-      cc.bodyClosure.op1,
+      bodyClosure.op1,
       BaseCompiler.matchCaptureTarget(accessors, target)
     );
   }
@@ -3675,10 +3682,15 @@ export class BaseCompiler {
     if (!cc.hasGuard || cc.guard === undefined) return undefined;
     if (cc.captureNames.length === 0)
       return BaseCompiler.compile(cc.guard.canonical, target);
-    if (cc.guardClosure === undefined || !isFunction(cc.guardClosure))
+    const guardClosure = buildCaseClosure(
+      cc.guard.engine,
+      cc.guard,
+      cc.captureNames
+    );
+    if (guardClosure === undefined || !isFunction(guardClosure))
       throw new Error('Match: case guard is not compilable. Fail closed (D6).');
     return BaseCompiler.compile(
-      cc.guardClosure.op1,
+      guardClosure.op1,
       BaseCompiler.matchCaptureTarget(accessors, target)
     );
   }
