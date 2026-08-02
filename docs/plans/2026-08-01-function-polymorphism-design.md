@@ -131,9 +131,13 @@ statically (refuted if the static type is disjoint, otherwise undecidable).
 Error values are never members of any value type.
 
 **Lexical forms pinned:** integer, decimal, and exact-rational literals,
-string literals, `True`/`False`. `NaN` is a member of no value type — an
-explicit rule (empirically, the engine's `isSame(NaN, NaN)` is `true`, so
-this does NOT follow from isSame and must be guarded). Zeros
+string literals, `True`/`False`. `NaN` is a member of exactly the value
+type `nan` — "match only themselves", like the infinities (*amended
+2026-08-02, user ruling; the v1 rule made `NaN` a member of NO value type,
+which would have made a `nan` literal parameter an unreachable clause*).
+Both directions stay explicit guards: the engine's `isSame(NaN, NaN)` is
+`true`, so neither NaN-in-`nan` nor NaN-not-in-`0` follows from isSame
+alone. NaN inhabits no numeric RANGE (it is unordered). Zeros
 (*amended at Phase 0 implementation, 2026-08-01*): the engine normalizes
 `0.0` and `-0.0` to the exact integer `0` **at boxing** — it has no distinct
 float zero — so both ARE members of the value type `0` under the D1 isSame
@@ -329,12 +333,23 @@ Extend the parameter grammar (both definition-statement forms) to accept
 that have value types (§4.1's pinned lexical forms). No destructuring/shape
 patterns in parameter position — that remains `match`'s job inside a body.
 
-*(Ruled 2026-08-02: the v1 literal-parameter grammar is exactly numbers,
-strings, and booleans — `Infinity` is NOT a literal parameter. `f(Infinity)`
-keeps the ordinary symbol-parameter reading (a parameter *named* `Infinity`,
-the general constant-shadowing pattern). Supporting infinity clauses first
-requires the type grammar to accept infinity value-type spellings, which it
-currently rejects; queued for a future type-grammar round.)*
+*(Ruled 2026-08-02, superseding a same-day ruling made on a wrong premise:
+`Infinity`, `-Infinity` and `NaN` ARE literal parameters, lowering to the
+value types `oo` / `-oo` / `nan`. The earlier "keep v1, queue behind a
+type-grammar round" ruling rested on a probe that read the type grammar as
+rejecting infinity value types — an artifact of `JSON.stringify(Infinity)`
+rendering as `null`; the grammar in fact already had the `oo`/`nan`
+spellings, and only the Cortex parameter recognition was missing. The
+consistency argument: `Infinity`/`NaN` are numeric LITERALS in Cortex
+expression position (`parseSymbol` maps them to number nodes), so the
+literal reading in parameter position is the uniform one. An ordinary
+constant name (`Pi`, `e`) is a symbol everywhere and remains a parameter
+NAME — same convention as match-pattern bindings. Landed with the fix:
+the type lexer now also accepts the capitalized `Infinity`/`-Infinity`/
+`NaN` spellings its own serializer emits, `nan <: nan` (the `===` NaN
+self-subtype hole), and principal-type lattice claims for non-finite
+value types — `nan` claims `number` only, `oo`/`-oo` claim
+`non_finite_number`.)*
 
 **Lowering (encoding pinned):** a literal parameter lowers to an anonymous
 typed parameter `["Typed", <fresh>, {str: "<value-type>"}]` where `<fresh>`

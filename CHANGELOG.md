@@ -489,7 +489,25 @@
 
   The **Cortex surface** is included: both definition forms accept
   **literal parameters** (`fib(0) = 0`, `function f("yes") { … }`,
-  `f(true) = 1` — numbers, strings, booleans), lowered to anonymous
+  `f(true) = 1` — numbers, strings, booleans, and the non-finite numeric
+  literals `Infinity`, `-Infinity` and `NaN`, which dispatch "match only
+  themselves": `f(NaN) = 0` handles exactly NaN, and a `real`- or
+  `integer`-typed clause never captures it; `oo` is accepted as an input
+  alias for `Infinity` in both expression and parameter position, matching
+  the type grammar's spelling — serialization always emits the canonical
+  `Infinity`, now unsigned in expression position too, where it used to
+  print `+Infinity`. All three spellings are now **reserved words** in the
+  literal class alongside `true`/`false`: `let Infinity = 5`,
+  `let oo = 5` and `let NaN = 1` are rejected with a `reserved-word`
+  diagnostic — the verbatim `` `oo` `` form still names a binding — and a
+  bare symbol named `Infinity`/`oo`/`NaN` serializes in verbatim form so
+  it can never be re-read as the literal). A constant *name* stays a
+  parameter name — `f(Pi) = Pi + 1` binds a parameter named `Pi`, the same
+  shadowing convention as match patterns — and a new advisory
+  `parameter-shadows-constant` diagnostic flags it when the name is a
+  multi-character engine constant (`Pi`, `GoldenRatio`; single-letter
+  names like `e` and `i` are the ordinary variable namespace and stay
+  quiet). Literal parameters are lowered to anonymous
   value-typed parameters with generated, reserved-prefix names that never
   surface (serialization renders the literal spelling back). Definition
   statements now lower to `DefineFunction` — so a second `function f`

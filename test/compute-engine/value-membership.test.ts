@@ -55,9 +55,21 @@ describe('VALUE MEMBERSHIP — typeAcceptsValue', () => {
     expect(typeAcceptsValue(ce.box(-0.0), t('0'))).toBe(true);
   });
 
-  it('NaN is a member of no value type', () => {
+  it('NaN is a member of exactly the value type `nan` (amended 2026-08-02)', () => {
+    expect(typeAcceptsValue(ce.box(NaN), t('nan'))).toBe(true);
     expect(typeAcceptsValue(ce.box(NaN), t('0'))).toBe(false);
     expect(typeAcceptsValue(ce.box(NaN), t('integer<0..10>'))).toBe(false);
+    // …and nothing else inhabits `nan`.
+    expect(typeAcceptsValue(ce.box(0), t('nan'))).toBe(false);
+    expect(typeAcceptsValue(ce.box(Infinity), t('nan'))).toBe(false);
+  });
+
+  it('infinities match only themselves', () => {
+    expect(typeAcceptsValue(ce.box(Infinity), t('oo'))).toBe(true);
+    expect(typeAcceptsValue(ce.box(-Infinity), t('-oo'))).toBe(true);
+    expect(typeAcceptsValue(ce.box(Infinity), t('-oo'))).toBe(false);
+    expect(typeAcceptsValue(ce.box(-Infinity), t('oo'))).toBe(false);
+    expect(typeAcceptsValue(ce.box(5), t('oo'))).toBe(false);
   });
 
   it('string and boolean literals inhabit their value types', () => {

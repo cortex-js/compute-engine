@@ -38,7 +38,10 @@ import { RESERVED_WORDS } from './reserved-words.js';
 import { OPERATORS as SHARED_OPERATORS } from './operators.js';
 
 export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
-  positiveInfinity: '+Infinity',
+  // Cortex's literal spelling is unsigned (`x + Infinity`, not
+  // `x + +Infinity`) — the leading `+` came from the generic default and
+  // re-parsed only by grace of unary plus.
+  positiveInfinity: 'Infinity',
   negativeInfinity: '-Infinity',
   notANumber: 'NaN',
   imaginaryUnit: 'i',
@@ -924,11 +927,32 @@ export function serializeCortex(
   // value type's text. The generated name never surfaces (function-
   // polymorphism design §4.5).
   // The spelling of a value type — what a literal parameter's type text
-  // looks like: a (signed) number, a quoted string, or a boolean. Guards
-  // the name suppression below so a non-value-typed parameter that merely
-  // wears the reserved prefix (box route) keeps its name.
+  // looks like: a (signed) number, a quoted string, a boolean, or the
+  // infinity/NaN spellings (`oo`/`-oo`/`+oo`/`nan`). Guards the name
+  // suppression below so a non-value-typed parameter that merely wears the
+  // reserved prefix (box route) keeps its name.
+  // The Cortex spelling of an infinity/NaN value-type text. Both the type
+  // grammar's compact spellings (`oo`/`nan`, what the Cortex parser lowers
+  // to) and the CANONICAL spellings its serializer emits
+  // (`typeToString` writes `Infinity`/`-Infinity`/`NaN`, which box-route
+  // markers carry) map to the Cortex literal.
+  const CORTEX_VALUE_SPELLING: Record<string, string> = {
+    oo: 'Infinity',
+    '+oo': 'Infinity',
+    '-oo': '-Infinity',
+    nan: 'NaN',
+    Infinity: 'Infinity',
+    '+Infinity': 'Infinity',
+    '-Infinity': '-Infinity',
+    NaN: 'NaN',
+  };
+
   const isValueTypeText = (t: string): boolean =>
-    /^-?[0-9.]/.test(t) || t.startsWith('"') || t === 'true' || t === 'false';
+    /^-?[0-9.]/.test(t) ||
+    t.startsWith('"') ||
+    t === 'true' ||
+    t === 'false' ||
+    t in CORTEX_VALUE_SPELLING;
 
   const serializeParam = (p: MathJsonExpression): FormattingBlock => {
     const typed = operator(p) === 'Typed';
@@ -949,7 +973,7 @@ export function serializeCortex(
         const inner = t.slice(1, -1).replace(/\\(["\\])/g, '$1');
         return fmt.text(`"${escapeString(inner)}"`);
       }
-      return fmt.text(t);
+      return fmt.text(CORTEX_VALUE_SPELLING[t] ?? t);
     }
     const nameStr = nameSym !== null ? escapeSymbol(nameSym) : '';
     return fmt.text(t !== null ? `${nameStr}: ${t}` : nameStr);

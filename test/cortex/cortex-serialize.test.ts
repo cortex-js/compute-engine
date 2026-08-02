@@ -19,10 +19,12 @@ describe('CORTEX SERIALIZING', () => {
     ).toMatchInlineSnapshot(
       `"-123_456_789_012_345_678_901_234_567_890_890e-126"`
     );
-    expect(serializeCortex({ num: '+Infinity' })).toMatch('+Infinity');
-    expect(serializeCortex({ num: '-Infinity' })).toMatch('-Infinity');
+    // Cortex's canonical infinity spelling is unsigned (`Infinity`); the
+    // `+Infinity` payload spelling is input-only.
+    expect(serializeCortex({ num: '+Infinity' })).toBe('Infinity');
+    expect(serializeCortex({ num: '-Infinity' })).toBe('-Infinity');
     expect(serializeCortex({ num: 'NaN' })).toMatch('NaN');
-    expect(serializeCortex({ num: 'Infinity' })).toMatch('+Infinity');
+    expect(serializeCortex({ num: 'Infinity' })).toBe('Infinity');
 
     // Repeating pattern
     expect(

@@ -32,6 +32,7 @@ export type DiagnosticCode =
   | 'print-not-available' // %0 = called name — there is no print; a program's output is its last statement's value
   | 'type-not-callable' // %0 = type name — a type name used as a function; types have no constructor yet; annotate instead: `const p: %0 = …`
   | 'assign-in-argument' // `=` (Assign) as a call argument; `==` was probably meant
+  | 'parameter-shadows-constant' // %0 = name — a function parameter named after a multi-character engine constant (`f(Pi) = …`): the body's `Pi` is the argument, not π
   | 'zero-index' // literal index 0 — indexing is 1-based
   | 'floor-division-comment' // `//` after code on the same line looks like floor division; it starts a comment
   | 'latex-parsing-unavailable' // no LaTeX parser was injected for a `$…$` island

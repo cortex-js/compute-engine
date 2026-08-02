@@ -23,8 +23,9 @@ import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
  *   one symbol → literal-value hop through the symbol's existing binding.
  * - **Exactness (D1)**: number comparison is `isSame` — the engine's exact
  *   value identity (`0.0` boxes to the exact integer `0`; `3.5 ≡ 7/2`).
- *   `NaN` is a member of NO value type (isSame(NaN, NaN) is true; ruled out
- *   explicitly). Range endpoints are inclusive.
+ *   `NaN` is a member of exactly the value type `nan` (amended 2026-08-02;
+ *   see `acceptsValueLiteral`) and of no other value type or range. Range
+ *   endpoints are inclusive.
  * - Error values are members of nothing.
  * - `false` means "not provably a member" — a symbolic or partially-known
  *   expression yields `false` and the caller keeps its ordinary behavior
@@ -78,6 +79,18 @@ export function admissionOf(op: Expression, param: Type): Admission {
   // classifying it undecidable would needlessly block dispatch and widen
   // result types.
   if (opType.matches(param)) return 'admit';
+
+  // A concrete NaN decides EXACTLY against any parameter: its synthesized
+  // type is the wide `number`, so neither the subtype match above nor
+  // disjointness below can ever settle it (`NaN` vs a `real` parameter was
+  // "undecidable", blocking dispatch and keeping calls inert even though the
+  // value is fully known). `number` IS NaN's principal type — NaN inhabits
+  // exactly the supertypes of `number` plus the value type `nan` — so
+  // `accepts`, whose fallback subtypes the synthesized type, is a precise
+  // membership oracle for it.
+  const nan = concreteValueOf(op);
+  if (nan !== undefined && isNumber(nan) && nan.isNaN === true)
+    return accepts(nan, param) ? 'admit' : 'refute';
 
   if (hasValueComponent(param)) {
     // A concrete value decides membership exactly; without one the value
@@ -226,10 +239,15 @@ function accepts(v: Expression, t: Type): boolean {
 }
 
 /** Membership in a literal value type (`0`, `"red"`, `true`): the engine's
- * exact value identity (`isSame`), with `NaN` ruled out explicitly. */
+ * exact value identity (`isSame`). `NaN` is a member of exactly the value
+ * type `nan` — "match only themselves", like the infinities (amended
+ * 2026-08-02; v1 ruled NaN a member of NO value type, which made a `nan`
+ * literal parameter unreachable). NaN never inhabits any OTHER value type
+ * even though `isSame(NaN, NaN)` is `true`, so both directions stay
+ * explicit. */
 function acceptsValueLiteral(v: Expression, value: unknown): boolean {
   if (typeof value === 'number') {
-    if (Number.isNaN(value)) return false;
+    if (Number.isNaN(value)) return isNumber(v) && v.isNaN === true;
     if (!isNumber(v) || v.isNaN === true) return false;
     return v.isSame(v.engine.number(value));
   }

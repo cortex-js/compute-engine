@@ -54,6 +54,19 @@ const EFFECT_SPECIFIER_WORDS: ReadonlySet<string> = new Set<string>([
  * argument list (`(n: integer)`). */
 const PLAIN_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** The reserved words that are LITERALS: they cannot name a binding (the
+ * verbatim `` `word` `` form still can). `true`/`false` are the boolean
+ * literals; `Infinity`, its input alias `oo`, and `NaN` are the non-finite
+ * numeric literals. Every other reserved word is contextual and remains
+ * usable as an identifier in binding position. */
+const LITERAL_WORDS: ReadonlySet<string> = new Set([
+  'true',
+  'false',
+  'Infinity',
+  'oo',
+  'NaN',
+]);
+
 /** The effect words of a definition's specifier slot, with their source span
  * (used to place a diagnostic on an invalid specifier). */
 type EffectSpecifier = { words: string[]; start: number; end: number };
@@ -568,10 +581,11 @@ export class Parser {
     this.harvest(nameTok);
     const name =
       nameTok.type === 'VERBATIM_SYMBOL' ? (nameTok.value ?? '') : nameTok.text;
-    // The boolean-literal words `true`/`false` are reserved: they cannot name a
-    // binding (the `` `true` `` verbatim form still can). Other reserved words
-    // are contextual and remain usable as identifiers here.
-    if (nameTok.type === 'SYMBOL' && (name === 'true' || name === 'false'))
+    // The literal words (`true`/`false`, `Infinity`/`oo`/`NaN`) are reserved:
+    // they cannot name a binding (the `` `true` `` verbatim form still can).
+    // Other reserved words are contextual and remain usable as identifiers
+    // here.
+    if (nameTok.type === 'SYMBOL' && LITERAL_WORDS.has(name))
       this.error(['reserved-word', name], nameTok.start, nameTok.end);
     const nameNode = this.wrap({ sym: name }, nameTok.start, nameTok.end);
     return this.finishDeclaration(isConst, kw.start, nameNode);
@@ -603,7 +617,7 @@ export class Parser {
           this.harvest(tok);
           const name =
             tok.type === 'VERBATIM_SYMBOL' ? (tok.value ?? '') : tok.text;
-          if (tok.type === 'SYMBOL' && (name === 'true' || name === 'false')) {
+          if (tok.type === 'SYMBOL' && LITERAL_WORDS.has(name)) {
             this.error(['reserved-word', name], tok.start, tok.end);
             ok = false;
           }
@@ -985,6 +999,10 @@ export class Parser {
     this.harvest(varTok);
     const varName =
       varTok.type === 'VERBATIM_SYMBOL' ? (varTok.value ?? '') : varTok.text;
+    // The loop variable is a binding: a literal word cannot name it
+    // (`for oo in …`); the verbatim form still can.
+    if (varTok.type === 'SYMBOL' && LITERAL_WORDS.has(varName))
+      this.error(['reserved-word', varName], varTok.start, varTok.end);
     const varNode = this.wrap({ sym: varName }, varTok.start, varTok.end);
 
     // The contextual `in` keyword (a SYMBOL token, consumed directly — not as
@@ -1503,11 +1521,14 @@ export class Parser {
     end: number
   ): MathJsonExpression {
     if (name === '_') return this.wrap({ sym: '_' }, start, end);
-    // Boolean and numeric-constant literals match structurally.
+    // Boolean and numeric-constant literals match structurally. `oo` is the
+    // input alias for `Infinity` — without it here, `oo` in pattern position
+    // fell through to the binding rule and matched ANYTHING.
     if (name === 'true') return this.wrap({ sym: 'True' }, start, end);
     if (name === 'false') return this.wrap({ sym: 'False' }, start, end);
     if (name === 'NaN') return this.wrap({ num: 'NaN' }, start, end);
-    if (name === 'Infinity') return this.wrap({ num: '+Infinity' }, start, end);
+    if (name === 'Infinity' || name === 'oo')
+      return this.wrap({ num: '+Infinity' }, start, end);
 
     const binding = this.wrap({ sym: '_' + name }, start, end);
 
@@ -1741,6 +1762,10 @@ export class Parser {
     this.harvest(nameTok);
     const name =
       nameTok.type === 'VERBATIM_SYMBOL' ? (nameTok.value ?? '') : nameTok.text;
+    // A literal word cannot name a function (`function oo(x) { … }` would
+    // shadow the Infinity literal); the verbatim form still can.
+    if (nameTok.type === 'SYMBOL' && LITERAL_WORDS.has(name))
+      this.error(['reserved-word', name], nameTok.start, nameTok.end);
     const nameNode = this.wrap({ sym: name }, nameTok.start, nameTok.end);
 
     if (!this.check('OPEN_PAREN')) {
@@ -1864,6 +1889,10 @@ export class Parser {
   private parseMathFunctionDef(): MathJsonExpression | null {
     const nameTok = this.advance(); // SYMBOL
     this.harvest(nameTok);
+    // A literal word cannot name a function (`Infinity(x) = …`); the
+    // verbatim form still can.
+    if (LITERAL_WORDS.has(nameTok.text))
+      this.error(['reserved-word', nameTok.text], nameTok.start, nameTok.end);
     const nameNode = this.wrap(
       { sym: nameTok.text },
       nameTok.start,
@@ -2134,18 +2163,28 @@ export class Parser {
 
   /** Whether the current token begins a **literal parameter**: a number
    * (optionally signed), a string, or a boolean literal in parameter
-   * position. */
+   * position. `Infinity` and `NaN` count: they are numeric LITERALS in
+   * expression position (see {@link parseSymbol}), so the literal reading
+   * is the consistent one — unlike an ordinary constant name (`Pi`), which
+   * is a symbol everywhere and stays a parameter name. */
   private startsLiteralParam(): boolean {
     const tok = this.current;
     if (tok.type === 'NUMBER' || tok.type === 'STRING') return true;
     if (
       tok.type === 'OPERATOR' &&
       (tok.text === '-' || tok.text === '+') &&
-      this.peek(1).type === 'NUMBER'
+      (this.peek(1).type === 'NUMBER' ||
+        (this.peek(1).type === 'SYMBOL' &&
+          (this.peek(1).text === 'Infinity' || this.peek(1).text === 'oo')))
     )
       return true;
     return (
-      tok.type === 'SYMBOL' && (tok.text === 'true' || tok.text === 'false')
+      tok.type === 'SYMBOL' &&
+      (tok.text === 'true' ||
+        tok.text === 'false' ||
+        tok.text === 'Infinity' ||
+        tok.text === 'oo' ||
+        tok.text === 'NaN')
     );
   }
 
@@ -2170,6 +2209,16 @@ export class Parser {
     let typeText: string;
     if (tok.type === 'NUMBER') {
       typeText = numberPayload(tok.text, negative);
+    } else if (
+      tok.type === 'SYMBOL' &&
+      (tok.text === 'Infinity' || tok.text === 'oo')
+    ) {
+      // The type grammar spells the infinity value types `oo` / `-oo`.
+      typeText = negative ? '-oo' : 'oo';
+    } else if (tok.type === 'SYMBOL' && tok.text === 'NaN') {
+      // The value type `nan` admits exactly NaN (amended D1 — "match only
+      // themselves", like the infinities).
+      typeText = 'nan';
     } else if (tok.type === 'STRING') {
       // Only a plain string is a literal — an interpolation hole is an
       // expression, and expressions are not parameters.
@@ -2243,6 +2292,10 @@ export class Parser {
     this.harvest(target);
     const name =
       target.type === 'VERBATIM_SYMBOL' ? (target.value ?? '') : target.text;
+    // An annotation implies a declaration: a literal word cannot be its
+    // target (`oo: number = 5`); the verbatim form still can.
+    if (target.type === 'SYMBOL' && LITERAL_WORDS.has(name))
+      this.error(['reserved-word', name], target.start, target.end);
     const nameNode = this.wrap({ sym: name }, target.start, target.end);
 
     // The cursor is now on the `:`; `finishDeclaration` parses the type and an
@@ -2922,10 +2975,12 @@ export class Parser {
     const token = this.advance();
     this.harvest(token);
 
-    // `NaN` and `Infinity` are numeric constants, not plain symbols.
+    // `NaN` and `Infinity` are numeric constants, not plain symbols. `oo`
+    // is an input alias for `Infinity` (the type grammar's spelling; the
+    // serializer emits the canonical `Infinity`).
     if (token.text === 'NaN')
       return this.wrap({ num: 'NaN' }, token.start, token.end);
-    if (token.text === 'Infinity')
+    if (token.text === 'Infinity' || token.text === 'oo')
       return this.wrap({ num: '+Infinity' }, token.start, token.end);
 
     // `true`/`false` are reserved-word input aliases for the boolean constants

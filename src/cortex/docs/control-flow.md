@@ -60,11 +60,25 @@ f(x: real) = x + 1
 
 ### Multiple clauses (literal parameters)
 
-A parameter can be a **literal** — a number, string, or boolean. Definition
-statements **accumulate**: defining the same name again with a different
-parameter list adds a *clause* rather than replacing the function, and a
-call dispatches to the most specific clause that matches its arguments
-(declaration order only breaks ties between equally specific clauses).
+A parameter can be a **literal** — a number, string, boolean, `Infinity`,
+`-Infinity`, or `NaN` (the spellings that are literals in expression
+position; `oo` is an input alias for `Infinity`. A constant *name* like
+`Pi` is a symbol and stays a parameter name — writing `f(Pi) = …` binds a
+parameter named `Pi` and draws an advisory `parameter-shadows-constant`
+diagnostic). Definition statements **accumulate**: defining the same name again
+with a different parameter list adds a *clause* rather than replacing the
+function, and a call dispatches to the most specific clause that matches
+its arguments (declaration order only breaks ties between equally specific
+clauses). A non-finite literal clause matches only itself — `f(NaN) = 0`
+handles exactly `NaN`; a `f(x: real)` clause never captures it:
+
+```cortex
+f(NaN) = 0
+f(Infinity) = 1
+f(x: number) = x + 1
+f(Infinity) + f(NaN)
+// ➔ 1
+```
 
 ```cortex
 fib(0) = 0

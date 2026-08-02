@@ -70,7 +70,10 @@ U+FF41-U+FF46
 _binary-digit_ → U+0030 | U+0031 | U+FF10 | U+FF11
 
 _numerical-constant_ → **`NaN`** | **`Infinity`** | **`+Infinity`** |
-**`-Infinity`**
+**`-Infinity`** | **`oo`** | **`+oo`** | **`-oo`**
+
+(`oo` is an input alias for `Infinity`; the serializer always emits the
+canonical `Infinity` spelling.)
 
 _base-10-exponent_ → (**`e`** | **`E`**) \[_sign_\](_digit_)+
 

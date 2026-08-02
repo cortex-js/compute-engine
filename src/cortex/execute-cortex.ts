@@ -4,8 +4,10 @@ import {
   operands,
   operand,
   stringValue,
+  symbol,
   machineValue,
 } from '../math-json/utils.js';
+import { isLiteralParamName } from '../math-json/symbols.js';
 import type { CancellationCause } from '../common/interruptible.js';
 
 // Type-only imports: `src/cortex` never statically imports the engine, so this
@@ -114,6 +116,25 @@ export function executeCortex(
   // canonicalization is cheap next to evaluation.
   if (!diagnostics.some((x) => x.severity === 'error'))
     diagnostics.push(...staticDiagnostics(ce, ast, source));
+
+  // Parameters that shadow an engine constant — `f(Pi) = Pi + 1` declares a
+  // parameter NAMED `Pi` (the uniform binding convention, shared with match
+  // patterns), so the body's `Pi` is the argument, not π. Advisory; one
+  // diagnostic per name per program run. Skipped on parse errors for the
+  // same reason as the static pass above: the AST of an unparseable program
+  // is a guess.
+  if (!diagnostics.some((x) => x.severity === 'error')) {
+    const reportedShadows = new Set<string>();
+    for (const stmt of statements)
+      scanConstantShadowingParams(
+        ce,
+        stmt,
+        reportedShadows,
+        diagnostics,
+        stmt,
+        source
+      );
+  }
 
   let value: BoxedExpression = ce.Nothing;
 
@@ -235,6 +256,65 @@ function statementRange(
  * (there is no printing in Cortex) instead of a fuzzy did-you-mean, which
  * would either stay silent or suggest something misleading. */
 const PRINT_LIKE = new Set(['print', 'println', 'printf', 'puts', 'echo']);
+
+/**
+ * Warn when a `Function` literal's parameter is named after an engine
+ * CONSTANT: in `f(Pi) = Pi + 1` (or `Pi |-> Pi + 1`) the parameter binds a
+ * fresh variable named `Pi` — the body's `Pi` is the argument, not π — the
+ * same shadowing convention as match-pattern bindings. That is almost never
+ * what the author meant when the name is a multi-character constant
+ * reference (`Pi`, `GoldenRatio`, `ExponentialE`), so those warn.
+ *
+ * Single-character names (`e`, `i`, `x`) are the universal variable
+ * namespace — `f(i) = i + 1` is an ordinary function of `i` — and stay
+ * quiet, even though `e` and `i` are engine constants too. (`Infinity` and
+ * `NaN` never reach this scan: they are numeric literals, and in parameter
+ * position they are literal parameters, not names.)
+ *
+ * Only SYSTEM-scope (builtin) constants count: a `const Radius = 10` the
+ * user declared in an earlier statement or cell is an ordinary binding —
+ * shadowing it with a parameter is unremarkable, and warning would
+ * misleadingly paint it as π-like. The system scope is the bottom of the
+ * context stack, the same identification the engine's own
+ * builtin-shadowing rules use.
+ *
+ * Advisory only — the parse and the semantics are unchanged.
+ */
+function scanConstantShadowingParams(
+  ce: ComputeEngine,
+  expr: MathJsonExpression,
+  reported: Set<string>,
+  diagnostics: ParsingDiagnostic[],
+  stmt: MathJsonExpression,
+  source: string
+): void {
+  if (operator(expr) === 'Function') {
+    for (const p of operands(expr).slice(1)) {
+      const name =
+        symbol(p) ?? (operator(p) === 'Typed' ? symbol(operand(p, 1)) : null);
+      if (name === null || name.length <= 1) continue;
+      if (reported.has(name) || isLiteralParamName(name)) continue;
+      const def = ce.lookupDefinition(name);
+      const systemScope = ce.contextStack[0]?.lexicalScope;
+      if (
+        def !== undefined &&
+        systemScope !== undefined &&
+        systemScope.bindings.get(name) === def &&
+        'value' in def &&
+        def.value?.isConstant === true
+      ) {
+        reported.add(name);
+        diagnostics.push({
+          severity: 'warning',
+          message: ['parameter-shadows-constant', name],
+          range: statementRange(stmt, source),
+        });
+      }
+    }
+  }
+  for (const op of operands(expr))
+    scanConstantShadowingParams(ce, op, reported, diagnostics, stmt, source);
+}
 
 /**
  * Walk a result expression (in MathJSON form) for function applications whose

@@ -139,3 +139,56 @@ describe('curated did-you-mean synonyms — Wolfram Language names', () => {
     expect(value.operator).toBe('Total');
   });
 });
+
+describe('parameter-shadows-constant lint', () => {
+  test('warns when a parameter is named after a multi-character constant', () => {
+    expect(execDiagnostics('f(Pi) = Pi + 1\nf(3)')).toEqual([
+      ['parameter-shadows-constant', 'Pi'],
+    ]);
+    expect(execDiagnostics('g(GoldenRatio) = 1')).toEqual([
+      ['parameter-shadows-constant', 'GoldenRatio'],
+    ]);
+    // Anonymous mapsto literals have the same shadowing convention.
+    expect(execDiagnostics('Pi |-> Pi + 1')).toEqual([
+      ['parameter-shadows-constant', 'Pi'],
+    ]);
+  });
+
+  test('single-letter constant names stay quiet (the variable namespace)', () => {
+    // `e` and `i` ARE engine constants, but `f(i) = i + 1` is an ordinary
+    // function of `i` — warning here would flag everyday math code.
+    expect(execDiagnostics('h(e) = e^2\nh(2)')).toEqual([]);
+    expect(execDiagnostics('k(i) = i + 1\nk(1)')).toEqual([]);
+    expect(execDiagnostics('m(x) = x + 1\nm(1)')).toEqual([]);
+  });
+
+  test('non-constant and literal parameters stay quiet', () => {
+    // `π` is an ordinary Cortex identifier (not bound to the constant), and
+    // `Infinity`/`NaN` are literal parameters, not names.
+    expect(execDiagnostics('f(π) = π + 1\nf(3)')).toEqual([]);
+    expect(execDiagnostics('f(Infinity) = 1\nf(Infinity)')).toEqual([]);
+    expect(execDiagnostics('f(NaN) = 1\nf(NaN)')).toEqual([]);
+  });
+
+  test('the warning is advisory — semantics unchanged', () => {
+    const ce = new ComputeEngine();
+    const { value } = executeCortex(ce, 'f(Pi) = Pi + 1\nf(3)');
+    expect(value.toString()).toBe('4');
+  });
+
+  test('a USER const is not an engine constant — no warning', () => {
+    // Cross-cell: `const Radius = 10` then a parameter named Radius. Only
+    // SYSTEM-scope (builtin) constants are π-like; shadowing a user
+    // binding with a parameter is unremarkable.
+    const ce = new ComputeEngine();
+    executeCortex(ce, 'const Radius = 10');
+    const r = executeCortex(ce, 'f(Radius) = Radius * 2\nf(3)');
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('6');
+  });
+
+  test('one diagnostic per name per run', () => {
+    const r = execDiagnostics('f(Pi) = Pi + 1\ng(Pi) = Pi * 2');
+    expect(r).toEqual([['parameter-shadows-constant', 'Pi']]);
+  });
+});

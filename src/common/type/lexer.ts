@@ -281,11 +281,17 @@ export class Lexer {
         this.input.slice(start, this.pos)
       );
     }
-    if (this.match('+infinity')) {
-      return this.createToken('PLUS_INFINITY', '+infinity');
+    if (this.match('+infinity') || this.match('+Infinity')) {
+      return this.createToken(
+        'PLUS_INFINITY',
+        this.input.slice(start, this.pos)
+      );
     }
-    if (this.match('-infinity')) {
-      return this.createToken('MINUS_INFINITY', '-infinity');
+    if (this.match('-infinity') || this.match('-Infinity')) {
+      return this.createToken(
+        'MINUS_INFINITY',
+        this.input.slice(start, this.pos)
+      );
     }
 
     // Identifiers and keywords (check this before single character tokens)
@@ -299,8 +305,10 @@ export class Lexer {
         case 'false':
           return this.createToken('FALSE', value);
         case 'nan':
+        case 'NaN':
           return this.createToken('NAN', value);
         case 'infinity':
+        case 'Infinity':
           return this.createToken('INFINITY', value);
         case 'oo':
           return this.createToken('INFINITY', value);

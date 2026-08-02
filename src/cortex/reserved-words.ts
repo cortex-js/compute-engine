@@ -34,6 +34,7 @@ export const RESERVED_WORDS = new Set<string>([
   'goto', // Not in use
   'if',
   'in', // Not in use
+  'Infinity', // Numeric literal (+∞); `oo` is an input alias
   'inline', // Not in use
   'interface', // Not in use
   'internal', // Not in use
@@ -46,11 +47,13 @@ export const RESERVED_WORDS = new Set<string>([
   'match', // Match-expression head: `match subject { case… }` (see parser `parseMatch`)
   'module', // Not in use
   'namespace', // Not in use
+  'NaN', // Numeric literal (Not a Number)
   'native', // Not in use
   'new', // Not in use
   'not', // Not in use
   'of', // Not in use
   'on', // Not in use
+  'oo', // Numeric literal — input alias for `Infinity`
   'optional', // Not in use
   'or', // Not in use
   'package', // Not in use

@@ -107,6 +107,80 @@ describe('CORTEX MULTI-CLAUSE — literal parameter lowering (§4.5)', () => {
     );
   });
 
+  test('Infinity and NaN are literal parameters (lowered to oo/nan)', () => {
+    // Both are numeric LITERALS in expression position, so the literal
+    // reading is the consistent one — unlike `Pi`, a symbol everywhere,
+    // which stays a parameter name.
+    expect(lowered('f(Infinity) = 1')).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', 1, ['Typed', 'literalParam_1', { str: 'oo' }]],
+    ]);
+    expect(lowered('f(-Infinity) = 2')).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', 2, ['Typed', 'literalParam_1', { str: '-oo' }]],
+    ]);
+    expect(lowered('f(NaN) = 3')).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', 3, ['Typed', 'literalParam_1', { str: 'nan' }]],
+    ]);
+  });
+
+  test('`oo` is an input alias for Infinity (canonical output spelling)', () => {
+    // Expression position: `oo` is the infinity literal.
+    expect(lowered('x + oo')).toEqual(['Add', 'x', { num: '+Infinity' }]);
+    // Parameter position: same lowering as `f(Infinity)`.
+    expect(lowered('f(oo) = 1')).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', 1, ['Typed', 'literalParam_1', { str: 'oo' }]],
+    ]);
+    expect(lowered('f(-oo) = 2')).toEqual([
+      'DefineFunction',
+      'f',
+      ['Function', 2, ['Typed', 'literalParam_1', { str: '-oo' }]],
+    ]);
+    // Serialization is canonical: `oo` in, `Infinity` out.
+    const [e] = parseCortex('f(oo) = 1');
+    expect(serializeCortex(e)).toBe('f(Infinity) = 1');
+    // The CANONICAL type-text spellings (what `typeToString` emits for a
+    // box-route marker) render the literal too — never the generated name.
+    expect(
+      serializeCortex([
+        'DefineFunction',
+        'f',
+        ['Function', 1, ['Typed', 'literalParam_1', { str: 'Infinity' }]],
+      ])
+    ).toBe('f(Infinity) = 1');
+    expect(
+      serializeCortex([
+        'DefineFunction',
+        'f',
+        ['Function', 1, ['Typed', 'literalParam_1', { str: 'NaN' }]],
+      ])
+    ).toBe('f(NaN) = 1');
+  });
+
+  test('`oo` in match-pattern position is the Infinity literal, not a binding', () => {
+    const { text, diagnostics } = run(`
+match 5 {
+  oo => 1
+  _ => 3
+}`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('3');
+    // Note the subject must BE +Infinity — `1 / 0` is ComplexInfinity
+    // (`~oo`), which the positive-infinity literal correctly refuses.
+    const inf = run(`
+match Infinity {
+  oo => "infinite"
+  _ => "finite"
+}`);
+    expect(inf.value.toString()).toContain('infinite');
+  });
+
   test('the generated-name prefix is reserved for user parameters', () => {
     // A user parameter wearing the reserved prefix would be
     // indistinguishable from a generated one (serialization would drop
@@ -226,6 +300,17 @@ point(7)`);
     expect(value.type.toString()).toBe('point');
   });
 
+  test('Infinity and NaN clauses dispatch — "match only themselves"', () => {
+    const { text, diagnostics } = run(`
+f(Infinity) = 1
+f(-Infinity) = 2
+f(NaN) = 3
+f(x: number) = 0
+f(Infinity) + 10 * f(-Infinity) + 100 * f(NaN) + 1000 * f(5)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('321');
+  });
+
   test('a post-evaluation miss is the no-matching-clause error value (D7)', () => {
     // `Floor(2.5) + 3` is statically an integer — admission is undecidable
     // against the value clauses, so the call passes validation; evaluation
@@ -304,6 +389,9 @@ describe('CORTEX MULTI-CLAUSE — serialization round-trip (§4.5)', () => {
     'h("yes", x) = x',
     'function g(true) {1}',
     'f(0, 0) = 1',
+    'f(Infinity) = 1',
+    'f(-Infinity) = 2',
+    'f(NaN) = 3',
   ])('%s round-trips through serializeCortex', (src) => {
     const [expr, diags] = parseCortex(src);
     expect(diags).toEqual([]);

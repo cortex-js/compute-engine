@@ -736,19 +736,25 @@ export function isSubtype(
     if (lhs.kind === 'value') {
       if (typeof lhs.value === 'boolean') return rhs === 'boolean';
       if (typeof lhs.value === 'number') {
-        // A *finite* number literal is a subtype of the finite base type
-        // (`value 0 <: finite_integer`, not merely `integer` — the literal
-        // cannot be ±∞/NaN). `finite_* <: *`, so every previously-true
-        // answer is preserved. Matches the value-vs-bounded-numeric path.
+        // Each numeric literal claims its PRINCIPAL type: NaN inhabits the
+        // wide `number` and nothing narrower (`nan ⊄ real` — a boxed NaN
+        // types as `number`); ±∞ inhabit `non_finite_number` (⊂ real, per
+        // the lattice); a *finite* literal claims the finite base type
+        // (`value 0 <: finite_integer`, not merely `integer`). Matches the
+        // value-vs-bounded-numeric path.
+        if (Number.isNaN(lhs.value))
+          return isPrimitiveSubtype('number', rhs as PrimitiveType);
+        if (!Number.isFinite(lhs.value))
+          return isPrimitiveSubtype(
+            'non_finite_number',
+            rhs as PrimitiveType
+          );
         if (Number.isInteger(lhs.value))
           return isPrimitiveSubtype('finite_integer', rhs as PrimitiveType);
         // A non-integer number literal (e.g. 3.5) is a real number, not just
         // `number` — `number ⊄ real`, so the old `'number'` made it fail
         // `value 3.5 <: real`. Matches the symmetric path below.
-        return isPrimitiveSubtype(
-          Number.isFinite(lhs.value) ? 'finite_real' : 'real',
-          rhs as PrimitiveType
-        );
+        return isPrimitiveSubtype('finite_real', rhs as PrimitiveType);
       }
       if (typeof lhs.value === 'string')
         return isPrimitiveSubtype('string', rhs as PrimitiveType);
@@ -1252,9 +1258,16 @@ export function isSubtype(
   // which tested `integer <: integer<5..10>` — always `false`.)
   if (rhs.kind === 'numeric' && lhs.kind === 'value') {
     if (typeof lhs.value !== 'number') return false;
-    const baseKind: NumericPrimitiveType = Number.isInteger(lhs.value)
-      ? 'finite_integer'
-      : 'finite_real';
+    // NaN is unordered: it inhabits no bounded range. (Without the explicit
+    // check, `NaN < lower` and `NaN > upper` are both false and the range
+    // would ADMIT it.) ±∞ claim their principal `non_finite_number`; the
+    // ordinary bound checks then reject them from any finite-bounded range.
+    if (Number.isNaN(lhs.value)) return false;
+    const baseKind: NumericPrimitiveType = !Number.isFinite(lhs.value)
+      ? 'non_finite_number'
+      : Number.isInteger(lhs.value)
+        ? 'finite_integer'
+        : 'finite_real';
     if (!isPrimitiveSubtype(baseKind, rhs.type)) return false;
     if (lhs.value < (rhs.lower ?? -Infinity)) return false;
     if (lhs.value > (rhs.upper ?? Infinity)) return false;
@@ -1279,20 +1292,32 @@ export function isSubtype(
   // Note: negation on the rhs (including the both-negation `!A <: !B ⟺ B <: A`
   // case) is handled earlier, before the primitive fall-through.
 
-  // Value types (strings, boolean, number)
+  // Value types (strings, boolean, number). `===` plus an explicit NaN
+  // case: the value type `nan` must be a subtype of ITSELF (`NaN === NaN`
+  // is false, which made every signature containing `nan` fail its own
+  // validation). Not `Object.is` — that would also distinguish ±0, and
+  // `-0`/`0` value types denote the same singleton (the engine normalizes
+  // both zeros to the exact integer `0` at boxing).
   if (rhs.kind === 'value' && lhs.kind === 'value')
-    return rhs.value === lhs.value;
+    return (
+      rhs.value === lhs.value ||
+      (typeof rhs.value === 'number' &&
+        Number.isNaN(rhs.value) &&
+        typeof lhs.value === 'number' &&
+        Number.isNaN(lhs.value))
+    );
 
   if (lhs.kind === 'value') {
     if (typeof lhs.value === 'boolean') return isSubtype('boolean', rhs);
     if (typeof lhs.value === 'number') {
-      // Finite literals claim the finite base type (see the value-vs-primitive
-      // path above): `value 0 <: finite_integer`.
+      // Principal-type claims, matching the value-vs-primitive path above:
+      // NaN → `number`, ±∞ → `non_finite_number`, finite literals → the
+      // finite base type (`value 0 <: finite_integer`).
+      if (Number.isNaN(lhs.value)) return isSubtype('number', rhs);
+      if (!Number.isFinite(lhs.value))
+        return isSubtype('non_finite_number', rhs);
       if (Number.isInteger(lhs.value)) return isSubtype('finite_integer', rhs);
-      return isSubtype(
-        Number.isFinite(lhs.value) ? 'finite_real' : 'real',
-        rhs
-      );
+      return isSubtype('finite_real', rhs);
     }
     if (typeof lhs.value === 'string') return isSubtype('string', rhs);
   }

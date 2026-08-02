@@ -4603,8 +4603,8 @@ export class BaseCompiler {
    * the §8 whole-function decline. Guard kinds mirror the runtime admission
    * (`typeAcceptsValue`/`admissionOf`) on the target's value model:
    * value types → `===` (faithful for the machine numbers, strings and
-   * booleans compiled code traffics in; `NaN` inhabits no value type, so a
-   * NaN-valued type is the constant `false`); numeric ranges → base guard
+   * booleans compiled code traffics in; the value type `nan` admits exactly
+   * NaN, so it tests `Number.isNaN`); numeric ranges → base guard
    * plus inclusive bound checks (a NaN argument fails `>=`, as it should);
    * primitives → `typeof`/`Number.isInteger` where JS can express them.
    * Note `number` admits the engine's complex values, which the JS calling
@@ -4641,7 +4641,10 @@ export class BaseCompiler {
       case 'value': {
         const v = t.value;
         if (typeof v === 'number') {
-          if (Number.isNaN(v)) return 'false'; // D1: NaN inhabits no value type
+          // The value type `nan` admits exactly NaN (amended D1, "match
+          // only themselves") — `===` is the one comparison that would NOT
+          // be faithful for it.
+          if (Number.isNaN(v)) return `Number.isNaN(${a})`;
           return `${a} === ${v === Infinity ? 'Infinity' : v === -Infinity ? '-Infinity' : String(v)}`;
         }
         if (typeof v === 'string') return `${a} === ${JSON.stringify(v)}`;

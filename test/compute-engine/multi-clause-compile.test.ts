@@ -99,12 +99,31 @@ describe('MULTI-CLAUSE COMPILE — guard chain (spec §8)', () => {
     expect(r?.run?.({})).toBe(3);
   });
 
+  it('Infinity and NaN clauses compile with interpreter parity', () => {
+    clause('g', ['Function', 1, p('a', 'oo')]);
+    clause('g', ['Function', 2, p('b', '-oo')]);
+    clause('g', ['Function', 3, p('c', 'nan')]);
+    clause('g', ['Function', 0, p('x', 'number')]);
+    const r = compile(ce.box(['g', 'w']));
+    expect(r?.run?.({ w: Infinity })).toBe(1);
+    expect(r?.run?.({ w: -Infinity })).toBe(2);
+    expect(r?.run?.({ w: NaN })).toBe(3);
+    expect(r?.run?.({ w: 7 })).toBe(0);
+    // Interpreter agrees (the concrete-NaN admission is decisive, not
+    // blocked — a fully-known value never keeps dispatch inert).
+    expect(ce.box(['g', 'PositiveInfinity']).evaluate().re).toBe(1);
+    expect(ce.box(['g', 'NegativeInfinity']).evaluate().re).toBe(2);
+    expect(ce.box(['g', 'NaN']).evaluate().re).toBe(3);
+    expect(ce.box(['g', 7]).evaluate().re).toBe(0);
+  });
+
   it('a compiled miss throws no-matching-clause (D7)', () => {
     clause('f', ['Function', 1, p('a', '0')]);
     clause('f', ['Function', 2, p('b', '1')]);
     const r = compile(ce.box(['f', 'y']));
     expect(() => r?.run?.({ y: 7 })).toThrow('no-matching-clause: f');
-    // NaN inhabits no value type (D1): it also misses.
+    // NaN inhabits only the value type `nan` (amended D1) — it misses
+    // every OTHER value clause.
     expect(() => r?.run?.({ y: NaN })).toThrow('no-matching-clause: f');
   });
 
