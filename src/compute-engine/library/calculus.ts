@@ -372,6 +372,10 @@ function nIntegrateMultiple(
       initialPanels: initialPanelsForDimensions(limits.length),
     });
     if (gk.converged && Number.isFinite(gk.estimate)) return inflate(gk);
+    // A level diagnosed as divergent has no finite value: propagate NaN rather
+    // than sample it, which would only launder the divergence into a
+    // plausible-looking number (and make every outer node pay for it).
+    if (gk.divergent) return { estimate: NaN, error: NaN };
     // A stalled level whose error bound already beats the sampler keeps its
     // quadrature result: sampling it would be both less accurate and, since
     // every inner level re-runs per outer node, far more expensive.
@@ -384,6 +388,9 @@ function nIntegrateMultiple(
   // The reported uncertainty is the outermost level's error estimate, inflated
   // by the propagated inner-level error (see `inflate` above).
   const r = integrateDim(0);
+  // No value to report an uncertainty ABOUT — a divergent level, or a NaN
+  // bound. `Measurement(NaN, NaN)` would dress that up as a measured quantity.
+  if (Number.isNaN(r.estimate)) return ce.NaN;
   return ce.expr(['Measurement', ce.number(r.estimate), ce.number(r.error)]);
 }
 
@@ -1470,6 +1477,10 @@ volumes
           // those samples cost minutes.
           if (compiled?.success) {
             const gk = adaptiveQuadrature(jsf, lower, upper);
+            // A diagnosed divergence has no finite value. Monte Carlo would
+            // still return one — a mean of samples that never saw the
+            // singularity — so the fallback is skipped, not just the report.
+            if (gk.divergent) return ce.NaN;
             if (
               (gk.converged || quadratureBeatsMonteCarlo(gk, 1e7)) &&
               Number.isFinite(gk.estimate)

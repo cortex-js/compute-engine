@@ -144,6 +144,129 @@ describe('MULTI-CLAUSE COMPILE — guard chain (spec §8)', () => {
   });
 });
 
+// ─── Complex-valued clause dispatch ─────────────────────────────────────────
+//
+// The JS calling convention represents a complex value as a `{re, im}` object
+// and a real one as a plain number; both inhabit `complex`. A clause set over
+// complex parameters therefore needs a guard accepting either shape, the
+// call-boundary coercion of a real argument bound to a complex parameter, and
+// one result convention across the clause bodies (Tycho item 60, here across
+// clauses rather than `Which` arms).
+//
+
+describe('MULTI-CLAUSE COMPILE — complex-valued dispatch', () => {
+  /** The Mandelbrot-ish iteration `J(0, z) = z; J(n, z) = J(n-1, z)² + c`. */
+  function defineJ(base: MathJsonExpression): void {
+    ce.declare('J', '(number, complex) -> complex');
+    ce.box(['DefineFunction', 'J', base]).evaluate();
+    clause('J', [
+      'Function',
+      [
+        'Add',
+        ['Square', ['J', ['Subtract', 'n', 1], 'z']],
+        ['Complex', 0.1, 0.2],
+      ],
+      p('n', 'integer'),
+      p('z', 'complex'),
+    ]);
+  }
+
+  it('compiles a recursive complex clause set with interpreter parity', () => {
+    defineJ(['Function', p('z', 'complex'), p('k', '0'), p('z', 'complex')]);
+    const r = compile(ce.box(['Function', ['J', 'n', 'w'], 'n', 'w']));
+    expect(r?.code).toContain('_fn_J$c1');
+    for (const n of [0, 1, 2, 3]) {
+      const got = r?.run?.(n, { re: 0.1, im: 0.2 }) as {
+        re: number;
+        im: number;
+      };
+      const want = ce.box(['J', n, ['Complex', 0.1, 0.2]]).N();
+      expect(got.re).toBeCloseTo(want.re, 12);
+      expect(got.im).toBeCloseTo(want.im, 12);
+    }
+  });
+
+  it('coerces a provably-real ARGUMENT bound to a complex parameter', () => {
+    // Without the coercion the seed reaches the body as a plain number and
+    // `.re` NaN-poisons the whole iteration.
+    defineJ(['Function', p('z', 'complex'), p('k', '0'), p('z', 'complex')]);
+    const r = compile(ce.box(['J', 3, 0.5]));
+    const got = r?.run?.({}) as { re: number; im: number };
+    const want = ce.box(['J', 3, 0.5]).N();
+    expect(got.re).toBeCloseTo(want.re, 12);
+    expect(got.im).toBeCloseTo(want.im, 12);
+
+    // Same coercion for an UNDECLARED clause set, whose stored signature is
+    // an intersection: the parameter type comes from the clause set instead.
+    clause('h', [
+      'Function',
+      ['Multiply', 'z', 2],
+      p('k', '0'),
+      p('z', 'complex'),
+    ]);
+    clause('h', [
+      'Function',
+      ['Add', 'z', 1],
+      p('n', 'integer'),
+      p('z', 'complex'),
+    ]);
+    const rh = compile(ce.box(['h', 1, 0.5]));
+    expect(rh?.code).toContain('re: 0.5, im: 0');
+    expect((rh?.run?.({}) as { re: number }).re).toBeCloseTo(
+      ce.box(['h', 1, 0.5]).N().re,
+      12
+    );
+  });
+
+  it('coerces a provably-real clause BODY to the complex convention', () => {
+    // The clause bodies are the ARMS of one dispatcher: a real-valued body
+    // beside a complex-valued one must be coerced, or the consumer reads
+    // `.re` off a plain number (NaN at every point).
+    clause('f', ['Function', 0, p('k', '0'), p('z', 'complex')]);
+    clause('f', [
+      'Function',
+      ['Add', 'z', 1],
+      p('n', 'integer'),
+      p('z', 'complex'),
+    ]);
+    const r = compile(
+      ce.box([
+        'Function',
+        ['Add', ['f', 'n', 'w'], ['Complex', 0, 1]],
+        'n',
+        'w',
+      ])
+    );
+    expect(r?.code).toContain('re: 0, im: 0');
+    for (const n of [0, 1]) {
+      const got = r?.run?.(n, { re: 0.5, im: 0.25 }) as {
+        re: number;
+        im: number;
+      };
+      const want = ce
+        .box(['Add', ['f', n, ['Complex', 0.5, 0.25]], ['Complex', 0, 1]])
+        .N();
+      expect(got.re).toBeCloseTo(want.re, 12);
+      expect(got.im).toBeCloseTo(want.im, 12);
+    }
+  });
+
+  it('the REAL twin is unchanged', () => {
+    clause('R', ['Function', p('y', 'real'), p('k', '0'), p('y', 'real')]);
+    clause('R', [
+      'Function',
+      ['Add', ['Square', ['R', ['Subtract', 'n', 1], 'y']], 0.1],
+      p('n', 'integer'),
+      p('y', 'real'),
+    ]);
+    const r = compile(ce.box(['R', 'n', 'yy']));
+    expect(r?.run?.({ n: 3, yy: 0.1 })).toBeCloseTo(
+      ce.box(['R', 3, 0.1]).N().re,
+      12
+    );
+  });
+});
+
 describe('MULTI-CLAUSE COMPILE — whole-function decline (spec §8)', () => {
   it('an inexpressible guard declines the whole function to the interpreter', () => {
     // `rational` has no faithful JS test — the WHOLE function falls back

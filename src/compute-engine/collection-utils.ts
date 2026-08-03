@@ -1,4 +1,9 @@
-import { widen, broadcastElementType } from '../common/type/utils.js';
+import {
+  widen,
+  broadcastElementType,
+  collectionElementType,
+  resolveTypeForCompilation as resolveType,
+} from '../common/type/utils.js';
 import { isSubtype } from '../common/type/subtype.js';
 import { Type } from '../common/type/types.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
@@ -584,6 +589,40 @@ export function isTuple(expr: Expression): boolean {
       const vt = v.type.type;
       return typeof vt !== 'string' && vt.kind === 'tuple';
     }
+  }
+  return false;
+}
+
+/**
+ * True when `expr` is a LIST OF POINTS — a finite indexed collection whose
+ * elements are tuples (`[(0,0),(3,4)]`).
+ *
+ * Used where a point binds ATOMICALLY inside a collection, so the operation
+ * applies per POINT rather than per coordinate: `Norm`/`Abs` of a point list
+ * is the list of point norms, on both the evaluate and the compile route
+ * (Tycho item 138).
+ *
+ * DELIBERATELY NARROW: a list of numeric LISTS (`[[0,0],[3,4]]`) is a MATRIX
+ * here, and the matrix semantics of `Norm` (Frobenius) and `Abs`
+ * (element-wise) win over the point reading. The point-ONLY operators
+ * (`Distance`, `PointX`/`PointY`/`PointZ`) admit that spelling too — they
+ * have no competing matrix meaning — through their own predicates.
+ */
+export function isPointListValue(expr: Expression): boolean {
+  // A nominal `type`/`type alias` for a point list is a point list.
+  const elt = collectionElementType(resolveType(expr.type.type));
+  // `'tuple'` (the bare, unparameterized type name) is a plain string, not a
+  // `{ kind: 'tuple' }` node, and it is what a `list<tuple>` declaration
+  // reports — both spellings must read as a point.
+  if (
+    elt !== undefined &&
+    (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
+  )
+    return true;
+  // A literal collection is often mis-typed (a list of 2-tuples types as a
+  // matrix), so fall back to the runtime evidence of its first element.
+  if (expr.isFiniteCollection === true && expr.isIndexedCollection === true) {
+    for (const first of expr.each()) return isTuple(first);
   }
   return false;
 }

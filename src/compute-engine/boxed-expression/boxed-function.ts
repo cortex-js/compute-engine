@@ -236,6 +236,15 @@ export class BoxedFunction
   /** Re-entrancy marker for `_effectsOf` — see the cycle note there. */
   private _effectsInFlight = false;
 
+  /** The engine generation at which `_type` was last written or confirmed.
+   * The cache KEY of `_type` (`undefined` for a pure constant, the generation
+   * otherwise) costs a purity projection plus an `isConstant` subtree walk to
+   * compute, so `get type` reads this first: within one generation both
+   * `isPure` and `isConstant` are stable, so the key would come out exactly as
+   * it did last time and `cachedValue` would hit — the recomputation cannot
+   * change the answer. `-1` is "never computed" (generations start at 0). */
+  private _typeGeneration = -1;
+
   constructor(
     ce: ComputeEngine,
     operator: string,
@@ -423,7 +432,10 @@ export class BoxedFunction
   }
 
   get isConstant(): boolean {
-    return this.isPure && this._ops.every((x) => x.isConstant);
+    // Operands first: the walk stops at the first free variable, which is
+    // cheaper than the effect projection `isPure` runs. Same conjunction,
+    // both sides side-effect free.
+    return this._ops.every((x) => x.isConstant) && this.isPure;
   }
 
   get json(): MathJsonExpression {
@@ -811,8 +823,9 @@ export class BoxedFunction
     const nominal = this._measurementNominal;
     if (nominal) return nominal.sgn;
 
+    // Operands first — see the note on the same conjunction in `get type`.
     const gen =
-      this.isPure && this._ops.every((x) => x.isConstant)
+      this._ops.every((x) => x.isConstant) && this.isPure
         ? undefined
         : this.engine._generation;
     return cachedValue(this._sgn, gen, () => {
@@ -1341,17 +1354,34 @@ export class BoxedFunction
 
   /** The type of the value of the function */
   get type(): BoxedType {
+    const generation = this.engine._generation;
+    // Fast path: the cache was already consulted at this generation, so the
+    // key it was consulted with — which costs a purity projection and an
+    // `isConstant` subtree walk — is necessarily the same one now. See
+    // `_typeGeneration`.
+    if (this._typeGeneration === generation && this._type.value !== null)
+      return this._type.value ?? BoxedType.unknown;
+
+    // `isConstant` is tested FIRST: it fails at the first free variable — the
+    // overwhelmingly common case for a row being canonicalized — whereas
+    // `isPure` runs the whole effect projection, which resolves symbol
+    // operands through their bindings and can force a stored function
+    // literal's arrow. Both are side-effect-free predicates, so the order is
+    // free; only the cost differs.
     const gen =
-      this.isPure && this._ops.every((x) => x.isConstant)
+      this._ops.every((x) => x.isConstant) && this.isPure
         ? undefined
         : this.engine._generation;
-    return (
+    const result =
       cachedValue(
         this._type,
         gen,
         () => new BoxedType(type(this), this.engine._typeResolver)
-      ) ?? BoxedType.unknown
-    );
+      ) ?? BoxedType.unknown;
+    // Record the generation OBSERVED ON ENTRY: a computation that bumped the
+    // generation (signature inference does) must leave the fast path closed.
+    this._typeGeneration = generation;
+    return result;
   }
 
   /** The shape of the tensor (dimensions), derived from the type */

@@ -214,6 +214,110 @@ export function quadratureBeatsMonteCarlo(
 }
 
 /**
+ * How many consecutive corner refinements make one comparison block in the
+ * endpoint-divergence test below. 20 halvings shrink the corner interval by
+ * ~1e6, so a bounded integrand's block contribution drops by the same factor —
+ * a wide margin against the `SHELL_DECAY` threshold.
+ */
+const SHELL_BLOCK = 20;
+
+/**
+ * The largest block-over-block ratio still read as "the tail is shrinking".
+ *
+ * The exactly-solvable family fixes this: `x^(−p)` on `[0, 1]` sheds blocks in
+ * the ratio `2^((1−p)·SHELL_BLOCK)`, so the test says "divergent" exactly for
+ * `p ≥ 1 + log₂(SHELL_DECAY)/SHELL_BLOCK`. At 0.99 that boundary is `p ≈
+ * 1.00072`: `1/x` (ratio exactly 1) and every stronger pole are caught, while
+ * the convergent `x^(−0.999)` (ratio 0.9862) and `x^(−0.99)` (0.8706) are not.
+ * The remaining gap is `x^(−p)` with `1 − 0.0007 < p < 1` — convergent, but its
+ * shells are within 1.4 % of a log-divergent one's over a 1e6 range of `x`, so
+ * no finite sampling separates them.
+ *
+ * Erring high is deliberate: a false positive rejects a legitimate integral,
+ * a false negative only leaves the pre-existing Monte-Carlo fallback in place.
+ * The same choice makes `1/(x·ln x)` (divergent) and `1/(x·ln²x)` (convergent)
+ * BOTH read as non-divergent — their block ratios are `1 − B/n` and `1 − 2B/n`
+ * at refinement depth `n`, i.e. both approach 1 from below and neither reaches
+ * 0.99 inside the panel budget.
+ */
+const SHELL_DECAY = 0.99;
+
+/**
+ * The smallest `|Σ shells| / Σ|shells|` a block must have for its sum to mean
+ * anything. A block of shells that alternate in sign sums to a small residue of
+ * near-cancelling terms; the ratio of two such residues is noise and can land
+ * anywhere (`∫₀¹ sin(1/x)/x dx` — conditionally convergent — produces 7.6).
+ * Divergence, by contrast, needs a tail of consistent sign, so a real one
+ * scores ~1 here.
+ */
+const SHELL_COHERENCE = 0.5;
+
+/**
+ * Whether a corner-shell sequence is the signature of a DIVERGENT endpoint.
+ *
+ * `shells[k]` is the integral over the piece shed by the k-th bisection of the
+ * panel touching an endpoint — i.e. the dyadic shells `[x₀+d/2^(k+1), x₀+d/2^k]`
+ * of the singular endpoint `x₀`, each computed by GK15 on an interval that does
+ * NOT contain the singularity, so each is accurate. The integral near `x₀` is
+ * exactly the sum of that series, and the question "does the integral exist"
+ * is exactly "does the series converge".
+ *
+ * The test compares the sum of the last `SHELL_BLOCK` shells against the sum of
+ * the `SHELL_BLOCK` before it. A convergent improper integral is Cauchy here:
+ * `∫₀¹ x^(−1/2)` sheds `2^(−k/2)`, `∫₀¹ ln x` sheds `k·2^(−k)`, and a bounded
+ * integrand sheds `2^(−k)` — every block is a small fraction of its
+ * predecessor. A log-divergent one (`1/x`) sheds a CONSTANT `ln 2` per shell,
+ * so consecutive blocks are equal; a power-divergent one (`1/x²`) sheds a
+ * growing amount. Hence "the last 20 halvings contributed as much as the 20
+ * before them" separates the two classes STRUCTURALLY — no threshold on the
+ * estimate or on the reported error is involved, which matters because a
+ * legitimate improper integral routinely reports a LOOSER relative error than
+ * a divergent one does.
+ *
+ * The sums are SIGNED, so a conditionally convergent oscillatory tail (whose
+ * shells do not shrink but do cancel) is not misread as divergent, and a
+ * negatively divergent integral (`−1/x`) still shows a ratio of 1.
+ */
+function shellsDiverge(shells: number[], tolerance: number): boolean {
+  const n = shells.length;
+  if (n < 2 * SHELL_BLOCK) return false;
+
+  // Signed sum and total magnitude of one block of shells.
+  const block = (from: number): [sum: number, magnitude: number] => {
+    let sum = 0;
+    let magnitude = 0;
+    for (let i = from; i < from + SHELL_BLOCK; i++) {
+      sum += shells[i];
+      magnitude += Math.abs(shells[i]);
+    }
+    return [sum, magnitude];
+  };
+
+  const [recent, recentMag] = block(n - SHELL_BLOCK);
+  const [prior, priorMag] = block(n - 2 * SHELL_BLOCK);
+
+  // A non-finite block is not evidence either way: a deep enough shell makes
+  // ANY integrand with an unbounded endpoint overflow, convergent or not
+  // (`x^(−0.99)` reaches `1e320` at denormal `x`), so the comparison is simply
+  // unavailable.
+  if (!Number.isFinite(recent) || !Number.isFinite(prior) || prior === 0)
+    return false;
+
+  // A non-shrinking tail below the requested tolerance cannot change the
+  // answer; only a tail that actually carries mass is a divergence.
+  if (!(Math.abs(recent) > tolerance)) return false;
+
+  // Both block sums must be sums, not cancellation residues.
+  if (
+    Math.abs(recent) < SHELL_COHERENCE * recentMag ||
+    Math.abs(prior) < SHELL_COHERENCE * priorMag
+  )
+    return false;
+
+  return recent / prior >= SHELL_DECAY;
+}
+
+/**
  * Adaptive GK15 over a finite interval `[a, b]`.
  */
 function adaptiveFinite(
@@ -224,7 +328,12 @@ function adaptiveFinite(
   atol: number,
   maxIntervals: number,
   initialPanels: number
-): { estimate: number; error: number; converged: boolean } {
+): {
+  estimate: number;
+  error: number;
+  converged: boolean;
+  divergent: boolean;
+} {
   const panels: Panel[] = [];
 
   // Incremental accumulators. A non-finite panel contribution must NOT enter
@@ -237,6 +346,7 @@ function adaptiveFinite(
   let totalError = 0;
   let badPanels = 0;
   let roundoffStop = false;
+  let divergent = false;
 
   // Fold a panel into the running totals, skipping non-finite contributions.
   const addPanel = (p: Panel) => {
@@ -272,6 +382,18 @@ function adaptiveFinite(
   if (panels.length === 0) panels.push(gk15(f, a, b));
   panels.forEach(addPanel);
 
+  // Endpoint-divergence bookkeeping: follow the panel that touches each end of
+  // the interval. Bisecting it sheds one dyadic shell (the child NOT touching
+  // the endpoint) and leaves a new, half-as-wide corner panel — so the adaptive
+  // loop already produces the shell series `shellsDiverge` needs, for free and
+  // in order. Only the corner chain is tracked: a divergence can only sit at an
+  // endpoint, since an interior blow-up would be shed by a bisection on both
+  // sides and, at worst, leaves an unsubdividable panel (`roundoffStop`).
+  let cornerLo = panels[0];
+  let cornerHi = panels[panels.length - 1];
+  const shellsLo: number[] = [];
+  const shellsHi: number[] = [];
+
   const tolerance = () => Math.max(atol, rtol * Math.abs(totalValue));
 
   while (panels.length < maxIntervals) {
@@ -300,16 +422,36 @@ function adaptiveFinite(
 
     panels[worst] = left;
     panels.push(right);
+
+    if (iv === cornerLo) {
+      cornerLo = left;
+      shellsLo.push(right.value);
+    }
+    if (iv === cornerHi) {
+      cornerHi = right;
+      shellsHi.push(left.value);
+    }
+    // Stop as soon as the corner series is diagnosed: continuing only spends
+    // the rest of the panel budget bisecting toward a singularity, which is
+    // both the whole cost of a divergent integral and — once the shells reach
+    // denormal arguments — the point where the shed values overflow and the
+    // diagnosis is no longer available.
+    const tol = tolerance();
+    if (shellsDiverge(shellsLo, tol) || shellsDiverge(shellsHi, tol)) {
+      divergent = true;
+      break;
+    }
   }
 
   const converged =
+    !divergent &&
     !roundoffStop &&
     badPanels === 0 &&
     Number.isFinite(totalValue) &&
     Number.isFinite(totalError) &&
     totalError <= tolerance();
 
-  return { estimate: totalValue, error: totalError, converged };
+  return { estimate: totalValue, error: totalError, converged, divergent };
 }
 
 /**
@@ -323,8 +465,14 @@ function adaptiveFinite(
  * (default `INITIAL_PANELS`). An ITERATED integral must reduce this — the floor
  * multiplies across levels; see `initialPanelsForDimensions`.
  *
- * Returns the `estimate`, an error `error` bound, and whether the requested
- * tolerance was met (`converged`). Semi-infinite bounds are handled by a
+ * Returns the `estimate`, an error `error` bound, whether the requested
+ * tolerance was met (`converged`), and whether the integral was found to
+ * DIVERGE (`divergent` — the shells shed by refinement toward an endpoint stop
+ * shrinking, see `shellsDiverge`). A `divergent` result has no finite value:
+ * `estimate` is whatever the panel budget happened to accumulate before it ran
+ * out, and callers must not report it (nor hand the integrand to a sampler,
+ * which would launder the divergence into a plausible-looking number).
+ * Semi-infinite bounds are handled by a
  * variable transform; the doubly-infinite case `(-∞, ∞)` is split at 0 into two
  * semi-infinite integrals (so a divergent half is detected instead of masked by
  * symmetric cancellation of an odd integrand), each half receiving half the
@@ -342,20 +490,31 @@ export function adaptiveQuadrature(
     maxIntervals?: number;
     initialPanels?: number;
   }
-): { estimate: number; error: number; converged: boolean } {
+): {
+  estimate: number;
+  error: number;
+  converged: boolean;
+  divergent: boolean;
+} {
   const rtol = options?.rtol ?? 1e-10;
   const atol = options?.atol ?? 1e-12;
   const maxIntervals = options?.maxIntervals ?? 1500;
   const initialPanels = options?.initialPanels ?? INITIAL_PANELS;
 
   if (Number.isNaN(a) || Number.isNaN(b))
-    return { estimate: NaN, error: NaN, converged: false };
+    return { estimate: NaN, error: NaN, converged: false, divergent: false };
 
-  if (a === b) return { estimate: 0, error: 0, converged: true };
+  if (a === b)
+    return { estimate: 0, error: 0, converged: true, divergent: false };
 
   if (a > b) {
     const r = adaptiveQuadrature(f, b, a, options);
-    return { estimate: -r.estimate, error: r.error, converged: r.converged };
+    return {
+      estimate: -r.estimate,
+      error: r.error,
+      converged: r.converged,
+      divergent: r.divergent,
+    };
   }
 
   // Here a < b. A non-finite bound is -∞ (for `a`) or +∞ (for `b`).
@@ -399,7 +558,11 @@ export function adaptiveQuadrature(
       right.converged &&
       Number.isFinite(estimate) &&
       error <= Math.max(atol, rtol * scale);
-    return { estimate, error, converged };
+    // Either half diverging makes the whole integral divergent: the two halves
+    // are integrals of the same sign structure over disjoint ranges, so a
+    // divergent one cannot be cancelled by the other (∞ − ∞ is not a value).
+    const divergent = left.divergent || right.divergent;
+    return { estimate, error, converged, divergent };
   } else if (bInf) {
     // [a, ∞): x = a + t/(1 - t), t ∈ [0, 1). dx = 1/(1 - t)² dt.
     g = (t) => {

@@ -663,7 +663,7 @@ function compilePointComponent(
   // type). Any other collection is element-indexing, like First/Second/Third,
   // which is the same `[idx]` access as the single-point case.
   const eltType = collectionElementType(t);
-  if (isPointListOperand(arg)) {
+  if (isPointListOperand(arg) || isCoordinateRowListOperand(arg)) {
     const coord =
       eltType !== undefined && typeof eltType !== 'string'
         ? tupleElementType(eltType, idx)
@@ -722,6 +722,37 @@ function isPointListOperand(e: Expression): boolean {
       (typeof ft !== 'string' && ft.kind === 'tuple') ||
       first.operator === 'Tuple'
     );
+  }
+  return false;
+}
+
+/**
+ * True when `e` is a list of coordinate ROWS — the list-of-lists spelling of a
+ * point list (`[[0,0],[3,4]]`, what a data import produces). Mirrors the row
+ * arm of the interpreter's `isPointLike`, and is admitted ONLY by the
+ * point-ONLY accessors (`PointX`/`PointY`/`PointZ`), which have no competing
+ * matrix meaning: `Norm`/`Abs` keep reading the same value as a matrix.
+ */
+function isCoordinateRowListOperand(e: Expression): boolean {
+  const t = jsType(e);
+  // A rank ≥ 2 numeric tensor (`matrix<number^(3x2)>`) is a list of rows: its
+  // `elements` is the SCALAR type, so the dimensions carry the shape.
+  if (typeof t !== 'string' && t.kind === 'list') {
+    if ((t.dimensions?.length ?? 0) > 1) return true;
+    const elt = t.elements;
+    if (
+      typeof elt !== 'string' &&
+      elt.kind === 'list' &&
+      isSubtype(collectionElementType(elt) ?? 'any', 'number')
+    )
+      return true;
+  }
+  if (e.isFiniteCollection) {
+    const first = e.at(1);
+    if (first === undefined) return false;
+    if (first.isIndexedCollection !== true) return false;
+    const elt = collectionElementType(jsType(first));
+    return elt !== undefined && isSubtype(elt, 'number');
   }
   return false;
 }
@@ -1730,6 +1761,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         'Norm: cannot compile a point with a broadcasting component. ' +
           'Fail closed (D6).'
       );
+    // A LIST of points: one norm per point, matching the interpreter (a point
+    // binds atomically, so `_SYS.norm` — which FLATTENS — would return a
+    // single scalar behind `success: true`). Tycho item 138. A list of numeric
+    // LISTS is a matrix and keeps the Frobenius/operator norms below.
+    if (isPointListOperand(args[0])) {
+      let ord = '';
+      if (args[1] != null) {
+        if (isString(args[1])) {
+          if (args[1].string !== 'Frobenius')
+            throw new Error(
+              `Norm: the "${args[1].string}" norm does not compile. ` +
+                `Fail closed (D6).`
+            );
+        } else ord = `, ${compile(args[1])}`;
+      }
+      return `(${compile(args[0])}).map((_pt) => _SYS.norm(_pt${ord}))`;
+    }
     if (args[1] != null) {
       if (isString(args[1])) {
         if (args[1].string === 'Frobenius')
@@ -3267,12 +3315,39 @@ const colorHelpers = {
     return oklabDeltaE(labA, labB);
   },
 
-  // Euclidean distance between two tuples. Plain numeric — not a color
-  // operation despite living in the same helpers block.
-  distance(a: number[], b: number[]): number {
+  // Euclidean distance between two points, broadcasting over a list of
+  // points. Plain numeric — not a color operation despite living in the same
+  // helpers block.
+  //
+  // A point is a flat numeric array (both the `Tuple` and the `List`
+  // spellings compile to one); a LIST of points is an array of those. A point
+  // against a list of points maps the distance over the list; two lists zip
+  // pairwise and must have the same length (the lifted-operator convention —
+  // no truncation to the shortest), mirroring the interpreter's `Distance`
+  // broadcast (Tycho items 130/138).
+  distance(a: unknown, b: unknown): number | number[] {
     if (!Array.isArray(a) || !Array.isArray(b))
       throw new Error('Distance: expected two arrays');
-    if (a.length !== b.length) throw new Error('Distance: dimension mismatch');
+    // An EMPTY array reads as an empty list of points (a 0-dimensional point
+    // has no distance), matching the interpreter's `Distance([], p) → []`.
+    const aList = a.length === 0 || Array.isArray(a[0]);
+    const bList = b.length === 0 || Array.isArray(b[0]);
+    if (!aList && !bList) return colorHelpers.pointDistance(a, b);
+    if (aList && bList) {
+      if (a.length !== b.length) throw new Error('Distance: dimension mismatch');
+      return a.map((p, i) => colorHelpers.pointDistance(p, b[i]));
+    }
+    if (aList) return a.map((p) => colorHelpers.pointDistance(p, b));
+    return b.map((p) => colorHelpers.pointDistance(a, p));
+  },
+
+  // The scalar leg of `distance`: the Euclidean distance between two points,
+  // each a flat numeric array.
+  pointDistance(a: unknown, b: unknown): number {
+    if (!Array.isArray(a) || !Array.isArray(b))
+      throw new Error('Distance: expected points (flat numeric arrays)');
+    if (a.length !== b.length || a.length === 0)
+      throw new Error('Distance: dimension mismatch');
     let sumSq = 0;
     for (let i = 0; i < a.length; i++) {
       if (typeof a[i] !== 'number' || typeof b[i] !== 'number')
@@ -4066,6 +4141,9 @@ const SYS_HELPERS = {
   // result is minutes spent making the answer worse. See `compileIntegrate`.
   integrate: (f: (x: number) => number, a: number, b: number) => {
     const r = adaptiveQuadrature(f, a, b);
+    // A diagnosed divergence has no finite value, and sampling it would only
+    // launder the divergence into a plausible-looking number.
+    if (r.divergent) return NaN;
     if (r.converged || quadratureBeatsMonteCarlo(r, 10e6)) return r.estimate;
     return monteCarloEstimate(f, a, b, 10e6).estimate;
   },

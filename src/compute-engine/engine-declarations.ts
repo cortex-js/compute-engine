@@ -1351,7 +1351,7 @@ function assertDeclaredEffects(
  * Returns the (possibly rebuilt) literal. Genuine parameter/return conflicts
  * are left for the caller's compatibility check to reject.
  */
-function reconcileFunctionLiteralReturn(
+export function reconcileFunctionLiteralReturn(
   ce: IComputeEngine,
   literal: Expression,
   declaredType: Type

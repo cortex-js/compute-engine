@@ -732,9 +732,19 @@ function componentAt(
 // of points they diverge (`First` returns the first point, not the x-list).
 function isPointLike(e: Expression): boolean {
   const t = e.type.type;
-  return (
-    (typeof t !== 'string' && t.kind === 'tuple') || e.operator === 'Tuple'
-  );
+  if ((typeof t !== 'string' && t.kind === 'tuple') || e.operator === 'Tuple')
+    return true;
+  // The list-of-lists spelling of a point list: a row of coordinates. A data
+  // import produces `[[0,0],[3,4]]` rather than a list of tuples, and the
+  // point accessors have no competing meaning for it — without this, `PointX`
+  // fell through to element indexing and returned the first ROW (Tycho item
+  // 138). A row is a *numeric* indexed collection: a list of strings, or a
+  // list of lists, keeps the First/Second/Third behavior.
+  if (e.isFiniteCollection === true && e.isIndexedCollection === true) {
+    const elt = collectionElementType(e.type.type);
+    if (elt !== undefined && isSubtype(elt, 'number')) return true;
+  }
+  return false;
 }
 
 // True when the operand's declared type says its elements are points (tuples).
@@ -744,6 +754,79 @@ function isPointLike(e: Expression): boolean {
 function hasPointElementType(xs: Expression): boolean {
   const elt = collectionElementType(xs.type.type);
   return elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple';
+}
+
+// The point arity a TYPE proves, or `undefined` when it proves nothing. A
+// tuple node's component count; the inner dimension of a rank ≥ 2 numeric
+// tensor (the list-of-lists spelling of a point list, whose rows ARE the
+// points); the component count of a collection's tuple element type. A bare
+// `tuple`, an `unknown`, a union or an unbound symbol proves nothing.
+function staticPointArity(t: Type): number | undefined {
+  if (typeof t === 'string') return undefined;
+  if (t.kind === 'tuple') return t.elements?.length;
+  if (t.kind === 'list' && (t.dimensions?.length ?? 0) > 1) {
+    const inner = t.dimensions![t.dimensions!.length - 1];
+    return inner > 0 ? inner : undefined;
+  }
+  const elt = collectionElementType(t);
+  if (elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple')
+    return elt.elements?.length;
+  return undefined;
+}
+
+// The point arity of a CONCRETE (evaluated) operand — the runtime counterpart
+// of `staticPointArity`, for the operands whose type was not decisive.
+function concretePointArity(e: Expression): number | undefined {
+  const t = e.type.type;
+  if (typeof t !== 'string' && t.kind === 'tuple')
+    return t.elements?.length ?? (isFunction(e) ? e.nops : undefined);
+  if (isFunction(e) && e.operator === 'Tuple') return e.nops;
+  // A coordinate ROW (the list-of-lists spelling), peeked the same way
+  // `pointComponentAt` decides broadcast-vs-index.
+  if (isPointLike(e)) return e.count;
+  return undefined;
+}
+
+// The runtime point arity an accessor application reads: a single point
+// (tuple) directly, or — for a collection — the arity of the points it
+// broadcasts over, peeked at the first element exactly the way
+// `pointComponentAt` decides broadcast-vs-index. `undefined` when the operand
+// is not a concrete point or list of points (a list of scalars element-indexes
+// like First/Second/Third, and proves nothing about a point arity).
+function runtimePointArity(xs: Expression): number | undefined {
+  const t = xs.type.type;
+  if (
+    (typeof t !== 'string' && t.kind === 'tuple') ||
+    (isFunction(xs) && xs.operator === 'Tuple')
+  )
+    return concretePointArity(xs);
+  if (xs.isFiniteCollection === true) {
+    for (const e of xs.each()) return concretePointArity(e);
+  }
+  return undefined;
+}
+
+// Item 138 clarified ask (2026-08-02): a statically-absent component is a
+// TYPE-level fact → a typed error. `PointZ` of a provably 2-D point (or of a
+// list/set of provably 2-D points) is `incompatible-dimensions`, not the
+// position-preserving absence marker. This REVERSES the 2026-07-22
+// NaN-over-Nothing ruling for this case — that ruling weighed marker vs
+// `Nothing` and never weighed a typed error. Scope: `PointZ` only; `PointX`/
+// `PointY` and 3-D points are untouched.
+//
+// Like the item-129 `At` multi-index gate, the check proves the mismatch
+// POSITIVELY: an `unknown`, unbound, bare-`tuple`, `list<tuple>` or union
+// operand proves nothing and stays inert (falling through to the
+// evaluate-time check, then to the marker on the compiled route).
+function pointArityError(
+  ce: ComputeEngine,
+  position: number,
+  arity: number
+): Expression {
+  return ce.error(
+    'incompatible-dimensions',
+    `coordinate ${position} vs ${arity}-dimensional point`
+  );
 }
 
 // Result type of a point-component accessor: a single point yields the
@@ -786,7 +869,19 @@ function pointComponentType(xs: Expression, position: number): Type {
   // recoverable (a literal list of tuples is often mis-typed as `vector<n>`
   // with numeric elements), so use `number` — honest for the geometric point
   // case, and it keeps the result an (honest) collection type, not a scalar.
-  if (xs.type.matches('indexed_collection')) return mapResultType(t, 'number');
+  if (xs.type.matches('indexed_collection')) {
+    // A rank ≥ 2 numeric tensor is a list of coordinate ROWS: projecting a
+    // coordinate drops the inner dimension (`matrix<3x2>` → `vector<3>`).
+    // `mapResultType` alone keeps every dimension, so it reported the SOURCE
+    // shape for the list-of-lists spelling.
+    if (
+      typeof t !== 'string' &&
+      t.kind === 'list' &&
+      (t.dimensions?.length ?? 0) > 1
+    )
+      return { kind: 'list', elements: 'number', dimensions: [t.dimensions![0]] };
+    return mapResultType(t, 'number');
+  }
   // Non-point-collection fallback follows the First/… row.
   return componentResultType(xs, position);
 }
@@ -4111,9 +4206,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'The z-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
     signature: '(any) -> any',
+    // A point with no z-coordinate is a DIMENSION mismatch, not an absent
+    // slot (item 138 clarified ask — see `pointArityError`). When the operand
+    // type statically proves 2-D, report it here, at type-check time, so the
+    // expression is invalid and every compile target fails closed on it.
+    canonical: (ops, { engine: ce }) => {
+      const args = checkArity(ce, ops, 1);
+      const xs = args[0];
+      if (xs?.isValid) {
+        const arity = staticPointArity(xs.type.type);
+        if (arity !== undefined && arity < 3)
+          return pointArityError(ce, 3, arity);
+      }
+      return ce._fn('PointZ', args);
+    },
     type: ([xs]) => pointComponentType(xs, 3),
-    evaluate: ([xs], { engine: ce, numericApproximation }) =>
-      pointComponentAt(xs, 3, ce, numericApproximation ?? false),
+    evaluate: ([xs], { engine: ce, numericApproximation }) => {
+      // The type was not decisive (a bare `tuple`, `list<tuple>`, `unknown`),
+      // but the concrete value is 2-D: the WHOLE application errors — a
+      // per-point marker inside a broadcast list is not wanted.
+      const arity = runtimePointArity(xs);
+      if (arity !== undefined && arity < 3)
+        return pointArityError(ce, 3, arity);
+      return pointComponentAt(xs, 3, ce, numericApproximation ?? false);
+    },
   },
 
   Last: {

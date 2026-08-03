@@ -943,13 +943,19 @@ describe('POINT/TUPLE ARITHMETIC — component accessors on non-indexed collecti
     expect(ce.box(['PointY', l]).evaluate().json).toEqual(['List', 2, 4]);
   });
 
-  test('PointZ over 2D points broadcasts a list of the absence marker', () => {
-    // BREAKING (2026-07-22): an out-of-band coordinate is POSITION-PRESERVING —
-    // it yields the marker (`NaN` for numeric coordinates), not `Nothing`,
-    // which would erase the slot and misalign the coordinate list.
+  test('PointZ over 2D points is an `incompatible-dimensions` error', () => {
+    // REVERSED (item 138 clarified ask, 2026-08-02): a statically-absent
+    // component is a TYPE-level fact → a typed error. This replaces the
+    // 2026-07-22 NaN-over-Nothing ruling for `PointZ` (that ruling weighed the
+    // position-preserving marker against `Nothing`, and never weighed a typed
+    // error). `set<tuple<integer, integer>>` PROVES the points are 2-D, so the
+    // mismatch is reported at type-check time and the WHOLE application errors
+    // — not one marker per point.
     const ce = new ComputeEngine();
     const s = ce.box(['Set', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
-    expect(ce.box(['PointZ', s]).evaluate().json).toEqual(['List', 'NaN', 'NaN']);
+    const z = ce.box(['PointZ', s]);
+    expect(z.isValid).toBe(false);
+    expect(z.evaluate().toString()).toMatch(/incompatible-dimensions/);
   });
 });
 

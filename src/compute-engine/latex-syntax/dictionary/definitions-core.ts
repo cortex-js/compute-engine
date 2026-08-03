@@ -35,6 +35,7 @@ import { joinLatex, supsub } from '../tokenizer.js';
 import { latexTemplate } from '../serializer-style.js';
 import { isEquationOperator, isInequalityOperator } from '../utils.js';
 import { BoxedType } from '../../../common/type/boxed-type.js';
+import { reducedRationalFromDecimal } from '../../numerics/rationals.js';
 import { parseQuantifier } from './definitions-logic.js';
 
 // ---------------------------------------------------------------------------
@@ -3330,6 +3331,24 @@ const continuationRanges = new WeakSet<object>();
  * fraction literal, which requires EXACT step emission — a float step like
  * `0.1666…` drifts and can miss the range's end anchor.
  */
+/**
+ * Exact difference `a - b` of two decimal-literal values, computed by
+ * recovering each value's decimal digits as an exact integer rational
+ * (shortest round-trip) and differencing in integer arithmetic. Returns the
+ * nearest double of the true difference, or `null` when either value has no
+ * small decimal representation (fall back to float subtraction).
+ */
+function exactDecimalDifference(a: number, b: number): number | null {
+  const ra = reducedRationalFromDecimal(a, 1);
+  const rb = reducedRationalFromDecimal(b, 1);
+  if (ra === null || rb === null) return null;
+  const num = ra[0] * rb[1] - rb[0] * ra[1];
+  const den = ra[1] * rb[1];
+  if (!Number.isSafeInteger(num) || !Number.isSafeInteger(den) || den === 0)
+    return null;
+  return num / den;
+}
+
 function rationalSampleValue(
   expr: MathJsonExpression
 ): { num: number; den: number } | null {
@@ -3623,8 +3642,14 @@ export function tryInferRangeFromElements(
     const rats = sampleRats as { num: number; den: number }[];
     const nums = rats.map((r) => r.num / r.den);
 
-    // Step = difference between the last two samples
-    const step = nums[nums.length - 1] - nums[nums.length - 2];
+    // Step = difference between the last two samples. Difference the
+    // samples' decimal digits as exact integer rationals where possible:
+    // JS double subtraction of two decimal literals carries representation
+    // dust (1.016 - 1.008 = 0.008000000000000007), and a dusty step baked
+    // into the Range shifts its count and misses the end anchor.
+    const step =
+      exactDecimalDifference(nums[nums.length - 1], nums[nums.length - 2]) ??
+      nums[nums.length - 1] - nums[nums.length - 2];
 
     // Degenerate: step is zero (or effectively zero)
     if (Math.abs(step) < tol)
@@ -3742,19 +3767,60 @@ function isArithmeticSampleShape(expr: MathJsonExpression): boolean {
 }
 
 /**
- * Two-sample fusion for exact symbolic anchors over a NUMERIC start:
- * `[0, \frac{2}{d}\pi ... end]` (the item-117 `tpalesypcc` class),
- * `[0, \frac{\pi}{4} ... 2\pi]`, `[0, \frac{1}{1.5} ... 4]`. With exactly
- * two samples there is no spacing to validate; the step is `s1 - s0`,
- * emitted symbolically — the `Range` canonical handler evaluates its step
- * operand, so an exact symbolic step stays exact.
+ * The value of a raw parse-time sample that is numerically KNOWN: a numeric
+ * literal, or a pure arithmetic composition of numeric literals (`2+1`,
+ * `1-0.1`, `2\cdot 2`, `1+0.008`). Returns `null` as soon as any leaf is a
+ * symbol or the shape is not arithmetic — a first anchor with a free variable
+ * is the ambiguous-progression territory the additive-base pass adjudicates
+ * (`[m+n, m+k+15, ...]` and `[m+n, m+n+x, ...]` stay placeholder Lists, as
+ * pinned by item 47), and `[f(1), f(2), ...]` is sequence notation, not a
+ * progression (`isArithmeticSampleShape` rejects the application shape at
+ * every level).
  *
- * Two deliberate gates: the FIRST sample must be a numeric literal (a
- * symbolic first anchor is the ambiguous-progression territory the
- * additive-base pass adjudicates — `[m+n, m+k+15, ...]` and
- * `[m+n, m+n+x, ...]` stay placeholder Lists, as pinned), and the second
- * must be an arithmetic COMPOUND shape so generic-sequence notation stays a
- * placeholder List (see `ARITHMETIC_SAMPLE_OPERATORS`).
+ * Only used as a gate and to detect a zero start — the emitted `Range` keeps
+ * the raw operands, so exactness is decided by the `Range` canonical handler,
+ * not by this float reduction.
+ */
+function numericSampleValue(expr: MathJsonExpression): number | null {
+  const v = machineValue(expr);
+  if (v !== null) return v;
+  const h = operator(expr);
+  if (h === null || !ARITHMETIC_SAMPLE_OPERATORS.has(h)) return null;
+  if (!isArithmeticSampleShape(expr)) return null;
+  const args = operands(expr).map(numericSampleValue);
+  if (args.some((a) => a === null)) return null;
+  const n = args as number[];
+  let result: number | null = null;
+  if (h === 'Add') result = n.reduce((a, b) => a + b, 0);
+  else if (h === 'Multiply' || h === 'InvisibleOperator')
+    result = n.reduce((a, b) => a * b, 1);
+  else if (h === 'Subtract' && n.length === 2) result = n[0] - n[1];
+  else if (h === 'Negate' && n.length === 1) result = -n[0];
+  else if ((h === 'Divide' || h === 'Rational') && n.length === 2)
+    result = n[0] / n[1];
+  else if (h === 'Power' && n.length === 2) result = Math.pow(n[0], n[1]);
+  else if (h === 'Square' && n.length === 1) result = n[0] * n[0];
+  else if (h === 'Sqrt' && n.length === 1) result = Math.sqrt(n[0]);
+  else if (h === 'Root' && n.length === 2) result = Math.pow(n[0], 1 / n[1]);
+  if (result === null || !Number.isFinite(result)) return null;
+  return result;
+}
+
+/**
+ * Two-sample fusion for exact symbolic anchors over a numerically KNOWN start:
+ * `[0, \frac{2}{d}\pi ... end]` (the item-117 `tpalesypcc` class),
+ * `[0, \frac{\pi}{4} ... 2\pi]`, `[0, \frac{1}{1.5} ... 4]`, and the compound
+ * first anchors of item 134 (`[2+1, 2+2...9]`, `[1+0.008, 1+0.016...5]`,
+ * `[1-0.1, 1-0.2...0]`). With exactly two samples there is no spacing to
+ * validate; the step is `s1 - s0`, emitted symbolically — the `Range`
+ * canonical handler evaluates its step operand, so an exact symbolic step
+ * stays exact.
+ *
+ * Two deliberate gates: the FIRST sample must be numerically known (see
+ * `numericSampleValue` — a symbolic first anchor is the ambiguous-progression
+ * territory the additive-base pass adjudicates), and the second must be an
+ * arithmetic COMPOUND shape so generic-sequence notation stays a placeholder
+ * List (see `ARITHMETIC_SAMPLE_OPERATORS`).
  */
 function tryTwoSampleSymbolicRange(
   samples: readonly MathJsonExpression[],
@@ -3762,7 +3828,7 @@ function tryTwoSampleSymbolicRange(
 ): MathJsonExpression | null {
   if (samples.length !== 2) return null;
   const [s0, s1] = samples;
-  const start = machineValue(s0);
+  const start = numericSampleValue(s0);
   if (start === null) return null;
   if (!isArithmeticSampleShape(s1)) return null;
   const step: MathJsonExpression = start === 0 ? s1 : ['Subtract', s1, s0];

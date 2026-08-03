@@ -20,7 +20,13 @@ describe('Parser: component access', () => {
     });
 
     test('p.z → PointZ(p)', () => {
-      expect(parse('p.z')).toEqual(['PointZ', 'p']);
+      // Probed on a 3-D point: since 2026-08-02 (item 138 clarified ask — a
+      // statically-absent component is a type-level fact) `.z` of a symbol
+      // declared `tuple<number, number>` canonicalizes to an
+      // `incompatible-dimensions` error, which would hide the parse mapping
+      // this test is about. (Single letter: `p3` would parse as `p·3`.)
+      ce.declare('w', 'tuple<number, number, number>');
+      expect(parse('w.z')).toEqual(['PointZ', 'w']);
     });
 
     test('chained: p.x.real → Real(PointX(p))', () => {

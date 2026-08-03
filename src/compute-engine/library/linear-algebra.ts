@@ -9,7 +9,11 @@ import {
 } from '../boxed-expression/tensor-view.js';
 import { totalDegree } from '../boxed-expression/polynomial-degree.js';
 import { checkArity } from '../boxed-expression/validate.js';
-import { isFiniteIndexedCollection, isTuple } from '../collection-utils.js';
+import {
+  isFiniteIndexedCollection,
+  isPointListValue,
+  isTuple,
+} from '../collection-utils.js';
 import {
   Expression,
   ExpressionInput,
@@ -41,6 +45,11 @@ import { pointNormType } from './utils.js';
 // lazy form. No existing test uses a matrix larger than this bound, so the eager
 // snapshots are unaffected.
 const MAX_SIZE_EAGER_TENSOR = 10000;
+
+/** The most points `Norm` broadcasts over (one norm per point). Beyond it the
+ *  operator stays symbolic rather than materialize an unbounded list — the
+ *  same bound `Distance`'s broadcast uses. */
+const MAX_POINT_LIST_NORM = 10000;
 
 /**
  * Build an m×n matrix as a fully-lazy nested `Tabulate`: an outer 1-D
@@ -1448,8 +1457,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, number|string?) -> number',
       // A point with a broadcasting collection component zips into one norm
       // per element — the honest type is then `list<number>` (Tycho item 74).
-      // `isTuple` is type-based so tuple-typed symbols route too.
-      type: ([x]) => (x && isTuple(x) ? pointNormType(x) : 'number'),
+      // `isTuple` is type-based so tuple-typed symbols route too. A LIST of
+      // points broadcasts to one norm per point (Tycho item 138).
+      type: ([x]) =>
+        x && isTuple(x)
+          ? pointNormType(x)
+          : x && isPointListValue(x)
+            ? { kind: 'list', elements: 'number' }
+            : 'number',
       evaluate: (
         ops,
         { engine: ce, numericApproximation }
@@ -1558,6 +1573,27 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // A point-like Tuple is treated as a rank-1 vector — but only inside
         // Norm (no general Tuple→vector coercion is introduced elsewhere).
         if (isFunction(x, 'Tuple')) return vectorNorm(x.ops);
+
+        // A LIST of points: one norm per point, matching the `Abs` broadcast
+        // (`Abs` of a point is its norm) and the compiled route — a list of
+        // points is not a tensor, so this used to stay inert (Tycho item 138).
+        // A list of numeric LISTS is a matrix: it falls through to the
+        // Frobenius/operator norms below.
+        if (isPointListValue(x)) {
+          // A symbolic (valueless) or unbounded operand stays symbolic: the
+          // point-list type alone is not a value to broadcast over.
+          const count = x.isFiniteCollection === true ? x.count : undefined;
+          if (count === undefined || count > MAX_POINT_LIST_NORM)
+            return undefined;
+          const norms: Expression[] = [];
+          for (const pt of x.each()) {
+            if (!isFunction(pt, 'Tuple')) return undefined;
+            const n = vectorNorm(pt.ops);
+            if (n === undefined) return undefined;
+            norms.push(n);
+          }
+          return ce.function('List', norms);
+        }
 
         if (!isTensorValue(x)) return undefined;
         const xTensor = packTensor(ce, x);

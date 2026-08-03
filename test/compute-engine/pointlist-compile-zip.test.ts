@@ -375,24 +375,45 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     ).toEqual(interpret(expr, { n: [1, 2, 3], m: [10, 20] }));
   });
 
-  it('PointZ over 2-arity points is NaN on BOTH routes (the absence marker)', () => {
+  it('PointZ over 2-arity points: the interpreter ERRORS, the compiled kernel keeps the NaN marker', () => {
+    // REVERSED in part (item 138 clarified ask, 2026-08-02): a statically-
+    // absent component is a TYPE-level fact → a typed `incompatible-dimensions`
+    // error. That reverses the 2026-07-22 NaN-over-Nothing ruling, which
+    // weighed the position-preserving marker against `Nothing` and never
+    // weighed a typed error.
+    //
+    // Here the operand type is `list<tuple>` — a BARE element tuple, whose
+    // arity is not statically known — so the static gate stays inert and the
+    // JS kernel is still emitted. Its numeric ABI keeps the `NaN` absence
+    // marker for dynamically-shaped bases (the shader targets cannot throw;
+    // see the DOMAIN-conditional pin below). The INTERPRETER sees the concrete
+    // 2-tuples and errors — once, for the whole application, not per point.
     const ce = zipEngine();
     const expr = ['PointZ', ['PointList', -6, 'n']];
+    expect(ce.box(['PointList', -6, 'n']).type.toString()).toBe('list<tuple>');
     const r = js.compile(ce.box(expr as any), { realOnly: true });
     const out = (r.run as (s: any) => number[])({ n: [1, 2, 3] });
     expect(out).toHaveLength(3);
     expect(out.every((v) => Number.isNaN(v))).toBe(true);
-    // The interpreter answers `NaN` too — not `undefined`, not an error.
-    const interp = interpret(expr, { n: [1, 2, 3] }) as number[];
-    expect(interp.every((v) => Number.isNaN(v))).toBe(true);
+    // The interpreted route, with `n` bound: one error, not a list of markers.
+    const ice = new ComputeEngine();
+    ice.assign('n', ice.box(['List', 1, 2, 3]));
+    expect(ice.box(expr as any).evaluate().toString()).toMatch(
+      /incompatible-dimensions/
+    );
   });
 
-  it('PointZ over a single 2-arity point is NaN, not undefined', () => {
+  it('PointZ over a single 2-arity point FAILS CLOSED at compile time', () => {
+    // REVERSED (item 138 clarified ask, 2026-08-02): `tuple<integer, integer>`
+    // statically proves the point is 2-D, so the expression is invalid before
+    // a kernel is ever emitted — an honest decline rather than a `NaN` a
+    // consumer would have to recognize.
     const ce = zipEngine();
-    const r = js.compile(ce.box(['PointZ', ['Tuple', 1, 2]]), {
-      realOnly: true,
-    });
-    expect(Number.isNaN((r.run as (s: any) => number)({}))).toBe(true);
+    const boxed = ce.box(['PointZ', ['Tuple', 1, 2]]);
+    expect(boxed.isValid).toBe(false);
+    expect(() => js.compile(boxed, { realOnly: true })).toThrow(
+      /incompatible-dimensions/
+    );
   });
 
   it('the `NaN` absence marker is DOMAIN-conditional: an object-domain coordinate keeps `undefined`', () => {
@@ -406,12 +427,16 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     expect(r.success).toBe(true);
     expect(r.code).not.toContain('?? NaN');
     // A numeric coordinate — and an out-of-range one, whose type is not
-    // statically known — keep the marker.
+    // statically known (`bt` is a BARE `tuple`) — keep the marker.
+    // (`PointZ('p')` was the second probe until 2026-08-02: `p` is
+    // `tuple<number, number>`, which now PROVES the mismatch, so it errors at
+    // type-check time instead of reaching the ABI. `bt` preserves this pin's
+    // subject: an out-of-range access whose arity is not statically known.)
     expect(
       js.compile(ce.box(['PointY', 'p']), { realOnly: true }).code
     ).toContain('?? NaN');
     expect(
-      js.compile(ce.box(['PointZ', 'p']), { realOnly: true }).code
+      js.compile(ce.box(['PointZ', 'bt']), { realOnly: true }).code
     ).toContain('?? NaN');
   });
 
@@ -598,15 +623,20 @@ describe('PointList — GPU projection (D3)', () => {
     // route: a parameterized tuple type states the arity, and `p.z` on a
     // `vec2` is invalid shader source — it must not be emitted behind
     // `success: true`.
+    //
+    // Since 2026-08-02 (item 138 clarified ask) the mismatch is caught even
+    // EARLIER — at type-check time, by `PointZ`'s canonical handler — so the
+    // diagnostic that reaches the caller is the engine's typed
+    // `incompatible-dimensions` error rather than this target's own message.
+    // Still fails closed, which is what this pin is about.
     const ce = gpuEngine();
     ce.declare('p2', 'tuple<number, number>');
     ce.declare('p3', 'tuple<number, number, number>');
+    expect(ce.box(['PointZ', 'p2']).isValid).toBe(false);
     for (const target of [glsl, wgsl])
       expect(() =>
         target.compile(ce.box(['PointZ', 'p2']), { realOnly: true })
-      ).toThrow(
-        /PointZ: the point has arity 2 — no third coordinate\. Fail closed \(D6\)\./
-      );
+      ).toThrow(/incompatible-dimensions/);
     // An in-range coordinate, and a 3-arity point, still swizzle.
     expect(glsl.compile(ce.box(['PointX', 'p2']), { realOnly: true }).code).toBe(
       'p2.x'
@@ -619,13 +649,14 @@ describe('PointList — GPU projection (D3)', () => {
   it('PointZ on an all-scalar `PointList` (a single point) fails closed as well', () => {
     // `PointList(-6, -7)` has no source, so it IS a single point (it evaluates
     // to `Tuple(-6, -7)` and types `tuple<…, …>`) and reaches the single-point
-    // branch, not the projection route.
+    // branch, not the projection route. Since 2026-08-02 the typed
+    // `incompatible-dimensions` error fires first (see the test above).
     const ce = gpuEngine();
     expect(() =>
       glsl.compile(ce.box(['PointZ', ['PointList', -6, -7]]), {
         realOnly: true,
       })
-    ).toThrow(/PointZ: the point has arity 2 — no third coordinate/);
+    ).toThrow(/incompatible-dimensions/);
   });
 
   it('a bare `tuple` and an all-collection union component decline as SLOTS, not sources', () => {

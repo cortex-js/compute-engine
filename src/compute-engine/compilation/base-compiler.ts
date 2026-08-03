@@ -9,6 +9,7 @@ import { lookupApplicable } from '../function-utils.js';
 import {
   isFiniteIndexedCollection,
   isNumericTuple,
+  isPointListValue,
   isPossiblyCollectionTyped,
   isTuple,
 } from '../collection-utils.js';
@@ -144,6 +145,15 @@ function collectUsedNames(
  */
 export function compilationType(expr: Expression): Type {
   return resolveTypeForCompilation(expr.type.type);
+}
+
+/**
+ * The JavaScript test recognizing the complex runtime convention — a
+ * `{ re, im }` object (see `branchComplexCoercion`). An array (a compiled
+ * collection) fails it: `[].re` is `undefined`.
+ */
+function jsComplexObjectTest(a: string): string {
+  return `(${a} !== null && typeof ${a} === "object" && typeof ${a}.re === "number")`;
 }
 
 function isBoundPossiblyCollectionTyped(a: Expression): boolean {
@@ -790,6 +800,16 @@ export class BaseCompiler {
     // it, `|p|` for `p: tuple<real,real>` broadcast `Math.abs` over the
     // point's components behind `success: true`.
     if (h === 'Abs' && args.length === 1 && isTuple(args[0])) {
+      return BaseCompiler.compileExpr(engine, 'Norm', args, prec, target);
+    }
+
+    // Same rule one level up: `|S|` over a LIST of points is the list of point
+    // norms (the interpreter broadcasts `Abs`, and `Abs` of a point is its
+    // norm), NOT the component-wise `abs` the broadcast lowering below would
+    // emit behind `success: true` (Tycho item 138). Every target's `Norm`
+    // either lowers the point list (javascript) or fails closed on it, so the
+    // rewrite is uniform rather than javascript-only.
+    if (h === 'Abs' && args.length === 1 && isPointListValue(args[0])) {
       return BaseCompiler.compileExpr(engine, 'Norm', args, prec, target);
     }
 
@@ -4179,7 +4199,11 @@ export class BaseCompiler {
       )
         return false;
       const pt = BaseCompiler.userFunctionParamType(engine, h, i);
-      return pt !== undefined && isNonRealNumber(pt);
+      if (pt !== undefined) return isNonRealNumber(pt);
+      // A multi-clause function has an INTERSECTION signature, from which
+      // `userFunctionParamType` reads no single parameter type — ask the
+      // clause set instead.
+      return BaseCompiler.multiClauseParamIsComplex(engine, h, i);
     });
     const compiledArgs = args.map((a) =>
       BaseCompiler.compileValueOperand(a, target)
@@ -4300,6 +4324,31 @@ export class BaseCompiler {
     const nOpt = t.optArgs?.length ?? 0;
     if (i < nArgs + nOpt) return t.optArgs![i - nArgs].type;
     return t.variadicArg?.type;
+  }
+
+  /**
+   * Is positional parameter `i` of the MULTI-CLAUSE function `h` complex-
+   * conventioned in every clause? The call-boundary coercion condition for a
+   * clause set (`userFunctionParamType` reads nothing from an intersection
+   * signature).
+   *
+   * Deliberately unanimous: where clauses disagree at a position (one `real`,
+   * one `complex`), wrapping the argument would make it fail the real
+   * clause's guard — the coercion would change DISPATCH, not just the
+   * convention. Such positions stay uncoerced, as before.
+   */
+  private static multiClauseParamIsComplex(
+    engine: ComputeEngine,
+    h: string,
+    i: number
+  ): boolean {
+    const state = multiClauseState(engine.lookupDefinition(h));
+    if (state === undefined || state.clauses.length === 0) return false;
+    return state.clauses.every((c) => {
+      const params = c.signature.args;
+      if (params === undefined || i >= params.length) return false;
+      return isNonRealNumber(params[i].type);
+    });
   }
 
   /**
@@ -4560,6 +4609,14 @@ export class BaseCompiler {
       // name of another user function (`userFunctionName` sanitizes to
       // `[\w$]` but user symbols never contain `$`).
       const helperNames = plans.map((_, i) => `${name}$c${i + 1}`);
+      // The clause bodies are the ARMS of one dispatcher: if any of them is
+      // complex-valued, every provably-real one must be coerced to the
+      // `{ re, im }` convention or the caller reads `.re` off a plain number
+      // (Tycho item 60, here across clauses instead of `Which` arms).
+      const coerce = BaseCompiler.branchComplexCoercion(
+        plans.map((p) => p.literal.ops[0]),
+        target
+      );
       for (let i = 0; i < plans.length; i++) {
         const { params, bodyExpr, bodyTarget } =
           BaseCompiler.prepareUserFunctionBody(
@@ -4570,11 +4627,12 @@ export class BaseCompiler {
         // A recursive clause body references `h` while `name` is in
         // `compiling`, so the self-call emits `name` — bound by the time any
         // call runs, since every def executes in the preamble first.
-        const body = BaseCompiler.withNestedCseHarvest(
+        const compiled = BaseCompiler.withNestedCseHarvest(
           bodyExpr,
           bodyTarget,
           () => BaseCompiler.compile(bodyExpr, bodyTarget)
         );
+        const body = coerce ? coerce(bodyExpr, compiled) : compiled;
         registry.defs.set(
           helperNames[i],
           `const ${helperNames[i]} = (${params.join(', ')}) => ${body};`
@@ -4611,9 +4669,10 @@ export class BaseCompiler {
    * NaN, so it tests `Number.isNaN`); numeric ranges → base guard
    * plus inclusive bound checks (a NaN argument fails `>=`, as it should);
    * primitives → `typeof`/`Number.isInteger` where JS can express them.
-   * Note `number` admits the engine's complex values, which the JS calling
-   * convention represents as `{re, im}` objects that a `typeof` test
-   * refuses — complex-valued dispatch is not compiled in v1.
+   * The JS calling convention represents a complex value as a `{re, im}`
+   * object and a real one as a plain number, and BOTH inhabit `complex` (and
+   * `number`): those two guards accept either shape, so a complex-valued
+   * clause set dispatches as the interpreter does.
    */
   private static jsClauseParamGuard(
     t: Type,
@@ -4631,8 +4690,10 @@ export class BaseCompiler {
           return `(typeof ${a} === "number" && !Number.isNaN(${a}))`;
         case 'finite_real':
           return `Number.isFinite(${a})`;
+        case 'complex':
+          return `(typeof ${a} === "number" || ${jsComplexObjectTest(a)})`;
         case 'number':
-          return `typeof ${a} === "number"`;
+          return `(typeof ${a} === "number" || ${jsComplexObjectTest(a)})`;
         case 'string':
           return `typeof ${a} === "string"`;
         case 'boolean':

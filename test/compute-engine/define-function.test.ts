@@ -34,11 +34,7 @@ describe('DEFINE FUNCTION — multi-clause fib (spec §1)', () => {
     clause('fib', ['Function', 1, p('o', '1')]);
     clause('fib', [
       'Function',
-      [
-        'Add',
-        ['fib', ['Subtract', 'n', 1]],
-        ['fib', ['Subtract', 'n', 2]],
-      ],
+      ['Add', ['fib', ['Subtract', 'n', 1]], ['fib', ['Subtract', 'n', 2]]],
       p('n', 'integer'),
     ]);
   });
@@ -358,6 +354,100 @@ describe('DEFINE FUNCTION — About clause listing', () => {
     clause('f', ['Function', ['Add', 'x', 1], 'x']);
     const about = ce.box(['About', 'f']).evaluate().toString();
     expect(about).not.toContain('multi-clause function');
+  });
+});
+
+// ─── Declare-then-define (§4.3a) ────────────────────────────────────────────
+
+describe('DEFINE FUNCTION — declare then define', () => {
+  it('accepts clauses that NARROW the declared signature', () => {
+    // A clause is an ARM of the declaration: `0 <: number`. Checking it as a
+    // function SUBTYPE of the declaration can never pass (parameters are
+    // contravariant) — the clause SET implements the declaration.
+    ce.declare('J', '(number, complex) -> complex');
+    expect(
+      clause('J', [
+        'Function',
+        p('z', 'complex'),
+        p('k', '0'),
+        p('z', 'complex'),
+      ])
+    ).toBe('"Nothing"');
+    expect(
+      clause('J', [
+        'Function',
+        ['Add', ['Square', ['J', ['Subtract', 'n', 1], 'z']], 'z'],
+        p('n', 'integer'),
+        p('z', 'complex'),
+      ])
+    ).toBe('"Nothing"');
+
+    // The declaration stays the symbol's type — a recursive clause's
+    // self-call types against it.
+    expect(ce.box('J').type.toString()).toBe('(number, complex) -> complex');
+    expect(
+      ce
+        .box(['J', 0, ['Complex', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('(1 + 2i)');
+    // z² + z at z = 1+2i is (1+2i)² + (1+2i) = (-3+4i) + (1+2i) = -2+6i
+    expect(
+      ce
+        .box(['J', 1, ['Complex', 1, 2]])
+        .N()
+        .toString()
+    ).toBe('(-2 + 6i)');
+  });
+
+  it('a call outside every clause is the D7 error, not a silent total function', () => {
+    // The declaration admits `J(5, z)` statically; no clause covers it, so
+    // the miss surfaces at evaluation instead of applying the `J(0, z)` body.
+    ce.declare('J', '(number, complex) -> complex');
+    clause('J', [
+      'Function',
+      p('z', 'complex'),
+      p('k', '0'),
+      p('z', 'complex'),
+    ]);
+    expect(
+      ce
+        .box(['J', 5, ['Complex', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toContain('no-matching-clause');
+  });
+
+  it('a clause outside the declared domain is a LOUD error value', () => {
+    ce.declare('g', '(integer) -> integer');
+    const r = clause('g', ['Function', 1, p('s', 'string')]);
+    expect(r).toContain('invalid-clause-definition');
+    expect(r).toContain('is outside the declared');
+  });
+
+  it('a clause whose ASCRIBED result escapes the declaration is rejected, and the record stays usable', () => {
+    ce.declare('k', '(number) -> integer');
+    const r = clause('k', [
+      'Function',
+      ['Typed', { str: 'hello' }, { str: 'string' }],
+      p('a', '0'),
+    ]);
+    expect(r).toContain('invalid-clause-definition');
+    expect(r).toContain('is not a subtype of the declared');
+    // Nothing was installed: the declaration survives, the call is inert
+    // (not a crash), and a well-typed clause still installs afterwards.
+    expect(ce.box('k').type.toString()).toBe('(number) -> integer');
+    expect(ce.box(['k', 0]).evaluate().toString()).toBe('k(0)');
+    expect(clause('k', ['Function', 7, p('a', '0')])).toBe('"Nothing"');
+    expect(ce.box(['k', 0]).evaluate().toString()).toBe('7');
+  });
+
+  it('an undeclared clause set is unchanged (intersection signature)', () => {
+    clause('f', ['Function', 1, p('a', '0')]);
+    clause('f', ['Function', ['Add', 'x', 1], p('x', 'integer')]);
+    expect(ce.box('f').type.toString()).toContain('&');
+    expect(ce.box(['f', 0]).evaluate().toString()).toBe('1');
+    expect(ce.box(['f', 4]).evaluate().toString()).toBe('5');
   });
 });
 

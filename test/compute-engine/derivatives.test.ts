@@ -1077,3 +1077,46 @@ describe('D over lazy operators stays symbolic (Tycho item 115)', () => {
     expect(result.operator).toEqual('Apply');
   });
 });
+
+describe('Symbolic derivative size guard (Tycho item 140)', () => {
+  // The differentiation rules duplicate their operands with no sharing:
+  // `d/dx √u = u′/(2√u)` writes `u` twice, so each derivative order roughly
+  // squares the tree of a deeply nested radical. The second derivative of a
+  // `√(x+√(x+…))` nested a few dozen deep runs to millions of nodes — minutes
+  // of work for a result no one can read. `differentiate()` refuses once what
+  // it is assembling crosses `MAX_DERIVATIVE_NODES` and the enclosing `D`
+  // stays inert, the same decline a lazy operator makes above.
+  //
+  // (The refusal is a bounded amount of work, not an instant one: the budget
+  // is sized to admit every derivative the rest of this suite takes, so a
+  // refusal necessarily costs at least as much as the largest admitted
+  // result. What it is not is unbounded.)
+  const nestedRadical = (depth: number): Expression => {
+    let latex = 'x';
+    for (let i = 0; i < depth; i++) latex = `\\sqrt{x+${latex}}`;
+    return parse(latex);
+  };
+
+  it('a second derivative under the budget is computed as usual', () => {
+    const result = engine.expr(['D', nestedRadical(4), 'x', 'x']).evaluate();
+    expect(result.operator).not.toEqual('D');
+    expect(result.toString()).not.toContain('D(');
+  });
+
+  it('a first derivative of a deeply nested radical is unaffected', () => {
+    const result = engine.expr(['D', nestedRadical(16), 'x']).evaluate();
+    expect(result.operator).not.toEqual('D');
+  }, 60_000);
+
+  it('the 37-deep radical of item 140 declines instead of hanging', () => {
+    // At this nesting BOTH orders are over budget: the first derivative
+    // alone runs to ~50 000 nodes / 176 000 characters (~25 s before the
+    // guard), the second to millions (no result in 75 s). Both now decline.
+    const f = nestedRadical(37);
+    expect(engine.expr(['D', f, 'x']).evaluate().operator).toEqual('D');
+    expect(engine.expr(['D', f, 'x', 'x']).evaluate().operator).toEqual('D');
+    // The abort travels on module state; the next derivative must be
+    // unaffected by it.
+    expect(D('\\sin(x^2)', 'x').evaluate().latex).toEqual('2x\\cos(x^2)');
+  }, 60_000);
+});

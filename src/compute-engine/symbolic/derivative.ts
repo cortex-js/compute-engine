@@ -34,6 +34,98 @@ const MAX_DIFFERENTIATION_DEPTH = 100;
 // limit. Check the engine deadline periodically across recursive calls.
 let differentiateCallCount = 0;
 
+/**
+ * Maximum size, in expression nodes, of a result the symbolic
+ * differentiator will build.
+ *
+ * The differentiation rules duplicate their operands with no sharing —
+ * `d/dx √u = u′/(2√u)` writes `u` twice — so each derivative order roughly
+ * squares the tree of a deeply nested expression. A 12-deep nested radical
+ * `√(x+√(x+…))` already has a second derivative of several million nodes:
+ * minutes of work, gigabytes of allocation, and a result no one can read.
+ *
+ * Rather than present that as a hang, decline honestly: `differentiate()`
+ * returns `undefined` as soon as the result it is assembling crosses this
+ * budget, and the enclosing `D` / `Derivative` stays inert and symbolic —
+ * the same convention a lazy operator uses to decline differentiation.
+ *
+ * Sizing. The largest derivative taken anywhere in the test suite is 798
+ * nodes, a factor of 30 below this, and the budget still admits the biggest
+ * nested-radical derivatives that complete in reasonable time (the 2nd
+ * derivative of an 8-deep radical, ~17 500 nodes, 7 s).
+ *
+ * It is not set higher, because a refusal is BOUNDED work, not instant: the
+ * differentiator has to build up to the budget before it can know it is over
+ * it, and that build is superlinear. Measured on `√(x+√(x+…))`: at 25 000
+ * nodes a 12-deep 2nd derivative declines in ~7 s and a 24-deep one in ~4 s,
+ * where the same refusals at 100 000 take ~85 s and ~17 s — slower than the
+ * unguarded blow-up they were meant to replace. A larger budget buys larger
+ * admissible results and pays for them in refusal latency; this value is
+ * where that trade sits.
+ *
+ * Real relief for the deeply-nested case needs sharing (a
+ * let/common-subexpression representation) in the derivative itself, which
+ * this guard does not attempt.
+ *
+ * Deliberately internal: a safety valve against pathological input, not a
+ * tuning knob.
+ */
+const MAX_DERIVATIVE_NODES = 25_000;
+
+/**
+ * Node counts, memoized by expression identity. Boxed expressions are
+ * immutable, and each differentiation rule reuses its operand instances in
+ * the terms it builds, so measuring a result costs O(nodes newly built at
+ * this step), not O(size of the result).
+ */
+const nodeCountCache = new WeakMap<Expression, number>();
+
+/**
+ * Distinct nodes measured since the current top-level differentiation
+ * started — the memo above makes each node count exactly once, so this is
+ * the number of nodes the differentiation has actually built.
+ *
+ * Result size alone is not enough to refuse *quickly*: the sum rule
+ * differentiates each term separately (every term under budget) and only
+ * exceeds the budget when the last one is added, by which point all the work
+ * is done. The footprint grows term by term and trips in the middle.
+ */
+let differentiationFootprint = 0;
+
+/**
+ * The number of nodes in `expr`, saturating above `limit`: the value is
+ * exact when it is `<= limit`, and merely "greater than `limit`" otherwise.
+ * Saturating bounds a single measurement even when nothing is shared, and
+ * keeps the count from overflowing on a heavily shared tree.
+ */
+function boundedNodeCount(expr: Expression, limit: number): number {
+  const cached = nodeCountCache.get(expr);
+  if (cached !== undefined) return cached;
+  differentiationFootprint += 1;
+  let n = 1;
+  if (isFunction(expr)) {
+    for (const op of expr.ops) {
+      n += boundedNodeCount(op, limit);
+      if (n > limit) break;
+    }
+  }
+  nodeCountCache.set(expr, n);
+  return n;
+}
+
+// Set once a differentiation has exceeded `MAX_DERIVATIVE_NODES`. The
+// recursion then unwinds by throwing `kOverBudget`, which every enclosing
+// level lets pass: returning `undefined` instead would have each level run
+// its own rule (`mul()`, `add()`, a `D(…)` placeholder for the operand that
+// declined) over operands that are already enormous — the unwind alone cost
+// more than the aborted differentiation. The sentinel never escapes: it is
+// caught by the `depth === 0` frame, which is where every caller enters
+// (including the re-entrant `expr.evaluate()` of a nested `D`), and turned
+// back into the ordinary `undefined` decline.
+const kOverBudget = Symbol('derivative-over-budget');
+let differentiationOverBudget = false;
+let differentiationNesting = 0;
+
 //
 // ── Derivative trace ────────────────────────────────────────────────
 //
@@ -468,6 +560,10 @@ function differentiateApplied(
  * expressions) should never approach this limit. Hitting the limit indicates
  * either a bug in the differentiation rules or a maliciously constructed input.
  *
+ * It also includes a SIZE limit (`MAX_DERIVATIVE_NODES`): an expression can
+ * blow up in width without ever getting deep, and the result is the same
+ * `undefined` decline rather than a result too large to be of any use.
+ *
  * @param expr - The expression to differentiate
  * @param v - The variable to differentiate with respect to
  * @param depth - Internal recursion depth counter (do not pass manually)
@@ -477,6 +573,47 @@ export function differentiate(
   expr: Expression,
   v: string,
   depth: number = 0,
+  trace?: DerivativeTrace
+): Expression | undefined {
+  if (differentiationNesting === 0) {
+    differentiationFootprint = 0;
+    differentiationOverBudget = false;
+  }
+  differentiationNesting += 1;
+  try {
+    if (differentiationOverBudget) throw kOverBudget;
+    const result = differentiateNode(expr, v, depth, trace);
+    // Guard against runaway expression GROWTH. Checked on the way out of
+    // EVERY level of the recursion, not just the top: a single top-level
+    // `differentiate()` call is what assembles the runaway result, so a
+    // check only at depth 0 would come too late. Two ways to exceed the
+    // budget: the accumulated footprint (how much has been built so far —
+    // the metric that stops the work early) and the size of this level's
+    // result (which catches a result whose sharing keeps the footprint
+    // small but which still prints as millions of characters).
+    if (
+      result !== undefined &&
+      (boundedNodeCount(result, MAX_DERIVATIVE_NODES) > MAX_DERIVATIVE_NODES ||
+        differentiationFootprint > MAX_DERIVATIVE_NODES)
+    ) {
+      differentiationOverBudget = true;
+      throw kOverBudget;
+    }
+    return result;
+  } catch (e) {
+    if (e === kOverBudget && depth === 0) return undefined;
+    throw e;
+  } finally {
+    differentiationNesting -= 1;
+  }
+}
+
+/** The differentiation rules themselves. Always reached through
+ * `differentiate()`, which applies the depth and size guards. */
+function differentiateNode(
+  expr: Expression,
+  v: string,
+  depth: number,
   trace?: DerivativeTrace
 ): Expression | undefined {
   // Guard against runaway recursion

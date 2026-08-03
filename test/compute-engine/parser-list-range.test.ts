@@ -510,6 +510,134 @@ describe('Parser: list range ellipsis', () => {
     });
   });
 
+  // The two-sample fusion accepts any numerically KNOWN first anchor, not just
+  // a bare numeric literal: an unknowns-free arithmetic composition of numeric
+  // literals (`2+1`, `1+0.008`, `1-0.1`, `2\cdot 2`) is a numeric anchor too.
+  // The step stays symbolic (`s1 - s0`) and is evaluated exactly by the `Range`
+  // canonical handler. (Tycho item 134.)
+  describe('two-sample form with a compound NUMERIC first anchor', () => {
+    test('`[2+1, 2+2...9]` → Range(3, 9, 1)', () => {
+      expect(parse('[2+1, 2+2...9]')).toEqual(['Range', 3, 9, 1]);
+      const value = ce.parse('[2+1, 2+2...9]').evaluate();
+      expect(value.count).toBe(7);
+      expect([...value.each()].map((x) => x.re)).toEqual([3, 4, 5, 6, 7, 8, 9]);
+    });
+
+    test('`[2\\cdot 1, 2\\cdot 2...9]` → Range(2, 9, 2)', () => {
+      expect(parse('[2\\cdot 1, 2\\cdot 2...9]')).toEqual(['Range', 2, 9, 2]);
+      const value = ce.parse('[2\\cdot 1, 2\\cdot 2...9]').evaluate();
+      expect(value.count).toBe(4);
+      expect([...value.each()].map((x) => x.re)).toEqual([2, 4, 6, 8]);
+    });
+
+    // The step is emitted as `Subtract(1+0.016, 1+0.008)` and evaluated
+    // exactly — no `1.016 - 1.008` float dust — so the range lands ON its end
+    // anchor (500 samples, last one exactly 5).
+    test('`[1+0.008, 1+0.016...5]` → exact 0.008 step', () => {
+      expect(parse('[1+0.008, 1+0.016...5]')).toEqual([
+        'Range',
+        ['Add', 1, 0.008],
+        5,
+        0.008,
+      ]);
+      const value = ce.parse('[1+0.008, 1+0.016...5]').evaluate();
+      expect(value.count).toBe(500);
+      const elements = [...value.each()].map((x) => x.re);
+      expect(elements[0]).toBe(1.008);
+      expect(elements[1]).toBe(1.016);
+      expect(elements[elements.length - 1]).toBe(5);
+    });
+
+    // Decreasing progression from a `Subtract`-shaped anchor pair.
+    test('`[1-0.1, 1-0.2...0]` → Range(0.9, 0, -0.1)', () => {
+      expect(parse('[1-0.1, 1-0.2...0]')).toEqual([
+        'Range',
+        ['Add', 1, -0.1],
+        0,
+        -0.1,
+      ]);
+      const value = ce.parse('[1-0.1, 1-0.2...0]').evaluate();
+      expect(value.count).toBe(10);
+      const elements = [...value.each()].map((x) => x.re);
+      expect(elements[0]).toBe(0.9);
+      expect(elements[1]).toBe(0.8);
+      expect(elements[elements.length - 1]).toBe(0);
+    });
+
+    // Pin: plain decimal-literal anchors difference their step EXACTLY (via
+    // the samples' decimal digits, not JS float subtraction), matching the
+    // compound-anchor path: `1.016 - 1.008` in doubles is
+    // 0.008000000000000007, which under-shot the range to 499 samples ending
+    // at ~4.992 instead of landing on the 5 anchor.
+    test('`[1.008, 1.016...5]` (plain literals) gets an exact step', () => {
+      expect(parse('[1.008, 1.016...5]')).toEqual(['Range', 1.008, 5, 0.008]);
+      const value = ce.parse('[1.008, 1.016...5]').evaluate();
+      expect(value.count).toBe(500);
+      const elements = [...value.each()].map((x) => x.re);
+      expect(elements[0]).toBe(1.008);
+      expect(elements[elements.length - 1]).toBe(5);
+    });
+
+    // Pin: a step that is genuinely a long-double artifact (no short decimal
+    // form) falls back to float differencing unchanged.
+    test('a 17-digit double sample keeps its float step', () => {
+      expect(parse('[0.1, 0.30000000000000004...1]')).toEqual([
+        'Range',
+        0.1,
+        1,
+        0.20000000000000004,
+      ]);
+    });
+
+    // Pin: exact rational literal anchors keep taking the exact numeric path.
+    test('`[\\frac{1}{2}, \\frac{1}{3}...0]` → Range(1/2, 0, -1/6)', () => {
+      expect(parse('[\\frac{1}{2}, \\frac{1}{3}...0]')).toEqual([
+        'Range',
+        ['Rational', 1, 2],
+        0,
+        ['Rational', -1, 6],
+      ]);
+      expect(ce.parse('[\\frac{1}{2}, \\frac{1}{3}...0]').evaluate().count).toBe(
+        4
+      );
+    });
+
+    // Pin: a symbolic multiplicative progression keeps taking the
+    // coefficient-times-symbol path (never reaches the two-sample fusion).
+    test('`[2a, 3a...9a]` → Range(2a, 9a, a)', () => {
+      expect(parse('[2a, 3a...9a]')).toEqual([
+        'Range',
+        ['Multiply', 2, 'a'],
+        ['Multiply', 9, 'a'],
+        'a',
+      ]);
+    });
+
+    // Negative (item 47): a first anchor with a free variable is NOT
+    // numerically known — differing bases stay a placeholder List.
+    test('`[m+n, m+k+15, ..., m+k+60]` stays a placeholder List', () => {
+      const result = parse('[m+n, m+k+15, ..., m+k+60]');
+      expect(operatorOf(result)).toBe('List');
+      expect(JSON.stringify(result)).toContain('ContinuationPlaceholder');
+    });
+
+    // Negative (item 47): non-numeric offset stays a placeholder List.
+    test('`[m+n, m+n+x, ..., m+n+60]` stays a placeholder List', () => {
+      const result = parse('[m+n, m+n+x, ..., m+n+60]');
+      expect(operatorOf(result)).toBe('List');
+      expect(JSON.stringify(result)).toContain('ContinuationPlaceholder');
+    });
+
+    // Negative: the application shape is excluded at EVERY level of the
+    // numeric reduction, so a compound anchor built from one stays a List.
+    test('`[f(1), f(2), ..., f(n)]` stays a placeholder List', () => {
+      expect(operatorOf(parse('[f(1), f(2), \\ldots, f(n)]'))).toBe('List');
+      expect(operatorOf(parse('[1+f(1), 1+f(2), \\ldots, 1+f(n)]'))).toBe(
+        'List'
+      );
+    });
+  });
+
   // An explicit `\operatorname{Range}(a,b)` element is a literal list entry,
   // NOT an ellipsis/`..` continuation: the range-inference normalization must
   // fire only for infix-produced (`..`/`...`/`\ldots`/`\dots`) ranges.

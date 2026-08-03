@@ -23,6 +23,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **ODE solving** | `audit/dsolve.ts` | CE · SymPy | `audit/REPORT-dsolve.md` |
 | **Bondarenko ∫** | `audit/bondarenko.ts` | CE · CE+R/F · SymPy · Mathematica | `audit/REPORT-bondarenko.md` |
 | **Kernel microbench** | `big-decimal/*` | CE · CE published · SymPy · mpmath | `big-decimal/BIGNUM-COMPARISON.md` |
+| **Engine configuration** | `effects-registration.ts` | CE (self, before/after) | stdout |
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 
 The first six are the **release baseline** (see below). Benchmark sources
@@ -350,6 +351,40 @@ capability:
   (e.g. the `div` normalize-skip). One command: `node
   big-decimal/run-ops.mjs` (writes `ops-results.json` + the Markdown tables that
   feed `BIGNUM-COMPARISON.md`'s "Primitive operations" section).
+
+---
+
+## Engine-configuration microbenchmark (`effects-registration.ts`)
+
+A **self-comparison** harness (no other CAS involved): it measures what a host
+pays to *configure* an engine the way a notebook or document manager does,
+rather than what one expression costs on a fresh engine. That distinction
+matters — the convert-time regressions hosts report have repeatedly had **no
+bare reduction**: they appear only once ~100 interdependent user functions are
+registered `declare(name, { signature })` + `assign(name, lambda)`, with call
+chains several levels deep, and rows that compose them.
+
+Four phases, warm median over N rounds:
+
+| Phase | What it measures |
+|---|---|
+| registration | `declare` + `assign` of `FNS` interdependent functions |
+| composition rows | re-parsing + `.type` + `.isPure` of rows applying them |
+| WithRandomSeed rows | seeded-random rows wrapping user-function applications |
+| re-registration | the document lifecycle: `popScope`/`pushScope` + register again |
+
+plus a **box microloop canary** (the ≈0.02 ms/iter plain-boxing baseline from
+the performance review), so a generic boxing regression can be told apart from
+one in a specific subsystem.
+
+```bash
+npx tsx benchmarks/effects-registration.ts          # defaults: 7 rounds, 120 fns, 40 rows
+ROUNDS=5 FNS=240 ROWS=60 npx tsx benchmarks/effects-registration.ts
+```
+
+Registration should scale **near-linearly** in `FNS`; a quadratic reading there
+(≈4× per doubling) means some per-node query is re-deriving a whole dependency
+chain — the shape of the 0.100.0 convert-time regression.
 
 ---
 

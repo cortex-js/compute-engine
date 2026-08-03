@@ -396,16 +396,20 @@ describe('COMPILE', () => {
         expect(r?.run?.()).toEqual(5);
       });
 
-      it('should throw rather than return a bogus number for Distance over a list<tuple> operand (widened signature)', () => {
+      // SUPERSEDED (Tycho items 130/138): a `list<tuple>` operand used to
+      // throw. It now BROADCASTS — two point lists zip pairwise, and a
+      // length mismatch is still a clean throw (no truncation).
+      it('should broadcast Distance over two list<tuple> operands', () => {
         const e = new ComputeEngine();
         e.declare('P', 'list<tuple<number, number>>');
         e.declare('Q', 'list<tuple<number, number>>');
         const expr = e.box(['Distance', 'P', 'Q']);
         const r = compile(expr);
         expect(r?.success).toBe(true);
-        expect(() => r?.run?.({ P: [[1, 2]], Q: [[0, 0]] })).toThrow(
-          /Distance: expected points/
-        );
+        expect(r?.run?.({ P: [[3, 4]], Q: [[0, 0]] })).toEqual([5]);
+        expect(() =>
+          r?.run?.({ P: [[1, 2]], Q: [[0, 0], [1, 1]] })
+        ).toThrow(/Distance: dimension mismatch/);
       });
     });
 

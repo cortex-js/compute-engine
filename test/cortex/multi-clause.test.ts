@@ -261,6 +261,18 @@ g(0)`);
     expect(text).toBe('999');
   });
 
+  test('clauses accumulate onto a DECLARED signature (declare-then-define)', () => {
+    // The prescribed shape for a recursive definition: each clause is an ARM
+    // of the declaration (`0 <: number`), never a function-subtype of it.
+    const { text, diagnostics } = run(`
+let fact: (number) -> number
+fact(0) = 1
+fact(n: integer) = n * fact(n - 1)
+fact(5)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('120');
+  });
+
   test('a plain assignment full-replaces the whole clause set (D6)', () => {
     const { text, diagnostics } = run(`
 f(0) = 1

@@ -35,6 +35,7 @@ import {
 import { functionLiteralDeclaredEffects } from './boxed-expression/function-literal.js';
 import { apply, lookup } from './function-utils.js';
 import { isMintedConstructor } from './type-constructors.js';
+import { reconcileFunctionLiteralReturn } from './engine-declarations.js';
 
 /**
  * Multi-clause function definitions — the engine half of
@@ -73,6 +74,13 @@ interface EffectRowState {
 interface MultiClauseState {
   clauses: FunctionClause[];
   effectRow: EffectRowState;
+  /** The symbol's author-DECLARED signature, when the clause set accumulates
+   * onto a name that was declared before it was defined (§4.3a). The
+   * declaration is authoritative: every clause is checked as an ARM of it and
+   * it stays the definition's signature instead of the clause intersection —
+   * so a recursive clause body types its self-call against the declaration
+   * (the whole point of declare-then-define). */
+  declared: FunctionSignature | undefined;
 }
 
 /** Marker on the INNER operator definition object (same pattern as
@@ -168,6 +176,107 @@ function sameParameterDomain(
 }
 
 //
+// ─── Declare-then-define (§4.3a) ──────────────────────────────────────────
+//
+
+/**
+ * The author-declared signature governing `id`, or `undefined` when the
+ * binding carries none.
+ *
+ * "Declared" means the AUTHOR wrote the signature for the SYMBOL and nothing
+ * has been defined under it yet — the string form
+ * `ce.declare(f, "(…) -> …")` (value slot, no value) or the object form
+ * `ce.declare(f, { signature: … })` (operator slot, no handler). A signature
+ * DERIVED from an installed definition is NOT a declaration: an annotated
+ * literal flips `inferredSignature` off (`assignValueAsOperatorDef`) and the
+ * §6.3 reconciliation stores a literal under a non-inferred value type, so
+ * without the "holds nothing yet" tests a clause-1 install would look declared
+ * and its own domain would refuse every later clause. Once a clause SET exists
+ * the declaration travels on its state instead.
+ *
+ * Only a PLAIN signature counts: an intersection is either our own clause
+ * encoding or an overload declaration, neither of which is an arm contract
+ * in v1.
+ */
+function declaredSignatureOf(
+  def: BoxedDefinition | undefined
+): FunctionSignature | undefined {
+  if (def === undefined) return undefined;
+  const state = multiClauseState(def);
+  if (state !== undefined) return state.declared;
+  let t: Type | undefined;
+  if (isValueDef(def)) {
+    if (def.value.inferredType || def.value.value !== undefined)
+      return undefined;
+    t = def.value.type.type;
+  } else if (isOperatorDef(def)) {
+    if (def.operator.inferredSignature || def.operator.evaluate !== undefined)
+      return undefined;
+    t = def.operator.signature.type;
+  }
+  if (typeof t !== 'object' || t.kind !== 'signature') return undefined;
+  return t;
+}
+
+/** The declared type of positional parameter `i` (required, then optional,
+ * then variadic); `undefined` when the signature takes no such parameter. */
+function declaredParamAt(sig: FunctionSignature, i: number): Type | undefined {
+  const nArgs = sig.args?.length ?? 0;
+  if (i < nArgs) return sig.args![i].type;
+  const nOpt = sig.optArgs?.length ?? 0;
+  if (i < nArgs + nOpt) return sig.optArgs![i - nArgs].type;
+  return sig.variadicArg?.type;
+}
+
+/**
+ * Check one clause against the symbol's declared signature — ARM-shaped, not
+ * function-subtype.
+ *
+ * A clause is a NARROWED arm of the declaration (`(0, complex) -> complex`
+ * under `(number, complex) -> complex`): it accepts a SUBSET of the declared
+ * domain, which is precisely what makes it a clause. Function subtyping is
+ * contravariant in the parameters, so checking a clause that way can never
+ * pass — the clause SET, not any single clause, implements the declaration.
+ * So: each parameter type must be a subtype of the declared type at that
+ * position, and the result a subtype of the declared result.
+ */
+function assertClauseFitsDeclared(
+  id: string,
+  clause: FunctionSignature,
+  declared: FunctionSignature
+): void {
+  const reject = (why: string): never => {
+    throw new ClauseDefinitionError(
+      'invalid-clause-definition',
+      `The clause "${typeToString(clause)}" is not an arm of the declared type "${typeToString(declared)}" of "${id}": ${why}`
+    );
+  };
+
+  const params = clause.args ?? [];
+  if (
+    (clause.optArgs?.length ?? 0) > 0 ||
+    clause.variadicArg !== undefined ||
+    params.length < (declared.args?.length ?? 0)
+  )
+    reject('the clause does not cover the declared parameters');
+
+  for (let i = 0; i < params.length; i++) {
+    const d = declaredParamAt(declared, i);
+    if (d === undefined)
+      reject(`the declaration takes no parameter at position ${i + 1}`);
+    else if (!isSubtype(params[i].type, d))
+      reject(
+        `parameter ${i + 1} of type "${typeToString(params[i].type)}" is outside the declared "${typeToString(d)}"`
+      );
+  }
+
+  if (!isSubtype(clause.result, declared.result))
+    reject(
+      `the result type "${typeToString(clause.result)}" is not a subtype of the declared "${typeToString(declared.result)}"`
+    );
+}
+
+//
 // ─── Accumulation (§4.3) ──────────────────────────────────────────────────
 //
 
@@ -234,10 +343,22 @@ export function defineFunctionClause(
       );
   }
 
+  // §4.3a — declare-then-define (the prescribed shape for a recursive
+  // definition). When `id` carries an author-declared signature, it is
+  // authoritative: ascribe its result onto an unannotated clause body (the
+  // same reconciliation `ce.assign` performs for a plain definition), then
+  // check the clause as an ARM of it.
+  const declared = declaredSignatureOf(existing);
+  if (declared !== undefined)
+    literal = reconcileFunctionLiteralReturn(ce, literal, declared);
+
   const incoming: FunctionClause = {
     signature: clauseSignatureOf(literal),
     literal,
   };
+  if (declared !== undefined)
+    assertClauseFitsDeclared(id, incoming.signature, declared);
+
   const incomingExplicit = functionLiteralDeclaredEffects(literal);
 
   // Existing clause state, or the conversion of a pre-existing single
@@ -285,7 +406,19 @@ export function defineFunctionClause(
   // so every consumer of that representation (differentiation, closure
   // capture, compile) is untouched; conversion to clause storage happens
   // when the second clause arrives.
-  if (clauses.length === 1 && multiClauseState(existing) === undefined) {
+  //
+  // A clause that NARROWS a declared signature is the exception: installing
+  // it as the plain definition would make the symbol total over the declared
+  // domain (`J(5, z)` would apply the `J(0, z)` body), so it goes to clause
+  // storage right away and a call outside its domain is the D7
+  // `no-matching-clause` error. A clause covering the declared domain
+  // exactly is the ordinary declare-then-assign shape and keeps it.
+  if (
+    clauses.length === 1 &&
+    multiClauseState(existing) === undefined &&
+    (declared === undefined ||
+      sameParameterDomain(incoming.signature, declared))
+  ) {
     ce.assign(id, literal);
     return;
   }
@@ -315,7 +448,7 @@ export function defineFunctionClause(
             : `The stated effects are narrower than the effects of an existing clause of "${id}"`
         );
 
-  installClauseList(ce, id, existing, clauses, effectRow);
+  installClauseList(ce, id, existing, clauses, effectRow, declared);
 }
 
 /** Convert a pre-existing single user-function definition — an operator
@@ -326,7 +459,11 @@ function convertToClauseState(
   def: BoxedDefinition | undefined
 ): MultiClauseState | undefined {
   if (def === undefined)
-    return { clauses: [], effectRow: { explicit: undefined } };
+    return {
+      clauses: [],
+      effectRow: { explicit: undefined },
+      declared: undefined,
+    };
 
   let literal: Expression | undefined;
   if (isOperatorDef(def))
@@ -342,6 +479,7 @@ function convertToClauseState(
   return {
     clauses: [{ signature: clauseSignatureOf(canonical), literal: canonical }],
     effectRow: { explicit: functionLiteralDeclaredEffects(canonical) },
+    declared: declaredSignatureOf(def),
   };
 }
 
@@ -382,6 +520,11 @@ export function loosenForClauseDefinition(
     (binding.operator as { _lambdaLiteral?: Expression })._lambdaLiteral !==
       undefined;
   if (!isTarget) return undefined;
+  // A clause set accumulating onto a DECLARED signature keeps it: that
+  // declaration is exactly what a recursive clause's self-call is meant to
+  // validate (and type) against — loosening it to `'function'` would put the
+  // self-call back at `unknown` (§4.3a).
+  if (declaredSignatureOf(binding) !== undefined) return undefined;
   const saved = binding.operator;
   updateDef(ce, id, binding, { signature: 'function' });
   return () => {
@@ -394,13 +537,16 @@ export function loosenForClauseDefinition(
 //
 
 /** Build and install the operator definition for a clause list: intersection
- * signature (row stamped on every arm, D5), selecting `evaluate`, marker. */
+ * signature (row stamped on every arm, D5) — or the author's DECLARED
+ * signature when there is one (§4.3a) — plus the selecting `evaluate` and the
+ * marker. */
 function installClauseList(
   ce: IComputeEngine,
   id: string,
   existing: BoxedDefinition | undefined,
   clauses: FunctionClause[],
-  effectRow: EffectRowState
+  effectRow: EffectRowState,
+  declared: FunctionSignature | undefined
 ): void {
   const row =
     effectRow.explicit ??
@@ -415,13 +561,12 @@ function installClauseList(
       : { ...c.signature, effects: row }
   );
   const signature: Type =
-    arms.length === 1 ? arms[0] : { kind: 'intersection', types: arms };
+    declared ??
+    (arms.length === 1 ? arms[0] : { kind: 'intersection', types: arms });
 
   const frozen = [...clauses];
   const def: OperatorDefinition = {
-    // ≥2 clauses by construction: a single clause installs via `ce.assign`
-    // (§4.2) and never reaches this list.
-    description: `Multi-clause function (${clauses.length} clauses)`,
+    description: `Multi-clause function (${clauses.length} clause${clauses.length === 1 ? '' : 's'})`,
     ...(row !== undefined && !isPureEffectSet(row)
       ? { effects: row }
       : { pure: true }),
@@ -438,6 +583,7 @@ function installClauseList(
     (installed.operator as unknown as MultiClauseMarker)[MULTI_CLAUSE] = {
       clauses,
       effectRow,
+      declared,
     };
   ce._mutationGeneration += 1;
   ce._semanticEpoch += 1;

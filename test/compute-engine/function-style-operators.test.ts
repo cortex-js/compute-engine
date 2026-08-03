@@ -329,16 +329,19 @@ describe('Distance accepts a union-declared point (item 130)', () => {
     ).toBe('sqrt(2)');
   });
 
-  test('an actual list of points is a clean runtime error, not a crash', () => {
+  // SUPERSEDED (Tycho item 130 follow-through, item 138): a list of points
+  // used to be a clean runtime error. It now BROADCASTS — one distance per
+  // point — which is the field shape `min(distance(S, p))` needs.
+  test('an actual list of points broadcasts, one distance per point', () => {
     const e = makeEngine();
     e.declare('ptl', `list<${T3}>` as any);
     e.assign(
       'ptl',
       e.box(['List', ['Tuple', 3, 4, 12], ['Tuple', 1, 2, 2]])
     );
-    expect(
-      e.box(['Distance', 'ptl', ['Tuple', 0, 0, 0]]).evaluate().operator
-    ).toBe('Error');
+    const d = e.box(['Distance', 'ptl', ['Tuple', 0, 0, 0]]).evaluate();
+    expect(d.operator).toBe('List');
+    expect(d.json).toEqual(['List', 13, 3]);
   });
 
   test('non-point operands are still rejected at the call boundary', () => {

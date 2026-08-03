@@ -1,6 +1,40 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- `PointZ` applied to a 2-D point is now a typed `incompatible-dimensions`
+  error instead of the `NaN` absence marker — at type-check time when the
+  operand's type statically proves 2-D (`tuple<number, number>`, or a list
+  or set of such points, in either the tuple or coordinate-row spelling),
+  and at evaluation time otherwise. The broadcast over a list of 2-D points
+  errors identically, and the JavaScript compile of a statically 2-D
+  operand declines. A statically-absent component is a type-level fact:
+  the silent `NaN` masked upstream pipeline defects. `PointX`/`PointY`,
+  all 3-D behavior, and the compiled runtime `NaN` marker for
+  dynamically-shaped bases are unchanged.
+
 ### New Features
+
+- Multi-clause function definitions can now be declared before they are
+  defined. `declare("J", "(number, complex) -> complex")` followed by
+  clauses such as `J(0, z) = z` previously failed with `incompatible-type`
+  (a literal-parameter clause is a narrowed arm of the declared signature,
+  not a function subtype) — and failed silently, leaving the symbol
+  undefined. Clauses are now checked arm-shaped against the declaration
+  (parameters and result must be subtypes of the declared ones), a
+  genuinely incompatible clause errors loudly without corrupting the
+  definition, and the declared signature is preserved on the installed
+  function — making declare-then-define usable for recursive clause sets
+  (`let fact: (number) -> number; fact(0) = 1; fact(n: integer) = n *
+  fact(n-1)`).
+
+- Complex-valued multi-clause function definitions now compile. A
+  recursive clause set such as `J(0, z: complex) = z; J(n: integer, z:
+  complex) = J(n-1, z)^2 + z_0` evaluated correctly but declined the
+  JavaScript compile target while its real-valued twin compiled; the
+  clause dispatcher now carries the complex `{re, im}` convention through
+  parameter guards, call-site coercion, and mixed real/complex clause
+  bodies.
 
 - The LaTeX serialization style options (`rootStyle`, `fractionStyle`,
   `indexStyle`, `powerStyle`, `logicStyle`, `numericSetStyle`,
@@ -17,7 +51,68 @@
   accepted for that option now throws when the option is set, instead of
   producing an empty serialization.
 
+- `Distance` broadcasts over point lists. `Distance(S, p)` (either argument
+  order) where `S` is a list of points — spelled as tuples
+  `[(0,0),(3,4)]` or as coordinate rows `[[0,0],[3,4]]` — returns the list
+  of per-point distances, on both the interpreted and compiled routes, so
+  `min(Distance(S, p))` computes the nearest-point distance directly.
+  `Distance(S, T)` over two point lists is pairwise with strict length
+  matching. Scalar and string arguments are still rejected.
+
+- Point operators are aligned over point lists: `PointX/Y/Z` project a
+  coordinate-row list (`PointX([[10,11],[20,21]])` is now `[10, 20]`, not
+  the first row), and `Norm` over a list of point tuples returns per-point
+  norms `[0, 5, 10]` on both routes, matching `Abs`. `Norm` over a plain
+  matrix (list of lists) keeps its Frobenius meaning. Compiled `Norm` and
+  `Abs` previously disagreed with the interpreter on these shapes (a
+  flattened norm and componentwise values behind `success: true`).
+
+### Performance
+
+- Registering many interdependent user functions (`declare` + `assign`
+  chains, the shape a document importer produces) was quadratic in the
+  number of functions: the `type` accessor's cache key evaluated the
+  effect projection (`isPure`, made binding-aware in 0.100.0) before the
+  cheap constant-operand short-circuit, forcing every stored function
+  literal's full signature to re-derive down the call chain on each
+  registration. Reordering the check and adding a per-generation fast path
+  makes registration near-linear — 9–14× faster at 120 functions, 13.7× at
+  240 — with byte-identical `isPure`/`effects`/`type` answers. New
+  benchmark: `benchmarks/effects-registration.ts`.
+
 ### Bug Fixes
+
+- Two-sample bracket ranges with decimal anchors now compute their step
+  exactly. `[1.008, 1.016...5]` previously differenced its anchors in
+  binary floating point, baking the step `0.008000000000000007` into the
+  range — 499 elements ending at ~4.992 instead of 500 landing on the 5
+  anchor. The step is now derived from the anchors' decimal digits in exact
+  integer arithmetic (`0.008`), matching the compound-anchor spelling
+  `[1+0.008, 1+0.016...5]`. Anchors with no short decimal form keep their
+  float step.
+
+- Symbolic differentiation declines honestly instead of blowing up. The
+  derivative of a deeply self-nested expression (e.g. a 12-deep
+  `√(x+√(x+…))` chain, whose second derivative is a 6.5-million-character
+  expression taking 45+ seconds) doubles its tree per level; differentiation
+  now tracks the size of what it builds and, past an internal budget
+  (25,000 nodes, ~30× the largest derivative in the test corpus), aborts
+  and leaves the `D`/`Derivative` inert — the established decline
+  convention — in bounded time rather than hanging.
+
+- A divergent definite integral is no longer reported as a confident
+  measurement. `\int_0^1 \frac{1}{x}\,dx` numericized to
+  `709.08956571281 ± 0.00000000074` — the value at which the adaptive
+  quadrature's refinement toward the singularity ran out of floating-point
+  range, dressed up as a measured quantity. Numeric integration now checks the
+  series of dyadic shells it sheds while refining toward each endpoint: a
+  convergent improper integral's shells shrink geometrically, a divergent one's
+  do not. Divergent integrals return `NaN` on all three numeric routes
+  (`.N()`, iterated `.N()`, and compiled code), and detection also stops the
+  refinement early, so `\int_0^\infty x\,dx` resolves in ~1 ms instead of
+  ~560 ms. Legitimate improper integrals — `\int_0^1 \frac{1}{\sqrt{x}}\,dx`,
+  `\int_0^1 \ln x\,dx` — are unaffected, as are proper integrals, whose
+  results are bit-for-bit unchanged.
 
 - The order in which functions are defined no longer changes their meaning. A
   definition body that referenced a function *before* it was defined — for

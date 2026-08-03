@@ -18,6 +18,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { isPointListValue } from '../collection-utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { resolveTypeForCompilation } from '../../common/type/utils.js';
 import { requirePrimitiveElements } from './javascript-target.js';
@@ -1191,6 +1192,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // fails closed (D6). (The `Infinity` SYMBOL already folds to `np.inf`.)
   Norm: (args, compile) => {
     if (args[0] == null) throw new Error('Norm: missing argument');
+    // A LIST of points is one norm PER POINT in the interpreter (a point binds
+    // atomically — Tycho item 138), which `np.linalg.norm` does not spell
+    // without an explicit `axis`. Fail closed rather than emit the flattened
+    // scalar behind `success: true`.
+    if (isPointListValue(args[0]))
+      throw new Error(
+        'Norm: a list of points has no numpy spelling — `np.linalg.norm` ' +
+          'flattens it into one scalar, but the interpreter answers one norm ' +
+          'per point. Fail closed (D6).'
+      );
     if (args.length < 2) return `np.linalg.norm(${compile(args[0])})`;
     const p = args[1];
     const rank = pyStaticRank(args[0]);

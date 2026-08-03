@@ -111,9 +111,11 @@ import {
 } from '../boxed-expression/arithmetic-power.js';
 import {
   broadcastResultType,
+  collectionElementType,
   isNonRealNumber,
   widen,
 } from '../../common/type/utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import {
   numericTypeHandler,
   elementaryFunctionType,
@@ -3186,46 +3188,54 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Distance: {
-      description: 'Euclidean distance between two points (tuples of numbers).',
+      description:
+        'Euclidean distance between two points, broadcasting over a list of points.',
       complexity: 6000,
-      // The parameter admits `list<tuple>` as well as `tuple` so that a symbol
-      // declared at the point-or-point-list union (how imported Desmos point
-      // values are typed) passes the call-boundary check, as it already does
-      // for `Norm`/`PointX` (Tycho item 130). Only a pair of tuples has a
-      // distance: an actual list of points is rejected by the evaluate handler
-      // at runtime.
-      signature: '(tuple | list<tuple>, tuple | list<tuple>) -> number',
+      // The parameter admits a POINT (a `tuple`, or the flat `list<number>`
+      // spelling a data import produces) and a LIST of points (`list<tuple>`,
+      // or the `list<list<number>>` spelling — which types as `list<number>`
+      // when the rows are equal-length, i.e. a matrix). Deliberately NOT
+      // `value`/`any`: a scalar or a string must still be rejected at the call
+      // boundary (Tycho items 130/138).
+      signature:
+        '(tuple | list<tuple> | list<number> | list<list<number>>, tuple | list<tuple> | list<number> | list<list<number>>) -> number',
+      // A point-list operand broadcasts: one distance per point.
+      type: ([a, b]) =>
+        (a && isPointListType(a)) || (b && isPointListType(b))
+          ? { kind: 'list', elements: 'number' }
+          : 'number',
       evaluate: ([a, b], { engine: ce, numericApproximation }) => {
-        if (!isFunction(a) || !isFunction(b))
-          return ce.error('incompatible-type');
-        if (a.operator !== 'Tuple' || b.operator !== 'Tuple')
-          return ce.error('incompatible-type');
-        if (a.ops!.length !== b.ops!.length || a.ops!.length === 0)
-          return ce.error('incompatible-type');
-        // Build √(Σ (aᵢ − bᵢ)²) as an expression and evaluate it once, so the
-        // exact path is honored (`Distance((0,0),(1,1)) → √2`, not the machine
-        // float) — mirroring `Hypot`. `.N()` still numericizes.
-        const terms: Expression[] = [];
-        for (let i = 0; i < a.ops!.length; i++) {
-          const ai = a.ops![i];
-          const bi = b.ops![i];
-          if (
-            !isNumber(ai) ||
-            !isNumber(bi) ||
-            ai.isFinite === false ||
-            bi.isFinite === false
-          )
-            return ce.error('expected-value');
-          terms.push(
-            ce.function('Power', [
-              ce.function('Subtract', [ai, bi]),
-              ce.number(2),
-            ])
+        const pa = pointOperand(a);
+        const pb = pointOperand(b);
+        // Point-to-point: the scalar distance.
+        if (pa && pb) return pointDistance(pa, pb, ce, numericApproximation);
+
+        const la = pa ? undefined : pointListOperand(a);
+        const lb = pb ? undefined : pointListOperand(b);
+        // Neither a point nor a list of points (a list of scalars, a symbolic
+        // operand, an oversized collection): reject as before.
+        if (!(pa || la) || !(pb || lb)) return ce.error('incompatible-type');
+
+        // Broadcast: a point against a list of points, or two lists of points
+        // pairwise. Two lists must have the SAME length — the lifted-operator
+        // convention (docs/BROADCAST-MODEL.md), no truncation to the shortest.
+        if (la && lb && la.length !== lb.length)
+          return ce.error('incompatible-dimensions');
+        const n = (la ?? lb!).length;
+        const results: Expression[] = [];
+        for (let i = 0; i < n; i++) {
+          const d = pointDistance(
+            la ? la[i] : pa!,
+            lb ? lb[i] : pb!,
+            ce,
+            numericApproximation
           );
+          // A malformed point (a dimension mismatch, a non-finite coordinate)
+          // is the whole call's error, not one element of the result list.
+          if (isFunction(d, 'Error')) return d;
+          results.push(d);
         }
-        return ce
-          .function('Sqrt', [ce.function('Add', terms)])
-          .evaluate({ numericApproximation });
+        return ce.function('List', results);
       },
     },
 
@@ -3615,6 +3625,102 @@ function* reduceCollection(
     yield acc;
   }
   return acc;
+}
+
+/** The most points `Distance` broadcasts over. Beyond it the operator stays
+ *  symbolic rather than materialize an unbounded list of radicals. */
+const MAX_DISTANCE_BROADCAST = 10000;
+
+/**
+ * The coordinates of `x` read as a single POINT, or `undefined` when `x` is
+ * not one. Both spellings are points: a `Tuple` — `(3, 4)` — and the flat
+ * numeric `List` a data import produces — `[3, 4]`. A list whose elements are
+ * themselves lists is a list of points, not a point: see `pointListOperand`.
+ */
+function pointOperand(x: Expression): readonly Expression[] | undefined {
+  if (isFunction(x, 'Tuple')) return x.ops!.length > 0 ? x.ops! : undefined;
+  // Any finite indexed collection of numbers — a `List` literal, a `Range`,
+  // a lazy `Map` — is the flat spelling. The count bound keeps a large domain
+  // from materializing here (an oversized operand stays symbolic).
+  if (x.isFiniteCollection !== true || x.isIndexedCollection !== true)
+    return undefined;
+  const count = x.count;
+  if (count === undefined || count === 0 || count > MAX_DISTANCE_BROADCAST)
+    return undefined;
+  const coords: Expression[] = [];
+  for (const el of x.each()) {
+    if (!isNumber(el)) return undefined;
+    coords.push(el);
+  }
+  return coords;
+}
+
+/**
+ * The points of `xs` read as a LIST of points, or `undefined` when `xs` is not
+ * one. Both spellings broadcast: a list of tuples `[(0,0),(3,4)]` and the list
+ * of lists `[[0,0],[3,4]]` a data import produces (Tycho item 138).
+ */
+function pointListOperand(
+  xs: Expression
+): readonly (readonly Expression[])[] | undefined {
+  if (xs.isFiniteCollection !== true || xs.isIndexedCollection !== true)
+    return undefined;
+  const count = xs.count;
+  if (count === undefined || count > MAX_DISTANCE_BROADCAST) return undefined;
+  const points: (readonly Expression[])[] = [];
+  for (const el of xs.each()) {
+    const p = pointOperand(el);
+    if (p === undefined) return undefined;
+    points.push(p);
+  }
+  return points;
+}
+
+/** True when the STATIC type of `x` says it holds a list of points — used by
+ *  the `Distance` type handler to report the broadcast result type. */
+function isPointListType(x: Expression): boolean {
+  const t = x.type.type;
+  if (typeof t === 'string') return false;
+  // A rank ≥ 2 numeric tensor (`matrix<number^(3x2)>`) is a list of rows: its
+  // `elements` is the SCALAR type, so the dimensions carry the shape.
+  if (t.kind === 'list' && (t.dimensions?.length ?? 0) >= 2) return true;
+  const elt = collectionElementType(t);
+  if (elt === undefined || elt === 'unknown' || elt === 'any') return false;
+  // A tuple, a nested list, or a union of those: an element that is itself an
+  // indexed collection is a point.
+  return isSubtype(elt, 'indexed_collection');
+}
+
+/** The Euclidean distance between two points, as an EXPRESSION:
+ *  √(Σ (aᵢ − bᵢ)²) built and evaluated once, so the exact path is honored
+ *  (`Distance((0,0),(1,1)) → √2`, not the machine float) — mirroring `Hypot`.
+ *  `.N()` still numericizes. */
+function pointDistance(
+  a: readonly Expression[],
+  b: readonly Expression[],
+  ce: ComputeEngine,
+  numericApproximation?: boolean
+): Expression {
+  if (a.length !== b.length || a.length === 0)
+    return ce.error('incompatible-dimensions');
+  const terms: Expression[] = [];
+  for (let i = 0; i < a.length; i++) {
+    const ai = a[i];
+    const bi = b[i];
+    if (
+      !isNumber(ai) ||
+      !isNumber(bi) ||
+      ai.isFinite === false ||
+      bi.isFinite === false
+    )
+      return ce.error('expected-value');
+    terms.push(
+      ce.function('Power', [ce.function('Subtract', [ai, bi]), ce.number(2)])
+    );
+  }
+  return ce
+    .function('Sqrt', [ce.function('Add', terms)])
+    .evaluate({ numericApproximation });
 }
 
 function evaluateAbs(

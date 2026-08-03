@@ -776,3 +776,175 @@ describe('quadratureBeatsMonteCarlo (Tycho item 128)', () => {
     expect(error).toBeGreaterThan(Math.abs(value - exact));
   });
 });
+
+// Regression (Tycho item 136, fallout from 128): with the Monte-Carlo fallback
+// correctly reserved for results sampling could improve, the sampler stopped
+// being the only thing that noticed a DIVERGENT integral — so `∫₀¹ dx/x` was
+// reported as `709.09 ± 7.4e-10`, a confident `Measurement` for an integral
+// that has no value. (709 is `ln` of the float overflow bound: GK kept
+// bisecting toward 0, each halving adding another `ln 2`.)
+//
+// The signal CANNOT be a threshold on the reported error: the legitimate
+// improper `∫₀¹ dx/√x` reports a LOOSER relative error (~7.7e-11) than the
+// divergent `∫₀¹ dx/x` did (~1e-12), so any σ- or relative-error cutoff
+// rejects the good integral first. It is instead structural — the dyadic
+// shells shed by refinement toward the endpoint must shrink (see
+// `shellsDiverge`).
+describe('divergent integrals are not laundered (Tycho item 136)', () => {
+  describe('adaptiveQuadrature reports `divergent`', () => {
+    test.each([
+      ['∫₀¹ dx/x (log-divergent, lower endpoint)', (x: number) => 1 / x, 0, 1],
+      ['∫₀¹ dx/x² (power-divergent)', (x: number) => 1 / (x * x), 0, 1],
+      [
+        '∫₀¹ dx/(1−x) (mirrored, upper endpoint)',
+        (x: number) => 1 / (1 - x),
+        0,
+        1,
+      ],
+      ['∫₋₁⁰ dx/x (negative, lower half)', (x: number) => 1 / x, -1, 0],
+      ['∫₀¹ −dx/x (negatively divergent)', (x: number) => -1 / x, 0, 1],
+      ['∫₀^∞ x dx (via the semi-infinite transform)', (x: number) => x, 0, Infinity],
+      ['∫₁^∞ dx/x', (x: number) => 1 / x, 1, Infinity],
+      ['∫₀^{π/2} tan x dx', Math.tan, 0, Math.PI / 2],
+      ['∫₀¹ x^(−1.01) dx (just past the pole)', (x: number) => x ** -1.01, 0, 1],
+    ])('%s', (_label, f, a, b) => {
+      const r = adaptiveQuadrature(f, a, b);
+      expect(r.divergent).toBe(true);
+      expect(r.converged).toBe(false);
+    });
+
+    test.each([
+      ['∫₀¹ dx/√x = 2', (x: number) => 1 / Math.sqrt(x), 0, 1, 2],
+      ['∫₀¹ ln x dx = −1', Math.log, 0, 1, -1],
+      ['∫₀¹ (ln x)² dx = 2', (x: number) => Math.log(x) ** 2, 0, 1, 2],
+      ['∫₀¹ √x·ln x dx = −4/9', (x: number) => Math.sqrt(x) * Math.log(x), 0, 1, -4 / 9],
+      ['∫₋₁¹ dx/√(1−x²) = π', (x: number) => 1 / Math.sqrt(1 - x * x), -1, 1, Math.PI],
+      // Convergent but only just: `x^(−p)` sheds blocks in the ratio
+      // `2^((1−p)·20)`, so these sit at 0.87 and 0.986 against a 0.99 cutoff.
+      ['∫₀¹ x^(−0.9) dx = 10', (x: number) => x ** -0.9, 0, 1, 10],
+      // (No value pinned: the true 100 is out of numerical reach — the tail
+      // below `h` still contributes `100·h^0.01`, so even `h = 1e-300` leaves
+      // 0.1% missing. The point here is only that it is not called divergent.)
+      ['∫₀¹ x^(−0.99) dx', (x: number) => x ** -0.99, 0, 1, undefined],
+      // Conditionally convergent: the shells do NOT shrink, they CANCEL. The
+      // signed block sums (plus the coherence gate) keep this off the
+      // divergent list.
+      ['∫₀¹ sin(1/x)/x dx', (x: number) => Math.sin(1 / x) / x, 0, 1, undefined],
+      // Proper integrals, for the same reason they always worked.
+      ['∫₀¹ x² dx = 1/3', (x: number) => x * x, 0, 1, 1 / 3],
+      ['∫₀^∞ e^(−x) dx = 1', (x: number) => Math.exp(-x), 0, Infinity, 1],
+      ['∫₋∞^∞ dx/(1+x²) = π', (x: number) => 1 / (1 + x * x), -Infinity, Infinity, Math.PI],
+    ])('%s is NOT divergent', (_label, f, a, b, exact) => {
+      const r = adaptiveQuadrature(f, a, b);
+      expect(r.divergent).toBe(false);
+      if (exact !== undefined) {
+        expect(r.estimate).toBeCloseTo(exact, 6);
+        expect(Number.isFinite(r.error)).toBe(true);
+      }
+    });
+
+    test('a converged result is never reported divergent', () => {
+      // `divergent` is only ever consulted on a stalled result, but the two
+      // flags must not be able to disagree.
+      const r = adaptiveQuadrature((x) => Math.exp(-x * x), -5, 5);
+      expect(r.converged).toBe(true);
+      expect(r.divergent).toBe(false);
+    });
+
+    test('detection stops the panel budget early', () => {
+      // Before: the loop bisected toward 0 until the corner panel reached the
+      // denormal range (~1075 halvings, ~20 ms). Now it stops ~40 shells in.
+      let evals = 0;
+      const t0 = Date.now();
+      const r = adaptiveQuadrature((x) => {
+        evals++;
+        return 1 / x;
+      }, 0, 1);
+      expect(r.divergent).toBe(true);
+      // Measured ~1700 evaluations / <1 ms; loose bounds, the point is the
+      // order of magnitude (the pre-fix run used ~16 000).
+      expect(evals).toBeLessThan(6000);
+      expect(Date.now() - t0).toBeLessThan(200);
+    });
+  });
+
+  describe('.N() route (single limit)', () => {
+    test.each([
+      ['\\int_0^1 \\frac{1}{x}\\,dx'],
+      ['\\int_0^1 \\frac{1}{x^2}\\,dx'],
+      ['\\int_0^1 \\frac{1}{1-x}\\,dx'],
+    ])('%s is not a Measurement', (latex) => {
+      const local = new ComputeEngine();
+      const r = local.parse(latex).N();
+      expect(r.operator).not.toBe('Measurement');
+      expect(Number.isFinite(r.re)).toBe(false);
+    });
+
+    test.each([
+      ['\\int_0^1 \\frac{1}{\\sqrt{x}}\\,dx', 2],
+      ['\\int_0^1 \\ln(x)\\,dx', -1],
+      ['\\int_0^1 x^2\\,dx', 1 / 3],
+    ])('%s still evaluates with a finite uncertainty', (latex, exact) => {
+      const local = new ComputeEngine();
+      const r = local.parse(latex).N();
+      const [value, error] =
+        r.operator === 'Measurement' ? [r.op1.re, r.op2.re] : [r.re, 0];
+      expect(value).toBeCloseTo(exact, 8);
+      expect(Number.isFinite(error)).toBe(true);
+    });
+  });
+
+  describe('.N() route (iterated)', () => {
+    test('a divergent inner level is not laundered into a Measurement', () => {
+      const local = new ComputeEngine();
+      const r = local
+        .box([
+          'Integrate',
+          ['Divide', 1, 'x'],
+          ['Limits', 'y', 0, 1],
+          ['Limits', 'x', 0, 1],
+        ])
+        .N();
+      expect(r.operator).not.toBe('Measurement');
+      expect(Number.isFinite(r.re)).toBe(false);
+    });
+
+    test('a convergent iterated integral is unaffected', () => {
+      // ∫₀¹∫₀¹ dx dy /√x = 2.
+      const local = new ComputeEngine();
+      const r = local
+        .box([
+          'Integrate',
+          ['Divide', 1, ['Sqrt', 'x']],
+          ['Limits', 'y', 0, 1],
+          ['Limits', 'x', 0, 1],
+        ])
+        .N();
+      expect(r.operator).toBe('Measurement');
+      expect(r.op1.re).toBeCloseTo(2, 8);
+    });
+  });
+
+  describe('compiled route (`_SYS.integrate`)', () => {
+    // An integrand with NO elementary antiderivative, so the compiler emits a
+    // quadrature call instead of folding to a closed form (a closed-form
+    // `∫dx/x` compiles to `ln y − ln 0` and reports `Infinity` without ever
+    // reaching `_SYS.integrate`).
+    test('a divergent integrand returns NaN, not a plausible number', () => {
+      const r = compileReal('\\int_0^y \\frac{e^{-x^2}}{x}\\,dx');
+      expect(r.code).toContain('_SYS.integrate');
+      expect(Number.isNaN(r.run({ y: 1 }) as number)).toBe(true);
+      // Power-divergent, same route.
+      const r2 = compileReal('\\int_0^y \\frac{e^{-x^2}}{x^2}\\,dx');
+      expect(Number.isNaN(r2.run({ y: 1 }) as number)).toBe(true);
+    });
+
+    test('a convergent endpoint singularity still integrates', () => {
+      // ∫₀¹ e^(−x²)/√x dx = 2∫₀¹ e^(−t⁴) dt = 1.6896771895142… (independent
+      // composite-Simpson check on the desingularized x = t² substitution).
+      const r = compileReal('\\int_0^y \\frac{e^{-x^2}}{\\sqrt{x}}\\,dx');
+      expect(r.code).toContain('_SYS.integrate');
+      expect(r.run({ y: 1 }) as number).toBeCloseTo(1.6896771895142, 9);
+    });
+  });
+});
