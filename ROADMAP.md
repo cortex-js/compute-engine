@@ -481,15 +481,33 @@ measured residual snap rate ~5e-5 on 2e6 random doubles). Docstring and
 test prose rewritten to state the RATE guarantee honestly (q cap
 ≈ 3e5·|v|^{-1/2}; ≤ ~1e-4 of arbitrary doubles can still snap by design).
 
-Residual the adversarial round PROVED unfixable at this layer (do not
-re-attempt with tolerance tuning): the compiled fold and type handler
-decide from the EXACT rational while `.N()` decides from the double, so an
-exact rational with q above the cap gets compiled-real vs `.N()`-complex
-(`(-2)^{1000003/1000001}`; a regression vs HEAD on the bignum lane for
-q ∈ (cap, ~1e7]). The only sound endpoint is the exact-provenance design
-change — the exponent's exact terms surviving numericization into `pow()`
-(the evaluate-handler options carry no original expression,
-`types-definitions.ts:98`) — deferred for a design pass with user rulings.
+~~Residual the adversarial round PROVED unfixable at this layer~~ —
+**RESOLVED by the exact-provenance design, USER-APPROVED and LANDED
+2026-08-03.** Evaluate handlers now receive `expression` in their options
+(the canonical node; `EvaluateHandlerOptions` in `types-definitions.ts`,
+threaded at both driver call sites in `boxed-function.ts`); `Power`
+forwards `expression.op2` as `rawExponent` into `pow()`, which prefers the
+exact rational — resolved through a symbol's binding when op2 is a symbol
+with a bound number literal — over the float reconstruction. All three
+legs now agree for exact rationals of ANY term size
+(`(-2)^{1000003/1000001}` real everywhere). A second adversarial round on
+the implementation then caught and fixed: parity decided on the narrowed
+`Number()` terms corrupted denominators > 2^53 (odd rounded to even —
+parity is now decided on the BIGINTS); the integer-ness test read the
+rounded double (`6000001/2000000` at precision 3 numericizes to exactly 3)
+instead of the raw reduced denominator (fixed; note the two paths coincide
+NUMERICALLY there — `cos(nπ) = (−1)^n` reproduces the integer power — so
+the observable is the TYPE, pinned); the `expression.ops` JSDoc overclaimed
+positional correspondence (holdMap flattens associative operators, unwraps
+`ReleaseHold`, drops operands — caveats now documented, plus the `lazy`
+exception) and the parallel handler-option type shapes in
+`types-expression.ts`/`boxed-operator-definition.ts` were unified onto the
+alias. Provenance residuals, PINNED as known-residual in
+`power-negative-base-branch.test.ts` (not silent): a lambda parameter,
+`Sum` body, `When`, or structural `Rational` exponent has no folded-literal
+provenance and keeps the reconstruction (complex past the cap) — extending
+those routes means exact-evaluating arbitrary op2 inside the hottest
+operator, deliberately not done.
 
 Residuals, recorded not fixed: (a) `_bignumComponent`'s `radical === 1` fast
 path (`exact-numeric-value.ts:284`) still numericizes an exact rational at

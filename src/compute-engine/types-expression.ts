@@ -230,13 +230,23 @@ interface BoxedOperatorDefinition
     ops: ReadonlyArray<Expression>,
     options: { engine: ExpressionComputeEngine; scope: Scope | undefined }
   ) => Expression | null;
+  /** The options are `EvaluateHandlerOptions` — spelled out here because that
+   * alias lives in `types-definitions.ts`, which imports this file, and
+   * because the engine member is narrowed to `ExpressionComputeEngine`. Keep
+   * the two in sync; `EvaluateHandlerOptions` documents the fields. */
   evaluate?: (
     ops: ReadonlyArray<Expression>,
-    options: Partial<EvaluateOptions> & { engine: ExpressionComputeEngine }
+    options: Partial<EvaluateOptions> & {
+      engine: ExpressionComputeEngine;
+      expression?: Expression;
+    }
   ) => Expression | undefined;
   evaluateAsync?: (
     ops: ReadonlyArray<Expression>,
-    options: Partial<EvaluateOptions> & { engine: ExpressionComputeEngine }
+    options: Partial<EvaluateOptions> & {
+      engine: ExpressionComputeEngine;
+      expression?: Expression;
+    }
   ) => Promise<Expression | undefined>;
   evalDimension?: (
     ops: ReadonlyArray<Expression>,

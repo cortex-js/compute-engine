@@ -2174,7 +2174,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       // x^n
       // evaluate: (ops) => ops[0].pow(ops[1]),
-      evaluate: ([x, n], { numericApproximation, engine }) => {
+      evaluate: ([x, n], { numericApproximation, engine, expression }) => {
         // Non-lazy operator: operands arrive already evaluated by the driver
         // (`_computeValue` step 4/`holdMap`) — do not re-evaluate them.
         // Handler-side re-evaluation re-descends the whole (unmemoized)
@@ -2211,6 +2211,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // are already covered by `isExact`.
         return pow(x, n, {
           numericApproximation: shouldNumericize(numericApproximation, x, n),
+          // The node's own exponent, BEFORE numericization: `n` above may be a
+          // double by now, which loses the exact rational terms that decide the
+          // branch of a negative base. `expression.ops` are the raw operands
+          // this call's `[x, n]` were evaluated from, so `op2` is `n`'s
+          // provenance. (Absent when the handler is invoked outside the
+          // evaluation driver — `pow` then falls back to reconstruction.)
+          rawExponent:
+            expression !== undefined && isFunction(expression)
+              ? expression.op2
+              : undefined,
         });
       },
       // Defined as RealNumbers for all power in RealNumbers when base > 0;

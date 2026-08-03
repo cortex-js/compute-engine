@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+### New Features
+
+- **Evaluate handlers now receive the expression being evaluated.** The
+  handler options carry an optional `expression` field — the canonical node,
+  whose `.ops` are the raw (pre-numericization) operands, unlike the
+  handler's first parameter which holds the evaluated operands (see the
+  `EvaluateHandlerOptions` documentation for the caveats: positional
+  correspondence does not survive associative flattening, `ReleaseHold`, or
+  dropped operands, and for `lazy` operators the first parameter is also
+  unevaluated). The first consumer is `Power`: under `.N()` a negative
+  base's real-vs-complex branch is now decided from the exponent's **exact**
+  rational — read from the raw operand, or through a symbol's binding — so
+  `.N()`, the type handler, and the compiled constant fold agree for exact
+  odd-denominator exponents of any term size (`(-2)^{1000003/1000001}` is
+  now real on every leg; parity is decided on the exact bigint terms, so
+  denominators beyond 2⁵³ do not corrupt the branch). Exponents with no
+  exact provenance (floats, `π`, a lambda parameter, a `Sum` body) keep the
+  rate-bounded float reconstruction.
+
 ### Bug Fixes
 
 - **Machine-precision `.N()` of a negative base to a rational power took the

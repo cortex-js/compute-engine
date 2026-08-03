@@ -19,6 +19,7 @@ export type {
   OEISCandidate,
   InterpretResult,
   OperatorDefinition,
+  EvaluateHandlerOptions,
   BaseDefinition,
   SimplifyOptions,
   ExplainOptions,

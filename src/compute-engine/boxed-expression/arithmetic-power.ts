@@ -50,6 +50,40 @@ function maximalPerfectPower(
  */
 const COINCIDENCE_BUDGET = 1e-4;
 
+/** A `Rational` term as an exact integer, or `undefined` if it is not one. */
+function asBigInteger(n: number | bigint): bigint | undefined {
+  if (typeof n === 'bigint') return n;
+  return Number.isInteger(n) ? BigInt(n) : undefined;
+}
+
+/**
+ * `n` as a double with the SAME PARITY — which is the only property of these
+ * terms the branch decision reads (an odd `q` is the real branch, an odd `p`
+ * its negative sign).
+ *
+ * Parity and magnitude cannot both survive the narrowing: EVERY double at or
+ * above 2^53 is an even integer, so an odd term that large has no faithful
+ * double at all. `Number(66052794534767279n)` is `…280`, which turned an odd
+ * numerator even and — for the denominator — reported a real value complex.
+ * Parity wins; a term that big is returned as a same-signed, same-parity
+ * sentinel instead. Nothing downstream reads the magnitude except the compiled
+ * fold's root-then-power split, which is gated at 64 and so declines the
+ * sentinel exactly as it would decline the true term.
+ */
+function parityFaithful(n: bigint): number {
+  const v = Number(n);
+  // Safe range: the narrowing is exact, parity included.
+  if (Number.isSafeInteger(v)) return v;
+  const isOdd = n % 2n !== 0n;
+  // Above the safe range every double is even, so an even term still narrows
+  // faithfully — unless it overflows to Infinity, whose parity is NaN.
+  if (!isOdd && Number.isFinite(v)) return v;
+  const sentinel = isOdd
+    ? Number.MAX_SAFE_INTEGER
+    : Number.MAX_SAFE_INTEGER - 1;
+  return n < 0n ? -sentinel : sentinel;
+}
+
 /**
  * The reduced terms `[p, q]` of a real exponent, for deciding the branch of a
  * NEGATIVE base — or `undefined` when no faithful rational is available.
@@ -140,10 +174,10 @@ export function realPowerBranchTerms(
 ): [p: number, q: number] | undefined {
   if (exact !== undefined) {
     const [rp, rq] = reducedRational(exact);
-    const p = Number(rp);
-    const q = Number(rq);
-    if (!Number.isFinite(p) || !Number.isFinite(q) || q === 0) return undefined;
-    return [p, q];
+    const p = asBigInteger(rp);
+    const q = asBigInteger(rq);
+    if (p === undefined || q === undefined || q === 0n) return undefined;
+    return [parityFaithful(p), parityFaithful(q)];
   }
 
   if (!Number.isFinite(value)) return undefined;
@@ -737,6 +771,31 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
 }
 
 /**
+ * The exact rational a RAW exponent carries, following one symbol binding.
+ *
+ * `asRational` reads a number LITERAL, so `(-2)^u` with `u := 1000003/1000001`
+ * had no provenance at all and decided its branch from the double, where the
+ * same exponent written inline decided it from the exact terms — the two
+ * disagreeing about whether the value is real. Reading the symbol's binding
+ * closes that gap: `.value` resolves the binding without evaluating anything
+ * (it is the stored expression, guarded against self-reference), so this stays
+ * safe to call from inside the `Power` handler.
+ *
+ * Deliberately NOT recursive and deliberately not an evaluation: an arbitrary
+ * `op2` (a lambda parameter, a `When`, a `Sum` body) keeps the float
+ * reconstruction. Evaluating it here would re-enter the engine's hottest
+ * operator.
+ */
+function rawRational(exp: Expression): Rational | undefined {
+  const direct = asRational(exp);
+  if (direct !== undefined) return direct;
+  if (!isSymbol(exp)) return undefined;
+  const value = exp.value;
+  if (value === undefined || value === exp) return undefined;
+  return asRational(value);
+}
+
+/**
  * The power function.
  *
  * It follows the same conventions as SymPy, which do not always
@@ -748,7 +807,32 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
 export function pow(
   x: Expression,
   exp: number | Expression,
-  { numericApproximation }: { numericApproximation: boolean }
+  {
+    numericApproximation,
+    rawExponent,
+  }: {
+    numericApproximation: boolean;
+    /**
+     * The RAW (pre-numericization) exponent of the `Power` node being
+     * evaluated, when the caller has it — `options.expression.op2` in an
+     * `evaluate` handler.
+     *
+     * Under `.N()` the `exp` argument arrives already numericized, so the
+     * exponent's exact rational terms — which decide the branch of a negative
+     * base — have been destroyed and can only be GUESSED back from the double.
+     * `realPowerBranchTerms` does guess, but only within a bounded
+     * coincidence budget, so a large-termed `p/q` (`1000003/1000001`) is
+     * declined and takes the complex branch while the type handler and the
+     * compiled constant fold — both of which still hold the exact rational —
+     * say real. Passing the raw exponent restores that provenance and the
+     * three agree for ANY term size.
+     *
+     * Only ever an addition to what is known: a caller without one, or a raw
+     * exponent with no exact rational (a float, `Pi`, `Ln(2)`), falls back to
+     * the reconstruction unchanged.
+     */
+    rawExponent?: Expression;
+  }
 ): Expression {
   if (
     !(x.isCanonical || x.isStructural) ||
@@ -810,22 +894,43 @@ export function pow(
             : isNumber(exp) && exp.im === 0
               ? exp.re
               : undefined;
-        if (
-          x.isNegative === true &&
-          x.im === 0 &&
-          eVal !== undefined &&
-          !Number.isInteger(eVal)
-        ) {
+        const negativeBase =
+          x.isNegative === true && x.im === 0 && eVal !== undefined;
+        // Recover the exponent's rational p/q — from its EXACT terms when it
+        // still has them, otherwise from the float. Under .N() the `exp`
+        // argument reaches here already numericized, so the exact terms come
+        // from the RAW exponent the caller threaded through (`rawExponent`,
+        // the node's own `op2`); that is the same object the type handler and
+        // the compiled constant fold read, so all three decide the same
+        // branch for any term size. Only when there is no raw exponent — or
+        // it is not an exact rational — does the float reconstruction decide,
+        // and `realPowerBranchTerms` recovers the rational the double came
+        // from within its coincidence budget.
+        const rawExact =
+          negativeBase && rawExponent !== undefined
+            ? rawRational(rawExponent)
+            : undefined;
+        const exact = negativeBase
+          ? (rawExact ??
+            (typeof exp === 'number' ? undefined : asRational(exp)))
+          : undefined;
+        const terms = negativeBase
+          ? realPowerBranchTerms(exact, eVal!)
+          : undefined;
+        // Integer-ness is a property of the exponent, not of the double it
+        // numericized to: at precision 3 `6000001/2000000` numericizes to
+        // EXACTLY 3, and reading the integer power off that double would take
+        // the plain (real) integer power where the raw — even — denominator
+        // says the value is complex. When the raw exponent is in hand its own
+        // reduced denominator decides; a pure-float exponent has nothing but
+        // the double, and keeps it.
+        const isIntegerExponent =
+          rawExact !== undefined && terms !== undefined
+            ? terms[1] === 1
+            : Number.isInteger(eVal);
+        if (negativeBase && !isIntegerExponent) {
           // |x|^e, computed on the positive base (no re-entry: base > 0).
           const absPow = pow(x.neg(), exp, { numericApproximation: true });
-          // Recover the exponent's rational p/q — from its EXACT terms when it
-          // still has them, otherwise from the float. Under .N() the exponent
-          // reaches here already numericized, so the float reconstruction is
-          // the only handle; `realPowerBranchTerms` makes it recover the
-          // rational the double came from, so `(−2)^(100/3)` decides the same
-          // (real) branch on both routes and in the compiled fold.
-          const exact = typeof exp === 'number' ? undefined : asRational(exp);
-          const terms = realPowerBranchTerms(exact, eVal);
           if (terms !== undefined && terms[1] % 2 !== 0) {
             // Odd denominator: real root. Sign from the numerator's parity.
             return terms[0] % 2 !== 0 ? absPow.neg() : absPow;

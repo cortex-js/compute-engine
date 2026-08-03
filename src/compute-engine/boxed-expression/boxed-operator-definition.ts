@@ -31,6 +31,7 @@ import type {
   CollectionHandlers,
   OperatorCompileHandler,
   EvaluateOptions,
+  EvaluateHandlerOptions,
   IComputeEngine as ComputeEngine,
   Scope,
   Sign,
@@ -384,12 +385,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   evaluate?: (
     ops: ReadonlyArray<Expression>,
-    options: Partial<EvaluateOptions> & { engine: ComputeEngine }
+    options: EvaluateHandlerOptions
   ) => Expression | undefined;
 
   evaluateAsync?: (
     ops: ReadonlyArray<Expression>,
-    options: Partial<EvaluateOptions> & { engine: ComputeEngine }
+    options: EvaluateHandlerOptions
   ) => Promise<Expression | undefined>;
 
   evalDimension?: (

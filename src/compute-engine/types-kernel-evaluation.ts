@@ -285,6 +285,11 @@ export type BoxedRuleSet<Expr = unknown, CE = unknown> = {
  * The argument of `ce.assign()` can be a primitive, an expression,
  * or a function that computes an expression from arguments.
  *
+ * The `options` the function receives at runtime are the evaluation driver's,
+ * so they carry the `EvaluateHandlerOptions` fields (`expression`, …) even
+ * though this kernel-level type — which cannot name that alias — spells out
+ * only `engine`.
+ *
  * @category Compute Engine
  */
 export type AssignValue<Expr = unknown, SemiExpr = unknown, CE = unknown> =

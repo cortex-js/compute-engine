@@ -2,6 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { realPowerBranchTerms } from '../../src/compute-engine/boxed-expression/arithmetic-power';
+import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
 
 /**
  * A negative base with an exact rational exponent `p/q` in lowest terms and an
@@ -85,9 +86,9 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       expect(realPowerBranchTerms(undefined, 0.25)).toEqual([1, 4]);
       // ...not even at machine precision, where the tolerance is widest.
       atPrecision(15, () => {
-        expect(isRealBranch(realPowerBranchTerms(undefined, 0.3333333333))).toBe(
-          false
-        );
+        expect(
+          isRealBranch(realPowerBranchTerms(undefined, 0.3333333333))
+        ).toBe(false);
         expect(realPowerBranchTerms(undefined, 0.3)).toEqual([3, 10]);
       });
     });
@@ -140,14 +141,18 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
       // MACHINE_PRECISION floor `setPrecision` does — it writes a GLOBAL of 3,
       // a 1%-wide window, which snaps anything to a small rational. The window
       // is clamped at 15 digits, so the branch cannot depend on it.
-      const at3 = atPrecision(3, () => realPowerBranchTerms(undefined, 1.234567));
+      const at3 = atPrecision(3, () =>
+        realPowerBranchTerms(undefined, 1.234567)
+      );
       const at15 = atPrecision(15, () =>
         realPowerBranchTerms(undefined, 1.234567)
       );
       expect(at3).toEqual(at15);
       expect(isRealBranch(at3)).toBe(false);
       expect(
-        isRealBranch(atPrecision(3, () => realPowerBranchTerms(undefined, Math.PI)))
+        isRealBranch(
+          atPrecision(3, () => realPowerBranchTerms(undefined, Math.PI))
+        )
       ).toBe(false);
       expect(
         atPrecision(3, () => realPowerBranchTerms(undefined, 100 / 3))
@@ -203,14 +208,18 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
     it('measures faithfulness at the same width the budget is charged for', () => {
       // Admitted through the old 1e-12 floor; its own tolerance is ~2.2e-17.
       expect(
-        atPrecision(17, () => realPowerBranchTerms(undefined, 0.02490069718328337))
+        atPrecision(17, () =>
+          realPowerBranchTerms(undefined, 0.02490069718328337)
+        )
       ).toBeUndefined();
       // The floor was never load-bearing for a genuine rounding: a p/q rounded
       // at the working precision lands well inside `tol` (worst case ~0.47·tol
       // over the terms exercised here), so tightening cannot cost a legitimate
       // reconstruction — the rows above still resolve.
       expect(
-        atPrecision(16, () => realPowerBranchTerms(undefined, 11.44444444444444))
+        atPrecision(16, () =>
+          realPowerBranchTerms(undefined, 11.44444444444444)
+        )
       ).toEqual([103, 9]);
     });
 
@@ -503,10 +512,15 @@ describe('NEGATIVE BASE: machine lane agrees with the bignum lane', () => {
     const tiny = new ComputeEngine({ precision: 3 });
     for (const e of ['Pi', ['Sqrt', 2], 1.234567] as any[])
       expect(tiny.box(['Power', -2, e]).N().im).not.toBe(0);
-    // NOT asserted: an exact rational round-tripping through a 3-digit engine.
-    // `(100/3).N()` there IS `33.3` — the exponent itself is destroyed before
-    // the branch helper sees it — so `(-2)^(100/3)` is complex (33.3 = 333/10).
-    // That is a property of `{ precision: 3 }`, not of the branch decision.
+    // An exact rational is unaffected by the engine's precision: `.N()` reads
+    // the branch off the RAW exponent (`Power`'s `expression.op2`), which is
+    // still `100/3` however coarsely it would numericize, so `(-2)^(100/3)` is
+    // REAL here — same answer as the type handler and the compiled fold. Only
+    // the magnitude is 3-digit. (Before the exponent's provenance was threaded,
+    // the double `33.3` was the only handle and reconstructed to `333/10` — an
+    // even denominator — making this one engine disagree with the other two
+    // legs.)
+    expect(tiny.box(['Power', -2, ['Rational', 100, 3]]).N().im).toBe(0);
   });
 });
 
@@ -571,5 +585,439 @@ describe('NEGATIVE BASE: engine CREATION ORDER does not move the branch', () => 
     for (const engine of [bignum, machine])
       for (const e of ['Pi', ['Sqrt', 2], 1.234567] as any[])
         expect(engine.box(['Power', -2, e]).N().im).not.toBe(0);
+  });
+});
+
+/**
+ * Reconstructing `p/q` from the exponent's DOUBLE is bounded by a coincidence
+ * budget, which caps the recoverable denominator at `~0.009/√tol` — around
+ * 3e5 at 17 digits. Past that cap a genuine odd-`q` rational is
+ * indistinguishable from an irrational and was DECLINED, so `.N()` returned
+ * the principal complex value for `(−2)^(1000003/1000001)` while the type
+ * handler and the compiled constant fold — both of which still hold the exact
+ * rational — said real. Three legs, two stories.
+ *
+ * `.N()` now holds the exact rational too: the evaluation driver hands every
+ * `evaluate` handler the node itself (`options.expression`), whose `ops` are
+ * the RAW, pre-numericization operands, and `Power` reads its exponent's terms
+ * off `expression.op2` instead of guessing them back from a double. The
+ * reconstruction survives only as the fallback for an exponent that HAS no
+ * exact rational — a float, `Pi`, `Ln(2)` — where nothing was lost to
+ * numericization in the first place.
+ */
+describe('NEGATIVE BASE: exact exponent provenance under .N()', () => {
+  let savedPrecision: number;
+  beforeAll(() => {
+    savedPrecision = BigDecimal.precision;
+  });
+  afterAll(() => {
+    BigDecimal.precision = savedPrecision;
+  });
+
+  /** `.N()`, the compiled constant fold, and `.type`, as one row. */
+  function legs(e: any): {
+    n: { re: number; im: number };
+    compiled: { re: number; im: number } | undefined;
+    typeIsComplex: boolean;
+  } {
+    const n = parts(e);
+    const r = compile(e, { fallback: false });
+    let compiled: { re: number; im: number } | undefined = undefined;
+    if (r.success && r.run) {
+      const v = (r.run as any)() as any;
+      compiled =
+        typeof v === 'number' ? { re: v, im: 0 } : { re: v.re, im: v.im };
+    }
+    return {
+      n,
+      compiled,
+      typeIsComplex:
+        e.type.matches('complex') && !e.type.matches('real') ? true : false,
+    };
+  }
+
+  /**
+   * The witnesses of the recorded disagreement. Both denominators are far past
+   * the reconstruction cap, so before the exponent's provenance was threaded
+   * `.N()` was COMPLEX here (`(−2)^(1000003/1000001)` → −2.0000027… −
+   * 1.2566e−5·i) while `run()` returned the real −2.0000027725878717. The
+   * numerators are odd, so the real value is negative: `(−1)^p·|b|^(p/q)`.
+   */
+  const flipped: [p: number, q: number][] = [
+    [1000003, 1000001],
+    [10000003, 10000001],
+  ];
+
+  for (const [p, q] of flipped) {
+    it(`(-2)^(${p}/${q}) is REAL, and .N()/compiled/type agree`, () => {
+      const e = ce.box(['Power', -2, ['Rational', p, q]]);
+      const want = (p % 2 === 0 ? 1 : -1) * Math.pow(2, p / q);
+      const { n, compiled, typeIsComplex } = legs(e);
+
+      // `.N()`: real, and on the `(−1)^p` sign.
+      expect(Math.abs(n.im)).toBe(0);
+      expect(n.re).toBeLessThan(0);
+      expect(n.re / want).toBeCloseTo(1, 12);
+
+      // ...agreeing with the compiled fold and with the type.
+      expect(compiled).toBeDefined();
+      expect(compiled!.im).toBe(0);
+      expect(compiled!.re / want).toBeCloseTo(1, 12);
+      expect(typeIsComplex).toBe(false);
+    });
+  }
+
+  /**
+   * Denominators spanning the reconstruction cap: 3 and 65839 were always
+   * recoverable from the double, 224219 sits just under the budget, 1000001 is
+   * over it and only the exact rational reaches the real branch, and
+   * 18014398509481985 is past 2^53, where the exact terms themselves survive
+   * only if their PARITY does. All five must behave identically, on both
+   * lanes, on all three legs.
+   *
+   * The numerators are `2q+1`/`2q+2` up to the safe range; past it that ratio
+   * rounds to the double 2 exactly and the node folds at canonicalization, so
+   * the last row uses a ratio (~11/3) that stays away from an integer.
+   */
+  it.each(['machine', 'bignum'])(
+    'agrees on all three legs across the reconstruction cap (%s lane)',
+    (lane) => {
+      const engine = new ComputeEngine();
+      if (lane === 'machine') engine.precision = 'machine';
+      const mismatches: string[] = [];
+      let compared = 0;
+      const pairs: [p: bigint, q: bigint][] = [];
+      for (const q of [3n, 65839n, 224219n, 1000001n])
+        // One odd and one even numerator, so both signs of the real branch are
+        // exercised at every denominator.
+        for (const p of [2n * q + 1n, 2n * q + 2n]) pairs.push([p, q]);
+      pairs.push([66052794534767279n, 18014398509481985n]); // odd p
+      pairs.push([66052794534767278n, 18014398509481985n]); // even p
+      for (const [p, q] of pairs) {
+        const e = engine.box(['Power', -2, engine.number([p, q])]);
+        const want =
+          (p % 2n === 0n ? 1 : -1) * Math.pow(2, Number(p) / Number(q));
+        const { n, compiled, typeIsComplex } = legs(e);
+        compared += 1;
+        if (Math.abs(n.im) !== 0 || !(Math.abs(n.re / want - 1) < 1e-9))
+          mismatches.push(`N (-2)^(${p}/${q}) = ${n.re} + ${n.im}i`);
+        if (
+          compiled === undefined ||
+          compiled.im !== 0 ||
+          !(Math.abs(compiled.re / want - 1) < 1e-9)
+        )
+          mismatches.push(
+            `compiled (-2)^(${p}/${q}) = ${JSON.stringify(compiled)}`
+          );
+        if (typeIsComplex)
+          mismatches.push(`type (-2)^(${p}/${q}) = ${e.type.toString()}`);
+      }
+      expect(mismatches).toEqual([]);
+      expect(compared).toBe(10);
+    }
+  );
+
+  /**
+   * The exponent's provenance reaches `.N()` only for the routes where `op2`
+   * IS a number literal (an inline rational, a `Rational` node, a `Sum` body)
+   * or a SYMBOL bound to one. `asRational` reads a literal, so `(-2)^u` with
+   * `u := 1000003/1000001` used to decide its branch from the double — COMPLEX
+   * — while the same exponent written inline decided it from the exact terms —
+   * REAL. Following the symbol's binding (which `.value` resolves without
+   * evaluating anything) closes that divergence.
+   */
+  it('follows a SYMBOL bound to an exact rational', () => {
+    const engine = new ComputeEngine();
+    engine.assign('u', engine.box(['Rational', 1000003, 1000001]));
+    const want = -Math.pow(2, 1000003 / 1000001); // odd numerator ⇒ negative
+
+    for (const e of [engine.box(['Power', -2, 'u']), engine.parse('(-2)^u')]) {
+      const n = e.N();
+      expect(Math.abs(n.im)).toBe(0);
+      expect(n.re / want).toBeCloseTo(1, 12);
+    }
+    // ...the same value the literal route returns.
+    const literal = engine.box(['Power', -2, ['Rational', 1000003, 1000001]]);
+    expect(literal.N().re).toBe(engine.box(['Power', -2, 'u']).N().re);
+  });
+
+  /**
+   * KNOWN RESIDUAL, pinned rather than left unstated. Provenance is read off
+   * the node's own `op2`, so it survives exactly one hop: a number literal, or
+   * a symbol bound to one. An `op2` whose exact value only exists once
+   * something ELSE has run — a lambda parameter bound at application, a
+   * `When`'s selected arm — reaches the handler as a plain expression, and the
+   * float reconstruction decides. Past its cap (`q = 1000001`) that is the
+   * COMPLEX branch, so these routes still disagree with the literal one.
+   *
+   * Recovering them would mean evaluating an arbitrary `op2` inside the engine's
+   * hottest operator — a re-entrancy and cost hazard deliberately not taken.
+   */
+  it('does NOT recover provenance through a lambda parameter or a When (residual)', () => {
+    const engine = new ComputeEngine();
+    engine.assign('f', engine.parse('t \\mapsto (-2)^t'));
+    const residual = [
+      engine.box(['f', ['Rational', 1000003, 1000001]]),
+      engine.box(['Power', -2, ['When', ['Rational', 1000003, 1000001], true]]),
+    ];
+    for (const e of residual) expect(e.N().im).not.toBe(0);
+
+    // The routes where `op2` IS the literal — including one nested in a `Sum`
+    // body — do resolve, and are the reference these residuals differ from.
+    expect(
+      Math.abs(engine.box(['Power', -2, ['Rational', 1000003, 1000001]]).N().im)
+    ).toBe(0);
+    expect(
+      Math.abs(
+        engine
+          .box([
+            'Sum',
+            ['Power', -2, ['Rational', 1000003, 1000001]],
+            ['Limits', 'k', 1, 1],
+          ])
+          .N().im
+      )
+    ).toBe(0);
+  });
+
+  /**
+   * The provenance-free controls. An exponent with no exact rational loses
+   * nothing to numericization, so the rate-bounded reconstruction remains the
+   * decision — unchanged in both directions.
+   */
+  it('leaves an exponent with no exact rational on the reconstruction path', () => {
+    const rows: [string, any][] = [
+      ['0.333333333333334', 0.333333333333334],
+      ['0.3333333333', 0.3333333333],
+      ['1.234567', 1.234567],
+      ['π', 'Pi'],
+      ['e', 'ExponentialE'],
+      ['√2', ['Sqrt', 2]],
+      ['ln 2', ['Ln', 2]],
+    ];
+    const real: string[] = [];
+    for (const [label, ex] of rows) {
+      const n = ce.box(['Power', -2, ex]).N();
+      if (n.im === 0) real.push(`(-2)^${label} = ${n.re}`);
+    }
+    expect(real).toEqual([]);
+
+    // ...and a float that DOES reconstruct still decides from the double: 0.3
+    // is 3/10, an even denominator, hence complex — as is 0.25 (1/4). Only an
+    // odd reconstructed denominator goes real, and it still does (2/3).
+    expect(ce.box(['Power', -2, 0.3]).N().im).not.toBe(0);
+    expect(ce.box(['Power', -2, 0.25]).N().im).not.toBe(0);
+    expect(ce.box(['Power', -2, 2 / 3]).N().im).toBe(0);
+  });
+});
+
+/**
+ * The exact terms decide the branch by their PARITY, and parity is the one
+ * property that does not survive narrowing a bigint to a double: EVERY double
+ * at or above 2^53 is an even integer. `Number(66052794534767279n)` is `…280`,
+ * so an odd denominator read as even sent a REAL value down the complex branch
+ * — and an odd numerator read as even dropped the `(−1)^p` sign. The narrowing
+ * now keeps the parity (giving up magnitude, which nothing but the compiled
+ * fold's ≤64 root-then-power split reads, and which declines either way).
+ *
+ * The three rows are the same ~11/3 ratio with each parity combination, all
+ * coprime with both terms above 2^53 after reduction.
+ */
+describe('NEGATIVE BASE: exact terms beyond the safe-integer range', () => {
+  const ODD_P = 66052794534767279n;
+  const EVEN_P = 66052794534767278n;
+  const ODD_Q = 18014398509481985n;
+  const EVEN_Q = 18014398509481986n;
+
+  const rows: [
+    label: string,
+    p: bigint,
+    q: bigint,
+    branch: 'real' | 'complex',
+  ][] = [
+    ['odd p / odd q', ODD_P, ODD_Q, 'real'],
+    ['even p / odd q', EVEN_P, ODD_Q, 'real'],
+    ['odd p / even q', ODD_P, EVEN_Q, 'complex'],
+  ];
+
+  it('decides parity on the exact terms, not on their narrowing', () => {
+    for (const [label, p, q] of rows) {
+      const t = realPowerBranchTerms([p, q], Number(p) / Number(q));
+      expect(t).toBeDefined();
+      expect(`${label}: p odd? ${t![0] % 2 !== 0}`).toBe(
+        `${label}: p odd? ${p % 2n !== 0n}`
+      );
+      expect(`${label}: q odd? ${t![1] % 2 !== 0}`).toBe(
+        `${label}: q odd? ${q % 2n !== 0n}`
+      );
+      // A term that cannot be narrowed faithfully must still read as "large",
+      // so the compiled fold's root-then-power split declines it as it would
+      // the true term.
+      expect(Math.abs(t![0])).toBeGreaterThan(64);
+      expect(Math.abs(t![1])).toBeGreaterThan(64);
+    }
+  });
+
+  for (const [label, p, q, branch] of rows) {
+    it(`(-2)^(${label}) is ${branch}, and .N()/compiled/type agree`, () => {
+      const e = ce.box(['Power', -2, ce.number([p, q])]);
+      const { re, im } = parts(e);
+      const f = folded(e);
+
+      if (branch === 'real') {
+        // `(−1)^p·|b|^(p/q)`: the odd numerator is the NEGATIVE root.
+        const want =
+          (p % 2n === 0n ? 1 : -1) * Math.pow(2, Number(p) / Number(q));
+        expect(Math.abs(im)).toBe(0);
+        expect(re / want).toBeCloseTo(1, 12);
+        expect(e.type.matches('complex') && !e.type.matches('real')).toBe(
+          false
+        );
+        expect(typeof f).toBe('number');
+        expect((f as number) / want).toBeCloseTo(1, 12);
+      } else {
+        expect(Math.abs(im)).not.toBe(0);
+        expect(e.type.toString()).toBe('finite_complex');
+        const c = f as { re: number; im: number };
+        expect(c.re / re).toBeCloseTo(1, 9);
+        expect(c.im / im).toBeCloseTo(1, 9);
+      }
+    });
+  }
+});
+
+/**
+ * An exponent's integer-ness is a property of the exponent, not of the double
+ * it numericized to. At `precision: 3` the exact `6000001/2000000` numericizes
+ * to EXACTLY 3, and reading the integer power off that double took the plain
+ * real power where the raw — even — denominator says the value is complex, so
+ * `.N()` alone left the branch the type handler and the compiled fold were on.
+ * The raw exponent's own reduced denominator decides now.
+ *
+ * The two paths coincide NUMERICALLY here, and necessarily so: `cos(nπ)` is
+ * `(−1)^n`, so the principal complex value of an integer exponent IS the
+ * integer power. What this pins is therefore the ledger — that all three legs
+ * report the complex branch — not a change in the returned value. (`.N()`'s
+ * magnitude is the 3-digit one, per "branch from raw, magnitude from the
+ * coarse float"; the compiled fold holds the full-precision exponent and so
+ * carries the genuine 1.3e−5 imaginary part.)
+ */
+describe('NEGATIVE BASE: an exponent that ROUNDS to an integer', () => {
+  let savedPrecision: number;
+  beforeAll(() => {
+    savedPrecision = BigDecimal.precision;
+  });
+  afterAll(() => {
+    BigDecimal.precision = savedPrecision;
+  });
+
+  it('takes the complex branch from the raw (even) denominator', () => {
+    const tiny = new ComputeEngine({ precision: 3 });
+    const e = tiny.box(['Power', -2, ['Rational', 6000001, 2000000]]);
+    // The exponent is NOT an integer; only its precision-3 double is.
+    expect(e.op2.isInteger).toBe(false);
+    expect(e.op2.N().re).toBe(3);
+
+    expect(e.type.toString()).toBe('finite_complex');
+    const c = folded(e) as { re: number; im: number };
+    expect(c.im).not.toBe(0);
+    expect(c.re).toBeCloseTo(-8, 5);
+    // `.N()` at precision 3: the complex branch with an integer phase, which
+    // is the integer power to the last digit.
+    expect(e.N().re).toBeCloseTo(-8, 12);
+  });
+
+  it('leaves a genuine integer exponent on the plain integer power', () => {
+    const engine = new ComputeEngine();
+    // A reduced denominator of 1 is an integer exponent however it is written
+    // — these fold to the integer power at canonicalization and must stay
+    // there.
+    const rows: [exp: any, want: number][] = [
+      [3, -8],
+      [['Rational', 6, 2], -8],
+      [['Rational', -9, 3], -0.125],
+      [['Rational', 4, 2], 4],
+    ];
+    for (const [exp, want] of rows) {
+      const n = engine.box(['Power', -2, exp]).N();
+      expect(n.im).toBe(0);
+      expect(n.re).toBe(want);
+    }
+  });
+});
+
+/**
+ * The mechanism the `Power` fix rides on: the evaluation driver passes the
+ * canonical node to every `evaluate` handler as `options.expression`. Its `ops`
+ * are the RAW operands — what the `type` handler sees — while the handler's
+ * first parameter holds the evaluated ones, which under `.N()` have been
+ * numericized. A handler that needs its operands' EXACTNESS (branch cuts,
+ * provenance, error messages that quote the input) has nowhere else to get it.
+ */
+describe('evaluate handler receives the canonical expression', () => {
+  it('exposes the RAW operands, which differ from the evaluated ones under .N()', () => {
+    const engine = new ComputeEngine();
+    const seen: {
+      raw: string;
+      evaluated: string;
+      isSameNode: boolean;
+      operator: string;
+    }[] = [];
+
+    engine.declare('ProvenanceProbe', {
+      signature: '(number) -> number',
+      evaluate: ([x], { expression, engine: ce }) => {
+        // `expression` is an `Expression`; `op1` lives on the narrowed
+        // function interface, so reach it through `isFunction()` — the same
+        // narrowing the `Power` handler uses.
+        const raw =
+          expression !== undefined && isFunction(expression)
+            ? expression.op1
+            : undefined;
+        seen.push({
+          raw: raw?.toString() ?? '<none>',
+          evaluated: x.toString(),
+          isSameNode: raw === x,
+          operator: expression?.operator ?? '<none>',
+        });
+        return ce.number(1);
+      },
+    });
+
+    const expr = engine.box(['ProvenanceProbe', ['Rational', 1, 3]]);
+
+    // Under `evaluate()` nothing is numericized: the operand IS the raw node.
+    expr.evaluate();
+    expect(seen[0].operator).toBe('ProvenanceProbe');
+    expect(seen[0].raw).toBe('1/3');
+    expect(seen[0].evaluated).toBe('1/3');
+    expect(seen[0].isSameNode).toBe(true);
+
+    // Under `.N()` the operand is a double while `expression.op1` still holds
+    // the exact rational — the whole point of the field.
+    expr.N();
+    expect(seen[1].raw).toBe('1/3');
+    expect(seen[1].evaluated).not.toBe('1/3');
+    expect(Number(seen[1].evaluated)).toBeCloseTo(1 / 3, 12);
+    expect(seen[1].isSameNode).toBe(false);
+  });
+
+  it('reaches the async handler too', async () => {
+    const engine = new ComputeEngine();
+    let raw: string | undefined = undefined;
+    engine.declare('AsyncProvenanceProbe', {
+      signature: '(number) -> number',
+      evaluateAsync: async ([_x], { expression, engine: ce }) => {
+        if (expression !== undefined && isFunction(expression))
+          raw = expression.op1.toString();
+        return ce.number(1);
+      },
+    });
+    await engine
+      .box(['AsyncProvenanceProbe', ['Rational', 1, 3]])
+      .evaluateAsync({
+        numericApproximation: true,
+      });
+    expect(raw).toBe('1/3');
   });
 });

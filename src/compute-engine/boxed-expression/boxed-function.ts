@@ -2198,6 +2198,10 @@ export class BoxedFunction
           numericApproximation,
           engine: this.engine,
           materialization: materialization,
+          // The node itself, so a handler can reach its RAW (pre-numericized)
+          // operands — `tail` has already been evaluated. See
+          // `EvaluateHandlerOptions.expression`.
+          expression: this,
         });
       } finally {
         if (isScoped) this.engine._popEvalContext();
@@ -2522,11 +2526,17 @@ export class BoxedFunction
 
       let value: Expression | undefined;
       try {
-        const opts: Partial<EvaluateOptions> & { engine: ComputeEngine } = {
+        const opts: Partial<EvaluateOptions> & {
+          engine: ComputeEngine;
+          expression: Expression;
+        } = {
           numericApproximation,
           engine,
           signal: options?.signal,
           materialization: options?.materialization,
+          // See the matching comment (and `EvaluateHandlerOptions.expression`)
+          // on the sync path.
+          expression: this,
         };
         // AWAIT INSIDE THE `try`: an `evaluateAsync` handler returns at its
         // first suspension point, not at completion, so popping on the
