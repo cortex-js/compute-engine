@@ -19,7 +19,57 @@
   exact provenance (floats, `π`, a lambda parameter, a `Sum` body) keep the
   rate-bounded float reconstruction.
 
+### Performance
+
+- **Compile-time complexness analysis is no longer quadratic on large
+  expressions** (Tycho item 148). The 0.100.2 operand-consulting fixes
+  (items 144/143) made `isComplexValued` walk a node's whole subtree per
+  query, and the GPU emitters query per node — a deeply nested expression
+  (a textually inlined user-function chain) paid O(n²): a depth-6 nested
+  chain spent 82% of its GLSL compile (1.5 million analysis calls) in the
+  walk, roughly doubling large shader compiles relative to 0.100.1. The
+  analysis is now memoized per compilation with a LAYERED memo that mirrors
+  the context's lexical nesting: entering a block frame or binder mask
+  pushes a fresh layer (an answer cached under a mask can never be reused
+  outside it), and leaving restores the enclosing layer — so binder-dense
+  bodies (nested `Sum`/`Product`) memoize too, instead of wiping the cache
+  at every mask crossing. Compiled output verified byte-identical across
+  targets. The depth-6 chain compiles 7× faster than unmemoized (and ~2×
+  faster than 0.100.1, which did fewer, cheaper walks); scaling on the
+  regressed class — deeply nested inlined expression chains — is
+  near-linear in expression size again. (Deeply nested *binder* chains,
+  `Sum`-in-`Sum`, keep a pre-existing superlinear analysis cost that
+  0.100.1 shares — measured, not part of this regression.)
+
 ### Bug Fixes
+
+- **`Real`, `Imaginary` and `Argument` are real-by-definition for the
+  compile targets** (Tycho item 147). The complexness analysis judged
+  these heads by their operands, so `Mod(Im(z), 1)` over a
+  declared-complex `z` tripped the GLSL real-only helper gate and failed
+  closed — even though the projections always lower to a real scalar
+  (`(z).y`, `atan(z.y, z.x)`, `.im`) on every target. The analysis now
+  short-circuits these heads as real-shaped regardless of their operand's
+  type, so real projections of complex interiors (`Mod(Im(b + a·ln(x+iy)),
+  Im(w))`, domain-coloring rows) compile again. Provably complex operands
+  (`Mod(√-2, 1)`, `Mod(i·x, 1)`, `Mod(Conjugate(z), 1)`) still fail
+  closed.
+
+- **A function literal with an invalid explicit `Block` body no longer
+  prints a bare internal `TypeError` while boxing** (Tycho item 150).
+  Canonicalizing `["Function", ["Block", ⟨body with an Error node⟩], …]`
+  dereferenced the invalid block's missing scope, and the caught
+  `Cannot read properties of undefined (reading 'bindings')` was printed
+  raw to `console.error` before recovering to a non-canonical literal.
+  The block is now rebuilt so scope creation runs even over an invalid
+  body: the literal boxes canonically (still `isValid: false`), with no
+  console noise. Two siblings fixed alongside: the nullary form silently
+  produced a canonical literal with an *unscoped* block, and an **empty**
+  `Block` body threw the same TypeError (it now follows the annotated
+  branch's convention: an empty body is `Nothing`). The two recovery
+  catch sites in `applyOperatorDefinition` now attribute anything they
+  print (`ComputeEngine: error canonicalizing \`op\`: …`) instead of
+  emitting a bare message.
 
 - **Machine-precision `.N()` of a negative base to a rational power took the
   wrong branch.** At machine precision, `(-2)^{100/3}` numericized to

@@ -1543,3 +1543,61 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     );
   });
 });
+
+// Tycho item 147: `Real`/`Imaginary`/`Argument` produce a real-SHAPED scalar on
+// every target, whatever their operand is — but `Imaginary` types bare `number`
+// (deliberately: `Im(~oo)` is `NaN`), so `isComplexValued` fell through to the
+// conservative operand recursion, saw the `complex` operand, and failed the
+// real-only-helper gate closed on forms that are real by construction.
+describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
+  const e = new ComputeEngine();
+  e.declare('z', 'complex');
+  e.declare('w', 'complex');
+
+  it('compiles Mod over Imaginary/Real/Argument of a complex symbol', () => {
+    expect(glsl.compile(e.box(['Mod', ['Imaginary', 'z'], 1])).code).toBe(
+      'mod((z).y, 1.0)'
+    );
+    expect(glsl.compile(e.box(['Mod', ['Real', 'z'], 1])).code).toBe(
+      'mod((z).x, 1.0)'
+    );
+    expect(glsl.compile(e.box(['Mod', ['Argument', 'z'], 1])).code).toBe(
+      'mod(atan(z.y, z.x), 1.0)'
+    );
+  });
+
+  it('compiles Mod with a real-by-definition head in BOTH positions', () => {
+    expect(
+      glsl.compile(e.box(['Mod', ['Imaginary', 'z'], ['Imaginary', 'w']])).code
+    ).toBe('mod((z).y, (w).y)');
+  });
+
+  it('still compiles Mod over Abs (the head that already worked)', () => {
+    expect(glsl.compile(e.box(['Mod', ['Abs', 'z'], 1])).code).toBe(
+      'mod(length(z), 1.0)'
+    );
+  });
+
+  it('survives enclosing arithmetic (the propagating-heads path)', () => {
+    expect(
+      glsl.compile(e.box(['Mod', ['Multiply', 2, ['Imaginary', 'z']], 1])).code
+    ).toBe('mod(2.0 * (z).y, 1.0)');
+  });
+
+  it('still fails closed on a genuinely complex-shaped operand', () => {
+    // `Conjugate` is complex → complex (it emits a `vec2`), so it is
+    // deliberately NOT a real-by-definition head.
+    expect(() => glsl.compile(e.box(['Mod', ['Conjugate', 'z'], 1]))).toThrow(
+      /real-only target helper "mod" cannot represent a complex-valued argument/
+    );
+    // The item-144 pins are unchanged.
+    expect(() => glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]))).toThrow(
+      /real-only target helper "mod" cannot represent a complex-valued argument/
+    );
+    expect(() =>
+      glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))
+    ).toThrow(
+      /real-only target helper "mod" cannot represent a complex-valued argument/
+    );
+  });
+});

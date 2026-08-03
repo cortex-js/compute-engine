@@ -407,10 +407,22 @@ export function canonicalFunctionLiteralArguments(
   let block: Expression;
   try {
     if (returnTypeOp === undefined) {
-      block =
-        bodyOp.operator === 'Block'
-          ? bodyOp.canonical
-          : ce.function('Block', [bodyOp]);
+      if (isFunction(bodyOp, 'Block')) {
+        block = bodyOp.canonical;
+        // `get canonical` short-circuits on an invalid expression (a `Block`
+        // containing an `Error` node) and returns it unbound — and therefore
+        // unscoped. Rebuild it from its statements so `Block`
+        // canonicalization runs and creates the scope the parameter
+        // declarations below rely on. An EMPTY statement list stays unscoped
+        // through the rebuild too (`canonicalBlock` declines zero operands),
+        // so it takes the annotated branch's convention: the body is
+        // `Nothing`.
+        if (!block.isScoped)
+          block = ce.function(
+            'Block',
+            bodyOp.nops === 0 ? [ce.Nothing] : [...bodyOp.ops]
+          );
+      } else block = ce.function('Block', [bodyOp]);
     } else {
       // Wrap the body Block's last statement in the return-type ascription.
       const statements: Expression[] = isFunction(bodyOp, 'Block')

@@ -495,11 +495,31 @@ export class BaseCompiler {
     // the names currently shadowing the engine (loop indices, lambda
     // parameters, broadcast elements).
     const prevBoundCtx = BaseCompiler._boundVarsCtx;
-    BaseCompiler._boundVarsCtx = target.boundVars ?? prevBoundCtx;
+    const nextBoundCtx = target.boundVars ?? prevBoundCtx;
+    // Compilation boundary for the complexness memo (Tycho item 148). This —
+    // not `compileRoot` — is the entry EVERY target funnels through (the GPU,
+    // JS, Python and interval targets each call `BaseCompiler.compile`
+    // directly from their own `compileOrThrow`), so the reset has to key off
+    // the nesting depth rather than a per-target hook. Engine symbol values
+    // are stable within one compilation but not across compilations, and a
+    // boxed expression can outlive the compile that cached its answer.
+    if (BaseCompiler._compileDepth === 0) BaseCompiler._invalidateComplexMemo();
+    BaseCompiler._compileDepth += 1;
+    // Only a genuine CHANGE of the bound-variable context invalidates: the
+    // inner targets of a recursion carry the SAME `boundVars` set object
+    // except at a binder crossing, so the memo survives the common path.
+    if (nextBoundCtx !== prevBoundCtx) {
+      BaseCompiler._boundVarsCtx = nextBoundCtx;
+      BaseCompiler._invalidateComplexMemo();
+    }
     try {
       return BaseCompiler.compileWithCse(expr, target, prec);
     } finally {
-      BaseCompiler._boundVarsCtx = prevBoundCtx;
+      BaseCompiler._compileDepth -= 1;
+      if (nextBoundCtx !== prevBoundCtx) {
+        BaseCompiler._boundVarsCtx = prevBoundCtx;
+        BaseCompiler._invalidateComplexMemo();
+      }
     }
   }
 
@@ -1809,6 +1829,28 @@ export class BaseCompiler {
     new Set(['Real', 'Imaginary', 'Argument', 'Conjugate']);
 
   /**
+   * Heads that produce a real-SHAPED value BY DEFINITION — whatever their
+   * operand's type or complexness. Every target lowers them to a real scalar
+   * (`Imaginary` → `(z).y` on GLSL/WGSL, `.im` on JS, `np.imag` on Python;
+   * `Argument` → `atan(z.y, z.x)` / `_SYS.carg`), so an enclosing form may
+   * treat them as real without parent and child disagreeing on the value
+   * shape.
+   *
+   * Read by `isComplexValued` BEFORE any type-based branch: `Imaginary` types
+   * bare `number` (deliberately — `Im(~oo)` is `NaN`), which would otherwise
+   * fall through to the conservative operand recursion and report complex,
+   * failing the real-only-helper gate closed on `Mod(Imaginary(z), 1)` (Tycho
+   * item 147). And a `Real(±∞)` can type `non_finite_number`, so the
+   * short-circuit must also precede the `isNonRealNumber` branch.
+   *
+   * Deliberately excludes `Conjugate` (complex → complex: emits `vec2` /
+   * `{re, im}`) and `AbsArg` (tuple-valued). `Arg` canonicalizes to
+   * `Argument`, so it needs no entry.
+   */
+  private static readonly REAL_BY_DEFINITION_HEADS: ReadonlySet<string> =
+    new Set(['Real', 'Imaginary', 'Argument']);
+
+  /**
    * Scalar arithmetic operator heads whose codegen would emit
    * element-wise-impossible scalar JS if handed a list-valued operand. Guarded
    * in `compileExpr`: such a form fails closed (D6) unless `tryCompileBroadcast`
@@ -2423,7 +2465,7 @@ export class BaseCompiler {
       complexFrame.set(local, false);
       vectorFrame.set(local, BaseCompiler.LOCAL_UNSET);
     }
-    BaseCompiler._localComplex.push(complexFrame);
+    BaseCompiler._pushLocalComplex(complexFrame);
     // Pushed before inference AND kept for the compilation of the statements,
     // so a later local's RHS that merely references an earlier one (`q ⩴ p`)
     // resolves the width through the frame (Defect C).
@@ -2432,10 +2474,11 @@ export class BaseCompiler {
       for (const arg of args) {
         if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0])) {
           const name = arg.ops[0].symbol;
-          if (isSymbol(arg.ops[1], 'complex')) complexFrame.set(name, true);
+          if (isSymbol(arg.ops[1], 'complex'))
+            BaseCompiler._setLocalComplex(complexFrame, name, true);
           const value = BaseCompiler.declareValueOperand(arg.ops);
           if (value !== undefined && BaseCompiler.isComplexValued(value))
-            complexFrame.set(name, true);
+            BaseCompiler._setLocalComplex(complexFrame, name, true);
           if (value !== undefined) noteVectorWidth(name, value);
         } else if (isFunction(arg, 'Assign') && isSymbol(arg.ops[0])) {
           const name = arg.ops[0].symbol;
@@ -2443,7 +2486,7 @@ export class BaseCompiler {
             complexFrame.get(name) === false &&
             BaseCompiler.isComplexValued(arg.ops[1])
           )
-            complexFrame.set(name, true);
+            BaseCompiler._setLocalComplex(complexFrame, name, true);
           if (arg.ops[1] !== undefined) noteVectorWidth(name, arg.ops[1]);
         }
       }
@@ -2553,7 +2596,7 @@ export class BaseCompiler {
         `;${target.ws('\n')}`
       )}${target.ws('\n')}})()`;
     } finally {
-      BaseCompiler._localComplex.pop();
+      BaseCompiler._popLocalComplex();
       BaseCompiler._localVector.pop();
     }
   }
@@ -3114,6 +3157,105 @@ export class BaseCompiler {
   private static _binderShield: Set<string>[] = [];
 
   /**
+   * Memoized `isComplexValued` answers for FUNCTION expressions (Tycho item
+   * 148). Keyed by expression IDENTITY, valid only for the context the
+   * analysis reads: the `_localComplex` frames, the `_binderShield` frames,
+   * `_boundVarsCtx`, and the engine's assigned symbol values.
+   *
+   * The memo is LAYERED to mirror the context's lexical nesting: entering a
+   * frame or binder mask pushes a fresh layer, leaving it pops back to the
+   * enclosing layer — which is valid again, because the enclosing context is
+   * restored exactly (the enter/exit sites are all symmetric try/finally
+   * pairs). Only the top layer is ever read or written, so an answer computed
+   * under a mask can never leak outside it; and because a binder NODE's own
+   * verdict is stored in its enclosing layer, sibling and repeat queries of
+   * the binder hit the memo instead of re-entering the mask — without this,
+   * nested `Sum`/`Product` chains stayed O(d²) (review finding on the item-148
+   * fix). `isComplexValued` only consults the memo while a compilation is
+   * running (`_compileDepth > 0`), where engine values are stable.
+   */
+  private static _complexMemoStack: WeakMap<object, boolean>[] = [
+    new WeakMap(),
+  ];
+
+  /**
+   * Drop every memoized complexness answer, at every layer.
+   *
+   * For WHOLESALE context changes: the compilation boundary (engine symbol
+   * values may differ) and a `_boundVarsCtx` swap (not a lexical push, so
+   * layering does not model it). Lexical enter/exit uses
+   * `_pushComplexMemoLayer`/`_popComplexMemoLayer` instead; an in-place
+   * mutation of the CURRENT frame uses `_resetComplexMemoTop`. Every context
+   * mutation goes through one of these — routed via the helpers below
+   * (`_pushLocalComplex`/`_popLocalComplex`/`_setLocalComplex`,
+   * `withBinderMask`, `withLocalShapeFrame`) and `compile()`'s
+   * `_boundVarsCtx` sync — so no new call site has to remember.
+   */
+  private static _invalidateComplexMemo(): void {
+    BaseCompiler._complexMemoStack = [new WeakMap()];
+  }
+
+  /** Enter a lexical context: answers cached inside must not escape it. */
+  private static _pushComplexMemoLayer(): void {
+    BaseCompiler._complexMemoStack.push(new WeakMap());
+  }
+
+  /**
+   * Leave a lexical context, restoring the enclosing layer. The guard resets
+   * rather than underflows if an unbalanced pop ever slips through — stale
+   * reuse is the failure mode that matters, an empty memo is merely slow.
+   */
+  private static _popComplexMemoLayer(): void {
+    BaseCompiler._complexMemoStack.pop();
+    if (BaseCompiler._complexMemoStack.length === 0)
+      BaseCompiler._complexMemoStack = [new WeakMap()];
+  }
+
+  /**
+   * The CURRENT frame changed in place (`compileBlock` fills its frame
+   * incrementally): answers cached under it are stale, enclosing layers are
+   * not consulted until their context is restored — drop only the top.
+   */
+  private static _resetComplexMemoTop(): void {
+    BaseCompiler._complexMemoStack[BaseCompiler._complexMemoStack.length - 1] =
+      new WeakMap();
+  }
+
+  /**
+   * Nesting depth of `compile()`. Zero outside any compilation — where the
+   * complexness memo is neither read nor written, because engine symbol
+   * values may change between compilations.
+   */
+  private static _compileDepth = 0;
+
+  /** Push a lexical frame of local complex-ness onto `_localComplex`. */
+  private static _pushLocalComplex(frame: Map<string, boolean>): void {
+    BaseCompiler._localComplex.push(frame);
+    BaseCompiler._pushComplexMemoLayer();
+  }
+
+  /** Pop the innermost `_localComplex` frame. */
+  private static _popLocalComplex(): void {
+    BaseCompiler._localComplex.pop();
+    BaseCompiler._popComplexMemoLayer();
+  }
+
+  /**
+   * Record a local's inferred complex-ness in a `_localComplex` frame.
+   * Routed through here (rather than a bare `frame.set`) because
+   * `compileBlock` fills its frame INCREMENTALLY, while the frame is already
+   * pushed and visible to the analysis.
+   */
+  private static _setLocalComplex(
+    frame: Map<string, boolean>,
+    name: string,
+    value: boolean
+  ): void {
+    frame.set(name, value);
+    BaseCompiler._resetComplexMemoTop();
+  }
+
+  /**
    * The binding structure of `expr` if it is a binder form, else `null`.
    *
    * A binder's operands are not all values: `Sum`/`Product`/`Loop`/
@@ -3189,11 +3331,13 @@ export class BaseCompiler {
     for (const n of binder.real) frame.set(n, false);
     BaseCompiler._localComplex.push(frame);
     BaseCompiler._binderShield.push(new Set(binder.shielded));
+    BaseCompiler._pushComplexMemoLayer();
     try {
       return fn();
     } finally {
       BaseCompiler._binderShield.pop();
       BaseCompiler._localComplex.pop();
+      BaseCompiler._popComplexMemoLayer();
     }
   }
 
@@ -3247,66 +3391,106 @@ export class BaseCompiler {
     }
 
     if (isFunction(expr)) {
-      // Check the function's return type from its operator definition
-      const t = expr.type;
-      if (isNonRealNumber(t.type)) {
-        // Sqrt/Ln/Log carve-out (2026-07-31): their type handlers now widen
-        // to `finite_complex`/`complex` for a real operand of UNKNOWN sign
-        // (type soundness: `√−2 = 1.414…i`), but the pinned compile contract
-        // keeps the real kernel for that case — these are the hottest plotted
-        // heads, and `Math.sqrt(-2)`/`sqrt(r)` yield a real-shaped `NaN` at
-        // run time. Only a provably negative or provably complex operand
-        // routes complex. The heads' own emitters use the same predicate
-        // (`resultIsComplexValued(head, args) && a provably negative
-        // operand`), so parent and child always agree on the value SHAPE —
-        // the invariant that matters for compiled correctness.
-        if (
-          expr.operator === 'Sqrt' ||
-          expr.operator === 'Ln' ||
-          expr.operator === 'Log'
-        )
-          return expr.ops.some(
-            (a) => a.isNegative === true || BaseCompiler.isComplexValued(a)
-          );
-        // …and the carve-out has to survive the arithmetic ABOVE those heads
-        // (Tycho item 144): `Multiply(1e5, Sqrt(u))` is itself typed
-        // `finite_complex`, so answering from the type here would report
-        // complex for a subtree the Sqrt carve-out just declared real, and the
-        // real-only-helper gate would fail closed on an operand that is real by
-        // construction. These heads only PROPAGATE complexness from their
-        // operands — and every target's emitter for them picks its
-        // real-vs-complex lowering from the OPERANDS with this same predicate
-        // (`args.some(isComplexValued)`), never from the node's type — so
-        // recursing keeps parent and child agreeing on the value SHAPE. Heads
-        // whose emitter reads the node TYPE instead (`Power`, `Root`, the
-        // inverse trigs — see `resultIsComplexValued`) must NOT be listed here.
-        if (BaseCompiler.COMPLEX_PROPAGATING_HEADS.has(expr.operator))
-          return expr.ops.some((a) => BaseCompiler.isComplexValued(a));
-        return true;
-      }
-      if (t.matches('real')) return false;
-      // A boolean or string value is never complex-valued, whatever its
-      // operands are. Without this, a predicate over a complex-typed operand
-      // (`Less(Sin(1e5·√u), 0)`) fell through to the conservative operand
-      // recursion below and reported complex — poisoning every enclosing form
-      // (a `Which` condition is not even a value position). Wide types
-      // (`number`, `unknown`) still take the recursion.
-      if (t.matches('boolean') || t.matches('string')) return false;
-
-      // Return type is unknown — fall back to checking whether any
-      // operand is complex (conservative: assumes function propagates
-      // complex-ness from its inputs). A binder form contributes only its
-      // body, analyzed with its bound names masked (see `binderParts`).
-      const binder = BaseCompiler.binderParts(expr);
-      if (binder)
-        return BaseCompiler.withBinderMask(binder, () =>
-          binder.bodies.some((b) => BaseCompiler.isComplexValued(b))
-        );
-
-      return expr.ops.some((arg) => BaseCompiler.isComplexValued(arg));
+      // Memoize FUNCTION answers only (Tycho item 148): symbols and numbers
+      // are already O(1), and a function answer transitively embeds the
+      // symbol/frame answers below it — which the TOTAL invalidation on every
+      // context mutation covers. Without this the analysis is O(subtree) per
+      // node and the whole compile O(n²) (a depth-6 nested chain spent 82% of
+      // its GLSL compile inside 1.5M `isComplexValued` calls).
+      //
+      // Only inside a compilation: engine symbol VALUES (read by the symbol
+      // arm's fallback) are stable while one compilation runs — compiles do
+      // not assign — but not between compilations, and a boxed expression can
+      // outlive the compile that first cached it.
+      if (BaseCompiler._compileDepth === 0)
+        return BaseCompiler._isComplexValuedFunction(expr);
+      const stack = BaseCompiler._complexMemoStack;
+      const hit = stack[stack.length - 1].get(expr);
+      if (hit !== undefined) return hit;
+      const result = BaseCompiler._isComplexValuedFunction(expr);
+      // Store into the layer that is live NOW, not the one captured on entry:
+      // a binder operand pushes a mask layer and pops it before returning, so
+      // by here the context — and the top layer — are the ones this call
+      // started with, and a binder node's own verdict lands in its ENCLOSING
+      // layer where sibling and repeat queries can hit it.
+      const after = BaseCompiler._complexMemoStack;
+      after[after.length - 1].set(expr, result);
+      return result;
     }
 
     return false;
+  }
+
+  /**
+   * The FUNCTION arm of `isComplexValued`, split out so the public entry can
+   * memoize it (Tycho item 148). Never call directly — the memo lives above.
+   */
+  private static _isComplexValuedFunction(
+    expr: Expression & { ops: ReadonlyArray<Expression> }
+  ): boolean {
+    // A head that is real-shaped by definition answers `false` BEFORE any
+    // type-based branch (Tycho item 147): `Imaginary` types bare `number`
+    // (so the conservative operand recursion would report complex) and
+    // `Real(±∞)` can type `non_finite_number` (so the `isNonRealNumber`
+    // branch would too) — yet every target emits a real scalar for both.
+    if (BaseCompiler.REAL_BY_DEFINITION_HEADS.has(expr.operator)) return false;
+    // Check the function's return type from its operator definition
+    const t = expr.type;
+    if (isNonRealNumber(t.type)) {
+      // Sqrt/Ln/Log carve-out (2026-07-31): their type handlers now widen
+      // to `finite_complex`/`complex` for a real operand of UNKNOWN sign
+      // (type soundness: `√−2 = 1.414…i`), but the pinned compile contract
+      // keeps the real kernel for that case — these are the hottest plotted
+      // heads, and `Math.sqrt(-2)`/`sqrt(r)` yield a real-shaped `NaN` at
+      // run time. Only a provably negative or provably complex operand
+      // routes complex. The heads' own emitters use the same predicate
+      // (`resultIsComplexValued(head, args) && a provably negative
+      // operand`), so parent and child always agree on the value SHAPE —
+      // the invariant that matters for compiled correctness.
+      if (
+        expr.operator === 'Sqrt' ||
+        expr.operator === 'Ln' ||
+        expr.operator === 'Log'
+      )
+        return expr.ops.some(
+          (a) => a.isNegative === true || BaseCompiler.isComplexValued(a)
+        );
+      // …and the carve-out has to survive the arithmetic ABOVE those heads
+      // (Tycho item 144): `Multiply(1e5, Sqrt(u))` is itself typed
+      // `finite_complex`, so answering from the type here would report
+      // complex for a subtree the Sqrt carve-out just declared real, and the
+      // real-only-helper gate would fail closed on an operand that is real by
+      // construction. These heads only PROPAGATE complexness from their
+      // operands — and every target's emitter for them picks its
+      // real-vs-complex lowering from the OPERANDS with this same predicate
+      // (`args.some(isComplexValued)`), never from the node's type — so
+      // recursing keeps parent and child agreeing on the value SHAPE. Heads
+      // whose emitter reads the node TYPE instead (`Power`, `Root`, the
+      // inverse trigs — see `resultIsComplexValued`) must NOT be listed here.
+      if (BaseCompiler.COMPLEX_PROPAGATING_HEADS.has(expr.operator))
+        return expr.ops.some((a) => BaseCompiler.isComplexValued(a));
+      return true;
+    }
+    if (t.matches('real')) return false;
+    // A boolean or string value is never complex-valued, whatever its
+    // operands are. Without this, a predicate over a complex-typed operand
+    // (`Less(Sin(1e5·√u), 0)`) fell through to the conservative operand
+    // recursion below and reported complex — poisoning every enclosing form
+    // (a `Which` condition is not even a value position). Wide types
+    // (`number`, `unknown`) still take the recursion.
+    if (t.matches('boolean') || t.matches('string')) return false;
+
+    // Return type is unknown — fall back to checking whether any
+    // operand is complex (conservative: assumes function propagates
+    // complex-ness from its inputs). A binder form contributes only its
+    // body, analyzed with its bound names masked (see `binderParts`).
+    const binder = BaseCompiler.binderParts(expr);
+    if (binder)
+      return BaseCompiler.withBinderMask(binder, () =>
+        binder.bodies.some((b) => BaseCompiler.isComplexValued(b))
+      );
+
+    return expr.ops.some((arg) => BaseCompiler.isComplexValued(arg));
   }
 
   /**
@@ -3430,6 +3614,11 @@ export class BaseCompiler {
     }
     BaseCompiler._localComplex.push(complex);
     BaseCompiler._localVector.push(vector);
+    // One layer per entry, isolated or not: during the frame only the fresh
+    // top layer is consulted (so an isolated body cannot reuse caller-context
+    // answers), and the exit below restores the enclosing frames exactly, so
+    // popping back to the enclosing layer is sound.
+    BaseCompiler._pushComplexMemoLayer();
     try {
       return fn();
     } finally {
@@ -3439,6 +3628,7 @@ export class BaseCompiler {
         BaseCompiler._localVector.pop();
         BaseCompiler._localComplex.pop();
       }
+      BaseCompiler._popComplexMemoLayer();
     }
   }
 

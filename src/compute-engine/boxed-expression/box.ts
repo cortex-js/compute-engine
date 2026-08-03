@@ -869,7 +869,13 @@ function applyOperatorDefinition(
         result = opDef.canonical(xs, { engine: ce, scope });
         if (result) return result;
       } catch (e) {
-        console.error(e instanceof Error ? e.message : e);
+        // Multi-arg form: a non-Error thrown value keeps its structure in the
+        // console (and a Symbol or null-prototype object, whose implicit
+        // string conversion throws, cannot break the recovery path).
+        console.error(
+          `ComputeEngine: error canonicalizing \`${name}\`:`,
+          e instanceof Error ? e.message : e
+        );
       }
       // The canonical handler gave up, return a non-canonical expression
       result = new BoxedFunction(ce, name, xs, {
@@ -976,7 +982,11 @@ function applyOperatorDefinition(
         return result;
       }
     } catch (e) {
-      console.error(e instanceof Error ? e.message : e);
+      // Multi-arg form — see the lazy-path catch above.
+      console.error(
+        `ComputeEngine: error canonicalizing \`${name}\`:`,
+        e instanceof Error ? e.message : e
+      );
     }
 
     // The canonical handler gave up, return a non-canonical expression

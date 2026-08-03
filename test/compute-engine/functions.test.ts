@@ -950,3 +950,95 @@ describe('CANONICAL-SUGAR HEADS KEEP ARITY ERRORS ON THE INERT HEAD', () => {
     expect(engine.box(['Exp2', 11]).evaluate().toString()).toBe('2048');
   });
 });
+
+describe('INVALID EXPLICIT-BLOCK BODY STILL GETS A SCOPED BLOCK', () => {
+  // Regression (2026-08-03, Tycho item 150): `get canonical` short-circuits on
+  // an invalid expression, so an explicit `Block` body containing an `Error`
+  // node came back from `bodyOp.canonical` unbound and UNSCOPED. The
+  // parameter-declaration loop in `canonicalFunctionLiteralArguments` then
+  // dereferenced `block.localScope!.bindings` and threw a bare
+  // `Cannot read properties of undefined (reading 'bindings')` onto the
+  // console before recovering to a non-canonical function literal.
+  let errorSpy: jest.SpyInstance;
+  let assertSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    assertSpy = jest.spyOn(console, 'assert').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+    assertSpy.mockRestore();
+  });
+
+  test('minimal repro boxes to a canonical, invalid function literal', () => {
+    const expr = engine.box(['Function', ['Block', ['Error', "'x'"]], 'W']);
+    expect(expr.operator).toBe('Function');
+    expect(expr.isCanonical).toBe(true);
+    expect(expr.isValid).toBe(false);
+    expect(expr.op1.operator).toBe('Block');
+    expect(expr.op1.isScoped).toBe(true);
+    expect(errorSpy).not.toHaveBeenCalled();
+    // The `console.assert(block.isScoped)` tripwire no longer fires
+    expect(assertSpy.mock.calls.filter((x) => !x[0])).toEqual([]);
+  });
+
+  test('nullary sibling gets a scoped block too', () => {
+    const expr = engine.box(['Function', ['Block', ['Error', "'x'"]]]);
+    expect(expr.isCanonical).toBe(true);
+    expect(expr.isValid).toBe(false);
+    expect(expr.op1.isScoped).toBe(true);
+    expect(() => expr.evaluate()).not.toThrow();
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  test('an invalid function literal inside Map recovers quietly', () => {
+    const expr = engine.box([
+      'Map',
+      ['Range', 1, 10],
+      [
+        'Function',
+        [
+          'Block',
+          [
+            'Sum',
+            [
+              'Which',
+              ['Equal', ['At', ['Error', "'incompatible-type'"], 'n'], 1],
+              1,
+              'True',
+              0,
+            ],
+            ['Limits', 'n', 1, 'W'],
+          ],
+        ],
+        'W',
+      ],
+    ]);
+    expect(expr.isCanonical).toBe(true);
+    expect(expr.isValid).toBe(false);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  test('a valid explicit-Block body is unchanged', () => {
+    const expr = engine.box(['Function', ['Block', ['Add', 'x', 1]], 'x']);
+    expect(expr.isCanonical).toBe(true);
+    expect(expr.isValid).toBe(true);
+    expect(expr.op1.isScoped).toBe(true);
+    expect(expr.json).toEqual(['Function', ['Block', ['Add', 'x', 1]], 'x']);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  test('an EMPTY Block body takes the Nothing convention', () => {
+    // `canonicalBlock` declines zero operands, so the rebuilt block stayed
+    // unscoped through a plain rebuild; an empty statement list follows the
+    // annotated branch's convention instead: the body is `Nothing`.
+    const expr = engine.box(['Function', ['Block'], 'W']);
+    expect(expr.isCanonical).toBe(true);
+    expect(expr.isValid).toBe(true);
+    expect(expr.op1.isScoped).toBe(true);
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(assertSpy.mock.calls.filter((x) => !x[0])).toEqual([]);
+  });
+});
