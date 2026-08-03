@@ -781,9 +781,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (fromValue !== undefined) return fromValue;
     // Type fallback (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.1e): a
     // `finite_number` refinement — e.g. from `assume(|q| < 1)` — entails
-    // finiteness even without a value.
+    // finiteness even without a value. Symmetrically, a `non_finite_number`
+    // type entails non-finiteness (see `get isInfinity`).
     const t = this.type;
-    if (!t.isUnknown && t.matches('finite_number')) return true;
+    if (!t.isUnknown) {
+      if (t.matches('finite_number')) return true;
+      if (t.matches('non_finite_number')) return false;
+    }
     return undefined;
   }
 
@@ -802,6 +806,19 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isInfinity(): boolean | undefined {
+    const fromValue = this._valueIsInfinity();
+    if (fromValue !== undefined) return fromValue;
+    // Type fallback, mirroring `BoxedFunction.isInfinity`: the static type can
+    // prove non-finiteness where no value is available — e.g. a symbol
+    // declared `non_finite_number`. That type is exactly the signed infinities
+    // (PositiveInfinity, NegativeInfinity — no NaN member, and no
+    // ComplexInfinity, which is typed `complex`), so it entails "is infinite".
+    const t = this.type;
+    if (!t.isUnknown && t.matches('non_finite_number')) return true;
+    return undefined;
+  }
+
+  private _valueIsInfinity(): boolean | undefined {
     const value = this.value;
     if (value === undefined) return undefined;
     if (isNumber(value)) return value.isInfinity;

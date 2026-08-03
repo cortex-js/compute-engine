@@ -1,5 +1,45 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Machine-precision `.N()` of a negative base to a rational power took the
+  wrong branch.** At machine precision, `(-2)^{100/3}` numericized to
+  `-1.08e10` (wrong sign — p = 100 is even), `(-2)^{7/3}` took the complex
+  branch where the real root exists, and `(-2)^{7/6}` — a genuine even-q
+  case — wrongly produced a real value. The exponent is numericized at the
+  engine's 15-digit precision before the real-root convention applies, which
+  put it far outside the branch decision's reconstruction tolerance. The
+  tolerance now scales with the engine precision, threaded identically
+  through the type handler and the compiled constant fold. A 288-cell
+  rational sweep against an independent reference went from 53 mismatches
+  to 0.
+
+  Fixing this exposed a deeper, longstanding defect in the same fallback:
+  every irrational's continued-fraction convergents eventually fall within
+  any fixed tolerance, so a negative base raised to an **irrational**
+  exponent could silently take the real branch — `(-2)^{\sqrt2}` and
+  `(-2)^{1/\pi}` were wrong-real on *both* precision lanes, `(-2)^e` on the
+  bignum lane, `(-2)^\pi` on the machine lane. The reconstruction now also
+  requires a coincidence bound (the candidate rational must be identifiable
+  as *the* value the double was rounded from, not merely a nearby
+  convergent): π, e, √2, √5, ln 2 and plain non-rational floats now take
+  the complex principal branch identically at every precision, and the
+  compiled constant fold follows (`(-2)^{\sqrt2}` folded to a wrong real
+  constant; it now folds to the complex value, matching `.N()`). Exact
+  `Rational` exponents are unaffected by the bound. Known limitation: once
+  an exponent has been numericized, a rational whose terms exceed what a
+  15–17-digit double preserves (denominator ≳ 3·10⁵) is indistinguishable
+  from an irrational and takes the complex branch.
+
+- **Symbols declared with a non-finite type now report their finiteness.**
+  A symbol declared `non_finite_number` answered `isFinite`/`isInfinity`
+  with `undefined`; both predicates now decide from the declared type
+  (`isFinite` is `false`, `isInfinity` is `true`), completing the
+  type-consult work started for function expressions in 0.100.2. The
+  workaround checks this blindness had required in the `Add`/`Multiply`/
+  `Divide` type handlers were retired after an instrumented full-suite run
+  showed the getters now subsume them everywhere.
+
 ## 0.100.2 _2026-08-03_
 
 ### New Features

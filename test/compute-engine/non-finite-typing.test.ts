@@ -22,6 +22,12 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     ce.pushScope();
     ce.declare('x_r', 'real'); // generic real: finiteness unknown, sign unknown
     ce.declare('z_f', 'finite_real'); // provably finite, sign unknown
+    ce.declare('nf_sym', 'non_finite_number'); // provably ±∞, no value
+    ce.declare('f_sym', 'finite_number'); // provably finite, no value
+    ce.declare('inf_val', 'number');
+    ce.assign('inf_val', ce.PositiveInfinity); // decided by its VALUE
+    ce.declare('three_val', 'number');
+    ce.assign('three_val', 3); // decided by its VALUE
     ce.assume(ce.box(['Greater', 'p_r', 0])); // provably positive real
   });
   afterAll(() => ce.popScope());
@@ -304,6 +310,60 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Zeta', 2])).toBe('finite_real');
       expect(typeOf(['Gamma', ['Rational', 1, 2]])).toBe('finite_real');
       expect(typeOf(['EllipticK', ['Rational', 1, 2]])).toBe('finite_real');
+    });
+  });
+
+  describe('a symbol’s declared type decides its finiteness predicates', () => {
+    // A symbol with no value has only its type to go on. `non_finite_number`
+    // is exactly the signed infinities, so it proves BOTH predicates —
+    // mirroring the type consult in `BoxedFunction.isInfinity` that decides
+    // `Ln(0)`. The three arithmetic type handlers below rely on it: they test
+    // `isFinite === false` alone, with no type disjunct of their own.
+    test('a `non_finite_number` symbol is decided by its type', () => {
+      const s = ce.box('nf_sym');
+      expect(s.isInfinity).toBe(true);
+      expect(s.isFinite).toBe(false);
+    });
+
+    test('a `finite_number` symbol stays finite (unchanged fallback)', () => {
+      const s = ce.box('f_sym');
+      expect(s.isFinite).toBe(true);
+      expect(s.isInfinity).toBe(undefined);
+    });
+
+    test('a generic `real` symbol decides neither (control)', () => {
+      const s = ce.box('x_r');
+      expect(s.isFinite).toBe(undefined);
+      expect(s.isInfinity).toBe(undefined);
+    });
+
+    test('an assigned value still decides, ahead of the type', () => {
+      // The type consult fires only where the value does not decide.
+      expect(ce.box('inf_val').isInfinity).toBe(true);
+      expect(ce.box('inf_val').isFinite).toBe(false);
+      expect(ce.box('three_val').isInfinity).toBe(false);
+      expect(ce.box('three_val').isFinite).toBe(true);
+    });
+
+    // Regression pins for the three arithmetic type handlers (Add, Multiply,
+    // Divide) that used to carry a `|| x.type.matches('non_finite_number')`
+    // disjunct purely because symbol operands were type-blind.
+    test('arithmetic over a `non_finite_number` symbol types soundly', () => {
+      // Without a decided `isFinite`, this fell through to the "every operand
+      // is finite" tail and claimed `finite_integer` — unsound.
+      expect(typeOf(['Multiply', 2, 'nf_sym'])).toBe('non_finite_number');
+      expect(typeOf(['Add', 1, 'nf_sym'])).toBe('non_finite_number');
+      expect(typeOf(['Divide', 'nf_sym', 2])).toBe('non_finite_number');
+      expect(typeOf(['Divide', 1, 'nf_sym'])).toBe('finite_integer');
+      // ∞/∞ is indeterminate.
+      expect(typeOf(['Divide', 'nf_sym', 'nf_sym'])).toBe('number');
+    });
+
+    test('arithmetic over a type-only-provable ±∞ function types soundly', () => {
+      expect(typeOf(['Multiply', 2, ['Ln', 0]])).toBe('non_finite_number');
+      expect(typeOf(['Add', 1, ['Ln', 0]])).toBe('non_finite_number');
+      expect(typeOf(['Divide', ['Ln', 0], 2])).toBe('non_finite_number');
+      expect(typeOf(['Divide', 1, ['Ln', 0]])).toBe('finite_integer');
     });
   });
 });

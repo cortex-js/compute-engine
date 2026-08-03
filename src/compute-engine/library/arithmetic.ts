@@ -281,9 +281,9 @@ function lnSign(x: Expression): Sign | undefined {
  * (`(−2)^0.3 = 0.7236… + 0.9960…i`).
  *
  * Returns `true` only when the complex branch is PROVABLE. An exponent whose
- * value cannot be pinned down (a symbol, or a float with no faithful rational
- * reconstruction) returns `false`, so the caller keeps its honest
- * `finite_number` hedge rather than over-claiming complex.
+ * value cannot be pinned down at all (a symbol, or anything without a finite
+ * real value) returns `false`, so the caller keeps its honest `finite_number`
+ * hedge rather than over-claiming complex.
  */
 function negativeBaseIsComplexBranch(exp: Expression): boolean {
   // `=== true` / `=== false`: a symbolic operand has `isReal`/`isInteger ===
@@ -295,7 +295,15 @@ function negativeBaseIsComplexBranch(exp: Expression): boolean {
   // branch decision, shared with the numeric path and the compiled constant
   // fold so type, `.N()` and compiled code cannot tell different stories.
   const terms = realPowerBranchTerms(asRational(exp), exp.re);
-  if (terms === undefined) return false;
+  // No trustworthy rational is a PROOF of the complex branch, not an absence of
+  // information — but only once the exponent has a definite value. A known
+  // real non-integer with a finite value that is not an odd-denominator
+  // rational takes the principal complex value, which is exactly what `.N()`
+  // returns; reading `undefined` as "unknown" here made the type disagree with
+  // the value (`(−2)^0.3333333333` typed `finite_number`, and the compiler
+  // lowered it to a real `Math.pow` that yields NaN). An exponent with no
+  // finite value — `Ln(2)`, a free symbol — still hedges.
+  if (terms === undefined) return Number.isFinite(exp.re);
   return terms[1] % 2 === 0;
 }
 
@@ -533,11 +541,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Division by zero: k/0 = ~oo, 0/0 = NaN — indeterminate.
         if (den.isSame(0)) return 'number';
         // A non-finite operand: `x/±∞ = 0`, `±∞/finite = ±∞`, but `∞/∞`,
-        // `∞/i`, `i/∞` give NaN/~oo. The static type check catches operands
-        // like `Ln(0)` whose provable non-finiteness is visible only in the
-        // type (`isFinite` stays `undefined`).
-        const nonFinite = (x: Expression) =>
-          x.isFinite === false || x.type.matches('non_finite_number');
+        // `∞/i`, `i/∞` give NaN/~oo. Operands like `Ln(0)`, or a symbol
+        // declared `non_finite_number`, have no value to probe: `isFinite`
+        // consults the static type on that path (see `BoxedFunction`/
+        // `BoxedSymbol` `isInfinity`), so it decides them too.
+        const nonFinite = (x: Expression) => x.isFinite === false;
         if (nonFinite(den) || nonFinite(num)) {
           // Ruling 2026-08-03 (mirrors the Multiply handler): a provably
           // non-finite REAL numerator over a provably finite, real, provably
@@ -1711,15 +1719,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return broadcastableResultTypeOf(ops);
         if (ops.some((x) => x.isNaN)) return 'number';
         // A provably non-finite factor may be visible only in its static
-        // TYPE: `Ln(0)` types `non_finite_number` while its structural
-        // `isFinite` stays `undefined` — without the type check `2·Ln(0)`
-        // fell through to the "every operand is finite" tail and claimed
-        // `finite_integer` (unsound; the value is −∞).
-        if (
-          ops.some(
-            (x) => x.isFinite === false || x.type.matches('non_finite_number')
-          )
-        ) {
+        // TYPE: `Ln(0)` types `non_finite_number`, as does a symbol declared
+        // `non_finite_number`, and neither has a value to probe. `isFinite`
+        // consults the type on that path (see `BoxedFunction`/`BoxedSymbol`
+        // `isInfinity`), so `isFinite === false` alone catches them; without
+        // it `2·Ln(0)` fell through to the "every operand is finite" tail and
+        // claimed `finite_integer` (unsound; the value is −∞).
+        if (ops.some((x) => x.isFinite === false)) {
           // 0 · ±∞ = NaN (indeterminate).
           if (ops.some((x) => x.isSame(0))) return 'number';
           // real · ±∞ = ±∞ (a non-finite real); a non-real factor (i, complex)
@@ -1738,8 +1744,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (
             ops.every((x) => {
               if (x.isReal !== true) return false;
-              if (x.isFinite === false || x.type.matches('non_finite_number'))
-                return true;
+              if (x.isFinite === false) return true;
               const s = x.sgn;
               return s === 'positive' || s === 'negative' || s === 'not-zero';
             })

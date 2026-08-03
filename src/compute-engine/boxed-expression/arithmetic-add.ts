@@ -385,15 +385,12 @@ export function addType(args: ReadonlyArray<Expression>): Type | BoxedType {
     return broadcastableResultTypeOf(args);
   if (args.some((x) => x.isNaN)) return 'number';
   // A provably non-finite operand may be visible only in its static TYPE:
-  // `Ln(0)`, `Artanh(1)` type `non_finite_number` while their structural
-  // `isFinite` stays `undefined` (no value probe before evaluation). Without
-  // the type check such a term slipped past this branch into the final
-  // `widen`, which reported `integer` for `1 + Ln(0)` — sound in the
-  // infinity-admitting lattice, but missing the provable `non_finite_number`.
-  const provablyNonFinite = (x: Expression) =>
-    x.isFinite === false || x.type.matches('non_finite_number');
+  // `Ln(0)`, `Artanh(1)` and a symbol declared `non_finite_number` have no
+  // value to probe before evaluation. `isFinite` itself consults the type on
+  // that path (see `BoxedFunction`/`BoxedSymbol` `isInfinity`), so
+  // `isFinite === false` alone is the complete test here.
   // (+∞) + (−∞) = NaN: two or more non-finite operands can cancel to NaN.
-  const nonFinite = args.filter(provablyNonFinite);
+  const nonFinite = args.filter((x) => x.isFinite === false);
   if (nonFinite.length >= 2) return 'number';
   if (nonFinite.length === 1) {
     // Exactly one provably non-finite term (non-finite typing convention):

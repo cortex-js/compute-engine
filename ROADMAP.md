@@ -423,9 +423,90 @@ whose reconstruction has an even denominator silently takes the complex branch:
 and types the node real. It is `.N()` that is wrong, and the disagreement is a
 floating-point artifact, not two defensible conventions. The compile path
 sidesteps it by declining whenever the exact and float readings disagree, so
-nothing emits a wrong value; the underlying `.N()` branch selection is
-unfixed. Fixing it means deciding the branch from the exact rational when one
-is available, in `arithmetic-power.ts`.
+nothing emits a wrong value.
+
+**FIXED 2026-08-03 (machine lane).** By fix time the bignum lane was already
+correct (an earlier 4-ulp reconstruction round); the MACHINE lane was still
+wrong in three directions — sign flips (`(-2)^(100/3)` → `-1.08e10`, p even),
+real→complex (`(-2)^(7/3)`), and even-q wrongly REAL (`(-2)^(7/6)`). Root
+cause deeper than this entry's account: `realPowerBranchTerms`
+(`arithmetic-power.ts:80`) already implements exact-first, but the evaluate
+handler receives operands ALREADY numericized (exact rational gone on both
+lanes), and a machine engine numericizes `100/3` at the ambient 15-digit
+`BigDecimal.precision` — ~1.5e5 ulp from the nearest double, far outside the
+4-ulp reconstruction tolerance. Fix: the reconstruction tolerance now scales
+to one unit in the last kept decimal digit (`precision` param, ≥17 clamps to
+the old 4-ulp — bignum lane bit-identical), threaded through the type
+handler (`negativeBaseIsComplexBranch`) and the compile fold
+(`negativeBaseRealPow`) so all three stay aligned. 288-cell sweep vs an
+independent reference: 53 mismatches → 0; compile emissions across 972
+probes byte-identical; zero snapshot churn. Tests in
+`power-negative-base-branch.test.ts` (unit reconstruction + lane parity).
+
+**Review round on the fix (2026-08-03) — the reconstruction fallback itself
+was unsound for IRRATIONAL exponents, and always had been.** Every
+irrational's CF convergents eventually fall within any fixed tolerance
+(error ~1/q² beats 4 ulp once q ≳ 3e7), so `(-2)^{√2}` and `(-2)^{1/π}`
+were wrong-REAL on BOTH lanes, `(-2)^e` on bignum, `(-2)^π` on machine —
+and the precision-scaled tolerance had made the lanes DISAGREE (different
+convergent per lane). Fixed with a coincidence-budget criterion (density
+of reduced rationals with denominator ≤ q is (6/π²)q² per unit length;
+require expected count in the admission window ≤ 1e-4 — measured ~7
+decades of separation between true rationals, worst 2.2e-11, and
+irrational convergents, best 1.1e-1). All lanes now agree on every probe;
+zero snapshot churn; `tol` digits floored at 15 (the `{precision: 3}`
+constructor bypasses setPrecision's MACHINE_PRECISION floor — pre-existing
+asymmetry, decision made immune rather than constructor changed). A
+`terms === undefined` result now PROVES the complex branch in
+`negativeBaseIsComplexBranch` once the exponent has a finite value
+(without this, `(-2)^{0.3333333333}` re-typed `finite_number` and the
+compiled≡`.N()` sweep broke).
+
+**Adversarial round on the criterion (2026-08-03, second pass)** — an
+Opus refuter + Codex, both with live repros. Closed the same day:
+(a) the tolerance read `ce.precision`, but the rounding is governed by the
+PROCESS-GLOBAL `BigDecimal.precision` — a default engine created before a
+machine engine numericized at the global 15 while its tolerance assumed
+17+, resurrecting the original `(-2)^(100/3)`-complex bug by
+engine-creation order; `realPowerBranchTerms` now reads the global (the
+`precision` parameter is REMOVED — keeping it was the footgun), which also
+restores same-moment lane agreement by construction. (b) the faithfulness
+gate never actually bounded `rationalize`'s output by the tolerance it
+charged the budget at (the `max(1e-12, tol)` floor dominated for
+|value| < 100; one accepted reconstruction sat 21× outside its own tol
+with a true expected-coincidence count of 1.2); the gate now measures at
+the same width the budget is charged for — a strictly monotone tightening
+(0 newly admitted, 104 near-cap coincidences dropped at 17 digits,
+measured residual snap rate ~5e-5 on 2e6 random doubles). Docstring and
+test prose rewritten to state the RATE guarantee honestly (q cap
+≈ 3e5·|v|^{-1/2}; ≤ ~1e-4 of arbitrary doubles can still snap by design).
+
+Residual the adversarial round PROVED unfixable at this layer (do not
+re-attempt with tolerance tuning): the compiled fold and type handler
+decide from the EXACT rational while `.N()` decides from the double, so an
+exact rational with q above the cap gets compiled-real vs `.N()`-complex
+(`(-2)^{1000003/1000001}`; a regression vs HEAD on the bignum lane for
+q ∈ (cap, ~1e7]). The only sound endpoint is the exact-provenance design
+change — the exponent's exact terms surviving numericization into `pow()`
+(the evaluate-handler options carry no original expression,
+`types-definitions.ts:98`) — deferred for a design pass with user rulings.
+
+Residuals, recorded not fixed: (a) `_bignumComponent`'s `radical === 1` fast
+path (`exact-numeric-value.ts:284`) still numericizes an exact rational at
+ambient precision instead of nearest-double — the sibling radical branch
+documents and floors exactly this defect; a candidate floor fix was BUILT,
+MEASURED (28 snapshot failures across 5 suites — machine `.N()` display
+widths change), and REVERTED as broad churn needing its own gated pass.
+(b) The branch is still decided by float reconstruction at `.N()` time — an
+exponent with terms too large to recover from a 15-digit double
+(denominator ≳ 3·10⁵ under the coincidence bound) takes the complex
+branch; curing that means letting the exact exponent survive
+numericization (evaluate-handler signature change, own design). Worth a
+ruling only if a consumer relies on very-large-denominator float
+exponents. (c) `Pi.isInteger` is `undefined` (not `false`), so `(-2)^π`
+still types `finite_number` and compiles to a real `Math.pow` (→ `null`)
+while `.N()` is complex — a hedged compiled/interpreted disagreement in
+the constant's type handler, orthogonal to the branch fix.
 
 **A negative VARIABLE base has no sign-corrected `Power` lowering.** With
 `a := -2`, `a^(2/3)` interprets to `1.5874` but compiles to `NaN`
@@ -451,11 +532,14 @@ something else; none is a regression):
   `gpu-target.ts` (~12 identical lines) because neither fixer could touch
   `base-compiler.ts`. `python-target.ts` very likely has the same `Sqrt`/`Ln`/
   `Log` split. Consolidate into `BaseCompiler` when fixing Python.
-- **Evaluating a derivative can shadow the `D` operator for the engine's
-  lifetime**: `D(D·x², x).evaluate()` declares the free symbol `D` as a _value_
-  definition, after which `isOperatorDef(lookupDefinition('D'))` is false and
-  `compile()` reports `` Unknown operator `D` ``. Same family as the
-  bare-assign-over-a-builtin shadowing fixed 2026-07-27; this route was missed.
+- ~~**Evaluating a derivative can shadow the `D` operator for the engine's
+  lifetime**~~ — **STALE, probed 2026-08-03: no longer reproduces.** Four
+  routes probed clean on 0.100.2 (box-route `D(D·x², x).evaluate()`,
+  parse-route `\frac{d}{dx}(D x^2)`, numeric-use inference `D + 1`, and an
+  explicit `assign('D', 5)`): `D(x², x)` still evaluates to `2x` and
+  compiles afterward in every case. Closed by the 2026-07-27
+  bare-assign-over-a-builtin scope-identity fix and/or the binder rounds;
+  struck without a code change.
 - **GPU: a builtin whose scalar slot is MANDATORY is unchecked when no scalar is
   present.** `Refract(V3, W3, X3)` emits `refract(vec3, vec3, vec3)`, which no
   driver accepts — the positional gate only runs when a scalar IS present.
@@ -524,13 +608,23 @@ New residues recorded by that round:
   `isSubtype` call, not a new type computation). `Ln(0).isFinite` is `false`.
   Measured: box-microloop canary 0.0196 → 0.0202 ms/iter (within noise),
   full suite +0.9% wall, ZERO snapshot churn. Two deliberate non-changes:
-  (a) the three Add/Multiply/Divide site patches are KEPT — proven
-  non-redundant, because **`BoxedSymbol.isFinite` is still type-blind on the
-  non-finite side** (it has a `finite_number → true` fallback but no
-  `non_finite_number → false` one; stripping the Multiply patch let
-  `Multiply(2, w)` with `w: non_finite_number` type `finite_integer`,
-  unsound). Fixing the symbol getter would retire the patches — separate
-  measured pass. (b) ~~an `isInfinity` companion trialled and DROPPED~~ —
+  (a) ~~the three Add/Multiply/Divide site patches are KEPT~~ — **RETIRED
+  2026-08-03**: `BoxedSymbol` now decides both predicates from its declared
+  type (`isInfinity` type fallback mirroring `BoxedFunction`; `isFinite`
+  gains the symmetric `non_finite_number → false` arm beside its existing
+  `finite_number → true` one), so `x.isFinite === false` subsumes the
+  `type.matches('non_finite_number')` disjuncts at all three sites (Add's
+  lives in `arithmetic-add.ts` `addType`, not `library/arithmetic.ts`).
+  Retirement was evidence-based, not by inspection: all four disjunct
+  evaluations were instrumented to log any operand where the type half
+  fired without the getter half, and a full-suite run produced ZERO
+  divergences (instrument proven live by reverting the getter). Class
+  sweep: BoxedNumber/BoxedSymbol/BoxedFunction all decide; no other class
+  can carry the type. Measured: zero churn, canary 4–8% FASTER (three
+  fewer `type.matches()` calls per operand). Residual flagged: `isNaN`
+  stays `undefined` for type-only non-finite expressions on both classes
+  though `non_finite_number` provably excludes NaN — symmetric,
+  pre-existing, possible follow-up. (b) ~~an `isInfinity` companion trialled and DROPPED~~ —
   **RULED 2026-08-03 and LANDED**: "a provably non-finite REAL factor is
   implicitly nonzero — proven signs are required only of the finite
   factors." The Multiply tight branch exempts provably non-finite factors
