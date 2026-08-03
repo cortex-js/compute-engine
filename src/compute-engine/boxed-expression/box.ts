@@ -52,7 +52,7 @@ import { sortOperands } from './order.js';
 import { validateArguments, checkNumericArgs } from './validate.js';
 import { overloadArms } from './overload.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import type { Type } from '../../common/type/types.js';
+import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
 import { isValueDef } from './utils.js';
 import { lookupApplicable } from '../function-utils.js';
@@ -639,6 +639,30 @@ function allParamsNumeric(signature: Type): boolean {
   return params.every((t) => isSubtype(t, 'number'));
 }
 
+/**
+ * The parameter types an operand at position `idx` could be bound to by a
+ * value definition's declared signature — one entry per overload arm (a
+ * single entry for a plain signature). Empty when the position is beyond
+ * every arm's parameters (an arity error, diagnosed elsewhere).
+ */
+function candidateParamsAt(valueType: Type, idx: number): Type[] {
+  const arms: ReadonlyArray<FunctionSignature> =
+    typeof valueType !== 'string' && valueType.kind === 'signature'
+      ? [valueType]
+      : (overloadArms(valueType) ?? []);
+
+  const result: Type[] = [];
+  for (const arm of arms) {
+    const args = arm.args ?? [];
+    const optArgs = arm.optArgs ?? [];
+    if (idx < args.length) result.push(args[idx].type);
+    else if (idx < args.length + optArgs.length)
+      result.push(optArgs[idx - args.length].type);
+    else if (arm.variadicArg) result.push(arm.variadicArg.type);
+  }
+  return result;
+}
+
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
@@ -746,6 +770,16 @@ function makeCanonicalFunction(
         // runtime, so it is not eagerly rejected; un-reject those and only
         // keep an invalid result if a closed operand actually violated the
         // signature.
+        //
+        // …unless the operand's own type *refutes* the parameter. "Has free
+        // variables" is a proxy for "provisional type", and it is only a
+        // valid proxy while the type could still turn out compatible: a
+        // symbol declared `string` can never denote a `tuple<…>`, so the
+        // error is definite, not provisional. Refute only on PROVABLE
+        // disjointness (`isDisjointFrom`, conservative by construction), so
+        // union-declared, `unknown`-typed and same-category-composite
+        // operands (`list<integer>` vs `list<string>` — the empty list
+        // inhabits both) keep deferring exactly as before.
         const cleaned = invalid.map((r, i) => {
           const orig = boxedOps[i];
           if (
@@ -753,8 +787,15 @@ function makeCanonicalFunction(
             orig.isValid &&
             !r.isValid &&
             orig.freeVariables.length > 0
-          )
+          ) {
+            const params = candidateParamsAt(valueType, i);
+            if (
+              params.length > 0 &&
+              params.every((p) => orig.type.isDisjointFrom(p))
+            )
+              return r;
             return orig;
+          }
           return r;
         });
         if (cleaned.some((r) => !r.isValid))

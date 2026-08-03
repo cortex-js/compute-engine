@@ -9,6 +9,15 @@
   silently skipping the declared-type check. The repair is now gated on the
   provenance of the shadow it rebinds to.
 
+- Arguments with free variables are no longer exempt from declared-type
+  checking when their type is provably incompatible. Applying a function
+  whose parameter is, e.g., `tuple<number, number, number>` to an unassigned
+  symbol declared `string` (or any provably disjoint type) now reports
+  `incompatible-type` instead of silently accepting the call. Arguments
+  whose type could still turn out compatible — `unknown`, inferred symbols,
+  unions with a matching arm, same-category collections — continue to defer
+  to runtime exactly as before.
+
 ### Performance
 
 - GPU compilation no longer re-merges its function table on every compile.
