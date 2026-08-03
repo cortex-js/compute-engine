@@ -1,5 +1,6 @@
 import { ComputeEngine, NumericType } from '../../src/compute-engine';
 import { _BoxedExpression } from '../../src/compute-engine/boxed-expression/abstract-boxed-expression';
+import { rewriteWithBinders } from '../../src/compute-engine/boxed-expression/binders';
 import { check, exprToString, engine as TEST_ENGINE } from '../utils';
 import type {
   CanonicalForm,
@@ -1196,6 +1197,166 @@ describe('`canonical` / `structural` options on parse/expr/function', () => {
     expect(pred.isCanonical).toBe(false);
     expect(ce.assume(pred)).toBe('ok');
     expect(ce.expr('x').isPositive).toBe(true);
+  });
+});
+
+describe('structural-aware subs', () => {
+  // Regression: `.subs()` on a STRUCTURAL receiver used to request a CANONICAL
+  // rebuild, silently erasing the parse vocabulary that structural form exists
+  // to preserve (`Subtract`, `Divide`, `InvisibleOperator`, `Delimiter`,
+  // operand order) and folding its exact literals. The receiver's form is now
+  // preserved three ways: canonical → canonical, structural → structural,
+  // raw → raw. An EXPLICIT `canonical` option keeps its former meaning.
+  const LATEX = '2(x+1) - \\frac{y}{3}';
+
+  test('a structural receiver stays structural, shape preserved', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(LATEX, { form: 'structural' });
+    expect((expr as any).isStructural).toBe(true);
+
+    const result = expr.subs({ x: ce.parse('k+1', { form: 'raw' }) });
+
+    // The parse vocabulary survives, and `k+1` substituted into `x+1` is NOT
+    // folded into `k+2`.
+    expect(result.json).toEqual([
+      'Subtract',
+      ['InvisibleOperator', 2, ['Delimiter', ['Add', ['Add', 'k', 1], 1]]],
+      ['Divide', 'y', 3],
+    ]);
+    expect(result.isCanonical).toBe(false);
+    expect((result as any).isStructural).toBe(true);
+    // Structural is BOUND, not raw: the result still answers type queries,
+    // and its operands are structural too.
+    expect(result.type.toString()).not.toBe('unknown');
+    expect((result.op1 as any).isStructural).toBe(true);
+  });
+
+  test('map() preserves a structural receiver (mirror of subs)', () => {
+    // `.map()` had the mirror-image defect: `options?.canonical ??
+    // this.isCanonical` sent a structural receiver into the RAW rebuild arm —
+    // shape preserved but binding lost. The identity map must be a no-op on
+    // form: still structural (bound), still parse-shaped.
+    const ce = new ComputeEngine();
+    const expr = ce.parse(LATEX, { form: 'structural' });
+    const result = expr.map((x) => x);
+    expect(result.json).toEqual(expr.json);
+    expect(result.isCanonical).toBe(false);
+    expect((result as any).isStructural).toBe(true);
+    expect(result.type.toString()).not.toBe('unknown');
+    // An EXPLICIT option keeps its former meaning: canonical rebuild.
+    const canon = expr.map((x) => x, { canonical: true });
+    expect(canon.isCanonical).toBe(true);
+  });
+
+  test('a structural receiver boxed from raw MathJSON is preserved too', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.expr(ce.parse(LATEX, { form: 'raw' }).json, {
+      form: 'structural',
+    });
+    const result = expr.subs({ x: ce.parse('k+1', { form: 'raw' }) });
+    expect(result.json).toEqual([
+      'Subtract',
+      ['InvisibleOperator', 2, ['Delimiter', ['Add', ['Add', 'k', 1], 1]]],
+      ['Divide', 'y', 3],
+    ]);
+    expect((result as any).isStructural).toBe(true);
+  });
+
+  test('a structural receiver with no match is returned by identity', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(LATEX, { form: 'structural' });
+    expect(expr.subs({ notInTheExpression: ce.number(1) })).toBe(expr);
+  });
+
+  test('a canonical receiver still re-canonicalizes', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .parse(LATEX)
+      .subs({ x: ce.parse('k+1', { form: 'raw' }) });
+    expect(result.json).toEqual([
+      'Add',
+      ['Multiply', 2, ['Add', 'k', 2]],
+      ['Multiply', ['Rational', -1, 3], 'y'],
+    ]);
+    expect(result.isCanonical).toBe(true);
+  });
+
+  test('a raw receiver stays raw', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .parse(LATEX, { form: 'raw' })
+      .subs({ x: ce.parse('k+1', { form: 'raw' }) });
+    expect(result.json).toEqual([
+      'Subtract',
+      ['InvisibleOperator', 2, ['Delimiter', ['Add', ['Add', 'k', 1], 1]]],
+      ['Divide', 'y', 3],
+    ]);
+    expect(result.isCanonical).toBe(false);
+    expect((result as any).isStructural).toBe(false);
+  });
+
+  test('an explicit `canonical` option overrides form preservation', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(LATEX, { form: 'structural' });
+
+    const canonical = expr.subs(
+      { x: ce.parse('k+1', { form: 'raw' }) },
+      { canonical: true }
+    );
+    expect(canonical.isCanonical).toBe(true);
+    expect(canonical.json).toEqual([
+      'Add',
+      ['Multiply', 2, ['Add', 'k', 2]],
+      ['Multiply', ['Rational', -1, 3], 'y'],
+    ]);
+
+    const raw = expr.subs(
+      { x: ce.parse('k+1', { form: 'raw' }) },
+      { canonical: false }
+    );
+    expect(raw.isCanonical).toBe(false);
+    expect((raw as any).isStructural).toBe(false);
+  });
+
+  test('a held operand of a canonical parent is still kept raw', () => {
+    // Same carve-out as `subs() preserves a bound index named i` in
+    // arithmetic.test.ts: the `Limits` index is held raw, and canonicalizing
+    // it here (outside its binding scope) would make `i` the imaginary unit.
+    const ce = new ComputeEngine();
+    const subbed = ce.parse('\\sum_{i=1}^{n}2^{-i}').subs({ n: 9 });
+    expect(subbed.json).toEqual([
+      'Sum',
+      ['Power', 2, ['Negate', 'i']],
+      ['Limits', 'i', 1, 9],
+    ]);
+    expect(subbed.evaluate().toString()).toBe('511/512');
+  });
+
+  test('rewriteWithBinders preserves the form of the tree it rebuilds', () => {
+    const ce = new ComputeEngine();
+    const toZ = (sym: any) =>
+      sym.symbol === 'x' ? ce.expr('z', { form: 'raw' }) : sym;
+
+    const structural = rewriteWithBinders(
+      ce.parse(LATEX, { form: 'structural' }),
+      toZ as any
+    );
+    expect(structural.json).toEqual([
+      'Subtract',
+      ['InvisibleOperator', 2, ['Delimiter', ['Add', 'z', 1]]],
+      ['Divide', 'y', 3],
+    ]);
+    expect(structural.isCanonical).toBe(false);
+    expect((structural as any).isStructural).toBe(true);
+
+    const raw = rewriteWithBinders(ce.parse(LATEX, { form: 'raw' }), toZ as any);
+    expect(raw.isCanonical).toBe(false);
+    expect((raw as any).isStructural).toBe(false);
+
+    const canonical = rewriteWithBinders(ce.parse(LATEX), (sym: any) =>
+      sym.symbol === 'x' ? ce.symbol('z') : sym
+    );
+    expect(canonical.isCanonical).toBe(true);
   });
 });
 

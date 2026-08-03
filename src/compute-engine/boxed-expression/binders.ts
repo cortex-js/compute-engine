@@ -247,7 +247,11 @@ export function rewriteWithBinders(
   const ce = expr.engine;
   if (!next.every((x) => x.isValid))
     return ce.function(expr.operator, next, { form: 'raw' });
-  const form = expr.isCanonical || expr.isStructural ? 'canonical' : 'raw';
+  const form = expr.isCanonical
+    ? 'canonical'
+    : expr.isStructural
+      ? 'structural'
+      : 'raw';
   return ce.function(expr.operator, next, { form, scope: expr.localScope });
 }
 

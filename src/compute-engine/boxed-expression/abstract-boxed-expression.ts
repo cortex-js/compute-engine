@@ -937,6 +937,14 @@ export abstract class _BoxedExpression implements Expression {
     options?: { canonical: CanonicalOptions; recursive?: boolean }
   ): Expression {
     if (!this.ops) return fn(this);
+    // No explicit form request: preserve the receiver's form — canonical
+    // stays canonical, structural stays structural, raw stays raw (the same
+    // contract as `subs()`; a structural receiver used to fall into the raw
+    // arm and come back unbound).
+    const structuralForm =
+      options?.canonical === undefined &&
+      !this.isCanonical &&
+      this.isStructural;
     const canonical = options?.canonical ?? this.isCanonical;
     const recursive = options?.recursive ?? true;
 
@@ -949,14 +957,15 @@ export abstract class _BoxedExpression implements Expression {
     if (
       (canonical === true
         ? this.isCanonical
-        : canonical === false && !this.isCanonical && !this.isStructural) &&
+        : structuralForm ||
+          (canonical === false && !this.isCanonical && !this.isStructural)) &&
       ops.every((x, i) => x === this.ops![i])
     )
       return fn(this);
 
     return fn(
       this.engine.function(this.operator, ops, {
-        form: canonical ? 'canonical' : 'raw',
+        form: structuralForm ? 'structural' : canonical ? 'canonical' : 'raw',
       })
     );
   }

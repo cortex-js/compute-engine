@@ -199,11 +199,10 @@ export function replaceAtSite(
   ops: ReadonlyArray<Expression>,
   path: readonly number[],
   replacement: Expression
-): Expression[] {
+): ReadonlyArray<Expression> {
+  if (ops[path[0]] === undefined) return ops;
   const next = [...ops];
-  const op = next[path[0]];
-  if (op !== undefined)
-    next[path[0]] = replaceAtPath(op, path.slice(1), replacement);
+  next[path[0]] = replaceAtPath(next[path[0]], path.slice(1), replacement);
   return next;
 }
 
@@ -214,6 +213,18 @@ export function replaceAtSite(
  * Intermediate nodes are rebuilt with `_fn` rather than `ce.function()`: this
  * is a surgical replacement of one symbol by an equal-but-differently-bound
  * one, and re-running a canonical handler could reshape the node.
+ *
+ * An intermediate on a live binding-site path is either RAW (the parse route
+ * — a lazy operator's held operands) or a CANONICAL wrapper the operator's
+ * own canonical handler just built (raw `Tuple` → `Limits`). It is never
+ * STRUCTURAL: structural means bound, and binding an indexing set outside
+ * its binder captures the site symbol in the ambient scope (`i` resolves to
+ * the imaginary unit), so `symbolAtSite` finds no live symbol and the
+ * operator errors out before this function runs. The `_fn` rebuild below
+ * therefore only ever re-marks nodes that were already canonical; the assert
+ * is the tripwire if that invariant is ever violated (a structural node
+ * rebuilt with `_fn` would falsely claim `isCanonical` while keeping its
+ * non-canonical shape).
  */
 function replaceAtPath(
   expr: Expression,
@@ -233,5 +244,9 @@ function replaceAtPath(
   const ce = expr.engine;
   if (!expr.isCanonical && !expr.isStructural)
     return ce.function(expr.operator, newOps, { form: 'raw' });
+  console.assert(
+    expr.isCanonical,
+    'replaceAtPath: a STRUCTURAL intermediate on a binding-site path — rebuilding it with `_fn` would falsely mark it canonical. See the invariant in the JSDoc.'
+  );
   return ce._fn(expr.operator, newOps, { scope: expr.localScope });
 }

@@ -40,6 +40,23 @@
 
 ### Bug Fixes
 
+- **`.subs()` on a structural expression now preserves the structural form.**
+  A structural receiver requested a CANONICAL rebuild, so substituting into
+  one silently canonicalized it: the parse vocabulary structural form exists
+  to preserve (`Subtract`, `Divide`, `InvisibleOperator`, `Delimiter`, operand
+  order) was erased and exact literals were folded — substituting `k+1` for
+  `x` in a structural `2(x+1)-\frac{y}{3}` returned
+  `Add(Multiply(2, Add(k, 2)), …)` instead of the structural
+  `Subtract(InvisibleOperator(2, Delimiter(Add(Add(k, 1), 1))), Divide(y, 3))`.
+  The receiver's form is now preserved three ways (canonical → canonical,
+  structural → structural, raw → raw); an explicit `canonical` option is
+  unchanged. The binder-rebuild internals (`rewriteWithBinders`, used by the
+  escaping-scope re-bind and by binding-keyed substitution) had the same
+  conflation and are fixed the same way. `.map()` had the mirror-image
+  defect — a structural receiver fell into the RAW rebuild arm, keeping the
+  shape but silently losing the binding — and now preserves the receiver's
+  form under the same three-way rule.
+
 - **GLSL compile of `Mod` over wide-typed real expressions.** The shader
   targets' real-only helper gate refused operands whose type merely *could* be
   complex: the complex type a `Sqrt`/`Ln` of unknown sign carries since 0.100.0

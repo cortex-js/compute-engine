@@ -702,8 +702,19 @@ export class BoxedFunction
     options?: { canonical?: CanonicalOptions }
   ): Expression {
     options ??= { canonical: undefined };
+
+    // When the caller does not request a form, the receiver's form is
+    // preserved: canonical → canonical, structural → structural, raw → raw.
+    // A structural receiver must not be rebuilt canonical: that erases the
+    // parse vocabulary structural form exists to preserve (`Subtract`,
+    // `Divide`, `InvisibleOperator`, `Delimiter`, operand order) and folds its
+    // exact literals. The operands are substituted shape-preservingly (see
+    // `opOptions` below) and this node is boxed with `form: 'structural'`.
+    const structuralForm =
+      options.canonical === undefined && !this.isCanonical && this.isStructural;
+
     if (options.canonical === undefined)
-      options = { canonical: this.isCanonical || this.isStructural };
+      options = { canonical: structuralForm ? false : this.isCanonical };
 
     // A non-canonical (held) child of a canonical parent — e.g. the index
     // symbol of `Limits`, held by `lazy` so it is never canonicalized — must
@@ -711,14 +722,20 @@ export class BoxedFunction
     // index `i` would become the imaginary unit). The parent's canonical
     // handler receives it raw, as it did when the expression was first built.
     // (A raw symbol reports `isStructural: true`, so key on `isCanonical`.)
+    // Under the structural arm each operand preserves its OWN form
+    // (`canonical: undefined`): a structural operand stays structural — and
+    // is returned by identity when nothing in it matched — while a held raw
+    // operand stays raw.
+    const opOptions = structuralForm ? { canonical: undefined } : options;
     const ops = this._ops.map((x) =>
       options!.canonical === true && !x.isCanonical
         ? x.subs(sub, { canonical: false })
-        : x.subs(sub, options)
+        : x.subs(sub, opOptions)
     );
 
-    const form =
-      options.canonical === true
+    const form = structuralForm
+      ? 'structural'
+      : options.canonical === true
         ? 'canonical'
         : options.canonical === false
           ? 'raw'
@@ -733,8 +750,7 @@ export class BoxedFunction
     // (A `CanonicalForm[]` request is not a plain canonicalization, so it
     // always rebuilds.)
     if (
-      form === 'canonical' &&
-      this.isCanonical &&
+      (form === 'canonical' ? this.isCanonical : form === 'structural') &&
       ops.every((x, i) => x === this._ops[i])
     )
       return this;
