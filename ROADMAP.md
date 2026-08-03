@@ -530,13 +530,36 @@ New residues recorded by that round:
   `non_finite_number → false` one; stripping the Multiply patch let
   `Multiply(2, w)` with `w: non_finite_number` type `finite_integer`,
   unsound). Fixing the symbol getter would retire the patches — separate
-  measured pass. (b) an `isInfinity` companion (`type ⊆ non_finite_number →
-  true`) was trialled and DROPPED: it breaks the pinned convention test
-  `non-finite-typing.test.ts:69` (`Divide(Ln(0), 2)` must stay `number`, the
-  prove-don't-assume widen; with the companion it sharpens to
-  `non_finite_number` — arguably more precise, `−∞/2 = −∞`). That is a
-  convention-vs-precision tradeoff needing a user ruling before anyone
-  re-attempts it. Mirror-image residue (deliberately untouched, much wider
+  measured pass. (b) ~~an `isInfinity` companion trialled and DROPPED~~ —
+  **RULED 2026-08-03 and LANDED**: "a provably non-finite REAL factor is
+  implicitly nonzero — proven signs are required only of the finite
+  factors." The Multiply tight branch exempts provably non-finite factors
+  from the sgn obligation (±∞ ≠ 0 is a theorem; `isReal === true` stays
+  required of EVERY factor — structural `isFinite === false` does not imply
+  real, viz. ComplexInfinity, so ∞·i keeps the widen); Divide gets the
+  mirrored branch (non-finite real numerator over a provably FINITE
+  (`isFinite === true`), real, proven-nonzero-sign denominator →
+  `non_finite_number`; ∞/∞, ∞/i, x/∞, unknown-finiteness denominators keep
+  `number`). The `isInfinity` companion landed with it (type consult on the
+  undefined path; the 2026-08-02 `isFinite` fallthrough consult became dead
+  and was removed — `isInfinity` is now the type-consult site). Pin
+  rewritten deliberately (`non-finite-typing.test.ts` § "implicitly
+  nonzero", + negative controls). Measured: zero snapshot churn, canary
+  within noise, compiled emissions for `k·Ln(0)` byte-identical on JS/GLSL.
+  Ripple (correct, pinned): the companion arms two pre-existing
+  canonicalization folds for type-provable infinities — `Ln(0)/π`
+  canonicalizes to `Ln(0)` and `2/Ln(0)` to `0` — so the Divide tight
+  branch is reachable mainly on the structural route (canonical shapes fold
+  first). A review flagged those folds' guards (`x/∞ → 0` with
+  unknown-finiteness `x`; `∞/a` accepting `isFinite === undefined`
+  denominators) as unsound — REFUTED: that is the documented generic-point
+  convention (same family as `x/x → 1`; the `∞/√π` FresnelC comment on the
+  fold records the guard choice deliberately), and `x/PositiveInfinity → 0`
+  already behaved this way for literal infinities; a `finite/±∞ → finite` type claim remains a possible future
+  tightening (noted in the handler). Residue: assumption-derived signs
+  (`assume(q > 0)`) leave `isFinite === undefined`, so such denominators
+  reach the tight branch only via the fold — existing sign-vs-finiteness
+  asymmetry, untouched. Mirror-image residue (deliberately untouched, much wider
   blast radius): `BoxedFunction` has no `finite_number → true` fallback, so
   `Sin(x)` types `finite_number` yet reports `isFinite === undefined`, while
   `BoxedSymbol` DOES have that fallback — the two classes are asymmetric.

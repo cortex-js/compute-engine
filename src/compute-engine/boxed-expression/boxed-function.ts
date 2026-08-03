@@ -841,6 +841,14 @@ export class BoxedFunction
 
   get isInfinity(): boolean | undefined {
     if (!this.isNumber) return false;
+    // Type fallback: the static type can prove non-finiteness where no
+    // structural analysis can — e.g. `Ln(0)` types `non_finite_number`. That
+    // type is exactly the signed infinities (PositiveInfinity,
+    // NegativeInfinity — no NaN member, and no ComplexInfinity, which is
+    // typed `complex`), so it entails "is infinite". The type is already
+    // computed and cached at this point (consulted by `isNumber` on entry).
+    const t = this.type;
+    if (!t.isUnknown && isSubtype(t.type, 'non_finite_number')) return true;
     return undefined; // We don't know until we evaluate
   }
 
@@ -897,18 +905,11 @@ export class BoxedFunction
       }
     }
 
-    if (this.isNaN === undefined || this.isInfinity === undefined) {
-      // Type fallback: the static type can prove non-finiteness where the
-      // structural analysis above could not — e.g. `Ln(0)` types
-      // `non_finite_number`. That type is exactly the signed infinities
-      // (PositiveInfinity, NegativeInfinity — no NaN member, and no
-      // ComplexInfinity, which is typed `complex`), so it entails "not
-      // finite". The type is already computed and cached at this point
-      // (consulted by `isNumber` on entry).
-      const t = this.type;
-      if (!t.isUnknown && isSubtype(t.type, 'non_finite_number')) return false;
+    // A type-provable non-finite expression (e.g. `Ln(0)`) never reaches here:
+    // `isInfinity` consults the static type and the early-return above already
+    // answered `false`. See `get isInfinity` for that type-consult site.
+    if (this.isNaN === undefined || this.isInfinity === undefined)
       return undefined;
-    }
     return true;
   }
 

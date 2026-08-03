@@ -61,12 +61,133 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(typeOf(['Add', 1, ['Artanh', 1]])).toBe('non_finite_number');
     });
 
-    test('a type-only-provable −∞ factor stays sound (sign unproven → number)', () => {
-      // `2·Ln(0)` is provably −∞ but the Multiply handler requires a proven
-      // sign on every factor for the tight claim; `number` is the sound widen
-      // (it was `finite_integer` before the fix).
-      expect(typeOf(['Multiply', 2, ['Ln', 0]])).toBe('number');
-      expect(typeOf(['Divide', ['Ln', 0], 2])).toBe('number');
+    // Ruling 2026-08-03: a provably non-finite REAL factor is implicitly
+    // non-zero (`±∞ ≠ 0` is a theorem), so a proven sign is required only of
+    // the FINITE factors. `Ln(0)` has sgn `non-positive` — not a proven
+    // non-zero sign — yet `2·Ln(0) = −∞`. Before the ruling both of these
+    // widened to `number`.
+    test('a provably non-finite real factor is implicitly nonzero (ruling 2026-08-03)', () => {
+      expect(typeOf(['Multiply', 2, ['Ln', 0]])).toBe('non_finite_number');
+      expect(typeOf(['Multiply', 2, ['Artanh', 1]])).toBe('non_finite_number');
+      // `Ln(0)/2` canonicalizes to `Multiply(1/2, Ln(0))`, so this is the
+      // Multiply handler too.
+      expect(typeOf(['Divide', ['Ln', 0], 2])).toBe('non_finite_number');
+    });
+
+    test('non-finite real numerator over a finite non-zero real denominator', () => {
+      // Canonically, `Ln(0)/π` no longer survives as a Divide: `canonicalDivide`
+      // folds `±∞/finite-nonzero` to the numerator (`Ln(0)`), which types
+      // `non_finite_number` on its own. The observable claim is unchanged.
+      const canonical = ce.box(['Divide', ['Ln', 0], 'Pi']);
+      expect(canonical.operator).toBe('Ln');
+      expect(canonical.type.toString()).toBe('non_finite_number');
+      // The structural route keeps the Divide head and exercises the Divide
+      // type handler's tight branch directly.
+      const structural = ce.function('Divide', [ce.box(['Ln', 0]), ce.Pi], {
+        structural: true,
+      });
+      expect(structural.operator).toBe('Divide');
+      expect(structural.type.toString()).toBe('non_finite_number');
+    });
+
+    test('negative controls: the non-finite factor must be REAL, finite factors keep their sign obligation', () => {
+      // `∞·i = ~oo`, not a signed infinity — `isFinite === false` does not
+      // imply real.
+      expect(typeOf(['Multiply', 'ImaginaryUnit', 'PositiveInfinity'])).toBe(
+        'number'
+      );
+      expect(typeOf(['Multiply', 'ImaginaryUnit', ['Ln', 0]])).toBe('number');
+      expect(typeOf(['Multiply', 2, 'ComplexInfinity'])).toBe('number');
+      // A possibly-zero FINITE factor still blocks the claim (0 · −∞ = NaN).
+      expect(typeOf(['Multiply', 'x_r', ['Ln', 0]])).toBe('number');
+      // Divide: an unknown-finiteness denominator admits ∞/∞ = NaN.
+      expect(typeOf(['Divide', ['Ln', 0], 'x_r'])).toBe('number');
+      // Divide: a provably finite denominator with no proven sign may be 0.
+      expect(typeOf(['Divide', ['Ln', 0], 'z_f'])).toBe('number');
+      // Divide: a non-real denominator (∞/i = ~oo).
+      expect(
+        ce
+          .function('Divide', [ce.PositiveInfinity, ce.I], { structural: true })
+          .type.toString()
+      ).toBe('number');
+      // Divide: a non-real NUMERATOR (~oo/5 = ~oo). Canonically this folds to
+      // the ~oo value (which types `complex`, see the documented residual
+      // below); the structural route exercises the handler's `isReal` guard.
+      expect(typeOf(['Divide', 'ComplexInfinity', 5])).toBe('complex');
+      expect(
+        ce
+          .function('Divide', [ce.ComplexInfinity, ce.box(5)], {
+            structural: true,
+          })
+          .type.toString()
+      ).toBe('number');
+    });
+
+    // Ruling 2026-08-03, symmetric case: `finite real / ±∞ = 0`.
+    test('a provably finite real numerator over a real ±∞ is exactly 0', () => {
+      // The canonical route folds `2/Ln(0)` to the literal `0`; the structural
+      // route keeps the Divide head and exercises the type handler.
+      expect(typeOf(['Divide', 2, ['Ln', 0]])).toBe('finite_integer');
+      const structural = ce.function('Divide', [ce.box(2), ce.box(['Ln', 0])], {
+        structural: true,
+      });
+      expect(structural.operator).toBe('Divide');
+      expect(structural.type.toString()).toBe('finite_integer');
+      // A provably finite (possibly zero) real numerator is still exactly 0.
+      expect(
+        ce
+          .function('Divide', [ce.box('z_f'), ce.box(['Ln', 0])], {
+            structural: true,
+          })
+          .type.toString()
+      ).toBe('finite_integer');
+    });
+
+    test('negative controls for `finite/±∞`: numerator finiteness and realness are obligations', () => {
+      const divide = (num: any, den: any) =>
+        ce
+          .function('Divide', [ce.box(num), ce.box(den)], { structural: true })
+          .type.toString();
+      // Unknown-finiteness numerator admits `∞/∞` = NaN.
+      expect(divide('x_r', ['Ln', 0])).toBe('number');
+      // Non-real numerator: `i/∞` is not claimed.
+      expect(divide('ImaginaryUnit', ['Ln', 0])).toBe('number');
+      // Non-real denominator: `2/~oo` is not claimed.
+      expect(divide(2, 'ComplexInfinity')).toBe('number');
+    });
+  });
+
+  describe('valueOf() projects only a proven direction', () => {
+    // `valueOf()` used to project ANY direction-unproven infinity to `'~oo'`.
+    // `Ln(0)` has sgn `non-positive` — not a proven `negative` — yet it is −∞.
+    // For an infinity, `non-negative` implies `+∞` and `non-positive` implies
+    // `-∞` (an infinity cannot be zero).
+    test('a type-only-provable ±∞ projects to ±Infinity', () => {
+      expect(ce.box(['Ln', 0]).valueOf()).toBe(-Infinity);
+      expect(ce.box(['Negate', ['Ln', 0]]).valueOf()).toBe(Infinity);
+    });
+
+    test('signed-infinity symbols are unchanged', () => {
+      expect(ce.symbol('PositiveInfinity').valueOf()).toBe(Infinity);
+      expect(ce.symbol('NegativeInfinity').valueOf()).toBe(-Infinity);
+    });
+
+    test('`~oo` is projected only when the value is provably non-real', () => {
+      expect(ce.symbol('ComplexInfinity').valueOf()).toBe('~oo');
+      expect(ce.box(['Divide', 1, 0]).valueOf()).toBe('~oo');
+    });
+
+    test('a direction-unproven REAL infinity does not guess `~oo`', () => {
+      ce.declare('nf_u', 'non_finite_number');
+      // `nf_u + 1` is provably infinite and real, but its direction is
+      // unproven: the projection falls through to the AsciiMath form instead
+      // of guessing complex infinity (it used to return `'~oo'`).
+      const e = ce.box(['Add', 'nf_u', 1]);
+      expect(e.isInfinity).toBe(true);
+      expect(e.isReal).toBe(true);
+      expect(e.valueOf()).not.toBe('~oo');
+      // A proven direction still projects: `|nf_u|` is non-negative, hence +∞.
+      expect(ce.box(['Abs', 'nf_u']).valueOf()).toBe(Infinity);
     });
   });
 

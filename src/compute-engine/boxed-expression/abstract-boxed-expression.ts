@@ -214,9 +214,16 @@ export abstract class _BoxedExpression implements Expression {
       if (this.symbol === 'NegativeInfinity') return -Infinity;
       if (this.symbol === 'ComplexInfinity') return '~oo';
       if (this.isInfinity) {
-        if (this.isPositive) return Infinity;
-        if (this.isNegative) return -Infinity;
-        return '~oo'; // ComplexInfinity
+        // Project only a *proven* direction. For an infinity, non-negative
+        // implies `+∞` and non-positive implies `-∞` (an infinity cannot be
+        // zero, and either predicate implies the value is real).
+        if (this.isPositive === true) return Infinity;
+        if (this.isNegative === true) return -Infinity;
+        if (this.isNonNegative === true) return Infinity;
+        if (this.isNonPositive === true) return -Infinity;
+        // `~oo` only when the value is provably non-real. Otherwise fall
+        // through: a direction-unproven real infinity is not complex infinity.
+        if (this.isReal === false) return '~oo'; // ComplexInfinity
       }
       if (typeof this.string === 'string') return this.string;
       if (typeof this.symbol === 'string')

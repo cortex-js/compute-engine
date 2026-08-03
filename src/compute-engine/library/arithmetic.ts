@@ -533,17 +533,38 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Division by zero: k/0 = ~oo, 0/0 = NaN — indeterminate.
         if (den.isSame(0)) return 'number';
         // A non-finite operand: `x/±∞ = 0`, `±∞/finite = ±∞`, but `∞/∞`,
-        // `∞/i`, `i/∞` give NaN/~oo. Widen to the top type (the old
-        // `non_finite_number` mis-typed `∞/i` and `∞/∞`). The static type
-        // check catches operands like `Ln(0)` whose provable non-finiteness
-        // is visible only in the type (`isFinite` stays `undefined`).
-        if (
-          den.isFinite === false ||
-          num.isFinite === false ||
-          den.type.matches('non_finite_number') ||
-          num.type.matches('non_finite_number')
-        )
+        // `∞/i`, `i/∞` give NaN/~oo. The static type check catches operands
+        // like `Ln(0)` whose provable non-finiteness is visible only in the
+        // type (`isFinite` stays `undefined`).
+        const nonFinite = (x: Expression) =>
+          x.isFinite === false || x.type.matches('non_finite_number');
+        if (nonFinite(den) || nonFinite(num)) {
+          // Ruling 2026-08-03 (mirrors the Multiply handler): a provably
+          // non-finite REAL numerator over a provably finite, real, provably
+          // non-zero denominator is `real ±∞ / finite non-zero real = ±∞`. The
+          // non-finite numerator needs no proven sign of its own (`±∞ ≠ 0` is
+          // a theorem); the denominator keeps the full obligation. `isReal` is
+          // required on both — `∞/i = ~oo` is not `non_finite_number`. The
+          // denominator must be provably finite (`isFinite === true`), not
+          // merely "not provably infinite": unknown finiteness admits `∞/∞`,
+          // which is NaN.
+          if (
+            nonFinite(num) &&
+            num.isReal === true &&
+            den.isFinite === true &&
+            den.isReal === true
+          ) {
+            const s = den.sgn;
+            if (s === 'positive' || s === 'negative' || s === 'not-zero')
+              return 'non_finite_number';
+          }
+          // Every other non-finite configuration (`∞/∞`, `∞/i`, `x/∞`, an
+          // unknown-finiteness denominator) widens to the top type. Possible
+          // future tightening: `finite/±∞ = 0` could claim a finite type, but
+          // that needs a provably finite, real numerator and is out of scope
+          // for this pass.
           return 'number';
+        }
         if (den.isInteger && num.isInteger) return 'finite_rational';
         if (den.isReal && num.isReal) return 'finite_real';
         // Real/pure-imaginary quotients (mirrors the Multiply type handler;
@@ -1693,13 +1714,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // 0 · ±∞ = NaN (indeterminate).
           if (ops.some((x) => x.isSame(0))) return 'number';
           // real · ±∞ = ±∞ (a non-finite real); a non-real factor (i, complex)
-          // with ∞ gives ~oo or NaN, and a *possibly-zero* factor gives NaN
-          // (0 · ∞), so only claim `non_finite_number` when every operand is
-          // provably real AND provably non-zero (non-finite typing
-          // convention: zero-ness must be proven absent, not assumed).
+          // with ∞ gives ~oo or NaN, and a *possibly-zero* finite factor gives
+          // NaN (0 · ∞). So every factor must be provably REAL, and every
+          // FINITE factor must additionally have a proven non-zero sign.
+          //
+          // Ruling 2026-08-03: a provably non-finite real factor is implicitly
+          // non-zero — `±∞ ≠ 0` is a theorem, so requiring a proven sign of it
+          // is redundant (`Ln(0)` has sgn `non-positive`, yet `2·Ln(0) = −∞`).
+          // Proven signs are required only of the finite factors. The
+          // `isReal === true` requirement stays for EVERY factor, including the
+          // non-finite one: structural `isFinite === false` does not imply real
+          // (`ComplexInfinity` has `isFinite === false` with type `complex`),
+          // and `∞·i = ~oo` must not be claimed `non_finite_number`.
           if (
             ops.every((x) => {
               if (x.isReal !== true) return false;
+              if (x.isFinite === false || x.type.matches('non_finite_number'))
+                return true;
               const s = x.sgn;
               return s === 'positive' || s === 'negative' || s === 'not-zero';
             })
