@@ -6060,6 +6060,102 @@ boundaryError(msg): MathJsonExpression
 
 <MemberCard>
 
+### RootStyle
+
+```ts
+type RootStyle = "radical" | "quotient" | "solidus";
+```
+
+How to serialize a root, i.e. `\sqrt{x}`, `x^{1/2}` or `x^\frac12`.
+
+</MemberCard>
+
+<MemberCard>
+
+### FractionStyle
+
+```ts
+type FractionStyle = 
+  | "quotient"
+  | "block-quotient"
+  | "inline-quotient"
+  | "inline-solidus"
+  | "nice-solidus"
+  | "reciprocal"
+  | "factor";
+```
+
+How to serialize a fraction.
+
+</MemberCard>
+
+<MemberCard>
+
+### LogicStyle
+
+```ts
+type LogicStyle = "word" | "boolean" | "uppercase-word" | "punctuation";
+```
+
+How to serialize the logic operators.
+
+</MemberCard>
+
+<MemberCard>
+
+### PowerStyle
+
+```ts
+type PowerStyle = "root" | "solidus" | "quotient";
+```
+
+How to serialize a fractional power.
+
+</MemberCard>
+
+<MemberCard>
+
+### NumericSetStyle
+
+```ts
+type NumericSetStyle = "compact" | "regular" | "interval" | "set-builder";
+```
+
+How to serialize a numeric set, i.e. `\R^*`, `\R \setminus \lbrace 0\rbrace`.
+
+</MemberCard>
+
+<MemberCard>
+
+### IndexStyle
+
+```ts
+type IndexStyle = "subscript" | "bracket";
+```
+
+How to serialize collection indexing (the `At` operator).
+
+</MemberCard>
+
+<MemberCard>
+
+### StyleOption
+
+```ts
+type StyleOption<T> = T | ((expr, level) => T);
+```
+
+A serialization style option: either a constant, or a function of the
+expression and of its nesting level.
+
+#### Type Parameters
+
+• T extends `string`
+
+</MemberCard>
+
+<MemberCard>
+
 ### SerializeLatexOptions
 
 ```ts
@@ -6071,21 +6167,14 @@ type SerializeLatexOptions = NumberSerializationFormat & {
   multiply: LatexString;
   missingSymbol: LatexString;
   keywordStyle: "text" | "keyword" | "operatorname";
-  applyFunctionStyle: (expr, level) => DelimiterScale;
-  groupStyle: (expr, level) => DelimiterScale;
-  rootStyle: (expr, level) => "radical" | "quotient" | "solidus";
-  fractionStyle: (expr, level) => 
-     | "quotient"
-     | "block-quotient"
-     | "inline-quotient"
-     | "inline-solidus"
-     | "nice-solidus"
-     | "reciprocal"
-     | "factor";
-  logicStyle: (expr, level) => "word" | "boolean" | "uppercase-word" | "punctuation";
-  powerStyle: (expr, level) => "root" | "solidus" | "quotient";
-  numericSetStyle: (expr, level) => "compact" | "regular" | "interval" | "set-builder";
-  indexStyle: (expr, level) => "subscript" | "bracket";
+  applyFunctionStyle: StyleOption<DelimiterScale>;
+  groupStyle: StyleOption<DelimiterScale>;
+  rootStyle: StyleOption<RootStyle>;
+  fractionStyle: StyleOption<FractionStyle>;
+  logicStyle: StyleOption<LogicStyle>;
+  powerStyle: StyleOption<PowerStyle>;
+  numericSetStyle: StyleOption<NumericSetStyle>;
+  indexStyle: StyleOption<IndexStyle>;
   dotNotation: boolean;
   dmsFormat: boolean;
   angleNormalization: "none" | "0...360" | "-180...180";
@@ -6198,7 +6287,7 @@ All three spellings parse back to the same expression.
 #### SerializeLatexOptions.indexStyle
 
 ```ts
-indexStyle: (expr, level) => "subscript" | "bracket";
+indexStyle: StyleOption<IndexStyle>;
 ```
 
 Notation used to serialize collection indexing (the `At` operator), e.g.
@@ -6321,6 +6410,37 @@ ce.expr(['Degrees', 370])
 
 </MemberCard>
 
+<MemberCard>
+
+### ResolvedSerializeLatexOptions
+
+```ts
+type ResolvedSerializeLatexOptions = Omit<SerializeLatexOptions, 
+  | "applyFunctionStyle"
+  | "groupStyle"
+  | "rootStyle"
+  | "fractionStyle"
+  | "logicStyle"
+  | "powerStyle"
+  | "numericSetStyle"
+  | "indexStyle"> & {
+  applyFunctionStyle: (expr, level) => DelimiterScale;
+  groupStyle: (expr, level) => DelimiterScale;
+  rootStyle: (expr, level) => RootStyle;
+  fractionStyle: (expr, level) => FractionStyle;
+  logicStyle: (expr, level) => LogicStyle;
+  powerStyle: (expr, level) => PowerStyle;
+  numericSetStyle: (expr, level) => NumericSetStyle;
+  indexStyle: (expr, level) => IndexStyle;
+};
+```
+
+The serialization options as seen by the serializer: the style options
+have been normalized from their constant form (e.g. `rootStyle: 'solidus'`)
+to their function form.
+
+</MemberCard>
+
 ### Serializer
 
 An instance of `Serializer` is provided to the `serialize` handlers of custom
@@ -6331,7 +6451,7 @@ LaTeX dictionary entries.
 ##### Serializer.options
 
 ```ts
-readonly options: Required<SerializeLatexOptions>;
+readonly options: Required<ResolvedSerializeLatexOptions>;
 ```
 
 </MemberCard>
