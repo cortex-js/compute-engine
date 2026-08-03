@@ -247,7 +247,8 @@ export function effectiveDischarge(
   discharge: readonly EffectLabel[] | undefined,
   op: Expression
 ): readonly EffectLabel[] | undefined {
-  if (discharge === undefined || !discharge.includes('random')) return discharge;
+  if (discharge === undefined || !discharge.includes('random'))
+    return discharge;
   if (!escapesAsDrawingLazyView(op)) return discharge;
   const rest = discharge.filter((label) => label !== 'random');
   return rest.length === 0 ? undefined : rest;

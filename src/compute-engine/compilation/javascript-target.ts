@@ -240,7 +240,7 @@ function compileJSEquality(
     (i >= 1 && i <= args.length - 2) || BaseCompiler.isComplexValued(args[i]);
   const bind = args.some((a, i) => a.isPure === false && multiSpliced(i));
   const bindings: string[] = [];
-  const codes = args.map((a, i) => {
+  const codes = args.map((a, _i) => {
     if (!bind || a.isPure !== false) return undefined;
     const t = BaseCompiler.tempVar(target);
     bindings.push(`${t} = ${compile(a)}`);

@@ -140,7 +140,9 @@ function structuralNumeratorDenominator(
       const base = arg.op1;
       const exp = arg.op2;
       if (isFunction(exp) && exp.operator === 'Negate' && exp.nops === 1) {
-        denominator.push(ce._fn('Power', [base, exp.op1], { canonical: false }));
+        denominator.push(
+          ce._fn('Power', [base, exp.op1], { canonical: false })
+        );
       } else {
         const n = isNumber(exp) ? asSmallInteger(exp) : null;
         if (n === -1) denominator.push(base);
@@ -1214,7 +1216,9 @@ function serializeJsonExpression(
       _preserveStructure = true;
     try {
       const structuralExpr = expr.structural;
-      const structuralOps = isFunction(structuralExpr) ? structuralExpr.ops : [];
+      const structuralOps = isFunction(structuralExpr)
+        ? structuralExpr.ops
+        : [];
       if (
         expr.isValid &&
         (expr.isCanonical || expr.isStructural) &&

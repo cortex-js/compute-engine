@@ -233,8 +233,7 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
    * (a symbol operand, or an application whose head is value-bound). */
   const visitValueDef = (
     occurrence: Expression,
-    valueDef: BoxedValueDefinition,
-    skipNames?: ReadonlySet<string>
+    valueDef: BoxedValueDefinition
   ): void => {
     const name = isSymbol(occurrence) ? occurrence.symbol : occurrence.operator;
     // A valueless, non-constant binding is trackable ONLY when it is the
@@ -297,7 +296,7 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
       const valueDef = e.valueDefinition;
       if (valueDef !== undefined) {
         if (excluded.has(valueDef) || seen.has(valueDef)) return;
-        visitValueDef(e, valueDef, skipNames);
+        visitValueDef(e, valueDef);
       } else if (e.operatorDefinition === undefined && e.isCanonical === false)
         eligible = false;
       return;
@@ -332,7 +331,7 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
       // track it like a symbol dependency.
       const headDef = e.valueDefinition;
       if (headDef !== undefined && !excluded.has(headDef) && !seen.has(headDef))
-        visitValueDef(e, headDef, skipNames);
+        visitValueDef(e, headDef);
       // A USER-DEFINED operator head (`f8(x)` after `ce.assign('f8', x ↦ …)`
       // creates an operator definition) needs no dep entry — redefinition and
       // signature inference always bump `_semanticEpoch` — but its

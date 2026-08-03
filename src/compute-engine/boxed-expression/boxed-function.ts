@@ -130,7 +130,6 @@ import { isScalarType } from './function-literal.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
-import { typeToString } from '../../common/type/serialize.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import {
   applyPoleOverride,

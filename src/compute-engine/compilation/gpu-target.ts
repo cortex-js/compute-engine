@@ -3237,11 +3237,7 @@ const GPU_BINOMIAL_UNROLL_LIMIT = 8;
  * inert in the interpreter, and a complex-valued `n` has no `vec2` lowering
  * here (the interpreter stays symbolic for it as well).
  */
-const gpuBinomial: CompiledFunction<Expression> = (
-  [n, k],
-  compile,
-  target
-) => {
+const gpuBinomial: CompiledFunction<Expression> = ([n, k], compile, target) => {
   if (n === null || n === undefined || k === null || k === undefined)
     throw new Error('Binomial: need two arguments');
   const kConst = tryGetConstant(k);
