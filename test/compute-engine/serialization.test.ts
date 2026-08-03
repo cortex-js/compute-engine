@@ -816,3 +816,103 @@ describe('A symbol bound to a lazy collection serializes as its name (Tycho item
     expect(joined.latex).toEqual('\\bigl\\lbrack1, 2, 3\\bigr\\rbrack');
   });
 });
+
+describe('Tycho item 145 — a non-canonical tree keeps its shape (prettify)', () => {
+  // `serializeJson()` recurses into `expr.structural.ops`, so the CHILDREN of
+  // a non-canonical tree used to reach the pretty `Multiply` rewrite, which
+  // rebuilt the product through `Product.asRationalExpression()` — sorting the
+  // factors and erasing explicit `Delimiter`s. A verbatim tree must survive
+  // serialization unchanged.
+  const modProduct = ['Mod', ['Delimiter', ['Multiply', 'k', 'f']], 1];
+  const term = ['Multiply', ['Divide', 1, 'n'], modProduct];
+
+  test('the explicit `Delimiter` and the operand order are preserved', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Add', term, 'y'] as any, { canonical: false });
+    expect(expr.toMathJson({ prettify: true })).toEqual([
+      'Add',
+      ['Divide', ['Mod', ['Delimiter', ['Multiply', 'k', 'f']], 1], 'n'],
+      'y',
+    ]);
+  });
+
+  test('the LaTeX round-trip keeps the `Mod` association', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Add', term, 'y'] as any, { canonical: false });
+    const tex = expr.toLatex({ invisibleMultiply: '\\cdot' });
+    expect(tex).toEqual('\\frac{1}{n}((k\\cdot f)\\bmod1)+y');
+    // The `Mod` first operand is still the whole product.
+    expect(ce.parse(tex, { canonical: false }).json).toEqual([
+      'Add',
+      [
+        'InvisibleOperator',
+        ['Divide', 1, 'n'],
+        ['Delimiter', ['Mod', ['Delimiter', ['Multiply', 'k', 'f']], 1]],
+      ],
+      'y',
+    ]);
+  });
+
+  test('a canonical tree is still prettified through `Product`', () => {
+    const ce = new ComputeEngine();
+    // `Multiply(x, Power(y, -1))` -> `Divide(x, y)`, and the canonical
+    // operand order (not the source order) is used.
+    const expr = ce.box(['Multiply', ['Power', 'y', -1], 'x'] as any);
+    expect(expr.toMathJson({ prettify: true })).toEqual(['Divide', 'x', 'y']);
+  });
+
+  test('a raw non-canonical subtree under a canonical root keeps its shape', () => {
+    const ce = new ComputeEngine();
+    // `Hold` holds its operand raw (neither canonical nor structural) while
+    // the `Hold` itself is canonical, so the root-level flag capture does not
+    // see it. Taking `.structural` of the canonical `Hold` rebuilds the
+    // operand as a structural node, erasing the distinction — so the raw
+    // operand has to be detected before that rebuild.
+    const nonCanonicalMul = ce.box(
+      ['Multiply', ['Power', 'n', -1], ['Delimiter', ['Multiply', 'k', 'f']]],
+      { canonical: false }
+    );
+    const held = ce.function('Hold', [nonCanonicalMul]);
+    expect(held.toMathJson({ prettify: true })).toEqual([
+      'Hold',
+      ['Divide', ['Delimiter', ['Multiply', 'k', 'f']], 'n'],
+    ]);
+  });
+
+  test('a bare rational literal factor is split into a fraction', () => {
+    const ce = new ComputeEngine();
+    // A literal rational factor (not a `Divide`/`Rational` function form)
+    // contributes a denominator part, like the canonical `Multiply`
+    // serializer does, and the factor order is preserved.
+    const expr = ce._fn(
+      'Add',
+      [
+        ce._fn(
+          'Multiply',
+          [ce.number([2, 3]), ce.symbol('x', { canonical: false })],
+          { canonical: false }
+        ),
+        ce.symbol('y', { canonical: false }),
+      ],
+      { canonical: false }
+    );
+    expect(expr.toMathJson({ prettify: true })).toEqual([
+      'Add',
+      ['Divide', ['Multiply', 2, 'x'], 3],
+      'y',
+    ]);
+    expect(expr.toLatex()).toEqual('\\frac{2x}{3}+y');
+  });
+
+  test('a non-canonical negated product keeps its factor order', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Add', ['Multiply', -1, 'x', 'a'], 'y'] as any, {
+      canonical: false,
+    });
+    expect(expr.toMathJson({ prettify: true })).toEqual([
+      'Add',
+      ['Negate', ['Multiply', 'x', 'a']],
+      'y',
+    ]);
+  });
+});

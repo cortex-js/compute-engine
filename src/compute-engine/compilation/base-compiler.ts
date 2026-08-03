@@ -1002,6 +1002,26 @@ export class BaseCompiler {
         );
     }
 
+    // An ORDERING comparison over a complex-valued operand has no lowering:
+    // the complex numbers are not ordered, so the interpreter leaves
+    // `Less(i·x, 0)` symbolic (no truth value), while both the infix path
+    // below and the function codegen it falls through to emit a raw `<` over
+    // the `{re, im}` object — a silent `false` behind `success: true`. Fail
+    // closed (D6) instead. `Equal`/`NotEqual` are NOT affected: they have
+    // their own complex-aware codegen (`_SYS.eq`/`_SYS.neq`). An operand of
+    // merely UNKNOWN sign over a real kernel (`Sqrt(x)`) is not complex-valued
+    // by `isComplexValued`'s carve-out, so `Less(Sqrt(x), 2)` still compiles.
+    if (BaseCompiler.ORDERING_HEADS.has(h)) {
+      const complexOperand = args.find((a) => BaseCompiler.isComplexValued(a));
+      if (complexOperand !== undefined)
+        throw new Error(
+          `${h}: cannot compile an ordering comparison over the ` +
+            `complex-valued operand \`${complexOperand.toString()}\` — the ` +
+            `complex numbers are not ordered, and the interpreter leaves the ` +
+            `comparison symbolic. Fail closed (D6).`
+        );
+    }
+
     // Handle operators
     const op = target.operators?.(h);
 
@@ -1796,6 +1816,34 @@ export class BaseCompiler {
    */
   private static readonly SCALAR_ARITHMETIC_HEADS: ReadonlySet<string> =
     new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power']);
+
+  /**
+   * Heads that only PROPAGATE complexness from their operands: the value they
+   * produce is complex exactly when one of their operands is. Read by
+   * `isComplexValued` to answer from the OPERANDS rather than from a node type
+   * that reads non-real — which is what keeps the `Sqrt`/`Ln`/`Log` carve-out
+   * alive through the arithmetic wrapped around those heads (Tycho item 144).
+   *
+   * Deliberately excludes `Power`/`Root` (and the inverse trigs): those emit a
+   * complex lowering off the node's TYPE (`resultIsComplexValued`), so their
+   * value shape does not follow their operands and answering from the operands
+   * here would put parent and child on different conventions.
+   */
+  private static readonly COMPLEX_PROPAGATING_HEADS: ReadonlySet<string> =
+    new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate']);
+
+  /**
+   * The ORDERING relational heads — the ones whose lowering needs a total
+   * order on its operands. `Equal`/`NotEqual` are deliberately absent: they
+   * are defined on the complex numbers and have their own complex-aware
+   * codegen.
+   */
+  private static readonly ORDERING_HEADS: ReadonlySet<string> = new Set([
+    'Less',
+    'LessEqual',
+    'Greater',
+    'GreaterEqual',
+  ]);
 
   /**
    * Logical operator heads that are `broadcastable` but return booleans. Like
@@ -3220,9 +3268,30 @@ export class BaseCompiler {
           return expr.ops.some(
             (a) => a.isNegative === true || BaseCompiler.isComplexValued(a)
           );
+        // …and the carve-out has to survive the arithmetic ABOVE those heads
+        // (Tycho item 144): `Multiply(1e5, Sqrt(u))` is itself typed
+        // `finite_complex`, so answering from the type here would report
+        // complex for a subtree the Sqrt carve-out just declared real, and the
+        // real-only-helper gate would fail closed on an operand that is real by
+        // construction. These heads only PROPAGATE complexness from their
+        // operands — and every target's emitter for them picks its
+        // real-vs-complex lowering from the OPERANDS with this same predicate
+        // (`args.some(isComplexValued)`), never from the node's type — so
+        // recursing keeps parent and child agreeing on the value SHAPE. Heads
+        // whose emitter reads the node TYPE instead (`Power`, `Root`, the
+        // inverse trigs — see `resultIsComplexValued`) must NOT be listed here.
+        if (BaseCompiler.COMPLEX_PROPAGATING_HEADS.has(expr.operator))
+          return expr.ops.some((a) => BaseCompiler.isComplexValued(a));
         return true;
       }
       if (t.matches('real')) return false;
+      // A boolean or string value is never complex-valued, whatever its
+      // operands are. Without this, a predicate over a complex-typed operand
+      // (`Less(Sin(1e5·√u), 0)`) fell through to the conservative operand
+      // recursion below and reported complex — poisoning every enclosing form
+      // (a `Which` condition is not even a value position). Wide types
+      // (`number`, `unknown`) still take the recursion.
+      if (t.matches('boolean') || t.matches('string')) return false;
 
       // Return type is unknown — fall back to checking whether any
       // operand is complex (conservative: assumes function propagates

@@ -27,7 +27,7 @@ import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 
 import { order } from './order.js';
-import { asSmallInteger } from './numerics.js';
+import { asRational, asSmallInteger } from './numerics.js';
 import type {
   IComputeEngine as ComputeEngine,
   Metadata,
@@ -119,9 +119,78 @@ function serializeSubtract(
 }
 
 /**
+ * Split the factors of a `Multiply` into a numerator and a denominator,
+ * preserving the original operand order and any explicit `Delimiter` wrapper.
+ *
+ * This mirrors `numeratorDenominator()` in the LaTeX dictionary. It is used
+ * for structural (i.e. bound but not canonical) expressions, where the
+ * `Product`-based rewrite would reorder the factors and erase `Delimiter`s.
+ *
+ * Return `null` if there is no denominator part, i.e. no rewrite to do.
+ */
+function structuralNumeratorDenominator(
+  ce: ComputeEngine,
+  args: ReadonlyArray<Expression>
+): [Expression, Expression] | null {
+  const numerator: Expression[] = [];
+  const denominator: Expression[] = [];
+
+  for (const arg of args) {
+    if (isFunction(arg) && arg.operator === 'Power' && arg.nops === 2) {
+      const base = arg.op1;
+      const exp = arg.op2;
+      if (isFunction(exp) && exp.operator === 'Negate' && exp.nops === 1) {
+        denominator.push(ce._fn('Power', [base, exp.op1], { canonical: false }));
+      } else {
+        const n = isNumber(exp) ? asSmallInteger(exp) : null;
+        if (n === -1) denominator.push(base);
+        else if (n !== null && n < 0)
+          denominator.push(
+            ce._fn('Power', [base, ce.number(-n)], { canonical: false })
+          );
+        else numerator.push(arg);
+      }
+    } else if (
+      isFunction(arg) &&
+      (arg.operator === 'Divide' || arg.operator === 'Rational') &&
+      arg.nops === 2
+    ) {
+      const num = arg.op1;
+      const den = arg.op2;
+      if (!isNumber(num) || asSmallInteger(num) !== 1) numerator.push(num);
+      if (!isNumber(den) || asSmallInteger(den) !== 1) denominator.push(den);
+    } else {
+      // A bare literal rational factor (not a `Divide`/`Rational` function
+      // form) also contributes a denominator part, mirroring the
+      // `rationalValue()` fallback of `numeratorDenominator()`.
+      const r = asRational(arg);
+      if (r !== undefined && !isInteger(r)) {
+        if (machineNumerator(r) !== 1) numerator.push(ce.number(r[0]));
+        denominator.push(ce.number(r[1]));
+      } else numerator.push(arg);
+    }
+  }
+
+  if (denominator.length === 0) return null;
+
+  const combine = (xs: Expression[]): Expression =>
+    xs.length === 0
+      ? ce.One
+      : xs.length === 1
+        ? xs[0]
+        : ce._fn('Multiply', xs, { canonical: false });
+
+  return [combine(numerator), combine(denominator)];
+}
+
+/**
  * The pretty version of `serializeJsonFunction()` applies
  * additional transformations to make the MathJSON more readable, for example
  *  it uses `Divide`  instead of `Multiply`/`Power` when applicable.
+ *
+ * When `_preserveStructure` is set (a verbatim, non-canonical tree), the
+ * operand order and any explicit `Delimiter` are meaningful, so only
+ * shape-preserving rewrites are applied.
  */
 function serializePrettyJsonFunction(
   ce: ComputeEngine,
@@ -130,6 +199,7 @@ function serializePrettyJsonFunction(
   options: Readonly<JsonSerializationOptions>,
   metadata?: Metadata
 ): MathJsonExpression {
+  const preserveStructure = _preserveStructure;
   const exclusions = options.exclude;
 
   if (name === 'Add' && args.length === 2 && !exclusions.includes('Subtract')) {
@@ -153,10 +223,21 @@ function serializePrettyJsonFunction(
     if (args[0].im === 0 && args[0].re === -1) {
       if (args.length === 2)
         return serializeJsonFunction(ce, 'Negate', [args[1]], options);
+      const rest = [...args.slice(1)];
+      // A verbatim tree keeps its factor order: canonicalizing (or sorting)
+      // the remaining factors here would reorder them.
+      if (preserveStructure)
+        return serializeJsonFunction(
+          ce,
+          'Negate',
+          [ce.function('Multiply', rest, { structural: true })],
+          options,
+          metadata
+        );
       return serializeJsonFunction(
         ce,
         'Negate',
-        [ce._fn('Multiply', [...args.slice(1)].sort(order))],
+        [ce._fn('Multiply', rest.sort(order))],
         options,
         metadata
       );
@@ -166,12 +247,25 @@ function serializePrettyJsonFunction(
   if (name === 'Multiply' && !exclusions.includes('Divide')) {
     // Display a product with negative exponents as a division if
     // there are terms with a negative degree.
-    const result = new _Product(ce, args, {
-      canonical: false,
-    }).asRationalExpression();
-    if (result.operator === 'Divide') {
-      const ops = (result as Expression & FunctionInterface).ops;
-      return serializeJsonFunction(ce, result.operator, ops, options, metadata);
+    if (preserveStructure) {
+      // The operand order and any explicit `Delimiter` must be preserved:
+      // use an order-preserving split instead of `Product`.
+      const nd = structuralNumeratorDenominator(ce, args);
+      if (nd) return serializeJsonFunction(ce, 'Divide', nd, options, metadata);
+    } else {
+      const result = new _Product(ce, args, {
+        canonical: false,
+      }).asRationalExpression();
+      if (result.operator === 'Divide') {
+        const ops = (result as Expression & FunctionInterface).ops;
+        return serializeJsonFunction(
+          ce,
+          result.operator,
+          ops,
+          options,
+          metadata
+        );
+      }
     }
   }
 
@@ -1028,7 +1122,47 @@ function serializeJsonNumber(
   return { num };
 }
 
+/**
+ * Serialize an expression to MathJSON.
+ *
+ * When the *root* of the serialized tree is not canonical, the expression is
+ * verbatim: its operand order and any explicit `Delimiter` are meaningful and
+ * must survive serialization (`_preserveStructure`). The flag is captured at
+ * the root and inherited by the nested calls: a canonical expression's
+ * `.structural` operands are themselves structural-but-not-canonical, so a
+ * per-node test would misclassify them.
+ */
 export function serializeJson(
+  ce: ComputeEngine,
+  expr: Expression,
+  options: Readonly<JsonSerializationOptions>
+): MathJsonExpression {
+  if (_serializeDepth === 0) _preserveStructure = !expr.isCanonical;
+  _serializeDepth += 1;
+  try {
+    return serializeJsonExpression(ce, expr, options);
+  } finally {
+    _serializeDepth -= 1;
+  }
+}
+
+let _preserveStructure = false;
+let _serializeDepth = 0;
+
+/**
+ * A "raw" expression: neither canonical nor structural, i.e. verbatim as
+ * authored. Its operand order and any explicit `Delimiter` are meaningful.
+ *
+ * Note that this is *not* the same as `!isCanonical`: `BoxedFunction.structural`
+ * rebuilds the children of a canonical expression as
+ * `isCanonical: false, isStructural: true` nodes, and those must still be
+ * serialized with the full pretty rewrites.
+ */
+function isRawExpression(expr: Expression): boolean {
+  return !expr.isCanonical && !expr.isStructural;
+}
+
+function serializeJsonExpression(
   ce: ComputeEngine,
   expr: Expression,
   options: Readonly<JsonSerializationOptions>
@@ -1066,29 +1200,45 @@ export function serializeJson(
 
   // Is it a function?
   if (isFunction(expr)) {
-    const structuralExpr = expr.structural;
-    const structuralOps = isFunction(structuralExpr) ? structuralExpr.ops : [];
+    // Turn on structure preservation when entering a raw (verbatim) node, or a
+    // node with a raw operand. The operands must be tested *here*, while they
+    // are still raw: taking `.structural` of a canonical parent rebuilds them
+    // as structural-but-not-canonical nodes, which erases the distinction
+    // (e.g. a raw operand held by a canonical `Hold`). Once on, the flag stays
+    // on for the whole subtree; it is restored on exit.
+    const savedPreserveStructure = _preserveStructure;
     if (
-      expr.isValid &&
-      (expr.isCanonical || expr.isStructural) &&
-      options.prettify
+      !_preserveStructure &&
+      (isRawExpression(expr) || expr.ops.some(isRawExpression))
     )
-      return serializePrettyJsonFunction(
-        ce,
-        expr.operator,
-        structuralOps,
-        options,
-        {
-          latex: expr.verbatimLatex,
-          wikidata,
-          sourceOffsets: expr.sourceOffsets,
-        }
-      );
-    return serializeJsonFunction(ce, expr.operator, structuralOps, options, {
-      latex: expr.verbatimLatex,
-      wikidata,
-      sourceOffsets: expr.sourceOffsets,
-    });
+      _preserveStructure = true;
+    try {
+      const structuralExpr = expr.structural;
+      const structuralOps = isFunction(structuralExpr) ? structuralExpr.ops : [];
+      if (
+        expr.isValid &&
+        (expr.isCanonical || expr.isStructural) &&
+        options.prettify
+      )
+        return serializePrettyJsonFunction(
+          ce,
+          expr.operator,
+          structuralOps,
+          options,
+          {
+            latex: expr.verbatimLatex,
+            wikidata,
+            sourceOffsets: expr.sourceOffsets,
+          }
+        );
+      return serializeJsonFunction(ce, expr.operator, structuralOps, options, {
+        latex: expr.verbatimLatex,
+        wikidata,
+        sourceOffsets: expr.sourceOffsets,
+      });
+    } finally {
+      _preserveStructure = savedPreserveStructure;
+    }
   }
 
   return expr.json;

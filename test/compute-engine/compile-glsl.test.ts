@@ -1458,3 +1458,88 @@ describe('GLSL zero-width aggregates fail closed', () => {
     );
   });
 });
+
+// Tycho item 144: `isComplexValued` over-reported complexness and the
+// real-only-helper gate (D6) failed closed on operands that are real by
+// construction, blanking Desmos-corpus render states.
+//
+// Two independent leaks, both above the `Sqrt`/`Ln`/`Log` carve-out that keeps
+// the real kernel for an unknown-sign radicand:
+//   1. the arithmetic wrapped around such a head (`1e5·√u`) is itself typed
+//      `finite_complex` and answered from its TYPE, defeating the carve-out;
+//   2. a `boolean`-typed node (a comparison, e.g. a `Which` condition — not
+//      even a value position) fell through to the conservative operand
+//      recursion and inherited the report.
+describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
+  const e = new ComputeEngine();
+  // √(⌈x⌉² + ⌈y⌉²): a real radicand of unknown sign, so `Sqrt` types
+  // `finite_complex` while the compile contract keeps the real `sqrt` kernel.
+  const radical = [
+    'Sqrt',
+    ['Add', ['Power', ['Ceil', 'x'], 2], ['Power', ['Ceil', 'y'], 2]],
+  ];
+
+  it('compiles the full witness (Multiply + comparison + Which under Mod)', () => {
+    const expr = e.box([
+      'Mod',
+      [
+        'Which',
+        ['Less', ['Sin', ['Multiply', 1e5, radical]], 0],
+        'x',
+        'True',
+        'y',
+      ],
+      1,
+    ]);
+    const code = glsl.compile(expr).code;
+    expect(code).toMatchInlineSnapshot(
+      `mod(((sin(100000.0 * sqrt(_gpu_powi(ceil(x), 2.0) + _gpu_powi(ceil(y), 2.0))) < 0.0) ? (x) : ((y))), 1.0)`
+    );
+  });
+
+  it('compiles a Multiply over a wide-typed Sqrt (leak 1)', () => {
+    const expr = e.box([
+      'Mod',
+      ['Multiply', 1e5, ['Sqrt', ['Add', ['Power', ['Ceil', 'x'], 2], 1]]],
+      1,
+    ]);
+    const code = glsl.compile(expr).code;
+    expect(code).toMatchInlineSnapshot(
+      `mod(100000.0 * sqrt(_gpu_powi(ceil(x), 2.0) + 1.0), 1.0)`
+    );
+  });
+
+  it('compiles a comparison over a wide-typed operand (leak 2)', () => {
+    const expr = e.box([
+      'Mod',
+      [
+        'Which',
+        ['Less', ['Multiply', 2, radical], 0],
+        'x',
+        'True',
+        'y',
+      ],
+      1,
+    ]);
+    const code = glsl.compile(expr).code;
+    expect(code).toMatchInlineSnapshot(
+      `mod(((2.0 * sqrt(_gpu_powi(ceil(x), 2.0) + _gpu_powi(ceil(y), 2.0)) < 0.0) ? (x) : ((y))), 1.0)`
+    );
+  });
+
+  it('still fails closed on a provably complex operand', () => {
+    expect(() => glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]))).toThrow(
+      /real-only target helper "mod" cannot represent a complex-valued argument/
+    );
+    expect(() => glsl.compile(e.box(['Mod', ['Complex', 1, 2], 1]))).toThrow(
+      /real-only target helper "mod" cannot represent a complex-valued argument/
+    );
+    // Propagated through a `Multiply`, the head whose type answer this fix
+    // replaced with operand recursion.
+    expect(() =>
+      glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))
+    ).toThrow(
+      /real-only target helper "mod" cannot represent a complex-valued argument/
+    );
+  });
+});

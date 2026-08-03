@@ -1,5 +1,117 @@
 ## [Unreleased]
 
+### New Features
+
+- **`Repeat` compiles on the JavaScript target.** `Repeat(7, 3)` previously
+  failed closed (interpreted fallback); it now lowers to a native array
+  construction with interpreter parity at the edges: the value is evaluated
+  exactly once and replicated (`Repeat(Random(), 3)` yields three copies of a
+  single draw — and consumes its draw even when the count is ≤ 0, matching the
+  interpreter), a zero or negative count yields `[]`, and the 1-argument
+  infinite form and a statically non-finite count still decline — the
+  interpreter leaves `Repeat(7, ∞)` unevaluated, so a compiled `[]` would be a
+  valid-looking value with the wrong meaning.
+
+- **`Binomial`/`Choose` compile on the GPU targets.** A literal k ∈ 0…8
+  unrolls to the falling-factorial form on GLSL and WGSL
+  (`Binomial(x+1, 2)` → `(((x + 1.0) * ((x + 1.0) - 1.0)) / 2.0)`), matching
+  the interpreter's generalized semantics for non-integer and negative first
+  operands (`Binomial(5.5, 2)` = 12.375, `Binomial(-1, 2)` = 1). An impure
+  (Random-family) operand is hoisted and drawn exactly once;
+  `Binomial(Random(), 0)` declines rather than folding to `1.0` (the
+  interpreter consumes that draw); a statically non-finite first operand
+  declines (`Binomial(∞, k)` is NaN in the interpreter for every k, including
+  k = 0); non-literal, negative, non-integer, or larger k fail closed.
+
+### Improvements
+
+- **Products and quotients with a provably non-finite real factor now type
+  `non_finite_number`.** New ratified rule: a provably non-finite real factor
+  is implicitly nonzero — proven signs are required only of the finite
+  factors. `2\ln(0)` and `\ln(0)/2` now type `non_finite_number` (previously
+  the top type `number`); shapes admitting `0·∞`, `∞/∞` or `∞·i` keep the
+  sound widen. Structurally, `Ln(0)` now reports `isFinite === false` and
+  `isInfinity === true` from its static type (both were `undefined`),
+  `valueOf()` projects a direction-proven infinity (`Ln(0).valueOf()` is
+  `-Infinity`; `~oo` is reserved for provably non-real values), `\ln(0)/\pi`
+  canonicalizes to `\ln(0)` and `2/\ln(0)` to `0`, and an unfolded
+  finite-real-over-±∞ quotient types `finite_integer` (the value is exactly
+  0). Compiled emissions are unchanged.
+
+### Bug Fixes
+
+- **GLSL compile of `Mod` over wide-typed real expressions.** The shader
+  targets' real-only helper gate refused operands whose type merely *could* be
+  complex: the complex type a `Sqrt`/`Ln` of unknown sign carries since 0.100.0
+  propagated to enclosing arithmetic (`10^5·√(⌈x⌉²+⌈y⌉²)`), through boolean
+  nodes, and into piecewise conditions, so `Mod` expressions over plot
+  variables failed closed (D6) where 0.99.0 compiled them. The complexness
+  analysis now short-circuits boolean- and string-typed nodes and, for
+  arithmetic heads that only propagate complexness (`Add`, `Subtract`,
+  `Multiply`, `Divide`, `Negate`), consults the operands — honoring the
+  unknown-sign `Sqrt`/`Ln`/`Log` real-kernel contract — instead of the widened
+  type. Provably complex operands still fail closed.
+
+- **`Min`/`Max` over a collection whose element type is unknown.** With a base
+  declared `indexed_collection`, `Distance(S, p)`'s result type degraded to
+  scalar `number` (the broadcast arm was invisible through the elementless
+  type), and `Min` then compiled to the variadic-scalar `Math.min(...)` — which
+  returns `NaN` when handed the runtime array, silently, behind
+  `success: true`. `Distance` now reports `number | list<number>` when an
+  operand's collection element type is undecidable, and the `Min`/`Max`
+  JavaScript lowering emits a runtime shape projection (reduce an array, pass a
+  scalar through) for operands that could be collections, matching the
+  interpreter both ways.
+
+- **`invisibleMultiply` serialization option vs `\bmod`.** With
+  `invisibleMultiply: '\\cdot'`, `Mod(k·f, 1)` serialized as
+  `k\cdot f\bmod1`, which re-parses as `k·Mod(f, 1)` — the `Mod` serializer
+  decided parenthesization assuming juxtaposition, which binds tighter than
+  `\bmod` while an explicit `\cdot` binds looser. A `Multiply` operand of an
+  infix `\bmod` is now parenthesized whenever the option is set (products that
+  serialize as `\frac` remain unwrapped).
+
+- **Ordering comparisons over a provably complex operand now fail closed at
+  compile time.** `Less`/`LessEqual`/`Greater`/`GreaterEqual` with a
+  complex-valued operand (`i·x < 0`) compiled to a raw JavaScript comparison of
+  a `{re, im}` object — a silent `false` behind `success: true` — while the
+  interpreter correctly leaves the comparison symbolic (the complex numbers are
+  not ordered). Such comparisons now decline with a clear diagnostic on every
+  compile target. `Equal`/`NotEqual` keep their complex support, and
+  real-kernel expressions of unknown sign (`√x < 2`) still compile.
+
+- **Non-canonical trees are no longer restructured by pretty serialization.**
+  Serializing a `canonical: false` expression (`toMathJson`/`toLatex` with
+  `prettify`) could rebuild a `Multiply` containing a symbolic `Divide` factor
+  through the canonical product machinery: explicit `Delimiter` fences were
+  dropped, factors reordered, and the round-trip changed the expression
+  (`Mod((k·f), 1)/n + y` re-parsed with the dividend split). Pretty rewrites on
+  a non-canonical tree are now shape-preserving — order-preserving
+  numerator/denominator split, no factor sorting, fences kept. Canonical
+  serialization is unchanged.
+
+- **Impure operands spliced by multi-use compile templates drew more than
+  once.** A lowering that splices a compiled operand string into its emitted
+  code more than once re-evaluates a `Random`-family operand at run time — a
+  silent wrong value that also shifts every later draw. A full audit of the
+  JavaScript, GLSL, WGSL, interval, and Python targets fixed twelve such
+  sites: `Equal`/`NotEqual` over a complex operand and across n-ary chains,
+  `Range(start, stop, step)` (which re-drew once per element), `Round`,
+  odd-degree `Root`, `Variance` (12 draws where the interpreter makes 2),
+  complex `Argument`/`Conjugate`, chained relations and element-wise selection
+  masks, `Match` subjects, and a double-compile in the complex `Add` fallback
+  that orphaned a hoisted draw. Impure operands are now bound to a temporary
+  exactly once and **in argument order** — binding only the middle of
+  `Random() < Random() < 0.9` had executed the second draw first, inverting
+  the comparison. Pure emissions are byte-identical throughout, and
+  regression tests count draw sites in the emitted code.
+
+- **`ContrastingColor` emitted invalid WGSL.** Both the 1-argument and
+  3-argument forms lowered to a GLSL-only `?:` ternary on every GPU language;
+  WGSL now emits `select(…)` (the GLSL emission is byte-identical), and an
+  impure (Random-family) color operand fails closed instead of being spliced
+  twice.
+
 ## 0.100.1 _2026-08-02_
 
 ### Breaking Changes

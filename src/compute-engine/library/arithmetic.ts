@@ -558,11 +558,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             if (s === 'positive' || s === 'negative' || s === 'not-zero')
               return 'non_finite_number';
           }
-          // Every other non-finite configuration (`∞/∞`, `∞/i`, `x/∞`, an
-          // unknown-finiteness denominator) widens to the top type. Possible
-          // future tightening: `finite/±∞ = 0` could claim a finite type, but
-          // that needs a provably finite, real numerator and is out of scope
-          // for this pass.
+          // The symmetric claim: a provably finite, real numerator over a
+          // provably non-finite REAL denominator is exactly `0`. Both `isReal`
+          // obligations are load-bearing: `i/∞` and `x/~oo` are not `0`, and
+          // an unknown-finiteness numerator admits `∞/∞` = NaN.
+          if (
+            num.isFinite === true &&
+            num.isReal === true &&
+            nonFinite(den) &&
+            den.isReal === true
+          )
+            return 'finite_integer';
+          // Every other non-finite configuration (`∞/∞`, `∞/i`, `i/∞`, an
+          // unknown-finiteness numerator or denominator) widens to the top
+          // type.
           return 'number';
         }
         if (den.isInteger && num.isInteger) return 'finite_rational';
@@ -3231,10 +3240,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(tuple | list<tuple> | list<number> | list<list<number>>, tuple | list<tuple> | list<number> | list<list<number>>) -> number',
       // A point-list operand broadcasts: one distance per point.
-      type: ([a, b]) =>
-        (a && isPointListType(a)) || (b && isPointListType(b))
-          ? { kind: 'list', elements: 'number' }
-          : 'number',
+      type: ([a, b]) => {
+        const pa = a ? isPointListType(a) : false;
+        const pb = b ? isPointListType(b) : false;
+        if (pa === true || pb === true)
+          return { kind: 'list', elements: 'number' };
+        // An operand that COULD be a list of points — an indexed collection
+        // whose ELEMENT type is unknown, e.g. a base declared with the bare
+        // `indexed_collection` type — must not be reported as the scalar: a
+        // compile target that trusts a bare `number` here lowers
+        // `Min(Distance(S, p))` to `Math.min(<array>)`, a silent `NaN` behind
+        // `success: true` (Tycho item 143). Report the union instead, so the
+        // consumer (and the lowering) sees that both shapes are possible.
+        if (pa === undefined || pb === undefined)
+          return 'number | list<number>';
+        return 'number';
+      },
       evaluate: ([a, b], { engine: ce, numericApproximation }) => {
         const pa = pointOperand(a);
         const pb = pointOperand(b);
@@ -3707,16 +3728,36 @@ function pointListOperand(
   return points;
 }
 
-/** True when the STATIC type of `x` says it holds a list of points — used by
- *  the `Distance` type handler to report the broadcast result type. */
-function isPointListType(x: Expression): boolean {
+/** Whether the STATIC type of `x` says it holds a list of points — used by
+ *  the `Distance` type handler to report the broadcast result type.
+ *  Three-valued: `true` when proven, `false` when ruled out, and `undefined`
+ *  when it CANNOT be decided statically (Tycho item 143). */
+function isPointListType(x: Expression): boolean | undefined {
   const t = x.type.type;
-  if (typeof t === 'string') return false;
   // A rank ≥ 2 numeric tensor (`matrix<number^(3x2)>`) is a list of rows: its
   // `elements` is the SCALAR type, so the dimensions carry the shape.
-  if (t.kind === 'list' && (t.dimensions?.length ?? 0) >= 2) return true;
+  if (
+    typeof t !== 'string' &&
+    t.kind === 'list' &&
+    (t.dimensions?.length ?? 0) >= 2
+  )
+    return true;
   const elt = collectionElementType(t);
-  if (elt === undefined || elt === 'unknown' || elt === 'any') return false;
+  if (elt === undefined) return false;
+  if (elt === 'unknown' || elt === 'any') {
+    // The element type is unknown, so a list of points is not ruled out. Only
+    // a type that COULD be an indexed collection can be one: a bare `tuple` is
+    // always read as a single point (`pointOperand` takes the `Tuple` branch
+    // first), and a non-indexed collection (set/dictionary/record) never
+    // broadcasts. A base declared with the bare `collection` type — the
+    // SUPERTYPE of `indexed_collection` — is undecidable too, not a scalar.
+    const kind = typeof t === 'string' ? t : t.kind;
+    return kind === 'list' ||
+      kind === 'indexed_collection' ||
+      kind === 'collection'
+      ? undefined
+      : false;
+  }
   // A tuple, a nested list, or a union of those: an element that is itself an
   // indexed collection is a point.
   return isSubtype(elt, 'indexed_collection');

@@ -2935,3 +2935,178 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     ).toBe(6);
   });
 });
+
+describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () => {
+  // A base declared with the BARE `indexed_collection` type has an unknown
+  // ELEMENT type, so `Distance(S, p)` cannot be proven a point-list broadcast
+  // statically. It used to report the scalar `number`, which made
+  // `compileExtremum` pick the variadic arm — `Math.min(<array>)`, i.e. NaN
+  // behind `success: true`. Two halves fix it: the type handler widens to
+  // `number | list<number>`, and the lowering projects on the runtime shape.
+  const POINTS = ['List', ['List', 0, 0], ['List', 3, 4], ['List', 6, 8]];
+  const P = ['List', 1, 2];
+  const MIN_D = Math.sqrt(5); // 2.23606797749979
+  const MAX_D = Math.sqrt(61); // 7.810249675906654
+
+  const engineWith = (decl: string | null): ComputeEngine => {
+    const e = new ComputeEngine();
+    if (decl !== null) e.declare('S', decl as any);
+    e.assign('S', e.box(POINTS));
+    return e;
+  };
+
+  it('reports `number | list<number>` for an undecidable operand', () => {
+    const e = engineWith('indexed_collection');
+    expect(e.box(['Distance', 'S', P]).type.toString()).toBe(
+      'list<number> | number'
+    );
+    // The provable cases are unchanged.
+    expect(
+      engineWith('list<list<number>>').box(['Distance', 'S', P]).type.toString()
+    ).toBe('list<number>');
+    expect(engineWith(null).box(['Distance', 'S', P]).type.toString()).toBe(
+      'list<number>'
+    );
+    // Point-to-point stays the scalar.
+    expect(
+      e.box(['Distance', ['List', 0, 0], ['List', 3, 4]]).type.toString()
+    ).toBe('number');
+  });
+
+  it('compiles Min/Max over the broadcast on all three declaration legs', () => {
+    for (const decl of [null, 'list<list<number>>', 'indexed_collection']) {
+      const e = engineWith(decl);
+      const min = compile(e.box(['Min', ['Distance', 'S', P]]), {
+        fallback: false,
+      })!;
+      expect(min.success).toBe(true);
+      expect(min.run!()).toBeCloseTo(MIN_D, 12);
+      const max = compile(e.box(['Max', ['Distance', 'S', P]]), {
+        fallback: false,
+      })!;
+      expect(max.success).toBe(true);
+      expect(max.run!()).toBeCloseTo(MAX_D, 12);
+    }
+  });
+
+  it('emits a runtime shape projection, not the scalar arm', () => {
+    const e = engineWith('indexed_collection');
+    const code = compile(e.box(['Min', ['Distance', 'S', P]]), {
+      fallback: false,
+    })!.code;
+    expect(code).toContain('Array.isArray');
+    expect(code).not.toMatch(/^Math\.min\(/);
+  });
+
+  it('a comparison row over the broadcast agrees with the interpreter', () => {
+    const e = engineWith('indexed_collection');
+    // The discriminating probe: the true answer is `True`, and the old
+    // `Math.min(<array>)` lowering answered `NaN < 3` → a silent `false`.
+    const near = e.box(['Less', ['Min', ['Distance', 'S', P]], 3]);
+    expect(near.evaluate().toString()).toBe('"True"');
+    expect(compile(near, { fallback: false })!.run!()).toBe(true);
+    // …and a row that is genuinely false stays false (not a false-from-NaN).
+    const far = e.box(['Less', ['Min', ['Distance', 'S', P]], 0.4]);
+    expect(far.evaluate().toString()).toBe('"False"');
+    expect(compile(far, { fallback: false })!.run!()).toBe(false);
+  });
+
+  it('treats the `collection` SUPERTYPE as undecidable too', () => {
+    // `collection` is a supertype of `indexed_collection`, so a base declared
+    // with it is just as undecidable — it used to fall through to the scalar
+    // `number` verdict, which put `Min` back on the `Math.min(<array>)` arm.
+    const e = engineWith('collection');
+    expect(e.box(['Distance', 'S', P]).type.toString()).toBe(
+      'list<number> | number'
+    );
+    const min = compile(e.box(['Min', ['Distance', 'S', P]]), {
+      fallback: false,
+    })!;
+    expect(min.success).toBe(true);
+    expect(min.code).toContain('Array.isArray');
+    expect(min.run!()).toBeCloseTo(MIN_D, 12);
+    // A genuinely non-indexed collection kind keeps the scalar verdict.
+    const setEngine = new ComputeEngine();
+    setEngine.declare('T', 'set<unknown>');
+    expect(setEngine.box(['Distance', 'T', P]).type.toString()).not.toContain(
+      'list<number>'
+    );
+  });
+
+  it('projects the runtime shape in the MIXED-operand extremum too', () => {
+    // `Min(Distance(S, p), 100)` takes the multi-operand arm, which only knew
+    // the PROVABLE collection test — the undecidable operand was passed to
+    // `Math.min` as a whole array → NaN behind `success: true`.
+    for (const decl of ['indexed_collection', 'collection']) {
+      const e = engineWith(decl);
+      const expr = e.box(['Min', ['Distance', 'S', P], 100]);
+      const r = compile(expr, { fallback: false })!;
+      expect(r.success).toBe(true);
+      expect(r.code).toContain('Array.isArray');
+      expect(r.run!()).toBeCloseTo(MIN_D, 12);
+      expect(r.run!()).toBeCloseTo(expr.evaluate().N().re, 12);
+      // The scalar operand still wins when it is the extremum.
+      const max = compile(e.box(['Max', ['Distance', 'S', P], 100]), {
+        fallback: false,
+      })!;
+      expect(max.run!()).toBe(100);
+    }
+    // The provably-scalar fast path is untouched.
+    expect(
+      compile(new ComputeEngine().box(['Min', 3, 5]), { fallback: false })!.code
+    ).toContain('Math.min');
+  });
+});
+
+describe('ordering over a complex-valued operand fails closed', () => {
+  // The complex numbers are not ordered: the interpreter leaves `Less(i·x, 0)`
+  // symbolic. The compiled form used to emit a raw `<` over the `{re, im}`
+  // object — a silent `false` behind `success: true`.
+  it('declines Less/LessEqual/Greater/GreaterEqual over a complex operand', () => {
+    const ce = new ComputeEngine();
+    for (const h of ['Less', 'LessEqual', 'Greater', 'GreaterEqual']) {
+      expect(() =>
+        compile(ce.box([h, ['Multiply', 'ImaginaryUnit', 'x'], 0]), {
+          fallback: false,
+        })
+      ).toThrow(/not ordered.*Fail closed \(D6\)/s);
+      // With the fallback (the default) the engine declines rather than
+      // answering a silent `false`.
+      const r = compile(ce.box([h, ['Multiply', 'ImaginaryUnit', 'x'], 0]));
+      expect(r?.success).toBe(false);
+    }
+  });
+
+  it('declines it inside a Which condition', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Mod',
+      ['Which', ['Less', ['Multiply', 'ImaginaryUnit', 'x'], 0], 1, 'True', 2],
+      1,
+    ]);
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /not ordered.*Fail closed \(D6\)/s
+    );
+    expect(compile(expr)?.success).toBe(false);
+  });
+
+  it('still admits an unknown-sign REAL kernel operand', () => {
+    // `Sqrt(x)` types `complex` for an operand of unknown sign, but the
+    // compile contract keeps the real kernel for it (the Sqrt/Ln/Log
+    // carve-out) — this must keep compiling.
+    const ce = new ComputeEngine();
+    const r = compile(ce.box(['Less', ['Sqrt', 'x'], 2]), { fallback: false })!;
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: 9 })).toBe(false);
+    expect(r.run!({ x: 1 })).toBe(true);
+  });
+
+  it('leaves Equal/NotEqual over complex operands alone', () => {
+    const ce = new ComputeEngine();
+    const r = compile(
+      ce.box(['Equal', ['Multiply', 'ImaginaryUnit', 'x'], 0]),
+      { fallback: false }
+    );
+    expect(r?.success).toBe(true);
+  });
+});

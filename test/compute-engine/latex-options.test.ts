@@ -257,3 +257,53 @@ describe('solidus/quotient root style over a Power base (Tycho item 113)', () =>
     ).toEqual('{x^2}^{1/2}');
   });
 });
+
+describe('Tycho item 145 — `invisibleMultiply` and `\\bmod` parenthesization', () => {
+  // `\bmod` (DIVISION_PRECEDENCE) binds LOOSER than juxtaposition, so `fk\bmod
+  // 1` re-parses as `Mod(fk, 1)` with no parens needed. But when
+  // `invisibleMultiply` is an explicit token, the product serializes with an
+  // infix operator at MULTIPLICATION_PRECEDENCE, which re-parses LOOSER than
+  // `\bmod` — the operand must then be parenthesized.
+  const modProduct = ['Mod', ['Multiply', 'k', 'f'], 1] as any;
+
+  test('the default (invisible) serialization is unchanged', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(modProduct);
+    expect(expr.toLatex()).toEqual('fk\\bmod1');
+    expect(ce.parse(expr.toLatex()).json).toEqual([
+      'Mod',
+      ['Multiply', 'f', 'k'],
+      1,
+    ]);
+  });
+
+  test('an explicit `invisibleMultiply` parenthesizes the lhs product', () => {
+    const ce = new ComputeEngine();
+    const tex = ce.box(modProduct).toLatex({ invisibleMultiply: '\\cdot' });
+    expect(tex).toEqual('(f\\cdot k)\\bmod1');
+    expect(ce.parse(tex).json).toEqual(['Mod', ['Multiply', 'f', 'k'], 1]);
+  });
+
+  test('an explicit `invisibleMultiply` parenthesizes the rhs product', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Mod', 5, ['Multiply', 'k', 'f']] as any);
+    const tex = expr.toLatex({ invisibleMultiply: '\\times' });
+    expect(tex).toEqual('5\\bmod(f\\times k)');
+    expect(ce.parse(tex).json).toEqual(['Mod', 5, ['Multiply', 'f', 'k']]);
+  });
+
+  test('non-product operands are unaffected by the override', () => {
+    const ce = new ComputeEngine();
+    // An `Add` operand is parenthesized either way; a fraction is not.
+    expect(
+      ce.box(['Mod', ['Add', 'x', 5], 2] as any).toLatex({
+        invisibleMultiply: '\\cdot',
+      })
+    ).toEqual('(x+5)\\bmod2');
+    expect(
+      ce.box(['Mod', ['Divide', 'x', 5], 2] as any).toLatex({
+        invisibleMultiply: '\\cdot',
+      })
+    ).toEqual('\\frac{x}{5}\\bmod2');
+  });
+});

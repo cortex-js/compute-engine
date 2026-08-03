@@ -5460,16 +5460,46 @@ function compileExtremum(
   if (args.length === 1 && args[0] && isIndexedCollectionOperand(args[0])) {
     return guardedReduce(compile(args[0]));
   }
+  // A single operand that is not PROVABLY scalar but not provably a collection
+  // either — its type admits an indexed-collection arm (`number |
+  // list<number>`, e.g. `Distance(S, p)` over a base declared with the bare
+  // `indexed_collection` type). The scalar arm `Math.min(<array>)` is `NaN` at
+  // run time, a silent wrong behind `success: true` (Tycho item 143), so
+  // project on the RUNTIME shape instead — the house idiom (see `_SYS.at`) —
+  // which matches the interpreter both ways. The operand is bound once, so an
+  // impure operand is still evaluated exactly once.
+  if (
+    args.length === 1 &&
+    args[0] &&
+    couldBeIndexedCollectionOperand(args[0])
+  ) {
+    return `((_v) => Array.isArray(_v) ? ${guardedReduce('_v')} : ${fn}(_v))(${compile(args[0])})`;
+  }
   // Mixed scalars + collection operand(s): `Max`/`Min` REDUCE — fold the
   // scalars and every collection's elements into a single scalar (matching
   // `evaluateMinMax`, which flattens collection operands). Spreading a
   // collection into a plain `Math.max(...)` call would pass an array as one
   // argument → `NaN`; instead spread each collection into a combined array and
   // reduce it. An all-empty combined array yields `NaN` (interpreter parity).
-  if (args.some((a) => a && isIndexedCollectionOperand(a))) {
-    const parts = args.map((a) =>
-      isIndexedCollectionOperand(a) ? `...(${compile(a)})` : compile(a)
-    );
+  // An operand that is only POSSIBLY an indexed collection takes the same
+  // runtime projection as the single-operand arm above, per operand: spread it
+  // when it is an array at run time, contribute it as a single element when it
+  // is a scalar. Without it, `Min(Distance(S, p), 100)` lowered to
+  // `Math.min(<array>, 100)` → a silent `NaN` (Tycho item 143). Each operand's
+  // code appears once, so an impure operand is still evaluated exactly once.
+  if (
+    args.some(
+      (a) =>
+        a &&
+        (isIndexedCollectionOperand(a) || couldBeIndexedCollectionOperand(a))
+    )
+  ) {
+    const parts = args.map((a) => {
+      if (isIndexedCollectionOperand(a)) return `...(${compile(a)})`;
+      if (couldBeIndexedCollectionOperand(a))
+        return `...((_v) => Array.isArray(_v) ? _v : [_v])(${compile(a)})`;
+      return compile(a);
+    });
     return guardedReduce(`[${parts.join(', ')}]`);
   }
   return `${fn}(${args.map((x) => compile(x)).join(', ')})`;

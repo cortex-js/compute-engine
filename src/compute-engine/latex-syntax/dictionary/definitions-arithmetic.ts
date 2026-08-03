@@ -2327,6 +2327,26 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // leaving juxtaposition products (`3k`, `2\pi`), fractions, and powers —
       // which already re-parse as tight units — unwrapped. This mirrors the
       // `Multiply` serializer's own operand wrapping just above.
+      // ...unless `invisibleMultiply` is set to an explicit token (`\cdot`,
+      // `\times`): a product then serializes with that infix operator, which
+      // re-parses at MULTIPLICATION_PRECEDENCE — *looser* than `\bmod` — so a
+      // `Multiply` operand must be parenthesized too.
+      const explicitMultiply = !!serializer.options.invisibleMultiply;
+      const wrapOperand = (op: MathJsonExpression | null) => {
+        if (explicitMultiply && operator(op) === 'Multiply') {
+          // ...but a product with a denominator serializes as a `\frac`,
+          // which is a tight unit either way.
+          const [, denom] = numeratorDenominator(op!);
+          const isFraction =
+            serializer.options.prettify === true &&
+            denom.length > 0 &&
+            !(denom.length === 1 && denom[0] === 1);
+          if (!isFraction)
+            return serializer.wrap(op, MULTIPLICATION_PRECEDENCE + 1);
+        }
+        return serializer.wrap(op, MULTIPLICATION_PRECEDENCE);
+      };
+
       const op1 = operand(expr, 1);
       // `\bmod` re-parses right-associatively (`a\bmod b\bmod c` →
       // `Mod(a, Mod(b, c))`), so a *left*-nested `Mod` must be parenthesized to
@@ -2336,8 +2356,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       const lhs =
         operator(op1) === 'Mod'
           ? serializer.wrap(op1, DIVISION_PRECEDENCE + 1)
-          : serializer.wrap(op1, MULTIPLICATION_PRECEDENCE);
-      const rhs = serializer.wrap(operand(expr, 2), MULTIPLICATION_PRECEDENCE);
+          : wrapOperand(op1);
+      const rhs = wrapOperand(operand(expr, 2));
       return joinLatex([lhs, '\\bmod', rhs]);
     },
   },

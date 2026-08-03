@@ -22,6 +22,28 @@ describe('Primality Test', () => {
               [
                 "Multiply",
                 "Pi",
+                [
+                  "Add",
+                  ["Factorial", ["Delimiter", ["Subtract", "n", 1]]],
+                  1
+                ]
+              ],
+              "n"
+            ]
+          ]
+        ]
+      ]
+      canonical = [
+        "Negate",
+        [
+          "Floor",
+          [
+            "Cos",
+            [
+              "Divide",
+              [
+                "Multiply",
+                "Pi",
                 ["Add", ["Factorial", ["Subtract", "n", 1]], 1]
               ],
               "n"
