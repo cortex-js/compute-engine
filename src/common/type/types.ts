@@ -180,8 +180,9 @@ export type ValueType = {
  *
  * The keys are strings. The set of keys is fixed.
  *
- * For a record type to be a subtype of another record type, it must have a
- * subset of the keys, and all their types must match (width subtyping).
+ * For a record type to be a subtype of another record type, it must contain
+ * every key required by the other type, and all their types must match (width
+ * subtyping). It may contain additional keys.
  *
  */
 export type RecordType = {

@@ -133,25 +133,24 @@ contextual wherever possible, following the precedent of `type` and `alias`.
 Keep hard reservation for active keywords, literals, and only the few future
 forms whose grammar genuinely cannot be contextual.
 
-### The public definition has drifted behind the implementation
+### The public definition had drifted behind the implementation — repaired
 
-Known examples:
+The 2026-08-03 documentation repair brought these items back into sync:
 
-- effect specifiers (`function roll(n) random -> integer`) are implemented,
-  tested, and described in the effects design, but absent from the public
-  syntax/types/control-flow reference;
-- literal parameters are documented in `control-flow.md`, but the formal
-  parameter grammar in `syntax.md` omits them;
-- the syntax/types docs support dictionary field access (`d.key`), while the
-  agent and Python guides still say never to use it;
-- `Missing`, `IsMissing`, and `Coalesce` are implemented but not adequately
-  surfaced in the Cortex reference; and
-- comments in `reserved-words.ts` still label several active words, including
-  `function`, `for`, and `in`, as "Not in use."
+- effect specifiers (`function roll(n) random -> integer`) are now covered by
+  the public syntax, types, and control-flow references;
+- the formal parameter grammar now includes literal parameters;
+- the agent, Python, and Mathematica guides now agree with the syntax/types
+  docs that identifier-shaped dictionary keys support `d.key`;
+- the Cortex type reference now explains `Nothing`, `Missing`, `NaN`,
+  `IsMissing`, and `Coalesce`; and
+- comments in `reserved-words.ts` now identify active declaration, function,
+  loop, and membership words correctly.
 
-The effects design's Stage 3 status is current; the drift is in the public
-language pages and smaller implementation comments. The public grammar and the
-executable examples should be brought back to one versioned source of truth.
+The executable documentation test covers the public Cortex examples and links.
+The broader architectural goal remains one versioned source of truth for the
+grammar and implementation tables, so this category of drift is detected
+rather than rediscovered manually.
 
 ### Static diagnostics and errors-as-values need a boundary rule
 

@@ -63,7 +63,7 @@ let double = x |-> 2x
 | `{1, 2, 3}` (set) | `{1, 2, 3}` |
 | `(1, 2)` (tuple) | `(1, 2)` |
 | `{"a": 1}` (dict) | `{"a" -> 1}`; empty dictionary is `{->}` |
-| `d["a"]` | `d["a"]` — never `d.a` |
+| `d["a"]` | `d["a"]`, or `d.a` when the key is an identifier |
 | `xs[0]` | `xs[1]` — **1-based** |
 | `xs[-1]` | `xs[-1]` |
 | `xs[1:3]` | `xs[2..3]` — 1-based, **inclusive** on both ends |
@@ -90,8 +90,10 @@ let counts = DictionaryFrom(Zip(["apples", "figs"], [3, 1]))
 // ➔ (3, ["apples","figs"], NaN)
 ```
 
-A missing dictionary key yields `NaN` rather than raising `KeyError` — see
-[Traps](#traps).
+A missing numeric dictionary field yields `NaN` rather than raising
+`KeyError`; a missing nonnumeric field remains `Missing`. `IsMissing`
+recognizes either representation, and `Coalesce(value, fallback)` supplies a
+default. See [Traps](#traps).
 
 ### Comprehensions
 
@@ -294,7 +296,7 @@ still returns a plausible-looking value.
 | `7 // 2` | `//` starts a comment, so the statement is just `7` | `Floor(7 / 2)` |
 | `xs[0]` | Silently `NaN` — indexing is 1-based | `xs[1]` |
 | `Solve(x^2 = 4, x)` | Silently `[]` — `=` is assignment | `Solve(x^2 == 4, x)` |
-| `d["missing"]` | `NaN`, not a `KeyError` | Guard first: `IndexOf(Keys(d), k)` is `0` when the key is absent |
+| `d["missing"]` | An absence value, not a `KeyError` (`NaN` for a numeric field, otherwise `Missing`) | `Coalesce(d["missing"], fallback)` or test with `IsMissing` |
 | `xs[1:3]` | Python's half-open slice; `xs[2..3]` is 1-based and inclusive | check both ends |
 | `x^1/2` | `(x^1)/2` — `^` binds tighter than `/` | `Sqrt(x)` or `x^(1/2)` |
 | `while c: … break` | `break` is unimplemented; the loop runs to the iteration limit | make the condition do the work |

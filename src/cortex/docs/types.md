@@ -48,6 +48,18 @@ annotation is recorded in the function's signature, but the current runtime
 does not reject a returned value merely because its inferred type differs from
 the annotation.
 
+Named functions can also declare their effects between the parameter list and
+the return type:
+
+```cortex
+function roll(n: integer) random -> integer { Random(n) }
+```
+
+Effect labels are part of the function type. See
+[Effect specifiers](/cortex/control-flow/#effect-specifiers) for declaration
+syntax and the [function type guide](/compute-engine/guides/types/#function-types)
+for subtyping rules.
+
 ## MathJSON representation
 
 The parser holds a type annotation as a MathJSON string. A declaration places
@@ -115,6 +127,32 @@ bare symbol as a boolean operand (`And`/`Or`/`Xor`/`Not`) infers that symbol
 `boolean` for the lifetime of the engine; a later numeric use of the same
 symbol in the same scope will then error. This is engine behavior, not
 something specific to Cortex.
+
+## Absence values
+
+Cortex distinguishes three related kinds of absence:
+
+- `Nothing` means “no value here” and is removed from function arguments and
+  collection literals.
+- `Missing` is a position-preserving missing value. Its type is `missing`.
+- `NaN` is the numeric form of an absent or undefined result. Numeric
+  operations and missing numeric fields generally normalize absence to `NaN`.
+
+`IsMissing(x)` recognizes both `Missing` and `NaN`, regardless of how the
+value arose. `Coalesce(a, b, ...)` evaluates from left to right and returns the
+first value that is not missing; if every argument is missing, it returns the
+last one unchanged.
+
+```cortex-live
+(Length([1, Missing, 3]), IsMissing(Missing), IsMissing(NaN),
+  Coalesce(Missing, 0), Missing + 1)
+// ➔ (3, True, True, 0, NaN)
+```
+
+A missing dictionary field follows the expected value domain: a numeric field
+produces `NaN`, while a string or other nonnumeric field produces `Missing`.
+Use `IsMissing` when the distinction between those representations is not
+important, and `Coalesce` to supply a fallback.
 
 ## Declaring a type
 

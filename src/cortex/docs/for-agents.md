@@ -69,8 +69,9 @@ g(x) + f(2)
   enforced at call time.
 - **Collections**: list `[1, 2, 3]`, set `{1, 2, 3}`, tuple `(1, 2)`,
   dictionary `{one -> 1, two -> 2}`, empty dictionary `{->}` (`{}` is the
-  empty set). Access dictionaries with `d["key"]`, not `d.key`. Tuples index
-  like lists (`p[1]` is the first component); a matrix (list of lists)
+  empty set). Access dictionaries with `d["key"]`; identifier-shaped keys also
+  have the shorthand `d.key`. Tuples index like lists (`p[1]` is the first
+  component); a matrix (list of lists)
   indexes as `m[2, 1]` or `m[2][1]`.
 - **Spread**: in a call argument list, `...t` splices a **tuple**'s elements
   in as positional arguments (`f(...p)`, `Max(...t)`, `g(1, ...p, ...q)`).
@@ -216,13 +217,17 @@ let xs = [10, 20, 30, 40]
 // ➔ ([10,20], 10, 40, [1,2,3], 3)
 ```
 
-Dictionaries (string keys; a **missing key silently yields `NaN`**):
+Dictionaries (string keys; dot access is shorthand for identifier-shaped
+keys):
 
 ```cortex
 let d = {one -> 1, two -> 2}
-(d["two"], Keys(d))
-// ➔ (2, ["one","two"])
+(d.two, d["two"], IsMissing(d.missing), Coalesce(d.missing, 0))
+// ➔ (2, 2, True, 0)
 ```
+
+An absent numeric field evaluates to `NaN`; an absent nonnumeric field remains
+`Missing`. `IsMissing` recognizes both forms.
 
 ## Library Quick Roster
 
@@ -240,6 +245,8 @@ Verified operator names, so you don't have to guess (search for more with
 - **Strings**: `Characters`, `StringJoin`, `StringSplit(s)` (splits on
   whitespace by default), `String(x)`.
 - **Dictionaries**: `Keys`, `Values`.
+- **Absence**: `Missing` preserves a missing position; `Nothing` is omitted
+  from arguments and collections; `IsMissing`, `Coalesce`.
 - **Symbolic**: `Simplify`, `HoldValues(body)` (evaluate `body` with its
   assigned symbols kept symbolic), `Solve(eq == v, x)`, `D(expr, x)`,
   `Derivative(f)`, `Integrate`, `N`, `Type`, `IsError(x)` (true for an error

@@ -370,14 +370,18 @@ design decision or small feature, not a bug):
   the documented Nothing-as-erasure semantics (assigning `Nothing` stores
   no value), recommend documenting rather than changing.
 
-**Declined from the review** (recorded so we don't re-derive): UFCS
-dot-call `a.f(b)` ≡ `f(a, b)` — `|>` already covers left-to-right
-composition, and `.` is loaded (`..`, decimals; dictionary `.key` access was
-already not adopted). `?` error propagation — already declined under
-refutable binding above; Hica needs it to unwrap `Maybe`/`Result` wrapper
-types, while Cortex errors-as-values propagate through evaluation without
-unwrapping. Structs/enums/ADTs — a different language direction; tuples +
-dictionaries + the engine type system cover the notebook use case.
+**Reopened after the review:** UFCS dot-call `a.f(b)` ≡ `f(a, b)`. The pipe
+operator covers left-to-right composition, but UFCS remains attractive for
+multi-argument calls. The collision with existing dictionary/record field
+access needs an explicit resolution; see the
+[2026-08-03 extensions review](../../docs/plans/2026-08-03-cortex-language-extensions-review.md#ufcs-and-the-pipe-operator).
+
+**Declined from the review** (recorded so we don't re-derive): `?` error
+propagation — already declined under refutable binding above; Hica needs it to
+unwrap `Maybe`/`Result` wrapper types, while Cortex errors-as-values propagate
+through evaluation without unwrapping. Structs/enums/ADTs — a different
+language direction; tuples + dictionaries + the engine type system cover the
+notebook use case.
 
 ### Serializer / compile-target polish
 

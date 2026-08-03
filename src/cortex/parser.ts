@@ -60,8 +60,9 @@ const PLAIN_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** The reserved words that are LITERALS: they cannot name a binding (the
  * verbatim `` `word` `` form still can). `true`/`false` are the boolean
  * literals; `Infinity`, its input alias `oo`, and `NaN` are the non-finite
- * numeric literals. Every other reserved word is contextual and remains
- * usable as an identifier in binding position. */
+ * numeric literals. Other reserved words are either handled contextually by
+ * their construct or rejected in binding position; the verbatim form remains
+ * available. */
 const LITERAL_WORDS: ReadonlySet<string> = new Set([
   'true',
   'false',

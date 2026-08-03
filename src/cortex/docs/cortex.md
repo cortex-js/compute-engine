@@ -119,6 +119,10 @@ calls and indexing.
 **Declarations** — binding names with `let` and `const`.
 </ReadMore>
 
+<ReadMore path="/cortex/types/">
+**Types** — annotations, named types, effects, and absence values.
+</ReadMore>
+
 <ReadMore path="/cortex/comments/">
 **Comments** — line and block comments.
 </ReadMore>

@@ -99,7 +99,7 @@ by exact value, so `0.5 === 1/2` is `True` too.
 | `Position[xs, v]` | `IndexOf(xs, v)` |
 | `Append[xs, v]`, `Join` | `Append(xs, v)`, `Join(xs, ys)` |
 | `Tally`, `Partition` | same names (`Tally` returns a `(values, counts)` pair) |
-| `<\|"a" -> 1\|>` (association) | `{"a" -> 1}`; read with `d["a"]`, enumerate with `Keys`/`Values` |
+| `<\|"a" -> 1\|>` (association) | `{"a" -> 1}`; read with `d["a"]` or `d.a`, enumerate with `Keys`/`Values` |
 | `Union`, `Intersection` | same names, returning a set |
 
 ```cortex

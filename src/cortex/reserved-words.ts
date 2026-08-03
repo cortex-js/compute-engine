@@ -11,7 +11,7 @@ export const RESERVED_WORDS = new Set<string>([
   'case', // Not in use
   'catch', // Not in use
   'class', // Not in use
-  'const', // Not in use
+  'const', // Immutable declaration head
   'continue', // Not in use
   'debugger',
   'default', // Not in use
@@ -25,15 +25,15 @@ export const RESERVED_WORDS = new Set<string>([
   'extern', // Not in use
   'false', // Boolean literal — parsed as the `False` symbol
   'finally', // Not in use
-  'for', // Not in use
+  'for', // Collection loop head
   'from', // Not in use
-  'function', // Not in use
+  'function', // Block-style function definition head
   'generator', // Not in use
   'get', // Not in use
   'global', // Not in use
   'goto', // Not in use
   'if',
-  'in', // Not in use
+  'in', // Membership operator and loop separator
   'Infinity', // Numeric literal (+∞); `oo` is an input alias
   'inline', // Not in use
   'interface', // Not in use
@@ -82,7 +82,7 @@ export const RESERVED_WORDS = new Set<string>([
   'warn', // Not in use
   'when', // Not in use
   'where', // Not in use
-  'while', // Not in use
+  'while', // Conditional loop head
   'with', // Not in use
   'xor', // Not in use
   'yield', // Not in use

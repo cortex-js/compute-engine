@@ -58,6 +58,45 @@ f(x: real) = x + 1
   ["Function", ["Add", "x", 1], ["Typed", "x", {"str": "real"}]]]
 ```
 
+### Effect specifiers
+
+A definition can state the effects that calling it may perform. The specifier
+sits after the parameter list and before the return arrow:
+
+```cortex
+function roll(n) random -> integer { Random(n) }
+```
+
+```json
+["DefineFunction", "roll",
+  ["Function",
+    ["Typed", ["Block", ["Random", "n"]],
+      {"str": "(n: unknown) random -> integer"}],
+    "n"]]
+```
+
+The nine effect labels are `console`, `entropy`, `environment`, `fs_read`,
+`fs_write`, `network`, `random`, `scope`, and `time`. Several labels may be
+listed with spaces. `pure` explicitly promises no effects; `any` means the
+effects are unknown. `pure` and `any` must appear alone.
+
+Without a specifier, effects are inferred from the body and may change when
+the definition is replaced. A written specifier is a contract: the body's
+inferred effects must be a subset of it. A pure body may satisfy a broader
+contract, but a body that performs an undeclared effect is rejected.
+
+The block form may omit the return annotation (`function f() random { … }`),
+in which case its declared result is `unknown`. In the math form, a written
+effect specifier must be followed by a return arrow:
+
+```cortex
+roll(n) random -> integer = Random(n)
+```
+
+See [Effect Specifiers](/compute-engine/guides/types/#effect-specifiers) for
+subtyping, callback checks, and the distinction between inferred and declared
+effects.
+
 ### Multiple clauses (literal parameters)
 
 A parameter can be a **literal** — a number, string, boolean, `Infinity`,
