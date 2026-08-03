@@ -3334,7 +3334,8 @@ const colorHelpers = {
     const bList = b.length === 0 || Array.isArray(b[0]);
     if (!aList && !bList) return colorHelpers.pointDistance(a, b);
     if (aList && bList) {
-      if (a.length !== b.length) throw new Error('Distance: dimension mismatch');
+      if (a.length !== b.length)
+        throw new Error('Distance: dimension mismatch');
       return a.map((p, i) => colorHelpers.pointDistance(p, b[i]));
     }
     if (aList) return a.map((p) => colorHelpers.pointDistance(p, b));

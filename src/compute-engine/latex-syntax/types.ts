@@ -1314,7 +1314,11 @@ export type PowerStyle = 'root' | 'solidus' | 'quotient';
  *
  * @category Latex Parsing and Serialization
  */
-export type NumericSetStyle = 'compact' | 'regular' | 'interval' | 'set-builder';
+export type NumericSetStyle =
+  | 'compact'
+  | 'regular'
+  | 'interval'
+  | 'set-builder';
 
 /** How to serialize collection indexing (the `At` operator).
  *
@@ -1565,10 +1569,7 @@ export type ResolvedSerializeLatexOptions = Omit<
   fractionStyle: (expr: MathJsonExpression, level: number) => FractionStyle;
   logicStyle: (expr: MathJsonExpression, level: number) => LogicStyle;
   powerStyle: (expr: MathJsonExpression, level: number) => PowerStyle;
-  numericSetStyle: (
-    expr: MathJsonExpression,
-    level: number
-  ) => NumericSetStyle;
+  numericSetStyle: (expr: MathJsonExpression, level: number) => NumericSetStyle;
   indexStyle: (expr: MathJsonExpression, level: number) => IndexStyle;
 };
 

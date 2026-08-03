@@ -879,7 +879,11 @@ function pointComponentType(xs: Expression, position: number): Type {
       t.kind === 'list' &&
       (t.dimensions?.length ?? 0) > 1
     )
-      return { kind: 'list', elements: 'number', dimensions: [t.dimensions![0]] };
+      return {
+        kind: 'list',
+        elements: 'number',
+        dimensions: [t.dimensions![0]],
+      };
     return mapResultType(t, 'number');
   }
   // Non-point-collection fallback follows the First/… row.
