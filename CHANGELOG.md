@@ -1,113 +1,108 @@
+## [Unreleased]
+
 ## 0.100.3 _2026-08-03_
 
 ### New Features
 
-- **Evaluate handlers now receive the expression being evaluated.** The
-  handler options carry an optional `expression` field — the canonical node,
-  whose `.ops` are the raw (pre-numericization) operands, unlike the
-  handler's first parameter which holds the evaluated operands (see the
-  `EvaluateHandlerOptions` documentation for the caveats: positional
-  correspondence does not survive associative flattening, `ReleaseHold`, or
-  dropped operands, and for `lazy` operators the first parameter is also
-  unevaluated). The first consumer is `Power`: under `.N()` a negative
-  base's real-vs-complex branch is now decided from the exponent's **exact**
-  rational — read from the raw operand, or through a symbol's binding — so
-  `.N()`, the type handler, and the compiled constant fold agree for exact
-  odd-denominator exponents of any term size (`(-2)^{1000003/1000001}` is
-  now real on every leg; parity is decided on the exact bigint terms, so
-  denominators beyond 2⁵³ do not corrupt the branch). Exponents with no
-  exact provenance (floats, `π`, a lambda parameter, a `Sum` body) keep the
-  rate-bounded float reconstruction.
+- **Evaluate handlers now receive the expression being evaluated.** The handler
+  options carry an optional `expression` field — the canonical node, whose
+  `.ops` are the raw (pre-numericization) operands, unlike the handler's first
+  parameter which holds the evaluated operands (see the `EvaluateHandlerOptions`
+  documentation for the caveats: positional correspondence does not survive
+  associative flattening, `ReleaseHold`, or dropped operands, and for `lazy`
+  operators the first parameter is also unevaluated). The first consumer is
+  `Power`: under `.N()` a negative base's real-vs-complex branch is now decided
+  from the exponent's **exact** rational — read from the raw operand, or through
+  a symbol's binding — so `.N()`, the type handler, and the compiled constant
+  fold agree for exact odd-denominator exponents of any term size
+  (`(-2)^{1000003/1000001}` is now real on every leg; parity is decided on the
+  exact bigint terms, so denominators beyond 2⁵³ do not corrupt the branch).
+  Exponents with no exact provenance (floats, `π`, a lambda parameter, a `Sum`
+  body) keep the rate-bounded float reconstruction.
 
 ### Performance
 
 - **Compile-time complexness analysis is no longer quadratic on large
-  expressions** (Tycho item 148). The 0.100.2 operand-consulting fixes
-  (items 144/143) made `isComplexValued` walk a node's whole subtree per
-  query, and the GPU emitters query per node — a deeply nested expression
-  (a textually inlined user-function chain) paid O(n²): a depth-6 nested
-  chain spent 82% of its GLSL compile (1.5 million analysis calls) in the
-  walk, roughly doubling large shader compiles relative to 0.100.1. The
-  analysis is now memoized per compilation with a LAYERED memo that mirrors
-  the context's lexical nesting: entering a block frame or binder mask
-  pushes a fresh layer (an answer cached under a mask can never be reused
-  outside it), and leaving restores the enclosing layer — so binder-dense
-  bodies (nested `Sum`/`Product`) memoize too, instead of wiping the cache
-  at every mask crossing. Compiled output verified byte-identical across
-  targets. The depth-6 chain compiles 7× faster than unmemoized (and ~2×
-  faster than 0.100.1, which did fewer, cheaper walks); scaling on the
-  regressed class — deeply nested inlined expression chains — is
-  near-linear in expression size again. (Deeply nested *binder* chains,
-  `Sum`-in-`Sum`, keep a pre-existing superlinear analysis cost that
-  0.100.1 shares — measured, not part of this regression.)
+  expressions** (Tycho item 148). The 0.100.2 operand-consulting fixes (items
+  144/143) made `isComplexValued` walk a node's whole subtree per query, and the
+  GPU emitters query per node — a deeply nested expression (a textually inlined
+  user-function chain) paid O(n²): a depth-6 nested chain spent 82% of its GLSL
+  compile (1.5 million analysis calls) in the walk, roughly doubling large
+  shader compiles relative to 0.100.1. The analysis is now memoized per
+  compilation with a LAYERED memo that mirrors the context's lexical nesting:
+  entering a block frame or binder mask pushes a fresh layer (an answer cached
+  under a mask can never be reused outside it), and leaving restores the
+  enclosing layer — so binder-dense bodies (nested `Sum`/`Product`) memoize too,
+  instead of wiping the cache at every mask crossing. Compiled output verified
+  byte-identical across targets. The depth-6 chain compiles 7× faster than
+  unmemoized (and ~2× faster than 0.100.1, which did fewer, cheaper walks);
+  scaling on the regressed class — deeply nested inlined expression chains — is
+  near-linear in expression size again. (Deeply nested _binder_ chains,
+  `Sum`-in-`Sum`, keep a pre-existing superlinear analysis cost that 0.100.1
+  shares — measured, not part of this regression.)
 
 ### Bug Fixes
 
-- **`Real`, `Imaginary` and `Argument` are real-by-definition for the
-  compile targets** (Tycho item 147). The complexness analysis judged
-  these heads by their operands, so `Mod(Im(z), 1)` over a
-  declared-complex `z` tripped the GLSL real-only helper gate and failed
-  closed — even though the projections always lower to a real scalar
-  (`(z).y`, `atan(z.y, z.x)`, `.im`) on every target. The analysis now
-  short-circuits these heads as real-shaped regardless of their operand's
-  type, so real projections of complex interiors (`Mod(Im(b + a·ln(x+iy)),
-  Im(w))`, domain-coloring rows) compile again. Provably complex operands
-  (`Mod(√-2, 1)`, `Mod(i·x, 1)`, `Mod(Conjugate(z), 1)`) still fail
-  closed.
+- **`Real`, `Imaginary` and `Argument` are real-by-definition for the compile
+  targets** (Tycho item 147). The complexness analysis judged these heads by
+  their operands, so `Mod(Im(z), 1)` over a declared-complex `z` tripped the
+  GLSL real-only helper gate and failed closed — even though the projections
+  always lower to a real scalar (`(z).y`, `atan(z.y, z.x)`, `.im`) on every
+  target. The analysis now short-circuits these heads as real-shaped regardless
+  of their operand's type, so real projections of complex interiors
+  (`Mod(Im(b + a·ln(x+iy)), Im(w))`, domain-coloring rows) compile again.
+  Provably complex operands (`Mod(√-2, 1)`, `Mod(i·x, 1)`,
+  `Mod(Conjugate(z), 1)`) still fail closed.
 
-- **A function literal with an invalid explicit `Block` body no longer
-  prints a bare internal `TypeError` while boxing** (Tycho item 150).
-  Canonicalizing `["Function", ["Block", ⟨body with an Error node⟩], …]`
-  dereferenced the invalid block's missing scope, and the caught
-  `Cannot read properties of undefined (reading 'bindings')` was printed
-  raw to `console.error` before recovering to a non-canonical literal.
-  The block is now rebuilt so scope creation runs even over an invalid
-  body: the literal boxes canonically (still `isValid: false`), with no
-  console noise. Two siblings fixed alongside: the nullary form silently
-  produced a canonical literal with an *unscoped* block, and an **empty**
-  `Block` body threw the same TypeError (it now follows the annotated
-  branch's convention: an empty body is `Nothing`). The two recovery
-  catch sites in `applyOperatorDefinition` now attribute anything they
-  print (`ComputeEngine: error canonicalizing \`op\`: …`) instead of
-  emitting a bare message.
+- **A function literal with an invalid explicit `Block` body no longer prints a
+  bare internal `TypeError` while boxing** (Tycho item 150). Canonicalizing
+  `["Function", ["Block", ⟨body with an Error node⟩], …]` dereferenced the
+  invalid block's missing scope, and the caught
+  `Cannot read properties of undefined (reading 'bindings')` was printed raw to
+  `console.error` before recovering to a non-canonical literal. The block is now
+  rebuilt so scope creation runs even over an invalid body: the literal boxes
+  canonically (still `isValid: false`), with no console noise. Two siblings
+  fixed alongside: the nullary form silently produced a canonical literal with
+  an _unscoped_ block, and an **empty** `Block` body threw the same TypeError
+  (it now follows the annotated branch's convention: an empty body is
+  `Nothing`). The two recovery catch sites in `applyOperatorDefinition` now
+  attribute anything they print (`ComputeEngine: error canonicalizing \`op\`:
+  …`) instead of emitting a bare message.
 
 - **Machine-precision `.N()` of a negative base to a rational power took the
-  wrong branch.** At machine precision, `(-2)^{100/3}` numericized to
-  `-1.08e10` (wrong sign — p = 100 is even), `(-2)^{7/3}` took the complex
-  branch where the real root exists, and `(-2)^{7/6}` — a genuine even-q
-  case — wrongly produced a real value. The exponent is numericized at the
-  engine's 15-digit precision before the real-root convention applies, which
-  put it far outside the branch decision's reconstruction tolerance. The
-  tolerance now scales with the engine precision, threaded identically
-  through the type handler and the compiled constant fold. A 288-cell
-  rational sweep against an independent reference went from 53 mismatches
-  to 0.
+  wrong branch.** At machine precision, `(-2)^{100/3}` numericized to `-1.08e10`
+  (wrong sign — p = 100 is even), `(-2)^{7/3}` took the complex branch where the
+  real root exists, and `(-2)^{7/6}` — a genuine even-q case — wrongly produced
+  a real value. The exponent is numericized at the engine's 15-digit precision
+  before the real-root convention applies, which put it far outside the branch
+  decision's reconstruction tolerance. The tolerance now scales with the engine
+  precision, threaded identically through the type handler and the compiled
+  constant fold. A 288-cell rational sweep against an independent reference went
+  from 53 mismatches to 0.
 
-  Fixing this exposed a deeper, longstanding defect in the same fallback:
-  every irrational's continued-fraction convergents eventually fall within
-  any fixed tolerance, so a negative base raised to an **irrational**
-  exponent could silently take the real branch — `(-2)^{\sqrt2}` and
-  `(-2)^{1/\pi}` were wrong-real on *both* precision lanes, `(-2)^e` on the
-  bignum lane, `(-2)^\pi` on the machine lane. The reconstruction now also
-  requires a coincidence bound (the candidate rational must be identifiable
-  as *the* value the double was rounded from, not merely a nearby
-  convergent): π, e, √2, √5, ln 2 and plain non-rational floats now take
-  the complex principal branch identically at every precision, and the
-  compiled constant fold follows (`(-2)^{\sqrt2}` folded to a wrong real
-  constant; it now folds to the complex value, matching `.N()`). Exact
-  `Rational` exponents are unaffected by the bound. Known limitation: once
+  Fixing this exposed a deeper, longstanding defect in the same fallback: every
+  irrational's continued-fraction convergents eventually fall within any fixed
+  tolerance, so a negative base raised to an **irrational** exponent could
+  silently take the real branch — `(-2)^{\sqrt2}` and `(-2)^{1/\pi}` were
+  wrong-real on _both_ precision lanes, `(-2)^e` on the bignum lane, `(-2)^\pi`
+  on the machine lane. The reconstruction now also requires a coincidence bound
+  (the candidate rational must be identifiable as _the_ value the double was
+  rounded from, not merely a nearby convergent): π, e, √2, √5, ln 2 and plain
+  non-rational floats now take the complex principal branch identically at every
+  precision, and the compiled constant fold follows (`(-2)^{\sqrt2}` folded to a
+  wrong real constant; it now folds to the complex value, matching `.N()`).
+  Exact `Rational` exponents are unaffected by the bound. Known limitation: once
   an exponent has been numericized, a rational whose terms exceed what a
-  15–17-digit double preserves (denominator ≳ 3·10⁵) is indistinguishable
-  from an irrational and takes the complex branch.
+  15–17-digit double preserves (denominator ≳ 3·10⁵) is indistinguishable from
+  an irrational and takes the complex branch.
 
-- **Symbols declared with a non-finite type now report their finiteness.**
-  A symbol declared `non_finite_number` answered `isFinite`/`isInfinity`
-  with `undefined`; both predicates now decide from the declared type
-  (`isFinite` is `false`, `isInfinity` is `true`), completing the
-  type-consult work started for function expressions in 0.100.2. The
-  workaround checks this blindness had required in the `Add`/`Multiply`/
-  `Divide` type handlers were retired after an instrumented full-suite run
-  showed the getters now subsume them everywhere.
+- **Symbols declared with a non-finite type now report their finiteness.** A
+  symbol declared `non_finite_number` answered `isFinite`/`isInfinity` with
+  `undefined`; both predicates now decide from the declared type (`isFinite` is
+  `false`, `isInfinity` is `true`), completing the type-consult work started for
+  function expressions in 0.100.2. The workaround checks this blindness had
+  required in the `Add`/`Multiply`/ `Divide` type handlers were retired after an
+  instrumented full-suite run showed the getters now subsume them everywhere.
 
 ## 0.100.2 _2026-08-03_
 

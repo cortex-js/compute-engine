@@ -2735,6 +2735,60 @@ ce.declare('MyGcd', {
 
 <MemberCard>
 
+### EvaluateHandlerOptions
+
+```ts
+type EvaluateHandlerOptions = Partial<EvaluateOptions> & {
+  engine: ComputeEngine;
+  expression: Expression;
+};
+```
+
+The `options` argument passed to an `evaluate` / `evaluateAsync` handler.
+
+#### EvaluateHandlerOptions.expression?
+
+```ts
+optional expression?: Expression;
+```
+
+The canonical expression node being evaluated.
+
+Its `ops` are the **raw** operands: canonical and bound, but
+**pre-numericization** — the same objects the `type` handler sees. The
+handler's first parameter, by contrast, holds the *evaluated* operands,
+which under `numericApproximation` have already been turned into floats.
+
+That makes this the handler's only access to the operands' exactness. For
+example `Power` reads the exact rational `p/q` of its exponent from
+`expression.op2` to decide the branch of a negative base — under `.N()`
+the exponent it receives as an operand is a double, from which `p/q`
+can only be guessed.
+
+**`expression.ops[i]` is NOT in general the provenance of `ops[i]`.** The
+evaluated operands come from `holdMap`, which reindexes them: it FLATTENS
+an associative operator (`f(a, f(b, c))` arrives as three operands, one
+more than the node has), it UNWRAPS `ReleaseHold` (so `expression.ops[i]`
+is the wrapper, not what was evaluated), and it DROPS an operand whose
+evaluation yields nothing. The correspondence holds only for a
+non-associative operator with no `ReleaseHold` and no dropped operand — so
+a handler that indexes into `expression.ops` must treat
+`expression.ops.length !== ops.length` as "no provenance" and fall back to
+what it can compute from the evaluated operands alone.
+
+**On a `lazy: true` operator there is no contrast to draw**: `holdMap`
+returns the operands unchanged, so the handler's first parameter is raw
+and held too — and, on the box/parse routes, not even canonicalized (see
+the lazy-operator trap in `CLAUDE.md`: such a handler must canonicalize
+each held operand it consumes).
+
+Read-only: do not mutate it, and do not assume it is present (a handler
+invoked outside the evaluation driver may not receive one).
+
+</MemberCard>
+
+<MemberCard>
+
 ### ValueDefinition
 
 ```ts
@@ -14431,8 +14485,9 @@ A record is a collection of key-value pairs.
 
 The keys are strings. The set of keys is fixed.
 
-For a record type to be a subtype of another record type, it must have a
-subset of the keys, and all their types must match (width subtyping).
+For a record type to be a subtype of another record type, it must contain
+every key required by the other type, and all their types must match (width
+subtyping). It may contain additional keys.
 
 </MemberCard>
 
