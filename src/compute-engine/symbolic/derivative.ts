@@ -12,6 +12,11 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
+import {
+  angularChainFactor,
+  DIRECT_TRIG_OPERATORS,
+  INVERSE_TRIG_OPERATORS,
+} from './angular-unit.js';
 
 /**
  * Maximum recursion depth for differentiation.
@@ -250,6 +255,33 @@ const DERIVATIVES_TABLE = {
   // they either don't have simple closed forms or involve the polygamma function
   // with varying orders.
 };
+
+/**
+ * Scale a `DERIVATIVES_TABLE` formula for the engine's `angularUnit`.
+ *
+ * The table holds the RADIAN derivatives. In a non-radian unit, `Sin(x)`
+ * denotes `sin(k·x)` (with `k = π/180` in degree mode), so its derivative
+ * picks up the chain factor `k`; an inverse function returns an angle in the
+ * current unit, so its derivative is divided by `k`. A no-op in radian mode
+ * (and for every unit-independent head, hyperbolics included).
+ *
+ * The factor is EXACT (`π/180`, not `0.01745…`): the derivative is an
+ * ordinary symbolic result and must not turn exact input into a float.
+ */
+function scaleForAngularUnit(
+  formula: Expression,
+  operator: string
+): Expression {
+  const ce = formula.engine;
+  if (ce.angularUnit === 'rad') return formula;
+  // `ce.function('Multiply'|'Divide', …)`, not `.mul()`/`.div()`: the
+  // formula can be a sum, and `mul()` would distribute over it.
+  if (DIRECT_TRIG_OPERATORS.has(operator))
+    return ce.function('Multiply', [angularChainFactor(ce), formula]);
+  if (INVERSE_TRIG_OPERATORS.has(operator))
+    return ce.function('Divide', [formula, angularChainFactor(ce)]);
+  return formula;
+}
 
 /**
  * True if `sym` names a user-defined function whose body can be resolved by
@@ -983,7 +1015,10 @@ export function differentiate(
   // Substitute the argument into the derivative formula
   // We use subs() instead of apply() to avoid evaluating the expression,
   // which would convert symbolic transcendentals like ln(10) to numeric values.
-  const derivFormula = ce.expr(h).subs({ _: g });
+  const derivFormula = scaleForAngularUnit(
+    ce.expr(h).subs({ _: g }),
+    expr.operator
+  );
   // A bare `f(x)` is a table lookup; a composite `f(g(x))` is the chain rule.
   recordD(
     trace,

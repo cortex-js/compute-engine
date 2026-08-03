@@ -458,6 +458,46 @@ function isIndexedCollectionOperand(e: Expression): boolean {
 }
 
 /**
+ * True when `e`'s static type ADMITS an indexed collection without proving one
+ * — a union with an indexed-collection arm. The witness is a lambda parameter
+ * indexed in its body: `At` narrows it to `indexed_collection | dictionary`,
+ * which matches neither `list` nor `indexed_collection`, so
+ * `isIndexedCollectionOperand` (the "provably" test) refuses it and every
+ * `v[1]`-shaped user function failed to compile.
+ *
+ * Admitting it is the runtime-projection rule (see the index note on the `At`
+ * handler): declared types here are routinely wider than the runtime value, and
+ * `_SYS.at` already dispatches on the RUNTIME shape and yields `NaN` for a
+ * non-collection base — exactly what the interpreter's `Nothing` projects to.
+ * A top type (`unknown`/`any`/`value`) is deliberately NOT admitted: that is
+ * "nothing is known", not "a collection is possible" (a free plot variable
+ * types `unknown` until inference refines it scalar), and it is what
+ * `isPossiblyCollectionTypedJS` governs.
+ */
+function couldBeIndexedCollectionOperand(e: Expression): boolean {
+  const t = jsType(e);
+  if (t === 'unknown' || t === 'any' || t === 'value') return false;
+  if (typeof t === 'object' && t.kind === 'union')
+    return t.types.some((m) => isSubtype(m, 'indexed_collection'));
+  return isSubtype(t, 'indexed_collection');
+}
+
+/**
+ * True when `e`'s static type PROVES a numeric index — the only index shape a
+ * base admitted by `couldBeIndexedCollectionOperand` may carry. Such a base can
+ * be a DICTIONARY at run time (the union arm the "could be" test tolerates),
+ * and the interpreter's `At` answers a keyed lookup there, while `_SYS.at`
+ * dispatches on the runtime shape and answers `NaN` for every non-array base.
+ * A keyed access would therefore compile to a silent `NaN` behind
+ * `success: true`, so it fails closed (D6) instead. A base that is PROVABLY an
+ * indexed collection is not subject to this test: no dictionary reaches it, and
+ * its index gate stays the interpreter-matching runtime one.
+ */
+function isNumericIndexOperand(e: Expression): boolean {
+  return isSubtype(jsType(e), 'number');
+}
+
+/**
  * Inline of `isPossiblyCollectionTyped` (collection-utils): an operand whose
  * collection-ness is not statically visible and so may be a JS array at run
  * time — a `broadcastable<T>` node, or a top-typed application
@@ -1135,10 +1175,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `At: only the single-index form compiles; multi-index (nested) ` +
           `access is not supported. Fail closed (D6).`
       );
-    if (!isIndexedCollectionOperand(coll))
+    const provablyIndexed = isIndexedCollectionOperand(coll);
+    if (!provablyIndexed && !couldBeIndexedCollectionOperand(coll))
       throw new Error(
         `At: cannot compile — first operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
+      );
+    // A base admitted only by the "could be" path may be a dictionary at run
+    // time, and keyed access has no compiled equivalent (`_SYS.at` answers NaN
+    // for a non-array base, where the interpreter returns the stored value).
+    // Require a provably numeric index there rather than emit a silent NaN.
+    if (!provablyIndexed && !isNumericIndexOperand(index))
+      throw new Error(
+        `At: cannot compile — the first operand is not provably an indexed ` +
+          `collection (type \`${coll.type.toString()}\`) and the index is not ` +
+          `provably numeric, so a keyed (dictionary) access cannot be ruled ` +
+          `out. Fail closed (D6).`
       );
     // A COMPLEX index needs no compile-time gate: the interpreter validates an
     // index through its `.re` (so `p[1+2i]` selects `p[1]`, the imaginary part

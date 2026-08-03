@@ -28,6 +28,15 @@ import {
   resolveFunctionLiteralTypes,
 } from './boxed-expression/function-literal.js';
 import { errorValue } from './boxed-expression/error-value.js';
+import {
+  beginProvisionalCapture,
+  endProvisionalCapture,
+  provisionalLiteral,
+  registerProvisionalDependents,
+  setProvisionalLiteral,
+  takeProvisionalDependents,
+  type ProvisionalDependent,
+} from './boxed-expression/provisional-application.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
 import { isPureComputedEffects } from '../common/type/effects.js';
 import type { Type } from '../common/type/types.js';
@@ -390,6 +399,11 @@ export function canonicalFunctionLiteralArguments(
     shadowNames,
     shadowTypes.size > 0 ? shadowTypes : undefined
   );
+  // Collect the juxtapositions the body reads as multiplication only because
+  // their leading symbol has no function definition yet — see
+  // `boxed-expression/provisional-application.ts`.
+  beginProvisionalCapture();
+  let provisionalHeads: ReadonlySet<string> | undefined;
   let block: Expression;
   try {
     if (returnTypeOp === undefined) {
@@ -412,6 +426,7 @@ export function canonicalFunctionLiteralArguments(
       block = ce.function('Block', statements);
     }
   } finally {
+    provisionalHeads = endProvisionalCapture();
     ce._popShadowedParameters();
   }
 
@@ -458,7 +473,110 @@ export function canonicalFunctionLiteralArguments(
   // stands. See `RESOLVED_TYPE_OPERANDS` (`function-literal.ts`).
   resolveFunctionLiteralTypes(literal);
 
+  // Definition order must not change semantics. If the body froze a
+  // juxtaposition as multiplication only because its leading symbol had no
+  // function definition at this moment, keep the RAW operands so the literal
+  // can be re-derived when that symbol gains one
+  // (`repairProvisionalDependents`).
+  // The literal may also be a RE-canonicalization of one already built (the
+  // `Function` operator's canonical handler runs a second time, on the
+  // literal's own operands): its body is then the very `Block` recorded the
+  // first time round, and the raw operands to re-derive from are the ones
+  // recorded with it.
+  const provisional =
+    provisionalHeads !== undefined
+      ? {
+          ops,
+          heads: provisionalHeads,
+          scope: ce.context.lexicalScope,
+        }
+      : provisionalLiteral(ops[0]);
+
+  if (provisional !== undefined) {
+    setProvisionalLiteral(literal, provisional);
+    setProvisionalLiteral(block, provisional);
+  }
+
   return literal;
+}
+
+/** Definitions currently being re-derived, so a repair that itself installs a
+ * definition cannot re-enter one. */
+const REPAIRING = new WeakSet<object>();
+
+/** The `Function` literal a dependent currently holds: the operator
+ * definition's lambda, or the value definition's value. */
+function dependentLiteral(def: ProvisionalDependent): Expression | undefined {
+  if ('signature' in def)
+    return (def as { _lambdaLiteral?: Expression })._lambdaLiteral;
+  return def.value;
+}
+
+/** Install a re-derived literal on a dependent, whichever kind it is. */
+function installRebuiltLiteral(
+  ce: ComputeEngine,
+  def: ProvisionalDependent,
+  rebuilt: Expression
+): void {
+  // `update()` re-registers the definition for whatever names the rebuilt body
+  // still reads provisionally.
+  if ('signature' in def) def.update({ evaluate: rebuilt });
+  else {
+    def.value = rebuilt;
+    registerProvisionalDependents(ce, rebuilt, def);
+  }
+}
+
+/**
+ * `name` just became callable: re-derive every definition whose body read
+ * `name` as a multiplication operand, from the raw operands recorded at
+ * canonicalization time.
+ *
+ * Injected into `boxed-expression/provisional-application.ts` by
+ * `init-lazy-refs.ts` — `updateDef` (`boxed-expression/utils.ts`) is the choke
+ * point that fires it, and it cannot import this module.
+ */
+export function repairProvisionalDependents(
+  ce: ComputeEngine,
+  name: string
+): void {
+  const defs = takeProvisionalDependents(ce, name);
+  if (defs === undefined) return;
+  // A rebuild can THROW: the definition constructors validate (a violated
+  // effect contract, an invalid body). The queue has already been drained, so
+  // an error escaping the loop would lose every dependent not yet processed.
+  // Each one is therefore rebuilt in isolation; a failed one keeps its previous
+  // definition (`update()` constructs before it swaps) and is RE-REGISTERED so
+  // a later redefinition of `name` retries it; and the first error is rethrown
+  // once the loop is done — a contract violation must still surface.
+  let firstError: { error: unknown } | undefined;
+  for (const def of defs) {
+    if (REPAIRING.has(def)) continue;
+    const literal = dependentLiteral(def);
+    const info = provisionalLiteral(literal);
+    if (info === undefined || !info.heads.has(name)) continue;
+    REPAIRING.add(def);
+    try {
+      // Re-canonicalized in the scope the literal was built in: its free
+      // symbols must resolve exactly as they did then, except for the one that
+      // has since become a function.
+      const rebuilt = ce._inScope(info.scope, () =>
+        canonicalFunctionLiteralArguments(ce, info.ops)
+      );
+      // Installed even when the rebuilt literal is INVALID: a fresh parse made
+      // after `name` was defined produces exactly that invalid application, and
+      // fresh-parse parity is the contract. Keeping the stale product instead
+      // would silently answer a different question.
+      if (rebuilt !== undefined && rebuilt !== literal)
+        installRebuiltLiteral(ce, def, rebuilt);
+    } catch (error) {
+      firstError ??= { error };
+      registerProvisionalDependents(ce, literal, def);
+    } finally {
+      REPAIRING.delete(def);
+    }
+  }
+  if (firstError !== undefined) throw firstError.error;
 }
 
 /**

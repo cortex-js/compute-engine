@@ -157,6 +157,74 @@ describe('latexOptions threads through MathJSON metadata serialization', () => {
   });
 });
 
+describe('Style options accept a constant as well as a function', () => {
+  test('rootStyle as a string matches the function form', () => {
+    const ce = new ComputeEngine();
+
+    ce.latexOptions = { rootStyle: () => 'solidus' };
+    const fnForm = ce.parse('\\sqrt{x}').latex;
+
+    ce.latexOptions = { rootStyle: 'solidus' };
+    const stringForm = ce.parse('\\sqrt{x}').latex;
+
+    expect(stringForm).toEqual('x^{1/2}');
+    expect(stringForm).toEqual(fnForm);
+  });
+
+  test('fractionStyle as a string matches the function form', () => {
+    const ce = new ComputeEngine();
+
+    ce.latexOptions = { fractionStyle: () => 'inline-solidus' };
+    const fnForm = ce.parse('\\frac{a}{b}').latex;
+
+    ce.latexOptions = { fractionStyle: 'inline-solidus' };
+    const stringForm = ce.parse('\\frac{a}{b}').latex;
+
+    expect(stringForm).toEqual('a/b');
+    expect(stringForm).toEqual(fnForm);
+  });
+
+  test('indexStyle as a string matches the function form', () => {
+    const ce = new ComputeEngine();
+
+    ce.latexOptions = { indexStyle: () => 'subscript' };
+    const fnForm = ce.box(['At', 'v', 1]).latex;
+
+    ce.latexOptions = { indexStyle: 'subscript' };
+    const stringForm = ce.box(['At', 'v', 1]).latex;
+
+    expect(stringForm).toEqual(fnForm);
+    expect(stringForm).toContain('_1');
+  });
+
+  test('a constant style passed to the constructor is honored', () => {
+    const ce = new ComputeEngine({ latexOptions: { rootStyle: 'solidus' } });
+    expect(ce.parse('\\sqrt{x}').latex).toEqual('x^{1/2}');
+  });
+
+  test('a constant style passed per-call is honored', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('\\sqrt{x}').toLatex({ rootStyle: 'solidus' })).toEqual(
+      'x^{1/2}'
+    );
+  });
+
+  test('an invalid constant throws when the option is set', () => {
+    const ce = new ComputeEngine();
+    expect(() => {
+      ce.latexOptions = { rootStyle: 'sold' as any };
+    }).toThrow(/rootStyle/);
+    // The engine is left usable, with the previous options
+    expect(ce.parse('\\sqrt{x}').latex).toEqual('\\sqrt{x}');
+  });
+
+  test('an invalid constant throws from the constructor', () => {
+    expect(
+      () => new ComputeEngine({ latexOptions: { fractionStyle: 'nope' as any } })
+    ).toThrow(/fractionStyle/);
+  });
+});
+
 describe('solidus/quotient root style over a Power base (Tycho item 113)', () => {
   // The exponent-spelled root styles must delimit a base that is itself a
   // Power: bare `x^2^{1/2}` is unparsable LaTeX (`unexpected-superscript`),

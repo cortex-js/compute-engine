@@ -65,6 +65,7 @@ import {
   symbolOrListArg,
 } from '../differential-equation-utils.js';
 import { evalDenseRows } from '../numerics/differential-equations.js';
+import { rewriteAngularUnit } from '../symbolic/angular-unit.js';
 import { symbolicLimit } from '../symbolic/limit.js';
 import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
@@ -696,7 +697,14 @@ function compileDerivative(
     return undefined;
 
   try {
-    return compile(value) || undefined;
+    // The closed form is a FRESH expression in the engine's angular
+    // convention (`d/dx sin x = (π/180)·cos x` in degree mode) — it never went
+    // through the entry-point rewrite, which skips the derivative heads
+    // precisely so that differentiation runs in that convention. Rewrite it
+    // here, or the radian-based `Math.cos` the target emits would disagree
+    // with `evaluate()`. Same reason `prepareUserFunctionBody` rewrites an
+    // emitted function-literal body.
+    return compile(rewriteAngularUnit(value)) || undefined;
   } catch {
     // The closed form contains a head this target cannot lower (`Digamma` on
     // glsl, say). Decline rather than let the inner error escape: a

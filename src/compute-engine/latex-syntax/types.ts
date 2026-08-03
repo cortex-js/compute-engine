@@ -1279,6 +1279,58 @@ export interface Parser {
   ): MathJsonExpression;
 }
 
+/** How to serialize a root, i.e. `\sqrt{x}`, `x^{1/2}` or `x^\frac12`.
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type RootStyle = 'radical' | 'quotient' | 'solidus';
+
+/** How to serialize a fraction.
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type FractionStyle =
+  | 'quotient'
+  | 'block-quotient'
+  | 'inline-quotient'
+  | 'inline-solidus'
+  | 'nice-solidus'
+  | 'reciprocal'
+  | 'factor';
+
+/** How to serialize the logic operators.
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type LogicStyle = 'word' | 'boolean' | 'uppercase-word' | 'punctuation';
+
+/** How to serialize a fractional power.
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type PowerStyle = 'root' | 'solidus' | 'quotient';
+
+/** How to serialize a numeric set, i.e. `\R^*`, `\R \setminus \lbrace 0\rbrace`.
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type NumericSetStyle = 'compact' | 'regular' | 'interval' | 'set-builder';
+
+/** How to serialize collection indexing (the `At` operator).
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type IndexStyle = 'subscript' | 'bracket';
+
+/** A serialization style option: either a constant, or a function of the
+ * expression and of its nesting level.
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type StyleOption<T extends string> =
+  | T
+  | ((expr: MathJsonExpression, level: number) => T);
+
 /**
  *
  * The LaTeX serialization options can used with the `expr.toLatex()` method.
@@ -1366,44 +1418,23 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   keywordStyle: 'text' | 'keyword' | 'operatorname';
 
   // Styles
-  applyFunctionStyle: (
-    expr: MathJsonExpression,
-    level: number
-  ) => DelimiterScale;
+  //
+  // Each style option can be either a constant (e.g. `rootStyle: 'solidus'`)
+  // or a function of the expression and its nesting level (e.g.
+  // `rootStyle: (expr, level) => level > 2 ? 'solidus' : 'radical'`).
+  applyFunctionStyle: StyleOption<DelimiterScale>;
 
-  groupStyle: (expr: MathJsonExpression, level: number) => DelimiterScale;
+  groupStyle: StyleOption<DelimiterScale>;
 
-  rootStyle: (
-    expr: MathJsonExpression,
-    level: number
-  ) => 'radical' | 'quotient' | 'solidus';
+  rootStyle: StyleOption<RootStyle>;
 
-  fractionStyle: (
-    expr: MathJsonExpression,
-    level: number
-  ) =>
-    | 'quotient'
-    | 'block-quotient'
-    | 'inline-quotient'
-    | 'inline-solidus'
-    | 'nice-solidus'
-    | 'reciprocal'
-    | 'factor';
+  fractionStyle: StyleOption<FractionStyle>;
 
-  logicStyle: (
-    expr: MathJsonExpression,
-    level: number
-  ) => 'word' | 'boolean' | 'uppercase-word' | 'punctuation';
+  logicStyle: StyleOption<LogicStyle>;
 
-  powerStyle: (
-    expr: MathJsonExpression,
-    level: number
-  ) => 'root' | 'solidus' | 'quotient';
+  powerStyle: StyleOption<PowerStyle>;
 
-  numericSetStyle: (
-    expr: MathJsonExpression,
-    level: number
-  ) => 'compact' | 'regular' | 'interval' | 'set-builder';
+  numericSetStyle: StyleOption<NumericSetStyle>;
 
   /**
    * Notation used to serialize collection indexing (the `At` operator), e.g.
@@ -1416,10 +1447,7 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
    *   symmetric with how subscript indexing of an `indexed_collection`
    *   parses; only round-trips when the base is declared as a collection.
    */
-  indexStyle: (
-    expr: MathJsonExpression,
-    level: number
-  ) => 'subscript' | 'bracket';
+  indexStyle: StyleOption<IndexStyle>;
 
   /**
    * When `true`, member-access heads serialize to dot notation:
@@ -1511,6 +1539,39 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   angleNormalization?: 'none' | '0...360' | '-180...180';
 };
 
+/** The serialization options as seen by the serializer: the style options
+ * have been normalized from their constant form (e.g. `rootStyle: 'solidus'`)
+ * to their function form.
+ *
+ * @category Latex Parsing and Serialization
+ */
+export type ResolvedSerializeLatexOptions = Omit<
+  SerializeLatexOptions,
+  | 'applyFunctionStyle'
+  | 'groupStyle'
+  | 'rootStyle'
+  | 'fractionStyle'
+  | 'logicStyle'
+  | 'powerStyle'
+  | 'numericSetStyle'
+  | 'indexStyle'
+> & {
+  applyFunctionStyle: (
+    expr: MathJsonExpression,
+    level: number
+  ) => DelimiterScale;
+  groupStyle: (expr: MathJsonExpression, level: number) => DelimiterScale;
+  rootStyle: (expr: MathJsonExpression, level: number) => RootStyle;
+  fractionStyle: (expr: MathJsonExpression, level: number) => FractionStyle;
+  logicStyle: (expr: MathJsonExpression, level: number) => LogicStyle;
+  powerStyle: (expr: MathJsonExpression, level: number) => PowerStyle;
+  numericSetStyle: (
+    expr: MathJsonExpression,
+    level: number
+  ) => NumericSetStyle;
+  indexStyle: (expr: MathJsonExpression, level: number) => IndexStyle;
+};
+
 /** @internal */
 export interface SerializerDictionaryEntry {
   name?: string;
@@ -1532,7 +1593,7 @@ export interface SerializerDictionary {
  *
  */
 export interface Serializer {
-  readonly options: Required<SerializeLatexOptions>;
+  readonly options: Required<ResolvedSerializeLatexOptions>;
   readonly dictionary: SerializerDictionary;
 
   /** "depth" of the expression:

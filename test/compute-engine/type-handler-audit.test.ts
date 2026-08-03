@@ -20,6 +20,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
 
 const ce = new ComputeEngine();
 ce.declare('r', 'real');
@@ -388,5 +389,79 @@ describe('TYPE AUDIT: Mod (floored remainder)', () => {
     expect(typeOf(['Mod', { num: '+Infinity' }, 5])).toBe('number');
     // A merely-`integer` operand admits ±∞ and does not narrow.
     expect(typeOf(['Mod', 'k', 900])).toBe('number');
+  });
+});
+
+describe('TYPE AUDIT: Sqrt over a closed (unknowns-free) radicand', () => {
+  // Machine floats are deliberately not folded at canonicalization, so the
+  // radicand of `√(1 − 0.2²)` reaches the type handler unevaluated and its
+  // `sgn` is undecided. A radicand with no unknowns is folded by the handler
+  // (value-safe: no free variable can change the answer) so a provably
+  // non-negative one claims `finite_real` rather than the `finite_complex`
+  // hedge (Tycho 0.100.0 adoption item 137).
+  it('an unfolded non-negative float radicand claims finite_real', () => {
+    expect(typeOf(['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]])).toBe(
+      'finite_real'
+    );
+    // …matching the folded form, which already claimed it
+    expect(typeOf(['Sqrt', 0.96])).toBe('finite_real');
+    expectSound(['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]]);
+  });
+
+  it('a negative radicand stays complex', () => {
+    expect(typeOf(['Sqrt', ['Subtract', ['Power', 0.2, 2], 1]])).toBe(
+      'finite_complex'
+    );
+    expect(typeOf(['Sqrt', -2])).toBe('finite_complex');
+    // …including one that only folding can decide (`ln 2 − 1 = −0.306…`)
+    expect(typeOf(['Sqrt', ['Subtract', ['Ln', 2], 1]])).toBe('finite_complex');
+    expectSound(['Sqrt', ['Subtract', ['Power', 0.2, 2], 1]]);
+  });
+
+  it('a radicand with unknowns is unchanged (no folding attempted)', () => {
+    expect(typeOf(['Sqrt', 'x'])).toBe('finite_number');
+    expect(typeOf(['Sqrt', ['Subtract', 1, ['Power', 'r', 2]]])).toBe(
+      'finite_complex'
+    );
+  });
+
+  it('does not claim a finite type for a non-finite closed radicand', () => {
+    expect(typeOf(['Sqrt', ['Divide', 1, 0.0]])).toBe('number');
+  });
+
+  it('does not fold an IMPURE radicand (a type query draws no random)', () => {
+    // `√(Random() − 0.5)` has no unknowns, but numericizing it to decide the
+    // type would consume a draw (and give an unstable answer).
+    const engine = new ComputeEngine();
+    const claimed: string[] = [];
+    const drawn = withRandomSeedFrame(engine, 7, () => {
+      claimed.push(
+        engine.box(['Sqrt', ['Subtract', ['Random'], 0.5]]).type.toString()
+      );
+      return engine._randomFrame!.next;
+    });
+    expect(drawn).toBe(0);
+    // …and the claim stays the conservative hedge
+    expect(claimed).toEqual(['finite_complex']);
+  });
+});
+
+describe('Tycho item 137: the GLSL band of a Which over a float radicand', () => {
+  it('the raw and the folded radicand agree', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    const glsl = engine.getCompilationTarget('glsl')!;
+    const branch = (radicand: string) =>
+      engine.parse(
+        `\\begin{cases} \\sqrt{${radicand}} & x > 0 \\\\ 0 & \\text{otherwise}\\end{cases}`
+      );
+
+    const raw = branch('1-0.2^2');
+    const folded = branch('0.96');
+    // The pair used to disagree: the raw radicand typed `finite_complex`
+    expect(raw.type.toString()).toBe(folded.type.toString());
+    expect(raw.type.toString()).toBe('finite_real');
+    expect(glsl.compile(raw).code).toBeTruthy();
+    expect(glsl.compile(folded).code).toBeTruthy();
   });
 });

@@ -123,6 +123,7 @@ import {
   absFunctionType,
   measurementType,
   bigOpResultType,
+  closedRealSign,
 } from './type-handlers.js';
 import {
   foldQuantityOperands,
@@ -2502,6 +2503,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // the bounded inverse-trig heads, 2026-07-30). Finite operand
           // (checked above) ⇒ finite result: `finite_complex`, not `complex`.
           if (x.isNonNegative === true) return 'finite_real';
+          // The radicand may be an unfolded float expression (`1 - 0.2^2`):
+          // machine floats are not folded at canonicalization, so `sgn` is
+          // undecided even though the value is known. Fold it when the
+          // radicand is closed (no unknowns).
+          const sign = closedRealSign(x);
+          if (sign === 'non-negative') return 'finite_real';
           return 'finite_complex';
         }
         return 'finite_number';

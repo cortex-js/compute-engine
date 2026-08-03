@@ -22,6 +22,11 @@ import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { functionLiteralParameterName } from './function-literal.js';
 import {
+  registerProvisionalDependents,
+  repairProvisionalDependents,
+  unregisterProvisionalDependent,
+} from './provisional-application.js';
+import {
   boundVariableNames,
   markShieldDeclaration,
   rewriteWithBinders,
@@ -1156,6 +1161,14 @@ export function updateDef(
     operator?: BoxedOperatorDefinition;
   };
 
+  // The halves this update is about to replace. They must leave the
+  // forward-reference registry with the record, or every redefinition of
+  // `name` strands the superseded definition object — and the literal and raw
+  // operands it holds — in every dependents set it had joined
+  // (`provisional-application.ts`).
+  const supersededValue = mutableDef.value;
+  const supersededOperator = mutableDef.operator;
+
   // Construct BEFORE swapping the record's halves: the definition
   // constructors validate and can throw (a registration conflict, a violated
   // effect contract). Deleting first left the record with NEITHER `value` nor
@@ -1176,6 +1189,40 @@ export function updateDef(
     const built = new _BoxedOperatorDefinition(ce, name, newDef);
     delete mutableDef.value;
     mutableDef.operator = built;
+  } else return;
+
+  if (supersededValue !== undefined && supersededValue !== mutableDef.value)
+    unregisterProvisionalDependent(supersededValue);
+  if (
+    supersededOperator !== undefined &&
+    supersededOperator !== mutableDef.operator
+  )
+    unregisterProvisionalDependent(supersededOperator);
+
+  // A function-typed VALUE definition is a caller too, and a callee too:
+  // `canonicalInvisibleOperator` reads it as an application, so a `Function`
+  // literal stored through this route (`ce.declare('g', '(number) -> number')`
+  // then `ce.assign('g', …)`) is exactly as order-dependent as one installed as
+  // an operator — but only the operator-def constructor registers on its own.
+  const installedValue = mutableDef.value;
+  let callableValue = false;
+  if (installedValue !== undefined && installedValue.type.matches('function')) {
+    callableValue = true;
+    if (installedValue !== supersededValue)
+      registerProvisionalDependents(ce, installedValue.value, installedValue);
+  }
+
+  // `name` may now be callable: any definition body that read it as a
+  // multiplication operand because it was not callable yet is re-derived here
+  // (`provisional-application.ts`).
+  if (mutableDef.operator !== undefined || callableValue) {
+    // The swap above is COMMITTED, and the repair below can throw. Bump the
+    // generation here rather than relying on the callers' post-`updateDef`
+    // bump (`declareSymbolOperator`), which such a throw would skip — leaving
+    // generation-keyed caches holding results computed against the definition
+    // that is no longer installed.
+    ce._generation += 1;
+    repairProvisionalDependents(ce, name);
   }
 }
 

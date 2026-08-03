@@ -105,6 +105,47 @@ export function functionLiteralParameterType(
   return undefined;
 }
 
+/** A type is "scalar" for broadcasting purposes if it is NOT a known
+ * collection-like type. Conservative: unknown/any → scalar.
+ * @internal
+ */
+export function isScalarType(t: Type): boolean {
+  if (typeof t === 'string') {
+    // String types like 'collection', 'list', 'tuple', 'set' are non-scalar.
+    if (
+      t === 'collection' ||
+      t === 'indexed_collection' ||
+      t === 'list' ||
+      t === 'tuple' ||
+      t === 'set' ||
+      t === 'dictionary' ||
+      t === 'record' ||
+      t === 'function'
+    )
+      return false;
+    return true;
+  }
+  if (
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection' ||
+    t.kind === 'list' ||
+    t.kind === 'tuple' ||
+    t.kind === 'set' ||
+    t.kind === 'dictionary' ||
+    t.kind === 'record' ||
+    t.kind === 'signature' ||
+    // A `broadcastable<T>` parameter accepts a collection whole (it handles
+    // collections natively), so it is NOT a scalar — a lambda with such a
+    // parameter must not be mapped/broadcast over a collection argument.
+    t.kind === 'broadcastable'
+  )
+    return false;
+  if (t.kind === 'union' || t.kind === 'intersection')
+    return t.types.every((x) => isScalarType(x));
+  if (t.kind === 'negation') return isScalarType(t.type);
+  return true;
+}
+
 /** The parameters of a `Function` literal, as `{ name, type }` records. Bare
  * parameters have `type: undefined`. */
 export function functionLiteralParameters(

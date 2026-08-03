@@ -1,6 +1,62 @@
 ## [Unreleased]
 
+### New Features
+
+- The LaTeX serialization style options (`rootStyle`, `fractionStyle`,
+  `indexStyle`, `powerStyle`, `logicStyle`, `numericSetStyle`,
+  `groupStyle`, `applyFunctionStyle`) can now be specified as a constant, in
+  addition to a function of the expression and of its nesting level:
+
+  ```ts
+  ce.latexOptions = { rootStyle: 'solidus' };
+  expr.toLatex({ fractionStyle: 'inline-solidus' });
+  ```
+
+  Previously, only the function form was supported, and a string value
+  serialized to an empty string. A string that is not one of the values
+  accepted for that option now throws when the option is set, instead of
+  producing an empty serialization.
+
 ### Bug Fixes
+
+- The order in which functions are defined no longer changes their meaning. A
+  definition body that referenced a function *before* it was defined — for
+  example `g(t) \coloneq 2a(t)` registered ahead of
+  `a(t) \coloneq [\cos t, \sin t]` — froze the reference as a multiplication
+  (`2 \cdot a \cdot t`), producing scalar results interpreted and
+  `null`/`NaN` from compiled functions behind `success: true`. Such
+  provisional readings are now re-derived when the referenced name later
+  gains a function definition, so every registration order yields the same
+  interpreted and compiled results. Genuinely scalar juxtaposition
+  (`2x(t+1)` where `x` never becomes a function) is unchanged.
+
+- Function parameters whose bodies index them are now treated as
+  collections. A definition such as `h(v) \coloneq v_1 + v_2` with `h`
+  declared `(list<real>) -> real` parsed the subscripts as unrelated
+  symbols, an `At`-indexing body inferred a scalar parameter (so list
+  arguments broadcast elementwise instead of applying), and the JavaScript
+  compile target declined `At` over a declared list parameter. All three are
+  fixed: parameters are bound at their declared types while the body is
+  parsed, an indexing body infers a collection parameter, and the compile
+  target admits indexing over such parameters with a runtime shape guard.
+
+- The derivative of trigonometric functions now honors `angularUnit`. In
+  degree mode, `D(Sin(x), x)` evaluates to `\frac{\pi}{180}\cos x` (and
+  inverse trigonometric derivatives are divided by the conversion factor),
+  on both the interpreted and compiled routes, for both by-reference
+  functions (`f'` where `f := x \mapsto \sin x`) and inline
+  `\frac{d}{dx}` expressions. Previously the interpreted derivative and the
+  compiled by-reference derivative returned radian-convention values, and
+  compiled `ND` double-converted.
+
+- `Sqrt` no longer claims a complex result type for a radicand whose
+  non-negativity only constant folding can establish. Machine floats are not
+  folded at canonicalization, so `\sqrt{1-0.2^2}` reached the type handler
+  with an undecided sign and typed as `finite_complex`, while the folded
+  `\sqrt{0.96}` typed as `finite_real`. A radicand that is pure and has no
+  unknowns is now folded to decide the sign. A negative radicand
+  (`\sqrt{0.2^2-1}`) still types as complex, and a radicand with unknowns
+  (`\sqrt{x}`) is unchanged.
 
 - Declared types are enforced for symbols named with a single uppercase
   letter. An argument-validation repair intended for bare standard-library

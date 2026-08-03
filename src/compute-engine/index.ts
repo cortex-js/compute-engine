@@ -63,6 +63,7 @@ import type {
   ParseLatexOptions,
   SerializeLatexOptions,
 } from './latex-syntax/types.js';
+import { validateStyleOptions } from './latex-syntax/style-options.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
 import { isSymbol } from './boxed-expression/type-guards.js';
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
@@ -743,7 +744,10 @@ export class ComputeEngine implements IComputeEngine {
     if (options?.latexSyntax) this._latexSyntax = options.latexSyntax;
 
     // Store engine-wide LaTeX options (merged into every parse/serialize call)
-    if (options?.latexOptions) this._latexOptions = { ...options.latexOptions };
+    if (options?.latexOptions) {
+      validateStyleOptions(options.latexOptions);
+      this._latexOptions = { ...options.latexOptions };
+    }
 
     hidePrivateProperties(this);
   }
@@ -2144,6 +2148,10 @@ export class ComputeEngine implements IComputeEngine {
   set latexOptions(
     options: Partial<ParseLatexOptions & SerializeLatexOptions>
   ) {
+    // A style option specified as an invalid constant (e.g.
+    // `rootStyle: 'sold'`) is reported here, rather than resulting in an
+    // empty serialization later on.
+    validateStyleOptions(options);
     this._latexOptions = { ...options };
   }
 

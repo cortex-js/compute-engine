@@ -762,6 +762,29 @@ function pyCollArg(
 }
 
 /**
+ * The Python analogs of the JavaScript target's `couldBeIndexedCollectionOperand`
+ * / `isNumericIndexOperand` (kept local, like `pyCollArg`, to avoid a
+ * cross-target import): a base whose static type merely ADMITS an indexed
+ * collection — a union with an indexed arm, the shape a lambda parameter
+ * indexed in its body carries (`dictionary | indexed_collection`) — is admitted
+ * on the RUNTIME-projection rule, but only with a provably numeric index, since
+ * the other arm is a dictionary and a keyed lookup has no compiled equivalent.
+ * A top type is not admitted: that is "nothing is known", not "a collection is
+ * possible".
+ */
+function pyCouldBeIndexedCollectionOperand(e: Expression): boolean {
+  const t = resolveTypeForCompilation(e.type.type);
+  if (t === 'unknown' || t === 'any' || t === 'value') return false;
+  if (typeof t === 'object' && t.kind === 'union')
+    return t.types.some((m) => isSubtype(m, 'indexed_collection'));
+  return isSubtype(t, 'indexed_collection');
+}
+
+function pyIsNumericIndexOperand(e: Expression): boolean {
+  return isSubtype(resolveTypeForCompilation(e.type.type), 'number');
+}
+
+/**
  * Compile a mapping/predicate operand for the Python target. A `Function`
  * literal compiles through the target's lambda handler; a bare binary
  * arithmetic operator symbol lowers to a Python lambda. Anything else —
@@ -1487,13 +1510,37 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   IsEmpty: (args, compile) =>
     `(len(${pyCollArg('IsEmpty', args[0], compile)}) == 0)`,
   At: (args, compile) => {
-    const coll = pyCollArg('At', args[0], compile);
-    if (args[1] == null || args.length !== 2)
+    const base = args[0];
+    const index = args[1];
+    if (base == null || index == null || args.length !== 2)
       throw new Error(
         `At: only the single-index form compiles. Fail closed (D6).`
       );
-    // 1-based; negative counts from the end; 0/out-of-range → nan
-    return `(lambda _l, _i: _l[int(_i) - 1] if 1 <= _i <= len(_l) else (_l[int(_i)] if -len(_l) <= _i <= -1 else float('nan')))(${coll}, ${compile(args[1])})`;
+    // Admission mirrors the JavaScript target: provably an indexed collection,
+    // or a union that merely ADMITS one (the `dictionary | indexed_collection`
+    // an indexed lambda parameter carries) — the latter only with a provably
+    // numeric index, since the other arm is a dictionary and a keyed lookup has
+    // no compiled equivalent.
+    const provablyIndexed =
+      base.type.matches('list') || base.type.matches('indexed_collection');
+    if (!provablyIndexed) {
+      if (!pyCouldBeIndexedCollectionOperand(base))
+        throw new Error(
+          `At: operand is not an indexed collection (list/vector/range). ` +
+            `Fail closed (D6).`
+        );
+      if (!pyIsNumericIndexOperand(index))
+        throw new Error(
+          `At: the first operand is not provably an indexed collection (type ` +
+            `\`${base.type.toString()}\`) and the index is not provably ` +
+            `numeric, so a keyed (dictionary) access cannot be ruled out. ` +
+            `Fail closed (D6).`
+        );
+    }
+    // 1-based; negative counts from the end; 0/out-of-range → nan. A base that
+    // is not a sequence at run time (the dictionary arm of an admitted union)
+    // projects to nan, mirroring the JavaScript `_SYS.at` runtime dispatch.
+    return `(lambda _l, _i: float('nan') if not isinstance(_l, (list, tuple, np.ndarray)) else (_l[int(_i) - 1] if 1 <= _i <= len(_l) else (_l[int(_i)] if -len(_l) <= _i <= -1 else float('nan'))))(${compile(base)}, ${compile(index)})`;
   },
   First: (args, compile) =>
     `(lambda _l: _l[0] if len(_l) > 0 else float('nan'))(${pyCollArg('First', args[0], compile)})`,

@@ -14,9 +14,12 @@ import {
 import {
   LatexString,
   SerializeLatexOptions,
+  ResolvedSerializeLatexOptions,
   DelimiterScale,
   ADDITION_PRECEDENCE,
 } from './types.js';
+
+import { normalizeStyleOptions } from './style-options.js';
 
 import type {
   IndexedLatexDictionary,
@@ -120,7 +123,7 @@ const STYLE_MODIFIERS: Record<string, (s: string) => string> = {
 };
 
 export class Serializer {
-  options: Readonly<Required<SerializeLatexOptions>>;
+  options: Readonly<Required<ResolvedSerializeLatexOptions>>;
   readonly dictionary: IndexedLatexDictionary;
   level = -1;
   constructor(
@@ -130,11 +133,13 @@ export class Serializer {
     this.dictionary = dictionary;
     // Ensure all optional properties are present with defaults
     // (`dotNotation` is required on `options`, so no default is needed for it)
+    // The style options can be specified as a constant string: normalize them
+    // to their function form.
     this.options = {
       dmsFormat: false,
       angleNormalization: 'none',
-      ...options,
-    } as Required<SerializeLatexOptions>;
+      ...normalizeStyleOptions(options),
+    } as Required<ResolvedSerializeLatexOptions>;
   }
 
   /**

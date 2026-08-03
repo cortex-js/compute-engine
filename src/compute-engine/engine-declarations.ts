@@ -52,6 +52,10 @@ import {
 } from './boxed-expression/utils.js';
 import { canonicalFunctionLiteral, lookup } from './function-utils.js';
 import {
+  registerProvisionalDependents,
+  repairProvisionalDependents,
+} from './boxed-expression/provisional-application.js';
+import {
   checkTypeConstructorNamespace,
   installConstructorFunction,
   isMintedConstructor,
@@ -446,6 +450,16 @@ export function setSymbolValue(
   if (isValueDef(def)) {
     def.value.value = value;
     ce._generation += 1;
+    // The declared-signature reconciliation paths (§6.3) store a `Function`
+    // literal through here rather than through `updateDef`, so this is where a
+    // function-typed value definition joins the forward-reference mechanism:
+    // its own body may carry a provisional reading (register it), and `id`
+    // becoming callable re-derives every body that read `id` as a
+    // multiplication operand (`boxed-expression/provisional-application.ts`).
+    if (def.value.type.matches('function')) {
+      registerProvisionalDependents(ce, value, def.value);
+      repairProvisionalDependents(ce, id);
+    }
     return;
   }
 

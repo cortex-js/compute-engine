@@ -25,6 +25,7 @@ import {
   functionLiteralParameters,
   functionLiteralReturnMarker,
   functionLiteralReturnType,
+  isScalarType,
 } from './function-literal.js';
 
 /**
@@ -228,6 +229,47 @@ export function matchesDeclaredTypeAxes(
  * rule: `makeCallback() := (() ↦ Random())` is itself pure, with result type
  * `() random -> …`.
  */
+/**
+ * The COLLECTION type inference gave a bare (unannotated) parameter, or
+ * `undefined` to leave its arrow slot `unknown` as before.
+ *
+ * A parameter operand denotes the one binding the literal's body Block
+ * declares for it (`bindParameterOperands`), so its `.type` is whatever the
+ * body's uses inferred — `At(v, 1)` narrows `v` to `indexed_collection |
+ * dictionary` through `At`'s signature. Surfacing that on the arrow is what
+ * makes `paramsAreScalar` false, so a list argument is APPLIED to the lambda
+ * instead of being broadcast element-wise over it (`h([3,4])` → `7`, not
+ * `[h(3), h(4)]`).
+ *
+ * Deliberately narrow: the inferred type must EXCLUDE every scalar, so only a
+ * parameter that cannot be a scalar is lifted. A parameter inferred `number`
+ * (the overwhelmingly common case, `x ↦ 2x`) keeps an `unknown` slot so the
+ * `broadcastable<T>` lift still fires; so does a function-typed one (a
+ * higher-order callback slot), and — the trap — so does an INDEX parameter:
+ * `At`'s index slot is `boolean | indexed_collection | number | string`
+ * (a gather index may itself be a collection), so `(t) ↦ L[t] + 1` must keep
+ * `t` unlifted even though one arm of that union is a collection.
+ */
+export function inferredCollectionParameterType(
+  param: Expression | undefined
+): Type | undefined {
+  if (param === undefined || !isSymbol(param)) return undefined;
+  const t = param.type.type;
+  if (t === 'unknown' || t === 'any' || t === 'value' || t === 'nothing')
+    return undefined;
+  if (!excludesEveryScalar(t) || isSubtype(t, 'function')) return undefined;
+  return t;
+}
+
+/** True when NO value of `t` is a scalar — every arm of a union has to be
+ * collection-like. (`isScalarType` of a union is the dual "every arm is a
+ * scalar", which is not the question here.) */
+function excludesEveryScalar(t: Type): boolean {
+  if (typeof t === 'object' && t.kind === 'union')
+    return t.types.every((m) => excludesEveryScalar(m));
+  return !isScalarType(t);
+}
+
 export function functionLiteralSignatureType(expr: Expression): Type {
   const ce = expr.engine;
   const body = functionLiteralBody(expr)!;
@@ -277,13 +319,15 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   // text round-trip here — possibly after that scope popped — either threw
   // `Unknown type` or silently dropped the annotation. Same hazard class as
   // the inferred-signature fix in `boxed-operator-definition.ts`.
+  const paramOps = isFunction(expr, 'Function') ? expr.ops.slice(1) : [];
   const args =
     params.length > 0
-      ? params.map((p) =>
-          p.type !== undefined
-            ? { name: p.name, type: p.type }
-            : { type: 'unknown' as Type }
-        )
+      ? params.map((p, i) => {
+          if (p.type !== undefined) return { name: p.name, type: p.type };
+          const inferred = inferredCollectionParameterType(paramOps[i]);
+          if (inferred !== undefined) return { name: p.name, type: inferred };
+          return { type: 'unknown' as Type };
+        })
       : undefined;
 
   // The effect specifier slot. An INFERRED empty set is written as an empty

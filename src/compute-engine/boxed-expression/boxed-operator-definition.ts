@@ -18,6 +18,7 @@ import {
 import {
   EffectContractError,
   inferFunctionLiteralEffects,
+  inferredCollectionParameterType,
   signatureEffects,
   stripArrowEffects,
 } from './effects-inference.js';
@@ -49,6 +50,7 @@ import { parseType } from '../../common/type/parse.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { defaultCollectionHandlers } from '../collection-utils.js';
+import { registerProvisionalDependents } from './provisional-application.js';
 
 const OPERATOR_DEF_KEYS = new Set([
   // Base
@@ -762,8 +764,18 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         // carries its own `def`, so it stays usable wherever it escapes to.
         const signature: Type = {
           kind: 'signature',
+          // A parameter slot is `unknown` unless the body's uses inferred a
+          // COLLECTION type for it (`v[1]` narrows `v` through `At`'s
+          // signature): surfacing that keeps `paramsAreScalar` false, so a
+          // list argument is applied to the function rather than broadcast
+          // element-wise over it. Same rule, same helper as the literal's own
+          // arrow (`functionLiteralSignatureType`).
           ...(params.length > 0
-            ? { args: params.map(() => ({ type: 'unknown' as Type })) }
+            ? {
+                args: params.map((p) => ({
+                  type: inferredCollectionParameterType(p) ?? 'unknown',
+                })),
+              }
             : {}),
           result: body.type.type,
         };
@@ -775,6 +787,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       if (isFunction(boxedFn) && boxedFn.operator === 'Function') {
         this._isLambda = true;
         this._lambdaLiteral = boxedFn;
+
+        // If the body froze a juxtaposition as multiplication only because its
+        // leading symbol had no function definition yet, wait on that symbol:
+        // definition order must not change semantics
+        // (`provisional-application.ts`).
+        registerProvisionalDependents(this.engine, boxedFn, this);
 
         // Derive the effect set from the BODY unless the caller stated it (as
         // `effects:`, as an effect-annotated signature, or as the legacy

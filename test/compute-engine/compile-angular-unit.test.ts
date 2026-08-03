@@ -216,3 +216,148 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
     expect(run({ x: 25 })).toBeCloseTo(interp, 10);
   });
 });
+
+//
+// ── Symbolic derivatives ────────────────────────────────────────────────
+//
+// `Sin(x)` denotes `sin(k·x)` in a non-radian unit, so its derivative carries
+// the chain factor `k` (`π/180` in degree mode). Every route must produce it:
+// the BY-REFERENCE path (`f'` over a function literal assigned to `f`) used to
+// miss it in both the interpreter and the compiler, while the INLINE Leibniz
+// path (`d/dx sin x`) only got it in compiled code — by accident of the
+// entry-point rewrite running before the differentiation (Tycho 0.100.0
+// adoption item 6).
+//
+// Each engine is created fresh, so `angularUnit` never leaks between tests.
+//
+
+/** An engine with `f := x ↦ sin x` declared. */
+function fEngine(unit: 'rad' | 'deg'): ComputeEngine {
+  const ce = new ComputeEngine();
+  ce.angularUnit = unit;
+  ce.parse('f \\coloneq x \\mapsto \\sin x').evaluate();
+  return ce;
+}
+
+/** `d/dx sin x` as an inert Leibniz derivative. */
+function inlineD(ce: ComputeEngine) {
+  return ce.box(['D', ['Sin', 'x'], 'x']);
+}
+
+describe('ANGULAR UNIT — symbolic derivative (by-reference vs inline)', () => {
+  // sin(k·x)' = k·cos(k·x), sampled at 0 and at the quarter turn.
+  const CASES = [
+    { unit: 'rad' as const, k: 1, points: [0, Math.PI / 2, 0.5] },
+    { unit: 'deg' as const, k: Math.PI / 180, points: [0, 90, 30] },
+  ];
+
+  for (const { unit, k, points } of CASES) {
+    test(`${unit}: interpreted — f'(x) and d/dx sin x agree with k·cos(k·x)`, () => {
+      const ce = fEngine(unit);
+      // The two closed forms are the same expression. Compared as MathJSON:
+      // applying a lambda re-nests a rational-coefficient product
+      // (`1/180·(π·cos x)` vs `1/180·π·cos x`), which `isSame` sees but the
+      // associative MathJSON serialization does not — a pre-existing quirk of
+      // the apply path, unrelated to angular units.
+      const byRef = ce.parse("f'(x)").evaluate();
+      const inline = inlineD(ce).evaluate();
+      expect(byRef.json).toEqual(inline.json);
+
+      for (const p of points) {
+        const expected = k * Math.cos(k * p);
+        expect(ce.parse(`f'(${p})`).N().re).toBeCloseTo(expected, 12);
+        expect(inline.subs({ x: p }).N().re).toBeCloseTo(expected, 12);
+      }
+    });
+
+    test(`${unit}: compiled — f'(x) and d/dx sin x agree with k·cos(k·x)`, () => {
+      const ce = fEngine(unit);
+      const js = ce.getCompilationTarget('javascript')!;
+      const byRef = js.compile(ce.parse("f'(x)"));
+      const inline = js.compile(inlineD(ce));
+      expect(byRef.success).toBe(true);
+      expect(inline.success).toBe(true);
+
+      for (const p of points) {
+        const expected = k * Math.cos(k * p);
+        expect(byRef.run!({ x: p }) as number).toBeCloseTo(expected, 12);
+        expect(inline.run!({ x: p }) as number).toBeCloseTo(expected, 12);
+      }
+    });
+
+    test(`${unit}: second derivative carries k²`, () => {
+      const ce = fEngine(unit);
+      const js = ce.getCompilationTarget('javascript')!;
+      const compiled = js.compile(ce.parse("f''(x)"));
+      for (const p of points) {
+        const expected = -k * k * Math.sin(k * p);
+        expect(ce.parse(`f''(${p})`).N().re).toBeCloseTo(expected, 12);
+        expect(compiled.run!({ x: p }) as number).toBeCloseTo(expected, 12);
+      }
+    });
+  }
+
+  test('deg: cos and the chain rule agree on both routes', () => {
+    const ce = new ComputeEngine();
+    ce.angularUnit = 'deg';
+    const js = ce.getCompilationTarget('javascript')!;
+    const k = Math.PI / 180;
+
+    // g := x ↦ cos x — d/dx cos(k·x) = −k·sin(k·x).
+    ce.parse('g \\coloneq x \\mapsto \\cos x').evaluate();
+    const gCompiled = js.compile(ce.parse("g'(x)"));
+    for (const p of [0, 30, 60, 90]) {
+      const expected = -k * Math.sin(k * p);
+      expect(ce.parse(`g'(${p})`).N().re).toBeCloseTo(expected, 12);
+      expect(gCompiled.run!({ x: p }) as number).toBeCloseTo(expected, 12);
+      expect(
+        ce.box(['D', ['Cos', 'x'], 'x']).evaluate().subs({ x: p }).N().re
+      ).toBeCloseTo(expected, 12);
+    }
+
+    // h := x ↦ sin(2x) — the chain rule composes with the unit factor:
+    // d/dx sin(k·2x) = 2k·cos(2k·x).
+    ce.parse('h \\coloneq x \\mapsto \\sin(2x)').evaluate();
+    const hCompiled = js.compile(ce.parse("h'(x)"));
+    for (const p of [0, 30, 45]) {
+      const expected = 2 * k * Math.cos(2 * k * p);
+      expect(ce.parse(`h'(${p})`).N().re).toBeCloseTo(expected, 12);
+      expect(hCompiled.run!({ x: p }) as number).toBeCloseTo(expected, 12);
+    }
+    // The reported sample: 2·(π/180)·cos(60°) = π/180.
+    expect(ce.parse("h'(30)").N().re).toBeCloseTo(k, 12);
+  });
+
+  test('deg: the by-reference derivative is not the radian value', () => {
+    // The regression itself: `f'(0)` used to be 1 (cos 0) on both routes.
+    const ce = fEngine('deg');
+    const js = ce.getCompilationTarget('javascript')!;
+    const run = js.compile(ce.parse("f'(x)")).run!;
+    expect(ce.parse("f'(0)").N().re).toBeCloseTo(Math.PI / 180, 15);
+    expect(run({ x: 0 }) as number).toBeCloseTo(Math.PI / 180, 15);
+    // 30°: the radian answer (cos 30 ≈ 0.154251) is not a coincidental match.
+    expect(ce.parse("f'(30)").N().re).toBeCloseTo(0.015114994701951816, 15);
+    expect(run({ x: 30 }) as number).toBeCloseTo(0.015114994701951816, 15);
+  });
+
+  test('deg: the chain factor stays exact', () => {
+    const ce = new ComputeEngine();
+    ce.angularUnit = 'deg';
+    expect(inlineD(ce).evaluate().toString()).toBe('1/180 * pi * cos(x)');
+    // Inverse trig: the result is an angle, so the derivative is DIVIDED by k.
+    expect(ce.box(['D', ['Arcsin', 'x'], 'x']).evaluate().toString()).toBe(
+      '180 / (pi * sqrt(1 - x^2))'
+    );
+  });
+
+  test('deg: ND is not converted twice', () => {
+    // `ND` numerically differentiates a body it compiles itself, so the
+    // entry-point rewrite must not scale that body a second time.
+    const ce = new ComputeEngine();
+    ce.angularUnit = 'deg';
+    const js = ce.getCompilationTarget('javascript')!;
+    const nd = ce.box(['ND', ['Function', ['Sin', 'x'], 'x'], 0]);
+    expect(nd.N().re).toBeCloseTo(Math.PI / 180, 10);
+    expect(js.compile(nd).run!({}) as number).toBeCloseTo(Math.PI / 180, 10);
+  });
+});

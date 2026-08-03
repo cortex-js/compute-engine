@@ -23,7 +23,11 @@ import { implicitCompile } from '../implicit-compile.js';
 import { _setCompile } from './stochastic-equal.js';
 
 import { validateArguments } from './validate.js';
-import { _setValidateArguments } from '../function-utils.js';
+import {
+  _setValidateArguments,
+  repairProvisionalDependents,
+} from '../function-utils.js';
+import { _setProvisionalRepair } from './provisional-application.js';
 
 import { add } from './arithmetic-add.js';
 import { _setFieldAddN } from '../tensor/tensor-fields.js';
@@ -42,3 +46,4 @@ _setGetPolynomialDegree(polynomialDegree);
 _setFindUnivariateRoots(findUnivariateRoots);
 _setValidateArguments(validateArguments);
 _setFieldAddN(add);
+_setProvisionalRepair(repairProvisionalDependents);

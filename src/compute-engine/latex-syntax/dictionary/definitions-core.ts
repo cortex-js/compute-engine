@@ -4066,6 +4066,57 @@ function pruneFunctionParams(
   parser.pruneUndeclared(names, checkpoint);
 }
 
+/**
+ * Parse the RHS of a function definition (`f(x, y) := body`) with the
+ * parameters bound, at their DECLARED types, in a parser-local symbol table.
+ *
+ * The subscript-vs-index decision is made at PARSE time from what the parser
+ * knows about the base symbol (see `parseSymbol`'s speculative subscript
+ * absorption), so a parameter that `f`'s declared signature types as an indexed
+ * collection has to be visible while its body is read. Without this,
+ * `h(v) \coloneq v_1 + v_2` — with `h` declared `(list<real>) -> real` —
+ * captured `v_1`/`v_2` as compound symbols unrelated to the parameter, and
+ * every call silently computed with those free symbols instead of indexing.
+ *
+ * Only the types a declared signature supplies are bound. A parameter with no
+ * known type is deliberately left alone: entering it in the symbol table would
+ * make `resolveSymbol` report it as *declared*, which is a separate question
+ * with its own (diagnostics and name-precedence) consequences.
+ */
+function parseFunctionDefinitionBody(
+  parser: Parser,
+  fn: string,
+  args: readonly MathJsonExpression[] | null,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
+  const parseBody = () =>
+    parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
+
+  const sig = parser.resolveSymbol(fn)?.type.type;
+  const sigArgs =
+    sig !== undefined && typeof sig === 'object' && sig.kind === 'signature'
+      ? [...(sig.args ?? []), ...(sig.optArgs ?? [])]
+      : undefined;
+  if (!args || !sigArgs || sigArgs.length === 0) return parseBody();
+
+  let pushed = false;
+  try {
+    for (let i = 0; i < args.length; i++) {
+      const name = symbol(args[i]);
+      const type = sigArgs[i]?.type;
+      if (!name || type === undefined) continue;
+      if (!pushed) {
+        parser.pushSymbolTable();
+        pushed = true;
+      }
+      parser.addSymbol(name, new BoxedType(type));
+    }
+    return parseBody();
+  } finally {
+    if (pushed) parser.popSymbolTable();
+  }
+}
+
 function parseAssign(
   parser: Parser,
   lhs: MathJsonExpression,
@@ -4126,13 +4177,13 @@ function parseAssign(
     const fn = symbol(operand(lhs, 1));
     if (!fn) return null;
 
-    const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
-    if (rhs === null) return null;
-
     const delimBody = operand(operand(lhs, 2), 1);
     let args: MathJsonExpression[] = [];
     if (operator(delimBody) === 'Sequence') args = [...operands(delimBody)];
     else if (delimBody) args = [delimBody!];
+
+    const rhs = parseFunctionDefinitionBody(parser, fn, args, until);
+    if (rhs === null) return null;
 
     pruneFunctionParams(parser, args, paramDiagCp);
     // The `f(x)` LHS was parsed as a neutral juxtaposition (code 2 emitted for
@@ -4198,7 +4249,7 @@ function parseAssign(
       // We have f_n := or f^n := ...
     }
     const args = operands(lhs);
-    const rhs = parser.parseExpression({ ...(until ?? {}), minPrec: 20 });
+    const rhs = parseFunctionDefinitionBody(parser, fn, args, until);
     if (rhs === null) return null;
 
     pruneFunctionParams(parser, args, paramDiagCp);

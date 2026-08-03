@@ -10,6 +10,7 @@ import {
   couldBeNumericTuple,
   isLinearAlgebraCollection,
 } from '../collection-utils.js';
+import { noteProvisionalApplication } from './provisional-application.js';
 
 const MATRIX_TYPE = new BoxedType('matrix');
 const FUNCTION_TYPE = new BoxedType('function');
@@ -136,6 +137,12 @@ export function canonicalInvisibleOperator(
       );
 
       if (allArgsNumeric) {
+        // The product reading rests on `lhsCanon` having no function
+        // definition *yet*: record it so a `Function` literal canonicalized now
+        // can be re-derived if the symbol later gains one (see
+        // `provisional-application.ts`).
+        if (couldBecomeFunction(def))
+          noteProvisionalApplication(lhsCanon.symbol);
         return ce.function('Multiply', [lhsCanon, ...args]);
       }
 
@@ -423,11 +430,29 @@ function combineFunctionApplications(
           continue;
         }
       }
+
+      // The pair stays two multiplication operands only because `symName` has
+      // no function definition *yet* — record it (see the same note in
+      // `canonicalInvisibleOperator`).
+      if (couldBecomeFunction(def)) noteProvisionalApplication(symName);
     }
     result.push(ops[i]);
     i++;
   }
   return result;
+}
+
+/** Whether a later definition could turn a juxtaposition on this symbol into a
+ * function application: it has no definition at all, or a value definition
+ * whose type is still unknown. A symbol declared with a concrete
+ * (non-function) type is settled — `2x(t+1)` with a numeric `x` is a product,
+ * and stays one. */
+function couldBecomeFunction(
+  def: ReturnType<ComputeEngine['lookupDefinition']>
+): boolean {
+  if (def === undefined) return true;
+  if (isOperatorDef(def)) return false;
+  return def.value.type.isUnknown;
 }
 
 function asInteger(expr: Expression): number {
