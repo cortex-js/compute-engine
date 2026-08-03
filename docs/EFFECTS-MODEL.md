@@ -131,6 +131,14 @@ pure, by the noise-floor convention below):
 | Derived sub-stream | — none (pure; noise-floor convention) — but carries the `readsRandomFrame` definition field (below) | no — frame-independent indices | yes | Monte-Carlo `Integrate` fallback, `stochasticEqual` (per `derived-substreams.md` §§2–6) |
 | Unseeded entropy | `entropy` | no | no — nothing promises replay | `RandomExpression` (fuzzer harness, `derived-substreams.md` §7) |
 
+A fourth fact about the frame stream is not a shape but a **boundary**: a
+frame contains only the draws made during its dynamic extent. A lazy view
+whose element work draws — `Map(xs, x ↦ Random())`, a `Comprehension` body
+— is a *completed value* that leaves the frame and draws at materialization
+(`RANDOMNESS-MODEL.md` §6). The `random` label therefore survives
+`WithRandomSeed` for such a body: see the frame-escape bullet under
+"Projection and discharge" (direction A, ruled 2026-08-02, Tycho item 142).
+
 Rulings adopted from `derived-substreams.md` (cross-referenced there):
 
 - **`RandomExpression` keeps raw `Math.random()`** and gets the `entropy`
@@ -699,6 +707,37 @@ The **contribution** of operand `aᵢ` separates *producing* the operand from
   scope write. (Per the confinement rule of "Scope writes", this example
   assumes `x` resolves to a binding outside the block — an escaping
   write; a block-confined write would not surface at all.)
+- **The `random` discharge stops at a frame ESCAPE** *(direction A, ruled
+  2026-08-02, Tycho item 142)*. A frame contains only the draws made during
+  its **dynamic extent**. A body that provably evaluates to a *lazy drawing
+  view* — `WithRandomSeed(42, Map(xs, x ↦ Random()))`, and equally the
+  `Comprehension` the `[… for k = …]` syntax parses to — is a **completed
+  value** that strips the frame and draws at materialization, from whatever
+  frame is active *then* (`RANDOMNESS-MODEL.md` §6, the ruling of
+  2026-07-25, and the "completed values strip the frame" rule of §2). That
+  runtime behavior is unchanged; what changes is that the discharge no
+  longer *claims* it: the position's effective discharge is the declared
+  set minus `random`, so the application reports `{random}`. The gate is
+  **positive proof, optimistic otherwise** — the node must be a lazy
+  collection view whose *element work* draws (the latent set of the
+  callback it invokes per element, or, for a view that binds its own
+  variables, its non-clause operands), reached through **value position**:
+  §2 states the escape holds "whether the view is the result itself or a
+  cell of a returned `List`/`Tuple`", so the literal containers are
+  traversed — the same container set, defined once, that the pending-draw
+  walk reads — as is the statement a `Block` returns (the walk needs no
+  `Block` case: it runs on an evaluated body, where the block has already
+  collapsed to that statement). A materializer around the view
+  (`ListFrom`, an index, a reducer) asked for the draws *inside* the frame
+  and keeps the discharge; so does a view whose only draw is in its
+  **source** (`Map(RandomShuffle(…), k ↦ k)` draws when the view is built);
+  so does an uncertain body. Both channels apply this rule through one
+  shared `effectiveDischarge` — the runtime `effectsOf` and the
+  construction-time inference must not disagree (the item-132 failure
+  mode), so a lambda whose body is `WithRandomSeed(42, lazyDrawingView)`
+  gets `random` on its own arrow too, while the per-site frame *inside* a
+  callback (`(i) ↦ WithRandomSeed(42, Random())`) still discharges and
+  stays pure.
 - **The runtime frame-protocol role is a separate field**, not the arrow:
   the definition gains `frameProtocol: 'seed'` (kind-valued — see "Frame
   kinds" under Label kinds; this is today's conflated second meaning of

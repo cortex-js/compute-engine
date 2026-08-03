@@ -1,12 +1,17 @@
 import type { EffectLabel, Type } from '../../common/type/types.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import {
+  hasDeclaredEffectLabel,
   isCoFiniteEffects,
   sameEffectSet,
   subtractEffects,
   unionComputedEffects,
 } from '../../common/type/effects.js';
-import { functionResult, signatureArms } from '../../common/type/utils.js';
+import {
+  functionResult,
+  signatureArms,
+  signatureEffects,
+} from '../../common/type/utils.js';
 import { couldBeCollectionOperand } from '../collection-utils.js';
 import { overloadArms, resolveOverload } from './overload.js';
 
@@ -14,11 +19,11 @@ import type {
   BoxedOperatorDefinition,
   BoxedValueDefinition,
   Expression,
+  FunctionInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 
 import { isFunction, sym } from './type-guards.js';
-import { signatureEffects } from './effects-inference.js';
 
 /**
  * # The runtime effect channel (`docs/EFFECTS-MODEL.md`, "Runtime counterpart")
@@ -42,7 +47,9 @@ import { signatureEffects } from './effects-inference.js';
  *   through `invokesAt`): a non-invoking position only STORES or SELECTS the
  *   value, so `List(randomF)` and `If(c, randomF, pureF)` are pure to build;
  * - **held, may-evaluate** (the default for `lazy` positions — a `Sum` body,
- *   the `WithRandomSeed` body): `effectsOf(aᵢ) − discharge(op, i)`;
+ *   the `WithRandomSeed` body): `effectsOf(aᵢ) − discharge(op, i)`, where a
+ *   discharge the operand provably ESCAPES does not apply — see
+ *   {@link effectiveDischarge};
  * - **held, quote/store** (`holdClass: 'quote'` — `Hold`): ∅. The effects
  *   resurface at forcing (`holdClass: 'release'` — `ReleaseHold`), which is
  *   itself an application: the projection strips one quote layer and recurses
@@ -189,7 +196,7 @@ export function applicationEffects(expr: Expression): ComputedEffects {
     if (effects === 'any') return 'any';
 
     const op = ops[i];
-    const discharge = def.discharges?.[i];
+    const discharge = effectiveDischarge(def.discharges?.[i], op);
 
     // The operand's OWN effects. Eager: producing the operand is never
     // dischargeable — the draw behind `Use(MakeCallback())` fires when the
@@ -216,6 +223,120 @@ export function applicationEffects(expr: Expression): ComputedEffects {
   }
 
   return effects;
+}
+
+/**
+ * The discharge that position actually applies to `op` — the declared set,
+ * minus `random` when the operand **provably escapes the frame** as a lazy
+ * drawing view (Tycho item 142, ruled 2026-08-02).
+ *
+ * A discharge says "bring it, I contain it", and a seed frame only contains the
+ * draws that happen during its dynamic extent. A lazy view whose element work
+ * draws is a COMPLETED value that strips the frame and draws from whatever
+ * frame is active at materialization (`docs/RANDOMNESS-MODEL.md` §6, and the
+ * "completed values strip the frame" rule of §2) — so
+ * `WithRandomSeed(42, Map(xs, x ↦ Random()))` draws LIVE, and claiming the
+ * discharge there would report a genuinely random expression pure.
+ *
+ * **Positive proof, optimistic otherwise**: only the provable frame-stripping
+ * shape flips. An uncertain body — an unknown head, a materializer whose length
+ * has not resolved, a view whose element work cannot be shown to draw — keeps
+ * the discharge, exactly as before.
+ */
+export function effectiveDischarge(
+  discharge: readonly EffectLabel[] | undefined,
+  op: Expression
+): readonly EffectLabel[] | undefined {
+  if (discharge === undefined || !discharge.includes('random')) return discharge;
+  if (!escapesAsDrawingLazyView(op)) return discharge;
+  const rest = discharge.filter((label) => label !== 'random');
+  return rest.length === 0 ? undefined : rest;
+}
+
+/**
+ * True when `expr` PROVABLY denotes — or RETURNS — a lazy collection view whose
+ * **element work** draws: the frame-escaping shape of
+ * `docs/RANDOMNESS-MODEL.md` §6.
+ *
+ * The same discrimination the pending-draw walk of `library/core.ts` makes, and
+ * keyed the same way — on operator flags, never on impurity in general:
+ *
+ * - the node is a lazy collection VIEW (`isLazyCollection`); a materializer
+ *   around it (`ListFrom(Map(…))`, an index, a reducer) asked for the draws
+ *   INSIDE the frame, so it is not this shape and keeps its discharge;
+ * - its ELEMENT work draws. For an ordinary view that is the LATENT half of its
+ *   own application — the callback it invokes per element
+ *   ({@link shallowApplicationEffects}); for a view that BINDS its own
+ *   variables (`Comprehension`, the shape `[… for k = …]` parses to) it is the
+ *   operands that are not clauses, its body spelled without a `Function` node.
+ *
+ * A view's SOURCE is deliberately excluded on both paths: `Map(RandomShuffle(…),
+ * k ↦ k)` draws when the view is built, inside the frame, and stays discharged.
+ *
+ * VALUE POSITION propagates, exactly as it does in that walk: §2 states the
+ * escape "stays a live-draw escape, whether the view is the result itself or a
+ * cell of a returned `List`/`Tuple`" — so the literal containers
+ * ({@link isValueContainer}, the one definition the walk reads too) are
+ * traversed. A `Block`'s LAST statement is traversed for the same reason: it is
+ * what the block returns. (The walk needs no `Block` case of its own — it runs
+ * on an EVALUATED body, where a block has already collapsed to that statement;
+ * this channel classifies the unevaluated shape.) Everything else is opaque and
+ * keeps the discharge — positive proof, optimistic otherwise.
+ */
+function escapesAsDrawingLazyView(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+
+  if (expr.isLazyCollection) {
+    // The per-element callback of an ordinary view.
+    if (hasDeclaredEffectLabel(shallowApplicationEffects(expr), 'random'))
+      return true;
+
+    // A binder view: everything that is not a clause is per-element body.
+    const clauses = binderClauseOperands(expr);
+    if (clauses === undefined) return false;
+    return expr.ops.some(
+      (op, i) =>
+        !clauses.has(i) && hasDeclaredEffectLabel(effectsOf(op), 'random')
+    );
+  }
+
+  // Value position: the cells a literal container returns…
+  if (isValueContainer(expr)) return expr.ops.some(escapesAsDrawingLazyView);
+  // …and the statement a `Block` returns. The earlier statements are evaluated
+  // UNDER the frame, so whatever they draw is owed to it.
+  if (isFunction(expr, 'Block'))
+    return escapesAsDrawingLazyView(expr.ops[expr.ops.length - 1]);
+
+  return false;
+}
+
+/**
+ * True when `expr` is a literal CONTAINER — an application that merely holds
+ * its operands, so a value in one of its cells is in value position and a lazy
+ * view there escapes with it (`docs/RANDOMNESS-MODEL.md` §2: "whether the view
+ * is the result itself or a cell of a returned `List`/`Tuple`").
+ *
+ * The single definition of that set: the pending-draw walk of `library/core.ts`
+ * reads it too, so the two cannot drift.
+ */
+export function isValueContainer(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  const h = expr.operator;
+  return h === 'List' || h === 'Tuple' || h === 'Pair';
+}
+
+/**
+ * The operand indices of a binder node that are its CLAUSES — the operands
+ * carrying the syntactic bound variables the node declares. Everything else is
+ * body. `undefined` when the node is not a binder with syntactic bound
+ * variables. Mirrors the helper of the same name in `library/core.ts`.
+ */
+function binderClauseOperands(
+  expr: Expression & FunctionInterface
+): Set<number> | undefined {
+  const sites = operatorDefinitionOf(expr)?.bindingSites?.(expr.ops, 'post');
+  if (sites === undefined || sites.length === 0) return undefined;
+  return new Set(sites.map((site) => site.path[0]));
 }
 
 /**

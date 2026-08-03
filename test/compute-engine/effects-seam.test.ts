@@ -65,11 +65,12 @@ describe('The Function-literal construction seam is the only builder', () => {
     const ALLOWED = [
       'compute-engine/boxed-expression/boxed-function.ts',
       'compute-engine/boxed-expression/boxed-operator-definition.ts',
-      // The runtime effect channel: it READS an arrow's effect specifier
-      // (`signatureEffects`) to get an operand's latent set. It never builds
-      // one — the literal's arrow reaches it through `.type`, i.e. through the
-      // seam.
-      'compute-engine/boxed-expression/effects-of.ts',
+      // (The runtime effect channel, `effects-of.ts`, no longer appears here:
+      // the seam re-exported `signatureEffects` for it, and since item 142 the
+      // dependency runs the other way — the seam reads the channel's shared
+      // `effectiveDischarge` so both channels apply ONE discharge rule. It now
+      // reads `signatureEffects` from `common/type/utils.ts`, where it is
+      // defined; it still never builds an arrow.)
       // The value-definition constructor: it applies the per-axis declared/
       // inferred split (`matchesDeclaredTypeAxes`) to the value-vs-type
       // compatibility check. It READS a stored literal's arrow; it never

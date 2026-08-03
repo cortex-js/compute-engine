@@ -973,11 +973,31 @@ describe('6 — discharge', () => {
     expect(live.evaluate().isSame(live.evaluate())).toBe(false);
   });
 
-  it('the discharge reaches a draw behind a named callback', () => {
+  it('the discharge does NOT reach a lazy view that escapes the frame', () => {
+    // Tycho item 142, ruled 2026-08-02 (direction A). A discharge says "bring
+    // it, I contain it" — and a seed frame contains only the draws made during
+    // its dynamic extent. A `Map` view's callback draws at MATERIALIZATION,
+    // from whatever frame is active then (`docs/RANDOMNESS-MODEL.md` §6), so
+    // the view escapes and its draws are LIVE. Claiming the discharge here
+    // reported a genuinely random expression pure.
+    //
+    // Spelling-insensitive: the callback is NAMED here and inline in the
+    // five-shape table below.
     const ce = new ComputeEngine();
     ce.assign('drawEach', ce.box(DRAWING_LAMBDA));
     expect(
       eff(ce.box(['WithRandomSeed', 42, ['Map', ['List', 1, 2], 'drawEach']]))
+    ).toEqual(['random']);
+    // …while materializing INSIDE the frame asks for the draws there, so the
+    // discharge is genuine and still applies.
+    expect(
+      eff(
+        ce.box([
+          'WithRandomSeed',
+          42,
+          ['ListFrom', ['Map', ['List', 1, 2], 'drawEach']],
+        ])
+      )
     ).toBe(undefined);
   });
 
@@ -1053,6 +1073,161 @@ describe('6 — discharge', () => {
     const e = ce.box(['WithRandomSeed', 42, ['opaqueSurvivor6', 'unboundN6']]);
     expect(e.isPure).toBe(false);
     expect(e.evaluate().operator).not.toBe('WithRandomSeed');
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Tycho item 142 (direction A, ruled 2026-08-02): the frame-escape carve-out
+  // on the `random` discharge. RUNTIME semantics are unchanged — the §6 ruling
+  // of `docs/RANDOMNESS-MODEL.md` (draws happen at materialization, from
+  // whatever frame is active then) stands; only the MODEL stops claiming a
+  // discharge it does not deliver.
+  // ─────────────────────────────────────────────────────────────────────────
+  describe('a frame-escaping lazy view is not discharged (item 142)', () => {
+    /** `Map(Range(1, 6), k ↦ Random())` — the lazy drawing view. */
+    const DRAWING_VIEW = ['Map', ['Range', 1, 6], DRAWING_LAMBDA];
+
+    it('the five shapes', () => {
+      const ce = new ComputeEngine();
+      const table = [
+        // an unframed draw
+        [['Random'], ['random']],
+        // a framed draw — a GENUINE discharge, the whole point of the frame
+        [['WithRandomSeed', 42, ['Random']], undefined],
+        // a bare lazy drawing view — impure wherever it is materialized
+        [DRAWING_VIEW, ['random']],
+        // THE CARVE-OUT: the view escapes the frame and draws live
+        [['WithRandomSeed', 42, DRAWING_VIEW], ['random']],
+        // materialized INSIDE the frame — genuine again
+        [['WithRandomSeed', 42, ['ListFrom', DRAWING_VIEW]], undefined],
+      ] as const;
+      // Labelled by INDEX: `toString()` materializes a lazy view (and would
+      // draw), so it cannot be used to identify a row.
+      table.forEach(([expr, expected], row) => {
+        const e = ce.box(expr as any);
+        expect([row, eff(e)]).toEqual([row, expected]);
+        expect([row, e.isPure]).toEqual([row, expected === undefined]);
+      });
+    });
+
+    it('a `Comprehension` is the same shape, on the parse route too', () => {
+      // `[… for k = …]` builds a `Comprehension` — a lazy view that binds its
+      // own variable, so its BODY is the per-element work (no `Function` node)
+      // and its CLAUSES are the source.
+      const ce = new ComputeEngine();
+      for (const [route, e] of Object.entries({
+        parse: ce.parse(
+          '\\mathrm{WithRandomSeed}(42, [\\mathrm{Random}() \\text{ for } k = [1..6]])'
+        ),
+        box: ce.box([
+          'WithRandomSeed',
+          42,
+          ['Comprehension', ['Random'], ['Element', 'k', ['Range', 1, 6]]],
+        ]),
+      })) {
+        expect([route, e.ops[1].operator]).toEqual([route, 'Comprehension']);
+        expect([route, eff(e)]).toEqual([route, ['random']]);
+      }
+      // …and materializing it inside the frame discharges as before.
+      expect(
+        eff(
+          ce.box([
+            'WithRandomSeed',
+            42,
+            [
+              'ListFrom',
+              ['Comprehension', ['Random'], ['Element', 'k', ['Range', 1, 6]]],
+            ],
+          ])
+        )
+      ).toBe(undefined);
+    });
+
+    it('a view escapes from a CONTAINER cell and from a `Block` result too', () => {
+      // `RANDOMNESS-MODEL.md` §2: the escape "stays a live-draw escape,
+      // whether the view is the result itself or a cell of a returned
+      // `List`/`Tuple`" — value position propagates through the literal
+      // containers exactly as it does in the pending-draw walk, and through
+      // the statement a `Block` returns.
+      const ce = new ComputeEngine();
+      for (const [label, body] of Object.entries({
+        List: ['List', DRAWING_VIEW, 1],
+        Tuple: ['Tuple', DRAWING_VIEW, 1],
+        Pair: ['Pair', DRAWING_VIEW, 1],
+        nested: ['List', ['List', DRAWING_VIEW]],
+        Block: ['Block', DRAWING_VIEW],
+        // The earlier statements run UNDER the frame; the last one escapes.
+        'Block after a framed draw': ['Block', ['Random'], DRAWING_VIEW],
+      })) {
+        const e = ce.box(['WithRandomSeed', 42, body] as any);
+        expect([label, eff(e)]).toEqual([label, ['random']]);
+      }
+    });
+
+    it('a container of only in-frame or pure cells keeps its discharge', () => {
+      const ce = new ComputeEngine();
+      for (const [label, body] of Object.entries({
+        // Draws made in the frame's own extent — the genuine discharge.
+        'framed draws': ['List', ['Random'], ['Random']],
+        // A view with nothing to escape.
+        'pure view': ['List', ['Map', ['Range', 1, 6], PURE_LAMBDA], 1],
+        // Materialized in the frame before it is stored.
+        materialized: ['List', ['ListFrom', DRAWING_VIEW], 1],
+        // The view is a STATEMENT, not the block's result: `Block` evaluates
+        // it under the frame and returns the draw that follows.
+        'view not returned': ['Block', DRAWING_VIEW, ['Random']],
+        'framed draw returned': ['Block', ['Random']],
+      })) {
+        const e = ce.box(['WithRandomSeed', 42, body] as any);
+        expect([label, eff(e)]).toEqual([label, undefined]);
+      }
+    });
+
+    it('positive proof only — a view with no draws to escape stays pure', () => {
+      const ce = new ComputeEngine();
+      // A lazy view whose ELEMENT work is pure: discharging nothing is fine,
+      // and the shape alone must not flip it.
+      expect(
+        eff(ce.box(['WithRandomSeed', 42, ['Map', ['Range', 1, 6], PURE_LAMBDA]]))
+      ).toBe(undefined);
+      // A view whose SOURCE draws: that draw happens when the view is BUILT,
+      // inside the frame, so it is owed to the frame and stays discharged.
+      expect(
+        eff(
+          ce.box([
+            'WithRandomSeed',
+            42,
+            ['Map', ['RandomShuffle', ['Range', 1, 5]], PURE_LAMBDA],
+          ])
+        )
+      ).toBe(undefined);
+    });
+
+    it('the two channels agree — a frame INSIDE a callback still discharges', () => {
+      // The item-132 distinction, kept: a per-site frame WITHIN the callback
+      // materializes its value inside itself, so the arrow stays pure and a
+      // `Map` over it stays pure. A frame OUTSIDE a lazy view is the escape.
+      const ce = new ComputeEngine();
+      const perSite = ce.box([
+        'Function',
+        ['WithRandomSeed', 42, ['Random']],
+        'i',
+      ]);
+      expect(perSite.isPure).toBe(true);
+      expect(eff(ce.box(['Map', ['Range', 1, 3], perSite]))).toBe(undefined);
+
+      // …and the escaping shape propagates through the STATIC channel too:
+      // the enclosing literal's own arrow carries `random`, so an operator
+      // reading only that arrow (`Map`) agrees with `effectsOf`.
+      const escaping = ce.box([
+        'Function',
+        ['WithRandomSeed', 42, DRAWING_VIEW],
+        'i',
+      ]);
+      expect(escaping.type.effects).toEqual(['random']);
+      expect(eff(ce.box(['Map', ['Range', 1, 3], escaping]))).toEqual([
+        'random',
+      ]);
+    });
   });
 });
 

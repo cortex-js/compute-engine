@@ -17,6 +17,7 @@ import type {
 } from '../global-types.js';
 
 import { isFunction, isSymbol, sym } from './type-guards.js';
+import { effectiveDischarge } from './effects-of.js';
 import { typeAcceptsValue } from './value-membership.js';
 import {
   functionLiteralBody,
@@ -633,7 +634,14 @@ class Walker {
     }
     for (let i = 0; i < expr.ops.length; i++) {
       const op = expr.ops[i];
-      const discharge = discharges[i];
+      // …and mirroring it on the ESCAPE carve-out too (Tycho item 142, ruled
+      // 2026-08-02): a `random` discharge does not apply to a body that
+      // provably escapes the frame as a lazy drawing view, because those draws
+      // happen at materialization, outside the frame
+      // (`docs/RANDOMNESS-MODEL.md` §6). Reading the shared
+      // `effectiveDischarge` is what keeps the two channels in lockstep — the
+      // item-132 disagreement was exactly this rule differing between them.
+      const discharge = effectiveDischarge(discharges[i], op);
       if (discharge === undefined || discharge.length === 0) {
         this.visit(op, ctx);
         continue;

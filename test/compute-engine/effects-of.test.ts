@@ -641,10 +641,22 @@ describe('`WithRandomSeed` — the canonical discharger', () => {
     }
   });
 
-  it('a nested draw behind a callback is discharged too', () => {
+  it('a lazy view that escapes the frame is NOT discharged (item 142)', () => {
     ce.assign('drawF', ce.parse('x \\mapsto \\mathrm{Random}()'));
+    // The view's callback draws at materialization, outside the frame
+    // (`docs/RANDOMNESS-MODEL.md` §6) — the discharge cannot claim it.
     expect(
       eff(ce.box(['WithRandomSeed', 42, ['Map', ['List', 1, 2], 'drawF']]))
+    ).toEqual(['random']);
+    // Materialized INSIDE the frame, the draws are owed to it and discharged.
+    expect(
+      eff(
+        ce.box([
+          'WithRandomSeed',
+          42,
+          ['ListFrom', ['Map', ['List', 1, 2], 'drawF']],
+        ])
+      )
     ).toBe(undefined);
   });
 

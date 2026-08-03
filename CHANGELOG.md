@@ -82,6 +82,19 @@
 
 ### Bug Fixes
 
+- `isPure` and `.effects` no longer claim a seed frame contains a lazy view
+  that escapes it. `WithRandomSeed(42, Map(xs, x => Random()))` — and the
+  `[Random() for k = [1...6]]` comprehension spelling of it — reported
+  `isPure: true` with no effects, even though a lazy view draws at
+  materialization, from whatever frame is active *then*, so the values were
+  genuinely live. Such an expression now reports `isPure: false` and
+  `["random"]`, including when the view leaves the frame as a cell of a
+  returned `List`/`Tuple`/`Pair` or as a block's result. The runtime
+  semantics are unchanged: materializing inside the frame
+  (`WithRandomSeed(42, ListFrom(Map(...)))`, an index, a reducer) still
+  replays, and still reports pure — as do a view whose element body draws
+  nothing and a seeded frame around an ordinary draw.
+
 - Two-sample bracket ranges with decimal anchors now compute their step
   exactly. `[1.008, 1.016...5]` previously differenced its anchors in
   binary floating point, baking the step `0.008000000000000007` into the

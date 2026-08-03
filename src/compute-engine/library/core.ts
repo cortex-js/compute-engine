@@ -95,6 +95,7 @@ import {
   typeCompatibilityErrorValue,
 } from '../boxed-expression/type-compatibility-error.js';
 import {
+  isValueContainer,
   operatorDefinitionOf,
   shallowApplicationEffects,
 } from '../boxed-expression/effects-of.js';
@@ -222,10 +223,11 @@ function hasPendingImpureApplication(
   if (def?.drawsRandom === true || def?.readsRandomFrame === true) return true;
   // Value position propagates through a lazy view and through the literal
   // containers; every other surviving application puts its whole subtree —
-  // lambdas included — in eager-survivor position.
+  // lambdas included — in eager-survivor position. The container set is the
+  // one `isValueContainer` defines, shared with the effect channel's
+  // frame-escape classifier so the two readings of §2 cannot drift.
   const isValueNode =
-    !underEagerSurvivor &&
-    (expr.isLazyCollection || h === 'List' || h === 'Tuple' || h === 'Pair');
+    !underEagerSurvivor && (expr.isLazyCollection || isValueContainer(expr));
   const under = underEagerSurvivor || !isValueNode;
   // Mode 1, the LATENT half: a surviving application that INVOKES a
   // function-valued operand which draws (`Map(xs, randomF)` beneath an
