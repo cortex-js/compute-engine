@@ -1379,6 +1379,22 @@ describe('isFinite propagation (B3 latent finiteness gap)', () => {
     expect(engine.expr(['Power', 'x', 2]).isFinite).toBeUndefined();
     expect(engine.expr(['Power', 'Pi', 'x']).isFinite).toBeUndefined();
   });
+
+  test('type-provable non-finiteness is reported (not just structural)', () => {
+    // `Ln(0)` is −∞. There is no `Ln` case in the structural propagation
+    // above, so finiteness comes from the static type (`non_finite_number`,
+    // i.e. the infinities). Previously `isFinite` was type-blind here and
+    // returned `undefined` even though `.type` proved the value non-finite.
+    expect(engine.parse('\\ln(0)').type.toString()).toBe('non_finite_number');
+    expect(engine.parse('\\ln(0)').isFinite).toBe(false);
+    expect(engine.expr(['Ln', 0]).isFinite).toBe(false);
+    expect(engine.parse('\\log(0)').isFinite).toBe(false);
+
+    // Control: the same operator with an undecidable argument is unchanged —
+    // `Ln(x)` types `number`, which proves nothing either way.
+    expect(engine.expr(['Ln', 'x']).type.toString()).toBe('number');
+    expect(engine.expr(['Ln', 'x']).isFinite).toBeUndefined();
+  });
 });
 
 /** These apply a numerical approximation. These could potentially be functions that do not have a symbolic form. */

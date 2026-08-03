@@ -1067,10 +1067,35 @@ export class BaseCompiler {
               // non-trivial middle operand (indices 1..n-2) to a temporary so it
               // is evaluated exactly once. A symbol or number literal is safe to
               // duplicate, so it is left inline (keeps output clean, no churn).
-              // Targets without `bindExpr` (GPU shaders) inline everything —
-              // safe there, since their `Random` requires a deterministic seed.
+              //
+              // A target WITHOUT `bindExpr` (the GPU shaders) has no
+              // expression-level binding form, so it inlines everything. That
+              // is safe for a PURE operand only: a shader `Random` draw is
+              // deterministic per invocation but `_gpu_rnd_draw` advances a
+              // runtime counter, so a second splice draws a DIFFERENT value
+              // and shifts every later draw in the shader. An impure middle
+              // operand is therefore bound to a hoisted temporary instead; if
+              // there is no statement sink to hoist into, the head declines.
+              //
+              // A bound operand is evaluated BEFORE the body that uses it, so
+              // binding only the MIDDLES would run a middle's draw ahead of an
+              // impure ENDPOINT left inline in the body — reversing the
+              // interpreter's argument order (`Less(Random(), Random(), 0.9)`
+              // drew the middle first). So as soon as an impure operand is
+              // bound at all, bind EVERY impure operand, in argument order:
+              // `bindExpr`'s application form (JS `((a, b) => …)(x, y)`,
+              // Python `(lambda a, b: …)(x, y)`) and the hoisted-statement sink
+              // both evaluate left to right, so the draws then follow argument
+              // order. Probed: the interpreter draws EAGERLY even for an
+              // operand the chain short-circuits past (`Less(5, 1, Random())`
+              // consumes a draw), so binding an index-≥2 endpoint is exact
+              // parity. A chain with no impure operand is untouched.
               const chainOp = target.chainOp ?? '&&';
               const bindings: Array<[name: string, value: string]> = [];
+              const impureMiddle = args.some(
+                (arg, i) =>
+                  i >= 1 && i <= args.length - 2 && arg.isPure === false
+              );
               const codes = args.map((arg, i) => {
                 // Each comparison after the first is short-circuited by the
                 // chain operator, so operands from index 2 on are the lazy
@@ -1080,14 +1105,29 @@ export class BaseCompiler {
                     ? BaseCompiler.compileOpValue(node, i, target, op[1], arg)
                     : BaseCompiler.compileValueOperand(arg, target, op[1]);
                 const isMiddle = i >= 1 && i <= args.length - 2;
+                const isImpure = arg.isPure === false;
                 if (
                   target.bindExpr &&
-                  isMiddle &&
-                  !isSymbol(arg) &&
-                  !isNumber(arg)
+                  ((isMiddle && !isSymbol(arg) && !isNumber(arg)) ||
+                    (impureMiddle && isImpure))
                 ) {
                   const name = BaseCompiler.tempVar(target);
                   bindings.push([name, code]);
+                  return name;
+                }
+                if (!target.bindExpr && impureMiddle && isImpure) {
+                  if (!BaseCompiler.canHoist(target))
+                    throw new Error(
+                      `${h}: an impure (Random) operand cannot be bound to a ` +
+                        'temporary at this position — a repeated draw would ' +
+                        'shift every later value in the shader. Fail closed (D6).'
+                    );
+                  const name = BaseCompiler.tempVar(target);
+                  const decl =
+                    target.language === 'wgsl'
+                      ? `var ${name}: f32`
+                      : `float ${name}`;
+                  BaseCompiler.hoistStatement(target, `${decl} = ${code};`);
                   return name;
                 }
                 return code;
@@ -3979,7 +4019,12 @@ export class BaseCompiler {
    * IIFE or `switch`). Only tier 0/1 constant dispatch and a trailing
    * irrefutable case compile; tier 2 destructuring and refutable tier 3 fail
    * closed (D6). The subject is compiled once and inlined into each comparison
-   * (safe: compiled shader expressions are deterministic).
+   * — once per leaf comparison, twice for a range pattern. That is safe for a
+   * PURE subject only: `_gpu_rnd_draw` advances a runtime counter, so an
+   * impure (Random-family) subject would be re-drawn per comparison. Such a
+   * subject is bound to a hoisted temporary instead (it is evaluated
+   * unconditionally, before any case, so hoisting it is sound); with no
+   * statement sink to hoist into, this declines (D6).
    */
   static compileMatchTernary(
     engine: ComputeEngine,
@@ -4008,7 +4053,22 @@ export class BaseCompiler {
 
     // The subject is UNCONDITIONAL — compiled once, before any case — so it is
     // deliberately outside `opts.arm`: whatever it hoists runs on every path.
-    const subj = BaseCompiler.compile(args[0], target);
+    let subj = BaseCompiler.compile(args[0], target);
+    // …but it is SPLICED once per comparison (twice for a range pattern), so
+    // an impure (Random-family) subject has to be bound to a temporary first.
+    if (args[0].isPure === false) {
+      if (!BaseCompiler.canHoist(target))
+        throw new Error(
+          'Match: an impure (Random) subject cannot be bound to a temporary ' +
+            'at this position — the subject is spliced into every case ' +
+            'comparison, and a repeated draw would shift every later value ' +
+            'in the shader. Fail closed (D6).'
+        );
+      const t = BaseCompiler.tempVar(target);
+      const decl = target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
+      BaseCompiler.hoistStatement(target, `${decl} = ${subj};`);
+      subj = t;
+    }
     const cases = plan.segments.flatMap((seg) => seg.cases);
     const run = opts.arm ?? ((f: () => string) => f());
 

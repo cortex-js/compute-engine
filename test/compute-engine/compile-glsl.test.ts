@@ -705,6 +705,93 @@ describe('GLSL COMPILATION', () => {
     });
   });
 
+  // `Binomial(n, k)` / `Choose(n, k)` for a literal non-negative integer `k`
+  // unrolls to the GENERALIZED binomial coefficient — the falling factorial
+  // n(n-1)…(n-k+1)/k!. That is the same closed form the interpreter expands
+  // to for a symbolic first operand (`Binomial(x, 2)` → `(x·(x-1))/2`), and
+  // unlike the JavaScript target's `_SYS.binomial` (a Pascal-triangle table)
+  // it also agrees with the interpreter for a real or negative `n`.
+  describe('Binomial / Choose (falling-factorial unroll)', () => {
+    it('unrolls a literal non-negative integer k', () => {
+      expect(glsl.compile(ce.expr(['Binomial', 'x', 0])).code).toBe('1.0');
+      expect(glsl.compile(ce.expr(['Binomial', 'x', 1])).code).toBe('x');
+      expect(glsl.compile(ce.expr(['Binomial', 'x', 2])).code).toBe(
+        '(((x) * ((x) - 1.0)) / 2.0)'
+      );
+      expect(glsl.compile(ce.expr(['Binomial', 'x', 3])).code).toBe(
+        '(((x) * ((x) - 1.0) * ((x) - 2.0)) / 6.0)'
+      );
+      // `Choose` is the same function in the interpreter (shared
+      // `evaluateBinomial`) — same lowering.
+      expect(glsl.compile(ce.expr(['Choose', 'x', 2])).code).toBe(
+        '(((x) * ((x) - 1.0)) / 2.0)'
+      );
+      // A compound first operand is parenthesized before the subtraction.
+      expect(glsl.compile(ce.expr(['Binomial', ['Add', 'x', 1], 2])).code).toBe(
+        '(((x + 1.0) * ((x + 1.0) - 1.0)) / 2.0)'
+      );
+    });
+
+    it('matches the interpreter numerically, including real and negative n', () => {
+      // GLSL cannot be executed here, so the emitted FORMULA is evaluated in
+      // JavaScript — the emission lives in the `* - / ()` + float-literal
+      // subset, which reads identically in both languages.
+      for (const k of [1, 2, 3, 4, 5, 6, 7, 8]) {
+        const code = glsl.compile(ce.expr(['Binomial', 'x', k])).code!;
+        for (const n of [0, 1, 2, 3, 5, 7, 10, -1, -2, -5, 5.5, 2.5, 0.5]) {
+          // eslint-disable-next-line no-eval
+          const shader = eval(code.replace(/\bx\b/g, `(${n})`)) as number;
+          const interpreted = ce.box(['Binomial', n, k]).N().re;
+          expect(shader).toBeCloseTo(interpreted, 9);
+        }
+      }
+      // The two values the ledger names.
+      const k2 = glsl.compile(ce.expr(['Binomial', 'x', 2])).code!;
+      // eslint-disable-next-line no-eval
+      expect(eval(k2.replace(/\bx\b/g, '(5.5)'))).toBe(12.375);
+      // eslint-disable-next-line no-eval
+      expect(eval(k2.replace(/\bx\b/g, '(-1)'))).toBe(1);
+      expect(ce.box(['Binomial', 5.5, 2]).N().re).toBe(12.375);
+      expect(ce.box(['Binomial', -1, 2]).N().re).toBe(1);
+    });
+
+    it('fails closed on a k the interpreter leaves inert, and on a long unroll', () => {
+      // Negative / non-integer / non-literal k: inert in the interpreter.
+      for (const k of [-1, 2.5, 'n'] as any[])
+        expect(() => glsl.compile(ce.expr(['Binomial', 'x', k]))).toThrow(
+          /Fail closed/
+        );
+      // k above the unroll cap (8).
+      expect(() => glsl.compile(ce.expr(['Binomial', 'x', 9]))).toThrow(
+        /would unroll to 9 factors/
+      );
+      expect(() =>
+        glsl.compile(ce.expr(['Binomial', 'x', 8]))
+      ).not.toThrow();
+    });
+
+    it('fails closed on a statically non-finite first operand', () => {
+      // Probed: the interpreter gives NaN for `Binomial(∞, 0)` — the `k = 0`
+      // fold to `1` does NOT hold there — and NaN for `Binomial(∞, 2)`, while
+      // the unroll emitted `1.0` and an ∞-valued falling factorial.
+      for (const n of ['PositiveInfinity', 'NegativeInfinity', 'NaN'])
+        for (const k of [0, 1, 2])
+          expect(() => glsl.compile(ce.expr(['Binomial', n, k]))).toThrow(
+            /statically non-finite first operand/
+          );
+      expect(ce.box(['Binomial', 'PositiveInfinity', 0]).N().re).toBeNaN();
+      expect(ce.box(['Binomial', 'PositiveInfinity', 2]).N().re).toBeNaN();
+      // A finite literal or symbol is unaffected (byte-identical).
+      expect(glsl.compile(ce.expr(['Binomial', 'x', 2])).code).toBe(
+        '(((x) * ((x) - 1.0)) / 2.0)'
+      );
+      expect(glsl.compile(ce.expr(['Binomial', 5, 2])).code).toBe(
+        '(((5.0) * ((5.0) - 1.0)) / 2.0)'
+      );
+      expect(glsl.compile(ce.expr(['Binomial', 'x', 0])).code).toBe('1.0');
+    });
+  });
+
   describe('Sum and Product', () => {
     it('should unroll Sum with small constant bounds', () => {
       const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
@@ -968,6 +1055,21 @@ describe('GLSL COMPILATION', () => {
           ce.box(['If', ['Greater', 'x', 0], 1, 2] as any)
         ).code;
         expect(code).toBe('((0.0 < x) ? (1.0) : (2.0))');
+      });
+
+      it('names the impure-temporary cause too, not just a loop', () => {
+        // The same escape detector now fires for a hoisted impure temporary
+        // (`Round(Random())` binds its operand to a `_tv`), so the message
+        // must not blame a loop-form Sum/Product exclusively.
+        expect(() =>
+          glsl.compile(
+            ce.box([
+              'WithRandomSeed',
+              7,
+              ['Which', ['Less', 'x', 1], ['Round', ['Random']], 'True', 2],
+            ] as any)
+          )
+        ).toThrow(/or an impure operand bound to a hoisted temporary/);
       });
     });
 

@@ -556,3 +556,370 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
     );
   });
 });
+
+describe('multi-splice × impure operand — the 2026-08-02 audit round', () => {
+  // A second sweep of the same class as the `Mod`/`Remainder`/`Cot` round
+  // above: a lowering that splices a compiled operand MORE than once (or
+  // compiles it twice) re-evaluates an impure (Random-family) operand at run
+  // time. Every site below drew more than once before the fix; each is now
+  // purity-gated, so a PURE operand keeps its emission byte-identical (pinned
+  // in the `…pure…` tests).
+  const ce = new ComputeEngine();
+  const glsl = () => ce.getCompilationTarget('glsl')!;
+  const wgsl = () => ce.getCompilationTarget('wgsl')!;
+  /** GLSL/WGSL source for `json`, unframed (fragment-stage spatial noise). */
+  const gpuCode = (json: any, lang: 'glsl' | 'wgsl' = 'glsl'): string =>
+    (lang === 'glsl' ? glsl() : wgsl()).compile(ce.box(json) as any).code ?? '';
+  const gpuDraws = (json: any, lang: 'glsl' | 'wgsl' = 'glsl'): number =>
+    (gpuCode(json, lang).match(/_gpu_rnd_draw/g) ?? []).length;
+  const jsCode = (json: any): string =>
+    compile(ce.box(json), { fallback: false }).code ?? '';
+  const jsDraws = (json: any): number =>
+    (jsCode(json).match(/drawNextRandomNumber/g) ?? []).length;
+  /** WGSL has no unframed draw — a seed frame is required there. */
+  const framed = (body: any) => ['WithRandomSeed', 7, body];
+
+  // --- JS: Equal (complex `part()` and the n-ary chain) --------------------
+
+  test('JS: Equal over a COMPLEX impure operand draws once', () => {
+    // `part()` splices the operand twice (`.re` and `.im`) — two draws before.
+    const json = [
+      'Equal',
+      ['Multiply', ['Random'], 'ImaginaryUnit'],
+      ['Complex', 0, 0.5],
+    ];
+    expect(jsDraws(json)).toBe(1);
+    expect(typeof compile(ce.box(json), { fallback: false }).run!({})).toBe(
+      'boolean'
+    );
+  });
+
+  test('JS: Equal(0.1, Random(), 0.9) draws once (chained middle operand)', () => {
+    const json = ['Equal', 0.1, ['Random'], 0.9];
+    expect(jsDraws(json)).toBe(1);
+    expect(typeof compile(ce.box(json), { fallback: false }).run!({})).toBe(
+      'boolean'
+    );
+  });
+
+  test('JS: Equal keeps the pure emission (byte-identical pins)', () => {
+    expect(jsCode(['Equal', 0.1, 'x', 0.9])).toBe(
+      '((Math.abs((0.1) - (_.x)) <= 1e-10) && (Math.abs((_.x) - (0.9)) <= 1e-10))'
+    );
+    expect(
+      jsCode(['Equal', ['Multiply', 'x', 'ImaginaryUnit'], ['Complex', 0, 0.5]])
+    ).toBe(
+      '(_SYS.cabs({ re: ((() => { const _a = ({ re: 0, im: 1 }), _r = _.x; ' +
+        'return { re: _a.re * _r, im: _a.im * _r }; })()).re - ' +
+        '(({ re: 0, im: 0.5 })).re, im: ((() => { const _a = ({ re: 0, im: 1 }), ' +
+        '_r = _.x; return { re: _a.re * _r, im: _a.im * _r }; })()).im - ' +
+        '(({ re: 0, im: 0.5 })).im }) <= 1e-10)'
+    );
+  });
+
+  // --- JS: Repeat ---------------------------------------------------------
+
+  test('JS: Repeat(Random(), 3) draws ONCE and repeats the same value', () => {
+    // The interpreter evaluates the value operand once and repeats the
+    // resulting VALUE: `Repeat(Random(), 3)` is three copies of one draw. A
+    // lowering that spliced the compiled value into a per-element callback
+    // would draw three DIFFERENT numbers.
+    const json = ['Repeat', ['Random'], 3];
+    expect(jsDraws(json)).toBe(1);
+    const v = compile(ce.box(json), { fallback: false }).run!({}) as number[];
+    expect(v).toHaveLength(3);
+    expect(v[1]).toBe(v[0]);
+    expect(v[2]).toBe(v[0]);
+    // Framed, element-for-element against the interpreter.
+    const { compiled: c, interpreted: i } = bothEngines(ce, json, 42);
+    expect(c).toEqual(i);
+  });
+
+  test('JS: Repeat draws its value even when the count is ≤ 0', () => {
+    // Probed: the interpreter consumes exactly one draw for
+    // `Repeat(Random(), 0)` and `Repeat(Random(), -1)` — the value is
+    // evaluated before the count is consulted. Hoisting it into an IIFE
+    // parameter (rather than the `Array.from` callback) preserves that.
+    for (const n of [0, -1]) {
+      const r = compiled(ce, ['Repeat', ['Random'], n]);
+      expect(r.run!({})).toEqual([]);
+      expect(trailingDraw(ce, 42, () => r.run!({}))).toBe(draw(42, 1));
+    }
+  });
+
+  test('JS: Repeat keeps the pure emission (byte-identical pin)', () => {
+    expect(jsCode(['Repeat', 7, 3])).toBe(
+      '((_v, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && ' +
+        '_n > 0)) return []; return Array.from({ length: _n }, () => _v); })(7, 3)'
+    );
+  });
+
+  // --- GPU: Binomial ------------------------------------------------------
+
+  test('GLSL/WGSL: Binomial(Random(), k) draws once (k splices)', () => {
+    // The falling-factorial unroll splices the first operand k times.
+    expect(gpuDraws(['Binomial', ['Random'], 2])).toBe(1);
+    expect(gpuCode(['Binomial', ['Random'], 2])).toContain('float _tv1 =');
+    expect(gpuDraws(['Binomial', ['Random'], 5])).toBe(1);
+    expect(gpuDraws(framed(['Choose', ['Random'], 4]), 'wgsl')).toBe(1);
+    expect(gpuCode(framed(['Choose', ['Random'], 4]), 'wgsl')).toContain(
+      'var _tv1: f32 ='
+    );
+    // k = 1 splices the operand exactly once — no temporary needed.
+    expect(gpuDraws(['Binomial', ['Random'], 1])).toBe(1);
+    // k = 0 discards the operand, but the interpreter still draws — there is
+    // no sink for a discarded draw in an expression, so it declines.
+    expect(() => gpuCode(['Binomial', ['Random'], 0])).toThrow(
+      /impure \(Random\) first operand/
+    );
+  });
+
+  // --- JS: Range ----------------------------------------------------------
+
+  test('JS: Range(Random(), 10, 2) draws once — not once per element', () => {
+    // `start` and `step` were spliced twice, the second time INSIDE the
+    // `Array.from` callback: the length came from one draw and every element
+    // from another, so the elements were not even an arithmetic sequence.
+    const json = ['Range', ['Random'], 10, 2];
+    expect(jsDraws(json)).toBe(1);
+    const v = compile(ce.box(json), { fallback: false }).run!({}) as number[];
+    expect(v.length).toBeGreaterThan(0);
+    expect(v[0]).toBeGreaterThanOrEqual(0);
+    expect(v[0]).toBeLessThan(1);
+    for (let i = 1; i < v.length; i++)
+      expect(v[i] - v[i - 1]).toBeCloseTo(2, 12);
+  });
+
+  test('JS: Range keeps the pure emission (byte-identical pins)', () => {
+    expect(jsCode(['Range', 'a', 'b', 'c'])).toBe(
+      'Array.from({length: Math.floor((_.b - _.a) / _.c) + 1}, (_e, i) => _.a + i * _.c)'
+    );
+    expect(jsCode(['Range', 1, 10, 2])).toBe(
+      'Array.from({length: Math.floor((10 - 1) / 2) + 1}, (_e, i) => 1 + i * 2)'
+    );
+  });
+
+  // --- GPU: Round, Root, Variance, Argument, Conjugate --------------------
+
+  test('GLSL: Round hoists an impure operand (both forms)', () => {
+    expect(gpuDraws(['Round', ['Random']])).toBe(1);
+    expect(gpuDraws(['Round', ['Random'], 2])).toBe(1);
+  });
+
+  test('GLSL: Root of an impure operand at an odd degree draws once', () => {
+    expect(gpuDraws(['Root', ['Random'], 3])).toBe(1);
+  });
+
+  test('GLSL: Variance draws exactly once PER ELEMENT (interpreter parity)', () => {
+    // Each element was spliced 2 + 2·N times: twelve draws for two elements.
+    expect(gpuDraws(['Variance', ['Random'], ['Random']])).toBe(2);
+    expect(
+      gpuDraws(['Variance', ['List', ['Random'], ['Random'], ['Random']]])
+    ).toBe(3);
+    // `Median` splices each element ONCE (sibling reduction, probed clean).
+    expect(gpuDraws(['Median', ['Random'], ['Random'], ['Random']])).toBe(3);
+  });
+
+  test('GLSL: Argument/Conjugate of an impure COMPLEX operand draw once', () => {
+    const z = ['Multiply', ['Random'], 'ImaginaryUnit'];
+    expect(gpuDraws(['Argument', z])).toBe(1);
+    expect(gpuCode(['Argument', z])).toContain('vec2 _tv1 =');
+    expect(gpuDraws(['Conjugate', z])).toBe(1);
+  });
+
+  test('GLSL: an impure ContrastingColor operand fails closed (D6)', () => {
+    // The three operands are `vec3`-shaped and each spliced twice — there is
+    // no temporary to bind a color to, so this declines rather than re-draw.
+    expect(() =>
+      gpuCode([
+        'ContrastingColor',
+        ['Tuple', ['Random'], 1, 1],
+        ['Tuple', 0, 0, 0],
+        ['Tuple', 0.5, 0.1, 30],
+      ])
+    ).toThrow(/impure \(Random\) operand/);
+  });
+
+  test('GLSL: the element-wise selection mask draws a middle operand once', () => {
+    expect(
+      gpuDraws([
+        'Which',
+        ['Less', ['List', 0.1, 0.2], ['Random'], ['List', 0.9, 0.8]],
+        ['List', 1, 2],
+        'True',
+        ['List', 3, 4],
+      ])
+    ).toBe(1);
+  });
+
+  test('GLSL: the complex Add fallback compiles each operand ONCE', () => {
+    // `tryGetComplexParts` compiled every operand, then the whole
+    // decomposition was discarded for the opaque-complex operand and the rest
+    // were compiled again — leaving an ORPHANED hoisted draw feeding nothing.
+    const code = gpuCode(framed(['Add', ['Cot', ['Random']], ['Sqrt', -2]]));
+    expect((code.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
+    // Every temporary declared is also USED (no orphan).
+    for (const t of new Set(code.match(/_tv\d+/g) ?? []))
+      expect((code.match(new RegExp(t, 'g')) ?? []).length).toBeGreaterThan(1);
+  });
+
+  test('GPU: pure operands keep the direct emission (byte-identical pins)', () => {
+    expect(gpuCode(['Round', 'x'])).toBe('(sign(x) * floor(abs(x) + 0.5))');
+    expect(gpuCode(['Round', 'x', 2])).toBe(
+      '((sign((x * 100.0)) * floor(abs((x * 100.0)) + 0.5)) / 100.0)'
+    );
+    expect(gpuCode(['Root', 'x', 3])).toBe(
+      '(sign(x) * pow(abs(x), 0.3333333333333333))'
+    );
+    expect(gpuCode(['Variance', 'x', 'y'])).toBe(
+      '(((x - ((x + y) / 2.0)) * (x - ((x + y) / 2.0)) + ' +
+        '(y - ((x + y) / 2.0)) * (y - ((x + y) / 2.0))) / 1.0)'
+    );
+    expect(gpuCode(['Argument', ['Complex', 'x', 'y']])).toBe(
+      'atan(vec2(x, y).y, vec2(x, y).x)'
+    );
+    expect(gpuCode(['Conjugate', ['Complex', 'x', 'y']])).toBe(
+      'vec2(vec2(x, y).x, -vec2(x, y).y)'
+    );
+    expect(
+      gpuCode([
+        'ContrastingColor',
+        ['Tuple', 1, 1, 1],
+        ['Tuple', 0, 0, 0],
+        ['Tuple', 0.5, 0.1, 30],
+      ])
+    ).toBe(
+      '(abs(_gpu_apca(vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0))) >= ' +
+        'abs(_gpu_apca(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.1, 30.0))) ? ' +
+        'vec3(0.0, 0.0, 0.0) : vec3(0.5, 0.1, 30.0))'
+    );
+    expect(
+      gpuCode([
+        'Which',
+        ['Less', ['List', 0.1, 0.2], 'x', ['List', 0.9, 0.8]],
+        ['List', 1, 2],
+        'True',
+        ['List', 3, 4],
+      ])
+    ).toBe(
+      'mix(vec2(3.0, 4.0), vec2(1.0, 2.0), bvec2(vec2(lessThan(vec2(0.1, 0.2), ' +
+        'vec2(x))) * vec2(lessThan(vec2(x), vec2(0.9, 0.8)))))'
+    );
+    expect(gpuCode(['Add', 1, ['Sqrt', -2]])).toBe(
+      'vec2(1.0, 0.0) + vec2(0.0, 1.4142135623730951)'
+    );
+    expect(gpuCode(['Add', 'x', 'ImaginaryUnit'])).toBe('vec2(x, 1.0)');
+  });
+
+  // --- shared templates: the relational chain and `Match` ------------------
+
+  const matchJSON = (subject: any) => [
+    'Match',
+    subject,
+    ['MatchCase', ['Alternatives', 1, 2], 10],
+    ['MatchCase', 3, 30],
+    ['MatchCase', '_', -1],
+  ];
+
+  test('GLSL: a chained relation draws its middle operand once', () => {
+    // Two draws before: the two comparisons compared DIFFERENT values.
+    expect(gpuDraws(['Less', 0.1, ['Random'], 0.9])).toBe(1);
+    expect(gpuCode(['Less', 0.1, ['Random'], 0.9])).toContain('float _tv1 =');
+  });
+
+  test('WGSL: a chained relation draws its middle operand once', () => {
+    expect(gpuDraws(framed(['Less', 0.1, ['Random'], 0.9]), 'wgsl')).toBe(1);
+    expect(gpuCode(framed(['Less', 0.1, ['Random'], 0.9]), 'wgsl')).toContain(
+      'var _tv1: f32 ='
+    );
+  });
+
+  test('GLSL: a chained relation draws its operands in ARGUMENT order', () => {
+    // Binding only the MIDDLE ran the middle's draw BEFORE the first operand's
+    // (the hoisted temporary precedes the mask/comparison expression), so the
+    // compiled chain compared the two draws in the wrong order. Both impure
+    // operands are now hoisted, in argument order.
+    const json = ['Less', ['Random'], ['Random'], 0.9];
+    expect(gpuDraws(json)).toBe(2);
+    const code = gpuCode(json);
+    expect(code).toMatch(/_tv1 = _gpu_rnd_draw[\s\S]*_tv2 = _gpu_rnd_draw/);
+    // The FIRST hoisted draw is the FIRST operand: it is the left side of the
+    // first comparison.
+    expect(code).toContain('(_tv1 < _tv2) && (_tv2 < 0.9)');
+  });
+
+  test('JS: a chained relation matches the interpreter (argument order)', () => {
+    // Seed 7 separates the two orders: draw 0 < draw 1, so the interpreter's
+    // `Less(d0, d1, 0.9)` is True while the swapped `Less(d1, d0, 0.9)` is
+    // False.
+    const json = ['Less', ['Random'], ['Random'], 0.9];
+    expect(jsDraws(json)).toBe(2);
+    expect(jsCode(json)).toBe(
+      '((_tv1, _tv2) => (_tv1 < _tv2) && (_tv2 < 0.9))' +
+        '(_SYS.drawNextRandomNumber(), _SYS.drawNextRandomNumber())'
+    );
+    const r = compiled(ce, json);
+    const c = withRandomSeedFrame(ce, 7, () => r.run!({}));
+    const i = withRandomSeedFrame(
+      ce,
+      7,
+      () => ce.box(json).evaluate().symbol === 'True'
+    );
+    expect(draw(7, 0)).toBeLessThan(draw(7, 1));
+    expect(c).toBe(i);
+    expect(c).toBe(true);
+  });
+
+  test('GLSL: the selection mask draws its operands in ARGUMENT order', () => {
+    // Same defect on the element-wise (`Which`) path: only an impure MIDDLE
+    // went through `gpuOperandOnce`, so an impure ENDPOINT stayed inline in
+    // the mask and drew AFTER the hoisted middle.
+    const json = [
+      'Which',
+      ['Less', ['Random'], ['Random'], ['List', 0.9, 0.8]],
+      ['List', 1, 2],
+      'True',
+      ['List', 3, 4],
+    ];
+    expect(gpuDraws(json)).toBe(2);
+    const code = gpuCode(json);
+    expect(code).toMatch(/_tv1 = _gpu_rnd_draw[\s\S]*_tv2 = _gpu_rnd_draw/);
+    expect(code).toContain('lessThan(vec2(_tv1), vec2(_tv2))');
+  });
+
+  test('GLSL/WGSL: an impure Match subject draws once', () => {
+    // The subject is spliced once per leaf comparison — three draws before.
+    expect(gpuDraws(matchJSON(['Random']))).toBe(1);
+    expect(gpuCode(matchJSON(['Random']))).toContain('float _tv1 =');
+    expect(gpuDraws(framed(matchJSON(['Random'])), 'wgsl')).toBe(1);
+    expect(gpuCode(framed(matchJSON(['Random'])), 'wgsl')).toContain(
+      'var _tv1: f32 ='
+    );
+    // A RANGE pattern splices the subject twice in one comparison.
+    expect(
+      gpuDraws([
+        'Match',
+        ['Random'],
+        ['MatchCase', ['Range', 1, 5], 10],
+        ['MatchCase', '_', -1],
+      ])
+    ).toBe(1);
+  });
+
+  test('chain/Match keep the pure emission (byte-identical pins)', () => {
+    expect(gpuCode(['Less', 0.1, 'x', 0.9])).toBe('(0.1 < x) && (x < 0.9)');
+    expect(gpuCode(['Less', 0.1, ['Add', 'x', 1], 0.9], 'wgsl')).toBe(
+      '(0.1 < x + 1.0) && (x + 1.0 < 0.9)'
+    );
+    expect(gpuCode(matchJSON('x'))).toBe(
+      '(((x == 1.0 || x == 2.0)) ? (10.0) : (((x == 3.0) ? (30.0) : (-1.0))))'
+    );
+    expect(gpuCode(matchJSON('x'), 'wgsl')).toBe(
+      'select(select(-1.0, 30.0, x == 3.0), 10.0, (x == 1.0 || x == 2.0))'
+    );
+    // The JS chain (a `bindExpr` target) is untouched by the GPU arm.
+    expect(jsCode(['Less', 0.1, ['Add', 'x', 1], 0.9])).toBe(
+      '((_tv1) => (0.1 < _tv1) && (_tv1 < 0.9))(_.x + 1)'
+    );
+  });
+});

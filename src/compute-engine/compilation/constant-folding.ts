@@ -289,11 +289,7 @@ export function tryGetComplexParts(
   // Recognizes both the ImaginaryUnit symbol and Complex(0, k) number literals
   if (isFunction(expr, 'Multiply')) {
     const ops = expr.ops;
-    const iIndex = ops.findIndex(
-      (op) =>
-        isSymbol(op, 'ImaginaryUnit') ||
-        (isNumber(op) && op.re === 0 && op.im !== 0)
-    );
+    const iIndex = imaginaryFactorIndex(ops);
     if (iIndex >= 0) {
       const iFactor = ops[iIndex];
       // The imaginary scale: 1 for ImaginaryUnit, im for Complex(0, im)
@@ -322,4 +318,35 @@ export function tryGetComplexParts(
 
   // Symbol, number (real), or real-valued function → purely real
   return { re: compile(expr), im: null };
+}
+
+/** The index of a factor standing for `i` (the `ImaginaryUnit` symbol or a
+ * `Complex(0, k)` literal), or -1. */
+function imaginaryFactorIndex(ops: ReadonlyArray<Expression>): number {
+  return ops.findIndex(
+    (op) =>
+      isSymbol(op, 'ImaginaryUnit') ||
+      (isNumber(op) && op.re === 0 && op.im !== 0)
+  );
+}
+
+/**
+ * Whether `tryGetComplexParts` would DECLINE (`null`) for `expr` — an opaque
+ * complex operand (a complex-valued call or symbol) with no structural re/im
+ * decomposition.
+ *
+ * Exposed so a caller can test for the decline BEFORE compiling anything:
+ * `tryGetComplexParts` COMPILES each operand it decomposes, and a caller that
+ * discards the whole decomposition as soon as ONE operand is opaque would
+ * otherwise compile the others a second time. For an IMPURE (Random-family)
+ * operand that is an extra evaluation — and on the GPU the discarded compile's
+ * hoisted statement stays in the shader, an orphan consuming a draw that feeds
+ * nothing.
+ */
+export function isOpaqueComplexOperand(expr: Expression): boolean {
+  if (isSymbol(expr, 'ImaginaryUnit')) return false;
+  if (isNumber(expr) && expr.im !== 0) return false;
+  if (isFunction(expr, 'Multiply') && imaginaryFactorIndex(expr.ops) >= 0)
+    return false;
+  return BaseCompiler.isComplexValued(expr);
 }

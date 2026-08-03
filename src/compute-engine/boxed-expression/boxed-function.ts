@@ -897,8 +897,18 @@ export class BoxedFunction
       }
     }
 
-    if (this.isNaN === undefined || this.isInfinity === undefined)
+    if (this.isNaN === undefined || this.isInfinity === undefined) {
+      // Type fallback: the static type can prove non-finiteness where the
+      // structural analysis above could not — e.g. `Ln(0)` types
+      // `non_finite_number`. That type is exactly the signed infinities
+      // (PositiveInfinity, NegativeInfinity — no NaN member, and no
+      // ComplexInfinity, which is typed `complex`), so it entails "not
+      // finite". The type is already computed and cached at this point
+      // (consulted by `isNumber` on entry).
+      const t = this.type;
+      if (!t.isUnknown && isSubtype(t.type, 'non_finite_number')) return false;
       return undefined;
+    }
     return true;
   }
 

@@ -1253,6 +1253,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       if (rank === 2) {
         const m = compile(args[0]);
         const ord = compile(p);
+        // NOTE: the run-time order is spliced TWICE (as the test and as the
+        // fallback value), so it is evaluated twice; that is only safe while
+        // this target has no impure lowering (`Random` and friends decline
+        // today) — bind it to a temporary if that changes. Same caveat as the
+        // `Equal`/`NotEqual` chains.
         return `np.linalg.norm(${m}, ('fro' if (${ord}) == 2 else (${ord})))`;
       }
       if (rank !== 1)

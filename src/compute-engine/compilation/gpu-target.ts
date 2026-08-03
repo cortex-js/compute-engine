@@ -10,6 +10,7 @@ import {
   tryGetConstant,
   foldTerms,
   tryGetComplexParts,
+  isOpaqueComplexOperand,
   formatFloat,
   gpuNonFiniteLiteral,
   parenthesizeFactor,
@@ -626,9 +627,10 @@ function compileGPUConditionalArm(
     sink.stmts.length = before;
     throw new Error(
       `${head}: a conditionally-evaluated branch contains a multi-statement ` +
-        `construct (a loop-form Sum/Product). Hoisting it out of the branch ` +
-        `would run it unconditionally — a shader conditional is an expression, ` +
-        `not a statement — which changes the result whenever the branch draws ` +
+        `construct (a loop-form Sum/Product, or an impure operand bound to a ` +
+        `hoisted temporary). Hoisting it out of the branch would run it ` +
+        `unconditionally — a shader conditional is an expression, not a ` +
+        `statement — which changes the result whenever the branch draws ` +
         `from the random stream. Fail closed (D6).`
     );
   }
@@ -903,17 +905,32 @@ function gpuSelectionMask(
       gpuSelectionDecline(
         `the relation \`${h}\` has no componentwise shader form.`
       );
-    const operand = (op: Expression): string => {
-      const code = compile(op);
+    const operand = (op: Expression, once: boolean): string => {
+      const code = once ? gpuOperandOnce(h, op, compile, target) : compile(op);
       return BaseCompiler.vectorComponentCount(op) === undefined
         ? `${fvec}(${code})`
         : code;
     };
-    const codes = ops.map(operand);
+    // A chained ordering `a < m < b` conjoins the successive pairwise masks,
+    // splicing each MIDDLE operand (indices 1..n-2) into two of them. An
+    // IMPURE (Random-family) operand must still be drawn exactly once —
+    // `_gpu_rnd_draw` advances a runtime counter, so a repeated splice draws a
+    // DIFFERENT value there AND shifts every later draw in the shader. Bind
+    // those to a hoisted temporary (or decline where there is no statement
+    // sink). Pure operands are safe to duplicate and stay inline.
+    //
+    // A hoisted temporary runs BEFORE the mask expression, so binding only the
+    // middles would draw a middle ahead of an impure ENDPOINT left inline —
+    // reversing the interpreter's argument order. Once a middle is bound, route
+    // EVERY impure operand through `gpuOperandOnce`, in argument order (the
+    // hoisted statements are emitted in that order).
+    const impureMiddle = ops.some(
+      (op, i) => i >= 1 && i <= ops.length - 2 && op.isPure === false
+    );
+    const codes = ops.map((op) =>
+      operand(op, impureMiddle && op.isPure === false)
+    );
     const masks: string[] = [];
-    // A chained ordering `a < m < b` conjoins the successive pairwise masks.
-    // The shared middle operand is compiled twice: safe here because GPU
-    // targets have no `bindExpr` and only support deterministic operands.
     for (let i = 0; i < codes.length - 1; i++) {
       masks.push(
         target.language === 'wgsl'
@@ -3197,6 +3214,95 @@ function assertFiniteGPUBound(
 const GPU_POWI_INLINE_LIMIT = 4;
 
 /**
+ * Largest literal `k` for which `Binomial(n, k)`/`Choose(n, k)` unrolls to its
+ * explicit falling-factorial product on a GPU target. Every unit of `k` adds
+ * one factor — and one splice of the compiled first operand — so keep the
+ * unroll short. (The interpreter's own symbolic expansion cap,
+ * `SYMBOLIC_EXPANSION_CAP` in `library/combinatorics.ts`, is larger; a shader
+ * expression has no statement sink for a long product, so this cap is
+ * tighter and a larger `k` fails closed.)
+ */
+const GPU_BINOMIAL_UNROLL_LIMIT = 8;
+
+/**
+ * `Binomial(n, k)` / `Choose(n, k)` for a literal non-negative integer `k`,
+ * as the GENERALIZED binomial coefficient — the falling factorial
+ * `n(n-1)…(n-k+1) / k!`. This is the same closed form the interpreter expands
+ * to for a symbolic first operand (`Binomial(x, 2)` → `(x·(x-1))/2`), and it
+ * agrees with the interpreter's numeric answers for a real or negative `n`
+ * too (`Binomial(5.5, 2)` = 12.375, `Binomial(-1, 2)` = 1) — unlike the JS
+ * target's `_SYS.binomial`, a Pascal-triangle table that is integer-only.
+ *
+ * Anything else declines (D6): a non-literal, negative or non-integer `k` is
+ * inert in the interpreter, and a complex-valued `n` has no `vec2` lowering
+ * here (the interpreter stays symbolic for it as well).
+ */
+const gpuBinomial: CompiledFunction<Expression> = (
+  [n, k],
+  compile,
+  target
+) => {
+  if (n === null || n === undefined || k === null || k === undefined)
+    throw new Error('Binomial: need two arguments');
+  const kConst = tryGetConstant(k);
+  if (kConst === undefined || !Number.isInteger(kConst) || kConst < 0)
+    throw new Error(
+      `Binomial: only a literal non-negative integer second operand ` +
+        `compiles — anything else is inert in the interpreter. ` +
+        `Fail closed (D6).`
+    );
+  if (kConst > GPU_BINOMIAL_UNROLL_LIMIT)
+    throw new Error(
+      `Binomial: a second operand above ${GPU_BINOMIAL_UNROLL_LIMIT} would ` +
+        `unroll to ${kConst} factors. Fail closed (D6).`
+    );
+  if (BaseCompiler.isComplexValued(n))
+    throw new Error(
+      `Binomial: a complex first operand has no GPU lowering. ` +
+        `Fail closed (D6).`
+    );
+  // A statically non-finite first operand: the interpreter returns NaN for
+  // BOTH `Binomial(∞, 0)` (probed — the `k = 0 → 1` fold below does NOT hold
+  // there) and `Binomial(∞, k)`. Check before the `k` special cases so neither
+  // fold can emit a diverging value. Only a STATICALLY provable non-finite
+  // operand declines: a runtime ±∞ reaching a finite-typed binding still
+  // unrolls (the documented static-assert class), as no runtime finite guard
+  // is emitted — that would change every pure emission.
+  if (
+    (isNumber(n) && !Number.isFinite(n.re)) ||
+    n.type.matches('non_finite_number')
+  )
+    throw new Error(
+      `Binomial: a statically non-finite first operand evaluates to NaN in ` +
+        `the interpreter, not a falling factorial. Fail closed (D6).`
+    );
+  if (kConst === 0) {
+    // `Binomial(x, 0)` is 1 — but the interpreter still EVALUATES the first
+    // operand (probed: `Binomial(Random(), 0)` consumes exactly one draw).
+    // Folding the operand away would skip the draw and shift every later
+    // value in the shader, and there is no sink for a discarded temporary
+    // here, so an impure operand declines instead.
+    if (n.isPure === false)
+      throw new Error(
+        `Binomial: a second operand of 0 discards the first, but an impure ` +
+          `(Random) first operand is still drawn by the interpreter. ` +
+          `Fail closed (D6).`
+      );
+    return formatFloat(1, target.language);
+  }
+  if (kConst === 1) return compile(n);
+  // The operand is spliced `k` times — bind an impure (Random-family) one to
+  // a hoisted temporary; a pure one compiles directly (byte-identical).
+  const c = gpuOperandOnce('Binomial', n, compile, target);
+  const factors = [`(${c})`];
+  for (let i = 1; i < kConst; i++)
+    factors.push(`((${c}) - ${formatFloat(i, target.language)})`);
+  let fact = 1;
+  for (let i = 2; i <= kConst; i++) fact *= i;
+  return `((${factors.join(' * ')}) / ${formatFloat(fact, target.language)})`;
+};
+
+/**
  * Compile a Sum or Product expression for GPU targets.
  *
  * Two compilation strategies:
@@ -3398,12 +3504,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target.language
       );
     }
-    // Try to decompose all operands into re/im parts
-    const parts = args.map((a) =>
-      tryGetComplexParts(a, compile, target.language)
-    );
-    if (parts.some((p) => p === null)) {
-      // Opaque complex operand — fall back to promote-and-add
+    // Opaque complex operand — fall back to promote-and-add. Tested BEFORE
+    // decomposing: `tryGetComplexParts` compiles each operand it decomposes,
+    // and the whole decomposition is discarded here, so testing after would
+    // compile every other operand TWICE. For an impure (Random-family) operand
+    // that is an extra draw, and the discarded compile's hoisted statement
+    // stays in the shader as an orphan feeding nothing.
+    if (args.some((a) => isOpaqueComplexOperand(a))) {
       const v2 = gpuVec2(target);
       return args
         .map((a) => {
@@ -3412,12 +3519,15 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         })
         .join(' + ');
     }
-    // All decomposed — collect re and im parts, fold each
+    // Every operand decomposes — collect re and im parts, fold each
+    const parts = args.map(
+      (a) => tryGetComplexParts(a, compile, target.language)!
+    );
     const reParts: string[] = [];
     const imParts: string[] = [];
     for (const p of parts) {
-      if (p!.re !== null) reParts.push(p!.re);
-      if (p!.im !== null) imParts.push(p!.im);
+      if (p.re !== null) reParts.push(p.re);
+      if (p.im !== null) imParts.push(p.im);
     }
     const reSum = foldTerms(reParts, '0.0', '+', target.language);
     const imSum = foldTerms(imParts, '0.0', '+', target.language);
@@ -3707,9 +3817,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return build(0);
   },
   // Cortex `Match`: tier-0/1 constant dispatch as a nested `select`/ternary with
-  // `==` comparisons, the subject inlined into each comparison (deterministic on
-  // GPU). Tier-2 destructuring, refutable tier-3, and string constants (no
-  // string type) fail closed (D6). See BaseCompiler.compileMatchTernary.
+  // `==` comparisons, the subject inlined into each comparison (safe for a PURE
+  // subject; an impure one is bound to a hoisted temporary instead — see
+  // `BaseCompiler.compileMatchTernary`). Tier-2 destructuring, refutable
+  // tier-3, and string constants (no string type) fail closed (D6).
   // `compileMatchTernary` compiles the pieces itself, so the no-hoist guard is
   // handed to it (`arm`) and applied PER PIECE — each case body, each case
   // guard, and each condition past the first — the way the `If`/`Which`
@@ -3819,11 +3930,15 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // GLSL/WGSL `round()` rounds half to even (implementation-defined ties);
     // the interpreter rounds half away from zero (Round(-2.5) = -3).
     // Reconstruct half-away as `sign(x)·floor(|x| + 0.5)`.
+    // `halfAway` splices its operand TWICE, so the operand goes through
+    // `gpuOperandOnce`: an impure (Random-family) operand is bound to a
+    // hoisted temporary instead of re-drawn, a pure one compiles directly
+    // (byte-identical).
     const halfAway = (c: string): string =>
       `(sign(${c}) * floor(abs(${c}) + 0.5))`;
     if (args.length < 2) {
       if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
-      return halfAway(compile(args[0]));
+      return halfAway(gpuOperandOnce('Round', args[0], compile, target));
     }
     // The SECOND operand is a precision: `Round(x, n)` rounds to `n` DECIMAL
     // PLACES (the Desmos/spreadsheet form the signature `(number, integer?)`
@@ -3862,7 +3977,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (n >= 0 && BaseCompiler.isIntegerValued(args[0]))
       return compile(args[0]);
     const factor = formatFloat(Math.pow(10, n), target.language);
-    return `(${halfAway(`(${compile(args[0])} * ${factor})`)} / ${factor})`;
+    // The SCALED operand is what `halfAway` splices twice — bind the operand
+    // itself once, then build the scaled string from it.
+    const c0 = gpuOperandOnce('Round', args[0], compile, target);
+    return `(${halfAway(`(${c0} * ${factor})`)} / ${factor})`;
   },
   Sign: 'sign',
   Sin: (args, compile) => {
@@ -3922,7 +4040,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Argument: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
-      const code = compile(args[0]);
+      // The `vec2` operand is spliced TWICE (`.y` and `.x`) — bind an impure
+      // (Random-family) one to a hoisted `vec2` temporary; a pure one compiles
+      // directly (byte-identical).
+      const code = gpuOperandOnce('Argument', args[0], compile, target, true);
       return `atan(${code}.y, ${code}.x)`;
     }
     // A real value's argument is 0 (x ≥ 0) or π (x < 0). Use the
@@ -3938,7 +4059,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Conjugate: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       const v2 = gpuVec2(target);
-      const code = compile(args[0]);
+      // Spliced TWICE (`.x` and `.y`) — see `Argument`.
+      const code = gpuOperandOnce('Conjugate', args[0], compile, target, true);
       return `${v2}(${code}.x, -${code}.y)`;
     }
     return compile(args[0]);
@@ -4219,6 +4341,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Erf: no argument');
     return `_gpu_erf(${compile(x)})`;
   },
+  Binomial: gpuBinomial,
+  // `Choose(n, k)` is the binomial coefficient — same lowering (the two heads
+  // share `evaluateBinomial` in the interpreter, so they must agree here too).
+  Choose: gpuBinomial,
   Erfc: ([x], compile) => {
     if (x === null) throw new Error('Erfc: no argument');
     return `(1.0 - _gpu_erf(${compile(x)}))`;
@@ -4328,7 +4454,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // Odd integer degree: GPU has no `cbrt`, and `pow` is NaN for a negative
     // base. Emit the sign-corrected form `sign(x)·|x|^(1/n)`.
     if (nConst !== undefined && Number.isInteger(nConst) && nConst % 2 !== 0) {
-      const c = compile(x);
+      // The operand is spliced TWICE — bind an impure (Random-family) one to a
+      // hoisted temporary; a pure one compiles directly (byte-identical).
+      const c = gpuOperandOnce('Root', x, compile, target);
       return `(sign(${c}) * pow(abs(${c}), ${formatFloat(
         1 / nConst,
         target.language
@@ -4353,10 +4481,36 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   ContrastingColor: (args, compile, target) => {
     if (args.length === 0) throw new Error('ContrastingColor: no argument');
     const bg = compile(args[0]);
+    // WGSL has no ternary operator: the selection must be spelled `select`.
+    // GLSL keeps the EXACT `?:` text it has always emitted (pinned).
+    // `select` evaluates BOTH arms eagerly, unlike `?:` — sound here because
+    // every operand of this head is pure (an impure one declines below, and in
+    // the 1-argument form both arms are literal `vec3` constants).
+    const pick = (cond: string, whenTrue: string, whenFalse: string): string =>
+      target?.language === 'wgsl'
+        ? `select(${whenFalse}, ${whenTrue}, ${cond})`
+        : `(${cond} ? ${whenTrue} : ${whenFalse})`;
     if (args.length >= 3) {
+      // Each of the three operands is spliced TWICE by the comparison below.
+      // A color operand is `vec3`-shaped, so there is no scalar (or `vec2`)
+      // temporary to bind it to — an impure (Random-family) operand would be
+      // re-drawn, and `_gpu_rnd_draw` advances a runtime counter, so the two
+      // splices compare DIFFERENT colors and every later draw in the shader
+      // shifts. No safe reading — decline (the `gpuOperandOnce` rule for a
+      // non-scalar operand).
+      if (args.slice(0, 3).some((a) => a.isPure === false))
+        throw new Error(
+          `ContrastingColor: an impure (Random) operand cannot be bound to a ` +
+            `temporary at this position — a repeated draw would shift every ` +
+            `later value in the shader. Fail closed (D6).`
+        );
       const fg1 = compile(args[1]);
       const fg2 = compile(args[2]);
-      return `(abs(_gpu_apca(${bg}, ${fg1})) >= abs(_gpu_apca(${bg}, ${fg2})) ? ${fg1} : ${fg2})`;
+      return pick(
+        `abs(_gpu_apca(${bg}, ${fg1})) >= abs(_gpu_apca(${bg}, ${fg2}))`,
+        fg1,
+        fg2
+      );
     }
     // Default: pick black or white in OKLCh. Black is vec3(0); white is L=1
     // achromatic — vec3(1.0, 0.0, 0.0). Heuristic from the JS path: low-luma
@@ -4365,7 +4519,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const v3 = isWGSL ? 'vec3f' : 'vec3';
     const black = `${v3}(0.0)`;
     const white = `${v3}(1.0, 0.0, 0.0)`;
-    return `((_gpu_apca(${bg}, ${black}) > 50.0) ? ${black} : ${white})`;
+    return pick(`(_gpu_apca(${bg}, ${black}) > 50.0)`, black, white);
   },
   ColorToColorspace: ([color, space], compile) => {
     if (color === null || space === null)
@@ -4720,7 +4874,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    * and must not be judged against the operand's `array`/`vecN` shape. The
    * N-scalar-argument form passes its operands through and stays gated.
    */
-  Variance: markAggregateConsuming((args, compile) => {
+  Variance: markAggregateConsuming((args, compile, target) => {
     // Normalise: if single List arg, use its elements; else use args directly.
     let elems: ReadonlyArray<Expression>;
     if (args.length === 1 && isFunction(args[0], 'List')) {
@@ -4734,7 +4888,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     const n = elems.length;
     if (n < 2) throw new Error('Variance: need at least 2 elements');
-    const compiled = elems.map((e) => compile(e));
+    // Every element is spliced 2 + 2·N times (once per mean term, plus twice
+    // per squared deviation), so an IMPURE (Random-family) element was drawn
+    // once per splice — `Variance(Random(), Random())` consumed TWELVE draws
+    // where the interpreter draws two. Bind impure elements to a hoisted
+    // temporary each; pure elements compile directly (byte-identical).
+    const compiled = elems.map((e) =>
+      gpuOperandOnce('Variance', e, compile, target)
+    );
     // mean = (v0 + v1 + ... + vN-1) / N
     const sum = compiled.join(' + ');
     const mean = `((${sum}) / ${formatGPUNumber(n)})`;

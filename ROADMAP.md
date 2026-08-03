@@ -383,9 +383,11 @@ open.
 
 Reduction-family heads that still decline on GPU while JS and the interpreter
 compute a value — each needs its own lowering, all fail closed: `Sum([1,2,3])`,
-`Product([1,2,3])`, `LCM`, `GCD`, `Length`. Also `Max([])`/`Min([])` decline in
-the empty-constructor guard where JS gives `NaN` — now that `_gpu_nan()` is
-reachable for literals, that guard could answer instead.
+`Product([1,2,3])`, `LCM`, `GCD`, `Length`. ~~Also `Max([])`/`Min([])` decline
+in the empty-constructor guard where JS gives `NaN`~~ — already answered:
+they emit the target NaN (`(_gpu_nan())` / WGSL bitcast) on both GPU
+languages, pinned in `compile-gpu-extremum.test.ts` § "GPU Max/Min over an
+EMPTY collection" (verified 2026-08-02; this row was stale).
 
 Still open, in rough priority:
 
@@ -515,12 +517,29 @@ handoff, all verified by probe + full suite, zero snapshot churn):
 
 New residues recorded by that round:
 
-- **`BoxedFunction.isFinite` is type-blind**: `Ln(0).type` is
-  `non_finite_number` yet `Ln(0).isFinite` is `undefined`. Consulting the
-  type in the getter would fix the whole class at the root, but `isFinite`
-  is documented perf-sensitive territory (the `Abs` type handler measured a
-  2.5× whole-suite slowdown from a similar coupling) — wants a measured pass,
-  not a drive-by.
+- ~~**`BoxedFunction.isFinite` is type-blind**~~ — **FIXED 2026-08-02, measured.**
+  The getter now consults the static type ONLY on the fallthrough path that
+  returned `undefined` (`this.type` is already generation-cached and forced
+  by the `isNumber` check at the getter's entry, so the consult is one
+  `isSubtype` call, not a new type computation). `Ln(0).isFinite` is `false`.
+  Measured: box-microloop canary 0.0196 → 0.0202 ms/iter (within noise),
+  full suite +0.9% wall, ZERO snapshot churn. Two deliberate non-changes:
+  (a) the three Add/Multiply/Divide site patches are KEPT — proven
+  non-redundant, because **`BoxedSymbol.isFinite` is still type-blind on the
+  non-finite side** (it has a `finite_number → true` fallback but no
+  `non_finite_number → false` one; stripping the Multiply patch let
+  `Multiply(2, w)` with `w: non_finite_number` type `finite_integer`,
+  unsound). Fixing the symbol getter would retire the patches — separate
+  measured pass. (b) an `isInfinity` companion (`type ⊆ non_finite_number →
+  true`) was trialled and DROPPED: it breaks the pinned convention test
+  `non-finite-typing.test.ts:69` (`Divide(Ln(0), 2)` must stay `number`, the
+  prove-don't-assume widen; with the companion it sharpens to
+  `non_finite_number` — arguably more precise, `−∞/2 = −∞`). That is a
+  convention-vs-precision tradeoff needing a user ruling before anyone
+  re-attempts it. Mirror-image residue (deliberately untouched, much wider
+  blast radius): `BoxedFunction` has no `finite_number → true` fallback, so
+  `Sin(x)` types `finite_number` yet reports `isFinite === undefined`, while
+  `BoxedSymbol` DOES have that fallback — the two classes are asymmetric.
 - **`Norm(scalar, 2)` on Python now declines** (was a runtime
   `ValueError`) — intentional side effect, flagged.
 - **Multi-splice templates × impure operands — 7 sites fixed 2026-07-31,
@@ -535,9 +554,63 @@ New residues recorded by that round:
   compiled with three `_gpu_rnd_draw` calls) and fixed the same way in the
   same round. JS `Cot`/`Coth` were already safe via `inlineExpression`
   (which binds compound operands); GPU `Square` is safe (its double-splice
-  is gated to symbols/literals, which are pure). NOT audited: the remaining
-  handlers of all four targets — grep for templates using an operand string
-  twice.
+  is gated to symbols/literals, which are pure).
+
+  **Audit COMPLETED 2026-08-02** — all five target files plus the shared
+  `base-compiler.ts` templates swept (three independent read passes, every
+  candidate classified, every UNSAFE claim confirmed by a draw-count probe
+  before fixing). **12 further sites fixed**, every fix purity-gated so pure
+  emissions stay byte-identical (pinned; regression tests in
+  `random-compile.test.ts` § "multi-splice × impure operand — the 2026-08-02
+  audit round"):
+
+  - JS `Equal`/`NotEqual` complex operand (`.re`/`.im` double splice) and
+    n-ary chain middle operands (double `compile()`); JS `Range` 3-operand
+    form (start/step re-spliced INSIDE the `Array.from` callback — was one
+    draw per element at run time).
+  - GPU `Round` (both forms), `Root` (odd degree), `Variance` (worst case:
+    `Variance(Random(), Random())` emitted 12 draws for the interpreter's
+    2), `Argument`/`Conjugate` complex branches (vec2 temps),
+    `gpuSelectionMask` chained-relation middles, `ContrastingColor` 3-arg
+    (vec3-shaped — impure operands now DECLINE, D6). GPU `Add` complex
+    fallback compiled every operand twice, orphaning hoisted statements (an
+    orphaned `_tvN = _gpu_rnd_draw(…)` consumed a draw feeding nothing) —
+    now pre-tests `isOpaqueComplexOperand` (`constant-folding.ts`) before
+    decomposing; `Multiply`/`Subtract` fallbacks probed clean.
+  - Shared `base-compiler.ts`: the relational-chain lowering inlined middle
+    operands twice on targets WITHOUT `bindExpr` (GPU) — the old comment's
+    rationale ("safe… deterministic seed") was stale, `_gpu_rnd_draw`
+    advances a runtime counter; and `compileMatchTernary` spliced the Match
+    subject once per comparison (twice per range pattern). Both now hoist an
+    impure operand via `canHoist`/`hoistStatement` (language-aware decl) or
+    decline; stale comments rewritten.
+  - Latent-only, no code change: the interval target has NO impure lowering
+    at all (no Random entry, closed head table) — its multi-splices are
+    unreachable, like Python's. Python `Norm` order splice got the same
+    guard comment as the Equal/NotEqual chains (comment-only, per the chain
+    precedent).
+
+  The dual-reviewer round on this diff caught and fixed two follow-on
+  defects in the fixes themselves: (a) **draw ORDER** — binding only the
+  impure middle made its draw execute before an inline impure endpoint
+  (`Less(Random(), Random(), 0.9)` computed the wrong boolean); both the
+  `bindExpr` and hoist branches of the chain lowering, and
+  `gpuSelectionMask`, now bind EVERY impure operand in argument order when
+  any needs binding (this also fixed the same order swap in the PRE-EXISTING
+  JS `bindExpr` branch). (b) `ContrastingColor`'s bare `?:` (both the 3-arg
+  and 1-arg forms) was invalid WGSL source — WGSL now emits `select(…)`
+  (operands are pure by the new gate, so eager `select` is sound); GLSL text
+  byte-identical.
+
+  Known residuals, recorded not fixed: n-ary `NotEqual(a, R, b)` draws twice
+  because canonicalization expands to `And` with two DISTINCT `Random()`
+  nodes — interpreter parity, not a splice. An impure VECTOR-shaped chain
+  endpoint alongside an impure middle now declines (was: compiled with the
+  wrong draw order) — correct D6, tiny surface reduction. B1 short-circuit
+  nuance RESOLVED by probe (2026-08-02): the interpreter EAGERLY draws even
+  a short-circuited chain operand (`Less(5, 1, Random())` consumes a draw),
+  so the unconditional hoist at index ≥ 2 is exact interpreter parity — no
+  decline needed, do not re-litigate.
 - **`Norm(matrix, "Infinity")` / `Norm(matrix, 1)` on Python: PROBED, faithful**
   (2026-07-31). The interpreter's rank-2 branch computes max row sum / max
   column sum — exactly numpy's matrix `ord=inf` / `ord=1`. The probe also
@@ -568,8 +641,36 @@ Worth a `finally` audit rather than a bug hunt.
 **B. Plain missing codegen — no design needed, small.** Good first-session
 material if someone wants a quick win.
 
-- **`Repeat` on javascript** (1/1) — `Repeat(7,3)` → `[7,7,7]`; trivial.
-- **`Choose` (`nCr`) on glsl** (4 st) — a loop or an `lgamma`-based form.
+- ~~**`Repeat` on javascript** (1/1)~~ — **DONE 2026-08-02.** IIFE-parameter
+  lowering next to `Fill`/`Tabulate`; the value is bound ONCE (an impure
+  value draws once and repeats — interpreter parity, including the
+  non-obvious edge that the interpreter consumes the draw even at count ≤ 0,
+  pinned). Runtime count is rounded, non-finite count → `[]` (the
+  `Chunk`-style finite guard, chosen over `Tabulate`'s unguarded shape so
+  `Repeat(x, ∞)` cannot attempt an unbounded allocation). 1-arg infinite
+  form keeps declining (D6), and a STATICALLY non-finite count declines too
+  (review round: the interpreter stays inert on `Repeat(7, ∞)`, so the
+  runtime guard's `[]` would be a valid-looking value with wrong semantics;
+  the runtime-valued non-finite case keeps the `[]` projection, documented).
+  Tests in `compile.test.ts` + `random-compile.test.ts`.
+- ~~**`Choose` (`nCr`) on glsl** (4 st)~~ — **DONE 2026-08-02** on GLSL AND
+  WGSL: literal k ∈ 0..8 unrolls the falling-factorial form
+  (`Binomial(x+1, 2)` → `(((x + 1.0) * ((x + 1.0) - 1.0)) / 2.0)`), which
+  matches the interpreter's GENERALIZED semantics (0 mismatches vs `.N()`
+  over k 1..8 × 15 sample n incl. 5.5, −1, −1.5); `Choose` aliases to the
+  same handler like the JS target. Operand bound via `gpuOperandOnce` when
+  spliced ≥ 2× (impure draws once); `Binomial(Random(), 0)` DECLINES —
+  probed: the interpreter consumes a draw there, and folding to `1.0` would
+  skip it and shift later draws. Non-literal/negative/non-integer k, k > 8,
+  complex operand: D6. A statically non-finite first operand also declines
+  (review round: interpreter gives NaN for `Binomial(∞, k)` — even k = 0 —
+  and stays inert on NaN input, so the `1.0` fold / unrolled `∞` were wrong;
+  a RUNTIME-∞ binding still takes the arithmetic form, the documented
+  static-assert divergence class). Report-only finding: the JS target's `_SYS.binomial`
+  (Pascal table, `expand.ts:36`) THROWS a raw TypeError for the
+  non-integer/negative n the interpreter handles (`Binomial(5.5, 2)` interp
+  12.375, compiled JS throws) — the GPU falling-factorial form would fix it
+  for literal k; not done, separate item.
 - ~~**Non-finite literals on GPU** (5 st)~~ — **DONE 2026-07-30.** One spelling
   now serves both a literal and a masked `When`/`Which` branch
   (`gpuNonFiniteLiteral` in `constant-folding.ts`; `gpuNaN` delegates to it), so

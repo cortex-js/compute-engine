@@ -180,7 +180,8 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
 function compileJSEquality(
   kind: 'Equal' | 'NotEqual',
   args: ReadonlyArray<Expression>,
-  compile: (e: Expression) => string
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
 ): string {
   if (args.length < 2)
     throw new Error(`${kind}: expected at least two arguments`);
@@ -226,29 +227,53 @@ function compileJSEquality(
     );
   }
   const cmp = kind === 'Equal' ? '<=' : '>';
-  const distance = (a: Expression, b: Expression): string => {
+  // An IMPURE operand (the Random family) must be evaluated exactly once — the
+  // interpreter evaluates each operand once. Two positions splice an operand
+  // MORE than once: a COMPLEX operand is spliced twice by `part()` (once for
+  // `.re`, once for `.im`), and a MIDDLE operand of a chained (n-ary) form
+  // appears in the two comparisons that straddle it. So `Equal(Random()·i, …)`
+  // and `Equal(0.1, Random(), 0.9)` each consumed TWO draws. When any operand
+  // is spliced more than once, bind EVERY impure operand — in argument order,
+  // so the draw order matches the interpreter's — to an IIFE const, and splice
+  // the const instead. Pure operands keep the direct emission byte-identical.
+  const multiSpliced = (i: number): boolean =>
+    (i >= 1 && i <= args.length - 2) || BaseCompiler.isComplexValued(args[i]);
+  const bind = args.some((a, i) => a.isPure === false && multiSpliced(i));
+  const bindings: string[] = [];
+  const codes = args.map((a, i) => {
+    if (!bind || a.isPure !== false) return undefined;
+    const t = BaseCompiler.tempVar(target);
+    bindings.push(`${t} = ${compile(a)}`);
+    return t;
+  });
+  const code = (i: number): string => codes[i] ?? compile(args[i]);
+  const distance = (i: number, j: number): string => {
+    const a = args[i];
+    const b = args[j];
     const anyComplex =
       BaseCompiler.isComplexValued(a) || BaseCompiler.isComplexValued(b);
-    if (!anyComplex) return `Math.abs((${compile(a)}) - (${compile(b)}))`;
+    if (!anyComplex) return `Math.abs((${code(i)}) - (${code(j)}))`;
     // Promote each operand to `{ re, im }` and take the modulus of the
     // difference. A real operand contributes `re = code`, `im = 0`.
-    const part = (e: Expression): { re: string; im: string } => {
-      const c = compile(e);
-      return BaseCompiler.isComplexValued(e)
+    const part = (e: Expression, c: string): { re: string; im: string } =>
+      BaseCompiler.isComplexValued(e)
         ? { re: `(${c}).re`, im: `(${c}).im` }
         : { re: `(${c})`, im: '0' };
-    };
-    const pa = part(a);
-    const pb = part(b);
+    const pa = part(a, code(i));
+    const pb = part(b, code(j));
     return `_SYS.cabs({ re: ${pa.re} - ${pb.re}, im: ${pa.im} - ${pb.im} })`;
   };
-  const pair = (a: Expression, b: Expression): string =>
-    `(${distance(a, b)} ${cmp} ${tol})`;
-  if (args.length === 2) return pair(args[0], args[1]);
-  const parts: string[] = [];
-  for (let i = 0; i < args.length - 1; i++)
-    parts.push(pair(args[i], args[i + 1]));
-  return `(${parts.join(' && ')})`;
+  const pair = (i: number, j: number): string =>
+    `(${distance(i, j)} ${cmp} ${tol})`;
+  let body: string;
+  if (args.length === 2) body = pair(0, 1);
+  else {
+    const parts: string[] = [];
+    for (let i = 0; i < args.length - 1; i++) parts.push(pair(i, i + 1));
+    body = `(${parts.join(' && ')})`;
+  }
+  if (bindings.length === 0) return body;
+  return `(() => { const ${bindings.join(', ')}; return ${body}; })()`;
 }
 
 /** JavaScript infix spelling of each ordering relation. */
@@ -916,8 +941,10 @@ function compileJSPointList(
 const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Tolerance-aware equality (see compileJSEquality). Not operators — a raw
   // `===` is exact and disagrees with the interpreter's tolerant compare.
-  Equal: (args, compile) => compileJSEquality('Equal', args, compile),
-  NotEqual: (args, compile) => compileJSEquality('NotEqual', args, compile),
+  Equal: (args, compile, target) =>
+    compileJSEquality('Equal', args, compile, target),
+  NotEqual: (args, compile, target) =>
+    compileJSEquality('NotEqual', args, compile, target),
   // The ordering relations and logical connectives normally lower to raw JS
   // infix in `BaseCompiler`. These handlers are reached ONLY when that path
   // declines — i.e. when an operand may be a collection at run time — and
@@ -1458,6 +1485,45 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const rows = compile(dims.ops[0]);
     const cols = compile(dims.ops[1]);
     return `((_f, _r, _c) => Array.from({ length: Math.max(0, Math.round(_r)) }, (_, _i) => Array.from({ length: Math.max(0, Math.round(_c)) }, (_, _j) => _f(_i + 1, _j + 1))))(${f}, ${rows}, ${cols})`;
+  },
+  // `Repeat(x, n)` → a list of n copies of x. The VALUE is hoisted into an
+  // IIFE parameter so it is evaluated exactly ONCE, matching the interpreter:
+  // `Repeat(Random(), 3)` is three copies of a SINGLE draw, and the draw
+  // happens even when the count is ≤ 0. Splicing the compiled value into a
+  // per-element callback instead would re-draw an impure operand once per
+  // element.
+  // The count is normalized like `Tabulate`'s dimension — rounded, and a
+  // non-positive one yields [] (unlike `Tabulate`, `Repeat(x, 0)` is NOT
+  // inert in the interpreter: it evaluates to []).
+  // A *statically* non-finite count (a `±∞` literal, or an operand typed
+  // `non_finite_number`) is inert in the interpreter (`toInteger` answers
+  // null), so it fails closed (D6) rather than compiling to `[]` behind
+  // `success: true`. A *dynamic* count that is non-finite only at run time
+  // still projects to [] — the Chunk/RotateLeft precedent, and the
+  // documented divergence: the interpreter stays inert there while the
+  // compiled form yields [] rather than attempting an unbounded allocation.
+  // The 1-argument form is an INFINITE lazy sequence with no compiled
+  // representation, and a statically non-integer count is a type error in the
+  // interpreter — both fail closed (D6).
+  Repeat: (args, compile) => {
+    if (args[0] == null) throw new Error('Repeat: missing value');
+    if (args.length !== 2)
+      throw new Error(
+        `Repeat: only the (value, count) form compiles — the 1-argument ` +
+          `form is an infinite sequence. Fail closed (D6).`
+      );
+    if (isNonFiniteBound(args[1]!))
+      throw new Error(
+        `Repeat: a statically non-finite count (${args[1]!.toString()}) is ` +
+          `inert in the interpreter. Fail closed (D6).`
+      );
+    const nConst = tryGetConstant(args[1]!);
+    if (nConst !== undefined && !Number.isInteger(nConst))
+      throw new Error(
+        `Repeat: a non-integer count (${nConst}) is a type error in the ` +
+          `interpreter. Fail closed (D6).`
+      );
+    return `((_v, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; return Array.from({ length: _n }, () => _v); })(${compile(args[0])}, ${compile(args[1]!)})`;
   },
   // Add one element at the end.
   Append: (args, compile) => {
@@ -2145,6 +2211,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // from the (undefined) array element. Use `_e` for the unused element.
       return `((_a, _b) => Array.from({length: Math.floor(Math.abs(_b - _a)) + 1}, (_e, _i) => _b >= _a ? _a + _i : _a - _i))(${start}, ${stop})`;
     }
+    // An IMPURE operand (the Random family) must be evaluated exactly once:
+    // `start` and `step` are each spliced twice, and the SECOND splice is
+    // inside the `Array.from` callback — so a spliced draw is re-drawn once
+    // per element, and the length is computed from a different value than the
+    // elements (`Range(Random(), 10, 2)` consumed a draw for the length and
+    // one more per element). Bind the three bounds to IIFE parameters (the
+    // shape the symbolic 2-argument branch above uses); pure operands keep the
+    // direct emission byte-identical.
+    if (args.slice(0, 3).some((a) => a?.isPure === false))
+      return `((_a, _b, _s) => Array.from({length: Math.floor((_b - _a) / _s) + 1}, (_e, _i) => _a + _i * _s))(${start}, ${stop}, ${step})`;
     return `Array.from({length: Math.floor((${stop} - ${start}) / ${step}) + 1}, (_e, i) => ${start} + i * ${step})`;
   },
   Root: ([arg, exp], compile, target) => {
@@ -5043,8 +5119,9 @@ function extractLimits(limitsExpr: Expression): {
 }
 
 /**
- * Whether a Sum/Product bound is KNOWN at compile time not to be a finite
- * number: a `±∞`/`NaN` literal, or an expression typed `non_finite_number`.
+ * Whether an operand (a Sum/Product bound, a `Repeat` count) is KNOWN at
+ * compile time not to be a finite number: a `±∞`/`NaN` literal, or an
+ * expression typed `non_finite_number`.
  *
  * Such a bound cannot be lowered to a counted loop — `i <= Infinity` never
  * fails, and `-Infinity + 1 === -Infinity` never advances the counter — so the

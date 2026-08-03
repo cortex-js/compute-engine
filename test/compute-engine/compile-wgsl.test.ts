@@ -594,6 +594,24 @@ describe('WGSL COMPILATION', () => {
       expect(r.preamble).toContain('fn _gpu_erf(x: f32) -> f32');
       expect(r.preamble).not.toContain('float _gpu_erf');
     });
+
+    // `Binomial`/`Choose` unroll to the falling factorial n(n-1)…/k! — pure
+    // arithmetic, so the WGSL emission is byte-identical to the GLSL one
+    // (pinned with its numeric parity in compile-glsl.test.ts) and needs no
+    // preamble helper.
+    it('unrolls Binomial/Choose with no preamble helper', () => {
+      const r = wgsl.compile(ce.expr(['Binomial', 'x', 3]));
+      expect(r.code).toBe('(((x) * ((x) - 1.0) * ((x) - 2.0)) / 6.0)');
+      expect(r.preamble ?? '').not.toContain('binomial');
+      expect(wgsl.compile(ce.expr(['Choose', 'x', 2])).code).toBe(
+        '(((x) * ((x) - 1.0)) / 2.0)'
+      );
+      expect(wgsl.compile(ce.expr(['Binomial', 'x', 1])).code).toBe('x');
+      expect(wgsl.compile(ce.expr(['Binomial', 'x', 0])).code).toBe('1.0');
+      expect(() => wgsl.compile(ce.expr(['Binomial', 'x', -1]))).toThrow(
+        /Fail closed/
+      );
+    });
   });
 
   // REVIEW.md E15: WGSL has no `?:` ternary and no `NaN` identifier, so the
@@ -933,5 +951,38 @@ describe('WGSL Mod with an impure operand draws once', () => {
     const target = ce.getCompilationTarget('wgsl')!;
     const code = target.compile(ce.box(['Mod', ['Add', 'x', 29], 900])).code;
     expect(code).toBe('((((x + 29.0) % (900.0)) + (900.0)) % (900.0))');
+  });
+});
+
+// WGSL has no ternary operator: `ContrastingColor` emitted `cond ? a : b` in
+// BOTH its forms, which is invalid WGSL source (the shader failed to compile
+// downstream, with `success: true` here). It must use `select(...)`, like
+// every other conditional emission in this target.
+describe('WGSL ContrastingColor uses select, never a ternary', () => {
+  it('compiles the 1-argument (black/white) form to select(...)', () => {
+    const code = wgsl.compile(ce.box(['ContrastingColor', ['Tuple', 1, 1, 1]]))
+      .code;
+    expect(code).toBe(
+      'select(vec3f(1.0, 0.0, 0.0), vec3f(0.0), ' +
+        '(_gpu_apca(vec3f(1.0, 1.0, 1.0), vec3f(0.0)) > 50.0))'
+    );
+    expect(code).not.toContain('?');
+  });
+
+  it('compiles the 3-argument form to select(...)', () => {
+    const code = wgsl.compile(
+      ce.box([
+        'ContrastingColor',
+        ['Tuple', 1, 1, 1],
+        ['Tuple', 0, 0, 0],
+        ['Tuple', 0.5, 0.1, 30],
+      ])
+    ).code;
+    expect(code).toBe(
+      'select(vec3f(0.5, 0.1, 30.0), vec3f(0.0, 0.0, 0.0), ' +
+        'abs(_gpu_apca(vec3f(1.0, 1.0, 1.0), vec3f(0.0, 0.0, 0.0))) >= ' +
+        'abs(_gpu_apca(vec3f(1.0, 1.0, 1.0), vec3f(0.5, 0.1, 30.0))))'
+    );
+    expect(code).not.toContain('?');
   });
 });

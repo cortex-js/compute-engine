@@ -1775,6 +1775,63 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ]);
   });
 
+  // `Repeat(value, count)`. Every expectation below was checked against the
+  // interpreter: `Repeat(7, 3)` → [7,7,7], `Repeat(7, 0)` → [],
+  // `Repeat(7, -1)` → [].
+  it('Repeat compiles to a list of n copies, clamped like the interpreter', () => {
+    const e = mkEngine();
+    expect(runJs(e, ['Repeat', 7, 3])).toEqual([7, 7, 7]);
+    expect(runJs(e, ['Repeat', 7, 0])).toEqual([]);
+    expect(runJs(e, ['Repeat', 7, -1])).toEqual([]);
+    expect(runJs(e, ['Repeat', ['List', 1, 2], 3])).toEqual([
+      [1, 2],
+      [1, 2],
+      [1, 2],
+    ]);
+    // Composes with the other collection folds.
+    expect(runJs(e, ['Length', ['Repeat', 7, 5]])).toBe(5);
+    expect(runJs(e, ['Sum', ['Repeat', 3, 4]])).toBe(12);
+  });
+
+  it('Repeat: a runtime count is rounded, clamped and finite-guarded', () => {
+    const e = mkEngine();
+    e.declare('k', 'integer');
+    e.declare('v', 'real');
+    const r = compile(e.box(['Repeat', 'v', 'k']), { fallback: false })!;
+    expect(r.run!({ v: 9, k: 4 })).toEqual([9, 9, 9, 9]);
+    expect(r.run!({ v: 9, k: 2.7 })).toEqual([9, 9, 9]); // rounded, like toInteger
+    expect(r.run!({ v: 9, k: -2 })).toEqual([]); // clamped to 0
+    expect(r.run!({ v: 9, k: NaN })).toEqual([]);
+    expect(r.run!({ v: 9, k: Infinity })).toEqual([]); // no unbounded allocation
+    // The value is an IIFE parameter, evaluated once (see the draw-count
+    // regression in random-compile.test.ts).
+    expect(r.code).toMatch(/^\(\(_v, _n\) =>/);
+  });
+
+  // `Repeat(7, +∞)` stays INERT in the interpreter (`toInteger` answers null,
+  // the expression is returned unevaluated), so the compiled form must not
+  // report success with a `[]` the interpreter never produces. A count that
+  // is non-finite only at RUN time keeps the `[]` projection above.
+  it('Repeat: a statically non-finite count fails closed', () => {
+    const e = mkEngine();
+    expect(
+      e.box(['Repeat', 7, 'PositiveInfinity']).evaluate().toString()
+    ).toBe('Repeat(7, +oo)');
+    expect(() =>
+      compile(e.box(['Repeat', 7, 'PositiveInfinity']), { fallback: false })
+    ).toThrow(/Fail closed/);
+    expect(() =>
+      compile(e.box(['Repeat', 7, 'NegativeInfinity']), { fallback: false })
+    ).toThrow(/Fail closed/);
+  });
+
+  it('Repeat: the 1-argument (infinite) form fails closed', () => {
+    const e = mkEngine();
+    expect(() =>
+      compile(e.box(['Repeat', 7]), { fallback: false })
+    ).toThrow(/Fail closed/);
+  });
+
   // Native-array collection operators (Tier 2). Every value below was
   // verified against the interpreter's evaluate() result.
   it('Append / Most / Slice compile to native array operations', () => {
