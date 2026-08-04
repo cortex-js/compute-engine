@@ -17,7 +17,6 @@ describe('DECLARATIVE SEQUENCE DEFINITIONS', () => {
 
     test('Geometric sequence', () => {
       const ce = new ComputeEngine();
-      // Note: Can't use 'G' as it maps to CatalanConstant in LaTeX
       ce.declareSequence('Z', {
         base: { 0: 1 },
         recurrence: '2 \\cdot Z_{n-1}',
@@ -412,7 +411,7 @@ describe('DECLARATIVE SEQUENCE DEFINITIONS', () => {
       expect(ce.getSequenceCache('W')!.size).toBe(0);
     });
 
-    // Note: Avoid 'E' (Euler's number), 'G' (CatalanConstant), 'D' (derivative)
+    // Note: Avoid 'E' (Euler's number) and 'D' (derivative)
     test('clearSequenceCache clears all sequences', () => {
       const ce = new ComputeEngine();
       ce.declareSequence('P', { base: { 0: 1 }, recurrence: 'P_{n-1} + 1' });
@@ -652,7 +651,6 @@ describe('MULTI-INDEX SEQUENCES (SUB-9)', () => {
   describe('Programmatic API with explicit base cases', () => {
     test('Simple 2x2 grid with all explicit base cases', () => {
       const ce = new ComputeEngine();
-      // Use 'U' instead of 'G' (G is reserved for CatalanConstant)
       ce.declareSequence('U', {
         variables: ['i', 'j'],
         base: {

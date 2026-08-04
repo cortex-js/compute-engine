@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A bare `G` is now a variable, not Catalan's constant.** The LaTeX
+  dictionary claimed the bare letter `G` for `CatalanConstant` ahead of any
+  declaration, so a formula such as `\int_{t_i}^{t_e}(G - F)\,dt` silently read
+  as `Subtract(CatalanConstant, F)`, and declaring `G` could not reclaim it. As
+  with `e` and `i`, the constant is now reachable only through explicit upright
+  markup: `\operatorname{G}` — also its serialized form, so `CatalanConstant`
+  still round-trips — and `\mathrm{G}`. Two consequences: `G`, `G(2)` and `G_x`
+  are ordinary symbols, and `\mathrm{G}` no longer parses as the upright symbol
+  `G_upright`.
+
+- **`EulerGamma` now serializes as `\operatorname{EulerGamma}`, not `\gamma`.**
+  Bare `\gamma` still *parses* as the constant, but it now yields to a
+  declaration (see Improvements), which would have made the old serialized form
+  ambiguous: in an engine where `gamma` is a variable, serializing an
+  expression carrying the constant and parsing it back silently returned the
+  variable. `\gamma` could not be disambiguated with upright markup the way `G`
+  was — `\operatorname{\gamma}` already means the plain symbol `gamma` — so the
+  constant serializes to its MathJSON name, which reaches `EulerGamma` through
+  the generic symbol path regardless of what is declared. Rendered output that
+  used to show `γ` now shows an upright `EulerGamma`.
+
 ### New Features
 
 - **Parametric polymorphism: `forall` type variables in function signatures.**
@@ -85,6 +108,20 @@
 
 ### Improvements
 
+- **Euler derivative notation and `\gamma` now yield to a declaration.** Both
+  spellings are claimed by a parselet that runs ahead of symbol resolution, so
+  no declaration could reclaim them: `D_x + 1` parsed as the derivative of the
+  constant function `x ↦ 1`, and `\gamma` was always the Euler-Mascheroni
+  constant. Each parselet now consults the symbol oracle first — the engine
+  scope, supplemented by the `resolveSymbol` parse option. `D_x` reads as a
+  symbol when the joined name `D_x` is declared (the same sibling-name rule
+  subscripted spellings already use) or when `D` itself is shadowed by a
+  non-function declaration; a function-typed `D` keeps the derivative reading.
+  `\gamma` reads as the symbol `gamma` when `gamma` is declared. Left
+  undeclared, both notations parse exactly as before. This gives a host
+  embedding the engine a way to say "these are my variables" without having to
+  replace the LaTeX dictionary.
+
 - **Degenerate big operators (`Σ_{i=a}^{a}`, `Π_{i=a}^{a}`) now reduce.** A big
   operator whose lower and upper bounds are structurally equal has a one-point
   domain, so it has exactly one term. Two reductions follow. First, at
@@ -156,6 +193,18 @@
   made the comparison trees honest (and bigger).
 
 ### Bug Fixes
+
+- **A function declared with a scalar return type is now rejected when added to
+  a tuple.** `scalar + tuple` is an error when the scalar is provable, and a
+  declared (non-inferred) numeric result counts as proof. That guard never
+  fired for a head declared with a function *type* —
+  `ce.declare('f', '(number) -> number')` — because such a declaration produces
+  a value definition rather than an operator definition, and the guard
+  consulted only the latter: `f(x) + (1, 2)` stayed a symbolic `Add`. It now
+  falls back to the head's value definition. The inferred cases are unchanged
+  and still stay symbolic, an inferred numeric type being retractable evidence
+  rather than proof: a signature inferred from a `:=` body, or a function type
+  inferred from earlier use.
 
 - **A built-in operator name used as a callback no longer compiles to a broken
   artifact.** `Map(xs, Sin)`, `CountIf(xs, IsPrime)` and the like compiled

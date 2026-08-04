@@ -48,11 +48,11 @@ int_(0)(sin(x) dx)
 
 exports[`DEFINITE INTEGRAL Symbolic lower bound (regions) 1`] = `
 \\int_{G}\\!\\sin(x)\\, \\mathrm{d}x
-int_("CatalanConstant")(sin(x) dx)
+int_(G)(sin(x) dx)
 [
   "Integrate",
   ["Function", ["Sin", "x"], "x"],
-  ["Limits", "x", "CatalanConstant", "Nothing"]
+  ["Limits", "x", "G", "Nothing"]
 ]
 `;
 
@@ -589,7 +589,7 @@ D(D(D((t) |-> y, t), t), t)
 
 exports[`REAL WORLD INTEGRALS Integral with non standard typesetting 1`] = `
 S_{t}=S_0+\\int_{t_{i}}^{t_{e}}\\!G-F\\, \\mathrm{d}t
-"S_t" === "S_0" + int_("t_i")^("t_e")(-F + "CatalanConstant" dt)
+"S_t" === "S_0" + int_("t_i")^("t_e")(-F + G dt)
 [
   "Equal",
   "S_t",
@@ -598,7 +598,7 @@ S_{t}=S_0+\\int_{t_{i}}^{t_{e}}\\!G-F\\, \\mathrm{d}t
     "S_0",
     [
       "Integrate",
-      ["Function", ["Subtract", "CatalanConstant", "F"], "t"],
+      ["Function", ["Subtract", "G", "F"], "t"],
       ["Limits", "t", "t_i", "t_e"]
     ]
   ]

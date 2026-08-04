@@ -2710,6 +2710,20 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // symbol.
       if (symbol(variable) === null) return null;
 
+      // A declaration outranks the notation. Two ways a writer says "`D_x` is
+      // a variable of mine, not a derivative":
+      //  - the JOINED name `D_x` is declared. Same sibling-name rule
+      //    `parseSymbol()` uses for subscripted spellings (see
+      //    `parse-symbol.ts`): a declared `D_x` must be spellable.
+      //  - `D` itself is shadowed by a non-function declaration. The standard
+      //    library declares `D` with a function signature, so this fires only
+      //    on a deliberate shadow — gating on mere declaredness would disable
+      //    the notation for everyone.
+      if (parser.resolveSymbol(`D_${symbol(variable)}`) !== undefined)
+        return null;
+      const headType = parser.resolveSymbol('D')?.type;
+      if (headType && !headType.matches('function')) return null;
+
       // Parse the function/expression to differentiate
       parser.skipSpace();
       const fn = parser.parseExpression({ minPrec: 740 });

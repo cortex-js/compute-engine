@@ -1310,9 +1310,39 @@ function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
 
 export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // Constants
-  { name: 'CatalanConstant', symbolTrigger: 'G' },
+  // Catalan's constant is conventionally written `G`, but a bare `G` is far
+  // more often a variable (gravitational constant, a graph, a group, a gain).
+  // As with `e` and `i`, the constant is reachable only through explicit
+  // upright markup, leaving the bare letter to the writer.
+  {
+    name: 'CatalanConstant',
+    latexTrigger: '\\operatorname{G}',
+    serialize: '\\operatorname{G}',
+  },
+  { latexTrigger: '\\mathrm{G}', parse: 'CatalanConstant' },
+  // `\varphi` keeps the bare trigger: the golden ratio is the dominant reading
+  // of that spelling, and `\phi` remains available as a plain variable.
   { name: 'GoldenRatio', latexTrigger: '\\varphi' },
-  { name: 'EulerGamma', latexTrigger: '\\gamma' },
+  // `\gamma` is also very often a variable (Lorentz factor, damping ratio,
+  // adiabatic index), so the bare spelling yields to a declaration the way
+  // Euler `D_x` does. It cannot get the upright-markup treatment `G` gets —
+  // `\operatorname{\gamma}` already means the plain symbol `gamma` (the Greek
+  // `\operatorname{}` convention) — so the constant SERIALIZES to its MathJSON
+  // name instead. That spelling reaches `EulerGamma` through the generic
+  // symbol path, independent of any declaration, so an expression carrying the
+  // constant still round-trips in an engine where `gamma` is a variable.
+  {
+    name: 'EulerGamma',
+    latexTrigger: '\\gamma',
+    serialize: '\\operatorname{EulerGamma}',
+    // Decline (`null`) rather than returning the symbol when `gamma` is
+    // declared: this parselet runs ahead of `parseFunction()`, so returning
+    // `'gamma'` here would strand a declared FUNCTION `\gamma(2, 1)` as an
+    // `InvisibleOperator` on the raw route. Declining falls through to the
+    // ordinary symbol/application paths, which handle both spellings.
+    parse: (parser: Parser): MathJsonExpression | null =>
+      parser.resolveSymbol('gamma') === undefined ? 'EulerGamma' : null,
+  },
   {
     name: 'Degrees',
     latexTrigger: ['\\degree'],

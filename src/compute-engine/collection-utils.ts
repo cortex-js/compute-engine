@@ -556,9 +556,21 @@ export function isDeclaredScalarNumber(expr: Expression): boolean {
   // qualifies even with a collection operand; a list-broadcast call is already
   // excluded by the `isSubtype(…, 'number')` gate above (its type is `list<…>`).
   if (isFunction(expr)) {
-    if (!expr.operatorDefinition) return false;
-    if (expr.operatorDefinition.inferredSignature) return false;
-    return true;
+    const opDef = expr.operatorDefinition;
+    if (opDef) return !opDef.inferredSignature;
+
+    // A head declared with a function TYPE rather than a signature —
+    // `ce.declare('H', '(number) -> number')` — carries a VALUE definition, so
+    // there is no operator definition to consult. The declaration is proof
+    // just the same; a function type merely INFERRED from earlier use
+    // (`inferredType`) is not, matching the `inferredSignature` rule above.
+    // Read the definition this call was BOUND to, not a fresh lookup of the
+    // name: `bind()` resolves the head through `lookupApplicable`, which can
+    // walk past an inner non-applicable shadow, and the call may carry its own
+    // local scope. Re-resolving in the engine's current scope could read
+    // `inferredType` off a different binding entirely.
+    const valueDef = expr.valueDefinition;
+    return valueDef !== undefined && !valueDef.inferredType;
   }
 
   return false;

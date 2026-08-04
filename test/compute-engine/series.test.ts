@@ -576,7 +576,7 @@ describe('Series — Laurent expansions at poles (§6)', () => {
 
   test('ζ(x) at 1 = 1/(x−1) + γ + O(x−1)', () => {
     expect(series('\\zeta(x)', '1').latex).toBe(
-      '\\frac{1}{x-1}+\\gamma+O\\left(x-1\\right)'
+      '\\frac{1}{x-1}+\\operatorname{EulerGamma}+O\\left(x-1\\right)'
     );
     expect(seriesResidue('\\zeta(x)', '1').isSame(1)).toBe(true);
   });
