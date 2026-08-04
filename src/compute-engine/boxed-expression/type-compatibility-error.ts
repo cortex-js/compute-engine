@@ -32,8 +32,8 @@ export class TypeCompatibilityError extends Error {
     /** The type of the offending value, when one was boxed. */
     readonly valueType: BoxedType | undefined,
     /** `'constructor'` for the minted-constructor guard, `'value'` for a
-     * declared-type mismatch, `'generic-literal-body'` for D7. */
-    readonly kind: 'value' | 'constructor' | 'generic-literal-body',
+     * declared-type mismatch, `'generic-overload-literal'` for G11. */
+    readonly kind: 'value' | 'constructor' | 'generic-overload-literal',
     message: string
   ) {
     super(message);
@@ -74,24 +74,71 @@ export function declaredTypeError(
 }
 
 /**
- * The v1 rejection of a generic declaration with an inline body (D7, §4.1 of
- * `docs/plans/2026-08-01-type-variables-design.md`).
+ * G11 (§2.4 of
+ * `docs/plans/2026-08-04-generic-function-literals-design.md`) — the
+ * single-arm restriction.
  *
- * `Ground <: Poly` is false (§5 rule 2), so a function literal — whose
- * inferred type is always ONE ground instantiation — can never satisfy a
- * generic declaration. Since declare-then-assign is the load-bearing idiom
- * (mandatory for recursion), the consequence is surfaced as its own
- * diagnostic instead of a bare `incompatible-type` comparing a polytype
- * against `(unknown) -> …`.
+ * A function literal may implement a polymorphic declared type only when that
+ * type is a SINGLE-ARM signature. An intersection (an overload set) with a
+ * polymorphic arm has no single erased body that could satisfy every arm's
+ * clause, bounds and result, so generic overload arms stay evaluate-handler
+ * territory in this milestone.
  *
- * The same sentence is used by the function-literal ANNOTATION rejection
- * (`function-utils.ts`), so all the v1 routes read alike.
+ * This constant supersedes the retired v1 `GENERIC_FUNCTION_LITERAL_MESSAGE`
+ * (D7), whose whole-feature rejection the generic-literal install path
+ * replaced.
  */
-export const GENERIC_FUNCTION_LITERAL_MESSAGE =
-  'A generic declaration cannot take a function-literal body in v1; supply an `evaluate` handler (a future release adds the generic `function f<T>(…)` form)';
+export const GENERIC_OVERLOAD_LITERAL_MESSAGE =
+  'A generic OVERLOAD SET cannot take a function-literal body; supply an `evaluate` handler, or declare a single generic signature';
 
-/** D7 — a function-literal body assigned to a symbol declared at a polytype. */
-export function genericLiteralBodyError(
+/**
+ * The rule a rejected generic spelling on a function LITERAL states
+ * (`docs/plans/2026-08-04-generic-function-literals-design.md` §3.4).
+ *
+ * A type variable enters a literal ONLY through a whole-signature `forall`
+ * clause (G6) — never through a per-parameter annotation, which would be a
+ * rank-2 spelling.
+ */
+export const TYPE_VARIABLE_INTRODUCTION_MESSAGE =
+  'Type variables are introduced by a whole-signature `forall` clause on the function literal (or by the `function f<T>(…)` form), never by a per-parameter annotation';
+
+/**
+ * A whole-signature `forall` marker on a literal that is not well-formed
+ * (§2.3): the marker is the literal's contract of record, so its shape is
+ * checked — a plain signature, with as many arguments as the literal has
+ * parameters.
+ */
+export const INVALID_GENERIC_MARKER_MESSAGE =
+  'A generic function-literal signature must be a plain signature (no optional or variadic arguments) with one argument per literal parameter';
+
+/**
+ * §2.4 rule 4, on the E2 route — a GROUND parameter annotation sitting at a
+ * QUANTIFIED marker position that does not COVER the variable's bound.
+ *
+ * Erasure drops such an annotation in favour of the marker, so the coverage
+ * question has to be answered before it is dropped: by the time the
+ * declaration boundary (`acceptsGenericFunctionLiteral`) reads the literal's
+ * parameters, the contradicting annotation is gone. `(x: integer)` at a
+ * `forall T: number` position must not silently become "accepts every
+ * number".
+ */
+export const GENERIC_ANNOTATION_COVERAGE_MESSAGE =
+  'A parameter annotation at a quantified position must accept every admitted instantiation: the type variable’s bound must be a subtype of the annotation';
+
+/**
+ * G5 (§2.5) — currying a generic function literal is not supported.
+ *
+ * A variable consumed by the supplied prefix cannot be recovered in the
+ * residual arrow: `forall T, U. (T, U) -> U` curried at one argument leaves a
+ * clause whose `T` occurs nowhere, which is unsolvable. Partial INSTANTIATION
+ * (solve the prefix, substitute, prune the clause) is the principled lift.
+ */
+export const GENERIC_PARTIAL_APPLICATION_MESSAGE =
+  'Partial application of a generic function is not supported: supply every argument';
+
+/** G11 — a function-literal body assigned to a symbol declared at a
+ * polymorphic OVERLOAD SET. */
+export function genericOverloadLiteralError(
   symbol: string,
   valueType: BoxedType | undefined,
   declaredType: BoxedType
@@ -100,10 +147,10 @@ export function genericLiteralBodyError(
     symbol,
     declaredType,
     valueType,
-    'generic-literal-body',
+    'generic-overload-literal',
     [
       `Symbol "${symbol}"`,
-      `The declared type "${declaredType}" is generic. ${GENERIC_FUNCTION_LITERAL_MESSAGE}`,
+      `The declared type "${declaredType}" is a generic overload set. ${GENERIC_OVERLOAD_LITERAL_MESSAGE}`,
     ].join('\n|   ')
   );
 }
@@ -133,16 +180,15 @@ export function typeCompatibilityErrorValue(
   ce: ComputeEngine,
   e: TypeCompatibilityError
 ): Expression {
-  // D7 keeps the `incompatible-type` code and its three-part payload (Cortex's
-  // diagnostic machinery keys on both), but carries the DEDICATED sentence in
-  // the `where` slot so the message is the same on every route — a host throw,
-  // an `Assign`/`Declare` error value, and the function-literal annotation
-  // rejection all read alike.
-  if (e.kind === 'generic-literal-body')
+  // G11 keeps the `incompatible-type` code and its three-part payload
+  // (Cortex's diagnostic machinery keys on both), but carries the DEDICATED
+  // sentence in the `where` slot so the message is the same on every route —
+  // a host throw and an `Assign`/`Declare` error value read alike.
+  if (e.kind === 'generic-overload-literal')
     return ce.typeError(
       e.declaredType.type,
       e.valueType,
-      `${e.symbol}: ${GENERIC_FUNCTION_LITERAL_MESSAGE}`
+      `${e.symbol}: ${GENERIC_OVERLOAD_LITERAL_MESSAGE}`
     );
   return ce.typeError(e.declaredType.type, e.valueType, e.symbol);
 }

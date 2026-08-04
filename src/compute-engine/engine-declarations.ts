@@ -19,6 +19,7 @@ import {
 } from '../common/type/instantiate.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import {
+  assertSingleArmPolytype,
   EffectContractError,
   matchesDeclaredTypeAxes,
   signatureEffects,
@@ -28,7 +29,6 @@ import {
 import {
   constructorAssignmentError,
   declaredTypeError,
-  genericLiteralBodyError,
 } from './boxed-expression/type-compatibility-error.js';
 import { osaDistance } from '../common/fuzzy-string-match.js';
 import { isPolymorphicType } from '../common/type/instantiate.js';
@@ -73,6 +73,7 @@ import {
   functionLiteralDeclaredEffects,
   functionLiteralParameters,
   functionLiteralReturnType,
+  mentionsQuantifiedVariable,
 } from './boxed-expression/function-literal.js';
 
 export function lookupDefinition(
@@ -677,12 +678,16 @@ export function declareFn(
       const declaredType =
         def.type instanceof BoxedType ? def.type.type : parseType(def.type);
       if (hasFunctionSignature(declaredType)) {
-        // D7 — see the assign path; checked before the arity/return
-        // reconciliation, which would otherwise ascribe an OPEN result type.
+        // G11 (§2.4) — see the assign path. Checked FIRST, ahead of the
+        // arity/effects assertions: an overload set with a generic arm is not
+        // a shape one erased body can implement, so an arity diagnostic for it
+        // would name the wrong problem. A SINGLE generic signature proceeds
+        // through the ordinary reconciliation below, whose return step knows
+        // not to ascribe a variable-mentioning result (§2.4).
         if (isPolymorphicType(declaredType))
-          throw genericLiteralBodyError(
+          assertSingleArmPolytype(
             id,
-            (def.value as Expression).type,
+            def.value as Expression,
             ce.type(declaredType)
           );
         // The literal must be arity-compatible with the declared signature
@@ -875,19 +880,18 @@ export function assignFn(
     if (literal !== undefined) {
       const declaredType = def.value.type;
 
-      // D7 (§4.1 of the type-variables design): a generic declaration cannot
-      // take a function-literal body in v1. Checked FIRST — before arity
-      // reconciliation, which would otherwise try to ascribe the declaration's
-      // OPEN result type to the body and throw `unresolved-type-variable`.
-      // `canonicalFunctionLiteral` LIFTS non-literals (a function-typed
-      // SYMBOL comes back as a literal), so discriminate on the original
-      // operand: a symbol has no "body" — it gets the honest D3 rejection
-      // (`Ground <: Poly` is false), not the literal-specific diagnostic.
+      // A generic declaration DOES take a function-literal body (the
+      // generic-literals milestone, §2.4): the literal installs under the
+      // declared polytype and every call instantiates it. Two things still run
+      // first. `canonicalFunctionLiteral` LIFTS non-literals (a function-typed
+      // SYMBOL comes back as a literal), so discriminate on the ORIGINAL
+      // operand: a symbol has no body to erase — it gets the honest D3
+      // rejection (`Ground <: Poly` is false). And G11 rejects a generic
+      // OVERLOAD SET, ahead of the arity/effects assertions below.
       if (declaredType.isPolymorphic) {
         const orig = ce.expr(arg2);
-        if (isSymbol(orig))
-          throw declaredTypeError(id, orig, declaredType);
-        throw genericLiteralBodyError(id, literal.type, declaredType);
+        if (isSymbol(orig)) throw declaredTypeError(id, orig, declaredType);
+        assertSingleArmPolytype(id, literal, declaredType);
       }
 
       // The literal must be arity-compatible with the declared signature (see
@@ -1004,9 +1008,13 @@ export function assignFn(
       if (literal !== undefined) {
         const declaredType = def.operator.signature;
 
-        // D7 — see the value-slot route above.
+        // G11 — see the value-slot route above. The literal then installs as a
+        // VALUE carrying the DECLARED polytype (the same representation this
+        // route already produces for a ground declared signature), so calls
+        // dispatch through the polytype-aware `validateArguments` / result
+        // instantiation exactly as a built-in generic operator's do.
         if (declaredType.isPolymorphic)
-          throw genericLiteralBodyError(id, literal.type, declaredType);
+          assertSingleArmPolytype(id, literal, declaredType);
 
         // The literal must be arity-compatible with the declared signature
         // (mirrors the value-slot path); otherwise a declared-arity call would
@@ -1250,6 +1258,14 @@ export function assignValueAsOperatorDef(
 function functionLiteralHasAnnotation(literal: Expression): boolean {
   if (functionLiteralReturnType(literal) !== undefined) return true;
   if (functionLiteralDeclaredEffects(literal) !== undefined) return true;
+  // A GENERIC literal (a whole-signature `forall` marker) is the strongest
+  // annotation there is, yet it declares NO return type (the result mentions a
+  // variable, so `functionLiteralReturnType` joins the wide-result convention)
+  // and, under erasure, no annotated parameter either. Without this arm
+  // `ce.assign('f', genericLiteral)` fell to the inferred-signature path, which
+  // reads the ascribed BODY type and produced the nonsense
+  // `(unknown) -> forall T. (x: T) -> T`.
+  if (isPolymorphicType(literal.type.type)) return true;
   return functionLiteralParameters(literal).some((p) => p.type !== undefined);
 }
 
@@ -1401,6 +1417,20 @@ export function reconcileFunctionLiteralReturn(
   declaredType: Type
 ): Expression {
   if (!isFunction(literal, 'Function')) return literal;
+
+  // A declared result that MENTIONS a quantified variable has nothing ground
+  // to ascribe (§2.4, G4): the body's return stays inferred and call-site
+  // result types come from the INSTANTIATED signature instead. Decided BEFORE
+  // `functionResult`, which hands back the honest-but-useless-here `unknown`
+  // on a polytype arm. A ground result under a `forall`
+  // (`forall T. (T) -> boolean`) reconciles exactly as it does under a ground
+  // declaration.
+  if (
+    typeof declaredType === 'object' &&
+    declaredType.kind === 'signature' &&
+    mentionsQuantifiedVariable(declaredType.result, declaredType)
+  )
+    return literal;
 
   // The declaration must be a function signature with a result type.
   const declaredResult = functionResult(declaredType);

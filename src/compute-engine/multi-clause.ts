@@ -10,6 +10,7 @@ import {
   unionEffectSets,
 } from '../common/type/effects.js';
 import { isSubtype, provablyDisjoint } from '../common/type/subtype.js';
+import { isPolymorphicType } from '../common/type/instantiate.js';
 
 import type {
   BoxedDefinition,
@@ -32,7 +33,10 @@ import {
   isValueDef,
   updateDef,
 } from './boxed-expression/utils.js';
-import { functionLiteralDeclaredEffects } from './boxed-expression/function-literal.js';
+import {
+  functionLiteralDeclaredEffects,
+  functionLiteralParameters,
+} from './boxed-expression/function-literal.js';
 import { apply, lookup } from './function-utils.js';
 import { isMintedConstructor } from './type-constructors.js';
 import { reconcileFunctionLiteralReturn } from './engine-declarations.js';
@@ -104,7 +108,10 @@ export function multiClauseState(
 
 export class ClauseDefinitionError extends Error {
   constructor(
-    readonly code: 'invalid-clause-definition' | 'incompatible-clause-effects',
+    readonly code:
+      | 'invalid-clause-definition'
+      | 'incompatible-clause-effects'
+      | 'generic-clause-unsupported',
     message: string
   ) {
     super(message);
@@ -215,7 +222,65 @@ function declaredSignatureOf(
     t = def.operator.signature.type;
   }
   if (typeof t !== 'object' || t.kind !== 'signature') return undefined;
+  // G2 (generic-function-literals design §2.6, rule 4): a `typeParams`-carrying
+  // declaration is NOT an arm contract clause storage can check — every
+  // `assertClauseFitsDeclared` comparison below would read the OPEN pattern
+  // `T` as a ground type. Reporting "no declaration" hands the single-clause
+  // case to `ce.assign`, which installs it through the generic boundary
+  // (§2.4); a SECOND clause is refused outright by the G2 gate in
+  // `defineFunctionClause`, so no polytype ever reaches clause storage.
+  if (isPolymorphicType(t)) return undefined;
   return t;
+}
+
+/** True when a canonical `Function` literal states its own `forall` clause
+ * (the E1/E2/E4 spellings) — i.e. the incoming clause is GENERIC. */
+function isGenericClauseLiteral(literal: Expression): boolean {
+  return isPolymorphicType(literal.type.type);
+}
+
+/** True when a clause carries a value-pattern (literal) parameter — a
+ * parameter wearing the generated `literalParam_` name. Read from the NAME,
+ * not from the annotation: erasure (§2.3) drops a quantified position's own
+ * annotation, so by the time the clause arrives here the value type may be
+ * gone while the generated name remains. */
+function hasLiteralPatternParam(literal: Expression): boolean {
+  return functionLiteralParameters(literal).some((p) =>
+    isLiteralParamName(p.name)
+  );
+}
+
+/**
+ * True when `def` already HOLDS a generic function definition — a stored
+ * generic literal, not a bare generic declaration (which is the ordinary
+ * declare-then-define shape and delegates to `ce.assign`).
+ */
+function holdsGenericDefinition(def: BoxedDefinition | undefined): boolean {
+  if (def === undefined) return false;
+  const state = multiClauseState(def);
+  if (state !== undefined)
+    return state.clauses.some((c) => isPolymorphicType(c.signature));
+  if (isValueDef(def))
+    return (
+      def.value.value !== undefined && isPolymorphicType(def.value.type.type)
+    );
+  if (isOperatorDef(def))
+    return (
+      def.operator.evaluate !== undefined &&
+      isPolymorphicType(def.operator.signature.type)
+    );
+  return false;
+}
+
+/** True when `def` already holds a function BODY — clause state, a stored
+ * value, or an evaluate handler. An incoming clause onto such a binding is
+ * clause 2 (or a replacement of clause 1), i.e. multi-clause territory. */
+function holdsDefinition(def: BoxedDefinition | undefined): boolean {
+  if (def === undefined) return false;
+  if (multiClauseState(def) !== undefined) return true;
+  if (isValueDef(def)) return def.value.value !== undefined;
+  if (isOperatorDef(def)) return def.operator.evaluate !== undefined;
+  return false;
 }
 
 /** The declared type of positional parameter `i` (required, then optional,
@@ -342,6 +407,37 @@ export function defineFunctionClause(
         `"${id}" is the constructor of a declared type; a type's constructor cannot be defined by clauses`
       );
   }
+
+  // G2 (generic-function-literals design §2.6, RULED — reject). Generic
+  // clauses in a clause SET are out of scope for this milestone, in BOTH
+  // directions, and the gate runs BEFORE any signature-assembly diagnostic so
+  // the rejection names the real problem. A plain single-clause generic
+  // definition is NOT rejected here: it falls through to the §4.2
+  // single-clause rule below, which delegates to `ce.assign` and installs
+  // through the generic declaration boundary (§2.4).
+  //
+  // Rule 1 — clause slot + literal parameter(s) (`function f<T>(0) { … }`) — is
+  // refused at the FIRST definition, so it is deliberately NOT gated on
+  // `existing`: value-clause machinery is multi-clause territory whether or not
+  // anything is bound yet. Without it the §4.2 single-clause shortcut below
+  // hands the literal to `ce.assign` unchecked, and erasure has already dropped
+  // the value annotation at a quantified marker position — the value guard
+  // would silently vanish.
+  if (isGenericClauseLiteral(literal) && hasLiteralPatternParam(literal))
+    throw new ClauseDefinitionError(
+      'generic-clause-unsupported',
+      `"${id}" cannot combine a generic clause with a literal parameter; generic functions are single-clause`
+    );
+  if (holdsGenericDefinition(existing))
+    throw new ClauseDefinitionError(
+      'generic-clause-unsupported',
+      `"${id}" is defined by a generic function; it cannot be extended with clauses`
+    );
+  if (isGenericClauseLiteral(literal) && holdsDefinition(existing))
+    throw new ClauseDefinitionError(
+      'generic-clause-unsupported',
+      `A generic clause cannot be added to "${id}", which is already defined; generic functions are single-clause`
+    );
 
   // §4.3a — declare-then-define (the prescribed shape for a recursive
   // definition). When `id` carries an author-declared signature, it is

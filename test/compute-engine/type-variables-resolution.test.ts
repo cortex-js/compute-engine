@@ -181,23 +181,30 @@ describe('the value-arm JOIN runs on INSTANTIATED arms (§4.2)', () => {
   });
 });
 
-describe('D7 names a function-literal body only when there IS one', () => {
+// SUPERSEDED by the generic-function-literals milestone (M1, phase 2): a
+// function-literal body under a generic declaration now INSTALLS on every
+// route (`docs/plans/2026-08-04-generic-function-literals-design.md` §2.4);
+// see `test/compute-engine/generic-function-literals.test.ts`. What survives
+// here is the discrimination the D7 gate introduced: a value with NO body — a
+// function-typed SYMBOL — is still an honest `Ground <: Poly` rejection.
+describe('a generic declaration accepts a BODY, never a ground function value', () => {
   const D7 = /generic declaration cannot take a function-literal body/;
 
-  test('a `Function` literal still gets the D7 diagnostic on `ce.assign`', () => {
+  test('a `Function` literal installs on `ce.assign`', () => {
     const ce = fresh();
     ce.declare('f', 'forall T. (T) -> T');
-    expect(() => ce.assign('f', ce.parse('x \\mapsto x'))).toThrow(D7);
+    expect(() => ce.assign('f', ce.parse('x \\mapsto x'))).not.toThrow();
+    expect(ce.box(['f', 5]).evaluate().toString()).toBe('5');
   });
 
-  test('…and on the `Assign` OPERATOR route, as an error value', () => {
+  test('…and on the `Assign` OPERATOR route', () => {
     const ce = fresh();
     ce.declare('f', 'forall T. (T) -> T');
     const v = ce
       .box(['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']])
       .evaluate();
-    expect(v.toString()).toContain('incompatible-type');
-    expect(v.toString()).toMatch(D7);
+    expect(v.toString()).not.toContain('incompatible-type');
+    expect(ce.box(['f', 5]).evaluate().toString()).toBe('6');
   });
 
   test('a GROUND function symbol gets a plain `incompatible-type` instead', () => {

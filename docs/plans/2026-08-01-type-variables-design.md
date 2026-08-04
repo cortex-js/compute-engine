@@ -2,8 +2,8 @@
 
 Status: **draft v4 — D1–D12 RULED (2026-08-01, approved as
 recommended); v2 milestone (generic literals + `function f<T>(…)`
-sugar) RULED §9.1; open: D13's encoding half (joint with the effects
-Stage-3 marker case)**
+sugar) IMPLEMENTED 2026-08-04, see §9.1; open: D13's encoding half
+(joint with the effects Stage-3 marker case)**
 Date: 2026-08-01 (v2 addressed the 27-finding dual review in
 `docs/scratch/2026-08-01-type-variables-design_SPEC_REVIEW.md`; v3
 integrated inline review R1–R11 and the Option-C syntax ruling; v4 folds
@@ -882,6 +882,12 @@ Expected argument 1 of type `indexed_collection`; got `set<integer>`.
 ## 9. The v2 milestone, non-goals (v1), and future work
 
 ### 9.1 v2 milestone (RULED 2026-08-01): generic function literals + sugared definition syntax
+
+**Status: IMPLEMENTED 2026-08-04** —
+[`2026-08-04-generic-function-literals-design.md`](./2026-08-04-generic-function-literals-design.md)
+is the milestone's own (ratified) spec and the record of what shipped. Read it
+before this section: M1 was ruled to be **erased-body canonicalization**, none
+of the three candidate approaches sketched below.
 
 Promoted from future work by author direction. v2 delivers **generic
 user functions with inline bodies**, in both spellings:

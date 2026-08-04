@@ -5,6 +5,7 @@ import type {
   Type,
 } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
+import { freeTypeVariables } from '../../common/type/instantiate.js';
 import {
   isGroupedTypeText,
   signatureEffects,
@@ -184,8 +185,10 @@ export function functionLiteralReturnMarker(
  *
  * **Decomposition predicate**: the marker's type operand decomposes as a full
  * signature iff it parses to a signature AND that signature carries an effect
- * set — the stated-empty `[]` a `pure` keyword builds counts. A signature
- * WITHOUT effects is deliberately NOT decomposed: `["Typed", body,
+ * set — the stated-empty `[]` a `pure` keyword builds counts — OR a non-empty
+ * `forall` clause (the generic-literal milestone: a polytype in the marker slot
+ * is ALWAYS a full signature, since a polytype can only be a signature). A
+ * signature with neither is deliberately NOT decomposed: `["Typed", body,
  * "(integer) -> integer"]` keeps its historical reading, a function whose
  * RESULT is a function.
  *
@@ -209,7 +212,34 @@ export function functionLiteralDeclaredSignature(
   const t = parseTypeOperand(marker.op2);
   if (t === undefined || typeof t === 'string' || t.kind !== 'signature')
     return undefined;
-  return signatureEffects(t) !== undefined ? t : undefined;
+  return signatureEffects(t) !== undefined || isQuantifiedSignature(t)
+    ? t
+    : undefined;
+}
+
+/** True when `t` carries a non-empty `forall` clause. */
+function isQuantifiedSignature(t: FunctionSignature): boolean {
+  return (t.typeParams?.length ?? 0) > 0;
+}
+
+/**
+ * True when `t` — a component of `sig` (an argument type or the result) —
+ * mentions one of the variables `sig`'s `forall` clause quantifies.
+ *
+ * Read on the COMPONENT, not on the whole signature: the clause-carrying
+ * signature is CLOSED, so `freeTypeVariables` of it is empty by construction.
+ * A component looked at on its own has those same occurrences FREE, so the
+ * question is whether any of them is a name the clause declares.
+ */
+export function mentionsQuantifiedVariable(
+  t: Type,
+  sig: FunctionSignature
+): boolean {
+  const params = sig.typeParams;
+  if (params === undefined || params.length === 0) return false;
+  const free = freeTypeVariables(t);
+  if (free.size === 0) return false;
+  return params.some((p) => free.has(p.name));
 }
 
 /** The arrow-level effects declared by a full-signature return marker, or
@@ -230,11 +260,18 @@ export function functionLiteralDeclaredEffects(
  * signature's RESULT — except under the wide-result convention (mirroring
  * `desugarSignatureString`'s `isWide`): a result of `unknown`/`any` declares
  * no return type at all, so the return stays inferred from the body and only
- * the effects are declared (`function tick() scope { … }`). */
+ * the effects are declared (`function tick() scope { … }`).
+ *
+ * A result that mentions a QUANTIFIED variable (`forall T. (T) -> T`) joins
+ * that same wide-result convention and declares no return type: under erasure
+ * there is nothing ground to ascribe, and call-site result types come from the
+ * INSTANTIATED signature instead. An open type must never leave this accessor
+ * — it would reach the §4.2 ground-invariant tripwires. */
 export function functionLiteralReturnType(expr: Expression): Type | undefined {
   const declared = functionLiteralDeclaredSignature(expr);
   if (declared !== undefined) {
     const result = declared.result;
+    if (mentionsQuantifiedVariable(result, declared)) return undefined;
     return result === 'unknown' || result === 'any' ? undefined : result;
   }
   const marker = functionLiteralReturnMarker(expr);

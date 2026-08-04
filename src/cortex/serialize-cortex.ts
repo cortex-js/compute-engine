@@ -15,6 +15,7 @@ import {
 import { splitGraphemes } from '../common/grapheme-splitter.js';
 import { isLiteralParamName } from '../math-json/symbols.js';
 import { parseType } from '../common/type/parse.js';
+import type { Type, TypeResolver } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
 import { isGroupedTypeText, signatureEffects } from '../common/type/utils.js';
 import { effectSetToString } from '../common/type/effects.js';
@@ -57,6 +58,32 @@ export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
   fractionalDigits: 'max',
   notation: 'auto',
   avoidExponentsInRange: [-7, 20],
+};
+
+/**
+ * A PERMISSIVE type resolver: every identifier resolves, as a bare nominal
+ * reference to itself.
+ *
+ * The serializer re-parses a `Typed` marker's type text only to DECOMPOSE it
+ * (does it carry effects or a `forall` clause? what are its argument types?)
+ * and then writes the pieces back out with `typeToString`, so names only have
+ * to round-trip TEXTUALLY — validating them is the parser's and the engine's
+ * job, and there is no type environment here to validate against. Without
+ * this, a signature naming a user-declared type (`function f<T>(x: T, y: Tx)`
+ * with `type Tx = integer`) throws `Unknown type "Tx"` and the definition
+ * silently loses its sugared form.
+ */
+const PERMISSIVE_TYPE_RESOLVER: TypeResolver = {
+  get names(): string[] {
+    return [];
+  },
+  forward: () => undefined,
+  resolve: (name: string) => ({
+    kind: 'reference',
+    name,
+    alias: false,
+    def: undefined,
+  }),
 };
 
 /**
@@ -527,7 +554,7 @@ export function serializeCortex(
       const text = typeText(operand(expr, 2));
       if (text !== null && !isGroupedTypeText(text)) {
         try {
-          const t = parseType(text);
+          const t = parseType(text, PERMISSIVE_TYPE_RESOLVER);
           if (
             typeof t !== 'string' &&
             t.kind === 'signature' &&
@@ -870,11 +897,12 @@ export function serializeCortex(
   // `["Typed", body, type]` is recognized here; the engine's canonical
   // Block-embedded ascription is not produced by the Cortex parser.
   //
-  // A marker holding a FULL SIGNATURE that carries an effect set decomposes
-  // back into the surface `(params) ‹effects› -> ‹result›` — the same
+  // A marker holding a FULL SIGNATURE that carries an effect set — OR a
+  // non-empty `forall` clause (the M2 sugared generic form) — decomposes back
+  // into the surface `<clause>(params) ‹effects› -> ‹result›`: the same
   // decomposition predicate the engine applies in
   // `boxed-expression/function-literal.ts`, so the two never disagree about
-  // what a marker means. A signature WITHOUT effects keeps its historical
+  // what a marker means. A signature with neither keeps its historical
   // reading: a return type that happens to be a function. Under the wide-result
   // convention a result of `unknown`/`any` declares no return type at all
   // (`function tick() scope { … }`), so it serializes with no arrow.
@@ -884,10 +912,19 @@ export function serializeCortex(
     bodyExpr: MathJsonExpression | null;
     retType: string | null;
     specifier: string | null;
+    /** The rendered `forall` declarations (`T, U: number`), or `null`. */
+    typeParams: string | null;
+    /** The marker signature's argument TYPES, positionally aligned with the
+     * literal's parameter operands. Marker argument NAMES are cosmetic — the
+     * literal's operands stay the names of record — so only the types are
+     * recovered, and only for a quantified marker, whose quantified parameters
+     * were erased to bare symbols at lowering. */
+    argTypes: readonly Type[];
   } => {
+    const none = { typeParams: null, argTypes: [] as readonly Type[] };
     const op1 = operand(fn, 1);
     if (operator(op1) !== 'Typed')
-      return { bodyExpr: op1, retType: null, specifier: null };
+      return { bodyExpr: op1, retType: null, specifier: null, ...none };
     const bodyExpr = operand(op1, 1);
     const text = typeText(operand(op1, 2));
     // A fully parenthesized spelling is a GROUPED type (ruled 2026-08-01):
@@ -898,16 +935,34 @@ export function serializeCortex(
     // serializes back verbatim through the plain return-type path below.
     if (text !== null && !isGroupedTypeText(text)) {
       try {
-        const t = parseType(text);
+        // Parsed with the PERMISSIVE resolver: a signature may name a
+        // user-declared type (`type Tx = integer` … `(x: T, y: Tx) -> T`),
+        // which a resolver-less parse rejects — the decomposition would fall
+        // into the catch below and the definition would lose its sugared form.
+        const t = parseType(text, PERMISSIVE_TYPE_RESOLVER);
         if (typeof t !== 'string' && t.kind === 'signature') {
           const effects = signatureEffects(t);
-          if (effects !== undefined) {
+          const quantifiers = t.typeParams ?? [];
+          if (effects !== undefined || quantifiers.length > 0) {
             const result = t.result;
             const isWide = result === 'unknown' || result === 'any';
             return {
               bodyExpr,
               retType: isWide ? null : typeToString(result),
-              specifier: effectSetToString(effects),
+              specifier:
+                effects !== undefined ? effectSetToString(effects) : null,
+              typeParams:
+                quantifiers.length > 0
+                  ? quantifiers
+                      .map((p) =>
+                        p.bound !== undefined
+                          ? `${p.name}: ${typeToString(p.bound)}`
+                          : p.name
+                      )
+                      .join(', ')
+                  : null,
+              argTypes:
+                quantifiers.length > 0 ? (t.args ?? []).map((a) => a.type) : [],
             };
           }
         }
@@ -915,7 +970,7 @@ export function serializeCortex(
         // Not a parseable type: keep the plain return-type reading.
       }
     }
-    return { bodyExpr, retType: text, specifier: null };
+    return { bodyExpr, retType: text, specifier: null, ...none };
   };
 
   // A single function-literal parameter: `x` (bare), `x: integer` (typed), or
@@ -951,10 +1006,20 @@ export function serializeCortex(
     t === 'false' ||
     t in CORTEX_VALUE_SPELLING;
 
-  const serializeParam = (p: MathJsonExpression): FormattingBlock => {
+  const serializeParam = (
+    p: MathJsonExpression,
+    markerType?: Type
+  ): FormattingBlock => {
     const typed = operator(p) === 'Typed';
     const nameSym = typed ? symbol(operand(p, 1)) : symbol(p);
-    const t = typed ? typeText(operand(p, 2)) : null;
+    // A BARE operand at a quantified position carries no type of its own (it
+    // was erased at lowering); its type is the positionally aligned marker
+    // argument. An operand that kept its own annotation keeps it verbatim.
+    const t =
+      (typed ? typeText(operand(p, 2)) : null) ??
+      (markerType !== undefined && markerType !== 'unknown'
+        ? typeToString(markerType)
+        : null);
     if (
       nameSym !== null &&
       isLiteralParamName(nameSym) &&
@@ -976,8 +1041,16 @@ export function serializeCortex(
     return fmt.text(t !== null ? `${nameStr}: ${t}` : nameStr);
   };
 
-  const serializeParamList = (params: MathJsonExpression[]): FormattingBlock =>
-    fmt.fencedList('(', fmt.separator(','), ')', params.map(serializeParam));
+  const serializeParamList = (
+    params: MathJsonExpression[],
+    markerTypes: readonly Type[] = []
+  ): FormattingBlock =>
+    fmt.fencedList(
+      '(',
+      fmt.separator(','),
+      ')',
+      params.map((p, i) => serializeParam(p, markerTypes[i]))
+    );
 
   // Reconstruct a named function definition from `f` and its `Function`
   // literal: `f(params) ‹effects› -> ret = body`, or
@@ -991,13 +1064,16 @@ export function serializeCortex(
     const nameSym = symbol(name);
     const nameStr = nameSym !== null ? escapeSymbol(nameSym) : '';
     const params = operands(fn).slice(1);
-    const { bodyExpr, retType, specifier } = fnLiteralParts(fn);
+    const { bodyExpr, retType, specifier, typeParams, argTypes } =
+      fnLiteralParts(fn);
     const specPart = specifier !== null ? ` ${specifier}` : '';
     const retPart = retType !== null ? ` -> ${retType}` : '';
+    // The M2 type-parameter clause sits between the name and the `(`.
+    const clausePart = typeParams !== null ? `<${typeParams}>` : '';
     if (operator(bodyExpr) === 'Block') {
       return fmt.line(
-        `function ${nameStr}`,
-        serializeParamList(params),
+        `function ${nameStr}${clausePart}`,
+        serializeParamList(params, argTypes),
         `${specPart}${retPart} `,
         fmt.fencedList(
           '{',
@@ -1010,6 +1086,20 @@ export function serializeCortex(
     // The math form has no specifier-without-arrow spelling — `f(x) random = 5`
     // is an expression, not a definition — so a wide result is spelled out
     // (`-> unknown`, which re-parses to the same marker signature).
+    // The math form `f<T>(x) = …` is NOT a definition — `f<T>(x)` is genuinely
+    // ambiguous with a relational expression, so the grammar does not claim it
+    // (§3.1). A generic definition therefore always serializes in the
+    // `function` block form, wrapping a non-`Block` body in braces.
+    if (typeParams !== null) {
+      return fmt.line(
+        `function ${nameStr}${clausePart}`,
+        serializeParamList(params, argTypes),
+        `${specPart}${retPart} `,
+        fmt.fencedList('{', fmt.separator(';'), '}', [
+          serializeExpression(bodyExpr),
+        ])
+      );
+    }
     const mathRetPart =
       retType !== null ? retPart : specifier !== null ? ' -> unknown' : '';
     return fmt.line(

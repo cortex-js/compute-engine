@@ -23,8 +23,10 @@ import {
   sym,
 } from './boxed-expression/type-guards.js';
 import {
+  functionLiteralDeclaredSignature,
   functionLiteralParameterName,
   functionLiteralParameterType,
+  mentionsQuantifiedVariable,
   resolveFunctionLiteralTypes,
 } from './boxed-expression/function-literal.js';
 import { errorValue } from './boxed-expression/error-value.js';
@@ -39,10 +41,17 @@ import {
 } from './boxed-expression/provisional-application.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
 import { isPureComputedEffects } from '../common/type/effects.js';
-import type { Type } from '../common/type/types.js';
+import type { FunctionSignature, Type } from '../common/type/types.js';
 import { parseType } from '../common/type/parse.js';
 import { isPolymorphicType } from '../common/type/instantiate.js';
-import { GENERIC_FUNCTION_LITERAL_MESSAGE } from './boxed-expression/type-compatibility-error.js';
+import {
+  GENERIC_ANNOTATION_COVERAGE_MESSAGE,
+  GENERIC_PARTIAL_APPLICATION_MESSAGE,
+  INVALID_GENERIC_MARKER_MESSAGE,
+  TYPE_VARIABLE_INTRODUCTION_MESSAGE,
+} from './boxed-expression/type-compatibility-error.js';
+import { substituteDeclaredBounds } from './boxed-expression/generic-instantiation.js';
+import { isSubtype } from '../common/type/subtype.js';
 import { typeToString } from '../common/type/serialize.js';
 import { signatureEffects } from '../common/type/utils.js';
 
@@ -337,6 +346,26 @@ export function canonicalFunctionLiteralArguments(
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
 
+  // ── The E2 pre-pass (generic-literals design §2.3), ordered FIRST ──────────
+  //
+  // A full-signature `forall` marker in the body slot is the literal's contract
+  // of record. It has to be read BEFORE the parameter operands are normalized:
+  // a hand-authored E2 (and the M2 lowering) may carry `["Typed", x, "'T'"]`
+  // parameters, and `T` is not a declared type name — type resolution would
+  // fail on it below. Under the erasure ruling (G1) those annotations are
+  // redundant anyway: the marker states the parameter types, and quantified
+  // positions are erased so the body canonicalizes exactly as an untyped
+  // literal's does.
+  const erased = eraseGenericParameters(ce, ops);
+  let genericMarker = false;
+  if (erased !== undefined) {
+    // A well-formedness violation is reported in place; otherwise continue with
+    // the erased operands.
+    if (erased.error !== undefined) return erased.error;
+    ops = erased.ops!;
+    genericMarker = true;
+  }
+
   // Signature-string sugar (typed-literals design §3.2/§10):
   // `["Function", body, "'(n: integer) -> complex'"]` desugars into the
   // structural form — each named argument becomes a `["Typed", name, type]`
@@ -346,19 +375,11 @@ export function canonicalFunctionLiteralArguments(
   // optional/variadic markers (those need `makeLambda` arity support);
   // anything else falls through to the standard expected-a-symbol error.
   if (ops.length === 2 && isString(ops[1])) {
-    // §4.1/D7: a `forall` clause is not accepted on a function-literal
-    // annotation in v1 — a literal cannot introduce type variables (the typed
-    // literal pipeline installs parameter types BEFORE body canonicalization,
-    // so an open `T` would reach `Add` and the algebra helpers, violating the
-    // §4.2 ground invariant). A polytype signature STRING parses to a
-    // signature carrying `typeParams`, so it would otherwise flow into the
-    // sugar path below: reject it here with the D7 diagnostic rather than the
-    // generic `expected-a-symbol` the sugar's decline would produce.
-    if (isPolytypeString(ce, ops[1].string))
-      return ce._fn('Function', [
-        ops[0],
-        ce.error(GENERIC_FUNCTION_LITERAL_MESSAGE, ops[1].string),
-      ]);
+    // A `forall` clause IS accepted here (generic-literals design §2.2, E1):
+    // the string parses to a signature carrying `typeParams` and desugars into
+    // the E2 form — bare symbols at the quantified positions (erasure, G1) and
+    // the full signature as the body's ascription — which then re-enters this
+    // function and takes the E2 pre-pass above.
     const desugared = desugarSignatureString(ce, ops[0], ops[1].string);
     if (desugared !== undefined)
       return canonicalFunctionLiteralArguments(ce, desugared);
@@ -373,10 +394,11 @@ export function canonicalFunctionLiteralArguments(
     if (isFunction(x, 'Typed') && isSymbol(x.op1)) {
       const normalized = normalizeTypedParameter(ce, x);
       // A `forall` clause on a PARAMETER annotation is a rank-2 spelling, and
-      // is rejected with the same D7 diagnostic (§4.1).
+      // stays rejected (G6, §2.2): a type variable enters a literal only
+      // through a whole-signature clause.
       const t = functionLiteralParameterType(normalized);
       if (t !== undefined && isPolymorphicType(t))
-        return ce.error(GENERIC_FUNCTION_LITERAL_MESSAGE, x.toString());
+        return ce.error(TYPE_VARIABLE_INTRODUCTION_MESSAGE, x.toString());
       return normalized;
     }
     return ce.error('expected-a-symbol', x.toString());
@@ -401,10 +423,18 @@ export function canonicalFunctionLiteralArguments(
   let returnTypeOp: Expression | undefined;
   if (isFunction(bodyOp, 'Typed')) {
     returnTypeOp = normalizeTypeOperand(ce, bodyOp.op2);
-    // A `forall` clause on the RETURN-type ascription — same D7 rejection.
-    if (isString(returnTypeOp) && isPolytypeString(ce, returnTypeOp.string))
+    // A polytype in the body slot is ALWAYS a full signature (§2.2), and a
+    // well-formed one was already recognized — and its quantified parameter
+    // positions erased — by the E2 pre-pass above. Anything polymorphic still
+    // arriving here is not a single signature (an overload INTERSECTION with a
+    // generic arm), which is not a shape a literal can implement.
+    if (
+      !genericMarker &&
+      isString(returnTypeOp) &&
+      isPolytypeString(ce, returnTypeOp.string)
+    )
       return ce._fn('Function', [
-        ce.error(GENERIC_FUNCTION_LITERAL_MESSAGE, returnTypeOp.string),
+        ce.error(INVALID_GENERIC_MARKER_MESSAGE, returnTypeOp.string),
         ...params,
       ]);
     bodyOp = bodyOp.op1;
@@ -730,6 +760,114 @@ function rebindParameters(
   );
 }
 
+/**
+ * The full-signature POLYTYPE a `Function` literal's body-slot marker declares
+ * (`["Function", ["Typed", body, "'forall T. (x: T) -> T'"], "x"]`), or
+ * `undefined` when the body slot carries no such marker.
+ *
+ * Deliberately narrower than `isPolytypeString`: only a single SIGNATURE is a
+ * shape a literal can implement. An overload intersection with a generic arm
+ * parses as a polytype too, and is left for the return-slot rejection.
+ */
+function bodySlotPolytype(
+  ce: ComputeEngine,
+  body: Expression | undefined
+): FunctionSignature | undefined {
+  if (!isFunction(body, 'Typed')) return undefined;
+  const op = body.op2;
+  if (op === undefined) return undefined;
+  const s = isString(op) ? op.string : sym(op);
+  if (s === undefined || !s.includes('forall')) return undefined;
+  let t: Type;
+  try {
+    t = parseType(s, ce._typeResolver);
+  } catch {
+    return undefined;
+  }
+  if (typeof t === 'string' || t.kind !== 'signature') return undefined;
+  return isPolymorphicType(t) ? t : undefined;
+}
+
+/**
+ * The E2 pre-pass (generic-literals design §2.3): validate a full-signature
+ * `forall` marker in the body slot and ERASE the parameter annotations it
+ * quantifies.
+ *
+ * Returns `undefined` when there is no such marker (the overwhelmingly common
+ * case — one `isFunction(_, 'Typed')` test), `{ error }` when the marker is not
+ * well-formed, and `{ ops }` with the erased operands otherwise.
+ *
+ * **Well-formedness.** The marker is the literal's contract of record, not a
+ * cosmetic mirror, so its shape is checked: a plain signature (no optional or
+ * variadic arguments in v1) with exactly as many arguments as the literal has
+ * parameters. **Positional mapping is authoritative** — the marker's argument
+ * NAMES are cosmetic, the literal's operand names stay the names of record
+ * (the `docs/EFFECTS-MODEL.md` mirror rule).
+ *
+ * **Erasure (G1).** A parameter whose marker argument type mentions a
+ * quantified variable loses its own `Typed` annotation and becomes a bare
+ * symbol, so the body canonicalizes exactly as an untyped literal's does and no
+ * type variable ever becomes the type of a symbol (the §4.2 ground invariant).
+ * A GROUND annotation at a ground marker position is kept and enforced as
+ * usual; a ground annotation at a quantified position is dropped in favour of
+ * the marker (single source of truth) — but only once it is known to COVER the
+ * variable's bound (§2.4 rule 4). The declaration boundary cannot answer that
+ * question on this route: it reads the literal's parameters AFTER erasure, by
+ * which point a contradicting annotation no longer exists.
+ */
+function eraseGenericParameters(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): { ops?: ReadonlyArray<Expression>; error?: Expression } | undefined {
+  const sig = bodySlotPolytype(ce, ops[0]);
+  if (sig === undefined) return undefined;
+
+  const params = ops.slice(1);
+  const args = sig.args ?? [];
+  if (
+    sig.optArgs !== undefined ||
+    sig.variadicArg !== undefined ||
+    args.length !== params.length
+  )
+    return {
+      error: ce._fn('Function', [
+        ce.error(INVALID_GENERIC_MARKER_MESSAGE, typeToString(sig)),
+        ...params,
+      ]),
+    };
+
+  // §2.4 rule 4 (CONTRAVARIANT): a ground annotation at a quantified position
+  // must accept every instantiation the clause admits — `bound <: annotation`.
+  // `substituteDeclaredBounds` leaves an UNBOUNDED variable alone; its
+  // kind-level reading is `any`, so supply that bound explicitly (as
+  // `acceptsGenericFunctionLiteral` does at the declaration boundary).
+  const bounded = (sig.typeParams ?? []).map((p) =>
+    p.bound === undefined ? { ...p, bound: 'any' as Type } : p
+  );
+
+  let erased = false;
+  let coverageError: Expression | undefined;
+  const newParams = params.map((p, i) => {
+    if (!isFunction(p, 'Typed') || !isSymbol(p.op1)) return p;
+    if (!mentionsQuantifiedVariable(args[i].type, sig)) return p;
+    const annotation = functionLiteralParameterType(p);
+    if (
+      coverageError === undefined &&
+      annotation !== undefined &&
+      !isSubtype(substituteDeclaredBounds(bounded, args[i].type), annotation)
+    )
+      coverageError = ce.error(
+        GENERIC_ANNOTATION_COVERAGE_MESSAGE,
+        p.toString()
+      );
+    erased = true;
+    return p.op1;
+  });
+  if (coverageError !== undefined)
+    return { error: ce._fn('Function', [coverageError, ...params]) };
+  return erased ? { ops: [ops[0], ...newParams] } : { ops };
+}
+
 /** Desugar a signature-string `Function` parameter (typed-literals design
  * §3.2 sugar) into structural operands `[body, ...params]`, or `undefined`
  * when the string is not a fully-named, non-variadic signature type. An
@@ -770,15 +908,29 @@ function desugarSignatureString(
   if (args.some((a) => !a.name)) return undefined;
 
   const isWide = (t: Type): boolean => t === 'unknown' || t === 'any';
+  // A `forall` clause (E1, generic-literals design §2.3): an argument whose
+  // type mentions a quantified variable produces a BARE parameter symbol —
+  // erasure (G1) — since the marker ascribed onto the body states its type and
+  // no type variable may become the type of a symbol. Ground-typed arguments
+  // keep their `Typed` marker and are enforced as usual.
+  const generic = isPolymorphicType(type);
   const params = args.map((a) =>
-    isWide(a.type)
+    isWide(a.type) || (generic && mentionsQuantifiedVariable(a.type, type))
       ? ce.symbol(a.name!)
       : ce._fn('Typed', [ce.symbol(a.name!), ce.string(typeToString(a.type))], {
           canonical: false,
         })
   );
   let newBody = body;
-  if (isFunction(body, 'Typed')) {
+  if (generic) {
+    // A `forall` clause is the ONLY record the literal keeps of its type
+    // variables, so the full signature is ascribed unconditionally — unlike the
+    // result-type cases below, a body-slot ascription does not get to win here
+    // and silently drop the clause (it stays, as an inner statement ascription).
+    newBody = ce._fn('Typed', [body, ce.string(typeToString(type))], {
+      canonical: false,
+    });
+  } else if (isFunction(body, 'Typed')) {
     // The body's own ascription wins over the signature string's result.
   } else if (signatureEffects(type) !== undefined) {
     // Arrow-level effects are PRESERVED onto the constructed signature
@@ -1424,6 +1576,18 @@ function makeLambda(
     (p) => functionLiteralParameterType(p) !== undefined
   );
 
+  // A GENERIC literal has no annotated parameter to gate on — erasure removed
+  // them — yet its polytype marker IS a contract, and an ANONYMOUS application
+  // (`Apply(Function(…), …)`) never passes a symbol's boxed-definition seam
+  // where the check would otherwise happen. So the apply-time validation gate
+  // widens to the marker (§2.5): `fnExpr.type.type` is then the polytype, and
+  // `_validateArguments` is already polytype-aware.
+  const declaredSignature = functionLiteralDeclaredSignature(fnExpr);
+  const isGenericLiteral =
+    declaredSignature !== undefined &&
+    (declaredSignature.typeParams?.length ?? 0) > 0;
+  const validateApplication = hasAnnotatedParam || isGenericLiteral;
+
   // The return-type ascription operand (§4.2 marker: the last Block statement
   // wrapped in `["Typed", stmt, type]`), reused verbatim when re-attaching the
   // return type onto a curried literal (§6.5 point 3). `undefined` when the
@@ -1469,6 +1633,20 @@ function makeLambda(
     // 3/ If there are fewer arguments than expected, curry the function
     //
     if (args.length < params.length) {
+      // G5 (§2.5): a GENERIC literal is not curried. The residual literal has
+      // no honest type — a variable consumed by the supplied prefix occurs
+      // nowhere in the remaining arrow, so the clause is unsolvable. Fires on
+      // the polytype marker regardless of `hasAnnotatedParam`: erasure leaves a
+      // generic literal with no annotated parameter at all, so the prefix
+      // validation below never runs for one. (Measured before the guard: the
+      // residual was built by re-attaching the FULL n-ary marker onto the
+      // (n-k)-ary curried literal, whose §2.3 arity check then rejected it —
+      // `(_1) |-> Error("A generic function-literal signature must be …")`,
+      // an error buried in the body rather than a diagnostic on the call.)
+      // Partial INSTANTIATION is the principled lift; recorded as future work.
+      if (isGenericLiteral)
+        return ce.error(GENERIC_PARTIAL_APPLICATION_MESSAGE, expr.toString());
+
       // Generate unique parameter names for the remaining (unapplied) params
       const unappliedParams = params.slice(args.length);
       const allSymbols = new Set([
@@ -1654,7 +1832,7 @@ function makeLambda(
     //     error-marked arguments (§13 decision 6), matching the named-`Declare`
     //     path so broadcast consumers (`Map`, …) surface the same diagnostic.
     //
-    if (ce.strict && hasAnnotatedParam && _validateArguments) {
+    if (ce.strict && validateApplication && _validateArguments) {
       const validated = _validateArguments(ce, evaluatedArgs, fnExpr.type.type);
       if (validated !== null) {
         // Any invalid operand: mismatch — return the inert application.

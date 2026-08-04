@@ -1438,96 +1438,152 @@ describe('EFFECTS (§4.6) — substitution never touches the effects slot', () =
   });
 });
 
-describe('D7 — the assignment boundary', () => {
+// The D7 boundary block, REWRITTEN for the generic-function-literals
+// milestone (M1, phase 2): `docs/plans/2026-08-04-generic-function-literals-
+// design.md` §2.4 replaces the D7 rejection with an INSTALL path on all three
+// v1 routes. The end-to-end behavior of an installed generic literal lives in
+// `test/compute-engine/generic-function-literals.test.ts`; what is pinned here
+// is the boundary itself — which values install, which are still refused, and
+// with which diagnostic.
+describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () => {
   const D7 = /generic declaration cannot take a function-literal body/;
+  const RANK2 = /Type variables are introduced by a whole-signature/;
+  const G11 = /generic OVERLOAD SET cannot take a function-literal body/;
 
-  test('route 1 — `ce.assign` throws a `TypeCompatibilityError`', () => {
+  test('route 1 — `ce.assign` installs the literal', () => {
     const ce = fresh();
     ce.declare('f', 'forall T. (T) -> T');
-    let caught: any;
-    try {
-      ce.assign('f', ce.parse('x \\mapsto x'));
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeDefined();
-    expect(caught.name).toBe('TypeCompatibilityError');
-    expect(caught.message).toMatch(D7);
+    expect(() => ce.assign('f', ce.parse('x \\mapsto x'))).not.toThrow();
+    expect(ce.box('f').type.toString()).toBe('forall T. (T) -> T');
+    expect(ce.box(['f', 5]).evaluate().toString()).toBe('5');
+    expect(ce.box(['f', 5]).type.toString()).toBe('finite_integer');
   });
 
-  test('route 1b — declare-with-value throws the same diagnostic', () => {
+  test('route 1b — declare-with-value installs it too', () => {
     const ce = fresh();
-    let caught: any;
-    try {
+    expect(() =>
       ce.declare('h', {
         type: 'forall T. (T) -> T',
         value: ce.parse('x \\mapsto x'),
-      } as any);
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught?.name).toBe('TypeCompatibilityError');
-    expect(caught.message).toMatch(D7);
+      } as any)
+    ).not.toThrow();
+    expect(
+      ce
+        .box(['h', { str: 'a' }] as any)
+        .evaluate()
+        .toString()
+    ).toBe('"a"');
   });
 
-  test('route 2 — the `Assign` OPERATOR yields an error VALUE, not a throw', () => {
+  test('route 2 — the `Assign` OPERATOR installs it, with no error value', () => {
     const ce = fresh();
     ce.declare('f', 'forall T. (T) -> T');
-    const r = ce.box(['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']]);
-    const v = r.evaluate();
-    expect(v.toString()).toContain('incompatible-type');
-    expect(v.toString()).toMatch(D7);
+    const v = ce
+      .box(['Assign', 'f', ['Function', ['Add', 'x', 1], 'x']])
+      .evaluate();
+    expect(v.toString()).not.toContain('incompatible-type');
+    expect(ce.box(['f', 5]).evaluate().toString()).toBe('6');
   });
 
   test('route 3 — a Cortex annotated declaration', () => {
     const ce = fresh();
     const { value } = executeCortex(ce, 'let f: forall T. (T) -> T = x |-> x');
-    // The ANNOTATION parses (via the shared type DSL); the BODY is rejected.
-    expect(value.toString()).toContain('incompatible-type');
-    expect(value.toString()).toContain('forall T. (T) -> T');
-    expect(value.toString()).toMatch(D7);
+    expect(value.toString()).not.toContain('incompatible-type');
+    expect(ce.box(['f', 5]).evaluate().toString()).toBe('5');
   });
 
-  test('a NON-callable value is an ordinary mismatch, not the D7 case', () => {
+  // `canonicalFunctionLiteral` LIFTS non-literals, so the boundary's
+  // literal-vs-symbol discrimination reads the ORIGINAL operand: a
+  // function-typed SYMBOL has no body to erase and keeps the honest
+  // `Ground <: Poly` rejection.
+  test('a function-typed SYMBOL is still an ordinary mismatch', () => {
+    const ce = fresh();
+    ce.declare('g', '(integer) -> string');
+    ce.declare('f', 'forall T. (T) -> T');
+    let caught: any;
+    try {
+      ce.assign('f', ce.symbol('g'));
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught?.name).toBe('TypeCompatibilityError');
+    expect(caught.message).toMatch(/is not compatible with the type/);
+    expect(caught.message).not.toMatch(D7);
+  });
+
+  test('a NON-callable value is an ordinary mismatch', () => {
     const ce = fresh();
     ce.declare('f', 'forall T. (T) -> T');
     let caught: any;
     try {
       // NOTE: a non-string operand would be LIFTED into a constant lambda by
-      // `canonicalFunctionLiteral`, which IS the D7 case; a string is not.
+      // `canonicalFunctionLiteral` — which now INSTALLS (the G10 trusted
+      // ascription); a string is not lifted.
       ce.assign('f', ce.string('nope'));
     } catch (e) {
       caught = e;
     }
     expect(caught?.message ?? '').not.toMatch(D7);
+    expect(caught?.name).toBe('TypeCompatibilityError');
   });
 
-  test('a `forall` annotation on a function LITERAL is rejected with D7', () => {
+  // G11 (§2.4) — the ONE polytype shape a literal body still cannot implement.
+  test('G11 — a generic OVERLOAD SET keeps a dedicated rejection', () => {
     const ce = fresh();
-    // signature-string sugar
+    ce.declare('m', '(forall T. (T) -> T) & ((string) -> string)');
+    let caught: any;
+    try {
+      ce.assign('m', ce.parse('x \\mapsto x'));
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught?.name).toBe('TypeCompatibilityError');
+    expect(caught.message).toMatch(G11);
+  });
+
+  test('G11 — …and as an error VALUE on the `Assign` operator route', () => {
+    const ce = fresh();
+    ce.declare('m', '(forall T. (T) -> T) & ((string) -> string)');
+    const v = ce.box(['Assign', 'm', ['Function', 'x', 'x']]).evaluate();
+    expect(v.toString()).toContain('incompatible-type');
+    expect(v.toString()).toMatch(G11);
+  });
+
+  // SUPERSEDED by the generic-function-literals milestone (M1, phase 1): the
+  // two WHOLE-SIGNATURE literal annotations — the signature-string sugar (E1)
+  // and the full-signature return-slot marker (E2) — are now accepted and give
+  // the literal a polymorphic `.type`. See
+  // `test/compute-engine/generic-function-literals.test.ts`. The rank-2
+  // per-parameter spelling keeps rejecting (G6), with the rule-stating message.
+  test('a whole-signature `forall` annotation on a literal is ACCEPTED (M1)', () => {
+    const ce = fresh();
+    // signature-string sugar (E1)
     const a = ce.box([
       'Function',
       ['Add', 'x', 1],
       { str: 'forall T. (x: T) -> T' },
     ] as any);
-    expect(a.isValid).toBe(false);
-    expect(a.toString()).toMatch(D7);
-    // annotated PARAMETER (a rank-2 spelling)
+    expect(a.isValid).toBe(true);
+    expect(a.type.toString()).toBe('forall T. (x: T) -> T');
+    // return-slot full-signature marker (E2)
+    const c = ce.box([
+      'Function',
+      ['Typed', 'x', { str: 'forall T. (x: T) -> T' }],
+      'x',
+    ] as any);
+    expect(c.isValid).toBe(true);
+    expect(c.type.toString()).toBe('forall T. (x: T) -> T');
+  });
+
+  test('a `forall` PARAMETER annotation (rank-2) is still rejected', () => {
+    const ce = fresh();
     const b = ce.box([
       'Function',
       1,
       ['Typed', 'x', { str: 'forall T. (T) -> T' }],
     ] as any);
     expect(b.isValid).toBe(false);
-    expect(b.toString()).toMatch(D7);
-    // return-type ascription
-    const c = ce.box([
-      'Function',
-      ['Typed', 1, { str: 'forall T. (T) -> T' }],
-      'x',
-    ] as any);
-    expect(c.isValid).toBe(false);
-    expect(c.toString()).toMatch(D7);
+    expect(b.toString()).toMatch(RANK2);
   });
 
   test('Cortex — a `forall` parameter annotation is rejected, not a parse error', () => {
@@ -1537,7 +1593,7 @@ describe('D7 — the assignment boundary', () => {
       'f(x: forall T. (T) -> T) = 1'
     );
     expect(diagnostics).toEqual([]);
-    expect(value.toString()).toMatch(D7);
+    expect(value.toString()).toMatch(RANK2);
   });
 });
 

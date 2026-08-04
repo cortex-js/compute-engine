@@ -189,6 +189,25 @@ ours — 202/69 — and they corrected it in review. Use 82/25.)
   shader targets need a monomorphized (per-call-site arity) lowering since
   they have no variadic dispatch.
 
+- **Generic user functions decline compilation whole-fn** (feature-parity
+  note, 2026-08-04 — the generic-function-literals milestone made them
+  reachable; no corpus sizing yet). A generic body
+  (`function f<T>(x: T) -> T { … }`, or a literal assigned to a `forall`
+  declaration) takes the standard decline in `ensureUserFunctionEmitted`
+  (G3, `docs/plans/2026-08-04-generic-function-literals-design.md` §2.7):
+  a polytype has no ground parameter type to read (`userFunctionParamType`
+  returns `undefined`, `userFunctionParamsAreScalar` answers `false`), so
+  an emitted call boundary would lose both its coercion wrap and its
+  broadcast wrap — measured pre-guard, `gd([1,2,3])` under
+  `forall T: number. (T) -> T` compiled to `_fn_gd([1, 2, 3])` and ran to
+  `null` where the interpreter broadcasts `[2,4,6]`: the silent-wrong-value
+  class, hence the whole-fn decline (interpreted fallback is sound and
+  pinned). The principled lift is per-call-site **monomorphization**
+  (instantiate the clause, emit one specialization per ground argument
+  shape); a cheaper interim — sound for scalar-only use — would be to emit
+  with the quantified parameter read **at its bound** and a broadcast wrap
+  derived the way `paramsAreScalar` reads bounds at evaluation.
+
 **GLSL/WGSL band** (204 members / 90 states compile on JS but not GPU — the
 GPU→CPU demotion class). Buckets triaged below.
 

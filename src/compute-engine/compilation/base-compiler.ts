@@ -4713,8 +4713,9 @@ export class BaseCompiler {
     const declared = def.value.type?.type;
     if (typeof declared === 'object' && declared.kind === 'signature') {
       // A GENERIC signature has open parameters: it neither broadcasts nor
-      // coerces in v1 (the type-variables design declines compiling a generic
-      // user function outright — §6). Answering `true` here would silently
+      // coerces (a generic user function declines whole-fn — G3,
+      // generic-function-literals design §2.7, enforced in
+      // `ensureUserFunctionEmitted`). Answering `true` here would silently
       // claim scalar parameters for a `forall T. (T) -> T`.
       if (isPolymorphicType(declared)) return false;
       return paramsAreScalar(declared);
@@ -4787,6 +4788,24 @@ export class BaseCompiler {
     });
   }
 
+  /** Does `h` resolve to a generic (polytype-signed) user function? Reads
+   * the same declared-signature-first precedence as
+   * `userFunctionParamsAreScalar`. */
+  private static userFunctionIsGeneric(
+    engine: ComputeEngine,
+    h: string,
+    literal: Expression
+  ): boolean {
+    const def = engine.lookupDefinition(h);
+    if (def !== undefined) {
+      if (isOperatorDef(def)) {
+        if (def.operator.signature?.isPolymorphic) return true;
+      } else if ('value' in def && def.value?.type?.isPolymorphic) return true;
+    }
+    const own = literal.type?.type;
+    return own !== undefined && isPolymorphicType(own);
+  }
+
   /**
    * If `h` names a user-defined function (see `userFunctionLiteral`) and the
    * target hosts a `userFunctions` registry, ensure its definition is emitted
@@ -4814,6 +4833,17 @@ export class BaseCompiler {
     // chain over its clause set (function-polymorphism design §8).
     if (literal === undefined)
       return BaseCompiler.tryEmitMultiClauseFunction(engine, h, target);
+
+    // A GENERIC user function declines whole-fn (G3, generic-function-
+    // literals design §2.7): its parameters are open type variables, so the
+    // emitted code can neither coerce nor broadcast a call — a lifted call
+    // (`f([1,2,3])` under `forall T: number. (T) -> T`) would run the scalar
+    // body on the array and silently compute a wrong value. The declared
+    // signature is authoritative when there is one (an E3 install stores a
+    // plain literal whose own arrow is ground); the literal's own polytype
+    // covers the bare-assign route.
+    if (BaseCompiler.userFunctionIsGeneric(engine, h, literal))
+      return undefined;
 
     // The generated code bakes this user function's current definition: record
     // it in the capture set (see `CompileTarget.symbolDeps`). Symbols its body

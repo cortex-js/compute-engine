@@ -18,11 +18,9 @@
   quantify per arm, with a ground arm beating an equally-specific generic one.
   On the query APIs, `matches` with a generic pattern answers existentially
   (`(number) -> number` matches `'forall T. (T) -> T'`) while `couldMatch`
-  reads each variable as its declared bound. Generic *function literals* are
-  not part of this release: a generic declaration takes an `evaluate` handler,
-  and assigning a literal body produces a dedicated diagnostic (the
-  `function f<T>(…)` form is planned). See the new "Generic Signatures"
-  section of the types guide.
+  reads each variable as its declared bound. A generic declaration may be
+  implemented by an `evaluate` handler or by a function body — see the two
+  entries below. See the new "Generic Signatures" section of the types guide.
 
   Twenty-five library operators now state their contracts declaratively with
   generic signatures instead of imperative type handlers, preserving operand
@@ -36,6 +34,43 @@
   part of this, a dimensioned collection is now also a subtype of a collection
   of its rows (`matrix<integer^(2x3)> <: indexed_collection<vector<integer^3>>`),
   matching how single-index access has always evaluated.
+
+- **Generic function literals: a `forall` signature can now be implemented by
+  an inline body.** A whole-signature clause makes a `["Function"]` literal
+  generic — written as a signature string
+  (`["Function", body, "'forall T. (x: T) -> T'"]`), as a `Typed` marker on
+  the body, or as the declared type of the symbol the literal is assigned to —
+  and it works on every route: `ce.assign`, the `Assign` operator, and an
+  annotated Cortex `const`/`let`. Each call instantiates the clause, so on one
+  engine `f(5)` types `finite_integer` and `f("a")` types `string`, bounds are
+  enforced at the call, and a collection argument still broadcasts at the
+  variable's bound. Declaring first and assigning after — `ce.declare('nest',
+  'forall T. (x: T, n: integer) -> T')` — makes generic *recursion* work for
+  the first time. The body is canonicalized once with the quantified
+  parameters **erased**: inside it, `x: T` is an ordinary unannotated
+  parameter, a bound does not narrow it, two parameters sharing `T` are not
+  known to have the same type, and the variable-correlated result is a trusted
+  ascription rather than a run-time check. Four boundaries are rejected with
+  dedicated diagnostics: partial application of a generic function, a generic
+  clause in a multi-clause set (in either direction), a function-literal body
+  for a generic overload set, and a `forall` clause on an individual parameter
+  annotation.
+
+- **Cortex: generic function definitions, `function f<T>(…)`.** A definition
+  takes a **type-parameter clause** between its name and its parameter list:
+  `function g<T: number, U>(x: T, k: (T) any -> U) -> list<U> { … }`. Bounds
+  must be ground types, the effect specifier and return type are unchanged,
+  and the clause names scope over the definition's **head** only — its
+  parameters, effect specifier and return type — so a body-local annotation
+  such as `let y: T` is an ordinary unknown-type error. Unused variables,
+  result-only variables and non-ground bounds are diagnosed at parse time by
+  the type grammar itself; an empty clause, a duplicate name and a generic
+  clause in a multi-clause set have their own codes
+  (`empty-type-parameter-clause`, `duplicate-type-parameter`,
+  `generic-clause-unsupported`). A generic definition serializes back to the
+  sugared form losslessly. The math definition form does not take a clause:
+  `f<T>(x) = x` remains an ordinary expression, since it is genuinely
+  ambiguous with a relational one.
 
 ### Issues Resolved
 

@@ -1,4 +1,9 @@
-import type { EffectLabel, EffectSet, Type } from '../../common/type/types.js';
+import type {
+  EffectLabel,
+  EffectSet,
+  FunctionSignature,
+  Type,
+} from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { signatureArms, signatureEffects } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -19,7 +24,11 @@ import type {
 import { isFunction, isSymbol, sym } from './type-guards.js';
 import { effectiveDischarge } from './effects-of.js';
 import { typeAcceptsValue } from './value-membership.js';
-import { genericLiteralBodyError } from './type-compatibility-error.js';
+import {
+  declaredTypeError,
+  genericOverloadLiteralError,
+} from './type-compatibility-error.js';
+import { substituteDeclaredBounds } from './generic-instantiation.js';
 import {
   functionLiteralBody,
   functionLiteralDeclaredEffects,
@@ -28,6 +37,7 @@ import {
   functionLiteralReturnMarker,
   functionLiteralReturnType,
   isScalarType,
+  mentionsQuantifiedVariable,
 } from './function-literal.js';
 
 /**
@@ -218,28 +228,26 @@ export function matchesDeclaredTypeAxes(
   )
     return true;
 
-  // D7 (§4.1 of the type-variables design): a GENERIC declaration cannot take
-  // a function-literal body in v1. `Ground <: Poly` is false, so the literal's
-  // ground type can never satisfy the declaration — surfaced as its own
-  // diagnostic on every route rather than as a bare `incompatible-type`
-  // comparing a polytype against `(unknown) -> …`. Raised as a
-  // `TypeCompatibilityError` so the `Assign`/`Declare` OPERATOR routes convert
-  // it to an error VALUE exactly as they do every other declared-type
-  // conflict. (`effectsDeclared` is unaffected — it is read from the polytype
-  // arrow by `signatureEffects`, which handles a clause fine.)
+  // A `Function` LITERAL under a GENERIC declaration is judged by the
+  // generic-literals acceptance rule (§2.4 of
+  // `docs/plans/2026-08-04-generic-function-literals-design.md`), NOT by
+  // `Ground <: Poly` — which is false (D3) and would reject every generic
+  // literal, as the retired D7 gate did. Under erasure (G1) the literal is an
+  // untyped lambda with the polytype as its call-site contract, so the axes
+  // that CAN be checked at the boundary are checked here and the rest is a
+  // trusted ascription (G10).
   //
-  // Gated on an actual `Function` LITERAL, as the three routes in
-  // `engine-declarations.ts` are: the diagnostic names a "function-literal
-  // body", and any other callable value (a symbol bound to a ground function,
-  // say) has no body to speak of. Those fall through to the ordinary
-  // `matches` path below, whose honest verdict is `Ground <: Poly = false` —
-  // a plain `incompatible-type`.
+  // Gated on an actual `Function` LITERAL, as the routes in
+  // `engine-declarations.ts` are: any other callable value (a symbol bound to
+  // a ground function, say) has no body to speak of and falls through to the
+  // ordinary `matches` path below, whose honest verdict is
+  // `Ground <: Poly = false` — a plain `incompatible-type`.
   if (
     declared.isPolymorphic &&
     isFunction(valueExpr, 'Function') &&
     isCallableType(value.type)
   )
-    throw genericLiteralBodyError(symbol ?? '', value, declared);
+    return acceptsGenericFunctionLiteral(symbol ?? '', valueExpr, declared);
 
   // A concrete value inhabiting a value-component declared type (`z: 0` with
   // `z := 0`): the synthesized type (`finite_integer`) cannot witness
@@ -252,6 +260,129 @@ export function matchesDeclaredTypeAxes(
   return declared.isPolymorphic
     ? isSubtype(stripped.type, declared.type)
     : stripped.matches(declared);
+}
+
+/**
+ * G11 (§2.4) — a function literal may implement a polymorphic declared type
+ * only when that type is a SINGLE-ARM signature.
+ *
+ * Runs FIRST at every declaration-boundary site, ahead of the arity and
+ * effects assertions: an overload set with a generic arm is not a shape one
+ * erased body can implement at all, so a "wrong arity" diagnostic for it would
+ * name the wrong problem.
+ *
+ * A no-op for a ground declared type and for a single generic signature.
+ */
+export function assertSingleArmPolytype(
+  symbol: string,
+  literal: Expression,
+  declared: BoxedType
+): void {
+  if (!declared.isPolymorphic) return;
+  const t = declared.type;
+  if (typeof t === 'object' && t.kind === 'signature') return;
+  throw genericOverloadLiteralError(symbol, literal.type, declared);
+}
+
+/**
+ * `sig` reduced to its TYPE AXES — `typeParams`, argument types and result —
+ * for the G9 α-equivalence comparison.
+ *
+ * Two axes are dropped. **Effects**, because they are governed solely by the
+ * `inferred ⊆ declared` subset rule (§2.4 rule 2) and whole-signature
+ * α-equality would penalize a literal for honestly stating a NARROWER set.
+ * **Argument names**, because a marker's argument names are cosmetic — the
+ * literal's operand names are the names of record (§2.3, the
+ * `docs/EFFECTS-MODEL.md` mirror rule) — and the α-equivalence relation
+ * compares dedup KEYS, which do spell names out (`(x: T) -> T`). Without this
+ * a declaration written `forall T. (T) -> T` would refuse the E1 spelling of
+ * its own implementation, whose sugar REQUIRES named arguments.
+ *
+ * `typeParams` is carried through (the rebuild invariant): the comparison is
+ * α-equivalence, which needs the clause.
+ */
+function typeAxesOf(sig: FunctionSignature): Type {
+  const t = stripArrowEffects(sig) as FunctionSignature;
+  const anonymize = (a: { name?: string; type: Type }) => ({ type: a.type });
+  return {
+    ...t,
+    ...(t.args !== undefined ? { args: t.args.map(anonymize) } : {}),
+    ...(t.optArgs !== undefined ? { optArgs: t.optArgs.map(anonymize) } : {}),
+    ...(t.variadicArg !== undefined
+      ? { variadicArg: anonymize(t.variadicArg) }
+      : {}),
+  };
+}
+
+/**
+ * The generic-literal ACCEPTANCE RULE (§2.4 of
+ * `docs/plans/2026-08-04-generic-function-literals-design.md`), shared by every
+ * declaration-boundary route.
+ *
+ * Rules 1 (arity, `assertFunctionLiteralArity`) and 2 (effects,
+ * `assertDeclaredEffects`) are the SAME assertions a ground declared signature
+ * runs — `signatureArms` and `signatureEffects` both read a clause-carrying
+ * arrow — so the boundary sites in `engine-declarations.ts` already apply
+ * them, unchanged, before the value definition is built and this check runs.
+ * What is generic-specific is rule 0 (G11, {@link assertSingleArmPolytype}),
+ * rule 3 and rule 4 below.
+ *
+ * Everything the erased body itself does — in particular whether it really
+ * returns its argument's type — is a TRUSTED ascription (G10, ruled): under
+ * erasure there is nothing to check it against.
+ */
+function acceptsGenericFunctionLiteral(
+  symbol: string,
+  literal: Expression,
+  declared: BoxedType
+): boolean {
+  // Rule 0 — G11.
+  assertSingleArmPolytype(symbol, literal, declared);
+  const declaredSig = declared.type as FunctionSignature;
+
+  // Rule 3 — own-contract agreement (G9). A literal that states its OWN
+  // full-signature polytype (E1/E2/E4) must agree with the declaration on the
+  // TYPE axes: `typeParams` modulo renaming, argument types, result. That is
+  // exactly `isSubtype` between two polytypes (§5 rule 3 — α-equivalence).
+  //
+  // The EFFECTS axis is excluded — stripped from BOTH arrows first — and is
+  // governed solely by the `inferred ⊆ declared` subset rule: a literal that
+  // honestly states a NARROWER effect set (`pure` marker under a `random`
+  // declaration) must not be penalized for being explicit where silence
+  // passes. A plain (E3) literal carries no marker and always passes.
+  const marker = functionLiteralDeclaredSignature(literal);
+  if (marker !== undefined && (marker.typeParams?.length ?? 0) > 0) {
+    if (!isSubtype(typeAxesOf(marker), typeAxesOf(declaredSig)))
+      throw declaredTypeError(symbol, literal, declared);
+  }
+
+  // Rule 4 — ground annotations cover the domain (CONTRAVARIANT). A ground
+  // implementation annotation sitting at a QUANTIFIED parameter position must
+  // accept every instantiation the declaration admits, i.e.
+  // `declaredBound <: annotation`. An unbounded variable is bounded by `any`,
+  // so in practice only a wide `unknown`/`any` annotation passes — don't
+  // annotate a quantified position. Ground annotations at GROUND positions
+  // reconcile exactly as they do under a ground declaration.
+  const args = declaredSig.args ?? [];
+  const typeParams = declaredSig.typeParams;
+  if (typeParams !== undefined && typeParams.length > 0) {
+    // `substituteDeclaredBounds` leaves an UNBOUNDED variable alone; the
+    // kind-level reading of one is `any`, so supply that bound explicitly.
+    const bounded = typeParams.map((p) =>
+      p.bound === undefined ? { ...p, bound: 'any' as Type } : p
+    );
+    const params = functionLiteralParameters(literal);
+    for (let i = 0; i < params.length && i < args.length; i++) {
+      const annotation = params[i].type;
+      if (annotation === undefined) continue;
+      const pattern = args[i].type;
+      if (!mentionsQuantifiedVariable(pattern, declaredSig)) continue;
+      if (!isSubtype(substituteDeclaredBounds(bounded, pattern), annotation))
+        throw declaredTypeError(symbol, literal, declared);
+    }
+  }
+
+  return true;
 }
 
 //
@@ -390,12 +521,32 @@ export function functionLiteralSignatureType(expr: Expression): Type {
       ? inferredEffects
       : unionEffectSets(declaredEffects, inferredEffects);
 
+  // A GENERIC marker (a `forall` clause) is the literal's contract of record on
+  // every TYPE axis: the clause, the argument types and the result are carried
+  // VERBATIM. Under erasure the quantified parameter operands are bare symbols,
+  // so the `args` assembled above would read `unknown` and the result would be
+  // the body's ground type — both would silently drop the clause. Only the
+  // EFFECTS axis is recomputed (`declared ∪ inferred`, above): the literal's own
+  // arrow must stay a sound over-approximation even where the declared contract
+  // is violated (`docs/EFFECTS-MODEL.md`). A closed polytype is a legal
+  // `isPolymorphic` `BoxedType`.
+  if (declaredSignature !== undefined && isGenericSignature(declaredSignature))
+    return {
+      ...declaredSignature,
+      ...(effects !== undefined ? { effects } : {}),
+    };
+
   return {
     kind: 'signature',
     ...(args !== undefined ? { args } : {}),
     ...(effects !== undefined ? { effects } : {}),
     result: bodyType,
   };
+}
+
+/** True when a full-signature marker carries a non-empty `forall` clause. */
+function isGenericSignature(t: FunctionSignature): boolean {
+  return (t.typeParams?.length ?? 0) > 0;
 }
 
 //

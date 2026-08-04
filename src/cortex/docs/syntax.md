@@ -208,10 +208,22 @@ _tuple-pattern_ → **`(`** (_symbol_ | _tuple-pattern_)#**`,`** **`)`**
 _math-function-signature_ → **`->`** _type_ |
 _effect-specifier_ **`->`** _type_
 
+_type-parameter_ → _symbol_ \[**`:`** _type_\]
+&nbsp;&nbsp;&nbsp;&nbsp;— the bound must be a ground type (it may not mention
+another type parameter)
+
+_type-parameter-clause_ → **`<`** (_type-parameter_)#**`,`** **`>`**
+&nbsp;&nbsp;&nbsp;&nbsp;— at least one parameter (`<>` is rejected); duplicate
+names are rejected; the names scope over the definition's HEAD only (its
+parameters, effect specifier, and return type), not over its body
+
 _function-definition_ → _symbol_ _parameters_
 \[_math-function-signature_\] **`=`** _expression_ |
-**`function`** _symbol_ _parameters_ \[_effect-specifier_\]
-\[**`->`** _type_\] _block_
+**`function`** _symbol_ \[_type-parameter-clause_\] _parameters_
+\[_effect-specifier_\] \[**`->`** _type_\] _block_
+&nbsp;&nbsp;&nbsp;&nbsp;— the `<…>` clause is claimed only by the
+**`function`** form: `f<T>(x) = x` is genuinely ambiguous with a relational
+expression, so the math form does not take it
 
 _type-declaration_ → **`type`** \[**`alias`**\] _symbol_
 \[**`<`** (_symbol_)#**`,`** **`>`**\] **`=`** _type_

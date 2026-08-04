@@ -75,6 +75,24 @@ const LITERAL_WORDS: ReadonlySet<string> = new Set([
  * (used to place a diagnostic on an invalid specifier). */
 type EffectSpecifier = { words: string[]; start: number; end: number };
 
+/** One declaration of a definition's **type-parameter clause** —
+ * `function f<T, U: number>(…)` (the M2 sugared generic form). The bound is
+ * the verbatim source slice, so it re-assembles into the `forall` prefix
+ * exactly as written. */
+type TypeParamDecl = { name: string; bound: string | null };
+
+/** A parsed type-parameter clause and its source span (the span covers
+ * `<` … `>` and anchors the clause's diagnostics). */
+type TypeParamClause = {
+  decls: TypeParamDecl[];
+  start: number;
+  end: number;
+};
+
+/** A type-grammar identifier (the clause's variable names live in the type
+ * namespace, not the Cortex binding namespace). */
+const TYPE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*/;
+
 //
 // The Cortex parser turns a `Token[]` (from the Cortex `Lexer`) into a MathJSON
 // expression plus a list of `ParsingDiagnostic`.
@@ -205,6 +223,21 @@ export class Parser {
    * (re-running a notebook cell). */
   private blockDepth = 0;
 
+  /** While a `function f<T>(…)` definition HEAD is being parsed, the names its
+   * type-parameter clause quantifies (G7 — the clause scopes over the head
+   * only). `null` everywhere else. */
+  private typeParamNames: ReadonlySet<string> | null = null;
+
+  /** Collector for the clause names {@link typeResolver} resolves during a
+   * single type subparse. Non-`null` only around the annotation whose "does it
+   * mention a quantified variable?" answer is being taken — that answer drives
+   * the erased lowering (§3.1): a parameter whose annotation mentions a clause
+   * name lowers to a BARE symbol. Reading it off the resolver is exact — it is
+   * the type parser itself reporting which identifiers it took as type
+   * references — where a text scan would have to guess about `list<T>`,
+   * `(T) -> real`, nested `forall` shadowing, and names like `Tx`. */
+  private typeParamHits: Set<string> | null = null;
+
   constructor(
     source: string,
     options?: {
@@ -227,7 +260,13 @@ export class Parser {
         return [...names];
       },
       forward: () => undefined,
-      resolve: (name: string) => (names.has(name) ? (name as any) : undefined),
+      resolve: (name: string) => {
+        if (!names.has(name)) return undefined;
+        // Record a reference to a name the enclosing definition's clause
+        // quantifies — see `typeParamHits`.
+        if (this.typeParamNames?.has(name)) this.typeParamHits?.add(name);
+        return name as any;
+      },
     };
     this.tokens = tokenize(source);
   }
@@ -1754,7 +1793,15 @@ export class Parser {
    * An **effect specifier** may sit between the parameter list and `->`
    * (`function roll(n) random -> integer { … }`); the ascription then carries
    * the FULL signature instead of the bare return type — see
-   * {@link definitionAscription}. */
+   * {@link definitionAscription}.
+   *
+   * A **type-parameter clause** may sit between the name and the parameter
+   * list (`function map<T, U>(…)` — the M2 sugared generic form,
+   * `docs/plans/2026-08-04-generic-function-literals-design.md` §3). It turns
+   * the ascription into a `forall`-quantified full signature and ERASES the
+   * annotations of the parameters it quantifies (they lower to bare symbols;
+   * the signature is the single source of truth for their types). See
+   * {@link parseTypeParamClause}. */
   private parseFunctionDefinition(): MathJsonExpression | null {
     const kw = this.advance(); // 'function'
     const nameTok = this.current;
@@ -1772,6 +1819,11 @@ export class Parser {
       this.error(['reserved-word', name], nameTok.start, nameTok.end);
     const nameNode = this.wrap({ sym: name }, nameTok.start, nameTok.end);
 
+    // Optional type-parameter clause `<T, U: bound>` (M2).
+    const clause = this.parseTypeParamClause(name);
+    if (clause === null) return null; // Malformed; already diagnosed.
+    const typeParams = clause?.decls ?? [];
+
     if (!this.check('OPEN_PAREN')) {
       this.error(
         ['opening-bracket-expected', '('],
@@ -1780,7 +1832,25 @@ export class Parser {
       );
       return null;
     }
-    const params = this.parseParameterList();
+
+    // G7 — the clause's names are in scope for the HEAD only (parameter list,
+    // effect specifier, return type). The body parses unseeded, so a
+    // body-local `let y: T` is an ordinary unknown-type error. The set is
+    // mutated in place (`typeResolver` closes over it), and only the names
+    // this clause ADDED are removed on restore: a clause name that shadows a
+    // user type of the same name leaves that type known afterwards.
+    const seeded = typeParams.filter((d) => !this.knownTypeNames.has(d.name));
+    const outerTypeParamNames = this.typeParamNames;
+    if (typeParams.length > 0) {
+      for (const d of typeParams) this.knownTypeNames.add(d.name);
+      this.typeParamNames = new Set(typeParams.map((d) => d.name));
+    }
+
+    // Which parameters mention a quantified name (parallel to `params`).
+    const quantified: boolean[] = [];
+    const params = this.parseParameterList(
+      typeParams.length > 0 ? quantified : undefined
+    );
 
     // Optional effect specifier `random`, `scope`, `pure`, … (bare words
     // between the parameter list and `->`).
@@ -1792,7 +1862,51 @@ export class Parser {
       this.advance(); // '->'
       returnType = this.parseHeldType();
     }
-    const ascription = this.definitionAscription(params, spec, returnType);
+
+    if (typeParams.length > 0) {
+      for (const d of seeded) this.knownTypeNames.delete(d.name);
+      this.typeParamNames = outerTypeParamNames;
+    }
+
+    // G2 rule 1 (§2.6) — a clause plus a LITERAL parameter is a generic
+    // multi-clause definition, out of scope for this milestone. Checked
+    // BEFORE signature assembly so the rejection names the real problem
+    // rather than reporting an unused type variable. The clause is then
+    // dropped (the definition parses on as an ordinary one) — the error
+    // diagnostic is the rejection.
+    let clauseDecls: readonly TypeParamDecl[] = typeParams;
+    if (typeParams.length > 0 && params.some(isLiteralParamNode)) {
+      this.error(
+        ['generic-clause-unsupported', name],
+        clause!.start,
+        clause!.end
+      );
+      clauseDecls = [];
+    }
+
+    const ascription = this.definitionAscription(
+      params,
+      spec,
+      returnType,
+      clauseDecls,
+      clause !== undefined ? [clause.start, clause.end] : undefined
+    );
+
+    // Erased lowering (§3.1): a parameter whose annotation mentions a
+    // quantified name lowers to a BARE symbol — the full-signature ascription
+    // carries its type, and the engine's E2 pre-pass would erase it anyway.
+    // Keyed on the POST-rejection clause state: when G2 dropped the clause
+    // there is no ascription to carry those types, so erasing here would
+    // silently turn `function f<T>(x: T, 0) { … }` into an ordinary
+    // `f(x, 0)` clause. The annotation stays, and reads as whatever `T` names
+    // outside the clause — a user type when one exists, an unresolved (hence
+    // `unknown`) name otherwise.
+    const loweredParams =
+      clauseDecls.length > 0
+        ? params.map((p, i) =>
+            quantified[i] === true ? (operand(p, 1) ?? p) : p
+          )
+        : params;
 
     if (!this.check('OPEN_BRACE')) {
       this.error(
@@ -1815,7 +1929,7 @@ export class Parser {
         : body;
 
     const fnNode = this.wrap(
-      ['Function', ascribedBody, ...params] as MathJsonExpression[],
+      ['Function', ascribedBody, ...loweredParams] as MathJsonExpression[],
       nameTok.start,
       end
     );
@@ -1824,6 +1938,122 @@ export class Parser {
       kw.start,
       end
     );
+  }
+
+  /**
+   * The optional **type-parameter clause** of a `function` definition —
+   * `<T>`, `<T: number, U>` — sitting between the name and the parameter list
+   * (`docs/plans/2026-08-04-generic-function-literals-design.md` §3.1).
+   *
+   * Returns `undefined` when there is no clause (the cursor is untouched),
+   * `null` on a malformed one (already diagnosed), otherwise the declarations
+   * and the clause's source span.
+   *
+   * **Parsed from the RAW SOURCE, not from tokens.** `<` and `>` are operator
+   * characters, and the Cortex lexer maximal-munches a run of them into ONE
+   * token: `<T: list<integer>>(` lexes the two closing angles as a single
+   * `>>`, and a signature bound puts a `>` inside `->`. So the clause is
+   * scanned character by character, its bounds are handed to the type
+   * subparser (`parseTypePrefix`, the `parseTypeBody` pattern), and the token
+   * cursor is re-synced ONCE at the end with `advanceToOffset` — which lands
+   * correctly even when the closing angle is buried in a munched token.
+   *
+   * Bounds are parsed with the clause's own names NOT in scope, so an
+   * F-bounded `<T: list<U>>` is an ordinary `Unknown type "U"` error.
+   */
+  private parseTypeParamClause(
+    fnName: string
+  ): TypeParamClause | null | undefined {
+    if (!this.check('OPERATOR') || !this.current.text.startsWith('<'))
+      return undefined;
+
+    const src = this.source;
+    const start = this.current.start;
+    let pos = start + 1;
+    const skipSpace = (): void => {
+      while (pos < src.length && /\s/.test(src[pos])) pos += 1;
+    };
+
+    skipSpace();
+    if (src[pos] === '>') {
+      // `function f<>(…)`: the slot is there but declares nothing.
+      this.error(['empty-type-parameter-clause', fnName], start, pos + 1);
+      pos += 1;
+      this.advanceToOffset(pos);
+      return { decls: [], start, end: pos };
+    }
+
+    const decls: TypeParamDecl[] = [];
+    const seen = new Set<string>();
+    for (;;) {
+      skipSpace();
+      const m = TYPE_IDENTIFIER.exec(src.slice(pos));
+      if (m === null) {
+        this.error(['symbol-expected'], pos, Math.min(pos + 1, src.length));
+        this.advanceToOffset(pos);
+        return null;
+      }
+      const varName = m[0];
+      const nameStart = pos;
+      pos += varName.length;
+
+      skipSpace();
+      let bound: string | null = null;
+      if (src[pos] === ':') {
+        pos += 1;
+        try {
+          const { end } = parseTypePrefix(src.slice(pos), this.typeResolver);
+          bound = src.slice(pos, pos + end).trim();
+          pos += end;
+        } catch (e) {
+          const err = e as { position?: number; rawMessage?: string };
+          const rel = typeof err.position === 'number' ? err.position : 0;
+          const message =
+            err.rawMessage ?? (e instanceof Error ? e.message : String(e));
+          this.error(
+            ['type-annotation-error', message],
+            pos + rel,
+            Math.min(pos + rel + 1, src.length)
+          );
+          this.advanceToOffset(pos);
+          return null;
+        }
+      }
+
+      // Mirrors the type grammar's own `forall` check, reported here so the
+      // clause — not the assembled signature — carries the diagnostic. The
+      // duplicate is dropped so the assembly does not report it twice.
+      if (seen.has(varName))
+        this.error(
+          ['duplicate-type-parameter', varName],
+          nameStart,
+          nameStart + varName.length
+        );
+      else {
+        seen.add(varName);
+        decls.push({ name: varName, bound });
+      }
+
+      skipSpace();
+      if (src[pos] === ',') {
+        pos += 1;
+        continue;
+      }
+      if (src[pos] === '>') {
+        pos += 1;
+        break;
+      }
+      this.error(
+        ['closing-bracket-expected', '>'],
+        pos,
+        Math.min(pos + 1, src.length)
+      );
+      this.advanceToOffset(pos);
+      return null;
+    }
+
+    this.advanceToOffset(pos);
+    return { decls, start, end: pos };
   }
 
   /** Whether the statement at the cursor is a math-style function definition
@@ -1998,25 +2228,45 @@ export class Parser {
    * convention that leaves the return inferred while still declaring the
    * effects (`function tick() scope { … }`).
    *
+   * The full signature is ALSO assembled — with no effect run — whenever a
+   * **type-parameter clause** is present (§3.2): a `forall`-quantified
+   * signature has no other spelling, and the clause's `forall` prefix is what
+   * makes `T` a variable rather than an unknown type name.
+   *
    * The signature is validated by the engine's type parser; a rejected
    * specifier (e.g. `pure random`, mutually exclusive in the type grammar) is
    * diagnosed on the specifier words and the definition falls back to the
-   * no-specifier ascription.
+   * no-specifier ascription. A rejected CLAUSE (an unused or result-only
+   * variable, a duplicate, a non-ground bound — all of them free from the type
+   * grammar's own declaration-time validation) falls back to NO ascription:
+   * the plain return type would name a variable that is no longer in scope.
    */
   private definitionAscription(
     params: MathJsonExpression[],
     spec: EffectSpecifier | null,
-    returnType: MathJsonExpression | null
+    returnType: MathJsonExpression | null,
+    typeParams: readonly TypeParamDecl[] = [],
+    clauseSpan?: [number, number]
   ): MathJsonExpression | null {
-    if (spec === null) return returnType;
+    if (spec === null && typeParams.length === 0) return returnType;
 
+    const span: [number, number] =
+      spec !== null ? [spec.start, spec.end] : (clauseSpan ?? [0, 0]);
     const retText =
       (returnType !== null ? stringValue(returnType) : null) ?? 'unknown';
-    const sig = this.specifierSignature(params, spec, retText);
-    if (sig === null) return returnType; // Diagnosed; keep the plain ascription.
+    const sig = this.specifierSignature(
+      params,
+      spec,
+      retText,
+      typeParams,
+      span
+    );
+    // Diagnosed; keep the plain ascription (but never a clause-dependent one).
+    if (sig === null) return typeParams.length > 0 ? null : returnType;
+    const start = clauseSpan?.[0] ?? span[0];
     const end =
-      (returnType !== null ? this.localEnd(returnType) : undefined) ?? spec.end;
-    return this.wrap({ str: sig }, spec.start, end);
+      (returnType !== null ? this.localEnd(returnType) : undefined) ?? span[1];
+    return this.wrap({ str: sig }, start, end);
   }
 
   /**
@@ -2030,14 +2280,24 @@ export class Parser {
    * grammar rejects) falls back to an all-positional argument list rather than
    * failing the definition.
    *
-   * The diagnostic spans the specifier tokens rather than offset-shifting the
-   * type parser's position (as `parseTypeAnnotation` does): the signature is
+   * The diagnostic spans `span` — the specifier tokens, or the type-parameter
+   * clause when there is no specifier — rather than offset-shifting the type
+   * parser's position (as `parseTypeAnnotation` does): the signature is
    * assembled, not a slice of the source, so its offsets do not map back.
+   *
+   * A non-empty `typeParams` prefixes the assembled string with the clause's
+   * `forall` declarations (bounds verbatim from the source). The result is
+   * SELF-CONTAINED — `forall` introduces its own names — so the validation
+   * below needs no seeding, and the type grammar's declaration-time checks
+   * (unused variable, result-only variable, non-ground bound, duplicate) come
+   * back as parse-time diagnostics for free.
    */
   private specifierSignature(
     params: MathJsonExpression[],
-    spec: EffectSpecifier,
-    retText: string
+    spec: EffectSpecifier | null,
+    retText: string,
+    typeParams: readonly TypeParamDecl[],
+    span: [number, number]
   ): string | null {
     const parts = params.map((p) => {
       if (operator(p) === 'Typed') {
@@ -2051,13 +2311,19 @@ export class Parser {
       return { name: symbol(p), type: 'unknown' };
     });
 
-    const effects = spec.words.join(' ');
+    const effects = spec !== null ? ` ${spec.words.join(' ')}` : '';
+    const prefix =
+      typeParams.length > 0
+        ? `forall ${typeParams
+            .map((d) => (d.bound !== null ? `${d.name}: ${d.bound}` : d.name))
+            .join(', ')}. `
+        : '';
     const build = (named: boolean): string =>
-      `(${parts
+      `${prefix}(${parts
         .map((p) =>
           named && p.name !== null ? `${p.name}: ${p.type}` : p.type
         )
-        .join(', ')}) ${effects} -> ${retText}`;
+        .join(', ')})${effects} -> ${retText}`;
 
     // A generated literal-parameter name must not leak into the marker
     // signature: fall back to the all-positional spelling.
@@ -2083,7 +2349,7 @@ export class Parser {
             err.rawMessage ?? (e instanceof Error ? e.message : String(e));
       }
     }
-    this.error(['type-annotation-error', message], spec.start, spec.end);
+    this.error(['type-annotation-error', message], span[0], span[1]);
     return null;
   }
 
@@ -2098,8 +2364,15 @@ export class Parser {
    * a number, string, or boolean literal in parameter position — lowers to an
    * anonymous value-typed parameter `["Typed", <generated>, {str: "<value>"}]`
    * where `<generated>` is a reserved-prefix name the body cannot reference
-   * (see {@link parseLiteralParam}). */
-  private parseParameterList(): MathJsonExpression[] {
+   * (see {@link parseLiteralParam}).
+   *
+   * When `quantified` is supplied (a `function f<T>(…)` head), one entry is
+   * appended per parameter recording whether its annotation MENTIONS one of
+   * the clause's type variables — the erased-lowering test of §3.1. The answer
+   * comes from the type resolver itself (see {@link typeParamHits}), so
+   * `list<T>` and `(T) -> real` count while a ground `tuple<Tx, real>` does
+   * not. */
+  private parseParameterList(quantified?: boolean[]): MathJsonExpression[] {
     const open = this.advance(); // '('
     this.brackets.push(open);
 
@@ -2114,6 +2387,7 @@ export class Parser {
             break;
           }
           params.push(p);
+          quantified?.push(false);
           if (!this.match('COMMA')) break;
           if (this.check('CLOSE_PAREN')) break; // trailing comma
           continue;
@@ -2138,7 +2412,11 @@ export class Parser {
         // Optional `: Type` — an annotated param is a typed function-literal
         // parameter `["Typed", sym, {str: type}]`.
         if (this.check('OPERATOR') && this.current.text === ':') {
+          const hits = quantified !== undefined ? new Set<string>() : null;
+          const outerHits = this.typeParamHits;
+          this.typeParamHits = hits;
           const annotation = this.parseTypeAnnotation();
+          this.typeParamHits = outerHits;
           if (annotation !== null)
             params.push(
               this.wrap(
@@ -2148,8 +2426,10 @@ export class Parser {
               )
             );
           else params.push(symNode);
+          quantified?.push((hits?.size ?? 0) > 0);
         } else {
           params.push(symNode);
+          quantified?.push(false);
         }
 
         if (!this.match('COMMA')) break;
@@ -3628,6 +3908,16 @@ function isLiteralNode(expr: MathJsonExpression): boolean {
   if (typeof expr === 'string' && /^'[\s\S]*'$/.test(expr)) return true;
   const s = symbolNameOf(expr) ?? (typeof expr === 'string' ? expr : null);
   return s === 'True' || s === 'False';
+}
+
+/** Whether a lowered parameter node is a **literal parameter** — the
+ * `["Typed", "literalParam_<n>", {str: "<value>"}]` form `parseLiteralParam`
+ * builds for `function f(0) { … }`. Literal parameters are multi-clause
+ * territory, so a type-parameter clause alongside one is rejected (G2). */
+function isLiteralParamNode(p: MathJsonExpression): boolean {
+  if (operator(p) !== 'Typed') return false;
+  const name = symbol(operand(p, 1));
+  return name !== null && isLiteralParamName(name);
 }
 
 /** The operator head of a function node (`{fn: [head, …]}`), or `null`. */

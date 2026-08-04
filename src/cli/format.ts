@@ -153,6 +153,14 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `"${args[0]}" is a type, not a function: types have no constructor; annotate instead, e.g. "const p: ${args[0]} = …"`;
     case 'type-shadow':
       return `The type "${args[0]}" shadows an existing type of the same name; the two are not distinguished — values of one satisfy the other`;
+    case 'type-variables-unsupported':
+      return `Generic type aliases are not supported yet: "type ${args[0]}<…>" is reserved syntax`;
+    case 'empty-type-parameter-clause':
+      return `"function ${args[0]}<>" declares no type variable; write "function ${args[0]}<T>(…)" or drop the "<>"`;
+    case 'duplicate-type-parameter':
+      return `The type variable "${args[0]}" is declared more than once`;
+    case 'generic-clause-unsupported':
+      return `"${args[0]}" is generic; generic functions are single-clause — they cannot use literal parameters or be extended with more clauses`;
     case 'assign-in-argument':
       return `"=" in an argument is assignment; use "==" for an equation or comparison`;
     case 'parameter-shadows-constant':

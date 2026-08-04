@@ -391,15 +391,29 @@ declares nothing.
 
 ### Type variables
 
-The syntax `type point<T> = tuple<T, T>` is **reserved** for a future
-release. It parses, and reports a dedicated `type-variables-unsupported`
-diagnostic, in both forms:
+A generic **type alias** — `type point<T> = tuple<T, T>` — is **reserved**
+for a future release. It parses, and reports a dedicated
+`type-variables-unsupported` diagnostic, in both forms:
 
 <!-- cortex-test: expect-diagnostics -->
 
 ```cortex
 type point<T> = tuple<T, T>
 ```
+
+Generic **functions** are supported: a `function` definition takes a
+type-parameter clause between its name and its parameter list, and the
+quantified names scope over the definition's head (its parameters, effect
+specifier, and return type):
+
+```cortex
+function swap<T, U>(x: T, y: U) -> tuple<U, T> { (y, x) }
+swap(1, "a")
+```
+
+A type parameter may carry a ground bound (`function g<T: number>(x: T) -> T`),
+which is enforced at every call. The equivalent full-type spelling is a
+`forall` annotation — `let f: forall T. (T) -> T = x |-> x`.
 
 ### Encoding
 

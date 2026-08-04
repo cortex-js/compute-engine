@@ -15,14 +15,18 @@ import { validCortex } from '../utils';
 //     so a `forall` clause is inherited from the type layer. The only genuine
 //     work is probing that the clause's DOT terminates cleanly under the
 //     tolerant prefix mode at every annotation boundary (`=`, newline, `)`).
-//  2. The SUGARED definition form (`function f(x: T) -> T { … }`) has no
-//     clause slot in v1 — its signature is assembled from scattered syntax.
-//     The `function f<T>(…)` spelling is a v2 milestone.
-//  3. SERIALIZATION never decomposes a polytype declaration into the sugared
+//  2. The SUGARED definition form (`function f(x: T) -> T { … }`) had no
+//     clause slot in v1 — its signature was assembled from scattered syntax.
+//     The `function f<T>(…)` spelling landed with the M2 milestone; it is
+//     covered by `generic-function-sugar.test.ts`.
+//  3. SERIALIZATION never decomposes a polytype DECLARATION into the sugared
 //     form: the full-literal spelling, or a diagnosed error — never a
 //     clause-stripped output (stripping is a CAPTURE, not just a loss:
 //     `forall point. (point) -> point` minus its clause silently re-resolves
-//     `point` against a nominal type of that name).
+//     `point` against a nominal type of that name). A `DefineFunction` whose
+//     literal carries a `forall` marker DOES round-trip through the M2
+//     sugared form (§3.3) — that is the clause-preserving spelling, not a
+//     stripped one.
 //
 // These are parse/serialize/execute-level probes: they pin what the Cortex
 // surface actually does, not what the engine's solver does (that is
@@ -92,24 +96,45 @@ describe('CORTEX `forall` ANNOTATIONS (D13: full-literal positions)', () => {
     ]);
   });
 
-  // D7: the annotation PARSES; the function-literal body is then rejected by
-  // the engine with the dedicated generic-declaration diagnostic — NOT a
-  // parse error. This is the Cortex leg of the three-route D7 pin.
-  test('a function-literal body gets the D7 diagnostic, not a parse error', () => {
+  // SUPERSEDED by the generic-function-literals milestone (M1, phase 2): the
+  // annotated `const`/`let` route (E3) now INSTALLS the literal
+  // (`docs/plans/2026-08-04-generic-function-literals-design.md` §2.4). The
+  // annotation still parses through the shared type DSL, as it always did.
+  test('a function-literal body INSTALLS, and instantiates per call', () => {
     expect(parseDiagnostics('let f: forall T. (T) -> T = x |-> x')).toEqual([]);
 
     const r = run('let f: forall T. (T) -> T = x |-> x');
     expect(r.diagnostics).toEqual([]);
-    expect(r.value).toBe(
-      'Error(ErrorCode("incompatible-type", "forall T. (T) -> T", "(unknown) -> unknown"), "f: A generic declaration cannot take a function-literal body in v1; supply an `evaluate` handler (a future release adds the generic `function f<T>(…)` form)")'
-    );
+    expect(r.value).toBe('(x) |-> x');
+
+    // Both instantiations, on ONE engine — no cross-call pollution.
+    expect(run('let f: forall T. (T) -> T = x |-> x\nf(5)')).toMatchObject({
+      diagnostics: [],
+      value: '5',
+      type: 'finite_integer',
+    });
+    expect(run('let f: forall T. (T) -> T = x |-> x\nf("a")')).toMatchObject({
+      diagnostics: [],
+      value: '"a"',
+      type: 'string',
+    });
   });
 
-  test('the D7 rejection also fires on the §9.1 `(x: T) scope -> T` shape', () => {
-    const source = 'let f: forall T. (x: T) scope -> T = x |-> x + 1';
+  test('…and on the §9.1 `(x: T) scope -> T` shape', () => {
+    const source = 'let f: forall T. (x: T) scope -> T = x |-> x + 1\nf(5)';
     expect(parseDiagnostics(source)).toEqual([]);
-    expect(run(source).value).toContain(
-      'A generic declaration cannot take a function-literal body in v1'
+    expect(run(source)).toMatchObject({
+      diagnostics: [],
+      value: '6',
+      type: 'finite_integer',
+    });
+  });
+
+  test('a declared BOUND is enforced at the call, not at the declaration', () => {
+    const source = 'let f: forall T: number. (x: T) -> T = x |-> x\nf("a")';
+    expect(parseDiagnostics(source)).toEqual([]);
+    expect(run(source).value).toBe(
+      'Error(ErrorCode("incompatible-type", "number", "string"))'
     );
   });
 
@@ -183,9 +208,7 @@ describe('CORTEX `forall` ANNOTATIONS (D13: prefix-mode dot termination)', () =>
   });
 
   test('the annotation terminates at `)` (parameter-list boundary)', () => {
-    expect(
-      validCortex('f(x: forall T. (T) -> T) = x')
-    ).toStrictEqual([
+    expect(validCortex('f(x: forall T. (T) -> T) = x')).toStrictEqual([
       'DefineFunction',
       'f',
       ['Function', 'x', ['Typed', 'x', { str: 'forall T. (T) -> T' }]],
@@ -249,9 +272,9 @@ describe('CORTEX `forall` × the `type` statement (D13: shadowing)', () => {
 //
 describe('CORTEX `forall` SERIALIZATION (D13: never decompose)', () => {
   test('a polytype declaration serializes as a full-literal annotation', () => {
-    expect(serializeCortex(['Declare', 'f', { str: 'forall T. (T) -> T' }])).toBe(
-      'let f: forall T. (T) -> T'
-    );
+    expect(
+      serializeCortex(['Declare', 'f', { str: 'forall T. (T) -> T' }])
+    ).toBe('let f: forall T. (T) -> T');
     expect(
       serializeCortex([
         'Declare',
@@ -300,20 +323,37 @@ describe('CORTEX `forall` SERIALIZATION (D13: never decompose)', () => {
     expect(validCortex(serialized)).toStrictEqual(ast);
   });
 
-  test('a polytype in a RETURN annotation keeps its clause too', () => {
-    const source = 'f(x) -> forall T. (T) -> T = x';
+  // SUPERSEDED by the generic-function-literals milestone (M2, phase 3): an
+  // UNGROUPED polytype in the return slot is the literal's OWN full signature
+  // (§2.2 — "a polytype cannot be anything else"), so the engine reads
+  // `f(x) -> forall T. (T) -> T = x` as declaring `f : forall T. (T) -> T`.
+  // The serializer mirrors that reading exactly (the two halves stay in sync)
+  // and emits the M2 sugared form. The GROUPED spelling is still an ordinary
+  // return-type ascription and still round-trips verbatim.
+  test('an UNGROUPED polytype return marker is the literal’s own signature', () => {
+    const ast = validCortex('f(x) -> forall T. (T) -> T = x');
+    // The engine reads this marker as `f`'s own polytype…
+    const ce = new ComputeEngine();
+    ce.box(ast as any).evaluate();
+    expect(ce.symbol('f').type.toString()).toBe('forall T. (T) -> T');
+    // …and the serializer decomposes it into the sugared form. Parameter
+    // NAMES come from the literal operands, types from the marker arguments.
+    expect(serializeCortex(ast as any)).toBe('function f<T>(x: T) -> T {x}');
+  });
+
+  test('a GROUPED polytype return annotation keeps the return reading', () => {
+    const source = 'f(x) -> (forall T. (T) -> T) = x';
     const ast = validCortex(source);
     const serialized = serializeCortex(ast as any);
     expect(serialized).toBe(source);
     expect(validCortex(serialized)).toStrictEqual(ast);
   });
 
-  // The v1 never-decompose rule is vacuously satisfied for the function's own
-  // signature: no Cortex route attaches a polytype to a `DefineFunction`
-  // (`specifierSignature()` assembles it from parameter/return annotations and
-  // the effects slot, none of which is a clause), so no serializer path can
-  // even attempt the sugared spelling. The declaration route above is the
-  // only spelling, and it is full-literal.
+  // The v1 never-decompose rule still holds for the DECLARATION route: no
+  // `Declare` path attaches a polytype to a `DefineFunction`, so the
+  // full-literal spelling below is the only one it can produce. (The M2
+  // sugared form is reached only from a `DefineFunction` whose literal
+  // carries a `forall` marker — see `generic-function-sugar.test.ts`.)
   test('an initializer serializes in call form — pre-existing, and generic/ground identical', () => {
     // BUG (pre-existing, NOT generics-specific): a `Function` literal in a
     // `Declare` attribute bag serializes as `Function(x, x)` rather than the
