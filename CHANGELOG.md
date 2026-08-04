@@ -28,6 +28,26 @@
   overrides all stay conservatively excluded. Opt out as before with
   `compile(expr, { cse: false })`.
 
+### Performance
+
+- **Symbolic equality of free-variable expressions now samples before it
+  simplifies.** The `eq()` free-variable branch ran expand+simplify on both
+  sides to try a structural proof, and only then fell back to stochastic
+  sampling — on large trees the symbolic pass costs hundreds of milliseconds
+  and, whenever the sides genuinely differ, contributes nothing the sampler
+  doesn't decide alone. The order is now reversed: sample first (a compile
+  plus ~50 deterministic point evaluations), and run the expand+simplify
+  proof only when sampling is uninformative (no compilable/finite sample
+  points). Verdicts are unchanged: a sampled agreement was already accepted
+  as `true`, a sampled disagreement already degraded to `undefined` under the
+  truth-under-constraints contract, and an identity provable by simplify
+  cannot genuinely disagree at a shared sample point. On a consumer's Voronoi
+  document whose piecewise rows compare each broadcast element against
+  `min(⟨list⟩)` (18 identical expand+simplify passes of the same
+  min-expression), the document build drops from 14.6 s to 6.2 s — faster
+  than releases that predate the 0.100.2 `\bmod` serialization fix, which had
+  made the comparison trees honest (and bigger).
+
 ### Bug Fixes
 
 - **A built-in operator name used as a callback no longer compiles to a broken

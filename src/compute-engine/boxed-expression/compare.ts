@@ -513,21 +513,30 @@ export function eq(
       return undefined;
     }
 
-    // Try structural equality after expand+simplify first
+    // Stochastic evaluation at random sample points, BEFORE the symbolic
+    // expand+simplify proof: sampling is a compile + ~50 point evaluations,
+    // where expand+simplify on a large tree can cost hundreds of ms — and a
+    // sampled verdict is already final in both directions. A sampled
+    // *disagreement* refutes only identity-in-all-variables — under the
+    // engine's "truth under constraints" equality contract (an assumption
+    // such as `x = 4` could still make `x + 1 = 5` true), it is not a
+    // definitive `false`, so it degrades to `undefined`; note an identity
+    // that expand+simplify could prove cannot genuinely disagree at a shared
+    // sample point, so skipping the symbolic proof loses nothing but
+    // float-pathology corners the sampling fallback already carried. Sampled
+    // *agreement* suggests an identity, which holds under any constraints —
+    // the pragmatic `true` is kept. (Decision D9, FINDINGS-TRACKER.md; makes
+    // free-variable answers uniform with `x.isEqual(2)` → undefined.)
+    const sampled = stochasticEqual(a, b);
+    if (sampled !== undefined) return sampled === false ? undefined : sampled;
+
+    // Sampling was uninformative (no compilable/finite sample points — e.g.
+    // non-numeric subexpressions or poles everywhere): fall back to the
+    // symbolic proof, structural equality after expand+simplify.
     a = _expand(a).simplify();
     b = _expand(b).simplify();
     if (same(a, b)) return true;
-
-    // Fall back to stochastic evaluation at random sample points.
-    // A sampled *disagreement* refutes only identity-in-all-variables — under
-    // the engine's "truth under constraints" equality contract (an assumption
-    // such as `x = 4` could still make `x + 1 = 5` true), it is not a
-    // definitive `false`, so it degrades to `undefined`. Sampled *agreement*
-    // suggests an identity, which holds under any constraints — the pragmatic
-    // `true` is kept. (Decision D9, FINDINGS-TRACKER.md; makes free-variable
-    // answers uniform with `x.isEqual(2)` → undefined.)
-    const sampled = stochasticEqual(a, b);
-    return sampled === false ? undefined : sampled;
+    return undefined;
   }
 
   //
