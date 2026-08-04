@@ -103,13 +103,14 @@ export const TYPE_VARIABLE_INTRODUCTION_MESSAGE =
   'Type variables are introduced by a whole-signature `forall` clause on the function literal (or by the `function f<T>(…)` form), never by a per-parameter annotation';
 
 /**
- * A whole-signature `forall` marker on a literal that is not well-formed
- * (§2.3): the marker is the literal's contract of record, so its shape is
- * checked — a plain signature, with as many arguments as the literal has
- * parameters.
+ * A whole-signature marker on a literal that is not well-formed (§2.3): the
+ * marker is the literal's contract of record — quantified or ground — so its
+ * shape is checked: a plain signature, with as many arguments as the literal
+ * has parameters. (A return type that merely HAPPENS to be an arrow is spelled
+ * GROUPED and is not a marker at all.)
  */
 export const INVALID_GENERIC_MARKER_MESSAGE =
-  'A generic function-literal signature must be a plain signature (no optional or variadic arguments) with one argument per literal parameter';
+  'A function-literal signature marker must be a plain signature (no optional or variadic arguments) with one argument per literal parameter';
 
 /**
  * §2.4 rule 4, on the E2 route — a GROUND parameter annotation sitting at a

@@ -184,13 +184,14 @@ export function functionLiteralReturnMarker(
  * return-type ascription.
  *
  * **Decomposition predicate**: the marker's type operand decomposes as a full
- * signature iff it parses to a signature AND that signature carries an effect
- * set — the stated-empty `[]` a `pure` keyword builds counts — OR a non-empty
- * `forall` clause (the generic-literal milestone: a polytype in the marker slot
- * is ALWAYS a full signature, since a polytype can only be a signature). A
- * signature with neither is deliberately NOT decomposed: `["Typed", body,
- * "(integer) -> integer"]` keeps its historical reading, a function whose
- * RESULT is a function.
+ * signature iff its TEXT is ungrouped and parses to a signature — effects and
+ * `forall` clause optional. An author who spells an arrow in the return slot
+ * plainly means the literal's contract; the GROUPED spelling (below) is the
+ * explicit opt-out for the "returns a function" reading, so a ground arrow
+ * needs no second discriminator (ruled 2026-08-04). Before that ruling only an
+ * effect-bearing or quantified signature decomposed, and `["Typed", body,
+ * "(x: number) -> number"]` typed as `(unknown) -> (x: number) -> number` —
+ * the marker author's contract read as a returned function.
  *
  * The literal's parameter operands remain the parameters of record. The marker
  * signature's argument list is a MIRROR built by the Cortex lowering (and by
@@ -212,14 +213,7 @@ export function functionLiteralDeclaredSignature(
   const t = parseTypeOperand(marker.op2);
   if (t === undefined || typeof t === 'string' || t.kind !== 'signature')
     return undefined;
-  return signatureEffects(t) !== undefined || isQuantifiedSignature(t)
-    ? t
-    : undefined;
-}
-
-/** True when `t` carries a non-empty `forall` clause. */
-function isQuantifiedSignature(t: FunctionSignature): boolean {
-  return (t.typeParams?.length ?? 0) > 0;
+  return t;
 }
 
 /**

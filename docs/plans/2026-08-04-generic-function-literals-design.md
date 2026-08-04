@@ -421,8 +421,55 @@ construction reaches `matchesDeclaredTypeAxes` with the rule above.
 - **Broadcast gating**: `applyFunctionLiteral`'s gate reads the declared
   signature and `paramsAreScalar` already reads quantified params at
   their bound (`substituteDeclaredBounds`, `boxed-function.ts:3459`) —
-  no change, but pinned by test (bounded `forall T: number. (T) -> T`
-  literal broadcasts over a list; unbounded does not double-lift).
+  no change on the VALUE route, pinned by test (bounded
+  `forall T: number. (T) -> T` literal broadcasts over a list; unbounded
+  does not double-lift). **Follow-up (user-ruled 2026-08-04, post-review
+  finding 7):** the bare-assign OPERATOR route never reached that gate —
+  its lambda operator def defaulted `broadcastable: false`, so validation
+  rejected `f([1,2,3])` while the compiled path already broadcast
+  (parity bug). Fixed by deriving `broadcastable: paramsAreScalar(sig)`
+  in `assignValueAsOperatorDef`, with an `isLambdaDef` guard keeping
+  lambda evaluation on its dedicated broadcast arm (empty source answers
+  `[]`, matching the value route, not the builtin `Nothing` convention).
+  Unbounded identities still echo the whole operand (D10 unaffected).
+- **Marker decomposition — the GROUND case (user-ruled 2026-08-04).**
+  The decomposition predicate
+  (`functionLiteralDeclaredSignature`) required an effect set OR a
+  `forall` clause, so an UNGROUPED ground arrow in the return slot read
+  as a return TYPE: `["Function", ["Typed", body, "(x: number) ->
+  number"], "x"]` typed `(unknown) -> (x: number) -> number`, and a
+  broadcast call typed `list<(x: number) -> number^3>` while evaluating
+  `[2,4,6]`. The predicate is now **any ungrouped signature marker** —
+  the grouped spelling (ruled 2026-08-01) is the author's explicit
+  opt-out for the returns-a-function reading, so a ground arrow needs no
+  second discriminator. Consequences: the E2 well-formedness pre-pass
+  (arity, no optional/variadic) covers ground markers too — erasure
+  still applies only to quantified positions; a plain arrow states NO
+  effects (`signatureEffects` is `undefined`, never a stated-pure
+  contract); the serializer's twin predicates
+  (`fnLiteralParts`, the standalone `Typed` handler) mirror it, and the
+  anonymous-literal route falls back to the lossless generic
+  `Function(Typed(body, "‹sig›"), …)` spelling whenever the marker
+  DECOMPOSED — dropping it as an ascription silently widened a result
+  narrower than the body's inferred type; and every
+  site that SYNTHESIZES a return-type marker from a `Type`
+  (`desugarSignatureString`, `reconcileFunctionLiteralReturn`,
+  `fnLiteralParts`' `retType`) goes through `returnTypeText`, which keeps
+  a signature RESULT grouped so it cannot re-read as a contract.
+- **Re-assign keeps the OPERATOR definition (user-ruled 2026-08-04).**
+  `ce.assign('f', ⟨annotated literal⟩)` twice migrated the binding to a
+  VALUE definition on the second call (the declared-signature
+  reconciliation branch in `assignFn`), dropping the operator half — and
+  with it the derived `broadcastable` flag and the
+  `_isLambda`/`_lambdaLiteral` consumers. A def that already carries a
+  user lambda now keeps its operator representation, rebuilt under the
+  same declared signature (which re-derives `effectsDeclared`). Notebook
+  re-run semantics: assign twice ≡ assign once. The
+  `evaluate === undefined` half of that branch — a declared-but-
+  unimplemented signature — still installs a VALUE, which is what makes
+  the object-form `ce.declare(f, { signature })` spelling observably
+  identical to the string form. The declared-type compatibility check is
+  NOT relaxed: a differently-shaped annotated literal still throws.
 - **Recursion**: declare `f : forall T. (T) -> T`, assign a literal whose
   body calls `f`. During body canonicalization the self-call validates
   against the polytype with an inferable-`unknown` actual → the solver's

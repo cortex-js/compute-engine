@@ -1677,22 +1677,59 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
     });
   });
 
-  describe('regression — a marker WITHOUT effects is not decomposed', () => {
-    it('a pure signature stays a plain return-type ascription', () => {
+  describe('an EFFECT-FREE marker decomposes too (ruled 2026-08-04)', () => {
+    it('a ground signature is the literal’s OWN contract, not a return type', () => {
+      // Was: an effect-free arrow stayed a return-type ascription, so this
+      // literal typed `(unknown) -> (integer) -> integer` — a function
+      // returning a function, which is plainly not what the marker author
+      // meant. The grouped spelling below is the opt-out for that reading, so
+      // the ungrouped one no longer needs effects to be read as a contract.
       const ce = new ComputeEngine();
       const f = ce.box([
         'Function',
         ['Typed', ['Add', 'x', 1], { str: '(integer) -> integer' }],
         'x',
       ]);
+      expect(typeToString(functionLiteralDeclaredSignature(f)!)).toBe(
+        '(integer) -> integer'
+      );
+      // A plain arrow STATES no effects — the specifier slot is empty, which is
+      // not the stated-empty set a `pure` keyword writes. Reading it as a
+      // stated-pure contract would put the literal on the checked track.
+      expect(functionLiteralDeclaredEffects(f)).toBe(undefined);
+      // The declared RETURN type is now the signature's RESULT.
+      expect(typeToString(functionLiteralReturnType(f)!)).toBe('integer');
+      expect(f.type.toString()).toBe('(unknown) -> integer');
+    });
+
+    it('the GROUPED spelling is the migration path for a returned function', () => {
+      const ce = new ComputeEngine();
+      const f = ce.box([
+        'Function',
+        ['Typed', ['Add', 'x', 1], { str: '((integer) -> integer)' }],
+        'x',
+      ]);
       expect(functionLiteralDeclaredSignature(f)).toBe(undefined);
       expect(functionLiteralDeclaredEffects(f)).toBe(undefined);
-      // The declared RETURN type is the whole signature: a function returning
-      // a function, today's meaning.
       expect(typeToString(functionLiteralReturnType(f)!)).toBe(
         '(integer) -> integer'
       );
       expect(f.type.toString()).toBe('(unknown) -> (integer) -> integer');
+    });
+
+    it('an ARITY-MISMATCHED ground marker is rejected, like a quantified one', () => {
+      // The E2 pre-pass well-formedness check now covers ground markers: the
+      // marker is the contract of record, so a signature the literal cannot
+      // implement is an error rather than a silent return-type reading.
+      const ce = new ComputeEngine();
+      const f = ce.box([
+        'Function',
+        ['Typed', ['Add', 'x', 1], { str: '(integer, integer) -> integer' }],
+        'x',
+      ]);
+      expect(f.toString()).toContain(
+        'A function-literal signature marker must be a plain signature'
+      );
     });
 
     it('a bare return-type ascription is unchanged', () => {
@@ -1858,6 +1895,63 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       expect(def.effectsDeclared).toBe(true);
       expect(def.pure).toBe(true);
       expect(def.signature.toString()).toBe('(unknown) pure -> integer');
+    });
+  });
+
+  describe('re-assigning a lambda preserves effect PROVENANCE', () => {
+    it('an INFERRED effect set does not become a declared contract', () => {
+      // The re-assignment rebuild installs a FRESH operator definition, and the
+      // constructor reads ANY effect-bearing supplied signature as author-
+      // STATED. Carrying an INFERRED specifier over would flip
+      // `effectsDeclared` on the second assign, turning the first assign's
+      // inference into a contract that later re-assigns are checked against.
+      const ce = new ComputeEngine();
+      const drawing = () =>
+        ce.box([
+          'Function',
+          ['Add', 'n', ['Random']],
+          ['Typed', 'n', { str: 'integer' }],
+        ]);
+      ce.assign('r9', drawing());
+      const first = ce.lookupDefinition('r9')!['operator']!;
+      expect(first.effectsDeclared).toBe(false);
+      expect(first.effects).toEqual(['random']);
+
+      ce.assign('r9', drawing());
+      const second = ce.lookupDefinition('r9')!['operator']!;
+      expect(second.effectsDeclared).toBe(false);
+      expect(second.effects).toEqual(['random']);
+
+      // A PURE body then re-infers from scratch: the previously-INFERRED
+      // `random` was never a contract, so nothing has to satisfy it.
+      ce.assign(
+        'r9',
+        ce.box([
+          'Function',
+          ['Add', 'n', 1],
+          ['Typed', 'n', { str: 'integer' }],
+        ])
+      );
+      const third = ce.lookupDefinition('r9')!['operator']!;
+      expect(third.effectsDeclared).toBe(false);
+      expect(third.pure).toBe(true);
+      expect(third.signature.toString()).not.toContain('random');
+    });
+
+    it('an AUTHOR-STATED contract still survives the re-assign', () => {
+      const ce = new ComputeEngine();
+      const stated = () =>
+        ce.box([
+          'Function',
+          ['Typed', DRAWING_BODY, { str: '(n: unknown) random -> integer' }],
+          'n',
+        ]);
+      ce.assign('r9b', stated());
+      ce.assign('r9b', stated());
+      const def = ce.lookupDefinition('r9b')!['operator']!;
+      expect(def.effectsDeclared).toBe(true);
+      expect(def.effects).toEqual(['random']);
+      expect(def.signature.toString()).toBe('(unknown) random -> integer');
     });
   });
 

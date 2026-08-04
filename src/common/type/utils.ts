@@ -142,7 +142,9 @@ export function signatureEffects(
  * where the ungrouped spelling of an effect-bearing signature declares the
  * LITERAL's own effect contract, and the grouped spelling is an ordinary
  * return-type ascription whose return happens to be an effectful arrow
- * (`function mk(x) -> ((real) random -> real) { … }`).
+ * (`function mk(x) -> ((real) random -> real) { … }`). Since 2026-08-04 the
+ * same reading applies to an EFFECT-FREE arrow, so grouping is what every
+ * "returns a function" return-type marker rests on.
  */
 export function isGroupedTypeText(text: string): boolean {
   const s = text.trim();
@@ -157,6 +159,23 @@ export function isGroupedTypeText(text: string): boolean {
     }
   }
   return false;
+}
+
+/**
+ * The text to store in a `Function`-literal RETURN-type marker for `t`.
+ *
+ * The inverse of {@link isGroupedTypeText}: a result that is itself a signature
+ * has to be spelled GROUPED, or the marker re-reads as the literal's own
+ * contract (`functionLiteralDeclaredSignature`) — the plain `typeToString`
+ * spelling of `(number) -> number` is exactly the ungrouped form that ruling
+ * gives to the literal. Every site that SYNTHESIZES a return-type marker from
+ * a {@link Type} (`desugarSignatureString`, `reconcileFunctionLiteralReturn`)
+ * must go through here; a site that carries an author-written type OPERAND
+ * through verbatim already preserves the author's grouping.
+ */
+export function returnTypeText(t: Type): string {
+  const s = typeToString(t);
+  return typeof t === 'object' && t.kind === 'signature' ? `(${s})` : s;
 }
 
 /**

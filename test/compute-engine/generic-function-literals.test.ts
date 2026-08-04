@@ -5,6 +5,7 @@ import { defineFunctionClause } from '../../src/compute-engine/multi-clause';
 import { stripArrowEffects } from '../../src/compute-engine/boxed-expression/effects-inference';
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
+import { executeCortex } from '../../src/cortex/execute-cortex';
 
 //
 // Generic function literals (M1, PHASE 1 — the literal standing alone).
@@ -346,7 +347,7 @@ describe('G5 — partial application of a generic literal is rejected', () => {
     // Instead the residual literal was built by re-attaching the FULL 2-ary
     // marker onto the 1-ary curried literal, whose §2.3 arity check then
     // rejected it — the result was
-    // `(_1) |-> Error("A generic function-literal signature must be …")`, an
+    // `(_1) |-> Error("A function-literal signature marker must be …")`, an
     // error buried in the residual body rather than a diagnostic on the call.
     const ce = fresh();
     const g = e1(
@@ -1164,5 +1165,330 @@ describe('§5.13 — G3, compile() declines a generic user function whole-fn', (
     const r = compile(ce.box(['kd', 'y'] as any));
     expect(r?.code ?? '').toContain('_fn_kd');
     expect(r?.run?.({ y: 21 })).toBe(42);
+  });
+});
+
+describe('§follow-up — operator-route broadcastability derives from `paramsAreScalar`', () => {
+  // A bare `ce.assign('f', ⟨annotated literal⟩)` — no prior declaration —
+  // installs an OPERATOR definition carrying the literal's derived signature
+  // (`assignValueAsOperatorDef`). That signature makes `inferredSignature =
+  // false`, so calls run through `validateArguments`, whose collection-at-a-
+  // scalar-parameter admission is gated on the definition's `broadcastable`
+  // flag. Left at its `false` default the flag REJECTED `f([1,2,3])` with
+  // `incompatible-type` while the very same literal broadcast on the
+  // declare-then-assign VALUE route (gated on `paramsAreScalar`, `box.ts`) and
+  // on the COMPILED path (`userFunctionParamsAreScalar`, `base-compiler.ts`).
+  // The flag is now derived the same way, so the three routes read one gate —
+  // which is what the design's §2 sketch already promised ("f: forall T:
+  // number. (T) -> T; f([1,2,3]) → broadcasts, types vector").
+  const {
+    compile,
+  } = require('../../src/compute-engine/compilation/compile-expression');
+
+  test('a BOUNDED generic bare-assign broadcasts, at its own rank', () => {
+    const ce = fresh();
+    ce.assign(
+      'f',
+      e2(ce, ['Multiply', 2, 'x'], 'forall T: number. (x: T) -> T', 'x')
+    );
+    const call = ce.box(['f', ['List', 1, 2, 3]] as any);
+    expect(call.evaluate().toString()).toBe('[2,4,6]');
+    // No double-lift (the §2.5 twin arm): the map's type, not a list of vectors.
+    expect(call.type.toString()).toBe('vector<finite_integer^3>');
+    // …and the VALUE route answers the same thing, literally.
+    const value = declareAssign('forall T: number. (x: T) -> T', [
+      'Function',
+      ['Multiply', 2, 'x'],
+      'x',
+    ]);
+    const vcall = value.box(['f', ['List', 1, 2, 3]] as any);
+    expect(call.type.toString()).toBe(vcall.type.toString());
+    expect(call.evaluate().toString()).toBe(vcall.evaluate().toString());
+    // The bound is still enforced at the scalar base.
+    expect(
+      ce
+        .box(['f', { str: 'a' }] as any)
+        .evaluate()
+        .toString()
+    ).toContain('incompatible-type');
+  });
+
+  test('an UNBOUNDED generic bare-assign identity ECHOES the whole list', () => {
+    // D10: the lift binds the FULL actual at a bare-variable pattern, so the
+    // identity returns the list itself — it does not map over it.
+    // `paramsAreScalar` answers `true` for an unbounded variable (the scalar
+    // default), so the derived flag must not turn that echo into a per-element
+    // map.
+    const ce = fresh();
+    ce.assign('f', e1(ce, 'x', 'forall T. (x: T) -> T'));
+    const call = ce.box(['f', ['List', 1, 2, 3]] as any);
+    expect(call.evaluate().toString()).toBe('[1,2,3]');
+    expect(call.type.toString()).toBe('vector<finite_integer^3>');
+  });
+
+  test('a GROUND annotated bare-assign broadcasts, and compiles to the same', () => {
+    const ce = fresh();
+    ce.assign('k', e1(ce, ['Multiply', 2, 'x'], '(x: number) -> number'));
+    const call = ce.box(['k', ['List', 1, 2, 3]] as any);
+    expect(call.evaluate().toString()).toBe('[2,4,6]');
+    expect(call.type.toString()).toBe('vector<3>');
+    // Compile parity (the §5.13 sibling): the compiled path reads the same
+    // `paramsAreScalar` gate, so it must agree with the interpreter — before
+    // this fix the interpreted call was an `incompatible-type` error and
+    // compilation declined on it.
+    expect(compile(call)?.run?.({})).toEqual([2, 4, 6]);
+    // …and the VALUE route agrees too.
+    const value = fresh();
+    value.declare('k', '(x: number) -> number');
+    value.assign('k', value.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
+    const vcall = value.box(['k', ['List', 1, 2, 3]] as any);
+    expect(call.type.toString()).toBe(vcall.type.toString());
+    expect(call.evaluate().toString()).toBe(vcall.evaluate().toString());
+  });
+
+  test('an EMPTY source answers `[]`, as the VALUE route does', () => {
+    // The lambda broadcast arm answers `[]`; the BUILTIN one answers `Nothing`.
+    // A `broadcastable` lambda must keep taking its own arm.
+    const ce = fresh();
+    ce.assign('k', e1(ce, ['Multiply', 2, 'x'], '(x: number) -> number'));
+    expect(
+      ce
+        .box(['k', ['List']] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[]');
+  });
+
+  test('a COLLECTION-VALUED result types NESTED, not flat', () => {
+    // The TYPING twin of the two evaluation guards. `type()`'s generic
+    // `broadcastable` wrapper unwraps the signature result
+    // (`broadcastElementType`) before lifting it; the dedicated lambda arm
+    // deliberately does NOT, because the per-element result IS the signature
+    // result. Now that a bare-assigned annotated literal carries
+    // `broadcastable`, the generic wrapper captured it first and typed the
+    // nested value `[[1,1],[2,2]]` as `vector<2>`.
+    const ce = fresh();
+    ce.assign(
+      'f',
+      e2(ce, ['List', 'x', 'x'], '(x: number) -> list<number>', 'x')
+    );
+    const call = ce.box(['f', ['List', 1, 2]] as any);
+    expect(call.type.toString()).toBe('list<list<number>>');
+    expect(call.evaluate().toString()).toBe('[[1,1],[2,2]]');
+    // …and the scalar call is unchanged.
+    expect(ce.box(['f', 3] as any).type.toString()).toBe('list<number>');
+    expect(ce.box(['f', 3] as any).evaluate().toString()).toBe('[3,3]');
+  });
+
+  test('a COLLECTION-typed parameter keeps binding its argument WHOLE', () => {
+    // The negative arm of the same gate: `paramsAreScalar` is false, so the
+    // list is the argument, not a source to map over.
+    const ce = fresh();
+    ce.assign('n', e1(ce, ['Length', 'x'], '(x: list<number>) -> number'));
+    const call = ce.box(['n', ['List', 1, 2, 3]] as any);
+    expect(call.evaluate().toString()).toBe('3');
+    expect(call.type.toString()).toBe('number');
+  });
+
+  test('a QUANTIFIED parameter read at a COLLECTION bound binds whole too', () => {
+    // §4.5: a quantified parameter is read at its declared bound, so
+    // `T: indexed_collection` is not scalar and the flag stays false.
+    const ce = fresh();
+    ce.assign(
+      'n',
+      e2(
+        ce,
+        ['Length', 'x'],
+        'forall T: indexed_collection. (x: T) -> integer',
+        'x'
+      )
+    );
+    expect(
+      ce
+        .box(['n', ['List', 1, 2, 3]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('3');
+  });
+
+  test('re-assignment RE-DERIVES the flag', () => {
+    // An untyped literal sets no signature (`inferredSignature`) and never
+    // touches the flag; assigning an annotated literal over it must set it
+    // (`_BoxedOperatorDefinition.update` merges `def.broadcastable ?? …`).
+    const ce = fresh();
+    ce.assign('f', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
+    expect(
+      ce
+        .box(['f', ['List', 1, 2, 3]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[2,4,6]');
+    ce.assign('f', e1(ce, ['Multiply', 3, 'x'], '(x: number) -> number'));
+    expect(
+      ce
+        .box(['f', ['List', 1, 2, 3]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[3,6,9]');
+  });
+
+  test('the CORTEX sugared route inherits it (same operator definition)', () => {
+    // `function f<T: number>(x: T) -> T { 2x }` lowers to `DefineFunction`,
+    // which delegates to `ce.assign` — the very route fixed here.
+    const ce = fresh();
+    const r = executeCortex(
+      ce,
+      'function f<T: number>(x: T) -> T { 2x }\nf([1, 2, 3])'
+    );
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+    expect(r.value?.toString()).toBe('[2,4,6]');
+  });
+
+  test('RE-ASSIGNING the same signature keeps the OPERATOR definition', () => {
+    // Notebook re-run semantics: assign twice ≡ assign once. The second assign
+    // took the declared-signature reconciliation branch and installed a VALUE
+    // definition, dropping the operator half — and with it the derived
+    // `broadcastable` flag and the `_isLambda`/`lambda` view.
+    const ce = fresh();
+    const lit = () => e2(ce, ['Multiply', 2, 'x'], '(x: number) -> number', 'x');
+
+    ce.assign('f', lit());
+    const first = ce.lookupDefinition('f') as any;
+    expect(first.operator).toBeDefined();
+    expect(first.operator.broadcastable).toBe(true);
+    expect(first.operator.lambda).toBeDefined();
+    expect(first.operator.signature.toString()).toBe('(unknown) -> number');
+
+    ce.assign('f', lit());
+    const second = ce.lookupDefinition('f') as any;
+    expect(second.operator).toBeDefined();
+    expect(second.value).toBeUndefined();
+    expect(second.operator.broadcastable).toBe(first.operator.broadcastable);
+    expect(second.operator.lambda).toBeDefined();
+    expect(second.operator.signature.toString()).toBe(
+      first.operator.signature.toString()
+    );
+
+    // …and the BEHAVIOR is unchanged across the re-run.
+    expect(ce.box(['f', 3] as any).evaluate().toString()).toBe('6');
+    expect(
+      ce
+        .box(['f', ['List', 1, 2, 3]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[2,4,6]');
+  });
+
+  test('a DIFFERENTLY-shaped annotated re-assign is still rejected', () => {
+    // The declared-type compatibility check is not relaxed by the above: the
+    // previous signature remains a contract the new literal has to satisfy.
+    const ce = fresh();
+    ce.assign('f', e2(ce, ['Multiply', 2, 'x'], '(x: number) -> number', 'x'));
+    expect(() =>
+      ce.assign('f', e2(ce, 'x', '(x: string) -> string', 'x'))
+    ).toThrow();
+  });
+});
+
+describe('§follow-up — an UNGROUPED ground marker is the literal’s own signature', () => {
+  // Ruled 2026-08-04: the decomposition predicate is "ungrouped signature",
+  // effects or `forall` clause optional. Before, a ground arrow in the return
+  // slot read as a RETURN type, so the literal typed
+  // `(unknown) -> (x: number) -> number` and a broadcast call typed
+  // `list<(x: number) -> number^3>` while evaluating `[2,4,6]`.
+  test('the literal types by the marker’s RESULT, and broadcast typing follows', () => {
+    const ce = fresh();
+    const f = e2(ce, ['Multiply', 2, 'x'], '(x: number) -> number', 'x');
+    expect(f.type.toString()).toBe('(unknown) -> number');
+    ce.assign('f', f);
+    const call = ce.box(['f', ['List', 1, 2, 3]] as any);
+    expect(call.evaluate().toString()).toBe('[2,4,6]');
+    expect(call.type.toString()).toBe('vector<3>');
+  });
+
+  test('the GROUPED spelling keeps the returns-a-function reading', () => {
+    const ce = fresh();
+    const f = e2(ce, ['Multiply', 2, 'x'], '((x: number) -> number)', 'x');
+    expect(f.type.toString()).toBe('(unknown) -> (x: number) -> number');
+  });
+
+  test('a plain arrow states NO effects (not a stated-pure contract)', () => {
+    const ce = fresh();
+    const f = e2(ce, ['Multiply', 2, 'x'], '(x: number) -> number', 'x');
+    // No specifier in the marker ⇒ nothing DECLARED, and inference found
+    // nothing either, so the arrow carries no effect set at all — not the
+    // stated-empty `[]` that a `pure` keyword writes (which would put the
+    // literal on the checked track and print ` pure`).
+    expect(f.type.effects).toBe(undefined);
+    expect(f.type.toString()).not.toContain('pure');
+  });
+
+  test('the E2 well-formedness rules now cover ground markers', () => {
+    const ce = fresh();
+    // Arity mismatch…
+    expect(
+      e2(ce, ['Multiply', 2, 'x'], '(a: number, b: number) -> number', 'x')
+        .toString()
+    ).toContain('A function-literal signature marker must be');
+    // …optional arguments…
+    expect(
+      e2(ce, ['Multiply', 2, 'x'], '(a: number, b: number?) -> number', 'x')
+        .toString()
+    ).toContain('A function-literal signature marker must be');
+    // …and a well-formed one is accepted.
+    expect(
+      e2(ce, ['Multiply', 2, 'x'], '(a: number) -> number', 'x').isValid
+    ).toBe(true);
+  });
+
+  describe('the marker is recognized in its CANONICAL, Block-embedded shape', () => {
+    // `["Function", ["Block", …, ["Typed", last, sig]], …params]` is the shape
+    // canonicalization produces, and `functionLiteralDeclaredSignature` reads
+    // it as the contract. A hand-authored one on the box route must therefore
+    // take the same E2 pre-pass — before, it slipped past the well-formedness
+    // check AND past quantified-parameter erasure.
+    /** The E2 spelling, written in the canonical (Block-embedded) shape. */
+    const e2Block = (
+      ce: ComputeEngine,
+      body: any,
+      signature: string,
+      ...params: any[]
+    ) =>
+      ce.box([
+        'Function',
+        ['Block', ['Typed', body, { str: signature }]],
+        ...params,
+      ] as any);
+
+    test('an arity mismatch is a diagnostic, as in the authoring shape', () => {
+      const ce = fresh();
+      expect(
+        e2Block(
+          ce,
+          ['Add', 'x', 1],
+          '(a: integer, b: integer) -> integer',
+          'x'
+        ).toString()
+      ).toContain('A function-literal signature marker must be');
+      // …and a well-formed one still boxes.
+      expect(
+        e2Block(ce, ['Add', 'x', 1], '(a: integer) -> integer', 'x').type
+          .toString()
+      ).toBe('(unknown) -> integer');
+    });
+
+    test('a POLYTYPE marker erases its quantified parameters', () => {
+      const ce = fresh();
+      const f = e2Block(
+        ce,
+        ['Add', 'x', 'x'],
+        'forall T: number. (x: T) -> T',
+        ['Typed', 'x', { str: 'T' }]
+      );
+      // The quantified parameter is a BARE symbol — `T` never becomes the type
+      // of a symbol (the §4.2 ground invariant).
+      expect(f.ops[1].json).toBe('x');
+      expect(f.type.toString()).toBe('forall T: number. (x: T) -> T');
+    });
   });
 });

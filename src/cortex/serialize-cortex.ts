@@ -17,7 +17,11 @@ import { isLiteralParamName } from '../math-json/symbols.js';
 import { parseType } from '../common/type/parse.js';
 import type { Type, TypeResolver } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
-import { isGroupedTypeText, signatureEffects } from '../common/type/utils.js';
+import {
+  isGroupedTypeText,
+  returnTypeText,
+  signatureEffects,
+} from '../common/type/utils.js';
 import { effectSetToString } from '../common/type/effects.js';
 import { NumberSerializationFormat } from '../compute-engine/latex-syntax/types.js';
 import { MathJsonExpression } from '../math-json/types.js';
@@ -515,18 +519,24 @@ export function serializeCortex(
       const hasTypedParam = params.some((p) => operator(p) === 'Typed');
       const hasReturn = operator(op1) === 'Typed';
       if (!hasTypedParam && !hasReturn) return serializeGenericFunction(expr);
-      // The return type has no anonymous-mapsto spelling; drop it (the body is
-      // serialized without the ascription).
-      const { bodyExpr, specifier } = fnLiteralParts(expr);
-      // An effect specifier has no anonymous-mapsto spelling EITHER, but unlike
-      // a return type it is a contract (`docs/EFFECTS-MODEL.md`, "Cortex
-      // surface"): dropping it would silently weaken the literal. The specifier
-      // slot exists only on the named definition forms, so a specifier-carrying
-      // anonymous literal falls back to the generic `Function(…)` spelling —
-      // and the `Typed` handler below keeps the contract-bearing ascription as
-      // an explicit `Typed(body, "‹sig›")` call (option B, ruled 2026-08-01),
-      // so the round-trip is lossless.
-      if (specifier !== null) return serializeGenericFunction(expr);
+      // A plain return-type ascription has no anonymous-mapsto spelling; drop
+      // it (the body is serialized without the ascription), as LaTeX and
+      // ASCII-math do.
+      const { bodyExpr, decomposed } = fnLiteralParts(expr);
+      // A marker that DECOMPOSED is not an ascription though — it is the
+      // literal's own signature (`docs/EFFECTS-MODEL.md`, "Cortex surface"),
+      // and dropping it would silently weaken the literal. None of its pieces
+      // has an anonymous-mapsto spelling — the specifier and `forall` slots
+      // exist only on the named definition forms, and the mapsto's `-> ‹ret›`
+      // slot does not exist at all — so a marker-carrying anonymous literal
+      // falls back to the generic `Function(…)` spelling, where the `Typed`
+      // handler below keeps the marker as an explicit `Typed(body, "‹sig›")`
+      // call (option B, ruled 2026-08-01; widened from "effect-bearing" to
+      // "decomposed" 2026-08-04). That re-parses to this very node, so the
+      // round-trip is lossless — including a ground marker whose result is
+      // NARROWER than the body's inferred type, which the dropped-ascription
+      // path would have silently widened.
+      if (decomposed) return serializeGenericFunction(expr);
       const arrow = options?.fancySymbols ? '↦' : '|->';
       return fmt.line(
         serializeParamList(params),
@@ -541,25 +551,23 @@ export function serializeCortex(
     // function literal; the `Function`/`Assign` handlers read the annotation
     // directly.
     //
-    // EXCEPTION (option B, ruled 2026-08-01): an UNGROUPED effect-bearing
-    // signature ascription is an effect CONTRACT (`docs/EFFECTS-MODEL.md`,
-    // "Cortex surface"), and dropping it would silently weaken the literal —
-    // the one thing the effects model promises not to do. It has no surface
-    // spelling outside the named definition forms, so it keeps the explicit
-    // call form `Typed(body, "‹sig›")`, which re-parses to this very node. A
-    // GROUPED spelling (`((real) random -> real)`) is an ordinary return-type
-    // ascription and stays transparent, like every effect-free ascription.
+    // EXCEPTION (option B, ruled 2026-08-01; widened 2026-08-04): an UNGROUPED
+    // signature ascription is the literal's own CONTRACT
+    // (`docs/EFFECTS-MODEL.md`, "Cortex surface"), and dropping it would
+    // silently weaken the literal — the one thing the effects model promises
+    // not to do. It has no surface spelling outside the named definition forms,
+    // so it keeps the explicit call form `Typed(body, "‹sig›")`, which re-parses
+    // to this very node. A GROUPED spelling (`((real) random -> real)`) is an
+    // ordinary return-type ascription and stays transparent, like every
+    // non-signature ascription. Mirrors the engine's decomposition predicate in
+    // `functionLiteralDeclaredSignature` — the two never disagree.
     //
     Typed: (expr: MathJsonExpression): FormattingBlock => {
       const text = typeText(operand(expr, 2));
       if (text !== null && !isGroupedTypeText(text)) {
         try {
           const t = parseType(text, PERMISSIVE_TYPE_RESOLVER);
-          if (
-            typeof t !== 'string' &&
-            t.kind === 'signature' &&
-            signatureEffects(t) !== undefined
-          )
+          if (typeof t !== 'string' && t.kind === 'signature')
             return serializeGenericFunction(expr);
         } catch {
           // Not a parseable type: keep the transparent reading.
@@ -897,15 +905,15 @@ export function serializeCortex(
   // `["Typed", body, type]` is recognized here; the engine's canonical
   // Block-embedded ascription is not produced by the Cortex parser.
   //
-  // A marker holding a FULL SIGNATURE that carries an effect set — OR a
-  // non-empty `forall` clause (the M2 sugared generic form) — decomposes back
-  // into the surface `<clause>(params) ‹effects› -> ‹result›`: the same
-  // decomposition predicate the engine applies in
-  // `boxed-expression/function-literal.ts`, so the two never disagree about
-  // what a marker means. A signature with neither keeps its historical
-  // reading: a return type that happens to be a function. Under the wide-result
-  // convention a result of `unknown`/`any` declares no return type at all
-  // (`function tick() scope { … }`), so it serializes with no arrow.
+  // A marker holding a FULL SIGNATURE — effect-bearing, quantified (the M2
+  // sugared generic form) or plain ground — decomposes back into the surface
+  // `<clause>(params) ‹effects› -> ‹result›`: the same decomposition predicate
+  // the engine applies in `boxed-expression/function-literal.ts`, so the two
+  // never disagree about what a marker means. A GROUPED spelling (tested just
+  // below) is the "return type that happens to be a function" reading and keeps
+  // its text verbatim. Under the wide-result convention a result of
+  // `unknown`/`any` declares no return type at all (`function tick() scope
+  // { … }`), so it serializes with no arrow.
   const fnLiteralParts = (
     fn: MathJsonExpression
   ): {
@@ -920,8 +928,17 @@ export function serializeCortex(
      * recovered, and only for a quantified marker, whose quantified parameters
      * were erased to bare symbols at lowering. */
     argTypes: readonly Type[];
+    /** True when the marker DECOMPOSED — i.e. it is the literal's own
+     * signature, not a plain return-type ascription. The named definition forms
+     * can spell every piece of it; the anonymous mapsto cannot, so that route
+     * uses this to fall back to the lossless generic `Function(…)` form. */
+    decomposed: boolean;
   } => {
-    const none = { typeParams: null, argTypes: [] as readonly Type[] };
+    const none = {
+      typeParams: null,
+      argTypes: [] as readonly Type[],
+      decomposed: false,
+    };
     const op1 = operand(fn, 1);
     if (operator(op1) !== 'Typed')
       return { bodyExpr: op1, retType: null, specifier: null, ...none };
@@ -943,28 +960,29 @@ export function serializeCortex(
         if (typeof t !== 'string' && t.kind === 'signature') {
           const effects = signatureEffects(t);
           const quantifiers = t.typeParams ?? [];
-          if (effects !== undefined || quantifiers.length > 0) {
-            const result = t.result;
-            const isWide = result === 'unknown' || result === 'any';
-            return {
-              bodyExpr,
-              retType: isWide ? null : typeToString(result),
-              specifier:
-                effects !== undefined ? effectSetToString(effects) : null,
-              typeParams:
-                quantifiers.length > 0
-                  ? quantifiers
-                      .map((p) =>
-                        p.bound !== undefined
-                          ? `${p.name}: ${typeToString(p.bound)}`
-                          : p.name
-                      )
-                      .join(', ')
-                  : null,
-              argTypes:
-                quantifiers.length > 0 ? (t.args ?? []).map((a) => a.type) : [],
-            };
-          }
+          const result = t.result;
+          const isWide = result === 'unknown' || result === 'any';
+          return {
+            bodyExpr,
+            // A result that is ITSELF a signature has to be re-spelled grouped
+            // (`returnTypeText`) or the `-> …` it produces would read back as
+            // the definition's own contract.
+            retType: isWide ? null : returnTypeText(result),
+            specifier: effects !== undefined ? effectSetToString(effects) : null,
+            typeParams:
+              quantifiers.length > 0
+                ? quantifiers
+                    .map((p) =>
+                      p.bound !== undefined
+                        ? `${p.name}: ${typeToString(p.bound)}`
+                        : p.name
+                    )
+                    .join(', ')
+                : null,
+            argTypes:
+              quantifiers.length > 0 ? (t.args ?? []).map((a) => a.type) : [],
+            decomposed: true,
+          };
         }
       } catch {
         // Not a parseable type: keep the plain return-type reading.

@@ -1931,6 +1931,14 @@ export class BoxedFunction
         this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
       if (
         def.broadcastable &&
+        // A user function literal has its OWN broadcast arm (step 2b) and takes
+        // it even when the definition is `broadcastable` — an annotated literal
+        // assigned bare now derives that flag from `paramsAreScalar`
+        // (`engine-declarations.ts`). The two arms agree except on the empty
+        // source, where this one answers `Nothing` and step 2b answers `[]` —
+        // and `[]` is what the declare-then-assign VALUE route answers, so a
+        // lambda must not be captured here.
+        !isLambdaDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
         !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
@@ -2301,6 +2309,8 @@ export class BoxedFunction
         this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
       if (
         def?.broadcastable &&
+        // Mirrors the sync path: a lambda takes its own step-2b arm.
+        !isLambdaDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteIndexedCollection(x) && !isTuple(x)) &&
         !skipBroadcastForVectorOps(this.operator, hasTensors, this.ops!)
@@ -2999,7 +3009,15 @@ function type(expr: BoxedFunction): Type {
     // symbolic-length `Range`, or an un-evaluated broadcast result like `R^2`).
     // Numeric tuples/points and tensor Add/Multiply (dedicated component-wise
     // typing) stay untouched via `skipBroadcastForVectorOps`.
-    if (def.broadcastable) {
+    // The TYPING twin of the two evaluation guards (steps 2/4): a user function
+    // literal has its OWN broadcast arm below, and an annotated literal
+    // assigned bare now derives `broadcastable` from `paramsAreScalar`
+    // (`engine-declarations.ts`), so it would otherwise be captured HERE. The
+    // two arms disagree on a collection-valued result: this one applies
+    // `broadcastElementType` (unwrapping it), the lambda arm deliberately does
+    // not — `f := (x: number) -> list<number>` applied to `[1,2]` evaluates to
+    // `[[1,1],[2,2]]` and must type `list<list<number>>`, not `vector<2>`.
+    if (def.broadcastable && !isLambdaDef(def)) {
       // O(rank) candidate check — see the §D4.2 note at the sibling sites.
       const hasTensors = expr.ops.some((x) => candidateShape(x) !== null);
       // `Equal`/`NotEqual` over TWO OR MORE definite collections is
@@ -3230,13 +3248,15 @@ function type(expr: BoxedFunction): Type {
       // POLYTYPE (a generic function literal), so this arm needs the same two
       // pieces the value route already has:
       //
-      //  1/ Instantiate the arm at the LAMBDA's own `threadable` reading. The
-      //     solve at the top of this function used `def.broadcastable`, which
-      //     is false for a user lambda — but `paramsAreScalar(def)` holding is
-      //     precisely the statement that the runtime broadcasts here, so the
-      //     D10 lift must be admitted, exactly as `paramsAreScalar(sig)` does
-      //     on the value route. A ground signature yields `undefined` and
-      //     keeps `sigResult` untouched.
+      //  1/ Instantiate the arm at the LAMBDA's own `threadable` reading.
+      //     `def.broadcastable` is now DERIVED from `paramsAreScalar` for a
+      //     bare-assigned lambda (and stays false on other lambda routes),
+      //     but this arm is only reached under the `paramsAreScalar(def)`
+      //     guard above — which is precisely the statement that the runtime
+      //     broadcasts here — so the D10 lift is admitted unconditionally,
+      //     exactly as `paramsAreScalar(sig)` does on the value route. A
+      //     ground signature yields `undefined` and keeps `sigResult`
+      //     untouched.
       //  2/ The D10 echo short-circuit, just below.
       const lambdaResult =
         instantiatedResultType(resolved, expr.ops, { threadable: true }) ??
@@ -3616,6 +3636,14 @@ export function paramsAreScalar(
   return args.every((arg) =>
     isScalarType(substituteDeclaredBounds(sigType.typeParams, arg.type))
   );
+}
+
+/** True when this operator definition is backed by a user function literal
+ * (`ce.assign('f', x ↦ …)`), which has its own broadcast arms (steps 2b/4b).
+ * @internal
+ */
+function isLambdaDef(def: BoxedOperatorDefinition | undefined): boolean {
+  return def instanceof _BoxedOperatorDefinition && def._isLambda;
 }
 
 function isOperatorDefinition(

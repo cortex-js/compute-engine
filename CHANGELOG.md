@@ -23,6 +23,17 @@
   the generic symbol path regardless of what is declared. Rendered output that
   used to show `γ` now shows an upright `EulerGamma`.
 
+- **An ungrouped full-signature marker on a function literal is now always
+  the literal's own contract.** `["Function", ["Typed", body,
+  "'(x: number) -> number'"], "x"]` previously read the marker as a *return
+  type* — the literal typed `(unknown) -> (x: number) -> number` — unless the
+  signature carried an effect specifier. It now declares the literal's own
+  signature (parameter types, arity — now checked — and return), whether or
+  not effects are stated, matching the `forall` and effect-bearing readings.
+  A plain arrow still states **no** effect contract. To ascribe a
+  function-*returning* type, use the grouped spelling, which is unchanged:
+  `["Typed", body, "'((x: number) -> number)'"]`.
+
 ### New Features
 
 - **Parametric polymorphism: `forall` type variables in function signatures.**
@@ -107,6 +118,24 @@
   condition yields `Nothing`, but the static type silently dropped that arm.
 
 ### Improvements
+
+- **The bare-assign route now broadcasts like the value route.** Assigning an
+  annotated or generic function literal directly (`ce.assign('f', …)` with no
+  prior declaration) installs an operator definition whose broadcastability
+  is derived from its parameter types, so `f([1,2,3])` with
+  `f: (x: number) -> number` — or `forall T: number. (T) -> T` — maps over
+  the list instead of rejecting, matching both the declare-then-assign route
+  and what compiled code already did. Unbounded generic identities still
+  return their operand whole, and an empty source answers `[]` on every
+  route.
+- **Re-assigning a function literal no longer changes its representation.**
+  Assigning the same annotated literal twice (the notebook re-run pattern)
+  used to silently convert the operator definition into a value definition,
+  losing the derived broadcast behavior; re-assignment now rebuilds the same
+  representation as the first assignment.
+- **Function-literal signature markers may reference user-declared types when
+  serialized to Cortex**, and anonymous literals carrying a signature marker
+  round-trip losslessly instead of dropping the ascription.
 
 - **Euler derivative notation and `\gamma` now yield to a declaration.** Both
   spellings are claimed by a parselet that runs ahead of symbol resolution, so

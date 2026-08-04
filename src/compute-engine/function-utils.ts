@@ -53,7 +53,11 @@ import {
 import { substituteDeclaredBounds } from './boxed-expression/generic-instantiation.js';
 import { isSubtype } from '../common/type/subtype.js';
 import { typeToString } from '../common/type/serialize.js';
-import { signatureEffects } from '../common/type/utils.js';
+import {
+  isGroupedTypeText,
+  returnTypeText,
+  signatureEffects,
+} from '../common/type/utils.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
 // A static import would create a cycle: `validate.ts → utils.ts →
@@ -348,7 +352,7 @@ export function canonicalFunctionLiteralArguments(
 
   // ── The E2 pre-pass (generic-literals design §2.3), ordered FIRST ──────────
   //
-  // A full-signature `forall` marker in the body slot is the literal's contract
+  // A full-signature marker in the body slot is the literal's contract
   // of record. It has to be read BEFORE the parameter operands are normalized:
   // a hand-authored E2 (and the M2 lowering) may carry `["Typed", x, "'T'"]`
   // parameters, and `T` is not a declared type name — type resolution would
@@ -363,7 +367,7 @@ export function canonicalFunctionLiteralArguments(
     // the erased operands.
     if (erased.error !== undefined) return erased.error;
     ops = erased.ops!;
-    genericMarker = true;
+    genericMarker = erased.generic === true;
   }
 
   // Signature-string sugar (typed-literals design §3.2/§10):
@@ -761,23 +765,39 @@ function rebindParameters(
 }
 
 /**
- * The full-signature POLYTYPE a `Function` literal's body-slot marker declares
- * (`["Function", ["Typed", body, "'forall T. (x: T) -> T'"], "x"]`), or
- * `undefined` when the body slot carries no such marker.
+ * The full signature a `Function` literal's body-slot marker declares
+ * (`["Function", ["Typed", body, "'forall T. (x: T) -> T'"], "x"]`, or the
+ * ground `"'(x: number) -> number'"`), or `undefined` when the body slot
+ * carries no such marker.
+ *
+ * The decomposition predicate of `functionLiteralDeclaredSignature`, read
+ * BEFORE canonicalization: an UNGROUPED signature spelling is the literal's own
+ * contract; a grouped one (`"'((number) -> number)'"`) is an ordinary
+ * return-type ascription and never reaches the well-formedness check below.
  *
  * Deliberately narrower than `isPolytypeString`: only a single SIGNATURE is a
  * shape a literal can implement. An overload intersection with a generic arm
  * parses as a polytype too, and is left for the return-slot rejection.
  */
-function bodySlotPolytype(
+function bodySlotSignature(
   ce: ComputeEngine,
   body: Expression | undefined
 ): FunctionSignature | undefined {
-  if (!isFunction(body, 'Typed')) return undefined;
-  const op = body.op2;
+  // Both marker shapes `functionLiteralReturnMarker` reads: the authoring form
+  // `["Typed", body, sig]` in the body slot, and the CANONICAL form, where the
+  // marker has moved INSIDE the Block and wraps its last statement. A
+  // hand-authored canonical-form literal reaches this route too, and the reader
+  // downstream (`functionLiteralDeclaredSignature`) recognizes it as the
+  // contract — so it must take the same well-formedness and erasure pass.
+  const marker = isFunction(body, 'Block') ? body.ops[body.nops - 1] : body;
+  if (!isFunction(marker, 'Typed')) return undefined;
+  const op = marker.op2;
   if (op === undefined) return undefined;
   const s = isString(op) ? op.string : sym(op);
-  if (s === undefined || !s.includes('forall')) return undefined;
+  // `->` is a necessary condition for a signature spelling: the cheap gate that
+  // keeps an ordinary `-> real` ascription off the resolver-parse path.
+  if (s === undefined || !s.includes('->')) return undefined;
+  if (isGroupedTypeText(s)) return undefined;
   let t: Type;
   try {
     t = parseType(s, ce._typeResolver);
@@ -785,17 +805,23 @@ function bodySlotPolytype(
     return undefined;
   }
   if (typeof t === 'string' || t.kind !== 'signature') return undefined;
-  return isPolymorphicType(t) ? t : undefined;
+  return t;
 }
 
 /**
  * The E2 pre-pass (generic-literals design §2.3): validate a full-signature
- * `forall` marker in the body slot and ERASE the parameter annotations it
- * quantifies.
+ * marker in the body slot and ERASE the parameter annotations it quantifies.
  *
  * Returns `undefined` when there is no such marker (the overwhelmingly common
  * case — one `isFunction(_, 'Typed')` test), `{ error }` when the marker is not
- * well-formed, and `{ ops }` with the erased operands otherwise.
+ * well-formed, and `{ ops, generic }` with the erased operands otherwise.
+ *
+ * A GROUND marker (`"'(x: number) -> number'"`) takes the well-formedness half
+ * only — it quantifies nothing, so there is nothing to erase. It is checked
+ * because it is a contract of record just as a quantified one is (ruled
+ * 2026-08-04): an arity mismatch means the author wrote a signature that the
+ * literal cannot implement, and the "returns a function" reading has its own
+ * spelling (a GROUPED marker), which never reaches here.
  *
  * **Well-formedness.** The marker is the literal's contract of record, not a
  * cosmetic mirror, so its shape is checked: a plain signature (no optional or
@@ -818,8 +844,10 @@ function bodySlotPolytype(
 function eraseGenericParameters(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
-): { ops?: ReadonlyArray<Expression>; error?: Expression } | undefined {
-  const sig = bodySlotPolytype(ce, ops[0]);
+):
+  | { ops?: ReadonlyArray<Expression>; error?: Expression; generic?: boolean }
+  | undefined {
+  const sig = bodySlotSignature(ce, ops[0]);
   if (sig === undefined) return undefined;
 
   const params = ops.slice(1);
@@ -835,6 +863,10 @@ function eraseGenericParameters(
         ...params,
       ]),
     };
+
+  // A GROUND marker quantifies nothing: the well-formedness check above is the
+  // whole pre-pass for it, and every parameter annotation stays.
+  if (!isPolymorphicType(sig)) return { ops, generic: false };
 
   // §2.4 rule 4 (CONTRAVARIANT): a ground annotation at a quantified position
   // must accept every instantiation the clause admits — `bound <: annotation`.
@@ -865,7 +897,9 @@ function eraseGenericParameters(
   });
   if (coverageError !== undefined)
     return { error: ce._fn('Function', [coverageError, ...params]) };
-  return erased ? { ops: [ops[0], ...newParams] } : { ops };
+  return erased
+    ? { ops: [ops[0], ...newParams], generic: true }
+    : { ops, generic: true };
 }
 
 /** Desugar a signature-string `Function` parameter (typed-literals design
@@ -941,7 +975,11 @@ function desugarSignatureString(
       canonical: false,
     });
   } else if (!isWide(type.result))
-    newBody = ce._fn('Typed', [body, ce.string(typeToString(type.result))], {
+    // `returnTypeText`, not `typeToString`: a result that is itself a signature
+    // has to stay GROUPED here, or the marker it builds re-reads as the
+    // literal's OWN contract (`functionLiteralDeclaredSignature`) instead of
+    // the return type the signature string declared.
+    newBody = ce._fn('Typed', [body, ce.string(returnTypeText(type.result))], {
       canonical: false,
     });
   return [newBody, ...params];
@@ -1641,7 +1679,7 @@ function makeLambda(
       // validation below never runs for one. (Measured before the guard: the
       // residual was built by re-attaching the FULL n-ary marker onto the
       // (n-k)-ary curried literal, whose §2.3 arity check then rejected it —
-      // `(_1) |-> Error("A generic function-literal signature must be …")`,
+      // `(_1) |-> Error("A function-literal signature marker must be …")`,
       // an error buried in the body rather than a diagnostic on the call.)
       // Partial INSTANTIATION is the principled lift; recorded as future work.
       if (isGenericLiteral)

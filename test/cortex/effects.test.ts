@@ -252,6 +252,51 @@ describe('CORTEX EFFECTS — regressions (no specifier anywhere)', () => {
         ],
       ]);
   });
+
+  test('an EFFECT-FREE grouped return type is a grouped type too (ruled 2026-08-04)', () => {
+    // The ungrouped ground arrow now declares the literal's OWN signature, so
+    // grouping is what every "returns a function" return type rests on —
+    // effect-free arrows exactly as effect-bearing ones. The parens survive
+    // into the marker text and back out.
+    expectRoundTrip('f(x) -> ((integer) -> integer) = g');
+    expect(validCortex('f(x) -> ((integer) -> integer) = g')).toStrictEqual([
+      'DefineFunction',
+      'f',
+      ['Function', ['Typed', 'g', { str: '((integer) -> integer)' }], 'x'],
+    ]);
+  });
+
+  test('an UNGROUPED ground marker decomposes to its RESULT (ruled 2026-08-04)', () => {
+    // `fnLiteralParts` decomposes an ungrouped ground marker just as it does an
+    // effect-bearing one. The marker's argument list is a cosmetic MIRROR (the
+    // literal's own operands are the parameters of record), so only the result
+    // reaches the surface — and the re-parsed definition means the same thing.
+    const def = [
+      'Assign',
+      'f',
+      [
+        'Function',
+        ['Typed', ['Multiply', 2, 'x'], { str: '(x: number) -> number' }],
+        'x',
+      ],
+    ] as MathJsonExpression;
+    expect(serializeCortex(def)).toBe('f(x) -> number = 2x');
+    expectRoundTrip('f(x) -> number = 2x');
+    // Same arrow type on both sides of the round trip.
+    const ce = new ComputeEngine();
+    expect(ce.box(def[2] as MathJsonExpression).type.toString()).toBe(
+      '(unknown) -> number'
+    );
+    expect(
+      ce
+        .box([
+          'Function',
+          ['Typed', ['Multiply', 2, 'x'], { str: 'number' }],
+          'x',
+        ] as MathJsonExpression)
+        .type.toString()
+    ).toBe('(unknown) -> number');
+  });
 });
 
 describe('CORTEX EFFECTS — anonymous contract literals (option B, ruled 2026-08-01)', () => {
@@ -273,6 +318,48 @@ describe('CORTEX EFFECTS — anonymous contract literals (option B, ruled 2026-0
       ['Typed', 'x', { str: '(x: unknown) random -> real' }],
       'x',
     ]);
+  });
+
+  test('an EFFECT-FREE ground marker round-trips the same way (ruled 2026-08-04)', () => {
+    // Widened from "effect-bearing" to "decomposed": an ungrouped ground arrow
+    // is the literal's own signature too, and the anonymous mapsto can spell
+    // none of it — not even the `-> ‹result›`. Dropping it was LOSSY whenever
+    // the marker's result is NARROWER than the body's inferred type: `x + 1`
+    // over a bare parameter infers `number` (finite-numeric widening), so
+    // `(x) |-> x + 1` would have silently widened this literal's `integer`
+    // return to `number`.
+    const lit = [
+      'Function',
+      ['Typed', ['Add', 'x', 1], { str: '(x: integer) -> integer' }],
+      'x',
+    ] as MathJsonExpression;
+    const ce = new ComputeEngine();
+    expect(ce.box(lit).type.toString()).toBe('(unknown) -> integer');
+    // …and the reading it would have degraded to.
+    expect(
+      ce.box(['Function', ['Add', 'x', 1], 'x'] as MathJsonExpression).type.toString()
+    ).toBe('(unknown) -> number');
+
+    const out = serializeCortex(lit);
+    expect(out).toBe('Function(Typed(x + 1, "(x: integer) -> integer"), x)');
+    expect(validCortex(out)).toStrictEqual(lit);
+    // The round trip preserves the arrow, not just the shape.
+    expect(ce.box(validCortex(out) as MathJsonExpression).type.toString()).toBe(
+      '(unknown) -> integer'
+    );
+  });
+
+  test('a GROUPED ground return type keeps the anonymous mapsto spelling', () => {
+    // The negative arm of the same gate: a grouped marker does NOT decompose,
+    // so it is an ordinary return-type ascription and is dropped, exactly as a
+    // bare `-> real` is.
+    expect(
+      serializeCortex([
+        'Function',
+        ['Typed', ['Add', 'x', 1], { str: '((integer) -> integer)' }],
+        'x',
+      ] as MathJsonExpression)
+    ).toBe('(x) |-> x + 1');
   });
 
   test('an effect-free ascription stays transparent', () => {

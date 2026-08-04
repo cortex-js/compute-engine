@@ -8,6 +8,7 @@ import {
   hasFunctionSignature,
   isValidType,
   isValidTypeName,
+  returnTypeText,
   signatureArms,
   widen,
 } from '../common/type/utils.js';
@@ -69,6 +70,7 @@ import {
   mintTypeConstructor,
 } from './type-constructors.js';
 import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
+import { paramsAreScalar } from './boxed-expression/boxed-function.js';
 import {
   functionLiteralDeclaredEffects,
   functionLiteralParameters,
@@ -1054,12 +1056,48 @@ export function assignFn(
         )
           throw declaredTypeError(id, reconciled, declaredType);
 
+        // A definition that ALREADY carries a user lambda keeps its OPERATOR
+        // representation: re-running `ce.assign('f', ⟨annotated literal⟩)` on
+        // the same symbol must land where the first run did (notebook re-run
+        // semantics — assign twice ≡ assign once). Migrating it to a VALUE def
+        // instead dropped the operator half wholesale, and with it the derived
+        // `broadcastable` flag and every `_isLambda`/`_lambdaLiteral` consumer,
+        // so the second run of a cell broadcast differently from the first.
+        // The DECLARED signature stays authoritative and travels onto the
+        // rebuilt def — so this changes the representation only: the
+        // compatibility checks above already rejected a literal that does not
+        // fit. (The `evaluate === undefined` half of the guard above — a
+        // declared-but-unimplemented signature — keeps installing a VALUE:
+        // that is what makes the object-form `ce.declare(f, { signature })`
+        // spelling observably identical to the string form.)
+        // The EFFECTS specifier travels only when its provenance is
+        // AUTHOR-STATED: the constructor reads ANY effect-bearing supplied
+        // signature as a declared contract, so carrying an INFERRED specifier
+        // over would promote it to one — a first bare assign of an effectful
+        // body would silently become a contract on the second, and later valid
+        // re-assigns would be checked against the previously-inferred set.
+        // Strip it instead and let the body walk restamp the inference.
+        if (def.operator.lambda !== undefined) {
+          const lambdaDef: OperatorDefinition = {
+            evaluate: reconciled,
+            signature: effectsDeclared
+              ? declaredType.type
+              : stripArrowEffects(declaredType.type),
+            broadcastable: paramsAreScalar(declaredType.type),
+          };
+          if (shadowBuiltin) ce._declareSymbolOperator(id, lambdaDef);
+          else {
+            updateDef(ce, id, def, lambdaDef);
+            ce._mutationGeneration += 1;
+            ce._semanticEpoch += 1;
+          }
+          return ce;
+        }
+
         // Store the reconciled literal as a VALUE under the declared signature
         // — the SAME representation the string-form (value-slot) declaration
         // produces. This makes the two spellings observably identical: `f(3)`
-        // type-errors against the declared param, and a well-typed call applies
-        // the lambda (an operator def cannot apply a bare tuple argument, so
-        // keeping it an operator would leave `f((3, 4))` unevaluated).
+        // type-errors against the declared param.
         if (shadowBuiltin) {
           ce._declareSymbolValue(id, {
             value: reconciled,
@@ -1238,6 +1276,18 @@ export function assignValueAsOperatorDef(
         declared === undefined
           ? stripped
           : withArrowEffects(stripped, declared),
+      // The derived signature makes `inferredSignature = false`, so calls now
+      // run through `validateArguments` — which admits a collection operand at
+      // a scalar parameter only when the definition is `broadcastable`. Left at
+      // its `false` default, a bare `ce.assign('f', ⟨annotated literal⟩)`
+      // REJECTED `f([1,2,3])` with `incompatible-type` while the very same
+      // literal broadcasts on the declare-then-assign VALUE route (`box.ts`
+      // gates that validation on `paramsAreScalar`) and on the COMPILED path
+      // (`userFunctionParamsAreScalar`, `base-compiler.ts`). Derive the flag
+      // the same way, so the three routes read one gate. Polytype-aware: a
+      // parameter quantified at a collection bound (`T: indexed_collection`)
+      // binds its argument WHOLE and keeps the flag false.
+      broadcastable: paramsAreScalar(stripped),
     };
   }
 
@@ -1455,10 +1505,12 @@ export function reconcileFunctionLiteralReturn(
 
   // Rebuild via the Phase-1 authoring form: wrap the body in a `Typed`
   // ascription and re-box so canonicalization normalizes it (§4.2 — the marker
-  // moves inside the Block, wrapping the last statement).
+  // moves inside the Block, wrapping the last statement). `returnTypeText`
+  // keeps a signature RESULT grouped, so the marker cannot re-read as the
+  // literal's own contract (`functionLiteralDeclaredSignature`).
   const rebuilt = ce.box([
     'Function',
-    ['Typed', literal.ops[0].json, `'${ce.type(declaredResult).toString()}'`],
+    ['Typed', literal.ops[0].json, `'${returnTypeText(declaredResult)}'`],
     ...literal.ops.slice(1).map((p) => p.json),
   ]);
   return isFunction(rebuilt, 'Function') ? rebuilt : literal;
