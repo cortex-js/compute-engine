@@ -2079,6 +2079,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
       enabled: options.cse,
       isStringVar: (name) =>
         vars !== undefined && typeof vars[name] === 'string',
+      isVarsKey: (name) =>
+        vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
     let code = withPythonHelpers(BaseCompiler.compileCseRoot(expr, target));
     if (this.includeImports) code = this.withImports(code);
@@ -2130,6 +2132,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
       enabled: options.cse,
       isStringVar: (name) =>
         vars !== undefined && typeof vars[name] === 'string',
+      isVarsKey: (name) =>
+        vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
     const code = withPythonHelpers(BaseCompiler.compileCseRoot(expr, target));
     return this.includeImports ? this.withImports(code) : code;

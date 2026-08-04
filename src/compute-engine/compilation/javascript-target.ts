@@ -4903,6 +4903,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         customOperator(name) !== undefined,
       isStringVar: (name) =>
         vars !== undefined && typeof vars[name] === 'string',
+      isVarsKey: (name) =>
+        vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
 
     const result = compileToTarget(expr, target, realOnly);
@@ -5380,9 +5382,11 @@ function builtinCombiner(op: Expression): string | undefined {
  * unary/ternary combiner fails closed at compile time rather than silently
  * dropping or fabricating an argument at runtime, where the interpreter
  * raises an arity error); or an operator symbol, which lowers to a binary
- * lambda only for the binary arithmetic operators (enforced in
- * `BaseCompiler.compile`, which fails closed for unary/relational/logical
- * operator symbols). A value-bound or dangling symbol fails closed too.
+ * lambda only for the binary arithmetic operators (checked here with
+ * `BaseCompiler.isBinaryInfixValueOperator` — every OTHER operator symbol
+ * now lowers to its eta-expanded wrapper at its own arity, e.g. the unary
+ * `_fn_Negate`, which is a valid `Map` callback but not a combiner). A
+ * value-bound or dangling symbol fails closed too.
  *
  * The result is wrapped to a fixed binary arity: native `reduce`/`map` pass
  * extra arguments (index, array) that must not leak into the combiner's
@@ -5400,7 +5404,10 @@ function customCombiner(
   } else if (isSymbol(op)) {
     const literal = BaseCompiler.userFunctionLiteral(op.engine, op.symbol);
     if (literal !== undefined) callable = literal.nops - 1 === 2;
-    else callable = target.operators?.(op.symbol) !== undefined;
+    else
+      callable =
+        target.operators?.(op.symbol) !== undefined &&
+        BaseCompiler.isBinaryInfixValueOperator(op.symbol);
   }
   if (!callable) return undefined;
   return `((_f) => (_a, _b) => _f(_a, _b))(${compile(op)})`;

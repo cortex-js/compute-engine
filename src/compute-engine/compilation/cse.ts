@@ -20,7 +20,6 @@ import type {
   FunctionInterface,
   IComputeEngine as ComputeEngine,
   BoxedOperatorDefinition,
-  BoxedDefinition,
 } from '../global-types.js';
 
 import {
@@ -29,6 +28,10 @@ import {
   isString,
 } from '../boxed-expression/type-guards.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
+import {
+  isPureBuiltinCallback,
+  systemScopeBinding,
+} from './builtin-callback.js';
 import { symbolAtSite } from '../boxed-expression/binding-sites.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 
@@ -328,6 +331,15 @@ export interface CseHarvestOptions {
   /** Is this symbol backed by a *string*-valued `vars` entry? (Non-string
    * `vars` are baked constants and are safe.) */
   readonly isStringVar?: (name: string) => boolean;
+  /** Is this symbol a `vars` key AT ALL (of any value kind)? A `vars` entry
+   * is the caller's external-input contract and WINS at emission over both
+   * function-value routes (`isBoundOrMapped` in `BaseCompiler.compile`), so a
+   * name that is a `vars` key is not the user function or built-in operator
+   * it happens to be spelled like — the callback relaxations below must not
+   * classify it on that premise. Broader than `isStringVar`: a non-string
+   * `vars` entry is a safe baked constant for the SOURCE-splicing gate, but
+   * it still overrides the name. */
+  readonly isVarsKey?: (name: string) => boolean;
 
   /**
    * Admit PURE user-defined function applications as candidates (Tycho item
@@ -460,6 +472,7 @@ class Harvester {
   private readonly engine: ComputeEngine;
   private readonly isOverriddenOperator: (name: string) => boolean;
   private readonly isStringVar: (name: string) => boolean;
+  private readonly isVarsKey: (name: string) => boolean;
   private readonly admitPureUserFunctions: boolean;
   /** Names no admission decision may resolve globally — see
    * `CseHarvestOptions.shadowedNames`. Filled once, in a prepass, BEFORE any
@@ -488,6 +501,7 @@ class Harvester {
   private readonly compileHandlerMemo = new Map<string, boolean>();
   private readonly opaqueOperandMemo = new Map<Expression, boolean>();
   private readonly opaqueSymbolMemo = new Map<string, boolean>();
+  private readonly builtinCallbackMemo = new Map<string, boolean>();
   private readonly symbolsMemo = new Map<Expression, Set<string>>();
 
   private clock = 0;
@@ -508,6 +522,7 @@ class Harvester {
     this.engine = root.engine as ComputeEngine;
     this.isOverriddenOperator = options.isOverriddenOperator ?? (() => false);
     this.isStringVar = options.isStringVar ?? (() => false);
+    this.isVarsKey = options.isVarsKey ?? (() => false);
     this.admitPureUserFunctions = options.admitPureUserFunctions === true;
     this.shadowedNames = new Set(options.shadowedNames ?? []);
     this.minSize = options.minSize ?? CSE_MIN_SIZE;
@@ -1140,12 +1155,9 @@ class Harvester {
     // provenance recorded at bootstrap overrides the scope test: no system
     // binding is offered for such a name, so both channels below classify it as
     // a caller handler. The set is fixed once the engine is constructed, so the
-    // memo stays valid.
-    const systemDef = this.engine._customLibraryOperators.has(id)
-      ? undefined
-      : (this.engine.contextStack[0]?.lexicalScope.bindings.get(id) as
-          | BoxedDefinition
-          | undefined);
+    // memo stays valid. (Shared with the built-in-callback predicates, which
+    // apply the same provenance test — `builtin-callback.ts`.)
+    const systemDef = systemScopeBinding(this.engine, id);
 
     let result = false;
     const ownDef = node.operatorDefinition;
@@ -1358,18 +1370,63 @@ class Harvester {
     // carries a function-matching type on the operand node itself, which
     // would otherwise reject it before its literal was ever consulted. A
     // SHADOWED name resolves to an enclosing binding, not to the global this
-    // would validate, so it is refused; a symbol resolving to a BUILT-IN
-    // operator definition has no literal and stays opaque.
+    // would validate, so it is refused; likewise a `vars` KEY, which wins at
+    // emission over both function-value routes, so the literal this would
+    // validate is not what the artifact calls. A symbol resolving to a
+    // BUILT-IN operator definition has no literal and is handled by the
+    // clause below.
     if (
       this.admitPureUserFunctions &&
       !this.shadowedNames.has(name) &&
+      !this.isVarsKey(name) &&
       this.userFnLiteralBody(name) !== undefined &&
       this.isAdmissibleUserFnCallee(name)
     )
       return false;
 
+    // A callback naming a PURE BUILT-IN operator (`Map(xs, Sin)`,
+    // `CountIf(xs, IsPrime)`) is likewise no longer invisible: the compiler
+    // eta-expands it into `(p) ↦ Sin(p)` and emits it as a shared local
+    // (`BaseCompiler.ensureBuiltinCallbackEmitted`), so what it does is
+    // exactly the built-in's own deterministic, effect-free emission — the
+    // same trust class as the table mapping an inline `x ↦ Sin(x)` callback
+    // would have gone through. Admitted only when ALL hold, mirroring
+    // emission so an operand that cannot emit never becomes CSE-eligible:
+    // the name is not shadowed, it is not a `vars` key (the caller's external
+    // input wins at emission, so the artifact does not call the built-in at
+    // all), it is not a caller `functions`/`operators` override (unknowable
+    // emitted purity — must stay opaque for MERGING even though emission does
+    // route through it), it resolves to the engine-authored system-scope
+    // definition, it is `pure`, and it is eta-expandable at its required
+    // arity (`Random` and the variadic operators decline). Same
+    // tested-before-the-type-gate reason as above. Name-keyed memo: every
+    // input is constant for one harvest.
+    if (
+      this.admitPureUserFunctions &&
+      !this.shadowedNames.has(name) &&
+      !this.isVarsKey(name) &&
+      !this.isOverriddenOperator(name) &&
+      this.isPureBuiltinCallbackName(name)
+    )
+      return false;
+
     if (operand.type.matches('function')) return true;
     return this.opaqueSymbolDefinition(name);
+  }
+
+  /**
+   * Memoized {@link isPureBuiltinCallback} — the provenance + purity + fixed
+   * arity gate a bare built-in operator name must clear to be admitted as a
+   * mergeable callback. Depends only on the name and engine state, both
+   * constant for the duration of one harvest; it consults no callee edge, so
+   * no neutral-edge guard is needed on the write.
+   */
+  private isPureBuiltinCallbackName(name: string): boolean {
+    const cached = this.builtinCallbackMemo.get(name);
+    if (cached !== undefined) return cached;
+    const result = isPureBuiltinCallback(this.engine, name);
+    this.builtinCallbackMemo.set(name, result);
+    return result;
   }
 
   /**

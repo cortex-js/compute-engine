@@ -65,6 +65,10 @@ import type {
 } from './types.js';
 import { candidateAt, childRegionAt, harvestCse } from './cse.js';
 import type { CseHarvest, CseHarvestOptions, CseRegion } from './cse.js';
+import {
+  builtinCallbackArity,
+  isRefusableBuiltinCallback,
+} from './builtin-callback.js';
 
 /**
  * A `_tv`/`_cse`-prefixed identifier token, as it appears inside a
@@ -266,6 +270,40 @@ export class BaseCompiler {
    */
   private static readonly BINARY_INFIX_VALUE_OPERATORS: ReadonlySet<string> =
     new Set(['Add', 'Subtract', 'Multiply', 'Divide']);
+
+  /**
+   * Does the bare operator symbol `s` lower to the binary infix lambda above?
+   *
+   * A target that consumes an operator symbol in a strictly BINARY role (a
+   * `Reduce`/`Scan` combiner) must ask: every other operator symbol now
+   * lowers to its eta-expanded wrapper at its OWN arity
+   * (`_fn_Negate = (t) => -t`), which is a valid `Map`/`Filter` callback but
+   * would silently mis-fold as a combiner (the interpreter raises an arity
+   * error there). Before eta-expansion existed, `BaseCompiler.compile` failed
+   * closed for those symbols and the combiner sites could rely on it.
+   */
+  static isBinaryInfixValueOperator(s: string): boolean {
+    return BaseCompiler.BINARY_INFIX_VALUE_OPERATORS.has(s);
+  }
+
+  /**
+   * The fail-closed (D6) refusal for a BUILT-IN operator name used in value
+   * position that has no first-class form: it neither eta-expands
+   * (`ensureBuiltinCallbackEmitted` declined — a variadic or zero-required
+   * signature, or a wrapper body that does not canonicalize) nor lowers to a
+   * binary infix lambda. Shared by the two routes that can reach that state
+   * (the `target.operators` branch and the bare-symbol branch) so both refuse
+   * with the same wording.
+   */
+  private static builtinCallbackRefusal(s: string): string {
+    return (
+      `${s}: cannot compile as a first-class function — the built-in ` +
+      `operator has no fixed arity to eta-expand at (a variadic or ` +
+      `zero-required signature), and only the binary arithmetic operators ` +
+      `(Add/Subtract/Multiply/Divide) lower to a combiner lambda. ` +
+      `Fail closed (D6).`
+    );
+  }
 
   /**
    * Compile `expr` as a **value operand** — a sub-expression spliced into a
@@ -596,15 +634,42 @@ export class BaseCompiler {
         // (D6) so the engine falls back to the interpreter instead of emitting
         // wrong-arity, invalid, or silently-diverging source (finding: Reduce/
         // Map over-accepted any operator symbol as a combiner/mapper).
-        if (!BaseCompiler.BINARY_INFIX_VALUE_OPERATORS.has(s))
-          throw new Error(
-            `${s}: cannot compile as a first-class function — only the binary ` +
-              `arithmetic operators (Add/Subtract/Multiply/Divide) lower to a ` +
-              `combiner lambda. Fail closed (D6).`
-          );
+        if (!BaseCompiler.BINARY_INFIX_VALUE_OPERATORS.has(s)) {
+          // …but a UNARY operator symbol (`Negate`, `Not`) is a perfectly good
+          // callback: eta-expand it here, before failing closed, exactly as
+          // the bare-symbol route below does for an unmapped built-in. Its
+          // wrapper BODY is an ordinary application, so it lowers through this
+          // very operator mapping (`_fn_Negate = (_tv1) => -_tv1`). Guarded
+          // like the route below so a BOUND name or a `vars` key spelled
+          // `Negate` keeps its current meaning (there, its current meaning is
+          // the refusal below).
+          const registry = target.userFunctions;
+          const isBoundOrMapped =
+            target.boundVars?.has(s) === true ||
+            target.varsKeys?.has(s) === true;
+          if (registry && !isBoundOrMapped) {
+            const etaFn = BaseCompiler.ensureBuiltinCallbackEmitted(
+              expr.engine,
+              s,
+              target
+            );
+            if (etaFn !== undefined && registry.lowering)
+              return registry.lowering.value({ id: s, name: etaFn, target });
+            if (etaFn !== undefined) return etaFn;
+          }
+          throw new Error(BaseCompiler.builtinCallbackRefusal(s));
+        }
         // We're compiling something like "Add"
         return `(a,b) => a ${op[0]} b`;
       }
+      // Resolving a free symbol RECORDS it as a vars-object reference (see
+      // `CompileTarget.varsObjectRefs`), and the lambda route refuses a body
+      // holding any. The two function-value routes below never emit that
+      // reference, so the record has to be rolled back when one of them
+      // answers — otherwise `t ↦ Sum(Map(xs, Sin))` is refused for a
+      // "dangling" `Sin` the artifact does not contain. Only a record THIS
+      // resolution introduced is removed.
+      const hadVarsRef = target.varsObjectRefs?.has(s) === true;
       const resolved = target.var?.(s);
       // A bare symbol naming a user-defined function, used in value position (a
       // higher-order operand such as `Map(list, f)` / `Filter(list, f)`),
@@ -642,12 +707,48 @@ export class BaseCompiler {
         );
         // A target whose language has no function VALUES (the shader targets)
         // decides what this reference means — in practice, fails closed (D6).
+        if (userFn !== undefined && !hadVarsRef)
+          target.varsObjectRefs?.delete(s);
         if (userFn !== undefined && registry.lowering)
           return registry.lowering.value({ id: s, name: userFn, target });
         if (userFn !== undefined) return userFn;
         // Memoize the negative lookup so a repeated free symbol doesn't re-hit
         // `lookupDefinition` on every occurrence during this compile.
         (registry.misses ??= new Set()).add(s);
+      }
+      // A bare BUILT-IN operator symbol in value position (`Map(xs, Sin)`,
+      // `CountIf(xs, IsPrime)`) is eta-expanded into `(p) ↦ Sin(p)` and
+      // emitted through the SAME shared-local machinery user functions use.
+      // Without this it fell through to the free-symbol read `_.Sin` and the
+      // artifact threw `_f is not a function` at RUN time — a broken artifact
+      // where the fail-closed principle wants either working code or a
+      // compile-time refusal. Tried AFTER the user-function route (a user
+      // definition shadowing the name wins) and only from THIS path, so an
+      // application HEAD (`Sin(x)` → `Math.sin(x)`) is untouched.
+      if (registry && !isBoundOrMapped) {
+        const etaFn = BaseCompiler.ensureBuiltinCallbackEmitted(
+          expr.engine,
+          s,
+          target
+        );
+        // As for user functions: a target whose language has no function
+        // VALUES (the shader targets) decides what this reference means — in
+        // practice, fails closed (D6).
+        if (etaFn !== undefined && !hadVarsRef) target.varsObjectRefs?.delete(s);
+        if (etaFn !== undefined && registry.lowering)
+          return registry.lowering.value({ id: s, name: etaFn, target });
+        if (etaFn !== undefined) return etaFn;
+        // A BUILT-IN operator name that could not be expanded (variadic,
+        // zero-required like `Random`, or a wrapper body that does not
+        // canonicalize) must not fall through to `_.Random`: that artifact
+        // compiles "successfully" and throws `_f is not a function` at run
+        // time. Fail closed (D6) — with the default `fallback: true` route
+        // this becomes an interpreter fallback. Scoped to a system-provenance
+        // operator name that is not one the engine itself reads as a variable
+        // (`isRefusableBuiltinCallback`): a plain free symbol, a value
+        // definition, a `vars` key, or a bound name is not affected.
+        if (isRefusableBuiltinCallback(expr.engine, s))
+          throw new Error(BaseCompiler.builtinCallbackRefusal(s));
       }
       if (resolved !== undefined) return resolved;
       // The target did not resolve the symbol (no `vars` mapping, constant, or
@@ -4703,6 +4804,31 @@ export class BaseCompiler {
     // consults are recorded by the body compile below.
     target.symbolDeps?.add(h);
 
+    return BaseCompiler.emitFunctionLiteralDefinition(
+      h,
+      literal,
+      target,
+      registry
+    );
+  }
+
+  /**
+   * Emit `literal` once into `registry.defs` as the named local function for
+   * `h` (`const _fn_h = …`) and return that local name.
+   *
+   * Shared by the two routes that have a `Function` literal in hand: a
+   * user-defined function (`ensureUserFunctionEmitted`) and the eta-expansion
+   * of a bare built-in operator symbol used as a callback
+   * (`ensureBuiltinCallbackEmitted`). Both therefore get the same shared
+   * local, the same nested-CSE harvest of the body, and the same target
+   * `lowering` hook.
+   */
+  private static emitFunctionLiteralDefinition(
+    h: string,
+    literal: Expression & FunctionInterface,
+    target: CompileTarget<Expression>,
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>
+  ): string | undefined {
     const name = BaseCompiler.userFunctionName(h);
 
     if (!registry.defs.has(name)) {
@@ -4777,6 +4903,64 @@ export class BaseCompiler {
     }
 
     return name;
+  }
+
+  /**
+   * If `s` names an eta-expandable BUILT-IN operator, synthesize the wrapper
+   * `(p₁ … pₙ) ↦ s(p₁ … pₙ)`, emit it once into `target.userFunctions.defs`
+   * and return that shared local name — so a built-in operator name used as a
+   * higher-order operand (`Map(xs, Sin)`, `CountIf(xs, IsPrime)`) is a real
+   * function VALUE rather than a dangling `_.Sin`.
+   *
+   * Eligibility (both halves in `builtin-callback.ts`, shared with the CSE
+   * admission test): the name resolves to the engine-authored system-scope
+   * definition by object identity, and its signature has a FIXED arity
+   * (`n ≥ 1` required parameters, no optional or variadic tail). Everything
+   * else — a user definition shadowing the name, a variadic operator like
+   * `Add`, an optional-tail one like `Ln` or `Random` — answers `undefined`
+   * and leaves the caller's previous behavior untouched.
+   *
+   * The wrapper BODY is an ordinary application, so a caller `functions` /
+   * `operators` override of that operator applies inside it — the same
+   * semantics an inline `x ↦ Sin(x)` callback has.
+   *
+   * Parameter names are drawn from the compilation's temp-name counter
+   * (`_tv1`, …), which already skips every name the artifact uses, so the
+   * synthesized wrapper can capture nothing.
+   */
+  static ensureBuiltinCallbackEmitted(
+    engine: ComputeEngine,
+    s: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const registry = target.userFunctions;
+    if (!registry) return undefined;
+
+    // Already emitted (a repeated reference): share the one definition, and
+    // in particular do NOT draw fresh temp names for it.
+    const name = BaseCompiler.userFunctionName(s);
+    if (registry.defs.has(name)) return name;
+
+    const arity = builtinCallbackArity(engine, s);
+    if (arity === undefined) return undefined;
+
+    const params: Expression[] = [];
+    for (let i = 0; i < arity; i++)
+      params.push(engine.symbol(BaseCompiler.tempVar(target)));
+    const literal = engine.function('Function', [
+      engine.function(s, params),
+      ...params,
+    ]);
+    // A built-in whose canonicalization refuses symbolic arguments would
+    // yield an error body: fail closed rather than emit it.
+    if (!isFunction(literal, 'Function') || !literal.isValid) return undefined;
+
+    return BaseCompiler.emitFunctionLiteralDefinition(
+      s,
+      literal,
+      target,
+      registry
+    );
   }
 
   /**
@@ -5185,6 +5369,11 @@ export class BaseCompiler {
             }
             return;
           }
+          // Likewise a bare BUILT-IN operator symbol in value position: the
+          // codegen eta-expands it into the shared local `_fn_Sin`
+          // (`ensureBuiltinCallbackEmitted`), so the artifact needs no input
+          // for it. Its wrapper body references nothing but its parameters.
+          if (builtinCallbackArity(engine, s) !== undefined) return;
         }
         // A symbol with a value (assigned, or a constant like `Pi`) is folded
         // into the code; descend into the value to surface any transitively
@@ -5635,6 +5824,7 @@ export class BaseCompiler {
       enabled?: boolean;
       isOverriddenOperator?: (name: string) => boolean;
       isStringVar?: (name: string) => boolean;
+      isVarsKey?: (name: string) => boolean;
     } = {}
   ): void {
     if (options.enabled === false || typeof target.cseBind !== 'function') {
@@ -5644,6 +5834,7 @@ export class BaseCompiler {
     const harvestOptions: CseHarvestOptions = {
       isOverriddenOperator: options.isOverriddenOperator,
       isStringVar: options.isStringVar,
+      isVarsKey: options.isVarsKey,
       // PURE user-function applications are admitted at the root too (item 120
       // follow-up): a repeated `f(x+1)` at the root is the same redundant call
       // as one inside a definition body. Admission validates the resolved

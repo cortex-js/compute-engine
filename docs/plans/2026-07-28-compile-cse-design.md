@@ -116,8 +116,12 @@ own design doc before any implementation.
   on user-fn-free trees; per-callee validation ≈ 0.02 ms, memoized per
   name per harvest), ROOT harvests admit them too, and a NAMED callback
   resolving to an admissible pure literal no longer blocks eligibility
-  (§5.2). Built-in named callbacks (`Map(xs, Sin)`) remain opaque — a
-  documented residual (§11).
+  (§5.2). Built-in named callbacks (`Map(xs, Sin)`) are admitted too: the
+  compiler eta-expands them at their REQUIRED arity into a shared emitted
+  wrapper, so they carry the built-in exemption's trust argument (§5.2). A
+  CALLER-OVERRIDDEN or `vars`-mapped operator name stays opaque, as does one
+  with no expandable arity (`Random`, `Less`), which emission now refuses at
+  compile time.
 - **Cross-region and cross-term hoisting** (PRE, LICM, sharing across
   unrolled terms): v2 (§11).
 - **Alpha-invariant merging**: `Sum(x², x)` and `Sum(y², y)` do not merge.
@@ -435,9 +439,48 @@ interval). The candidate pipeline, in order:
      as well as held lazy operands. The rule remains derived from the
      operand, not from an operator list. An inline `Function` literal is
      fine — its body is ordinary harvestable structure that passes these
-     gates recursively. Built-in operator names stay opaque (no literal
-     body to validate) — extending the built-in exemption's trust argument
-     to them is v2 (§11).
+     gates recursively. **Built-in operator names admitted 2026-08-03.**
+     A callback naming a built-in has no literal body to validate, but it
+     no longer needs one: the compiler ETA-EXPANDS it into
+     `(p₁ … pₙ) ↦ op(p₁ … pₙ)` and emits that wrapper as a shared local
+     through the user-function machinery
+     (`BaseCompiler.ensureBuiltinCallbackEmitted`) — before, the symbol
+     fell through to the free-variable read `_.Sin` and the artifact threw
+     `_f is not a function` at RUN time. What such a callback does is
+     therefore exactly the built-in's own deterministic, effect-free
+     emission: the built-in exemption's trust argument, extended. Admitted
+     when ALL hold (`isPureBuiltinCallback`, `compilation/builtin-callback.ts`,
+     the module emission shares — an operand that cannot eta-expand must
+     never become CSE-eligible): the name is not shadowed; it is not an
+     `isVarsKey` caller `vars` entry (the caller's external input WINS at
+     emission, so the artifact does not call the built-in at all — the
+     user-function relaxation above is gated on the same test); it is not an
+     `isOverriddenOperator` caller splice (unknowable emitted purity — it
+     stays opaque for MERGING even though emission does route through it);
+     it resolves to the engine-authored SYSTEM-scope definition by object
+     identity, and is not a `_customLibraryOperators` name (the same
+     provenance test `hasCallerCompileHandler` applies, now shared); the
+     definition is `pure` (so `Random` is refused); and it is expandable at
+     its REQUIRED arity.
+
+     **Required arity, not fixed arity (review round, 2026-08-03).** The
+     wrapper is built over the operator's `n ≥ 1` REQUIRED parameters. An
+     OPTIONAL tail does not disqualify: a callback site applies the operator
+     with only its required arguments (the optionals default), so
+     `(p) ↦ Ln(p)` is semantically exact and `Map(xs, Ln)` compiles. Only a
+     VARIADIC tail (`Add`, `Less`) or a zero-required signature (`Random`,
+     `Max`) has no single wrapper arity; those DECLINE, and emission then
+     FAILS CLOSED (D6) at compile time rather than falling through to the
+     free-variable read `_.Random` that throws at run time. Two carve-outs on
+     the refusal: it applies only in value position (an application HEAD is
+     untouched), and never to a bare single-uppercase-letter name (`D`, `N`),
+     which the engine's own `devolveUnappliedOperator` fallback reads as a
+     VARIABLE. A unary operator carrying a `target.operators` mapping
+     (`Negate`) is expanded on that branch too, before its
+     first-class-function refusal; its wrapper body lowers through the very
+     mapping. Reduce/Scan COMBINER sites, which need a strictly binary
+     operand, therefore check `BaseCompiler.isBinaryInfixValueOperator`
+     explicitly instead of relying on that refusal.
 
      **Shadow guard (review round, 2026-08-03).** Name-based resolution
      (`lookupDefinition`/`_getSymbolValue`) sees the engine scope at
@@ -660,7 +703,7 @@ visibility and evaluate-once).
 | --- | --- | --- | --- |
 | dedup (single occurrence of repeated code + value parity) | value+shape | value+shape | shape+pyexec |
 | purity / draw-stream (`WithRandomSeed`, cse on/off/interpreter; EFFECTS-MODEL dependency-order counterexample) | value | — | — |
-| emission purity (custom `functions`/`operators`/string-`vars` → no CSE through OR below the mapping; **named callbacks (2026-08-03): two identical `Map(xs, f)` with a PURE user `f` MERGE, a drawing `f` does NOT, a built-in callback (`Map(xs, Sin)`) stays opaque**; inline-literal callback eligible; splice containing `_cse1` doesn't collide) | value+shape | — | shape |
+| emission purity (custom `functions`/`operators`/string-`vars` → no CSE through OR below the mapping; **named callbacks (2026-08-03): two identical `Map(xs, f)` with a PURE user `f` MERGE, a drawing `f` does NOT; a PURE BUILT-IN callback (`Map(xs, Sin)`, the optional-tail `Ln`, the operator-mapped `Negate`) MERGES via its eta-expanded wrapper, while a drawing (`Random`), variadic (`Less`), CALLER-OVERRIDDEN or `vars`-mapped one does NOT**; inline-literal callback eligible; splice containing `_cse1` doesn't collide) | value+shape | — | shape |
 | capture (same-named subtree under different binders incl. `Integrate`, `D`; in/out of binder) | value+shape | shape | shape |
 | conditionality (arm-only candidates not hoisted; Coalesce default; chained-relation tail; §7.4 guard probe at `x = 0`) — one test per `LAZY_OPERANDS` entry | value+shape | shape | shape |
 | `Match` inert (JS: no `_cse` inside Match emission; interval-js/python: existing fail-closed contract asserted) | shape | shape | shape |
@@ -680,7 +723,7 @@ visibility and evaluate-once).
 | pure calls in definition bodies (item 120, `admitPureUserFunctions`: recursive self-call bound once INSIDE the conditional arm, depth-20 linear; drawing callee stays two calls; non-recursive coloneq body; callee body splicing a string-`vars` entry stays inert; stale installed signature — callee reassigned to draw — re-derived against current bindings) | value+shape | — | — |
 | pure calls at the ROOT (2026-08-03: repeated pure call binds once via assign AND coloneq routes; repeated drawing call stays two calls; forward-reference pin unchanged) | value+shape | — | — |
 | shadow guard (2026-08-03 review round: shadowed HEAD at root never binds — byte-equal to `cse: false`; shadowed OPERAND callback stays two traversals with call count preserved; nested-harvest param shadowing — `_fn_` body with a param named like an admissible global emits no `_cse`; unshadowed callback still merges) | value+shape | — | — |
-| eager-operator typed named callback (2026-08-03: repeated `CountIf(xs, purePredicate)` binds once; drawing predicate stays unmerged) | value+shape | — | — |
+| eager-operator typed named callback (2026-08-03: repeated `CountIf(xs, purePredicate)` binds once; drawing predicate stays unmerged; built-in predicate `CountIf(xs, Abs)` binds once; a user definition SHADOWING a built-in name routes through the user-function gate) | value+shape | — | — |
 
 ### Performance and complexity
 
@@ -835,12 +878,12 @@ recorded so they aren't rediscovered:
 - ~~Named/opaque callbacks to higher-order built-ins, behind sound
   callback effect projection.~~ **Landed for user-function literals
   2026-08-03** (§5.2: `computeOpaqueCallableOperand` resolves a
-  bare-symbol callback through `isAdmissibleUserFnCallee`). Remaining
-  residual: callbacks naming BUILT-IN operators (`Map(xs, Sin)`) stay
-  opaque — admitting them needs only the built-in exemption's trust
-  argument extended to operand position, but no corpus witness demands
-  it yet. Parameters and opaque function values stay excluded (nothing
-  to validate).
+  bare-symbol callback through `isAdmissibleUserFnCallee`), and for
+  BUILT-IN operator names the same day (§5.2: eta-expanded into a shared
+  emitted wrapper at its REQUIRED arity, then admitted when pure,
+  system-provenance and expandable; caller-overridden, `vars`-mapped and
+  variadic/zero-required names stay opaque). Parameters and
+  opaque function values stay excluded (nothing to validate).
 - Per-mapping purity attestation for caller-supplied `functions`, and a
   target-level emission-purity attestation re-enabling CSE on direct
   custom targets (§4.2).

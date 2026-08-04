@@ -1009,6 +1009,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         Object.prototype.hasOwnProperty.call(namedFunctions, name),
       isStringVar: (name) =>
         vars !== undefined && typeof vars[name] === 'string',
+      isVarsKey: (name) =>
+        vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
 
     const result = compileToIntervalTarget(expr, target);

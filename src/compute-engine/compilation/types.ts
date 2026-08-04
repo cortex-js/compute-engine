@@ -163,6 +163,7 @@ export type CseSession = {
   harvestOptions?: {
     isOverriddenOperator?: (name: string) => boolean;
     isStringVar?: (name: string) => boolean;
+    isVarsKey?: (name: string) => boolean;
     /** Names an admission decision may not resolve globally (enclosing
      * binder/parameter names). */
     shadowedNames?: ReadonlySet<string>;

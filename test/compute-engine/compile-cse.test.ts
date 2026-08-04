@@ -9,6 +9,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
+import { harvestCse } from '../../src/compute-engine/compilation/cse';
 import type { CompileTarget } from '../../src/compute-engine/compilation/types';
 import type { Expression } from '../../src/compute-engine/global-types';
 
@@ -371,7 +372,10 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     // `Map(xs, f)` impure (G1) and `f` itself inadmissible, so merging — which
     // would change the draw stream — never happens.
     const engine = new ComputeEngine();
-    engine.assign('drawer', engine.parse('x \\mapsto x + \\operatorname{Random}()'));
+    engine.assign(
+      'drawer',
+      engine.parse('x \\mapsto x + \\operatorname{Random}()')
+    );
     const expr = mappedTwice(engine, 'drawer');
     const result = compile(expr, { fallback: false });
 
@@ -380,12 +384,106 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     expect(occurrences(result.code, '.map(')).toBe(2);
   });
 
-  it('keeps a BUILT-IN operator callback opaque', () => {
-    // The relaxation covers user-function literals only: `Sin` resolves to an
-    // operator definition with no lambda literal, so `Map(xs, Sin)` stays out.
+  it('merges two identical `Map(xs, Sin)` with a BUILT-IN operator callback', () => {
+    // `Sin` resolves to the engine-authored system-scope operator definition,
+    // is `pure`, and has a FIXED unary signature — so the compiler
+    // eta-expands it into the shared local `_fn_Sin` and the harvest admits
+    // it exactly like a pure user-function callback.
     const engine = new ComputeEngine();
     const expr = mappedTwice(engine, 'Sin');
     const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    expect(occurrences(result.code, '.map(')).toBe(1);
+
+    const value = (result.run as (v: Record<string, number>) => number)({});
+    expect(value).toBe(
+      compile(expr, { fallback: false, cse: false }).run!({}) as number
+    );
+    expect(value).toBeCloseTo(expr.evaluate().N().re!, 12);
+  });
+
+  it('merges two identical `Map(xs, Ln)` — an OPTIONAL-tail built-in', () => {
+    // `Ln` expands at its REQUIRED arity (1 of 1 required + 1 optional), so
+    // it is admitted exactly like `Sin`.
+    const engine = new ComputeEngine();
+    const expr = mappedTwice(engine, 'Ln');
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    expect(occurrences(result.code, '.map(')).toBe(1);
+
+    const value = (result.run as (v: Record<string, number>) => number)({});
+    expect(value).toBe(
+      compile(expr, { fallback: false, cse: false }).run!({}) as number
+    );
+    expect(value).toBeCloseTo(expr.evaluate().N().re!, 12);
+  });
+
+  it('merges two identical `Map(xs, Negate)` — an OPERATOR-MAPPED built-in', () => {
+    const engine = new ComputeEngine();
+    const expr = mappedTwice(engine, 'Negate');
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    expect(occurrences(result.code, '.map(')).toBe(1);
+    expect((result.run as (v: Record<string, number>) => number)({})).toBe(
+      expr.evaluate().N().re!
+    );
+  });
+
+  it('keeps a DRAWING built-in callback (`Random`) opaque', () => {
+    // `Random` is impure AND has no expandable arity (zero required
+    // parameters), so it never becomes CSE-eligible. Emission now REFUSES it
+    // outright rather than emitting a broken artifact, so the opacity is
+    // pinned on the harvest itself.
+    const engine = new ComputeEngine();
+    const expr = mappedTwice(engine, 'Random');
+    expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
+
+    const harvest = harvestCse(expr, { admitPureUserFunctions: true });
+    expect(harvest.candidates).toHaveLength(0);
+  });
+
+  it('keeps a VARIADIC-tail built-in callback (`Less`) opaque', () => {
+    // One required parameter plus a variadic tail: no single wrapper arity,
+    // so emission refuses and the harvest must agree.
+    const engine = new ComputeEngine();
+    const expr = mappedTwice(engine, 'Less');
+    expect(() => compile(expr, { fallback: false })).toThrow(/Fail closed/);
+
+    const harvest = harvestCse(expr, { admitPureUserFunctions: true });
+    expect(harvest.candidates).toHaveLength(0);
+  });
+
+  it('keeps a `vars`-MAPPED built-in name opaque', () => {
+    // A `vars` entry is the caller's external-input contract and WINS at
+    // emission over the eta route, so the name is not the built-in it is
+    // spelled like — admitting it would rest on a false premise. A NON-string
+    // `vars` value is a baked constant, so the source-splicing gate
+    // (`isStringVar`) does not cover it; the broader `isVarsKey` test does.
+    // (The user-function relaxation is gated on the identical test.)
+    const engine = new ComputeEngine();
+    const expr = mappedTwice(engine, 'Sin');
+    const code = new JavaScriptTarget().compile(expr, {
+      vars: { Sin: 5 } as unknown as Record<string, string>,
+    }).code;
+
+    expect(code).not.toMatch(/_cse\d/);
+    expect(occurrences(code, '.map(')).toBe(2);
+    expect(code).not.toContain('_fn_Sin');
+  });
+
+  it('keeps a CALLER-OVERRIDDEN built-in callback opaque', () => {
+    // A `functions` mapping splices caller source of unknowable purity into
+    // the wrapper BODY, so the operand must stay opaque for MERGING even
+    // though emission still routes through the eta-expanded wrapper.
+    const engine = new ComputeEngine();
+    const expr = mappedTwice(engine, 'Sin');
+    const result = compile(expr, {
+      fallback: false,
+      functions: { Sin: 'mySin' },
+    });
 
     expect(result.code).not.toMatch(/_cse\d/);
     expect(occurrences(result.code, '.map(')).toBe(2);
@@ -509,7 +607,10 @@ describe('COMPILE CSE — capture', () => {
     // The outer occurrences bind; the loop body is emitted unshared, and the
     // outer temporary never appears inside the loop.
     expect(code).toContain('const _cse2 = _IA.sin(_IA.mul(_IA.point(6), _.n))');
-    const loop = code.slice(code.indexOf('for (let n'), code.indexOf('return _tv1'));
+    const loop = code.slice(
+      code.indexOf('for (let n'),
+      code.indexOf('return _tv1')
+    );
     expect(loop).not.toContain('_cse');
   });
 
@@ -904,9 +1005,11 @@ describe('COMPILE CSE — name collisions', () => {
   });
 
   it('does not capture a Python parameter named `_cse1`', () => {
-    const code = new PythonTarget().compileFunction(ce.box(probe3('_cse1')), 'f', [
-      '_cse1',
-    ]);
+    const code = new PythonTarget().compileFunction(
+      ce.box(probe3('_cse1')),
+      'f',
+      ['_cse1']
+    );
     expect(code).toBe(
       'def f(_cse1):\n' +
         '    return [_cse2 + _cse2 + _cse2 ** 2 for _cse2 in [np.sin(6 * _cse1)]][0]\n'
@@ -1114,8 +1217,14 @@ describe('COMPILE CSE — options', () => {
 
   it('a REUSED caller-built direct target compiles identically twice', () => {
     const target = new JavaScriptTarget().createTarget();
-    const first = compile(ce.parse(PROBE_LATEX), { target, fallback: false }).code;
-    const second = compile(ce.parse(PROBE_LATEX), { target, fallback: false }).code;
+    const first = compile(ce.parse(PROBE_LATEX), {
+      target,
+      fallback: false,
+    }).code;
+    const second = compile(ce.parse(PROBE_LATEX), {
+      target,
+      fallback: false,
+    }).code;
 
     expect(second).toBe(first);
     expect(first).not.toMatch(/_cse/);
@@ -1157,7 +1266,10 @@ describe('COMPILE CSE — options', () => {
 describe('COMPILE CSE — user-function body dedup', () => {
   const engineWithF = () => {
     const engine = new ComputeEngine();
-    engine.assign('f', engine.parse('x \\mapsto \\sin(6x)^2 + \\sin(6x) + \\sin(6x)'));
+    engine.assign(
+      'f',
+      engine.parse('x \\mapsto \\sin(6x)^2 + \\sin(6x) + \\sin(6x)')
+    );
     return engine;
   };
 
@@ -1290,7 +1402,10 @@ describe('COMPILE CSE — repeated pure calls in definition bodies (item 120)', 
   it('does not bind a repeated IMPURE call (two draws stay two draws)', () => {
     const engine = new ComputeEngine();
     engine.declare('D_0', '(number) -> number');
-    engine.assign('D_0', engine.parse('(n)\\mapsto n+\\operatorname{Random}()'));
+    engine.assign(
+      'D_0',
+      engine.parse('(n)\\mapsto n+\\operatorname{Random}()')
+    );
     engine.declare('W_0', '(number) -> number');
     engine.assign('W_0', engine.parse('(t)\\mapsto D_0(t)+D_0(t)'));
     const result = compile(engine.parse('(u)\\mapsto W_0(u)'), {
@@ -1305,14 +1420,14 @@ describe('COMPILE CSE — repeated pure calls in definition bodies (item 120)', 
 
   it('binds a repeated pure call in a NON-recursive coloneq-defined body', () => {
     const engine = new ComputeEngine();
-    engine.parse('h(i)\\coloneq\\operatorname{mod}(10^4\\sin(10^4i),1)').evaluate();
+    engine
+      .parse('h(i)\\coloneq\\operatorname{mod}(10^4\\sin(10^4i),1)')
+      .evaluate();
     engine.parse('g(t)\\coloneq h(t)+h(t)^2').evaluate();
     const result = compile(engine.parse('(u)\\mapsto g(u)'), {
       fallback: false,
     });
-    const def = result.code
-      .split('\n')
-      .find((l) => l.includes('const _fn_g'))!;
+    const def = result.code.split('\n').find((l) => l.includes('const _fn_g'))!;
     // The two h(t) occurrences share one binding.
     expect(occurrences(def, 'const _cse')).toBe(1);
   });
@@ -1348,7 +1463,10 @@ describe('COMPILE CSE — repeated pure calls in definition bodies (item 120)', 
     engine.assign('k_1', engine.parse('(n)\\mapsto n+1'));
     engine.assign('h_1', engine.parse('(t)\\mapsto k_1(t)+1'));
     engine.assign('m_1', engine.parse('(t)\\mapsto h_1(t)+h_1(t)^2'));
-    engine.assign('k_1', engine.parse('(n)\\mapsto n+\\operatorname{Random}()'));
+    engine.assign(
+      'k_1',
+      engine.parse('(n)\\mapsto n+\\operatorname{Random}()')
+    );
     const result = compile(engine.parse('(w)\\mapsto m_1(w)'), {
       functions: {},
       fallback: false,
@@ -1411,7 +1529,10 @@ describe('COMPILE CSE — repeated pure calls at the ROOT (item 120 follow-up)',
 
   it('leaves a repeated DRAWING call as two calls at the root', () => {
     const engine = new ComputeEngine();
-    engine.assign('d_2', engine.parse('(t)\\mapsto t+\\operatorname{Random}()'));
+    engine.assign(
+      'd_2',
+      engine.parse('(t)\\mapsto t+\\operatorname{Random}()')
+    );
     const result = compile(engine.parse('d_2(x+1) + d_2(x+1)^2'), {
       fallback: false,
     });
@@ -1565,6 +1686,42 @@ describe('COMPILE CSE — typed named callback of an eager operator', () => {
 
     expect(occurrences(result.code, '.filter(')).toBe(3);
   });
+
+  it('merges repeated `CountIf(xs, Abs)` with a BUILT-IN predicate', () => {
+    // The same relaxation for a callback naming a pure, fixed-arity built-in.
+    // (`Abs` rather than `IsPrime`: the natural predicate has no JavaScript
+    // lowering, so its wrapper body would fail closed before merging is even
+    // reachable — see `compile.test.ts`.)
+    const engine = new ComputeEngine();
+    const countIf = (): any => ['CountIf', ['List', 1, 2, 3, 4, 5], 'Abs'];
+    const expr = engine.box(['Add', countIf(), countIf(), countIf()] as any);
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    expect(occurrences(result.code, '.filter(')).toBe(1);
+
+    const off = compile(expr, { fallback: false, cse: false });
+    expect((result.run as (v: any) => number)({})).toBe(
+      (off.run as (v: any) => number)({})
+    );
+  });
+
+  it('routes a SHADOWED built-in name through the user-function gate', () => {
+    // A user definition assigned over a built-in name is not identity-equal
+    // to the system-scope binding, so the built-in provenance test refuses it
+    // and the user-function relaxation (which validates the literal body)
+    // owns the verdict.
+    const engine = new ComputeEngine();
+    engine.assign('Sin', engine.parse('x \\mapsto x + 1'));
+    const mapped = ['Sum', ['Map', ['List', 1, 2, 3, 4, 5], 'Sin']];
+    const expr = engine.box(['Add', mapped, mapped] as any);
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    expect(result.code).not.toContain('Math.sin');
+    // 2 × (2 + 3 + 4 + 5 + 6) — the USER definition, not the built-in.
+    expect((result.run as (v: any) => number)({})).toBe(40);
+  });
 });
 
 /**
@@ -1620,10 +1777,32 @@ describe('COMPILE CSE — non-scalar aliasing', () => {
   const aliased = () =>
     ce.box([
       'Add',
-      ['At', ['Sort', ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']]], 1],
-      ['At', ['Reverse', ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']]], 1],
-      ['At', ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']], 1],
-      ['At', ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']], 2],
+      [
+        'At',
+        [
+          'Sort',
+          ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']],
+        ],
+        1,
+      ],
+      [
+        'At',
+        [
+          'Reverse',
+          ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']],
+        ],
+        1,
+      ],
+      [
+        'At',
+        ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']],
+        1,
+      ],
+      [
+        'At',
+        ['List', ['Sin', 'u'], ['Cos', 'u'], ['Sinh', 'u'], ['Cosh', 'u']],
+        2,
+      ],
     ]);
 
   it('shares one array across Sort, Reverse and direct access without drift', () => {
@@ -1890,7 +2069,9 @@ pyDescribe('COMPILE CSE — Python emitted source (pyexec)', () => {
       const t = ['Sin', ['Multiply', k + 2, 'u']];
       terms.push(t, t, t);
     }
-    const source = new PythonTarget().compileToSource(ce.box(['Add', ...terms]));
+    const source = new PythonTarget().compileToSource(
+      ce.box(['Add', ...terms])
+    );
     expect(occurrences(source, 'for _cse')).toBe(32);
     astParse(source, 'stress');
 
@@ -1916,11 +2097,16 @@ pyDescribe('COMPILE CSE — Python emitted source (pyexec)', () => {
  */
 describe('COMPILE CSE — conditionality, per lazy-operand entry', () => {
   /** The index at which the guarded region begins in the emitted source. */
-  const guardAt = (code: string, marker: string): number => code.indexOf(marker);
+  const guardAt = (code: string, marker: string): number =>
+    code.indexOf(marker);
 
   it.each([
     ['If (value arms)', ce.box(['If', ['Less', 'x', 0], probe3('u'), 0]), '?'],
-    ['When (the value arm)', ce.box(['When', probe3('u'), ['Less', 'x', 0]]), '?'],
+    [
+      'When (the value arm)',
+      ce.box(['When', probe3('u'), ['Less', 'x', 0]]),
+      '?',
+    ],
     [
       'And (operands after the first)',
       ce.box(['And', ['Less', 'x', 0], ['Less', 0, probe3('u')]]),
@@ -1958,8 +2144,16 @@ describe('COMPILE CSE — conditionality, per lazy-operand entry', () => {
     // which only the guarded code performs.
     const cases: Array<[string, Expression, Record<string, unknown>]> = [
       ['If', ce.box(['If', ['Less', 'x', 0], probe3('u'), 0]), { x: 1 }],
-      ['And', ce.box(['And', ['Less', 'x', 0], ['Less', 0, probe3('u')]]), { x: 1 }],
-      ['Or', ce.box(['Or', ['Less', 'x', 0], ['Less', 0, probe3('u')]]), { x: -1 }],
+      [
+        'And',
+        ce.box(['And', ['Less', 'x', 0], ['Less', 0, probe3('u')]]),
+        { x: 1 },
+      ],
+      [
+        'Or',
+        ce.box(['Or', ['Less', 'x', 0], ['Less', 0, probe3('u')]]),
+        { x: -1 },
+      ],
       ['Coalesce', ce.box(['Coalesce', 'x', probe3('u')]), { x: 1 }],
     ];
     for (const [name, expr, base] of cases) {
@@ -2167,7 +2361,13 @@ describe('COMPILE CSE — emission purity (G1b), built-in compile handlers', () 
     // The load-bearing interaction: the exemption relies entirely on G1. Three
     // `PointList`s over four draws each stay three independent draw sequences.
     const e = listEngine();
-    const draws = (): any => ['Add', ['Random'], ['Random'], ['Random'], ['Random']];
+    const draws = (): any => [
+      'Add',
+      ['Random'],
+      ['Random'],
+      ['Random'],
+      ['Random'],
+    ];
     const pl = (): any => ['PointList', draws(), 'n'];
     const result = compile(e.box(['List', pl(), pl(), pl()] as any), {
       fallback: false,

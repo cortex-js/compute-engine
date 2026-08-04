@@ -17,9 +17,39 @@
   typed callbacks of eager operators such as `CountIf` (a drawing `f` still
   compiles to two — draw streams and call counts are preserved; a callback or
   callee name shadowed by an enclosing parameter is conservatively never
-  merged). Callbacks naming
-  built-in operators (`Map(xs, Sin)`) remain conservatively excluded. Opt out
-  as before with `compile(expr, { cse: false })`.
+  merged). Callbacks naming **built-in** operators (`Map(xs, Sin)`,
+  `CountIf(xs, IsPrime)`) are now admitted as well: the compiler eta-expands
+  them into a shared emitted wrapper, so what they do is the built-in's own
+  deterministic, effect-free emission. They merge when the operator is pure,
+  is the engine's own definition for that name, and has at least one required
+  parameter and no variadic tail — a drawing built-in (`Random`), a variadic
+  one (`Add`, `Less`), a name a user definition shadows, a name a caller
+  `vars` entry maps, and a name a caller `functions` / `operators` mapping
+  overrides all stay conservatively excluded. Opt out as before with
+  `compile(expr, { cse: false })`.
+
+### Bug Fixes
+
+- **A built-in operator name used as a callback no longer compiles to a broken
+  artifact.** `Map(xs, Sin)`, `CountIf(xs, IsPrime)` and the like compiled
+  "successfully" and then threw `_f is not a function` at run time: the
+  callback symbol fell through to a free-variable lookup instead of resolving
+  to a function. Such a name is now eta-expanded into a shared emitted wrapper
+  (`const _fn_Sin = (_tv1) => Math.sin(_tv1)`) — the same machinery a
+  user-defined function callback already used — so the artifact runs and
+  agrees with the interpreter. The expansion happens at the operator's
+  **required** arity, so an operator with an OPTIONAL tail works too
+  (`Sum(Map(xs, Ln))`: a callback site applies `Ln` unary and the optional
+  base defaults), as does a unary operator with a target operator mapping
+  (`Negate`), which the bare-operator-symbol path used to refuse outright.
+  Where a built-in cannot be expanded at all — a variadic tail (`Less`), no
+  required parameter (`Random`), or a wrapper body with no lowering on the
+  target (`IsPrime` on JavaScript, any function value on the shader targets) —
+  compilation now fails closed at compile time and the caller falls back to
+  the interpreter, instead of producing an artifact that throws. (A bare
+  single-uppercase-letter operator name such as `D` or `N` is exempt: the
+  engine reads those as variables when they appear un-applied, so they keep
+  their free-symbol reading.)
 
 ## 0.100.3 _2026-08-03_
 

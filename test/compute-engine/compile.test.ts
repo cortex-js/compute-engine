@@ -386,11 +386,7 @@ describe('COMPILE', () => {
 
     describe('Distance compilation', () => {
       it('should compile and run Distance on two tuples', () => {
-        const expr = ce.expr([
-          'Distance',
-          ['Tuple', 3, 4],
-          ['Tuple', 0, 0],
-        ]);
+        const expr = ce.expr(['Distance', ['Tuple', 3, 4], ['Tuple', 0, 0]]);
         const r = compile(expr);
         expect(r?.success).toBe(true);
         expect(r?.run?.()).toEqual(5);
@@ -408,7 +404,13 @@ describe('COMPILE', () => {
         expect(r?.success).toBe(true);
         expect(r?.run?.({ P: [[3, 4]], Q: [[0, 0]] })).toEqual([5]);
         expect(() =>
-          r?.run?.({ P: [[1, 2]], Q: [[0, 0], [1, 1]] })
+          r?.run?.({
+            P: [[1, 2]],
+            Q: [
+              [0, 0],
+              [1, 1],
+            ],
+          })
         ).toThrow(/Distance: dimension mismatch/);
       });
     });
@@ -1814,9 +1816,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
   // is non-finite only at RUN time keeps the `[]` projection above.
   it('Repeat: a statically non-finite count fails closed', () => {
     const e = mkEngine();
-    expect(
-      e.box(['Repeat', 7, 'PositiveInfinity']).evaluate().toString()
-    ).toBe('Repeat(7, +oo)');
+    expect(e.box(['Repeat', 7, 'PositiveInfinity']).evaluate().toString()).toBe(
+      'Repeat(7, +oo)'
+    );
     expect(() =>
       compile(e.box(['Repeat', 7, 'PositiveInfinity']), { fallback: false })
     ).toThrow(/Fail closed/);
@@ -1827,9 +1829,9 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
 
   it('Repeat: the 1-argument (infinite) form fails closed', () => {
     const e = mkEngine();
-    expect(() =>
-      compile(e.box(['Repeat', 7]), { fallback: false })
-    ).toThrow(/Fail closed/);
+    expect(() => compile(e.box(['Repeat', 7]), { fallback: false })).toThrow(
+      /Fail closed/
+    );
   });
 
   // Native-array collection operators (Tier 2). Every value below was
@@ -2842,6 +2844,9 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
     // A unary (Negate/Not) or relational (Less) operator symbol must NOT lower
     // to a binary infix lambda: it would fold to garbage behind success:true
     // (Negate → −6, Less → true) while the interpreter stays symbolic.
+    // `Negate` now eta-expands to a UNARY callback (fine for `Map`), so the
+    // COMBINER site is what refuses it here
+    // (`BaseCompiler.isBinaryInfixValueOperator`).
     const e = new ComputeEngine();
     const js = new JavaScriptTarget();
     for (const op of ['Negate', 'Not', 'Less', 'Greater', 'And', 'Or']) {
@@ -2861,17 +2866,16 @@ describe('COMPILE higher-order combiner/mapper fail-closed', () => {
   it('Map/Filter over an operator symbol fall back to the interpreter — finding 1', () => {
     const e = new ComputeEngine();
     const js = new JavaScriptTarget();
-    // Direct target compilation fails closed…
-    expect(() =>
-      js.compile(e.box(['Map', L, 'Negate']), { realOnly: true })
-    ).toThrow(/Fail closed/);
+    // A NON-expandable operator symbol (variadic `Less`) still fails closed…
     expect(() =>
       js.compile(e.box(['Filter', L, 'Less']), { realOnly: true })
     ).toThrow(/Fail closed/);
-    // …and the engine-level compile (with fallback) reports success:false and
-    // yields the interpreter's result rather than garbage.
+    // …but a UNARY one is eta-expanded into a real callback rather than
+    // refused: `Map(L, Negate)` is a valid application at `Negate`'s own
+    // arity (it is only a *combiner* that needs two parameters). It compiles
+    // and agrees with the interpreter.
     const m = compile(e.box(['Map', L, 'Negate']));
-    expect(m?.success).toBe(false);
+    expect(m?.success).toBe(true);
     expect((m?.run as (v: Record<string, number>) => number[])({})).toEqual([
       -1, -2, -3,
     ]);
@@ -3108,5 +3112,166 @@ describe('ordering over a complex-valued operand fails closed', () => {
       { fallback: false }
     );
     expect(r?.success).toBe(true);
+  });
+});
+
+/**
+ * A BUILT-IN operator name used as a CALLBACK (`Map(xs, Sin)`,
+ * `CountIf(xs, IsPrime)`). It used to fall through to the free-variable read
+ * `_.Sin`, so the artifact compiled "successfully" and then threw
+ * `_f is not a function` at RUN time. It is now eta-expanded at its REQUIRED
+ * arity into a shared emitted local — `const _fn_Sin = (_tv1) =>
+ * Math.sin(_tv1)` — through the same machinery user-defined function
+ * callbacks use. A built-in with no expandable arity (variadic, zero
+ * required) fails closed at COMPILE time instead.
+ */
+describe('COMPILE built-in operator name as a callback', () => {
+  const XS = ['List', 1, 2, 3, 4, 5];
+  /** `sin 1 + … + sin 5`, from the interpreter. */
+  const SUM_SIN = new ComputeEngine()
+    .box(['Sum', ['Map', XS, 'Sin']])
+    .evaluate()
+    .N().re!;
+
+  it('compiles and runs `Sum(Map(xs, Sin))`', () => {
+    const e = new ComputeEngine();
+    const expr = e.box(['Sum', ['Map', XS, 'Sin']]);
+    const r = compile(expr, { fallback: false })!;
+
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_fn_Sin');
+    expect(r.code).not.toContain('_.Sin');
+    expect(r.run!({}) as number).toBeCloseTo(expr.evaluate().N().re!, 12);
+  });
+
+  it('emits the wrapper once, as a shared local', () => {
+    // The `Function`-literal route puts the emitted definitions in `code`.
+    const e = new ComputeEngine();
+    const expr = e.box([
+      'Function',
+      ['Add', ['Sum', ['Map', XS, 'Sin']], 't'],
+      't',
+    ]);
+    const r = compile(expr, { fallback: false })!;
+
+    expect(r.code).toContain('const _fn_Sin = (_tv1) => Math.sin(_tv1);');
+    expect(r.code.split('const _fn_Sin').length - 1).toBe(1);
+    expect(r.run!(0.5) as number).toBeCloseTo(0.5 + SUM_SIN, 12);
+  });
+
+  it('does not report the callback as a free symbol', () => {
+    // The artifact needs no `Sin` input: the declarative reference analysis
+    // must agree with the codegen.
+    const e = new ComputeEngine();
+    const r = compile(e.box(['Sum', ['Map', XS, 'Sin']]), { fallback: false })!;
+    expect(r.freeSymbols).toEqual([]);
+  });
+
+  it('leaves the APPLICATION HEAD untouched', () => {
+    // The eta route is reachable only from the bare-symbol (value) position:
+    // `Sin(x)` must still emit the table mapping, never `_fn_Sin`.
+    const e = new ComputeEngine();
+    const r = compile(e.parse('\\sin(x)^2 + \\sin(2x)'), { fallback: false })!;
+    expect(r.code).toContain('Math.sin(');
+    expect(r.code).not.toContain('_fn_');
+  });
+
+  it('does not capture a same-named lambda parameter', () => {
+    // The wrapper's parameter is drawn from the compilation's temp-name
+    // counter, which skips every name the artifact already uses.
+    const e = new ComputeEngine();
+    const expr = e.box([
+      'Function',
+      ['Add', ['Sum', ['Map', XS, 'Sin']], '_tv1'],
+      '_tv1',
+    ]);
+    const r = compile(expr, { fallback: false })!;
+
+    expect(r.code).toContain('const _fn_Sin = (_tv2) => Math.sin(_tv2);');
+    expect(r.run!(10) as number).toBeCloseTo(10 + SUM_SIN, 12);
+  });
+
+  it('expands an OPTIONAL-tail operator at its required arity (`Ln`)', () => {
+    // `Ln` is 1 required + 1 optional parameter. A callback site applies it
+    // unary (the optional base defaults), so the unary wrapper is exact —
+    // it must NOT decline and fall through to a dangling `_.Ln`.
+    const e = new ComputeEngine();
+    const expr = e.box(['Sum', ['Map', XS, 'Ln']]);
+    const r = compile(expr, { fallback: false })!;
+
+    expect(r.code).not.toContain('_.Ln');
+    expect(r.run!({}) as number).toBeCloseTo(expr.evaluate().N().re!, 12);
+  });
+
+  it('expands a unary OPERATOR-MAPPED built-in (`Negate`)', () => {
+    // `Negate` has a `target.operators` mapping, so the bare-operator-symbol
+    // branch owns it and used to refuse outright. It now eta-expands there
+    // too — its wrapper body lowers through that very operator mapping.
+    // (`Not` is mapped and unary as well, but `Not(_tv1)` does not
+    // canonicalize over an untyped parameter, so it still fails closed.)
+    const e = new ComputeEngine();
+    const expr = e.box(['Sum', ['Map', XS, 'Negate']]);
+    const r = compile(expr, { fallback: false })!;
+
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_fn_Negate');
+    expect(r.run!({}) as number).toBe(expr.evaluate().N().re!);
+  });
+
+  it('fails CLOSED for an operator with no expandable arity', () => {
+    // `Random` (zero required) and `Less`/`NotLess` (one required plus a
+    // VARIADIC tail — the mapped and unmapped routes respectively) have no
+    // single wrapper arity. Rather than emitting a dangling `_.Random` that
+    // throws `_f is not a function` at RUN time, they refuse at compile time.
+    const e = new ComputeEngine();
+    for (const op of ['Random', 'Less', 'NotLess']) {
+      expect(() =>
+        compile(e.box(['Map', XS, op]), { fallback: false })
+      ).toThrow(
+        new RegExp(
+          `${op}: cannot compile as a first-class function[\\s\\S]*Fail closed`
+        )
+      );
+    }
+    // With the default fallback route the interpreter answers instead.
+    const r = compile(e.box(['Map', XS, 'Random']));
+    expect(r?.success).toBe(false);
+  });
+
+  it('leaves a NON-built-in free symbol alone', () => {
+    // The fail-closed refusal is scoped to a system-provenance operator name:
+    // a plain unknown symbol in callback position keeps its previous
+    // free-variable read.
+    const e = new ComputeEngine();
+    const r = compile(e.box(['Map', XS, 'zork']), { fallback: false })!;
+    expect(r.code).toContain('_.zork');
+  });
+
+  it('fails CLOSED when the wrapper body has no lowering', () => {
+    // `IsPrime` eta-expands, but its application has no JavaScript mapping:
+    // a compile-time refusal, not an artifact that throws at run time.
+    const e = new ComputeEngine();
+    expect(() =>
+      compile(e.box(['CountIf', XS, 'IsPrime']), { fallback: false })
+    ).toThrow(/Fail closed/);
+
+    // With the fallback, the interpreter answers.
+    const r = compile(e.box(['CountIf', XS, 'IsPrime']));
+    expect(r?.success).toBe(false);
+    expect(r!.run!({})).toBe(3);
+  });
+
+  it('applies a caller `functions` override inside the wrapper', () => {
+    // The wrapper body is an ordinary application, so a caller mapping of the
+    // operator applies within it — the same semantics an inline
+    // `x ↦ Sin(x)` callback has.
+    const e = new ComputeEngine();
+    const expr = e.box([
+      'Function',
+      ['Add', ['Sum', ['Map', XS, 'Sin']], 't'],
+      't',
+    ]);
+    const r = compile(expr, { fallback: false, functions: { Sin: 'mySin' } })!;
+    expect(r.code).toContain('const _fn_Sin = (_tv1) => mySin(_tv1);');
   });
 });

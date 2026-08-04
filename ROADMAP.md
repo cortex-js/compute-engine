@@ -140,6 +140,30 @@ A compile decline is not a slow path — the consumer's JS wrapper installs a
 `() => NaN` stub, so a declining row **draws nothing**. Treat these as
 correctness gaps with a performance-shaped symptom.
 
+- **Callback parameter complexness is not analyzed (pre-existing, surfaced
+  by the 2026-08-03 built-in-callback review).** A callback body — inline
+  literal or emitted wrapper alike — compiles its parameter as
+  statically real, so `Map([3+4i], Abs)` (and `x ↦ Abs(x)` over the same
+  list) emits `Math.abs`, receives the `{re, im}` object at runtime, and
+  silently returns `NaN` instead of 5 or failing closed. Verified
+  identical for inline literals and named/eta-expanded callbacks, so no
+  regression — but it is a silent-wrong-value class, unlike the ledger's
+  declining rows. The fix is a complexness projection from the
+  collection's element type into the callback's parameter (or a
+  fail-closed gate when the element type is provably complex); it belongs
+  with the complexness-analysis machinery (items 147/148), not with CSE.
+
+- **Single-uppercase-letter operator names (`D`, `N`) in callback position
+  emit `_.D` (broken artifact) — deliberate carve-out, 2026-08-03.** The
+  fail-closed refusal for un-expandable built-in names exempts
+  `/^[A-Z]$/` because `devolveUnappliedOperator` reads an un-applied
+  single-uppercase-letter symbol as a caller variable by convention
+  (`∫ D x² dx` parses `D` as a variable; 9 integrate/derivative tests pin
+  it). Consequence: `Map(xs, D)` keeps the old runtime-throw behavior. A
+  position-aware refusal (callback operand positions only) would close it
+  but the JS target has ~9 separate callback splice sites and no
+  chokepoint — revisit only with a witness.
+
 **JavaScript band** (230 members / 81 states fail). Per the consumer's
 per-bucket provenance rules, **82 members / 25 states are our target gaps**; the
 other 148/61 are their own unexpanded user-function heads, unparsed LaTeX, and
@@ -254,10 +278,15 @@ axis). Remaining, all demand-gated:
   inert on user-fn-free trees; per-callee validation ≈ 0.02 ms, memoized
   per name per harvest; staleness is handled by per-level re-derivation
   against current bindings at harvest time (post-compile reassignment is
-  the compile-wide artifact-snapshot policy). Residual: callbacks naming
-  BUILT-IN operators (`Map(xs, Sin)`) stay conservatively opaque — no
-  corpus witness demands them yet. See
-  `2026-07-28-compile-cse-design.md` §5.2/§11.
+  the compile-wide artifact-snapshot policy). Callbacks naming BUILT-IN
+  operators (`Map(xs, Sin)`, `CountIf(xs, IsPrime)`) landed the same day:
+  such a name is eta-expanded into a shared emitted wrapper — which also
+  fixed an emission bug where it fell through to a free-variable read and
+  the artifact threw `_f is not a function` at run time — and is then
+  admitted when the operator is pure, is the engine's own definition by
+  system-scope identity, and has a fixed arity. Drawing (`Random`),
+  variadic/optional-tail (`Add`, `Ln`), shadowed and caller-overridden
+  names stay opaque. See `2026-07-28-compile-cse-design.md` §5.2/§11.
 - No corpus re-measure yet: how much of the 11 st / 36 mem + 2 st actually
   closed is the consumer's count to re-run — do not mark this bucket resolved
   on our numbers.
