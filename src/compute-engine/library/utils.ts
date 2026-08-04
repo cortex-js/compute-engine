@@ -10,6 +10,7 @@ import {
   isFunction,
 } from '../boxed-expression/type-guards.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
+import { collectBinderNames } from '../boxed-expression/utils.js';
 import { numericValueOf } from '../boxed-expression/numerics.js';
 
 import { checkDeadline } from '../../common/interruptible.js';
@@ -243,6 +244,133 @@ function telescopingParts(
     return { pos, neg, forward: false };
 
   return undefined;
+}
+
+/**
+ * Strictly SYNTACTIC equality of two big-op bounds: same operator and operand
+ * shape, symbols compared by NAME, number literals by value. Unlike `isSame`
+ * it never dereferences a symbol's assigned value.
+ *
+ * That distinction is load-bearing at canonicalization: `isSame` follows a
+ * symbol's value when comparing a symbol against a non-symbol, so with
+ * `a := 5` it reports `Σ_{i=a}^{5}` degenerate and the fold is baked into the
+ * canonical form PERMANENTLY — a later `a := 3` cannot undo it. Canonical form
+ * must not depend on the values symbols happen to hold.
+ *
+ * Anything that is not a symbol, number literal or function expression
+ * compares false (conservative: "not provably the same point").
+ */
+function sameBoundStructure(a: Expression, b: Expression): boolean {
+  if (a === b) return true;
+  if (isSymbol(a) || isSymbol(b))
+    return isSymbol(a) && isSymbol(b) && a.symbol === b.symbol;
+  if (isNumber(a) || isNumber(b))
+    return isNumber(a) && isNumber(b) && a.isSame(b);
+  if (isFunction(a) && isFunction(b))
+    return (
+      a.operator === b.operator &&
+      a.nops === b.nops &&
+      a.ops.every((op, i) => sameBoundStructure(op, b.ops[i]))
+    );
+  return false;
+}
+
+/**
+ * A big operator is DEGENERATE when its lower and upper bounds are the same
+ * point (`Σ_{i=a}^{a}`): the domain is the single point `i = a`, so the
+ * operator has exactly one term — no enumeration required, even when `a` is
+ * symbolic.
+ *
+ * `structural` selects how "the same" is decided, and the two callers differ:
+ *   - canonicalization (`isVacuousIndexingSet`) passes `true` and gets the
+ *     purely syntactic `sameBoundStructure` — a canonical form may not depend
+ *     on the values symbols currently hold;
+ *   - evaluation (`degenerateBigOpTerm`) passes `false` and gets `isSame`,
+ *     which follows those values: reading them is exactly what evaluate does.
+ *
+ * Declines when the bound is not provably a point: `±∞` and `NaN` bounds keep
+ * whatever behavior they already had (`Σ_{i=∞}^{∞}` is an infinite-domain
+ * question, not a one-term one). An invalid bound (an error expression) is not
+ * a point either. Neither is an IMPURE one: two occurrences of
+ * `RandomInteger(1, 6)` look alike but are independent draws, so a
+ * same-spelling test would read two different endpoints as one. A FREE bound
+ * (`d`) IS treated as a point, consistent with the engine's other
+ * generic-symbol folds (`x/x → 1`).
+ */
+function isDegenerateBounds(
+  lower: Expression | undefined,
+  upper: Expression | undefined,
+  structural: boolean
+): boolean {
+  if (!lower || !upper) return false;
+  if (lower.isNaN === true || upper.isNaN === true) return false;
+  if (lower.isInfinity === true || upper.isInfinity === true) return false;
+  if (!lower.isValid || !upper.isValid) return false;
+  if (!lower.isPure || !upper.isPure) return false;
+  return structural ? sameBoundStructure(lower, upper) : lower.isSame(upper);
+}
+
+/**
+ * `degenerateBigOpTerm` recognized a degenerate operator but declined its
+ * one-term substitution as capture-unsafe.
+ *
+ * Distinct from `undefined` ("not degenerate, carry on") because the callers'
+ * next move is the symbolic closed forms, and those substitute the bound for
+ * the index with NO capture guard of their own
+ * (`symbolicSumClosedForm`/`symbolicProductClosedForm`). Falling through would
+ * land exactly the corruption the decline exists to prevent, so on this
+ * sentinel the caller must keep the expression symbolic.
+ */
+export const DEGENERATE_CAPTURE_UNSAFE = Symbol('degenerate-capture-unsafe');
+
+/**
+ * Reduce a degenerate big operator (`Σ_{i=a}^{a} f(i)`, `Π_{i=a}^{a} f(i)`) to
+ * its single term `f(a)`, for a bound `a` the domain classifier could not
+ * enumerate (a free symbol, e.g. `Σ_{i=x}^{x} i² = x²`). One point needs no
+ * enumeration, so this runs ahead of the closed-form attempts on the
+ * `'symbolic'` path.
+ *
+ * The index is substituted rather than ASSIGNED (as the numeric iteration in
+ * `reduceBigOp` does): the index is declared `integer` by
+ * `indexingSetSites(1, 'integer')`, so `ce.assign(i, x)` for a bound of
+ * unknown type throws `TypeCompatibilityError` — a symbolic bound is exactly
+ * the case that cannot go through the assign. The neighbouring symbolic
+ * closed forms substitute for the same reason. `subs` is not binder-aware, so
+ * the substitution is guarded against capture the way lambda inlining is
+ * (`collectBinderNames`): if any binder inside the body could capture the
+ * index or a symbol of the bound, decline and stay symbolic.
+ *
+ * Returns undefined (caller carries on) when the indexing set is not a
+ * degenerate `Limits`, and `DEGENERATE_CAPTURE_UNSAFE` when it IS degenerate
+ * but the substitution would not be capture-safe — see that sentinel for why
+ * the two outcomes cannot share a return value.
+ */
+export function degenerateBigOpTerm(
+  body: Expression | undefined,
+  limits: Expression,
+  numericApproximation: boolean | undefined
+): Expression | typeof DEGENERATE_CAPTURE_UNSAFE | undefined {
+  if (!body || !isFunction(limits, 'Limits') || limits.ops.length < 3)
+    return undefined;
+  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+  if (index === undefined) return undefined;
+  const lower = limits.op2;
+  if (!isDegenerateBounds(lower, limits.op3, false)) return undefined;
+
+  // An index-less bounds pair (`Limits(Nothing, a, a)`) has no index to
+  // substitute: its body is already the single term. Reached on the
+  // STRUCTURAL route (`ce.function('Sum', …, { structural: true })`), which
+  // bypasses `canonicalBigop` — and so its dropping of vacuous indexing sets.
+  if (index === 'Nothing') return body.evaluate({ numericApproximation });
+
+  const binders = collectBinderNames(body);
+  if (binders.size > 0) {
+    if (binders.has(index)) return DEGENERATE_CAPTURE_UNSAFE;
+    for (const s of lower.symbols)
+      if (binders.has(s)) return DEGENERATE_CAPTURE_UNSAFE;
+  }
+
+  return body.subs({ [index]: lower }).evaluate({ numericApproximation });
 }
 
 /**
@@ -1640,7 +1768,55 @@ export function canonicalBigop(
     return ce.expr(['Reduce', body, 'Multiply', 1]);
   }
 
-  return ce._fn(bigOp, [body, ...indexes], { scope: bigOpScope });
+  // A degenerate indexing set (`Σ_{i=d}^{d}`) describes the single point
+  // `i = d`, so every term of the operator is the body. When the index does
+  // not occur in the body, the set carries no information at all and is
+  // dropped; if that leaves none, the operator IS its body — the "identity
+  // wrapper" spelling `\sum_{i=d}^{d} f(x)` folds to `f(x)`. Same family as
+  // the other generic-symbol folds (`x/x → 1`) done at canonicalization.
+  //
+  // The occurrence test is by NAME, so a shadowing inner binder of the same
+  // name reads as an occurrence and the fold is declined — conservative in
+  // the safe direction. A body that DOES use the index keeps its indexing
+  // set; the evaluate path reduces it (`degenerateBigOpTerm`).
+  const usedIndexes =
+    indexes.length === 0
+      ? indexes
+      : indexes.filter((x) => !isVacuousIndexingSet(x, body, indexes));
+  if (usedIndexes.length === 0 && indexes.length > 0) return body;
+
+  return ce._fn(bigOp, [body, ...usedIndexes], { scope: bigOpScope });
+}
+
+/**
+ * Is this indexing set a degenerate `Limits(i, a, a)` whose index `i` is
+ * referenced nowhere? Such a set contributes nothing: it can be dropped from
+ * the big operator (see `canonicalBigop`).
+ *
+ * "Nowhere" means neither in `body` NOR in the bounds of any SIBLING indexing
+ * set: `Σ_{i=5}^{5} Σ_{j=i}^{10} j` reads `i` in the second set's lower bound,
+ * so dropping the first would strand that `i` free. The sibling test is
+ * deliberately conservative — every other set is checked, not just the ones
+ * that survive — since a set retained only by this check can itself keep
+ * another alive.
+ */
+function isVacuousIndexingSet(
+  set: Expression,
+  body: Expression,
+  siblings: ReadonlyArray<Expression>
+): boolean {
+  if (!isFunction(set, 'Limits') || set.ops.length < 3) return false;
+  if (!isDegenerateBounds(set.op2, set.op3, true)) return false;
+  if (!isSymbol(set.op1)) return false;
+  const index = set.op1.symbol;
+  if (index === 'Nothing') return true;
+  if (body.has(index)) return false;
+  for (const other of siblings) {
+    if (other === set || !isFunction(other, 'Limits')) continue;
+    // Skip the sibling's own index operand: only its BOUNDS can reference us.
+    if (other.ops.slice(1).some((bound) => bound.has(index))) return false;
+  }
+  return true;
 }
 
 /**

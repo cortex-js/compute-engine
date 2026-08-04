@@ -93,6 +93,8 @@ import {
   NON_ENUMERABLE_BOUNDS,
   bigOpBoundsError,
   classifyBigopDomain,
+  DEGENERATE_CAPTURE_UNSAFE,
+  degenerateBigOpTerm,
   symbolicSumClosedForm,
   symbolicProductClosedForm,
   infiniteSumClosedForm,
@@ -3332,8 +3334,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const bounds = ops.slice(1);
         const mode = classifyBigopDomain(ops[0], bounds, ce);
         if (mode === 'symbolic') {
-          if (bounds.length === 1)
+          if (bounds.length === 1) {
+            // Degenerate bounds (`Π_{i=x}^{x}`): one term, no enumeration.
+            const term = degenerateBigOpTerm(ops[0], bounds[0], numeric);
+            // A capture-unsafe decline must NOT fall through: the closed forms
+            // substitute the same way, without a capture guard.
+            if (term === DEGENERATE_CAPTURE_UNSAFE) return undefined;
+            if (term !== undefined) return term;
             return symbolicProductClosedForm(ops[0], bounds[0], ce);
+          }
           return undefined;
         }
         if (mode === 'numeric' && !numeric) {
@@ -3376,8 +3385,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         {
           const mode = classifyBigopDomain(ops[0], bounds, ce);
           if (mode === 'symbolic') {
-            if (bounds.length === 1)
+            if (bounds.length === 1) {
+              // Degenerate bounds (`Π_{i=x}^{x}`): one term, no enumeration.
+              const term = degenerateBigOpTerm(ops[0], bounds[0], numeric);
+              // A capture-unsafe decline must NOT fall through: the closed
+              // forms substitute the same way, without a capture guard.
+              if (term === DEGENERATE_CAPTURE_UNSAFE) return undefined;
+              if (term !== undefined) return term;
               return symbolicProductClosedForm(ops[0], bounds[0], ce);
+            }
             return undefined;
           }
           if (mode === 'numeric' && !numeric) {
@@ -3472,8 +3488,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const numeric = numericApproximation;
         const mode = classifyBigopDomain(first, rest, engine);
         if (mode === 'symbolic') {
-          if (rest.length === 1)
+          if (rest.length === 1) {
+            // Degenerate bounds (`Σ_{i=x}^{x}`): one term, no enumeration.
+            const term = degenerateBigOpTerm(first, rest[0], numeric);
+            // A capture-unsafe decline must NOT fall through: the closed forms
+            // substitute the same way, without a capture guard.
+            if (term === DEGENERATE_CAPTURE_UNSAFE) return undefined;
+            if (term !== undefined) return term;
             return symbolicSumClosedForm(first, rest[0], engine);
+          }
           return undefined;
         }
         if (mode === 'numeric' && !numeric) {
@@ -3541,8 +3564,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         {
           const mode = classifyBigopDomain(first, rest, engine);
           if (mode === 'symbolic') {
-            if (rest.length === 1)
+            if (rest.length === 1) {
+              // Degenerate bounds (`Σ_{i=x}^{x}`): one term, no enumeration.
+              const term = degenerateBigOpTerm(first, rest[0], numeric);
+              // A capture-unsafe decline must NOT fall through: the closed
+              // forms substitute the same way, without a capture guard.
+              if (term === DEGENERATE_CAPTURE_UNSAFE) return undefined;
+              if (term !== undefined) return term;
               return symbolicSumClosedForm(first, rest[0], engine);
+            }
             return undefined;
           }
           if (mode === 'numeric' && !numeric) {

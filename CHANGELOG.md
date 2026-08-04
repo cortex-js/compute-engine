@@ -2,6 +2,30 @@
 
 ### Improvements
 
+- **Degenerate big operators (`Σ_{i=a}^{a}`, `Π_{i=a}^{a}`) now reduce.** A big
+  operator whose lower and upper bounds are structurally equal has a one-point
+  domain, so it has exactly one term. Two reductions follow. First, at
+  **evaluation**: a symbolic bound made the domain non-enumerable, so
+  `\sum_{i=x}^{x} i^2` stayed inert; one point needs no enumeration, and it now
+  evaluates to `x^2` (`Product` likewise). Second, at **canonicalization**:
+  when the index does not occur in the body, the indexing set carries no
+  information at all, so the "identity wrapper" spelling `\sum_{i=d}^{d} f(x)`
+  folds to `f(x)` — the same generic-symbol fold family as `x/x → 1`. With
+  several indexing sets only the degenerate, unused ones are dropped — and
+  never one whose index a sibling indexing set's bounds reference. The
+  canonicalization fold compares the bounds strictly syntactically: it never
+  reads a symbol's assigned value (`\sum_{i=a}^{5}` with `a := 5` keeps its
+  `Sum` structure — values belong to evaluation, where the reduction does
+  follow them). Bounds that are not provably a fixed one-point domain are
+  unaffected: `±∞` and `NaN` bounds keep their previous behavior, impure or
+  invalid bounds (two syntactically identical `RandomInteger(1,6)` draws) stay
+  symbolic, and literal equal bounds with the index used
+  (`\sum_{i=5}^{5} i^2` → `25`) still enumerate as before. The evaluate-path
+  reduction substitutes the bound for the index under a capture guard; a body
+  whose inner binder could capture it stays symbolic rather than being
+  silently corrupted (and the guard's refusal is final — it does not fall
+  through to the closed-form rewrites, which carry no such guard).
+
 - **Compile-time CSE now merges repeated pure user-function calls everywhere,
   including named callbacks.** The 0.100.0 admission of pure user-function
   applications applied only inside emitted definition bodies (where a repeated
