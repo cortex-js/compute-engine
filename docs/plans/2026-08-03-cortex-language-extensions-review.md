@@ -85,11 +85,30 @@ f()
 ```
 
 Parameter annotations are enforced. A visible `-> integer` should likewise be
-a checked contract. Check it after the body has evaluated, before returning to
-the caller; if the result is definitely incompatible, produce an
-`incompatible-type` error value with the call in its trace. If compatibility is
-symbolically undecidable, defer rather than reject prematurely. Direct calls,
-`Apply`, pipes, recursive calls, and compiled targets must agree.
+a checked contract, applied after the body has evaluated and before returning
+to the caller, with this result matrix:
+
+- **`Error` result — exempt.** An `Error` value bypasses the contract and
+  propagates unchanged. Errors are an implicit possible result of every
+  evaluation: error is an absorbing element under strict evaluation, the type
+  lattice deliberately keeps `error` incomparable to ordinary types, and the
+  effects model rejected tracking partiality in signatures. Replacing a
+  propagating error with `incompatible-type` would destroy the original error
+  and its trace. The contract constrains successful results only.
+- **Definitely compatible** — return the result.
+- **Definitely incompatible, non-error** — produce an `incompatible-type`
+  error value with the call in its trace.
+- **Symbolically undecidable** (the result still carries free variables or an
+  unresolved type) — pass it through unchecked. There is no persistent
+  deferred obligation or ascription node in the first version; this is a
+  boundary check on what is decidable at return time.
+- **`Nothing`, `Missing`, `NaN`** — ordinary values, checked against the
+  declared type like any other result (`NaN` inhabits the number types;
+  `-> integer` does not admit `Nothing` unless declared `integer | nothing`).
+
+Direct calls, `Apply`, pipes, recursive calls, and compiled targets must
+agree, and acceptance tests must prove an existing error's code and trace
+survive the boundary unchanged.
 
 ### Assignment can look like an equation
 
@@ -101,8 +120,13 @@ Solve(x^2 = 4, x)
 
 It can return a plausible wrong answer because `=` is `Assign`, not `Equal`.
 The existing `assign-in-argument` warning should become an error with a `==`
-fix-it. More generally, assignment could be restricted to a bare binding target
-in statement position. Function definitions remain their own parsed form.
+fix-it. More generally, assignment should be restricted to a bare binding
+target in statement position. Statement position means a direct statement of
+the program or of a `{ ... }` block body — nothing else. In particular a
+parenthesized assignment is an expression and is rejected, so
+`Solve((x = 4), x)` does not reopen the trap, and chained assignment
+(`a = b = 5`) is rejected because its right-hand side is itself an assignment
+expression. Function definitions remain their own parsed form.
 
 This preserves Cortex's established `=` spelling without allowing it in the
 positions where it is overwhelmingly likely to be a mistaken equation.
@@ -120,10 +144,15 @@ these spellings become natural:
 ```
 
 Known compound operators such as `!=`, `!in`, `|>`, and `|->` still win by
-longest match. If no known operator starts at the current position, recovery
-should consume enough of the unknown run to issue one useful diagnostic; the
-change should not turn every unsupported compound spelling into a misleading
-sequence of otherwise valid operators.
+longest match. Longest-matching a known prefix is not sufficient by itself: an
+unsupported run with a known prefix (`|>>` starting with `|>`) would still lex
+as a misleading sequence of valid operators. The rule should therefore
+validate the entire maximal punctuation run: split it greedily into known
+operators only when every resulting token is known and the adjacency is
+grammatically legal at that position (a postfix operator followed by an infix
+or prefix operator, as in `3!^2`); otherwise issue one diagnostic covering the
+whole run. Acceptance cases: `3!^2`, `0..-1`, an unsupported run with a known
+prefix, and the diagnostic count and source range on recovery.
 
 ### Too many hypothetical keywords are reserved
 
@@ -188,7 +217,15 @@ makes the important distinction explicit:
 
 The operator should be right-associative by the usual coalescing convention;
 canonicalization may flatten `a ?? b ?? c` to the existing variadic
-`Coalesce(a, b, c)`, which evaluates choices lazily from left to right. Its
+`Coalesce(a, b, c)` — but only after a prerequisite fix to `Coalesce` itself.
+The current implementation eagerly evaluates the entire remaining tail the
+moment an operand is symbolically undecided, so flattening today would change
+observable effect and error timing relative to the nested form. Fix
+`Coalesce` first so an undecided operand leaves the tail unevaluated
+(`Coalesce(v, …rest)` with `rest` untouched) and choices are genuinely
+evaluated lazily from left to right, with acceptance tests using an unresolved
+first operand and an effectful or erroring later operand on both the
+interpreter and compiled routes. Its
 precedence relative to `|>`, `||`, and assignment needs an explicit ruling and
 round-trip tests; the examples above do not settle expressions such as
 `value |> parse ?? fallback`.
@@ -260,6 +297,11 @@ These should not be adopted automatically as one package. Questions to settle:
 5. What is the exact order of generator binding, filtering, and evaluation?
 6. Are unbounded domains rejected in collection-delimited forms, kept as
    symbolic/intensional values, or allowed to produce lazy collections?
+7. How does the chosen surface interact with effectful element bodies? The
+   underlying `Comprehension` primitive already has a documented trap: a body
+   drawing randomness escapes the enclosing `WithRandomSeed` frame and draws
+   live at materialization. The surface form must rule this explicitly rather
+   than inherit it silently.
 
 A coherent split would be:
 
@@ -359,10 +401,13 @@ needs a separate control-flow ruling. The most useful interpretation is:
 - on success, bind/return the unwrapped successful value;
 - on error, return the *original error value* from the current function.
 
-That is an early error-propagation operation, not a return of `Nothing`. It
-therefore requires a real non-local `Return` construct and a rule for use at top
-level. Possible top-level behavior is simply to make the original error the
-cell's final value.
+That is an early error-propagation operation, not a return of `Nothing`. The
+engine already implements the required machinery: `Return` propagates
+structurally through `Block` and `Loop` and is unwrapped at the
+function-application boundary. What is missing is only Cortex surface syntax
+lowering to that protocol, plus a rule for use at top level. Possible
+top-level behavior is simply to make the original error the cell's final
+value.
 
 Questions to settle:
 
@@ -411,6 +456,11 @@ The two uses of `otherwise` are contextual and do not conflict:
 - after an expression, `expr otherwise fallback` is error rescue;
 - at the start of a `match` case pattern, `otherwise => body` is catch-all.
 
+In both roles `otherwise` remains a contextual word, consistent with the
+reservation principle stated earlier: it is not added to the reserved-word
+list, it is recognized only in these two structural positions, and its use as
+an ordinary identifier elsewhere remains legal.
+
 An alternative postfix layout—`match value { cases } otherwise body`—is not
 recommended. It competes visually and grammatically with the expression-level
 error-rescue operator and makes the catch-all less obviously part of the
@@ -429,9 +479,22 @@ for x in xs {
 }
 ```
 
-Reject them outside a loop. A value-carrying `break value` should wait until or
-unless loops become value-producing expressions. General `return` is a separate
-decision, though `otherwise return` creates new pressure to define it.
+Reject them outside a loop, with precise boundaries: loop context resets at
+every function/lambda boundary — a `break` inside a lambda defined or invoked
+within a loop must not escape to the enclosing loop — and control targets the
+innermost lexically enclosing loop. `break`/`continue` remain valid inside
+`if`, `match`, and `do` blocks within a loop body. These rules matter because
+the engine's `Block` already short-circuits structurally on
+`Break`/`Continue`, so a parser-only loop-depth check without a function
+boundary would permit unintended non-local control flow.
+
+The engine also already supports the value-carrying forms: the `Loop` operator
+consumes `Break(v)` as the loop's value and types such loops accordingly, and
+`Return` propagation exists at the engine layer (see `otherwise return`
+above). Value-carrying `break value` and general `return` are therefore
+surface-syntax decisions, not blocked on new runtime machinery. General
+`return` still needs its own ruling, and `otherwise return` creates new
+pressure to define it.
 
 ### Function parameter ergonomics
 
@@ -483,8 +546,10 @@ function first<T>(xs: list<T>) -> T { xs[1] }
 function swap<T, U>(p: tuple<T, U>) -> tuple<U, T> { (p[2], p[1]) }
 ```
 
-Generic type declarations such as `type pair<T> = tuple<T, T>` are a separate
-future extension; they are not part of the ruled generic-function milestone.
+Transparent generic type aliases (`type alias pair<T> = tuple<T, T>`) are
+ruled to ride the phase-1 substitution machinery and need not wait for
+generic bodies; parameterized **nominal** type declarations remain a separate
+future extension. Neither is part of the ruled generic-function milestone.
 
 This is substantially more valuable than adding isolated type-handler special
 cases. Higher-rank types, higher-kinded types, and type packs can remain out of
@@ -525,6 +590,13 @@ Cortex body either cannot type-check `Add(x, x)`, must be restricted to a
 closed built-in type family, or must defer an avoidable error until runtime.
 This behavioral constraint—not field access—is the strongest justification
 for a protocol-like feature.
+
+Everything in this section presupposes the type-variable plan's v2 milestone
+M1 (per-call generic-body instantiation), which that design explicitly leaves
+to a future dedicated document with several competing candidate approaches.
+The M1 approach chosen materially constrains how requirement inference over a
+body can work; requirement inference should be designed together with M1, not
+before it.
 
 Start with **inferred anonymous operation requirements**, not mandatory
 `requires` sections. A requirement is a compile-time obligation over existing
@@ -596,6 +668,17 @@ generic definitions, and separate compilation still need precise rules. In
 particular, inference can discover that a signature exists; it cannot infer
 algebraic laws such as associativity from the body.
 
+Named honestly, this is a restricted typeclass system — dictionary passing
+with witnesses fixed at instantiation, and no dynamic dispatch — and it
+carries two more prerequisites beyond the rules above. Requirements and
+witness sets need a MathJSON representation: the promise that inferred
+requirements are visible through introspection and tooling is meaningless
+without a serialization, and in this language the IR *is* the serialization.
+And witness transport needs a mechanism: how a captured witness set travels
+with an instantiated generic body into evaluation and compilation — including
+across the worker-boundary serialization used by parallel execution, where a
+body and its witnesses must ship together.
+
 Only introduce **named protocols** if groups of requirements repeat in real
 code. They can then be aliases or bundles over the same mechanism rather than a
 second dispatch system:
@@ -630,6 +713,12 @@ Initial semantic constraints should be conservative:
 - Exactly one visible conformance or witness set must win for a concrete
   protocol/type combination; ambiguity is an error. Notebook re-evaluation and
   lexical scope make this coherence rule more important, not less.
+- Named conformances need a concrete mechanism before named protocols are
+  implementable: a declaration syntax or API, ownership/orphan rules, lexical
+  visibility, duplicate/ambiguity diagnostics, and a witness-invalidation rule
+  for notebook re-evaluation — when a definition participating in a captured
+  witness set is replaced, dependent instantiations must be invalidated rather
+  than silently kept or silently re-resolved.
 - No protocol inheritance or default implementations initially. Composition
   can be expressed by requiring several protocols; defaults can be ordinary
   generic functions.
@@ -678,6 +767,15 @@ function describe(x: integer | string) {
   }
 }
 ```
+
+Two prerequisites need to be named. First, `x is integer` is not current
+Cortex syntax: a dynamic `is` type-test operator is independently useful and
+should be adopted as a high-priority surface form of its own (see the
+sequencing section), regardless of when static narrowing lands. Second, the
+static checker currently canonicalizes each statement independently — prior
+declarations are not modeled — so narrowing needs a checker-design
+prerequisite covering statement transfer, lexical environments, assignment
+invalidation, branch joins, and conservative guard handling across bindings.
 
 `match` already binds typed patterns dynamically, but static exhaustiveness,
 redundant-case detection, and branch-local narrowing are deferred. This is the
@@ -936,6 +1034,17 @@ stats.robustMean(data)
 Start with explicit file modules and namespace values; defer package management,
 implicit prelude customization, and elaborate visibility systems.
 
+Even the smallest version must specify its trust boundary. Module reading is a
+load-time host concern — imports are resolved when the program is parsed and
+loaded, before evaluation — so it is not the runtime `fs_read` effect, but it
+deserves the same default-deny posture: the host injects a module resolver,
+and without one, imports fail with a diagnostic rather than reaching the
+filesystem. The design must specify the resolution root, path normalization
+and symlink policy (no traversal outside the root by default), allowed
+extensions, cycle handling, caching and re-evaluation semantics, and that
+imported code gains no host capabilities beyond those of the importing
+evaluation.
+
 ## Async, parallelism, threads, and coroutines
 
 These names describe different facilities and should not enter Cortex as one
@@ -979,6 +1088,24 @@ value cacheable. It is nevertheless not callable from a synchronous evaluation
 entry point. A sync entry point rejects an application carrying `async` before
 running it; `evaluateAsync()` is the outer boundary that can discharge the
 suspension.
+
+Two gaps must be closed before any example here becomes executable. First,
+the host contract does not exist yet: Cortex's public entry point is the
+synchronous `executeCortex()`, with no awaiting variant, no abort signal, and
+no evaluation identity. An `executeCortexAsync(..., { signal })` (or an
+equivalent engine `evaluateAsync` route) must specify statement ordering under
+suspension, sync-entry rejection diagnostics, and CLI behavior; rerun
+cancellation must be assigned to the notebook host through an explicit
+evaluation handle, because the language runtime cannot infer cell identity.
+
+Second, lazy collection views need a rule. `Map`, `Filter`, `Comprehension`,
+and the proposed `ParallelMap` defer element work until later synchronous
+`each()`/`at()` access, so `Map(urls, Fetch)` could escape the awaiting
+boundary with undischarged async work and no promise value or async iteration
+protocol to resolve it. The first version should reject `async` effects
+inside callbacks or bodies of lazy views that can escape the awaiting
+boundary — equivalently, an async-carrying view must be fully materialized
+within the async evaluation that created it.
 
 Do not add promise-valued variables, promise combinator methods, or implicit
 promise lifting across the library. Errors from an awaited computation remain
@@ -1024,8 +1151,10 @@ parallel Map(xs, f)
 
 The operator evaluates independent operands/elements concurrently but preserves
 the same value and result ordering as sequential evaluation. The scheduler may
-choose worker threads, processes, GPU execution, or a serial fallback; none of
-those mechanisms belongs in the language contract.
+choose worker threads, processes, or a serial fallback; none of those
+mechanisms belongs in the language contract. GPU execution is admissible only
+as an explicit opt-in precision tier (see the execution model below), because
+`f32` kernels cannot reproduce sequential double-precision values.
 
 #### A concrete `ParallelMap` contract
 
@@ -1042,11 +1171,22 @@ A conservative first version would have these rules:
 1. **Ordered result.** Element `i` of the result is `f(xs[i])`, regardless of
    completion order. Internally completed values wait in a bounded reorder
    buffer.
-2. **Lazy and bounded.** Like `Map`, it is a lazy list view. Materialization
-   starts only a bounded window of work, so
+2. **Lazy and bounded — as a property of the drain, not of the escaping
+   value.** Like `Map`, it is a lazy list view, and
    `Take(ParallelMap(Iterate(f, seed), g), 10)` never tries to enumerate the
-   infinite source. A host option or optional argument controls maximum
-   concurrency.
+   infinite source. The parallel window exists only while a driving
+   `evaluateAsync` is materializing the view: prefetch, the reorder buffer,
+   and worker dispatch are internal scheduling of that drain, and completed
+   elements are memoized. The collection interface itself stays synchronous
+   (`each()`/`at()`): an element demanded after the view has escaped the
+   async evaluation is computed serially on demand — legal because serial
+   execution is always a valid strategy under this contract, and the value
+   is identical; it is simply not accelerated. No async-collection protocol
+   is required. (Callbacks carrying the `async` *effect* are the different,
+   stricter case ruled in the async section: there serial fallback is
+   impossible rather than merely slow, so such views must be fully
+   materialized within the async evaluation that created them.) A host
+   option or optional argument controls maximum concurrency.
 3. **Exactly once per demanded element.** Retries are not implicit. Element
    memoization ensures that re-reading a materialized position does not rerun
    its callback.
@@ -1055,10 +1195,25 @@ A conservative first version would have these rules:
    collection/error boundary. It does not cancel unrelated elements unless the
    whole evaluation is canceled.
 5. **Structured cancellation.** Abandoning or canceling the consumer cancels
-   outstanding work for no-longer-demanded elements.
-6. **Scope snapshot.** Captured values are snapshotted when a materialization
-   batch starts. Every element in that batch sees the same captured state;
-   escaping writes from the callback are forbidden.
+   outstanding work for no-longer-demanded elements. Cancellation does not
+   corrupt the view: an implementation may retain already-memoized elements
+   (later demands replay them and compute the rest serially) or drop the
+   partial memo wholesale and recompute on demand — both are observationally
+   legal, because the callback is pure and recomputation is therefore
+   unobservable. The only obligation is never to expose a partially computed
+   element.
+6. **Scope snapshot.** Captured values are snapshotted once, when the view
+   first materializes, and that snapshot is retained for the lifetime of the
+   view; every element sees the same captured state regardless of batching,
+   concurrency window, or backend. Escaping writes from the callback are
+   forbidden. This is deliberately scheduler-independent: a per-batch
+   snapshot would let a captured binding mutated between demands produce
+   different results at different concurrency settings, breaking the
+   equal-to-sequential guarantee. Where this differs observably from
+   sequential `Map` (which reads captures at each element's materialization),
+   the difference is part of the documented contract. Acceptance test: mutate
+   a captured binding between demands and require identical results at
+   concurrency 1, concurrency N, and serial fallback.
 
 For v1, require the callback to be **pure**. This is clearer than trying to
 make every current effect schedule-independent. `scope`, console output,
@@ -1066,6 +1221,24 @@ filesystem writes and similar actions are order-sensitive; clock/environment
 reads can observe different external states at different completion times; and
 the current framed-random contract consumes a sequential draw index that
 parallel scheduling must not reorder.
+
+Purity is necessary but not sufficient. The effects model classifies writes
+and actions, not reads of captured mutable scope, so a pure callback can
+still observe a binding that is reassigned between demands. Admissibility
+therefore adds two structural conditions on the callback value: it must be
+**closed** — every free symbol resolves into the captured snapshot, with no
+live-scope reads at call time — and its captured snapshot must be
+**serializable**, since it crosses the worker boundary. These are checked at
+dispatch by inspecting the actual callback value, exactly where higher-order
+operators already project effects from the callback; a callback failing
+either condition declines to serial fallback with identical values. They are
+deliberately *not* new effect labels: closed-ness is a property of a
+particular closure value relative to the bindings it captured — like
+constness, a binding-level attribute knowable at closure creation — not a
+context-free label on a function signature, and encoding it as an effect
+would force conservative contagion through every higher-order composition. A
+static diagnostic may later surface the classification as an analysis
+result.
 
 A later version could admit `random` under an explicit per-element substream
 rule derived from `(frame seed, element index)`. That would be deterministic
@@ -1075,11 +1248,145 @@ semantics rather than an invisible optimization. Concurrently awaited I/O
 belongs in a separately named bounded `ConcurrentMap`/async facility if it is
 ever needed.
 
-Backend choice is an implementation detail: compiled SIMD, a GPU kernel, a
-worker pool, or serial fallback are all valid if they produce the same ordered
-value. An open policy question is whether `ParallelMap` promises an attempt at
-parallel execution or merely grants the optimizer permission to parallelize.
-The former is more predictable for performance; the latter is more portable.
+Backend choice is an implementation detail with one exception: compiled SIMD,
+a worker pool, and serial fallback are all valid because they produce the same
+ordered `f64` value. A GPU backend cannot: WGSL/GLSL execute in `f32` with
+looser NaN/infinity semantics, so a GPU kernel cannot reproduce sequential
+double-precision results bit for bit. GPU execution is therefore an explicit
+opt-in precision tier — like the existing machine-versus-bignum split — never
+a silent scheduler choice.
+
+The policy question — does `ParallelMap` promise an attempt at parallel
+execution, or merely grant permission to parallelize? — is resolved as
+**promise to attempt**. The explicit operator is a request: `evaluateAsync`
+honors it unconditionally, subject to admissibility (a pure, compilable
+callback), and falls back to serial execution otherwise, mirroring the
+existing compile-with-interpreter-fallback pattern. Anything automatic (see
+the execution model below) is permission, not promise.
+
+#### Execution model
+
+Parallelism is an execution strategy, never a semantics: under the contract
+above, a parallel backend may not change the value. Three consequences fix
+the API shape.
+
+1. **No new evaluation entry point, and no `parallel` flag.**
+   `numericApproximation` changes *what* is computed — exact versus float,
+   two different correct answers. Parallelism changes only *how*, so it must
+   not be a peer of that flag. The synchronous `evaluate()` route always runs
+   the serial fallback — legal precisely because the contract pins the
+   value — and the existing `evaluateAsync()` is where a genuinely parallel
+   backend runs, necessarily, since every real mechanism (worker messaging,
+   GPU readback) is asynchronous. Execution *policy* lives in the options bag
+   the async design needs anyway for cancellation:
+   `evaluateAsync({ signal, maxConcurrency, ... })`, including a
+   `parallel: false` kill-switch for debugging and reproduction — policy, not
+   meaning.
+
+2. **Real parallelism implies compilation, because values cannot cross a
+   thread boundary.** Boxed expressions and compiled closures hold engine
+   references and are not structured-cloneable. Two transports:
+
+   - **Numeric tier (the payoff case):** compile the callback to JavaScript
+     *source*, ship the string to a persistent worker pool, and move data as
+     `Float64Array` transferables — zero-copy, and deployable without the
+     cross-origin isolation that `SharedArrayBuffer` requires. Decline to
+     compile → serial fallback, exactly like `Map` auto-compilation today.
+     This tier admits only callbacks whose compiled form is total over
+     floats: `NaN` is the error representation, as in compiled kernels
+     generally. A callback that can produce a genuine `Error` value takes
+     the symbolic tier, which preserves error values in their collection
+     positions, or declines to serial.
+   - **Symbolic tier (general fallback):** one engine per worker; the
+     callback and the captured-scope snapshot travel as MathJSON, results
+     return as MathJSON. Correct for arbitrary pure callbacks but heavy —
+     engine startup, per-element serialization — so it should exist without
+     leading.
+
+   The scope-snapshot rule above maps directly onto this model: "snapshot
+   once at first materialization" is literally "serialize the captured
+   bindings once and ship them." The WGSL compile target already exists; a
+   GPU backend needs only a host-side compute-dispatch harness (one
+   invocation per element, storage buffers in and out, asynchronous readback)
+   plus the opt-in precision tier ruled above.
+
+3. **In the interpreter, transparent parallelization of plain `Map` is a
+   possible later optimization, not a substitute for `ParallelMap`.** (In the
+   compiled `javascript-async` target below it is instead the default story,
+   because a compiled artifact's closed world makes the safety gate easy to
+   prove.) The explicit operator
+   is needed for two reasons. It is where the documented contract deltas
+   live — the snapshot epoch, and any future per-element random substream
+   rule; an operator byte-identical to `Map` would not deserve a name, and
+   this one differs in exactly the corners that justify one. And heuristics
+   cannot see callback cost: total work is `n × cost(f)` against a real fixed
+   dispatch cost, so collection length is a poor proxy — ten elements at two
+   seconds each deserve parallelism; a million at nanoseconds each do not.
+   The user knows which stage is expensive; a threshold does not.
+
+   If automatic `Map` parallelization is ever added under `evaluateAsync`, it
+   is gated on provable indistinguishability: a pure, compiled callback, and
+   no speculation past the current demand. The speculation condition is the
+   subtle one: sequential lazy `Map` reads captures at each element's
+   materialization, so evaluating a demanded batch concurrently is safe (the
+   sequential order would have evaluated all of it after the same preceding
+   assignments), but prefetching beyond the demand can observe stale captures
+   relative to sequential order — the automatic path must not speculate
+   unless captured bindings are provably immutable. For the cost decision,
+   sampling beats thresholds: run the first element serially through the
+   compiled kernel, measure, then decide whether dispatch overhead pays —
+   which also validates the kernel before shipping it to workers.
+
+4. **Compilation targets encode the same split: the target is the opt-in.**
+
+   - **`javascript` (sync):** a `ParallelMap` node compiles exactly like
+     `Map` — a serial drain loop. The contract makes this legal, and the
+     artifact's synchronous shape is a consumer guarantee: a flag that
+     silently turned `(x) => number` into `(x) => Promise<number>` would be a
+     semantics flag in disguise.
+   - **`javascript-async` (new target):** a Promise-returning artifact, and a
+     wholesale grant of *permission*: within it the compiler may parallelize
+     any admissible data-parallel stage — explicit `ParallelMap` or plain
+     `Map` — using the effect, purity, and type information it already has.
+     A compiled artifact is a closed world (a pure function of its arguments,
+     with no interleaved assignments between element demands), so the
+     indistinguishability gate that is subtle in the interpreter is easy
+     here: pure callback → parallelize; impure or unprovable → serial. The
+     deterministic value contract is retained — `javascript-async` returns
+     the same `f64` values as `javascript`, just asynchronously — so a
+     consumer can switch targets without revalidating output, and does not
+     need to choose `Map` versus `ParallelMap` when compiling; selecting the
+     target does the work. The motivating case is repeated invocation with
+     varying arguments (an animated plot): the worker pool stays warm, the
+     kernel ships once, per-call cost is data transfer — and repetition lets
+     the artifact decide adaptively, timing early calls serially and
+     switching to workers once dispatch overhead pays.
+
+     Pool ownership follows the engine: the engine owns one persistent
+     worker pool, shared by runtime `ParallelMap` execution and every
+     `javascript-async` artifact it compiles, and disposed with the engine.
+     An artifact therefore stays bound to its engine — either invoked
+     through an engine execute method or self-executing while holding a
+     reference to its engine's pool. Each invocation accepts a per-call
+     abort signal so a superseded call (a stale animation frame) can be
+     abandoned without disturbing the pool.
+   - **GPU targets (`wgsl`, `glsl`):** target selection is the
+     precision-tier opt-in, per the ruling above. Here `ParallelMap` is not a
+     scheduling hint but the *compilation unit marker*: the callback becomes
+     the compute kernel and the collection becomes the dispatch — one
+     invocation per element, storage buffers in and out — with the operator
+     boundary telling the compiler where the kernel ends and the host
+     dispatch description begins. A serial `Map` drain has no meaning in a
+     shader; the explicit operator is what gives collection compilation to
+     GPU targets a well-defined shape.
+
+The composition story is then: write `Map` everywhere; when running
+interpreted, flip the one hot stage to `ParallelMap` (a request the runtime
+promises to attempt under `evaluateAsync`); when compiling, select
+`javascript-async` and let the compiler parallelize what it can prove
+admissible (a permission granted by target selection). Either way, no program
+can tell the difference except by the clock — only the GPU targets trade the
+value contract, explicitly, for the `f32` tier.
 
 #### Parallel-pipe syntax
 
@@ -1558,22 +1865,29 @@ This is prioritization, not approval.
 
 ### Second: high-leverage surface forms over existing concepts
 
-1. `??` for `Coalesce`.
+1. `??` for `Coalesce`, after the `Coalesce` lazy-tail fix.
 2. `if let` for error-refutable binding.
 3. `otherwise fallback`, after its direct-error semantics are ruled.
 4. `otherwise => body` as a `match` catch-all.
 5. `break` and `continue`.
-6. One comprehension syntax after eager/lazy, filter lowering, and
+6. General `return` and `otherwise return`, lowering to the engine's existing
+   `Return` protocol, once their top-level behavior is ruled.
+7. An `is` type-test operator (`x is integer`): a small surface form over the
+   existing dynamic type test, independently useful and a prerequisite for
+   flow-sensitive narrowing.
+8. One comprehension syntax after eager/lazy, filter lowering, and
    collection-kind questions are settled.
-7. Pipe first-argument shorthand or UFCS, after the field collision is ruled.
-8. Immutable update primitives and possibly `with` syntax.
+9. Pipe first-argument shorthand or UFCS, after the field collision is ruled.
+10. Immutable update primitives and possibly `with` syntax.
 
 ### Third: type and domain expressiveness
 
-1. Flow-sensitive narrowing, exhaustiveness, and redundancy checking.
-2. Generic declarations, followed by generic Cortex bodies/syntax according
-   to the type-variable plan's milestones.
-3. Transparent generic type aliases.
+1. Flow-sensitive narrowing, exhaustiveness, and redundancy checking, after
+   the checker-design prerequisite (statement environments and joins) and the
+   `is` operator land.
+2. Transparent generic type aliases, riding the type-variable plan's phase-1
+   substitution machinery.
+3. Generic Cortex bodies/syntax, per the type-variable plan's v2 milestones.
 4. Dimension variables and repeated-shape correlation.
 5. Physical-dimension types for units and quantities.
 6. Inferred operation requirements plus named generic-parameter protocol
