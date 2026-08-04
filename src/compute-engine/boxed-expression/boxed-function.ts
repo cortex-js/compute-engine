@@ -66,7 +66,11 @@ import {
   triStateSelect,
 } from './overload.js';
 import { candidateShape } from './tensor-view.js';
-import { instantiatedResultType } from './generic-instantiation.js';
+import {
+  instantiatedResultType,
+  liftedEchoPositions,
+  substituteDeclaredBounds,
+} from './generic-instantiation.js';
 import type {
   EffectLabel,
   FunctionSignature,
@@ -3198,10 +3202,16 @@ function type(expr: BoxedFunction): Type {
       resolvedArm(expr, expr.valueDefinition.type.type) ??
       expr.valueDefinition.type.type;
     // As on the operator-def route: a polytype arm is instantiated at the call
-    // site so no open type escapes as the expression's `.type` (§4.2).
+    // site so no open type escapes as the expression's `.type` (§4.2). The
+    // solve sees the SAME `threadable` gate this route hands
+    // `validateArguments` (`box.ts`), so validation and result typing solve one
+    // constraint problem (§4.5).
+    const threadable = paramsAreScalar(sig);
     const sigResult =
-      instantiatedResultType(sig, expr.ops) ?? functionResult(sig) ?? 'unknown';
-    if (paramsAreScalar(sig)) {
+      instantiatedResultType(sig, expr.ops, { threadable }) ??
+      functionResult(sig) ??
+      'unknown';
+    if (threadable) {
       // As at the operator-def lambda site above: a numeric-tuple argument
       // binds whole to a scalar parameter and the body broadcasts it, so an
       // INFERRED signature result disagrees with the value — return `any`. A
@@ -3231,6 +3241,18 @@ function type(expr: BoxedFunction): Type {
         // Shape-aware (§D6.1), as at the operator-def lambda site above —
         // including the collection-valued-result exception.
         if (mapped.length > 0) {
+          // D10 (§4.4) — the lift already bound the FULL actual to a
+          // bare-variable result, so `sigResult` IS the collection: wrapping it
+          // again would type `f([1,2,3])` under `forall T. (T) -> T` as
+          // `list<vector<…^3>>` instead of the operand's own
+          // `vector<…^3>` (the operator route's answer). Polytype-only: a
+          // ground signature has no echo positions and falls through unchanged.
+          const echoed = liftedEchoPositions(sig, expr.ops, { threadable });
+          if (
+            echoed.size > 0 &&
+            expr.ops.some((x, i) => echoed.has(i) && mapped.includes(x))
+          )
+            return sigResult;
           const collectionValued =
             isSubtype(sigResult, 'collection') ||
             (typeof sigResult !== 'string' &&
@@ -3428,7 +3450,14 @@ export function paramsAreScalar(
     ...(sigType.optArgs ?? []),
     ...(sigType.variadicArg ? [sigType.variadicArg] : []),
   ];
-  return args.every((arg) => isScalarType(arg.type));
+  // A QUANTIFIED parameter is read at its declared bound (§4.5): `T:
+  // indexed_collection` can only ever denote a collection, so `(T) -> T` binds
+  // its argument WHOLE exactly as the ground `(indexed_collection) -> …` does,
+  // and no site may lift/thread over it. An unbounded variable keeps the scalar
+  // default, and a ground signature (no `typeParams`) is untouched.
+  return args.every((arg) =>
+    isScalarType(substituteDeclaredBounds(sigType.typeParams, arg.type))
+  );
 }
 
 function isOperatorDefinition(

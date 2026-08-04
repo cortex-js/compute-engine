@@ -256,3 +256,130 @@ describe('D7 names a function-literal body only when there IS one', () => {
     );
   });
 });
+
+describe('§4.5 parity on the VALUE-definition route', () => {
+  // A function symbol declared with a plain type STRING resolves through the
+  // value-definition route (`box.ts`'s `isValueDef` branch and the value-def
+  // arm of `computeFunctionType`), not the operator route. Both halves of that
+  // route used to disagree with their operator-route twins on a polytype:
+  //
+  //  (ii) the declared BOUND was not enforced — `paramsAreScalar` read a bare
+  //       `T` as scalar whatever its bound, so the broadcast-lift gate admitted
+  //       ANY collection at a `T: indexed_collection` parameter.
+  // (iii) a D10 lift-echo was wrapped TWICE — the result already IS the full
+  //       actual, and the broadcast wrapper lifted it again.
+  const setup = () => {
+    const ce = fresh();
+    // The same signature on all three routes.
+    ce.declare('vecho', 'forall T: indexed_collection. (T) -> T'); // value
+    ce.declare('oecho', {
+      signature: 'forall T: indexed_collection. (T) -> T',
+    }); // operator
+    ce.declare('gecho', '(indexed_collection) -> indexed_collection'); // ground
+    return ce;
+  };
+
+  const M22 = ['List', ['List', 1, 2], ['List', 3, 4]];
+
+  test('(ii) a `set` operand is rejected identically on all three routes', () => {
+    const ce = setup();
+    for (const f of ['vecho', 'oecho', 'gecho']) {
+      const e = ce.box([f, ['Set', 1, 2]]);
+      expect(e.isValid).toBe(false);
+      // §8: the reported expected type is the ground BOUND, never variable
+      // syntax — and it is the same string on every route.
+      expect(JSON.stringify(e.json)).toBe(
+        `["${f}",["Error",["ErrorCode","'incompatible-type'","'indexed_collection'","'set<finite_integer>'"]]]`
+      );
+    }
+  });
+
+  test('(ii) a scalar operand is still rejected on the value route', () => {
+    const ce = setup();
+    expect(ce.box(['vecho', 5]).isValid).toBe(false);
+    expect(ce.box(['oecho', 5]).isValid).toBe(false);
+  });
+
+  test('(ii) a matrix operand is admitted and echoed verbatim', () => {
+    const ce = setup();
+    const e = ce.box(['vecho', M22]);
+    expect(e.isValid).toBe(true);
+    expect(e.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(e.type.toString()).toBe(e.op1.type.toString());
+    // Route parity: the operator route says the same thing.
+    expect(ce.box(['oecho', M22]).type.toString()).toBe(
+      'matrix<finite_integer^(2x2)>'
+    );
+  });
+
+  test('(iii) a D10 lift-echo is NOT wrapped a second time', () => {
+    const ce = fresh();
+    ce.declare('vid', 'forall T. (T) -> T'); // value route
+    ce.declare('oid', { signature: 'forall T. (T) -> T' }); // operator route
+    expect(ce.box(['vid', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'vector<finite_integer^3>'
+    );
+    expect(ce.box(['oid', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'vector<finite_integer^3>'
+    );
+    expect(ce.box(['vid', M22]).type.toString()).toBe(
+      'matrix<finite_integer^(2x2)>'
+    );
+    // A scalar operand is unaffected.
+    expect(ce.box(['vid', 5]).type.toString()).toBe('finite_integer');
+  });
+
+  test('(iii) a scalar-bounded polytype echoes the actual, as on the operator route', () => {
+    const ce = fresh();
+    ce.declare('vnum', 'forall T: number. (T) -> T');
+    ce.declare('onum', {
+      signature: 'forall T: number. (T) -> T',
+      broadcastable: true,
+    });
+    // D10: the lift binds the FULL actual, so both routes echo the operand's
+    // own type (this is what the migrated `Conjugate`/`Chop` handlers produce).
+    expect(ce.box(['vnum', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'vector<finite_integer^3>'
+    );
+    expect(ce.box(['onum', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'vector<finite_integer^3>'
+    );
+    expect(ce.box(['vnum', 2]).type.toString()).toBe('finite_integer');
+  });
+
+  test('a migrated broadcastable operator still evaluates elementwise', () => {
+    const ce = fresh();
+    // `Chop`: `forall T: number. (T) -> T`, broadcastable.
+    expect(ce.box(['Chop', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'vector<finite_integer^3>'
+    );
+    expect(
+      ce
+        .box(['Chop', ['List', 1e-12, 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[0,2,3]');
+    expect(
+      ce
+        .box(['Conjugate', ['List', 1, 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,3]');
+  });
+
+  test('GROUND value-route rows are unchanged', () => {
+    const ce = fresh();
+    // The `(any) -> any` single-wrap convention of the ground value route.
+    ce.declare('ga', '(any) -> any');
+    expect(ce.box(['ga', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'list<any^3>'
+    );
+    ce.declare('gn', '(number) -> number');
+    expect(ce.box(['gn', ['List', 1, 2, 3]]).type.toString()).toBe('vector<3>');
+    ce.declare('gc', '(indexed_collection) -> indexed_collection');
+    expect(ce.box(['gc', ['Set', 1, 2]]).isValid).toBe(false);
+    expect(ce.box(['gc', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'indexed_collection'
+    );
+  });
+});

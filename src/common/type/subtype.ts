@@ -15,6 +15,7 @@ import type {
   BroadcastableType,
   CollectionType,
   FunctionSignature,
+  ListType,
   NumericPrimitiveType,
   PrimitiveType,
   SetType,
@@ -1205,7 +1206,11 @@ export function isSubtype(
     if (lhs.kind === 'indexed_collection')
       return isSubtype(lhs.elements, rhs.elements);
 
-    if (lhs.kind === 'list') return isSubtype(lhs.elements, rhs.elements);
+    if (lhs.kind === 'list')
+      return (
+        isSubtype(lhs.elements, rhs.elements) ||
+        peeledRowMatches(lhs, rhs.elements)
+      );
 
     if (lhs.kind === 'tuple') {
       // A tuple is a subtype of a collection if all its elements are subtypes of the collection elements
@@ -1218,7 +1223,11 @@ export function isSubtype(
     if (lhs.kind === 'collection' || lhs.kind === 'indexed_collection')
       return isSubtype(lhs.elements, rhs.elements);
 
-    if (lhs.kind === 'list') return isSubtype(lhs.elements, rhs.elements);
+    if (lhs.kind === 'list')
+      return (
+        isSubtype(lhs.elements, rhs.elements) ||
+        peeledRowMatches(lhs, rhs.elements)
+      );
 
     if (lhs.kind === 'tuple')
       return lhs.elements.every((x) => isSubtype(x.type, rhs.elements));
@@ -1477,6 +1486,31 @@ function broadcastableCollectionElementType(type: Type): Type | undefined {
     return type.elements;
   }
   return undefined;
+}
+
+/**
+ * A dimensioned rank-n list (n ≥ 2) has TWO consistent readings as a
+ * collection: the flat scalar-dtype reading (`matrix<integer^(2x3)>` is a
+ * collection of `integer`) and the peeled reading — the one the runtime uses,
+ * where indexing yields a sub-tensor with one fewer dimension ("the first
+ * element of a matrix is its first row"). `collectionElementType` (utils.ts)
+ * and `broadcastableCollectionElementType` above both report the PEELED row;
+ * membership in `collection<E>` / `indexed_collection<E>` must accept it too,
+ * or a signature instantiated from the element type (`forall T.
+ * (indexed_collection<T>, …)` solving `T = vector<integer^3>`) rejects the very
+ * operand that produced it.
+ *
+ * Additive only: the caller checks the scalar reading first and consults this
+ * one afterwards, so both readings are admitted and no previously-accepted
+ * membership is lost.
+ */
+function peeledRowMatches(lhs: ListType, elements: Type): boolean {
+  const dims = lhs.dimensions;
+  if (!dims || dims.length <= 1) return false;
+  return isSubtype(
+    { kind: 'list', elements: lhs.elements, dimensions: dims.slice(1) },
+    elements
+  );
 }
 
 function isValue(type: Type): boolean {

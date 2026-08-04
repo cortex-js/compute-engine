@@ -412,6 +412,54 @@ describe('NO BEHAVIOR CHANGE FOR EXISTING TYPE STRINGS', () => {
   });
 });
 
+describe('DIMENSIONED ACTUALS — the two collection readings (subtype.ts)', () => {
+  // A dimensioned rank-n list (n >= 2) has two consistent readings as a
+  // collection, and `isSubtype` must admit BOTH: the flat scalar-dtype reading,
+  // and the PEELED reading the runtime uses (`collectionElementType`: "the
+  // first element of a matrix is its first row"). Admitting only the first is
+  // what made `forall T. (indexed_collection<T>, …)` reject the very matrix
+  // operand whose element type pinned `T`.
+  test('the peeled row reading is admitted', () => {
+    const m = parseType('matrix<integer^(2x3)>');
+    expect(typeToString(collectionElementType(m)!)).toBe('vector<integer^3>');
+    expect(
+      isSubtype(m, parseType('indexed_collection<vector<integer^3>>'))
+    ).toBe(true);
+    expect(isSubtype(m, parseType('collection<vector<integer^3>>'))).toBe(true);
+  });
+
+  test('the scalar-dtype reading is unchanged (additive, not replaced)', () => {
+    const m = parseType('matrix<integer^(2x3)>');
+    expect(isSubtype(m, parseType('indexed_collection<integer>'))).toBe(true);
+    expect(isSubtype(m, parseType('collection<integer>'))).toBe(true);
+  });
+
+  test('a 1-D list is unaffected — there is no dimension to peel', () => {
+    const v = parseType('list<string^2>');
+    expect(typeToString(collectionElementType(v)!)).toBe('string');
+    expect(isSubtype(v, parseType('indexed_collection<string>'))).toBe(true);
+    expect(isSubtype(v, parseType('indexed_collection<list<string>>'))).toBe(
+      false
+    );
+  });
+
+  test('the peel is ONE dimension, and the row shape still has to match', () => {
+    const m = parseType('matrix<integer^(2x3)>');
+    expect(
+      isSubtype(m, parseType('indexed_collection<vector<integer^2>>'))
+    ).toBe(false);
+    expect(isSubtype(m, parseType('indexed_collection<string>'))).toBe(false);
+    // Rank 3 peels to rank 2, not to the scalar-plus-one.
+    const t3 = parseType('list<integer^(2x3x4)>');
+    expect(
+      isSubtype(t3, parseType('indexed_collection<matrix<integer^(3x4)>>'))
+    ).toBe(true);
+    expect(
+      isSubtype(t3, parseType('indexed_collection<matrix<integer^(2x4)>>'))
+    ).toBe(false);
+  });
+});
+
 describe('FREE VARIABLES AND SUBSTITUTION', () => {
   test('a polytype has no free variables; an open type does', () => {
     expect([...freeTypeVariables(parseType('forall T. (T) -> T'))]).toEqual([]);
@@ -524,6 +572,32 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // `widen(unknown, integer)` is `integer`, which would OVERSTATE the result.
     expect(solve('forall T. (T, T) -> T', ['unknown', 'integer'])).toBe(
       '(unknown, unknown) -> unknown'
+    );
+  });
+
+  test('only a TOP-LEVEL top type waives the declared bound (D8 provenance)', () => {
+    // The D8 waiver exists because the GROUND path admits a top-typed operand
+    // unconditionally (the unknown/`any` gate in `validateArguments`) — that
+    // gate reads the WHOLE operand's type, so the waiver is for a bound
+    // recorded at a bare-variable pattern, depth 0.
+    for (const top of ['any', 'unknown']) {
+      expect(solve('forall T: indexed_collection. (T) -> T', [top])).toBe(
+        `(${top}) -> ${top}`
+      );
+      // NESTED under a constructor there is no such counterpart:
+      // `isSubtype(tuple<any>, tuple<number>)` is false, so the bound is
+      // enforced and the solve FAILS, exactly as the ground reading does.
+      expect(solve('forall T: number. (tuple<T>) -> T', [`tuple<${top}>`])).toMatch(
+        /^FAIL .*is declared with bound `number`/
+      );
+      // The JOIN itself is unchanged — `T` still solves to the top type.
+      expect(solvedVar('forall T: number. (tuple<T>) -> T', [`tuple<${top}>`], 'T')).toBe(
+        top
+      );
+    }
+    // An UNBOUNDED variable is unaffected either way.
+    expect(solve('forall T. (tuple<T>) -> T', ['tuple<any>'])).toBe(
+      '(tuple<any>) -> any'
     );
   });
 
@@ -909,6 +983,32 @@ describe('END TO END — a user-declared generic operator', () => {
     );
   });
 
+  test('the D10 unwrap is for the TRUE echo shape only (value route)', () => {
+    // The lifted-echo short circuit returns the solved result UNWRAPPED, which
+    // is right only when the arm's result IS the bare variable: the lift
+    // already bound the full collection to it. A result that merely MENTIONS
+    // the variable wraps it, so the broadcast shape must be built as usual.
+    const ce = fresh();
+    ce.declare('vEcho', 'forall T. (T) -> T');
+    ce.declare('vTuple', 'forall T. (T) -> tuple<T>');
+    ce.declare('vList', 'forall T. (T) -> list<T>');
+    const xs = ['List', 1, 2, 3] as any;
+    expect(ce.box(['vEcho', xs]).type.toString()).toBe(
+      'vector<finite_integer^3>'
+    );
+    expect(ce.box(['vTuple', xs]).type.toString()).toBe(
+      'list<tuple<vector<finite_integer^3>>>'
+    );
+    expect(ce.box(['vList', xs]).type.toString()).toBe(
+      'list<list<vector<finite_integer^3>>>'
+    );
+    // A BOUNDED echo is still an echo.
+    ce.declare('vBounded', 'forall T: indexed_collection. (T) -> T');
+    expect(ce.box(['vBounded', xs]).type.toString()).toBe(
+      'vector<finite_integer^3>'
+    );
+  });
+
   test('a POLYTYPE actual is admitted against the instantiated expected arrow', () => {
     const ce = fresh();
     ce.declare('gid', 'forall T. (T) -> T');
@@ -969,6 +1069,15 @@ describe('§5 — `Poly <: Ground` (rule 1) accepts only a COMPLETE match', () =
     ['forall T. (T) -> T', '(integer) random -> integer', true],
     // Arity shape.
     ['forall T. (T) -> T', '(integer, integer) -> integer', false],
+    // A top type NESTED under a constructor does not waive the declared bound
+    // (D8 is a TOP-LEVEL waiver): the ground reading needs
+    // `tuple<any> <: tuple<number>`, which is false, so no instantiation fits.
+    // There is no runtime re-check on this route, so admitting it would be
+    // unsound rather than merely optimistic.
+    ['forall T: number. (tuple<T>) -> T', '(tuple<any>) -> any', false],
+    ['forall T: number. (tuple<T>) -> T', '(tuple<unknown>) -> unknown', false],
+    // Unbounded: unchanged.
+    ['forall T. (tuple<T>) -> T', '(tuple<any>) -> any', true],
   ];
   test.each(rows)('%s <: %s → %s', (a, b, expected) => {
     expect(isSubtype(parseType(a), parseType(b))).toBe(expected);
@@ -1037,6 +1146,61 @@ describe('ADMISSION-GATE PARITY (§4.5)', () => {
     );
     expect(g).toBe(r);
     expect(g).toBe(true);
+  });
+
+  test('NON-inferable `any` operand at a BOUNDED variable (D8, any arm)', () => {
+    // `any` is the top type: it is a subtype of nothing but itself, so a
+    // variable it absorbs would fail EVERY declared bound — while the ground
+    // signature admits an `any` operand unconditionally (the unknown/any gate).
+    // `any` therefore absorbs exactly as `unknown` does.
+    const [g, r] = parity(
+      'forall T: indexed_collection. (T) -> T',
+      '(indexed_collection) -> indexed_collection',
+      (ce) => ce.box(['p', 'a']),
+      (ce) => ce.declare('a', 'any')
+    );
+    expect(g).toBe(r);
+    expect(g).toBe(true);
+    // The D8 `unknown` arm at the SAME bounded shape stays green.
+    const [gu, ru] = parity(
+      'forall T: indexed_collection. (T) -> T',
+      '(indexed_collection) -> indexed_collection',
+      (ce) => ce.box(['p', 'u']),
+      (ce) => ce.declare('u', 'unknown')
+    );
+    expect(gu).toBe(ru);
+    expect(gu).toBe(true);
+    // A library witness of each: the bound is not re-checked, but a genuinely
+    // wrong operand is still refused.
+    const ce2 = fresh();
+    ce2.declare('rvA', 'any');
+    expect(ce2.function('Reverse', [ce2.box('rvA')]).isValid).toBe(true);
+    expect(ce2.function('Reverse', [ce2.string('hello')]).isValid).toBe(false);
+  });
+
+  test('a NESTED top type is NOT waived — both routes refuse (D8 is top-level)', () => {
+    // The D8 waiver above is for a top type arriving as the WHOLE operand's
+    // type. Under a constructor there is no ground counterpart to preserve:
+    // `(tuple<number>) -> number` refuses a `tuple<any>` operand, so the
+    // generic reading must refuse it too rather than loosen past the ground
+    // signature.
+    for (const nested of ['tuple<any>', 'tuple<unknown>']) {
+      const [g, r] = parity(
+        'forall T: number. (tuple<T>) -> T',
+        '(tuple<number>) -> number',
+        (ce) => ce.box(['p', 'n']),
+        (ce) => ce.declare('n', nested)
+      );
+      expect([nested, g, r]).toEqual([nested, false, false]);
+    }
+    // Control: the same shape with an in-bound element is admitted by both.
+    const [g2, r2] = parity(
+      'forall T: number. (tuple<T>) -> T',
+      '(tuple<number>) -> number',
+      (ce) => ce.box(['p', 'n']),
+      (ce) => ce.declare('n', 'tuple<integer>')
+    );
+    expect([g2, r2]).toEqual([true, true]);
   });
 
   test('a refuted operand is refuted under BOTH', () => {

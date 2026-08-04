@@ -627,9 +627,16 @@ export interface TypeInferenceFailure {
 export interface TypeInferenceResult {
   /** Total: one entry per quantified variable, always ground. */
   bindings: TypeBindings;
-  /** Variables solved to the ABSORBED `unknown` (§4.3 table): their upper
-   * bounds are provisionally satisfied (D8). */
+  /** Variables solved to a TOP-LEVEL absorbed top type — `unknown` or `any`
+   * contributed by the whole operand at a bare-variable pattern (§4.3 table):
+   * their upper bounds are provisionally satisfied (D8). A top type nested
+   * under a constructor still absorbs the JOIN, but is NOT listed here. */
   absorbed: ReadonlySet<string>;
+  /** Variables that got NO call-site bound AND carry no declared bound, so S3
+   * fell back to `unknown`. Used for DISPLAY only: an error message reads
+   * better showing the parameter's ground skeleton (`indexed_collection`) than
+   * the impossible-looking `indexed_collection<unknown>`. */
+  unbound: ReadonlySet<string>;
   /** False when the structural walk itself did not match (a ground pattern
    * position refuted the actual). The embedding in `validateArguments` ignores
    * this — its own admission gates own accept/reject — but `matches` and the
@@ -645,6 +652,11 @@ interface Bound {
   /** Set on the one upper-bound entry contributed by the variable's DECLARED
    * bound (see `uppersOf`) — the only term the D10 lift carve-out waives. */
   declared?: boolean;
+  /** True when the bound is the operand's OWN type at a BARE-VARIABLE pattern
+   * (the walk's depth-0 case), false when it came out of a constructor
+   * recursion. Only a top-level top type waives satisfiability (see
+   * `joinBounds`). */
+  top?: boolean;
 }
 
 interface SolverState {
@@ -675,6 +687,7 @@ export function solveTypeArguments(
     return {
       bindings: Object.create(null),
       absorbed: new Set(),
+      unbound: new Set(),
       matched: true,
       failures: [],
     };
@@ -700,7 +713,8 @@ export function solveTypeArguments(
     // eligible for post-solve narrowing instead (§4.3 table).
     if (opts?.inferable?.(i)) continue;
     if (opts?.lifted?.(i) && isVariable(pattern)) s.lifted.add(pattern.name);
-    if (!walkPattern(s, pattern, actual, i, 'lower', true)) s.matched = false;
+    if (!walkPattern(s, pattern, actual, i, 'lower', true, true))
+      s.matched = false;
   }
 
   // Pass 2b — the contravariant sweep (collection only; satisfiability below).
@@ -710,7 +724,7 @@ export function solveTypeArguments(
     if (pattern === undefined || actual === undefined) continue;
     if (opts?.skip?.(i)) continue;
     if (opts?.inferable?.(i)) continue;
-    walkPattern(s, pattern, actual, i, 'upper', true);
+    walkPattern(s, pattern, actual, i, 'upper', true, true);
   }
 
   //
@@ -719,17 +733,19 @@ export function solveTypeArguments(
   //
   const bindings: TypeBindings = Object.create(null);
   const absorbed = new Set<string>();
+  const unbound = new Set<string>();
   for (const p of params) {
     const lowers = s.lower.get(p.name);
     const uppers = uppersOf(s, p.name);
     if (lowers && lowers.length > 0) {
-      const joined = joinBounds(lowers.map((b) => b.type));
+      const joined = joinBounds(lowers);
       bindings[p.name] = joined.type;
       if (joined.absorbed) absorbed.add(p.name);
     } else if (uppers.length > 0) {
       bindings[p.name] = algebra().narrow(...uppers.map((b) => b.type));
     } else {
       bindings[p.name] = p.bound ?? 'unknown';
+      if (p.bound === undefined) unbound.add(p.name);
     }
   }
 
@@ -738,8 +754,10 @@ export function solveTypeArguments(
   //
   const failures: TypeInferenceFailure[] = [];
   for (const p of params) {
-    // D8: an absorbed `unknown` satisfies every upper bound PROVISIONALLY —
-    // the runtime stays the honest party, and §4.5 parity is preserved.
+    // D8: a TOP-LEVEL absorbed top type (`unknown` or `any` — the whole
+    // operand's own type) satisfies every upper bound PROVISIONALLY — the
+    // runtime stays the honest party, and §4.5 parity is preserved. A NESTED
+    // one does not waive anything (see `joinBounds`).
     if (absorbed.has(p.name)) continue;
     // D10: a lift-admitted operand at a bare-variable pattern was admitted at
     // its SCALAR BASE; re-checking the DECLARED bound against the (collection)
@@ -806,7 +824,7 @@ export function solveTypeArguments(
     });
   }
 
-  return { bindings, absorbed, matched: s.matched, failures };
+  return { bindings, absorbed, unbound, matched: s.matched, failures };
 }
 
 /**
@@ -935,7 +953,8 @@ function addBound(
   map: Map<string, Bound[]>,
   name: string,
   type: Type,
-  index: number | undefined
+  index: number | undefined,
+  top: boolean
 ): void {
   // Ground-type invariant (§4.2): only GROUND bounds are ever joined or met —
   // the algebra helpers assert on an open input. The one shape that can reach
@@ -944,8 +963,8 @@ function addBound(
   // this is a backstop.
   if (hasFreeTypeVariables(type)) return;
   const list = map.get(name);
-  if (list) list.push({ type, index });
-  else map.set(name, [{ type, index }]);
+  if (list) list.push({ type, index, top });
+  else map.set(name, [{ type, index, top }]);
 }
 
 function uppersOf(s: SolverState, name: string): Bound[] {
@@ -972,20 +991,35 @@ function describePositions(bounds: ReadonlyArray<Bound>): string {
  * NOT raw `widen`: `widen(unknown, X)` returns `X`, which would DISCARD a
  * non-inferable unknown and overstate the result.
  */
-function joinBounds(bounds: ReadonlyArray<Type>): {
+function joinBounds(bounds: ReadonlyArray<Bound>): {
   type: Type;
   absorbed: boolean;
 } {
-  // `unknown` absorbs, and is checked before `any`: it is the reading that
-  // then makes upper bounds PROVISIONAL (D8) rather than silently satisfied by
-  // the top type. (A call mixing `any` and a non-inferable `unknown` is
-  // vanishingly rare; the choice is recorded rather than left to `widen`.)
-  if (bounds.some((b) => b === 'unknown')) return { type: 'unknown', absorbed: true };
-  if (bounds.some((b) => b === 'any')) return { type: 'any', absorbed: false };
+  // A top type ABSORBS the join wherever it occurs, but it only WAIVES the
+  // satisfiability check when it arrived TOP-LEVEL — as the whole operand's
+  // own type at a bare-variable pattern. That is the only shape D8/§4.3 rules
+  // on, and the only one the ground path has a counterpart for: the
+  // unknown/`any` gate in `validateArguments` admits a top-typed OPERAND
+  // unconditionally, so `forall T: indexed_collection. (T) -> T` must admit
+  // one too (§4.5 parity). A NESTED top type has no such counterpart —
+  // `isSubtype(tuple<any>, tuple<number>)` is false, so the ground signature
+  // rejects and the generic one must as well; waiving there would loosen past
+  // the ground reading, and `matches`/`Poly <: Ground` have no runtime
+  // re-check to fall back on. `unknown` and `any` behave identically.
+  const absorbed = bounds.some(
+    (b) => b.top === true && (b.type === 'unknown' || b.type === 'any')
+  );
+  // `unknown` is checked before `any` only to fix the reported SOLUTION when a
+  // call mixes the two (vanishingly rare; recorded rather than left to
+  // `widen`, whose `widen(unknown, X) = X` would DISCARD a non-inferable
+  // unknown and overstate the result).
+  if (bounds.some((b) => b.type === 'unknown'))
+    return { type: 'unknown', absorbed };
+  if (bounds.some((b) => b.type === 'any')) return { type: 'any', absorbed };
   // `never` is NEUTRAL (identity): `Concat([], [1])` solves `T = integer`.
-  const ordinary = bounds.filter((b) => b !== 'never');
+  const ordinary = bounds.filter((b) => b.type !== 'never');
   if (ordinary.length === 0) return { type: 'never', absorbed: false };
-  return { type: algebra().widen(...ordinary), absorbed: false };
+  return { type: algebra().widen(...ordinary.map((b) => b.type)), absorbed: false };
 }
 
 /**
@@ -1116,6 +1150,11 @@ function elementTypeOf(type: Type): Type | undefined {
  *
  * Returns false when the structural match itself failed (checked only in the
  * `'lower'` sweep, so a failure is reported once).
+ *
+ * `topLevel` is true only for the DEPTH-0 call on a parameter pattern: a bound
+ * recorded there is the operand's own type, which is what the D8 top-type
+ * waiver is about. Every recursive call is a constructor descent and passes
+ * false.
  */
 function walkPattern(
   s: SolverState,
@@ -1123,13 +1162,14 @@ function walkPattern(
   actual: Type,
   index: number | undefined,
   phase: 'lower' | 'upper',
-  covariant: boolean
+  covariant: boolean,
+  topLevel: boolean
 ): boolean {
   if (isVariable(pattern)) {
     if (phase === 'lower' && covariant)
-      addBound(s.lower, pattern.name, actual, index);
+      addBound(s.lower, pattern.name, actual, index, topLevel);
     else if (phase === 'upper' && !covariant)
-      addBound(s.upper, pattern.name, actual, index);
+      addBound(s.upper, pattern.name, actual, index, topLevel);
     return true;
   }
 
@@ -1145,7 +1185,8 @@ function walkPattern(
   if (typeof actual === 'object' && actual.kind === 'union') {
     let ok = true;
     for (const arm of actual.types)
-      if (!walkPattern(s, pattern, arm, index, phase, covariant)) ok = false;
+      if (!walkPattern(s, pattern, arm, index, phase, covariant, topLevel))
+        ok = false;
     return ok;
   }
 
@@ -1172,7 +1213,8 @@ function walkPattern(
         actual.result,
         index,
         phase,
-        covariant
+        covariant,
+        false
       );
       const patternArgs = signatureElements(pattern);
       const actualArgs = signatureElements(actual);
@@ -1185,7 +1227,8 @@ function walkPattern(
             actualArgs[i].type,
             index,
             phase,
-            !covariant
+            !covariant,
+            false
           )
         )
           ok = false;
@@ -1204,7 +1247,15 @@ function walkPattern(
           : actual === 'list' || actual === 'indexed_collection'
             ? 'any'
             : actual;
-      return walkPattern(s, pattern.elements, inner, index, phase, covariant);
+      return walkPattern(
+        s,
+        pattern.elements,
+        inner,
+        index,
+        phase,
+        covariant,
+        false
+      );
     }
 
     case 'tuple': {
@@ -1229,7 +1280,8 @@ function walkPattern(
             actual.elements[i].type,
             index,
             phase,
-            covariant
+            covariant,
+            false
           )
         )
           ok = false;
@@ -1250,7 +1302,8 @@ function walkPattern(
         actual.values,
         index,
         phase,
-        covariant
+        covariant,
+        false
       );
     }
 
@@ -1266,7 +1319,8 @@ function walkPattern(
       for (const [key, value] of Object.entries(pattern.elements)) {
         const a = actual.elements[key];
         if (a === undefined) continue;
-        if (!walkPattern(s, value, a, index, phase, covariant)) ok = false;
+        if (!walkPattern(s, value, a, index, phase, covariant, false))
+          ok = false;
       }
       return ok;
     }
@@ -1283,7 +1337,15 @@ function walkPattern(
         return false;
       const element = elementTypeOf(actual);
       if (element === undefined) return true;
-      return walkPattern(s, pattern.elements, element, index, phase, covariant);
+      return walkPattern(
+        s,
+        pattern.elements,
+        element,
+        index,
+        phase,
+        covariant,
+        false
+      );
     }
 
     default:

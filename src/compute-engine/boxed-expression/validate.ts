@@ -24,6 +24,7 @@ import {
   resolveOverload,
 } from './overload.js';
 import { parseType } from '../../common/type/parse.js';
+import { reduceType } from '../../common/type/reduce.js';
 import {
   freeTypeVariables,
   parameterPositions,
@@ -718,12 +719,12 @@ export function validateArguments(
     return 'any';
   };
 
-  // D8 — absorbed-`unknown` × upper bounds. When a variable solved to the
-  // ABSORBED `unknown` (a non-inferable unknown operand), every constraint
-  // that mentions it is satisfied PROVISIONALLY: the position is admitted
-  // exactly as the engine's other provisional admissions are, and the runtime
-  // stays the honest party. Without this, a generic signature would be
-  // statically STRICTER than its ground counterpart on unknown operands,
+  // D8 — absorbed top type × upper bounds. When a variable solved to an
+  // ABSORBED `unknown` or `any` (a non-inferable top-typed operand), every
+  // constraint that mentions it is satisfied PROVISIONALLY: the position is
+  // admitted exactly as the engine's other provisional admissions are, and the
+  // runtime stays the honest party. Without this, a generic signature would be
+  // statically STRICTER than its ground counterpart on unknown/`any` operands,
   // breaking the §4.5 parity requirement. Deferred like the other provisional
   // admissions, so the final inference pass does not narrow on a guess.
   const provisionalIdx = new Set<number>();
@@ -749,6 +750,37 @@ export function validateArguments(
       ? undefined
       : groundParam(sig.variadicArg.type);
   const varParamCount = sig.variadicMin ?? 0;
+
+  // §8 DISPLAY ONLY. A variable that got no call-site bound and carries no
+  // declared bound falls to S3's `unknown`, so the instantiated parameter
+  // reads `indexed_collection<unknown>` in an `incompatible-type` message — an
+  // impossible-looking requirement for what is really "any indexed
+  // collection". The message shows such a variable at its GROUND SKELETON
+  // (`any`, which `reduceType` normalizes back to the bare constructor,
+  // restoring the ground signature's wording). Nothing that TYPES the call
+  // uses these: `params`/`optParams`/`varParam` keep the solved bindings.
+  const displayBindings =
+    solved && solved.unbound.size > 0
+      ? {
+          ...solved.bindings,
+          ...Object.fromEntries(
+            [...solved.unbound].map((v) => [v, 'any' as Type])
+          ),
+        }
+      : undefined;
+  const displayParam = (param: Type, ground: Type): Type => {
+    if (displayBindings === undefined) return ground;
+    const t = instantiatedParam(param, displayBindings);
+    return t === undefined ? ground : reduceType(t);
+  };
+  const displayParams =
+    sig.args?.map((x, k) => displayParam(x.type, params[k])) ?? [];
+  const displayOptParams =
+    sig.optArgs?.map((x, k) => displayParam(x.type, optParams[k])) ?? [];
+  const displayVarParam =
+    sig.variadicArg === undefined || varParam === undefined
+      ? undefined
+      : displayParam(sig.variadicArg.type, varParam);
 
   /** The type to infer into the operand at `idx`. For a plain signature this
    * is the parameter itself; for an overload set it is the JOIN over every
@@ -902,7 +934,7 @@ export function validateArguments(
         deferredIdx.add(result.length - 1);
         continue;
       }
-      result.push(ce.typeError(param, op.type, op));
+      result.push(ce.typeError(displayParams[idx] ?? param, op.type, op));
       isValid = false;
       continue;
     }
@@ -999,7 +1031,9 @@ export function validateArguments(
         i += 1;
         continue;
       }
-      result.push(ce.typeError(param, op.type, op));
+      result.push(
+        ce.typeError(displayOptParams[i - params.length] ?? param, op.type, op)
+      );
       isValid = false;
       i += 1;
       continue;
@@ -1090,7 +1124,9 @@ export function validateArguments(
           deferredIdx.add(result.length - 1);
           continue;
         }
-        result.push(ce.typeError(varParam, op.type, op));
+        result.push(
+          ce.typeError(displayVarParam ?? varParam, op.type, op)
+        );
         isValid = false;
         continue;
       }

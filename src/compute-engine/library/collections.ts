@@ -59,7 +59,6 @@ import type {
   Scope,
 } from '../global-types.js';
 import { BoxedType } from '../types.js';
-import { typeToString } from '../../common/type/serialize.js';
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
@@ -1484,11 +1483,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
     invokes: false,
     complexity: 8200,
-    signature: '(key: string, value: any) -> tuple<string, unknown>',
-    type: ([_key, value]) => ({
-      kind: 'tuple',
-      elements: [{ type: 'string' }, { type: value.type.type }],
-    }),
+    signature: 'forall T. (key: string, value: T) -> tuple<string, T>',
 
     canonical: (args, { engine }) => {
       const [key, value] = checkTypes(engine, args, ['string', 'any']);
@@ -1561,8 +1556,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
     invokes: false,
     complexity: 8200,
-    signature: '(value: any) -> tuple<any>',
-    type: ([value]) => tupleTypeOf([value]),
+    signature: 'forall T. (value: T) -> tuple<T>',
     canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 1)),
   },
 
@@ -1573,8 +1567,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
     invokes: false,
     complexity: 8200,
-    signature: '(first: any, second: any) -> tuple<any, any>',
-    type: ([first, second]) => tupleTypeOf([first, second]),
+    signature: 'forall T, U. (first: T, second: U) -> tuple<T, U>',
     canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 2)),
   },
 
@@ -1585,8 +1578,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `invokes` metadata in `docs/EFFECTS-MODEL.md`.
     invokes: false,
     complexity: 8200,
-    signature: '(first: any, second: any, third: any) -> tuple<any, any, any>',
-    type: ([first, second, third]) => tupleTypeOf([first, second, third]),
+    signature:
+      'forall T, U, V. (first: T, second: U, third: V) -> tuple<T, U, V>',
 
     canonical: (ops, { engine }) => engine.tuple(...checkArity(engine, ops, 3)),
   },
@@ -3992,9 +3985,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Take: {
     description: ['Return `n` elements from a collection.'],
     complexity: 8200,
-    signature: '(xs: indexed_collection, count: number) -> indexed_collection',
-    type: ([xs]) =>
-      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
+    signature:
+      'forall T. (xs: indexed_collection<T>, count: number) -> list<T>',
     // No `evaluate` handler: materialization goes through the generic lazy-
     // collection path, driven by the `count`/`at`/`iterator` handlers below.
     // (A previous handler materialized eagerly from its operands — but the
@@ -4076,9 +4068,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Drop: {
     description: ['Return the collection without the first n elements.'],
     complexity: 8200,
-    signature: '(xs: indexed_collection, count: number) -> indexed_collection',
-    type: ([xs]) =>
-      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
+    signature:
+      'forall T. (xs: indexed_collection<T>, count: number) -> list<T>',
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -4370,11 +4361,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature:
-      '(value: indexed_collection, start: number, end: number) -> list',
-    type: ([xs]) => ({
-      kind: 'list',
-      elements: collectionElementType(xs.type.type) ?? 'any',
-    }),
+      'forall T. (value: indexed_collection<T>, start: number, end: number) -> list<T>',
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -4433,8 +4420,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Reverse: {
     description: 'Reverse the order of the elements of an indexed collection.',
     complexity: 8200,
-    signature: '(indexed_collection) -> indexed_collection',
-    type: ([xs]) => xs.type,
+    signature: 'forall T: indexed_collection. (T) -> T',
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -4497,15 +4483,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
     ],
     complexity: 8200,
-    signature: '(indexed_collection, integer, value) -> list',
-    // Element type widens to include the inserted value's type.
-    type: (ops) => ({
-      kind: 'list',
-      elements: widen(
-        collectionElementType(ops[0].type.type) ?? 'any',
-        ops[2].type.type
-      ),
-    }),
+    // The repeated variable widens the element type to include the inserted
+    // value's type (the §4.3 join of the two lower bounds). UNBOUNDED (the
+    // audit-ruled spelling): a bound here would also constrain the SOURCE
+    // collection's elements, rejecting `Insert(fs, 1, 2)` on a
+    // `list<function>` that the ground `(indexed_collection, …)` accepted.
+    // `evaluate` splices whatever it is given, so the looser reading is also
+    // the honest one.
+    signature: 'forall T. (indexed_collection<T>, integer, T) -> list<T>',
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);
@@ -4604,11 +4589,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
     ],
     complexity: 8200,
-    signature: '(indexed_collection, integer) -> list',
-    type: (ops) => ({
-      kind: 'list',
-      elements: collectionElementType(ops[0].type.type) ?? 'any',
-    }),
+    signature: 'forall T. (indexed_collection<T>, integer) -> list<T>',
     evaluate: ([xs, idx], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
@@ -4694,15 +4675,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'A negative index counts from the end. An out-of-range, zero, or non-integer index leaves the expression unevaluated.',
     ],
     complexity: 8200,
-    signature: '(indexed_collection, integer, value) -> list',
-    // Element type widens to include the replacement value's type.
-    type: (ops) => ({
-      kind: 'list',
-      elements: widen(
-        collectionElementType(ops[0].type.type) ?? 'any',
-        ops[2].type.type
-      ),
-    }),
+    // The repeated variable widens the element type to include the replacement
+    // value's type (the §4.3 join of the two lower bounds). UNBOUNDED — see
+    // `Insert`: a bound would also constrain the SOURCE collection's elements.
+    signature: 'forall T. (indexed_collection<T>, integer, T) -> list<T>',
     evaluate: ([xs, idx, value], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
@@ -5083,13 +5059,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the elements of the collection sorted according to the given comparison function.',
     complexity: 8200,
-    signature: '(indexed_collection, order: function?) -> indexed_collection',
+    // The result always rebuilds as a `List` (see `evaluate`), so the result
+    // type is `list<T>`, not the source's (possibly indexed/Range) type. The
+    // `order` slot stays the PRIMITIVE `function`, not an arrow: a
+    // function-typed *symbol* operand must be admitted there (pinned by
+    // `collection-callback-signatures.test.ts`).
+    signature: 'forall T. (indexed_collection<T>, order: function?) -> list<T>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Sort', ops, 1),
-    // The result always rebuilds as a `List` (see `evaluate`), so the static
-    // type must be `list<elt>`, not the source's (possibly indexed/Range) type.
-    type: ([xs]) =>
-      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
     evaluate: ([xs, fn], { engine: ce }) => {
       // Eager collection results rebuild as `List`, never the source's head
       // (a `Range`/`Linspace` head would reinterpret the sorted elements as
@@ -5249,11 +5226,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Without it, `isPure` — and therefore `isConstant` — is true for a
     // shuffle of a literal list, and the impurity backstop in
     // `map-auto-compile.ts` does not gate it.
-    signature: '(indexed_collection) random -> indexed_collection',
-    // The result always rebuilds as a `List` (see `evaluate`), so the static
-    // type must be `list<elt>`, not the source's (possibly indexed/Range) type.
-    type: ([xs]) =>
-      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
+    // The result always rebuilds as a `List` (see `evaluate`), so the result
+    // type is `list<T>`, not the source's (possibly indexed/Range) type.
+    signature: 'forall T. (indexed_collection<T>) random -> list<T>',
     evaluate: ([xs], { engine: ce }) => {
       // An INFINITE collection can never be shuffled: error loudly, matching
       // `Random`/`RandomSample` (`out-of-range`, "a finite collection").
@@ -5449,24 +5424,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'Return a tuple with the unique elements of the collection and their respective counts.',
     complexity: 8200,
-    signature: '(collection) -> tuple<list, list<integer>>',
-    type: ([xs], { engine: _ce }) => {
-      const t = xs.type.type;
-      if (t === 'string')
-        return parseType(`tuple<list<string>, list<integer>>`);
-      return {
-        kind: 'tuple',
-        elements: [
-          {
-            type: {
-              kind: 'list',
-              elements: collectionElementType(t) ?? 'any',
-            },
-          },
-          { type: { kind: 'list', elements: 'integer' } },
-        ],
-      };
-    },
+    signature: 'forall T. (collection<T>) -> tuple<list<T>, list<integer>>',
     evaluate: (ops, { engine: ce }) => {
       if (!ops[0].isFiniteCollection) return undefined;
       const [values, counts] = tally(ops[0]!);
@@ -5480,9 +5438,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   Unique: {
     description: 'Return a list of the unique elements of the collection.',
     complexity: 8200,
-    signature: '(collection) -> list',
-    type: ([xs]) =>
-      `list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>`,
+    signature: 'forall T. (collection<T>) -> list<T>',
     evaluate: (ops, { engine: ce }) => {
       if (!ops[0].isFiniteCollection) return undefined;
       const [values, _counts] = tally(ops[0]!);
@@ -5620,14 +5576,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     wikidata: 'Q381060',
     complexity: 8200,
-    signature: '(collection, integer | function, integer?) -> list',
+    // The second parameter stays the PRIMITIVE `integer | function` union: an
+    // arm of a union may not mention a type variable, and the size/predicate
+    // arms are both ground anyway.
+    signature:
+      'forall T. (collection<T>, integer | function, integer?) -> list<list<T>>',
     // A shorthand predicate (`Partition(xs, _ > 5)`) desugars to a function
     // literal; a size operand (a number, or a symbol holding one) yields no
     // parameter and is left alone, so the size arm is unaffected.
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Partition', ops, 1),
-    type: ([xs]) =>
-      `list<list<${typeToString(collectionElementType(xs.type.type) ?? 'any')}>>`,
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
 
@@ -5759,17 +5717,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Returns a list of lists. Unlike `GroupBy`, only adjacent elements are grouped, so a key value that recurs after a different run starts a new chunk.',
     ],
     complexity: 8200,
-    signature: '(collection, key: function) -> list<list>',
+    // Element types flow through from the source: `list<list<T>>`. The `key`
+    // slot stays the PRIMITIVE `function` (a function-typed symbol operand
+    // must be admitted there).
+    signature: 'forall T. (collection<T>, key: function) -> list<list<T>>',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1),
-    // Element types flow through from the source: list<list<elt>>.
-    type: (ops) => ({
-      kind: 'list',
-      elements: {
-        kind: 'list',
-        elements: collectionElementType(ops[0].type.type) ?? 'any',
-      },
-    }),
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);

@@ -480,9 +480,27 @@ export type TypeResolver = {
 };
 
 /**
+ * Parametric polymorphism is IMPLEMENTED: a signature may be quantified by a
+ * prefix `forall` clause with ground upper bounds
+ * (`forall T: indexed_collection. (T) -> T`), rank-1 (prenex) only, solved by
+ * local inference at each call site. See `doc/08-guide-types.md` and
+ * `docs/plans/2026-08-01-type-variables-design.md`.
+ *
  * ### Future considerations:
- * - Add support for generics (e.g. `list<T>`), i.e. parametric polymorphism,
- * - Add support for type constraints (e.g. `list<T: number>` or list<T> where T: number),
+ * - Add support for generic function literals and the `function f<T>(…)`
+ *   definition form (today a generic declaration requires an `evaluate`
+ *   handler; a function-literal body is rejected),
+ * - Add support for dimension variables (e.g. `forall T, M, N, P.
+ *   (matrix<T^(MxN)>, matrix<T^(NxP)>) -> matrix<T^(MxP)>`) -- dimensions are
+ *   integers, not types, so they need their own variable kind and solver,
+ * - Add support for type packs / variadic correlation (the `Map`-class
+ *   contract: n independently-typed collections with an n-ary callback),
+ * - Add support for F-bounded and variable-referencing bounds
+ *   (e.g. `forall T: comparable<T>`, `forall T: list<U>`) -- bounds are ground,
+ * - Add support for type variables in unions, intersections and negations,
+ *   each of which needs its own inference rule,
+ * - Add support for higher-rank and higher-kinded types, and for variance
+ *   annotations,
  * - Add support for type variants (e.g. a la Rust enums)
  *     Maybe something like
  *      `variant<Square, Circle>` or

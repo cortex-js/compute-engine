@@ -869,6 +869,7 @@ type(type): BoxedType
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| [`BoxedType`](#boxedtype)
 
@@ -1028,6 +1029,7 @@ declareType(name, type, options?): void
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| [`BoxedType`](#boxedtype)
 
@@ -1086,6 +1088,7 @@ declare(id, def, scope?): IComputeEngine
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| `Partial`\<`OnlyFirst`\<[`ValueDefinition`](#valuedefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
@@ -1104,6 +1107,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
@@ -1131,6 +1135,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferredSignature`: `boolean`;
@@ -1150,6 +1155,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype)
      \| `undefined`;
@@ -1187,6 +1193,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
@@ -1214,6 +1221,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferredSignature`: `boolean`;
@@ -1233,6 +1241,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype)
      \| `undefined`;
@@ -1285,6 +1294,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| `Partial`\<`OnlyFirst`\<[`ValueDefinition`](#valuedefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
@@ -1303,6 +1313,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
@@ -1330,6 +1341,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferredSignature`: `boolean`;
@@ -1349,6 +1361,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype)
      \| `undefined`;
@@ -1386,6 +1399,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
@@ -1413,6 +1427,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferredSignature`: `boolean`;
@@ -1432,6 +1447,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype)
      \| `undefined`;
@@ -4399,6 +4415,7 @@ optional type?: (ops, options) =>
   | NumericType
   | FunctionSignature
   | ValueType
+  | TypeVariable
   | TypeReference
   | BoxedType
   | undefined;
@@ -8587,6 +8604,7 @@ type(type): BoxedType
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| [`BoxedType`](#boxedtype)
 
@@ -8746,6 +8764,7 @@ declareType(name, type, options?): void
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| [`BoxedType`](#boxedtype)
 
@@ -8804,6 +8823,7 @@ declare(id, def, scope?): IComputeEngine
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| `Partial`\<`OnlyFirst`\<[`ValueDefinition`](#valuedefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
@@ -8822,6 +8842,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
@@ -8849,6 +8870,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferredSignature`: `boolean`;
@@ -8868,6 +8890,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype)
      \| `undefined`;
@@ -8905,6 +8928,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
@@ -8932,6 +8956,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferredSignature`: `boolean`;
@@ -8951,6 +8976,7 @@ declare(id, def, scope?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype)
      \| `undefined`;
@@ -9003,6 +9029,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| `Partial`\<`OnlyFirst`\<[`ValueDefinition`](#valuedefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
@@ -9021,6 +9048,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
@@ -9048,6 +9076,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferredSignature`: `boolean`;
@@ -9067,6 +9096,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype)
      \| `undefined`;
@@ -9104,6 +9134,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferred`: `boolean`;
@@ -9131,6 +9162,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
   `inferredSignature`: `boolean`;
@@ -9150,6 +9182,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`NumericType`](#numerictype)
      \| [`FunctionSignature`](#functionsignature)
      \| [`ValueType`](#valuetype)
+     \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype)
      \| `undefined`;
@@ -12181,6 +12214,7 @@ set type(type:
   | NumericType
   | FunctionSignature
   | ValueType
+  | TypeVariable
   | TypeReference
   | BoxedType): void
 ```
@@ -13608,6 +13642,7 @@ new BoxedType(type, typeResolver?): BoxedType
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
 
 ####### typeResolver?
@@ -13778,6 +13813,24 @@ type: Type;
 
 <MemberCard>
 
+##### BoxedType.isPolymorphic
+
+```ts
+readonly isPolymorphic: boolean;
+```
+
+True when this type is a **polytype**: a signature carrying a `forall`
+clause, or an overload set with at least one such arm.
+
+Computed ONCE, here, at construction: every per-call dispatch check
+(argument validation, result typing) reads this boolean and is O(1) — it
+must never become a tree walk. Polytypes are legal only as signatures, so
+the computation itself is a shallow field test.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedType.unionMembers
 
 The members of a union type, each boxed, or `[this]` for any other type.
@@ -13858,6 +13911,20 @@ static narrow(...types): BoxedType
 matches(other): boolean
 ```
 
+True when every value of this type is an `other`.
+
+**A polymorphic PATTERN is a consistent existential** (D12): the pattern's
+variables are solved against the subject and the match holds iff a
+consistent instantiation exists — so
+`ce.type('(number) -> number').matches('forall T. (T) -> T')` is `true`,
+the probe users actually mean. `couldMatch` deliberately answers `false`
+on the same row (D6's bound-reading, contravariant `any`); the two
+predicates diverge by design.
+
+A polymorphic SUBJECT is the `isSubtype` story: rule 1 against a ground
+pattern (instantiate-and-check), rule 3 (α-equivalence) against a
+polymorphic one.
+
 ####### other
 
   \| `string`
@@ -13875,6 +13942,7 @@ matches(other): boolean
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| [`BoxedType`](#boxedtype)
 
@@ -13905,6 +13973,7 @@ is(other): boolean
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| [`BoxedType`](#boxedtype)
 
@@ -13949,6 +14018,7 @@ Throws if `other` is a string that is not a valid type.
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| [`BoxedType`](#boxedtype)
 
@@ -14009,6 +14079,7 @@ Throws if `other` is a string that is not a valid type.
   \| [`NumericType`](#numerictype)
   \| [`FunctionSignature`](#functionsignature)
   \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
   \| [`TypeReference`](#typereference)
   \| [`BoxedType`](#boxedtype)
 
@@ -14415,6 +14486,45 @@ result stays `[]`).
 
 <MemberCard>
 
+### TypeVariable
+
+```ts
+type TypeVariable = {
+  kind: "variable";
+  name: string;
+};
+```
+
+A universally quantified type variable (rank-1).
+
+Only legal inside a function signature; declared and scoped by its arm's
+`forall` clause ([FunctionSignature.typeParams](#typeparams)). A variable is
+**atomic and opaque**: it is never reduced, distributed or collapsed, and it
+is substituted away by instantiation at a call site.
+
+</MemberCard>
+
+<MemberCard>
+
+### TypeParameter
+
+```ts
+type TypeParameter = {
+  name: string;
+  bound: Type;
+};
+```
+
+One entry of a signature's `forall` clause: the variable's name and its
+optional declared upper bound.
+
+The bound must be **ground** (no type variables) — validated when the
+declared type is boxed. An unbounded variable's implicit bound is `any`.
+
+</MemberCard>
+
+<MemberCard>
+
 ### FunctionSignature
 
 ```ts
@@ -14425,6 +14535,7 @@ type FunctionSignature = {
   variadicArg: NamedElement;
   variadicMin: 0 | 1;
   effects: EffectSet;
+  typeParams: TypeParameter[];
   result: Type;
 };
 ```
@@ -14687,6 +14798,7 @@ type Type =
   | NumericPrimitiveType
   | FunctionSignature
   | ValueType
+  | TypeVariable
   | TypeReference;
 ```
 

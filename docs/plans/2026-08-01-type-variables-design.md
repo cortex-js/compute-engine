@@ -258,7 +258,10 @@ undefined. Lifting the restriction is future work.
     the `ce.assign` and `Assign`-operator routes.
   - `effectsDeclared` derives from `signatureEffects(type) !== undefined`,
     which reads polytype arrows fine — pinned: a generic declaration with
-    a specifier (`forall T, U. (T) random -> U`) still records the effects
+    a specifier (`forall T, U. (T, U) random -> U` — note `U` must occur in
+    an argument position per the result-reachability rule above; the earlier
+    draft's `(T) random -> U` spelling is rejected by this spec's own check)
+    still records the effects
     contract.
 
 ### 4.2 The ground-type invariant — and its enforcement
@@ -1175,7 +1178,8 @@ are D10–D13**.
   (`const f: forall T. (x: T) scope -> T = { x + n }` — the annotation
   parses via the shared DSL, then the literal body is rejected with the
   same D7 diagnostic, not a parse error); `effectsDeclared` recorded
-  from `forall T, U. (T) random -> U`.
+  from `forall T, U. (T, U) random -> U` (the reachable spelling — a
+  result-only `U` is rejected by §4.1's own reachability check).
 - **Admission-gate parity (§4.5):** for each gate (deferred-overlap,
   broadcastable, missing-stripped, Spread, non-strict, inferable-unknown,
   non-inferable-unknown under D8), a generic signature and its ground

@@ -1,5 +1,53 @@
 ## [Unreleased]
 
+### New Features
+
+- **Parametric polymorphism: `forall` type variables in function signatures.**
+  The type language gains rank-1 (prenex) type variables with optional ground
+  upper bounds: `forall T. (list<T>) -> T`,
+  `forall T: indexed_collection. (T) -> T`,
+  `forall T, U. (list<T>, (T) any -> U) -> list<U>`. Any identifier can be a
+  variable — the clause declares it, and within its arm the quantified name
+  shadows a nominal type of the same name (`forall` itself is now reserved in
+  type strings). User functions can be declared generically
+  (`ce.declare('swap', 'forall T, U. (tuple<T, U>) -> tuple<U, T>')`); each
+  call solves the variables from the operands by local type inference
+  (repeated variables join — `forall T. (T, T) -> T` at an `integer` and a
+  `real` gives `real`), the result type is obtained by substitution, and a
+  violated bound reports the instantiated expected type. Overload sets
+  quantify per arm, with a ground arm beating an equally-specific generic one.
+  On the query APIs, `matches` with a generic pattern answers existentially
+  (`(number) -> number` matches `'forall T. (T) -> T'`) while `couldMatch`
+  reads each variable as its declared bound. Generic *function literals* are
+  not part of this release: a generic declaration takes an `evaluate` handler,
+  and assigning a literal body produces a dedicated diagnostic (the
+  `function f<T>(…)` form is planned). See the new "Generic Signatures"
+  section of the types guide.
+
+  Twenty-five library operators now state their contracts declaratively with
+  generic signatures instead of imperative type handlers, preserving operand
+  kinds and dimensions exactly: `Identity`, `Prime`, `BaseForm`, `Chop`,
+  `PlusMinus`, `Remainder`, `Conjugate`, `Inverse`, `Reverse`, the tuple
+  constructors (`Single`, `Pair`, `Triple`, `KeyValuePair`), and the
+  collection family (`Take`, `Drop`, `Slice`, `DeleteAt`, `Insert`,
+  `ReplaceAt`, `Sort`, `Unique`, `RandomShuffle`, `Tally`, `Partition`,
+  `ChunkBy`) — e.g. `Reverse` of a `matrix<integer^(2x3)>` is now statically a
+  `matrix<integer^(2x3)>`, and `Take` of it a `list<vector<integer^3>>`. As
+  part of this, a dimensioned collection is now also a subtype of a collection
+  of its rows (`matrix<integer^(2x3)> <: indexed_collection<vector<integer^3>>`),
+  matching how single-index access has always evaluated.
+
+### Issues Resolved
+
+- **`Find` now types as the element, not the collection.** Its static type was
+  the whole collection's (`Find([1,2,3], p)` claimed `list<integer>`) while
+  evaluation returns a single element or `Nothing`; it is now
+  `element | nothing`.
+- **`BaseForm`'s declared result contradicted its behavior** (`-> string |
+  nothing` while echoing its numeric operand); it now echoes the operand type.
+- **`If` without an else branch keeps the `nothing` arm in its type.** A false
+  condition yields `Nothing`, but the static type silently dropped that arm.
+
 ### Improvements
 
 - **Degenerate big operators (`Σ_{i=a}^{a}`, `Π_{i=a}^{a}`) now reduce.** A big

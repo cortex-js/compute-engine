@@ -1184,8 +1184,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     Identity: {
       description: 'Return the argument unchanged',
-      signature: '(any) -> unknown',
-      type: ([x]) => x.type,
+      signature: 'forall T. (T) -> T',
       evaluate: ([x]) => x,
     },
   },
@@ -3393,8 +3392,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     BaseForm: {
       description: '`BaseForm(expr, base=10)`',
       complexity: 9000,
-      signature: '(number, (string|number)?) -> number',
-      type: ([x]) => (x === undefined ? 'nothing' : x.type),
+      signature: 'forall T: number. (T, (string|number)?) -> T',
       evaluate: ([x]) => x,
     },
 
@@ -3582,11 +3580,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Prime: {
       description:
         "Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs.",
-      signature: '(any, integer?) -> unknown',
       // A primed entity denotes something of the same kind as its base:
       // `a'` on a number-valued symbol is another value (so `\sin a'`
       // type-checks), `f'` on a function is a function. Mirror the type.
-      type: ([x]) => x?.type ?? 'unknown',
+      signature: 'forall T. (T, integer?) -> T',
     },
   },
 ];

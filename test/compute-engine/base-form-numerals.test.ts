@@ -151,7 +151,9 @@ describe('BaseForm result type', () => {
   });
 
   test('the declared signature result is numeric', () => {
+    // Since the forall migration the result is the bounded echo `T` with
+    // `T: number` — the numeric contract lives in the bound.
     const sig = ce.lookupDefinition('BaseForm')!.operator!.signature.toString();
-    expect(sig.endsWith('-> number')).toBe(true);
+    expect(sig).toBe('forall T: number. (T, number | string?) -> T');
   });
 });

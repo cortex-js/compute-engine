@@ -7,7 +7,11 @@ import {
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
 import { typeContainsMissing } from '../../common/type/utils.js';
-import type { FunctionSignature, Type } from '../../common/type/types.js';
+import type {
+  FunctionSignature,
+  Type,
+  TypeParameter,
+} from '../../common/type/types.js';
 
 import { couldBeCollectionOperand } from '../collection-utils.js';
 import type { Expression } from '../global-types.js';
@@ -35,6 +39,32 @@ export function polytypeArm(
   if (t.kind !== 'signature') return undefined;
   if (t.typeParams === undefined || t.typeParams.length === 0) return undefined;
   return t;
+}
+
+/**
+ * `t` with every variable quantified by `typeParams` replaced by its DECLARED
+ * BOUND (an unbounded variable is left as-is).
+ *
+ * This is the KIND-level reading of a pattern — what EVERY instantiation of it
+ * has in common, NOT what a given call binds (that is `solveArm`'s job). It is
+ * what a gate asking a *shape* question about the signature itself must use:
+ * `T: indexed_collection` can only ever denote a collection, so a `(T) -> T`
+ * parameter is collection-typed exactly as the ground
+ * `(indexed_collection) -> indexed_collection` one is (§4.5 parity).
+ */
+export function substituteDeclaredBounds(
+  typeParams: ReadonlyArray<TypeParameter> | undefined,
+  t: Type
+): Type {
+  if (typeParams === undefined || typeParams.length === 0) return t;
+  const bounds: Record<string, Type> = Object.create(null);
+  let n = 0;
+  for (const p of typeParams)
+    if (p.bound !== undefined) {
+      bounds[p.name] = p.bound;
+      n += 1;
+    }
+  return n === 0 ? t : substituteTypeVariables(t, bounds);
 }
 
 /** What the embedding knows about the call that the solver cannot see. */
@@ -115,6 +145,47 @@ export function solveArm(
     }
   );
 }
+
+/**
+ * The operand positions whose FULL actual the D10 lift already put into the
+ * arm's result: a lift-admitted operand (same predicate as `solveArm`'s
+ * `lifted` policy) sitting at a BARE-VARIABLE parameter whose variable IS the
+ * whole result.
+ *
+ * At such a position the solved result type IS the collection actual — the
+ * broadcast/lift wrapper at the call site must therefore not lift it a SECOND
+ * time (`f([1,2,3])` under `forall T. (T) -> T` is `vector<…^3>`, never
+ * `list<vector<…^3>>`). Empty for a ground signature, so no non-generic path
+ * changes.
+ *
+ * The result must be the BARE variable, not merely mention it: under
+ * `forall T. (T) -> tuple<T>` the arm's result is a tuple WRAPPING the
+ * collection, so the caller's unwrap would drop the broadcast shape the value
+ * route builds. Only the true echo shape short-circuits.
+ */
+export function liftedEchoPositions(
+  arm: Readonly<Type> | undefined,
+  ops: ReadonlyArray<Expression>,
+  ctx?: ArmInferenceContext
+): ReadonlySet<number> {
+  const poly = polytypeArm(arm);
+  if (poly === undefined || !ctx?.threadable || ctx.lazy)
+    return EMPTY_POSITIONS;
+  const echoed = poly.result;
+  if (typeof echoed !== 'object' || echoed.kind !== 'variable')
+    return EMPTY_POSITIONS;
+
+  const result = new Set<number>();
+  parameterPositions(poly, ops.length).forEach((p, i) => {
+    if (p === undefined || typeof p === 'string') return;
+    if (p.kind !== 'variable' || p.name !== echoed.name) return;
+    const op = ops[i];
+    if (op && couldBeCollectionOperand(op)) result.add(i);
+  });
+  return result;
+}
+
+const EMPTY_POSITIONS: ReadonlySet<number> = new Set<number>();
 
 /**
  * `param` with the solved bindings applied, or `undefined` when it is STILL
