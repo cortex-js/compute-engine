@@ -1935,6 +1935,29 @@ One deliberate semantic tightening rode along, in
 returns `false`. Unreachable in practice (`Interpret`'s samples are numeric
 data), and the suite is green either way.
 
+#### Free-variable `eq()` follow-ups (reordered to sampling-first 2026-08-03; both levers unbuilt, tracked so they aren't re-derived)
+
+The `eq()` free-variable branch now samples before the expand+simplify proof
+(commit `aa48b48e`; a Tycho witness dropped 14.6 s → 6.2 s). Two further levers
+were designed and deliberately NOT built, because the reorder alone met the
+need:
+
+- **Expand+simplify memo** — for a workload where repeated comparisons
+  *agree* under sampling (so the symbolic proof still runs each time), memoize
+  `_expand(x).simplify()` per engine: structural-hash key, `isSame` guard,
+  invalidated on `_mutationGeneration` **plus** per-free-symbol
+  `_writeVersion` dependencies (the item-126/127 element-memo discipline —
+  plain `_generation` churns on ephemeral loop-index writes and would never
+  hit inside a drain). A bundle-patch prototype measured 14.6 s → 6.6 s on the
+  same witness before the reorder superseded it.
+- **Loop-invariant broadcast operand hoisting** — each broadcast element
+  evaluation re-resolves invariant scalar operands to *fresh* nodes (verified:
+  a WeakMap keyed on node identity got zero hits within a drain), so
+  `stochasticEqual` recompiles the same tree per element. Hoisting invariant
+  operands once per drain would restore node identity and enable a per-node
+  compiled-evaluator cache. Only worth it if a witness shows sampling-compile
+  as the hot path; per-comparison cost is currently a compile + ~50 point
+  evaluations.
 
 ### Strategic
 
@@ -2162,6 +2185,26 @@ is in git history. The only items deliberately left open:
   complete fix is head-specific structural reduction over held operands (no
   operand `.evaluate()`); the cheap mitigation is adding `Max`/`Min`/`Inverse`
   to the denylist to honor the documented contract.
+
+- **Degenerate big-op round (2026-08-03), flagged not fixed:**
+  - `sameSyntactic` (`boxed-expression/compare.ts`) is mis-named: despite its
+    "compares symbols by NAME, ignoring bindings" doc, the symbol-vs-non-symbol
+    branch of `same()` dereferences `sym.value` unconditionally — the
+    `syntactic` flag is threaded through but never consulted there. Latent
+    surprise for rule-matching callers (this is why the degenerate-bounds fold
+    needed its own `sameBoundStructure()`). Fix = honor the flag in that
+    branch, or rename and document; audit callers either way.
+  - Dependent multi-index big-op bounds don't evaluate:
+    `Sum(j, Limits(i,5,5), Limits(j,i,10))` canonicalizes intact (the vacuity
+    fix keeps `i`'s set) but stays symbolic — `classifyBigopDomain` reads the
+    symbolic lower bound `i` as non-enumerable. Enumerating would need
+    per-iteration re-resolution of dependent bounds in the multi-set walk.
+  - Collection-valued body of a degenerate big-op is a semantic fork:
+    `Σ_{i=a}^{a} L` (L a collection, index unused) routes through the
+    pre-existing arity-1 rewrite `Reduce(L, 'Add', 0)` — it sums L's
+    elements — where the one-point fold would yield `L` itself (one term, that
+    term being the list). Decide which reading is intended before touching it;
+    the current behavior predates the fold and is deliberately preserved.
 
 **Lessons worth keeping in mind** (the durable ones are in CLAUDE.md): the
 `undefined → false` collapse in three-valued predicates was the single most
