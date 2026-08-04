@@ -786,12 +786,27 @@ export function solveTypeArguments(
       declaredBound !== undefined &&
       !algebra().isSubtype(solution, declaredBound)
     ) {
+      // §8 deterministic blame: the EARLIEST operand whose OWN contribution
+      // violates the bound. Blaming `pinnedBy[0]` unconditionally names the
+      // first position that contributed ANY bound, which for a repeated
+      // variable (`(T, T) -> T`) is routinely an innocent operand — its type
+      // satisfies the bound, and its only role was to be joined with a later,
+      // incompatible one (`f(5, matrix)` blamed operand 0, reporting `number`
+      // as expected against the perfectly good `finite_integer`). When every
+      // contribution individually satisfies the bound and only the JOIN
+      // violates it, no single position is at fault, so the first pinning
+      // position is blamed as before.
+      const culprit =
+        pinnedBy.find(
+          (b) =>
+            b.index !== undefined && !algebra().isSubtype(b.type, declaredBound)
+        ) ?? pinnedBy[0];
       failures.push({
         kind: 'bound',
         variable: p.name,
         solution,
         expected: declaredBound,
-        index: pinnedBy[0]?.index,
+        index: culprit?.index,
         detail: `\`${p.name}\` is declared with bound \`${typeToString(declaredBound)}\`, but was solved to \`${typeToString(solution)}\`${pinnedText}`,
       });
       continue;

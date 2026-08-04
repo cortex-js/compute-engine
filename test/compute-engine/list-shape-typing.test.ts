@@ -172,3 +172,109 @@ describe('Phase A — degenerate lists keep prior (no-claim) behavior', () => {
     expect(boxed.type.toString()).toBe('list<list<never>>');
   });
 });
+
+describe('BROADCAST ARM 1 — a handler that owns its collection typing is not re-wrapped', () => {
+  // `Negate` is on the `handlerOwnsCollectionTyping` allowlist: its type
+  // handler passes the operand's type through, so its result is ALREADY the
+  // whole broadcast collection. The arm-1 wrapper assumes a SCALAR per-element
+  // `sigResult` and peels one rank off before re-shaping, which turned an
+  // honest `matrix<E^(2x2)>` into the mixed-encoding
+  // `list<vector<E^2>^(2x2)>`. The pre-existing `deferToHandler` gate only
+  // dropped the `isFixedShapeCollection` disjunct — enough for a matrix-TYPED
+  // SYMBOL (`-M → matrix`), but a matrix LITERAL still entered
+  // `broadcastingOps` through `isFiniteIndexedCollection` and got re-wrapped.
+  // Rank 1 round-tripped by luck, which is why this only ever showed at
+  // rank ≥ 2.
+  const M22 = ['List', ['List', 1, 2], ['List', 3, 4]] as any;
+
+  test('a matrix LITERAL keeps the dimensioned matrix encoding', () => {
+    const e = ce.box(['Negate', M22]);
+    expect(e.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    // The declared type is exactly what the value evaluates to — the mixed
+    // encoding was a strictly worse claim about the same value.
+    expect(e.evaluate().type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(e.evaluate().toString()).toBe('[[-1,-2],[-3,-4]]');
+  });
+
+  test('rank 3 too — the re-wrap nested a matrix inside a rank-3 shape', () => {
+    const e = ce.box(['Negate', ['List', M22, M22]]);
+    expect(e.type.toString()).toBe('list<finite_integer^(2x2x2)>');
+    expect(e.evaluate().type.toString()).toBe('list<finite_integer^(2x2x2)>');
+  });
+
+  test('a matrix-TYPED symbol and rank 1 are unchanged', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('MM', 'matrix<integer^(2x2)>');
+    expect(ce2.box(['Negate', 'MM']).type.toString()).toBe(
+      'matrix<integer^(2x2)>'
+    );
+    expect(ce.box(['Negate', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'vector<finite_integer^3>'
+    );
+    expect(ce.box(['Negate', 5]).type.toString()).toBe('finite_integer');
+  });
+
+  test('a SHAPELESS handler result still goes through the wrapper', () => {
+    // `Range(1,5)` is `indexed_collection<integer>` — no statically-provable
+    // dimensions — so the wrapper's upgrade to the definite `list<integer>` is
+    // real information, not a mangling. Short-circuiting here would LOSE
+    // precision, so `staticCollectionDims` gates the short circuit.
+    expect(ce.box(['Negate', ['Range', 1, 5]]).type.toString()).toBe(
+      'list<integer>'
+    );
+  });
+
+  test('GROUND-PATH REGRESSION — a non-allowlisted broadcastable is untouched', () => {
+    // `Sin`/`Sqrt` compute a SCALAR per-element result, so the wrapper is what
+    // builds their shape and must keep running. These are the reference
+    // answers the allowlisted handlers now agree with.
+    expect(ce.box(['Sin', M22]).type.toString()).toBe('matrix<2x2>');
+    expect(ce.box(['Sqrt', M22]).type.toString()).toBe('matrix<2x2>');
+    expect(ce.box(['Sin', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'vector<3>'
+    );
+  });
+
+  test('the D10 echo short-circuit requires RANK DOMINANCE over the other broadcasting operands', () => {
+    // With a SECOND broadcasting operand of higher rank, the runtime result is
+    // the broadcast of ALL operands, not the echo: `pg([10,20], M22)`
+    // evaluates to a matrix. Returning the echoed vector type verbatim would
+    // make the declared type fail to contain the value; the wrapper's sound
+    // rank-mismatch answer stands. In the dominant order the echo IS the
+    // result and returns verbatim. Both orders pin evaluated ⊆ declared.
+    const eng = new ComputeEngine();
+    eng.declare('pg57', {
+      signature: 'forall T: number, U: number. (T, U) -> T',
+      broadcastable: true,
+      evaluate: (ops) => ops[0],
+    } as any);
+    const low = eng.box(['pg57', ['List', 10, 20], M22]);
+    expect(low.type.toString()).toBe('list<finite_integer>');
+    expect(low.evaluate().type.matches(low.type.toString())).toBe(true);
+    const dom = eng.box(['pg57', M22, ['List', 10, 20]]);
+    expect(dom.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(dom.evaluate().type.matches(dom.type.toString())).toBe(true);
+  });
+
+  test('a genuine UNION-typed echo returns verbatim (pure echo, unary)', () => {
+    // The echo test is PURE-echo equality, not shape conjuncts: a declared
+    // `list<integer> | matrix<integer>` operand at `forall T. (T) -> T` binds
+    // `T` to exactly that union, and the honest result IS the union — the
+    // wrapper would mangle it. (`Remainder(M, 7)` stays on the wrapper: its
+    // solution is a JOIN over the scalar operand, not equal to the operand's
+    // type.)
+    const eng = new ComputeEngine();
+    eng.declare('lu57', 'list<integer> | matrix<integer>');
+    eng.declare('echoU57', {
+      signature: 'forall T. (T) -> T',
+      broadcastable: true,
+      evaluate: (ops) => ops[0],
+    } as any);
+    expect(eng.box(['echoU57', 'lu57']).type.toString()).toBe(
+      'list<integer> | matrix<integer>'
+    );
+    expect(
+      ce.box(['Remainder', M22, 7]).type.toString()
+    ).toBe('list<finite_integer | vector<finite_integer^2>^(2x2)>');
+  });
+});

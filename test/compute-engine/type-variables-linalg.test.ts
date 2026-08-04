@@ -84,13 +84,16 @@ describe('Conjugate — forall T: number. (T) -> T', () => {
     ).toBe('[(1 - 2i),3]');
   });
 
-  test('D10 — a matrix operand keeps the rank/shape-aware broadcast type', () => {
+  test('D10 — a matrix operand echoes the operand type, not a re-shaped lift', () => {
     const ce = fresh();
     const e = ce.box(['Conjugate', M22]);
     expect(e.op1.type.toString()).toBe('matrix<finite_integer^(2x2)>');
-    // The broadcast wrapper (rank/shape-aware lift) owns the result type here,
-    // exactly as it did with the imperative echo.
-    expect(e.type.toString()).toBe('list<vector<finite_integer^2>^(2x2)>');
+    // D10 bound `T` to the FULL actual, so the arm's result IS the operand's
+    // own type: the broadcast wrapper must not unwrap and re-shape it (that
+    // produced the mixed-encoding `list<vector<finite_integer^2>^(2x2)>`).
+    // A GROUND broadcastable — `Sin`, `Sqrt` — already answers `matrix<…>`
+    // here, so this is the shape that keeps the two paths in agreement.
+    expect(e.type.toString()).toBe('matrix<finite_integer^(2x2)>');
     expect(e.evaluate().toString()).toBe('[[1,2],[3,4]]');
   });
 

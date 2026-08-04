@@ -646,6 +646,54 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     expect(r).toContain('set<real>');
   });
 
+  test('§8 blame — a repeated variable blames the OFFENDING position', () => {
+    /** The blamed operand index of the first bound failure. */
+    const blame = (sig: string, actuals: string[]): number | undefined => {
+      const arm = parseType(sig) as any;
+      const r = solveTypeArguments(
+        arm,
+        actuals.map((a) => parseType(a))
+      );
+      return r.failures.find((f) => f.kind === 'bound')?.index;
+    };
+    // Under `(T, T) -> T` the JOIN violates the bound, but only ONE operand is
+    // at fault: blaming the first PINNING position named the innocent one.
+    expect(
+      blame('forall T: number. (T, T) -> T', [
+        'finite_integer',
+        'matrix<integer^(2x2)>',
+      ])
+    ).toBe(1);
+    expect(
+      blame('forall T: number. (T, T) -> T', [
+        'matrix<integer^(2x2)>',
+        'finite_integer',
+      ])
+    ).toBe(0);
+    // Deterministic: the EARLIEST individually-violating position, never the
+    // last one, when several are at fault.
+    expect(
+      blame('forall T: number. (T, T) -> T', [
+        'matrix<integer^(2x2)>',
+        'string',
+      ])
+    ).toBe(0);
+    expect(
+      blame('forall T: number. (T, T, T) -> T', ['integer', 'real', 'string'])
+    ).toBe(2);
+    // A widening join (no union in sight) is blamed the same way: `real` is the
+    // operand that does not fit `T: integer`.
+    expect(
+      blame('forall T: integer. (T, T) -> T', ['integer', 'real'])
+    ).toBe(1);
+    // The single-position case is unchanged.
+    expect(blame('forall T: number. (T) -> T', ['string'])).toBe(0);
+    // NOTE: the "every contribution individually satisfies the bound but the
+    // JOIN does not" case is NOT constructible — the join is a least upper
+    // bound, so `A <: B` and `C <: B` imply `widen(A, C) <: B`. The
+    // fall-back-to-`pinnedBy[0]` arm is therefore defensive only.
+  });
+
   test('D10 — a LIFT-admitted operand at a bare variable binds the FULL actual', () => {
     // Admission is checked at the scalar base by the lift gate (`integer <:
     // number`); the variable binds `list<integer>`, so the result is the
@@ -902,6 +950,41 @@ describe('END TO END — a user-declared generic operator', () => {
     expect(bad.toString()).not.toContain('forall');
   });
 
+  test('§8 blame — the OFFENDING operand carries the error, not the first one', () => {
+    const ce = fresh();
+    ce.declare('rem2', { signature: 'forall T: number. (T, T) -> T' });
+    ce.declare('mtx', 'matrix<integer^(2x2)>');
+
+    const bad = ce.box(['rem2', 5, 'mtx']);
+    expect(bad.isValid).toBe(false);
+    // The `5` is innocent — it satisfies `T: number` on its own. Blaming it
+    // produced the self-contradictory "expected number, got finite_integer".
+    expect(bad.op1.isValid).toBe(true);
+    expect(bad.op1.toString()).toBe('5');
+    expect(bad.op2.isValid).toBe(false);
+    expect(bad.op2.toString()).toContain('matrix<integer^(2x2)>');
+    expect(bad.op2.toString()).toContain('"number"');
+
+    // Reversed: the offending operand is now first, and it is the one blamed.
+    const rev = ce.box(['rem2', 'mtx', 5]);
+    expect(rev.isValid).toBe(false);
+    expect(rev.op1.isValid).toBe(false);
+    expect(rev.op2.isValid).toBe(true);
+    expect(rev.op2.toString()).toBe('5');
+
+    // A widening join, no union: `real` is what does not fit `T: integer`,
+    // and the reported actual is `real` — never the innocent `integer`.
+    ce.declare('gInt', { signature: 'forall T: integer. (T, T) -> T' });
+    ce.declare('iSym', 'integer');
+    ce.declare('rSym', 'real');
+    const g = ce.box(['gInt', 'iSym', 'rSym']);
+    expect(g.isValid).toBe(false);
+    expect(g.op1.isValid).toBe(true);
+    expect(g.op2.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "integer", "real"))'
+    );
+  });
+
   test('`never` neutrality — the `Concat([], [1])` shape', () => {
     const ce = fresh();
     ce.declare('cat', {
@@ -980,6 +1063,47 @@ describe('END TO END — a user-declared generic operator', () => {
     // Admission at the scalar base, `T` bound to the FULL actual.
     expect(ce.box(['neg2', ['List', 1, 2, 3]]).type.toString()).toBe(
       'vector<finite_integer^3>'
+    );
+  });
+
+  test('D10 — the OPERATOR route echoes rank ≥ 2 without re-shaping it', () => {
+    const ce = fresh();
+    ce.declare('pEcho', {
+      signature: 'forall T: number. (T) -> T',
+      broadcastable: true,
+    });
+    // A GROUND broadcastable is the reference answer: the wrapper builds the
+    // operand's shape around the scalar per-element result.
+    ce.declare('gEcho', { signature: '(number) -> number', broadcastable: true });
+    const m22 = ['List', ['List', 1, 2], ['List', 3, 4]] as any;
+    expect(ce.box(['gEcho', m22]).type.toString()).toBe('matrix<2x2>');
+    // The polytype arm binds `T` to the FULL actual under D10, so its result
+    // ALREADY is that matrix. Unwrapping one level and re-shaping it produced
+    // the mixed encoding `list<vector<finite_integer^2>^(2x2)>`.
+    expect(ce.box(['pEcho', m22]).type.toString()).toBe(
+      'matrix<finite_integer^(2x2)>'
+    );
+    // Rank 1 is unchanged (the re-shape happened to round-trip there).
+    expect(ce.box(['pEcho', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'vector<finite_integer^3>'
+    );
+    expect(ce.box(['gEcho', ['List', 1, 2, 3]]).type.toString()).toBe(
+      'vector<3>'
+    );
+    // A declared collection-typed operand (not a literal) takes the same route.
+    ce.declare('pm', 'matrix<integer^(2x2)>');
+    expect(ce.box(['pEcho', 'pm']).type.toString()).toBe(
+      'matrix<integer^(2x2)>'
+    );
+    // A UNION solution is a join over MORE than the echo (`Remainder(M, 7)`),
+    // i.e. the widen artifact the broadcast wrapper exists to repair — it stays
+    // on the wrapper path and keeps its definite `list<…>` shape.
+    ce.declare('pRem', {
+      signature: 'forall T: number. (T, T) -> T',
+      broadcastable: true,
+    });
+    expect(ce.box(['pRem', m22, 7]).type.toString()).toBe(
+      'list<finite_integer | vector<finite_integer^2>^(2x2)>'
     );
   });
 

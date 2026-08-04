@@ -477,6 +477,23 @@ describe('TYPE VARIABLES / collections — the dimensioned-actual rule', () => {
     expect(s.toString()).toContain('"indexed_collection"');
   });
 
+  test('§8 DISPLAY — a bound violated at a CONSTRUCTOR position shows the instantiated pattern', () => {
+    // The blamed position may be a constructor pattern (`list<T>` at a
+    // `T: integer` bound). Displaying the bare bound would read
+    // "expected `integer`, got `vector<finite_real^2>`" — incoherent for a
+    // parameter whose true expected type is `list<integer>`. The bound is
+    // substituted INTO the pattern for display, like the §8 callback case.
+    const ce = engine();
+    ce.declare('hh57', { signature: 'forall T: integer. (T, list<T>) -> T' });
+    const e = ce.box(['hh57', 1, ['List', 1.5, 2.5]]);
+    expect(e.isValid).toBe(false);
+    // Blame lands on the offending operand (position 1), with the
+    // instantiated `list<integer>` as the expected type — not the bare bound.
+    expect(e.op2.toString()).toContain('incompatible-type');
+    expect(e.op2.toString()).toContain('list<integer>');
+    expect(e.op1.toString()).toBe('1');
+  });
+
   test('`Sort`/`ChunkBy`/`Partition` still admit a function-typed SYMBOL', () => {
     // The callback slots are the PRIMITIVE `function`, not an arrow: an arrow
     // parameter would reject a bare `function`-typed symbol operand

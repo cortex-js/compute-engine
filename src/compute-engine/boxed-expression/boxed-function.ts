@@ -90,6 +90,7 @@ import {
   isSignatureType,
   narrow,
   numericMissingSlot,
+  staticCollectionDims,
   stripMissingFromType,
   typeContainsMissing,
   widen,
@@ -3072,7 +3073,60 @@ function type(expr: BoxedFunction): Type {
             isBroadcastCollectionType(x) ||
             (!deferToHandler && isFixedShapeCollection(x))
         );
-        if (broadcastingOps.length > 0)
+        if (broadcastingOps.length > 0) {
+          // The wrapper below assumes `sigResult` is the SCALAR per-element
+          // result, and unwraps one rank off it before re-shaping. Two cases
+          // break that assumption — `sigResult` is already the WHOLE broadcast
+          // result — and both produced the same mixed encoding, a rank-2
+          // `list<vector<E^2>^(2x2)>` where the value is a plain
+          // `matrix<E^(2x2)>` (rank 1 round-tripped by luck, which is why this
+          // only ever showed at rank ≥ 2):
+          //
+          //  (a) An ALLOWLISTED handler that owns its own collection typing
+          //      (`deferToHandler`): `Negate` passes `x.type` through, so
+          //      `Negate([[1,2],[3,4]])` IS the operand's matrix. The gate
+          //      already existed but only dropped the `isFixedShapeCollection`
+          //      disjunct, which covers a matrix-TYPED symbol (`-M → matrix`)
+          //      and misses a matrix LITERAL — that one still entered
+          //      `broadcastingOps` via `isFiniteIndexedCollection` and got
+          //      re-wrapped.
+          //  (b) D10 (§4.4) — the solver bound the variable to the FULL actual
+          //      at a bare-variable echo, so a polytype `Chop`/`Conjugate`
+          //      result IS the collection. Same guard the value route applies
+          //      at the function-literal site below.
+          //
+          // Two things keep a `sigResult` ON the wrapper path even so, because
+          // there the wrapper still ADDS information rather than mangling it:
+          //  - a UNION, which is a join over MORE than the whole result
+          //    (`Remainder(M, 7)` joins the matrix with the scalar's
+          //    `finite_integer`; `Add(S, 1)` over a possibly-non-indexed
+          //    `set`) — precisely the widen artifact the wrapper repairs;
+          //  - a SHAPELESS collection (`staticCollectionDims` is `null`), such
+          //    as the `indexed_collection<integer>` of `-Range(1,5)`: the
+          //    wrapper upgrades it to the definite `list<integer>`, so
+          //    short-circuiting would LOSE precision instead of preserving it.
+          // Ground non-allowlisted operators (`Sin`, `Sqrt`) have neither an
+          // echo nor a collection `sigResult` and fall through unchanged.
+          const sigResultIsWholeCollection =
+            isSubtype(sigResult, 'collection') &&
+            !(typeof sigResult !== 'string' && sigResult.kind === 'union') &&
+            staticCollectionDims(sigResult) !== null;
+          if (sigResultIsWholeCollection) {
+            if (deferToHandler) return maybeAbsorb(sigResult);
+            const echoed = liftedEchoPositions(resolved, expr.ops, {
+              threadable: def.broadcastable,
+              stripMissing: (i) => def.stripsMissingAt(i),
+              lazy: def.lazy,
+            });
+            if (
+              echoed.size > 0 &&
+              expr.ops.some(
+                (x, i) => echoed.has(i) && broadcastingOps.includes(x)
+              )
+            )
+              return maybeAbsorb(sigResult);
+          }
+
           // Rank/shape-aware lift (§D6.1): mirror the operands'
           // statically-provable structure — `Sqrt(M)` with `M: matrix<2x2>`
           // types `list<finite_number^2x2>`, statically compatible with
@@ -3085,6 +3139,7 @@ function type(expr: BoxedFunction): Type {
               broadcastElementType(sigResult)
             )
           );
+        }
 
         // Arm 2 (possibly-collection, step 2 phase C). No operand is a
         // statically-visible collection, but some operand's collection-ness is

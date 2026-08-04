@@ -1161,13 +1161,26 @@ export function validateArguments(
       // For a contravariant (callback) conflict the expected type displayed is
       // the blamed position's parameter with the variable set to what the
       // OTHER constraints pin it to — §8's `(integer) -> boolean`, not the
-      // bare constraining type. For a violated DECLARED bound it is the bound.
+      // bare constraining type. A violated DECLARED bound gets the same
+      // treatment with the variable set to the bound itself: the blamed
+      // position may be a CONSTRUCTOR pattern (`list<T>` at a `T: integer`
+      // bound), where displaying the bare bound would read "expected
+      // `integer`, got `vector<finite_real^2>`" — the instantiated pattern
+      // (`list<integer>`) is the position's true expected type. For a
+      // bare-variable position the instantiation IS the bound, so the message
+      // is unchanged there.
       const pattern = patterns[idx];
+      const pinTo =
+        f.kind === 'upper' && f.pin !== undefined
+          ? f.pin
+          : f.kind === 'bound'
+            ? f.expected
+            : undefined;
       const expected =
-        f.kind === 'upper' && f.pin !== undefined && pattern !== undefined
+        pinTo !== undefined && pattern !== undefined
           ? (instantiatedParam(pattern, {
               ...solved.bindings,
-              [f.variable]: f.pin,
+              [f.variable]: pinTo,
             }) ?? f.expected)
           : f.expected;
       result[idx] = ce.typeError(expected, ops[idx]?.type, ops[idx]);
