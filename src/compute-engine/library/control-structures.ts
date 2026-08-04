@@ -17,6 +17,7 @@ import {
   isTuple,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
+import { reduceType } from '../../common/type/reduce.js';
 import type { Type } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
@@ -135,7 +136,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             // positions are the `NaN` no-match cell.
             ifFalse !== undefined
           );
-        return widen(ifTrue.type.type, ifFalse?.type.type ?? 'nothing');
+        // Without an else branch a false condition yields `Nothing`, and the
+        // `Nothing` arm must survive in the type: `widen` treats `nothing` as
+        // a join identity and would swallow it, so build the union explicitly.
+        if (ifFalse === undefined)
+          return reduceType({
+            kind: 'union',
+            types: [ifTrue.type.type, 'nothing'],
+          });
+        return widen(ifTrue.type.type, ifFalse.type.type);
       },
       canonical: (ops, { engine }) =>
         engine._fn(

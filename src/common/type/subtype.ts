@@ -14,6 +14,7 @@ import {
 import type {
   BroadcastableType,
   CollectionType,
+  FunctionSignature,
   NumericPrimitiveType,
   PrimitiveType,
   SetType,
@@ -24,6 +25,12 @@ import type {
 } from './types.js';
 import { parseType } from './parse.js';
 import { isEffectSubset } from './effects.js';
+import {
+  _setTypeAlgebra,
+  instantiatesTo,
+  substituteTypeVariables,
+} from './instantiate.js';
+import { typeToDedupKey } from './serialize.js';
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
@@ -353,6 +360,8 @@ function endUnfold(ref: TypeReference): void {
  * direction, yet they share `integer`.
  */
 export function provablyDisjoint(a: Type, b: Type): boolean {
+  assertGroundType('provablyDisjoint', a);
+  assertGroundType('provablyDisjoint', b);
   if (a === 'never' || b === 'never') return true; // empty set
   if (a === 'any' || b === 'any') return false;
 
@@ -470,6 +479,7 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
  * which the caller must therefore draw no conclusion.
  */
 function typeCategory(t: Type): PrimitiveType | undefined {
+  assertGroundType('typeCategory', t);
   if (typeof t === 'string') return t as PrimitiveType;
   switch (t.kind) {
     case 'list':
@@ -620,6 +630,58 @@ export function couldMatch(a: Type, b: Type): boolean {
   // Fall back to assignability in either direction: `a` could be a `b` if
   // every `a` is a `b`, or if some `b`s are `a`s.
   return isSubtype(a, b) || isSubtype(b, a);
+}
+
+/** True when this signature carries a `forall` clause (is a polytype). */
+function isPolytype(t: FunctionSignature): boolean {
+  return t.typeParams !== undefined && t.typeParams.length > 0;
+}
+
+/**
+ * α-equivalence of two polytype arms: the same shape up to a CONSISTENT
+ * renaming of their quantified variables (§5 rule 3).
+ *
+ * The clauses are paired positionally — `forall T, U. (T, U) -> T` and
+ * `forall U, T. (U, T) -> U` are equivalent — and their declared bounds are
+ * compared STRUCTURALLY (differing bounds ⇒ not equivalent). The bodies are
+ * compared by renaming the lhs's variables to the rhs's names (a simultaneous
+ * substitution, so a swap does not capture) and comparing DEDUP KEYS, which is
+ * the structural equality the rest of the type layer already keys on.
+ *
+ * The dedup key, not the plain serialization: `(T) pure -> T` and `(T) -> T`
+ * are the two spellings of the same ∅ effect set (`isEffectSubset` already
+ * treats them as equal on the ground path), and comparing serializations would
+ * make the generic path gratuitously stricter than the ground one.
+ */
+function alphaEquivalentSignatures(
+  a: FunctionSignature,
+  b: FunctionSignature
+): boolean {
+  const ap = a.typeParams!;
+  const bp = b.typeParams!;
+  if (ap.length !== bp.length) return false;
+
+  // A type variable may legally be named `__proto__`, so the renaming map must
+  // have no prototype to assign through.
+  const renaming: Record<string, Type> = Object.create(null);
+  for (let i = 0; i < ap.length; i++) {
+    const aBound = ap[i].bound;
+    const bBound = bp[i].bound;
+    if ((aBound === undefined) !== (bBound === undefined)) return false;
+    if (
+      aBound !== undefined &&
+      typeToDedupKey(aBound) !== typeToDedupKey(bBound!)
+    )
+      return false;
+    renaming[ap[i].name] = { kind: 'variable', name: bp[i].name };
+  }
+
+  // Substituting every quantified name also strips the (now fully
+  // instantiated) clause, so both sides are compared clause-free.
+  const renamed = substituteTypeVariables(a, renaming);
+  const stripped: FunctionSignature = { ...b };
+  delete stripped.typeParams;
+  return typeToDedupKey(renamed) === typeToDedupKey(stripped);
 }
 
 /** Return true if lhs is a subtype of rhs */
@@ -989,6 +1051,28 @@ export function isSubtype(
   // Handle function signatures
   //
   if (lhs.kind === 'signature' && rhs.kind === 'signature') {
+    //
+    // Polytypes (§5 of the type-variables design). The three rules are
+    // arm-local: an overload set is an intersection, and the branches above
+    // have already reduced it to a per-arm question.
+    //
+    const lhsPoly = isPolytype(lhs);
+    const rhsPoly = isPolytype(rhs);
+    if (lhsPoly || rhsPoly) {
+      // Rule 3: `Poly <: Poly` is α-equivalence only in v1 (same shape up to
+      // consistent renaming, declared bounds compared structurally), plus
+      // reflexivity.
+      if (lhsPoly && rhsPoly) return alphaEquivalentSignatures(lhs, rhs);
+      // Rule 2: `Ground <: Poly` is FALSE. A polytype promises EVERY
+      // instantiation; no single ground signature delivers that.
+      if (rhsPoly) return false;
+      // Rule 1: `Poly <: Ground` — true iff SOME instantiation is a subtype.
+      // Instantiate-and-check: solve the ground params against the poly params
+      // contravariantly, then run the COMPLETE signature check on the
+      // substituted arm (instantiation alone is not acceptance).
+      return instantiatesTo(lhs, rhs);
+    }
+
     // Covariant in the effect set, by subset inclusion: `(real) -> real` <:
     // `(real) random -> real` <: `(real) any -> real`. Absent is the empty
     // set (pure), below everything; `any` is the top. Singletons are pairwise
@@ -1530,6 +1614,7 @@ function unionTypes(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
  *  only encompasses values that belong to both input types.
  */
 export function narrow(...types: Readonly<Type>[]): Type {
+  assertGroundInputs('narrow', types);
   // The meet of NO types is the top type: nothing has been constrained yet.
   // (`nothing` — the unit type of the value `Nothing` — is neither the top nor
   // the bottom of the lattice; using it here was a false friend for languages
@@ -1545,6 +1630,7 @@ export function narrow(...types: Readonly<Type>[]): Type {
  *  that encompasses the possible values of the input types.
  */
 export function widen(...types: Readonly<Type>[]): Readonly<Type> {
+  assertGroundInputs('widen', types);
   // The join of NO types is the bottom type — the element type of an EMPTY
   // collection, whose elements are drawn from the empty set. This is what
   // makes `[]` type as `list<never>` and, by covariance, a member of every
@@ -1629,3 +1715,38 @@ function superType(a: Readonly<Type>, b: Readonly<Type>): Type {
 
   return 'any';
 }
+
+//
+// ── Type variables: dev tripwires and the solver's algebra ───────────────────
+//
+
+/**
+ * Dev-time tripwire (§4.2): the algebra helpers never see an OPEN type. The
+ * production defense is the skip/ground-projection rules in `validate.ts` and
+ * the solver's ground-only bound joins — not a throw. `console.assert` is
+ * stripped in the minified production build (CLAUDE.md), so this costs nothing
+ * where it matters and is loud where a leak would otherwise be silent.
+ */
+function assertGroundInputs(who: string, types: ReadonlyArray<Type>): void {
+  for (const t of types) assertGroundType(who, t);
+}
+
+/** @internal — exported for the sibling tripwires in `reduce.ts`.
+ *
+ * The message is built only on FAILURE: these helpers sit on the hottest path
+ * in the type layer, and an eagerly interpolated template per call would be a
+ * measurable cost for a dev-only check. */
+export function assertGroundType(who: string, t: Type): void {
+  if (typeof t === 'object' && t.kind === 'variable')
+    console.assert(
+      false,
+      `${who}() received an open type variable \`${t.name}\` — the ground-type invariant (§4.2) leaked`
+    );
+}
+
+// Hand the solver (`instantiate.ts`) the three algebra primitives it needs.
+// Registered here, unconditionally at module load, because `subtype.ts`
+// already depends on `instantiate.ts` and the reverse import would be a cycle
+// (zero-cycle budget, CLAUDE.md). Anything that can reach `isSubtype` has
+// therefore loaded this module and armed the solver.
+_setTypeAlgebra({ isSubtype, widen: widen as (...t: Type[]) => Type, narrow });

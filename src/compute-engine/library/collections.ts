@@ -24,6 +24,7 @@ import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
 // (collections → compile-expression → base-compiler → library/utils → collections)
 import { parseType } from '../../common/type/parse.js';
+import { reduceType } from '../../common/type/reduce.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   DictionaryType,
@@ -4974,7 +4975,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection, predicate: function) -> any',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1),
-    type: (ops) => ops[0].type,
+    // Returns a single element, or `Nothing` when no element matches: the
+    // element type of the collection, not the collection type.
+    type: (ops) =>
+      reduceType({
+        kind: 'union',
+        types: [collectionElementType(ops[0].type.type) ?? 'any', 'nothing'],
+      }),
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Nothing;

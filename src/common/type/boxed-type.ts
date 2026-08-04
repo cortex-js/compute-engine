@@ -3,6 +3,14 @@ import { couldMatch, isSubtype, provablyDisjoint } from './subtype.js';
 import { typeToString } from './serialize.js';
 import { parseType } from './parse.js';
 import { narrow, signatureEffects, widen } from './utils.js';
+import {
+  hasFreeTypeVariables,
+  isPolymorphicType,
+  matchesPolytypePattern,
+  readTypeVariablesAsBounds,
+  TypeVariableError,
+  validateDeclaredType,
+} from './instantiate.js';
 
 /** @category Type */
 export class BoxedType {
@@ -24,6 +32,17 @@ export class BoxedType {
   static setInteger = new BoxedType('set<integer>');
 
   type: Type;
+
+  /**
+   * True when this type is a **polytype**: a signature carrying a `forall`
+   * clause, or an overload set with at least one such arm.
+   *
+   * Computed ONCE, here, at construction: every per-call dispatch check
+   * (argument validation, result typing) reads this boolean and is O(1) — it
+   * must never become a tree walk. Polytypes are legal only as signatures, so
+   * the computation itself is a shallow field test.
+   */
+  readonly isPolymorphic: boolean;
 
   /** The resolver this type was created with, if any.
    *
@@ -62,6 +81,24 @@ export class BoxedType {
     this._typeResolver = typeResolver;
     if (typeof type === 'string') this.type = parseType(type, typeResolver);
     else this.type = type;
+
+    this.isPolymorphic = isPolymorphicType(this.type);
+
+    // The string route validated its clause in `parseType()`. On the OBJECT
+    // route the same §7.2 validation runs here: a hand-built polytype is
+    // validated, and anything else must be CLOSED. The free-variable scan is
+    // not the shallow "is it a bare variable" test it once was — a variable
+    // nested at any depth (`list<T>`, `tuple<T, integer>`) is just as open, and
+    // boxing it silently is what lets it escape into the algebra, whose helpers
+    // assert on an open input.
+    if (typeof this.type === 'object' && typeof type !== 'string') {
+      if (this.isPolymorphic) validateDeclaredType(this.type);
+      else if (hasFreeTypeVariables(this.type))
+        throw new TypeVariableError(
+          'unresolved-type-variable',
+          `The type \`${typeToString(this.type)}\` refers to a type variable that is not quantified by a \`forall\` clause: an open type is not declarable`
+        );
+    }
   }
 
   /**
@@ -90,8 +127,27 @@ export class BoxedType {
     }
   }
 
+  /**
+   * True when every value of this type is an `other`.
+   *
+   * **A polymorphic PATTERN is a consistent existential** (D12): the pattern's
+   * variables are solved against the subject and the match holds iff a
+   * consistent instantiation exists — so
+   * `ce.type('(number) -> number').matches('forall T. (T) -> T')` is `true`,
+   * the probe users actually mean. `couldMatch` deliberately answers `false`
+   * on the same row (D6's bound-reading, contravariant `any`); the two
+   * predicates diverge by design.
+   *
+   * A polymorphic SUBJECT is the `isSubtype` story: rule 1 against a ground
+   * pattern (instantiate-and-check), rule 3 (α-equivalence) against a
+   * polymorphic one.
+   */
   matches(other: Type | TypeString | BoxedType): boolean {
-    return isSubtype(this.type, this._resolve(other));
+    const pattern = this._resolve(other);
+    // Gated on the O(1) flags: a ground pattern costs exactly what it did.
+    if (!this.isPolymorphic && isPolymorphicType(pattern))
+      return matchesPolytypePattern(this.type, pattern);
+    return isSubtype(this.type, pattern);
   }
 
   is(other: Type | TypeString | BoxedType): boolean {
@@ -150,7 +206,18 @@ export class BoxedType {
    * Throws if `other` is a string that is not a valid type.
    */
   couldMatch(other: Type | TypeString | BoxedType): boolean {
-    return couldMatch(this.type, this._resolve(other));
+    const pattern = this._resolve(other);
+    // D6 bound-reading, on BOTH sides: each free variable occurrence reads as
+    // its declared bound (`any` when unbounded), a wildcard with no
+    // cross-occurrence consistency. Kept for `couldMatch` (and the
+    // subject-less `at`-handler check) even though pattern-side `matches` went
+    // existential under D12 — the two predicates are pinned separately.
+    if (this.isPolymorphic || isPolymorphicType(pattern))
+      return couldMatch(
+        readTypeVariablesAsBounds(this.type),
+        readTypeVariablesAsBounds(pattern)
+      );
+    return couldMatch(this.type, pattern);
   }
 
   /**

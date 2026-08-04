@@ -1,6 +1,13 @@
 import { isSubtype, widen } from '../../common/type/subtype.js';
 import { isEffectSubset } from '../../common/type/effects.js';
 import {
+  freeTypeVariables,
+  readTypeVariablesAsBounds,
+  substituteTypeVariables,
+  type TypeInferenceResult,
+} from '../../common/type/instantiate.js';
+import { solveArm } from './generic-instantiation.js';
+import {
   broadcastableBaseMatches,
   narrowingPreservesEffects,
   overlapsForDeferredValidation,
@@ -48,10 +55,35 @@ import {
  */
 
 export interface OverloadResolution {
-  /** The most-specific viable arm; `undefined` when no arm fits. */
+  /** The most-specific viable arm, AS DECLARED — a polytype arm keeps its
+   * `forall` clause; `undefined` when no arm fits. */
   selected: FunctionSignature | undefined;
-  /** Every arm that survived arity + type filtering, in declaration order. */
+  /** Every arm that survived arity + type filtering, in declaration order,
+   * each one GROUND: a polytype arm is the instantiation solved at THIS call
+   * (per-arm, §4.1 of the type-variables design), a ground arm is itself.
+   *
+   * This is what `joinParamAt` consumes, so operand inference never sees an
+   * open type (§4.2 ground invariant).
+   */
   viable: ReadonlyArray<FunctionSignature>;
+  /** `selected`'s ground instantiation at this call (§6). `undefined` exactly
+   * when `selected` is; for a ground arm it IS `selected`.
+   *
+   * Consumed by `resolvedArm`'s value-arm JOIN, which must never widen over an
+   * OPEN result (§4.2). Result typing at large still re-derives its own
+   * instantiation from `selected`: `.type` is a getter reached on paths that
+   * never resolved, so `boxed-function.ts` recomputes the policies (and hence
+   * the solve) deliberately — see `resolvedArm`'s docblock. */
+  selectedInstance: FunctionSignature | undefined;
+  /** The solve that produced `selectedInstance`, or `undefined` when
+   * `selected` is ground (or absent). `validateArguments` consumes it instead
+   * of re-solving the selected arm with the identical context.
+   *
+   * Everything else the resolution could expose — the declared form of each
+   * viable arm, the per-arm bindings — had no consumer and is deliberately not
+   * carried: the two real callers need the JOIN over `viable` (ground, §4.3)
+   * and this one solve. */
+  selectedSolution: TypeInferenceResult | undefined;
 }
 
 /**
@@ -190,6 +222,11 @@ export interface AdmissionPolicies {
  *
  * So every gate below carries the same conditions as its counterpart rather
  * than a convenient over-approximation.
+ *
+ * `param` is always GROUND: every caller runs the arm through
+ * {@link instantiateArm} first (§4.1 per-arm instantiation), which is also what
+ * keeps an open pattern out of `overlapsForDeferredValidation`/`typeCategory`,
+ * whose §4.2 tripwires assert on `kind: 'variable'`.
  */
 function operandAdmits(
   ce: ComputeEngine,
@@ -267,6 +304,110 @@ function operandAdmits(
   return false;
 }
 
+/** A GROUND view of one arm at one call (§4.1 per-arm instantiation). */
+interface ArmInstance {
+  /** The arm as DECLARED — a polytype arm keeps its `forall` clause. */
+  declared: FunctionSignature;
+  /** The arm with this call's solution substituted. Always ground. */
+  instance: FunctionSignature;
+  /** The solve that produced `instance`. `undefined` for a ground arm (no
+   * clause, no solve). */
+  solution: TypeInferenceResult | undefined;
+  /** The arm carries a `forall` clause (D11's generic-vs-ground test). */
+  generic: boolean;
+  /** False when the instantiation itself is unsatisfiable — a violated
+   * declared bound, or conflicting upper bounds. Such an arm is NOT viable;
+   * `instance` is then the D6 bound-reading, which is what makes the §8
+   * diagnosis name the declared bound rather than the solution that violated
+   * it. */
+  ok: boolean;
+}
+
+/** Does this arm carry a `forall` clause? O(1) — the gate that keeps a ground
+ * overload set on the pre-generics path. */
+function isGenericArm(arm: FunctionSignature): boolean {
+  return arm.typeParams !== undefined && arm.typeParams.length > 0;
+}
+
+/**
+ * `arm`, instantiated at this call (type-variables design §4.1/§6).
+ *
+ * Each arm is solved **independently**: the clause is per-arm, so the same
+ * letter in two arms is two unrelated variables. Admissibility and specificity
+ * are then computed on the INSTANTIATED arms — `isSubtype` answers `false` for
+ * an open pattern, so comparing declared arms would report every generic arm
+ * incomparable and silently fall through to declaration order.
+ *
+ * Write-free (the solver is), and O(1) for a ground arm: no clause, no solve,
+ * and the instance is the arm itself.
+ */
+function instantiateArm(
+  arm: FunctionSignature,
+  ops: ReadonlyArray<Expression>,
+  policies?: AdmissionPolicies
+): ArmInstance {
+  if (!isGenericArm(arm))
+    return {
+      declared: arm,
+      instance: arm,
+      solution: undefined,
+      generic: false,
+      ok: true,
+    };
+
+  const solved = solveArm(arm, ops, {
+    threadable: policies?.threadable,
+    stripMissing: policies?.stripMissing,
+    lazy: policies?.lazy,
+  });
+
+  // Substitution of a signature preserves its kind, so both branches below are
+  // signatures.
+  if (solved.failures.length > 0)
+    return {
+      declared: arm,
+      instance: readTypeVariablesAsBounds(arm) as FunctionSignature,
+      solution: solved,
+      generic: true,
+      ok: false,
+    };
+
+  const substituted = substituteTypeVariables(arm, solved.bindings);
+  // The solver is total, so a residue is unreachable — but an open type must
+  // never reach `isSubtype`/`matches` (§4.2), so read any survivor as its
+  // bound rather than assuming.
+  const ground =
+    freeTypeVariables(substituted).size === 0
+      ? substituted
+      : readTypeVariablesAsBounds(substituted);
+  return {
+    declared: arm,
+    instance: ground as FunctionSignature,
+    solution: solved,
+    generic: true,
+    ok: true,
+  };
+}
+
+/**
+ * Every arm of `arms` in its GROUND form at this call — index-aligned with
+ * `arms`, and `arms` itself (no allocation, no solve) when no arm is generic.
+ *
+ * For the callers that must rank or JOIN over the WHOLE declared set rather
+ * than over `resolveOverload`'s `viable` subset — the value-arm tri-state
+ * dispatch in `resolvedArm`, whose `nonRefuted` set is indexed against the
+ * declared arms. Ranking or widening on the DECLARED arms there would hand an
+ * open pattern to `isSubtype`/`widen`, which the §4.2 ground invariant forbids.
+ */
+export function instantiateArms(
+  arms: ReadonlyArray<FunctionSignature>,
+  ops: ReadonlyArray<Expression>,
+  policies?: AdmissionPolicies
+): ReadonlyArray<FunctionSignature> {
+  if (!arms.some(isGenericArm)) return arms;
+  return arms.map((arm) => instantiateArm(arm, ops, policies).instance);
+}
+
 /**
  * How `a`'s ARGUMENT types compare to `b`'s at this call:
  *
@@ -320,9 +461,36 @@ export function isMoreSpecific(
 }
 
 /**
+ * Does `a` beat `b` at this call? Specificity is compared on the INSTANTIATED
+ * arms (§6 of the type-variables design).
+ *
+ * **D11 — generic-vs-ground tie (RULED ground-wins).** When the two arms are
+ * IDENTICAL after instantiation (`(forall T. (T) -> T) & ((integer) ->
+ * integer)` at an `integer` operand), the GROUND declaration wins: "most
+ * specific declaration" is why an author writes the specialized arm at all
+ * (distinct handler, distinct effects). Without the rule, resolution falls
+ * through to declaration order and order-independence breaks silently — §11
+ * pins the tie with the arms declared in both orders.
+ *
+ * The rule is a TIE-break only: an instantiated-generic arm that is strictly
+ * more specific by arguments, or by effects (`isMoreSpecific(b, a)` below),
+ * still wins.
+ */
+function outranks(a: ArmInstance, b: ArmInstance, arity: number): boolean {
+  if (isMoreSpecific(a.instance, b.instance, arity)) return true;
+  return (
+    !a.generic &&
+    b.generic &&
+    argSpecificity(a.instance, b.instance, arity) === 'equal' &&
+    !isMoreSpecific(b.instance, a.instance, arity)
+  );
+}
+
+/**
  * Resolve an application of `arms` to `ops` (§3 of the design): filter by
- * arity, filter by operand type, then rank the survivors most-specific-first,
- * tie-breaking by declaration order.
+ * arity, instantiate each arm independently (§4.1 — a ground arm instantiates
+ * to itself, at no cost), filter by operand type, then rank the survivors
+ * most-specific-first, tie-breaking by D11 and then by declaration order.
  *
  * Never writes. `selected` is `undefined` exactly when `viable` is empty.
  */
@@ -333,28 +501,81 @@ export function resolveOverload(
   policies?: AdmissionPolicies
 ): OverloadResolution {
   const arity = ops.length;
-  const byArity = arms.filter((a) => arityAdmits(a, arity));
 
   // Note `operandAdmits` handles `lazy` itself (a lazy operator's operands are
   // unbound, so their types are not meaningful and refute nothing). Keeping
   // that inside the single admission rule is what makes the filter and the
   // diagnostic agree.
-  const viable = byArity.filter((arm) =>
-    ops.every((op, i) => {
-      const param = paramAt(arm, i);
-      return param !== undefined && operandAdmits(ce, op, param, i, policies);
-    })
-  );
 
-  if (viable.length === 0) return { selected: undefined, viable };
+  // A GROUND overload set — every set in the library today — takes the
+  // original path verbatim: no instantiation, no per-arm bookkeeping, and D11
+  // cannot apply (it needs a generic arm). The gate is one flag read per arm.
+  // A pure SPECIALIZATION of the general path below, not a second policy:
+  // `instantiateArm` is the identity on a ground arm and `outranks` reduces to
+  // `isMoreSpecific` when no arm is generic.
+  if (!arms.some(isGenericArm)) {
+    const viable = arms.filter(
+      (arm) =>
+        arityAdmits(arm, arity) &&
+        ops.every((op, i) => {
+          const param = paramAt(arm, i);
+          return (
+            param !== undefined && operandAdmits(ce, op, param, i, policies)
+          );
+        })
+    );
+    if (viable.length === 0)
+      return {
+        selected: undefined,
+        selectedInstance: undefined,
+        selectedSolution: undefined,
+        viable,
+      };
+    let selected = viable[0];
+    for (let i = 1; i < viable.length; i++)
+      if (isMoreSpecific(viable[i], selected, arity)) selected = viable[i];
+    return {
+      selected,
+      selectedInstance: selected,
+      selectedSolution: undefined,
+      viable,
+    };
+  }
+
+  const candidates: ArmInstance[] = [];
+  for (const arm of arms) {
+    if (!arityAdmits(arm, arity)) continue;
+    const candidate = instantiateArm(arm, ops, policies);
+    // An unsatisfiable instantiation (violated bound) is not an arm this call
+    // can take.
+    if (!candidate.ok) continue;
+    const admits = ops.every((op, i) => {
+      const param = paramAt(candidate.instance, i);
+      return param !== undefined && operandAdmits(ce, op, param, i, policies);
+    });
+    if (admits) candidates.push(candidate);
+  }
+
+  if (candidates.length === 0)
+    return {
+      selected: undefined,
+      selectedInstance: undefined,
+      selectedSolution: undefined,
+      viable: [],
+    };
 
   // Rank: the first arm not beaten by any other wins. Scanning in declaration
   // order makes the tie-break fall out for free.
-  let selected = viable[0];
-  for (const candidate of viable.slice(1))
-    if (isMoreSpecific(candidate, selected, arity)) selected = candidate;
+  let best = candidates[0];
+  for (let i = 1; i < candidates.length; i++)
+    if (outranks(candidates[i], best, arity)) best = candidates[i];
 
-  return { selected, viable };
+  return {
+    selected: best.declared,
+    selectedInstance: best.instance,
+    selectedSolution: best.solution,
+    viable: candidates.map((c) => c.instance),
+  };
 }
 
 /**
@@ -509,10 +730,15 @@ export function diagnoseNoMatch(
     return { arityViable, arityTarget, refuted: new Map() };
   }
 
-  // Score each arm by the positions it refutes; keep the nearest misses.
+  // Score each arm by the positions it refutes; keep the nearest misses. As in
+  // `resolveOverload`, each arm is scored on its INSTANTIATION at this call, so
+  // the reported "expected" type is ground (§8 rule 1) — and an arm whose
+  // instantiation failed is scored on its bound-reading, which is what names
+  // the violated declared bound.
   let fewest = Infinity;
   let candidates: { arm: FunctionSignature; refutes: number[] }[] = [];
-  for (const arm of arityViable) {
+  for (const declared of arityViable) {
+    const arm = instantiateArm(declared, ops, options).instance;
     const refutes: number[] = [];
     ops.forEach((op, i) => {
       const param = paramAt(arm, i);

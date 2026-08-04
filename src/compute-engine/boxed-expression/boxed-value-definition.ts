@@ -214,7 +214,8 @@ export class _BoxedValueDefinition
             this._value.type,
             this._type,
             this.effectsDeclared,
-            this._value
+            this._value,
+            this.name
           )
         ) {
           throw declaredTypeError(this.name, this._value, this._type);

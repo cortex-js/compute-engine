@@ -105,6 +105,7 @@ export function isValidType(t: any): t is Readonly<Type> {
     t.kind === 'numeric' ||
     t.kind === 'collection' ||
     t.kind === 'indexed_collection' ||
+    t.kind === 'variable' ||
     t.kind === 'reference'
   );
 }

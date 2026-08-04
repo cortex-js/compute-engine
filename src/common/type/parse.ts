@@ -3,6 +3,7 @@ import type { Type, TypeResolver, TypeString } from './types.js';
 import { isValidType } from './primitive.js';
 import { Parser } from './parser.js';
 import { buildTypeFromAST } from './type-builder.js';
+import { TypeVariableError, validateDeclaredType } from './instantiate.js';
 
 // Note: the authoritative BNF grammar for the type syntax lives with the
 // parser implementation in `./parser.ts`.
@@ -62,6 +63,11 @@ export function parseType(
     const ast = parser.parseType();
     const type = buildTypeFromAST(ast, typeResolver);
 
+    // Polytypes are validated where they are boxed (§7.2). Gated on the parse
+    // having seen a `forall` clause: a variable can only be introduced by one,
+    // so a type string without a clause pays nothing.
+    if (parser.sawForall) validateDeclaredType(type);
+
     if (cacheable) {
       // Simple bound: reset the cache if it grows too large (the working set
       // of distinct type strings is small, so this should rarely trigger)
@@ -71,11 +77,16 @@ export function parseType(
 
     return type;
   } catch (error) {
-    throw new Error(
+    const wrapped = new Error(
       `Failed to parse type "${s}": ${
         error instanceof Error ? error.message : String(error)
       }`
     );
+    // Keep the structured code of a type-variable violation reachable on the
+    // re-thrown error (the code is in the message either way).
+    if (error instanceof TypeVariableError)
+      (wrapped as Error & { code?: string }).code = error.code;
+    throw wrapped;
   }
 }
 
@@ -108,5 +119,6 @@ export function parseTypePrefix(
   const parser = new Parser(source, { typeResolver, allowTrailing: true });
   const ast = parser.parseTypePrefix();
   const type = buildTypeFromAST(ast, typeResolver);
+  if (parser.sawForall) validateDeclaredType(type);
   return { type, end: parser.endOffset };
 }

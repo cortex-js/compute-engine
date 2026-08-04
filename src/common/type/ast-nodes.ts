@@ -30,6 +30,30 @@ export interface FunctionSignatureNode extends ASTNode {
   returnType: TypeNode;
 }
 
+/** One `<identifier> (":" <type>)?` entry of a `forall` clause. */
+export interface TypeParamNode extends ASTNode {
+  kind: 'type_param';
+  name: string;
+  bound?: TypeNode;
+}
+
+/** A `forall <var_decl> ("," <var_decl>)* "." <type>` clause.
+ *
+ * The clause is only MEANINGFUL on a function signature; the grammar admits it
+ * in any type position and the declaration-time validation rejects the rest
+ * (`unsupported-variable-position`). */
+export interface ForallTypeNode extends ASTNode {
+  kind: 'forall';
+  typeParams: TypeParamNode[];
+  body: TypeNode;
+}
+
+/** An occurrence of a name quantified by an enclosing `forall` clause. */
+export interface TypeVariableNode extends ASTNode {
+  kind: 'type_variable';
+  name: string;
+}
+
 export interface UnionTypeNode extends ASTNode {
   kind: 'union';
   types: TypeNode[];
@@ -161,6 +185,8 @@ export interface VerbatimStringNode extends ASTNode {
 
 export type TypeNode =
   | FunctionSignatureNode
+  | ForallTypeNode
+  | TypeVariableNode
   | UnionTypeNode
   | IntersectionTypeNode
   | NegationTypeNode
@@ -184,6 +210,8 @@ export type TypeNode =
 
 export interface ASTVisitor<T> {
   visitFunctionSignature(node: FunctionSignatureNode): T;
+  visitForallType(node: ForallTypeNode): T;
+  visitTypeVariable(node: TypeVariableNode): T;
   visitUnionType(node: UnionTypeNode): T;
   visitIntersectionType(node: IntersectionTypeNode): T;
   visitNegationType(node: NegationTypeNode): T;
@@ -210,6 +238,10 @@ export function visitNode<T>(node: TypeNode, visitor: ASTVisitor<T>): T {
   switch (node.kind) {
     case 'function_signature':
       return visitor.visitFunctionSignature(node);
+    case 'forall':
+      return visitor.visitForallType(node);
+    case 'type_variable':
+      return visitor.visitTypeVariable(node);
     case 'union':
       return visitor.visitUnionType(node);
     case 'intersection':

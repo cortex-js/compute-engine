@@ -24,6 +24,16 @@ import {
   resolveOverload,
 } from './overload.js';
 import { parseType } from '../../common/type/parse.js';
+import {
+  freeTypeVariables,
+  parameterPositions,
+  type TypeInferenceResult,
+} from '../../common/type/instantiate.js';
+import {
+  instantiatedParam,
+  polytypeArm,
+  solveArm,
+} from './generic-instantiation.js';
 import { FunctionSignature, Type } from '../../common/type/types.js';
 import type {
   Expression,
@@ -594,6 +604,10 @@ export function validateArguments(
   // that survived (§4.3). Those pull in opposite directions.
   let sig: FunctionSignature;
   let viableArms: ReadonlyArray<FunctionSignature> | undefined;
+  /** The selected arm's solve, when resolution already computed it — the
+   * call-site instantiation below reuses it instead of solving the same arm
+   * against the same operands with the same context a second time. */
+  let armSolution: TypeInferenceResult | undefined;
   if (signature.kind === 'signature') {
     sig = signature;
   } else {
@@ -610,7 +624,12 @@ export function validateArguments(
       freshMatrixRepair: (op: Expression, param: Type) =>
         couldRepairFreshMatrixInference(ce, op, param, freshlyInferred),
     };
-    const { selected, viable } = resolveOverload(ce, ops, arms, policies);
+    const { selected, viable, selectedSolution } = resolveOverload(
+      ce,
+      ops,
+      arms,
+      policies
+    );
     if (!selected) {
       // No arm fits. Blame the operands actually at fault: an operand every
       // near-miss arm accepts at its position stays untouched, so a bad seed
@@ -649,6 +668,7 @@ export function validateArguments(
     }
     sig = selected;
     viableArms = viable;
+    armSolution = selectedSolution;
   }
 
   const result: Expression[] = [];
@@ -668,17 +688,85 @@ export function validateArguments(
   // over-constrain unrelated later uses.
   const deferredIdx = new Set<number>();
 
-  const params = sig.args?.map((x) => x.type) ?? [];
-  const optParams = sig.optArgs?.map((x) => x.type) ?? [];
-  const varParam = sig.variadicArg?.type;
+  //
+  // Call-site instantiation (§4.3 of the type-variables design). Gated on the
+  // O(1) polytype test: a ground signature reaches none of this.
+  //
+  // Every site below that consumes a parameter type — `matches`, `isSubtype`,
+  // `infer` — must see the INSTANTIATED ground parameter, never an open one
+  // (§4.2 rule 1). The cheapest way to guarantee that is to instantiate the
+  // parameter arrays ONCE, here, so no gate can accidentally read the pattern.
+  // `paramStillOpen` records a residue that stayed open (impossible with a
+  // total solver, but a leak must SKIP every write rather than write an open
+  // type).
+  //
+  // `armSolution` is that same solve, when overload resolution already ran it
+  // on this arm with this context (the policies it passes to `solveArm` are
+  // exactly the three below) — reused rather than recomputed.
+  const polyArm = polytypeArm(sig);
+  const solved = polyArm
+    ? (armSolution ??
+      solveArm(polyArm, ops, { threadable, stripMissing, lazy }))
+    : undefined;
+  let paramStillOpen = false;
+  const groundParam = (param: Type): Type => {
+    if (!solved) return param;
+    const t = instantiatedParam(param, solved.bindings);
+    if (t !== undefined) return t;
+    paramStillOpen = true;
+    // Still open: admit everything at this position and skip every write.
+    return 'any';
+  };
+
+  // D8 — absorbed-`unknown` × upper bounds. When a variable solved to the
+  // ABSORBED `unknown` (a non-inferable unknown operand), every constraint
+  // that mentions it is satisfied PROVISIONALLY: the position is admitted
+  // exactly as the engine's other provisional admissions are, and the runtime
+  // stays the honest party. Without this, a generic signature would be
+  // statically STRICTER than its ground counterpart on unknown operands,
+  // breaking the §4.5 parity requirement. Deferred like the other provisional
+  // admissions, so the final inference pass does not narrow on a guess.
+  const provisionalIdx = new Set<number>();
+  if (solved && solved.absorbed.size > 0 && polyArm) {
+    const patterns = parameterPositions(polyArm, ops.length);
+    patterns.forEach((p, k) => {
+      if (p === undefined) return;
+      for (const v of freeTypeVariables(p))
+        if (solved.absorbed.has(v)) {
+          provisionalIdx.add(k);
+          return;
+        }
+    });
+  }
+
+  const params = sig.args?.map((x) => groundParam(x.type)) ?? [];
+  const optParams = sig.optArgs?.map((x) => groundParam(x.type)) ?? [];
+  // One instantiation for the whole variadic tail: the solver folds every
+  // matching actual into the same variable's bound set (§4.3), so the tail's
+  // instantiated pattern is position-independent.
+  const varParam =
+    sig.variadicArg === undefined
+      ? undefined
+      : groundParam(sig.variadicArg.type);
   const varParamCount = sig.variadicMin ?? 0;
 
   /** The type to infer into the operand at `idx`. For a plain signature this
    * is the parameter itself; for an overload set it is the JOIN over every
    * viable arm (§4.3) — never the selected arm's parameter, which would
    * over-constrain the symbol (§4.5). */
-  const inferenceTypeAt = (idx: number, param: Type): Type | undefined =>
-    viableArms ? joinParamAt(viableArms, idx) : param;
+  const inferenceTypeAt = (idx: number, param: Type): Type | undefined => {
+    // §4.2 rule 1: never write while a parameter is still open.
+    if (paramStillOpen) return undefined;
+    if (!viableArms) return param;
+    const joined = joinParamAt(viableArms, idx);
+    // BACKSTOP (§4.2). `resolveOverload` instantiates every arm before the
+    // join, so `viableArms` is ground and this join is too. A residue would
+    // mean an unsolved variable leaked through the solver: skip the write
+    // rather than narrow a symbol to a type variable.
+    if (joined !== undefined && freeTypeVariables(joined).size > 0)
+      return undefined;
+    return joined;
+  };
 
   let i = 0;
 
@@ -710,6 +798,12 @@ export function validateArguments(
       result.push(op);
       continue;
     }
+    // D8 provisional admission (see `provisionalIdx`).
+    if (provisionalIdx.has(idx)) {
+      result.push(op);
+      deferredIdx.add(result.length - 1);
+      continue;
+    }
     if (op.valueDefinition?.inferredType && op.type.matches(param)) {
       result.push(op);
       continue;
@@ -724,7 +818,11 @@ export function validateArguments(
     // value does not prove the symbol always holds it — pinning `k: 0` from
     // `g(k)` would over-constrain every later use. Membership (below)
     // admits the concrete-witness case instead, without the write.
+    // NOT while a parameter is still OPEN (§4.2 rule 1): `param` here is the
+    // INSTANTIATED ground projection, and a site that could not be
+    // instantiated skips the write rather than narrowing to a type variable.
     if (
+      !paramStillOpen &&
       op.valueDefinition?.inferredType &&
       isSubtype(param, op.type.type) &&
       !hasValueComponent(param) &&
@@ -841,6 +939,13 @@ export function validateArguments(
       i += 1;
       continue;
     }
+    // D8 provisional admission (see `provisionalIdx`).
+    if (provisionalIdx.has(i)) {
+      result.push(op);
+      deferredIdx.add(result.length - 1);
+      i += 1;
+      continue;
+    }
     if (op.valueDefinition?.inferredType && op.type.matches(param)) {
       // There was an inferred type, and it is contravariant with `number`
       // e.g. "any". We'll narrow it down to `number` when we infer later.
@@ -853,6 +958,7 @@ export function validateArguments(
     // effect axis (`narrowingPreservesEffects`); NOT to a value-component
     // type (see the required-param gate).
     if (
+      !paramStillOpen &&
       op.valueDefinition?.inferredType &&
       isSubtype(param, op.type.type) &&
       !hasValueComponent(param) &&
@@ -927,6 +1033,12 @@ export function validateArguments(
         result.push(op);
         continue;
       }
+      // D8 provisional admission (see `provisionalIdx`).
+      if (provisionalIdx.has(i - 1)) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
+        continue;
+      }
       if (op.valueDefinition?.inferredType && op.type.matches(varParam)) {
         // There was an inferred type, and it is contravariant with `number`
         // e.g. "any". We'll narrow it down `number` to  when we infer later.
@@ -938,6 +1050,7 @@ export function validateArguments(
       // on the effect axis (`narrowingPreservesEffects`); NOT to a
       // value-component type (see the required-param gate).
       if (
+        !paramStillOpen &&
         op.valueDefinition?.inferredType &&
         isSubtype(varParam, op.type.type) &&
         !hasValueComponent(varParam) &&
@@ -994,6 +1107,34 @@ export function validateArguments(
   if (i < ops.length) {
     for (const op of ops.slice(i)) {
       result.push(ce.error('unexpected-argument', op.toString()));
+      isValid = false;
+    }
+  }
+
+  // A bound constraint the per-position gates cannot see (§8): the solved
+  // value violates a declared bound, or two contravariant positions demand
+  // incompatible instantiations. Every position matched its INSTANTIATED
+  // parameter, so this is the only place the conflict can surface. The
+  // displayed expected type is always ground (§8 rule 1).
+  if (solved && solved.failures.length > 0 && polyArm) {
+    const patterns = parameterPositions(polyArm, ops.length);
+    for (const f of solved.failures) {
+      const idx = f.index ?? 0;
+      if (idx >= result.length) continue;
+      if (!result[idx].isValid) continue;
+      // For a contravariant (callback) conflict the expected type displayed is
+      // the blamed position's parameter with the variable set to what the
+      // OTHER constraints pin it to — §8's `(integer) -> boolean`, not the
+      // bare constraining type. For a violated DECLARED bound it is the bound.
+      const pattern = patterns[idx];
+      const expected =
+        f.kind === 'upper' && f.pin !== undefined && pattern !== undefined
+          ? (instantiatedParam(pattern, {
+              ...solved.bindings,
+              [f.variable]: f.pin,
+            }) ?? f.expected)
+          : f.expected;
+      result[idx] = ce.typeError(expected, ops[idx]?.type, ops[idx]);
       isValid = false;
     }
   }

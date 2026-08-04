@@ -183,8 +183,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       description: 'Complex conjugate of a number.',
       broadcastable: true,
       complexity: 1200,
-      signature: '(number) -> number',
-      type: ([z]) => z.type,
+      signature: 'forall T: number. (T) -> T',
       sgn: ([z]) => z.sgn,
       evaluate: (ops, { engine: ce }) => {
         if (!isNumber(ops[0])) return undefined;

@@ -48,8 +48,9 @@ import {
 } from './function-literal.js';
 import { functionResult, signatureArms } from '../../common/type/utils.js';
 import { parseType } from '../../common/type/parse.js';
+import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import { typeToString } from '../../common/type/serialize.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { defaultCollectionHandlers } from '../collection-utils.js';
 import { registerProvisionalDependents } from './provisional-application.js';
 
@@ -707,8 +708,14 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // value it guards is one). Such an operator's result type is legitimately
     // not a collection type in general, so skip the static signature check.
     if (this.collection && !this.collection.isCollection) {
+      // Every free type variable read as its declared bound (`any` when
+      // unbounded) — the D6 bound-reading this SUBJECT-LESS check uses (§5.1
+      // of the type-variables design). It is what makes a migrated identity
+      // echo (`forall T: indexed_collection. (T) -> T`) count as possibly
+      // indexed, and it keeps an open type out of `isSubtype`/`couldMatch`.
+      const declaredType = readTypeVariablesAsBounds(this.signature.type);
       // If we have collection handlers, the result type must be a collection
-      const resultType = functionResult(this.signature.type);
+      const resultType = functionResult(declaredType);
       if (!resultType)
         throw new Error(
           `Operator Definition "${this.name}": a collection handler is defined, but the signature "${this.signature}" does not have a result type`
@@ -722,12 +729,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           `Operator Definition "${this.name}" returns an indexed collection, but the 'at' handler is missing`
         );
       }
-      // @fixme: this warning cannot reliably be checked, because some functions (Map, Filter) return an indexed collection if the input is indexed. Would need support for type arguments in signatures.
-      // if (!isSubtype(resultType, 'indexed_collection') && this.collection.at) {
-      //   throw new Error(
-      //     `Operator Definition "${this.name}" returns a non-indexed collection, but the 'at' handler is defined`
-      //   );
-      // }
+      // The ARM-AWARE `at`-handler rule (§6 of the type-variables design).
+      // The old blanket check ("a non-indexed result must not define `at`")
+      // was disabled because `Map`/`Filter` return an indexed collection only
+      // when their input is one — a conditional `at` handler is legitimate.
+      // The honest rule is per ARM: an `at` handler is an error only when NO
+      // arm could return an indexed collection. Mixed indexed/non-indexed arms
+      // with one conditional handler are legal and produce no warning.
+      if (this.collection.at && !couldReturnIndexedCollection(declaredType))
+        throw new Error(
+          `Operator Definition "${this.name}": an 'at' handler is defined, but no arm of the signature "${this.signature}" can return an indexed collection`
+        );
     }
 
     let evaluate: _BoxedOperatorDefinition['evaluate'] | undefined = undefined;
@@ -923,6 +935,53 @@ function legacyFlagEffects(
   if (drawsRandom === true) return { stated: true, effects: ['random'] };
   if (pure === false) return { stated: true, effects: 'any' };
   return { stated: true, effects: undefined };
+}
+
+/**
+ * True when SOME arm of `type` could return an indexed collection — the
+ * arm-aware half of the `at`-handler check (§6 of the type-variables design).
+ *
+ * `couldMatch`, not `isSubtype`: the question is "could this ever be indexed",
+ * so a `collection<…>` result (`Map`'s) counts. `type` must already carry the
+ * D6 bound-reading (variables replaced by their bounds).
+ */
+function couldReturnIndexedCollection(type: Type): boolean {
+  const arms =
+    (typeof type !== 'string' && type.kind === 'intersection'
+      ? signatureArms(type)
+      : undefined) ?? [type];
+  return arms.some((arm) => {
+    const result = functionResult(arm);
+    if (result === undefined) return false;
+    return couldBeIndexed(result);
+  });
+}
+
+/**
+ * The per-result-node half of {@link couldReturnIndexedCollection}.
+ *
+ * `couldMatch` compares collection kinds LIKE WITH LIKE, so a parameterized
+ * `collection<T>` result answers `false` against the bare `indexed_collection`
+ * primitive even though `indexed_collection` is a SUBKIND of `collection`, not
+ * a sibling (`Filter`'s bare `collection` result answers `true` only because
+ * the fallback is assignability). Ask the question the rule means — could this
+ * value be an indexed collection of its own element type.
+ *
+ * The repair must DISTRIBUTE over a union: `couldMatch` itself distributes, so
+ * a result written `collection<number> | set<number>` answers `false` for the
+ * `collection` member and would drop straight through a whole-node test — the
+ * definition would then reject an `at` handler despite a possibly-indexed arm.
+ */
+function couldBeIndexed(result: Type): boolean {
+  if (couldMatch(result, 'indexed_collection')) return true;
+  if (typeof result !== 'object') return false;
+  if (result.kind === 'collection')
+    return couldMatch(result, {
+      kind: 'indexed_collection',
+      elements: result.elements,
+    });
+  if (result.kind === 'union') return result.types.some(couldBeIndexed);
+  return false;
 }
 
 /**

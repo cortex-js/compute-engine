@@ -1,5 +1,6 @@
 import { typeToDedupKey, typeToString } from './serialize.js';
 import {
+  assertGroundType,
   COVERING_UNION_MAP,
   isSubtype,
   meetPrimitiveTypes,
@@ -99,6 +100,11 @@ export function reduceType(type: Type): Type {
       return type;
 
     case 'expression':
+      return type;
+
+    // A type variable is ATOMIC and OPAQUE, like `broadcastable`: never
+    // collapsed, never distributed, never merged with anything.
+    case 'variable':
       return type;
 
     default:
@@ -318,6 +324,9 @@ function reduceUnionType(type: AlgebraicType): Type {
  * - Incomparable non-primitive pairs are considered disjoint → `nothing`.
  */
 function meet2(a: Type, b: Type): Type {
+  // Dev tripwire (§4.2): the algebra helpers never see an OPEN type.
+  assertGroundType('meet', a);
+  assertGroundType('meet', b);
   if (isSubtype(a, b)) return a;
   if (isSubtype(b, a)) return b;
 

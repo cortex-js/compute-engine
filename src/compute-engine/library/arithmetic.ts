@@ -493,8 +493,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       idempotent: true,
       complexity: 1200,
 
-      signature: '(number) -> number',
-      type: ([x]) => x.type,
+      signature: 'forall T: number. (T) -> T',
       evaluate: (ops, { numericApproximation }) => {
         const op = ops[0];
         const ce = op.engine;
@@ -2011,18 +2010,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Plus or Minus',
       wikidata: 'Q120812',
       complexity: 1200,
-      signature: '(value, value) -> tuple',
+      signature: 'forall T: value, U: value. (T, U) -> tuple<T, U>',
       canonical: (args, { engine: ce }) => {
         args = checkNumericArgs(ce, args, 2);
         if (args.length === 0) return ce.error('missing');
         return ce._fn('PlusMinus', [args[0], args[1].abs()]);
       },
-      // Built structurally, not via a serialize-and-reparse round trip: a
-      // resolver-less `parseType()` cannot read back a user-declared type.
-      type: ([x, y]) => ({
-        kind: 'tuple',
-        elements: [{ type: x.type.type }, { type: y.type.type }],
-      }),
       evaluate: ([x, y], { engine }) => engine.tuple(x.add(y.neg()), x.add(y)),
     },
 
@@ -2409,8 +2402,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         'IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`)',
       complexity: 2500,
       broadcastable: true,
-      signature: '(number, number) -> number',
-      type: ([a, b]) => widen(a.type.type, b.type.type),
+      signature: 'forall T: number. (T, T) -> T',
       evaluate: ([a, b]) =>
         apply2(
           a,

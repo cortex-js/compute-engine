@@ -27,6 +27,9 @@ import {
   NamedElementNode,
   ArgumentNode,
   DimensionNode,
+  ForallTypeNode,
+  TypeParamNode,
+  TypeVariableNode,
 } from './ast-nodes.js';
 import { EffectLabel, EffectSet, TypeResolver } from './types.js';
 import { PRIMITIVE_TYPES_SET } from './primitive.js';
@@ -35,8 +38,27 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 /**
  * BNF grammar for the type parser:
  *
-<type> ::= <union_type>
+<type> ::= <forall_type>
+         | <union_type>
          | <function_signature>
+
+(* --- Type variables (parametric polymorphism) --- *)
+
+(* A prefix, dot-terminated quantifier clause. The clause is only MEANINGFUL on
+   a function signature (and, per arm, on the members of an overload set:
+   `(forall T. (list<T>) -> T) & (forall T. (set<T>) -> boolean)`); the grammar
+   admits it in any type position and the declaration-time validation rejects
+   every other placement with `unsupported-variable-position`.
+   The dot is load-bearing: a bound is a type, and types have unbounded right
+   edges (`forall T: (real) -> real. (g: T) -> boolean`).
+   `forall` is a RESERVED word in type strings. *)
+<forall_type> ::= "forall" <var_decl> ( "," <var_decl> )* "." <type>
+
+<var_decl> ::= <identifier> ( ":" <type> )?      (* the bound must be GROUND *)
+
+(* Within its arm, a quantified name SHADOWS every other reading of that
+   identifier (primitive, nominal or resolver-provided) and parses as a type
+   variable. *)
 
 <union_type> ::= <intersection_type> ( " | " <intersection_type> )*
 
@@ -194,6 +216,15 @@ export class Parser {
    * type. Exposed via `endOffset` for prefix mode. */
   private _end = 0;
 
+  /** The `forall`-quantified names in scope, innermost last. An identifier
+   * found here parses as a type VARIABLE, shadowing every other reading. */
+  private _typeVarScopes: Set<string>[] = [];
+
+  /** True once a `forall` clause has been parsed. The declaration-time
+   * validation (`validateDeclaredType`) is gated on it, so a type string
+   * without a clause pays nothing. */
+  private _sawForall = false;
+
   constructor(
     input: string,
     options?: { typeResolver?: TypeResolver; allowTrailing?: boolean }
@@ -214,6 +245,12 @@ export class Parser {
    * prefix (the delimiter/whitespace that ended the type is *not* included). */
   get endOffset(): number {
     return this._end;
+  }
+
+  /** True when the parsed type carried a `forall` clause — the gate for the
+   * declaration-time polytype validation. */
+  get sawForall(): boolean {
+    return this._sawForall;
   }
 
   error(message: string, suggestion?: string): never {
@@ -497,7 +534,92 @@ export class Parser {
     return this.createNode<IntersectionTypeNode>('intersection', { types });
   }
 
+  /** True when `name` is quantified by an enclosing `forall` clause. */
+  private isTypeVariable(name: string): boolean {
+    for (let i = this._typeVarScopes.length - 1; i >= 0; i--)
+      if (this._typeVarScopes[i].has(name)) return true;
+    return false;
+  }
+
+  /**
+   * `forall <var_decl> ("," <var_decl>)* "." <type>`.
+   *
+   * Each name enters scope as soon as it is read, so it shadows every other
+   * reading of that identifier for the rest of the clause (including a later
+   * bound) and for the quantified type. A clause on anything other than a
+   * signature — and any nested clause — parses, and is rejected when the
+   * declared type is validated (`unsupported-variable-position`).
+   */
+  private parseForallType(): ForallTypeNode {
+    this._sawForall = true;
+    this.advance(); // consume 'forall'
+
+    const scope = new Set<string>();
+    this._typeVarScopes.push(scope);
+    try {
+      const typeParams: TypeParamNode[] = [];
+      do {
+        if (this.current.type !== 'IDENTIFIER')
+          this.error(
+            'Expected a type variable name after `forall`',
+            'For example `forall T. (T) -> T`'
+          );
+        const nameToken = this.current;
+        const name = this.advance().value;
+        if (scope.has(name))
+          this.errorAtToken(
+            nameToken,
+            `The type variable \`${name}\` is declared more than once`
+          );
+        scope.add(name);
+
+        let bound: TypeNode | undefined;
+        if (this.match(':')) {
+          bound = this.parseUnionType();
+          if (!bound)
+            this.error(
+              `Expected a type after the bound of \`${name}\``,
+              'For example `forall T: number. (T) -> T`'
+            );
+        }
+
+        typeParams.push(
+          this.createNode<TypeParamNode>('type_param', { name, bound })
+        );
+      } while (this.match(','));
+
+      if (!this.match('.'))
+        this.error(
+          'Expected `.` after the `forall` clause',
+          'For example `forall T. (T) -> T`'
+        );
+
+      const body = this.parseUnionType();
+      if (!body)
+        this.error(
+          'Expected a function signature after the `forall` clause',
+          'For example `forall T. (T) -> T`'
+        );
+
+      return this.createNode<ForallTypeNode>('forall', { typeParams, body });
+    } finally {
+      this._typeVarScopes.pop();
+    }
+  }
+
   private parsePrimaryType(): TypeNode | undefined {
+    // A `forall` clause, and the occurrences of the names it quantifies. The
+    // variable check comes first: within its arm a quantified name shadows
+    // every other reading of the identifier (primitive, nominal, or
+    // resolver-provided).
+    if (this.current.type === 'IDENTIFIER') {
+      if (this.isTypeVariable(this.current.value)) {
+        const name = this.advance().value;
+        return this.createNode<TypeVariableNode>('type_variable', { name });
+      }
+      if (this.current.value === 'forall') return this.parseForallType();
+    }
+
     // Try negation
     if (this.match('!')) {
       const type = this.parsePrimaryType();

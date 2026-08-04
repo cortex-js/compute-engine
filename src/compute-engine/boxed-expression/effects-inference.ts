@@ -19,6 +19,7 @@ import type {
 import { isFunction, isSymbol, sym } from './type-guards.js';
 import { effectiveDischarge } from './effects-of.js';
 import { typeAcceptsValue } from './value-membership.js';
+import { genericLiteralBodyError } from './type-compatibility-error.js';
 import {
   functionLiteralBody,
   functionLiteralDeclaredEffects,
@@ -200,9 +201,46 @@ export function matchesDeclaredTypeAxes(
   value: BoxedType,
   declared: BoxedType,
   effectsDeclared: boolean,
-  valueExpr?: Expression
+  valueExpr?: Expression,
+  /** The symbol being declared/assigned, for the D7 diagnostic. */
+  symbol?: string
 ): boolean {
-  if (value.matches(declared)) return true;
+  // Declaration compatibility uses SUBTYPE semantics. `BoxedType.matches` on
+  // a polymorphic pattern is the D12 existential QUERY ("does SOME
+  // instantiation fit?"), which would accept an instance-shaped ground value
+  // against a generic declaration — but a declaration promises EVERY
+  // instantiation (`Ground <: Poly` is false, D3), so a polymorphic declared
+  // type is held to `isSubtype` here, never the existential probe.
+  if (
+    declared.isPolymorphic
+      ? isSubtype(value.type, declared.type)
+      : value.matches(declared)
+  )
+    return true;
+
+  // D7 (§4.1 of the type-variables design): a GENERIC declaration cannot take
+  // a function-literal body in v1. `Ground <: Poly` is false, so the literal's
+  // ground type can never satisfy the declaration — surfaced as its own
+  // diagnostic on every route rather than as a bare `incompatible-type`
+  // comparing a polytype against `(unknown) -> …`. Raised as a
+  // `TypeCompatibilityError` so the `Assign`/`Declare` OPERATOR routes convert
+  // it to an error VALUE exactly as they do every other declared-type
+  // conflict. (`effectsDeclared` is unaffected — it is read from the polytype
+  // arrow by `signatureEffects`, which handles a clause fine.)
+  //
+  // Gated on an actual `Function` LITERAL, as the three routes in
+  // `engine-declarations.ts` are: the diagnostic names a "function-literal
+  // body", and any other callable value (a symbol bound to a ground function,
+  // say) has no body to speak of. Those fall through to the ordinary
+  // `matches` path below, whose honest verdict is `Ground <: Poly = false` —
+  // a plain `incompatible-type`.
+  if (
+    declared.isPolymorphic &&
+    isFunction(valueExpr, 'Function') &&
+    isCallableType(value.type)
+  )
+    throw genericLiteralBodyError(symbol ?? '', value, declared);
+
   // A concrete value inhabiting a value-component declared type (`z: 0` with
   // `z := 0`): the synthesized type (`finite_integer`) cannot witness
   // membership in the value type. See `value-membership.ts`.
@@ -210,7 +248,10 @@ export function matchesDeclaredTypeAxes(
     return true;
   if (effectsDeclared || signatureEffects(declared.type) !== undefined)
     return false;
-  return ce.type(stripArrowEffects(value.type)).matches(declared);
+  const stripped = ce.type(stripArrowEffects(value.type));
+  return declared.isPolymorphic
+    ? isSubtype(stripped.type, declared.type)
+    : stripped.matches(declared);
 }
 
 //

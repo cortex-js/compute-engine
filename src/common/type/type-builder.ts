@@ -1,6 +1,8 @@
 import {
   TypeNode,
   FunctionSignatureNode,
+  ForallTypeNode,
+  TypeVariableNode,
   UnionTypeNode,
   IntersectionTypeNode,
   NegationTypeNode,
@@ -26,7 +28,14 @@ import {
   NamedElementNode,
   DimensionNode,
 } from './ast-nodes.js';
-import { Type, NamedElement, TypeResolver } from './types.js';
+import {
+  Type,
+  NamedElement,
+  TypeResolver,
+  TypeParameter,
+  FunctionSignature,
+} from './types.js';
+import { TypeVariableError } from './instantiate.js';
 
 export class TypeBuilder implements ASTVisitor<Type> {
   private typeResolver: TypeResolver;
@@ -90,6 +99,32 @@ export class TypeBuilder implements ASTVisitor<Type> {
     }
 
     return signature;
+  }
+
+  visitForallType(node: ForallTypeNode): Type {
+    const body = this.buildType(node.body);
+
+    // The clause LIVES on the signature it quantifies. A clause on anything
+    // else (a bare intersection, a union, a primitive) has no arm to scope
+    // over — §7.2 rejects it here, where the declared type is boxed.
+    if (typeof body === 'string' || body.kind !== 'signature')
+      throw new TypeVariableError(
+        'unsupported-variable-position',
+        'A `forall` clause can only be applied to a function signature'
+      );
+
+    const typeParams: TypeParameter[] = node.typeParams.map((p) =>
+      p.bound === undefined
+        ? { name: p.name }
+        : { name: p.name, bound: this.buildType(p.bound) }
+    );
+
+    const signature: FunctionSignature = { ...body, typeParams };
+    return signature;
+  }
+
+  visitTypeVariable(node: TypeVariableNode): Type {
+    return { kind: 'variable', name: node.name };
   }
 
   visitUnionType(node: UnionTypeNode): Type {

@@ -136,3 +136,22 @@ describe('BaseForm LaTeX serialization round-trip', () => {
     expect(ce.parse(e.latex).json).toEqual(['BaseForm', { num: v.toString() }, 16]);
   });
 });
+
+describe('BaseForm result type', () => {
+  // `BaseForm` is a display wrapper: it echoes its numeric operand (the base
+  // only affects serialization). The declared result must therefore be
+  // numeric — it used to claim `string | nothing`, contradicting both the
+  // `type:` handler and `evaluate`.
+  test('the result type is numeric, not a string', () => {
+    const e = ce.box(['BaseForm', 42, 16]);
+    expect(e.type.matches('number')).toBe(true);
+    expect(e.type.matches('string')).toBe(false);
+    expect(e.evaluate().type.matches('number')).toBe(true);
+    expect(e.evaluate().re).toBe(42);
+  });
+
+  test('the declared signature result is numeric', () => {
+    const sig = ce.lookupDefinition('BaseForm')!.operator!.signature.toString();
+    expect(sig.endsWith('-> number')).toBe(true);
+  });
+});

@@ -13,6 +13,10 @@ import {
 } from '../common/type/utils.js';
 import { parseType } from '../common/type/parse.js';
 import { isEffectSubset } from '../common/type/effects.js';
+import {
+  isReservedTypeName,
+  TypeVariableError,
+} from '../common/type/instantiate.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import {
   EffectContractError,
@@ -24,8 +28,10 @@ import {
 import {
   constructorAssignmentError,
   declaredTypeError,
+  genericLiteralBodyError,
 } from './boxed-expression/type-compatibility-error.js';
 import { osaDistance } from '../common/fuzzy-string-match.js';
+import { isPolymorphicType } from '../common/type/instantiate.js';
 
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
 import type { MathJsonSymbol } from '../math-json/types.js';
@@ -62,7 +68,7 @@ import {
   loosenMintedConstructor,
   mintTypeConstructor,
 } from './type-constructors.js';
-import { isFunction } from './boxed-expression/type-guards.js';
+import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
 import {
   functionLiteralDeclaredEffects,
   functionLiteralParameters,
@@ -477,6 +483,14 @@ export function declareType(
     mint,
   }: { alias?: boolean; fromStatement?: boolean; mint?: boolean } = {}
 ): void {
+  // `forall` is a reserved word in type strings (the quantifier clause), so it
+  // cannot also name a type.
+  if (isReservedTypeName(name))
+    throw new TypeVariableError(
+      'reserved-type-name',
+      `The type name "${name}" is reserved`
+    );
+
   if (!isValidTypeName(name)) throw Error(`The type name "${name}" is invalid`);
 
   // A type declaration claims BOTH namespaces: the type record, and a
@@ -663,6 +677,14 @@ export function declareFn(
       const declaredType =
         def.type instanceof BoxedType ? def.type.type : parseType(def.type);
       if (hasFunctionSignature(declaredType)) {
+        // D7 — see the assign path; checked before the arity/return
+        // reconciliation, which would otherwise ascribe an OPEN result type.
+        if (isPolymorphicType(declaredType))
+          throw genericLiteralBodyError(
+            id,
+            (def.value as Expression).type,
+            ce.type(declaredType)
+          );
         // The literal must be arity-compatible with the declared signature
         // (mirrors the assign path); otherwise a declared-arity call would
         // silently partial-apply.
@@ -853,6 +875,21 @@ export function assignFn(
     if (literal !== undefined) {
       const declaredType = def.value.type;
 
+      // D7 (§4.1 of the type-variables design): a generic declaration cannot
+      // take a function-literal body in v1. Checked FIRST — before arity
+      // reconciliation, which would otherwise try to ascribe the declaration's
+      // OPEN result type to the body and throw `unresolved-type-variable`.
+      // `canonicalFunctionLiteral` LIFTS non-literals (a function-typed
+      // SYMBOL comes back as a literal), so discriminate on the original
+      // operand: a symbol has no "body" — it gets the honest D3 rejection
+      // (`Ground <: Poly` is false), not the literal-specific diagnostic.
+      if (declaredType.isPolymorphic) {
+        const orig = ce.expr(arg2);
+        if (isSymbol(orig))
+          throw declaredTypeError(id, orig, declaredType);
+        throw genericLiteralBodyError(id, literal.type, declaredType);
+      }
+
       // The literal must be arity-compatible with the declared signature (see
       // `assertFunctionLiteralArity`); otherwise function subtyping would treat
       // an over-arity literal as assignable to a lower-arity signature, or an
@@ -881,7 +918,8 @@ export function assignFn(
           reconciled.type,
           declaredType,
           effectsDeclared,
-          reconciled
+          reconciled,
+          id
         )
       )
         throw declaredTypeError(id, reconciled, declaredType);
@@ -966,6 +1004,10 @@ export function assignFn(
       if (literal !== undefined) {
         const declaredType = def.operator.signature;
 
+        // D7 — see the value-slot route above.
+        if (declaredType.isPolymorphic)
+          throw genericLiteralBodyError(id, literal.type, declaredType);
+
         // The literal must be arity-compatible with the declared signature
         // (mirrors the value-slot path); otherwise a declared-arity call would
         // silently partial-apply on the fixed-arity body.
@@ -998,7 +1040,8 @@ export function assignFn(
             reconciled.type,
             declaredType,
             effectsDeclared,
-            reconciled
+            reconciled,
+            id
           )
         )
           throw declaredTypeError(id, reconciled, declaredType);
@@ -1087,7 +1130,8 @@ export function assignFn(
           value.type,
           def.value.type,
           def.value.effectsDeclared,
-          value
+          value,
+          id
         )
       )
         throw declaredTypeError(id, value, def.value.type);

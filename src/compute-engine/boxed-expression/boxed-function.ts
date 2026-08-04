@@ -60,11 +60,13 @@ import {
 } from './type-guards.js';
 import {
   armHasValueParam,
+  instantiateArms,
   overloadArms,
   resolveOverload,
   triStateSelect,
 } from './overload.js';
 import { candidateShape } from './tensor-view.js';
+import { instantiatedResultType } from './generic-instantiation.js';
 import type {
   EffectLabel,
   FunctionSignature,
@@ -319,9 +321,12 @@ export class BoxedFunction
             ? narrow(oldSig.result, t)
             : widen(oldSig.result, t),
       };
-      // The effect specifier is part of the arrow and is not re-derivable from
-      // the result-type inference: carry it across the rebuild.
+      // The effect specifier and the `forall` clause are the arrow's two
+      // adjunct fields, neither re-derivable from the result-type inference:
+      // carry BOTH across the rebuild.
       if (oldSig.effects !== undefined) nextSig.effects = oldSig.effects;
+      if (oldSig.typeParams !== undefined)
+        nextSig.typeParams = oldSig.typeParams;
       def.signature = new BoxedType(nextSig, this.engine._typeResolver);
     }
 
@@ -2886,7 +2891,23 @@ function type(expr: BoxedFunction): Type {
     // JOIN over every viable arm (§4.3): a result type wants the most precise
     // arm, an operand constraint must be the weakest — conflating them
     // reintroduces the §4.5 unsoundness.
-    let sigResult = functionResult(resolvedArm(expr, sig) ?? sig) ?? 'unknown';
+    const resolved = resolvedArm(expr, sig) ?? sig;
+    let sigResult = functionResult(resolved) ?? 'unknown';
+
+    // A polytype arm's declared result is OPEN (`functionResult` hands back
+    // the pattern), and an open type must never escape as an expression's
+    // `.type` (§4.2 ground invariant). Solve the arm at this call site and
+    // substitute; an unsolvable residue falls back to `unknown`, never to a
+    // variable. The solve mirrors `validateArguments`' — same gates, same
+    // bindings — for the same reason `resolvedArm` recomputes its policies.
+    {
+      const instantiated = instantiatedResultType(resolved, expr.ops, {
+        threadable: def.broadcastable,
+        stripMissing: (i) => def.stripsMissingAt(i),
+        lazy: def.lazy,
+      });
+      if (instantiated !== undefined) sigResult = instantiated;
+    }
 
     // Missing-value absorption (§3.B of the missing-value typing design). When
     // this application resolves to `propagate` and some operand carries a
@@ -3176,7 +3197,10 @@ function type(expr: BoxedFunction): Type {
     const sig =
       resolvedArm(expr, expr.valueDefinition.type.type) ??
       expr.valueDefinition.type.type;
-    const sigResult = functionResult(sig) ?? 'unknown';
+    // As on the operator-def route: a polytype arm is instantiated at the call
+    // site so no open type escapes as the expression's `.type` (§4.2).
+    const sigResult =
+      instantiatedResultType(sig, expr.ops) ?? functionResult(sig) ?? 'unknown';
     if (paramsAreScalar(sig)) {
       // As at the operator-def lambda site above: a numeric-tuple argument
       // binds whole to a scalar parameter and the body broadcasts it, so an
@@ -3338,11 +3362,17 @@ function resolvedArm(
   const arms = overloadArms(sig);
   if (!arms) return undefined;
   const def = expr.operatorDefinition;
-  const selected = resolveOverload(expr.engine, expr.ops, arms, {
+  const policies = {
     lazy: def?.lazy,
     threadable: def?.broadcastable,
     couldBeCollection: couldBeCollectionOperand,
-  }).selected;
+  };
+  const { selected, selectedInstance } = resolveOverload(
+    expr.engine,
+    expr.ops,
+    arms,
+    policies
+  );
   if (selected === undefined) return undefined;
 
   // Value-arm JOIN (function-polymorphism design §4.4): when an arm
@@ -3356,13 +3386,20 @@ function resolvedArm(
   // sets without them keep the boolean-selected arm byte-identically.
   // Skipped for lazy operators (operands unbound; their types refute
   // nothing meaningful).
+  //
+  // The tri-state pass runs on the INSTANTIATED arms (§4.2 ground invariant):
+  // `armAdmission`/`isMoreSpecific` compare parameters and the `blocked`
+  // branch WIDENS results, none of which may see an open pattern. Index-aligned
+  // with `arms`, so `verdict.index`/`nonRefuted` carry over unchanged; the
+  // identity on a set with no generic arm.
   if (!def?.lazy && arms.some(armHasValueParam)) {
-    const verdict = triStateSelect(expr.ops, arms);
-    if (verdict.kind === 'selected') return arms[verdict.index];
+    const ground = instantiateArms(arms, expr.ops, policies);
+    const verdict = triStateSelect(expr.ops, ground);
+    if (verdict.kind === 'selected') return ground[verdict.index];
     if (verdict.kind === 'blocked')
       return {
-        ...selected,
-        result: widen(...verdict.nonRefuted.map((i) => arms[i].result)),
+        ...(selectedInstance ?? selected),
+        result: widen(...verdict.nonRefuted.map((i) => ground[i].result)),
       };
   }
   return selected;

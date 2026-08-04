@@ -1,0 +1,1294 @@
+import type {
+  FunctionSignature,
+  ListType,
+  NamedElement,
+  Type,
+  TypeParameter,
+} from './types.js';
+import { typeToString } from './serialize.js';
+
+/**
+ * Type variables (parametric polymorphism), type-layer half.
+ *
+ * A **polytype** is a function signature carrying a `forall` clause
+ * (`typeParams`); its variables (`{ kind: 'variable' }`) are quantified over
+ * that one arm (rank-1, per-arm — see
+ * `docs/plans/2026-08-01-type-variables-design.md`).
+ *
+ * This module owns the three variable-level operations the rest of the type
+ * layer needs: what a type's free variables are, how a substitution is applied
+ * (as a PURE REBUILD), and whether a declared type's clause is well-formed.
+ * The call-site solver (`inferTypeArguments`) is phase 2.
+ */
+
+//
+// ── Errors ───────────────────────────────────────────────────────────────────
+//
+
+/** The declaration-time violations of §7.2 of the design. */
+export type TypeVariableErrorCode =
+  | 'unresolved-type-variable'
+  | 'unsolvable-type-variable'
+  | 'unsupported-variable-position'
+  | 'reserved-type-name';
+
+/** An `Error` carrying one of the {@link TypeVariableErrorCode}s.
+ *
+ * The code is ALSO the head of the message: `parseType()` wraps a thrown error
+ * in a new `Error` (`Failed to parse type "…": …`), which would drop a
+ * property-only code. */
+export class TypeVariableError extends Error {
+  code: TypeVariableErrorCode;
+  constructor(code: TypeVariableErrorCode, message: string) {
+    super(`${code}: ${message}`);
+    this.code = code;
+  }
+}
+
+function fail(code: TypeVariableErrorCode, message: string): never {
+  throw new TypeVariableError(code, message);
+}
+
+/** Type names that cannot be declared (`ce.declareType('forall', …)`). */
+export const RESERVED_TYPE_NAMES: ReadonlySet<string> = new Set(['forall']);
+
+export function isReservedTypeName(name: string): boolean {
+  return RESERVED_TYPE_NAMES.has(name);
+}
+
+//
+// ── Predicates ───────────────────────────────────────────────────────────────
+//
+
+/**
+ * True when `t` is a polytype: a signature carrying a `forall` clause, or an
+ * overload set (intersection) with at least one such arm.
+ *
+ * SHALLOW by construction — polytypes are legal only as signatures (§4.1), so
+ * this is O(1) (O(#arms) for an overload set) and never a tree walk. It is what
+ * `BoxedType.isPolymorphic` stores at construction time.
+ */
+export function isPolymorphicType(t: Type): boolean {
+  if (typeof t !== 'object') return false;
+  if (t.kind === 'signature')
+    return t.typeParams !== undefined && t.typeParams.length > 0;
+  if (t.kind === 'intersection')
+    return t.types.some(
+      (arm) =>
+        typeof arm === 'object' &&
+        arm.kind === 'signature' &&
+        arm.typeParams !== undefined &&
+        arm.typeParams.length > 0
+    );
+  return false;
+}
+
+//
+// ── Free variables ───────────────────────────────────────────────────────────
+//
+
+/**
+ * The names of the type variables occurring FREE in `t` — i.e. not bound by a
+ * `forall` clause on an enclosing (or on `t`'s own) signature.
+ *
+ * `freeTypeVariables('forall T. (T) -> T')` is therefore empty, while
+ * `freeTypeVariables('(T) -> T')` (an open, internally-constructed type) is
+ * `{T}`.
+ */
+export function freeTypeVariables(t: Type): Set<string> {
+  const result = new Set<string>();
+  collectFreeVariables(t, undefined, result);
+  return result;
+}
+
+function collectFreeVariables(
+  t: Type,
+  bound: ReadonlySet<string> | undefined,
+  into: Set<string>
+): void {
+  if (typeof t === 'string') return;
+  switch (t.kind) {
+    case 'variable':
+      if (bound === undefined || !bound.has(t.name)) into.add(t.name);
+      return;
+    case 'signature': {
+      let scope = bound;
+      if (t.typeParams !== undefined && t.typeParams.length > 0) {
+        scope = new Set(bound);
+        for (const p of t.typeParams) (scope as Set<string>).add(p.name);
+        // A bound is ground (§7.2), but walk it anyway: an ill-formed one is
+        // reported by `validateDeclaredType`, not silently ignored here.
+        for (const p of t.typeParams)
+          if (p.bound !== undefined) collectFreeVariables(p.bound, bound, into);
+      }
+      for (const arg of signatureElements(t))
+        collectFreeVariables(arg.type, scope, into);
+      collectFreeVariables(t.result, scope, into);
+      return;
+    }
+    case 'union':
+    case 'intersection':
+      for (const x of t.types) collectFreeVariables(x, bound, into);
+      return;
+    case 'negation':
+      collectFreeVariables(t.type, bound, into);
+      return;
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      collectFreeVariables(t.elements, bound, into);
+      return;
+    case 'tuple':
+      for (const el of t.elements) collectFreeVariables(el.type, bound, into);
+      return;
+    case 'dictionary':
+      collectFreeVariables(t.values, bound, into);
+      return;
+    case 'record':
+      for (const x of Object.values(t.elements))
+        collectFreeVariables(x, bound, into);
+      return;
+    default:
+      return;
+  }
+}
+
+/**
+ * True when `t` has at least one FREE type variable — the predicate-only
+ * reading of {@link freeTypeVariables}.
+ *
+ * Short-circuits on the first occurrence and allocates nothing, which matters:
+ * the solver asks this question at EVERY node it visits (the skeleton walk, the
+ * pattern walk, every bound it records), and answering it by building a `Set`
+ * of names made solving quadratic in the depth of the type.
+ */
+export function hasFreeTypeVariables(t: Type): boolean {
+  return hasFreeVariables(t, undefined);
+}
+
+function hasFreeVariables(
+  t: Type,
+  bound: ReadonlySet<string> | undefined
+): boolean {
+  if (typeof t === 'string') return false;
+  switch (t.kind) {
+    case 'variable':
+      return bound === undefined || !bound.has(t.name);
+    case 'signature': {
+      let scope = bound;
+      if (t.typeParams !== undefined && t.typeParams.length > 0) {
+        scope = new Set(bound);
+        for (const p of t.typeParams) (scope as Set<string>).add(p.name);
+        // A bound is ground (§7.2), but walk it anyway — see
+        // `collectFreeVariables`.
+        for (const p of t.typeParams)
+          if (p.bound !== undefined && hasFreeVariables(p.bound, bound))
+            return true;
+      }
+      for (const arg of signatureElements(t))
+        if (hasFreeVariables(arg.type, scope)) return true;
+      return hasFreeVariables(t.result, scope);
+    }
+    case 'union':
+    case 'intersection':
+      for (const x of t.types) if (hasFreeVariables(x, bound)) return true;
+      return false;
+    case 'negation':
+      return hasFreeVariables(t.type, bound);
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return hasFreeVariables(t.elements, bound);
+    case 'tuple':
+      for (const el of t.elements)
+        if (hasFreeVariables(el.type, bound)) return true;
+      return false;
+    case 'dictionary':
+      return hasFreeVariables(t.values, bound);
+    case 'record':
+      for (const x of Object.values(t.elements))
+        if (hasFreeVariables(x, bound)) return true;
+      return false;
+    default:
+      return false;
+  }
+}
+
+/** The argument elements of a signature, in order (required, optional,
+ * variadic). */
+function signatureElements(t: FunctionSignature): NamedElement[] {
+  const result: NamedElement[] = [];
+  if (t.args) result.push(...t.args);
+  if (t.optArgs) result.push(...t.optArgs);
+  if (t.variadicArg) result.push(t.variadicArg);
+  return result;
+}
+
+//
+// ── Substitution ─────────────────────────────────────────────────────────────
+//
+
+/** Own-property membership, for the string-keyed maps this module builds from
+ * AUTHOR-SUPPLIED variable names — `__proto__` is a legal type-variable name
+ * (`/^[a-zA-Z_][a-zA-Z0-9_]*$/`), so neither a plain `in` nor a bare index is
+ * safe on a map that may have come from a caller's object literal. */
+function hasOwn(map: Readonly<Record<string, unknown>>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(map, key);
+}
+
+/**
+ * `t` with every free occurrence of a variable named in `bindings` replaced by
+ * its binding.
+ *
+ * **Pure rebuild, no mutation.** Polytypes are SHARED objects — interned by
+ * `parseType()`'s `TYPE_CACHE` (and deep-frozen there) and stored on
+ * definitions — so every node on the substitution path is rebuilt and nothing
+ * is ever written in place. A subtree with no substituted occurrence is
+ * returned by identity, so an instantiation allocates only along the path it
+ * touches.
+ *
+ * A signature's own clause is INSTANTIATED, not shadowed: substituting `{T:
+ * integer}` into `forall T. (T) -> T` yields the ground `(integer) -> integer`
+ * with the clause (and just the substituted entries) removed. That is what a
+ * call-site instantiation means; there is no rank-2 nesting in v1 for the
+ * shadowing reading to matter to.
+ */
+export function substituteTypeVariables(
+  t: Type,
+  bindings: Readonly<Record<string, Type>>
+): Type {
+  if (typeof t === 'string') return t;
+  switch (t.kind) {
+    case 'variable': {
+      // OWN properties only: a variable legally named `__proto__` (or
+      // `toString`) must not read an inherited `Object.prototype` member.
+      const binding = hasOwn(bindings, t.name) ? bindings[t.name] : undefined;
+      return binding === undefined ? t : binding;
+    }
+    case 'signature': {
+      const args = substituteElements(t.args, bindings);
+      const optArgs = substituteElements(t.optArgs, bindings);
+      const variadicArg =
+        t.variadicArg === undefined
+          ? undefined
+          : substituteElement(t.variadicArg, bindings);
+      const result = substituteTypeVariables(t.result, bindings);
+      const typeParams = t.typeParams?.filter(
+        (p) => !hasOwn(bindings, p.name) || bindings[p.name] === undefined
+      );
+      const clauseChanged =
+        t.typeParams !== undefined && typeParams!.length !== t.typeParams.length;
+      if (
+        !clauseChanged &&
+        args === t.args &&
+        optArgs === t.optArgs &&
+        variadicArg === t.variadicArg &&
+        result === t.result
+      )
+        return t;
+      const next: FunctionSignature = { ...t, result };
+      if (args !== undefined) next.args = args;
+      if (optArgs !== undefined) next.optArgs = optArgs;
+      if (variadicArg !== undefined) next.variadicArg = variadicArg;
+      if (clauseChanged) {
+        if (typeParams!.length === 0) delete next.typeParams;
+        else next.typeParams = typeParams;
+      }
+      return next;
+    }
+    case 'union':
+    case 'intersection': {
+      const types = substituteAll(t.types, bindings);
+      return types === t.types ? t : { ...t, types };
+    }
+    case 'negation': {
+      const type = substituteTypeVariables(t.type, bindings);
+      return type === t.type ? t : { ...t, type };
+    }
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable': {
+      const elements = substituteTypeVariables(t.elements, bindings);
+      return elements === t.elements ? t : { ...t, elements };
+    }
+    case 'tuple': {
+      const elements = substituteElements(t.elements, bindings)!;
+      return elements === t.elements ? t : { ...t, elements };
+    }
+    case 'dictionary': {
+      const values = substituteTypeVariables(t.values, bindings);
+      return values === t.values ? t : { ...t, values };
+    }
+    case 'record': {
+      let changed = false;
+      const elements: Record<string, Type> = {};
+      for (const [key, value] of Object.entries(t.elements)) {
+        const next = substituteTypeVariables(value, bindings);
+        if (next !== value) changed = true;
+        elements[key] = next;
+      }
+      return changed ? { ...t, elements } : t;
+    }
+    default:
+      return t;
+  }
+}
+
+function substituteAll(
+  types: Type[],
+  bindings: Readonly<Record<string, Type>>
+): Type[] {
+  let changed = false;
+  const result = types.map((x) => {
+    const next = substituteTypeVariables(x, bindings);
+    if (next !== x) changed = true;
+    return next;
+  });
+  return changed ? result : types;
+}
+
+function substituteElement(
+  el: NamedElement,
+  bindings: Readonly<Record<string, Type>>
+): NamedElement {
+  const type = substituteTypeVariables(el.type, bindings);
+  return type === el.type ? el : { ...el, type };
+}
+
+function substituteElements(
+  elements: NamedElement[] | undefined,
+  bindings: Readonly<Record<string, Type>>
+): NamedElement[] | undefined {
+  if (elements === undefined) return undefined;
+  let changed = false;
+  const result = elements.map((el) => {
+    const next = substituteElement(el, bindings);
+    if (next !== el) changed = true;
+    return next;
+  });
+  return changed ? result : elements;
+}
+
+//
+// ── Declaration-time validation (§7.2) ───────────────────────────────────────
+//
+
+/**
+ * Validate a declared type's `forall` clauses and variable occurrences, per
+ * arm. Throws a {@link TypeVariableError} on the first violation; returns
+ * normally for every type with no clause and no variable — including every
+ * type in the pre-generics language.
+ *
+ * Runs where a declared type is BOXED: `parseType()` (whenever the parse saw a
+ * clause) and the `BoxedType` constructor's object route.
+ */
+export function validateDeclaredType(t: Type): void {
+  if (typeof t === 'object' && t.kind === 'intersection') {
+    // An overload set: each arm carries (and is validated against) its own
+    // clause.
+    for (const arm of t.types) validateArm(arm);
+    return;
+  }
+  validateArm(t);
+}
+
+function validateArm(t: Type): void {
+  if (
+    typeof t === 'object' &&
+    t.kind === 'signature' &&
+    t.typeParams !== undefined &&
+    t.typeParams.length > 0
+  ) {
+    validatePolytypeArm(t, t.typeParams);
+    return;
+  }
+
+  // Not a polytype: no clause may appear anywhere inside it, and no variable
+  // may occur free.
+  const declared = new Set<string>();
+  const seen = new Set<string>();
+  walk(t, declared, true, seen);
+}
+
+function validatePolytypeArm(
+  arm: FunctionSignature,
+  typeParams: TypeParameter[]
+): void {
+  const declared = new Set<string>();
+  for (const p of typeParams) {
+    if (declared.has(p.name))
+      fail(
+        'unsupported-variable-position',
+        `The type variable \`${p.name}\` is declared more than once in the same \`forall\` clause`
+      );
+    declared.add(p.name);
+  }
+
+  // v1: a bound must be GROUND — no variables (no `T: list<U>`, no F-bounded
+  // `T: comparable<T>`) — and cannot itself carry a clause.
+  for (const p of typeParams) {
+    if (p.bound === undefined) continue;
+    if (freeTypeVariables(p.bound).size > 0)
+      fail(
+        'unsupported-variable-position',
+        `The bound of the type variable \`${p.name}\` must be a ground type: \`${typeToString(p.bound)}\` refers to a type variable`
+      );
+    const boundVars = new Set<string>();
+    walk(p.bound, declared, false, boundVars);
+  }
+
+  const inArgs = new Set<string>();
+  for (const el of signatureElements(arm)) walk(el.type, declared, true, inArgs);
+  const inResult = new Set<string>();
+  walk(arm.result, declared, true, inResult);
+
+  // Result-reachability: a variable that never occurs in an argument position
+  // cannot be solved — whether it occurs only in the result, or nowhere at all.
+  for (const p of typeParams) {
+    if (inArgs.has(p.name)) continue;
+    if (inResult.has(p.name))
+      fail(
+        'unsolvable-type-variable',
+        `The type variable \`${p.name}\` occurs only in the result of its signature, so it can never be solved. Write the ground type directly`
+      );
+    fail(
+      'unsolvable-type-variable',
+      `The type variable \`${p.name}\` is quantified but never used`
+    );
+  }
+}
+
+/**
+ * Walk `t`, checking every variable occurrence against the v1 position
+ * fragment (§3) and rejecting a `forall` clause in any nested position.
+ *
+ * `allowed` is false inside a union arm, an intersection member, a negation or
+ * a bound — the positions whose inference rules v1 does not have.
+ */
+function walk(
+  t: Type,
+  declared: ReadonlySet<string>,
+  allowed: boolean,
+  into: Set<string>
+): void {
+  if (typeof t === 'string') return;
+  switch (t.kind) {
+    case 'variable':
+      if (!allowed)
+        fail(
+          'unsupported-variable-position',
+          `The type variable \`${t.name}\` cannot appear in a union, an intersection, a negation or a bound`
+        );
+      if (!declared.has(t.name))
+        fail(
+          'unresolved-type-variable',
+          `The type variable \`${t.name}\` is not quantified by a \`forall\` clause`
+        );
+      into.add(t.name);
+      return;
+    case 'signature':
+      if (t.typeParams !== undefined && t.typeParams.length > 0)
+        fail(
+          'unsupported-variable-position',
+          'A `forall` clause can only quantify a top-level signature (or one arm of an overload set), not a nested one'
+        );
+      // `allowed` is PROPAGATED, not reset: a nested arrow reached from a
+      // forbidden position (a union arm, a negation, a bound) is itself a
+      // forbidden position — `forall T. (((T) -> T) | string) -> T` has no
+      // v1 inference rule. An ordinary nested arrow, reached from an allowed
+      // position, stays allowed.
+      for (const el of signatureElements(t))
+        walk(el.type, declared, allowed, into);
+      walk(t.result, declared, allowed, into);
+      return;
+    case 'union':
+    case 'intersection':
+      for (const x of t.types) walk(x, declared, false, into);
+      return;
+    case 'negation':
+      walk(t.type, declared, false, into);
+      return;
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      walk(t.elements, declared, allowed, into);
+      return;
+    case 'tuple':
+      for (const el of t.elements) walk(el.type, declared, allowed, into);
+      return;
+    case 'dictionary':
+      walk(t.values, declared, allowed, into);
+      return;
+    case 'record':
+      for (const x of Object.values(t.elements))
+        walk(x, declared, allowed, into);
+      return;
+    default:
+      return;
+  }
+}
+
+//
+// ── The call-site solver (§4.3) ──────────────────────────────────────────────
+//
+
+/**
+ * The type-algebra primitives the solver needs, injected by `subtype.ts`.
+ *
+ * `subtype.ts` already imports this module (`substituteTypeVariables`, for
+ * α-equivalence), so an ordinary import in the other direction would be a
+ * cycle — and the zero-cycle budget is enforced (CLAUDE.md). Injection keeps
+ * this module dependency-free while making registration unconditional:
+ * `subtype.ts` registers at module load, so the algebra is available to
+ * anything that can reach `isSubtype` at all.
+ */
+export interface TypeAlgebra {
+  isSubtype: (a: Type, b: Type) => boolean;
+  widen: (...types: Type[]) => Type;
+  narrow: (...types: Type[]) => Type;
+}
+
+let _algebra: TypeAlgebra | undefined;
+
+/** @internal — called by `subtype.ts` at module load. */
+export function _setTypeAlgebra(algebra: TypeAlgebra): void {
+  _algebra = algebra;
+}
+
+function algebra(): TypeAlgebra {
+  // UNCONDITIONAL: `console.assert` is stripped from the minified production
+  // build, so an unregistered algebra would surface there as an opaque
+  // `Cannot read properties of undefined`.
+  if (_algebra === undefined)
+    throw new Error(
+      'Type algebra not registered: import `./subtype.js` before using the type-variable solver'
+    );
+  return _algebra;
+}
+
+/** A solved instantiation: one ground type per quantified variable. */
+export type TypeBindings = Record<string, Type>;
+
+/** Per-position information the solver needs from its embedding (§4.5).
+ *
+ * All predicates are keyed on the OPERAND index. Omitted ⇒ false everywhere,
+ * which is the plain "every operand contributes its type" reading.
+ */
+export interface InferenceOptions {
+  /** The position contributes NO bounds: overlap-deferred admission, a
+   * `Spread` operand, a missing-stripped operand, an already-invalid operand
+   * (§4.5 gate table). */
+  skip?: (index: number) => boolean;
+  /** The position holds an INFERABLE symbol whose type is `unknown`/`any`: no
+   * bound, and the symbol stays eligible for post-solve narrowing to the
+   * instantiated ground parameter (§4.3 bound-join table, last row). */
+  inferable?: (index: number) => boolean;
+  /** The operand was admitted by a broadcast LIFT (D10): a bare-variable
+   * pattern binds the FULL actual type, while admission stays checked at the
+   * scalar base by the lift gate itself — so the declared bound is NOT
+   * re-checked against the (collection) solution here. */
+  lifted?: (index: number) => boolean;
+}
+
+/** Why an instantiation is unsatisfiable (§8 blame). */
+export interface TypeInferenceFailure {
+  /** `'bound'` — the solved value violates the variable's DECLARED bound;
+   * `'upper'` — it violates an upper bound collected contravariantly. */
+  kind: 'bound' | 'upper';
+  /** The offending variable. */
+  variable: string;
+  /** The value the variable solved to. */
+  solution: Type;
+  /** The GROUND type to display as "expected" (§8 rule 1). For `'bound'` this
+   * is the declared bound; for `'upper'` the constraining actual. */
+  expected: Type;
+  /** The operand to blame: the position that pinned the solution for a
+   * declared-bound violation, the constraining position for an upper bound
+   * (§8 deterministic blame). `undefined` when no position is on record. */
+  index?: number;
+  /** The §8 supplementary line (variable, solved value, pinning positions,
+   * declared bound). */
+  detail: string;
+  /** For an `'upper'` failure: the value the OTHER constraints pin the
+   * variable to. Substituting it into the blamed position's pattern is what
+   * makes the reported expected type the ground arrow §8 asks for
+   * (`(integer) -> boolean`), rather than the bare constraining type. */
+  pin?: Type;
+}
+
+export interface TypeInferenceResult {
+  /** Total: one entry per quantified variable, always ground. */
+  bindings: TypeBindings;
+  /** Variables solved to the ABSORBED `unknown` (§4.3 table): their upper
+   * bounds are provisionally satisfied (D8). */
+  absorbed: ReadonlySet<string>;
+  /** False when the structural walk itself did not match (a ground pattern
+   * position refuted the actual). The embedding in `validateArguments` ignores
+   * this — its own admission gates own accept/reject — but `matches` and the
+   * `Poly <: Ground` rule use it. */
+  matched: boolean;
+  /** Non-empty when a bound constraint failed. */
+  failures: ReadonlyArray<TypeInferenceFailure>;
+}
+
+interface Bound {
+  type: Type;
+  index?: number;
+  /** Set on the one upper-bound entry contributed by the variable's DECLARED
+   * bound (see `uppersOf`) — the only term the D10 lift carve-out waives. */
+  declared?: boolean;
+}
+
+interface SolverState {
+  params: TypeParameter[];
+  declared: Map<string, Type | undefined>;
+  lower: Map<string, Bound[]>;
+  upper: Map<string, Bound[]>;
+  lifted: Set<string>;
+  matched: boolean;
+}
+
+/**
+ * Solve one signature arm's `forall` clause against the actual operand types
+ * (§4.3). Write-free: the only output is a binding map.
+ *
+ * Order-independent by construction — the covariant sweep (pass 1 + pass 2a)
+ * runs to completion over EVERY position, then the contravariant sweep (pass
+ * 2b) collects upper bounds, then S1–S3 solve, then satisfiability is checked.
+ * No position is ever solved with a partial solution.
+ */
+export function solveTypeArguments(
+  arm: FunctionSignature,
+  actuals: ReadonlyArray<Type | undefined>,
+  opts?: InferenceOptions
+): TypeInferenceResult {
+  const params = arm.typeParams ?? [];
+  if (params.length === 0)
+    return {
+      bindings: Object.create(null),
+      absorbed: new Set(),
+      matched: true,
+      failures: [],
+    };
+
+  const s: SolverState = {
+    params,
+    declared: new Map(params.map((p) => [p.name, p.bound])),
+    lower: new Map(),
+    upper: new Map(),
+    lifted: new Set(),
+    matched: true,
+  };
+
+  const positions = parameterPositions(arm, actuals.length);
+
+  // Pass 1 + pass 2a — the covariant sweep, over every position.
+  for (let i = 0; i < positions.length; i++) {
+    const pattern = positions[i];
+    const actual = actuals[i];
+    if (pattern === undefined || actual === undefined) continue;
+    if (opts?.skip?.(i)) continue;
+    // An inferable unknown/`any` symbol contributes NO bound; it stays
+    // eligible for post-solve narrowing instead (§4.3 table).
+    if (opts?.inferable?.(i)) continue;
+    if (opts?.lifted?.(i) && isVariable(pattern)) s.lifted.add(pattern.name);
+    if (!walkPattern(s, pattern, actual, i, 'lower', true)) s.matched = false;
+  }
+
+  // Pass 2b — the contravariant sweep (collection only; satisfiability below).
+  for (let i = 0; i < positions.length; i++) {
+    const pattern = positions[i];
+    const actual = actuals[i];
+    if (pattern === undefined || actual === undefined) continue;
+    if (opts?.skip?.(i)) continue;
+    if (opts?.inferable?.(i)) continue;
+    walkPattern(s, pattern, actual, i, 'upper', true);
+  }
+
+  //
+  // Solve — S1 (join of lowers), S2 (meet of uppers), S3 (declared bound, else
+  // `unknown`; NEVER `never`).
+  //
+  const bindings: TypeBindings = Object.create(null);
+  const absorbed = new Set<string>();
+  for (const p of params) {
+    const lowers = s.lower.get(p.name);
+    const uppers = uppersOf(s, p.name);
+    if (lowers && lowers.length > 0) {
+      const joined = joinBounds(lowers.map((b) => b.type));
+      bindings[p.name] = joined.type;
+      if (joined.absorbed) absorbed.add(p.name);
+    } else if (uppers.length > 0) {
+      bindings[p.name] = algebra().narrow(...uppers.map((b) => b.type));
+    } else {
+      bindings[p.name] = p.bound ?? 'unknown';
+    }
+  }
+
+  //
+  // Satisfiability (§4.3 pass 2b). The declared bound joins the upper set.
+  //
+  const failures: TypeInferenceFailure[] = [];
+  for (const p of params) {
+    // D8: an absorbed `unknown` satisfies every upper bound PROVISIONALLY —
+    // the runtime stays the honest party, and §4.5 parity is preserved.
+    if (absorbed.has(p.name)) continue;
+    // D10: a lift-admitted operand at a bare-variable pattern was admitted at
+    // its SCALAR BASE; re-checking the DECLARED bound against the (collection)
+    // solution would contradict the very admission that produced it. Only that
+    // one term is waived — an upper bound contributed contravariantly by
+    // ANOTHER position (a callback parameter) still constrains the variable.
+    const lifted = s.lifted.has(p.name);
+    const uppers = lifted
+      ? uppersOf(s, p.name).filter((b) => !b.declared)
+      : uppersOf(s, p.name);
+    if (uppers.length === 0) continue;
+    const solution = bindings[p.name];
+    const meet = algebra().narrow(...uppers.map((b) => b.type));
+    // Disjoint upper bounds (empty meet) fail even when the solution is itself
+    // `never` — S2's meet of two incompatible callback parameters is `never`,
+    // and `never <: never` would otherwise wave the conflict through.
+    const disjoint = meet === 'never' && uppers.some((b) => b.type !== 'never');
+    if (!disjoint && algebra().isSubtype(solution, meet)) continue;
+
+    // The declared bound is not on the record for a lifted variable, so it can
+    // never be the thing blamed either.
+    const declaredBound = lifted ? undefined : p.bound;
+    const pinnedBy = s.lower.get(p.name) ?? [];
+    const pinnedText = describePositions(pinnedBy);
+    if (
+      declaredBound !== undefined &&
+      !algebra().isSubtype(solution, declaredBound)
+    ) {
+      failures.push({
+        kind: 'bound',
+        variable: p.name,
+        solution,
+        expected: declaredBound,
+        index: pinnedBy[0]?.index,
+        detail: `\`${p.name}\` is declared with bound \`${typeToString(declaredBound)}\`, but was solved to \`${typeToString(solution)}\`${pinnedText}`,
+      });
+      continue;
+    }
+    // A contravariant (callback) upper bound: blame the constraining position.
+    // With DISJOINT uppers there is no violated-by-the-solution bound (the
+    // solution is `never`, a subtype of them all), so the last positioned
+    // upper is blamed against what the earlier ones pin.
+    const positioned = uppers.filter((b) => b.index !== undefined);
+    const violated =
+      uppers.find((b) => !algebra().isSubtype(solution, b.type)) ??
+      positioned[positioned.length - 1] ??
+      uppers[0];
+    const others = uppers.filter((b) => b !== violated);
+    const pin = disjoint
+      ? others.length > 0
+        ? algebra().narrow(...others.map((b) => b.type))
+        : solution
+      : solution;
+    failures.push({
+      kind: 'upper',
+      variable: p.name,
+      solution,
+      expected: violated.type,
+      index: violated.index,
+      pin,
+      detail: disjoint
+        ? `\`${p.name}\` has incompatible requirements (${uppers.map((b) => `\`${typeToString(b.type)}\``).join(', ')})`
+        : `\`${p.name}\` was solved to \`${typeToString(solution)}\`${pinnedText}; this position requires \`${p.name} <: ${typeToString(violated.type)}\``,
+    });
+  }
+
+  return { bindings, absorbed, matched: s.matched, failures };
+}
+
+/**
+ * The §4.3 solver, in the shape the design states: the bindings, or `null`
+ * when no consistent instantiation exists.
+ */
+export function inferTypeArguments(
+  arm: FunctionSignature,
+  actuals: ReadonlyArray<Type | undefined>,
+  opts?: InferenceOptions
+): TypeBindings | null {
+  const r = solveTypeArguments(arm, actuals, opts);
+  if (!r.matched || r.failures.length > 0) return null;
+  return r.bindings;
+}
+
+/**
+ * `Poly <: Ground` (§5 rule 1): true iff SOME instantiation is a subtype.
+ *
+ * The ground signature's parameters are the "actuals" flowing into the
+ * polytype's parameters (contravariantly, so a ground param at a bare
+ * poly-variable is a LOWER bound), and then the COMPLETE existing
+ * signature-subtype check runs on the substituted arm — instantiation alone is
+ * not acceptance (result covariance, effects, arity shape, named slots).
+ */
+export function instantiatesTo(
+  poly: FunctionSignature,
+  ground: FunctionSignature
+): boolean {
+  // An OPEN expected side with a polytype actual: v1 declines (no higher-order
+  // unification, §4.3).
+  if (ground.typeParams !== undefined && ground.typeParams.length > 0)
+    return false;
+  const actuals = [
+    ...(ground.args ?? []),
+    ...(ground.optArgs ?? []),
+    ...(ground.variadicArg ? [ground.variadicArg] : []),
+  ].map((x) => x.type);
+  const bindings = inferTypeArguments(poly, actuals);
+  if (bindings === null) return false;
+  const instantiated = substituteTypeVariables(poly, bindings);
+  if (isPolymorphicType(instantiated)) return false;
+  return algebra().isSubtype(instantiated, ground);
+}
+
+/**
+ * Pattern-side `matches` against a POLYMORPHIC pattern — the D12 consistent
+ * existential: solve the pattern's variables against `subject`, then check the
+ * subject against the substituted pattern with the ordinary subtype relation.
+ *
+ * The polarity is the mirror of {@link instantiatesTo}: here the subject flows
+ * INTO the pattern (`subject <: pattern[σ]`), so the pattern's parameters take
+ * UPPER bounds from the subject's and its result takes a LOWER bound — which
+ * is exactly what the solver's signature branch does when the whole pattern is
+ * handed to it as one covariant position.
+ */
+export function matchesPolytypePattern(subject: Type, pattern: Type): boolean {
+  if (typeof pattern !== 'object') return algebra().isSubtype(subject, pattern);
+  // An intersection pattern (an overload set) is satisfied only when EVERY arm
+  // is — the existing `rhs.kind === 'intersection'` rule of `isSubtype`.
+  if (pattern.kind === 'intersection')
+    return pattern.types.every((arm) => matchesPolytypePattern(subject, arm));
+  if (
+    pattern.kind !== 'signature' ||
+    pattern.typeParams === undefined ||
+    pattern.typeParams.length === 0
+  )
+    return algebra().isSubtype(subject, pattern);
+
+  // The arm with its clause lifted onto a synthetic one-parameter carrier, so
+  // the pattern's variables read as FREE while the solver walks it.
+  const open: FunctionSignature = { ...pattern };
+  delete open.typeParams;
+  const carrier: FunctionSignature = {
+    kind: 'signature',
+    typeParams: pattern.typeParams,
+    args: [{ type: open }],
+    result: 'nothing',
+  };
+  const bindings = inferTypeArguments(carrier, [subject]);
+  if (bindings === null) return false;
+  return algebra().isSubtype(subject, substituteTypeVariables(open, bindings));
+}
+
+/**
+ * Every free variable occurrence replaced by its declared bound (`any` when
+ * unbounded) — the D6 "bound-reading" `couldMatch` (and the subject-less
+ * `at`-handler check) use, on BOTH sides. Positional: no cross-occurrence
+ * consistency.
+ */
+export function readTypeVariablesAsBounds(t: Type): Type {
+  if (!isPolymorphicType(t)) return t;
+  if (typeof t !== 'object') return t;
+  if (t.kind === 'intersection')
+    return { ...t, types: t.types.map(readTypeVariablesAsBounds) };
+  if (t.kind !== 'signature') return t;
+  const bindings: TypeBindings = Object.create(null);
+  for (const p of t.typeParams ?? []) bindings[p.name] = p.bound ?? 'any';
+  return substituteTypeVariables(t, bindings);
+}
+
+//
+// ── Solver internals ─────────────────────────────────────────────────────────
+//
+
+function isVariable(t: Type): t is { kind: 'variable'; name: string } {
+  return typeof t === 'object' && t.kind === 'variable';
+}
+
+/** The parameter pattern at each operand position (required, then optional,
+ * then the variadic pattern repeated — a variadic parameter collects ONE bound
+ * per matching actual, all folded into the same variable's bound set). */
+export function parameterPositions(
+  arm: FunctionSignature,
+  count: number
+): (Type | undefined)[] {
+  const out: (Type | undefined)[] = [];
+  for (const a of arm.args ?? []) out.push(a.type);
+  for (const a of arm.optArgs ?? []) out.push(a.type);
+  const variadic = arm.variadicArg?.type;
+  while (out.length < count) out.push(variadic);
+  return out.slice(0, Math.max(count, 0));
+}
+
+function addBound(
+  map: Map<string, Bound[]>,
+  name: string,
+  type: Type,
+  index: number | undefined
+): void {
+  // Ground-type invariant (§4.2): only GROUND bounds are ever joined or met —
+  // the algebra helpers assert on an open input. The one shape that can reach
+  // here open is a polytype ACTUAL (its own quantified variables), which §4.3
+  // declines rather than unifies; the signature branch already drops those, so
+  // this is a backstop.
+  if (hasFreeTypeVariables(type)) return;
+  const list = map.get(name);
+  if (list) list.push({ type, index });
+  else map.set(name, [{ type, index }]);
+}
+
+function uppersOf(s: SolverState, name: string): Bound[] {
+  const collected = s.upper.get(name) ?? [];
+  const declared = s.declared.get(name);
+  // The declared bound JOINS the upper-bound set of its variable (§4.3).
+  return declared === undefined
+    ? collected
+    : [...collected, { type: declared, declared: true }];
+}
+
+function describePositions(bounds: ReadonlyArray<Bound>): string {
+  const positions = bounds
+    .map((b) => b.index)
+    .filter((x): x is number => x !== undefined)
+    .map((x) => x + 1);
+  if (positions.length === 0) return '';
+  if (positions.length === 1) return ` (from argument ${positions[0]})`;
+  return ` (from arguments ${positions.join(', ')})`;
+}
+
+/**
+ * How special LOWER bounds combine — the §4.3 bound-join table. Deliberately
+ * NOT raw `widen`: `widen(unknown, X)` returns `X`, which would DISCARD a
+ * non-inferable unknown and overstate the result.
+ */
+function joinBounds(bounds: ReadonlyArray<Type>): {
+  type: Type;
+  absorbed: boolean;
+} {
+  // `unknown` absorbs, and is checked before `any`: it is the reading that
+  // then makes upper bounds PROVISIONAL (D8) rather than silently satisfied by
+  // the top type. (A call mixing `any` and a non-inferable `unknown` is
+  // vanishingly rare; the choice is recorded rather than left to `widen`.)
+  if (bounds.some((b) => b === 'unknown')) return { type: 'unknown', absorbed: true };
+  if (bounds.some((b) => b === 'any')) return { type: 'any', absorbed: false };
+  // `never` is NEUTRAL (identity): `Concat([], [1])` solves `T = integer`.
+  const ordinary = bounds.filter((b) => b !== 'never');
+  if (ordinary.length === 0) return { type: 'never', absorbed: false };
+  return { type: algebra().widen(...ordinary), absorbed: false };
+}
+
+/**
+ * `t` with every free variable replaced by the WIDEST type admissible at its
+ * position — the ground skeleton a constructor pattern is matched against
+ * before recursing, and the LOOSEST reading of a parameter (which is what an
+ * embedding uses to decide whether a position is only provisionally admitted,
+ * §4.5).
+ *
+ * Variance-aware, and that is load-bearing: `any` in a CONTRAVARIANT position
+ * is the tightest possible reading, not the loosest — `(integer) -> boolean`
+ * is not a subtype of `(any) -> boolean`. A variable under a callback
+ * parameter therefore reads as `never`, so `forall T. ((T) -> boolean) -> T`
+ * admits every unary predicate at its skeleton, as it must.
+ */
+export function groundSkeleton(t: Type, covariant = true): Type {
+  if (!hasFreeTypeVariables(t)) return t;
+  return skeleton(t, covariant);
+}
+
+function skeleton(t: Type, covariant: boolean): Type {
+  if (typeof t === 'string') return t;
+  if (!hasFreeTypeVariables(t)) return t;
+  switch (t.kind) {
+    case 'variable':
+      return covariant ? 'any' : 'never';
+    case 'signature': {
+      const next: FunctionSignature = { ...t, result: skeleton(t.result, covariant) };
+      if (t.args) next.args = t.args.map((a) => ({ ...a, type: skeleton(a.type, !covariant) }));
+      if (t.optArgs)
+        next.optArgs = t.optArgs.map((a) => ({ ...a, type: skeleton(a.type, !covariant) }));
+      if (t.variadicArg)
+        next.variadicArg = { ...t.variadicArg, type: skeleton(t.variadicArg.type, !covariant) };
+      delete next.typeParams;
+      return next;
+    }
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return { ...t, elements: skeleton(t.elements, covariant) };
+    case 'tuple':
+      return {
+        ...t,
+        elements: t.elements.map((e) => ({ ...e, type: skeleton(e.type, covariant) })),
+      };
+    case 'dictionary':
+      return { ...t, values: skeleton(t.values, covariant) };
+    case 'record': {
+      const elements: Record<string, Type> = {};
+      for (const [k, v] of Object.entries(t.elements))
+        elements[k] = skeleton(v, covariant);
+      return { ...t, elements };
+    }
+    case 'union':
+    case 'intersection':
+      return { ...t, types: t.types.map((x) => skeleton(x, covariant)) };
+    case 'negation':
+      return { ...t, type: skeleton(t.type, !covariant) };
+    default:
+      return t;
+  }
+}
+
+/**
+ * The element type ONE index into `actual` yields.
+ *
+ * Mirrors `collectionElementType` (`common/type/utils.ts`) EXACTLY — including
+ * the dimension peel: an index into a `matrix<integer^(2x3)>` is a row
+ * (`integer^3`), not the scalar `integer`. Duplicated rather than imported
+ * because `utils.ts` depends on `subtype.ts`, which depends on this module.
+ */
+function elementTypeOf(type: Type): Type | undefined {
+  if (typeof type === 'string') {
+    if (
+      type === 'collection' ||
+      type === 'indexed_collection' ||
+      type === 'list' ||
+      type === 'set' ||
+      type === 'tuple' ||
+      type === 'dictionary' ||
+      type === 'record'
+    )
+      return 'any';
+    return undefined;
+  }
+  if (type.kind === 'collection' || type.kind === 'indexed_collection')
+    return type.elements;
+  if (type.kind === 'list') {
+    const dims = (type as ListType).dimensions;
+    if (dims && dims.length > 1)
+      return { kind: 'list', elements: type.elements, dimensions: dims.slice(1) };
+    return type.elements;
+  }
+  if (type.kind === 'set') return type.elements;
+  if (type.kind === 'broadcastable') return type.elements;
+  if (type.kind === 'tuple')
+    return algebra().widen(...type.elements.map((x) => x.type));
+  // Indexing a dictionary or a record yields a `(key, value)` entry. Built as
+  // a `Type` object rather than through `parseType` (which this module must not
+  // depend on); `widen()` of no types is `never`, matching the
+  // `tuple<string, never>` an empty record produces in `utils.ts`.
+  if (type.kind === 'dictionary')
+    return {
+      kind: 'tuple',
+      elements: [{ type: 'string' }, { type: type.values }],
+    };
+  if (type.kind === 'record')
+    return {
+      kind: 'tuple',
+      elements: [
+        { type: 'string' },
+        { type: algebra().widen(...Object.values(type.elements)) },
+      ],
+    };
+  return undefined;
+}
+
+/**
+ * Walk a parameter PATTERN against an ACTUAL type, recording bounds.
+ *
+ * `phase` selects which sweep this is: `'lower'` records a variable in a
+ * covariant position (pass 1 + pass 2a), `'upper'` records a variable in a
+ * contravariant position (pass 2b). Both sweeps traverse the same structure —
+ * separating them by phase, rather than by parameter, is what makes the
+ * outcome independent of operand ORDER.
+ *
+ * Returns false when the structural match itself failed (checked only in the
+ * `'lower'` sweep, so a failure is reported once).
+ */
+function walkPattern(
+  s: SolverState,
+  pattern: Type,
+  actual: Type,
+  index: number | undefined,
+  phase: 'lower' | 'upper',
+  covariant: boolean
+): boolean {
+  if (isVariable(pattern)) {
+    if (phase === 'lower' && covariant)
+      addBound(s.lower, pattern.name, actual, index);
+    else if (phase === 'upper' && !covariant)
+      addBound(s.upper, pattern.name, actual, index);
+    return true;
+  }
+
+  if (!hasFreeTypeVariables(pattern)) {
+    if (phase !== 'lower') return true;
+    return covariant
+      ? algebra().isSubtype(actual, pattern)
+      : algebra().isSubtype(pattern, actual);
+  }
+
+  // A UNION actual distributes: every arm must match the pattern, and each
+  // contributes bounds (§4.3 pass 1).
+  if (typeof actual === 'object' && actual.kind === 'union') {
+    let ok = true;
+    for (const arm of actual.types)
+      if (!walkPattern(s, pattern, arm, index, phase, covariant)) ok = false;
+    return ok;
+  }
+
+  if (typeof pattern === 'string') return true; // unreachable: no free vars
+
+  switch (pattern.kind) {
+    case 'signature': {
+      if (typeof actual !== 'object' || actual.kind !== 'signature') {
+        if (phase !== 'lower' || !covariant) return true;
+        return algebra().isSubtype(actual, groundSkeleton(pattern, true));
+      }
+      // A POLYTYPE actual at a function-typed pattern: v1 DECLINES to unify
+      // (no higher-order unification, §4.3). The position contributes no
+      // bounds; the actual is then admitted — or not — by the `Poly <: Ground`
+      // rule against whatever the OTHER positions instantiate this parameter
+      // to (§5 rule 1).
+      if (actual.typeParams !== undefined && actual.typeParams.length > 0)
+        return true;
+      // Pass 2a walks the RESULT covariantly; pass 2b walks each PARAMETER
+      // with the variance flipped.
+      let ok = walkPattern(
+        s,
+        pattern.result,
+        actual.result,
+        index,
+        phase,
+        covariant
+      );
+      const patternArgs = signatureElements(pattern);
+      const actualArgs = signatureElements(actual);
+      const n = Math.min(patternArgs.length, actualArgs.length);
+      for (let i = 0; i < n; i++)
+        if (
+          !walkPattern(
+            s,
+            patternArgs[i].type,
+            actualArgs[i].type,
+            index,
+            phase,
+            !covariant
+          )
+        )
+          ok = false;
+      return ok;
+    }
+
+    case 'broadcastable': {
+      // §4.4 three-shape decomposition: a scalar actual, an indexed collection
+      // of `S`, or a `broadcastable<S>` all bind `T ≥ S`.
+      const inner =
+        typeof actual === 'object' &&
+        (actual.kind === 'broadcastable' ||
+          actual.kind === 'list' ||
+          actual.kind === 'indexed_collection')
+          ? elementTypeOf(actual)!
+          : actual === 'list' || actual === 'indexed_collection'
+            ? 'any'
+            : actual;
+      return walkPattern(s, pattern.elements, inner, index, phase, covariant);
+    }
+
+    case 'tuple': {
+      if (
+        phase === 'lower' &&
+        covariant &&
+        !algebra().isSubtype(actual, groundSkeleton(pattern, true))
+      )
+        return false;
+      if (typeof actual !== 'object' || actual.kind !== 'tuple') {
+        // A bare `tuple` (or anything non-decomposable): no per-element bound.
+        return true;
+      }
+      if (actual.elements.length !== pattern.elements.length)
+        return phase !== 'lower';
+      let ok = true;
+      for (let i = 0; i < pattern.elements.length; i++)
+        if (
+          !walkPattern(
+            s,
+            pattern.elements[i].type,
+            actual.elements[i].type,
+            index,
+            phase,
+            covariant
+          )
+        )
+          ok = false;
+      return ok;
+    }
+
+    case 'dictionary': {
+      if (
+        phase === 'lower' &&
+        covariant &&
+        !algebra().isSubtype(actual, groundSkeleton(pattern, true))
+      )
+        return false;
+      if (typeof actual !== 'object' || actual.kind !== 'dictionary') return true;
+      return walkPattern(
+        s,
+        pattern.values,
+        actual.values,
+        index,
+        phase,
+        covariant
+      );
+    }
+
+    case 'record': {
+      if (
+        phase === 'lower' &&
+        covariant &&
+        !algebra().isSubtype(actual, groundSkeleton(pattern, true))
+      )
+        return false;
+      if (typeof actual !== 'object' || actual.kind !== 'record') return true;
+      let ok = true;
+      for (const [key, value] of Object.entries(pattern.elements)) {
+        const a = actual.elements[key];
+        if (a === undefined) continue;
+        if (!walkPattern(s, value, a, index, phase, covariant)) ok = false;
+      }
+      return ok;
+    }
+
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection': {
+      if (
+        phase === 'lower' &&
+        covariant &&
+        !algebra().isSubtype(actual, groundSkeleton(pattern, true))
+      )
+        return false;
+      const element = elementTypeOf(actual);
+      if (element === undefined) return true;
+      return walkPattern(s, pattern.elements, element, index, phase, covariant);
+    }
+
+    default:
+      // A variable under a union/intersection/negation is rejected at
+      // declaration time (§7.2), so nothing else can carry one.
+      return true;
+  }
+}

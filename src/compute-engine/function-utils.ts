@@ -41,6 +41,8 @@ import { effectsOf } from './boxed-expression/effects-of.js';
 import { isPureComputedEffects } from '../common/type/effects.js';
 import type { Type } from '../common/type/types.js';
 import { parseType } from '../common/type/parse.js';
+import { isPolymorphicType } from '../common/type/instantiate.js';
+import { GENERIC_FUNCTION_LITERAL_MESSAGE } from './boxed-expression/type-compatibility-error.js';
 import { typeToString } from '../common/type/serialize.js';
 import { signatureEffects } from '../common/type/utils.js';
 
@@ -344,6 +346,19 @@ export function canonicalFunctionLiteralArguments(
   // optional/variadic markers (those need `makeLambda` arity support);
   // anything else falls through to the standard expected-a-symbol error.
   if (ops.length === 2 && isString(ops[1])) {
+    // §4.1/D7: a `forall` clause is not accepted on a function-literal
+    // annotation in v1 — a literal cannot introduce type variables (the typed
+    // literal pipeline installs parameter types BEFORE body canonicalization,
+    // so an open `T` would reach `Add` and the algebra helpers, violating the
+    // §4.2 ground invariant). A polytype signature STRING parses to a
+    // signature carrying `typeParams`, so it would otherwise flow into the
+    // sugar path below: reject it here with the D7 diagnostic rather than the
+    // generic `expected-a-symbol` the sugar's decline would produce.
+    if (isPolytypeString(ce, ops[1].string))
+      return ce._fn('Function', [
+        ops[0],
+        ce.error(GENERIC_FUNCTION_LITERAL_MESSAGE, ops[1].string),
+      ]);
     const desugared = desugarSignatureString(ce, ops[0], ops[1].string);
     if (desugared !== undefined)
       return canonicalFunctionLiteralArguments(ce, desugared);
@@ -355,8 +370,15 @@ export function canonicalFunctionLiteralArguments(
   // string (mirroring how `Declare` keeps its type operand raw).
   const params = ops.slice(1).map((x) => {
     if (isSymbol(x)) return x;
-    if (isFunction(x, 'Typed') && isSymbol(x.op1))
-      return normalizeTypedParameter(ce, x);
+    if (isFunction(x, 'Typed') && isSymbol(x.op1)) {
+      const normalized = normalizeTypedParameter(ce, x);
+      // A `forall` clause on a PARAMETER annotation is a rank-2 spelling, and
+      // is rejected with the same D7 diagnostic (§4.1).
+      const t = functionLiteralParameterType(normalized);
+      if (t !== undefined && isPolymorphicType(t))
+        return ce.error(GENERIC_FUNCTION_LITERAL_MESSAGE, x.toString());
+      return normalized;
+    }
     return ce.error('expected-a-symbol', x.toString());
   });
 
@@ -379,6 +401,12 @@ export function canonicalFunctionLiteralArguments(
   let returnTypeOp: Expression | undefined;
   if (isFunction(bodyOp, 'Typed')) {
     returnTypeOp = normalizeTypeOperand(ce, bodyOp.op2);
+    // A `forall` clause on the RETURN-type ascription — same D7 rejection.
+    if (isString(returnTypeOp) && isPolytypeString(ce, returnTypeOp.string))
+      return ce._fn('Function', [
+        ce.error(GENERIC_FUNCTION_LITERAL_MESSAGE, returnTypeOp.string),
+        ...params,
+      ]);
     bodyOp = bodyOp.op1;
   }
 
@@ -1493,6 +1521,11 @@ function makeLambda(
           const prefixSig: Type = {
             kind: 'signature',
             args: (fullSig.args ?? []).slice(0, args.length),
+            // The arrow's `forall` clause is an adjunct field: a signature
+            // rebuilt field-by-field carries it (the rebuild invariant).
+            ...(fullSig.typeParams !== undefined
+              ? { typeParams: fullSig.typeParams }
+              : {}),
             result: fullSig.result,
           };
           const validated = _validateArguments(
@@ -1906,4 +1939,17 @@ export function lookupApplicable(
     currentScope = currentScope.parent;
   }
   return innermost;
+}
+
+/** True when `s` is a type string that parses to a POLYTYPE (a `forall`
+ * clause). Used to reject a generic annotation on a function literal (D7,
+ * §4.1 of the type-variables design); a non-type string is not our business
+ * and answers `false`. */
+function isPolytypeString(ce: ComputeEngine, s: string): boolean {
+  if (!s.includes('forall')) return false;
+  try {
+    return isPolymorphicType(parseType(s, ce._typeResolver));
+  } catch {
+    return false;
+  }
 }

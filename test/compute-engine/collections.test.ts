@@ -1160,6 +1160,34 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
     expect(e.re).toEqual(6);
   });
 
+  test('Find types as the ELEMENT type (| nothing), not the collection type', () => {
+    // `Find` returns a single element, or `Nothing` when nothing matches, so
+    // its static type must be the element type unioned with `nothing`. It
+    // used to echo `ops[0].type`, statically claiming `list<integer>` for an
+    // expression that evaluates to an integer.
+    const e = engine.box([
+      'Find',
+      ['List', 1, 2, 3],
+      ['Function', ['Greater', 'x', 1], 'x'],
+    ]);
+    expect(e.type.matches('list<number>')).toBe(false);
+    expect(e.type.matches('integer | nothing')).toBe(true);
+    // The evaluated result agrees with the declared type.
+    const v = e.evaluate();
+    expect(v.re).toEqual(2);
+    expect(v.type.matches(e.type)).toBe(true);
+
+    // No match: the result is `Nothing`, also covered by the declared type.
+    const none = engine.box([
+      'Find',
+      ['List', 1, 2, 3],
+      ['Function', ['Greater', 'x', 10], 'x'],
+    ]);
+    const noneValue = none.evaluate();
+    expect(noneValue.symbol).toEqual('Nothing');
+    expect(noneValue.type.matches(none.type)).toBe(true);
+  });
+
   test('DictionaryFrom of a finite collection of pairs', () => {
     const e = engine
       .box([

@@ -146,6 +146,25 @@ export type EffectLabel =
  */
 export type EffectSet = 'any' | EffectLabel[];
 
+/**
+ * A universally quantified type variable (rank-1).
+ *
+ * Only legal inside a function signature; declared and scoped by its arm's
+ * `forall` clause ({@link FunctionSignature.typeParams}). A variable is
+ * **atomic and opaque**: it is never reduced, distributed or collapsed, and it
+ * is substituted away by instantiation at a call site.
+ */
+export type TypeVariable = { kind: 'variable'; name: string };
+
+/**
+ * One entry of a signature's `forall` clause: the variable's name and its
+ * optional declared upper bound.
+ *
+ * The bound must be **ground** (no type variables) — validated when the
+ * declared type is boxed. An unbounded variable's implicit bound is `any`.
+ */
+export type TypeParameter = { name: string; bound?: Type };
+
 export type FunctionSignature = {
   kind: 'signature';
   args?: NamedElement[];
@@ -158,6 +177,16 @@ export type FunctionSignature = {
    * specifier slot, exactly as an unannotated signature always has. The
    * stated-pure `[]` is the same set, spelled ` pure`. See {@link EffectSet}. */
   effects?: EffectSet;
+  /** The `forall` clause quantifying this arm (order-preserving).
+   *
+   * Present only on a **polytype**: `forall T, U: number. (T, U) -> T`. Each
+   * arm of an overload set carries its own clause; same-named variables in
+   * different arms are unrelated.
+   *
+   * `typeParams` and `effects` are the signature's two optional adjuncts: any
+   * code that REBUILDS a signature field-by-field must carry BOTH across the
+   * rebuild (a `{...t}` spread does it for free). */
+  typeParams?: TypeParameter[];
   result: Type;
 };
 
@@ -305,6 +334,7 @@ export type Type =
   | NumericPrimitiveType
   | FunctionSignature
   | ValueType
+  | TypeVariable
   | TypeReference;
 
 /**

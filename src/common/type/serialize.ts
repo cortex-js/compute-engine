@@ -72,6 +72,15 @@ export function typeToString(type: Type, precedence = 0): string {
       result = type.name;
       break;
 
+    case 'variable':
+      // A type variable is atomic: its name, as the author wrote it. Variable
+      // names are NEVER canonicalized here — the author's letters round-trip
+      // by construction, which the `forall` clause below relies on (the
+      // α-blindness of string-keyed identity is recorded and accepted, see
+      // §5 of the type-variables design).
+      result = type.name;
+      break;
+
     case 'negation':
       // Serialize negation types
       result = `!${typeToString(type.type, NEGATION_PRECEDENCE)}`;
@@ -243,7 +252,20 @@ export function typeToString(type: Type, precedence = 0): string {
         (ELIDE_STATED_PURE && type.effects !== 'any' && !type.effects.length)
           ? ''
           : ` ${effectSetToString(type.effects)}`;
-      result = `(${argsList})${effects} -> ${typeToString(type.result)}`;
+      // The `forall` clause, emitted with the author's variable names (it
+      // round-trips by construction). A polytype has SIGNATURE_PRECEDENCE, so
+      // an arm of an overload set is parenthesized by the check below, exactly
+      // as the per-arm clause syntax requires.
+      const clause = type.typeParams?.length
+        ? `forall ${type.typeParams
+            .map((p) =>
+              p.bound === undefined
+                ? p.name
+                : `${p.name}: ${typeToString(p.bound)}`
+            )
+            .join(', ')}. `
+        : '';
+      result = `${clause}(${argsList})${effects} -> ${typeToString(type.result)}`;
       break;
 
     default:
@@ -296,6 +318,8 @@ function getPrecedence(kind: string): number {
     case 'signature':
       return SIGNATURE_PRECEDENCE;
     case 'value':
+    // A type variable is an atom, like a primitive name: never parenthesized.
+    case 'variable':
       return VALUE_PRECEDENCE;
     default:
       return 0;

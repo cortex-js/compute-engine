@@ -23,6 +23,7 @@ import {
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { parseType } from '../../common/type/parse.js';
+import { isPolymorphicType } from '../../common/type/instantiate.js';
 import type { Type } from '../../common/type/types.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { normalizeIndexingSet } from '../library/utils.js';
@@ -4710,8 +4711,14 @@ export class BaseCompiler {
     if (isOperatorDef(def)) return paramsAreScalar(def.operator);
     if (!('value' in def) || def.value === undefined) return true;
     const declared = def.value.type?.type;
-    if (typeof declared === 'object' && declared.kind === 'signature')
+    if (typeof declared === 'object' && declared.kind === 'signature') {
+      // A GENERIC signature has open parameters: it neither broadcasts nor
+      // coerces in v1 (the type-variables design declines compiling a generic
+      // user function outright — §6). Answering `true` here would silently
+      // claim scalar parameters for a `forall T. (T) -> T`.
+      if (isPolymorphicType(declared)) return false;
       return paramsAreScalar(declared);
+    }
     const literal = def.value.value?.type?.type;
     if (literal === undefined) return true;
     return paramsAreScalar(literal);
@@ -4739,6 +4746,13 @@ export class BaseCompiler {
     const t = boxed?.type;
     if (t === undefined || typeof t === 'string' || t.kind !== 'signature')
       return undefined;
+    // A GENERIC signature's parameter is a type VARIABLE, not a type the
+    // compiler can coerce or broadcast against: DECLINE (return `undefined`,
+    // never throw — the decline convention). The `kind !== 'signature'` guard
+    // above does not catch it: `typeParams` lives ON the signature. Threading
+    // call-site instantiated signatures into compilation is future work
+    // (§6/§9.2 of the type-variables design).
+    if (isPolymorphicType(t)) return undefined;
     const nArgs = t.args?.length ?? 0;
     if (i < nArgs) return t.args![i].type;
     const nOpt = t.optArgs?.length ?? 0;
@@ -4765,6 +4779,8 @@ export class BaseCompiler {
     const state = multiClauseState(engine.lookupDefinition(h));
     if (state === undefined || state.clauses.length === 0) return false;
     return state.clauses.every((c) => {
+      // A generic clause declines (see `userFunctionParamType`).
+      if (isPolymorphicType(c.signature)) return false;
       const params = c.signature.args;
       if (params === undefined || i >= params.length) return false;
       return isNonRealNumber(params[i].type);

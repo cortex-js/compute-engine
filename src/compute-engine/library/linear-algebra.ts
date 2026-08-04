@@ -441,8 +441,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Inverse: {
       description: 'Multiplicative inverse of a square matrix.',
       complexity: 8200,
-      signature: '(matrix) -> matrix',
-      type: ([matrix]) => matrix.type,
+      signature: 'forall T: matrix. (T) -> T',
       evaluate: ([matrix], { engine: ce, numericApproximation }) => {
         const op1 = matrix;
 

@@ -260,8 +260,18 @@ export function functionResult(
   if (type === 'function') return 'unknown';
   const arms = signatureArms(type);
   if (!arms) return undefined;
-  if (arms.length === 1) return arms[0].result;
-  return widen(...arms.map((a) => a.result));
+  // A POLYTYPE arm's declared result is OPEN — it is a pattern, not a type
+  // (`forall T. (T) -> T` results in `T`). An open type must never escape as
+  // an expression's `.type` (§4.2 ground invariant of the type-variables
+  // design), and this function is read by a dozen library `type:` handlers
+  // that pass it straight through (`Map(xs, genericFn)`). Callers that CAN
+  // instantiate — argument validation and the two result-typing sites — solve
+  // the arm at the call site and override this; everyone else gets the honest
+  // `unknown`.
+  const armResult = (a: FunctionSignature): Type =>
+    a.typeParams !== undefined && a.typeParams.length > 0 ? 'unknown' : a.result;
+  if (arms.length === 1) return armResult(arms[0]);
+  return widen(...arms.map(armResult));
 }
 
 export function collectionElementType(type: Readonly<Type>): Type | undefined {

@@ -29,6 +29,7 @@ export type TokenType =
   | '?'
   | '*'
   | '+'
+  | '.'
   | '..'
   | 'x'
   // Special
@@ -361,6 +362,12 @@ export class Lexer {
       case '*':
         this.advance();
         return this.createToken('*', '*');
+      case '.':
+        // A lone `.` terminates a `forall` clause. (`..`, the numeric-range
+        // separator, is matched before this switch; a decimal point is
+        // consumed by `readNumber`.)
+        this.advance();
+        return this.createToken('.', '.');
       case '+':
         if (/[0-9]/.test(this.peek(1))) {
           return this.createToken('NUMBER_LITERAL', this.readNumber());
