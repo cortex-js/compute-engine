@@ -337,21 +337,58 @@ describe('COMPILE CSE — binder bodies', () => {
 });
 
 describe('COMPILE CSE — emission purity (G1b)', () => {
-  it('does not merge two identical `Map(xs, f)` with a user-declared callback', () => {
-    // A NAMED callback is invisible to purity inference (`docs/EFFECTS-MODEL.md`):
-    // `Map(xs, f)` can report pure while `f` draws or writes, so merging two
-    // such applications could change a draw stream or a call count.
-    ce.assign('mapper', ce.parse('x \\mapsto x^2 + 3x + 1'));
-    const mapped = ['Sum', ['Map', ['List', 1, 2, 3, 4], 'mapper']];
-    const expr = ce.box(['Add', mapped, mapped]);
+  /** `Sum(Map([1,2,3,4], cb))` twice, over a fresh engine (assigning a symbol
+   * retypes it for the engine's lifetime). */
+  const mappedTwice = (engine: ComputeEngine, cb: string) => {
+    const mapped = ['Sum', ['Map', ['List', 1, 2, 3, 4], cb]];
+    return engine.box(['Add', mapped, mapped]);
+  };
+
+  it('merges two identical `Map(xs, f)` with a PURE named callback', () => {
+    // A named callback used to be opaque outright — invisible to purity
+    // inference (`docs/EFFECTS-MODEL.md`). It is now resolved through the
+    // same transitive admission gate as a call site
+    // (`isAdmissibleUserFnCallee`): a callback whose literal body validates
+    // pure and emission-clean no longer blocks the application.
+    const engine = new ComputeEngine();
+    engine.assign('mapper', engine.parse('x \\mapsto x^2 + 3x + 1'));
+    const expr = mappedTwice(engine, 'mapper');
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    // The mapping itself is emitted ONCE.
+    expect(occurrences(result.code, '.map(')).toBe(1);
+
+    const value = (result.run as (v: Record<string, number>) => number)({});
+    expect(value).toBe(
+      compile(expr, { fallback: false, cse: false }).run!({}) as number
+    );
+    expect(value).toBe(expr.evaluate().N().re);
+  });
+
+  it('does not merge two identical `Map(xs, f)` with a DRAWING named callback', () => {
+    // The relaxation is gated on the callback's body: `f` drawing makes
+    // `Map(xs, f)` impure (G1) and `f` itself inadmissible, so merging — which
+    // would change the draw stream — never happens.
+    const engine = new ComputeEngine();
+    engine.assign('drawer', engine.parse('x \\mapsto x + \\operatorname{Random}()'));
+    const expr = mappedTwice(engine, 'drawer');
     const result = compile(expr, { fallback: false });
 
     expect(result.code).not.toMatch(/_cse\d/);
     // Both applications are still emitted, in full.
     expect(occurrences(result.code, '.map(')).toBe(2);
-    expect((result.run as (v: Record<string, number>) => number)({})).toBe(
-      expr.evaluate().N().re
-    );
+  });
+
+  it('keeps a BUILT-IN operator callback opaque', () => {
+    // The relaxation covers user-function literals only: `Sin` resolves to an
+    // operator definition with no lambda literal, so `Map(xs, Sin)` stays out.
+    const engine = new ComputeEngine();
+    const expr = mappedTwice(engine, 'Sin');
+    const result = compile(expr, { fallback: false });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, '.map(')).toBe(2);
   });
 });
 
@@ -1015,8 +1052,9 @@ describe('COMPILE CSE — draw streams', () => {
     // in v5 and implemented by the Stage 2 inference: `f() := g()` declared
     // BEFORE `g` exists sees an UNRESOLVED named head and infers `{any}` —
     // honest, at the cost of caching for forward references. (Stage 0 marked
-    // it pure; that was hole 3.) Either way G1b excludes user-defined function
-    // applications outright, so two effectful calls can never merge.
+    // it pure; that was hole 3.) The admission gate needs a RESOLVABLE pure
+    // callee body, and `f`'s is impure through `g`, so two effectful calls can
+    // never merge.
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('() \\mapsto g()'));
     engine.assign('g', engine.parse('() \\mapsto \\operatorname{Random}()'));
@@ -1111,7 +1149,10 @@ describe('COMPILE CSE — options', () => {
 /**
  * §5.4 — the harvest boundary. A user-defined function's definition body is
  * emitted once, under its OWN nested harvest scope (own regions and
- * candidates, shared naming counter). The CALL SITES stay ineligible (G1b).
+ * candidates, shared naming counter). The call sites belong to the ENCLOSING
+ * harvest, which admits pure user-function applications too (item 120
+ * follow-up), so a repeated call binds there — independently of, and without
+ * disturbing, the body's own bindings.
  */
 describe('COMPILE CSE — user-function body dedup', () => {
   const engineWithF = () => {
@@ -1120,7 +1161,7 @@ describe('COMPILE CSE — user-function body dedup', () => {
     return engine;
   };
 
-  it('deduplicates inside the emitted `_fn_f`, not across call sites', () => {
+  it('deduplicates inside the emitted `_fn_f`, independently of the call sites', () => {
     const engine = engineWithF();
     // The `Function`-literal route puts the emitted definitions in `code`.
     const expr = engine.parse('t \\mapsto f(t) + f(2t)');
@@ -1132,7 +1173,8 @@ describe('COMPILE CSE — user-function body dedup', () => {
       'const _fn_f = (x) => (() => { const _cse1 = Math.sin(6 * x); ' +
         'return _cse1 + _cse1 + Math.pow(_cse1, 2); })()'
     );
-    // …and the two call sites are still two calls (G1b: never merged).
+    // …and the two call sites are still two calls: `f(t)` and `f(2t)` are
+    // different expressions, so there is nothing to merge.
     expect(occurrences(result.code, '_fn_f(')).toBe(2);
 
     expect((result.run as (t: number) => number)(0.3)).toBeCloseTo(
@@ -1144,14 +1186,25 @@ describe('COMPILE CSE — user-function body dedup', () => {
     );
   });
 
-  it('does not merge two identical call sites', () => {
+  it('binds three identical call sites once', () => {
     const engine = engineWithF();
     const expr = engine.parse('t \\mapsto f(2t) + f(2t) + f(2t)');
     const result = compile(expr, { fallback: false });
 
-    expect(occurrences(result.code, '_fn_f(2 * t)')).toBe(3);
-    // The only temporary is the one inside the definition body.
-    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    // ONE call for the three occurrences (item 120 follow-up), …
+    expect(occurrences(result.code, '_fn_f(2 * t)')).toBe(1);
+    // …plus the body's own binding: two temporaries in the artifact.
+    expect(occurrences(result.code, 'const _cse')).toBe(2);
+    // The body still deduplicates its three `sin(6x)`.
+    expect(occurrences(result.code, 'Math.sin')).toBe(1);
+
+    expect((result.run as (t: number) => number)(0.3)).toBeCloseTo(
+      compile(engineWithF().parse('t \\mapsto f(2t) + f(2t) + f(2t)'), {
+        fallback: false,
+        cse: false,
+      }).run!(0.3) as number,
+      12
+    );
   });
 
   it('keeps the definition value unchanged on the interval-js target', () => {
@@ -1305,6 +1358,212 @@ describe('COMPILE CSE — repeated pure calls in definition bodies (item 120)', 
       .find((l) => l.includes('const _fn_m_1'))!;
     expect(occurrences(def, '_fn_h_1(')).toBe(2);
     expect(def).not.toContain('_cse');
+  });
+});
+
+/**
+ * Item 120, follow-up — the ROOT harvest admits pure user-function
+ * applications on the same terms as a definition-body harvest. A repeated
+ * `f(x+1)` written directly by the caller is exactly the redundant call the
+ * nested harvest already collapsed; the only reason it survived was the
+ * conservative Phase-1 stance, not a soundness argument. The admission gate is
+ * shared, so a drawing callee stays inert here too.
+ */
+describe('COMPILE CSE — repeated pure calls at the ROOT (item 120 follow-up)', () => {
+  it('binds a repeated pure call once (assign route)', () => {
+    const engine = new ComputeEngine();
+    engine.assign('f_2', engine.parse('(t)\\mapsto\\sin(6t)+\\cos(t)'));
+    const expr = engine.parse('f_2(x+1) + f_2(x+1)^2');
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    // The single call is the binding's initializer — no other call site.
+    expect(occurrences(result.code, '_fn_f_2(')).toBe(1);
+    expect(result.code).toContain('const _cse1 = _fn_f_2(');
+
+    expect((result.run as (v: any) => number)({ x: 0.3 })).toBeCloseTo(
+      compile(expr, { fallback: false, cse: false }).run!({
+        x: 0.3,
+      }) as number,
+      12
+    );
+  });
+
+  it('binds a repeated pure call once (coloneq route)', () => {
+    // The `\coloneq` route mints an OPERATOR definition carrying a lambda
+    // literal; the assign route stores a VALUE. Both resolve through
+    // `userFnLiteralBody`.
+    const engine = new ComputeEngine();
+    engine.parse('f_3(t)\\coloneq\\sin(6t)+\\cos(t)').evaluate();
+    const expr = engine.parse('f_3(x+1) + f_3(x+1)^2');
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    expect(occurrences(result.code, '_fn_f_3(')).toBe(1);
+
+    expect((result.run as (v: any) => number)({ x: 0.3 })).toBeCloseTo(
+      compile(expr, { fallback: false, cse: false }).run!({
+        x: 0.3,
+      }) as number,
+      12
+    );
+  });
+
+  it('leaves a repeated DRAWING call as two calls at the root', () => {
+    const engine = new ComputeEngine();
+    engine.assign('d_2', engine.parse('(t)\\mapsto t+\\operatorname{Random}()'));
+    const result = compile(engine.parse('d_2(x+1) + d_2(x+1)^2'), {
+      fallback: false,
+    });
+
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, '_fn_d_2(')).toBe(2);
+  });
+});
+
+/**
+ * The admission gates (`isAdmissibleUserFnCallee` and the named-callback
+ * relaxation) resolve a NAME through engine-GLOBAL lookups
+ * (`lookupDefinition` / `_getSymbolValue`). A name bound by an enclosing
+ * binder — a lambda parameter, a definition parameter — denotes that binding,
+ * not the global, so admitting it would validate the wrong callee's body.
+ * Every such name is refused, fail closed: the harvester collects the binder
+ * names of the tree it walks, and the compiler threads in the parameter names
+ * of the definition whose body a NESTED harvest covers (§5.4).
+ */
+describe('COMPILE CSE — shadowed names are never admitted', () => {
+  it('refuses a call whose HEAD is a lambda parameter', () => {
+    const engine = new ComputeEngine();
+    engine.assign('f', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
+    const result = compile(engine.parse('(f,x)\\mapsto f(x)+f(x)+f(x)'), {
+      fallback: false,
+    });
+
+    // NOTE: the emitted code calls the GLOBAL `f` (`_fn_f`), not the
+    // parameter. Head-position shadowing resolving to the global is
+    // pre-existing, engine-wide behavior shared by the interpreter and the
+    // compiler — it is NOT what this test pins and must not be "fixed" here.
+    // What is pinned is that CSE refuses to merge the three calls: the
+    // harvest cannot know which `f` a call site means, so it declines.
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, '_fn_f(')).toBe(3);
+    // …which is exactly the `cse: false` emission.
+    expect(result.code).toBe(
+      compile(engine.parse('(f,x)\\mapsto f(x)+f(x)+f(x)'), {
+        fallback: false,
+        cse: false,
+      }).code
+    );
+  });
+
+  it('refuses a named-callback OPERAND that is a lambda parameter', () => {
+    const engine = new ComputeEngine();
+    engine.assign('f', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
+    const mapped = ['Sum', ['Map', ['List', 1, 2, 3, 4], 'f']];
+    const expr = engine.box(['Function', ['Add', mapped, mapped], 'f'] as any);
+    const result = compile(expr, { fallback: false });
+
+    // Both traversals survive: the callback `f` is the PARAMETER, and the
+    // global `f` the relaxation would have validated is a different function.
+    expect(result.code).not.toMatch(/_cse\d/);
+    expect(occurrences(result.code, '.map(')).toBe(2);
+
+    // Call counts are preserved: 4 elements × 2 traversals.
+    let calls = 0;
+    const value = (result.run as (cb: (t: number) => number) => number)(
+      (t: number) => {
+        calls += 1;
+        return t;
+      }
+    );
+    expect(calls).toBe(8);
+    expect(value).toBe(20);
+  });
+
+  it('refuses a callee that is a PARAMETER of the definition being emitted', () => {
+    // The nested harvest sees only `q_2`'s BODY, in which `g_2` is a free
+    // symbol — its binder is `q_2`'s parameter list, outside the tree. The
+    // compiler threads those parameter names in as `shadowedNames`.
+    const engine = new ComputeEngine();
+    engine.assign('g_2', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
+    engine.assign(
+      'q_2',
+      engine.box([
+        'Function',
+        ['Add', ['g_2', 't'], ['Power', ['g_2', 't'], 2]],
+        'g_2',
+        't',
+      ])
+    );
+    const result = compile(engine.parse('(h,v)\\mapsto q_2(h,v)'), {
+      fallback: false,
+    });
+
+    const def = result.code.split('\n').find((l) => l.includes('_fn_q_2 ='))!;
+    // Same pre-existing head semantics as above: the two calls emit against
+    // the GLOBAL `_fn_g_2`. The pin is that they are NOT merged.
+    expect(def).not.toMatch(/_cse\d/);
+    expect(occurrences(def, '_fn_g_2(')).toBe(2);
+  });
+
+  it('still merges an UNSHADOWED named callback (canary)', () => {
+    const engine = new ComputeEngine();
+    engine.assign('f', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
+    const mapped = ['Sum', ['Map', ['List', 1, 2, 3, 4], 'f']];
+    const result = compile(engine.box(['Add', mapped, mapped] as any), {
+      fallback: false,
+    });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    expect(occurrences(result.code, '.map(')).toBe(1);
+  });
+});
+
+/**
+ * The named-callback relaxation must be reachable for a callback whose
+ * operand node carries a DECLARED function type. `CountIf(xs, p)` binds `p`
+ * eagerly, so the symbol arrives typed (`(unknown) -> boolean`); testing the
+ * operand's type before its literal would reject it before the relaxation
+ * ever ran, and only the operand's `List` — not the repeated application —
+ * would bind.
+ */
+describe('COMPILE CSE — typed named callback of an eager operator', () => {
+  it('merges repeated `CountIf(xs, p)` with a PURE named predicate', () => {
+    const engine = new ComputeEngine();
+    engine.assign('p_1', engine.parse('(t)\\mapsto t>1'));
+    const countIf = (): any => ['CountIf', ['List', 1, 2, 3, 4, 5], 'p_1'];
+    const expr = engine.box([
+      'Add',
+      ['Square', countIf()],
+      countIf(),
+      countIf(),
+    ] as any);
+    const result = compile(expr, { fallback: false });
+
+    expect(occurrences(result.code, 'const _cse')).toBe(1);
+    // The whole application binds once — not just its collection operand.
+    expect(occurrences(result.code, '.filter(')).toBe(1);
+    expect(result.code).toContain('const _cse1 = ((_f)');
+
+    const off = compile(expr, { fallback: false, cse: false });
+    expect((result.run as (v: any) => number)({})).toBe(
+      (off.run as (v: any) => number)({})
+    );
+  });
+
+  it('keeps a DRAWING typed named callback out', () => {
+    const engine = new ComputeEngine();
+    engine.assign(
+      'p_2',
+      engine.parse('(t)\\mapsto t+\\operatorname{Random}()>1')
+    );
+    const countIf = (): any => ['CountIf', ['List', 1, 2, 3, 4, 5], 'p_2'];
+    const result = compile(
+      engine.box(['Add', ['Square', countIf()], countIf(), countIf()] as any),
+      { fallback: false }
+    );
+
+    expect(occurrences(result.code, '.filter(')).toBe(3);
   });
 });
 

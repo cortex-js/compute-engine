@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+### Improvements
+
+- **Compile-time CSE now merges repeated pure user-function calls everywhere,
+  including named callbacks.** The 0.100.0 admission of pure user-function
+  applications applied only inside emitted definition bodies (where a repeated
+  recursive self-call made compiled recursion exponential); a repeated call at
+  the top level of the compiled expression — `f(x+1) + f(x+1)^2` — still
+  compiled to two calls. Both compiler harvest routes now admit them, behind
+  the same transitive callee-body validation (each level's purity is re-derived
+  against current bindings at compile time, so a callee that draws, writes, or
+  splices caller-supplied source stays un-merged). In addition, a **named**
+  callback that resolves to a validated pure function literal no longer blocks
+  eligibility: two identical `Map(xs, f)` applications with a pure
+  user-defined `f` now compile to one traversal, and the same applies to
+  typed callbacks of eager operators such as `CountIf` (a drawing `f` still
+  compiles to two — draw streams and call counts are preserved; a callback or
+  callee name shadowed by an enclosing parameter is conservatively never
+  merged). Callbacks naming
+  built-in operators (`Map(xs, Sin)`) remain conservatively excluded. Opt out
+  as before with `compile(expr, { cse: false })`.
+
 ## 0.100.3 _2026-08-03_
 
 ### New Features

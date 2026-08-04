@@ -331,18 +331,40 @@ export interface CseHarvestOptions {
 
   /**
    * Admit PURE user-defined function applications as candidates (Tycho item
-   * 120). Off by default — the G1b conservative stance for root harvests —
-   * and set by the NESTED harvest over an emitted `_fn_*` definition body,
-   * where a repeated self-call (`R(i-1,x,y)` twice in one body) makes the
-   * compiled recursion exponential. Purity is enforced by the record-time G1
-   * gate (`node.isPure`, the effects-model projection, which resolves
-   * through the definition and its operands), so an application of a
-   * drawing/writing function stays inert. An admitted application is also
-   * exempt from the size/score heuristics: a call's runtime cost is
+   * 120). Off by default for direct `harvestCse` callers, but set by BOTH
+   * compiler harvest routes — the ROOT harvest (`openCseSession`) and the
+   * NESTED harvest over an emitted `_fn_*` definition body, where a repeated
+   * self-call (`R(i-1,x,y)` twice in one body) makes the compiled recursion
+   * exponential. Purity is enforced by the record-time G1 gate
+   * (`node.isPure`, the effects-model projection, which resolves through the
+   * definition and its operands) plus a fresh per-level re-derivation over
+   * the resolved callee body (`isAdmissibleUserFnCallee`), so an application
+   * of a drawing/writing function stays inert. An admitted application is
+   * also exempt from the size/score heuristics: a call's runtime cost is
    * unrelated to its syntactic size, and binding a twice-occurring call
    * always halves the calls (exponentially so under recursion).
+   *
+   * The flag additionally relaxes the opaque-callable-operand gate for a
+   * bare-symbol callback that resolves to an ADMISSIBLE pure user-function
+   * literal (`Map(xs, f)`), so such an application is no longer excluded on
+   * account of its callback alone. Built-in operator names stay opaque.
    */
   readonly admitPureUserFunctions?: boolean;
+
+  /**
+   * Names that must NEVER be admitted as user-function callees nor relaxed as
+   * named callbacks — the caller's enclosing binder/parameter names. A name
+   * that is bound by an enclosing lambda resolves to that BINDING at run time,
+   * while every lookup this module performs (`lookupDefinition`,
+   * `_getSymbolValue`) is engine-GLOBAL, so a same-named global would be
+   * validated in place of the actual callee. Fail closed instead.
+   *
+   * The harvester unions this set with the binder names it collects from the
+   * harvested tree itself (a lambda whose parameter shadows a global is
+   * visible there); the option covers the names bound OUTSIDE the tree — the
+   * parameters of the definition whose body is being harvested (§5.4).
+   */
+  readonly shadowedNames?: ReadonlySet<string>;
 
   // Thresholds — defaulted from the exported constants; overridable so tests
   // and tuning runs need not restate the pipeline.
@@ -439,6 +461,11 @@ class Harvester {
   private readonly isOverriddenOperator: (name: string) => boolean;
   private readonly isStringVar: (name: string) => boolean;
   private readonly admitPureUserFunctions: boolean;
+  /** Names no admission decision may resolve globally — see
+   * `CseHarvestOptions.shadowedNames`. Filled once, in a prepass, BEFORE any
+   * eligibility check runs: the admission memos are name-keyed, so the set
+   * must be fixed for the whole harvest. */
+  private readonly shadowedNames: Set<string>;
   private readonly minSize: number;
   private readonly minScore: number;
   private readonly maxBindingsPerRegion: number;
@@ -482,6 +509,7 @@ class Harvester {
     this.isOverriddenOperator = options.isOverriddenOperator ?? (() => false);
     this.isStringVar = options.isStringVar ?? (() => false);
     this.admitPureUserFunctions = options.admitPureUserFunctions === true;
+    this.shadowedNames = new Set(options.shadowedNames ?? []);
     this.minSize = options.minSize ?? CSE_MIN_SIZE;
     this.minScore = options.minScore ?? CSE_MIN_SCORE;
     this.maxBindingsPerRegion =
@@ -491,6 +519,8 @@ class Harvester {
   }
 
   run(): CseHarvest {
+    this.collectShadowedNames(this.root, new Set<Expression>());
+
     const rootRegion = this.createRegion(undefined, 'root', false, undefined, [
       // no bound names at the root
     ]);
@@ -517,6 +547,34 @@ class Harvester {
         mergedRegionSites: this.mergedRegionSites,
       },
     };
+  }
+
+  /**
+   * Collect every binder-bound name occurring ANYWHERE in the tree into
+   * {@link shadowedNames} — the same two sources the walk uses to compute a
+   * region's `boundNames` (a `Function` literal's parameters, a `scoped:`
+   * definition's binding sites; see `walkOperands`/`operandPlans`).
+   *
+   * Deliberately a prepass rather than an incremental collection during the
+   * main walk: eligibility (and with it `isAdmissibleUserFnCallee`, whose
+   * verdicts are memoized per NAME) runs at node exit, so a name bound in a
+   * region visited later must already be known when the first verdict for it
+   * is cached. Whole-tree, not scope-accurate: over-approximating the shadow
+   * set only ever refuses a merge.
+   */
+  private collectShadowedNames(node: Expression, seen: Set<Expression>): void {
+    if (!isFunction(node) || seen.has(node)) return;
+    seen.add(node);
+    if (node.operator === 'Function') {
+      for (const name of functionLiteralParamNames(node))
+        this.shadowedNames.add(name);
+    } else {
+      const def = node.operatorDefinition;
+      if (def?.scoped === true)
+        for (const name of binderSplit(def, node).boundNames)
+          this.shadowedNames.add(name);
+    }
+    for (const op of node.ops) this.collectShadowedNames(op, seen);
   }
 
   // -------------------------------------------------------------------------
@@ -971,7 +1029,7 @@ class Harvester {
    *   engine-authored emission, the same trust class as the built-in table
    *   mappings;
    * - a user-defined function application — unless the harvest opts in via
-   *   `admitPureUserFunctions` (nested definition-body harvests, item 120),
+   *   `admitPureUserFunctions` (both compiler harvest routes, item 120),
    *   in which case the resolved callee's BODY is validated transitively
    *   (`isAdmissibleUserFnCallee`): the same emission-purity gates plus a
    *   fresh per-level semantic-purity check, because the application node's
@@ -1009,12 +1067,11 @@ class Harvester {
     // handler is exempt (see `hasCallerCompileHandler`).
     if (this.hasCallerCompileHandler(node)) return false;
     // A user-defined function application is admissible only where the
-    // harvest opts in (`admitPureUserFunctions` — nested definition-body
-    // harvests, Tycho item 120) AND its resolved callee's body validates
+    // harvest opts in (`admitPureUserFunctions` — both compiler harvest
+    // routes, Tycho item 120) AND its resolved callee's body validates
     // transitively (`isAdmissibleUserFnCallee` — the call site alone proves
-    // nothing about what the emitted body splices or draws). Root harvests
-    // keep the conservative Phase-1 stance. Checked BEFORE the
-    // fixed-built-in gate below: the declare-then-assign route stores the
+    // nothing about what the emitted body splices or draws). Checked BEFORE
+    // the fixed-built-in gate below: the declare-then-assign route stores the
     // lambda as a VALUE definition, so its application nodes carry no
     // *operator* definition — the gate below would reject them before this
     // clause ever admitted one.
@@ -1136,6 +1193,12 @@ class Harvester {
    * is final and memoizes.
    */
   private isAdmissibleUserFnCallee(id: string): boolean {
+    // A name bound by an enclosing binder/parameter resolves to that binding
+    // at run time, but every lookup below is engine-GLOBAL: validating the
+    // same-named global would answer a question about the wrong callee. Fail
+    // closed (§5.2). The set is fixed for the whole harvest, so the verdict is
+    // still name-memoizable.
+    if (this.shadowedNames.has(id)) return false;
     const cached = this.calleeVerdictMemo.get(id);
     if (cached !== undefined) return cached;
     if (this.calleeInProgress.has(id)) {
@@ -1270,17 +1333,54 @@ class Harvester {
     // large candidate-free trees. Engine state is constant during a harvest.
     const cached = this.opaqueOperandMemo.get(operand);
     if (cached !== undefined) return cached;
+    const before = this.calleeNeutralEdges;
     const result = this.computeOpaqueCallableOperand(operand);
-    this.opaqueOperandMemo.set(operand, result);
+    // A verdict that leaned on a neutral (re-entrant) callee edge — reachable
+    // through the named-callback relaxation below — is provisional, same
+    // discipline as `calleeVerdictMemo`.
+    if (this.calleeNeutralEdges === before)
+      this.opaqueOperandMemo.set(operand, result);
     return result;
   }
 
   private computeOpaqueCallableOperand(operand: Expression): boolean {
     if (isFunction(operand, 'Function')) return false;
-    if (operand.type.matches('function')) return true;
-    if (!isSymbol(operand)) return false;
+    if (!isSymbol(operand)) return operand.type.matches('function');
 
     const name = operand.symbol;
+    // A NAMED callback that resolves to a user-function LITERAL is no longer
+    // invisible where the harvest admits pure user functions: the same
+    // transitive gate applied to a call site (`isAdmissibleUserFnCallee` —
+    // fresh per-level `body.isPure` plus the emission-purity scan) answers
+    // "what does `f` do?" for `Map(xs, f)` too, and G1 (`node.isPure`) still
+    // gates the whole application. Tested BEFORE the type gate below: a
+    // DECLARED callback (`CountIf(xs, p)` with `p: (number) -> boolean`)
+    // carries a function-matching type on the operand node itself, which
+    // would otherwise reject it before its literal was ever consulted. A
+    // SHADOWED name resolves to an enclosing binding, not to the global this
+    // would validate, so it is refused; a symbol resolving to a BUILT-IN
+    // operator definition has no literal and stays opaque.
+    if (
+      this.admitPureUserFunctions &&
+      !this.shadowedNames.has(name) &&
+      this.userFnLiteralBody(name) !== undefined &&
+      this.isAdmissibleUserFnCallee(name)
+    )
+      return false;
+
+    if (operand.type.matches('function')) return true;
+    return this.opaqueSymbolDefinition(name);
+  }
+
+  /**
+   * The DEFINITION-based half of the opaque-operand test for a bare symbol —
+   * it depends on nothing but the name and engine state, both constant during
+   * a harvest. Unlike the whole classification (which also consults the
+   * OPERAND NODE's type, and the shadow set) it is therefore safely memoizable
+   * per name; and it never consults `isAdmissibleUserFnCallee`, so no
+   * neutral-edge guard is needed on the write.
+   */
+  private opaqueSymbolDefinition(name: string): boolean {
     const cached = this.opaqueSymbolMemo.get(name);
     if (cached !== undefined) return cached;
     const def = this.engine.lookupDefinition(name);
@@ -1537,7 +1637,10 @@ function binderSplit(
 }
 
 /** The parameter names of a `Function` literal (`['Function', body, …params]`),
- * unwrapping a `Typed` ascription. Diagnostic only. */
+ * unwrapping a `Typed` ascription. Load-bearing for admission: the shadow-name
+ * prepass (`collectShadowedNames`) refuses these names as user-function
+ * callees and named callbacks, and region `boundNames` keep candidate matching
+ * capture-sound. */
 function functionLiteralParamNames(
   node: Expression & FunctionInterface
 ): string[] {

@@ -102,12 +102,22 @@ own design doc before any implementation.
   indices) makes binding placement clause-position-dependent; bounds are
   small in practice. v2 (§11).
 - **User-defined function applications inside candidates**: ineligible in
-  Phase 1 (§5.2 G1b). Purity inference for user definitions is documented
+  Phase 1 (§5.2 G1b). Purity inference for user definitions was documented
   **dependency-order-unsound** (`docs/EFFECTS-MODEL.md` §"Dependency-order
   inference is unsound": `f() := g()` defined before an effectful `g` stays
-  marked pure), so `isPure` cannot be trusted for them. A sound transitive
-  effect-row check is v2 (§11). This costs little: per §1, Tycho's
-  duplication arrives pre-inlined as built-in operators.
+  marked pure), so `isPure` could not be trusted for them. This costs
+  little: per §1, Tycho's duplication arrives pre-inlined as built-in
+  operators. **Amended 2026-08-01 (shipped 0.100.0)**: the effects model's
+  Stage 2 closed the soundness gap (unresolved heads infer `{any}`;
+  `effectsOf` resolves through bindings), and NESTED definition-body
+  harvests began admitting pure user-function applications behind a
+  transitive callee-body validation — the `admitPureUserFunctions` opt-in,
+  §5.2. **Amended 2026-08-03**: after a measured pass (admission is inert
+  on user-fn-free trees; per-callee validation ≈ 0.02 ms, memoized per
+  name per harvest), ROOT harvests admit them too, and a NAMED callback
+  resolving to an admissible pure literal no longer blocks eligibility
+  (§5.2). Built-in named callbacks (`Map(xs, Sin)`) remain opaque — a
+  documented residual (§11).
 - **Cross-region and cross-term hoisting** (PRE, LICM, sharing across
   unrolled terms): v2 (§11).
 - **Alpha-invariant merging**: `Sum(x², x)` and `Sum(y², y)` do not merge.
@@ -374,28 +384,87 @@ interval). The candidate pipeline, in order:
      beneath it evaluates, so those occurrences do not count toward any
      candidate);
    - any subtree containing a **user-defined function application** —
-     purity inference for user definitions is dependency-order-unsound
-     (`docs/EFFECTS-MODEL.md` §"Dependency-order inference is unsound"),
-     so a stale `pure` marking could merge effectful calls. v2 restores
-     these behind a sound transitive effect-row check (§11);
+     UNLESS the harvest opts in via `admitPureUserFunctions`
+     (**amended 2026-08-01, Tycho item 120; shipped 0.100.0**). Original
+     rationale: purity inference for user definitions was
+     dependency-order-unsound (`docs/EFFECTS-MODEL.md` §"Dependency-order
+     inference is unsound"), so a stale `pure` marking could merge
+     effectful calls. Effects Stage 2 closed that (unresolved heads infer
+     `{any}`; `effectsOf` resolves callbacks through bindings). Admission
+     is set by BOTH compiler harvest routes (**amended 2026-08-03** after
+     the measured pass): the ROOT harvest (`openCseSession`) and the
+     NESTED harvest over an emitted `_fn_*` definition body (§5.4), where
+     a repeated self-call makes compiled recursion exponential; direct
+     `harvestCse` callers default to off. An admitted application's
+     resolved callee BODY
+     is validated transitively (`Harvester.isAdmissibleUserFnCallee`): the
+     same emission-purity gates as this list, plus a fresh per-level
+     semantic-purity check — the application node's own `isPure` can be
+     install-time stale one level removed. Recursion through definitions
+     is handled at the NAME level (in-flight callee → neutral edge;
+     verdicts leaning on a neutral edge stay provisional, uncached).
+     Admitted applications are exempt from the G4 size/score heuristics —
+     a call's runtime cost is unrelated to its syntactic size, and binding
+     a twice-occurring call always halves the calls. The declare-then-
+     assign route stores the lambda as a VALUE definition, so the
+     admission check runs BEFORE the fixed-built-in gate below (those
+     application nodes carry no operator definition);
    - any application whose operator position is not a fixed built-in
      (e.g. `Apply` with a symbolic head, a parameter used as a function) —
      the EFFECTS-MODEL higher-order optimism;
-   - any subtree containing a **function-valued operand that is not an
-     inline `Function` literal** — a named callback, a parameter, or an
-     opaque function value handed to a higher-order built-in
-     (`Map(xs, f)`, `Filter`, `Reduce`, `Sort` with a key, …). The head is
-     a fixed built-in, so the previous two bullets don't fire, but named
-     callbacks are **invisible to purity inference**
-     (EFFECTS-MODEL §"Current state"): `Map(xs, f)` can report pure while
-     `f` draws or writes, and merging two such applications would change
-     draw streams or callback invocation counts. The rule is derived from
-     the operand (function-typed and not a literal), not from an operator
-     list. An inline `Function` literal is fine — its body is ordinary
-     harvestable structure that passes these gates recursively.
-   Net: Phase 1 candidates are built-in-operator subtrees whose callable
-   operands, if any, are inline literals — which is what the corpus
-   consists of (§1).
+   - any subtree containing a **function-valued operand that is neither an
+     inline `Function` literal nor a name resolving to an admissible pure
+     user-function literal** — a parameter, an opaque function value, or a
+     built-in operator name handed to a higher-order built-in
+     (`Map(xs, Sin)`, `Sort` with a built-in key, …). The original blanket
+     exclusion of every named callback existed because they were
+     **invisible to purity inference**: `Map(xs, f)` could report pure
+     while `f` draws or writes, and merging two such applications would
+     change draw streams or callback invocation counts. **Amended
+     2026-08-03**: where the harvest admits pure user functions, a
+     bare-symbol callback resolving to a user-function literal is answered
+     by the SAME transitive gate as a call site
+     (`isAdmissibleUserFnCallee` — fresh per-level `body.isPure` plus the
+     emission-purity scan, in `computeOpaqueCallableOperand`), and G1
+     (`node.isPure`, which since effects Stage 2 resolves the callback
+     through its current binding) still gates the whole application — so
+     two identical `Map(xs, f)` with a validated pure `f` now merge, while
+     a drawing `f` stays un-merged. Bare symbols are classified through
+     this relaxed path BEFORE the function-type check, so it reaches
+     typed callbacks of EAGER higher-order operators (`CountIf(xs, p)`)
+     as well as held lazy operands. The rule remains derived from the
+     operand, not from an operator list. An inline `Function` literal is
+     fine — its body is ordinary harvestable structure that passes these
+     gates recursively. Built-in operator names stay opaque (no literal
+     body to validate) — extending the built-in exemption's trust argument
+     to them is v2 (§11).
+
+     **Shadow guard (review round, 2026-08-03).** Name-based resolution
+     (`lookupDefinition`/`_getSymbolValue`) sees the engine scope at
+     harvest time, not the lexical scope of the tree being harvested — a
+     `Function`-literal parameter named like an admissible global would be
+     admitted against the GLOBAL's body while emission references the
+     parameter (a runtime value that may be impure), changing call counts.
+     Admission therefore fails closed on shadowed names: a prepass
+     (`collectShadowedNames`) collects every binder-bound name in the
+     harvested tree (`Function` params via `functionLiteralParamNames`,
+     `scoped:` binder names via `binderSplit`), unioned with the caller's
+     `CseHarvestOptions.shadowedNames` — the nested definition-body
+     harvest threads the emitted definition's parameter names through it,
+     since those params are not binder nodes inside the harvested body
+     tree. `isAdmissibleUserFnCallee` and the callback relaxation both
+     refuse any name in the set. The set is whole-tree, not
+     scope-accurate — a name bound by any binder anywhere in the tree is
+     refused everywhere in that harvest — which only ever declines a
+     merge (same conservatism class as G3's any-assign-anywhere). Note:
+     HEAD-position resolution of a shadowed name to the global is
+     pre-existing engine-wide semantics (interpreter and compiler agree,
+     with and without CSE) and is deliberately not addressed here; the
+     guard just keeps CSE from binding through such names at all.
+   Net: candidates are built-in-operator subtrees plus validated pure
+   user-function applications; callable operands are inline literals or
+   names resolving to validated pure user-function literals
+   (2026-08-03; the 2026-08-01 item-120 round covered definition bodies).
 3. **G2 — same-region rule.** ≥ 2 occurrences attributed to the **same
    region**; binds at that region's top; occurrences elsewhere emit inline
    (or join that region's own candidate). No binding crosses a region
@@ -442,8 +511,12 @@ Emission-time trees:
   body gets its own nested harvest scope in the same session (own regions
   and candidates; shared naming context so names never collide across the
   artifact). Duplication inside a called definition is recovered once, in
-  the emitted named function. (The *call sites* remain CSE-ineligible per
-  G1b; the *body interior* is built-in-operator code and fully eligible.)
+  the emitted named function. The nested harvest passes
+  `admitPureUserFunctions: true` (item 120, §5.2), so repeated PURE
+  user-function calls inside a body — notably a recursive body's repeated
+  self-call — are also bound. Since 2026-08-03 the ROOT harvest passes the
+  flag too (`openCseSession`), so repeated pure call sites bind at every
+  level.
 - **Unrolled `Sum`/`Product` terms**: region instances, §6.1.
 - **`Match` plan closures** and other synthesized structure (destructuring
   desugar): not harvested; `Match` is inert (§2).
@@ -587,7 +660,7 @@ visibility and evaluate-once).
 | --- | --- | --- | --- |
 | dedup (single occurrence of repeated code + value parity) | value+shape | value+shape | shape+pyexec |
 | purity / draw-stream (`WithRandomSeed`, cse on/off/interpreter; EFFECTS-MODEL dependency-order counterexample) | value | — | — |
-| emission purity (custom `functions`/`operators`/string-`vars` → no CSE through OR below the mapping; user-fn application ineligible; **named-callback regression: two identical `Map(xs, f)` with a drawing `f` NOT merged, inline-literal callback IS eligible**; splice containing `_cse1` doesn't collide) | value+shape | — | shape |
+| emission purity (custom `functions`/`operators`/string-`vars` → no CSE through OR below the mapping; **named callbacks (2026-08-03): two identical `Map(xs, f)` with a PURE user `f` MERGE, a drawing `f` does NOT, a built-in callback (`Map(xs, Sin)`) stays opaque**; inline-literal callback eligible; splice containing `_cse1` doesn't collide) | value+shape | — | shape |
 | capture (same-named subtree under different binders incl. `Integrate`, `D`; in/out of binder) | value+shape | shape | shape |
 | conditionality (arm-only candidates not hoisted; Coalesce default; chained-relation tail; §7.4 guard probe at `x = 0`) — one test per `LAZY_OPERANDS` entry | value+shape | shape | shape |
 | `Match` inert (JS: no `_cse` inside Match emission; interval-js/python: existing fail-closed contract asserted) | shape | shape | shape |
@@ -603,7 +676,11 @@ visibility and evaluate-once).
 | harvest budget (synthetic hash-collision bucket exhausts `CSE_MAX_VERIFY_NODES_PER_BUCKET` → dropped whole, output identical to `cse: false`, deterministic) | shape | — | — |
 | DAG lazy edges (one node object in two differently-lazy operand positions of one construct — the `compileOp` index wiring) | value+shape | shape | shape |
 | non-scalar aliasing (helper-mutation audit pin) | value | value | — |
-| user-function body dedup (duplicated subtree inside a called `f(x) := …` definition; call sites not merged) | value+shape | shape | — |
+| user-function body dedup (duplicated subtree inside a called `f(x) := …` definition; identical ROOT call sites bind once since 2026-08-03) | value+shape | shape | — |
+| pure calls in definition bodies (item 120, `admitPureUserFunctions`: recursive self-call bound once INSIDE the conditional arm, depth-20 linear; drawing callee stays two calls; non-recursive coloneq body; callee body splicing a string-`vars` entry stays inert; stale installed signature — callee reassigned to draw — re-derived against current bindings) | value+shape | — | — |
+| pure calls at the ROOT (2026-08-03: repeated pure call binds once via assign AND coloneq routes; repeated drawing call stays two calls; forward-reference pin unchanged) | value+shape | — | — |
+| shadow guard (2026-08-03 review round: shadowed HEAD at root never binds — byte-equal to `cse: false`; shadowed OPERAND callback stays two traversals with call count preserved; nested-harvest param shadowing — `_fn_` body with a param named like an admissible global emits no `_cse`; unshadowed callback still merges) | value+shape | — | — |
+| eager-operator typed named callback (2026-08-03: repeated `CountIf(xs, purePredicate)` binds once; drawing predicate stays unmerged) | value+shape | — | — |
 
 ### Performance and complexity
 
@@ -742,10 +819,28 @@ recorded so they aren't rediscovered:
   a target whose `boundVars` the enclosing instance does not describe, so
   the blind-instance guard degrades it to the pre-CSE emission: sound, at
   the cost of a wasted harvest.
-- User-defined function applications as candidates, behind a sound
-  transitive effect-row check (per `docs/EFFECTS-MODEL.md`).
-- Named/opaque callbacks to higher-order built-ins, behind sound callback
-  effect projection (same EFFECTS-MODEL dependency).
+- ~~User-defined function applications as candidates, behind a sound
+  transitive effect-row check (per `docs/EFFECTS-MODEL.md`).~~ **Landed:
+  NESTED definition-body harvests 2026-08-01 (item 120, shipped 0.100.0);
+  ROOT harvests 2026-08-03 after the measured pass** (admission is inert
+  on user-fn-free trees, +0.9% ≈ noise at 3.6k edges; per-callee
+  transitive validation ≈ 0.02 ms, memoized per name per harvest; the
+  per-harvest memos are sound because a harvest is synchronous and engine
+  state cannot change mid-harvest — there is no cross-compilation harvest
+  cache. Staleness rule: admission never trusts a node-level purity
+  marking across a definition boundary — each level re-derives against
+  CURRENT bindings at harvest time; post-compile reassignment is the
+  compile-wide snapshot policy, since emitted bodies are baked into the
+  artifact regardless of merging). See §5.2.
+- ~~Named/opaque callbacks to higher-order built-ins, behind sound
+  callback effect projection.~~ **Landed for user-function literals
+  2026-08-03** (§5.2: `computeOpaqueCallableOperand` resolves a
+  bare-symbol callback through `isAdmissibleUserFnCallee`). Remaining
+  residual: callbacks naming BUILT-IN operators (`Map(xs, Sin)`) stay
+  opaque — admitting them needs only the built-in exemption's trust
+  argument extended to operand position, but no corpus witness demands
+  it yet. Parameters and opaque function values stay excluded (nothing
+  to validate).
 - Per-mapping purity attestation for caller-supplied `functions`, and a
   target-level emission-purity attestation re-enabling CSE on direct
   custom targets (§4.2).

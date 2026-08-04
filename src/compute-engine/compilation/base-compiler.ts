@@ -4764,6 +4764,7 @@ export class BaseCompiler {
         const body = BaseCompiler.withNestedCseHarvest(
           bodyExpr,
           bodyTarget,
+          params,
           () => BaseCompiler.compile(bodyExpr, bodyTarget)
         );
         registry.defs.set(
@@ -4949,6 +4950,7 @@ export class BaseCompiler {
         const compiled = BaseCompiler.withNestedCseHarvest(
           bodyExpr,
           bodyTarget,
+          params,
           () => BaseCompiler.compile(bodyExpr, bodyTarget)
         );
         const body = coerce ? coerce(bodyExpr, compiled) : compiled;
@@ -5642,6 +5644,12 @@ export class BaseCompiler {
     const harvestOptions: CseHarvestOptions = {
       isOverriddenOperator: options.isOverriddenOperator,
       isStringVar: options.isStringVar,
+      // PURE user-function applications are admitted at the root too (item 120
+      // follow-up): a repeated `f(x+1)` at the root is the same redundant call
+      // as one inside a definition body. Admission validates the resolved
+      // callee's BODY transitively (`isAdmissibleUserFnCallee`), and G1
+      // (`node.isPure`) independently keeps a drawing/writing call inert.
+      admitPureUserFunctions: true,
     };
     const harvest = harvestCse(expr, harvestOptions);
     BaseCompiler.mergeUsedNames(target, harvest.usedNames);
@@ -5873,23 +5881,36 @@ export class BaseCompiler {
    * harvest scope: own regions and candidates, same session and naming
    * counter (so temps never collide across the artifact), and the same G1b
    * provenance predicates the boundary recorded.
+   *
+   * `shadowedNames` are the emitted definition's PARAMETER names. They are
+   * bound by the definition, not by anything inside the body tree, so the
+   * harvester's own binder prepass cannot see them — yet the harvest's
+   * admission lookups are engine-global, so without them a parameter that
+   * happens to share a global's name would be validated against that global.
    */
   private static withNestedCseHarvest(
     expr: Expression,
     target: CompileTarget<Expression>,
+    shadowedNames: ReadonlyArray<string>,
     fn: () => TargetSource
   ): TargetSource {
     const session = target.cse;
     if (session === undefined || !session.enabled) return fn();
     const outer = session.harvest;
-    // Definition bodies additionally admit PURE user-function applications as
-    // candidates (item 120): a repeated self-call in a recursive body —
+    // Definition bodies admit PURE user-function applications as candidates
+    // (item 120): a repeated self-call in a recursive body —
     // `R(i-1,x,y) + 0.5·S(x,y,R(i-1,x,y))` — makes the compiled recursion
     // exponential (2^depth calls), and binding it once per level collapses
-    // that to linear. Root harvests keep the conservative Phase-1 stance.
+    // that to linear. Root harvests admit them too (see `openCseSession`), so
+    // both routes now pass the flag; it is restated here because a nested
+    // harvest may inherit options from a caller-built session.
     const nested = harvestCse(expr, {
       ...(session.harvestOptions ?? {}),
       admitPureUserFunctions: true,
+      shadowedNames: new Set([
+        ...(session.harvestOptions?.shadowedNames ?? []),
+        ...shadowedNames,
+      ]),
     });
     BaseCompiler.mergeUsedNames(target, nested.usedNames);
     session.harvest = nested;
