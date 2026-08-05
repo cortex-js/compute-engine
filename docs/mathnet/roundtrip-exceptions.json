@@ -4,14 +4,6 @@
  "engineVersion": "0.100.3",
  "lastChecked": "2026-08-05",
  "classes": {
-  "continuation-placeholder-multiply-regroups": {
-   "reason": "bug",
-   "note": "A canonical Multiply whose operands include ContinuationPlaceholder serializes with MIXED separators - invisible juxtaposition between the literal factors, explicit \\times around the ellipsis (`ab\\times\\dots\\times z`). On reparse the juxtaposed run binds tighter and becomes a nested Multiply. Repro: ce.parse('a\\\\cdot b\\\\cdot\\\\dots\\\\cdot z') -> 'ab\\\\times\\\\dots\\\\times z' -> ['Multiply',['Multiply','a','b'],'ContinuationPlaceholder','z']. The Add form ('a+b+\\\\dots+z') round-trips, so this is Multiply-specific."
-  },
-  "continuation-placeholder-fraction-aggregation": {
-   "reason": "bug",
-   "note": "A Multiply of Rationals containing a ContinuationPlaceholder is aggregated into one \\frac, moving numerators and denominators across the ellipsis: Multiply(3/2, 6/5, ContinuationPlaceholder, X) serializes as \\frac{3\\times6\\times\\dots\\times X}{2\\times5}, which reparses with 3*6/(2*5) folded to 9/5."
-  },
   "fraction-fallback-inverse-power": {
    "reason": "bug",
    "note": "When the denominator itself contains a fraction (or an ellipsis), the serializer declines \\frac and falls back to `(a)(b)^{-1}`, which reparses as Multiply(a, Divide(1,b)) rather than Divide(a,b). Repro: ce.parse('\\\\frac{100}{\\\\sin(\\\\frac{5\\\\pi}{9})}') -> '(100)(\\\\sin(\\\\frac{5\\\\pi}{9}))^{-1}'. Note the numerator-1 case is safe: '\\\\frac{1}{\\\\sin(\\\\frac{\\\\pi}{2})}' -> '(\\\\sin(...))^{-1}' reparses as Divide(1,...)."
@@ -19,14 +11,6 @@
   "quotient-factor-merged-into-fraction": {
    "reason": "bug",
    "note": "A Multiply with a Divide/reciprocal factor is emitted as ONE fraction over the whole product, so the reparse is a Divide of the product instead of a Multiply. Repros: '\\\\frac{1}{2}\\\\cdot\\\\frac{1}{a+x}' -> '\\\\frac{1}{2(a+x)}'; '(-1)^{m}\\\\frac{1}{a}' -> '\\\\frac{(-1)^{m}}{a}'. CANDIDATE documented-lossy: the rewrite is value-preserving prettification; it fails only the structural tier. Needs a maintainer ruling before it is either fixed or reclassified."
-  },
-  "singleton-tuple-dropped": {
-   "reason": "bug",
-   "note": "A one-operand Tuple serializes as `(x)`, which reparses as plain `x` - the tuple-ness is lost. Repro: ce.parse('x=1,') -> ['Tuple',['Equal','x',1]] -> '(x=1)' -> ['Equal','x',1]. (Trailing commas in the corpus are the usual source of singleton Tuples.)"
-  },
-  "operator-symbol-serializes-empty": {
-   "reason": "bug",
-   "note": "An operator name used as a VALUE serializes to the empty string, silently deleting the operand. Repro: ce.parse('(A,+)') -> ['Tuple','A','Add'] -> '(A,)' -> ['Tuple','A']. Same for Multiply/\\\\cdot. Worst class in the list: the LaTeX round trip loses data outright."
   },
   "at-over-declared-set-base": {
    "reason": "bug",
@@ -36,21 +20,9 @@
    "reason": "bug",
    "note": "The parser maps the literal `i` to ['Complex',0,1] but `\\\\imaginaryI` to the symbol 'ImaginaryUnit'; the serializer emits `\\\\imaginaryI` for both. Repro: ce.parse('i') -> ['Complex',0,1] -> '\\\\imaginaryI' -> 'ImaginaryUnit'. Two canonical spellings of the same value; canonicalization should pick one."
   },
-  "prime-serialization-not-delimited": {
-   "reason": "bug",
-   "note": "Prime serializes as `A^\\\\prime` with no brace/space, so an immediately following letter is swallowed into the command name: `\\\\angle BA'C` -> `\\\\angle BA^\\\\primeC` -> Error 'unexpected-command' on '\\\\primeC'. `A'` in isolation round-trips; the defect needs a letter directly after the prime."
-  },
   "angle-assign-lhs-not-reparsable": {
    "reason": "bug",
    "note": "`\\\\varangle Z Y X := ...` boxes as Assign('Angle', Function(...)) and reserializes with a parenthesized argument list on the LHS (`\\\\angle(Z, Y, X)\\\\coloneq...`), which the Assign parselet rejects with 'expected-a-symbol'."
-  },
-  "forall-body-not-delimited": {
-   "reason": "bug",
-   "note": "`\\\\forall <cond>, <body>` is serialized with NO delimiters around the body, so on reparse the body is truncated at the first lower-precedence operator and the rest reassociates above the ForAll. Repro: ce.parse('a_0=9 \\\\text{ and } a_1=3 \\\\text{ for all } k \\\\ge 0') -> ForAll(k>=0, And(a_0=9, a_1=3)) -> '\\\\forall k\\\\ge0, a_0=9\\\\land a_1=3' -> And(a_1=3, ForAll(k>=0, a_0=9))."
-  },
-  "forall-held-body-not-canonicalized": {
-   "reason": "bug",
-   "note": "A Tuple in a ForAll body reserializes as `(a,b,c)` and comes back as Delimiter(Sequence(...)) instead of Tuple - the held/lazy body is never canonicalized on the reparse route. Repro: ce.parse('a_0=1, a_1=3 \\\\text{ for all } n \\\\ge 1') -> ForAll(n>=1, Tuple(...)) -> '\\\\forall n\\\\ge1, (a_0=1,a_1=3)' -> ForAll(n>=1, Delimiter(Sequence(...))). The same corpus rows also retain HorizontalSpacing (\\\\quad) inside the body."
   },
   "builtin-head-vs-value-def-drift": {
    "reason": "bug",
@@ -75,8 +47,8 @@
   },
   {
    "latex": "(\\mathbb{Z}_n, +, \\cdot)",
-   "reserialized": "(\\Z[n],,)",
-   "mismatch": "[\"Tuple\",[\"At\",\"Integers\",\"n\"],\"Add\",\"Multiply\"]  ≠  [\"Tuple\",[\"At\",[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'dictionary | indexed_collection'\",\"'set<finite_integer>'\"]],\"n\"]]",
+   "reserialized": "(\\Z[n],\\mathrm{Add},\\mathrm{Multiply})",
+   "mismatch": "[\"Tuple\",[\"At\",\"Integers\",\"n\"],\"Add\",\"Multiply\"]  ≠  [\"Tuple\",[\"At\",[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'dictionary | indexed_collection'\",\"'set<finite_integer>'\"]],\"n\"],\"Add\",\"Multiply\"]",
    "class": "at-over-declared-set-base",
    "reason": "bug",
    "note": "Also exhibits operator-symbol-serializes-empty (the `+`/`\\cdot` operands vanish)."
@@ -136,62 +108,6 @@
    "note": "Also exhibits Multiply(-1, ...) reserializing as `-(...)` and reparsing as Negate(...)."
   },
   {
-   "latex": "\\lim_{n \\rightarrow \\infty} \\left( \\left(1+\\frac{1}{2}\\right) \\cdot \\left(1+\\frac{1}{2+3}\\right) \\cdot \\ldots \\cdot \\left(1+\\frac{1}{2+3+\\ldots+n}\\right) \\right).",
-   "reserialized": "\\lim_{n\\to\\infty}\\frac{3\\times6\\times\\dots\\times(\\frac{1}{2+3+\\dots+n}+1)}{2\\times5}",
-   "mismatch": "[\"Limit\",[\"Function\",[\"Block\",[\"Multiply\",[\"Rational\",3,2],[\"Rational\",6,5],\"ContinuationPlaceholder\",[\"Add\",[\"Divide\",1,[\"Add\",2,3,\"ContinuationPlaceholder\",\"n\"]],1]]],\"n\"],\"PositiveInfinity\"]  ≠  [\"Limit\",[\"Function\",[\"Block\",[\"Multiply\",[\"Rational\",9,5],\"ContinuationPlaceholder\",[\"Add\",[\"Divide\",1,[\"Add\",2,3,\"ContinuationPlaceholder\",\"n\"]],1]]],\"n\"],\"PositiveInfinity\"]",
-   "class": "continuation-placeholder-fraction-aggregation",
-   "reason": "bug"
-  },
-  {
-   "latex": "(2!+2)(3!+3)(4!+2)(5!+3) \\cdots (2018!+2)(2019!+3)",
-   "reserialized": "(2+2!)(3+3!)(2+4!)(3+5!)\\times\\dots\\times(2+2\\,018!)(3+2\\,019!)",
-   "mismatch": "[\"Multiply\",[\"Add\",2,[\"Factorial\",2]],[\"Add\",3,[\"Factorial\",3]],[\"Add\",2,[\"Factorial\",4]],[\"Add\",3,[\"Factorial\",5]],\"ContinuationPlaceholder\",[\"Add\",2,[\"Factorial\",2018]],[\"Add\",3,[\"Factorial\",2019]]]  ≠  [\"Multiply\",[\"Multiply\",[\"Add\",2,[\"Factorial\",2]],[\"Add\",2,[\"Factorial\",4]],[\"Add\",3,[\"Factorial\",3]],[\"Add\",3,[\"Factorial\",5]]],\"ContinuationPlaceholder\",[\"Multiply\",[\"Add\",2,[\"Factorial\",2018]],[\"Add\",3,[\"Factorial\",2…",
-   "class": "continuation-placeholder-multiply-regroups",
-   "reason": "bug"
-  },
-  {
-   "latex": "\\lim_{n \\rightarrow \\infty} \\left(2 a_{n} - a_{1} - a_{2}\\right) \\left(2 a_{n} - a_{2} - a_{3}\\right) \\cdots \\left(2 a_{n} - a_{n-2} - a_{n-1}\\right) \\left(2 a_{n} - a_{n-1} - a_{1}\\right)",
-   "reserialized": "\\lim_{n\\to\\infty}(-a_1-a_2+2a_{n})(-a_2-a_3+2a_{n})\\times\\dots\\times(2a_{n}-a_{n-2}-a_{n-1})(-a_1+2a_{n}-a_{n-1})",
-   "mismatch": "[\"Limit\",[\"Function\",[\"Block\",[\"Multiply\",[\"Add\",[\"Negate\",\"a_1\"],[\"Negate\",\"a_2\"],[\"Multiply\",2,\"a_n\"]],[\"Add\",[\"Negate\",\"a_2\"],[\"Negate\",\"a_3\"],[\"Multiply\",2,\"a_n\"]],\"ContinuationPlaceholder\",[\"Add\",[\"Multiply\",2,\"a_n…  ≠  [\"Limit\",[\"Function\",[\"Block\",[\"Multiply\",[\"Multiply\",[\"Add\",[\"Negate\",\"a_1\"],[\"Negate\",\"a_2\"],[\"Multiply\",2,\"a_n\"]],[\"Add\",[\"Negate\",\"a_2\"],[\"Negate\",\"a_3\"],[\"Multiply\",2,\"a_n\"]]],\"ContinuationPlaceholder\",[\"Multiply\",…",
-   "class": "continuation-placeholder-multiply-regroups",
-   "reason": "bug"
-  },
-  {
-   "latex": "\\log_{n}\\left(\\frac{1}{2}\\right) \\log_{n-1}\\left(\\frac{1}{3}\\right) \\cdots \\log_{2}\\left(\\frac{1}{n}\\right)",
-   "reserialized": "\\log_{n}(\\frac{1}{2})\\log_{n-1}(\\frac{1}{3})\\times\\dots\\times\\log_{2}(\\frac{1}{n})",
-   "mismatch": "[\"Multiply\",[\"Log\",[\"Rational\",1,2],\"n\"],[\"Log\",[\"Rational\",1,3],[\"Add\",\"n\",-1]],\"ContinuationPlaceholder\",[\"Log\",[\"Divide\",1,\"n\"],2]]  ≠  [\"Multiply\",[\"Multiply\",[\"Log\",[\"Rational\",1,2],\"n\"],[\"Log\",[\"Rational\",1,3],[\"Add\",\"n\",-1]]],\"ContinuationPlaceholder\",[\"Log\",[\"Divide\",1,\"n\"],2]]",
-   "class": "continuation-placeholder-multiply-regroups",
-   "reason": "bug"
-  },
-  {
-   "latex": "A_0A_1\\cdots A_5",
-   "reserialized": "A_0A_1\\times\\dots\\times A_5",
-   "mismatch": "[\"Multiply\",\"A_0\",\"A_1\",\"ContinuationPlaceholder\",\"A_5\"]  ≠  [\"Multiply\",[\"Multiply\",\"A_0\",\"A_1\"],\"ContinuationPlaceholder\",\"A_5\"]",
-   "class": "continuation-placeholder-multiply-regroups",
-   "reason": "bug"
-  },
-  {
-   "latex": "a_1 \\cdot a_2 \\cdot \\dots \\cdot a_n",
-   "reserialized": "a_1a_2\\times\\dots\\times a_{n}",
-   "mismatch": "[\"Multiply\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]  ≠  [\"Multiply\",[\"Multiply\",\"a_1\",\"a_2\"],\"ContinuationPlaceholder\",\"a_n\"]",
-   "class": "continuation-placeholder-multiply-regroups",
-   "reason": "bug"
-  },
-  {
-   "latex": "a_1^2 a_2^2 \\cdots a_n^2 - 4(a_1^2 + a_2^2 + \\cdots + a_n^2)",
-   "reserialized": "a_1^2a_2^2\\times\\dots\\times a_{n}^2-4(a_1^2+a_2^2+\\dots+a_{n}^2)",
-   "mismatch": "[\"Add\",[\"Multiply\",[\"Power\",\"a_1\",2],[\"Power\",\"a_2\",2],\"ContinuationPlaceholder\",[\"Power\",\"a_n\",2]],[\"Multiply\",-4,[\"Add\",[\"Power\",\"a_1\",2],[\"Power\",\"a_2\",2],\"ContinuationPlaceholder\",[\"Power\",\"a_n\",2]]]]  ≠  [\"Add\",[\"Multiply\",[\"Multiply\",[\"Power\",\"a_1\",2],[\"Power\",\"a_2\",2]],\"ContinuationPlaceholder\",[\"Power\",\"a_n\",2]],[\"Multiply\",-4,[\"Add\",[\"Power\",\"a_1\",2],[\"Power\",\"a_2\",2],\"ContinuationPlaceholder\",[\"Power\",\"a_n\",2]]]]",
-   "class": "continuation-placeholder-multiply-regroups",
-   "reason": "bug"
-  },
-  {
-   "latex": "A_1A_2 \\cdots A_{2n}",
-   "reserialized": "A_1A_2\\times\\dots\\times A_{2n}",
-   "mismatch": "[\"Multiply\",\"A_1\",\"A_2\",\"ContinuationPlaceholder\",\"A_2n\"]  ≠  [\"Multiply\",[\"Multiply\",\"A_1\",\"A_2\"],\"ContinuationPlaceholder\",\"A_2n\"]",
-   "class": "continuation-placeholder-multiply-regroups",
-   "reason": "bug"
-  },
-  {
    "latex": "n ≡ 0, 4, 5 (mod 6)",
    "reserialized": "(n\\equiv0,4,5\\times6dmo)",
    "mismatch": "[\"Tuple\",[\"IdenticallyEqual\",\"n\",0],4,[\"Multiply\",5,6,\"d\",\"m\",\"o\"]]  ≠  [\"Tuple\",[\"IdenticallyEqual\",\"n\",0],4,[\"Multiply\",30,\"d\",\"m\",\"o\"]]",
@@ -199,37 +115,9 @@
    "reason": "bug"
   },
   {
-   "latex": "a_0 = 9 \\quad \\text{and} \\quad a_{k+1} = 3a_k^4 + 4a_k^3 \\quad \\text{for all } k \\ge 0.",
-   "reserialized": "\\forall k\\ge0, a_0=9\\land\\quad a_{k+1}=3a_{k}^4+4a_{k}^3\\quad",
-   "mismatch": "[\"ForAll\",[\"GreaterEqual\",\"k\",0],[\"And\",[\"Equal\",\"a_0\",9],[\"Equal\",[\"InvisibleOperator\",[\"HorizontalSpacing\",18],[\"Subscript\",\"a\",[\"Add\",\"k\",1]]],[\"Add\",[\"InvisibleOperator\",3,[\"Power\",\"a_k\",4]],[\"InvisibleOperator\",4,[…  ≠  [\"And\",[\"Equal\",[\"Subscript\",\"a\",[\"Add\",\"k\",1]],[\"Add\",[\"Multiply\",3,[\"Power\",\"a_k\",4]],[\"Multiply\",4,[\"Power\",\"a_k\",3]]]],[\"ForAll\",[\"GreaterEqual\",\"k\",0],[\"Equal\",\"a_0\",9]]]",
-   "class": "forall-body-not-delimited",
-   "reason": "bug"
-  },
-  {
-   "latex": "a_0 = 1, \\quad a_1 = 3, \\quad \\text{and} \\quad a_{n+1} = a_n + a_{n-1} \\quad \\text{for all } n \\ge 1.",
-   "reserialized": "\\forall n\\ge1, (a_0=1,a_1=3,a_{n+1}=a_{n}+a_{n-1}\\quad)",
-   "mismatch": "[\"ForAll\",[\"GreaterEqual\",\"n\",1],[\"Tuple\",[\"Equal\",\"a_0\",1],[\"Equal\",\"a_1\",3],[\"Equal\",[\"Subscript\",\"a\",[\"Add\",\"n\",1]],[\"Add\",\"a_n\",[\"InvisibleOperator\",[\"Subscript\",\"a\",[\"Subtract\",\"n\",1]],[\"HorizontalSpacing\",18]]]]]]  ≠  [\"ForAll\",[\"GreaterEqual\",\"n\",1],[\"Delimiter\",[\"Sequence\",[\"Equal\",\"a_0\",1],[\"Equal\",\"a_1\",3],[\"Equal\",[\"Subscript\",\"a\",[\"Add\",\"n\",1]],[\"Add\",\"a_n\",[\"InvisibleOperator\",[\"Subscript\",\"a\",[\"Subtract\",\"n\",1]],[\"HorizontalS…",
-   "class": "forall-held-body-not-canonicalized",
-   "reason": "bug"
-  },
-  {
-   "latex": "u_0 = 0,\\ u_1 = 1,\\ u_n = 2011u_{n-1} - u_{n-2} \\quad \\text{for } n \\ge 2.",
-   "reserialized": "\\forall n\\ge2, (u_0=0,u_1=1,u_{n}=2\\,011u_{n-1}-u_{n-2}\\quad)",
-   "mismatch": "[\"ForAll\",[\"GreaterEqual\",\"n\",2],[\"Tuple\",[\"Equal\",\"u_0\",0],[\"Equal\",\"u_1\",1],[\"Equal\",\"u_n\",[\"Subtract\",[\"InvisibleOperator\",2011,[\"Subscript\",\"u\",[\"Subtract\",\"n\",1]]],[\"InvisibleOperator\",[\"Subscript\",\"u\",[\"Subtract\",…  ≠  [\"ForAll\",[\"GreaterEqual\",\"n\",2],[\"Delimiter\",[\"Sequence\",[\"Equal\",\"u_0\",0],[\"Equal\",\"u_1\",1],[\"Equal\",\"u_n\",[\"Subtract\",[\"InvisibleOperator\",2011,[\"Subscript\",\"u\",[\"Subtract\",\"n\",1]]],[\"InvisibleOperator\",[\"Subscript\",…",
-   "class": "forall-held-body-not-canonicalized",
-   "reason": "bug"
-  },
-  {
-   "latex": "x_1 = a, \\quad x_2 = b, \\quad x_n = \\frac{x_{n-1}^2 + x_{n-2}^2}{x_{n-1} + x_{n-2}} \\quad \\text{for } n \\ge 3.",
-   "reserialized": "\\forall n\\ge3, (x_1=a,x_2=b,x_{n}=((x_{n-1}^2+x_{n-2}^2)/(x_{n-1}+x_{n-2}))\\quad)",
-   "mismatch": "[\"ForAll\",[\"GreaterEqual\",\"n\",3],[\"Tuple\",[\"Equal\",\"x_1\",\"a\"],[\"Equal\",\"x_2\",\"b\"],[\"Equal\",\"x_n\",[\"InvisibleOperator\",[\"Divide\",[\"Add\",[\"Power\",[\"Subscript\",\"x\",[\"Subtract\",\"n\",1]],2],[\"Power\",[\"Subscript\",\"x\",[\"Subtrac…  ≠  [\"ForAll\",[\"GreaterEqual\",\"n\",3],[\"Delimiter\",[\"Sequence\",[\"Equal\",\"x_1\",\"a\"],[\"Equal\",\"x_2\",\"b\"],[\"Equal\",\"x_n\",[\"InvisibleOperator\",[\"Delimiter\",[\"Divide\",[\"Delimiter\",[\"Add\",[\"Power\",[\"Subscript\",\"x\",[\"Subtract\",\"n\",…",
-   "class": "forall-held-body-not-canonicalized",
-   "reason": "bug"
-  },
-  {
    "latex": "\\left( \\frac{n}{2(a_1 + a_2 + \\cdots + a_n)} - 1 \\right)^n \\le \\left[ \\frac{a_1 + a_2 + \\cdots + a_n}{n} \\right]^n \\left( \\frac{1}{a_1} - 1 \\right) \\left( \\frac{1}{a_2} - 1 \\right) \\cdots \\left( \\frac{1}{a_n} - 1 \\right).",
-   "reserialized": "{((n)(2(a_1+a_2+\\dots+a_{n}))^{-1}-1)}^{n}\\le\\bigl\\lbrack\\frac{a_1+a_2+\\dots+a_{n}}{n}\\bigr\\rbrack^{n}(\\frac{1}{a_1}-1)(\\frac{1}{a_2}-1)\\times\\dots\\times(\\frac{1}{a_{n}}-1)",
-   "mismatch": "[\"LessEqual\",[\"Power\",[\"Add\",[\"Divide\",\"n\",[\"Multiply\",2,[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]]],-1],\"n\"],[\"Multiply\",[\"Power\",[\"List\",[\"Divide\",[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"],\"n\"]],\"n…  ≠  [\"LessEqual\",[\"Power\",[\"Add\",[\"Multiply\",\"n\",[\"Divide\",1,[\"Multiply\",2,[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]]]],-1],\"n\"],[\"Multiply\",[\"Multiply\",[\"Add\",[\"Divide\",1,\"a_1\"],-1],[\"Add\",[\"Divide\",1,\"a_2\"],-1],…",
+   "reserialized": "{((n)(2(a_1+a_2+\\dots+a_{n}))^{-1}-1)}^{n}\\le\\bigl\\lbrack\\frac{a_1+a_2+\\dots+a_{n}}{n}\\bigr\\rbrack^{n}\\times(\\frac{1}{a_1}-1)\\times(\\frac{1}{a_2}-1)\\times\\dots\\times(\\frac{1}{a_{n}}-1)",
+   "mismatch": "[\"LessEqual\",[\"Power\",[\"Add\",[\"Divide\",\"n\",[\"Multiply\",2,[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]]],-1],\"n\"],[\"Multiply\",[\"Power\",[\"List\",[\"Divide\",[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"],\"n\"]],\"n…  ≠  [\"LessEqual\",[\"Power\",[\"Add\",[\"Multiply\",\"n\",[\"Divide\",1,[\"Multiply\",2,[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]]]],-1],\"n\"],[\"Multiply\",[\"Power\",[\"List\",[\"Divide\",[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",…",
    "class": "fraction-fallback-inverse-power",
    "reason": "bug",
    "note": "Also exhibits continuation-placeholder-multiply-regroups on the RHS."
@@ -263,34 +151,6 @@
    "reason": "bug"
   },
   {
-   "latex": "(A,+, \\cdot)",
-   "reserialized": "(A,,)",
-   "mismatch": "[\"Tuple\",\"A\",\"Add\",\"Multiply\"]  ≠  [\"Tuple\",\"A\"]",
-   "class": "operator-symbol-serializes-empty",
-   "reason": "bug"
-  },
-  {
-   "latex": "(A,+)",
-   "reserialized": "(A,)",
-   "mismatch": "[\"Tuple\",\"A\",\"Add\"]  ≠  [\"Tuple\",\"A\"]",
-   "class": "operator-symbol-serializes-empty",
-   "reason": "bug"
-  },
-  {
-   "latex": "(K, +, \\cdot)",
-   "reserialized": "(K,,)",
-   "mismatch": "[\"Tuple\",\"K\",\"Add\",\"Multiply\"]  ≠  [\"Tuple\",\"K\"]",
-   "class": "operator-symbol-serializes-empty",
-   "reason": "bug"
-  },
-  {
-   "latex": "\\angle BA'C = \\angle BB'C",
-   "reserialized": "(\\angle BA^\\primeC)=(\\angle BB^\\primeC)",
-   "mismatch": "[\"Equal\",[\"Angle\",\"B\",[\"Prime\",\"A\"],\"C\"],[\"Angle\",\"B\",[\"Prime\",\"B\"],\"C\"]]  ≠  [\"Equal\",[\"Delimiter\",[\"Angle\",\"B\",[\"Error\",\"'missing'\",[\"LatexString\",\"'^'\"]],[\"Error\",\"'unexpected-command'\",[\"LatexString\",\"'\\\\primeC'\"]]]],[\"Delimiter\",[\"Angle\",\"B\",[\"Error\",\"'missing'\",[\"LatexString\",\"'^'\"]],[\"Erro…",
-   "class": "prime-serialization-not-delimited",
-   "reason": "bug"
-  },
-  {
    "latex": "\\frac{1}{n} = \\frac{1}{a_1} - \\frac{1}{a_2} + \\frac{1}{a_3} - \\dots + (-1)^{m-1} \\frac{1}{a_m}.",
    "reserialized": "\\frac{1}{n}=\\frac{1}{a_1}-\\frac{1}{a_2}+\\frac{1}{a_3}-\\dots+\\frac{(-1)^{m-1}}{a_{m}}",
    "mismatch": "[\"Equal\",[\"Divide\",1,\"n\"],[\"Add\",[\"Divide\",1,\"a_1\"],[\"Negate\",[\"Divide\",1,\"a_2\"]],[\"Divide\",1,\"a_3\"],[\"Negate\",\"ContinuationPlaceholder\"],[\"Multiply\",[\"Divide\",1,\"a_m\"],[\"Power\",-1,[\"Add\",\"m\",-1]]]]]  ≠  [\"Equal\",[\"Divide\",1,\"n\"],[\"Add\",[\"Divide\",1,\"a_1\"],[\"Negate\",[\"Divide\",1,\"a_2\"]],[\"Divide\",1,\"a_3\"],[\"Negate\",\"ContinuationPlaceholder\"],[\"Divide\",[\"Power\",-1,[\"Add\",\"m\",-1]],\"a_m\"]]]",
@@ -312,27 +172,12 @@
    "reason": "bug"
   },
   {
-   "latex": "\\frac{1}{a_1} + \\frac{1}{a_2} + \\cdots + \\frac{1}{a_m} = 1,",
-   "reserialized": "(\\frac{1}{a_1}+\\frac{1}{a_2}+\\dots+\\frac{1}{a_{m}}=1)",
-   "mismatch": "[\"Tuple\",[\"Equal\",[\"Add\",[\"Divide\",1,\"a_1\"],[\"Divide\",1,\"a_2\"],\"ContinuationPlaceholder\",[\"Divide\",1,\"a_m\"]],1]]  ≠  [\"Equal\",[\"Add\",[\"Divide\",1,\"a_1\"],[\"Divide\",1,\"a_2\"],\"ContinuationPlaceholder\",[\"Divide\",1,\"a_m\"]],1]",
-   "class": "singleton-tuple-dropped",
-   "reason": "bug",
-   "note": "Trailing comma in the source makes a one-operand Tuple."
-  },
-  {
-   "latex": "\\frac{f(q^m)}{f(q)} = (px_1 + 1) \\cdots (px_n + 1) \\cdot p^m,",
-   "reserialized": "(\\frac{fq^{m}}{fq}=(px_1+1)\\times\\dots\\times(px_{n}+1)p^{m})",
-   "mismatch": "[\"Tuple\",[\"Equal\",[\"Divide\",[\"Multiply\",\"f\",[\"Power\",\"q\",\"m\"]],[\"Multiply\",\"f\",\"q\"]],[\"Multiply\",[\"Add\",[\"Multiply\",\"p\",\"x_1\"],1],\"ContinuationPlaceholder\",[\"Add\",[\"Multiply\",\"p\",\"x_n\"],1],[\"Power\",\"p\",\"m\"]]]]  ≠  [\"Equal\",[\"Divide\",[\"Multiply\",\"f\",[\"Power\",\"q\",\"m\"]],[\"Multiply\",\"f\",\"q\"]],[\"Multiply\",[\"Add\",[\"Multiply\",\"p\",\"x_1\"],1],\"ContinuationPlaceholder\",[\"Multiply\",[\"Add\",[\"Multiply\",\"p\",\"x_n\"],1],[\"Power\",\"p\",\"m\"]]]]",
-   "class": "singleton-tuple-dropped",
-   "reason": "bug",
-   "note": "Also exhibits continuation-placeholder-multiply-regroups inside the RHS."
-  },
-  {
    "latex": "f(x) + f(y) + 2xyf(xy) = \\frac{f(xy)}{f(x+y)}, \\qquad \\textcircled{1}",
-   "reserialized": "(2fxxyy+fx+fy=\\frac{fxy}{f(x+y)})",
-   "mismatch": "[\"Tuple\",[\"Equal\",[\"Add\",[\"Multiply\",2,\"f\",\"x\",\"x\",\"y\",\"y\"],[\"Multiply\",\"f\",\"x\"],[\"Multiply\",\"f\",\"y\"]],[\"Divide\",[\"Multiply\",\"f\",\"x\",\"y\"],[\"Multiply\",\"f\",[\"Add\",\"x\",\"y\"]]]]]  ≠  [\"Equal\",[\"Add\",[\"Multiply\",2,\"f\",\"x\",\"x\",\"y\",\"y\"],[\"Multiply\",\"f\",\"x\"],[\"Multiply\",\"f\",\"y\"]],[\"Divide\",[\"Multiply\",\"f\",\"x\",\"y\"],[\"Multiply\",\"f\",[\"Add\",\"x\",\"y\"]]]]",
-   "class": "singleton-tuple-dropped",
-   "reason": "bug"
+   "reserialized": "(2fxxyy+fx+fy=\\frac{fxy}{f(x+y)},)",
+   "mismatch": "identical MathJSON, isSame false (binding/order): [\"Tuple\",[\"Equal\",[\"Add\",[\"Multiply\",2,\"f\",\"x\",\"x\",\"y\",\"y\"],[\"Multiply\",\"f\",\"x\"],[\"Multiply\",\"f\",\"y\"]],[\"Divide\",[\"Multiply\",\"f\",\"x\",\"y\"],[\"Multiply\",\"f\",[\"Add\",\"x\",\"y\"]]]]]",
+   "class": "inference-drift-canonical-order",
+   "reason": "bug",
+   "note": "Formerly singleton-tuple-dropped; the tuple-ness now survives (trailing-comma serialization, 2026-08-04 fix round). The residual failure is a nested-vs-flat Multiply arity mismatch (Multiply(2,f,x,y,Multiply(x,y)) vs flat Multiply(2,f,x,x,y,y)) that the .json shorthand hides - defect (i) of this class."
   }
  ]
 }

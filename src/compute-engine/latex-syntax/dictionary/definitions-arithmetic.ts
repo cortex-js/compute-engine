@@ -564,6 +564,20 @@ function serializeAdd(
   return result;
 }
 
+/**
+ * True when a product has a direct `ContinuationPlaceholder` (`…`) factor,
+ * possibly under a `Negate`. Such a product is notational: the ellipsis stands
+ * for the elided factors, and the serialization must not regroup factors
+ * across it (see `serializeMultiply`).
+ */
+function hasContinuationFactor(expr: MathJsonExpression): boolean {
+  return operands(expr).some((op) =>
+    operator(op) === 'Negate'
+      ? symbol(operand(op, 1)) === 'ContinuationPlaceholder'
+      : symbol(op) === 'ContinuationPlaceholder'
+  );
+}
+
 function serializeMultiply(
   serializer: Serializer,
   expr: MathJsonExpression | null
@@ -576,11 +590,23 @@ function serializeMultiply(
 
   let result = '';
 
+  // A `ContinuationPlaceholder` (`…`) factor makes this product notational.
+  // Two serialization rules follow, both required for the product to re-parse
+  // to the same expression:
+  //  - no numerator/denominator aggregation: it would move factors ACROSS the
+  //    ellipsis into a single `\frac` (`3/2·6/5·…·X` →
+  //    `\frac{3\times6\times\dots\times X}{2\times5}`), which re-parses with
+  //    `3·6/(2·5)` folded to `9/5`;
+  //  - a uniform EXPLICIT separator between every factor: mixing juxtaposition
+  //    with `\times` (`ab\times\dots\times z`) lets the juxtaposed run bind
+  //    tighter and re-parse as a nested `Multiply`.
+  const isContinuationProduct = hasContinuationFactor(expr);
+
   //
   // Is it a fraction?
   // (i.e. does it have a denominator, i.e. some factors with a negative power)
   //
-  if (serializer.options.prettify === true) {
+  if (serializer.options.prettify === true && !isContinuationProduct) {
     const [numer, denom] = numeratorDenominator(expr);
     if (denom.length > 0) {
       if (denom.length === 1 && denom[0] === 1) {
@@ -616,9 +642,6 @@ function serializeMultiply(
     }
   }
   let prevWasNumber = false;
-  // Track a `ContinuationPlaceholder` (`…`) operand so the next factor gets an
-  // explicit multiplication separator (see the join logic below).
-  let prevWasContinuation = false;
   // Track a bare-symbol factor (its serialized name, or null): juxtaposed with
   // a following parenthesized group it can re-parse as a function CALL (see the
   // join logic).
@@ -644,7 +667,6 @@ function serializeMultiply(
         else result = latexTemplate(serializer.options.multiply, result, term);
       }
       prevWasNumber = true;
-      prevWasContinuation = false;
       prevSymbol = null;
       continue;
     }
@@ -656,14 +678,16 @@ function serializeMultiply(
       if (r !== undefined && r !== null) {
         const [n, d] = r;
         if (n === 1 && d !== null) {
-          result += serializeRoot(
+          const root = serializeRoot(
             serializer,
             serializer.rootStyle(arg, serializer.level),
             operand(arg, 1),
             d
           );
+          if (result && isContinuationProduct)
+            result = latexTemplate(serializer.options.multiply, result, root);
+          else result += root;
           prevWasNumber = false;
-          prevWasContinuation = false;
           prevSymbol = null;
           continue;
         }
@@ -681,7 +705,6 @@ function serializeMultiply(
       else result = latexTemplate(serializer.options.multiply, result, term);
 
       prevWasNumber = true;
-      prevWasContinuation = false;
       prevSymbol = null;
       continue;
     }
@@ -712,7 +735,12 @@ function serializeMultiply(
       result = term;
     } else {
       const h = operator(arg);
-      if (prevWasNumber && (h === 'Divide' || h === 'Rational')) {
+      // In a notational product (one carrying a `…` factor), every factor is
+      // joined by the same explicit separator, so no run of factors can
+      // re-group across the ellipsis when re-parsed.
+      if (isContinuationProduct) {
+        result = latexTemplate(serializer.options.multiply, result, term);
+      } else if (prevWasNumber && (h === 'Divide' || h === 'Rational')) {
         // Can't use an invisible multiply if a number
         // multiplied by a fraction
         result = latexTemplate(serializer.options.multiply, result, term);
@@ -726,13 +754,6 @@ function serializeMultiply(
       // already handled explicitly above, but prettify rewrites
       // `Power(n, 2)` to `Square(n)`, which bypasses that branch.)
       else if (/^\d/.test(term)) {
-        result = latexTemplate(serializer.options.multiply, result, term);
-      }
-      // A `ContinuationPlaceholder` (`…`) is notational: force an explicit
-      // multiplication separator on BOTH sides so the ellipsis does not merge
-      // with an adjacent factor via juxtaposition (which would reparse as a
-      // `Range` rather than the original product).
-      else if (isContinuation || prevWasContinuation) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
       // A bare symbol juxtaposed with a parenthesized group can re-parse as a
@@ -768,7 +789,6 @@ function serializeMultiply(
       }
     }
     prevWasNumber = false;
-    prevWasContinuation = isContinuation;
     prevSymbol = !isContinuation ? symbol(arg) : null;
   }
 

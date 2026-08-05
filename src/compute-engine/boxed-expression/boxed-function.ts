@@ -269,6 +269,11 @@ export class BoxedFunction
 
     this._isStructural = options?.structural ?? false;
     if (options?.canonical || this._isStructural) this.bind();
+    // `null` is "not bound" — as documented on `_def`, and as distinct from
+    // the `undefined` `bind()` leaves when it finds no definition. Only
+    // `evaluate()` reads the two apart (see `_canonicalToEvaluate()`); every
+    // other use tests `_def` for falsiness.
+    else this._def = null;
   }
 
   // NOTE: this hash folds bound-variable NAMES (via each symbol operand's
@@ -1467,11 +1472,47 @@ export class BoxedFunction
     // A deadline is armed only by an enclosing `withTimeLimit` span; work
     // outside a span runs unbounded. Evaluation checkpoints the ambient
     // deadline (`engine._deadlineFrame`) if one is in effect.
+    const canonical = this._canonicalToEvaluate();
+    if (canonical) return canonical.evaluate(options);
     return this._computeValue(options)();
   }
 
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
+    const canonical = this._canonicalToEvaluate();
+    if (canonical) return canonical.evaluateAsync(options);
     return this._computeValueAsync(options)();
+  }
+
+  /**
+   * `evaluate()` yields a canonical value: an expression that is not
+   * canonical must therefore evaluate to the same value as its canonical
+   * form. Structural and raw trees have not run canonicalization, so the
+   * work canonicalization does — resolving parse sugar, and above all
+   * declaring the bound variables of a binder (`Sum`, `Product`,
+   * `Integrate`, …) in its local scope — has not happened. Evaluating them
+   * in place either does nothing (a raw tree has no definition to dispatch
+   * to) or, for a binder, silently computes a DIFFERENT value from an
+   * unbound index. Route them through the canonical form instead.
+   *
+   * Returns the expression to evaluate in our place, or `undefined` to
+   * evaluate this expression directly.
+   *
+   * Canonicalization is not guaranteed to produce a canonical expression:
+   * an invalid tree canonicalizes to itself, and an operator whose canonical
+   * handler declines can hand back another non-canonical node. Requiring
+   * `isCanonical` of the result (not merely a different node) is what keeps
+   * this from recursing forever.
+   */
+  private _canonicalToEvaluate(): Expression | undefined {
+    // Only the two non-canonical TIERS are routed. `isCanonical` is false for
+    // a third shape — an expression that WAS canonicalized but whose operator
+    // has no definition (`_def === undefined`) — and re-canonicalizing that
+    // one would rebuild the identical tree on every single `evaluate()` call
+    // (a 4x slowdown of the compilation and factorization paths, which
+    // evaluate definition-less nodes in a loop).
+    if (this._def !== null && !this._isStructural) return undefined;
+    const canonical = this.canonical;
+    return canonical.isCanonical ? canonical : undefined;
   }
 
   N(): Expression {

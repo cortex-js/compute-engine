@@ -473,16 +473,14 @@ describe('TEXT KEYWORDS', () => {
   test('\\text{for all} as prefix', () => {
     expect(check('\\text{for all} x: x > 0')).toMatchInlineSnapshot(`
       box       = ["ForAll", "x", ["Greater", "x", 0]]
-      simplify  = ForAll(x, 0 < x)
-      eval-auto = ForAll(x, x > 0)
+      canonical = ["ForAll", "x", ["Less", 0, "x"]]
     `);
   });
 
   test('\\text{there exists} as prefix', () => {
     expect(check('\\text{there exists} x: x > 0')).toMatchInlineSnapshot(`
       box       = ["Exists", "x", ["Greater", "x", 0]]
-      simplify  = Exists(x, 0 < x)
-      eval-auto = Exists(x, x > 0)
+      canonical = ["Exists", "x", ["Less", 0, "x"]]
     `);
   });
 });

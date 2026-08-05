@@ -2,6 +2,7 @@ import type {
   Expression,
   SymbolDefinitions,
   IComputeEngine as ComputeEngine,
+  Scope,
 } from '../global-types.js';
 import {
   evaluateAnd,
@@ -46,6 +47,35 @@ import {
  * (`docs/plans/2026-07-26-binder-mechanism-design.md` §2 stage 8).
  */
 const QUANTIFIER_SITES = limitsIndexSites(0);
+
+/**
+ * The quantifiers are `lazy`, so their operands arrive RAW — unbound and
+ * uncanonicalized — on the `ce.box()` and `ce.parse()` routes (see the
+ * "`lazy: true` operators with no `canonical` handler are inert" trap in
+ * CLAUDE.md). Without this handler a *parenthesized* body kept its parse
+ * sugar: `\forall n, (a, b)` came back as
+ * `ForAll(n, Delimiter(Sequence(a, b)))` instead of `ForAll(n, Tuple(a, b))`,
+ * and the serializer therefore could not delimit the body with parentheses
+ * at all (the body is truncated at the first low-precedence operator without
+ * them — see `serializeQuantifier`).
+ *
+ * `.canonical` is value-safe: it binds structure but does NOT substitute
+ * assigned symbol values. The handler runs inside the quantifier's own scope,
+ * with the bound variable already declared by the binder hook in `box.ts`.
+ */
+function canonicalQuantifier(
+  name: string
+): (
+  ops: ReadonlyArray<Expression>,
+  options: { engine: ComputeEngine; scope: Scope | undefined }
+) => Expression {
+  return (ops, { engine: ce, scope }) =>
+    ce._fn(
+      name,
+      ops.map((x) => x.canonical),
+      { scope }
+    );
+}
 
 export const LOGIC_LIBRARY: SymbolDefinitions = {
   True: {
@@ -172,6 +202,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     signature: '(value, boolean) -> boolean',
     lazy: true,
     scoped: QUANTIFIER_SITES,
+    canonical: canonicalQuantifier('Exists'),
     evaluate: evaluateExists,
   },
   NotExists: {
@@ -180,6 +211,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     signature: '(value, boolean) -> boolean',
     lazy: true,
     scoped: QUANTIFIER_SITES,
+    canonical: canonicalQuantifier('NotExists'),
     evaluate: (args, options) => {
       const result = evaluateExists(args, options);
       if (sym(result) === 'True') return options.engine.False;
@@ -193,6 +225,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     signature: '(value, boolean) -> boolean',
     lazy: true,
     scoped: QUANTIFIER_SITES,
+    canonical: canonicalQuantifier('ExistsUnique'),
     evaluate: evaluateExistsUnique,
   },
   ForAll: {
@@ -201,6 +234,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     signature: '(value, boolean) -> boolean',
     lazy: true,
     scoped: QUANTIFIER_SITES,
+    canonical: canonicalQuantifier('ForAll'),
     evaluate: evaluateForAll,
   },
   NotForAll: {
@@ -209,6 +243,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     signature: '(value, boolean) -> boolean',
     lazy: true,
     scoped: QUANTIFIER_SITES,
+    canonical: canonicalQuantifier('NotForAll'),
     evaluate: (args, options) => {
       const result = evaluateForAll(args, options);
       if (sym(result) === 'True') return options.engine.False;

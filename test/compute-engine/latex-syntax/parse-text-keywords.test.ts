@@ -139,10 +139,11 @@ describe('KEYWORD COMMAND (\\keyword{…})', () => {
   });
 
   test('\\keyword{for all} quantifier', () => {
+    // The quantifier body is canonical (`Greater` folds to `Less`).
     expect(ce.parse('\\keyword{for all} x, x > 0').json).toEqual([
       'ForAll',
       'x',
-      ['Greater', 'x', 0],
+      ['Less', 0, 'x'],
     ]);
   });
 
@@ -171,11 +172,14 @@ describe('TRAILING QUALIFIER CLAUSES', () => {
   test('trailing \\text{for} condition parses as ForAll', () => {
     // A non-binding clause (a condition, not `name = collection`) after `for`
     // is a trailing qualifier: `body for n >= 2` → ForAll(n >= 2, body).
+    // Both operands are canonical — the quantifiers canonicalize their held
+    // operands, so the condition folds to `LessEqual` and the body's
+    // `InvisibleOperator` resolves to `Multiply`.
     const engine = new ComputeEngine();
     expect(engine.parse('u_n = 3u_{n-1} \\text{ for } n \\ge 2').json).toEqual([
       'ForAll',
-      ['GreaterEqual', 'n', 2],
-      ['Equal', 'u_n', ['InvisibleOperator', 3, ['Subscript', 'u', ['Subtract', 'n', 1]]]],
+      ['LessEqual', 2, 'n'],
+      ['Equal', 'u_n', ['Multiply', 3, ['Subscript', 'u', ['Subtract', 'n', 1]]]],
     ]);
   });
 
@@ -185,8 +189,8 @@ describe('TRAILING QUALIFIER CLAUSES', () => {
       engine.parse('u_n = 3u_{n-1} \\text{ for all } n \\ge 2').json
     ).toEqual([
       'ForAll',
-      ['GreaterEqual', 'n', 2],
-      ['Equal', 'u_n', ['InvisibleOperator', 3, ['Subscript', 'u', ['Subtract', 'n', 1]]]],
+      ['LessEqual', 2, 'n'],
+      ['Equal', 'u_n', ['Multiply', 3, ['Subscript', 'u', ['Subtract', 'n', 1]]]],
     ]);
   });
 
@@ -228,7 +232,7 @@ describe('TRAILING QUALIFIER CLAUSES', () => {
     expect(e.isValid).toBe(true);
     expect(JSON.stringify(e.json)).not.toContain('Error');
     expect(e.operator).toBe('ForAll');
-    expect(e.op1.json).toEqual(['GreaterEqual', 'n', 2]);
+    expect(e.op1.json).toEqual(['LessEqual', 2, 'n']);
     // The body is a Tuple of the three equations.
     expect(e.op2.operator).toBe('Tuple');
     expect(e.op2.nops).toBe(3);
@@ -242,7 +246,7 @@ describe('TRAILING QUALIFIER CLAUSES', () => {
     expect(e.isValid).toBe(true);
     expect(JSON.stringify(e.json)).not.toContain('Error');
     expect(e.operator).toBe('ForAll');
-    expect(e.op1.json).toEqual(['GreaterEqual', 'n', 3]);
+    expect(e.op1.json).toEqual(['LessEqual', 3, 'n']);
     expect(e.op2.operator).toBe('Tuple');
     expect(e.op2.nops).toBe(3);
   });
@@ -257,7 +261,7 @@ describe('TRAILING QUALIFIER CLAUSES', () => {
     // The `and` connective is absorbed, so there is no stray text token.
     expect(JSON.stringify(e.json)).not.toContain("'and'");
     expect(e.operator).toBe('ForAll');
-    expect(e.op1.json).toEqual(['GreaterEqual', 'n', 1]);
+    expect(e.op1.json).toEqual(['LessEqual', 1, 'n']);
     expect(e.op2.operator).toBe('Tuple');
     expect(e.op2.nops).toBe(3);
   });

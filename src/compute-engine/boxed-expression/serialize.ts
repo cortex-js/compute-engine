@@ -37,7 +37,13 @@ import type {
   DisplayDigits,
 } from '../global-types.js';
 import { isDictionary, isOperatorDef } from './utils.js';
-import { isNumber, isSymbol, isString, isFunction } from './type-guards.js';
+import {
+  isNumber,
+  isSymbol,
+  isString,
+  isFunction,
+  isContinuationOperand,
+} from './type-guards.js';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils.js';
 
 // Lazy reference to break circular dependency:
@@ -246,7 +252,16 @@ function serializePrettyJsonFunction(
     }
   }
 
-  if (name === 'Multiply' && !exclusions.includes('Divide')) {
+  if (
+    name === 'Multiply' &&
+    !exclusions.includes('Divide') &&
+    // Ellipsis fold barrier: a direct `ContinuationPlaceholder` operand makes
+    // this a notational product. Aggregating it into a single quotient would
+    // move numerators and denominators ACROSS the ellipsis
+    // (`\frac1a·\frac1b·…·\frac1z` → `\frac{\dots}{abz}`), which no longer
+    // re-parses to the same product.
+    !args.some((x) => isContinuationOperand(x))
+  ) {
     // Display a product with negative exponents as a division if
     // there are terms with a negative degree.
     if (preserveStructure) {

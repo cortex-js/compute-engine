@@ -213,12 +213,14 @@ describe('Tier 4 #3b — inferred-type narrowing in argument checking', () => {
 
 describe('Tier 4 #4 — quantifiers & angle brackets', () => {
   test('standalone quantified condition `\\forall n \\ge 1`', () => {
+    // The condition is canonical (`GreaterEqual`/`Greater` fold to
+    // `LessEqual`/`Less`): the quantifiers canonicalize their held operands.
     expect(json('\\forall n \\ge 1')).toEqual([
       'ForAll',
-      ['GreaterEqual', 'n', 1],
+      ['LessEqual', 1, 'n'],
       'True',
     ]);
-    expect(json('\\exists x > 0')).toEqual(['Exists', ['Greater', 'x', 0], 'True']);
+    expect(json('\\exists x > 0')).toEqual(['Exists', ['Less', 0, 'x'], 'True']);
   });
 
   test('non-regression: bare `\\forall x` (no condition, no body) still errors', () => {

@@ -75,7 +75,7 @@ describe('DELIMITERS SERIALIZING', () => {
       box       = ["Delimiter", ["Sequence", ["Add", 1, 2]]]
       canonical = ["Single", 3]
       box-latex = (1+2)
-      latex     = (3)
+      latex     = (3,)
     `));
 
   test('Non-collection with default parens and comma', () =>

@@ -14,10 +14,16 @@ describe('CANONICAL FORM RESTRICTIONS', () => {
       TEST_ENGINE.expr('m', { form: 'raw' }).value = 1;
     }).toThrow();
   });
-  test('Non-canonical expressions evaluate to themselves', () => {
+  // `evaluate()` answers with a canonical value on every tier: a raw or
+  // structural expression evaluates through its canonical form, so it yields
+  // the same value the canonical tree does. (Before, a raw expression
+  // evaluated to itself — which made a binder on the structural tier compute
+  // a silently WRONG value from an unbound index. See
+  // `structural-evaluate.test.ts`.)
+  test('Non-canonical expressions evaluate to their canonical value', () => {
     expect(
       TEST_ENGINE.parse('2 + 3', { form: 'raw' }).evaluate().toString()
-    ).toEqual('2 + 3');
+    ).toEqual('5');
   });
 });
 

@@ -671,9 +671,9 @@ describe('Logic', () => {
         ForAll,
         x,
         [
-          Greater,
-          x,
+          Less,
           0,
+          x,
         ],
       ]
     `);
@@ -686,9 +686,9 @@ describe('Logic', () => {
         ForAll,
         x,
         [
-          Greater,
-          x,
+          Less,
           0,
+          x,
         ],
       ]
     `);
@@ -698,9 +698,9 @@ describe('Logic', () => {
         ForAll,
         x,
         [
-          Greater,
-          x,
+          Less,
           0,
+          x,
         ],
       ]
     `);
@@ -710,9 +710,9 @@ describe('Logic', () => {
         ForAll,
         x,
         [
-          Greater,
-          x,
+          Less,
           0,
+          x,
         ],
       ]
     `);
@@ -722,24 +722,22 @@ describe('Logic', () => {
         ForAll,
         x,
         [
-          Greater,
-          x,
+          Less,
           0,
+          x,
         ],
       ]
     `);
-    // With parentheses
+    // With parentheses (the body sheds its `Delimiter` parse sugar: the
+    // quantifiers canonicalize their held operands)
     expect(ce.parse('\\forall x (x>0)').json).toMatchInlineSnapshot(`
       [
         ForAll,
         x,
         [
-          Delimiter,
-          [
-            Greater,
-            x,
-            0,
-          ],
+          Less,
+          0,
+          x,
         ],
       ]
     `);
@@ -783,9 +781,9 @@ describe('Logic', () => {
         ForAll,
         x,
         [
-          Greater,
-          x,
+          Less,
           0,
+          x,
         ],
       ]
     `);
@@ -808,9 +806,9 @@ describe('Logic', () => {
         Exists,
         x,
         [
-          Greater,
-          x,
+          Less,
           0,
+          x,
         ],
       ]
     `);
@@ -836,9 +834,9 @@ describe('Logic', () => {
         NotForAll,
         x,
         [
-          Greater,
-          x,
+          Less,
           0,
+          x,
         ],
       ]
     `);
@@ -850,24 +848,26 @@ describe('Logic', () => {
         NotExists,
         x,
         [
-          Greater,
-          x,
+          Less,
           0,
+          x,
         ],
       ]
     `);
   });
 
   // Serialization tests
+  // The quantifier body is canonicalized (the quantifiers have a `canonical`
+  // handler), so a `Greater` body is serialized in its canonical `Less` form.
   it('should serialize ForAll', () => {
     expect(ce.expr(['ForAll', 'x', ['Greater', 'x', 0]]).latex).toBe(
-      '\\forall x, x\\gt0'
+      '\\forall x, 0\\lt x'
     );
   });
 
   it('should serialize Exists', () => {
     expect(ce.expr(['Exists', 'x', ['Greater', 'x', 0]]).latex).toBe(
-      '\\exists x, x\\gt0'
+      '\\exists x, 0\\lt x'
     );
   });
 
@@ -879,13 +879,13 @@ describe('Logic', () => {
 
   it('should serialize NotForAll', () => {
     expect(ce.expr(['NotForAll', 'x', ['Greater', 'x', 0]]).latex).toBe(
-      '\\lnot\\forall x, x\\gt0'
+      '\\lnot\\forall x, 0\\lt x'
     );
   });
 
   it('should serialize NotExists', () => {
     expect(ce.expr(['NotExists', 'x', ['Greater', 'x', 0]]).latex).toBe(
-      '\\lnot\\exists x, x\\gt0'
+      '\\lnot\\exists x, 0\\lt x'
     );
   });
 

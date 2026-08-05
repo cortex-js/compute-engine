@@ -88,7 +88,42 @@
   names). The same semantics are what the new `scope` option on `ce.parse()`
   provides — see New Features.
 
+- **`evaluate()` on a raw or structural expression now evaluates through its
+  canonical form.** Binder machinery — declaring a `Sum` index, normalizing
+  `Tuple → Limits` — is a canonicalization step, so evaluating a structural
+  binder ran its handler against an unbound index and returned a *silently
+  wrong value*: `["Sum", "n", ["Tuple", "n", 1, 3]]` boxed with
+  `structural: true` evaluated to `9` instead of `6`, and the same tree boxed
+  raw evaluated to itself. Both routes (and `.N()` and async evaluation) now
+  produce the canonical result: the receiver stays on its tier, but
+  `.evaluate()` leaves the tier and every tier agrees on the value. Two
+  consequences: a raw `2 + 3` now evaluates to `5` instead of echoing
+  itself, and arity or type errors that only canonicalization checks can now
+  surface from evaluating a raw tree (a raw `5 |> 3` evaluates to the same
+  `incompatible-type` error the canonical route reports, where it used to
+  stay an inert `Pipe`). A bare unbound *symbol* still evaluates to itself.
+
+- **Quantifiers now canonicalize their operands.** `ForAll`, `Exists`,
+  `NotForAll`, `NotExists` and `ExistsUnique` held their operands without a
+  canonical handler, so a parsed quantifier kept raw parse sugar in its body:
+  `InvisibleOperator` where `Multiply` was meant, `Delimiter(Sequence(…))`
+  where a `Tuple` was meant, stray `HorizontalSpacing` from `\quad`. The
+  condition and body are now canonical (e.g. a condition `x > 0` normalizes
+  to `0 < x` like every other comparison), which also makes the serialized
+  form round-trip.
+
 ### New Features
+
+- **`expr.hash` is now a documented public property.** A structural,
+  bucketing-grade hash suitable as an **in-memory** cache or bucket key with a
+  deep compare on hit. The documented contract: `a.isSame(b)` implies
+  `a.hash === b.hash` (the hash is a pure function of the canonical tree — a
+  symbol's assigned value never affects it); it is deterministic within a
+  release but **not stable across releases**, so it must never be persisted;
+  it is 32-bit-class, so a hash hit must be verified with `isSame()`; and it
+  folds bound-variable names (binding-identity, not alpha-equivalence),
+  matching `isSame()`. The property itself is unchanged — it was previously
+  marked `@internal`.
 
 - **Parametric polymorphism: `forall` type variables in function signatures.**
   The type language gains rank-1 (prenex) type variables with optional ground
@@ -503,7 +538,33 @@
   engine reads those as variables when they appear un-applied, so they keep
   their free-symbol reading.)
 
-## 0.100.3 _2026-08-03_
+- **Six classes of LaTeX round-trip defects are fixed** (found by the corpus
+  round-trip lane, `npm run check:roundtrip` — 18 of its 37 recorded
+  failures cleared):
+  - A symbol naming an operator, used as a value, serialized to the *empty
+    string*, silently deleting the operand: `(A, +)` — the tuple of a set
+    and its operation — parsed to `["Tuple", "A", "Add"]` but serialized as
+    `(A,)`. Such a symbol now falls back to `\mathrm{Add}`, which parses
+    back to the same symbol.
+  - A one-operand `Tuple` serialized as `(x)`, which parses back as plain
+    `x`. It now serializes with a trailing comma, `(x,)`, a spelling the
+    parser already accepted.
+  - A product containing an ellipsis (`ContinuationPlaceholder`) serialized
+    with mixed separators (`ab\times\dots\times z`), so the juxtaposed run
+    regrouped into a nested `Multiply` when parsed back; and a product of
+    rationals with an ellipsis was merged into a single `\frac`, moving
+    factors across the ellipsis and folding them (`3/2 · 6/5 · … · X` came
+    back with a spurious `9/5`). An ellipsis product now joins every factor
+    with an explicit multiplication sign and is never merged into one
+    fraction.
+  - `Prime` serialized its exponent unbraced (`A^\prime`), so a following
+    letter was swallowed into the command name: `\angle BA'C` serialized
+    back to `\primeC`, which does not parse. The exponent is now braced.
+  - A quantifier body serialized without delimiters, so `\forall k\ge0,
+    a_0=9\land a_1=3` parsed back with the `\land` bound *above* the
+    `ForAll`. The body is now parenthesized when its precedence requires
+    it, and — with quantifier operands now canonical (see Breaking
+    Changes) — the body round-trips structurally.
 
 ### New Features
 

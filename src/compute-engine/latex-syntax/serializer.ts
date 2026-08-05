@@ -295,7 +295,14 @@ export class Serializer {
       // Print the trigger as an symbol
       return serializeSymbol(symbol(expr) ?? '') ?? '';
     }
-    return def?.serialize?.(this, expr) ?? serializeSymbol(symbol(expr)) ?? '';
+    // The def may be for an OPERATOR of that name (e.g. the infix `Add`).
+    // Its serialize handler expects an application: with no operands it
+    // yields nothing, which would silently delete the symbol. When that
+    // happens, fall back to serializing the name as a symbol (`\mathrm{Add}`),
+    // which re-parses to the same symbol.
+    const result = def?.serialize?.(this, expr);
+    if (result !== undefined && result.trim() !== '') return result;
+    return serializeSymbol(symbol(expr)) ?? '';
   }
 
   serializeFunction(

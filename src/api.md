@@ -742,6 +742,10 @@ symbol(sym, options?): Expression
 
 [`Metadata`](#metadata-1)
 
+####### autoDeclare?
+
+`boolean`
+
 </MemberCard>
 
 <MemberCard>
@@ -946,6 +950,43 @@ popScope(): void
 
 <MemberCard>
 
+##### ExpressionComputeEngine.createScope()
+
+```ts
+createScope(bindings?, parent?): InspectableScope
+```
+
+####### bindings?
+
+`Record`\<`string`, 
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
+  \| [`TypeReference`](#typereference)
+  \| [`TaggedValueDefinition`](#taggedvaluedefinition)
+  \| [`TaggedOperatorDefinition`](#taggedoperatordefinition)\>
+
+####### parent?
+
+`Scope`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.lookupDefinition()
 
 ```ts
@@ -1046,6 +1087,10 @@ declareType(name, type, options?): void
 ####### mint?
 
 `boolean`
+
+####### typeParams?
+
+[`TypeParamsOption`](#typeparamsoption)
 
 </MemberCard>
 
@@ -1172,7 +1217,7 @@ declare(id, def, scope?): IComputeEngine
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`) => `boolean` \| `undefined`;
+  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
  \}\>\>
@@ -1258,7 +1303,7 @@ declare(id, def, scope?): IComputeEngine
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`) => `boolean` \| `undefined`;
+  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
  \}\>\>
@@ -1378,7 +1423,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`) => `boolean` \| `undefined`;
+  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
  \}\>\>
@@ -1464,7 +1509,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`) => `boolean` \| `undefined`;
+  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
  \}\>\>
@@ -3266,7 +3311,7 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   evaluateAsync: (ops, options) => Promise<Expression | undefined>;
   evalDimension: (args, options) => Expression;
   compile: OperatorCompileHandler;
-  eq: (a, b) => boolean | undefined;
+  eq: (a, b, prover?) => boolean | undefined;
   neq: (a, b) => boolean | undefined;
   collection: CollectionHandlers;
 };
@@ -3531,6 +3576,22 @@ declared on one of those heads is ignored.
 Return `undefined` (or an empty string) to fall back to the
 default compilation (a `null` returned from untyped JavaScript is
 tolerated and treated the same). See [OperatorCompileHandler](#operatorcompilehandler).
+
+#### OperatorDefinition.eq?
+
+```ts
+optional eq?: (a, b, prover?) => boolean | undefined;
+```
+
+Custom equality handler.
+
+`prover` indicates the tier of the caller: `false` for the cheap
+arithmetic tier (`eq()` / `.isEqual()`), `true` for the prover tier
+(`eqIdentical()` / `.isIdenticallyEqual()`), and `undefined` when the
+caller does not distinguish (e.g. `cmp()`). A handler that does
+prover-tier work (sampling, expand/simplify, identity questions in the
+free variables) must decline — return `undefined` — when
+`prover === false`.
 
 </MemberCard>
 
@@ -4452,8 +4513,10 @@ simplifications are valid.
 ##### BoxedOperatorDefinition.eq?
 
 ```ts
-optional eq?: (a, b) => boolean | undefined;
+optional eq?: (a, b, prover?) => boolean | undefined;
 ```
+
+See `OperatorDefinition.eq` for the meaning of `prover`.
 
 </MemberCard>
 
@@ -8477,6 +8540,10 @@ symbol(sym, options?): Expression
 
 [`Metadata`](#metadata-1)
 
+####### autoDeclare?
+
+`boolean`
+
 </MemberCard>
 
 <MemberCard>
@@ -8681,6 +8748,43 @@ popScope(): void
 
 <MemberCard>
 
+##### IComputeEngine.createScope()
+
+```ts
+createScope(bindings?, parent?): InspectableScope
+```
+
+####### bindings?
+
+`Record`\<`string`, 
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
+  \| [`TypeReference`](#typereference)
+  \| [`TaggedValueDefinition`](#taggedvaluedefinition)
+  \| [`TaggedOperatorDefinition`](#taggedoperatordefinition)\>
+
+####### parent?
+
+`Scope`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.lookupDefinition()
 
 ```ts
@@ -8781,6 +8885,10 @@ declareType(name, type, options?): void
 ####### mint?
 
 `boolean`
+
+####### typeParams?
+
+[`TypeParamsOption`](#typeparamsoption)
 
 </MemberCard>
 
@@ -8907,7 +9015,7 @@ declare(id, def, scope?): IComputeEngine
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`) => `boolean` \| `undefined`;
+  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
  \}\>\>
@@ -8993,7 +9101,7 @@ declare(id, def, scope?): IComputeEngine
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`) => `boolean` \| `undefined`;
+  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
  \}\>\>
@@ -9113,7 +9221,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`) => `boolean` \| `undefined`;
+  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
  \}\>\>
@@ -9199,7 +9307,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evaluateAsync`: (`ops`, `options`) => `Promise`\<[`Expression`](#expression-5) \| `undefined`\>;
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `eq`: (`a`, `b`) => `boolean` \| `undefined`;
+  `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
  \}\>\>
@@ -9761,6 +9869,43 @@ Lexical scope specialized to boxed definitions.
 
 <MemberCard>
 
+### InspectableScope
+
+```ts
+type InspectableScope = KernelInspectableScope<BoxedDefinition>;
+```
+
+A caller-owned, readable lexical scope — the product of
+`ce.createScope()`. Specialized to boxed definitions.
+
+</MemberCard>
+
+<MemberCard>
+
+### ScopeDeclaration
+
+```ts
+type ScopeDeclaration = KernelScopeDeclaration<BoxedDefinition>;
+```
+
+One entry of an [InspectableScope](#inspectablescope) harvest.
+
+</MemberCard>
+
+<MemberCard>
+
+### ScopeNarrowing
+
+```ts
+type ScopeNarrowing = KernelScopeNarrowing<BoxedDefinition>;
+```
+
+One outer-definition narrowing observed by an [InspectableScope](#inspectablescope).
+
+</MemberCard>
+
+<MemberCard>
+
 ### EvalContext
 
 ```ts
@@ -10035,6 +10180,42 @@ This expression is a number, but not `±Infinity`, `ComplexInfinity` or
 </MemberCard>
 
 #### Other
+
+<MemberCard>
+
+##### Expression.hash
+
+```ts
+readonly hash: number;
+```
+
+A structural hash of this expression, suitable as an **in-memory**
+bucketing or cache key with a deep compare on hit.
+
+The contract:
+
+- **Invariant**: if `a.isSame(b)` is `true`, then `a.hash === b.hash`.
+  The hash is the structural tier's companion — a pure function of the
+  canonical tree. A symbol's assigned value never affects it.
+
+- **Stability**: deterministic within a release — the same canonical
+  tree yields the same hash across engine instances and processes, as
+  it is computed from structure and strings only, with no engine state.
+  **Not stable across releases**: the hash function may change in any
+  release, so a cache keyed on it must not outlive the engine build.
+  Never persist it.
+
+- **Collisions**: a 32-bit-class, bucketing-grade hash. Distinct
+  expressions may share a hash; always verify a hash hit with
+  `isSame()` (or another structural compare) before treating two
+  expressions as identical.
+
+- **Bound variables**: folds bound-variable _names_ (binding-identity,
+  not alpha-equivalence), matching `isSame()`: `Sum(i, i in 1..n)` and
+  `Sum(j, j in 1..n)` hash differently, just as they are not `isSame()`.
+  This clause co-evolves with `isSame()` semantics.
+
+</MemberCard>
 
 <MemberCard>
 
@@ -12137,6 +12318,46 @@ holds for all values (`(x+1)^2` vs `x^2+2x+1`) is `true`, and anything
 else — including `x` vs `2`, or `x+1` vs `5`, which an assumption such
 as `x = 4` could make true — is `undefined`, never a definitive
 `false`.
+
+####### other
+
+`number` \| [`Expression`](#expression-5)
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.isIdenticallyEqual()
+
+```ts
+isIdenticallyEqual(other): boolean | undefined
+```
+
+Identity of this expression and `other` in **all** their free variables,
+that is `sin(x)^2 + cos(x)^2 ≡ 1`. This is the deepest — and most
+expensive — of the three equality tiers:
+
+| Method | Semantics |
+| --- | --- |
+| `expr.isSame(other)` | **Structural**: syntactic equality of the canonical forms. Always decidable, no evaluation. |
+| `expr.isEqual(other)` | **Arithmetic**: the values are equal (within `engine.tolerance`). |
+| `expr.isIdenticallyEqual(other)` | **Identity**: the two expressions are equal for every value of their free variables. |
+
+Three-valued: `true` when identity could be established, `false` when the
+expressions are provably different, and `undefined` when neither could be
+determined. In particular, expressions that merely *disagree* at sampled
+points (`x+1` vs `x+2`) are `undefined`, not `false`: an assumption could
+still constrain them equal.
+
+Identity is established by stochastic sampling (evaluating both
+expressions at random points), falling back to a symbolic
+expand-and-simplify proof. A `true` obtained from sampling alone is
+therefore a very strong indication, but not a formal proof
+([Richardson's theorem](https://en.wikipedia.org/wiki/Richardson%27s_theorem)
+makes a complete decision procedure impossible).
+
+This is the API counterpart of the `IdenticallyEqual` operator (`\equiv`
+in LaTeX).
 
 ####### other
 
@@ -14525,6 +14746,32 @@ declared type is boxed. An unbounded variable's implicit bound is `any`.
 
 <MemberCard>
 
+### TypeParamsOption
+
+```ts
+type TypeParamsOption = 
+  | string
+  | ReadonlyArray<
+  | string
+  | {
+  name: string;
+  bound: Type | TypeString;
+}>;
+```
+
+The `typeParams` option of a generic type-ALIAS declaration
+(`ce.declareType('Pair', 'tuple<T, T>', { alias: true, typeParams: ['T'] })`).
+
+Either clause TEXT (`'T, U: number'`, also accepted one entry at a time) or
+pre-built parameters whose bound may be a type string. Every TEXT spelling
+goes through the shared clause parser (`parseTypeParameterClause`); the
+object-array form is validated directly by `normalizeDeclaredTypeParams`
+(same rules: reserved names, duplicates, ground bounds).
+
+</MemberCard>
+
+<MemberCard>
+
 ### FunctionSignature
 
 ```ts
@@ -14769,6 +15016,7 @@ type TypeReference = {
   name: string;
   alias: boolean;
   def: Type | undefined;
+  typeParams: TypeParameter[];
 };
 ```
 
@@ -14833,6 +15081,15 @@ Types are described using the following BNF grammar:
                | <set>
                | <broadcastable>
                | <collection>
+               | <type_reference>
+
+(A reference to a user-declared type. The optional argument list applies a
+GENERIC type alias (`Pair<integer>`); it is expanded eagerly into the
+substituted alias body when the type is built, so an applied reference never
+appears in a `Type`. The authoritative grammar lives with the parser in
+`./parser.ts`.)
+
+<type_reference> ::= ( "type" )? <identifier> ( "<" <type> ("," <type>)* ">" )?
 
 <primitive> ::= "any" | "unknown" | <value-type> | <symbolic-type> | <numeric-type>
 

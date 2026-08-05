@@ -709,7 +709,33 @@ export interface Expression {
   /** @internal */
   readonly _kind: string;
 
-  /** @internal */
+  /**
+   * A structural hash of this expression, suitable as an **in-memory**
+   * bucketing or cache key with a deep compare on hit.
+   *
+   * The contract:
+   *
+   * - **Invariant**: if `a.isSame(b)` is `true`, then `a.hash === b.hash`.
+   *   The hash is the structural tier's companion — a pure function of the
+   *   canonical tree. A symbol's assigned value never affects it.
+   *
+   * - **Stability**: deterministic within a release — the same canonical
+   *   tree yields the same hash across engine instances and processes, as
+   *   it is computed from structure and strings only, with no engine state.
+   *   **Not stable across releases**: the hash function may change in any
+   *   release, so a cache keyed on it must not outlive the engine build.
+   *   Never persist it.
+   *
+   * - **Collisions**: a 32-bit-class, bucketing-grade hash. Distinct
+   *   expressions may share a hash; always verify a hash hit with
+   *   `isSame()` (or another structural compare) before treating two
+   *   expressions as identical.
+   *
+   * - **Bound variables**: folds bound-variable _names_ (binding-identity,
+   *   not alpha-equivalence), matching `isSame()`: `Sum(i, i in 1..n)` and
+   *   `Sum(j, j in 1..n)` hash differently, just as they are not `isSame()`.
+   *   This clause co-evolves with `isSame()` semantics.
+   */
   readonly hash: number;
 
   /**

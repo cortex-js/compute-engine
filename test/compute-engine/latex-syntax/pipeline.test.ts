@@ -84,7 +84,13 @@ describe('PIPELINE OPERATOR — infix `x |> f`', () => {
 
   test('a non-function RHS remains an inert Pipe', () => {
     expect(parse('5|>3').json).toEqual(['Pipe', 5, 3]);
-    expect(parse('5|>3').evaluate().json).toEqual(['Pipe', 5, 3]);
+    // The RAW tree keeps the `Pipe` shape (type errors are a canonicalization
+    // check, not a parse one), but `evaluate()` answers with a canonical
+    // value on every tier — the same one the canonical route gives.
+    expect(parse('5|>3').evaluate().json).toEqual(
+      ce.parse('5|>3').evaluate().json
+    );
+    expect(parse('5|>3').evaluate().operator).toBe('Error');
   });
 });
 

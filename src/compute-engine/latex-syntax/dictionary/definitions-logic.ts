@@ -665,9 +665,15 @@ function serializeQuantifier(
     if (args.length === 1)
       return `${quantifierSymbol} ${serializer.serialize(args[0])}`;
 
-    // args[0] is the bound variable/condition, args[1] is the body
+    // args[0] is the bound variable/condition, args[1] is the body.
+    //
+    // The body is delimited when it binds looser than a comparison: the
+    // quantifier body is parsed with tight binding (standard FOL scope — see
+    // `tightBindingCondition`), so an undelimited `\forall x, a\land b`
+    // reparses as `And(b, ForAll(x, a))`, with the connective reassociated
+    // ABOVE the quantifier. `wrap` leaves comparisons (the usual body) alone.
     const boundVar = serializer.serialize(args[0]);
-    const body = serializer.serialize(args[1]);
+    const body = serializer.wrap(args[1], COMPARISON_PRECEDENCE);
     return `${quantifierSymbol} ${boundVar}, ${body}`;
   };
 }

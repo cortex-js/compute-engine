@@ -1662,8 +1662,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
   {
     name: 'Tuple',
+    // A one-element tuple needs a trailing comma: `(x)` would re-parse as
+    // the plain expression `x`, losing the tuple, while `(x,)` re-parses as
+    // `Tuple(x)`.
     serialize: (serializer, expr) =>
-      joinLatex(['(', serializeOps(',')(serializer, expr), ')']),
+      joinLatex([
+        '(',
+        serializeOps(',')(serializer, expr),
+        nops(expr) === 1 ? ',' : '',
+        ')',
+      ]),
   },
   {
     name: 'Pair',
@@ -1677,8 +1685,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
   {
     name: 'Single',
+    // `Single` is the MathJSON shorthand for a one-element `Tuple`: it needs
+    // a trailing comma, since `(x)` would re-parse as the plain expression
+    // `x`, losing the tuple.
     serialize: (serializer, expr) =>
-      joinLatex(['(', serializeOps(',')(serializer, expr), ')']),
+      joinLatex([
+        '(',
+        serializeOps(',')(serializer, expr),
+        nops(expr) === 1 ? ',' : '',
+        ')',
+      ]),
   },
 
   {
@@ -2405,9 +2421,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     serialize: (serializer, expr) => {
       const n2 = machineValue(operand(expr, 2)) ?? 1;
       const base = serializer.serialize(operand(expr, 1));
-      if (n2 === 1) return base + '^\\prime';
-      if (n2 === 2) return base + '^\\doubleprime';
-      if (n2 === 3) return base + '^\\tripleprime';
+      // Note: the prime command must be braced: an undelimited
+      // `A^\prime` swallows a following letter into the command name
+      // (`A^\primeC`) and no longer round-trips.
+      if (n2 === 1) return base + '^{\\prime}';
+      if (n2 === 2) return base + '^{\\doubleprime}';
+      if (n2 === 3) return base + '^{\\tripleprime}';
       return base + '^{(' + serializer.serialize(operand(expr, 2)) + ')}';
     },
   },
