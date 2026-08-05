@@ -837,8 +837,21 @@ export function parseQuantifier(
       const body = parser.parseEnclosure();
       parser.exitQuantifierScope();
       if (body) {
-        if (boundName) parser.pruneUndeclared([boundName], diagCp);
-        return [kind, symbol, missingIfEmpty(body)];
+        // Only commit to "symbol + enclosure-as-body" when the enclosure ends
+        // the quantified expression. If the input continues — e.g. the
+        // relation in `\forall f(x) > 0, f(x) < 1` — then the symbol and the
+        // group are a predicate application inside the CONDITION, not a bound
+        // variable and its body. Rewind (below) and let the condition parse
+        // run instead. `\forall x (x > 0)`, where nothing follows the group,
+        // keeps its parse.
+        parser.skipSpace();
+        if (
+          parser.atTerminator(terminator) ||
+          tightBindingCondition(parser, terminator)
+        ) {
+          if (boundName) parser.pruneUndeclared([boundName], diagCp);
+          return [kind, symbol, missingIfEmpty(body)];
+        }
       }
     }
 
@@ -865,28 +878,44 @@ export function parseQuantifier(
     // (a relation, not an operand the group could multiply), the group is
     // shaped like a proposition and nothing but the quantifier's own scope
     // boundary follows it. Otherwise rewind and parse greedily, as before.
-    const groupTerminator = {
-      ...condTerminator,
-      condition: (p: Parser) =>
-        p.peek === '(' || p.peek === '\\left' || condTerminator.condition(p),
-    };
-    const groupCondition = parser.parseExpression(groupTerminator);
-    if (groupCondition !== null && operator(groupCondition) !== '') {
-      parser.skipSpace();
-      parser.enterQuantifierScope();
-      const groupBody = parser.parseEnclosure();
-      parser.exitQuantifierScope();
-      parser.skipSpace();
-      if (
-        isQuantifierBodyShape(groupBody) &&
-        (parser.atTerminator(terminator) ||
-          tightBindingCondition(parser, terminator))
-      )
-        return [
-          kind,
-          groupCondition,
-          missingIfEmpty(groupBody),
-        ] as MathJsonExpression;
+    //
+    // The first `(` is not necessarily the body's: in
+    // `\forall f(x) > 0 (f(x) < 1)` it opens a predicate application inside
+    // the condition. So the candidate split points are tried left to right,
+    // each attempt requiring the group to start past the previous one.
+    let splitFrom = index;
+    while (true) {
+      const from = splitFrom;
+      const groupTerminator = {
+        ...condTerminator,
+        condition: (p: Parser) =>
+          ((p.peek === '(' || p.peek === '\\left') && p.index > from) ||
+          condTerminator.condition(p),
+      };
+      parser.index = index;
+      const groupCondition = parser.parseExpression(groupTerminator);
+      const groupAt = parser.index;
+      if (groupCondition !== null && operator(groupCondition) !== '') {
+        parser.skipSpace();
+        parser.enterQuantifierScope();
+        const groupBody = parser.parseEnclosure();
+        parser.exitQuantifierScope();
+        parser.skipSpace();
+        if (
+          isQuantifierBodyShape(groupBody) &&
+          (parser.atTerminator(terminator) ||
+            tightBindingCondition(parser, terminator))
+        )
+          return [
+            kind,
+            groupCondition,
+            missingIfEmpty(groupBody),
+          ] as MathJsonExpression;
+      }
+      // No split here: retry past this candidate. Stop when the attempt made
+      // no progress (no further `(` to try).
+      if (groupCondition === null || groupAt <= splitFrom) break;
+      splitFrom = groupAt;
     }
     parser.index = index;
 

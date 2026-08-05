@@ -436,7 +436,11 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\bar\\R', parse: 'ExtendedRealNumbers' },
 
   // Integers < 0
-  { name: 'NegativeIntegers', latexTrigger: '\\Z_{<0}' },
+  {
+    name: 'NegativeIntegers',
+    standaloneSymbol: true,
+    latexTrigger: '\\Z_{<0}',
+  },
   { latexTrigger: '\\Z_{\\lt0}', parse: 'NegativeIntegers' },
   { latexTrigger: '\\Z^-', parse: 'NegativeIntegers' },
   { latexTrigger: '\\Z^{-}', parse: 'NegativeIntegers' },
@@ -452,7 +456,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   },
   { latexTrigger: '\\Z_{\\leq0}', parse: 'NonPositiveIntegers' },
   { latexTrigger: '\\Z_{\\leqslant0}', parse: 'NonPositiveIntegers' },
-  { latexTrigger: '\\Z_{<0}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\Z^{-0}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\Z^{\\leq}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\Z^{\\le}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\Z^{\\leqslant}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\Z^{\\leq0}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\Z^{\\le0}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\Z^{\\leqslant0}', parse: 'NonPositiveIntegers' },
+  { latexTrigger: '\\Z^{0-}', parse: 'NonPositiveIntegers' },
 
   // Integers >  0
   { name: 'PositiveIntegers', standaloneSymbol: true, latexTrigger: '\\N^*' },

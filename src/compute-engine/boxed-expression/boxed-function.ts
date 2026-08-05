@@ -57,6 +57,7 @@ import {
   isString,
   isSymbol,
   isContinuationOperand,
+  isFoldBarrierProduct,
 } from './type-guards.js';
 import {
   armHasValueParam,
@@ -528,9 +529,14 @@ export class BoxedFunction
     // `ContinuationPlaceholder` operand is a notational object. Do not flatten
     // nested associative operands or sort — preserve source order and the
     // nested anchor structure (`2n`) in the serialized form.
+    // For a product the test is depth-aware (`isFoldBarrierProduct`): a
+    // canonical `Multiply` holds back a nested barrier product, so the
+    // ellipsis can sit below the surface (`2·(4·(2·…·n))`). Flattening there
+    // would splice the elided pattern into one chain and then SORT it.
     if (
       (def?.associative || def?.commutative) &&
-      !this.ops.some((x) => isContinuationOperand(x))
+      !this.ops.some((x) => isContinuationOperand(x)) &&
+      !isFoldBarrierProduct(this)
     ) {
       // Flatten the arguments if they are the same as the operator
       const xs: Expression[] = this.ops.map((x) => x.structural);

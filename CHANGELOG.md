@@ -22,6 +22,24 @@
   `\mathbb{Z}_{\ge0}` still name `PositiveIntegers`, `NegativeNumbers` and
   `NonNegativeIntegers`.
 
+- **Quantifiers accept an undelimited parenthesized body.**
+  `\forall x > 0 (x^2 > 0)` — a condition followed by a parenthesized body,
+  with no comma between them — now parses as
+  `["ForAll", <x > 0>, <x^2 > 0>]` for all five quantifiers (`\forall`,
+  `\exists`, `\exists!` and the negated forms). Previously the group was
+  absorbed into the condition as an implicit product. The split is accepted
+  only when the group reads as a proposition — a relation, a logic connective,
+  a membership, or a predicate application such as `(P(x))` — so
+  `\forall x > 2 (\sin y)` still reads the group as a factor of the condition.
+
+- **More spellings of the quotient ring and the sign-restricted number sets
+  parse.** `\frac{\Z}{n\Z}` (and `\dfrac`, `\tfrac`) now reads as
+  `["QuotientRing", "Integers", "n"]`, like the inline
+  `\mathbb{Z}/n\mathbb{Z}`, and serializes back to `\Z_{n}`. The terse
+  blackboard-bold family also accepts the short comparison commands —
+  `\R_{\ge 0}`, `\R_{\gt0}`, `\N_{\ge1}` and their siblings — which
+  previously required the spelled-out `\geq`/`\geqslant` forms.
+
 ### Bug Fixes
 
 - **A subscript or bracket on a set constant is no longer read as an index.**
@@ -150,6 +168,59 @@
   a different binder identity (the fallback compared with `isSame` and `isEqual`
   only, and `isEqual` no longer proves identities in free variables) — this
   recovers the `Sinc` derivative identity.
+
+- **A negated product now has a single canonical spelling.** `canonicalMultiply`
+  normalizes signs before folding exact numeric factors, so a fold that itself
+  produced a negative real coefficient — only a product with complex factors
+  can, e.g. `i \cdot i = -1` — stranded a literal `-1` operand:
+  `["Multiply", "ImaginaryUnit", "ImaginaryUnit", "a", "b"]` canonicalized to
+  `["Multiply", -1, "a", "b"]`, which serializes as `-(ab)` and re-parses as
+  the structurally different `["Negate", ["Multiply", "a", "b"]]`. A
+  fold-produced negative coefficient now re-enters the sign normalization, so
+  both spellings converge on `Negate(Multiply(a, b))` — the same form literal
+  input has always produced. With this, every remaining serialize-and-reparse
+  exception in the MathNet corpus ledger is a documented-lossy prettification:
+  the ledger carries zero bug classes (385/391 round-trip).
+
+- **A function assigned at the top level is no longer mistaken for an
+  un-applied builtin.** The single-uppercase-letter fallback (see the `N`/`D`
+  entry above) decided "standard library" by scope position, but
+  `ce.assign('F', ce.parse('x \mapsto x^2'))` lands its definition in the same
+  scope as the library — so `F + 1` silently shadowed the function with an
+  unknown variable, and from then on `F(2)` evaluated to the product `2F`.
+  The fallback now discriminates on the definition's origin: a user-defined
+  function used as a numeric operand surfaces an `incompatible-type` error
+  and the function stays intact. Devolution of the builtins themselves
+  (`N + 1`, `S/D`) is unchanged.
+
+- **A raw (non-canonical) symbol now evaluates through its binding**, matching
+  the behavior raw and structural *function* nodes gained in 0.101.0. With
+  `x` assigned `5`, `ce.box('x', { canonical: false }).evaluate()` returned
+  the symbol `x`; it now returns `5`, while the receiver stays on its tier. A
+  symbol with no assigned value still evaluates to itself.
+
+- **The ellipsis fold barrier holds at any depth, on every route.** A product
+  carrying a `ContinuationPlaceholder` (`\dots`) in a nested operand could
+  still be spliced — and its factors folded or reordered across the ellipsis —
+  when it arrived through raw MathJSON (`ce.box`), wrapped in a `Sequence`, or
+  as an explicit `\cdot`/`*` chain hanging off a juxtaposed run:
+  `(px_1 + 1) \cdots (px_n + 1) \cdot p^m` re-serialized with the `\dots`
+  moved to the front. All flattening sites now share one depth-aware barrier,
+  and an explicit multiplication folds a juxtaposed ellipsis run into a single
+  flat notational product, which round-trips.
+
+- **An unknown function head whose name collides with a claimed constant
+  spelling is spelled upright.** A function head literally named `pi` serialized
+  as `\pi(x)`, which re-parses as `Pi` — the constant, a different symbol. The
+  head-spelling path now consults the same claimed-spellings table as bare
+  symbols: `\mathrm{pi}(x)`, `\mathrm{zeta}(x)`. A custom dictionary entry for
+  such a head with a notation of its own is honored — only the colliding
+  auto-generated spelling is bypassed.
+
+- `InterpolatingFunction` used as a bare symbol no longer serializes with a
+  trailing empty subscript (`\operatorname{InterpolatingFunction}_{}`); it is
+  spelled `\mathrm{InterpolatingFunction}`, which re-parses to the symbol. The
+  applied form keeps its domain-subscript notation.
 
 ## 0.101.0 _2026-08-04_
 

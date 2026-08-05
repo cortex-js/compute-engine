@@ -580,6 +580,30 @@ function hasContinuationFactor(expr: MathJsonExpression): boolean {
 }
 
 /**
+ * True for a `Multiply` operand that is itself an ellipsis fold barrier: it
+ * carries a `ContinuationPlaceholder` somewhere below, through `Multiply`/
+ * `Sequence` nesting. A canonical product holds such an operand back nested
+ * (`2·(4·(2·…·n))`), and the nesting is load-bearing: serialized as a flat
+ * `\times` chain it re-parses flat, so the elided pattern is lost. The parent
+ * must parenthesize it and join with an explicit separator.
+ */
+function isFoldBarrierFactor(
+  expr: MathJsonExpression | null | undefined
+): boolean {
+  if (expr === null || expr === undefined) return false;
+  if (operator(expr) !== 'Multiply') return false;
+  const contains = (x: MathJsonExpression): boolean => {
+    if (symbol(x) === 'ContinuationPlaceholder') return true;
+    const h = operator(x);
+    if (h === 'Negate')
+      return symbol(operand(x, 1)) === 'ContinuationPlaceholder';
+    if (h === 'Multiply' || h === 'Sequence') return operands(x).some(contains);
+    return false;
+  };
+  return operands(expr).some(contains);
+}
+
+/**
  * Fold an explicit multiplication (`\cdot`, `*`) operand into a `Multiply`
  * chain. Like `foldAssociativeOperator`, plus one repair: an UNDELIMITED
  * juxtaposition (`InvisibleOperator`) operand that carries a direct
@@ -629,7 +653,11 @@ function serializeMultiply(
   //  - a uniform EXPLICIT separator between every factor: mixing juxtaposition
   //    with `\times` (`ab\times\dots\times z`) lets the juxtaposed run bind
   //    tighter and re-parse as a nested `Multiply`.
-  const isContinuationProduct = hasContinuationFactor(expr);
+  //  - a nested barrier operand (`2·(4·(2·…·n))`) makes the parent notational
+  //    too: it must not aggregate across the nested ellipsis either, and its
+  //    factors are joined explicitly for the same regrouping reason.
+  const isContinuationProduct =
+    hasContinuationFactor(expr) || operands(expr).some(isFoldBarrierFactor);
 
   //
   // Is it a fraction?
@@ -752,10 +780,15 @@ function serializeMultiply(
     // into the `Mod` on either side (`x·Mod(A,2)` → `xA\bmod2` re-parses as
     // `Mod(xA,2)`), so wrap `Mod` factors above their own precedence to
     // force parens.
+    // A nested fold-barrier product must keep its parentheses (see
+    // `isFoldBarrierFactor`): wrap above multiplication precedence to force
+    // them, so the nesting survives the round-trip.
     term =
       operator(arg) === 'Mod' && nops(arg) === 2
         ? serializer.wrap(arg, DIVISION_PRECEDENCE + 1)
-        : serializer.wrap(arg, MULTIPLICATION_PRECEDENCE);
+        : isFoldBarrierFactor(arg)
+          ? serializer.wrap(arg, MULTIPLICATION_PRECEDENCE + 1)
+          : serializer.wrap(arg, MULTIPLICATION_PRECEDENCE);
 
     // 2.2. The terms can be separated by an invisible multiply.
     const isContinuation = symbol(arg) === 'ContinuationPlaceholder';

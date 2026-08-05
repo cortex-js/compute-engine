@@ -478,6 +478,42 @@ describe('Pins: notations that are NOT ring constructions', () => {
     expect(parse('\\Z^{\\ge0}')).toBe('NonNegativeIntegers');
   });
 
+  test('`\\Z_{<0}` is NegativeIntegers on both spellings of `\\Z`', () => {
+    // The terse and `\mathbb` spellings used to disagree: a stray
+    // `\Z_{<0}` entry in the NonPositiveIntegers block shadowed the
+    // NegativeIntegers trigger (later entries win at indexing), so
+    // `\Z_{<0}` parsed as `NonPositiveIntegers` while `\mathbb{Z}_{<0}`
+    // parsed as `NegativeIntegers`.
+    expect(parse('\\Z_{<0}')).toBe('NegativeIntegers');
+    expect(parse('\\mathbb{Z}_{<0}')).toBe('NegativeIntegers');
+    expect(parse('\\Z_{\\lt0}')).toBe('NegativeIntegers');
+
+    // The `\le0` family the stray entry sat in keeps its own spellings...
+    for (const latex of ['\\Z_{\\le0}', '\\Z_{\\leq0}', '\\Z_{\\leqslant0}'])
+      expect(parse(latex)).toBe('NonPositiveIntegers');
+
+    // ...plus the superscript spellings it was missing, mirroring the
+    // `\Z^{\ge…}`/`\R^{\le…}` families.
+    for (const latex of [
+      '\\Z^{\\le0}',
+      '\\Z^{\\leq0}',
+      '\\Z^{\\leqslant0}',
+      '\\Z^{\\le}',
+      '\\Z^{\\leq}',
+      '\\Z^{\\leqslant}',
+      '\\Z^{-0}',
+      '\\Z^{0-}',
+    ])
+      expect(parse(latex)).toBe('NonPositiveIntegers');
+  });
+
+  test('`NegativeIntegers` serializes symbolically and round-trips', () => {
+    expect(ce.box('NegativeIntegers').latex).toBe('\\Z_{<0}');
+    expect(roundTrips('NegativeIntegers')).toBe(true);
+    expect(ce.box('NonPositiveIntegers').latex).toBe('\\Z_{\\le0}');
+    expect(roundTrips('NonPositiveIntegers')).toBe(true);
+  });
+
   test('At over a genuine indexed collection is untouched', () => {
     expect(ce.parse('[1,2,3][2]').evaluate().json).toBe(2);
     expect(ce.box(['At', ['List', 1, 2, 3], 2]).evaluate().json).toBe(2);

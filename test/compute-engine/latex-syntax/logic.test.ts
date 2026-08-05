@@ -920,6 +920,25 @@ describe('Logic', () => {
     );
   });
 
+  it('should not read a predicate application as the bound variable', () => {
+    // `f(x)` opens the CONDITION here: neither the symbol `f` nor the group
+    // `(x)` is a bound variable / body pair, since the relation continues past
+    // the group. Both the comma and the undelimited-group form of the body
+    // give the same shape.
+    const forAll =
+      '["ForAll",["Less",0,["Multiply","f","x"]],["Less",["Multiply","f","x"],1]]';
+    expect(parseJson('\\forall f(x) > 0, f(x) < 1')).toBe(forAll);
+    expect(parseJson('\\forall f(x) > 0 (f(x) < 1)')).toBe(forAll);
+    expect(parseJson('\\exists f(x) > 0, f(x) < 1')).toBe(
+      '["Exists",["Less",0,["Multiply","f","x"]],["Less",["Multiply","f","x"],1]]'
+    );
+    // ... while a bare variable followed by a parenthesized proposition is
+    // still a bound variable + body: nothing follows the group.
+    expect(parseJson('\\forall x (x > 0)')).toBe(
+      '["ForAll","x",["Less",0,"x"]]'
+    );
+  });
+
   // Serialization tests
   // The quantifier body is canonicalized (the quantifiers have a `canonical`
   // handler), so a `Greater` body is serialized in its canonical `Less` form.

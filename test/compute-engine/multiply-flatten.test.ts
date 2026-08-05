@@ -279,6 +279,46 @@ describe('CANONICAL MULTIPLY IS FLAT', () => {
         ['Multiply', '2', '...', 'n'],
       ]);
     });
+
+    // The canonical tree keeps the barrier nested; the SERIALIZED form has to
+    // keep it nested too. `.structural` (which `.json` goes through) flattens
+    // and SORTS associative operands, which would splice `2·(4·(2·…·n))` into
+    // one chain and slide the two `2`s together — destroying the elided
+    // pattern and the round trip.
+    test('a nested barrier keeps its nesting and source order in MathJSON', () => {
+      const ce = new ComputeEngine();
+      const expr = ce.parse(
+        '2\\left(4\\left(2 \\cdot \\dots \\cdot n\\right)\\right)'
+      );
+      expect(expr.json).toEqual([
+        'Multiply',
+        2,
+        ['Multiply', 4, ['Multiply', 2, 'ContinuationPlaceholder', 'n']],
+      ]);
+    });
+
+    test('a nested barrier serializes with its parentheses and round-trips', () => {
+      const ce = new ComputeEngine();
+      const expr = ce.parse(
+        '2\\left(4\\left(2 \\cdot \\dots \\cdot n\\right)\\right)'
+      );
+      expect(expr.latex).toBe('2\\times(4\\times(2\\times\\dots\\times n))');
+      expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+    });
+
+    test('a one-level nested barrier round-trips too', () => {
+      const ce = new ComputeEngine();
+      const expr = ce.parse('2\\left(2 \\cdot \\dots \\cdot n\\right)');
+      expect(expr.latex).toBe('2\\times(2\\times\\dots\\times n)');
+      expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+    });
+
+    test('an ordinary nested product still flattens on output', () => {
+      const ce = new ComputeEngine();
+      const expr = ce.parse('a\\left(b\\left(cd\\right)\\right)');
+      expect(expr.json).toEqual(['Multiply', 'a', 'b', 'c', 'd']);
+      expect(expr.latex).toBe('abcd');
+    });
   });
 
   /**
