@@ -25,6 +25,13 @@ export type CommonEntry = {
 
   serialize?: SerializeHandler;
 
+  /**
+   * True when the LaTeX this entry serializes for the bare symbol parses back
+   * to that same symbol, so it can be used for an unapplied operator (see
+   * `BaseEntry.standaloneSymbol`). Otherwise the name is spelled out.
+   */
+  standaloneSymbol?: boolean;
+
   /** Note: not all kinds have a `latexTrigger` or `symbolTrigger`.
    * For example, matchfix operators use `openTrigger`/`closeTrigger`
    */

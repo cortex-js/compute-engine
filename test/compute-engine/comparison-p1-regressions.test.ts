@@ -54,14 +54,26 @@ describe('CM-P1-2: isSame is a symmetric, transitive equivalence relation', () =
     expect(lit.isEqual(one)).toBe(true);
   });
 
-  test('ImaginaryUnit vs Complex(0,1) is symmetric', () => {
+  test('symbol-valued-i vs Complex(0,1) is symmetric', () => {
     const ce = new ComputeEngine();
-    const i = ce.symbol('ImaginaryUnit');
+    // Note: the `ImaginaryUnit` symbol no longer serves as the fixture here —
+    // it is declared `holdUntil: 'never'`, so it canonicalizes straight to the
+    // complex literal (there is a single canonical spelling of `i`). A plain
+    // assigned symbol still exercises the symbol-vs-value asymmetry.
+    ce.assign('myI', ce.box(['Complex', 0, 1]));
+    const i = ce.symbol('myI');
     const c = ce.box(['Complex', 0, 1]);
     expect(i.isSame(c)).toBe(false);
     expect(c.isSame(i)).toBe(false);
     expect(i.isEqual(c)).toBe(true);
     expect(c.isEqual(i)).toBe(true);
+  });
+
+  test('the imaginary unit has ONE canonical spelling', () => {
+    const ce = new ComputeEngine();
+    expect(ce.symbol('ImaginaryUnit').isSame(ce.box(['Complex', 0, 1]))).toBe(
+      true
+    );
   });
 
   test('exact vs inexact 1/3 is symmetric and strict (both directions false)', () => {

@@ -188,6 +188,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
   // Constants
   {
     name: 'True',
+    standaloneSymbol: true,
     kind: 'symbol',
     latexTrigger: ['\\top'], // ⊤ U+22A4
   },
@@ -209,6 +210,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
 
   {
     name: 'False',
+    standaloneSymbol: true,
     kind: 'symbol',
     latexTrigger: ['\\bot'], // ⊥ U+22A5
   },

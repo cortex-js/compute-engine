@@ -57,7 +57,13 @@ export class EngineStartupCoordinator {
       NaN: new BoxedNumber(this.engine, Number.NaN),
       PositiveInfinity: new BoxedNumber(this.engine, Number.POSITIVE_INFINITY),
       NegativeInfinity: new BoxedNumber(this.engine, Number.NEGATIVE_INFINITY),
-      I: new BoxedNumber(this.engine, { im: 1 }),
+      // The imaginary unit is an EXACT constant (like `√2`), so it must be
+      // built from its exact components. `{ im: 1 }` would take the
+      // `'im' in value` branch of `_numericValue()`, which produces an
+      // *inexact* Big/Machine value — and every exactness-gated fold
+      // (`canonicalPower`'s `i^2 = -1`, …) then declines on `ce.I` while
+      // folding the identical `["Complex", 0, 1]` literal, which boxes exact.
+      I: new BoxedNumber(this.engine, { rational: [0, 1], imRational: [1, 1] }),
       ComplexInfinity: new BoxedNumber(this.engine, {
         re: Infinity,
         im: Infinity,

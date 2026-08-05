@@ -122,11 +122,10 @@ describe('CANONICAL FORMS', () => {
   test('Prefer (numeric value) x (term) over (integer x √(integer) x (term/integer))', () => {
     expect(check('3 \\sqrt{5} \\frac{x}{7}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 3, ["Sqrt", 5], ["Divide", "x", 7]]
-      canonical = ["Multiply", 3, ["Rational", 1, 7], ["Sqrt", 5], "x"]
-      simplify  = 3/7sqrt(5) * x
+      canonical = ["Multiply", ["Rational", 3, 7], ["Sqrt", 5], "x"]
       eval-auto = 3/7sqrt(5) * x
       eval-mach = 3/7sqrt(5) * x
-      N-auto    = 0.958314847499909869891 * x
+      N-auto    = 0.95831484749990986989 * x
       N-mach    = 0.9583148474999099 * x
     `);
   });
@@ -134,8 +133,7 @@ describe('CANONICAL FORMS', () => {
   test('Prefer (numeric value) x (term) over (integer x √(integer) x (term/integer))', () => {
     expect(check('3 \\sqrt{5} \\frac{x}{3}')).toMatchInlineSnapshot(`
       box       = ["InvisibleOperator", 3, ["Sqrt", 5], ["Divide", "x", 3]]
-      canonical = ["Multiply", 3, ["Rational", 1, 3], ["Sqrt", 5], "x"]
-      simplify  = sqrt(5) * x
+      canonical = ["Multiply", ["Sqrt", 5], "x"]
       eval-auto = sqrt(5) * x
       eval-mach = sqrt(5) * x
       N-auto    = 2.23606797749978969641 * x

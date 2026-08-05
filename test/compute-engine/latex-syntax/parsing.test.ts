@@ -365,7 +365,7 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
 
     test('Imaginary unit: ii', () => {
       expect(ce.parse('ii', { strict: false })).toMatchInlineSnapshot(
-        `ImaginaryUnit`
+        `["Complex", 0, 1]`
       );
     });
 

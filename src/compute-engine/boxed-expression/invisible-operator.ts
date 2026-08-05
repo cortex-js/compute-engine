@@ -346,9 +346,13 @@ export function canonicalInvisibleOperator(
           (x.isIndexedCollection && !isString(x)))
     )
   ) {
-    // Note: we don't want to use canonicalMultiply here, because
-    // invisible operator canonicalization should not affect multiplication,
-    // i.e. `1(2+3)` should not be simplified to `2+3`.
+    // Note: `_fn` rather than `canonicalMultiply` — this function decides
+    // *which operator* the juxtaposition is, and leaves the product's own
+    // canonicalization to its caller (the `InvisibleOperator` canonical
+    // handler in `library/core.ts`, which runs `canonicalMultiply` on the
+    // result). Splitting the two steps keeps the multiply-vs-apply decision
+    // readable and keeps this function free of arithmetic folding; the
+    // product IS still fully canonicalized — `1(2+3)` reduces to `5`.
     //
     return ce._fn('Multiply', ops);
   }

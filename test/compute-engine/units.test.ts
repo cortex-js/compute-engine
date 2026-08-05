@@ -507,7 +507,9 @@ describe('LATEX PARSING', () => {
 
   test('\\mathrm{i} alone is ImaginaryUnit', () => {
     const expr = engine.parse('\\mathrm{i}');
-    expect(expr.symbol).toBe('ImaginaryUnit');
+    // The imaginary unit has a single canonical spelling: the complex literal
+    // (the `ImaginaryUnit` symbol substitutes its value at canonicalization).
+    expect(expr.json).toEqual(['Complex', 0, 1]);
   });
 
   test('Non-unit \\mathrm{xyz} falls through to symbol parsing', () => {

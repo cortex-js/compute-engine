@@ -1,7 +1,7 @@
 {
   "generator": "scripts/fungrim/compile-rules.ts",
   "sliceEntries": 1648,
-  "emitted": 1440,
+  "emitted": 1435,
   "ledger": {
     "box-error": 1,
     "compat-signature": 3,
@@ -9,45 +9,45 @@
     "duplicate-undirected": 15,
     "guard-uncompilable": 69,
     "lhs-not-value-form": 85,
-    "no-fire": 23,
+    "no-fire": 28,
     "not-equation": 8
   },
   "byPurpose": {
-    "expand": 113,
-    "simplify": 1319,
+    "expand": 116,
+    "simplify": 1311,
     "transform": 8
   },
   "byClass": {
     "identity": 1090,
-    "specific-value": 350
+    "specific-value": 345
   },
   "byTarget": {
-    "simplify": 1440
+    "simplify": 1435
   },
   "sampleKinds": {
-    "numeric": 48,
-    "symbolic": 1392
+    "numeric": 106,
+    "symbolic": 1329
   },
   "headBuckets": {
-    "Multiply": 284,
+    "Multiply": 289,
     "Add": 223,
-    "Divide": 92,
+    "Divide": 91,
     "Apply": 63,
     "JacobiTheta": 62,
     "Which": 46,
     "CarlsonRJ": 36,
-    "Negate": 36,
+    "Negate": 30,
     "CarlsonRF": 25,
     "GCD": 25,
     "CarlsonRD": 20,
     "HurwitzZeta": 20,
-    "Power": 20,
     "Sin": 19,
     "Arctan": 18,
     "AGM": 16,
     "IncompleteEllipticE": 16,
     "IncompleteEllipticF": 16,
     "ModularJ": 16,
+    "Power": 16,
     "CarlsonRG": 14,
     "Digamma": 14,
     "LCM": 14,
@@ -56,13 +56,13 @@
     "EllipticK": 13,
     "DedekindEta": 12,
     "ModularLambda": 12,
-    "Sqrt": 12,
     "CarlsonRC": 11,
     "Map": 11,
+    "Sqrt": 11,
     "LambertW": 10,
+    "Abs": 9,
     "Conjugate": 9,
     "Imaginary": 9,
-    "Abs": 8,
     "Argument": 8,
     "ChebyshevU": 8,
     "EisensteinE": 8,
@@ -97,6 +97,7 @@
     "ArgMin": 2,
     "BernoulliPolynomial": 2,
     "Cos": 2,
+    "DedekindEtaEpsilon": 2,
     "Factorial": 2,
     "IncompleteBeta": 2,
     "KeiperLiLambda": 2,
@@ -115,7 +116,6 @@
     "BesselI": 1,
     "Beta": 1,
     "Cosh": 1,
-    "DedekindEtaEpsilon": 1,
     "Erf": 1,
     "Erfi": 1,
     "Floor": 1,
@@ -129,7 +129,7 @@
     "WeierstrassSigma": 1,
     "WeierstrassZeta": 1
   },
-  "declaredShells": 97,
+  "declaredShells": 94,
   "injected": [
     "zeta-trivial-zeros"
   ],
@@ -338,6 +338,11 @@
       "detail": "rule did not fire"
     },
     {
+      "id": "2eb54a",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
+    },
+    {
       "id": "2f4f74",
       "reason": "no-fire",
       "detail": "rule did not fire"
@@ -356,6 +361,11 @@
       "id": "31adf6",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "31b0df",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
     },
     {
       "id": "3d276b",
@@ -496,6 +506,11 @@
       "id": "67bb53",
       "reason": "lhs-not-value-form",
       "detail": "symbol"
+    },
+    {
+      "id": "67c262",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
     },
     {
       "id": "6880d0",
@@ -666,6 +681,11 @@
       "id": "88168b",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Or\""
+    },
+    {
+      "id": "8be138",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
     },
     {
       "id": "8d304b",
@@ -1031,6 +1051,11 @@
       "id": "df52fc",
       "reason": "guard-uncompilable",
       "detail": "unsupported conjunct \"Not\""
+    },
+    {
+      "id": "e0425a",
+      "reason": "no-fire",
+      "detail": "rule did not fire"
     },
     {
       "id": "e103e7",

@@ -1336,13 +1336,14 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // upright markup, leaving the bare letter to the writer.
   {
     name: 'CatalanConstant',
+    standaloneSymbol: true,
     latexTrigger: '\\operatorname{G}',
     serialize: '\\operatorname{G}',
   },
   { latexTrigger: '\\mathrm{G}', parse: 'CatalanConstant' },
   // `\varphi` keeps the bare trigger: the golden ratio is the dominant reading
   // of that spelling, and `\phi` remains available as a plain variable.
-  { name: 'GoldenRatio', latexTrigger: '\\varphi' },
+  { name: 'GoldenRatio', standaloneSymbol: true, latexTrigger: '\\varphi' },
   // `\gamma` is also very often a variable (Lorentz factor, damping ratio,
   // adiabatic index), so the bare spelling yields to a declaration the way
   // Euler `D_x` does. It cannot get the upright-markup treatment `G` gets —
@@ -1353,6 +1354,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   // constant still round-trips in an engine where `gamma` is a variable.
   {
     name: 'EulerGamma',
+    standaloneSymbol: true,
     latexTrigger: '\\gamma',
     serialize: '\\operatorname{EulerGamma}',
     // Decline (`null`) rather than returning the symbol when `gamma` is
@@ -1486,6 +1488,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'ComplexInfinity',
+    standaloneSymbol: true,
     latexTrigger: ['\\tilde', '\\infty'],
     serialize: '\\tilde\\infty',
   },
@@ -1493,10 +1496,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\tilde', '<{>', '\\infty', '<}>'],
     parse: 'ComplexInfinity',
   },
-  { name: 'Pi', kind: 'symbol', latexTrigger: ['\\pi'] },
+  {
+    name: 'Pi',
+    standaloneSymbol: true,
+    kind: 'symbol',
+    latexTrigger: ['\\pi'],
+  },
   { latexTrigger: ['π'], parse: 'Pi' },
   {
     name: 'ExponentialE',
+    standaloneSymbol: true,
     latexTrigger: ['\\exponentialE'],
     parse: 'ExponentialE',
     serialize: '\\exponentialE',
@@ -2009,6 +2018,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Lg',
+    standaloneSymbol: true,
     latexTrigger: ['\\lg'],
     serialize: (serializer, expr) =>
       symbol(expr) !== null
@@ -2026,6 +2036,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Lb',
+    standaloneSymbol: true,
     latexTrigger: '\\lb',
     parse: (parser: Parser) => parseLb(parser),
   },
@@ -2037,6 +2048,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Ln',
+    standaloneSymbol: true,
     latexTrigger: ['\\ln'],
     parse: (parser: Parser) => parseLog('Ln', parser),
     serialize: (serializer, expr) =>
@@ -2051,6 +2063,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   },
   {
     name: 'Log',
+    standaloneSymbol: true,
     latexTrigger: ['\\log'],
     parse: (parser: Parser) => parseLog('Log', parser),
     serialize: (serializer, expr) => {

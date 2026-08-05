@@ -202,7 +202,7 @@ describe('PROPERTIES OF NUMBERS', () => {
 
   test('ImaginaryUnit is a complex number', () => {
     expect(checkProps(ce.expr('ImaginaryUnit'))).toMatchInlineSnapshot(`
-      number literal: false
+      number literal: true
       type: imaginary
       real: false
       rational: false

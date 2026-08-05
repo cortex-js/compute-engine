@@ -173,8 +173,9 @@ describe('SUBSCRIPT SYMBOL HANDLING', () => {
     // 'i' with subscript is a new symbol, not ImaginaryUnit
     expect(ce.parse('i_A')).toMatchInlineSnapshot(`i_A`);
     expect(ce.parse('i_A+1')).toMatchInlineSnapshot(`["Add", "i_A", 1]`);
+    // (Dividing by the imaginary unit folds to multiplying by -i.)
     expect(ce.parse('\\frac{i_{A}}{i}')).toMatchInlineSnapshot(
-      `["Divide", "i_A", ["Complex", 0, 1]]`
+      `["Multiply", ["Complex", 0, -1], "i_A"]`
     );
 
     // Similarly for 'e' (ExponentialE)

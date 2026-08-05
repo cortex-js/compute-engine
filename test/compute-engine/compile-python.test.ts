@@ -352,8 +352,10 @@ describe('PYTHON TARGET', () => {
     });
 
     it('should compile ImaginaryUnit', () => {
+      // `ImaginaryUnit` canonicalizes to the complex literal (single canonical
+      // spelling of `i`), so it compiles through the complex-literal path.
       const expr = ce.expr('ImaginaryUnit');
-      expect(python.compile(expr).code).toBe('1j');
+      expect(python.compile(expr).code).toBe('complex(0, 1)');
     });
 
     it('should use cmath.sin for complex sin', () => {

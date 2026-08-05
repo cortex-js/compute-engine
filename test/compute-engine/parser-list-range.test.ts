@@ -713,12 +713,14 @@ describe('Parser: list range ellipsis', () => {
   // (`Multiply`), not a silent `Tuple`. This matters for a scaled `\frac`
   // whose numerator is a list/range: `2\frac{[…]}{8}` — the scaled numerator
   // has type `vector<N>`/`list<number>` but is not yet a concrete collection.
+  // The two scalar factors fold: a canonical `Multiply` is flat, so the `2`
+  // and the `1/8` contributed by the `\frac` are direct operands of the same
+  // product and combine to `1/4`.
   describe('scalar · list scaling (not Tuple)', () => {
     test('`2\\frac{[0,...,8]}{8}` scales the range', () => {
       expect(parse('2\\frac{\\left[0,...,8\\right]}{8}')).toEqual([
         'Multiply',
-        2,
-        ['Rational', 1, 8],
+        ['Rational', 1, 4],
         ['Range', 0, 8],
       ]);
     });
@@ -726,8 +728,7 @@ describe('Parser: list range ellipsis', () => {
     test('`2\\frac{[1,2,3]}{8}` scales the list literal', () => {
       expect(parse('2\\frac{\\left[1,2,3\\right]}{8}')).toEqual([
         'Multiply',
-        2,
-        ['Rational', 1, 8],
+        ['Rational', 1, 4],
         ['List', 1, 2, 3],
       ]);
     });

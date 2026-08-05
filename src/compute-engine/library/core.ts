@@ -735,10 +735,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Note: since the canonical form will be a different operator,
       // no need to calculate the result type
       canonical: (x, { engine }) => {
-        // The `canonicalInvisibleOperator` function will return only
-        // canonicalization for the invisible operator, not for any operators
-        // it may turn into.
-        // This is necessary for `1(2+3)` to be correctly canonicalized to `2+3`.
+        // `canonicalInvisibleOperator` only decides *which operator* the
+        // juxtaposition is; it does not canonicalize the operator it turns
+        // into. So when it answers `Multiply`, run that operator's own
+        // canonicalization here — this is what drops the unit factor and
+        // folds exact numerics, e.g. `1(2+3)` → `5`. It is also the only
+        // route by which the product gets flattened, since `Multiply` has no
+        // `canonical` handler of its own (see `canonicalMultiply`).
         const y = canonicalInvisibleOperator(x, { engine });
         if (!y) return engine.Nothing;
         if (isFunction(y, 'Multiply')) return canonicalMultiply(engine, y.ops);

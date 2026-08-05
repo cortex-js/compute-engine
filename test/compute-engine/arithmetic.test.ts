@@ -1364,9 +1364,14 @@ describe('SUM', () => {
   it('should simplify arithmetic progression', () => {
     ce.declare('a', 'real');
     ce.declare('d', 'real');
+    // Gate-sensitive: the closed form is built factored as `(b+1)(a + bd/2)`,
+    // but `simplify()` accepts the distributed rewrite because it clears the
+    // 1.3x cost gate by 0.1 (35 vs 35.1) — a margin that appeared when the
+    // canonical-Multiply flatten fix removed a hidden nesting from the
+    // expanded form. Pointer for any future cost-model tuning.
     expect(
       ce.parse('\\sum_{n=0}^{b}(a + d*n)').simplify().toString()
-    ).toMatchInlineSnapshot(`(b + 1) * (1/2 * b * d + a)`);
+    ).toMatchInlineSnapshot(`1/2 * d * b^2 + a * b + 1/2 * b * d + a`);
   });
 
   it('should evaluate arithmetic progression numerically', () => {
@@ -1677,9 +1682,13 @@ describe('SUM', () => {
   // General arithmetic progression: Sum(a + d*n, [n, m, b])
   it('should simplify arithmetic progression with non-zero lower bound', () => {
     // Sum(3n+5, [n, 1, b]) = (b)(5 + 3(1+b)/2) = 3b(b+1)/2 + 5b
+    // Gate-sensitive: same as the `a + d*n` case above — the factored closed
+    // form is distributed because the rewrite clears `simplify()`'s 1.3x cost
+    // gate by 0.1 since the canonical-Multiply flatten fix. Pointer for any
+    // future cost-model tuning.
     expect(
       ce.parse('\\sum_{n=1}^{b}(3n + 5)').simplify().toString()
-    ).toMatchInlineSnapshot(`3/2 * b * (b + 1) + 5b`);
+    ).toMatchInlineSnapshot(`3/2 * b^2 + 13/2 * b`);
   });
 
   it('should evaluate arithmetic progression with non-zero lower bound', () => {

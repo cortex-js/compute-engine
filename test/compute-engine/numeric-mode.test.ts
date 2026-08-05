@@ -98,7 +98,7 @@ describe('NUMERIC MODE', () => {
   test(`\\sqrt{-1}`, () =>
     expect(check('\\sqrt{-1}')).toMatchInlineSnapshot(`
       box       = ["Sqrt", -1]
-      simplify  = i
+      canonical = ["Complex", 0, 1]
     `));
 
   test('e^{i\\pi}', () =>

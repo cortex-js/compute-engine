@@ -112,9 +112,27 @@ failing, and `--update` refreshes drifted entries. `--update` rewrites the list
 (new entries land as class `unclassified` / reason `bug` — triage them, and
 add the class to the `classes` table with a minimal repro).
 
+Not every listed class is a defect. A class carrying `reason:
+"documented-lossy"` is a shape the serializer is **contractually allowed** to
+lose at the structural tier: the rendering it picks is value-preserving
+prettification, so the round-trip property holds up to value but not up to
+structure, and `isSame` — a syntactic comparison — reports a mismatch by
+design. Two classes are ruled that way (maintainer ruling, 2026-08-04): a
+`Multiply` carrying a `Divide`/reciprocal factor is emitted as one fraction
+over the whole product (`\frac{1}{2}\cdot\frac{1}{a+x}` → `\frac{1}{2(a+x)}`),
+and the fallback used when a denominator itself contains a fraction, which
+renders `(a)(b)^{-1}` and parses back as a `Multiply`. CI counts these separately
+from `bug` entries and treats them as accepted contract, not as defects to
+fix — reclassifying one back to `bug` is a deliberate ruling, not routine
+triage.
+
 State at introduction (2026-08-04, v0.100.3): 447 corpus inputs, 59 skipped,
 **351/388 round-trip**, 37 exceptions in 15 classes, all currently classified
 `bug`. Runtime ~11 s on an idle machine.
+
+After the 2026-08-04/05 serializer fix rounds: **377/388 round-trip**, 11
+exceptions in 5 classes — 6 rows `documented-lossy` (the two ruled classes
+above) and 5 rows `bug`.
 
 ## Regenerating from scratch
 

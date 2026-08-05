@@ -117,7 +117,10 @@ N-auto    = 1.6180339887498948482
 N-mach    = 1.618033988749895
 `;
 
-exports[`CONSTANTS ImaginaryUnit 1`] = `ImaginaryUnit`;
+exports[`CONSTANTS ImaginaryUnit 1`] = `
+box       = ImaginaryUnit
+canonical = ["Complex", 0, 1]
+`;
 
 exports[`CONSTANTS MachineEpsilon 1`] = `
 box       = MachineEpsilon

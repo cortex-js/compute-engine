@@ -430,9 +430,11 @@ describe('fail-open rule-condition guards', () => {
       const engine = new ComputeEngine();
       expect(engine.parse('q^2').replace(['x^2 -> 42; x:notreal'])).toBeNull();
       const ei = new ComputeEngine();
-      expect(ei.parse('i^2').replace(['x^2 -> 42; x:notreal'])?.toString()).toBe(
-        '42'
-      );
+      // `i^2` itself canonicalizes to `-1` (nothing left to match), so the
+      // non-real base is carried by `i·a`.
+      expect(
+        ei.parse('(i a)^2').replace(['x^2 -> 42; x:notreal'])?.toString()
+      ).toBe('42');
     });
 
     it(':composite does not classify 0 or 1 as composite', () => {
@@ -648,7 +650,12 @@ describe('fail-open rule-condition guards', () => {
 
     it('i in a string rule matches the canonical imaginary unit', () => {
       const engine = new ComputeEngine();
-      expect(engine.parse('i^2').replace('i^2 -> 42')?.toString()).toBe('42');
+      // Note: `i^2` cannot be the vehicle — it canonicalizes to the literal
+      // `-1` on both sides, and a rule whose match is a bare number literal
+      // never fires. `\sin(i)` keeps the imaginary unit in place.
+      expect(
+        engine.parse('\\sin(i)').replace('\\sin(i) -> 42')?.toString()
+      ).toBe('42');
     });
 
     it('e/i in object-rule LaTeX match strings are normalized too', () => {

@@ -456,7 +456,7 @@ describe('PATTERNS  MATCH - Sequence wildcards', () => {
         match(pattern, ['Add', ['Power', 'x', 'ExponentialE'], 'ImaginaryUnit'])
       ).toMatchInlineSnapshot(`
         {
-          __w: ImaginaryUnit,
+          __w: ["Complex", 0, 1],
         }
       `);
       expect(match(pattern, ['Add', ['Square', 'y'], ['Power', 'x', 2], 3]))

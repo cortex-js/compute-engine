@@ -136,18 +136,21 @@ function parseTrig(op: string): ExpressionParseHandler {
 export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   {
     name: 'Arcsin',
+    standaloneSymbol: true,
     latexTrigger: ['\\arcsin'],
 
     parse: parseTrig('Arcsin'),
   },
   {
     name: 'Arccos',
+    standaloneSymbol: true,
     latexTrigger: ['\\arccos'],
 
     parse: parseTrig('Arccos'),
   },
   {
     name: 'Arctan',
+    standaloneSymbol: true,
     latexTrigger: ['\\arctan'],
 
     parse: parseTrig('Arctan'),
@@ -176,6 +179,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arccot',
+    standaloneSymbol: true,
     symbolTrigger: 'arcctg',
     parse: parseTrig('Arccot'),
   },
@@ -186,6 +190,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arcoth',
+    standaloneSymbol: true,
     symbolTrigger: 'arcoth',
     parse: parseTrig('Arcoth'),
   },
@@ -218,6 +223,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arccsc',
+    standaloneSymbol: true,
     symbolTrigger: 'arccsc',
 
     parse: parseTrig('Arccsc'),
@@ -230,6 +236,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arsinh',
+    standaloneSymbol: true,
     symbolTrigger: 'arsinh',
     parse: parseTrig('Arsinh'),
   },
@@ -250,6 +257,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arcosh',
+    standaloneSymbol: true,
     symbolTrigger: 'arcosh',
     parse: parseTrig('Arcosh'),
   },
@@ -270,6 +278,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Artanh',
+    standaloneSymbol: true,
     symbolTrigger: 'artanh',
     parse: parseTrig('Artanh'),
   },
@@ -290,6 +299,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arsech',
+    standaloneSymbol: true,
     symbolTrigger: 'arsech',
     parse: parseTrig('Arsech'),
   },
@@ -310,6 +320,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Arcsch',
+    standaloneSymbol: true,
     symbolTrigger: 'arcsch',
     parse: parseTrig('Arcsch'),
   },
@@ -330,6 +341,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Cosec',
+    standaloneSymbol: true,
     symbolTrigger: 'cosec',
 
     parse: parseTrig('Cosec'),
@@ -342,6 +354,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Cosh',
+    standaloneSymbol: true,
     latexTrigger: ['\\cosh'],
 
     parse: parseTrig('Cosh'),
@@ -354,6 +367,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Cot',
+    standaloneSymbol: true,
     latexTrigger: ['\\cot'],
 
     parse: parseTrig('Cot'),
@@ -371,12 +385,14 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Csc',
+    standaloneSymbol: true,
     latexTrigger: ['\\csc'],
 
     parse: parseTrig('Csc'),
   },
   {
     name: 'Csch',
+    standaloneSymbol: true,
     latexTrigger: ['\\csch'],
 
     parse: parseTrig('Csch'),
@@ -388,6 +404,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Coth',
+    standaloneSymbol: true,
     latexTrigger: ['\\coth'],
     parse: parseTrig('Coth'),
   },
@@ -408,12 +425,14 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Sec',
+    standaloneSymbol: true,
     latexTrigger: ['\\sec'],
 
     parse: parseTrig('Sec'),
   },
   {
     name: 'Sech',
+    standaloneSymbol: true,
     symbolTrigger: 'sech',
     parse: parseTrig('Sech'),
   },
@@ -424,6 +443,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Sinh',
+    standaloneSymbol: true,
     latexTrigger: ['\\sinh'],
 
     parse: parseTrig('Sinh'),
@@ -436,6 +456,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Tan',
+    standaloneSymbol: true,
     latexTrigger: ['\\tan'],
 
     parse: parseTrig('Tan'),
@@ -448,6 +469,7 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
   },
   {
     name: 'Tanh',
+    standaloneSymbol: true,
     latexTrigger: ['\\tanh'],
 
     parse: parseTrig('Tanh'),
@@ -461,12 +483,14 @@ export const DEFINITIONS_TRIGONOMETRY: LatexDictionary = [
 
   {
     name: 'Cos',
+    standaloneSymbol: true,
     latexTrigger: ['\\cos'],
 
     parse: parseTrig('Cos'),
   },
   {
     name: 'Sin',
+    standaloneSymbol: true,
     latexTrigger: ['\\sin'],
 
     parse: parseTrig('Sin'),

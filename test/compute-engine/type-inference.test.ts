@@ -315,7 +315,9 @@ describe('TYPE INFERENCE FOR REAL × IMAGINARY ARITHMETIC (D10 shim retirement)'
 
   it('i·i is ⊂ real (even number of imaginary factors)', () => {
     const e = ce.box(['Multiply', 'ImaginaryUnit', 'ImaginaryUnit']);
-    expect(e.type.toString()).toBe('finite_real');
+    // `ImaginaryUnit` canonicalizes to the complex literal, so the product of
+    // two literals folds to -1: a narrower type, still ⊂ real.
+    expect(e.type.toString()).toBe('finite_integer');
     expect(e.type.matches('real')).toBe(true);
   });
 
@@ -367,9 +369,11 @@ describe('TYPE INFERENCE FOR REAL × IMAGINARY ARITHMETIC (D10 shim retirement)'
   });
 
   it('i^2 is ⊂ real, i^3 is imaginary', () => {
-    expect(ce.box(['Power', 'ImaginaryUnit', 2]).type.toString()).toBe(
-      'finite_real'
-    );
+    // `i` is an exact literal, so `i^2` folds to -1 at canonicalization: a
+    // narrower type than the symbolic `finite_real`, still ⊂ real.
+    const square = ce.box(['Power', 'ImaginaryUnit', 2]);
+    expect(square.type.toString()).toBe('finite_integer');
+    expect(square.type.matches('real')).toBe(true);
     expect(ce.box(['Power', 'ImaginaryUnit', 3]).type.toString()).toBe(
       'imaginary'
     );

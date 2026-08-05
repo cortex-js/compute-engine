@@ -122,6 +122,42 @@ const STYLE_MODIFIERS: Record<string, (s: string) => string> = {
   monospace: (s: string) => `\\mathtt{${s}}`,
 };
 
+// ---------------------------------------------------------------------------
+// Symbol-position serialization of operators
+// ---------------------------------------------------------------------------
+
+/**
+ * The symbols whose notation is one of the number spellings configured on the
+ * serializer (`positiveInfinity`, `negativeInfinity`, `notANumber`,
+ * `imaginaryUnit`).
+ *
+ * Those denote a value, not an operator, so they stand on their own whether or
+ * not the entry is flagged `standaloneSymbol`. `-\infty`, the spelling of
+ * `NegativeInfinity`, in fact re-parses as `["Negate", "PositiveInfinity"]` —
+ * the same value, but not the same symbol — so it could not be flagged.
+ */
+const NUMBER_SPELLING_SYMBOLS = new Set([
+  'PositiveInfinity',
+  'NegativeInfinity',
+  'NaN',
+  'ImaginaryUnit',
+]);
+
+/**
+ * Is `name` a symbol whose spelling comes from the serializer's number
+ * options?
+ *
+ * The exemption is keyed on the symbol being serialized, not on the LaTeX the
+ * entry produces: an unrelated entry that happened to emit one of those
+ * spellings would not re-parse to its own name, so it must still fall back to
+ * `\mathrm{Name}`.
+ */
+function isNumberSpellingSymbol(name: string | null | undefined): boolean {
+  return (
+    name !== null && name !== undefined && NUMBER_SPELLING_SYMBOLS.has(name)
+  );
+}
+
 export class Serializer {
   options: Readonly<Required<ResolvedSerializeLatexOptions>>;
   readonly dictionary: IndexedLatexDictionary;
@@ -295,13 +331,25 @@ export class Serializer {
       // Print the trigger as an symbol
       return serializeSymbol(symbol(expr) ?? '') ?? '';
     }
-    // The def may be for an OPERATOR of that name (e.g. the infix `Add`).
-    // Its serialize handler expects an application: with no operands it
-    // yields nothing, which would silently delete the symbol. When that
-    // happens, fall back to serializing the name as a symbol (`\mathrm{Add}`),
-    // which re-parses to the same symbol.
-    const result = def?.serialize?.(this, expr);
-    if (result !== undefined && result.trim() !== '') return result;
+    // The def may be for an OPERATOR of that name (e.g. the infix `Add`, the
+    // matchfix `Abs`, the postfix `Factorial`). Its serialize handler expects
+    // an application: with no operands it yields either nothing (which would
+    // silently delete the symbol) or a fragment of notation that does not
+    // re-parse (`\vert\vert` for `Abs`, `!` for `Factorial`, `\sum` for
+    // `Sum`). The entry's notation is used here only when the entry declares
+    // that it stands on its own (`standaloneSymbol`, the `\sin` class) or is
+    // one of the number symbols whose spelling comes from the serializer
+    // options. Otherwise the name is spelled out as `\mathrm{Add}`, which
+    // always re-parses to the same symbol.
+    if (def?.serialize) {
+      const result = def.serialize(this, expr);
+      if (
+        result.trim() !== '' &&
+        (def.standaloneSymbol === true ||
+          isNumberSpellingSymbol(symbol(expr) ?? def.name))
+      )
+        return result;
+    }
     return serializeSymbol(symbol(expr)) ?? '';
   }
 

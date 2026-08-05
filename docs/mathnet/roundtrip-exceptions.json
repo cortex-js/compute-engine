@@ -1,50 +1,31 @@
 {
  "$comment": "Known failures of the serialize->parse round-trip property `ce.parse(t.latex).isSame(t)` (structural tier) over docs/mathnet/parser-test-cases.json. Maintained by docs/mathnet/scripts/check-roundtrip.ts (npm run check:roundtrip); regenerate with `npm run check:roundtrip -- --update`. `reason` is `bug` (a serializer/round-trip defect to fix) or `documented-lossy` (a form the serializer is contractually allowed to lose). `class` groups identical-cause entries; see `classes` below. CI fails only on failures NOT listed here.",
  "date": "2026-08-04",
- "engineVersion": "0.100.3",
+ "engineVersion": "0.101.0+unreleased",
  "lastChecked": "2026-08-05",
  "classes": {
   "fraction-fallback-inverse-power": {
-   "reason": "bug",
-   "note": "When the denominator itself contains a fraction (or an ellipsis), the serializer declines \\frac and falls back to `(a)(b)^{-1}`, which reparses as Multiply(a, Divide(1,b)) rather than Divide(a,b). Repro: ce.parse('\\\\frac{100}{\\\\sin(\\\\frac{5\\\\pi}{9})}') -> '(100)(\\\\sin(\\\\frac{5\\\\pi}{9}))^{-1}'. Note the numerator-1 case is safe: '\\\\frac{1}{\\\\sin(\\\\frac{\\\\pi}{2})}' -> '(\\\\sin(...))^{-1}' reparses as Divide(1,...)."
+   "reason": "documented-lossy",
+   "note": "RULED documented-lossy 2026-08-04: when the denominator itself contains a fraction (or an ellipsis) the serializer declines \\\\frac and falls back to `(a)(b)^{-1}`, which reparses as Multiply(a, Divide(1,b)) rather than Divide(a,b). Value-preserving rendering choice; structure loss is accepted. (The numerator-1 case round-trips.)"
   },
   "quotient-factor-merged-into-fraction": {
-   "reason": "bug",
-   "note": "A Multiply with a Divide/reciprocal factor is emitted as ONE fraction over the whole product, so the reparse is a Divide of the product instead of a Multiply. Repros: '\\\\frac{1}{2}\\\\cdot\\\\frac{1}{a+x}' -> '\\\\frac{1}{2(a+x)}'; '(-1)^{m}\\\\frac{1}{a}' -> '\\\\frac{(-1)^{m}}{a}'. CANDIDATE documented-lossy: the rewrite is value-preserving prettification; it fails only the structural tier. Needs a maintainer ruling before it is either fixed or reclassified."
+   "reason": "documented-lossy",
+   "note": "RULED documented-lossy 2026-08-04: a Multiply with a Divide/reciprocal factor is emitted as ONE fraction over the whole product ('\\\\frac{1}{2}\\\\cdot\\\\frac{1}{a+x}' -> '\\\\frac{1}{2(a+x)}'). The rewrite is value-preserving prettification; the serializer is contractually allowed to lose the factored structure, so the reparse being a Divide of the product fails only the structural tier by design."
   },
   "at-over-declared-set-base": {
    "reason": "bug",
    "note": "At over a set-typed base reserializes to a bracket form that no longer type-checks. Repro: ce.parse('\\\\mathbb{Z}_n') -> ['At','Integers','n'] -> '\\\\Z[n]' -> ['At',['Error',['ErrorCode',\"'incompatible-type'\",\"'dictionary | indexed_collection'\",\"'set<finite_integer>'\"]],'n']. The first parse arguably should not have produced At over Integers either."
   },
-  "complex-i-vs-imaginary-unit": {
-   "reason": "bug",
-   "note": "The parser maps the literal `i` to ['Complex',0,1] but `\\\\imaginaryI` to the symbol 'ImaginaryUnit'; the serializer emits `\\\\imaginaryI` for both. Repro: ce.parse('i') -> ['Complex',0,1] -> '\\\\imaginaryI' -> 'ImaginaryUnit'. Two canonical spellings of the same value; canonicalization should pick one."
-  },
-  "angle-assign-lhs-not-reparsable": {
-   "reason": "bug",
-   "note": "`\\\\varangle Z Y X := ...` boxes as Assign('Angle', Function(...)) and reserializes with a parenthesized argument list on the LHS (`\\\\angle(Z, Y, X)\\\\coloneq...`), which the Assign parselet rejects with 'expected-a-symbol'."
-  },
   "builtin-head-vs-value-def-drift": {
    "reason": "bug",
    "note": "A name that is BOTH a library operator and used as a free variable binds inconsistently WITHIN one parse: the head-position occurrence takes the builtin operator definition, a later occurrence auto-declares a value definition. The reparse sees the value definition everywhere, so the trees differ by binding identity with IDENTICAL MathJSON. Repro: ce.parse('N, N+1') - N types as '(any, integer?) -> unknown' in pass 1, 'number' in pass 2. Same for D (derivative) in '(DB+BC)^2=AD^2+AC^2.'."
   },
-  "inference-drift-canonical-order": {
+  "negate-vs-multiply-minus-one": {
    "reason": "bug",
-   "note": "Pass 1 leaves inferred free-symbol types in the engine and pass 2 canonicalizes differently under them. Repro: ce.parse('2f(ab)') on a fresh engine has .ops [2, f, Multiply(a,b)] - a NESTED, unflattened Multiply, f typed 'unknown' - while the reparse of '2abf' has .ops [2,a,b,f], flat. Two defects behind one entry: (i) canonical Multiply left a nested Multiply unflattened; (ii) .json prints ['Multiply',2,'a','b','f'] for BOTH trees, so MathJSON equality is not a proxy for isSame. The same-engine reparse is forced (cross-engine isSame is false for every symbol), so this class cannot be designed away by the harness."
-  },
-  "exact-numeric-fold-gap": {
-   "reason": "bug",
-   "note": "Pass 1 leaves an exact numeric product unfolded where pass 2 folds it. Repro: ce.parse('n \\\\equiv 0, 4, 5 (mod 6)') -> ['Multiply',5,6,'d','m','o'] in pass 1, ['Multiply',30,'d','m','o'] after the round trip. Isolated '5\\\\times 6 d' folds correctly, so the gap is context-dependent."
+   "note": "Two canonical spellings of a negated product: ['Multiply',-1,a,b,...] serializes as `-(ab...)`, which reparses as ['Negate',['Multiply',a,b,...]] - both forms survive canonicalization. Same two-spellings nature as the fixed complex-i class; canonicalization should pick one. (Sole row formerly in complex-i-vs-imaginary-unit; its imaginary-unit half was fixed 2026-08-04 when ImaginaryUnit converged on Complex(0,1).)"
   }
  },
  "exceptions": [
-  {
-   "latex": "\\varangle Z Y X:= 180^{\\circ}-\\varangle X Y Z",
-   "reserialized": "\\angle(Z, Y, X)\\coloneq\\pi-(\\angle XYZ)",
-   "mismatch": "[\"Assign\",\"Angle\",[\"Function\",[\"Block\",[\"Add\",[\"Negate\",[\"Angle\",\"X\",\"Y\",\"Z\"]],\"Pi\"]],\"Z\",\"Y\",\"X\"]]  ≠  [\"Assign\",\"Angle\",[\"Function\",[\"Block\",[\"Add\",[\"Negate\",[\"Angle\",\"X\",\"Y\",\"Z\"]],\"Pi\"]],[\"Error\",\"'expected-a-symbol'\",\"'(Z,Y,X)'\"]]]",
-   "class": "angle-assign-lhs-not-reparsable",
-   "reason": "bug"
-  },
   {
    "latex": "(\\mathbb{Z}_n, +, \\cdot)",
    "reserialized": "(\\Z[n],\\mathrm{Add},\\mathrm{Multiply})",
@@ -78,48 +59,19 @@
    "note": "The drifting name is N (numeric approximation)."
   },
   {
-   "latex": "|z| + |z - x| + |z - y| \\geq \\left| \\frac{\\sqrt{3}}{2}x + \\left(y - \\frac{1}{2}\\right)i \\right|.",
-   "reserialized": "\\vert\\frac{x\\sqrt{3}}{2}+(\\imaginaryI)(y-\\frac{1}{2})\\vert\\le\\vert z\\vert+\\vert z-x\\vert+\\vert z-y\\vert",
-   "mismatch": "[\"LessEqual\",[\"Abs\",[\"Add\",[\"Multiply\",\"x\",[\"Divide\",[\"Sqrt\",3],2]],[\"Multiply\",[\"Complex\",0,1],[\"Add\",\"y\",[\"Rational\",-1,2]]]]],[\"Add\",[\"Abs\",\"z\"],[\"Abs\",[\"Add\",[\"Negate\",\"x\"],\"z\"]],[\"Abs\",[\"Add\",[\"Negate\",\"y\"],\"z\"]]]]  ≠  [\"LessEqual\",[\"Abs\",[\"Add\",[\"Multiply\",\"x\",[\"Divide\",[\"Sqrt\",3],2]],[\"Multiply\",\"ImaginaryUnit\",[\"Add\",\"y\",[\"Rational\",-1,2]]]]],[\"Add\",[\"Abs\",\"z\"],[\"Abs\",[\"Add\",[\"Negate\",\"x\"],\"z\"]],[\"Abs\",[\"Add\",[\"Negate\",\"y\"],\"z\"]]]]",
-   "class": "complex-i-vs-imaginary-unit",
-   "reason": "bug"
-  },
-  {
-   "latex": "b_i = \\left[ \\frac{a_1 + a_2 + \\dots + a_{i-1} + a_{i+1} + \\dots + a_n}{n-1} \\right], \\quad 1 \\leq i \\leq n.",
-   "reserialized": "(b_{i}=\\bigl\\lbrack\\frac{a_1+a_2+\\dots+a_{i-1}+a_{i+1}+\\dots+a_{n}}{n-1}\\bigr\\rbrack,1\\le\\imaginaryI\\le n)",
-   "mismatch": "identical MathJSON, isSame false (binding/order): [\"Tuple\",[\"Equal\",\"b_i\",[\"List\",[\"Divide\",[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",[\"Subscript\",\"a\",[\"Subtract\",\"i\",1]],[\"Subscript\",\"a\",[\"Add\",\"i\",1]],\"ContinuationPlaceholder\",\"a_n\"],[\"Add\",\"n\",-1]]]],[\"LessEqual\"…",
-   "class": "complex-i-vs-imaginary-unit",
-   "reason": "bug",
-   "note": "The bare `i` of `1 \\leq i \\leq n` is parsed as the imaginary unit; that is the documented Greek/constant spelling convention, but the two spellings still fail to round-trip."
-  },
-  {
-   "latex": "i^{\\text{th}}",
-   "reserialized": "\\imaginaryI",
-   "mismatch": "[\"Complex\",0,1]  ≠  \"ImaginaryUnit\"",
-   "class": "complex-i-vs-imaginary-unit",
-   "reason": "bug"
-  },
-  {
    "latex": "If n is odd: (n^2 − 1)/2; if n is even: (n^2 − 4)/2.",
    "reserialized": "((\\imaginaryI)Iddfnos\\colon\\frac{n^2-1}{2},-(\\exponentialE\\exponentialE fnnsv)\\colon\\frac{n^2-4}{2})",
-   "mismatch": "[\"Tuple\",[\"Colon\",[\"Multiply\",[\"Complex\",0,1],\"I\",\"d\",\"d\",\"f\",\"n\",\"o\",\"s\"],[\"Multiply\",[\"Rational\",1,2],[\"Add\",[\"Power\",\"n\",2],-1]]],[\"Colon\",[\"Multiply\",-1,\"ExponentialE\",\"ExponentialE\",\"f\",\"n\",\"n\",\"s\",\"v\"],[\"Multiply\"…  ≠  [\"Tuple\",[\"Colon\",[\"Multiply\",\"ImaginaryUnit\",\"I\",\"d\",\"d\",\"f\",\"n\",\"o\",\"s\"],[\"Multiply\",[\"Rational\",1,2],[\"Add\",[\"Power\",\"n\",2],-1]]],[\"Colon\",[\"Negate\",[\"Multiply\",\"ExponentialE\",\"ExponentialE\",\"f\",\"n\",\"n\",\"s\",\"v\"]],[\"M…",
-   "class": "complex-i-vs-imaginary-unit",
+   "mismatch": "[\"Tuple\",[\"Colon\",[\"Multiply\",[\"Complex\",0,1],\"I\",\"d\",\"d\",\"f\",\"n\",\"o\",\"s\"],[\"Multiply\",[\"Rational\",1,2],[\"Add\",[\"Power\",\"n\",2],-1]]],[\"Colon\",[\"Multiply\",-1,\"ExponentialE\",\"ExponentialE\",\"f\",\"n\",\"n\",\"s\",\"v\"],[\"Multiply\"…  ≠  [\"Tuple\",[\"Colon\",[\"Multiply\",[\"Complex\",0,1],\"I\",\"d\",\"d\",\"f\",\"n\",\"o\",\"s\"],[\"Multiply\",[\"Rational\",1,2],[\"Add\",[\"Power\",\"n\",2],-1]]],[\"Colon\",[\"Negate\",[\"Multiply\",\"ExponentialE\",\"ExponentialE\",\"f\",\"n\",\"n\",\"s\",\"v\"]],[\"M…",
+   "class": "negate-vs-multiply-minus-one",
    "reason": "bug",
-   "note": "Also exhibits Multiply(-1, ...) reserializing as `-(...)` and reparsing as Negate(...)."
-  },
-  {
-   "latex": "n ≡ 0, 4, 5 (mod 6)",
-   "reserialized": "(n\\equiv0,4,5\\times6dmo)",
-   "mismatch": "[\"Tuple\",[\"IdenticallyEqual\",\"n\",0],4,[\"Multiply\",5,6,\"d\",\"m\",\"o\"]]  ≠  [\"Tuple\",[\"IdenticallyEqual\",\"n\",0],4,[\"Multiply\",30,\"d\",\"m\",\"o\"]]",
-   "class": "exact-numeric-fold-gap",
-   "reason": "bug"
+   "note": "Formerly complex-i-vs-imaginary-unit; the imaginary-unit halves now agree (both ['Complex',0,1]). The residual failure is the Negate-vs-Multiply(-1,...) spelling split."
   },
   {
    "latex": "\\left( \\frac{n}{2(a_1 + a_2 + \\cdots + a_n)} - 1 \\right)^n \\le \\left[ \\frac{a_1 + a_2 + \\cdots + a_n}{n} \\right]^n \\left( \\frac{1}{a_1} - 1 \\right) \\left( \\frac{1}{a_2} - 1 \\right) \\cdots \\left( \\frac{1}{a_n} - 1 \\right).",
    "reserialized": "{((n)(2(a_1+a_2+\\dots+a_{n}))^{-1}-1)}^{n}\\le\\bigl\\lbrack\\frac{a_1+a_2+\\dots+a_{n}}{n}\\bigr\\rbrack^{n}\\times(\\frac{1}{a_1}-1)\\times(\\frac{1}{a_2}-1)\\times\\dots\\times(\\frac{1}{a_{n}}-1)",
    "mismatch": "[\"LessEqual\",[\"Power\",[\"Add\",[\"Divide\",\"n\",[\"Multiply\",2,[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]]],-1],\"n\"],[\"Multiply\",[\"Power\",[\"List\",[\"Divide\",[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"],\"n\"]],\"n…  ≠  [\"LessEqual\",[\"Power\",[\"Add\",[\"Multiply\",\"n\",[\"Divide\",1,[\"Multiply\",2,[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]]]],-1],\"n\"],[\"Multiply\",[\"Power\",[\"List\",[\"Divide\",[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",…",
    "class": "fraction-fallback-inverse-power",
-   "reason": "bug",
+   "reason": "documented-lossy",
    "note": "Also exhibits continuation-placeholder-multiply-regroups on the RHS."
   },
   {
@@ -127,57 +79,35 @@
    "reserialized": "BD^2=(100)(\\sin(\\frac{5\\pi}{9}))^{-1}",
    "mismatch": "[\"Equal\",[\"Multiply\",\"B\",[\"Power\",\"D\",2]],[\"Divide\",100,[\"Sin\",[\"Multiply\",[\"Rational\",5,9],\"Pi\"]]]]  ≠  [\"Equal\",[\"Multiply\",\"B\",[\"Power\",\"D\",2]],[\"Multiply\",100,[\"Divide\",1,[\"Sin\",[\"Multiply\",[\"Rational\",5,9],\"Pi\"]]]]]",
    "class": "fraction-fallback-inverse-power",
-   "reason": "bug"
+   "reason": "documented-lossy"
   },
   {
    "latex": "M = \\max \\left\\{ \\frac{x_1}{1+x_1}, \\frac{x_2}{1+x_1+x_2}, \\dots, \\frac{x_n}{1+x_1+x_2+\\dots+x_n} \\right\\}.",
    "reserialized": "M=\\max(\\lbrace\\frac{x_1}{x_1+1}, \\frac{x_2}{x_1+x_2+1}, \\dots, (x_{n})(1+x_1+x_2+\\dots+x_{n})^{-1}\\rbrace)",
    "mismatch": "[\"Equal\",\"M\",[\"Max\",[\"Set\",[\"Divide\",\"x_1\",[\"Add\",\"x_1\",1]],[\"Divide\",\"x_2\",[\"Add\",\"x_1\",\"x_2\",1]],\"ContinuationPlaceholder\",[\"Divide\",\"x_n\",[\"Add\",1,\"x_1\",\"x_2\",\"ContinuationPlaceholder\",\"x_n\"]]]]]  ≠  [\"Equal\",\"M\",[\"Max\",[\"Set\",[\"Divide\",\"x_1\",[\"Add\",\"x_1\",1]],[\"Divide\",\"x_2\",[\"Add\",\"x_1\",\"x_2\",1]],\"ContinuationPlaceholder\",[\"Multiply\",\"x_n\",[\"Divide\",1,[\"Add\",1,\"x_1\",\"x_2\",\"ContinuationPlaceholder\",\"x_n\"]]]]]]",
    "class": "fraction-fallback-inverse-power",
-   "reason": "bug"
-  },
-  {
-   "latex": "2f(ab) = (b+1)f(a) + (a+1)f(b).",
-   "reserialized": "2abf=bf(a+1)+af(b+1)",
-   "mismatch": "identical MathJSON, isSame false (binding/order): [\"Equal\",[\"Multiply\",2,\"a\",\"b\",\"f\"],[\"Add\",[\"Multiply\",\"b\",\"f\",[\"Add\",\"a\",1]],[\"Multiply\",\"a\",\"f\",[\"Add\",\"b\",1]]]]",
-   "class": "inference-drift-canonical-order",
-   "reason": "bug"
-  },
-  {
-   "latex": "f(yf(x))(x + y) = x^2(f(x) + f(y)).",
-   "reserialized": "ffxy(x+y)=(fx+fy)x^2",
-   "mismatch": "identical MathJSON, isSame false (binding/order): [\"Equal\",[\"Multiply\",\"f\",\"f\",\"x\",\"y\",[\"Add\",\"x\",\"y\"]],[\"Multiply\",[\"Add\",[\"Multiply\",\"f\",\"x\"],[\"Multiply\",\"f\",\"y\"]],[\"Power\",\"x\",2]]]",
-   "class": "inference-drift-canonical-order",
-   "reason": "bug"
+   "reason": "documented-lossy"
   },
   {
    "latex": "\\frac{1}{n} = \\frac{1}{a_1} - \\frac{1}{a_2} + \\frac{1}{a_3} - \\dots + (-1)^{m-1} \\frac{1}{a_m}.",
    "reserialized": "\\frac{1}{n}=\\frac{1}{a_1}-\\frac{1}{a_2}+\\frac{1}{a_3}-\\dots+\\frac{(-1)^{m-1}}{a_{m}}",
    "mismatch": "[\"Equal\",[\"Divide\",1,\"n\"],[\"Add\",[\"Divide\",1,\"a_1\"],[\"Negate\",[\"Divide\",1,\"a_2\"]],[\"Divide\",1,\"a_3\"],[\"Negate\",\"ContinuationPlaceholder\"],[\"Multiply\",[\"Divide\",1,\"a_m\"],[\"Power\",-1,[\"Add\",\"m\",-1]]]]]  ≠  [\"Equal\",[\"Divide\",1,\"n\"],[\"Add\",[\"Divide\",1,\"a_1\"],[\"Negate\",[\"Divide\",1,\"a_2\"]],[\"Divide\",1,\"a_3\"],[\"Negate\",\"ContinuationPlaceholder\"],[\"Divide\",[\"Power\",-1,[\"Add\",\"m\",-1]],\"a_m\"]]]",
    "class": "quotient-factor-merged-into-fraction",
-   "reason": "bug"
+   "reason": "documented-lossy"
   },
   {
    "latex": "\\left[ \\sum_{i=1}^{n} \\frac{1}{a_i^2 + x^2} \\right]^2 \\leq \\frac{1}{2} \\cdot \\frac{1}{a_1 (a_1 - 1) + x^2}.",
    "reserialized": "\\bigl\\lbrack\\sum_{i=1}^{n}1/(a_{i}^2+x^2)\\bigr\\rbrack^2\\le(2(x^2+a_1(a_1-1)))^{-1}",
    "mismatch": "[\"LessEqual\",[\"Power\",[\"List\",[\"Sum\",[\"Divide\",1,[\"Add\",[\"Power\",\"a_i\",2],[\"Power\",\"x\",2]]],[\"Limits\",\"i\",1,\"n\"]]],2],[\"Multiply\",[\"Rational\",1,2],[\"Divide\",1,[\"Add\",[\"Power\",\"x\",2],[\"Multiply\",\"a_1\",[\"Add\",\"a_1\",-1]]]]…  ≠  [\"LessEqual\",[\"Power\",[\"List\",[\"Sum\",[\"Divide\",1,[\"Add\",[\"Power\",\"a_i\",2],[\"Power\",\"x\",2]]],[\"Limits\",\"i\",1,\"n\"]]],2],[\"Divide\",1,[\"Multiply\",2,[\"Add\",[\"Power\",\"x\",2],[\"Multiply\",\"a_1\",[\"Add\",\"a_1\",-1]]]]]]",
    "class": "quotient-factor-merged-into-fraction",
-   "reason": "bug"
+   "reason": "documented-lossy"
   },
   {
    "latex": "\\lim_{n \\to \\infty} \\frac{1}{n} \\sum_{k=1}^{n} a_k f\\left(\\frac{k}{n}\\right) = a \\int_{0}^{1} f(x) dx.",
    "reserialized": "\\lim_{n\\to\\infty}\\frac{1}{n}(\\sum_{k=1}^{n}(a_{k}fk)/n)=a\\int_{0}^{1}\\!fx\\, \\mathrm{d}x",
    "mismatch": "[\"Equal\",[\"Limit\",[\"Function\",[\"Block\",[\"Multiply\",[\"Divide\",1,\"n\"],[\"Sum\",[\"Multiply\",\"a_k\",\"f\",[\"Divide\",\"k\",\"n\"]],[\"Limits\",\"k\",1,\"n\"]]]],\"n\"],\"PositiveInfinity\"],[\"Multiply\",\"a\",[\"Integrate\",[\"Function\",[\"Block\",[\"M…  ≠  [\"Equal\",[\"Limit\",[\"Function\",[\"Block\",[\"Multiply\",[\"Divide\",1,\"n\"],[\"Sum\",[\"Divide\",[\"Multiply\",\"a_k\",\"f\",\"k\"],\"n\"],[\"Limits\",\"k\",1,\"n\"]]]],\"n\"],\"PositiveInfinity\"],[\"Multiply\",\"a\",[\"Integrate\",[\"Function\",[\"Block\",[\"M…",
    "class": "quotient-factor-merged-into-fraction",
-   "reason": "bug"
-  },
-  {
-   "latex": "f(x) + f(y) + 2xyf(xy) = \\frac{f(xy)}{f(x+y)}, \\qquad \\textcircled{1}",
-   "reserialized": "(2fxxyy+fx+fy=\\frac{fxy}{f(x+y)},)",
-   "mismatch": "identical MathJSON, isSame false (binding/order): [\"Tuple\",[\"Equal\",[\"Add\",[\"Multiply\",2,\"f\",\"x\",\"x\",\"y\",\"y\"],[\"Multiply\",\"f\",\"x\"],[\"Multiply\",\"f\",\"y\"]],[\"Divide\",[\"Multiply\",\"f\",\"x\",\"y\"],[\"Multiply\",\"f\",[\"Add\",\"x\",\"y\"]]]]]",
-   "class": "inference-drift-canonical-order",
-   "reason": "bug",
-   "note": "Formerly singleton-tuple-dropped; the tuple-ness now survives (trailing-comma serialization, 2026-08-04 fix round). The residual failure is a nested-vs-flat Multiply arity mismatch (Multiply(2,f,x,y,Multiply(x,y)) vs flat Multiply(2,f,x,x,y,y)) that the .json shorthand hides - defect (i) of this class."
+   "reason": "documented-lossy"
   }
  ]
 }

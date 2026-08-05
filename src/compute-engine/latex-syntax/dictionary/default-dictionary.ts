@@ -70,11 +70,13 @@ export {
 export const DEFINITIONS_PHYSICS: LatexDictionary = [
   {
     name: 'Mu0',
+    standaloneSymbol: true,
     kind: 'symbol',
     latexTrigger: '\\mu_0',
   },
   {
     name: 'VacuumPermittivity',
+    standaloneSymbol: true,
     kind: 'symbol',
     latexTrigger: '\\varepsilon_0',
   },

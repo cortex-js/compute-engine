@@ -1138,6 +1138,25 @@ export function div(num: Expression, denom: number | Expression): Expression {
 //
 
 /**
+ * True if `x` carries a continuation operand anywhere in the subtree that
+ * `flatten(…, 'Multiply')` would lift into the enclosing product. The check
+ * must be as deep as `flatten` is recursive: a placeholder two levels down,
+ * e.g. `Multiply(a, Multiply(b, ContinuationPlaceholder))`, is spliced into
+ * the enclosing product just the same.
+ */
+function containsContinuationOperand(x: Expression): boolean {
+  if (isContinuationOperand(x)) return true;
+  if (isFunction(x, 'Multiply') || isFunction(x, 'Sequence'))
+    return x.ops.some(containsContinuationOperand);
+  return false;
+}
+
+/** A nested product that is an ellipsis-fold barrier: do not splice it. */
+function isFoldBarrierProduct(x: Expression): boolean {
+  return isFunction(x, 'Multiply') && containsContinuationOperand(x);
+}
+
+/**
  * The canonical form of `Multiply`:
  * - removes `1` and `-1`
  * - simplifies the signs:
@@ -1164,6 +1183,30 @@ export function canonicalMultiply(
       'Multiply',
       ops.map((x) => x.canonical)
     );
+
+  //
+  // Flatten nested products: `Multiply` is associative, so a canonical
+  // `Multiply` never has a `Multiply` operand. Most callers arrive via
+  // `ce.function('Multiply', …)`, which flattens in `checkNumericArgs`, but
+  // direct callers (notably the `InvisibleOperator` canonical handler, which
+  // hands us the operands of a product it built itself) do not — so `2f(ab)`
+  // used to canonicalize to `Multiply(2, f, Multiply(a, b))`. `flatten` bails
+  // out without allocating when there is nothing to lift.
+  //
+  // A nested product that is itself an ellipsis-fold barrier is left alone:
+  // lifting its operands would smuggle a `ContinuationPlaceholder` past the
+  // check above and fold across it. Only the barrier-bearing operands are held
+  // back — the unrelated ones still flatten, so the result is as flat as the
+  // barrier allows.
+  //
+  if (ops.some(isFoldBarrierProduct)) {
+    const flattened: Expression[] = [];
+    for (const x of ops) {
+      if (isFoldBarrierProduct(x)) flattened.push(x);
+      else flattened.push(...flatten([x], 'Multiply', false));
+    }
+    ops = flattened;
+  } else ops = flatten(ops, 'Multiply', false);
 
   // Two or more numeric tuples (points/vectors) have no implicit product
   // (dot/cross); reject `tuple · tuple` at canonicalization when provable.
@@ -1268,8 +1311,14 @@ export function canonicalMultiply(
     const next = xs[i + 1];
 
     // Do we have a number literal followed either by a sqrt or an imaginary unit?
+    // Non-finite literals are excluded from this promotion, as they are from
+    // the exact fold above: `∞·i` has no exact pure-imaginary form, and
+    // promoting it built a bogus value out of an infinite component
+    // (`∞·i` canonicalized to NaN, while the other operand order stayed
+    // symbolic — see the canonicalization contract in CLAUDE.md: machine
+    // floats, infinity and NaN are excluded from folding).
 
-    if (isNumber(x)) {
+    if (isNumber(x) && !x.isInfinity && !x.isNaN) {
       // Do we have a Sqrt expression?
       if (
         isFunction(next, 'Sqrt') &&

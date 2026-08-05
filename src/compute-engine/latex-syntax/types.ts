@@ -375,6 +375,32 @@ export type BaseEntry = {
    * If no `serialize` handler is provided, the trigger is used.
    */
   serialize?: LatexString | SerializeHandler;
+
+  /**
+   * Whether this entry's notation stands on its own, that is: the LaTeX this
+   * entry serializes for the bare symbol — the name used as a value, with no
+   * operands, as in `["Tuple", "A", "Sin"]` — parses back to that same
+   * symbol.
+   *
+   * This is true of function commands (`\sin`, `\ln`) and of constant and set
+   * notations (`\Z`, `\emptyset`, `\varphi`), and false of every notation
+   * written in terms of its operands: with no operands, a matchfix, infix,
+   * prefix, postfix or big-operator entry yields a fragment such as
+   * `\vert\vert` (`Abs`), `!` (`Factorial`) or `\sum` (`Sum`), which does not
+   * parse back.
+   *
+   * When this is not `true`, an unapplied symbol is serialized as
+   * `\mathrm{Name}` instead of with this entry's notation. Leaving it unset is
+   * therefore always safe — `\mathrm{Name}` parses back to the same symbol —
+   * and only costs the nicer spelling.
+   *
+   * Note that the four number spellings configured on the serializer
+   * (`positiveInfinity`, `negativeInfinity`, `notANumber`, `imaginaryUnit`)
+   * are recognized on their own and need not be flagged.
+   *
+   * **Default**: `false`
+   */
+  standaloneSymbol?: boolean;
 };
 
 /**

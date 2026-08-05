@@ -48,10 +48,11 @@ function boxMachineNumber(ce: IComputeEngine, value: number): Expression {
  * rationals like `1+i`, `1/2+i`; pure-imaginary radicals like `√2·i`), so
  * those literals report `isExact === true` on their own. However a complex
  * literal can still arrive through the inexact `Big`/`MachineNumericValue`
- * lane with exactly-representable components — notably the engine's `i`
- * constant itself (`ce.I` is a machine complex). Treat such a value with an
- * *integer* real part and an *integer* imaginary part (a Gaussian integer)
- * as exact too, so exact Gaussian arithmetic (`(1+i)^2 = 2i`, WP-2.16) and
+ * lane with exactly-representable components — a float-lane computation whose
+ * result happens to land on a Gaussian integer, e.g. `(0.5+0.5i)·2` or
+ * `ce.number(new Complex(2, 3))`, both of which box inexact. Treat such a
+ * value with an *integer* real part and an *integer* imaginary part (a
+ * Gaussian integer) as exact too, so exact Gaussian arithmetic (`(1+i)^2 = 2i`, WP-2.16) and
  * symbolic-stay identities keyed on an exact complex argument (e.g. an
  * Eisenstein series at τ = i) are preserved. A non-Gaussian complex float
  * (`1.5+2i`) still numericizes — it never was representable exactly.

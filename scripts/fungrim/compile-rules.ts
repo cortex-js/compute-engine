@@ -1280,7 +1280,20 @@ function selfTestScoped(
       const expected = ce.expr(substituteWildcards(replaceW, dewild) as never);
       if (inst.isValid && expected.isValid) {
         const r = inst.replace(unconditioned);
-        if (r !== null && (r.isSame(expected) || r.isEqual(expected) === true))
+        // Same comparison ladder as `fireTest` above: `isSame` compares
+        // binder identity (a rule that transplants a lambda-bound occurrence
+        // yields a name-identical but differently-bound result), and
+        // `isEqual` is the cheap arithmetic tier — it answers `undefined`,
+        // not `true`, for an identity in free variables. Without
+        // `sameSyntactic` this branch rejects rewrites whose result is
+        // structurally identical to the expectation (e.g. 50f72f, the Sinc
+        // derivative).
+        if (
+          r !== null &&
+          (r.isSame(expected) ||
+            sameSyntactic(r, expected) ||
+            r.isEqual(expected) === true)
+        )
           return { ok: true, sampleKind: 'symbolic' };
       }
     } finally {

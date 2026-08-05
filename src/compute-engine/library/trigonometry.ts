@@ -111,6 +111,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
         if (Number.isNaN(fArg)) return arg.mul(ce.Pi).div(180);
 
+        // A non-real argument flows through the linear conversion intact
+        // (`Degrees(i) = iπ/180`, per the type handler above): the `.re`-based
+        // paths below would silently drop the imaginary part and turn
+        // `Degrees(i)` into 0.
+        if (arg.im) return arg.mul(ce.Pi).div(180);
+
         // `Degrees(d)` is the faithful linear conversion `d·π/180` — it does
         // NOT reduce `d` mod 360. (Reducing here made the canonical form
         // disagree with the `evaluate` handler — `Degrees(390)` canonicalized

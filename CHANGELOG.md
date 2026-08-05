@@ -1,3 +1,90 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **The imaginary unit now has a single canonical spelling: `["Complex", 0, 1]`.**
+  A bare `i` parsed to the complex literal `["Complex", 0, 1]`, but
+  `\imaginaryI` (and `\mathrm{i}`, `\operatorname{i}`, and the MathJSON symbol
+  `"ImaginaryUnit"`) canonicalized to the _symbol_ `ImaginaryUnit`. Since the
+  serializer emits `\imaginaryI` for both, `ce.parse('i')` did not round-trip,
+  and two structurally identical expressions could compare unequal with
+  `isSame()`. The `ImaginaryUnit` definition has always been declared
+  `holdUntil: 'never'` — meaning its value is substituted at canonicalization —
+  but the symbol was interned in the engine's common-symbol table, which
+  short-circuited that substitution. It no longer is, so
+  `ce.parse('i')`, `ce.parse('\imaginaryI')` and `ce.box('ImaginaryUnit')` now
+  all canonicalize to the same complex literal. **Migration:** raw MathJSON
+  `"ImaginaryUnit"` is still accepted and still round-trips non-canonically
+  (`ce.box('ImaginaryUnit', { canonical: false })`), but code matching on the
+  canonical form should test for the complex literal — `expr.isSame(ce.I)` or
+  the `isImaginaryUnit()` helper — rather than for the symbol name.
+
+- **The interned imaginary unit is now an exact value**, so exactness-gated
+  folds fire on it. It was built from a float-lane numeric value while the
+  identical `["Complex", 0, 1]` literal boxed exact, which made canonicalization
+  disagree with itself depending on how `i` reached it: `["Power",
+  "ImaginaryUnit", 2]` stayed `i^2` (and `ce.parse('i^2').simplify()` did not
+  reduce) while `["Power", ["Complex", 0, 1], 2]` folded to `-1` — so
+  `ce.box(expr.json)` did not round-trip to `expr`. Small integer powers of `i`
+  now fold on every route, and `\sqrt{-1}`, `(-1)^{1/2}` and `\frac{a}{i}`
+  canonicalize to `i`, `i` and `-ia` respectively.
+
+- A product of an infinity and the imaginary unit no longer collapses to `NaN`
+  at canonicalization. `["Multiply", "PositiveInfinity", ["Complex", 0, 1]]`
+  canonicalized to `NaN` while the other operand order stayed symbolic: the
+  `n·i` promotion (which folds `2·i` to the exact `2i`) accepted a non-finite
+  left operand and built a value out of an infinite component. Infinities are
+  excluded from that fold, so both operand orders now keep the symbolic
+  product. `evaluate()` still returns `NaN` for the indeterminate form.
+
+- `Degrees()` of a non-real argument no longer drops the imaginary part.
+  `\imaginaryI\degree` canonicalized to `0` (and `(2+3i)\degree` to `\frac{\pi}{90}`)
+  because the conversion read only the real part of its operand. The linear
+  conversion is now applied to the whole value: `Degrees(i) = i\pi/180`.
+
+- A canonical `Multiply` is now always flat. A product built by the invisible
+  (juxtaposition) operator could keep a nested `Multiply` operand — for example
+  `ce.parse('2f(ab)')` canonicalized to `Multiply(2, f, Multiply(a, b))` instead
+  of `Multiply(2, a, b, f)` — which broke the associativity contract and made
+  two structurally identical products compare unequal with `isSame()`. Note the
+  MathJSON serializer flattens on output, so `expr.json` printed the same
+  `["Multiply", 2, "a", "b", "f"]` either way; only `expr.ops` showed the
+  difference. As a consequence exact numeric factors separated by parentheses
+  now fold as they should: `2(3x)` canonicalizes to `6x`. One visible knock-on:
+  two closed forms returned by `Sum` — `(b+1)(a+bd/2)` and its sibling — now
+  come back from `simplify()` expanded (`1/2·d·b² + a·b + 1/2·b·d + a`) rather
+  than factored. The values and the canonical forms are unchanged; flattening
+  shaved the expanded rewrite's cost just under `simplify()`'s 1.3× acceptance
+  gate (35 vs 35.1), so the rewrite is now accepted where it used to be
+  rejected. That margin shows how finely the cost gate discriminates between a
+  factored and an expanded form, and it is a candidate for tuning.
+
+- An operator used as a value — unapplied, as in `["Tuple", "A", "Abs"]` or as
+  a callback in `["Map", xs, "Factorial"]` — no longer serializes to a fragment
+  of its own notation. The serializer reached for the operator's LaTeX
+  notation, which is written in terms of operands, so with none it emitted
+  `\vert\vert` for `Abs`, `!` for `Factorial` or `\sum` for `Sum`; none of
+  those re-parse. A LaTeX dictionary entry now declares whether its notation
+  stands on its own with the new `standaloneSymbol` property — true of the
+  function commands (`\sin`, `\ln`, `\arctan`) and of the constant and set
+  notations (`\Z`, `\emptyset`, `\varphi`) — and only a flagged entry's
+  notation is used for an unapplied symbol. Every other operator is spelled out
+  as `\mathrm{Abs}`, `\mathrm{Factorial}`, `\mathrm{Sum}`, which re-parses to
+  the same symbol. Leaving `standaloneSymbol` unset on a custom dictionary
+  entry is always safe: it only costs the nicer spelling.
+
+- The Fungrim identity artifact was regenerated against the canonical forms
+  above (1445 rules: 1435 simplify + 10 solve). Five imaginary-unit identities
+  were retired because canonicalization now performs them natively, which made
+  each rule a no-op: `\sqrt{-1} = i`, `i^2 = -1`, `1/i = -i`, `i^3 = -i` and
+  `i^4 = 1`. Every rule matching on the imaginary unit was re-encoded to the
+  `["Complex", 0, 1]` canonical spelling; none was lost, and no rule's meaning
+  changed. Separately, the offline rule compiler's self-test no longer rejects a
+  rewrite whose result is structurally identical to the expectation but carries
+  a different binder identity (the fallback compared with `isSame` and `isEqual`
+  only, and `isEqual` no longer proves identities in free variables) — this
+  recovers the `Sinc` derivative identity.
+
 ## 0.101.0 _2026-08-04_
 
 ### Breaking Changes

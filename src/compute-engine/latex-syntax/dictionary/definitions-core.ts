@@ -1169,7 +1169,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // ContinuationPlaceholder serializes to `\dots` (its `latexTrigger`), which
   // is what existing round-trip snapshots expect. The additional triggers
   // below all parse to the same symbol.
-  { name: 'ContinuationPlaceholder', latexTrigger: ['\\dots'] },
+  {
+    name: 'ContinuationPlaceholder',
+    standaloneSymbol: true,
+    latexTrigger: ['\\dots'],
+  },
   { latexTrigger: ['\\ldots'], parse: 'ContinuationPlaceholder' },
   { latexTrigger: ['\\cdots'], parse: 'ContinuationPlaceholder' },
   { latexTrigger: ['\\dotsb'], parse: 'ContinuationPlaceholder' },
@@ -1365,6 +1369,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // whose bare form falls back to this symbol.)
   {
     name: PIPE_TOPIC_MARKER,
+    standaloneSymbol: true,
     serialize: '\\square',
   },
   // Pipeline operator: `x \rhd f` (also `x \triangleright f`,

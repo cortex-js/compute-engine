@@ -418,7 +418,11 @@ export class ComputeEngine implements IComputeEngine {
     None: null,
     Undefined: null,
 
-    ImaginaryUnit: null,
+    // Note: `ImaginaryUnit` is deliberately NOT interned here. Its definition
+    // has `holdUntil: 'never'`, so canonicalizing the symbol must substitute
+    // its value, the complex literal `i` (`ce.I`). Interning it would
+    // short-circuit that substitution and leave a second canonical spelling of
+    // the imaginary unit (the symbol) alongside `["Complex", 0, 1]`.
     ExponentialE: null,
   };
 

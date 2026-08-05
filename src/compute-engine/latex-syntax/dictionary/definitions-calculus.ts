@@ -542,6 +542,7 @@ export const DEFINITIONS_CALCULUS: LatexDictionary = [
     // through MathJSON, not LaTeX.
     kind: 'expression',
     name: 'InterpolatingFunction',
+    standaloneSymbol: true,
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const data = operand(expr, 1);
       // data = List of rows [x, h, r1..r5]: the domain is the first row's x

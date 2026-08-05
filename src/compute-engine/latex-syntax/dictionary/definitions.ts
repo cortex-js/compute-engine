@@ -551,6 +551,8 @@ function makeIndexedEntry(
 
     // A serialize function requires a name
     result.serialize = makeSerializeHandler(entry, tokensTrigger, idTrigger);
+
+    if (entry.standaloneSymbol === true) result.standaloneSymbol = true;
   }
 
   //

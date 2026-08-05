@@ -139,8 +139,9 @@ describe('POWERS/ROOTS', () => {
     expect(check('x^{\\frac12}')).toMatchInlineSnapshot(`sqrt(x)`);
     expect(check('2^{\\frac12}')).toMatchInlineSnapshot(`sqrt(2)`);
     expect(check('(x+1)^{\\frac12}')).toMatchInlineSnapshot(`sqrt(x + 1)`);
-    expect(check('(-1)^{\\frac12}')).toMatchInlineSnapshot(`sqrt(-1)`);
-    expect(check('x+(-1)^{\\frac12}')).toMatchInlineSnapshot(`x + sqrt(-1)`);
+    // √(-1) canonicalizes to the imaginary unit
+    expect(check('(-1)^{\\frac12}')).toMatchInlineSnapshot(`i`);
+    expect(check('x+(-1)^{\\frac12}')).toMatchInlineSnapshot(`x + i`);
 
     expect(check('x^{\\frac34}')).toMatchInlineSnapshot(`x^(3/4)`);
     expect(check('2^{\\frac34}')).toMatchInlineSnapshot(`2^(3/4)`);
