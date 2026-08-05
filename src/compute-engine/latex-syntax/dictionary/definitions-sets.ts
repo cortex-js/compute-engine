@@ -6,8 +6,10 @@ import {
   operand,
   operands,
   stringValue,
+  symbol,
 } from '../../../math-json/utils.js';
 import { joinLatex } from '../tokenizer.js';
+import { RING_CONSTANTS } from '../utils.js';
 import { MathJsonExpression } from '../../../math-json/types.js';
 import {
   LatexDictionary,
@@ -16,6 +18,8 @@ import {
   Parser,
   Terminator,
   COMPARISON_PRECEDENCE,
+  DIVISION_PRECEDENCE,
+  POSTFIX_PRECEDENCE,
 } from '../types.js';
 import { tryInferRangeFromElements } from './definitions-core.js';
 
@@ -272,6 +276,22 @@ const COMPARISON_HEADS = new Set<string>([
   'Not',
 ]);
 
+/**
+ * Is `expr` one of the blackboard-bold ring constants (`Integers`,
+ * `RationalNumbers`, ...)?
+ *
+ * The bracket (`\Z[\sqrt2]`) and subscript (`\Z_n`) notations for the ring
+ * constructions are only read back as `Adjoin`/`QuotientRing` when the base is
+ * one of these constants (the canonical `At`/`Subscript` dispatch in
+ * `library/ring-constructions.ts` gates on the same set). The serializers use
+ * this to pick a spelling that round-trips.
+ */
+function isRingConstant(expr: MathJsonExpression | null | undefined): boolean {
+  if (expr === null || expr === undefined) return false;
+  const name = symbol(expr);
+  return name !== null && RING_CONSTANTS.has(name);
+}
+
 export const DEFINITIONS_SETS: LatexDictionary = [
   //
   // Constants
@@ -525,6 +545,106 @@ export const DEFINITIONS_SETS: LatexDictionary = [
         ['Element', 'n', 'NonNegativeIntegers'],
         ['Condition', ['Greater', 'n', 1]],
       ] as MathJsonExpression,
+  },
+
+  //
+  // Ring constructions
+  //
+  // NOTE: the helper `isRingConstant()` (above) gates the
+  // bracket/subscript serializations on the base being one of the four
+  // blackboard-bold ring constants — the only bases the parse route
+  // recognizes.
+  //
+  // `Adjoin` (ring adjunction) and `QuotientRing` (quotient) are inert
+  // operators defined in `library/sets.ts`. Their bracket/subscript input
+  // forms are NOT parsed here: `\mathbb{Z}[\sqrt2]` and `\mathbb{Z}_n` are
+  // read by the generic postfix-index and subscript parselets, and the
+  // canonical handlers of `At`/`Subscript` dispatch to the ring construction
+  // when the base is one of the blackboard-bold ring constants (see
+  // `library/ring-constructions.ts`). Only the serializers — and the
+  // `\mathbb{Z}/n\mathbb{Z}` spelling, which the arithmetic `/` would
+  // otherwise claim — live here.
+  //
+  {
+    name: 'Adjoin',
+    // `\Z[\sqrt2]`, `\Z[\sqrt2, \sqrt3]`, `\Z[x]`. Reparsed by the postfix
+    // `[` index parselet into `At`, which canonicalizes back to `Adjoin`.
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      const ops = operands(expr);
+      // The bracket notation is only reparsed as a ring adjunction when the
+      // base is one of the ring constants (that is the gate of the canonical
+      // `At` dispatch). For any other base — a constructed ring such as
+      // `Adjoin(Adjoin(Z, x), y)` or `QuotientRing(...)` — fall back to the
+      // functional spelling `\mathrm{Adjoin}(...)`, which round-trips.
+      if (!isRingConstant(ops[0])) return serializer.serializeFunction(expr);
+      const base = serializer.wrap(ops[0] ?? 'Nothing', POSTFIX_PRECEDENCE);
+      const adjuncts = ops.slice(1).map((x) => serializer.serialize(x));
+      return joinLatex([base, '[', adjuncts.join(', '), ']']);
+    },
+  },
+  {
+    name: 'QuotientRing',
+    // Serialized in the SUBSCRIPT form `\Z_{n}` (the round-trip target); the
+    // `\Z/n\Z` spelling is parse-only.
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
+      // As for `Adjoin`: the subscript notation is only read back as a
+      // quotient ring when the base is a ring constant, so a constructed base
+      // gets the functional spelling `\mathrm{QuotientRing}(...)` instead.
+      if (!isRingConstant(operand(expr, 1)))
+        return serializer.serializeFunction(expr);
+      const base = serializer.wrap(
+        operand(expr, 1) ?? 'Nothing',
+        POSTFIX_PRECEDENCE
+      );
+      return joinLatex([
+        base,
+        '_{',
+        serializer.serialize(operand(expr, 2)),
+        '}',
+      ]);
+    },
+  },
+  {
+    // `\mathbb{Z}/n\mathbb{Z}` — the quotient ring in ideal notation.
+    //
+    // Declared POSTFIX on the base so it is tried (step 6 of `parsePrimary`)
+    // before the arithmetic `/` infix, which is indexed later in the
+    // dictionary and would otherwise always claim the slash.
+    //
+    // Deliberately narrow: it fires only on the `R / m R` shape with the SAME
+    // blackboard-bold RING constant on both sides. Anything else — including
+    // `\Z/2`, which has no trailing ring, and `S/nS` over an arbitrary
+    // set-typed symbol — restores the index and returns `null`, leaving the
+    // slash to `Divide` exactly as before.
+    kind: 'postfix',
+    precedence: DIVISION_PRECEDENCE,
+    latexTrigger: ['/'],
+    parse: (
+      parser: Parser,
+      lhs: MathJsonExpression
+    ): MathJsonExpression | null => {
+      const base = symbol(lhs);
+      if (base === null) return null;
+      // Same gate as the canonical `At`/`Subscript` dispatch
+      // (`library/ring-constructions.ts`): only the four ring constants, and
+      // only while the ambient environment still reports them as sets (a
+      // scope that shadows `Integers` with a non-set falls back to `Divide`).
+      if (!RING_CONSTANTS.has(base)) return null;
+      if (parser.resolveSymbol(base)?.type.matches('set') !== true) return null;
+
+      const start = parser.index;
+      const rhs = parser.parseExpression({ minPrec: DIVISION_PRECEDENCE });
+      if (
+        rhs !== null &&
+        operator(rhs) === 'InvisibleOperator' &&
+        nops(rhs) === 2 &&
+        symbol(operand(rhs, 2)) === base
+      )
+        return ['QuotientRing', lhs, operand(rhs, 1)!] as MathJsonExpression;
+
+      parser.index = start;
+      return null;
+    },
   },
 
   //

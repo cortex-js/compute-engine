@@ -73,6 +73,8 @@ import {
   sym,
 } from '../boxed-expression/type-guards.js';
 import { typeMembership } from './sets.js';
+import { isRingConstant } from './ring-constructions.js';
+import { adjoinType } from './type-handlers.js';
 
 // From NumPy:
 export const DEFAULT_LINSPACE_COUNT = 50;
@@ -3589,6 +3591,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'handle',
     missingStrip: 'all',
     type: (ops) => {
+      // Bracket notation over a blackboard-bold RING constant canonicalizes to
+      // ring ADJUNCTION (see the `canonical` handler below), so report the same
+      // type it does. Without this, a STRUCTURAL `At(Integers, √2)` — which
+      // never reaches `canonical` — fell through to the indexing analysis
+      // below and claimed `number` instead of the adjunction's `set<…>`.
+      if (ops.length >= 2 && isRingConstant(ops[0])) return adjoinType(ops);
+
       // The RAW type of the element(s) a single index selects (no absence
       // marker). Used as the inner element type of a gather and as the peeled
       // type of a chained step.
@@ -3773,6 +3782,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // collection when the function is applied. Rejecting it here would
     // permanently invalidate the definition (see `isDeclaredScalarNumber`).
     canonical: (ops, { engine: ce }) => {
+      // Bracket notation over a blackboard-bold RING constant is ring
+      // ADJUNCTION, not indexing: `\mathbb{Z}[\sqrt2]` is ℤ[√2], `\mathbb{Z}[x]`
+      // the polynomial ring. A set is not an indexed collection, so the `At`
+      // reading below could only produce an `incompatible-type` error.
+      if (ops.length >= 2 && isRingConstant(ops[0]))
+        return ce._fn('Adjoin', ops);
+
       // `ops` are already canonical (At is not lazy). `At` is declared
       // `handle`/`missingStrip: 'all'`, so validation strips a `missing` arm
       // from every position (§3.B): a `Missing`/`T | missing` base or index is

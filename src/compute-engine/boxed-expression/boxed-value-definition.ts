@@ -114,6 +114,11 @@ export class _BoxedValueDefinition
   // as every other definition.
   _isShield: true | undefined = undefined;
 
+  // True when this binding was created to shadow a standard-library operator
+  // used as a bare value (`N + 1`, `S / D`). This provenance belongs to the
+  // binding itself; replacing the definition naturally discards the marker.
+  _isDevolvedShadow: true | undefined = undefined;
+
   // Bumped on every semantic change to THIS definition (value write, type
   // change, disposal). Used with binding-identity re-resolution to validate
   // per-dependency caches (the `Comprehension` element memo) without an

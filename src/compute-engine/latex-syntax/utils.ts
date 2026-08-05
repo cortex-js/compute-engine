@@ -21,6 +21,32 @@ export function asLatexString(s: unknown): string | null {
   return null;
 }
 
+/**
+ * The standard-library blackboard-bold constants that name a **ring** (or a
+ * field, which is a ring).
+ *
+ * These are the only bases for which the ring-construction notations
+ * `\mathbb{Z}[\sqrt2]` (adjunction — `Adjoin`) and `\mathbb{Z}_n` /
+ * `\mathbb{Z}/n\mathbb{Z}` (quotient — `QuotientRing`) are recognized. The
+ * list is explicit rather than derived from the type of the operand: "is a
+ * ring" is an algebraic property the type lattice does not model (a
+ * `set<integer>` type is carried by `PositiveIntegers` too, which is not a
+ * ring), and keeping the dispatch narrow leaves `At`/`Subscript` over every
+ * other set-typed base exactly as it was.
+ *
+ * It lives here — the lowest layer that both consumers can reach — so the
+ * LaTeX parselets (`dictionary/definitions-sets.ts`) and the canonical
+ * dispatch (`library/ring-constructions.ts`, which cannot be imported from
+ * this layer) share ONE list. Same arrangement as `isRelationalOperator`
+ * below, which `library/relational-operator.ts` consumes.
+ */
+export const RING_CONSTANTS: ReadonlySet<string> = new Set([
+  'Integers',
+  'RationalNumbers',
+  'RealNumbers',
+  'ComplexNumbers',
+]);
+
 export function isRelationalOperator(name: string | undefined): boolean {
   if (typeof name !== 'string') return false;
   return DEFINITIONS_INEQUALITIES.some((x) => x.name === name);

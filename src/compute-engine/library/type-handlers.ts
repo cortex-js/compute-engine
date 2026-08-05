@@ -2,6 +2,7 @@ import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
+import { collectionElementType, widen } from '../../common/type/utils.js';
 
 /**
  * Type handlers for the standard library follow the **non-finite typing
@@ -607,4 +608,47 @@ export function elementaryFunctionType(
     default:
       return numericTypeHandler(ops);
   }
+}
+
+/**
+ * `Adjoin(R, a, b, …)` — the ring `R` with `a`, `b`, … adjoined.
+ *
+ * Every element of the adjunction is a polynomial in the adjoined elements
+ * with coefficients in `R`, so the smallest sound element type is the **join**
+ * of the base ring's element type and the types of the adjoined elements:
+ * `ℤ[√2]` is a set of finite reals, `ℤ[i]` a set of finite complexes, and
+ * `ℤ[x]` (an indeterminate of unknown type) widens all the way to `unknown`.
+ *
+ * No non-finite value is introduced by adjunction, so no `non_finite_number`
+ * claim is made (nor withheld): the finiteness of the result is exactly the
+ * finiteness carried by the operands' own types.
+ */
+export function adjoinType(ops: ReadonlyArray<Expression>): Type {
+  const base = ops[0];
+  const baseElements =
+    (base ? collectionElementType(base.type.type) : undefined) ?? 'unknown';
+  const adjoined = ops.slice(1).map((x) => x.type.type);
+  // `widen` treats `unknown` as "no information" and drops it, which would let
+  // `ℤ[x]` (an INDETERMINATE) claim `set<finite_integer>` — unsound, since the
+  // elements are polynomials in `x`, not integers. An adjunct carrying no type
+  // information takes the whole claim to `unknown`.
+  if (baseElements === 'unknown' || adjoined.some((t) => t === 'unknown'))
+    return { kind: 'set', elements: 'unknown' };
+  return { kind: 'set', elements: widen(baseElements, ...adjoined) };
+}
+
+/**
+ * `QuotientRing(R, m)` — the quotient of the ring `R` by the ideal generated
+ * by `m` (`ℤ_n` = `ℤ/nℤ`).
+ *
+ * The residues are represented by elements of the base ring, so the element
+ * type is the base's: `QuotientRing(Integers, n)` is a `set<finite_integer>`.
+ * The quotient is never larger than the base, so this is an upper bound in
+ * both directions and introduces no non-finite value.
+ */
+export function quotientRingType(ops: ReadonlyArray<Expression>): Type {
+  const base = ops[0];
+  const elements =
+    (base ? collectionElementType(base.type.type) : undefined) ?? 'unknown';
+  return { kind: 'set', elements };
 }

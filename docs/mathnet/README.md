@@ -130,9 +130,11 @@ State at introduction (2026-08-04, v0.100.3): 447 corpus inputs, 59 skipped,
 **351/388 round-trip**, 37 exceptions in 15 classes, all currently classified
 `bug`. Runtime ~11 s on an idle machine.
 
-After the 2026-08-04/05 serializer fix rounds: **377/388 round-trip**, 11
-exceptions in 5 classes — 6 rows `documented-lossy` (the two ruled classes
-above) and 5 rows `bug`.
+After the 2026-08-04/05 serializer fix rounds: **384/391 round-trip**, 7
+exceptions in 3 classes — 6 rows `documented-lossy` (the two ruled classes
+above) and 1 row `bug` (`negate-vs-multiply-minus-one`). The corpus grew by
+3 checked inputs along the way (rows that previously failed to parse cleanly
+now do).
 
 ## Regenerating from scratch
 

@@ -22,7 +22,6 @@ import type {
   Scope,
 } from '../global-types.js';
 import { isSymbol } from './type-guards.js';
-import { isDevolvedShadow } from './devolved-shadows.js';
 import {
   admissionOf,
   hasValueComponent,
@@ -184,12 +183,11 @@ function isRepairableOperatorSymbol(
   let scope: Scope | null = ce.context.lexicalScope;
   while (scope && !scope.bindings.has(name)) scope = scope.parent;
   if (!scope) return false;
-  // The tagged-definition guards, inline: importing them from `./utils.js`
-  // would close a cycle through `boxed-operator-definition.ts` (the runtime
-  // effect channel calls this resolver, and definitions call `function-utils`).
+  // Use the tagged union's discriminant directly: importing the general
+  // definition guards from `./utils.js` would close a runtime cycle.
   const def = scope.bindings.get(name)!;
   if (!scope.parent) return 'operator' in def;
-  return 'value' in def && isDevolvedShadow(def);
+  return 'value' in def && def.value._isDevolvedShadow === true;
 }
 
 /** The caller policies the filter must mirror to stay faithful to

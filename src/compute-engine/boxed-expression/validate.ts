@@ -45,7 +45,6 @@ import type {
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isTensorValue } from './tensor-view.js';
-import { isDevolvedShadow, markDevolvedShadow } from './devolved-shadows.js';
 import { isSymbol, isFunction, isContinuationOperand } from './type-guards.js';
 
 // Parsed once: the type of an indexed collection whose every element is a
@@ -160,14 +159,17 @@ function devolveUnappliedOperator(
     while (shadowScope && !shadowScope.bindings.has(name))
       shadowScope = shadowScope.parent;
     const shadow = shadowScope?.bindings.get(name);
-    if (shadow && isValueDef(shadow)) markDevolvedShadow(shadow);
+    if (shadowScope && shadow && isValueDef(shadow)) {
+      shadow.value._isDevolvedShadow = true;
+      ce._boxingState.noteDevolvedShadow(shadowScope);
+    }
     return ce.box(name);
   }
   // The name was already shadowed with a value BY THIS REPAIR (e.g. by a
   // previous operand of the same expression): rebind this occurrence to the
   // shadow. Any other value definition — in particular a user declaration —
   // is not a repair target.
-  if (isValueDef(def) && isDevolvedShadow(def)) return ce.box(name);
+  if (isValueDef(def) && def.value._isDevolvedShadow) return ce.box(name);
   return null;
 }
 

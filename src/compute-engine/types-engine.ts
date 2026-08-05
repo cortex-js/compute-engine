@@ -21,6 +21,7 @@ import type {
 } from './numeric-value/types.js';
 import type { BigNum, Rational } from './numerics/types.js';
 import type { RandomSeedFrame, RandomSubstream } from './numerics/random.js';
+import type { EngineBoxingState } from './engine-boxing-state.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type {
@@ -267,6 +268,10 @@ export interface IComputeEngine {
    * `beginInferenceTransaction` in `box.ts`).
    * @internal */
   _inferenceTxDepth: number;
+
+  /** Per-engine state for construction-local boxing repairs.
+   * @internal */
+  readonly _boxingState: EngineBoxingState<Scope>;
 
   /** When true, a discarded scope tombstones its value definitions and the
    * symbol resolution sites throw on a use of a dead binding

@@ -1137,6 +1137,10 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * accepted and re-stamped, never checked against the declaration. */
   effectsDeclared: boolean;
 
+  /** True when the un-applied-operator repair created this binding.
+   * @internal */
+  _isDevolvedShadow: true | undefined;
+
   type: BoxedType;
 
   /**

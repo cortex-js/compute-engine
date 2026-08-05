@@ -187,19 +187,33 @@ function boxHold(
  *
  * If available, preserve LaTeX and wikidata metadata in the boxed expression.
  *
- * Note that `boxFunction()` should only be called from `ce.function()`
+ * This is also used internally when `box()` encounters a function expression.
+ * The root repair guard is idempotent, so those nested calls join the existing
+ * construction while a direct `ce.function()` call establishes one here.
  */
-
 export function boxFunction(
   ce: ComputeEngine,
   name: MathJsonSymbol,
   ops: readonly ExpressionInput[],
-  options?: {
-    metadata?: Metadata;
-    canonical?: CanonicalOptions;
-    structural?: boolean;
-    scope?: Scope;
-  }
+  options?: BoxFunctionOptions
+): Expression {
+  return withDevolveRepair(ce, () =>
+    boxFunctionInternal(ce, name, ops, options)
+  );
+}
+
+type BoxFunctionOptions = {
+  metadata?: Metadata;
+  canonical?: CanonicalOptions;
+  structural?: boolean;
+  scope?: Scope;
+};
+
+function boxFunctionInternal(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  ops: readonly ExpressionInput[],
+  options?: BoxFunctionOptions
 ): Expression {
   options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
@@ -458,6 +472,67 @@ function stringifyForError(value: unknown): string {
   return s.length > 200 ? s.slice(0, 200) + '…' : s;
 }
 
+/**
+ * Run `build`, redoing it once if the un-applied-operator repair invented a
+ * binding while it ran.
+ *
+ * The repair (`devolveUnappliedOperator`, `validate.ts`) can declare a
+ * variable for a builtin name PARTWAY through a construction: in `N, N+1` the
+ * bare `N` binds the operator, and only the `N` of `N+1` devolves. The
+ * occurrences boxed before the shadow existed keep the operator binding, so one
+ * expression ends up denoting two different things by one name — and boxing the
+ * same input again (as a serialize/parse round trip does) a third, which is why
+ * byte-identical MathJSON could compare `isSame` false.
+ *
+ * Detect it and redo the construction, now that the binding the name should
+ * have had all along exists. Nested unscoped constructions join the engine's
+ * root construction; a scoped operator establishes its own repair frame and
+ * rebuilds against the same scope.
+ *
+ * `build` must be free of side effects other than boxing: it is called twice.
+ */
+function withDevolveRepair(
+  ce: ComputeEngine,
+  build: () => Expression
+): Expression {
+  return ce._boxingState.withRootRepair(build);
+}
+
+/**
+ * The half of the repair a rebuild cannot do on its own: an operand the caller
+ * had ALREADY boxed (`ce.function('Tuple', [ce.box('N'), ['Add', 'N', 1]])`)
+ * is canonical, so it passes through boxing unchanged and keeps the operator
+ * binding it got before the shadow existed — one expression again denoting two
+ * things by one name.
+ *
+ * On a rebuild only, re-resolve such an operand against the shadow. The
+ * caller's expression is never mutated: the rebinding is a fresh symbol in the
+ * OUTPUT tree.
+ *
+ * Returns `null` when the operand is not a stale un-applied operator.
+ */
+function rebindDevolvedSymbol(
+  ce: ComputeEngine,
+  expr: Expression,
+  scope: Scope | undefined
+): Expression | null {
+  if (!isSymbol(expr)) return null;
+  // An un-applied OPERATOR binding is what the repair replaces. A symbol bound
+  // to a value is either the shadow already (nothing to do) or a declaration
+  // the repair never touches.
+  if (!expr.operatorDefinition) return null;
+
+  const name = expr.symbol;
+  let s: Scope | null = scope ?? ce.context.lexicalScope;
+  while (s && !s.bindings.has(name)) s = s.parent;
+  const def = s?.bindings.get(name);
+  // Same provenance check as `devolveUnappliedOperator` (`validate.ts`): only
+  // a shadow the repair itself created is a rebinding target.
+  if (!def || !isValueDef(def) || !def.value._isDevolvedShadow) return null;
+
+  return ce._inScope(scope, () => ce.expr(name));
+}
+
 export function box(
   ce: ComputeEngine,
   expr: null | undefined | NumericValue | ExpressionInput,
@@ -469,7 +544,7 @@ export function box(
 ): Expression {
   beginInferenceTransaction(ce);
   try {
-    return boxInternal(ce, expr, options);
+    return withDevolveRepair(ce, () => boxInternal(ce, expr, options));
   } finally {
     endInferenceTransaction(ce);
   }
@@ -488,8 +563,19 @@ function boxInternal(
 
   if (expr instanceof NumericValue) return fromNumericValue(ce, expr);
 
-  if (expr instanceof _BoxedExpression)
-    return canonicalForm(expr, options?.canonical ?? true, options?.scope);
+  if (expr instanceof _BoxedExpression) {
+    // While rebuilding after a devolved shadow, an operand boxed before the
+    // shadow existed still carries the stale operator binding (see
+    // `rebindDevolvedSymbol`). A normal pass never asks.
+    const rebound = ce._boxingState.isRebuilding
+      ? rebindDevolvedSymbol(ce, expr, options?.scope)
+      : null;
+    return canonicalForm(
+      rebound ?? expr,
+      options?.canonical ?? true,
+      options?.scope
+    );
+  }
 
   options = options ? { ...options } : {};
   if (!('canonical' in options)) options.canonical = true;
@@ -840,7 +926,14 @@ function makeCanonicalFunction(
   // See `docs/plans/2026-07-26-binder-mechanism-design.md` §1.3.
   const sites = opDef.bindingSites;
   if (sites !== undefined && scope !== undefined)
-    return canonicalizeBinder(ce, name, ops, metadata, scope, opDef, sites);
+    return ce._boxingState.withScopedRepair(scope, () =>
+      canonicalizeBinder(ce, name, ops, metadata, scope, opDef, sites)
+    );
+
+  if (opDef.scoped && scope !== undefined)
+    return ce._boxingState.withScopedRepair(scope, () =>
+      applyOperatorDefinition(ce, name, ops, metadata, scope, opDef)
+    );
 
   return applyOperatorDefinition(ce, name, ops, metadata, scope, opDef);
 }

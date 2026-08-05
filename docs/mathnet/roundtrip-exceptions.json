@@ -12,60 +12,12 @@
    "reason": "documented-lossy",
    "note": "RULED documented-lossy 2026-08-04: a Multiply with a Divide/reciprocal factor is emitted as ONE fraction over the whole product ('\\\\frac{1}{2}\\\\cdot\\\\frac{1}{a+x}' -> '\\\\frac{1}{2(a+x)}'). The rewrite is value-preserving prettification; the serializer is contractually allowed to lose the factored structure, so the reparse being a Divide of the product fails only the structural tier by design."
   },
-  "at-over-declared-set-base": {
-   "reason": "bug",
-   "note": "At over a set-typed base reserializes to a bracket form that no longer type-checks. Repro: ce.parse('\\\\mathbb{Z}_n') -> ['At','Integers','n'] -> '\\\\Z[n]' -> ['At',['Error',['ErrorCode',\"'incompatible-type'\",\"'dictionary | indexed_collection'\",\"'set<finite_integer>'\"]],'n']. The first parse arguably should not have produced At over Integers either."
-  },
-  "builtin-head-vs-value-def-drift": {
-   "reason": "bug",
-   "note": "A name that is BOTH a library operator and used as a free variable binds inconsistently WITHIN one parse: the head-position occurrence takes the builtin operator definition, a later occurrence auto-declares a value definition. The reparse sees the value definition everywhere, so the trees differ by binding identity with IDENTICAL MathJSON. Repro: ce.parse('N, N+1') - N types as '(any, integer?) -> unknown' in pass 1, 'number' in pass 2. Same for D (derivative) in '(DB+BC)^2=AD^2+AC^2.'."
-  },
   "negate-vs-multiply-minus-one": {
    "reason": "bug",
    "note": "Two canonical spellings of a negated product: ['Multiply',-1,a,b,...] serializes as `-(ab...)`, which reparses as ['Negate',['Multiply',a,b,...]] - both forms survive canonicalization. Same two-spellings nature as the fixed complex-i class; canonicalization should pick one. (Sole row formerly in complex-i-vs-imaginary-unit; its imaginary-unit half was fixed 2026-08-04 when ImaginaryUnit converged on Complex(0,1).)"
   }
  },
  "exceptions": [
-  {
-   "latex": "(\\mathbb{Z}_n, +, \\cdot)",
-   "reserialized": "(\\Z[n],\\mathrm{Add},\\mathrm{Multiply})",
-   "mismatch": "[\"Tuple\",[\"At\",\"Integers\",\"n\"],\"Add\",\"Multiply\"]  ≠  [\"Tuple\",[\"At\",[\"Error\",[\"ErrorCode\",\"'incompatible-type'\",\"'dictionary | indexed_collection'\",\"'set<finite_integer>'\"]],\"n\"],\"Add\",\"Multiply\"]",
-   "class": "at-over-declared-set-base",
-   "reason": "bug",
-   "note": "Also exhibits operator-symbol-serializes-empty (the `+`/`\\cdot` operands vanish)."
-  },
-  {
-   "latex": "(DB+BC)^2=AD^2+AC^2.",
-   "reserialized": "(BC+BD)^2=AC^2+AD^2",
-   "mismatch": "identical MathJSON, isSame false (binding/order): [\"Equal\",[\"Power\",[\"Add\",[\"Multiply\",\"B\",\"C\"],[\"Multiply\",\"B\",\"D\"]],2],[\"Add\",[\"Multiply\",\"A\",[\"Power\",\"C\",2]],[\"Multiply\",\"A\",[\"Power\",\"D\",2]]]]",
-   "class": "builtin-head-vs-value-def-drift",
-   "reason": "bug",
-   "note": "The drifting name is D (the derivative operator)."
-  },
-  {
-   "latex": "N, N+1, N+2, N+3",
-   "reserialized": "(N,N+1,N+2,N+3)",
-   "mismatch": "identical MathJSON, isSame false (binding/order): [\"Tuple\",\"N\",[\"Add\",\"N\",1],[\"Add\",\"N\",2],[\"Add\",\"N\",3]]",
-   "class": "builtin-head-vs-value-def-drift",
-   "reason": "bug",
-   "note": "The drifting name is N (numeric approximation)."
-  },
-  {
-   "latex": "OP^{4} + \\left(\\frac{MN}{2}\\right)^{4} = MP^{2} \\cdot NP^{2}",
-   "reserialized": "OP^4+(\\frac{MN}{2})^4=MNP^2P^2",
-   "mismatch": "identical MathJSON, isSame false (binding/order): [\"Equal\",[\"Add\",[\"Multiply\",\"O\",[\"Power\",\"P\",4]],[\"Power\",[\"Multiply\",[\"Rational\",1,2],\"M\",\"N\"],4]],[\"Multiply\",\"M\",\"N\",[\"Power\",\"P\",2],[\"Power\",\"P\",2]]]",
-   "class": "builtin-head-vs-value-def-drift",
-   "reason": "bug",
-   "note": "The drifting name is N (numeric approximation)."
-  },
-  {
-   "latex": "If n is odd: (n^2 − 1)/2; if n is even: (n^2 − 4)/2.",
-   "reserialized": "((\\imaginaryI)Iddfnos\\colon\\frac{n^2-1}{2},-(\\exponentialE\\exponentialE fnnsv)\\colon\\frac{n^2-4}{2})",
-   "mismatch": "[\"Tuple\",[\"Colon\",[\"Multiply\",[\"Complex\",0,1],\"I\",\"d\",\"d\",\"f\",\"n\",\"o\",\"s\"],[\"Multiply\",[\"Rational\",1,2],[\"Add\",[\"Power\",\"n\",2],-1]]],[\"Colon\",[\"Multiply\",-1,\"ExponentialE\",\"ExponentialE\",\"f\",\"n\",\"n\",\"s\",\"v\"],[\"Multiply\"…  ≠  [\"Tuple\",[\"Colon\",[\"Multiply\",[\"Complex\",0,1],\"I\",\"d\",\"d\",\"f\",\"n\",\"o\",\"s\"],[\"Multiply\",[\"Rational\",1,2],[\"Add\",[\"Power\",\"n\",2],-1]]],[\"Colon\",[\"Negate\",[\"Multiply\",\"ExponentialE\",\"ExponentialE\",\"f\",\"n\",\"n\",\"s\",\"v\"]],[\"M…",
-   "class": "negate-vs-multiply-minus-one",
-   "reason": "bug",
-   "note": "Formerly complex-i-vs-imaginary-unit; the imaginary-unit halves now agree (both ['Complex',0,1]). The residual failure is the Negate-vs-Multiply(-1,...) spelling split."
-  },
   {
    "latex": "\\left( \\frac{n}{2(a_1 + a_2 + \\cdots + a_n)} - 1 \\right)^n \\le \\left[ \\frac{a_1 + a_2 + \\cdots + a_n}{n} \\right]^n \\left( \\frac{1}{a_1} - 1 \\right) \\left( \\frac{1}{a_2} - 1 \\right) \\cdots \\left( \\frac{1}{a_n} - 1 \\right).",
    "reserialized": "{((n)(2(a_1+a_2+\\dots+a_{n}))^{-1}-1)}^{n}\\le\\bigl\\lbrack\\frac{a_1+a_2+\\dots+a_{n}}{n}\\bigr\\rbrack^{n}\\times(\\frac{1}{a_1}-1)\\times(\\frac{1}{a_2}-1)\\times\\dots\\times(\\frac{1}{a_{n}}-1)",
@@ -87,6 +39,14 @@
    "mismatch": "[\"Equal\",\"M\",[\"Max\",[\"Set\",[\"Divide\",\"x_1\",[\"Add\",\"x_1\",1]],[\"Divide\",\"x_2\",[\"Add\",\"x_1\",\"x_2\",1]],\"ContinuationPlaceholder\",[\"Divide\",\"x_n\",[\"Add\",1,\"x_1\",\"x_2\",\"ContinuationPlaceholder\",\"x_n\"]]]]]  ≠  [\"Equal\",\"M\",[\"Max\",[\"Set\",[\"Divide\",\"x_1\",[\"Add\",\"x_1\",1]],[\"Divide\",\"x_2\",[\"Add\",\"x_1\",\"x_2\",1]],\"ContinuationPlaceholder\",[\"Multiply\",\"x_n\",[\"Divide\",1,[\"Add\",1,\"x_1\",\"x_2\",\"ContinuationPlaceholder\",\"x_n\"]]]]]]",
    "class": "fraction-fallback-inverse-power",
    "reason": "documented-lossy"
+  },
+  {
+   "latex": "If n is odd: (n^2 − 1)/2; if n is even: (n^2 − 4)/2.",
+   "reserialized": "((\\imaginaryI)Iddfnos\\colon\\frac{n^2-1}{2},-(\\exponentialE\\exponentialE fnnsv)\\colon\\frac{n^2-4}{2})",
+   "mismatch": "[\"Tuple\",[\"Colon\",[\"Multiply\",[\"Complex\",0,1],\"I\",\"d\",\"d\",\"f\",\"n\",\"o\",\"s\"],[\"Multiply\",[\"Rational\",1,2],[\"Add\",[\"Power\",\"n\",2],-1]]],[\"Colon\",[\"Multiply\",-1,\"ExponentialE\",\"ExponentialE\",\"f\",\"n\",\"n\",\"s\",\"v\"],[\"Multiply\"…  ≠  [\"Tuple\",[\"Colon\",[\"Multiply\",[\"Complex\",0,1],\"I\",\"d\",\"d\",\"f\",\"n\",\"o\",\"s\"],[\"Multiply\",[\"Rational\",1,2],[\"Add\",[\"Power\",\"n\",2],-1]]],[\"Colon\",[\"Negate\",[\"Multiply\",\"ExponentialE\",\"ExponentialE\",\"f\",\"n\",\"n\",\"s\",\"v\"]],[\"M…",
+   "class": "negate-vs-multiply-minus-one",
+   "reason": "bug",
+   "note": "Formerly complex-i-vs-imaginary-unit; the imaginary-unit halves now agree (both ['Complex',0,1]). The residual failure is the Negate-vs-Multiply(-1,...) spelling split."
   },
   {
    "latex": "\\frac{1}{n} = \\frac{1}{a_1} - \\frac{1}{a_2} + \\frac{1}{a_3} - \\dots + (-1)^{m-1} \\frac{1}{a_m}.",

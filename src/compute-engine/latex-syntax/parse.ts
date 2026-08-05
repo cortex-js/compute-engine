@@ -3173,7 +3173,43 @@ export class _Parser implements Parser {
           const result = def.parse(this, this.error('missing', start));
           if (result !== null) return result;
         }
-        return this.error('unexpected-operator', start);
+        // The postfix reading declined (e.g. the ring-quotient `/`, which only
+        // claims the `R/mR` shape). A token can carry several operator
+        // readings, so fall through to the prefix/infix ones when they exist
+        // instead of giving up here — `/2` must still recover as
+        // `Divide(missing, 2)`. With no alternative reading, report the
+        // unexpected operator from where the declined parse left off (so the
+        // error still carries the offending token).
+        //
+        // A NAMED postfix entry is deliberately NOT recovered here as
+        // `[def.name, missing]` (which is what `0e8c11b9` removed): the only
+        // named entry that reaches this point is `At`, and `2[1,2]` /
+        // `\foo[0]{1}{2}` are pinned to the `unexpected-operator` reading by
+        // `delimiters.test.ts` and `serialize.test.ts` — pins added AFTER
+        // `0e8c11b9`, so the plain error is the intended recovery. (`!` alone
+        // still yields `['Factorial', missing]`; it never reaches this path.)
+        //
+        // BREADTH: this fall-through applies to EVERY postfix entry that
+        // declines (or has no `parse` handler at all), not only the
+        // ring-quotient parselet that motivated it. Scan of the default LaTeX
+        // dictionary on 2026-08-05 — matching each postfix trigger against the
+        // prefix/infix triggers that can also match at the same index — found
+        // the postfix entries with an alternative reading reachable here to be:
+        // `/` (vs `Divide` and `SlashEqual`), the `_` family (`_`, `_+`, `_-`,
+        // `_*`, `_\star` vs `Subscript`), `.` (vs `Range`) and `!` (vs
+        // `Unequal`, and only when followed by `=`). The `^` family never
+        // reaches this code: `^` is intercepted at the top of this method.
+        // A postfix entry added later whose trigger collides with a
+        // prefix/infix one has its error recovery changed by this path.
+        const afterPostfix = this.index;
+        this.index = start;
+        if (
+          this.peekDefinitions('prefix').length === 0 &&
+          this.peekDefinitions('infix').length === 0
+        ) {
+          this.index = afterPostfix;
+          return this.error('unexpected-operator', start);
+        }
       }
 
       // Check prefix before infix, to catch `-` as a single missing operand

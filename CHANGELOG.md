@@ -1,6 +1,51 @@
 ## [Unreleased]
 
+### New Features
+
+- **Two ring constructions, `Adjoin` and `QuotientRing`, with their standard
+  notations.** `\mathbb{Z}[\sqrt2]`, `\mathbb{Z}[\sqrt2,\sqrt3]`,
+  `\mathbb{Z}[i]` and `\mathbb{Z}[x]` now parse as ring adjunction
+  (`["Adjoin", "Integers", …]`), and both `\mathbb{Z}_n` and
+  `\mathbb{Z}/n\mathbb{Z}` as the quotient ring
+  (`["QuotientRing", "Integers", "n"]`), which serializes back to the subscript
+  form. The blackboard-bold ring and field constants — `\mathbb{Z}`,
+  `\mathbb{Q}`, `\mathbb{R}`, `\mathbb{C}` — are accepted as bases. Both
+  operators are **inert** in this version: they stay symbolic, carry no
+  membership test and no arithmetic in the constructed ring, but they do report
+  an honest type — `\mathbb{Z}[\sqrt2]` is a `set<finite_real>`,
+  `\mathbb{Z}[i]` a `set<finite_complex>`, `\mathbb{Z}_n` a
+  `set<finite_integer>`. Note that `\mathbb{Z}_p` is read as the integers
+  modulo `p` — the quotient reading — not as the alternative number-theoretic
+  reading the same notation carries in some texts, and that field adjunction
+  written with parentheses (`\mathbb{Q}(\sqrt2)`) is not parsed. Sign-restricted
+  spellings are unaffected: `\mathbb{Z}_+`, `\mathbb{R}_-` and
+  `\mathbb{Z}_{\ge0}` still name `PositiveIntegers`, `NegativeNumbers` and
+  `NonNegativeIntegers`.
+
 ### Bug Fixes
+
+- **A subscript or bracket on a set constant is no longer read as an index.**
+  `\mathbb{Z}_n` parsed as `["At", "Integers", "n"]` — indexing into a set —
+  which is not a valid type, and serialized back to `\Z[n]`, which parsed as
+  an `incompatible-type` error, so the expression did not survive a round trip.
+  Those spellings now produce the ring constructions above. Indexing a genuine
+  indexed collection is unchanged.
+
+- **A bare `N` or `D` used as a variable now binds the same way everywhere in
+  an expression.** A single-uppercase-letter name that is also a standard
+  library operator reads as a variable when it appears where a value is
+  required (`N + 1`), and the engine declares that variable the moment it first
+  sees such an occurrence. Occurrences boxed _before_ that point — the first
+  `N` of `N, N+1` — kept the operator binding, so one expression carried two
+  different bindings for one name (`isSame()` was false between two
+  occurrences) and boxing the same input a second time produced a third. An
+  expression such as `N, N+1, N+2` or `(DB+BC)^2 = AD^2+AC^2` therefore did not
+  survive a serialize-and-reparse round trip. When the variable is declared
+  partway through a boxing, the expression is now rebuilt against it, so every
+  occurrence shares one binding. What the names mean is unchanged: `N(2.3)` and
+  `D(x^2, x)` still apply the builtin operators, `x^2 |> D` still pipes into
+  the derivative operator, and a bare mention on its own (`ce.parse('N')`)
+  still leaves the operator definition intact.
 
 - **A symbol spelled by the generic (name-based) speller now reads back as the
   same symbol.** Two cosmetic spellings changed the symbol's identity on a

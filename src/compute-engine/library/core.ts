@@ -29,6 +29,8 @@ import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
 import { fromDigits } from '../numerics/strings.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { randomCount } from './random-utils.js';
+import { isRingConstant } from './ring-constructions.js';
+import { quotientRingType } from './type-handlers.js';
 import { interval } from '../numerics/interval.js';
 import { range, rangeLast } from './collections.js';
 import { checkDeadline } from '../../common/interruptible.js';
@@ -2924,6 +2926,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(collection, any) -> any',
       type: ([op1, op2], { engine: ce }) => {
         if (isString(op1) && asSmallInteger(op2) !== null) return 'integer';
+
+        // A subscript on a blackboard-bold RING constant canonicalizes to the
+        // quotient ring `ℤ_n = ℤ/nℤ` (see the `canonical` handler below), so
+        // report the same type it does. Without this, a STRUCTURAL
+        // `Subscript(Integers, n)` — which never reaches `canonical` — fell
+        // through to `collectionElementType` and claimed `finite_integer`:
+        // the element type of ℤ, not the type of the quotient RING.
+        if (isRingConstant(op1)) return quotientRingType([op1, op2]);
+
         if (op1.isIndexedCollection)
           return collectionElementType(op1.type.type) ?? 'any';
 
@@ -2988,6 +2999,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             ce.error(['invalid-base', op2.toString()]),
           ]);
         }
+
+        // A subscript on a blackboard-bold RING constant is the quotient ring
+        // `ℤ_n = ℤ/nℤ`, not an index into ℤ (a set is not an indexed
+        // collection, so the `At` reading below produced a type error and a
+        // bracket reserialization that no longer parsed — the
+        // `at-over-declared-set-base` round-trip defect).
+        // Sign-restricted spellings (`\Z_+`, `\R_{\ge0}`, …) never reach here:
+        // they are matched by their own LaTeX triggers and resolve directly to
+        // `PositiveIntegers` & co.
+        if (isRingConstant(op1))
+          return ce._fn('QuotientRing', [op1, op2.canonical]);
 
         // Is it a collection expression (like a list literal)?
         if (op1.isIndexedCollection) return ce._fn('At', [op1, op2.canonical]);

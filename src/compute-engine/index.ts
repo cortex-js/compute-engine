@@ -203,6 +203,7 @@ import {
 import { SimplificationRuleStore } from './engine-simplification-rules.js';
 import { EngineNumericConfiguration } from './engine-numeric-configuration.js';
 import { EngineRuntimeState } from './engine-runtime-state.js';
+import { EngineBoxingState } from './engine-boxing-state.js';
 import { EngineStartupCoordinator } from './engine-startup-coordinator.js';
 import { createTypeResolver } from './engine-type-resolver.js';
 import {
@@ -370,6 +371,9 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal Runtime execution limits and verification mode state */
   private _runtimeState = new EngineRuntimeState();
+
+  /** @internal Construction-local boxing repair state */
+  readonly _boxingState = new EngineBoxingState<Scope>();
 
   /** @internal Configuration change generation/tracking lifecycle */
   private _configurationLifecycle = new EngineConfigurationLifecycle();

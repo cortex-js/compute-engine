@@ -121,6 +121,10 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _writeVersion: number;
 
+  /** True when the un-applied-operator repair created this binding.
+   * @internal */
+  _isDevolvedShadow: true | undefined;
+
   holdUntil: 'never' | 'evaluate' | 'N';
   value: Expression | undefined;
   readonly isSelfReferential: boolean;

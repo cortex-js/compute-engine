@@ -644,3 +644,31 @@ check('Mismatched type', () => {
     ]
   `);
 });
+
+describe('Postfix-decline recovery in parseSyntaxError', () => {
+  const raw = (s: string) =>
+    JSON.stringify(engine.parse(s, { canonical: false }).json);
+
+  test('a declining postfix falls through to the infix reading', () => {
+    // The ring-quotient `/` postfix only claims the `R/mR` shape; when it
+    // declines, the `Divide` infix reading still recovers the operand.
+    expect(raw('/2')).toEqual(
+      '["Divide",["Error","\'missing\'",["LatexString","\'/\'"]],2]'
+    );
+    // The shape the postfix DOES claim is unaffected.
+    expect(raw('\\Z/2\\Z')).toEqual('["QuotientRing","Integers",2]');
+  });
+
+  test('a named postfix with no competing reading is NOT rebuilt as [name, missing]', () => {
+    // `2[1,2]`: the `At` postfix declines and there is no prefix/infix reading
+    // for `[`, so the recovery is the plain error — NOT `["At", missing]`.
+    // (See the note at the fall-through in `parse.ts`.)
+    expect(raw('2[1,2]')).toEqual(
+      '["Sequence",2,["Error","\'unexpected-operator\'",["LatexString","\'[\'"]]]'
+    );
+    // `!` never reaches that path: it keeps its richer operator recovery.
+    expect(raw('!')).toEqual(
+      '["Factorial",["Error","\'missing\'",["LatexString","\'!\'"]]]'
+    );
+  });
+});
