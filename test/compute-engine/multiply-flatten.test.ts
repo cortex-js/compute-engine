@@ -187,6 +187,68 @@ describe('CANONICAL MULTIPLY IS FLAT', () => {
       ]);
     });
 
+    test('a raw-boxed Multiply holds a deep barrier back (checkNumericArgs route)', () => {
+      const ce = new ComputeEngine();
+      // The barrier sits two levels down in a RAW `Multiply` (no
+      // InvisibleOperator/Delimiter wrapper), so it is `checkNumericArgs`'s
+      // flatten — not `canonicalMultiply`'s — that must hold it back whole.
+      const expr = ce.box([
+        'Multiply',
+        ['Multiply', 'a', ['Multiply', 'b', 'ContinuationPlaceholder']],
+        'c',
+      ]);
+      expect(tree(expr)).toEqual([
+        'Multiply',
+        'c',
+        ['Multiply', 'a', ['Multiply', 'b', '...']],
+      ]);
+    });
+
+    test('a Sequence-wrapped barrier is held back (box route)', () => {
+      const ce = new ComputeEngine();
+      // `flatten()` descends `Sequence` as well as the requested head, so a
+      // barrier hiding behind a `Sequence` wrapper is spliced just like a
+      // nested `Multiply` would be — the barrier check has to see through
+      // `Sequence` too. Note the `Sequence` needs two or more operands to
+      // reach the check: a one-operand `Sequence` collapses to its operand
+      // during canonicalization, before the flatten ever runs.
+      const expr = ce.box([
+        'Multiply',
+        ['Sequence', ['Multiply', 'a', 'ContinuationPlaceholder'], 'z'],
+        'b',
+      ]);
+      expect(tree(expr)).toEqual([
+        'Multiply',
+        'b',
+        'z',
+        ['Multiply', 'a', '...'],
+      ]);
+      // The ellipsis never becomes a direct operand of the outer product
+      expect(opStrings(expr)).not.toContain('...');
+    });
+
+    test('a Sequence-wrapped barrier keeps its anchor away from a numeric sibling', () => {
+      const ce = new ComputeEngine();
+      // The `2` belongs to the elided pattern (the `2n` anchor): splicing the
+      // barrier would strand it next to the outer `3` as a fellow direct
+      // operand of one fold.
+      const expr = ce.box([
+        'Multiply',
+        ['Sequence', 'z', ['Multiply', 2, 'ContinuationPlaceholder', 'n']],
+        3,
+        'b',
+      ]);
+      expect(tree(expr)).toEqual([
+        'Multiply',
+        '3',
+        'b',
+        'z',
+        ['Multiply', '2', '...', 'n'],
+      ]);
+      expect(opStrings(expr)).not.toContain('...');
+      expect(opStrings(expr)).not.toContain('2');
+    });
+
     test('an unrelated nested product still flattens next to a barrier', () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
@@ -216,6 +278,37 @@ describe('CANONICAL MULTIPLY IS FLAT', () => {
         'y',
         ['Multiply', '2', '...', 'n'],
       ]);
+    });
+  });
+
+  /**
+   * The exact-numeric fold in `canonicalMultiply` can PRODUCE a negative real
+   * coefficient that was not there in the operands (`i · i → -1`). That
+   * coefficient has to re-enter the sign channel after the fold, otherwise the
+   * result serializes as `Multiply(-1, …)` instead of `Negate(…)`. These pin
+   * the negate-vs-multiply-minus-one round trip.
+   */
+  describe('post-fold sign re-extraction', () => {
+    test('i · i · a · b → Negate(Multiply(a, b))', () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce.box(['Multiply', ['Complex', 0, 1], ['Complex', 0, 1], 'a', 'b'])
+          .json
+      ).toEqual(['Negate', ['Multiply', 'a', 'b']]);
+    });
+
+    test('i · i · 2 · a → Multiply(-2, a) — the sign folds into the coefficient', () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce.box(['Multiply', ['Complex', 0, 1], ['Complex', 0, 1], 2, 'a']).json
+      ).toEqual(['Multiply', -2, 'a']);
+    });
+
+    test('i · i → -1', () => {
+      const ce = new ComputeEngine();
+      expect(
+        ce.box(['Multiply', ['Complex', 0, 1], ['Complex', 0, 1]]).json
+      ).toEqual(-1);
     });
   });
 });

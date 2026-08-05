@@ -41,14 +41,6 @@
    "reason": "documented-lossy"
   },
   {
-   "latex": "If n is odd: (n^2 − 1)/2; if n is even: (n^2 − 4)/2.",
-   "reserialized": "((\\imaginaryI)Iddfnos\\colon\\frac{n^2-1}{2},-(\\exponentialE\\exponentialE fnnsv)\\colon\\frac{n^2-4}{2})",
-   "mismatch": "[\"Tuple\",[\"Colon\",[\"Multiply\",[\"Complex\",0,1],\"I\",\"d\",\"d\",\"f\",\"n\",\"o\",\"s\"],[\"Multiply\",[\"Rational\",1,2],[\"Add\",[\"Power\",\"n\",2],-1]]],[\"Colon\",[\"Multiply\",-1,\"ExponentialE\",\"ExponentialE\",\"f\",\"n\",\"n\",\"s\",\"v\"],[\"Multiply\"…  ≠  [\"Tuple\",[\"Colon\",[\"Multiply\",[\"Complex\",0,1],\"I\",\"d\",\"d\",\"f\",\"n\",\"o\",\"s\"],[\"Multiply\",[\"Rational\",1,2],[\"Add\",[\"Power\",\"n\",2],-1]]],[\"Colon\",[\"Negate\",[\"Multiply\",\"ExponentialE\",\"ExponentialE\",\"f\",\"n\",\"n\",\"s\",\"v\"]],[\"M…",
-   "class": "negate-vs-multiply-minus-one",
-   "reason": "bug",
-   "note": "Formerly complex-i-vs-imaginary-unit; the imaginary-unit halves now agree (both ['Complex',0,1]). The residual failure is the Negate-vs-Multiply(-1,...) spelling split."
-  },
-  {
    "latex": "\\frac{1}{n} = \\frac{1}{a_1} - \\frac{1}{a_2} + \\frac{1}{a_3} - \\dots + (-1)^{m-1} \\frac{1}{a_m}.",
    "reserialized": "\\frac{1}{n}=\\frac{1}{a_1}-\\frac{1}{a_2}+\\frac{1}{a_3}-\\dots+\\frac{(-1)^{m-1}}{a_{m}}",
    "mismatch": "[\"Equal\",[\"Divide\",1,\"n\"],[\"Add\",[\"Divide\",1,\"a_1\"],[\"Negate\",[\"Divide\",1,\"a_2\"]],[\"Divide\",1,\"a_3\"],[\"Negate\",\"ContinuationPlaceholder\"],[\"Multiply\",[\"Divide\",1,\"a_m\"],[\"Power\",-1,[\"Add\",\"m\",-1]]]]]  ≠  [\"Equal\",[\"Divide\",1,\"n\"],[\"Add\",[\"Divide\",1,\"a_1\"],[\"Negate\",[\"Divide\",1,\"a_2\"]],[\"Divide\",1,\"a_3\"],[\"Negate\",\"ContinuationPlaceholder\"],[\"Divide\",[\"Power\",-1,[\"Add\",\"m\",-1]],\"a_m\"]]]",

@@ -383,13 +383,25 @@ export class Serializer {
     //
     // Use serialize handler if available
     //
-    if (def?.serialize) return def.serialize(this, expr);
+    // ...unless the entry's own notation IS a spelling that belongs to another
+    // symbol: the auto-generated entry for a head named `pi` spells it `\pi`,
+    // so `\pi(x)` would read back as the constant `Pi`. Such a head is spelled
+    // upright, exactly as a value symbol with the same name is (see
+    // `spellSymbol()`). An entry with a notation of its own (a custom
+    // `\operatorname{pi}` entry, say) is not affected: only the colliding
+    // spelling is refused, not the name.
+    const h = operator(expr);
+    const claimed = this.dictionary.claimedSpellings.get(h);
+    if (
+      def?.serialize &&
+      (claimed === undefined || def.latexTrigger !== claimed)
+    )
+      return def.serialize(this, expr);
 
     // It's a function without a serializer.
     // It may have come from the `resolveSymbol()` handler
     // Serialize the arguments as function arguments
-    const h = operator(expr);
-    return serializeSymbol(h, 'auto') + this.wrapArguments(expr);
+    return this.spellSymbol(h) + this.wrapArguments(expr);
   }
 
   serialize(expr: MathJsonExpression | null | undefined): LatexString {

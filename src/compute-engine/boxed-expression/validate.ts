@@ -6,7 +6,7 @@ import {
   typeIsProvablyNonNumericCollection,
 } from '../collection-utils.js';
 
-import { flatten } from './flatten.js';
+import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { admissionOf, hasValueComponent } from './value-membership.js';
 import {
@@ -45,7 +45,13 @@ import type {
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isTensorValue } from './tensor-view.js';
-import { isSymbol, isFunction, isContinuationOperand } from './type-guards.js';
+import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
+import {
+  isSymbol,
+  isFunction,
+  isContinuationOperand,
+  containsContinuationOperand,
+} from './type-guards.js';
 
 // Parsed once: the type of an indexed collection whose every element is a
 // number. Used in `checkNumericArgs` to accept collections for broadcasting on
@@ -151,6 +157,18 @@ function devolveUnappliedOperator(
   if (!scope.parent) {
     // Bound to the standard library: shadow it in the current scope
     if (!isOperatorDef(def)) return null;
+    // A top-level `ce.assign('F', x ↦ x²)` hoists its definition into the
+    // same parentless scope as the standard library, so scope position alone
+    // cannot tell a builtin from a user function. Discriminate on the
+    // definition's ORIGIN: a definition backed by a user-defined function
+    // literal is a genuine user function — using it as a numeric operand must
+    // surface `incompatible-type`, not silently shadow the function (which
+    // would also turn a later `F(2)` into the product `2F`).
+    if (
+      def.operator instanceof _BoxedOperatorDefinition &&
+      def.operator._isLambda
+    )
+      return null;
     ce.declare(name, 'unknown');
     // Remember the shadow we just created: a later operand of the same
     // expression still carries the stale operator binding and has to be
@@ -204,7 +222,16 @@ export function checkNumericArgs(
   // anchor (the `2n` in `Multiply(2, n)`). Still lift `Sequence`/`Nothing`.
   if (flattenHead && ops.some((x) => isContinuationOperand(x)))
     ops = flatten(ops);
-  else ops = flatten(ops, flattenHead);
+  else if (flattenHead && ops.some((x) => containsContinuationOperand(x))) {
+    // Depth-aware barrier (mirrors `canonicalMultiply`): a nested product may
+    // carry its ellipsis at any depth — e.g. raw-boxed
+    // `Multiply(Multiply(a, Multiply(b, ContinuationPlaceholder)), c)` — and,
+    // since `flatten` descends `Sequence` too, it may also sit behind a
+    // `Sequence` wrapper. Splicing either would smuggle the placeholder past
+    // the direct-operand check above. Hold barrier-bearing products back
+    // whole; everything else still flattens.
+    ops = flattenHoldingBarriers(ops, flattenHead);
+  } else ops = flatten(ops, flattenHead);
 
   // @fastpath
   if (!ce.strict) {

@@ -292,6 +292,49 @@ function isRingConstant(expr: MathJsonExpression | null | undefined): boolean {
   return name !== null && RING_CONSTANTS.has(name);
 }
 
+/**
+ * `\frac{\Z}{n\Z}` — a quotient ring written as a fraction.
+ *
+ * Called from `parseFraction()` (`definitions-arithmetic.ts`) right before it
+ * falls back to `Divide`: the `\frac` parselet has to own both readings, since
+ * a second `\frac` entry in this dictionary could not pre-empt it (the indexed
+ * dictionary gives precedence to the LAST matching definition, and
+ * `DEFINITIONS_ARITHMETIC` is aggregated after `DEFINITIONS_SETS`).
+ *
+ * The gates mirror the `\Z/n\Z` postfix form below: the numerator must be one
+ * of the blackboard-bold RING constants, still reported as a set by the
+ * ambient environment, and the denominator must be
+ * `<expr> · <the same constant>`. One deliberate broadening over the postfix
+ * form: the denominator product may arrive as `Multiply` as well as
+ * `InvisibleOperator`, so the explicit `\frac{\Z}{n \cdot \Z}` spelling also
+ * matches (the postfix form only sees juxtaposition). Everything else —
+ * `\frac{\Z}{n}` (no trailing ring), `\frac{\Z}{n\R}` (a different ring),
+ * `\frac{x}{nx}` — returns `null` and stays an ordinary division.
+ *
+ * As for the slash form, the match is by NAME and set-ness, not by binding
+ * identity: that check cannot be made across the parser seam (see the note on
+ * the `/` parselet below).
+ */
+export function parseQuotientRingFraction(
+  parser: Parser,
+  numer: MathJsonExpression,
+  denom: MathJsonExpression
+): MathJsonExpression | null {
+  const base = symbol(numer);
+  if (base === null || !RING_CONSTANTS.has(base)) return null;
+  if (parser.resolveSymbol(base)?.type.matches('set') !== true) return null;
+
+  const h = operator(denom);
+  if (
+    (h === 'InvisibleOperator' || h === 'Multiply') &&
+    nops(denom) === 2 &&
+    symbol(operand(denom, 2)) === base
+  )
+    return ['QuotientRing', numer, operand(denom, 1)!] as MathJsonExpression;
+
+  return null;
+}
+
 export const DEFINITIONS_SETS: LatexDictionary = [
   //
   // Constants
@@ -336,6 +379,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\R^-', parse: 'NegativeNumbers' },
   { latexTrigger: '\\R_-', parse: 'NegativeNumbers' },
   { latexTrigger: '\\R_{-}', parse: 'NegativeNumbers' },
+  { latexTrigger: '\\R_{\\lt0}', parse: 'NegativeNumbers' },
   { latexTrigger: '\\R^{\\lt}', parse: 'NegativeNumbers' },
   { latexTrigger: '\\R^{<}', parse: 'NegativeNumbers' },
   { latexTrigger: '\\R^{\\lt0}', parse: 'NegativeNumbers' },
@@ -347,10 +391,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     standaloneSymbol: true,
     latexTrigger: '\\R_{\\le0}',
   },
+  { latexTrigger: '\\R_{\\leq0}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\R_{\\leqslant0}', parse: 'NonPositiveNumbers' },
   { latexTrigger: '\\R^{\\leq0}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\R^{\\le0}', parse: 'NonPositiveNumbers' },
   { latexTrigger: '\\R^{\\leqslant0}', parse: 'NonPositiveNumbers' },
   { latexTrigger: '\\R^{-0}', parse: 'NonPositiveNumbers' },
   { latexTrigger: '\\R^{\\leq}', parse: 'NonPositiveNumbers' },
+  { latexTrigger: '\\R^{\\le}', parse: 'NonPositiveNumbers' },
   { latexTrigger: '\\R^{\\leqslant}', parse: 'NonPositiveNumbers' },
   { latexTrigger: '\\R^{0-}', parse: 'NonPositiveNumbers' },
 
@@ -360,6 +408,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\R^{+}', parse: 'PositiveNumbers' },
   { latexTrigger: '\\R_+', parse: 'PositiveNumbers' },
   { latexTrigger: '\\R_{+}', parse: 'PositiveNumbers' },
+  { latexTrigger: '\\R_{\\gt0}', parse: 'PositiveNumbers' },
   { latexTrigger: '\\R^{\\gt}', parse: 'PositiveNumbers' },
   { latexTrigger: '\\R^{\\gt 0}', parse: 'PositiveNumbers' },
   { latexTrigger: '\\R^{>}', parse: 'PositiveNumbers' },
@@ -371,9 +420,11 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     standaloneSymbol: true,
     latexTrigger: '\\R_{\\geq0}',
   },
+  { latexTrigger: '\\R_{\\ge0}', parse: 'NonNegativeNumbers' },
   { latexTrigger: '\\R_{\\geqslant0}', parse: 'NonNegativeNumbers' },
   { latexTrigger: '\\R^{0+}', parse: 'NonNegativeNumbers' },
   { latexTrigger: '\\R^{\\geq}', parse: 'NonNegativeNumbers' },
+  { latexTrigger: '\\R^{\\ge}', parse: 'NonNegativeNumbers' },
   { latexTrigger: '\\R^{\\geqslant}', parse: 'NonNegativeNumbers' },
 
   // Extended Real numbers = \R \cup \{-\infty, +\infty\}
@@ -420,6 +471,11 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\N^{\\star}', parse: 'PositiveIntegers' },
   { latexTrigger: '\\N_1', parse: 'PositiveIntegers' },
   { latexTrigger: '\\N_{1}', parse: 'PositiveIntegers' }, // https://mathvault.ca/hub/higher-math/math-symbols/algebra-symbols/
+  { latexTrigger: '\\N_{>0}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N_{\\gt0}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N_{\\geq1}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N_{\\ge1}', parse: 'PositiveIntegers' },
+  { latexTrigger: '\\N_{\\geqslant1}', parse: 'PositiveIntegers' },
 
   // Integers >=  0
   // Note that 0 is included in $\N$, following the convention from
@@ -431,13 +487,21 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   },
   { latexTrigger: '\\Z^{+0}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{\\geq}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\Z^{\\ge}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{\\geqslant}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{\\geq0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\Z^{\\ge0}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{\\geqslant0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\Z_{\\geq0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\Z_{\\ge0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\Z_{\\geqslant0}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{0+}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\mathbb{N}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\N_0', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\N_{0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\N_{\\geq0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\N_{\\ge0}', parse: 'NonNegativeIntegers' },
+  { latexTrigger: '\\N_{\\geqslant0}', parse: 'NonNegativeIntegers' },
 
   // Extended Integers = \Z \cup \{-\infty, +\infty\}
   {

@@ -404,7 +404,7 @@ function symbolNameByLatex(): Map<string, string> {
 
 /**
  * The symbol names whose generic spelling this dictionary gives to another
- * symbol.
+ * symbol, mapped to the colliding spelling (`pi` -> `\pi`).
  *
  * The generic speller spells `pi` as `\pi` and `phiLetter` as `\varphi`, but
  * the dictionary reads those commands back as the constants `Pi` and
@@ -421,8 +421,8 @@ function symbolNameByLatex(): Map<string, string> {
  */
 function claimedSpellings(
   dic: Readonly<Partial<LatexDictionaryEntry>[]>
-): Set<string> {
-  const result = new Set<string>();
+): Map<string, string> {
+  const result = new Map<string, string>();
   for (const entry of dic) {
     const fields = entry as LatexDictionaryEntryFields & {
       readonly name?: string;
@@ -438,16 +438,16 @@ function claimedSpellings(
     if (kind !== 'symbol' && kind !== 'expression' && kind !== 'function')
       continue;
 
-    const name = symbolNameByLatex().get(
-      typeof trigger === 'string' ? trigger : trigger.join('')
-    );
+    const spelling = typeof trigger === 'string' ? trigger : trigger.join('');
+    const name = symbolNameByLatex().get(spelling);
     if (name === undefined) continue;
 
     if (typeof fields.parse === 'function') continue;
 
     const claimant =
       typeof fields.parse === 'string' ? fields.parse : fields.name;
-    if (claimant !== undefined && claimant !== name) result.add(name);
+    if (claimant !== undefined && claimant !== name)
+      result.set(name, spelling);
   }
   return result;
 }

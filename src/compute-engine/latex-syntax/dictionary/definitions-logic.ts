@@ -17,6 +17,7 @@ import {
 } from '../../../math-json/utils.js';
 import type { MathJsonExpression } from '../../../math-json.js';
 import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators.js';
+import { isRelationalOperator } from '../utils.js';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
 //
@@ -700,6 +701,75 @@ function tightBindingCondition(
   );
 }
 
+// Operators that make an expression a proposition rather than a value. Used
+// to tell a quantifier body apart from an implicit product: in
+// `\forall x > 0 (x^2 > 0)` the group is the body, in `\forall x > 2(y+1)` it
+// is a factor of the condition. Relations are recognized separately, with
+// `isRelationalOperator()`.
+//
+// Recognition is deliberately POSITIVE: a head that is not listed (an
+// arithmetic expression, but also a function application such as `\sin y`)
+// is not a body, and the parser rewinds to the greedy parse — the safe
+// fallback, since it is the behavior that predates this split.
+const PROPOSITION_OPERATORS = new Set([
+  // Logical connectives
+  'And',
+  'Or',
+  'Not',
+  'Xor',
+  'Nand',
+  'Nor',
+  'Implies',
+  'Equivalent',
+  'IdenticallyEqual',
+  // Quantifiers
+  'ForAll',
+  'Exists',
+  'ExistsUnique',
+  'NotForAll',
+  'NotExists',
+  // Membership and set relations
+  'Element',
+  'NotElement',
+  'Subset',
+  'SubsetEqual',
+  'Superset',
+  'SupersetEqual',
+  'NotSubset',
+  'NotSuperset',
+  'NotSubsetNotEqual',
+  'NotSupersetNotEqual',
+  'SquareSubset',
+  'SquareSubsetEqual',
+  'SquareSuperset',
+  'SquareSupersetEqual',
+  'Divides',
+  'NotDivides',
+  // Predicate application
+  'Predicate',
+]);
+
+function isQuantifierBodyShape(expr: MathJsonExpression | null): boolean {
+  if (expr === null) return false;
+  const h = operator(expr);
+  // `parseEnclosure()` returns the group wrapped in a `Delimiter`
+  if (h === 'Delimiter')
+    return nops(expr) >= 1 && isQuantifierBodyShape(operand(expr, 1));
+  // A symbol juxtaposed with a delimited group is a predicate application
+  // (`(P(x))`), not a product.
+  if (h === 'InvisibleOperator')
+    return (
+      nops(expr) === 2 &&
+      typeof operand(expr, 1) === 'string' &&
+      operator(operand(expr, 2)) === 'Delimiter'
+    );
+  // A bare symbol (`(P)`) or a boolean literal (`(\mathrm{True})`)
+  if (h === '') return typeof expr === 'string';
+  // A relation or comparison (`(x^2 > 0)`, `(x = y)`)
+  if (isRelationalOperator(h)) return true;
+  return PROPOSITION_OPERATORS.has(h);
+}
+
 export function parseQuantifier(
   kind: 'NotForAll' | 'NotExists' | 'ForAll' | 'Exists' | 'ExistsUnique'
 ): (
@@ -788,6 +858,38 @@ export function parseQuantifier(
         p.peek === '\\colon' ||
         (terminator?.condition?.(p) ?? false),
     };
+    // 2a. `<condition> ( <body> )` with no separator, e.g.
+    // `\forall x > 0 (x^2 > 0)`. Parsing the condition greedily would absorb
+    // the group as an implicit product, so first try with the group as a
+    // terminator. The split is only accepted when the condition is compound
+    // (a relation, not an operand the group could multiply), the group is
+    // shaped like a proposition and nothing but the quantifier's own scope
+    // boundary follows it. Otherwise rewind and parse greedily, as before.
+    const groupTerminator = {
+      ...condTerminator,
+      condition: (p: Parser) =>
+        p.peek === '(' || p.peek === '\\left' || condTerminator.condition(p),
+    };
+    const groupCondition = parser.parseExpression(groupTerminator);
+    if (groupCondition !== null && operator(groupCondition) !== '') {
+      parser.skipSpace();
+      parser.enterQuantifierScope();
+      const groupBody = parser.parseEnclosure();
+      parser.exitQuantifierScope();
+      parser.skipSpace();
+      if (
+        isQuantifierBodyShape(groupBody) &&
+        (parser.atTerminator(terminator) ||
+          tightBindingCondition(parser, terminator))
+      )
+        return [
+          kind,
+          groupCondition,
+          missingIfEmpty(groupBody),
+        ] as MathJsonExpression;
+    }
+    parser.index = index;
+
     const condition = parser.parseExpression(condTerminator);
     if (condition === null) return null;
 

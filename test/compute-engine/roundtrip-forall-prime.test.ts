@@ -104,8 +104,23 @@ describe('QUANTIFIER BODY IS DELIMITED AND CANONICALIZED', () => {
     ['not-exists with a conjunction body', '\\lnot\\exists x, a=1\\land b=2'],
     ['quantified condition', '\\forall x\\ge0, a=1\\land b=2'],
     ['element condition', '\\forall x \\in S, P(x)'],
+    ['condition with a parenthesized body', '\\forall x>0 (x^2>0)'],
+    ['exists, condition with a parenthesized body', '\\exists x>0 (x^2=2)'],
   ])('round-trips: %s', (_label, src) => {
     expect(roundTrip(src).same).toBe(true);
+  });
+
+  test('a condition with a parenthesized body is not an implicit product', () => {
+    const r = roundTrip('\\forall x>0 (x^2>0)');
+    // Before the fix, the group was absorbed into the condition as an
+    // invisible operator: `ForAll(x > (0, x^2>0), True)`.
+    expect(r.original).toBe(
+      '["ForAll",["Less",0,"x"],["Less",0,["Power","x",2]]]'
+    );
+    // The serializer emits the comma form, which reparses identically.
+    expect(r.serialized).toBe('\\forall 0\\lt x, 0\\lt x^2');
+    expect(r.reparsed).toBe(r.original);
+    expect(r.same).toBe(true);
   });
 
   test('a comparison body is still serialized without parentheses', () => {

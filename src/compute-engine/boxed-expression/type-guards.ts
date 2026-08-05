@@ -129,6 +129,30 @@ export function isContinuationOperand(
 }
 
 /**
+ * Depth-aware companion to {@link isContinuationOperand}: does `expr` carry a
+ * continuation operand anywhere below it, descending through `Multiply` and
+ * `Sequence` nesting? A raw (unflattened) product can hold its ellipsis at any
+ * depth, e.g. `Multiply(a, Multiply(b, ContinuationPlaceholder))`.
+ */
+export function containsContinuationOperand(
+  expr: Expression | null | undefined
+): boolean {
+  if (isContinuationOperand(expr)) return true;
+  if (isFunction(expr, 'Multiply') || isFunction(expr, 'Sequence'))
+    return (expr as Expression & FunctionInterface).ops.some(
+      containsContinuationOperand
+    );
+  return false;
+}
+
+/** A nested product that is an ellipsis-fold barrier: do not splice it. */
+export function isFoldBarrierProduct(
+  expr: Expression | null | undefined
+): boolean {
+  return isFunction(expr, 'Multiply') && containsContinuationOperand(expr);
+}
+
+/**
  * Return the numeric value if `expr` is a number literal, otherwise `undefined`.
  *
  * Convenience helper that combines `isNumber()` with `.numericValue` access.

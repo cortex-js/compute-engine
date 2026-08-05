@@ -83,6 +83,21 @@ describe('un-applied builtin operator devolves to a symbol', () => {
     expect(JSON.stringify(expr.json)).toContain('Error');
   });
 
+  test('user-ASSIGNED functions are NOT devolved (root-scope hoisting)', () => {
+    // A top-level `ce.assign('F', λ)` hoists its definition into the same
+    // parentless scope as the standard library — the devolve fallback must
+    // discriminate on the definition's ORIGIN, not its scope position.
+    const ce = new ComputeEngine();
+    ce.assign('F', ce.parse('x \\mapsto x^2'));
+    const boxed = ce.box(['Add', 'F', 1]);
+    expect(JSON.stringify(boxed.json)).toContain('Error');
+    const parsed = ce.parse('F + 1');
+    expect(JSON.stringify(parsed.json)).toContain('Error');
+    // The assigned function is intact — no silent engine-lifetime shadow
+    // (before the fix, `F(2)` here evaluated to the product `2F`).
+    expect(ce.parse('F(2)').evaluate().json).toBe(4);
+  });
+
   test('multi-letter builtin operators are NOT devolved', () => {
     const ce = new ComputeEngine();
     const expr = ce.box(['Add', 'Sin', 1]);

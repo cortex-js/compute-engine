@@ -11,6 +11,7 @@ import {
   isSymbol,
   numericValue,
   isContinuationOperand,
+  containsContinuationOperand,
 } from './type-guards.js';
 import {
   isNumericTuple,
@@ -43,7 +44,7 @@ import { bigint } from '../numerics/bigint.js';
 
 import { sortProductOperands } from './order.js';
 import { asRadical } from './arithmetic-power.js';
-import { flatten } from './flatten.js';
+import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { asRational, asSmallInteger } from './numerics.js';
 import { negateProduct } from './negate.js';
 import { add } from './arithmetic-add.js';
@@ -1144,17 +1145,6 @@ export function div(num: Expression, denom: number | Expression): Expression {
  * e.g. `Multiply(a, Multiply(b, ContinuationPlaceholder))`, is spliced into
  * the enclosing product just the same.
  */
-function containsContinuationOperand(x: Expression): boolean {
-  if (isContinuationOperand(x)) return true;
-  if (isFunction(x, 'Multiply') || isFunction(x, 'Sequence'))
-    return x.ops.some(containsContinuationOperand);
-  return false;
-}
-
-/** A nested product that is an ellipsis-fold barrier: do not splice it. */
-function isFoldBarrierProduct(x: Expression): boolean {
-  return isFunction(x, 'Multiply') && containsContinuationOperand(x);
-}
 
 /**
  * The canonical form of `Multiply`:
@@ -1195,18 +1185,15 @@ export function canonicalMultiply(
   //
   // A nested product that is itself an ellipsis-fold barrier is left alone:
   // lifting its operands would smuggle a `ContinuationPlaceholder` past the
-  // check above and fold across it. Only the barrier-bearing operands are held
-  // back — the unrelated ones still flatten, so the result is as flat as the
-  // barrier allows.
+  // check above and fold across it. Because `flatten` also descends `Sequence`,
+  // the barrier may sit behind a `Sequence` wrapper — the hold has to be
+  // recursive too. Only the barrier-bearing operands are held back — the
+  // unrelated ones still flatten, so the result is as flat as the barrier
+  // allows.
   //
-  if (ops.some(isFoldBarrierProduct)) {
-    const flattened: Expression[] = [];
-    for (const x of ops) {
-      if (isFoldBarrierProduct(x)) flattened.push(x);
-      else flattened.push(...flatten([x], 'Multiply', false));
-    }
-    ops = flattened;
-  } else ops = flatten(ops, 'Multiply', false);
+  if (ops.some((x) => containsContinuationOperand(x)))
+    ops = flattenHoldingBarriers(ops, 'Multiply', false);
+  else ops = flatten(ops, 'Multiply', false);
 
   // Two or more numeric tuples (points/vectors) have no implicit product
   // (dot/cross); reject `tuple · tuple` at canonicalization when provable.
@@ -1289,6 +1276,19 @@ export function canonicalMultiply(
         // 0 * ±∞ = NaN, 0 * NaN = NaN
         if (nonNumeric.some((x) => x.isInfinity || x.isNaN)) return ce.NaN;
         return ce.Zero;
+      }
+      // The fold can produce a NEGATIVE real coefficient even though the sign
+      // pass above normalized every literal positive — only a product with
+      // complex operands can (e.g. `i·i = -1`). Re-enter the sign channel so
+      // the fold result spells the same as literal input:
+      // `Multiply(i, i, a, b)` → `Negate(Multiply(a, b))`, exactly like
+      // `Multiply(-1, a, b)`. A stranded `-1` operand serializes as `-(ab…)`,
+      // which reparses as `Negate(Multiply(…))` — a second canonical spelling
+      // of the same negated product (round-trip class
+      // negate-vs-multiply-minus-one).
+      if (product.im === 0 && product.sgn() === -1) {
+        sign = -sign;
+        product = product.neg();
       }
       if (!product.eq(1)) nonNumeric.unshift(ce.number(product));
       xs = nonNumeric;

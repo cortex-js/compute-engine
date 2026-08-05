@@ -43,6 +43,7 @@ import {
   isString,
   isFunction,
   isContinuationOperand,
+  containsContinuationOperand,
 } from './type-guards.js';
 import { matchesNumber, matchesSymbol } from '../../math-json/utils.js';
 
@@ -255,12 +256,15 @@ function serializePrettyJsonFunction(
   if (
     name === 'Multiply' &&
     !exclusions.includes('Divide') &&
-    // Ellipsis fold barrier: a direct `ContinuationPlaceholder` operand makes
-    // this a notational product. Aggregating it into a single quotient would
-    // move numerators and denominators ACROSS the ellipsis
-    // (`\frac1a·\frac1b·…·\frac1z` → `\frac{\dots}{abz}`), which no longer
-    // re-parses to the same product.
-    !args.some((x) => isContinuationOperand(x))
+    // Ellipsis fold barrier: a `ContinuationPlaceholder` operand — direct OR
+    // inside a nested barrier product — makes this a notational product.
+    // Aggregating it into a single quotient would move numerators and
+    // denominators ACROSS the ellipsis (`\frac1a·\frac1b·…·\frac1z` →
+    // `\frac{\dots}{abz}`), and `_Product` SORTS, which re-orders the elided
+    // pattern (`…` drifts to the front) — neither re-parses to the same
+    // product. Depth-aware for the same reason the canonicalization barrier
+    // is: a held-back nested product carries its ellipsis below the surface.
+    !args.some((x) => containsContinuationOperand(x))
   ) {
     // Display a product with negative exponents as a division if
     // there are terms with a negative degree.

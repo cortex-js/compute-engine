@@ -1798,7 +1798,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
 
         // Regular symbol assignment
-        const symbol = op1.evaluate();
+        // The LHS is held RAW on purpose: it is a NAME, not a reference. Read
+        // the name directly; `evaluate()` is only the fallback for a non-symbol
+        // LHS that computes one. (A raw symbol now evaluates through its
+        // canonical form — see `BoxedSymbol._canonicalToEvaluate()` — so
+        // evaluating a symbol LHS would read its VALUE and the assignment would
+        // silently vanish.)
+        const symbol = isSymbol(op1) ? op1 : op1.evaluate();
         const symbolName = sym(symbol);
         if (!symbolName) return undefined;
         const val = op2.evaluate();
@@ -2097,7 +2103,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return bindPattern(ops[0], value!) ?? value!;
         }
 
-        const symbolName = sym(ops[0].evaluate());
+        // As in `Assign`: the declared operand is a NAME held raw, so read it
+        // directly rather than evaluating it (which would resolve it to a
+        // value and make the declaration vanish).
+        const symbolName = sym(isSymbol(ops[0]) ? ops[0] : ops[0].evaluate());
         if (!symbolName) return undefined;
 
         // See the `Assign` handler: a violated definition-annotation contract

@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../../src/compute-engine';
 import { engine as ce } from '../../utils';
 
 describe('Logic', () => {
@@ -854,6 +855,69 @@ describe('Logic', () => {
         ],
       ]
     `);
+  });
+
+  // A condition followed by a PARENTHESIZED body, with no separator: the
+  // group is the body, not an implicit product with the condition.
+  // A fresh engine per case: the shared `ce` has already inferred `x` as a
+  // boolean from the bare-symbol quantifier cases above.
+  const parseJson = (latex: string): string =>
+    JSON.stringify(new ComputeEngine().parse(latex).json);
+
+  it('should parse a condition with an undelimited parenthesized body', () => {
+    const forAll = '["ForAll",["Less",0,"x"],["Less",0,["Power","x",2]]]';
+    expect(parseJson('\\forall x > 0 (x^2 > 0)')).toBe(forAll);
+    // ... the same shape as the comma form
+    expect(parseJson('\\forall x > 0, x^2 > 0')).toBe(forAll);
+    expect(parseJson('\\exists x > 0 (x^2 = 2)')).toBe(
+      '["Exists",["Less",0,"x"],["Equal",["Power","x",2],2]]'
+    );
+    expect(parseJson('\\exists! x > 0 (x^2 = 2)')).toBe(
+      '["ExistsUnique",["Less",0,"x"],["Equal",["Power","x",2],2]]'
+    );
+    expect(parseJson('\\lnot\\forall x > 0 (x^2 > 0)')).toBe(
+      '["NotForAll",["Less",0,"x"],["Less",0,["Power","x",2]]]'
+    );
+    expect(parseJson('\\lnot\\exists x > 0 (x^2 > 0)')).toBe(
+      '["NotExists",["Less",0,"x"],["Less",0,["Power","x",2]]]'
+    );
+    // A set-membership condition, and the `\left(...\right)` spelling
+    expect(parseJson('\\forall x \\in S (x > 0)')).toBe(
+      '["ForAll",["Element","x","S"],["Less",0,"x"]]'
+    );
+    expect(parseJson('\\forall x > 0 \\left(x^2 > 0\\right)')).toBe(forAll);
+  });
+
+  it('should not read a parenthesized factor as a quantifier body', () => {
+    // `2(y+1)` is an implicit product in the condition, not a body: the group
+    // is arithmetic, so this stays the standalone-condition form.
+    expect(parseJson('\\forall x > 2(y+1)')).toBe(
+      '["ForAll",["Less",["Multiply",2,["Add","y",1]],"x"],"True"]'
+    );
+    // Same with a space before the group: a group is a body only when it is
+    // shaped like a proposition. A function application (`\sin y`) or an
+    // arithmetic expression is a factor of the condition, so the greedy
+    // parse stands.
+    expect(parseJson('\\forall x > 2 (\\sin y)')).toBe(
+      '["ForAll",["Less",["Multiply",2,["Sin","y"]],"x"],"True"]'
+    );
+    expect(parseJson('\\forall x > 0 (x^2 + 1)')).toBe(
+      '["ForAll",["Less",["Multiply",0,["Add",["Power","x",2],1]],"x"],"True"]'
+    );
+    // ... while a relation, a set membership, a connective or a predicate
+    // application still splits into condition + body.
+    expect(parseJson('\\forall x > 0 (x^2 > 0)')).toBe(
+      '["ForAll",["Less",0,"x"],["Less",0,["Power","x",2]]]'
+    );
+    expect(parseJson('\\forall x \\in S (x > 0)')).toBe(
+      '["ForAll",["Element","x","S"],["Less",0,"x"]]'
+    );
+    expect(parseJson('\\forall x > 0 (x > 0 \\land y > 0)')).toBe(
+      '["ForAll",["Less",0,"x"],["And",["Less",0,"x"],["Less",0,"y"]]]'
+    );
+    expect(parseJson('\\forall x > 0 (P(x))')).toBe(
+      '["ForAll",["Less",0,"x"],["Predicate","P","x"]]'
+    );
   });
 
   // Serialization tests

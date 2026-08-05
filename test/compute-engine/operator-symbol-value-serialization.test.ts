@@ -213,6 +213,23 @@ describe('OPERATOR NAME IN SYMBOL POSITION', () => {
       expect(syntax.serialize('NegativeInfinity')).toBe('-\\infty');
       expect(syntax.serialize('ImaginaryUnit')).toBe('\\imaginaryI');
     });
+
+    test('`InterpolatingFunction` is spelled out in symbol position', () => {
+      // Its entry is not flagged `standaloneSymbol`: the notation it
+      // serializes is an application, so the bare symbol is spelled upright,
+      // which re-parses to the same symbol.
+      expect(DICTIONARY.ids.get('InterpolatingFunction')?.standaloneSymbol)
+        .toBeUndefined();
+
+      for (const expr of [
+        ce.box('InterpolatingFunction', { canonical: false }),
+        ce.box('InterpolatingFunction'),
+      ]) {
+        const latex = expr.latex;
+        expect(latex).toBe('\\mathrm{InterpolatingFunction}');
+        expect(ce.parse(latex).json).toBe('InterpolatingFunction');
+      }
+    });
   });
 });
 
@@ -285,5 +302,90 @@ describe('GENERIC SYMBOL SPELLING', () => {
       expect(latex).toBe('(A,\\gamma)');
       expect(probe.parse(latex).op2.symbol).toBe('gamma');
     });
+  });
+});
+
+/**
+ * The claimed-spelling guard applies to a function HEAD, not just to a symbol
+ * used as a value: a head literally named `pi` used to serialize as `\pi(x)`,
+ * which reads back as the constant `Pi` (`Pi\cdot x`). The head is spelled
+ * upright instead, exactly as the same name in value position is.
+ *
+ * The yield-to-declaration exemption is derived once, at dictionary index
+ * time, so `gamma` — whose command `EulerGamma` yields — keeps `\gamma(x)`
+ * here too, without the serializer re-deriving anything.
+ */
+describe('CLAIMED SPELLING OF A FUNCTION HEAD', () => {
+  // [head name, expected spelling of the head]
+  const CASES: [name: string, head: string][] = [
+    ['pi', '\\mathrm{pi}'],
+    ['zeta', '\\mathrm{zeta}'],
+    ['phiLetter', '\\mathrm{phiLetter}'],
+    // An ordinary unknown head is unaffected
+    ['foo', '\\mathrm{foo}'],
+    // ...and so is a name whose entry yields the command to a declaration
+    ['gamma', '\\gamma'],
+  ];
+
+  describe('box route', () => {
+    test.each(CASES)('a head named %s serializes as %s', (name, head) => {
+      // Non-canonical (the head is not bound at all)...
+      expect(new ComputeEngine().box([name, 'x'], { canonical: false }).toLatex())
+        .toBe(`${head}(x)`);
+      // ...and canonical
+      expect(new ComputeEngine().box([name, 'x']).toLatex()).toBe(`${head}(x)`);
+    });
+
+    test.each(CASES)('a head named %s round-trips', (name, head) => {
+      const probe = new ComputeEngine();
+      probe.declare(name, '(number) -> number');
+      const latex = probe.box([name, 2]).toLatex();
+      expect(latex).toBe(`${head}(2)`);
+      expect(probe.parse(latex).json).toEqual([name, 2]);
+    });
+  });
+
+  describe('parse route', () => {
+    test.each(CASES)(
+      'a head named %s parsed as an application round-trips',
+      (name, head) => {
+        const probe = new ComputeEngine();
+        probe.declare(name, '(number) -> number');
+        const expr = probe.parse(`${head}(2)`);
+        expect(expr.operator).toBe(name);
+        // ...and serializing what was parsed is stable
+        expect(expr.toLatex()).toBe(`${head}(2)`);
+      }
+    );
+  });
+
+  test('an entry with a notation of its own keeps its serializer', () => {
+    // The guard refuses the colliding SPELLING, not the name: a custom entry
+    // for a head named `pi` whose notation is safe (it is not `\pi`) is
+    // serialized through it, and round-trips.
+    const syntax = new LatexSyntax({
+      dictionary: [
+        // Drop the auto-generated `{name:'pi', latexTrigger:'\pi'}` entry from
+        // the `SYMBOLS` table: a name can only be defined once.
+        ...(LATEX_DICTIONARY as any).filter((e: any) => e.name !== 'pi'),
+        { name: 'pi', kind: 'function', symbolTrigger: 'piFn' },
+      ] as any,
+    });
+
+    const latex = syntax.serialize(['pi', 2]);
+    expect(latex).toBe('\\mathrm{piFn}(2)');
+    expect(syntax.parse(latex)).toEqual(['pi', 2]);
+
+    // The bare symbol is still spelled upright: `\pi` is not its spelling.
+    expect(syntax.serialize('pi')).toBe('\\mathrm{pi}');
+  });
+
+  test('a known operator keeps its notation', () => {
+    // The guard is keyed on the claimed names only: an operator with a
+    // dictionary entry still serializes through it.
+    const probe = new ComputeEngine();
+    expect(probe.box(['Sin', 'x']).toLatex()).toBe('\\sin(x)');
+    expect(probe.box(['Abs', 'x']).toLatex()).toBe('\\vert x\\vert');
+    expect(probe.box(['Add', 'x', 1]).toLatex()).toBe('x+1');
   });
 });

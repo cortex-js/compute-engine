@@ -31,6 +31,7 @@ import {
 } from '../types.js';
 import { latexTemplate } from '../serializer-style.js';
 import { PIPE_TOPIC_MARKER } from './definitions-core.js';
+import { parseQuotientRingFraction } from './definitions-sets.js';
 import { joinLatex, supsub } from '../tokenizer.js';
 import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 import { roundMeasurementForDisplay } from '../../numerics/strings.js';
@@ -578,6 +579,34 @@ function hasContinuationFactor(expr: MathJsonExpression): boolean {
   );
 }
 
+/**
+ * Fold an explicit multiplication (`\cdot`, `*`) operand into a `Multiply`
+ * chain. Like `foldAssociativeOperator`, plus one repair: an UNDELIMITED
+ * juxtaposition (`InvisibleOperator`) operand that carries a direct
+ * `ContinuationPlaceholder` — `(px_1+1)\cdots(px_n+1) \cdot p^m` — is spliced
+ * into the chain rather than kept as a nested operand. That grouping is a
+ * parser artifact: the source spells ONE flat notational product, and keeping
+ * the artifact nested lets the canonicalizer's ellipsis barrier freeze the
+ * nesting (and the serializer re-order it), so the row no longer round-trips.
+ * A `Delimiter`-wrapped (parenthesized) product is the user's own grouping and
+ * is NOT spliced — the nested-barrier pins in `multiply-flatten.test.ts` stay
+ * authoritative for that shape.
+ */
+function foldMultiplyChain(
+  lhs: MathJsonExpression,
+  rhs: MathJsonExpression
+): MathJsonExpression {
+  const splice = (x: MathJsonExpression): MathJsonExpression[] | null =>
+    operator(x) === 'InvisibleOperator' && hasContinuationFactor(x)
+      ? [...operands(x)]
+      : null;
+  const l = splice(lhs);
+  const r = splice(rhs);
+  if (l !== null || r !== null)
+    return ['Multiply', ...(l ?? [lhs]), ...(r ?? [rhs])];
+  return foldAssociativeOperator('Multiply', lhs, rhs);
+}
+
 function serializeMultiply(
   serializer: Serializer,
   expr: MathJsonExpression | null
@@ -996,6 +1025,12 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
       return result;
     }
   }
+
+  // `\frac{\Z}{n\Z}` — the quotient ring in fraction notation. Narrowly gated
+  // (see `parseQuotientRingFraction`); returns `null` for every other
+  // fraction, which then stays an ordinary division.
+  const quotientRing = parseQuotientRingFraction(parser, numer, denom);
+  if (quotientRing !== null) return quotientRing;
 
   return ['Divide', numer, denom];
 }
@@ -2244,7 +2279,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // (for example, it's used as a separator in \int)
       if (rhs === null) return null;
 
-      return foldAssociativeOperator('Multiply', lhs, rhs);
+      return foldMultiplyChain(lhs, rhs);
     },
   },
   // Unicode multiplication-sign spellings (paste/keyboard input), parsed the
@@ -2371,7 +2406,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       });
       if (rhs === null) return ['Multiply', lhs, MISSING];
 
-      return foldAssociativeOperator('Multiply', lhs, rhs);
+      return foldMultiplyChain(lhs, rhs);
     },
   },
   // Infix modulo, as in `26 \bmod 5`

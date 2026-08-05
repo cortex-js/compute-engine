@@ -141,11 +141,12 @@ export type IndexedLatexDictionary = {
   lookahead: number;
 
   // The symbol names whose generic (letterlike) spelling this dictionary
-  // gives to a DIFFERENT symbol: the plain symbol `pi` is spelled `\pi` by
-  // the generic speller, but this dictionary reads `\pi` back as `Pi`. Those
-  // names are spelled upright instead (`\mathrm{pi}`).
+  // gives to a DIFFERENT symbol, mapped to that spelling: the plain symbol
+  // `pi` is spelled `\pi` by the generic speller, but this dictionary reads
+  // `\pi` back as `Pi`. Those names are spelled upright instead
+  // (`\mathrm{pi}`).
   // Computed at indexing time by `claimedSpellings()`.
-  claimedSpellings: Set<string>;
+  claimedSpellings: Map<string, string>;
 
   defs: IndexedLatexDictionaryEntry[];
 

@@ -66,6 +66,52 @@ describe('QuotientRing — parsing', () => {
     // existed).
     expect(parse('\\Z/2')).toEqual(['Multiply', ['Rational', 1, 2], 'Integers']);
   });
+
+  test('fraction form `\\frac{\\Z}{n\\Z}`', () => {
+    expect(parse('\\frac{\\Z}{n\\Z}')).toEqual([
+      'QuotientRing',
+      'Integers',
+      'n',
+    ]);
+    expect(parse('\\frac{\\mathbb{Z}}{n\\mathbb{Z}}')).toEqual([
+      'QuotientRing',
+      'Integers',
+      'n',
+    ]);
+    // Numeric modulus, and the other ring constants.
+    expect(parse('\\frac{\\Z}{2\\Z}')).toEqual(['QuotientRing', 'Integers', 2]);
+    expect(parse('\\frac{\\R}{n\\R}')).toEqual([
+      'QuotientRing',
+      'RealNumbers',
+      'n',
+    ]);
+    // The hook lives in `parseFraction`, so the `\frac` variants share it.
+    expect(parse('\\dfrac{\\Z}{n\\Z}')).toEqual([
+      'QuotientRing',
+      'Integers',
+      'n',
+    ]);
+  });
+
+  test('the fraction form requires the SAME ring on both sides', () => {
+    // No trailing ring: ordinary division.
+    expect(parse('\\frac{\\Z}{n}')).toEqual(['Divide', 'Integers', 'n']);
+    // A DIFFERENT ring in the denominator: ordinary division.
+    expect(parse('\\frac{\\Z}{n\\R}')).toEqual([
+      'Divide',
+      'Integers',
+      ['Tuple', 'n', 'RealNumbers'],
+    ]);
+    // More than two factors in the denominator: ordinary division.
+    // Fresh engine: this parse infers a numeric type for `x` in the shared
+    // engine, which would poison the `ℤ[x] : set<unknown>` pin below.
+    const fresh = new ComputeEngine();
+    expect(fresh.parse('\\frac{\\Z}{n\\Z x}').json).toEqual([
+      'Divide',
+      'Integers',
+      ['Tuple', 'n', 'Integers', 'x'],
+    ]);
+  });
 });
 
 describe('Adjoin — parsing', () => {
@@ -178,10 +224,19 @@ describe('Serialization round-trips', () => {
       '\\mathbb{Z}[\\sqrt{2},\\sqrt{3}]',
       '\\mathbb{Z}[x]',
       '\\mathbb{Z}[i]',
+      '\\frac{\\Z}{n\\Z}',
+      '\\frac{\\mathbb{Z}}{n\\mathbb{Z}}',
     ]) {
       const first = ce.parse(latex);
       expect(ce.parse(first.latex).isSame(first)).toBe(true);
     }
+  });
+
+  test('the fraction form serializes back as the SUBSCRIPT form', () => {
+    // `\frac{\Z}{n\Z}` is parse-only: like the `\Z/n\Z` slash form it
+    // reserializes to the canonical subscript spelling.
+    expect(ce.parse('\\frac{\\Z}{n\\Z}').latex).toBe('\\Z_{n}');
+    expect(ce.parse('\\frac{\\R}{n\\R}').latex).toBe('\\R_{n}');
   });
 
   test('the `at-over-declared-set-base` ledger row round-trips', () => {
@@ -389,6 +444,40 @@ describe('Pins: notations that are NOT ring constructions', () => {
     expect(parse('\\mathbb{R}^-')).toEqual(['Superminus', 'RealNumbers']);
   });
 
+  test('the terse `\\R`/`\\Z`/`\\N` sign restrictions are NOT QuotientRing', () => {
+    // Comparison-command subscripts over a RING constant used to fall through
+    // to the `\Z_n` quotient-ring reading, producing
+    // `QuotientRing(RealNumbers, <error>)`. They are sign-restricted sets.
+    //
+    // The tokenizer swallows the space after a command name, so `\ge 0` and
+    // `\ge0` are the SAME token stream; the gap was `\ge` vs `\geq`, which
+    // are distinct commands and so distinct triggers.
+    for (const latex of ['\\R_{\\ge 0}', '\\R_{\\ge0}', '\\R_{\\geq0}'])
+      expect(parse(latex)).toBe('NonNegativeNumbers');
+    for (const latex of ['\\R_{\\gt 0}', '\\R_{\\gt0}', '\\R_{>0}'])
+      expect(parse(latex)).toBe('PositiveNumbers');
+    for (const latex of ['\\R_{\\lt 0}', '\\R_{\\lt0}', '\\R_{<0}'])
+      expect(parse(latex)).toBe('NegativeNumbers');
+    for (const latex of ['\\R_{\\le 0}', '\\R_{\\leq0}', '\\R_{\\leqslant0}'])
+      expect(parse(latex)).toBe('NonPositiveNumbers');
+
+    for (const latex of [
+      '\\Z_{\\ge 0}',
+      '\\Z_{\\geq0}',
+      '\\Z_{\\geqslant0}',
+      '\\N_{\\ge 0}',
+      '\\N_{\\geq0}',
+    ])
+      expect(parse(latex)).toBe('NonNegativeIntegers');
+    for (const latex of ['\\N_{>0}', '\\N_{\\gt0}', '\\N_{\\ge 1}'])
+      expect(parse(latex)).toBe('PositiveIntegers');
+
+    // Superscript short-command spellings match their `\geq`/`\leq` forms.
+    expect(parse('\\R^{\\ge}')).toBe('NonNegativeNumbers');
+    expect(parse('\\R^{\\le}')).toBe('NonPositiveNumbers');
+    expect(parse('\\Z^{\\ge0}')).toBe('NonNegativeIntegers');
+  });
+
   test('At over a genuine indexed collection is untouched', () => {
     expect(ce.parse('[1,2,3][2]').evaluate().json).toBe(2);
     expect(ce.box(['At', ['List', 1, 2, 3], 2]).evaluate().json).toBe(2);
@@ -418,6 +507,34 @@ describe('Pins: notations that are NOT ring constructions', () => {
       'S',
       ['Tuple', 'n', 'S'],
     ]);
+  });
+
+  test('the fraction form does not fire over an arbitrary set-typed symbol', () => {
+    const engine = new ComputeEngine();
+    engine.declare('S', 'set<integer>');
+    expect(engine.parse('\\frac{S}{nS}').json).toEqual([
+      'Divide',
+      'S',
+      ['Tuple', 'n', 'S'],
+    ]);
+    // `\mathbb{N}` is set-typed but is NOT a ring.
+    expect(parse('\\frac{\\N}{n\\N}')).toEqual([
+      'Divide',
+      'NonNegativeIntegers',
+      ['Tuple', 'n', 'NonNegativeIntegers'],
+    ]);
+  });
+
+  test('ordinary fractions are untouched', () => {
+    expect(parse('\\frac{x}{n x}')).toEqual([
+      'Divide',
+      'x',
+      ['Multiply', 'n', 'x'],
+    ]);
+    expect(parse('\\frac{a}{b}')).toEqual(['Divide', 'a', 'b']);
+    expect(parse('\\frac{1}{2}')).toEqual(['Rational', 1, 2]);
+    // Leibniz notation still wins over the quotient-ring reading.
+    expect(parse('\\frac{d}{dx}x^2')).toEqual(['D', ['Power', 'x', 2], 'x']);
   });
 
   test('ordinary division is untouched', () => {

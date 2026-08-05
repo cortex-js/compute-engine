@@ -130,11 +130,14 @@ State at introduction (2026-08-04, v0.100.3): 447 corpus inputs, 59 skipped,
 **351/388 round-trip**, 37 exceptions in 15 classes, all currently classified
 `bug`. Runtime ~11 s on an idle machine.
 
-After the 2026-08-04/05 serializer fix rounds: **384/391 round-trip**, 7
-exceptions in 3 classes — 6 rows `documented-lossy` (the two ruled classes
-above) and 1 row `bug` (`negate-vs-multiply-minus-one`). The corpus grew by
-3 checked inputs along the way (rows that previously failed to parse cleanly
-now do).
+After the 2026-08-04/05 serializer fix rounds: **385/391 round-trip**, 6
+exceptions in 2 classes, all `documented-lossy` (the two ruled classes
+above) — **zero `bug` rows**. The last bug class
+(`negate-vs-multiply-minus-one`) was closed by ruling on 2026-08-05:
+`canonicalMultiply` re-extracts a fold-produced negative real coefficient
+into the sign channel, so `Multiply(-1, …)` and `Negate(Multiply(…))` no
+longer coexist as canonical spellings. The corpus grew by 3 checked inputs
+along the way (rows that previously failed to parse cleanly now do).
 
 ## Regenerating from scratch
 

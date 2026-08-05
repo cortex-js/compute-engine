@@ -994,6 +994,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {
+    const canonical = this._canonicalToEvaluate();
+    if (canonical) return canonical.evaluate(options);
+
     const def = this.valueDefinition;
     if (!def) return this;
     // Debug invariant (§3 of the binder-mechanism design): a resolution site,
@@ -1021,6 +1024,34 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       }
     }
     return this;
+  }
+
+  /**
+   * `evaluate()` yields a canonical value, so a symbol that is not canonical
+   * must evaluate to the same value as its canonical form — exactly as a raw
+   * or structural function node does (see
+   * `BoxedFunction._canonicalToEvaluate()`). An unbound symbol has no
+   * definition to resolve, so evaluating it in place always answers with the
+   * symbol itself, even when a value is assigned to that name; canonicalizing
+   * binds it in the current scope instead.
+   *
+   * Unlike a function node, a symbol's `_def` is either a definition or
+   * `undefined` (never `null`): `isCanonical` and "has a binding" coincide,
+   * so a bound symbol — which is all a structural symbol can be — is always
+   * evaluated directly, through the `evaluateInOwnBindings` dereference path.
+   *
+   * Canonicalization is not guaranteed to produce a canonical expression (an
+   * invalid symbol canonicalizes to an error). Requiring `isCanonical` of the
+   * result, not merely a different node, is what keeps this from recursing
+   * forever.
+   *
+   * Returns the expression to evaluate in our place, or `undefined` to
+   * evaluate this symbol directly.
+   */
+  private _canonicalToEvaluate(): Expression | undefined {
+    if (this._def !== undefined) return undefined;
+    const canonical = this.canonical;
+    return canonical.isCanonical ? canonical : undefined;
   }
 
   /**
@@ -1110,6 +1141,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   N(): Expression {
+    const canonical = this._canonicalToEvaluate();
+    if (canonical) return canonical.N();
+
     // An indirect cycle (`a := b`, `b := a`) is invisible to the
     // self-reference guards below: each value mentions only the OTHER symbol.
     // Stay symbolic rather than recursing forever (see `cycle-guard.ts`).

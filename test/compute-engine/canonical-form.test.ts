@@ -25,6 +25,38 @@ describe('CANONICAL FORM RESTRICTIONS', () => {
       TEST_ENGINE.parse('2 + 3', { form: 'raw' }).evaluate().toString()
     ).toEqual('5');
   });
+
+  // Same contract for a bare SYMBOL: a raw symbol is unbound, so evaluating
+  // it in place would answer with the symbol itself even when a value is
+  // assigned to that name. It evaluates through its canonical form, which
+  // binds the name in the current scope.
+  test('A non-canonical symbol evaluates to its assigned value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    const raw = ce.box('x', { canonical: false });
+    expect(raw.isCanonical).toBe(false);
+    expect(raw.evaluate().toString()).toEqual('5');
+    // The receiver stays on its tier; only the result is canonical
+    expect(raw.isCanonical).toBe(false);
+  });
+
+  test('A non-canonical symbol .N() yields its assigned value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    expect(ce.box('x', { canonical: false }).N().toString()).toEqual('5');
+    // A constant numericizes, as it does on the canonical tier
+    expect(ce.box('Pi', { canonical: false }).N().toString()).toEqual(
+      ce.box('Pi').N().toString()
+    );
+  });
+
+  test('A non-canonical symbol with no value evaluates to itself', () => {
+    const ce = new ComputeEngine();
+    const result = ce.box('zzz', { canonical: false }).evaluate();
+    expect(result.symbol).toEqual('zzz');
+    // The result of `evaluate()` is canonical on every tier
+    expect(result.isCanonical).toBe(true);
+  });
 });
 
 describe('CANONICAL FORMS', () => {
