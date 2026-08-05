@@ -40,6 +40,26 @@
   `\R_{\ge 0}`, `\R_{\gt0}`, `\N_{\ge1}` and their siblings — which
   previously required the spelled-out `\geq`/`\geqslant` forms.
 
+### Improvements
+
+- **`ComputeEngine`, `expr.engine` and `ExpressionComputeEngine` are now one
+  interchangeable type — no more casts between them.** The `ComputeEngine`
+  exported from the package (and from the `/core` sub-path) is now a
+  constructor value paired with the structural `IComputeEngine` interface,
+  rather than the class itself, whose private fields made its type nominal.
+  An engine obtained from `expr.engine` (typed `ExpressionComputeEngine`) can
+  now be assigned or passed wherever a `ComputeEngine` is expected, and vice
+  versa. `new ComputeEngine()`, `instanceof ComputeEngine`,
+  `InstanceType<typeof ComputeEngine>` and the static
+  `ComputeEngine.getStandardLibrary()` all work as before (the constructor's
+  type is the new `ComputeEngineConstructor` interface). The interface also
+  gained members that were previously only on the class: `Two`, `toJSON()`,
+  `suggestOperatorName()` and `functionProperties()`. One typed-surface
+  consequence: the legacy `canonical`/`structural` options of `ce.expr()` and
+  `ce.box()` are not part of the interface — use the equivalent `form` option
+  (`{ canonical: false }` → `{ form: 'raw' }`, `{ structural: true }` →
+  `{ form: 'structural' }`); the legacy options still work at runtime.
+
 ### Bug Fixes
 
 - **A subscript or bracket on a set constant is no longer read as an index.**

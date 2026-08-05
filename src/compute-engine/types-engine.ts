@@ -24,6 +24,11 @@ import type { RandomSeedFrame, RandomSubstream } from './numerics/random.js';
 import type { EngineBoxingState } from './engine-boxing-state.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
+import type { FunctionProperties } from './function-properties/types.js';
+export type {
+  FunctionProperties,
+  FunctionPropertyRecord,
+} from './function-properties/types.js';
 import type {
   Metadata,
   CanonicalOptions,
@@ -195,6 +200,7 @@ export interface IComputeEngine {
   readonly One: Expression;
   readonly Half: Expression;
   readonly NegativeOne: Expression;
+  readonly Two: Expression;
   /** ImaginaryUnit */
   readonly I: Expression;
   readonly NaN: Expression;
@@ -216,6 +222,11 @@ export interface IComputeEngine {
 
   /** @internal */
   readonly _typeResolver: TypeResolver;
+
+  /** Absolute time beyond which evaluation should not proceed.
+   * @internal
+   */
+  deadline: number | undefined;
 
   /** Absolute time beyond which evaluation should not proceed
    * @internal
@@ -979,6 +990,46 @@ export interface IComputeEngine {
     query: string | string[],
     options?: { limit?: number }
   ): DefinitionSearchResult[];
+
+  /**
+   * Given a `name` that is **not** a known operator, return the closest known
+   * operator name — a "did you mean" suggestion — or `undefined` when nothing
+   * is close enough. Powers the Cortex `unknown-function` diagnostic.
+   *
+   * Matching is conservative and applied in priority order (first match wins):
+   * case-insensitive exact match, singular/plural, Damerau–Levenshtein
+   * distance (≤ 2 for names of length ≥ 6, ≤ 1 for length 5, never for
+   * shorter names), then a prefix match against exactly one operator. Ties
+   * prefer the candidate sharing the longest prefix with the query.
+   *
+   * ```ts
+   * ce.suggestOperatorName('Quartile'); // → 'Quartiles'
+   * ce.suggestOperatorName('foo');      // → undefined
+   * ```
+   */
+  suggestOperatorName(name: string): string | undefined;
+
+  /**
+   * Return the known analytic properties of an operator — poles, zeros, branch
+   * points/cuts, residues, holomorphic/meromorphic domains — drawn from the
+   * Fungrim-derived metadata store, or `undefined` if none are recorded.
+   *
+   * ```ts
+   * ce.functionProperties('Gamma')?.poles?.toString(); // 'NonPositiveIntegers'
+   * ```
+   *
+   * The set-valued accessors (`poles`, `zeros`, ...) return a boxed set for the
+   * unconditional record of that kind; parametric / conditional records (e.g.
+   * residues that depend on parameters) are available via `entries`.
+   */
+  functionProperties(name: string): FunctionProperties | undefined;
+
+  /** Debug representation, e.g. for `JSON.stringify()`. */
+  toJSON(): string;
+
+  /** Print the evaluation-context stack to the console.
+   * @internal */
+  _printStack(options?: { details?: boolean; maxDepth?: number }): void;
 }
 
 declare module './types-expression.js' {

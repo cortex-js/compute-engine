@@ -4,8 +4,26 @@
 export const version = '{{SDK_VERSION}}';
 
 // ── Core engine ─────────────────────────────────────────────────────
-import { ComputeEngine } from './compute-engine/index.js';
-export { ComputeEngine } from './compute-engine/index.js';
+import { ComputeEngine as ComputeEngineImpl } from './compute-engine/index.js';
+import type { IComputeEngine } from './compute-engine/types.js';
+
+/** The constructor (and statics) of {@link ComputeEngine}. */
+export interface ComputeEngineConstructor {
+  new (
+    options?: ConstructorParameters<typeof ComputeEngineImpl>[0]
+  ): ComputeEngine;
+  getStandardLibrary: typeof ComputeEngineImpl.getStandardLibrary;
+}
+
+/**
+ * The `ComputeEngine` value is the engine constructor; the `ComputeEngine`
+ * type is the structural `IComputeEngine` interface. Exporting the interface
+ * (rather than the class, whose private fields make its type nominal) keeps
+ * `new ComputeEngine()`, `expr.engine` and `ExpressionComputeEngine`
+ * mutually assignable without casts.
+ */
+export const ComputeEngine: ComputeEngineConstructor = ComputeEngineImpl;
+export type ComputeEngine = IComputeEngine;
 
 export type * from './compute-engine/types.js';
 
@@ -18,12 +36,12 @@ export {
 } from './compute-engine/latex-syntax/latex-syntax.js';
 
 // ── Wire up LatexSyntax so all ComputeEngine instances can lazily create one ──
-ComputeEngine._latexSyntaxFactory = () => new LatexSyntax();
+ComputeEngineImpl._latexSyntaxFactory = () => new LatexSyntax();
 
 // ── Wire up the default engine factory with LatexSyntax ─────────────
 import { _setDefaultEngineFactory } from './compute-engine/free-functions.js';
 _setDefaultEngineFactory(
-  () => new ComputeEngine({ latexSyntax: new LatexSyntax() })
+  () => new ComputeEngineImpl({ latexSyntax: new LatexSyntax() })
 );
 
 import { LATEX_DICTIONARY } from './compute-engine/latex-syntax/dictionary/default-dictionary.js';
@@ -157,11 +175,6 @@ export type { BoxedSymbol } from './compute-engine/boxed-expression/boxed-symbol
 export type { BoxedFunction } from './compute-engine/boxed-expression/boxed-function.js';
 export type { BoxedString } from './compute-engine/boxed-expression/boxed-string.js';
 
-export type {
-  FunctionProperties,
-  FunctionPropertyRecord,
-} from './compute-engine/function-properties/index.js';
-
 // ── Global registration ─────────────────────────────────────────────
 // The self-registration slot is the only discovery channel that works with
 // zero host cooperation (a page that just script-tags the bundle next to a
@@ -176,7 +189,7 @@ export type {
 (globalThis as Record<symbol, unknown>)[
   Symbol.for('io.cortexjs.compute-engine')
 ] = {
-  ComputeEngine: ComputeEngine.prototype.constructor,
+  ComputeEngine: ComputeEngineImpl,
   version: '{{SDK_VERSION}}',
   LatexSyntax,
   LATEX_DICTIONARY,

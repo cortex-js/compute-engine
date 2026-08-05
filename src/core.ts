@@ -4,7 +4,26 @@
 
 export const version = '{{SDK_VERSION}}';
 
-export { ComputeEngine } from './compute-engine/index.js';
+import { ComputeEngine as ComputeEngineImpl } from './compute-engine/index.js';
+import type { IComputeEngine } from './compute-engine/types.js';
+
+/** The constructor (and statics) of {@link ComputeEngine}. */
+export interface ComputeEngineConstructor {
+  new (
+    options?: ConstructorParameters<typeof ComputeEngineImpl>[0]
+  ): ComputeEngine;
+  getStandardLibrary: typeof ComputeEngineImpl.getStandardLibrary;
+}
+
+/**
+ * The `ComputeEngine` value is the engine constructor; the `ComputeEngine`
+ * type is the structural `IComputeEngine` interface. Exporting the interface
+ * (rather than the class, whose private fields make its type nominal) keeps
+ * `new ComputeEngine()`, `expr.engine` and `ExpressionComputeEngine`
+ * mutually assignable without casts.
+ */
+export const ComputeEngine: ComputeEngineConstructor = ComputeEngineImpl;
+export type ComputeEngine = IComputeEngine;
 
 // Thrown when an evaluation exceeds `ce.timeLimit` or `ce.iterationLimit`
 export { CancellationError } from './common/interruptible.js';

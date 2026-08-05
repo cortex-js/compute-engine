@@ -526,9 +526,7 @@ class McpServer {
     // The raw AST is annotated with source offsets; a non-canonical box
     // round-trip normalizes it to plain MathJSON without resolving sugar.
     const mathjson =
-      ast === null
-        ? null
-        : new ComputeEngine().box(ast, { canonical: false }).json;
+      ast === null ? null : new ComputeEngine().box(ast, { form: 'raw' }).json;
     return toolResult({
       ok: !diagnostics.some((x) => x.severity === 'error'),
       mathjson,
