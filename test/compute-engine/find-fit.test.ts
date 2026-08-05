@@ -461,45 +461,119 @@ describe('FindFit Jacobian fallback (§ 7.8)', () => {
 // --- § 7.9 Deadline --------------------------------------------------------
 
 describe('FindFit deadline (§ 7.9)', () => {
-  // Layered deadline contract (Tycho item 118): a timeout during the
-  // PRE-solve phase (data evaluation, differentiation, compilation) still
-  // propagates as the standard cancellation — there is nothing useful to
-  // return. A timeout during the SOLVE (starting-point evaluation onward)
-  // returns a best-so-far record with `converged: false` and
-  // `timedOut: True` instead of throwing.
-  test('a pre-solve timeout propagates the standard cancellation', () => {
+  // In-band deadline contract (Tycho item 118 + its addendum): a deadline that
+  // expires anywhere inside `FindFit`/`FindRoot` answers a RECORD, never a
+  // bare cancellation the caller would have to duck-type. `timedOut: True`
+  // marks it and `phase` says how far the call got:
+  //   - `"setup"` — the budget went entirely to data evaluation,
+  //     differentiation and model compilation; nothing was fitted, so
+  //     `iterations` is 0, `residualNorm` is NaN and the reported parameters
+  //     are the starting guesses.
+  //   - `"solve"` — the starting-point evaluation or the LM iteration was cut
+  //     short, so the parameters are genuine best-so-far.
+  // Non-timeout throws propagate unchanged in both phases.
+
+  /** The six-parameter double-sine fit over 400 rows: setup alone (data
+   * evaluation + six analytic derivatives + compilation) far outruns a 2 ms
+   * budget, so the deadline fires before the solver is ever reached. */
+  const setupHeavyOperands = () => {
     const rnd = lcg(42);
     const pts: [number, number][] = [];
     for (let i = 0; i < 400; i++) pts.push([i * 0.03, rnd() * 2 - 1]);
-    const data = dataset(pts);
-    const model = ce.box([
-      'Add',
-      ['Multiply', 'a', ['Sin', ['Add', ['Multiply', 'b', 'x'], 'c']]],
-      ['Multiply', 'p', ['Sin', ['Add', ['Multiply', 'q', 'x'], 'r']]],
-    ]);
-    const params = ce.box([
-      'List',
-      ['Tuple', 'a', 1],
-      ['Tuple', 'b', 1],
-      ['Tuple', 'c', 0],
-      ['Tuple', 'p', 1],
-      ['Tuple', 'q', 2],
-      ['Tuple', 'r', 0],
-    ]);
+    return {
+      data: dataset(pts),
+      model: ce.box([
+        'Add',
+        ['Multiply', 'a', ['Sin', ['Add', ['Multiply', 'b', 'x'], 'c']]],
+        ['Multiply', 'p', ['Sin', ['Add', ['Multiply', 'q', 'x'], 'r']]],
+      ]),
+      params: ce.box([
+        'List',
+        ['Tuple', 'a', 1],
+        ['Tuple', 'b', 1],
+        ['Tuple', 'c', 0],
+        ['Tuple', 'p', 1],
+        ['Tuple', 'q', 2],
+        ['Tuple', 'r', 0],
+      ]),
+    };
+  };
+
+  test('a setup-phase timeout reports in band with phase: "setup"', () => {
+    const { data, model, params } = setupHeavyOperands();
+
+    const t0 = Date.now();
+    const r = ce.withTimeLimit({ ms: 2, label: 'test:fit-deadline' }, () =>
+      ce.function('FindFit', [data, model, params, ce.symbol('x')]).evaluate()
+    );
+    expect(Date.now() - t0).toBeLessThan(3000);
+
+    // A record, not a throw — the consumer's ask (item 118 addendum).
+    expect(r.operator).toBe('Dictionary');
+    expect(r.get('timedOut')?.symbol).toBe('True');
+    expect(r.get('phase')?.string).toBe('setup');
+    expect(r.get('converged')?.symbol).toBe('False');
+    // Nothing was fitted: no iteration ran and no residual was ever formed.
+    expect(iterations(r)).toBe(0);
+    expect(residualNorm(r)).toBeNaN();
+    // The only honest parameter values are the starting guesses.
+    expect(param(r, 'a')).toBe(1);
+    expect(param(r, 'c')).toBe(0);
+    expect(param(r, 'q')).toBe(2);
+  });
+
+  test('parse route: a setup-phase timeout reports in band', () => {
+    // `FindFit` is lazy, so the parse-route operands arrive held and unbound;
+    // canonicalizing them is itself part of the setup phase. Parsing happens
+    // OUTSIDE the budget — only the evaluation is timed.
+    const rnd = lcg(11);
+    const pts: string[] = [];
+    for (let i = 0; i < 400; i++)
+      pts.push(`(${(i * 0.03).toFixed(4)}, ${(rnd() * 2 - 1).toFixed(4)})`);
+    const expr = ce.parse(
+      `\\operatorname{FindFit}(\\lbrack ${pts.join(
+        ', '
+      )} \\rbrack, a\\sin(b x + c) + p\\sin(q x + r), \\lbrack a, b, c, p, q, r \\rbrack, x)`
+    );
+
+    const r = ce.withTimeLimit({ ms: 2, label: 'test:fit-parse-deadline' }, () =>
+      expr.evaluate()
+    );
+    expect(r.operator).toBe('Dictionary');
+    expect(r.get('timedOut')?.symbol).toBe('True');
+    expect(r.get('phase')?.string).toBe('setup');
+    expect(iterations(r)).toBe(0);
+  });
+
+  test('a non-timeout error during setup still propagates', () => {
+    // The setup-phase net converts ONLY an expired time budget into a record.
+    // A genuine fault raised while the data operand is evaluated throws.
+    ce.declare('Boom', {
+      signature: '() -> number',
+      evaluate: () => {
+        throw new Error('boom: setup failure');
+      },
+    } as any);
+    const data = ce.box(['List', ['Tuple', 1, ['Boom']], ['Tuple', 2, 4]]);
 
     let err: unknown;
-    const t0 = Date.now();
     try {
-      ce.withTimeLimit({ ms: 2, label: 'test:fit-deadline' }, () =>
-        ce.function('FindFit', [data, model, params, ce.symbol('x')]).evaluate()
+      ce.withTimeLimit({ ms: 5000 }, () =>
+        ce
+          .function('FindFit', [
+            data,
+            ce.box(['Multiply', 'a', 'x']),
+            ce.box(['List', ['Tuple', 'a', 1]]),
+            ce.symbol('x'),
+          ])
+          .evaluate()
       );
     } catch (e) {
       err = e;
     }
-    expect(err).toBeInstanceOf(CancellationError);
-    expect((err as CancellationError).cause).toBe('timeout');
-    expect((err as CancellationError).attribution).toBe('test:fit-deadline');
-    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(CancellationError);
+    expect((err as Error).message).toBe('boom: setup failure');
   });
 
   test('a solve-phase timeout returns best-so-far with timedOut: True (item 118)', () => {
@@ -528,13 +602,14 @@ describe('FindFit deadline (§ 7.9)', () => {
     expect(Date.now() - t0).toBeLessThan(2000);
     expect(r.operator).toBe('Dictionary');
     expect(r.get('timedOut')?.symbol).toBe('True');
+    expect(r.get('phase')?.string).toBe('solve');
     expect(r.get('converged')?.symbol).toBe('False');
     const fitted = r.get('parameters');
     expect(typeof fitted?.get('a')?.re).toBe('number');
     expect(typeof fitted?.get('b')?.re).toBe('number');
   });
 
-  test('an untimed fit record has no timedOut key', () => {
+  test('an untimed fit record has neither a timedOut nor a phase key', () => {
     const pts: [number, number][] = [];
     for (let i = 0; i < 20; i++) pts.push([i, 3 * i + 1]);
     const r = findFit(
@@ -544,7 +619,9 @@ describe('FindFit deadline (§ 7.9)', () => {
       'x'
     );
     expect(r.get('converged')?.symbol).toBe('True');
+    // Zero-churn contract: the normal-path record gains no new key.
     expect(r.get('timedOut')).toBeUndefined();
+    expect(r.get('phase')).toBeUndefined();
   });
 });
 

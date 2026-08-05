@@ -173,6 +173,14 @@ function removeMintedTypeConstructor(
  *   fails its own type is worse than no constructor, so mint nothing (a
  *   NOMINAL named-tuple is unaffected: its value is tagged and its type comes
  *   from the `type` handler).
+ * - a GENERIC type alias (`type alias Pair<T> = tuple<T, T>`) → `undefined`
+ *   too. There is no one signature to mint: the body is open, and a
+ *   constructor built from it would carry unquantified type variables — which
+ *   `BoxedType`'s closedness check rejects, aborting the whole declaration.
+ *   Generic aliases claim no value name, following the mint-nothing precedent
+ *   of record-bodied aliases. (A plain-alias → generic-alias redeclaration
+ *   still DROPS a previously minted constructor: `mintTypeConstructor` removes
+ *   it before consulting this.)
  * - anything else (scalar, list, dictionary, union, signature, reference…) →
  *   unary.
  *
@@ -182,8 +190,10 @@ function removeMintedTypeConstructor(
 function deriveConstructorSignature(
   body: Type,
   result: Type,
-  alias: boolean
+  alias: boolean,
+  generic: boolean
 ): FunctionSignature | undefined {
+  if (generic) return undefined;
   if (body === 'record') return undefined;
   if (typeof body === 'object') {
     if (body.kind === 'record') return undefined;
@@ -228,9 +238,14 @@ export function mintTypeConstructor(
   // checks its operands and returns the plain structural value, so its result
   // is the definition body (D10).
   const alias = ref.alias === true;
-  const signature = deriveConstructorSignature(body, alias ? body : ref, alias);
-  // D4b: record bodies — and named-field tuple bodies of an alias — mint
-  // nothing.
+  const signature = deriveConstructorSignature(
+    body,
+    alias ? body : ref,
+    alias,
+    ref.typeParams !== undefined
+  );
+  // D4b: record bodies — named-field tuple bodies of an alias, and generic
+  // aliases — mint nothing.
   if (signature === undefined) return;
 
   const nAry = typeof body === 'object' && body.kind === 'tuple';

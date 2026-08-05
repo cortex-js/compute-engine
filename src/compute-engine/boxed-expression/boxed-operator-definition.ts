@@ -320,6 +320,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   signature: BoxedType;
   inferredSignature = true;
 
+  /** See `OperatorDefinition._derivedSignature`. */
+  _derivedSignature = false;
+
   /** True if this operator definition was created from a user-defined
    * function literal (e.g. via `ce.assign('f', ce.parse('x \\mapsto x^2'))`).
    * Used to enable auto-broadcasting when applied to indexed collections.
@@ -654,6 +657,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
       if ('inferredSignature' in def)
         this.inferredSignature = def.inferredSignature as boolean;
+
+      if ('_derivedSignature' in def)
+        this._derivedSignature = def._derivedSignature as boolean;
 
       // Effects written in the signature's specifier slot are the same
       // statement as the `effects:` field. (This is also how the effects of a

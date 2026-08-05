@@ -694,15 +694,39 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     // fall-back-to-`pinnedBy[0]` arm is therefore defensive only.
   });
 
-  test('D10 — a LIFT-admitted operand at a bare variable binds the FULL actual', () => {
-    // Admission is checked at the scalar base by the lift gate (`integer <:
-    // number`); the variable binds `list<integer>`, so the result is the
-    // collection type — what today's echo handlers produce under broadcast.
+  test('D10 — a LIFT-admitted operand at a bare variable binds its ELEMENT', () => {
+    // RE-RULED 2026-08-04 (measured): the runtime MAPS at every lift-admitted
+    // position, so the variable denotes ONE ELEMENT, not the whole actual.
+    // Admission is still checked at the scalar base by the lift gate; the
+    // call site's ordinary broadcast wrap puts the rank back, so a bare echo
+    // still types `list<integer>` end to end (unwrap ∘ whole-bind ≡ wrap ∘
+    // element-bind) while a variable-MENTIONING result no longer types one
+    // rank too high.
     expect(
       solve('forall T: number. (T) -> T', ['list<integer>'], {
         lifted: () => true,
       })
-    ).toBe('(list<integer>) -> list<integer>');
+    ).toBe('(integer) -> integer');
+    // The peel goes to the LEAF, matching the rank the wrap re-adds.
+    expect(
+      solve('forall T: number. (T) -> tuple<T, T>', ['matrix<integer^(2x3)>'], {
+        lifted: () => true,
+      })
+    ).toBe('(integer) -> tuple<integer, integer>');
+    // Only the kinds a broadcast MAPS are peeled: a scalar contributes itself
+    // (`broadcastable` = scalar-or-collection), and so do the admitted-but-
+    // never-mapped kinds — a `set`, and an atomic `tuple`.
+    expect(
+      solve('forall T: number. (T) -> T', ['integer'], { lifted: () => true })
+    ).toBe('(integer) -> integer');
+    expect(
+      solve('forall T. (T) -> T', ['set<integer>'], { lifted: () => true })
+    ).toBe('(set<integer>) -> set<integer>');
+    expect(
+      solve('forall T. (T) -> T', ['tuple<integer, string>'], {
+        lifted: () => true,
+      })
+    ).toBe('(tuple<integer, string>) -> tuple<integer, string>');
     // Without the lift flag the same call violates the declared bound.
     expect(solve('forall T: number. (T) -> T', ['list<integer>'])).toContain(
       'FAIL'
@@ -856,20 +880,29 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     expect(r).toContain('FAIL');
     expect(r).toContain('T <: string');
     // The bound itself is still waived: the plain lifted echo passes, and no
-    // `bound` failure is reported.
+    // `bound` failure is reported. (The waiver stays load-bearing after the
+    // 2026-08-04 element-bind re-ruling: the lift ADMISSION gate is looser
+    // than the peel — it admits any could-be-collection operand, including
+    // the never-mapped `set`/`tuple` kinds, whose whole-actual bound would
+    // otherwise be blamed against the scalar declared bound.)
     expect(
       solve('forall T: number. (T) -> T', ['list<integer>'], {
         lifted: () => true,
       })
-    ).toBe('(list<integer>) -> list<integer>');
+    ).toBe('(integer) -> integer');
+    expect(
+      solve('forall T: number. (T) -> T', ['set<string>'], {
+        lifted: () => true,
+      })
+    ).not.toContain('FAIL');
     // …and a COMPATIBLE positioned upper bound still solves.
     expect(
       solve(
         'forall T: number. (T, (T) -> boolean) -> T',
-        ['list<integer>', '(list<number>) -> boolean'],
+        ['list<integer>', '(number) -> boolean'],
         { lifted: (i: number) => i === 0 }
       )
-    ).toBe('(list<integer>, (list<integer>) -> boolean) -> list<integer>');
+    ).toBe('(integer, (integer) -> boolean) -> integer');
   });
 
   test('`inferTypeArguments` returns null exactly when a constraint fails', () => {
@@ -1077,9 +1110,10 @@ describe('END TO END — a user-declared generic operator', () => {
     ce.declare('gEcho', { signature: '(number) -> number', broadcastable: true });
     const m22 = ['List', ['List', 1, 2], ['List', 3, 4]] as any;
     expect(ce.box(['gEcho', m22]).type.toString()).toBe('matrix<2x2>');
-    // The polytype arm binds `T` to the FULL actual under D10, so its result
-    // ALREADY is that matrix. Unwrapping one level and re-shaping it produced
-    // the mixed encoding `list<vector<finite_integer^2>^(2x2)>`.
+    // The polytype arm binds `T` to the operand's ELEMENT under D10 (re-ruled
+    // 2026-08-04), so the wrapper builds the shape around it exactly as it
+    // does for the ground reference — same encoding, no
+    // `list<vector<finite_integer^2>^(2x2)>` mix.
     expect(ce.box(['pEcho', m22]).type.toString()).toBe(
       'matrix<finite_integer^(2x2)>'
     );
@@ -1095,23 +1129,31 @@ describe('END TO END — a user-declared generic operator', () => {
     expect(ce.box(['pEcho', 'pm']).type.toString()).toBe(
       'matrix<integer^(2x2)>'
     );
-    // A UNION solution is a join over MORE than the echo (`Remainder(M, 7)`),
-    // i.e. the widen artifact the broadcast wrapper exists to repair — it stays
-    // on the wrapper path and keeps its definite `list<…>` shape.
+    // A repeated variable over a collection AND a scalar (`Remainder(M, 7)`)
+    // no longer produces a union at all: element-binding joins the matrix's
+    // LEAF with the scalar operand, so `T = finite_integer` and the wrapper
+    // gives the same clean matrix the ground reference does. (Before the
+    // 2026-08-04 re-ruling this was the widen artifact
+    // `list<finite_integer | vector<finite_integer^2>^(2x2)>` — the very
+    // mixed encoding the wrapper exists to repair.)
     ce.declare('pRem', {
       signature: 'forall T: number. (T, T) -> T',
       broadcastable: true,
     });
     expect(ce.box(['pRem', m22, 7]).type.toString()).toBe(
-      'list<finite_integer | vector<finite_integer^2>^(2x2)>'
+      'matrix<finite_integer^(2x2)>'
     );
   });
 
-  test('the D10 unwrap is for the TRUE echo shape only (value route)', () => {
-    // The lifted-echo short circuit returns the solved result UNWRAPPED, which
-    // is right only when the arm's result IS the bare variable: the lift
-    // already bound the full collection to it. A result that merely MENTIONS
-    // the variable wraps it, so the broadcast shape must be built as usual.
+  test('every result SHAPE gets the same wrap (value route)', () => {
+    // D10 RE-RULED (2026-08-04). Under the old whole-actual bind, a
+    // bare-variable result had to be short-circuited (it already WAS the
+    // collection) while a result that merely MENTIONS the variable was wrapped
+    // around the whole actual — one rank too high, and contradicted by the
+    // runtime (`x ↦ (x, x)` over `[1, 2]` evaluates to `[(1,1), (2,2)]`, a
+    // list of pairs of INTEGERS). Element-binding makes one rule cover both:
+    // the arm instantiates to the PER-ELEMENT result and the ordinary
+    // broadcast wrap re-adds the operand's rank.
     const ce = fresh();
     ce.declare('vEcho', 'forall T. (T) -> T');
     ce.declare('vTuple', 'forall T. (T) -> tuple<T>');
@@ -1121,10 +1163,10 @@ describe('END TO END — a user-declared generic operator', () => {
       'vector<finite_integer^3>'
     );
     expect(ce.box(['vTuple', xs]).type.toString()).toBe(
-      'list<tuple<vector<finite_integer^3>>>'
+      'list<tuple<finite_integer>>'
     );
     expect(ce.box(['vList', xs]).type.toString()).toBe(
-      'list<list<vector<finite_integer^3>>>'
+      'list<list<finite_integer>>'
     );
     // A BOUNDED echo is still an echo.
     ce.declare('vBounded', 'forall T: indexed_collection. (T) -> T');

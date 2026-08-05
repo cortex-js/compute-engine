@@ -1,9 +1,19 @@
-import type { Type, TypeResolver, TypeString } from './types.js';
+import type {
+  Type,
+  TypeParameter,
+  TypeResolver,
+  TypeString,
+} from './types.js';
 
 import { isValidType } from './primitive.js';
 import { Parser } from './parser.js';
 import { buildTypeFromAST } from './type-builder.js';
-import { TypeVariableError, validateDeclaredType } from './instantiate.js';
+import {
+  TypeVariableError,
+  freeTypeVariables,
+  isReservedTypeName,
+  validateDeclaredType,
+} from './instantiate.js';
 
 // Note: the authoritative BNF grammar for the type syntax lives with the
 // parser implementation in `./parser.ts`.
@@ -32,18 +42,25 @@ function deepFreeze<T>(obj: T): T {
   return obj;
 }
 
-export function parseType(s: undefined, typeResolver?: TypeResolver): undefined;
+export function parseType(
+  s: undefined,
+  typeResolver?: TypeResolver,
+  typeVars?: readonly TypeParameter[]
+): undefined;
 export function parseType(
   s: TypeString | Type,
-  typeResolver?: TypeResolver
+  typeResolver?: TypeResolver,
+  typeVars?: readonly TypeParameter[]
 ): Type;
 export function parseType(
   s: TypeString | Type | undefined,
-  typeResolver?: TypeResolver
+  typeResolver?: TypeResolver,
+  typeVars?: readonly TypeParameter[]
 ): Type | undefined;
 export function parseType(
   s: TypeString | Type | undefined,
-  typeResolver?: TypeResolver
+  typeResolver?: TypeResolver,
+  typeVars?: readonly TypeParameter[]
 ): Type | undefined {
   if (s === undefined) return undefined;
   // Check if it's a primitive type or already a Type object
@@ -52,16 +69,19 @@ export function parseType(
   // Parse the type string
   if (typeof s !== 'string') return undefined;
 
-  const cacheable = typeResolver === undefined;
+  // A PRE-SEEDED parse is uncacheable: identical text means different things
+  // under different seeds (`tuple<T, T>` with `T` seeded is an open type; with
+  // nothing seeded it is an unknown-type error).
+  const cacheable = typeResolver === undefined && typeVars === undefined;
   if (cacheable) {
     const cached = TYPE_CACHE.get(s);
     if (cached !== undefined) return cached;
   }
 
   try {
-    const parser = new Parser(s, { typeResolver });
+    const parser = new Parser(s, { typeResolver, typeVars });
     const ast = parser.parseType();
-    const type = buildTypeFromAST(ast, typeResolver);
+    const type = buildTypeFromAST(ast, typeResolver, typeVars);
 
     // Polytypes are validated where they are boxed (§7.2). Gated on the parse
     // having seen a `forall` clause: a variable can only be introduced by one,
@@ -114,11 +134,148 @@ export function parseType(
  */
 export function parseTypePrefix(
   source: string,
-  typeResolver?: TypeResolver
+  typeResolver?: TypeResolver,
+  typeVars?: readonly TypeParameter[]
 ): { type: Type; end: number } {
-  const parser = new Parser(source, { typeResolver, allowTrailing: true });
+  const parser = new Parser(source, {
+    typeResolver,
+    allowTrailing: true,
+    typeVars,
+  });
   const ast = parser.parseTypePrefix();
-  const type = buildTypeFromAST(ast, typeResolver);
+  const type = buildTypeFromAST(ast, typeResolver, typeVars);
   if (parser.sawForall) validateDeclaredType(type);
   return { type, end: parser.endOffset };
+}
+
+//
+// ── The shared type-parameter CLAUSE parser ──────────────────────────────────
+//
+
+/** A structured failure of {@link parseTypeParameterClause}: a machine code, a
+ * human message, and the offset WITHIN the clause text where it was found.
+ *
+ * Structured rather than thrown because each consumer surfaces it differently:
+ * the Cortex parser turns it into a ranged diagnostic, the `DeclareType`
+ * operator into an error VALUE, the host `ce.declareType()` into a throw. */
+export interface TypeParameterClauseError {
+  code:
+    | 'name-expected'
+    | 'duplicate-name'
+    | 'reserved-name'
+    | 'bound-error'
+    | 'separator-expected'
+    | 'empty-clause';
+  message: string;
+  position: number;
+}
+
+/**
+ * Parse the TEXT of a type-parameter clause — `"T"`, `"T, U: number"` — into
+ * {@link TypeParameter}s.
+ *
+ * The one clause reader shared by every route that carries a clause as text:
+ * the `typeParams` attrs entry of a `DeclareType` statement (A1), the host
+ * `ce.declareType(…, { typeParams })` option (A2), and — indirectly — the
+ * Cortex `type alias Pair<T> = …` statement, whose own character scanner adds
+ * source ranges and hands the text on. The input is the clause CONTENTS: the
+ * enclosing `<`/`>` are not part of it.
+ *
+ * The whole text must be consumed (a trailing `,` or a stray `>` is an error).
+ * Names are checked for duplicates and against {@link isReservedTypeName}.
+ * Bounds are parsed as ordinary — GROUND — types with the clause's own names
+ * NOT in scope, so an F-bounded `T: list<U>` is an unknown-type error.
+ */
+export function parseTypeParameterClause(
+  text: string,
+  typeResolver?: TypeResolver
+): { params: TypeParameter[] } | { error: TypeParameterClauseError } {
+  const err = (
+    code: TypeParameterClauseError['code'],
+    message: string,
+    position: number
+  ): { error: TypeParameterClauseError } => ({
+    error: { code, message, position },
+  });
+
+  let pos = 0;
+  const skipSpace = (): void => {
+    while (pos < text.length && /\s/.test(text[pos])) pos += 1;
+  };
+
+  skipSpace();
+  if (pos >= text.length)
+    return err('empty-clause', 'Expected at least one type parameter', pos);
+
+  const params: TypeParameter[] = [];
+  const seen = new Set<string>();
+  for (;;) {
+    skipSpace();
+    const m = /^[a-zA-Z_][a-zA-Z0-9_]*/.exec(text.slice(pos));
+    if (m === null)
+      return err('name-expected', 'Expected a type parameter name', pos);
+    const name = m[0];
+    const namePos = pos;
+    pos += name.length;
+
+    if (isReservedTypeName(name))
+      return err(
+        'reserved-name',
+        `The type name "${name}" is reserved`,
+        namePos
+      );
+    // `Set` is prototype-free-safe: a parameter legally named `__proto__` or
+    // `toString` is an ordinary member here.
+    if (seen.has(name))
+      return err(
+        'duplicate-name',
+        `The type variable \`${name}\` is declared more than once`,
+        namePos
+      );
+    seen.add(name);
+
+    skipSpace();
+    let bound: Type | undefined;
+    if (text[pos] === ':') {
+      pos += 1;
+      const boundPos = pos;
+      try {
+        const { type, end } = parseTypePrefix(text.slice(pos), typeResolver);
+        bound = type;
+        pos += end;
+      } catch (e) {
+        const detail = e as { position?: number; rawMessage?: string };
+        return err(
+          'bound-error',
+          detail.rawMessage ?? (e instanceof Error ? e.message : String(e)),
+          boundPos + (detail.position ?? 0)
+        );
+      }
+      // v1: a bound is GROUND. Unreachable through the type parser (the
+      // clause's names are not seeded), but a `forall`-carrying bound is not.
+      if (freeTypeVariables(bound).size > 0)
+        return err(
+          'bound-error',
+          `The bound of the type variable \`${name}\` must be a ground type`,
+          boundPos
+        );
+    }
+
+    params.push(bound === undefined ? { name } : { name, bound });
+
+    skipSpace();
+    if (pos >= text.length) break;
+    if (text[pos] !== ',')
+      return err(
+        'separator-expected',
+        'Expected `,` between type parameters',
+        pos
+      );
+    pos += 1;
+    skipSpace();
+    if (pos >= text.length)
+      return err('name-expected', 'Expected a type parameter name', pos);
+  }
+
+  return { params };
 }

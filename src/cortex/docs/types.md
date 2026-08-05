@@ -391,9 +391,26 @@ declares nothing.
 
 ### Type variables
 
-A generic **type alias** — `type point<T> = tuple<T, T>` — is **reserved**
-for a future release. It parses, and reports a dedicated
-`type-variables-unsupported` diagnostic, in both forms:
+A generic **type alias** takes a type-parameter clause between its name
+and the `=`. The applied spelling is usable anywhere a type is written,
+and expands **transparently** — `Pair<integer>` means exactly
+`tuple<integer, integer>`, and that expansion is what type displays and
+error messages show:
+
+```cortex
+type alias Pair<T> = tuple<T, T>
+let p: Pair<integer> = (1, 2)
+```
+
+A parameter may carry a ground bound (`type alias Keyed<T: value> = …`),
+enforced wherever the alias is applied — including application to
+another clause's type variable, which is admitted when the variable's
+own bound satisfies the parameter's. A generic alias may not refer to
+itself, and every parameter must be used in the body.
+
+A parameterized **nominal** type — the bare form,
+`type point<T> = tuple<T, T>` — remains **reserved** and reports a
+dedicated `type-variables-unsupported` diagnostic:
 
 <!-- cortex-test: expect-diagnostics -->
 

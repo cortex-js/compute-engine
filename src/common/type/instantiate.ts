@@ -25,12 +25,28 @@ import { typeToString } from './serialize.js';
 // ── Errors ───────────────────────────────────────────────────────────────────
 //
 
-/** The declaration-time violations of §7.2 of the design. */
+/** The declaration-time violations of §7.2 of the design, plus the
+ * generic-type-alias matrix (`docs/plans/2026-08-04-generic-type-aliases-
+ * design.md`, error matrix). */
 export type TypeVariableErrorCode =
   | 'unresolved-type-variable'
   | 'unsolvable-type-variable'
   | 'unsupported-variable-position'
-  | 'reserved-type-name';
+  | 'reserved-type-name'
+  /** A generic alias applied to the wrong number of type arguments — including
+   * a bare use (`let p: Pair`), an empty list (`Pair<>`), and arguments on a
+   * name that takes none. */
+  | 'generic-alias-arity'
+  /** A type argument that does not satisfy its parameter's declared bound
+   * (A7: an OPEN argument is judged by its own declared bound). */
+  | 'generic-alias-bound'
+  /** A generic alias applied inside its own body. */
+  | 'generic-alias-self-reference'
+  /** A `type X<…>` spelling over a forward-reference placeholder. */
+  | 'generic-alias-forward-reference'
+  /** A clause parameter the alias body never mentions: under transparency a
+   * phantom parameter is meaningless. */
+  | 'generic-alias-unused-parameter';
 
 /** An `Error` carrying one of the {@link TypeVariableErrorCode}s.
  *
@@ -574,6 +590,22 @@ function algebra(): TypeAlgebra {
   return _algebra;
 }
 
+/**
+ * Does the GROUND type `t` satisfy the declared upper bound `bound`?
+ *
+ * The one subtype question the type BUILDER needs (generic-alias argument
+ * admission, A7), routed through the INJECTED algebra: a direct
+ * `type-builder → subtype` import would close a three-node cycle
+ * (`subtype → instantiate → …`), and the zero-cycle budget is enforced.
+ *
+ * `any` short-circuits, so an unbounded parameter — and the `any` an unbounded
+ * open argument reads as — never reaches the algebra at all.
+ */
+export function satisfiesTypeBound(t: Type, bound: Type): boolean {
+  if (bound === 'any') return true;
+  return algebra().isSubtype(t, bound);
+}
+
 /** A solved instantiation: one ground type per quantified variable. */
 export type TypeBindings = Record<string, Type>;
 
@@ -591,10 +623,11 @@ export interface InferenceOptions {
    * bound, and the symbol stays eligible for post-solve narrowing to the
    * instantiated ground parameter (§4.3 bound-join table, last row). */
   inferable?: (index: number) => boolean;
-  /** The operand was admitted by a broadcast LIFT (D10): a bare-variable
-   * pattern binds the FULL actual type, while admission stays checked at the
-   * scalar base by the lift gate itself — so the declared bound is NOT
-   * re-checked against the (collection) solution here. */
+  /** The operand was admitted by a broadcast LIFT (D10, re-ruled 2026-08-04):
+   * the runtime MAPS at such a position, so a bare-variable pattern binds the
+   * operand's ELEMENT type (a scalar actual contributes itself). Admission
+   * stays checked at the scalar base by the lift gate itself — so the declared
+   * bound is NOT re-checked against the solution here. */
   lifted?: (index: number) => boolean;
 }
 
@@ -703,16 +736,28 @@ export function solveTypeArguments(
 
   const positions = parameterPositions(arm, actuals.length);
 
+  // D10 (§4.4, re-ruled 2026-08-04): what a LIFT-ADMITTED operand contributes
+  // at a bare-variable pattern is its ELEMENT type, not the whole actual —
+  // the runtime maps at every lift-admitted position, so the variable
+  // semantically denotes one element. Computed once, shared by both sweeps.
+  const contributed = positions.map((pattern, i) => {
+    const actual = actuals[i];
+    if (pattern === undefined || actual === undefined) return actual;
+    if (opts?.skip?.(i) || opts?.inferable?.(i)) return actual;
+    if (!opts?.lifted?.(i) || !isVariable(pattern)) return actual;
+    s.lifted.add(pattern.name);
+    return liftedElementTypeOf(actual);
+  });
+
   // Pass 1 + pass 2a — the covariant sweep, over every position.
   for (let i = 0; i < positions.length; i++) {
     const pattern = positions[i];
-    const actual = actuals[i];
+    const actual = contributed[i];
     if (pattern === undefined || actual === undefined) continue;
     if (opts?.skip?.(i)) continue;
     // An inferable unknown/`any` symbol contributes NO bound; it stays
     // eligible for post-solve narrowing instead (§4.3 table).
     if (opts?.inferable?.(i)) continue;
-    if (opts?.lifted?.(i) && isVariable(pattern)) s.lifted.add(pattern.name);
     if (!walkPattern(s, pattern, actual, i, 'lower', true, true))
       s.matched = false;
   }
@@ -720,7 +765,7 @@ export function solveTypeArguments(
   // Pass 2b — the contravariant sweep (collection only; satisfiability below).
   for (let i = 0; i < positions.length; i++) {
     const pattern = positions[i];
-    const actual = actuals[i];
+    const actual = contributed[i];
     if (pattern === undefined || actual === undefined) continue;
     if (opts?.skip?.(i)) continue;
     if (opts?.inferable?.(i)) continue;
@@ -1153,6 +1198,85 @@ function elementTypeOf(type: Type): Type | undefined {
     };
   return undefined;
 }
+
+/**
+ * What ONE ELEMENT of a LIFT-ADMITTED operand is typed (D10, §4.4, re-ruled
+ * 2026-08-04).
+ *
+ * Only the kinds the broadcast machinery actually MAPS are peeled. The lift
+ * ADMISSION gate is deliberately looser than the mapping (`validate.ts` admits
+ * any `couldBeCollectionOperand` at a threadable position), and the two must
+ * not be conflated: a `set` operand is admitted but never mapped (`Conjugate(
+ * Set(1, 2))` stays inert), and a TUPLE binds whole and atomically
+ * (`Negate((1, 2))` is a tuple, and `f((1, 2))` under `forall T. (T) -> T`
+ * echoes the tuple). Those, like a plain scalar actual — `broadcastable` means
+ * scalar-OR-collection — contribute THEMSELVES, exactly as before the
+ * re-ruling. So does an `unknown`/`any` actual, which keeps its D8 top-type
+ * absorption verbatim.
+ *
+ * How DEEP the peel goes is decided by the OUTER actual's kind, so that it
+ * mirrors term for term the rank the wrapper re-adds:
+ * - a `list` outer peels ALL THE WAY DOWN the `list` nesting, because the
+ *   runtime maps to the scalar LEAVES (`x ↦ (x, x)` over a 2×2 matrix
+ *   evaluates to a 2×2 of tuples, not a 2×2 of tuples-of-rows) and
+ *   `broadcastShapedResultType` re-adds exactly the RANK
+ *   `staticCollectionDims` reports — which recurses through `list` elements
+ *   only, and stops on an `unknown`/bare-`list` element or a non-`list` kind
+ *   such as `tuple`;
+ * - an `indexed_collection`/`broadcastable` outer has NO static rank
+ *   (`staticCollectionDims` answers `null` for it), so the wrapper re-adds
+ *   exactly ONE level and the peel takes exactly one — even when the element
+ *   is itself a list.
+ */
+function liftedElementTypeOf(actual: Type): Type {
+  // A UNION of shapes (`list<integer> | matrix<integer>`, the `Add` widen
+  // artifact) distributes: whichever arm the value takes, the body sees that
+  // arm's element. But only when EVERY member is a mapped kind: an unmapped
+  // member (a `set`, a `tuple`, a scalar) is echoed WHOLE by the runtime while
+  // the wrapper still re-lifts, so distributing the peel across it would be
+  // unsound (`list<integer> | set<integer>` must not contribute
+  // `integer | set<integer>`). Such a union contributes itself.
+  if (typeof actual === 'object' && actual.kind === 'union') {
+    if (!actual.types.every((t) => isMappedActual(t))) return actual;
+    return algebra().widen(...actual.types.map((t) => liftedElementTypeOf(t)));
+  }
+
+  // A bare `list`/`indexed_collection` carries no element information; peeling
+  // it to `any` still gets the RANK right (the wrapper re-adds one level),
+  // where contributing it whole would nest (`list<list>`).
+  if (actual === 'list' || actual === 'indexed_collection') return 'any';
+
+  if (typeof actual !== 'object' || !MAPPED_KINDS.has(actual.kind))
+    return actual;
+  let t = elementTypeOf(actual);
+  if (t === undefined) return actual;
+  if (actual.kind === 'list') {
+    while (typeof t === 'object' && t.kind === 'list') {
+      const next = elementTypeOf(t);
+      if (next === undefined) break;
+      t = next;
+    }
+  }
+  return t;
+}
+
+/** Whether an actual is one of the kinds a broadcast MAPS over — the union
+ * members `liftedElementTypeOf` may distribute the peel across. The bare
+ * `list`/`indexed_collection` spellings carry no element type but ARE mapped
+ * (they peel to `any`). */
+function isMappedActual(t: Type): boolean {
+  if (t === 'list' || t === 'indexed_collection') return true;
+  return typeof t === 'object' && MAPPED_KINDS.has(t.kind);
+}
+
+/** The collection kinds a broadcast MAPS over (§4.4 D10). Notably absent:
+ * `tuple` (atomic under broadcast), `set`/`collection`/`dictionary`/`record`
+ * (not indexed — admitted by the lift gate, never mapped). */
+const MAPPED_KINDS: ReadonlySet<string> = new Set([
+  'list',
+  'indexed_collection',
+  'broadcastable',
+]);
 
 /**
  * Walk a parameter PATTERN against an ACTUAL type, recording bounds.

@@ -376,6 +376,27 @@ instantiated-result check as future work (same future-work slot as the
 polytype; the literal is stored as the value. `BoxedValueDefinition`
 construction reaches `matchesDeclaredTypeAxes` with the rule above.
 
+**Residuals round (2026-08-04, post-commit):**
+- **Self-describing values**: the boundary ascribes the declared
+  polytype onto a plain literal (`ascribeDeclaredPolytype`, all three
+  routes) so the stored value's own type is the polytype — but ONLY
+  when every clause argument mentions a quantified variable (a ground
+  argument like `n: number` would become a per-element `apply()`
+  constraint inside a broadcast, where `n` legitimately receives a
+  whole row — pinned limitation; such literals still self-describe as
+  their inferred arrow).
+- **Untyped re-assign full-replaces a DERIVED signature** (user-ruled,
+  the polymorphism D6 precedent): a new `_derivedSignature` provenance
+  flag distinguishes assign-derived signatures (replaceable) from
+  author declarations (sticky, all `ce.declare` forms).
+- **Anonymous application result typing**: `Apply`'s own `type:`
+  handler instantiates polytype heads (`instantiatedResultType`);
+  `['Apply', lit, args]` and `[lit, args]` are the same node after
+  canonicalization. A bound-violating anonymous call types the solved
+  instantiation (the solver is write-free and does not enforce bounds;
+  validation cannot run on `Apply`'s expression-typed operands) —
+  pinned. `Pipe` stays idle (lazy).
+
 ### 2.5 The application path
 
 - **`makeLambda`** (`function-utils.ts:1332`): erased quantified params
@@ -408,16 +429,22 @@ construction reaches `matchesDeclaredTypeAxes` with the rule above.
   the clause) is the principled lift; recorded as future work, not v1.
 - **Result typing — the twin arm.** The value-definition arm of
   `computeFunctionResultType` already instantiates
-  (`instantiatedResultType`, `boxed-function.ts:3209`) and carries the
-  D10 `liftedEchoPositions` guard (`:3244`). The **operator-def lambda
-  arm** (`:3160`) has neither — harmless today because an operator-def
-  lambda can only carry an inferred ground signature, but the moment the
-  operator slot installs generic literals (this milestone), that arm
+  (`instantiatedResultType`, `boxed-function.ts:3209`) and carried a D10
+  `liftedEchoPositions` guard (`:3244`). The **operator-def lambda arm**
+  (`:3160`) had neither — harmless while an operator-def lambda could
+  only carry an inferred ground signature, but the moment the operator
+  slot installs generic literals (this milestone), that arm
   **double-lifts**: `f([1,2,3])` under `forall T. (T) -> T` would type
-  `list<vector>` instead of `vector`. Mirror both pieces
-  (`instantiatedResultType` + the echo guard) onto the twin. This was
-  pre-flagged in the v1 implementation notes ("mirror at the lambda twin
-  when v2 generic literals land").
+  `list<vector>` instead of `vector`. Mirror `instantiatedResultType`
+  onto the twin. This was pre-flagged in the v1 implementation notes
+  ("mirror at the lambda twin when v2 generic literals land").
+  **Amended 2026-08-04 (D10 re-ruling):** the echo guard is RETIRED on
+  all three arms (both lambda arms and the builtin one). A lift-admitted
+  operand now binds its ELEMENT type, so `instantiatedResultType` returns
+  the PER-ELEMENT result and the ordinary broadcast wrap is the whole
+  answer — `vector` for the bare echo as before, and correctly ranked for
+  a result that merely MENTIONS the variable. Only `instantiatedResultType`
+  has to be mirrored onto the twin; there is no second piece.
 - **Broadcast gating**: `applyFunctionLiteral`'s gate reads the declared
   signature and `paramsAreScalar` already reads quantified params at
   their bound (`substituteDeclaredBounds`, `boxed-function.ts:3459`) —

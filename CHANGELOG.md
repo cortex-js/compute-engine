@@ -334,6 +334,20 @@
   overrides all stay conservatively excluded. Opt out as before with
   `compile(expr, { cse: false })`.
 
+- **`FindFit`/`FindRoot` now report a setup-phase deadline in band** (Tycho
+  item 118 addendum). A time budget consumed entirely before the solver
+  started — evaluating the data operand, differentiating the model, compiling
+  it — used to escape as a bare `CancellationError` the caller could only
+  duck-type, which an interpreted model over a few hundred rows hits routinely
+  under a tight ambient budget. Such an expiry now answers the same record
+  shape a mid-solve expiry does, with `timedOut: True` and a new `phase` entry
+  naming how far the call got: `"setup"` (nothing was fitted — `iterations` is
+  `0`, `residualNorm` is `NaN`, and the reported parameters are the starting
+  guesses) or `"solve"` (genuine best-so-far, as before). Only an expired time
+  budget converts: every other failure during setup — a malformed model, bad
+  data, an abort signal — behaves exactly as it did. The keys appear only on a
+  timed-out record, so a successful fit is unchanged.
+
 ### Performance
 
 - **Symbolic equality of free-variable expressions now samples before it

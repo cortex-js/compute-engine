@@ -120,6 +120,31 @@ describe('CORTEX `forall` ANNOTATIONS (D13: full-literal positions)', () => {
     });
   });
 
+  // R1 — the INSTALLED literal is self-describing: the declaration's clause is
+  // ascribed onto it as a full-signature marker, so the value's OWN type is the
+  // polytype rather than the `(unknown) -> unknown` its bare parameters infer.
+  test('…and the installed VALUE carries the declared polytype', () => {
+    const r = run('let f: forall T. (x: T) -> T = x |-> x\nf');
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value).toBe('(x) |-> x');
+    expect(r.type).toBe('forall T. (x: T) -> T');
+
+    // The unnamed-argument spelling too (marker argument names are cosmetic).
+    expect(run('let f: forall T. (T) -> T = x |-> x\nf').type).toBe(
+      'forall T. (T) -> T'
+    );
+  });
+
+  test('…and the value serializes with the marker', () => {
+    // The known Declare-value-bag gap keeps this off the `x |-> x` sugar; what
+    // R1 pins is that the round trip no longer DROPS the clause.
+    const ce = new ComputeEngine();
+    const r = executeCortex(ce, 'let f: forall T. (x: T) -> T = x |-> x\nf');
+    expect(serializeCortex(r.value!.json)).toBe(
+      'Function(do {Typed(x, "forall T. (x: T) -> T")}, x)'
+    );
+  });
+
   test('…and on the §9.1 `(x: T) scope -> T` shape', () => {
     const source = 'let f: forall T. (x: T) scope -> T = x |-> x + 1\nf(5)';
     expect(parseDiagnostics(source)).toEqual([]);

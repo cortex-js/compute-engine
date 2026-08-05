@@ -1,7 +1,12 @@
 import type { Complex } from 'complex-esm';
 import type { OneOf } from '../common/one-of.js';
 import type { MathJsonSymbol, MathJsonNumberObject } from '../math-json.js';
-import type { Type, TypeString, TypeResolver } from '../common/type/types.js';
+import type {
+  Type,
+  TypeString,
+  TypeResolver,
+  TypeParamsOption,
+} from '../common/type/types.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
 import type { DeadlineFrame } from '../common/interruptible.js';
@@ -715,7 +720,12 @@ export interface IComputeEngine {
   declareType(
     name: string,
     type: Type | TypeString | BoxedType,
-    options?: { alias?: boolean; fromStatement?: boolean; mint?: boolean }
+    options?: {
+      alias?: boolean;
+      fromStatement?: boolean;
+      mint?: boolean;
+      typeParams?: TypeParamsOption;
+    }
   ): void;
 
   declare(symbols: {

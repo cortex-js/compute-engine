@@ -15,6 +15,8 @@
  * PROJECTED gradient, so a minimizer pressed against an active bound converges.
  */
 
+import { isTimeoutCancellation } from '../../common/interruptible.js';
+
 export interface LMResult {
   theta: number[];
   converged: boolean;
@@ -327,12 +329,7 @@ export function levenbergMarquardt(
       }
     }
   } catch (e) {
-    if (
-      !(e instanceof Error) ||
-      e.name !== 'CancellationError' ||
-      (e as { cause?: unknown }).cause !== 'timeout'
-    )
-      throw e;
+    if (!isTimeoutCancellation(e)) throw e;
     timedOut = true;
   }
 

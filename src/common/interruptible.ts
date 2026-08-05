@@ -114,6 +114,26 @@ export function checkDeadline(
 }
 
 /**
+ * True when `e` is a `CancellationError` raised by an expired time budget
+ * (`cause: 'timeout'`), as opposed to an abort signal, an iteration-limit or
+ * recursion-depth breach, or any other error.
+ *
+ * Only an expired time budget licenses a caller to convert a throw into a
+ * partial, in-band result; every other cancellation must propagate.
+ *
+ * Identified by NAME (and `cause`), never `instanceof`: plugin bundles
+ * re-bundle engine code, so a `CancellationError` crossing a bundle boundary
+ * is not an instance of the host's class.
+ */
+export function isTimeoutCancellation(e: unknown): boolean {
+  return (
+    e instanceof Error &&
+    e.name === 'CancellationError' &&
+    (e as { cause?: unknown }).cause === 'timeout'
+  );
+}
+
+/**
  * Ambient deadline for nested numeric routines.
  *
  * Compiled functions (`_SYS.integrate`, `_SYS.limit`, …) have no access to

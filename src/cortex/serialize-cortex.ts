@@ -674,10 +674,19 @@ export function serializeCortex(
     //   ["DeclareType", "pair", {str:"tuple<number, number>"},
     //     ["Dictionary", ["KeyValuePair", "alias", "True"]]]
     //                                → type alias pair = tuple<number, number>
+    //   ["DeclareType", "Pair", {str:"tuple<T, T>"},
+    //     ["Dictionary", ["KeyValuePair", "alias", "True"],
+    //                    ["KeyValuePair", "typeParams", {str:"T"}]]]
+    //                                → type alias Pair<T> = tuple<T, T>
     //
     // A bare `type` declares a NOMINAL type (no attributes needed — nominal is
-    // `DeclareType`'s default); `type alias` declares a structural alias. Any
-    // other attributes bag falls back to the generic function form.
+    // `DeclareType`'s default); `type alias` declares a structural alias, and
+    // an additional `typeParams` entry (clause TEXT) makes it generic. The
+    // attributes bag is read in either MathJSON dictionary encoding (the
+    // operator `Dictionary` form the parser emits, and the `{dict: …}`
+    // shorthand) and in any key order. Any other bag — including `typeParams`
+    // WITHOUT `alias -> True`, a shape well-formed lowering never produces —
+    // falls back to the generic function form.
     //
     DeclareType: (expr: MathJsonExpression): FormattingBlock => {
       const args = operands(expr);
@@ -690,19 +699,26 @@ export function serializeCortex(
 
       if (args.length === 2) return fmt.line('type ', name, ' = ', body);
 
-      const attrs = args[2];
-      if (operator(attrs) !== 'Dictionary')
-        return serializeGenericFunction(expr);
-      const entries = operands(attrs);
-      if (entries.length !== 1) return serializeGenericFunction(expr);
-      const entry = entries[0];
-      if (operator(entry) !== 'KeyValuePair')
-        return serializeGenericFunction(expr);
-      const key = stringValue(operand(entry, 1)) ?? symbol(operand(entry, 1));
-      if (key !== 'alias' || symbol(operand(entry, 2)) !== 'True')
+      const entries = attributeEntries(args[2]);
+      if (entries === null) return serializeGenericFunction(expr);
+      const keys = Object.keys(entries);
+      if (
+        keys.length === 0 ||
+        keys.some((k) => k !== 'alias' && k !== 'typeParams')
+      )
         return serializeGenericFunction(expr);
 
-      return fmt.line('type alias ', name, ' = ', body);
+      if (symbol(entries['alias'] ?? null) !== 'True')
+        return serializeGenericFunction(expr);
+
+      const clauseOp = entries['typeParams'];
+      if (clauseOp === undefined)
+        return fmt.line('type alias ', name, ' = ', body);
+      const clause = stringValue(clauseOp) ?? symbol(clauseOp);
+      if (clause === null || clause.length === 0)
+        return serializeGenericFunction(expr);
+
+      return fmt.line('type alias ', name, '<', clause, '> = ', body);
     },
 
     Assign: (expr: MathJsonExpression): FormattingBlock => {
@@ -1236,6 +1252,47 @@ export function serializeCortex(
       .serialize(0);
   return serializeExpression(expr).serialize(0);
 }
+/**
+ * The entries of an ATTRIBUTES bag, in either MathJSON dictionary encoding:
+ * the operator form `["Dictionary", ["KeyValuePair", key, value], …]` the
+ * Cortex parser emits, and the `{dict: {key: value, …}}` shorthand a host may
+ * box directly. `null` when the operand is not a well-formed bag at all — the
+ * caller then has no keyword spelling for it.
+ *
+ * Not `dictionaryFromExpression()`: that one reads a key with `stringValue`
+ * only, so it silently DROPS the SYMBOL keys the parser's lowering uses
+ * (`["KeyValuePair", "alias", "True"]`), and it flattens values, losing the
+ * string/symbol distinction. The map is prototype-free: an attribute key comes
+ * from author text and may be `__proto__`.
+ */
+function attributeEntries(
+  expr: MathJsonExpression | null
+): Record<string, MathJsonExpression> | null {
+  if (expr === null) return null;
+  const entries: Record<string, MathJsonExpression> = Object.create(null);
+
+  if (
+    typeof expr === 'object' &&
+    !Array.isArray(expr) &&
+    'dict' in expr &&
+    typeof expr.dict === 'object' &&
+    expr.dict !== null
+  ) {
+    for (const [k, v] of Object.entries(expr.dict))
+      entries[k] = v as MathJsonExpression;
+    return entries;
+  }
+
+  if (operator(expr) !== 'Dictionary') return null;
+  for (const entry of operands(expr)) {
+    if (operator(entry) !== 'KeyValuePair') return null;
+    const key = stringValue(operand(entry, 1)) ?? symbol(operand(entry, 1));
+    if (key === null) return null;
+    entries[key] = operand(entry, 2) ?? 'Nothing';
+  }
+  return entries;
+}
+
 // Flip the sign of an already-serialized number so a `Negate` of a literal
 // folds into the literal (`3` → `-3`, `-3` → `3`, `+Infinity` → `-Infinity`).
 function negateNumberString(n: string): string {

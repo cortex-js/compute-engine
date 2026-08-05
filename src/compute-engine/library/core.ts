@@ -5,6 +5,7 @@ import {
 } from '../latex-syntax/latex-syntax.js';
 
 import { checkType, checkArity } from '../boxed-expression/validate.js';
+import { instantiatedResultType } from '../boxed-expression/generic-instantiation.js';
 import { canonicalForm } from '../boxed-expression/canonical.js';
 import { asSmallInteger, toInteger } from '../boxed-expression/numerics.js';
 import {
@@ -41,7 +42,10 @@ import {
   stripMissingFromType,
   widen,
 } from '../../common/type/utils.js';
-import { parseType } from '../../common/type/parse.js';
+import {
+  parseType,
+  parseTypeParameterClause,
+} from '../../common/type/parse.js';
 import { canonicalMultiply } from '../boxed-expression/arithmetic-mul-div.js';
 import {
   canonicalSolve,
@@ -58,7 +62,7 @@ import type {
   CanonicalForm,
 } from '../global-types.js';
 import type { FunctionInterface } from '../types-expression.js';
-import type { Type } from '../../common/type/types.js';
+import type { Type, TypeParameter } from '../../common/type/types.js';
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import {
@@ -562,16 +566,54 @@ function declareTypeStatement(
     );
 
   // Nominal by default (mirrors `ce.declareType()`); `alias -> True` makes it
-  // a structural alias.
+  // a structural alias. The `{dict: …}` shorthand boxes an unquoted `True`
+  // as a STRING, the operator `Dictionary` encoding as the symbol — read both,
+  // exactly as the `typeParams` clause below does.
+  const hasAttrs = attrs !== undefined && isDictionary(attrs);
+  const aliasOp = hasAttrs ? attrs.get('alias') : undefined;
   const alias =
-    attrs !== undefined && isDictionary(attrs)
-      ? sym(attrs.get('alias')) === 'True'
-      : false;
+    aliasOp !== undefined &&
+    (isString(aliasOp) ? aliasOp.string : sym(aliasOp)) === 'True';
+
+  // A GENERIC alias carries its type-parameter clause as TEXT (A1). This
+  // handler is the box/parse-route choke point — it runs for BOTH the
+  // canonical and the evaluate pass — so the clause must be read and threaded
+  // here, not only on the Cortex statement route.
+  let typeParams: TypeParameter[] | undefined;
+  if (hasAttrs) {
+    const clauseOp = attrs.get('typeParams');
+    const clauseText = clauseOp
+      ? ((isString(clauseOp) ? clauseOp.string : sym(clauseOp)) ?? undefined)
+      : undefined;
+    if (clauseText !== undefined) {
+      // Only the ALIAS form takes a clause (parameterized nominal types are
+      // out of scope) — the same rule the Cortex statement route reports as
+      // `type-variables-unsupported` and the host route throws for.
+      if (!alias)
+        return ce.error(
+          [
+            'invalid-type-declaration',
+            'A type parameter clause requires `alias -> True`: parameterized nominal types are not supported',
+          ],
+          name
+        );
+      const parsed = parseTypeParameterClause(clauseText, ce._typeResolver);
+      if ('error' in parsed)
+        return ce.error(
+          [
+            'invalid-type-declaration',
+            `Invalid type parameter clause: ${parsed.error.message}`,
+          ],
+          name
+        );
+      typeParams = parsed.params;
+    }
+  }
 
   // Errors are values: an invalid name, a malformed type expression or a
   // conflict with a host declaration must not throw to the host.
   try {
-    ce.declareType(name, typeStr, { alias, fromStatement: true });
+    ce.declareType(name, typeStr, { alias, fromStatement: true, typeParams });
   } catch (e) {
     return ce.error(
       ['invalid-type-declaration', e instanceof Error ? e.message : String(e)],
@@ -1195,7 +1237,33 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // (rung 2 — `apply()` bubbles it) instead of freezing with it.
       inspectsErrors: true,
       signature: '(name:symbol, arguments:expression*) -> unknown',
-      type: ([fn]) => functionResult(fn.type.type) ?? 'unknown',
+      // An ANONYMOUS application instantiates its callee's `forall` clause here
+      // (generic-function-literals design §2.5). This is the one application
+      // seam that crosses NO symbol/definition boundary — the callee is an
+      // expression, so neither the operator-def nor the value-def arm of
+      // `boxed-function.ts`'s `type()` runs — and `functionResult` of a polytype
+      // hands back the OPEN result, which must never escape as a `.type` (§4.2).
+      // Left alone it degraded to `unknown`: `Apply(x |-> x, 5)` typed
+      // `unknown` while `f(5)` under the same signature typed `integer`. The
+      // application-head spelling `[⟨literal⟩, 5]` canonicalizes to `Apply`, so
+      // it is covered by the same line.
+      // Same solver as the value-definition arm, but NOT its `threadable`
+      // gate: `apply()` binds each argument WHOLE — `Apply(x |-> (x, x),
+      // [1, 2])` evaluates to `([1,2], [1,2])`, not to a list of pairs (a
+      // broadcasting BODY such as `2x` broadcasts on its own, inside the
+      // binding, and does not make this route a map). So no position is
+      // lift-admitted here and the D10 element bind (§4.4) must not fire:
+      // `T` binds the collection itself, and there is no wrap on this route
+      // to put a rank back. A ground callee yields `undefined` and falls
+      // through to today's `functionResult`.
+      type: ([fn, ...args]) => {
+        const t = fn.type.type;
+        return (
+          instantiatedResultType(t, args, { threadable: false }) ??
+          functionResult(t) ??
+          'unknown'
+        );
+      },
       canonical: (args, { engine: ce }) => {
         const s = sym(args[0]);
         if (s) return ce.function(s, args.slice(1));
@@ -2039,7 +2107,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'string) and the type a string holding a type expression, e.g. ' +
         '`"tuple<x: integer, y: integer>"`. The type is nominal by default; ' +
         'an optional trailing attributes dictionary with `alias -> True` ' +
-        'makes it a structural alias instead. The declaration also mints a ' +
+        'makes it a structural alias instead, and an additional ' +
+        '`typeParams -> "T, U: number"` entry makes it a GENERIC alias whose ' +
+        'uses must be applied (`Pair<integer>`). The declaration also mints a ' +
         'value constructor of the same name — `["point", 1, 2]`, an inert ' +
         'tagged value for a nominal type, a checked identity for an alias — ' +
         'except for a `record` body, which mints none. Evaluates to ' +

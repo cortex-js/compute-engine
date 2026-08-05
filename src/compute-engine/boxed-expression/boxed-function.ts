@@ -68,7 +68,6 @@ import {
 import { candidateShape } from './tensor-view.js';
 import {
   instantiatedResultType,
-  liftedEchoPositions,
   substituteDeclaredBounds,
 } from './generic-instantiation.js';
 import type {
@@ -80,7 +79,6 @@ import { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { typeToString } from '../../common/type/serialize.js';
 import { NUMERIC_TYPES } from '../../common/type/primitive.js';
 import {
   absorbNumericAbsence,
@@ -299,6 +297,13 @@ export class BoxedFunction
     const def = this.operatorDefinition;
     if (!def || !def.inferredSignature) return false;
 
+    // Narrowing capture (`InspectableScope.narrowings()`): a contained parse
+    // that refines the signature of an OUTER inferred function reports it back
+    // to the caller, same as `BoxedSymbol.infer()` does for symbols.
+    // `undefined` — the normal case — costs one property read.
+    const sink = this.engine._narrowingSink;
+    const previousSignature = sink ? def.signature : undefined;
+
     // If the signature was inferred, refine it by narrowing the result
     if (def.signature.is('function')) {
       def.signature = new BoxedType(
@@ -347,6 +352,19 @@ export class BoxedFunction
     // semantic change other expressions may depend on.
     this.engine._mutationGeneration += 1;
     this.engine._semanticEpoch += 1;
+
+    if (
+      sink &&
+      previousSignature !== undefined &&
+      previousSignature !== def.signature &&
+      this._def
+    )
+      sink._recordNarrowing(
+        this._operator,
+        this._def,
+        previousSignature,
+        def.signature
+      );
 
     return true;
   }
@@ -3094,88 +3112,46 @@ function type(expr: BoxedFunction): Type {
         );
         if (broadcastingOps.length > 0) {
           // The wrapper below assumes `sigResult` is the SCALAR per-element
-          // result, and unwraps one rank off it before re-shaping. Two cases
-          // break that assumption — `sigResult` is already the WHOLE broadcast
-          // result — and both produced the same mixed encoding, a rank-2
+          // result, and unwraps one rank off it before re-shaping. ONE case
+          // breaks that assumption — `sigResult` is already the WHOLE
+          // broadcast result — producing a mixed encoding, a rank-2
           // `list<vector<E^2>^(2x2)>` where the value is a plain
           // `matrix<E^(2x2)>` (rank 1 round-tripped by luck, which is why this
           // only ever showed at rank ≥ 2):
           //
-          //  (a) An ALLOWLISTED handler that owns its own collection typing
-          //      (`deferToHandler`): `Negate` passes `x.type` through, so
-          //      `Negate([[1,2],[3,4]])` IS the operand's matrix. The gate
-          //      already existed but only dropped the `isFixedShapeCollection`
-          //      disjunct, which covers a matrix-TYPED symbol (`-M → matrix`)
-          //      and misses a matrix LITERAL — that one still entered
-          //      `broadcastingOps` via `isFiniteIndexedCollection` and got
-          //      re-wrapped.
-          //  (b) D10 (§4.4) — the solver bound the variable to the FULL actual
-          //      at a bare-variable echo, so a polytype `Chop`/`Conjugate`
-          //      result IS the collection. Same guard the value route applies
-          //      at the function-literal site below.
+          //  An ALLOWLISTED handler that owns its own collection typing
+          //  (`deferToHandler`): `Negate` passes `x.type` through, so
+          //  `Negate([[1,2],[3,4]])` IS the operand's matrix. The gate
+          //  already existed but only dropped the `isFixedShapeCollection`
+          //  disjunct, which covers a matrix-TYPED symbol (`-M → matrix`)
+          //  and misses a matrix LITERAL — that one still entered
+          //  `broadcastingOps` via `isFiniteIndexedCollection` and got
+          //  re-wrapped.
           //
-          // What keeps a `sigResult` ON the wrapper path differs per arm,
-          // because there the wrapper still ADDS information rather than
-          // mangling it:
-          //  - Arm (a): a SHAPELESS collection (`staticCollectionDims` is
-          //    `null`) — this conjunct decides alone (a union is never a
-          //    `kind: 'list'` object, so it is shapeless too): the
-          //    `indexed_collection<integer>` of `-Range(1,5)` is upgraded by
-          //    the wrapper to the definite `list<integer>`, and `Add(S, 1)`'s
-          //    union is the widen artifact the wrapper repairs. Note this arm
-          //    is `Negate`-only today: `Add`/`Multiply` are diverted by
-          //    `skipBroadcastForVectorOps` before arm 1 ever sees a
-          //    shape-bearing operand. Adding a NON-unary operator to the
-          //    allowlist requires the same rank-dominance reasoning as
-          //    arm (b).
-          //  - Arm (b): the echo must be PURE — `sigResult` structurally
-          //    equal to the echoed operand's own type. That excludes a JOINED
-          //    solution (`Remainder(M, 7)`: `T` widens to
-          //    `matrix | finite_integer`, ≠ the operand) while admitting a
-          //    genuine union-typed echo verbatim, matching the value route.
-          //    And the echoed operand must DOMINATE the broadcast shape: with
-          //    a second broadcasting operand of higher (or unknown) rank the
-          //    runtime result is the broadcast of ALL operands, not the echo
-          //    (`f([10,20], M22)` evaluates to a matrix), so the wrapper's
-          //    sound rank-mismatch answer stands.
-          // Ground non-allowlisted operators (`Sin`, `Sqrt`) have neither an
-          // echo nor a collection `sigResult` and fall through unchanged.
+          // What keeps a `sigResult` ON the wrapper path is a SHAPELESS
+          // collection (`staticCollectionDims` is `null`) — this conjunct
+          // decides alone (a union is never a `kind: 'list'` object, so it is
+          // shapeless too): the `indexed_collection<integer>` of
+          // `-Range(1,5)` is upgraded by the wrapper to the definite
+          // `list<integer>`, and `Add(S, 1)`'s union is the widen artifact the
+          // wrapper repairs. Note this arm is `Negate`-only today:
+          // `Add`/`Multiply` are diverted by `skipBroadcastForVectorOps`
+          // before arm 1 ever sees a shape-bearing operand.
+          //
+          // A POLYTYPE arm needs no second case any more (D10, re-ruled
+          // 2026-08-04): the solver binds a lift-admitted operand's ELEMENT
+          // type, so a `Chop`/`Conjugate` echo instantiates to the per-element
+          // result and the wrapper below re-lifts it — the answer the retired
+          // `liftedEchoPositions` short-circuit used to hand back verbatim,
+          // and the correct one for a variable-MENTIONING result too. Ground
+          // non-allowlisted operators (`Sin`, `Sqrt`) have neither an echo nor
+          // a collection `sigResult` and fall through unchanged.
           if (
             deferToHandler &&
             isSubtype(sigResult, 'collection') &&
             staticCollectionDims(sigResult) !== null
           )
             return maybeAbsorb(sigResult);
-          if (!deferToHandler) {
-            const echoed = liftedEchoPositions(resolved, expr.ops, {
-              threadable: def.broadcastable,
-              stripMissing: (i) => def.stripsMissingAt(i),
-              lazy: def.lazy,
-            });
-            if (echoed.size > 0) {
-              const sigStr = typeToString(sigResult);
-              const echoIdx = expr.ops.findIndex(
-                (x, i) =>
-                  echoed.has(i) &&
-                  broadcastingOps.includes(x) &&
-                  typeToString(x.type.type) === sigStr
-              );
-              if (echoIdx >= 0) {
-                const eDims = staticCollectionDims(expr.ops[echoIdx].type.type);
-                const others = broadcastingOps.filter(
-                  (x) => x !== expr.ops[echoIdx]
-                );
-                const dominant =
-                  others.length === 0 ||
-                  (eDims !== null &&
-                    others.every((x) => {
-                      const d = staticCollectionDims(x.type.type);
-                      return d !== null && d.length <= eDims.length;
-                    }));
-                if (dominant) return maybeAbsorb(sigResult);
-              }
-            }
-          }
 
           // Rank/shape-aware lift (§D6.1): mirror the operands'
           // statically-provable structure — `Sqrt(M)` with `M: matrix<2x2>`
@@ -3245,19 +3221,15 @@ function type(expr: BoxedFunction): Type {
         return 'any';
       // The TWIN of the value-definition arm below (generic-function-literals
       // design §2.5). A lambda operator definition can now carry a DECLARED
-      // POLYTYPE (a generic function literal), so this arm needs the same two
-      // pieces the value route already has:
-      //
-      //  1/ Instantiate the arm at the LAMBDA's own `threadable` reading.
-      //     `def.broadcastable` is now DERIVED from `paramsAreScalar` for a
-      //     bare-assigned lambda (and stays false on other lambda routes),
-      //     but this arm is only reached under the `paramsAreScalar(def)`
-      //     guard above — which is precisely the statement that the runtime
-      //     broadcasts here — so the D10 lift is admitted unconditionally,
-      //     exactly as `paramsAreScalar(sig)` does on the value route. A
-      //     ground signature yields `undefined` and keeps `sigResult`
-      //     untouched.
-      //  2/ The D10 echo short-circuit, just below.
+      // POLYTYPE (a generic function literal), so this arm instantiates the
+      // arm at the LAMBDA's own `threadable` reading.
+      // `def.broadcastable` is now DERIVED from `paramsAreScalar` for a
+      // bare-assigned lambda (and stays false on other lambda routes), but
+      // this arm is only reached under the `paramsAreScalar(def)` guard above
+      // — which is precisely the statement that the runtime broadcasts here —
+      // so the D10 lift is admitted unconditionally, exactly as
+      // `paramsAreScalar(sig)` does on the value route. A ground signature
+      // yields `undefined` and keeps `sigResult` untouched.
       const lambdaResult =
         instantiatedResultType(resolved, expr.ops, { threadable: true }) ??
         sigResult;
@@ -3281,41 +3253,14 @@ function type(expr: BoxedFunction): Type {
             isFixedShapeCollection(x)
         );
         if (mapped.length > 0) {
-          // D10 (§4.4) — the lift already bound the FULL actual to a
-          // bare-variable result, so `lambdaResult` IS the collection:
-          // wrapping it again would type `f([1,2,3])` under
-          // `forall T. (T) -> T` as `list<vector<…^3>>` instead of the
-          // operand's own `vector<…^3>`. The value route's guard, mirrored —
-          // including the builtin arm's PURE-ECHO and RANK-DOMINANCE tests:
-          // the echo must be structurally the whole result, and the echoed
-          // operand must dominate every other broadcasting operand's rank.
-          // Otherwise the runtime broadcasts them ALL and the answer is the
-          // wrapper's (`f([1,2], M22)` under `forall T, U. (T, U) -> T` with
-          // body `x + n` evaluates to a matrix, not the vector `T` echoes).
-          const echoed = liftedEchoPositions(resolved, expr.ops, {
-            threadable: true,
-          });
-          if (echoed.size > 0) {
-            const sigStr = typeToString(lambdaResult);
-            const echoIdx = expr.ops.findIndex(
-              (x, i) =>
-                echoed.has(i) &&
-                mapped.includes(x) &&
-                typeToString(x.type.type) === sigStr
-            );
-            if (echoIdx >= 0) {
-              const eDims = staticCollectionDims(expr.ops[echoIdx].type.type);
-              const others = mapped.filter((x) => x !== expr.ops[echoIdx]);
-              const dominant =
-                others.length === 0 ||
-                (eDims !== null &&
-                  others.every((x) => {
-                    const d = staticCollectionDims(x.type.type);
-                    return d !== null && d.length <= eDims.length;
-                  }));
-              if (dominant) return lambdaResult;
-            }
-          }
+          // D10 (§4.4, re-ruled 2026-08-04): `lambdaResult` is the PER-ELEMENT
+          // result — the solver bound each lift-admitted operand's element
+          // type — so the ordinary wrap below is the whole answer. It
+          // reproduces the retired echo short-circuit on the bare-echo shape
+          // (`f([1,2,3])` under `forall T. (T) -> T` is `vector<…^3>`, since
+          // `T` binds `finite_integer` and the wrap re-adds the operand's
+          // rank) and fixes the variable-MENTIONING shapes the short-circuit
+          // could not reach.
           // A collection-valued per-element result keeps the plain nested
           // lift (`f := x ↦ [x,-x]` over `[1,2]` → `list<vector<2>>`):
           // installing the collection result as the element of a dimensioned
@@ -3399,38 +3344,9 @@ function type(expr: BoxedFunction): Type {
         // Shape-aware (§D6.1), as at the operator-def lambda site above —
         // including the collection-valued-result exception.
         if (mapped.length > 0) {
-          // D10 (§4.4) — the lift already bound the FULL actual to a
-          // bare-variable result, so `sigResult` IS the collection: wrapping it
-          // again would type `f([1,2,3])` under `forall T. (T) -> T` as
-          // `list<vector<…^3>>` instead of the operand's own
-          // `vector<…^3>` (the operator route's answer). Polytype-only: a
-          // ground signature has no echo positions and falls through unchanged.
-          // As at the operator-def lambda site above (and at the builtin arm),
-          // the echo must be PURE and must DOMINATE the broadcast rank: a
-          // non-echoed operand of higher rank makes the runtime result the
-          // broadcast of ALL of them, so the wrapper's answer stands.
-          const echoed = liftedEchoPositions(sig, expr.ops, { threadable });
-          if (echoed.size > 0) {
-            const sigStr = typeToString(sigResult);
-            const echoIdx = expr.ops.findIndex(
-              (x, i) =>
-                echoed.has(i) &&
-                mapped.includes(x) &&
-                typeToString(x.type.type) === sigStr
-            );
-            if (echoIdx >= 0) {
-              const eDims = staticCollectionDims(expr.ops[echoIdx].type.type);
-              const others = mapped.filter((x) => x !== expr.ops[echoIdx]);
-              const dominant =
-                others.length === 0 ||
-                (eDims !== null &&
-                  others.every((x) => {
-                    const d = staticCollectionDims(x.type.type);
-                    return d !== null && d.length <= eDims.length;
-                  }));
-              if (dominant) return sigResult;
-            }
-          }
+          // D10 (§4.4, re-ruled 2026-08-04): as at the operator-def lambda
+          // site above, `sigResult` is already the PER-ELEMENT result, so the
+          // ordinary wrap below is the whole answer on this route too.
           const collectionValued =
             isSubtype(sigResult, 'collection') ||
             (typeof sigResult !== 'string' &&
@@ -3524,7 +3440,18 @@ function applyFunctionLiteral(
       while (true) {
         const { done, value: zipped } = items.next();
         if (done) break;
-        results.push(apply(value, zipped, options));
+        // A broadcast maps to the scalar LEAVES: when a zipped row is itself
+        // a broadcast-admitted collection (a rank≥2 source), re-dispatch
+        // through the operator name so this arm applies again, exactly as the
+        // operator-def routes do (steps 2/2b/4b re-enter `_computeValue` via
+        // `_fn(operator, …).evaluate()`). Applying the literal to the row
+        // directly would bind the whole row to a scalar parameter and stop at
+        // rank 1, disagreeing with the D10 leaf-rank typing.
+        results.push(
+          zipped.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))
+            ? expr.engine._fn(expr.operator, zipped).evaluate(options)
+            : apply(value, zipped, options)
+        );
       }
       return expr.engine._fn('List', results);
     }

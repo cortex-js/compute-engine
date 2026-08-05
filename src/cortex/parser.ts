@@ -4,7 +4,11 @@ import {
   isLiteralParamName,
 } from '../math-json/symbols.js';
 import { Origin } from '../common/debug.js';
-import { parseType, parseTypePrefix } from '../common/type/parse.js';
+import {
+  parseType,
+  parseTypeParameterClause,
+  parseTypePrefix,
+} from '../common/type/parse.js';
 import { EFFECT_LABELS } from '../common/type/effects.js';
 import type { TypeResolver } from '../common/type/types.js';
 import {
@@ -92,6 +96,15 @@ type TypeParamClause = {
 /** A type-grammar identifier (the clause's variable names live in the type
  * namespace, not the Cortex binding namespace). */
 const TYPE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*/;
+
+/** Does this OPERATOR token, following `type Name`, head a `type` statement?
+ * `=` opens the body; `<` opens a type-parameter clause. `<>` is listed too
+ * because the lexer maximal-munches a run of operator characters, so the empty
+ * clause of `type alias Pair<> = …` arrives as ONE token — and it must still be
+ * recognized, diagnosed and recovered as a type statement. */
+function isTypeStatementHead(text: string): boolean {
+  return text === '=' || text === '<' || text === '<>';
+}
 
 //
 // The Cortex parser turns a `Token[]` (from the Cortex `Lexer`) into a MathJSON
@@ -222,6 +235,14 @@ export class Parser {
    * top-level redeclaration is the legitimate statement-replace flow
    * (re-running a notebook cell). */
   private blockDepth = 0;
+
+  /** Set by {@link recoverAtStatementBoundary}: the statement that just
+   * returned `null` has ALREADY emitted its diagnostic and resynchronized to
+   * the next statement boundary. The statement loops (`parseProgram`,
+   * `parseBlock`) check and clear it: they skip their own recovery (which
+   * would swallow the next statement) and carry on with the following
+   * statement instead of bailing out of the block. */
+  private statementRecovered = false;
 
   /** While a `function f<T>(…)` definition HEAD is being parsed, the names its
    * type-parameter clause quantifies (G7 — the clause scopes over the head
@@ -384,6 +405,7 @@ export class Parser {
       const startPos = this.pos;
       const token = this.current;
       const diagBefore = this.diagnostics.length;
+      this.statementRecovered = false;
       const expr = this.parseStatement();
       if (expr !== null) {
         exprs.push(expr);
@@ -392,7 +414,10 @@ export class Parser {
         // If the failed parse already emitted a diagnostic, don't double-report.
         if (this.diagnostics.length === diagBefore)
           this.reportUnexpected(token);
-        this.recoverAtTopLevel();
+        // …and if it already resynchronized, don't recover a second time: that
+        // would swallow the next statement.
+        if (this.statementRecovered) this.statementRecovered = false;
+        else this.recoverAtTopLevel();
       }
       // Guard against a non-advancing iteration.
       if (this.pos === startPos) this.advance();
@@ -497,10 +522,18 @@ export class Parser {
       if (this.check('CLOSE_BRACE') || this.check('EOF')) break;
       const startPos = this.pos;
       const diagBefore = this.diagnostics.length;
+      this.statementRecovered = false;
       const stmt = this.parseStatement();
       if (stmt === null) {
         if (this.diagnostics.length === diagBefore)
           this.reportUnexpected(this.current);
+        // A statement that already resynchronized to the next boundary only
+        // costs its own statement: keep parsing the rest of the block.
+        if (this.statementRecovered) {
+          this.statementRecovered = false;
+          if (this.pos === startPos) this.advance();
+          continue;
+        }
         this.recoverInBracket();
         break;
       }
@@ -702,9 +735,9 @@ export class Parser {
 
   /** Parse the optional `: Type` and `= value` tail of a declaration and build
    * the engine `Declare` node (type positional; `value`/`constant` in a
-   * trailing attributes `Dictionary`). On a malformed type, returns `null` (the
-   * type subparse has already recovered). The current token is the one right
-   * after the declared name (`:`, `=`, or a separator). With `allowType:
+   * trailing attributes `Dictionary`). On a malformed type, returns `null`
+   * after recovering at the statement boundary. The current token is the one
+   * right after the declared name (`:`, `=`, or a separator). With `allowType:
    * false` a `:` annotation is a diagnostic; with `requireValue: true` a
    * missing `= value` is one (both used by destructuring declarations). */
   private finishDeclaration(
@@ -726,7 +759,12 @@ export class Parser {
         return null;
       }
       const t = this.parseTypeAnnotation();
-      if (t === null) return null;
+      if (t === null) {
+        // Diagnosed, cursor still at the error: skip the rest of the
+        // declaration (ONCE) so the next statement still parses.
+        this.recoverAtStatementBoundary();
+        return null;
+      }
       typeNode = t.node;
       end = t.end;
     }
@@ -826,8 +864,11 @@ export class Parser {
   // nominal type literally named `alias` — legal, discouraged, pinned in a
   // test.
   //
-  // `type name<…> = …` (a generic alias) is reserved syntax: recognized, then
-  // rejected with a `type-variables-unsupported` diagnostic. Both forms.
+  // `type alias Name<T> = …` declares a GENERIC alias: the clause rides the
+  // attributes bag as its source TEXT (`typeParams -> "T, U: number"`), and
+  // the body parses with those names in scope as type parameters. The BARE
+  // (nominal) form with a clause keeps its `type-variables-unsupported`
+  // diagnostic — parameterized nominal types are out of scope.
   //
 
   /** Does the current `type` SYMBOL token head a `type` statement? Only the
@@ -843,7 +884,7 @@ export class Parser {
     const name = this.peek(1);
     if (name.type !== 'SYMBOL') return false;
     const next = this.peek(2);
-    return next.type === 'OPERATOR' && (next.text === '=' || next.text === '<');
+    return next.type === 'OPERATOR' && isTypeStatementHead(next.text);
   }
 
   /** Is the token `n` ahead of the current one the `alias` word of a
@@ -853,7 +894,7 @@ export class Parser {
     if (alias.type !== 'SYMBOL' || alias.text !== 'alias') return false;
     if (this.peek(n + 1).type !== 'SYMBOL') return false;
     const next = this.peek(n + 2);
-    return next.type === 'OPERATOR' && (next.text === '=' || next.text === '<');
+    return next.type === 'OPERATOR' && isTypeStatementHead(next.text);
   }
 
   private parseTypeStatement(): MathJsonExpression | null {
@@ -894,23 +935,92 @@ export class Parser {
       if (!wasKnown) this.knownTypeNames.delete(name);
     };
 
-    // The reserved generic-alias slot.
-    if (this.check('OPERATOR') && this.current.text === '<') {
-      this.error(
-        ['type-variables-unsupported', name],
-        this.current.start,
-        this.current.end
-      );
-      unseed();
-      // Return `null`: `parseProgram`/`parseBlock` recover at the next
-      // statement boundary, so the rest of the program still parses.
-      return null;
+    // The type-parameter clause of a GENERIC alias (`type alias Pair<T> = …`).
+    // Only the ALIAS form takes one: a parameterized NOMINAL type has no
+    // meaning without variance and identity rules, and stays rejected.
+    let clauseText: string | undefined;
+    let clauseDecls: readonly TypeParamDecl[] = [];
+    if (this.check('OPERATOR') && this.current.text.startsWith('<')) {
+      if (!isAlias) {
+        this.error(
+          ['type-variables-unsupported', name],
+          this.current.start,
+          this.current.end
+        );
+        unseed();
+        // Return `null`: `parseProgram`/`parseBlock` recover at the next
+        // statement boundary, so the rest of the program still parses.
+        return null;
+      }
+      const clauseStart = this.current.start;
+      const diagBefore = this.diagnostics.length;
+      const clause = this.parseTypeParamClause(name);
+      // `undefined` is unreachable (the `<` was just checked); `null` and an
+      // EMPTY clause (`<>`, already diagnosed) declare nothing.
+      if (clause === null || clause === undefined || clause.decls.length === 0) {
+        unseed();
+        this.recoverAtStatementBoundary();
+        return null;
+      }
+      // The clause TEXT rides the lowering (A1): the engine re-parses it with
+      // the shared clause parser on the `DeclareType` route. Sliced from the
+      // source between the angle brackets, so the author's spelling of a bound
+      // (`T: list<integer>`) survives verbatim.
+      // Trimmed for the lowering, but the shared parser reports positions
+      // relative to the TRIMMED text, so the leading-whitespace it dropped has
+      // to be added back when a diagnostic is placed (`Pair< number, T>`).
+      const rawText = this.source.slice(clauseStart + 1, clause.end - 1);
+      const text = rawText.trim();
+      const textOffset = rawText.length - rawText.trimStart().length;
+
+      // The scanner above is the SOURCE-RANGE half of the clause reader; the
+      // shared parser in the type layer is the authority on what a clause
+      // MEANS (reserved names, duplicates, ground bounds). Run it here so the
+      // statement is rejected at parse time rather than lowering text the
+      // engine will refuse — and so the two readers cannot drift. A shape the
+      // scanner already diagnosed (a duplicate name, which it drops) is not
+      // re-reported.
+      const checked = parseTypeParameterClause(text, this.typeResolver);
+      if ('error' in checked) {
+        if (this.diagnostics.length === diagBefore)
+          this.error(
+            ['type-annotation-error', checked.error.message],
+            clauseStart + 1 + textOffset + checked.error.position,
+            Math.min(
+              clauseStart + 2 + textOffset + checked.error.position,
+              this.source.length
+            )
+          );
+        unseed();
+        this.recoverAtStatementBoundary();
+        return null;
+      }
+
+      clauseDecls = clause.decls;
+      clauseText = text;
     }
+
+    // The clause's names are in scope for the BODY (and only for it): `tuple<T,
+    // T>` must read `T` as a type parameter, not report an unknown type. Only
+    // the names this clause ADDED are removed afterwards, so a parameter
+    // shadowing a user type leaves that type known.
+    const seededParams = clauseDecls.filter(
+      (d) => !this.knownTypeNames.has(d.name)
+    );
+    for (const d of clauseDecls) this.knownTypeNames.add(d.name);
+    const unseedParams = (): void => {
+      for (const d of seededParams) this.knownTypeNames.delete(d.name);
+    };
 
     const eq = this.advance(); // '='
     const body = this.parseTypeBody(eq.end);
+    unseedParams();
     if (body === null) {
       unseed();
+      // The type subparse diagnosed but did not move: skip the rest of this
+      // statement (ONCE — see `recoverAtStatementBoundary`) so the next one
+      // still parses.
+      this.recoverAtStatementBoundary();
       return null;
     }
 
@@ -922,23 +1032,24 @@ export class Parser {
       body.node,
     ];
     // Only the `alias` form carries attributes: the bare form is nominal, and
-    // nominal is `DeclareType`'s default.
-    if (isAlias)
-      parts.push(
-        this.wrap(
-          [
-            'Dictionary',
-            this.kvPair(
-              'alias',
-              this.wrap({ sym: 'True' }, start, end),
-              start,
-              end
-            ),
-          ] as MathJsonExpression[],
-          start,
-          end
-        )
-      );
+    // nominal is `DeclareType`'s default. A GENERIC alias adds its clause TEXT
+    // as a second entry (A1) — `typeParams` never appears without `alias`.
+    if (isAlias) {
+      const entries: MathJsonExpression[] = [
+        'Dictionary',
+        this.kvPair('alias', this.wrap({ sym: 'True' }, start, end), start, end),
+      ];
+      if (clauseText !== undefined)
+        entries.push(
+          this.kvPair(
+            'typeParams',
+            this.wrap({ str: clauseText }, start, end),
+            start,
+            end
+          )
+        );
+      parts.push(this.wrap(entries, start, end));
+    }
     return this.wrap(parts, start, end);
   }
 
@@ -1579,7 +1690,13 @@ export class Parser {
     // with any explicit guard by the caller.
     if (this.check('OPERATOR') && this.current.text === ':') {
       const annotation = this.parseTypeAnnotation();
-      if (annotation !== null) {
+      if (annotation === null) {
+        // Diagnosed; the cursor is still at the malformed type. A pattern
+        // lives in a comma-separated list (or directly before a `=>`), so
+        // resync to that element boundary and let the rest of the patterns —
+        // and the arm's body — parse. The binding is kept, unguarded.
+        this.recoverInBracket(true);
+      } else {
         const typeText = stringValue(annotation.node) ?? '';
         // The guard below lowers to `Element(name, <type name>)`, which only
         // resolves SIMPLE NAMED types. A compound annotation (`!error`,
@@ -2425,7 +2542,13 @@ export class Parser {
                 annotation.end
               )
             );
-          else params.push(symNode);
+          else {
+            // Diagnosed; the cursor is still at the malformed type. Resync to
+            // the next `,` or the `)` so the remaining parameters parse; the
+            // parameter itself survives untyped.
+            this.recoverInBracket(true);
+            params.push(symNode);
+          }
           quantified?.push((hits?.size ?? 0) > 0);
         } else {
           params.push(symNode);
@@ -2596,7 +2719,10 @@ export class Parser {
    * type is parsed by the engine's `common/type` prefix subparser, then parsing
    * resumes in Cortex just past the type. Returns the held `{str}` type node and
    * its end offset, or `null` on a malformed type (after emitting a
-   * `type-annotation-error` diagnostic and recovering at top level).
+   * `type-annotation-error` diagnostic). On `null` the cursor is left AT the
+   * offending token: the caller resynchronizes, since the right resync unit
+   * depends on the context (a statement boundary for a declaration, the next
+   * `,`/closer for a parameter or pattern list).
    */
   private parseTypeAnnotation(): {
     node: MathJsonExpression;
@@ -2612,7 +2738,8 @@ export class Parser {
    * parser's known-type-name resolver), then parsing resumes in Cortex just
    * past the type. Returns the held `{str}` type node and its end offset, or
    * `null` on a malformed type (after emitting a `type-annotation-error`
-   * diagnostic and recovering at top level). */
+   * diagnostic). Recovery is the CALLER's: on `null` the cursor is left at the
+   * offending token, un-advanced (see {@link parseTypeAnnotation}). */
   private parseTypeBody(typeSourceStart: number): {
     node: MathJsonExpression;
     end: number;
@@ -2643,7 +2770,6 @@ export class Parser {
         }
       }
       this.error(['type-annotation-error', message], errStart, errEnd);
-      this.recoverAtTopLevel();
       return null;
     }
 
@@ -2679,6 +2805,26 @@ export class Parser {
       this.advance();
     }
     if (this.current.type === 'SEMICOLON') this.advance();
+  }
+
+  /** Resynchronize at the end of a malformed statement whose diagnostic has
+   * already been emitted, and record that fact (see {@link
+   * statementRecovered}) so the statement loop does not recover a SECOND time
+   * — which would skip the statement that follows. Unlike {@link
+   * recoverAtTopLevel} the current token is not consumed unconditionally (the
+   * cursor may already be past the error), and a `}` stops the skip so a
+   * statement inside a block never eats the block's closing brace. */
+  private recoverAtStatementBoundary(): void {
+    while (
+      this.current.type !== 'EOF' &&
+      this.current.type !== 'SEMICOLON' &&
+      this.current.type !== 'CLOSE_BRACE' &&
+      !this.current.precededByLinebreak
+    ) {
+      this.advance();
+    }
+    if (this.current.type === 'SEMICOLON') this.advance();
+    this.statementRecovered = true;
   }
 
   /**
@@ -3633,6 +3779,11 @@ export class Parser {
               annotation.end
             );
             typed = true;
+          } else {
+            // Diagnosed; the cursor is still at the malformed type. Resync to
+            // the next `,` or the closer so the rest of the list parses; the
+            // element survives as the bare symbol.
+            this.recoverInBracket(true);
           }
         }
         values.push(element);
@@ -3658,9 +3809,20 @@ export class Parser {
   }
 
   /** Within a bracketed construct, skip to (but do not consume) the matching
-   * closer, tracking nesting. */
-  private recoverInBracket(): void {
+   * closer, tracking nesting. With `stopAtElementBoundary`, a `,` or a `=>`
+   * arrow at the outer nesting level also stops the skip: that is the resync
+   * unit for ONE malformed element of a comma-separated list (a parameter
+   * annotation, a match pattern), leaving the rest of the list to parse. */
+  private recoverInBracket(stopAtElementBoundary = false): void {
     let depth = 0;
+    // Both `stopAtElementBoundary` callers resync from a malformed TYPE
+    // annotation, where `<`/`>` are the generic-application brackets, never
+    // comparisons. Track their nesting too: without it, `Pair<integer, string`
+    // resyncs at the comma INSIDE the type arguments and the caller mints a
+    // bogus element (`string`) out of the type's own argument list. Only a
+    // token that is a PURE RUN of `<` or `>` is a bracket (`<=`, `>=`, `=>`,
+    // `->` are not); a munched `>>` closes two levels.
+    let angle = 0;
     while (this.current.type !== 'EOF') {
       const t = this.current.type;
       if (t === 'OPEN_PAREN' || t === 'OPEN_BRACKET' || t === 'OPEN_BRACE') {
@@ -3672,6 +3834,18 @@ export class Parser {
       ) {
         if (depth === 0) return;
         depth -= 1;
+      } else if (
+        stopAtElementBoundary &&
+        depth === 0 &&
+        t === 'OPERATOR' &&
+        /^(<+|>+)$/.test(this.current.text)
+      ) {
+        const text = this.current.text;
+        if (text[0] === '<') angle += text.length;
+        else angle = Math.max(0, angle - text.length);
+      } else if (stopAtElementBoundary && depth === 0 && angle === 0) {
+        if (t === 'COMMA') return;
+        if (t === 'OPERATOR' && this.current.text === '=>') return;
       }
       this.advance();
     }

@@ -235,13 +235,15 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
     );
   });
 
-  test('the D10 echo short-circuit requires RANK DOMINANCE over the other broadcasting operands', () => {
-    // With a SECOND broadcasting operand of higher rank, the runtime result is
-    // the broadcast of ALL operands, not the echo: `pg([10,20], M22)`
-    // evaluates to a matrix. Returning the echoed vector type verbatim would
-    // make the declared type fail to contain the value; the wrapper's sound
-    // rank-mismatch answer stands. In the dominant order the echo IS the
-    // result and returns verbatim. Both orders pin evaluated ⊆ declared.
+  test('a polytype broadcastable takes the WRAPPER answer on mixed ranks', () => {
+    // D10 RE-RULED (2026-08-04): the echo short-circuit that used to hand the
+    // dominant operand's type back verbatim is retired — a lift-admitted
+    // operand now binds its ELEMENT, so the wrapper builds every answer. With
+    // operands of DIFFERENT ranks the wrapper declines to invent a shape and
+    // answers the plain `list<E>`, which is exactly what the GROUND
+    // broadcastable answers for the same call (§4.5 parity). Less precise
+    // than the retired short-circuit, still sound: both orders pin
+    // evaluated ⊆ declared.
     const eng = new ComputeEngine();
     eng.declare('pg57', {
       signature: 'forall T: number, U: number. (T, U) -> T',
@@ -252,17 +254,24 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
     expect(low.type.toString()).toBe('list<finite_integer>');
     expect(low.evaluate().type.matches(low.type.toString())).toBe(true);
     const dom = eng.box(['pg57', M22, ['List', 10, 20]]);
-    expect(dom.type.toString()).toBe('matrix<finite_integer^(2x2)>');
+    expect(dom.type.toString()).toBe('list<finite_integer>');
     expect(dom.evaluate().type.matches(dom.type.toString())).toBe(true);
+    // The ground counterpart, for the parity claim above.
+    eng.declare('gg57', {
+      signature: '(number, number) -> number',
+      broadcastable: true,
+      evaluate: (ops) => ops[0],
+    } as any);
+    expect(eng.box(['gg57', M22, ['List', 10, 20]]).type.toString()).toBe(
+      'list<number>'
+    );
   });
 
-  test('a genuine UNION-typed echo returns verbatim (pure echo, unary)', () => {
-    // The echo test is PURE-echo equality, not shape conjuncts: a declared
-    // `list<integer> | matrix<integer>` operand at `forall T. (T) -> T` binds
-    // `T` to exactly that union, and the honest result IS the union — the
-    // wrapper would mangle it. (`Remainder(M, 7)` stays on the wrapper: its
-    // solution is a JOIN over the scalar operand, not equal to the operand's
-    // type.)
+  test('a UNION-typed operand also takes the wrapper answer', () => {
+    // Same re-ruling: a declared `list<integer> | matrix<integer>` operand at
+    // `forall T. (T) -> T` binds `T` to the union's ELEMENT (`integer` on
+    // both arms), and the wrapper — unable to prove a rank across the arms —
+    // answers `list<integer>`. Again the ground reading, and again sound.
     const eng = new ComputeEngine();
     eng.declare('lu57', 'list<integer> | matrix<integer>');
     eng.declare('echoU57', {
@@ -270,11 +279,14 @@ describe('BROADCAST ARM 1 — a handler that owns its collection typing is not r
       broadcastable: true,
       evaluate: (ops) => ops[0],
     } as any);
-    expect(eng.box(['echoU57', 'lu57']).type.toString()).toBe(
-      'list<integer> | matrix<integer>'
+    const e = eng.box(['echoU57', 'lu57']);
+    expect(e.type.toString()).toBe('list<integer>');
+    expect(e.evaluate().type.matches(e.type.toString())).toBe(true);
+    // `Remainder(M, 7)` no longer widens to a union at all: element-binding
+    // joins the matrix LEAF with the scalar, so the wrapper gives the clean
+    // matrix (was `list<finite_integer | vector<finite_integer^2>^(2x2)>`).
+    expect(ce.box(['Remainder', M22, 7]).type.toString()).toBe(
+      'matrix<finite_integer^(2x2)>'
     );
-    expect(
-      ce.box(['Remainder', M22, 7]).type.toString()
-    ).toBe('list<finite_integer | vector<finite_integer^2>^(2x2)>');
   });
 });

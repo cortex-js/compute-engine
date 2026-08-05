@@ -136,9 +136,11 @@ export function solveArm(
         );
       },
       lifted: (i) => {
-        // D10: a lift-admitted operand at a bare-variable pattern binds the
-        // FULL actual; admission stays checked at the scalar base by the lift
-        // gate itself.
+        // D10 (re-ruled 2026-08-04): a lift-admitted operand at a
+        // bare-variable pattern binds its ELEMENT type — the runtime maps
+        // here, so the variable denotes one element and the call site's
+        // ordinary broadcast wrap re-lifts the instantiated result. Admission
+        // stays checked at the scalar base by the lift gate itself.
         const op = ops[i];
         return !!ctx?.threadable && !!op && couldBeCollectionOperand(op);
       },
@@ -146,46 +148,15 @@ export function solveArm(
   );
 }
 
-/**
- * The operand positions whose FULL actual the D10 lift already put into the
- * arm's result: a lift-admitted operand (same predicate as `solveArm`'s
- * `lifted` policy) sitting at a BARE-VARIABLE parameter whose variable IS the
- * whole result.
- *
- * At such a position the solved result type IS the collection actual — the
- * broadcast/lift wrapper at the call site must therefore not lift it a SECOND
- * time (`f([1,2,3])` under `forall T. (T) -> T` is `vector<…^3>`, never
- * `list<vector<…^3>>`). Empty for a ground signature, so no non-generic path
- * changes.
- *
- * The result must be the BARE variable, not merely mention it: under
- * `forall T. (T) -> tuple<T>` the arm's result is a tuple WRAPPING the
- * collection, so the caller's unwrap would drop the broadcast shape the value
- * route builds. Only the true echo shape short-circuits.
- */
-export function liftedEchoPositions(
-  arm: Readonly<Type> | undefined,
-  ops: ReadonlyArray<Expression>,
-  ctx?: ArmInferenceContext
-): ReadonlySet<number> {
-  const poly = polytypeArm(arm);
-  if (poly === undefined || !ctx?.threadable || ctx.lazy)
-    return EMPTY_POSITIONS;
-  const echoed = poly.result;
-  if (typeof echoed !== 'object' || echoed.kind !== 'variable')
-    return EMPTY_POSITIONS;
-
-  const result = new Set<number>();
-  parameterPositions(poly, ops.length).forEach((p, i) => {
-    if (p === undefined || typeof p === 'string') return;
-    if (p.kind !== 'variable' || p.name !== echoed.name) return;
-    const op = ops[i];
-    if (op && couldBeCollectionOperand(op)) result.add(i);
-  });
-  return result;
-}
-
-const EMPTY_POSITIONS: ReadonlySet<number> = new Set<number>();
+// RETIRED 2026-08-04 (D10 re-ruling): `liftedEchoPositions`. While a
+// lift-admitted operand bound the WHOLE actual, a bare-variable result type
+// already WAS the collection and the call site had to skip its broadcast wrap.
+// Element-binding removes the special case: the instantiated result is now the
+// PER-ELEMENT type at every lift-admitted position, so the ordinary wrap
+// produces the right answer for every result shape — the bare echo (unwrap ∘
+// whole-bind ≡ wrap ∘ element-bind) and the variable-MENTIONING results the
+// short-circuit could never handle (`(T) -> tuple<T, T>` typed one rank too
+// high).
 
 /**
  * `param` with the solved bindings applied, or `undefined` when it is STILL

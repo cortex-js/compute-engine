@@ -16,7 +16,10 @@
  * differentiate symbolically falls back to a forward finite difference.
  */
 
-import { checkDeadline } from '../common/interruptible.js';
+import {
+  checkDeadline,
+  isTimeoutCancellation,
+} from '../common/interruptible.js';
 
 import type { Expression, IComputeEngine } from './global-types.js';
 import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
@@ -312,11 +315,23 @@ function prepareUnit(
 const FALSE_ = (ce: IComputeEngine) => ce.symbol('False');
 const TRUE_ = (ce: IComputeEngine) => ce.symbol('True');
 
+/**
+ * Which phase of the lowering a deadline expired in, reported in band as the
+ * `phase` entry of a timed-out record.
+ *
+ *  - `'setup'`: operand/data evaluation, differentiation, model compilation —
+ *    no solve was ever attempted, so there are no fitted values.
+ *  - `'solve'`: the starting-point evaluation or the LM iteration, so the
+ *    record carries genuine best-so-far parameters.
+ */
+type FitPhase = 'setup' | 'solve';
+
 /** Build the `Dictionary` result record. */
 function buildRecord(
   ce: IComputeEngine,
   paramNames: string[],
-  result: LMResult
+  result: LMResult,
+  phase: FitPhase = 'solve'
 ): Expression {
   const paramEntries = paramNames.map((name, j) =>
     ce.tuple(ce.string(name), ce.number(result.theta[j]))
@@ -328,11 +343,53 @@ function buildRecord(
     ce.tuple(ce.string('residualNorm'), ce.number(result.residualNorm)),
     ce.tuple(ce.string('iterations'), ce.number(result.iterations)),
   ];
-  // Present ONLY when the solve was cut short by an evaluation deadline
-  // (best-so-far result, Tycho item 118) — the normal-path record is
-  // unchanged, so existing consumers see no new key.
-  if (result.timedOut) entries.push(ce.tuple(ce.string('timedOut'), TRUE_(ce)));
+  // Present ONLY when the call was cut short by an evaluation deadline
+  // (Tycho item 118 + addendum) — the normal-path record is unchanged, so
+  // existing consumers see no new key. `phase` says whether anything was
+  // fitted at all: `"solve"` carries best-so-far parameters, `"setup"` means
+  // the budget expired before the solver ran (empty/starting parameters,
+  // `iterations: 0`, NaN residual norm).
+  if (result.timedOut) {
+    entries.push(ce.tuple(ce.string('timedOut'), TRUE_(ce)));
+    entries.push(ce.tuple(ce.string('phase'), ce.string(phase)));
+  }
   return ce.function('Dictionary', entries);
+}
+
+/**
+ * Mutable capture shared with the setup-phase deadline net in `findFit`/
+ * `findRoot`: whatever the setup managed to compute before the budget expired,
+ * so the in-band timeout record can carry it honestly.
+ */
+interface SetupContext {
+  /** Parameter specs, once parsed — their starts are the only values we can
+   * honestly report when no solve ran. Absent if the deadline fired first. */
+  specs?: ParamSpec[];
+  /** Set once control passes to `solve`, so a timeout escaping from there is
+   * not mislabelled `"setup"`. */
+  phase: FitPhase;
+}
+
+/** In-band record for a deadline that expired during the SETUP phase (Tycho
+ * item 118 addendum): a consumer whose whole budget goes to data evaluation,
+ * differentiation and compilation gets the same record shape as a solve-phase
+ * timeout — `timedOut: True`, `phase: "setup"`, `iterations: 0` — rather than
+ * a bare `CancellationError` it would have to duck-type. */
+function timeoutRecord(ce: IComputeEngine, ctx: SetupContext): Expression {
+  const specs = ctx.specs ?? [];
+  return buildRecord(
+    ce,
+    specs.map((s) => s.name),
+    {
+      // The starting point is all that is known: no residual was ever formed.
+      theta: specs.map((s) => clamp(s.start, s.lo, s.hi)),
+      converged: false,
+      residualNorm: NaN,
+      iterations: 0,
+      timedOut: true,
+    },
+    ctx.phase
+  );
 }
 
 /** Assemble the global residual/Jacobian callbacks over all units and run LM. */
@@ -441,12 +498,7 @@ function solve(
       onIteration: () => checkDeadline(ce._deadlineFrame),
     });
   } catch (e) {
-    if (
-      !(e instanceof Error) ||
-      e.name !== 'CancellationError' ||
-      (e as { cause?: unknown }).cause !== 'timeout'
-    )
-      throw e;
+    if (!isTimeoutCancellation(e)) throw e;
     result = {
       theta: theta0.map((v, j) => clamp(v, lo[j], hi[j])),
       converged: false,
@@ -476,10 +528,43 @@ interface FitUnitWithParams extends FitUnit {
 // Public entry points
 //
 
+/**
+ * Run `body` under the deadline net that keeps a timeout IN BAND.
+ *
+ * A timeout raised while the setup is still running — evaluating the data
+ * operand, differentiating the model, compiling it — is converted to the same
+ * record shape a solve-phase timeout produces, tagged `phase: "setup"`. An
+ * interpreted model over a few hundred rows can consume an entire ambient
+ * budget before the solver ever starts, and a caller that only ever sees a
+ * bare `CancellationError` cannot tell that apart from an engine fault.
+ * Solve-phase timeouts are caught deeper (inside `solve`/`levenbergMarquardt`)
+ * and never reach here. Every other throw propagates unchanged.
+ */
+function withSetupDeadline(
+  ce: IComputeEngine,
+  body: (ctx: SetupContext) => Expression | undefined
+): Expression | undefined {
+  const ctx: SetupContext = { phase: 'setup' };
+  try {
+    return body(ctx);
+  } catch (e) {
+    if (!isTimeoutCancellation(e)) throw e;
+    return timeoutRecord(ce, ctx);
+  }
+}
+
 /** `FindFit(data, model, params, vars)`. */
 export function findFit(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  return withSetupDeadline(ce, (ctx) => findFitCore(ce, ops, ctx));
+}
+
+function findFitCore(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  ctx: SetupContext
 ): Expression | undefined {
   if (ops.length < 4) return undefined;
   // The operator is `lazy`, so the operands arrive held and UNBOUND (raw box
@@ -496,6 +581,7 @@ export function findFit(
   if (specs === 'error')
     return ce.error('unexpected-argument', 'FindFit: malformed parameter spec');
   if (!specs) return undefined;
+  ctx.specs = specs;
 
   const varNames = parseVars(varsOp);
   if (!varNames) return undefined;
@@ -546,6 +632,7 @@ export function findFit(
     units.push({ ...unit, paramFresh });
   }
 
+  ctx.phase = 'solve';
   return solve(ce, units, specs);
 }
 
@@ -553,6 +640,14 @@ export function findFit(
 export function findRoot(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  return withSetupDeadline(ce, (ctx) => findRootCore(ce, ops, ctx));
+}
+
+function findRootCore(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  ctx: SetupContext
 ): Expression | undefined {
   if (ops.length < 2) return undefined;
   // See `findFit`: the operands arrive held and unbound, so canonicalize them
@@ -568,6 +663,7 @@ export function findRoot(
       'FindRoot: malformed parameter spec'
     );
   if (!specs) return undefined;
+  ctx.specs = specs;
 
   // Equation(s): a list of them, or a single equation/residual.
   const equations = isFunction(equationsOp, 'List')
@@ -604,5 +700,6 @@ export function findRoot(
     units.push({ ...unit, paramFresh });
   }
 
+  ctx.phase = 'solve';
   return solve(ce, units, specs);
 }

@@ -1,7 +1,12 @@
 import { Complex } from 'complex-esm';
 import { BigDecimal } from '../big-decimal/index.js';
 
-import { Type, TypeResolver, TypeString } from '../common/type/types.js';
+import {
+  Type,
+  TypeParamsOption,
+  TypeResolver,
+  TypeString,
+} from '../common/type/types.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 
 import type { OneOf } from '../common/one-of.js';
@@ -489,7 +494,16 @@ export class ComputeEngine implements IComputeEngine {
   declareType(
     name: string,
     type: BoxedType | Type | TypeString,
-    options?: { alias?: boolean; fromStatement?: boolean; mint?: boolean }
+    options?: {
+      alias?: boolean;
+      fromStatement?: boolean;
+      mint?: boolean;
+      /** A generic type ALIAS's parameter clause
+       * (`{ alias: true, typeParams: ['T'] }`): the body is then parsed with
+       * those names in scope as type VARIABLES, and every use must apply them
+       * (`Pair<integer>`), which expands eagerly into the substituted body. */
+      typeParams?: TypeParamsOption;
+    }
   ): void {
     declareTypeImpl(this, name, type, options);
   }

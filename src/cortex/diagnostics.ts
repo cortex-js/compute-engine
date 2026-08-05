@@ -21,7 +21,7 @@ export type DiagnosticCode =
   | 'hexadecimal-number-expected'
   | 'invalid-symbol-name' // %0 = symbol name
   | 'type-annotation-error' // %0 = message from the type subparser
-  | 'type-variables-unsupported' // %0 = type name — the `type name<…>` generic-alias slot is reserved but not yet supported
+  | 'type-variables-unsupported' // %0 = type name — a parameterized NOMINAL type (`type name<…> = …`); only the `type alias name<…>` form takes a clause
   | 'empty-type-parameter-clause' // %0 = function name — `function f<>(…)`: the clause slot is present but declares nothing
   | 'duplicate-type-parameter' // %0 = variable name — the same name twice in one `function f<T, T>(…)` clause
   | 'generic-clause-unsupported' // %0 = function name — a generic (`function f<T>(…)`) definition cannot take part in a multi-clause set

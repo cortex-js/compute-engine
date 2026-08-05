@@ -165,6 +165,20 @@ export type TypeVariable = { kind: 'variable'; name: string };
  */
 export type TypeParameter = { name: string; bound?: Type };
 
+/**
+ * The `typeParams` option of a generic type-ALIAS declaration
+ * (`ce.declareType('Pair', 'tuple<T, T>', { alias: true, typeParams: ['T'] })`).
+ *
+ * Either clause TEXT (`'T, U: number'`, also accepted one entry at a time) or
+ * pre-built parameters whose bound may be a type string. Every TEXT spelling
+ * goes through the shared clause parser (`parseTypeParameterClause`); the
+ * object-array form is validated directly by `normalizeDeclaredTypeParams`
+ * (same rules: reserved names, duplicates, ground bounds).
+ */
+export type TypeParamsOption =
+  | string
+  | ReadonlyArray<string | { name: string; bound?: Type | TypeString }>;
+
 export type FunctionSignature = {
   kind: 'signature';
   args?: NamedElement[];
@@ -315,6 +329,17 @@ export type TypeReference = {
   name: string;
   alias: boolean;
   def: Type | undefined;
+  /** The `forall`-like clause of a GENERIC type ALIAS
+   * (`type alias Pair<T> = tuple<T, T>`), in declaration order.
+   *
+   * A record-level field, never part of a `Type`: an applied reference
+   * (`Pair<integer>`) is EAGERLY EXPANDED into the substituted body when the
+   * type is built, so no downstream consumer ever meets an unexpanded
+   * application. Present only on a structural alias — parameterized NOMINAL
+   * types are out of scope.
+   *
+   * See `docs/plans/2026-08-04-generic-type-aliases-design.md`. */
+  typeParams?: TypeParameter[];
 };
 
 export type Type =
@@ -359,6 +384,15 @@ export type Type =
  *                | <set>
  *                | <broadcastable>
  *                | <collection>
+ *                | <type_reference>
+ *
+ * (A reference to a user-declared type. The optional argument list applies a
+ * GENERIC type alias (`Pair<integer>`); it is expanded eagerly into the
+ * substituted alias body when the type is built, so an applied reference never
+ * appears in a `Type`. The authoritative grammar lives with the parser in
+ * `./parser.ts`.)
+ *
+ * <type_reference> ::= ( "type" )? <identifier> ( "<" <type> ("," <type>)* ">" )?
  *
  * <primitive> ::= "any" | "unknown" | <value-type> | <symbolic-type> | <numeric-type>
  *

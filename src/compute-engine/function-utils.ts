@@ -47,7 +47,7 @@ import { isPolymorphicType } from '../common/type/instantiate.js';
 import {
   GENERIC_ANNOTATION_COVERAGE_MESSAGE,
   GENERIC_PARTIAL_APPLICATION_MESSAGE,
-  INVALID_GENERIC_MARKER_MESSAGE,
+  INVALID_SIGNATURE_MARKER_MESSAGE,
   TYPE_VARIABLE_INTRODUCTION_MESSAGE,
 } from './boxed-expression/type-compatibility-error.js';
 import { substituteDeclaredBounds } from './boxed-expression/generic-instantiation.js';
@@ -438,7 +438,7 @@ export function canonicalFunctionLiteralArguments(
       isPolytypeString(ce, returnTypeOp.string)
     )
       return ce._fn('Function', [
-        ce.error(INVALID_GENERIC_MARKER_MESSAGE, returnTypeOp.string),
+        ce.error(INVALID_SIGNATURE_MARKER_MESSAGE, returnTypeOp.string),
         ...params,
       ]);
     bodyOp = bodyOp.op1;
@@ -859,7 +859,7 @@ function eraseGenericParameters(
   )
     return {
       error: ce._fn('Function', [
-        ce.error(INVALID_GENERIC_MARKER_MESSAGE, typeToString(sig)),
+        ce.error(INVALID_SIGNATURE_MARKER_MESSAGE, typeToString(sig)),
         ...params,
       ]),
     };

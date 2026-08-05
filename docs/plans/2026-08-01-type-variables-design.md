@@ -400,26 +400,57 @@ broadcastable<T>`), so its decomposition is explicit:
 - indexed-collection actual with element type `S` → lower bound `T ≥ S`;
 - actual `broadcastable<S>` → lower bound `T ≥ S`.
 
-**Lifted operands at a bare-variable pattern — D10 (ruling recommended:
-(a)).** The scalar-base decomposition above applies to
-`broadcastable<T>`-**constructor** patterns only. A **bare bounded
-variable** (the identity-echo shape, `forall T: number. (T) -> T` on a
-`broadcastable: true` operator) interacts with the broadcast-lift
-admission gate differently — and the two rules would otherwise
+**Lifted operands at a bare-variable pattern — D10 (RE-RULED 2026-08-04;
+supersedes the original ruling (a)).** The scalar-base decomposition
+above applies to `broadcastable<T>`-**constructor** patterns only. A
+**bare variable** (the identity-echo shape, `forall T: number. (T) -> T`
+on a `broadcastable: true` operator) interacts with the broadcast-lift
+admission gate differently — and a naive reading of the two rules would
 contradict: `Negate([1, 2, 3])` is lift-admitted via the scalar base
-(`integer <: number`), but the elementwise *result* is a
-`list<integer>`, so solving `T` from the base would claim a scalar
-result. The rule: **for a lift-admitted operand at a bare-variable
-pattern, the bound/admission check uses the scalar base (existing lift
-semantics, unchanged), but the variable binds the FULL actual type.**
-The substituted result is then the collection type — exactly what the
-current echo handlers (`type: x.type`) produce under broadcast today.
-The solver has the lift information locally: it is embedded in
-`validateArguments`, where the lift gate fires (§4.3/§4.5).
-Alternatives considered: (b) spelling every echo as a
-scalar-arm/collection-arm overload pair — explicit but doubles each
-declaration and cannot cover nested broadcast depth without further
-arms; (c) dropping the four broadcastable echoes
+(`integer <: number`), but the elementwise *result* is a `list<integer>`.
+
+The rule: **for a lift-admitted operand at a bare-variable pattern, the
+bound/admission check uses the scalar base (existing lift semantics,
+unchanged), and the variable binds the operand's ELEMENT type.** The
+call site's ordinary broadcast wrap then re-adds the operand's rank, so
+the echo still ends up `list<integer>` end to end. The solver has the
+lift information locally: it is embedded in `validateArguments`, where
+the lift gate fires (§4.3/§4.5).
+
+*What the peel is.* Only the kinds a broadcast actually MAPS are peeled —
+`list`, `indexed_collection`, `broadcastable`. The lift ADMISSION gate is
+deliberately looser (it admits any could-be-collection operand at a
+threadable position), and the two must not be conflated: a `set` is
+admitted but never mapped (`Conjugate(Set(1, 2))` stays inert and stays
+`set<…>`), a `tuple` is atomic under broadcast (`Negate((1, 2))` is a
+tuple), and a plain scalar actual — `broadcastable` means
+scalar-OR-collection — contributes itself. Where it does apply the peel
+goes to the scalar LEAF, not one level: the runtime maps all the way down
+(`x ↦ (x, x)` over a 2×2 matrix evaluates to a 2×2 of pairs of scalars),
+which is exactly the rank `broadcastShapedResultType` re-adds. This also
+means the declared-bound waiver below stays load-bearing: it covers the
+admitted-but-never-mapped kinds, whose whole-actual bound would otherwise
+be blamed against the scalar declared bound.
+
+*Why it was re-ruled.* The original ruling had the variable bind the FULL
+actual, with a `liftedEchoPositions` short-circuit un-wrapping the result
+at bare-variable echoes. Measured (2026-08-04, five shapes): the runtime
+maps at every lift-admitted position, so a result that merely MENTIONS
+the variable — which the short-circuit could not recognize — typed one
+rank too high. `forall T. (T) -> tuple<T, T>` over `[1, 2]` typed
+`list<tuple<vector<…^2>, vector<…^2>>>` against the value `[(1,1), (2,2)]`
+(`list<tuple<integer, integer>^2>`). Element-binding makes one rule cover
+every result shape and retires the short-circuit: for the bare echo the
+final type is unchanged by equivalence (unwrap ∘ whole-bind ≡ wrap ∘
+element-bind). Two consequences beyond the fix, both *toward* §4.5
+parity: a mixed-rank or union-typed operand now gets the wrapper's
+(coarser) shape answer, the same one its ground counterpart gets; and
+`Remainder(M, 7)`-shaped calls no longer widen to a union at all.
+
+Alternatives considered (unchanged, and still declined): (b) spelling
+every echo as a scalar-arm/collection-arm overload pair — explicit but
+doubles each declaration and cannot cover nested broadcast depth without
+further arms; (c) dropping the four broadcastable echoes
 (`Conjugate`/`Chop`/`Negate`, and future ones) from D4 — forfeits
 audited conversions. Worked-example row in §4.7; §11 pin.
 
@@ -434,7 +465,7 @@ to inference:
 | operand already invalid | no bound; existing error path unchanged |
 | inferable unknown/`any` symbol | no bound; post-solve narrowing to the instantiated ground param (§4.2 rule 1) |
 | non-inferable `unknown`/`any` operand | bound per the §4.3 table (absorbing; uppers provisional per D8) |
-| broadcastable lift / threadable call | `broadcastable<T>`-constructor patterns: bounds from the scalar base (§4.4); a lift-admitted operand at a **bare-variable** pattern binds the FULL actual, admission still checked at the base (§4.4, D10) |
+| broadcastable lift / threadable call | `broadcastable<T>`-constructor patterns: bounds from the scalar base (§4.4); a lift-admitted operand at a **bare-variable** pattern binds its ELEMENT type (mapped kinds only), admission still checked at the base (§4.4, D10) |
 | deferred (overlap-provisional) collection admission (`deferredIdx`) | **no bound** — the position is provisionally admitted exactly as today; its runtime re-validation is unchanged; variables relying only on it fall to S3 |
 | missing-value stripping | stripped before inference; contributes nothing |
 | `Spread` operand | no bound (§4.3 pass 1) |
@@ -491,7 +522,8 @@ recorded in §7.4.
 | `forall T, U. (tuple<T, U>) -> tuple<U, T>` | `tuple<integer, string>` | `T = integer`, `U = string` | `tuple<string, integer>` |
 | `forall T: indexed_collection. (T) -> T` | `matrix<integer^(2x3)>` | `T = matrix<integer^(2x3)>` (verbatim; bound ✓) | `matrix<integer^(2x3)>` — kind + dimensions preserved |
 | `forall T: indexed_collection. (T) -> T` | `set<real>` | — | bound violated: `set<real>` is not an `indexed_collection` (§8 names the declared bound) |
-| `forall T: number. (T) -> T` on a `broadcastable: true` operator | `list<integer>` (lift-admitted) | admission at the scalar base (`integer <: number` ✓); `T = list<integer>` (full actual, D10) | `list<integer>` — matches today's echo handlers under broadcast |
+| `forall T: number. (T) -> T` on a `broadcastable: true` operator | `list<integer>` (lift-admitted) | admission at the scalar base (`integer <: number` ✓); `T = integer` (ELEMENT, D10) | `list<integer>` — the call site's broadcast wrap re-adds the rank |
+| `forall T. (T) -> tuple<T, T>` on a `broadcastable: true` operator | `list<integer>` (lift-admitted) | `T = integer` (ELEMENT, D10) | `list<tuple<integer, integer>>` — one rank, matching the value `[(1,1), (2,2)]` |
 | `forall T, U, V. ((U) -> V, (T) -> U) -> (T) -> V` | `(real) -> string`, `(integer) -> real` | 2a: `V ≥ string`, `U ≥ real` → `U = real`, `V = string`; 2b: `U <: real` ✓, `T <: integer` → `T = integer` | `(integer) -> string` |
 | `forall T. ((T) -> boolean, (T) -> boolean) -> T` | `(integer) -> boolean`, `(real) -> boolean` | 2b uppers: `T <: integer`, `T <: real` → `T = integer` (meet) | `integer` |
 | `forall T. ((T) -> boolean, T) -> T` | `(integer) -> boolean`, `unknown` (non-inferable) | `T = unknown` (absorbed); upper `T <: integer` **provisionally satisfied** (D8) | `unknown` |
@@ -1080,14 +1112,22 @@ are D10–D13**.
 
 ### Ruled in v4 (2026-08-01, approved as recommended)
 
-10. **D10 — broadcast lift × bounded echo: RULED (a)** (§4.4): a
-    lift-admitted operand at a *bare-variable* pattern binds the FULL
-    actual while admission stays checked at the scalar base; reproduces
-    today's echo handlers under broadcast exactly, single-armed
-    declarations, lift info locally available. Declined: (b)
-    scalar/collection overload-pair spelling (doubles every echo; can't
-    cover nested broadcast depth), (c) dropping the four broadcastable
-    echoes from D4.
+10. **D10 — broadcast lift × bounded echo: RULED (a), RE-RULED
+    2026-08-04** (§4.4): a lift-admitted operand at a *bare-variable*
+    pattern binds its **ELEMENT** type (mapped kinds only — not `set`,
+    not `tuple`, not a scalar), while admission stays checked at the
+    scalar base; the call site's ordinary broadcast wrap re-adds the
+    rank. The original ruling bound the FULL actual and needed a
+    `liftedEchoPositions` short-circuit to un-wrap bare-variable
+    results; measured evidence (five shapes, 2026-08-04) showed the
+    runtime maps at every lift-admitted position, so variable-MENTIONING
+    results — which the short-circuit could not recognize — typed one
+    rank too high (`forall T. (T) -> tuple<T, T>` over `[1, 2]`). The
+    echo machinery is retired; the bare echo is unchanged by
+    equivalence. Declined then and still: (b) scalar/collection
+    overload-pair spelling (doubles every echo; can't cover nested
+    broadcast depth), (c) dropping the four broadcastable echoes from
+    D4.
 11. **D11 — generic-vs-ground arm tie: RULED ground-wins** (§6): when a
     ground arm and an instantiated-generic arm are identical after
     instantiation, the ground arm wins ("most specific declaration") —
@@ -1149,9 +1189,10 @@ are D10–D13**.
   variadic fold, the non-inferable-unknown absorption, the `never`-bound
   neutrality (`Concat([], [1])`-shape), the D8 provisional row, the
   bounded-identity verbatim row (kind + dimensions preserved), the
-  **lifted-echo row** (D10: broadcastable echo at `list<integer>` —
-  admission at the base, `T` bound to the full actual, result the
-  collection type), and the
+  **lifted-echo row** (D10 as re-ruled 2026-08-04: broadcastable echo at
+  `list<integer>` — admission at the base, `T` bound to the ELEMENT, the
+  wrap restoring the collection type; plus the never-peeled kinds and a
+  MENTION result at rank 2), and the
   violated-declared-bound failure with its §8 message; `compose` with
   operand order reversed (order-independence witness); multi-callback meet
   of upper bounds and the disjoint-uppers failure; `broadcastable<T>`

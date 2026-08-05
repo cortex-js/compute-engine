@@ -229,6 +229,30 @@ describe('CORTEX MATCH — diagnostics', () => {
       'match-alternative-binding'
     );
   });
+
+  test('a malformed pattern annotation costs only its type guard', () => {
+    // The type subparse leaves the cursor at the offending token; the pattern
+    // resynchronizes at its own element boundary (the `,`/closer/`=>`), so the
+    // rest of the arm — and every later arm — still parses. (It used to
+    // resynchronize at a STATEMENT boundary, dropping the remaining arms.)
+    const source = 'match n {\n  a: nosuch => 1\n  b: integer => 2\n  _ => 3\n}';
+    expect(diagnostics(source)).toEqual([
+      'type-annotation-error',
+      // `a` is a bare binding once its guard is gone — irrefutable, non-final.
+      'match-irrefutable-case',
+    ]);
+    const [expr] = parseCortex(source);
+    expect(serializeCortex(expr!)).toBe(
+      'match n {\n  a => 1\n  b if b in integer => 2\n  _ => 3\n}'
+    );
+  });
+
+  test('…and inside a list pattern, only its own element', () => {
+    const source = 'match n {\n  [a: nosuch, c] => 1\n  _ => 3\n}';
+    expect(diagnostics(source)).toEqual(['type-annotation-error']);
+    const [expr] = parseCortex(source);
+    expect(serializeCortex(expr!)).toBe('match n {\n  [a, c] => 1\n  _ => 3\n}');
+  });
 });
 
 describe('CORTEX MATCH — round-trip (parse → serialize → parse fixpoint)', () => {

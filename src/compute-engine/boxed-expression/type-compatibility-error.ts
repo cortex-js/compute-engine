@@ -109,7 +109,7 @@ export const TYPE_VARIABLE_INTRODUCTION_MESSAGE =
  * has parameters. (A return type that merely HAPPENS to be an arrow is spelled
  * GROUPED and is not a marker at all.)
  */
-export const INVALID_GENERIC_MARKER_MESSAGE =
+export const INVALID_SIGNATURE_MARKER_MESSAGE =
   'A function-literal signature marker must be a plain signature (no optional or variadic arguments) with one argument per literal parameter';
 
 /**

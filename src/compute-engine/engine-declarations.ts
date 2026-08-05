@@ -1,6 +1,8 @@
 import type {
   FunctionSignature,
   Type,
+  TypeParameter,
+  TypeParamsOption,
   TypeString,
 } from '../common/type/types.js';
 import {
@@ -12,9 +14,11 @@ import {
   signatureArms,
   widen,
 } from '../common/type/utils.js';
-import { parseType } from '../common/type/parse.js';
+import { parseType, parseTypeParameterClause } from '../common/type/parse.js';
 import { isEffectSubset } from '../common/type/effects.js';
 import {
+  freeTypeVariables,
+  hasFreeTypeVariables,
   isReservedTypeName,
   TypeVariableError,
 } from '../common/type/instantiate.js';
@@ -73,10 +77,12 @@ import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
 import { paramsAreScalar } from './boxed-expression/boxed-function.js';
 import {
   functionLiteralDeclaredEffects,
+  functionLiteralDeclaredSignature,
   functionLiteralParameters,
   functionLiteralReturnType,
   mentionsQuantifiedVariable,
 } from './boxed-expression/function-literal.js';
+import { typeToString } from '../common/type/serialize.js';
 
 export function lookupDefinition(
   ce: IComputeEngine,
@@ -476,6 +482,76 @@ export function setSymbolValue(
   throw new Error(`Cannot assign a value to operator symbol "${id}"`);
 }
 
+/**
+ * A2 — normalize the `typeParams` option of `ce.declareType()` into
+ * {@link TypeParameter}s. Throws (before ANY mutation) on a malformed clause.
+ *
+ * Both spellings the option admits go through the SHARED clause parser: a
+ * string is clause TEXT (`'T'`, `'T, U: number'`, or one entry of an array),
+ * and an object is a pre-built `{ name, bound? }` whose bound may be a type
+ * string. Names are checked for validity, reservation and duplication across
+ * the whole list.
+ */
+function normalizeDeclaredTypeParams(
+  ce: IComputeEngine,
+  typeName: string,
+  option: TypeParamsOption
+): TypeParameter[] {
+  const entries = typeof option === 'string' ? [option] : option;
+  const params: TypeParameter[] = [];
+  const seen = new Set<string>();
+
+  const push = (p: TypeParameter): void => {
+    if (!isValidTypeName(p.name) || isReservedTypeName(p.name))
+      throw new TypeVariableError(
+        isReservedTypeName(p.name)
+          ? 'reserved-type-name'
+          : 'unsupported-variable-position',
+        `The type parameter name "${p.name}" of "${typeName}" is invalid`
+      );
+    if (seen.has(p.name))
+      throw new TypeVariableError(
+        'unsupported-variable-position',
+        `The type variable \`${p.name}\` is declared more than once in the clause of "${typeName}"`
+      );
+    seen.add(p.name);
+    params.push(p);
+  };
+
+  for (const entry of entries) {
+    if (typeof entry === 'string') {
+      const parsed = parseTypeParameterClause(entry, ce._typeResolver);
+      if ('error' in parsed)
+        throw new TypeVariableError(
+          parsed.error.code === 'reserved-name'
+            ? 'reserved-type-name'
+            : 'unsupported-variable-position',
+          `Invalid type parameter clause for "${typeName}": ${parsed.error.message}`
+        );
+      for (const p of parsed.params) push(p);
+      continue;
+    }
+    const bound =
+      entry.bound === undefined
+        ? undefined
+        : parseType(entry.bound as Type | TypeString, ce._typeResolver);
+    if (bound !== undefined && hasFreeTypeVariables(bound))
+      throw new TypeVariableError(
+        'unsupported-variable-position',
+        `The bound of the type variable \`${entry.name}\` must be a ground type`
+      );
+    push(bound === undefined ? { name: entry.name } : { name: entry.name, bound });
+  }
+
+  if (params.length === 0)
+    throw new TypeVariableError(
+      'unsupported-variable-position',
+      `The type parameter clause of "${typeName}" is empty`
+    );
+
+  return params;
+}
+
 export function declareType(
   ce: IComputeEngine,
   name: string,
@@ -484,7 +560,13 @@ export function declareType(
     alias,
     fromStatement,
     mint,
-  }: { alias?: boolean; fromStatement?: boolean; mint?: boolean } = {}
+    typeParams,
+  }: {
+    alias?: boolean;
+    fromStatement?: boolean;
+    mint?: boolean;
+    typeParams?: TypeParamsOption;
+  } = {}
 ): void {
   // `forall` is a reserved word in type strings (the quantifier clause), so it
   // cannot also name a type.
@@ -495,6 +577,23 @@ export function declareType(
     );
 
   if (!isValidTypeName(name)) throw Error(`The type name "${name}" is invalid`);
+
+  // The generic clause is validated FIRST — before any namespace is touched —
+  // so a malformed one leaves both halves exactly as they were.
+  const params =
+    typeParams === undefined
+      ? undefined
+      : normalizeDeclaredTypeParams(ce, name, typeParams);
+
+  // Only the ALIAS form takes a clause: parameterized NOMINAL types are out of
+  // scope (generic-type-aliases design §1/§2 — a generic alias is expanded
+  // eagerly, which a nominal reference cannot be). Rejected before anything is
+  // mutated, mirroring the Cortex statement route's
+  // `type-variables-unsupported` diagnostic.
+  if (params !== undefined && alias !== true)
+    throw Error(
+      `The type "${name}" cannot be generic: only a type ALIAS takes a type parameter clause (write \`alias: true\`)`
+    );
 
   // A type declaration claims BOTH namespaces: the type record, and a
   // value-level constructor of the same name (nominal-types design §4.1/D5).
@@ -526,7 +625,13 @@ export function declareType(
   // not the recursion placeholder below. An outer-scope binding is shadowed,
   // not conflicted; an inferred (valueless, auto-declared) binding upgrades; a
   // constructor we minted earlier is ours to replace.
-  if (mint) checkTypeConstructorNamespace(scope, name);
+  // A GENERIC alias mints nothing (`deriveConstructorSignature` declines a
+  // parameterized body, D4b), so it makes no claim on the value namespace and
+  // must not be pre-checked against one: `function Duo(x) {…}` followed by
+  // `type alias Duo<T> = tuple<T, T>` is legal. (A plain→generic replacement
+  // still drops the constructor the plain form minted — `mintTypeConstructor`
+  // calls `removeMintedTypeConstructor` before deriving.)
+  if (mint && params === undefined) checkTypeConstructorNamespace(scope, name);
 
   if (existing) delete scope.types![name];
 
@@ -536,10 +641,20 @@ export function declareType(
 
   // First, add a placeholder record to allow recursive types
   scope.types[name] = { kind: 'reference', name, alias, def: undefined };
+  // The clause goes on the placeholder, BEFORE the body parses: a generic
+  // alias that applies itself is then detected unambiguously (the record has
+  // `typeParams` and no `def` yet) as `generic-alias-self-reference`.
+  if (params !== undefined) scope.types[name].typeParams = params;
   if (fromStatement)
     (
       scope.types[name] as { _declaredByStatement?: boolean }
     )._declaredByStatement = true;
+
+  /** Undo the placeholder: a declaration that failed declares nothing. */
+  const rollbackTypeHalf = (): void => {
+    delete scope.types![name];
+    if (existing) scope.types![name] = existing;
+  };
 
   // Parse the type (which may reference itself). If it is malformed, leave
   // the scope as it was: a placeholder with no `def` is a dangling reference
@@ -550,12 +665,32 @@ export function declareType(
       type instanceof BoxedType
         ? type.type
         : typeof type === 'string'
-          ? parseType(type, ce._typeResolver)
+          ? // A2 — the clause is PRE-SEEDED into the body parse, so `T` reads
+            // as a type variable rather than as an unknown type name.
+            parseType(type, ce._typeResolver, params)
           : type;
   } catch (e) {
-    delete scope.types[name];
-    if (existing) scope.types[name] = existing;
+    rollbackTypeHalf();
     throw e;
+  }
+
+  // Under transparency a phantom parameter is meaningless: `Tagged<integer>`
+  // and `Tagged<string>` would be the same type. Rejected like the signature
+  // rule's unused quantified variable.
+  if (params !== undefined) {
+    const free = freeTypeVariables(def);
+    const unused = params.filter((p) => !free.has(p.name));
+    if (unused.length > 0) {
+      rollbackTypeHalf();
+      throw new TypeVariableError(
+        'generic-alias-unused-parameter',
+        `The type parameter${unused.length === 1 ? '' : 's'} \`${unused
+          .map((p) => p.name)
+          .join('`, `')}\` of "${name}" ${
+          unused.length === 1 ? 'is' : 'are'
+        } never used in its definition`
+      );
+    }
   }
 
   // Adjust the definition (the type references in the type will point to
@@ -574,14 +709,19 @@ export function declareType(
     try {
       mintTypeConstructor(ce, scope, name, scope.types[name], def);
     } catch (e) {
-      delete scope.types[name];
-      if (existing) scope.types[name] = existing;
+      rollbackTypeHalf();
       if (existingBinding !== undefined)
         scope.bindings.set(name, existingBinding);
       else scope.bindings.delete(name);
       throw e;
     }
   }
+
+  // A5 — replacing a type record is a context change: bump the generation so
+  // the caches keyed on it (and every expression boxed AFTER this point) see
+  // the new definition. Expressions already boxed keep the type they computed,
+  // exactly as a value redeclaration leaves them.
+  if (existing) ce._generation += 1;
 }
 
 export function declareFn(
@@ -1007,7 +1147,21 @@ export function assignFn(
       hasFunctionSignature(def.operator.signature.type)
     ) {
       const literal = canonicalFunctionLiteral(ce.expr(arg2));
-      if (literal !== undefined) {
+      // R4 — an UNTYPED literal assigned over a DERIVED signature full-replaces
+      // it (D6, "Assign always full-replaces"). A signature derived from the
+      // PREVIOUS assign's annotation is a record of that literal, not a contract
+      // on the name: re-assigning a bare `x ↦ 2x` must re-infer from the new
+      // body, not check it against — and keep — annotations the author has
+      // deleted. The boundary is provenance, not shape: a signature that came
+      // from `ce.declare()` is a DECLARATION and stays sticky. And an ANNOTATED
+      // re-assign still reconciles below whatever the provenance, so
+      // annotated → same-annotated rebuilds identically and
+      // annotated → differently-annotated still errors.
+      const replacesDerived =
+        def.operator._derivedSignature &&
+        literal !== undefined &&
+        !functionLiteralHasAnnotation(literal);
+      if (literal !== undefined && !replacesDerived) {
         const declaredType = def.operator.signature;
 
         // G11 — see the value-slot route above. The literal then installs as a
@@ -1084,6 +1238,10 @@ export function assignFn(
               ? declaredType.type
               : stripArrowEffects(declaredType.type),
             broadcastable: paramsAreScalar(declaredType.type),
+            // R4 — the signature's PROVENANCE travels with it: rebuilding the
+            // def must not launder an assign-derived signature into a
+            // declaration (nor a declaration into a derived one).
+            _derivedSignature: def.operator._derivedSignature,
           };
           if (shadowBuiltin) ce._declareSymbolOperator(id, lambdaDef);
           else {
@@ -1288,6 +1446,10 @@ export function assignValueAsOperatorDef(
       // parameter quantified at a collection bound (`T: indexed_collection`)
       // binds its argument WHOLE and keeps the flag false.
       broadcastable: paramsAreScalar(stripped),
+      // R4 — record that this pinned signature is DERIVED from the literal, not
+      // declared on the NAME. A later UNTYPED assign full-replaces it (D6)
+      // instead of checking the new body against the old annotation.
+      _derivedSignature: true,
     };
   }
 
@@ -1468,6 +1630,14 @@ export function reconcileFunctionLiteralReturn(
 ): Expression {
   if (!isFunction(literal, 'Function')) return literal;
 
+  // A POLYTYPE declaration ascribes its whole clause onto a marker-less literal
+  // (R1): the stored value is then self-describing — `f`'s value types as the
+  // polytype, not as the erased `(unknown) -> unknown` its bare parameters
+  // would otherwise infer. Runs BEFORE the return-type reconciliation below,
+  // which has nothing ground to ascribe under a variable-mentioning result.
+  const ascribed = ascribeDeclaredPolytype(ce, literal, declaredType);
+  if (ascribed !== undefined) return ascribed;
+
   // A declared result that MENTIONS a quantified variable has nothing ground
   // to ascribe (§2.4, G4): the body's return stays inferred and call-site
   // result types come from the INSTANTIATED signature instead. Decided BEFORE
@@ -1514,4 +1684,88 @@ export function reconcileFunctionLiteralReturn(
     ...literal.ops.slice(1).map((p) => p.json),
   ]);
   return isFunction(rebuilt, 'Function') ? rebuilt : literal;
+}
+
+/**
+ * R1 — ascribe a DECLARED POLYTYPE onto a marker-less function literal, so the
+ * stored value describes itself.
+ *
+ * `let f: forall T. (x: T) -> T = x |-> x` installed a literal whose own type
+ * was the erased `(unknown) -> unknown`: the declaration's clause lived only on
+ * the definition, so `f`'s VALUE (what `evaluate()` and serialization hand back)
+ * had lost it. Rebuilding through the Phase-1 authoring form — the full
+ * signature as the body-slot marker — makes `functionLiteralSignatureType`
+ * carry the clause VERBATIM (`effects-inference.ts`, the `isGenericSignature`
+ * arm), so the value and the definition agree.
+ *
+ * Returns `undefined` (leave the literal alone) unless every precondition
+ * holds:
+ * - the declaration is a single polytype signature the E2 pre-pass accepts as a
+ *   marker (a plain signature — no optional or variadic arguments — with one
+ *   argument per literal parameter);
+ * - the literal carries NO marker of its own (no full-signature marker, no
+ *   return ascription, no declared effects) and NO parameter annotation;
+ * - EVERY argument of the declaration mentions a quantified variable.
+ *
+ * Together those make the rebuild a pure DISPLAY fix. Erasure (G1) has nothing
+ * to erase (every quantified parameter is already bare), the G9 α-agreement
+ * check is trivially satisfied (the marker IS the declared type), and the
+ * §2.4-rule-4 annotation-coverage check has no annotation to reject. A literal
+ * that DOES carry its own marker already went through those checks and keeps
+ * it.
+ *
+ * The last condition is not cosmetic. A GROUND argument in the clause
+ * (`forall T. (x: T, n: number) -> T`) would become a real constraint on the
+ * literal's OWN arrow, and that arrow is enforced at every direct application
+ * of the stored value — notably the per-element `apply()` inside a broadcast,
+ * where `n` legitimately receives a whole row. Ascribing it there turns a
+ * working broadcast into `incompatible-type`. Restricting the ascription to
+ * clauses whose arguments are all quantified means it can only ever RECORD the
+ * `forall`, never tighten a parameter.
+ *
+ * Ground declarations are deliberately out of scope: their parameter types are
+ * dropped from the stored literal's arrow too (`(x) |-> x` under
+ * `(x: integer) -> integer` types `(unknown) -> integer`), but that asymmetry
+ * predates this milestone and has a far larger surface.
+ */
+function ascribeDeclaredPolytype(
+  ce: IComputeEngine,
+  literal: Expression,
+  declaredType: Type
+): Expression | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
+  if (typeof declaredType !== 'object' || declaredType.kind !== 'signature')
+    return undefined;
+  if ((declaredType.typeParams?.length ?? 0) === 0) return undefined;
+  if (
+    declaredType.optArgs !== undefined ||
+    declaredType.variadicArg !== undefined
+  )
+    return undefined;
+  if ((declaredType.args?.length ?? 0) !== literal.nops - 1) return undefined;
+  if (
+    !(declaredType.args ?? []).every((a) =>
+      mentionsQuantifiedVariable(a.type, declaredType)
+    )
+  )
+    return undefined;
+
+  // Already self-describing (or carrying an author ascription we must not
+  // overwrite).
+  if (functionLiteralDeclaredSignature(literal) !== undefined) return undefined;
+  if (functionLiteralReturnType(literal) !== undefined) return undefined;
+  if (functionLiteralDeclaredEffects(literal) !== undefined) return undefined;
+  if (functionLiteralParameters(literal).some((p) => p.type !== undefined))
+    return undefined;
+
+  // As in `reconcileFunctionLiteralReturn` above, and under the same constraint
+  // as `desugarSignatureString`: the serialized type goes straight back into
+  // `canonicalFunctionLiteralArguments` — in this same scope — which re-parses
+  // it with the resolver, so a scope-local type name stays resolved.
+  const rebuilt = ce.box([
+    'Function',
+    ['Typed', literal.ops[0].json, `'${typeToString(declaredType)}'`],
+    ...literal.ops.slice(1).map((p) => p.json),
+  ]);
+  return isFunction(rebuilt, 'Function') ? rebuilt : undefined;
 }

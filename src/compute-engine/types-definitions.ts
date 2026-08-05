@@ -426,6 +426,21 @@ export type OperatorDefinition = Partial<BaseDefinition> &
     inferredSignature?: boolean;
 
     /**
+     * The `signature` was DERIVED from an annotated function literal at
+     * `ce.assign()` time, not written by the author as a declaration.
+     *
+     * Such a signature is pinned (`inferredSignature: false`) so that calls
+     * validate the annotated parameter types — but it is not a contract on the
+     * NAME: a later untyped `ce.assign()` full-replaces it and re-infers from
+     * the new literal (D6, "Assign always full-replaces"). A signature that
+     * came from `ce.declare()` is sticky and keeps constraining every
+     * re-assign.
+     *
+     * @internal
+     */
+    _derivedSignature?: boolean;
+
+    /**
      * The type of the result (return type) based on the type of
      * the arguments.
      *
@@ -1556,6 +1571,12 @@ export interface BoxedOperatorDefinition
    * as more information becomes available.
    */
   inferredSignature: boolean;
+
+  /** See {@link OperatorDefinition._derivedSignature}: the pinned signature
+   * came from an annotated function literal at assign time, not from an
+   * author's declaration.
+   * @internal */
+  _derivedSignature: boolean;
 
   /** The type of the arguments and return value of this function */
   signature: BoxedType;

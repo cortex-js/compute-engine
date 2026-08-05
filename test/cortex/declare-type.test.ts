@@ -181,10 +181,8 @@ describe('CORTEX TYPE DECLARATION DIAGNOSTICS', () => {
     expect(JSON.stringify(value)).toContain('Declare');
   });
 
-  test('the generic-alias slot is reserved in the `alias` form too', () => {
-    expect(diagnosticsOf('type alias pair<T> = tuple<T, T>')).toEqual([
-      ['type-variables-unsupported', 'pair'],
-    ]);
+  test('…but the `alias` form ACCEPTS a clause (generic aliases)', () => {
+    expect(diagnosticsOf('type alias pair<T> = tuple<T, T>')).toEqual([]);
   });
 
   test('a reserved word cannot name a type', () => {
@@ -203,6 +201,313 @@ describe('CORTEX TYPE DECLARATION DIAGNOSTICS', () => {
     expect(diagnosticsOf('type point = tuple<')).toEqual([
       ['type-annotation-error', 'Expected tuple element'],
     ]);
+  });
+});
+
+//
+// GENERIC type aliases: `type alias Pair<T> = tuple<T, T>`
+// (`docs/plans/2026-08-04-generic-type-aliases-design.md`).
+//
+// The clause rides the attributes bag as its source TEXT (A1) — never without
+// `alias -> True`, a shape the lowering cannot produce. The body parses with
+// the clause's names in scope, and they leave scope with the statement.
+//
+describe('CORTEX GENERIC TYPE ALIASES (lowering)', () => {
+  test('a clause lowers to a `typeParams` attrs entry', () => {
+    expect(validCortex('type alias Pair<T> = tuple<T, T>')).toStrictEqual([
+      'DeclareType',
+      'Pair',
+      { str: 'tuple<T, T>' },
+      [
+        'Dictionary',
+        ['KeyValuePair', 'alias', 'True'],
+        ['KeyValuePair', 'typeParams', { str: 'T' }],
+      ],
+    ]);
+  });
+
+  test('a multi-parameter, bounded clause keeps the author’s spelling', () => {
+    expect(
+      validCortex('type alias Two<T, U: list<integer>> = tuple<T, U>')
+    ).toStrictEqual([
+      'DeclareType',
+      'Two',
+      { str: 'tuple<T, U>' },
+      [
+        'Dictionary',
+        ['KeyValuePair', 'alias', 'True'],
+        ['KeyValuePair', 'typeParams', { str: 'T, U: list<integer>' }],
+      ],
+    ]);
+  });
+
+  test('an applied reference in a later annotation parses', () => {
+    expect(
+      diagnosticsOf(
+        'type alias Pair<T> = tuple<T, T>\nlet p: Pair<integer> = (1, 2)'
+      )
+    ).toEqual([]);
+  });
+
+  test('the clause names are OUT of scope after the statement', () => {
+    expect(
+      diagnosticsOf('type alias Pair<T> = tuple<T, T>\nlet q: T = 1')
+    ).toEqual([['type-annotation-error', 'Unknown type "T"']]);
+  });
+
+  test('an empty clause is diagnosed and declares nothing', () => {
+    expect(
+      diagnosticsOf('type alias Pair<> = tuple<integer, integer>\nlet p: Pair = 1')
+    ).toEqual([
+      ['empty-type-parameter-clause', 'Pair'],
+      ['type-annotation-error', 'Unknown type "Pair"'],
+    ]);
+  });
+
+  test('a duplicate clause name is diagnosed at the clause, and declares nothing', () => {
+    // Exactly ONE diagnostic for the duplicate (the source-range scanner's),
+    // and the name is un-seeded: the next annotation reports it unknown.
+    expect(
+      diagnosticsOf('type alias Pair<T, T> = tuple<T, T>\nlet p: Pair<integer> = 1')
+    ).toEqual([
+      ['duplicate-type-parameter', 'T'],
+      ['type-annotation-error', 'Unknown type "Pair"'],
+    ]);
+  });
+
+  test('a RESERVED clause name is rejected by the shared clause parser', () => {
+    expect(
+      diagnosticsOf('type alias Pair<forall> = tuple<forall, forall>')
+    ).toEqual([
+      ['type-annotation-error', 'The type name "forall" is reserved'],
+    ]);
+  });
+
+  test('…and its position survives LEADING WHITESPACE in the clause', () => {
+    // The shared parser reports positions relative to the TRIMMED clause text,
+    // so the whitespace it dropped has to be added back — otherwise the
+    // diagnostic lands one column early, on the space.
+    const source = 'type alias Pair< forall> = tuple<forall, forall>';
+    const [, diagnostics] = parseCortex(source);
+    expect(diagnostics.map((d) => d.message)).toEqual([
+      ['type-annotation-error', 'The type name "forall" is reserved'],
+    ]);
+    expect(diagnostics[0].range[0]).toBe(source.indexOf('forall'));
+    expect(source.slice(diagnostics[0].range[0], source.indexOf('>'))).toBe(
+      'forall'
+    );
+  });
+
+  test('a malformed clause un-seeds the name and the next statement parses', () => {
+    const source = 'type alias Pair<T = tuple<T, T>\nlet a = 1';
+    const [value, diagnostics] = parseCortex(source);
+    expect(diagnostics.map((d) => d.message)).toEqual([
+      ['closing-bracket-expected', '>'],
+    ]);
+    expect(JSON.stringify(value)).toContain('Declare');
+  });
+});
+
+//
+// A6 recovery, now reachable through the applied-reference syntax: a malformed
+// applied alias costs its own statement / its own list element and no more.
+//
+describe('CORTEX MALFORMED APPLIED ALIAS RECOVERY', () => {
+  function recovered(source: string): string {
+    const [expr] = parseCortex(source);
+    return expr === null ? '' : serializeCortex(expr);
+  }
+
+  test('in a `type` statement, the next statement survives', () => {
+    const source =
+      'type alias Pair<T> = tuple<T, T>\ntype alias Bad = Pair<integer\nlet a = 0\na + 1';
+    const [, diagnostics] = parseCortex(source);
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'type-annotation-error',
+    ]);
+    expect(recovered(source)).toContain('let a = 0');
+  });
+
+  test('in a function parameter list, the rest of the list parses', () => {
+    // The `<` here is never closed, so everything up to the `)` belongs to the
+    // type's argument list as far as the resync can tell — `b: integer` is
+    // swallowed with it, and only `a` survives (untyped). That is the
+    // deliberate trade: honoring `<…>` nesting costs a following element in
+    // the UNCLOSED case, and buys never minting a bogus one from the type's
+    // own arguments (`f(x, string)` for `x: Pair<integer, string)`).
+    const source =
+      'type alias Pair<T> = tuple<T, T>\nfunction f(a: Pair<integer, b: integer) { b }';
+    const [value, diagnostics] = parseCortex(source);
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'type-annotation-error',
+    ]);
+    expect(JSON.stringify(value)).toContain('DefineFunction');
+    expect(serializeCortex(value!)).toContain('function f(a) {b}');
+  });
+
+  test('…and a CLOSED `<…>` still resyncs at the next element', () => {
+    // The nesting counter only changes the unclosed case: a balanced argument
+    // list returns the scan to depth 0 before the comma, so the following
+    // parameter parses exactly as it always did.
+    const source = 'function f(x: nosuch<integer>, y: integer) { y }';
+    const [value, diagnostics] = parseCortex(source);
+    expect(diagnostics.map((d) => d.message)).toEqual([
+      ['type-annotation-error', 'Unknown type "nosuch"'],
+    ]);
+    expect(serializeCortex(value!)).toBe('function f(x, y: integer) {y}');
+  });
+
+  test('in a `match` pattern, the remainder of the arm parses', () => {
+    // Same trade as the parameter list: the unclosed `<` swallows `m`, so the
+    // arm's pattern recovers as the single binding `n`. The follow-on
+    // `match-irrefutable-case` is an honest report about the RECOVERED shape
+    // (a bare binding matches everything, so `_` is unreachable), not a second
+    // complaint about the type.
+    const source =
+      'type alias Pair<T> = tuple<T, T>\nmatch x {\n  (n: Pair<integer, m) => 1\n  _ => 2\n}';
+    const [value, diagnostics] = parseCortex(source);
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'type-annotation-error',
+      'match-irrefutable-case',
+    ]);
+    expect(JSON.stringify(value)).toContain('Match');
+  });
+});
+
+describe('CORTEX GENERIC TYPE ALIASES (serialization)', () => {
+  test('a generic alias serializes as `type alias Pair<T> = …`', () => {
+    expect(
+      serializeCortex([
+        'DeclareType',
+        'Pair',
+        { str: 'tuple<T, T>' },
+        [
+          'Dictionary',
+          ['KeyValuePair', 'alias', 'True'],
+          ['KeyValuePair', 'typeParams', { str: 'T' }],
+        ],
+      ])
+    ).toBe('type alias Pair<T> = tuple<T, T>');
+  });
+
+  test('…in any key order', () => {
+    expect(
+      serializeCortex([
+        'DeclareType',
+        'Pair',
+        { str: 'tuple<T, T>' },
+        [
+          'Dictionary',
+          ['KeyValuePair', 'typeParams', { str: 'T' }],
+          ['KeyValuePair', 'alias', 'True'],
+        ],
+      ])
+    ).toBe('type alias Pair<T> = tuple<T, T>');
+  });
+
+  test('…and in the `{dict: …}` shorthand encoding', () => {
+    expect(
+      serializeCortex([
+        'DeclareType',
+        'Pair',
+        { str: 'tuple<T, T>' },
+        { dict: { alias: 'True', typeParams: { str: 'T' } } } as any,
+      ])
+    ).toBe('type alias Pair<T> = tuple<T, T>');
+  });
+
+  test('`typeParams` WITHOUT `alias` falls back to the generic form', () => {
+    expect(
+      serializeCortex([
+        'DeclareType',
+        'Pair',
+        { str: 'tuple<T, T>' },
+        ['Dictionary', ['KeyValuePair', 'typeParams', { str: 'T' }]],
+      ])
+    ).toContain('DeclareType');
+  });
+
+  test('an unknown extra attribute still falls back', () => {
+    expect(
+      serializeCortex([
+        'DeclareType',
+        'Pair',
+        { str: 'tuple<T, T>' },
+        [
+          'Dictionary',
+          ['KeyValuePair', 'alias', 'True'],
+          ['KeyValuePair', 'typeParams', { str: 'T' }],
+          ['KeyValuePair', 'holdUntil', 'True'],
+        ],
+      ])
+    ).toContain('DeclareType');
+  });
+
+  test('round-trip: parse → serialize → parse', () => {
+    const source = 'type alias Pair<T, U: number> = tuple<T, U>';
+    const ast = validCortex(source);
+    const serialized = serializeCortex(ast as any);
+    expect(serialized).toBe(source);
+    expect(validCortex(serialized)).toStrictEqual(ast);
+  });
+});
+
+//
+// A malformed body costs its OWN statement and nothing more. The type
+// subparse only diagnoses (it leaves the cursor at the offending token); the
+// statement recovers exactly ONCE, and the statement loop is told so — before
+// that fix the top-level loop recovered a SECOND time, swallowing the next
+// statement, and a block abandoned everything after the bad declaration.
+//
+describe('CORTEX TYPE STATEMENT RECOVERY', () => {
+  /** The parsed program, serialized back to Cortex: which statements survived. */
+  function recovered(source: string): string {
+    const [expr] = parseCortex(source);
+    return expr === null ? '' : serializeCortex(expr);
+  }
+
+  test('the statement after a malformed body still parses', () => {
+    const source = 'type point = )bad(\nlet a = 0\na + 1';
+    expect(diagnosticsOf(source)).toEqual([
+      ['type-annotation-error', 'Expected a type'],
+    ]);
+    expect(recovered(source)).toBe('let a = 0\na + 1');
+  });
+
+  test('…including when the body is an unknown type name', () => {
+    const source = 'type point = nosuchtype\nlet a = 0\na + 1';
+    expect(diagnosticsOf(source)).toEqual([
+      ['type-annotation-error', 'Unknown type "nosuchtype"'],
+    ]);
+    expect(recovered(source)).toBe('let a = 0\na + 1');
+  });
+
+  test('…and when the statements are `;`-separated on one line', () => {
+    const source = 'type point = )bad(; let a = 0; a + 1';
+    expect(diagnosticsOf(source)).toEqual([
+      ['type-annotation-error', 'Expected a type'],
+    ]);
+    expect(recovered(source)).toBe('let a = 0\na + 1');
+  });
+
+  test('inside a block, the rest of the block still parses', () => {
+    const source =
+      'do {\n  type inner = )bad(\n  let b = 1\n  b + 1\n}\nlet c = 2';
+    expect(diagnosticsOf(source)).toEqual([
+      ['type-annotation-error', 'Expected a type'],
+    ]);
+    // Both the block's remaining statements and the statement AFTER the block.
+    expect(recovered(source)).toBe('do {let b = 1; b + 1}\nlet c = 2');
+  });
+
+  test('a malformed body does not eat the block’s closing brace', () => {
+    // Same-line closer: the statement recovery stops at `}` rather than
+    // skipping past it and unbalancing the block.
+    const source = 'do { type inner = )bad( }\nlet c = 2';
+    expect(diagnosticsOf(source)).toEqual([
+      ['type-annotation-error', 'Expected a type'],
+    ]);
+    expect(recovered(source)).toBe('do {}\nlet c = 2');
   });
 });
 
@@ -251,19 +556,16 @@ describe('CORTEX TYPE SELF-REFERENCE', () => {
 //
 describe('CORTEX TYPE NAME SEEDING', () => {
   test('a malformed body un-seeds the name', () => {
-    // (The filler statement is where the type-body recovery stops.)
-    expect(
-      diagnosticsOf('type point = )bad(\nlet a = 0\nlet p: point = 1')
-    ).toEqual([
+    // The malformed body costs its OWN statement and nothing else: the very
+    // next statement is the one that reports `point` is unknown.
+    expect(diagnosticsOf('type point = )bad(\nlet p: point = 1')).toEqual([
       ['type-annotation-error', 'Expected a type'],
       ['type-annotation-error', 'Unknown type "point"'],
     ]);
   });
 
   test('an unknown-type body un-seeds the name', () => {
-    expect(
-      diagnosticsOf('type point = nosuchtype\nlet a = 0\nlet p: point = 1')
-    ).toEqual([
+    expect(diagnosticsOf('type point = nosuchtype\nlet p: point = 1')).toEqual([
       ['type-annotation-error', 'Unknown type "nosuchtype"'],
       ['type-annotation-error', 'Unknown type "point"'],
     ]);
@@ -278,9 +580,7 @@ describe('CORTEX TYPE NAME SEEDING', () => {
 
   test('a failed declaration does not un-declare a HOST-supplied name', () => {
     expect(
-      diagnosticsOf('type taken = )bad(\nlet a = 0\nlet p: taken = 1', [
-        'taken',
-      ])
+      diagnosticsOf('type taken = )bad(\nlet p: taken = 1', ['taken'])
     ).toEqual([['type-annotation-error', 'Expected a type']]);
   });
 

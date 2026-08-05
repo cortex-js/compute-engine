@@ -160,6 +160,11 @@ export interface TypeReferenceNode extends ASTNode {
   kind: 'type_reference';
   name: string;
   isForward?: boolean;
+  /** The type ARGUMENTS of an applied reference (`Pair<integer>`), when the
+   * `<…>` slot was written. Absent (not `[]`) when it was not: `Pair<>` is an
+   * arity error, `Pair` a bare reference. Only a generic type ALIAS has an
+   * expansion for them (`type-builder.ts`, `visitTypeReference`). */
+  args?: TypeNode[];
 }
 
 export interface ValueNode extends ASTNode {

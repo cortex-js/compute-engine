@@ -31,7 +31,13 @@ import {
   TypeParamNode,
   TypeVariableNode,
 } from './ast-nodes.js';
-import { EffectLabel, EffectSet, TypeResolver } from './types.js';
+import {
+  EffectLabel,
+  EffectSet,
+  TypeParameter,
+  TypeResolver,
+} from './types.js';
+import { TypeVariableError } from './instantiate.js';
 import { PRIMITIVE_TYPES_SET } from './primitive.js';
 import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 
@@ -58,7 +64,11 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 
 (* Within its arm, a quantified name SHADOWS every other reading of that
    identifier (primitive, nominal or resolver-provided) and parses as a type
-   variable. *)
+   variable. A parse may also be PRE-SEEDED with variables that no `forall` in
+   the text declares (the `typeVars` option — the body of a generic type alias,
+   whose parameters are quantified by the declaration, not by the body). Such a
+   parse is UNCACHEABLE: the same text means different things under different
+   seeds. *)
 
 <union_type> ::= <intersection_type> ( " | " <intersection_type> )*
 
@@ -163,7 +173,16 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 
 (* --- Atomic and Primitive Types --- *)
 
-<type_reference> ::= ( "type" )? <identifier>
+(* An APPLIED reference carries a type-argument list: `Pair<integer>`, the use
+   site of a generic type alias (`docs/plans/2026-08-04-generic-type-aliases-
+   design.md`). The list is EAGERLY EXPANDED into the substituted alias body
+   when the type is built, so no applied-reference node ever reaches the `Type`
+   representation. An empty list (`Pair<>`), a wrong count, or arguments on a
+   non-generic name are arity errors raised there — the grammar admits them.
+   Writing the slot is also what closes the silent-truncation hazard: without
+   it `p: Pair<integer>` parsed as the bare `Pair` and leaked `<integer>` to the
+   surrounding (Cortex) grammar. *)
+<type_reference> ::= ( "type" )? <identifier> ( "<" <type> ( "," <type> )* ">" | "<" ">" )?
 
 <value> ::= <string_literal>
           | <number_literal>
@@ -227,9 +246,19 @@ export class Parser {
 
   constructor(
     input: string,
-    options?: { typeResolver?: TypeResolver; allowTrailing?: boolean }
+    options?: {
+      typeResolver?: TypeResolver;
+      allowTrailing?: boolean;
+      typeVars?: readonly TypeParameter[];
+    }
   ) {
     this.allowTrailing = options?.allowTrailing ?? false;
+    // A PRE-SEEDED parse (the body of a generic type alias): the alias's own
+    // parameters are in scope from the first token, exactly as if an enclosing
+    // `forall` had quantified them, so `tuple<T, T>` reads `T` as a VARIABLE
+    // rather than as an unknown type name.
+    if (options?.typeVars !== undefined && options.typeVars.length > 0)
+      this._typeVarScopes.push(new Set(options.typeVars.map((p) => p.name)));
     this.lexer = new Lexer(input, { tolerant: this.allowTrailing });
     this.typeResolver = options?.typeResolver ?? {
       forward: () => undefined,
@@ -1557,6 +1586,11 @@ export class Parser {
       const nameToken = this.current; // Capture token position before advancing
       const name = this.advance().value;
 
+      // The optional type-ARGUMENT list of an applied reference. Parsed for
+      // every reference, resolved or not: the arity/expansion verdict belongs
+      // to the type builder, which is the only place that can see the record.
+      const args = this.parseTypeArguments();
+
       // Try to resolve the type
       const result = this.typeResolver.resolve(name);
       if (result) {
@@ -1564,16 +1598,28 @@ export class Parser {
         return this.createNode<TypeReferenceNode>('type_reference', {
           name,
           isForward,
+          args,
         });
       }
 
       // If it was a forward reference, let the resolver know
       if (isForward) {
+        // `type Later<integer>`: an APPLIED forward reference is rejected
+        // BEFORE `forward()` runs. `forward()` mutates the namespace (it
+        // installs a `def: undefined` placeholder), and letting the builder
+        // reject afterwards would leave that placeholder behind to poison a
+        // later real `declareType('Later', …)`.
+        if (args !== undefined)
+          throw new TypeVariableError(
+            'generic-alias-forward-reference',
+            `The forward reference \`type ${name}\` cannot take type arguments: declare "${name}" before applying it`
+          );
         const forwardResult = this.typeResolver.forward(name);
         if (forwardResult) {
           return this.createNode<TypeReferenceNode>('type_reference', {
             name,
             isForward: true,
+            args,
           });
         }
       }
@@ -1591,9 +1637,39 @@ export class Parser {
       return this.createNode<TypeReferenceNode>('type_reference', {
         name,
         isForward,
+        args,
       });
     }
 
     return undefined;
+  }
+
+  /** The `<…>` argument list of an applied type reference, or `undefined` when
+   * the slot is absent. An EMPTY list (`Pair<>`) returns `[]` — a distinct
+   * (and always erroneous) shape the builder reports as an arity error. */
+  private parseTypeArguments(): TypeNode[] | undefined {
+    if (this.current.type !== '<') return undefined;
+    this.advance(); // '<'
+
+    if ((this.current as Token).type === '>') {
+      this.advance();
+      return [];
+    }
+
+    const args: TypeNode[] = [];
+    do {
+      const arg = this.parseUnionType();
+      if (!arg) this.error('Expected a type argument');
+      args.push(arg);
+    } while (this.match(','));
+
+    if ((this.current as Token).type !== '>')
+      this.error(
+        'Expected `>` to close the type arguments',
+        'For example `Pair<integer>`'
+      );
+    this.advance(); // '>'
+
+    return args;
   }
 }

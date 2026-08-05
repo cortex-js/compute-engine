@@ -579,20 +579,55 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
     );
   });
 
-  test('the ANONYMOUS `Apply` route evaluates but does NOT type (pinned)', () => {
-    // `Apply(literal, …)` never passes a symbol's boxed-definition seam, so no
-    // arm is resolved and no result instantiation happens: the honest static
-    // answer stays `unknown`. Only the SYMBOL-call route instantiates. (Phase 1
-    // measured the same `unknown`; phase 2 does not change it.)
+  // R2. The ANONYMOUS application crosses no symbol/definition seam, so neither
+  // the operator-def nor the value-def arm of `boxed-function.ts`'s `type()`
+  // runs — the instantiation happens in `Apply`'s own type handler instead
+  // (`library/core.ts`). Both spellings are the same node: the
+  // application-head form canonicalizes to `Apply`.
+  test('the ANONYMOUS `Apply` route instantiates its callee', () => {
     const ce = fresh();
     const f = e1(ce, 'x', 'forall T. (x: T) -> T');
-    expect(ce.box(['Apply', f.json, 5] as any).type.toString()).toBe('unknown');
+    expect(ce.box(['Apply', f.json, 5] as any).type.toString()).toBe(
+      'finite_integer'
+    );
     expect(
       ce
         .box(['Apply', f.json, 5] as any)
         .evaluate()
         .toString()
     ).toBe('5');
+    expect(
+      ce.box(['Apply', f.json, { str: 'a' }] as any).type.toString()
+    ).toBe('string');
+  });
+
+  test('…and the application-HEAD spelling is the same node', () => {
+    const ce = fresh();
+    const f = e1(ce, 'x', 'forall T. (x: T) -> T');
+    const head = ce.box([f.json, 5] as any);
+    expect(head.operator).toBe('Apply');
+    expect(head.type.toString()).toBe('finite_integer');
+    expect(head.evaluate().toString()).toBe('5');
+    expect(ce.box([f.json, { str: 'a' }] as any).type.toString()).toBe(
+      'string'
+    );
+  });
+
+  test('a lift-admitted collection operand binds WHOLE, as on the named route', () => {
+    // `Apply` does not broadcast — `apply()` binds the argument whole — so the
+    // D10 echo answer (the operand's own type) is the honest one here too.
+    const ce = fresh();
+    const f = e1(ce, 'x', 'forall T. (x: T) -> T');
+    const call = ce.box(['Apply', f.json, ['List', 1, 2]] as any);
+    expect(call.type.toString()).toBe('vector<finite_integer^2>');
+    expect(call.evaluate().toString()).toBe('[1,2]');
+  });
+
+  test('a GROUND callee is unchanged (no polytype, no instantiation)', () => {
+    const ce = fresh();
+    const g = e2(ce, 'x', '(x: integer) -> integer', 'x');
+    expect(ce.box(['Apply', g.json, 5] as any).type.toString()).toBe('integer');
+    expect(ce.box([g.json, 5] as any).type.toString()).toBe('integer');
   });
 });
 
@@ -690,6 +725,178 @@ describe('§5.3 — bounds and broadcast (no double-lift)', () => {
     expect(call.type.toString()).not.toBe('vector<finite_integer^2>');
     const evaluated = call.evaluate();
     expect(evaluated.toString()).toBe('[[2,3],[5,6]]');
+    expect(evaluated.type.matches(call.type)).toBe(true);
+  });
+});
+
+// D10 RE-RULED, 2026-08-04. The measurement that forced it: at a
+// lift-admitted position the runtime MAPS, so `T` denotes ONE ELEMENT. Under
+// the old whole-actual bind a result that MENTIONS `T` (rather than being the
+// bare `T` the retired echo short-circuit recognized) came out one rank too
+// high — `forall T. (T) -> tuple<T, T>` over `[1, 2]` typed
+// `list<tuple<vector<…^2>, vector<…^2>>>` while the value is
+// `[(1,1), (2,2)]`. Every case below asserts evaluated ⊆ declared, which is
+// what the old answers failed.
+describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
+  const pin = (ce: ComputeEngine, arg: any, type: string, value: string) => {
+    const call = ce.box(['f', arg] as any);
+    expect(call.type.toString()).toBe(type);
+    const evaluated = call.evaluate();
+    expect(evaluated.toString()).toBe(value);
+    expect(evaluated.type.matches(call.type)).toBe(true);
+  };
+
+  test('a MENTION result: the wrap is around the per-element tuple', () => {
+    const ce = fresh();
+    ce.assign(
+      'f',
+      e1(ce, ['Tuple', 'x', 'x'], 'forall T. (x: T) -> tuple<T, T>')
+    );
+    // The scalar call is the per-element answer the wrap is built from.
+    pin(ce, 5, 'tuple<finite_integer, finite_integer>', '(5, 5)');
+    pin(
+      ce,
+      ['List', 1, 2],
+      'list<tuple<finite_integer, finite_integer>>',
+      '[(1, 1),(2, 2)]'
+    );
+    // Rank 2 — the depth the peel has to reach (the broadcast maps to the
+    // scalar LEAVES, so `T` is `finite_integer`, not a matrix row).
+    pin(
+      ce,
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      'list<tuple<finite_integer, finite_integer>>',
+      '[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]'
+    );
+  });
+
+  test('…and the VALUE-DEF arm agrees, at rank 1 AND rank 2', () => {
+    const ce = declareAssign('forall T. (x: T) -> tuple<T, T>', [
+      'Function',
+      ['Tuple', 'x', 'x'],
+      'x',
+    ]);
+    pin(ce, 5, 'tuple<finite_integer, finite_integer>', '(5, 5)');
+    pin(
+      ce,
+      ['List', 1, 2],
+      'list<tuple<finite_integer, finite_integer>>',
+      '[(1, 1),(2, 2)]'
+    );
+    // The value route maps to the scalar LEAVES too: its zip re-dispatches
+    // through the operator name when a zipped row is itself a broadcast
+    // collection, exactly as the operator-def routes do. Without that the
+    // literal would be applied to the whole ROW (`[([1,2],[1,2]), …]`) and
+    // disagree with the leaf-rank typing above.
+    pin(
+      ce,
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      'list<tuple<finite_integer, finite_integer>>',
+      '[[(1, 1),(2, 2)],[(3, 3),(4, 4)]]'
+    );
+  });
+
+  test('a BOUNDED scalar variable behaves identically', () => {
+    // The bound is checked at the scalar base by the lift gate; the element
+    // bind is what the result is built from.
+    const ce = fresh();
+    ce.assign(
+      'f',
+      e1(ce, ['Tuple', 'x', 'x'], 'forall T: number. (x: T) -> tuple<T, T>')
+    );
+    pin(ce, 5, 'tuple<finite_integer, finite_integer>', '(5, 5)');
+    pin(
+      ce,
+      ['List', 1, 2],
+      'list<tuple<finite_integer, finite_integer>>',
+      '[(1, 1),(2, 2)]'
+    );
+  });
+
+  test('a COLLECTION-bounded variable is NOT lift-admitted and echoes whole', () => {
+    // `T: indexed_collection` makes the parameter collection-typed, so
+    // `paramsAreScalar` is false, nothing is lifted, and the operand binds
+    // whole — unchanged by the re-ruling.
+    const ce = fresh();
+    ce.declare('vecho', 'forall T: indexed_collection. (T) -> T');
+    expect(ce.box(['vecho', ['List', 1, 2]] as any).type.toString()).toBe(
+      'vector<finite_integer^2>'
+    );
+    expect(
+      ce
+        .box(['vecho', ['List', ['List', 1, 2], ['List', 3, 4]]] as any)
+        .type.toString()
+    ).toBe('matrix<finite_integer^(2x2)>');
+    expect(ce.box(['vecho', 5] as any).isValid).toBe(false);
+  });
+
+  test('an ATOMIC or NEVER-MAPPED operand still binds whole', () => {
+    // The lift ADMISSION gate is looser than the map: a tuple is atomic under
+    // broadcast and a `set` is admitted but never mapped, so neither is
+    // peeled (this is what keeps `Conjugate(Set(1, 2))` typed `set<…>`).
+    const ce = fresh();
+    ce.assign('f', e1(ce, 'x', 'forall T. (x: T) -> T'));
+    expect(ce.box(['f', ['Tuple', 1, 2]] as any).type.toString()).toBe(
+      'tuple<finite_integer, finite_integer>'
+    );
+    expect(ce.box(['Conjugate', ['Set', 1, 2]] as any).type.toString()).toBe(
+      'set<finite_integer>'
+    );
+  });
+
+  test('a UNION actual distributes the peel only when EVERY member maps', () => {
+    const ce = fresh();
+    ce.declare('f', 'forall T. (x: T) -> tuple<T, T>');
+    // All members mapped: the peel distributes (the `Add` widen artifact).
+    ce.declare('v', 'list<integer> | matrix<integer>');
+    expect(ce.box(['f', 'v'] as any).type.toString()).toBe(
+      'list<tuple<integer, integer>>'
+    );
+    // One member the broadcast never maps (a `set` is lift-ADMITTED but
+    // inert): distributing would claim `integer | set<integer>` while the
+    // runtime may echo the set whole. The union contributes ITSELF.
+    ce.declare('u', 'list<integer> | set<integer>');
+    expect(ce.box(['f', 'u'] as any).type.toString()).toBe(
+      'list<tuple<list<integer> | set<integer>, list<integer> | set<integer>>>'
+    );
+  });
+
+  test('the peel depth follows the OUTER kind, not the element', () => {
+    const ce = fresh();
+    ce.declare('f', 'forall T. (x: T) -> tuple<T, T>');
+    // A `list` outer has a static rank, so the peel descends to the LEAF and
+    // `broadcastShapedResultType` re-adds every level.
+    ce.declare('h', 'list<list<integer^2>>');
+    expect(ce.box(['f', 'h'] as any).type.toString()).toBe(
+      'list<tuple<integer, integer>>'
+    );
+    // An `indexed_collection`/`broadcastable` outer has NO static rank
+    // (`staticCollectionDims` answers `null`), so the wrapper re-adds exactly
+    // ONE level — the peel must take exactly one too, or the type comes out
+    // flat while the runtime stays nested.
+    ce.declare('g', 'indexed_collection<list<integer^2>>');
+    expect(ce.box(['f', 'g'] as any).type.toString()).toBe(
+      'list<tuple<vector<integer^2>, vector<integer^2>>>'
+    );
+    ce.declare('b', 'broadcastable<list<integer^2>>');
+    expect(ce.box(['f', 'b'] as any).type.toString()).toBe(
+      'broadcastable<tuple<vector<integer^2>, vector<integer^2>>>'
+    );
+  });
+
+  test('`Apply` is NOT a map: it binds the argument whole', () => {
+    // `apply()` binds each argument whole — a broadcasting BODY broadcasts on
+    // its own, inside the binding. So no position is lift-admitted on this
+    // route and the element bind must not fire (there is no wrap here to put
+    // a rank back).
+    const ce = fresh();
+    const f = e1(ce, ['Tuple', 'x', 'x'], 'forall T. (x: T) -> tuple<T, T>');
+    const call = ce.box(['Apply', f.json, ['List', 1, 2]] as any);
+    expect(call.type.toString()).toBe(
+      'tuple<vector<finite_integer^2>, vector<finite_integer^2>>'
+    );
+    const evaluated = call.evaluate();
+    expect(evaluated.toString()).toBe('([1,2], [1,2])');
     expect(evaluated.type.matches(call.type)).toBe(true);
   });
 });
@@ -1490,5 +1697,155 @@ describe('§follow-up — an UNGROUPED ground marker is the literal’s own sign
       expect(f.ops[1].json).toBe('x');
       expect(f.type.toString()).toBe('forall T: number. (x: T) -> T');
     });
+  });
+});
+
+//
+// R1 — the STORED literal carries the declared polytype.
+//
+// A marker-less literal accepted under a polymorphic declaration is rebuilt
+// with the full-signature marker, so the VALUE describes itself: `f`'s value
+// types as the polytype rather than as the `(unknown) -> unknown` its erased
+// bare parameters would infer. Display only — the ascription is restricted to
+// clauses whose every argument is quantified, so it can never introduce a
+// ground parameter constraint on the literal's own arrow.
+//
+describe('R1 — a declared polytype is ascribed onto the stored literal', () => {
+  test('declare-then-assign: the value carries the clause', () => {
+    const ce = declareAssign('forall T. (x: T) -> T', ['Function', 'x', 'x']);
+    const value = ce.box('f').evaluate();
+    expect(value.toString()).toBe('(x) |-> x');
+    expect(value.type.toString()).toBe('forall T. (x: T) -> T');
+    // The definition's own type is unchanged, and so is every call.
+    expect(ce.box('f').type.toString()).toBe('forall T. (x: T) -> T');
+    expect(ce.box(['f', 5] as any).type.toString()).toBe('finite_integer');
+  });
+
+  test('declare-WITH-value: the same', () => {
+    const ce = fresh();
+    ce.declare('f', {
+      type: 'forall T. (x: T) -> T',
+      value: ce.box(['Function', 'x', 'x']),
+    } as any);
+    const value = ce.box('f').evaluate();
+    expect(value.type.toString()).toBe('forall T. (x: T) -> T');
+    expect(value.json).toMatchObject([
+      'Function',
+      ['Block', ['Typed', 'x', "'forall T. (x: T) -> T'"]],
+      'x',
+    ]);
+  });
+
+  test('a GROUND argument in the clause is NOT ascribed', () => {
+    // `n: number` would become a real constraint on the literal's own arrow,
+    // enforced at the per-element `apply()` inside a broadcast — where `n`
+    // legitimately receives a whole row. The clause is left off instead.
+    const ce = declareAssign('forall T. (x: T, n: number) -> T', [
+      'Function',
+      ['Add', 'x', 'n'],
+      'x',
+      'n',
+    ]);
+    expect(ce.box('f').evaluate().type.toString()).toBe(
+      '(unknown, unknown) -> number'
+    );
+  });
+
+  test("a literal with its OWN marker keeps it", () => {
+    const ce = fresh();
+    ce.declare('f', 'forall T. (x: T) -> T');
+    ce.assign('f', e2(ce, 'x', 'forall U. (y: U) -> U', 'x'));
+    expect(ce.box('f').evaluate().type.toString()).toBe(
+      'forall U. (y: U) -> U'
+    );
+  });
+
+  test('a GROUND declaration is untouched (pre-existing asymmetry)', () => {
+    const ce = fresh();
+    ce.declare('g', '(x: integer) -> integer');
+    ce.assign('g', ce.box(['Function', 'x', 'x']));
+    expect(ce.box('g').type.toString()).toBe('(x: integer) -> integer');
+    // The stored literal still loses the PARAMETER type — out of R1's scope.
+    expect(ce.box('g').evaluate().type.toString()).toBe('(unknown) -> integer');
+  });
+});
+
+//
+// R4 — an untyped re-assign full-replaces an assign-DERIVED signature
+// (D6, "Assign always full-replaces"). The boundary is PROVENANCE: a signature
+// written by `ce.declare()` is a declaration and stays sticky.
+//
+describe('R4 — untyped re-assign replaces a derived signature', () => {
+  const annotated = (ce: ComputeEngine) =>
+    ce.box(['Function', ['Typed', ['Add', 'x', 1], "'integer'"], 'x'] as any);
+  const untyped = (ce: ComputeEngine) =>
+    ce.box(['Function', ['Multiply', 'x', 2], 'x'] as any);
+
+  test('annotated then untyped: the derived signature is discarded', () => {
+    const ce = fresh();
+    ce.assign('g', annotated(ce));
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> integer');
+    ce.assign('g', untyped(ce));
+    // Re-inferred from the NEW body — the old return annotation is gone.
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> finite_number');
+    expect(ce.box(['g', 1.5] as any).evaluate().toString()).toBe('3');
+    // …and the representation stays an operator definition with a lambda.
+    const def = ce.lookupDefinition('g');
+    expect(def?.operator?.inferredSignature).toBe(true);
+    expect(def?.operator?.lambda).toBeDefined();
+  });
+
+  test('a PARAMETER annotation is derived the same way', () => {
+    const ce = fresh();
+    ce.assign(
+      'g',
+      ce.box(['Function', ['Add', 'x', 1], ['Typed', 'x', "'integer'"]] as any)
+    );
+    expect(ce.box(['g', 1.5] as any).isValid).toBe(false);
+    ce.assign('g', untyped(ce));
+    expect(ce.box(['g', 1.5] as any).isValid).toBe(true);
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> finite_number');
+  });
+
+  test('a GENERIC annotation is derived the same way', () => {
+    const ce = fresh();
+    ce.assign('g', e2(ce, 'x', 'forall T. (x: T) -> T', 'x'));
+    expect(ce.box('g').type.toString()).toBe('forall T. (x: T) -> T');
+    ce.assign('g', untyped(ce));
+    expect(ce.box('g').type.isPolymorphic).toBe(false);
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> finite_number');
+  });
+
+  test('a DECLARED signature stays sticky (string form)', () => {
+    const ce = fresh();
+    ce.declare('g', '(x: integer) -> integer');
+    ce.assign('g', untyped(ce));
+    expect(ce.box('g').type.toString()).toBe('(x: integer) -> integer');
+    expect(ce.box(['g', 1.5] as any).isValid).toBe(false);
+  });
+
+  test('a DECLARED signature stays sticky (object form, with a body)', () => {
+    const ce = fresh();
+    ce.declare('g', {
+      signature: '(x: integer) -> integer',
+      evaluate: ['Function', ['Add', 'x', 1], 'x'],
+    } as any);
+    ce.assign('g', untyped(ce));
+    expect(ce.box('g').type.toString()).toBe('(x: integer) -> integer');
+    expect(ce.box(['g', 1.5] as any).isValid).toBe(false);
+  });
+
+  test('an ANNOTATED re-assign is unchanged: same rebuilds, different errors', () => {
+    const ce = fresh();
+    ce.assign('g', annotated(ce));
+    ce.assign('g', annotated(ce));
+    expect(ce.box('g').type.toString()).toBe('(unknown) -> integer');
+
+    expect(() =>
+      ce.assign(
+        'g',
+        ce.box(['Function', ['Typed', ['Add', 'x', 1], "'string'"], 'x'] as any)
+      )
+    ).toThrow();
   });
 });
