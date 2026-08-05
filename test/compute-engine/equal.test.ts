@@ -5,7 +5,6 @@ import { sameSyntactic } from '../../src/compute-engine/boxed-expression/compare
 const TESTS: [string, string][] = [
   ['1234', '1234.0'],
   ['2+2', '4'],
-  ['x^2', 'x\\times x'],
   ['\\frac{1}{2}', '0.5'],
   ['\\sqrt{4}', '2'],
   ['\\sin(\\frac{\\pi}{2})', '1'],
@@ -13,6 +12,13 @@ const TESTS: [string, string][] = [
   // ['\\int_{0}^{1} x^2 dx', '\\frac{1}{3}'],
   ['\\sum_{n=1}^{10} n', '55'],
   // ['\\lim_{x \\to \\infty} (1 + \\frac{1}{x})^x', 'e'],
+];
+
+// Two relations are equivalent when they have the same SOLUTION SET — an
+// identity question in the free variables of the operands, hence the PROVER
+// tier (`.isIdenticallyEqual()`). The cheap arithmetic tier (`.isEqual()`)
+// declines with `undefined`. See docs/plans/2026-08-04-cheap-equal-audit.md.
+const EQUIVALENT_RELATIONS: [string, string][] = [
   ['2x+1=0', '2x=-1'],
   ['2x+1=0', 'x=-\\frac12'],
   ['x^2+2x+1=0', '(x+1)^2=0'],
@@ -21,12 +27,19 @@ const TESTS: [string, string][] = [
   ['3x + 1 = 0', '6x + 2 = 0'],
   ['2(13.1+x)<(10-5)', '26.2+2x<5'],
   ['x^2 + 2x + 1 = 0', 'x^2 + 2x = -1'],
-  // Same unknowns, structurally equal after expand/simplify
+];
+
+// Identities in the free variables. These belong to the PROVER tier
+// (`IdenticallyEqual` / `.isIdenticallyEqual()`) — expand+simplify and
+// stochastic sampling. Arithmetic `=` / `.isEqual()` is the cheap tier and
+// stays inert on them. See docs/plans/2026-08-04-cheap-equal-audit.md.
+const IDENTITIES: [string, string][] = [
+  ['x^2', 'x\\times x'],
   ['(x+1)^2', 'x^2+2x+1'],
 ];
 
-// Tests for equation equivalence - equations that should NOT be equal
-// (different solution sets)
+// Tests for equation equivalence - equations that should NOT be equivalent
+// (different solution sets). Prover tier, like `EQUIVALENT_RELATIONS`.
 const NOT_EQUAL_EQUATIONS: [string, string][] = [
   // Different solution sets: x^2-1=0 has solutions {-1, 1}, x-1=0 has solution {1}
   ['x^2 - 1 = 0', 'x - 1 = 0'],
@@ -46,11 +59,32 @@ describe('a.isEqual(b)', () => {
   }
 });
 
+describe('a.isIdenticallyEqual(b) — free-variable identities', () => {
+  for (const test of IDENTITIES) {
+    const [a, b] = test;
+    it(`("${a}").isIdenticallyEqual("${b}")`, () =>
+      expect(ce.parse(a).isIdenticallyEqual(ce.parse(b))).toBe(true));
+    it(`("${a}").isEqual("${b}") is inert (arithmetic tier)`, () =>
+      expect(ce.parse(a).isEqual(ce.parse(b))).toBe(undefined));
+  }
+});
+
+describe('Relation equivalence — prover tier', () => {
+  for (const [a, b] of EQUIVALENT_RELATIONS) {
+    it(`("${a}").isIdenticallyEqual("${b}")`, () =>
+      expect(ce.parse(a).isIdenticallyEqual(ce.parse(b))).toBe(true));
+    it(`("${a}").isEqual("${b}") is inert (arithmetic tier)`, () =>
+      expect(ce.parse(a).isEqual(ce.parse(b))).toBe(undefined));
+  }
+});
+
 describe('Equation equivalence - non-equivalent equations', () => {
   for (const test of NOT_EQUAL_EQUATIONS) {
     const [a, b] = test;
-    it(`("${a}").isEqual("${b}") should be false`, () =>
-      expect(ce.parse(a).isEqual(ce.parse(b))).toBe(false));
+    it(`("${a}").isIdenticallyEqual("${b}") should be false`, () =>
+      expect(ce.parse(a).isIdenticallyEqual(ce.parse(b))).toBe(false));
+    it(`("${a}").isEqual("${b}") is inert (arithmetic tier)`, () =>
+      expect(ce.parse(a).isEqual(ce.parse(b))).toBe(undefined));
   }
 });
 
@@ -70,13 +104,14 @@ describe('Equation equivalence - multiple unknowns (REVIEW.md B13)', () => {
     ['x+y=0', 'x+2y=0'],
   ];
 
+  // Relation equivalence is prover tier (see `EQUIVALENT_RELATIONS`).
   for (const [a, b] of EQUIVALENT)
-    it(`("${a}").isEqual("${b}") is true`, () =>
-      expect(ce.parse(a).isEqual(ce.parse(b))).toBe(true));
+    it(`("${a}").isIdenticallyEqual("${b}") is true`, () =>
+      expect(ce.parse(a).isIdenticallyEqual(ce.parse(b))).toBe(true));
 
   for (const [a, b] of NOT_EQUIVALENT)
-    it(`("${a}").isEqual("${b}") is false`, () =>
-      expect(ce.parse(a).isEqual(ce.parse(b))).toBe(false));
+    it(`("${a}").isIdenticallyEqual("${b}") is false`, () =>
+      expect(ce.parse(a).isIdenticallyEqual(ce.parse(b))).toBe(false));
 });
 
 // `isSame` is an unconditional equivalence relation (option B): two symbols

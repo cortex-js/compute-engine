@@ -137,9 +137,11 @@ function parseModulusAnnotation(
 }
 
 /**
- * Shared parse handler for the congruence/equivalence infix operators
+ * Shared parse handler for the congruence/identity infix operators
  * (`\equiv` and the Unicode `≡`). Produces `Congruent(a, b, n)` when a modulus
- * annotation follows, otherwise `Equivalent(a, b)`.
+ * annotation follows, otherwise `IdenticallyEqual(a, b)` — the prover tier of
+ * the equality ladder (`Same` / `Equal` / `IdenticallyEqual`). The logical
+ * biconditional keeps `\iff` / `\Leftrightarrow` (`Equivalent`).
  */
 function parseEquivalent(
   parser: Parser,
@@ -179,7 +181,7 @@ function parseEquivalent(
       ];
     return ['Congruent', lhs, missingIfEmpty(rhs), modulus];
   }
-  return ['Equivalent', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
+  return ['IdenticallyEqual', lhs, missingIfEmpty(rhs)] as MathJsonExpression;
 }
 
 export const DEFINITIONS_LOGIC: LatexDictionary = [
@@ -414,6 +416,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     // (`\implies`, 220), so `a ≡ b ⟹ c ≡ d` groups as
     // `Implies(Congruent(…), Congruent(…))` rather than mis-associating the
     // implication into one of the congruences.
+    name: 'IdenticallyEqual',
     latexTrigger: ['\\equiv'],
     kind: 'infix',
     associativity: 'right',

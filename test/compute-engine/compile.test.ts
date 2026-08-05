@@ -1318,6 +1318,18 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     );
   });
 
+  it('IdenticallyEqual (`\\equiv`) has no lowering and fails closed (D6)', () => {
+    // The PROVER tier: deciding `IdenticallyEqual` means sampling and symbolic
+    // expansion, which has no numeric lowering at all. Like `Same`, it must
+    // never borrow `Equal`'s tolerant `_SYS.eq`.
+    const e = new ComputeEngine();
+    e.declare('x', 'number');
+    const js = new JavaScriptTarget();
+    expect(() => js.compile(e.box(['IdenticallyEqual', 'x', 1]))).toThrow(
+      /IdenticallyEqual.*no lowering.*Fail closed/s
+    );
+  });
+
   it('Which with a collection condition selects element-wise (was fail-closed)', () => {
     // `d = m` broadcasts to `[False, False, False]`, so every position takes
     // the default arm. Element-wise selection landed 2026-07-27

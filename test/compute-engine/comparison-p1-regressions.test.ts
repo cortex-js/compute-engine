@@ -12,13 +12,21 @@ import { ComputeEngine } from '../../src/compute-engine';
  * CM-P1-5 (isEqual identity semantics for free-variable expressions) is a
  * documented contract fork against comparison-assumptions-regressions.test.ts
  * (`x.isEqual(2)` → undefined, committed as the P0-30 fix) and was NOT changed.
+ *
+ * UPDATE (equality tiers, 2026-08-04): the value-FOLLOWING half of CM-P1-1 /
+ * CM-P1-2 was retired. `isSame` is now strictly syntactic everywhere — a
+ * symbol is never the same as its value — so the symmetry those tests
+ * pinned is now the symmetry of `false`, and the value question they were
+ * really asking migrates to `.isEqual()`. Symmetry and transitivity, the
+ * actual contract, still hold (see the representation-pool test).
  */
 
-describe('CM-P1-1: BoxedSymbol.isSame follows a function-valued binding', () => {
-  test('g := x^2+1 ; g.isSame(x^2+1)', () => {
+describe('CM-P1-1: BoxedSymbol.isSame does NOT follow a function-valued binding', () => {
+  test('g := x^2+1 ; g.isSame(x^2+1) is false, g.isEqual(x^2+1) is true', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x^2+1'));
-    expect(ce.symbol('g').isSame(ce.parse('x^2+1'))).toBe(true);
+    expect(ce.symbol('g').isSame(ce.parse('x^2+1'))).toBe(false);
+    expect(ce.symbol('g').isEqual(ce.parse('x^2+1'))).toBe(true);
   });
 
   test('symmetry for the expression-valued binding', () => {
@@ -27,7 +35,8 @@ describe('CM-P1-1: BoxedSymbol.isSame follows a function-valued binding', () => 
     const g = ce.symbol('g');
     const e = ce.parse('x^2+1');
     expect(g.isSame(e)).toBe(e.isSame(g));
-    expect(e.isSame(g)).toBe(true);
+    expect(e.isSame(g)).toBe(false);
+    expect(e.isEqual(g)).toBe(true);
   });
 });
 
@@ -37,16 +46,22 @@ describe('CM-P1-2: isSame is a symmetric, transitive equivalence relation', () =
     ce.assign('one', 1);
     const one = ce.symbol('one');
     const lit = ce.number(1);
-    expect(one.isSame(lit)).toBe(true);
-    expect(lit.isSame(one)).toBe(true); // used to be false (asymmetric)
+    // Syntactic: a symbol is not its value, in either direction.
+    expect(one.isSame(lit)).toBe(false);
+    expect(lit.isSame(one)).toBe(false);
+    // The value question is `.isEqual()`, and it too is symmetric.
+    expect(one.isEqual(lit)).toBe(true);
+    expect(lit.isEqual(one)).toBe(true);
   });
 
   test('ImaginaryUnit vs Complex(0,1) is symmetric', () => {
     const ce = new ComputeEngine();
     const i = ce.symbol('ImaginaryUnit');
     const c = ce.box(['Complex', 0, 1]);
-    expect(i.isSame(c)).toBe(true);
-    expect(c.isSame(i)).toBe(true); // used to be false
+    expect(i.isSame(c)).toBe(false);
+    expect(c.isSame(i)).toBe(false);
+    expect(i.isEqual(c)).toBe(true);
+    expect(c.isEqual(i)).toBe(true);
   });
 
   test('exact vs inexact 1/3 is symmetric and strict (both directions false)', () => {

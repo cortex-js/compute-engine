@@ -44,7 +44,7 @@ import type { SmallInteger } from '../numerics/types.js';
 
 import { toAsciiMath } from './ascii-math.js';
 // Dynamic import for serializeJson to avoid circular dependency
-import { cmp, eq, same } from './compare.js';
+import { cmp, eq, eqIdentical, same } from './compare.js';
 import { CancellationError } from '../../common/interruptible.js';
 import { isSymbol, isString, isNumber, isFunction } from './type-guards.js';
 import { extractIntervalBounds } from './inequality-bounds.js';
@@ -774,6 +774,10 @@ export abstract class _BoxedExpression implements Expression {
 
   isEqual(other: number | Expression): boolean | undefined {
     return eq(this, other);
+  }
+
+  isIdenticallyEqual(other: number | Expression): boolean | undefined {
+    return eqIdentical(this, other);
   }
 
   // `cmp()` may return a weak/indeterminate relation (`'<='` or `'>='`, e.g.

@@ -1,22 +1,28 @@
 import { engine as ce } from '../utils';
 
+// The stochastic sampler backs the PROVER tier only: `IdenticallyEqual`
+// (`\equiv`) / `.isIdenticallyEqual()`. Arithmetic `=` / `.isEqual()` is the
+// cheap tier and is inert on a free-variable identity — pinned alongside the
+// first case below. See docs/plans/2026-08-04-cheap-equal-audit.md.
 describe('STOCHASTIC EQUALITY', () => {
   it('trig identity: sin²(x) + cos²(x) = 1', () => {
     const a = ce.parse('\\sin^2(x) + \\cos^2(x)');
     const b = ce.parse('1');
-    expect(a.isEqual(b)).toBe(true);
+    expect(a.isIdenticallyEqual(b)).toBe(true);
+    // The arithmetic tier does not sample: it stays inert.
+    expect(a.isEqual(b)).toBe(undefined);
   });
 
   it('algebraic: (x²-1)/(x-1) = x+1', () => {
     const a = ce.parse('\\frac{x^2-1}{x-1}');
     const b = ce.parse('x+1');
-    expect(a.isEqual(b)).toBe(true);
+    expect(a.isIdenticallyEqual(b)).toBe(true);
   });
 
   it('multi-variable: (x+y)² = x²+2xy+y²', () => {
     const a = ce.parse('(x+y)^2');
     const b = ce.parse('x^2 + 2xy + y^2');
-    expect(a.isEqual(b)).toBe(true);
+    expect(a.isIdenticallyEqual(b)).toBe(true);
   });
 
   it('not an identity: x² vs x³ is undefined (not false)', () => {
@@ -26,24 +32,24 @@ describe('STOCHASTIC EQUALITY', () => {
     // never a definitive `false`.
     const a = ce.parse('x^2');
     const b = ce.parse('x^3');
-    expect(a.isEqual(b)).toBe(undefined);
+    expect(a.isIdenticallyEqual(b)).toBe(undefined);
   });
 
   it('different unknowns that cancel: x - x + y = y', () => {
     const a = ce.parse('x - x + y');
     const b = ce.parse('y');
-    expect(a.isEqual(b)).toBe(true);
+    expect(a.isIdenticallyEqual(b)).toBe(true);
   });
 
   it('double angle: sin(2x) = 2sin(x)cos(x)', () => {
     const a = ce.parse('\\sin(2x)');
     const b = ce.parse('2\\sin(x)\\cos(x)');
-    expect(a.isEqual(b)).toBe(true);
+    expect(a.isIdenticallyEqual(b)).toBe(true);
   });
 
   it('constant expressions with unknowns: 0·x = 0', () => {
     const a = ce.parse('0 \\cdot x');
     const b = ce.parse('0');
-    expect(a.isEqual(b)).toBe(true);
+    expect(a.isIdenticallyEqual(b)).toBe(true);
   });
 });

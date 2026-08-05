@@ -16,12 +16,6 @@ import {
 import { boundVariableBindings, sameBindingDef } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
 import { stochasticEqual } from './stochastic-equal.js';
-import {
-  CYCLE_DETECTED,
-  CycleDepthQuery,
-  enterCycleDepthQuery,
-  exitCycleDepthQuery,
-} from './cycle-guard.js';
 
 // Lazy reference to break circular dependency:
 // expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare
@@ -39,9 +33,12 @@ export function _setExpand(fn: ExpandFn) {
  * denotes its binder, so the name is the whole answer), or when both free
  * occurrences resolve to the same binding — where a standard-library
  * definition counts as the same binding across engines, and a user constant
- * compares by its value. Everything else — including a raw occurrence against
- * a bound one — is a different symbol; a caller comparing a TEMPLATE against
- * a subject asks the syntactic question explicitly via `sameSyntactic`.
+ * compares by its value. (That last case is BINDING identity — two engines'
+ * same-named constant — not value-following: a mutable symbol's value is
+ * never dereferenced by `isSame`.) Everything else — including a raw
+ * occurrence against a bound one — is a different symbol; a caller comparing
+ * a TEMPLATE against a subject asks the syntactic question explicitly via
+ * `sameSyntactic`.
  *
  * @internal Exported for `BoxedSymbol.isSame`, which handles the top-level
  * symbol-vs-symbol case before `same()` is reached.
@@ -243,14 +240,14 @@ function extendBinders(
  * The set is allocated lazily, so comparing binder-free expressions — the hot
  * path, via `Terms.find` — costs exactly what it did before.
  *
- * ### Contract: an equivalence relation (modulo value-following)
+ * ### Contract: an equivalence relation
  *
- * Reflexive, symmetric and transitive — unconditionally, for every operand —
- * EXCEPT across value-following: `isSame` follows a symbol's assigned value
- * when compared against a non-symbol (`x := 1` makes `x.isSame(1)` true while
- * `x.isSame(y)` with `y := 1` stays false), a pre-existing hybrid no other
- * system's structural equality has. Dedup keys are safe as long as the keyed
- * set is all-symbols or all-values; do not mix.
+ * Reflexive, symmetric and transitive — unconditionally, for every operand.
+ * A symbol's assigned value is NEVER dereferenced: `isSame` is strictly
+ * syntactic, so `x := 1` leaves `x.isSame(1)` false, exactly like
+ * `x.isSame(y)` with `y := 1`. (Value equality is the `Equal`/`.isEqual()`
+ * tier; identity in the free variables is `.isIdenticallyEqual()`.) Any
+ * dedup key is therefore safe, including a set mixing symbols and values.
  *
  * An earlier revision exempted RAW operands, on the reasoning that they carry
  * no bindings and so can only be compared syntactically. That broke
@@ -273,44 +270,9 @@ export function same(
 ): boolean {
   if (a === b) return true;
 
-  //
-  // Follow symbol value bindings so that isSame is symmetric (it is used as a
-  // dedup/matching key and must be an equivalence relation). `BoxedSymbol.isSame`
-  // already follows the LHS binding; mirror it here for whichever side is a
-  // symbol when the *other* side is not. Two symbols are compared by name in the
-  // BoxedSymbol branch below (bindings are NOT followed for symbol-vs-symbol),
-  // so we only unwrap when exactly one operand is a symbol.
-  //
-  const aSym = isSymbol(a);
-  const bSym = isSymbol(b);
-  if (aSym !== bSym) {
-    // A followed VALUE was never inside the binders enclosing the occurrence
-    // that held it, so it gets no binder map: a name it shares with one of
-    // those binders is a coincidence of spelling, not a bound occurrence.
-    const sym = bSym ? b : a;
-    const value = sym.value;
-    if (value === undefined || (value as Expression) === sym) return false;
-
-    // `same()` follows symbol bindings itself, outside `BoxedSymbol`, so it
-    // needs its own guard against an indirect reference cycle (`a := b` with
-    // `b := a`): unwrapping either side leads back here forever. Fail closed —
-    // "not provably the same" — rather than overflowing the stack.
-    const binding = sym.valueDefinition;
-    if (binding !== undefined) {
-      const guard = enterCycleDepthQuery(binding, CycleDepthQuery.Same);
-      if (guard === CYCLE_DETECTED) return false;
-      try {
-        return bSym
-          ? same(a, value, boundA, undefined, syntactic)
-          : same(value, b, undefined, boundB, syntactic);
-      } finally {
-        exitCycleDepthQuery(binding, CycleDepthQuery.Same, guard);
-      }
-    }
-    return bSym
-      ? same(a, value, boundA, undefined, syntactic)
-      : same(value, b, undefined, boundB, syntactic);
-  }
+  // A symbol is compared as a symbol, never as its value: exactly one operand
+  // being a symbol falls through to the type-mismatch branches below and is
+  // `false`.
 
   //
   // BoxedFunction
@@ -404,22 +366,63 @@ export function same(
 }
 
 /**
- * Mathematical equality of two boxed expressions.
+ * Arithmetic equality of two boxed expressions.
  *
- * In general, it is impossible to always prove equality
- * ([Richardson's theorem](https://en.wikipedia.org/wiki/Richardson%27s_theorem)) but this works often...
+ * The cheap tier, backing `=` (`Equal`) and `.isEqual()`: evaluate the
+ * operands, then compare structurally (`isSame`), then — when neither side
+ * has unknowns — check that their difference is zero within the engine
+ * tolerance. Anything still undecided (in particular, a comparison with free
+ * variables) is **inert**: `undefined`, not `false`. No expand, no simplify,
+ * no stochastic sampling.
+ *
+ * Proving an identity in the free variables (`sin²x + cos²x = 1`) is the
+ * prover tier's job: see `eqIdentical()` / `.isIdenticallyEqual()`. In
+ * general it is impossible to always prove equality
+ * ([Richardson's theorem](https://en.wikipedia.org/wiki/Richardson%27s_theorem)).
  */
 export function eq(
   a: Expression,
   inputB: number | Expression
 ): boolean | undefined {
-  // We want to give a chance to the eq handler of the functions first
+  return eqImpl(a, inputB, false);
+}
+
+/**
+ * Identity of two boxed expressions in all their free variables.
+ *
+ * This is the "prover" tier: in addition to everything `eq()` does, the free
+ * variable machinery (stochastic sampling at random sample points, then a
+ * symbolic expand+simplify proof) is engaged. Three-valued: a stochastic
+ * disagreement degrades to `undefined` rather than a definitive `false`.
+ */
+export function eqIdentical(
+  a: Expression,
+  inputB: number | Expression
+): boolean | undefined {
+  return eqImpl(a, inputB, true);
+}
+
+/**
+ * Shared implementation of `eq()` and `eqIdentical()`.
+ *
+ * When `prover` is false, the free-variable branch (stochastic sampling +
+ * expand/simplify fallback) is skipped and the comparison degrades to
+ * `undefined` at that point.
+ */
+function eqImpl(
+  a: Expression,
+  inputB: number | Expression,
+  prover: boolean
+): boolean | undefined {
+  // We want to give a chance to the eq handler of the functions first.
+  // The tier is passed to the handler: a handler that does prover-tier work
+  // (e.g. relation equivalence) declines when `prover` is false.
   if (a.operatorDefinition?.eq) {
-    const cmp = a.operatorDefinition.eq(a, a.engine.expr(inputB));
+    const cmp = a.operatorDefinition.eq(a, a.engine.expr(inputB), prover);
     if (cmp !== undefined) return cmp;
   }
   if (typeof inputB !== 'number' && inputB.operatorDefinition?.eq) {
-    const cmp = inputB.operatorDefinition.eq(inputB, a);
+    const cmp = inputB.operatorDefinition.eq(inputB, a, prover);
     if (cmp !== undefined) return cmp;
   }
 
@@ -448,9 +451,9 @@ export function eq(
   //
   if (isFunction(a) || isFunction(b)) {
     // If the function has a special handler for equality, use it
-    let cmp = a.operatorDefinition?.eq?.(a, b);
+    let cmp = a.operatorDefinition?.eq?.(a, b, prover);
     if (cmp !== undefined) return cmp;
-    cmp = b.operatorDefinition?.eq?.(b, a);
+    cmp = b.operatorDefinition?.eq?.(b, a, prover);
     if (cmp !== undefined) return cmp;
 
     // If the expressions are structurally identical, they are equal — EXCEPT
@@ -484,7 +487,7 @@ export function eq(
         for (const xa of a.each()) {
           const xb = itB.next();
           if (xb.done) return false;
-          const cmp = eq(xa, xb.value);
+          const cmp = eqImpl(xa, xb.value, prover);
           if (cmp !== true) return cmp;
         }
         return true;
@@ -512,6 +515,10 @@ export function eq(
       // value did not resolve to a number). Don't assert a definitive `false`.
       return undefined;
     }
+
+    // The free-variable prover: only the "identical" tier engages it. Without
+    // it, a comparison with free variables is simply undecided.
+    if (!prover) return undefined;
 
     // Stochastic evaluation at random sample points, BEFORE the symbolic
     // expand+simplify proof: sampling is a compile + ~50 point evaluations,

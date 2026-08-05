@@ -86,11 +86,13 @@ const isSameTests: [
   [1, 1, true],
   [['Add', 'x', 1], ['Add', 'x', 1], true],
 
-  // Symbol with value binding
-  ['one', 1, true],
+  // Symbol with a value binding: `isSame` is strictly SYNTACTIC — the value
+  // is never dereferenced, so a symbol is never the same as a literal.
+  // (Value equality is `.isEqual()`; see `is()` above for the smart check.)
+  ['one', 1, false],
   ['one', 2, false],
-  ['zero', 0, true],
-  ['nan', NaN, true],
+  ['zero', 0, false],
+  ['nan', NaN, false],
 ];
 
 describe('isSame()', () => {

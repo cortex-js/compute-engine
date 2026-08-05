@@ -8,7 +8,7 @@ import type {
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { isFiniteIndexedCollection, isTuple } from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
-import { eq } from '../boxed-expression/compare.js';
+import { eq, eqIdentical } from '../boxed-expression/compare.js';
 import {
   isNumber,
   isFunction,
@@ -256,7 +256,13 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // Two equations are equivalent if they have the same solution set.
     // For polynomial equations, this means the LHS-RHS expressions differ
     // only by a non-zero constant factor.
-    eq: (a, b) => {
+    eq: (a, b, prover) => {
+      // Relation equivalence (same solution set) is an *identity* question in
+      // the free variables of the operands: prover tier only, per the ratified
+      // audit (docs/plans/2026-08-04-cheap-equal-audit.md). The cheap
+      // arithmetic tier (`eq()` / `.isEqual()`) declines. `cmp()` passes no
+      // flag, so its behavior is unchanged.
+      if (prover === false) return undefined;
       if (a.operator !== b.operator) return undefined;
       if (!isFunction(a) || !isFunction(b)) return undefined;
 
@@ -406,6 +412,68 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     },
   } as OperatorDefinition,
 
+  IdenticallyEqual: {
+    description: [
+      'Identity comparison (`\\equiv`).',
+      'True iff the operands are equal for every value of their free variables.',
+    ],
+    complexity: 11000,
+
+    signature: '(any, any) -> boolean',
+
+    // `lazy` for the same reason as `Equal`: the `canonical` handler needs the
+    // raw, direction-intact operands to decompose a chain (`a ≡ b ≡ c`).
+    lazy: true,
+
+    // Same absence semantics as `Equal` (§3.D): a `Missing` operand makes the
+    // comparison `Missing` (Kleene), a `NaN` operand makes it `False` (IEEE).
+    missingBehavior: 'handle',
+
+    type: (ops) => relationalAbsenceType(ops),
+
+    // Deliberately NOT `broadcastable`: this is a PROVER (is this an identity
+    // in all the free variables?), not an arithmetic comparison, so a list
+    // operand is compared as a whole rather than zipped element-wise.
+
+    canonical: (args, { engine: ce }) =>
+      canonicalRelational(ce, 'IdenticallyEqual', args),
+
+    evaluate: (rawOps, { engine: ce, numericApproximation }) => {
+      if (rawOps.length < 2) return ce.True;
+      // `lazy` skips evaluating the arguments before this handler runs, so
+      // evaluate them here (see the `Equal` handler).
+      const ops = rawOps.map((op) => op.evaluate({ numericApproximation }));
+      const vals = readComparisonAbsence(ce, rawOps, ops);
+      if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
+      if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
+      let lhs: Expression | undefined = undefined;
+      for (const arg of ops) {
+        if (!lhs) lhs = arg;
+        else {
+          // Dimensioned quantities compare by their SI magnitude, like
+          // `Equal` (`5 m ≡ 500 cm`).
+          const qcmp = quantityCompare(lhs, arg);
+          if (qcmp !== null) {
+            if (Math.abs(qcmp) > ce.tolerance) return ce.False;
+            lhs = arg;
+            continue;
+          }
+
+          const test = eqIdentical(lhs, arg);
+          if (test === false) return ce.False;
+          // Undecidable stays INERT, like `Equal`: `x ≡ y` is a *claim*, not a
+          // falsity. Note the prover degrades a sampled disagreement to
+          // `undefined` (D9), so a non-identity such as `x ≡ x+1` also stays
+          // inert rather than collapsing to `False`.
+          if (test === undefined)
+            return inertRelation(ce, 'IdenticallyEqual', rawOps, ops);
+          lhs = arg;
+        }
+      }
+      return ce.True;
+    },
+  } as OperatorDefinition,
+
   Same: {
     description: [
       'Structural identity comparison (Cortex `===`).',
@@ -414,14 +482,30 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
 
     // Variadic (the Cortex parser emits a chained `a === b === c` as a single
-    // n-ary `Same`). `Equal` gets away with a fixed `(any, any)` signature
-    // only because it is `lazy`, which skips argument validation.
+    // n-ary `Same`). Documentary only: like the other `lazy` relations
+    // (`Equal`, whose fixed `(any, any)` signature only works for the same
+    // reason), argument validation is skipped.
     signature: '(any, any+) -> boolean',
 
-    // Deliberately NOT `lazy`: unlike `IsSame` (which compares raw,
-    // uncanonicalized operands), `Same` compares the *values* its operands
-    // evaluate to — so `x === x` with `x := 1+1` is `True`, and a compound
-    // operand folds before the structural test.
+    // `lazy`, so the operands are CANONICALIZED but never evaluated: `Same` is
+    // strictly SYNTACTIC equality of the canonical forms. Canonicalization
+    // still folds exact arithmetic (`Same(1+1, 2)` is `True`) and binds
+    // structure, but it does NOT dereference a symbol's value — so `Same` never
+    // depends on the current bindings, unlike `Equal`. `IsSame` remains the
+    // fully raw counterpart (no canonicalization at all).
+    //
+    // A `lazy` operator with no `canonical` handler is inert on the box/parse
+    // routes (its held operands arrive UNBOUND), hence the handler below; the
+    // `evaluate` handler canonicalizes defensively too, since it consumes held
+    // operands.
+    lazy: true,
+
+    canonical: (args, { engine: ce }) =>
+      ce._fn(
+        'Same',
+        args.map((x) => x.canonical)
+      ),
+
     //
     // Deliberately NOT `broadcastable`: `Same` is a structural predicate, so a
     // list operand is compared as a whole (`[1,2] === [1,2]` is the scalar
@@ -440,8 +524,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // no tolerance, and never evaluates a radical to a float
     // (`sqrt(2) === 1.4142135623730951` is `False`). Same philosophy as the
     // structural totality of `match`.
-    evaluate: (ops, { engine: ce }) => {
-      if (ops.length < 2) return ce.True;
+    evaluate: (rawOps, { engine: ce }) => {
+      if (rawOps.length < 2) return ce.True;
+      const ops = rawOps.map((op) => op.canonical);
       for (let i = 1; i < ops.length; i++)
         if (!ops[i - 1].isSame(ops[i])) return ce.False;
       return ce.True;
@@ -477,16 +562,28 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       canonicalRelational(ce, 'NotEqual', args),
 
     // Comparing two equalities...
-    eq: (a, b) => {
-      if (a.operator !== b.operator) return false;
-      if (!isFunction(a) || !isFunction(b)) return false;
-      // Equality is commutative
+    eq: (a, b, prover) => {
+      // Relation equivalence is an identity question in the free variables:
+      // prover tier only (see `Equal`'s handler).
+      if (prover === false) return undefined;
+      if (a.operator !== b.operator) return undefined;
+      if (!isFunction(a) || !isFunction(b)) return undefined;
+      // Equality is commutative.
+      // Comparing two relations asks whether they express the same condition:
+      // an identity question in their free variables, hence the prover tier
+      // (`isIdenticallyEqual`) rather than arithmetic `isEqual()`.
       if (
-        (a.op1.isEqual(b.op1) && a.op2.isEqual(b.op2)) ||
-        (a.op1.isEqual(b.op2) && a.op2.isEqual(b.op1))
+        (a.op1.isIdenticallyEqual(b.op1) === true &&
+          a.op2.isIdenticallyEqual(b.op2) === true) ||
+        (a.op1.isIdenticallyEqual(b.op2) === true &&
+          a.op2.isIdenticallyEqual(b.op1) === true)
       )
         return true;
-      return false;
+      // Three-valued: pairwise NON-identity does not prove the two relations
+      // are non-equivalent (`x ≠ 1` and `x+1 ≠ 2` have the same solution set
+      // with pairwise-different operands), and neither does a different
+      // operator. Decline rather than assert a definitive `false`.
+      return undefined;
     },
 
     evaluate: (rawOps, { engine: ce, numericApproximation }) => {
@@ -564,7 +661,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     broadcastable: true,
     canonical: (ops, { engine: ce }) => canonicalRelational(ce, 'Less', ops),
 
-    eq: (a, b) => inequalityEq(a, b, 'Greater'),
+    eq: (a, b, prover) => inequalityEq(a, b, 'Greater', prover),
 
     evaluate: (rawOps, { engine: ce, numericApproximation }) => {
       // This operator is `lazy` (so its `canonical` handler can see raw,
@@ -664,7 +761,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     canonical: (ops, { engine: ce }) =>
       canonicalRelational(ce, 'LessEqual', ops),
 
-    eq: (a, b) => inequalityEq(a, b, 'LessGreater'),
+    eq: (a, b, prover) => inequalityEq(a, b, 'LessGreater', prover),
 
     evaluate: (rawOps, { engine: ce, numericApproximation }) => {
       // `lazy` skips argument evaluation (see `Less` above): evaluate here.
@@ -1043,6 +1140,7 @@ const CHAINABLE_COMPARISON = new Set([
   'GreaterEqual',
   'Equal',
   'NotEqual',
+  'IdenticallyEqual',
 ]);
 
 function canonicalRelational(
@@ -1162,19 +1260,38 @@ function canonicalComparisonChain(
 function inequalityEq(
   a: Expression,
   b: Expression,
-  oppositeOperator?: string
-): boolean {
-  if (!isFunction(a) || !isFunction(b)) return false;
+  oppositeOperator?: string,
+  prover?: boolean
+): boolean | undefined {
+  // Relation equivalence is an identity question in the free variables:
+  // prover tier only (see `Equal`'s `eq` handler).
+  if (prover === false) return undefined;
+  if (!isFunction(a) || !isFunction(b)) return undefined;
 
+  // Two relations are equivalent when they have the same solution set — an
+  // *identity* question in the free variables of the operands (`2(13.1+x) < 5`
+  // vs `26.2+2x < 5`), not arithmetic equality. Use the prover tier
+  // (`isIdenticallyEqual`), which keeps the free-variable machinery; cheap
+  // `isEqual()` would report a spurious `false` here.
+  //
+  // Three-valued: only an all-pairs *provable* identity yields `true`. An
+  // undecided pair (or pairwise non-identity, which does not prove the
+  // relations differ: `x < 1` vs `x+1 < 2`) yields `undefined`, never `false`.
   if (a.operator === b.operator) {
-    if (a.nops !== b.nops) return false;
-    return a.ops.every((op, i) => op.isEqual(b.ops[i]));
+    if (a.nops !== b.nops) return undefined;
+    return a.ops.every((op, i) => op.isIdenticallyEqual(b.ops[i]) === true)
+      ? true
+      : undefined;
   }
 
   if (b.operator === oppositeOperator) {
-    if (a.nops !== b.nops) return false;
-    return a.ops.every((op, i) => op.isEqual(b.ops[b.nops - 1 - i]));
+    if (a.nops !== b.nops) return undefined;
+    return a.ops.every(
+      (op, i) => op.isIdenticallyEqual(b.ops[b.nops - 1 - i]) === true
+    )
+      ? true
+      : undefined;
   }
 
-  return false;
+  return undefined;
 }

@@ -616,12 +616,60 @@ describe('Same (Cortex `===`) — total structural identity', () => {
     expect(ce.box(['Equal', 'x', 'y']).evaluate().operator).toBe('Equal');
   });
 
-  test('operands are evaluated first (not held like `IsSame`)', () => {
+  test('operands are CANONICALIZED, not evaluated (and not held like `IsSame`)', () => {
+    // Canonicalization folds exact arithmetic, so `1 + 1` is the number `2`.
     expect(s(['Add', 1, 1], 2)).toBe('True');
-    // `IsSame` is the raw/unevaluated counterpart.
+    // `IsSame` is the raw/uncanonicalized counterpart.
     expect(ce.box(['IsSame', ['Add', 1, 1], 2]).evaluate().symbol).toBe(
       'False'
     );
+    // But nothing is EVALUATED: `sin(0)` and `3!` canonicalize to themselves,
+    // so they are structurally distinct from their values. (`Equal` — the
+    // arithmetic tier — answers `True` for both.)
+    expect(s(['Sin', 0], 0)).toBe('False');
+    expect(ce.box(['Equal', ['Sin', 0], 0]).evaluate().symbol).toBe('True');
+    expect(s(['Factorial', 3], 6)).toBe('False');
+  });
+
+  test('a symbol value is never dereferenced through a compound operand', () => {
+    // `Same` is strictly syntactic: with `x := 5`, the canonical form of
+    // `x + 1` is `x + 1`, not `6`.
+    const e = new ComputeEngine();
+    e.assign('x', 5);
+    expect(e.box(['Same', ['Add', 'x', 1], 6]).evaluate().symbol).toBe('False');
+    expect(e.box(['Equal', ['Add', 'x', 1], 6]).evaluate().symbol).toBe('True');
+  });
+
+  test('a symbol value is never dereferenced at the TOP level either', () => {
+    // The headline example of the equality tiers: `isSame` sheds its
+    // value-following shortcut, so a symbol is never the same as its value —
+    // at any depth, in either direction, boxed or primitive.
+    const e = new ComputeEngine();
+    e.assign('x', 5);
+    expect(e.box(['Same', 'x', 5]).evaluate().symbol).toBe('False');
+    expect(e.box(['Equal', 'x', 5]).evaluate().symbol).toBe('True');
+
+    const x = e.symbol('x');
+    expect(x.isSame(e.box(5))).toBe(false);
+    expect(x.isSame(5)).toBe(false); // primitive overload
+    // ...and the other direction of the same comparison.
+    expect(e.box(5).isSame(x)).toBe(false);
+    // The value questions still answer:
+    expect(x.isEqual(5)).toBe(true);
+    expect(x.is(5)).toBe(true); // numeric fallback, unchanged
+  });
+
+  test('two symbols holding the same value are still different symbols', () => {
+    const e = new ComputeEngine();
+    e.assign('a', 5);
+    e.assign('b', 5);
+    expect(e.symbol('a').isSame(e.symbol('b'))).toBe(false);
+    expect(e.box(['Same', 'a', 'b']).evaluate().symbol).toBe('False');
+    // ...and a symbol is always the same as itself (reflexivity).
+    const a = e.symbol('a');
+    expect(a.isSame(a)).toBe(true);
+    expect(e.symbol('a').isSame(e.symbol('a'))).toBe(true);
+    expect(e.box(['Same', 'a', 'a']).evaluate().symbol).toBe('True');
   });
 
   test('strings', () => {

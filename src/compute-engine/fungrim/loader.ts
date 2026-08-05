@@ -273,10 +273,12 @@ function buildGuardClosures(
         const rhs = boxGuardExpr(g.rhs);
         return (sub) => {
           try {
-            // Provable inequality only: `isEqual` may be `undefined` for
-            // symbolic arguments (even under assumptions) — that is the
-            // undecided case the onGuardUndecided hook makes observable.
-            const eq = lhs.subs(sub).isEqual(rhs.subs(sub));
+            // Provable inequality only: `isIdenticallyEqual` may be
+            // `undefined` for symbolic arguments (even under assumptions) —
+            // that is the undecided case the onGuardUndecided hook makes
+            // observable. Corpus identity validation is the prover's job, so
+            // this stays on the prover tier rather than cheap `isEqual()`.
+            const eq = lhs.subs(sub).isIdenticallyEqual(rhs.subs(sub));
             if (eq === undefined) return undefined;
             return eq === false;
           } catch {

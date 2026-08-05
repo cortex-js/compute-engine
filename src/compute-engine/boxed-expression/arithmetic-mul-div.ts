@@ -86,13 +86,11 @@ function exactPowExceedsBudget(base: NumericValue, exp: Rational): boolean {
 /**
  * Structural check: is `op` the number literal `n`?
  *
- * Canonicalization folds must NOT use plain `.isSame(n)` on an operand that
- * can be a symbol: `.isSame()` follows symbol value bindings, so a mutable
- * symbol whose *current* value happens to be `n` would be folded into the
- * canonical structure (`Divide(2, x)` → `2` while `x` holds `1`, →
- * `ComplexInfinity` while it holds `0`). The structure of a canonical
- * expression must never depend on a symbol's transient value — the fold is
- * only sound when the operand is the literal itself.
+ * The structure of a canonical expression must never depend on a symbol's
+ * transient value — a fold is only sound when the operand is the literal
+ * itself. `.isSame()` is strictly syntactic (a symbol never compares equal to
+ * a literal), so a bare `.isSame(n)` could no longer mis-fold; the `isNumber`
+ * guard is kept because it states the intent and short-circuits cheaply.
  */
 function isLiteral(op: Expression, n: number): boolean {
   return isNumber(op) && op.isSame(n);
@@ -327,11 +325,12 @@ export class Product {
       }
     }
 
-    // Note: term should be positive, so no need to handle the -1 case
-    // (isLiteral, not isSame: a symbol whose current value is 1/0 must not
-    // fold structurally; the value-following `isSame(0) === false` NEGATIVE
-    // guard below stays — it conservatively blocks the x^0 → 1 fold when the
-    // base is known to be 0.)
+    // Note: term should be positive, so no need to handle the -1 case.
+    // (isLiteral for the value-independent folds. `.isSame()` is strictly
+    // syntactic, so the `isSame(0) === false` guard admits ANY non-literal
+    // base to the x^0 → 1 fold — a generic-symbol fold like x/x → 1: `z^0`
+    // canonicalizes to 1 even while `z := 0`. Only the literal `0^0` falls
+    // through and canonicalizes to NaN.)
     if (isLiteral(term, 1) && (!exp || isOne(exp))) return;
     if (term.isSame(0) === false && exp && isZero(exp)) return;
     if (isLiteral(term, 0)) {

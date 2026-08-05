@@ -109,6 +109,16 @@ describe('CANONICAL FOLDING', () => {
       expect(ce.expr(['Power', 2, -1]).json).toEqual(['Rational', 1, 2]);
     });
 
+    test('x^0 → 1 is a generic-symbol fold: fires even while the symbol holds 0', () => {
+      // Canonical structure never depends on a symbol's transient value
+      // (same convention as x/x → 1): `z^0` folds to 1 even while `z := 0`.
+      // Only the literal `0^0` is indeterminate.
+      const eng = new ComputeEngine();
+      eng.assign('z', 0);
+      expect(eng.parse('z^0').json).toEqual(1);
+      expect(eng.parse('0^0').isNaN).toBe(true);
+    });
+
     test('Power(x, 2) stays as Power (non-numeric base, no fold)', () => {
       const result = ce.expr(['Power', 'x', 2]);
       expect(result.operator).toBe('Power');

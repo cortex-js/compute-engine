@@ -34,6 +34,49 @@
   function-*returning* type, use the grouped spelling, which is unchanged:
   `["Typed", body, "'((x: number) -> number)'"]`.
 
+- **`expr.isEqual()` and `=` no longer prove symbolic identities.** Equality is
+  now *arithmetic*: the operands are evaluated, compared structurally, and —
+  when their difference has no unknowns — compared numerically within
+  `ce.tolerance`. No expansion, no simplification and no sampling is attempted.
+  An identity between expressions with free variables, such as
+  `\sin^2 x + \cos^2 x = 1` or `(x+1)^2 = x^2 + 2x + 1`, therefore returns
+  `undefined` instead of `true`, and the corresponding `Equal` expression stays
+  inert (as it already did for any undetermined comparison, so an equation is
+  still usable as an argument to `Solve`). Every `=` comparison is now cheap
+  and predictable. **Migration:** wherever an identity was being proven, call
+  `expr.isIdenticallyEqual(other)`, or evaluate
+  `["IdenticallyEqual", lhs, rhs]` (LaTeX `lhs \equiv rhs`) instead of
+  `["Equal", lhs, rhs]`. Comparisons of numbers, of constant expressions, and
+  of expressions that evaluate to the same structure are unaffected.
+
+- **`expr.isSame()` no longer follows the value of a symbol.** It is now
+  strictly syntactic everywhere: it compares canonical forms as written and
+  never substitutes an assigned value. Previously a top-level
+  symbol-versus-literal comparison dereferenced the binding — with `one := 1`,
+  `ce.symbol('one').isSame(1)` was `true` — while the same comparison between
+  two symbols, or nested inside a larger expression, did not, which made the
+  method inconsistent with itself. With `x := 5`, `ce.symbol('x').isSame(5)` is
+  now `false`. **Migration:** use `expr.isEqual(value)` — or `expr.is(value)`,
+  which adds a numeric fallback for constant expressions — to compare values;
+  `.isSame()` answers "is this the same expression?" only. Internal checks
+  against a literal operand, such as `op.isSame(0)`, are unaffected. One
+  canonicalization consequence: the `x^0 → 1` fold is now a pure
+  generic-symbol fold (like `x/x → 1`), so `z^0` canonicalizes to `1` even
+  while `z := 0` — previously the assigned value was peeked and the fold was
+  blocked. The literal `0^0` still canonicalizes to `NaN`.
+
+- **A bare `\equiv` now parses as `IdenticallyEqual`, not `Equivalent`.**
+  `\equiv` is the mathematical identity sign, so `p \equiv q` parses as
+  `["IdenticallyEqual", "p", "q"]` (see New Features). The biconditional keeps
+  all of its other notations — `\iff`, `\Leftrightarrow`, `\leftrightarrow`,
+  `\Longleftrightarrow`, `\longleftrightarrow` — and `Equivalent` still
+  serializes as `\iff`, so logic round-trips are unaffected; only the reading
+  of `p \equiv q` as a biconditional changes. Over boolean operands the two
+  operators agree in any case, since two propositions are identically equal
+  exactly when they are equivalent. **Migration:** write `p \iff q` where a
+  biconditional is meant. A `\equiv` followed by `\pmod{n}` is still a
+  `Congruent`, and `\not\equiv` still negates a congruence.
+
 ### New Features
 
 - **Parametric polymorphism: `forall` type variables in function signatures.**
@@ -105,6 +148,34 @@
   sugared form losslessly. The math definition form does not take a clause:
   `f<T>(x) = x` remains an ordinary expression, since it is genuinely
   ambiguous with a relational one.
+
+- **`IdenticallyEqual`: a dedicated operator for mathematical identities.**
+  `["IdenticallyEqual", lhs, rhs]`, the method `expr.isIdenticallyEqual(other)`
+  and the LaTeX notation `\equiv` (the `≡` character parses the same way, and
+  the operator serializes back to `\equiv`) ask whether two expressions have
+  the same value for **every** value of their free variables. This is the tier
+  that proves an identity: it applies expansion and simplification and
+  evaluates both sides at pseudo-random sample points, so a `True` verdict may
+  rest on sampling — a very strong indication rather than a formal proof, and
+  the only comparison in the engine that can answer this way. It is
+  three-valued: an identity that can neither be established nor refuted stays
+  unevaluated. The machinery itself is not new — it is the prover that `Equal`
+  used to run — but it is now reached explicitly. On the compile targets,
+  `Equal` keeps its tolerance comparison while `IdenticallyEqual` and `Same`
+  decline to compile.
+
+- **`Same` (the Cortex `===` operator, also written `≣`) is now specified as
+  canonical-syntactic equality**, matching `expr.isSame()`. It compares the
+  canonical form of its operands as written and **never dereferences the value
+  of a symbol**: with `x := 5`, `["Same", "x", 5]` is `False` while
+  `["Equal", "x", 5]` is `True`. It remains total — always `True` or `False`,
+  with no tolerance — and keeps no IEEE exemption for `NaN`:
+  `["Same", "NaN", "NaN"]` is `True` where `["Equal", "NaN", "NaN"]` is
+  `False`, and the same holds inside a collection
+  (`["Equal", ["List", "NaN"], ["List", "NaN"]]` is `False`). Together with
+  `Equal` and `IdenticallyEqual`, this gives three tiers of comparison —
+  syntactic, same value, and same function of the free variables — described
+  in the "Comparing Expressions" section of the Symbolic Computing guide.
 
 ### Issues Resolved
 

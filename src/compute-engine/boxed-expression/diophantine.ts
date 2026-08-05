@@ -347,7 +347,7 @@ function confirm(
   const subs: Record<string, Expression> = {};
   for (let i = 0; i < unknowns.length; i++)
     subs[unknowns[i]] = ce.number(values[i]);
-  return residual.subs(subs).evaluate().isEqual(0) === true;
+  return residual.subs(subs).evaluate().isIdenticallyEqual(0) === true;
 }
 
 /** Whether a concrete integer lies in its (bounded) domain, honoring steps. */

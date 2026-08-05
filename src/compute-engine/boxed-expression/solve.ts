@@ -3060,11 +3060,14 @@ function validateRoots(
     if (value.isNaN) return false;
     if (value.has(x)) return false;
 
-    // Important: we want to use `isEqual()`, not `is(0)` here
-    // The former accounts for tolerance, the latter does not.
-    if (value.isEqual(0)) return true;
+    // Important: we want the prover tier (`isIdenticallyEqual()`), not
+    // `is(0)`: the former accounts for tolerance (the latter does not), and a
+    // parametric root substituted back leaves free variables, so the residual
+    // vanishing is an identity question that needs the free-variable
+    // machinery. Cheap `isEqual()` degrades to `undefined` there.
+    if (value.isIdenticallyEqual(0)) return true;
 
-    // For a fully numeric value (no unknowns left), `isEqual(0)` is
+    // For a fully numeric value (no unknowns left), `isIdenticallyEqual(0)` is
     // definitive: do NOT fall back to symbolic simplification, which may
     // wrongly accept an extraneous root (e.g. simplification rules like
     // `ln(a) + ln(b) → ln(ab)` assume principal domains and can collapse a
@@ -3077,7 +3080,7 @@ function validateRoots(
     // symbolic simplification. An unsimplified `evaluate()` leaves it as a
     // non-zero-looking expression, so without this the valid root would be
     // discarded (issue #300).
-    const zero = value.simplify().isEqual(0);
+    const zero = value.simplify().isIdenticallyEqual(0);
 
     // Three-valued discipline (undefined ≠ false): only a *decidably* extraneous
     // root is pruned. For a guarded `When` root the substitute-back check can be
@@ -3103,7 +3106,9 @@ function validateRoots(
   const uniqueRoots: Expression[] = [];
   for (const root of validRoots) {
     const isDuplicate = uniqueRoots.some(
-      (existing) => existing.isSame(root) || existing.isEqual(root)
+      // Roots may be parametric (free variables left), so recognizing a
+      // duplicate is an identity question: prover tier, not cheap `isEqual()`.
+      (existing) => existing.isSame(root) || existing.isIdenticallyEqual(root)
     );
     if (!isDuplicate) uniqueRoots.push(root);
   }

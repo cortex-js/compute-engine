@@ -183,7 +183,9 @@ describe('the cycle guard does not affect well-formed bindings', () => {
     ce.assign('v', ce.parse('u'));
     ce.assign('w', ce.parse('v'));
     expect(ce.box('w').N().json).toEqual(5);
-    expect(ce.box('w').isSame(5)).toBe(true);
+    // `isSame` is syntactic (a symbol is never the same as a literal); the
+    // chain resolving is an arithmetic-equality question.
+    expect(ce.box('w').isEqual(5)).toBe(true);
     expect(ce.box('w').sgn).toEqual('positive');
   });
 

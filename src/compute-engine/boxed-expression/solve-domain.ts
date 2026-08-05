@@ -1291,7 +1291,7 @@ function expandPeriodicRoots(
         predBody
           .subs({ [unknown]: member })
           .evaluate()
-          .isEqual(0) !== true
+          .isIdenticallyEqual(0) !== true
       )
         continue;
       out.push(member);
@@ -1439,7 +1439,7 @@ function confirmExact(
   subs: Record<string, Expression>
 ): boolean {
   const v = predBody.subs(subs).evaluate();
-  if (isEquation) return v.isEqual(0) === true;
+  if (isEquation) return v.isIdenticallyEqual(0) === true;
   return sym(v) === 'True';
 }
 

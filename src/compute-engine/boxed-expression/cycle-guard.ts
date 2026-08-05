@@ -10,8 +10,9 @@
  *
  * A function expression is a finite tree and cannot refer back to itself, so
  * every such cycle must traverse at least one symbol. Guarding the value
- * delegation in `BoxedSymbol` — plus `same()` in `compare.ts`, which follows
- * symbol bindings itself — is therefore complete for this class of cycle.
+ * delegation in `BoxedSymbol` is therefore complete for this class of cycle.
+ * (`isSame`/`same()` in `compare.ts` are strictly syntactic and never follow
+ * symbol bindings, so they need no guard here.)
  *
  * A guarded query **fails closed**: it returns `false`/`undefined`/no value,
  * whatever means "cannot determine" for that getter. It never throws, and a
@@ -25,9 +26,8 @@
  * the kind as well keeps those nestings legal. This is sound because a cycle
  * repeats *identically*, so it must revisit some (binding, kind) pair.
  *
- * For `at` and `isSame`/`same` even a per-kind boolean is too strict: nested
- * access or nested comparison of one and the same collection is ordinary.
- * Those use a depth limit instead.
+ * For `at` even a per-kind boolean is too strict: nested access into one and
+ * the same collection is ordinary. That uses a depth limit instead.
  *
  * `each` is a flag despite belonging to that family, because its guard spans
  * only the synchronous body of `each()` — where the delegation happens — and
@@ -117,8 +117,6 @@ export const CYCLE_DETECTED = -1;
  */
 export const CycleDepthQuery = {
   At: 0,
-  IsSame: 1,
-  Same: 2,
 } as const;
 
 /**
@@ -128,7 +126,7 @@ export const CycleDepthQuery = {
  */
 const MAX_CYCLE_DEPTH = 32;
 
-const _depths: Map<object, number>[] = [new Map(), new Map(), new Map()];
+const _depths: Map<object, number>[] = [new Map()];
 
 /**
  * Begin a re-entrant guarded query. Returns `CYCLE_DETECTED` once the same

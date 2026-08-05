@@ -371,7 +371,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     options: { engine: ComputeEngine }
   ) => Sign | undefined;
 
-  eq?: (a: Expression, b: Expression) => boolean | undefined;
+  /** See `OperatorDefinition.eq` (types-definitions.ts) for `prover`. */
+  eq?: (a: Expression, b: Expression, prover?: boolean) => boolean | undefined;
   neq?: (a: Expression, b: Expression) => boolean | undefined;
 
   even?: (

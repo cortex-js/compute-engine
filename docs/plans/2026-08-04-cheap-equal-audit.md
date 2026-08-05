@@ -61,7 +61,7 @@ paying the prover.
 | `solve.ts:3065/3080/3106` (root verification, dedup) | Parametric roots keep unknowns; numeric roots unaffected either way. |
 | `solve-domain.ts:1294/1442`, `diophantine.ts:350` | Solution verification, same rationale. |
 | `fungrim/loader.ts:279` | Corpus identity validation — literally the prover's job. |
-| Public `.isEqual()` | Stays deep — documented "full mathematical equality"; becomes the API twin of the new operator. |
+| Public `.isEqual()` | ~~Stays deep~~ — superseded by ratified consequence #2 below: `.isEqual()` goes cheap with `=`; the prover's API twin is `.isIdenticallyEqual()`. (Row kept as the audit-time recommendation.) |
 
 ## Ratified design (user-ruled 2026-08-04)
 

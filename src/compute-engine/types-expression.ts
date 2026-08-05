@@ -224,7 +224,8 @@ interface BoxedOperatorDefinition
     ops: ReadonlyArray<Expression>,
     options: { engine: ExpressionComputeEngine }
   ) => Sign | undefined;
-  eq?: (a: Expression, b: Expression) => boolean | undefined;
+  /** See `OperatorDefinition.eq` (types-definitions.ts) for `prover`. */
+  eq?: (a: Expression, b: Expression, prover?: boolean) => boolean | undefined;
   neq?: (a: Expression, b: Expression) => boolean | undefined;
   canonical?: (
     ops: ReadonlyArray<Expression>,
@@ -2267,6 +2268,37 @@ export interface Expression {
    * @category Relational Operator
    */
   isEqual(other: number | Expression): boolean | undefined;
+
+  /**
+   * Identity of this expression and `other` in **all** their free variables,
+   * that is `sin(x)^2 + cos(x)^2 ≡ 1`. This is the deepest — and most
+   * expensive — of the three equality tiers:
+   *
+   * | Method | Semantics |
+   * | --- | --- |
+   * | `expr.isSame(other)` | **Structural**: syntactic equality of the canonical forms. Always decidable, no evaluation. |
+   * | `expr.isEqual(other)` | **Arithmetic**: the values are equal (within `engine.tolerance`). |
+   * | `expr.isIdenticallyEqual(other)` | **Identity**: the two expressions are equal for every value of their free variables. |
+   *
+   * Three-valued: `true` when identity could be established, `false` when the
+   * expressions are provably different, and `undefined` when neither could be
+   * determined. In particular, expressions that merely *disagree* at sampled
+   * points (`x+1` vs `x+2`) are `undefined`, not `false`: an assumption could
+   * still constrain them equal.
+   *
+   * Identity is established by stochastic sampling (evaluating both
+   * expressions at random points), falling back to a symbolic
+   * expand-and-simplify proof. A `true` obtained from sampling alone is
+   * therefore a very strong indication, but not a formal proof
+   * ([Richardson's theorem](https://en.wikipedia.org/wiki/Richardson%27s_theorem)
+   * makes a complete decision procedure impossible).
+   *
+   * This is the API counterpart of the `IdenticallyEqual` operator (`\equiv`
+   * in LaTeX).
+   *
+   * @category Relational Operator
+   */
+  isIdenticallyEqual(other: number | Expression): boolean | undefined;
 
   /**
    * Is `true` if the expression is a collection.

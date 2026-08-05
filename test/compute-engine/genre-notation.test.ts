@@ -92,11 +92,11 @@ describe('Genre notation: \\not-prefixed relations', () => {
     ]);
   });
 
-  test('\\not\\equiv negates an equivalence when no modulus follows', () => {
+  test('\\not\\equiv negates an identity when no modulus follows', () => {
     const ce = freshEngine();
     expect(ce.parse('p \\not\\equiv q').json).toEqual([
       'Not',
-      ['Equivalent', 'p', 'q'],
+      ['IdenticallyEqual', 'p', 'q'],
     ]);
   });
 
@@ -147,7 +147,13 @@ describe('Genre notation: \\not-prefixed relations', () => {
       'b',
       12,
     ]);
-    expect(ce.parse('p \\equiv q').json).toEqual(['Equivalent', 'p', 'q']);
+    // Bare `\equiv` (no modulus) is the identity relation, not the logical
+    // biconditional (which keeps `\iff`).
+    expect(ce.parse('p \\equiv q').json).toEqual([
+      'IdenticallyEqual',
+      'p',
+      'q',
+    ]);
   });
 });
 

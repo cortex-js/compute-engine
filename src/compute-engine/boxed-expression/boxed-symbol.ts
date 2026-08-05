@@ -216,11 +216,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     other: Expression | number | bigint | boolean | string,
     tolerance?: number
   ): boolean {
-    // Structural check (includes value following via isSame)
+    // Structural check (syntactic: `isSame` does NOT follow the binding)
     if (tolerance === undefined && this.isSame(other)) return true;
 
-    // If value following didn't match but we have a bound value,
-    // try the smart check on the value (which may be a function expression).
+    // The structural check never follows the binding, so if we have a bound
+    // value, try the smart check on it (it may be a function expression).
     // Guarded: with an indirect cycle (`a := b`, `b := a`) each value is
     // another symbol whose `is()` leads straight back here.
     const val = this.value;
@@ -237,10 +237,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   isSame(other: Expression | number | bigint | boolean | string): boolean {
-    if (other === true)
-      return this.symbol === 'True' || isSymbol(this.value, 'True');
-    if (other === false)
-      return this.symbol === 'False' || isSymbol(this.value, 'False');
+    if (this === (other as unknown)) return true;
+
+    // The boolean primitives BOX to the `True`/`False` symbols, so they are
+    // compared as symbols. This is a comparison of syntax, not of value: a
+    // symbol whose assigned value happens to be `True` is not `True`.
+    if (other === true) return this.symbol === 'True';
+    if (other === false) return this.symbol === 'False';
 
     // Two symbols are the same symbol when they share a name AND denote the
     // same binding (see `sameBinding`). No binder can enclose this
@@ -249,29 +252,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (other instanceof _BoxedExpression && isSymbol(other))
       return this.symbol === other.symbol && sameBinding(this, other);
 
-    // `other` is not a symbol. Follow *this* symbol's value binding and compare
-    // it against `other` directly (isSame follows symbol value bindings).
-    //
-    // Do NOT unwrap `other.value` here: for a function-valued expression (e.g.
-    // `g := x^2 + 1`) `other.value` is `undefined`, which used to drop the
-    // comparison to `false` even when the binding matched (CM-P1-1). `same()`
-    // follows the RHS binding for symmetry, so passing `other` unchanged is
-    // correct for numbers, strings and function expressions alike.
-    //
-    // Following the binding can walk into an indirect reference cycle
-    // (`a := b` with `b := a`), so the delegation is guarded. A DEPTH limit
-    // rather than a flag: comparing nested structures legitimately re-enters
-    // the comparison of the same symbol (see `cycle-guard.ts`).
-    const value = this.value;
-    if (value === undefined) return false;
-    const def = this._def!;
-    const guard = enterCycleDepthQuery(def, CycleDepthQuery.IsSame);
-    if (guard === CYCLE_DETECTED) return false;
-    try {
-      return value.isSame(other);
-    } finally {
-      exitCycleDepthQuery(def, CycleDepthQuery.IsSame, guard);
-    }
+    // `other` is not a symbol: `isSame` is strictly syntactic, so this
+    // symbol's value binding is NOT followed (`x := 5` leaves
+    // `x.isSame(5)` false). Value equality is `.isEqual()`; identity in the
+    // free variables is `.isIdenticallyEqual()`.
+    return false;
   }
 
   toNumericValue(): [NumericValue, Expression] {

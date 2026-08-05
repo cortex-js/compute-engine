@@ -438,10 +438,13 @@ describe('numericization is skipped for arguments that cannot numericize', () =>
 
   it('the gated paths still answer for arguments that DO numericize', () => {
     const ce = new ComputeEngine();
-    // Partial numericization of a symbolic operand still compares equal.
-    expect(ce.parse('\\sin(2)+x').isEqual(ce.parse('0.9092974268256817+x'))).toBe(true);
-    expect(ce.parse('\\sqrt{2}x').isEqual(ce.parse('1.4142135623730951x'))).toBe(true);
-    expect(ce.parse('(x+1)^2').isEqual(ce.parse('x^2+2x+1'))).toBe(true);
+    // Partial numericization of a symbolic operand still compares equal. A
+    // free variable makes these identity questions, so they are asked of the
+    // PROVER tier (`.isIdenticallyEqual()`); arithmetic `.isEqual()` is inert.
+    expect(ce.parse('\\sin(2)+x').isIdenticallyEqual(ce.parse('0.9092974268256817+x'))).toBe(true);
+    expect(ce.parse('\\sqrt{2}x').isIdenticallyEqual(ce.parse('1.4142135623730951x'))).toBe(true);
+    expect(ce.parse('(x+1)^2').isIdenticallyEqual(ce.parse('x^2+2x+1'))).toBe(true);
+    expect(ce.parse('\\sin(2)+x').isEqual(ce.parse('0.9092974268256817+x'))).toBe(undefined);
     // Ordering, approximate equality and rationalization of closed forms.
     expect(ce.parse('\\mathrm{Rationalize}(0.5)').evaluate().toString()).toBe('1/2');
     expect(ce.parse('\\mathrm{ApproxEqual}(\\pi, 3.14159265358979)').evaluate().symbol).toBe('True');

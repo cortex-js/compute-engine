@@ -631,7 +631,22 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      */
     compile?: OperatorCompileHandler;
 
-    eq?: (a: Expression, b: Expression) => boolean | undefined;
+    /**
+     * Custom equality handler.
+     *
+     * `prover` indicates the tier of the caller: `false` for the cheap
+     * arithmetic tier (`eq()` / `.isEqual()`), `true` for the prover tier
+     * (`eqIdentical()` / `.isIdenticallyEqual()`), and `undefined` when the
+     * caller does not distinguish (e.g. `cmp()`). A handler that does
+     * prover-tier work (sampling, expand/simplify, identity questions in the
+     * free variables) must decline — return `undefined` — when
+     * `prover === false`.
+     */
+    eq?: (
+      a: Expression,
+      b: Expression,
+      prover?: boolean
+    ) => boolean | undefined;
     neq?: (a: Expression, b: Expression) => boolean | undefined;
 
     collection?: CollectionHandlers;
@@ -1614,7 +1629,8 @@ export interface BoxedOperatorDefinition
     options: { engine: ComputeEngine }
   ) => Sign | undefined;
 
-  eq?: (a: Expression, b: Expression) => boolean | undefined;
+  /** See `OperatorDefinition.eq` for the meaning of `prover`. */
+  eq?: (a: Expression, b: Expression, prover?: boolean) => boolean | undefined;
   neq?: (a: Expression, b: Expression) => boolean | undefined;
 
   canonical?: (

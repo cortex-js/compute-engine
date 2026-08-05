@@ -677,9 +677,24 @@ export function isImaginaryUnit(expr: Expression): boolean {
 
   if (isNumber(expr)) return expr.re === 0 && expr.im === 1;
 
-  // !note: use 'isSame' instead of checking identity with 'I', to account for potential,
-  // non-default definition of the imaginary unit
-  if (isSymbol(expr)) return expr.canonical.isSame(engine.I);
+  // A symbol IS the imaginary unit when its assigned value resolves to the
+  // number i — an EXPLICIT dereference (`.isSame()` is strictly syntactic and
+  // never follows a binding), kept so a non-default definition of the
+  // imaginary unit still qualifies. Cycle-guarded with a visited-name set
+  // (rather than depth-capped) so a valid, merely-long acyclic alias chain
+  // is not mistaken for a cycle.
+  if (isSymbol(expr)) {
+    const visited = new Set<string>([expr.symbol]);
+    let v: Expression | undefined = expr.canonical.value;
+    while (v !== undefined) {
+      if (isNumber(v)) return v.re === 0 && v.im === 1;
+      if (!isSymbol(v)) return false;
+      if (visited.has(v.symbol)) return false;
+      visited.add(v.symbol);
+      v = v.value;
+    }
+    return false;
+  }
 
   // function/string/...
   return false;

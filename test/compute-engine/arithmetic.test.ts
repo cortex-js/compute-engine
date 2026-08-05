@@ -2582,10 +2582,15 @@ describe('Core arithmetic correctness (REVIEW.md A6–A12)', () => {
 
   // A9: function-difference comparison used an exact === 0 (no tolerance).
   it('A9: function comparison uses tolerance', () => {
-    // (0.1 + 0.2 + x) − (0.3 + x) = 5.55e-17 (within tolerance) → equal.
+    // (0.1 + 0.2) − 0.3 = 5.55e-17 (within tolerance) → equal, on the
+    // arithmetic tier (no unknowns, so the difference numericizes).
+    expect(ce.expr(['Add', 0.1, 0.2]).isEqual(ce.expr(['Add', 0.3]))).toBe(true);
+    // With a free variable it is an identity question, so the PROVER tier
+    // answers and the arithmetic tier stays inert.
     const a = ce.expr(['Add', 0.1, 0.2, 'x']);
     const b = ce.expr(['Add', 0.3, 'x']);
-    expect(a.isEqual(b)).toBe(true);
+    expect(a.isIdenticallyEqual(b)).toBe(true);
+    expect(a.isEqual(b)).toBe(undefined);
   });
 
   // A11: a/0 was inconsistent — ComplexInfinity for a JS-number denominator,

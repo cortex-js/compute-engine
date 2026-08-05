@@ -34,9 +34,9 @@ function evalStr(ce: ComputeEngine, s: string): string {
 }
 
 describe('MathNet Tier-3 Task 4: Unicode operator glyphs', () => {
-  test('≡ (U+2261) parses as equivalence / congruence', () => {
+  test('≡ (U+2261) parses as identity / congruence', () => {
     const ce = freshEngine();
-    expect(ce.parse('p ≡ q').json).toEqual(['Equivalent', 'p', 'q']);
+    expect(ce.parse('p ≡ q').json).toEqual(['IdenticallyEqual', 'p', 'q']);
     expect(ce.parse('7 ≡ 1 (mod 3)').json).toEqual(['Congruent', 7, 1, 3]);
   });
 
@@ -139,15 +139,23 @@ describe('MathNet Tier-3 Task 5: congruence', () => {
     expect(ce.parse('a \\equiv b \\pmod{n}').latex).toBe('a\\equiv b\\pmod{n}');
   });
 
-  test('bare \\equiv (no modulus) stays Equivalent', () => {
+  // Bare `\equiv` is the IDENTITY relation (`IdenticallyEqual`), the prover
+  // tier of the `Same`/`Equal`/`IdenticallyEqual` ladder. It used to parse as
+  // the logical biconditional `Equivalent`, which keeps `\iff` /
+  // `\Leftrightarrow`.
+  test('bare \\equiv (no modulus) is IdenticallyEqual', () => {
     const ce = freshEngine();
-    expect(ce.parse('p \\equiv q').json).toEqual(['Equivalent', 'p', 'q']);
+    expect(ce.parse('p \\equiv q').json).toEqual([
+      'IdenticallyEqual',
+      'p',
+      'q',
+    ]);
   });
 
   test('\\equiv followed by a real parenthesized rhs is not mistaken for a modulus', () => {
     const ce = freshEngine();
     expect(ce.parse('a \\equiv (b + c)').json).toEqual([
-      'Equivalent',
+      'IdenticallyEqual',
       'a',
       ['Add', 'b', 'c'],
     ]);
@@ -403,7 +411,11 @@ describe('Congruence chains and recoveries (2026-07-09 pmod-chain round)', () =>
       'b',
       7,
     ]);
-    expect(ce.parse('p \\equiv q').json).toEqual(['Equivalent', 'p', 'q']);
+    expect(ce.parse('p \\equiv q').json).toEqual([
+      'IdenticallyEqual',
+      'p',
+      'q',
+    ]);
     expect(ce.parse('2019^8 \\not\\equiv -1 \\pmod{17}').json).toEqual([
       'Not',
       ['Congruent', ['Power', 2019, 8], -1, 17],
