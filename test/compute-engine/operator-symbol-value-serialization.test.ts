@@ -95,25 +95,20 @@ describe('OPERATOR NAME IN SYMBOL POSITION', () => {
     // Every name in the LaTeX dictionary, serialized in symbol position and
     // re-parsed, must come back as the same symbol.
     //
-    // The exceptions below are NOT about the operator dispatch: their notation
-    // is correctly rejected and the name is spelled out, but the generic
-    // *symbol* spelling of the name is itself not round-trippable — a trailing
-    // digit becomes a subscript (`Arctan2` → `\mathrm{Arctan_2}`, same as `x2`
-    // → `x_2`), and the lowercase Greek-letter names are spelled with a
-    // command the dictionary assigns to a constant (`\gamma` → `EulerGamma`).
-    // Both are pre-existing plain-symbol issues.
-    const EXCEPTIONS = [
-      'Arctan2',
-      'Factorial2',
-      'NewtonDerivative1',
-      'NewtonDerivative2',
-      'NewtonDerivative3',
-      'NewtonDerivative4',
-      'gamma',
-      'phiLetter',
-      'pi',
-      'zeta',
-    ];
+    // `gamma` is the sole exception, and it is declaration-dependent BY
+    // DESIGN rather than a defect — an artifact of this sweep reading the
+    // LaTeX with a fresh engine. `\gamma` is `EulerGamma` only while `gamma`
+    // is undeclared: the constant yields the bare command to a declaration
+    // (see the `EulerGamma` entry), so in the engine where the symbol `gamma`
+    // exists — the only engine that can produce it — `\gamma` reads back as
+    // that symbol and the same-engine round-trip holds.
+    //
+    // Every other name whose generic spelling the dictionary gives to a
+    // different symbol (`pi` → `\pi` → `Pi`) is spelled upright instead
+    // (`\mathrm{pi}`), and a plain trailing digit run is no longer promoted
+    // to a subscript (`Arctan2` → `\mathrm{Arctan2}`, not `\mathrm{Arctan_2}`
+    // → `Arctan_2`).
+    const EXCEPTIONS = ['gamma'];
 
     const names = [...DICTIONARY.ids.keys()];
 
@@ -217,6 +212,78 @@ describe('OPERATOR NAME IN SYMBOL POSITION', () => {
       expect(syntax.serialize('PositiveInfinity')).toBe('\\infty');
       expect(syntax.serialize('NegativeInfinity')).toBe('-\\infty');
       expect(syntax.serialize('ImaginaryUnit')).toBe('\\imaginaryI');
+    });
+  });
+});
+
+/**
+ * The generic symbol speller — the name-based spelling used when no dictionary
+ * notation applies — has to produce LaTeX that reads back as the SAME symbol.
+ * Two prettifications used to break that: a plain trailing digit run became a
+ * subscript (`x2` → `x_2`, read back as the different symbol `x_2`), and a
+ * name from the Greek/letterlike table was spelled with a command the
+ * dictionary gives to a constant (`pi` → `\pi`, read back as `Pi`).
+ */
+describe('GENERIC SYMBOL SPELLING', () => {
+  const CASES: [name: string, latex: string][] = [
+    // A plain trailing digit run stays in the body...
+    ['x2', '\\mathrm{x2}'],
+    ['a12', '\\mathrm{a12}'],
+    ['Arctan2', '\\mathrm{Arctan2}'],
+    // ...but a name that already uses the `_` subscript convention keeps its
+    // subscript (that spelling does round-trip)
+    ['x_2', 'x_2'],
+    // A letterlike spelling the dictionary gives to a constant is not used...
+    ['pi', '\\mathrm{pi}'],
+    ['zeta', '\\mathrm{zeta}'],
+    ['phiLetter', '\\mathrm{phiLetter}'],
+    // ...unless the constant yields the bare command to a declaration, in
+    // which case the spelling is the symbol's wherever the symbol exists
+    ['gamma', '\\gamma'],
+  ];
+
+  describe('box route', () => {
+    test.each(CASES)('%s serializes as %s', (name, expected) => {
+      expect(ce.box(name).toLatex()).toBe(expected);
+      // ...and in symbol position (as a tuple element)
+      expect(ce.box(['Tuple', 'A', name]).toLatex()).toBe(`(A,${expected})`);
+    });
+
+    test.each(CASES.filter(([name]) => name !== 'gamma'))(
+      '%s round-trips through a fresh engine',
+      (name) => {
+        const probe = new ComputeEngine();
+        expect(
+          probe.parse(ce.box(name).toLatex()).isSame(probe.box(name))
+        ).toBe(true);
+      }
+    );
+  });
+
+  describe('parse route', () => {
+    test.each(CASES.filter(([name]) => name !== 'gamma'))(
+      '%s parsed as a value round-trips',
+      (name) => {
+        const latex = ce.box(['Tuple', 'A', name]).toLatex();
+        const probe = new ComputeEngine();
+        const expr = probe.parse(latex);
+        expect(expr.op2.symbol).toBe(name);
+        // ...and serializing what was parsed is stable
+        expect(expr.toLatex()).toBe(latex);
+      }
+    );
+
+    test('`gamma` keeps the bare command, which the constant yields', () => {
+      // On a FRESH engine the command belongs to the constant...
+      expect(new ComputeEngine().parse('\\gamma').symbol).toBe('EulerGamma');
+
+      // ...but an engine that has the symbol `gamma` — the only engine that
+      // can produce that symbol — reads it back as the symbol.
+      const probe = new ComputeEngine();
+      probe.declare('gamma', 'real');
+      const latex = probe.box(['Tuple', 'A', 'gamma']).toLatex();
+      expect(latex).toBe('(A,\\gamma)');
+      expect(probe.parse(latex).op2.symbol).toBe('gamma');
     });
   });
 });

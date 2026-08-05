@@ -555,10 +555,16 @@ describe('SYMBOLS', () => {
     });
 
     test('numeric modifiers', () => {
-      // Single-token bases keep their default (italic) style; only the
-      // subscript is attached. Multi-letter bases are still wrapped in \mathrm.
-      expect(latex('x0')).toEqual(`x_0`);
-      expect(latex('x123')).toEqual(`x_{123}`);
+      // A PLAIN trailing digit run is not promoted to a subscript: `x0`
+      // spelled `x_0` would be read back as the different symbol `x_0`. The
+      // name is spelled verbatim instead, upright.
+      expect(latex('x0')).toEqual(`\\mathrm{x0}`);
+      expect(latex('x123')).toEqual(`\\mathrm{x123}`);
+      // A name that already uses the `_` subscript convention keeps it:
+      // single-token bases keep their default (italic) style, only the
+      // subscript is attached.
+      expect(latex('`x_0`')).toEqual(`x_0`);
+      expect(latex('`x_123`')).toEqual(`x_{123}`);
       expect(latex('`mu_123`')).toEqual(`\\mu_{123}`);
     });
 

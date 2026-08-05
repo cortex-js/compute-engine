@@ -12,6 +12,8 @@ import {
 
 import { ErrorSignal, WarningSignal } from '../../../common/signals.js';
 
+import { SYMBOLS } from './definitions-symbols.js';
+
 import {
   countTokens,
   joinLatex,
@@ -387,12 +389,76 @@ function addEntry(
   }
 }
 
+/** Lazy reverse map of the generic symbol speller: LaTeX command (e.g.
+ * `\\pi`) to the symbol name it spells (e.g. `pi`). First entry wins, as in
+ * the speller. */
+let _symbolNameByLatex: Map<string, string> | null = null;
+function symbolNameByLatex(): Map<string, string> {
+  if (!_symbolNameByLatex) {
+    _symbolNameByLatex = new Map();
+    for (const [name, latex] of SYMBOLS)
+      if (!_symbolNameByLatex.has(latex)) _symbolNameByLatex.set(latex, name);
+  }
+  return _symbolNameByLatex;
+}
+
+/**
+ * The symbol names whose generic spelling this dictionary gives to another
+ * symbol.
+ *
+ * The generic speller spells `pi` as `\pi` and `phiLetter` as `\varphi`, but
+ * the dictionary reads those commands back as the constants `Pi` and
+ * `GoldenRatio`: the generic spelling is not the name's own. Such names are
+ * spelled upright instead (see `Serializer.spellSymbol()`).
+ *
+ * A claiming entry whose `parse` is a HANDLER does not claim the spelling: a
+ * handler is the only form that can decline (return `null`), which is how an
+ * entry yields the bare command to a declaration — `\gamma` is `EulerGamma`
+ * only while `gamma` is undeclared, so the generic `\gamma` spelling of the
+ * plain symbol stays correct wherever that symbol exists. A `parse` given as
+ * a name (or omitted, so the entry's own name is used) always produces that
+ * symbol, and so always claims the spelling.
+ */
+function claimedSpellings(
+  dic: Readonly<Partial<LatexDictionaryEntry>[]>
+): Set<string> {
+  const result = new Set<string>();
+  for (const entry of dic) {
+    const fields = entry as LatexDictionaryEntryFields & {
+      readonly name?: string;
+      readonly parse?: unknown;
+    };
+    const trigger = fields.latexTrigger;
+    if (trigger === undefined) continue;
+
+    // Only an entry that can be read as a bare symbol competes with the
+    // generic spelling: an infix/postfix/matchfix/environment trigger is
+    // read in a position a symbol never occupies.
+    const kind = fields.kind ?? 'expression';
+    if (kind !== 'symbol' && kind !== 'expression' && kind !== 'function')
+      continue;
+
+    const name = symbolNameByLatex().get(
+      typeof trigger === 'string' ? trigger : trigger.join('')
+    );
+    if (name === undefined) continue;
+
+    if (typeof fields.parse === 'function') continue;
+
+    const claimant =
+      typeof fields.parse === 'string' ? fields.parse : fields.name;
+    if (claimant !== undefined && claimant !== name) result.add(name);
+  }
+  return result;
+}
+
 export function indexLatexDictionary(
   dic: Readonly<Partial<LatexDictionaryEntry>[]>,
   onError: (sig: ErrorSignal | WarningSignal) => void
 ): IndexedLatexDictionary {
   const result: IndexedLatexDictionary = {
     lookahead: 1,
+    claimedSpellings: claimedSpellings(dic),
     ids: new Map(),
     defs: [],
     matchfixByOpen: new Map(),

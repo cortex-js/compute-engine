@@ -140,6 +140,13 @@ export type IndexedLatexDictionary = {
   // considered (longest trigger length)
   lookahead: number;
 
+  // The symbol names whose generic (letterlike) spelling this dictionary
+  // gives to a DIFFERENT symbol: the plain symbol `pi` is spelled `\pi` by
+  // the generic speller, but this dictionary reads `\pi` back as `Pi`. Those
+  // names are spelled upright instead (`\mathrm{pi}`).
+  // Computed at indexing time by `claimedSpellings()`.
+  claimedSpellings: Set<string>;
+
   defs: IndexedLatexDictionaryEntry[];
 
   // Index of matchfix entries by their opening delimiter token

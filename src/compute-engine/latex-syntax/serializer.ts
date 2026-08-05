@@ -329,7 +329,7 @@ export class Serializer {
       // It's a function, but it doesn't have arguments.
       // For example `"Cos"`.
       // Print the trigger as an symbol
-      return serializeSymbol(symbol(expr) ?? '') ?? '';
+      return this.spellSymbol(symbol(expr) ?? '');
     }
     // The def may be for an OPERATOR of that name (e.g. the infix `Add`, the
     // matchfix `Abs`, the postfix `Factorial`). Its serialize handler expects
@@ -350,7 +350,24 @@ export class Serializer {
       )
         return result;
     }
-    return serializeSymbol(symbol(expr)) ?? '';
+    return this.spellSymbol(symbol(expr));
+  }
+
+  /**
+   * Spell out a symbol name, without using any dictionary notation.
+   *
+   * The generic speller gives a letterlike command to the names in the
+   * `SYMBOLS` table (`pi` → `\pi`). When this dictionary reads that command
+   * back as a DIFFERENT symbol (`\pi` → `Pi`), the command is not this
+   * symbol's to use: it is spelled upright instead (`\mathrm{pi}`), which
+   * always re-parses to the symbol. See `claimedSpellings()`.
+   */
+  private spellSymbol(name: string | null): string {
+    if (name === null) return '';
+    // Every claimed name comes from the `SYMBOLS` table, so it is a plain
+    // ASCII identifier and needs no escaping inside `\mathrm{}`.
+    if (this.dictionary.claimedSpellings.has(name)) return `\\mathrm{${name}}`;
+    return serializeSymbol(name) ?? '';
   }
 
   serializeFunction(
@@ -664,8 +681,15 @@ function parseSymbolBody(
     const sups: string[] = [];
     const subs: string[] = [];
 
-    // Check if we have a string of digits at the end of the body
-    const m = body.match(/^([^\d].*?)(\d+)$/);
+    // Check if we have a string of digits at the end of the body.
+    //
+    // Only a name that already uses the `_` subscript convention gets this
+    // prettification: promoting the trailing digits of a PLAIN name would
+    // change the symbol, since `x2` would be spelled `x_2` and read back as
+    // the different symbol `x_2` (and a bare `x2` is not an option either: it
+    // parses as the product `x·2`). A plain digit-suffixed name is therefore
+    // spelled verbatim — upright, as `\mathrm{x2}`.
+    const m = s.includes('_') ? body.match(/^([^\d].*?)(\d+)$/) : null;
     if (m) {
       subs.push(m[2]);
       body = m[1];
@@ -746,12 +770,13 @@ function parseSymbolBody(
 //
 // Other special symbols:
 // 'x_012' --> `x_{012}`
-// 'x012' --> `x_{012}`
+// 'x012' --> `\mathrm{x012}` (a plain trailing digit run is NOT subscripted:
+//            see `parseSymbolBody()`)
 // 'x_"max"' --> `x_\operatorname{max}`
 // '_' --> `\operatorname{\_}`
 // '_a' --> `\operatorname{\_a}`
 // '___a' --> `\operatorname{\_\_\_a}`
-// 'alpha0' --> `mathit{\alpha_{0}}`
+// 'alpha0' --> `\mathrm{alpha0}`
 // 'alpha__beta' --> `\operatorname{\alpha^{\beta}}`
 // 'alpha_beta' --> `\operatorname{\alpha_{beta}}`
 // 'speed-of-sound' --> `\mathit{speed\unicode{"2012}of\unicode{"2012}sound}`

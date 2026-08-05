@@ -2,6 +2,27 @@
 
 ### Bug Fixes
 
+- **A symbol spelled by the generic (name-based) speller now reads back as the
+  same symbol.** Two cosmetic spellings changed the symbol's identity on a
+  round trip. A plain trailing digit run became a subscript, so the symbol `x2`
+  serialized as `x_2` and parsed back as the _different_ symbol `x_2` (and
+  `Arctan2` as `\mathrm{Arctan_2}` → `Arctan_2`). Such a name is now spelled
+  verbatim and upright — `\mathrm{x2}`, `\mathrm{Arctan2}` — which reads back
+  as the original symbol; a name that already uses the `_` subscript
+  convention is unaffected (`x_2` still serializes as `x_2`). **This changes
+  the rendering of digit-suffixed names:** they display upright as `x2` rather
+  than as `x₂`; write `x_2` for the subscripted form. Separately, a name from
+  the Greek-letter table whose command the LaTeX dictionary gives to a
+  constant was spelled with that command: the symbol `pi` serialized as `\pi`
+  and parsed back as `Pi`, `zeta` as `\zeta` → `Zeta`, `phiLetter` as
+  `\varphi` → `GoldenRatio`. Those names are now spelled `\mathrm{pi}`,
+  `\mathrm{zeta}` and `\mathrm{phiLetter}`. The set is derived from the
+  dictionary, not hardcoded: a constant that yields its bare command to a
+  declaration does not claim the spelling, so the symbol `gamma` still
+  serializes as `\gamma` — that command reads back as `EulerGamma` only in an
+  engine where `gamma` is undeclared, i.e. never in an engine holding the
+  symbol.
+
 - **The imaginary unit now has a single canonical spelling: `["Complex", 0, 1]`.**
   A bare `i` parsed to the complex literal `["Complex", 0, 1]`, but
   `\imaginaryI` (and `\mathrm{i}`, `\operatorname{i}`, and the MathJSON symbol
