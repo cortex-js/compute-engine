@@ -957,7 +957,11 @@ export class Parser {
       const clause = this.parseTypeParamClause(name);
       // `undefined` is unreachable (the `<` was just checked); `null` and an
       // EMPTY clause (`<>`, already diagnosed) declare nothing.
-      if (clause === null || clause === undefined || clause.decls.length === 0) {
+      if (
+        clause === null ||
+        clause === undefined ||
+        clause.decls.length === 0
+      ) {
         unseed();
         this.recoverAtStatementBoundary();
         return null;
@@ -1037,7 +1041,12 @@ export class Parser {
     if (isAlias) {
       const entries: MathJsonExpression[] = [
         'Dictionary',
-        this.kvPair('alias', this.wrap({ sym: 'True' }, start, end), start, end),
+        this.kvPair(
+          'alias',
+          this.wrap({ sym: 'True' }, start, end),
+          start,
+          end
+        ),
       ];
       if (clauseText !== undefined)
         entries.push(

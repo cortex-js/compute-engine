@@ -54,7 +54,10 @@ export class TypeBuilder implements ASTVisitor<Type> {
    * applied to an open argument. */
   private _typeVarScopes: (readonly TypeParameter[])[] = [];
 
-  constructor(typeResolver?: TypeResolver, typeVars?: readonly TypeParameter[]) {
+  constructor(
+    typeResolver?: TypeResolver,
+    typeVars?: readonly TypeParameter[]
+  ) {
     this.typeResolver = typeResolver ?? {
       forward: () => undefined,
       resolve: () => undefined,

@@ -288,7 +288,9 @@ export function functionResult(
   // the arm at the call site and override this; everyone else gets the honest
   // `unknown`.
   const armResult = (a: FunctionSignature): Type =>
-    a.typeParams !== undefined && a.typeParams.length > 0 ? 'unknown' : a.result;
+    a.typeParams !== undefined && a.typeParams.length > 0
+      ? 'unknown'
+      : a.result;
   if (arms.length === 1) return armResult(arms[0]);
   return widen(...arms.map(armResult));
 }

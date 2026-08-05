@@ -1,9 +1,4 @@
-import type {
-  Type,
-  TypeParameter,
-  TypeResolver,
-  TypeString,
-} from './types.js';
+import type { Type, TypeParameter, TypeResolver, TypeString } from './types.js';
 
 import { isValidType } from './primitive.js';
 import { Parser } from './parser.js';

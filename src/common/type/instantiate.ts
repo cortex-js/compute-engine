@@ -297,7 +297,8 @@ export function substituteTypeVariables(
         (p) => !hasOwn(bindings, p.name) || bindings[p.name] === undefined
       );
       const clauseChanged =
-        t.typeParams !== undefined && typeParams!.length !== t.typeParams.length;
+        t.typeParams !== undefined &&
+        typeParams!.length !== t.typeParams.length;
       if (
         !clauseChanged &&
         args === t.args &&
@@ -460,7 +461,8 @@ function validatePolytypeArm(
   }
 
   const inArgs = new Set<string>();
-  for (const el of signatureElements(arm)) walk(el.type, declared, true, inArgs);
+  for (const el of signatureElements(arm))
+    walk(el.type, declared, true, inArgs);
   const inResult = new Set<string>();
   walk(arm.result, declared, true, inResult);
 
@@ -1079,7 +1081,10 @@ function joinBounds(bounds: ReadonlyArray<Bound>): {
   // `never` is NEUTRAL (identity): `Concat([], [1])` solves `T = integer`.
   const ordinary = bounds.filter((b) => b.type !== 'never');
   if (ordinary.length === 0) return { type: 'never', absorbed: false };
-  return { type: algebra().widen(...ordinary.map((b) => b.type)), absorbed: false };
+  return {
+    type: algebra().widen(...ordinary.map((b) => b.type)),
+    absorbed: false,
+  };
 }
 
 /**
@@ -1107,12 +1112,25 @@ function skeleton(t: Type, covariant: boolean): Type {
     case 'variable':
       return covariant ? 'any' : 'never';
     case 'signature': {
-      const next: FunctionSignature = { ...t, result: skeleton(t.result, covariant) };
-      if (t.args) next.args = t.args.map((a) => ({ ...a, type: skeleton(a.type, !covariant) }));
+      const next: FunctionSignature = {
+        ...t,
+        result: skeleton(t.result, covariant),
+      };
+      if (t.args)
+        next.args = t.args.map((a) => ({
+          ...a,
+          type: skeleton(a.type, !covariant),
+        }));
       if (t.optArgs)
-        next.optArgs = t.optArgs.map((a) => ({ ...a, type: skeleton(a.type, !covariant) }));
+        next.optArgs = t.optArgs.map((a) => ({
+          ...a,
+          type: skeleton(a.type, !covariant),
+        }));
       if (t.variadicArg)
-        next.variadicArg = { ...t.variadicArg, type: skeleton(t.variadicArg.type, !covariant) };
+        next.variadicArg = {
+          ...t.variadicArg,
+          type: skeleton(t.variadicArg.type, !covariant),
+        };
       delete next.typeParams;
       return next;
     }
@@ -1125,7 +1143,10 @@ function skeleton(t: Type, covariant: boolean): Type {
     case 'tuple':
       return {
         ...t,
-        elements: t.elements.map((e) => ({ ...e, type: skeleton(e.type, covariant) })),
+        elements: t.elements.map((e) => ({
+          ...e,
+          type: skeleton(e.type, covariant),
+        })),
       };
     case 'dictionary':
       return { ...t, values: skeleton(t.values, covariant) };
@@ -1172,7 +1193,11 @@ function elementTypeOf(type: Type): Type | undefined {
   if (type.kind === 'list') {
     const dims = (type as ListType).dimensions;
     if (dims && dims.length > 1)
-      return { kind: 'list', elements: type.elements, dimensions: dims.slice(1) };
+      return {
+        kind: 'list',
+        elements: type.elements,
+        dimensions: dims.slice(1),
+      };
     return type.elements;
   }
   if (type.kind === 'set') return type.elements;
@@ -1434,7 +1459,8 @@ function walkPattern(
         !algebra().isSubtype(actual, groundSkeleton(pattern, true))
       )
         return false;
-      if (typeof actual !== 'object' || actual.kind !== 'dictionary') return true;
+      if (typeof actual !== 'object' || actual.kind !== 'dictionary')
+        return true;
       return walkPattern(
         s,
         pattern.values,

@@ -491,7 +491,7 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
   // Is it a single-letter symbol (possibly with subscript)?
   //
   if (/^[a-zA-Z]$/.test(parser.peek) || /^\p{XIDS}$/u.test(parser.peek)) {
-    let id = parser.nextToken();
+    const id = parser.nextToken();
 
     const info = parser.resolveSymbol(id);
 

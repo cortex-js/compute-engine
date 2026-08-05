@@ -1124,9 +1124,7 @@ export function validateArguments(
           deferredIdx.add(result.length - 1);
           continue;
         }
-        result.push(
-          ce.typeError(displayVarParam ?? varParam, op.type, op)
-        );
+        result.push(ce.typeError(displayVarParam ?? varParam, op.type, op));
         isValid = false;
         continue;
       }

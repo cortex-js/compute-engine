@@ -21,6 +21,7 @@ import {
   hasFreeTypeVariables,
   isReservedTypeName,
   TypeVariableError,
+  isPolymorphicType,
 } from '../common/type/instantiate.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import {
@@ -36,7 +37,6 @@ import {
   declaredTypeError,
 } from './boxed-expression/type-compatibility-error.js';
 import { osaDistance } from '../common/fuzzy-string-match.js';
-import { isPolymorphicType } from '../common/type/instantiate.js';
 
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
 import type { MathJsonSymbol } from '../math-json/types.js';
@@ -540,7 +540,9 @@ function normalizeDeclaredTypeParams(
         'unsupported-variable-position',
         `The bound of the type variable \`${entry.name}\` must be a ground type`
       );
-    push(bound === undefined ? { name: entry.name } : { name: entry.name, bound });
+    push(
+      bound === undefined ? { name: entry.name } : { name: entry.name, bound }
+    );
   }
 
   if (params.length === 0)

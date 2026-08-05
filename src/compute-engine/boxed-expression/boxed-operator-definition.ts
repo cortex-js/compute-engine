@@ -953,10 +953,9 @@ function legacyFlagEffects(
  * D6 bound-reading (variables replaced by their bounds).
  */
 function couldReturnIndexedCollection(type: Type): boolean {
-  const arms =
-    (typeof type !== 'string' && type.kind === 'intersection'
-      ? signatureArms(type)
-      : undefined) ?? [type];
+  const arms = (typeof type !== 'string' && type.kind === 'intersection'
+    ? signatureArms(type)
+    : undefined) ?? [type];
   return arms.some((arm) => {
     const result = functionResult(arm);
     if (result === undefined) return false;

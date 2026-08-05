@@ -735,7 +735,8 @@ export class BaseCompiler {
         // As for user functions: a target whose language has no function
         // VALUES (the shader targets) decides what this reference means — in
         // practice, fails closed (D6).
-        if (etaFn !== undefined && !hadVarsRef) target.varsObjectRefs?.delete(s);
+        if (etaFn !== undefined && !hadVarsRef)
+          target.varsObjectRefs?.delete(s);
         if (etaFn !== undefined && registry.lowering)
           return registry.lowering.value({ id: s, name: etaFn, target });
         if (etaFn !== undefined) return etaFn;

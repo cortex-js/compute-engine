@@ -989,7 +989,8 @@ export function serializeCortex(
             // (`returnTypeText`) or the `-> …` it produces would read back as
             // the definition's own contract.
             retType: isWide ? null : returnTypeText(result),
-            specifier: effects !== undefined ? effectSetToString(effects) : null,
+            specifier:
+              effects !== undefined ? effectSetToString(effects) : null,
             typeParams:
               quantifiers.length > 0
                 ? quantifiers
