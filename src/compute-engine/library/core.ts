@@ -1934,11 +1934,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const hasValue = valueSource !== undefined;
         const value = hasValue ? valueSource!.evaluate() : undefined;
 
-        // Resolve the remaining attributes.
-        const isConstant = sym(attrs?.get('constant')) === 'True';
+        // Resolve the remaining attributes. Both flags are read in EITHER
+        // encoding, as `declareTypeStatement` reads `alias`: the `{dict: …}`
+        // shorthand boxes an unquoted `True`/`never` as a STRING, the operator
+        // `Dictionary` form carries the SYMBOL.
+        const constantOp = attrs?.get('constant');
+        const isConstant =
+          constantOp !== undefined &&
+          (isString(constantOp) ? constantOp.string : sym(constantOp)) ===
+            'True';
         const holdOp = attrs?.get('holdUntil')?.evaluate();
         const holdUntil = (
-          holdOp && isString(holdOp) ? holdOp.string : undefined
+          holdOp
+            ? ((isString(holdOp) ? holdOp.string : sym(holdOp)) ?? undefined)
+            : undefined
         ) as 'never' | 'evaluate' | 'N' | undefined;
 
         // Declare ONE name with the resolved type/constant/holdUntil.

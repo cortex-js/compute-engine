@@ -225,9 +225,12 @@ _function-definition_ → _symbol_ _parameters_
 **`function`** form: `f<T>(x) = x` is genuinely ambiguous with a relational
 expression, so the math form does not take it
 
-_type-declaration_ → **`type`** \[**`alias`**\] _symbol_
-\[**`<`** (_symbol_)#**`,`** **`>`**\] **`=`** _type_
-&nbsp;&nbsp;&nbsp;&nbsp;— the `<…>` slot is reserved and rejected
+_type-declaration_ → **`type`** **`alias`** _symbol_
+\[_type-parameter-clause_\] **`=`** _type_ |
+**`type`** _symbol_ **`=`** _type_
+&nbsp;&nbsp;&nbsp;&nbsp;— only the **`alias`** form takes a clause; the
+`<…>` slot of the bare (nominal) form is reserved and rejected. The clause
+names scope over the definition only, and each must be used in it
 
 _while-statement_ → **`while`** _expression_ _block_
 

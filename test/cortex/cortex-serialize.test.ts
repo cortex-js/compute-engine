@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { serializeCortex } from '../../src/cortex/serialize-cortex';
 
 describe('CORTEX SERIALIZING', () => {
@@ -246,6 +247,22 @@ describe('CORTEX SERIALIZING DICTIONARIES', () => {
         ['KeyValuePair', { str: 'one' }, 1],
         ['KeyValuePair', { str: 'two' }, 2],
       ])
+    );
+  });
+
+  // A `{dict: …}` VALUE is a `DictionaryValue`, which — unlike a
+  // `MathJsonExpression` — may be a JS boolean. Canonicalizing a dictionary
+  // collapses the `True`/`False` symbols to booleans, so this is the shape a
+  // round-tripped bag actually carries; it used to render as an EMPTY value
+  // (`{"a" -> }`), which does not re-parse.
+  test('boolean dictionary values render as the True/False symbols', () => {
+    expect(
+      serializeCortex({ dict: { a: true, b: false, c: 3 } })
+    ).toMatchInlineSnapshot(`"{"a" -> True, "b" -> False, "c" -> 3}"`);
+
+    // The operator form and the canonicalized shorthand agree.
+    expect(serializeCortex({ dict: { a: true } })).toEqual(
+      serializeCortex(['Dictionary', ['KeyValuePair', { str: 'a' }, 'True']])
     );
   });
 });
@@ -518,5 +535,60 @@ describe('CORTEX SERIALIZING DECLARATIONS', () => {
         ['Dictionary', ['KeyValuePair', { sym: 'holdUntil' }, { str: 'never' }]],
       ] as any)
     ).toBe('Declare(x, {holdUntil -> "never"})');
+  });
+
+  // Canonicalizing rewrites the attributes bag into the `{dict: …}` shorthand
+  // and collapses the `True` symbol to a JS boolean. Reading only the operator
+  // `Dictionary` form lost the `let`/`const` spelling on that route, and the
+  // boolean rendered empty (`{"constant" -> }`).
+  test('declarations survive a canonical-box round trip', () => {
+    const { parseCortex } = require('../../src/cortex/parse-cortex');
+    const ce = new ComputeEngine();
+    const rtBoxed = (src: string) =>
+      serializeCortex(ce.box(parseCortex(src)[0]).json as any);
+
+    expect(rtBoxed('let x = 5')).toBe('let x = 5');
+    expect(rtBoxed('const c = 5')).toBe('const c = 5');
+    expect(rtBoxed('type alias pt = tuple<integer, integer>')).toBe(
+      'type alias pt = tuple<integer, integer>'
+    );
+    expect(rtBoxed('type alias Pair<T> = tuple<T, T>')).toBe(
+      'type alias Pair<T> = tuple<T, T>'
+    );
+    expect(rtBoxed('type nom = tuple<integer, integer>')).toBe(
+      'type nom = tuple<integer, integer>'
+    );
+  });
+
+  // The flag is accepted in every encoding an attributes bag can carry it in,
+  // matching the engine-side readers (`declareTypeStatement`, `Declare`'s
+  // evaluate handler). A JS boolean is a `DictionaryValue`, so it is only
+  // reachable through the `{dict: …}` shorthand — never inside the operator
+  // form, where the value position holds a `MathJsonExpression`.
+  test('the `constant`/`alias` flag is read in every encoding', () => {
+    const constantBags = [
+      ['Dictionary', ['KeyValuePair', { str: 'constant' }, 'True'], ['KeyValuePair', { str: 'value' }, 5]],
+      ['Dictionary', ['KeyValuePair', { str: 'constant' }, { str: 'True' }], ['KeyValuePair', { str: 'value' }, 5]],
+      { dict: { constant: 'True', value: 5 } },
+      { dict: { constant: true, value: 5 } },
+    ];
+    for (const bag of constantBags)
+      expect(serializeCortex(['Declare', 'k', bag] as any)).toBe('const k = 5');
+
+    const aliasBags = [
+      ['Dictionary', ['KeyValuePair', { str: 'alias' }, 'True']],
+      ['Dictionary', ['KeyValuePair', { str: 'alias' }, { str: 'True' }]],
+      { dict: { alias: 'True' } },
+      { dict: { alias: true } },
+    ];
+    for (const bag of aliasBags)
+      expect(
+        serializeCortex([
+          'DeclareType',
+          'pt',
+          { str: 'tuple<integer, integer>' },
+          bag,
+        ] as any)
+      ).toBe('type alias pt = tuple<integer, integer>');
   });
 });

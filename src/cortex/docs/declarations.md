@@ -75,8 +75,9 @@ let a: pair = (1, 2)
 ```
 
 `type` declares a new, distinct type; `type alias` declares another name for
-an existing one. Unlike `let` and `const`, `type` is not a reserved word —
-only these statement shapes claim it. See
+an existing one, and takes a type-parameter clause if it needs one
+(`type alias Pair<T> = tuple<T, T>`). Unlike `let` and `const`, `type` is not
+a reserved word — only these statement shapes claim it. See
 [Declaring a type](/cortex/types/#declaring-a-type) for the whole story.
 
 ## Reassignment vs. declaration

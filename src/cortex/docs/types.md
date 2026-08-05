@@ -402,11 +402,26 @@ type alias Pair<T> = tuple<T, T>
 let p: Pair<integer> = (1, 2)
 ```
 
-A parameter may carry a ground bound (`type alias Keyed<T: value> = …`),
-enforced wherever the alias is applied — including application to
-another clause's type variable, which is admitted when the variable's
-own bound satisfies the parameter's. A generic alias may not refer to
-itself, and every parameter must be used in the body.
+A parameter may carry a ground bound, enforced wherever the alias is
+applied — including application to another clause's type variable, which
+is admitted when the variable's own bound satisfies the parameter's. One
+alias may therefore be built out of another:
+
+```cortex
+type alias Keyed<T: number> = tuple<string, T>
+type alias Table<T: integer> = list<Keyed<T>>
+let rows: Table<integer> = [("a", 1), ("b", 2)]
+```
+
+A generic alias may not refer to itself, every parameter must be used in
+the body, and applying one without its arguments (a bare `Pair`) is an
+error. Unlike a plain alias, a generic one declares **no**
+[constructor](#constructor-functions) and claims nothing in the value
+namespace: a `function` of the same name is an ordinary function,
+declared before or after. A dependent alias **snapshots** the
+definitions it was built from: re-running the `type` statement for
+`Keyed` leaves `Table` as it was until `Table`'s own statement is re-run
+too — which re-running the cell does.
 
 A parameterized **nominal** type — the bare form,
 `type point<T> = tuple<T, T>` — remains **reserved** and reports a
@@ -454,6 +469,19 @@ type alias pair = tuple<number, number>
 ```json
 ["DeclareType", "pair", {"str": "tuple<number, number>"},
   ["Dictionary", ["KeyValuePair", "alias", "True"]]]
+```
+
+A type-parameter clause rides the same dictionary, as the text of the
+clause:
+
+```cortex
+type alias Pair<T> = tuple<T, T>
+```
+
+```json
+["DeclareType", "Pair", {"str": "tuple<T, T>"},
+  ["Dictionary", ["KeyValuePair", "alias", "True"],
+    ["KeyValuePair", "typeParams", {"str": "T"}]]]
 ```
 
 A type is registered when its statement is canonicalized, which is why the

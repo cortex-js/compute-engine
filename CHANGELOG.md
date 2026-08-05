@@ -160,6 +160,37 @@
   `f<T>(x) = x` remains an ordinary expression, since it is genuinely
   ambiguous with a relational one.
 
+- **Transparent generic type aliases: `type alias Pair<T> = tuple<T, T>`.** A
+  structural type alias can now take a **type-parameter clause**, in Cortex as
+  above and from the host with
+  `ce.declareType('Pair', 'tuple<T, T>', { alias: true, typeParams: ['T'] })`
+  — parameter names, `{ name, bound }` records or one clause string
+  (`'T, U: number'`). The applied spelling is usable anywhere a type is
+  written: an annotation, a parameter, the element position of another type.
+  It expands **eagerly**, at type resolution, into the substituted definition,
+  so nothing downstream ever meets an applied reference: `Pair<integer>` *is*
+  `tuple<integer, integer>`, and that expansion is what `.type`,
+  `toString()`, `matches()` and error messages show — the source keeps the
+  spelling it was written with, and a Cortex program round-trips
+  `let p: Pair<integer> = (1, 2)` verbatim. Arguments nest
+  (`Pair<Pair<integer>>`, `list<Pair<integer>>`) and aliases compose
+  (`type alias Wrap<T> = list<Pair<T>>`). A parameter may carry a ground
+  bound, enforced wherever the alias is applied; an argument that is itself a
+  type **variable** — a `forall` clause's, or the enclosing alias's own
+  parameter — is admitted by comparing bounds: the variable's declared bound
+  must satisfy the parameter's (an unbounded variable is bounded by `any`, so
+  a bare `forall T. (Keyed<T>) -> T` reports `generic-alias-bound` naming both
+  bounds). Four limits, each with its own diagnostic: a generic alias may not
+  refer to **itself** (recursive generic aliases are out of scope), every
+  parameter must be **used** in the definition, a bare or wrongly-sized
+  application is an arity error, and a parameterized **nominal** type is still
+  unsupported. No constructor is minted for a generic alias and its name is
+  not claimed in the value namespace at all, so a function of the same name
+  stays legal, before or after. A dependent alias **snapshots** what it was
+  built from: re-running a `type` statement replaces that alias, and
+  re-running the cell re-declares the dependents in order. See the new
+  "Generic Type Aliases" section of the types guide.
+
 - **`IdenticallyEqual`: a dedicated operator for mathematical identities.**
   `["IdenticallyEqual", lhs, rhs]`, the method `expr.isIdenticallyEqual(other)`
   and the LaTeX notation `\equiv` (the `≡` character parses the same way, and
@@ -269,6 +300,64 @@
 - **Function-literal signature markers may reference user-declared types when
   serialized to Cortex**, and anonymous literals carrying a signature marker
   round-trip losslessly instead of dropping the ascription.
+
+- **A broadcast argument at a generic parameter now binds the *element*
+  type.** When a collection is admitted against a scalar-bounded type variable
+  — the lift that makes `Conjugate([1, 2, 3])` legal — the variable used to
+  bind the whole argument, and the result was un-wrapped again only where it
+  was the bare variable. A result that merely *mentioned* the variable then
+  came out one rank too high: `forall T. (T) -> tuple<T, T>` over `[1, 2]`
+  typed `list<tuple<vector<…^2>, vector<…^2>>>` against the value
+  `[(1, 1), (2, 2)]`. The bound is still checked at the scalar base —
+  admission is unchanged — but the variable now binds the argument's element
+  type and the call site's ordinary broadcast wrap re-adds the rank, which
+  gives one rule for every result shape: an echo (`Chop`, `Conjugate`) types
+  exactly as before, and a result that mentions the variable is the
+  per-element result with the argument's shape around it. Two static types
+  change: a mixed-rank or union-typed argument now takes the broadcast
+  wrapper's (coarser) shape answer, the same one its ground counterpart gets,
+  and `Remainder(M, 7)`-shaped calls no longer widen to a union at all —
+  `matrix<finite_integer^(2x2)>`, where the whole-argument bind gave
+  `list<finite_integer | vector<finite_integer^2>^(2x2)>`. Only the kinds a
+  broadcast actually maps are peeled: a `set` argument is admitted but never
+  mapped (`Conjugate(Set(1, 2))` stays a `set`), and a tuple stays atomic. In
+  the same pass, a rank ≥ 2 argument to a generic **function literal** now
+  maps to the scalar leaves on the value route too, matching the operator
+  route and compiled code: with `f: forall T. (x: T) -> tuple<T, T>` assigned
+  `x |-> (x, x)`, a 2×2 argument evaluates to a 2×2 of pairs of scalars
+  instead of applying the literal to whole rows.
+
+- **A malformed type annotation no longer swallows the statement after it.**
+  Recovery from a bad annotation ran twice — once inside the type subparser
+  and once in its caller — so a declaration such as `let x: )bad( = 1`
+  resynchronized one statement too far and discarded the line that followed.
+  The subparser now only diagnoses, and each caller resynchronizes at the unit
+  its own grammar uses: a statement boundary for a declaration, the next `,` or
+  closing bracket for one element of a list. A malformed annotation in a
+  function's parameter list, in a `|->` parameter list or in a `match` tuple
+  pattern therefore costs only its own annotation — the parameter survives
+  untyped and the rest of the list still parses. The `|->` case is the one
+  that was silently wrong rather than merely noisy: the parameters after the
+  malformed one were dropped, so the lambda went on to parse at a different
+  arity. The resync honors `<…>` nesting, so an unclosed applied alias
+  (`f(x: Pair<integer, string)`) no longer mints a bogus parameter out of the
+  type's own argument list.
+
+- **Generic values describe themselves, and an anonymous generic application
+  is typed.** A function literal assigned to a symbol declared with a
+  polytype now carries that polytype as its own type on all three routes
+  (`ce.assign`, the `Assign` operator, an annotated Cortex `const`/`let`), so
+  the stored value reports `forall T. (x: T) -> T` instead of the arrow its
+  erased body would infer — as long as every parameter of the clause mentions
+  a quantified variable (a literal with a ground parameter still self-describes
+  as its inferred arrow). Applying a generic literal *anonymously* —
+  `["Apply", literal, arg]`, and the bare `[literal, arg]` it canonicalizes
+  from — instantiates the clause too, so the application types
+  `finite_integer` at `5` and `string` at `"a"` rather than falling back to
+  `unknown`. And re-assigning an **untyped** literal over a signature that was
+  itself *derived* from an earlier assignment now fully replaces it, arity
+  included; a signature the author declared (any `ce.declare` form) stays
+  sticky, as before.
 
 - **Euler derivative notation and `\gamma` now yield to a declaration.** Both
   spellings are claimed by a parselet that runs ahead of symbol resolution, so

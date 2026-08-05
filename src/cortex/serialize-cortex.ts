@@ -162,15 +162,12 @@ export function serializeCortex(
         // `dictionaryFromExpression` returns a `MathJsonDictionaryObject`
         // (`{ dict: { key: value, … } }`); the entries live in `.dict`, not on
         // the wrapper itself.
-        const dictEntries = dict.dict as unknown as Record<
-          string,
-          MathJsonExpression
-        >;
+        const dictEntries = dict.dict;
         const keyValues = Object.keys(dictEntries).map((key) =>
           fmt.line(
             serializeString(key),
             fmt.relationalOperator('->'),
-            serializeExpression(dictEntries[key])
+            serializeExpression(dictionaryValueToExpression(dictEntries[key]))
           )
         );
 
@@ -620,14 +617,20 @@ export function serializeCortex(
       // Optional positional type (a string or type-name symbol), optional
       // trailing attributes dictionary.
       let typeStr: string | null = null;
-      let attrsOp: MathJsonExpression | null = null;
+      let entries: Record<string, MathJsonExpression> | null = null;
       for (const a of args.slice(1)) {
-        if (operator(a) === 'Dictionary') {
-          if (attrsOp !== null) return serializeGenericFunction(expr);
-          attrsOp = a;
+        // The attributes bag, read through `attributeEntries` so BOTH
+        // dictionary encodings are recognized: the operator form the parser
+        // emits, and the `{dict: …}` shorthand a CANONICALIZED `Declare`
+        // carries. Matching only the operator form lost the `let`/`const`
+        // spelling on every round trip through the boxer.
+        const bag = attributeEntries(a);
+        if (bag !== null) {
+          if (entries !== null) return serializeGenericFunction(expr);
+          entries = bag;
         } else {
           const s = stringValue(a) ?? symbol(a);
-          if (s === null || typeStr !== null || attrsOp !== null)
+          if (s === null || typeStr !== null || entries !== null)
             return serializeGenericFunction(expr);
           typeStr = s;
         }
@@ -637,15 +640,13 @@ export function serializeCortex(
       // `let`/`const` spelling.
       let valueOp: MathJsonExpression | null = null;
       let isConst = false;
-      if (attrsOp !== null) {
-        for (const entry of operands(attrsOp)) {
-          if (operator(entry) !== 'KeyValuePair')
-            return serializeGenericFunction(expr);
-          const key =
-            stringValue(operand(entry, 1)) ?? symbol(operand(entry, 1));
-          if (key === 'value') valueOp = operand(entry, 2);
+      if (entries !== null) {
+        for (const key of Object.keys(entries)) {
+          if (key === 'value') valueOp = entries[key];
           else if (key === 'constant') {
-            if (symbol(operand(entry, 2)) !== 'True')
+            // Both encodings, as `Declare`'s evaluate handler reads it.
+            const v = entries[key];
+            if ((symbol(v) ?? stringValue(v)) !== 'True')
               return serializeGenericFunction(expr);
             isConst = true;
           } else return serializeGenericFunction(expr);
@@ -708,7 +709,11 @@ export function serializeCortex(
       )
         return serializeGenericFunction(expr);
 
-      if (symbol(entries['alias'] ?? null) !== 'True')
+      // Read the flag in BOTH encodings, exactly as `declareTypeStatement`
+      // does: the `{dict: …}` shorthand boxes an unquoted `True` as a STRING,
+      // the operator `Dictionary` form carries the SYMBOL.
+      const aliasOp = entries['alias'] ?? null;
+      if ((symbol(aliasOp) ?? stringValue(aliasOp)) !== 'True')
         return serializeGenericFunction(expr);
 
       const clauseOp = entries['typeParams'];
@@ -1265,6 +1270,26 @@ export function serializeCortex(
  * string/symbol distinction. The map is prototype-free: an attribute key comes
  * from author text and may be `__proto__`.
  */
+/**
+ * A `{dict: …}` VALUE is a `DictionaryValue`, not a `MathJsonExpression`: the
+ * two unions differ on `boolean`, which is a legal dictionary value but not a
+ * legal expression. Canonicalizing a dictionary collapses the `True`/`False`
+ * symbols to JS booleans (`boxedExpressionToDictionaryValue`), so a bag that
+ * was authored in the operator form comes back as `{dict: {alias: true}}` —
+ * and a raw cast would hand `true` to `serializeExpression()`, which matches
+ * no expression shape and renders EMPTY (`{"alias" -> }`, unparseable).
+ *
+ * Map the booleans back to the symbols they canonicalized from. Every other
+ * `DictionaryValue` is passed through as before: a bare string keeps reading
+ * as a symbol shorthand and an array as a nested expression, which is the
+ * convention the dictionary serialization tests pin (`z: ['Add', 2, 'x']` →
+ * `"z" -> 2 + x`).
+ */
+function dictionaryValueToExpression(v: unknown): MathJsonExpression {
+  if (typeof v === 'boolean') return v ? 'True' : 'False';
+  return v as MathJsonExpression;
+}
+
 function attributeEntries(
   expr: MathJsonExpression | null
 ): Record<string, MathJsonExpression> | null {
@@ -1279,7 +1304,7 @@ function attributeEntries(
     expr.dict !== null
   ) {
     for (const [k, v] of Object.entries(expr.dict))
-      entries[k] = v as MathJsonExpression;
+      entries[k] = dictionaryValueToExpression(v);
     return entries;
   }
 

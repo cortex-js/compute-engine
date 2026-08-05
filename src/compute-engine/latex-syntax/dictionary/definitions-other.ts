@@ -614,7 +614,11 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       //
       // Border
       //
-      if (dict.dict.border === true)
+      // The flag is read in either encoding: the LaTeX parser and a
+      // canonicalized `Dictionary` both yield the JS boolean, but a host may
+      // write the `True` symbol, which `dictionaryFromExpression` flattens to
+      // the string `'True'`.
+      if (dict.dict.border === true || dict.dict.border === 'True')
         result = joinLatex(['\\boxed{', result, '}']);
 
       //
