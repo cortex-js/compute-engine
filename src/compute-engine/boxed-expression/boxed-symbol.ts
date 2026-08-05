@@ -444,6 +444,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (!this._def) return false;
 
     const def = this._def;
+
+    // Narrowing capture (`InspectableScope.narrowings()`): while a parse/box
+    // runs against a caller-owned scope, every type this call writes onto a
+    // definition that lives OUTSIDE that scope is reported back to the caller —
+    // the phase-1 residual of scope containment, made observable. `undefined`
+    // — the normal case — costs one property read.
+    const sink = this.engine._narrowingSink;
+
     if (isValueDef(def)) {
       // The type of a constant cannot be changed, so it is never inferred,
       // even if it is unknown (e.g. `ContinuationPlaceholder`)
@@ -451,6 +459,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
       if (def.value.inferredType || def.value.type.isUnknown) {
         const wasUnknown = def.value.type.isUnknown;
+        const previousType = sink ? def.value.type : undefined;
         const inferred = this.engine.type(
           inferenceMode === 'widen'
             ? widen(def.value.type.type, t)
@@ -472,12 +481,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // deliberately not recorded.
         if (wasUnknown && this.engine._inferenceTxDepth > 0)
           (this.engine._freshlyInferred ??= new Set()).add(def.value);
+        if (sink && previousType !== undefined)
+          sink._recordNarrowing(this._id, def, previousType, inferred);
         return true;
       }
       return false;
     }
 
     if (isOperatorDef(def)) {
+      const previousType = sink ? def.operator.signature : undefined;
       const newType = this.engine.type(
         inferenceMode === 'widen'
           ? widen(def.operator.signature.type, t)
@@ -496,10 +508,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // semantic change other expressions may depend on.
         this.engine._mutationGeneration += 1;
         this.engine._semanticEpoch += 1;
+        if (sink && previousType !== undefined)
+          sink._recordNarrowing(this._id, def, previousType, newType);
         return true;
       }
       // The type is no longer a function, use a value definition
       updateDef(this.engine, this._id, def, { type: newType.type });
+      if (sink && previousType !== undefined)
+        sink._recordNarrowing(this._id, def, previousType, newType);
       return true;
     }
 

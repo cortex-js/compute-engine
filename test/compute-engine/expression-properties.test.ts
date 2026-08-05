@@ -389,6 +389,64 @@ describe('FREE_VARIABLES (lambdas & integrals)', () => {
   });
 });
 
+describe('FREE_VARIABLES (structural tier)', () => {
+  // The bound variables of a STRUCTURAL tree come from the operator
+  // definition's binding sites, which know the raw parse spellings — so a
+  // structural answer matches the canonical one. See
+  // `docs/plans/2026-08-04-parse-scope-control-design.md` A3.
+  const body = ['Power', 'n', 2];
+
+  it.each([
+    ['Tuple', ['Tuple', 'n', 1, 10]],
+    ['Limits', ['Limits', 'n', 1, 10]],
+    ['Element', ['Element', 'n', ['Range', 1, 10]]],
+    ['bare symbol', 'n'],
+  ])('structural Sum: excludes the index (%s spelling)', (_name, limits) => {
+    const sum = engine.box(['Sum', body, limits] as any, { structural: true });
+    expect(sum.freeVariables).toEqual([]);
+    expect(sum.unknowns).toEqual([]);
+  });
+
+  it('structural Product: excludes the index', () => {
+    const p = engine.box(['Product', body, ['Tuple', 'n', 1, 10]], {
+      structural: true,
+    });
+    expect(p.freeVariables).toEqual([]);
+  });
+
+  it('structural/canonical route parity', () => {
+    const json = ['Sum', ['Multiply', 'a', body], ['Tuple', 'n', 1, 10]];
+    const structural = engine.box(json as any, { structural: true });
+    const canonical = engine.box(json as any);
+    expect(structural.freeVariables).toEqual(['a']);
+    expect(canonical.freeVariables).toEqual(structural.freeVariables);
+    expect(structural.unknowns).toEqual(canonical.unknowns);
+  });
+
+  it('structural Function literal: still excludes its parameters', () => {
+    const f = engine.box(['Function', ['Add', 'x', 'b'], 'x'], {
+      structural: true,
+    });
+    expect(f.freeVariables).toEqual(['b']);
+  });
+
+  it('a node with no definition falls back to the spelling heuristic', () => {
+    // `canonical: false` leaves the node unbound (no operator definition), so
+    // there are no binding sites to consult: only the canonical
+    // `Limits`/`Element` spellings are recognized, and `Tuple` is not.
+    const raw = engine.box(['Sum', body, ['Tuple', 'n', 1, 10]], {
+      canonical: false,
+    });
+    expect(raw.operatorDefinition).toBeUndefined();
+    expect(raw.freeVariables).toEqual(['n']);
+
+    const rawLimits = engine.box(['Sum', body, ['Limits', 'n', 1, 10]], {
+      canonical: false,
+    });
+    expect(rawLimits.freeVariables).toEqual([]);
+  });
+});
+
 describe('DEFINES', () => {
   it('value assignment defines its target', () => {
     expect(engine.parse('a := 3').defines).toEqual(['a']);

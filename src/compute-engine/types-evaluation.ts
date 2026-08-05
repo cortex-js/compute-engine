@@ -18,6 +18,10 @@ import type {
   ExplainStep as KernelExplainStep,
   Explanation as KernelExplanation,
   Scope as KernelScope,
+  InspectableScope as KernelInspectableScope,
+  NarrowingSink as KernelNarrowingSink,
+  ScopeDeclaration as KernelScopeDeclaration,
+  ScopeNarrowing as KernelScopeNarrowing,
 } from './types-kernel-evaluation.js';
 
 export type {
@@ -114,6 +118,19 @@ export type AssignValue = KernelAssignValue<
 
 /** Lexical scope specialized to boxed definitions. */
 export type Scope = KernelScope<BoxedDefinition>;
+
+/** A caller-owned, readable lexical scope — the product of
+ * `ce.createScope()`. Specialized to boxed definitions. */
+export type InspectableScope = KernelInspectableScope<BoxedDefinition>;
+
+/** One entry of an {@link InspectableScope} harvest. */
+export type ScopeDeclaration = KernelScopeDeclaration<BoxedDefinition>;
+
+/** One outer-definition narrowing observed by an {@link InspectableScope}. */
+export type ScopeNarrowing = KernelScopeNarrowing<BoxedDefinition>;
+
+/** Where `infer()` routes narrowing captures. @internal */
+export type NarrowingSink = KernelNarrowingSink<BoxedDefinition>;
 
 /** Evaluation context specialized to this engine/runtime model. */
 export type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;

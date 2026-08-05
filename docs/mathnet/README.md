@@ -21,6 +21,7 @@ modeling).
 | [parser-test-cases.json](./parser-test-cases.json) | **Curated regression corpus**: 345 originally failing LaTeX fragments + 83 follow-up fragments + 19 failing answer strings, categorized (captured on v0.67.0 plus follow-ups) |
 | [math-genre-sweep.md](./math-genre-sweep.md) | **Genre-coverage sweep** (2026-07-09) over Hendrycks MATH (15,546 fragments, all 7 subjects incl. worked solutions): 95.27% clean, ranked new-notation gap list |
 | [math-genre-failures.json](./math-genre-failures.json) | The 735 failing MATH fragments, tagged by motif (`latex`/`config`/`errCode`/`motifs`) |
+| [roundtrip-exceptions.json](./roundtrip-exceptions.json) | **Versioned exception list** for the serialize→parse round-trip property (below), grouped into failure `classes` with a `reason` (`bug` / `documented-lossy`) |
 | [scripts/](./scripts/) | Regeneration + progress-check scripts (below) |
 
 The bulky intermediate data (row samples, full sweep results, ~9 MB of JSONL)
@@ -73,6 +74,47 @@ trailing-ellipsis recovery, and set label tolerance landed. 15 representative
 new failures were appended (categories: `sequence-braces`,
 `trailing-qualifier`, `trailing-label`, `set-relation-subscript`,
 `greek-capital`, plus divisibility/arc variants).
+
+## Serialize→parse round-trip property
+
+```sh
+npm run check:roundtrip                # pass/fail counts + failure classes
+npm run check:roundtrip -- --failures  # list every failure with its class
+npm run check:roundtrip -- --update    # regenerate roundtrip-exceptions.json
+```
+
+Stage 3 "corpus lane" of
+[docs/plans/2026-08-04-parse-scope-control-design.md](../plans/2026-08-04-parse-scope-control-design.md)
+§ D (Tycho item 153). For every corpus input that parses cleanly, the checker
+asserts
+
+```ts
+const t = ce.parse(input);        // CANONICAL
+ce.parse(t.latex).isSame(t);      // STRUCTURAL tier (`Same`), deliberate
+```
+
+Engine discipline mirrors `check-corpus.ts`: **one fresh engine per corpus
+row**, with both the parse and the reparse on that same engine — `isSame`
+compares symbol binding definitions by identity, so a cross-engine comparison
+is false for every symbol and the property would be vacuous. The consequence
+is a real failure class (`inference-drift-canonical-order`): the first parse
+leaves inferred types in the engine and those can change how the reparse
+canonicalizes. Inputs that do not parse cleanly are skipped — this harness
+measures the serializer; `check-corpus.ts` owns parser coverage.
+
+Failures are reconciled against
+[roundtrip-exceptions.json](./roundtrip-exceptions.json). **CI fails on a
+failure that is not in the list, and on a listed failure whose defect has
+drifted** (the reserialized LaTeX or the mismatch no longer matches the
+recorded one) — a regression that turns a known failure into a different one
+must not pass silently. Listed entries that now pass are reported without
+failing, and `--update` refreshes drifted entries. `--update` rewrites the list
+(new entries land as class `unclassified` / reason `bug` — triage them, and
+add the class to the `classes` table with a minimal repro).
+
+State at introduction (2026-08-04, v0.100.3): 447 corpus inputs, 59 skipped,
+**351/388 round-trip**, 37 exceptions in 15 classes, all currently classified
+`bug`. Runtime ~11 s on an idle machine.
 
 ## Regenerating from scratch
 

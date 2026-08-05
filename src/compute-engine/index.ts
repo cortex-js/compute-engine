@@ -37,6 +37,8 @@ import type {
   Rule,
   RulePurpose,
   Scope,
+  InspectableScope,
+  NarrowingSink,
   EvalContext,
   ExpressionInput,
   IComputeEngine,
@@ -154,6 +156,11 @@ import {
   inScope as inScopeImpl,
   printStack as printStackImpl,
 } from './engine-scope.js';
+
+import {
+  createScope as createScopeImpl,
+  inHarvestScope,
+} from './engine-inspectable-scope.js';
 
 import {
   ask as askImpl,
@@ -1666,6 +1673,43 @@ export class ComputeEngine implements IComputeEngine {
     popScopeImpl(this);
   }
 
+  /**
+   * Create a caller-owned lexical scope, for use as the `scope` option of
+   * `ce.parse()` / `ce.expr()`.
+   *
+   * The parse/box then runs with this scope current: lookups walk
+   * `scope → parents`, and **every auto-declare and inference lands rooted
+   * here**. Discarding the scope discards the writes; keeping it lets the
+   * caller read back what the parse declared and inferred.
+   *
+   * ```js
+   * const scope = ce.createScope({ h: 'function', p: 'tuple<3>' });
+   * const expr = ce.parse('h(u) = u^2', { scope });
+   * scope.declarations();  // -> [{ name: 'h', … }, { name: 'u', … }]
+   * ```
+   *
+   * @param bindings Declarations to pre-populate the scope with. A `Type` or
+   * type string is declared through the normal declare path. A
+   * `BoxedDefinition` — typically one harvested from an earlier scope's
+   * `declarations()` — is re-installed as the SAME object, preserving binding
+   * identity and write-version continuity; it is then shared mutable state
+   * between the two scopes.
+   *
+   * @param parent The enclosing scope. Defaults to the engine's current
+   * lexical scope **at call time** — callers with their own ordering
+   * discipline should pass their document scope explicitly rather than rely on
+   * whatever is current.
+   */
+  createScope(
+    bindings?: Record<string, Type | TypeString | BoxedDefinition>,
+    parent?: Scope
+  ): InspectableScope {
+    return createScopeImpl(this, bindings, parent);
+  }
+
+  /** @internal */
+  _narrowingSink: NarrowingSink | undefined = undefined;
+
   /** @internal */
   _pushEvalContext(scope: Scope, name?: string): void {
     pushEvalContextImpl(this, scope, name);
@@ -1687,6 +1731,19 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _inScope<T>(scope: Scope | undefined, f: () => T): T {
     return inScopeImpl(this, scope, f);
+  }
+
+  /** @internal Depth of the enclosing resolve-only regions. */
+  _resolveOnlyDepth = 0;
+
+  /** @internal */
+  _resolveOnly<T>(f: () => T): T {
+    this._resolveOnlyDepth += 1;
+    try {
+      return f();
+    } finally {
+      this._resolveOnlyDepth -= 1;
+    }
   }
 
   /** @internal */
@@ -2072,6 +2129,12 @@ export class ComputeEngine implements IComputeEngine {
 
   /** Return a boxed expression from a number, string or expression input.
    * Calls `ce.function()`, `ce.number()` or `ce.symbol()` as appropriate.
+   *
+   * `options.scope` RECEIVES the boxing's writes: the box runs with that scope
+   * as the current lexical scope, so lookups walk `scope → parents` and every
+   * auto-declare and inference lands rooted there. (Before 0.101.0 the option
+   * steered lookup only, and auto-declares still landed in the engine's
+   * current scope.) Use `ce.createScope()` to make one that can be read back.
    */
   expr(
     expr: NumericValue | ExpressionInput,
@@ -2083,7 +2146,9 @@ export class ComputeEngine implements IComputeEngine {
     }
   ): Expression {
     const { canonical, structural } = optionsToInternal(options);
-    return box(this, expr, { canonical, structural, scope: options?.scope });
+    return inHarvestScope(this, options?.scope, () =>
+      box(this, expr, { canonical, structural, scope: options?.scope })
+    );
   }
 
   /** @deprecated Use `expr()` instead. */
@@ -2165,6 +2230,12 @@ export class ComputeEngine implements IComputeEngine {
    * expression containing `["Error", ...]` nodes (check `expr.isValid`).
    * Parsing `null` returns `null`.
    *
+   * `options.scope` RECEIVES the parse's writes: the whole parse runs with
+   * that scope as the current lexical scope, so name resolution (including the
+   * parser's symbol oracle) walks `scope → parents`, and every auto-declare
+   * and inference lands rooted there. Discarding the scope discards the
+   * writes. Use `ce.createScope()` to make one that can be read back.
+   *
    * @throws Only in edge cases:
    * - the argument is neither a string nor `null`/`undefined`;
    * - no LaTeX syntax is available (minimal entry point without a
@@ -2178,6 +2249,7 @@ export class ComputeEngine implements IComputeEngine {
       form?: FormOption;
       canonical?: CanonicalOptions;
       structural?: boolean;
+      scope?: Scope | undefined;
     }
   ): Expression;
   parse(
@@ -2186,6 +2258,7 @@ export class ComputeEngine implements IComputeEngine {
       form?: FormOption;
       canonical?: CanonicalOptions;
       structural?: boolean;
+      scope?: Scope | undefined;
     }
   ): Expression | null;
   parse(
@@ -2194,18 +2267,33 @@ export class ComputeEngine implements IComputeEngine {
       form?: FormOption;
       canonical?: CanonicalOptions;
       structural?: boolean;
+      scope?: Scope | undefined;
     }
   ): Expression | null {
     if (latex === null || latex === undefined) return null;
     if (typeof latex !== 'string')
       throw Error('ce.parse(): expected a LaTeX string');
 
+    // The supplied scope RECEIVES the call's writes, so the WHOLE parse runs
+    // with it as the current lexical scope: the LaTeX pass (whose symbol
+    // oracle falls back to a scope lookup, so a binding there steers
+    // application-vs-multiplication and the subscript fold) and the boxing
+    // (whose auto-declares and inference then land rooted there). `inScope`
+    // pops without the disposal loop, so a harvested definition outlives the
+    // call. Re-entered with the option cleared, so this runs exactly once.
+    if (options?.scope)
+      return inHarvestScope(this, options.scope, () =>
+        this.parse(latex, { ...options, scope: undefined })
+      );
+
     const syntax = this._requireLatexSyntax();
 
     // `form` / `canonical` / `structural` control how the parsed MathJSON is
-    // boxed; they are not LaTeX-parser options, so keep them out of
-    // `parseOpts` (which is forwarded to the LaTeX parser).
-    const { form, canonical, structural, ...parseOpts } = options ?? {};
+    // boxed, and `scope` was consumed by the re-entry above; none of them are
+    // LaTeX-parser options, so keep them out of `parseOpts` (which is
+    // forwarded to the LaTeX parser).
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { form, canonical, structural, scope, ...parseOpts } = options ?? {};
 
     // Opt-in parse diagnostics: the parser reports each diagnostic through an
     // internal sink; collect them here and attach the (possibly empty) array
@@ -2471,7 +2559,11 @@ export class ComputeEngine implements IComputeEngine {
   /** Create a boxed symbol */
   symbol(
     name: string,
-    options?: { canonical?: CanonicalOptions; metadata?: Metadata }
+    options?: {
+      canonical?: CanonicalOptions;
+      metadata?: Metadata;
+      autoDeclare?: boolean;
+    }
   ): Expression {
     return createSymbolExpression(this, this._commonSymbols, name, options);
   }

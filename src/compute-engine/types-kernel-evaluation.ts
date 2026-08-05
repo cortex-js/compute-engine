@@ -312,6 +312,87 @@ export type Scope<Binding = unknown> = {
   noAutoDeclare?: boolean;
 };
 
+/**
+ * One entry of an {@link InspectableScope}'s harvest: a name the scope owns,
+ * with the type its definition carries **after** the contained parse/box has
+ * run its inference.
+ *
+ * @category Definitions
+ */
+export type ScopeDeclaration<Binding = unknown> = {
+  name: string;
+  /** The definition's type, post-inference. For an operator definition, its
+   * signature. `type.toString()` is the canonical type spelling — the stable,
+   * fingerprintable form. */
+  type: BoxedType;
+  /** `true` when the type was auto-declared or inferred from usage rather than
+   * stated by the caller (an initializer entry declared with an explicit type
+   * is `false`, even if inference later narrowed it). */
+  inferred: boolean;
+  def: Binding;
+};
+
+/**
+ * One narrowing of an **outer** definition observed while a parse/box ran
+ * against an {@link InspectableScope} — the phase-1 residual of scope
+ * containment: an ephemeral scope contains new *declarations*, not the
+ * narrowing of declarations that already existed further up the chain.
+ *
+ * @category Definitions
+ */
+export type ScopeNarrowing<Binding = unknown> = {
+  name: string;
+  /** The type the definition carried when the narrowing window opened. */
+  from: BoxedType;
+  /** The type it carries now. */
+  to: BoxedType;
+  /** The narrowed definition. It is NOT one of this scope's own bindings — it
+   * lives in an enclosing scope. */
+  def: Binding;
+};
+
+/**
+ * A {@link Scope} that can be read back after a parse or box has run against
+ * it — the product of `ce.createScope()`.
+ *
+ * Structurally it is a plain `Scope`, so it is accepted anywhere a `Scope` is;
+ * the extra methods are the supported way to decode its content (`bindings`
+ * holds internal definition records whose shape is not API).
+ *
+ * @category Definitions
+ */
+export interface InspectableScope<Binding = unknown> extends Scope<Binding> {
+  /** The scope's own declarations, sorted lexicographically by name.
+   * The order is deterministic and independent of declare interleaving, so the
+   * harvest can be fingerprinted. */
+  declarations(): ReadonlyArray<ScopeDeclaration<Binding>>;
+
+  /** Narrowings of **outer** definitions observed while contained calls ran
+   * against this scope, sorted lexicographically by name. */
+  narrowings(): ReadonlyArray<ScopeNarrowing<Binding>>;
+
+  /** Release the scope's own definitions from engine-wide
+   * configuration-change tracking. Idempotent. */
+  dispose(): void;
+}
+
+/**
+ * Where {@link InspectableScope.narrowings} captures are routed while a
+ * contained parse/box is running. Set on the engine for the duration of the
+ * call; `undefined` (the normal case) is the gate that keeps capture off.
+ *
+ * @internal
+ */
+export interface NarrowingSink<Binding = unknown> {
+  /** @internal */
+  _recordNarrowing(
+    name: string,
+    def: Binding,
+    from: BoxedType,
+    to: BoxedType
+  ): void;
+}
+
 /** @category Compute Engine */
 export type EvalContext<Expr = unknown, Binding = unknown> = {
   lexicalScope: Scope<Binding>;

@@ -117,15 +117,28 @@ the single per-call option and no option-interaction rules exist.
 
 ```ts
 // NEW: create a scope for the `scope` option. `parent` defaults to the
-// current lexical scope; pass an explicit parent to root elsewhere.
+// engine's current lexical scope AT CALL TIME (documented — callers with
+// ordering discipline, e.g. Tycho, pass their document scope explicitly).
 ce.createScope(
-  bindings?: Record<string, Type | TypeString>,
+  bindings?: Record<string, Type | TypeString | BoxedDefinition>,
   parent?: Scope
 ): InspectableScope;   // Scope + read surface, defined in B3
 
 const scope = ce.createScope({ h: 'function', p: 'tuple<3>' });
 const expr  = ce.parse(row, { scope });
 ```
+
+**`BoxedDefinition` initializer values (Tycho rider 1)**: a harvested
+`def` re-installs the **same definition object** — a plain
+`bindings.set(name, def)`, NOT a re-declare through
+`declareSymbolValue` (which would mint a fresh holder). Binding identity
+and `_writeVersion` continuity are preserved, so pass N+1 seeded from
+pass N's harvest keeps memo validation warm (the consumer D-203
+invariant) by construction. Constraints: same engine only (definitions
+are engine-bound); installing one def in two live scopes makes it
+*shared mutable state* — a type narrowing through either scope is
+visible in both. That aliasing is the intended semantics for sequential
+pass-seeding and is documented, not prevented.
 
 **Semantics**: each entry is declared into the fresh scope; the parse/box
 runs with it current (B1); the caller keeps or discards the scope.
@@ -181,13 +194,37 @@ harvesting = enumerating it after the call.
 // createScope (B2) returns an inspectable scope: structurally a Scope
 // (assignable anywhere a Scope goes), plus the read surface.
 interface InspectableScope extends Scope {
+  // Sorted lexicographically by name — DETERMINISTIC (consumers
+  // fingerprint the harvest), independent of declare interleaving.
   declarations(): ReadonlyArray<{
     name: string;
-    type: Type;          // post-inference type (narrowed in place)
+    type: BoxedType;     // post-inference type (narrowed in place);
+                         // .toString() = canonical fingerprintable
+                         // spelling, .matches() works directly
+                         // (user-ruled 2026-08-05: BoxedType, not raw
+                         // Type — raw Type made fingerprints depend on
+                         // internal representation stability)
     inferred: boolean;   // true if auto-declared/type-inferred rather
                          // than explicitly declared (incl. initializer)
     def: BoxedDefinition;
   }>;
+
+  // OUTER symbols narrowed by contained parses run against this scope —
+  // the phase-1 residual, made observable (Tycho rider 2). Same
+  // deterministic order.
+  narrowings(): ReadonlyArray<{
+    name: string;
+    from: BoxedType;
+    to: BoxedType;
+    def: BoxedDefinition;   // a def NOT in this scope's bindings
+  }>;
+
+  // Deterministic release: unsubscribes owned defs from engine
+  // configuration-change tracking. Idempotent. Bumps each def's
+  // _writeVersion once (visible to writeVersion-keyed consumer caches —
+  // dispose BETWEEN passes, not mid-pass). Defs stay data-readable
+  // after disposal; re-installing a DISPOSED def is out of contract.
+  dispose(): void;
 }
 ce.createScope(bindings?, parent?): InspectableScope;
 ```
@@ -220,6 +257,30 @@ method carries no hidden coupling. Boundary: a hand-rolled
 `{ parent, bindings }` literal still satisfies `Scope` and works as the
 `scope` option, but only `createScope` products are inspectable — the
 documented way to make a harvest scope.
+
+**Lifetime contract (verified against the engine, answers Tycho rider
+1's ownership question).** The `scope` option is implemented on
+`inScope` (`engine-scope.ts:129`), whose exit path pops the temporary
+eval context **without** the disposal loop — only `popScope` /
+`removeEvalContext` route through `discardEvalContext`
+(`engine-scope.ts:85`), which calls `def.dispose()` on the scope's value
+defs. A caller-owned scope is never pushed through that path, so **its
+definitions are never auto-disposed**: holding a harvested `def` after
+the parse — or after dropping the scope reference — is supported.
+`dispose()` itself is mild (`boxed-value-definition.ts:326`): one
+`_writeVersion` bump plus unsubscribing from configuration-change
+events; data reads keep working. The explicit `dispose()` on
+`InspectableScope` exists for deterministic release of those event
+subscriptions (held by constant/dynamic-valued defs; plain inferred
+value defs subscribe to nothing and need no disposal).
+
+**`narrowings()` implementation note**: the parse/box entry points
+already run inside an inference transaction
+(`beginInferenceTransaction`, `box.ts:434` — tracking-only today).
+Extend the transaction record to capture `{def, from, to}` on each
+`infer()` that targets a def outside the supplied scope, and surface the
+per-call window's captures on the scope. This is the data that will
+justify or retire the phase-2 suppression flag.
 
 **Known residual (phase 1, disclosed and accepted by Tycho)**: type
 inference can narrow a symbol declared in an *outer* scope during a
@@ -261,7 +322,11 @@ stable URL, carrying:
 3. **Bound-symbol equality** — per-binder-instance identity; whole-tree
    comparison is alpha-aware; compare at/below a common root; detached
    cross-tree leaf comparison out of contract; reflexivity guaranteed
-   (A2).
+   (A2). **Tier naming (Tycho rider 4)**: this contract describes the
+   STRUCTURAL tier (`Same` / `.isSame()` post-split) and is invariant
+   under the value-following flip — binder/alpha comparison is untouched
+   by it. The page also carries (or links) the three-tier semantic
+   definitions from the equality-split design.
 4. **Error attachment** (answers Tycho's 152 follow-up; probe-verified):
    - A type violation attaches at the nearest **type-constraining
      consumer** — possibly arbitrarily far above the edit, through
@@ -286,8 +351,11 @@ stable URL, carrying:
 **Corpus lane (regular CI)**: harvest canonical trees by running the
 existing corpora (MathNet `check-corpus` harness + the Tycho-donated
 687-state reference-package trees, accepted as a seed) through
-parse→canonicalize; assert `ce.parse(t.latex).isSame(t)` against a
-versioned exception list (`test/.../roundtrip-exceptions.json` or
+parse→canonicalize; assert `ce.parse(t.latex).isSame(t)` — the
+STRUCTURAL tier (`Same`), named explicitly per Tycho rider 4; the
+harness runs fresh engines with no assignments, so the assertion is
+invariant under the value-following flip — against a versioned
+exception list (`test/.../roundtrip-exceptions.json` or
 similar, each entry carrying a reason: `bug` — link to issue — or
 `documented-lossy`, e.g. `indexStyle: 'subscript'`). The initial
 exception list is the first deliverable.
@@ -330,5 +398,18 @@ typecheck + `check:deps` before each stage ships.
    vs. introducing a differently-named option and deprecating `scope`.
 3. **A1 shape**: confirm no-declare (structural-symbol contract) over
    declare-into-ephemeral for partial forms.
-4. **`createScope` initializer value type**: `Type | TypeString` only in
-   v1 — confirm.
+4. ~~**`createScope` initializer value type**~~ RESOLVED (Tycho rider 1,
+   2026-08-04): `Type | TypeString | BoxedDefinition` — harvested defs
+   re-install the same object (see B2).
+
+## Release note (supersedes the earlier separate-release plan)
+
+Per the maintainer ruling relayed to Tycho 2026-08-04: this work ships
+in the **same release** as the equality-tiers split
+(`2026-08-04-cheap-equal-audit.md`). Implementation order is unchanged
+(equality flips first, then this plan), and Tycho structures their
+adoption probes to attribute equality-driven and scope-driven pin flips
+independently. The release notice must carry: the three tier
+definitions, the tier namings above (round-trip property = `Same`;
+bound-symbol contract = `Same`), and the two breaking entries
+(`ce.expr` scope semantics; equality flips).

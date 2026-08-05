@@ -567,8 +567,14 @@ function boxInternal(
       // is 'never')
       // @note: alternatively, this could be signalled by a 'Symbol' CanonicalForm: but this way is
       // more predictable, & ensures substitution as per above
+      // A partial form resolves symbols but never DECLARES them: its output is
+      // not fully canonical, so it follows the structural symbol contract and
+      // leaves the caller's scope untouched (`autoDeclare: false`).
       const canonicalSymbol = canonical || options.canonical !== false;
-      return ce.symbol(sym, { canonical: canonicalSymbol });
+      return ce.symbol(sym, {
+        canonical: canonicalSymbol,
+        autoDeclare: canonical,
+      });
     }
 
     if (matchesNumber(expr)) return ce.number(expr);

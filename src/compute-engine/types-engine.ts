@@ -47,6 +47,8 @@ import type {
   RuleStep as KernelRuleStep,
   AssignValue as KernelAssignValue,
   Scope as KernelScope,
+  InspectableScope as KernelInspectableScope,
+  NarrowingSink as KernelNarrowingSink,
   EvalContext as KernelEvalContext,
 } from './types-kernel-evaluation.js';
 import type {
@@ -68,6 +70,8 @@ type AssignValue = KernelAssignValue<
   IComputeEngine
 >;
 type Scope = KernelScope<BoxedDefinition>;
+type InspectableScope = KernelInspectableScope<BoxedDefinition>;
+type NarrowingSink = KernelNarrowingSink<BoxedDefinition>;
 type EvalContext = KernelEvalContext<Expression, BoxedDefinition>;
 
 /** Minimal interface for a LaTeX parser/serializer.
@@ -500,7 +504,11 @@ export interface IComputeEngine {
 
   symbol(
     sym: string,
-    options?: { canonical?: CanonicalOptions; metadata?: Metadata }
+    options?: {
+      canonical?: CanonicalOptions;
+      metadata?: Metadata;
+      autoDeclare?: boolean;
+    }
   ): Expression;
 
   string(s: string, metadata?: Metadata): Expression;
@@ -541,6 +549,11 @@ export interface IComputeEngine {
 
   pushScope(scope?: Scope, name?: string): void;
   popScope(): void;
+
+  createScope(
+    bindings?: Record<string, Type | TypeString | BoxedDefinition>,
+    parent?: Scope
+  ): InspectableScope;
 
   /**
    *
@@ -590,6 +603,29 @@ export interface IComputeEngine {
    * executes the function `f` in that scope and returns the result.
    * @internal */
   _inScope<T>(scope: Scope | undefined, f: () => T): T;
+
+  /**
+   * Execute `f` in a **resolve-only** region: while it runs, boxing a symbol
+   * resolves the name against the scope chain as usual, but a name that
+   * resolves to nothing stays UNBOUND instead of being auto-declared into the
+   * current scope. Partial canonical forms (`canonical: ['Number']`) run this
+   * way — their output is not fully canonical, so they follow the structural
+   * symbol contract and write nothing to the caller's scope.
+   * See `docs/plans/2026-08-04-parse-scope-control-design.md` A1.
+   * @internal */
+  _resolveOnly<T>(f: () => T): T;
+
+  /** Depth of the enclosing {@link _resolveOnly} regions; auto-declaration is
+   * suppressed while it is positive.
+   * @internal */
+  _resolveOnlyDepth: number;
+
+  /**
+   * Where `infer()` routes the narrowings it performs while a parse/box runs
+   * against a `createScope()` product. `undefined` — the normal case — is the
+   * gate that keeps the capture off.
+   * @internal */
+  _narrowingSink: NarrowingSink | undefined;
 
   /**
    * For internal use. Use `ce.declare()` instead.

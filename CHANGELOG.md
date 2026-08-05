@@ -77,6 +77,17 @@
   biconditional is meant. A `\equiv` followed by `\pmod{n}` is still a
   `Congruent`, and `\not\equiv` still negates a congruence.
 
+- **`ce.expr()`'s `scope` option now RECEIVES the boxing's writes.** It used to
+  steer *lookup* only: auto-declared free symbols, undeclared call heads and
+  type inference all still landed in the engine's current scope, so the option
+  half-contained a boxing. The whole box now runs with the supplied scope as
+  the current lexical scope, so every declaration and inference lands rooted
+  there and discarding the scope discards the writes. Code that passed `scope`
+  to redirect lookups while deliberately keeping the declarations in the
+  engine's scope must now box without the option (or re-declare the harvested
+  names). The same semantics are what the new `scope` option on `ce.parse()`
+  provides — see New Features.
+
 ### New Features
 
 - **Parametric polymorphism: `forall` type variables in function signatures.**
@@ -177,6 +188,42 @@
   syntactic, same value, and same function of the free variables — described
   in the "Comparing Expressions" section of the Symbolic Computing guide.
 
+- **Per-call scope control: `ce.parse(latex, { scope })` and
+  `ce.createScope()`.** Canonical parsing writes to the engine's lexical scope
+  — free symbols are auto-declared, undeclared call heads become inferred
+  functions, types are narrowed by usage — which consumers parsing untrusted or
+  out-of-order input had to contain with `pushScope`/`popScope` discipline.
+  `scope` makes the containment first-class: the whole parse runs with the
+  supplied scope current, so name resolution walks `scope → parents` and every
+  auto-declare and inference lands rooted there. `ce.createScope(bindings?,
+  parent?)` builds one from a declarations table, which turns each parse into a
+  function of (latex, dictionary, declarations):
+
+  ```js
+  const scope = ce.createScope({ h: 'function', p: 'tuple<3>' });
+  const expr = ce.parse('h(u) = u^2', { scope });
+  ```
+
+  One binding per definition head is enough to make a definition parse against
+  a predeclared name of a different arity — or against a builtin
+  (`N(x, m, s) = …`) — with no mutation and no ordering requirement, and a
+  binding for a subscripted spelling (`{ theta_z: 'number' }`) is what
+  `\theta_z` resolves to instead of being declared. Trigger-spelled names
+  now participate fully: a subscripted Greek-letter base consults the same
+  joined-name resolution as ASCII names, so a `function`-typed binding (or
+  `resolveSymbol` answer) for `alpha_1` makes `\alpha_1(x)` parse as a
+  function application — previously only ASCII bases could commit a joined
+  name. The scope is caller-owned
+  and readable: `declarations()` returns its entries with their post-inference
+  types (as `BoxedType`, so `entry.type.toString()` is the canonical,
+  fingerprintable spelling) and an `inferred` flag, sorted by name; `narrowings()` reports
+  definitions in *enclosing* scopes that a contained parse narrowed (the one
+  write an ephemeral scope cannot contain); `dispose()` releases the scope's
+  definitions from configuration-change tracking. A definition harvested from
+  one scope can seed the next — `ce.createScope({ f: def })` installs the same
+  object, preserving binding identity — and the scope's definitions are never
+  auto-disposed, so a harvested definition outlives the call.
+
 ### Issues Resolved
 
 - **`Find` now types as the element, not the collection.** Its static type was
@@ -189,6 +236,21 @@
   condition yields `Nothing`, but the static type silently dropped that arm.
 
 ### Improvements
+
+- **Structural-tier `freeVariables`, `unknowns` and `references` now derive
+  bound variables from the operator's binding sites.** On a structural tree
+  (`ce.box(…, { structural: true })`) a binder's bound variable leaked as a
+  free variable whenever its operand carried a raw parse spelling the
+  free-variable walk did not know: `["Sum", ["Power", "n", 2], ["Tuple", "n",
+  1, 10]]` reported `n` as free, while the canonical route reported nothing.
+  The bound names now come from the operator definition's binding-site
+  selectors, which read every spelling the binder accepts (`Tuple`, `Element`,
+  `Limits`, a bare symbol, held or not), so the structural and canonical routes
+  agree. Consumers that pattern-match raw binder spellings to build
+  capture-avoidance sets can retire those collectors. A node with no operator
+  definition (`canonical: false`) has no binding sites to consult and keeps the
+  previous spelling-based recognition, and a binder whose variable survives
+  into its result (`D`, `Series`) still reports that variable as free.
 
 - **The bare-assign route now broadcasts like the value route.** Assigning an
   annotated or generic function literal directly (`ce.assign('f', …)` with no
@@ -293,6 +355,17 @@
   made the comparison trees honest (and bigger).
 
 ### Bug Fixes
+
+- **A parse or box under a partial canonical form no longer declares free
+  symbols.** `ce.parse(s, { canonical: ['Number'] })` — any partial form —
+  auto-declared every free symbol into the current scope, so containing the
+  writes of an untrusted or out-of-order parse required `pushScope`/`popScope`
+  discipline even though the result is not fully canonical. A partial form now
+  follows the same symbol contract as the structural route: names resolve
+  against the scope chain — an existing declaration still binds, and a
+  `holdUntil: 'never'` constant still substitutes its value — but a name that
+  resolves to nothing stays unbound instead of being declared. `canonical:
+  true`, `canonical: false` and `structural: true` are unchanged.
 
 - **A function declared with a scalar return type is now rejected when added to
   a tuple.** `scalar + tuple` is an error when the scalar is provable, and a

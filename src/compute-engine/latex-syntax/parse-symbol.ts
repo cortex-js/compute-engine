@@ -347,6 +347,132 @@ export function parseInvalidSymbol(parser: Parser): MathJsonExpression | null {
 }
 
 /**
+ * Speculatively absorb one or more subscripts into the symbol name `id`,
+ * e.g. `a` followed by `_1` becomes `a_1`.
+ *
+ * This ensures 'i_A' is parsed as a single symbol 'i_A', not as a subscript
+ * applied to 'i' (which would turn 'i' into ImaginaryUnit first)
+ * However, complex subscripts should remain as Subscript expressions:
+ * - {n,m} (comma indicates multi-index)
+ * - {n+1} (operators indicate an expression)
+ * - {(n+1)} (parentheses indicate an expression)
+ *
+ * When `requireResolution` is true, an absorbed subscript is kept only if the
+ * JOINED name resolves to a declaration (via the `resolveSymbol` oracle:
+ * per-call/engine handler composed with the engine scope); otherwise the `_`
+ * is rewound and the subscript reading (index, Subscript, …) stands.
+ *
+ * That is the case for:
+ * - an indexed-collection base, which normally keeps its subscripts so `B_2`
+ *   on a list `B` reads as indexing (`At(B, 2)`). But a subscripted spelling
+ *   whose joined name is itself declared in scope is a reference to that
+ *   symbol: sibling names (a point `B` alongside `B_2`, `B_3`, …) must outrank
+ *   index capture, which would otherwise make every such name unspellable —
+ *   and indistinguishable post-parse from genuine `B[2]` indexing.
+ * - a trigger-spelled base (`\alpha`, `\theta`, …), whose default reading
+ *   (a `Subscript` expression) is kept unless the joined name is declared.
+ *
+ * The parser index is left just after the last absorbed subscript.
+ */
+function absorbSubscripts(
+  parser: Parser,
+  id: string,
+  requireResolution: boolean
+): string {
+  while (!parser.atEnd) {
+    const currentPeek = parser.peek;
+    if (currentPeek !== '_') break;
+
+    const underscoreIndex = parser.index;
+    // The name this iteration would produce, committed at the end of the
+    // loop body via `commit()`.
+    let suffix: string | null = null;
+    const commit = (): boolean => {
+      if (suffix === null) return false;
+      const candidate = id + '_' + suffix;
+      if (requireResolution && parser.resolveSymbol(candidate) === undefined) {
+        parser.index = underscoreIndex;
+        return false;
+      }
+      id = candidate;
+      return true;
+    };
+
+    parser.nextToken(); // consume '_'
+    const hasBrace = parser.match('<{>');
+    if (hasBrace) {
+      // Braced subscript: only include in symbol name if it contains
+      // only simple tokens (letters, digits, and nested subscripts).
+      // If it starts with '(' or contains operators, it's an expression.
+      const firstToken = parser.peek;
+      if (
+        firstToken === '(' ||
+        firstToken === '\\lparen' ||
+        firstToken === '\\left'
+      ) {
+        // Starts with parenthesis - it's an expression, not a symbol
+        parser.index = underscoreIndex;
+        break;
+      }
+
+      const sub = parseSymbolBody(parser);
+      // An empty braced subscript (`x_{}`) is meaningless decoration:
+      // consume and drop it rather than folding it into the symbol name
+      // (which would produce a spurious `x_` symbol).
+      if (sub === '' && parser.peek === '<}>') {
+        parser.match('<}>');
+        continue;
+      }
+      // Check for indicators that this is an expression, not a simple symbol:
+      // - null result
+      // - contains comma (multi-index)
+      // - contains operators (converted to 'plus', 'minus', etc. by parseSymbolBody)
+      // - doesn't end with closing brace
+      const hasOperators = sub !== null && /plus|minus|times|ast/.test(sub);
+      if (
+        sub === null ||
+        sub.includes(',') ||
+        hasOperators ||
+        parser.peek !== '<}>'
+      ) {
+        parser.index = underscoreIndex;
+        break;
+      }
+      parser.match('<}>');
+      suffix = sub;
+    } else {
+      // Unbraced subscript: only accept a single letter or digit
+      // In non-strict mode, consume all consecutive digits
+      const subToken = parser.peek;
+      if (parser.options.strict === false && /^[0-9]$/.test(subToken)) {
+        let digits = '';
+        while (!parser.atEnd && /^[0-9]$/.test(parser.peek)) {
+          digits += parser.peek;
+          parser.nextToken();
+        }
+        suffix = digits;
+      } else if (
+        /^[a-zA-Z0-9]$/.test(subToken) ||
+        /^\p{XIDS}$/u.test(subToken)
+      ) {
+        parser.nextToken();
+        suffix = subToken;
+      } else {
+        // Not a valid subscript token, backtrack the '_'
+        parser.index = underscoreIndex;
+        break;
+      }
+    }
+
+    // Commit the absorbed subscript, or rewind (a base whose joined name is
+    // not declared: the subscript is an index or a `Subscript` expression).
+    if (!commit()) break;
+  }
+
+  return id;
+}
+
+/**
  * Match a symbol.
  *
  * It can be:
@@ -376,114 +502,10 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
 
     const isCollection = info?.type.matches('indexed_collection') ?? false;
 
-    // Check if followed by subscript(s) - if so, include them in the symbol name
-    // This ensures 'i_A' is parsed as a single symbol 'i_A', not as a subscript
-    // applied to 'i' (which would turn 'i' into ImaginaryUnit first)
-    // However, complex subscripts should remain as Subscript expressions:
-    // - {n,m} (comma indicates multi-index)
-    // - {n+1} (operators indicate an expression)
-    // - {(n+1)} (parentheses indicate an expression)
-    //
-    // An indexed-collection base normally keeps its subscripts too, so `B_2`
-    // on a list `B` reads as indexing (`At(B, 2)`). But a subscripted
-    // spelling whose JOINED name is itself declared in scope is a reference
-    // to that symbol: sibling names (a point `B` alongside `B_2`, `B_3`, …)
-    // must outrank index capture, which would otherwise make every such name
-    // unspellable — and indistinguishable post-parse from genuine `B[2]`
-    // indexing. So absorb speculatively and keep the absorption only if the
-    // joined name resolves to a declaration; otherwise rewind and let the
-    // index reading stand.
-    while (!parser.atEnd) {
-      const currentPeek = parser.peek;
-      if (currentPeek !== '_') break;
-
-      const underscoreIndex = parser.index;
-      // The name this iteration would produce, committed at the end of the
-      // loop body via `commit()`.
-      let suffix: string | null = null;
-      const commit = (): boolean => {
-        if (suffix === null) return false;
-        const candidate = id + '_' + suffix;
-        if (isCollection && parser.resolveSymbol(candidate) === undefined) {
-          parser.index = underscoreIndex;
-          return false;
-        }
-        id = candidate;
-        return true;
-      };
-
-      parser.nextToken(); // consume '_'
-      const hasBrace = parser.match('<{>');
-      if (hasBrace) {
-        // Braced subscript: only include in symbol name if it contains
-        // only simple tokens (letters, digits, and nested subscripts).
-        // If it starts with '(' or contains operators, it's an expression.
-        const firstToken = parser.peek;
-        if (
-          firstToken === '(' ||
-          firstToken === '\\lparen' ||
-          firstToken === '\\left'
-        ) {
-          // Starts with parenthesis - it's an expression, not a symbol
-          parser.index = underscoreIndex;
-          break;
-        }
-
-        const sub = parseSymbolBody(parser);
-        // An empty braced subscript (`x_{}`) is meaningless decoration:
-        // consume and drop it rather than folding it into the symbol name
-        // (which would produce a spurious `x_` symbol).
-        if (sub === '' && parser.peek === '<}>') {
-          parser.match('<}>');
-          continue;
-        }
-        // Check for indicators that this is an expression, not a simple symbol:
-        // - null result
-        // - contains comma (multi-index)
-        // - contains operators (converted to 'plus', 'minus', etc. by parseSymbolBody)
-        // - doesn't end with closing brace
-        const hasOperators = sub !== null && /plus|minus|times|ast/.test(sub);
-        if (
-          sub === null ||
-          sub.includes(',') ||
-          hasOperators ||
-          parser.peek !== '<}>'
-        ) {
-          parser.index = underscoreIndex;
-          break;
-        }
-        parser.match('<}>');
-        suffix = sub;
-      } else {
-        // Unbraced subscript: only accept a single letter or digit
-        // In non-strict mode, consume all consecutive digits
-        const subToken = parser.peek;
-        if (parser.options.strict === false && /^[0-9]$/.test(subToken)) {
-          let digits = '';
-          while (!parser.atEnd && /^[0-9]$/.test(parser.peek)) {
-            digits += parser.peek;
-            parser.nextToken();
-          }
-          suffix = digits;
-        } else if (
-          /^[a-zA-Z0-9]$/.test(subToken) ||
-          /^\p{XIDS}$/u.test(subToken)
-        ) {
-          parser.nextToken();
-          suffix = subToken;
-        } else {
-          // Not a valid subscript token, backtrack the '_'
-          parser.index = underscoreIndex;
-          break;
-        }
-      }
-
-      // Commit the absorbed subscript, or rewind (an indexed-collection base
-      // whose joined name is not declared: the subscript is an index).
-      if (!commit()) break;
-    }
-
-    return id;
+    // Check if followed by subscript(s) - if so, include them in the symbol
+    // name. An indexed-collection base only absorbs a subscript whose joined
+    // name is declared (see `absorbSubscripts()`).
+    return absorbSubscripts(parser, id, isCollection);
   }
 
   //
@@ -506,11 +528,29 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
   // (other than a letter, it could be a command, e.g. \alpha)
   //
   const index = parser.index;
+  // True when the symbol is spelled with a single LaTeX command (`\alpha`),
+  // i.e. not a prefixed symbol (`\operatorname{speed}`) nor an emoji run.
+  const isTriggerSpelled = id === null;
   id ??= parseSymbolToken(parser, { toplevel: true });
 
   if (id) {
     id = id.normalize();
-    if (isValidSymbol(id)) return id;
+    if (isValidSymbol(id)) {
+      // A trigger-spelled base followed by a subscript keeps its default
+      // reading (a `Subscript` expression, or a dictionary constant such as
+      // `\mu_0`) UNLESS the joined name (`alpha_1`) is itself declared: a
+      // declared name must be spellable, and must work as a call head
+      // (`\alpha_1(x)`). Same rule (and same accepted subscript shapes) as
+      // the single-letter branch above; the joined name is only committed
+      // when the oracle resolves it.
+      if (isTriggerSpelled && parser.peek === '_') {
+        // As in the single-letter branch, a base with `subscriptEvaluate`
+        // owns the meaning of its subscripts: never absorb them.
+        if (!parser.resolveSymbol(id)?.subscriptEvaluate)
+          id = absorbSubscripts(parser, id, true);
+      }
+      return id;
+    }
   }
 
   //

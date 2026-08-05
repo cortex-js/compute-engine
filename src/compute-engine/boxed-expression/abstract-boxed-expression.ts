@@ -47,6 +47,7 @@ import { toAsciiMath } from './ascii-math.js';
 import { cmp, eq, eqIdentical, same } from './compare.js';
 import { CancellationError } from '../../common/interruptible.js';
 import { isSymbol, isString, isNumber, isFunction } from './type-guards.js';
+import { symbolAtSite } from './binding-sites.js';
 import { extractIntervalBounds } from './inequality-bounds.js';
 import { labelFor } from './explain-labels.js';
 
@@ -1284,6 +1285,43 @@ function isReferencedFunctionHead(
 }
 
 /**
+ * The **index variables** this node binds, according to its operator
+ * definition's binding-site selectors — the one place binder knowledge lives
+ * (`binding-sites.ts`). `undefined` when this node declares none, and the
+ * caller then falls back to the structural recognition below.
+ *
+ * The selectors read the RAW operand shapes — a bare symbol, `Tuple`,
+ * `Element`, `Limits`, held or not — so a STRUCTURAL tree answers the same as
+ * a canonical one. Before this, the hand-rolled recognition below knew only
+ * the canonical `Limits`/`Element` spellings, and a structural
+ * `["Sum", ["Power","n",2], ["Tuple","n",1,10]]` leaked its index `n` as a
+ * free variable.
+ *
+ * Only `clauseLocal` sites count — the *indexing-set* clauses (`Sum`,
+ * `Product`, `Integrate`, the quantifiers, `Comprehension`, …), which is
+ * exactly the class the structural recognition below covers. A binder whose
+ * variable is a plain operand (`D`'s differentiation variable, `Series`'
+ * expansion variable) is NOT an index: the variable survives into the result,
+ * so it is deliberately reported as free (pinned by
+ * `expression-properties.test.ts`, "D: differentiation variable remains
+ * free"). This function is a spelling upgrade of the recognition below, not a
+ * reclassification of which operators eliminate their variable.
+ */
+function bindingSiteNames(
+  expr: Expression & { ops: ReadonlyArray<Expression> }
+): Set<string> | undefined {
+  const sites = expr.operatorDefinition?.bindingSites?.(expr.ops, 'post');
+  if (sites === undefined || sites.length === 0) return undefined;
+  const names = new Set<string>();
+  for (const site of sites) {
+    if (!site.clauseLocal) continue;
+    const sym = symbolAtSite(expr.ops, site.path);
+    if (sym !== undefined) names.add(sym.symbol);
+  }
+  return names.size === 0 ? undefined : names;
+}
+
+/**
  * Shared traversal that collects, in a single pass, both the free variables
  * (operand symbols not bound to a value or by an enclosing scope) into
  * `freeVars` and the applied user functions (operator heads) into `refFns`.
@@ -1359,14 +1397,22 @@ function getReferences(
   // Otherwise, collect the variables bound by this expression's structure.
   // This must NOT be gated on `isScoped`: `Integrate` is not scoped yet binds
   // its integration variable.
-  //   - index variables — Sum/Product/Integrate: an inner `Limits`/`Element`
-  //     carries the index/variable as its first operand.
+  //   - index variables — Sum/Product/Integrate: the operator definition's
+  //     binding-site selectors answer this, on a canonical tree AND on a raw
+  //     or structural one (they read the raw operand spellings: a bare symbol,
+  //     `Tuple`, `Element`, `Limits`, held or not). Only when the node
+  //     declares no indexing-set site (no definition, or a non-index binder)
+  //     do we fall back to recognizing an inner `Limits`/`Element` here.
   //   - local variables — Block: inner `Assign`/`Declare` introduce locals.
-  const indexVars = new Set<string>();
+  //     `Block` is `scoped: true` with no binding sites, so this stays a
+  //     structural recognition.
+  const siteVars = bindingSiteNames(expr);
+  const indexVars = siteVars ?? new Set<string>();
   const localVars = new Set<string>();
   for (const op of expr.ops) {
     if (!isFunction(op)) continue;
     if (
+      siteVars === undefined &&
       (op.operator === 'Limits' || op.operator === 'Element') &&
       isSymbol(op.op1)
     )

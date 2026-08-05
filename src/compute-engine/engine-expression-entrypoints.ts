@@ -75,11 +75,32 @@ function isNumberCanonicalized(canonical?: CanonicalOptions): boolean {
   return false;
 }
 
+/**
+ * Box a symbol.
+ *
+ * `options.autoDeclare === false` — or running inside an `engine._resolveOnly()`
+ * region — selects the **resolve-only** mode: the name is resolved against the
+ * scope chain exactly as usual (a `holdUntil: 'never'` constant still
+ * substitutes its value, an existing definition still binds), but a name with
+ * no definition anywhere stays UNBOUND instead of being declared in the current
+ * scope. This is the symbol contract of the structural route, and the one a
+ * partial canonical form (`canonical: ['Number']`) uses: such output is not
+ * fully canonical, so it must not write to the caller's scope.
+ * See `docs/plans/2026-08-04-parse-scope-control-design.md` A1.
+ *
+ * (Not honored by the shadowed-parameter branch below: a `Function` literal's
+ * parameter is a binder-local declaration, not a free symbol, and that branch
+ * is only live while a function body is being fully canonicalized.)
+ */
 export function createSymbolExpression(
   engine: SymbolHost,
   commonSymbols: { [symbol: string]: null | Expression },
   symbolName: string,
-  options?: { canonical?: CanonicalOptions; metadata?: Metadata }
+  options?: {
+    canonical?: CanonicalOptions;
+    metadata?: Metadata;
+    autoDeclare?: boolean;
+  }
 ): Expression {
   const canonical = options?.canonical ?? true;
   const metadata = options?.metadata;
@@ -164,6 +185,12 @@ export function createSymbolExpression(
     return def.value.value ?? engine.Nothing;
 
   if (def) return new BoxedSymbol(engine, name, { metadata, def });
+
+  // Resolve-only: the name resolved to nothing, and this caller (or the
+  // enclosing region) does not want a declaration written to its scope. Leave
+  // the symbol unbound.
+  if (options?.autoDeclare === false || engine._resolveOnlyDepth > 0)
+    return new BoxedSymbol(engine, name, { metadata });
 
   // Auto-declare: if current scope has noAutoDeclare, redirect to parent scope
   // so free variables in BigOp bodies land in the enclosing scope, not the BigOp scope.

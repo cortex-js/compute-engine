@@ -189,6 +189,10 @@ interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
   complexity: number;
   inferredSignature: boolean;
+  /** See `OperatorDefinition._derivedSignature` (types-definitions.ts): the
+   * pinned signature was derived from an annotated function literal at assign
+   * time, not declared by the author. @internal */
+  _derivedSignature: boolean;
   signature: BoxedType;
   /** The binding-site selector of the declaration's `scoped` flag, when one
    * was given — `undefined` for a plain `scoped: true` and for an unscoped
@@ -199,7 +203,10 @@ interface BoxedOperatorDefinition
   bindingSites?: (
     ops: ReadonlyArray<Expression>,
     phase: 'pre' | 'post'
-  ) => readonly { readonly path: readonly number[] }[];
+  ) => readonly {
+    readonly path: readonly number[];
+    readonly clauseLocal?: boolean;
+  }[];
   readonly resolvedMissingBehavior:
     | 'reject'
     | 'propagate'

@@ -132,3 +132,154 @@ describe('SUBSCRIPT: declared-name precedence over index capture', () => {
     });
   });
 });
+
+/**
+ * A trigger-spelled base (`\alpha`, `\theta`, …) followed by a subscript now
+ * consults the same joined-name oracle the single-letter branch uses, so a
+ * declared `alpha_1` can be a call head (`\alpha_1(x)`).
+ *
+ * Without a declaration nothing changes: the subscript keeps its default
+ * reading (a `Subscript` expression, or a dictionary constant such as `\mu_0`).
+ */
+describe('SUBSCRIPT: trigger-spelled base with a declared joined name', () => {
+  const json = (
+    ce: ComputeEngine,
+    latex: string,
+    resolveSymbol?: (id: string) => any
+  ) => JSON.stringify(ce.parse(latex, { canonical: false, resolveSymbol }).json);
+
+  // A per-call oracle that knows one joined name, and nothing else.
+  const alpha1 = (id: string) =>
+    id === 'alpha_1' ? { type: 'function' } : undefined;
+
+  describe('current behavior without an oracle (pinned first)', () => {
+    test('`\\alpha_1` and `\\alpha_1(x)` keep the Subscript reading', () => {
+      const ce = new ComputeEngine();
+      expect(json(ce, '\\alpha_1')).toBe('["Subscript","alpha",1]');
+      expect(json(ce, '\\alpha_1(x)')).toBe(
+        '["InvisibleOperator",["Subscript","alpha",1],["Delimiter","x"]]'
+      );
+      expect(json(ce, '\\alpha_{1}')).toBe('["Subscript","alpha",1]');
+    });
+  });
+
+  describe('the delta: a declared joined name is a spellable call head', () => {
+    test('per-call `resolveSymbol`', () => {
+      const ce = new ComputeEngine();
+      expect(json(ce, '\\alpha_1(x)', alpha1)).toBe('["alpha_1","x"]');
+      expect(json(ce, '\\alpha_1', alpha1)).toBe('"alpha_1"');
+      // Braced spelling, same rule
+      expect(json(ce, '\\alpha_{1}(x)', alpha1)).toBe('["alpha_1","x"]');
+    });
+
+    test('scope fallback: the joined name declared in the current scope', () => {
+      const ce = new ComputeEngine();
+      ce.pushScope();
+      ce.declare('alpha_1', 'function');
+      expect(json(ce, '\\alpha_1(x)')).toBe('["alpha_1","x"]');
+      expect(json(ce, '\\alpha_1')).toBe('"alpha_1"');
+      ce.popScope();
+      // Out of scope again: the default reading is restored
+      expect(json(ce, '\\alpha_1(x)')).toBe(
+        '["InvisibleOperator",["Subscript","alpha",1],["Delimiter","x"]]'
+      );
+    });
+
+    test('an undeclared sibling of a declared name is unaffected', () => {
+      const ce = new ComputeEngine();
+      expect(json(ce, '\\alpha_2', alpha1)).toBe('["Subscript","alpha",2]');
+      expect(json(ce, '\\theta_1', alpha1)).toBe('["Subscript","theta",1]');
+    });
+
+    test('round-trip: the committed joined name re-parses', () => {
+      const ce = new ComputeEngine();
+      const call = ce.parse('\\alpha_1(x)', {
+        canonical: false,
+        resolveSymbol: alpha1,
+      });
+      expect(call.toLatex()).toBe('\\alpha_1(x)');
+      expect(json(ce, call.toLatex(), alpha1)).toBe('["alpha_1","x"]');
+
+      const sym = ce.box('alpha_1', { canonical: false });
+      expect(sym.toLatex()).toBe('\\alpha_1');
+      expect(json(ce, sym.toLatex(), alpha1)).toBe('"alpha_1"');
+    });
+  });
+
+  describe('only the subscript shapes the single-letter branch absorbs', () => {
+    test('an expression subscript is never absorbed', () => {
+      const ce = new ComputeEngine();
+      const oracle = (id: string) =>
+        id.startsWith('alpha_') ? { type: 'function' } : undefined;
+      expect(json(ce, '\\alpha_{n+1}', oracle)).toBe(
+        '["Subscript","alpha",["Add","n",1]]'
+      );
+      expect(json(ce, '\\alpha_{1,2}', oracle)).toBe(
+        '["Subscript","alpha",["Delimiter",["Sequence",1,2],"\',\'"]]'
+      );
+    });
+
+    test('a `subscriptEvaluate` base still owns all its subscripts', () => {
+      const ce = new ComputeEngine();
+      ce.declare('alpha', {
+        subscriptEvaluate: (subscript, { engine }) =>
+          engine.number((subscript.re ?? 0) * 2),
+      });
+      ce.declare('alpha_5', 'function');
+      expect(json(ce, '\\alpha_5')).toBe('["Subscript","alpha",5]');
+      expect(ce.parse('\\alpha_5').evaluate().re).toBe(10);
+    });
+  });
+
+  describe('dictionary resolutions are not preempted', () => {
+    // `\mu_0` / `\varepsilon_0` are physics-constant LaTeX triggers
+    // (DEFINITIONS_PHYSICS): the whole 3-token run is claimed by the
+    // dictionary before any symbol parsing.
+    test('`\\mu_0` is the vacuum-permeability constant, oracle or not', () => {
+      const ce = new ComputeEngine();
+      for (const resolve of [undefined, alpha1]) {
+        expect(json(ce, '\\mu_0', resolve)).toBe('"Mu0"');
+        expect(json(ce, '\\varepsilon_0', resolve)).toBe(
+          '"VacuumPermittivity"'
+        );
+      }
+    });
+
+    test('a declared non-function joined name does not preempt `\\mu_0`', () => {
+      const ce = new ComputeEngine();
+      const oracle = (id: string) =>
+        id === 'mu_0' ? { type: 'number' } : undefined;
+      expect(json(ce, '\\mu_0', oracle)).toBe('"Mu0"');
+      expect(json(ce, '\\mu_0(x)', oracle)).toBe(
+        '["InvisibleOperator","Mu0",["Delimiter","x"]]'
+      );
+    });
+
+    test('`\\delta_n` stays Kronecker delta', () => {
+      const ce = new ComputeEngine();
+      const oracle = (id: string) =>
+        id === 'delta_n' ? { type: 'function' } : undefined;
+      for (const resolve of [undefined, oracle])
+        expect(json(ce, '\\delta_n', resolve)).toBe('["KroneckerDelta","n"]');
+    });
+  });
+
+  describe('the single-letter (ASCII) branch is unchanged', () => {
+    test('`a_1` absorbs with or without an oracle', () => {
+      const ce = new ComputeEngine();
+      for (const resolve of [undefined, alpha1]) {
+        expect(json(ce, 'a_1', resolve)).toBe('"a_1"');
+        expect(json(ce, 'a_1(x)', resolve)).toBe(
+          '["InvisibleOperator","a_1",["Delimiter","x"]]'
+        );
+      }
+    });
+
+    test('a declared `a_1` is a call head, as before', () => {
+      const ce = new ComputeEngine();
+      const oracle = (id: string) =>
+        id === 'a_1' ? { type: 'function' } : undefined;
+      expect(json(ce, 'a_1(x)', oracle)).toBe('["a_1","x"]');
+    });
+  });
+});

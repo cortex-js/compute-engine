@@ -1,4 +1,9 @@
-import type { Expression, CanonicalOptions, Scope } from '../global-types.js';
+import type {
+  Expression,
+  CanonicalForm,
+  CanonicalOptions,
+  Scope,
+} from '../global-types.js';
 
 import { canonicalInvisibleOperator } from './invisible-operator.js';
 
@@ -24,6 +29,28 @@ export function canonicalForm(
 
   if (typeof forms === 'string') forms = [forms];
 
+  // A partial form is not fully canonical, so it follows the STRUCTURAL symbol
+  // contract: symbols resolve against the scope chain (a `holdUntil: 'never'`
+  // constant still substitutes its value, an existing declaration still binds),
+  // but a name that resolves to nothing is left unbound instead of being
+  // declared into the caller's scope. The suppression wraps the whole pipeline
+  // because the forms reach `.canonical` on a symbol through many helpers
+  // (`isImaginaryUnit`, `flatten`, `canonicalInvisibleOperator`, …), not just
+  // `symbolForm`. See `docs/plans/2026-08-04-parse-scope-control-design.md` A1.
+  //
+  // The supplied scope is honored on this path too (B1): it steers the lookups
+  // the forms perform, exactly as it does on the `forms === true` path above.
+  // Without it, `scope` was silently ignored for every partial form.
+  const formList = forms;
+  return expr.engine._inScope(scope, () =>
+    expr.engine._resolveOnly(() => applyForms(expr, formList))
+  );
+}
+
+function applyForms(
+  expr: Expression,
+  forms: readonly CanonicalForm[]
+): Expression {
   // Like for full canonicalization, request the canonical form of symbols.
   // Automatically, this involves the substitution of the symbol with its
   // value, if it is a constant-flagged symbol, with a 'holdUntil' attribute of
