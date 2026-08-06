@@ -864,6 +864,27 @@ describe('Logic', () => {
   const parseJson = (latex: string): string =>
     JSON.stringify(new ComputeEngine().parse(latex).json);
 
+  it('reads a predicate application in the CONDITION like in the body', () => {
+    // The condition is parsed in quantifier scope, like the body: both
+    // occurrences of `P(x)` produce `Predicate` (ruled 2026-08-05; the
+    // condition used to parse OUTSIDE the scope, yielding the application
+    // `["P","x"]` in the condition but `Predicate` in the body).
+    expect(parseJson('\\forall P(x), P(x)')).toBe(
+      '["ForAll",["Predicate","P","x"],["Predicate","P","x"]]'
+    );
+    expect(parseJson('\\exists Q(a,b), Q(a,b)')).toBe(
+      '["Exists",["Predicate","Q","a","b"],["Predicate","Q","a","b"]]'
+    );
+    // A predicate inside a compound condition gets the same treatment.
+    expect(parseJson('\\forall P(x) > 0, P(x) < 1')).toBe(
+      '["ForAll",["Less",0,["Predicate","P","x"]],["Less",["Predicate","P","x"],1]]'
+    );
+    // Lowercase heads are unaffected: juxtaposition in both positions.
+    expect(parseJson('\\forall f(x) > 0, f(x) < 1')).toBe(
+      '["ForAll",["Less",0,["Multiply","f","x"]],["Less",["Multiply","f","x"],1]]'
+    );
+  });
+
   it('should parse a condition with an undelimited parenthesized body', () => {
     const forAll = '["ForAll",["Less",0,"x"],["Less",0,["Power","x",2]]]';
     expect(parseJson('\\forall x > 0 (x^2 > 0)')).toBe(forAll);

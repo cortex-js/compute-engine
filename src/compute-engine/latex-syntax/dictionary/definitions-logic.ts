@@ -893,7 +893,12 @@ export function parseQuantifier(
           condTerminator.condition(p),
       };
       parser.index = index;
+      // The condition is parsed in quantifier scope, like the body: it is a
+      // proposition ("for all x SUCH THAT P(x)"), so a predicate application
+      // in it must read as `Predicate`, the same as it does in the body.
+      parser.enterQuantifierScope();
       const groupCondition = parser.parseExpression(groupTerminator);
+      parser.exitQuantifierScope();
       const groupAt = parser.index;
       if (groupCondition !== null && operator(groupCondition) !== '') {
         parser.skipSpace();
@@ -919,7 +924,12 @@ export function parseQuantifier(
     }
     parser.index = index;
 
+    // In quantifier scope for the same reason as the 2a split above: the
+    // condition is a proposition, and `\forall P(x), P(x)` must read its two
+    // occurrences of `P(x)` identically.
+    parser.enterQuantifierScope();
     const condition = parser.parseExpression(condTerminator);
+    parser.exitQuantifierScope();
     if (condition === null) return null;
 
     // Either a separator or a parenthesis
