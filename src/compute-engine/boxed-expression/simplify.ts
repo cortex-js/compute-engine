@@ -433,6 +433,40 @@ export function simplify(
   return steps as RuleSteps;
 }
 
+/**
+ * The cost gate does not demand that a rewrite be *cheaper* — it tolerates a
+ * bounded amount of growth, because several mathematically preferred rewrites
+ * score slightly worse under the cost function (the canonical example is
+ * `2·2^x → 2^(x+1)`, which goes from cost 4 to cost 5).
+ *
+ * The tolerance is the *smaller* of two budgets:
+ *
+ * - `COST_GATE_RATIO` — 30% of the current cost. This is what small
+ *   expressions live on: at cost 4 it grants +1.2, enough for the power
+ *   combination above.
+ *
+ * - `COST_GATE_MAX_GROWTH` — an absolute ceiling of 10 cost units, whatever
+ *   the size of the expression.
+ *
+ * The absolute ceiling exists because a pure ratio grants *more* slack the
+ * bigger the expression, which is exactly backwards: it is on large
+ * expressions that runaway growth hurts. Instrumenting this gate over the full
+ * test suite (1,324 growth attempts) found the ratio alone approving a single
+ * rewrite that added **1,693** cost units, and a chain that walked one
+ * expression from cost 7,098 to 10,133 — every step waved through as a
+ * "simplification". The ceiling costs nothing: the suite is green at 10, and
+ * the rewrites it newly rejects are fraction splits that should never have
+ * been called simplifications (`(-b+√(b²-4ac))/2a` was being blown apart into
+ * `-b/2a + √(b²-4ac)/2a`).
+ *
+ * Note that this slack is a fallback, not the sanctioned route for a rewrite
+ * that is preferred despite being larger: such a rule should tag its step
+ * `purpose: 'transform'`, which bypasses the gate outright (see
+ * `simplifyNonCommutativeFunction`).
+ */
+const COST_GATE_RATIO = 1.3;
+const COST_GATE_MAX_GROWTH = 10;
+
 function isCheaper(
   oldExpr: Expression,
   newExpr: Expression | null | undefined,
@@ -450,11 +484,12 @@ function isCheaper(
   const oldCost = costFunction(oldExpr);
   const newCost = costFunction(newExpr);
 
-  // Use a threshold of 1.3 (30% more expensive) to allow mathematically valid
-  // simplifications like combining powers (2 * 2^x -> 2^(x+1))
-  if (newCost <= 1.3 * oldCost) return true;
+  const budget = Math.min(
+    oldCost + COST_GATE_MAX_GROWTH,
+    COST_GATE_RATIO * oldCost
+  );
 
-  return false;
+  return newCost <= budget;
 }
 
 /**

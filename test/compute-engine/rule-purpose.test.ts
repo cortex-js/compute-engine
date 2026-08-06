@@ -4,16 +4,18 @@ import { ComputeEngine, Rule } from '../../src/compute-engine';
  * Tests for rule purpose tags (`RulePurpose`) and the simplification
  * cost policy (M3 of the rule-mechanics plan):
  *
- * - `'simplify'` (default): results must pass the cost gate (today's
- *   behavior — results that grow the expression > 1.3× are discarded).
+ * - `'simplify'` (default): results must pass the cost gate — a result may
+ *   grow the expression by at most `min(30%, 10 cost units)`; beyond that it
+ *   is discarded.
  * - `'transform'`: mathematically-preferred rewrites, exempt from the
  *   cost gate.
  * - `'expand'`: growth-by-design, skipped by `simplify()` but reachable
  *   via `expr.replace()`.
  */
 
-// A rule that grows the expression beyond the 1.3× cost-gate threshold:
-// tan(x) costs 11, sin(x)/cos(x) costs 30.
+// A rule that grows the expression beyond the cost-gate budget:
+// tan(x) costs 11, sin(x)/cos(x) costs 30 (over both the 30% ratio and the
+// 10-unit absolute ceiling).
 const GROWTH_RULE: Rule = {
   match: ['Tan', '_x'],
   replace: ['Divide', ['Sin', '_x'], ['Cos', '_x']],
@@ -49,6 +51,40 @@ describe('rule purpose: cost gate (default/simplify)', () => {
       rules: [{ ...GROWTH_RULE, purpose: 'simplify' }],
     });
     expect(result.latex).toBe('\\tan(x)');
+  });
+});
+
+describe('cost gate: the growth budget is capped in absolute terms', () => {
+  // The gate tolerates growth of `min(30% of cost, 10 cost units)`. The
+  // absolute ceiling matters because a bare ratio grants ever more slack as
+  // the expression gets bigger — the regime where runaway growth actually
+  // hurts.
+
+  it('a small expression still gets its 30% of slack (2·2^x → 2^(x+1))', () => {
+    const ce = new ComputeEngine();
+    // cost 4 → 5: over-budget by ratio alone would reject it, the 30% (+1.2)
+    // allowance is what lets this land.
+    expect(ce.parse('2\\cdot2^x').simplify().toString()).toBe('2^(x + 1)');
+  });
+
+  it('a large expression does not get proportionally more slack', () => {
+    const ce = new ComputeEngine();
+    // cost 40 → 52 if split. 52 is exactly 1.3 × 40, so the ratio alone
+    // accepted this and simplify() used to return the split form
+    // `-b/(2a) + sqrt(b^2-4ac)/(2a)`. +12 is over the 10-unit ceiling, so the
+    // closed quadratic-formula form now survives.
+    expect(
+      ce.parse('\\frac{-b+\\sqrt{b^2-4ac}}{2a}').simplify().toString()
+    ).toBe('(-b + sqrt(b^2 - 4a * c)) / (2a)');
+  });
+
+  it("'transform' still bypasses the ceiling, not just the ratio", () => {
+    const ce = new ComputeEngine();
+    // tan(x) → sin(x)/cos(x) is +19, over both budgets; the tag exempts it.
+    const result = ce
+      .parse('\\tan(x)')
+      .simplify({ rules: [{ ...GROWTH_RULE, purpose: 'transform' }] });
+    expect(result.latex).toBe('\\frac{\\sin(x)}{\\cos(x)}');
   });
 });
 

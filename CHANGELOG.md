@@ -42,6 +42,17 @@
 
 ### Improvements
 
+- **`simplify()` no longer lets large expressions grow without bound.** The
+  cost gate that decides whether to keep a rewrite tolerated growth of up to
+  30% — a proportion, so the bigger the expression, the more growth it
+  allowed. It now tolerates the smaller of 30% **or 10 cost units**. Small
+  rewrites that depend on the slack are unaffected (`2·2^x → 2^(x+1)` still
+  fires); what changes is that `simplify()` no longer walks a large expression
+  steadily uphill, and no longer breaks a closed form apart into a longer
+  equivalent — `\frac{-b+\sqrt{b^2-4ac}}{2a}` used to come back as
+  `-b/(2a) + \sqrt{b^2-4ac}/(2a)`. A rule that should apply regardless of cost
+  should be tagged `purpose: 'transform'`, which bypasses the gate entirely.
+
 - **`ComputeEngine`, `expr.engine` and `ExpressionComputeEngine` are now one
   interchangeable type — no more casts between them.** The `ComputeEngine`
   exported from the package (and from the `/core` sub-path) is now a
