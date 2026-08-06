@@ -466,8 +466,16 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
         // Get the resulting exponent m/n
         const resultExp = exp.div(rootIndex);
 
-        // For even root index, we need |x|^{m/n}
-        if (rootIndex.isEven === true) {
+        // For even root index, we need |x|^{m/n}.
+        //
+        // The `|·|` form is valid only on the reals: `⁴√(z²) = √|z|` fails for
+        // a complex base — at z = i it gives 1 where the principal value is
+        // e^{iπ/4} ≈ 0.707 + 0.707i. Bail on a declared-complex / provably
+        // non-real base, matching the sibling `√(x²) → |x|` rewrites (SYM
+        // P0-4 / D4). Until this guard was added the rewrite was unsound for a
+        // complex base and only the cost gate — which rejected `√|z|` as more
+        // expensive than `⁴√(z²)` — kept it from firing.
+        if (rootIndex.isEven === true && isEligibleRealRewrite(base)) {
           // Only simplify if m/n is simpler than root form
           // (i.e., m/n is a rational with smaller denominator than n, or an integer)
           if (resultExp.isInteger === true) {
@@ -475,6 +483,11 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
             return {
               value: ce._fn('Abs', [base]).pow(resultExp),
               because: 'root(x^m, n) -> |x|^{m/n} when m/n is integer',
+              // Cost-gate exempt, with the rest of the `|·|`-extraction
+              // family: introducing an `Abs` always grows the expression
+              // (`⁴√(x²)` is 8, `√|x|` is 11), so this is kept because it is
+              // the reduced real-domain form, not because it is smaller.
+              purpose: 'transform',
             };
           }
           // For non-integer m/n, still simplify to |x|^{m/n} form
@@ -488,6 +501,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
               return {
                 value: ce._fn('Abs', [base]).pow(resultExp),
                 because: 'root(x^m, n) -> |x|^{m/n}',
+                purpose: 'transform',
               };
             }
           }

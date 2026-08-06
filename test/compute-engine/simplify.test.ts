@@ -1147,6 +1147,31 @@ describe('NEGATIVE BASE POWER RULES', () => {
 // forms below keep working. Doing it per-iteration instead measured 3-4x on
 // the general corpus and 11-13x on binder-heavy input, so it belongs at the
 // fixpoint (mirroring the trial expansion).
+// `⁴√(x²) → √|x|` was the last open claim in SYMBOLIC_FINDINGS P2-1. The rule
+// existed and fired, but its result is LARGER (8 → 11), so the cost gate
+// rejected it — and that rejection was accidentally masking a soundness bug:
+// the rewrite had no real-eligibility guard, so for a declared-complex base it
+// produced `√|z|` where the principal value of `⁴√(z²)` at z = i is
+// e^{iπ/4} ≈ 0.707+0.707i, not 1.
+describe('root-to-abs reduction (SYMBOLIC_FINDINGS P2-1)', () => {
+  test('4th-root(x^2) = sqrt(|x|)', () =>
+    expect(ce.parse('\\sqrt[4]{x^2}').simplify().toString()).toBe('sqrt(|x|)'));
+
+  test('4th-root(x^8) = x^2 (integer m/n)', () =>
+    expect(ce.parse('\\sqrt[4]{x^8}').simplify().toString()).toBe('x^2'));
+
+  test('cube-root(x^6) = x^2 (odd index needs no Abs)', () =>
+    expect(ce.parse('\\sqrt[3]{x^6}').simplify().toString()).toBe('x^2'));
+
+  test('a declared-complex base must NOT reduce', () => {
+    const c = new ComputeEngine();
+    c.declare('z', 'complex');
+    expect(c.parse('\\sqrt[4]{z^2}').simplify().toString()).toBe(
+      'root(4)(z^2)'
+    );
+  });
+});
+
 describe('binder bodies are simplified at the fixpoint', () => {
   test('integrand: sin^2+cos^2 collapses', () =>
     expect(ce.parse('\\int (\\sin^2 x + \\cos^2 x) dx').simplify().toString()).toBe(

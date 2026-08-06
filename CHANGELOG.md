@@ -93,6 +93,15 @@
 
 ### Resolved Issues
 
+- **An even root of an even power reduces, and no longer does so for complex
+  values.** `\sqrt[4]{x^2}` now returns `\sqrt{|x|}`. It did not before, because
+  the result is structurally larger and the cost check rejected it — which was
+  quietly masking a soundness bug: the rewrite had no real-domain guard, so for
+  a value declared complex it would have produced `\sqrt{|z|}`, where the
+  principal value of `\sqrt[4]{z^2}` at `z=i` is `e^{i\pi/4}`, not 1. The guard
+  is now in place and the reduction is kept for being the reduced real-domain
+  form rather than the smaller one. A complex-declared base is left alone.
+
 - **A closure returned from a function now resolves captured variables from
   inside a nested block.** `k ↦ (x ↦ if x > 1 { k } else { 0 })` applied at
   `k = 100` returned the symbol `k` instead of `100`, while the same body
