@@ -174,7 +174,7 @@ exports[`simplify: powers x^1 1`] = `x`;
 
 exports[`simplify: powers x^3 x^4 1`] = `["Power", "x", 7]`;
 
-exports[`simplify: radicals (\\sqrt{2}+\\sqrt{3})^2 1`] = `["Square", ["Add", ["Sqrt", 2], ["Sqrt", 3]]]`;
+exports[`simplify: radicals (\\sqrt{2}+\\sqrt{3})^2 1`] = `["Add", 5, ["Multiply", 2, ["Sqrt", 6]]]`;
 
 exports[`simplify: radicals (-8)^{\\frac13} 1`] = `-2`;
 

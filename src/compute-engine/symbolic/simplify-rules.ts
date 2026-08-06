@@ -383,12 +383,13 @@ export const SIMPLIFY_RULES: Rule[] = [
     // — accepted deliberately, since a size threshold would mean `-(x+1)`
     // distributes and `-(a+…+z)` does not.
     //
-    // Repricing `Negate` would NOT remove the need for this tag (measured
-    // 2026-08-05): distribution turns one `Negate` + one `Add` into one `Add`
-    // + n `Negate`s, so at any positive `Negate` cost the distributed form
-    // scores worse — at cost 1 it is still +2 for `-(a+b+c)`. Only a model
-    // where a leading sign on a term is free would flip it. Only the Add case
-    // is exempt; every other negation rewrite stays subject to the gate.
+    // Still needed after the 2026-08-05 cost-model repricing, though less so:
+    // a sign on a term now costs 1 rather than 4, so the distributed form wins
+    // outright up to FOUR terms (factored 7+n vs distributed 3+2n). Beyond
+    // that the per-term signs add up and it loses again, so the tag is what
+    // keeps the behavior consistent across sizes instead of introducing an
+    // arbitrary term-count cutoff. Only the Add case is exempt; every other
+    // negation rewrite stays subject to the gate.
     if (isFunction(x.op1, 'Add'))
       return { value: x.op1.neg(), because: 'negation', purpose: 'transform' };
     return { value: x.op1.neg(), because: 'negation' };

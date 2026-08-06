@@ -17,6 +17,81 @@
 
 ### Resolved Issues
 
+- **The cost function no longer prices the same expression differently
+  depending on which form it is handed.** `Square(x)` cost 6 unevaluated but 1
+  canonical, and `Exp(x)` cost 10 versus 1 — yet both canonicalize to a
+  `Power`. Since `simplify()`'s cost gate compares an incoming expression
+  against a rule's result, and the two need not be in the same form, that made
+  some comparisons off by up to 2×. Both now price through the same helper as
+  `Power`, so the cost is a property of the expression rather than of its
+  representation.
+
+  Relatedly, a negation is now priced by what it is applied to: a sign on a
+  *term* costs 1, while negating a whole *sum* keeps the higher cost of 4,
+  since that forces delimiters. Previously both cost 4, which said `-a - b - c`
+  is nearly twice as complicated as `-(a + b + c)` when it reads more simply —
+  and made `Subtract(a, b)` cost less than the `Add(a, Negate(b))` it
+  canonicalizes to. One visible consequence: `\int\sqrt{x^2-1}dx` now returns
+  `\frac12(x\sqrt{x^2-1} - \operatorname{arcosh} x)`, matching the factored form
+  its two sibling trig-substitution integrals already returned.
+
+- **A coefficient no longer jumps in cost at an arbitrary size.** The cost
+  function treated a numeral times something as cheap only for an integer up to
+  10 (but any rational), and discarded the coefficient's own size entirely — so
+  `10x` cost 4 while `11x` cost 10, a 2.5× step for the same shape. The
+  coefficient's cost is now counted, which prices size continuously (integer
+  literals are already priced by digit count), and the magnitude test is gone:
+  `11x` costs 5, `1000x` costs 7. `2x` still costs less than `x + x`, which is
+  what the discount exists for. One visible consequence: `\sum n^2` returns
+  `\frac16(2b^3+3b^2+b)` rather than `\frac13 b^3+\frac12 b^2+\frac16 b`,
+  matching the shape `\sum n` already returned.
+
+- **An unevaluated integral now weighs heavily against a closed form.** `Integrate`
+  was priced like any unrecognized operator, but an antiderivative can be much
+  larger than its integrand — `\int\sec^3x\,dx` scored 49 against a closed form
+  of 78, and `\int\frac{1}{x^4+1}dx` 62 against 145 — so a rewrite that resolved
+  such an integral could be rejected for being "more complicated". Integrals now
+  carry a large flat premium. It is a weight rather than an absolute rule — a
+  closed form vastly larger than its integral could still lose. It is flat rather than
+  proportional so that comparing two expressions which each contain one integral
+  still turns on the integrands, and so that an expression with fewer integrals
+  still wins.
+
+- **A radical is no longer priced as if it were an ordinary decimal.** The cost
+  function reduced an exact value to its floating-point magnitude, so `\sqrt3`,
+  `2\sqrt3` and `\sqrt{17}` all scored the same as the plain decimal `0.5` — the
+  radical was invisible to every comparison. An exact value is now priced as
+  `rational × \sqrt{radical}` with the radical counted, calibrated so a radical
+  literal costs about what the equivalent expression costs (`\sqrt3` and
+  `\sqrt y` both score 6). Plain integers, decimals and fractions are unchanged.
+
+  Because a radical now carries weight, keeping one factored out beats spreading
+  it across several terms, so a number of antiderivatives come back in a tidier
+  form: `\int\frac{1}{x^2+x+1}dx` returns
+  `\frac{2\sqrt3}{3}\arctan\left(\frac{\sqrt3}{3}(2x+1)\right)` rather than
+  distributing the `\sqrt3` over both terms of the argument. Collapsing nested
+  radicals (`\sqrt{\sqrt{12}} \to \sqrt[4]{12}`) also no longer needs a
+  cost-gate exemption — it now wins on its own merits.
+
+- **Raising something to a power now accounts for what is being raised.** The
+  cost function priced a power by its exponent alone, so `(a+b+c+d)^{20}` — which
+  expands to 1,771 terms — scored 2, the same as `x^{20}` and barely above `x^2`.
+  The base is now counted. `2q^2` is still cheaper than the repeated
+  multiplication it replaces, which is what that rule exists for. One visible
+  consequence: `(\sqrt2+\sqrt3)^2` now reaches its closed form `5+2\sqrt6`
+  instead of staying unexpanded.
+
+  Two long-standing shortcuts came out with it. A negated power was priced
+  without its base, so `-\sin^2x` scored 4 where `\sin^2x` scored 12 — the same
+  subexpression valued three-fold apart on nothing but a leading sign. And
+  `\sqrt{}` carried hidden surcharges for a perfect-square or odd-power
+  argument, added to push factoring rewrites like `\sqrt{x^2y}\to|x|\sqrt y`
+  past the cost check. Those rewrites introduce an absolute value, so they
+  genuinely do grow the expression; they are kept because they are correct on
+  the reals, not because they are smaller, and they now say so directly rather
+  than relying on a surcharge to disguise their size. Same for distributing an
+  exponent over a product. Behavior is unchanged in every case.
+
 - **`ce.parse()` now accepts a `scope` option in its public type signature.**
   The implementation has always honored it — the whole parse runs with the
   supplied scope as the current lexical scope, so name resolution walks

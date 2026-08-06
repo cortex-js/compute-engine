@@ -631,13 +631,15 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     // sqrt(sqrt(x)) -> x^{1/4} (nested square roots)
     const nestedRadicand = sqrtRadicand(arg);
     if (nestedRadicand) {
-      // Cost-gate exempt: collapsing nested radicals to a single one is the
-      // canonical form even though it can score larger (√(2√3) is 7,
-      // ⁴√12 is 8).
+      // No cost-gate exemption needed. This used to carry
+      // `purpose: 'transform'` because the cost function priced a radical
+      // LITERAL by its machine-float value, making `√(2√3)` (7) look cheaper
+      // than the collapsed `⁴√12` (8). Radical literals are now priced as
+      // radicals, so the collapsed form wins on its own merits (11 vs 8) and
+      // the tag came off.
       return {
         value: nestedRadicand.pow(ce.number([1, 4])),
         because: 'sqrt(sqrt(x)) -> x^{1/4}',
-        purpose: 'transform',
       };
     }
 
@@ -672,6 +674,12 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
             return {
               value: ce._fn('Abs', [base]),
               because: 'sqrt(x^2) -> |x|',
+              // Cost-gate exempt, with the whole `|·|`-extraction family
+              // below: pulling an `Abs` out from under a radical is a
+              // real-domain correctness rewrite (√(x²) is |x|, not x) and it
+              // ALWAYS grows the expression, so it can never win on cost. The
+              // `Sqrt` cost penalties that used to force it have been removed.
+              purpose: 'transform',
             };
           }
 
@@ -680,6 +688,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
             return {
               value: ce._fn('Abs', [base]).pow(exp.div(2)),
               because: 'sqrt(x^{2n}) -> |x|^n',
+              purpose: 'transform',
             };
           }
 
@@ -767,6 +776,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
           return {
             value: outsideSqrt,
             because: 'sqrt(a^2 * ...) -> |a| * ...',
+            purpose: 'transform',
           };
         }
 
@@ -776,6 +786,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
         return {
           value: outsideSqrt.mul(ce._fn('Sqrt', [insideSqrt])),
           because: 'sqrt(a^2 * b) -> |a| * sqrt(b)',
+          purpose: 'transform',
         };
       }
     }
@@ -864,9 +875,17 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     // Distribute exponent over product
     if (isFunction(base, 'Multiply') && exp.isInteger === true) {
       const newFactors = base.ops.map((factor) => factor.pow(exp));
+      // Cost-gate exempt: distributing the exponent is the preferred form
+      // (pinned by the POWER DISTRIBUTION GUARDS tests), but it is not the
+      // cheaper one — `a^2·b^2` costs 11 against `(ab)^2` at 10, since each
+      // distributed factor now pays for its own base. The `Power` cost used
+      // to weight a `Multiply` base specifically so this rewrite would win;
+      // that was a price standing in for a preference, so the preference is
+      // declared here instead.
       return {
         value: ce._fn('Multiply', newFactors),
         because: '(a*b)^n -> a^n * b^n',
+        purpose: 'transform',
       };
     }
 

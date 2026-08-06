@@ -218,7 +218,7 @@ describe('INDEFINITE INTEGRATION', () => {
 
   test('sqrt(x^2-1) (trig substitution)', () =>
     expect(evaluate('\\int \\sqrt{x^2-1} dx')).toMatchInlineSnapshot(
-      `1/2 * x * sqrt(x^2 - 1) - 1/2 * arcosh(x)`
+      `1/2 * (x * sqrt(x^2 - 1) - arcosh(x))`
     ));
 
   test('sqrt(4-x^2) (trig substitution with a=2)', () =>
@@ -417,7 +417,7 @@ describe('INDEFINITE INTEGRATION', () => {
 
   test('1/(x^2+x+1) (completing square)', () =>
     expect(evaluate('\\int \\frac{1}{x^2+x+1} dx')).toMatchInlineSnapshot(
-      `2/3sqrt(3) * arctan(2/3sqrt(3) * x + sqrt(3)/3)`
+      `2/3sqrt(3) * arctan(sqrt(3)/3 * (2x + 1))`
     ));
 
   // Irreducible quadratic powers (reduction formula)
@@ -562,13 +562,13 @@ describe('ROADMAP B2: fractional powers and exact partial-fraction coefficients'
     expect(
       noFloats(evaluate('\\int \\frac{1}{x^3+1} dx'))
     ).toMatchInlineSnapshot(
-      `1/3 * ln(|x + 1|) + sqrt(3)/3 * arctan(2/3sqrt(3) * x - sqrt(3)/3) - 1/6 * ln(|x^2 - x + 1|)`
+      `1/3 * ln(|x + 1|) + sqrt(3)/3 * arctan(sqrt(3)/3 * (2x - 1)) - 1/6 * ln(|x^2 - x + 1|)`
     ));
 
   test('∫1/(x²−x+1) dx is exact (irreducible quadratic with Negate term)', () =>
     expect(
       noFloats(evaluate('\\int \\frac{1}{x^2-x+1} dx'))
-    ).toMatchInlineSnapshot(`2/3sqrt(3) * arctan(2/3sqrt(3) * x - sqrt(3)/3)`));
+    ).toMatchInlineSnapshot(`2/3sqrt(3) * arctan(sqrt(3)/3 * (2x - 1))`));
 
   test('∫1/(2−x) dx = −ln|2−x| (linear factor with Negate term)', () =>
     expect(evaluate('\\int \\frac{1}{2-x} dx')).toMatchInlineSnapshot(
@@ -874,7 +874,7 @@ describe('ROADMAP B2: non-elementary & radical integrals (leftovers)', () => {
   test('∫1/√(x²+x+1) dx → arsinh((2x+1)/√3)', () => {
     expect(
       evaluate('\\int \\frac{1}{\\sqrt{x^2+x+1}} dx')
-    ).toMatchInlineSnapshot(`arsinh(2/3sqrt(3) * x + sqrt(3)/3)`);
+    ).toMatchInlineSnapshot(`arsinh(2/3sqrt(3) * (x + 1/2))`);
     checkDeriv(
       '\\frac{1}{\\sqrt{x^2+x+1}}',
       '\\operatorname{arsinh}(\\frac{2x+1}{\\sqrt3})'

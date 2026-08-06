@@ -1603,7 +1603,7 @@ describe('DSolve', () => {
       'x',
     ]);
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) === x^2 + "c_1" * x]`
+      `[y(x) === x * ("c_1" + x)]`
     );
   });
 

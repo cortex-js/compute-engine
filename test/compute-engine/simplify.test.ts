@@ -1140,6 +1140,40 @@ describe('NEGATIVE BASE POWER RULES', () => {
     ));
 });
 
+// The `|·|`-extraction family (`√(x²) → |x|`, `√(x²y) → |x|√y`, …) and power
+// distribution used to be forced through the cost gate by surcharges baked
+// into the `Sqrt` and `Power` costs. Those surcharges were removed in favour of
+// `purpose: 'transform'` tags, so these behaviors now rest ENTIRELY on the
+// tags — nothing about their size keeps them alive, since each ADDS an `Abs`
+// or a factor. Lock them down.
+describe('|·|-extraction and power distribution survive without cost surcharges', () => {
+  test('sqrt(x^2) = |x|', () =>
+    expect(simplify('\\sqrt{x^2}')).toMatchInlineSnapshot(`["Abs", "x"]`));
+
+  test('sqrt(x^2 y) = |x| sqrt(y)', () =>
+    expect(simplify('\\sqrt{x^2 y}')).toMatchInlineSnapshot(
+      `["Multiply", ["Abs", "x"], ["Sqrt", "y"]]`
+    ));
+
+  test('sqrt(x^3) = |x| sqrt(x) (odd power)', () =>
+    expect(simplify('\\sqrt{x^3}')).toMatchInlineSnapshot(
+      `["Multiply", ["Abs", "x"], ["Sqrt", "x"]]`
+    ));
+
+  test('sqrt(4x^2) = 2|x|', () =>
+    expect(simplify('\\sqrt{4x^2}')).toMatchInlineSnapshot(
+      `["Multiply", 2, ["Abs", "x"]]`
+    ));
+
+  // A negated base must not block a power rewrite: `(-sin x)^2` scored 5
+  // against `sin(x)^2` at 12 while a `Negate` base was priced flat, so the
+  // gate kept the negation. A bare symbol base hid it.
+  test('(-sin(x))^2 = sin(x)^2 (negated base is costed)', () =>
+    expect(simplify('(-\\sin(x))^2')).toMatchInlineSnapshot(
+      `["Square", ["Sin", "x"]]`
+    ));
+});
+
 describe('POWER DISTRIBUTION GUARDS', () => {
   test('(x^{-2})^2 = x^{-4}', () =>
     expect(simplify('(x^{-2})^2')).toMatchInlineSnapshot(

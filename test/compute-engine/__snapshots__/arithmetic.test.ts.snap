@@ -1194,5 +1194,5 @@ invalid   =[
 
 exports[`Square Square 1`] = `
 box       = ["Square", 2.5]
-eval-auto = 6.25
+simplify  = 6.25
 `;

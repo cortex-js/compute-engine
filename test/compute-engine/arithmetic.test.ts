@@ -1288,7 +1288,7 @@ describe('SUM', () => {
   it('should simplify sum of index squared', () => {
     expect(
       ce.parse('\\sum_{n=1}^{b}(n^2)').simplify().toString()
-    ).toMatchInlineSnapshot(`1/3 * b^3 + 1/2 * b^2 + 1/6 * b`);
+    ).toMatchInlineSnapshot(`1/6 * (2b^3 + 3b^2 + b)`);
   });
 
   it('should factor out constant from sum', () => {
