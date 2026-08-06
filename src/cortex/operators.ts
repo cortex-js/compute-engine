@@ -16,8 +16,10 @@ import { MathJsonSymbol } from '../math-json/types.js';
 // (`argOp.precedence < op.precedence` ⇒ wrap the operand) working unchanged.
 //
 //   Assign            10   (infix, right, relational spacing)
+//   MapsTo |->        15   (infix, right)
 //   Pipe  |>  ~>      20   (infix, left)
 //   KeyValuePair ->   30   (infix)
+//   conditional `a if c else b`  35  (ternary — see CONDITIONAL_PRECEDENCE)
 //   Or  ||            40   (infix, left)
 //   And &&            50   (infix, left)
 //   relational        60   (infix, n-ary chainable — see parser)
@@ -40,6 +42,40 @@ import { MathJsonSymbol } from '../math-json/types.js';
 // the `FANCY_UNICODE` codepoint table in `characters.ts`, not through this
 // field.
 //
+
+/**
+ * Precedence of the conditional expression `a if c else b` (→ `["If", c, a,
+ * b]`).
+ *
+ * It is deliberately NOT a row in `OPERATORS`: the form is a word-spelled
+ * *ternary*, so the parser recognizes it directly (`parseConditionalTail`)
+ * rather than through `peekInfix` — a row here would make `peekInfix` claim
+ * `if` as an ordinary binary infix and build the wrong shape. The serializer
+ * registers it by name for the same reason. This constant is the one place
+ * the two sides agree on its precedence.
+ *
+ * It sits between `KeyValuePair` (30) and `Or` (40) — looser than every
+ * ordinary operator, exactly as in Python, where the conditional binds looser
+ * than `or`:
+ *
+ *     a + b if c else d   →  (a + b) if c else d
+ *     a || b if c else d  →  (a || b) if c else d
+ *
+ * but tighter than the four loosest forms, which are the ones that *bind* or
+ * *pair* rather than compute. Each would otherwise capture the conditional's
+ * consequent alone and leave a shape nobody can mean:
+ *
+ *     x = a if c else b     →  x = (a if c else b)      not (x = a) if …
+ *     x |-> a if c else b   →  x |-> (a if c else b)    not (x |-> a) if …
+ *     xs |> f if c else g   →  xs |> (f if c else g)    not (xs |> f) if …
+ *     k -> v if c else w    →  k -> (v if c else w)     not (k -> v) if …
+ *
+ * The `->` case is the load-bearing one: below `KeyValuePair` the conditional
+ * swallows the pair, and a dictionary entry whose value is conditional is not
+ * merely misparsed but silently DROPPED (the element is no longer a
+ * `KeyValuePair`, so the dictionary reader skips it).
+ */
+export const CONDITIONAL_PRECEDENCE = 35;
 
 export interface OperatorDef {
   /** The MathJSON operator this spelling maps to, e.g. `'Add'`. */

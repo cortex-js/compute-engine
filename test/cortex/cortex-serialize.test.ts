@@ -498,6 +498,107 @@ describe('CORTEX SERIALIZING SPREAD', () => {
   });
 });
 
+// `If` has two Cortex spellings, chosen by the shape of its branches: the
+// block form (`Block` branches) and the conditional expression (plain
+// expression branches). A shape that is neither keeps the generic call form.
+describe('CORTEX SERIALIZING IF', () => {
+  const rt = (src: string) => {
+    const { parseCortex } = require('../../src/cortex/parse-cortex');
+    const strip = (x: any) =>
+      JSON.parse(
+        JSON.stringify(x, (k, v) => (k === 'sourceOffsets' ? undefined : v))
+      );
+    const [v] = parseCortex(src);
+    return serializeCortex(strip(v));
+  };
+
+  test('Block branches serialize as the block form', () => {
+    expect(serializeCortex(['If', 'c', ['Block', 1], ['Block', 2]])).toBe(
+      'if c {1} else {2}'
+    );
+    expect(serializeCortex(['If', 'c', ['Block', 1]])).toBe('if c {1}');
+    expect(
+      serializeCortex([
+        'If',
+        'c',
+        ['Block', 1],
+        ['If', 'd', ['Block', 2], ['Block', 3]],
+      ])
+    ).toBe('if c {1} else if d {2} else {3}');
+  });
+
+  test('expression branches serialize as the conditional form', () => {
+    expect(serializeCortex(['If', 'c', 1, 2])).toBe('1 if c else 2');
+    expect(serializeCortex(['If', ['Greater', 'x', 0], 1, 2])).toBe(
+      '1 if x > 0 else 2'
+    );
+  });
+
+  // The conditional binds looser than every ordinary operator, so an `If` in
+  // operand position needs parentheses — without them `1 if c else 2 + 3`
+  // re-parses as `If(c, 1, 2 + 3)`.
+  test('a conditional in operand position is parenthesized', () => {
+    expect(serializeCortex(['Add', ['If', 'c', 1, 2], 3])).toBe(
+      '(1 if c else 2) + 3'
+    );
+    expect(serializeCortex(['Assign', 'x', ['If', 'c', 1, 2]])).toBe(
+      'x = 1 if c else 2'
+    );
+  });
+
+  // Chaining is right-nested: an `If` in the alternative needs no parentheses,
+  // one in the consequent does.
+  test('nested conditionals parenthesize on the left only', () => {
+    expect(serializeCortex(['If', 'c', 1, ['If', 'd', 2, 3]])).toBe(
+      '1 if c else 2 if d else 3'
+    );
+    expect(serializeCortex(['If', 'c', ['If', 'd', 1, 2], 3])).toBe(
+      '(1 if d else 2) if c else 3'
+    );
+  });
+
+  // The forms the conditional binds tighter than take no parentheses on the
+  // right, and do take them when they are the consequent.
+  test('parenthesization follows the precedence on both sides', () => {
+    expect(
+      serializeCortex(['KeyValuePair', { str: 'k' }, ['If', 'c', 1, 2]])
+    ).toBe('"k" -> 1 if c else 2');
+    expect(
+      serializeCortex(['If', 'c', ['KeyValuePair', { str: 'k' }, 1], 2])
+    ).toBe('("k" -> 1) if c else 2');
+    expect(serializeCortex(['Pipe', 'xs', ['If', 'c', 'f', 'g']])).toBe(
+      'xs |> f if c else g'
+    );
+    expect(serializeCortex(['If', 'c', ['Or', 'a', 'b'], 'd'])).toBe(
+      'a || b if c else d'
+    );
+    expect(serializeCortex(['Or', ['If', 'c', 'a', 'b'], 'd'])).toBe(
+      '(a if c else b) || d'
+    );
+  });
+
+  test('shapes with neither spelling keep the generic call form', () => {
+    // Mixed branches — a `Block` consequent with an expression alternative.
+    expect(serializeCortex(['If', 'c', ['Block', 1], 2])).toBe(
+      'If(c, do {1}, 2)'
+    );
+    // No else: there is no conditional spelling for a missing branch.
+    expect(serializeCortex(['If', 'c', 1])).toBe('If(c, 1)');
+  });
+
+  test('both forms round-trip from source', () => {
+    expect(rt('if c { 1 } else { 2 }')).toBe('if c {1} else {2}');
+    expect(rt('if c { 1 } else if d { 2 } else { 3 }')).toBe(
+      'if c {1} else if d {2} else {3}'
+    );
+    expect(rt('if c { let x = 1\n x + 1 }')).toBe('if c {let x = 1; x + 1}');
+    expect(rt('1 if c else 2')).toBe('1 if c else 2');
+    expect(rt('x = 1 if c else 2')).toBe('x = 1 if c else 2');
+    expect(rt('1 if c else 2 if d else 3')).toBe('1 if c else 2 if d else 3');
+    expect(rt('x + if c { 1 } else { 2 }')).toBe('x + (if c {1} else {2})');
+  });
+});
+
 // `Declare` reconstructs the `let`/`const` statement syntax; shapes with no
 // such spelling (extra attributes, a computed name) keep the generic form.
 describe('CORTEX SERIALIZING DECLARATIONS', () => {

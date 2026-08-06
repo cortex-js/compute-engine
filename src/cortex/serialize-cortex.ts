@@ -37,7 +37,10 @@ import {
 } from './formatter.js';
 import { DIGITS, ESCAPED_CHARS, isBreak, isInvisible } from './characters.js';
 import { RESERVED_WORDS } from './reserved-words.js';
-import { OPERATORS as SHARED_OPERATORS } from './operators.js';
+import {
+  CONDITIONAL_PRECEDENCE,
+  OPERATORS as SHARED_OPERATORS,
+} from './operators.js';
 
 export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
   // Cortex's literal spelling is unsigned (`x + Infinity`, not
@@ -245,6 +248,15 @@ export function serializeCortex(
   // normalization (see docs/syntax.md).
   if (OPERATORS['Divide'] && !OPERATORS['Rational'])
     OPERATORS['Rational'] = { ...OPERATORS['Divide'] };
+
+  // The conditional expression `a if c else b` is not a row in the shared
+  // table (it is a word-spelled ternary the parser recognizes directly), but it
+  // needs a precedence HERE so an `If` appearing as another operator's operand
+  // is parenthesized: `Add(If(c, 1, 2), 3)` must serialize `(1 if c else 2) + 3`,
+  // never `1 if c else 2 + 3` (which re-parses as `If(c, 1, 2 + 3)`). Its own
+  // spelling comes from the `If` entry in `FUNCTIONS`, which runs first, so
+  // this row is only ever read as an *operand's* precedence.
+  OPERATORS['If'] = { symbol: 'if', precedence: CONDITIONAL_PRECEDENCE };
 
   // Is `expr` a number literal (a plain number, a `{num}` object, or a numeric
   // string)? Used by the `Negate`/`Multiply` serializers below.
@@ -473,9 +485,25 @@ export function serializeCortex(
       return serializeOperator(expr) ?? serializeGenericFunction(expr);
     },
 
-    // `If` has no `if`-expression spelling in the Phase 2 grammar, so it is
-    // left to the generic `If(cond, then, else)` function form (which
-    // round-trips). Phase 4 owns the statement form.
+    //
+    // If — two surface forms, selected by the shape of the branches
+    //
+    // The parser builds `Block` branches for the block form and plain
+    // expressions for the conditional form, so keying on that shape is exactly
+    // what makes each spelling round-trip:
+    //
+    //   If(c, Block(…), Block(…))  →  `if c { … } else { … }`
+    //                                 (chaining to `else if …` when the
+    //                                  alternative is itself a block-form `If`,
+    //                                  the shape `parseIf` builds)
+    //   If(c, a, b), branches non-Block  →  `a if c else b`
+    //
+    // Anything else — a mixed `If(c, Block(1), 2)`, or an arity outside 2…3 —
+    // falls through to the generic `If(c, …)` call form, which also re-parses
+    // faithfully.
+    //
+    If: (expr: MathJsonExpression): FormattingBlock =>
+      serializeIf(expr) ?? serializeGenericFunction(expr),
 
     //
     // Block (expression position): `do { stmt; stmt; … }`
@@ -487,18 +515,8 @@ export function serializeCortex(
     // position (a bare `{ … }` there is the collection grammar). Statements are
     // `;`-separated; the block scopes and yields its final statement's value.
     //
-    Block: (expr: MathJsonExpression): FormattingBlock => {
-      if (nops(expr) === 0) return fmt.text('do {}');
-      return fmt.line(
-        'do ',
-        fmt.fencedList(
-          '{',
-          fmt.separator(';'),
-          '}',
-          mapArgs<FormattingBlock>(expr, serializeExpression)
-        )
-      );
-    },
+    Block: (expr: MathJsonExpression): FormattingBlock =>
+      fmt.line('do ', serializeBraceBlock(expr)),
 
     //
     // Function literal (typed function literals, Phase 4)
@@ -1181,6 +1199,96 @@ export function serializeCortex(
         mapArgs<FormattingBlock>(expr, serializeExpression)
       ),
       ')'
+    );
+  }
+
+  /** The `{ … }` of a `Block`: `;`-separated statements, inline when they fit,
+   * one per indented line otherwise. Shared by the `do { … }` block expression
+   * and the branches of the `if` block form. */
+  function serializeBraceBlock(block: MathJsonExpression): FormattingBlock {
+    if (nops(block) === 0) return fmt.text('{}');
+    return fmt.fencedList(
+      '{',
+      fmt.separator(';'),
+      '}',
+      mapArgs<FormattingBlock>(block, serializeExpression)
+    );
+  }
+
+  /** Serialize an operand of the conditional form, parenthesizing it when it
+   * binds too loosely to re-parse as itself. The consequent and the condition
+   * are parsed ABOVE the conditional's own precedence, so a nested conditional
+   * (or an `=`) needs parentheses there; the alternative is parsed AT it
+   * (right-nesting), so a nested conditional needs none. */
+  function serializeConditionalOperand(
+    arg: MathJsonExpression | null,
+    minPrecedence: number
+  ): FormattingBlock {
+    const argOp = OPERATORS[operator(arg)];
+    if (argOp && argOp.precedence < minPrecedence)
+      return fmt.line('(', serializeExpression(arg), ')');
+    return serializeExpression(arg);
+  }
+
+  const isBlock = (x: MathJsonExpression | null): boolean =>
+    x !== null && operator(x) === 'Block';
+
+  /** The block form — `if c { … }`, `if c { … } else { … }`, and the
+   * `else if` chain — or `null` when the node is not that shape (a branch that
+   * is not a `Block`, or an arity outside 2…3). */
+  function serializeIfBlockForm(
+    expr: MathJsonExpression
+  ): FormattingBlock | null {
+    const count = nops(expr);
+    if (count !== 2 && count !== 3) return null;
+    const cond = operand(expr, 1);
+    const consequent = operand(expr, 2);
+    const alternative = count === 3 ? operand(expr, 3) : null;
+    if (cond === null || !isBlock(consequent)) return null;
+
+    const head = fmt.line(
+      'if ',
+      serializeConditionalOperand(cond, CONDITIONAL_PRECEDENCE + 1),
+      ' ',
+      serializeBraceBlock(consequent!)
+    );
+    if (alternative === null) return head;
+
+    if (isBlock(alternative))
+      return fmt.line(head, ' else ', serializeBraceBlock(alternative));
+
+    // `else if …`: only a block-form `If` can chain. Anything else in `else`
+    // position has no block spelling, so the whole node falls back to the
+    // generic call form rather than emitting a half-block hybrid.
+    const chained =
+      operator(alternative) === 'If' ? serializeIfBlockForm(alternative) : null;
+    if (chained === null) return null;
+    return fmt.line(head, ' else ', chained);
+  }
+
+  /** `If` in either of its two Cortex spellings, or `null` for the shapes that
+   * have neither (the caller then emits the generic call form). */
+  function serializeIf(expr: MathJsonExpression): FormattingBlock | null {
+    const blockForm = serializeIfBlockForm(expr);
+    if (blockForm !== null) return blockForm;
+
+    // The conditional form. Both branches must be present (the `else` is
+    // mandatory) and neither may be a `Block` — a `Block` branch belongs to the
+    // block form, and a mixed node has no single spelling.
+    if (nops(expr) !== 3) return null;
+    const cond = operand(expr, 1);
+    const consequent = operand(expr, 2);
+    const alternative = operand(expr, 3);
+    if (cond === null || consequent === null || alternative === null)
+      return null;
+    if (isBlock(consequent) || isBlock(alternative)) return null;
+
+    return fmt.line(
+      serializeConditionalOperand(consequent, CONDITIONAL_PRECEDENCE + 1),
+      ' if ',
+      serializeConditionalOperand(cond, CONDITIONAL_PRECEDENCE + 1),
+      ' else ',
+      serializeConditionalOperand(alternative, CONDITIONAL_PRECEDENCE)
     );
   }
 

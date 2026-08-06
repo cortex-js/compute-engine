@@ -301,6 +301,131 @@ describe('CORTEX CONTROL FLOW', () => {
   });
 });
 
+//
+// The conditional expression `a if c else b` — the same `If` the block form
+// builds, but with plain expression branches (no `Block`, so no scope). It
+// binds looser than every ordinary operator and tighter than `=` and `|->`.
+//
+describe('CORTEX CONDITIONAL EXPRESSION', () => {
+  test('lowers to If(cond, consequent, alternative) — no Block branches', () => {
+    expect(validCortex('1 if c else 2')).toStrictEqual(['If', 'c', 1, 2]);
+  });
+
+  test('binds looser than the ordinary operators', () => {
+    expect(validCortex('a + b if c else d')).toStrictEqual([
+      'If',
+      'c',
+      ['Add', 'a', 'b'],
+      'd',
+    ]);
+    expect(validCortex('1 if x > 0 else 2')).toStrictEqual([
+      'If',
+      ['Greater', 'x', 0],
+      1,
+      2,
+    ]);
+  });
+
+  test('binds tighter than `=`: the whole conditional is the RHS', () => {
+    expect(validCortex('x = 1 if c else 2')).toStrictEqual([
+      'Assign',
+      'x',
+      ['If', 'c', 1, 2],
+    ]);
+  });
+
+  test('binds tighter than `|->`: the whole conditional is the body', () => {
+    expect(validCortex('x |-> x + 1 if c else 2')).toStrictEqual([
+      'Function',
+      ['If', 'c', ['Add', 'x', 1], 2],
+      'x',
+    ]);
+  });
+
+  test('binds tighter than `|>`: the whole conditional is the piped value', () => {
+    expect(validCortex('xs |> f if c else g')).toStrictEqual([
+      'Pipe',
+      'xs',
+      ['If', 'c', 'f', 'g'],
+    ]);
+  });
+
+  // The load-bearing case for the conditional's precedence. Below
+  // `KeyValuePair` the conditional swallows the pair, and the entry stops
+  // being a `KeyValuePair` — so the dictionary reader skips it and the entry
+  // is silently DROPPED, not merely misparsed.
+  test('binds tighter than `->`: a dictionary value can be conditional', () => {
+    expect(validCortex('{ "k" -> 1 if c else 2 }')).toStrictEqual([
+      'Dictionary',
+      ['KeyValuePair', { str: 'k' }, ['If', 'c', 1, 2]],
+    ]);
+    expect(validCortex('{ "a" -> 1, "b" -> 2 if c else 3 }')).toStrictEqual([
+      'Dictionary',
+      ['KeyValuePair', { str: 'a' }, 1],
+      ['KeyValuePair', { str: 'b' }, ['If', 'c', 2, 3]],
+    ]);
+  });
+
+  test('binds looser than `||` (as in Python)', () => {
+    expect(validCortex('a || b if c else d')).toStrictEqual([
+      'If',
+      'c',
+      ['Or', 'a', 'b'],
+      'd',
+    ]);
+  });
+
+  test('chains right-nested (no `else if` spelling needed)', () => {
+    expect(validCortex('1 if c else 2 if d else 3')).toStrictEqual([
+      'If',
+      'c',
+      1,
+      ['If', 'd', 2, 3],
+    ]);
+  });
+
+  test('usable as an argument and a list element', () => {
+    expect(validCortex('f(1 if c else 2, 3)')).toStrictEqual([
+      'f',
+      ['If', 'c', 1, 2],
+      3,
+    ]);
+    expect(validCortex('[1 if c else 2]')).toStrictEqual([
+      'List',
+      ['If', 'c', 1, 2],
+    ]);
+  });
+
+  test('the `else` is mandatory', () => {
+    const [, diags] = parseCortex('1 if c');
+    expect(diags.length).toBeGreaterThan(0);
+    expect(diags[0].message[0]).toBe('conditional-else-expected');
+  });
+
+  // The guard rail that keeps the conditional from swallowing the next
+  // statement: a linebreak is a statement separator, so an `if` that starts a
+  // line is a new `if`-statement, never a conditional tail.
+  test('an `if` on the next line is a statement, not a conditional tail', () => {
+    expect(validCortex('let y = 3\nif c { 1 } else { 2 }')).toStrictEqual([
+      'Block',
+      ['Declare', 'y', ['Dictionary', ['KeyValuePair', 'value', 3]]],
+      ['If', 'c', ['Block', 1], ['Block', 2]],
+    ]);
+  });
+
+  // A case-leading `if` introduces a match guard. Patterns use their own
+  // grammar (`parsePatternInfix`), which has no conditional rule, so the guard
+  // is never mistaken for a conditional tail on the pattern.
+  test('does not capture a match-case guard', () => {
+    expect(validCortex('match x { n if n > 0 => a\n _ => b }')).toStrictEqual([
+      'Match',
+      'x',
+      ['MatchCase', '_n', ['Greater', 'n', 0], 'a'],
+      ['MatchCase', '_', 'b'],
+    ]);
+  });
+});
+
 describe('CORTEX BLOCKS', () => {
   test('empty block', () => {
     expect(validCortex('if a { }')).toStrictEqual(['If', 'a', ['Block']]);

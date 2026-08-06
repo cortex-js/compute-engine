@@ -2,6 +2,7 @@
   "en-us": {
     "binary-number-expected": "A binary number was expected",
     "closing-bracket-expected": "A \"%0\" was expected",
+    "conditional-else-expected": "An \"else\" was expected: a conditional expression is \"a if condition else b\"",
     "decimal-number-expected": "A decimal number was expected",
     "eof-expected": "Nothing more was expected, got \"%0\"",
     "empty-verbatim-symbol": "A symbol name was expected",

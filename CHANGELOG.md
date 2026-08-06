@@ -40,7 +40,44 @@
   `\R_{\ge 0}`, `\R_{\gt0}`, `\N_{\ge1}` and their siblings — which
   previously required the spelled-out `\geq`/`\geqslant` forms.
 
+- **Cortex: the conditional expression `a if c else b`.** When both branches
+  are single expressions, the braces of the block form are noise, and the
+  conditional spells the same `["If", c, a, b]` without them:
+  `let y = 10 if x > 3 else 20`. It is the same operator the block form builds
+  — only the branches differ, plain expressions instead of `Block`s, so the
+  conditional introduces no scope and no statement can appear in a branch. The
+  `else` is **mandatory** (it is what ends the condition; a missing branch would
+  leave the false case with no value to name), and `1 if c` reports the new
+  `conditional-else-expected` diagnostic — use the block form `if c { 1 }`
+  when there is nothing to return. Chains nest to the right
+  (`"zero" if n == 0 else "negative" if n < 0 else "positive"`), so there is no
+  `else if` spelling to learn. The conditional binds looser than every operator
+  that computes — as in Python, looser than `||` — but tighter than the four
+  that bind or pair, `=`, `|->`, `|>` and `->`, so the whole conditional is the
+  right-hand side of an assignment, the body of a function, the piped value, or
+  the value of a dictionary entry. Used as an operand it needs parentheses:
+  `1 if c else 2 + 3` reads as `1 if c else (2 + 3)`. One layout rule: the `if`
+  must be on the **same line** as the value before it — a line break separates
+  statements, so an `if` that starts a line always begins a new `if`-statement.
+  The block form is unchanged, and a match-case guard (`n if n > 0 => …`) is
+  unaffected: patterns have their own grammar, which has no conditional.
+
 ### Improvements
+
+- **Cortex: `If` now serializes as `if`, not as a function call.** The
+  `if`-expression syntax has always *parsed*, but the serializer had no rule to
+  emit it, so a program written `if c { 1 } else { 2 }` came back from the
+  formatter as `If(c, do {1}, do {2})`. It now round-trips to the form it was
+  written in. The spelling is chosen by the shape of the branches, which is
+  exactly what the parser distinguishes: `Block` branches give the block form
+  (chaining to `else if` when the alternative is itself a block-form `If`),
+  plain expression branches give the conditional form `a if c else b`. A shape
+  with neither spelling — mixed branches, or an `If` with no `else` and a
+  non-`Block` consequent — keeps the generic `If(c, …)` call form, which
+  also re-parses faithfully. An `If` in operand position is parenthesized according
+  to the conditional's precedence, so `Add(If(c, 1, 2), 3)` serializes
+  `(1 if c else 2) + 3` rather than the differently-parsing
+  `1 if c else 2 + 3`.
 
 - **`simplify()` no longer lets large expressions grow without bound.** The
   cost gate that decides whether to keep a rewrite tolerated growth of up to

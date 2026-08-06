@@ -238,6 +238,69 @@ if x > 0 { 1 } else if x < 0 { 2 } else { 3 }
 A `{ }` block's value is its last expression — the same `Block` semantics
 as a multi-statement program (see [Blocks](#blocks) below).
 
+### The conditional expression `a if c else b`
+
+When both branches are single expressions, the braces are noise. The
+conditional form spells the same `If` without them:
+
+```cortex
+let x = 5
+10 if x > 3 else 20
+// ➔ 10
+```
+
+```json
+["If", ["Greater", "x", 3], 10, 20]
+```
+
+It is the *same* `If` — only the branches differ: plain expressions instead of
+`Block`s, so the conditional introduces no scope and no statement can appear in
+a branch.
+
+Three rules follow from where it sits in the grammar:
+
+**The `else` is required.** It is what ends the condition, and a missing branch
+would leave the false case with no value to name. `1 if c` is an error; use the
+block form (`if c { 1 }`) when there is nothing to return.
+
+**It binds looser than every operator that computes, but tighter than the four
+that bind or pair — `=`, `|->`, `|>` and `->`.** So the whole conditional is the
+right-hand side of an assignment, the body of a function, or the value of a
+dictionary entry, and no parentheses are needed around a comparison:
+
+```cortex
+let scale = 2
+let tag = n |-> "big" if n * scale > 10 else "small"
+tag(6)
+// ➔ "big"
+```
+
+```cortex
+let n = 7
+{ "value" -> n, "parity" -> "odd" if n % 2 == 1 else "even" }
+// ➔ {"value" -> 7, "parity" -> "odd"}
+```
+
+Going the other way — a conditional used as an operand — does need
+parentheses, since `1 if c else 2 + 3` reads as `1 if c else (2 + 3)`:
+
+```cortex
+(10 if 3 > 0 else 20) + 5
+// ➔ 15
+```
+
+**Chains nest to the right,** so there is no `else if` spelling to learn:
+
+```cortex
+let n = 0
+"zero" if n == 0 else "negative" if n < 0 else "positive"
+// ➔ "zero"
+```
+
+One layout rule: the `if` must be on the **same line** as the value before it.
+A line break separates statements, so an `if` that starts a line always begins
+a new `if`-statement, never a continuation of the line above.
+
 ## `match`
 
 `match` is an **expression** that inspects the structure of a subject against

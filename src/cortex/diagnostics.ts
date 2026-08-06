@@ -39,6 +39,7 @@ export type DiagnosticCode =
   | 'zero-index' // literal index 0 — indexing is 1-based
   | 'floor-division-comment' // `//` after code on the same line looks like floor division; it starts a comment
   | 'latex-parsing-unavailable' // no LaTeX parser was injected for a `$…$` island
+  | 'conditional-else-expected' // a conditional expression (`a if c else b`) is missing its `else` branch
   | 'match-case-arrow-expected' // a `match` case is missing its `=>` arrow
   | 'match-alternative-binding' // a named binding appears inside an or-alternative
   | 'match-multiple-rest' // more than one `...rest` in a single list/tuple pattern

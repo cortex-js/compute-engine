@@ -27,6 +27,7 @@ import {
 } from './diagnostics.js';
 import { tokenize } from './lexer.js';
 import {
+  CONDITIONAL_PRECEDENCE,
   OperatorDef,
   infixOperatorForSymbol,
   postfixOperatorForSymbol,
@@ -2889,6 +2890,27 @@ export class Parser {
         continue;
       }
 
+      // Conditional expression: `a if cond else b` → `["If", cond, a, b]`.
+      // A word-spelled TERNARY, so it is recognized here rather than through
+      // the shared operator table (`peekInfix` never claims `if`).
+      //
+      // The `if` must be on the SAME LINE as `a`: a linebreak is a statement
+      // separator (see "Statement sequencing" above), so an `if` that starts a
+      // line is a new `if`-statement, never a conditional tail. Without this
+      // guard, `let y = 3` followed by `if c { … }` on the next line would
+      // glue into `3 if c …` and then fail on the `{`.
+      if (
+        CONDITIONAL_PRECEDENCE >= minPrecedence &&
+        this.check('SYMBOL') &&
+        this.current.text === 'if' &&
+        !this.current.precededByLinebreak
+      ) {
+        const conditional = this.parseConditionalTail(left);
+        if (conditional === null) break;
+        left = conditional;
+        continue;
+      }
+
       const op = this.peekInfix();
       if (op === null) {
         // Invisible multiplication: a number literal immediately followed (no
@@ -2934,6 +2956,53 @@ export class Parser {
     }
 
     return left;
+  }
+
+  /**
+   * The tail of a conditional expression — `if cond else alternative`, with
+   * the already-parsed `consequent` to its left and the `if` current —
+   * yielding `["If", cond, consequent, alternative]`.
+   *
+   * Unlike the block form (`parseIf`), both branches are plain **expressions**,
+   * never `Block`s, so the conditional introduces no scope and no statement can
+   * appear in a branch (they never reach `parseStatement`). The `else` is
+   * MANDATORY: it is what terminates the condition, and a missing branch would
+   * leave the false case with no spelling. No `else if` spelling is needed —
+   * the alternative is parsed at the conditional's own precedence, so
+   * `a if c else b if d else e` right-nests on its own.
+   */
+  private parseConditionalTail(
+    consequent: MathJsonExpression
+  ): MathJsonExpression | null {
+    const kw = this.advance(); // 'if'
+
+    const cond = this.parseExpression(CONDITIONAL_PRECEDENCE + 1);
+    if (cond === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+
+    if (!(this.check('SYMBOL') && this.current.text === 'else')) {
+      this.error(
+        ['conditional-else-expected'],
+        this.current.start,
+        this.current.end
+      );
+      return null;
+    }
+    this.advance(); // 'else'
+
+    const alternative = this.parseExpression(CONDITIONAL_PRECEDENCE);
+    if (alternative === null) {
+      this.error(['expression-expected'], this.current.start, this.current.end);
+      return null;
+    }
+
+    return this.wrap(
+      ['If', cond, consequent, alternative] as MathJsonExpression[],
+      this.localStart(consequent) ?? kw.start,
+      this.localEnd(alternative) ?? this.previousEnd()
+    );
   }
 
   /** A prefix-operator run followed by its operand, or a primary. */

@@ -148,6 +148,20 @@ describe('CORTEX EXECUTE — programs', () => {
     expect(value.re).toBe(1);
   });
 
+  test('a conditional expression', () => {
+    const { value, diagnostics } = run('let x = 5\n10 if x > 3 else 20');
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(10);
+  });
+
+  test('a conditional expression as a lambda body', () => {
+    const { value, diagnostics } = run(
+      'let sign = x |-> 1 if x > 0 else -1\nsign(-4)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(-1);
+  });
+
   test('the `..` range operator drives a Sum', () => {
     const { value, diagnostics } = run('Sum(k, k in 1..5)');
     expect(diagnostics).toEqual([]);
