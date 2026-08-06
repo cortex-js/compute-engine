@@ -35,6 +35,9 @@ type InternalSimplifyOptions = SimplifyOptions & {
   /** Set on the inner call of the trial expansion (see the end of
    * `simplify()`) so the trial cannot nest. */
   noExpansionTrial?: boolean;
+  /** Set on the inner call of the binder-body pass (see the end of
+   * `simplify()`) so that pass cannot nest. */
+  noBinderBodyPass?: boolean;
 };
 
 const BASIC_ARITHMETIC = [
@@ -393,7 +396,39 @@ export function simplify(
   } while (!steps.slice(0, -1).some((x) => sameSyntactic(x.value, expr)));
 
   //
-  // 4/ Cost-guarded trial expansion
+  // 4/ Binder-body pass
+  //
+  // A `scoped` operator (Sum, Product, D, Integrate) withholds its BODY from
+  // `simplifyOperands`, so the rule scan always sees the body's original
+  // shape. That is load-bearing: the closed-form rules match on shape, and
+  // simplifying first rewrites it out from under them (`Σ k(k+1)` becomes
+  // `Σ (k²+k)` and the sum-of-products rule misses; the telescoping
+  // `∏ (k+1)/k` becomes `∏ (1/k + 1)`).
+  //
+  // At the fixpoint those rules have had every chance and none fired, so there
+  // is no longer a shape to protect. Simplify the body once here and re-run
+  // the driver. Doing it here rather than inside `simplifyExpression` is what
+  // keeps it affordable: that function is re-entered by the loop above, so a
+  // per-iteration body pass re-simplified every body on every pass — measured
+  // at 3-4x on the general corpus and 11-13x on binder-heavy input.
+  //
+  // Like the expansion trial below, it runs once, after the loop, with the
+  // pass disabled on the inner call so it cannot nest.
+  //
+  if (!options.noBinderBodyPass && isFunction(expr)) {
+    const withBody = simplifyBinderBodies(expr, options);
+    if (withBody !== undefined && !sameSyntactic(withBody, expr)) {
+      const settled = simplify(withBody, {
+        ...options,
+        noBinderBodyPass: true,
+      }).at(-1)!.value;
+      steps = [...steps, { value: settled, because: 'simplified body' }];
+      expr = settled;
+    }
+  }
+
+  //
+  // 5/ Cost-guarded trial expansion
   //
   // Rules tagged `purpose: 'expand'` are excluded from the scan above because
   // expansion usually grows an expression. That left `simplify()` unable to
@@ -547,6 +582,111 @@ function simplifyOperandCapture(
       build
     );
   return chain.at(-1)!.value;
+}
+
+/**
+ * The scoped operators whose operand 0 IS the withheld body. `scoped` alone is
+ * too coarse to use here: it is also true for the quantifiers (`ForAll`,
+ * `Exists`, …), whose operand 0 is the bound-variable/condition and whose body
+ * is operand 1, and for `Block`, whose operands are a statement SEQUENCE whose
+ * value is the LAST one. Simplifying operand 0 of either would be aiming at
+ * the wrong thing. These four are exactly the heads the withholding in
+ * `simplifyOperands` exists to protect.
+ */
+const BINDER_BODY_AT_OP0 = ['Sum', 'Product', 'D', 'Integrate'];
+
+/**
+ * True when `expr`'s operand 0 is the withheld body this pass should simplify.
+ *
+ * `Block` earns a conditional yes: a lambda's body lowers to a single-statement
+ * `Block`, so reaching it is the whole point for `Integrate` — but a
+ * MULTI-statement `Block` is a sequence whose later statements observe the
+ * side effects of earlier ones and whose value is the LAST operand, so operand
+ * 0 is not "the body" there and it is left alone.
+ */
+function hasBodyAtOperand0(expr: Expression): boolean {
+  if (BINDER_BODY_AT_OP0.includes(expr.operator)) return true;
+  return expr.operator === 'Block' && isFunction(expr) && expr.ops.length === 1;
+}
+
+/**
+ * Simplify the bodies that the operators in `BINDER_BODY_AT_OP0` withhold from
+ * the operand pass, anywhere in `expr`. Returns `undefined` when nothing
+ * changed.
+ *
+ * A body arrives in one of two shapes: `Sum`/`Product`/`D` hold the raw
+ * expression (`n + n`), while `Integrate` holds a function literal
+ * (`(x) |-> x + x`). A literal cannot just be handed to `simplify()` — the
+ * `Function` head is lazy and holds its own body in turn — so rebuild it around
+ * the simplified inner body, reusing the SAME parameter operands and carrying
+ * the original `localScope` across so the binding survives.
+ */
+function simplifyBinderBodies(
+  expr: Expression,
+  options: Partial<InternalSimplifyOptions>
+): Expression | undefined {
+  if (!isFunction(expr)) return undefined;
+
+  // Ellipsis fold barrier: a function with a direct `ContinuationPlaceholder`
+  // operand is a notational object, left untouched by `simplifyExpression`.
+  // Repeat that guard here so this pass cannot reach inside one after the main
+  // loop has declined it.
+  if (expr.ops.some((x) => isContinuationOperand(x))) return undefined;
+
+  const ce = expr.engine;
+
+  const simplifyBody = (body: Expression): Expression | undefined => {
+    if (isFunction(body, 'Function')) {
+      const inner = body.ops[0];
+      if (inner === undefined) return undefined;
+      // Do NOT set `noBinderBodyPass` here. A body is a proper subexpression,
+      // so descending terminates by structural induction, and the flag would
+      // defeat the pass exactly where it is needed: a lambda's body is a
+      // `Block`, which is ITSELF a withheld-body operator, so disabling the
+      // pass one level down left `∫(x+x)dx` untouched.
+      const r = simplify(inner, options).at(-1)!.value;
+      if (sameSyntactic(r, inner)) return undefined;
+      return ce._fn('Function', [r, ...body.ops.slice(1)], {
+        scope: body.localScope,
+      });
+    }
+    const r = simplify(body, options).at(-1)!.value;
+    return sameSyntactic(r, body) ? undefined : r;
+  };
+
+  const isBodyHead = hasBodyAtOperand0(expr);
+
+  let changed = false;
+  const ops = expr.ops.map((op, i) => {
+    if (i === 0 && isBodyHead) {
+      const b = simplifyBody(op);
+      if (b !== undefined) {
+        changed = true;
+        return b;
+      }
+      return op;
+    }
+    // Recurse elsewhere so a binder nested inside another expression is
+    // reached too.
+    const nested = simplifyBinderBodies(op, options);
+    if (nested !== undefined) {
+      changed = true;
+      return nested;
+    }
+    return op;
+  });
+
+  if (!changed) return undefined;
+
+  // Rebuild carrying the original scope. `_fn` for a binder head — its
+  // `canonical` handler would re-wrap the function literal (the reason
+  // `simplifyOperands` avoids it there) — but the CANONICALIZING constructor
+  // for any other ancestor on the path, since replacing an operand of an
+  // `Add`/`Multiply`/`List` can change its canonical form (folding, ordering)
+  // and `_fn` would return it flagged canonical without re-folding.
+  return isBodyHead
+    ? ce._fn(expr.operator, ops, { scope: expr.localScope })
+    : ce.function(expr.operator, ops, { scope: expr.localScope } as any);
 }
 
 function simplifyOperands(

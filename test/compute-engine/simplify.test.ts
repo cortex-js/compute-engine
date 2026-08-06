@@ -1140,6 +1140,50 @@ describe('NEGATIVE BASE POWER RULES', () => {
     ));
 });
 
+// `simplify()` withholds a `scoped` operator's BODY from the operand pass so
+// the closed-form rules can match on its original shape. At the fixpoint those
+// rules have had their chance, so the body is simplified once and the driver
+// re-run — which is what lets these reduce while the shape-matched closed
+// forms below keep working. Doing it per-iteration instead measured 3-4x on
+// the general corpus and 11-13x on binder-heavy input, so it belongs at the
+// fixpoint (mirroring the trial expansion).
+describe('binder bodies are simplified at the fixpoint', () => {
+  test('integrand: sin^2+cos^2 collapses', () =>
+    expect(ce.parse('\\int (\\sin^2 x + \\cos^2 x) dx').simplify().toString()).toBe(
+      'int(1 dx)'
+    ));
+
+  test('integrand: x+x folds (the body is a Block inside a lambda)', () =>
+    expect(ce.parse('\\int (x+x) dx').simplify().toString()).toBe('int(2x dx)'));
+
+  test('integrand: a rational cancels', () =>
+    expect(
+      ce.parse('\\int \\frac{x^2-1}{x-1} dx').simplify().toString()
+    ).toBe('int(x + 1 dx)'));
+
+  test('Sum body reduces, then the closed form applies', () =>
+    expect(ce.parse('\\sum_{n=1}^{b}(n+n)').simplify().toString()).toBe(
+      'b^2 + b'
+    ));
+
+  test('D body reduces', () =>
+    expect(
+      ce.parse('\\frac{d}{dx}(\\sin^2 x + \\cos^2 x)').simplify().toString()
+    ).toBe('D(1, x)'));
+
+  // The two closed forms the withholding exists to protect: simplifying the
+  // body FIRST rewrites the shape out from under their pattern.
+  test('protected: Sum k(k+1) still reaches its closed form', () =>
+    expect(ce.parse('\\sum_{k=1}^{b}(k(k+1))').simplify().toString()).toBe(
+      '1/3 * b^3 + b^2 + 2/3 * b'
+    ));
+
+  test('protected: telescoping Product (k+1)/k still reaches b+1', () =>
+    expect(
+      ce.parse('\\prod_{k=1}^{b}\\frac{k+1}{k}').simplify().toString()
+    ).toBe('b + 1'));
+});
+
 // The `|·|`-extraction family (`√(x²) → |x|`, `√(x²y) → |x|√y`, …) and power
 // distribution used to be forced through the cost gate by surcharges baked
 // into the `Sqrt` and `Power` costs. Those surcharges were removed in favour of
