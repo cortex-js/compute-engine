@@ -79,24 +79,48 @@
   `(1 if c else 2) + 3` rather than the differently-parsing
   `1 if c else 2 + 3`.
 
-- **`simplify()` no longer lets large expressions grow without bound.** The
-  cost gate that decides whether to keep a rewrite tolerated growth of up to
-  30% — a proportion, so the bigger the expression, the more growth it
-  allowed. It now tolerates the smaller of 30% **or 10 cost units**. Small
-  rewrites that depend on the slack are unaffected (`2·2^x → 2^(x+1)` still
-  fires); what changes is that `simplify()` no longer walks a large expression
-  steadily uphill, and no longer breaks a closed form apart into a longer
-  equivalent — `\frac{-b+\sqrt{b^2-4ac}}{2a}` used to come back as
-  `-b/(2a) + \sqrt{b^2-4ac}/(2a)`. A rule that should apply regardless of cost
-  should be tagged `purpose: 'transform'`, which bypasses the gate entirely.
+- **`simplify()` no longer returns a result more complicated than its input.**
+  The cost gate that decides whether to keep a rewrite used to tolerate growth
+  of up to 30% — a proportion, so the bigger the expression, the more growth it
+  allowed. It is now **strict**: a rewrite is kept only if it does not increase
+  the cost.
 
-  Relatedly, the power-combination rewrites `x^n·x^m → x^{n+m}`, `x·x^n →
-  x^{n+1}` and `x^n·x → x^{n+1}` are now tagged `purpose: 'transform'`, which
-  their equivalent for three or more factors already was. Previously the same
-  rewrite obeyed two different cost policies depending on which implementation
-  caught it. No change under the default cost function, where these are within
-  budget anyway; it matters for a caller-supplied `costFunction` that ranks
-  `Power` expensive.
+  Two things were wrong with the tolerance. It let large expressions run away:
+  instrumenting the gate across the test suite caught a single rewrite adding
+  1,693 cost units, and a chain walking one expression from cost 7,098 to
+  10,133 — every step recorded as a "simplification". And 90% of what the
+  tolerance actually bought was the generic expansion rule, which was making
+  results **worse** by blowing factored closed forms apart.
+
+  Removing it restores them. `\sum_{n=0}^{b}(a + dn)` now returns the textbook
+  `(b+1)(a + bd/2)` instead of a four-term polynomial; `\int\sqrt{1-x^2}dx`
+  returns `\frac12(x\sqrt{1-x^2} + \arcsin x)`; `\int e^x\sin x\,dx` returns
+  `\frac12(\sin x - \cos x)e^x`; solving `x^2 - 2x\cos t + 1 = 0` for `t`
+  returns `\arccos\frac{x^2+1}{2x}`, which now agrees with the validity
+  condition reported beside it; and `\frac{-b+\sqrt{b^2-4ac}}{2a}` stays in
+  closed form instead of splitting into `-b/(2a) + \sqrt{b^2-4ac}/(2a)`.
+
+  A rule that should apply regardless of cost is tagged `purpose: 'transform'`,
+  which bypasses the gate entirely — that, not a numeric tolerance, is the
+  supported way to express "preferred even though larger".
+
+  Making that work meant tagging the rewrites that had been surviving on the
+  tolerance. Nine families now declare `purpose: 'transform'` explicitly: the
+  power combinations `x^n·x^m → x^{n+m}`, `x·x^n → x^{n+1}` and
+  `x^n·x → x^{n+1}` (whose equivalent for three or more factors already
+  carried the tag, so the same rewrite had been obeying two different cost
+  policies depending on which implementation caught it); collapsing nested
+  radicals (`√√12 → ⁴√12`); removing a logarithm from under an exponential
+  (`e^{\ln x + y} → x·e^y` and its `\log_c` sibling); `\log_c(x^n) →
+  n·\log_c(x)`; the geometric-series and shifted/falling-factorial closed
+  forms for `Sum` and `Product`; the `\sin/\cos(π ± x)` argument reductions;
+  rationalizing a radical denominator; and `\sqrt{x^{2n+1}} → |x|^n\sqrt{x}`
+  (a branch-cut correctness rewrite, not a size optimization). Several were
+  untagged only because the original string-matching exemption list never
+  named them. Tagging them also makes them robust to a caller-supplied
+  `costFunction`. Distributing a negation over a sum (`-(x+1)` → `-1-x`) is
+  tagged for the same reason — it trades one negation for one per term, so it
+  always scores worse, but it is the form the rest of the engine works in.
 
 - **`ComputeEngine`, `expr.engine` and `ExpressionComputeEngine` are now one
   interchangeable type — no more casts between them.** The `ComputeEngine`

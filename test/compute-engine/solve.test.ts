@@ -759,8 +759,8 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
     // t = ±arccos((x² + 1)/(2x)), guarded by the |ratio| ≤ 1 validity
     // condition (conditional-values design, Phase 2).
     expect(result).toEqual([
-      'arccos(1/2 * x + 1 / (2x)) {|(x^2 + 1) / (2x)| <= 1}',
-      '-arccos(1/2 * x + 1 / (2x)) {|(x^2 + 1) / (2x)| <= 1}',
+      'arccos((x^2 + 1) / (2x)) {|(x^2 + 1) / (2x)| <= 1}',
+      '-arccos((x^2 + 1) / (2x)) {|(x^2 + 1) / (2x)| <= 1}',
     ]);
   });
 });

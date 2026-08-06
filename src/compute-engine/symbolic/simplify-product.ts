@@ -104,7 +104,9 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
         ce.function('Factorial', [ce.function('Add', [b, c])]),
         ce.function('Factorial', [c]),
       ]);
-      return { value: result, because: 'shifted factorial' };
+      // Cost-gate exempt: resolving a Product into a closed form is
+      // preferred whatever the two sides score.
+      return { value: result, because: 'shifted factorial', purpose: 'transform' };
     }
   }
 
@@ -291,7 +293,8 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
         ce.function('Factorial', [base]),
         ce.function('Factorial', [base.sub(n)]),
       ]);
-      return { value: result, because: 'falling factorial' };
+      // Cost-gate exempt: see the note on 'shifted factorial' above.
+      return { value: result, because: 'falling factorial', purpose: 'transform' };
     }
   }
 

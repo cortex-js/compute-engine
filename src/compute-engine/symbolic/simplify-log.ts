@@ -26,16 +26,41 @@ import { toBigint } from '../boxed-expression/numerics.js';
  * expensive" check because they are mathematically preferred even when
  * structurally larger. That exemption used to be a fragile string match on the
  * `because` label in the cost gate; it now travels with the step as a
- * `purpose: 'transform'` tag. The set of exempted steps is preserved exactly:
- * the same `ln(...)` / `log_...` label prefixes that the cost gate matched. The
- * `combine ln/log terms`, `e^...`, `c^...` and `log base 0 or 1` steps were not
- * exempt before and are not tagged now.
+ * `purpose: 'transform'` tag.
+ *
+ * The exempted set is the `ln(...)` / `log_...` label prefixes the cost gate
+ * originally matched, plus the two `e^(… + y)` sums named in
+ * `EXP_OF_LOG_SUM_LABELS`. Those two had been left out only because the
+ * original whitelist did not name them: they were passing on the gate's growth
+ * tolerance instead (`e^(x + ln x)` scores 14, `x·e^x` scores 18). Splitting a
+ * logarithm out from under an exponential is a preferred rewrite whatever it
+ * scores, so it is now tagged outright.
+ *
+ * They are matched by exact label, NOT by an `e^(ln(` prefix: sibling rules in
+ * this file label themselves `e^(ln(x) * y) -> x^y` and
+ * `e^(ln(x) / y) -> x^(1/y)`, which such a prefix would silently exempt too.
+ * Neither needs the exemption (both reduce cost on their own), and a
+ * `transform` tag is an unconditional gate bypass, so it should never be
+ * handed out by accident.
+ *
+ * The `combine ln/log terms`, `c^...` and `log base 0 or 1` steps remain
+ * untagged.
  */
+const EXP_OF_LOG_SUM_LABELS = new Set([
+  'e^(ln(x) + y) -> x * e^y',
+  'e^(log_c(x) + y) -> x^{1/ln(c)} * e^y',
+]);
+
 export function simplifyLog(x: Expression): RuleStep | undefined {
   const r = simplifyLogCore(x);
   if (r === undefined) return r;
   const b = r.because;
-  if (b === 'ln' || b?.startsWith('ln(') || b?.startsWith('log_'))
+  if (
+    b === 'ln' ||
+    b?.startsWith('ln(') ||
+    b?.startsWith('log_') ||
+    (b !== undefined && EXP_OF_LOG_SUM_LABELS.has(b))
+  )
     return { ...r, purpose: 'transform' };
   return r;
 }

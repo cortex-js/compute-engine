@@ -4,18 +4,17 @@ import { ComputeEngine, Expression, Rule } from '../../src/compute-engine';
  * Tests for rule purpose tags (`RulePurpose`) and the simplification
  * cost policy (M3 of the rule-mechanics plan):
  *
- * - `'simplify'` (default): results must pass the cost gate — a result may
- *   grow the expression by at most `min(30%, 10 cost units)`; beyond that it
- *   is discarded.
+ * - `'simplify'` (default): results must pass the cost gate — a result that
+ *   makes the expression more expensive is discarded. The gate is strict; it
+ *   grants no growth allowance.
  * - `'transform'`: mathematically-preferred rewrites, exempt from the
  *   cost gate.
  * - `'expand'`: growth-by-design, skipped by `simplify()` but reachable
  *   via `expr.replace()`.
  */
 
-// A rule that grows the expression beyond the cost-gate budget:
-// tan(x) costs 11, sin(x)/cos(x) costs 30 (over both the 30% ratio and the
-// 10-unit absolute ceiling).
+// A rule whose result is more expensive than its input, so the cost gate
+// rejects it: tan(x) costs 11, sin(x)/cos(x) costs 30.
 const GROWTH_RULE: Rule = {
   match: ['Tan', '_x'],
   replace: ['Divide', ['Sin', '_x'], ['Cos', '_x']],
@@ -54,38 +53,44 @@ describe('rule purpose: cost gate (default/simplify)', () => {
   });
 });
 
-describe('cost gate: the growth budget is capped in absolute terms', () => {
-  // The gate tolerates growth of `min(30% of cost, 10 cost units)`. The
-  // absolute ceiling matters because a bare ratio grants ever more slack as
-  // the expression gets bigger — the regime where runaway growth actually
-  // hurts.
+describe('cost gate: no rewrite may make the expression more expensive', () => {
+  // The gate grants no growth allowance. A rewrite that is preferred despite
+  // scoring larger declares itself with `purpose: 'transform'` rather than
+  // relying on a numeric tolerance.
 
-  it('a small expression still gets its 30% of slack (2·2^x → 2^(x+1))', () => {
+  it('a preferred rewrite that scores larger still fires, via its tag', () => {
     const ce = new ComputeEngine();
-    // cost 4 → 5: over-budget by ratio alone would reject it, the 30% (+1.2)
-    // allowance is what lets this land.
+    // 2·2^x is cost 4, 2^(x+1) is cost 5. This survives only because the
+    // power-combination rules carry `purpose: 'transform'` — under a bare
+    // strict gate with no tag it would be discarded.
     expect(ce.parse('2\\cdot2^x').simplify().toString()).toBe('2^(x + 1)');
   });
 
-  it('a large expression does not get proportionally more slack', () => {
+  it('a closed form is not blown apart into a longer equivalent', () => {
     const ce = new ComputeEngine();
-    // cost 40 → 52 if split. 52 is exactly 1.3 × 40, so the ratio alone
-    // accepted this and simplify() used to return the split form
-    // `-b/(2a) + sqrt(b^2-4ac)/(2a)`. +12 is over the 10-unit ceiling, so the
-    // closed quadratic-formula form now survives.
+    // cost 40 → 52 if split. Under the old proportional gate 52 was exactly
+    // 1.3 × 40, so simplify() returned `-b/(2a) + sqrt(b^2-4ac)/(2a)`.
     expect(
       ce.parse('\\frac{-b+\\sqrt{b^2-4ac}}{2a}').simplify().toString()
     ).toBe('(-b + sqrt(b^2 - 4a * c)) / (2a)');
+  });
+
+  it('a factored closed form survives instead of being expanded', () => {
+    const ce = new ComputeEngine();
+    // The arithmetic-progression closed form. Expanding it to
+    // `1/2·d·b^2 + a·b + 1/2·b·d + a` scores better under the cost function,
+    // which is precisely why the old growth tolerance let `expand` do it.
+    expect(
+      ce.parse('\\sum_{n=0}^{b}(a + d n)').simplify().toString()
+    ).toBe('(b + 1) * (1/2 * b * d + a)');
   });
 
   it('power combination survives a cost function that penalises Power', () => {
     const ce = new ComputeEngine();
     // The three power-combination rules in `simplify-power.ts` are tagged
     // `purpose: 'transform'`, matching their sibling in `simplify-rules.ts`.
-    // Under the default cost function the rewrite is within budget anyway
-    // (4 → 5), so the tag only shows itself against a cost function that
-    // ranks Power expensive — which the public `costFunction` option lets a
-    // caller supply. Untagged, the gate discards the rewrite here.
+    // The tag is what carries them past a cost function that ranks Power
+    // expensive — which the public `costFunction` option lets a caller supply.
     const powerAverse = (e: Expression): number =>
       (e.operator === 'Power' ? 100 : 0) + ce.costFunction(e);
     expect(
@@ -93,9 +98,30 @@ describe('cost gate: the growth budget is capped in absolute terms', () => {
     ).toBe('2^(x + 1)');
   });
 
-  it("'transform' still bypasses the ceiling, not just the ratio", () => {
+  it('a negated sum is still distributed, via its tag', () => {
     const ce = new ComputeEngine();
-    // tan(x) → sin(x)/cos(x) is +19, over both budgets; the tag exempts it.
+    // -(x+1) is cost 9, -1-x is cost 10: distributing trades one Negate for
+    // one per term, so it never passes the gate on cost. It is tagged
+    // `purpose: 'transform'` on the `negation` rule instead.
+    expect(ce.parse('-(x+1)').simplify().toString()).toBe('-1 - x');
+    expect(ce.parse('-(a+b+c)').simplify().toString()).toBe('-a - b - c');
+  });
+
+  it('the negated-sum tag is not shadowed by a later untagged rule', () => {
+    const ce = new ComputeEngine();
+    // Regression guard for a subtle failure mode: the aggregated head
+    // dispatcher attributes a pass to the LAST rule that fires, so when the
+    // untagged `expand` rule (declared earlier) also produced this rewrite,
+    // the `transform` tag was dropped and the gate discarded the result.
+    // `expand` now declines a negated sum. A negated *product* must still
+    // reach `expand`.
+    expect(ce.parse('-(x+1)').simplify().toString()).toBe('-1 - x');
+    expect(ce.parse('-(x(y+1))').simplify().toString()).toBe('-x * y - x');
+  });
+
+  it("'transform' exempts a rewrite that grows the expression", () => {
+    const ce = new ComputeEngine();
+    // tan(x) → sin(x)/cos(x) is 11 → 30; the tag exempts it.
     const result = ce
       .parse('\\tan(x)')
       .simplify({ rules: [{ ...GROWTH_RULE, purpose: 'transform' }] });

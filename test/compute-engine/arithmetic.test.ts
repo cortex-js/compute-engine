@@ -1345,7 +1345,7 @@ describe('SUM', () => {
   it('should simplify alternating unit series', () => {
     expect(
       ce.parse('\\sum_{n=0}^{b}((-1)^n)').simplify().toString()
-    ).toMatchInlineSnapshot(`1/2 * (-1)^b + 1/2`);
+    ).toMatchInlineSnapshot(`1/2 * ((-1)^b + 1)`);
   });
 
   it('should evaluate alternating unit series (even upper bound)', () => {
@@ -1371,7 +1371,7 @@ describe('SUM', () => {
     // expanded form. Pointer for any future cost-model tuning.
     expect(
       ce.parse('\\sum_{n=0}^{b}(a + d*n)').simplify().toString()
-    ).toMatchInlineSnapshot(`1/2 * d * b^2 + a * b + 1/2 * b * d + a`);
+    ).toMatchInlineSnapshot(`(b + 1) * (1/2 * b * d + a)`);
   });
 
   it('should evaluate arithmetic progression numerically', () => {
@@ -1994,7 +1994,7 @@ describe('PRODUCT', () => {
   it('should simplify Wallis-like product 1 - 1/k^2', () => {
     expect(
       ce.parse('\\prod_{k=2}^{b}(1 - \\frac{1}{k^2})').simplify().toString()
-    ).toMatchInlineSnapshot(`1 / (2b) + 1/2`);
+    ).toMatchInlineSnapshot(`(b + 1) / (2b)`);
   });
 
   it('should evaluate Wallis-like product 1 - 1/k^2', () => {

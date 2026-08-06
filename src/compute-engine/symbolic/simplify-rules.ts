@@ -292,6 +292,16 @@ export const SIMPLIFY_RULES: Rule[] = [
     // term genuinely simplifies.
     if (isFunction(x, 'Divide') && isFunction(x.op2, 'Add')) return undefined;
 
+    // Skip a negated sum, e.g. -(x+1). The `negation` rule below produces the
+    // identical result and tags it `purpose: 'transform'`, which is what
+    // carries it past the cost gate — distributing a negation always scores
+    // worse (9 → 10 for -(x+1)) because it trades one Negate for one per
+    // term. Reaching it via `expand` instead would lose that tag: this rule is
+    // declared first, and the aggregated head dispatcher attributes the pass
+    // to the LAST rule that fires. Only a negated *sum* is skipped; a negated
+    // product like -(x(y+1)) still expands here.
+    if (isFunction(x, 'Negate') && isFunction(x.op1, 'Add')) return undefined;
+
     // Skip expand for Multiply expressions with same-base powers
     // Let simplifyPower handle e^x * e^2 -> e^{x+2} instead of evaluating e^2
     // Also handle bare symbols (a = a^1) as having an implicit power
@@ -358,6 +368,26 @@ export const SIMPLIFY_RULES: Rule[] = [
 
   (x): RuleStep | undefined => {
     if (!isFunction(x, 'Negate')) return undefined;
+    // Distributing a negation over a sum is a canonical normalization, not an
+    // expansion: `-(x+1)` → `-1 - x`. The distributed form is the one the rest
+    // of the engine works in — it is what `.neg()` yields, and what serializes
+    // to `Subtract`.
+    //
+    // It is cost-gate exempt because the cost function misprices it, not
+    // because it is genuinely bigger: `Negate` carries a `nameCost` of 4, the
+    // same as `Subtract`, so each distributed term is charged as a full
+    // operation when what it actually costs a reader is one minus sign.
+    // `-a-b-c` reads *lighter* than `-(a+b+c)` while scoring heavier. Note the
+    // growth is proportional to the term count, so this exemption does let a
+    // large negated sum distribute where the old proportional gate rejected it
+    // — accepted deliberately, since a size threshold would mean `-(x+1)`
+    // distributes and `-(a+…+z)` does not.
+    //
+    // If `Negate`'s cost is ever corrected, re-test whether this tag is still
+    // load-bearing — it may not be. Only the Add case is exempt; every other
+    // negation rewrite stays subject to the gate.
+    if (isFunction(x.op1, 'Add'))
+      return { value: x.op1.neg(), because: 'negation', purpose: 'transform' };
     return { value: x.op1.neg(), because: 'negation' };
   },
 
@@ -618,8 +648,8 @@ export const SIMPLIFY_RULES: Rule[] = [
       // Cost-gate exempt (log rewrites are mathematically preferred even when
       // structurally larger, e.g. ln(x^√2) -> √2·ln(x)): the
       // `purpose: 'transform'` tag replaces the former `because === 'ln'` match
-      // in simplify.ts. Note the sibling `Log` branch (because 'log') was never
-      // exempt and stays untagged.
+      // in simplify.ts. The sibling `Log` branch (because 'log') carries the
+      // same tag — see below.
       return { value: x.op1.ln(x.ops[1]), because: 'ln', purpose: 'transform' };
     }
     if (x.operator === 'Log') {
@@ -683,7 +713,12 @@ export const SIMPLIFY_RULES: Rule[] = [
         )
           return undefined;
       }
-      return { value: x.op1.ln(logBase), because: 'log' };
+      // Cost-gate exempt, like the `ln` branch above: `log_c(x^n) ->
+      // n*log_c(x)` is the preferred form even though it scores larger (11 →
+      // 13). This branch was previously left untagged only because the
+      // original cost-gate whitelist did not name it — it was riding the
+      // gate's growth tolerance instead.
+      return { value: x.op1.ln(logBase), because: 'log', purpose: 'transform' };
     }
     return undefined;
   },

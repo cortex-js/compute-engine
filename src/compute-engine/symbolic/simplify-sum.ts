@@ -249,17 +249,28 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     const r = body.op1;
     const b = upper;
 
+    // Both closed forms below are cost-gate exempt (`purpose: 'transform'`):
+    // resolving a Sum into a closed form is preferred whatever the two sides
+    // score, and the closed form is routinely the larger of the two.
     if (lower.isSame(0)) {
       // Sum from n=0 to b of r^n = (1 - r^(b+1)) / (1 - r)
       const numerator = ce.One.sub(r.pow(b.add(ce.One)));
       const denominator = ce.One.sub(r);
-      return { value: numerator.div(denominator), because: 'geometric series' };
+      return {
+        value: numerator.div(denominator),
+        because: 'geometric series',
+        purpose: 'transform',
+      };
     } else if (lower.isSame(1)) {
       // Sum from n=1 to b of r^n = (r - r^(b+1)) / (1 - r)
       // Note: This form is more compact than r*(1-r^b)/(1-r)
       const numerator = r.sub(r.pow(b.add(ce.One)));
       const denominator = ce.One.sub(r);
-      return { value: numerator.div(denominator), because: 'geometric series' };
+      return {
+        value: numerator.div(denominator),
+        because: 'geometric series',
+        purpose: 'transform',
+      };
     }
   }
 

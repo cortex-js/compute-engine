@@ -208,12 +208,12 @@ describe('INDEFINITE INTEGRATION', () => {
   // Trigonometric substitution tests
   test('sqrt(1-x^2) (trig substitution)', () =>
     expect(evaluate('\\int \\sqrt{1-x^2} dx')).toMatchInlineSnapshot(
-      `1/2 * x * sqrt(1 - x^2) + 1/2 * arcsin(x)`
+      `1/2 * (x * sqrt(1 - x^2) + arcsin(x))`
     ));
 
   test('sqrt(1+x^2) (trig substitution)', () =>
     expect(evaluate('\\int \\sqrt{1+x^2} dx')).toMatchInlineSnapshot(
-      `1/2 * x * sqrt(x^2 + 1) + 1/2 * arsinh(x)`
+      `1/2 * (x * sqrt(x^2 + 1) + arsinh(x))`
     ));
 
   test('sqrt(x^2-1) (trig substitution)', () =>
@@ -263,12 +263,12 @@ describe('INDEFINITE INTEGRATION', () => {
   // Cyclic integration patterns (e^x with trig)
   test('e^x*sin(x) (cyclic integration)', () =>
     expect(evaluate('\\int e^x \\sin x dx')).toMatchInlineSnapshot(
-      `-1/2 * cos(x) * e^x + 1/2 * sin(x) * e^x`
+      `1/2 * (-cos(x) + sin(x)) * e^x`
     ));
 
   test('e^x*cos(x) (cyclic integration)', () =>
     expect(evaluate('\\int e^x \\cos x dx')).toMatchInlineSnapshot(
-      `1/2 * sin(x) * e^x + 1/2 * cos(x) * e^x`
+      `1/2 * (sin(x) + cos(x)) * e^x`
     ));
 
   test('e^x*sin(2x) (cyclic with linear argument)', () =>

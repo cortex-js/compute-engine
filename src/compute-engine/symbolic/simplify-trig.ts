@@ -283,6 +283,11 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     }
 
     // π - x transformations
+    //
+    // These and the π + x transformations below are cost-gate exempt
+    // (`purpose: 'transform'`): reducing the argument to its principal range
+    // is preferred even though extracting the sign adds a Negate, which makes
+    // the reduced form score larger.
     if (isFunction(arg, 'Subtract')) {
       const left = arg.op1;
       const right = arg.op2;
@@ -293,6 +298,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
           return {
             value: sign === 1 ? result : result.neg(),
             because: `${op}(π - x) -> ${sign === 1 ? '' : '-'}${op}(x)`,
+            purpose: 'transform',
           };
         }
       }
@@ -316,6 +322,7 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
             return {
               value: sign === 1 ? result : result.neg(),
               because: `${op}(π + x) -> ${sign === 1 ? '' : '-'}${op}(x)`,
+              purpose: 'transform',
             };
           }
         }

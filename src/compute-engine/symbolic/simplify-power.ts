@@ -631,9 +631,13 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     // sqrt(sqrt(x)) -> x^{1/4} (nested square roots)
     const nestedRadicand = sqrtRadicand(arg);
     if (nestedRadicand) {
+      // Cost-gate exempt: collapsing nested radicals to a single one is the
+      // canonical form even though it can score larger (√(2√3) is 7,
+      // ⁴√12 is 8).
       return {
         value: nestedRadicand.pow(ce.number([1, 4])),
         because: 'sqrt(sqrt(x)) -> x^{1/4}',
+        purpose: 'transform',
       };
     }
 
@@ -694,6 +698,10 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
                   .pow(n)
                   .mul(ce._fn('Sqrt', [base])),
                 because: 'sqrt(x^{2n+1}) -> |x|^n * sqrt(x)',
+                // Cost-gate exempt: this is a branch-cut correctness rewrite
+                // (it is what keeps √(x³) real-valued as |x|√x), not a
+                // size optimisation. See branch-cut-guards.test.ts.
+                purpose: 'transform',
               };
             }
           }

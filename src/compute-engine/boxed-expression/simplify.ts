@@ -434,39 +434,40 @@ export function simplify(
 }
 
 /**
- * The cost gate does not demand that a rewrite be *cheaper* — it tolerates a
- * bounded amount of growth, because several mathematically preferred rewrites
- * score slightly worse under the cost function (the canonical example is
- * `2·2^x → 2^(x+1)`, which goes from cost 4 to cost 5).
+ * The cost gate: a rewrite is kept only if it does not make the expression
+ * more expensive. Equal cost is allowed (a reordering into an equivalent form
+ * is not progress, but it is not regress either, and the fixpoint loop's
+ * dedup guard stops it cycling).
  *
- * The tolerance is the *smaller* of two budgets:
+ * This is strict on purpose. The gate used to tolerate growth — 30%, later
+ * `min(30%, 10 cost units)` — so that mathematically preferred rewrites that
+ * happen to score worse could survive. That tolerance was doing two jobs at
+ * once, and it was bad at both:
  *
- * - `COST_GATE_RATIO` — 30% of the current cost. This is what small
- *   expressions live on: at cost 4 it grants +1.2, enough for the power
- *   combination above.
+ * - Instrumenting the gate over the full test suite (1,324 growth attempts)
+ *   found the proportional form approving a single rewrite that added
+ *   **1,693** cost units, and a chain that walked one expression from cost
+ *   7,098 to 10,133 — every step waved through as a "simplification".
  *
- * - `COST_GATE_MAX_GROWTH` — an absolute ceiling of 10 cost units, whatever
- *   the size of the expression.
+ * - 90% of the rewrites living on the tolerance were the generic `expand`
+ *   rule, and what it bought was *worse* output: expansion was blowing
+ *   factored closed forms apart. Removing the slack restores them —
+ *   `Sum(a + d·n)` returns the textbook `(b+1)(a + b·d/2)` instead of a
+ *   four-term polynomial, `∫√(1-x²)` regains `½(x√(1-x²) + arcsin x)`, and
+ *   `Solve` returns `arccos((x²+1)/(2x))`, which finally agrees with the
+ *   guard condition it is reported alongside.
  *
- * The absolute ceiling exists because a pure ratio grants *more* slack the
- * bigger the expression, which is exactly backwards: it is on large
- * expressions that runaway growth hurts. Instrumenting this gate over the full
- * test suite (1,324 growth attempts) found the ratio alone approving a single
- * rewrite that added **1,693** cost units, and a chain that walked one
- * expression from cost 7,098 to 10,133 — every step waved through as a
- * "simplification". The ceiling costs nothing: the suite is green at 10, and
- * the rewrites it newly rejects are fraction splits that should never have
- * been called simplifications (`(-b+√(b²-4ac))/2a` was being blown apart into
- * `-b/2a + √(b²-4ac)/2a`).
+ * A rewrite that genuinely is preferred despite scoring larger does not need
+ * a numeric allowance — it declares itself with `purpose: 'transform'`, which
+ * bypasses this gate outright (see `simplifyNonCommutativeFunction`). Every
+ * such rule now carries the tag; reach for that, not for a tolerance here.
  *
- * Note that this slack is a fallback, not the sanctioned route for a rewrite
- * that is preferred despite being larger: such a rule should tag its step
- * `purpose: 'transform'`, which bypasses the gate outright (see
- * `simplifyNonCommutativeFunction`).
+ * When adding a tag, check it actually reaches this gate: the aggregated head
+ * dispatcher attributes a pass to the LAST rule that fires, so a tagged rule
+ * whose result a later untagged rule re-derives will lose the tag. That is why
+ * the `expand` rule declines a negated sum and leaves `-(x+1)` to the tagged
+ * `negation` rule.
  */
-const COST_GATE_RATIO = 1.3;
-const COST_GATE_MAX_GROWTH = 10;
-
 function isCheaper(
   oldExpr: Expression,
   newExpr: Expression | null | undefined,
@@ -481,15 +482,7 @@ function isCheaper(
 
   costFunction ??= (x) => ce.costFunction(x);
 
-  const oldCost = costFunction(oldExpr);
-  const newCost = costFunction(newExpr);
-
-  const budget = Math.min(
-    oldCost + COST_GATE_MAX_GROWTH,
-    COST_GATE_RATIO * oldCost
-  );
-
-  return newCost <= budget;
+  return costFunction(newExpr) <= costFunction(oldExpr);
 }
 
 /**
