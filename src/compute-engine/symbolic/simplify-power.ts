@@ -1121,6 +1121,15 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
   }
 
   // Handle Multiply for power combination
+  //
+  // Every rewrite below is cost-gate exempt (`purpose: 'transform'`): power
+  // combination is mathematically preferred even when it scores structurally
+  // larger — `2·2^x -> 2^(x+1)` goes from cost 4 to cost 5. This matches the
+  // sibling implementation in `simplify-rules.ts` ('combined powers with same
+  // base'), which has carried the tag since the label-matching cost-gate
+  // whitelist was replaced. These three had been left untagged and were
+  // instead riding the gate's growth tolerance, so the same rewrite obeyed two
+  // different policies depending on which implementation caught it.
   if (op === 'Multiply' && isFunction(x) && x.ops.length >= 2) {
     // x^n * x^m -> x^{n+m}
     // This is a more complex rule that needs to find matching bases
@@ -1151,6 +1160,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
             return {
               value: baseA.pow(sumExp),
               because: 'x^n * x^m -> x^{n+m}',
+              purpose: 'transform',
             };
           }
         }
@@ -1165,6 +1175,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
           return {
             value: a.pow(ce.function('Add', [b.op2, ce.One])),
             because: 'x * x^n -> x^{n+1}',
+            purpose: 'transform',
           };
         }
       }
@@ -1178,6 +1189,7 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
           return {
             value: b.pow(ce.function('Add', [a.op2, ce.One])),
             because: 'x^n * x -> x^{n+1}',
+            purpose: 'transform',
           };
         }
       }

@@ -1,4 +1,4 @@
-import { ComputeEngine, Rule } from '../../src/compute-engine';
+import { ComputeEngine, Expression, Rule } from '../../src/compute-engine';
 
 /**
  * Tests for rule purpose tags (`RulePurpose`) and the simplification
@@ -76,6 +76,21 @@ describe('cost gate: the growth budget is capped in absolute terms', () => {
     expect(
       ce.parse('\\frac{-b+\\sqrt{b^2-4ac}}{2a}').simplify().toString()
     ).toBe('(-b + sqrt(b^2 - 4a * c)) / (2a)');
+  });
+
+  it('power combination survives a cost function that penalises Power', () => {
+    const ce = new ComputeEngine();
+    // The three power-combination rules in `simplify-power.ts` are tagged
+    // `purpose: 'transform'`, matching their sibling in `simplify-rules.ts`.
+    // Under the default cost function the rewrite is within budget anyway
+    // (4 → 5), so the tag only shows itself against a cost function that
+    // ranks Power expensive — which the public `costFunction` option lets a
+    // caller supply. Untagged, the gate discards the rewrite here.
+    const powerAverse = (e: Expression): number =>
+      (e.operator === 'Power' ? 100 : 0) + ce.costFunction(e);
+    expect(
+      ce.parse('2\\cdot2^x').simplify({ costFunction: powerAverse }).toString()
+    ).toBe('2^(x + 1)');
   });
 
   it("'transform' still bypasses the ceiling, not just the ratio", () => {

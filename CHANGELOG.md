@@ -53,6 +53,14 @@
   `-b/(2a) + \sqrt{b^2-4ac}/(2a)`. A rule that should apply regardless of cost
   should be tagged `purpose: 'transform'`, which bypasses the gate entirely.
 
+  Relatedly, the power-combination rewrites `x^n·x^m → x^{n+m}`, `x·x^n →
+  x^{n+1}` and `x^n·x → x^{n+1}` are now tagged `purpose: 'transform'`, which
+  their equivalent for three or more factors already was. Previously the same
+  rewrite obeyed two different cost policies depending on which implementation
+  caught it. No change under the default cost function, where these are within
+  budget anyway; it matters for a caller-supplied `costFunction` that ranks
+  `Power` expensive.
+
 - **`ComputeEngine`, `expr.engine` and `ExpressionComputeEngine` are now one
   interchangeable type — no more casts between them.** The `ComputeEngine`
   exported from the package (and from the `/core` sub-path) is now a
