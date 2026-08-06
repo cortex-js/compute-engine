@@ -446,8 +446,7 @@ function claimedSpellings(
 
     const claimant =
       typeof fields.parse === 'string' ? fields.parse : fields.name;
-    if (claimant !== undefined && claimant !== name)
-      result.set(name, spelling);
+    if (claimant !== undefined && claimant !== name) result.set(name, spelling);
   }
   return result;
 }

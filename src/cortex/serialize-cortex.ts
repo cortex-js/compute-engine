@@ -1270,7 +1270,8 @@ export function serializeCortex(
     clauses: { cond: MathJsonExpression; body: MathJsonExpression }[];
     elseBody: MathJsonExpression | null;
   } | null {
-    const clauses: { cond: MathJsonExpression; body: MathJsonExpression }[] = [];
+    const clauses: { cond: MathJsonExpression; body: MathJsonExpression }[] =
+      [];
     let node: MathJsonExpression = expr;
     for (;;) {
       const count = nops(node);
@@ -1337,7 +1338,9 @@ export function serializeCortex(
         rows.push(fmt.indent(fmt.stack(...statements)));
     };
     clauses.forEach(({ cond, body }, i) => {
-      rows.push(fmt.line(i === 0 ? 'if ' : '} else if ', condition(cond), ' {'));
+      rows.push(
+        fmt.line(i === 0 ? 'if ' : '} else if ', condition(cond), ' {')
+      );
       pushBody(body);
     });
     if (elseBody !== null) {
