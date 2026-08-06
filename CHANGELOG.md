@@ -15,23 +15,220 @@
   call site. `{ canonical: false }` (equivalently `{ form: 'raw' }`) is in the
   same position and was already untyped.
 
+- **Cortex: `=` is now positional — it assigns only as a whole statement, and
+  compares everywhere else.** `:=` always assigns and `==` always compares; a
+  bare `=` means `Assign` when it is the top-level operator of a statement whose
+  left side is a binding target (a name, or a field/index path rooted at one),
+  and `Equal` in every other position. The canonical trap simply works:
+  `Solve(x^2 = 4, x)` is the equation and returns `[2, -2]`, where it used to
+  assign and report no solutions. So do `if a = true { … }`, `while x = 5 { }`
+  and `[a = 1]`, each of which previously assigned **silently** — the C footgun
+  no longer exists in Cortex.
+
+  The decision is purely syntactic: it never depends on evaluating a value, on
+  scope, or on which definitions are installed. As a comparison `=` binds at the
+  relational tier, so `if x = 5 && y` groups as `(x = 5) && y`; as an assignment
+  it binds loosest and takes the whole right-hand side.
+
+  Two consequences. A statement whose left side is _not_ a binding target now
+  compares — `x^2 = 4` on its own line is the equation, not an assignment to a
+  power. And `a = b = 5` would assign `a` the boolean `b == 5`, which is never
+  what a chained assignment means, so it reports `chained-assignment`; write
+  `a := b := 5` to chain, or `a = (b = 5)` if the comparison was meant.
+
+  `:=` is unconditional, so it still reaches a condition where a bare `=` no
+  longer can. `if flag := true { … }` assigns and then uses the assigned value
+  as the test — with no type error to catch it — so it now reports
+  `assign-in-condition`, a **warning** (the spelling is deliberate). It fires
+  only where a value is consumed as a boolean, not for `f(a := 1)`.
+
+  The `assign-in-argument` diagnostic is **removed**: `f(x = 4)` is now an
+  ordinary comparison, so there is nothing left to diagnose. Serialized output
+  always uses the explicit `:=` and `==`, never a bare `=`, so a round-trip is
+  exact regardless of position — which means the formatter rewrites an authored
+  `=` to `:=` where it assigns.
+
+### New Features
+
+- **Cortex: `break` and `continue`.** They leave, or skip to the next iteration
+  of, the innermost enclosing `while`/`for` loop, and lower to the engine's
+  existing `Break()`/`Continue()` primitives. Valid anywhere in a loop body,
+  including inside an `if`, a `match` case, or a `do` block. The loop context
+  resets at every function and lambda boundary — a `break` written inside a
+  lambda defined in a loop body does not target that loop, and is a
+  `control-outside-loop` diagnostic — because the engine's `Block`
+  short-circuits on `Break`/`Continue` structurally, so a laxer rule would
+  permit non-local control flow. Value-carrying `break value` remains unspelled,
+  pending the ruling on a general `return`.
+
+- **Cortex: `??` for absence coalescing.** `a ?? b` is `Coalesce(a, b)`: the
+  value of `a` unless it is absent (`Missing` or `NaN`). It discharges
+  _absence_; it does not rescue an `Error`. Right-associative, at precedence 18
+  — looser than `|>` so `xs |> f ?? 0` defaults the pipeline's result, tighter
+  than `|->` so `x |-> x.a ?? 0` defaults inside the body.
+
+- **Cortex: `is` for dynamic type tests.** `x is integer` lowers to
+  `Element(x, integer)` — the same test a `match` type pattern performs. The
+  right operand is a type name, so a typo (`x is intger`) is a parse-time
+  diagnostic rather than a comparison against an undeclared symbol. Simple named
+  types only for now: a compound type (`!error`, `integer | string`,
+  `list<integer>`) reports `type-pattern-unsupported`, as the equivalent typed
+  pattern already does. `is` is a contextual word — `let is = 5` stays legal.
+
+### Improvements
+
+- **Cortex: most reserved words are now ordinary identifiers.** Only the words
+  the grammar actually consumes are reserved: the literals (`true`, `false`,
+  `Infinity`, `oo`, `NaN`) and the active keywords and word operators (`break`,
+  `const`, `continue`, `do`, `else`, `for`, `function`, `if`, `in`, `match`,
+  `while`). The other 76 words in the documented list — `set`, `with`, `label`,
+  `where`, `to`, `each`, and so on — can name a binding, be assigned to, be a
+  `|->` parameter, and be called. Previously a binding name accepted them but a
+  bare assignment target, a mapsto parameter, and a call's callee did not, so
+  `label(6) = 1` was accepted while `label(6)` was an error.
+
+  Relatedly, assigning to a literal word is no longer silently accepted:
+  `true = 5` and `NaN = 1` now report `reserved-word` like every other binding
+  position.
+
 ### Resolved Issues
 
-- **The cost function no longer prices the same expression differently
-  depending on which form it is handed.** `Square(x)` cost 6 unevaluated but 1
-  canonical, and `Exp(x)` cost 10 versus 1 — yet both canonicalize to a
-  `Power`. Since `simplify()`'s cost gate compares an incoming expression
-  against a rule's result, and the two need not be in the same form, that made
-  some comparisons off by up to 2×. Both now price through the same helper as
-  `Power`, so the cost is a property of the expression rather than of its
-  representation.
+- **A closure returned from a function now resolves captured variables from
+  inside a nested block.** `k ↦ (x ↦ if x > 1 { k } else { 0 })` applied at
+  `k = 100` returned the symbol `k` instead of `100`, while the same body
+  without the branch blocks — or a plain `do { k }` — returned `100`.
+  `captureClosures` rebinds a returned function literal so its body block
+  closes over the call's frame, but it reused the body's operands verbatim, so
+  a *scoped block nested inside* that body kept its canonicalization-time
+  parent chain and reached the stale copies of the same lexical levels. The
+  walk now re-roots nested blocks onto the captured chain, keeping their own
+  locals. Held operands are what introduce such a block — `If` branches are the
+  common case, and Cortex compiles every `if` branch to a block, so any `if`
+  inside an escaping lambda was affected, including one drained later from a
+  lazy `Map`.
+
+- **An annotated function parameter read from inside a nested block now
+  resolves.** In Cortex, `function s(k: number) { if 1 > 0 { k } else { 0 } }`
+  returned the *symbol* `k` rather than the argument — while the same function
+  with a bare `k` returned it correctly. `evaluateBlock` sweeps stale
+  canonicalization bookkeeping from the block's scope, and its keep-test was
+  "is this binding's type inferred". An auto-declared shadow inherits the
+  DECLARED type of the outer binding it shadows, so an annotated parameter left
+  an explicitly-typed valueless shadow that survived the sweep and hid the call
+  value in the lambda's fresh scope. The keep-test is now "was this created by
+  a `Declare` statement", which is what the sweep meant to ask; genuine
+  block-locals still survive, including across a re-entered block. Cortex wraps
+  each `if` branch in a block, which is why the conditional shape surfaced it.
+
+- **A lazy `Map` returned from a function no longer loses the variables its
+  mapping function closed over.** `f(k) = Map([1,2], x ↦ x + k)` drained by the
+  caller produced `[k + 1, k + 2]` instead of `[101, 102]` — a silently wrong
+  value, with no error. Drain-time Map fusion serves each element with a direct
+  operator application in the **ambient** scope, bypassing `makeLambda` and so
+  its scope push, and the shape gate treated every parameter-free operand as a
+  "closed" value. A free symbol is not closed: it resolves by binding lookup,
+  and once the defining call has returned that binding is no longer ambient.
+  The closure chain was always intact — `captureClosures` rebinds the literal
+  to the call's frame — so the fix is for the drain to evaluate inside it. A
+  level whose operands are all literals, the shape the fusion was built for
+  (`1 + Mod(Range(0,899) + 29, 900)`), records no scope and keeps the original
+  zero-scope-work path; the 3×900 witness is unchanged.
+
+- **Annotating a callback parameter no longer switches off broadcasting for the
+  whole function.** `function map(f: (A) -> B, t)` stopped broadcasting over
+  *every* parameter the moment `f` was annotated, so a recursive
+  `map(f, t.children)` over a tree went inert while the identical function with
+  a bare `f` worked. Broadcast eligibility (`paramsAreScalar`) is
+  all-or-nothing across the parameter list and a function type is not a scalar
+  type, so one callback annotation vetoed the rest. A function-typed parameter
+  receives a function, never a collection, so it can never be broadcast over
+  and now abstains instead of vetoing — which is the position the inference
+  path already took, so a declared `(A) -> B` parameter and an inferred one of
+  the same shape no longer disagree. A **collection**-typed parameter still
+  suppresses broadcasting for the function: it consumes a whole collection, and
+  that suppression is what keeps a nested collection argument from being
+  descended into elementwise.
+
+- **Reading a field through a recursive type's own recursive field no longer
+  fails with `Converting circular structure to JSON`.** With
+  `type tree = tuple<value: any, children: list<tree>>`, the expression
+  `t.children[1].value` produced that error rather than the field's value.
+  Joining the element types of a `list<tree>` reaches `unionTypes`, whose
+  de-duplication key was `JSON.stringify(type)` — and a recursive type
+  reference reaches itself through its resolved `def`. The key now omits `def`,
+  which is both cycle-safe and lossless: a reference is identified by its name,
+  and `def` is the only edge by which a type cycle can close.
+
+- **A recursive type alias no longer overflows the stack when a value fails to
+  match it.**
+  `type alias json = missing | boolean | finite_real | string | list<json> | dictionary<json>`
+  accepted every JSON shape correctly, but any _rejected_ value — a function, a
+  complex number, `NaN` — produced `Maximum call stack size exceeded` instead of
+  an `incompatible-type` error. `hasValueComponent` unfolded structural alias
+  references with no cycle guard, unlike `isSubtype`, which has had one at each
+  of its own unfold sites. Cutting the back edge is exact rather than merely
+  conservative here: every component reachable around the cycle is already
+  reachable on the first unfold.
+
+- **A forward type reference can now be fulfilled by a later declaration, so a
+  mutually recursive set of types is writable.** The documented spelling —
+  `ce.declareType("json", "… | type json_array")` followed by
+  `ce.declareType("json_array", "list<json>")` — failed with
+  `The type "json_array" is already defined in the current scope`: the forward
+  reference installed a type record, and the declaration meant to complete it
+  read that record as a redeclaration conflict. The declaration now completes
+  the record **in place**, so the types that captured the reference resolve
+  through to the definition (a fresh record would leave them pointing at the
+  empty one, and the recursion could never close). Only an unfulfilled reference
+  is completable; a name that already has a definition is still a redeclaration
+  error. This applies to the Cortex `type` statement equally.
+
+- **A parameter typed by an alias of a collection now binds its argument whole
+  instead of broadcasting over it.** With `type alias u = list<number>`, a
+  function `(u) -> …` applied to `[1, 2]` was mapped over the list and each
+  element then failed the parameter check — while the inline
+  `(list<number>) -> …` spelling bound correctly. `isScalarType` did not unfold
+  alias references, so an alias of a collection read as a scalar. Nominal types
+  are unaffected and still broadcast: their values are tagged applications,
+  never collections, so a list of them is a genuine elementwise call.
+
+- **`simplify()` now reduces inside `\int`, `\sum`, `\prod` and
+  `\frac{d}{dx}`.** The body of those operators was never simplified, so
+  `\int(\sin^2x+\cos^2x)dx` stayed as written rather than becoming `\int 1\,dx`,
+  and `\sum(n+n)` never reached its closed form. That was deliberate: the
+  closed-form rules match on the body's _shape_, and simplifying first rewrites
+  the shape out from under them — `\sum k(k+1)` becomes `\sum(k^2+k)` and the
+  sum-of-products rule stops recognising it. The body is now simplified once at
+  the fixpoint, after those rules have had every chance and none has fired, so
+  both work: the integrand above collapses AND `\sum k(k+1)` still returns its
+  closed form.
+
+  This is new work on expressions that contain a binder — roughly 3x on
+  binder-heavy input in exchange for simplification that previously did not
+  happen at all. Expressions without a binder are unaffected.
+
+- **`Coalesce` no longer evaluates its tail past an undecided operand.** When an
+  operand still carried free variables, the handler evaluated every remaining
+  operand before returning the partially evaluated expression — so a later
+  operand's effects ran, and its errors surfaced, on a path that a decided first
+  operand would never have taken. The tail is now left unevaluated, which also
+  makes the nested form `Coalesce(a, Coalesce(b, c))` and the flat
+  `Coalesce(a, b, c)` observationally equal.
+
+- **The cost function no longer prices the same expression differently depending
+  on which form it is handed.** `Square(x)` cost 6 unevaluated but 1 canonical,
+  and `Exp(x)` cost 10 versus 1 — yet both canonicalize to a `Power`. Since
+  `simplify()`'s cost gate compares an incoming expression against a rule's
+  result, and the two need not be in the same form, that made some comparisons
+  off by up to 2×. Both now price through the same helper as `Power`, so the
+  cost is a property of the expression rather than of its representation.
 
   Relatedly, a negation is now priced by what it is applied to: a sign on a
-  *term* costs 1, while negating a whole *sum* keeps the higher cost of 4,
-  since that forces delimiters. Previously both cost 4, which said `-a - b - c`
-  is nearly twice as complicated as `-(a + b + c)` when it reads more simply —
-  and made `Subtract(a, b)` cost less than the `Add(a, Negate(b))` it
-  canonicalizes to. One visible consequence: `\int\sqrt{x^2-1}dx` now returns
+  _term_ costs 1, while negating a whole _sum_ keeps the higher cost of 4, since
+  that forces delimiters. Previously both cost 4, which said `-a - b - c` is
+  nearly twice as complicated as `-(a + b + c)` when it reads more simply — and
+  made `Subtract(a, b)` cost less than the `Add(a, Negate(b))` it canonicalizes
+  to. One visible consequence: `\int\sqrt{x^2-1}dx` now returns
   `\frac12(x\sqrt{x^2-1} - \operatorname{arcosh} x)`, matching the factored form
   its two sibling trig-substitution integrals already returned.
 
@@ -46,16 +243,24 @@
   `\frac16(2b^3+3b^2+b)` rather than `\frac13 b^3+\frac12 b^2+\frac16 b`,
   matching the shape `\sum n` already returned.
 
-- **An unevaluated integral now weighs heavily against a closed form.** `Integrate`
-  was priced like any unrecognized operator, but an antiderivative can be much
-  larger than its integrand — `\int\sec^3x\,dx` scored 49 against a closed form
-  of 78, and `\int\frac{1}{x^4+1}dx` 62 against 145 — so a rewrite that resolved
-  such an integral could be rejected for being "more complicated". Integrals now
-  carry a large flat premium. It is a weight rather than an absolute rule — a
-  closed form vastly larger than its integral could still lose. It is flat rather than
-  proportional so that comparing two expressions which each contain one integral
-  still turns on the integrands, and so that an expression with fewer integrals
-  still wins.
+- **Raising something to a power now accounts for what is being raised.** The
+  cost function priced a power by its exponent alone, so `(a+b+c+d)^{20}` —
+  which expands to 1,771 terms — scored 2, the same as `x^{20}` and barely above
+  `x^2`. The base is now counted. `2q^2` is still cheaper than the repeated
+  multiplication it replaces, which is what that rule exists for. One visible
+  consequence: `(\sqrt2+\sqrt3)^2` now reaches its closed form `5+2\sqrt6`
+  instead of staying unexpanded.
+
+  Two long-standing shortcuts came out with it. A negated power was priced
+  without its base, so `-\sin^2x` scored 4 where `\sin^2x` scored 12 — the same
+  subexpression valued three-fold apart on nothing but a leading sign. And
+  `\sqrt{}` carried hidden surcharges for a perfect-square or odd-power
+  argument, added to push factoring rewrites like `\sqrt{x^2y}\to|x|\sqrt y`
+  past the cost check. Those rewrites introduce an absolute value, so they
+  genuinely do grow the expression; they are kept because they are correct on
+  the reals, not because they are smaller, and they now say so directly rather
+  than relying on a surcharge to disguise their size. Same for distributing an
+  exponent over a product. Behavior is unchanged in every case.
 
 - **A radical is no longer priced as if it were an ordinary decimal.** The cost
   function reduced an exact value to its floating-point magnitude, so `\sqrt3`,
@@ -73,24 +278,16 @@
   radicals (`\sqrt{\sqrt{12}} \to \sqrt[4]{12}`) also no longer needs a
   cost-gate exemption — it now wins on its own merits.
 
-- **Raising something to a power now accounts for what is being raised.** The
-  cost function priced a power by its exponent alone, so `(a+b+c+d)^{20}` — which
-  expands to 1,771 terms — scored 2, the same as `x^{20}` and barely above `x^2`.
-  The base is now counted. `2q^2` is still cheaper than the repeated
-  multiplication it replaces, which is what that rule exists for. One visible
-  consequence: `(\sqrt2+\sqrt3)^2` now reaches its closed form `5+2\sqrt6`
-  instead of staying unexpanded.
-
-  Two long-standing shortcuts came out with it. A negated power was priced
-  without its base, so `-\sin^2x` scored 4 where `\sin^2x` scored 12 — the same
-  subexpression valued three-fold apart on nothing but a leading sign. And
-  `\sqrt{}` carried hidden surcharges for a perfect-square or odd-power
-  argument, added to push factoring rewrites like `\sqrt{x^2y}\to|x|\sqrt y`
-  past the cost check. Those rewrites introduce an absolute value, so they
-  genuinely do grow the expression; they are kept because they are correct on
-  the reals, not because they are smaller, and they now say so directly rather
-  than relying on a surcharge to disguise their size. Same for distributing an
-  exponent over a product. Behavior is unchanged in every case.
+- **An unevaluated integral now weighs heavily against a closed form.**
+  `Integrate` was priced like any unrecognized operator, but an antiderivative
+  can be much larger than its integrand — `\int\sec^3x\,dx` scored 49 against a
+  closed form of 78, and `\int\frac{1}{x^4+1}dx` 62 against 145 — so a rewrite
+  that resolved such an integral could be rejected for being "more complicated".
+  Integrals now carry a large flat premium. It is a weight rather than an
+  absolute rule — a closed form vastly larger than its integral could still
+  lose. It is flat rather than proportional so that comparing two expressions
+  which each contain one integral still turns on the integrands, and so that an
+  expression with fewer integrals still wins.
 
 - **`ce.parse()` now accepts a `scope` option in its public type signature.**
   The implementation has always honored it — the whole parse runs with the
@@ -105,14 +302,14 @@
 - **`Pochhammer()`, `Degrees()` and `DMS()` no longer numericize an exact
   irrational argument.** Found by auditing for the `Beta()` bug below, which
   turned out to be one instance of a small class. `(\sqrt2)_2` returned
-  `3.41421356…` instead of the exact `2 + \sqrt2`, and `\mathrm{Degrees}(\sqrt2)`
-  returned `0.0246826…` instead of `\sqrt2\pi/180`. Two different causes, one
-  symptom: `Pochhammer` built its rising-factorial terms with the `.add()`
-  method, which folds two exact literals to a machine float (the same slip as
-  `Beta`, and its own symbolic branch alongside already did it correctly);
-  `Degrees` fell back to `ce.number(arg.re)` for a non-rational argument, and
-  `.re` is a machine float. Exact rationals, integers, floats, poles and
-  symbolic arguments are unchanged in all three.
+  `3.41421356…` instead of the exact `2 + \sqrt2`, and
+  `\mathrm{Degrees}(\sqrt2)` returned `0.0246826…` instead of `\sqrt2\pi/180`.
+  Two different causes, one symptom: `Pochhammer` built its rising-factorial
+  terms with the `.add()` method, which folds two exact literals to a machine
+  float (the same slip as `Beta`, and its own symbolic branch alongside already
+  did it correctly); `Degrees` fell back to `ce.number(arg.re)` for a
+  non-rational argument, and `.re` is a machine float. Exact rationals,
+  integers, floats, poles and symbolic arguments are unchanged in all three.
 
   The audit also found the nightly exactness grid was covering only 104 of the
   engine's numeric operators — which is why these went unnoticed. It now covers
