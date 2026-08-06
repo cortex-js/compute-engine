@@ -45,7 +45,7 @@ name exists, e.g. `len` → `Length`).
 ```cortex
 let x = 5                 // mutable declaration
 const tau = 6.28          // immutable; reassigning yields an Error value
-x = x + 3                 // assignment (= is Assign, NOT equality)
+x = x + 3                 // assignment: a bare `=` assigns only as a STATEMENT
 f(x) = x^2                // function definition, math style
 square = x |-> x^2        // anonymous function ("|->" is the lambda arrow)
 function g(n) {           // function definition, block style
@@ -86,11 +86,12 @@ g(x) + f(2)
 - **LaTeX islands**: `$\frac{1}{2}$` splices parsed LaTeX into the expression
   (available in the CLI and any host that injects a LaTeX parser).
 
-**Operator precedence**, loosest → tightest: `=` · `|->` · `|>` (pipe) · `->`
-(key-value) · `||` · `&&` · comparisons `== != < <= > >= === in !in`
-(chainable: `1 < 2 < 3`) · `..` (range) · `+ -` · `* / %` · unary `- !` ·
-`^`/`**` (right-associative) · postfix `!`. Calls `f(x)` and indexing `xs[i]`
-bind tightest of all.
+**Operator precedence**, loosest → tightest: `:=` · `|->` · `??` (coalesce) ·
+`|>` (pipe) · `->` (key-value) · `||` · `&&` · comparisons
+`== != < <= > >= === in !in is` (chainable: `1 < 2 < 3`) · `..` (range) ·
+`+ -` · `* / %` · unary `- !` · `^`/`**` (right-associative) · postfix `!`.
+Calls `f(x)` and indexing `xs[i]` bind tightest of all. A bare `=` has no
+fixed tier: it binds like `:=` when it assigns and like `==` when it compares.
 
 ## If You Know Python or JavaScript
 
@@ -103,12 +104,13 @@ actually happens → write instead:**
 | `7 // 2` floor division | **Silent wrong value**: `//` starts a comment, so this is just `7` | `Floor(7 / 2)` |
 | `7 / 2` integer division | Exact rational `7/2`, not `3` or `3.5` | `Floor(7 / 2)` for `3`; `N(7 / 2)` for `3.5` |
 | `range(1, 5)` excludes end | Inert call + did-you-mean; `Range(1, 5)` **includes** 5: `[1,2,3,4,5]` | `Range(1, n)` or `1..n` for 1…n inclusive |
-| `Solve(x^2 = 4, x)` | **Silently** `[]` — `=` is assignment | `Solve(x^2 == 4, x)` → `[2, -2]` |
+| `x = 5` at top level | Assigns — `=` assigns only as a whole statement with a name on the left | `x == 5` for the equation |
 | `# comment` | Diagnostic (`#` introduces pragmas) | `// comment` or `/* … */` |
 | `def f(x):` / `(x) => …` / `lambda x: …` | Parse diagnostics | `f(x) = expr`, `x \|-> expr`, or `function f(x) { … }` |
 | `cond ? a : b` | Parse diagnostic | `if cond { a } else { b }` — `if` is an expression |
 | `elif` | Parse diagnostic | `else if` |
-| `return` / `break` / `continue` | Reserved words, **not implemented** — `while true { … break }` runs to the iteration limit | Last expression is the value; loop on a condition instead of breaking |
+| `return` | Reserved word, **not implemented** | A block's value is its last expression |
+| `break` / `continue` | Work as expected inside a `while`/`for` body; the loop context resets at every function and lambda boundary | *(nothing to change)* |
 | `print(x)` | Inert unknown call; nothing prints | The program's value is its **last statement** |
 | `len(xs)` | Inert + did-you-mean | `Length(xs)` |
 | `s[i]` / `len(s)` on a string | Error value / inert — strings are **not** collections | `Characters(s)[i]`, `Length(Characters(s))` |

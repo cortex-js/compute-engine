@@ -15,8 +15,10 @@ import { MathJsonSymbol } from '../math-json/types.js';
 // direction keeps the serializer's existing parenthesization test
 // (`argOp.precedence < op.precedence` ⇒ wrap the operand) working unchanged.
 //
-//   Assign            10   (infix, right, relational spacing)
+//   Assign :=         10   (infix, right, relational spacing)
+//   (bare `=` is positional — it resolves to `:=` or `==`; see its row)
 //   MapsTo |->        15   (infix, right)
+//   Coalesce ??       18   (infix, right)
 //   Pipe  |>  ~>      20   (infix, left)
 //   KeyValuePair ->   30   (infix)
 //   conditional `a if c else b`  35  (ternary — see CONDITIONAL_PRECEDENCE)
@@ -77,6 +79,27 @@ import { MathJsonSymbol } from '../math-json/types.js';
  */
 export const CONDITIONAL_PRECEDENCE = 35;
 
+/**
+ * Precedence of the dynamic type test `x is integer` (→ `["Element", x,
+ * integer]`, the same shape a `match` type pattern lowers to).
+ *
+ * Like `CONDITIONAL_PRECEDENCE` this is deliberately NOT a row in `OPERATORS`:
+ * the right operand of `is` is a **type**, not an expression, so the parser
+ * recognizes the form directly (`parseTypeTestTail`) and hands the right side
+ * to the type subparser. A row here would let `peekInfix` claim `is` as an
+ * ordinary binary infix and parse `integer` as a symbol reference — losing the
+ * parse-time typo diagnostic an annotation gets.
+ *
+ * It shares the relational precedence (60) with `in`, which it reads as: the
+ * two spell the same `Element` test, and `x is integer && y is string` must
+ * group as `(x is integer) && (y is string)`.
+ *
+ * The serializer has no `is` spelling to emit — `Element` serializes as `in`,
+ * so `x is integer` reads back as `x in integer`. That is the same expression;
+ * `is` is an input spelling that says "type test" at the point of writing.
+ */
+export const TYPE_TEST_PRECEDENCE = 60;
+
 export interface OperatorDef {
   /** The MathJSON operator this spelling maps to, e.g. `'Add'`. */
   name: MathJsonSymbol;
@@ -101,8 +124,34 @@ export interface OperatorDef {
  * canonical spelling.
  */
 export const OPERATORS: OperatorDef[] = [
+  // `:=` ALWAYS assigns, in every position. It is listed before the `=` row so
+  // `operatorDefByName('Assign')` resolves here: the serializer therefore
+  // always emits `:=`, never a bare `=`, which is what makes the round-trip
+  // exact (see the `=` row below).
   {
     name: 'Assign',
+    symbol: ':=',
+    precedence: 10,
+    kind: 'infix',
+    assoc: 'right',
+    relational: true,
+  },
+  // A bare `=` is POSITIONAL — it is `Assign` only as the top-level operator of
+  // a statement whose left side is a binding target, and `Equal` everywhere
+  // else. `if a = true { … }`, `Solve(x^2 = 4, x)` and `[a = 1]` are therefore
+  // comparisons, while `x = 5` as a statement still assigns.
+  //
+  // Its `name` is a parser-internal marker that never reaches MathJSON: the
+  // Pratt loop resolves it to the `:=` row or the `==` row before building a
+  // node, so the resulting expression is indistinguishable from one written
+  // with the explicit spelling — including the relational n-ary chaining that
+  // makes `a = b = c` in expression position `Equal(a, b, c)`.
+  //
+  // The precedence here is only what `peekInfix` reports; the resolved row's
+  // precedence is what actually binds (10 when assigning, 60 when comparing),
+  // so `if x = 5 && y` groups as `(x = 5) && y` exactly like `==`.
+  {
+    name: 'AssignOrEqual',
     symbol: '=',
     precedence: 10,
     kind: 'infix',
@@ -121,6 +170,36 @@ export const OPERATORS: OperatorDef[] = [
     symbol: '|->',
     fancySymbol: '↦',
     precedence: 15,
+    kind: 'infix',
+    assoc: 'right',
+  },
+  // Absence coalescing `a ?? b` → `Coalesce(a, b)`. It discharges Cortex
+  // ABSENCE (`Missing`/`NaN`); it does NOT rescue an `Error`.
+  //
+  // Precedence 18 is pinned from both sides:
+  //
+  //   - LOOSER than `Pipe` (20), so `xs |> f ?? 0` is `(xs |> f) ?? 0` — the
+  //     default is for the pipeline's result, never for the stage function.
+  //   - TIGHTER than `MapsTo` (15), so `x |-> x.a ?? 0` puts the default
+  //     inside the body rather than coalescing the whole lambda.
+  //
+  // That also places it below `Or` (40), below `KeyValuePair` (30) — exactly
+  // where `Pipe` already sits, so `{k -> v ?? d}` needs the same parentheses
+  // `{k -> (xs |> f)}` needs, and gets the same `dictionary-key-value-expected`
+  // diagnostic without them — and above `Assign` (10). This is the C#
+  // position: loosest of the computing operators. `a ?? b || c` is therefore
+  // `a ?? (b || c)`; write parentheses when the other grouping is meant.
+  //
+  // Right-associative, so `a ?? b ?? c` is `Coalesce(a, Coalesce(b, c))`. The
+  // parser does not flatten it into the variadic `Coalesce(a, b, c)`, and the
+  // serializer spells both as the same chain: the two forms are
+  // observationally equal, which is precisely what the `Coalesce` lazy-tail
+  // rule in `library/core.ts` guarantees (an undecided operand leaves the tail
+  // unevaluated, so no effect or error can distinguish them).
+  {
+    name: 'Coalesce',
+    symbol: '??',
+    precedence: 18,
     kind: 'infix',
     assoc: 'right',
   },

@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeCortex } from '../../src/cortex/execute-cortex';
 import { parseCortex } from '../../src/cortex/parse-cortex';
+import { validCortex } from '../utils';
 
 function parseCodes(source: string): string[] {
   return parseCortex(source)[1].map((d) =>
@@ -37,16 +38,96 @@ describe('floor-division comment lint', () => {
   });
 });
 
-describe('assign-in-argument lint', () => {
-  test('warns for = inside call arguments', () => {
-    expect(parseCodes('Solve(x^2 = 4, x)')).toContain('assign-in-argument');
-    expect(parseCodes('f(a, b = 2)')).toContain('assign-in-argument');
+describe('positional `=`', () => {
+  // `=` assigns only as the top-level operator of a statement whose left side
+  // is a binding target; everywhere else it compares. `:=` always assigns and
+  // `==` always compares.
+  test('the canonical trap is now simply an equation', () => {
+    // Previously `Assign`, which made `Solve` silently report no solutions.
+    expect(validCortex('Solve(x^2 = 4, x)')).toStrictEqual([
+      'Solve',
+      ['Equal', ['Power', 'x', 2], 4],
+      'x',
+    ]);
+    expect(parseCodes('Solve(x^2 = 4, x)')).toEqual([]);
   });
 
-  test('stays quiet for == and ordinary assignments', () => {
-    expect(parseCodes('Solve(x^2 == 4, x)')).toEqual([]);
-    expect(parseCodes('let x = 5')).toEqual([]);
-    expect(parseCodes('x = f(4)')).toEqual([]);
+  test('a condition compares rather than assigning', () => {
+    expect(validCortex('if a = true { 1 } else { 2 }')).toStrictEqual([
+      'If',
+      ['Equal', 'a', 'True'],
+      ['Block', 1],
+      ['Block', 2],
+    ]);
+  });
+
+  test('a statement with a binding target still assigns', () => {
+    expect(validCortex('x = 5')).toStrictEqual(['Assign', 'x', 5]);
+    expect(validCortex('x := 5')).toStrictEqual(['Assign', 'x', 5]);
+  });
+
+  test('`:=` in a condition warns — the assigned VALUE becomes the test', () => {
+    // Positional `=` closed the implicit form of this trap; `:=` is
+    // unconditional, so the explicit spelling still reaches a condition.
+    // `if flag := true { … }` takes the branch and assigns, with no type error
+    // to catch it, which is what makes a boolean assignment the sharp case.
+    for (const src of [
+      'if i := 5 { 1 } else { 2 }',
+      'if flag := true { 1 }',
+      'while i := 5 { }',
+      '1 if (flag := true) else 2',
+    ])
+      expect([src, parseCodes(src)]).toEqual([src, ['assign-in-condition']]);
+
+    // It is a WARNING: `:=` is the deliberate spelling, and the program parses.
+    const [, diags] = parseCortex('if flag := true { 1 }');
+    expect(diags.map((d) => d.severity)).toEqual(['warning']);
+  });
+
+  test('…but only where a value is consumed AS a boolean', () => {
+    // A bare `=` in a condition is already `Equal`, so there is nothing to
+    // warn about; and an argument or element is odd but unambiguous.
+    for (const src of [
+      'if i = 5 { 1 } else { 2 }',
+      'if i == 5 { 1 } else { 2 }',
+      'if (i := 5) == 5 { 1 }',
+      'f(a := 1)',
+      '[a := 1]',
+      'i := 5',
+    ])
+      expect([src, parseCodes(src)]).toEqual([src, []]);
+  });
+
+  test('a match GUARD is a condition too', () => {
+    // A guard consumes its value as a boolean exactly like `if`/`while`.
+    expect(parseCodes('match x { y if flag := true => 1 }')).toEqual([
+      'assign-in-condition',
+    ]);
+    expect(parseCodes('match x { y if flag == true => 1 }')).toEqual([]);
+  });
+
+  test('the target must be a WRITTEN name, not one a fold produced', () => {
+    // `+` is the identity, so `+x` reduces to the bare symbol `x`; and the
+    // root of `true.x` is a literal word. Neither is a binding target, so
+    // both compare.
+    expect(validCortex('+x = 5')).toStrictEqual(['Equal', 'x', 5]);
+    expect(validCortex('true.x = 1')).toStrictEqual([
+      'Equal',
+      ['Field', 'True', { str: 'x' }],
+      1,
+    ]);
+    // …and the explicit spelling against a literal root is still rejected.
+    expect(parseCodes('true.x := 1')).toContain('reserved-word');
+    // Redundant parentheses around a name do NOT change what it is.
+    expect(validCortex('(x) = 5')).toStrictEqual(['Assign', 'x', 5]);
+  });
+
+  test('`a = b = 5` is diagnosed — it would assign a boolean', () => {
+    expect(parseCodes('a = b = 5')).toContain('chained-assignment');
+    // …but the explicit spellings are not: one chains, one compares.
+    expect(parseCodes('a := b := 5')).toEqual([]);
+    expect(parseCodes('a = (b = 5)')).toEqual([]);
+    expect(parseCodes('a = b == 5')).toEqual([]);
   });
 });
 

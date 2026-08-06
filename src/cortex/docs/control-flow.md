@@ -835,10 +835,67 @@ counter |-> do { counter = counter + 1; counter }
 
 A `do` **not** followed by `{` is an `opening-bracket-expected` diagnostic.
 
-## `return` / `break` / `continue`
+## `break` and `continue`
 
-These three words are reserved but **not implemented**: Cortex's
-expression-oriented style (an `if` is a value, a block's value is its last
-expression) doesn't need an explicit `return` yet, and loops are for-effect
-only. Using them produces a `reserved-word` diagnostic rather than the
-control-transfer behavior their names suggest.
+`break` leaves the innermost enclosing loop; `continue` skips to its next
+iteration. Both lower to the engine's `Break()` / `Continue()` primitives.
+
+```cortex
+for x in [1, 2, 3, 4] {
+  if x > 3 { break }
+  if x == 2 { continue }
+  f(x)
+}
+```
+
+They are valid anywhere inside a loop body — directly, or nested in an `if`, a
+`match` case, or a `do` block:
+
+```cortex
+for x in xs {
+  match x {
+    0 => continue
+    _ => f(x)
+  }
+}
+```
+
+Outside a loop they are a `control-outside-loop` diagnostic:
+
+<!-- cortex-test: expect-diagnostics -->
+
+```cortex
+if x > 1 { break }
+```
+
+The loop context **resets at every function and lambda boundary**. A `break`
+written inside a function or lambda defined in a loop body does not target
+that loop — it is outside a loop, and diagnosed:
+
+<!-- cortex-test: expect-diagnostics -->
+
+```cortex
+for x in xs {
+  function h() { break }
+}
+```
+
+This boundary is not a style rule. The engine's `Block` short-circuits on
+`Break`/`Continue` structurally, so a `Break` returned out of a lambda body
+would otherwise transfer control to whatever loop happened to be running.
+
+Only the value-less forms are surface syntax. The engine's `Break(v)` — which
+makes the loop evaluate to `v` — has no Cortex spelling yet; it is bundled with
+the ruling on a general `return`.
+
+Serialized back from MathJSON, they appear in their call form (`Break()`,
+`Continue()`), like the `Loop` they belong to.
+
+## `return`
+
+`return` is **not implemented**: Cortex's expression-oriented style (an `if` is
+a value, a block's value is its last expression) doesn't need an explicit
+`return` yet. It is listed among the words the language reserves the right to
+claim later, but nothing claims it today — so `return` is an ordinary
+identifier and carries no control-flow meaning at all, rather than producing a
+diagnostic. Prefer not to use it as a name.

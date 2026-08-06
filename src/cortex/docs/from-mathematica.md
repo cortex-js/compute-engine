@@ -28,7 +28,7 @@ operators all keep their names; `{k, 1, n}` iterator triples work in `Sum`,
 2. **`{…}` is a set, not a list.** A Cortex list is `[1, 2, 3]`. The braces
    survive in iterator triples, where they read positionally, but a bare
    `{1, 2, 2}` is the *set* `{1, 2}`.
-3. **`=` is assignment and `->` is a key/value pair.** Equations use `==`
+3. **`=` assigns only as a whole statement; inside an expression it is `Equal`.** `->` is a key/value pair. `:=` always assigns and `==` always compares
    (as in Wolfram), but replacement rules must be written `Rule(x, 3)`.
 4. **There is no `%`**, no `Out[]`, and no notebook history. `%` is the
    remainder operator.
@@ -264,7 +264,7 @@ Surface forms that look like Wolfram but behave differently.
 | `E`, `I` | Ordinary undeclared symbols — they stay symbolic, silently | `e`, `i` |
 | `expr /. x -> 3` | `->` builds a `KeyValuePair`, not a `Rule` | `ReplaceAll(expr, Rule(x, 3))` |
 | `%` for the last result | `%` is the `Mod` operator | bind results with `let` |
-| `x = 4` inside `Solve` | `=` is assignment: `Solve(x^2 = 4, x)` is silently `[]` | `Solve(x^2 == 4, x)` |
+| `x = 4` inside `Solve` | Works as expected — inside an expression `=` is `Equal`, so `Solve(x^2 = 4, x)` is the equation | *(nothing to change)* |
 | `expr;` to suppress | `;` only separates statements | *(nothing to suppress)* |
 | `Total`, `Select`, `Cases`, `MemberQ`, `Accumulate`, `Nest` | Unknown names: the call stays **symbolic and inert**, with a did-you-mean warning naming the Cortex operator | `Sum`, `Filter`, `Filter`, `Contains(xs, v)`, `Scan`, `Iterate` |
 | `Ceiling`, `Quotient`, `IntegerPart` | Inert (with a did-you-mean warning) | `Ceil`, `Floor(a/b)`, `Floor` |

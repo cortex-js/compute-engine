@@ -791,3 +791,75 @@ describe('CORTEX EXECUTE — the bare `_` identity shorthand', () => {
     expect(value.toString()).toBe('["True"]');
   });
 });
+
+describe('CORTEX EXECUTE — `??` and `is`', () => {
+  const value = (src: string): string => {
+    const { value, diagnostics } = run(src);
+    expect(diagnostics).toEqual([]);
+    return value.toString();
+  };
+
+  test('`??` discharges absence, left to right', () => {
+    expect(value('5 ?? 1')).toBe('5');
+    expect(value('NaN ?? 7')).toBe('7');
+    expect(value('Missing ?? 7')).toBe('7');
+    expect(value('NaN ?? Missing ?? 3')).toBe('3');
+  });
+
+  test('`??` is lazy: the fallback is not evaluated when the value is present', () => {
+    expect(value('1 ?? (1/0)')).toBe('1');
+  });
+
+  test('`??` over an out-of-band index discharges the hole', () => {
+    expect(value('let xs = [10, 20]\nxs[9] ?? 0')).toBe('0');
+  });
+
+  test('`??` inside a lambda body', () => {
+    expect(value('let f = (x) |-> x ?? 0\nf(NaN)')).toBe('0');
+  });
+
+  test('`is` is a runtime type test', () => {
+    expect(value('5 is integer')).toBe('"True"');
+    expect(value('5 is string')).toBe('"False"');
+    expect(value('"a" is string')).toBe('"True"');
+    expect(value('if 5 is integer { "yes" } else { "no" }')).toBe('"yes"');
+  });
+});
+
+describe('CORTEX EXECUTE — `break` and `continue`', () => {
+  test('`break` leaves the loop', () => {
+    // `total` accumulates 1 + 2 and stops: the loop is abandoned at x = 3.
+    const { value, diagnostics } = run(
+      'let total = 0\nfor x in [1, 2, 3, 4] {\n  if x > 2 { break }\n  total = total + x\n}\ntotal'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(3);
+  });
+
+  test('`continue` skips to the next iteration', () => {
+    // Every element is visited; only x = 2 is skipped → 1 + 3 + 4.
+    const { value, diagnostics } = run(
+      'let total = 0\nfor x in [1, 2, 3, 4] {\n  if x == 2 { continue }\n  total = total + x\n}\ntotal'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(8);
+  });
+
+  test('`break` in a `while` loop', () => {
+    const { value, diagnostics } = run(
+      'let k = 0\nwhile True {\n  k = k + 1\n  if k >= 3 { break }\n}\nk'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(3);
+  });
+
+  test('`break` targets the INNERMOST loop', () => {
+    // The inner loop breaks on its first element, so the outer loop still
+    // runs all three times: 3 × 1 = 3.
+    const { value, diagnostics } = run(
+      'let n = 0\nfor x in [1, 2, 3] {\n  for y in [10, 20] {\n    n = n + 1\n    break\n  }\n}\nn'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(3);
+  });
+});

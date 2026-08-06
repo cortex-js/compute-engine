@@ -7,9 +7,10 @@ Category: scientific
 
 Grammar validation
 ------------------
-Last validated: 2026-07-12 against the Cortex grammar shipped in
-`src/cortex/` (compute-engine 0.74.0). This pass added the lowercase
-`true`/`false` literal aliases (ratified 2026-07-11) to the constants table.
+Last validated: 2026-08-06 against the Cortex grammar shipped in
+`src/cortex/`. This pass narrowed the keyword table to the words the grammar
+actually claims (the reserved-word relaxation), added `break`/`continue`, the
+contextual `type`/`alias`/`is`, and the non-finite literals.
 Tables cross-checked against source:
   - operators.ts   — operator spellings incl. `%` (Mod) and postfix `!`
                      (Factorial), plus `|>`/`~>` (Pipe), `**` (Power), `!in`
@@ -18,10 +19,15 @@ Tables cross-checked against source:
                      digit separators), `"…"` / `"""…"""` / `#"…"#` strings,
                      `` `…` `` verbatim symbols, `$…$` LaTeX islands, `#…`
                      pragmas, and line + nested block comments.
-  - reserved-words.ts — the reserved-word set (highlighted as keywords).
+  - reserved-words.ts — `ACTIVE_WORDS` (highlighted as keywords) and
+                     `LITERAL_WORDS` (highlighted as constants). The merely
+                     RESERVED words are ordinary identifiers and are NOT
+                     highlighted.
 
-`highlight.js` is NOT a devDependency of this repo, so this mode is maintained
-by static review rather than an automated test. When the grammar changes, update
+`highlight.js` is NOT a devDependency of this repo, so the assembled mode is
+maintained by static review rather than an automated test — but the keyword and
+constant TABLES are exported and pinned by
+`test/cortex/reserved-words.test.ts`, which needs no such dependency. When the grammar changes, update
 the tables below and refresh the "Last validated" date. A quick structural check
 is `node -e "import('./src/cortex/highlight-js-mode.js').then(m =>
 m.default({ C_LINE_COMMENT_MODE:{}, COMMENT:()=>({}) }))"` (asserts the module
@@ -72,96 +78,40 @@ const DOMAINS_LIST = [
   'Matrix',
 ];
 
-// Reserved words (source of truth: `src/cortex/reserved-words.ts`) plus the
-// contextual `let` keyword (which is NOT reserved but heads a declaration).
-// Most reserved words are not yet wired to a construct; the live heads are
-// `let`, `const`, `function`, `if`, `else`, `while`, `for`, and the contextual
-// `in`. All reserved words are highlighted so an author sees that the name is
-// unavailable as a bare identifier.
-const KEYWORDS_LIST = [
+// The words the grammar CLAIMS (source of truth: `ACTIVE_WORDS` in
+// `src/cortex/reserved-words.ts`), plus the contextual heads that are not
+// reserved words at all but do head a construct: `let`, `type`, `alias`, and
+// the `is` type test.
+//
+// The merely-RESERVED words (`set`, `with`, `label`, `where`, …) are
+// deliberately NOT here. They are ordinary identifiers — they can name a
+// binding, be assigned to, be a `|->` parameter, and be called — so painting
+// them as keywords would tell the author a name is unavailable when it is
+// available. They are a documentation concern, not a coloring one.
+//
+// The literal words (`true`, `false`, `NaN`, `Infinity`, `oo`) complete the
+// hard-reserved set and live in `CONSTANTS_LIST` below.
+//
+// `test/cortex/reserved-words.test.ts` pins this list against the two tiers so
+// it cannot drift again.
+export const KEYWORDS_LIST = [
+  // Contextual heads — not reserved words, but they head a construct.
   'let',
-  'abstract',
-  'at',
-  'and',
-  'as',
-  'async',
-  'assert',
-  'await',
-  'begin',
+  'type',
+  'alias',
+  'is',
+  // ACTIVE_WORDS — the heads and word operators the parser claims.
   'break',
-  'case',
-  'catch',
-  'class',
   'const',
   'continue',
-  'debugger',
-  'default',
-  'delete',
-  'dynamic',
   'do',
-  'each',
   'else',
-  'end',
-  'export',
-  'extern',
-  'finally',
   'for',
-  'from',
   'function',
-  'generator',
-  'get',
-  'global',
-  'goto',
   'if',
   'in',
-  'inline',
-  'interface',
-  'internal',
-  'import',
-  'iterator',
-  'label',
-  'lazy',
-  'local',
-  'loop',
   'match',
-  'module',
-  'namespace',
-  'native',
-  'new',
-  'not',
-  'of',
-  'on',
-  'optional',
-  'or',
-  'package',
-  'parallel',
-  'private',
-  'protected',
-  'protocol',
-  'public',
-  'repeat',
-  'return',
-  'self',
-  'set',
-  'static',
-  'super',
-  'switch',
-  'this',
-  'throw',
-  'to',
-  'try',
-  'union',
-  'until',
-  'using',
-  'var',
-  'variant',
-  'warn',
-  'when',
-  'where',
   'while',
-  'with',
-  'xor',
-  'yield',
 ];
 
 const KEYWORD = {
@@ -182,11 +132,14 @@ const BUILT_IN = {
 
 // Literal constants. `true`/`false` are the lowercase input aliases for the
 // `True`/`False` symbols (ratified 2026-07-11).
-const CONSTANTS_LIST = [
+export const CONSTANTS_LIST = [
   'True',
   'False',
   'true',
   'false',
+  'NaN',
+  'Infinity',
+  'oo',
   'Maybe',
   'Missing',
   'Nothing',

@@ -161,8 +161,12 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `The type variable "${args[0]}" is declared more than once`;
     case 'generic-clause-unsupported':
       return `"${args[0]}" is generic; generic functions are single-clause — they cannot use literal parameters or be extended with more clauses`;
-    case 'assign-in-argument':
-      return `"=" in an argument is assignment; use "==" for an equation or comparison`;
+    case 'control-outside-loop':
+      return `"${args[0]}" is only valid inside a "while" or "for" body; the loop context resets at every function and lambda boundary`;
+    case 'assign-in-condition':
+      return `":=" in a condition assigns, and the assigned value becomes the test; use "==" to compare, or assign on its own line first`;
+    case 'chained-assignment':
+      return `"=" only assigns as a whole statement — the second "=" here compares, so this assigns a boolean; write "a := b := 5" to chain the assignment, or parenthesize if the comparison was meant`;
     case 'parameter-shadows-constant':
       return `The parameter "${args[0]}" shadows the constant of the same name: inside the body, "${args[0]}" is the argument, not the constant. Rename the parameter, or use the constant's value directly`;
     case 'zero-index':

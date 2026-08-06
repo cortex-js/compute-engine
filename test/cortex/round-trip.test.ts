@@ -25,7 +25,20 @@ import { MathJsonExpression } from '../../src/math-json/types';
 // diagnostic.
 //
 
-const FLAT = new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'And', 'Or']);
+// `Coalesce` joins the associative-flattening set for a different reason than
+// the arithmetic heads: it is variadic in MathJSON but right-associative in
+// Cortex, and the two shapes are observationally equal (an undecided operand
+// leaves the tail unevaluated), so the serializer spells both as one `??`
+// chain.
+const FLAT = new Set([
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'And',
+  'Or',
+  'Coalesce',
+]);
 
 function toNum(s: string): string {
   let t = s.replace(/_/g, '');
@@ -158,6 +171,12 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   ['KeyValuePair', ['KeyValuePair', 'a', 'b']],
   ['Assign', ['Assign', 'x', 2]],
   ['Pipe', ['Pipe', 'a', 'b']],
+  ['Coalesce', ['Coalesce', 'a', 'b']],
+  // A variadic `Coalesce` serializes as the `??` chain and re-parses nested;
+  // normalization (4) flattens both. The two shapes are observationally equal
+  // — see the lazy-tail rule in `library/core.ts`.
+  ['Coalesce variadic', ['Coalesce', 'a', 'b', 'c']],
+  ['Coalesce nested', ['Coalesce', 'a', ['Coalesce', 'b', 'c']]],
 
   // Negate (documented sign-folding normalization)
   ['Negate symbol', ['Negate', 'x']],

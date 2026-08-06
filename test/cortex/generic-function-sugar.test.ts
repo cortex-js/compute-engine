@@ -401,7 +401,7 @@ describe('M2 SUGARED GENERICS — grammar diagnostics (§3.1/§3.2)', () => {
     const [expr, diags] = parseCortex('f<T>(x) = x');
     expect(diags ?? []).toEqual([]);
     expect(strip(expr)).toEqual([
-      'Assign',
+      'Equal',
       ['Greater', ['Less', 'f', 'T'], 'x'],
       'x',
     ]);

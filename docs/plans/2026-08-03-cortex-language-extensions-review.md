@@ -29,6 +29,66 @@ Every status claim below was re-verified against the implementation on
 2026-08-05, two days after the note was written. Several items had already
 landed, and one had landed only partially — see tier 0.
 
+### Tier 1 — IMPLEMENTED 2026-08-06 (plus positional `=`, below)
+
+All five tier-1 items landed together. Notes on what the implementation ruled,
+where it differs from the sketch above, and what it deliberately left out:
+
+1. **Reserved-word relaxation — done.** The fix was not positional: all three
+   remaining positions flowed through the same expression-primary rejection.
+   `reserved-words.ts` now has two tiers — `HARD_RESERVED_WORDS`
+   (`LITERAL_WORDS` ∪ `ACTIVE_WORDS`, the 16 words the grammar actually
+   consumes) is what the parser rejects and the serializer spells verbatim;
+   `RESERVED_WORDS` stays the documented "may be claimed later" list and is now
+   ordinary identifiers. The active words stay rejected in expression position
+   (`y = while` is a keyword out of place, pinned by an existing test), which
+   is the "keep hard reservation for active keywords" half of the policy.
+   One hole the note did not name was closed at the same time: `true = 5` and
+   `NaN = 1` were accepted **silently**, because a literal word has already
+   become its value node by the time `=` is combined. The bare-target position
+   now checks the source slice (`parser.checkAssignTarget`).
+
+2. **`break`/`continue` — done**, lowering to `["Break"]`/`["Continue"]`. The
+   loop context is a parser counter reset to zero at every function, method
+   and lambda boundary; outside a loop the diagnostic is
+   `control-outside-loop`. They are admitted in *expression* position too, not
+   only statement position — a `match` case body and a conditional branch are
+   expressions in Cortex, so `match x { 0 => continue }` would otherwise be
+   unspellable. Value-carrying `break value` was NOT added (still bundled with
+   the general-`return` ruling). The serializer keeps the call form
+   `Break()`/`Continue()`: `Loop` has no keyword spelling, so a bare `break`
+   would re-parse outside a loop.
+
+3. **`assign-in-argument` — SUPERSEDED, then removed.** It shipped as an error
+   with a `==` fix-it, and was retired hours later when positional `=` landed
+   (below): `f(x = 4)` is now an ordinary comparison, so there is nothing left
+   to diagnose. The diagnostic code and its fix-it are gone.
+
+4. **`is` — done**, lowering to `Element(x, type)` — the same shape a `match`
+   type pattern produces. Two rulings the note left open:
+   - Its right operand is bounded to **one identifier token**, not handed to
+     the type subparser wholesale. Otherwise the TYPE grammar's `|`/`&`
+     swallow the EXPRESSION grammar's `||`/`&&`, and
+     `x is integer && y is string` fails to parse. A compound type is still
+     recognized (and reported `type-pattern-unsupported`, exactly as the
+     equivalent typed pattern is) by re-parsing it when a lone `|`, `&`, `<`
+     or `->` follows the name.
+   - There is no `is` spelling in the serializer: `Element` serializes as
+     `in`, so `x is integer` reads back as `x in integer`. `is` is an input
+     spelling; no new MathJSON head was invented.
+
+5. **`??` — done**, and **the `Coalesce` lazy-tail precondition was NOT
+   stale**. `Coalesce`'s evaluate handler eagerly evaluated the whole
+   remaining tail the moment an operand was undecided, so a later operand's
+   effects ran on a path the decided case never takes. Fixed first
+   (`library/core.ts`); the tail is now left unevaluated, which also makes the
+   flat and nested forms observationally equal. `??` is precedence **18**,
+   right-associative — pinned from both sides: looser than `Pipe` (20) so
+   `xs |> f ?? 0` defaults the pipeline's *result*, tighter than `MapsTo` (15)
+   so `x |-> x.a ?? 0` defaults inside the body. That places it below `->`,
+   exactly where `Pipe` already sits, so `{k -> v ?? d}` needs parentheses and
+   gets the same `dictionary-key-value-expected` diagnostic without them.
+
 ### Tier 0 — already landed; do not schedule
 
 - **Transparent generic type aliases** (third-tier item 2).
@@ -43,7 +103,7 @@ landed, and one had landed only partially — see tier 0.
   `RESERVED_WORDS` are usable as identifiers. Three positions were missed —
   see tier 1 item 1.
 
-### Tier 1 — easy wins
+### Tier 1 — easy wins *(all IMPLEMENTED 2026-08-06 — see above)*
 
 1. **Finish the reserved-word relaxation.**
    ([section](#too-many-hypothetical-keywords-are-reserved)) The policy and its
@@ -65,7 +125,10 @@ landed, and one had landed only partially — see tier 0.
    today (as a warning) and the fix-it machinery is in place, so this is a
    severity flip plus a fix-it string. Scope it to *that* change: the broader
    "restrict assignment to a statement-position binding target" half is a
-   separate, larger item — chained `a = b = 5` still parses clean.
+   separate, larger item — chained `a = b = 5` still parses clean. That half
+   is now superseded by
+   [positional `=`](#positional-assignment-and-comparison), a tier-2
+   item.
 
 4. **An `is` type-test operator (`x is integer`).**
    ([section](#1-flow-sensitive-narrowing-and-exhaustiveness)) The smallest new
@@ -103,6 +166,10 @@ landed, and one had landed only partially — see tier 0.
 9. **`if let`.** ([section](#refutable-binding-if-let)) Blocked on
    first-tier item 7 — resolving full type expressions in typed patterns —
    which is independently useful and should be scheduled first.
+
+9b. **Positional `=`, with `:=` for assignment — IMPLEMENTED 2026-08-06.**
+    ([section](#positional-assignment-and-comparison)) See that section for
+    what was ruled and what the implementation settled.
 
 ### Tier 3 — needs a design ruling or a prerequisite landing first
 
@@ -228,16 +295,143 @@ Solve(x^2 = 4, x)
 
 It can return a plausible wrong answer because `=` is `Assign`, not `Equal`.
 The existing `assign-in-argument` warning should become an error with a `==`
-fix-it. More generally, assignment should be restricted to a bare binding
-target in statement position. Statement position means a direct statement of
-the program or of a `{ ... }` block body — nothing else. In particular a
-parenthesized assignment is an expression and is rejected, so
-`Solve((x = 4), x)` does not reopen the trap, and chained assignment
-(`a = b = 5`) is rejected because its right-hand side is itself an assignment
-expression. Function definitions remain their own parsed form.
+fix-it. **(Done 2026-08-06 — see tier 1.)**
 
-This preserves Cortex's established `=` spelling without allowing it in the
-positions where it is overwhelmingly likely to be a mistaken equation.
+More generally, assignment should be restricted to a bare binding target in
+statement position. Statement position means a direct statement of the program
+or of a `{ ... }` block body — nothing else. In particular a parenthesized
+assignment is an expression, so `Solve((x = 4), x)` does not reopen the trap,
+and chained assignment (`a = b = 5`) is caught because its right-hand side is
+itself an assignment expression. Function definitions remain their own parsed
+form.
+
+That leaves one question the original proposal answered by rejection: what
+`=` *means* in the positions it is no longer allowed to be assignment. The
+next section proposes reinterpreting it rather than rejecting it, and
+supersedes this half of the item.
+
+#### Positional assignment and comparison
+
+_Added 2026-08-06. **IMPLEMENTED the same day** — see "How it was ruled" at the
+end of this section for the four decisions and what they cost._
+
+The baseline is worse than the `Solve` example suggests. Today `=` is `Assign`
+in **every** position, and only a call argument is diagnosed:
+
+```text
+if x = 5 { 1 } else { 2 }     →  If(Assign(x, 5), …)
+while x = 5 { }               →  Loop(…Not(Assign(x, 5))…)
+[a = 1]                       →  List(Assign(a, 1))
+x^2 = 4                       →  Assign(Power(x, 2), 4)
+```
+
+The C footgun is live, unguarded, and silent.
+
+The proposal is a three-way split:
+
+- `:=` is **always** `Assign`. It is currently unclaimed punctuation —
+  `x := 5` is an `unexpected-symbol` diagnostic, and `characters.ts` has a
+  commented-out `≔` (U+2254) mapping already reserved for it.
+- `==` is **always** `Equal`, as today.
+- `=` is either, decided by **syntactic position**: `Assign` when it is the
+  top-level operator of a statement whose left side is a binding target;
+  `Equal` everywhere else.
+
+The decision is positional, so it never depends on evaluating a value, on
+scope, or on which definitions happen to be installed — the constraint this
+note sets for all contextual syntax in the summary assessment. It is the same
+boundary the paragraph above draws; the only change is that the expression
+side becomes `Equal` instead of an error. Every line in the table above then
+reads the way a mathematician expects, and `Solve(x^2 = 4, x)` simply works.
+
+Four things need an explicit ruling.
+
+1. **Chained `a = b = 5` must stay an error.** Under the bare rule the outer
+   `=` is statement position (`Assign`) while the inner is expression position
+   (`Equal`), so it would silently become "assign a boolean". Keep the
+   rejection above as an explicit carve-out; do not let the new rule swallow
+   it.
+
+2. **`f(a = 1)` is a real regression for one population.** Today a Python
+   migrant reaching for a keyword argument gets an error with a `==` fix-it.
+   Under the rule the call is legal, silently passes a boolean, and fails
+   later with a worse message. This is the one place the proposal is a step
+   backwards, and it should be weighed against `Solve(x^2 = 4, x)` going from
+   error to correct. Note that the named-argument syntax this note proposes
+   elsewhere spells the binding `name: value`, not `name = value`, so the two
+   do not collide — only the migrant's reflex does.
+
+3. **Statement-level `x^2 = 4` becomes `Equal`**, because its left side is not
+   a binding target. That is the most valuable single consequence: an equation
+   as a cell's value is what a notebook or a plotting host actually wants, and
+   it is currently an `Assign` to a `Power`.
+
+4. **Statement-level `y = 2x + 1` is irreducible.** With a bare-symbol left
+   side, a mathematician means the line and a programmer means the assignment.
+   No positional rule can separate them; the rule picks `Assign` by fiat,
+   preserving today's behavior. Worth stating explicitly because it is exactly
+   the shape a plotting consumer would hand the parser, and the answer is "use
+   `==` (or a `$…$` island) when you mean the equation."
+
+Two implementation consequences:
+
+- **Serialization.** A nested `Assign` has no `=` spelling left, and a
+  statement-level `Equal` with a symbol left side would re-parse as `Assign`.
+  The clean resolution is that `=` becomes an **input-only** spelling and
+  output is always `:=` / `==` — precedent-consistent with `oo`, `~>`, and
+  `**`. The cost is that the serializer is also the formatter, so formatting
+  would rewrite every authored `=`. Preserving the authored spelling through
+  source metadata is the alternative, and is the same mechanism the
+  `otherwise` catch-all raises.
+- **The parser has no statement-position signal today.** `parseExpression(0)`
+  is also used for the `while` condition, the `for` collection, and the
+  `match` subject and case bodies, so `minPrecedence === 0` cannot stand in
+  for it: an explicit flag has to be threaded from `parseStatement` /
+  `parseBlock`. That plumbing is required by the restriction proposal above
+  regardless of which way this question is answered.
+
+A smaller variant is available if the ruling on point 2 goes badly: adopt
+`:=` alone, as an unambiguous assignment spelling, and leave `=` exactly as it
+is. That captures the readability win at zero risk, and leaves the positional
+rule as a later decision.
+
+##### How it was ruled
+
+The author's ruling was that `if a = true { … }` must read as `Equal`, which
+selects the full positional design. The four open points resolved as:
+
+1. **Chained `a = b = 5` is diagnosed** (`chained-assignment`), as proposed.
+   Detection is by node identity — the parser remembers the `Equal` most
+   recently built from a *bare* `=`, so `a := b := 5` (genuinely chained) and
+   `a = (b = 5)` (explicitly a comparison) both stay silent.
+2. **The `f(a = 1)` regression is accepted**, and it retired the
+   `assign-in-argument` diagnostic entirely: once `=` in an argument *is*
+   `Equal`, diagnosing it is wrong. Note this is not a collision with the
+   proposed named-argument syntax, which spells the binding `name: value`.
+3. **A non-binding left side compares even as a statement**, so `x^2 = 4`
+   is the equation, as proposed.
+4. **A bare-symbol left side still assigns** (`y = 2x + 1`), as proposed. Write
+   `==` for the equation.
+
+Three things the section did not anticipate:
+
+- **The binding target includes `Field` and `At` chains** (`p.x = 1`,
+  `xs[1] = 2`), not just a bare name. Both already *error* at evaluation
+  (Cortex records and collections are immutable), so reading them as
+  comparisons would have traded a real diagnostic for a silent `False`.
+- **The literal words needed excluding explicitly.** `true`/`false` become
+  SYMBOL nodes, so they looked like binding targets and `true = 5` resolved to
+  an assignment — while `NaN = 1`, whose literal is a NUMBER node, resolved to
+  a comparison. All five are now excluded, so a bare `=` against any of them is
+  the equation and only `:=` is rejected.
+- **A bare `=` has no fixed precedence.** It binds at 10 when it assigns and at
+  60 when it compares, resolved before the precedence test. Fixing it at 10
+  would have made `if x = 5 && y` group as `x = (5 && y)`.
+
+The serialization question was ruled for **input-only `=`**: output always uses
+`:=` and `==`. The cost is real and visible — the formatter rewrites an
+authored `=` to `:=`, which changed several formatter and round-trip
+expectations — but it buys an exact round-trip with no source metadata.
 
 ### Operator runs are tokenized too coarsely
 
@@ -1964,7 +2158,8 @@ This is prioritization, not approval.
 1. Synchronize the language definition with effects, fields, multi-clause
    parameters, and missing-data operations.
 2. Enforce return contracts.
-3. Make assignment-in-argument an error.
+3. Make assignment-in-argument an error, then rule positional `=` (with `:=`
+   as the unambiguous assignment spelling).
 4. Fix known-operator tokenization.
 5. Make unused future keywords contextual.
 6. Clarify checked handling of error values.

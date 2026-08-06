@@ -1,4 +1,5 @@
 import { parseCortex } from '../../src/cortex/parse-cortex';
+import { serializeCortex } from '../../src/cortex/serialize-cortex';
 import { validCortex } from '../utils';
 
 //
@@ -152,11 +153,7 @@ describe('CORTEX FUNCTION DEFINITIONS', () => {
     expect(validCortex('function f(x) -> real { x + 1 }')).toStrictEqual([
       'DefineFunction',
       'f',
-      [
-        'Function',
-        ['Typed', ['Block', ['Add', 'x', 1]], { str: 'real' }],
-        'x',
-      ],
+      ['Function', ['Typed', ['Block', ['Add', 'x', 1]], { str: 'real' }], 'x'],
     ]);
   });
 
@@ -486,9 +483,7 @@ describe('CORTEX STATEMENT KEYWORDS STAY RESERVED IN EXPRESSION POSITION', () =>
 
 describe('CORTEX MULTI-STATEMENT PROGRAM', () => {
   test('declarations and control flow sequence into a Block', () => {
-    expect(
-      validCortex('let x = 5\nif x > 0 { 1 } else { 2 }')
-    ).toStrictEqual([
+    expect(validCortex('let x = 5\nif x > 0 { 1 } else { 2 }')).toStrictEqual([
       'Block',
       ['Declare', 'x', ['Dictionary', ['KeyValuePair', 'value', 5]]],
       ['If', ['Greater', 'x', 0], ['Block', 1], ['Block', 2]],
@@ -557,5 +552,76 @@ describe('CORTEX STATEMENTS — destructuring declarations', () => {
     const [, diags] = parseCortex('let (x, 5) = p');
     expect(diags.length).toBeGreaterThan(0);
     expect(diags[0].message).toStrictEqual(['symbol-expected']);
+  });
+});
+
+describe('CORTEX `break` AND `continue`', () => {
+  const codes = (src: string): string[] =>
+    parseCortex(src)[1].map((d) =>
+      Array.isArray(d.message) ? String(d.message[0]) : String(d.message)
+    );
+
+  test('they lower to the engine `Break()` / `Continue()` FUNCTION forms', () => {
+    // The function form is what the engine dispatches on: a bare `Break`
+    // SYMBOL canonicalizes to an error, precisely so the two cannot be
+    // confused (`canonicalStatement`, library/control-structures.ts).
+    expect(validCortex('for x in xs { break }')).toStrictEqual([
+      'Loop',
+      ['Block', ['Break']],
+      ['Element', 'x', 'xs'],
+    ]);
+    expect(validCortex('for x in xs { continue }')).toStrictEqual([
+      'Loop',
+      ['Block', ['Continue']],
+      ['Element', 'x', 'xs'],
+    ]);
+  });
+
+  test.each([
+    'for x in xs { break }',
+    'for x in xs { continue }',
+    'while c { break }',
+    'for x in xs { if x > 2 { break } }',
+    'for x in xs { do { break } }',
+    'for x in xs { match x { 1 => break \n _ => 0 } }',
+    'for x in xs { for y in ys { break } }',
+  ])('accepted inside a loop: `%s`', (src) => {
+    expect(codes(src)).toEqual([]);
+  });
+
+  test.each([
+    ['at top level', 'break'],
+    ['at top level', 'continue'],
+    ['in a bare `if`', 'if x > 1 { break }'],
+    ['in a bare `match`', 'match x { 1 => break }'],
+    // The loop context resets at every function/lambda boundary: a `break`
+    // there must not escape to the enclosing loop.
+    ['in a lambda inside a loop', 'for x in xs { g(y |-> break) }'],
+    ['in a `do` lambda inside a loop', 'for x in xs { g(y |-> do { break }) }'],
+    ['in a function inside a loop', 'for x in xs { function h() { break } }'],
+    ['in a definition RHS inside a loop', 'for x in xs { f(x) = break }'],
+    // The explicit `Function(…)` literal is a boundary too. A call argument
+    // is otherwise parsed in the ENCLOSING loop context, so this parsed clean
+    // and the lambda could later emit `Break()` into an unrelated loop.
+    [
+      'in an explicit `Function()` literal',
+      'for x in xs { let f = Function(break) }',
+    ],
+    [
+      'in an explicit `Function()` literal',
+      'for x in xs { let f = Function(continue) }',
+    ],
+  ])('rejected %s: `%s`', (_where, src) => {
+    expect(codes(src)).toContain('control-outside-loop');
+  });
+
+  test('they round-trip through the serializer in call form', () => {
+    // `Loop` has no keyword spelling in the serializer, so a bare `break`
+    // would re-parse OUTSIDE a loop (a `control-outside-loop` error). The
+    // call form is the faithful one.
+    expect(serializeCortex(['Break'])).toBe('Break()');
+    expect(serializeCortex(['Continue'])).toBe('Continue()');
+    expect(validCortex('Break()')).toStrictEqual(['Break']);
+    expect(validCortex('Continue()')).toStrictEqual(['Continue']);
   });
 });

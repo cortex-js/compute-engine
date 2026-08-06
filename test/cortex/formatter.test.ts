@@ -233,7 +233,7 @@ describe('CORTEX FORMATTER — the `if` block form stacks conventionally', () =>
     ]);
     expect(out.split('\n')).toEqual([
       'if someLongVariableName > 0 {',
-      '  accumulator = accumulator + someLongVariableName',
+      '  accumulator := accumulator + someLongVariableName',
       '  accumulator * 2',
       '} else {',
       '  0',
@@ -273,7 +273,7 @@ describe('CORTEX FORMATTER — the `if` block form stacks conventionally', () =>
     expect(out.split('\n')).toEqual([
       'if outerCondition {',
       '  if innerCondition {',
-      '    x = 1',
+      '    x := 1',
       '    x + 1',
       '  } else {',
       '    2',
@@ -298,11 +298,15 @@ describe('CORTEX FORMATTER — the `if` block form stacks conventionally', () =>
         'someFunctionName',
         ['Block', ['Assign', 'x', 1], ['Add', 'x', 1], ['Multiply', 'x', 2]],
       ],
-      { margin: 24 }
+      // 26, not 24: the assignment serializes as `:=`, one column wider than
+      // the old bare `=`, and at this indent a 24 margin wraps it — which
+      // would test the wrap rather than the do-block indentation this test is
+      // about. The expression is still far too wide to fit on one line.
+      { margin: 26 }
     );
     expect(out.split('\n')).toEqual([
       'someFunctionName(do {',
-      '                   x = 1',
+      '                   x := 1',
       '                   x + 1',
       '                   x * 2',
       '                 })',

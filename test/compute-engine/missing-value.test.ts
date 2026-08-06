@@ -611,6 +611,46 @@ describe('P3 — Coalesce (§3.D)', () => {
     expect(ce.box(['Coalesce', 5]).evaluate().toString()).toBe('5');
   });
 
+  test('an UNDECIDED operand leaves the tail unevaluated', () => {
+    // `Coalesce` short-circuits, so an operand past an undecided one may never
+    // be needed. Evaluating the tail here would run its effects on a path the
+    // decided case never takes — and would make the flat form observably
+    // different from the nested one, blocking `a ?? b ?? c` flattening.
+    const e = new ComputeEngine();
+    e.declare('u', 'number');
+    const ran: string[] = [];
+    e.declare('trace', {
+      signature: '(number) -> number',
+      evaluate: (ops) => {
+        ran.push(ops[0].toString());
+        return ops[0];
+      },
+    });
+
+    // Flat: neither tail operand runs.
+    expect(
+      e.box(['Coalesce', 'u', ['trace', 1], ['trace', 2]]).evaluate().toString()
+    ).toBe('Coalesce(u, trace(1), trace(2))');
+    expect(ran).toEqual([]);
+
+    // Nested (the shape `a ?? b ?? c` parses to): same, and the same effects.
+    ran.length = 0;
+    expect(
+      e
+        .box(['Coalesce', 'u', ['Coalesce', ['trace', 1], ['trace', 2]]])
+        .evaluate()
+        .toString()
+    ).toBe('Coalesce(u, Coalesce(trace(1), trace(2)))');
+    expect(ran).toEqual([]);
+
+    // A DECIDED first operand still short-circuits the whole tail.
+    ran.length = 0;
+    expect(
+      e.box(['Coalesce', 7, ['trace', 1], ['trace', 2]]).evaluate().toString()
+    ).toBe('7');
+    expect(ran).toEqual([]);
+  });
+
   test('result type T₁° | … | Tₙ₋₁° | Tₙ (stripped arms except last)', () => {
     const e = new ComputeEngine();
     e.declare('q', 'number | missing');

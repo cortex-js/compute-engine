@@ -46,8 +46,10 @@ precedence (for example `+` and `-`, or `*` and `/`).
 
 | Tier | Operator            | ASCII  | Fancy | Kind   | Associativity |
 | ---- | -------------------- | ------ | ----- | ------ | ------------- |
-| 10   | Assign                | `=`    |       | infix  | right         |
+| 10   | Assign                | `:=`   |       | infix  | right         |
+| —    | Assign _or_ Equal     | `=`    |       | infix  | positional    |
 | 15   | MapsTo                | `\|->` | `↦`   | infix  | right         |
+| 18   | Coalesce              | `??`   |       | infix  | right         |
 | 20   | Pipe                  | `\|>`  |       | infix  | left          |
 | 20   | Pipe                  | `~>`   |       | infix  | left          |
 | 30   | KeyValuePair          | `->`   | `→`   | infix  | left          |
@@ -61,6 +63,7 @@ precedence (for example `+` and `-`, or `*` and `/`).
 | 60   | LessEqual             | `<=`   | `⩽`   | infix  | n-ary chain   |
 | 60   | GreaterEqual          | `>=`   | `⩾`   | infix  | n-ary chain   |
 | 60   | Element               | `in`   | `∈`   | infix  | n-ary chain   |
+| 60   | Element (type test)   | `is`   |       | infix  |               |
 | 60   | NotElement            | `!in`  | `∉`   | infix  | n-ary chain   |
 | 65   | Range                 | `..`   | `‥`   | infix  | left          |
 | 70   | Add                   | `+`    |       | infix  | left          |
@@ -123,6 +126,68 @@ a + b |> f       // (a + b) |> f
 a || b |> f      // (a || b) |> f
 x = a |> f       // x = (a |> f)
 ```
+
+## Absence coalescing: `??`
+
+`a ?? b` is `Coalesce(a, b)`: the value of `a` unless `a` is **absent**
+(`Missing` or `NaN`), in which case the value of `b`. It is lazy — `b` is not
+evaluated when `a` is present.
+
+```cortex
+let timeout = config.timeout ?? 30
+let first = xs[1] ?? 0
+```
+
+`??` discharges **absence**. It does _not_ rescue an `Error`: an error operand
+is an error, not a missing value, and propagates.
+
+It is right-associative, so a chain falls through left to right:
+
+```cortex
+a ?? b ?? c      // Coalesce(a, Coalesce(b, c))
+```
+
+Its precedence (18) sits between `|->` and `|>`, which fixes the two groupings
+that matter:
+
+```cortex
+xs |> f ?? 0     // (xs |> f) ?? 0 — the default is for the pipeline's RESULT
+x |-> x.a ?? 0   // x |-> (x.a ?? 0) — the default is inside the body
+```
+
+Like `|>`, it is looser than `->`, so a dictionary value needs parentheses:
+
+<!-- cortex-test: expect-diagnostics -->
+
+```cortex
+{a -> 1, b -> x ?? 2}
+```
+
+Write `{a -> 1, b -> (x ?? 2)}` instead. It is also looser than `||` and `&&`
+(the C# position), so `a ?? b || c` is `a ?? (b || c)`.
+
+## Type test: `is`
+
+`x is integer` tests at runtime whether a value inhabits a type. It is the
+same test a `match` type pattern performs, and lowers to the same
+`Element(value, type)` expression:
+
+```cortex
+x is integer
+x is string && y is boolean
+```
+
+The right operand is a **type name**, not an expression, so a typo is a
+parse-time diagnostic rather than a comparison against an undeclared symbol.
+This first version resolves **simple named types** only: a compound type
+(`!error`, `integer | string`, `list<integer>`) parses but reports
+`type-pattern-unsupported`, exactly as the equivalent typed pattern does.
+
+`is` is a **contextual** word, not a reserved one — it is recognized only
+between an operand and a type name, so `let is = 5` and `f(is)` remain legal.
+
+Since `is` and `in` spell the same `Element` expression, a program serialized
+back from MathJSON uses `in` for both.
 
 ## Anonymous functions: `|->`
 
@@ -327,5 +392,73 @@ used contextually to separate a `match` pattern from its result.
 
 ## Assignment vs. equality
 
-`=` is `Assign` — **assignment**, not equality. Use `==` (`Equal`) to compare
-values and `===` (`Same`) for structural identity.
+Three spellings, two meanings:
+
+- **`:=` always assigns.**
+- **`==` always compares** (and `===` is `Same`, structural identity).
+- **`=` is positional.** It assigns when it is the top-level operator of a
+  **statement** whose left side is a binding target — a name, or a field/index
+  path rooted at one. Everywhere else it compares.
+
+So a statement assigns:
+
+```cortex
+x = 5
+count = count + 1
+```
+
+…while the same `=` inside any larger expression is an equation, which is what
+a reader of mathematics expects:
+
+```cortex
+Solve(x^2 = 4, x)        // Equal — the equation, not an assignment
+if a = true { 1 } else { 2 }
+[a = 1, b = 2]
+```
+
+This is why `=` needs no parentheses to be safe in a condition: `if a = true`
+cannot silently assign, and the C footgun does not exist in Cortex.
+
+As a comparison, `=` binds at the relational tier (60) like `==`, so
+`if x = 5 && y` groups as `(x = 5) && y`. As an assignment it binds loosest
+(10), taking the whole right-hand side.
+
+Two consequences worth knowing:
+
+**A non-binding left side compares, even as a statement.** `x^2 = 4` on its own
+line is the equation, because `x^2` is not a name. A bare name always assigns,
+so write `==` when you mean the equation:
+
+```cortex
+y == 2 * x + 1           // the equation
+y = 2 * x + 1            // assigns to y
+```
+
+**A chain is diagnosed.** `a = b = 5` would assign `a` the *boolean* `b == 5`,
+which is never what a chained assignment means:
+
+<!-- cortex-test: expect-diagnostics -->
+
+```cortex
+a = b = 5
+```
+
+Write `a := b := 5` to chain the assignment, or `a = (b = 5)` if the comparison
+really was intended.
+
+**An assignment in a condition is a warning.** `:=` is unconditional, so it
+reaches a condition where a bare `=` no longer can — and Cortex has no
+`if init; cond` form, so the assigned value *is* the test:
+
+```cortex
+if flag := true { 1 }   // warning: assign-in-condition
+```
+
+It is a warning rather than an error, since `:=` is the deliberate spelling.
+It fires only where a value is consumed as a boolean — an `if`/`while`
+condition — not for `f(a := 1)` or `[a := 1]`, which are unambiguous.
+
+**Serialization uses the explicit spellings.** An expression written back out
+by the formatter or serializer always uses `:=` for assignment and `==` for
+comparison, never a bare `=` — so a round-trip is exact regardless of position.
+`=` is an input convenience.

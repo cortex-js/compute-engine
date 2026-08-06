@@ -561,16 +561,14 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
       ]
     `);
 
-    // `end` is a reserved word, rejected in expression position.
+    // `end` is a *merely* reserved word — no construct claims it — so it
+    // parses as an ordinary symbol and only the unterminated string is
+    // diagnosed. (A HARD-reserved word here would add `reserved-word`.)
     expect(invalidCortex('end"')).toMatchInlineSnapshot(`
       [
         Error,
         [
           String,
-          [
-            reserved-word,
-            end,
-          ],
           [
             unexpected-symbol,
             ",
@@ -583,10 +581,6 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
         Error,
         [
           String,
-          [
-            reserved-word,
-            end,
-          ],
           [
             unexpected-symbol,
             ",
@@ -602,10 +596,6 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
           [
             string-literal-closing-delimiter-expected,
             ",
-          ],
-          [
-            reserved-word,
-            end,
           ],
           [
             unexpected-symbol,
@@ -759,10 +749,6 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
             ",
           ],
           [
-            reserved-word,
-            end,
-          ],
-          [
             unexpected-symbol,
             ",
           ],
@@ -781,10 +767,6 @@ describe('CORTEX PARSING SINGLE-LINE STRINGS', () => {
           [
             string-literal-closing-delimiter-expected,
             ",
-          ],
-          [
-            reserved-word,
-            end,
           ],
           [
             unexpected-symbol,
@@ -1622,17 +1604,9 @@ describe('CORTEX PARSING OPERATORS', () => {
     expect(validCortex('x != y')).toStrictEqual(['NotEqual', 'x', 'y']);
     expect(validCortex('x!=y')).toStrictEqual(['NotEqual', 'x', 'y']);
     // Factorial binds tighter than Power's operands: `2^3!` = `2^(3!)`.
-    expect(validCortex('2^3!')).toStrictEqual([
-      'Power',
-      2,
-      ['Factorial', 3],
-    ]);
+    expect(validCortex('2^3!')).toStrictEqual(['Power', 2, ['Factorial', 3]]);
     // …and `3! ^ 2` = `(3!)^2` (spaced, since the lexer munches `!^`).
-    expect(validCortex('3! ^ 2')).toStrictEqual([
-      'Power',
-      ['Factorial', 3],
-      2,
-    ]);
+    expect(validCortex('3! ^ 2')).toStrictEqual(['Power', ['Factorial', 3], 2]);
     // Prefix `-` is looser than postfix `!`: `-3!` = `-(3!)`.
     expect(validCortex('-3!')).toStrictEqual(['Negate', ['Factorial', 3]]);
     // Applies after a parenthesized expression, a call, and an index.
@@ -1642,11 +1616,7 @@ describe('CORTEX PARSING OPERATORS', () => {
     ]);
     expect(validCortex('f(x)!')).toStrictEqual(['Factorial', ['f', 'x']]);
     // Factorial as an operand of an infix operator.
-    expect(validCortex('n! + 1')).toStrictEqual([
-      'Add',
-      ['Factorial', 'n'],
-      1,
-    ]);
+    expect(validCortex('n! + 1')).toStrictEqual(['Add', ['Factorial', 'n'], 1]);
   });
   test('Invalid postfix `!`', () => {
     // A postfix `!` must abut its operand: `x !y` (space before `!`) is not a
@@ -1692,7 +1662,11 @@ describe('CORTEX PARSING BOOLEAN LITERALS', () => {
   test('`true`/`false` are input aliases for `True`/`False`', () => {
     expect(validCortex('true')).toStrictEqual('True');
     expect(validCortex('false')).toStrictEqual('False');
-    expect(validCortex('true && false')).toStrictEqual(['And', 'True', 'False']);
+    expect(validCortex('true && false')).toStrictEqual([
+      'And',
+      'True',
+      'False',
+    ]);
     expect(validCortex('!true')).toStrictEqual(['Not', 'True']);
     expect(validCortex('let x = true')).toStrictEqual([
       'Declare',
@@ -1860,13 +1834,15 @@ describe('CORTEX PARSING `do { … }` BLOCK EXPRESSIONS', () => {
   });
 
   test('a do-block as a lambda body', () => {
-    expect(
-      validCortex('x |-> do { let t = x * x; t + 1 }')
-    ).toStrictEqual([
+    expect(validCortex('x |-> do { let t = x * x; t + 1 }')).toStrictEqual([
       'Function',
       [
         'Block',
-        ['Declare', 't', ['Dictionary', ['KeyValuePair', 'value', ['Multiply', 'x', 'x']]]],
+        [
+          'Declare',
+          't',
+          ['Dictionary', ['KeyValuePair', 'value', ['Multiply', 'x', 'x']]],
+        ],
         ['Add', 't', 1],
       ],
       'x',
@@ -1963,5 +1939,161 @@ describe('CORTEX PARSING SPREAD ARGUMENTS', () => {
 
     const [, inLet] = parseCortex('let x = ...p');
     expect(inLet.length).toBeGreaterThan(0);
+  });
+});
+
+describe('CORTEX ABSENCE COALESCING `??`', () => {
+  test('`a ?? b` is Coalesce', () => {
+    expect(validCortex('a ?? b')).toStrictEqual(['Coalesce', 'a', 'b']);
+  });
+
+  test('right-associative: a chain falls through left to right', () => {
+    expect(validCortex('a ?? b ?? c')).toStrictEqual([
+      'Coalesce',
+      'a',
+      ['Coalesce', 'b', 'c'],
+    ]);
+  });
+
+  test('LOOSER than `|>`: the default is for the pipeline result', () => {
+    expect(validCortex('xs |> f ?? 0')).toStrictEqual([
+      'Coalesce',
+      ['Pipe', 'xs', 'f'],
+      0,
+    ]);
+  });
+
+  test('TIGHTER than `|->`: the default is inside the lambda body', () => {
+    expect(validCortex('x |-> x.a ?? 0')).toStrictEqual([
+      'Function',
+      ['Coalesce', ['Field', 'x', { str: 'a' }], 0],
+      'x',
+    ]);
+  });
+
+  test('looser than `||` (the C# position)', () => {
+    expect(validCortex('a ?? b || c')).toStrictEqual([
+      'Coalesce',
+      'a',
+      ['Or', 'b', 'c'],
+    ]);
+  });
+
+  test('tighter than `=`, so it is the whole initializer', () => {
+    expect(validCortex('let t = c ?? 30')).toStrictEqual([
+      'Declare',
+      't',
+      ['Dictionary', ['KeyValuePair', 'value', ['Coalesce', 'c', 30]]],
+    ]);
+  });
+
+  test('an index access is a natural left operand', () => {
+    expect(validCortex('xs[1] ?? 0')).toStrictEqual([
+      'Coalesce',
+      ['At', 'xs', 1],
+      0,
+    ]);
+  });
+});
+
+describe('CORTEX TYPE TEST `is`', () => {
+  test('`x is integer` is the Element type test', () => {
+    expect(validCortex('x is integer')).toStrictEqual([
+      'Element',
+      'x',
+      'integer',
+    ]);
+  });
+
+  test('it binds tighter than `&&`/`||`, so tests conjoin', () => {
+    // The TYPE grammar's `&`/`|` must not swallow the EXPRESSION grammar's
+    // `&&`/`||`: the right operand is bounded to one identifier token.
+    expect(validCortex('x is integer && y is string')).toStrictEqual([
+      'And',
+      ['Element', 'x', 'integer'],
+      ['Element', 'y', 'string'],
+    ]);
+    expect(validCortex('x is integer || y is string')).toStrictEqual([
+      'Or',
+      ['Element', 'x', 'integer'],
+      ['Element', 'y', 'string'],
+    ]);
+  });
+
+  test('it binds looser than arithmetic', () => {
+    expect(validCortex('x + 1 is integer')).toStrictEqual([
+      'Element',
+      ['Add', 'x', 1],
+      'integer',
+    ]);
+  });
+
+  test('it is usable as an `if` condition', () => {
+    expect(validCortex('if x is integer { 1 } else { 2 }')).toStrictEqual([
+      'If',
+      ['Element', 'x', 'integer'],
+      ['Block', 1],
+      ['Block', 2],
+    ]);
+  });
+
+  test('a misspelled type is a parse-time diagnostic', () => {
+    const [, diags] = parseCortex('x is intger');
+    expect(diags.map((d) => (d.message as string[])[0])).toContain(
+      'type-annotation-error'
+    );
+  });
+
+  test('a COMPOUND type parses but is unsupported (as in a typed pattern)', () => {
+    for (const src of [
+      'x is integer | string',
+      'x is !error',
+      'x is list<integer>',
+    ]) {
+      const [, diags] = parseCortex(src);
+      expect([src, diags.map((d) => (d.message as string[])[0])]).toEqual([
+        src,
+        ['type-pattern-unsupported'],
+      ]);
+    }
+  });
+
+  test('`is` stays an ordinary identifier outside the test position', () => {
+    expect(parseCortex('let is = 5')[1]).toEqual([]);
+    expect(validCortex('f(is)')).toStrictEqual(['f', 'is']);
+    expect(validCortex('is + 1')).toStrictEqual(['Add', 'is', 1]);
+  });
+
+  test('the TYPE must be on the same line as `is` too', () => {
+    // The left-side guard alone let the test reach across a statement
+    // separator: `x is` / `integer + 1` silently fused into
+    // `Add(Element(x, integer), 1)` with no diagnostic at all.
+    const [expr, diags] = parseCortex('x is\ninteger + 1');
+    expect(diags.map((d) => (d.message as string[])[0])).toEqual([
+      'type-annotation-error',
+    ]);
+    // The two statements stay separate: the `+ 1` belongs to the SECOND one.
+    const bare = JSON.parse(
+      JSON.stringify(expr, (k, v) => (k === 'sourceOffsets' ? undefined : v))
+    );
+    expect(bare).toEqual({
+      fn: [
+        'Block',
+        { sym: 'x' },
+        { fn: ['Add', { sym: 'integer' }, { num: '1' }] },
+      ],
+    });
+  });
+
+  test('it must be on the SAME LINE as its left operand', () => {
+    // A linebreak is a statement separator, and `is` is still spellable as an
+    // identifier — so an `is` starting a line is a new statement reading that
+    // variable, not a type test on the previous one.
+    expect(parseCortex('x\nis + 1')[1]).toEqual([]);
+    expect(validCortex('x\nis + 1')).toStrictEqual([
+      'Block',
+      'x',
+      ['Add', 'is', 1],
+    ]);
   });
 });

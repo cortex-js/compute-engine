@@ -957,14 +957,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (isAbsentValue(v)) continue;
           // An operand whose absence cannot be decided (it still carries free
           // variables) leaves the expression partially unevaluated from here
-          // on: return `Coalesce` of this operand and the remaining tail.
+          // on: return `Coalesce` of this operand and the remaining tail —
+          // with the tail left UNEVALUATED. `Coalesce` short-circuits, so an
+          // operand past an undecided one may never be needed; evaluating it
+          // here would run its effects (and surface its errors) on a path the
+          // decided case never takes. It also makes the nested form
+          // `Coalesce(a, Coalesce(b, c))` and the flat `Coalesce(a, b, c)`
+          // observationally equal, which is what lets `a ?? b ?? c` be
+          // flattened.
           if (v.freeVariables.length > 0) {
-            const tail = [
-              v,
-              ...ops
-                .slice(i + 1)
-                .map((o) => o.evaluate({ numericApproximation })),
-            ];
+            const tail = [v, ...ops.slice(i + 1)];
             return tail.length === 1 ? tail[0] : ce._fn('Coalesce', tail);
           }
           // A decided, non-absent value: this is the result.

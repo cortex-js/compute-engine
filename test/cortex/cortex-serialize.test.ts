@@ -169,8 +169,11 @@ describe('CORTEX SERIALIZING SYMBOLS', () => {
   });
 
   test('Verbatim symbols', () => {
-    // Reserved word
-    expect(serializeCortex('new')).toMatch('`new`');
+    // A word the grammar claims has no plain spelling
+    expect(serializeCortex('while')).toMatch('`while`');
+    expect(serializeCortex('NaN')).toMatch('`NaN`');
+    // …but a merely-reserved word is an ordinary identifier and stays plain
+    expect(serializeCortex('new')).toBe('new');
     // Contain a syntax character
     expect(serializeCortex('`x+y`')).toMatch('`x+y`');
     // Start with a Syntax character
@@ -542,7 +545,7 @@ describe('CORTEX SERIALIZING IF', () => {
       '(1 if c else 2) + 3'
     );
     expect(serializeCortex(['Assign', 'x', ['If', 'c', 1, 2]])).toBe(
-      'x = 1 if c else 2'
+      'x := 1 if c else 2'
     );
   });
 
@@ -593,7 +596,7 @@ describe('CORTEX SERIALIZING IF', () => {
     );
     expect(rt('if c { let x = 1\n x + 1 }')).toBe('if c {let x = 1; x + 1}');
     expect(rt('1 if c else 2')).toBe('1 if c else 2');
-    expect(rt('x = 1 if c else 2')).toBe('x = 1 if c else 2');
+    expect(rt('x = 1 if c else 2')).toBe('x := 1 if c else 2');
     expect(rt('1 if c else 2 if d else 3')).toBe('1 if c else 2 if d else 3');
     expect(rt('x + if c { 1 } else { 2 }')).toBe('x + (if c {1} else {2})');
   });

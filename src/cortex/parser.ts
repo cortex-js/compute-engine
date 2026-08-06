@@ -29,11 +29,12 @@ import { tokenize } from './lexer.js';
 import {
   CONDITIONAL_PRECEDENCE,
   OperatorDef,
+  TYPE_TEST_PRECEDENCE,
   infixOperatorForSymbol,
   postfixOperatorForSymbol,
   prefixOperatorForSymbol,
 } from './operators.js';
-import { RESERVED_WORDS } from './reserved-words.js';
+import { HARD_RESERVED_WORDS, LITERAL_WORDS } from './reserved-words.js';
 import { SourceSpan, Token, TokenType } from './tokens.js';
 
 /** Precedence of the prefix operators (`-`, `!`, and fancy aliases). Read from
@@ -43,6 +44,12 @@ const PREFIX_PRECEDENCE = prefixOperatorForSymbol('!')!.precedence;
 /** Precedence of `Multiply`, used for invisible multiplication (`2x`). Read
  * from the shared table so it stays in sync. */
 const MULTIPLY_PRECEDENCE = infixOperatorForSymbol('*')!.precedence;
+
+/** The two rows a bare `=` resolves to. Reading them from the shared table
+ * keeps the positional `=` identical to the explicit spellings — same head,
+ * same precedence, same associativity, same relational chaining. */
+const ASSIGN_OPERATOR = infixOperatorForSymbol(':=')!;
+const EQUAL_OPERATOR = infixOperatorForSymbol('==')!;
 
 /** The characters that can head a prefix operator run (`-x`, `!a`, `+3`). */
 const PREFIX_SIGILS = new Set(['!', '-', '+']);
@@ -61,20 +68,6 @@ const EFFECT_SPECIFIER_WORDS: ReadonlySet<string> = new Set<string>([
 /** A plain identifier — the names that can be spelled in a signature's named
  * argument list (`(n: integer)`). */
 const PLAIN_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/** The reserved words that are LITERALS: they cannot name a binding (the
- * verbatim `` `word` `` form still can). `true`/`false` are the boolean
- * literals; `Infinity`, its input alias `oo`, and `NaN` are the non-finite
- * numeric literals. Other reserved words are either handled contextually by
- * their construct or rejected in binding position; the verbatim form remains
- * available. */
-const LITERAL_WORDS: ReadonlySet<string> = new Set([
-  'true',
-  'false',
-  'Infinity',
-  'oo',
-  'NaN',
-]);
 
 /** The effect words of a definition's specifier slot, with their source span
  * (used to place a diagnostic on an invalid specifier). */
@@ -236,6 +229,43 @@ export class Parser {
    * top-level redeclaration is the legitimate statement-replace flow
    * (re-running a notebook cell). */
   private blockDepth = 0;
+
+  /**
+   * Lexically enclosing loop bodies (`while`/`for`) — the `break`/`continue`
+   * context. Zero means "not in a loop", and those words are then a
+   * `control-outside-loop` diagnostic.
+   *
+   * It is SAVED AND RESET TO ZERO across every function/lambda boundary, not
+   * merely incremented: a `break` inside a lambda defined in a loop body must
+   * not escape to that loop. This is not a style rule — the engine's `Block`
+   * short-circuits on `Break`/`Continue` structurally, so a parser-only depth
+   * check without the function boundary would let a `Break` returned from a
+   * lambda body reach whatever loop happened to be running.
+   */
+  private loopDepth = 0;
+
+  /**
+   * True only while the OUTERMOST expression of a statement is being parsed —
+   * the one position where a bare `=` means `Assign` rather than `Equal`.
+   *
+   * `parseExpression` consumes the flag on entry (reads it, then clears it),
+   * so exactly one Pratt loop ever sees it true: every nested call — a call
+   * argument, a collection element, a parenthesized group, an operator's right
+   * operand — sees `false` and reads `=` as a comparison. `parseStatement`
+   * sets it only on its fall-through expression-statement path, never around
+   * the keyword heads, so an `if`/`while` condition and a `match` subject are
+   * expression position too.
+   */
+  private assignPosition = false;
+
+  /**
+   * The `Equal` node most recently built from a BARE `=` (never from `==`).
+   * Used to catch `a = b = 5`: the outer `=` assigns and the inner compares,
+   * so the statement silently means "assign a boolean" to anyone arriving from
+   * C or Python. Identity comparison against the assignment's right operand is
+   * exact — `wrap()` returns a fresh object per node.
+   */
+  private lastBareEqualNode: MathJsonExpression | null = null;
 
   /** Set by {@link recoverAtStatementBoundary}: the statement that just
    * returned `null` has ALREADY emitted its diagnostic and resynchronized to
@@ -478,6 +508,9 @@ export class Parser {
           return this.parseFor();
         case 'match':
           return this.parseMatch();
+        case 'break':
+        case 'continue':
+          return this.parseLoopControl();
         case 'type':
           // `type` is a CONTEXTUAL keyword: it stays a legal identifier
           // everywhere (`type = 5`, `type: integer = 4`, `let type = 5`, a bare
@@ -492,7 +525,17 @@ export class Parser {
 
     const annotation = this.tryParseAnnotation();
     if (annotation !== undefined) return annotation;
-    return this.parseExpression(0);
+
+    // The expression-statement path — the ONE position where a bare `=` is an
+    // assignment. Set only here, never around the keyword heads above, so an
+    // `if`/`while` condition and a `match` subject are expression position and
+    // read `=` as a comparison.
+    this.assignPosition = true;
+    try {
+      return this.parseExpression(0);
+    } finally {
+      this.assignPosition = false;
+    }
   }
 
   //
@@ -907,7 +950,7 @@ export class Parser {
     const nameTok = this.advance(); // the type name
     this.harvest(nameTok);
     const name = nameTok.text;
-    if (RESERVED_WORDS.has(name)) {
+    if (HARD_RESERVED_WORDS.has(name)) {
       this.error(['reserved-word', name], nameTok.start, nameTok.end);
       return null;
     }
@@ -1077,6 +1120,7 @@ export class Parser {
       this.error(['expression-expected'], this.current.start, this.current.end);
       return null;
     }
+    this.checkConditionAssign(cond);
     if (!this.check('OPEN_BRACE')) {
       this.error(
         ['opening-bracket-expected', '{'],
@@ -1115,6 +1159,40 @@ export class Parser {
     return this.wrap(parts, kw.start, end);
   }
 
+  /**
+   * `break` / `continue` — statement-position loop control, lowering to the
+   * engine's `["Break"]` / `["Continue"]`.
+   *
+   * The FUNCTION form is what the engine dispatches on: a bare `Break` SYMBOL
+   * canonicalizes to an error (`canonicalStatement` in
+   * `library/control-structures.ts`), precisely so this shape cannot be
+   * confused with a variable reference.
+   *
+   * Only the value-less forms are surface syntax. `Break(v)` exists in the
+   * engine and types the loop accordingly, but `break value` is a ruling
+   * bundled with general `return` — see the language-extensions note.
+   */
+  private parseLoopControl(): MathJsonExpression | null {
+    const kw = this.advance(); // 'break' | 'continue'
+    const head = kw.text === 'break' ? 'Break' : 'Continue';
+    if (this.loopDepth === 0)
+      this.error(['control-outside-loop', kw.text], kw.start, kw.end);
+    return this.wrap([head] as MathJsonExpression[], kw.start, kw.end);
+  }
+
+  /** Run `parse` with the `break`/`continue` context set to `depth`: one
+   * deeper for a loop body, zero for a function/lambda body (the boundary
+   * `break` may not cross). */
+  private inLoopContext<T>(depth: number, parse: () => T): T {
+    const saved = this.loopDepth;
+    this.loopDepth = depth;
+    try {
+      return parse();
+    } finally {
+      this.loopDepth = saved;
+    }
+  }
+
   /** `while cond { … }` lowers to the engine's imperative `Loop`:
    * `Loop(Block(If(Not(cond), Break), body))` — an infinite loop that breaks
    * when the condition fails, then runs the body. No custom head, so it
@@ -1127,6 +1205,7 @@ export class Parser {
       this.error(['expression-expected'], this.current.start, this.current.end);
       return null;
     }
+    this.checkConditionAssign(cond);
     if (!this.check('OPEN_BRACE')) {
       this.error(
         ['opening-bracket-expected', '{'],
@@ -1135,7 +1214,9 @@ export class Parser {
       );
       return null;
     }
-    const body = this.parseBlock();
+    const body = this.inLoopContext(this.loopDepth + 1, () =>
+      this.parseBlock()
+    );
     const end = this.localEnd(body) ?? this.previousEnd();
     const loopBody = [
       'Block',
@@ -1191,7 +1272,9 @@ export class Parser {
       );
       return null;
     }
-    const body = this.parseBlock();
+    const body = this.inLoopContext(this.loopDepth + 1, () =>
+      this.parseBlock()
+    );
     const end = this.localEnd(body) ?? this.previousEnd();
 
     const elementNode = this.wrap(
@@ -1350,6 +1433,9 @@ export class Parser {
         );
         return null;
       }
+      // A match guard is a boolean consumer, exactly like an `if`/`while`
+      // condition — an assignment here is the same trap.
+      this.checkConditionAssign(explicitGuard);
     }
 
     // The arrow `=>` (an OPERATOR token; not an expression operator).
@@ -2043,7 +2129,8 @@ export class Parser {
       );
       return null;
     }
-    const body = this.parseBlock();
+    // A function body is a `break`/`continue` BOUNDARY, not just a new block.
+    const body = this.inLoopContext(0, () => this.parseBlock());
     const end = this.localEnd(body) ?? this.previousEnd();
 
     const ascribedBody =
@@ -2282,7 +2369,8 @@ export class Parser {
       return null;
     }
     this.advance(); // '='
-    const rhs = this.parseExpression(0);
+    // The right-hand side is a function body: a `break`/`continue` BOUNDARY.
+    const rhs = this.inLoopContext(0, () => this.parseExpression(0));
     if (rhs === null) {
       this.error(['expression-expected'], this.current.start, this.current.end);
       return null;
@@ -2871,6 +2959,12 @@ export class Parser {
    * `minPrecedence`. Returns `null` if no primary can be parsed.
    */
   private parseExpression(minPrecedence: number): MathJsonExpression | null {
+    // CONSUME the statement-position flag: only this call may read a bare `=`
+    // as an assignment, and every nested `parseExpression` — including the one
+    // that parses this expression's own right operand — sees it cleared.
+    const atStatement = this.assignPosition;
+    this.assignPosition = false;
+
     let left = this.parseUnary();
     if (left === null) return null;
 
@@ -2911,6 +3005,33 @@ export class Parser {
         continue;
       }
 
+      // `x is integer` — the dynamic type test. Also recognized here rather
+      // than through the operator table, because its right operand is a TYPE:
+      // the type subparser consumes it, so `x is intger` is a parse-time
+      // diagnostic instead of a comparison against an undeclared symbol.
+      //
+      // `is` is a CONTEXTUAL word, not a reserved one: it is claimed only in
+      // infix position after an operand, so `let is = 5` and `f(is)` remain
+      // legal.
+      //
+      // For the same reason it must be on the SAME LINE as its left operand,
+      // exactly like the conditional `if` above. A linebreak is a statement
+      // separator, and `is` is still spellable as an ordinary identifier, so
+      // an `is` starting a line is a new statement reading that variable —
+      // without this guard, `x` followed by `is + 1` on the next line is
+      // swallowed as a type test and diagnosed.
+      if (
+        TYPE_TEST_PRECEDENCE >= minPrecedence &&
+        this.check('SYMBOL') &&
+        this.current.text === 'is' &&
+        !this.current.precededByLinebreak
+      ) {
+        const test = this.parseTypeTestTail(left);
+        if (test === null) break;
+        left = test;
+        continue;
+      }
+
       const op = this.peekInfix();
       if (op === null) {
         // Invisible multiplication: a number literal immediately followed (no
@@ -2934,7 +3055,28 @@ export class Parser {
         }
         break;
       }
-      if (op.def.precedence < minPrecedence) break;
+      // Resolve a bare `=` to the spelling it actually means BEFORE the
+      // precedence test, because the two readings bind differently: `Assign`
+      // is the loosest operator (10) so it takes the whole right-hand side,
+      // while `Equal` is relational (60) so `if x = 5 && y` groups as
+      // `(x = 5) && y`. From here on `def` is the resolved row, so the node
+      // built below — and its n-ary relational chaining — is identical to one
+      // written with `:=` or `==`.
+      const asAssign =
+        op.def.name === 'AssignOrEqual' &&
+        atStatement &&
+        minPrecedence === 0 &&
+        isBindingTarget(left) &&
+        this.startsWithSymbolToken(left) &&
+        !this.isLiteralWordNode(left);
+      const def =
+        op.def.name === 'AssignOrEqual'
+          ? asAssign
+            ? ASSIGN_OPERATOR
+            : EQUAL_OPERATOR
+          : op.def;
+
+      if (def.precedence < minPrecedence) break;
 
       if (op.asymmetric) this.emitAsymmetric(this.current, op.def.symbol);
 
@@ -2942,8 +3084,14 @@ export class Parser {
       for (let i = 0; i < op.tokenCount; i++) this.advance();
 
       const rightMin =
-        op.def.assoc === 'right' ? op.def.precedence : op.def.precedence + 1;
-      const right = this.parseExpression(rightMin);
+        def.assoc === 'right' ? def.precedence : def.precedence + 1;
+      // A mapsto's right operand is a LAMBDA BODY, so it is a
+      // `break`/`continue` boundary: `for x in xs { f(y |-> break) }` must not
+      // let the lambda's `break` bind to the enclosing loop.
+      const right =
+        def.symbol === '|->'
+          ? this.inLoopContext(0, () => this.parseExpression(rightMin))
+          : this.parseExpression(rightMin);
       if (right === null) {
         this.error(
           ['expression-expected'],
@@ -2952,7 +3100,22 @@ export class Parser {
         );
         break;
       }
-      left = this.combineInfix(op.def, left, right);
+
+      // `a = b = 5` reads as "assign a the boolean (b == 5)" — coherent, but
+      // never what someone writing a chained assignment means. Diagnose it;
+      // `a := b := 5` (genuinely chained) and `a = (b = 5)` (explicitly a
+      // comparison) both stay silent.
+      if (asAssign && right === this.lastBareEqualNode)
+        this.error(
+          ['chained-assignment'],
+          this.localStart(right) ?? 0,
+          this.localEnd(right) ?? this.previousEnd()
+        );
+      left = this.combineInfix(def, left, right);
+      // Record a BARE-`=` comparison so the chained-assignment check above can
+      // recognize it by identity on the next iteration / outer frame.
+      if (op.def.name === 'AssignOrEqual' && !asAssign)
+        this.lastBareEqualNode = left;
     }
 
     return left;
@@ -2981,6 +3144,7 @@ export class Parser {
       this.error(['expression-expected'], this.current.start, this.current.end);
       return null;
     }
+    this.checkConditionAssign(cond);
 
     if (!(this.check('SYMBOL') && this.current.text === 'else')) {
       this.error(
@@ -3002,6 +3166,111 @@ export class Parser {
       ['If', cond, consequent, alternative] as MathJsonExpression[],
       this.localStart(consequent) ?? kw.start,
       this.localEnd(alternative) ?? this.previousEnd()
+    );
+  }
+
+  /**
+   * The tail of a dynamic type test — `is Type`, with the already-parsed
+   * `subject` to its left and the `is` current — yielding `["Element",
+   * subject, Type]`.
+   *
+   * `Element(value, <type name>)` is the engine's dynamic type test and is
+   * exactly what a `match` type pattern (`n: integer => …`) lowers to, so the
+   * two surfaces agree by construction. It resolves SIMPLE NAMED types only: a
+   * compound type parses (the subparser accepts the whole union, negation, or
+   * application) but never resolves, so it gets the same
+   * `type-pattern-unsupported` diagnostic the pattern form gets. Full type
+   * expressions in this position land with the typed-pattern work, in one
+   * place for both surfaces.
+   */
+  private parseTypeTestTail(
+    subject: MathJsonExpression
+  ): MathJsonExpression | null {
+    const kw = this.advance(); // 'is'
+    const start = this.localStart(subject) ?? kw.start;
+    const tok = this.current;
+
+    // The type must be on the SAME LINE as `is`, for the same reason `is`
+    // itself must be on the same line as its subject: a linebreak is a
+    // statement separator, so without this the test reaches across it and
+    // silently fuses two statements (`x is` / `integer + 1` became
+    // `Add(Element(x, integer), 1)` with no diagnostic at all).
+    if (tok.precededByLinebreak) {
+      this.error(
+        ['type-annotation-error', 'Expected a type on the same line as `is`'],
+        kw.start,
+        kw.end
+      );
+      return null;
+    }
+
+    // The right operand is exactly ONE identifier token. Bounding it that way
+    // — instead of handing the rest of the line to the type subparser — is
+    // what keeps the TYPE grammar's `|`/`&` from swallowing the EXPRESSION
+    // grammar's `||`/`&&`: `x is integer && y is string` must be a conjunction
+    // of two tests, not an intersection type. The lexer munches `&&`/`||` into
+    // single tokens, so a compound type is recognizable by a LONE `|`, `&`,
+    // `<`, or `->` after the name.
+    const next = this.peek();
+    const continuesType =
+      next.type === 'OPERATOR' &&
+      (next.text === '|' ||
+        next.text === '&' ||
+        next.text === '<' ||
+        next.text === '->');
+
+    if (
+      tok.type === 'SYMBOL' &&
+      PLAIN_IDENTIFIER.test(tok.text) &&
+      !continuesType
+    ) {
+      this.advance();
+      this.harvest(tok);
+      // Validate the name against the type grammar in isolation, so a typo is
+      // caught here (`x is intger`) rather than becoming a comparison against
+      // an undeclared symbol.
+      try {
+        parseTypePrefix(tok.text, this.typeResolver);
+      } catch (e) {
+        const err = e as { rawMessage?: string };
+        const message =
+          err.rawMessage ?? (e instanceof Error ? e.message : String(e));
+        this.error(['type-annotation-error', message], tok.start, tok.end);
+      }
+      return this.wrap(
+        [
+          'Element',
+          subject,
+          this.wrap({ sym: tok.text }, tok.start, tok.end),
+        ] as MathJsonExpression[],
+        start,
+        tok.end
+      );
+    }
+
+    // A compound type (`!error`, `integer | string`, `list<integer>`) or no
+    // type at all. Hand it to the type subparser so the diagnostic is precise
+    // and the cursor lands past the whole type, then report it as unsupported
+    // — the same verdict the equivalent `match` pattern gets.
+    const annotation = this.parseTypeBody(kw.end);
+    if (annotation === null) return null;
+    this.error(
+      ['type-pattern-unsupported', stringValue(annotation.node) ?? ''],
+      start,
+      annotation.end
+    );
+    return this.wrap(
+      [
+        'Element',
+        subject,
+        this.wrap(
+          { sym: stringValue(annotation.node) ?? '' },
+          kw.end,
+          annotation.end
+        ),
+      ] as MathJsonExpression[],
+      start,
+      annotation.end
     );
   }
 
@@ -3069,7 +3338,11 @@ export class Parser {
         const folded = foldSignedNumber(result, negative);
         if (folded !== null) result = this.wrap(folded, start, end);
         else if (negative) result = this.wrap(['Negate', result], start, end);
-        // `+` on a non-literal: identity, `result` unchanged.
+        // `+` on a non-literal is the identity, but the node must still span
+        // the sign: without it `+x` reports the span of `x` alone, and `+x = 5`
+        // looked like a bare binding target (positional `=` then assigned
+        // instead of comparing).
+        else result = this.wrap(result, start, end);
       }
     }
     return result;
@@ -3199,6 +3472,8 @@ export class Parser {
         end
       );
 
+    if (def.name === 'Assign') this.checkAssignTarget(left);
+
     if (
       def.relational &&
       typeof left === 'object' &&
@@ -3216,6 +3491,97 @@ export class Parser {
       start,
       end
     );
+  }
+
+  /**
+   * A literal word is not an assignment target: `true = 5` would bind the
+   * boolean literal, and `NaN = 1` a numeric one. This is the bare-target
+   * position of the five-word rejection set — the other positions reject the
+   * word at its token, but here the literal has already become its value node
+   * (`true` → `{sym:"True"}`, `oo` → `{num:"+Infinity"}`), so the check reads
+   * the target's source slice instead. A verbatim `` `True` `` (or a plain
+   * `True`, which is not a reserved word) is unaffected.
+   */
+  private checkAssignTarget(target: MathJsonExpression): void {
+    // The ROOT of the path, not the whole node: the span of `true.x` is
+    // `true.x`, which is not a literal word, so checking it whole let a
+    // literal-rooted path through.
+    target = bindingTargetRoot(target) ?? target;
+    const start = this.localStart(target);
+    const end = this.localEnd(target);
+    if (start === undefined || start === null) return;
+    if (end === undefined || end === null) return;
+    const text = this.source.slice(start, end);
+    if (LITERAL_WORDS.has(text))
+      this.error(['reserved-word', text], start, end);
+  }
+
+  /**
+   * `if flag := true { … }` assigns and then uses the assigned value as the
+   * test. Positional `=` closed the IMPLICIT form of this trap — a bare `=` in
+   * a condition is now `Equal` — but `:=` is unconditional, so the explicit
+   * spelling still reaches here.
+   *
+   * A WARNING, not an error: `:=` is the deliberate assignment spelling, and
+   * refusing it in a position where the author typed it on purpose would
+   * repeat the mistake positional `=` was adopted to fix. Cortex has no
+   * `if init; cond` form, so the assigned value really is the test — which is
+   * what makes it worth remarking on.
+   *
+   * Scoped to the two positions that consume a value AS a boolean (an
+   * `if`/`while` condition, including the `a if c else b` ternary). A call
+   * argument or a collection element — `f(a := 1)`, `[a := 1]` — is odd but
+   * unambiguous, and the type system already handles it.
+   */
+  private checkConditionAssign(cond: MathJsonExpression): void {
+    if (operator(cond) !== 'Assign') return;
+    const start = this.localStart(cond);
+    const end = this.localEnd(cond);
+    if (start === undefined || start === null) return;
+    if (end === undefined || end === null) return;
+    this.error(['assign-in-condition'], start, end, 'warning');
+  }
+
+  /**
+   * Whether a node's source begins with a bare-symbol token — the check that
+   * keeps `isBindingTarget` honest about the *authored* syntax rather than the
+   * reduced node.
+   *
+   * A `+` prefix is the identity, so `+x` reduces to the bare symbol `x` and
+   * would otherwise look like a name; positional `=` must compare there.
+   *
+   * A parenthesized group is deliberately NOT caught: it returns its content
+   * node, whose span excludes the parentheses, so `(x) = 5` still assigns.
+   * That is the intended reading — redundant parentheses around a name do not
+   * change what it is. (The case the design note names, `Solve((x = 4), x)`,
+   * is already handled: the inner `=` is in expression position and compares.)
+   */
+  private startsWithSymbolToken(target: MathJsonExpression): boolean {
+    const start = this.localStart(target);
+    if (start === undefined || start === null) return false;
+    for (const tok of this.tokens) {
+      if (tok.start < start) continue;
+      return tok.type === 'SYMBOL' || tok.type === 'VERBATIM_SYMBOL';
+    }
+    return false;
+  }
+
+  /**
+   * Whether a node was spelled as a literal word. `true`/`false` become SYMBOL
+   * nodes (`{sym:"True"}`), so `isBindingTarget` would otherwise accept them
+   * and a bare `true = 5` would resolve to an assignment — while `NaN = 1`,
+   * whose literal becomes a NUMBER node, resolved to a comparison. Excluding
+   * them makes all five literal words behave alike: a bare `=` against one is
+   * the equation, and only the explicit `:=` asks to bind (and is rejected by
+   * {@link checkAssignTarget}).
+   */
+  private isLiteralWordNode(target: MathJsonExpression): boolean {
+    target = bindingTargetRoot(target) ?? target;
+    const start = this.localStart(target);
+    const end = this.localEnd(target);
+    if (start === undefined || start === null) return false;
+    if (end === undefined || end === null) return false;
+    return LITERAL_WORDS.has(this.source.slice(start, end));
   }
 
   /** Extract the parameters from a mapsto LHS: a bare symbol (one parameter),
@@ -3316,24 +3682,21 @@ export class Parser {
    * `Apply` (`(g)(x)` → `["Apply", g, x]`). */
   private parseCall(callee: MathJsonExpression): MathJsonExpression {
     const start = this.localStart(callee) ?? this.current.start;
+    // The explicit `Function(body, …params)` literal is a function boundary
+    // for `break`/`continue`, exactly as `|->` is. Without this, a call
+    // argument is parsed in the ENCLOSING loop context, so
+    // `for x in xs { let f = Function(break) }` would be accepted and the
+    // lambda could later emit `Break()` into an unrelated running loop — the
+    // non-local control flow the boundary exists to prevent. Every other head
+    // keeps the surrounding context: a `do` block or a `match` inside a loop
+    // body is still inside that loop.
+    const isFunctionLiteral = symbolNameOf(callee) === 'Function';
     // Spread arguments (`f(...t)`) are admitted in call argument lists only.
-    const { values, end } = this.parseBracketedList(
-      'CLOSE_PAREN',
-      ')',
-      false,
-      true
-    );
-    // `f(x = 4)` is almost always a mistake: `=` is assignment, so
-    // `Solve(x^2 = 4, x)` silently reports no solutions, and Cortex has no
-    // keyword arguments. Advisory only — the parse is unchanged.
-    for (const v of values)
-      if (operator(v) === 'Assign')
-        this.error(
-          'assign-in-argument',
-          this.localStart(v) ?? start,
-          this.localEnd(v) ?? end,
-          'warning'
-        );
+    const { values, end } = isFunctionLiteral
+      ? this.inLoopContext(0, () =>
+          this.parseBracketedList('CLOSE_PAREN', ')', false, true)
+        )
+      : this.parseBracketedList('CLOSE_PAREN', ')', false, true);
     const head = symbolNameOf(callee);
     if (head !== null)
       return this.wrap([head, ...values] as MathJsonExpression[], start, end);
@@ -3446,6 +3809,14 @@ export class Parser {
         // the same `["Block", …]` an `if`/`function` body produces, so block
         // scoping and the final-statement value come from the engine unchanged.
         if (token.text === 'do') return this.parseDoBlock();
+        // `break`/`continue` are statements, but Cortex's statement-bearing
+        // forms are expressions: a `match` case body and a conditional branch
+        // are expressions, not blocks. Admitting them here is what makes
+        // `match x { 1 => break }` work inside a loop — and, outside one,
+        // turns a confusing `reserved-word` into the precise
+        // `control-outside-loop`.
+        if (token.text === 'break' || token.text === 'continue')
+          return this.parseLoopControl();
         return this.parseSymbol();
       case 'VERBATIM_SYMBOL':
         return this.parseVerbatimSymbol();
@@ -3505,11 +3876,17 @@ export class Parser {
     if (token.text === 'false')
       return this.wrap({ sym: 'False' }, token.start, token.end);
 
-    // A reserved word is rejected in expression position (the verbatim
-    // `` `word` `` form, handled by `parseVerbatimSymbol`, still works). Word
-    // operators such as `in` never reach here — they are consumed by the Pratt
-    // loop before a primary is attempted.
-    if (RESERVED_WORDS.has(token.text))
+    // A HARD-reserved word — a literal, or a head/word operator the grammar
+    // claims — is rejected in expression position: `y = while` is a keyword out
+    // of place, not a symbol reference. The verbatim `` `word` `` form (handled
+    // by `parseVerbatimSymbol`) still works. Word operators such as `in` reach
+    // here only out of position; in place they are consumed by the Pratt loop
+    // before a primary is attempted.
+    //
+    // Merely *reserved* words (`set`, `with`, `label`, …) are ordinary symbols:
+    // their constructs do not exist, so nothing claims them. See
+    // `reserved-words.ts` for the two tiers.
+    if (HARD_RESERVED_WORDS.has(token.text))
       this.error(['reserved-word', token.text], token.start, token.end);
 
     return this.wrap({ sym: token.text }, token.start, token.end);
@@ -3637,6 +4014,20 @@ export class Parser {
    * `["Tuple", a, b]`; `()` → diagnostic (no empty tuple in v0).
    */
   private parseParenthesized(): MathJsonExpression | null {
+    // Parentheses are the EXPLICIT comparison spelling: `a = (b = 5)` says
+    // "assign a the value of b == 5" on purpose, so it must not be reported as
+    // an accidental chained assignment. Restoring the bare-`=` marker to what
+    // it was BEFORE the group — so nothing created inside it can be matched by
+    // identity afterwards — is what distinguishes it from bare `a = b = 5`.
+    const outerBareEqual = this.lastBareEqualNode;
+    try {
+      return this.parseParenthesizedBody();
+    } finally {
+      this.lastBareEqualNode = outerBareEqual;
+    }
+  }
+
+  private parseParenthesizedBody(): MathJsonExpression | null {
     const diagBefore = this.diagnostics.length;
     // Allow `bare-symbol : Type` elements so a typed mapsto parameter list
     // `(x: integer) |-> …` parses (a `:` has no infix parselet, so it would
@@ -4149,6 +4540,35 @@ function symbolNameOf(expr: MathJsonExpression): string | null {
   )
     return (expr as { sym: string }).sym;
   return null;
+}
+
+/**
+ * Whether a node can be the left side of an assignment: a bare symbol, or a
+ * `Field`/`At` chain rooted at one (`p.x`, `xs[1]`, `m.a[2].b`).
+ *
+ * This is the test that makes a bare `=` positional — with a binding target on
+ * the left of a statement it assigns, otherwise it compares. `Field`/`At` are
+ * included deliberately: both already reject at evaluation (Cortex collections
+ * and records are immutable), so reading them as comparisons instead would
+ * trade a real diagnostic for a silent `False`. When immutable-update
+ * expressions land they become meaningful in the same position.
+ */
+function isBindingTarget(expr: MathJsonExpression): boolean {
+  return bindingTargetRoot(expr) !== null;
+}
+
+/** The bare symbol a binding target is rooted at (`p` for `p.a[2].b`), or
+ * `null` when the node is not a binding target at all. The literal-word checks
+ * use the root's source span, since the whole path's span (`true.x`) is never
+ * a literal word. */
+function bindingTargetRoot(
+  expr: MathJsonExpression
+): MathJsonExpression | null {
+  if (symbolNameOf(expr) !== null) return expr;
+  const ops = fnOps(expr);
+  if (ops === null || ops.length < 2) return null;
+  if (ops[0] !== 'Field' && ops[0] !== 'At') return null;
+  return bindingTargetRoot(ops[1]);
 }
 
 /** Whether a pattern leaf is a literal that matches structurally (a number, a

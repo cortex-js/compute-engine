@@ -36,7 +36,7 @@ import {
   FormattingBlock,
 } from './formatter.js';
 import { DIGITS, ESCAPED_CHARS, isBreak, isInvisible } from './characters.js';
-import { RESERVED_WORDS } from './reserved-words.js';
+import { HARD_RESERVED_WORDS } from './reserved-words.js';
 import {
   CONDITIONAL_PRECEDENCE,
   OPERATORS as SHARED_OPERATORS,
@@ -1580,8 +1580,10 @@ function escapeString(s: string): string {
 // the output stays lexically balanced (single line, closed backticks), and
 // re-parses with an `invalid-symbol-name` diagnostic.
 function escapeSymbol(s: string): string {
-  // If it's a reserved word: it should be always be escaped
-  if (RESERVED_WORDS.has(s)) return `\`${s}\``;
+  // A HARD-reserved word (a literal or a head/word operator the grammar claims)
+  // has no plain spelling — emit the verbatim form so it re-parses as a symbol.
+  // Merely *reserved* words are ordinary identifiers and are emitted as-is.
+  if (HARD_RESERVED_WORDS.has(s)) return `\`${s}\``;
 
   // Shortcut common case: all alphanumeric symbol => nothing to escape
   if (/^[a-zA-Z][a-zA-Z\d_]*$/.test(s)) return s;
