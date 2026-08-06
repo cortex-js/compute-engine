@@ -505,6 +505,10 @@ describe('Pins: notations that are NOT ring constructions', () => {
       '\\Z^{0-}',
     ])
       expect(parse(latex)).toBe('NonPositiveIntegers');
+
+    // The strict superscript family, mirroring `\R^{<…}`.
+    for (const latex of ['\\Z^{<}', '\\Z^{\\lt}', '\\Z^{\\lt0}', '\\Z^{<0}'])
+      expect(parse(latex)).toBe('NegativeIntegers');
   });
 
   test('`NegativeIntegers` serializes symbolically and round-trips', () => {

@@ -58,7 +58,9 @@
   consequence: the legacy `canonical`/`structural` options of `ce.expr()` and
   `ce.box()` are not part of the interface — use the equivalent `form` option
   (`{ canonical: false }` → `{ form: 'raw' }`, `{ structural: true }` →
-  `{ form: 'structural' }`); the legacy options still work at runtime.
+  `{ form: 'structural' }`); the legacy options still work at runtime. The
+  `ExpressionComputeEngine` type is now **deprecated**: it is interchangeable
+  with `ComputeEngine`, which should be used instead.
 
 ### Bug Fixes
 

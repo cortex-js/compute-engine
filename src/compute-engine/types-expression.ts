@@ -48,6 +48,10 @@ import type {
  * This interface is augmented by `types-engine.ts` with the concrete
  * `IComputeEngine` members to avoid type-layer circular dependencies.
  *
+ * @deprecated Use `ComputeEngine` (the type exported from the package entry
+ * points) or `IComputeEngine` instead — the three are interchangeable, and
+ * this alias will be removed in a future release.
+ *
  * @category Compute Engine
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type

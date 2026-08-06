@@ -40,12 +40,18 @@ Assignable value for `ce.assign()`.
 
 </MemberCard>
 
-### ExpressionComputeEngine
+### ~~ExpressionComputeEngine~~
 
 Compute engine surface used by expression types.
 
 This interface is augmented by `types-engine.ts` with the concrete
 `IComputeEngine` members to avoid type-layer circular dependencies.
+
+#### Deprecated
+
+Use `ComputeEngine` (the type exported from the package entry
+points) or `IComputeEngine` instead — the three are interchangeable, and
+this alias will be removed in a future release.
 
 #### Extends
 
@@ -53,7 +59,7 @@ This interface is augmented by `types-engine.ts` with the concrete
 
 <MemberCard>
 
-##### ExpressionComputeEngine.latexSyntax
+##### ExpressionComputeEngine.~~latexSyntax~~
 
 ```ts
 readonly latexSyntax: ILatexSyntax | undefined;
@@ -66,7 +72,7 @@ The LatexSyntax instance used for LaTeX parsing/serialization.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.latexOptions
+##### ExpressionComputeEngine.~~latexOptions~~
 
 ```ts
 latexOptions: Partial<ParseLatexOptions & SerializeLatexOptions>;
@@ -80,7 +86,7 @@ Engine-wide LaTeX parse/serialize options (e.g. `decimalSeparator`).
 
 <MemberCard>
 
-##### ExpressionComputeEngine.True
+##### ExpressionComputeEngine.~~True~~
 
 ```ts
 readonly True: Expression;
@@ -90,7 +96,7 @@ readonly True: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.False
+##### ExpressionComputeEngine.~~False~~
 
 ```ts
 readonly False: Expression;
@@ -100,7 +106,7 @@ readonly False: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.Pi
+##### ExpressionComputeEngine.~~Pi~~
 
 ```ts
 readonly Pi: Expression;
@@ -110,7 +116,7 @@ readonly Pi: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.E
+##### ExpressionComputeEngine.~~E~~
 
 ```ts
 readonly E: Expression;
@@ -120,7 +126,7 @@ readonly E: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.Nothing
+##### ExpressionComputeEngine.~~Nothing~~
 
 ```ts
 readonly Nothing: Expression;
@@ -130,7 +136,7 @@ readonly Nothing: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.Missing
+##### ExpressionComputeEngine.~~Missing~~
 
 ```ts
 readonly Missing: Expression;
@@ -142,7 +148,7 @@ The `Missing` symbol: an absent value whose position is preserved.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.Zero
+##### ExpressionComputeEngine.~~Zero~~
 
 ```ts
 readonly Zero: Expression;
@@ -152,7 +158,7 @@ readonly Zero: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.One
+##### ExpressionComputeEngine.~~One~~
 
 ```ts
 readonly One: Expression;
@@ -162,7 +168,7 @@ readonly One: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.Half
+##### ExpressionComputeEngine.~~Half~~
 
 ```ts
 readonly Half: Expression;
@@ -172,7 +178,7 @@ readonly Half: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.NegativeOne
+##### ExpressionComputeEngine.~~NegativeOne~~
 
 ```ts
 readonly NegativeOne: Expression;
@@ -182,7 +188,7 @@ readonly NegativeOne: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.Two
+##### ExpressionComputeEngine.~~Two~~
 
 ```ts
 readonly Two: Expression;
@@ -192,7 +198,7 @@ readonly Two: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.I
+##### ExpressionComputeEngine.~~I~~
 
 ```ts
 readonly I: Expression;
@@ -204,7 +210,7 @@ ImaginaryUnit
 
 <MemberCard>
 
-##### ExpressionComputeEngine.NaN
+##### ExpressionComputeEngine.~~NaN~~
 
 ```ts
 readonly NaN: Expression;
@@ -214,7 +220,7 @@ readonly NaN: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.PositiveInfinity
+##### ExpressionComputeEngine.~~PositiveInfinity~~
 
 ```ts
 readonly PositiveInfinity: Expression;
@@ -224,7 +230,7 @@ readonly PositiveInfinity: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.NegativeInfinity
+##### ExpressionComputeEngine.~~NegativeInfinity~~
 
 ```ts
 readonly NegativeInfinity: Expression;
@@ -234,7 +240,7 @@ readonly NegativeInfinity: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.ComplexInfinity
+##### ExpressionComputeEngine.~~ComplexInfinity~~
 
 ```ts
 readonly ComplexInfinity: Expression;
@@ -244,7 +250,7 @@ readonly ComplexInfinity: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.context
+##### ExpressionComputeEngine.~~context~~
 
 ```ts
 readonly context: EvalContext;
@@ -254,7 +260,7 @@ readonly context: EvalContext;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.contextStack
+##### ExpressionComputeEngine.~~contextStack~~
 
 ```ts
 contextStack: readonly EvalContext[];
@@ -264,7 +270,7 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
-##### ExpressionComputeEngine.iterationLimit
+##### ExpressionComputeEngine.~~iterationLimit~~
 
 ```ts
 iterationLimit: number;
@@ -274,7 +280,7 @@ iterationLimit: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.recursionLimit
+##### ExpressionComputeEngine.~~recursionLimit~~
 
 ```ts
 recursionLimit: number;
@@ -284,7 +290,7 @@ recursionLimit: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.maxCollectionSize
+##### ExpressionComputeEngine.~~maxCollectionSize~~
 
 ```ts
 maxCollectionSize: number;
@@ -294,7 +300,7 @@ maxCollectionSize: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.bignum
+##### ExpressionComputeEngine.~~bignum~~
 
 ```ts
 bignum: (a) => BigDecimal;
@@ -304,7 +310,7 @@ bignum: (a) => BigDecimal;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.complex
+##### ExpressionComputeEngine.~~complex~~
 
 ```ts
 complex: (a, b?) => Complex;
@@ -314,7 +320,7 @@ complex: (a, b?) => Complex;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.tolerance
+##### ExpressionComputeEngine.~~tolerance~~
 
 ```ts
 tolerance: number;
@@ -324,7 +330,7 @@ tolerance: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.angularUnit
+##### ExpressionComputeEngine.~~angularUnit~~
 
 ```ts
 angularUnit: AngularUnit;
@@ -334,7 +340,7 @@ angularUnit: AngularUnit;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.costFunction
+##### ExpressionComputeEngine.~~costFunction~~
 
 ```ts
 costFunction: (expr) => number;
@@ -344,7 +350,7 @@ costFunction: (expr) => number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.simplificationRules
+##### ExpressionComputeEngine.~~simplificationRules~~
 
 ```ts
 simplificationRules: Rule[];
@@ -358,7 +364,7 @@ The rules used by `.simplify()` when no explicit `rules` option is passed.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.solveRules
+##### ExpressionComputeEngine.~~solveRules~~
 
 ```ts
 solveRules: Rule[];
@@ -377,7 +383,7 @@ The rules used by `solve()` to find roots of univariate expressions.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.harmonizationRules
+##### ExpressionComputeEngine.~~harmonizationRules~~
 
 ```ts
 harmonizationRules: Rule[];
@@ -391,7 +397,7 @@ The rules used by `solve()` to transform an equation into equivalent,
 
 <MemberCard>
 
-##### ExpressionComputeEngine.strict
+##### ExpressionComputeEngine.~~strict~~
 
 ```ts
 strict: boolean;
@@ -401,7 +407,7 @@ strict: boolean;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.jit
+##### ExpressionComputeEngine.~~jit~~
 
 ```ts
 jit: "auto" | "off";
@@ -417,7 +423,7 @@ compilation and latches to `'off'` engine-wide on the first CSP
 
 <MemberCard>
 
-##### ExpressionComputeEngine.trace
+##### ExpressionComputeEngine.~~trace~~
 
 ```ts
 trace: readonly string[];
@@ -429,7 +435,7 @@ A list of the function calls to the current evaluation context
 
 <MemberCard>
 
-##### ExpressionComputeEngine.precision
+##### ExpressionComputeEngine.~~precision~~
 
 ```ts
 get precision(): number
@@ -440,7 +446,7 @@ set precision(p: number | "auto" | "machine"): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.withTimeLimit()
+##### ExpressionComputeEngine.~~withTimeLimit()~~
 
 ```ts
 withTimeLimit<T>(limit, fn): T
@@ -476,7 +482,7 @@ that point runs **outside** the deadline and is never cancelled (see
 
 <MemberCard>
 
-##### ExpressionComputeEngine.chop()
+##### ExpressionComputeEngine.~~chop()~~
 
 ###### chop(n)
 
@@ -512,7 +518,7 @@ chop(n): number | BigDecimal
 
 <MemberCard>
 
-##### ExpressionComputeEngine.expr()
+##### ExpressionComputeEngine.~~expr()~~
 
 ```ts
 expr(expr, options?): Expression
@@ -566,7 +572,7 @@ Use `expr()` instead.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.parse()
+##### ExpressionComputeEngine.~~parse()~~
 
 ###### parse(latex, options)
 
@@ -609,7 +615,7 @@ parse(latex, options?): Expression | null
 
 <MemberCard>
 
-##### ExpressionComputeEngine.appliedNonFunctions()
+##### ExpressionComputeEngine.~~appliedNonFunctions()~~
 
 ```ts
 appliedNonFunctions(latex): string[]
@@ -635,7 +641,7 @@ juxtaposition analysis.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.function()
+##### ExpressionComputeEngine.~~function()~~
 
 ```ts
 function(name, ops, options?): Expression
@@ -671,7 +677,7 @@ readonly [`ExpressionInput`](#expressioninput)[]
 
 <MemberCard>
 
-##### ExpressionComputeEngine.getCompilationTarget()
+##### ExpressionComputeEngine.~~getCompilationTarget()~~
 
 ###### getCompilationTarget(name)
 
@@ -701,7 +707,7 @@ getCompilationTarget(name):
 
 <MemberCard>
 
-##### ExpressionComputeEngine.number()
+##### ExpressionComputeEngine.~~number()~~
 
 ```ts
 number(value, options?): Expression
@@ -732,7 +738,7 @@ number(value, options?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.symbol()
+##### ExpressionComputeEngine.~~symbol()~~
 
 ```ts
 symbol(sym, options?): Expression
@@ -760,7 +766,7 @@ symbol(sym, options?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.string()
+##### ExpressionComputeEngine.~~string()~~
 
 ```ts
 string(s, metadata?): Expression
@@ -778,7 +784,7 @@ string(s, metadata?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.error()
+##### ExpressionComputeEngine.~~error()~~
 
 ```ts
 error(message, where?): Expression
@@ -796,7 +802,7 @@ error(message, where?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.typeError()
+##### ExpressionComputeEngine.~~typeError()~~
 
 ```ts
 typeError(expectedType, actualType, where?): Expression
@@ -820,7 +826,7 @@ typeError(expectedType, actualType, where?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.hold()
+##### ExpressionComputeEngine.~~hold()~~
 
 ```ts
 hold(expr): Expression
@@ -834,7 +840,7 @@ hold(expr): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.tuple()
+##### ExpressionComputeEngine.~~tuple()~~
 
 ###### tuple(elements)
 
@@ -860,7 +866,7 @@ tuple(...elements): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.type()
+##### ExpressionComputeEngine.~~type()~~
 
 ```ts
 type(type): BoxedType
@@ -891,7 +897,7 @@ type(type): BoxedType
 
 <MemberCard>
 
-##### ExpressionComputeEngine.rules()
+##### ExpressionComputeEngine.~~rules()~~
 
 ```ts
 rules(rules, options?): BoxedRuleSet
@@ -918,7 +924,7 @@ Default purpose applied to any rule in the set that doesn't carry
 
 <MemberCard>
 
-##### ExpressionComputeEngine.getRuleSet()
+##### ExpressionComputeEngine.~~getRuleSet()~~
 
 ```ts
 getRuleSet(id?): BoxedRuleSet | undefined
@@ -932,7 +938,7 @@ getRuleSet(id?): BoxedRuleSet | undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.pushScope()
+##### ExpressionComputeEngine.~~pushScope()~~
 
 ```ts
 pushScope(scope?, name?): void
@@ -950,7 +956,7 @@ pushScope(scope?, name?): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.popScope()
+##### ExpressionComputeEngine.~~popScope()~~
 
 ```ts
 popScope(): void
@@ -960,7 +966,7 @@ popScope(): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.createScope()
+##### ExpressionComputeEngine.~~createScope()~~
 
 ```ts
 createScope(bindings?, parent?): InspectableScope
@@ -997,7 +1003,7 @@ createScope(bindings?, parent?): InspectableScope
 
 <MemberCard>
 
-##### ExpressionComputeEngine.lookupDefinition()
+##### ExpressionComputeEngine.~~lookupDefinition()~~
 
 ```ts
 lookupDefinition(id): BoxedDefinition | undefined
@@ -1011,7 +1017,7 @@ lookupDefinition(id): BoxedDefinition | undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.assign()
+##### ExpressionComputeEngine.~~assign()~~
 
 ###### assign(ids)
 
@@ -1053,7 +1059,7 @@ assign(arg1, arg2?): IComputeEngine
 
 <MemberCard>
 
-##### ExpressionComputeEngine.declareType()
+##### ExpressionComputeEngine.~~declareType()~~
 
 ```ts
 declareType(name, type, options?): void
@@ -1106,7 +1112,7 @@ declareType(name, type, options?): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.declare()
+##### ExpressionComputeEngine.~~declare()~~
 
 ###### declare(symbols)
 
@@ -1532,7 +1538,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 
 <MemberCard>
 
-##### ExpressionComputeEngine.assume()
+##### ExpressionComputeEngine.~~assume()~~
 
 ```ts
 assume(predicate): AssumeResult
@@ -1546,7 +1552,7 @@ assume(predicate): AssumeResult
 
 <MemberCard>
 
-##### ExpressionComputeEngine.declareSequence()
+##### ExpressionComputeEngine.~~declareSequence()~~
 
 ```ts
 declareSequence(name, def): IComputeEngine
@@ -1577,7 +1583,7 @@ ce.parse('F_{10}').evaluate();  // → 55
 
 <MemberCard>
 
-##### ExpressionComputeEngine.getSequenceStatus()
+##### ExpressionComputeEngine.~~getSequenceStatus()~~
 
 ```ts
 getSequenceStatus(name): SequenceStatus
@@ -1601,7 +1607,7 @@ ce.getSequenceStatus('F');
 
 <MemberCard>
 
-##### ExpressionComputeEngine.getSequence()
+##### ExpressionComputeEngine.~~getSequence()~~
 
 ```ts
 getSequence(name): SequenceInfo | undefined
@@ -1618,7 +1624,7 @@ Returns `undefined` if the symbol is not a sequence.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.listSequences()
+##### ExpressionComputeEngine.~~listSequences()~~
 
 ```ts
 listSequences(): string[]
@@ -1631,7 +1637,7 @@ Returns an array of sequence names.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.isSequence()
+##### ExpressionComputeEngine.~~isSequence()~~
 
 ```ts
 isSequence(name): boolean
@@ -1647,7 +1653,7 @@ Check if a symbol is a defined sequence.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.clearSequenceCache()
+##### ExpressionComputeEngine.~~clearSequenceCache()~~
 
 ```ts
 clearSequenceCache(name?): void
@@ -1664,7 +1670,7 @@ If no name is provided, clears caches for all sequences.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.getSequenceCache()
+##### ExpressionComputeEngine.~~getSequenceCache()~~
 
 ```ts
 getSequenceCache(name): 
@@ -1686,7 +1692,7 @@ For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
 
 <MemberCard>
 
-##### ExpressionComputeEngine.getSequenceTerms()
+##### ExpressionComputeEngine.~~getSequenceTerms()~~
 
 ```ts
 getSequenceTerms(
@@ -1734,7 +1740,7 @@ ce.getSequenceTerms('F', 0, 10);
 
 <MemberCard>
 
-##### ExpressionComputeEngine.lookupOEIS()
+##### ExpressionComputeEngine.~~lookupOEIS()~~
 
 ```ts
 lookupOEIS(terms, options?): Promise<OEISSequenceInfo[]>
@@ -1765,7 +1771,7 @@ const results = await ce.lookupOEIS([0, 1, 1, 2, 3, 5, 8, 13]);
 
 <MemberCard>
 
-##### ExpressionComputeEngine.checkSequenceOEIS()
+##### ExpressionComputeEngine.~~checkSequenceOEIS()~~
 
 ```ts
 checkSequenceOEIS(name, count?, options?): Promise<{
@@ -1806,7 +1812,7 @@ const result = await ce.checkSequenceOEIS('F', 10);
 
 <MemberCard>
 
-##### ExpressionComputeEngine.interpret()
+##### ExpressionComputeEngine.~~interpret()~~
 
 ```ts
 interpret(expr, options?): Promise<InterpretResult>
@@ -1846,7 +1852,7 @@ const { expression, candidates } = await ce.interpret(
 
 <MemberCard>
 
-##### ExpressionComputeEngine.forget()
+##### ExpressionComputeEngine.~~forget()~~
 
 ```ts
 forget(symbol?): void
@@ -1860,7 +1866,7 @@ forget(symbol?): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.ask()
+##### ExpressionComputeEngine.~~ask()~~
 
 ```ts
 ask(pattern): BoxedSubstitution[]
@@ -1874,7 +1880,7 @@ ask(pattern): BoxedSubstitution[]
 
 <MemberCard>
 
-##### ExpressionComputeEngine.verify()
+##### ExpressionComputeEngine.~~verify()~~
 
 ```ts
 verify(query): boolean | undefined
@@ -1888,7 +1894,7 @@ verify(query): boolean | undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.operatorInfo()
+##### ExpressionComputeEngine.~~operatorInfo()~~
 
 ```ts
 operatorInfo(head): OperatorInfo | undefined
@@ -1913,7 +1919,7 @@ maintaining a parallel list of "known" operators.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.normalizeIdentifier()
+##### ExpressionComputeEngine.~~normalizeIdentifier()~~
 
 ```ts
 normalizeIdentifier(latex): string
@@ -1939,7 +1945,7 @@ name without the side-effect of auto-declaring the symbol.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.symbolInfo()
+##### ExpressionComputeEngine.~~symbolInfo()~~
 
 ```ts
 symbolInfo(name): SymbolInfo | undefined
@@ -1965,7 +1971,7 @@ two methods are non-overlapping).
 
 <MemberCard>
 
-##### ExpressionComputeEngine.searchDefinitions()
+##### ExpressionComputeEngine.~~searchDefinitions()~~
 
 ```ts
 searchDefinitions(query, options?): DefinitionSearchResult[]
@@ -1997,7 +2003,7 @@ call for full detail.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.suggestOperatorName()
+##### ExpressionComputeEngine.~~suggestOperatorName()~~
 
 ```ts
 suggestOperatorName(name): string | undefined
@@ -2026,7 +2032,7 @@ ce.suggestOperatorName('foo');      // → undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.functionProperties()
+##### ExpressionComputeEngine.~~functionProperties()~~
 
 ```ts
 functionProperties(name): FunctionProperties | undefined
@@ -2052,7 +2058,7 @@ residues that depend on parameters) are available via `entries`.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.toJSON()
+##### ExpressionComputeEngine.~~toJSON()~~
 
 ```ts
 toJSON(): string

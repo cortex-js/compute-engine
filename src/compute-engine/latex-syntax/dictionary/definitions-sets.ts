@@ -447,6 +447,9 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: '\\Z_-', parse: 'NegativeIntegers' },
   { latexTrigger: '\\Z_{-}', parse: 'NegativeIntegers' },
   { latexTrigger: '\\Z^{\\lt}', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\Z^{<}', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\Z^{\\lt0}', parse: 'NegativeIntegers' },
+  { latexTrigger: '\\Z^{<0}', parse: 'NegativeIntegers' },
 
   // Integers <= 0
   {
