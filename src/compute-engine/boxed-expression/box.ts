@@ -803,7 +803,14 @@ function makeCanonicalFunction(
   const def = lookupApplicable(name, scope ?? ce.context.lexicalScope);
   if (!def) {
     // No def. This is for example `["f", 2]` where "f" is not declared.
-    ce.declare(name, { type: 'function', inferred: true });
+    // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
+    // serialization) a read must not write to the caller's scope: skip the
+    // auto-declaration and construct the application with an unbound
+    // operator, per the structural symbol contract. Note this gates only
+    // the AUTO-declare of an undeclared head — binding-site declarations
+    // (a Sum index into its local scope) are deliberate and unaffected.
+    if (ce._resolveOnlyDepth === 0)
+      ce.declare(name, { type: 'function', inferred: true });
     return new BoxedFunction(ce, name, flatten(semiCanonical(ce, ops)), {
       metadata,
       canonical: true,

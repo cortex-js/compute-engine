@@ -532,9 +532,17 @@ export class Formatter {
     inlineSepBlocks.push(blocks[blocks.length - 1]);
 
     if (!open && !close) {
+      // An UNFENCED list is an infix-operator chain (`a + b + c`), and its
+      // separator is the operator. Wrap `inlineSepBlocks`, never `sepBlocks`:
+      // with no closing fence, a separator after the last element is left
+      // dangling at the end of the output, and a dangling operator does not
+      // re-parse (`a +\nb + c +` → `unexpected-symbol "+"`). Only the
+      // separators BETWEEN elements may survive a line break — those do
+      // continue the expression, since an operator with whitespace on both
+      // sides stays infix across a linebreak.
       return this.choice(
         this.line(...inlineSepBlocks),
-        this.wrap(...sepBlocks)
+        this.wrap(...inlineSepBlocks)
       );
     }
     return this.choice(

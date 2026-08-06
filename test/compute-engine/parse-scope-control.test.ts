@@ -423,6 +423,76 @@ describe('the scope option NEVER disposes the scope’s definitions', () => {
   });
 });
 
+/**
+ * Serialization is a READ. The prettifier re-canonicalizes structural rebuilds
+ * (`_Product.asRationalExpression()` → `flatten` → `.canonical`), which used
+ * to auto-declare an undeclared function head into whatever scope was ambient
+ * at serialization time. Witness from Tycho (2026-08-05): serializing a
+ * sub-operand of a canonical parse made against a per-call scope declared
+ * `Q_z` as a function in the surrounding document scope, changing how later
+ * parses read.
+ */
+describe('SERIALIZATION does not write to the ambient scope', () => {
+  const LATEX = 'y=aQ_{z}\\left(x,y\\right)';
+
+  it('toLatex() on a per-call-scope parse leaks nothing (Tycho witness)', () => {
+    const ce = new ComputeEngine();
+    const documentScope = ce.createScope();
+    ce.pushScope(documentScope);
+
+    const scope1 = ce.createScope(undefined, documentScope);
+    const before = ce.parse(LATEX, {
+      strict: false,
+      canonical: false,
+      scope: scope1,
+    }).json;
+
+    const expression = ce.parse(LATEX, { strict: false, scope: scope1 });
+
+    // The RHS is `Multiply(a, Q_z(x,y))`: its serialization routes through
+    // the Product decomposition that used to re-canonicalize in the ambient
+    // scope and declare `Q_z` there.
+    expect(expression.ops![1].toLatex()).toBe('aQ_{z}(x, y)');
+    expect(documentScope.declarations().map((d) => d.name)).toEqual([]);
+
+    // A later non-canonical parse against a sibling scope is unchanged.
+    const scope2 = ce.createScope(undefined, documentScope);
+    const after = ce.parse(LATEX, {
+      strict: false,
+      canonical: false,
+      scope: scope2,
+    }).json;
+    expect(after).toEqual(before);
+
+    ce.popScope();
+  });
+
+  it('toMathJson() leaks nothing either', () => {
+    const ce = new ComputeEngine();
+    const documentScope = ce.createScope();
+    ce.pushScope(documentScope);
+
+    const scope1 = ce.createScope(undefined, documentScope);
+    const expression = ce.parse(LATEX, { strict: false, scope: scope1 });
+    expression.ops![1].toMathJson();
+
+    expect(documentScope.declarations().map((d) => d.name)).toEqual([]);
+    ce.popScope();
+  });
+
+  it('serialization does not write inference onto ambient declarations', () => {
+    const ce = new ComputeEngine();
+    // `k` is ambient and undeclared-typed; serializing an expression that
+    // mentions it must not narrow it.
+    ce.declare('k', 'unknown');
+    const expr = ce.parse('k x^2');
+    const before = ce.lookupDefinition('k')!.value!.type.toString();
+    expr.toLatex();
+    expr.toMathJson();
+    expect(ce.lookupDefinition('k')!.value!.type.toString()).toBe(before);
+  });
+});
+
 describe('trigger-spelled names resolve through the supplied scope', () => {
   it('a binding makes the Subscript fold RESOLVE instead of declare', () => {
     const ce = new ComputeEngine();

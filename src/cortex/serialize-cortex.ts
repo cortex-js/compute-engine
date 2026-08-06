@@ -513,10 +513,12 @@ export function serializeCortex(
     // bare statement list). The `do { … }` block-expression form is the only
     // spelling that makes a `Block` re-parse as a `Block` in expression
     // position (a bare `{ … }` there is the collection grammar). Statements are
-    // `;`-separated; the block scopes and yields its final statement's value.
+    // `;`-separated inline, line-separated when stacked (a linebreak is a
+    // statement separator too); the block scopes and yields its final
+    // statement's value.
     //
     Block: (expr: MathJsonExpression): FormattingBlock =>
-      fmt.line('do ', serializeBraceBlock(expr)),
+      serializeBraceBlockStatement('do ', expr),
 
     //
     // Function literal (typed function literals, Phase 4)
@@ -1202,17 +1204,42 @@ export function serializeCortex(
     );
   }
 
-  /** The `{ … }` of a `Block`: `;`-separated statements, inline when they fit,
-   * one per indented line otherwise. Shared by the `do { … }` block expression
-   * and the branches of the `if` block form. */
-  function serializeBraceBlock(block: MathJsonExpression): FormattingBlock {
-    if (nops(block) === 0) return fmt.text('{}');
-    return fmt.fencedList(
-      '{',
-      fmt.separator(';'),
-      '}',
-      mapArgs<FormattingBlock>(block, serializeExpression)
+  /** A keyword-introduced statement block — `do { … }` — laid out the same way
+   * as the `if` block form: inline when it fits, otherwise an outer stack
+   * anchored at the KEYWORD, so the body sits one indent in and the closing
+   * brace lines up under the keyword. Anchoring at the `{` instead (what
+   * `fencedList` does) staircases the body out to the brace's column. */
+  function serializeBraceBlockStatement(
+    head: string,
+    block: MathJsonExpression
+  ): FormattingBlock {
+    const statements = blockStatements(block);
+    if (statements.length === 0) return fmt.text(head + '{}');
+    return fmt.choice(
+      fmt.line(head, serializeBraceBlockInline(block)),
+      fmt.stack(
+        fmt.text(head + '{'),
+        fmt.indent(fmt.stack(...statements)),
+        fmt.text('}')
+      )
     );
+  }
+
+  /** The `{ … }` of a `Block`, forced onto ONE line. Where a caller offers its
+   * own stacked layout, the inline alternative must be strictly inline, or the
+   * two stacked layouts compete and the brace-anchored one can win on cost and
+   * staircase the body. */
+  function serializeBraceBlockInline(
+    block: MathJsonExpression
+  ): FormattingBlock {
+    const statements = blockStatements(block);
+    if (statements.length === 0) return fmt.text('{}');
+    const parts: FormattingBlock[] = [];
+    statements.forEach((statement, i) => {
+      if (i > 0) parts.push(fmt.separator(';'));
+      parts.push(statement);
+    });
+    return fmt.line(fmt.fence('{'), ...parts, fmt.fence('}'));
   }
 
   /** Serialize an operand of the conditional form, parenthesizing it when it
@@ -1233,37 +1260,93 @@ export function serializeCortex(
   const isBlock = (x: MathJsonExpression | null): boolean =>
     x !== null && operator(x) === 'Block';
 
-  /** The block form — `if c { … }`, `if c { … } else { … }`, and the
-   * `else if` chain — or `null` when the node is not that shape (a branch that
-   * is not a `Block`, or an arity outside 2…3). */
+  /** Flatten a block-form `If` and its `else if` chain into a list of
+   * `cond`/`body` clauses plus a final `else` body, or `null` when the node is
+   * not that shape (a branch that is not a `Block`, an arity outside 2…3, or an
+   * `else` that is neither a `Block` nor a block-form `If`). Flattening the
+   * chain here is what lets the stacked layout below put every `} else if …` at
+   * the same column instead of nesting each one a level deeper. */
+  function ifBlockClauses(expr: MathJsonExpression): {
+    clauses: { cond: MathJsonExpression; body: MathJsonExpression }[];
+    elseBody: MathJsonExpression | null;
+  } | null {
+    const clauses: { cond: MathJsonExpression; body: MathJsonExpression }[] = [];
+    let node: MathJsonExpression = expr;
+    for (;;) {
+      const count = nops(node);
+      if (count !== 2 && count !== 3) return null;
+      const cond = operand(node, 1);
+      const body = operand(node, 2);
+      const alternative = count === 3 ? operand(node, 3) : null;
+      if (cond === null || body === null || !isBlock(body)) return null;
+      clauses.push({ cond, body });
+
+      if (alternative === null) return { clauses, elseBody: null };
+      if (isBlock(alternative)) return { clauses, elseBody: alternative };
+      // Only a block-form `If` can chain into `else if`. Anything else in
+      // `else` position has no block spelling, so the whole node falls back to
+      // the generic call form rather than emitting a half-block hybrid.
+      if (operator(alternative) !== 'If') return null;
+      node = alternative;
+    }
+  }
+
+  /** The statements of a `Block`, one per element. */
+  const blockStatements = (block: MathJsonExpression): FormattingBlock[] =>
+    mapArgs<FormattingBlock>(block, serializeExpression) ?? [];
+
+  /** The block form — `if c { … }`, `if c { … } else { … }`, and the `else if`
+   * chain — or `null` when the node is not that shape.
+   *
+   * Two layouts, and the formatter picks the cheaper: everything on one line,
+   * or the conventional stacked form. The stacked one is built as an OUTER
+   * stack whose rows are the head lines and the closing `}`, with each body one
+   * indent in. That matters: a `StackBlock` aligns its continuation lines to
+   * the column where the stack BEGINS, so anchoring the stack at the `if`
+   * itself puts `} else {` and `}` under the `if` and the bodies one indent
+   * further. Handing the braces to `fencedList` instead (as the inline layout
+   * does) would anchor the body at the `{`, which for a statement block
+   * staircases it far to the right. */
   function serializeIfBlockForm(
     expr: MathJsonExpression
   ): FormattingBlock | null {
-    const count = nops(expr);
-    if (count !== 2 && count !== 3) return null;
-    const cond = operand(expr, 1);
-    const consequent = operand(expr, 2);
-    const alternative = count === 3 ? operand(expr, 3) : null;
-    if (cond === null || !isBlock(consequent)) return null;
+    const parsed = ifBlockClauses(expr);
+    if (parsed === null) return null;
+    const { clauses, elseBody } = parsed;
 
-    const head = fmt.line(
-      'if ',
-      serializeConditionalOperand(cond, CONDITIONAL_PRECEDENCE + 1),
-      ' ',
-      serializeBraceBlock(consequent!)
-    );
-    if (alternative === null) return head;
+    const condition = (cond: MathJsonExpression): FormattingBlock =>
+      serializeConditionalOperand(cond, CONDITIONAL_PRECEDENCE + 1);
 
-    if (isBlock(alternative))
-      return fmt.line(head, ' else ', serializeBraceBlock(alternative));
+    // Inline: `if c { … } else if d { … } else { … }`.
+    const inlineParts: (string | FormattingBlock)[] = [];
+    clauses.forEach(({ cond, body }, i) => {
+      inlineParts.push(i === 0 ? 'if ' : ' else if ');
+      inlineParts.push(condition(cond), ' ', serializeBraceBlockInline(body));
+    });
+    if (elseBody !== null)
+      inlineParts.push(' else ', serializeBraceBlockInline(elseBody));
+    const inline = fmt.line(...inlineParts);
 
-    // `else if …`: only a block-form `If` can chain. Anything else in `else`
-    // position has no block spelling, so the whole node falls back to the
-    // generic call form rather than emitting a half-block hybrid.
-    const chained =
-      operator(alternative) === 'If' ? serializeIfBlockForm(alternative) : null;
-    if (chained === null) return null;
-    return fmt.line(head, ' else ', chained);
+    // Stacked. Statements are separated by the line break itself — a linebreak
+    // is a statement separator in Cortex, so no `;` is needed. An empty body
+    // contributes no row at all, rather than a line of indent whitespace.
+    const rows: FormattingBlock[] = [];
+    const pushBody = (body: MathJsonExpression): void => {
+      const statements = blockStatements(body);
+      if (statements.length > 0)
+        rows.push(fmt.indent(fmt.stack(...statements)));
+    };
+    clauses.forEach(({ cond, body }, i) => {
+      rows.push(fmt.line(i === 0 ? 'if ' : '} else if ', condition(cond), ' {'));
+      pushBody(body);
+    });
+    if (elseBody !== null) {
+      rows.push(fmt.text('} else {'));
+      pushBody(elseBody);
+    }
+    rows.push(fmt.text('}'));
+
+    return fmt.choice(inline, fmt.stack(...rows));
   }
 
   /** `If` in either of its two Cortex spellings, or `null` for the shapes that

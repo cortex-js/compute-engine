@@ -1161,7 +1161,12 @@ export function serializeJson(
   if (_serializeDepth === 0) _preserveStructure = !expr.isCanonical;
   _serializeDepth += 1;
   try {
-    return serializeJsonExpression(ce, expr, options);
+    // Serialization is a read: the prettifier re-canonicalizes structural
+    // rebuilds (`_Product.asRationalExpression()` → `flatten`), which must
+    // not declare or infer into the current scope — an expression parsed
+    // against a caller-supplied scope would otherwise leak its undeclared
+    // heads into whatever scope is ambient at serialization time.
+    return ce._resolveOnly(() => serializeJsonExpression(ce, expr, options));
   } finally {
     _serializeDepth -= 1;
   }

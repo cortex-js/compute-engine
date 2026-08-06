@@ -443,6 +443,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   infer(t: Type, inferenceMode: 'narrow' | 'widen' = 'narrow'): boolean {
     if (!this._def) return false;
 
+    // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
+    // serialization) a read must not write inference onto a definition —
+    // every call site is fire-and-forget, so declining is safe.
+    if (this.engine._resolveOnlyDepth > 0) return false;
+
     const def = this._def;
 
     // Narrowing capture (`InspectableScope.narrowings()`): while a parse/box

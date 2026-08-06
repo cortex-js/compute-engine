@@ -303,6 +303,11 @@ export class BoxedFunction
     const def = this.operatorDefinition;
     if (!def || !def.inferredSignature) return false;
 
+    // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
+    // serialization) a read must not write inference onto a definition —
+    // every call site is fire-and-forget, so declining is safe.
+    if (this.engine._resolveOnlyDepth > 0) return false;
+
     // Narrowing capture (`InspectableScope.narrowings()`): a contained parse
     // that refines the signature of an OUTER inferred function reports it back
     // to the caller, same as `BoxedSymbol.infer()` does for symbols.

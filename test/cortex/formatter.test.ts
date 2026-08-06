@@ -174,6 +174,153 @@ describe('CORTEX FORMATTER — no trailing whitespace', () => {
   });
 });
 
+describe('CORTEX FORMATTER — a wrapped operator chain has no dangling operator', () => {
+  // An UNFENCED list (`fmt.list`) is an infix-operator chain, and its separator
+  // is the operator itself. The wrapped layout used to emit the separator after
+  // EVERY element, including the last — with no closing fence to absorb it, the
+  // output ended in a dangling operator and did not re-parse at all
+  // (`a +\nb + c +` → `unexpected-symbol "+"`). Fenced lists are unaffected: a
+  // trailing `,` before `]` or `;` before `}` is legal and stays.
+  const TRAILING_OPERATOR = /[-+*/%^&|<>=!]+$/;
+
+  test('a wrapped Add chain ends with an operand, not an operator', () => {
+    const out = serializeCortex(
+      ['Add', 'accumulator', 'someLongVariableName', 'x', 'y'],
+      { margin: 30 }
+    );
+    expect(out).toContain('\n'); // actually wrapped
+    expect(TRAILING_OPERATOR.test(out)).toBe(false);
+  });
+
+  test('the wrapped output re-parses', () => {
+    for (const expr of [
+      ['Add', 'accumulator', 'someLongVariableName', 'x', 'y'],
+      ['Multiply', 'alpha', 'betaLongName', 'gammaName', 'd'],
+      ['And', 'firstCondition', 'secondCondition', 'thirdCondition'],
+    ] as MathJsonExpression[]) {
+      const out = serializeCortex(expr, { margin: 25 });
+      expect(out).toContain('\n');
+      const [, diagnostics] = parseCortex(out);
+      expect(diagnostics).toEqual([]);
+    }
+  });
+
+  test('a fenced list keeps its trailing separator (which re-parses)', () => {
+    const out = serializeCortex(['List', 1, 2, 3, 4, 5, 6, 7, 8], NARROW);
+    expect(out.split('\n').slice(-2)[0].trim()).toBe('8,');
+    expect(parseCortex(out)[1]).toEqual([]);
+  });
+});
+
+describe('CORTEX FORMATTER — the `if` block form stacks conventionally', () => {
+  // A `StackBlock` aligns continuation lines to the column where the stack
+  // BEGINS. Handing the branches to `fencedList` anchors the body at the `{`,
+  // which for a statement block staircases it far to the right. The block form
+  // instead builds an outer stack anchored at the `if`, so the body sits one
+  // indent in and the closing braces line up under the `if`.
+  const longBody: MathJsonExpression = [
+    'Block',
+    ['Assign', 'accumulator', ['Add', 'accumulator', 'someLongVariableName']],
+    ['Multiply', 'accumulator', 2],
+  ];
+
+  test('a long if/else stacks with a 2-space body indent', () => {
+    const out = serializeCortex([
+      'If',
+      ['Greater', 'someLongVariableName', 0],
+      longBody,
+      ['Block', 0],
+    ]);
+    expect(out.split('\n')).toEqual([
+      'if someLongVariableName > 0 {',
+      '  accumulator = accumulator + someLongVariableName',
+      '  accumulator * 2',
+      '} else {',
+      '  0',
+      '}',
+    ]);
+  });
+
+  test('an else-if chain keeps every clause at the same column', () => {
+    const out = serializeCortex([
+      'If',
+      ['Greater', 'n', 0],
+      longBody,
+      ['If', ['Less', 'n', 0], ['Block', ['Negate', 'n']], ['Block', 0]],
+    ]);
+    const heads = out.split('\n').filter((l) => /^[^ ]/.test(l));
+    expect(heads).toEqual(['if n > 0 {', '} else if n < 0 {', '} else {', '}']);
+  });
+
+  test('a nested if indents one level per depth', () => {
+    const out = serializeCortex(
+      [
+        'If',
+        'outerCondition',
+        [
+          'Block',
+          [
+            'If',
+            'innerCondition',
+            ['Block', ['Assign', 'x', 1], ['Add', 'x', 1]],
+            ['Block', 2],
+          ],
+        ],
+        ['Block', 3],
+      ],
+      { margin: 30 }
+    );
+    expect(out.split('\n')).toEqual([
+      'if outerCondition {',
+      '  if innerCondition {',
+      '    x = 1',
+      '    x + 1',
+      '  } else {',
+      '    2',
+      '  }',
+      '} else {',
+      '  3',
+      '}',
+    ]);
+  });
+
+  test('a short if still fits on one line', () => {
+    expect(serializeCortex(['If', 'c', ['Block', 1], ['Block', 2]])).toBe(
+      'if c {1} else {2}'
+    );
+  });
+
+  // `do { … }` is the other keyword-introduced statement block and gets the
+  // same layout: anchored at the keyword, not at the brace.
+  test('a nested do-block stacks under its keyword', () => {
+    const out = serializeCortex(
+      [
+        'someFunctionName',
+        ['Block', ['Assign', 'x', 1], ['Add', 'x', 1], ['Multiply', 'x', 2]],
+      ],
+      { margin: 24 }
+    );
+    expect(out.split('\n')).toEqual([
+      'someFunctionName(do {',
+      '                   x = 1',
+      '                   x + 1',
+      '                   x * 2',
+      '                 })',
+    ]);
+    expect(parseCortex(out)[1]).toEqual([]);
+  });
+
+  test('every stacked layout re-parses', () => {
+    for (const margin of [80, 30, 24]) {
+      const out = serializeCortex(
+        ['If', 'condition', longBody, ['Block', 0]],
+        { margin }
+      );
+      expect(parseCortex(out)[1]).toEqual([]);
+    }
+  });
+});
+
 describe('CORTEX FORMATTER — string literals keep interior spaces', () => {
   // The trailing-whitespace trim operates only at stacked-fragment ends. A
   // string literal is always emitted as a single inline `"…"` block (interior

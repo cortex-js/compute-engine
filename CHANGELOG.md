@@ -144,6 +144,43 @@
 
 ### Bug Fixes
 
+- **Serialization no longer writes to the current scope.** `toLatex()` and
+  `toMathJson()` internally re-canonicalize parts of the expression they lay
+  out (for example to display a product with negative exponents as a
+  fraction), and that re-canonicalization could **declare** an undeclared
+  function head — or write an inferred type onto a declaration — in whatever
+  scope was ambient at serialization time. In particular, serializing an
+  expression that had been parsed against a per-call `scope` leaked its
+  function heads into the surrounding scope, changing how later parses read
+  (`aQ_{z}(x,y)` parsed before the leak as an implicit product, after it as a
+  function application). Serialization now runs in a resolve-only region:
+  names resolve against the scope chain but are never declared, and no
+  inference is written. The same region now also covers the undeclared-head
+  auto-declaration during partial-form boxing, which the resolve-only
+  contract already promised but did not enforce.
+
+- **Cortex: a wrapped operator chain no longer ends in a dangling operator.**
+  When an infix chain was long enough to wrap, the formatter emitted the
+  operator after *every* element, including the last. With no closing fence to
+  absorb it the output ended on the operator, and the result did not re-parse:
+  `Add(accumulator, someLongVariableName, x, y)` at a narrow margin produced
+  `accumulator +` / `someLongVariableName + x + y +`, which reports
+  `unexpected-symbol "+"`. Only the separators *between* elements are kept now;
+  those are fine across a line break, since an operator with whitespace on both
+  sides stays infix. Fenced lists are unaffected — a trailing `,` before `]`
+  or `;` before `}` is legal Cortex and still emitted.
+
+- **Cortex: a statement block that has to wrap is indented, not staircased.**
+  `do { … }` (and the new `if` block form) laid its body out with the generic
+  fenced-list layout, which aligns continuation lines to the *opening brace*.
+  For a statement block that pushed the body out to the brace's column, and at
+  a realistic margin left so little width that the statements broke apart in
+  turn. Both are now laid out anchored at the **keyword**: body one indent in,
+  closing brace under the keyword, statements separated by the line break
+  itself. An `else if` chain is flattened first, so every clause stays at the
+  same column instead of nesting a level deeper per `else if`. Expressions and
+  collections keep the existing brace-aligned layout.
+
 - **A subscript or bracket on a set constant is no longer read as an index.**
   `\mathbb{Z}_n` parsed as `["At", "Integers", "n"]` — indexing into a set —
   which is not a valid type, and serialized back to `\Z[n]`, which parsed as
