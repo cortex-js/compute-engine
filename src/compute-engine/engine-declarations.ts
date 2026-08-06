@@ -608,7 +608,30 @@ export function declareType(
   // Is the type already defined in this scope?
   const scope = ce.context.lexicalScope;
   const existing = scope.types?.[name];
-  if (existing) {
+
+  // An UNRESOLVED FORWARD REFERENCE is a promise to declare, not a conflict:
+  // `type json_array` inside an earlier body made `resolver.forward()` install
+  // an empty record, and every type mentioning the name captured THAT object.
+  // This declaration fulfills it — IN PLACE, so those captures see the
+  // definition (a fresh record would leave them pointing at the empty one, and
+  // mutual recursion could never close). A record with a `def` is a completed
+  // declaration and still conflicts; only the empty promise is fulfillable.
+  const fulfillsForwardRef = existing !== undefined && existing.def === undefined;
+
+  // A forward reference is necessarily BARE — the type parser has no syntax for
+  // applying one — so every type that already captured this record captured it
+  // with no arguments. Turning it generic would leave those types holding an
+  // unapplied generic reference, which is an arity error everywhere else and
+  // silently matches nothing (`list<type Gen>` then matched
+  // `list<tuple<integer, integer>>` as `false`). Reject instead, leaving the
+  // placeholder untouched for a well-formed declaration later.
+  if (fulfillsForwardRef && typeParams !== undefined)
+    throw new TypeVariableError(
+      'generic-alias-arity',
+      `The type "${name}" is referenced as a forward reference, which takes no type arguments: it cannot be declared generic`
+    );
+
+  if (existing && !fulfillsForwardRef) {
     // A record this scope created from a `DeclareType` statement (marked
     // `_declaredByStatement`, mirroring the `Declare` operator handler) is
     // ours to replace: the same program may be canonicalized then evaluated,
@@ -635,14 +658,18 @@ export function declareType(
   // calls `removeMintedTypeConstructor` before deriving.)
   if (mint && params === undefined) checkTypeConstructorNamespace(scope, name);
 
-  if (existing) delete scope.types![name];
+  if (existing && !fulfillsForwardRef) delete scope.types![name];
 
   scope.types ??= {};
 
   alias ??= false; // Nominal by default
 
-  // First, add a placeholder record to allow recursive types
-  scope.types[name] = { kind: 'reference', name, alias, def: undefined };
+  // First, add a placeholder record to allow recursive types. Fulfilling a
+  // forward reference REUSES the record `forward()` installed — same object,
+  // now carrying this declaration's `alias` — so the types that captured it
+  // resolve through to the definition set below.
+  if (fulfillsForwardRef) existing!.alias = alias;
+  else scope.types[name] = { kind: 'reference', name, alias, def: undefined };
   // The clause goes on the placeholder, BEFORE the body parses: a generic
   // alias that applies itself is then detected unambiguously (the record has
   // `typeParams` and no `def` yet) as `generic-alias-self-reference`.
@@ -654,6 +681,22 @@ export function declareType(
 
   /** Undo the placeholder: a declaration that failed declares nothing. */
   const rollbackTypeHalf = (): void => {
+    if (fulfillsForwardRef) {
+      // The record is the forward reference's own; restoring it means putting
+      // it back to the unfulfilled state, not removing it — the types holding
+      // it stay as they were, still waiting for a declaration.
+      existing!.alias = false;
+      existing!.def = undefined;
+      delete existing!.typeParams;
+      // `_declaredByStatement` was set on this very record before the body
+      // parsed. Leaving it behind would mark a still-unfulfilled promise as
+      // statement-created, and the redeclaration guard above keys on exactly
+      // that flag — so a later `fromStatement` declaration would silently
+      // replace a type this handler never declared.
+      delete (existing as { _declaredByStatement?: boolean })
+        ._declaredByStatement;
+      return;
+    }
     delete scope.types![name];
     if (existing) scope.types![name] = existing;
   };

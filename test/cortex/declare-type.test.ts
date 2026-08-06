@@ -1196,3 +1196,193 @@ describe('CORTEX TYPE CONSTRUCTORS', () => {
     expect(r.value.toString()).toBe('("True", "False", "False")');
   });
 });
+
+//
+// RECURSIVE TYPES
+//
+// A JSON value is the canonical recursive type: it refers to itself through
+// its own array and object arms. Two spellings must work — one self-recursive
+// alias, and a mutually recursive set closed by `type`-prefixed forward
+// references (the spelling `doc/08-guide-types.md` documents for the host API).
+//
+// Each of these pinned a distinct defect:
+//  - `hasValueComponent` unfolded a structural alias with no cycle guard, so
+//    every REJECTED value blew the stack instead of erroring `incompatible-type`.
+//  - A forward reference installed a type record that the fulfilling
+//    declaration then read as a redeclaration conflict, so a mutually
+//    recursive set could not be written at all.
+//  - `isScalarType` did not unfold alias references, so a parameter typed by
+//    an alias of a collection BROADCAST over its argument instead of binding
+//    it whole.
+//
+describe('CORTEX RECURSIVE TYPES', () => {
+  const SELF =
+    'type alias json = missing | boolean | finite_real | string | list<json> | dictionary<json>\n';
+
+  const MUTUAL = [
+    'type alias json = missing | boolean | finite_real | string | type jsonArray | type jsonObject',
+    'type alias jsonArray = list<json>',
+    'type alias jsonObject = dictionary<json>',
+    '',
+  ].join('\n');
+
+  for (const [shape, def] of [
+    ['self-recursive', SELF],
+    ['mutually recursive', MUTUAL],
+  ] as const) {
+    describe(`a ${shape} JSON alias`, () => {
+      test('accepts a nested value', () => {
+        const ce = new ComputeEngine();
+        const r = executeCortex(
+          ce,
+          def + 'let a: json = {items -> [1, {k -> "v"}], ok -> True}\na'
+        );
+        expect(r.diagnostics).toEqual([]);
+      });
+
+      test('accepts `Missing` as a position-preserving null', () => {
+        const ce = new ComputeEngine();
+        const r = executeCortex(ce, def + 'let a: json = [1, Missing, 3]\nLength(a)');
+        expect(r.diagnostics).toEqual([]);
+        expect(r.value.toString()).toBe('3');
+      });
+
+      // Every arm of the rejection path used to overflow the stack: the type
+      // is only consulted recursively when NO arm matches.
+      for (const [label, value] of [
+        ['a function', '(x) |-> x + 1'],
+        ['a complex number', '2 + 3i'],
+        ['NaN', 'NaN'],
+      ] as const) {
+        test(`rejects ${label} with a type error, not a stack overflow`, () => {
+          const ce = new ComputeEngine();
+          const r = executeCortex(ce, def + `let a: json = ${value}\na`);
+          const messages = r.diagnostics.map((d) => String(d.message[1]));
+          expect(messages).toHaveLength(1);
+          expect(messages[0]).toContain('incompatible-type');
+          expect(messages[0]).not.toContain('call stack');
+        });
+      }
+
+      // The parameter type admits a list, so the list is ONE argument.
+      test('binds a list argument whole instead of broadcasting', () => {
+        const ce = new ComputeEngine();
+        const r = executeCortex(
+          ce,
+          def + 'function f(v: json) -> string { "ok" }\nf([1, 2, 3])'
+        );
+        expect(r.diagnostics).toEqual([]);
+        expect(r.value.toString()).toBe('"ok"');
+      });
+    });
+  }
+
+  test('an alias of a collection binds whole, like the inline spelling', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      [
+        'type alias u = list<number>',
+        'function f(v: u) -> string { "ok" }',
+        'f([1, 2])',
+      ].join('\n')
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('"ok"');
+  });
+
+  // The dual of the rule above: a NOMINAL type stays opaque, and opaque means
+  // scalar — its values are tagged applications, never collections, so a list
+  // of them is a genuine broadcast.
+  test('a nominal-typed parameter still broadcasts over a list', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      [
+        'type point = tuple<x: number, y: number>',
+        'function n(p: point) -> number { 1 }',
+        'n([point(1, 2), point(3, 4)])',
+      ].join('\n')
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('[1,1]');
+  });
+
+  test('a forward reference is fulfilled in place, not conflicted', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      [
+        'type alias tree = number | type branch',
+        'type alias branch = list<tree>',
+        'let t: tree = [1, [2, [3]]]',
+        't',
+      ].join('\n')
+    );
+    expect(r.diagnostics).toEqual([]);
+  });
+
+  // Only the EMPTY promise is fulfillable; a completed declaration still
+  // conflicts, so the forward-reference path cannot be used to redeclare.
+  test('a fulfilled forward reference cannot be declared twice', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('branch', 'list<number>');
+    const r = executeCortex(ce, 'type alias branch = list<string>\n1');
+    const messages = r.diagnostics.map((d) => String(d.message[1]));
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain('already defined');
+  });
+});
+
+//
+// Field access reaching THROUGH a recursive type's own recursive field.
+// `unionTypes` keyed its de-dup set on `JSON.stringify(type)`, and a recursive
+// reference reaches itself through `def` — so joining two element types of a
+// `list<tree>` threw "Converting circular structure to JSON".
+//
+describe('CORTEX RECURSIVE TYPE FIELD ACCESS', () => {
+  const TREE =
+    'type tree = tuple<value: any, children: list<tree>>\n' +
+    'let t = tree(1, [tree(2, []), tree(3, [])])\n';
+
+  test('a field read through the recursive field resolves', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(ce, TREE + 't.children[1].value');
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('2');
+  });
+
+  test('the same read via `First`', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(ce, TREE + 'First(t.children).value');
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('2');
+  });
+
+  test('a deep chain resolves', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      'type tree = tuple<value: any, children: list<tree>>\n' +
+        'let t = tree(1, [tree(2, [tree(4, [])])])\n' +
+        't.children[1].children[1].value'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('4');
+  });
+
+  test('a recursive `map` over the tree', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      [
+        'type tree = tuple<value: any, children: list<tree>>',
+        'function map(f, t) { tree(f(t.value), map(f, t.children)) }',
+        'let t = tree(1, [tree(2, [tree(4, [])]), tree(3, [])])',
+        'map((x) |-> x * 10, t)',
+      ].join('\n')
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('tree(10, [tree(20, [tree(40, [])]),tree(30, [])])');
+  });
+});

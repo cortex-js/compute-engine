@@ -3612,9 +3612,28 @@ export function paramsAreScalar(
   // its argument WHOLE exactly as the ground `(indexed_collection) -> …` does,
   // and no site may lift/thread over it. An unbounded variable keeps the scalar
   // default, and a ground signature (no `typeParams`) is untouched.
-  return args.every((arg) =>
-    isScalarType(substituteDeclaredBounds(sigType.typeParams, arg.type))
-  );
+  return args.every((arg) => {
+    const t = substituteDeclaredBounds(sigType.typeParams, arg.type);
+    // A FUNCTION-typed parameter is a higher-order CALLBACK slot: its argument
+    // is a function, never a collection, so it can never itself be broadcast
+    // over — and it must not veto broadcasting of the OTHER parameters. This
+    // predicate is all-or-nothing across the parameter list, so without the
+    // exemption a single `(A) -> B` annotation silently switched off
+    // broadcasting for every parameter of the function: `map(f, t.children)`
+    // stopped mapping the moment `f` was annotated.
+    //
+    // The INFERENCE path already takes exactly this position — see
+    // `inferredCollectionParameterType` (effects-inference.ts), which exempts
+    // "a function-typed one (a higher-order callback slot)" so the
+    // `broadcastable<T>` lift keeps firing. Before this, a DECLARED `(A) -> B`
+    // parameter disagreed with an INFERRED one of the same shape.
+    //
+    // A COLLECTION-typed parameter deliberately still vetoes: it consumes a
+    // whole collection, and suppressing the lift is what keeps a nested
+    // collection argument from being descended into elementwise.
+    if (isSubtype(t, 'function')) return true;
+    return isScalarType(t);
+  });
 }
 
 /** True when this operator definition is backed by a user function literal

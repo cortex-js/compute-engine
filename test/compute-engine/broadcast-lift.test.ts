@@ -287,3 +287,98 @@ describe('BROADCAST LIFT — broadcastable operand admitted by non-threadable pa
     expect(ce.box(['Totient', { str: 'hello' }] as any).isValid).toBe(false);
   });
 });
+
+//
+// Broadcast eligibility and the FUNCTION-typed parameter.
+//
+// `paramsAreScalar` is all-or-nothing across the parameter list, and a
+// function type is not a scalar type — so a single `(A) -> B` annotation used
+// to switch broadcasting off for EVERY parameter of the function. A
+// higher-order callback slot can never receive a collection, so it must not
+// veto the other parameters; the inference path
+// (`inferredCollectionParameterType`) already took that position, and a
+// DECLARED parameter now agrees with an INFERRED one of the same shape.
+//
+// A COLLECTION-typed parameter deliberately still vetoes — it consumes a whole
+// collection, and the veto is what stops a nested collection argument from
+// being descended into elementwise.
+//
+describe('BROADCAST ELIGIBILITY: function-typed parameters', () => {
+  // A nominal constructor body cannot broadcast internally (unlike `n * 2`,
+  // where `Multiply` broadcasts on its own and masks the function-level
+  // question), so this isolates function-level broadcast.
+  const prog = (param: string, arg: string) =>
+    [
+      'type box = tuple<v: any>',
+      `function g(${param}, k) { box(k) }`,
+      `g(${arg}, [10, 20])`,
+    ].join('\n');
+
+  const runCortex = (src: string) => {
+    // Lazily required so this file keeps its engine-only import surface.
+    const {
+      executeCortex,
+    } = require('../../src/cortex/execute-cortex') as typeof import('../../src/cortex/execute-cortex');
+    const ce = new ComputeEngine();
+    const r = executeCortex(ce, src);
+    expect(r.diagnostics).toEqual([]);
+    return r.value.toString();
+  };
+
+  test('a bare parameter broadcasts (baseline)', () => {
+    expect(runCortex(prog('c', '1'))).toBe('[box(10),box(20)]');
+  });
+
+  test('a scalar-typed parameter broadcasts', () => {
+    expect(runCortex(prog('c: number', '1'))).toBe('[box(10),box(20)]');
+    expect(runCortex(prog('c: string', '"a"'))).toBe('[box(10),box(20)]');
+  });
+
+  test('a function-typed parameter no longer vetoes', () => {
+    expect(runCortex(prog('c: (any) -> any', '(x) |-> x'))).toBe(
+      '[box(10),box(20)]'
+    );
+    expect(runCortex(prog('c: function', '(x) |-> x'))).toBe(
+      '[box(10),box(20)]'
+    );
+  });
+
+  test('a collection-typed parameter still vetoes', () => {
+    expect(runCortex(prog('c: list<number>', '[1]'))).toBe('box([10,20])');
+    expect(runCortex(prog('c: tuple<number, number>', '(0, 1)'))).toBe(
+      'box([10,20])'
+    );
+    expect(runCortex(prog('c: dictionary<number>', '{lo -> 0}'))).toBe(
+      'box([10,20])'
+    );
+  });
+
+  // The motivating program: a recursive `map` over a nominal tree whose
+  // recursion IS the broadcast over `list<tree>`. Annotating `f` used to make
+  // the whole call go inert.
+  describe('recursive tree map', () => {
+    const tree = 'type tree = tuple<value: any, children: list<tree>>';
+    const sample = 'let t = tree(1, [tree(2, [tree(4, [])]), tree(3, [])])';
+    const expected = 'tree(10, [tree(20, [tree(40, [])]),tree(30, [])])';
+
+    for (const [label, sig] of [
+      ['bare parameters', '(f, t)'],
+      ['generic f', '<A, B>(f: (A) -> B, t)'],
+      ['generic f and typed tree', '<A, B>(f: (A) -> B, t: tree) -> tree'],
+      ['plainly typed f', '(f: (any) -> any, t)'],
+    ] as const) {
+      test(label, () => {
+        expect(
+          runCortex(
+            [
+              tree,
+              `function map${sig} { tree(f(t.value), map(f, t.children)) }`,
+              sample,
+              'map((x) |-> x * 10, t)',
+            ].join('\n')
+          )
+        ).toBe(expected);
+      });
+    }
+  });
+});

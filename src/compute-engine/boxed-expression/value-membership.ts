@@ -1,4 +1,4 @@
-import type { Type } from '../../common/type/types.js';
+import type { Type, TypeReference } from '../../common/type/types.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 
 import type { Expression } from '../global-types.js';
@@ -109,6 +109,26 @@ export function admissionOf(op: Expression, param: Type): Admission {
  * (a literal value type or a bounded numeric), so that `typeAcceptsValue`
  * could answer differently from subtyping? */
 export function hasValueComponent(t: Type): boolean {
+  return valueComponent(t, undefined);
+}
+
+/** `hasValueComponent`, carrying the set of alias references currently being
+ * unfolded on THIS path — the same cycle guard `isSubtype` applies at its own
+ * unfold sites (`common/type/subtype.ts`), which this predicate previously
+ * lacked: a self-recursive alias (`type alias json = … | list<json>`) unfolded
+ * forever and overflowed the stack.
+ *
+ * Answering `false` on re-entry is EXACT here, not merely conservative: every
+ * component reachable by going around the cycle is also reachable on the first
+ * unfold, so no value component can be lost by cutting the back edge.
+ *
+ * The set is path-scoped (each frame deletes its own entry in a `finally`) and
+ * allocated lazily at the first reference, so the ground-type path — types with
+ * no reference in them at all — allocates nothing. */
+function valueComponent(
+  t: Type,
+  seen: Set<TypeReference> | undefined
+): boolean {
   if (typeof t === 'string') return false;
   switch (t.kind) {
     case 'value':
@@ -116,16 +136,25 @@ export function hasValueComponent(t: Type): boolean {
       return true;
     case 'union':
     case 'intersection':
-      return t.types.some(hasValueComponent);
+      return t.types.some((x) => valueComponent(x, seen));
     case 'negation':
-      return hasValueComponent(t.type);
-    case 'reference':
+      return valueComponent(t.type, seen);
+    case 'reference': {
       // Structural aliases unfold; a nominal reference stays opaque.
-      return t.alias && t.def !== undefined ? hasValueComponent(t.def) : false;
+      if (t.alias !== true || t.def === undefined) return false;
+      if (seen === undefined) seen = new Set();
+      else if (seen.has(t)) return false; // cycle — cut the back edge
+      seen.add(t);
+      try {
+        return valueComponent(t.def, seen);
+      } finally {
+        seen.delete(t);
+      }
+    }
     case 'list':
-      return hasValueComponent(t.elements);
+      return valueComponent(t.elements, seen);
     case 'tuple':
-      return t.elements.some((e) => hasValueComponent(e.type));
+      return t.elements.some((e) => valueComponent(e.type, seen));
     default:
       return false;
   }

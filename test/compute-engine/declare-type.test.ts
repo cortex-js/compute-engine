@@ -224,3 +224,102 @@ describe('DeclareType errors', () => {
     expect(ce.type('tuple<integer, integer>').matches(ce.type('r'))).toBe(true);
   });
 });
+
+//
+// Forward references (`type name` inside a type body) — the spelling
+// `doc/08-guide-types.md` documents for a mutually recursive set. The
+// reference installs an empty type record; the later declaration must FULFILL
+// that record in place rather than treat it as a redeclaration conflict, so
+// the types that captured it resolve through to the definition.
+//
+describe('FORWARD REFERENCES', () => {
+  test('a mutually recursive JSON definition closes', () => {
+    const ce = new ComputeEngine();
+    const alias = { alias: true };
+    ce.declareType(
+      'json',
+      'nothing | boolean | number | string | type json_array | type json_object',
+      alias
+    );
+    ce.declareType('json_array', 'list<json>', alias);
+    ce.declareType('json_object', 'dictionary<json>', alias);
+
+    // The forward-declared arms resolve, so `json` accepts its own recursive
+    // shapes and rejects a non-JSON one.
+    expect(ce.type('list<number>').matches('json')).toBe(true);
+    expect(ce.type('dictionary<string>').matches('json')).toBe(true);
+    expect(ce.type('list<list<string>>').matches('json')).toBe(true);
+    expect(ce.type('(number) -> number').matches('json')).toBe(false);
+  });
+
+  // The arms must be ALIASES to be inhabited by plain values: a NOMINAL
+  // forward-declared arm resolves just the same, but its inhabitants are
+  // constructor applications, so a plain list is not one of them.
+  test('a nominal forward-declared arm stays opaque', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('njson', 'number | type njson_array');
+    ce.declareType('njson_array', 'list<njson>');
+    expect(ce.type('list<number>').matches('njson')).toBe(false);
+  });
+
+  test('the fulfilling declaration is visible through the capturing type', () => {
+    const ce = new ComputeEngine();
+    // `outer` captures the empty `inner` record before `inner` has a body.
+    ce.declareType('outer', 'list<type inner>', { alias: true });
+    ce.declareType('inner', 'integer', { alias: true });
+    expect(ce.type('list<integer>').matches('outer')).toBe(true);
+    expect(ce.type('list<string>').matches('outer')).toBe(false);
+  });
+
+  test('a completed declaration still conflicts', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('done', 'integer');
+    expect(() => ce.declareType('done', 'string')).toThrow(
+      /already defined in the current scope/
+    );
+  });
+
+  test('a failed fulfillment leaves the reference unfulfilled, not broken', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('holder', 'list<type pending>', { alias: true });
+    expect(() => ce.declareType('pending', 'tuple<<>')).toThrow();
+    // The promise is still open: a later, well-formed declaration fulfills it.
+    ce.declareType('pending', 'integer', { alias: true });
+    expect(ce.type('list<integer>').matches('holder')).toBe(true);
+  });
+});
+
+//
+// REVIEW FINDINGS (2026-08-06 dual review of the forward-reference change).
+//
+describe('FORWARD REFERENCES: review findings', () => {
+  // A forward reference is necessarily BARE — the type parser cannot apply one
+  // — so every type that captured it captured it with no arguments. Fulfilling
+  // it with a GENERIC declaration would leave those types holding an unapplied
+  // generic reference, which matches nothing.
+  test('a generic declaration cannot fulfill a forward reference', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('holder', 'list<type Gen>', { alias: true });
+    expect(() =>
+      ce.declareType('Gen', 'tuple<T, T>', { alias: true, typeParams: ['T'] })
+    ).toThrow(/cannot be declared generic/);
+  });
+
+  // The rollback must restore the record to exactly what `forward()` created.
+  // `_declaredByStatement` is set BEFORE the body parses, and the
+  // redeclaration guard keys on it — so leaving it behind let a later
+  // statement silently replace a type no statement had declared.
+  test('a failed fulfillment does not mark the record statement-declared', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('holder', 'list<type pending>', { alias: true });
+    expect(() =>
+      ce.declareType('pending', 'tuple<<>', { fromStatement: true })
+    ).toThrow();
+    // A host declaration now completes it — and stays protected.
+    ce.declareType('pending', 'integer', { alias: true });
+    expect(() =>
+      ce.declareType('pending', 'string', { fromStatement: true, alias: true })
+    ).toThrow(/already defined in the current scope/);
+    expect(ce.type('list<integer>').matches('holder')).toBe(true);
+  });
+});

@@ -1400,15 +1400,63 @@ function captureClosures(
         parent: closureParent,
         bindings: closureBindings,
       };
-      const closedBlock = ce._fn('Block', innerBlock.ops, {
-        scope: closureScope,
-      });
+      // Rebuild the body's own ops against the NEW scope: a scoped `Block`
+      // nested inside the body (an `If` branch, a loop body) keeps its
+      // canonicalization-time parent chain otherwise, which reaches the stale
+      // copies of these same lexical levels instead of the captured ones. That
+      // is invisible for an arithmetic body — its symbols live directly in the
+      // body Block, which IS rebuilt here — and shows up the moment a held
+      // operand introduces a scope: `k ↦ (x ↦ If(x > 1, {k}, {0}))` applied at
+      // `k = 100` returned the symbol `k`, while the same body without the
+      // branch Blocks, or a plain `do { k }`, returned `100`.
+      const closedBlock = ce._fn(
+        'Block',
+        innerBlock.ops.map((op) => captureClosures(ce, op, closureScope)),
+        { scope: closureScope }
+      );
       return ce._fn('Function', [closedBlock, ...expr.ops.slice(1)]);
     }
     return expr;
   }
 
-  // Recurse into compound expressions (List, Tuple, Pair, etc.)
+  // A scoped `Block` re-roots onto the captured chain, keeping its OWN
+  // bindings (genuine block-locals). Stale canonicalization shadows among them
+  // are swept when the block evaluates (`evaluateBlock`), so re-parenting is
+  // what makes that sweep reach the captured value rather than another stale
+  // level.
+  // ANY scoped expression — a `Block`, or a binder such as
+  // `Sum`/`Product`/`Loop`/`Comprehension` — re-roots its own scope onto the
+  // captured chain and recurses through its operands against that new scope.
+  //
+  // Both halves are load-bearing:
+  // - RE-ROOT, because the expression's canonicalization-time scope chains to
+  //   the stale copies of these same lexical levels; leaving it in place is
+  //   what made a captured variable read as unbound from an `If` branch, and
+  //   preserving it verbatim on a `Loop` silently zeroed the loop body.
+  // - COPY the bindings, because `expr` is the template shared by every closure
+  //   derived from this literal and the scope is mutated at evaluation
+  //   (`evaluateBlock` sweeps it, `Declare` writes to it). Aliasing gives
+  //   overlapping activations one frame, so a nested call clobbers an outer
+  //   call's locals: `make = k ↦ (n ↦ if n > 0 { let y = k; y + make(k+1)(n-1) }
+  //   else { k })` returned 9 for `make(0)(3)` instead of 6.
+  //
+  // Dropping the scope instead re-resolves a binder's index against the
+  // enclosing chain — `Sum(If(i > 0, {i·k}, {0}), i, 1, n)` in an escaping
+  // closure threw `Cannot assign a value to the constant "i"`, `i` having
+  // fallen through to the imaginary unit.
+  if (isFunction(expr) && expr.localScope) {
+    const scope: Scope = {
+      parent: closureParent,
+      bindings: new Map(expr.localScope.bindings),
+    };
+    return ce._fn(
+      expr.operator!,
+      expr.ops.map((op) => captureClosures(ce, op, scope)),
+      { scope }
+    );
+  }
+
+  // Recurse into unscoped compound expressions (List, Tuple, Pair, etc.)
   if (isFunction(expr) && expr.ops.length > 0) {
     let changed = false;
     const newOps = expr.ops.map((op) => {

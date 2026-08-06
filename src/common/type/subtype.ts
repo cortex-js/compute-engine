@@ -1619,6 +1619,22 @@ const LOSSY_SUPERTYPE = new Set<string>([
   'any',
 ]);
 
+/** `JSON.stringify` replacer for the de-dup key below: drop a type reference's
+ * resolved `def`.
+ *
+ * A RECURSIVE type reaches itself through that field — `type tree =
+ * tuple<value: any, children: list<tree>>` has `tree.def` containing the very
+ * record being serialized — so an unfiltered `JSON.stringify` throws
+ * "Converting circular structure to JSON". `def` is also redundant in a key: a
+ * reference is identified by its `name` (plus `alias`, both kept), and two
+ * references with the same name in the same scope resolve to the same
+ * definition. Dropping it is therefore both cycle-safe and lossless — and it
+ * is the only back edge, since a cycle can only re-enter through a reference.
+ */
+function dedupKeyReplacer(key: string, value: unknown): unknown {
+  return key === 'def' ? undefined : value;
+}
+
 /** Build a union of two types, flattening if either is already a union and
  *  de-duplicating identical members. Returns the simpler type if reducible.
  */
@@ -1631,7 +1647,7 @@ function unionTypes(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
       for (const m of t.types) push(m);
       return;
     }
-    const key = typeof t === 'string' ? t : JSON.stringify(t);
+    const key = typeof t === 'string' ? t : JSON.stringify(t, dedupKeyReplacer);
     if (!keys.has(key)) {
       keys.add(key);
       members.push(t as Type);

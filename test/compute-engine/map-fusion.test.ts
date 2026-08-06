@@ -543,3 +543,96 @@ describe('Map fusion — laziness and impurity', () => {
     expect((a as any).nops).toBe(5);
   });
 });
+
+//
+// CLOSED-OVER VARIABLES (2026-08-06).
+//
+// The lowered path evaluates each level's application in the AMBIENT scope,
+// bypassing `makeLambda` and therefore its scope push. The shape gate treated
+// every parameter-free operand as a "closed" value, but a free SYMBOL is not
+// closed — it resolves by binding lookup. A lazy `Map` returned from a
+// function outlives the frame its lambda closed over, so draining it in the
+// caller's scope resolved the captured variable to nothing and silently
+// produced a symbolic element:
+//
+//   f(k) = Map([1,2], x ↦ x + k);  f(100)   ⇒  [k + 1, k + 2]   (was)
+//                                            ⇒  [101, 102]      (now)
+//
+// The closure chain itself was always intact (`captureClosures` rebinds the
+// literal to the fresh scope); it was the drain that did not evaluate inside
+// it. A level whose operands are all LITERALS — the shape this fusion was
+// built for — records no scope and keeps the original zero-scope-work path.
+//
+describe('Map fusion: closed-over variables', () => {
+  const drain = (mj: any, arg: number): string => {
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.box(['Function', mj, 'k']) as any);
+    return ce.box(['f', arg]).evaluate().toString();
+  };
+
+  test('an escaping lazy Map resolves its captured variable', () => {
+    expect(
+      drain(['Map', ['List', 1, 2], ['Function', ['Add', 'x', 'k'], 'x']], 100)
+    ).toBe('[101,102]');
+  });
+
+  test('the same for a multiplicative body', () => {
+    expect(
+      drain(
+        ['Map', ['List', 1, 2], ['Function', ['Multiply', 'x', 'k'], 'x']],
+        100
+      )
+    ).toBe('[100,200]');
+  });
+
+  // `List` is a lowerable head too, and here the captured symbol is a bare
+  // operand rather than part of an evaluated arithmetic subexpression.
+  test('a captured variable held as a bare operand', () => {
+    expect(
+      drain(['Map', ['List', 1, 2], ['Function', ['List', 'x', 'k'], 'x']], 100)
+    ).toBe('[[1,100],[2,100]]');
+  });
+
+  test('a stacked spine resolves the capture at every level', () => {
+    expect(
+      drain(
+        [
+          'Map',
+          ['Map', ['List', 1, 2], ['Function', ['Add', 'x', 'k'], 'x']],
+          ['Function', ['Multiply', 'y', 'k'], 'y'],
+        ],
+        10
+      )
+    ).toBe('[110,120]');
+  });
+
+  // The motivating shape stays on the untouched path: no operand carries a
+  // symbol, so no scope is recorded and the drain does no scope work.
+  test('a literal-only level records no closure scope', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Map',
+      ['List', 1, 2, 3],
+      ['Function', ['Add', 'x', 100], 'x'],
+    ]);
+    const spine = lowerMapSpine(expr);
+    expect(spine).toBeDefined();
+    expect(spine!.levels.every((l) => l.closureScope === undefined)).toBe(true);
+    expect(expr.evaluate().toString()).toBe('[101,102,103]');
+  });
+
+  test('a level with a symbol operand records one', () => {
+    const ce = new ComputeEngine();
+    ce.assign('scale', 10);
+    const expr = ce.box([
+      'Map',
+      ['List', 1, 2],
+      ['Function', ['Multiply', 'x', 'scale'], 'x'],
+    ]);
+    const spine = lowerMapSpine(expr);
+    expect(spine).toBeDefined();
+    expect(spine!.levels.some((l) => l.closureScope !== undefined)).toBe(true);
+    // A top-level binding resolved on both paths; it must keep doing so.
+    expect(expr.evaluate().toString()).toBe('[10,20]');
+  });
+});

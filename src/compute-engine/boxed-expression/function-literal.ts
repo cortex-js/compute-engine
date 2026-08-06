@@ -3,6 +3,7 @@ import type {
   EffectSet,
   FunctionSignature,
   Type,
+  TypeReference,
 } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
 import { freeTypeVariables } from '../../common/type/instantiate.js';
@@ -110,7 +111,10 @@ export function functionLiteralParameterType(
  * collection-like type. Conservative: unknown/any → scalar.
  * @internal
  */
-export function isScalarType(t: Type): boolean {
+export function isScalarType(
+  t: Type,
+  seen?: Set<TypeReference>
+): boolean {
   if (typeof t === 'string') {
     // String types like 'collection', 'list', 'tuple', 'set' are non-scalar.
     if (
@@ -142,8 +146,32 @@ export function isScalarType(t: Type): boolean {
   )
     return false;
   if (t.kind === 'union' || t.kind === 'intersection')
-    return t.types.every((x) => isScalarType(x));
-  if (t.kind === 'negation') return isScalarType(t.type);
+    return t.types.every((x) => isScalarType(x, seen));
+  if (t.kind === 'negation') return isScalarType(t.type, seen);
+  // A STRUCTURAL alias IS its definition, so an alias of a collection type is
+  // NOT scalar — the same unfold rule `isSubtype` applies. Without it,
+  // `type alias u = list<number>` read as scalar and a `(u) -> …` function
+  // BROADCAST over its list argument instead of binding it whole (each element
+  // then failing the parameter check), while the inline `(list<number>) -> …`
+  // spelling bound correctly.
+  //
+  // A NOMINAL reference stays opaque, and opaque means scalar: its values are
+  // tagged applications, never collections, so a list of them is a genuine
+  // broadcast (`norm([p1, p2])` maps a `(point) -> …` over the list).
+  if (t.kind === 'reference') {
+    if (t.alias !== true || t.def === undefined) return true;
+    // Cycle guard (mirrors `beginUnfold` in `common/type/subtype.ts`). A pure
+    // reference cycle passes through no collection constructor, so cutting the
+    // back edge as "scalar" agrees with the conservative default below.
+    if (seen === undefined) seen = new Set();
+    else if (seen.has(t)) return true;
+    seen.add(t);
+    try {
+      return isScalarType(t.def, seen);
+    } finally {
+      seen.delete(t);
+    }
+  }
   return true;
 }
 

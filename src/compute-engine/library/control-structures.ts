@@ -1042,15 +1042,26 @@ function evaluateBlock(
   // shadow here at canonicalization, hiding the call value in the lambda's
   // fresh scope. Runtime `Declare`/`Assign` statements re-create genuine
   // block-locals below; reads of everything else resolve by name up the
-  // chain. Bindings carrying a value or an explicit type are kept (e.g.
-  // locals from a previous evaluation of this block — reset by `Declare`'s
-  // statement-redeclare path, not here).
+  // chain.
+  //
+  // The keep-test is "was this created by a `Declare` STATEMENT"
+  // (`_declaredByStatement`, set by the `Declare` handler) — NOT "is its type
+  // inferred". An auto-declared shadow inherits the DECLARED type of the outer
+  // binding it shadows, so an *annotated* parameter read from a nested Block
+  // left an explicitly-typed valueless shadow that the inferred-only test kept,
+  // and it then hid the call value in the lambda's fresh scope:
+  // `function s(k: number) { if 1 > 0 { k } else { 0 } }` returned the symbol
+  // `k`, while the same function with a bare `k` returned the argument.
+  // (Cortex wraps each `if` branch in a Block, which is why the conditional
+  // shape surfaced it.) Locals from a previous evaluation of this block carry
+  // the marker and are still kept — reset by `Declare`'s statement-redeclare
+  // path, not here.
   const scope = ce.context.lexicalScope;
   for (const [name, def] of [...scope.bindings]) {
     if (
       'value' in def &&
-      def.value.inferredType &&
-      def.value.value === undefined
+      def.value.value === undefined &&
+      (def as { _declaredByStatement?: boolean })._declaredByStatement !== true
     )
       scope.bindings.delete(name);
   }

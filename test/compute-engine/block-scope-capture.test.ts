@@ -268,3 +268,263 @@ describe('block-local semantics preserved', () => {
     expect(ce.symbol('zzouter').evaluate().toString()).toEqual('42');
   });
 });
+
+//
+// ANNOTATED PARAMETER read from a nested Block (2026-08-06).
+//
+// `evaluateBlock` sweeps stale canonicalization bookkeeping from the block's
+// scope, and the keep-test used to be "is its type inferred". An auto-declared
+// shadow inherits the DECLARED type of the outer binding it shadows, so an
+// annotated parameter produced an explicitly-typed valueless shadow that
+// survived the sweep and hid the call value in the lambda's fresh scope. The
+// keep-test is now "was this created by a `Declare` STATEMENT".
+//
+// Surfaced through Cortex, which wraps each `if` branch in a `Block`:
+//   function s(k: number) { if 1 > 0 { k } else { 0 } };  s(100)   ⇒ `k`
+// The same function with a bare `k` returned `100`.
+//
+describe('annotated parameter read from a nested Block', () => {
+  const ifBody = [
+    'Block',
+    ['If', ['Greater', 1, 0], ['Block', 'k'], ['Block', 0]],
+  ];
+
+  const call = (param: any, declarator: 'Assign' | 'DefineFunction'): string => {
+    const ce = new ComputeEngine();
+    ce.box([declarator, 's', ['Function', ifBody, param]] as any).evaluate();
+    return ce.box(['s', 100]).evaluate().toString();
+  };
+
+  const TYPED = ['Typed', 'k', { str: 'number' }];
+
+  test('a Typed parameter resolves through an If-branch Block', () => {
+    expect(call(TYPED, 'Assign')).toBe('100');
+  });
+
+  test('the same on the DefineFunction route', () => {
+    expect(call(TYPED, 'DefineFunction')).toBe('100');
+  });
+
+  test('a bare parameter still resolves (unchanged)', () => {
+    expect(call('k', 'Assign')).toBe('100');
+    expect(call('k', 'DefineFunction')).toBe('100');
+  });
+
+  test('the else branch too', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      's',
+      [
+        'Function',
+        ['Block', ['If', ['Less', 1, 0], ['Block', 0], ['Block', 'k']]],
+        TYPED,
+      ],
+    ] as any).evaluate();
+    expect(ce.box(['s', 100]).evaluate().toString()).toBe('100');
+  });
+
+  // The sweep must still KEEP a genuine block-local: a `Declare` statement
+  // marks its binding, and re-entering the block resets rather than sweeps it.
+  test('a block-local declared with an explicit type survives', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      's',
+      [
+        'Function',
+        [
+          'Block',
+          ['Declare', 'local', { str: 'number' }, ['Dictionary', ['KeyValuePair', 'value', 7]]],
+          ['Add', 'local', 'k'],
+        ],
+        TYPED,
+      ],
+    ] as any).evaluate();
+    expect(ce.box(['s', 100]).evaluate().toString()).toBe('107');
+    // Re-entering the same block (second call) must not accumulate or stale.
+    expect(ce.box(['s', 1]).evaluate().toString()).toBe('8');
+  });
+});
+
+//
+// NESTED SCOPED BLOCK inside an escaping closure (2026-08-06).
+//
+// `captureClosures` rebinds a returned `Function` literal so its body Block
+// closes over the call's fresh scope — but it reused the body's ops verbatim,
+// so a scoped `Block` NESTED in that body (an `If` branch, a loop body) kept
+// its canonicalization-time parent chain and reached the stale copies of the
+// same lexical levels instead of the captured ones.
+//
+// Invisible for an arithmetic body, whose symbols live directly in the body
+// Block that IS rebuilt; visible the moment a held operand introduces a scope.
+// `If`'s branches are the common case, and Cortex compiles every `if` branch
+// to a Block, so `(x) |-> if x > 1 { k } else { 0 }` lost `k`.
+//
+describe('nested scoped Block in an escaping closure', () => {
+  /** `s = k |-> (x |-> body)`; returns `s(100)(2)`. */
+  const nested = (body: any): string => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      's',
+      ce.box(['Function', ['Block', ['Function', body, 'x']], 'k']) as any
+    );
+    const inner = ce.box(['s', 100]).evaluate();
+    return ce.box(['Apply', inner, 2]).evaluate().toString();
+  };
+
+  test('an If branch Block resolves the captured variable', () => {
+    expect(
+      nested(['If', ['Greater', 'x', 1], ['Block', 'k'], ['Block', 0]])
+    ).toBe('100');
+  });
+
+  test('the else branch too', () => {
+    expect(
+      nested(['If', ['Less', 'x', 1], ['Block', 0], ['Block', 'k']])
+    ).toBe('100');
+  });
+
+  test('an expression inside the branch Block', () => {
+    expect(
+      nested([
+        'If',
+        ['Greater', 'x', 1],
+        ['Block', ['Add', 'k', 1]],
+        ['Block', 0],
+      ])
+    ).toBe('101');
+  });
+
+  test('the branch sees the inner parameter as well as the captured one', () => {
+    expect(
+      nested([
+        'If',
+        ['Greater', 'x', 1],
+        ['Block', ['Add', 'x', 'k']],
+        ['Block', 0],
+      ])
+    ).toBe('102');
+  });
+
+  // Shapes that already worked — they must keep working.
+  test('bare If branches (no nested scope)', () => {
+    expect(nested(['If', ['Greater', 'x', 1], 'k', 0])).toBe('100');
+  });
+
+  test('a plain nested Block', () => {
+    expect(nested(['Block', 'k'])).toBe('100');
+  });
+
+  test('an arithmetic body', () => {
+    expect(nested(['Add', 'x', 'k'])).toBe('102');
+  });
+
+  // The drain case this started from: the lazy Map holds the lambda, so the
+  // branch Block is evaluated well after the defining call returned.
+  test('through a lazy Map drained by the caller', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      's',
+      ce.box([
+        'Function',
+        [
+          'Map',
+          ['List', 1, 2],
+          [
+            'Function',
+            ['If', ['Greater', 'x', 1], ['Block', 'k'], ['Block', 0]],
+            'x',
+          ],
+        ],
+        'k',
+      ]) as any
+    );
+    expect(ce.box(['s', 100]).evaluate().toString()).toBe('[0,100]');
+  });
+});
+
+//
+// REVIEW FINDINGS (2026-08-06 dual review of the closure-capture change).
+//
+// The scoped-expression branch of `captureClosures` has to do BOTH things:
+// re-root the scope onto the captured chain, and COPY its bindings. Each half
+// was got wrong once and each has its own failure mode.
+//
+describe('captureClosures: scoped-expression re-rooting', () => {
+  // COPY: `expr` is the canonicalization template shared by every closure made
+  // from this literal, and the scope is mutated at evaluation. Aliasing the
+  // Map gave overlapping activations one frame, so a nested call clobbered an
+  // outer call's local before it was read back.
+  test('recursion through an escaping closure keeps each frame’s locals', () => {
+    const ce = new ComputeEngine();
+    // make = k ↦ (n ↦ if n > 0 { let y = k; y + make(k+1)(n-1) } else { k })
+    ce.box([
+      'Assign',
+      'make',
+      [
+        'Function',
+        [
+          'Block',
+          [
+            'Function',
+            [
+              'Block',
+              [
+                'If',
+                ['Greater', 'n', 0],
+                [
+                  'Block',
+                  ['Declare', 'y', ['Dictionary', ['KeyValuePair', 'value', 'k']]],
+                  ['Add', 'y', ['Apply', ['make', ['Add', 'k', 1]], ['Subtract', 'n', 1]]],
+                ],
+                ['Block', 'k'],
+              ],
+            ],
+            'n',
+          ],
+        ],
+        'k',
+      ],
+    ] as any).evaluate();
+    // 0 + (1 + (2 + 3)) = 6; the aliased-Map bug produced 9.
+    expect(
+      ce.box(['Apply', ['make', 0], 3]).evaluate().toString()
+    ).toBe('6');
+  });
+
+  // RE-ROOT: a binder owns the scope declaring its index. Dropping that scope
+  // resolved the index against the enclosing chain (`i` → the imaginary unit,
+  // a hard throw); preserving it verbatim kept the stale parent chain, so the
+  // captured variable read as unbound and a loop body silently produced 0.
+  const binder = (body: any): string => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'make',
+      ce.box(['Function', ['Block', ['Function', ['Block', body], 'n']], 'k']) as any
+    );
+    const inner = ce.box(['make', 2]).evaluate();
+    return ce.box(['Apply', inner, 3]).evaluate().toString();
+  };
+
+  test('a Sum binder inside an escaping closure resolves the capture', () => {
+    expect(binder(['Sum', ['Multiply', 'i', 'k'], ['Limits', 'i', 1, 'n']])).toBe(
+      '12'
+    );
+  });
+
+  test('the same when the binder body holds a nested scoped Block', () => {
+    expect(
+      binder([
+        'Sum',
+        [
+          'If',
+          ['Greater', 'i', 0],
+          ['Block', ['Multiply', 'i', 'k']],
+          ['Block', 0],
+        ],
+        ['Limits', 'i', 1, 'n'],
+      ])
+    ).toBe('12');
+  });
+});

@@ -1,6 +1,7 @@
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
+  Scope,
 } from '../global-types.js';
 
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
@@ -47,6 +48,20 @@ export interface LoweredLevel {
   arity: number;
   /** The level's source operands (everything but the mapping function). */
   sources: ReadonlyArray<Expression>;
+  /** The mapping function's body scope, when a slot operand carries a FREE
+   * SYMBOL — a variable the lambda closed over rather than a literal.
+   *
+   * The lowered path evaluates in the AMBIENT scope, so such an operand only
+   * resolves while its defining frame is still current. A lazy `Map` returned
+   * from a function outlives that frame: `f(k) = Map([1,2], x ↦ x + k)` drained
+   * by the caller resolved `k` to nothing and produced `[k+1, k+2]`. The
+   * closure chain itself is intact (`captureClosures` rebinds the literal), so
+   * the fix is for the drain to evaluate INSIDE it.
+   *
+   * `undefined` when every slot operand is a literal — the shape the fusion
+   * work was built for (`1 + Mod(Range(0,899) + 29, 900)`), which keeps the
+   * original zero-scope-work path. */
+  closureScope?: Scope;
 }
 
 /**
@@ -100,11 +115,16 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
   if (body === undefined) return undefined;
 
   // A canonical body is a scoped `Block`; only a SINGLE-statement block is
-  // in shape.
+  // in shape. Keep its scope: it is the head of the literal's closure chain,
+  // and a slot operand that closed over an enclosing frame can only be
+  // resolved inside it.
+  let bodyScope: Scope | undefined;
   if (isFunction(body, 'Block')) {
     if (body.nops !== 1) return undefined;
+    bodyScope = body.localScope ?? undefined;
     body = body.op1;
   }
+  let needsClosureScope = false;
 
   // The numeric marker (`Block(N(inner))`, from the item-39 `.N()` rewrap and
   // the `addN`/`mulN` N-maps).
@@ -162,7 +182,13 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
     // `.canonical` binds structure without substituting assigned symbol
     // values, so reactivity and impurity are preserved.
     if (o.has(names)) return undefined;
-    slots.push(o.isCanonical ? o : o.canonical);
+    const operand = o.isCanonical ? o : o.canonical;
+    // A free symbol here is a CLOSED-OVER variable, not a closed value: it
+    // resolves by binding lookup, and the lowered path looks up in the ambient
+    // scope. Record the body scope so the drain can evaluate inside the
+    // closure chain (see `closureScope`).
+    if (operand.symbols.length > 0) needsClosureScope = true;
+    slots.push(operand);
   }
 
   return {
@@ -173,5 +199,6 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
     napprox,
     arity,
     sources,
+    closureScope: needsClosureScope ? bodyScope : undefined,
   };
 }

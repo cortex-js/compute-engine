@@ -155,11 +155,23 @@ export function makeSpineRunner(
             const args: Expression[] = [];
             for (const s of slots)
               args.push(typeof s === 'number' ? row[s] : (s as Expression));
-            v = ce
-              ._fn(level.op!, args)
-              .evaluate(
-                level.napprox ? { numericApproximation: true } : undefined
-              );
+            const opts = level.napprox
+              ? { numericApproximation: true as const }
+              : undefined;
+            // A level whose operands closed over an enclosing frame must be
+            // evaluated INSIDE that closure chain: the lowered path runs in the
+            // ambient scope, where a captured variable is unbound once its
+            // defining call has returned (a lazy `Map` outlives it). Levels
+            // whose operands are all literals — the shape this fusion was built
+            // for — record no scope and keep the original zero-scope-work path.
+            if (level.closureScope) {
+              ce.pushScope(level.closureScope);
+              try {
+                v = ce._fn(level.op!, args).evaluate(opts);
+              } finally {
+                ce.popScope();
+              }
+            } else v = ce._fn(level.op!, args).evaluate(opts);
           }
         }
       }
