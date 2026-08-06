@@ -416,7 +416,7 @@ function gpuResultIsComplexValued(
   const engine = args[0]?.engine;
   if (engine === undefined) return false;
   try {
-    const t = engine.function(head, [...args], { structural: true }).type;
+    const t = engine.function(head, [...args], { form: 'structural' }).type;
     return isNonRealNumber(t.type);
   } catch {
     return false;

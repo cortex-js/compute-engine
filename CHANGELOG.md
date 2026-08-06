@@ -1,6 +1,31 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The `structural: true` boolean is no longer part of `ce.function()`'s typed
+  signature — use `{ form: 'structural' }`.** The `form` option has been the
+  documented spelling for the creation modes since the structural tier was
+  introduced, and `ce.expr()`, `ce.box()` and `ce.parse()` had already dropped
+  the boolean from their public types; `ce.function()` was the last one still
+  carrying it, which made the surface inconsistent and advertised a spelling the
+  guide tells you not to use. The boolean is still accepted **at runtime** —
+  `optionsToInternal()` maps `{ structural: true }` and `{ form: 'structural' }`
+  to the identical internal form — so only code type-checked against
+  `ComputeEngine`/`IComputeEngine` is affected, and the fix is a rename at the
+  call site. `{ canonical: false }` (equivalently `{ form: 'raw' }`) is in the
+  same position and was already untyped.
+
 ### Resolved Issues
+
+- **`ce.parse()` now accepts a `scope` option in its public type signature.**
+  The implementation has always honored it — the whole parse runs with the
+  supplied scope as the current lexical scope, so name resolution walks
+  `scope → parents` and every auto-declare and inference lands rooted there —
+  but the option was missing from `IComputeEngine.parse()`, which is the type
+  the public `ComputeEngine` resolves to. Passing it was therefore a compile
+  error (`TS2769`) even though it worked at runtime. `ce.expr()`, `ce.box()`,
+  `ce.function()` and `ce._fn()` all already declared it; `parse()` was the lone
+  omission. No runtime change.
 
 - **`Pochhammer()`, `Degrees()` and `DMS()` no longer numericize an exact
   irrational argument.** Found by auditing for the `Beta()` bug below, which

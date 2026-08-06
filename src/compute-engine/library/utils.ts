@@ -359,7 +359,7 @@ export function degenerateBigOpTerm(
 
   // An index-less bounds pair (`Limits(Nothing, a, a)`) has no index to
   // substitute: its body is already the single term. Reached on the
-  // STRUCTURAL route (`ce.function('Sum', …, { structural: true })`), which
+  // STRUCTURAL route (`ce.function('Sum', …, { form: 'structural' })`), which
   // bypasses `canonicalBigop` — and so its dropping of vacuous indexing sets.
   if (index === 'Nothing') return body.evaluate({ numericApproximation });
 
@@ -414,14 +414,14 @@ export function symbolicSumClosedForm(
       return ce.function(
         'Subtract',
         [pos.subs({ [index]: upper }), neg.subs({ [index]: lower })],
-        { structural: true }
+        { form: 'structural' }
       );
     }
     // Σ (t(k) − t(k+1)) = t(a) − t(b+1), where t = pos (so neg = t(k+1)).
     return ce.function(
       'Subtract',
       [pos.subs({ [index]: lower }), neg.subs({ [index]: upper })],
-      { structural: true }
+      { form: 'structural' }
     );
   }
 
@@ -541,11 +541,11 @@ function asReadableFraction(z: Expression, ce: ComputeEngine): Expression {
   const restExpr =
     rest.length === 1
       ? rest[0]
-      : ce.function('Multiply', rest, { structural: true });
+      : ce.function('Multiply', rest, { form: 'structural' });
   const numExpr = num.isSame(1)
     ? restExpr
-    : ce.function('Multiply', [num, restExpr], { structural: true });
-  return ce.function('Divide', [numExpr, den], { structural: true });
+    : ce.function('Multiply', [num, restExpr], { form: 'structural' });
+  return ce.function('Divide', [numExpr, den], { form: 'structural' });
 }
 
 /**
@@ -1010,7 +1010,7 @@ export function infiniteSumClosedForm(
       if (!cf) return undefined; // any piece without a closed form ⇒ stay symbolic
       pieces.push(cf);
     }
-    return ce.function('Add', pieces, { structural: true });
+    return ce.function('Add', pieces, { form: 'structural' });
   }
 
   return (

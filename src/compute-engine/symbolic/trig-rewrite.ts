@@ -56,7 +56,7 @@ function toExp(op: string, u: Expression): Expression | null {
   // exponent (e.g. `e^{i}` for `sin(1)`) is not re-expanded into `cos + i·sin`
   // by canonicalization. The exponential form is what we want to expose.
   const exp = (exponent: Expression): Expression =>
-    ce.function('Power', [ce.E, exponent], { structural: true });
+    ce.function('Power', [ce.E, exponent], { form: 'structural' });
 
   if (TRIG.has(op)) {
     const eiu = exp(I.mul(u)); // e^{iu}

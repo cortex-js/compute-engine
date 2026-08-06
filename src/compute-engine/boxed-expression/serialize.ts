@@ -239,7 +239,7 @@ function serializePrettyJsonFunction(
         return serializeJsonFunction(
           ce,
           'Negate',
-          [ce.function('Multiply', rest, { structural: true })],
+          [ce.function('Multiply', rest, { form: 'structural' })],
           options,
           metadata
         );

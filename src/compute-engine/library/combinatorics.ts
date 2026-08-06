@@ -205,17 +205,17 @@ function evaluateBinomial(
       const factors: Expression[] = [nExpr];
       for (let i = 1; i < kn; i++)
         factors.push(
-          ce.function('Subtract', [nExpr, ce.number(i)], { structural: true })
+          ce.function('Subtract', [nExpr, ce.number(i)], { form: 'structural' })
         );
       let fact = 1n;
       for (let i = 2n; i <= k; i++) fact *= i;
       return ce.function(
         'Divide',
         [
-          ce.function('Multiply', factors, { structural: true }),
+          ce.function('Multiply', factors, { form: 'structural' }),
           ce.number(fact),
         ],
-        { structural: true }
+        { form: 'structural' }
       );
     }
   }
@@ -266,9 +266,9 @@ function evaluatePochhammer(
   const factors: Expression[] = [aExpr];
   for (let i = 1; i < kn; i++)
     factors.push(
-      ce.function('Add', [aExpr, ce.number(i)], { structural: true })
+      ce.function('Add', [aExpr, ce.number(i)], { form: 'structural' })
     );
-  return ce.function('Multiply', factors, { structural: true });
+  return ce.function('Multiply', factors, { form: 'structural' });
 }
 
 export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [

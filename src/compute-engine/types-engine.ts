@@ -409,14 +409,27 @@ export interface IComputeEngine {
    *
    * This is a convenience method equivalent to `ce.expr(parse(latex))`,
    * but uses the engine's symbol definitions for better parsing accuracy.
+   *
+   * `options.scope` RECEIVES the parse's writes: the whole parse runs with
+   * that scope as the current lexical scope, so name resolution (including
+   * the parser's symbol oracle) walks `scope → parents`, and every
+   * auto-declare and inference lands rooted there. Discarding the scope
+   * discards the writes. Use `ce.createScope()` to make one that can be read
+   * back.
    */
   parse(
     latex: string,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+    options?: Partial<ParseLatexOptions> & {
+      form?: FormOption;
+      scope?: Scope;
+    }
   ): Expression;
   parse(
     latex: string | null,
-    options?: Partial<ParseLatexOptions> & { form?: FormOption }
+    options?: Partial<ParseLatexOptions> & {
+      form?: FormOption;
+      scope?: Scope;
+    }
   ): Expression | null;
 
   /**
@@ -440,7 +453,6 @@ export interface IComputeEngine {
     options?: {
       metadata?: Metadata;
       form?: FormOption;
-      structural?: boolean;
       scope?: Scope;
     }
   ): Expression;
