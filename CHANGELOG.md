@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Beta()` no longer numericizes an exact irrational argument.**
+  `\mathrm{B}(\sqrt2, 2)` evaluated to `0.2928932188…` instead of the exact
+  `1/(\sqrt2(1+\sqrt2))`, breaking the contract that `evaluate()` returns the
+  most exact form and only `N()` produces a float. The closed form
+  `\mathrm{B}(a, m) = (m-1)!/(a(a+1)\cdots(a+m-1))` was being built with the
+  `.add()`/`.mul()` methods, which fold two exact literals to a machine float —
+  so `\sqrt2 + 1` collapsed on the very first factor and the whole result went
+  inexact. Integer and rational arguments were unaffected (they fold exactly),
+  which is why only an irrational argument showed it. Poles
+  (`\mathrm{B}(-1, 2) = \tilde\infty`), the finite negative cases
+  (`\mathrm{B}(-2, 2) = 1/2`) and float arguments are unchanged.
+
 ## 0.102.0 _2026-08-05_
 
 ### New Features
@@ -12,44 +28,43 @@
   `\mathbb{Q}`, `\mathbb{R}`, `\mathbb{C}` — are accepted as bases. Both
   operators are **inert** in this version: they stay symbolic, carry no
   membership test and no arithmetic in the constructed ring, but they do report
-  an honest type — `\mathbb{Z}[\sqrt2]` is a `set<finite_real>`,
-  `\mathbb{Z}[i]` a `set<finite_complex>`, `\mathbb{Z}_n` a
-  `set<finite_integer>`. Note that `\mathbb{Z}_p` is read as the integers
-  modulo `p` — the quotient reading — not as the alternative number-theoretic
-  reading the same notation carries in some texts, and that field adjunction
-  written with parentheses (`\mathbb{Q}(\sqrt2)`) is not parsed. Sign-restricted
-  spellings are unaffected: `\mathbb{Z}_+`, `\mathbb{R}_-` and
-  `\mathbb{Z}_{\ge0}` still name `PositiveIntegers`, `NegativeNumbers` and
-  `NonNegativeIntegers`.
+  an honest type — `\mathbb{Z}[\sqrt2]` is a `set<finite_real>`, `\mathbb{Z}[i]`
+  a `set<finite_complex>`, `\mathbb{Z}_n` a `set<finite_integer>`. Note that
+  `\mathbb{Z}_p` is read as the integers modulo `p` — the quotient reading — not
+  as the alternative number-theoretic reading the same notation carries in some
+  texts, and that field adjunction written with parentheses
+  (`\mathbb{Q}(\sqrt2)`) is not parsed. Sign-restricted spellings are
+  unaffected: `\mathbb{Z}_+`, `\mathbb{R}_-` and `\mathbb{Z}_{\ge0}` still name
+  `PositiveIntegers`, `NegativeNumbers` and `NonNegativeIntegers`.
 
 - **Quantifiers accept an undelimited parenthesized body.**
-  `\forall x > 0 (x^2 > 0)` — a condition followed by a parenthesized body,
-  with no comma between them — now parses as
-  `["ForAll", <x > 0>, <x^2 > 0>]` for all five quantifiers (`\forall`,
-  `\exists`, `\exists!` and the negated forms). Previously the group was
-  absorbed into the condition as an implicit product. The split is accepted
-  only when the group reads as a proposition — a relation, a logic connective,
-  a membership, or a predicate application such as `(P(x))` — so
-  `\forall x > 2 (\sin y)` still reads the group as a factor of the condition.
+  `\forall x > 0 (x^2 > 0)` — a condition followed by a parenthesized body, with
+  no comma between them — now parses as `["ForAll", <x > 0>, <x^2 > 0>]` for all
+  five quantifiers (`\forall`, `\exists`, `\exists!` and the negated forms).
+  Previously the group was absorbed into the condition as an implicit product.
+  The split is accepted only when the group reads as a proposition — a relation,
+  a logic connective, a membership, or a predicate application such as `(P(x))`
+  — so `\forall x > 2 (\sin y)` still reads the group as a factor of the
+  condition.
 
 - **More spellings of the quotient ring and the sign-restricted number sets
   parse.** `\frac{\Z}{n\Z}` (and `\dfrac`, `\tfrac`) now reads as
-  `["QuotientRing", "Integers", "n"]`, like the inline
-  `\mathbb{Z}/n\mathbb{Z}`, and serializes back to `\Z_{n}`. The terse
-  blackboard-bold family also accepts the short comparison commands —
-  `\R_{\ge 0}`, `\R_{\gt0}`, `\N_{\ge1}` and their siblings — which
-  previously required the spelled-out `\geq`/`\geqslant` forms.
+  `["QuotientRing", "Integers", "n"]`, like the inline `\mathbb{Z}/n\mathbb{Z}`,
+  and serializes back to `\Z_{n}`. The terse blackboard-bold family also accepts
+  the short comparison commands — `\R_{\ge 0}`, `\R_{\gt0}`, `\N_{\ge1}` and
+  their siblings — which previously required the spelled-out `\geq`/`\geqslant`
+  forms.
 
-- **Cortex: the conditional expression `a if c else b`.** When both branches
-  are single expressions, the braces of the block form are noise, and the
+- **Cortex: the conditional expression `a if c else b`.** When both branches are
+  single expressions, the braces of the block form are noise, and the
   conditional spells the same `["If", c, a, b]` without them:
-  `let y = 10 if x > 3 else 20`. It is the same operator the block form builds
-  — only the branches differ, plain expressions instead of `Block`s, so the
+  `let y = 10 if x > 3 else 20`. It is the same operator the block form builds —
+  only the branches differ, plain expressions instead of `Block`s, so the
   conditional introduces no scope and no statement can appear in a branch. The
   `else` is **mandatory** (it is what ends the condition; a missing branch would
   leave the false case with no value to name), and `1 if c` reports the new
-  `conditional-else-expected` diagnostic — use the block form `if c { 1 }`
-  when there is nothing to return. Chains nest to the right
+  `conditional-else-expected` diagnostic — use the block form `if c { 1 }` when
+  there is nothing to return. Chains nest to the right
   (`"zero" if n == 0 else "negative" if n < 0 else "positive"`), so there is no
   `else if` spelling to learn. The conditional binds looser than every operator
   that computes — as in Python, looser than `||` — but tighter than the four
@@ -65,7 +80,7 @@
 ### Improvements
 
 - **Cortex: `If` now serializes as `if`, not as a function call.** The
-  `if`-expression syntax has always *parsed*, but the serializer had no rule to
+  `if`-expression syntax has always _parsed_, but the serializer had no rule to
   emit it, so a program written `if c { 1 } else { 2 }` came back from the
   formatter as `If(c, do {1}, do {2})`. It now round-trips to the form it was
   written in. The spelling is chosen by the shape of the branches, which is
@@ -73,11 +88,10 @@
   (chaining to `else if` when the alternative is itself a block-form `If`),
   plain expression branches give the conditional form `a if c else b`. A shape
   with neither spelling — mixed branches, or an `If` with no `else` and a
-  non-`Block` consequent — keeps the generic `If(c, …)` call form, which
-  also re-parses faithfully. An `If` in operand position is parenthesized according
+  non-`Block` consequent — keeps the generic `If(c, …)` call form, which also
+  re-parses faithfully. An `If` in operand position is parenthesized according
   to the conditional's precedence, so `Add(If(c, 1, 2), 3)` serializes
-  `(1 if c else 2) + 3` rather than the differently-parsing
-  `1 if c else 2 + 3`.
+  `(1 if c else 2) + 3` rather than the differently-parsing `1 if c else 2 + 3`.
 
 - **`simplify()` no longer returns a result more complicated than its input.**
   The cost gate that decides whether to keep a rewrite used to tolerate growth
@@ -87,10 +101,10 @@
 
   Two things were wrong with the tolerance. It let large expressions run away:
   instrumenting the gate across the test suite caught a single rewrite adding
-  1,693 cost units, and a chain walking one expression from cost 7,098 to
-  10,133 — every step recorded as a "simplification". And 90% of what the
-  tolerance actually bought was the generic expansion rule, which was making
-  results **worse** by blowing factored closed forms apart.
+  1,693 cost units, and a chain walking one expression from cost 7,098 to 10,133
+  — every step recorded as a "simplification". And 90% of what the tolerance
+  actually bought was the generic expansion rule, which was making results
+  **worse** by blowing factored closed forms apart.
 
   Removing it restores them. `\sum_{n=0}^{b}(a + dn)` now returns the textbook
   `(b+1)(a + bd/2)` instead of a four-term polynomial; `\int\sqrt{1-x^2}dx`
@@ -107,29 +121,30 @@
   Making that work meant tagging the rewrites that had been surviving on the
   tolerance. Nine families now declare `purpose: 'transform'` explicitly: the
   power combinations `x^n·x^m → x^{n+m}`, `x·x^n → x^{n+1}` and
-  `x^n·x → x^{n+1}` (whose equivalent for three or more factors already
-  carried the tag, so the same rewrite had been obeying two different cost
-  policies depending on which implementation caught it); collapsing nested
-  radicals (`√√12 → ⁴√12`); removing a logarithm from under an exponential
-  (`e^{\ln x + y} → x·e^y` and its `\log_c` sibling); `\log_c(x^n) →
-  n·\log_c(x)`; the geometric-series and shifted/falling-factorial closed
-  forms for `Sum` and `Product`; the `\sin/\cos(π ± x)` argument reductions;
-  rationalizing a radical denominator; and `\sqrt{x^{2n+1}} → |x|^n\sqrt{x}`
-  (a branch-cut correctness rewrite, not a size optimization). Several were
-  untagged only because the original string-matching exemption list never
-  named them. Tagging them also makes them robust to a caller-supplied
-  `costFunction`. Distributing a negation over a sum (`-(x+1)` → `-1-x`) is
-  tagged for the same reason — it trades one negation for one per term, so it
-  always scores worse, but it is the form the rest of the engine works in.
+  `x^n·x → x^{n+1}` (whose equivalent for three or more factors already carried
+  the tag, so the same rewrite had been obeying two different cost policies
+  depending on which implementation caught it); collapsing nested radicals
+  (`√√12 → ⁴√12`); removing a logarithm from under an exponential
+  (`e^{\ln x + y} → x·e^y` and its `\log_c` sibling);
+  `\log_c(x^n) → n·\log_c(x)`; the geometric-series and
+  shifted/falling-factorial closed forms for `Sum` and `Product`; the
+  `\sin/\cos(π ± x)` argument reductions; rationalizing a radical denominator;
+  and `\sqrt{x^{2n+1}} → |x|^n\sqrt{x}` (a branch-cut correctness rewrite, not a
+  size optimization). Several were untagged only because the original
+  string-matching exemption list never named them. Tagging them also makes them
+  robust to a caller-supplied `costFunction`. Distributing a negation over a sum
+  (`-(x+1)` → `-1-x`) is tagged for the same reason — it trades one negation for
+  one per term, so it always scores worse, but it is the form the rest of the
+  engine works in.
 
 - **`ComputeEngine`, `expr.engine` and `ExpressionComputeEngine` are now one
   interchangeable type — no more casts between them.** The `ComputeEngine`
-  exported from the package (and from the `/core` sub-path) is now a
-  constructor value paired with the structural `IComputeEngine` interface,
-  rather than the class itself, whose private fields made its type nominal.
-  An engine obtained from `expr.engine` (typed `ExpressionComputeEngine`) can
-  now be assigned or passed wherever a `ComputeEngine` is expected, and vice
-  versa. `new ComputeEngine()`, `instanceof ComputeEngine`,
+  exported from the package (and from the `/core` sub-path) is now a constructor
+  value paired with the structural `IComputeEngine` interface, rather than the
+  class itself, whose private fields made its type nominal. An engine obtained
+  from `expr.engine` (typed `ExpressionComputeEngine`) can now be assigned or
+  passed wherever a `ComputeEngine` is expected, and vice versa.
+  `new ComputeEngine()`, `instanceof ComputeEngine`,
   `InstanceType<typeof ComputeEngine>` and the static
   `ComputeEngine.getStandardLibrary()` all work as before (the constructor's
   type is the new `ComputeEngineConstructor` interface). The interface also
@@ -142,101 +157,100 @@
   `ExpressionComputeEngine` type is now **deprecated**: it is interchangeable
   with `ComputeEngine`, which should be used instead.
 
-### Bug Fixes
+### Resolved Issues
 
 - **Serialization no longer writes to the current scope.** `toLatex()` and
-  `toMathJson()` internally re-canonicalize parts of the expression they lay
-  out (for example to display a product with negative exponents as a
-  fraction), and that re-canonicalization could **declare** an undeclared
-  function head — or write an inferred type onto a declaration — in whatever
-  scope was ambient at serialization time. In particular, serializing an
-  expression that had been parsed against a per-call `scope` leaked its
-  function heads into the surrounding scope, changing how later parses read
-  (`aQ_{z}(x,y)` parsed before the leak as an implicit product, after it as a
-  function application). Serialization now runs in a resolve-only region:
-  names resolve against the scope chain but are never declared, and no
-  inference is written. The same region now also covers the undeclared-head
-  auto-declaration during partial-form boxing, which the resolve-only
-  contract already promised but did not enforce.
+  `toMathJson()` internally re-canonicalize parts of the expression they lay out
+  (for example to display a product with negative exponents as a fraction), and
+  that re-canonicalization could **declare** an undeclared function head — or
+  write an inferred type onto a declaration — in whatever scope was ambient at
+  serialization time. In particular, serializing an expression that had been
+  parsed against a per-call `scope` leaked its function heads into the
+  surrounding scope, changing how later parses read (`aQ_{z}(x,y)` parsed before
+  the leak as an implicit product, after it as a function application).
+  Serialization now runs in a resolve-only region: names resolve against the
+  scope chain but are never declared, and no inference is written. The same
+  region now also covers the undeclared-head auto-declaration during
+  partial-form boxing, which the resolve-only contract already promised but did
+  not enforce.
 
 - **Cortex: a wrapped operator chain no longer ends in a dangling operator.**
   When an infix chain was long enough to wrap, the formatter emitted the
-  operator after *every* element, including the last. With no closing fence to
+  operator after _every_ element, including the last. With no closing fence to
   absorb it the output ended on the operator, and the result did not re-parse:
   `Add(accumulator, someLongVariableName, x, y)` at a narrow margin produced
   `accumulator +` / `someLongVariableName + x + y +`, which reports
-  `unexpected-symbol "+"`. Only the separators *between* elements are kept now;
+  `unexpected-symbol "+"`. Only the separators _between_ elements are kept now;
   those are fine across a line break, since an operator with whitespace on both
-  sides stays infix. Fenced lists are unaffected — a trailing `,` before `]`
-  or `;` before `}` is legal Cortex and still emitted.
+  sides stays infix. Fenced lists are unaffected — a trailing `,` before `]` or
+  `;` before `}` is legal Cortex and still emitted.
 
 - **Cortex: a statement block that has to wrap is indented, not staircased.**
   `do { … }` (and the new `if` block form) laid its body out with the generic
-  fenced-list layout, which aligns continuation lines to the *opening brace*.
-  For a statement block that pushed the body out to the brace's column, and at
-  a realistic margin left so little width that the statements broke apart in
-  turn. Both are now laid out anchored at the **keyword**: body one indent in,
-  closing brace under the keyword, statements separated by the line break
-  itself. An `else if` chain is flattened first, so every clause stays at the
-  same column instead of nesting a level deeper per `else if`. Expressions and
-  collections keep the existing brace-aligned layout.
+  fenced-list layout, which aligns continuation lines to the _opening brace_.
+  For a statement block that pushed the body out to the brace's column, and at a
+  realistic margin left so little width that the statements broke apart in turn.
+  Both are now laid out anchored at the **keyword**: body one indent in, closing
+  brace under the keyword, statements separated by the line break itself. An
+  `else if` chain is flattened first, so every clause stays at the same column
+  instead of nesting a level deeper per `else if`. Expressions and collections
+  keep the existing brace-aligned layout.
 
 - **A subscript or bracket on a set constant is no longer read as an index.**
   `\mathbb{Z}_n` parsed as `["At", "Integers", "n"]` — indexing into a set —
-  which is not a valid type, and serialized back to `\Z[n]`, which parsed as
-  an `incompatible-type` error, so the expression did not survive a round trip.
+  which is not a valid type, and serialized back to `\Z[n]`, which parsed as an
+  `incompatible-type` error, so the expression did not survive a round trip.
   Those spellings now produce the ring constructions above. Indexing a genuine
   indexed collection is unchanged.
 
-- **A bare `N` or `D` used as a variable now binds the same way everywhere in
-  an expression.** A single-uppercase-letter name that is also a standard
-  library operator reads as a variable when it appears where a value is
-  required (`N + 1`), and the engine declares that variable the moment it first
-  sees such an occurrence. Occurrences boxed _before_ that point — the first
-  `N` of `N, N+1` — kept the operator binding, so one expression carried two
-  different bindings for one name (`isSame()` was false between two
-  occurrences) and boxing the same input a second time produced a third. An
-  expression such as `N, N+1, N+2` or `(DB+BC)^2 = AD^2+AC^2` therefore did not
-  survive a serialize-and-reparse round trip. When the variable is declared
-  partway through a boxing, the expression is now rebuilt against it, so every
+- **A bare `N` or `D` used as a variable now binds the same way everywhere in an
+  expression.** A single-uppercase-letter name that is also a standard library
+  operator reads as a variable when it appears where a value is required
+  (`N + 1`), and the engine declares that variable the moment it first sees such
+  an occurrence. Occurrences boxed _before_ that point — the first `N` of
+  `N, N+1` — kept the operator binding, so one expression carried two different
+  bindings for one name (`isSame()` was false between two occurrences) and
+  boxing the same input a second time produced a third. An expression such as
+  `N, N+1, N+2` or `(DB+BC)^2 = AD^2+AC^2` therefore did not survive a
+  serialize-and-reparse round trip. When the variable is declared partway
+  through a boxing, the expression is now rebuilt against it, so every
   occurrence shares one binding. What the names mean is unchanged: `N(2.3)` and
-  `D(x^2, x)` still apply the builtin operators, `x^2 |> D` still pipes into
-  the derivative operator, and a bare mention on its own (`ce.parse('N')`)
-  still leaves the operator definition intact.
+  `D(x^2, x)` still apply the builtin operators, `x^2 |> D` still pipes into the
+  derivative operator, and a bare mention on its own (`ce.parse('N')`) still
+  leaves the operator definition intact.
 
 - **A symbol spelled by the generic (name-based) speller now reads back as the
-  same symbol.** Two cosmetic spellings changed the symbol's identity on a
-  round trip. A plain trailing digit run became a subscript, so the symbol `x2`
+  same symbol.** Two cosmetic spellings changed the symbol's identity on a round
+  trip. A plain trailing digit run became a subscript, so the symbol `x2`
   serialized as `x_2` and parsed back as the _different_ symbol `x_2` (and
   `Arctan2` as `\mathrm{Arctan_2}` → `Arctan_2`). Such a name is now spelled
-  verbatim and upright — `\mathrm{x2}`, `\mathrm{Arctan2}` — which reads back
-  as the original symbol; a name that already uses the `_` subscript
-  convention is unaffected (`x_2` still serializes as `x_2`). **This changes
-  the rendering of digit-suffixed names:** they display upright as `x2` rather
-  than as `x₂`; write `x_2` for the subscripted form. Separately, a name from
-  the Greek-letter table whose command the LaTeX dictionary gives to a
-  constant was spelled with that command: the symbol `pi` serialized as `\pi`
-  and parsed back as `Pi`, `zeta` as `\zeta` → `Zeta`, `phiLetter` as
-  `\varphi` → `GoldenRatio`. Those names are now spelled `\mathrm{pi}`,
-  `\mathrm{zeta}` and `\mathrm{phiLetter}`. The set is derived from the
-  dictionary, not hardcoded: a constant that yields its bare command to a
-  declaration does not claim the spelling, so the symbol `gamma` still
-  serializes as `\gamma` — that command reads back as `EulerGamma` only in an
-  engine where `gamma` is undeclared, i.e. never in an engine holding the
-  symbol.
+  verbatim and upright — `\mathrm{x2}`, `\mathrm{Arctan2}` — which reads back as
+  the original symbol; a name that already uses the `_` subscript convention is
+  unaffected (`x_2` still serializes as `x_2`). **This changes the rendering of
+  digit-suffixed names:** they display upright as `x2` rather than as `x₂`;
+  write `x_2` for the subscripted form. Separately, a name from the Greek-letter
+  table whose command the LaTeX dictionary gives to a constant was spelled with
+  that command: the symbol `pi` serialized as `\pi` and parsed back as `Pi`,
+  `zeta` as `\zeta` → `Zeta`, `phiLetter` as `\varphi` → `GoldenRatio`. Those
+  names are now spelled `\mathrm{pi}`, `\mathrm{zeta}` and `\mathrm{phiLetter}`.
+  The set is derived from the dictionary, not hardcoded: a constant that yields
+  its bare command to a declaration does not claim the spelling, so the symbol
+  `gamma` still serializes as `\gamma` — that command reads back as `EulerGamma`
+  only in an engine where `gamma` is undeclared, i.e. never in an engine holding
+  the symbol.
 
-- **The imaginary unit now has a single canonical spelling: `["Complex", 0, 1]`.**
-  A bare `i` parsed to the complex literal `["Complex", 0, 1]`, but
-  `\imaginaryI` (and `\mathrm{i}`, `\operatorname{i}`, and the MathJSON symbol
-  `"ImaginaryUnit"`) canonicalized to the _symbol_ `ImaginaryUnit`. Since the
-  serializer emits `\imaginaryI` for both, `ce.parse('i')` did not round-trip,
-  and two structurally identical expressions could compare unequal with
-  `isSame()`. The `ImaginaryUnit` definition has always been declared
-  `holdUntil: 'never'` — meaning its value is substituted at canonicalization —
-  but the symbol was interned in the engine's common-symbol table, which
-  short-circuited that substitution. It no longer is, so
-  `ce.parse('i')`, `ce.parse('\imaginaryI')` and `ce.box('ImaginaryUnit')` now
-  all canonicalize to the same complex literal. **Migration:** raw MathJSON
+- **The imaginary unit now has a single canonical spelling:
+  `["Complex", 0, 1]`.** A bare `i` parsed to the complex literal
+  `["Complex", 0, 1]`, but `\imaginaryI` (and `\mathrm{i}`, `\operatorname{i}`,
+  and the MathJSON symbol `"ImaginaryUnit"`) canonicalized to the _symbol_
+  `ImaginaryUnit`. Since the serializer emits `\imaginaryI` for both,
+  `ce.parse('i')` did not round-trip, and two structurally identical expressions
+  could compare unequal with `isSame()`. The `ImaginaryUnit` definition has
+  always been declared `holdUntil: 'never'` — meaning its value is substituted
+  at canonicalization — but the symbol was interned in the engine's
+  common-symbol table, which short-circuited that substitution. It no longer is,
+  so `ce.parse('i')`, `ce.parse('\imaginaryI')` and `ce.box('ImaginaryUnit')`
+  now all canonicalize to the same complex literal. **Migration:** raw MathJSON
   `"ImaginaryUnit"` is still accepted and still round-trips non-canonically
   (`ce.box('ImaginaryUnit', { canonical: false })`), but code matching on the
   canonical form should test for the complex literal — `expr.isSame(ce.I)` or
@@ -245,9 +259,9 @@
 - **The interned imaginary unit is now an exact value**, so exactness-gated
   folds fire on it. It was built from a float-lane numeric value while the
   identical `["Complex", 0, 1]` literal boxed exact, which made canonicalization
-  disagree with itself depending on how `i` reached it: `["Power",
-  "ImaginaryUnit", 2]` stayed `i^2` (and `ce.parse('i^2').simplify()` did not
-  reduce) while `["Power", ["Complex", 0, 1], 2]` folded to `-1` — so
+  disagree with itself depending on how `i` reached it:
+  `["Power", "ImaginaryUnit", 2]` stayed `i^2` (and `ce.parse('i^2').simplify()`
+  did not reduce) while `["Power", ["Complex", 0, 1], 2]` folded to `-1` — so
   `ce.box(expr.json)` did not round-trip to `expr`. Small integer powers of `i`
   now fold on every route, and `\sqrt{-1}`, `(-1)^{1/2}` and `\frac{a}{i}`
   canonicalize to `i`, `i` and `-ia` respectively.
@@ -257,13 +271,14 @@
   canonicalized to `NaN` while the other operand order stayed symbolic: the
   `n·i` promotion (which folds `2·i` to the exact `2i`) accepted a non-finite
   left operand and built a value out of an infinite component. Infinities are
-  excluded from that fold, so both operand orders now keep the symbolic
-  product. `evaluate()` still returns `NaN` for the indeterminate form.
+  excluded from that fold, so both operand orders now keep the symbolic product.
+  `evaluate()` still returns `NaN` for the indeterminate form.
 
 - `Degrees()` of a non-real argument no longer drops the imaginary part.
-  `\imaginaryI\degree` canonicalized to `0` (and `(2+3i)\degree` to `\frac{\pi}{90}`)
-  because the conversion read only the real part of its operand. The linear
-  conversion is now applied to the whole value: `Degrees(i) = i\pi/180`.
+  `\imaginaryI\degree` canonicalized to `0` (and `(2+3i)\degree` to
+  `\frac{\pi}{90}`) because the conversion read only the real part of its
+  operand. The linear conversion is now applied to the whole value:
+  `Degrees(i) = i\pi/180`.
 
 - A canonical `Multiply` is now always flat. A product built by the invisible
   (juxtaposition) operator could keep a nested `Multiply` operand — for example
@@ -282,19 +297,19 @@
   rejected. That margin shows how finely the cost gate discriminates between a
   factored and an expanded form, and it is a candidate for tuning.
 
-- An operator used as a value — unapplied, as in `["Tuple", "A", "Abs"]` or as
-  a callback in `["Map", xs, "Factorial"]` — no longer serializes to a fragment
-  of its own notation. The serializer reached for the operator's LaTeX
-  notation, which is written in terms of operands, so with none it emitted
-  `\vert\vert` for `Abs`, `!` for `Factorial` or `\sum` for `Sum`; none of
-  those re-parse. A LaTeX dictionary entry now declares whether its notation
-  stands on its own with the new `standaloneSymbol` property — true of the
-  function commands (`\sin`, `\ln`, `\arctan`) and of the constant and set
-  notations (`\Z`, `\emptyset`, `\varphi`) — and only a flagged entry's
-  notation is used for an unapplied symbol. Every other operator is spelled out
-  as `\mathrm{Abs}`, `\mathrm{Factorial}`, `\mathrm{Sum}`, which re-parses to
-  the same symbol. Leaving `standaloneSymbol` unset on a custom dictionary
-  entry is always safe: it only costs the nicer spelling.
+- An operator used as a value — unapplied, as in `["Tuple", "A", "Abs"]` or as a
+  callback in `["Map", xs, "Factorial"]` — no longer serializes to a fragment of
+  its own notation. The serializer reached for the operator's LaTeX notation,
+  which is written in terms of operands, so with none it emitted `\vert\vert`
+  for `Abs`, `!` for `Factorial` or `\sum` for `Sum`; none of those re-parse. A
+  LaTeX dictionary entry now declares whether its notation stands on its own
+  with the new `standaloneSymbol` property — true of the function commands
+  (`\sin`, `\ln`, `\arctan`) and of the constant and set notations (`\Z`,
+  `\emptyset`, `\varphi`) — and only a flagged entry's notation is used for an
+  unapplied symbol. Every other operator is spelled out as `\mathrm{Abs}`,
+  `\mathrm{Factorial}`, `\mathrm{Sum}`, which re-parses to the same symbol.
+  Leaving `standaloneSymbol` unset on a custom dictionary entry is always safe:
+  it only costs the nicer spelling.
 
 - The Fungrim identity artifact was regenerated against the canonical forms
   above (1445 rules: 1435 simplify + 10 solve). Five imaginary-unit identities
@@ -313,40 +328,40 @@
   produced a negative real coefficient — only a product with complex factors
   can, e.g. `i \cdot i = -1` — stranded a literal `-1` operand:
   `["Multiply", "ImaginaryUnit", "ImaginaryUnit", "a", "b"]` canonicalized to
-  `["Multiply", -1, "a", "b"]`, which serializes as `-(ab)` and re-parses as
-  the structurally different `["Negate", ["Multiply", "a", "b"]]`. A
-  fold-produced negative coefficient now re-enters the sign normalization, so
-  both spellings converge on `Negate(Multiply(a, b))` — the same form literal
-  input has always produced. With this, every remaining serialize-and-reparse
-  exception in the MathNet corpus ledger is a documented-lossy prettification:
-  the ledger carries zero bug classes (385/391 round-trip).
+  `["Multiply", -1, "a", "b"]`, which serializes as `-(ab)` and re-parses as the
+  structurally different `["Negate", ["Multiply", "a", "b"]]`. A fold-produced
+  negative coefficient now re-enters the sign normalization, so both spellings
+  converge on `Negate(Multiply(a, b))` — the same form literal input has always
+  produced. With this, every remaining serialize-and-reparse exception in the
+  MathNet corpus ledger is a documented-lossy prettification: the ledger carries
+  zero bug classes (385/391 round-trip).
 
-- **A function assigned at the top level is no longer mistaken for an
-  un-applied builtin.** The single-uppercase-letter fallback (see the `N`/`D`
-  entry above) decided "standard library" by scope position, but
+- **A function assigned at the top level is no longer mistaken for an un-applied
+  builtin.** The single-uppercase-letter fallback (see the `N`/`D` entry above)
+  decided "standard library" by scope position, but
   `ce.assign('F', ce.parse('x \mapsto x^2'))` lands its definition in the same
   scope as the library — so `F + 1` silently shadowed the function with an
-  unknown variable, and from then on `F(2)` evaluated to the product `2F`.
-  The fallback now discriminates on the definition's origin: a user-defined
-  function used as a numeric operand surfaces an `incompatible-type` error
-  and the function stays intact. Devolution of the builtins themselves
-  (`N + 1`, `S/D`) is unchanged.
+  unknown variable, and from then on `F(2)` evaluated to the product `2F`. The
+  fallback now discriminates on the definition's origin: a user-defined function
+  used as a numeric operand surfaces an `incompatible-type` error and the
+  function stays intact. Devolution of the builtins themselves (`N + 1`, `S/D`)
+  is unchanged.
 
 - **A raw (non-canonical) symbol now evaluates through its binding**, matching
-  the behavior raw and structural *function* nodes gained in 0.101.0. With
-  `x` assigned `5`, `ce.box('x', { canonical: false }).evaluate()` returned
-  the symbol `x`; it now returns `5`, while the receiver stays on its tier. A
-  symbol with no assigned value still evaluates to itself.
+  the behavior raw and structural _function_ nodes gained in 0.101.0. With `x`
+  assigned `5`, `ce.box('x', { canonical: false }).evaluate()` returned the
+  symbol `x`; it now returns `5`, while the receiver stays on its tier. A symbol
+  with no assigned value still evaluates to itself.
 
 - **The ellipsis fold barrier holds at any depth, on every route.** A product
-  carrying a `ContinuationPlaceholder` (`\dots`) in a nested operand could
-  still be spliced — and its factors folded or reordered across the ellipsis —
-  when it arrived through raw MathJSON (`ce.box`), wrapped in a `Sequence`, or
-  as an explicit `\cdot`/`*` chain hanging off a juxtaposed run:
-  `(px_1 + 1) \cdots (px_n + 1) \cdot p^m` re-serialized with the `\dots`
-  moved to the front. All flattening sites now share one depth-aware barrier,
-  and an explicit multiplication folds a juxtaposed ellipsis run into a single
-  flat notational product, which round-trips.
+  carrying a `ContinuationPlaceholder` (`\dots`) in a nested operand could still
+  be spliced — and its factors folded or reordered across the ellipsis — when it
+  arrived through raw MathJSON (`ce.box`), wrapped in a `Sequence`, or as an
+  explicit `\cdot`/`*` chain hanging off a juxtaposed run:
+  `(px_1 + 1) \cdots (px_n + 1) \cdot p^m` re-serialized with the `\dots` moved
+  to the front. All flattening sites now share one depth-aware barrier, and an
+  explicit multiplication folds a juxtaposed ellipsis run into a single flat
+  notational product, which round-trips.
 
 - **An unknown function head whose name collides with a claimed constant
   spelling is spelled upright.** A function head literally named `pi` serialized
@@ -1054,7 +1069,7 @@
   finite-real-over-±∞ quotient types `finite_integer` (the value is exactly 0).
   Compiled emissions are unchanged.
 
-### Bug Fixes
+### Resolved Issues
 
 - **`.subs()` on a structural expression now preserves the structural form.** A
   structural receiver requested a CANONICAL rebuild, so substituting into one
@@ -1224,7 +1239,7 @@
   `isPure`/`effects`/`type` answers. New benchmark:
   `benchmarks/effects-registration.ts`.
 
-### Bug Fixes
+### Resolved Issues
 
 - `isPure` and `.effects` no longer claim a seed frame contains a lazy view that
   escapes it. `WithRandomSeed(42, Map(xs, x => Random()))` — and the
@@ -1742,7 +1757,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   10-million-sample Monte-Carlo integral under Jest). Draw values are unchanged
   — the stability vectors are untouched.
 
-### Bug Fixes
+### Resolved Issues
 
 - **A Leibniz derivative no longer swallows the comparison that follows it.**
   `\frac{d}{dx}x^2 > 0` parsed as `D(x^2 > 0, x)` — the derivative of a
@@ -3687,7 +3702,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   is what lets surrounding operations compose: `At(p, I) + 1` broadcasts
   element-wise, and `Length(At(p, I))` compiles.
 
-### Bug Fixes
+### Resolved Issues
 
 - **`assume()` after `assign()` now records the assumption.** The predicate was
   evaluated through the symbol's assigned value before the assumption system saw
@@ -4149,7 +4164,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   `equations` is an equation (`lhs == rhs`), a bare residual expression (read as
   `= 0`), or a list of either.
 
-### Bug Fixes
+### Resolved Issues
 
 - **Applying a declared-then-assigned function to a large collection is now
   lazy, matching the hybrid-laziness contract.** Since 0.84.0, element-wise
@@ -4242,7 +4257,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   — or a negative one — returns an `out-of-range` error rather than silently
   misbehaving.
 
-### Improvements and Bug Fixes
+### Improvements and Resolved Issues
 
 - **`Abs` of a fixed-arity point is now the Euclidean norm.** `|(3, 4)|`
   evaluates to `5` — the single-bar spelling of the vector magnitude, consistent
@@ -4596,7 +4611,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   the honest union — a non-indexed collection is never broadcast by the value
   path, so a scalar outcome stays reachable there.
 
-### Bug Fixes
+### Resolved Issues
 
 - **`isValid` now honors its documented contract through a list/tensor.**
   `isValid` is specified as `false` if the expression "or any of its
@@ -4639,7 +4654,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   that can produce the compiled result, so a complex value consumed by an
   operation with a real result still compiles (`At([i, 2], 2)` → `2`).
 
-### Bug Fixes
+### Resolved Issues
 
 - **A `When` (restriction) whose value was a COLLECTION did not expose the
   collection interface.** `isCollection` was `false`, `count` `undefined` and
@@ -4742,7 +4757,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
 
 ## 0.87.0 _2026-07-19_
 
-### Bug Fixes
+### Resolved Issues
 
 - **Exponential blowup evaluating float-carrying symbolic bodies inside function
   applications.** The "inexact operand numericizes a closed-constant
@@ -4947,7 +4962,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   ≥ 3 both routes go through different roundings and agree to ~1 ulp. Exponents
   ≥ 9, negative, and non-integer still use the general helper.
 
-### Bug Fixes
+### Resolved Issues
 
 - **Degree-mode compilation now reaches user-defined function bodies.** The
   angular-unit rewrite (scaling trig arguments/results so radian-based compiled
@@ -4972,7 +4987,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
 
 ## 0.86.2 _2026-07-19_
 
-### Bug Fixes
+### Resolved Issues
 
 - **An assigned complex symbol now compiles as complex without an explicit
   declaration.** `ce.assign("z_0", <complex value>)` then compiling an
@@ -5009,7 +5024,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
 
 ## 0.86.1 _2026-07-19_
 
-### Bug Fixes
+### Resolved Issues
 
 - **Materializing a list no longer restructures its eager elements.**
   `evaluate({materialization: true})` on a literal list spliced the contents of
@@ -5082,7 +5097,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   Re-entrant (an inner call can only shorten the effective deadline, never
   extend it).
 
-### Bug Fixes
+### Resolved Issues
 
 - **`.N()` of `Tuple ± scalar·Tuple` no longer throws at machine precision.**
   When every term of a component sum was an integer-valued machine float
@@ -5166,7 +5181,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
     `vector` row) went from a 2 s timeout to ~10 ms of lazy composition, with
     materialization deferred to the consumer sweep.
 
-### Bug Fixes
+### Resolved Issues
 
 - **String `vars` values now splice into compiled JavaScript and Python as
   source, not as string literals.** The `vars` compile option is the live-path
@@ -5300,7 +5315,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   claim in `Multiply` — see the sgn audit below — and before that was masked
   entirely).
 
-### Bug Fixes
+### Resolved Issues
 
 - **Lazy broadcast over a declared-`unknown` symbol no longer throws
   `Not canonical` (Tycho item 42).** Evaluating `mod(L, N)/N` with `L` a
@@ -5486,7 +5501,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
 
 ## 0.84.1 _2026-07-17_
 
-### Bug Fixes
+### Resolved Issues
 
 - **`Equal`/`NotEqual` over a possibly-collection operand now compile on the
   `javascript` target with an interpreter-faithful runtime dispatch.** A
@@ -5523,7 +5538,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
 
 ## 0.84.0 _2026-07-17_
 
-### Bug Fixes
+### Resolved Issues
 
 - **`Sort` and `Shuffle` of a non-`List` collection returned corrupt results.**
   Both rebuilt their result with the _source_ collection's operator, so the
@@ -5658,7 +5673,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   structural and control-flow heads (`Sum`, `If`, `Block`, …) keep their bespoke
   lowering and ignore the handler.
 
-### Bug Fixes
+### Resolved Issues
 
 - **A `Mod` in a product or a power base now serializes parenthesized, fixing a
   round-trip corruption.** Juxtaposition (invisible multiply) and superscripts
@@ -5676,7 +5691,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
 
 ## 0.83.1 _2026-07-17_
 
-### Bug Fixes
+### Resolved Issues
 
 - **Fixed a 0.82.0 regression: an operand typed `broadcastable<T>` was rejected
   by operators with a plain scalar parameter, baking an unrecoverable
@@ -5718,7 +5733,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   of axes (scalar `0`, vector `1`, matrix `2`) — not the linear-algebra (row)
   rank.
 
-### Bug Fixes
+### Resolved Issues
 
 - **The `javascript` compile target now lowers a reduce (`Sum`/`Product`) and
   rank-dispatched multiplication over an `unknown`- or `broadcastable`-typed
@@ -5836,7 +5851,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   for single-element collections. An empty broadcast still evaluates to
   `Nothing`.
 
-### Bug Fixes
+### Resolved Issues
 
 - **`Sum`/`Product` over a _computed_ list-valued body now reduces instead of
   broadcasting.** `Sum(L)` of a literal collection reduced correctly, but a body
@@ -5994,7 +6009,7 @@ against an independent `mpmath` reference, never another tool. Reproduce with
   predicate form `Partition(xs, predicate)` (split into matching / non-matching
   groups) is unchanged.
 
-### Bug Fixes
+### Resolved Issues
 
 - **The two declare forms are equivalent under declare-then-assign.** Declaring
   a function head with the object form (`ce.declare('f', {signature: …})`) and
@@ -6357,7 +6372,7 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
   `[0, 0.5, 1]`). Compiles on all targets, including the native `clamp` on
   `glsl`/`wgsl` and `np.clip` on `python`.
 
-### Bug Fixes
+### Resolved Issues
 
 - **`GCD`/`LCM` now evaluate on non-integer real arguments.** `\gcd(2.25, 2.1)`
   and `\operatorname{lcm}(2.5, 1.5)` previously stayed symbolic (and compiled to
@@ -6886,7 +6901,7 @@ Fixes from a review of the 0.78.0–0.80.0 changes:
   round-trips are unaffected; only consumers pattern-matching the MathJSON parse
   shape need updating.
 
-### Bug Fixes
+### Resolved Issues
 
 - **Symbolic derivatives of declared-then-assigned functions** (0.77.0
   regression). Declaring a function symbol before assigning its body —

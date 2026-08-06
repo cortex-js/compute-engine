@@ -283,6 +283,45 @@ describe('BETA FUNCTION', () => {
     expect(ce.expr(['Beta', -3, 2]).evaluate().toString()).toBe('1/6');
     expect(ce.expr(['Beta', 2, 3]).evaluate().toString()).toBe('1/12');
   });
+
+  // Regression (nightly exactness grid): an exact IRRATIONAL argument used to
+  // numericize. `B(a, m) = (m-1)!/(a(a+1)…)` was built with the `.add()` /
+  // `.mul()` methods, which fold two exact literals to a machine float, so
+  // `√2 + 1` became 2.41421356… on the first factor and the whole result went
+  // inexact. Integer/rational arguments fold exactly, which is why only the
+  // irrational case showed it.
+  // Has `evaluate()` numericized to a float? Only a NUMBER LITERAL carries
+  // `isExact`, and only an inexact one reports `false` — an exact closed form
+  // such as `1 / (√2·(1+√2))` is a `Divide`, for which `isExact` is undefined.
+  const numericized = (e: unknown) => (e as { isExact?: boolean }).isExact === false;
+
+  test('B(√2, 2) stays exact under evaluate', () => {
+    const r = ce.expr(['Beta', ['Sqrt', 2], 2]).evaluate();
+    expect(numericized(r)).toBe(false);
+    // B(a, 2) = 1/(a(a+1)) = 1/(√2(1+√2)) = 1/(2+√2)
+    expect(r.N().re).toBeCloseTo(1 / (2 + Math.SQRT2), 12);
+  });
+
+  test('B(√2, 3) and B(2, √2) stay exact (either argument position)', () => {
+    const r3 = ce.expr(['Beta', ['Sqrt', 2], 3]).evaluate();
+    expect(numericized(r3)).toBe(false);
+    expect(r3.N().re).toBeCloseTo(
+      2 / (Math.SQRT2 * (1 + Math.SQRT2) * (2 + Math.SQRT2)),
+      12
+    );
+    // The reduction is symmetric: the positive integer may be either operand.
+    const rSwap = ce.expr(['Beta', 2, ['Sqrt', 2]]).evaluate();
+    expect(numericized(rSwap)).toBe(false);
+    expect(rSwap.N().re).toBeCloseTo(1 / (2 + Math.SQRT2), 12);
+  });
+
+  // The other half of the contract: an INEXACT argument must still numericize
+  // (that used to come free from `.mul()` folding the floats).
+  test('B(2.5, 2) numericizes under evaluate', () => {
+    const r = ce.expr(['Beta', 2.5, 2]).evaluate();
+    expect(numericized(r)).toBe(true);
+    expect(r.re).toBeCloseTo(1 / (2.5 * 3.5), 12);
+  });
 });
 
 describe('ZETA FUNCTION', () => {

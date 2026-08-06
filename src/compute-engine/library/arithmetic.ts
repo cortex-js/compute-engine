@@ -3635,15 +3635,36 @@ function betaPositiveIntegerArg(
   m: number
 ): Expression | undefined {
   if (m > 100) return undefined;
-  let denom = ce.One;
+
+  // Build the product with `ce.function(...)`, NOT the `.add()`/`.mul()`
+  // methods: those fold two exact literals to a machine float, so an exact
+  // irrational argument lost its exactness on the very first factor
+  // (`B(√2, 2)`: `√2 + 1` → 2.41421356…) and the whole result numericized, in
+  // violation of the evaluate/N contract. Integer and rational arguments were
+  // unaffected — they fold exactly — which is why only the irrational case
+  // showed it. See CLAUDE.md, "`.add()`/`.mul()` methods fold exact literals
+  // to floats".
+  const factors: Expression[] = [];
   for (let k = 0; k < m; k++) {
-    const factor = a.add(k);
+    const factor = k === 0 ? a : ce.function('Add', [a, ce.number(k)]);
+    // A vanishing factor is a Γ-pole (`B(−1, 2)`). Integer arithmetic still
+    // folds exactly through `ce.function`, so this stays detectable.
     if (factor.isSame(0)) return ce.ComplexInfinity;
-    denom = denom.mul(factor);
+    factors.push(factor);
   }
+  const denom =
+    factors.length === 1 ? factors[0] : ce.function('Multiply', factors);
+
   let numer = 1n;
   for (let k = 2; k < m; k++) numer *= BigInt(k);
-  return ce.number(numer).div(denom);
+  const result = ce.function('Divide', [ce.number(numer), denom]);
+
+  // The other half of the evaluate/N contract: an INEXACT argument must still
+  // numericize. That used to come free from `.mul()` folding the floats; with
+  // the structural construction above, `B(2.5, 2)` would otherwise return the
+  // unevaluated `1 / (2.5 * (1 + 2.5))`.
+  if (isNumber(a) && a.isExact === false) return result.N();
+  return result;
 }
 
 /**
