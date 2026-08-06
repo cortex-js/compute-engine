@@ -8,9 +8,20 @@ Category: scientific
 Grammar validation
 ------------------
 Last validated: 2026-08-06 against the Cortex grammar shipped in
-`src/cortex/`. This pass narrowed the keyword table to the words the grammar
-actually claims (the reserved-word relaxation), added `break`/`continue`, the
-contextual `type`/`alias`/`is`, and the non-finite literals.
+`src/cortex/`. The first pass that day narrowed the keyword table to the words
+the grammar actually claims (the reserved-word relaxation), added
+`break`/`continue`, the contextual `type`/`alias`/`is`, and the non-finite
+literals. A second pass replaced the identifier character class with the actual
+complement of `WHITE_SPACE ∪ PATTERN_SYNTAX ∪ IDENTIFIER_CONTINUE_PROHIBITED`
+(it had excluded only the C0 controls, so a symbol swallowed the `,` and `;`
+that follow it), unbounded the verbatim-symbol body, widened the Unicode
+operator class to all of non-ASCII `PATTERN_SYNTAX`, made `#pragma` stop where
+the lexer stops, and dropped the trailing `\b` from the number literals so
+implicit multiplication (`3x`) is a number followed by a symbol. That pass was
+checked mechanically, not by eye: every symbol boundary the mode produces over
+the 255 ```cortex blocks in `src/cortex/docs` matches `tokenize()`, and the
+identifier class agrees with `isBreak`/`isIdentifierContinueProhibited` on
+every code point in U+0000..U+FFFF.
 Tables cross-checked against source:
   - operators.ts   — operator spellings incl. `%` (Mod) and postfix `!`
                      (Factorial), plus `|>`/`~>` (Pipe), `**` (Power), `!in`
@@ -19,6 +30,8 @@ Tables cross-checked against source:
                      digit separators), `"…"` / `"""…"""` / `#"…"#` strings,
                      `` `…` `` verbatim symbols, `$…$` LaTeX islands, `#…`
                      pragmas, and line + nested block comments.
+  - characters.ts  — `isBreak` / `isIdentifierContinueProhibited`, the tables
+                     the identifier and Unicode-operator classes mirror.
   - reserved-words.ts — `ACTIVE_WORDS` (highlighted as keywords) and
                      `LITERAL_WORDS` (highlighted as constants). The merely
                      RESERVED words are ordinary identifiers and are NOT
@@ -153,6 +166,12 @@ const CONSTANT = {
 
 const decimalDigits = '([0-9]_*)+';
 const hexDigits = '([0-9a-fA-F]_*)+';
+// A leading `\b` keeps the digits of `x2` inside the identifier, but there is
+// deliberately NO trailing `\b`: `scanNumber` stops as soon as the literal ends
+// and lets `scanSymbol` take over, so implicit multiplication — `3x`, `2h`,
+// `5r`, all over the docs — is a NUMBER followed by a SYMBOL. A trailing `\b`
+// would fail to match `3` in `3x` (digit and letter are both word characters)
+// and hand the whole run to the identifier matcher as one name.
 const NUMBER = {
   className: 'number',
   relevance: 0,
@@ -162,17 +181,17 @@ const NUMBER = {
     {
       match:
         `\\b0[xX](${hexDigits})(\\.(${hexDigits}))?` +
-        `([pP][+-]?(${decimalDigits}))?\\b`,
+        `([pP][+-]?(${decimalDigits}))?`,
     },
     // binary-literal
     {
-      match: /\b0[bB]([01]_*)+\b/,
+      match: /\b0[bB]([01]_*)+/,
     },
     // decimal floating-point-literal (subsumes decimal-literal)
     {
       match:
         `\\b(${decimalDigits})(\\.(${decimalDigits}))?` +
-        `([eE][+-]?(${decimalDigits}))?\\b`,
+        `([eE][+-]?(${decimalDigits}))?`,
     },
   ],
 };
@@ -237,10 +256,43 @@ const LATEX_ISLAND = {
   relevance: 10,
 };
 
-// A pragma `#identifier` (and the leading `#!` shebang).
+// An identifier runs until a *break* character. `lexer.ts` `scanSymbol` stops
+// on `isBreak(c) || isIdentifierContinueProhibited(c)`, and `isBreak` is
+// `WHITE_SPACE ∪ PATTERN_SYNTAX` (`characters.ts`), so the class below is the
+// complement of those three tables.
+//
+// The previous class excluded only the C0 controls, so it swallowed every
+// separator the grammar relies on: `Add(x, 2)` matched `x,` as one identifier
+// and `a;b` as one name. It also excluded `_`, which the lexer accepts
+// anywhere in a symbol.
+//
+// There is deliberately no separate initial-character class:
+// `isIdentifierStartProhibited` only adds characters `PATTERN_SYNTAX` already
+// excludes, and digits are kept out of the first position by listing `NUMBER`
+// before `SYMBOLS` in `contains` — the same precedence the lexer gets from
+// consulting `scanNumber` before `scanSymbol`.
+//
+// Ranges below, in table order: C0 and space + `!"#$%&'()*+,-./` | `:;<=>?@` |
+// `[\]^` | backtick | `{|}~` + DEL and C1 + NBSP + `¡¢£¤¥¦§` | © | «¬ | ® |
+// °± | ¶ | » | ¿ | × | ÷ | OGHAM SPACE | MONGOLIAN VOWEL SEPARATOR | the
+// U+2000 spaces | LRM and RLM | U+2010‥U+203E | U+2041‥U+2053 | MEDIUM
+// MATHEMATICAL SPACE | the arrow, math and dingbat blocks | CJK punctuation |
+// U+FD3E‥U+FD3F | U+FE45‥U+FE46 | the non-characters.
+const IDENTIFIER_CHARACTER =
+  /[^\u0000-\u002F\u003A-\u0040\u005B-\u005E\u0060\u007B-\u00A7\u00A9\u00AB\u00AC\u00AE\u00B0\u00B1\u00B6\u00BB\u00BF\u00D7\u00F7\u1680\u180E\u2000-\u200A\u200E\u200F\u2010-\u203E\u2041-\u2053\u205F\u2190-\u2775\u2794-\u2E7F\u3000-\u3003\u3008-\u3020\u3030\uFD3E\uFD3F\uFE45\uFE46\uFFFE\uFFFF]/;
+const IDENTIFIER_CHARACTERS = concat(
+  IDENTIFIER_CHARACTER,
+  IDENTIFIER_CHARACTER,
+  '*'
+);
+
+// A pragma is `#` followed by identifier characters (`scanHash` reuses the
+// same break rule as `scanSymbol`), so `#simplify+1` is the pragma `#simplify`
+// followed by an operator, not one long pragma. `#!` on the first line is a
+// shebang.
 const META = {
   className: 'meta',
-  variants: [{ match: /^#!.*/ }, { match: /#[^\s#"(){}[\],;]+/ }],
+  variants: [{ match: /^#!.*/ }, { match: concat(/#/, IDENTIFIER_CHARACTERS) }],
 };
 
 const COMMENT_MODES = (hljs) => [
@@ -250,21 +302,14 @@ const COMMENT_MODES = (hljs) => [
   }),
 ];
 
-const IDENTIFIER_INITIAL_CHARACTER =
-  /[^\u0000-\u0020\uFFFE\uFFFF#$%@_\u0060\u007E]/;
-const IDENTIFIER_CHARACTER = /[^\u0000-\u0020\uFFFE\uFFFF]/;
-const IDENTIFIER_CHARACTERS = concat(
-  IDENTIFIER_INITIAL_CHARACTER,
-  IDENTIFIER_CHARACTER,
-  '*'
-);
-
 const SYMBOLS = [
   // Verbatim (backtick-quoted) symbol: `` `while` `` — a literal name that may
-  // shadow a reserved word.
+  // shadow a reserved word. `scanVerbatimSymbol` accepts *any* character up to
+  // the closing backtick (a linebreak ends it unbalanced), so this is not the
+  // identifier class: `` `hello world` `` is a single verbatim symbol.
   {
     className: 'variable',
-    match: concat(/`/, IDENTIFIER_CHARACTERS, /`/),
+    match: /`[^`\n]*`/,
   },
   {
     className: 'variable',
@@ -274,23 +319,34 @@ const SYMBOLS = [
 
 // Operators. The ASCII variant maximal-munches a run of the lexer's operator
 // characters (`src/cortex/lexer.ts` OPERATOR_CHARS) so multi-character
-// operators — `|>`, `~>`, `->`, `|->`, `**`, `!=`, `%`, postfix `!` — are one
-// token. The fancy variant covers the Unicode operator glyphs the serializer
-// emits and the parser accepts (`↦ → ⋁ ⋀ ≣ ≠ ⩽ ⩾ ≤ ≥ ∈ ∉ ∧ ∨ × ÷ − ¬`), which
-// would otherwise be swallowed by the identifier matcher above.
+// operators — `|>`, `~>`, `->`, `|->`, `**`, `!=`, `%`, postfix `!` and the
+// range `..` — are one token.
+//
+// The fancy variant covers the Unicode operator glyphs the serializer emits and
+// the parser accepts (`↦ → ⋁ ⋀ ≣ ≠ ⩽ ⩾ ≤ ≥ ∈ ∉ ∧ ∨ × ÷ − ¬`). It spans the whole
+// non-ASCII part of `PATTERN_SYNTAX` rather than a hand-picked subset: those
+// characters all break an identifier, so anything left uncovered here would
+// render as unstyled text. One glyph per token — unlike the ASCII run, the
+// lexer does not munch these together.
 const OPERATOR = {
   className: 'operator',
   relevance: 0,
   variants: [
-    { begin: /[+\-*/^=<>!&|~:?%]+/ },
-    { begin: /[\u2190-\u21FF\u2200-\u22FF\u00AC\u00D7\u00F7\u2A7D\u2A7E]/ },
+    { begin: /[+\-*/^=<>!&|~:?%.]+/ },
+    {
+      begin:
+        /[\u00A1-\u00A7\u00A9\u00AB\u00AC\u00AE\u00B0\u00B1\u00B6\u00BB\u00BF\u00D7\u00F7\u2010-\u203E\u2041-\u2053\u2190-\u2775\u2794-\u2E7F\u3001-\u3003\u3008-\u3020\u3030\uFD3E\uFD3F\uFE45\uFE46]/,
+    },
   ],
 };
 
+// Brackets and the separators. `,` and `;` are not OPERATOR_CHARS in the lexer
+// — they end a symbol as `PATTERN_SYNTAX` and are consumed by the parser as
+// separators — so they are punctuation here rather than operators.
 const BRACE = {
   className: 'punctuation',
   relevance: 0,
-  begin: /[[\](){}]/,
+  begin: /[[\](){},;]/,
 };
 
 /**
