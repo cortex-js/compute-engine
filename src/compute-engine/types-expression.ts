@@ -2054,7 +2054,8 @@ export interface Expression {
    * The result is in canonical form.
    *
    * **Time and recursion limits**: if the evaluation runs inside an enclosing
-   * {@linkcode ComputeEngine.withTimeLimit} span and exceeds its deadline, or
+   * {@linkcode IComputeEngine.withTimeLimit | ComputeEngine.withTimeLimit}
+   * span and exceeds its deadline, or
    * exceeds the recursion limit, a `CancellationError` is thrown (its `cause`
    * is `'timeout'` or `'recursion-depth-exceeded'`). Catch it to distinguish
    * an interrupted evaluation from a symbolic (inert) result.

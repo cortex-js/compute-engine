@@ -877,7 +877,8 @@ export type ParseLatexOptions = NumberFormat & {
    * juxtaposition read as multiply, discarded `%` comments, and trailing noise
    * dropped by recovery.
    *
-   * This flag only takes effect through {@link ComputeEngine.parse}, which
+   * This flag only takes effect through
+   * {@link IComputeEngine.parse | ComputeEngine.parse}, which
    * wires up the collector and attaches the resulting array to the top-level
    * parsed expression's `parseDiagnostics` property. On the standalone
    * `LatexSyntax.parse()` entry point the flag is a silent no-op (that entry

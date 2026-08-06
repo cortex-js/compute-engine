@@ -182,6 +182,16 @@ readonly NegativeOne: Expression;
 
 <MemberCard>
 
+##### ExpressionComputeEngine.Two
+
+```ts
+readonly Two: Expression;
+```
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.I
 
 ```ts
@@ -1982,6 +1992,73 @@ call for full detail.
 ####### limit?
 
 `number`
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.suggestOperatorName()
+
+```ts
+suggestOperatorName(name): string | undefined
+```
+
+Given a `name` that is **not** a known operator, return the closest known
+operator name — a "did you mean" suggestion — or `undefined` when nothing
+is close enough. Powers the Cortex `unknown-function` diagnostic.
+
+Matching is conservative and applied in priority order (first match wins):
+case-insensitive exact match, singular/plural, Damerau–Levenshtein
+distance (≤ 2 for names of length ≥ 6, ≤ 1 for length 5, never for
+shorter names), then a prefix match against exactly one operator. Ties
+prefer the candidate sharing the longest prefix with the query.
+
+```ts
+ce.suggestOperatorName('Quartile'); // → 'Quartiles'
+ce.suggestOperatorName('foo');      // → undefined
+```
+
+####### name
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.functionProperties()
+
+```ts
+functionProperties(name): FunctionProperties | undefined
+```
+
+Return the known analytic properties of an operator — poles, zeros, branch
+points/cuts, residues, holomorphic/meromorphic domains — drawn from the
+Fungrim-derived metadata store, or `undefined` if none are recorded.
+
+```ts
+ce.functionProperties('Gamma')?.poles?.toString(); // 'NonPositiveIntegers'
+```
+
+The set-valued accessors (`poles`, `zeros`, ...) return a boxed set for the
+unconditional record of that kind; parametric / conditional records (e.g.
+residues that depend on parameters) are available via `entries`.
+
+####### name
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.toJSON()
+
+```ts
+toJSON(): string
+```
+
+Debug representation, e.g. for `JSON.stringify()`.
 
 </MemberCard>
 
@@ -5020,6 +5097,7 @@ LaTeX expressions that are equivalent, for example `\operatorname{gcd}` or
 type BaseEntry = {
   name: MathJsonSymbol;
   serialize: LatexString | SerializeHandler;
+  standaloneSymbol: boolean;
 };
 ```
 
@@ -5444,7 +5522,8 @@ flagging charitable parse decisions — undeclared symbols, application-like
 juxtaposition read as multiply, discarded `%` comments, and trailing noise
 dropped by recovery.
 
-This flag only takes effect through ComputeEngine.parse, which
+This flag only takes effect through
+[ComputeEngine.parse](#parse-1), which
 wires up the collector and attaches the resulting array to the top-level
 parsed expression's `parseDiagnostics` property. On the standalone
 `LatexSyntax.parse()` entry point the flag is a silent no-op (that entry
@@ -7711,6 +7790,226 @@ Verified, OEIS-attributed closed-form proposals (possibly empty).
 
 ## Other
 
+### FunctionPropertyRecord
+
+A single analytic-property record for an operator. The MathJSON fields are
+raw (as translated from Fungrim); box them with `ce.expr` to query.
+
+<MemberCard>
+
+##### FunctionPropertyRecord.id
+
+```ts
+readonly id: string;
+```
+
+The Fungrim entry id (provenance).
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionPropertyRecord.property
+
+```ts
+readonly property: string;
+```
+
+One of `Poles`, `Zeros`, `BranchPoints`, `BranchCuts`, `Residue`,
+`EssentialSingularities`, `IsHolomorphic`, `IsMeromorphic`,
+`AnalyticContinuation`, `Solutions`, `ComplexZeroMultiplicity`.
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionPropertyRecord.var
+
+```ts
+readonly var: string | null;
+```
+
+The distinguished variable the property is stated in (e.g. `z`).
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionPropertyRecord.argIndex
+
+```ts
+readonly argIndex: number | null;
+```
+
+Index of `var` among the operator's arguments, or null when there is no
+single argument position (parametric / composite).
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionPropertyRecord.expr
+
+```ts
+readonly expr: ExpressionInput | null;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionPropertyRecord.domain
+
+```ts
+readonly domain: ExpressionInput | null;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionPropertyRecord.point
+
+```ts
+readonly point: ExpressionInput | null;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionPropertyRecord.condition
+
+```ts
+readonly condition: ExpressionInput | null;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionPropertyRecord.value
+
+```ts
+readonly value: ExpressionInput | null;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionPropertyRecord.assumptions
+
+```ts
+readonly assumptions: ExpressionInput | null;
+```
+
+</MemberCard>
+
+### FunctionProperties
+
+Queryable analytic properties of an operator, returned by
+`ce.functionProperties(name)`. The set-valued accessors return a boxed set
+(e.g. `NonPositiveIntegers`) for the unconditional record of that kind, or
+`undefined` when no such record exists. Parametric / conditional records
+(e.g. residues that depend on parameters) are available via `entries`.
+
+<MemberCard>
+
+##### FunctionProperties.operator
+
+```ts
+readonly operator: string;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionProperties.entries
+
+```ts
+readonly entries: readonly FunctionPropertyRecord[];
+```
+
+All analytic-property records for this operator.
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionProperties.poles
+
+```ts
+readonly poles: Expression | undefined;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionProperties.zeros
+
+```ts
+readonly zeros: Expression | undefined;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionProperties.branchPoints
+
+```ts
+readonly branchPoints: Expression | undefined;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionProperties.branchCuts
+
+```ts
+readonly branchCuts: Expression | undefined;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionProperties.essentialSingularities
+
+```ts
+readonly essentialSingularities: Expression | undefined;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionProperties.holomorphicDomain
+
+```ts
+readonly holomorphicDomain: Expression | undefined;
+```
+
+The domain on which the function is holomorphic.
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionProperties.isMeromorphic
+
+```ts
+readonly isMeromorphic: boolean | undefined;
+```
+
+Whether the function is meromorphic, when the corpus records it.
+
+</MemberCard>
+
 <MemberCard>
 
 ### SymbolTable
@@ -7974,6 +8273,16 @@ readonly Half: Expression;
 
 ```ts
 readonly NegativeOne: Expression;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.Two
+
+```ts
+readonly Two: Expression;
 ```
 
 </MemberCard>
@@ -9780,6 +10089,73 @@ call for full detail.
 ####### limit?
 
 `number`
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.suggestOperatorName()
+
+```ts
+suggestOperatorName(name): string | undefined
+```
+
+Given a `name` that is **not** a known operator, return the closest known
+operator name — a "did you mean" suggestion — or `undefined` when nothing
+is close enough. Powers the Cortex `unknown-function` diagnostic.
+
+Matching is conservative and applied in priority order (first match wins):
+case-insensitive exact match, singular/plural, Damerau–Levenshtein
+distance (≤ 2 for names of length ≥ 6, ≤ 1 for length 5, never for
+shorter names), then a prefix match against exactly one operator. Ties
+prefer the candidate sharing the longest prefix with the query.
+
+```ts
+ce.suggestOperatorName('Quartile'); // → 'Quartiles'
+ce.suggestOperatorName('foo');      // → undefined
+```
+
+####### name
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.functionProperties()
+
+```ts
+functionProperties(name): FunctionProperties | undefined
+```
+
+Return the known analytic properties of an operator — poles, zeros, branch
+points/cuts, residues, holomorphic/meromorphic domains — drawn from the
+Fungrim-derived metadata store, or `undefined` if none are recorded.
+
+```ts
+ce.functionProperties('Gamma')?.poles?.toString(); // 'NonPositiveIntegers'
+```
+
+The set-valued accessors (`poles`, `zeros`, ...) return a boxed set for the
+unconditional record of that kind; parametric / conditional records (e.g.
+residues that depend on parameters) are available via `entries`.
+
+####### name
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.toJSON()
+
+```ts
+toJSON(): string
+```
+
+Debug representation, e.g. for `JSON.stringify()`.
 
 </MemberCard>
 
@@ -11618,7 +11994,8 @@ It is possible that the result of `expr.evaluate()` may be the same as
 The result is in canonical form.
 
 **Time and recursion limits**: if the evaluation runs inside an enclosing
-ComputeEngine.withTimeLimit span and exceeds its deadline, or
+[`ComputeEngine.withTimeLimit`](#withtimelimit)
+span and exceeds its deadline, or
 exceeds the recursion limit, a `CancellationError` is thrown (its `cause`
 is `'timeout'` or `'recursion-depth-exceeded'`). Catch it to distinguish
 an interrupted evaluation from a symbolic (inert) result.
