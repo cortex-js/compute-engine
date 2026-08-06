@@ -18,6 +18,114 @@ Related:
 - [`docs/EFFECTS-MODEL.md`](../EFFECTS-MODEL.md) — function effects
 - [`docs/plans/2026-08-01-type-variables-design.md`](2026-08-01-type-variables-design.md) — parametric polymorphism
 
+## Prioritized backlog (added 2026-08-05)
+
+Ordered by **implementation cost**, cheapest first — a complement to
+[Tentative sequencing](#tentative-sequencing) at the end of this note, which
+orders the same material by theme and dependency. Neither list is approval;
+this note remains exploratory.
+
+Every status claim below was re-verified against the implementation on
+2026-08-05, two days after the note was written. Several items had already
+landed, and one had landed only partially — see tier 0.
+
+### Tier 0 — already landed; do not schedule
+
+- **Transparent generic type aliases** (third-tier item 2).
+  `type alias Pair<T> = tuple<T, T>` parses clean.
+- **Generic function definitions** (third-tier item 3, v1).
+  `function g<T>(x: T) -> T { x }` parses clean.
+- **The documentation drift repair**, as recorded in
+  [the section on it](#the-public-definition-had-drifted-behind-the-implementation--repaired).
+- **The reserved-word relaxation — but only partially.** A binding name in
+  `let`, `const` or `function` now rejects just the five literal words
+  (`true`, `false`, `NaN`, `Infinity`, `oo`); the other 82 words in
+  `RESERVED_WORDS` are usable as identifiers. Three positions were missed —
+  see tier 1 item 1.
+
+### Tier 1 — easy wins
+
+1. **Finish the reserved-word relaxation.**
+   ([section](#too-many-hypothetical-keywords-are-reserved)) The policy and its
+   precedent (`LITERAL_WORDS`) already exist; three positions still reject all
+   82 words — a bare assignment target (`with = 5`), a mapsto parameter
+   (`set |-> set`), and a call's callee (`label(6)`). The inconsistency is
+   already user-visible: `label(6)` is an error today while `label(6) = 1` is
+   accepted. Localized parser change; acceptance is the same five-word
+   rejection set in every position.
+
+2. **`break` and `continue`.** ([section](#break-and-continue)) Pure surface
+   syntax over a protocol that already works: `Loop(Block(If(k > 2, Break),
+   …))` over `1..5` evaluates to `3` today, and Cortex's own `while` lowering
+   already emits `["Break"]`. Needs statement-position parsing, a "not inside a
+   loop" diagnostic, and round-trip coverage — no engine work.
+
+3. **Make `assign-in-argument` an error with a `==` fix-it.**
+   ([section](#assignment-can-look-like-an-equation)) The diagnostic fires
+   today (as a warning) and the fix-it machinery is in place, so this is a
+   severity flip plus a fix-it string. Scope it to *that* change: the broader
+   "restrict assignment to a statement-position binding target" half is a
+   separate, larger item — chained `a = b = 5` still parses clean.
+
+4. **An `is` type-test operator (`x is integer`).**
+   ([section](#1-flow-sensitive-narrowing-and-exhaustiveness)) The smallest new
+   surface form in the note: one infix operator over the existing dynamic type
+   test. Independently useful, and the stated prerequisite for flow-sensitive
+   narrowing.
+
+5. **`??` for `Coalesce`.** ([section](#absence-coalescing-)) One infix
+   operator over an operator that already exists and is already lazy —
+   `Coalesce` is declared `lazy: true` and short-circuits (`Coalesce(1, 1/0)`
+   → `1`, no division). Before starting, establish what "the `Coalesce`
+   lazy-tail fix" in the sequencing section refers to; the tail behavior looks
+   correct now, so that precondition may be stale.
+
+### Tier 2 — moderate, mostly self-contained
+
+6. **Known-operator tokenization.**
+   ([section](#operator-runs-are-tokenized-too-coarsely)) Still broken:
+   `3!^2` → `unexpected-symbol "!^"`, `0..-1` → `unexpected-symbol "..-"`.
+   One lexer change, but the rule is whole-run validation rather than
+   longest-known-prefix, and it needs a recovery-diagnostic design. Acceptance
+   cases are already enumerated in the section.
+
+7. **Enforce return contracts.**
+   ([section](#return-annotations-are-not-contracts)) Confirmed unenforced:
+   `function f() -> integer { "oops" }` returns `"oops"`. The result matrix is
+   fully specified, so the design work is done — the cost is breadth, since
+   direct calls, `Apply`, pipes, recursion and every compile target must agree,
+   and tests must prove an existing error's code and trace survive unchanged.
+
+8. **`otherwise` fallback, and `otherwise =>` as a `match` catch-all.**
+   ([section](#error-fallback-and-propagation-otherwise)) Two related surface
+   forms sharing one ruling on direct-error semantics; do them together.
+
+9. **`if let`.** ([section](#refutable-binding-if-let)) Blocked on
+   first-tier item 7 — resolving full type expressions in typed patterns —
+   which is independently useful and should be scheduled first.
+
+### Tier 3 — needs a design ruling or a prerequisite landing first
+
+10. **Comprehensions** — one syntax, once eager/lazy, filter lowering, and
+    collection-kind questions are settled ([section](#comprehensions)).
+11. **Flow-sensitive narrowing and exhaustiveness** — needs statement
+    environments and joins in the checker, plus the `is` operator
+    ([section](#1-flow-sensitive-narrowing-and-exhaustiveness)).
+12. **The static-diagnostic / error-value boundary rule** — a checker
+    semantics question, not a syntax one
+    ([section](#static-diagnostics-and-errors-as-values-need-a-boundary-rule)).
+13. **Pipe first-argument shorthand or UFCS** — five options, none ruled
+    ([section](#ufcs-and-the-pipe-operator)).
+14. **Immutable update expressions** and a possible `with` form
+    ([section](#immutable-update-expressions)).
+15. **The remaining type-system gaps** — dimension and shape variables,
+    physical-dimension types, record optionality and exactness, limited type
+    projections, typed fallibility ([section](#remaining-type-system-gaps)).
+16. **Large domain features** — symbolic rewrite blocks, unit literals,
+    modules, deterministic parallelism, coroutines. Each is its own design
+    note, and the note already recommends deferring most of them until demand
+    is demonstrated.
+
 ## Purpose
 
 Review Cortex as it exists now and record possible extensions that would
