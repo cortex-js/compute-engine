@@ -288,6 +288,29 @@ describe('Degrees is a faithful conversion (REVIEW.md B20)', () => {
     expect(literal).toBeCloseTo(faithful, 10);
     expect(symbolic).toBeCloseTo(literal, 10);
   });
+
+  // Regression (nightly exactness grid): the canonical handler fell back to
+  // `ce.number(arg.re)` for a non-rational argument, and `.re` is a machine
+  // float — so an exact radical was numericized (`Degrees(√2)` → 0.0246826…)
+  // instead of staying `√2·π/180`. Rationals took an earlier branch, and `Pi`
+  // / `Ln(2)` are not number literals, so only an exact radical hit it.
+  it('an exact radical argument stays exact', () => {
+    const ce = new ComputeEngine();
+    const r = ce.expr(['Degrees', ['Sqrt', 2]]).evaluate();
+    expect((r as unknown as { isExact?: boolean }).isExact).not.toBe(false);
+    expect(r.N().re).toBeCloseTo((Math.SQRT2 * Math.PI) / 180, 12);
+    // DMS delegates a lone exact degrees argument to Degrees unchanged.
+    const d = ce.expr(['DMS', ['Sqrt', 2]]).evaluate();
+    expect((d as unknown as { isExact?: boolean }).isExact).not.toBe(false);
+    expect(d.N().re).toBeCloseTo((Math.SQRT2 * Math.PI) / 180, 12);
+  });
+
+  it('a float argument still numericizes', () => {
+    const ce = new ComputeEngine();
+    const r = ce.expr(['Degrees', 0.5]).evaluate();
+    expect((r as unknown as { isExact?: boolean }).isExact).toBe(false);
+    expect(r.re).toBeCloseTo((0.5 * Math.PI) / 180, 12);
+  });
 });
 
 // R28b: inverse trig/hyperbolic functions evaluate to their complex principal

@@ -187,6 +187,12 @@ const UNARY: string[] = [
   'Fibonacci', 'Subfactorial', 'BellNumber', 'CatalanNumber', 'LucasL',
   'BernoulliB', 'PrimePi', 'Totient', 'MoebiusMu',
   'Haversine', 'InverseHaversine',
+  // Added 2026-08-05 after an audit found the grid covered only 104 of the
+  // engine's numeric operators — `Degrees(√2)` was numericizing undetected.
+  'AiryAiPrime', 'AiryBiPrime', 'CoshIntegral', 'SinhIntegral', 'DedekindEta',
+  'Degrees', 'IntegerSqrt', 'CarmichaelLambda', 'NPartition', 'NthPrime',
+  'PrimeNu', 'PrimeOmega', 'PrimitiveRoot', 'Radical',
+  'Sigma0', 'Sigma1', 'SigmaMinus1',
 ];
 
 type Raw = [unknown, unknown, 'exact' | 'inexact' | 'special', boolean];
@@ -217,6 +223,14 @@ const BINARY: string[] = [
   'Binomial', 'Choose', 'Hypot', 'Arctan2', 'Max', 'Min',
   'PolyGamma', 'JacobiSymbol', 'LegendreSymbol', 'Stirling', 'Eulerian',
   'Multinomial', 'DivisorSigma',
+  // Added 2026-08-05 with the unary batch above (same coverage audit).
+  // Deliberately NOT added: `Mandelbrot` and `Julia` are smooth escape-time
+  // samplers — a float IS their answer, so the exact-arg contract does not
+  // apply; `Rational`/`Rationalize` invert it (they exist to turn a float into
+  // an exact value).
+  'AGM', 'EisensteinE', 'EllipticF', 'GammaRegularized', 'Pochhammer',
+  'PolyLog', 'DigitSum', 'ModularInverse', 'MultiplicativeOrder', 'NextPrime',
+  'StirlingS1',
 ];
 
 describeNightly('NIGHTLY exactness grid — unary operators', () => {

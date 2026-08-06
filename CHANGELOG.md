@@ -2,6 +2,24 @@
 
 ### Resolved Issues
 
+- **`Pochhammer()`, `Degrees()` and `DMS()` no longer numericize an exact
+  irrational argument.** Found by auditing for the `Beta()` bug below, which
+  turned out to be one instance of a small class. `(\sqrt2)_2` returned
+  `3.41421356…` instead of the exact `2 + \sqrt2`, and `\mathrm{Degrees}(\sqrt2)`
+  returned `0.0246826…` instead of `\sqrt2\pi/180`. Two different causes, one
+  symptom: `Pochhammer` built its rising-factorial terms with the `.add()`
+  method, which folds two exact literals to a machine float (the same slip as
+  `Beta`, and its own symbolic branch alongside already did it correctly);
+  `Degrees` fell back to `ce.number(arg.re)` for a non-rational argument, and
+  `.re` is a machine float. Exact rationals, integers, floats, poles and
+  symbolic arguments are unchanged in all three.
+
+  The audit also found the nightly exactness grid was covering only 104 of the
+  engine's numeric operators — which is why these went unnoticed. It now covers
+  28 more. `Mandelbrot`/`Julia` are deliberately excluded (a float is the answer
+  for an escape-time sampler), as are `Rational`/`Rationalize` (they exist to
+  turn a float into an exact value).
+
 - **`Beta()` no longer numericizes an exact irrational argument.**
   `\mathrm{B}(\sqrt2, 2)` evaluated to `0.2928932188…` instead of the exact
   `1/(\sqrt2(1+\sqrt2))`, breaking the contract that `evaluate()` returns the

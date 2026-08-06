@@ -248,9 +248,17 @@ function evaluatePochhammer(
   // Numeric first argument: fold the product to a number (evaluate() respects
   // the exact/float split — floats are otherwise excluded from canonical
   // folding, so the product must be evaluated rather than merely constructed).
+  //
+  // Build the terms with `ce.function('Add', …)`, matching the symbolic branch
+  // below: the `.add()` METHOD folds two exact literals to a machine float, so
+  // an exact irrational `a` lost its exactness on the first term
+  // (`(√2)_2` → 3.41421356… instead of `2 + √2`). The trailing `.evaluate()`
+  // still folds a float argument to a float, so both halves of the exact/N
+  // contract hold.
   if (isNumber(aExpr) && aExpr.im === 0) {
     const factors: Expression[] = [];
-    for (let i = 0; i < kn; i++) factors.push(aExpr.add(ce.number(i)));
+    for (let i = 0; i < kn; i++)
+      factors.push(ce.function('Add', [aExpr, ce.number(i)]));
     return ce.function('Multiply', factors).evaluate();
   }
 

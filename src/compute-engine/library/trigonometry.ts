@@ -141,6 +141,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           if (fRadians[0] === 1) return ce.Pi.div(fRadians[1]);
           return ce.number(fRadians).mul(ce.Pi);
         }
+        // An exact non-rational literal (a radical such as `√2`) must keep its
+        // exactness: `.re` is a machine float, so `ce.number(fArg)` would
+        // numericize a perfectly representable exact value — `Degrees(√2)`
+        // returned 0.0246826… instead of `√2·π/180`. Only `√2`-style literals
+        // reach here; `Pi` and `Ln(2)` are not number literals, so they skip
+        // this path and are already handled exactly by `evaluate`.
+        if (arg.isExact) return arg.div(180).mul(ce.Pi);
         return ce.number(fArg).div(180).mul(ce.Pi);
       },
       evaluate: (ops, options) => {
@@ -163,6 +170,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
         if (Number.isNaN(deg)) return ce._fn('DMS', ops);
 
+        // A lone exact degrees argument needs no decimal recovery: hand it to
+        // `Degrees` intact. The `.re` reads above are a decimal-notation
+        // convenience and would otherwise float it (`DMS(√2)` → 0.0246826…).
+        // The mixed case (`DMS(√2, 30)`) still goes through the decimal path —
+        // combining an exact radical with minutes/seconds needs symbolic
+        // arithmetic this constructor does not do.
+        if (ops.length === 1 && isNumber(ops[0]) && ops[0].isExact)
+          return ce.function('Degrees', [ops[0]]);
+
         // Decimal components make totalSec non-integer: recover an exact
         // scaled rational, or fall back to float degrees (a non-integer
         // rational pair would box to NaN).
@@ -179,6 +195,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const sec = ops[2]?.re ?? 0;
 
         if (Number.isNaN(deg)) return ce._fn('DMS', ops);
+
+        // Match the canonical handler's exact-degrees passthrough.
+        if (ops.length === 1 && isNumber(ops[0]) && ops[0].isExact)
+          return ce.function('Degrees', [ops[0]]).evaluate(options);
 
         // Match the canonical handler: keep exact arguments exact.
         const totalSec = 3600 * deg + 60 * min + sec;

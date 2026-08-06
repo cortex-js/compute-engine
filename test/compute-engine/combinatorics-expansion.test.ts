@@ -64,6 +64,23 @@ describe('Pochhammer symbolic expansion (Wester B13)', () => {
     expect(ce.expr(['Pochhammer', 'a', 1]).evaluate().json).toEqual('a');
   });
 
+  // Regression (nightly exactness grid): the numeric-argument branch built its
+  // terms with the `.add()` METHOD, which folds two exact literals to a machine
+  // float — so `(√2)_2` returned 3.41421356… instead of the exact `2 + √2`.
+  // The symbolic branch alongside it already used `ce.function('Add', …)`.
+  it('an exact irrational first argument stays exact', () => {
+    const r = ce.expr(['Pochhammer', ['Sqrt', 2], 2]).evaluate();
+    expect((r as unknown as { isExact?: boolean }).isExact).not.toBe(false);
+    // (√2)_2 = √2(√2+1) = 2 + √2
+    expect(r.N().re).toBeCloseTo(2 + Math.SQRT2, 12);
+    const r3 = ce.expr(['Pochhammer', ['Sqrt', 2], 3]).evaluate();
+    expect((r3 as unknown as { isExact?: boolean }).isExact).not.toBe(false);
+    expect(r3.N().re).toBeCloseTo(
+      Math.SQRT2 * (Math.SQRT2 + 1) * (Math.SQRT2 + 2),
+      12
+    );
+  });
+
   it('stays inert for a symbolic second argument', () => {
     expect(ce.expr(['Pochhammer', 'a', 'k']).evaluate().json).toEqual([
       'Pochhammer',
