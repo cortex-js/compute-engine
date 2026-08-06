@@ -14,9 +14,9 @@ can drift from the implementation.
 
 **What carries over.** The shape of a program: sequential statements,
 lexically scoped functions, closures, first-class lambdas, `Map`/`Filter`, a
-`for x in collection` loop, arbitrary-precision integers, `%` with Python's
-sign convention, negative indices, chained comparisons, and `**` for
-exponentiation.
+`for x in collection` loop, the conditional expression `a if c else b`,
+arbitrary-precision integers, `%` with Python's sign convention, negative
+indices, chained comparisons, and `**` for exponentiation.
 
 **What to unlearn.** Three things, in order of how much trouble they cause:
 
@@ -49,7 +49,7 @@ symbolic, with a did-you-mean warning when a close library name exists
 (`len` suggests `Length`).
 
 ```cortex
-fact(n) = if n <= 1 { 1 } else { n * fact(n - 1) }
+fact(n) = 1 if n <= 1 else n * fact(n - 1)
 let double = x |-> 2x
 (fact(5), double(21))
 // ➔ (120, 42)
@@ -127,7 +127,7 @@ Sum(m)
 | Python | Cortex |
 |:--|:--|
 | `if c: … elif d: … else: …` | `if c { … } else if d { … } else { … }` |
-| `a if c else b` | `if c { a } else { b }` — `if` is an **expression** |
+| `a if c else b` | `a if c else b` — same syntax; chains nest right, so there is no `elif` spelling to learn |
 | `and`, `or`, `not` | `&&`, `\|\|`, `!` (the words are reserved but unimplemented) |
 | `for x in xs:` | `for x in xs { … }` |
 | `for i in range(n):` | `for i in 1..n { … }` |

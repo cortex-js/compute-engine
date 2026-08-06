@@ -19,6 +19,11 @@ A few idioms these programs rely on:
 - Loops (`for`, `while`) are evaluated **for effect** — accumulate into a
   variable (a number, or a list built up with `Join`/`Append`), or use
   `Map`/`Filter`/`Reduce` for value-producing iteration.
+- `1..n` is the **inclusive** range from 1 to n, and `x |> f` pipes a value
+  into a function — when the function takes several arguments, `_` marks the
+  piped value's slot (`xs |> Map(_, f)`).
+- `a if c else b` is the conditional expression — the same `If` as
+  `if c { a } else { b }`, without the braces.
 - Collection **literals** evaluate their elements; lazy **operators**
   (`Range`, `Map`, `Filter`) are generators that enumerate on demand (see
   [Evaluation](/cortex/evaluation/)).
@@ -27,12 +32,12 @@ A few idioms these programs rely on:
 
 ## Iteration and Accumulation
 
-**Sum of the multiples of 3 or 5 below 100.** A `for` loop over a `Range`,
+**Sum of the multiples of 3 or 5 below 100.** A `for` loop over a range,
 accumulating into a variable:
 
 ```cortex
 let total = 0
-for k in Range(1, 99) {
+for k in 1..99 {
   if k % 3 == 0 || k % 5 == 0 { total = total + k }
 }
 total
@@ -43,7 +48,7 @@ total
 is a single `Map` — no printing, no mutation:
 
 ```cortex
-Map(Range(1, 15), k |->
+Map(1..15, k |->
   if k % 15 == 0 { "FizzBuzz" }
   else if k % 3 == 0 { "Fizz" }
   else if k % 5 == 0 { "Buzz" }
@@ -52,13 +57,13 @@ Map(Range(1, 15), k |->
 ```
 
 **Collatz stopping time.** A `while` loop whose body chooses the next value
-with an `if` expression:
+with a conditional expression:
 
 ```cortex
 let n = 27
 let steps = 0
 while n != 1 {
-  n = if n % 2 == 0 { n / 2 } else { 3n + 1 }
+  n = n / 2 if n % 2 == 0 else 3n + 1
   steps = steps + 1
 }
 steps
@@ -85,7 +90,7 @@ appended literal snapshots the loop variable's current value:
 
 ```cortex
 let xs = []
-for k in Range(1, 3) { xs = Join(xs, [k]) }
+for k in 1..3 { xs = Join(xs, [k]) }
 xs
 // ➔ [1, 2, 3]
 ```
@@ -95,7 +100,7 @@ xs
 ```cortex
 let a = 0
 let b = 1
-for k in Range(1, 20) {
+for k in 1..20 {
   let t = a + b
   a = b
   b = t
@@ -104,11 +109,11 @@ a
 // ➔ 6765
 ```
 
-**A trial-division primality test.** A function with a block body, used to
-count the primes below 100:
+**A trial-division primality test.** A function with a typed parameter and a
+block body, used to count the primes below 100:
 
 ```cortex
-isPrime(n) = if n < 2 { False } else {
+isPrime(n: integer) = if n < 2 { False } else {
   let d = 2
   let prime = True
   while d * d <= n {
@@ -117,7 +122,7 @@ isPrime(n) = if n < 2 { False } else {
   prime
 }
 let count = 0
-for k in Range(2, 99) { if isPrime(k) { count = count + 1 } }
+for k in 2..99 { if isPrime(k) { count = count + 1 } }
 count
 // ➔ 25
 ```
@@ -180,26 +185,41 @@ pair carried in a two-element list literal, stays exact all the way to F(200)
 — far past the 2⁵³ limit of floating point:
 
 ```cortex
-Fold((p, _) |-> [p[2], p[1] + p[2]], [0, 1], Range(1, 200))[1]
+Fold((p, _) |-> [p[2], p[1] + p[2]], [0, 1], 1..200)[1]
 // ➔ 280571172992510140037611932413038677189525
 ```
 
 ## Recursion
 
 A recursive function refers to itself by name — a one-step definition just
-works, because the name is declared before the body is processed:
+works, because the name is declared before the body is processed. Definition
+statements **accumulate**: repeating a name with a different parameter list
+adds a *clause*, and a call dispatches to the most specific clause that
+matches — so a base case is a literal-parameter clause rather than an `if`
+(see [Multiple clauses](/cortex/control-flow/#multiple-clauses-literal-parameters)):
 
 ```cortex
-fact(n) = if n <= 1 { 1 } else { n * fact(n - 1) }
+fact(0) = 1
+fact(n: integer) = n * fact(n - 1)
 fact(10)
 // ➔ 3628800
 ```
 
-The two-step form — declare with `let`, then assign a `|->` lambda — is
-equivalent (`let fact` followed by
-`fact = n |-> if n <= 1 { 1 } else { n * fact(n - 1) }`). Note that
-*mutually* recursive functions still require declaring all the names with
-`let` before defining any of them.
+**Multi-clause Fibonacci**, with two base clauses:
+
+```cortex
+fib(0) = 0
+fib(1) = 1
+fib(n: integer) = fib(n - 1) + fib(n - 2)
+Map(1..10, fib)
+// ➔ [1, 1, 2, 3, 5, 8, 13, 21, 34, 55]
+```
+
+A single-clause spelling with a conditional is equivalent
+(`fact(n) = 1 if n <= 1 else n * fact(n - 1)`), as is the two-step form —
+declare with `let`, then assign a `|->` lambda. Note that *mutually*
+recursive functions still require declaring all the names with `let` before
+defining any of them.
 
 ## Higher-Order Functions
 
@@ -218,14 +238,14 @@ dg(2)
 // ➔ 12000001/1000000
 ```
 
-Wrap the call in `N(…)` for a floating-point value — numericization reaches
+Pipe the call into `N` for a floating-point value — numericization reaches
 through the user-function/closure call:
 
 ```cortex
 deriv(f, h) = x |-> (f(x + h) - f(x - h)) / (2h)
 g(x) = x^3
 let dg = deriv(g, 1/1000)
-N(dg(2))
+dg(2) |> N
 // ➔ 12.000001
 ```
 
@@ -284,7 +304,7 @@ rational number); `N(…)` converts the final result to a float:
 
 ```cortex
 let x = 1
-for k in Range(1, 6) { x = (x + 2/x) / 2 }
+for k in 1..6 { x = (x + 2/x) / 2 }
 N(x)
 // ➔ 1.4142135623730950488
 ```
@@ -296,7 +316,7 @@ g(x) = x^2
 let n = 100
 let h = 1/n
 let area = (g(0) + g(1)) / 2
-for k in Range(1, n - 1) { area = area + g(k * h) }
+for k in 1..n - 1 { area = area + g(k * h) }
 N(area * h)
 // ➔ 0.33335
 ```
@@ -306,7 +326,7 @@ N(area * h)
 ```cortex
 let inside = 0
 let total = 500
-for k in Range(1, total) {
+for k in 1..total {
   let px = Random()
   let py = Random()
   if px^2 + py^2 < 1 { inside = inside + 1 }
@@ -321,8 +341,8 @@ with a seeded random frame. The block replays exactly, while repeated draws
 nest, and the innermost one wins. Outside any frame, draws are live:
 
 ```cortex
-let a = WithRandomSeed(7, [Random(Range(1, 100)), Random(Range(1, 100))])
-let b = WithRandomSeed(7, [Random(Range(1, 100)), Random(Range(1, 100))])
+let a = WithRandomSeed(7, [Random(1..100), Random(1..100)])
+let b = WithRandomSeed(7, [Random(1..100), Random(1..100)])
 a == b
 // ➔ True
 ```
@@ -423,7 +443,7 @@ an exact rational — no floating-point drift:
 
 ```cortex
 let h = 0
-for k in Range(1, 20) { h = h + 1/k }
+for k in 1..20 { h = h + 1/k }
 h
 // ➔ 55835135/15519504
 ```
@@ -467,7 +487,7 @@ closed form of the golden ratio:
 
 ```cortex
 let x = 2
-for k in Range(1, 40) { x = 1 + 1/x }
+for k in 1..40 { x = 1 + 1/x }
 let phi = $\frac{1 + \sqrt{5}}{2}$
 N(Abs(x - phi))
 // ➔ ≈ 6.24e-18
@@ -499,17 +519,17 @@ count
 pentagon on the unit circle; their vector sum is exactly zero:
 
 ```cortex
-Sum(Exp(2*Pi*ImaginaryUnit*k/5), (k, 0, 4))
+Sum(Exp(2*Pi*i*k/5), (k, 0, 4))
 // ➔ 0
 ```
 
 (`N(…)` of the same sum returns zero to floating-point roundoff, ≈ 1e-16.)
 
-**An exact rational Fold.** Folding `1/k` over a `Range` keeps the accumulator
+**An exact rational Fold.** Folding `1/k` over a range keeps the accumulator
 an exact rational — the 10th harmonic number:
 
 ```cortex
-Fold((a, k) |-> a + 1/k, 0, Range(1, 10))
+Fold((a, k) |-> a + 1/k, 0, 1..10)
 // ➔ 7381/2520
 ```
 
@@ -548,13 +568,12 @@ let x = 2^11 - 1
 ```
 
 **A formatted table.** `\t` and `\n` escapes in a string literal are real
-control characters. Build a table of `n`, `n²`, `n³` — a plain header string
-plus one interpolated row per value, joined with `Fold`/`StringJoin`:
+control characters. Build a table of `n`, `n²`, `n³` — one interpolated row
+per value, folded onto the header with `StringJoin` in a pipeline:
 
 ```cortex
 let header = "n\tn^2\tn^3\n"
-let lines = Map(Range(1, 5), n |-> "\(n)\t\(n^2)\t\(n^3)\n")
-StringJoin(header, Fold((acc, line) |-> StringJoin(acc, line), "", lines))
+1..5 |> Map(_, n |-> "\(n)\t\(n^2)\t\(n^3)\n") |> Fold(StringJoin, header, _)
 ```
 
 produces (tabs aligned, newline-separated rows):
@@ -572,7 +591,7 @@ n	n^2	n^3
 characters (grapheme clusters); `Tally` counts them:
 
 ```cortex
-let freq = Tally(Characters("mississippi"))
+let freq = "mississippi" |> Characters |> Tally
 let d = DictionaryFrom(Zip(freq[1], freq[2]))
 (d["m"], d["i"], d["s"], d["p"])
 // ➔ (1, 4, 4, 2)
@@ -587,16 +606,12 @@ let words = StringSplit("the quick brown fox the lazy dog the")
 // ➔ (8, [3, 1, 1, 1, 1, 1])
 ```
 
-**A Caesar cipher.** `UnicodeScalars` turns a string into its code points;
-shifting each and rebuilding with `StringFrom(…, "unicode-scalars")` is the
-inverse operation, so encoding then decoding round-trips:
+**A Caesar cipher.** A three-stage pipeline: `UnicodeScalars` turns a string
+into its code points, `Map` shifts each, and `StringFrom(…, "unicode-scalars")`
+rebuilds the string. Shifting back decodes, so the cipher round-trips:
 
 ```cortex
-function shift(s, k) {
-  let out = []
-  for c in UnicodeScalars(s) { out = Join(out, [c + k]) }
-  StringFrom(out, "unicode-scalars")
-}
+shift(s, k) = s |> UnicodeScalars |> Map(_, c |-> c + k) |> StringFrom(_, "unicode-scalars")
 (shift("hello", 3), shift(shift("hello", 3), -3))
 // ➔ ("khoor", "hello")
 ```
@@ -634,11 +649,11 @@ let xs = [4, 8, 15, 16, 23, 42]
 // ➔ (18, 31/2, 42, 182)
 ```
 
-**Filter and reduce** with anonymous functions:
+**Filter and reduce** with anonymous functions, chained into a pipeline —
+`_` is the piped value:
 
 ```cortex
-let evens = Filter(Range(1, 10), n |-> n % 2 == 0)
-Reduce(evens, (acc, n) |-> acc + n)
+1..10 |> Filter(_, n |-> n % 2 == 0) |> Reduce(_, (acc, n) |-> acc + n)
 // ➔ 30
 ```
 
@@ -657,6 +672,14 @@ let m = [[1, 2], [3, 4]]
 // ➔ 18
 ```
 
+When a stage takes several arguments, `_` marks the slot the piped value
+fills. The primes below 100, counted:
+
+```cortex
+1..100 |> Filter(_, IsPrime) |> Length
+// ➔ 25
+```
+
 **Spread arguments.** In a call argument list, `...t` splices the elements of
 the tuple `t` in as positional arguments; several spreads splice in order:
 
@@ -672,7 +695,7 @@ dot(...p, ...q)
 explicit initial value:
 
 ```cortex
-Fold((acc, n) |-> acc + n^2, 0, Range(1, 5))
+Fold((acc, n) |-> acc + n^2, 0, 1..5)
 // ➔ 55
 ```
 
@@ -737,9 +760,9 @@ let value = {"I" -> 1, "V" -> 5, "X" -> 10, "L" -> 50, "C" -> 100, "D" -> 500, "
 let s = ["M","C","M","X","C","I","V"]
 let n = Length(s)
 let total = 0
-for i in Range(1, n) {
+for i in 1..n {
   let cur = value[s[i]]
-  if i < n && cur < value[s[i + 1]] { total = total - cur } else { total = total + cur }
+  total = total - cur if i < n && cur < value[s[i + 1]] else total + cur
 }
 total
 // ➔ 1994

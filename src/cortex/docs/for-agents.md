@@ -52,7 +52,7 @@ function g(n) {           // function definition, block style
   let t = n + 1           // blocks are lexically scoped
   t * 2                   // a block's value is its last expression
 }
-let parity = if x % 2 == 0 { "even" } else { "odd" }  // if is an EXPRESSION
+let parity = "even" if x % 2 == 0 else "odd"  // conditional expression; if is also an expression: if c { a } else { b }
 g(x) + f(2)
 // ➔ 22
 ```
@@ -87,7 +87,8 @@ g(x) + f(2)
   (available in the CLI and any host that injects a LaTeX parser).
 
 **Operator precedence**, loosest → tightest: `:=` · `|->` · `??` (coalesce) ·
-`|>` (pipe) · `->` (key-value) · `||` · `&&` · comparisons
+`|>` (pipe) · `->` (key-value) · `a if c else b` (conditional) · `||` · `&&` ·
+comparisons
 `== != < <= > >= === in !in is` (chainable: `1 < 2 < 3`) · `..` (range) ·
 `+ -` · `* / %` · unary `- !` · `^`/`**` (right-associative) · postfix `!`.
 Calls `f(x)` and indexing `xs[i]` bind tightest of all. A bare `=` has no
@@ -107,7 +108,7 @@ actually happens → write instead:**
 | `x = 5` at top level | Assigns — `=` assigns only as a whole statement with a name on the left | `x == 5` for the equation |
 | `# comment` | Diagnostic (`#` introduces pragmas) | `// comment` or `/* … */` |
 | `def f(x):` / `(x) => …` / `lambda x: …` | Parse diagnostics | `f(x) = expr`, `x \|-> expr`, or `function f(x) { … }` |
-| `cond ? a : b` | Parse diagnostic | `if cond { a } else { b }` — `if` is an expression |
+| `cond ? a : b` | Parse diagnostic | `a if cond else b`, or `if cond { a } else { b }` — both are expressions |
 | `elif` | Parse diagnostic | `else if` |
 | `return` | Reserved word, **not implemented** | A block's value is its last expression |
 | `break` / `continue` | Work as expected inside a `while`/`for` body; the loop context resets at every function and lambda boundary | *(nothing to change)* |
@@ -144,7 +145,7 @@ Functions, recursion (self-reference works in a one-step definition, with
 any number of recursive calls — `fib(n-1) + fib(n-2)` is fine), and closures:
 
 ```cortex
-fact(n) = if n <= 1 { 1 } else { n * fact(n - 1) }
+fact(n) = 1 if n <= 1 else n * fact(n - 1)
 makeAdder(k) = x |-> x + k     // closures capture lexically
 let add10 = makeAdder(10)
 add10(fact(5))
@@ -238,7 +239,7 @@ Verified operator names, so you don't have to guess (search for more with
 
 - **Numbers**: `Abs`, `Floor`, `Ceil` (not `Ceiling`), `Round`, `Sqrt`,
   `Max`, `Min` (each takes a list or varargs), `Mod`, `GCD`, `LCM`,
-  `IsPrime`, `Random(Range(a, b))`.
+  `IsPrime`, `Random(a..b)`.
 - **Lists**: `Length`, `First`, `Last`, `Rest`, `Take`, `Drop`, `Reverse`,
   `Sort` (optional comparator — see below), `IndexOf`, `Join`, `Append`,
   `Sum`, `Mean`, `StandardDeviation` (sample, n−1), `Map`, `Filter`,

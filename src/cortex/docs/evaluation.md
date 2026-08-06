@@ -53,7 +53,7 @@ one to a variable stores a snapshot of the element *values*:
 
 ```cortex
 let xs = []
-for k in Range(1, 3) { xs = Join(xs, [k]) }
+for k in 1..3 { xs = Join(xs, [k]) }
 xs
 // ➔ [1, 2, 3]
 ```

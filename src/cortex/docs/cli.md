@@ -226,7 +226,7 @@ Unclosed blocks, collections, strings, and expressions ending with an operator
 continue at a secondary prompt:
 
 ```text
-cortex> if (x > 0) {
+cortex> if x > 0 {
 ...   x + 1
 ... }
 6

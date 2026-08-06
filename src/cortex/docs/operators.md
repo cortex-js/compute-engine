@@ -81,6 +81,12 @@ Postfix calls and indexing (`f(x)`, `xs[i]`) bind tighter than every entry in
 this table — they are handled directly by the parser rather than through the
 operator table, since they are not spelled with an operator symbol.
 
+The conditional expression `a if c else b` is not an operator row either, but
+it has a place in this order: between `KeyValuePair` (30) and `Or` (40), so it
+binds looser than every operator that computes and tighter than the forms that
+bind or pair (`=`, `|->`, `|>`, `->`). See
+[Control Flow](/cortex/control-flow/#the-conditional-expression-a-if-c-else-b).
+
 ## The whitespace rule
 
 An infix operator must have whitespace on **both** sides or on **neither**

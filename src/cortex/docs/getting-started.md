@@ -53,7 +53,7 @@ Save this program as `squares.cx`:
 
 ```cortex
 square(x) = x^2
-Map(Range(1, 5), square)
+Map(1..5, square)
 ```
 
 Run it:
@@ -99,7 +99,7 @@ import {
 const ce = new ComputeEngine();
 const { value, diagnostics } = executeCortex(
   ce,
-  "factorial(n) = if n <= 1 { 1 } else { n * factorial(n - 1) }\nfactorial(10)"
+  "factorial(n) = 1 if n <= 1 else n * factorial(n - 1)\nfactorial(10)"
 );
 
 if (diagnostics.length > 0) console.error(diagnostics);

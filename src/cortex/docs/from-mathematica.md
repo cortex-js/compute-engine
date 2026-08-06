@@ -174,7 +174,7 @@ let g = x |-> x^2 + 1
 
 | Wolfram | Cortex |
 |:--|:--|
-| `If[c, a, b]` | `if c { a } else { b }` — an expression |
+| `If[c, a, b]` | `a if c else b`, or `if c { a } else { b }` — an expression |
 | `Which[c1, a, c2, b, True, z]` | `if c1 { a } else if c2 { b } else { z }` |
 | `Switch[x, 0, "zero", _, "other"]` | `match x { 0 => "zero"; _ => "other" }` |
 | `Cases[xs, patt]` | `Filter` with a predicate, or `Map` over a `match` |
@@ -269,7 +269,7 @@ Surface forms that look like Wolfram but behave differently.
 | `Total`, `Select`, `Cases`, `MemberQ`, `Accumulate`, `Nest` | Unknown names: the call stays **symbolic and inert**, with a did-you-mean warning naming the Cortex operator | `Sum`, `Filter`, `Filter`, `Contains(xs, v)`, `Scan`, `Iterate` |
 | `Ceiling`, `Quotient`, `IntegerPart` | Inert (with a did-you-mean warning) | `Ceil`, `Floor(a/b)`, `Floor` |
 | `StringLength`, `ToUpperCase` | Inert — the string library is small | `Length(Characters(s))`; decompose and rebuild |
-| `RandomReal[]`, `RandomInteger[n]` | Inert (with a did-you-mean warning) | `Random()`, `Random(Range(1, n))` |
+| `RandomReal[]`, `RandomInteger[n]` | Inert (with a did-you-mean warning) | `Random()`, `Random(1..n)` |
 | `SameQ[1, 1.]` | `1 === 1.0` is `True` — the lexer folds `1.0` to `1` | *(nothing — but don't read `===` as type-aware)* |
 | `3!^2` | Diagnostic — the lexer reads `!^` as one token | `3! ^ 2` |
 | `a +b` | Diagnostic — an infix operator needs spaces on both sides or neither | `a + b` or `a+b` |
