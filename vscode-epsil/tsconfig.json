@@ -1,0 +1,23 @@
+{
+  // Type-check only: esbuild (build.mjs) does the emit.
+  //
+  // `src/server.ts` imports the engine from `../../src`, so tsc pulls the
+  // repo sources into this program. The settings below therefore have to
+  // match the ones the repo's own tsconfig uses for those files (module
+  // resolution, lib, `resolveJsonModule`) — without `include`ing the repo,
+  // which would type-check the whole engine on every extension build.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom", "dom.iterable", "scripthost"],
+    "types": ["node", "vscode"],
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"]
+}

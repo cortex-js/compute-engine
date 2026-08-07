@@ -1,0 +1,30 @@
+// Epsil demo — open this file in the Extension Development Host (F5)
+// to see highlighting, live diagnostics, and the Run button.
+
+/* Block comments
+   /* can nest */
+   like this. */
+
+// Symbolic by default: exact results stay exact
+let radius = 1/2
+let area = Pi * radius^2
+
+// Numeric approximation is explicit
+N(area)
+
+// Strings, with interpolation
+let name = "world"
+"hello, \(name)"
+
+// LaTeX islands parse as math
+let q = $\frac{\sqrt{2}}{2}$
+
+// Collections and pipelines
+let squares = Map([1, 2, 3, 4], x |-> x^2)
+Sum(...squares)
+
+// Implicit multiplication: 3x is a number then a symbol
+Simplify(3x + 2x)
+
+// Uncomment to see a live static type error:
+// y := "a" + 1

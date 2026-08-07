@@ -1,0 +1,474 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "information_for_contributors": [
+    "This grammar is a port of `src/epsil/highlight-js-mode.js`, which is the",
+    "validated description of the Epsil token classes. Both are derived from",
+    "`src/epsil/lexer.ts`, `src/epsil/characters.ts` and",
+    "`src/epsil/reserved-words.ts` — change those first, then this file.",
+    "",
+    "Two character classes are ported verbatim and must not be hand-edited:",
+    "the identifier class is the exact complement of",
+    "`WHITE_SPACE u PATTERN_SYNTAX u IDENTIFIER_CONTINUE_PROHIBITED`, and the",
+    "`keyword.operator.unicode` class is the whole non-ASCII part of",
+    "`PATTERN_SYNTAX`. Both were checked against `isBreak`,",
+    "`isIdentifierContinueProhibited` and `isSyntax` on every code point in",
+    "U+0000..U+FFFF.",
+    "",
+    "Number literals deliberately have NO trailing word boundary: `scanNumber`",
+    "stops as soon as the literal ends and lets `scanSymbol` take over, so",
+    "implicit multiplication (`3x`, `2h`) is a NUMBER followed by a SYMBOL.",
+    "",
+    "Only the words the grammar actually claims are highlighted. The merely",
+    "RESERVED words (`set`, `with`, `label`, `where`, ...) are ordinary",
+    "identifiers and are intentionally left as `variable.other.epsil`.",
+    "",
+    "Known conservative divergences from the lexer, all line-oriented because",
+    "TextMate tokenizes one line at a time:",
+    "  - a `$...$` LaTeX island may span lines in the lexer; here it ends at",
+    "    end of line so one stray `$` cannot repaint the rest of the file.",
+    "  - `\"\"\"...\"\"\"` is highlighted even when the opening delimiter is not",
+    "    followed by a linebreak (which the lexer rejects).",
+    "  - `#!` is only recognized at offset 0 by the lexer; TextMate has no",
+    "    whole-document anchor, so it is matched at the start of any line."
+  ],
+  "name": "Epsil",
+  "scopeName": "source.epsil",
+  "fileTypes": [
+    "epsil"
+  ],
+  "patterns": [
+    {
+      "include": "#shebang"
+    },
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#latex-island"
+    },
+    {
+      "include": "#pragma"
+    },
+    {
+      "include": "#verbatim-symbol"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    },
+    {
+      "include": "#identifiers"
+    }
+  ],
+  "repository": {
+    "shebang": {
+      "name": "comment.line.shebang.epsil",
+      "match": "^#!.*$"
+    },
+    "comments": {
+      "patterns": [
+        {
+          "include": "#doc-line-comment"
+        },
+        {
+          "include": "#line-comment"
+        },
+        {
+          "include": "#doc-block-comment"
+        },
+        {
+          "include": "#block-comment"
+        }
+      ]
+    },
+    "doc-line-comment": {
+      "name": "comment.line.documentation.epsil",
+      "begin": "///",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.epsil"
+        }
+      },
+      "end": "(?=$)"
+    },
+    "line-comment": {
+      "name": "comment.line.double-slash.epsil",
+      "begin": "//",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.epsil"
+        }
+      },
+      "end": "(?=$)"
+    },
+    "doc-block-comment": {
+      "name": "comment.block.documentation.epsil",
+      "begin": "/\\*\\*(?!/)",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.begin.epsil"
+        }
+      },
+      "end": "\\*/",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.end.epsil"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#doc-block-comment"
+        },
+        {
+          "include": "#block-comment"
+        }
+      ]
+    },
+    "block-comment": {
+      "name": "comment.block.epsil",
+      "begin": "/\\*",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.begin.epsil"
+        }
+      },
+      "end": "\\*/",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.comment.end.epsil"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#block-comment"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "include": "#triple-quoted-string"
+        },
+        {
+          "include": "#raw-string"
+        },
+        {
+          "include": "#raw-string-unterminated"
+        },
+        {
+          "include": "#quoted-string"
+        }
+      ]
+    },
+    "triple-quoted-string": {
+      "name": "string.quoted.triple.epsil",
+      "begin": "\"\"\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.epsil"
+        }
+      },
+      "end": "\"\"\"",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.epsil"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#string-body-multiline"
+        }
+      ]
+    },
+    "raw-string": {
+      "name": "string.quoted.other.raw.epsil",
+      "match": "(#+)\"(?:(?!\"\\1)[^\\n])*\"\\1"
+    },
+    "raw-string-unterminated": {
+      "name": "string.quoted.other.raw.epsil",
+      "match": "#+\"[^\\n]*$"
+    },
+    "quoted-string": {
+      "name": "string.quoted.double.epsil",
+      "begin": "\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.epsil"
+        }
+      },
+      "end": "\"|(?=$)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.epsil"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#string-body-single"
+        }
+      ]
+    },
+    "string-body-multiline": {
+      "patterns": [
+        {
+          "include": "#interpolation"
+        },
+        {
+          "include": "#line-continuation"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#invalid-escape"
+        }
+      ]
+    },
+    "string-body-single": {
+      "patterns": [
+        {
+          "include": "#interpolation"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#invalid-escape"
+        }
+      ]
+    },
+    "escape": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.epsil",
+          "match": "\\\\u\\{[0-9a-fA-F]{0,8}\\}"
+        },
+        {
+          "name": "constant.character.escape.epsil",
+          "match": "\\\\u[0-9a-fA-F]{4}"
+        },
+        {
+          "name": "constant.character.escape.epsil",
+          "match": "\\\\[0'\"\\\\bfnrst]"
+        }
+      ]
+    },
+    "line-continuation": {
+      "name": "constant.character.escape.line-continuation.epsil",
+      "match": "\\\\[ \\t]*$"
+    },
+    "invalid-escape": {
+      "name": "invalid.illegal.unknown-escape.epsil",
+      "match": "\\\\."
+    },
+    "interpolation": {
+      "name": "meta.embedded.line.epsil",
+      "begin": "\\\\\\(",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.begin.epsil"
+        }
+      },
+      "end": "\\)|(?=$)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.end.epsil"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#paren-group"
+        },
+        {
+          "include": "$self"
+        }
+      ]
+    },
+    "paren-group": {
+      "begin": "\\(",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.parens.begin.epsil"
+        }
+      },
+      "end": "\\)|(?=$)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.parens.end.epsil"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#paren-group"
+        },
+        {
+          "include": "$self"
+        }
+      ]
+    },
+    "latex-island": {
+      "name": "string.other.math.latex.epsil",
+      "contentName": "meta.embedded.block.latex",
+      "begin": "\\$",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.epsil"
+        }
+      },
+      "end": "\\$|(?=$)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.epsil"
+        }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.epsil",
+          "match": "\\\\\\$"
+        }
+      ]
+    },
+    "pragma": {
+      "name": "meta.preprocessor.epsil",
+      "match": "(#)([^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF]+)",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.preprocessor.epsil"
+        },
+        "2": {
+          "name": "entity.name.function.preprocessor.epsil"
+        }
+      }
+    },
+    "verbatim-symbol": {
+      "patterns": [
+        {
+          "name": "variable.other.verbatim.epsil",
+          "match": "(`)[^`\\n]*(`)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.symbol.begin.epsil"
+            },
+            "2": {
+              "name": "punctuation.definition.symbol.end.epsil"
+            }
+          }
+        },
+        {
+          "name": "variable.other.verbatim.epsil",
+          "match": "(`)[^`\\n]*$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.symbol.begin.epsil"
+            }
+          }
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.epsil",
+          "match": "(?<![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])0[xX](?:[0-9a-fA-F]_*)+(?:\\.(?:[0-9a-fA-F]_*)+)?(?:[pP][+-]?(?:[0-9]_*)+)?"
+        },
+        {
+          "name": "constant.numeric.binary.epsil",
+          "match": "(?<![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])0[bB](?:[01]_*)+"
+        },
+        {
+          "name": "constant.numeric.decimal.epsil",
+          "match": "(?<![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])(?:[0-9]_*)+(?:\\.(?:[0-9]_*)+)?(?:[eE][+-]?(?:[0-9]_*)+)?"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.epsil",
+          "match": "(?<![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])(?:break|continue|do|else|for|if|match|while)(?![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])"
+        },
+        {
+          "name": "storage.type.epsil",
+          "match": "(?<![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])(?:alias|const|function|let|type)(?![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])"
+        },
+        {
+          "name": "keyword.operator.word.epsil",
+          "match": "(?<![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])(?:in|is)(?![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.epsil",
+          "match": "(?<![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])(?:All|False|Infinity|Maybe|Missing|NaN|None|Nothing|True|false|oo|true)(?![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])"
+        },
+        {
+          "name": "constant.language.glyph.epsil",
+          "match": "[\\u03C0\\u2102\\u2115\\u211A\\u211D\\u2124\\u2147\\u2148\\u2205\\u221E\\u29DD]"
+        }
+      ]
+    },
+    "types": {
+      "name": "support.type.epsil",
+      "match": "(?<![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])(?:Anything|Boolean|Matrix|Number|Set|String|Symbol|Vector)(?![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])"
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.epsil",
+          "match": "[+\\-*/^=<>!&|~:?%.]+"
+        },
+        {
+          "name": "keyword.operator.unicode.epsil",
+          "match": "[\\u00A1-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u2010-\\u203E\\u2041-\\u2053\\u2190-\\u2775\\u2794-\\u2E7F\\u3001-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.definition.bracket.epsil",
+          "match": "[\\[\\](){}]"
+        },
+        {
+          "name": "punctuation.separator.comma.epsil",
+          "match": ","
+        },
+        {
+          "name": "punctuation.terminator.statement.epsil",
+          "match": ";"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "support.function.epsil",
+          "match": "(?<![^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF])[\\p{Lu}\\p{Lt}][^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF]*"
+        },
+        {
+          "name": "variable.other.epsil",
+          "match": "[^\\u0000-\\u002F\\u003A-\\u0040\\u005B-\\u005E\\u0060\\u007B-\\u00A7\\u00A9\\u00AB\\u00AC\\u00AE\\u00B0\\u00B1\\u00B6\\u00BB\\u00BF\\u00D7\\u00F7\\u1680\\u180E\\u2000-\\u200A\\u200E\\u200F\\u2010-\\u203E\\u2041-\\u2053\\u205F\\u2190-\\u2775\\u2794-\\u2E7F\\u3000-\\u3003\\u3008-\\u3020\\u3030\\uFD3E\\uFD3F\\uFE45\\uFE46\\uFFFE\\uFFFF]+"
+        }
+      ]
+    }
+  }
+}

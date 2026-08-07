@@ -5,6 +5,19 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Run Epsil Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--disable-extensions",
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-epsil",
+        "${workspaceFolder}/vscode-epsil/examples",
+        "${workspaceFolder}/vscode-epsil/examples/demo.epsil"
+      ],
+      "outFiles": ["${workspaceFolder}/vscode-epsil/dist/**/*.js"],
+      "preLaunchTask": "build epsil extension"
+    },
+    {
       "name": "Launch Chrome",
       "type": "chrome",
       "request": "launch",

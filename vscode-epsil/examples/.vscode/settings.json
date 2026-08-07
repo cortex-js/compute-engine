@@ -1,0 +1,7 @@
+{
+  // In this in-repo demo workspace the npm package isn't installed, so run
+  // the CLI from the repo's build output instead of `npx epsil` (which only
+  // works in a project that has @cortex-js/compute-engine installed).
+  // Rebuild with `npm run build` at the repo root if dist/ is stale.
+  "epsil.cliCommand": "node ../../dist/esm/cli/epsil.js"
+}

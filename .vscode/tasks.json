@@ -2,6 +2,13 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "build epsil extension",
+      "type": "shell",
+      "command": "npm run build",
+      "options": { "cwd": "${workspaceFolder}/vscode-epsil" },
+      "problemMatcher": []
+    },
+    {
       "label": "npm: start",
       "type": "npm",
       "script": "start",

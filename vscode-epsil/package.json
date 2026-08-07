@@ -1,0 +1,122 @@
+{
+  "name": "epsil",
+  "displayName": "Epsil",
+  "description": "Language support for Epsil — syntax highlighting, diagnostics, and run commands for .epsil files",
+  "version": "0.1.0",
+  "publisher": "cortex-js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cortex-js/compute-engine.git",
+    "directory": "vscode-epsil"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "epsil",
+    "mathjson",
+    "compute engine",
+    "scientific computing",
+    "cas"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:epsil"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "epsil",
+        "aliases": [
+          "Epsil"
+        ],
+        "extensions": [
+          ".epsil"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "epsil",
+        "scopeName": "source.epsil",
+        "path": "./syntaxes/epsil.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "epsil.runFile",
+        "title": "Epsil: Run File",
+        "icon": "$(play)"
+      },
+      {
+        "command": "epsil.restartServer",
+        "title": "Epsil: Restart Language Server"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "epsil.runFile",
+          "when": "resourceLangId == epsil",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "epsil.runFile",
+          "when": "resourceLangId == epsil"
+        },
+        {
+          "command": "epsil.restartServer",
+          "when": "resourceLangId == epsil"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Epsil",
+      "properties": {
+        "epsil.cliCommand": {
+          "type": "string",
+          "default": "npx epsil",
+          "description": "Command used by 'Epsil: Run File' to execute a source file in the terminal."
+        },
+        "epsil.diagnostics.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Report parse errors, lints, and static type errors as you type."
+        },
+        "epsil.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the communication between VS Code and the Epsil language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "vscode:prepublish": "node build.mjs"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.0",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
+  }
+}

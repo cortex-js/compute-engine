@@ -116,6 +116,10 @@
       "import": "./dist/esm-min/epsil.js",
       "require": "./dist/umd-min/epsil.cjs",
       "default": "./dist/esm-min/epsil.js"
+    },
+    "./cli": {
+      "import": "./dist/esm-min/cli/epsil.js",
+      "default": "./dist/esm-min/cli/epsil.js"
     }
   },
   "main": "./dist/esm-min/compute-engine.js",

@@ -10,7 +10,9 @@
   are `parseEpsil()`, `serializeEpsil()` and `executeEpsil()` (with the
   corresponding `ExecuteEpsilOptions`/`ExecuteEpsilResult` types). The npm
   package name and `@cortex-js` scope are unchanged. There are no compatibility
-  aliases: update imports and scripts to the new names.
+  aliases: update imports and scripts to the new names. A `./cli` package
+  export exposes the CLI entry point so the standalone `epsil` launcher
+  package (and other tools) can forward to it.
 
 - **The `structural: true` boolean is no longer part of `ce.function()`'s typed
   signature — use `{ form: 'structural' }`.** The `form` option has been the

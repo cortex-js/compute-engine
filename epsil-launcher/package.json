@@ -1,0 +1,33 @@
+{
+  "name": "@cortex-js/epsil",
+  "version": "0.0.1",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Launcher for the Epsil language CLI, which ships with @cortex-js/compute-engine",
+  "keywords": [
+    "epsil",
+    "cli",
+    "scientific computing",
+    "cas",
+    "compute engine"
+  ],
+  "homepage": "https://cortexjs.io/epsil/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cortex-js/compute-engine.git",
+    "directory": "epsil-launcher"
+  },
+  "bugs": "https://github.com/cortex-js/compute-engine/issues/",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "epsil": "./bin/epsil.js"
+  },
+  "files": [
+    "/bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
