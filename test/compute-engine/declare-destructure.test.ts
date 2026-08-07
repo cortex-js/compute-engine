@@ -290,6 +290,15 @@ describe('Declare with a Tuple pattern: compilation', () => {
     expect(r?.success).toBe(false);
   });
 
+  test('a destructuring declare in VALUE position fails closed', () => {
+    // The rewrite ends on the last leaf's declare, whose value is that leaf's,
+    // not the tuple's. Refused EXPLICITLY: it used to be desugared here too
+    // and fail closed only because `return let b = 4` is a syntax error.
+    const expr = boxed('do { let a = 1; let (x, y) = (3, 4) }');
+    expect(compile(expr)?.success).toBe(false);
+    expect(expr.evaluate().toString()).toBe('(3, 4)');
+  });
+
   test('a scalar assignment still compiles', () => {
     const r = compile(boxed('do { let x = 1; x := 42; x }'));
     expect(r?.success).toBe(true);
@@ -415,6 +424,43 @@ describe('Assign with a Tuple pattern: compilation', () => {
     // Every temporary that is READ is also WRITTEN.
     for (const name of new Set(code.match(/_tv\d+/g) ?? []))
       expect(code).toMatch(new RegExp(`${name} = `));
+  });
+
+  test.each(['glsl', 'wgsl'] as const)(
+    'the %s target compiles it, with no stray `return` in the loop',
+    (to) => {
+      const r = compile(
+        boxed(
+          'do { let a = 0; let b = 1; ' +
+            'for k in 1..10 { (a, b) := (b, a + b) }; a }'
+        ),
+        { to }
+      );
+      expect(r?.success).toBe(true);
+      const code = r!.code as string;
+      const loop = code.slice(code.indexOf('for ('), code.lastIndexOf('}'));
+      // A `return` inside the loop exits the shader on iteration 1.
+      expect(loop).not.toMatch(/\breturn\b/);
+      for (const name of new Set(code.match(/_tv\d+/g) ?? []))
+        expect(code).toMatch(new RegExp(`${name} = `));
+    }
+  );
+
+  test('a multi-statement loop body emits no `return` either', () => {
+    // PRE-EXISTING bug, fixed by the same statement-list path: a shader loop
+    // body compiled for its VALUE emitted `return <last statement>` inside
+    // the loop. Nothing to do with destructuring — two scalar assigns hit it.
+    const r = compile(
+      boxed(
+        'do { let a = 0; let b = 1; ' +
+          'for k in 1..10 { a := a + k; b := b * 2 }; a }'
+      ),
+      { to: 'glsl' }
+    );
+    expect(r?.success).toBe(true);
+    const code = r!.code as string;
+    const loop = code.slice(code.indexOf('for ('), code.lastIndexOf('}'));
+    expect(loop).not.toMatch(/\breturn\b/);
   });
 
   test('a destructuring assign in VALUE position fails closed', () => {

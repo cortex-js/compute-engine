@@ -80,13 +80,15 @@
   writes — `(a, b) := (b, a + b)` becomes `let _tv1 = b; let _tv2 = a + b;
   a = _tv1; b = _tv2` — which is what keeps the compiled form honest: the
   targets already exist, so the naive `a = b; b = a` would read the `a` it just
-  clobbered. Temporaries never capture a name the program already uses. The
-  JavaScript and Python targets compile it in any statement position,
-  including a loop body, so the Fibonacci and Euclid steps above compile.
-  Value position (a block's last statement, whose value is the block's), a
-  non-literal tuple value, and the shader targets fail closed (D6) and the
-  interpreter takes over. (This also fixes a silent divergence in the same
-  family as the destructuring-declare one: a tuple target previously compiled
+  clobbered. Temporaries never capture a name the program already uses. Every
+  target — JavaScript, Python, GLSL and WGSL — compiles it in any statement
+  position, including a loop body, so the Fibonacci and Euclid steps above
+  compile. Value position (a block's last statement, whose value is the
+  block's) and a non-literal tuple value fail closed (D6) and the interpreter
+  takes over; a destructuring `let` in value position is now refused the same
+  way, explicitly, rather than by emitting source that happens not to parse.
+  (This also fixes a silent divergence in the same family as the
+  destructuring-declare one: a tuple target previously compiled
   as `_ = …`, leaving every target at its old value behind `success: true`.)
 
   ```js
@@ -220,6 +222,14 @@
   position.
 
 ### Resolved Issues
+
+- **A shader loop body no longer emits a `return` inside the loop.** On the
+  GLSL and WGSL targets, a `for` body with more than one statement compiled as
+  a *value* — its last statement became `return <statement>`, so the shader
+  returned on the first iteration while reporting `success: true`. Two plain
+  scalar assignments (`a := a + k; b := b * 2`) were enough to hit it. A loop
+  body is now compiled as a statement list, which is also what lets a
+  destructuring assignment lower on those targets.
 
 - **An even root of an even power reduces, and no longer does so for complex
   values.** `\sqrt[4]{x^2}` now returns `\sqrt{|x|}`. It did not before, because

@@ -677,8 +677,12 @@ export class Parser {
   //                         ["KeyValuePair", constant, True]]]
   //
   // `constant` is a *binding attribute* (`constant: True` → `isConstant`), not
-  // a type; the engine enforces immutability (reassigning a `const` yields an
-  // error value). A bare annotation `name: Type = value` (no keyword) also
+  // a type; the engine enforces immutability. Reassigning a `const` THROWS
+  // (`ce.assign`) rather than producing an error value — unlike a declared
+  // type mismatch, which the `Assign` handler converts to one: a write the
+  // binding can never accept is a program bug, not a value. A Cortex program
+  // degrades it at the statement boundary into a `runtime-error` diagnostic
+  // and keeps going. A bare annotation `name: Type = value` (no keyword) also
   // declares — see `tryParseAnnotation` — emitting the same `Declare` shape
   // (never `constant`).
   //

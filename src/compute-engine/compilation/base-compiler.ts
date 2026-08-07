@@ -1387,11 +1387,14 @@ export class BaseCompiler {
 
     if (h === 'Declare') {
       // A destructuring declare (`let (x, y) = …`) is desugared at the block
-      // level; a bare one reaching here would compile as `let _ = …` and its
-      // pattern names would silently read as NaN — fail closed (D6).
+      // level, into per-leaf declares; one reaching here is in value position
+      // (or outside a block entirely) and would compile as `let _ = …`, its
+      // pattern names silently reading as NaN — fail closed (D6).
       if (isFunction(args[0], 'Tuple'))
         throw new Error(
-          `Cannot compile a destructuring declaration outside a block. ` +
+          `Cannot compile a destructuring declaration in value position. ` +
+            `It is desugared to per-leaf declares only in STATEMENT ` +
+            `position (a block's non-final statement, or a loop body). ` +
             `Fail closed (D6).`
         );
       const name = isSymbol(args[0]) ? args[0].symbol : '_';
@@ -2547,37 +2550,77 @@ export class BaseCompiler {
   }
 
   /**
+   * Compile an expression as a statement list evaluated **for effect** — a
+   * loop body — rather than for its value.
+   *
+   * The difference from `compile()` is what happens to the LAST statement:
+   * compiled for a value it is wrapped/returned (`return <stmt>`, or the
+   * target's `block` hook), which inside a loop returns from the enclosing
+   * function on the first iteration. Compiled for effect it is just another
+   * statement. It is also the position where a destructuring assign lowers,
+   * since no statement's value is anyone's.
+   *
+   * Used by targets whose loop bodies route through `compileExpr` (the shader
+   * targets). The JavaScript and Python targets have their own statement
+   * dispatchers (`compileLoopBody`, `compilePythonStatements`).
+   */
+  static compileStatementList(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    if (isFunction(expr, 'Block'))
+      return BaseCompiler.compileBlock(expr.ops, target, expr, false);
+    const stmts = BaseCompiler.desugarPatternAssign(expr, target);
+    if (stmts === null) return BaseCompiler.compile(expr, target);
+    const stmtTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
+    return stmts
+      .map((s) => BaseCompiler.compile(s, stmtTarget))
+      .join(`;${target.ws('\n')}`);
+  }
+
+  /**
    * Compile a block expression
    */
   private static compileBlock(
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
-    node?: Expression
+    node?: Expression,
+    valueUsed = true
   ): TargetSource {
     // Desugar destructuring declares first, so the locals collection and the
-    // inference below see only plain scalar declares.
+    // inference below see only plain scalar declares. As with the assigns
+    // below, a value-position one is left alone and fails closed: the rewrite
+    // ends on the LAST leaf's declare, whose value is that leaf's, not the
+    // tuple's. (It used to be desugared here too and fail closed only by
+    // accident — `return let b = 4` is a syntax error, so the emitted source
+    // failed to parse. An explicit refusal beats relying on that.)
     if (
       args.some(
         (a) => isFunction(a, 'Declare') && isFunction(a.ops[0], 'Tuple')
       )
-    )
-      args = args.flatMap((a) => BaseCompiler.desugarPatternDeclare(a) ?? [a]);
+    ) {
+      const n = args.length;
+      args = args.flatMap((a, i) =>
+        valueUsed && i === n - 1
+          ? [a]
+          : (BaseCompiler.desugarPatternDeclare(a) ?? [a])
+      );
+    }
 
     // …then destructuring assigns, which lower to temporaries + writes.
     //
-    // The LAST statement is deliberately left alone: a block's value is its
-    // last statement's, and the rewrite ends on a write (yielding one leaf,
-    // not the tuple). `compileBlock` cannot tell a value-producing block from
-    // a statement list — a GPU target routes loop bodies through here — so
-    // rather than guess, a trailing destructuring assign falls through to
-    // `compileExpr` and fails closed (D6). The loop-body paths, which DO know
-    // their value is discarded, desugar it (`compileLoopBody`).
+    // When the block's VALUE is used, the last statement is left alone: the
+    // block's value is that statement's, and the rewrite ends on a write
+    // (yielding one leaf, not the tuple). It falls through to `compileExpr`
+    // and fails closed (D6) rather than silently returning the wrong thing.
+    // In a statement list (`valueUsed: false`) there is no such position, so
+    // every statement — including the last — lowers.
     if (
       args.some((a) => isFunction(a, 'Assign') && isFunction(a.ops[0], 'Tuple'))
     ) {
       const n = args.length;
       args = args.flatMap((a, i) =>
-        i === n - 1
+        valueUsed && i === n - 1
           ? [a]
           : (BaseCompiler.desugarPatternAssign(a, target) ?? [a])
       );
@@ -2810,6 +2853,15 @@ export class BaseCompiler {
       );
 
       if (result.length === 0) return '';
+
+      // A statement list evaluated FOR EFFECT — a loop body — has no value,
+      // so it is neither wrapped nor returned from: it is just its statements.
+      // Going through the value paths below emitted `return <last statement>`
+      // INSIDE the loop, which returns from the enclosing function on the
+      // first iteration. (Reachable on any target whose loop bodies route
+      // here — the shader targets — for any multi-statement body,
+      // destructuring or not.)
+      if (!valueUsed) return result.join(`;${target.ws('\n')}`);
 
       if (target.block) return target.block(result);
 

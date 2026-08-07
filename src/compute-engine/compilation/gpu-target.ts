@@ -4826,7 +4826,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // type-consistent wherever the body uses it in float arithmetic — mirroring
     // the Sum/Product for-loop path.
     const indexAsFloat = isWGSL ? `f32(${index})` : `float(${index})`;
-    const bodyCode = BaseCompiler.compile(args[0], {
+    // The body is a STATEMENT LIST, not a value: compiled for a value, a
+    // multi-statement body emitted `return <last statement>` inside the loop
+    // — returning from the shader on the first iteration. It is also the
+    // position where a destructuring assign (`(a, b) := (b, a + b)`) lowers.
+    const bodyCode = BaseCompiler.compileStatementList(args[0], {
       ...target,
       var: (id) => (id === index ? indexAsFloat : target.var(id)),
       // The counter shadows any same-named engine symbol (an index named `i`
