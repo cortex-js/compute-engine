@@ -2,13 +2,13 @@
     <img alt="math live" src="assets/compute-engine.jpg?raw=true"/>
 </div>
 
-<h3><strong>Cortex Compute Engine</strong></h3>
+<h3><strong>Compute Engine</strong></h3>
 <h1>Symbolic manipulation and numeric evaluation of MathJSON expressions</h1>
 
 [MathJSON](https://cortexjs.io/math-json/) is a lightweight mathematical
 notation interchange format based on JSON.
 
-The Cortex Compute Engine can parse LaTeX to MathJSON, serialize MathJSON to
+The Compute Engine can parse LaTeX to MathJSON, serialize MathJSON to
 LaTeX or MathASCII, format, simplify and evaluate MathJSON expressions.
 
 Reference documentation and guides at
@@ -138,59 +138,59 @@ console.log(solution.x.json);  // 3
 console.log(solution.y.json);  // 2
 ```
 
-### Cortex Language (Experimental)
+### Epsil Language (Experimental)
 
-Cortex is a text-syntax programming language for scientific computing whose
+Epsil is a text-syntax programming language for scientific computing whose
 intermediate representation is MathJSON, evaluated by the Compute Engine. It
 ships as a separate, **experimental** entry point (syntax and semantics may
 change between releases):
 
 ```js
-import { ComputeEngine, executeCortex } from "@cortex-js/compute-engine/cortex";
+import { ComputeEngine, executeEpsil } from "@cortex-js/compute-engine/epsil";
 
 const ce = new ComputeEngine();
-const { value } = executeCortex(ce, `
+const { value } = executeEpsil(ce, `
   let x = 1/2
   if (x < 1) { x + 1 } else { 0 }
 `);
 // value.toString() ➔ "3/2"
 ```
 
-See the [Cortex language documentation](https://cortexjs.io/cortex/).
+See the [Epsil language documentation](https://cortexjs.io/epsil/).
 
-#### Cortex CLI and REPL
+#### Epsil CLI and REPL
 
-The package also installs a `cortex` command:
+The package also installs an `epsil` command:
 
 ```sh
 # Start an interactive session
-npx cortex
+npx epsil
 
 # Evaluate source text or a file
-npx cortex -e 'Simplify(2 + 2x)'
-npx cortex program.cx
+npx epsil -e 'Simplify(2 + 2x)'
+npx epsil program.epsil
 
-# Cortex programs can also be piped over stdin
-printf '1/2 + 1' | npx cortex
+# Epsil programs can also be piped over stdin
+printf '1/2 + 1' | npx epsil
 ```
 
 The interactive session preserves declarations between inputs and supports
 persistent history, multiline input, `.load`, `.clear`, `.ast`, and `.time`. Run
-`cortex --help` for output formats and execution-limit options.
+`epsil --help` for output formats and execution-limit options.
 
 #### MCP Server for AI Assistants
 
-The `cortex` command includes a
+The `epsil` command includes a
 [Model Context Protocol](https://modelcontextprotocol.io) server, so an AI
-assistant can evaluate Cortex programs — exact arithmetic and symbolic
+assistant can evaluate Epsil programs — exact arithmetic and symbolic
 computation as a tool call. For example, with Claude Code:
 
 ```sh
-claude mcp add cortex -- npx -y @cortex-js/compute-engine mcp
+claude mcp add epsil -- npx -y @cortex-js/compute-engine mcp
 ```
 
 The server exposes `evaluate`, `check`, `doc`, `parse`, and `serialize` tools,
-and serves a machine-verified language card so the assistant can learn Cortex on
+and serves a machine-verified language card so the assistant can learn Epsil on
 its own. It also has a native Streamable HTTP transport for ChatGPT and other
 URL-based clients:
 
@@ -198,7 +198,7 @@ URL-based clients:
 npx -y @cortex-js/compute-engine mcp --transport streamable-http
 ```
 
-See the [MCP server guide](https://cortexjs.io/cortex/mcp/) for ChatGPT setup
+See the [MCP server guide](https://cortexjs.io/epsil/mcp/) for ChatGPT setup
 and HTTPS deployment options.
 
 **💡 Best Practices:**

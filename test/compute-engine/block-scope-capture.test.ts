@@ -180,7 +180,7 @@ describe('nested Blocks inside function bodies', () => {
   });
 
   test('a while-style Loop body inside a function reads the parameter', () => {
-    // The Cortex `fn f(n) { while … }` lowering shape: the parameter is
+    // The Epsil `fn f(n) { while … }` lowering shape: the parameter is
     // referenced from a Block nested two levels below the function body.
     ce.declare('sumto', '(integer) -> integer');
     ce.assign(
@@ -279,7 +279,7 @@ describe('block-local semantics preserved', () => {
 // survived the sweep and hid the call value in the lambda's fresh scope. The
 // keep-test is now "was this created by a `Declare` STATEMENT".
 //
-// Surfaced through Cortex, which wraps each `if` branch in a `Block`:
+// Surfaced through Epsil, which wraps each `if` branch in a `Block`:
 //   function s(k: number) { if 1 > 0 { k } else { 0 } };  s(100)   ⇒ `k`
 // The same function with a bare `k` returned `100`.
 //
@@ -358,7 +358,7 @@ describe('annotated parameter read from a nested Block', () => {
 //
 // Invisible for an arithmetic body, whose symbols live directly in the body
 // Block that IS rebuilt; visible the moment a held operand introduces a scope.
-// `If`'s branches are the common case, and Cortex compiles every `if` branch
+// `If`'s branches are the common case, and Epsil compiles every `if` branch
 // to a Block, so `(x) |-> if x > 1 { k } else { 0 }` lost `k`.
 //
 describe('nested scoped Block in an escaping closure', () => {

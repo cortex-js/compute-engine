@@ -305,7 +305,7 @@ export function same(
     // Two NaN literals are structurally the same number leaf, whether or not
     // they happen to be the same interned object. `isSame` is a dedup/matching
     // key and must stay an equivalence relation (reflexive on NaN), so it
-    // cannot inherit IEEE's `NaN !== NaN` — otherwise `NaN === NaN` in Cortex
+    // cannot inherit IEEE's `NaN !== NaN` — otherwise `NaN === NaN` in Epsil
     // answers `True` or `False` depending only on whether the operands carried
     // `sourceOffsets` metadata (which defeats interning). This mirrors the
     // explicit NaN check in the primitive overload of `BoxedNumber.isSame`

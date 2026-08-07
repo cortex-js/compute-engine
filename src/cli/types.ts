@@ -1,7 +1,7 @@
 import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
-import type { ParsingDiagnostic } from '../cortex/diagnostics.js';
+import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
 
-export type OutputMode = 'value' | 'json' | 'cortex';
+export type OutputMode = 'value' | 'json' | 'epsil';
 
 export type DiagnosticsFormat = 'text' | 'json';
 
@@ -50,7 +50,7 @@ export interface EvaluationResult {
   elapsedMs: number;
 }
 
-export interface CortexSession {
+export interface EpsilSession {
   readonly engine: ComputeEngine;
   readonly timeLimit: number;
   evaluate(source: string, url?: string): EvaluationResult;

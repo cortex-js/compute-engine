@@ -1,6 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseType } from '../../src/common/type/parse';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // Transparent generic type aliases — `type alias Pair<T> = tuple<T, T>`
@@ -14,7 +14,7 @@ import { executeCortex } from '../../src/cortex/execute-cortex';
 //
 // Three routes reach the declaration and each is exercised below: the host
 // `ce.declareType(…, { typeParams })`, the `DeclareType` operator (box route),
-// and the Cortex `type alias` statement.
+// and the Epsil `type alias` statement.
 //
 
 /** The error code of a thrown type-layer failure (`generic-alias-…`). */
@@ -429,7 +429,7 @@ describe('GENERIC TYPE ALIASES — no mint, no value-namespace claim', () => {
   test('a user function of the same name is legal after the alias', () => {
     const ce = new ComputeEngine();
     ce.declareType('Pair', 'tuple<T, T>', { alias: true, typeParams: ['T'] });
-    const r = executeCortex(ce, 'function Pair(x) { x }\nPair(5)');
+    const r = executeEpsil(ce, 'function Pair(x) { x }\nPair(5)');
     expect(r.diagnostics.map((d) => d.message)).toEqual([]);
     expect(r.value.toString()).toBe('5');
   });
@@ -456,7 +456,7 @@ describe('GENERIC TYPE ALIASES — no mint, no value-namespace claim', () => {
   // value or function is no obstacle — in EITHER order.
   test('an existing user function does not block the generic alias', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'function Duo(x) { x }\ntype alias Duo<T> = tuple<T, T>\nlet p: Duo<integer> = (1, 2)\np'
     );
@@ -499,9 +499,9 @@ describe('GENERIC TYPE ALIASES — a clause on the nominal form', () => {
     expect(ce.type('Nom<integer>').toString()).toBe('Nom<integer>');
   });
 
-  test('the Cortex statement route agrees', () => {
+  test('the Epsil statement route agrees', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(ce, 'type Nom<T> = tuple<T, T>');
+    const r = executeEpsil(ce, 'type Nom<T> = tuple<T, T>');
     expect(r.diagnostics.map((d) => d.message)).toEqual([]);
     expect(ce.type('Nom<integer>').toString()).toBe('Nom<integer>');
   });
@@ -639,9 +639,9 @@ describe('GENERIC TYPE ALIASES — hostile parameter names', () => {
     );
   });
 
-  test('…and on the Cortex route', () => {
+  test('…and on the Epsil route', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type alias Proto<__proto__> = tuple<__proto__, __proto__>\nlet p: Proto<integer> = (1, 2)\np'
     );
@@ -735,9 +735,9 @@ describe('GENERIC TYPE ALIASES — box route (`DeclareType`) parity', () => {
 });
 
 describe('GENERIC TYPE ALIASES — A4: SOURCE keeps the spelling, TYPE shows the expansion', () => {
-  test('Cortex round-trips the applied spelling verbatim', () => {
+  test('Epsil round-trips the applied spelling verbatim', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type alias Pair<T> = tuple<T, T>\nlet p: Pair<integer> = (1, 2)\np'
     );
@@ -751,10 +751,10 @@ describe('GENERIC TYPE ALIASES — A4: SOURCE keeps the spelling, TYPE shows the
   });
 });
 
-describe('GENERIC TYPE ALIASES — Cortex statement route', () => {
+describe('GENERIC TYPE ALIASES — Epsil statement route', () => {
   test('declare, then annotate a `let`', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type alias Pair<T> = tuple<T, T>\nlet p: Pair<integer> = (1, 2)\np'
     );
@@ -764,7 +764,7 @@ describe('GENERIC TYPE ALIASES — Cortex statement route', () => {
 
   test('annotate a function parameter', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type alias Pair<T> = tuple<T, T>\nfunction f(a: Pair<integer>) { a }\nf((1, 2))'
     );
@@ -774,7 +774,7 @@ describe('GENERIC TYPE ALIASES — Cortex statement route', () => {
 
   test('a bounded clause, applied inside the bound', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type alias Keyed<T: number> = tuple<string, T>\nlet k: Keyed<integer> = ("a", 1)\nk'
     );
@@ -784,7 +784,7 @@ describe('GENERIC TYPE ALIASES — Cortex statement route', () => {
 
   test('an argument outside the bound is a runtime error value', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type alias Keyed<T: number> = tuple<string, T>\nlet k: Keyed<string> = ("a", "b")\nk'
     );
@@ -793,7 +793,7 @@ describe('GENERIC TYPE ALIASES — Cortex statement route', () => {
 
   test('the value validates against the EXPANSION', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type alias Pair<T> = tuple<T, T>\nlet p: Pair<integer> = (1, "x")\np'
     );
@@ -802,14 +802,14 @@ describe('GENERIC TYPE ALIASES — Cortex statement route', () => {
 
   test('a generic alias declared in a block is not visible after it', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'let start = 0\ndo {\n  type alias Inner<T> = tuple<T, T>\n  let q: Inner<integer> = (3, 4)\n  q\n}'
     );
     expect(r.diagnostics.map((d) => d.message)).toEqual([]);
     expect(r.value.toString()).toBe('(3, 4)');
     expect(() => ce.type('Inner<integer>')).toThrow();
-    const r2 = executeCortex(ce, 'let z: Inner<integer> = (3, 4)\nz');
+    const r2 = executeEpsil(ce, 'let z: Inner<integer> = (3, 4)\nz');
     expect(r2.diagnostics.map((d) => d.message)).toEqual([
       ['type-annotation-error', 'Unknown type "Inner"'],
     ]);
@@ -817,7 +817,7 @@ describe('GENERIC TYPE ALIASES — Cortex statement route', () => {
 
   test('a NOMINAL type with a clause declares an opaque parameterized type', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(ce, 'type gen<T> = tuple<T, T>\nlet a = 1\na');
+    const r = executeEpsil(ce, 'type gen<T> = tuple<T, T>\nlet a = 1\na');
     expect(r.diagnostics.map((d) => d.message)).toEqual([]);
     expect(r.value.toString()).toBe('1');
     expect(ce.type('gen<integer>').toString()).toBe('gen<integer>');

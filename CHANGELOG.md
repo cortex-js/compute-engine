@@ -2,6 +2,16 @@
 
 ### Breaking Changes
 
+- **The Cortex language has been renamed Epsil.** The experimental scripting
+  language previously called Cortex is now Epsil, and every public surface
+  follows: the CLI binary is `epsil` (was `cortex`), the conventional source
+  file extension is `.epsil` (was `.cortex` / `.cx`), the package subpath is
+  `@cortex-js/compute-engine/epsil` (was `…/cortex`), and the API entry points
+  are `parseEpsil()`, `serializeEpsil()` and `executeEpsil()` (with the
+  corresponding `ExecuteEpsilOptions`/`ExecuteEpsilResult` types). The npm
+  package name and `@cortex-js` scope are unchanged. There are no compatibility
+  aliases: update imports and scripts to the new names.
+
 - **The `structural: true` boolean is no longer part of `ce.function()`'s typed
   signature — use `{ form: 'structural' }`.** The `form` option has been the
   documented spelling for the creation modes since the structural tier was

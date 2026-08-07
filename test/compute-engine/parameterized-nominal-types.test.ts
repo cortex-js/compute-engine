@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import {
   freeTypeVariables,
   hasFreeTypeVariables,
@@ -127,9 +127,9 @@ function boxEngine(): ComputeEngine {
   return ce;
 }
 
-function cortexEngine(): ComputeEngine {
+function epsilEngine(): ComputeEngine {
   const ce = new ComputeEngine();
-  const r = executeCortex(ce, `type tree<out T> = ${TREE_BODY}\nlet a = 1\na`);
+  const r = executeEpsil(ce, `type tree<out T> = ${TREE_BODY}\nlet a = 1\na`);
   expect(r.diagnostics.map((d) => d.message)).toEqual([]);
   return ce;
 }
@@ -141,7 +141,7 @@ describe('PARAMETERIZED NOMINAL TYPES — declaration, three routes', () => {
   test.each([
     ['host', hostEngine],
     ['box', boxEngine],
-    ['cortex statement', cortexEngine],
+    ['epsil statement', epsilEngine],
   ])('%s route registers the type', (_name, make) => {
     const ce = make();
     expect(ce.type('tree<integer>').toString()).toBe('tree<integer>');
@@ -149,13 +149,13 @@ describe('PARAMETERIZED NOMINAL TYPES — declaration, three routes', () => {
 
   test('the parse route agrees with the box route', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(ce, `type tree<out T> = ${TREE_BODY}`);
+    const r = executeEpsil(ce, `type tree<out T> = ${TREE_BODY}`);
     expect(r.diagnostics.map((d) => d.message)).toEqual([]);
     expect(ce.type('tree<integer>').toString()).toBe('tree<integer>');
   });
 
   test('the declared variance is stored on the record', () => {
-    for (const make of [hostEngine, boxEngine, cortexEngine]) {
+    for (const make of [hostEngine, boxEngine, epsilEngine]) {
       const ce = make();
       expect(ce._typeResolver.resolve('tree')?.typeParams).toEqual([
         { name: 'T', variance: 'out' },
@@ -628,7 +628,7 @@ describe('PARAMETERIZED NOMINAL TYPES — regressions', () => {
     expect(r.toString()).toContain('invalid-type-declaration');
 
     const ce3 = new ComputeEngine();
-    const r3 = executeCortex(ce3, 'type alias Duo<out T> = tuple<T, T>');
+    const r3 = executeEpsil(ce3, 'type alias Duo<out T> = tuple<T, T>');
     expect(r3.diagnostics.map((d) => d.message[0])).toEqual([
       'type-annotation-error',
     ]);

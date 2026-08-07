@@ -1,8 +1,8 @@
 # The Jacobian Conjecture Is False
 
 _A summary of the July 2026 counterexample, with every computation carried out
-in Cortex. All code blocks on this page are executable as written; each was
-verified against the Cortex runtime in this repository._
+in Epsil. All code blocks on this page are executable as written; each was
+verified against the Epsil runtime in this repository._
 
 ## The conjecture
 
@@ -42,11 +42,11 @@ an explicit counterexample in dimension 3 — found not by a human, but by
 Anthropic's Claude Fable 5 model (the announcement is 216 characters of
 mathematics). It is a degree-7 map
 $F = (a, b, c) : \mathbb{C}^3 \to
-\mathbb{C}^3$. In Cortex, we can define it by
+\mathbb{C}^3$. In Epsil, we can define it by
 quoting the announcement's LaTeX verbatim — a `$…$` LaTeX island is parsed and
 spliced in as an expression:
 
-```cortex
+```epsil
 a(x, y, z) = $(1+xy)^3 z + y^2(1+xy)(4+3xy)$
 b(x, y, z) = $y + 3x(1+xy)^2 z + 3xy^2(4+3xy)$
 c(x, y, z) = $2x - 3x^2 y - x^3 z$
@@ -61,7 +61,7 @@ injective.
 The `JacobianMatrix` operator builds the matrix of symbolic partial derivatives
 ∂fᵢ/∂xⱼ directly; pipe it through `Determinant` and `Simplify`:
 
-```cortex
+```epsil
 let J = [a, b, c] |> JacobianMatrix
 
 J |> Determinant |> Simplify
@@ -80,7 +80,7 @@ yet.
 
 Three distinct points — real, and even rational — hit the same image:
 
-```cortex
+```epsil
 F(p) = (a(...p), b(...p), c(...p))
 
 let fiber = [(0, 0, -1/4), (1, -3/2, 13/2), (-1, 3/2, 13/2)]
@@ -93,7 +93,7 @@ Map(fiber, F)
 The arithmetic here is exact rational arithmetic, not floating point, so this is
 a proof, not numerical evidence. A two-line certificate of non-injectivity:
 
-```cortex
+```epsil
 (F((0, 0, -1/4)) == F((1, -3/2, 13/2)), (0, 0, -1/4) != (1, -3/2, 13/2))
 // ➔ (True, True)
 ```
@@ -143,9 +143,9 @@ The multiplication map is étale precisely where $L$ and $Q$ share no root —
 which is exactly where the resultant is nonzero. But it is not injective: a
 cubic with three distinct roots factors as linear × quadratic in **three** ways,
 one for each choice of which root the linear factor takes. Watch the mechanism
-in Cortex:
+in Epsil:
 
-```cortex
+```epsil
 P(t) = $t^3 - 6t^2 + 11t - 6$
 let roots = Solve(P(t) == 0, t)
 Map(roots, r |-> (t - r, Simplify(P(t) / (t - r))))
@@ -159,7 +159,7 @@ of "multiplication of coprime polynomials is étale". The counterexample isn't a
 random needle in coefficient space; it is a natural map between moduli of
 polynomials, written out in an explicit chart.
 
-## Could Cortex have found the counterexample?
+## Could Epsil have found the counterexample?
 
 Three different questions hide in there.
 
@@ -174,7 +174,7 @@ usually associated with NP problems, playing out in algebraic geometry.
 essentially never land on the solution variety; you'd be looking for a
 positive-codimension miracle. No amount of raw compute in any CAS finds this by
 enumeration. And a direct assault on a found candidate's fibers is also out of
-reach of today's solvers — asking Cortex to solve `F(x,y,z) == (-1/4, 0, 0)` as
+reach of today's solvers — asking Epsil to solve `F(x,y,z) == (-1/4, 0, 0)` as
 a raw degree-7 system returns the equation unsolved, symbolically intact. The
 fibers only become computable _through the structure_ (factor the cubic, as
 above).
@@ -182,10 +182,10 @@ above).
 **Structured search — yes, plausibly.** Once the idea is "multiplication maps
 between spaces of polynomials, normalized by a resultant", the search space
 collapses from 360 coefficients to a handful of discrete choices (degrees to
-multiply, which slice to take), and Cortex has every primitive needed to audit a
+multiply, which slice to take), and Epsil has every primitive needed to audit a
 candidate family:
 
-```cortex
+```epsil
 // The resultant that defines the normalization slice is a built-in:
 Resultant(t - 1, t^2 - 5*t + 6, t)
 // ➔ 2

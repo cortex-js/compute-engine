@@ -153,7 +153,7 @@ function assumeDispatch(proposition: Expression): AssumeResult {
   // Outright malformed input (not a predicate operator at all) reports
   // `'not-a-predicate'` too — errors are VALUES (error-propagation design
   // §8a): the throw escaped to the host on the direct route (`Assume(Ln("a"))`
-  // via `ce.box`), while the same program run through Cortex became an
+  // via `ce.box`), while the same program run through Epsil became an
   // `["Error", …]` value, so the two routes disagreed on whether an
   // unassumable proposition is catastrophic. Every sub-dispatcher below
   // already reports malformed input this way (`!isFunction(proposition)`,

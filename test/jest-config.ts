@@ -69,7 +69,7 @@ function formatStackTrace(s: string): string {
 /**
  * @noInheritDoc
  */
-class CortexConsole extends CustomConsole {
+class EpsilConsole extends CustomConsole {
   constructor(stdout, stderr, formatBuffer = (_type, message) => message) {
     super(stdout, stderr, formatBuffer);
   }
@@ -158,7 +158,7 @@ function serialize(x: any): string {
   return x.toString();
 }
 
-global.console = new CortexConsole(
+global.console = new EpsilConsole(
   process.stdout,
   process.stderr,
   simpleFormatter

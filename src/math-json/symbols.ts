@@ -1,7 +1,7 @@
 /**
  * Reserved prefix for parser-generated parameter names.
  *
- * A **literal parameter** in a Cortex function definition (`function f(0) =
+ * A **literal parameter** in an Epsil function definition (`function f(0) =
  * 1`, `f("yes") = …`) lowers to an anonymous value-typed parameter
  * `["Typed", "literalParam_1", {str: "0"}]` — the name is generated (1-based
  * parameter position), never written by the author, and the body cannot

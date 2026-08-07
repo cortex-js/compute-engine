@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { groundSkeleton } from '../../src/common/type/instantiate';
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
@@ -487,14 +487,14 @@ describe('VARIANCE — the operator route unblocks (Phase 0 deviation)', () => {
   });
 });
 
-describe('VARIANCE — Cortex route parity', () => {
-  function run(source: string): ReturnType<typeof executeCortex> {
-    return executeCortex(new ComputeEngine(), source);
+describe('VARIANCE — Epsil route parity', () => {
+  function run(source: string): ReturnType<typeof executeEpsil> {
+    return executeEpsil(new ComputeEngine(), source);
   }
 
   test('a variance marker on the statement route relates two applications', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type tree<out T> = ${TREE_BODY}\nlet a = 1\na`
     );
@@ -504,7 +504,7 @@ describe('VARIANCE — Cortex route parity', () => {
 
   test('the unannotated statement form is `out` too', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(ce, `type tree<T> = ${TREE_BODY}\nlet a = 1\na`);
+    const r = executeEpsil(ce, `type tree<T> = ${TREE_BODY}\nlet a = 1\na`);
     expect(r.diagnostics.map((d) => d.message)).toEqual([]);
     expect(ce.type('tree<integer>').matches('tree<number>')).toBe(true);
   });
@@ -528,7 +528,7 @@ describe('VARIANCE — Cortex route parity', () => {
 
   test('an `inout` marker parses and is honored', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type cell<inout T> = tuple<v: T>\nlet a = 1\na'
     );
@@ -538,7 +538,7 @@ describe('VARIANCE — Cortex route parity', () => {
 
   test('an `in` marker parses and reverses the relation', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type sink<in T> = tuple<run: (T) -> nothing>\nlet a = 1\na'
     );
@@ -572,9 +572,9 @@ describe('§10 — construction at a widened type', () => {
     );
   });
 
-  test('the Cortex spelling `let t: tree<number> = tree(1, [])` executes cleanly', () => {
+  test('the Epsil spelling `let t: tree<number> = tree(1, [])` executes cleanly', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type tree<T> = ${TREE_BODY}\nlet t: tree<number> = tree(1, [])\nt`
     );
@@ -594,14 +594,14 @@ describe('§10 — construction at a widened type', () => {
     expect(t.type.matches('tree<finite_integer>')).toBe(true);
   });
 
-  // The Cortex route says the same thing, as a DIAGNOSTIC rather than a
+  // The Epsil route says the same thing, as a DIAGNOSTIC rather than a
   // subtype verdict: ruling (c) is a documented limitation, so it has to be
   // legible at the surface the user writes. The construction itself succeeds
   // (`tree(1, [])` is a `tree<finite_integer>`); it is the widened ANNOTATION
   // that fails.
-  test('the Cortex spelling reports ruling (c) as an incompatible-type', () => {
+  test('the Epsil spelling reports ruling (c) as an incompatible-type', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type tree<inout T> = ${TREE_BODY}\nlet t: tree<number> = tree(1, [])\nt`
     );

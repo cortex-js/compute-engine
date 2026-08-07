@@ -290,7 +290,7 @@ describe('Playground regressions', () => {
   // always terminated (it substitutes one level), but `.N()` — and the
   // collection-shape queries reached from numeric `Add` — used to follow the
   // cycle without a guard and overflow the stack. Reported by Tycho (surfaced
-  // through `.latex` on a cortex read-back, which calls `.N()`).
+  // through `.latex` on a epsil read-back, which calls `.N()`).
   describe('self-referential binding does not overflow the stack', () => {
     test('.N() on `a := a + 1` stays symbolic', () => {
       const ce = new ComputeEngine();

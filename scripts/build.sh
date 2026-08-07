@@ -46,8 +46,8 @@ fi
 # (Note: we use es-build (via `npm start`) for development builds usually)
 export BUILD="${1-production}"
 
-# export TARGETS="math-json cortex compute-engine"
-export TARGETS="math-json latex-syntax interval numerics core compile identities integration-rules cortex compute-engine"
+# export TARGETS="math-json epsil compute-engine"
+export TARGETS="math-json latex-syntax interval numerics core compile identities integration-rules epsil compute-engine"
 
 # export GIT_VERSION=`git describe --long --dirty`
 
@@ -97,12 +97,12 @@ if [[ "$TARGETS" == *compute-engine* ]]; then
   "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/compute-engine.ts 
 fi
-if [[ "$TARGETS" == *cortex* ]]; then
+if [[ "$TARGETS" == *epsil* ]]; then
   "$TS7" $DTS_FLAGS \
-    --emitDeclarationOnly --outDir ./dist/types ./src/cortex.ts
+    --emitDeclarationOnly --outDir ./dist/types ./src/epsil.ts
   "$TS7" --target es2022 --module es2022 --moduleResolution bundler \
     --types node --skipLibCheck --allowImportingTsExtensions true \
-    --noEmit --ignoreConfig ./src/cli/cortex.ts
+    --noEmit --ignoreConfig ./src/cli/epsil.ts
 fi
 if [[ "$TARGETS" == *latex-syntax* ]]; then
   "$TS7" $DTS_FLAGS \
@@ -174,17 +174,17 @@ if [ "$BUILD" = "production" ]; then
     node ./test/consumer/nodenext-smoke.mjs
     echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying nodenext consumer resolution$RESET"
 
-    # Runtime smoke: import the built `/cortex` and main bundles and execute a
-    # tiny Cortex program, asserting the result and cross-subpath engine
+    # Runtime smoke: import the built `/epsil` and main bundles and execute a
+    # tiny Epsil program, asserting the result and cross-subpath engine
     # identity. Complements the type-only nodenext smoke above; runs last so it
     # exercises the exact bundles that will be published.
-    printf "$BASENAME$DOT Verifying Cortex runtime smoke"
-    node ./test/consumer/cortex-runtime-smoke.mjs
-    echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying Cortex runtime smoke$RESET"
+    printf "$BASENAME$DOT Verifying Epsil runtime smoke"
+    node ./test/consumer/epsil-runtime-smoke.mjs
+    echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying Epsil runtime smoke$RESET"
 
-    printf "$BASENAME$DOT Verifying Cortex CLI smoke"
-    node ./test/consumer/cortex-cli-smoke.mjs
-    echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying Cortex CLI smoke$RESET"
+    printf "$BASENAME$DOT Verifying Epsil CLI smoke"
+    node ./test/consumer/epsil-cli-smoke.mjs
+    echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying Epsil CLI smoke$RESET"
 
 
     # Run test suite

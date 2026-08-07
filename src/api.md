@@ -585,6 +585,13 @@ Parse a LaTeX string and return a boxed expression.
 This is a convenience method equivalent to `ce.expr(parse(latex))`,
 but uses the engine's symbol definitions for better parsing accuracy.
 
+`options.scope` RECEIVES the parse's writes: the whole parse runs with
+that scope as the current lexical scope, so name resolution (including
+the parser's symbol oracle) walks `scope → parents`, and every
+auto-declare and inference lands rooted there. Discarding the scope
+discards the writes. Use `ce.createScope()` to make one that can be read
+back.
+
 ####### latex
 
 `string`
@@ -593,6 +600,7 @@ but uses the engine's symbol definitions for better parsing accuracy.
 
 `Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
   `form`: [`FormOption`](#formoption);
+  `scope`: `Scope`;
  \}
 
 ###### parse(latex, options)
@@ -609,6 +617,7 @@ parse(latex, options?): Expression | null
 
 `Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
   `form`: [`FormOption`](#formoption);
+  `scope`: `Scope`;
  \}
 
 </MemberCard>
@@ -664,10 +673,6 @@ readonly [`ExpressionInput`](#expressioninput)[]
 ####### form?
 
 [`FormOption`](#formoption)
-
-####### structural?
-
-`boolean`
 
 ####### scope?
 
@@ -2011,7 +2016,7 @@ suggestOperatorName(name): string | undefined
 
 Given a `name` that is **not** a known operator, return the closest known
 operator name — a "did you mean" suggestion — or `undefined` when nothing
-is close enough. Powers the Cortex `unknown-function` diagnostic.
+is close enough. Powers the Epsil `unknown-function` diagnostic.
 
 Matching is conservative and applied in priority order (first match wins):
 case-insensitive exact match, singular/plural, Damerau–Levenshtein
@@ -8682,6 +8687,13 @@ Parse a LaTeX string and return a boxed expression.
 This is a convenience method equivalent to `ce.expr(parse(latex))`,
 but uses the engine's symbol definitions for better parsing accuracy.
 
+`options.scope` RECEIVES the parse's writes: the whole parse runs with
+that scope as the current lexical scope, so name resolution (including
+the parser's symbol oracle) walks `scope → parents`, and every
+auto-declare and inference lands rooted there. Discarding the scope
+discards the writes. Use `ce.createScope()` to make one that can be read
+back.
+
 ####### latex
 
 `string`
@@ -8690,6 +8702,7 @@ but uses the engine's symbol definitions for better parsing accuracy.
 
 `Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
   `form`: [`FormOption`](#formoption);
+  `scope`: `Scope`;
  \}
 
 ###### parse(latex, options)
@@ -8706,6 +8719,7 @@ parse(latex, options?): Expression | null
 
 `Partial`\<[`ParseLatexOptions`](#parselatexoptions)\> & \{
   `form`: [`FormOption`](#formoption);
+  `scope`: `Scope`;
  \}
 
 </MemberCard>
@@ -8761,10 +8775,6 @@ readonly [`ExpressionInput`](#expressioninput)[]
 ####### form?
 
 [`FormOption`](#formoption)
-
-####### structural?
-
-`boolean`
 
 ####### scope?
 
@@ -10108,7 +10118,7 @@ suggestOperatorName(name): string | undefined
 
 Given a `name` that is **not** a known operator, return the closest known
 operator name — a "did you mean" suggestion — or `undefined` when nothing
-is close enough. Powers the Cortex `unknown-function` diagnostic.
+is close enough. Powers the Epsil `unknown-function` diagnostic.
 
 Matching is conservative and applied in priority order (first match wins):
 case-insensitive exact match, singular/plural, Damerau–Levenshtein
@@ -15110,17 +15120,37 @@ is substituted away by instantiation at a call site.
 
 <MemberCard>
 
+### TypeVariance
+
+```ts
+type TypeVariance = "in" | "out" | "inout";
+```
+
+How a parameterized NOMINAL type relates two of its applications
+(`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §4).
+
+Declared inside a type-parameter clause (`type tree<out T> = …`); the words
+are contextual there and are never reserved. Only a nominal declaration
+carries one — a transparent alias has no declaration-level variance, and a
+`forall` clause never does.
+
+</MemberCard>
+
+<MemberCard>
+
 ### TypeParameter
 
 ```ts
 type TypeParameter = {
   name: string;
   bound: Type;
+  variance: TypeVariance;
 };
 ```
 
-One entry of a signature's `forall` clause: the variable's name and its
-optional declared upper bound.
+One entry of a signature's `forall` clause, or of a declared type's
+type-parameter clause: the variable's name and its optional declared upper
+bound.
 
 The bound must be **ground** (no type variables) — validated when the
 declared type is boxed. An unbounded variable's implicit bound is `any`.
@@ -15139,11 +15169,14 @@ type TypeParamsOption =
   | {
   name: string;
   bound: Type | TypeString;
+  variance: TypeVariance;
 }>;
 ```
 
-The `typeParams` option of a generic type-ALIAS declaration
-(`ce.declareType('Pair', 'tuple<T, T>', { alias: true, typeParams: ['T'] })`).
+The `typeParams` option of a generic type declaration — an ALIAS
+(`ce.declareType('Pair', 'tuple<T, T>', { alias: true, typeParams: ['T'] })`)
+or a parameterized NOMINAL type
+(`ce.declareType('tree', '…', { typeParams: [{ name: 'T', variance: 'out' }] })`).
 
 Either clause TEXT (`'T, U: number'`, also accepted one entry at a time) or
 pre-built parameters whose bound may be a type string. Every TEXT spelling
@@ -15400,6 +15433,9 @@ type TypeReference = {
   alias: boolean;
   def: Type | undefined;
   typeParams: TypeParameter[];
+  args: Type[];
+  _varianceState: "deferred" | "verified";
+  _varianceBlockedOn: string[];
 };
 ```
 

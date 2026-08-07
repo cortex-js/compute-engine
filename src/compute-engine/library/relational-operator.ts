@@ -476,12 +476,12 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
   Same: {
     description: [
-      'Structural identity comparison (Cortex `===`).',
+      'Structural identity comparison (Epsil `===`).',
       'True iff every adjacent pair of operands is structurally identical.',
     ],
     complexity: 11000,
 
-    // Variadic (the Cortex parser emits a chained `a === b === c` as a single
+    // Variadic (the Epsil parser emits a chained `a === b === c` as a single
     // n-ary `Same`). Documentary only: like the other `lazy` relations
     // (`Equal`, whose fixed `(any, any)` signature only works for the same
     // reason), argument validation is skipped.

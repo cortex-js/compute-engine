@@ -384,7 +384,7 @@ All twelve non-deadline guards audited for deadline-independent test coverage:
 
 **INDEPENDENT** (a test exercises the guard with no deadline, or the guard is
 structural and fires far below any deadline): loop `iterationLimit`
-(cortex asserts the `iteration-limit-exceeded` cause directly),
+(epsil asserts the `iteration-limit-exceeded` cause directly),
 `recursionLimit` (cause-string asserted), `maxCollectionSize` (structural cap,
 `a3-lists`), `MAX_ITERATION` Sum/Product cap (deterministic value cap),
 series order bound (`series.test`: order 500 → `O(x^101)`), Rubi's own
@@ -478,7 +478,7 @@ propagate":
 - `rubi/driver.ts:451`, `:506` → `return null` (integration silently degrades)
 - `rubi/driver.ts:1809`, `rubi/normal-form.ts:205`, `rubi-utils.ts:469-474`
 - `monte-carlo.ts:122` → returns partial estimate
-- `cortex/execute-cortex.ts:104-116` → converts to a boxed `["Error", …]`
+- `epsil/execute-epsil.ts:104-116` → converts to a boxed `["Error", …]`
 
 Note these test `e.name === 'CancellationError'` rather than `instanceof`, for
 cross-bundle safety. Preserve that.
@@ -564,7 +564,7 @@ attribution it reports which span owned the deadline.
   of which engine loop is spinning.
 - Convert the ~12 suites that assert a throw via the ambient limit — these
   would **hang** rather than fail at release N+1, so they must move during
-  release N: `cortex/execute.test.ts:397`, `bug-fixes.test.ts:184`,
+  release N: `epsil/execute.test.ts:397`, `bug-fixes.test.ts:184`,
   `parser-for-comprehension.test.ts:201-203`,
   `limit-special-functions.test.ts:275-309`,
   `compile-integrate.test.ts:169-175`, `interpret.test.ts:351-368`, plus the
@@ -628,7 +628,7 @@ a prerequisite rather than a nicety.
    did not exist in CHANGELOG.md and was created (verbatim, brackets —
    release-process load-bearing).
 4. ~~Test-suite conversion to labelled spans, §6.5~~ — **DONE** (release N
-   scope). Converted to labelled spans (`test:*`): cortex execute, bug-fixes
+   scope). Converted to labelled spans (`test:*`): epsil execute, bug-fixes
    (#29 Gruntz tower), parser-for-comprehension (IndexOf/∞-Range),
    limit-special-functions (two Gruntz cases), compile-integrate
    (degrade-to-quadrature — degrade verified to still occur under a span),

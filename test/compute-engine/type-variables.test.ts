@@ -13,7 +13,7 @@ import {
   substituteTypeVariables,
 } from '../../src/common/type/instantiate';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import type { Type } from '../../src/common/type/types';
 
 //
@@ -1535,9 +1535,9 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
     expect(ce.box(['f', 5]).evaluate().toString()).toBe('6');
   });
 
-  test('route 3 — a Cortex annotated declaration', () => {
+  test('route 3 — an Epsil annotated declaration', () => {
     const ce = fresh();
-    const { value } = executeCortex(ce, 'let f: forall T. (T) -> T = x |-> x');
+    const { value } = executeEpsil(ce, 'let f: forall T. (T) -> T = x |-> x');
     expect(value.toString()).not.toContain('incompatible-type');
     expect(ce.box(['f', 5]).evaluate().toString()).toBe('5');
   });
@@ -1636,9 +1636,9 @@ describe('THE DECLARATION BOUNDARY — a generic declaration takes a body', () =
     expect(b.toString()).toMatch(RANK2);
   });
 
-  test('Cortex — a `forall` parameter annotation is rejected, not a parse error', () => {
+  test('Epsil — a `forall` parameter annotation is rejected, not a parse error', () => {
     const ce = fresh();
-    const { value, diagnostics } = executeCortex(
+    const { value, diagnostics } = executeEpsil(
       ce,
       'f(x: forall T. (T) -> T) = 1'
     );

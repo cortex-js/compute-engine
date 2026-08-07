@@ -3812,7 +3812,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     };
     return build(0);
   },
-  // Cortex `Match`: tier-0/1 constant dispatch as a nested `select`/ternary with
+  // Epsil `Match`: tier-0/1 constant dispatch as a nested `select`/ternary with
   // `==` comparisons, the subject inlined into each comparison (safe for a PURE
   // subject; an impure one is bound to a hoisted temporary instead — see
   // `BaseCompiler.compileMatchTernary`). Tier-2 destructuring, refutable

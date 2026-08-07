@@ -314,41 +314,41 @@ describe('BROADCAST ELIGIBILITY: function-typed parameters', () => {
       `g(${arg}, [10, 20])`,
     ].join('\n');
 
-  const runCortex = (src: string) => {
+  const runEpsil = (src: string) => {
     // Lazily required so this file keeps its engine-only import surface.
     const {
-      executeCortex,
-    } = require('../../src/cortex/execute-cortex') as typeof import('../../src/cortex/execute-cortex');
+      executeEpsil,
+    } = require('../../src/epsil/execute-epsil') as typeof import('../../src/epsil/execute-epsil');
     const ce = new ComputeEngine();
-    const r = executeCortex(ce, src);
+    const r = executeEpsil(ce, src);
     expect(r.diagnostics).toEqual([]);
     return r.value.toString();
   };
 
   test('a bare parameter broadcasts (baseline)', () => {
-    expect(runCortex(prog('c', '1'))).toBe('[box(10),box(20)]');
+    expect(runEpsil(prog('c', '1'))).toBe('[box(10),box(20)]');
   });
 
   test('a scalar-typed parameter broadcasts', () => {
-    expect(runCortex(prog('c: number', '1'))).toBe('[box(10),box(20)]');
-    expect(runCortex(prog('c: string', '"a"'))).toBe('[box(10),box(20)]');
+    expect(runEpsil(prog('c: number', '1'))).toBe('[box(10),box(20)]');
+    expect(runEpsil(prog('c: string', '"a"'))).toBe('[box(10),box(20)]');
   });
 
   test('a function-typed parameter no longer vetoes', () => {
-    expect(runCortex(prog('c: (any) -> any', '(x) |-> x'))).toBe(
+    expect(runEpsil(prog('c: (any) -> any', '(x) |-> x'))).toBe(
       '[box(10),box(20)]'
     );
-    expect(runCortex(prog('c: function', '(x) |-> x'))).toBe(
+    expect(runEpsil(prog('c: function', '(x) |-> x'))).toBe(
       '[box(10),box(20)]'
     );
   });
 
   test('a collection-typed parameter still vetoes', () => {
-    expect(runCortex(prog('c: list<number>', '[1]'))).toBe('box([10,20])');
-    expect(runCortex(prog('c: tuple<number, number>', '(0, 1)'))).toBe(
+    expect(runEpsil(prog('c: list<number>', '[1]'))).toBe('box([10,20])');
+    expect(runEpsil(prog('c: tuple<number, number>', '(0, 1)'))).toBe(
       'box([10,20])'
     );
-    expect(runCortex(prog('c: dictionary<number>', '{lo -> 0}'))).toBe(
+    expect(runEpsil(prog('c: dictionary<number>', '{lo -> 0}'))).toBe(
       'box([10,20])'
     );
   });
@@ -369,7 +369,7 @@ describe('BROADCAST ELIGIBILITY: function-typed parameters', () => {
     ] as const) {
       test(label, () => {
         expect(
-          runCortex(
+          runEpsil(
             [
               tree,
               `function map${sig} { tree(f(t.value), map(f, t.children)) }`,

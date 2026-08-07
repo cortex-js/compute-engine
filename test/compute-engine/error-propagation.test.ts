@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 import type { MathJsonExpression } from '../../src/math-json/types';
 import {
@@ -48,13 +48,13 @@ const ERR: MathJsonExpression = ['Error', { str: 'oops' }];
  * motivating case of the design's spec refinement. */
 const BAD: MathJsonExpression = ['Add', { str: 'a' }, 1];
 
-/** Run a Cortex program on a fresh engine. */
-function cortex(source: string): string {
+/** Run an Epsil program on a fresh engine. */
+function epsil(source: string): string {
   const ce = new ComputeEngine();
   const parseLatex = (latex: string): MathJsonExpression => ce.parse(latex).json;
-  const { value, diagnostics } = executeCortex(ce, source, { parseLatex });
+  const { value, diagnostics } = executeEpsil(ce, source, { parseLatex });
   // These programs are deliberately bad, and `"a" + 1` is detectable at
-  // canonicalization time: `executeCortex` reports it as a
+  // canonicalization time: `executeEpsil` reports it as a
   // `static-type-error` diagnostic before running the program (design §5),
   // then evaluates it anyway. What this helper pins is what *evaluation*
   // does with the error, so only non-static diagnostics are unexpected.
@@ -136,17 +136,17 @@ describe('ERROR PROPAGATION — rung 2: bubbling at application', () => {
     expect(calls()).toBe(0);
   });
 
-  test('route parity: box, ce.function and Cortex agree', () => {
+  test('route parity: box, ce.function and Epsil agree', () => {
     const { ce } = setup();
     const boxed = ce.box(ERR);
     expect(ce.function('f', [boxed]).evaluate().toString()).toBe(
       'Error("oops")'
     );
     expect(ce.box(['f', ERR]).evaluate().toString()).toBe('Error("oops")');
-    expect(cortex('let f = x |-> x + 1; f("a" + 1)')).toBe(
+    expect(epsil('let f = x |-> x + 1; f("a" + 1)')).toBe(
       'Error(ErrorCode("incompatible-type", "number", "string"))'
     );
-    expect(cortex('let f = x |-> x + 1; ("a" + 1) |> f')).toBe(
+    expect(epsil('let f = x |-> x + 1; ("a" + 1) |> f')).toBe(
       'Error(ErrorCode("incompatible-type", "number", "string"))'
     );
   });
@@ -241,13 +241,13 @@ describe('ERROR PROPAGATION — rung 3: the breadcrumb (§2a)', () => {
     // The breadcrumb is provenance, not payload: it must not change how a
     // `match` case sees the error.
     expect(
-      cortex('match Sin("a" + 1) {\n  Error(c) => "caught"\n  _ => "no"\n}')
+      epsil('match Sin("a" + 1) {\n  Error(c) => "caught"\n  _ => "no"\n}')
     ).toBe('"caught"');
   });
 
-  test('the Cortex runtime-error diagnostic renders the frame chain', () => {
+  test('the Epsil runtime-error diagnostic renders the frame chain', () => {
     const ce = new ComputeEngine();
-    const { diagnostics } = executeCortex(
+    const { diagnostics } = executeEpsil(
       ce,
       'let y = Sin("a" + 1)\n1 + 1',
       {}
@@ -354,13 +354,13 @@ describe('ERROR PROPAGATION — rung 1: IsError', () => {
     ).toBe('True');
   });
 
-  test('route parity: box, ce.function and Cortex agree', () => {
+  test('route parity: box, ce.function and Epsil agree', () => {
     const ce = new ComputeEngine();
     expect(ce.function('IsError', [ce.box(BAD)]).evaluate().symbol).toBe(
       'True'
     );
-    expect(cortex('IsError("a" + 1)')).toBe('"True"');
-    expect(cortex('IsError(5)')).toBe('"False"');
+    expect(epsil('IsError("a" + 1)')).toBe('"True"');
+    expect(epsil('IsError(5)')).toBe('"False"');
   });
 
   /**
@@ -378,7 +378,7 @@ describe('ERROR PROPAGATION — rung 1: IsError', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Pipe', BAD, 'IsError']).evaluate().symbol).toBe('True');
     expect(ce.box(['IsError', BAD]).evaluate().symbol).toBe('True');
-    expect(cortex('("a" + 1) |> IsError')).toBe('"True"');
+    expect(epsil('("a" + 1) |> IsError')).toBe('"True"');
   });
 
   test('`Type` is likewise an observer on both routes', () => {
@@ -416,8 +416,8 @@ describe('ERROR PROPAGATION — Nothing: argument-list erasure, route parity', (
     expect(ce.box(['Pipe', 'Nothing', lit]).evaluate().toString()).toBe(
       nullary
     );
-    expect(cortex('(x |-> x + 1)(Nothing)')).toBe(nullary);
-    expect(cortex('Nothing |> (x |-> x + 1)')).toBe(nullary);
+    expect(epsil('(x |-> x + 1)(Nothing)')).toBe(nullary);
+    expect(epsil('Nothing |> (x |-> x + 1)')).toBe(nullary);
   });
 });
 
@@ -603,12 +603,12 @@ describe('ERROR PROPAGATION — rung 3: the §8a route-divergence residue is clo
 
   test('`Assume` of a non-predicate is a VALUE, not a throw', () => {
     // §6a.4: the throw was inside `assume()`'s own dispatcher, so it escaped
-    // to the host on the direct route while Cortex turned it into a value.
+    // to the host on the direct route while Epsil turned it into a value.
     const ce = new ComputeEngine();
     expect(() => ce.box(['Assume', ['Ln', { str: 'a' }]]).evaluate()).not.toThrow();
     expect(() => ce.box(['Assume', 5]).evaluate()).not.toThrow();
     expect(ce.assume(ce.box(['Ln', { str: 'a' }]))).toBe('not-a-predicate');
-    expect(cortex('Assume(Ln("a"))')).not.toContain('Unsupported assumption');
+    expect(epsil('Assume(Ln("a"))')).not.toContain('Unsupported assumption');
     // The operator reports the outcome as a STRING: two AssumeResult values
     // ("not-a-predicate", "internal-error") are not valid symbol names, so
     // the previous `-> symbol` contract rendered exactly the failure cases
@@ -681,7 +681,7 @@ describe('ERROR PROPAGATION — Nothing: erasure is a rule on the WRITTEN argume
     expect(ce.box(['Pipe', ['g'], NOTHING_FN]).evaluate().toString()).toBe(
       '"nothing"'
     );
-    expect(cortex('let g = () |-> Nothing; (x |-> Type(x))(g())')).toBe(
+    expect(epsil('let g = () |-> Nothing; (x |-> Type(x))(g())')).toBe(
       '"nothing"'
     );
   });

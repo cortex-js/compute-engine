@@ -452,7 +452,7 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   // used verbatim, bypassing the widening rule. A Block's type is its last
   // statement's type, so `body.type` already surfaces the ascribed return.
   const ascribedReturn = functionLiteralReturnType(expr);
-  // A FULL-SIGNATURE marker (`docs/EFFECTS-MODEL.md`, "Cortex surface") is the
+  // A FULL-SIGNATURE marker (`docs/EFFECTS-MODEL.md`, "Epsil surface") is the
   // trap here: `Typed`'s type handler surfaces the ascribed type verbatim, and
   // a Block's type is its last statement's, so `body.type` IS that whole
   // signature — meaningless as a body type. The last statement's OWN type

@@ -586,7 +586,7 @@ describe('An undecidable comparison keeps its evaluated operands', () => {
   });
 });
 
-describe('Same (Cortex `===`) — total structural identity', () => {
+describe('Same (Epsil `===`) — total structural identity', () => {
   const s = (...ops: any[]) =>
     ce.box(['Same', ...ops] as any).evaluate().symbol;
 
@@ -705,7 +705,7 @@ describe('Same (Cortex `===`) — total structural identity', () => {
   test('NaN identity does not depend on interning', () => {
     // `"NaN"` and a bare `{num:"NaN"}` box to the interned `ce.NaN`, so
     // `isSame` used to succeed by object identity alone. Attaching metadata
-    // (`sourceOffsets`, as the Cortex parser does) defeats interning and
+    // (`sourceOffsets`, as the Epsil parser does) defeats interning and
     // produced a *fresh* number literal — and `Same` then answered `False`,
     // making the answer depend on provenance rather than on the value.
     const nan = (offsets: [number, number]) =>

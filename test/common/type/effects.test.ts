@@ -162,7 +162,7 @@ describe('grammar: accepted forms', () => {
   // it is a distinct SPELLING and it round-trips: `parseType` →
   // `typeToString` gives the author's `pure` back, so re-declaring from a
   // serialized signature re-establishes the purity contract instead of
-  // silently demoting it to the inferred track (the Cortex round-trip
+  // silently demoting it to the inferred track (the Epsil round-trip
   // argument). See `user-function-purity.test.ts` for the contract half.
   //
   describe('`pure` — the stated empty set, and it round-trips', () => {

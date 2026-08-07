@@ -103,7 +103,7 @@ Impact:
 Evidence:
 
 - Package exports only `.` in `package.json`
-- Separate roots exist (`src/math-json.ts`, `src/cortex.ts`) but are not exposed via subpath exports
+- Separate roots exist (`src/math-json.ts`, `src/epsil.ts`) but are not exposed via subpath exports
 - Example imports are inconsistent: some from `../dist/*`, some from `../src/*`, while README uses package import
 
 Impact:
@@ -306,7 +306,7 @@ That document proposes role interfaces and stronger type contracts for boxed exp
 5. Publish explicit subpath exports
 - `@cortex-js/compute-engine`
 - `@cortex-js/compute-engine/math-json`
-- `@cortex-js/compute-engine/cortex`
+- `@cortex-js/compute-engine/epsil`
 
 ## Prioritized Refactor Plan
 
@@ -323,7 +323,7 @@ That document proposes role interfaces and stronger type contracts for boxed exp
 ## Phase 1: Public API and Packaging (2-4 weeks)
 
 1. Introduce new explicit form API and aliases (`parseLatex`, `boxMathJson`)
-2. Add subpath exports for `math-json` and `cortex`
+2. Add subpath exports for `math-json` and `epsil`
 3. Replace implicit global registration with opt-in call
 4. Update docs and examples to one coherent API narrative by persona
 

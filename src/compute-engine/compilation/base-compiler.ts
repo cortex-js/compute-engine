@@ -4176,7 +4176,7 @@ export class BaseCompiler {
   }
 
   // ───────────────────────────────────────────────────────────────────────
-  // `Match` compilation (Cortex structural pattern matching, Phase 4 —
+  // `Match` compilation (Epsil structural pattern matching, Phase 4 —
   // docs/plans/2026-07-12-cortex-match-design.md §5).
   //
   // Compilation reuses the classification ladder from `match-dispatch.ts`

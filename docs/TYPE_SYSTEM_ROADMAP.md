@@ -22,7 +22,7 @@ its own):
 - `docs/EFFECTS-MODEL.md` — effect labels on function types
 - `docs/plans/2026-08-03-cortex-language-extensions-review.md` —
   language-level backlog (sum sugar would slot there)
-- `src/cortex/docs/types.md` — Cortex-surface reference for the `type` /
+- `src/epsil/docs/types.md` — Epsil-surface reference for the `type` /
   `type alias` statements
 
 ### In flight as of 2026-08-06
@@ -34,8 +34,8 @@ tree, **uncommitted**. Known residuals that this roadmap builds on:
 parameterized nominals (`unsupported-variable-position` — the restriction
 behind the §2.2 ruling); wrong-arity result type in a constructor-function
 literal gets a misleading E1-sugar diagnostic; re-declaring a type throws
-on the host API but replaces via Cortex statement. The Cortex-surface doc
-(`src/cortex/docs/types.md`) still says constructing/reading parameterized
+on the host API but replaces via Epsil statement. The Epsil-surface doc
+(`src/epsil/docs/types.md`) still says constructing/reading parameterized
 nominal values is unsupported — stale once the working tree lands; update
 it with the same commit.
 
@@ -90,7 +90,7 @@ OCaml-polymorphic-variant / TS-discriminated-union "detected shape" model.
 Probed working end to end (2026-08-06), including the recursive generic
 case with the sum's own name at recursive positions:
 
-```cortex
+```epsil
 type leaf = nothing
 type node<T> = tuple<value: T, children: list<type tree<T>>>   // fwd ref, defers
 type alias tree<T> = leaf | node<T>                            // fulfilment: OK
@@ -106,7 +106,7 @@ self-recursive, transparent JSON alias works today, with structural
 membership (`list<list<number>> <: json`), the self-forward-ref staying
 equirecursive/lazy:
 
-```cortex
+```epsil
 type alias json = missing | boolean | number | string
                 | list<type json> | dictionary<type json>
 ```
@@ -200,7 +200,7 @@ bound + HKT signature `<F: collection, T, U>(F<T>, (T) -> U) -> F<U>`
 would express declaratively — the compiler written because the type
 language couldn't say it. First deliverable on this track: user
 conformance (a nominal type declaring itself a collection and supplying
-handlers from Cortex).
+handlers from Epsil).
 
 ## 5. Higher-kinded types and rank-2 (long term, gated)
 
@@ -219,7 +219,7 @@ For genuine Functor/Monad abstraction, in dependency order:
    scope-enforcement types à la `runST`/`withFile`, where the nested
    quantifier makes resource escape a type error.) Inference: rank-2 is
    barely decidable, rank-3+ undecidable — annotation-required in
-   practice, which fits Cortex's explicit-annotation posture.
+   practice, which fits Epsil's explicit-annotation posture.
 
 Neither is committed. The trigger would be demand for user-defined
 container/functor abstractions that the blessed-concrete-monads posture

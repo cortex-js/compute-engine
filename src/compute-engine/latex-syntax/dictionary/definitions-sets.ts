@@ -81,7 +81,7 @@ function parseIntervalBody(
  * is a closed interval and a parenthesized pair `(a, b)` is an open one.
  *
  * This reading happens HERE, at the LaTeX boundary. A directly-constructed
- * MathJSON `["List", a, b]` (or a Cortex `[a, b]` literal) is a two-element
+ * MathJSON `["List", a, b]` (or an Epsil `[a, b]` literal) is a two-element
  * collection, never an interval — set operations on it use collection
  * semantics (e.g. `Intersection([1,2], [2,3])` → `Set(2)`). Unambiguous
  * interval notations (`[a, b)`, `]a, b[`, …) have dedicated matchfix entries.

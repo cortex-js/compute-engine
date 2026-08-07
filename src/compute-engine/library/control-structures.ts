@@ -456,7 +456,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, options) => evaluateWhich(ops, options),
     },
 
-    // Structural pattern matching (Cortex `match`). See
+    // Structural pattern matching (Epsil `match`). See
     // `docs/plans/2026-07-12-cortex-match-design.md` and
     // `boxed-expression/match-dispatch.ts`.
     Match: {
@@ -1052,7 +1052,7 @@ function evaluateBlock(
   // and it then hid the call value in the lambda's fresh scope:
   // `function s(k: number) { if 1 > 0 { k } else { 0 } }` returned the symbol
   // `k`, while the same function with a bare `k` returned the argument.
-  // (Cortex wraps each `if` branch in a Block, which is why the conditional
+  // (Epsil wraps each `if` branch in a Block, which is why the conditional
   // shape surfaced it.) Locals from a previous evaluation of this block carry
   // the marker and are still kept — reset by `Declare`'s statement-redeclare
   // path, not here.

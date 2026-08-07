@@ -446,7 +446,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     };
     return buildPiecewise(0);
   },
-  // Cortex `Match`: structural pattern matching. An interval subject spanning
+  // Epsil `Match`: structural pattern matching. An interval subject spanning
   // two cases' constants has the same discontinuity hazard as compiled `Which`,
   // but a faithful interval treatment (per-branch `singular` semantics for
   // structural equality dispatch) is an explicit v1 out (design §5). Fail closed

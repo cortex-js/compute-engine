@@ -8,7 +8,7 @@ import type { MathJsonExpression } from '../../src/math-json/types';
  * via the `DefineFunction` head — clause accumulation, tri-state dispatch,
  * inert-on-undecidable, `no-matching-clause`, symbol-level effect row.
  *
- * Box/programmatic routes only (the Cortex surface is Phase 2).
+ * Box/programmatic routes only (the Epsil surface is Phase 2).
  */
 
 let ce: ComputeEngine;
@@ -181,7 +181,7 @@ describe('DEFINE FUNCTION — accumulation', () => {
     // With nominal-types v2 constructor functions live, a definition
     // statement targeting a same-scope type name is a smart-constructor
     // definition — the constructor interpretation wins over clause
-    // accumulation. (Cortex: `type frac = …; function frac(…) { … }`.)
+    // accumulation. (Epsil: `type frac = …; function frac(…) { … }`.)
     ce.declareType('point', 'tuple<integer, integer>');
     const r = clause('point', [
       'Function',
@@ -324,7 +324,7 @@ describe('DEFINE FUNCTION — About clause listing', () => {
   });
 
   it('suppresses GENERATED literal-parameter names (§4.5)', () => {
-    // The Cortex lowering's generated names (`literalParam_<n>`) render by
+    // The Epsil lowering's generated names (`literalParam_<n>`) render by
     // their value type alone; a user-chosen name (above) is kept.
     clause('f', ['Function', 100, p('literalParam_1', '0')]);
     clause('f', ['Function', ['Add', 'n', 1], p('n', 'integer')]);

@@ -1670,7 +1670,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "A collection of key -> value entries with string keys (`{x -> 1, y -> 2}` in Cortex)."
+      "description": "A collection of key -> value entries with string keys (`{x -> 1, y -> 2}` in Epsil)."
     },
     {
       "name": "DictionaryFrom",
@@ -2374,7 +2374,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Access a named field of a value: `p.x` in Cortex.\n\nOn a record or dictionary value, `Field(d, \"x\")` behaves exactly as `d[\"x\"]` (`At` semantics, including the absence marker for a key a dictionary may not have).\n\nOn a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p[\"x\"]` keep rejecting.\n\nA field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic."
+      "description": "Access a named field of a value: `p.x` in Epsil.\n\nOn a record or dictionary value, `Field(d, \"x\")` behaves exactly as `d[\"x\"]` (`At` semantics, including the absence marker for a key a dictionary may not have).\n\nOn a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p[\"x\"]` keep rejecting.\n\nA field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic."
     },
     {
       "name": "Fill",
@@ -5886,7 +5886,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Structural identity comparison (Cortex `===`).\n\nTrue iff every adjacent pair of operands is structurally identical."
+      "description": "Structural identity comparison (Epsil `===`).\n\nTrue iff every adjacent pair of operands is structurally identical."
     },
     {
       "name": "Scan",
@@ -6262,7 +6262,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Spread(t): splice the elements of the tuple `t` into the enclosing\n\nargument list (Cortex surface syntax: `f(...t)`).\n\nA literal tuple splices at canonicalization; a symbolic argument is\n\nspliced by the enclosing call at evaluation (step 0 of the evaluate\n\npath), which re-validates the resulting arity."
+      "description": "Spread(t): splice the elements of the tuple `t` into the enclosing\n\nargument list (Epsil surface syntax: `f(...t)`).\n\nA literal tuple splices at canonicalization; a symbolic argument is\n\nspliced by the enclosing call at evaluation (step 0 of the evaluate\n\npath), which re-validates the resulting arity."
     },
     {
       "name": "Sqrt",

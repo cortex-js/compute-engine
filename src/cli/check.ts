@@ -1,15 +1,15 @@
 import type { MathJsonExpression } from '../math-json/types.js';
 
-import { ComputeEngine, parseCortex } from '../cortex.js';
-import type { ParsingDiagnostic } from '../cortex/diagnostics.js';
-import { staticDiagnostics } from '../cortex/static-diagnostics.js';
+import { ComputeEngine, parseEpsil } from '../epsil.js';
+import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
+import { staticDiagnostics } from '../epsil/static-diagnostics.js';
 
 import { CliUsageError, parseCheckArguments } from './arguments.js';
 import { diagnosticToJson, formatDiagnostics } from './format.js';
 import { readSource, type CliIo } from './io.js';
 
 /**
- * Parse a program without evaluating it, the way `cortex check` does: a
+ * Parse a program without evaluating it, the way `epsil check` does: a
  * LaTeX parser is injected so `$…$` islands check the same way they
  * evaluate, and a `#error` directive (which throws a FatalParsingError)
  * is reported as a diagnostic rather than crashing the caller.
@@ -26,7 +26,7 @@ export function parseSource(
   const parseLatex = (latex: string) => engine.parse(latex).json;
 
   try {
-    const [ast, diagnostics] = parseCortex(source, url, { parseLatex });
+    const [ast, diagnostics] = parseEpsil(source, url, { parseLatex });
     return { ast, diagnostics };
   } catch (error) {
     return {
@@ -48,7 +48,7 @@ export function parseSource(
 /**
  * Parse a program and report both its parse diagnostics and the type errors
  * the engine detects when the program is *canonicalized* — the check phase
- * shared by `cortex check` and the MCP `check` tool.
+ * shared by `epsil check` and the MCP `check` tool.
  *
  * The canonicalization pass is skipped when parsing produced errors: the AST
  * of an unparseable program is a guess, and its canonical form would spray
@@ -75,7 +75,7 @@ export function checkSource(
 }
 
 /**
- * `cortex check` — parse and canonicalize a program, reporting diagnostics
+ * `epsil check` — parse and canonicalize a program, reporting diagnostics
  * without evaluating anything. This is the fast validation loop: syntax,
  * string and type-annotation errors, `match` shape problems, and the type
  * errors the engine catches at canonicalization time (`"a" + 1`). It does not
@@ -94,7 +94,7 @@ export async function runCheck(
       error instanceof CliUsageError && error.message
         ? `${error.message}\n`
         : '';
-    io.stderr.write(`${message}Try "cortex --help" for more information.\n`);
+    io.stderr.write(`${message}Try "epsil --help" for more information.\n`);
     return 2;
   }
 
@@ -104,7 +104,7 @@ export async function runCheck(
     ({ source, url } = await readSource(options.eval, options.file, io));
   } catch (error) {
     io.stderr.write(
-      `cortex: ${error instanceof Error ? error.message : String(error)}\n`
+      `epsil: ${error instanceof Error ? error.message : String(error)}\n`
     );
     return 1;
   }

@@ -5,7 +5,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 //
 // - `String(…)` joined its operands' *serialized* forms, so a string
 //   operand's quotes leaked into the result value: `String("x = ", 3)`
-//   produced the content `"x = "3` instead of `x = 3`. This broke Cortex
+//   produced the content `"x = "3` instead of `x = 3`. This broke Epsil
 //   string interpolation (`"\(x)"` lowers to `String`).
 // - `Type` is lazy (it must not evaluate its operand), but a lazy operand is
 //   not canonical and a non-canonical expression has no type — so `Type(y)`

@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // User-defined constructor functions (nominal-types design §4.5/§4.5b,
@@ -142,7 +142,7 @@ describe('record-body constructor function (host route)', () => {
 describe('D9 equality over constructed values', () => {
   test('a normalizing constructor produces EQUAL values from equal inputs', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type frac = record<n: integer, d: integer>
 function frac(n: integer, d: integer) { {n -> n / GCD(n, d), d -> d / GCD(n, d)} }
@@ -243,7 +243,7 @@ describe('runtime arm dispatch — refutations produce clean errors', () => {
     // scope. `BoxedDictionary.json` now serializes expression-valued entries
     // in the `["Dictionary", …]` operator form, which re-binds correctly.
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type nat = record<v: integer>
 function nat(x: integer) { if (x < 0) { nat(-x) } else { {v -> x} } }
@@ -261,7 +261,7 @@ function nat(x: integer) { if (x < 0) { nat(-x) } else { {v -> x} } }
 describe('D15 — self-reference in the constructor body', () => {
   test('a recursive constructor passes its own tagged result through un-nested', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type pt = tuple<x: number, y: number>
 function pt(k: number, flag: boolean) { if (k < 0) { pt(-k, flag) } else { (k, k + 1) } }
@@ -278,7 +278,7 @@ pt(-3, True)`
 // not parse — a wrong arity, an unknown name — the signature readers used to
 // swallow the failure: the E1 sugar (a signature STRING in the parameter slot)
 // fell through to `expected-a-symbol`, blaming the operand for not being a
-// symbol, and the E2 body-slot marker (what the Cortex `function f<U>(…) -> …`
+// symbol, and the E2 body-slot marker (what the Epsil `function f<U>(…) -> …`
 // head lowers to) dropped the whole contract silently. Both now report the
 // type parser's own diagnostic.
 //
@@ -336,9 +336,9 @@ describe('a signature annotation that does not parse reports WHY', () => {
     expect(f.type.toString()).toBe('forall U. (v: U) -> tree<U>');
   });
 
-  test('the Cortex route reports the arity problem instead of dropping the annotation', () => {
+  test('the Epsil route reports the arity problem instead of dropping the annotation', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type tr<T> = tuple<v: T, cs: list<type tr<T>>>
 function f<U>(x: U) -> tr<U, U> { x }
@@ -352,10 +352,10 @@ Type(f)`
   });
 });
 
-describe('Cortex route (statement flow)', () => {
+describe('Epsil route (statement flow)', () => {
   test('the §4.5 flagship example works end to end with zero diagnostics', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type circle = record<x: number, y: number, r: number>
 function circle(x, y, r) { {x -> x, y -> y, r -> r} }
@@ -371,7 +371,7 @@ circle(1, 2, 3)`
     // recognition must run at Assign CANONICALIZATION, or `point(1, 0, True)`
     // would be validated against the auto-minted 2-ary signature.
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type point = tuple<x: number, y: number>
 function point(r: number, theta: number, polar: boolean) { (r * Cos(theta), r * Sin(theta)) }
@@ -383,7 +383,7 @@ point(1, 0, True)`
 
   test('match destructures a tagged value through the constructor pattern', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type pt = tuple<x: number, y: number>
 const p = pt(1, 2)
@@ -394,7 +394,7 @@ match p { pt(a, b) => a + b }`
 
   test('function BEFORE the type declaration is the D5 collision', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `function circle(x, y, r) { {x -> x, y -> y, r -> r} }
 type circle = record<x: number, y: number, r: number>
@@ -409,7 +409,7 @@ circle(1, 2, 3)`
 
   test('an alias type´s same-name function is an ordinary function (no tagging)', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type alias pair = tuple<number, number>
 function pair(x) { x + 1 }
@@ -421,16 +421,16 @@ pair(3)`
 
   test('re-running the function statement replaces the constructor (notebook re-run)', () => {
     const ce = new ComputeEngine();
-    executeCortex(
+    executeEpsil(
       ce,
       `type m = number
 function m(b: boolean) { If(b, 1, 0) }`
     );
-    const r1 = executeCortex(ce, `m(True)`);
+    const r1 = executeEpsil(ce, `m(True)`);
     expect(r1.value!.json).toEqual(['m', 1]);
     // Edited body, same signature shape: the new body wins.
-    executeCortex(ce, `function m(b: boolean) { If(b, 10, 0) }`);
-    const r2 = executeCortex(ce, `m(True)`);
+    executeEpsil(ce, `function m(b: boolean) { If(b, 10, 0) }`);
+    const r2 = executeEpsil(ce, `m(True)`);
     expect(r2.value!.json).toEqual(['m', 10]);
   });
 });

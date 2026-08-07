@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
 //
-// `Spread` — the engine marker behind the Cortex spread syntax `f(...t)`.
+// `Spread` — the engine marker behind the Epsil spread syntax `f(...t)`.
 //
 // A `Spread` operand whose argument is a literal `Tuple` splices at
 // canonicalization (via `Sequence`); a symbolic argument defers — argument

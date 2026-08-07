@@ -1,6 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { assertGroundType } from '../../src/common/type/subtype';
 import type { Type } from '../../src/common/type/types';
 
@@ -148,9 +148,9 @@ describe('§5 — T is solved at the construction site', () => {
     expect(t.type.toString()).toBe('tree<finite_integer>');
   });
 
-  test('Cortex route: the §2 flagship declares and constructs with no diagnostic', () => {
+  test('Epsil route: the §2 flagship declares and constructs with no diagnostic', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type tree<T> = tuple<value: T, children: list<tree<T>>>\n' +
         'let t = tree(1, [])\n' +

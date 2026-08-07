@@ -1,10 +1,10 @@
-import { ComputeEngine } from '../cortex.js';
+import { ComputeEngine } from '../epsil.js';
 
 import { CliUsageError, parseDocArguments } from './arguments.js';
 import type { CliIo } from './io.js';
 
 /**
- * One documentation entry, as printed by `cortex doc`. `signature` is set
+ * One documentation entry, as printed by `epsil doc`. `signature` is set
  * for operators, `type` (and `value`, when it has one) for symbols.
  */
 export interface DocEntry {
@@ -20,7 +20,7 @@ export interface DocEntry {
 }
 
 /**
- * `cortex doc <name-or-keywords>` — look up a library definition by exact
+ * `epsil doc <name-or-keywords>` — look up a library definition by exact
  * name, or search the library (identifiers, descriptions, curated keywords,
  * LaTeX triggers) when the argument is not a known name.
  */
@@ -33,7 +33,7 @@ export function runDoc(args: readonly string[], io: CliIo): number {
       error instanceof CliUsageError && error.message
         ? `${error.message}\n`
         : '';
-    io.stderr.write(`${message}Try "cortex --help" for more information.\n`);
+    io.stderr.write(`${message}Try "epsil --help" for more information.\n`);
     return 2;
   }
 
@@ -46,7 +46,7 @@ export function runDoc(args: readonly string[], io: CliIo): number {
         `${JSON.stringify({ query: options.query, matches: [] })}\n`
       );
     } else {
-      io.stderr.write(`cortex: no documentation matches "${options.query}"\n`);
+      io.stderr.write(`epsil: no documentation matches "${options.query}"\n`);
     }
     return 1;
   }
@@ -72,7 +72,7 @@ export function runDoc(args: readonly string[], io: CliIo): number {
 }
 
 /**
- * Look up library documentation the way `cortex doc` does: an exact (or
+ * Look up library documentation the way `epsil doc` does: an exact (or
  * case-insensitively exact) name gets the full entry first; other queries
  * get a ranked search-result list.
  */

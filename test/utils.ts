@@ -1,8 +1,8 @@
 import { MathJsonExpression as Expression } from '../src/math-json/types';
-import { ParsingDiagnostic } from '../src/cortex/diagnostics';
+import { ParsingDiagnostic } from '../src/epsil/diagnostics';
 import { ComputeEngine } from '../src/compute-engine';
 
-import { parseCortex } from '../src/cortex';
+import { parseEpsil } from '../src/epsil';
 import { _BoxedExpression } from '../src/compute-engine/boxed-expression/abstract-boxed-expression';
 import type { ExpressionInput } from '../src/compute-engine/global-types';
 
@@ -324,14 +324,14 @@ function formatError(errors: ParsingDiagnostic[]): Expression {
   ];
 }
 
-export function validCortex(s: string): Expression | null {
-  const [value, errors] = parseCortex(s);
+export function validEpsil(s: string): Expression | null {
+  const [value, errors] = parseEpsil(s);
   if (errors && errors.length > 0) return formatError(errors);
   return strip(value);
 }
 
-export function invalidCortex(s: string): Expression | null {
-  const [value, errors] = parseCortex(s);
+export function invalidEpsil(s: string): Expression | null {
+  const [value, errors] = parseEpsil(s);
   if (errors && errors.length > 0) return formatError(errors);
   return ['UnexpectedSuccess', strip(value as Expression) ?? 'Missing'];
 }

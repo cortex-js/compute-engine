@@ -4,13 +4,13 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
- * Phase 1 of the Cortex `match` design
+ * Phase 1 of the Epsil `match` design
  * (docs/plans/2026-07-12-cortex-match-design.md §6 item 1): the engine-level
  * `Match`/`MatchCase`/`Pin`/`Alternatives` heads with tier-3 reference
  * semantics via the generic matcher. Selection logic lives in
  * `src/compute-engine/boxed-expression/match-dispatch.ts`.
  *
- * These tests exercise the MathJSON heads directly (the Cortex surface syntax
+ * These tests exercise the MathJSON heads directly (the Epsil surface syntax
  * is Phase 3).
  */
 

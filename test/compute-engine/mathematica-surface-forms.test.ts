@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 /**
  * Mathematica-style surface forms (Tier 1):
@@ -209,7 +209,7 @@ describe('Table also accepts the TUPLE spelling of an iterator spec', () => {
   // tuple to `Tabulate`, which rejected it with `incompatible-type … tuple<…>`.
   //
   // `Table` is `lazy`, so its operands arrive HELD (raw, unbound) on the
-  // `ce.box` and Cortex routes and pre-boxed on the `ce.function` route — all
+  // `ce.box` and Epsil routes and pre-boxed on the `ce.function` route — all
   // three are probed here (see CLAUDE.md, "lazy: true operators").
 
   /** Materialize the (lazy) collection a `Table` canonicalizes to. */
@@ -300,10 +300,10 @@ describe('Table also accepts the TUPLE spelling of an iterator spec', () => {
     );
   });
 
-  test('Cortex route: `Table(k^2, (k,1,5))`', () => {
+  test('Epsil route: `Table(k^2, (k,1,5))`', () => {
     const cx = (source: string) => {
       const e = new ComputeEngine();
-      const { value, diagnostics } = executeCortex(e, source);
+      const { value, diagnostics } = executeEpsil(e, source);
       expect(diagnostics).toEqual([]);
       return value.toString();
     };

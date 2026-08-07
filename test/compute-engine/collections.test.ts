@@ -4351,7 +4351,7 @@ describe('BARE SHORTHAND PREDICATE ON THE EAGER FUNCTION-SLOT OPERATORS', () => 
     ).toBe('[[2,3,4],[3,4,5]]');
   });
 
-  // Parse (Cortex/LaTeX) route: the shorthand and an explicit `\mapsto` lambda
+  // Parse (Epsil/LaTeX) route: the shorthand and an explicit `\mapsto` lambda
   // reach the same canonical form and the same value.
   test('parse route: bare shorthand and a lambda agree', () => {
     expect(

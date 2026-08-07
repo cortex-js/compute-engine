@@ -863,7 +863,7 @@ describe('ELEMENTWISE BROADCAST — hybrid laziness (huge collections)', () => {
     // the arithmetic `Add(Range(1,n),1)` path — its post-eval broadcast gate
     // admits the unresolved-finiteness source. (A LAZY operator keeps the strict
     // whole-collection fold: `Equal(Characters(s), Reverse(Characters(s)))` in
-    // test/cortex/programs.test.ts "anagram and palindrome checks".)
+    // test/epsil/programs.test.ts "anagram and palindrome checks".)
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
     const r = ce.box(['Sin', ['Range', 1, 'n']]).evaluate();

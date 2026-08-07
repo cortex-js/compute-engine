@@ -7,18 +7,18 @@ import {
 } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { ComputeEngine, serializeCortex, version } from '../cortex.js';
+import { ComputeEngine, serializeEpsil, version } from '../epsil.js';
 
 import { CliUsageError, parseMcpArguments } from './arguments.js';
 import { checkSource, parseSource } from './check.js';
 import { lookupDoc } from './doc.js';
 import { diagnosticToJson, formatValue, hasErrors } from './format.js';
 import type { CliIo } from './io.js';
-import { makeCortexSession } from './session.js';
+import { makeEpsilSession } from './session.js';
 import type { McpOptions } from './types.js';
 
 /**
- * `cortex mcp` — a Model Context Protocol server over stdio or Streamable
+ * `epsil mcp` — a Model Context Protocol server over stdio or Streamable
  * HTTP, exposing the same operations as the CLI as tools (`evaluate`,
  * `check`, `doc`, `parse`, `serialize`) and the agent-facing language card
  * as a resource. It is implemented directly rather than through the MCP SDK
@@ -30,7 +30,7 @@ import type { McpOptions } from './types.js';
  * engine's lifetime.)
  */
 
-const CARD_URI = 'cortex://docs/for-agents';
+const CARD_URI = 'epsil://docs/for-agents';
 const MAX_HTTP_BODY_BYTES = 1024 * 1024;
 
 /** Newest first; `initialize` echoes the client's version when supported. */
@@ -44,17 +44,17 @@ const STREAMABLE_HTTP_PROTOCOL_VERSIONS = new Set(
   PROTOCOL_VERSIONS.filter((x) => x !== '2024-11-05')
 );
 
-const INSTRUCTIONS = `Tools for Cortex, the programming language of the Compute Engine (https://cortexjs.io). Before writing Cortex source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions.`;
+const INSTRUCTIONS = `Tools for Epsil, the programming language of the Compute Engine (https://cortexjs.io). Before writing Epsil source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions.`;
 
 const TOOLS = [
   {
     name: 'evaluate',
     description:
-      'Evaluate a complete Cortex program and return its value (the value of the last statement) in display, Cortex and MathJSON forms, along with any diagnostics. Each call runs in a fresh session: definitions do not persist between calls, so the program must be self-contained.',
+      'Evaluate a complete Epsil program and return its value (the value of the last statement) in display, Epsil and MathJSON forms, along with any diagnostics. Each call runs in a fresh session: definitions do not persist between calls, so the program must be self-contained.',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Cortex source code' },
+        source: { type: 'string', description: 'Epsil source code' },
         timeLimit: {
           type: 'number',
           description:
@@ -68,11 +68,11 @@ const TOOLS = [
   {
     name: 'check',
     description:
-      'Parse and canonicalize a Cortex program and report diagnostics without evaluating it. This is the fast validation loop: it catches syntax, string and type-annotation errors, and the type errors detected at canonicalization time (e.g. "a" + 1), but not genuinely dynamic problems (an out-of-range index, a match with no matching case).',
+      'Parse and canonicalize an Epsil program and report diagnostics without evaluating it. This is the fast validation loop: it catches syntax, string and type-annotation errors, and the type errors detected at canonicalization time (e.g. "a" + 1), but not genuinely dynamic problems (an out-of-range index, a match with no matching case).',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Cortex source code' },
+        source: { type: 'string', description: 'Epsil source code' },
       },
       required: ['source'],
     },
@@ -101,11 +101,11 @@ const TOOLS = [
   {
     name: 'parse',
     description:
-      'Parse a Cortex program into MathJSON without evaluating it. Returns the MathJSON expression and any diagnostics.',
+      'Parse an Epsil program into MathJSON without evaluating it. Returns the MathJSON expression and any diagnostics.',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Cortex source code' },
+        source: { type: 'string', description: 'Epsil source code' },
       },
       required: ['source'],
     },
@@ -113,7 +113,7 @@ const TOOLS = [
   },
   {
     name: 'serialize',
-    description: 'Convert a MathJSON expression to Cortex source.',
+    description: 'Convert a MathJSON expression to Epsil source.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -129,10 +129,10 @@ const TOOLS = [
 
 const CARD_RESOURCE = {
   uri: CARD_URI,
-  name: 'cortex-language-card',
-  title: 'Cortex language card',
+  name: 'epsil-language-card',
+  title: 'Epsil language card',
   description:
-    'A compact guide to the Cortex language for agents: syntax, semantics, idioms, common traps and a roster of the standard library. Read this before writing Cortex.',
+    'A compact guide to the Epsil language for agents: syntax, semantics, idioms, common traps and a roster of the standard library. Read this before writing Epsil.',
   mimeType: 'text/markdown',
 };
 
@@ -167,7 +167,7 @@ export async function runMcp(
       error instanceof CliUsageError && error.message
         ? `${error.message}\n`
         : '';
-    io.stderr.write(`${message}Try "cortex --help" for more information.\n`);
+    io.stderr.write(`${message}Try "epsil --help" for more information.\n`);
     return 2;
   }
 
@@ -218,7 +218,7 @@ async function runMcpHttp(
   const server = createMcpHttpServerForDispatcher(mcp, options);
   return new Promise((resolve) => {
     const handleListenError = (error: Error): void => {
-      io.stderr.write(`cortex mcp: ${error.message}\n`);
+      io.stderr.write(`epsil mcp: ${error.message}\n`);
       resolve(1);
     };
     server.once('error', handleListenError);
@@ -227,7 +227,7 @@ async function runMcpHttp(
       const address = server.address() as AddressInfo | null;
       const port = address?.port ?? options.port;
       io.stderr.write(
-        `Cortex MCP server listening on http://${displayHost(
+        `Epsil MCP server listening on http://${displayHost(
           options.host
         )}:${port}${options.path}\n`
       );
@@ -422,7 +422,7 @@ class McpServer {
               ? requested
               : PROTOCOL_VERSIONS[0],
           capabilities: { tools: {}, resources: {} },
-          serverInfo: { name: 'cortex', title: 'Cortex', version },
+          serverInfo: { name: 'epsil', title: 'Epsil', version },
           instructions: INSTRUCTIONS,
         };
       }
@@ -490,12 +490,12 @@ class McpServer {
         ? this.timeLimit
         : requireTimeLimit(args.timeLimit);
 
-    const result = makeCortexSession(timeLimit).evaluate(source);
+    const result = makeEpsilSession(timeLimit).evaluate(source);
     const json = formatValue(result, 'json');
     return toolResult({
       ok: !hasErrors(result),
       value: formatValue(result, 'value'),
-      cortex: formatValue(result, 'cortex'),
+      epsil: formatValue(result, 'epsil'),
       mathjson: json ? JSON.parse(json) : null,
       diagnostics: result.diagnostics.map((x) => diagnosticToJson(x, source)),
     });
@@ -538,8 +538,8 @@ class McpServer {
     if (args.mathjson === undefined)
       throw new Error('Expected a "mathjson" argument.');
     return toolResult({
-      cortex: serializeCortex(
-        args.mathjson as Parameters<typeof serializeCortex>[0]
+      epsil: serializeEpsil(
+        args.mathjson as Parameters<typeof serializeEpsil>[0]
       ),
     });
   }
@@ -687,11 +687,11 @@ function displayHost(host: string): string {
 }
 
 /** Locate the language card when the caller did not supply a loader (the
- * installed CLI resolves it relative to its own bundle; see `cortex.ts`).
+ * installed CLI resolves it relative to its own bundle; see `epsil.ts`).
  * This fallback covers running from a checkout of the repository. */
 async function defaultLoadCard(): Promise<string> {
   try {
-    return await readFile('src/cortex/docs/for-agents.md', 'utf8');
+    return await readFile('src/epsil/docs/for-agents.md', 'utf8');
   } catch {
     throw new McpError(-32002, `Resource not available: ${CARD_URI}`);
   }

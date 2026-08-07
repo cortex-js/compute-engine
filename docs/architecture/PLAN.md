@@ -386,7 +386,7 @@ documents this inconsistency but does not resolve it.
 ### 5.1 Current State
 
 - Single export path: `"."` in package.json
-- MathJSON types and Cortex utilities are bundled but not independently
+- MathJSON types and Epsil utilities are bundled but not independently
   importable
 - Examples use inconsistent import paths (`../src`, `../dist`, package name)
 

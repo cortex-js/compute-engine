@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 //
@@ -17,7 +17,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // constructor is a checked cast: `pt(1, 2)` validates and returns the plain
 // tuple (D10).
 //
-// The Cortex end-to-end shapes live in `test/cortex/declare-type.test.ts`.
+// The Epsil end-to-end shapes live in `test/epsil/declare-type.test.ts`.
 //
 
 /** The outcome of a call, as a string: `'ok'` or `throw: <first line>`. */
@@ -84,9 +84,9 @@ describe('MINTING — signature derivation (D4)', () => {
     expect(ce.operatorInfo('npt')).toBeUndefined();
     // …and the type itself is registered as usual.
     expect(ce.type('npt').toString()).toBe('npt');
-    // The Cortex lint covers the call site.
+    // The Epsil lint covers the call site.
     expect(
-      executeCortex(
+      executeEpsil(
         ce,
         'type alias npt2 = tuple<x: number, y: number>\nnpt2(1, 2)'
       ).diagnostics.map((d) => d.message)
@@ -142,18 +142,18 @@ describe('NOMINAL constructor — the tagged value (§4.1)', () => {
     );
   });
 
-  test('route parity — ce.function / ce.box / Cortex parse', () => {
+  test('route parity — ce.function / ce.box / Epsil parse', () => {
     const ce = new ComputeEngine();
     ce.declareType('point', 'tuple<x: number, y: number>');
     const viaBox = ce.box(['point', 1, 2]);
     const viaFn = ce.function('point', [ce.number(1), ce.number(2)]);
-    const viaCortex = executeCortex(ce, 'point(1, 2)').value;
-    for (const p of [viaBox, viaFn, viaCortex]) {
+    const viaEpsil = executeEpsil(ce, 'point(1, 2)').value;
+    for (const p of [viaBox, viaFn, viaEpsil]) {
       expect(p.toString()).toBe('point(1, 2)');
       expect(p.type.toString()).toBe('point');
     }
     expect(viaBox.isSame(viaFn)).toBe(true);
-    expect(viaBox.isSame(viaCortex)).toBe(true);
+    expect(viaBox.isSame(viaEpsil)).toBe(true);
   });
 
   test('MathJSON round-trips (serialization is free)', () => {
@@ -265,7 +265,7 @@ describe('OPACITY (D3) — a nominal value does not pierce', () => {
 
   test('field access by name ALSO rejects (no D6 accessors in v1)', () => {
     // Recorded deliberately: `At(p, "x")` goes through the same
-    // `indexed_collection | dictionary` gate as `At(p, 1)`, and Cortex has no
+    // `indexed_collection | dictionary` gate as `At(p, 1)`, and Epsil has no
     // `.`-field-access surface at all (`p.x` is a lex/parse error). Accessors
     // therefore wait for a surface; opacity wins (see the task report).
     const ce = engine();

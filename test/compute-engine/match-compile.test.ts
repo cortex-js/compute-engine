@@ -4,7 +4,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
- * Phase 4 of the Cortex `match` design
+ * Phase 4 of the Epsil `match` design
  * (docs/plans/2026-07-12-cortex-match-design.md §5): `compile()` support for the
  * `Match` head. Tier 0/1 (constant / literal / pin-of-constant) compile to
  * chained ternaries (or an integer `switch` on JS), tier 2 (fixed-shape

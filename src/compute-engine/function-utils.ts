@@ -809,7 +809,7 @@ function bodySlotSignature(
   } catch (e) {
     // The text IS signature-shaped (ungrouped, with an arrow), so the failure
     // is the author's contract not parsing — not "this is not a marker".
-    // Swallowing it here dropped the whole ascription silently (a Cortex
+    // Swallowing it here dropped the whole ascription silently (an Epsil
     // `function f<U>(x: U) -> tr<U, U>` typed as `(unknown) -> unknown`).
     return { error: signatureStringError(ce, s, e) };
   }
@@ -1016,7 +1016,7 @@ function desugarSignatureString(
     // The body's own ascription wins over the signature string's result.
   } else if (signatureEffects(type) !== undefined) {
     // Arrow-level effects are PRESERVED onto the constructed signature
-    // (`docs/EFFECTS-MODEL.md`, "Cortex surface"), so the FULL signature is
+    // (`docs/EFFECTS-MODEL.md`, "Epsil surface"), so the FULL signature is
     // ascribed — regardless of `isWide(type.result)`, since the wide-result
     // convention keeps the return inferred downstream.
     newBody = ce._fn('Typed', [body, ce.string(typeToString(type))], {
@@ -1282,7 +1282,7 @@ function unwrapReturn(ce: ComputeEngine, expr: Expression): Expression {
  * second clause) valueless-but-visible in bodyScope, where a nested `Block`
  * or `Sum` resolving up the chain finds it before `freshScope`'s value.
  * Measured: `f(n: integer) = if n <= 1 { 1 } else { n * f(n-1) }` returns
- * `NaN` (`test/cortex/execute.test.ts` › 'recursion with a typed param still
+ * `NaN` (`test/epsil/execute.test.ts` › 'recursion with a typed param still
  * works'). What activation records DID retire is the three-candidate binding
  * search in `bindingKeyedSubs`, which is where the "two live bindings at once"
  * state was actually observable.

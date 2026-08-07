@@ -657,7 +657,7 @@ function declareTypeStatement(
   // A GENERIC alias carries its type-parameter clause as TEXT (A1). This
   // handler is the box/parse-route choke point — it runs for BOTH the
   // canonical and the evaluate pass — so the clause must be read and threaded
-  // here, not only on the Cortex statement route.
+  // here, not only on the Epsil statement route.
   let typeParams: TypeParameter[] | undefined;
   if (hasAttrs) {
     const clauseOp = attrs.get('typeParams');
@@ -1275,7 +1275,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Spread: {
       description: [
         'Spread(t): splice the elements of the tuple `t` into the enclosing',
-        'argument list (Cortex surface syntax: `f(...t)`).',
+        'argument list (Epsil surface syntax: `f(...t)`).',
         'A literal tuple splices at canonicalization; a symbolic argument is',
         'spliced by the enclosing call at evaluation (step 0 of the evaluate',
         'path), which re-validates the resulting arity.',
@@ -1378,7 +1378,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     // Pipeline application: `Pipe(x, f)` evaluates to `f(x)`. The right
     // operand may be a function symbol (`Pipe(5, Sin)` → `Sin(5)`), a
     // `Function` literal, or anything else applicable. Chains produced by the
-    // Cortex `|>`/`~>` operators arrive left-associated
+    // Epsil `|>`/`~>` operators arrive left-associated
     // (`Pipe(Pipe(a, f), g)`) and reduce naturally, inner stage first.
     Pipe: {
       description:

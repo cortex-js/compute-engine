@@ -208,7 +208,7 @@ export function functionLiteralReturnMarker(
 
 /**
  * The FULL SIGNATURE a return marker declares (`docs/EFFECTS-MODEL.md`,
- * "Cortex surface"), or `undefined` when the marker is an ordinary
+ * "Epsil surface"), or `undefined` when the marker is an ordinary
  * return-type ascription.
  *
  * **Decomposition predicate**: the marker's type operand decomposes as a full
@@ -222,7 +222,7 @@ export function functionLiteralReturnMarker(
  * the marker author's contract read as a returned function.
  *
  * The literal's parameter operands remain the parameters of record. The marker
- * signature's argument list is a MIRROR built by the Cortex lowering (and by
+ * signature's argument list is a MIRROR built by the Epsil lowering (and by
  * `desugarSignatureString`) and is never read for parameter types.
  */
 export function functionLiteralDeclaredSignature(

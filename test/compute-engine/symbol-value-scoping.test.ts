@@ -42,14 +42,14 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 function engine(): ComputeEngine {
   return new ComputeEngine();
 }
 
-function cortex(src: string): string {
-  return executeCortex(new ComputeEngine(), src).value.toString();
+function epsil(src: string): string {
+  return executeEpsil(new ComputeEngine(), src).value.toString();
 }
 
 /** `let d = 3x^2 + 1` via the raw-MathJSON route. */
@@ -76,9 +76,9 @@ describe('SPEC: staleness (one-evaluate-late)', () => {
     expect(ce.box('d').evaluate().evaluate().toString()).toEqual('13');
   });
 
-  test('Cortex route: bare deref and N agree', () => {
-    expect(cortex('let d = 3x^2 + 1\nlet x = 2\nd')).toEqual('13');
-    expect(cortex('let d = 3x^2 + 1\nlet x = 2\nN(d)')).toEqual('13');
+  test('Epsil route: bare deref and N agree', () => {
+    expect(epsil('let d = 3x^2 + 1\nlet x = 2\nd')).toEqual('13');
+    expect(epsil('let d = 3x^2 + 1\nlet x = 2\nN(d)')).toEqual('13');
   });
 
   test('the compiled route agrees with evaluate()', () => {
@@ -111,8 +111,8 @@ describe('SPEC: the late-bound/early-bound ruling', () => {
     // value snapshots what was already bound and stays live only for what was
     // free. The same three statements give different answers by declaration
     // order. Must hold before AND after the fix.
-    expect(cortex('let x = 2\nlet d = 3x^2 + 1\nx = 3\nN(d)')).toEqual('13');
-    expect(cortex('let d = 3x^2 + 1\nlet x = 2\nx = 3\nN(d)')).toEqual('28');
+    expect(epsil('let x = 2\nlet d = 3x^2 + 1\nx = 3\nN(d)')).toEqual('13');
+    expect(epsil('let d = 3x^2 + 1\nlet x = 2\nx = 3\nN(d)')).toEqual('28');
   });
 });
 
@@ -209,10 +209,10 @@ describe('SPEC: name capture through call frames', () => {
     // 26 substitution in function-utils, not the dereference path. A fix
     // confined to `BoxedSymbol.evaluate()` could not have flipped this; keying
     // the substitution on the parameter's BINDING did.
-    expect(cortex('let a = x + 1\ng(z) = a\nh(x) = g(1)\nh(5)')).toEqual(
+    expect(epsil('let a = x + 1\ng(z) = a\nh(x) = g(1)\nh(5)')).toEqual(
       'x + 1'
     );
-    expect(cortex('let a = x + 1\ng(z) = a\nh(x) = g(1)\nN(h(5))')).toEqual(
+    expect(epsil('let a = x + 1\ng(z) = a\nh(x) = g(1)\nN(h(5))')).toEqual(
       'x + 1'
     );
   });
@@ -257,9 +257,9 @@ describe('SPEC: name capture through call frames', () => {
   test('lambda frames do not capture either', () => {
     // A lambda's call frame is the same mechanism as a named function's, so it
     // must answer the same way on all three routes.
-    expect(cortex('let a = x + 1\nlet h = x |-> a\nh(5)')).toEqual('x + 1');
-    expect(cortex('let a = x + 1\nlet h = x |-> a\nN(h(5))')).toEqual('x + 1');
-    // Box route: same shape, no Cortex parsing involved.
+    expect(epsil('let a = x + 1\nlet h = x |-> a\nh(5)')).toEqual('x + 1');
+    expect(epsil('let a = x + 1\nlet h = x |-> a\nN(h(5))')).toEqual('x + 1');
+    // Box route: same shape, no Epsil parsing involved.
     const ce = engine();
     ce.box(['Assign', 'a', ['Add', 'x', 1]]).evaluate();
     expect(
@@ -275,9 +275,9 @@ describe('SPEC: name capture through call frames', () => {
     // into a's stored value. (The 2026-07-24 naive re-evaluate-on-deref
     // experiment broke exactly this — it returned 105.)
     expect(
-      cortex('let a = x + 1\nf(y) = do { let x = 99; a + y }\nf(5)')
+      epsil('let a = x + 1\nf(y) = do { let x = 99; a + y }\nf(5)')
     ).toEqual('x + 6');
-    expect(cortex('let a = x + 1\ng(y) = do { let x = 99; a }\ng(5)')).toEqual(
+    expect(epsil('let a = x + 1\ng(y) = do { let x = 99; a }\ng(5)')).toEqual(
       'x + 1'
     );
   });
@@ -287,7 +287,7 @@ describe('SPEC: name capture through call frames', () => {
     // parameter bindings hold values ALREADY evaluated in the caller, so
     // "the def's scope is the frame" is safe for them. Here the argument `y`
     // means the caller's y = 7, not the frame's y = 2.
-    expect(cortex('f(x, y) = x\nlet y = 7\nf(y, 2)')).toEqual('7');
+    expect(epsil('f(x, y) = x\nlet y = 7\nf(y, 2)')).toEqual('7');
   });
 });
 
@@ -371,8 +371,8 @@ describe('SPEC: cycle behavior (must not regress)', () => {
     // dereference and fall back to the stored value (returning at the
     // re-entry point instead yields 'b + 3'; returning the bare symbol yields
     // 'a + 2' — both regressions of the residual pinned here).
-    expect(cortex('let s\ns = s + 1\ns')).toEqual('s + 1');
-    expect(cortex('a = b + 1\nb = a + 1\na')).toEqual('b + 1');
+    expect(epsil('let s\ns = s + 1\ns')).toEqual('s + 1');
+    expect(epsil('a = b + 1\nb = a + 1\na')).toEqual('b + 1');
   });
 
   test('a cycle further down the chain costs only its own dereference', () => {
@@ -383,15 +383,15 @@ describe('SPEC: cycle behavior (must not regress)', () => {
     // The values look one level deeper than written because assignment is EAGER
     // (see the late/early ruling): by the time `q = p + 1` runs, `p` already
     // dereferences to `q + 1`, so `q` stores `q + 2`.
-    expect(cortex('p = q + 1\nq = p + 1\np')).toEqual('q + 1');
-    expect(cortex('a = p + 5\np = q + 1\nq = p + 1\na')).toEqual('q + 6');
+    expect(epsil('p = q + 1\nq = p + 1\np')).toEqual('q + 1');
+    expect(epsil('a = p + 5\np = q + 1\nq = p + 1\na')).toEqual('q + 6');
   });
 
   test('a self-referential ARGUMENT substitutes once (Tycho item 46)', () => {
     // The self-reference guard is explicitly unchanged by this design: the
     // frame binds t to an argument that mentions t, and the value is
     // substituted once rather than re-resolved forever.
-    expect(cortex('f(t) = t + 1\nf(t + 1)')).toEqual('t + 2');
+    expect(epsil('f(t) = t + 1\nf(t + 1)')).toEqual('t + 2');
   });
 
   test('recursion still terminates', () => {
@@ -414,7 +414,7 @@ describe('SPEC: cycle behavior (must not regress)', () => {
   });
 
   test('loop-carried numeric state is exact and fast-path eligible', () => {
-    expect(cortex('let t = 0\nfor k in 1..100 { t = t + k }\nt')).toEqual(
+    expect(epsil('let t = 0\nfor k in 1..100 { t = t + k }\nt')).toEqual(
       '5050'
     );
   });

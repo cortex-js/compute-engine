@@ -5,7 +5,7 @@ import { _forTesting } from '../../src/compute-engine/boxed-expression/match-dis
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
- * Phase 2 of the Cortex `match` design
+ * Phase 2 of the Epsil `match` design
  * (docs/plans/2026-07-12-cortex-match-design.md §4): the classification ladder.
  *
  * Each case is classified once into a tier (0 constant dispatch / 1 literal

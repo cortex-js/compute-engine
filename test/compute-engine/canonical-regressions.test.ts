@@ -183,7 +183,7 @@ describe('Canonical folds must not follow symbol value bindings (2026-07-10)', (
   // `.isSame(n)` follows a symbol's value binding, so canonical folds that
   // used it leaked a mutable symbol's *transient* value into canonical
   // structure: `Divide(2, x)` canonicalized to `2` while `x` held `1` (and
-  // to ComplexInfinity while it held `0`). Symptom: in a notebook/Cortex
+  // to ComplexInfinity while it held `0`). Symptom: in a notebook/Epsil
   // program, Newton's method `x = (x + 2/x)/2` starting from `x = 1`
   // silently computed the (x+2)/2 ladder — 63/32 instead of √2. Canonical
   // folds now require the number *literal* (isLiteral in

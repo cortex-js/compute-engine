@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 //
 // `Declare` with a `Tuple` pattern in the name position — the engine form
-// behind Cortex destructuring declarations (`let (x, y) = t`). The pattern is
+// behind Epsil destructuring declarations (`let (x, y) = t`). The pattern is
 // held raw (canonicalizing it would bind the about-to-be-declared names);
 // each component declares in the current scope. Shape mismatches yield an
 // incompatible-type error value and bind nothing else.
@@ -49,7 +49,7 @@ describe('Declare with a Tuple pattern', () => {
       ['Tuple', 'x', 'y'],
       attrs(['Tuple', 3, 4], true),
     ]).evaluate();
-    // Engine-level assignment to a constant throws (the Cortex runtime
+    // Engine-level assignment to a constant throws (the Epsil runtime
     // surfaces this as a `runtime-error` diagnostic).
     expect(() => ce.box(['Assign', 'x', 9]).evaluate()).toThrow();
     expect(ce.symbol('x').evaluate().isSame(3)).toBe(true);
@@ -97,7 +97,7 @@ describe('Declare with a Tuple pattern', () => {
 
 //
 // `Assign` with a `Tuple` pattern in the target position — the engine form
-// behind Cortex destructuring assignments (`(x, y) := t`). Same pattern
+// behind Epsil destructuring assignments (`(x, y) := t`). Same pattern
 // grammar as the declaration form, but it WRITES existing bindings, so the
 // targets keep their identity and their declared type. The RHS is evaluated
 // once, up front, before any target is written — that is what makes a swap a
@@ -241,14 +241,14 @@ describe('Declare with a Tuple pattern: compilation', () => {
   const {
     compile,
   } = require('../../src/compute-engine/compilation/compile-expression');
-  const { parseCortex } = require('../../src/cortex/parse-cortex');
+  const { parseEpsil } = require('../../src/epsil/parse-epsil');
   const strip = (x: any) =>
     JSON.parse(
       JSON.stringify(x, (k, v) => (k === 'sourceOffsets' ? undefined : v))
     );
   const boxed = (src: string) => {
     const ce = new ComputeEngine();
-    const [ast] = parseCortex(src);
+    const [ast] = parseEpsil(src);
     return ce.box(strip(ast));
   };
 
@@ -318,14 +318,14 @@ describe('Assign with a Tuple pattern: compilation', () => {
   const {
     compile,
   } = require('../../src/compute-engine/compilation/compile-expression');
-  const { parseCortex } = require('../../src/cortex/parse-cortex');
+  const { parseEpsil } = require('../../src/epsil/parse-epsil');
   const strip = (x: any) =>
     JSON.parse(
       JSON.stringify(x, (k, v) => (k === 'sourceOffsets' ? undefined : v))
     );
   const boxed = (src: string) => {
     const ce = new ComputeEngine();
-    const [ast] = parseCortex(src);
+    const [ast] = parseEpsil(src);
     return ce.box(strip(ast));
   };
   /** Compile `src`, assert it compiled, and assert it agrees with the

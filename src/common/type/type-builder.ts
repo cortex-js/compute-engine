@@ -377,7 +377,7 @@ export class TypeBuilder implements ASTVisitor<Type> {
    * `tree<T>` inside `tree`'s own body needs no definition to be built.
    *
    * Returns `undefined` — "not a generic application, carry on" — only when the
-   * resolver does not hand back a type RECORD (the Cortex parser's shim
+   * resolver does not hand back a type RECORD (the Epsil parser's shim
    * resolves a name to the bare name: it is a syntax check, and the engine
    * re-parses the same text with the real resolver).
    */
@@ -397,7 +397,7 @@ export class TypeBuilder implements ASTVisitor<Type> {
         `The type "${name}" is generic: it takes ${params!.length} type argument${params!.length === 1 ? '' : 's'} (write \`${name}<…>\`)`
       );
 
-    // Not a record — the Cortex resolver shim. Nothing checkable here.
+    // Not a record — the Epsil resolver shim. Nothing checkable here.
     if (record === undefined) return undefined;
 
     // An APPLIED FORWARD REFERENCE (`type forest<T>`): the name has no
@@ -538,7 +538,7 @@ export class TypeBuilder implements ASTVisitor<Type> {
 /** The resolver's answer as a type RECORD, when it is one.
  *
  * `TypeResolver.resolve` is typed as returning a `TypeReference`, but the
- * Cortex parser's shim resolves a known name to the bare NAME (a string): its
+ * Epsil parser's shim resolves a known name to the bare NAME (a string): its
  * type subparse is a syntax check and the built `Type` is discarded. Every
  * generic-alias check needs the record (its `typeParams` and its `def`), so
  * guard on the shape rather than on the declared type. */

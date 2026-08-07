@@ -180,7 +180,7 @@ import { EFFECT_LABELS, isEffectLabel } from './effects.js';
    non-generic name are arity errors raised there — the grammar admits them.
    Writing the slot is also what closes the silent-truncation hazard: without
    it `p: Pair<integer>` parsed as the bare `Pair` and leaked `<integer>` to the
-   surrounding (Cortex) grammar. *)
+   surrounding (Epsil) grammar. *)
 <type_reference> ::= ( "type" )? <identifier> ( "<" <type> ( "," <type> )* ">" | "<" ">" )?
 
 <value> ::= <string_literal>
@@ -223,7 +223,7 @@ export class Parser {
   /**
    * Prefix mode: parse a type from the *start* of the input and stop at the
    * first token that cannot continue the type, without requiring EOF. Used by
-   * `parseTypePrefix()` (the Cortex type-annotation boundary). In this mode the
+   * `parseTypePrefix()` (the Epsil type-annotation boundary). In this mode the
    * lexer is tolerant (unexpected trailing characters become EOF) and the
    * `this.lexer.input`-scanning error heuristics are scoped to the consumed
    * range so trailing (non-type) source never leaks into a type suggestion.
@@ -289,7 +289,7 @@ export class Parser {
     let input = this.lexer.input;
     // In prefix mode, scope the displayed source (and the `set(`/`list(` … "did
     // you mean" heuristics that scan `input`) to the range consumed so far, so
-    // trailing Cortex source after the type does not leak into the message.
+    // trailing Epsil source after the type does not leak into the message.
     if (this.allowTrailing)
       input = input.slice(0, token.position + token.value.length);
     const lines = input.split('\n');
@@ -314,7 +314,7 @@ export class Parser {
 
     formattedMessage.push('');
 
-    // Attach structured location so the prefix-parse boundary (Cortex) can
+    // Attach structured location so the prefix-parse boundary (Epsil) can
     // offset-shift the error to an absolute source position. These extra
     // properties are additive and ignored by the existing `parseType()`
     // callers, which only read `.message`.
@@ -445,7 +445,7 @@ export class Parser {
     const type = this.parseUnionType();
     if (!type) this.error('Expected a type');
 
-    // No EOF check: trailing tokens belong to the surrounding (Cortex) grammar.
+    // No EOF check: trailing tokens belong to the surrounding (Epsil) grammar.
     return type;
   }
 

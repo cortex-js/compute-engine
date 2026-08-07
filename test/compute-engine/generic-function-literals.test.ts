@@ -5,7 +5,7 @@ import { defineFunctionClause } from '../../src/compute-engine/multi-clause';
 import { stripArrowEffects } from '../../src/compute-engine/boxed-expression/effects-inference';
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // Generic function literals (M1, PHASE 1 — the literal standing alone).
@@ -18,10 +18,10 @@ import { executeCortex } from '../../src/cortex/execute-cortex';
 //   E1  `["Function", body, "'forall T. (x: T) -> T'"]`      (signature-string)
 //   E2  `["Function", ["Typed", body, "'forall …'"], …params]` (full marker)
 //
-// The DECLARATION BOUNDARY (`ce.assign` / the `Assign` operator / Cortex
+// The DECLARATION BOUNDARY (`ce.assign` / the `Assign` operator / Epsil
 // annotated `const`) is phase 2 — the second half of this file. Its sibling
 // pins live in `type-variables.test.ts` ("THE DECLARATION BOUNDARY") and
-// `test/cortex/type-variables-cortex.test.ts`.
+// `test/epsil/type-variables-epsil.test.ts`.
 //
 
 function fresh(): ComputeEngine {
@@ -1539,11 +1539,11 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     ).toBe('[3,6,9]');
   });
 
-  test('the CORTEX sugared route inherits it (same operator definition)', () => {
+  test('the EPSIL sugared route inherits it (same operator definition)', () => {
     // `function f<T: number>(x: T) -> T { 2x }` lowers to `DefineFunction`,
     // which delegates to `ce.assign` — the very route fixed here.
     const ce = fresh();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'function f<T: number>(x: T) -> T { 2x }\nf([1, 2, 3])'
     );

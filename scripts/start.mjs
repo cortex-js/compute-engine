@@ -17,11 +17,11 @@ esbuild
   })
   .then((ctx) => ctx.watch());
 
-// Build and serve the library (plus the Cortex entry used by
-// test/cortex.html)
+// Build and serve the library (plus the Epsil entry used by
+// test/epsil.html)
 esbuild
   .context({
-    entryPoints: ['./src/compute-engine.ts', './src/cortex.ts'],
+    entryPoints: ['./src/compute-engine.ts', './src/epsil.ts'],
     outdir: './dist',
     entryNames: '[name].esm',
     format: 'esm',

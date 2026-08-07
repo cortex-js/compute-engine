@@ -118,15 +118,15 @@ const INTEGRATION_RULES_UMD_OPTIONS = {
   },
 };
 
-const CORTEX_UMD_OPTIONS = {
+const EPSIL_UMD_OPTIONS = {
   banner: {
-    js: `/** Cortex ${SDK_VERSION} ${
+    js: `/** Epsil ${SDK_VERSION} ${
       process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
     }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Cortex = {}));})(this, (function (exports) { 'use strict';`,
+    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Epsil = {}));})(this, (function (exports) { 'use strict';`,
   },
   footer: {
-    js: `Object.assign(exports, Cortex); Object.defineProperty(exports, '__esModule', { value: true });}));`,
+    js: `Object.assign(exports, Epsil); Object.defineProperty(exports, '__esModule', { value: true });}));`,
   },
 };
 
@@ -159,7 +159,7 @@ const MIN_OPTIONS = {
 };
 
 // Entry table: source entry name → its UMD wrapper options + IIFE globalName.
-// `esmViaSplit` entries (compute-engine + integration-rules + cortex) do NOT
+// `esmViaSplit` entries (compute-engine + integration-rules + epsil) do NOT
 // get a standalone single-entry ESM build — their ESM output comes from the
 // shared code-splitting invocation below. Every entry still gets both UMD
 // variants.
@@ -188,9 +188,9 @@ const ENTRIES = [
     esmViaSplit: true,
   },
   {
-    name: 'cortex',
-    umd: CORTEX_UMD_OPTIONS,
-    globalName: 'Cortex',
+    name: 'epsil',
+    umd: EPSIL_UMD_OPTIONS,
+    globalName: 'Epsil',
     esmViaSplit: true,
   },
 ];
@@ -201,15 +201,15 @@ const ENTRIES = [
 // `chunks/`).
 const builds = [];
 
-// Build the library + the integration-rules plugin + the cortex language as
+// Build the library + the integration-rules plugin + the epsil language as
 // ONE esbuild invocation per ESM variant with code splitting, so the shared
 // engine core (BigDecimal, boxed expressions, numeric-value, latex-syntax, …)
 // is emitted ONCE into a common chunk that `esm/compute-engine.js`,
-// `esm/integration-rules.js` and `esm/cortex.js` import (and likewise under
+// `esm/integration-rules.js` and `esm/epsil.js` import (and likewise under
 // `esm-min/`). Without this, each bundle re-bundles the entire engine and its
 // duplicate class definitions break cross-bundle `instanceof` checks (e.g. a
 // host-created BigDecimal fails `instanceof BigDecimal` inside the plugin's
-// statically-imported engine code, and `executeCortex(ce, …)` receives a
+// statically-imported engine code, and `executeEpsil(ce, …)` receives a
 // host-created engine). Splitting is ESM-only; the UMD variants stay
 // self-contained single files. The variant marker is the outdir
 // (`dist/esm` vs `dist/esm-min`), so the entry/chunk names carry no suffix.
@@ -224,7 +224,7 @@ for (const [outdir, extra] of [
       entryPoints: [
         './src/compute-engine.ts',
         './src/integration-rules.ts',
-        './src/cortex.ts',
+        './src/epsil.ts',
       ],
       outdir,
       format: 'esm',
@@ -279,8 +279,8 @@ for (const e of ENTRIES) {
 }
 
 // Node CLI. Keep this as a small bundle of the command-line implementation,
-// with the Cortex library entry external: the output lives under `cli/`, so
-// its preserved `../cortex.js` import resolves to the sibling library bundle.
+// with the Epsil library entry external: the output lives under `cli/`, so
+// its preserved `../epsil.js` import resolves to the sibling library bundle.
 // This avoids shipping a second ~2 MB copy of the Compute Engine in the
 // executable.
 for (const [outdir, extra] of [
@@ -291,11 +291,11 @@ for (const [outdir, extra] of [
     esbuild.build({
       ...BUILD_OPTIONS,
       ...extra,
-      entryPoints: ['./src/cli/cortex.ts'],
-      outfile: `${outdir}/cli/cortex.js`,
+      entryPoints: ['./src/cli/epsil.ts'],
+      outfile: `${outdir}/cli/epsil.js`,
       format: 'esm',
       platform: 'node',
-      external: ['../cortex.js'],
+      external: ['../epsil.js'],
     })
   );
 }
@@ -305,13 +305,13 @@ for (const [outdir, extra] of [
 //
 await Promise.all(builds);
 await Promise.all([
-  chmod('./dist/esm/cli/cortex.js', 0o755),
-  chmod('./dist/esm-min/cli/cortex.js', 0o755),
-  // The agent-facing language card is served by `cortex mcp` as a resource;
+  chmod('./dist/esm/cli/epsil.js', 0o755),
+  chmod('./dist/esm-min/cli/epsil.js', 0o755),
+  // The agent-facing language card is served by `epsil mcp` as a resource;
   // the CLI resolves it relative to its own bundle.
-  copyFile('./src/cortex/docs/for-agents.md', './dist/esm/cli/for-agents.md'),
+  copyFile('./src/epsil/docs/for-agents.md', './dist/esm/cli/for-agents.md'),
   copyFile(
-    './src/cortex/docs/for-agents.md',
+    './src/epsil/docs/for-agents.md',
     './dist/esm-min/cli/for-agents.md'
   ),
 ]);

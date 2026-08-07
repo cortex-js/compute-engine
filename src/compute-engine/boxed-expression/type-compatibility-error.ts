@@ -173,7 +173,7 @@ export function constructorAssignmentError(
 /**
  * The `incompatible-type` error VALUE a rejected declared type yields on the
  * `Assign` / `Declare` operator routes — the same shape and channel as the
- * call-boundary type check (`createTypeErrorExpression`), so Cortex's
+ * call-boundary type check (`createTypeErrorExpression`), so Epsil's
  * diagnostic machinery classifies it as `incompatible-type` rather than an
  * opaque message string.
  */
@@ -182,7 +182,7 @@ export function typeCompatibilityErrorValue(
   e: TypeCompatibilityError
 ): Expression {
   // G11 keeps the `incompatible-type` code and its three-part payload
-  // (Cortex's diagnostic machinery keys on both), but carries the DEDICATED
+  // (Epsil's diagnostic machinery keys on both), but carries the DEDICATED
   // sentence in the `where` slot so the message is the same on every route —
   // a host throw and an `Assign`/`Declare` error value read alike.
   if (e.kind === 'generic-overload-literal')

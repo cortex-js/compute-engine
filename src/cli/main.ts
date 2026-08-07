@@ -1,4 +1,4 @@
-import { version } from '../cortex.js';
+import { version } from '../epsil.js';
 
 import { CliUsageError, parseCliArguments } from './arguments.js';
 import { runCheck } from './check.js';
@@ -12,16 +12,16 @@ import {
 import { readSource, type CliIo } from './io.js';
 import { runMcp } from './mcp.js';
 import { runRepl } from './repl.js';
-import { makeCortexSession } from './session.js';
+import { makeEpsilSession } from './session.js';
 
 export type { CliIo } from './io.js';
 
-const HELP = `Usage: cortex [options] [file]
-       cortex check [options] [file]
-       cortex doc [options] <name or keywords>
-       cortex mcp [options]
+const HELP = `Usage: epsil [options] [file]
+       epsil check [options] [file]
+       epsil doc [options] <name or keywords>
+       epsil mcp [options]
 
-Evaluate Cortex programs or start an interactive session.
+Evaluate Epsil programs or start an interactive session.
 
 Commands:
   check                   parse a program and report diagnostics without
@@ -34,12 +34,12 @@ Commands:
                           language card resource; stdio is the default
 
 Arguments:
-  file                    Cortex source file (.cortex or .cx)
+  file                    Epsil source file (.epsil)
 
 Options:
   -e, --eval <source>     evaluate source text
       --json              print the result as MathJSON
-      --cortex            print the result as Cortex source
+      --epsil            print the result as Epsil source
       --diagnostics <fmt> print diagnostics as "text" (default) or "json"
       --time-limit <ms>   evaluation deadline; 0 disables it (default: 10000)
       --transport <type>  MCP transport: "stdio" (default) or
@@ -53,7 +53,7 @@ Options:
   -h, --help              display this help
   -v, --version           display the package version
 
-With no file or --eval, cortex starts a REPL when stdin is a terminal and
+With no file or --eval, epsil starts a REPL when stdin is a terminal and
 otherwise reads a program from stdin.
 `;
 
@@ -78,7 +78,7 @@ export async function main(
       error instanceof CliUsageError && error.message
         ? `${error.message}\n`
         : '';
-    io.stderr.write(`${message}Try "cortex --help" for more information.\n`);
+    io.stderr.write(`${message}Try "epsil --help" for more information.\n`);
     return 2;
   }
 
@@ -91,7 +91,7 @@ export async function main(
     return 0;
   }
 
-  const session = makeCortexSession(options.timeLimit);
+  const session = makeEpsilSession(options.timeLimit);
   if (
     options.eval === undefined &&
     options.file === undefined &&
@@ -131,7 +131,7 @@ export async function main(
     return hasErrors(result) ? 1 : 0;
   } catch (error) {
     io.stderr.write(
-      `cortex: ${error instanceof Error ? error.message : String(error)}\n`
+      `epsil: ${error instanceof Error ? error.message : String(error)}\n`
     );
     return 1;
   }

@@ -1515,11 +1515,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Dictionary: {
     description:
-      'A collection of key -> value entries with string keys (`{x -> 1, y -> 2}` in Cortex).',
+      'A collection of key -> value entries with string keys (`{x -> 1, y -> 2}` in Epsil).',
     // Boxing intercepts `["Dictionary", …]` structurally and constructs the
     // dictionary VALUE directly (`box.ts`), BEFORE definition lookup — so no
     // handler on this definition ever runs. It exists so `Dictionary` is a
-    // KNOWN operator: introspection (`ce.operatorInfo`), the Cortex
+    // KNOWN operator: introspection (`ce.operatorInfo`), the Epsil
     // unknown-function lint, and the generated operator inventory all key on
     // a definition's existence, and the name genuinely appears in MathJSON —
     // a dictionary with an unevaluated-expression entry serializes in this
@@ -3466,7 +3466,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   Field: {
     description: [
-      'Access a named field of a value: `p.x` in Cortex.',
+      'Access a named field of a value: `p.x` in Epsil.',
       'On a record or dictionary value, `Field(d, "x")` behaves exactly as `d["x"]` (`At` semantics, including the absence marker for a key a dictionary may not have).',
       'On a value of a NOMINAL type whose definition body has named fields (a record body, or a named-tuple body), the field is resolved through the type definition — the sanctioned accessor window of the nominal-types design (D6/§4.5b D16). This does not make the value a collection: `First(p)` and `p["x"]` keep rejecting.',
       'A field name that is not in a record/named-tuple definition is a static defect (the result type is `error`); on an unknown-typed operand the expression stays symbolic.',

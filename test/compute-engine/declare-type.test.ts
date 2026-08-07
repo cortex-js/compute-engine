@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
 //
-// `DeclareType` — the engine form behind a Cortex `type` declaration.
+// `DeclareType` — the engine form behind an Epsil `type` declaration.
 //
 // `["DeclareType", name, type, attributes?]` registers a type in the current
 // lexical scope: nominal by default, a structural alias with an

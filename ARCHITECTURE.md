@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the overall architecture of the **Cortex Compute
+This document describes the overall architecture of the **Epsil Compute
 Engine** — a TypeScript library for symbolic manipulation and numeric
 evaluation of mathematical expressions, published as
 [`@cortex-js/compute-engine`](https://www.npmjs.com/package/@cortex-js/compute-engine).
@@ -78,7 +78,7 @@ src/
 ├── compile.ts               Compilation-targets entry
 ├── identities.ts            Fungrim identities plugin entry (loadIdentities)
 ├── integration-rules.ts     Rubi integration-rules plugin entry
-├── cortex.ts                Experimental Cortex language (not a published entry)
+├── epsil.ts                Experimental Epsil language (not a published entry)
 │
 ├── math-json/               MathJSON format: types + accessors/guards
 │   ├── types.ts             MathJsonExpression and its object forms
@@ -763,8 +763,8 @@ The **full** entry (`compute-engine.ts`) registers
 `ComputeEngine._latexSyntaxFactory` and a default-engine factory that injects
 `LatexSyntax`; the **core** entry registers a factory without it. This is the
 mechanism that lets `new ComputeEngine()` support LaTeX when imported from the
-full package while keeping LaTeX out of core bundles. (`src/cortex.ts` is an
-experimental Cortex-language entry and is not part of the published `exports`.)
+full package while keeping LaTeX out of core bundles. (`src/epsil.ts` is an
+experimental Epsil-language entry and is not part of the published `exports`.)
 
 ## Build, test, and docs tooling
 

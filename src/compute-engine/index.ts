@@ -1617,7 +1617,7 @@ export class ComputeEngine implements IComputeEngine {
   /**
    * Given a `name` that is **not** a known operator, return the closest known
    * operator name — a "did you mean" suggestion — or `undefined` when nothing
-   * is close enough. Powers the Cortex `unknown-function` diagnostic.
+   * is close enough. Powers the Epsil `unknown-function` diagnostic.
    *
    * Matching is conservative and applied in priority order (first match wins):
    * case-insensitive exact match, singular/plural, Damerau–Levenshtein

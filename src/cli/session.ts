@@ -1,11 +1,11 @@
 import { performance } from 'node:perf_hooks';
 
-import { ComputeEngine, executeCortex, parseCortex } from '../cortex.js';
-import type { ParsingDiagnostic } from '../cortex/diagnostics.js';
+import { ComputeEngine, executeEpsil, parseEpsil } from '../epsil.js';
+import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
 
-import type { CortexSession, EvaluationResult } from './types.js';
+import type { EpsilSession, EvaluationResult } from './types.js';
 
-export function makeCortexSession(timeLimit: number): CortexSession {
+export function makeEpsilSession(timeLimit: number): EpsilSession {
   let engine = new ComputeEngine();
 
   const parseLatex = (latex: string) => engine.parse(latex).json;
@@ -20,13 +20,13 @@ export function makeCortexSession(timeLimit: number): CortexSession {
     evaluate(source: string, url?: string): EvaluationResult {
       const start = performance.now();
       const run = () =>
-        executeCortex(engine, source, {
+        executeEpsil(engine, source, {
           url,
           parseLatex,
         });
       const result =
         timeLimit > 0
-          ? engine.withTimeLimit({ ms: timeLimit, label: 'cortex:cli' }, run)
+          ? engine.withTimeLimit({ ms: timeLimit, label: 'epsil:cli' }, run)
           : run();
 
       return {
@@ -38,7 +38,7 @@ export function makeCortexSession(timeLimit: number): CortexSession {
 
     parse(source: string, url?: string): ParsingDiagnostic[] {
       try {
-        return parseCortex(source, url, { parseLatex })[1];
+        return parseEpsil(source, url, { parseLatex })[1];
       } catch {
         return [];
       }

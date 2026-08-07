@@ -44,7 +44,7 @@ fixes, and deletion of the 0.95.0 random-family tombstones. The 0.91–0.95 line
 carried `FindFit`/`FindRoot` (Tycho item 77), the `Nothing`-erasure/`Missing`
 marker work, overload sets, the **Random family redesign**
 (`WithRandomSeed` frames, PCG3D, domain-only `Random` — see
-`docs/RANDOMNESS-MODEL.md`), and Cortex spread/destructuring. The 0.87–0.90
+`docs/RANDOMNESS-MODEL.md`), and Epsil spread/destructuring. The 0.87–0.90
 line carried the
 Tycho items 56–76 rounds (complex-compile emission, the timeout-span model
 replacing `ce.timeLimit`, compiled recursive lambdas, `RandomList`,
@@ -65,14 +65,14 @@ SymPy/Mathematica, Rubi R13–R16, `Interpret`, number theory) and the 0.7x
 Neyret-corpus parse coverage 92.9%; the remaining Desmos gaps are
 importer-side (tracked in tycho's `COMPUTE_ENGINE.md`), not engine items.
 
-**Cortex language shipped (2026-07-09):** the revived Cortex language
-(parser, serializer, `executeCortex` interpreter — phases 0–5 of the revival)
+**Epsil language shipped (2026-07-09):** the revived Epsil language
+(parser, serializer, `executeEpsil` interpreter — phases 0–5 of the revival)
 is published as an **experimental** entry point
-`@cortex-js/compute-engine/cortex`, joined to the code-splitting ESM build so
-`executeCortex(ce, …)` shares engine-class identity with a host-created
+`@cortex-js/compute-engine/epsil`, joined to the code-splitting ESM build so
+`executeEpsil(ce, …)` shares engine-class identity with a host-created
 engine. Residual ship items (docs sync to cortexjs.io, highlight-mode
 validation) are release-protocol steps tracked in
-`roadmap/cortex/STATUS_REPORT.md`, not here.
+`roadmap/epsil/STATUS_REPORT.md`, not here.
 
 The June 2026 codebase review (REVIEW.md) is fully dispositioned. **Rubi
 status:** R1–R30 + R8 landed — chapters 1/2/3/5/6/7, 4.1/4.3/4.5, §8.8 Polylogarithm,

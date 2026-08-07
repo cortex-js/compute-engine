@@ -126,7 +126,7 @@ export function checkTypeConstructorNamespace(
   // Mirrors the upgrade rule in `declareFn()` / the `Declare` handler: only a
   // value-LESS inferred binding is upgradable. The operator half is narrower
   // than `declareFn()`'s: an operator whose signature was merely *inferred*
-  // may still be a real definition (a Cortex `function point(x) {…}` is an
+  // may still be a real definition (an Epsil `function point(x) {…}` is an
   // operator def with an inferred signature and a body), and that is a genuine
   // collision. Only a handler-less shell — an auto-declaration from usage, or
   // a host `{signature, inferredSignature: true}` vouch — upgrades.
@@ -169,7 +169,7 @@ function removeMintedTypeConstructor(
  *   parameters (`point: (x: number, y: number) -> point`).
  * - `record` body → `undefined`: record bodies auto-mint NOTHING (D4b). Their
  *   inhabitation story is user-defined constructor functions (§4.5, v2); the
- *   Cortex `type-not-callable` lint covers call sites meanwhile.
+ *   Epsil `type-not-callable` lint covers call sites meanwhile.
  * - a NAMED-field tuple body of an ALIAS → `undefined` too, for the same
  *   reason: the identity constructor returns a plain `Tuple`, whose
  *   synthesized type has UNNAMED elements, and the subtype rules reject that

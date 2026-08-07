@@ -32,7 +32,7 @@ export function parseCliArguments(
         'help': { type: 'boolean', short: 'h' },
         'version': { type: 'boolean', short: 'v' },
         'json': { type: 'boolean' },
-        'cortex': { type: 'boolean' },
+        'epsil': { type: 'boolean' },
         'diagnostics': { type: 'string' },
         'no-color': { type: 'boolean' },
         'time-limit': { type: 'string' },
@@ -47,16 +47,16 @@ export function parseCliArguments(
   const timeLimit =
     typeof values['time-limit'] === 'string' ? values['time-limit'] : undefined;
   if (positionals.length > 1)
-    throw new CliUsageError('Expected at most one Cortex source file.');
+    throw new CliUsageError('Expected at most one Epsil source file.');
   if (evalSource !== undefined && positionals.length > 0)
     throw new CliUsageError('The --eval option cannot be used with a file.');
-  if (values.json === true && values.cortex === true)
+  if (values.json === true && values.epsil === true)
     throw new CliUsageError(
-      'The --json and --cortex output options are mutually exclusive.'
+      'The --json and --epsil output options are mutually exclusive.'
     );
 
   const outputMode: OutputMode =
-    values.json === true ? 'json' : values.cortex === true ? 'cortex' : 'value';
+    values.json === true ? 'json' : values.epsil === true ? 'epsil' : 'value';
 
   return {
     eval: evalSource,
@@ -93,7 +93,7 @@ export function parseCheckArguments(
   const { values, positionals } = parsed;
   const evalSource = typeof values.eval === 'string' ? values.eval : undefined;
   if (positionals.length > 1)
-    throw new CliUsageError('Expected at most one Cortex source file.');
+    throw new CliUsageError('Expected at most one Epsil source file.');
   if (evalSource !== undefined && positionals.length > 0)
     throw new CliUsageError('The --eval option cannot be used with a file.');
 
@@ -125,7 +125,7 @@ export function parseDocArguments(args: readonly string[]): DocOptions {
   const query = positionals.join(' ').trim();
   if (query.length === 0)
     throw new CliUsageError(
-      'Expected a symbol name or search keywords, e.g. "cortex doc Sin".'
+      'Expected a symbol name or search keywords, e.g. "epsil doc Sin".'
     );
 
   return {

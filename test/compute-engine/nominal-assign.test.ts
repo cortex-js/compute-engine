@@ -1,6 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine';
-import { executeCortex } from '../../src/cortex/execute-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { isTypeCompatibilityError } from '../../src/compute-engine/boxed-expression/type-compatibility-error';
 
 //
@@ -174,11 +174,11 @@ describe('STRUCTURAL alias declared type accepts a matching value', () => {
     expect(ce.box('b').evaluate().toString()).toBe('(5, 6)');
   });
 
-  test('the Cortex `type alias` statement still works', () => {
+  test('the Epsil `type alias` statement still works', () => {
     // The STRUCTURAL form is `type alias`; a bare `type` declares a nominal
     // type, which no structural value inhabits (see the nominal pins above).
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type alias pt = tuple<number, number>\nlet p: pt = (1, 2)\np'
     );
@@ -186,9 +186,9 @@ describe('STRUCTURAL alias declared type accepts a matching value', () => {
     expect(r.value.toString()).toBe('(1, 2)');
   });
 
-  test('a Cortex `type alias` is assignable after declaration', () => {
+  test('an Epsil `type alias` is assignable after declaration', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type alias pt = tuple<number, number>\nlet p: pt = (1, 2)\np = (3, 4)\np'
     );
@@ -302,9 +302,9 @@ describe('a MINTED type constructor cannot be assigned over (D5)', () => {
     );
   });
 
-  test('the Cortex `point = 5` route becomes an Error value', () => {
+  test('the Epsil `point = 5` route becomes an Error value', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type point = tuple<x: number, y: number>\npoint = 5'
     );
@@ -313,7 +313,7 @@ describe('a MINTED type constructor cannot be assigned over (D5)', () => {
     );
     // The type half is untouched.
     expect(
-      executeCortex(ce, 'let p: point = point(1, 2)\np').value.toString()
+      executeEpsil(ce, 'let p: point = point(1, 2)\np').value.toString()
     ).toBe('point(1, 2)');
   });
 
@@ -404,9 +404,9 @@ describe('the throw/value channel split for a declared-type rejection', () => {
     }
   });
 
-  test('an `executeCortex` program gets the error VALUE, unchanged behavior', () => {
+  test('an `executeEpsil` program gets the error VALUE, unchanged behavior', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       'type point = tuple<x: number, y: number>\nlet p: point = (1, 2)'
     );
@@ -414,7 +414,7 @@ describe('the throw/value channel split for a declared-type rejection', () => {
     expect(errorCode(r.value)).toBe('incompatible-type');
     // Nothing was installed, and the type half is untouched.
     expect(
-      executeCortex(ce, 'let q: point = point(1, 2)\nq').value.toString()
+      executeEpsil(ce, 'let q: point = point(1, 2)\nq').value.toString()
     ).toBe('point(1, 2)');
   });
 });

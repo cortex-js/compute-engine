@@ -1081,7 +1081,7 @@ describe('PYTHON TARGET', () => {
   // Statement-position control flow inside a loop body: `If` containing
   // `Break`/`Continue`/`Return` must compile to a Python `if` STATEMENT (not
   // the expression-If's `(then) if (cond) else (else)`, a SyntaxError). This is
-  // how Cortex lowers `while`: `Loop(Block(If(cond, Break), …))`.
+  // how Epsil lowers `while`: `Loop(Block(If(cond, Break), …))`.
   describe('Loop body → statement-position control flow', () => {
     it('while-pattern: If(cond, Break) compiles to an `if …:` statement', () => {
       const expr = ce.box([

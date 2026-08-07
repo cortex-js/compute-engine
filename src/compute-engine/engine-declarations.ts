@@ -313,7 +313,7 @@ const CURATED_SYNONYMS: Record<string, string> = {
   every: 'All',
   // Wolfram Language names. These are SUGGESTIONS, not aliases: the operator
   // they point at is the right neighborhood, but the call shape often differs
-  // (`Accumulate[xs]` vs `Scan(xs, Add)`). The namespace stays Cortex-native.
+  // (`Accumulate[xs]` vs `Scan(xs, Add)`). The namespace stays Epsil-native.
   total: 'Sum',
   select: 'Filter',
   cases: 'Filter',
@@ -1463,7 +1463,7 @@ export function assignFn(
     // §4.5b D13 (nominal-types design) — constructor-function recognition. A
     // function literal assigned to a name that the CURRENT scope's own
     // `scope.types` declares as a NOMINAL type is that type's constructor
-    // function: recognized here, at install time, so the Cortex `function`
+    // function: recognized here, at install time, so the Epsil `function`
     // statement and the box/host routes agree by construction. Ordering falls
     // out of execution order — at Assign time the type either is already
     // declared (→ constructor) or is not (→ plain function; a LATER
@@ -1922,7 +1922,7 @@ export function assignValueAsOperatorDef(
   // `effectsDeclared` and make the engine check its own inference against
   // itself). Strip the top-level specifier; the body walk re-derives it.
   // EXCEPT when the literal carries a full-signature return marker
-  // (`docs/EFFECTS-MODEL.md`, "Cortex surface"): those effects are
+  // (`docs/EFFECTS-MODEL.md`, "Epsil surface"): those effects are
   // AUTHOR-stated, so they ride onto the derived signature — which makes the
   // operator-def constructor set `effectsDeclared` and run the
   // definition-annotation check (`inferred ⊆ declared`) on its own.

@@ -1582,7 +1582,7 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
 // ───────────────────────────────────────────────────────────────────────────
 // STAGE 3 — full-signature `Typed` markers.
 //
-// `docs/EFFECTS-MODEL.md`, "Cortex surface": the block-form definition return
+// `docs/EFFECTS-MODEL.md`, "Epsil surface": the block-form definition return
 // annotation is encoded as **the full signature**. A `Function` literal's §4.2
 // return marker may hold a complete `FunctionSignature` — parameter types
 // mirrored from the parameter list, arrow effects from the post-parameter-list

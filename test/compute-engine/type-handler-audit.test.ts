@@ -333,7 +333,7 @@ describe('TYPE AUDIT: Ceil (and the inert `Ceiling` alias)', () => {
   // `Truncate`. The 2026-07-31 review reported `Ceiling(k) → unknown` as a
   // missing narrowing; the real cause is that `Ceiling` is not an operator at
   // all — it is a deliberately INERT Mathematica alias (see
-  // `src/cortex/docs/from-mathematica.md`). Pinned so the next reader does not
+  // `src/epsil/docs/from-mathematica.md`). Pinned so the next reader does not
   // "fix" a handler that is already correct, and so the exact-mode Map compile
   // tier's interval table keeps keying on the name that exists.
   ce.declare('cfk', 'finite_integer');

@@ -5,7 +5,7 @@ import { typeToString } from '../../src/common/type/serialize';
 // `parseTypePrefix` parses a type from the START of a string and reports how
 // far it consumed, without requiring EOF and without its "did you mean" error
 // heuristics reading past the consumed range. It is the entry point used by the
-// Cortex parser for type annotations (`x: real = 5`).
+// Epsil parser for type annotations (`x: real = 5`).
 //
 
 describe('parseTypePrefix', () => {

@@ -7,11 +7,11 @@ import {
   type REPLServer,
 } from 'node:repl';
 
-import { version } from '../cortex.js';
-import type { ParsingDiagnostic } from '../cortex/diagnostics.js';
+import { version } from '../epsil.js';
+import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
 
 import { formatDiagnostics, formatValue } from './format.js';
-import type { CortexSession, EvaluationResult, OutputMode } from './types.js';
+import type { EpsilSession, EvaluationResult, OutputMode } from './types.js';
 
 export interface ReplOptions {
   color: boolean;
@@ -26,7 +26,7 @@ class ReplEvaluation {
 }
 
 export function runRepl(
-  session: CortexSession,
+  session: EpsilSession,
   options: ReplOptions
 ): Promise<number> {
   const input = options.input ?? process.stdin;
@@ -35,10 +35,10 @@ export function runRepl(
   let outputModeBeforeAst = options.outputMode;
   let showTime = false;
 
-  output.write(`Cortex ${version}\nType .help for more information.\n\n`);
+  output.write(`Epsil ${version}\nType .help for more information.\n\n`);
 
   const server = startNodeRepl({
-    prompt: 'cortex> ',
+    prompt: 'epsil> ',
     input,
     output,
     terminal: Boolean(
@@ -49,7 +49,7 @@ export function runRepl(
       const diagnostics = session.parse(source, filename);
       if (isRecoverable(source, diagnostics)) {
         callback(
-          new Recoverable(new SyntaxError('Incomplete Cortex input')),
+          new Recoverable(new SyntaxError('Incomplete Epsil input')),
           undefined
         );
         return;
@@ -100,7 +100,7 @@ export function runRepl(
   });
 
   server.defineCommand('load', {
-    help: 'load and execute a Cortex source file',
+    help: 'load and execute an Epsil source file',
     action(filename) {
       loadFile(this, session, filename, outputMode, options.color, showTime);
     },
@@ -115,7 +115,7 @@ export function runRepl(
 
 function loadFile(
   server: REPLServer,
-  session: CortexSession,
+  session: EpsilSession,
   filename: string,
   outputMode: OutputMode,
   color: boolean,
@@ -190,8 +190,8 @@ function setupHistory(server: REPLServer, configuredPath?: string): void {
   if (configuredPath === '') return;
   const historyPath =
     configuredPath ??
-    process.env.CORTEX_REPL_HISTORY ??
-    resolve(homedir(), '.cortex_history');
+    process.env.EPSIL_REPL_HISTORY ??
+    resolve(homedir(), '.epsil_history');
 
   try {
     const lastSlash = Math.max(

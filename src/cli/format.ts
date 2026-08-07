@@ -1,5 +1,5 @@
-import { serializeCortex } from '../cortex.js';
-import type { ParsingDiagnostic } from '../cortex/diagnostics.js';
+import { serializeEpsil } from '../epsil.js';
+import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
 
 import type { EvaluationResult, OutputMode } from './types.js';
 
@@ -42,8 +42,8 @@ export function formatValue(
       2
     );
   }
-  if (mode === 'cortex')
-    return serializeCortex(
+  if (mode === 'epsil')
+    return serializeEpsil(
       result.value.toMathJson({ fractionalDigits: 'auto' })
     );
   return result.value.toString();

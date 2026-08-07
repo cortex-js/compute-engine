@@ -1305,7 +1305,7 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     ).toThrow(/Fail closed/);
   });
 
-  it('Same (Cortex `===`) has no lowering and fails closed (D6)', () => {
+  it('Same (Epsil `===`) has no lowering and fails closed (D6)', () => {
     // `Same` is a STRUCTURAL predicate: there is no sound numeric lowering of
     // it, and it must never borrow `Equal`'s tolerant `_SYS.eq` (which would
     // silently answer `true` for `sqrt(2) === 1.4142135623730951`). No target

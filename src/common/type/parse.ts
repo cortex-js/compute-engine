@@ -125,7 +125,7 @@ export function parseType(
  * Unlike {@link parseType}, this does **not** require the whole string to be a
  * type: `source` may be followed by arbitrary trailing content (e.g.
  * `"real = 5"`, `"list<integer>, y"`). This is the entry point used by the
- * Cortex parser for type annotations (`x: real = 5`), where the type occupies
+ * Epsil parser for type annotations (`x: real = 5`), where the type occupies
  * a prefix of the remaining source.
  *
  * The parser's `input`-scanning "did you mean `list<…>`" heuristics are scoped
@@ -163,7 +163,7 @@ export function parseTypePrefix(
  * human message, and the offset WITHIN the clause text where it was found.
  *
  * Structured rather than thrown because each consumer surfaces it differently:
- * the Cortex parser turns it into a ranged diagnostic, the `DeclareType`
+ * the Epsil parser turns it into a ranged diagnostic, the `DeclareType`
  * operator into an error VALUE, the host `ce.declareType()` into a throw. */
 export interface TypeParameterClauseError {
   code:
@@ -184,7 +184,7 @@ export interface TypeParameterClauseError {
  * The one clause reader shared by every route that carries a clause as text:
  * the `typeParams` attrs entry of a `DeclareType` statement (A1), the host
  * `ce.declareType(…, { typeParams })` option (A2), and — indirectly — the
- * Cortex `type alias Pair<T> = …` statement, whose own character scanner adds
+ * Epsil `type alias Pair<T> = …` statement, whose own character scanner adds
  * source ranges and hands the text on. The input is the clause CONTENTS: the
  * enclosing `<`/`>` are not part of it.
  *

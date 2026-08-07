@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { executeCortex } from '../../src/cortex/execute-cortex';
-import { parseCortex } from '../../src/cortex/parse-cortex';
-import { serializeCortex } from '../../src/cortex/serialize-cortex';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 
@@ -14,9 +14,9 @@ import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascrip
 // collection access keeps rejecting).
 //
 
-describe('Cortex `.` grammar', () => {
+describe('Epsil `.` grammar', () => {
   test('p.x lowers to Field', () => {
-    const [ast, diags] = parseCortex('p.x');
+    const [ast, diags] = parseEpsil('p.x');
     expect(diags).toEqual([]);
     expect(JSON.parse(JSON.stringify(ast)).fn).toEqual([
       'Field',
@@ -26,7 +26,7 @@ describe('Cortex `.` grammar', () => {
   });
 
   test('chains left-associate: a.b.c', () => {
-    const [ast, diags] = parseCortex('a.b.c');
+    const [ast, diags] = parseEpsil('a.b.c');
     expect(diags).toEqual([]);
     const fn = JSON.parse(JSON.stringify(ast)).fn;
     expect(fn[0]).toBe('Field');
@@ -36,29 +36,29 @@ describe('Cortex `.` grammar', () => {
   });
 
   test('2.x stays invisible multiplication (the lexer owns the dot)', () => {
-    const [ast, diags] = parseCortex('2.x');
+    const [ast, diags] = parseEpsil('2.x');
     expect(diags).toEqual([]);
     expect(JSON.parse(JSON.stringify(ast)).fn[0]).toBe('Multiply');
   });
 
   test('the range operator is untouched: 1..5', () => {
-    const [ast, diags] = parseCortex('1..5');
+    const [ast, diags] = parseEpsil('1..5');
     expect(diags).toEqual([]);
     expect(JSON.parse(JSON.stringify(ast)).fn[0]).toBe('Range');
   });
 
   test('the dot must abut the base: `p .x` ends the expression', () => {
-    const [, diags] = parseCortex('p .x');
+    const [, diags] = parseEpsil('p .x');
     expect(diags.length).toBeGreaterThan(0);
   });
 
   test('positional access is not claimed: t.1 diagnoses', () => {
-    const [, diags] = parseCortex('t.1');
+    const [, diags] = parseEpsil('t.1');
     expect(diags.length).toBeGreaterThan(0);
   });
 
   test('a call on a field value: p.x(2) → Apply(Field(p, "x"), 2)', () => {
-    const [ast, diags] = parseCortex('p.x(2)');
+    const [ast, diags] = parseEpsil('p.x(2)');
     expect(diags).toEqual([]);
     const fn = JSON.parse(JSON.stringify(ast)).fn;
     expect(fn[0]).toBe('Apply');
@@ -66,15 +66,15 @@ describe('Cortex `.` grammar', () => {
   });
 
   test('serialization round-trips: p.x + q.y', () => {
-    const [ast] = parseCortex('p.x + q.y');
-    expect(serializeCortex(ast!)).toBe('p.x + q.y');
+    const [ast] = parseEpsil('p.x + q.y');
+    expect(serializeEpsil(ast!)).toBe('p.x + q.y');
   });
 });
 
 describe('Field on records and dictionaries (`d.x` ≡ `d["x"]`)', () => {
   test('present key, absent key (absence marker), and At parity', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `const d = {a -> 10, b -> 20}
 (d.a, d["a"], d.zz)`
@@ -87,7 +87,7 @@ describe('Field on records and dictionaries (`d.x` ≡ `d["x"]`)', () => {
 describe('Field on nominal types (the sanctioned accessor window)', () => {
   test('record-bodied nominal: fields come from the payload', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type circle = record<x: number, y: number, r: number>
 function circle(x, y, r) { {x -> x, y -> y, r -> r} }
@@ -100,7 +100,7 @@ const c = circle(1, 2, 3)
 
   test('named-tuple-bodied nominal: fields resolve by position', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type pt = tuple<x: number, y: number>
 const p = pt(1, 2)
@@ -112,7 +112,7 @@ const p = pt(1, 2)
 
   test('an unknown field is an error value', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `type pt = tuple<x: number, y: number>
 const p = pt(1, 2)
@@ -123,13 +123,13 @@ p.z`
 
   test('D3 upheld: Field does NOT unlock collection access', () => {
     const ce = new ComputeEngine();
-    executeCortex(
+    executeEpsil(
       ce,
       `type pt = tuple<x: number, y: number>
 const p = pt(1, 2)`
     );
-    expect(executeCortex(ce, 'First(p)').value!.operator).toBe('Error');
-    expect(executeCortex(ce, 'p["x"]').value!.operator).toBe('Error');
+    expect(executeEpsil(ce, 'First(p)').value!.operator).toBe('Error');
+    expect(executeEpsil(ce, 'p["x"]').value!.operator).toBe('Error');
   });
 
   test('an unknown-typed operand stays symbolic', () => {
@@ -154,7 +154,7 @@ const p = pt(1, 2)`
 
   test('an absent base propagates the marker through a chain (At parity)', () => {
     const ce = new ComputeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `const d = {a -> {b -> 1}}
 (d.zz.x, d["zz"]["x"])`
@@ -249,7 +249,7 @@ describe('Field at an instantiated parameterized nominal body (§6)', () => {
 
   test('a 3-deep tree reads at every level, by field and by chain', () => {
     const ce = treeEngine();
-    const r = executeCortex(
+    const r = executeEpsil(
       ce,
       `let t = tree(1, [tree(2, [tree(3, [])])])
 (t.value, t.children[1].value, t.children[1].children[1].value)`
@@ -261,9 +261,9 @@ describe('Field at an instantiated parameterized nominal body (§6)', () => {
     );
   });
 
-  test('the Cortex `.` route agrees with the host route', () => {
+  test('the Epsil `.` route agrees with the host route', () => {
     const ce = treeEngine();
-    const r = executeCortex(ce, `let t = tree(7, [])\nt.value`);
+    const r = executeEpsil(ce, `let t = tree(7, [])\nt.value`);
     expect(r.diagnostics ?? []).toEqual([]);
     expect(r.value!.toString()).toBe('7');
     expect(r.value!.type.toString()).toBe('finite_integer');
@@ -336,7 +336,7 @@ describe('Field at an instantiated parameterized nominal body (§6)', () => {
     expect(ce.box(['Field', 'raw', { str: 'u' }]).type.toString()).toBe(
       'string'
     );
-    const r = executeCortex(ce, `const p = pt(1, 2)\n(p.x, p.y)`);
+    const r = executeEpsil(ce, `const p = pt(1, 2)\n(p.x, p.y)`);
     expect(r.diagnostics ?? []).toEqual([]);
     expect(r.value!.toString()).toBe('(1, 2)');
   });

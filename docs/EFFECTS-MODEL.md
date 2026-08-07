@@ -550,7 +550,7 @@ parse error today), so the `)` … `->` slot is positionally isolated (see
 Normalization above for the consequences), and the slot anchors
 per-arrow, so the nested-bounds exhibit below reads fine. Beyond being
 lighter, it leans on the most widely-known effect-annotation syntax in
-existence — relevant to Cortex's LLM-friendliness goal. (Swift's
+existence — relevant to Epsil's LLM-friendliness goal. (Swift's
 `rethrows`/`reasync` — effect *polymorphism* — is the corner "Sets, not
 rows" deliberately gives up, and does not need, since projection always
 sees the actual operand.)
@@ -570,7 +570,7 @@ part of the proposal.
 **Considered and rejected (2026-07-29): a postfix separator**, e.g.
 `(a: integer) -> boolean :: random` (the trailing-position shape of Flix's
 `\ IO` and Eff's `! Δ`; `::` itself is unclaimed in both the type and
-Cortex grammars). Rejected for three reasons, the first decisive:
+Epsil grammars). Rejected for three reasons, the first decisive:
 
 1. **Postfix trailers don't nest, and CE's dominant use site is nested** —
    parameter bounds inside another signature. Compare:
@@ -603,7 +603,7 @@ operand's signature, so `Map(xs, pureF)` is still computed pure.
 specifier slot is positionally isolated from both, so no collision
 arises. Types travel as strings in MathJSON, so effect annotations
 round-trip wherever a **full signature** is carried (definition-form
-encoding: see "Cortex surface").
+encoding: see "Epsil surface").
 
 ### The default: bare `->` means pure
 
@@ -1193,7 +1193,7 @@ for opaque declared HOFs, a rare corner.
 
 **What sets avoid**: effect variables in the lexer/parser/serializer;
 unification state in `subtype.ts`/`matches()` (which must stay write-free);
-row rewriting; annotation-language complexity hostile to Cortex's
+row rewriting; annotation-language complexity hostile to Epsil's
 LLM-friendliness goals. Discharge declarations are deliberately not a
 `rethrows` — they subtract declared constants, never bind variables.
 
@@ -1249,7 +1249,7 @@ consumer distinguishes "may assert" from "total". The underlying want —
 a test harness collecting assertion reports — is a reporting
 *capability* (a `ce.effects` interface), not a label;
 and **`error`/partiality** — expanded below, because the reasoning is
-load-bearing for planned Cortex ergonomics.
+load-bearing for planned Epsil ergonomics.
 
 ### `async` will be an effect, not a promise type (ruled 2026-07-29)
 
@@ -1341,15 +1341,15 @@ Two boundaries of the ruling, stated so it is not over-read:
 
 The forward-looking reason is the strongest: failure-handling ergonomics
 are **narrowing** operations, and only the value representation narrows.
-The planned Cortex refutable binding (`if let x = parse(s) { … } else
-{ … }` — see the "Refutable binding" item in `roadmap/cortex/README.md`)
+The planned Epsil refutable binding (`if let x = parse(s) { … } else
+{ … }` — see the "Refutable binding" item in `roadmap/epsil/README.md`)
 binds `x` at type `typeOf(scrutinee) & !error` via the existing
 `NegationType`, and its `else` arm knows the scrutinee is `error` — all
 expressible today because failure lives in the lattice. An effect bit has
 nothing to narrow; representing errors as effects would foreclose exactly
 these ergonomics. Corollary ruling: Rust/Swift-style `?` propagation is
 declined — it requires early-return (non-local control flow), which
-Cortex's expression-`Block` model deliberately lacks; deep chains are
+Epsil's expression-`Block` model deliberately lacks; deep chains are
 `match`'s job.
 
 ## What does not change
@@ -1369,11 +1369,11 @@ Cortex's expression-`Block` model deliberately lacks; deep chains are
 - **The estimator rulings of `derived-substreams.md`** §§2–7 — this
   document defers to them (see "Randomness shapes").
 
-## Cortex surface
+## Epsil surface
 
 Effects ride the type literal:
 
-```cortex
+```epsil
 let f: (real) random -> real             // opaque declaration
 integrate(f: (real) -> real, a, b) = …   // pure-callback bound, checked at call
 function roll(n) random -> integer { Random(Range(1, n)) }   // checked vs body
@@ -1395,7 +1395,7 @@ Scoping of the "no new grammar" claim:
   the constructed signature**, not discarded. Existing bare `Typed(body,
   returnType)` ascriptions remain valid (return-type-only, pure arrow).
   Examples for anonymous literals, `Assign`, block-form definitions, and
-  serialization belong in the Stage 3 test suite. `serialize-cortex.ts`
+  serialization belong in the Stage 3 test suite. `serialize-epsil.ts`
   updates in lockstep so definitions round-trip.
 
 On a definition, an effect annotation is a contract per the
@@ -1417,7 +1417,7 @@ remain retained-not-validated for now.
   `function mk(x) -> ((real) random -> real) { … }`. Grouping does not
   survive parsing, so the gate is textual (`isGroupedTypeText`,
   `common/type/utils.ts`, applied by both the engine's
-  `functionLiteralDeclaredSignature` and the Cortex serializer): a
+  `functionLiteralDeclaredSignature` and the Epsil serializer): a
   fully parenthesized marker spelling is a grouped type, never the
   literal's own contract. The ungrouped spelling declares the contract.
 - **Wide-result convention** (mirrors `desugarSignatureString`): a
@@ -1435,7 +1435,7 @@ remain retained-not-validated for now.
   stripping the arrow, which sets `effectsDeclared` and runs the check).
 - **The marker's argument list is a cosmetic mirror.** The literal's
   parameter operands remain the parameters-of-record; nothing reads
-  parameter types out of the marker signature. The Cortex lowering
+  parameter types out of the marker signature. The Epsil lowering
   spells them named (`(n: unknown) random -> integer`), falling back to
   positional spelling when a parameter name is not a plain identifier.
 - **Math-style definitions require the arrow** — `f(x) random ->
@@ -1450,7 +1450,7 @@ remain retained-not-validated for now.
   ascription still wins); the effect-free path is unchanged.
 - **Anonymous contract literals serialize losslessly** (option B, ruled
   2026-08-01): a specifier-carrying anonymous literal has no lambda
-  spelling, so the Cortex serializer keeps the contract as an explicit
+  spelling, so the Epsil serializer keeps the contract as an explicit
   `Typed(body, "‹sig›")` call inside the generic `Function(…)` form —
   which re-parses to the same MathJSON. Effect-free ascriptions and
   grouped (return-type) spellings stay transparent as before. A lambda
@@ -1531,14 +1531,14 @@ Each stage is useful without the next; per-stage pinning tests named.
   is pinned by the inferred-track / declared-track describes in
   `user-function-purity.test.ts` and the `pure` grammar block in
   `test/common/type/effects.test.ts`.
-- **Stage 3 — Cortex (implemented 2026-08-01)**: type-literal effects in
+- **Stage 3 — Epsil (implemented 2026-08-01)**: type-literal effects in
   the parser/serializer pair; the definition-form full-signature
-  encoding, per the "Encoding rulings" of "Cortex surface" (decomposition
+  encoding, per the "Encoding rulings" of "Epsil surface" (decomposition
   predicate, wide-result convention, arrow-required math form,
   declared ∪ inferred arrow). The declaration form and parameter
   annotations rode along for free (the type subparser gained the
   specifier slot in Stage 1); the new grammar is the definition-form
-  specifier slot only. Tests: `test/cortex/effects.test.ts` (round-trip
+  specifier slot only. Tests: `test/epsil/effects.test.ts` (round-trip
   of all three surface positions, execution-route contract checks) and
   the "STAGE 3 — full-signature `Typed` markers" block of
   `test/compute-engine/effects-contracts.test.ts` (engine encoding:
@@ -1594,7 +1594,7 @@ Each stage is useful without the next; per-stage pinning tests named.
 
 ## Open questions
 
-- Should discharge declarations get Cortex surface syntax, or remain
+- Should discharge declarations get Epsil surface syntax, or remain
   definition-API-only (sufficient for builtins/hosts, the only foreseeable
   dischargers)? Lean: API-only until a user-level handler story exists.
 

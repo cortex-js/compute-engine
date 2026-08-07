@@ -17,7 +17,7 @@ import { isWildcard, wildcardName, wildcardType } from './pattern-utils.js';
 import { errorOpsWithoutTrace, errorTrace } from './error-value.js';
 
 /**
- * `Match` dispatch — Cortex structural pattern matching
+ * `Match` dispatch — Epsil structural pattern matching
  * (see `docs/plans/2026-07-12-cortex-match-design.md`).
  *
  * `["Match", subject, case₁, …, caseₙ]` where each `caseᵢ` is
@@ -1011,7 +1011,7 @@ function withoutErrorTrace(subject: Expression): Expression {
  * patterns and inside other dictionary values (dict-in-list, dict-in-dict,
  * list-in-dict, …). A `Dictionary` appearing as an operand of a *non-structural*
  * operator pattern (e.g. `Add(dict, x)`) is not supported — no such pattern is
- * reachable from Cortex surface syntax — and fails to match.
+ * reachable from Epsil surface syntax — and fails to match.
  */
 function matchPattern(
   ce: ComputeEngine,
