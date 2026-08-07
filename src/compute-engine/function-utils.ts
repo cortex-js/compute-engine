@@ -377,7 +377,10 @@ export function canonicalFunctionLiteralArguments(
   // ascription. Applied only when the single parameter operand is a string
   // parsing to a signature type with every argument named and no
   // optional/variadic markers (those need `makeLambda` arity support);
-  // anything else falls through to the standard expected-a-symbol error.
+  // anything else falls through to the standard expected-a-symbol error —
+  // except a string that IS signature-shaped and fails to parse as a type,
+  // which reports the type parser's own diagnostic (see
+  // `signatureStringError`) rather than blaming the operand.
   if (ops.length === 2 && isString(ops[1])) {
     // A `forall` clause IS accepted here (generic-literals design §2.2, E1):
     // the string parses to a signature carrying `typeParams` and desugars into
@@ -385,8 +388,10 @@ export function canonicalFunctionLiteralArguments(
     // the full signature as the body's ascription — which then re-enters this
     // function and takes the E2 pre-pass above.
     const desugared = desugarSignatureString(ce, ops[0], ops[1].string);
+    if (desugared?.error !== undefined)
+      return ce._fn('Function', [ops[0], desugared.error]);
     if (desugared !== undefined)
-      return canonicalFunctionLiteralArguments(ce, desugared);
+      return canonicalFunctionLiteralArguments(ce, desugared.ops!);
   }
 
   // Parameters: a bare symbol (inferred type) or an annotated parameter
@@ -782,7 +787,7 @@ function rebindParameters(
 function bodySlotSignature(
   ce: ComputeEngine,
   body: Expression | undefined
-): FunctionSignature | undefined {
+): { sig?: FunctionSignature; error?: Expression } | undefined {
   // Both marker shapes `functionLiteralReturnMarker` reads: the authoring form
   // `["Typed", body, sig]` in the body slot, and the CANONICAL form, where the
   // marker has moved INSIDE the Block and wraps its last statement. A
@@ -801,11 +806,42 @@ function bodySlotSignature(
   let t: Type;
   try {
     t = parseType(s, ce._typeResolver);
-  } catch {
-    return undefined;
+  } catch (e) {
+    // The text IS signature-shaped (ungrouped, with an arrow), so the failure
+    // is the author's contract not parsing — not "this is not a marker".
+    // Swallowing it here dropped the whole ascription silently (a Cortex
+    // `function f<U>(x: U) -> tr<U, U>` typed as `(unknown) -> unknown`).
+    return { error: signatureStringError(ce, s, e) };
   }
   if (typeof t === 'string' || t.kind !== 'signature') return undefined;
-  return t;
+  return { sig: t };
+}
+
+/**
+ * The error expression for a signature-string annotation — the E1 sugar's
+ * parameter-slot string or the E2 body-slot marker — that is signature-shaped
+ * but does not parse as a type.
+ *
+ * A structured `TypeVariableError` code (`generic-alias-arity`,
+ * `variance-violation`, …) becomes the error's own code, so the real cause
+ * survives; anything else the type parser rejects is reported as
+ * `invalid-type-annotation` carrying the type parser's message. The code is
+ * also the head of a `TypeVariableError`'s message, so it is stripped from the
+ * detail rather than repeated.
+ */
+function signatureStringError(
+  ce: ComputeEngine,
+  signature: string,
+  e: unknown
+): Expression {
+  const err = e as { code?: string; rawMessage?: string };
+  let detail = err.rawMessage ?? (e instanceof Error ? e.message : String(e));
+  if (err.code !== undefined && detail.startsWith(`${err.code}: `))
+    detail = detail.slice(err.code.length + 2);
+  return ce.error(
+    [err.code ?? 'invalid-type-annotation', detail],
+    `"${signature}"`
+  );
 }
 
 /**
@@ -847,10 +883,14 @@ function eraseGenericParameters(
 ):
   | { ops?: ReadonlyArray<Expression>; error?: Expression; generic?: boolean }
   | undefined {
-  const sig = bodySlotSignature(ce, ops[0]);
-  if (sig === undefined) return undefined;
+  const marker = bodySlotSignature(ce, ops[0]);
+  if (marker === undefined) return undefined;
 
   const params = ops.slice(1);
+  if (marker.error !== undefined)
+    return { error: ce._fn('Function', [marker.error, ...params]) };
+  const sig = marker.sig!;
+
   const args = sig.args ?? [];
   if (
     sig.optArgs !== undefined ||
@@ -903,8 +943,9 @@ function eraseGenericParameters(
 }
 
 /** Desugar a signature-string `Function` parameter (typed-literals design
- * §3.2 sugar) into structural operands `[body, ...params]`, or `undefined`
- * when the string is not a fully-named, non-variadic signature type. An
+ * §3.2 sugar) into structural operands `{ ops: [body, ...params] }`, or
+ * `undefined` when the string is not a fully-named, non-variadic signature
+ * type, or `{ error }` when it is signature-shaped but does not parse. An
  * `unknown`/`any` argument or result type stays unannotated; an explicit
  * `Typed` body ascription is kept over the signature's result type.
  *
@@ -923,7 +964,7 @@ function desugarSignatureString(
   ce: ComputeEngine,
   body: Expression,
   signature: string
-): Expression[] | undefined {
+): { ops?: Expression[]; error?: Expression } | undefined {
   let type: Type;
   try {
     type = parseType(signature);
@@ -932,8 +973,15 @@ function desugarSignatureString(
     // resolver (second, so the memo-cached parse carries the common case).
     try {
       type = parseType(signature, ce._typeResolver);
-    } catch {
-      return undefined;
+    } catch (e) {
+      // A string that is not signature-shaped is not a signature the author
+      // failed to write — it falls through to the parameter-name reading and
+      // its `expected-a-symbol` error. One that IS (an ungrouped arrow, the
+      // same gate `bodySlotSignature` uses) reports why it did not parse,
+      // instead of blaming the operand for not being a symbol.
+      if (!signature.includes('->') || isGroupedTypeText(signature))
+        return undefined;
+      return { error: signatureStringError(ce, signature, e) };
     }
   }
   if (typeof type === 'string' || type.kind !== 'signature') return undefined;
@@ -982,7 +1030,7 @@ function desugarSignatureString(
     newBody = ce._fn('Typed', [body, ce.string(returnTypeText(type.result))], {
       canonical: false,
     });
-  return [newBody, ...params];
+  return { ops: [newBody, ...params] };
 }
 
 /** Normalize a `Typed` type operand (a string literal or a type-name symbol)

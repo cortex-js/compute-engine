@@ -664,6 +664,39 @@ describe('CORTEX SERIALIZING DECLARATIONS', () => {
     );
   });
 
+  // A parameterized NOMINAL type lowers to `typeParams` WITHOUT `alias` — a
+  // bag the fallback comment used to call "a shape well-formed lowering never
+  // produces", so the statement came back as
+  // `DeclareType(box, "…", {typeParams -> "out T"})`. The clause text is
+  // bracket-free and carries the variance marker verbatim, so re-emitting it
+  // inside `<…>` is the whole reconstruction.
+  test('parameterized nominal `type` statements round-trip', () => {
+    expect(rt('type box<T> = tuple<v: T>')).toBe('type box<T> = tuple<v: T>');
+    expect(rt('type box<out T> = tuple<v: T>')).toBe(
+      'type box<out T> = tuple<v: T>'
+    );
+    expect(rt('type box<inout T> = tuple<v: T>')).toBe(
+      'type box<inout T> = tuple<v: T>'
+    );
+    expect(rt('type sink<in T> = tuple<accept: (T) -> nothing>')).toBe(
+      'type sink<in T> = tuple<accept: (T) -> nothing>'
+    );
+    // A bound rides along in the same clause text.
+    expect(rt('type num<T: number> = tuple<v: T>')).toBe(
+      'type num<T: number> = tuple<v: T>'
+    );
+    // The alias and unparameterized forms are unchanged.
+    expect(rt('type alias Pair<T> = tuple<T, T>')).toBe(
+      'type alias Pair<T> = tuple<T, T>'
+    );
+    expect(rt('type alias pt = tuple<number, number>')).toBe(
+      'type alias pt = tuple<number, number>'
+    );
+    expect(rt('type point = tuple<number, number>')).toBe(
+      'type point = tuple<number, number>'
+    );
+  });
+
   // The flag is accepted in every encoding an attributes bag can carry it in,
   // matching the engine-side readers (`declareTypeStatement`, `Declare`'s
   // evaluate handler). A JS boolean is a `DictionaryValue`, so it is only

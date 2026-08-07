@@ -1,6 +1,8 @@
 import { isEffectSubset, unionEffectSets } from './effects.js';
+import { substituteTypeVariables } from './instantiate.js';
 import { parseType } from './parse.js';
 import { isValidType } from './primitive.js';
+import { declarationOf } from './reference.js';
 import { typeToString } from './serialize.js';
 import { isSubtype, widen } from './subtype.js';
 
@@ -373,6 +375,18 @@ export function isValidTypeName(name: string): boolean {
  * is shared with `subtype.ts` (which must not import this module). The set is
  * allocated only once a reference is actually unfolded, so the identity path
  * (a non-reference type) allocates nothing.
+ *
+ * An APPLIED reference to a parameterized nominal type
+ * (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §7) unfolds to
+ * its definition INSTANTIATED at the application's arguments: `tree<integer>`
+ * erases to whatever `tuple<value: integer, children: list<tree<integer>>>`
+ * compiles to, and declines identically where that would. Without the
+ * substitution the compiler would meet the declaration's bare type variables
+ * and answer every layout question about `T` instead of about `integer`.
+ * The cycle guard keys on the DECLARATION record (`declarationOf`), not on the
+ * application: substitution rebuilds an application, so the fresh object would
+ * defeat an identity guard on the node itself. For an unparameterized reference
+ * the record IS the node, so the existing behavior is unchanged.
  */
 export function resolveTypeForCompilation(t: Readonly<Type>): Type {
   let seen: Set<TypeReference> | undefined;
@@ -383,9 +397,17 @@ export function resolveTypeForCompilation(t: Readonly<Type>): Type {
     result.def !== undefined
   ) {
     seen ??= new Set();
-    if (seen.has(result)) return result;
-    seen.add(result);
-    result = result.def;
+    const decl = declarationOf(result);
+    if (seen.has(decl)) return result;
+    seen.add(decl);
+    const typeParams = decl.typeParams;
+    const args = result.args;
+    if (args !== undefined && typeParams !== undefined) {
+      const bindings: Record<string, Type> = Object.create(null);
+      for (let i = 0; i < typeParams.length; i++)
+        if (args[i] !== undefined) bindings[typeParams[i].name] = args[i];
+      result = substituteTypeVariables(result.def, bindings);
+    } else result = result.def;
   }
   return result;
 }

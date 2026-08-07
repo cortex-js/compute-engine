@@ -44,6 +44,7 @@ import {
 } from './instantiate.js';
 import type { TypeVariableErrorCode } from './instantiate.js';
 import { typeToString } from './serialize.js';
+import { applyTypeReference, recordForwardArity } from './reference.js';
 
 export class TypeBuilder implements ASTVisitor<Type> {
   private typeResolver: TypeResolver;
@@ -323,12 +324,24 @@ export class TypeBuilder implements ASTVisitor<Type> {
     const resolved = this.typeResolver.resolve(node.name);
     const record = asTypeReferenceRecord(resolved);
 
-    // A GENERIC type alias — written applied (`Pair<integer>`) or declared
-    // generic (a bare `Pair`, which is an arity error). Everything else falls
-    // through to the plain reference path below.
+    // A BARE use of a not-yet-declared name (`type forest`) is an application
+    // at arity zero: it is recorded too, so a declaration that turns the name
+    // generic is caught against it (§4.2).
+    if (
+      node.isForward &&
+      node.args === undefined &&
+      record !== undefined &&
+      record.def === undefined &&
+      record.typeParams === undefined
+    )
+      recordForwardArity(record, 0);
+
+    // A GENERIC type — written applied (`Pair<integer>`, `tree<integer>`) or
+    // declared generic (a bare `Pair`, which is an arity error). Everything
+    // else falls through to the plain reference path below.
     if (node.args !== undefined || record?.typeParams !== undefined) {
-      const expanded = this.expandGenericAlias(node, record);
-      if (expanded !== undefined) return expanded;
+      const applied = this.applyTypeReference(node, record);
+      if (applied !== undefined) return applied;
     }
 
     if (resolved) {
@@ -348,20 +361,27 @@ export class TypeBuilder implements ASTVisitor<Type> {
   }
 
   /**
-   * Expand an applied generic-alias reference into its substituted body —
-   * the whole of the generic-alias feature at the TYPE layer
+   * Apply a generic type reference — the two halves of the feature at the TYPE
+   * layer.
+   *
+   * A generic ALIAS is TRANSPARENT, so the application is EXPANDED here, once,
+   * at type-resolution time: no applied-alias node exists in the `Type`
+   * representation, and nothing downstream ever meets one
    * (`docs/plans/2026-08-04-generic-type-aliases-design.md` §3.3).
    *
-   * Transparency means the expansion happens HERE, once, at type-resolution
-   * time: no applied-reference node exists in the `Type` representation, so
-   * nothing downstream (subtype, widen, compile, serialization) ever meets one.
+   * A parameterized NOMINAL type is OPAQUE, so the application is KEPT: the
+   * node carries its `args` and delegates `def` to the declaration record, and
+   * subtyping relates two applications by name plus arguments without ever
+   * consulting the body (`docs/plans/2026-08-06-parameterized-nominal-types-
+   * design.md` §3). That is what makes a RECURSIVE parametric type work: the
+   * `tree<T>` inside `tree`'s own body needs no definition to be built.
    *
    * Returns `undefined` — "not a generic application, carry on" — only when the
    * resolver does not hand back a type RECORD (the Cortex parser's shim
    * resolves a name to the bare name: it is a syntax check, and the engine
    * re-parses the same text with the real resolver).
    */
-  private expandGenericAlias(
+  private applyTypeReference(
     node: TypeReferenceNode,
     record: TypeReference | undefined
   ): Type | undefined {
@@ -369,22 +389,28 @@ export class TypeBuilder implements ASTVisitor<Type> {
     const params = record?.typeParams;
     const args = node.args;
 
-    // A generic alias written BARE: there is nothing to expand.
+    // A generic type written BARE (§6/N7): an arity error, for an alias and a
+    // nominal type alike.
     if (args === undefined)
       fail(
         'generic-alias-arity',
         `The type "${name}" is generic: it takes ${params!.length} type argument${params!.length === 1 ? '' : 's'} (write \`${name}<…>\`)`
       );
 
-    // `type Pair<integer>`: a forward reference has no body to expand against.
-    if (node.isForward)
-      fail(
-        'generic-alias-forward-reference',
-        `The forward reference \`type ${name}\` cannot take type arguments: declare "${name}" before applying it`
-      );
-
     // Not a record — the Cortex resolver shim. Nothing checkable here.
     if (record === undefined) return undefined;
+
+    // An APPLIED FORWARD REFERENCE (`type forest<T>`): the name has no
+    // declaration yet, so there is nothing to check the application against.
+    // Record the argument count instead — the declaration that fulfills the
+    // promise is checked against every recorded use (§4.2).
+    if (node.isForward && record.def === undefined && params === undefined) {
+      recordForwardArity(record, args.length);
+      return applyTypeReference(
+        record,
+        args.map((a) => this.buildType(a))
+      );
+    }
 
     if (params === undefined) {
       if (record.def === undefined)
@@ -399,17 +425,10 @@ export class TypeBuilder implements ASTVisitor<Type> {
     }
 
     // Expansion is STRUCTURAL: it substitutes into the body and drops the
-    // name. Only an alias may be treated that way — `declareType` rejects a
-    // clause on the nominal form, so a parameterized non-alias record here
-    // would be a declaration-route leak.
-    console.assert(
-      record.alias === true,
-      `The generic type "${name}" is not an alias: only an alias body may be expanded structurally`
-    );
-
-    // The record's own body is still parsing: this application is inside it.
-    // Recursive generic aliases are out of scope (v1).
-    if (record.def === undefined)
+    // name. Only an alias may be treated that way. The record's own body is
+    // still parsing when `def` is undefined: that application is inside it,
+    // and recursive generic aliases are out of scope (v1).
+    if (record.alias === true && record.def === undefined)
       fail(
         'generic-alias-self-reference',
         `The generic type alias "${name}" cannot refer to itself: a generic alias is expanded eagerly, so its body has no definition to expand into yet`
@@ -425,14 +444,18 @@ export class TypeBuilder implements ASTVisitor<Type> {
     // or `toString`, and a plain object literal would treat both as inherited
     // members rather than as bindings.
     const bindings: Record<string, Type> = Object.create(null);
+    const built: Type[] = [];
     for (let i = 0; i < params.length; i++) {
       const arg = this.buildType(args[i]);
       const bound = params[i].bound;
       if (bound !== undefined) this.checkArgumentBound(name, arg, params[i]);
       bindings[params[i].name] = arg;
+      built.push(arg);
     }
 
-    return substituteTypeVariables(record.def, bindings);
+    if (record.alias !== true) return applyTypeReference(record, built);
+
+    return substituteTypeVariables(record.def!, bindings);
   }
 
   /**

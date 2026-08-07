@@ -3,6 +3,7 @@ import type {
   Type,
   TypeParameter,
   TypeParamsOption,
+  TypeReference,
   TypeString,
 } from '../common/type/types.js';
 import {
@@ -20,9 +21,14 @@ import {
   freeTypeVariables,
   hasFreeTypeVariables,
   isReservedTypeName,
+  satisfiesTypeBound,
+  substituteTypeVariables,
   TypeVariableError,
   isPolymorphicType,
 } from '../common/type/instantiate.js';
+import { declarationOf, forwardArities } from '../common/type/reference.js';
+import { verifyVariance } from '../common/type/variance.js';
+import type { VarianceResult } from '../common/type/variance.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import {
   assertSingleArmPolytype,
@@ -540,9 +546,10 @@ function normalizeDeclaredTypeParams(
         'unsupported-variable-position',
         `The bound of the type variable \`${entry.name}\` must be a ground type`
       );
-    push(
-      bound === undefined ? { name: entry.name } : { name: entry.name, bound }
-    );
+    const param: TypeParameter = { name: entry.name };
+    if (bound !== undefined) param.bound = bound;
+    if (entry.variance !== undefined) param.variance = entry.variance;
+    push(param);
   }
 
   if (params.length === 0)
@@ -587,15 +594,18 @@ export function declareType(
       ? undefined
       : normalizeDeclaredTypeParams(ce, name, typeParams);
 
-  // Only the ALIAS form takes a clause: parameterized NOMINAL types are out of
-  // scope (generic-type-aliases design §1/§2 — a generic alias is expanded
-  // eagerly, which a nominal reference cannot be). Rejected before anything is
-  // mutated, mirroring the Cortex statement route's
-  // `type-variables-unsupported` diagnostic.
-  if (params !== undefined && alias !== true)
-    throw Error(
-      `The type "${name}" cannot be generic: only a type ALIAS takes a type parameter clause (write \`alias: true\`)`
-    );
+  // Variance is a property of a NOMINAL declaration: it relates two
+  // applications of an opaque type. A transparent alias has no such relation
+  // to declare — an applied alias IS its expansion — so a marker there is
+  // rejected rather than silently ignored (parameterized-nominal design §2).
+  if (params !== undefined && alias === true) {
+    const marked = params.find((p) => p.variance !== undefined);
+    if (marked !== undefined)
+      throw new TypeVariableError(
+        'unsupported-variable-position',
+        `The type parameter \`${marked.name}\` of the ALIAS "${name}" cannot declare a variance: an alias is transparent, so its applications are expanded rather than related`
+      );
+  }
 
   // A type declaration claims BOTH namespaces: the type record, and a
   // value-level constructor of the same name (nominal-types design §4.1/D5).
@@ -616,20 +626,30 @@ export function declareType(
   // definition (a fresh record would leave them pointing at the empty one, and
   // mutual recursion could never close). A record with a `def` is a completed
   // declaration and still conflicts; only the empty promise is fulfillable.
-  const fulfillsForwardRef = existing !== undefined && existing.def === undefined;
+  const fulfillsForwardRef =
+    existing !== undefined && existing.def === undefined;
 
-  // A forward reference is necessarily BARE — the type parser has no syntax for
-  // applying one — so every type that already captured this record captured it
-  // with no arguments. Turning it generic would leave those types holding an
-  // unapplied generic reference, which is an arity error everywhere else and
-  // silently matches nothing (`list<type Gen>` then matched
-  // `list<tuple<integer, integer>>` as `false`). Reject instead, leaving the
-  // placeholder untouched for a well-formed declaration later.
-  if (fulfillsForwardRef && typeParams !== undefined)
-    throw new TypeVariableError(
-      'generic-alias-arity',
-      `The type "${name}" is referenced as a forward reference, which takes no type arguments: it cannot be declared generic`
-    );
+  // A forward reference is created by USE, so its arity is known only from the
+  // uses that created it: each one recorded how many arguments it applied
+  // (`type forest` records 0, `type forest<T>` records 1). This declaration
+  // must agree with every one of them — a mismatch would leave those types
+  // holding an application at the wrong arity, which matches nothing
+  // (`list<type Gen>` then matched `list<tuple<integer, integer>>` as
+  // `false`). Reject instead, leaving the placeholder untouched for a
+  // well-formed declaration later (design §4.2).
+  if (fulfillsForwardRef) {
+    const declaredArity = params?.length ?? 0;
+    const used = forwardArities(existing!);
+    const mismatch =
+      used === undefined
+        ? undefined
+        : [...used].find((n) => n !== declaredArity);
+    if (mismatch !== undefined)
+      throw new TypeVariableError(
+        'generic-alias-arity',
+        `The type "${name}" is declared with ${declaredArity} type parameter${declaredArity === 1 ? '' : 's'}, but an earlier forward reference applies it to ${mismatch} type argument${mismatch === 1 ? '' : 's'}`
+      );
+  }
 
   if (existing && !fulfillsForwardRef) {
     // A record this scope created from a `DeclareType` statement (marked
@@ -645,31 +665,73 @@ export function declareType(
       throw Error(`The type "${name}" is already defined in the current scope`);
   }
 
+  // A statement replacement UPDATES THE RECORD IN PLACE, for the same reason a
+  // forward-reference fulfilment does: every type that mentions the name — and
+  // every applied reference `box<integer>` already built — captured THIS
+  // object, and an applied reference additionally holds it through a hard
+  // `decl` back-pointer (`common/type/reference.ts`). Swapping in a fresh
+  // record left those captures answering from the OLD definition: a node
+  // parsed before the redeclaration and one parsed after gave different
+  // subtyping verdicts for the same pair of types, and a mutually recursive
+  // set needed a THIRD notebook run to converge. The definition is the
+  // record's, so replacing the definition means writing the record.
+  const replacesInPlace = existing !== undefined && !fulfillsForwardRef;
+
   // D5, atomicity: the value half is checked BEFORE anything is mutated, so a
   // collision leaves neither namespace touched — not the existing type record,
   // not the recursion placeholder below. An outer-scope binding is shadowed,
   // not conflicted; an inferred (valueless, auto-declared) binding upgrades; a
   // constructor we minted earlier is ours to replace.
-  // A GENERIC alias mints nothing (`deriveConstructorSignature` declines a
+  // A GENERIC ALIAS mints nothing (`deriveConstructorSignature` declines a
   // parameterized body, D4b), so it makes no claim on the value namespace and
   // must not be pre-checked against one: `function Duo(x) {…}` followed by
   // `type alias Duo<T> = tuple<T, T>` is legal. (A plain→generic replacement
   // still drops the constructor the plain form minted — `mintTypeConstructor`
   // calls `removeMintedTypeConstructor` before deriving.)
-  if (mint && params === undefined) checkTypeConstructorNamespace(scope, name);
-
-  if (existing && !fulfillsForwardRef) delete scope.types![name];
+  // A parameterized NOMINAL type is the opposite: it mints a `forall`-quantified
+  // constructor (design §5), so it does claim the value name. `alias` is not
+  // yet defaulted here, so `!== true` reads "nominal".
+  if (mint && (params === undefined || alias !== true))
+    checkTypeConstructorNamespace(scope, name);
 
   scope.types ??= {};
 
   alias ??= false; // Nominal by default
 
+  // The state a failing replacement must put back. Unlike a forward-reference
+  // fulfilment — whose rollback CLEARS the record back to an unfulfilled
+  // promise — a replacement rolls back onto a type that was already working,
+  // so every field it overwrites is snapshotted first. (`_declaredByStatement`
+  // is in the snapshot even though the guard above proved it `true`: the
+  // restore then states the whole prior record rather than re-deriving it.)
+  const prior = replacesInPlace
+    ? {
+        def: existing!.def,
+        alias: existing!.alias,
+        typeParams: existing!.typeParams,
+        varianceState: existing!._varianceState,
+        varianceBlockedOn: existing!._varianceBlockedOn,
+        declaredByStatement: (existing as { _declaredByStatement?: boolean })
+          ._declaredByStatement,
+      }
+    : undefined;
+
   // First, add a placeholder record to allow recursive types. Fulfilling a
-  // forward reference REUSES the record `forward()` installed — same object,
-  // now carrying this declaration's `alias` — so the types that captured it
-  // resolve through to the definition set below.
-  if (fulfillsForwardRef) existing!.alias = alias;
-  else scope.types[name] = { kind: 'reference', name, alias, def: undefined };
+  // forward reference — or replacing a statement-declared type — REUSES the
+  // record already in the scope (same object, now carrying this declaration's
+  // `alias`), so the types that captured it resolve through to the definition
+  // set below. Re-opening it as a placeholder (no `def`, no verified variance)
+  // is what makes the body parse below behave exactly as it does for a first
+  // declaration: a generic type that applies itself is detected as
+  // `generic-alias-self-reference`, and the recursive occurrence in the new
+  // body binds to this record rather than to the old definition.
+  if (fulfillsForwardRef || replacesInPlace) {
+    existing!.alias = alias;
+    existing!.def = undefined;
+    delete existing!.typeParams;
+    delete existing!._varianceState;
+    delete existing!._varianceBlockedOn;
+  } else scope.types[name] = { kind: 'reference', name, alias, def: undefined };
   // The clause goes on the placeholder, BEFORE the body parses: a generic
   // alias that applies itself is then detected unambiguously (the record has
   // `typeParams` and no `def` yet) as `generic-alias-self-reference`.
@@ -681,6 +743,28 @@ export function declareType(
 
   /** Undo the placeholder: a declaration that failed declares nothing. */
   const rollbackTypeHalf = (): void => {
+    if (prior !== undefined) {
+      // A replacement restores the record's PREVIOUS definition, field by
+      // field. Clearing it (the forward-reference behaviour below) would leave
+      // a type that worked a moment ago undefined — and, since the record is
+      // shared, would break every type that mentions it too.
+      existing!.alias = prior.alias;
+      existing!.def = prior.def;
+      if (prior.typeParams === undefined) delete existing!.typeParams;
+      else existing!.typeParams = prior.typeParams;
+      if (prior.varianceState === undefined) delete existing!._varianceState;
+      else existing!._varianceState = prior.varianceState;
+      if (prior.varianceBlockedOn === undefined)
+        delete existing!._varianceBlockedOn;
+      else existing!._varianceBlockedOn = prior.varianceBlockedOn;
+      if (prior.declaredByStatement === undefined)
+        delete (existing as { _declaredByStatement?: boolean })
+          ._declaredByStatement;
+      else
+        (existing as { _declaredByStatement?: boolean })._declaredByStatement =
+          prior.declaredByStatement;
+      return;
+    }
     if (fulfillsForwardRef) {
       // The record is the forward reference's own; restoring it means putting
       // it back to the unfulfilled state, not removing it — the types holding
@@ -688,6 +772,11 @@ export function declareType(
       existing!.alias = false;
       existing!.def = undefined;
       delete existing!.typeParams;
+      // The variance verification state belongs to the DECLARATION this
+      // handler was making. Left behind on the re-opened promise it would let
+      // a subtype judgment read the (now absent) parameters as verified.
+      delete existing!._varianceState;
+      delete existing!._varianceBlockedOn;
       // `_declaredByStatement` was set on this very record before the body
       // parsed. Leaving it behind would mark a still-unfulfilled promise as
       // statement-created, and the redeclaration guard above keys on exactly
@@ -697,8 +786,10 @@ export function declareType(
         ._declaredByStatement;
       return;
     }
+    // A first declaration: the placeholder is this handler's own, so undoing it
+    // is removing it. (Every case with an `existing` record is handled above —
+    // both reuse it in place.)
     delete scope.types![name];
-    if (existing) scope.types![name] = existing;
   };
 
   // Parse the type (which may reference itself). If it is malformed, leave
@@ -719,10 +810,55 @@ export function declareType(
     throw e;
   }
 
-  // Under transparency a phantom parameter is meaningless: `Tagged<integer>`
-  // and `Tagged<string>` would be the same type. Rejected like the signature
-  // rule's unused quantified variable.
-  if (params !== undefined) {
+  // A body that is NOTHING BUT an application of the type being declared
+  // (`type r<T> = r<T>`) defines nothing at all: erasure resolves the reference
+  // to itself forever, and two such applications relate by a variance no body
+  // ever justified. The generic-ALIAS form of this is caught while the body
+  // parses (`generic-alias-self-reference`, `type-builder.ts`); a nominal body
+  // reaches that site legitimately, because a recursive occurrence is exactly
+  // what makes the feature work — so the vacuous case is recognized HERE, where
+  // "top level of the body" is knowable. Recursion UNDER structure stays legal.
+  if (
+    alias !== true &&
+    typeof def === 'object' &&
+    def.kind === 'reference' &&
+    def.args !== undefined &&
+    declarationOf(def) === scope.types[name]
+  ) {
+    rollbackTypeHalf();
+    throw new TypeVariableError(
+      'generic-alias-self-reference',
+      `The definition of the nominal type "${name}" cannot be just an application of itself: a recursive occurrence must appear under some structure (a tuple field, \`list<${name}<…>>\`, …)`
+    );
+  }
+
+  // A phantom parameter is meaningless under either reading: transparently
+  // `Tagged<integer>` and `Tagged<string>` are the same type, and opaquely
+  // they are indistinguishable yet unequal. Rejected like the signature rule's
+  // unused quantified variable.
+  //
+  // Hook A (design §4.2/§4.4): a parameterized NOMINAL type also has its
+  // declared variance — the written marker, or the `out` a missing one
+  // declares — VERIFIED against the body, and the same walk answers the
+  // unused-parameter question, so the two checks are one call. It runs AFTER
+  // the body parse returns (`parseType` prefixes "Failed to parse type" onto
+  // anything thrown inside it) and BEFORE the definition feeds the mint block,
+  // so a violating declaration never mints.
+  if (params !== undefined && alias !== true) {
+    const verdict = verifyVariance(name, params, def);
+    if (verdict.status === 'violation') {
+      rollbackTypeHalf();
+      throw new TypeVariableError(verdict.code, verdict.message);
+    }
+    const record = scope.types[name];
+    if (verdict.status === 'deferred') {
+      record._varianceState = 'deferred';
+      record._varianceBlockedOn = verdict.blockedOn;
+    } else {
+      record._varianceState = 'verified';
+      delete record._varianceBlockedOn;
+    }
+  } else if (params !== undefined) {
     const free = freeTypeVariables(def);
     const unused = params.filter((p) => !free.has(p.name));
     if (unused.length > 0) {
@@ -741,6 +877,28 @@ export function declareType(
   // Adjust the definition (the type references in the type will point to
   // the placeholder record)
   scope.types[name].def = def;
+
+  // Hook B: this declaration may have fulfilled the forward reference a
+  // provisionally-accepted one was waiting on. Verify every group that has
+  // become complete, to a fixpoint.
+  //
+  // A REPLACEMENT additionally re-verifies the types that already mention this
+  // record. They follow the new definition (the record is theirs too), so a
+  // redeclaration that changes this type's variance can invalidate a
+  // dependent's own declared variance — and that dependent, not this
+  // declaration, is where the contradiction lives. Such a verdict fails THIS
+  // statement, which rolls back, leaving the dependent as it was.
+  let settled: TypeReference[];
+  try {
+    settled = settleVarianceGroup(
+      scope,
+      name,
+      replacesInPlace ? existing : undefined
+    );
+  } catch (e) {
+    rollbackTypeHalf();
+    throw e;
+  }
 
   // Mint the value-level constructor (§4.1, D4/D4b/D10). If it cannot be
   // declared, roll BOTH halves back: the registration is atomic across the two
@@ -766,7 +924,305 @@ export function declareType(
   // the caches keyed on it (and every expression boxed AFTER this point) see
   // the new definition. Expressions already boxed keep the type they computed,
   // exactly as a value redeclaration leaves them.
-  if (existing) ce._generation += 1;
+  // A variance flip from provisional (`inout`-conservative) to verified is the
+  // same kind of change — it widens the answers subtyping gives. In practice it
+  // only ever happens on a declaration that fulfils a forward reference, so
+  // `existing` is already truthy; the second disjunct is there so a future
+  // unblocking route cannot silently skip the bump.
+  if (existing || settled.length > 0) ce._generation += 1;
+}
+
+/**
+ * Every mention of the declaration record `target` in `body` — `undefined` when
+ * it is not mentioned at all. A BARE reference is an application at arity ZERO,
+ * exactly as it is for a forward reference (`forwardArities`): it is what makes
+ * a plain → generic re-declaration a mismatch (N7).
+ *
+ * STRUCTURAL walk: an applied reference is compared by the identity of its
+ * declaration record (`declarationOf`, the `decl` back-pointer) and descended
+ * into through its ARGUMENTS only — never through `def`. That is both the
+ * cycle guard a recursive nominal needs (`type tree<T> = tuple<T,
+ * list<tree<T>>>` closes its loop through `def`) and the right question:
+ * mentioning a type is a property of the body as written, not of what the
+ * mentioned type expands to. The visited set covers shared sub-structure.
+ */
+function mentionsOf(
+  body: Type,
+  target: TypeReference
+): TypeReference[] | undefined {
+  const seen = new Set<object>();
+  let mentions: TypeReference[] | undefined;
+  const visit = (t: Type | undefined): void => {
+    if (t === undefined || typeof t !== 'object') return;
+    if (seen.has(t)) return;
+    seen.add(t);
+    switch (t.kind) {
+      case 'reference':
+        if (declarationOf(t) === target) (mentions ??= []).push(t);
+        (t.args ?? []).forEach(visit);
+        return;
+      case 'signature':
+        (t.args ?? []).forEach((a) => visit(a.type));
+        (t.optArgs ?? []).forEach((a) => visit(a.type));
+        if (t.variadicArg !== undefined) visit(t.variadicArg.type);
+        visit(t.result);
+        return;
+      case 'union':
+      case 'intersection':
+        t.types.forEach(visit);
+        return;
+      case 'negation':
+        visit(t.type);
+        return;
+      case 'list':
+      case 'set':
+      case 'collection':
+      case 'indexed_collection':
+      case 'broadcastable':
+        visit(t.elements);
+        return;
+      case 'dictionary':
+        visit(t.values);
+        return;
+      case 'tuple':
+        t.elements.forEach((el) => visit(el.type));
+        return;
+      case 'record':
+        Object.values(t.elements).forEach(visit);
+        return;
+      default:
+        return;
+    }
+  };
+  visit(body);
+  return mentions;
+}
+
+/**
+ * Ruling C, fulfilment half: re-verify every provisionally-accepted declaration
+ * in scope whose blocking forward references have since gained definitions,
+ * until no further record settles.
+ *
+ * This terminates without a least-fixed-point search because no member's
+ * variance is being SOLVED — each is verified against its own declared (or
+ * default) variance, and a reference with a known definition composes with the
+ * variance that declaration states. A mutually recursive pair therefore settles
+ * in at most two passes.
+ *
+ * A late violation throws: the failing OPERATION is the fulfilling declaration
+ * (which rolls back atomically, as any failing declaration does), while the
+ * message is ATTRIBUTED to the original declaration and names the trigger. Any
+ * record this pass already flipped is put back, so the throw leaves the scope
+ * exactly as it found it.
+ *
+ * `replaced` is the record a statement re-declaration has just UPDATED IN
+ * PLACE. Its dependents keep pointing at it, so they now read the new
+ * declaration — its clause and its variance both — and every one that mentions
+ * it is checked against it again: the ARITY of each mention against the new
+ * type-parameter count, each argument against the new BOUNDS, and (for an
+ * already-verified parameterized nominal) its own declared variance against the
+ * new body. Dependents are both TYPE-level (the scope chain's type records) and
+ * VALUE-level (its declared symbol types and operator signatures). That pass
+ * changes no state: a dependent either still checks out (nothing to record) or
+ * fails, which throws and so fails the redeclaration.
+ */
+function settleVarianceGroup(
+  scope: Scope,
+  justDeclared: string,
+  replaced?: TypeReference
+): TypeReference[] {
+  const flipped: TypeReference[] = [];
+  const wasBlockedOn = new Map<TypeReference, string[] | undefined>();
+  const undo = (): void => {
+    for (const r of flipped) {
+      r._varianceState = 'deferred';
+      r._varianceBlockedOn = wasBlockedOn.get(r);
+    }
+  };
+
+  // The dependent re-verification runs FIRST, before anything is flipped, so a
+  // violation needs no undo. Deferred dependents are left to the variance
+  // fixpoint below — they are re-verified there anyway, and only there can they
+  // settle.
+  if (replaced !== undefined) {
+    const params = replaced.typeParams;
+    const declaredArity = params?.length ?? 0;
+
+    /**
+     * Re-check every mention of the replaced record in `body` against the NEW
+     * declaration. `subject` names the dependent in the diagnostic ("the
+     * definition of \"holder\"", "the signature of \"f\""), `ownParams` is the
+     * dependent's own generic clause, used to read an OPEN argument as its
+     * declared bound exactly as A7's admission rule does at build time.
+     */
+    const recheckMentions = (
+      body: Type,
+      subject: string,
+      ownParams: readonly TypeParameter[] | undefined
+    ): void => {
+      const mentions = mentionsOf(body, replaced);
+      if (mentions === undefined) return;
+
+      // ARITY first: a dependent that applies the replaced type at the old
+      // arity holds an application that matches nothing, whatever anything
+      // else says. Checked for EVERY dependent, alias or nominal, type-level or
+      // value-level — arity is a property of the application, not of the
+      // subtyping contract. Covers all three directions a clause edit can take:
+      // a changed parameter count, generic → plain (`declaredArity` 0 against
+      // applied uses) and plain → generic (a bare mention is arity 0, N7).
+      for (const mention of mentions) {
+        const arity = mention.args?.length ?? 0;
+        if (arity !== declaredArity)
+          throw new TypeVariableError(
+            'generic-alias-arity',
+            `${subject} applies "${replaced.name}" to ${arity} type argument${
+              arity === 1 ? '' : 's'
+            }, but "${replaced.name}" is now declared with ${declaredArity} type parameter${
+              declaredArity === 1 ? '' : 's'
+            } (surfaced when \`${justDeclared}\` was declared)`
+          );
+      }
+
+      // BOUNDS: the arities now agree, so each argument is re-admitted against
+      // the parameter it fills. A redeclaration that ADDS a bound
+      // (`box<T>` → `box<T: integer>`) leaves every existing `box<string>`
+      // behind it otherwise.
+      if (params === undefined) return;
+      for (const mention of mentions) {
+        for (let i = 0; i < params.length; i++) {
+          const bound = params[i].bound;
+          if (bound === undefined) continue;
+          const arg = mention.args![i];
+          const free = freeTypeVariables(arg);
+          let subjectArg = arg;
+          if (free.size > 0) {
+            const bindings: Record<string, Type> = Object.create(null);
+            for (const v of free)
+              bindings[v] = ownParams?.find((p) => p.name === v)?.bound ?? 'any';
+            subjectArg = substituteTypeVariables(arg, bindings);
+          }
+          if (satisfiesTypeBound(subjectArg, bound)) continue;
+          throw new TypeVariableError(
+            'generic-alias-bound',
+            `${subject} applies "${replaced.name}" to the type argument \`${typeToString(
+              arg
+            )}\`, which does not satisfy the bound \`${typeToString(bound)}\` of the parameter \`${
+              params[i].name
+            }\` of "${replaced.name}" (surfaced when \`${justDeclared}\` was declared)`
+          );
+        }
+      }
+    };
+
+    for (let s: Scope | null | undefined = scope; s; s = s.parent) {
+      for (const record of Object.values(s.types ?? {})) {
+        if (record === replaced || record.def === undefined) continue;
+        recheckMentions(
+          record.def,
+          `The definition of "${record.name}"`,
+          record.typeParams
+        );
+
+        // VARIANCE: only a parameterized nominal has one to re-verify, and a
+        // still-deferred one belongs to the fixpoint below.
+        if (record._varianceState !== 'verified') continue;
+        if (record.typeParams === undefined) continue;
+        const verdict = verifyVariance(
+          record.name,
+          record.typeParams,
+          record.def,
+          { triggeredBy: justDeclared }
+        );
+        if (verdict.status === 'violation')
+          throw new TypeVariableError(verdict.code, verdict.message);
+      }
+
+      // VALUE-level dependents. A declared symbol type or operator signature
+      // that mentions the record is broken by exactly the edits that break a
+      // type dependent — after `type Foo<T>` replaces `type Foo`, a declared
+      // `f: (Foo) -> integer` holds a bare application of a generic type, which
+      // matches nothing, so `f` is uncallable with no diagnostic anywhere.
+      //
+      // Only DECLARED types are judged: an inferred one is the engine's own
+      // running guess and is re-derived from use, not stated by an author.
+      // Minted constructors are skipped too — they are derived from the type
+      // records checked just above and are re-minted by the declaration running
+      // right now, so within this window they are stale BY CONSTRUCTION (the
+      // redeclared type's own constructor still carries the old clause).
+      //
+      // Out of scope, deliberately: types held by expressions that are already
+      // boxed (design A5 — they keep the type they computed, exactly as a value
+      // redeclaration leaves them), and CHILD scopes, which are unreachable
+      // from here and, being popped by the time a later statement redeclares,
+      // hold nothing a program can still use.
+      for (const [bindingName, binding] of s.bindings) {
+        if (isMintedConstructor(binding)) continue;
+        let boxed: BoxedType | undefined;
+        if (isOperatorDef(binding)) {
+          if (binding.operator.inferredSignature) continue;
+          boxed = binding.operator.signature;
+        } else if (isValueDef(binding)) {
+          if (binding.value.inferredType) continue;
+          boxed = binding.value.type;
+        } else continue;
+
+        // A definition whose type cannot even be resolved is not a dependent
+        // this pass can judge; leave it to whatever already reports it.
+        let declared: Type;
+        try {
+          declared = boxed.type;
+        } catch {
+          continue;
+        }
+        const signature =
+          typeof declared === 'object' && declared.kind === 'signature'
+            ? declared
+            : undefined;
+        recheckMentions(
+          declared,
+          `The ${signature ? 'signature' : 'declared type'} of "${bindingName}"`,
+          signature?.typeParams
+        );
+      }
+    }
+  }
+
+  let progressed = true;
+  while (progressed) {
+    progressed = false;
+    // The root scope's `parent` is spelled `null`, but a bootstrap scope may
+    // leave it undefined — walk on truthiness.
+    for (let s: Scope | null | undefined = scope; s; s = s.parent) {
+      for (const record of Object.values(s.types ?? {})) {
+        if (record._varianceState !== 'deferred') continue;
+        if (record.typeParams === undefined || record.def === undefined)
+          continue;
+        let verdict: VarianceResult;
+        try {
+          verdict = verifyVariance(record.name, record.typeParams, record.def, {
+            triggeredBy: justDeclared,
+          });
+        } catch (e) {
+          undo();
+          throw e;
+        }
+        if (verdict.status === 'violation') {
+          undo();
+          throw new TypeVariableError(verdict.code, verdict.message);
+        }
+        if (verdict.status === 'deferred') {
+          record._varianceBlockedOn = verdict.blockedOn;
+          continue;
+        }
+        wasBlockedOn.set(record, record._varianceBlockedOn);
+        record._varianceState = 'verified';
+        delete record._varianceBlockedOn;
+        flipped.push(record);
+        progressed = true;
+      }
+    }
+  }
+  return flipped;
 }
 
 export function declareFn(

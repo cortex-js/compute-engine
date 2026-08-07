@@ -91,6 +91,11 @@ type TypeParamClause = {
  * namespace, not the Cortex binding namespace). */
 const TYPE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*/;
 
+/** The contextual variance marker of a type-parameter clause, followed by (the
+ * start of) the parameter's name. Mirrors `parseTypeParameterClause`'s reader;
+ * `inout` is listed first so it is preferred over its `in` prefix. */
+const VARIANCE_MARKER = /^(inout|in|out)\s+(?=[A-Za-z_])/;
+
 /** Does this OPERATOR token, following `type Name`, head a `type` statement?
  * `=` opens the body; `<` opens a type-parameter clause. `<>` is listed too
  * because the lexer maximal-munches a run of operator characters, so the empty
@@ -979,26 +984,18 @@ export class Parser {
       if (!wasKnown) this.knownTypeNames.delete(name);
     };
 
-    // The type-parameter clause of a GENERIC alias (`type alias Pair<T> = …`).
-    // Only the ALIAS form takes one: a parameterized NOMINAL type has no
-    // meaning without variance and identity rules, and stays rejected.
+    // The type-parameter clause of a GENERIC alias (`type alias Pair<T> = …`)
+    // or of a parameterized NOMINAL type (`type tree<out T> = …`). Only the
+    // nominal form takes a VARIANCE marker: an alias is transparent, so it has
+    // no relation between two applications to declare.
     let clauseText: string | undefined;
     let clauseDecls: readonly TypeParamDecl[] = [];
     if (this.check('OPERATOR') && this.current.text.startsWith('<')) {
-      if (!isAlias) {
-        this.error(
-          ['type-variables-unsupported', name],
-          this.current.start,
-          this.current.end
-        );
-        unseed();
-        // Return `null`: `parseProgram`/`parseBlock` recover at the next
-        // statement boundary, so the rest of the program still parses.
-        return null;
-      }
       const clauseStart = this.current.start;
       const diagBefore = this.diagnostics.length;
-      const clause = this.parseTypeParamClause(name);
+      // The marker is SCANNED for both forms so an alias that writes one gets
+      // the explanatory diagnostic below rather than a bare syntax error.
+      const clause = this.parseTypeParamClause(name, true);
       // `undefined` is unreachable (the `<` was just checked); `null` and an
       // EMPTY clause (`<>`, already diagnosed) declare nothing.
       if (
@@ -1044,6 +1041,26 @@ export class Parser {
         return null;
       }
 
+      // Variance on a transparent alias is meaningless (design §2). Diagnosed
+      // here rather than left to the engine so the author sees it at the
+      // declaration.
+      const marked = isAlias
+        ? checked.params.find((p) => p.variance !== undefined)
+        : undefined;
+      if (marked !== undefined) {
+        this.error(
+          [
+            'type-annotation-error',
+            `The type parameter \`${marked.name}\` of the alias "${name}" cannot declare a variance: an alias is transparent, so its applications are expanded rather than related`,
+          ],
+          clauseStart,
+          clause.end
+        );
+        unseed();
+        this.recoverAtStatementBoundary();
+        return null;
+      }
+
       clauseDecls = clause.decls;
       clauseText = text;
     }
@@ -1079,19 +1096,22 @@ export class Parser {
       this.wrap({ sym: name }, nameTok.start, nameTok.end),
       body.node,
     ];
-    // Only the `alias` form carries attributes: the bare form is nominal, and
-    // nominal is `DeclareType`'s default. A GENERIC alias adds its clause TEXT
-    // as a second entry (A1) — `typeParams` never appears without `alias`.
-    if (isAlias) {
-      const entries: MathJsonExpression[] = [
-        'Dictionary',
-        this.kvPair(
-          'alias',
-          this.wrap({ sym: 'True' }, start, end),
-          start,
-          end
-        ),
-      ];
+    // Attributes are carried only when something departs from the defaults:
+    // nominal is `DeclareType`'s default, so the bare unparameterized form
+    // needs none. `alias -> True` marks the structural form; a clause rides as
+    // its source TEXT, bracket-free (A1 / §3.1), for BOTH forms — the variance
+    // marker of a parameterized nominal type is just more clause text.
+    if (isAlias || clauseText !== undefined) {
+      const entries: MathJsonExpression[] = ['Dictionary'];
+      if (isAlias)
+        entries.push(
+          this.kvPair(
+            'alias',
+            this.wrap({ sym: 'True' }, start, end),
+            start,
+            end
+          )
+        );
       if (clauseText !== undefined)
         entries.push(
           this.kvPair(
@@ -2176,7 +2196,8 @@ export class Parser {
    * F-bounded `<T: list<U>>` is an ordinary `Unknown type "U"` error.
    */
   private parseTypeParamClause(
-    fnName: string
+    fnName: string,
+    allowVariance = false
   ): TypeParamClause | null | undefined {
     if (!this.check('OPERATOR') || !this.current.text.startsWith('<'))
       return undefined;
@@ -2201,6 +2222,15 @@ export class Parser {
     const seen = new Set<string>();
     for (;;) {
       skipSpace();
+      // The optional VARIANCE marker of a parameterized nominal type
+      // (`type tree<out T> = …`). Contextual: read as a marker only when a
+      // name follows, so a parameter named `in` still parses. A `function`
+      // clause never takes one — variance relates two applications of a TYPE,
+      // and a function's parameters are solved per call.
+      if (allowVariance) {
+        const vm = VARIANCE_MARKER.exec(src.slice(pos));
+        if (vm !== null) pos += vm[0].length;
+      }
       const m = TYPE_IDENTIFIER.exec(src.slice(pos));
       if (m === null) {
         this.error(['symbol-expected'], pos, Math.min(pos + 1, src.length));

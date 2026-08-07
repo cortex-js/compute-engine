@@ -652,3 +652,74 @@ describe('CORTEX MATCH — per-evaluation closures (regression, 2026-08-01)', ()
     expect(r.value?.toString()).toBe('55');
   });
 });
+
+//
+// Phase 3 of the parameterized-nominal design
+// (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §6 and the
+// §10 "Recursion" obligation): `match` reads a parameterized nominal at its
+// instantiated body. The `match` machinery itself is unchanged — a case binds
+// VALUES, so the tagged application matches structurally exactly as a
+// non-parameterized nominal does.
+//
+describe('CORTEX MATCH — parameterized nominal subjects (§6)', () => {
+  /** `type tree<T> = tuple<value: T, children: list<tree<T>>>` — unannotated,
+   * so `out` by the verified default (§4.4). */
+  const TREE = 'type tree<T> = tuple<value: T, children: list<tree<T>>>\n';
+
+  it('binds the payload of a tree<T>', () => {
+    const r = run(
+      TREE + 'let t = tree(1, [])\nmatch t { tree(v, cs) => v }'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.toString()).toBe('1');
+  });
+
+  it('binds and evaluates at every level of a 3-deep tree', () => {
+    const r = run(
+      TREE +
+        'let t = tree(1, [tree(2, [tree(3, [])])])\n' +
+        'match t { tree(v1, cs1) => [v1, ' +
+        'match cs1[1] { tree(v2, cs2) => v2 }, ' +
+        'match cs1[1] { tree(v2, cs2) => ' +
+        'match cs2[1] { tree(v3, cs3) => v3 } }] }'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.toString()).toBe('[1,2,3]');
+  });
+
+  it('the children capture is the nested applications, unexpanded', () => {
+    const r = run(
+      TREE +
+        'let t = tree(1, [tree(2, []), tree(3, [])])\n' +
+        'match t { tree(v, cs) => cs }'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.toString()).toBe('[tree(2, []),tree(3, [])]');
+  });
+
+  // The §1 motivating program: a `map` over a recursive parametric container.
+  it('a recursive map over a tree rebuilds it with f applied to each value', () => {
+    const r = run(
+      TREE +
+        'function mapTree(t) { match t { tree(v, cs) => ' +
+        'tree(v * 10, Map(cs, mapTree)) } }\n' +
+        'let t = tree(1, [tree(2, [tree(3, [])]), tree(4, [])])\n' +
+        'let m = mapTree(t)\n' +
+        '[m.value, m.children[1].value, m.children[1].children[1].value, ' +
+        'm.children[2].value]'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.toString()).toBe('[10,20,30,40]');
+  });
+
+  it('the map result is still a tree<T>', () => {
+    const r = run(
+      TREE +
+        'function mapTree(t) { match t { tree(v, cs) => ' +
+        'tree(v * 10, Map(cs, mapTree)) } }\n' +
+        'mapTree(tree(1, [tree(2, [])]))'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.type.toString()).toBe('tree<finite_integer>');
+  });
+});

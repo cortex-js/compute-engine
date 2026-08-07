@@ -6,6 +6,8 @@ import type {
   TypeParameter,
 } from './types.js';
 import { typeToString } from './serialize.js';
+import { declarationOf, withTypeArguments } from './reference.js';
+import { subtypingVarianceOf } from './variance.js';
 
 /**
  * Type variables (parametric polymorphism), type-layer half.
@@ -46,7 +48,10 @@ export type TypeVariableErrorCode =
   | 'generic-alias-forward-reference'
   /** A clause parameter the alias body never mentions: under transparency a
    * phantom parameter is meaningless. */
-  | 'generic-alias-unused-parameter';
+  | 'generic-alias-unused-parameter'
+  /** A parameterized nominal type whose body contradicts the variance its
+   * clause declares — or the `out` a missing marker declares (§4.4). */
+  | 'variance-violation';
 
 /** An `Error` carrying one of the {@link TypeVariableErrorCode}s.
  *
@@ -166,6 +171,14 @@ function collectFreeVariables(
       for (const x of Object.values(t.elements))
         collectFreeVariables(x, bound, into);
       return;
+    case 'reference':
+      // An APPLIED reference (`tree<T>`) carries its arguments, and a variable
+      // may occur only there — without this, `forall T. (tree<T>) -> T` reads
+      // as ground. The `def` is NOT followed: a nominal reference is opaque,
+      // and its body's variables are bound by its own clause.
+      if (t.args !== undefined)
+        for (const a of t.args) collectFreeVariables(a, bound, into);
+      return;
     default:
       return;
   }
@@ -228,6 +241,11 @@ function hasFreeVariables(
     case 'record':
       for (const x of Object.values(t.elements))
         if (hasFreeVariables(x, bound)) return true;
+      return false;
+    case 'reference':
+      // Arguments only — see `collectFreeVariables`.
+      if (t.args !== undefined)
+        for (const a of t.args) if (hasFreeVariables(a, bound)) return true;
       return false;
     default:
       return false;
@@ -352,6 +370,13 @@ export function substituteTypeVariables(
       }
       return changed ? { ...t, elements } : t;
     }
+    case 'reference': {
+      // Substitution reaches INTO an application (`tree<T>[T := integer]` is
+      // `tree<integer>`) but never through it: the reference stays unexpanded.
+      if (t.args === undefined) return t;
+      const args = substituteAll(t.args, bindings);
+      return args === t.args ? t : withTypeArguments(t, args);
+    }
     default:
       return t;
   }
@@ -430,7 +455,7 @@ function validateArm(t: Type): void {
   // may occur free.
   const declared = new Set<string>();
   const seen = new Set<string>();
-  walk(t, declared, true, seen);
+  walk(t, declared, null, seen);
 }
 
 function validatePolytypeArm(
@@ -457,14 +482,14 @@ function validatePolytypeArm(
         `The bound of the type variable \`${p.name}\` must be a ground type: \`${typeToString(p.bound)}\` refers to a type variable`
       );
     const boundVars = new Set<string>();
-    walk(p.bound, declared, false, boundVars);
+    walk(p.bound, declared, 'bound', boundVars);
   }
 
   const inArgs = new Set<string>();
   for (const el of signatureElements(arm))
-    walk(el.type, declared, true, inArgs);
+    walk(el.type, declared, null, inArgs);
   const inResult = new Set<string>();
-  walk(arm.result, declared, true, inResult);
+  walk(arm.result, declared, null, inResult);
 
   // Result-reachability: a variable that never occurs in an argument position
   // cannot be solved — whether it occurs only in the result, or nowhere at all.
@@ -483,25 +508,44 @@ function validatePolytypeArm(
 }
 
 /**
+ * The kind of position a type variable may NOT occur in — the positions whose
+ * inference rules the solver does not have. `null` is an allowed position.
+ *
+ * A UNION arm is no longer one of them (Rule U): a union with a single open
+ * arm has an inference rule, spelled in `walkPattern`.
+ */
+type ForbiddenPosition = 'intersection' | 'negation' | 'bound';
+
+const FORBIDDEN_POSITION_MESSAGE: Readonly<Record<ForbiddenPosition, string>> = {
+  // Steer to the spelling that replaces it: `T & number` is what an author
+  // writes when they mean a CONSTRAINT, and a constraint is a bound.
+  intersection:
+    'cannot appear in an intersection. To constrain a type variable, declare a bound on it instead: `forall T: number.`',
+  negation: 'cannot appear in a negation',
+  bound: 'cannot appear in a bound',
+};
+
+/**
  * Walk `t`, checking every variable occurrence against the v1 position
  * fragment (§3) and rejecting a `forall` clause in any nested position.
  *
- * `allowed` is false inside a union arm, an intersection member, a negation or
- * a bound — the positions whose inference rules v1 does not have.
+ * `forbidden` names the enclosing position when variables are not admissible
+ * there (an intersection member, a negation or a bound), and is `null`
+ * otherwise.
  */
 function walk(
   t: Type,
   declared: ReadonlySet<string>,
-  allowed: boolean,
+  forbidden: ForbiddenPosition | null,
   into: Set<string>
 ): void {
   if (typeof t === 'string') return;
   switch (t.kind) {
     case 'variable':
-      if (!allowed)
+      if (forbidden !== null)
         fail(
           'unsupported-variable-position',
-          `The type variable \`${t.name}\` cannot appear in a union, an intersection, a negation or a bound`
+          `The type variable \`${t.name}\` ${FORBIDDEN_POSITION_MESSAGE[forbidden]}`
         );
       if (!declared.has(t.name))
         fail(
@@ -516,38 +560,56 @@ function walk(
           'unsupported-variable-position',
           'A `forall` clause can only quantify a top-level signature (or one arm of an overload set), not a nested one'
         );
-      // `allowed` is PROPAGATED, not reset: a nested arrow reached from a
-      // forbidden position (a union arm, a negation, a bound) is itself a
-      // forbidden position — `forall T. (((T) -> T) | string) -> T` has no
-      // v1 inference rule. An ordinary nested arrow, reached from an allowed
-      // position, stays allowed.
+      // `forbidden` is PROPAGATED, not reset: a nested arrow reached from a
+      // forbidden position (an intersection member, a negation, a bound) is
+      // itself a forbidden position. An ordinary nested arrow, reached from an
+      // allowed position, stays allowed.
       for (const el of signatureElements(t))
-        walk(el.type, declared, allowed, into);
-      walk(t.result, declared, allowed, into);
+        walk(el.type, declared, forbidden, into);
+      walk(t.result, declared, forbidden, into);
       return;
-    case 'union':
+    case 'union': {
+      // Rule U: a union arm IS an admissible position, but at most one arm of
+      // a union may be open. With two open arms nothing at a call site says
+      // which arm a value took, so neither variable could be solved —
+      // `T | U` is unsolvable by construction, not merely unimplemented.
+      const open = t.types.filter((x) => hasFreeTypeVariables(x));
+      if (open.length > 1)
+        fail(
+          'unsupported-variable-position',
+          `At most one arm of a union can refer to a type variable, but \`${typeToString(t)}\` has ${open.length}. Nothing at a call site says which arm a value took, so neither variable could be solved`
+        );
+      for (const x of t.types) walk(x, declared, forbidden, into);
+      return;
+    }
     case 'intersection':
-      for (const x of t.types) walk(x, declared, false, into);
+      for (const x of t.types) walk(x, declared, 'intersection', into);
       return;
     case 'negation':
-      walk(t.type, declared, false, into);
+      walk(t.type, declared, 'negation', into);
       return;
     case 'list':
     case 'set':
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
-      walk(t.elements, declared, allowed, into);
+      walk(t.elements, declared, forbidden, into);
       return;
     case 'tuple':
-      for (const el of t.elements) walk(el.type, declared, allowed, into);
+      for (const el of t.elements) walk(el.type, declared, forbidden, into);
       return;
     case 'dictionary':
-      walk(t.values, declared, allowed, into);
+      walk(t.values, declared, forbidden, into);
       return;
     case 'record':
       for (const x of Object.values(t.elements))
-        walk(x, declared, allowed, into);
+        walk(x, declared, forbidden, into);
+      return;
+    case 'reference':
+      // The arguments of an application are ordinary positions (variance is
+      // Phase 1 and does not change what is LEGAL here).
+      if (t.args !== undefined)
+        for (const a of t.args) walk(a, declared, forbidden, into);
       return;
     default:
       return;
@@ -1102,10 +1164,43 @@ function joinBounds(bounds: ReadonlyArray<Bound>): {
  */
 export function groundSkeleton(t: Type, covariant = true): Type {
   if (!hasFreeTypeVariables(t)) return t;
-  return skeleton(t, covariant);
+  return skeleton(t, covariant, false);
 }
 
-function skeleton(t: Type, covariant: boolean): Type {
+/**
+ * `t` read as a MEMBERSHIP/ADMISSION domain: which values could inhabit SOME
+ * instantiation of it.
+ *
+ * Same walk as {@link groundSkeleton}, and identical everywhere except at an
+ * applied reference whose parameter is read INVARIANTLY (`inout`, or a
+ * declaration whose variance is not verified yet — ruling C reads those as
+ * `inout` too). The two skeletons answer different questions and §4.3 makes
+ * them disagree there:
+ *
+ * - **Disjointness** (`groundSkeleton`, feeding `provablyDisjoint` and the D14a
+ *   arm-overlap check) must never claim disjointness it cannot prove, so an
+ *   invariant argument keeps the polarity and yields `cell<any>` — a concrete
+ *   application no over-claim can be derived from.
+ * - **Membership** cannot use that answer: `cell<integer> <: cell<any>` is
+ *   FALSE under invariance, so `cell<any>` would admit no application but the
+ *   literal `cell<any>` — an `inout` (or still-deferred) nominal could never be
+ *   a constructor argument of another parameterized nominal. The domain wanted
+ *   is "any application of this declaration", which no `Type` spells, so the
+ *   position reads as the top of its polarity (`any` covariantly, `never`
+ *   contravariantly) and the rest is decided POST-solve, against the
+ *   INSTANTIATED parameter — which `validate.ts` re-gates and, at a
+ *   constructor, the value-membership check re-gates again.
+ *
+ * `out` and `in` need no such widening: `X<A> <: X<any>` always holds under
+ * `out`, and `X<A> <: X<never>` always holds under `in` (the flipped position
+ * already yields `never`), so both admit every application as they stand.
+ */
+export function admissionSkeleton(t: Type, covariant = true): Type {
+  if (!hasFreeTypeVariables(t)) return t;
+  return skeleton(t, covariant, true);
+}
+
+function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
   if (typeof t === 'string') return t;
   if (!hasFreeTypeVariables(t)) return t;
   switch (t.kind) {
@@ -1114,22 +1209,22 @@ function skeleton(t: Type, covariant: boolean): Type {
     case 'signature': {
       const next: FunctionSignature = {
         ...t,
-        result: skeleton(t.result, covariant),
+        result: skeleton(t.result, covariant, membership),
       };
       if (t.args)
         next.args = t.args.map((a) => ({
           ...a,
-          type: skeleton(a.type, !covariant),
+          type: skeleton(a.type, !covariant, membership),
         }));
       if (t.optArgs)
         next.optArgs = t.optArgs.map((a) => ({
           ...a,
-          type: skeleton(a.type, !covariant),
+          type: skeleton(a.type, !covariant, membership),
         }));
       if (t.variadicArg)
         next.variadicArg = {
           ...t.variadicArg,
-          type: skeleton(t.variadicArg.type, !covariant),
+          type: skeleton(t.variadicArg.type, !covariant, membership),
         };
       delete next.typeParams;
       return next;
@@ -1139,28 +1234,72 @@ function skeleton(t: Type, covariant: boolean): Type {
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
-      return { ...t, elements: skeleton(t.elements, covariant) };
+      return { ...t, elements: skeleton(t.elements, covariant, membership) };
     case 'tuple':
       return {
         ...t,
         elements: t.elements.map((e) => ({
           ...e,
-          type: skeleton(e.type, covariant),
+          type: skeleton(e.type, covariant, membership),
         })),
       };
     case 'dictionary':
-      return { ...t, values: skeleton(t.values, covariant) };
+      return { ...t, values: skeleton(t.values, covariant, membership) };
     case 'record': {
       const elements: Record<string, Type> = {};
       for (const [k, v] of Object.entries(t.elements))
-        elements[k] = skeleton(v, covariant);
+        elements[k] = skeleton(v, covariant, membership);
       return { ...t, elements };
     }
     case 'union':
     case 'intersection':
-      return { ...t, types: t.types.map((x) => skeleton(x, covariant)) };
+      return {
+        ...t,
+        types: t.types.map((x) => skeleton(x, covariant, membership)),
+      };
     case 'negation':
-      return { ...t, type: skeleton(t.type, !covariant) };
+      return { ...t, type: skeleton(t.type, !covariant, membership) };
+    case 'reference': {
+      // `tree<T>` skeletonizes to `tree<any>`, argument-wise — without this an
+      // application stays OPEN inside a skeletonized body, and every consumer
+      // that requires a ground input (the D14a arm-overlap check) is defeated.
+      // Each argument composes with the referenced parameter's DECLARED
+      // variance (§4.2): `out` keeps the polarity, `in` flips it.
+      //
+      // `inout` has no sound single skeleton — under invariance neither `any`
+      // nor `never` is admitted by an argument that is not literally it — so
+      // the choice is made on the other contract the skeleton has to honor:
+      // §5 requires that it "never let disjointness be derived from the type
+      // variable alone". `never` is provably disjoint from everything, `any`
+      // from nothing, so the non-flipping direction (which yields `any` in a
+      // covariant context) is the conservative one. `inout` therefore passes
+      // the polarity through unchanged.
+      //
+      // MEMBERSHIP mode parts company exactly there: `cell<any>` admits no
+      // application but itself under invariance, so an admission domain reads
+      // the whole position as the top of its polarity instead — see
+      // {@link admissionSkeleton}.
+      if (t.args === undefined) return t;
+      const decl = declarationOf(t);
+      if (
+        membership &&
+        t.args.some(
+          (a, i) =>
+            hasFreeTypeVariables(a) && subtypingVarianceOf(t, i) === 'inout'
+        )
+      )
+        return covariant ? 'any' : 'never';
+      return withTypeArguments(
+        t,
+        t.args.map((a, i) =>
+          skeleton(
+            a,
+            decl.typeParams?.[i]?.variance === 'in' ? !covariant : covariant,
+            membership
+          )
+        )
+      );
+    }
     default:
       return t;
   }
@@ -1513,8 +1652,87 @@ function walkPattern(
       );
     }
 
+    case 'reference': {
+      // An APPLIED nominal reference unifies by NAME plus pairwise argument
+      // unification — the body is never consulted, so recursion costs nothing
+      // here (parameterized-nominal design §3/§4.3). A different name, a
+      // different arity or a non-application refutes the match.
+      if (pattern.args === undefined) return true;
+      if (
+        typeof actual !== 'object' ||
+        actual.kind !== 'reference' ||
+        actual.name !== pattern.name ||
+        actual.args === undefined ||
+        actual.args.length !== pattern.args.length
+      )
+        return phase !== 'lower';
+      let ok = true;
+      for (let i = 0; i < pattern.args.length; i++)
+        if (
+          !walkPattern(
+            s,
+            pattern.args[i],
+            actual.args[i],
+            index,
+            phase,
+            covariant,
+            false
+          )
+        )
+          ok = false;
+      return ok;
+    }
+
+    case 'union': {
+      // Rule U. A union ACTUAL has already distributed (above), so `actual`
+      // here is a single type matched against `P₁ | … | Pₙ`, of which at most
+      // one arm is open (§7.2 admits no more).
+      //
+      // Nothing is contributed in the `'upper'` sweep: v1 records no
+      // contravariant bound from a union arm. Admission is re-gated after the
+      // solve, against the INSTANTIATED parameter, so a wrong solution is
+      // rejected there rather than silently accepted here.
+      if (phase !== 'lower' || !covariant) return true;
+      const open: Type[] = [];
+      for (const arm of pattern.types) {
+        if (hasFreeTypeVariables(arm)) {
+          open.push(arm);
+          continue;
+        }
+        // The value took a GROUND arm: this operand says nothing about the
+        // variable, so it contributes `never` — the NEUTRAL element of the
+        // bound join (`joinBounds`). Another operand that does constrain the
+        // variable therefore wins outright, and when none does the solution is
+        // `never`, the bottom of the family: `opt(Missing)` is an `opt<never>`.
+        if (algebra().isSubtype(actual, arm)) {
+          for (const name of freeTypeVariables(pattern))
+            addBound(s.lower, name, 'never', index, false);
+          return true;
+        }
+      }
+      // No ground arm accepted, so the value must have taken the open one —
+      // and its refutation is the union's: `list<T> | string` really does
+      // refute a `set<integer>`.
+      if (open.length === 1)
+        return walkPattern(
+          s,
+          open[0],
+          actual,
+          index,
+          phase,
+          covariant,
+          // NOT a constructor descent: the arm's type IS the operand's own
+          // type, so the D8 top-type waiver still applies at depth 0.
+          topLevel
+        );
+      // Neither a ground arm nor a single open one: contribute nothing rather
+      // than refute. Unreachable for a DECLARED type, but the walk stays
+      // total — internally-constructed patterns are never validated.
+      return true;
+    }
+
     default:
-      // A variable under a union/intersection/negation is rejected at
+      // A variable under an intersection or a negation is rejected at
       // declaration time (§7.2), so nothing else can carry one.
       return true;
   }

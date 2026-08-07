@@ -272,6 +272,86 @@ pt(-3, True)`
   });
 });
 
+//
+// A generic constructor function annotates its result with an application of
+// the nominal type (`forall U. (v: U) -> tree<U>`). When that annotation does
+// not parse — a wrong arity, an unknown name — the signature readers used to
+// swallow the failure: the E1 sugar (a signature STRING in the parameter slot)
+// fell through to `expected-a-symbol`, blaming the operand for not being a
+// symbol, and the E2 body-slot marker (what the Cortex `function f<U>(…) -> …`
+// head lowers to) dropped the whole contract silently. Both now report the
+// type parser's own diagnostic.
+//
+describe('a signature annotation that does not parse reports WHY', () => {
+  /** `tree<T>`, the parameterized nominal type of the design's flagship. */
+  function treeEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declareType('tree', 'tuple<v: T, cs: list<type tree<T>>>', {
+      typeParams: 'T',
+    });
+    return ce;
+  }
+
+  /** The E1 sugar route: the signature as a STRING parameter operand. */
+  function sugar(ce: ComputeEngine, signature: string): string {
+    return ce.box(['Function', ['Block', 'v'], { str: signature }]).toString();
+  }
+
+  test('a wrong-arity result type carries the `generic-alias-arity` code', () => {
+    const r = sugar(treeEngine(), 'forall U. (v: U) -> tree<U, U>');
+    expect(r).toContain('generic-alias-arity');
+    expect(r).toContain('takes 1 type argument, but 2 were given');
+    expect(r).not.toContain('expected-a-symbol');
+  });
+
+  test('an unknown type name gets its own code, not the arity one', () => {
+    const r = sugar(treeEngine(), 'forall U. (v: U) -> nosuch<U>');
+    expect(r).toContain('invalid-type-annotation');
+    expect(r).toContain('Unknown type');
+    expect(r).toContain('nosuch');
+    expect(r).not.toContain('generic-alias-arity');
+    expect(r).not.toContain('expected-a-symbol');
+  });
+
+  test('a string that is not signature-shaped is still `expected-a-symbol`', () => {
+    // The parameter slot's other job is reading a parameter NAME, so a string
+    // with no arrow is not a signature the author failed to write.
+    expect(sugar(treeEngine(), '@@garbage!!')).toContain('expected-a-symbol');
+    expect(sugar(treeEngine(), 'x')).toContain('expected-a-symbol');
+    // …and a symbol operand is a parameter, untouched by any of this.
+    const ce = treeEngine();
+    expect(ce.box(['Function', ['Block', 'x'], 'x']).toString()).not.toContain(
+      'Error'
+    );
+  });
+
+  test('a VALID generic constructor signature still desugars', () => {
+    const ce = treeEngine();
+    const f = ce.box([
+      'Function',
+      ['Block', 'v'],
+      { str: 'forall U. (v: U) -> tree<U>' },
+    ]);
+    expect(f.toString()).not.toContain('Error');
+    expect(f.type.toString()).toBe('forall U. (v: U) -> tree<U>');
+  });
+
+  test('the Cortex route reports the arity problem instead of dropping the annotation', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      `type tr<T> = tuple<v: T, cs: list<type tr<T>>>
+function f<U>(x: U) -> tr<U, U> { x }
+Type(f)`
+    );
+    const messages = (r.diagnostics ?? []).map((d) => String(d.message));
+    expect(messages.join('\n')).toContain('generic-alias-arity');
+    // Before the fix the annotation was dropped and `f` typed
+    // `(unknown) -> unknown` with no diagnostic at all.
+    expect(messages.join('\n')).toContain('takes 1 type argument');
+  });
+});
+
 describe('Cortex route (statement flow)', () => {
   test('the §4.5 flagship example works end to end with zero diagnostics', () => {
     const ce = new ComputeEngine();

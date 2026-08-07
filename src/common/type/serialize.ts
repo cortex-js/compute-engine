@@ -68,8 +68,13 @@ export function typeToString(type: Type, precedence = 0): string {
       break;
 
     case 'reference':
-      // Serialize reference types
-      result = type.name;
+      // Serialize reference types. An APPLIED reference to a parameterized
+      // nominal type keeps its arguments (`tree<integer>`); the declaration's
+      // variance markers belong to the clause, never to an application.
+      result =
+        type.args === undefined
+          ? type.name
+          : `${type.name}<${type.args.map((t) => typeToString(t)).join(', ')}>`;
       break;
 
     case 'variable':

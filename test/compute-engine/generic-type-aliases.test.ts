@@ -229,26 +229,31 @@ describe('GENERIC TYPE ALIASES — error matrix (host route)', () => {
     expect(() => ce.type('Rec')).toThrow();
   });
 
-  test('a forward reference applied', () => {
+  // An APPLIED forward reference is legal since the parameterized-nominal work
+  // (design §4.2): it records its argument count on the placeholder, and the
+  // declaration that fulfills it is checked against every recorded use.
+  test('a forward reference applied at the arity it is later declared with', () => {
     const ce = new ComputeEngine();
-    expect(codeOf(() => ce.type('type Later<integer>'))).toBe(
-      'generic-alias-forward-reference'
-    );
-  });
-
-  test('…and it leaves NO placeholder behind', () => {
-    // `forward()` MUTATES the namespace (it installs a `def: undefined`
-    // record), so the rejection has to happen before it runs: a placeholder
-    // left over from the failed application would poison the real declaration
-    // that follows.
-    const ce = new ComputeEngine();
-    expect(codeOf(() => ce.type('type Later<integer>'))).toBe(
-      'generic-alias-forward-reference'
-    );
+    expect(codeOf(() => ce.type('type Later<integer>'))).toBe('<no error>');
     ce.declareType('Later', 'tuple<T, T>', { alias: true, typeParams: ['T'] });
     expect(ce.type('Later<integer>').toString()).toBe(
       'tuple<integer, integer>'
     );
+  });
+
+  test('a forward reference applied at the WRONG arity', () => {
+    const ce = new ComputeEngine();
+    expect(codeOf(() => ce.type('type Later<integer, string>'))).toBe(
+      '<no error>'
+    );
+    expect(
+      codeOf(() =>
+        ce.declareType('Later', 'tuple<T, T>', {
+          alias: true,
+          typeParams: ['T'],
+        })
+      )
+    ).toBe('generic-alias-arity');
   });
 
   test('an unused clause parameter', () => {
@@ -469,23 +474,18 @@ describe('GENERIC TYPE ALIASES — no mint, no value-namespace claim', () => {
   });
 });
 
-// Only the ALIAS form takes a type-parameter clause: parameterized NOMINAL
-// types are out of scope (a generic alias is EXPANDED, which a nominal
-// reference cannot be). The Cortex statement route already reported this as
-// `type-variables-unsupported`; the host and box routes must agree.
-describe('GENERIC TYPE ALIASES — a clause requires `alias`', () => {
-  test('the host route throws, and declares nothing', () => {
+// BOTH forms take a type-parameter clause since the parameterized-nominal
+// work: an ALIAS is expanded eagerly, a NOMINAL type keeps its application.
+// The two must not be confused — the alias expands, the nominal one does not.
+describe('GENERIC TYPE ALIASES — a clause on the nominal form', () => {
+  test('the host route declares a parameterized NOMINAL type', () => {
     const ce = new ComputeEngine();
-    expect(() =>
-      ce.declareType('Nom', 'tuple<T, T>', { typeParams: ['T'] })
-    ).toThrow(/cannot be generic/);
-    // Nothing was mutated: the name is still free for a real declaration.
-    expect(() => ce.type('Nom')).toThrow();
-    ce.declareType('Nom', 'tuple<T, T>', { alias: true, typeParams: ['T'] });
-    expect(ce.type('Nom<integer>').toString()).toBe('tuple<integer, integer>');
+    ce.declareType('Nom', 'tuple<T, T>', { typeParams: ['T'] });
+    // Opaque: the application survives, where an alias would have expanded.
+    expect(ce.type('Nom<integer>').toString()).toBe('Nom<integer>');
   });
 
-  test('the box route yields an error VALUE', () => {
+  test('the box route registers it too', () => {
     const ce = new ComputeEngine();
     const r = ce
       .box([
@@ -495,16 +495,15 @@ describe('GENERIC TYPE ALIASES — a clause requires `alias`', () => {
         ['Dictionary', ['KeyValuePair', 'typeParams', { str: 'T' }]],
       ])
       .evaluate();
-    expect(r.toString()).toContain('invalid-type-declaration');
-    expect(r.toString()).toContain('alias -> True');
+    expect(r.toString()).toBe('"Nothing"');
+    expect(ce.type('Nom<integer>').toString()).toBe('Nom<integer>');
   });
 
-  test('the Cortex statement route keeps its diagnostic', () => {
+  test('the Cortex statement route agrees', () => {
     const ce = new ComputeEngine();
     const r = executeCortex(ce, 'type Nom<T> = tuple<T, T>');
-    expect(r.diagnostics.map((d) => d.message)).toEqual([
-      ['type-variables-unsupported', 'Nom'],
-    ]);
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+    expect(ce.type('Nom<integer>').toString()).toBe('Nom<integer>');
   });
 });
 
@@ -816,12 +815,11 @@ describe('GENERIC TYPE ALIASES — Cortex statement route', () => {
     ]);
   });
 
-  test('a NOMINAL type with a clause is still rejected', () => {
+  test('a NOMINAL type with a clause declares an opaque parameterized type', () => {
     const ce = new ComputeEngine();
     const r = executeCortex(ce, 'type gen<T> = tuple<T, T>\nlet a = 1\na');
-    expect(r.diagnostics.map((d) => d.message)).toEqual([
-      ['type-variables-unsupported', 'gen'],
-    ]);
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
     expect(r.value.toString()).toBe('1');
+    expect(ce.type('gen<integer>').toString()).toBe('gen<integer>');
   });
 });

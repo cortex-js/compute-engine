@@ -588,17 +588,10 @@ function declareTypeStatement(
       ? ((isString(clauseOp) ? clauseOp.string : sym(clauseOp)) ?? undefined)
       : undefined;
     if (clauseText !== undefined) {
-      // Only the ALIAS form takes a clause (parameterized nominal types are
-      // out of scope) — the same rule the Cortex statement route reports as
-      // `type-variables-unsupported` and the host route throws for.
-      if (!alias)
-        return ce.error(
-          [
-            'invalid-type-declaration',
-            'A type parameter clause requires `alias -> True`: parameterized nominal types are not supported',
-          ],
-          name
-        );
+      // Both forms take a clause: a generic ALIAS (expanded eagerly) and a
+      // parameterized NOMINAL type (kept as an application). The clause is the
+      // source text WITHOUT the enclosing angle brackets, so a variance marker
+      // is just more clause text (`"out T"`).
       const parsed = parseTypeParameterClause(clauseText, ce._typeResolver);
       if ('error' in parsed)
         return ce.error(

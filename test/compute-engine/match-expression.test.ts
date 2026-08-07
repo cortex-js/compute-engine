@@ -1,5 +1,6 @@
 import { engine as ce } from '../utils';
 
+import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
@@ -703,5 +704,87 @@ describe('MATCH — error subjects (rung 1)', () => {
       ]),
     ]);
     expect(fn.evaluate().toString()).toBe('"other"');
+  });
+});
+
+//
+// Phase 3 of the parameterized-nominal design
+// (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §6): `match`
+// at an instantiated body. No `match` machinery changes for this — a case
+// binds the VALUES the tagged application carries, and a capture's type is
+// the bound expression's own type — so these are pins that the
+// non-parameterized nominal path already covers the parameterized one.
+//
+describe('MATCH — a parameterized nominal subject (§6)', () => {
+  /** A fresh engine: `declareType` must not leak into the shared one. */
+  function treeEngine(): ComputeEngine {
+    const e = new ComputeEngine();
+    e.declareType('tree', 'tuple<value: T, children: list<tree<T>>>', {
+      typeParams: ['T'],
+    });
+    return e;
+  }
+
+  /** A 3-deep `tree<finite_integer>`. */
+  const tree3: MathJsonExpression = [
+    'tree',
+    1,
+    ['List', ['tree', 2, ['List', ['tree', 3, ['List']]]]],
+  ];
+
+  it('binds the payload and the children of an applied nominal', () => {
+    const e = treeEngine();
+    const v = e
+      .box(['Match', tree3, ['MatchCase', ['tree', '_v', '_cs'], 'v']])
+      .evaluate();
+    expect(v.toString()).toBe('1');
+    const cs = e
+      .box(['Match', tree3, ['MatchCase', ['tree', '_v', '_cs'], 'cs']])
+      .evaluate();
+    expect(cs.toString()).toBe('[tree(2, [tree(3, [])])]');
+  });
+
+  it('reads at every level of a 3-deep tree', () => {
+    const e = treeEngine();
+    const inner: MathJsonExpression = [
+      'Match',
+      ['At', 'cs', 1],
+      ['MatchCase', ['tree', '_w', '_ds'], 'w'],
+    ];
+    expect(
+      e
+        .box(['Match', tree3, ['MatchCase', ['tree', '_v', '_cs'], inner]])
+        .evaluate()
+        .toString()
+    ).toBe('2');
+    const innermost: MathJsonExpression = [
+      'Match',
+      ['At', 'cs', 1],
+      [
+        'MatchCase',
+        ['tree', '_w', '_ds'],
+        ['Match', ['At', 'ds', 1], ['MatchCase', ['tree', '_z', '_es'], 'z']],
+      ],
+    ];
+    expect(
+      e
+        .box(['Match', tree3, ['MatchCase', ['tree', '_v', '_cs'], innermost]])
+        .evaluate()
+        .toString()
+    ).toBe('3');
+  });
+
+  it('a different nominal name does not match (opacity)', () => {
+    const e = treeEngine();
+    e.declareType('leaf', 'tuple<value: T>', { typeParams: ['T'] });
+    const r = e
+      .box([
+        'Match',
+        tree3,
+        ['MatchCase', ['leaf', '_v'], 'v'],
+        ['MatchCase', '_', { str: 'other' }],
+      ])
+      .evaluate();
+    expect(r.toString()).toBe('"other"');
   });
 });

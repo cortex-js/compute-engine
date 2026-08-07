@@ -198,3 +198,146 @@ describe('Field compile lowering (D16/§4.6)', () => {
     );
   });
 });
+
+//
+// Phase 3 of the parameterized-nominal design
+// (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §6): a field
+// is read off the body INSTANTIATED at the reference's arguments. One
+// substitution against a finite body — the nested `tree<T>` becomes
+// `tree<integer>` and stays an UNEXPANDED reference, which is why recursion
+// costs nothing here.
+//
+
+describe('Field at an instantiated parameterized nominal body (§6)', () => {
+  /** `type tree<T> = tuple<value: T, children: list<tree<T>>>`, unannotated
+   * (so `out` by the verified default). */
+  function treeEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declareType('tree', 'tuple<value: T, children: list<tree<T>>>', {
+      typeParams: ['T'],
+    });
+    return ce;
+  }
+
+  test('the field TYPE is the parameter substituted at the argument', () => {
+    const ce = treeEngine();
+    ce.declare('t', 'tree<integer>');
+    expect(ce.box(['Field', 't', { str: 'value' }]).type.toString()).toBe(
+      'integer'
+    );
+  });
+
+  test('the recursive field stays ONE LEVEL DEEP: list<tree<integer>>', () => {
+    const ce = treeEngine();
+    ce.declare('t', 'tree<integer>');
+    // NOT the expanded body: the nested reference keeps its arguments.
+    expect(ce.box(['Field', 't', { str: 'children' }]).type.toString()).toBe(
+      'list<tree<integer>>'
+    );
+  });
+
+  test('the field VALUE is the payload', () => {
+    const ce = treeEngine();
+    const t = ['tree', 1, ['List', ['tree', 2, ['List']]]] as const;
+    expect(ce.box(['Field', t, { str: 'value' }]).evaluate().toString()).toBe(
+      '1'
+    );
+    expect(
+      ce.box(['Field', t, { str: 'children' }]).evaluate().toString()
+    ).toBe('[tree(2, [])]');
+  });
+
+  test('a 3-deep tree reads at every level, by field and by chain', () => {
+    const ce = treeEngine();
+    const r = executeCortex(
+      ce,
+      `let t = tree(1, [tree(2, [tree(3, [])])])
+(t.value, t.children[1].value, t.children[1].children[1].value)`
+    );
+    expect(r.diagnostics ?? []).toEqual([]);
+    expect(r.value!.toString()).toBe('(1, 2, 3)');
+    expect(r.value!.type.toString()).toBe(
+      'tuple<finite_integer, finite_integer, finite_integer>'
+    );
+  });
+
+  test('the Cortex `.` route agrees with the host route', () => {
+    const ce = treeEngine();
+    const r = executeCortex(ce, `let t = tree(7, [])\nt.value`);
+    expect(r.diagnostics ?? []).toEqual([]);
+    expect(r.value!.toString()).toBe('7');
+    expect(r.value!.type.toString()).toBe('finite_integer');
+  });
+
+  test('a CONTRAVARIANT occurrence instantiates too: (integer) -> boolean', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('pred', 'tuple<run: (T) -> boolean>', {
+      typeParams: [{ name: 'T', variance: 'in' }],
+    });
+    ce.declare('p', 'pred<integer>');
+    expect(ce.box(['Field', 'p', { str: 'run' }]).type.toString()).toBe(
+      '(integer) -> boolean'
+    );
+  });
+
+  test('co- and contravariant occurrences in ONE body both instantiate', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('events', 'tuple<log: list<T>, notify: (T) -> boolean>', {
+      typeParams: [{ name: 'T', variance: 'inout' }],
+    });
+    ce.declare('e', 'events<integer>');
+    expect(ce.box(['Field', 'e', { str: 'log' }]).type.toString()).toBe(
+      'list<integer>'
+    );
+    expect(ce.box(['Field', 'e', { str: 'notify' }]).type.toString()).toBe(
+      '(integer) -> boolean'
+    );
+  });
+
+  test('a record-bodied parameterized nominal instantiates as well', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('bag', 'record<one: T, many: list<T>>', {
+      typeParams: ['T'],
+    });
+    ce.declare('b', 'bag<string>');
+    expect(ce.box(['Field', 'b', { str: 'one' }]).type.toString()).toBe(
+      'string'
+    );
+    expect(ce.box(['Field', 'b', { str: 'many' }]).type.toString()).toBe(
+      'list<string>'
+    );
+  });
+
+  test('an ALIAS chain onto an application instantiates through the chain', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('holder', 'tuple<item: T>', { typeParams: ['T'] });
+    ce.declareType('intHolder', 'holder<integer>');
+    ce.declare('h', 'intHolder');
+    expect(ce.box(['Field', 'h', { str: 'item' }]).type.toString()).toBe(
+      'integer'
+    );
+  });
+
+  test('GLSL compile: an applied nominal still swizzles by position', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('pair', 'tuple<x: T, y: T>', { typeParams: ['T'] });
+    ce.declare('p', 'pair<number>');
+    const glsl = new GLSLTarget();
+    expect(glsl.compile(ce.box(['Field', 'p', { str: 'y' }])).code).toBe('p.y');
+  });
+
+  test('regression: a NON-parameterized nominal and a plain named tuple are unchanged', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('pt', 'tuple<x: number, y: number>');
+    ce.declare('q', 'pt');
+    expect(ce.box(['Field', 'q', { str: 'x' }]).type.toString()).toBe('number');
+    // A plain (un-nominal) named tuple resolves without any reference hop.
+    ce.declare('raw', 'tuple<u: string, v: number>');
+    expect(ce.box(['Field', 'raw', { str: 'u' }]).type.toString()).toBe(
+      'string'
+    );
+    const r = executeCortex(ce, `const p = pt(1, 2)\n(p.x, p.y)`);
+    expect(r.diagnostics ?? []).toEqual([]);
+    expect(r.value!.toString()).toBe('(1, 2)');
+  });
+});

@@ -423,15 +423,113 @@ definitions it was built from: re-running the `type` statement for
 `Keyed` leaves `Table` as it was until `Table`'s own statement is re-run
 too — which re-running the cell does.
 
-A parameterized **nominal** type — the bare form,
-`type point<T> = tuple<T, T>` — remains **reserved** and reports a
-dedicated `type-variables-unsupported` diagnostic:
+A parameterized **nominal** type — the bare form — takes a clause too, and
+takes it the same way. The difference is what an application means: a
+nominal type is **opaque**, so `tree<integer>` is never expanded, which is
+what lets its body be recursive.
 
-<!-- cortex-test: expect-diagnostics -->
+```cortex-live
+type tree<T> = tuple<value: T, children: list<tree<T>>>
+let t = tree(1, [tree(2, [])])
+Type(t)
+// ➔ "tree<finite_integer>"
+```
+
+The constructor is **quantified** — `tree: forall T. (T, list<tree<T>>) ->
+tree<T>` — so `T` is solved at each construction, from the arguments.
+Applying the type at the wrong arity — including a bare `tree` — is the same
+error as for an alias, and a parameter bound is enforced the same way.
+
+Reading a **field** reads the definition **instantiated at the application's
+arguments**, so it comes back at the type the application supplied, not at
+`T`:
+
+```cortex-live
+type tree<T> = tuple<value: T, children: list<tree<T>>>
+let t: tree<number> = tree(1, [])
+Type(t.value)
+// ➔ "number"
+```
+
+`match` is not a projection of the annotation — it binds **values**, so each
+capture comes back at the matched value's *own* type, usually narrower than
+the annotation's:
+
+```cortex-live
+type tree<T> = tuple<value: T, children: list<tree<T>>>
+let t: tree<number> = tree(1, [])
+match t { tree(v, cs) => Type(v) }
+// ➔ "integer"
+```
+
+**Variance.** A parameter may carry an `in`/`out`/`inout` marker saying how
+two applications relate: `out` (covariant) makes a `tree<integer>` usable
+where a `tree<number>` is expected, `in` (contravariant) reverses that, and
+`inout` (invariant) relates only identical arguments. The words are
+contextual, claimed only inside a clause. An alias takes no marker — it
+expands rather than relates.
 
 ```cortex
-type point<T> = tuple<T, T>
+type tree<out T> = tuple<value: T, children: list<tree<T>>>
+type sink<in T> = tuple<accept: (T) -> nothing>
 ```
+
+**A parameter with no marker means `out`** — declared, not inferred, and
+verified against the body like any written marker. Values are immutable, so
+covariance is sound, and it is what the common case (a payload container)
+wants; only the minority that consumes its parameter needs to say so. Because
+the default is *declared*, a body that uses its parameter in an input
+position does not quietly change the type's subtyping contract — it is a
+`variance-violation` naming the offending occurrence and the markers that
+would verify:
+
+```cortex
+type events<T> = tuple<log: list<T>, notify: (T) -> nothing>
+```
+
+This statement parses, but declares nothing: it evaluates to an error value
+carrying a `variance-violation`. `T` appears in both an output position
+(`log`) and an input one (`notify.(arg 1)`), so `events` can only be
+`inout` — writing `type events<inout T> = …` accepts the definition, at the
+cost of `events<integer>` no longer being usable as an `events<number>`.
+`inout` verifies against any body: invariance promises nothing, so it is
+always sound, just less permissive.
+
+One limitation follows from that. A construction solves its parameters from
+its arguments alone, and an annotation does not widen them: `let t:
+tree<number> = tree(1, [])` works only because the `tree<finite_integer>` it
+builds *is* a `tree<number>` under `out`. For an explicitly `inout` or `in`
+parameter that step is not available, so such a type can only be constructed
+at exactly its argument type.
+
+**Unions.** A type variable may stand in one arm of a union, which is what
+makes an optional payload expressible:
+
+```cortex-live
+type opt<T> = T | missing
+let a = opt(1)
+Type(a)
+// ➔ "opt<finite_integer>"
+```
+
+Each construction takes exactly one arm. Taking the **ground** arm says
+nothing about `T`, so `T` is solved to `never` — the narrowest member of the
+family, and (under `out`) a subtype of every other:
+
+```cortex-live
+type opt<T> = T | missing
+let b = opt(Missing)
+Type(b)
+// ➔ "opt<never>"
+```
+
+Only **one** arm may mention a variable: with two open arms nothing at the
+construction site says which arm a value took, so neither variable could be
+solved. `type both<T, U> = T | U` therefore declares nothing — it evaluates to
+an error value carrying an `unsupported-variable-position`. A variable may not
+stand in an intersection or a negation at all; an intersection is usually a
+constraint written in the wrong place, and the error says so — write a bound
+(`type box<T: number> = …`) instead of `T & number`.
 
 Generic **functions** are supported: a `function` definition takes a
 type-parameter clause between its name and its parameter list, and the
@@ -482,6 +580,18 @@ type alias Pair<T> = tuple<T, T>
 ["DeclareType", "Pair", {"str": "tuple<T, T>"},
   ["Dictionary", ["KeyValuePair", "alias", "True"],
     ["KeyValuePair", "typeParams", {"str": "T"}]]]
+```
+
+The clause is carried **without** its enclosing `<`/`>`, and a variance
+marker is simply part of that text — the bare form needs no other change:
+
+```cortex
+type tree<out T> = tuple<value: T, children: list<tree<T>>>
+```
+
+```json
+["DeclareType", "tree", {"str": "tuple<value: T, children: list<tree<T>>>"},
+  ["Dictionary", ["KeyValuePair", "typeParams", {"str": "out T"}]]]
 ```
 
 A type is registered when its statement is canonicalized, which is why the

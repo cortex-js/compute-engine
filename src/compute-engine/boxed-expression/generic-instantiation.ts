@@ -1,6 +1,6 @@
 import {
+  admissionSkeleton,
   freeTypeVariables,
-  groundSkeleton,
   parameterPositions,
   solveTypeArguments,
   substituteTypeVariables,
@@ -102,9 +102,16 @@ export function solveArm(
   // operand that fails even this is admitted provisionally at best (deferred
   // overlap, value-component tri-state, matrix repair, devolution), and every
   // provisional admission contributes NO bound (§4.5).
+  //
+  // This is an ADMISSION domain, not a disjointness one: at an INVARIANT
+  // applied reference (`cell<inout T>`, or one whose variance is still
+  // deferred) the ordinary skeleton `cell<any>` is over-strict and would skip
+  // — and so never solve — a position every `cell<X>` legitimately inhabits.
+  // The solve itself refutes a non-application, and the post-solve gate in
+  // `validate.ts` re-checks the position against the INSTANTIATED parameter.
   const positions = parameterPositions(arm, ops.length);
   const skeletons = positions.map((p) =>
-    p === undefined ? undefined : groundSkeleton(p)
+    p === undefined ? undefined : admissionSkeleton(p)
   );
 
   return solveTypeArguments(

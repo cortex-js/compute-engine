@@ -32,6 +32,7 @@ import {
   substituteTypeVariables,
 } from './instantiate.js';
 import { typeToDedupKey } from './serialize.js';
+import { subtypingVarianceOf } from './variance.js';
 
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
@@ -1000,7 +1001,7 @@ export function isSubtype(
   //
   if (rhs.kind === 'reference') {
     if (typeof lhs !== 'string' && lhs.kind === 'reference')
-      return lhs.name === rhs.name;
+      return sameTypeApplication(lhs, rhs);
     if (rhs.alias === true && rhs.def) {
       // The rhs is a structural type, so we need to check if the lhs is a subtype of the rhs definition
       return isSubtype(lhs, rhs.def);
@@ -1618,6 +1619,68 @@ const LOSSY_SUPERTYPE = new Set<string>([
   'map',
   'any',
 ]);
+
+/**
+ * Two type references relate iff they name the same type AND, when
+ * parameterized, agree argument by argument according to the DECLARED variance
+ * of each parameter (§4.3):
+ *
+ * ```
+ * out    → Aᵢ <: Bᵢ
+ * in     → Bᵢ <: Aᵢ
+ * inout  → Aᵢ ≡ Bᵢ   (mutual subtyping)
+ * ```
+ *
+ * The zero-parameter case is the pre-existing nominal rule, unchanged: `point
+ * <: point` by name. A declaration whose variance is not yet verified reads as
+ * `inout` (ruling C) — see {@link subtypingVarianceOf}.
+ *
+ * Two APPLICATIONS must additionally be applications of the SAME declaration
+ * record. Relating them by NAME alone made shadowed same-name types in nested
+ * scopes relate ASYMMETRICALLY: the per-parameter variance was read off the
+ * RHS declaration and then applied to the LHS's body, so an outer `box<inout
+ * T>` was a subtype of an inner `box<out T>` while the reverse was false — one
+ * side's variance granting a relation the other side's body never promised.
+ * The record is identity-stable, so this costs nothing legitimate: an in-place
+ * redeclaration (N12) keeps it, and a `typeToString`/re-parse round trip
+ * resolves back to the same record.
+ *
+ * When either side has no `decl` back-pointer — a structurally-built node, or
+ * one that reached us from outside the resolver — there is no record to
+ * compare, so the name comparison stands. That fallback is the PERMISSIVE
+ * direction, deliberately: those nodes predate the back-pointer and refusing
+ * them would break relations that work today, whereas the asymmetry above only
+ * arises between two resolver-built applications.
+ *
+ * No body is consulted, so no cycle guard is needed at this site: the
+ * recursion lives in the arguments, and those are finite.
+ */
+function sameTypeApplication(
+  lhs: Readonly<TypeReference>,
+  rhs: Readonly<TypeReference>
+): boolean {
+  if (lhs.name !== rhs.name) return false;
+  const a = lhs.args;
+  const b = rhs.args;
+  if (a === undefined || b === undefined) return a === b;
+  if (a.length !== b.length) return false;
+
+  const lhsDecl = (lhs as { decl?: TypeReference }).decl;
+  const rhsDecl = (rhs as { decl?: TypeReference }).decl;
+  if (lhsDecl !== undefined && rhsDecl !== undefined && lhsDecl !== rhsDecl)
+    return false;
+
+  return a.every((x, i) => {
+    switch (subtypingVarianceOf(rhs, i)) {
+      case 'out':
+        return isSubtype(x, b[i]);
+      case 'in':
+        return isSubtype(b[i], x);
+      default:
+        return isSubtype(x, b[i]) && isSubtype(b[i], x);
+    }
+  });
+}
 
 /** `JSON.stringify` replacer for the de-dup key below: drop a type reference's
  * resolved `def`.

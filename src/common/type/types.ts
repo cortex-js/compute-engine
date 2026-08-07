@@ -156,18 +156,36 @@ export type EffectSet = 'any' | EffectLabel[];
  */
 export type TypeVariable = { kind: 'variable'; name: string };
 
+/** How a parameterized NOMINAL type relates two of its applications
+ * (`docs/plans/2026-08-06-parameterized-nominal-types-design.md` §4).
+ *
+ * Declared inside a type-parameter clause (`type tree<out T> = …`); the words
+ * are contextual there and are never reserved. Only a nominal declaration
+ * carries one — a transparent alias has no declaration-level variance, and a
+ * `forall` clause never does. */
+export type TypeVariance = 'in' | 'out' | 'inout';
+
 /**
- * One entry of a signature's `forall` clause: the variable's name and its
- * optional declared upper bound.
+ * One entry of a signature's `forall` clause, or of a declared type's
+ * type-parameter clause: the variable's name and its optional declared upper
+ * bound.
  *
  * The bound must be **ground** (no type variables) — validated when the
  * declared type is boxed. An unbounded variable's implicit bound is `any`.
  */
-export type TypeParameter = { name: string; bound?: Type };
+export type TypeParameter = {
+  name: string;
+  bound?: Type;
+  /** Declaration-level variance, on a parameterized NOMINAL type only.
+   * Absent means the default (`out`, verified — §4.4). */
+  variance?: TypeVariance;
+};
 
 /**
- * The `typeParams` option of a generic type-ALIAS declaration
- * (`ce.declareType('Pair', 'tuple<T, T>', { alias: true, typeParams: ['T'] })`).
+ * The `typeParams` option of a generic type declaration — an ALIAS
+ * (`ce.declareType('Pair', 'tuple<T, T>', { alias: true, typeParams: ['T'] })`)
+ * or a parameterized NOMINAL type
+ * (`ce.declareType('tree', '…', { typeParams: [{ name: 'T', variance: 'out' }] })`).
  *
  * Either clause TEXT (`'T, U: number'`, also accepted one entry at a time) or
  * pre-built parameters whose bound may be a type string. Every TEXT spelling
@@ -177,7 +195,10 @@ export type TypeParameter = { name: string; bound?: Type };
  */
 export type TypeParamsOption =
   | string
-  | ReadonlyArray<string | { name: string; bound?: Type | TypeString }>;
+  | ReadonlyArray<
+      | string
+      | { name: string; bound?: Type | TypeString; variance?: TypeVariance }
+    >;
 
 export type FunctionSignature = {
   kind: 'signature';
@@ -329,17 +350,50 @@ export type TypeReference = {
   name: string;
   alias: boolean;
   def: Type | undefined;
-  /** The `forall`-like clause of a GENERIC type ALIAS
-   * (`type alias Pair<T> = tuple<T, T>`), in declaration order.
+  /** The `forall`-like clause of a GENERIC type declaration — an ALIAS
+   * (`type alias Pair<T> = tuple<T, T>`) or a parameterized NOMINAL type
+   * (`type tree<out T> = …`) — in declaration order.
    *
-   * A record-level field, never part of a `Type`: an applied reference
-   * (`Pair<integer>`) is EAGERLY EXPANDED into the substituted body when the
-   * type is built, so no downstream consumer ever meets an unexpanded
-   * application. Present only on a structural alias — parameterized NOMINAL
-   * types are out of scope.
+   * A record-level field, never part of a `Type`: it lives on the declaration
+   * record held in a scope, not on an applied reference.
    *
-   * See `docs/plans/2026-08-04-generic-type-aliases-design.md`. */
+   * For an ALIAS an applied reference (`Pair<integer>`) is EAGERLY EXPANDED
+   * into the substituted body when the type is built, so no downstream
+   * consumer ever meets an unexpanded alias application. A parameterized
+   * NOMINAL application is the opposite: it is opaque, so it KEEPS its
+   * arguments (see `args`).
+   *
+   * See `docs/plans/2026-08-04-generic-type-aliases-design.md` and
+   * `docs/plans/2026-08-06-parameterized-nominal-types-design.md`. */
   typeParams?: TypeParameter[];
+
+  /** The type ARGUMENTS of an applied reference to a parameterized nominal
+   * type (`tree<integer>`), in declaration order.
+   *
+   * Present only on an APPLICATION, never on a declaration record, and never
+   * on a generic ALIAS (which is expanded away instead). An applied nominal
+   * reference is never expanded for subtyping — `tree<A>` and `tree<B>` are
+   * related by name plus an argument-wise comparison — which is what makes a
+   * recursive parametric type expressible at all (§1 of the design).
+   *
+   * An application delegates `def` to its declaration record, so a recursive
+   * body (`tree<T>` inside `tree`) sees the definition once it is set. */
+  args?: Type[];
+
+  /** Whether this declaration's variance has been VERIFIED against its body
+   * (parameterized-nominal design §4.2, ruling C). On the DECLARATION record
+   * only — absent on aliases, on non-parameterized nominals, and on an applied
+   * reference (which reads its record's state through `declarationOf`).
+   *
+   * `'deferred'` means the body reaches an unfulfilled forward reference, so
+   * the declaration was accepted provisionally: until fulfilment completes the
+   * group check, every subtype judgment reads its parameters as `inout`, which
+   * is sound whatever variance fulfilment reveals. */
+  _varianceState?: 'deferred' | 'verified';
+
+  /** The unfulfilled forward-reference names a `'deferred'` verification waits
+   * on. Cleared when the record reaches `'verified'`. */
+  _varianceBlockedOn?: string[];
 };
 
 export type Type =

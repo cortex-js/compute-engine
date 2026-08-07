@@ -699,15 +699,20 @@ export function serializeCortex(
     //     ["Dictionary", ["KeyValuePair", "alias", "True"],
     //                    ["KeyValuePair", "typeParams", {str:"T"}]]]
     //                                → type alias Pair<T> = tuple<T, T>
+    //   ["DeclareType", "box", {str:"tuple<v: T>"},
+    //     ["Dictionary", ["KeyValuePair", "typeParams", {str:"out T"}]]]
+    //                                → type box<out T> = tuple<v: T>
     //
     // A bare `type` declares a NOMINAL type (no attributes needed — nominal is
-    // `DeclareType`'s default); `type alias` declares a structural alias, and
-    // an additional `typeParams` entry (clause TEXT) makes it generic. The
+    // `DeclareType`'s default); `type alias` declares a structural alias, and a
+    // `typeParams` entry (clause TEXT) makes EITHER form generic — a
+    // parameterized nominal type is `typeParams` WITHOUT `alias -> True`. The
+    // clause text is bracket-free and carries any variance marker verbatim
+    // (`"out T"`), so re-emitting it inside `<…>` reproduces the source. The
     // attributes bag is read in either MathJSON dictionary encoding (the
     // operator `Dictionary` form the parser emits, and the `{dict: …}`
-    // shorthand) and in any key order. Any other bag — including `typeParams`
-    // WITHOUT `alias -> True`, a shape well-formed lowering never produces —
-    // falls back to the generic function form.
+    // shorthand) and in any key order. Any other bag falls back to the generic
+    // function form.
     //
     DeclareType: (expr: MathJsonExpression): FormattingBlock => {
       const args = operands(expr);
@@ -733,17 +738,21 @@ export function serializeCortex(
       // does: the `{dict: …}` shorthand boxes an unquoted `True` as a STRING,
       // the operator `Dictionary` form carries the SYMBOL.
       const aliasOp = entries['alias'] ?? null;
-      if ((symbol(aliasOp) ?? stringValue(aliasOp)) !== 'True')
+      if (
+        aliasOp !== null &&
+        (symbol(aliasOp) ?? stringValue(aliasOp)) !== 'True'
+      )
         return serializeGenericFunction(expr);
+      const kind = aliasOp !== null ? 'type alias ' : 'type ';
 
       const clauseOp = entries['typeParams'];
-      if (clauseOp === undefined)
-        return fmt.line('type alias ', name, ' = ', body);
+      // No clause: only the `alias` flag is left, since the bag is non-empty.
+      if (clauseOp === undefined) return fmt.line(kind, name, ' = ', body);
       const clause = stringValue(clauseOp) ?? symbol(clauseOp);
       if (clause === null || clause.length === 0)
         return serializeGenericFunction(expr);
 
-      return fmt.line('type alias ', name, '<', clause, '> = ', body);
+      return fmt.line(kind, name, '<', clause, '> = ', body);
     },
 
     Assign: (expr: MathJsonExpression): FormattingBlock => {

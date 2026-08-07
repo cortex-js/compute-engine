@@ -1,4 +1,10 @@
-import type { Type, TypeParameter, TypeResolver, TypeString } from './types.js';
+import type {
+  Type,
+  TypeParameter,
+  TypeResolver,
+  TypeString,
+  TypeVariance,
+} from './types.js';
 
 import { isValidType } from './primitive.js';
 import { Parser } from './parser.js';
@@ -96,11 +102,17 @@ export function parseType(
       `Failed to parse type "${s}": ${
         error instanceof Error ? error.message : String(error)
       }`
-    );
+    ) as Error & { code?: string; rawMessage?: string };
     // Keep the structured code of a type-variable violation reachable on the
     // re-thrown error (the code is in the message either way).
-    if (error instanceof TypeVariableError)
-      (wrapped as Error & { code?: string }).code = error.code;
+    if (error instanceof TypeVariableError) {
+      wrapped.code = error.code;
+      wrapped.rawMessage = error.message;
+    }
+    // …and the BARE message, so a caller that reports the failure does not have
+    // to quote the whole type string back at the author. `rawMessage` is the
+    // type parser's own convention (set by `errorAtToken`).
+    wrapped.rawMessage ??= (error as { rawMessage?: string }).rawMessage;
     throw wrapped;
   }
 }
@@ -180,7 +192,18 @@ export interface TypeParameterClauseError {
  * Names are checked for duplicates and against {@link isReservedTypeName}.
  * Bounds are parsed as ordinary — GROUND — types with the clause's own names
  * NOT in scope, so an F-bounded `T: list<U>` is an unknown-type error.
+ *
+ * A parameter may carry a leading VARIANCE marker — `out T`, `in T`,
+ * `inout T` — the declaration-level variance of a parameterized nominal type
+ * (parameterized-nominal design §3.1). The words are CONTEXTUAL: one is read
+ * as a marker only when another name follows it, so a parameter legally named
+ * `in` still parses as a name. Rejecting a marker where it is meaningless (a
+ * transparent alias) is the CALLER's job — this reader is shared.
  */
+/** A variance marker followed by (the start of) a parameter name. `inout` is
+ * listed first so it is preferred over its `in` prefix. */
+const VARIANCE_MARKER = /^(inout|in|out)\s+(?=[a-zA-Z_])/;
+
 export function parseTypeParameterClause(
   text: string,
   typeResolver?: TypeResolver
@@ -206,6 +229,13 @@ export function parseTypeParameterClause(
   const seen = new Set<string>();
   for (;;) {
     skipSpace();
+    // The contextual variance marker: only when a NAME follows it.
+    let variance: TypeVariance | undefined;
+    const vm = VARIANCE_MARKER.exec(text.slice(pos));
+    if (vm !== null) {
+      variance = vm[1] as TypeVariance;
+      pos += vm[0].length;
+    }
     const m = /^[a-zA-Z_][a-zA-Z0-9_]*/.exec(text.slice(pos));
     if (m === null)
       return err('name-expected', 'Expected a type parameter name', pos);
@@ -256,7 +286,10 @@ export function parseTypeParameterClause(
         );
     }
 
-    params.push(bound === undefined ? { name } : { name, bound });
+    const param: TypeParameter = { name };
+    if (bound !== undefined) param.bound = bound;
+    if (variance !== undefined) param.variance = variance;
+    params.push(param);
 
     skipSpace();
     if (pos >= text.length) break;

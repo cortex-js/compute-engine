@@ -50,6 +50,77 @@
 
 ### New Features
 
+- **Parameterized nominal types: `type tree<T> = tuple<value: T, children:
+  list<tree<T>>>`.** A nominal `type` declaration now takes the same
+  type-parameter clause a generic alias takes, in Cortex as above and from the
+  host with
+  `ce.declareType('tree', '…', { typeParams: [{ name: 'T', variance: 'out' }] })`.
+  Unlike an alias, an application is **opaque** — `tree<integer>` is never
+  expanded — which is precisely what lets the definition refer to itself, so a
+  recursive parametric container (a rose tree, a JSON with a payload, a zipper)
+  is expressible for the first time. The arity, bound and unused-parameter rules
+  are the alias's, shared and generalized; self-reference, which an alias
+  forbids, is the point here.
+
+  A parameter carries a **variance** marker — `out` (covariant), `in`
+  (contravariant) or `inout` (invariant) — saying how two applications relate:
+  under `out`, a `tree<integer>` is usable where a `tree<number>` is expected.
+  **No marker means `out`**, declared rather than inferred and verified against
+  the definition like a written one: values are immutable, so covariance is
+  sound and is what a payload container wants, and only the consuming minority
+  pays an annotation. Because the default is declared, a definition that uses
+  its parameter in an input position does not quietly change the type's
+  subtyping contract — it is a `variance-violation` at the declaration, naming
+  the violated variance and where it came from, the offending occurrences by
+  path (`notify.(arg 1)`), and exactly the markers that would verify. `inout`
+  verifies against any definition. Variance and bounds do not interact.
+
+  A `tuple` definition mints a **quantified** constructor
+  (`tree: forall T. (T, list<tree<T>>) -> tree<T>`), so `tree(1, [])` solves
+  `T = finite_integer` from its arguments; a `record` definition is still
+  inhabited by a constructor function, whose own clause is independent of the
+  type's. Field access reads the definition **instantiated at the
+  application's arguments** — with `t: tree<number>`, `t.value` is a `number`.
+  `match` is a binding of values, not a projection of the annotation: each
+  capture takes the matched **value's own** type, usually narrower — on a `t`
+  built as `tree(1, [])`, `match t { tree(v, cs) => … }` binds `v: integer` and
+  `cs: list<never>`, not `number` and `list<tree<number>>`. Compilation
+  erases the tag at the instantiated definition, as it already did for an
+  unparameterized nominal type: `tree<integer>` compiles like the equivalent
+  tuple, and declines identically where that would. One documented limitation: a
+  construction solves its parameters from its arguments alone and an annotation
+  does not widen them, so an explicitly `inout`/`in` parameterized type can only
+  be constructed at exactly its argument type. See the new "Parameterized
+  Nominal Types" section of the types guide.
+
+- A type variable may now appear in one arm of a **union**: `type opt<T> = T |
+  missing` and `forall T. (T | missing) -> list<T>` are accepted, and at a call
+  the argument takes exactly one arm — the open arm binds the variable
+  (refutation included), a ground arm binds `never`, the narrowest member of
+  the family. At most one arm of a union may mention a variable (`T | U` is
+  unsolvable by construction). Intersections and negations remain rejected
+  wherever the declaration mints a constructor — the minted signature is what
+  is checked, so a `record` body or a `mint: false` declaration goes
+  unchecked — and the intersection diagnostic now steers to the spelling that
+  replaces it, a bound (`forall T: number.`).
+
+- A Cortex `type` statement re-declaration (a notebook re-run, or an edited
+  definition) now UPDATES the existing type record in place instead of
+  installing a new one. Types that mention the name — and applied references
+  such as `box<integer>` already built — follow the new definition, so a node
+  parsed before the re-run and one parsed after can no longer give different
+  subtyping answers for the same pair of types, and a mutually recursive set
+  converges on the second run rather than the third. A re-declaration that
+  breaks a type depending on it now fails on the run that introduces it, rather
+  than silently leaving that type reading a stale definition: an edit that
+  changes the type-parameter count while a dependent still applies the old
+  arity is a `generic-alias-arity` error, and one that makes a dependent's
+  declared variance unsound is a `variance-violation`. Both are attributed to
+  the dependent and name the re-declaration as the trigger, and both roll the
+  statement back completely — definition, type-parameter clause, verified
+  variance and minted constructor all restored. Re-declaring a type through the
+  host `ce.declareType()` API still throws, unchanged.
+
 - **Cortex: `break` and `continue`.** They leave, or skip to the next iteration
   of, the innermost enclosing `while`/`for` loop, and lower to the engine's
   existing `Break()`/`Continue()` primitives. Valid anywhere in a loop body,

@@ -32,7 +32,10 @@ import {
   RecordType,
   TupleType,
   Type,
+  TypeReference,
 } from '../../common/type/types.js';
+import { declarationOf } from '../../common/type/reference.js';
+import { substituteTypeVariables } from '../../common/type/instantiate.js';
 import {
   collectionElementType,
   functionResult,
@@ -535,11 +538,24 @@ const POINT_LIST_COMPILE_LANGUAGES: ReadonlySet<string> = new Set([
 function fieldBearingType(
   t: Type
 ): RecordType | TupleType | DictionaryType | 'none' | undefined {
-  const seen = new Set<Type>();
+  // Keyed on the DECLARATION record, not on `t`: instantiating an applied
+  // reference below mints a fresh body object each step, so an identity guard
+  // on `t` itself would go blind on a cycle. The record is identity-stable.
+  const seen = new Set<TypeReference>();
   while (typeof t === 'object' && t.kind === 'reference') {
-    if (t.def === undefined || seen.has(t)) return undefined;
-    seen.add(t);
-    t = t.def;
+    const decl = declarationOf(t);
+    if (t.def === undefined || seen.has(decl)) return undefined;
+    seen.add(decl);
+    // An APPLIED reference reads its body instantiated at the arguments
+    // (parameterized-nominal design §6). One substitution, one level deep: a
+    // nested `tree<T>` stays an unexpanded reference, so the loop terminates.
+    const params = decl.typeParams;
+    if (t.args !== undefined && params !== undefined) {
+      const bindings: Record<string, Type> = Object.create(null);
+      const n = Math.min(params.length, t.args.length);
+      for (let i = 0; i < n; i++) bindings[params[i].name] = t.args[i];
+      t = substituteTypeVariables(t.def, bindings);
+    } else t = t.def;
   }
   if (typeof t === 'string') {
     if (

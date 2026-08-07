@@ -37,7 +37,6 @@ import {
   TypeParameter,
   TypeResolver,
 } from './types.js';
-import { TypeVariableError } from './instantiate.js';
 import { PRIMITIVE_TYPES_SET } from './primitive.js';
 import { EFFECT_LABELS, isEffectLabel } from './effects.js';
 
@@ -1604,16 +1603,9 @@ export class Parser {
 
       // If it was a forward reference, let the resolver know
       if (isForward) {
-        // `type Later<integer>`: an APPLIED forward reference is rejected
-        // BEFORE `forward()` runs. `forward()` mutates the namespace (it
-        // installs a `def: undefined` placeholder), and letting the builder
-        // reject afterwards would leave that placeholder behind to poison a
-        // later real `declareType('Later', …)`.
-        if (args !== undefined)
-          throw new TypeVariableError(
-            'generic-alias-forward-reference',
-            `The forward reference \`type ${name}\` cannot take type arguments: declare "${name}" before applying it`
-          );
+        // `type Later<integer>` is legal: an applied forward reference records
+        // its argument count on the placeholder, and the declaration that
+        // fulfills it is checked against every recorded use (design §4.2).
         const forwardResult = this.typeResolver.forward(name);
         if (forwardResult) {
           return this.createNode<TypeReferenceNode>('type_reference', {

@@ -236,8 +236,11 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
   });
 
   test('variable in an unsupported position', () => {
-    expect(codeOf(() => ce.type('forall T. (T | string) -> T'))).toBe(
-      'unsupported-variable-position'
+    // A UNION arm is no longer one of them (Rule U) — see
+    // `union-position-polytypes.test.ts`.
+    expect(ce.type('forall T. (T | string) -> T').isPolymorphic).toBe(true);
+    expect(ce.type('forall T. (list<T | string>) -> T').isPolymorphic).toBe(
+      true
     );
     expect(codeOf(() => ce.type('forall T. (T & number) -> T'))).toBe(
       'unsupported-variable-position'
@@ -245,20 +248,25 @@ describe('DECLARATION-TIME VALIDATION (§7.2)', () => {
     expect(codeOf(() => ce.type('forall T. (!T) -> T'))).toBe(
       'unsupported-variable-position'
     );
-    expect(codeOf(() => ce.type('forall T. (list<T | string>) -> T'))).toBe(
+    // Two OPEN arms stay rejected: nothing at a call site says which arm a
+    // value took, so neither variable could be solved.
+    expect(codeOf(() => ce.type('forall T, U. (T | U) -> tuple<T, U>'))).toBe(
       'unsupported-variable-position'
     );
   });
 
-  test('a nested ARROW under a union is still a forbidden position', () => {
-    // The nested signature does not re-open the position: reached from a union
-    // arm, its own parameters and result stay forbidden.
-    expect(codeOf(() => ce.type('forall T. (((T) -> T) | string) -> T'))).toBe(
-      'unsupported-variable-position'
-    );
+  test('a nested ARROW under a union is an ALLOWED position (Rule U)', () => {
+    // Rule U supplied the inference rule this position was missing: a union
+    // arm no longer forbids what it contains, so a nested arrow reached
+    // through one is an ordinary nested arrow.
     expect(
-      codeOf(() => ce.type('forall T. ((integer) -> (T | string)) -> T'))
-    ).toBe('unsupported-variable-position');
+      ce.type('forall T. (((T) -> T) | string) -> T').isPolymorphic
+    ).toBe(true);
+    expect(
+      ce.type('forall T. ((integer) -> (T | string)) -> T').isPolymorphic
+    ).toBe(true);
+    // An INTERSECTION member still forbids what it contains, nested arrow or
+    // not.
     expect(
       codeOf(() => ce.type('forall T. (list<((T) -> boolean) & string>) -> T'))
     ).toBe('unsupported-variable-position');

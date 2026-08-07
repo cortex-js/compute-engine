@@ -178,10 +178,21 @@ describe('CORTEX `forall` ANNOTATIONS (D13: full-literal positions)', () => {
         'unsolvable-type-variable: The type variable `U` is quantified but never used',
       ],
     ]);
-    expect(parseDiagnostics('let f: forall T. (T | string) -> T')).toEqual([
+    expect(parseDiagnostics('let f: forall T. (T & number) -> T')).toEqual([
       [
         'type-annotation-error',
-        'unsupported-variable-position: The type variable `T` cannot appear in a union, an intersection, a negation or a bound',
+        'unsupported-variable-position: The type variable `T` cannot appear in an intersection. To constrain a type variable, declare a bound on it instead: `forall T: number.`',
+      ],
+    ]);
+    // A UNION arm is an ALLOWED position (Rule U) — but only one arm of a
+    // union may be open.
+    expect(parseDiagnostics('let f: forall T. (T | string) -> T')).toEqual([]);
+    expect(
+      parseDiagnostics('let f: forall T, U. (T | U) -> tuple<T, U>')
+    ).toEqual([
+      [
+        'type-annotation-error',
+        'unsupported-variable-position: At most one arm of a union can refer to a type variable, but `T | U` has 2. Nothing at a call site says which arm a value took, so neither variable could be solved',
       ],
     ]);
   });

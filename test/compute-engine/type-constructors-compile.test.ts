@@ -1,6 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { resolveTypeForCompilation } from '../../src/common/type/utils';
+import { typeToString } from '../../src/common/type/serialize';
 
 //
 // Phase 2 of the nominal-types design
@@ -367,6 +369,173 @@ describe('ABSENCE AXIS — the reference unfolds BEFORE the missing-strip', () =
     expect(ce.box('x').type.toString()).toBe('mn');
     expect(jsCode(ce, ['IsMissing', 'x'])).toBe('Number.isNaN(_.x)');
     expect(compile(ce.box(['IsMissing', 'x'])).run!({ x: NaN })).toBe(true);
+  });
+});
+
+describe('PARAMETERIZED NOMINAL — erasure at the INSTANTIATED body', () => {
+  //
+  // Phase 4 of `docs/plans/2026-08-06-parameterized-nominal-types-design.md`
+  // (§7). Nothing new is claimed: `tree<integer>` erases to whatever the
+  // equivalent tuple compiles to, and declines identically where that would.
+  // What is new is WHICH body answers — an applied reference unfolds to its
+  // definition INSTANTIATED at the application's arguments, so the layout
+  // question is asked about `integer`, never about the declaration's `T`.
+  //
+  test('an applied reference unfolds to the body instantiated at its arguments', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('tree', 'tuple<value: T, children: list<tree<T>>>', {
+      typeParams: ['T'],
+    });
+    const resolved = (t: string) =>
+      typeToString(resolveTypeForCompilation(ce.type(t as never).type));
+
+    expect(resolved('tree<integer>')).toBe(
+      'tuple<value: integer, children: list<tree<integer>>>'
+    );
+    // One level deep: the recursive occurrence stays an UNEXPANDED reference,
+    // instantiated at the same argument — so the walk terminates on a
+    // recursive body without a special case.
+    expect(resolved('tree<tree<integer>>')).toBe(
+      'tuple<value: tree<integer>, children: list<tree<tree<integer>>>>'
+    );
+    // Two applications of one declaration are two different layouts.
+    expect(resolved('tree<string>')).toBe(
+      'tuple<value: string, children: list<tree<string>>>'
+    );
+  });
+
+  test('a generic ALIAS still expands eagerly — no applied node reaches the gate', () => {
+    // The regression the design's §3 guards: generic aliases keep their
+    // zero-unfold-site property, so `resolveTypeForCompilation` is the
+    // identity on one.
+    const ce = new ComputeEngine();
+    ce.declareType('Pair', 'tuple<T, T>', { alias: true, typeParams: ['T'] });
+    const t = ce.type('Pair<number>').type;
+    expect(typeof t === 'object' && t.kind).toBe('tuple');
+    expect(typeToString(resolveTypeForCompilation(t))).toBe(
+      'tuple<number, number>'
+    );
+  });
+
+  test('the ABSENCE AXIS is chosen at the instantiated type, not at `T`', () => {
+    // The gate that actually discriminates: the JavaScript target picks the
+    // NaN axis for a numeric-domain hole and the `undefined` axis otherwise,
+    // from `isSubtype(resolveTypeForCompilation(t), 'number')`. Without the
+    // substitution both instantiations resolve to the bare variable `T`,
+    // which is not `<: number` — so `qty<number>` would silently take the
+    // OBJECT axis and the compiled `IsMissing` would disagree with the
+    // interpreter (I6: a numeric-slot hole reads as `NaN`).
+    const ce = new ComputeEngine();
+    ce.declareType('qty', 'T', { typeParams: ['T'] });
+    ce.declare('a', 'qty<number>');
+    ce.declare('b', 'qty<string>');
+    ce.declare('n', 'number');
+    ce.declare('s', 'string');
+
+    expect(ce.box('a').type.toString()).toBe('qty<number>');
+    expect(jsCode(ce, ['IsMissing', 'a'])).toBe(
+      jsCode(ce, ['IsMissing', 'n']).replace(/_\.n/g, '_.a')
+    );
+    expect(jsCode(ce, ['IsMissing', 'a'])).toBe('Number.isNaN(_.a)');
+    // The SAME declaration, instantiated at an object-domain argument, takes
+    // the other axis — exactly as the inline spelling does.
+    expect(jsCode(ce, ['IsMissing', 'b'])).toBe(
+      jsCode(ce, ['IsMissing', 's']).replace(/_\.s/g, '_.b')
+    );
+    expect(jsCode(ce, ['IsMissing', 'b'])).toBe('(_.b === undefined)');
+
+    const isMissing = compile(ce.box(['IsMissing', 'a'])).run!;
+    expect(isMissing({ a: NaN })).toBe(true);
+    expect(isMissing({ a: 5 })).toBe(false);
+  });
+
+  test('`Coalesce` discharges on the instantiated axis', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('qty', 'T', { typeParams: ['T'] });
+    ce.declare('a', 'qty<number>');
+    ce.declare('n', 'number');
+    expect(jsCode(ce, ['Coalesce', 'a', 0])).toBe(
+      jsCode(ce, ['Coalesce', 'n', 0]).replace(/_\.n/g, '_.a')
+    );
+    // NOT the `??` object axis: `NaN ?? 0` is `NaN`, which would disagree.
+    expect(jsCode(ce, ['Coalesce', 'a', 0])).not.toMatch(/\?\?/);
+    const coalesce = compile(ce.box(['Coalesce', 'a', 0])).run!;
+    expect(coalesce({ a: NaN })).toBe(0);
+    expect(coalesce({ a: 5 })).toBe(5);
+  });
+
+  test('a value at an instantiated nominal type erases like the inline spelling', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('tree', 'tuple<value: T, children: list<tree<T>>>', {
+      typeParams: ['T'],
+    });
+    ce.declare('t', 'tree<integer>');
+    ce.declare('u', 'tuple<value: integer, children: list<tree<integer>>>');
+    // A tuple is an object-domain layout at either spelling.
+    expect(jsCode(ce, ['IsMissing', 't'])).toBe(
+      jsCode(ce, ['IsMissing', 'u']).replace(/_\.u/g, '_.t')
+    );
+    expect(jsCode(ce, ['IsMissing', 't'])).toBe('(_.t === undefined)');
+  });
+
+  test('a construction at a parameterized nominal compiles like the plain value', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('tree', 'tuple<value: T, children: list<tree<T>>>', {
+      typeParams: ['T'],
+    });
+    expect(ce.box(['tree', 1, ['List']]).type.toString()).toBe(
+      'tree<finite_integer>'
+    );
+    expect(jsCode(ce, ['tree', 1, ['List']])).toBe(
+      jsCode(ce, ['Tuple', 1, ['List']])
+    );
+    expect(jsCode(ce, ['tree', 1, ['List']])).toBe('[1, []]');
+
+    // A 3-deep tree — every level erases, and the compiled value is the plain
+    // nested one.
+    const deep = (ctor: string) => [
+      ctor,
+      1,
+      ['List', [ctor, 2, ['List', [ctor, 3, ['List']]]]],
+    ];
+    expect(jsCode(ce, deep('tree'))).toBe(jsCode(ce, deep('Tuple')));
+    expect(compile(ce.box(deep('tree') as never)).run!({})).toEqual([
+      1,
+      [[2, [[3, []]]]],
+    ]);
+  });
+
+  test('GLSL: a parameterized tuple body is the target `vecN`, and declines identically', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('pt', 'tuple<T, T>', { typeParams: ['T'] });
+    ce.declare('x', 'number');
+    ce.declare('y', 'number');
+    ce.declare('q', 'tuple<number, number>');
+    expect(glslCode(ce, ['pt', 'x', 'y'])).toBe(
+      glslCode(ce, ['Tuple', 'x', 'y'])
+    );
+    expect(glslCode(ce, ['pt', 'x', 'y'])).toBe('vec2(x, y)');
+    // A `vecN` component must be a scalar: a tuple of tuples has no shader
+    // lowering, at either spelling.
+    expect(glslCode(ce, ['pt', 'q', 'q'])).toBe(
+      glslCode(ce, ['Tuple', 'q', 'q'])
+    );
+    expect(glslCode(ce, ['pt', 'q', 'q'])).toBe('DECLINE');
+  });
+
+  test('DECLINES cleanly where the plain shape declines — never throws', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('tree', 'tuple<value: T, children: list<tree<T>>>', {
+      typeParams: ['T'],
+    });
+    ce.declare('x', 'number');
+    expect(() =>
+      compile(ce.box(['tree', 1, ['List', ['Unknown9', 'x']]]))
+    ).not.toThrow();
+    expect(jsCode(ce, ['tree', 1, ['List', ['Unknown9', 'x']]])).toBe(
+      jsCode(ce, ['Tuple', 1, ['List', ['Unknown9', 'x']]])
+    );
+    expect(jsCode(ce, ['tree', 1, ['List', ['Unknown9', 'x']]])).toBe('');
   });
 });
 

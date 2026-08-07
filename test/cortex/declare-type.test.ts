@@ -166,23 +166,22 @@ describe('CORTEX `type` IS A CONTEXTUAL KEYWORD', () => {
 });
 
 describe('CORTEX TYPE DECLARATION DIAGNOSTICS', () => {
-  test('the generic-alias slot is reserved but unsupported', () => {
-    const diagnostics = diagnosticsOf('type point<T> = tuple<T, T>');
-    expect(diagnostics).toEqual([['type-variables-unsupported', 'point']]);
+  test('the bare form ACCEPTS a clause (parameterized nominal types)', () => {
+    expect(diagnosticsOf('type point<T> = tuple<T, T>')).toEqual([]);
+    expect(diagnosticsOf('type point<out T> = tuple<T, T>')).toEqual([]);
   });
 
-  test('a rejected generic alias does not stop the parse', () => {
-    const source = 'type point<T> = tuple<T, T>\nlet a = 1';
-    const [value, diagnostics] = parseCortex(source);
-    expect(diagnostics.map((d) => d.message)).toEqual([
-      ['type-variables-unsupported', 'point'],
-    ]);
-    // The following statement still parses.
-    expect(JSON.stringify(value)).toContain('Declare');
-  });
-
-  test('…but the `alias` form ACCEPTS a clause (generic aliases)', () => {
+  test('…and so does the `alias` form (generic aliases)', () => {
     expect(diagnosticsOf('type alias pair<T> = tuple<T, T>')).toEqual([]);
+  });
+
+  // Variance is a NOMINAL declaration's contract between two applications; a
+  // transparent alias expands instead, so a marker there is meaningless.
+  test('a variance marker on an alias clause is rejected', () => {
+    const diagnostics = diagnosticsOf('type alias pair<out T> = tuple<T, T>');
+    expect(diagnostics.length).toBe(1);
+    expect(diagnostics[0][0]).toBe('type-annotation-error');
+    expect(String(diagnostics[0][1])).toContain('cannot declare a variance');
   });
 
   test('a reserved word cannot name a type', () => {
@@ -416,7 +415,9 @@ describe('CORTEX GENERIC TYPE ALIASES (serialization)', () => {
     ).toBe('type alias Pair<T> = tuple<T, T>');
   });
 
-  test('`typeParams` WITHOUT `alias` falls back to the generic form', () => {
+  // `typeParams` WITHOUT `alias` is a parameterized NOMINAL type — the
+  // statement form, not a fallback (adversarial-review finding 7).
+  test('`typeParams` WITHOUT `alias` is the parameterized nominal form', () => {
     expect(
       serializeCortex([
         'DeclareType',
@@ -424,7 +425,7 @@ describe('CORTEX GENERIC TYPE ALIASES (serialization)', () => {
         { str: 'tuple<T, T>' },
         ['Dictionary', ['KeyValuePair', 'typeParams', { str: 'T' }]],
       ])
-    ).toContain('DeclareType');
+    ).toBe('type Pair<T> = tuple<T, T>');
   });
 
   test('an unknown extra attribute still falls back', () => {
@@ -571,9 +572,9 @@ describe('CORTEX TYPE NAME SEEDING', () => {
     ]);
   });
 
-  test('the rejected generic slot un-seeds its name too', () => {
-    expect(diagnosticsOf('type gen<T> = tuple<T, T>\nlet p: gen = 1')).toEqual([
-      ['type-variables-unsupported', 'gen'],
+  test('a MALFORMED generic clause un-seeds its name too', () => {
+    expect(diagnosticsOf('type gen<> = tuple<T, T>\nlet p: gen = 1')).toEqual([
+      ['empty-type-parameter-clause', 'gen'],
       ['type-annotation-error', 'Unknown type "gen"'],
     ]);
   });
@@ -871,13 +872,69 @@ describe('CORTEX TYPE DECLARATIONS (end-to-end)', () => {
     ).toBe(false);
   });
 
-  test('the generics rejection is a diagnostic, not a crash', () => {
+  test('a parameterized nominal type declares end-to-end', () => {
     const ce = new ComputeEngine();
     const r = executeCortex(ce, 'type gen<T> = tuple<T, T>\nlet a = 1\na');
-    expect(r.diagnostics.map((d) => d.message)).toEqual([
-      ['type-variables-unsupported', 'gen'],
-    ]);
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
     expect(r.value.toString()).toBe('1');
+    expect(ce.type('gen<integer>').toString()).toBe('gen<integer>');
+  });
+
+  // Variance (parameterized-nominal design §4) on the statement route: the
+  // marker rides the clause TEXT, and the engine verifies it against the body
+  // exactly as it does for a host `ce.declareType`.
+  test('a variance marker relates two applications', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      'type tree<out T> = tuple<value: T, children: list<tree<T>>>\nlet a = 1\na'
+    );
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+    expect(ce.type('tree<integer>').matches('tree<number>')).toBe(true);
+    expect(ce.type('tree<number>').matches('tree<integer>')).toBe(false);
+  });
+
+  test('an unannotated clause means `out`, and is verified as such', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(ce, 'type box<T> = tuple<v: T>\nlet a = 1\na');
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+    expect(ce.type('box<integer>').matches('box<number>')).toBe(true);
+  });
+
+  test('an `in` marker reverses the relation', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      'type sink<in T> = tuple<run: (T) -> nothing>\nlet a = 1\na'
+    );
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+    expect(ce.type('sink<number>').matches('sink<integer>')).toBe(true);
+    expect(ce.type('sink<integer>').matches('sink<number>')).toBe(false);
+  });
+
+  // A body that contradicts the declared (or defaulted) variance is a
+  // `variance-violation`. The statement route surfaces the engine's message
+  // verbatim inside `invalid-type-declaration`.
+  test('a body contradicting the marker is an error value', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(ce, 'type h<out T> = tuple<run: (T) -> nothing>');
+    expect(r.value.operator).toBe('Error');
+    expect(r.value.toString()).toContain('variance-violation');
+    expect(() => ce.type('h<integer>')).toThrow();
+  });
+
+  test('…and so does the unannotated form, prescriptively', () => {
+    const ce = new ComputeEngine();
+    const r = executeCortex(
+      ce,
+      'type events<T> = tuple<log: list<T>, notify: (T) -> nothing>'
+    );
+    expect(r.value.operator).toBe('Error');
+    const s = r.value.toString();
+    expect(s).toContain('variance-violation');
+    expect(s).toContain('notify');
+    expect(s).toContain('`out` is the default when no marker is written');
+    expect(s).toContain('declare it `inout`');
   });
 });
 
@@ -1384,5 +1441,279 @@ describe('CORTEX RECURSIVE TYPE FIELD ACCESS', () => {
     );
     expect(r.diagnostics).toEqual([]);
     expect(r.value.toString()).toBe('tree(10, [tree(20, [tree(40, [])]),tree(30, [])])');
+  });
+});
+
+//
+// NOTEBOOK RE-RUNS — a `type` statement re-run on the same engine UPDATES the
+// existing record IN PLACE rather than swapping in a fresh one.
+//
+// The record is what every mentioning type captured (and what an applied
+// reference `box<integer>` holds through its `decl` back-pointer), so a swap
+// left those captures reading the previous definition: two nodes for the same
+// type disagreed depending on which run parsed them, and a mutually recursive
+// pair needed a THIRD run to converge.
+//
+describe('CORTEX TYPE RE-DECLARATION (in place)', () => {
+  const recordOf = (ce: ComputeEngine, name: string) =>
+    (ce as any)._typeResolver.resolve(name);
+
+  test('re-running a `type` statement keeps the same record object', () => {
+    const ce = new ComputeEngine();
+    executeCortex(ce, 'type box<T> = tuple<v: T>\nlet a = 1\na');
+    const before = recordOf(ce, 'box');
+    const r = executeCortex(ce, 'type box<T> = tuple<v: T, w: T>\nlet a = 1\na');
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+    expect(recordOf(ce, 'box')).toBe(before);
+  });
+
+  test('a node parsed BEFORE the re-run answers from the new definition', () => {
+    const ce = new ComputeEngine();
+    executeCortex(ce, 'type box<out T> = tuple<v: T>\nlet a = 1\na');
+    const staleInt = ce.type('box<integer>');
+    const staleNum = ce.type('box<number>');
+    expect(staleInt.matches(staleNum)).toBe(true);
+
+    // The edited body forces invariance, and the clause is edited to match.
+    const r = executeCortex(
+      ce,
+      'type box<inout T> = tuple<v: T, f: (T) -> nothing>\nlet a = 1\na'
+    );
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+
+    const freshInt = ce.type('box<integer>');
+    const freshNum = ce.type('box<number>');
+    // All four old/new combinations agree.
+    expect(staleInt.matches(staleNum)).toBe(false);
+    expect(freshInt.matches(freshNum)).toBe(false);
+    expect(staleInt.matches(freshNum)).toBe(false);
+    expect(freshInt.matches(staleNum)).toBe(false);
+  });
+
+  // The one-run lag: on the second run, the forward reference `type m2<T>` in
+  // `m1`'s body RESOLVES (the name is declared from run 1), so `m1` captures
+  // the run-1 record — which a swapping replacement then orphaned.
+  test('a mutually recursive pair converges on the SECOND run', () => {
+    const ce = new ComputeEngine();
+    const program = (tail: string) =>
+      `type m1<T> = tuple<a: T, b: list<type m2<T>>>\ntype m2<T> = tuple<c: T${tail}>\nlet a = 1\na`;
+
+    expect(
+      executeCortex(ce, program('')).diagnostics.map((d) => d.message)
+    ).toEqual([]);
+    expect(
+      executeCortex(ce, program(', d: string')).diagnostics.map((d) => d.message)
+    ).toEqual([]);
+
+    const m1 = recordOf(ce, 'm1');
+    const m2 = recordOf(ce, 'm2');
+    // `m1`'s `b` field is `list<m2<T>>`; its element must be an application of
+    // the LIVE `m2` record, not of run 1's.
+    const element = (m1.def as any).elements[1].type.elements;
+    expect(element.kind).toBe('reference');
+    expect(element.name).toBe('m2');
+    // The back-pointer itself is pinned: an `?? element` fallback here would
+    // pass on a node that carries no `decl` at all, and the subtype rule now
+    // relates two applications by that pointer.
+    expect(element.decl).toBe(m2);
+    expect(element.def).toBe(m2.def);
+  });
+
+  // A dependent's declared variance is re-verified against the new definition.
+  // The redeclaration is what makes it unsound, so the REDECLARATION fails and
+  // rolls back; the message is attributed to the dependent and names the
+  // redeclaration as the trigger.
+  test('a re-run that unsounds a dependent fails on the run that introduces it', () => {
+    const ce = new ComputeEngine();
+    const r1 = executeCortex(
+      ce,
+      'type w2<out T> = tuple<v: T>\ntype w1<out T> = tuple<w: w2<T>>\nlet a = 1\na'
+    );
+    expect(r1.diagnostics.map((d) => d.message)).toEqual([]);
+    expect(ce.type('w1<integer>').matches('w1<number>')).toBe(true);
+
+    // Run 2 edits `w2` alone — sound in isolation, fatal for `w1`.
+    const r2 = executeCortex(ce, 'type w2<in T> = tuple<run: (T) -> nothing>');
+    expect(r2.value.operator).toBe('Error');
+    const s = r2.value.toString();
+    expect(s).toContain('variance-violation');
+    expect(s).toContain('parameter `T` of `w1`');
+    expect(s).toContain('surfaced when `w2` was declared');
+
+    // The engine is left in run 1's state: `w2` keeps its run-1 body, and
+    // `w1` is still verified covariant. Both stay usable.
+    expect(ce.type('w2<integer>').matches('w2<number>')).toBe(true);
+    expect(ce.type('w1<integer>').matches('w1<number>')).toBe(true);
+    expect(recordOf(ce, 'w2')._varianceState).toBe('verified');
+    expect(recordOf(ce, 'w1')._varianceState).toBe('verified');
+  });
+
+  test('re-running an UNCHANGED program is clean, values included', () => {
+    const ce = new ComputeEngine();
+    const program =
+      'type tree<out T> = tuple<value: T, children: list<tree<T>>>\ntree(1, [])';
+    for (const _ of [1, 2, 3]) {
+      const r = executeCortex(ce, program);
+      expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+      expect(r.value.type.toString()).toBe('tree<finite_integer>');
+    }
+    expect(ce.type('tree<integer>').matches('tree<number>')).toBe(true);
+  });
+});
+
+//
+// Arity coherence across notebook runs: editing a type's clause while another
+// type still applies it at the old arity fails the RE-DECLARING statement and
+// rolls back, exactly as an unsound variance edit does.
+//
+describe('CORTEX TYPE RE-DECLARATION (dependent arity)', () => {
+  const recordOf = (ce: ComputeEngine, name: string) =>
+    (ce as any)._typeResolver.resolve(name);
+
+  test('editing a clause under a dependent errors on the run that does it', () => {
+    const ce = new ComputeEngine();
+    const r1 = executeCortex(
+      ce,
+      'type a2<out T> = tuple<v: T>\ntype a1<out T> = tuple<w: a2<T>>\nlet a = 1\na'
+    );
+    expect(r1.diagnostics.map((d) => d.message)).toEqual([]);
+
+    // Run 2 gives `a2` a second parameter; `a1` still writes `a2<T>`.
+    const r2 = executeCortex(ce, 'type a2<out T, out U> = tuple<v: T, u: U>');
+    expect(r2.value.operator).toBe('Error');
+    const s = r2.value.toString();
+    expect(s).toContain('generic-alias-arity');
+    expect(s).toContain('The definition of \\"a1\\" applies \\"a2\\"');
+    expect(s).toContain('surfaced when `a2` was declared');
+
+    // Left in run 1's state: both types still usable at their old clauses.
+    expect(recordOf(ce, 'a2').typeParams).toHaveLength(1);
+    expect(ce.type('a2<integer>').matches('a2<number>')).toBe(true);
+    expect(ce.type('a1<integer>').matches('a1<number>')).toBe(true);
+  });
+
+  test('an arity-preserving edit under a dependent re-runs cleanly', () => {
+    const ce = new ComputeEngine();
+    expect(
+      executeCortex(
+        ce,
+        'type h2<out T> = tuple<v: T>\ntype h1<out T> = tuple<w: h2<T>>\nlet a = 1\na'
+      ).diagnostics.map((d) => d.message)
+    ).toEqual([]);
+    expect(
+      executeCortex(
+        ce,
+        'type h2<out T> = tuple<v: T, extra: string>\nlet a = 1\na'
+      ).diagnostics.map((d) => d.message)
+    ).toEqual([]);
+    expect(ce.type('h1<integer>').matches('h1<number>')).toBe(true);
+    expect(ce.type('h2<integer>').matches('h2<number>')).toBe(true);
+  });
+});
+
+//
+// Re-declaration coherence, VALUE half. The type-level dependent pass above
+// only ever scanned `scope.types`, so a declared symbol or operator signature
+// mentioning the record survived an incompatible clause edit silently: `f:
+// (Foo) -> integer` after `Foo` became generic held a bare application of a
+// generic type, which matches nothing — `f` was uncallable with no diagnostic
+// anywhere, and a stale application could leak a free type variable downstream.
+// Bounds are the same story one step over: adding `T: integer` to a clause left
+// every existing `box<string>` behind it.
+//
+describe('CORTEX TYPE RE-DECLARATION (value dependents and bounds)', () => {
+  const recordOf = (ce: ComputeEngine, name: string) =>
+    (ce as any)._typeResolver.resolve(name);
+
+  test('a VALUE dependent at a stale arity fails the redeclaring run', () => {
+    const ce = new ComputeEngine();
+    expect(
+      executeCortex(
+        ce,
+        'type Foo = tuple<a: integer>\nlet z = 1\nz'
+      ).diagnostics.map((d) => d.message)
+    ).toEqual([]);
+    ce.declare('f', '(Foo) -> integer');
+    expect(ce.box('f').type.toString()).toBe('(Foo) -> integer');
+
+    // `Foo` becomes generic; `f`'s declared signature still writes it bare.
+    const r = executeCortex(ce, 'type Foo<T> = tuple<a: T>');
+    expect(r.value.operator).toBe('Error');
+    const s = r.value.toString();
+    expect(s).toContain('generic-alias-arity');
+    expect(s).toContain('The signature of \\"f\\" applies \\"Foo\\"');
+    expect(s).toContain('surfaced when `Foo` was declared');
+
+    // Rolled back: `Foo` is plain again and `f` is still callable.
+    expect(recordOf(ce, 'Foo').typeParams).toBeUndefined();
+    expect(ce.box('f').type.toString()).toBe('(Foo) -> integer');
+    expect(ce.type('Foo').matches('Foo')).toBe(true);
+  });
+
+  test('a benign redeclaration with value dependents still succeeds', () => {
+    const ce = new ComputeEngine();
+    executeCortex(ce, 'type Bar = tuple<a: integer>\nlet z = 1\nz');
+    ce.declare('g', '(Bar) -> integer');
+    expect(
+      executeCortex(
+        ce,
+        'type Bar = tuple<a: integer, b: string>\nlet z = 1\nz'
+      ).diagnostics.map((d) => d.message)
+    ).toEqual([]);
+    expect(ce.box('g').type.toString()).toBe('(Bar) -> integer');
+    expect((recordOf(ce, 'Bar').def as any).elements).toHaveLength(2);
+  });
+
+  test('a TYPE dependent violating a NEW bound fails the redeclaring run', () => {
+    const ce = new ComputeEngine();
+    expect(
+      executeCortex(
+        ce,
+        'type bx<T> = tuple<v: T>\ntype holder = tuple<b: bx<string>>\nlet z = 1\nz'
+      ).diagnostics.map((d) => d.message)
+    ).toEqual([]);
+
+    const r = executeCortex(ce, 'type bx<T: integer> = tuple<v: T>');
+    expect(r.value.operator).toBe('Error');
+    const s = r.value.toString();
+    expect(s).toContain('generic-alias-bound');
+    expect(s).toContain('The definition of \\"holder\\" applies \\"bx\\"');
+    expect(s).toContain('surfaced when `bx` was declared');
+
+    // Rolled back: the clause is unbounded again, so `bx<string>` still builds.
+    expect(recordOf(ce, 'bx').typeParams[0].bound).toBeUndefined();
+    expect(ce.type('bx<string>').matches('bx<string>')).toBe(true);
+  });
+
+  test('a VALUE dependent violating a NEW bound fails the redeclaring run', () => {
+    const ce = new ComputeEngine();
+    executeCortex(ce, 'type cx<T> = tuple<v: T>\nlet z = 1\nz');
+    ce.declare('h', '(cx<string>) -> integer');
+
+    const r = executeCortex(ce, 'type cx<T: integer> = tuple<v: T>');
+    expect(r.value.operator).toBe('Error');
+    const s = r.value.toString();
+    expect(s).toContain('generic-alias-bound');
+    expect(s).toContain('The signature of \\"h\\" applies \\"cx\\"');
+
+    expect(recordOf(ce, 'cx').typeParams[0].bound).toBeUndefined();
+    expect(ce.box('h').type.toString()).toBe('(cx<string>) -> integer');
+  });
+
+  test('a bound the dependents satisfy re-runs cleanly', () => {
+    const ce = new ComputeEngine();
+    executeCortex(
+      ce,
+      'type dx<T> = tuple<v: T>\ntype dholder = tuple<b: dx<integer>>\nlet z = 1\nz'
+    );
+    ce.declare('k', '(dx<integer>) -> integer');
+    expect(
+      executeCortex(
+        ce,
+        'type dx<T: number> = tuple<v: T>\nlet z = 1\nz'
+      ).diagnostics.map((d) => d.message)
+    ).toEqual([]);
+    expect(recordOf(ce, 'dx').typeParams[0].bound).toBe('number');
+    expect(ce.box('k').type.toString()).toBe('(dx<integer>) -> integer');
   });
 });

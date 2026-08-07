@@ -3,9 +3,13 @@ import type {
   NamedElement,
   RecordType,
   Type,
+  TypeParameter,
   TypeReference,
 } from '../common/type/types.js';
 import { isSubtype, provablyDisjoint } from '../common/type/subtype.js';
+import { groundSkeleton } from '../common/type/instantiate.js';
+import { applyTypeReference, declarationOf } from '../common/type/reference.js';
+import { subtypingVarianceOf } from '../common/type/variance.js';
 
 import type {
   BoxedDefinition,
@@ -181,6 +185,12 @@ function removeMintedTypeConstructor(
  *   of record-bodied aliases. (A plain-alias → generic-alias redeclaration
  *   still DROPS a previously minted constructor: `mintTypeConstructor` removes
  *   it before consulting this.)
+ * - a parameterized NOMINAL type (`type tree<T> = tuple<value: T, …>`) → the
+ *   same signature, `forall`-QUANTIFIED by the type's clause
+ *   (`forall T. (T, list<tree<T>>) -> tree<T>`, parameterized-nominal design
+ *   §5). The rank-1 call-site solver instantiates `T` per construction. The
+ *   open body is legal here for exactly the reason it is not for an alias: the
+ *   clause closes it.
  * - anything else (scalar, list, dictionary, union, signature, reference…) →
  *   unary.
  *
@@ -191,9 +201,11 @@ function deriveConstructorSignature(
   body: Type,
   result: Type,
   alias: boolean,
-  generic: boolean
+  typeParams: TypeParameter[] | undefined
 ): FunctionSignature | undefined {
-  if (generic) return undefined;
+  if (typeParams !== undefined && alias) return undefined;
+  const close = (sig: FunctionSignature): FunctionSignature =>
+    typeParams === undefined ? sig : { ...sig, typeParams };
   if (body === 'record') return undefined;
   if (typeof body === 'object') {
     if (body.kind === 'record') return undefined;
@@ -203,10 +215,23 @@ function deriveConstructorSignature(
       const args: NamedElement[] = body.elements.map((x) =>
         x.name === undefined ? { type: x.type } : { name: x.name, type: x.type }
       );
-      return { kind: 'signature', args, result };
+      return close({ kind: 'signature', args, result });
     }
   }
-  return { kind: 'signature', args: [{ type: body }], result };
+  return close({ kind: 'signature', args: [{ type: body }], result });
+}
+
+/** The result type of a nominal constructor: the reference itself, or — for a
+ * parameterized nominal — the reference APPLIED to its own parameters
+ * (`tree<T>`), which is what the solver instantiates. Never the bare `tree`,
+ * which is an arity error at every use. */
+function appliedNominalResult(ref: TypeReference): Type {
+  const typeParams = ref.typeParams;
+  if (typeParams === undefined) return ref;
+  return applyTypeReference(
+    ref,
+    typeParams.map((p) => ({ kind: 'variable', name: p.name }) as Type)
+  );
 }
 
 /**
@@ -238,11 +263,12 @@ export function mintTypeConstructor(
   // checks its operands and returns the plain structural value, so its result
   // is the definition body (D10).
   const alias = ref.alias === true;
+  const typeParams = ref.typeParams;
   const signature = deriveConstructorSignature(
     body,
-    alias ? body : ref,
+    alias ? body : appliedNominalResult(ref),
     alias,
-    ref.typeParams !== undefined
+    typeParams
   );
   // D4b: record bodies — named-field tuple bodies of an alias, and generic
   // aliases — mint nothing.
@@ -264,7 +290,14 @@ export function mintTypeConstructor(
     signature,
     // Redundant with the signature's result, but explicit: the `type` handler
     // is where nominal-ness is answered from.
-    type: () => (alias ? body : ref),
+    //
+    // A PARAMETERIZED nominal mints none: `def.type` runs AFTER the polytype
+    // instantiation and OVERWRITES its result, so a handler returning the
+    // declaration record would type every `tree(1, [])` as the bare `tree` and
+    // discard the solve.
+    ...(typeParams === undefined
+      ? { type: () => (alias ? body : ref) }
+      : {}),
   };
 
   if (alias) {
@@ -349,7 +382,17 @@ function paramTypeAt(sig: FunctionSignature, i: number): Type | undefined {
 /** D14a — can a call ever inhabit both the user arm and the raw-injection
  * arm? Overlap = the raw arm's arity is admissible for the user arm AND no
  * common position is provably disjoint. Undecidable (an unannotated user
- * parameter types `unknown`) counts as overlap: reject, loudly. */
+ * parameter types `unknown`) counts as overlap: reject, loudly.
+ *
+ * BOTH sides must be GROUND. `raw` already is (the caller grounds the body),
+ * and the user arm is grounded here: a QUANTIFIED user arm (§5 —
+ * `forall U. (x: U) -> pack<U>`) otherwise walks its own `U` into
+ * `provablyDisjoint`, breaking the ground-inputs contract that only a
+ * stripped-in-production `console.assert` guards. Each parameter is grounded
+ * COVARIANTLY, as the domain it is: the position asks "which values could
+ * reach here", so an open `U` reads `any` — undecidable, hence overlap — and
+ * not the `never` a whole-signature grounding would put there (which is
+ * disjoint from everything and would silently clear every generic user arm). */
 function overlapsRawArm(user: Type, raw: FunctionSignature): boolean {
   if (typeof user !== 'object' || user.kind !== 'signature') return true;
   const rawArity = (raw.args ?? []).length;
@@ -360,11 +403,46 @@ function overlapsRawArm(user: Type, raw: FunctionSignature): boolean {
       : req + (user.optArgs ?? []).length;
   if (rawArity < req || rawArity > max) return false;
   for (let i = 0; i < rawArity; i++) {
-    const u = paramTypeAt(user, i);
+    const p = paramTypeAt(user, i);
+    const u = p === undefined ? undefined : groundSkeleton(p);
     const r = raw.args![i].type;
     if (u !== undefined && provablyDisjoint(u, r)) return false;
   }
   return true;
+}
+
+/**
+ * MEMBERSHIP at an applied reference the §4.3 subtype rule reads INVARIANTLY —
+ * an explicit `inout` parameter, or a declaration whose variance is not
+ * verified yet (ruling C reads those as `inout` too).
+ *
+ * Such a position is inhabited by no OTHER application: `cell<integer> <:
+ * cell<any>` is false under invariance. But `cell<any>` is what grounding
+ * `cell<T>` produces, and that reading has to stay — it is the DISJOINTNESS
+ * contract (§5: never derive disjointness from the type variable), which
+ * `provablyDisjoint` and the D14a overlap check above depend on. Reading it as
+ * a membership domain instead would make an `inout` (or still-deferred)
+ * nominal impossible to use as a constructor argument of another
+ * parameterized nominal — the payload would never be judged to inhabit the
+ * body, and the construction would stay inert forever.
+ *
+ * So the two contracts split HERE, at the membership walk: any application of
+ * the SAME declaration record inhabits the position, and the arguments are
+ * decided where they can be — by the static gate, which sees the OPEN
+ * parameter, solves it, and re-checks the operand against the INSTANTIATED
+ * one. A non-application still falls through to the ordinary disjointness
+ * test, so `w(5)` is refuted exactly as before.
+ */
+function admitsApplication(t: Type, target: Type): boolean {
+  if (typeof target !== 'object' || target.kind !== 'reference') return false;
+  const targetArgs = target.args;
+  if (targetArgs === undefined) return false;
+  if (!targetArgs.some((_, i) => subtypingVarianceOf(target, i) === 'inout'))
+    return false;
+  if (typeof t !== 'object' || t.kind !== 'reference') return false;
+  if (t.name !== target.name || t.args?.length !== targetArgs.length)
+    return false;
+  return declarationOf(t) === declarationOf(target);
 }
 
 /** Tri-state value-membership verdict: does this VALUE inhabit the type?
@@ -375,6 +453,7 @@ type Inhabits = 'yes' | 'no' | 'maybe';
 function staticInhabits(t: Type, target: Type): Inhabits {
   if (t === 'unknown' || t === 'any') return 'maybe';
   if (isSubtype(t, target)) return 'yes';
+  if (admitsApplication(t, target)) return 'yes';
   return provablyDisjoint(t, target) ? 'no' : 'maybe';
 }
 
@@ -538,7 +617,29 @@ export function installConstructorFunction(
   const body = ref.def;
   if (body === undefined) throw Error(`The type "${name}" is not defined`);
 
-  const raw = rawInjectionSignature(body, ref);
+  const typeParams = ref.typeParams;
+  const generic = typeParams !== undefined;
+
+  // §5 — a parameterized nominal's body is OPEN, and `provablyDisjoint` (via
+  // `overlapsRawArm`) plus every value-membership check below require GROUND
+  // inputs. That requirement is guarded only by a `console.assert`, stripped in
+  // the production build, and the assert catches a TOP-LEVEL bare variable
+  // only — a nested `T` would sail through and decide overlap or inhabitation
+  // from a variable. So the CHECKS run against the body's ground skeleton,
+  // while the declared signature keeps the open body under the type's clause.
+  const checkBody = generic ? groundSkeleton(body) : body;
+
+  // The nominal result is the APPLIED reference (`tree<T>`) for a
+  // parameterized type; `ref` itself otherwise.
+  const result = appliedNominalResult(ref);
+  const raw: FunctionSignature = generic
+    ? { ...rawInjectionSignature(body, result), typeParams }
+    : rawInjectionSignature(body, result);
+  /** The raw arm read as a GROUND domain — the only form the overlap check and
+   * the runtime membership checks may see. */
+  const rawCheck = generic
+    ? rawInjectionSignature(checkBody, groundSkeleton(result))
+    : raw;
 
   // The user arm: the literal's (inferred or annotated) signature, with the
   // result replaced by the nominal reference — the constructor returns the
@@ -546,21 +647,41 @@ export function installConstructorFunction(
   // specifier is dropped: it is inference-produced here, and the definition
   // carries the effects axis itself (below), so keeping it on the arm would
   // read as an author-stated contract.
+  //
+  // For a PARAMETERIZED nominal the result is an APPLICATION, and the
+  // function's type-parameter clause is its own (§5): the names are
+  // alpha-irrelevant and the type's clause is not in scope inside the
+  // function, so nothing here may instantiate the application on the author's
+  // behalf. The contract runs through the literal's DECLARED result, which is
+  // kept verbatim when it already applies the nominal; without one there is
+  // nothing to instantiate with and the ground application is the honest
+  // answer.
   const litSig = literal.type.type;
+  const nominalResult = (sig: FunctionSignature | undefined): Type => {
+    if (!generic) return result;
+    const declared = sig?.result;
+    if (
+      typeof declared === 'object' &&
+      declared.kind === 'reference' &&
+      declared.name === name
+    )
+      return declared;
+    return groundSkeleton(result);
+  };
   let userArm: FunctionSignature;
   if (typeof litSig === 'object' && litSig.kind === 'signature') {
-    userArm = { ...litSig, result: ref };
+    userArm = { ...litSig, result: nominalResult(litSig) };
     delete userArm.effects;
   } else {
     userArm = {
       kind: 'signature',
       variadicArg: { type: 'any' },
       variadicMin: 0,
-      result: ref,
+      result: nominalResult(undefined),
     };
   }
 
-  if (overlapsRawArm(userArm, raw))
+  if (overlapsRawArm(userArm, rawCheck))
     throw Error(
       `The constructor function "${name}" overlaps the type's raw-injection constructor: a value that already satisfies the definition "${name}" must construct unchanged, so a constructor parameterization must be distinguishable from the payload itself. Use a different arity, or annotate the parameters with types disjoint from the definition body.`
     );
@@ -582,8 +703,10 @@ export function installConstructorFunction(
     lazy: false,
     complexity: 9000,
     signature: { kind: 'intersection', types: [userArm, raw] },
-    // The single source of nominal-ness (§4.1).
-    type: () => ref,
+    // The single source of nominal-ness (§4.1). A PARAMETERIZED nominal mints
+    // no handler: `def.type` runs AFTER the resolved arm's instantiation and
+    // would overwrite `tree<integer>` with the bare `tree`.
+    ...(generic ? {} : { type: () => ref }),
     eq: constructorEq,
     evaluate: (ops, options) => {
       // Raw injection first (D14a): operands that already form the payload
@@ -591,7 +714,7 @@ export function installConstructorFunction(
       // inert tagged value. An undecided verdict (symbolic operands) also
       // stays inert: running the body on a possibly-raw payload would break
       // the D12 round-trip.
-      const rawVerdict = rawArmMatch(ops, raw);
+      const rawVerdict = rawArmMatch(ops, rawCheck);
       if (rawVerdict !== 'no') return undefined;
 
       // User arm. Arity outside the user arm (statically rejected already;
@@ -605,7 +728,7 @@ export function installConstructorFunction(
       if (ops.length < req || ops.length > max) {
         const engine = ops[0]?.engine ?? ce;
         return ops.length === 1
-          ? engine.typeError(body, ops[0].type, ops[0])
+          ? engine.typeError(checkBody, ops[0].type, ops[0])
           : undefined;
       }
 
@@ -619,14 +742,18 @@ export function installConstructorFunction(
       // position otherwise. An undecided position proceeds: the static gate
       // admitted it.
       for (let i = 0; i < ops.length; i++) {
+        // A generic user arm quantifies its own variables: membership is a
+        // GROUND question, so the parameter is read at its skeleton (a no-op
+        // for a closed one).
         const p = paramTypeAt(userArm, i);
-        if (p !== undefined && valueInhabits(ops[i], p) === 'no') {
+        const g = p === undefined ? undefined : groundSkeleton(p);
+        if (g !== undefined && valueInhabits(ops[i], g) === 'no') {
           const engine = ops[i].engine;
-          if (ops.length === (raw.args ?? []).length) {
-            const r = raw.args![i].type;
+          if (ops.length === (rawCheck.args ?? []).length) {
+            const r = rawCheck.args![i].type;
             return engine.typeError(r, ops[i].type, ops[i]);
           }
-          return engine.typeError(p, ops[i].type, ops[i]);
+          return engine.typeError(g, ops[i].type, ops[i]);
         }
       }
 
@@ -681,10 +808,10 @@ export function installConstructorFunction(
           if (leaks(payload.get(k)!)) return undefined;
       } else if (leaks(payload)) return undefined;
 
-      const verdict = valueInhabits(payload, body);
+      const verdict = valueInhabits(payload, checkBody);
       if (verdict === 'maybe') return undefined;
       if (verdict === 'no')
-        return payload.engine.typeError(body, payload.type, payload);
+        return payload.engine.typeError(checkBody, payload.type, payload);
 
       // Tag the checked payload (D12): tuple payloads spread inline, matching
       // the auto-mint shape; every other payload is a single operand.
@@ -701,7 +828,7 @@ export function installConstructorFunction(
     compile: (args, compile) => {
       if (args.length === 0) return undefined;
       const engine = args[0].engine;
-      const verdict = rawArmMatch(args as ReadonlyArray<Expression>, raw);
+      const verdict = rawArmMatch(args as ReadonlyArray<Expression>, rawCheck);
       if (verdict === 'yes') {
         if (!nAryRaw) return args.length === 1 ? compile(args[0]) : undefined;
         return compile(engine.function('Tuple', args as Expression[]));
