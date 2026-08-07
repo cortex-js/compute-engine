@@ -970,3 +970,100 @@ a(...(u, v))`);
     expect(text).toBe('34');
   });
 });
+
+//
+// Destructuring assignment: `(x, y) := t` writes bindings that already exist.
+// The right side is evaluated ONCE, in full, before any target is written —
+// which is what makes `(a, b) := (b, a)` a swap rather than `a = b; b = b`.
+//
+describe('CORTEX PROGRAMS — destructuring assignment', () => {
+  test('swaps two bindings', () => {
+    const { text, diagnostics } = run(`
+let a = 1
+let b = 2
+(a, b) := (b, a)
+(a, b)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(2, 1)');
+  });
+
+  test('rotates three bindings', () => {
+    const { text, diagnostics } = run(`
+let a = 1
+let b = 2
+let c = 3
+(a, b, c) := (c, a, b)
+(a, b, c)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(3, 1, 2)');
+  });
+
+  test('carries a pair through a loop (Fibonacci)', () => {
+    const { text, diagnostics } = run(`
+let a = 0
+let b = 1
+for k in 1..10 {
+  (a, b) := (b, a + b)
+}
+a`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('55');
+  });
+
+  test('nested patterns and `_` skip positions', () => {
+    const { text, diagnostics } = run(`
+let a = 0
+let b = 0
+let c = 0
+(a, (b, c)) := (1, (2, 3))
+a + 10*b + 100*c`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('321');
+  });
+
+  test('destructures a function result', () => {
+    const { text, diagnostics } = run(`
+divmod(x, y) = (Floor(x / y), x % y)
+let q = 0
+let r = 0
+(q, r) := divmod(17, 5)
+(q, r)`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('(3, 2)');
+  });
+
+  test('the targets keep their declared type', () => {
+    const { text } = run(`
+let a: integer = 1
+let b: integer = 2
+(a, b) := (1, "oops")`);
+    expect(text).toContain('incompatible-type');
+  });
+
+  test('a shape mismatch is an Error value', () => {
+    const { text } = run(`
+let a = 1
+let b = 2
+(a, b) := (1, 2, 3)`);
+    expect(text).toContain('incompatible-type');
+  });
+
+  test('a bare `=` on a tuple pattern is diagnosed, and COMPARES', () => {
+    // A parenthesized left side is not a binding target, so the positional
+    // `=` rule reads this as `Equal` and the intended swap silently does
+    // nothing — which is why it is diagnosed. `:=` is the only assignment
+    // spelling for a pattern.
+    const { text, diagnostics } = run(`
+let a = 1
+let b = 2
+(a, b) = (b, a)
+(a, b)`);
+    expect(
+      diagnostics.map((d: { message: unknown }) =>
+        Array.isArray(d.message) ? d.message[0] : d.message
+      )
+    ).toContain('destructuring-bare-equal');
+    // Unchanged: the comparison did not write anything.
+    expect(text).toBe('(1, 2)');
+  });
+});

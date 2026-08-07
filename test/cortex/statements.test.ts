@@ -553,6 +553,71 @@ describe('CORTEX STATEMENTS — destructuring declarations', () => {
     expect(diags.length).toBeGreaterThan(0);
     expect(diags[0].message).toStrictEqual(['symbol-expected']);
   });
+
+  // `(x, y) := v` — a destructuring ASSIGNMENT. No new parser rule: the
+  // pattern is an ordinary parenthesized tuple expression, and `:=` is the
+  // ordinary assignment operator. What makes it work is the engine `Assign`
+  // accepting a `Tuple` target.
+  test('`(x, y) := v` lowers to Assign of a Tuple target', () => {
+    expect(validCortex('(x, y) := p')).toStrictEqual([
+      'Assign',
+      ['Tuple', 'x', 'y'],
+      'p',
+    ]);
+  });
+
+  test('nested patterns and `_` wildcards parse in a target', () => {
+    expect(validCortex('(a, (b, c), _) := p')).toStrictEqual([
+      'Assign',
+      ['Tuple', 'a', ['Tuple', 'b', 'c'], '_'],
+      'p',
+    ]);
+  });
+
+  // A parenthesized left side is not a binding target, so the positional `=`
+  // resolves to `Equal` — the intended write would silently vanish. `:=` is
+  // the only assignment spelling for a pattern, and the bare `=` is
+  // diagnosed. The node stays `Equal`: the diagnostic reports, it does not
+  // reinterpret.
+  const codesOf = (src: string): string[] =>
+    parseCortex(src)[1].map((d) =>
+      Array.isArray(d.message) ? String(d.message[0]) : String(d.message)
+    );
+
+  test('a statement-leading `(x, y) = v` is diagnosed, and COMPARES', () => {
+    const [value, diags] = parseCortex('(x, y) = p');
+    expect(diags.map((d) => d.message)).toStrictEqual([
+      ['destructuring-bare-equal'],
+    ]);
+    // The reported node is still the comparison.
+    expect(serializeCortex(value!)).toBe('(x, y) == p');
+  });
+
+  test.each([
+    ['a swap', '(a, b) = (b, a)'],
+    ['a wildcard position', '(a, _, c) = (1, 2, 3)'],
+    ['a nested pattern', '(a, (b, c)) = t'],
+  ])('the bare-`=` diagnostic fires for %s', (_label, src) => {
+    expect(codesOf(src)).toContain('destructuring-bare-equal');
+  });
+
+  test.each([
+    // The correct spelling, and the explicit comparison.
+    ['`:=`', '(a, b) := (b, a)'],
+    ['`==`', '(a, b) == (b, a)'],
+    // A computed component is a plausible tuple equation, not a mistyped
+    // destructuring.
+    ['a computed component', '(x + 1, y) = t'],
+    // Not statement-leading: expression position never assigns anyway, so
+    // there is nothing to mistake.
+    ['an argument', 'Solve((a, b) = (b, a), a)'],
+    ['a condition', 'if (a, b) = (b, a) { 1 }'],
+    ['a list element', '[(a, b) = (b, a)]'],
+    // Redundant parentheses around a NAME still assign (documented).
+    ['a parenthesized name', '(x) = 5'],
+  ])('it stays silent for %s', (_label, src) => {
+    expect(codesOf(src)).not.toContain('destructuring-bare-equal');
+  });
 });
 
 describe('CORTEX `break` AND `continue`', () => {

@@ -535,6 +535,83 @@ function randomListType(
 }
 
 /**
+ * Match a destructuring `Tuple` pattern against a value, returning the
+ * `(name, value)` pairs to bind — in pattern order, `_` positions dropped — or
+ * an `Error` value if the shapes do not match.
+ *
+ * The pattern is irrefutable in FORM (a raw `Tuple` of bare symbols, `_`, or
+ * nested tuple patterns), so the only way to fail is a runtime SHAPE mismatch.
+ * The ENTIRE tree is matched here, before the caller writes anything: a
+ * mismatch nested under an already-matched sibling — `(a, (b, c)) := (1, 5)` —
+ * must not leave `a` written. (It did when matching and binding shared one
+ * pass: the nested level's shape was only checked once the walk reached it.)
+ */
+function collectTuplePattern(
+  ce: ComputeEngine,
+  pattern: Expression,
+  v: Expression,
+  out: [name: string, value: Expression][]
+): Expression | null {
+  if (!isFunction(pattern, 'Tuple'))
+    return ce.typeError('tuple', pattern.type, pattern.toString());
+  if (!isFunction(v, 'Tuple'))
+    return ce.typeError('tuple', v.type, v.toString());
+  if (v.nops !== pattern.nops)
+    return ce.typeError(
+      parseType(`tuple<${Array(pattern.nops).fill('unknown').join(', ')}>`)!,
+      v.type,
+      v.toString()
+    );
+  for (let i = 0; i < pattern.nops; i++) {
+    const p = pattern.ops[i];
+    const el = v.ops[i];
+    if (isFunction(p, 'Tuple')) {
+      const err = collectTuplePattern(ce, p, el.evaluate(), out);
+      if (err) return err;
+      continue;
+    }
+    const name = sym(p);
+    if (!name) return ce.typeError('symbol', p.type, p.toString());
+    if (name === '_') continue;
+    out.push([name, el]);
+  }
+  return null;
+}
+
+/**
+ * Bind a destructuring `Tuple` pattern, invoking `bindOne` at every named
+ * position. Shared by the two destructuring routes: the `let (x, y) = v`
+ * declaration (`Declare`) and the `(x, y) := v` assignment (`Assign`).
+ *
+ * Two phases: the whole pattern is matched first ({@link collectTuplePattern}),
+ * and only a fully-matched pattern writes. So a shape mismatch anywhere —
+ * including one nested under a sibling that would have bound — writes nothing
+ * at all.
+ *
+ * A `bindOne` that itself fails is a different matter: a `const` target or a
+ * declared-type violation is discovered only by attempting the write, so
+ * earlier positions in the same pattern have already been written and stay
+ * written. The walk stops at the first such position.
+ *
+ * Returns `null` when every position bound, otherwise the `Error` value.
+ */
+function bindTuplePattern(
+  ce: ComputeEngine,
+  pattern: Expression,
+  v: Expression,
+  bindOne: (name: string, value: Expression) => Expression | null
+): Expression | null {
+  const pairs: [name: string, value: Expression][] = [];
+  const err = collectTuplePattern(ce, pattern, v, pairs);
+  if (err) return err;
+  for (const [name, value] of pairs) {
+    const e = bindOne(name, value);
+    if (e) return e;
+  }
+  return null;
+}
+
+/**
  * Register the type declared by a `DeclareType` statement in the current
  * lexical scope. Returns an `Error` value on failure, `null` on success.
  *
@@ -1581,8 +1658,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
 
         // Note: we can't use checkType() because it canonicalized/bind the argument.
+        // As in `Declare`, a `Tuple` first operand is a destructuring pattern
+        // (`(x, y) := v`) and is kept raw: canonicalizing it would fold a
+        // single-letter target into the constant of that name (`(i, j) := …`
+        // would write `ImaginaryUnit`).
         let symbol = lhs;
-        if (!isSymbol(symbol)) {
+        if (!isSymbol(symbol) && !isFunction(symbol, 'Tuple')) {
           // If the argument was not a symbol literal, see if we can evaluate it to a symbol
           symbol = checkType(ce, lhs, 'symbol');
         }
@@ -1790,6 +1871,36 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
           // Fallback: treat as regular assignment to compound symbol
           // This shouldn't normally happen with well-formed input
+        }
+
+        //
+        // `Assign((x, y), v)` — a destructuring assignment (`(x, y) := v`).
+        // The same pattern grammar as the destructuring `let` (a raw Tuple of
+        // bare symbols, `_` to skip a position, nested tuple patterns), but it
+        // WRITES the targets rather than declaring them, so an existing
+        // binding keeps its identity and its declared type.
+        //
+        // The RHS is evaluated ONCE, up front, before any target is written —
+        // that is what makes the swap `(a, b) := (b, a)` mean what it reads.
+        //
+        if (isFunction(op1, 'Tuple')) {
+          const val = op2.evaluate();
+          const err = bindTuplePattern(ce, op1, val, (name, el) => {
+            // As in the scalar path below: a violated effect contract or a
+            // declared-type mismatch is not installed and surfaces as an
+            // error VALUE, even though the host `ce.assign` throws.
+            try {
+              ce.assign(name, el);
+            } catch (e) {
+              if (isEffectContractError(e))
+                return effectContractErrorValue(ce, e);
+              if (isTypeCompatibilityError(e))
+                return typeCompatibilityErrorValue(ce, e);
+              throw e;
+            }
+            return null;
+          });
+          return err ?? val;
         }
 
         // Regular symbol assignment
@@ -2064,38 +2175,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         //
         if (isFunction(ops[0], 'Tuple')) {
           if (hasType || !hasValue) return undefined;
-          const bindPattern = (
-            pattern: Expression,
-            v: Expression
-          ): Expression | null => {
-            if (!isFunction(pattern, 'Tuple'))
-              return ce.typeError('tuple', pattern.type, pattern.toString());
-            if (!isFunction(v, 'Tuple'))
-              return ce.typeError('tuple', v.type, v.toString());
-            if (v.nops !== pattern.nops)
-              return ce.typeError(
-                parseType(
-                  `tuple<${Array(pattern.nops).fill('unknown').join(', ')}>`
-                )!,
-                v.type,
-                v.toString()
-              );
-            for (let i = 0; i < pattern.nops; i++) {
-              const p = pattern.ops[i];
-              const el = v.ops[i];
-              if (isFunction(p, 'Tuple')) {
-                const err = bindPattern(p, el.evaluate());
-                if (err) return err;
-                continue;
-              }
-              const name = sym(p);
-              if (!name) return ce.typeError('symbol', p.type, p.toString());
-              if (name === '_') continue;
+          return (
+            bindTuplePattern(ce, ops[0], value!, (name, el) => {
               declareOne(name, el);
-            }
-            return null;
-          };
-          return bindPattern(ops[0], value!) ?? value!;
+              return null;
+            }) ?? value!
+          );
         }
 
         // As in `Assign`: the declared operand is a NAME held raw, so read it

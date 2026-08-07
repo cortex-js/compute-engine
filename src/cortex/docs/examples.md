@@ -29,6 +29,10 @@ A few idioms these programs rely on:
   [Evaluation](/cortex/evaluation/)).
 - `a % b` is the remainder (`Mod`), and a postfix `!` is the factorial. The
   `!` must directly follow its operand (`n!`; `x != y` is still ≠).
+- A tuple pattern binds several names at once — `let (q, r) = …` declares
+  them, `(a, b) := …` writes ones that already exist. The right side is
+  evaluated before anything is written, so `(a, b) := (b, a)` swaps. It must
+  be spelled `:=` (see [declarations](/cortex/declarations/)).
 
 ## Iteration and Accumulation
 
@@ -70,16 +74,15 @@ steps
 // ➔ 111
 ```
 
-**Euclid's algorithm.** The classic three-line GCD, with a block-scoped
-temporary:
+**Euclid's algorithm.** The classic GCD. The loop step rewrites the pair at
+once with a destructuring assignment, so no temporary is needed — the right
+side is fully evaluated before either name is written:
 
 ```cortex
 let a = 1071
 let b = 462
 while b != 0 {
-  let t = a % b
-  a = b
-  b = t
+  (a, b) := (b, a % b)
 }
 a
 // ➔ 21
@@ -95,15 +98,14 @@ xs
 // ➔ [1, 2, 3]
 ```
 
-**Iterative Fibonacci.**
+**Iterative Fibonacci.** The same pair-carrying step — `(a, b) := (b, a + b)`
+is the whole loop body:
 
 ```cortex
 let a = 0
 let b = 1
 for k in 1..20 {
-  let t = a + b
-  a = b
-  b = t
+  (a, b) := (b, a + b)
 }
 a
 // ➔ 6765
@@ -178,6 +180,16 @@ Fermat's little theorem 7¹² ≡ 1 (mod 13), and 222 = 18·12 + 6, so:
 ```cortex
 (GCD(48, 36), LCM(48, 36), FactorInteger(360), Divisors(28))
 // ➔ (12, 144, [(2, 3), (3, 2), (5, 1)], [1, 2, 4, 7, 14, 28])
+```
+
+**Returning several values.** A function returns a tuple, and a destructuring
+declaration unpacks it into names in one statement:
+
+```cortex
+divmod(a: integer, b: integer) = (Floor(a / b), a % b)
+let (q, r) = divmod(2026, 7)
+(q, r)
+// ➔ (289, 3)
 ```
 
 **Arbitrary-precision integers.** The iterative Fibonacci, with the running

@@ -271,6 +271,19 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   ],
   ['If (generic function form)', ['If', 'c', 't', 'e']],
 
+  // Destructuring assignment: a `Tuple` in the target position of `Assign`.
+  // Nothing special in the serializer — the generic infix `:=` form already
+  // spells a tuple target — but it must keep round-tripping as an `Assign`
+  // rather than degrading to `Equal`.
+  [
+    'destructuring assign',
+    ['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'b', 'a']],
+  ],
+  [
+    'destructuring assign (nested, wildcard)',
+    ['Assign', ['Tuple', 'a', ['Tuple', 'b', 'c'], '_'], 'p'],
+  ],
+
   // Interpolated string
   ['String interpolation', ['String', "'hello'", 'name']],
 

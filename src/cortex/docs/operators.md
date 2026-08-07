@@ -452,6 +452,23 @@ a = b = 5
 Write `a := b := 5` to chain the assignment, or `a = (b = 5)` if the comparison
 really was intended.
 
+**A tuple pattern with a bare `=` is diagnosed.** A parenthesized left side is
+not a binding target, so `(a, b) = (b, a)` is a *comparison* of two tuples
+whose result is discarded — the swap it looks like silently does nothing:
+
+<!-- cortex-test: expect-diagnostics -->
+
+```cortex
+(a, b) = (b, a)
+```
+
+Write `(a, b) := (b, a)` to
+[destructure](/cortex/declarations/#destructuring-assignment), or `==` if the
+comparison really was intended. The diagnostic is narrow: it fires only when
+the left side is shaped exactly like a destructuring pattern (bare names, `_`,
+nested tuples), so a genuine tuple equation with computed components —
+`(x + 1, y) = t` — stays silent.
+
 **An assignment in a condition is a warning.** `:=` is unconditional, so it
 reaches a condition where a bare `=` no longer can — and Cortex has no
 `if init; cond` form, so the assigned value *is* the test:

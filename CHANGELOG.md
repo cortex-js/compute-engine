@@ -50,6 +50,63 @@
 
 ### New Features
 
+- **Destructuring assignment — `(a, b) := (b, a)`.** A tuple pattern may now
+  appear on the left of a Cortex assignment, writing bindings that already
+  exist instead of declaring new ones. The pattern grammar is the destructuring
+  `let`'s — at least two elements, each a bare symbol, a `_` skipping that
+  position, or a nested tuple pattern — and a shape mismatch is the same
+  `incompatible-type` error value.
+
+  The right-hand side is evaluated **once, in full, before any target is
+  written**, which is what makes a swap mean what it reads: `(a, b) := (b, a)`
+  exchanges the two values rather than assigning `b` to both. The same holds
+  for a rotation (`(a, b, c) := (c, a, b)`) and for the pair-carrying loop step
+  that is the usual reason to want this — `(a, b) := (b, a + b)` is an entire
+  Fibonacci iteration, and `(a, b) := (b, a % b)` an entire Euclid step, with
+  no temporary.
+
+  Unlike a destructuring `let`, the targets keep their identity and their
+  declared type: a value that does not fit a target's type is an error value,
+  and assigning to a `const` fails. Those two are found only by attempting the
+  write, so they are not atomic — targets earlier in the pattern stay written.
+  A shape mismatch is atomic and writes nothing, including when it is nested
+  under a position that would have bound; the destructuring `let` gained the
+  same guarantee, which it did not previously have. Lowers to the `Assign`
+  primitive with a `Tuple` pattern in the target position, held raw
+  (canonicalizing it would fold a single-letter target such as `i` into the
+  constant of that name), and accepted on all routes.
+
+  In **compiled** code it lowers to per-leaf temporaries followed by per-leaf
+  writes — `(a, b) := (b, a + b)` becomes `let _tv1 = b; let _tv2 = a + b;
+  a = _tv1; b = _tv2` — which is what keeps the compiled form honest: the
+  targets already exist, so the naive `a = b; b = a` would read the `a` it just
+  clobbered. Temporaries never capture a name the program already uses. The
+  JavaScript and Python targets compile it in any statement position,
+  including a loop body, so the Fibonacci and Euclid steps above compile.
+  Value position (a block's last statement, whose value is the block's), a
+  non-literal tuple value, and the shader targets fail closed (D6) and the
+  interpreter takes over. (This also fixes a silent divergence in the same
+  family as the destructuring-declare one: a tuple target previously compiled
+  as `_ = …`, leaving every target at its old value behind `success: true`.)
+
+  ```js
+  ce.box(['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'b', 'a']]).evaluate();
+  ```
+
+- **Cortex diagnoses a tuple pattern written with a bare `=`.** A parenthesized
+  left side is not a binding target, so `(a, b) = (b, a)` resolves — correctly,
+  under the positional-`=` rule — to a *comparison* of two tuples whose result
+  is discarded: the swap it looks like silently does nothing. That shape is
+  almost always a typo for the destructuring assignment above, so it now
+  reports `destructuring-bare-equal`; write `(a, b) := (b, a)` to destructure,
+  or `==` if the comparison was meant. The node is unchanged — the diagnostic
+  reports, it does not reinterpret.
+
+  The check is deliberately narrow: it fires only statement-leading, and only
+  when the left side is shaped exactly like a destructuring pattern (bare
+  names, `_`, nested tuples), so a genuine tuple equation with computed
+  components — `(x + 1, y) = t` — stays silent.
+
 - **Parameterized nominal types: `type tree<T> = tuple<value: T, children:
   list<tree<T>>>`.** A nominal `type` declaration now takes the same
   type-parameter clause a generic alias takes, in Cortex as above and from the

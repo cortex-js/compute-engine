@@ -80,7 +80,10 @@ g(x) + f(2)
 - **Destructuring**: `let (q, r) = divmod(17, 5)` binds a tuple's components
   (`const` makes them constants; `_` skips a position; patterns nest). Tuples
   only, ≥ 2 elements, initializer required; a shape mismatch is an Error
-  value. For conditional destructuring use `match`.
+  value. For conditional destructuring use `match`. The same pattern assigns
+  to EXISTING bindings with `:=`, evaluating the right side once before it
+  writes anything, so `(a, b) := (b, a)` swaps. It must be `:=` — a
+  statement-leading `(a, b) = …` is a comparison, and is diagnosed.
 - **Block in expression position**: `do { … }` (a bare `{ … }` in expression
   position is always a set/dictionary literal).
 - **LaTeX islands**: `$\frac{1}{2}$` splices parsed LaTeX into the expression

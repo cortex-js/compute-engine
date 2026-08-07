@@ -129,6 +129,19 @@ describe('positional `=`', () => {
     expect(parseCodes('a = (b = 5)')).toEqual([]);
     expect(parseCodes('a = b == 5')).toEqual([]);
   });
+
+  test('`(a, b) = (b, a)` is diagnosed — the swap would not happen', () => {
+    // A parenthesized left side is not a binding target, so this compares two
+    // tuples and throws the result away.
+    expect(parseCodes('(a, b) = (b, a)')).toContain(
+      'destructuring-bare-equal'
+    );
+    // …but the explicit spellings are not: one destructures, one compares.
+    expect(parseCodes('(a, b) := (b, a)')).toEqual([]);
+    expect(parseCodes('(a, b) == (b, a)')).toEqual([]);
+    // A computed component is a plausible tuple equation, not a typo.
+    expect(parseCodes('(x + 1, y) = t')).toEqual([]);
+  });
 });
 
 describe('zero-index lint', () => {

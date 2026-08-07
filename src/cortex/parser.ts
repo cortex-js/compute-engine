@@ -3099,6 +3099,26 @@ export class Parser {
         isBindingTarget(left) &&
         this.startsWithSymbolToken(left) &&
         !this.isLiteralWordNode(left);
+      // `(a, b) = (b, a)` — a destructuring assignment written with a bare
+      // `=`. A parenthesized left side is not a binding target, so this
+      // resolved to a COMPARISON of two tuples whose result is discarded:
+      // the swap silently does nothing. Diagnosed only for a left side
+      // shaped exactly like a destructuring pattern (bare symbols, `_`,
+      // nested tuples), so a genuine tuple equation — `(x, y) = f(t)` with
+      // computed components — stays silent.
+      if (
+        op.def.name === 'AssignOrEqual' &&
+        atStatement &&
+        minPrecedence === 0 &&
+        !asAssign &&
+        isDestructuringPatternShape(left)
+      )
+        this.error(
+          ['destructuring-bare-equal'],
+          this.localStart(left) ?? 0,
+          this.localEnd(left) ?? this.previousEnd()
+        );
+
       const def =
         op.def.name === 'AssignOrEqual'
           ? asAssign
@@ -4585,6 +4605,27 @@ function symbolNameOf(expr: MathJsonExpression): string | null {
  */
 function isBindingTarget(expr: MathJsonExpression): boolean {
   return bindingTargetRoot(expr) !== null;
+}
+
+/**
+ * Whether a node is shaped exactly like a destructuring pattern: a `Tuple` of
+ * at least two elements, each a bare symbol (`_` included) or a nested such
+ * `Tuple`. This is the same grammar `parseDeclarationPattern` accepts for
+ * `let (x, y) = …`, recognized here on an ORDINARY parenthesized tuple
+ * expression — the pattern is not a binding target, so a bare `=` against one
+ * resolves to a comparison and the intended write silently vanishes.
+ *
+ * Deliberately narrow: a computed component (`(x + 1, y) = …`) is a plausible
+ * tuple equation, not a mistyped destructuring, and stays silent.
+ */
+function isDestructuringPatternShape(expr: MathJsonExpression): boolean {
+  const ops = fnOps(expr);
+  if (ops === null || ops[0] !== 'Tuple' || ops.length < 3) return false;
+  return ops
+    .slice(1)
+    .every(
+      (el) => symbolNameOf(el) !== null || isDestructuringPatternShape(el)
+    );
 }
 
 /** The bare symbol a binding target is rooted at (`p` for `p.a[2].b`), or

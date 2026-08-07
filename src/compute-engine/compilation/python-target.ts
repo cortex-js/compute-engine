@@ -280,13 +280,34 @@ function compilePythonStatements(
     return code;
   }
 
-  if (h === 'Block')
-    return BaseCompiler.withCseScope(expr, -1, target, () =>
-      expr.ops
-        .map((s) => compilePythonStatements(s, target))
+  if (h === 'Block') {
+    // As in `BaseCompiler.compileLoopBody`: a statement list is where a
+    // destructuring assign (`(a, b) := (b, a + b)`) lowers to temporaries +
+    // writes. Its value is discarded here, which is what makes the rewrite
+    // safe (see `desugarPatternAssign`).
+    const stmts = expr.ops.flatMap(
+      (s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]
+    );
+    const bodyTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
+    return BaseCompiler.withCseScope(expr, -1, bodyTarget, () =>
+      stmts
+        .map((s) => compilePythonStatements(s, bodyTarget))
         .filter((s) => s !== '')
         .join('\n')
     );
+  }
+
+  // …and the same statement as a bare (unwrapped) loop body.
+  if (h === 'Assign' && isFunction(expr.ops[0], 'Tuple')) {
+    const stmts = BaseCompiler.desugarPatternAssign(expr, target);
+    if (stmts !== null) {
+      const bodyTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
+      return stmts
+        .map((s) => compilePythonStatements(s, bodyTarget))
+        .filter((s) => s !== '')
+        .join('\n');
+    }
+  }
 
   if (h === 'Loop') return compilePythonLoop(expr.ops, target, expr);
 

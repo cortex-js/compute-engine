@@ -62,6 +62,58 @@ Destructuring lowers to the same `Declare` primitive with the pattern in the
 name position: `["Declare", ["Tuple", "q", "r"], ["Dictionary",
 ["KeyValuePair", "value", …]]]`.
 
+## Destructuring assignment
+
+The same pattern may appear on the left of an assignment, to write bindings
+that already exist instead of declaring new ones:
+
+```cortex
+let a = 1
+let b = 2
+(a, b) := (b, a)
+(a, b)
+// ➔ (2, 1)
+```
+
+The right side is evaluated **once, in full, before any target is written**,
+so a swap means what it reads — `(a, b) := (b, a)` exchanges the two values
+rather than assigning `b` to both. The same holds for a rotation
+(`(a, b, c) := (c, a, b)`) and for the pair-carrying loop step that is the
+usual reason to want this:
+
+```cortex
+let a = 0
+let b = 1
+for k in 1..10 {
+  (a, b) := (b, a + b)
+}
+a
+// ➔ 55
+```
+
+The pattern grammar is exactly the one above — at least two elements, each a
+bare symbol, a `_` skipping that position, or a nested tuple pattern — and a
+shape mismatch is the same `incompatible-type` error value, which writes
+**nothing**: the whole pattern is matched before any target is written, so a
+mismatch nested under a position that would have bound leaves that one alone
+too.
+
+The differences from a destructuring `let` are the ones assignment always has:
+the targets keep their identity and their declared type (a value that does not
+fit a target's type is an error value), and assigning to a `const` fails.
+Those two failures are found only by attempting the write, so unlike a shape
+mismatch they are **not** atomic — targets earlier in the pattern have already
+been written and stay written.
+
+The assignment operator must be spelled `:=`. A statement-leading `(a, b) = …`
+is a **comparison**, not an assignment — a parenthesized left side is not a
+binding target, so the bare `=` reads as `Equal`. Because that is almost
+always a typo for the destructuring assignment, it is
+[diagnosed](/cortex/operators/).
+
+Destructuring assignment lowers to `Assign` with the pattern in the target
+position: `["Assign", ["Tuple", "a", "b"], ["Tuple", "b", "a"]]`.
+
 ## Declaring a type
 
 A third declaration keyword, `type`, introduces a **type** name rather than a
@@ -182,6 +234,6 @@ lexical scope, so a `let`/`const` inside a block does not leak into the
 enclosing scope.
 
 `let` and `const` are the binding keywords. There is currently no compound
-assignment (`+=`); destructuring declarations (`let (x, y) = t`) are
-described above.
+assignment (`+=`); destructuring declarations (`let (x, y) = t`) and
+destructuring assignments (`(x, y) := t`) are described above.
 

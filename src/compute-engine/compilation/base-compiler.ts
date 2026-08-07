@@ -1412,10 +1412,22 @@ export class BaseCompiler {
           : BaseCompiler.compileOp(node, valueIndex, target, 0, value);
       return `let ${name} = ${valueCode}`;
     }
-    if (h === 'Assign')
+    if (h === 'Assign') {
+      // A destructuring assignment (`(x, y) := …`) is desugared at the block
+      // level, into temporaries + writes; a bare one reaching here has no
+      // statement list to expand into and would compile as `_ = …`, leaving
+      // every target at its old value — fail closed (D6).
+      if (isFunction(args[0], 'Tuple'))
+        throw new Error(
+          `Cannot compile a destructuring assignment in value position. ` +
+            `It is desugared to temporaries + writes only in STATEMENT ` +
+            `position (a block's non-final statement, or a loop body). ` +
+            `Fail closed (D6).`
+        );
       return `${
         isSymbol(args[0]) ? args[0].symbol : '_'
       } = ${BaseCompiler.compileOp(node, 1, target, 0, args[1])}`;
+    }
     if (h === 'Return')
       return `return ${BaseCompiler.compileOp(node, 0, target, 0, args[0])}`;
     if (h === 'Break') return 'break';
@@ -2447,6 +2459,94 @@ export class BaseCompiler {
   }
 
   /**
+   * Desugar a destructuring `Assign` statement (`(a, b) := (…, …)`) into
+   * per-leaf temporaries followed by per-leaf writes, so the locals
+   * collection, the inference below and every target's statement emitter see
+   * only plain scalar declares and assigns. Returns `null` when the statement
+   * is not a destructuring assign.
+   *
+   * Unlike the declaration form, the targets ALREADY EXIST, so the writes
+   * cannot be interleaved with the reads: `(a, b) := (b, a)` lowered per-leaf
+   * would emit `a = b; b = a` and read the `a` it just clobbered. Every
+   * element is therefore bound to a temporary FIRST, and only then written to
+   * its target — which is exactly the interpreter's "evaluate the whole
+   * right-hand side, then write" order:
+   *
+   *     (a, b) := (b, a + b)
+   *       ⟶  let _tv1 = b; let _tv2 = a + b; a = _tv1; b = _tv2
+   *
+   * A `_` position still gets a temporary (its element is evaluated for
+   * effect) but no write. As with the declare form, only a LITERAL tuple value
+   * lowers — a non-literal value or a shape mismatch fails closed (D6) and
+   * the interpreter takes over.
+   *
+   * The rewrite is for EFFECT only: it ends on a write, whose value is one
+   * leaf's, not the tuple's. Callers must therefore only apply it in statement
+   * position — never where the statement's value is the enclosing block's
+   * (see the caller in `compileBlock`, which leaves a trailing destructuring
+   * assign to fail closed).
+   */
+  static desugarPatternAssign(
+    arg: Expression,
+    target: CompileTarget<Expression>
+  ): ReadonlyArray<Expression> | null {
+    if (!isFunction(arg, 'Assign') || !isFunction(arg.ops[0], 'Tuple'))
+      return null;
+    const ce = arg.engine;
+    const binds: Expression[] = [];
+    const writes: Expression[] = [];
+    const walk = (pattern: Expression, v: Expression | undefined): void => {
+      if (!isFunction(pattern, 'Tuple'))
+        throw new Error(
+          `Cannot compile a destructuring assignment: the pattern is not a ` +
+            `tuple. Fail closed (D6).`
+        );
+      if (v === undefined || !isFunction(v, 'Tuple'))
+        throw new Error(
+          `Cannot compile a destructuring assignment whose value is not a ` +
+            `literal tuple` +
+            (v === undefined ? '' : ` (got '${v.type.toString()}')`) +
+            `. Fail closed (D6) — the interpreter evaluates it.`
+        );
+      if (pattern.nops !== v.nops)
+        throw new Error(
+          `Cannot compile a destructuring assignment: the pattern has ` +
+            `${pattern.nops} positions but the value tuple has ${v.nops}. ` +
+            `Fail closed (D6).`
+        );
+      for (let i = 0; i < pattern.nops; i++) {
+        const p = pattern.ops[i];
+        const el = v.ops[i];
+        if (isFunction(p, 'Tuple')) {
+          walk(p, el);
+          continue;
+        }
+        if (!isSymbol(p))
+          throw new Error(
+            `Cannot compile a destructuring assignment: a pattern position ` +
+              `is not a symbol. Fail closed (D6).`
+          );
+        // Every leaf is read into a temporary before ANY target is written —
+        // including a `_` leaf, whose element is still evaluated for effect.
+        //
+        // The declaration and its initializer are emitted as SEPARATE
+        // statements, not as one value-carrying `Declare`: a target with a
+        // `declare` hook (Python, GPU) emits only the declaration from a
+        // `Declare` and relies on `compileBlock` to hoist the initializer out
+        // as its own assignment — which the statement paths here do not do,
+        // so a combined form silently dropped the initializer and left every
+        // temporary unbound (`a = _tv1` with no `_tv1 = …`).
+        const temp = ce.symbol(BaseCompiler.tempVar(target));
+        binds.push(ce._fn('Declare', [temp, ce.string('unknown')]));
+        binds.push(ce._fn('Assign', [temp, el]));
+        if (p.symbol !== '_') writes.push(ce._fn('Assign', [p, temp]));
+      }
+    };
+    walk(arg.ops[0], arg.ops[1]);
+    return [...binds, ...writes];
+  }
+
+  /**
    * Compile a block expression
    */
   private static compileBlock(
@@ -2462,6 +2562,26 @@ export class BaseCompiler {
       )
     )
       args = args.flatMap((a) => BaseCompiler.desugarPatternDeclare(a) ?? [a]);
+
+    // …then destructuring assigns, which lower to temporaries + writes.
+    //
+    // The LAST statement is deliberately left alone: a block's value is its
+    // last statement's, and the rewrite ends on a write (yielding one leaf,
+    // not the tuple). `compileBlock` cannot tell a value-producing block from
+    // a statement list — a GPU target routes loop bodies through here — so
+    // rather than guess, a trailing destructuring assign falls through to
+    // `compileExpr` and fails closed (D6). The loop-body paths, which DO know
+    // their value is discarded, desugar it (`compileLoopBody`).
+    if (
+      args.some((a) => isFunction(a, 'Assign') && isFunction(a.ops[0], 'Tuple'))
+    ) {
+      const n = args.length;
+      args = args.flatMap((a, i) =>
+        i === n - 1
+          ? [a]
+          : (BaseCompiler.desugarPatternAssign(a, target) ?? [a])
+      );
+    }
 
     // Get all the Declare statements
     const locals: string[] = [];
@@ -3057,12 +3177,58 @@ export class BaseCompiler {
     }
 
     if (h === 'Block') {
-      return BaseCompiler.withCseScope(expr, -1, target, () =>
-        expr.ops.map((s) => BaseCompiler.compileLoopBody(s, target)).join('; ')
+      // A loop body is a statement list of its own — it does NOT go through
+      // `compileBlock` — so the destructuring-assign desugar has to run here
+      // too, or the pair-carrying loop step this feature exists for
+      // (`(a, b) := (b, a + b)`) would fail closed. A body's value is
+      // discarded, so no trailing value tuple (`isLast: false`).
+      const stmts = expr.ops.flatMap(
+        (s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]
+      );
+      const bodyTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
+      return BaseCompiler.withCseScope(expr, -1, bodyTarget, () =>
+        stmts
+          .map((s) => BaseCompiler.compileLoopBody(s, bodyTarget))
+          .join('; ')
       );
     }
 
+    // …and the same statement as a bare (unwrapped) loop body.
+    if (h === 'Assign' && isFunction(expr.ops[0], 'Tuple')) {
+      const stmts = BaseCompiler.desugarPatternAssign(expr, target);
+      if (stmts !== null) {
+        const bodyTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
+        return stmts
+          .map((s) => BaseCompiler.compileLoopBody(s, bodyTarget))
+          .join('; ');
+      }
+    }
+
     return BaseCompiler.compileOp(expr, -1, target, 0, expr);
+  }
+
+  /**
+   * A loop-body target in which the desugar's temporaries resolve to BARE
+   * identifiers. `compileBlock` does this for its locals; the loop-body path
+   * has no locals collection of its own, so without it a temp is emitted as
+   * `let _tv1 = …` but read back as the free symbol `_._tv1`.
+   *
+   * Returns `target` unchanged when the statement list declares no temporary.
+   */
+  static loopBodyTempTarget(
+    stmts: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): CompileTarget<Expression> {
+    const temps: string[] = [];
+    for (const s of stmts)
+      if (isFunction(s, 'Declare') && isSymbol(s.ops[0]))
+        temps.push(s.ops[0].symbol);
+    if (temps.length === 0) return target;
+    return {
+      ...target,
+      var: (id) => (temps.includes(id) ? id : target.var(id)),
+      boundVars: BaseCompiler.withBoundNames(target, temps),
+    };
   }
 
   /**

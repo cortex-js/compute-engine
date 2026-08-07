@@ -73,10 +73,159 @@ describe('Declare with a Tuple pattern', () => {
     expect(r.toString()).toContain('incompatible-type');
   });
 
+  test('a shape mismatch NESTED under a bound sibling declares nothing', () => {
+    // The whole pattern is matched before anything is declared, so the
+    // `(b, c)` mismatch stops `a` from being declared too.
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Declare',
+        ['Tuple', 'a', ['Tuple', 'b', 'c']],
+        attrs(['Tuple', 1, 5]),
+      ])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(ce.symbol('a').evaluate().symbol).toBe('a');
+  });
+
   test('a pattern without a value stays inert', () => {
     const ce = new ComputeEngine();
     const r = ce.box(['Declare', ['Tuple', 'x', 'y']]).evaluate();
     expect(r.operator).toBe('Declare');
+  });
+});
+
+//
+// `Assign` with a `Tuple` pattern in the target position — the engine form
+// behind Cortex destructuring assignments (`(x, y) := t`). Same pattern
+// grammar as the declaration form, but it WRITES existing bindings, so the
+// targets keep their identity and their declared type. The RHS is evaluated
+// once, up front, before any target is written — that is what makes a swap a
+// swap.
+//
+describe('Assign with a Tuple pattern', () => {
+  test('writes each target (box route)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', 1);
+    ce.assign('b', 2);
+    const r = ce
+      .box(['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'b', 'a']])
+      .evaluate();
+    expect(r.toString()).toBe('(2, 1)');
+    expect(ce.symbol('a').evaluate().isSame(2)).toBe(true);
+    expect(ce.symbol('b').evaluate().isSame(1)).toBe(true);
+  });
+
+  test('the RHS is evaluated before any target is written (swap)', () => {
+    // The whole point: a per-leaf rewrite `a = b; b = a` would give (2, 2).
+    const ce = new ComputeEngine();
+    ce.assign('a', 1);
+    ce.assign('b', 2);
+    ce.assign('c', 3);
+    ce.box(['Assign', ['Tuple', 'a', 'b', 'c'], ['Tuple', 'c', 'a', 'b']])
+      .evaluate();
+    expect(
+      ce.box(['Tuple', 'a', 'b', 'c']).evaluate().toString()
+    ).toBe('(3, 1, 2)');
+  });
+
+  test('the pattern is held RAW through canonicalization', () => {
+    // Canonicalizing the target would fold a single-letter name into the
+    // library constant of that name — `i` into `ImaginaryUnit` — and the
+    // assignment would write the wrong thing (or nothing).
+    const ce = new ComputeEngine();
+    const e = ce.box(['Assign', ['Tuple', 'i', 'j'], ['Tuple', 1, 2]]);
+    expect(e.json).toEqual(['Assign', ['Tuple', 'i', 'j'], ['Tuple', 1, 2]]);
+  });
+
+  test('nested patterns and `_` wildcards', () => {
+    const ce = new ComputeEngine();
+    for (const n of ['a', 'b', 'c']) ce.assign(n, 0);
+    ce.box([
+      'Assign',
+      ['Tuple', ['Tuple', 'a', 'b'], '_', 'c'],
+      ['Tuple', ['Tuple', 1, 2], 99, 5],
+    ]).evaluate();
+    expect(ce.parse('a + b + c').evaluate().isSame(8)).toBe(true);
+  });
+
+  test('a length mismatch is an error value, and writes nothing', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 1);
+    ce.assign('y', 2);
+    const r = ce
+      .box(['Assign', ['Tuple', 'x', 'y'], ['Tuple', 1, 2, 3]])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('incompatible-type');
+    expect(ce.symbol('x').evaluate().isSame(1)).toBe(true);
+  });
+
+  test('a non-tuple value is an error value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 1);
+    ce.assign('y', 2);
+    const r = ce.box(['Assign', ['Tuple', 'x', 'y'], 5]).evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('incompatible-type');
+  });
+
+  test('a shape mismatch NESTED under a bound sibling writes nothing', () => {
+    // Two-phase: the whole pattern is matched before anything is written, so
+    // the `(b, c)` mismatch stops `a` from being written too. (When matching
+    // and binding shared one pass, `a` was already 1 by the time the nested
+    // level was checked.)
+    const ce = new ComputeEngine();
+    for (const n of ['a', 'b', 'c']) ce.assign(n, 0);
+    const r = ce
+      .box(['Assign', ['Tuple', 'a', ['Tuple', 'b', 'c']], ['Tuple', 1, 5]])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(ce.symbol('a').evaluate().isSame(0)).toBe(true);
+  });
+
+  test('a value that does not fit a target type is an error value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'integer');
+    ce.declare('y', 'integer');
+    ce.assign('x', 1);
+    ce.assign('y', 2);
+    // A value DIFFERENT from `x`'s current one, so the assertion below cannot
+    // pass by accident.
+    const r = ce
+      .box(['Assign', ['Tuple', 'x', 'y'], ['Tuple', 99, { str: 'oops' }]])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('incompatible-type');
+    // PINNED, not endorsed: a per-target write failure is discovered only by
+    // attempting the write, so the earlier position stays written. Unlike a
+    // shape mismatch (above), this is NOT atomic. Whether a destructuring
+    // assignment should roll back here is an open language-semantics
+    // question; this records today's behavior so a change is deliberate.
+    expect(ce.symbol('x').evaluate().isSame(99)).toBe(true);
+  });
+
+  test('it is a `scope` effect, typed by the RHS', () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', 1);
+    ce.assign('b', 2);
+    const e = ce.box(['Assign', ['Tuple', 'a', 'b'], ['Tuple', 'b', 'a']]);
+    expect([...(e.effects ?? [])]).toEqual(['scope']);
+    expect(e.type.toString()).toBe('tuple<integer, integer>');
+  });
+
+  test('the `ce.function` route agrees with the box route', () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', 1);
+    ce.assign('b', 2);
+    const r = ce
+      .function('Assign', [
+        ce.function('Tuple', [ce.symbol('a'), ce.symbol('b')]),
+        ce.function('Tuple', [ce.symbol('b'), ce.symbol('a')]),
+      ])
+      .evaluate();
+    expect(r.toString()).toBe('(2, 1)');
+    expect(ce.symbol('a').evaluate().isSame(2)).toBe(true);
   });
 });
 
@@ -139,5 +288,141 @@ describe('Declare with a Tuple pattern: compilation', () => {
   test('a shape mismatch fails closed', () => {
     const r = compile(boxed('do { let (x, y, z) = (1, 2); 0 }'));
     expect(r?.success).toBe(false);
+  });
+
+  test('a scalar assignment still compiles', () => {
+    const r = compile(boxed('do { let x = 1; x := 42; x }'));
+    expect(r?.success).toBe(true);
+    expect(r!.run!()).toBe(42);
+  });
+});
+
+//
+// A destructuring ASSIGNMENT lowers to per-leaf temporaries followed by
+// per-leaf writes: `(a, b) := (b, a + b)` ⟶ `let _tv1 = b; let _tv2 = a + b;
+// a = _tv1; b = _tv2`. The temporaries are what make it sound — the targets
+// already exist, so the naive per-leaf rewrite `a = b; b = a` would read the
+// `a` it just clobbered. Regression: a tuple target used to compile as
+// `_ = …`, leaving every target at its old value behind `success: true`.
+//
+describe('Assign with a Tuple pattern: compilation', () => {
+  const {
+    compile,
+  } = require('../../src/compute-engine/compilation/compile-expression');
+  const { parseCortex } = require('../../src/cortex/parse-cortex');
+  const strip = (x: any) =>
+    JSON.parse(
+      JSON.stringify(x, (k, v) => (k === 'sourceOffsets' ? undefined : v))
+    );
+  const boxed = (src: string) => {
+    const ce = new ComputeEngine();
+    const [ast] = parseCortex(src);
+    return ce.box(strip(ast));
+  };
+  /** Compile `src`, assert it compiled, and assert it agrees with the
+   * interpreter — the property that matters for every case below. */
+  const agrees = (src: string, expected: number) => {
+    const expr = boxed(src);
+    const r = compile(expr);
+    expect(r?.success).toBe(true);
+    expect(r!.run!()).toBe(expected);
+    expect(expr.evaluate().isSame(expected)).toBe(true);
+  };
+
+  test('a swap compiles, via temporaries', () => {
+    agrees('do { let a = 1; let b = 2; (a, b) := (b, a); 10*a + b }', 21);
+    // The lowering, pinned: both reads land in temporaries BEFORE either
+    // write. `a = b; b = a` would be the bug this exists to prevent.
+    const code = compile(
+      boxed('do { let a = 1; let b = 2; (a, b) := (b, a); 10*a + b }')
+    )!.code as string;
+    expect(code).toMatch(/_tv\d+/);
+    const firstWrite = code.search(/\ba = _tv/);
+    const lastTempInit = code.search(/_tv\d+ = a\b/);
+    expect(lastTempInit).toBeGreaterThan(-1);
+    expect(lastTempInit).toBeLessThan(firstWrite);
+  });
+
+  test('the pair-carrying loop step compiles (Fibonacci)', () => {
+    agrees(
+      'do { let a = 0; let b = 1; for k in 1..10 { (a, b) := (b, a + b) }; a }',
+      55
+    );
+  });
+
+  test('a `while` loop step compiles (Euclid)', () => {
+    agrees(
+      'do { let a = 1071; let b = 462; ' +
+        'while b != 0 { (a, b) := (b, a % b) }; a }',
+      21
+    );
+  });
+
+  test('a rotation compiles', () => {
+    agrees(
+      'do { let a=1; let b=2; let c=3; (a,b,c) := (c,a,b); 100*a+10*b+c }',
+      312
+    );
+  });
+
+  test('nested patterns and wildcards compile', () => {
+    agrees(
+      'do { let a=0; let b=0; let c=0; (a,(b,c)) := (1,(2,3)); 100*a+10*b+c }',
+      123
+    );
+    agrees('do { let a=0; let c=0; (a,_,c) := (1,2,3); 10*a+c }', 13);
+  });
+
+  test('a temporary never captures a name the program already uses', () => {
+    // `tempVar` skips every name in the compilation's inventory, so a user
+    // binding literally named `_tv1` is not shadowed.
+    agrees(
+      'do { let _tv1 = 5; let a=1; let b=2; (a,b) := (b, a + _tv1); 10*a+b }',
+      26
+    );
+  });
+
+  test('two destructuring assigns in one block do not collide', () => {
+    agrees(
+      'do { let a=1; let b=2; (a,b) := (b,a); (a,b) := (b,a); 10*a+b }',
+      12
+    );
+  });
+
+  test('a non-literal tuple value fails closed (interpreter fallback)', () => {
+    const expr = boxed(
+      'do { let a=0; let b=0; let p = (3,4); (a,b) := p; 10*a+b }'
+    );
+    expect(compile(expr)?.success).toBe(false);
+    expect(expr.evaluate().isSame(34)).toBe(true);
+  });
+
+  test('the Python target emits the temporaries too', () => {
+    // Python has its own statement path (`compilePythonStatements`) that
+    // mirrors `compileLoopBody`, and a `declare` hook that emits ONLY the
+    // declaration — so a value-carrying `Declare` dropped the initializer and
+    // left every temporary unbound (`a = _tv1` with no `_tv1 = …`). The
+    // lowering emits declaration and initializer as separate statements.
+    const r = compile(
+      boxed(
+        'do { let a = 0; let b = 1; ' +
+          'for k in 1..10 { (a, b) := (b, a + b) }; a }'
+      ),
+      { to: 'python' }
+    );
+    expect(r?.success).toBe(true);
+    const code = r!.code as string;
+    // Every temporary that is READ is also WRITTEN.
+    for (const name of new Set(code.match(/_tv\d+/g) ?? []))
+      expect(code).toMatch(new RegExp(`${name} = `));
+  });
+
+  test('a destructuring assign in VALUE position fails closed', () => {
+    // The rewrite ends on a write, whose value is one leaf's — not the
+    // tuple's. A block's last statement is its value, so it is left alone and
+    // fails closed rather than silently returning the wrong thing.
+    const expr = boxed('do { let a=1; let b=2; (a,b) := (b,a) }');
+    expect(compile(expr)?.success).toBe(false);
+    expect(expr.evaluate().toString()).toBe('(2, 1)');
   });
 });
