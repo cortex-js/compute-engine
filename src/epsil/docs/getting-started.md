@@ -72,8 +72,7 @@ The conventional file extension is `.epsil`.
 
 ## Work Symbolically
 
-Epsil uses the Compute Engine, so expressions remain exact and symbolic by
-default:
+Expressions remain exact and symbolic by default:
 
 ```epsil-live
 Simplify(2 + 3x^3 + 2x^2 + x^3 + 1)

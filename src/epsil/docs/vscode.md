@@ -51,9 +51,9 @@ symbols, and merely-reserved words are not highlighted as keywords.
 
 Diagnostics appear inline (squiggles) and in the Problems panel. They are the
 same diagnostics `epsil check` reports: syntax errors, lints such as
-`zero-index`, and the type errors the engine detects when the program is
-canonicalized. The editor **never evaluates your program** — checking is
-static, so a long-running computation in a file does not affect editing.
+`zero-index`, and the type errors found while preparing the program to run.
+The editor **never evaluates your program** — checking is static, so a
+long-running computation in a file does not affect editing.
 
 ```epsil
 let radius = 1/2

@@ -216,8 +216,7 @@ is the one numeric answer that differs on values you are likely to type:
 
 (Python gives `0`, `2`, `0`.)
 
-Because values are Compute Engine expressions, arithmetic over a list is
-elementwise without NumPy:
+Arithmetic broadcasts over a list elementwise, without anything like NumPy:
 
 ```epsil
 ([1, 2, 3] + 1, [1, 2, 3] * [4, 5, 6], Sum(Map(1..4, k |-> k^2)))

@@ -12,8 +12,8 @@ date: Last Modified
 
 Epsil's JavaScript API accepts a string. A host reading an Epsil source file
 should decode it as UTF-8 and should write identifiers in
-[Unicode NFC form](https://www.unicode.org/reports/tr15/tr15-50.html), as
-required by the MathJSON symbol contract.
+[Unicode NFC form](https://www.unicode.org/reports/tr15/tr15-50.html), the form
+symbol names are compared in (see [Symbols](/epsil/literals/#symbols)).
 
 The Epsil parser does not decode files or strip a byte-order mark. File I/O
 and decoding are the responsibility of the host. Inside a string literal,

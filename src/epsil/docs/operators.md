@@ -95,7 +95,7 @@ rules let a multi-line program parse deterministically without a separator
 between every expression:
 
 ```epsil
-a + b     // infix Add: ["Add", "a", "b"]
+a + b     // infix addition
 a+b       // same: whitespace on neither side
 ```
 
@@ -110,7 +110,7 @@ The expression `a` ends there; `+b` is left over on the same line with no
 separator before it, which is a diagnostic (`unexpected-symbol`) rather than a
 silently-inferred sequence — see [Statements and Sequencing](/epsil/syntax/).
 On its own line (after a linebreak or `;`), `+b` is a valid new statement:
-unary `+` is the identity, so `a\n+b` parses as `["Block", "a", "b"]`.
+unary `+` is the identity, so `a` and `+b` are simply two statements.
 
 ```epsil
 a+ b
@@ -121,7 +121,7 @@ parser recovers as infix `Add` but reports an
 `asymmetric-operator-whitespace` diagnostic (with a fix-it), since this is
 more useful to the author than silently ending the statement.
 
-## Pipe: `|>` and `~>`
+## Pipe: `|>` and `~>` {#pipe}
 
 `|>` and `~>` are aliases for `Pipe` and sit at the **loosest** precedence
 tier, right below `Assign` — looser than arithmetic, relational, and boolean
@@ -133,7 +133,7 @@ a || b |> f      // (a || b) |> f
 x = a |> f       // x = (a |> f)
 ```
 
-## Absence coalescing: `??`
+## Absence coalescing: `??` {#absence-coalescing}
 
 `a ?? b` is `Coalesce(a, b)`: the value of `a` unless `a` is **absent**
 (`Missing` or `NaN`), in which case the value of `b`. It is lazy — `b` is not
@@ -192,10 +192,10 @@ This first version resolves **simple named types** only: a compound type
 `is` is a **contextual** word, not a reserved one — it is recognized only
 between an operand and a type name, so `let is = 5` and `f(is)` remain legal.
 
-Since `is` and `in` spell the same `Element` expression, a program serialized
-back from MathJSON uses `in` for both.
+Since `is` and `in` express the same membership test, a program written back
+out from its parsed form uses `in` for both.
 
-## Anonymous functions: `|->`
+## Anonymous functions: `|->` {#anonymous-functions}
 
 The mapsto operator constructs an anonymous function:
 
@@ -213,10 +213,10 @@ function to `f`. Typed parameters can be written in parentheses:
 (x: integer) |-> x + 1
 ```
 
-The `MapsTo` name in the table is internal to parsing. The resulting MathJSON
-uses `Function`, not a `MapsTo` head.
+The `MapsTo` name in the table is internal to parsing: it names the operator,
+not the function value the expression produces.
 
-## Ranges: `..`
+## Ranges: `..` {#ranges}
 
 The range operator is a compact spelling of a two-argument `Range`:
 
@@ -231,14 +231,14 @@ subtraction. The Unicode two-dot leader `‥` is an input alias. Serialization
 uses `Range(a, b)`, and a stepped range continues to use the three-argument
 call `Range(a, b, step)`.
 
-## Spread: `...`
+## Spread: `...` {#spread}
 
 In a **call argument list** — and only there — a prefix `...` spreads a tuple
 into the call's arguments: the tuple's elements become ordinary positional
 arguments.
 
 ```epsil
-f(...t)          // ["f", ["Spread", "t"]]
+f(...t)          // t's elements become f's arguments
 f(1, ...t, q)    // splices between positional arguments
 g(...p, ...q)    // several spreads splice in order
 Max(...t)        // variadic built-ins accept spreads
@@ -251,88 +251,88 @@ symbolic (the spread never binds positionally to a single parameter). The
 three-dot token is distinct from the range operator `..`; outside an argument
 list `...` is a diagnostic.
 
-## Unary prefix: `-` and `!`
+## Unary prefix: `-` and `!` {#unary-prefix}
 
 `-` (`Negate`) and `!` (`Not`) are prefix operators. They must abut their
 operand with no whitespace:
 
 ```epsil
--x        // ["Negate", "x"]
-!a        // ["Not", "a"]
-!!a       // ["Not", ["Not", "a"]] — `!!` lexes as one token that peels into two Not's
+-x        // negation
+!a        // logical not
+!!a       // double negation — `!!` lexes as one token that peels into two
 ```
 
 `Negate`/`Not` bind looser than `Power`, so a leading minus does not reach
 inside an exponent:
 
 ```epsil
--x^2      // -(x^2), i.e. ["Negate", ["Power", "x", 2]]
+-x^2      // -(x^2), not (-x)^2
 ```
 
 A unary minus applied directly to a number literal folds into the literal
-rather than producing a `Negate` node:
+rather than becoming a negation:
 
 ```epsil
--2        // the literal -2, not ["Negate", 2]
+-2        // the literal -2, not a negation of 2
 ```
 
-Unary `+` is accepted the same way but is the identity: `+(2 + 1)` is
-`["Add", 2, 1]`, not wrapped in anything.
+Unary `+` is accepted the same way but is the identity: `+(2 + 1)` is just
+`2 + 1`.
 
-## Power: `^` and `**`
+## Power: `^` and `**` {#power}
 
 `Power` is the tightest operator in the table and is **right-associative**.
 `**` is an accepted alias for `^` (same table row, same precedence):
 
 ```epsil
-x^2       // ["Power", "x", 2]
-x**2      // ["Power", "x", 2]
-2^3^2     // ["Power", 2, ["Power", 3, 2]] — right-associative
+x^2       // exponentiation
+x**2      // the same
+2^3^2     // 2^(3^2) — right-associative
 ```
 
 Because `Power` binds tighter than `Multiply`/`Divide`:
 
 ```epsil
-x^1/2     // (x^1)/2, i.e. ["Divide", ["Power", "x", 1], 2]
+x^1/2     // (x^1)/2, not x^(1/2)
 ```
 
-## Modulo: `%`
+## Modulo: `%` {#modulo}
 
 `%` is `Mod`, an infix operator at the multiplicative tier (the same
 precedence as `*` and `/`), left-associative:
 
 ```epsil
-a % b       // ["Mod", "a", "b"]
-a + b % c   // a + (b % c): ["Add", "a", ["Mod", "b", "c"]]
-a % b % c   // ["Mod", ["Mod", "a", "b"], "c"] — left-associative
+a % b       // remainder
+a + b % c   // a + (b % c)
+a % b % c   // (a % b) % c — left-associative
 ```
 
-## Factorial: postfix `!`
+## Factorial: postfix `!` {#factorial}
 
 `!` in **postfix** position is `Factorial`. Position disambiguates it from the
 prefix `!` (`Not`): a `!` that abuts the preceding operand is a factorial
 (`x!`), while a `!` at the start of an operand is `Not` (`!x`).
 
 ```epsil
-5!          // ["Factorial", 5]
-n!          // ["Factorial", "n"]
-!x          // ["Not", "x"] — prefix, unchanged
+5!          // factorial
+n!          // factorial
+!x          // prefix not, unchanged
 ```
 
 `Factorial` binds tighter than `Power` (tier 110 vs. 100), so it reaches inside
 a `Power` operand, and a leading minus stays outside it:
 
 ```epsil
-2^3!        // 2^(3!): ["Power", 2, ["Factorial", 3]]
-3! ^ 2      // (3!)^2: ["Power", ["Factorial", 3], 2]
--3!         // -(3!): ["Negate", ["Factorial", 3]]
+2^3!        // 2^(3!)
+3! ^ 2      // (3!)^2
+-3!         // -(3!)
 ```
 
 It also applies after a parenthesized expression, a call, or an index:
 
 ```epsil
-(a + b)!    // ["Factorial", ["Add", "a", "b"]]
-f(x)!       // ["Factorial", ["f", "x"]]
+(a + b)!    // factorial of the sum
+f(x)!       // factorial of the result
 ```
 
 Like a prefix operator, a postfix `!` must **abut** its operand: `x!` is a
@@ -350,16 +350,15 @@ A number literal immediately followed — with **no** whitespace — by a symbol
 or an opening parenthesis is read as an implicit `Multiply`:
 
 ```epsil
-2x        // ["Multiply", 2, "x"]
-3x^3      // 3·(x^3): ["Multiply", 3, ["Power", "x", 3]]
-2i        // ["Multiply", 2, "i"] — `i` is the engine's ImaginaryUnit symbol
-2(2 + 1)  // ["Multiply", 2, ["Add", 2, 1]]
+2x        // 2 * x
+3x^3      // 3·(x^3)
+2i        // 2 * i, where `i` is the imaginary unit
+2(2 + 1)  // 2 * (2 + 1)
 ```
 
-Note that a symbol immediately followed by `(` is a **function call**, not an
-invisible multiplication: `x(2+1)` is `["x", ["Add", 2, 1]]`, and a
-parenthesized (or otherwise compound) callee produces `Apply`:
-`(a+b)(2+1)` is `["Apply", ["Add", "a", "b"], ["Add", 2, 1]]`. See
+Note that a **symbol** immediately followed by `(` is a **function call**, not
+an invisible multiplication: `x(2+1)` calls `x`, and `(a+b)(2+1)` calls the
+value of `a+b`. Only a *number* on the left means multiplication. See
 [Calls and Indexing](/epsil/syntax/).
 
 Whitespace between the number and the symbol suppresses invisible
@@ -368,23 +367,17 @@ multiplication and is instead a statement boundary: `2 1/2` is a diagnostic
 
 ## Chained relational operators
 
-Relational operators (precedence tier 60) are **n-ary chainable**: a run of
-the *same* relational operator flattens into one node, matching how
-mathematicians write inequalities and how the engine already represents them:
+Relational operators (precedence tier 60) are **chainable**, matching how
+mathematicians write inequalities: `a < b < c` means what it looks like, and so
+does a chain that mixes operators —
 
 ```epsil
-a < b < c     // ["Less", "a", "b", "c"]
+a < b <= c
 ```
 
-A *mix* of relational operators initially lowers as a left-associated tree:
-
-```epsil
-a < b <= c    // ["LessEqual", ["Less", "a", "b"], "c"]
-```
-
-When the tree is boxed by the Compute Engine, it is canonicalized to the
-pairwise conjunction `a < b && b <= c`. Consequently, evaluating a mixed chain
-has the usual mathematical chained-comparison semantics.
+means `a < b && b <= c`. A mixed chain is rewritten into that pairwise
+conjunction before it is evaluated, so both kinds of chain have the usual
+mathematical chained-comparison semantics.
 
 ## Logic operators
 

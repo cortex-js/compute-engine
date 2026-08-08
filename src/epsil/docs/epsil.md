@@ -32,7 +32,7 @@ const { value, diagnostics } = executeEpsil(ce, "1 + 2");
 
 Here is "Hello World" in Epsil. Edit the code and press **Run** (or
 <kbd>⌘/Ctrl</kbd>+<kbd>Enter</kbd>) — the result is the value of the last
-statement, shown as an Epsil value and as its underlying MathJSON.
+statement.
 
 ```epsil-live
 "Hello World"
@@ -53,7 +53,7 @@ let x = 2^11 - 1
 ```
 
 Errors are ordinary values, so a program never throws to its host — a problem
-surfaces as an `["Error", …]` value or a diagnostic:
+surfaces as an `Error` value or a diagnostic:
 
 ```epsil-live
 const answer = 42
@@ -131,9 +131,14 @@ calls and indexing.
 **Pragmas** — parser directives embedded in the code.
 </ReadMore>
 
+<ReadMore path="/epsil/implementation/">
+**Inside Epsil** — the JavaScript API, and the MathJSON each language form
+lowers to. Not needed to write Epsil.
+</ReadMore>
+
 ## Collections
 
-Epsil has literal syntax for the Compute Engine's collections.
+Epsil has literal syntax for lists, sets and dictionaries.
 
 **Lists** are ordered and 1-indexed with `xs[i]`:
 

@@ -447,8 +447,8 @@ Product(Map(Range(1, 3), k |-> k + i))
 ## Exact and Symbolic Computation
 
 These examples show what sets Epsil apart from a conventional language: the
-values flowing through a program are Compute Engine expressions, so
-arithmetic is exact and results can be symbolic.
+values flowing through a program are mathematical expressions, so arithmetic
+is exact and results can be symbolic.
 
 **Exact rationals.** The 20th harmonic number, accumulated in a loop, stays
 an exact rational — no floating-point drift:

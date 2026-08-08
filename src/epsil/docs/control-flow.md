@@ -2,7 +2,7 @@
 title: Epsil Control Flow
 sidebar_label: Control Flow
 slug: /epsil/control-flow/
-description: "Control flow in Epsil: function definitions in math and block style, conditionals, pattern matching and loops, and the MathJSON each form lowers to."
+description: "Control flow in Epsil: function definitions in math and block style, conditionals, pattern matching, loops and blocks."
 hide_title: true
 date: Last Modified
 ---
@@ -10,8 +10,7 @@ date: Last Modified
 
 ## Functions
 
-A function can be defined in two forms, both lowering to the same shape:
-`["DefineFunction", name, ["Function", body, …params]]`.
+A function can be defined in two forms, which mean the same thing.
 
 The **math style** is a single expression:
 
@@ -19,16 +18,8 @@ The **math style** is a single expression:
 f(x) = x + 1
 ```
 
-```json
-["DefineFunction", "f", ["Function", ["Add", "x", 1], "x"]]
-```
-
 ```epsil
 f(x, y) = x + y
-```
-
-```json
-["DefineFunction", "f", ["Function", ["Add", "x", "y"], "x", "y"]]
 ```
 
 The **block style** wraps the body in a statement block, whose value is its
@@ -36,10 +27,6 @@ last expression:
 
 ```epsil
 function f(x) { x + 1 }
-```
-
-```json
-["DefineFunction", "f", ["Function", ["Block", ["Add", "x", 1]], "x"]]
 ```
 
 Parameters can carry a type annotation (`f(x: real) = …`), and the block
@@ -53,11 +40,6 @@ value against that annotation.
 f(x: real) = x + 1
 ```
 
-```json
-["DefineFunction", "f",
-  ["Function", ["Add", "x", 1], ["Typed", "x", {"str": "real"}]]]
-```
-
 ### Effect specifiers
 
 A definition can state the effects that calling it may perform. The specifier
@@ -65,14 +47,6 @@ sits after the parameter list and before the return arrow:
 
 ```epsil
 function roll(n) random -> integer { Random(n) }
-```
-
-```json
-["DefineFunction", "roll",
-  ["Function",
-    ["Typed", ["Block", ["Random", "n"]],
-      {"str": "(n: unknown) random -> integer"}],
-    "n"]]
 ```
 
 The nine effect labels are `console`, `entropy`, `environment`, `fs_read`,
@@ -132,13 +106,8 @@ clause — so re-running an edited definition behaves as expected. A plain
 assignment (`f = x |-> …`) still replaces the whole binding, clauses and
 all.
 
-A literal parameter lowers to an anonymous parameter constrained to that
-exact value (a *value type*):
-
-```json
-["DefineFunction", "fib",
-  ["Function", 0, ["Typed", "literalParam_1", {"str": "0"}]]]
-```
+A literal parameter behaves as an anonymous parameter constrained to that exact
+value — the clause is selected only when the argument *is* that value.
 
 If no clause matches the evaluated arguments, the call is a
 `no-matching-clause` error. To inspect the clause set of a function, use
@@ -164,16 +133,8 @@ An anonymous function uses the ASCII mapsto arrow `|->` (the engine's `↦`);
 x |-> x + 1
 ```
 
-```json
-["Function", ["Add", "x", 1], "x"]
-```
-
 ```epsil
 (x, y) |-> x + y
-```
-
-```json
-["Function", ["Add", "x", "y"], "x", "y"]
 ```
 
 A mapsto binds loosely enough to sit on the right-hand side of an
@@ -183,10 +144,6 @@ assignment:
 f = x |-> x + 1
 ```
 
-```json
-["Assign", "f", ["Function", ["Add", "x", 1], "x"]]
-```
-
 A lambda can take **no** parameters — an empty parameter list `()` before the
 arrow:
 
@@ -194,20 +151,12 @@ arrow:
 () |-> 42
 ```
 
-```json
-["Function", 42]
-```
-
-## `if` / `else`
+## `if` / `else` {#if-else}
 
 `if`/`else` is an **expression**, not a statement — it evaluates to a value:
 
 ```epsil
 if x > 0 { 1 } else { 2 }
-```
-
-```json
-["If", ["Greater", "x", 0], ["Block", 1], ["Block", 2]]
 ```
 
 The `else` branch is optional:
@@ -216,32 +165,20 @@ The `else` branch is optional:
 if x > 0 { 1 }
 ```
 
-```json
-["If", ["Greater", "x", 0], ["Block", 1]]
-```
-
-`else if` chains nest into an `If` in `else` position:
+`else if` chains nest, so an `if` in `else` position is just another
+conditional:
 
 ```epsil
 if x > 0 { 1 } else if x < 0 { 2 } else { 3 }
 ```
 
-```json
-[
-  "If",
-  ["Greater", "x", 0],
-  ["Block", 1],
-  ["If", ["Less", "x", 0], ["Block", 2], ["Block", 3]]
-]
-```
-
-A `{ }` block's value is its last expression — the same `Block` semantics
+A `{ }` block's value is its last expression — the same block semantics
 as a multi-statement program (see [Blocks](#blocks) below).
 
 ### The conditional expression `a if c else b`
 
 When both branches are single expressions, the braces are noise. The
-conditional form spells the same `If` without them:
+conditional form spells the same conditional without them:
 
 ```epsil
 let x = 5
@@ -249,13 +186,9 @@ let x = 5
 // ➔ 10
 ```
 
-```json
-["If", ["Greater", "x", 3], 10, 20]
-```
-
-It is the *same* `If` — only the branches differ: plain expressions instead of
-`Block`s, so the conditional introduces no scope and no statement can appear in
-a branch.
+It is the *same* conditional as `if`/`else` — only the branches differ: plain
+expressions instead of blocks, so it introduces no scope and no statement can
+appear in a branch.
 
 Three rules follow from where it sits in the grammar:
 
@@ -314,15 +247,6 @@ match x {
 }
 ```
 
-```json
-[
-  "Match",
-  "x",
-  ["MatchCase", 0, {"str": "zero"}],
-  ["MatchCase", "_", {"str": "other"}]
-]
-```
-
 Unlike `if`/`Which`, `match` is **structural** and **total**: it always
 selects a case, it never stays inert. A literal pattern (`0`) matches
 structurally, and `_` is the anonymous wildcard, matching anything — with a
@@ -341,10 +265,6 @@ expression first, so this applies inside nested patterns too:
 match p {
   (x, e) => x + e
 }
-```
-
-```json
-["Match", "p", ["MatchCase", ["Tuple", "_x", "_e"], ["Add", "x", "e"]]]
 ```
 
 Matching `(2, 7)` against this case binds `x` to `2` and `e` to `7` — the
@@ -382,15 +302,6 @@ match x {
 }
 ```
 
-```json
-[
-  "Match",
-  "x",
-  ["MatchCase", ["Pin", "Pi"], {"str": "is-pi"}],
-  ["MatchCase", "_", {"str": "no"}]
-]
-```
-
 ```epsil
 match x {
   == limit => 1
@@ -398,14 +309,9 @@ match x {
 }
 ```
 
-```json
-["Match", "x", ["MatchCase", ["Pin", "limit"], 1], ["MatchCase", "_", 0]]
-```
-
-The Epsil parser lowers **every** non-literal pinned expression to `Pin`,
-whether it names a constant or a runtime variable — it cannot tell the two
-apart lexically, and only `Pin` resolution looks up the value at match time.
-A pin of a literal (`== 5`) drops the `Pin` head and matches structurally,
+A pin is resolved at match time, and a pinned name may equally be a constant or
+a runtime variable — the parser cannot tell the two apart lexically, and does
+not need to. A pin of a *literal* (`== 5`) simply matches structurally, the
 same as writing the literal directly; `Infinity`/`NaN` are numeric literals in
 Epsil, so `== Infinity` is a literal pin too, with no binding trap to avoid.
 
@@ -420,15 +326,6 @@ match x {
   1 | 2 | == Pi => "small"
   _ => "big"
 }
-```
-
-```json
-[
-  "Match",
-  "x",
-  ["MatchCase", ["Alternatives", 1, 2, ["Pin", "Pi"]], {"str": "small"}],
-  ["MatchCase", "_", {"str": "big"}]
-]
 ```
 
 Alternatives must be **binding-free** — `_` is fine (`[0, _] | [_, 0]`), but a
@@ -451,16 +348,6 @@ match x {
 }
 ```
 
-```json
-[
-  "Match",
-  "x",
-  ["MatchCase", ["Range", 0, 9], {"str": "digit"}],
-  ["MatchCase", ["Range", 10, 99], {"str": "two digits"}],
-  ["MatchCase", "_", {"str": "big"}]
-]
-```
-
 Both endpoints are included, and they are compared with the same tolerance
 `match` uses for every other number leaf, so a subject a hair outside an
 endpoint still selects the case. Only a **number** matches: a symbol, a
@@ -475,15 +362,6 @@ match x {
   0..Infinity => "nonnegative"
   _ => "negative"
 }
-```
-
-```json
-[
-  "Match",
-  "x",
-  ["MatchCase", ["Range", 0, "PositiveInfinity"], {"str": "nonnegative"}],
-  ["MatchCase", "_", {"str": "negative"}]
-]
 ```
 
 A bound that is a bare identifier (which would otherwise *bind*, like any
@@ -521,19 +399,6 @@ match x {
 }
 ```
 
-```json
-[
-  "Match",
-  "x",
-  [
-    "MatchCase",
-    ["Alternatives", ["Range", 0, 9], ["Range", 100, 109]],
-    {"str": "in"}
-  ],
-  ["MatchCase", "_", {"str": "out"}]
-]
-```
-
 Two consequences worth knowing. First, this is a **carve-out**: a `Range`
 *value* can no longer be matched structurally in pattern position — write
 `== Range(1, 10)` (a pin) to compare against the range value itself. Second,
@@ -559,15 +424,6 @@ match n {
 }
 ```
 
-```json
-[
-  "Match",
-  "n",
-  ["MatchCase", "_n", ["Greater", "n", 3], {"str": "big"}],
-  ["MatchCase", "_", {"str": "small"}]
-]
-```
-
 If the guard is undecidable for a symbolic subject, the case falls through to
 the next one — consistent with `match`'s totality, a guard never leaves the
 whole expression inert.
@@ -583,40 +439,16 @@ match xs {
 }
 ```
 
-```json
-["Match", "xs", ["MatchCase", ["List", "_first", "___rest"], "first"]]
-```
-
 ```epsil
 match p {
   (x, y) => x
 }
 ```
 
-```json
-["Match", "p", ["MatchCase", ["Tuple", "_x", "_y"], "x"]]
-```
-
 ```epsil
 match p {
   {x -> px, y -> py} => px + py
 }
-```
-
-```json
-[
-  "Match",
-  "p",
-  [
-    "MatchCase",
-    [
-      "Dictionary",
-      ["KeyValuePair", {"str": "x"}, "_px"],
-      ["KeyValuePair", {"str": "y"}, "_py"]
-    ],
-    ["Add", "px", "py"]
-  ]
-]
 ```
 
 `...rest` (or bare `...`) captures the remaining elements of a list pattern;
@@ -651,41 +483,18 @@ match n {
 }
 ```
 
-```json
-[
-  "Match",
-  "n",
-  [
-    "MatchCase",
-    "_n",
-    ["And", ["Element", "n", "integer"], ["Greater", "n", 0]],
-    {"str": "positive integer"}
-  ],
-  ["MatchCase", "_", {"str": "other"}]
-]
-```
-
 ### Algebraic patterns
 
 Because a pattern is parsed as an ordinary expression, matching on operator
-structure comes for free — a pattern like `a + b` dispatches on the `Add`
+structure comes for free — a pattern like `a + b` dispatches on the addition
 operator and captures its operands, with the same commutative matching the
-rule system already uses for `Add`/`Multiply`:
+rule system already uses for sums and products:
 
 ```epsil
 match z {
   a + b if a > 0 => a
   _ => 0
 }
-```
-
-```json
-[
-  "Match",
-  "z",
-  ["MatchCase", ["Add", "_a", "_b"], ["Greater", "a", 0], "a"],
-  ["MatchCase", "_", 0]
-]
 ```
 
 This is symbolic destructuring, evaluated by the engine's general pattern
@@ -706,83 +515,49 @@ match 3 {
 }
 ```
 
-```json
-["Match", 3, ["MatchCase", 0, {"str": "zero"}]]
-```
-
 Evaluating this expression yields `Error("match-no-case", 3)`.
 
 ## Loops
 
-There is one loop keyword form for each of the two common shapes, and both
-lower to the engine's imperative `Loop` — evaluated **for effect**, not for
-its value (a `Loop`'s value is `Nothing`). Value-producing iteration over a
-collection belongs to the library functions `Map`/`Filter`/`Reduce`, not to
-a loop statement.
+There is one loop keyword form for each of the two common shapes. Both are
+evaluated **for effect**, not for their value — a loop's value is `Nothing`.
+Value-producing iteration over a collection belongs to the library functions
+`Map`/`Filter`/`Reduce`, not to a loop statement.
 
-`while cond { … }` lowers to a `Loop` over a `Block` whose first statement
-breaks out when the condition becomes false:
+`while cond { … }` repeats its body until the condition becomes false:
 
 ```epsil
 while x > 0 { x }
 ```
 
-```json
-[
-  "Loop",
-  ["Block", ["If", ["Not", ["Greater", "x", 0]], ["Break"]], ["Block", "x"]]
-]
-```
-
-`for x in xs { … }` lowers to `["Loop", body, ["Element", "x", "xs"]]` — the
-loop variable's `in` is the engine's `Element` operator, doubling as the
-iterator clause:
+`for x in xs { … }` binds the loop variable to each element in turn:
 
 ```epsil
 for x in xs { x }
 ```
 
-```json
-["Loop", ["Block", "x"], ["Element", "x", "xs"]]
-```
-
 `in` is contextual: only the loop-variable `in` introduces the iterator
 clause. A second, later `in` in the collection expression is still the
-ordinary `Element` infix operator:
+ordinary membership operator, so `for x in a in b { … }` iterates over the
+value of `a in b`:
 
 ```epsil
 for x in a in b { x }
 ```
 
-```json
-["Loop", ["Block", "x"], ["Element", "x", ["Element", "a", "b"]]]
-```
-
 ## Blocks
 
 A `{ … }` that immediately follows a keyword (`function`/`if`/`else`/
-`while`/`for`) is a **statement block** — the engine's `Block` — and is
-distinct from the `{ … }` **collection** grammar (set/dictionary literals).
-A bare `{ … }` with no introducing keyword is always the
-collection grammar:
-
-```epsil
-{ 1, 2 }
-```
-
-```json
-["Set", 1, 2]
-```
+`while`/`for`) is a **statement block**, and is distinct from the `{ … }`
+**collection** grammar (set/dictionary literals). A bare `{ … }` with no
+introducing keyword is always the collection grammar, so `{ 1, 2 }` on its own
+is a set.
 
 Each block pushes its own lexical scope. A block's value is its last
 expression; an empty block's value is `Nothing`:
 
 ```epsil
 if a { }
-```
-
-```json
-["If", "a", ["Block"]]
 ```
 
 Statements inside a block are separated the same way as top-level
@@ -792,21 +567,13 @@ statements — a linebreak or a `;`:
 if a { 1; 2; 3 }
 ```
 
-```json
-["If", "a", ["Block", 1, 2, 3]]
-```
-
 Blocks nest freely:
 
 ```epsil
 if a { if b { 1 } }
 ```
 
-```json
-["If", "a", ["Block", ["If", "b", ["Block", 1]]]]
-```
-
-### `do { … }` block expressions
+### `do { … }` block expressions {#do-block-expressions}
 
 To use a statement block **in expression position** — where a bare `{ … }`
 would be the collection grammar — prefix it with `do`. `do { … }` opens a
@@ -819,14 +586,8 @@ block:
 let y = do { let t = 3; t + 1 }
 ```
 
-```json
-["Declare", "y", ["Dictionary", ["KeyValuePair", "value",
-  ["Block", ["Declare", "t", ["Dictionary", ["KeyValuePair", "value", 3]]],
-    ["Add", "t", 1]]]]]
-```
-
-Because a lambda body is an ordinary expression, `x |-> do { … }` produces the
-same `Function(Block(…), x)` shape a named `function` body does — so a closure
+Because a lambda body is an ordinary expression, `x |-> do { … }` gives a
+lambda the same multi-statement body a named `function` has — so a closure
 whose body runs several statements is written with `do`:
 
 ```epsil
@@ -838,7 +599,7 @@ A `do` **not** followed by `{` is an `opening-bracket-expected` diagnostic.
 ## `break` and `continue`
 
 `break` leaves the innermost enclosing loop; `continue` skips to its next
-iteration. Both lower to the engine's `Break()` / `Continue()` primitives.
+iteration.
 
 ```epsil
 for x in [1, 2, 3, 4] {
@@ -880,16 +641,14 @@ for x in xs {
 }
 ```
 
-This boundary is not a style rule. The engine's `Block` short-circuits on
-`Break`/`Continue` structurally, so a `Break` returned out of a lambda body
-would otherwise transfer control to whatever loop happened to be running.
+This boundary is not a style rule; it follows from how the engine propagates a
+break out of a block (see
+[Loops and control transfer](/epsil/implementation/#loops-and-control-transfer)).
 
-Only the value-less forms are surface syntax. The engine's `Break(v)` — which
-makes the loop evaluate to `v` — has no Epsil spelling yet; it is bundled with
-the ruling on a general `return`.
-
-Serialized back from MathJSON, they appear in their call form (`Break()`,
-`Continue()`), like the `Loop` they belong to.
+Only the value-less forms are surface syntax. A break that makes the loop
+evaluate to a value has no Epsil spelling yet; it is bundled with the ruling on
+a general `return`. Serialized back, `break` and `continue` appear in their
+call form (`Break()`, `Continue()`), like the loop they belong to.
 
 ## `return`
 

@@ -58,10 +58,6 @@ With `const`, every bound name is a constant. An initializer is required, and
 a type annotation is not accepted on a pattern. Duplicate names anywhere in
 one pattern are a diagnostic.
 
-Destructuring lowers to the same `Declare` primitive with the pattern in the
-name position: `["Declare", ["Tuple", "q", "r"], ["Dictionary",
-["KeyValuePair", "value", …]]]`.
-
 ## Destructuring assignment
 
 The same pattern may appear on the left of an assignment, to write bindings
@@ -111,9 +107,6 @@ binding target, so the bare `=` reads as `Equal`. Because that is almost
 always a typo for the destructuring assignment, it is
 [diagnosed](/epsil/operators/).
 
-Destructuring assignment lowers to `Assign` with the pattern in the target
-position: `["Assign", ["Tuple", "a", "b"], ["Tuple", "b", "a"]]`.
-
 ## Declaring a type
 
 A third declaration keyword, `type`, introduces a **type** name rather than a
@@ -135,19 +128,14 @@ a reserved word — only these statement shapes claim it. See
 ## Reassignment vs. declaration
 
 A bare `x = 5` — no `let`/`const` keyword, no type annotation — is not
-declaration syntax: it is an **assignment** and lowers to `Assign`:
+declaration syntax: it is an **assignment**:
 
 ```epsil
 x = 5
 ```
 
-```json
-["Assign", "x", 5]
-```
-
-The Compute Engine permits `Assign` to establish a value for a previously
-unbound symbol, but `let` is the explicit and idiomatic way to introduce a
-mutable binding.
+Assigning to a name that was never declared does establish it, but `let` is
+the explicit and idiomatic way to introduce a mutable binding.
 
 Reassigning a symbol that was declared `const` produces an
 [error value](/epsil/evaluation/#errors-are-values), not a parse error or a
@@ -158,72 +146,23 @@ const c = 1
 c = 2
 ```
 
-`c = 2` still parses and lowers to `["Assign", "c", 2]`; it's the engine,
-at evaluation time, that rejects the assignment and produces an `["Error",
-…]` value.
+`c = 2` still parses as a perfectly ordinary assignment; the failure happens at
+evaluation time, and its result is an error value.
 
-## Encoding
-
-Declarations lower to the engine's `Declare` operator — not an
-Epsil-specific `Let`/`Const` head. `Declare` takes the declared symbol, an
-optional type (positional, when present), and a trailing attributes
-`Dictionary` carrying `value` and, for `const`, `constant: True`. `const` is
-a **binding attribute** (`constant: True` → the engine's `isConstant`), not a
-type — the engine, not Epsil, enforces it.
-
-```epsil
-let x = 5
-```
-
-```json
-["Declare", "x", ["Dictionary", ["KeyValuePair", "value", 5]]]
-```
-
-The type is inferred (`integer`, here) when no annotation is given. With an
-annotation, the type appears as a positional argument before the attributes
-dictionary:
-
-```epsil
-let x: real = 5
-```
-
-```json
-["Declare", "x", {"str": "real"},
-  ["Dictionary", ["KeyValuePair", "value", 5]]]
-```
-
-A declaration with no initializer omits the attributes dictionary entirely:
+A declaration with no initializer declares the name without giving it a value:
 
 ```epsil
 let x: real
+let y
 ```
 
-```json
-["Declare", "x", {"str": "real"}]
-```
+Without an annotation, the type is inferred from the initializer — `let x = 5`
+declares `x` as an `integer`.
 
-```epsil
-let x
-```
-
-```json
-["Declare", "x"]
-```
-
-`const` adds a `constant` key alongside `value`:
-
-```epsil
-const c = 6.28
-```
-
-```json
-["Declare", "c", ["Dictionary", ["KeyValuePair", "value", 6.28], ["KeyValuePair", "constant", "True"]]]
-```
-
-Because declarations lower directly to the engine's own `Declare`
-primitive, there is no separate Epsil-side declaration logic at execution
-time — the program evaluates the `Declare` expression exactly like any other
-expression.
+Constness is a property of the **binding**, not of the type, and it is enforced
+by the runtime rather than by a separate Epsil-side check. See
+[Declarations](/epsil/implementation/#declarations) for the underlying
+representation.
 
 ## Scoping
 

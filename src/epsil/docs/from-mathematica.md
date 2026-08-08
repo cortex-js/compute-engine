@@ -62,7 +62,7 @@ Only the value of the **last** statement is returned; an earlier statement
 that evaluates to an error value also raises a diagnostic, so nothing vanishes
 silently.
 
-### `==` vs `===` (Wolfram's `SameQ`)
+### `==` vs `===` (Wolfram's `SameQ`) {#equality-vs-sameq}
 
 `==` is the semantic comparison: it evaluates, compares within tolerance, and
 may stay an unresolved *condition* (`x == y` is what you hand to `Solve`).

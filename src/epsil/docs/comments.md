@@ -2,7 +2,7 @@
 title: Epsil Comments
 sidebar_label: Comments
 slug: /epsil/comments/
-description: "Line and nestable block comments in Epsil, documentation comments, and why comments are lossy — they do not survive the round trip through MathJSON."
+description: "Line and nestable block comments in Epsil, documentation comments, and why comments are lossy — they do not survive a read-write round trip."
 hide_title: true
 date: Last Modified
 ---
@@ -36,14 +36,12 @@ markdown**, use `///` for single line comments and `/** */` for block comments.
 ## Comments are lossy
 
 The parser currently **discards** comments: they are not attached to the
-MathJSON of the following expression, and a round-trip
-(`parseEpsil` → `serializeEpsil`) does not reproduce them. Comments carry no
-semantic weight. The lexer recognizes the documentation-comment spellings, but
-the parser does not currently attach them to nodes.
+expression that follows them, so reading a program and writing it back out
+does not reproduce them. Comments carry no semantic weight. The lexer
+recognizes the documentation-comment spellings, but the parser does not
+currently attach them to anything.
 
 This is a deliberate scope decision. Notebooks keep prose in dedicated
 markdown cells rather than in code comments, so comment preservation is not
-required for the notebook workflow. (The serializer can still *emit* a
-`/* … */` comment when a MathJSON expression carries a `comment` metadata
-field, but nothing on the parse side currently populates that field.)
+required for the notebook workflow.
 

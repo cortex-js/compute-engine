@@ -29,9 +29,9 @@ In the grammar below, the following notation is used:
 ## Grammar overview
 
 The productions below describe the source forms accepted by the current
-parser. The Unicode identifier rules are delegated to the
-[MathJSON symbol profile](/math-json/#symbols), and the type following a `:`
-or return arrow is parsed using the
+parser. The Unicode identifier rules are described under
+[Symbols](/epsil/literals/#symbols), and the type following a `:` or return
+arrow is parsed using the
 [Compute Engine type language](/compute-engine/guides/types/). Detailed
 `match` patterns are documented under
 [Control Flow](/epsil/control-flow/#match).
@@ -105,13 +105,14 @@ _verbatim-symbol_ → **`` ` ``** _symbol-start_ (_symbol-continue_)\*
 **`` ` ``**
 
 The content of a _verbatim-symbol_ is taken literally: no escape sequences
-are applied, and it must be a valid MathJSON symbol name. The form exists to
+are applied, and it must still be a valid symbol name. The form exists to
 write symbols whose name is a reserved word, e.g. `` `while` ``.
 
 _inline-symbol_ → _symbol-start_ (_symbol-continue_)\*
 
-_symbol-start_ and _symbol-continue_ follow the MathJSON symbol profile.
-Reserved words are not accepted as _inline-symbol_; use the verbatim form.
+_symbol-start_ and _symbol-continue_ follow the Unicode profile described
+under [Symbols](/epsil/literals/#symbols). Reserved words are not accepted as
+_inline-symbol_; use the verbatim form.
 
 _escape-expression_ → **`\(`** _expression_ **`)`**
 
@@ -270,27 +271,17 @@ silent sequence — it is a diagnostic:
 Error: unexpected-symbol "2"
 ```
 
-A well-formed multi-statement program wraps its statements in `["Block", …]`; a
-program consisting of a single statement is returned unwrapped (no `Block`
-wrapper):
+A multi-statement program is a sequence, evaluated in order, whose value is the
+value of its last statement. `;` is interchangeable with a linebreak as a
+separator, so these two programs are identical:
 
 ```epsil
 a
 2
 ```
 
-```json
-["Block", "a", 2]
-```
-
-`;` is interchangeable with a linebreak as a separator:
-
 ```epsil
 a; 2
-```
-
-```json
-["Block", "a", 2]
 ```
 
 ## Primary expressions
@@ -320,8 +311,8 @@ A call is a symbol (or another primary) immediately followed — with **no**
 whitespace — by a parenthesized, comma-separated argument list:
 
 ```epsil
-f(x, y)     // ["f", "x", "y"]
-f()         // ["f"]
+f(x, y)
+f()
 ```
 
 An argument may be prefixed with `...` to spread a tuple's elements into the
@@ -329,35 +320,35 @@ call's arguments (valid only in call argument lists — see
 [Spread](/epsil/operators/#spread)):
 
 ```epsil
-f(...p)      // ["f", ["Spread", "p"]]
-f(1, ...p)   // ["f", 1, ["Spread", "p"]]
+f(...p)
+f(1, ...p)
 ```
 
-If the callee is not a bare symbol (for example, a parenthesized expression
-or the result of another call), the call lowers to `Apply`:
+The callee does not have to be a bare symbol. A parenthesized expression, or
+the result of another call, can be called too:
 
 ```epsil
-(getF())(x)   // ["Apply", ["getF"], "x"]
-(a + b)(2+1)  // ["Apply", ["Add", "a", "b"], ["Add", 2, 1]]
+(getF())(x)
+(a + b)(2+1)
 ```
 
 Indexing is a primary immediately followed — with no whitespace — by a
-bracketed index expression, and lowers to `At`. Indexing is **1-based**,
-matching the engine convention (`xs[1]` is the first element):
+bracketed index expression. Indexing is **1-based** (`xs[1]` is the first
+element):
 
 ```epsil
-xs[i]       // ["At", "xs", "i"]
-f(x)[0]     // ["At", ["f", "x"], 0]
+xs[i]
+f(x)[0]
 ```
 
 Field access is a primary immediately followed — with no whitespace — by a
-`.` and a symbol, and lowers to `Field`. Chains associate left, and a call
-on a field value lowers through `Apply` like any non-symbol callee:
+`.` and a symbol. Chains associate left, and a field value can be called like
+any other computed callee:
 
 ```epsil
-p.x         // ["Field", "p", "x"]
-a.b.c       // ["Field", ["Field", "a", "b"], "c"]
-p.x(2)      // ["Apply", ["Field", "p", "x"], 2]
+p.x
+a.b.c
+p.x(2)
 ```
 
 A number literal never takes a field: the lexer folds a trailing dot into
@@ -372,17 +363,14 @@ call/index/field — the same whitespace-sensitivity that governs operators.
 
 ## Collections, tuples, and dictionaries
 
-- **List**: `[a, b]` → `["List", "a", "b"]`; `[]` → `["List"]`.
-- **Set**: `{a, b}` → `["Set", "a", "b"]`; `{}` → `["Set"]`.
-- **Tuple**: `(a, b)` → `["Tuple", "a", "b"]`; a single parenthesized element,
-  `(a)`, is just the parenthesized expression `a`, not a one-element tuple;
-  `()` is a diagnostic (`expression-expected`) — there is no empty tuple —
-  **except** immediately before a mapsto arrow, where `() |-> expr` is a
-  zero-parameter lambda (`["Function", body]`).
-- **Dictionary**: `{k -> v}` → `["Dictionary", ["KeyValuePair", {str: "k"}, "v"]]`;
-  an unquoted key becomes a string key. The empty dictionary is spelled
-  `{->}` (not `{}`, which is the empty set) and lowers to
-  `["Dictionary"]`.
+- **List**: `[a, b]`; `[]` is the empty list.
+- **Set**: `{a, b}`; `{}` is the empty set.
+- **Tuple**: `(a, b)`. A single parenthesized element, `(a)`, is just the
+  parenthesized expression `a`, not a one-element tuple; `()` is a diagnostic
+  (`expression-expected`) — there is no empty tuple — **except** immediately
+  before a mapsto arrow, where `() |-> expr` is a zero-parameter lambda.
+- **Dictionary**: `{k -> v}`; an unquoted key becomes a string key. The empty
+  dictionary is spelled `{->}`, not `{}` (which is the empty set).
 
 `{ … }` is disambiguated by looking at the first element once it has been
 parsed: if it is followed by a top-level `->`, the whole `{ … }` is a
@@ -391,18 +379,12 @@ otherwise `{ … }` is a set.
 
 A `{` in expression position is therefore **always** a collection literal (set
 or dictionary); to open a statement block in expression position, prefix it
-with `do`. `do { … }` is a block expression (the engine's `Block`) — a
-statement sequence whose value is its last statement — while a bare `{ … }`
-stays a set/dictionary. See [Blocks](/epsil/control-flow/#blocks).
+with `do`. `do { … }` is a block expression — a statement sequence whose value
+is its last statement — while a bare `{ … }` stays a set/dictionary. See
+[Blocks](/epsil/control-flow/#blocks).
 
 ```epsil
 { one -> 1, two -> 2 }
-```
-
-```json
-["Dictionary",
-  ["KeyValuePair", {"str": "one"}, 1],
-  ["KeyValuePair", {"str": "two"}, 2]]
 ```
 
 Trailing commas are allowed in every collection form (lists, sets, tuples,
@@ -414,60 +396,30 @@ and diffs:
 ```
 
 A bare, top-level comma-separated sequence with no enclosing delimiter (for
-example `1, 2, 3` on its own) is **not** a `Sequence` literal — it is a
-diagnostic. `Sequence` is available only as an explicit call: `Sequence(1, 2,
-3)` → `["Sequence", 1, 2, 3]`.
+example `1, 2, 3` on its own) is **not** a sequence literal — it is a
+diagnostic. A sequence is written only as an explicit call, `Sequence(1, 2, 3)`.
 
-## Round-trip and serialization normalizations
+## Round-trips
 
-`serializeEpsil` and `parseEpsil` are inverses over the MathJSON the grammar
-can produce, up to a small set of documented normalizations.
-`parseEpsil(serializeEpsil(e))` is **structurally** equal to `e` after
-applying:
-
-- **Number formatting** — `2`, `{num: "2"}` and `"2"` are the same number;
-  the serializer emits a single canonical spelling (with `_` digit grouping),
-  which re-parses to a `{num}` object.
-- **`Negate` of a literal** — `["Negate", 3]` serializes to `-3` and
-  `["Negate", -1]` to `1`; both re-parse as a signed `num` literal rather than
-  a `Negate` node (the sign is folded into the number).
-- **`Rational` → `Divide`** — `["Rational", 1, 2]` serializes to `1 / 2`.
-  There is no rational literal in the grammar, so it re-parses as
-  `["Divide", 1, 2]`.
-- **Invisible multiply** — a binary `["Multiply", {num}, {sym}]` serializes to
-  the juxtaposed form `2x` (only when the two abut and re-lex unambiguously as
-  a number followed by a symbol). All other products — n-ary, number×group
-  (`2(x+1)`), group×group — stay explicit `*`, because `(x+y)(3+4)` would
-  otherwise re-parse as `Apply`, not `Multiply`.
-- **Associativity** — the left-associative operators
-  (`Add`/`Subtract`/`Multiply`/`Divide`/`And`/`Or`) re-parse into
-  left-nested binary trees; a flat n-ary form and its left-nested spelling are
-  the same expression.
+Reading a program and writing it back out reproduces its meaning, but not
+necessarily its spelling. A few forms have one canonical rendering: numbers get
+a single spelling (with `_` digit grouping), a division is always written with
+an explicit `/`, `2x` keeps its juxtaposed form where that re-reads
+unambiguously (but `2(x+1)` and `(x+y)(3+4)` keep an explicit `*`, since a
+juxtaposed group would read as a call), and `is` is written as `in` — the two
+spell the same membership test.
 
 Comments are **not** preserved by a round-trip — see
-[Comments](/epsil/comments/).
-
-`If` and `Match` have dedicated expression spellings. Other MathJSON heads that
-do not have a special surface form serialize as ordinary function calls.
+[Comments](/epsil/comments/). For the exact list of normalizations, see
+[Round-trip and serialization normalizations](/epsil/implementation/#round-trip-and-serialization-normalizations).
 
 ## Relationship to the loose math parser
 
 Epsil is a **programming-language** syntax. The Compute Engine also ships a
-*loose math parser* (`ce.parse(src, { canonical: false })`) that reads
-LaTeX/ASCII-math notation. The two share a few surface forms but are **not** the
-same language, and they overlap only partially:
-
-| Source     | Epsil `parseEpsil`                | Loose `ce.parse` (non-canonical)              | Agree? |
-| ---------- | ----------------------------------- | --------------------------------------------- | ------ |
-| `[1, 2, 3]` | `["List", 1, 2, 3]`                | `["List", 1, 2, 3]`                           | ✅ same |
-| `x^2`      | `["Power", "x", 2]`                  | `["Power", "x", 2]`                            | ✅ same |
-| `2**3`     | `["Power", 2, 3]`                   | math-parser artifact (`**` is not an operator) | ❌ diverge |
-| `a \|> b`   | `["Pipe", "a", "b"]`               | `["Pipe", "a", "b"]`                           | ✅ same |
-| `f(x, y)`  | `["f", "x", "y"]` (call)            | `["InvisibleOperator", "f", ["Delimiter", …]]` | ❌ diverge |
-| `sin`      | `"sin"` (a symbol)                  | `["InvisibleOperator", "s", "i", "n"]`         | ❌ diverge |
-| `2x`       | `["Multiply", 2, "x"]`             | `["InvisibleOperator", 2, "x"]`               | ❌ diverge |
-
-The remaining divergences are intentional: in Epsil a juxtaposed name is a
-single identifier (`sin` is one symbol, not `s·i·n`), `f(x, y)` is a function
-call, and `**` is exponentiation. The two parsers do agree that `|>` produces
-`Pipe`. Do not rely on them agreeing except on the rows marked *same*.
+*loose math parser* that reads LaTeX/ASCII-math notation. The two share a few
+surface forms but are **not** the same language: in Epsil a juxtaposed name is
+a single identifier (`sin` is one symbol, not `s·i·n`), `f(x, y)` is a function
+call rather than a product, and `**` is exponentiation. Do not assume a snippet
+means the same thing to both. See
+[Relationship to the loose math parser](/epsil/implementation/#relationship-to-the-loose-math-parser)
+for a form-by-form comparison.

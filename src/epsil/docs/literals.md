@@ -2,7 +2,7 @@
 title: Epsil Literals
 sidebar_label: Literals
 slug: /epsil/literals/
-description: "Literal forms in Epsil: symbols following the MathJSON Unicode UAX31 profile, numbers, strings and collections, and the MathJSON each produces."
+description: "Literal forms in Epsil: symbol names and the Unicode UAX31 profile they follow, numbers, strings, collections, and $…$ LaTeX islands."
 hide_title: true
 date: Last Modified
 ---
@@ -10,19 +10,18 @@ date: Last Modified
 
 ## Symbols
 
-**Symbols** are names that identify variables, constants and functions. The
-name of a symbol must be a valid [MathJSON symbol](/math-json/#symbols): a
-profile of [Unicode UAX31](https://unicode.org/reports/tr31/) — a letter or
-underscore followed by letters, digits and underscores, drawn from the
-Unicode recommended scripts (emoji are also allowed). The prohibited
-characters below can never appear in a symbol name.
+**Symbols** are names that identify variables, constants and functions. A
+symbol name follows a profile of
+[Unicode UAX31](https://unicode.org/reports/tr31/) — a letter or underscore
+followed by letters, digits and underscores, drawn from the Unicode
+recommended scripts (emoji are also allowed). The prohibited characters below
+can never appear in a symbol name.
 
-When expressions are boxed for execution, symbol bindings are normalized to the
-[Unicode Normalization Form Canonical Composition (NFC)](http://www.macchiato.com/unicode/nfc-faq).
-They are stored and compared using NFC. For example, `Å`
+Symbol names are compared after
+[Unicode NFC normalization](http://www.macchiato.com/unicode/nfc-faq), so `Å`
 written as **U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE** and as
 **U+0041 LATIN CAPITAL LETTER A** followed by **U+030A COMBINING RING ABOVE**
-represent the same symbol.
+are the same symbol.
 
 ### Prohibited Symbol Characters
 
@@ -91,11 +90,10 @@ them as names.
 (**U+0060 GRAVE ACCENT**) before and after its name.
 
 The characters between the two backticks are taken literally: no escape
-sequences are applied. The name must still be a valid
-[MathJSON symbol](/math-json/#symbols) — the Verbatim Form does not allow
-names that would otherwise be invalid, such as names containing whitespace,
-a backslash, or characters with the **Pattern_Syntax** Unicode property
-(`+`, `<`, `|`, ...).
+sequences are applied. The name must still be a valid symbol name — the
+Verbatim Form does not allow names that would otherwise be invalid, such as
+names containing whitespace, a backslash, or characters with the
+**Pattern_Syntax** Unicode property (`+`, `<`, `|`, ...).
 
 Since the name cannot include a line break, a verbatim symbol must open and
 close on the same line.
@@ -274,16 +272,12 @@ or backslash that would otherwise need to be escaped, leading to the
 ## LaTeX Islands
 
 A `$…$` island is a primary expression whose contents are LaTeX rather than
-Epsil. The text between the delimiters is handed to an **injected** LaTeX
-parser, and the MathJSON it returns is spliced into the Epsil AST at that
-point, composing with the surrounding expression like any other primary:
+Epsil. The text between the delimiters is read by a LaTeX parser and the result
+takes the island's place, composing with the surrounding expression like any
+other primary — so this is `2 × ½`:
 
 ```epsil
 2 * $\frac{1}{2}$
-```
-
-```json
-["Multiply", 2, ["Divide", 1, 2]]
 ```
 
 ### Delimiters
@@ -297,15 +291,15 @@ point, composing with the surrounding expression like any other primary:
 
 ### Dialect
 
-The LaTeX dialect accepted inside an island is whatever the injected parser
-accepts — Epsil does not define or restrict it. In practice this is the
-Compute Engine's LaTeX parser (`ce.parse()`), but Epsil's own parser has no
-static dependency on it: the parser is passed in by the caller, the same way
-the engine itself injects `LatexSyntax` rather than importing it directly.
-Without an injected parser, a `$…$` island produces a
-`latex-parsing-unavailable` diagnostic instead of a spliced expression.
+The LaTeX dialect accepted inside an island is whatever the host's LaTeX parser
+accepts — Epsil does not define or restrict it. In practice this is the Compute
+Engine's LaTeX parser. Because the parser is supplied by the host rather than
+built into the language, a host that does not supply one turns every island
+into a `latex-parsing-unavailable` diagnostic. See
+[Strings and LaTeX islands](/epsil/implementation/#strings-and-latex-islands)
+for how a host wires one up.
 
-### Why `$` is prohibited as a symbol's first character
+### Why `$` is prohibited as a symbol's first character {#why-dollar-is-prohibited}
 
 `$` cannot start an Epsil symbol name (see
 [Prohibited Symbol Characters](#prohibited-symbol-characters) above). This is

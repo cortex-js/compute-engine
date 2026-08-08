@@ -8,10 +8,9 @@ date: Last Modified
 ---
 # Naming Conventions
 
-Epsil follows the naming convention already used throughout MathJSON and
-the Compute Engine's library: **capitalized** identifiers denote library or
-engine operators, **lowercase** identifiers denote user-defined variables
-and functions.
+Epsil follows the naming convention used throughout its standard library:
+**capitalized** identifiers denote library operators, **lowercase**
+identifiers denote user-defined variables and functions.
 
 ```epsil
 Sin(x)

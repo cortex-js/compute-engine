@@ -76,7 +76,7 @@ Pi * radius^2
 | Option | Description |
 |:--|:--|
 | `-e`, `--eval <source>` | Evaluate Epsil source supplied on the command line. |
-| `--json` | Write the result as formatted MathJSON. Finite lazy collections (`Range`, `Map` results, …) are materialized into their elements, up to 10,000. |
+| `--json` | Write the result as formatted [MathJSON](/epsil/implementation/), the representation Epsil programs are evaluated in. Finite lazy collections (`Range`, `Map` results, …) are materialized into their elements, up to 10,000. |
 | `--epsil` | Write the result as serialized Epsil source. |
 | `--diagnostics <fmt>` | Write diagnostics as `text` (the default) or as a `json` array. |
 | `--time-limit <ms>` | Set the evaluation deadline in milliseconds. The default is `10000`; `0` disables it. |
@@ -85,16 +85,16 @@ Pi * radius^2
 | `-v`, `--version` | Display the package version. |
 
 `--json` and `--epsil` are mutually exclusive. With neither option, results
-use the Compute Engine's ordinary textual representation.
+use the ordinary textual representation of a value.
 
 ## Checking a Program Without Evaluating It
 
 `epsil check` parses a program and reports its diagnostics — syntax errors,
 malformed strings, invalid type annotations, `match` shape problems, and the
 trap lints (`=` inside a call argument, a literal index `0`, a `//` comment
-that reads as floor division) — without evaluating anything. It also
-canonicalizes the program (still without running it) and reports the problems
-that surface there — type errors such as `"a" + 1`, but also a wrong argument
+that reads as floor division) — without evaluating anything. It also prepares
+the program to run (still without running it) and reports the problems that
+surface there — type errors such as `"a" + 1`, but also a wrong argument
 count — as `static-type-error` diagnostics anchored to the offending statement.
 An `Error(…)` value the program itself builds is not reported: errors are
 values. It accepts the same source forms as evaluation: a file,
@@ -218,9 +218,8 @@ epsil> x^2
 25
 ```
 
-The REPL keeps one `ComputeEngine` for the session, so top-level declarations
-and assignments persist between inputs. `.clear` creates a fresh engine and
-clears that state.
+The REPL keeps one session, so top-level declarations and assignments persist
+between inputs. `.clear` starts a fresh session and clears that state.
 
 Unclosed blocks, collections, strings, and expressions ending with an operator
 continue at a secondary prompt:
@@ -237,9 +236,9 @@ epsil> if x > 0 {
 | Command | Description |
 |:--|:--|
 | `.help` | List the available REPL commands. |
-| `.clear` | Reset the session to a fresh `ComputeEngine`. |
+| `.clear` | Reset to a fresh session. |
 | `.load <file>` | Execute an Epsil source file in the current session. |
-| `.ast` | Toggle MathJSON result output. |
+| `.ast` | Toggle [MathJSON](/epsil/implementation/) result output. |
 | `.time` | Toggle elapsed-time output. |
 | `.editor` | Enter Node's multiline editor mode. |
 | `.break` | Abandon the current multiline input. |
@@ -266,8 +265,8 @@ The process exits with:
 - `1` for source, runtime, cancellation, or file errors;
 - `2` for invalid command-line usage.
 
-Evaluation is symbolic and exact by default, just like `executeEpsil()`. Use
-`N(expr)` in the program when a numeric approximation is required.
+Evaluation is symbolic and exact by default. Use `N(expr)` in the program when
+a numeric approximation is required.
 
 Host-state pragmas such as `#env` and `#navigator` remain disabled in the CLI.
 The command does not provide an option to enable them.
@@ -282,5 +281,5 @@ unresponsive:
 npx epsil --time-limit 30000 long-running.epsil
 ```
 
-Set `--time-limit 0` for no deadline. The Compute Engine's iteration and
+Set `--time-limit 0` for no deadline. The iteration and
 recursion limits continue to apply independently.

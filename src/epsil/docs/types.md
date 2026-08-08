@@ -2,21 +2,18 @@
 title: Epsil Types
 sidebar_label: Types
 slug: /epsil/types/
-description: "Epsil has no type system of its own — it reuses the Compute Engine's type language, the same syntax accepted by ce.declare(\"f\", \"(real) -> real\"), and adds a type statement to name new types."
+description: "Types in Epsil: where a type annotation is written and what it means, declaring named types and aliases, generics, and how types are inferred."
 hide_title: true
 date: Last Modified
 ---
 # Types
 
-Epsil does not have its own type system: it reuses the Compute Engine's
-type language, the same syntax accepted by
-`ce.declare("f", "(real) -> real")`. See the
-[Compute Engine type guide](/compute-engine/guides/types/) for the type
-language itself. This page covers where a type
-annotation is written in Epsil source and what it means, and how a program
-declares type names of its own; the type grammar
-includes unions, intersections, tuples, records, function signatures, and
-generic collection types.
+Epsil does not have its own type system: it uses the
+[Compute Engine type language](/compute-engine/guides/types/), which covers
+unions, intersections, tuples, records, function signatures, and generic
+collection types. See that guide for the type language itself. This page covers
+where a type annotation is written in Epsil source, what it means, and how a
+program declares type names of its own.
 
 ## Annotation positions
 
@@ -60,63 +57,21 @@ Effect labels are part of the function type. See
 syntax and the [function type guide](/compute-engine/guides/types/#function-types)
 for subtyping rules.
 
-## MathJSON representation
-
-The parser holds a type annotation as a MathJSON string. A declaration places
-that string after the declared symbol. An initializer is stored in the
-declaration's attributes dictionary:
-
-```epsil
-x: real = 5
-```
-
-```json
-["Declare", "x", {"str": "real"},
-  ["Dictionary", ["KeyValuePair", "value", 5]]]
-```
+The whole of a type annotation is read by a dedicated type subparser, so `<`,
+`>`, `|`, `&`, and `->` inside it are consumed there and never reinterpreted by
+the surrounding expression grammar. In `u: integer | boolean`, the `|` is part
+of the type, not a logical operator:
 
 ```epsil
 xs: list<integer>
-```
-
-```json
-["Declare", "xs", {"str": "list<integer>"}]
-```
-
-```epsil
 f: (real) -> real
 ```
 
-```json
-["Declare", "f", {"str": "(real) -> real"}]
-```
-
-Note that `<`, `>`, `|`, `&`, and `->` inside the type annotation are
-consumed entirely by the type subparser — for example
-`u: integer | boolean` holds the whole `"integer | boolean"` string, and none
-of those tokens are visible to (or reinterpreted by) the surrounding
-expression grammar.
-
 ## Semantics
 
-An annotation uses the same engine type machinery as
-`ce.declare()`. Type checking is not a separate Epsil-side pass — it happens
-at canonicalization/evaluation time, the same way it does for any other
-declared symbol. Epsil does not add a second type checker on top of the
-engine's.
-
-Typed parameters are represented with `Typed` nodes:
-
-```epsil
-f(x: integer) -> real = x + 1
-```
-
-```json
-["Assign", "f",
-  ["Function",
-    ["Typed", ["Add", "x", 1], {"str": "real"}],
-    ["Typed", "x", {"str": "integer"}]]]
-```
+Type checking is not a separate Epsil-side pass — it happens as the program is
+prepared and evaluated, the same way it does for any other declared symbol.
+Epsil does not add a second type checker on top of the runtime's.
 
 ## Inference
 
@@ -635,59 +590,15 @@ A type parameter may carry a ground bound (`function g<T: number>(x: T) -> T`),
 which is enforced at every call. The equivalent full-type spelling is a
 `forall` annotation — `let f: forall T. (T) -> T = x |-> x`.
 
-### Encoding
+### When a type takes effect
 
-A `type` statement lowers to the engine's `DeclareType` operator — the
-MathJSON mirror of `ce.declareType()`. The body is carried as the source text
-of the type. The bare form has no attributes; the `alias` form adds an
-attributes dictionary with `alias -> True`:
+A `type` statement registers its name as the program is prepared, which is why
+the statements *after* it — in the same program or in a later cell — can
+annotate with it. A type the host declares on its own is visible to a program
+the same way, constructor and all.
 
-```epsil
-type point = tuple<x: number, y: number>
-```
-
-```json
-["DeclareType", "point", {"str": "tuple<x: number, y: number>"}]
-```
-
-```epsil
-type alias pair = tuple<number, number>
-```
-
-```json
-["DeclareType", "pair", {"str": "tuple<number, number>"},
-  ["Dictionary", ["KeyValuePair", "alias", "True"]]]
-```
-
-A type-parameter clause rides the same dictionary, as the text of the
-clause:
-
-```epsil
-type alias Pair<T> = tuple<T, T>
-```
-
-```json
-["DeclareType", "Pair", {"str": "tuple<T, T>"},
-  ["Dictionary", ["KeyValuePair", "alias", "True"],
-    ["KeyValuePair", "typeParams", {"str": "T"}]]]
-```
-
-The clause is carried **without** its enclosing `<`/`>`, and a variance
-marker is simply part of that text — the bare form needs no other change:
-
-```epsil
-type tree<out T> = tuple<value: T, children: list<tree<T>>>
-```
-
-```json
-["DeclareType", "tree", {"str": "tuple<value: T, children: list<tree<T>>>"},
-  ["Dictionary", ["KeyValuePair", "typeParams", {"str": "out T"}]]]
-```
-
-A type is registered when its statement is canonicalized, which is why the
-statements after it — in the same program or in a later cell — can annotate
-with it. A type declared by the host with `ce.declareType()` is visible to a
-program the same way, constructor and all.
+For the underlying representation, see
+[Type declarations](/epsil/implementation/#type-declarations).
 
 ## Diagnostics
 

@@ -2,33 +2,31 @@
 title: Epsil Evaluation
 sidebar_label: Evaluation
 slug: /epsil/evaluation/
-description: "How executeEpsil evaluates an Epsil program: top-level statements run sequentially in the engine's current scope, and the last statement's value is the result."
+description: "How an Epsil program evaluates: top-level statements run sequentially in one session scope, values stay exact, and errors are ordinary values."
 hide_title: true
 date: Last Modified
 ---
 # Evaluation
 
-`executeEpsil(ce, source, options?)` parses an Epsil program and evaluates
-each top-level statement **sequentially**, in the engine's current scope —
-a notebook cell, or a chain of cells sharing one scope. The result is the
-**last statement's** value:
+A program's top-level statements are evaluated **sequentially**, and the
+program's value is the **last statement's** value:
 
-```ts
-const { value, diagnostics } = executeEpsil(ce, 'let x = 5\nx = x + 3\nx');
-// value.re === 8
+```epsil
+let x = 5
+x = x + 3
+x
+// ➔ 8
 ```
 
 No scope is pushed around the whole program: declarations persist across
-statements (and across cells, in a notebook that chains calls to
-`executeEpsil` against the same engine), the same way variables persist
-across cells in a REPL. Blocks and function bodies still push their own
-lexical scopes (see [Control Flow](/epsil/control-flow/)).
+statements, and across cells in a notebook or inputs in a REPL that share one
+session. Blocks and function bodies still push their own lexical scopes (see
+[Control Flow](/epsil/control-flow/)).
 
 ## Symbolic by default
 
-Evaluation follows the engine's ordinary exactness contract: a top-level
-expression evaluates the same way `ce.parse(latex).evaluate()` does. A
-transcendental of an exact argument stays symbolic —
+Values stay **exact** unless you ask otherwise. A transcendental of an exact
+argument stays symbolic —
 
 ```epsil
 Ln(2)
@@ -72,24 +70,20 @@ operation (an aggregate, an index) at the point of definition.
 
 Per [Principles](/epsil/principles/), "errors are values": a *runtime*
 problem — a type error, an out-of-domain argument, reassigning a `const` —
-flows as an embedded `["Error", …]` MathJSON value, not as a thrown
-exception. `executeEpsil` never throws for a runtime problem; it catches
-the underlying engine exception (for the handful of paths, like a `const`
-reassignment, that still throw internally) and returns an `Error` value in
-its place.
+becomes an `Error` value embedded in the result, not a thrown exception. A
+program never throws to its host for a runtime problem.
 
-*Parse*-time problems are different: a malformed program surfaces through
-the `diagnostics` array, not through `value`. So are the few execution-time
-problems that are really about the source, not the computation — a gated
-host pragma, or a `#error` directive (see below) — which also go to
-`diagnostics` rather than becoming an `Error` value.
+*Parse*-time problems are different: a malformed program surfaces as a
+**diagnostic**, not as a value. So do the few execution-time problems that are
+really about the source, not the computation — a gated host pragma, or an
+`#error` directive (see below).
 
-Because only the **last** statement's value is returned, an error value
-produced by an earlier statement would otherwise vanish silently. Each
+Because only the **last** statement's value is the program's result, an error
+value produced by an earlier statement would otherwise vanish silently. Each
 *non-final* statement that evaluates to an error value therefore also emits
 a `runtime-error` diagnostic — for example an indexed assignment
-(`xs[2] = 9`, which the engine rejects: element assignment is not
-supported), or reassigning a `const` in the middle of a program.
+(`xs[2] = 9`, which is rejected: element assignment is not supported), or
+reassigning a `const` in the middle of a program.
 
 ## Pragma security
 
@@ -103,37 +97,26 @@ in an unfamiliar environment, both are **gated off by default**:
 #env("HOME")
 ```
 
-with the default options produces a `host-pragma-disabled` diagnostic and no
-host read — the pragma evaluates to `Nothing`. Passing
-`{ allowHostPragmas: true }` to `executeEpsil` opts back in and lets `#env`/
-`#navigator` read the host as documented in [Pragmas](/epsil/pragmas/).
+by default produces a `host-pragma-disabled` diagnostic and no host read — the
+pragma evaluates to `Nothing`. A host can opt back in and let `#env`/
+`#navigator` read as documented in [Pragmas](/epsil/pragmas/).
 
 The benign pragmas — `#line`, `#column`, `#url`, `#filename`, `#date`,
 `#time` — always work; they don't read anything sensitive from the host.
 
-`#error(...)` never throws a `FatalParsingError` out of `executeEpsil`: it
-is converted to an `error-directive` diagnostic, so a single bad cell can't
-crash the host embedding it.
+`#error(...)` never crashes the host embedding the program: it becomes an
+`error-directive` diagnostic, so a single bad cell is contained.
 
 ## Interruptibility
 
-A host can give an Epsil evaluation an explicit time budget by wrapping it in
-the Compute Engine's `withTimeLimit()` span:
-
-```ts
-const result = ce.withTimeLimit(
-  { ms: 500, label: "epsil-cell" },
-  () => executeEpsil(ce, source, { parseLatex })
-);
-```
-
-The engine's `iterationLimit` and `recursionLimit` provide independent
-count-based bounds. `executeEpsil()` converts a limit breach during execution
-into an error value (or an `evaluation-canceled` diagnostic when it occurs in a
-non-final statement).
+A host can give an evaluation an explicit time budget, and independent
+count-based bounds on iteration and recursion depth. A breached limit becomes
+an error value (or an `evaluation-canceled` diagnostic when it happens in a
+non-final statement) — see
+[Execution](/epsil/implementation/#execution) for how a host sets one.
 
 These limits are cooperative. A browser that evaluates untrusted or potentially
-unbounded programs should run Epsil in a Web Worker that the host can terminate
-from the outside. See
+unbounded programs should run Epsil in a Web Worker it can terminate from the
+outside. See
 [Execution Constraints](/compute-engine/guides/execution-constraints/) for the
 complete cancellation model.
