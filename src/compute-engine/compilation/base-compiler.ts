@@ -400,6 +400,24 @@ export function isFlatAllStringComparisonParticipant(
 }
 
 /**
+ * The MIXED-string ORDERING rule, shared by every site that must agree on it:
+ * the two infix diverts below (`orderingOverString` for JavaScript,
+ * `pyOrderingUnfaithful` for Python) and the Python target's ordering gate
+ * (`assertPyNoMixedStringOrdering`). At least one participant carries string
+ * evidence, but not every one is a provably FLAT string — the only all-string
+ * shape whose parity with interpretation is verified. The `some` and `every`
+ * sides deliberately use DIFFERENT predicates; see each for why.
+ */
+export function isMixedStringOrderingParticipants(
+  args: ReadonlyArray<Expression>
+): boolean {
+  return (
+    args.some(isProvablyStringComparisonParticipant) &&
+    !args.every(isFlatAllStringComparisonParticipant)
+  );
+}
+
+/**
  * The JavaScript test recognizing the complex runtime convention — a
  * `{ re, im }` object (see `branchComplexCoercion`). An array (a compiled
  * collection) fails it: `[].re` is `undefined`.
@@ -1470,13 +1488,48 @@ export class BaseCompiler {
           const orderingOverString =
             target.language === 'javascript' &&
             isRelationalOperator(h) &&
-            args.some(isProvablyStringComparisonParticipant) &&
-            !args.every(isFlatAllStringComparisonParticipant);
+            isMixedStringOrderingParticipants(args);
+          // PYTHON, the same two divert rules as the ordering gates on that
+          // target (`assertPyNoMixedStringOrdering` /
+          // `assertPyComparableAggregate`, python-target.ts): an ordering whose
+          // participants mix string evidence with something not provably a
+          // string, or whose participant is an unfaithful AGGREGATE, must not
+          // take the infix `<`. A mixed pair emits `"a" < 1` — a
+          // plausible-looking boolean where the interpreter stays symbolic —
+          // and an aggregate emits `p < q` / `d1 < d2`, which Python answers
+          // lexicographically (or raises) where the interpreter leaves the
+          // comparison inert. Declining here lets the head fall through to
+          // `compilePythonRelation`, which fails closed (D6) with the
+          // diagnostic. An ALL-string ordering keeps the fast path: `"a" < "b"`
+          // is the interpreter's own string comparison (probe-verified,
+          // chains included).
+          //
+          // A participant that is merely collection-TYPED diverts too, with the
+          // same STATIC evidence the JS collection divert above uses: the
+          // `!x.isCollection` admission below is blind to an unassigned
+          // collection-typed symbol, so `Less(sl1, sl2)` over two
+          // `list<string>` parameters emitted the infix `sl1 < sl2` — ONE
+          // lexicographic Python bool where the interpreter answers a list of
+          // booleans (and the flat-all-string exemption let it straight
+          // through). `compilePythonRelation` emits the element-wise
+          // `np.less(sl1, sl2)` for the admitted shapes and D6-declines the
+          // gated ones.
+          const pyOrderingUnfaithful =
+            target.language === 'python' &&
+            isRelationalOperator(h) &&
+            (args.some((x) => unfaithfulComparisonAggregate(x) !== null) ||
+              args.some(
+                (x) =>
+                  x.type.matches('collection') ||
+                  isBoundPossiblyCollectionTyped(x)
+              ) ||
+              isMixedStringOrderingParticipants(args));
           // Compile as an operator (only for non-collection arguments)
           if (
             args.every((x) => !x.isCollection) &&
             !relationalOverCollection &&
-            !orderingOverString
+            !orderingOverString &&
+            !pyOrderingUnfaithful
           ) {
             if (isRelationalOperator(h) && args.length > 2) {
               // Chain relational operators, conjoined with the target's chain

@@ -2792,14 +2792,34 @@ describe('COMPILE collection-op findings', () => {
     }
   });
 
-  it('IndexOf uses tolerant compare like the interpreter — finding A6', () => {
-    // 0.1 + 0.2 ≈ 0.30000000000000004; a raw `===` would miss the 0.3 element.
-    const b = ce.box(['IndexOf', ['List', 0.3], ['Add', 0.1, 0.2]]);
-    const r = compile(b);
-    expect((r.run as (v: Record<string, number>) => number)({})).toBe(1);
-    expect((r.run as (v: Record<string, number>) => number)({})).toBe(
-      b.evaluate().re
-    );
+  it('IndexOf uses EXACT compare like the interpreter — finding A6 (revised)', () => {
+    // REVISED 2026-08-08. This used to pin a TOLERANT compare, asserting that
+    // `IndexOf([0.3], Add(0.1, 0.2))` compiled to 1 "like the interpreter".
+    // The premise was a probe artifact: the interpreter's number `.isSame()` is
+    // EXACT — `IndexOf([0], 5e-11)` → 0 and
+    // `IndexOf([0.30000000000000004], 0.3)` → 0 — and the old probe only
+    // agreed because `Add(0.1, 0.2)` EVALUATES to exactly `0.3` by exact
+    // decimal folding, so the element test never saw a near-miss float.
+    //
+    // ACCEPTED RESIDUAL (documented, deliberately not asserted): the compiled
+    // form of that old probe recomputes the sum in f64 →
+    // `0.30000000000000004`, which the exact element test does NOT find, while
+    // the interpreter folds it to `0.3` and does. That is the ordinary
+    // exactness loss of compiling to f64 arithmetic — no element test can close
+    // it, and a tolerance leaf would only trade it for wrong answers on the two
+    // rows below.
+    for (const [expr, expected] of [
+      [['IndexOf', ['List', 0], { num: '5e-11' }], 0],
+      [['IndexOf', ['List', { num: '0.30000000000000004' }], 0.3], 0],
+    ] as const) {
+      const b = ce.box(expr as any);
+      expect(b.evaluate().re).toBe(expected);
+      const r = compile(b);
+      expect(r.success).toBe(true);
+      expect((r.run as (v: Record<string, number>) => number)({})).toBe(
+        expected
+      );
+    }
   });
 
   it('Map/Filter do not leak the native callback index — finding A7', () => {

@@ -1562,20 +1562,31 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       .join(', ')}]`;
   },
   // 1-based index of the first element equal to `value`, or 0 if not found.
-  // Uses the engine's numeric tolerance (like `compileJSEquality`), NOT a raw
-  // `Array.indexOf` (`===`): the interpreter compares within `engine.tolerance`,
-  // so `IndexOf([0.3], 0.1 + 0.2)` must find the element. `findIndex` is 0-based
-  // and returns -1 when absent, so `+ 1` maps both. The value is hoisted into an
+  // The element test is EXACT, matching the interpreter's `.isSame()`, which
+  // has no numeric tolerance (`IndexOf([0], 5e-11)` and
+  // `IndexOf([0.30000000000000004], 0.3)` both answer 0, probe-verified) —
+  // NOT the tolerance test `compileJSEquality` uses for `Equal`. It is not
+  // `Array.indexOf` either, because of NaN (below). `findIndex` is 0-based and
+  // returns -1 when absent, so `+ 1` maps both. The value is hoisted into an
   // IIFE parameter so it is evaluated once.
+  //
+  // ACCEPTED RESIDUAL (exactness loss, unclosable): a needle COMPUTED at
+  // runtime to a near-miss f64 (`0.1 + 0.2` → `0.30000000000000004`) is not
+  // found in a `[0.3]` haystack, where the interpreter folds `Add(0.1, 0.2)`
+  // exactly to `0.3` and does find it. That is the ordinary exactness loss of
+  // compiling to f64 arithmetic — no element test can recover the exact sum,
+  // and a tolerance leaf would only trade it for wrong answers on genuinely
+  // distinct nearby numbers.
   IndexOf: (args, compile) => {
     const coll = collArg('IndexOf', args[0], compile);
     if (args[1] == null) throw new Error('IndexOf: missing value');
-    // The tolerance test below is numeric, so a string needle (or a provably
-    // string ELEMENT type) makes every comparison `NaN <= tol` → 0 ("absent")
-    // behind a `success: true`. Only PROVABLE string evidence gates: an
-    // unknown element type stays on the numeric path. An AGGREGATE needle is
-    // as invisible to it: `IndexOf([[1,2],[3,4]], Tuple(3,4))` ran to 0 where
-    // the interpreter answers 2.
+    // An AGGREGATE needle is invisible to the element test — `===` on two
+    // distinct arrays is reference identity, so
+    // `IndexOf([[1,2],[3,4]], Tuple(3,4))` ran to 0 where the interpreter
+    // answers 2. The string gates below are RETAINED for the same fail-closed
+    // reason they were introduced (pinned in this file's suite), even though
+    // the exact `===` leaf would now compare strings faithfully: relaxing them
+    // is a separate decision, not part of the exactness fix.
     assertComparableAggregate('IndexOf', [args[1]]);
     assertNoStringOperand('IndexOf', [args[1]]);
     const elt = collectionElementType(jsType(args[0]));
@@ -1586,8 +1597,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `tolerance comparison, NaN for strings). Fail closed (D6) — the ` +
           `interpreter evaluates it.`
       );
-    const tol = args[0]?.engine?.tolerance ?? 1e-10;
-    return `((_v) => (${coll}).findIndex((_x) => Math.abs(_x - _v) <= ${tol}) + 1)(${compile(
+    // Strict `===` is the whole element test, plus one departure: NaN.
+    // `NaN === NaN` is false, so a NaN needle would never be found, where the
+    // interpreter's structural `.isSame()` answers 1 — hence the both-NaN
+    // short-circuit. BOOLEAN-ness needs no guard: `true === 1` is false
+    // natively (it was the earlier `Math.abs(true - 1) <= tol` leaf that found
+    // a boolean needle in a numeric haystack, and a numeric needle in a
+    // boolean one, where the interpreter answers 0).
+    return `((_v) => (${coll}).findIndex((_x) => (_x !== _x && _v !== _v) || _x === _v) + 1)(${compile(
       args[1]
     )})`;
   },

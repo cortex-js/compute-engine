@@ -180,16 +180,26 @@ describe('the shapes that must keep failing closed', () => {
 
 describe('other targets are unaffected', () => {
   // The relaxation is JavaScript-only: it is a JS coercion hazard, lowered
-  // onto a JS runtime helper. The non-shader targets keep the source they
-  // emitted before, byte for byte.
+  // onto a JS runtime helper. The non-shader targets keep their own lowering
+  // (no `_SYS`).
+  //
+  // The Python row used to pin the infix `xs < 3`. That emission was itself
+  // unfaithful — a plain-list binding raises `TypeError` and a tuple binding
+  // compares lexicographically, where the interpreter broadcasts element-wise —
+  // so a collection-TYPED ordering participant now diverts to the `np.less`
+  // codegen on that target (see `pyOrderingUnfaithful` in base-compiler.ts and
+  // `compile-python-string-fail-closed.test.ts`). Still no `_SYS`.
+  //
+  // `toContain`, not `toBe`: the Python ufunc goes through the `_ce_ord` shape
+  // guard, whose definition is prepended to the emitted code.
   test.each([
-    ['python', 'xs < 3'],
+    ['python', '_ce_ord(np.less, xs, 3)'],
     ['interval-js', '_IA.less(_.xs, _IA.point(3))'],
   ])('%s keeps its own lowering', (to, expected) => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'list<real>');
     const r = compile(ce.box(['Less', 'xs', 3] as any), { to } as any)!;
-    expect(r.code).toBe(expected);
+    expect(r.code).toContain(expected);
     expect(r.code).not.toContain('_SYS');
   });
 

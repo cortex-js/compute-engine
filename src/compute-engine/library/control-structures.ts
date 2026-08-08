@@ -1257,7 +1257,21 @@ function canonicalLoopLike(
       if (!ce.context.lexicalScope.bindings.has(indexExpr.symbol))
         ce.declare(indexExpr.symbol, 'unknown');
     }
-    return ce._fn('Element', [indexExpr.canonical, collExpr.canonical]);
+    const collCanonical = collExpr.canonical;
+    // These clauses are rebuilt with `_fn`, which bypasses the `Element`
+    // canonical handler — so nothing narrows the iterated operand. Yet
+    // iterating over a not-yet-typed symbol is collection evidence in the same
+    // way `Length(x)` or `x[i]` is: narrow it, so a function parameter whose
+    // only use is `for c in cs` types as a collection (and the lambda
+    // auto-broadcast then binds a collection argument whole instead of mapping
+    // over it).
+    if (
+      isSymbol(collCanonical) &&
+      collCanonical.valueDefinition?.inferredType &&
+      collCanonical.type.type === 'unknown'
+    )
+      collCanonical.infer('collection', 'narrow');
+    return ce._fn('Element', [indexExpr.canonical, collCanonical]);
   });
   const canonicalBody: Expression = canonicalStatement(ce, body);
 

@@ -8,7 +8,14 @@ import type {
   CompilationOptions,
   CompilationResult,
 } from './types.js';
-import { BaseCompiler } from './base-compiler.js';
+import {
+  BaseCompiler,
+  isFlatAllStringComparisonParticipant,
+  isMixedStringOrderingParticipants,
+  isProvablyStringComparisonParticipant,
+  isProvablyTupleParticipant,
+  unfaithfulComparisonAggregate,
+} from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { tryGetConstant } from './constant-folding.js';
 import {
@@ -20,7 +27,12 @@ import {
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { isPointListValue } from '../collection-utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { resolveTypeForCompilation } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  resolveTypeForCompilation,
+} from '../../common/type/utils.js';
+import type { Type, TypeReference } from '../../common/type/types.js';
+import { declarationOf } from '../../common/type/reference.js';
 import { requirePrimitiveElements } from './javascript-target.js';
 
 /**
@@ -39,6 +51,211 @@ const PYTHON_CONSTANTS: Record<string, string> = {
   CatalanConstant: '0.915965594177219015054603514932384110774',
   EulerGamma: '0.5772156649015328606065120900824024310421',
 };
+
+/**
+ * Fail closed (D6) when a COMPARISON participant is an aggregate whose
+ * whole-value comparison none of this target's kernels reproduces — a
+ * `dictionary`, a `record`, or a `tuple` at participant level
+ * (`unfaithfulComparisonAggregate`). Mirrors `assertComparableAggregate` on the
+ * JavaScript target; the hazards are the same, with NumPy in place of the JS
+ * coercion rules:
+ *
+ *  - a `dictionary`/`record` has no positional lowering at all, so the scalar
+ *    equality form (`abs(a - b) <= tol`) is a `TypeError` and the infix `<` of
+ *    an ordering compares Python dicts (a `TypeError` too, or worse a
+ *    lexicographic answer for another mapping type);
+ *  - a `tuple` lowers to a Python tuple, which `np.less` maps over ELEMENT-WISE
+ *    (`Less(Tuple(1,2), Tuple(3,4))` → `[True, True]`) and the infix `<`
+ *    compares lexicographically, where the interpreter leaves the ordering
+ *    symbolic — a point binds atomically.
+ *
+ * ONE carve-out, applied by the caller and not here: a BINARY `Equal`/
+ * `NotEqual` whose EVERY participant is provably tuple-typed skips this gate —
+ * see `compilePythonEquality`. The orderings never take it.
+ */
+function assertPyComparableAggregate(
+  kind: string,
+  args: ReadonlyArray<Expression>
+): void {
+  for (const a of args) {
+    const aggregate = unfaithfulComparisonAggregate(a);
+    if (aggregate === null) continue;
+    throw new Error(
+      `${kind}: cannot compile — a ${aggregate} participant. The interpreter ` +
+        `compares it as ONE value, whereas the emitted Python looks inside it: ` +
+        `a dictionary or record has no positional lowering (the tolerance test ` +
+        `\`abs(a - b)\` raises), and a tuple is mapped over element-wise by ` +
+        `\`np.less\` (\`Equal(Tuple(1, 2), List(1, 2))\` answered \`True\`) ` +
+        `where a point binds atomically. Fail closed (D6) — the interpreter ` +
+        `evaluates it.`
+    );
+  }
+}
+
+/**
+ * True when a comparison participant carries `tuple` evidence BELOW its own
+ * level — a point LIST (`list<tuple<number, number>>`), or a union/nesting
+ * reaching one.
+ *
+ * This is exactly the case `unfaithfulComparisonAggregate` deliberately does
+ * NOT report (its tuple search stops at participant level), because the
+ * point-list lowering must keep compiling for the EQUALITY family, whose
+ * `_ce_eqcoll` compares each point as one value. The ORDERINGS have no such
+ * kernel: `np.less([(1,2)], [(3,4)])` looks INSIDE each point and answers
+ * `[[True, True]]`, whereas the interpreter broadcasts to an INERT point
+ * comparison (`[(1, 2) < (3, 4)]`). So this predicate gates the orderings only
+ * — see `compilePythonRelation`.
+ *
+ * The walk mirrors `unfaithfulComparisonAggregate`'s structure: a union stays at
+ * the SAME level (each member is an alternative value of the participant, not an
+ * element of it), a collection peels one level, and a `reference` unfolds to its
+ * definition behind the repo's standard per-path cycle guard so a recursive
+ * alias (`type pts = list<pts> | tuple<number, number>`) terminates.
+ */
+function hasNestedTupleEvidence(x: Expression): boolean {
+  const walk = (
+    t: Type,
+    top: boolean,
+    visited?: ReadonlySet<TypeReference>
+  ): boolean => {
+    if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
+      const decl = declarationOf(t);
+      if (visited?.has(decl)) return false;
+      visited = new Set(visited).add(decl);
+    }
+    const r = resolveTypeForCompilation(t);
+    if (typeof r === 'string') return !top && r === 'tuple';
+    if (r.kind === 'tuple') return !top;
+    if (r.kind === 'union') return r.types.some((m) => walk(m, top, visited));
+    const elt = collectionElementType(r);
+    if (elt === undefined) return false;
+    return walk(elt, false, visited);
+  };
+  return walk(x.type.type, true);
+}
+
+/**
+ * Fail closed (D6) when an ORDERING participant is a point list (nested tuple
+ * evidence) — see `hasNestedTupleEvidence`. EQUALITY does not take this gate.
+ */
+function assertPyNoNestedTupleOrdering(
+  kind: string,
+  args: ReadonlyArray<Expression>
+): void {
+  if (args.some(hasNestedTupleEvidence))
+    throw new Error(
+      `${kind}: cannot compile — a participant whose ELEMENTS are tuples (a ` +
+        `point list). \`np.less([(1, 2)], [(3, 4)])\` looks inside each point ` +
+        `and answers \`[[True, True]]\`, whereas the interpreter broadcasts to ` +
+        `an inert point comparison (\`[(1, 2) < (3, 4)]\`). Only the EQUALITY ` +
+        `family admits point lists (whole-value \`_ce_eqcoll\`). ` +
+        `Fail closed (D6) — the interpreter evaluates it.`
+    );
+}
+
+/**
+ * True when EVERY component of a provably-tuple participant is provably
+ * NUMERIC, recursing into nested tuple components (a point of points qualifies)
+ * and requiring every member of a union to qualify.
+ *
+ * The ADMISSION side of the tuple-equality carve-out, paired with
+ * `isProvablyTupleParticipant` — see `compilePythonEquality`. Tuple-ness alone
+ * is not enough on this target: `_ce_eqcoll`'s scalar leaf compares with Python
+ * `==`, under which `True == 1`, so `Equal(Tuple(True), Tuple(1))` answered
+ * `True` where the interpreter answers `False`. Anything but a provable number
+ * — a boolean, a string, `unknown`, a union with a non-numeric member, or a
+ * bare `tuple` with no component information at all — disqualifies, and the
+ * aggregate gate then declines the head (fail closed).
+ */
+function isNumericTupleParticipant(x: Expression): boolean {
+  const walk = (t: Type, visited?: ReadonlySet<TypeReference>): boolean => {
+    if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
+      const decl = declarationOf(t);
+      if (visited?.has(decl)) return false;
+      visited = new Set(visited).add(decl);
+    }
+    const r = resolveTypeForCompilation(t);
+    // A bare `tuple` carries no component information: nothing to prove numeric.
+    if (r === 'tuple' || r === 'never') return false;
+    if (typeof r !== 'string') {
+      if (r.kind === 'tuple')
+        return r.elements.every((e) => walk(e.type, visited));
+      if (r.kind === 'union') return r.types.every((m) => walk(m, visited));
+    }
+    return isSubtype(r, 'number');
+  };
+  return walk(x.type.type);
+}
+
+/**
+ * Fail closed (D6) when EQUALITY has a provably string-valued participant.
+ *
+ * The scalar lowering is NUMERIC — `abs((a) - (b)) <= tol` — which for strings
+ * raises `TypeError` at run time (pure Python, no NumPy coercion), so
+ * `Equal("a", "a")` never answered the interpreter's `True`. Evidence is tested
+ * per PARTICIPANT, not per operand, exactly as on the JavaScript target.
+ *
+ * The ORDERINGS are governed by the narrower `assertPyNoMixedStringOrdering`:
+ * all-string orderings agree with interpretation and keep compiling.
+ */
+function assertPyNoStringOperand(
+  kind: string,
+  args: ReadonlyArray<Expression>
+): void {
+  if (args.some(isProvablyStringComparisonParticipant))
+    throw new Error(
+      `${kind}: cannot compile — string-valued operands are not supported by ` +
+        `this target (the lowering is numeric: a tolerance test on the ` +
+        `difference, which raises \`TypeError\` for strings). ` +
+        `Fail closed (D6) — the interpreter evaluates it.`
+    );
+}
+
+/**
+ * Fail closed (D6) when an ORDERING (`Less`/`LessEqual`/`Greater`/
+ * `GreaterEqual`) MIXES string evidence with a participant that is not provably
+ * a FLAT string (`isMixedStringOrderingParticipants`, shared with the base
+ * compiler's infix diverts).
+ *
+ * All-string is SOUND and keeps compiling, probe-verified against
+ * interpretation: the scalar infix `"a" < "b"` and `np.less(["a","c"],
+ * ["b","b"])` / `np.less(["a","c"], "b")` all agree with the interpreter's
+ * code-unit string comparison (`compare.ts`), chains included.
+ *
+ * The MIXED case is the wrong one, and wrong in two different ways depending on
+ * the shape and the NumPy version: `np.less(["a",10], ["b",9])` coerces `10` to
+ * `"10"` and string-compares (a silent `[True, True]` where the interpreter
+ * answers `10 < 9` → `False`), while `np.less("a", [1,2])` raises on NumPy 2.x
+ * but historically returned a scalar `False` with a `FutureWarning`. Emitted
+ * code runs against an arbitrary NumPy, so the shape is gated at COMPILE time
+ * on static type evidence rather than trusted to be loud at run time.
+ *
+ * ACCEPTED RESIDUAL (ruled 2026-08-08): the all-string admission is faithful
+ * per UTF-16 code UNIT, the interpreter's ordering (`compare.ts` uses raw JS
+ * `<`), while Python's `<` compares code POINTS. The two disagree only when an
+ * astral-plane character (≥ U+10000) is ordered against a BMP character in
+ * U+E000–U+FFFF: the interpreter sees the leading surrogate (U+D800–U+DBFF)
+ * and answers `Less("\u{10000}", "")` → True, Python answers False.
+ * Deliberately NOT gated — the divergence needs an astral character on one
+ * side, and closing it would mean declining every string ordering or emitting
+ * a code-unit comparator. Revisit only if a real corpus hits it.
+ */
+function assertPyNoMixedStringOrdering(
+  kind: string,
+  args: ReadonlyArray<Expression>
+): void {
+  if (isMixedStringOrderingParticipants(args))
+    throw new Error(
+      `${kind}: cannot compile — an ordering that mixes a string operand with ` +
+        `an operand that is not provably a string. The interpreter leaves such ` +
+        `a comparison symbolic (\`Less("a", 1)\` stays inert), whereas NumPy ` +
+        `coerces the number to a string and answers a plausible-looking ` +
+        `boolean (\`np.less(["a", 10], ["b", 9])\` → \`[True, True]\`). An ` +
+        `ordering whose operands are ALL provably strings does compile — the ` +
+        `interpreter compares strings the same way. ` +
+        `Fail closed (D6) — the interpreter evaluates it.`
+    );
+}
 
 /**
  * Emit a Python equality test with the engine's numeric tolerance baked in at
@@ -75,6 +292,50 @@ function compilePythonEquality(
     throw new Error(`${kind}: expected at least two arguments`);
   const tol = args[0]?.engine?.tolerance ?? 1e-10;
   const collCount = args.filter(isPyCollectionOperand).length;
+  // Ahead of every lowering below (the scalar `abs` form, `_ce_eqcoll`, and
+  // both chain forms) — see `assertPyComparableAggregate` /
+  // `assertPyNoStringOperand`.
+  //
+  // The one carve-out in the aggregate gate: a BINARY equality whose EVERY
+  // participant is provably tuple-typed with provably NUMERIC components keeps
+  // the `_ce_eqcoll` lowering it had before the gate existed. That helper's
+  // list-vs-list branch is whole-value equality — exactly the interpreter's
+  // atomic point comparison, at equal and at unequal arity (a length mismatch
+  // is `False`, and so is the interpreter's answer). Only the MIXED shapes were
+  // wrong (`Equal(Tuple(1, 2), List(1, 2))` answered `True` against the
+  // interpreter's `False`), and those still decline: one non-tuple participant
+  // and `every` fails. The numeric-component requirement
+  // (`isNumericTupleParticipant`) closes Python's own `==` coercion: a boolean
+  // component made `Equal(Tuple(True), Tuple(1))` answer `True` (`True == 1`)
+  // where the interpreter answers `False`.
+  //
+  // Gate ORDER is load-bearing, as on the JavaScript target: the string gate
+  // runs AFTER the tuple carve-out, so a tuple with a string component
+  // (`Equal(Tuple(1, "a"), Tuple(1, "a"))`) still declines on string evidence.
+  //
+  // DELIBERATE DIVERGENCE from the JavaScript target, which fails closed on ANY
+  // string evidence: ONE class of string equality is admitted here, because on
+  // this target it is FAITHFUL rather than wrong. Where every participant is a
+  // provably FLAT all-string collection and the emission is therefore
+  // `_ce_eqcoll` (not the numeric `abs` form), the helper compares strings with
+  // Python's own structural `==` — including the numeric-string trap it was
+  // written for (`Equal(["1"], ["1.0"])` → `False`, matching the interpreter,
+  // where `np.asarray(..., dtype=float)` would have parsed both to 1.0). That
+  // class is pinned by EXECUTED parity in `compile-python-parity.test.ts`
+  // (`eq_coll_strings_equal`, `eq_coll_strings_unequal`,
+  // `eq_coll_numeric_strings`, `eq_coll_numeric_strings_same`). Everything else
+  // with string evidence declines: the scalar form raises `TypeError`, and the
+  // admission side is the narrow `isFlatAllStringComparisonParticipant` so a
+  // mixed (`list<string | number>`) or NESTED all-string participant fails
+  // closed even though `_ce_eqcoll` was probed faithful on it.
+  const tupleEquality =
+    args.length === 2 &&
+    args.every(isProvablyTupleParticipant) &&
+    args.every(isNumericTupleParticipant);
+  if (!tupleEquality) assertPyComparableAggregate(kind, args);
+  const stringCollectionEquality =
+    collCount >= 2 && args.every(isFlatAllStringComparisonParticipant);
+  if (!stringCollectionEquality) assertPyNoStringOperand(kind, args);
   if (collCount === 1)
     throw new Error(
       `${kind}: a single collection operand broadcasts element-wise in the ` +
@@ -610,6 +871,112 @@ const PYTHON_EQCOLL_HELPER = `def _ce_eqcoll(_a, _b, _tol):
     return all(_ce_eqcoll(_x, _y, _tol) for _x, _y in zip(_a, _b))
 `;
 
+/**
+ * `_ce_indexof` — the runtime element test for `IndexOf`, plus its `_ce_same`
+ * leaf comparison. This is NOT `_ce_eqcoll`: `IndexOf` compares like the
+ * interpreter's `.isSame()`, which is STRUCTURAL and **EXACT** — type-sensitive
+ * about bool-ness, container kind and NaN, with NO tolerance on numbers
+ * (`IndexOf([0], 5e-11)` answers 0, and
+ * `IndexOf([0.30000000000000004], 0.3)` answers 0 — both probe-verified).
+ *
+ * An earlier version of this helper compared numbers within the engine
+ * tolerance, on the belief that the interpreter tolerated float noise. That
+ * belief was a PROBE ARTIFACT: the probe was `IndexOf([0.3], 0.1 + 0.2)`, and
+ * `Add(0.1, 0.2)` EVALUATES to exactly `0.3` by the engine's exact decimal
+ * folding, so the comparison leaf never saw a near-miss float at all. Beware
+ * this trap when probing: a needle written as a computed sum tells you nothing
+ * about the element test.
+ *
+ * Python's `in`/`.index` would be close, except for one crack: `True == 1`
+ * and `False == 0` are True in Python, so a boolean needle was found in a
+ * numeric haystack (and a numeric needle in a boolean one), where the
+ * interpreter answers 0. `_ce_same` therefore compares BOOL-ness first and
+ * reports unequal when it differs.
+ *
+ * The rest, on purpose:
+ *  - numeric pairs compare with the plain `==` leaf, which is exact but still
+ *    crosses int/float (`1 == 1.0` is True — the interpreter agrees);
+ *  - a tuple and a list of the same values are NOT the same (mixed container
+ *    kinds fall through to `_a == _b`, which is False in Python), which keeps
+ *    the `Equal`-family tuple/list distinction and finds a TUPLE needle in a
+ *    point list. That distinction applies to NATIVE containers only: an
+ *    `np.ndarray` on either side is normalized with `np.asarray(x).tolist()`
+ *    and recursed on, so a caller-supplied `(n, 2)` point matrix works (each
+ *    row is a 1-D array, which `_a == _b` would have turned into an array and
+ *    an ambiguous-truth-value error). An ndarray row is therefore LIST-like,
+ *    and a compiled tuple needle matches it — a deliberate choice, matching how
+ *    the engine lowers `Matrix` rows (as nested lists / an ndarray);
+ *  - strings, and a missing needle → 0, are unchanged.
+ *
+ * The one other departure from Python equality is NaN: `nan == nan` is False,
+ * so a NaN needle was never found, where the interpreter's structural
+ * `.isSame()` answers 1. The both-NaN case is guarded to float scalars so an
+ * ndarray element cannot reach it (`_a != _a` on an array is an array, and
+ * `and` would raise an ambiguous-truth-value error); `np.float64` subclasses
+ * `float`, and `np.floating` covers the narrower numpy float scalars.
+ *
+ * ACCEPTED RESIDUAL (exactness loss, unclosable): a needle COMPUTED at runtime
+ * to a near-miss f64 — Python's `0.1 + 0.2` → `0.30000000000000004` — is not
+ * found in a `[0.3]` haystack, where the interpreter folds `Add(0.1, 0.2)`
+ * exactly to `0.3` and finds it. That is the ordinary exactness loss of
+ * compiling to f64 arithmetic, not a defect of the element test: no element
+ * test can recover the exact sum, and a tolerance leaf would only trade this
+ * residual for wrong answers on genuinely distinct nearby numbers.
+ */
+const PYTHON_INDEXOF_HELPER = `def _ce_same(_a, _b):
+    if isinstance(_a, np.ndarray) or isinstance(_b, np.ndarray):
+        return _ce_same(np.asarray(_a).tolist(), np.asarray(_b).tolist())
+    if isinstance(_a, (bool, np.bool_)) != isinstance(_b, (bool, np.bool_)):
+        return False
+    if isinstance(_a, tuple) and isinstance(_b, tuple):
+        return len(_a) == len(_b) and all(_ce_same(_x, _y) for _x, _y in zip(_a, _b))
+    if isinstance(_a, list) and isinstance(_b, list):
+        return len(_a) == len(_b) and all(_ce_same(_x, _y) for _x, _y in zip(_a, _b))
+    if isinstance(_a, (float, np.floating)) and isinstance(_b, (float, np.floating)) and _a != _a and _b != _b:
+        return True
+    return bool(_a == _b)
+
+def _ce_indexof(_l, _v):
+    for _i, _x in enumerate(_l):
+        if _ce_same(_x, _v):
+            return _i + 1
+    return 0
+`;
+
+/**
+ * `_ce_ord` — the shape guard the ORDERING ufuncs (`np.less`, `np.less_equal`,
+ * `np.greater`, `np.greater_equal`) are emitted through by
+ * `compilePythonRelation`.
+ *
+ * The interpreter refuses an element-wise ordering of two collections of
+ * DIFFERENT lengths: `Less([1,2,3], [1,2])` and `Less([1], [1,2])` both
+ * evaluate to `Error("incompatible-dimensions", …)`. NumPy only half agrees —
+ * it raises loudly on 3-vs-2, but SILENTLY BROADCASTS 1-vs-n
+ * (`np.less([1], [1, 2])` → `[False, True]`), a wrong answer behind a
+ * `success: true`. The guard raises on any list-like-vs-list-like length
+ * mismatch, the 1-vs-n case included, before applying the ufunc.
+ *
+ * Scalar-vs-collection broadcasting stays ALLOWED: the interpreter broadcasts a
+ * scalar over a collection (`Less(["a","c"], "b")` → `["True","False"]`, pinned
+ * in `compile-python-string-fail-closed.test.ts`). A `str` is not list-like in
+ * Python's `isinstance` sense, so a string scalar takes the broadcast path as
+ * intended. A 0-dimensional ndarray is treated as a scalar too (`len()` on one
+ * raises `TypeError`).
+ */
+const PYTHON_ORD_HELPER = `def _ce_ord(_f, _a, _b):
+    def _ce_ord_len(_x):
+        if isinstance(_x, np.ndarray):
+            return len(_x) if _x.ndim > 0 else None
+        if isinstance(_x, (list, tuple)):
+            return len(_x)
+        return None
+    _la = _ce_ord_len(_a)
+    _lb = _ce_ord_len(_b)
+    if _la is not None and _lb is not None and _la != _lb:
+        raise ValueError('incompatible dimensions')
+    return _f(_a, _b)
+`;
+
 /** Prepend any referenced runtime helper definitions to the compiled `code`.
  * Idempotent per emission unit; a redefinition (if two units are concatenated)
  * is harmless in Python. */
@@ -618,6 +985,8 @@ function withPythonHelpers(code: string): string {
   if (out.includes('_ce_rref(')) out = `${PYTHON_RREF_HELPER}\n${out}`;
   if (out.includes('_ce_bcast(')) out = `${PYTHON_BCAST_HELPER}\n${out}`;
   if (out.includes('_ce_eqcoll(')) out = `${PYTHON_EQCOLL_HELPER}\n${out}`;
+  if (out.includes('_ce_indexof(')) out = `${PYTHON_INDEXOF_HELPER}\n${out}`;
+  if (out.includes('_ce_ord(')) out = `${PYTHON_ORD_HELPER}\n${out}`;
   return out;
 }
 
@@ -717,19 +1086,35 @@ function compilePythonSample(
  * the interpreter's element-wise `Less([1,9],[3,4],[5,6]) → [True, False]`. The
  * shared middle operands are bound once in an immediately-applied lambda, so
  * each is evaluated exactly once (as the infix route does through `bindExpr`).
+ *
+ * Every ufunc application — the binary form and each pair of a chain — is
+ * emitted through the `_ce_ord` shape guard, because NumPy silently BROADCASTS
+ * a 1-element operand over an n-element one where the interpreter reports
+ * `incompatible-dimensions`. See `PYTHON_ORD_HELPER`.
  */
 function compilePythonRelation(
   fn: string,
   args: ReadonlyArray<Expression>,
-  compile: (e: Expression) => string
+  compile: (e: Expression) => string,
+  kind: string
 ): string {
   if (args.length < 2) throw new Error(`${fn}: expected at least two operands`);
+  // The comparison gates. All are reached HERE for every ordering the infix
+  // route declines as well: the base compiler diverts a mixed-string,
+  // aggregate, or collection-TYPED ordering off the infix `<` so the head falls
+  // through to this codegen, which fails closed. No tuple carve-out — the
+  // orderings never take one (the interpreter leaves `Less(Tuple, Tuple)`
+  // symbolic), and the point-list shape the aggregate gate admits for equality
+  // is closed here by `assertPyNoNestedTupleOrdering`.
+  assertPyComparableAggregate(kind, args);
+  assertPyNoNestedTupleOrdering(kind, args);
+  assertPyNoMixedStringOrdering(kind, args);
   if (args.length === 2)
-    return `${fn}(${compile(args[0])}, ${compile(args[1])})`;
+    return `_ce_ord(${fn}, ${compile(args[0])}, ${compile(args[1])})`;
   const names = args.map((_, i) => `_r${i}`);
-  let body = `${fn}(${names[0]}, ${names[1]})`;
+  let body = `_ce_ord(${fn}, ${names[0]}, ${names[1]})`;
   for (let i = 1; i < args.length - 1; i++)
-    body = `np.logical_and(${body}, ${fn}(${names[i]}, ${names[i + 1]}))`;
+    body = `np.logical_and(${body}, _ce_ord(${fn}, ${names[i]}, ${names[i + 1]}))`;
   return `(lambda ${names.join(', ')}: ${body})(${args
     .map((a) => compile(a))
     .join(', ')})`;
@@ -1343,13 +1728,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   NotEqual: (args, compile) => compilePythonEquality('NotEqual', args, compile),
   // Chained (3+ operand) forms fold pairwise — a bare `np.less(a, b, c)` would
   // consume the third operand as numpy's `out`. See `compilePythonRelation`.
-  Less: (args, compile) => compilePythonRelation('np.less', args, compile),
+  Less: (args, compile) =>
+    compilePythonRelation('np.less', args, compile, 'Less'),
   LessEqual: (args, compile) =>
-    compilePythonRelation('np.less_equal', args, compile),
+    compilePythonRelation('np.less_equal', args, compile, 'LessEqual'),
   Greater: (args, compile) =>
-    compilePythonRelation('np.greater', args, compile),
+    compilePythonRelation('np.greater', args, compile, 'Greater'),
   GreaterEqual: (args, compile) =>
-    compilePythonRelation('np.greater_equal', args, compile),
+    compilePythonRelation('np.greater_equal', args, compile, 'GreaterEqual'),
   And: (args, compile) => compilePythonLogical('np.logical_and', args, compile),
   Or: (args, compile) => compilePythonLogical('np.logical_or', args, compile),
   Not: 'np.logical_not',
@@ -1629,10 +2015,23 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args[1] == null) throw new Error('Append: missing value');
     return `[*${coll}, ${compile(args[1])}]`;
   },
+  // DELIBERATE DIVERGENCE from the JavaScript target, which fails closed on a
+  // string (or tuple) needle because its element test is the numeric tolerance
+  // test. This lowering is not numeric: the `_ce_indexof` adapter is Python's
+  // own structural equality, so a string needle, a string haystack and a TUPLE
+  // needle in a point list are all faithful — probe-verified against the
+  // interpreter (`IndexOf([(1,2),(3,4)], Tuple(3,4))` → 2, a missing value → 0).
+  // Nothing to GATE here (ruled 2026-08-08: adapter over gate) — but the
+  // faithfulness now holds BECAUSE of the adapter: bare `in`/`.index` had one
+  // crack, Python's `True == 1`, which found a boolean needle in a numeric
+  // haystack where the interpreter answers 0. `_ce_same` compares bool-ness
+  // first, and its number leaf is EXACT (no tolerance — see
+  // PYTHON_INDEXOF_HELPER). Pinned in
+  // `compile-python-string-fail-closed.test.ts`.
   IndexOf: (args, compile) => {
     const coll = pyCollArg('IndexOf', args[0], compile);
     if (args[1] == null) throw new Error('IndexOf: missing value');
-    return `(lambda _l, _v: _l.index(_v) + 1 if _v in _l else 0)(${coll}, ${compile(args[1])})`;
+    return `_ce_indexof(${coll}, ${compile(args[1])})`;
   },
   Contains: (args, compile) => {
     if (args[0]) requirePrimitiveElements('Contains', args[0]);
@@ -2207,6 +2606,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
     if (body.includes('_ce_rref(')) code += `${PYTHON_RREF_HELPER}\n`;
     if (body.includes('_ce_bcast(')) code += `${PYTHON_BCAST_HELPER}\n`;
     if (body.includes('_ce_eqcoll(')) code += `${PYTHON_EQCOLL_HELPER}\n`;
+    if (body.includes('_ce_indexof(')) code += `${PYTHON_INDEXOF_HELPER}\n`;
+    if (body.includes('_ce_ord(')) code += `${PYTHON_ORD_HELPER}\n`;
 
     code += `def ${functionName}(${params}):\n`;
 
@@ -2292,15 +2693,24 @@ export class PythonTarget implements LanguageTarget<Expression> {
           'Loop, or Block) cannot be a Python lambda body — use ' +
           'compileFunction instead.'
       );
-    // A collection-operand ElementMax/ElementMin/Clamp routes through the
-    // module-level `_ce_bcast` helper, which a bare lambda has no place to
-    // define. Fail closed rather than emit a reference to an undefined name.
-    if (body.includes('_ce_bcast('))
-      throw new Error(
-        'compileLambda: ElementMax/ElementMin/Clamp over a collection operand ' +
-          'needs the module-level _ce_bcast helper, which cannot ride along a ' +
-          'bare lambda — use compileFunction instead.'
-      );
+    // Any lowering that routes through a module-level `_ce_*` runtime helper
+    // cannot ride along a bare lambda, which has no place to define it. Fail
+    // closed rather than emit a reference to an undefined name. (`_ce_bcast` is
+    // the collection-operand ElementMax/ElementMin/Clamp lowering; `_ce_indexof`
+    // is IndexOf's element test; `_ce_eqcoll` is collection/tuple equality;
+    // `_ce_ord` is the ordering shape guard.)
+    for (const [helper, what] of [
+      ['_ce_bcast(', 'ElementMax/ElementMin/Clamp over a collection operand'],
+      ['_ce_indexof(', 'IndexOf'],
+      ['_ce_eqcoll(', 'equality over a collection or tuple operand'],
+      ['_ce_ord(', 'an ordering over a collection operand'],
+    ] as const)
+      if (body.includes(helper))
+        throw new Error(
+          `compileLambda: ${what} needs the module-level ` +
+            `${helper.slice(0, -1)} helper, which cannot ride along a bare ` +
+            `lambda — use compileFunction instead.`
+        );
 
     const params = parameters.join(', ');
     return `lambda ${params}: ${body}`;

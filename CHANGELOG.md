@@ -281,6 +281,16 @@
 
 ### Resolved Issues
 
+- **Iterating over a function parameter now counts as collection evidence.** A
+  parameter whose only use was `for c in cs` stayed untyped, so the lambda
+  auto-broadcast mapped the function over the argument's elements instead of
+  binding the collection whole: a function that accumulated `t = t + c` over
+  `for c in cs` and was applied to `[1, 2, 3]` returned `[0, 0, 0]` instead of
+  `6`, and its inferred signature read `(unknown) -> …`. The iterated operand of a
+  `Loop`/`Comprehension` `Element` clause now narrows an as-yet-untyped symbol
+  to `collection`, matching what `Length(cs)` and `cs[i]` already did. Scalar
+  parameters are unaffected — `f(x) = x * 2` still broadcasts over a list.
+
 - **Compiled string comparisons fail closed instead of returning wrong
   values.** The JavaScript compile target is numeric at heart: `Equal` and
   `NotEqual` lower to a tolerance test (`Math.abs(a - b) <= tol`), which for
@@ -320,6 +330,29 @@
   shapes keep byte-identical codegen. (The Python target has the same
   broadcast-route defect — `np.less("a", [1, 2])` — recorded as a known open
   hole, not yet fixed.)
+
+- **The Python compile target now fails closed on the string and aggregate
+  comparisons it miscompiled.** Two shapes returned wrong values behind
+  `success: true`: an ordering that mixes strings with numbers, where NumPy
+  coerces the number to a string and compares as text
+  (`Less(["a", 10], ["b", 9])` ran to `[True, True]`, while the interpreter
+  answers `["True", "False"]` — `10 < 9` is False), and equality with a
+  `tuple` participant, where the tuple is looked inside instead of binding
+  atomically (`Equal(Tuple(1, 2), List(1, 2))` ran to `True` against the
+  interpreter's `False`). Both now decline (D6) and the interpreter fallback
+  answers correctly, as do `dictionary`/`record` comparisons (no positional
+  lowering at all) and scalar string equality (`abs("a" - "a")` raises).
+  Gating is at COMPILE time on static type evidence, not on the emitted code
+  raising: several mixed shapes are loud on NumPy 2.x but historically
+  returned a scalar `False` with a `FutureWarning`, and emitted code runs on
+  the user's NumPy. As on the JavaScript target, an `unknown`-typed operand is
+  never string evidence, so numeric and plot comparisons compile
+  byte-identically. What keeps compiling, each with executed-parity pins:
+  all-string orderings (scalar, chained, list-vs-list, list-vs-scalar),
+  tuple-vs-tuple equality, and — unlike the JavaScript target, whose kernels
+  are numeric there — `IndexOf` in every shape (including a tuple needle in a
+  point list) and all-string collection equality, both of which lower to
+  Python's own structural comparison and are faithful.
 
 - **A destructuring `Declare` with a positional initial value now binds
   (tuple patterns).** `["Declare", ["Tuple", "x", "y"], "unknown",

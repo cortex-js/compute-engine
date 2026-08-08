@@ -131,13 +131,17 @@ describe('PYTHON ARITY — chained relations / logic over collections', () => {
 
   it('a three-operand relation folds pairwise instead of filling numpy `out`', () => {
     const code = src(['Less', A, B, C]);
-    expect(code).toBe(
-      '(lambda _r0, _r1, _r2: np.logical_and(np.less(_r0, _r1), np.less(_r1, _r2)))([1, 9], [3, 4], [5, 6])'
+    // `toContain`, not `toBe`: every ufunc application goes through the
+    // `_ce_ord` shape guard, whose definition is prepended to the source.
+    expect(code).toContain(
+      '(lambda _r0, _r1, _r2: np.logical_and(_ce_ord(np.less, _r0, _r1), _ce_ord(np.less, _r1, _r2)))([1, 9], [3, 4], [5, 6])'
     );
   });
 
   it('the binary form is unchanged', () => {
-    expect(src(['Less', A, B])).toBe('np.less([1, 9], [3, 4])');
+    expect(src(['Less', A, B])).toContain(
+      '_ce_ord(np.less, [1, 9], [3, 4])'
+    );
   });
 
   it('And/Or fold pairwise', () => {
@@ -308,9 +312,18 @@ const describeNumpy = venvHas('numpy') ? describe : describe.skip;
 
 describeNumpy('PYTHON ARITY — execution parity (venv)', () => {
   it('the emitted Python evaluates to the interpreter value', () => {
-    let program = 'import numpy as np\nimport cmath, math, json\n\nresults = []\n';
-    for (const c of EXEC_CASES)
-      program += `results.append(np.asarray(${src(c.expr)}).tolist())\n`;
+    // Each case is emitted as its own `def`, not inlined into the
+    // `results.append(...)` expression: a lowering that routes through a
+    // module-level runtime helper (`_ce_ord` for the ordering ufuncs) carries
+    // the helper's DEFINITION in its emitted source, which is a statement.
+    let program = 'import numpy as np\nimport cmath, math, json\n\n';
+    EXEC_CASES.forEach((c, i) => {
+      program += `${python.compileFunction(ce.box(c.expr), `fn_${i}`, [])}\n`;
+    });
+    program += 'results = []\n';
+    EXEC_CASES.forEach((_c, i) => {
+      program += `results.append(np.asarray(fn_${i}()).tolist())\n`;
+    });
     program += 'print(json.dumps(results))\n';
 
     const file = path.join(os.tmpdir(), `ce-py-arity-${process.pid}.py`);

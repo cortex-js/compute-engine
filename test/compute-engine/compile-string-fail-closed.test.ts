@@ -6,7 +6,10 @@
  * `"a" == "a"` answered `false` where the interpreter answers `True`, a wrong
  * answer behind a `success: true`. `IndexOf` used the same tolerance test, so a
  * string needle was never "found" (0 instead of the interpreter's 1-based
- * index).
+ * index). `IndexOf`'s element test is now an EXACT `===` (see the last
+ * `describe` below), which would compare strings faithfully, but its string
+ * gates are deliberately RETAINED: relaxing them is a separate tier, like
+ * string equality.
  *
  * The ORDERINGS are governed by a NARROWER rule, because the interpreter
  * compares two strings with the same raw JavaScript `<` this target emits
@@ -701,4 +704,93 @@ describe('the gate does not reach past string operands', () => {
     expect(less.success).toBe(true);
     expect(less.run!()).toBe(true);
   });
+});
+
+// -----------------------------------------------------------------------------
+// `IndexOf`'s element test is EXACT and distinguishes booleans from numbers,
+// like the interpreter's `.isSame()`. It used to be the numeric tolerance test
+// `Equal` uses, which was wrong twice over behind a `success: true`:
+// `Math.abs(true - 1)` is 0, so `IndexOf([1, 2], True)` RAN to 1 where the
+// interpreter answers 0; and a needle merely within `engine.tolerance` of an
+// element was "found" where the interpreter's exact `.isSame()` answers 0.
+// Ruled 2026-08-08: fixed in the emitted predicate (adapter), not a
+// compile-time gate, so these all keep compiling. The Python target's
+// `_ce_indexof` adapter is the mirror
+// (`compile-python-string-fail-closed.test.ts`).
+// -----------------------------------------------------------------------------
+describe('IndexOf element test is exact and boolean-aware (executed parity)', () => {
+  const cases: Array<{ name: string; expr: any; expected: number }> = [
+    {
+      name: 'bool needle, numeric haystack',
+      expr: ['IndexOf', ['List', 1, 2], 'True'],
+      expected: 0,
+    },
+    {
+      name: 'numeric needle, bool haystack',
+      expr: ['IndexOf', ['List', 'True'], 1],
+      expected: 0,
+    },
+    {
+      name: 'bool needle, bool haystack',
+      expr: ['IndexOf', ['List', 'True', 'False'], 'False'],
+      expected: 2,
+    },
+    // Numbers still match across int/float (`1.5 === 1.5`, and `1 === 1.0`).
+    {
+      name: 'float needle, numeric haystack',
+      expr: ['IndexOf', ['List', { num: '1.5' }, 3], { num: '1.5' }],
+      expected: 1,
+    },
+    // NaN: `NaN === NaN` is false, but the interpreter's structural
+    // `.isSame()` finds a NaN needle — hence the both-NaN short-circuit.
+    {
+      name: 'NaN needle, NaN in haystack',
+      expr: ['IndexOf', ['List', 'NaN', 3], 'NaN'],
+      expected: 1,
+    },
+    {
+      name: 'NaN needle, no NaN in haystack',
+      expr: ['IndexOf', ['List', 1, 2], 'NaN'],
+      expected: 0,
+    },
+    // EXACTNESS. The interpreter's number `.isSame()` has NO tolerance, so a
+    // needle that merely lands within `engine.tolerance` of an element is NOT
+    // found. The element test used to be a tolerance comparison and answered 1
+    // on both of these.
+    //
+    // (The earlier belief that the interpreter tolerated float noise came from
+    // probing with `IndexOf([0.3], Add(0.1, 0.2))`: `Add(0.1, 0.2)` EVALUATES
+    // to exactly `0.3` by exact decimal folding, so the comparison leaf never
+    // saw a near-miss float. Beware that trap when probing this — which is
+    // also why the divergence below is documented, not executed.)
+    {
+      name: 'needle within tolerance of an element is NOT found',
+      expr: ['IndexOf', ['List', 0], { num: '5e-11' }],
+      expected: 0,
+    },
+    {
+      name: 'float-noise element is NOT found by the rounded needle',
+      expr: ['IndexOf', ['List', { num: '0.30000000000000004' }], 0.3],
+      expected: 0,
+    },
+    // ACCEPTED RESIDUAL (documented, not asserted — canonicalization would fold
+    // the sum away before the compiler ever saw a near-miss float): a needle
+    // COMPUTED at runtime to a near-miss f64 (`0.1 + 0.2` →
+    // `0.30000000000000004` in JavaScript) is not found in a `[0.3]` haystack,
+    // where the interpreter folds `Add(0.1, 0.2)` exactly to `0.3` and finds
+    // it. That is the ordinary exactness loss of compiling to f64 arithmetic;
+    // no element test can close it, and a tolerance leaf would only trade it
+    // for wrong answers on the two rows above.
+  ];
+
+  for (const c of cases) {
+    test(`${c.name} → ${c.expected}`, () => {
+      const expr = ce.box(c.expr);
+      // The interpreter's answer is the reference.
+      expect(expr.evaluate().re).toBe(c.expected);
+      const r = compile(expr, { fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.run!()).toBe(c.expected);
+    });
+  }
 });
