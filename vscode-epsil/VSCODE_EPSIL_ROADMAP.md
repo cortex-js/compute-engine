@@ -179,29 +179,45 @@ point.** Observed on the canonical tree of a representative program:
   its diagnostics) and boxes each separately — it holds the statement's
   offsets before boxing, so breakpoint/line mapping never depends on the
   canonical tree.
-- **Tier 2: blocked until propagation is fixed.** The engine-side
-  `onStatement` hook fires on canonical nodes (Block operands, loop-body
-  statements), and today none of them carry offsets.
+- **Tier 2: propagation FIXED 2026-08-07** (see "The propagation fix"
+  below). The engine-side `onStatement` hook will fire on canonical nodes
+  (Block operands, loop-body statements), which now carry offsets.
 
-### Shape of the Tier 2 fix
+### The propagation fix — IMPLEMENTED 2026-08-07
 
-Stamp the canonical result with the source node's offsets when the result
-lacks its own, at both drop sites. Two hazards to design around:
+`withSourceOffsets()` in `boxed-expression/box.ts` stamps a canonical result
+with the caller's `metadata.sourceOffsets`, applied at the drop sites: the
+custom-`canonical`-handler returns in `applyOperatorDefinition` (both the
+lazy and non-lazy paths) and the numeric fast-path constructors in
+`makeNumericFunction` (`canonicalAdd`, `canonicalPower`, …). The
+`.canonical` getter in `boxed-function.ts` now threads
+`{ sourceOffsets }` metadata into its `engine.function` call (mirroring what
+`get structural` always did — `latex` is deliberately not threaded: the
+canonical form is a different expression).
 
-- **Shared/interned nodes.** A canonical handler may return a shared
-  expression (`ce.One` for `x/x`, an operand passed through unchanged, a
-  cached symbol). Mutating such a node would smear source positions across
-  unrelated expressions. So: re-wrap (a fresh `BoxedFunction` with the same
-  operands plus metadata — re-boxing is cheap per the canon-deferral
-  findings) or stamp only provably-fresh nodes; never mutate in place.
-  Note `.canonical` is memoized on the source node, so a re-wrap there is
-  per-source-node and identity-stable.
-- **Hot path.** Both sites are in the canonicalization fast path; the stamp
-  must be a cheap conditional (`metadata?.sourceOffsets !== undefined &&
-  result.sourceOffsets === undefined`) that is free when no offsets are in
-  play (LaTeX/MathJSON input has none).
+Hazards handled:
 
-Scope guard: statement-level fidelity (Block operands, loop bodies,
-Declare/Assign) is all Tier 2 needs. Sub-expression fidelity through
-rewrites like `Add` folding is neither needed nor realistic (a folded `7`
-has no single source span).
+- **Shared/interned nodes.** Only a `BoxedFunction` lacking its own offsets
+  is stamped — number/symbol/string results may be interned singletons
+  (`ce.One` for `x/x`, library symbols) and are never written to. A result
+  already carrying offsets (a pass-through operand with its own sub-span)
+  keeps the more precise span. Residual accepted risk: a handler serving a
+  *cached function expression* gets stamped once with its first consumer's
+  span — positions are advisory metadata, never read by structural
+  semantics.
+- **Hot path.** The stamp is two property reads when no offsets are present
+  (LaTeX and programmatic construction pay nothing).
+- **Snapshots.** Default JSON serialization already drops `sourceOffsets`
+  unless explicitly requested (`serialize.ts`), so no snapshot churn.
+
+Verified (probes + `test/compute-engine/source-offsets.test.ts`): Block
+operands, Loop nodes, the user's loop-body block and each statement inside
+it, function-literal body statements, `Declare`/`Assign`/`Add` statement
+roots — all carry their spans after canonical boxing, on both the direct-box
+and `.canonical` routes. Synthesized lowering nodes (`If`/`Break` from
+`while`) have no source counterpart and correctly carry none. `ce.One`
+stays unstamped; LaTeX-parsed and programmatically built expressions are
+unchanged.
+
+With this landed, Tier 2's remaining work is the evaluator hook (the
+`onStatement` callback + async execution path + call-stack surfacing).

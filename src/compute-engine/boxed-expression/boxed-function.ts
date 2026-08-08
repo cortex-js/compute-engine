@@ -524,7 +524,18 @@ export class BoxedFunction
    */
   get canonical(): Expression {
     if (this.isCanonical || !this.isValid) return this;
-    return this.engine.function(this._operator, this._ops);
+    // Thread the source position through (a raw statement's `.canonical` is
+    // how a `Block`/`Loop` body canonicalizes — without this, no statement
+    // inside a scoped operator can be mapped back to source). `latex` is
+    // deliberately NOT threaded here: the canonical form is a different
+    // expression, for which verbatim source LaTeX would be a lie.
+    return this.engine.function(
+      this._operator,
+      this._ops,
+      this.sourceOffsets !== undefined
+        ? { metadata: { sourceOffsets: this.sourceOffsets } }
+        : undefined
+    );
   }
 
   get structural(): Expression {
