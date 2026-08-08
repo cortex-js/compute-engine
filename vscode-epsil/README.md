@@ -20,26 +20,33 @@ programming language of the Cortex Compute Engine.
 
 ## Debugging
 
-Set breakpoints in the gutter and press <kbd>F5</kbd>. The debugger executes
-the program **one top-level statement at a time** (the same evaluation
-`executeEpsil` performs), pausing between statements:
+Set breakpoints in the gutter and press <kbd>F5</kbd>. The debuggee runs on a
+worker thread that pauses **at every statement** — top-level statements, and
+the statements inside function bodies, loop bodies and `if` branches:
 
-- **Breakpoints** bind to top-level statement lines — a breakpoint on a blank
-  or continuation line snaps to the next statement.
-- **Step Over** runs one statement. Everything *inside* a statement — a
-  `while` body, a function call — runs to completion as a single step, so
-  Step Into/Out currently behave like Step Over (statement-level granularity
-  is the current design; see `VSCODE_EPSIL_ROADMAP.md`).
-- **Variables** shows every binding you have declared, with its inferred type;
+- **Breakpoints** bind to statement lines anywhere, including inside a
+  function or loop body — a breakpoint on a blank or continuation line snaps
+  to the next statement. A loop-body breakpoint stops on every iteration.
+- **Step Over / Into / Out** work at statement granularity: Step Into enters
+  a called function's body; Step Out runs to the caller. (A single statement
+  that is one pure computation — no block statements inside — executes as
+  one step.)
+- **Variables** shows every binding visible from the paused scope — locals
+  and parameters included when paused inside a body — with inferred types;
   lists, tuples and dictionaries expand. Hovering a variable name shows its
   value.
+- **Call stack** shows the nesting of the paused position, down to the
+  top-level statement that started it.
 - **Debug console and watches** evaluate with full Epsil semantics in the
-  live session scope — like the REPL. That also means an expression with a
+  live paused scope — like the REPL. That also means an expression with a
   side effect (an assignment, a declaration) takes effect in the paused
   program; watches are re-evaluated on every stop, so keep them effect-free.
-- **Pause** takes effect at the next statement boundary. A single statement
-  that never returns cannot be paused — bound it up front with the
-  `statementTimeLimit` launch option (ms per statement), or stop the session.
+- **Pause** takes effect at the next statement pause point. A statement that
+  is a single long-running pure computation cannot be paused — bound it up
+  front with the `statementTimeLimit` launch option (ms per statement), or
+  stop the session. (Note: the per-statement limit keeps counting while
+  paused at a breakpoint inside that statement — avoid combining a tight
+  limit with body breakpoints.)
 - Parse errors stop the launch (they are already shown inline by the language
   server); the program's final value is printed to the debug console when the
   run completes.
@@ -87,7 +94,7 @@ Useful commands:
 
 | Command                       | What it does                                        |
 | ----------------------------- | --------------------------------------------------- |
-| `npm run build`               | Bundle `dist/extension.js`, `dist/server.js` and `dist/debug-adapter.js`. |
+| `npm run build`               | Bundle `dist/extension.js`, `dist/server.js`, `dist/debug-adapter.js` and `dist/debug-worker.js`. |
 | `npm run watch`               | Same, rebuilding on change.                          |
 | `./node_modules/.bin/tsc --noEmit` | Type-check the extension (esbuild does the emit). |
 

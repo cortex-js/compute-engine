@@ -208,8 +208,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // The symbol is canonical if it has a definition
     if (this._def) return this;
 
-    // Return a new canonical symbol, scoped in the current context
-    return this.engine.symbol(this._id);
+    // Return a new canonical symbol, scoped in the current context. The
+    // source position rides along (a bare-symbol statement is the idiomatic
+    // Epsil return value; the debugger pauses on it by its offsets).
+    return this.engine.symbol(
+      this._id,
+      this.sourceOffsets !== undefined
+        ? { metadata: { sourceOffsets: this.sourceOffsets } }
+        : undefined
+    );
   }
 
   is(

@@ -45,7 +45,10 @@ import {
 import { osaDistance } from '../common/fuzzy-string-match.js';
 
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
-import type { MathJsonSymbol } from '../math-json/types.js';
+import type {
+  MathJsonExpression,
+  MathJsonSymbol,
+} from '../math-json/types.js';
 
 import type {
   ValueDefinition,
@@ -1456,7 +1459,14 @@ export function assignFn(
         const selfDef = ce.lookupDefinition(id);
         if (selfDef && isValueDef(selfDef) && selfDef.value.inferredType)
           selfDef.value.type = ce.type('function');
-        if (boxedFn) arg2 = ce.box(boxedFn.json) as AssignValue;
+        // Serialize WITH `sourceOffsets` (`.json` drops them): this re-box
+        // otherwise erased every recursive function body's source positions,
+        // which is what the debugger's body breakpoints map statements back
+        // through. NOT `toMathJson()` — that is the display serializer, and
+        // its function shorthand collapses the literal (dropping the
+        // parameter list).
+        if (boxedFn)
+          arg2 = ce.box(jsonWithSourceOffsets(boxedFn)) as AssignValue;
       }
     }
 
@@ -1898,6 +1908,37 @@ function assignValueAsValue(
  * CANONICAL-time constructor-function recognition (§4.5b D13): an alias
  * type's same-name function replaces the minted identity constructor at
  * canonicalization so later statements validate against the real signature. */
+/**
+ * The plain-structure serialization of `get json`, with each function node's
+ * (and symbol's) `sourceOffsets` kept, in the object form the Epsil parser
+ * itself emits — so re-boxing preserves the debugger's statement-level pause
+ * points. Number/string atoms delegate to `.json` unchanged (a bare NUMBER
+ * literal statement loses its position; statement anchors are function
+ * expressions and symbols).
+ *
+ * Deliberately NOT `toMathJson()`: that is the display serializer, whose
+ * function shorthand rewrites a `Function` literal (collapsing its parameter
+ * list) — the re-boxed value must be structurally faithful.
+ */
+function jsonWithSourceOffsets(expr: Expression): MathJsonExpression {
+  const sourceOffsets = expr.sourceOffsets;
+  if (isSymbol(expr)) {
+    return sourceOffsets !== undefined
+      ? { sym: expr.symbol, sourceOffsets }
+      : expr.json;
+  }
+  if (!isFunction(expr)) return expr.json;
+  // Mirror `BoxedFunction.get json`: serialize the structural form's
+  // operands (sorting/flattening for associative operators, no folding).
+  const structural = expr.structural;
+  const ops = isFunction(structural) ? structural.ops : expr.ops;
+  const fn = [expr.operator, ...ops.map(jsonWithSourceOffsets)] as [
+    MathJsonSymbol,
+    ...MathJsonExpression[],
+  ];
+  return sourceOffsets !== undefined ? { fn, sourceOffsets } : fn;
+}
+
 export function assignValueAsOperatorDef(
   ce: IComputeEngine,
   value: AssignValue

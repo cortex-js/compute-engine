@@ -124,9 +124,12 @@ needs a debug hook:
 ## Recommended sequence
 
 1. ~~**Source-offsets audit**~~ — DONE 2026-08-07 (findings below).
-2. ~~**Tier 1**~~ — SHIPPED 2026-08-07 (see above). Tier 0 (inline result
-   decorations) remains open; it can reuse the adapter's statement loop.
-3. **Tier 2** only if stepping into loops/functions proves a real demand.
+2. ~~**Tier 1**~~ — SHIPPED 2026-08-07 (see above).
+3. ~~**Tier 2**~~ — SHIPPED 2026-08-07 (offsets propagation + evaluator
+   hook + worker-thread debuggee; see "The evaluator hook" below).
+   Remaining open: Tier 0 (inline result decorations, can reuse the worker
+   protocol) and Tier 3 polish (conditional breakpoints, logpoints,
+   break-on-error-value).
 
 ## Audit: `sourceOffsets` survival through boxing/canonicalization
 
@@ -219,5 +222,64 @@ and `.canonical` routes. Synthesized lowering nodes (`If`/`Break` from
 stays unstamped; LaTeX-parsed and programmatically built expressions are
 unchanged.
 
-With this landed, Tier 2's remaining work is the evaluator hook (the
-`onStatement` callback + async execution path + call-stack surfacing).
+### The evaluator hook — SHIPPED 2026-08-07 (Tier 2 complete)
+
+Design pivot from the original sketch: no async execution path. Instead —
+
+- **Engine**: a synchronous, module-global statement hook
+  (`src/common/debug-hook.ts`, zero imports) fired by `evaluateStatements`
+  (`function-utils.ts` — the sequencer behind `Block` bodies, lambda bodies
+  and `if` branches) before each statement carrying `sourceOffsets`. One
+  comparison per statement when unset; engine-internal blocks never fire.
+  This is the ONLY engine surface — since every Epsil function body, loop
+  body and `if` branch is a `Block`, one hook site covers them all
+  (verified: loop bodies fire per iteration, function bodies on
+  application). Pinned by `test/compute-engine/debug-hook.test.ts`.
+- **Debugger**: the debuggee moved to a worker thread
+  (`vscode-epsil/src/debug-worker.ts`, engine bundled; protocol in
+  `debug-protocol.ts`). Pausing = blocking synchronously in the hook
+  (`Atomics.wait` on a shared futex); while paused the worker services
+  inspection commands (variables, watches, stack) by polling its command
+  port with `receiveMessageOnPort`, so watches run against the live paused
+  scope — sidestepping the concurrent-async-evaluation limitation entirely.
+  The main-thread adapter (`debug-adapter.ts`) is a thin DAP↔worker bridge.
+- **Step Over/Into/Out**: relative `ce.contextStack.length` depth at the
+  pause, compared at each subsequent hook fire. Bare `Block` statements
+  never stop (the loop-lowering wrapper starts on the first body line —
+  stopping on both would double-stop every iteration).
+- **Call stack**: a per-depth last-hook-line stack maintained by the worker,
+  named from `contextStack` entries where names exist, with the top-level
+  statement as the bottom frame.
+- **Breakpoint verification**: all raw-AST `Block` operand start-lines plus
+  top-level statement lines.
+
+**Follow-up round (same day) — call-stack naming + coverage holes.** Frames
+initially showed the engine's internal `anonymous_N` scope labels, one per
+context depth (nested blocks each added a frame), and recursive function
+bodies never fired the hook at all. Fixes:
+
+- The three lambda-application `pushScope(freshScope)` sites
+  (`function-utils.ts`) now name their context `'call'` — the activation
+  marker. The worker emits ONE frame per `'call'` context (nested unnamed
+  block/loop contexts group into it), so frame count matches activations,
+  including direct recursion. Display names come from source spans: the
+  worker records every `Function` literal's span (named via the enclosing
+  `DefineFunction`), and a frame is named by the innermost span containing
+  its current statement's offset. (`ce.trace` now reports `'call'` rows;
+  it had no consumers.)
+- **Recursive bodies fired nothing**: the assign-time knot-tying re-box
+  (`engine-declarations.ts` — a self-referential literal is re-boxed from
+  JSON so the self-call binds the real definition) serialized WITHOUT
+  `sourceOffsets`, erasing every recursive function body's positions. Fixed
+  by serializing with `metadata: ['sourceOffsets']`.
+- `captureClosures` rebuilds (4 sites) and `BoxedSymbol.canonical` now
+  thread `sourceOffsets`, so closure-captured bodies and bare-symbol return
+  statements (the idiomatic Epsil return) keep their pause points.
+
+Known limits: a statement that is one pure computation (no block statements
+inside) has no pause points — terminate or `statementTimeLimit` only, and
+the per-statement time limit keeps counting while paused inside that
+statement. A bare NUMBER-literal statement (`{ 1 }` as a whole branch body)
+does not fire. Hover remains identifier-only. Evaluate/variables requests
+while running (not paused) are declined. Anonymous lambdas show
+`(anonymous)` in the stack.

@@ -1,29 +1,35 @@
-// Debug adapter (DAP) for Epsil — Tier 1 of VSCODE_EPSIL_ROADMAP.md.
+// Debug adapter (DAP) for Epsil — Tiers 1+2 of VSCODE_EPSIL_ROADMAP.md.
 //
-// Adapter and debuggee share this one process: the adapter mirrors
-// `executeEpsil`'s statement loop (parse → box+evaluate each top-level
-// statement in the engine's current scope) under DAP control, pausing between
-// statements. Statement granularity is the Tier 1 contract: breakpoints bind
-// to top-level statement lines, "step" runs one statement, and control flow
-// *inside* a statement (a `while` body, a function call) runs to completion —
-// stepping into it is Tier 2 (needs engine hooks; see the roadmap).
+// Two threads:
+//  - THIS file (main thread): the DAP endpoint. It owns no engine — it
+//    translates protocol requests into commands for the debuggee worker and
+//    forwards the worker's events.
+//  - debug-worker.ts (worker thread): the debuggee. It embeds the engine,
+//    executes the program, and pauses by BLOCKING synchronously — between
+//    top-level statements and, via the engine's debug statement hook, before
+//    every source-mapped statement inside function bodies, loop bodies and
+//    `if` branches. While paused it services inspection commands from its
+//    pause loop, so variables and watches run against the live paused scope.
 //
-// The event loop is shared between DAP traffic and evaluation, so the loop
-// yields (`setImmediate`) before each statement: pause/terminate/evaluate
-// requests are serviced at statement boundaries. A single runaway statement
-// cannot be paused — only terminated (process kill) or bounded up front with
-// the `statementTimeLimit` launch option.
+// The command channel is a MessagePort the worker polls SYNCHRONOUSLY
+// (`receiveMessageOnPort`) plus a shared Int32 futex: the main thread posts
+// a command, flips the flag, and `Atomics.notify`s; the worker wakes from
+// `Atomics.wait` even while blocked mid-evaluation. Worker → main replies
+// ride ordinary `postMessage`, which delivers fine from a blocked worker.
 //
-// Like the language server, the engine is bundled from repo source (see
-// build.mjs); everything lives in one bundle, so `instanceof` is safe here.
+// Limits: a statement that fires no pause points (a single long-running
+// pure computation) cannot be paused — only terminated, or bounded with the
+// `statementTimeLimit` launch option. Note that the per-statement time limit
+// keeps running while paused at a breakpoint inside that statement, so avoid
+// combining a tight limit with body breakpoints.
 
 import { readFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
+import { MessageChannel, Worker } from 'node:worker_threads';
 
 import {
   Breakpoint,
   DebugSession,
-  Handles,
   InitializedEvent,
   OutputEvent,
   Scope,
@@ -35,75 +41,47 @@ import {
 } from '@vscode/debugadapter';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 
-import {
-  ComputeEngine,
-  executeEpsil,
-  parseEpsil,
-  serializeEpsil,
-} from '../../src/epsil.js';
-import {
-  isFunction,
-  isSymbol,
-  type BoxedDefinition,
-  type BoxedExpression,
-} from '../../src/compute-engine.js';
-import { typeToString } from '../../src/common/type/serialize.js';
-import type { MathJsonExpression } from '../../src/math-json/types.js';
-import { operands, operator, stringValue } from '../../src/math-json/utils.js';
-import { FatalParsingError } from '../../src/epsil/diagnostics.js';
-import { formatDiagnostics } from '../../src/cli/format.js';
+import type {
+  FrameInfo,
+  WorkerCommand,
+  WorkerConfig,
+  WorkerEvent,
+} from './debug-protocol.js';
 
 const THREAD_ID = 1;
-
-/** Cap for a value rendered inline (Variables pane, hover, watch). */
-const INLINE_VALUE_MAX = 200;
-/** Cap for a value printed to the debug console. */
-const CONSOLE_VALUE_MAX = 10_000;
+const GLOBALS_REF = 1;
+/** Deadline for a worker inspection reply — the worker only services
+ * commands while paused, so a reply not arriving promptly means it is off
+ * running (or wedged); fail the request rather than hang the client. */
+const REPLY_TIMEOUT_MS = 3_000;
 
 interface EpsilLaunchArguments extends DebugProtocol.LaunchRequestArguments {
   /** Path of the Epsil source file to run. */
   program: string;
   /** Stop before the first statement. */
   stopOnEntry?: boolean;
-  /** Per-statement evaluation deadline in ms (0 = none). The only guard
-   * against a statement that never returns — pause cannot interrupt one. */
+  /** Per-statement evaluation deadline in ms (0 = none). */
   statementTimeLimit?: number;
   /** Set by VS Code for "Run Without Debugging": breakpoints are ignored. */
   noDebug?: boolean;
 }
 
-interface StatementInfo {
-  json: MathJsonExpression;
-  /** 1-based source line of the statement's first character. */
-  line: number;
-}
-
-/** What a `variablesReference` handle resolves to. */
-type VariableContainer =
-  | { kind: 'globals' }
-  | { kind: 'expr'; expr: BoxedExpression };
-
 export class EpsilDebugSession extends DebugSession {
-  private engine!: ComputeEngine;
-  private parseLatex!: (latex: string) => MathJsonExpression;
+  private worker: Worker | undefined;
+  private commandPort: import('node:worker_threads').MessagePort | undefined;
+  private ctrl: Int32Array | undefined;
 
-  private launchArgs: EpsilLaunchArguments | undefined;
   private programPath = '';
-  private sourceText = '';
-  private statements: StatementInfo[] = [];
+  /** Lines a breakpoint can bind to (from the worker's AST walk). */
+  private breakpointableLines: number[] = [];
+  private paused = false;
+  private lastStop: { line: number; frames: FrameInfo[] } | undefined;
 
-  /** Index of the next statement to execute. */
-  private index = 0;
-  /** Value of the last executed statement (the program result at the end). */
-  private lastValue: BoxedExpression | undefined;
-
-  /** Verified breakpoint lines (1-based, statement-start lines). */
-  private breakpointLines = new Set<number>();
-  private running = false;
-  private pauseRequested = false;
-  private terminated = false;
-
-  private variableHandles = new Handles<VariableContainer>();
+  private nextRequestId = 1;
+  private pendingReplies = new Map<
+    number,
+    { resolve: (event: WorkerEvent) => void; timer: NodeJS.Timeout }
+  >();
 
   constructor() {
     super();
@@ -120,21 +98,22 @@ export class EpsilDebugSession extends DebugSession {
       supportsConfigurationDoneRequest: true,
       supportsTerminateRequest: true,
       supportsEvaluateForHovers: true,
+      supportsSteppingGranularity: false,
     };
     this.sendResponse(response);
-    // InitializedEvent is deliberately deferred to launchRequest: breakpoints
-    // can only be verified against the parsed statement list.
+    // InitializedEvent is deferred to launchRequest: breakpoints can only be
+    // verified once the worker has parsed the program.
   }
 
   protected override launchRequest(
     response: DebugProtocol.LaunchResponse,
     args: EpsilLaunchArguments
   ): void {
-    this.launchArgs = args;
     this.programPath = args.program;
 
+    let sourceText: string;
     try {
-      this.sourceText = readFileSync(args.program, 'utf8');
+      sourceText = readFileSync(args.program, 'utf8');
     } catch (error) {
       this.sendErrorResponse(response, {
         id: 1001,
@@ -145,88 +124,143 @@ export class EpsilDebugSession extends DebugSession {
       return;
     }
 
-    this.engine = new ComputeEngine();
-    this.parseLatex = (latex) => this.engine.parse(latex).json;
+    const controlBuffer = new SharedArrayBuffer(4);
+    this.ctrl = new Int32Array(controlBuffer);
+    const channel = new MessageChannel();
+    this.commandPort = channel.port1;
 
-    let ast: MathJsonExpression;
-    try {
-      const [parsed, diagnostics] = parseEpsil(
-        this.sourceText,
-        this.programPath,
-        {
-          parseLatex: this.parseLatex,
-          typeNames: this.engine._typeResolver.names,
+    const config: WorkerConfig = {
+      program: args.program,
+      sourceText,
+      stopOnEntry: args.stopOnEntry === true,
+      statementTimeLimit: args.statementTimeLimit ?? 0,
+      noDebug: args.noDebug === true,
+      controlBuffer,
+      commandPort: channel.port2,
+    };
+
+    this.worker = new Worker(join(__dirname, 'debug-worker.js'), {
+      workerData: config,
+      transferList: [channel.port2],
+    });
+
+    let launched = false;
+    this.worker.on('message', (event: WorkerEvent) => {
+      if (event.type === 'ready') {
+        this.breakpointableLines = event.breakpointableLines;
+        if (!launched) {
+          launched = true;
+          this.sendResponse(response);
+          this.sendEvent(new InitializedEvent());
         }
-      );
-      ast = parsed;
-      if (diagnostics.length > 0) {
-        this.output(
-          formatDiagnostics(diagnostics, this.sourceText, this.programPath, false) +
-            '\n',
-          'stderr'
-        );
-      }
-      // A mis-parsed program yields a guessed AST with unreliable line
-      // mapping: like a compile error, it stops the launch. (The language
-      // server shows the same diagnostics inline.)
-      if (diagnostics.some((x) => x.severity === 'error')) {
-        this.sendResponse(response);
-        this.sendEvent(new TerminatedEvent());
         return;
       }
-    } catch (error) {
-      if (error instanceof FatalParsingError) {
-        this.output(`error: ${error.message}\n`, 'stderr');
+      this.onWorkerEvent(event);
+      // A parse failure terminates before 'ready'; the launch must still be
+      // answered for the session to shut down cleanly.
+      if (event.type === 'terminated' && !launched) {
+        launched = true;
         this.sendResponse(response);
-        this.sendEvent(new TerminatedEvent());
-        return;
       }
-      throw error;
-    }
-
-    // Unwrap the program wrapper (same rule as `executeEpsil`): a top-level
-    // `Block` is unambiguously the multi-statement wrapper.
-    const statements =
-      operator(ast) === 'Block' ? [...operands(ast)] : [ast];
-    this.statements = statements.map((stmt) => ({
-      json: stmt,
-      line: this.lineOfOffset(this.offsetsOf(stmt)[0]),
-    }));
-
-    this.sendResponse(response);
-    // Ready for breakpoint configuration; execution starts at
-    // configurationDone.
-    this.sendEvent(new InitializedEvent());
+    });
+    this.worker.on('error', (error) => {
+      this.output(`debuggee error: ${error.message}\n`, 'stderr');
+      this.sendEvent(new TerminatedEvent());
+    });
+    this.worker.on('exit', () => {
+      this.worker = undefined;
+    });
   }
 
   protected override configurationDoneRequest(
     response: DebugProtocol.ConfigurationDoneResponse
   ): void {
     this.sendResponse(response);
-    if (this.statements.length === 0) return this.finish();
-    if (this.launchArgs?.stopOnEntry && !this.launchArgs.noDebug)
-      return this.reportStopped('entry');
-    if (this.shouldBreakAt(0)) return this.reportStopped('breakpoint');
-    void this.resume(false);
+    this.postCommand({ type: 'start' });
   }
 
   protected override disconnectRequest(
     response: DebugProtocol.DisconnectResponse
   ): void {
-    this.terminated = true;
+    void this.worker?.terminate();
     this.sendResponse(response);
-    // The host closes our stdio after this; exit deterministically anyway.
     setTimeout(() => process.exit(0), 100);
   }
 
   protected override terminateRequest(
     response: DebugProtocol.TerminateResponse
   ): void {
-    this.terminated = true;
+    this.postCommand({ type: 'terminate' });
     this.sendResponse(response);
-    // If the run loop is live it emits TerminatedEvent at the next statement
-    // boundary; when stopped, emit it now.
-    if (!this.running) this.sendEvent(new TerminatedEvent());
+    // If the worker is wedged in a computation with no pause points, the
+    // command never lands: hard-kill after a grace period.
+    const worker = this.worker;
+    setTimeout(() => {
+      if (worker !== undefined && this.worker === worker) {
+        void worker.terminate();
+        this.sendEvent(new TerminatedEvent());
+      }
+    }, 2_000);
+  }
+
+  // ── Worker events ──────────────────────────────────────────────────────
+
+  private onWorkerEvent(event: WorkerEvent): void {
+    switch (event.type) {
+      case 'output': {
+        this.output(event.text, event.category, event.line);
+        break;
+      }
+      case 'stopped': {
+        this.paused = true;
+        this.lastStop = { line: event.line, frames: event.frames };
+        this.sendEvent(new StoppedEvent(event.reason, THREAD_ID));
+        break;
+      }
+      case 'terminated': {
+        this.sendEvent(new TerminatedEvent());
+        break;
+      }
+      case 'variables-reply':
+      case 'evaluate-reply': {
+        const pending = this.pendingReplies.get(event.id);
+        if (pending !== undefined) {
+          this.pendingReplies.delete(event.id);
+          clearTimeout(pending.timer);
+          pending.resolve(event);
+        }
+        break;
+      }
+    }
+  }
+
+  // ── Commands to the worker ─────────────────────────────────────────────
+
+  private postCommand(command: WorkerCommand): void {
+    if (this.commandPort === undefined || this.ctrl === undefined) return;
+    this.commandPort.postMessage(command);
+    Atomics.store(this.ctrl, 0, 1);
+    Atomics.notify(this.ctrl, 0);
+  }
+
+  /** Post a command that expects a reply (only serviced while paused). */
+  private request(
+    command: WorkerCommand & { id: number }
+  ): Promise<WorkerEvent | undefined> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingReplies.delete(command.id);
+        resolve(undefined);
+      }, REPLY_TIMEOUT_MS);
+      this.pendingReplies.set(command.id, { resolve, timer });
+      this.postCommand(command);
+    });
+  }
+
+  private resume(command: WorkerCommand): void {
+    this.paused = false;
+    this.lastStop = undefined;
+    this.postCommand(command);
   }
 
   // ── Breakpoints ────────────────────────────────────────────────────────
@@ -235,20 +269,18 @@ export class EpsilDebugSession extends DebugSession {
     response: DebugProtocol.SetBreakpointsResponse,
     args: DebugProtocol.SetBreakpointsArguments
   ): void {
-    this.breakpointLines.clear();
+    const verified = new Set<number>();
     const breakpoints = (args.breakpoints ?? []).map((requested) => {
       const line = this.convertClientLineToDebugger(requested.line);
-      // Bind to the first statement at or after the requested line — the
-      // standard "next valid location" convention.
-      const target = this.statements.find((s) => s.line >= line);
+      // Bind to the first statement line at or after the requested line —
+      // the standard "next valid location" convention.
+      const target = this.breakpointableLines.find((l) => l >= line);
       if (target === undefined)
         return new Breakpoint(false, this.convertDebuggerLineToClient(line));
-      this.breakpointLines.add(target.line);
-      return new Breakpoint(
-        true,
-        this.convertDebuggerLineToClient(target.line)
-      );
+      verified.add(target);
+      return new Breakpoint(true, this.convertDebuggerLineToClient(target));
     });
+    this.postCommand({ type: 'breakpoints', lines: [...verified] });
     response.body = { breakpoints };
     this.sendResponse(response);
   }
@@ -259,127 +291,33 @@ export class EpsilDebugSession extends DebugSession {
     response: DebugProtocol.ContinueResponse
   ): void {
     this.sendResponse(response);
-    if (!this.running) void this.resume(false);
+    this.resume({ type: 'continue' });
   }
 
-  protected override nextRequest(
-    response: DebugProtocol.NextResponse
-  ): void {
+  protected override nextRequest(response: DebugProtocol.NextResponse): void {
     this.sendResponse(response);
-    if (!this.running) void this.resume(true);
+    this.resume({ type: 'step', mode: 'over' });
   }
 
-  // Tier 1 has nothing to step into or out of — both act like "next". (The
-  // capabilities can't decline these: DAP treats stepIn/stepOut as core.)
   protected override stepInRequest(
     response: DebugProtocol.StepInResponse
   ): void {
     this.sendResponse(response);
-    if (!this.running) void this.resume(true);
+    this.resume({ type: 'step', mode: 'in' });
   }
 
   protected override stepOutRequest(
     response: DebugProtocol.StepOutResponse
   ): void {
     this.sendResponse(response);
-    if (!this.running) void this.resume(true);
+    this.resume({ type: 'step', mode: 'out' });
   }
 
   protected override pauseRequest(
     response: DebugProtocol.PauseResponse
   ): void {
-    this.pauseRequested = true;
+    this.postCommand({ type: 'pause' });
     this.sendResponse(response);
-  }
-
-  /**
-   * The run loop. Executes statements until a stop condition (step done,
-   * breakpoint, pause, termination) or the end of the program. Yields to the
-   * event loop before each statement so queued DAP requests are serviced.
-   */
-  private async resume(stepOne: boolean): Promise<void> {
-    this.running = true;
-    try {
-      while (!this.terminated && this.index < this.statements.length) {
-        await this.executeStatement(this.statements[this.index]);
-        this.index++;
-        if (this.terminated) break;
-        if (this.index >= this.statements.length) break;
-        if (stepOne) return this.reportStopped('step');
-        if (this.pauseRequested) {
-          this.pauseRequested = false;
-          return this.reportStopped('pause');
-        }
-        if (!this.launchArgs?.noDebug && this.shouldBreakAt(this.index))
-          return this.reportStopped('breakpoint');
-      }
-      if (this.terminated) this.sendEvent(new TerminatedEvent());
-      else this.finish();
-    } finally {
-      this.running = false;
-    }
-  }
-
-  /** Break at statement `index`? True when its line has a breakpoint and the
-   * statement is the first of that line (several `;`-separated statements on
-   * one line stop once, not once per statement). */
-  private shouldBreakAt(index: number): boolean {
-    const line = this.statements[index].line;
-    if (!this.breakpointLines.has(line)) return false;
-    return index === 0 || this.statements[index - 1].line !== line;
-  }
-
-  private async executeStatement(stmt: StatementInfo): Promise<void> {
-    // Service pending DAP traffic (pause, terminate, evaluate, breakpoints).
-    await new Promise((resolve) => setImmediate(resolve));
-    if (this.terminated) return;
-
-    // Mirrors `executeEpsil`: runtime problems become `["Error", …]` values;
-    // the try/catch is the backstop for the throwing paths (const
-    // reassignment, cap breaches).
-    let value: BoxedExpression;
-    const run = () => this.engine.box(stmt.json).evaluate();
-    try {
-      const limit = this.launchArgs?.statementTimeLimit ?? 0;
-      value =
-        limit > 0
-          ? this.engine.withTimeLimit({ ms: limit, label: 'epsil:debug' }, run)
-          : run();
-    } catch (error) {
-      value = this.engine.box([
-        'Error',
-        { str: error instanceof Error ? error.message : String(error) },
-      ]);
-    }
-    this.lastValue = value;
-
-    const errors = value.errors;
-    if (errors.length > 0) {
-      this.output(
-        `${basename(this.programPath)}:${stmt.line}: ${errors[0].toString()}\n`,
-        'stderr',
-        stmt.line
-      );
-    }
-  }
-
-  /** Program ran to completion: print the result (the last statement's
-   * value — Epsil's output convention) and terminate. */
-  private finish(): void {
-    const value = this.lastValue;
-    if (
-      value !== undefined &&
-      !(isSymbol(value) && value.symbol === 'Nothing') &&
-      value.errors.length === 0
-    ) {
-      this.output(`${this.render(value, CONSOLE_VALUE_MAX)}\n`, 'stdout');
-    }
-    this.sendEvent(new TerminatedEvent());
-  }
-
-  private reportStopped(reason: string): void {
-    this.variableHandles.reset();
-    this.sendEvent(new StoppedEvent(reason, THREAD_ID));
   }
 
   // ── Inspection ─────────────────────────────────────────────────────────
@@ -394,259 +332,93 @@ export class EpsilDebugSession extends DebugSession {
   protected override stackTraceRequest(
     response: DebugProtocol.StackTraceResponse
   ): void {
-    // One frame — Tier 1 stops only between top-level statements. The frame
-    // points at the next statement to execute (or the last one at the end).
-    const current =
-      this.statements[Math.min(this.index, this.statements.length - 1)];
-    const frame = new StackFrame(
-      1,
-      'top level',
-      new Source(basename(this.programPath), this.programPath),
-      this.convertDebuggerLineToClient(current?.line ?? 1),
-      1
-    );
-    response.body = { stackFrames: [frame], totalFrames: 1 };
+    const frames = this.lastStop?.frames ?? [];
+    response.body = {
+      stackFrames: frames.map(
+        (frame, i) =>
+          new StackFrame(
+            i + 1,
+            frame.name,
+            new Source(basename(this.programPath), this.programPath),
+            frame.line > 0
+              ? this.convertDebuggerLineToClient(frame.line)
+              : undefined,
+            1
+          )
+      ),
+      totalFrames: frames.length,
+    };
     this.sendResponse(response);
   }
 
   protected override scopesRequest(
     response: DebugProtocol.ScopesResponse
   ): void {
-    response.body = {
-      scopes: [
-        new Scope(
-          'Variables',
-          this.variableHandles.create({ kind: 'globals' }),
-          false
-        ),
-      ],
-    };
+    // One scope: the worker's binding walk already merges the chain from the
+    // paused scope outward, so locals and globals appear together.
+    response.body = { scopes: [new Scope('Variables', GLOBALS_REF, false)] };
     this.sendResponse(response);
   }
 
-  protected override variablesRequest(
+  protected override async variablesRequest(
     response: DebugProtocol.VariablesResponse,
     args: DebugProtocol.VariablesArguments
-  ): void {
-    const container = this.variableHandles.get(args.variablesReference);
+  ): Promise<void> {
     response.body = { variables: [] };
-    if (container?.kind === 'globals') {
-      response.body.variables = this.collectBindings().map(([name, def]) =>
-        this.definitionVariable(name, def)
-      );
-    } else if (container?.kind === 'expr') {
-      response.body.variables = this.childVariables(container.expr);
+    if (this.paused) {
+      const reply = await this.request({
+        type: 'variables',
+        id: this.nextRequestId++,
+        ref: args.variablesReference,
+      });
+      if (reply?.type === 'variables-reply') {
+        response.body.variables = reply.variables.map((v) => ({
+          name: v.name,
+          value: v.value,
+          type: v.type,
+          variablesReference: v.ref === 0 ? 0 : v.ref,
+        }));
+      }
     }
     this.sendResponse(response);
   }
 
-  protected override evaluateRequest(
+  protected override async evaluateRequest(
     response: DebugProtocol.EvaluateResponse,
     args: DebugProtocol.EvaluateArguments
-  ): void {
-    if (this.engine === undefined) {
+  ): Promise<void> {
+    if (!this.paused) {
       this.sendErrorResponse(response, {
         id: 1002,
-        format: 'The Epsil session has not started yet.',
+        format: 'Only available while paused.',
       });
       return;
     }
-
-    // Hovers must not run code: an expression hover could call a function.
-    // Only a bare identifier — answered from the scope bindings, no
-    // evaluation — is safe.
-    if (args.context === 'hover') {
-      const name = args.expression.trim();
-      const def = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
-        ? this.collectBindings().find(([n]) => n === name)?.[1]
-        : undefined;
-      const expr = def !== undefined && 'value' in def ? def.value.value : undefined;
-      if (expr === undefined) {
-        this.sendErrorResponse(
-          response,
-          { id: 1003, format: 'not available' },
-          undefined,
-          undefined,
-          undefined // no telemetry, no UI: hover errors are silent
-        );
-        return;
-      }
-      response.body = {
-        result: this.render(expr, INLINE_VALUE_MAX),
-        variablesReference: this.referenceFor(expr),
-      };
-      this.sendResponse(response);
-      return;
-    }
-
-    // Debug-console and watch input evaluates with full Epsil semantics in
-    // the live session scope (exactly the REPL contract — declarations and
-    // assignments take effect; a watch with a side effect is on the author).
-    const result = executeEpsil(this.engine, args.expression, {
-      url: '(debug console)',
-      parseLatex: this.parseLatex,
+    const context =
+      args.context === 'hover' || args.context === 'watch'
+        ? args.context
+        : ('repl' as const);
+    const reply = await this.request({
+      type: 'evaluate',
+      id: this.nextRequestId++,
+      expression: args.expression,
+      context,
     });
-
-    const errors = result.diagnostics.filter((x) => x.severity === 'error');
-    if (errors.length > 0) {
+    if (reply?.type !== 'evaluate-reply' || !reply.ok) {
       this.sendErrorResponse(response, {
-        id: 1004,
-        format: formatDiagnostics(errors, args.expression, undefined, false),
+        id: 1003,
+        format:
+          reply?.type === 'evaluate-reply' && reply.result !== ''
+            ? reply.result
+            : 'not available',
       });
       return;
     }
-    if (args.context === 'repl' && result.diagnostics.length > 0) {
-      this.output(
-        formatDiagnostics(
-          result.diagnostics,
-          args.expression,
-          undefined,
-          false
-        ) + '\n',
-        'stderr'
-      );
-    }
-
-    response.body = {
-      result: this.render(result.value, INLINE_VALUE_MAX),
-      variablesReference: this.referenceFor(result.value),
-    };
+    response.body = { result: reply.result, variablesReference: reply.ref };
     this.sendResponse(response);
   }
 
-  // ── Variables helpers ──────────────────────────────────────────────────
-
-  /**
-   * The user's bindings: every name declared in the scope chain from the
-   * engine's current scope up to — excluding — the system (builtin) scope,
-   * innermost declaration winning. At a statement boundary the current scope
-   * is the global session scope, so this is exactly what the user declared.
-   */
-  private collectBindings(): Array<[string, BoxedDefinition]> {
-    const systemScope = this.engine.contextStack[0]?.lexicalScope;
-    const seen = new Map<string, BoxedDefinition>();
-    let scope: (typeof systemScope) | null = this.engine.context.lexicalScope;
-    while (scope !== null && scope !== undefined && scope !== systemScope) {
-      for (const [name, def] of scope.bindings)
-        if (!seen.has(name)) seen.set(name, def);
-      scope = scope.parent;
-    }
-    return [...seen].sort(([a], [b]) => a.localeCompare(b));
-  }
-
-  private definitionVariable(
-    name: string,
-    def: BoxedDefinition
-  ): DebugProtocol.Variable {
-    if ('operator' in def) {
-      return {
-        name,
-        value: this.signatureDisplay(def),
-        variablesReference: 0,
-      };
-    }
-    const expr = def.value.value;
-    return {
-      name,
-      value: expr === undefined ? '(unassigned)' : this.render(expr, INLINE_VALUE_MAX),
-      type: def.value.type.toString(),
-      variablesReference: expr === undefined ? 0 : this.referenceFor(expr),
-    };
-  }
-
-  /**
-   * The signature shown for a function binding.
-   *
-   * For a user-defined function the engine's arrow deliberately reports a
-   * bare parameter as `unknown` unless the body PROVES it can never be a
-   * scalar — scalar evidence is filtered out so the lambda auto-broadcast
-   * lift stays available (`inferredCollectionParameterType`). For DISPLAY
-   * that filter hides real information, so read the parameter BINDINGS in
-   * the body scope instead: they carry everything body-usage inference
-   * recorded (`c in digits` ⇒ `c: string`; `cs[i]` ⇒ the index union), and
-   * the parameter names to boot. Display-only — the engine's arrow type is
-   * untouched.
-   */
-  private signatureDisplay(
-    def: Extract<BoxedDefinition, { operator: unknown }>
-  ): string {
-    const opDef = def.operator;
-    const fallback = String(opDef.signature ?? 'function');
-    const lambda = opDef.lambda;
-    if (lambda === undefined || lambda.parameters.length === 0) return fallback;
-
-    const scope = lambda.body.localScope;
-    const params = lambda.parameters.map(({ name, type }) => {
-      // An annotated parameter shows its declared type.
-      if (type !== undefined) return `${name}: ${typeToString(type)}`;
-      // A bare parameter shows the binding evidence, when there is any.
-      const binding = scope?.bindings.get(name);
-      const bt =
-        binding !== undefined && 'value' in binding
-          ? binding.value.type
-          : undefined;
-      if (bt === undefined || bt.isUnknown) return name;
-      return `${name}: ${bt.toString()}`;
-    });
-
-    // The result slot comes from the engine's own arrow.
-    const st = opDef.signature?.type;
-    const result =
-      st !== undefined && typeof st !== 'string' && st.kind === 'signature'
-        ? st.result
-        : undefined;
-    if (result === undefined) return fallback;
-    return `(${params.join(', ')}) -> ${typeToString(result)}`;
-  }
-
-  /** Children of a structured value: its operands, labeled with Epsil's
-   * 1-based indices (dictionary entries labeled by key). */
-  private childVariables(expr: BoxedExpression): DebugProtocol.Variable[] {
-    if (!isFunction(expr)) return [];
-    return expr.ops.map((op, i) => {
-      // A dictionary operand is a key → value pair: label with the key.
-      if (
-        isFunction(op) &&
-        (op.operator === 'KeyValuePair' || op.operator === 'Tuple') &&
-        op.nops === 2
-      ) {
-        const key = stringValue(op.op1.json);
-        if (key !== null) {
-          const valueExpr = op.op2;
-          return {
-            name: key,
-            value: this.render(valueExpr, INLINE_VALUE_MAX),
-            variablesReference: this.referenceFor(valueExpr),
-          };
-        }
-      }
-      return {
-        name: `[${i + 1}]`,
-        value: this.render(op, INLINE_VALUE_MAX),
-        variablesReference: this.referenceFor(op),
-      };
-    });
-  }
-
-  /** A `variablesReference` for an expandable value (has operands), or 0. */
-  private referenceFor(expr: BoxedExpression): number {
-    if (!isFunction(expr) || expr.nops === 0) return 0;
-    return this.variableHandles.create({ kind: 'expr', expr });
-  }
-
-  // ── Rendering ──────────────────────────────────────────────────────────
-
-  private render(expr: BoxedExpression, maxLength: number): string {
-    let text: string;
-    try {
-      text = serializeEpsil(expr.json);
-    } catch {
-      text = expr.toString();
-    }
-    if (maxLength <= INLINE_VALUE_MAX) text = text.replace(/\s+/g, ' ');
-    if (text.length > maxLength) text = `${text.slice(0, maxLength - 1)}…`;
-    return text;
-  }
+  // ── Output ─────────────────────────────────────────────────────────────
 
   private output(
     text: string,
@@ -662,24 +434,6 @@ export class EpsilDebugSession extends DebugSession {
       event.body.line = this.convertDebuggerLineToClient(line);
     }
     this.sendEvent(event);
-  }
-
-  // ── Source positions ───────────────────────────────────────────────────
-
-  private offsetsOf(stmt: MathJsonExpression): [number, number] {
-    return (
-      (typeof stmt === 'object' && stmt !== null && !Array.isArray(stmt)
-        ? (stmt as { sourceOffsets?: [number, number] }).sourceOffsets
-        : undefined) ?? [0, this.sourceText.length]
-    );
-  }
-
-  /** 1-based line of a character offset. */
-  private lineOfOffset(offset: number): number {
-    let line = 1;
-    for (let i = 0; i < offset && i < this.sourceText.length; i++)
-      if (this.sourceText.charCodeAt(i) === 10) line++;
-    return line;
   }
 }
 

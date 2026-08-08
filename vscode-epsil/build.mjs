@@ -45,7 +45,14 @@ const CONFIGS = [
     ...COMMON,
     entryPoints: ['./src/debug-adapter.ts'],
     outfile: './dist/debug-adapter.js',
-    // Like the server: the engine (and the DAP library) ride in the bundle.
+    // The DAP endpoint only — the engine lives in the worker bundle.
+    external: [],
+  },
+  {
+    ...COMMON,
+    entryPoints: ['./src/debug-worker.ts'],
+    outfile: './dist/debug-worker.js',
+    // The debuggee: engine bundled from repo source, like the server.
     external: [],
   },
 ];

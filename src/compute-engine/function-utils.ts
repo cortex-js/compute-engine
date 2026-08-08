@@ -1481,12 +1481,21 @@ function captureClosures(
       // operand introduces a scope: `k ↦ (x ↦ If(x > 1, {k}, {0}))` applied at
       // `k = 100` returned the symbol `k`, while the same body without the
       // branch Blocks, or a plain `do { k }`, returned `100`.
+      // `metadata` on the rebuilds: a debugger maps statements back to
+      // source through `sourceOffsets`, and this copy is the body the hook
+      // sees at application time — dropping them here silently disables
+      // body breakpoints for the rebuilt statements.
       const closedBlock = ce._fn(
         'Block',
         innerBlock.ops.map((op) => captureClosures(ce, op, closureScope)),
-        { scope: closureScope }
+        {
+          scope: closureScope,
+          metadata: { sourceOffsets: innerBlock.sourceOffsets },
+        }
       );
-      return ce._fn('Function', [closedBlock, ...expr.ops.slice(1)]);
+      return ce._fn('Function', [closedBlock, ...expr.ops.slice(1)], {
+        metadata: { sourceOffsets: expr.sourceOffsets },
+      });
     }
     return expr;
   }
@@ -1524,7 +1533,7 @@ function captureClosures(
     return ce._fn(
       expr.operator!,
       expr.ops.map((op) => captureClosures(ce, op, scope)),
-      { scope }
+      { scope, metadata: { sourceOffsets: expr.sourceOffsets } }
     );
   }
 
@@ -1536,7 +1545,10 @@ function captureClosures(
       if (captured !== op) changed = true;
       return captured;
     });
-    if (changed) return ce._fn(expr.operator!, newOps);
+    if (changed)
+      return ce._fn(expr.operator!, newOps, {
+        metadata: { sourceOffsets: expr.sourceOffsets },
+      });
   }
 
   return expr;
@@ -1710,7 +1722,10 @@ function makeLambda(
       // condition then reads the valueless binding forever and never
       // terminates.
       const hiddenBindings = hideBodyScopeParams(bodyScope, []);
-      ce.pushScope(freshScope);
+      // Named 'call': a function-application activation frame. The debugger's
+      // statement hook uses this to delimit stack frames (one per
+      // activation — nested unnamed Block/loop contexts group into it).
+      ce.pushScope(freshScope, 'call');
       let result: Expression;
       try {
         result = unwrapReturn(ce, evaluateStatements(ce, nullaryBody.ops));
@@ -1957,7 +1972,10 @@ function makeLambda(
         .map((p) => functionLiteralParameterName(p));
       const hiddenBindings = hideBodyScopeParams(bodyScope, curryParamNames);
 
-      ce.pushScope(freshScope);
+      // Named 'call': a function-application activation frame. The debugger's
+      // statement hook uses this to delimit stack frames (one per
+      // activation — nested unnamed Block/loop contexts group into it).
+      ce.pushScope(freshScope, 'call');
       let newBody: Expression;
       try {
         newBody = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));
@@ -2056,7 +2074,10 @@ function makeLambda(
     // Push fresh scope and evaluate block contents directly.
     // We evaluate bodyFn.ops (the Block's children) rather than calling
     // body.evaluate() — see evaluateStatements JSDoc for why.
-    ce.pushScope(freshScope);
+    // Named 'call': a function-application activation frame. The debugger's
+      // statement hook uses this to delimit stack frames (one per
+      // activation — nested unnamed Block/loop contexts group into it).
+      ce.pushScope(freshScope, 'call');
     let result: Expression;
     try {
       result = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));
