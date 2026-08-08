@@ -3,6 +3,9 @@
 Status: living document. Started 2026-08-06 from a design conversation on
 sum types, monads/functors, and protocols; the empirical probes cited were
 run that day against the parameterized-nominal-types working tree.
+Updated 2026-08-08 after reviewing the system against Hindley–Milner and
+assessing the cost of F-bounded bounds (§5) and constrained HKT (§6);
+the `Map`-precision probes cited in §6 were run that day.
 
 Design docs for the shipped and in-flight tiers (each §1 item points to
 its own):
@@ -23,7 +26,8 @@ its own):
 - `docs/plans/2026-08-03-cortex-language-extensions-review.md` —
   language-level backlog (sum sugar would slot there)
 - `src/epsil/docs/types.md` — Epsil-surface reference for the `type` /
-  `type alias` statements
+  `type alias` statements, plus user-facing background on how the type
+  system works (lattice, local generics, evidence-based inference)
 
 ### In flight as of 2026-08-06
 
@@ -78,6 +82,19 @@ propagating values, effects via the effect system) rather than user-facing
 monad/functor abstraction. The built-in propagation semantics removes most
 everyday motivation for the abstraction tier; the roadmap below keeps the
 door open without committing to it.
+
+Relatedly, the system is deliberately **not Hindley–Milner**: the base
+relation is a subtype lattice (join/meet), not type equality under
+unification; generics are explicitly quantified and solved locally at each
+call site by a bound-collection/join fold (D2: `forall T. (T, T) -> T` at
+`(integer, real)` solves `T = real` where HM would fail to unify); and
+inference of unannotated symbols is evidence-based and *revisable* (narrow
+from argument use, widen from value assignment, non-monotone override per
+D11, forward-ref re-derivation) rather than a once-and-final principal
+type. Principal types and whole-program inference are traded away for
+subtyping, unions, refinements, overloads, and open-world incremental
+sessions — the right trade for a CAS. User-facing background lives in
+`src/epsil/docs/types.md` ("How the type system works").
 
 ## 2. Sum types (near term)
 
@@ -183,7 +200,8 @@ discharged"** — one criterion covering products (erase) and sums (reify).
 Two distinct gaps stand between today and a user-facing `mappable`:
 
 - **Constraint**: "a type that supports map" as a bound. Bounds today are
-  ground types only.
+  ground types only (§5 lifts the ground restriction; the protocol-as-bound
+  role is a further step).
 - **Dispatch**: parametricity means a single generic `map<F, T, U>` body
   cannot iterate an arbitrary opaque container; per-type implementations
   plus selection machinery (conformance declarations, dictionary-passing
@@ -202,7 +220,36 @@ language couldn't say it. First deliverable on this track: user
 conformance (a nominal type declaring itself a collection and supplying
 handlers from Epsil).
 
-## 5. Higher-kinded types and rank-2 (long term, gated)
+## 5. F-bounded and variable-referencing bounds (mid term, unblocked)
+
+Assessed 2026-08-08: `forall T: comparable<T>` and cross-variable bounds
+(`forall T: list<U>`) fit the current machinery as an **incremental
+extension** — no new theory. The reason is the solver's shape: bounds do
+not participate in the sweeps of `solveTypeArguments`; they enter only at
+the end (joined into the upper set, and as the S3 default). Since S1–S3
+solve **all** variables before any satisfiability check runs, a non-ground
+bound can be checked by substituting the complete binding map into it and
+then running the ordinary ground subtype check — the ground-type firewall
+(`assertGroundInputs`) is preserved because substitution happens before
+the lattice is consulted. Work list:
+
+- Lift the gate in `validateDeclaredType` that rejects variable-referencing
+  bounds.
+- Add the substitute-into-bound step in the satisfiability phase
+  (`uppersOf`).
+- S3: an unconstrained variable can no longer default to its bound (not
+  ground) — default to `unknown`, or extend the result-reachability
+  validation to require such variables be solvable from arguments.
+- Teach the `Poly <: Poly` α-equivalence comparison to compare bounds up
+  to renaming.
+
+Recursion in the bound (`comparable<T>` where the solution itself involves
+`comparable`) is already covered by nominal opacity plus the
+`beginUnfold`/`endUnfold` cycle guards. Trigger: comparator-style
+signatures (`Sort` with a custom comparator) or the §4 protocols track
+needing a self-referential bound.
+
+## 6. Higher-kinded types and rank-2 (long term, gated)
 
 For genuine Functor/Monad abstraction, in dependency order:
 
@@ -221,11 +268,81 @@ For genuine Functor/Monad abstraction, in dependency order:
    barely decidable, rank-3+ undecidable — annotation-required in
    practice, which fits Epsil's explicit-annotation posture.
 
-Neither is committed. The trigger would be demand for user-defined
-container/functor abstractions that the blessed-concrete-monads posture
-(§1) cannot absorb.
+**General** HKT breaks four load-bearing assumptions at once (assessed
+2026-08-08): no AST node for "variable applied to arguments" and no
+uniform head+args decomposition (built-in collections are distinct AST
+kinds — `list` with dimensions, named-or-positional `tuple`,
+`broadcastable`); matching a pattern `F<A>` against `list<integer>` is
+higher-order unification, which `instantiate.ts` §4.3 explicitly declines;
+constructors do not live in the subtype lattice, so the S1–S3 join/meet
+fold cannot solve a constructor variable; and the variance of an unknown
+constructor is unknowable, requiring variance-kinded quantification. That
+is a re-architecture of `types.ts`/`instantiate.ts`/`subtype.ts`/
+`variance.ts`, not an extension.
 
-## 6. Open rulings and questions
+### 6.1 Constrained HKT — collections only (assessed 2026-08-08)
+
+The cost-benefit flips if `F` is restricted to a **closed universe of
+collection constructors**. Two findings sharpen the actual gap first:
+
+- Kind-preservation with an *unchanged* element is already expressible
+  today: `forall T: indexed_collection. (T) -> T` covers the
+  `Sort`/`Reverse`/`Filter`/`Take` family with no new machinery.
+- Builtins already deliver the precision imperatively, per-head fallback
+  included — probed 2026-08-08: `Map` over a list types `vector<3>`
+  (constructor *and* dimensions preserved), over a set `set<number>`, over
+  a range `indexed_collection<number>` (correct: the image of a range is
+  not a range).
+
+So the gap is precisely **same container, different element, for
+user-declared functions** — the `Map`-shaped signature family, today
+constructor-erased to `-> indexed_collection`.
+
+Under the collections-only restriction each §6 blocker shrinks: the closed
+head set needs only a decompose/reapply pair (`collection-utils.ts` is
+most of the decompose half); matching `F<A>` stays first-order (pure
+decomposition, no type-level lambdas); if every constructor in the
+universe is element-covariant the kind implies out-variance (no
+`variance.ts` surface); and solving is rigid — all occurrences of `F`
+must agree on the same head, a syntactic check beside S1–S3, not a new
+join theory (do **not** define head-joins via
+`list <: indexed_collection <: collection` — joining heads erases the
+preservation promise that is the point).
+
+**Cheaper shape than constructor variables**: two built-in type operators
+on kind-`*` variables — `elem<T>` and `rebind<T, B>`:
+
+```
+Map: forall T: collection, B. (T, (elem<T>) -> B) -> rebind<T, B>
+```
+
+No kind system, no change to what a type variable is, and the same
+solve-then-reduce fit as §5: S1–S3 complete first, then `elem`/`rebind`
+reduce on ground bindings before the lattice is consulted. (Rust
+GATs-lite / C++ allocator-rebind precedent.)
+
+**Landmine (either shape)**: the closed universe is not uniform.
+`rebind<range, string>` is meaningless; dimensioned lists should keep
+dimensions under `Map` but not under a user `Filter`; dictionaries raise
+"what is the element". Scala 2.8's `CanBuildFrom` is the cautionary tale —
+the same per-head problem solved with implicit resolution became the
+language's most notorious complexity sink (redesigned away in 2.13). The
+builtin type handlers already encode the right per-head answers, so the
+spec work is transcribing them into a per-head rebind table with a defined
+fallback — real spec surface, and where this "small" feature would grow.
+
+Scoping option: make `elem`/`rebind` usable in declarations only at
+first — ships the `Map`-signature win while deferring type operators in
+user-facing type syntax.
+
+Neither general HKT nor rank-2 is committed. The trigger would be demand
+for user-defined container/functor abstractions that the
+blessed-concrete-monads posture (§1) cannot absorb — concretely, Epsil
+users declaring their own collection-generic functions once the §4
+conformance track lands. When it fires, §6.1 is the likely first step,
+with three rulings needed in order (see §7).
+
+## 7. Open rulings and questions
 
 1. **§2.2**: bless-and-pin or close the forward-ref-to-alias route for
    recursive generic sums. Load-bearing; decide before documenting sums.
@@ -236,3 +353,8 @@ container/functor abstractions that the blessed-concrete-monads posture
    of parameterized nominal types in compiled code.
 5. JSON-null vs absence (§2.1): recommend the `jnull`-tagged hybrid in
    docs/examples, or accept the conflation?
+6. Constrained HKT (§6.1), when the trigger fires — three rulings in
+   order: (a) `elem`/`rebind` operators vs constructor variables (lean
+   rebind — the smaller theory); (b) the per-head rebind/fallback table,
+   seeded from what the builtin type handlers already do; (c) whether the
+   operators are user-visible type syntax or declarations-only at first.

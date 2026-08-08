@@ -128,6 +128,96 @@ bare symbol as a boolean operand (`And`/`Or`/`Xor`/`Not`) infers that symbol
 symbol in the same scope will then error. This is engine behavior, not
 something specific to Epsil.
 
+## How the type system works
+
+None of this section is needed to use Epsil — it is background for readers
+curious about what kind of type system this is and why it behaves the way
+it does.
+
+### Types form a lattice
+
+The foundation of the system is **subtyping**: types are arranged in a
+hierarchy, and most questions the engine asks are of the form "is this
+type a subtype of that one?". The numeric types form a tower —
+`integer ⊂ rational ⊂ real ⊂ complex ⊂ number` — so an `integer` is
+accepted anywhere a `real` is expected, with no conversion involved.
+Around that tower the type language adds unions (`integer | boolean`),
+range refinements (`integer<0..10>`), collections with element types
+(`list<integer>`, `set<string>`), tuples and records, and function
+signatures with effect labels.
+
+Any two types have a **join** (the narrowest type that covers both — the
+join of `integer` and `real` is `real`) and a **meet** (the widest type
+inside both). Joins and meets are the workhorses of the whole system: the
+type of a mixed list is the join of its element types, and inference
+(below) is built out of these two moves.
+
+### It is not Hindley–Milner
+
+Languages in the ML family (OCaml, Haskell, Elm) use a different
+foundation, called Hindley–Milner: types are compared for *equality* and
+solved by unification, which buys two famous guarantees. Every expression
+has a **principal type** — a single most general type that every other
+valid type is a specialization of — and inference is **whole-program**:
+the compiler sees the finished program at once, and a use of a function
+far from its definition can determine the definition's type, with no
+annotations anywhere.
+
+This system deliberately trades those guarantees away, for two reasons.
+
+First, subtyping and principal types pull against each other. In
+Hindley–Milner, `integer` and `real` simply fail to unify; here, a
+function declared `forall T. (T, T) -> T` called with an `integer` and a
+`real` succeeds, solving `T` to their join (a `real`). That is the
+behavior mathematics wants — but once many types are valid for an
+expression, "the single most general one" stops being the useful answer,
+and the engine makes pragmatic choices instead.
+
+Second, there is no "whole program" to infer over. A session is
+open-ended: definitions arrive one statement (or one cell) at a time, may
+refer to names defined later, and may be redefined. The engine therefore
+types what it has seen so far and refines as more arrives, rather than
+solving a closed program once.
+
+In character the system is closer to TypeScript or Go than to ML:
+subtyping at the base, generics that are explicitly declared rather than
+silently inferred, and types solved locally rather than globally.
+
+### Generics are explicit and solved per call
+
+A function is generic only when it is *declared* generic — with a
+`function f<T>(…)` clause or a `forall` annotation. Nothing is silently
+generalized: `x |-> x` is a function on some inferred type, not an
+implicit "for all T". At each call of a generic function, the engine
+collects what the arguments say about each type variable and solves the
+variables on the spot, by joining that evidence; the call's result type
+comes from substituting the solution into the signature.
+
+Subtyping also quietly absorbs a classic use of polymorphism: the empty
+list needs no "for all" type — it is simply `list<never>`, and since
+`never` is the bottom of the lattice (joining it with anything gives the
+other type back), `Join([], [1, 2])` comes out as `list<finite_integer>`
+with no quantifier anywhere.
+
+### Inference gathers evidence, and can change its mind
+
+When a symbol has no annotation, the engine does not solve equations to
+find its type — it accumulates **evidence** from how the symbol is used,
+moving through the lattice as evidence arrives. Using a symbol as an
+argument *narrows* its type toward the parameter's; assigning it a value
+*widens* its type to cover the value. A symbol first seen in `x + 1` is
+provisionally taken to be a `number` — a guess, not a theorem.
+
+Because they are evidence, inferred types are **revisable** in ways a
+Hindley–Milner type never is. A guess that turns out incompatible with a
+later assignment is discarded in favor of the value's own type, and a
+function that referred to a name defined only later is re-derived once the
+definition appears, so declaration order does not change what a program
+means. Only *inferred* types move: a type you annotate is a commitment,
+never silently revised — which is the practical takeaway. Annotations are
+never required, but where the inferred guess isn't what you meant, an
+annotation pins it.
+
 ## Absence values
 
 Epsil distinguishes three related kinds of absence:
