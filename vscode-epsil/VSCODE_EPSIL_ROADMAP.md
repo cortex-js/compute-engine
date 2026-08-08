@@ -50,9 +50,23 @@ changes and no DAP machinery.
 - Runs in a separate on-demand process (not the LSP server — see constraint
   above).
 
-## Tier 1 — Statement-level debugger (no engine changes, ~few days)
+## Tier 1 — Statement-level debugger (no engine changes) — SHIPPED 2026-08-07
 
-A real, useful debugger:
+Implemented in `src/debug-adapter.ts` (bundled to `dist/debug-adapter.js`,
+declared in `contributes.debuggers` with `runtime: node` — DAP over stdio, no
+descriptor factory needed). A `DebugConfigurationProvider` in `extension.ts`
+makes F5 work on an `.epsil` file with no `launch.json`. Launch options:
+`program`, `stopOnEntry`, `statementTimeLimit` (ms per statement, the only
+guard against a statement that never returns — pause acts at statement
+boundaries). Parse errors stop the launch. Hover evaluation is restricted to
+bare identifiers (answered from scope bindings, no evaluation); debug
+console/watches run full `executeEpsil` semantics in the live scope.
+Verified end-to-end by DAP stdio harnesses (scratchpad `dap-smoke*.mjs`,
+session-local): breakpoint bind/reject, stop/step/continue, variables with
+types + child expansion, REPL evaluate, hover, stopOnEntry, parse-error
+launch, time-limited infinite loop.
+
+The original scope, all delivered:
 
 - **DAP adapter** in `vscode-epsil/` using `@vscode/debugadapter`, with a
   `"type": "epsil"` launch config and a `DebugAdapterDescriptorFactory`.
@@ -109,10 +123,9 @@ needs a debug hook:
 
 ## Recommended sequence
 
-1. **Tier 0 + Tier 1 together** — they share the statement-loop driver, need
-   no engine changes, and cover variable inspection, breakpoints, and
-   step-over.
-2. **Source-offsets audit** (prerequisite for Tier 2; findings below).
+1. ~~**Source-offsets audit**~~ — DONE 2026-08-07 (findings below).
+2. ~~**Tier 1**~~ — SHIPPED 2026-08-07 (see above). Tier 0 (inline result
+   decorations) remains open; it can reuse the adapter's statement loop.
 3. **Tier 2** only if stepping into loops/functions proves a real demand.
 
 ## Audit: `sourceOffsets` survival through boxing/canonicalization

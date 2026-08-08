@@ -41,6 +41,13 @@ const CONFIGS = [
     // published extension has no `node_modules` to fall back on.
     external: [],
   },
+  {
+    ...COMMON,
+    entryPoints: ['./src/debug-adapter.ts'],
+    outfile: './dist/debug-adapter.js',
+    // Like the server: the engine (and the DAP library) ride in the bundle.
+    external: [],
+  },
 ];
 
 if (watch) {

@@ -12,8 +12,50 @@ programming language of the Cortex Compute Engine.
 - **Epsil: Run File** (`epsil.runFile`) — saves the active file and runs it in
   an integrated terminal named _Epsil_. The command line comes from the
   `epsil.cliCommand` setting (`npx epsil` by default).
+- **Debugging** — breakpoints, step-over, variable inspection, watches, and a
+  live debug console for `.epsil` files. Press <kbd>F5</kbd> on an Epsil file
+  (no `launch.json` needed).
 - **Epsil: Restart Language Server** (`epsil.restartServer`) for when the
   server needs a nudge.
+
+## Debugging
+
+Set breakpoints in the gutter and press <kbd>F5</kbd>. The debugger executes
+the program **one top-level statement at a time** (the same evaluation
+`executeEpsil` performs), pausing between statements:
+
+- **Breakpoints** bind to top-level statement lines — a breakpoint on a blank
+  or continuation line snaps to the next statement.
+- **Step Over** runs one statement. Everything *inside* a statement — a
+  `while` body, a function call — runs to completion as a single step, so
+  Step Into/Out currently behave like Step Over (statement-level granularity
+  is the current design; see `VSCODE_EPSIL_ROADMAP.md`).
+- **Variables** shows every binding you have declared, with its inferred type;
+  lists, tuples and dictionaries expand. Hovering a variable name shows its
+  value.
+- **Debug console and watches** evaluate with full Epsil semantics in the
+  live session scope — like the REPL. That also means an expression with a
+  side effect (an assignment, a declaration) takes effect in the paused
+  program; watches are re-evaluated on every stop, so keep them effect-free.
+- **Pause** takes effect at the next statement boundary. A single statement
+  that never returns cannot be paused — bound it up front with the
+  `statementTimeLimit` launch option (ms per statement), or stop the session.
+- Parse errors stop the launch (they are already shown inline by the language
+  server); the program's final value is printed to the debug console when the
+  run completes.
+
+Launch configuration (all optional beyond `program`):
+
+```jsonc
+{
+  "type": "epsil",
+  "request": "launch",
+  "name": "Debug Epsil File",
+  "program": "${file}",
+  "stopOnEntry": false,
+  "statementTimeLimit": 0 // ms per statement, 0 = unlimited
+}
+```
 
 ## Settings
 
@@ -45,7 +87,7 @@ Useful commands:
 
 | Command                       | What it does                                        |
 | ----------------------------- | --------------------------------------------------- |
-| `npm run build`               | Bundle `dist/extension.js` and `dist/server.js`.     |
+| `npm run build`               | Bundle `dist/extension.js`, `dist/server.js` and `dist/debug-adapter.js`. |
 | `npm run watch`               | Same, rebuilding on change.                          |
 | `./node_modules/.bin/tsc --noEmit` | Type-check the extension (esbuild does the emit). |
 

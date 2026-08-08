@@ -20,7 +20,32 @@ export async function activate(
   // Server` is available to recover from a server that failed to start.
   context.subscriptions.push(
     vscode.commands.registerCommand('epsil.runFile', runFile),
-    vscode.commands.registerCommand('epsil.restartServer', restartServer)
+    vscode.commands.registerCommand('epsil.restartServer', restartServer),
+    // F5 on an .epsil file with no launch.json: synthesize a launch config
+    // for the active editor. (The adapter itself is declared in
+    // `contributes.debuggers` — program + runtime — so no descriptor factory
+    // is needed.)
+    vscode.debug.registerDebugConfigurationProvider('epsil', {
+      resolveDebugConfiguration(_folder, config) {
+        if (!config.type && !config.request && !config.name) {
+          const document = vscode.window.activeTextEditor?.document;
+          if (document?.languageId !== 'epsil') return undefined;
+          if (document.isUntitled) {
+            void vscode.window.showErrorMessage(
+              'Save this file before debugging it: Epsil debugs a file from disk.'
+            );
+            return undefined;
+          }
+          return {
+            type: 'epsil',
+            request: 'launch',
+            name: 'Debug Epsil File',
+            program: document.uri.fsPath,
+          };
+        }
+        return config;
+      },
+    })
   );
 
   const serverModule = context.asAbsolutePath(path.join('dist', 'server.js'));
