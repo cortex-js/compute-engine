@@ -8,7 +8,12 @@ import { reduceType } from '../../common/type/reduce.js';
 import { collectionElementType } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import { flatten } from '../boxed-expression/flatten.js';
-import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+  sym,
+} from '../boxed-expression/type-guards.js';
 import { validateArguments } from '../boxed-expression/validate.js';
 import {
   getFactIndex,
@@ -661,6 +666,39 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           ]),
           ...(condition ? [condition.canonical] : []),
         ]);
+      }
+
+      // `c in digits` on a not-yet-typed FUNCTION PARAMETER is element-type
+      // evidence, the membership counterpart of the collection evidence
+      // `Length(cs)` writes onto its operand (see the `Length` canonical
+      // handler): narrow the parameter to the collection's element type.
+      // Binding-only — a scalar element type never surfaces on a function
+      // literal's arrow (`inferredCollectionParameterType` filters it), so
+      // the lambda auto-broadcast default is unaffected.
+      //
+      // Two deliberate confinements:
+      // - PARAMETERS ONLY (the shadowed-parameter stack is populated exactly
+      //   while a literal's body canonicalizes). Membership is a PREDICATE —
+      //   `x in [1, 2, 3]` on a string-valued `x` is legitimately `False`,
+      //   not a type error — so it must not retype a global symbol: a Solve
+      //   domain spec (`Element(x, Range(1, 9))`) would otherwise
+      //   permanently narrow the unknown it merely constrains.
+      // - VALUE collections only (a list, a string's characters, a range) —
+      //   membership in a SET (`x ∈ ℤ`, `x ∈ {1,2,3}`) is how an assumption
+      //   is spelled, and set refinements belong to the assume machinery,
+      //   which applies them SCOPED (P1-6: a refinement in a pushed scope
+      //   must not leak).
+      const canonicalValue = value.canonical;
+      if (
+        isSymbol(canonicalValue) &&
+        ce._isShadowedParameter(canonicalValue.symbol) &&
+        canonicalValue.valueDefinition?.inferredType &&
+        canonicalValue.type.type === 'unknown' &&
+        !canonicalCollection.type.matches('set')
+      ) {
+        const elt = collectionElementType(canonicalCollection.type.type);
+        if (elt !== undefined && elt !== 'any' && elt !== 'unknown')
+          canonicalValue.infer(elt, 'narrow');
       }
 
       // Validate optional third argument

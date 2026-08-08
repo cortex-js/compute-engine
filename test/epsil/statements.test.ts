@@ -410,6 +410,17 @@ describe('EPSIL CONDITIONAL EXPRESSION', () => {
     ]);
   });
 
+  // The flip side of that guard rail: a conditional TAIL accidentally placed
+  // at the start of a line parses as an if-statement whose condition is
+  // followed by `else` — impossible for a statement, so it gets a targeted
+  // diagnostic instead of the misleading "opening bracket expected".
+  test('a line-start conditional tail gets the targeted diagnostic', () => {
+    const [, diags] = parseEpsil('f(x) =\n  x + 1\n    if x > 0 else 0');
+    expect(diags.map((d) => d.message[0])).toContain(
+      'conditional-if-line-start'
+    );
+  });
+
   // A case-leading `if` introduces a match guard. Patterns use their own
   // grammar (`parsePatternInfix`), which has no conditional rule, so the guard
   // is never mistaken for a conditional tail on the pattern.

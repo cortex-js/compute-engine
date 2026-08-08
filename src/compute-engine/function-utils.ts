@@ -1,4 +1,5 @@
 import { MathJsonSymbol } from '../math-json.js';
+import { debugStatementHook } from '../common/debug-hook.js';
 import { cmp } from './boxed-expression/compare.js';
 import {
   evaluateInOwnBindings,
@@ -472,6 +473,7 @@ export function canonicalFunctionLiteralArguments(
   beginProvisionalCapture();
   let provisionalHeads: ReadonlySet<string> | undefined;
   let block: Expression;
+  let shadowedDefs: ReadonlyMap<string, BoxedDefinition> = new Map();
   try {
     if (returnTypeOp === undefined) {
       if (isFunction(bodyOp, 'Block')) {
@@ -504,6 +506,10 @@ export function canonicalFunctionLiteralArguments(
       );
       block = ce.function('Block', statements);
     }
+    // Read the bindings the body's bare-parameter references auto-declared
+    // (and shared) while the frame is still on the stack — the parameter
+    // declarations below adopt them.
+    shadowedDefs = ce._currentShadowedParameterDefs();
   } finally {
     provisionalHeads = endProvisionalCapture();
     ce._popShadowedParameters();
@@ -520,8 +526,20 @@ export function canonicalFunctionLiteralArguments(
     const t = functionLiteralParameterType(param);
     if (t !== undefined)
       ce.declare(name, { inferred: false, type: t }, block.localScope);
-    else
-      ce.declare(name, { inferred: true, type: 'unknown' }, block.localScope);
+    else {
+      // A bare parameter whose first reference sat in a NESTED Block scope (an
+      // `if` branch, a loop body) auto-declared its shared binding there, not
+      // here. Adopt that binding as the parameter's: it is the one every body
+      // occurrence resolves to, and the one that carries the type evidence
+      // inference wrote (e.g. `cs[j]` ⇒ `cs: indexed_collection`). Declaring a
+      // fresh `unknown` binding instead severs the signature from the body's
+      // evidence, and the lambda auto-broadcast then wrongly maps the function
+      // over a collection argument that the body consumes whole.
+      const shared = shadowedDefs.get(name);
+      if (shared !== undefined) block.localScope!.bindings.set(name, shared);
+      else
+        ce.declare(name, { inferred: true, type: 'unknown' }, block.localScope);
+    }
   }
 
   // Re-bind parameter occurrences that were canonicalized OUTSIDE this Block.
@@ -1229,6 +1247,12 @@ export function evaluateStatements(
 ): Expression {
   let result: Expression = ce.Nothing;
   for (const op of ops) {
+    // Debugger pause point (see `common/debug-hook.ts`): only statements
+    // that originated from source (carrying `sourceOffsets`) fire — the
+    // hook may BLOCK. One comparison per statement when no debugger is
+    // attached.
+    if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
+      debugStatementHook(op);
     // Evaluate the statement. `Break`/`Continue` are inert registered
     // operators and `Return` is unregistered, so a literal control-flow
     // statement evaluates to itself with its operand evaluated.
@@ -1677,6 +1701,15 @@ function makeLambda(
       const freshScope: Scope = { parent: capturedScope, bindings: new Map() };
       const savedParent = bodyScope.parent;
       bodyScope.parent = freshScope;
+      // Hide the stale canonicalization bookkeeping in bodyScope (hoisted
+      // `Declare`/`Assign` targets, auto-declared references — all inferred
+      // and valueless), exactly as the parameterized `invoke` path does.
+      // The runtime `Declare`s below run against freshScope, so a stale
+      // valueless binding left in bodyScope would shadow the fresh local for
+      // every NESTED scope that chains through bodyScope — a `while` loop's
+      // condition then reads the valueless binding forever and never
+      // terminates.
+      const hiddenBindings = hideBodyScopeParams(bodyScope, []);
       ce.pushScope(freshScope);
       let result: Expression;
       try {
@@ -1688,6 +1721,7 @@ function makeLambda(
       } finally {
         ce.popScope();
         bodyScope.parent = savedParent;
+        restoreBodyScopeParams(bodyScope, hiddenBindings);
       }
       return result.isValid ? result : undefined;
     });

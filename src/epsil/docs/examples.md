@@ -835,3 +835,191 @@ let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
 Intersection(d48, d36) == {1, 2, 3, 4, 6, 12}
 // ➔ True
 ```
+
+## A Complete Program: Parsing JSON
+
+A recursive-descent JSON parser, in about a hundred lines. JSON maps onto
+Epsil data directly — objects become dictionaries, arrays become lists,
+`null` becomes `Missing` — and numbers come out **exact**: `2.5e-1` parses to
+the rational `1/4`, not a float.
+
+The program pulls together most of the language:
+
+- A **recursive type alias** names the result: a `json` value is a scalar, a
+  `list<json>`, or a dictionary.
+- Each parse function takes the character list and a 1-based index and
+  returns the tuple `(value, indexAfter)` — state is **threaded through
+  return values** and read back with a destructuring assignment,
+  `(v, j) := parseValue(cs, j)`.
+- `parseValue` dispatches on the next character with a **`match`
+  expression**; the string scanner decodes escapes with another.
+- The character predicates take `string | missing`: an indexed read `cs[j]`
+  is absent past the end of input, and that possibility is part of its type.
+
+```epsil
+type alias json = number | string | boolean | missing | list<json> | dictionary
+
+let digits = Characters("0123456789")
+isDigit(c: string | missing) = c in digits
+isWs(c: string | missing) = c == " " || c == "\n" || c == "\t" || c == "\r"
+
+// Index of the first non-whitespace character at or after i
+function skipWs(cs: list<string>, i: integer) -> integer {
+  let j = i
+  while j <= Length(cs) && isWs(cs[j]) { j = j + 1 }
+  j
+}
+
+// A run of digits starting at i, as (value, indexAfter)
+function parseDigits(cs: list<string>, i: integer) -> tuple<integer, integer> {
+  let j = i
+  let n = 0
+  while j <= Length(cs) && isDigit(cs[j]) {
+    n = 10 * n + IndexOf(digits, cs[j]) - 1
+    j = j + 1
+  }
+  (n, j)
+}
+
+// Number: -?int(.frac)?((e|E)(+|-)?exp)? — kept exact, so 2.5e-1 is 1/4
+function parseNumber(cs: list<string>, i: integer) -> tuple<json, integer> {
+  let j = i
+  let sign = 1
+  if cs[j] == "-" {
+    sign = -1
+    j = j + 1
+  }
+  let n = 0
+  (n, j) := parseDigits(cs, j)
+  if cs[j] == "." {
+    let f = 0
+    let start = j + 1
+    (f, j) := parseDigits(cs, start)
+    n = n + f / 10^(j - start)
+  }
+  if cs[j] == "e" || cs[j] == "E" {
+    j = j + 1
+    let esign = 1
+    if cs[j] == "+" { j = j + 1 }
+    else if cs[j] == "-" {
+      esign = -1
+      j = j + 1
+    }
+    let e = 0
+    (e, j) := parseDigits(cs, j)
+    n = n * 10^(esign * e)
+  }
+  (sign * n, j)
+}
+
+// Characters of a string body from i up to the closing quote
+function scanString(cs: list<string>, i: integer) -> tuple<string, integer> {
+  let j = i
+  let out = []
+  while cs[j] != "\"" {
+    if cs[j] == "\\" {
+      let c = match cs[j + 1] {
+        "n" => "\n"
+        "t" => "\t"
+        "r" => "\r"
+        e => e // covers \" \\ \/
+      }
+      out = Join(out, [c])
+      j = j + 2
+    } else {
+      out = Join(out, [cs[j]])
+      j = j + 1
+    }
+  }
+  (StringJoin(ListFrom(out)), j + 1)
+}
+
+// String: cs[i] is the opening quote
+parseString(cs: list<string>, i: integer) = scanString(cs, i + 1)
+
+// Array: cs[i] is "[" — elements become a list
+function parseArray(cs: list<string>, i: integer) -> tuple<json, integer> {
+  let j = skipWs(cs, i + 1)
+  let out = []
+  if cs[j] == "]" { j = j + 1 }
+  else {
+    let more = true
+    while more {
+      let v = 0
+      (v, j) := parseValue(cs, j)
+      out = Join(out, [v])
+      j = skipWs(cs, j)
+      if cs[j] == "," { j = skipWs(cs, j + 1) }
+      else { more = false } // at "]"
+    }
+    j = j + 1
+  }
+  (ListFrom(out), j)
+}
+
+// Object: cs[i] is "{" — key-value pairs become a dictionary
+function parseObject(cs: list<string>, i: integer) -> tuple<json, integer> {
+  let j = skipWs(cs, i + 1)
+  let keys = []
+  let vals = []
+  if cs[j] == "}" { j = j + 1 }
+  else {
+    let more = true
+    while more {
+      let k = ""
+      (k, j) := parseString(cs, skipWs(cs, j))
+      j = skipWs(cs, skipWs(cs, j) + 1) // skip ":"
+      let v = 0
+      (v, j) := parseValue(cs, j)
+      keys = Join(keys, [k])
+      vals = Join(vals, [v])
+      j = skipWs(cs, j)
+      if cs[j] == "," { j = skipWs(cs, j + 1) }
+      else { more = false } // at "}"
+    }
+    j = j + 1
+  }
+  (DictionaryFrom(Zip(ListFrom(keys), ListFrom(vals))), j)
+}
+
+// Any JSON value, dispatched on its first character
+function parseValue(cs: list<string>, i: integer) -> tuple<json, integer> {
+  let j = skipWs(cs, i)
+  match cs[j] {
+    "\"" => parseString(cs, j)
+    "[" => parseArray(cs, j)
+    "{" => parseObject(cs, j)
+    "t" => (True, j + 4) // true
+    "f" => (False, j + 5) // false
+    "n" => (Missing, j + 4) // null
+    _ => parseNumber(cs, j)
+  }
+}
+
+function jsonParse(s: string) -> json {
+  let (v, _) = parseValue(Characters(s), 1)
+  v
+}
+
+// A multiline string ("""…""") holds the JSON without escaping its quotes.
+let src = """
+{
+  "name": "Ada Lovelace",
+  "born": 1815,
+  "tags": ["math", "computing"],
+  "ratio": 2.5e-1,
+  "active": true,
+  "note": null
+}
+"""
+let doc = jsonParse(src)
+(doc.name, doc.tags[2], doc.born + 1, doc.ratio, doc.active, IsMissing(doc.note))
+// ➔ ("Ada Lovelace", "computing", 1816, 1/4, "True", "True")
+```
+
+Some details worth noticing: the exponent `2.5e-1` came back as the exact
+rational `1/4`, and adding 1 to `doc.born` is ordinary arithmetic on the
+parsed value. An absent key would read back as `Missing` — the same value a
+JSON `null` parses to — and `IsMissing` recognizes both. The parser is about
+as fast as you would expect an interpreted recursive-descent parser to be;
+it is a language showcase, not a replacement for a native JSON reader.

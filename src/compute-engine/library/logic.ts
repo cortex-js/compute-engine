@@ -106,6 +106,13 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     idempotent: true,
     complexity: 10000,
     signature: '(boolean+) -> boolean',
+    // A possibly-absent operand (`boolean | missing`, e.g. a comparison on an
+    // indexed read `cs[j] == "a"`) validates — the strip-before-validate gate
+    // (§3.B) removes the `missing` arm — and evaluation is Kleene: `False`
+    // dominates, a surviving `Missing` operand propagates. Without this, a
+    // guarded loop condition `j <= n && cs[j] == "a"` was REJECTED at
+    // canonicalization with `incompatible-type`.
+    missingBehavior: 'handle',
     evaluate: evaluateAnd,
   },
   Or: {
@@ -118,7 +125,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     idempotent: true,
     complexity: 10000,
     signature: '(boolean+) -> boolean',
-
+    // Kleene over absence, mirroring `And`: `True` dominates, a surviving
+    // `Missing` operand propagates.
+    missingBehavior: 'handle',
     evaluate: evaluateOr,
   },
   Not: {
@@ -129,6 +138,9 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     complexity: 10100,
     // @todo: this may not be needed, since we also have rules.
     signature: '(boolean) -> boolean',
+    // Kleene over absence, like `And`/`Or`: a possibly-absent operand
+    // validates and `Not(Missing)` evaluates to `Missing`.
+    missingBehavior: 'handle',
     evaluate: evaluateNot,
   },
   Equivalent: {

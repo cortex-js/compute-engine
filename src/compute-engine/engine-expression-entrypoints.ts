@@ -163,17 +163,35 @@ export function createSymbolExpression(
       return new BoxedSymbol(engine, name, { metadata, def: pdef });
     }
 
-    let pdef = engine.lookupDefinition(name);
-    if (!pdef || (isValueDef(pdef) && pdef.value.isConstant)) {
-      let autoScope = engine.context.lexicalScope;
-      while (autoScope.noAutoDeclare && autoScope.parent)
-        autoScope = autoScope.parent;
-      pdef = engine._declareSymbolValue(
+    // Reuse the binding a prior reference to this bare parameter already
+    // auto-declared — including one made in a SIBLING or ancestor Block scope
+    // (an `if` branch, a loop body). Sharing one binding is what lets type
+    // evidence accumulate on the parameter: `cs[j]` inside a `while` body
+    // infers `cs: indexed_collection` onto the SAME binding the literal's
+    // parameter operand ends up bound to (see the adoption step in
+    // `canonicalFunctionLiteralArguments`), so the inferred signature reflects
+    // the use and the lambda auto-broadcast doesn't misfire on a collection
+    // argument.
+    const cachedBare = engine._shadowedParameterDef(name);
+    if (cachedBare !== undefined)
+      return new BoxedSymbol(engine, name, { metadata, def: cachedBare });
+
+    let autoScope = engine.context.lexicalScope;
+    while (autoScope.noAutoDeclare && autoScope.parent)
+      autoScope = autoScope.parent;
+    // Reuse an existing local in this exact scope (a prior reference or a
+    // hoisted declaration here) rather than re-declaring; NEVER an outer
+    // binding — a parameter shadows, so resolving to a same-named global
+    // would write the body's type evidence onto it (and sever the
+    // parameter's own binding from that evidence).
+    const pdef =
+      autoScope.bindings.get(name) ??
+      engine._declareSymbolValue(
         name,
         { type: 'unknown', inferred: true },
         autoScope
       );
-    }
+    engine._setShadowedParameterDef(name, pdef);
     return new BoxedSymbol(engine, name, { metadata, def: pdef });
   }
 

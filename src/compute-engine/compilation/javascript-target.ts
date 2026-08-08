@@ -131,7 +131,11 @@ import { interval } from '../numerics/interval.js';
 import { withRandomSeedFrame } from '../boxed-expression/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
-import { BaseCompiler, pointHasBroadcastComponent } from './base-compiler.js';
+import {
+  BaseCompiler,
+  isProvablyStringOperand,
+  pointHasBroadcastComponent,
+} from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import type {
   CompileTarget,
@@ -169,6 +173,76 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
 };
 
 /**
+ * Fail closed (D6) when EQUALITY (or the `IndexOf` element test) has a provably
+ * string-valued operand — fully closed on any string evidence.
+ *
+ * Both lowerings are NUMERIC: equality is `Math.abs(a - b) <= tol`, which for
+ * strings is `NaN <= tol` → a silent `false`, so a compiled `"a" == "a"`
+ * answered `false` where the interpreter answers `True`. `IndexOf` uses the same
+ * tolerance test, so a string needle was never found (0 instead of the
+ * interpreter's 1-based index). String equality was never correct compiled, so
+ * admitting it is a separate tier, not a soundness fix.
+ *
+ * The ORDERINGS are governed by the narrower `assertNoMixedStringOrdering`:
+ * they emit a raw `<`, which the interpreter agrees with for strings.
+ */
+function assertNoStringOperand(
+  kind: string,
+  args: ReadonlyArray<Expression>
+): void {
+  if (args.some(isProvablyStringOperand))
+    throw new Error(
+      `${kind}: cannot compile — string-valued operands are not supported by ` +
+        `this target (the lowering is numeric: a tolerance test on the ` +
+        `difference, which is NaN for strings). ` +
+        `Fail closed (D6) — the interpreter evaluates it.`
+    );
+}
+
+/**
+ * True when an ORDERING (`Less`/`LessEqual`/`Greater`/`GreaterEqual`) over these
+ * operands must fail closed: at least one operand is provably string, but NOT
+ * every operand is.
+ *
+ * All-string is SOUND and keeps compiling. The interpreter compares two strings
+ * with the same raw JavaScript `<` this target emits (`compare.ts`:
+ * `a.string < b.string ? '<' : '>'`), so `"Z" < "a"`, `"10" < "9"`,
+ * `"ä" < "b"` and `"abc" < "abd"` all agree — verified against interpretation,
+ * and pinned in `compile-string-fail-closed.test.ts`.
+ *
+ * The MIXED pair is the silently-wrong one: the interpreter leaves
+ * `Less("a", 1)` SYMBOLIC (inert), whereas `"a" < 1` is a plausible-looking
+ * `false`. An operand of unknown type alongside a string counts as
+ * POSSIBLY-mixed and declines too — it is not provable string evidence, so it
+ * could be the number that makes the pair mixed at run time.
+ *
+ * Chained (n-ary) orderings follow the same rule: `every`/`some` range over all
+ * the operands, so an all-string chain compiles and any other declines.
+ */
+function isMixedStringOrdering(args: ReadonlyArray<Expression>): boolean {
+  return (
+    args.some(isProvablyStringOperand) && !args.every(isProvablyStringOperand)
+  );
+}
+
+/** Fail closed (D6) on a mixed / possibly-mixed string ordering. */
+function assertNoMixedStringOrdering(
+  kind: string,
+  args: ReadonlyArray<Expression>
+): void {
+  if (isMixedStringOrdering(args))
+    throw new Error(
+      `${kind}: cannot compile — an ordering that mixes a string operand with ` +
+        `an operand that is not provably a string. The interpreter leaves such ` +
+        `a comparison symbolic (\`Less("a", 1)\` stays inert), whereas the ` +
+        `emitted JavaScript \`<\` coerces and answers a plausible-looking ` +
+        `\`false\`. An ordering whose operands are ALL provably strings does ` +
+        `compile — the interpreter compares strings with the same \`<\`. ` +
+        `Fail closed (D6) — the interpreter evaluates it.`
+    );
+}
+
+/**
  * Emit a JavaScript equality test with the engine's numeric tolerance baked in
  * at compile time. The interpreter treats two numbers as equal when
  * `|a − b| <= engine.tolerance` (default 1e-10) — so `0.1 + 0.2 === 0.3` is
@@ -185,6 +259,10 @@ function compileJSEquality(
 ): string {
   if (args.length < 2)
     throw new Error(`${kind}: expected at least two arguments`);
+  // Ahead of BOTH lowerings below: the `_SYS.eq`/`_SYS.neq` runtime dispatch
+  // compares scalars tolerantly too, so a string operand is as wrong there as
+  // on the scalar tolerance path.
+  assertNoStringOperand(kind, args);
   // Equality over a (possibly-)collection operand: a raw `Math.abs(a - b)`
   // over a list silently coerces (`[1,2,3] - 2` → NaN), so the scalar codegen
   // below would return a wrong boolean behind a `success: true`. The BINARY
@@ -329,6 +407,15 @@ function compileJSCollectionBoolean(
   // relation, are the shared inventory's conditionally-evaluated positions, so
   // the CSE pass must push the region harvest opened for them. A position that
   // opened no region compiles exactly as before.
+  //
+  // A MIXED / possibly-mixed string ordering is diverted here from the infix
+  // path in `BaseCompiler` expressly to fail closed (D6); an ALL-string ordering
+  // never reaches here (it keeps the raw infix lowering, which the interpreter
+  // agrees with). Reachable independently when a string operand sits alongside a
+  // collection one — `Less("a", [1, 2])` — which the interpreter answers with a
+  // list of INERT comparisons, not the `[false, false]` a broadcast would give.
+  // The connectives are not gated: they consume booleans, not strings.
+  if (kind in JS_ORDERING_OPERATORS) assertNoMixedStringOrdering(kind, args);
   // SCALAR operands still lower normally. This handler is also reached from
   // INSIDE the `_SYS.bcast` closure that `BaseCompiler.tryCompileBroadcast`
   // emits for a provable array operand (`Not([True, False])` becomes
@@ -1383,6 +1470,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   IndexOf: (args, compile) => {
     const coll = collArg('IndexOf', args[0], compile);
     if (args[1] == null) throw new Error('IndexOf: missing value');
+    // The tolerance test below is numeric, so a string needle (or a provably
+    // string ELEMENT type) makes every comparison `NaN <= tol` → 0 ("absent")
+    // behind a `success: true`. Only PROVABLE string evidence gates: an
+    // unknown element type stays on the numeric path.
+    assertNoStringOperand('IndexOf', [args[1]]);
+    const elt = collectionElementType(jsType(args[0]));
+    if (elt !== undefined && elt !== 'never' && isSubtype(elt, 'string'))
+      throw new Error(
+        `IndexOf: cannot compile — the collection has string elements, which ` +
+          `are not supported by this target (the element test is a numeric ` +
+          `tolerance comparison, NaN for strings). Fail closed (D6) — the ` +
+          `interpreter evaluates it.`
+      );
     const tol = args[0]?.engine?.tolerance ?? 1e-10;
     return `((_v) => (${coll}).findIndex((_x) => Math.abs(_x - _v) <= ${tol}) + 1)(${compile(
       args[1]

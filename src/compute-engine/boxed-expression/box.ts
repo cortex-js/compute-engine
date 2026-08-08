@@ -945,6 +945,49 @@ function makeCanonicalFunction(
   return applyOperatorDefinition(ce, name, ops, metadata, scope, opDef);
 }
 
+/** Every value of `t` is a collection — a union qualifies only when all its
+ * arms do. Scalar-admitting types (including `unknown`/`any`) do not. */
+function isCollectionOnlyType(t: Type): boolean {
+  if (typeof t === 'object' && t.kind === 'union')
+    return t.types.every(isCollectionOnlyType);
+  return isSubtype(t, 'collection');
+}
+
+/**
+ * A call to a user function whose signature was INFERRED skips argument
+ * validation (currying and partial application are resolved by the lambda at
+ * evaluation time). That skip also silenced the one inference side-channel the
+ * validators provide: narrowing an unknown-typed symbol argument to the
+ * parameter's type. Without it, a function that merely FORWARDS its parameter
+ * (`g(xs) = f(xs)` where `f`'s body indexes its parameter) accumulates no
+ * collection evidence on `xs`, its inferred signature stays `(unknown)`, and
+ * the lambda auto-broadcast then maps `g` over a collection argument that `f`
+ * consumes whole.
+ *
+ * Propagate just that side-channel here: an argument that is a symbol whose
+ * type is inferred and still `unknown` narrows to the callee's inferred
+ * parameter type, when that type is collection-only (the evidence is
+ * unambiguous — no scalar value could occupy the slot). Scalar parameter
+ * types are NOT propagated: an inferred scalar is a broadcast-friendly guess,
+ * not evidence the caller's argument is scalar.
+ */
+function narrowArgsFromInferredSignature(
+  sig: Type,
+  args: ReadonlyArray<Expression>
+): void {
+  if (typeof sig === 'string' || sig.kind !== 'signature' || !sig.args) return;
+  const n = Math.min(args.length, sig.args.length);
+  for (let i = 0; i < n; i++) {
+    const arg = args[i];
+    if (!isSymbol(arg)) continue;
+    if (!arg.valueDefinition?.inferredType) continue;
+    if (arg.type.type !== 'unknown') continue;
+    const paramType = sig.args[i].type;
+    if (!isCollectionOnlyType(paramType)) continue;
+    arg.infer(paramType, 'narrow');
+  }
+}
+
 /**
  * The operator-definition half of `makeCanonicalFunction`: apply the `lazy`
  * flag, the `canonical` handler, signature validation, `flatten`,
@@ -956,6 +999,43 @@ function makeCanonicalFunction(
  * pre-phase needs them to locate the binding sites), so a binder does not box
  * its operands twice.
  */
+/**
+ * Re-attach the source position carried by `metadata` to a canonically
+ * constructed result that lost it: a custom `canonical` handler (and the
+ * numeric fast-path constructors in `makeNumericFunction`) build their result
+ * without the caller's metadata. Statement-level positions (`Block` operands,
+ * loop bodies, `Declare`/`Assign`) must survive canonicalization so a
+ * debugger can map canonical statements back to source
+ * (`vscode-epsil/VSCODE_EPSIL_ROADMAP.md`, Tier 2).
+ *
+ * Only a FUNCTION expression lacking its own offsets is stamped:
+ *  - a number/symbol/string result may be an interned singleton (`ce.One`,
+ *    a library symbol) shared across unrelated expressions — writing a
+ *    position on one would smear it engine-wide;
+ *  - a result already carrying offsets (a pass-through operand with its own,
+ *    more precise, sub-span) keeps them.
+ *
+ * The write cannot reach an unrelated statement: a handler's function result
+ * is either constructed fresh or is an operand of the very node being
+ * canonicalized. (A handler serving a cached function expression would be
+ * stamped once with its first consumer's span — positions are advisory
+ * metadata, so a stale span is acceptable; structural semantics never read
+ * them.) Free when the input carries no offsets (LaTeX and programmatic
+ * construction).
+ */
+function withSourceOffsets(
+  result: Expression,
+  metadata: Metadata | undefined
+): Expression {
+  const sourceOffsets = metadata?.sourceOffsets;
+  if (sourceOffsets === undefined) return result;
+  if (!(result instanceof BoxedFunction)) return result;
+  if (result.sourceOffsets !== undefined) return result;
+  (result as { sourceOffsets?: [number, number] }).sourceOffsets =
+    sourceOffsets;
+  return result;
+}
+
 function applyOperatorDefinition(
   ce: ComputeEngine,
   name: MathJsonSymbol,
@@ -973,7 +1053,7 @@ function applyOperatorDefinition(
     if (opDef.canonical) {
       try {
         result = opDef.canonical(xs, { engine: ce, scope });
-        if (result) return result;
+        if (result) return withSourceOffsets(result, metadata);
       } catch (e) {
         // Multi-arg form: a non-Error thrown value keeps its structure in the
         // console (and a Symbol or null-prototype object, whose implicit
@@ -991,6 +1071,8 @@ function applyOperatorDefinition(
       return result;
     }
 
+    if (opDef.inferredSignature)
+      narrowArgsFromInferredSignature(opDef.signature.type, xs);
     result = new BoxedFunction(
       ce,
       name,
@@ -1085,7 +1167,7 @@ function applyOperatorDefinition(
               scope,
             });
         }
-        return result;
+        return withSourceOffsets(result, metadata);
       }
     } catch (e) {
       // Multi-arg form — see the lazy-path catch above.
@@ -1115,7 +1197,11 @@ function applyOperatorDefinition(
 
   // Skip validation for function literals with inferred signatures.
   // These will be validated during evaluation by the lambda function,
-  // which handles currying and partial application.
+  // which handles currying and partial application. Collection evidence on
+  // the callee's parameters still narrows unknown symbol arguments (see
+  // `narrowArgsFromInferredSignature`).
+  if (opDef.inferredSignature)
+    narrowArgsFromInferredSignature(opDef.signature.type, args);
   const adjustedArgs = opDef.inferredSignature
     ? null
     : validateArguments(
@@ -1422,19 +1508,32 @@ function makeNumericFunction(
   // Short path for some functions
   // (avoid looking up a definition)
   //
-  if (name === 'Add') return canonicalAdd(ce, ops);
-  if (name === 'Negate') return canonicalNegate(ops[0]);
-  if (name === 'Multiply') return canonicalMultiply(ce, ops);
+  if (name === 'Add') return withSourceOffsets(canonicalAdd(ce, ops), metadata);
+  if (name === 'Negate')
+    return withSourceOffsets(canonicalNegate(ops[0]), metadata);
+  if (name === 'Multiply')
+    return withSourceOffsets(canonicalMultiply(ce, ops), metadata);
   if (name === 'Divide') {
     if (ops.length === 2)
-      return canonicalDivide(...(ops as [Expression, Expression]));
-    return ops.slice(1).reduce((a, b) => canonicalDivide(a, b), ops[0]);
+      return withSourceOffsets(
+        canonicalDivide(...(ops as [Expression, Expression])),
+        metadata
+      );
+    return withSourceOffsets(
+      ops.slice(1).reduce((a, b) => canonicalDivide(a, b), ops[0]),
+      metadata
+    );
   }
-  if (name === 'Exp') return canonicalPower(ce.E, ops[0]);
-  if (name === 'Square') return canonicalPower(ops[0], ce.number(2));
-  if (name === 'Power') return canonicalPower(ops[0], ops[1]);
-  if (name === 'Root') return canonicalRoot(ops[0], ops[1]);
-  if (name === 'Sqrt') return canonicalRoot(ops[0], 2);
+  if (name === 'Exp')
+    return withSourceOffsets(canonicalPower(ce.E, ops[0]), metadata);
+  if (name === 'Square')
+    return withSourceOffsets(canonicalPower(ops[0], ce.number(2)), metadata);
+  if (name === 'Power')
+    return withSourceOffsets(canonicalPower(ops[0], ops[1]), metadata);
+  if (name === 'Root')
+    return withSourceOffsets(canonicalRoot(ops[0], ops[1]), metadata);
+  if (name === 'Sqrt')
+    return withSourceOffsets(canonicalRoot(ops[0], 2), metadata);
 
   if (name === 'Ln' || name === 'Log') {
     if (ops.length > 0) {

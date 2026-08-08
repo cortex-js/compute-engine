@@ -224,6 +224,28 @@ describe('EPSIL MATCH — diagnostics', () => {
     );
   });
 
+  test('comma-separated cases get the targeted separator diagnostic', () => {
+    const diags = diagnostics('match x {\n  0 => "zero", 1 => "one", _ => "n"\n}');
+    // One diagnostic per comma, and the comma recovers as a separator (no
+    // cascade of unexpected-symbol noise).
+    expect(diags).toEqual(['match-case-separator', 'match-case-separator']);
+  });
+
+  test('a pinned case after a result line is a new case, not a continuation', () => {
+    // `"one"` followed by a line starting `== lim` used to fuse into the
+    // comparison `"one" == lim`, and the `=>` then diagnosed. At the top
+    // level of a case body a linebreak ends the body.
+    const r = run(
+      'let lim = 5\nf(x) = match x {\n  1 => "one"\n  == lim => "limit"\n  _ => "other"\n}\n(f(1), f(5), f(9))'
+    );
+    expect(r.value?.toString()).toBe('("one", "limit", "other")');
+  });
+
+  test('leading-operator continuation still works inside a parenthesized case body', () => {
+    const r = run('match 1 {\n  1 => (10\n    + 5)\n  _ => 0\n}');
+    expect(r.value?.toString()).toBe('15');
+  });
+
   test('an anonymous `_` inside an or-alternative is allowed (no binding diagnostic)', () => {
     expect(diagnostics('match p {\n  [0, _] | [_, 0] => "edge"\n  _ => "no"\n}')).not.toContain(
       'match-alternative-binding'

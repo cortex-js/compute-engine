@@ -213,6 +213,15 @@ export class Parser {
    * guard. See `parseMatch`. */
   private matchTypeGuards: MathJsonExpression[] = [];
 
+  /** Bracket depths at which a `match` case BODY is being parsed. At the top
+   * level of a case body, a linebreak followed by an infix operator must END
+   * the body — the next line is a new case — rather than continue the
+   * expression: without this, a case body followed by a pinned case
+   * (`1 => "one"` / `== lim => …`) silently fused into `"one" == lim`, and the
+   * `=>` then diagnosed. Depth-gated so parenthesized subexpressions inside
+   * the body keep the ordinary continuation behavior. */
+  private matchBodyStops: number[] = [];
+
   /** Type names this program may refer to in an annotation: the host-supplied
    * names (`typeNames`, seeded from the engine's type resolver) plus every name
    * declared by a `type` statement parsed so far. Consulted by `typeResolver`,
@@ -1146,6 +1155,16 @@ export class Parser {
     }
     this.checkConditionAssign(cond);
     if (!this.check('OPEN_BRACE')) {
+      // `if cond else …` — no `{` and a dangling `else`: this is a
+      // conditional-expression TAIL (`value if cond else other`) whose `if`
+      // landed at the start of a line. An `if` that starts a line always
+      // begins a new if-statement (a linebreak is a statement separator), so
+      // the value it was meant to follow was cut off. Diagnose the actual
+      // mistake instead of the misleading "opening bracket expected".
+      if (this.check('SYMBOL') && this.current.text === 'else') {
+        this.error(['conditional-if-line-start'], kw.start, kw.end);
+        return null;
+      }
       this.error(
         ['opening-bracket-expected', '{'],
         this.current.start,
@@ -1376,6 +1395,17 @@ export class Parser {
         this.current.precededByLinebreak
       ) {
         // A valid case boundary.
+      } else if (this.check('COMMA')) {
+        // A comma between cases is a common reflex (Rust match arms, object
+        // literals). Diagnose it precisely — with a fix-it to `;` — and then
+        // treat it as a separator so the remaining cases still parse.
+        this.diagnostics.push({
+          severity: 'error',
+          message: ['match-case-separator'],
+          range: [this.current.start, this.current.end],
+          fixits: [[this.current.start, this.current.end, ';']],
+        });
+        this.advance();
       } else {
         this.error(
           ['unexpected-symbol', this.current.text],
@@ -1473,7 +1503,13 @@ export class Parser {
     }
     this.advance(); // '=>'
 
-    const body = this.parseExpression(0);
+    this.matchBodyStops.push(this.brackets.length);
+    let body: MathJsonExpression | null;
+    try {
+      body = this.parseExpression(0);
+    } finally {
+      this.matchBodyStops.pop();
+    }
     if (body === null) {
       this.error(['expression-expected'], this.current.start, this.current.end);
       return null;
@@ -3065,6 +3101,21 @@ export class Parser {
         left = test;
         continue;
       }
+
+      // At the TOP LEVEL of a `match` case body, a linebreak ends the body —
+      // the next line is a new case, which may well START with an operator
+      // (a pinned pattern `== lim => …`, an or-alternative). Continuing the
+      // expression across the break would swallow the next case's pattern
+      // (`1 => "one"` then `== lim => …` fused into `"one" == lim`).
+      // Parenthesized subexpressions are deeper in `this.brackets`, so they
+      // keep the ordinary leading-operator continuation.
+      if (
+        this.current.precededByLinebreak &&
+        this.matchBodyStops.length > 0 &&
+        this.matchBodyStops[this.matchBodyStops.length - 1] ===
+          this.brackets.length
+      )
+        break;
 
       const op = this.peekInfix();
       if (op === null) {

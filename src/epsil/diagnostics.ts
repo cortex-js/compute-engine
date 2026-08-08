@@ -43,7 +43,9 @@ export type DiagnosticCode =
   | 'floor-division-comment' // `//` after code on the same line looks like floor division; it starts a comment
   | 'latex-parsing-unavailable' // no LaTeX parser was injected for a `$…$` island
   | 'conditional-else-expected' // a conditional expression (`a if c else b`) is missing its `else` branch
+  | 'conditional-if-line-start' // an `if` starting a line always begins an if-STATEMENT; a conditional tail (`a if c else b`) must keep `if` on the same line as `a`
   | 'match-case-arrow-expected' // a `match` case is missing its `=>` arrow
+  | 'match-case-separator' // match cases are separated by a newline or `;`, not a comma
   | 'match-alternative-binding' // a named binding appears inside an or-alternative
   | 'match-multiple-rest' // more than one `...rest` in a single list/tuple pattern
   | 'match-irrefutable-case' // %0 = binding name — a non-final case that matches anything

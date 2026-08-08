@@ -47,6 +47,7 @@ import {
   type BoxedDefinition,
   type BoxedExpression,
 } from '../../src/compute-engine.js';
+import { typeToString } from '../../src/common/type/serialize.js';
 import type { MathJsonExpression } from '../../src/math-json/types.js';
 import { operands, operator, stringValue } from '../../src/math-json/utils.js';
 import { FatalParsingError } from '../../src/epsil/diagnostics.js';
@@ -540,7 +541,7 @@ export class EpsilDebugSession extends DebugSession {
     if ('operator' in def) {
       return {
         name,
-        value: String(def.operator.signature ?? 'function'),
+        value: this.signatureDisplay(def),
         variablesReference: 0,
       };
     }
@@ -551,6 +552,51 @@ export class EpsilDebugSession extends DebugSession {
       type: def.value.type.toString(),
       variablesReference: expr === undefined ? 0 : this.referenceFor(expr),
     };
+  }
+
+  /**
+   * The signature shown for a function binding.
+   *
+   * For a user-defined function the engine's arrow deliberately reports a
+   * bare parameter as `unknown` unless the body PROVES it can never be a
+   * scalar — scalar evidence is filtered out so the lambda auto-broadcast
+   * lift stays available (`inferredCollectionParameterType`). For DISPLAY
+   * that filter hides real information, so read the parameter BINDINGS in
+   * the body scope instead: they carry everything body-usage inference
+   * recorded (`c in digits` ⇒ `c: string`; `cs[i]` ⇒ the index union), and
+   * the parameter names to boot. Display-only — the engine's arrow type is
+   * untouched.
+   */
+  private signatureDisplay(
+    def: Extract<BoxedDefinition, { operator: unknown }>
+  ): string {
+    const opDef = def.operator;
+    const fallback = String(opDef.signature ?? 'function');
+    const lambda = opDef.lambda;
+    if (lambda === undefined || lambda.parameters.length === 0) return fallback;
+
+    const scope = lambda.body.localScope;
+    const params = lambda.parameters.map(({ name, type }) => {
+      // An annotated parameter shows its declared type.
+      if (type !== undefined) return `${name}: ${typeToString(type)}`;
+      // A bare parameter shows the binding evidence, when there is any.
+      const binding = scope?.bindings.get(name);
+      const bt =
+        binding !== undefined && 'value' in binding
+          ? binding.value.type
+          : undefined;
+      if (bt === undefined || bt.isUnknown) return name;
+      return `${name}: ${bt.toString()}`;
+    });
+
+    // The result slot comes from the engine's own arrow.
+    const st = opDef.signature?.type;
+    const result =
+      st !== undefined && typeof st !== 'string' && st.kind === 'signature'
+        ? st.result
+        : undefined;
+    if (result === undefined) return fallback;
+    return `(${params.join(', ')}) -> ${typeToString(result)}`;
   }
 
   /** Children of a structured value: its operands, labeled with Epsil's

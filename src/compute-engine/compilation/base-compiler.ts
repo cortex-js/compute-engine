@@ -153,6 +153,28 @@ export function compilationType(expr: Expression): Type {
 }
 
 /**
+ * True when `a` is PROVABLY string-valued: a string literal, or an operand
+ * whose (alias-resolved) static type is a subtype of `string`.
+ *
+ * Deliberately `isSubtype`, NOT `.matches('string')`: `matches` is the
+ * "could be" direction, so an `unknown`-typed symbol would answer true and
+ * gate a numeric plot equality such as `x^2 + y^2 = 4`, whose inferred
+ * parameters must stay on the numeric fast path with byte-identical output.
+ * Only positive string EVIDENCE gates. `never` is a subtype of every type and
+ * so is not evidence either.
+ *
+ * Shared by BaseCompiler's infix-ordering divert (which falls through to the
+ * JS ordering codegen on a mixed string operand) and javascript-target's
+ * fail-closed string gates (`assertNoStringOperand`,
+ * `isMixedStringOrdering`) — their agreement is load-bearing.
+ */
+export function isProvablyStringOperand(x: Expression): boolean {
+  if (isString(x)) return true;
+  const t = resolveTypeForCompilation(x.type.type);
+  return t !== 'never' && isSubtype(t, 'string');
+}
+
+/**
  * The JavaScript test recognizing the complex runtime convention — a
  * `{ re, im }` object (see `branchComplexCoercion`). An array (a compiled
  * collection) fails it: `[].re` is `undefined`.
@@ -1197,8 +1219,32 @@ export class BaseCompiler {
                 x.type.matches('collection') ||
                 isBoundPossiblyCollectionTyped(x)
             );
+          // An ORDERING that MIXES a string operand with one that is not
+          // provably a string. The raw infix `<` agrees with the interpreter
+          // when EVERY operand is a string — it compares strings with `<` too
+          // (`compare.ts`) — so an all-string ordering keeps this fast path. A
+          // mixed pair does not agree: the interpreter leaves `Less("a", 1)`
+          // symbolic whereas `"a" < 1` is a plausible-looking `false`. Decline
+          // the infix path there so the head falls through to the JS ordering
+          // codegen, which fails closed (D6) and lets the engine fall back to
+          // the interpreter. An operand of unknown type alongside a string is
+          // POSSIBLY mixed and declines too.
+          //
+          // JAVASCRIPT ONLY, like the collection divert above: the other
+          // targets keep their existing lowering. `isSubtype`, not `.matches`,
+          // so an `unknown`-typed operand is never itself string EVIDENCE (plot
+          // comparisons with inferred parameters keep byte-identical output).
+          const orderingOverString =
+            target.language === 'javascript' &&
+            isRelationalOperator(h) &&
+            args.some(isProvablyStringOperand) &&
+            !args.every(isProvablyStringOperand);
           // Compile as an operator (only for non-collection arguments)
-          if (args.every((x) => !x.isCollection) && !relationalOverCollection) {
+          if (
+            args.every((x) => !x.isCollection) &&
+            !relationalOverCollection &&
+            !orderingOverString
+          ) {
             if (isRelationalOperator(h) && args.length > 2) {
               // Chain relational operators, conjoined with the target's chain
               // operator (`&&` by default; Python `and`).
@@ -2397,23 +2443,126 @@ export class BaseCompiler {
   }
 
   /**
+   * Lower a destructuring pattern whose value is tuple-VALUED but not a
+   * literal `Tuple` — the state-threading idiom `(n, j) := parseDigits(cs, j)`
+   * — into ONE temporary holding the whole tuple plus a positional read per
+   * leaf. Returns `null` when the shape is not admitted; the caller then fails
+   * closed (D6) and the interpreter evaluates the statement.
+   *
+   *     let (v, j) = step(k)
+   *       ⟶  let _tv1; _tv1 = step(k); let v = _tv1[1]; let j = _tv1[2]
+   *
+   * The value is evaluated EXACTLY ONCE (into the temporary) and only then
+   * read, which is the interpreter's order — including for a `_` position,
+   * which contributes no read at all.
+   *
+   * Admitted only when all of:
+   * - the target is JavaScript. Every other target keeps the existing D6 —
+   *   the positional-read lowering has only been established there (the
+   *   Python target cannot compile a user-function call at all, so the shape
+   *   this exists for is unreachable on it) and a widened gate needs its own
+   *   per-target verification, not an assumption.
+   * - the pattern is FLAT at this level (every position a symbol or `_`). A
+   *   nested position would need a temporary of its own; it stays D6.
+   * - the value's static type is a tuple whose arity is statically known and
+   *   equals the pattern's. An unknown arity cannot be checked against the
+   *   pattern, and a mismatch is an interpreter error.
+   *
+   * The temporary is declared in a THROWAWAY scope carrying the value's own
+   * type, so the emitted `At(_tv1, i)` reads as a tuple index: the JS `At`
+   * admission gate is type-based, and a bare `unknown`-typed temporary is
+   * (deliberately) not admitted by it. The scope is popped immediately — the
+   * boxed symbol keeps its definition, and nothing is left in the ambient
+   * scope.
+   *
+   * Note for whoever widens the target gate: the temporary's declaration and
+   * its initializer are emitted as SEPARATE statements because a target with a
+   * `declare` hook (Python, GPU) emits only the declaration from a combined
+   * `Declare(sym, type, value)` and drops the initializer (see
+   * `desugarPatternAssign`). The per-leaf DECLARES below are combined, which
+   * is sound on JavaScript only — splitting those too is the first step of
+   * widening this gate.
+   */
+  private static destructureViaTemp(
+    pattern: Expression & FunctionInterface,
+    v: Expression | undefined,
+    target: CompileTarget<Expression>,
+    kind: 'declaration' | 'assignment'
+  ): { binds: Expression[]; writes: Expression[] } | null {
+    if (v === undefined) return null;
+    if (target.language !== 'javascript') return null;
+    if (pattern.nops === 0) return null;
+    if (!pattern.ops.every((p) => isSymbol(p))) return null;
+    const t = compilationType(v);
+    if (typeof t === 'string' || t.kind !== 'tuple') return null;
+    if (t.elements.length !== pattern.nops) return null;
+
+    const ce = pattern.engine;
+    const temp = BaseCompiler.typedTemp(
+      ce,
+      BaseCompiler.tempVar(target),
+      v.type.type
+    );
+    const binds = [
+      ce._fn('Declare', [temp, ce.string('unknown')]),
+      ce._fn('Assign', [temp, v]),
+    ];
+    const writes: Expression[] = [];
+    for (let i = 0; i < pattern.nops; i++) {
+      const p = pattern.ops[i];
+      if (!isSymbol(p) || p.symbol === '_') continue;
+      // `At` is 1-BASED.
+      const read = ce._fn('At', [temp, ce.number(i + 1)]);
+      writes.push(
+        kind === 'declaration'
+          ? ce._fn('Declare', [p, ce.string('unknown'), read])
+          : ce._fn('Assign', [p, read])
+      );
+    }
+    return { binds, writes };
+  }
+
+  /**
+   * A temporary SYMBOL carrying a static type, without touching the ambient
+   * scope: declared in a scope pushed for the boxing and popped right after.
+   * The returned expression keeps the definition it was bound to.
+   */
+  private static typedTemp(
+    ce: ComputeEngine,
+    name: string,
+    type: Type
+  ): Expression {
+    ce.pushScope();
+    try {
+      ce.declare(name, type);
+      return ce.symbol(name);
+    } finally {
+      ce.popScope();
+    }
+  }
+
+  /**
    * Desugar a destructuring `Declare` statement (`let (x, y) = (…, …)`) into
    * per-leaf declares, so locals collection, complex/vector inference and
    * every target's statement emitter see only plain scalar declares. Returns
    * `null` when the statement is not a destructuring declare.
    *
-   * Only a LITERAL tuple value lowers: each element expression is bound
-   * exactly once, in pattern order, so the rewrite is observationally
+   * A LITERAL tuple value lowers element-wise: each element expression is
+   * bound exactly once, in pattern order, so the rewrite is observationally
    * identical to the interpreter's evaluate-once semantics. A `_` leaf keeps
-   * its element as a bare statement (its evaluation still happens). A
-   * non-literal value (a symbol, a call) has no sound static lowering
-   * without a typed temporary, and a shape mismatch is an interpreter error
-   * — both fail closed (D6) so the engine falls back to the interpreter.
-   * (Without this, the pattern compiled as a single `let _ = …` and every
-   * pattern name silently read as NaN.)
+   * its element as a bare statement (its evaluation still happens).
+   *
+   * A tuple-VALUED value that is not a literal tuple (a call such as
+   * `step(k)`, a tuple-typed symbol) lowers through ONE temporary holding the
+   * whole tuple, plus a positional read per leaf — see `destructureViaTemp`,
+   * which owns the gating. Everything else (an untyped or unknown-arity
+   * value, a shape mismatch) fails closed (D6) so the engine falls back to the
+   * interpreter. (Without any of this, the pattern compiled as a single
+   * `let _ = …` and every pattern name silently read as NaN.)
    */
   private static desugarPatternDeclare(
-    arg: Expression
+    arg: Expression,
+    target: CompileTarget<Expression>
   ): ReadonlyArray<Expression> | null {
     if (!isFunction(arg, 'Declare') || !isFunction(arg.ops[0], 'Tuple'))
       return null;
@@ -2425,13 +2574,27 @@ export class BaseCompiler {
           `Cannot compile a destructuring declaration: the pattern is not a ` +
             `tuple. Fail closed (D6).`
         );
-      if (v === undefined || !isFunction(v, 'Tuple'))
+      if (v === undefined || !isFunction(v, 'Tuple')) {
+        // A tuple-VALUED (but not literal) value: one temporary + positional
+        // reads, when `destructureViaTemp` admits the shape.
+        const viaTemp = BaseCompiler.destructureViaTemp(
+          pattern,
+          v,
+          target,
+          'declaration'
+        );
+        if (viaTemp !== null) {
+          out.push(...viaTemp.binds, ...viaTemp.writes);
+          return;
+        }
         throw new Error(
           `Cannot compile a destructuring declaration whose value is not a ` +
-            `literal tuple` +
+            `literal tuple, nor an expression of statically-known tuple ` +
+            `arity` +
             (v === undefined ? '' : ` (got '${v.type.toString()}')`) +
             `. Fail closed (D6) — the interpreter evaluates it.`
         );
+      }
       if (pattern.nops !== v.nops)
         throw new Error(
           `Cannot compile a destructuring declaration: the pattern has ` +
@@ -2479,9 +2642,10 @@ export class BaseCompiler {
    *       ⟶  let _tv1 = b; let _tv2 = a + b; a = _tv1; b = _tv2
    *
    * A `_` position still gets a temporary (its element is evaluated for
-   * effect) but no write. As with the declare form, only a LITERAL tuple value
-   * lowers — a non-literal value or a shape mismatch fails closed (D6) and
-   * the interpreter takes over.
+   * effect) but no write. As with the declare form, a LITERAL tuple value
+   * lowers element-wise, a tuple-VALUED one through a single whole-tuple
+   * temporary (`destructureViaTemp`), and anything else — an unknown arity, a
+   * shape mismatch — fails closed (D6) so the interpreter takes over.
    *
    * The rewrite is for EFFECT only: it ends on a write, whose value is one
    * leaf's, not the tuple's. Callers must therefore only apply it in statement
@@ -2504,13 +2668,30 @@ export class BaseCompiler {
           `Cannot compile a destructuring assignment: the pattern is not a ` +
             `tuple. Fail closed (D6).`
         );
-      if (v === undefined || !isFunction(v, 'Tuple'))
+      if (v === undefined || !isFunction(v, 'Tuple')) {
+        // A tuple-VALUED (but not literal) value: one temporary + positional
+        // reads, when `destructureViaTemp` admits the shape. Its binds still
+        // precede EVERY write (they are collected in the same two lists), so
+        // the evaluate-then-write order is preserved even in a mixed pattern.
+        const viaTemp = BaseCompiler.destructureViaTemp(
+          pattern,
+          v,
+          target,
+          'assignment'
+        );
+        if (viaTemp !== null) {
+          binds.push(...viaTemp.binds);
+          writes.push(...viaTemp.writes);
+          return;
+        }
         throw new Error(
           `Cannot compile a destructuring assignment whose value is not a ` +
-            `literal tuple` +
+            `literal tuple, nor an expression of statically-known tuple ` +
+            `arity` +
             (v === undefined ? '' : ` (got '${v.type.toString()}')`) +
             `. Fail closed (D6) — the interpreter evaluates it.`
         );
+      }
       if (pattern.nops !== v.nops)
         throw new Error(
           `Cannot compile a destructuring assignment: the pattern has ` +
@@ -2603,7 +2784,7 @@ export class BaseCompiler {
       args = args.flatMap((a, i) =>
         valueUsed && i === n - 1
           ? [a]
-          : (BaseCompiler.desugarPatternDeclare(a) ?? [a])
+          : (BaseCompiler.desugarPatternDeclare(a, target) ?? [a])
       );
     }
 

@@ -219,6 +219,31 @@
 
 ### Improvements
 
+- **Membership in a value collection now types the tested function
+  parameter.** `Element(c, digits)` — Epsil `c in digits` — inside a function
+  body narrows a not-yet-typed parameter to the collection's element type
+  (`digits: list<string>` ⇒ `c: string`), the membership counterpart of the
+  collection evidence `Length(cs)` and `cs[i]` already contribute. The
+  evidence lands on the parameter's binding only: the function's arrow still
+  reports a scalar parameter slot as `unknown`, so the lambda auto-broadcast
+  default is unchanged (`isDigit(["5", "x"])` still maps elementwise). Two
+  deliberate exclusions: a **global** symbol is never retyped — membership is
+  a predicate (`x in [1, 2, 3]` on a string-valued `x` is `False`, not a type
+  error), and a Solve domain spec such as `Element(x, Range(1, 9))`
+  constrains its unknown without narrowing it — and membership in a **set**
+  (`x ∈ ℤ`, `x ∈ {1, 2, 3}`) stays with the assume machinery, which applies
+  such refinements scoped.
+
+- **Epsil debugger: function signatures in the Variables panel show inferred
+  parameter evidence.** The engine's arrow deliberately hides evidence that
+  does not rule out broadcasting, so a function like
+  `skipWs(cs, i) = … cs[i] …` displayed as
+  `(dictionary | indexed_collection, unknown) -> …`. The debugger now reads
+  the parameter bindings instead and shows names alongside everything
+  inference recorded: `(cs: dictionary | indexed_collection, i: boolean |
+  indexed_collection | number | string) -> …`, and `isDigit` shows
+  `(c: string) -> boolean`. Display-only; the engine's types are untouched.
+
 - **Cortex: most reserved words are now ordinary identifiers.** Only the words
   the grammar actually consumes are reserved: the literals (`true`, `false`,
   `Infinity`, `oo`, `NaN`) and the active keywords and word operators (`break`,
@@ -234,6 +259,91 @@
   position.
 
 ### Resolved Issues
+
+- **Compiled string comparisons fail closed instead of returning wrong
+  values.** The JavaScript compile target is numeric at heart: `Equal` and
+  `NotEqual` lower to a tolerance test (`Math.abs(a - b) <= tol`), which for
+  string operands is `NaN <= tol` — so `s == "a"` compiled to `false` behind
+  `success: true`, and `IndexOf` over a list of strings returned 0 for the
+  same reason. Both now fail closed (D6) when an operand is *provably* a
+  string (a string literal, or statically string-typed — an unknown-typed
+  symbol never gates, so inferred-parameter plot equalities compile
+  byte-identically), and the interpreter fallback returns the correct value.
+  Orderings (`Less`, `Greater`, …) are gated more narrowly, on the **mixed**
+  case only (`"a" < 1` — inert in the interpreter, `false` compiled): an
+  all-string comparison compares strings exactly as the interpreter does
+  (raw code-unit order) and keeps compiling, with parity pinned. `match` on
+  string constants was never affected — it emits a real `===` — and is now
+  pinned too. The Python target needed no gate: its wrong shapes raise a
+  loud runtime `TypeError` rather than a silent value, and its `IndexOf` is
+  genuinely correct.
+
+- **A destructuring declare or assign whose right-hand side is a
+  tuple-valued expression now compiles (JavaScript target).**
+  `let (v, j) = parseValue(cs, i)` and the state-threading idiom
+  `(v, j) := step(j)` previously failed closed unless the right-hand side
+  was a literal tuple. When the pattern is flat and the right-hand side's
+  static type pins the tuple arity (`-> tuple<T1, T2>`), the compiler now
+  binds the whole result to one temporary and reads components positionally
+  — `let _tv1; _tv1 = step(k); let v = _SYS.at(_tv1, 1); …` — preserving the
+  interpreter's evaluate-once-then-write order (so swaps and `_` positions
+  behave identically). A tuple-typed *symbol* right-hand side rides the same
+  path. Nested patterns, statically-unknown arity, and every non-JavaScript
+  target (GLSL, WGSL, Python, interval) keep the fail-closed refusal.
+
+- **A function no longer broadcasts over a collection argument its body
+  consumes whole.** A user function's unannotated parameters default to
+  scalar, and a scalar-parameter function maps over an indexed-collection
+  argument (the vectorization convention: `f(x) = 2x` applied to `[1, 2, 3]`
+  is `[2, 4, 6]`). But the *collection evidence* a body provides was being
+  lost in three ways, so functions that plainly consume a collection whole
+  were broadcast too — the body then saw a single element, and conditions
+  inside it failed (`Condition must evaluate to "True" or "False"`) or loops
+  never terminated. All three are fixed, and each writes its evidence onto
+  the parameter so the inferred signature reflects the use:
+  - a parameter referenced only from a **nested block scope** (an `if`
+    branch, a `while` body — `while cs[j] != "z"`) auto-declared a throwaway
+    per-scope shadow binding that swallowed the inference; bare parameters
+    now share one cached binding across the whole body, which the literal's
+    parameter declaration then adopts;
+  - a function that merely **forwards its parameter** (`g(xs) = f(xs)`)
+    learned nothing, because calls to inferred-signature functions skip
+    argument validation — and with it, its narrowing side-channel; the
+    collection-only parameter types of the callee now narrow unknown symbol
+    arguments even on that route;
+  - `Length(x)` contributed nothing because its parameter is deliberately
+    `any` (`Length(5)` stays symbolic); it now treats a not-yet-typed symbol
+    operand as collection evidence, like an indexed read does.
+
+- **A `while` loop inside a zero-argument function now terminates.**
+  `function f() { let j = 1; while j < 3 { j = j + 1 }; j }` hit the
+  iteration limit: the nullary apply path skipped the sweep of stale
+  canonicalization bookkeeping that the parameterized path performs, so the
+  loop condition read a hoisted valueless binding forever. The nullary path
+  now hides those bindings for the duration of the call, exactly like the
+  parameterized path.
+
+- **`And`/`Or`/`Not` accept a possibly-absent condition, Kleene-style.** A
+  comparison on an indexed read — `cs[j] == "a"`, honestly typed
+  `boolean | missing` since the index may be out of range — was rejected at
+  canonicalization by the logic operators' `boolean` parameters, so the
+  guarded loop condition `j <= Length(cs) && cs[j] == "a"` errored with
+  `incompatible-type`. The three operators now declare the `handle`
+  missing-value behavior and evaluate Kleene over absence: `False` dominates
+  `And`, `True` dominates `Or`, `Not(Missing)` is `Missing`, and a surviving
+  absent condition still surfaces through `If`'s absent-condition error.
+
+- **Epsil: a pinned `match` case after a result line is a new case.** The
+  case body `1 => "one"` followed by a line starting `== lim => …` fused into
+  the comparison `"one" == lim` (leading-operator line continuation), and the
+  `=>` then diagnosed. At the top level of a case body a linebreak now ends
+  the body; parenthesized subexpressions keep the ordinary continuation.
+  Two diagnostics were also sharpened: comma-separated cases get a targeted
+  `match-case-separator` (with a fix-it to `;`, and parsing recovers instead
+  of dropping the remaining cases), and a conditional tail accidentally
+  placed at the start of a line (`x + 1` / `if x > 0 else 0`) reports
+  `conditional-if-line-start` instead of the misleading
+  `opening bracket expected`.
 
 - **A shader loop body no longer emits a `return` inside the loop.** On the
   GLSL and WGSL targets, a `for` body with more than one statement compiled as

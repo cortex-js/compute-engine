@@ -1,30 +1,146 @@
-// Epsil demo — open this file in the Extension Development Host (F5)
-// to see highlighting, live diagnostics, and the Run button.
+  // json-parse.epsil — a recursive-descent JSON parser written in Epsil.
+  //
+  // jsonParse(s) turns a JSON string into an Epsil data structure:
+  //   object → dictionary        array  → list
+  //   string → string            number → exact number (0.25 becomes 1/4)
+  //   true/false → True/False    null   → Missing
+  //
+  // Every parse function takes the character list `cs` and a 1-based index,
+  // and returns a tuple (value, indexAfter) — the position is threaded through
+  // return values, so the parser is a set of pure recursive functions.
 
-/* Block comments
-   /* can nest */
-   like this. */
+  let digits = Characters("0123456789")
+  isDigit(c) = c in digits
+  isWs(c) = c == " " || c == "\n" || c == "\t" || c == "\r"
 
-// Symbolic by default: exact results stay exact
-let radius = 1/2
-let area = Pi * radius^2
+  // Index of the first non-whitespace character at or after i
+  skipWs(cs, i) = skipWs(cs, i + 1) if i <= Length(cs) && isWs(cs[i]) else i
 
-// Numeric approximation is explicit
-N(area)
+  // A run of digits starting at i, as (value, indexAfter); acc accumulates
+  function parseDigits(cs, i, acc) {
+    if i <= Length(cs) && isDigit(cs[i]) {
+      parseDigits(cs, i + 1, 10 * acc + IndexOf(digits, cs[i]) - 1)
+    } else { (acc, i) }
+  }
 
-// Strings, with interpolation
-let name = "world"
-"hello, \(name)"
+  // Number: -?int(.frac)?((e|E)(+|-)?exp)? — kept exact, so 2.5e-1 is 1/4
+  function parseNumber(cs, i) {
+    let j = i
+    let sign = 1
+    if cs[j] == "-" {
+      sign = -1
+      j = j + 1
+    }
+    let n = 0
+    (n, j) := parseDigits(cs, j, 0)
+    if cs[j] == "." {
+      let f = 0
+      let start = j + 1
+      (f, j) := parseDigits(cs, start, 0)
+      n = n + f / 10^(j - start)
+    }
+    if cs[j] == "e" || cs[j] == "E" {
+      j = j + 1
+      let esign = 1
+      if cs[j] == "+" { j = j + 1 }
+      else if cs[j] == "-" {
+        esign = -1
+        j = j + 1
+      }
+      let e = 0
+      (e, j) := parseDigits(cs, j, 0)
+      n = n * 10^(esign * e)
+    }
+    (sign * n, j)
+  }
 
-// LaTeX islands parse as math
-let q = $\frac{\sqrt{2}}{2}$
+  // Characters of a string body from i to the closing quote; out accumulates
+  function scanString(cs, i, out) {
+    let c = cs[i]
+    if c == "\"" { (StringJoin(ListFrom(out)), i + 1) }
+    else if c == "\\" {
+      let e = match cs[i + 1] {
+        "n" => "\n"
+        "t" => "\t"
+        "r" => "\r"
+        _ => cs[i + 1] // covers \" \\ \/
+      }
+      scanString(cs, i + 2, Join(out, [e]))
+    }
+    else { scanString(cs, i + 1, Join(out, [c])) }
+  }
 
-// Collections and pipelines
-let squares = Map([1, 2, 3, 4], x |-> x^2)
-Sum(...squares)
+  // String: cs[i] is the opening quote
+  function parseString(cs, i) {
+    let quote = cs[i]
+    scanString(cs, i + 1, [])
+  }
 
-// Implicit multiplication: 3x is a number then a symbol
-Simplify(3x + 2x)
+  // Comma-separated values from i (inside "[…]"); acc accumulates
+  function parseElements(cs, i, acc) {
+    let v = 0
+    let j = 0
+    (v, j) := parseValue(cs, i)
+    let out = Join(acc, [v])
+    j = skipWs(cs, j)
+    if cs[j] == "," { parseElements(cs, skipWs(cs, j + 1), out) }
+    else { (ListFrom(out), j + 1) } // at "]"
+  }
 
-// Uncomment to see a live static type error:
-// y := "a" + 1
+  // Array: cs[i] is "[" — elements become a list
+  function parseArray(cs, i) {
+    let j = skipWs(cs, i + 1)
+    if cs[j] == "]" { ([], j + 1) } else { parseElements(cs, j, []) }
+  }
+
+  // "key": value pairs from i (inside "{…}"); keys/vals accumulate
+  function parseMembers(cs, i, keys, vals) {
+    let k = ""
+    let j = 0
+    (k, j) := parseString(cs, i)
+    j = skipWs(cs, skipWs(cs, j) + 1) // skip ":"
+    let v = 0
+    (v, j) := parseValue(cs, j)
+    let ks = Join(keys, [k])
+    let vs = Join(vals, [v])
+    j = skipWs(cs, j)
+    if cs[j] == "," { parseMembers(cs, skipWs(cs, j + 1), ks, vs) }
+    else { (DictionaryFrom(Zip(ListFrom(ks), ListFrom(vs))), j + 1) } // at "}"
+  }
+
+  // Object: cs[i] is "{" — key-value pairs become a dictionary
+  function parseObject(cs, i) {
+    let j = skipWs(cs, i + 1)
+    if cs[j] == "}" { ({->}, j + 1) } else { parseMembers(cs, j, [], []) }
+  }
+
+  // Any JSON value, dispatched on its first character
+  function parseValue(cs, i) {
+    let j = skipWs(cs, i)
+    let c = cs[j]
+    if c == "\"" { parseString(cs, j) }
+    else if c == "[" { parseArray(cs, j) }
+    else if c == "{" { parseObject(cs, j) }
+    else if c == "t" { (True, j + 4) } // true
+    else if c == "f" { (False, j + 5) } // false
+    else if c == "n" { (Missing, j + 4) } // null
+    else { parseNumber(cs, j) }
+  }
+
+  function jsonParse(s) {
+    let (v, _) = parseValue(Characters(s), 1)
+    v
+  }
+
+    let src = """
+  {
+    "name": "Ada Lovelace",
+    "born": 1815,
+    "tags": ["math", "computing"],
+    "ratio": 2.5e-1,
+    "active": true,
+    "note": null
+  }
+  """
+
+  jsonParse(src)

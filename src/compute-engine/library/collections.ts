@@ -1283,6 +1283,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // drop) that this custom canonical handler would otherwise short-circuit.
       ops = flatten(ops);
       const stripped = withFirst(peekCountPreserving(ops[0]), ops);
+      // The declared parameter is `any` — deliberately tolerant, so
+      // `Length(5)` stays symbolic instead of erroring — which means
+      // validation contributes no type inference. Yet `Length(x)` on a
+      // not-yet-typed symbol is collection evidence in the same way `x[i]`
+      // is: narrow it, so a function parameter whose only use is
+      // `Length(cs)` types as a collection (and the lambda auto-broadcast
+      // then binds a collection argument whole instead of mapping over it).
+      const target = stripped[0];
+      if (
+        target !== undefined &&
+        isSymbol(target) &&
+        target.valueDefinition?.inferredType &&
+        target.type.type === 'unknown'
+      )
+        target.infer('collection', 'narrow');
       const adjusted = validateArguments(
         ce,
         stripped,

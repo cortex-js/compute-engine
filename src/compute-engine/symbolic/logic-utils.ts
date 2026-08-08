@@ -226,6 +226,8 @@ export function evaluateNot(
   const op1 = sym(args[0]);
   if (op1 === 'True') return ce.False;
   if (op1 === 'False') return ce.True;
+  // Kleene: the negation of an absent truth value is absent.
+  if (op1 === 'Missing') return ce.Missing;
   return undefined;
 }
 

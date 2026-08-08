@@ -204,6 +204,10 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `Expected closing bracket "${args[0]}"`;
     case 'string-literal-closing-delimiter-expected':
       return `Expected closing string delimiter ${JSON.stringify(args[0])}`;
+    case 'match-case-separator':
+      return `Match cases are separated by a newline or ";", not a comma`;
+    case 'conditional-if-line-start':
+      return `An "if" at the start of a line begins a new if-statement; for a conditional expression ("a if c else b"), keep "if" on the same line as the value before it`;
     case 'unexpected-symbol':
       return `Unexpected symbol "${args[0]}"`;
     default: {

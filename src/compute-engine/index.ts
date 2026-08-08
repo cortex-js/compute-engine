@@ -1846,6 +1846,15 @@ export class ComputeEngine implements IComputeEngine {
       }
   }
 
+  /** The bindings cached on the TOP shadowed-parameter frame — read by
+   * `canonicalFunctionLiteralArguments` just before popping the frame, so the
+   * literal's parameter declarations can adopt the binding the body's
+   * references accumulated type evidence on. @internal */
+  _currentShadowedParameterDefs(): ReadonlyMap<string, BoxedDefinition> {
+    const stack = this._shadowedParameterStack;
+    return stack.length > 0 ? stack[stack.length - 1].defs : new Map();
+  }
+
   /**
    * Use `ce.expr(name)` instead
    * @internal */

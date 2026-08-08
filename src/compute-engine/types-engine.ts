@@ -712,6 +712,10 @@ export interface IComputeEngine {
   /** Cache the binding auto-declared for an active shadowed parameter so later
    * references reuse it. @internal */
   _setShadowedParameterDef(name: string, def: BoxedDefinition): void;
+  /** The bindings cached on the TOP shadowed-parameter frame — read just
+   * before popping it so a literal's parameter declarations can adopt the
+   * binding the body's references accumulated type evidence on. @internal */
+  _currentShadowedParameterDefs(): ReadonlyMap<string, BoxedDefinition>;
 
   /** Enter a user-function application, throwing a `CancellationError`
    * (`cause: 'recursion-depth-exceeded'`) when `recursionLimit` is exceeded.
