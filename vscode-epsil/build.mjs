@@ -55,6 +55,13 @@ const CONFIGS = [
     // The debuggee: engine bundled from repo source, like the server.
     external: [],
   },
+  {
+    ...COMMON,
+    entryPoints: ['./src/inline-runner.ts'],
+    outfile: './dist/inline-runner.js',
+    // Inline-results runner: engine bundled from repo source.
+    external: [],
+  },
 ];
 
 if (watch) {

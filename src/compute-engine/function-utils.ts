@@ -1,5 +1,8 @@
 import { MathJsonSymbol } from '../math-json.js';
-import { debugStatementHook } from '../common/debug-hook.js';
+import {
+  debugStatementHook,
+  debugStatementResultHook,
+} from '../common/debug-hook.js';
 import { cmp } from './boxed-expression/compare.js';
 import {
   evaluateInOwnBindings,
@@ -1257,6 +1260,13 @@ export function evaluateStatements(
     // operators and `Return` is unregistered, so a literal control-flow
     // statement evaluates to itself with its operand evaluated.
     result = op.evaluate();
+    // Post-statement debugger hook (break-on-error-value); same guard shape
+    // as the pre-statement hook above.
+    if (
+      debugStatementResultHook !== undefined &&
+      op.sourceOffsets !== undefined
+    )
+      debugStatementResultHook(op, result);
     // Short-circuit on a control-flow result — whether the statement was a
     // literal `Break`/`Continue`/`Return` or *evaluated to* one (e.g.
     // `If(cond, Break)`). The control-flow expression itself is the block's

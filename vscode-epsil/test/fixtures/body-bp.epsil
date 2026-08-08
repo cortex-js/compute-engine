@@ -1,0 +1,9 @@
+function double(n) {
+  let a = n * 2
+  a + 1
+}
+let x = 0
+while x < 3 {
+  x := x + 1
+}
+double(x)

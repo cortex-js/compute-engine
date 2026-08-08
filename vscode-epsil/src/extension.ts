@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import * as path from 'node:path';
 
 import * as vscode from 'vscode';
@@ -21,6 +22,17 @@ export async function activate(
   context.subscriptions.push(
     vscode.commands.registerCommand('epsil.runFile', runFile),
     vscode.commands.registerCommand('epsil.restartServer', restartServer),
+    vscode.commands.registerCommand('epsil.showInlineResults', () =>
+      showInlineResults(context)
+    ),
+    vscode.commands.registerCommand('epsil.clearInlineResults', () =>
+      clearInlineResults()
+    ),
+    // Inline results are positioned by line: any edit invalidates them.
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (decoratedDocument === event.document.uri.toString())
+        clearInlineResults();
+    }),
     // F5 on an .epsil file with no launch.json: synthesize a launch config
     // for the active editor. (The adapter itself is declared in
     // `contributes.debuggers` — program + runtime — so no descriptor factory
@@ -138,6 +150,128 @@ async function runFile(): Promise<void> {
     vscode.window.createTerminal({ name: TERMINAL_NAME, cwd });
   terminal.show(true);
   terminal.sendText(`${cliCommand} ${quoteArgument(document.uri.fsPath)}`);
+}
+
+// ── Inline results ─────────────────────────────────────────────────────────
+
+/** One decoration type for values, one for error values. */
+let valueDecoration: vscode.TextEditorDecorationType | undefined;
+let errorDecoration: vscode.TextEditorDecorationType | undefined;
+/** URI (string) of the document currently decorated, if any. */
+let decoratedDocument: string | undefined;
+
+function decorationTypes(): [
+  vscode.TextEditorDecorationType,
+  vscode.TextEditorDecorationType,
+] {
+  valueDecoration ??= vscode.window.createTextEditorDecorationType({
+    after: {
+      color: new vscode.ThemeColor('editorCodeLens.foreground'),
+      margin: '0 0 0 2em',
+      fontStyle: 'italic',
+    },
+  });
+  errorDecoration ??= vscode.window.createTextEditorDecorationType({
+    after: {
+      color: new vscode.ThemeColor('errorForeground'),
+      margin: '0 0 0 2em',
+      fontStyle: 'italic',
+    },
+  });
+  return [valueDecoration, errorDecoration];
+}
+
+function clearInlineResults(): void {
+  decoratedDocument = undefined;
+  for (const editor of vscode.window.visibleTextEditors) {
+    if (valueDecoration) editor.setDecorations(valueDecoration, []);
+    if (errorDecoration) editor.setDecorations(errorDecoration, []);
+  }
+}
+
+/**
+ * Run the active Epsil file with the bundled inline runner (a separate node
+ * process — never the extension host) and decorate each top-level
+ * statement's last line with its value. Cleared on any edit.
+ */
+async function showInlineResults(
+  context: vscode.ExtensionContext
+): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  const document = editor?.document;
+  if (!editor || !document || document.languageId !== 'epsil') {
+    void vscode.window.showErrorMessage(
+      'Epsil: Show Inline Results needs an Epsil file in the active editor.'
+    );
+    return;
+  }
+  if (document.isUntitled) {
+    void vscode.window.showErrorMessage(
+      'Save this file before running it: Epsil runs a file from disk.'
+    );
+    return;
+  }
+  if (!(await document.save())) return;
+
+  const runner = context.asAbsolutePath(path.join('dist', 'inline-runner.js'));
+  const timeLimit =
+    vscode.workspace
+      .getConfiguration('epsil')
+      .get<number>('inlineResults.statementTimeLimit') ?? 5000;
+
+  const output = await new Promise<{ stdout: string; stderr: string }>(
+    (resolve) => {
+      execFile(
+        process.execPath,
+        [runner, document.uri.fsPath, String(timeLimit)],
+        {
+          // The extension host's own executable doubles as node.
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+          maxBuffer: 16 * 1024 * 1024,
+        },
+        (_error, stdout, stderr) => resolve({ stdout, stderr })
+      );
+    }
+  );
+
+  if (output.stderr.trim().length > 0) {
+    // Parse errors and diagnostics: the language server already shows them
+    // inline; a status message is enough here.
+    void vscode.window.setStatusBarMessage(
+      'Epsil: inline results — the file has diagnostics (see Problems).',
+      5000
+    );
+  }
+
+  const [valueType, errorType] = decorationTypes();
+  const values: vscode.DecorationOptions[] = [];
+  const errors: vscode.DecorationOptions[] = [];
+  for (const line of output.stdout.split('\n')) {
+    if (line.trim() === '') continue;
+    let record: {
+      type?: string;
+      endLine?: number;
+      value?: string;
+      isError?: boolean;
+    };
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (record.type !== 'result' || record.value === undefined) continue;
+    const at = Math.min((record.endLine ?? 1) - 1, document.lineCount - 1);
+    const range = document.lineAt(at).range;
+    (record.isError ? errors : values).push({
+      range,
+      renderOptions: {
+        after: { contentText: ` ⇒ ${record.value}` },
+      },
+    });
+  }
+  editor.setDecorations(valueType, values);
+  editor.setDecorations(errorType, errors);
+  decoratedDocument = document.uri.toString();
 }
 
 async function restartServer(): Promise<void> {

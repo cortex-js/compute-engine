@@ -1,0 +1,5 @@
+let x = 3
+let y = x + 2
+x := x * 10
+let z = [x + y, 2, 3]
+z[1] + 1

@@ -56,6 +56,15 @@
       {
         "command": "epsil.restartServer",
         "title": "Epsil: Restart Language Server"
+      },
+      {
+        "command": "epsil.showInlineResults",
+        "title": "Epsil: Show Inline Results",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "epsil.clearInlineResults",
+        "title": "Epsil: Clear Inline Results"
       }
     ],
     "menus": {
@@ -73,6 +82,14 @@
         },
         {
           "command": "epsil.restartServer",
+          "when": "resourceLangId == epsil"
+        },
+        {
+          "command": "epsil.showInlineResults",
+          "when": "resourceLangId == epsil"
+        },
+        {
+          "command": "epsil.clearInlineResults",
           "when": "resourceLangId == epsil"
         }
       ]
@@ -145,6 +162,11 @@
           "default": "npx epsil",
           "description": "Command used by 'Epsil: Run File' to execute a source file in the terminal."
         },
+        "epsil.inlineResults.statementTimeLimit": {
+          "type": "number",
+          "default": 5000,
+          "description": "Time limit per statement (in milliseconds) when computing inline results. 0 disables the limit."
+        },
         "epsil.diagnostics.enable": {
           "type": "boolean",
           "default": true,
@@ -166,6 +188,8 @@
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
+    "pretest": "node build.mjs",
+    "test": "node test/dap.test.mjs",
     "vscode:prepublish": "node build.mjs"
   },
   "dependencies": {

@@ -127,9 +127,21 @@ needs a debug hook:
 2. ~~**Tier 1**~~ — SHIPPED 2026-08-07 (see above).
 3. ~~**Tier 2**~~ — SHIPPED 2026-08-07 (offsets propagation + evaluator
    hook + worker-thread debuggee; see "The evaluator hook" below).
-   Remaining open: Tier 0 (inline result decorations, can reuse the worker
-   protocol) and Tier 3 polish (conditional breakpoints, logpoints,
-   break-on-error-value).
+4. ~~**Tier 0 + Tier 3**~~ — SHIPPED 2026-08-07: inline result decorations
+   (`inline-runner.ts` + `epsil.showInlineResults`), conditional
+   breakpoints, logpoints, the *Error Values* exception filter (built on a
+   post-statement result hook in `debug-hook.ts` — note: Epsil catches most
+   body-embedded errors STATICALLY, so the filter's realistic surface is
+   statements whose runtime value is/contains an error), Locals/Globals
+   scope split (split at the run's baseline scope), restart, anonymous
+   lambdas named from their `let`/`Assign` binding, and same-line
+   nested-statement breakpoint dedup (an `if` and its branch's return value
+   share a line; the loop-iteration re-stop case has an IDENTICAL span and
+   still stops). End-to-end suite: `test/dap.test.mjs` (`npm test`).
+
+   Remaining open: marketplace publish (needs the `cortex-js` publisher
+   account); "run to here" is covered by VS Code's built-in Run to Cursor
+   (a temporary breakpoint — works with this adapter as-is).
 
 ## Audit: `sourceOffsets` survival through boxing/canonicalization
 

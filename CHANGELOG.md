@@ -62,6 +62,27 @@
 
 ### New Features
 
+- **Epsil debugging support in the engine.** Two additions that let a
+  debugger (such as the VS Code Epsil extension's DAP adapter) pause and
+  inspect Epsil programs at statement granularity:
+  - **Source positions survive canonicalization.** The `sourceOffsets`
+    metadata the Epsil parser attaches to every node is now preserved
+    through canonical boxing — custom canonical-handler results and the
+    numeric fast-path constructors re-attach it, the `.canonical` getters
+    (function and symbol) thread it, closure capture keeps it on rebuilt
+    bodies, and the recursion knot-tying re-box serializes it. Positions are
+    advisory metadata: default JSON serialization does not emit them
+    (opt-in via `metadata: ['sourceOffsets']`), and interned singletons are
+    never stamped.
+  - **Debug statement hooks.** `src/common/debug-hook.ts` exposes a
+    synchronous, module-global pre-statement hook and post-statement result
+    hook, fired by the statement sequencer (`Block` bodies, lambda bodies,
+    `if` branches) for source-mapped statements only. One comparison per
+    statement when unset; not part of the public engine API.
+  - Function-application scopes are now pushed with the context name
+    `'call'` (previously an anonymous placeholder name), so `ce.trace` and
+    debuggers can delimit activation frames.
+
 - **Destructuring assignment — `(a, b) := (b, a)`.** A tuple pattern may now
   appear on the left of a Cortex assignment, writing bindings that already
   exist instead of declaring new ones. The pattern grammar is the destructuring

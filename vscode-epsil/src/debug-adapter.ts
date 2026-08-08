@@ -41,15 +41,17 @@ import {
 } from '@vscode/debugadapter';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 
-import type {
-  FrameInfo,
-  WorkerCommand,
-  WorkerConfig,
-  WorkerEvent,
+import {
+  GLOBALS_REF,
+  LOCALS_REF,
+  type BreakpointSpec,
+  type FrameInfo,
+  type WorkerCommand,
+  type WorkerConfig,
+  type WorkerEvent,
 } from './debug-protocol.js';
 
 const THREAD_ID = 1;
-const GLOBALS_REF = 1;
 /** Deadline for a worker inspection reply — the worker only services
  * commands while paused, so a reply not arriving promptly means it is off
  * running (or wedged); fail the request rather than hang the client. */
@@ -72,10 +74,14 @@ export class EpsilDebugSession extends DebugSession {
   private ctrl: Int32Array | undefined;
 
   private programPath = '';
+  private launchArgs: EpsilLaunchArguments | undefined;
   /** Lines a breakpoint can bind to (from the worker's AST walk). */
   private breakpointableLines: number[] = [];
   private paused = false;
   private lastStop: { line: number; frames: FrameInfo[] } | undefined;
+  /** Last configuration sent, for re-applying on restart. */
+  private lastBreakpoints: BreakpointSpec[] = [];
+  private lastErrorValuesFilter = false;
 
   private nextRequestId = 1;
   private pendingReplies = new Map<
@@ -99,6 +105,19 @@ export class EpsilDebugSession extends DebugSession {
       supportsTerminateRequest: true,
       supportsEvaluateForHovers: true,
       supportsSteppingGranularity: false,
+      supportsConditionalBreakpoints: true,
+      supportsLogPoints: true,
+      supportsRestartRequest: true,
+      exceptionBreakpointFilters: [
+        {
+          filter: 'error-values',
+          label: 'Error Values',
+          description:
+            'Pause when a statement evaluates to an error value ' +
+            '(Epsil reports runtime problems as values, not exceptions).',
+          default: false,
+        },
+      ],
     };
     this.sendResponse(response);
     // InitializedEvent is deferred to launchRequest: breakpoints can only be
@@ -109,18 +128,39 @@ export class EpsilDebugSession extends DebugSession {
     response: DebugProtocol.LaunchResponse,
     args: EpsilLaunchArguments
   ): void {
+    this.launchArgs = args;
     this.programPath = args.program;
+    this.startWorker(
+      // First 'ready': answer the launch and open the configuration phase.
+      () => {
+        this.sendResponse(response);
+        this.sendEvent(new InitializedEvent());
+      },
+      // Parse failure before 'ready': the launch must still be answered for
+      // the session to shut down cleanly.
+      () => this.sendResponse(response)
+    );
+  }
+
+  /** Spawn the debuggee worker. `onReady`/`onEarlyExit` fire once. */
+  private startWorker(
+    onReady: () => void,
+    onEarlyExit: () => void,
+    onError?: (message: string) => void
+  ): void {
+    const args = this.launchArgs!;
 
     let sourceText: string;
     try {
       sourceText = readFileSync(args.program, 'utf8');
     } catch (error) {
-      this.sendErrorResponse(response, {
-        id: 1001,
-        format: `Cannot read '${args.program}': ${
+      (onError ?? ((m: string) => this.output(`${m}\n`, 'stderr')))(
+        `Cannot read '${args.program}': ${
           error instanceof Error ? error.message : String(error)
-        }`,
-      });
+        }`
+      );
+      onEarlyExit();
+      this.sendEvent(new TerminatedEvent());
       return;
     }
 
@@ -139,36 +179,34 @@ export class EpsilDebugSession extends DebugSession {
       commandPort: channel.port2,
     };
 
-    this.worker = new Worker(join(__dirname, 'debug-worker.js'), {
+    const worker = new Worker(join(__dirname, 'debug-worker.js'), {
       workerData: config,
       transferList: [channel.port2],
     });
+    this.worker = worker;
 
     let launched = false;
-    this.worker.on('message', (event: WorkerEvent) => {
+    worker.on('message', (event: WorkerEvent) => {
       if (event.type === 'ready') {
         this.breakpointableLines = event.breakpointableLines;
         if (!launched) {
           launched = true;
-          this.sendResponse(response);
-          this.sendEvent(new InitializedEvent());
+          onReady();
         }
         return;
       }
       this.onWorkerEvent(event);
-      // A parse failure terminates before 'ready'; the launch must still be
-      // answered for the session to shut down cleanly.
       if (event.type === 'terminated' && !launched) {
         launched = true;
-        this.sendResponse(response);
+        onEarlyExit();
       }
     });
-    this.worker.on('error', (error) => {
+    worker.on('error', (error) => {
       this.output(`debuggee error: ${error.message}\n`, 'stderr');
       this.sendEvent(new TerminatedEvent());
     });
-    this.worker.on('exit', () => {
-      this.worker = undefined;
+    worker.on('exit', () => {
+      if (this.worker === worker) this.worker = undefined;
     });
   }
 
@@ -269,7 +307,7 @@ export class EpsilDebugSession extends DebugSession {
     response: DebugProtocol.SetBreakpointsResponse,
     args: DebugProtocol.SetBreakpointsArguments
   ): void {
-    const verified = new Set<number>();
+    const specs = new Map<number, BreakpointSpec>();
     const breakpoints = (args.breakpoints ?? []).map((requested) => {
       const line = this.convertClientLineToDebugger(requested.line);
       // Bind to the first statement line at or after the requested line —
@@ -277,11 +315,59 @@ export class EpsilDebugSession extends DebugSession {
       const target = this.breakpointableLines.find((l) => l >= line);
       if (target === undefined)
         return new Breakpoint(false, this.convertDebuggerLineToClient(line));
-      verified.add(target);
+      specs.set(target, {
+        line: target,
+        condition: requested.condition,
+        logMessage: requested.logMessage,
+      });
       return new Breakpoint(true, this.convertDebuggerLineToClient(target));
     });
-    this.postCommand({ type: 'breakpoints', lines: [...verified] });
+    this.lastBreakpoints = [...specs.values()];
+    this.postCommand({ type: 'breakpoints', breakpoints: this.lastBreakpoints });
     response.body = { breakpoints };
+    this.sendResponse(response);
+  }
+
+  protected override setExceptionBreakPointsRequest(
+    response: DebugProtocol.SetExceptionBreakpointsResponse,
+    args: DebugProtocol.SetExceptionBreakpointsArguments
+  ): void {
+    this.lastErrorValuesFilter = (args.filters ?? []).includes('error-values');
+    this.postCommand({
+      type: 'exception-filters',
+      errorValues: this.lastErrorValuesFilter,
+    });
+    this.sendResponse(response);
+  }
+
+  protected override restartRequest(
+    response: DebugProtocol.RestartResponse
+  ): void {
+    const previous = this.worker;
+    this.worker = undefined; // detach: its late events must not interleave
+    void previous?.terminate();
+    this.paused = false;
+    this.lastStop = undefined;
+    this.pendingReplies.forEach((p) => clearTimeout(p.timer));
+    this.pendingReplies.clear();
+
+    // Fresh worker, same launch config; re-apply the cached breakpoints and
+    // exception filters, then start (VS Code does not re-run the
+    // configuration phase on a restart).
+    this.startWorker(
+      () => {
+        this.postCommand({
+          type: 'breakpoints',
+          breakpoints: this.lastBreakpoints,
+        });
+        this.postCommand({
+          type: 'exception-filters',
+          errorValues: this.lastErrorValuesFilter,
+        });
+        this.postCommand({ type: 'start' });
+      },
+      () => {}
+    );
     this.sendResponse(response);
   }
 
@@ -354,9 +440,15 @@ export class EpsilDebugSession extends DebugSession {
   protected override scopesRequest(
     response: DebugProtocol.ScopesResponse
   ): void {
-    // One scope: the worker's binding walk already merges the chain from the
-    // paused scope outward, so locals and globals appear together.
-    response.body = { scopes: [new Scope('Variables', GLOBALS_REF, false)] };
+    // Locals: bindings above the run's baseline scope — the paused body's
+    // parameters and locals (empty at a top-level pause). Globals: the
+    // session's own declarations.
+    response.body = {
+      scopes: [
+        new Scope('Locals', LOCALS_REF, false),
+        new Scope('Globals', GLOBALS_REF, false),
+      ],
+    };
     this.sendResponse(response);
   }
 

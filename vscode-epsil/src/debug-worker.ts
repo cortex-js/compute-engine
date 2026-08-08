@@ -32,7 +32,10 @@ import {
   type BoxedDefinition,
   type BoxedExpression,
 } from '../../src/compute-engine.js';
-import { setDebugStatementHook } from '../../src/common/debug-hook.js';
+import {
+  setDebugStatementHook,
+  setDebugStatementResultHook,
+} from '../../src/common/debug-hook.js';
 import { typeToString } from '../../src/common/type/serialize.js';
 import type { MathJsonExpression } from '../../src/math-json/types.js';
 import {
@@ -44,12 +47,15 @@ import {
 import { FatalParsingError } from '../../src/epsil/diagnostics.js';
 import { formatDiagnostics } from '../../src/cli/format.js';
 
-import type {
-  FrameInfo,
-  VariableInfo,
-  WorkerCommand,
-  WorkerConfig,
-  WorkerEvent,
+import {
+  GLOBALS_REF,
+  LOCALS_REF,
+  type BreakpointSpec,
+  type FrameInfo,
+  type VariableInfo,
+  type WorkerCommand,
+  type WorkerConfig,
+  type WorkerEvent,
 } from './debug-protocol.js';
 
 const INLINE_VALUE_MAX = 200;
@@ -105,9 +111,15 @@ let statements: StatementInfo[] = [];
 let baseDepth = 0;
 
 // Debug state, mutated by commands.
-const breakpointLines = new Set<number>();
+const breakpoints = new Map<number, BreakpointSpec>();
+/** Break when a statement evaluates to an `["Error", …]` value. */
+let breakOnErrorValues = false;
 let pauseRequested = false;
 let started = false;
+/** The scope current when the run started: bindings above it are locals of
+ * the paused position; it and its ancestors (to the system scope) are the
+ * session globals. */
+let baselineScope: unknown;
 /** Armed stepping: stop at the next pause point satisfying the mode. */
 let stepMode: 'in' | 'over' | 'out' | 'top' | undefined;
 let stepDepth = 0;
@@ -125,13 +137,12 @@ let functionSpans: Array<{ name: string; start: number; end: number }> = [];
 
 // ── Variables (handles live only while paused) ────────────────────────────
 
-const GLOBALS_REF = 1;
-let nextRef = 2;
+let nextRef = LOCALS_REF + 1;
 const handleTable = new Map<number, BoxedExpression>();
 
 function resetHandles(): void {
   handleTable.clear();
-  nextRef = 2;
+  nextRef = LOCALS_REF + 1;
 }
 
 function referenceFor(expr: BoxedExpression): number {
@@ -153,15 +164,26 @@ function render(expr: BoxedExpression, maxLength: number): string {
   return text;
 }
 
-/** Every user binding on the scope chain from the CURRENT scope up to —
- * excluding — the system scope, innermost winning. At a body pause the
- * current scope is the function/loop scope, so locals and parameters are
- * included. */
-function collectBindings(): Array<[string, BoxedDefinition]> {
+/**
+ * User bindings on the scope chain, innermost winning, split at the
+ * baseline (the scope current when the run started):
+ *  - `'locals'`: scopes ABOVE the baseline — the paused body's locals,
+ *    parameters, loop variables. Empty at a top-level pause.
+ *  - `'globals'`: the baseline scope up to — excluding — the system scope:
+ *    the session's own declarations.
+ *  - `'all'`: the whole chain (hover/watch name lookup).
+ */
+function collectBindings(
+  kind: 'locals' | 'globals' | 'all'
+): Array<[string, BoxedDefinition]> {
   const systemScope = engine.contextStack[0]?.lexicalScope;
   const seen = new Map<string, BoxedDefinition>();
-  let scope: typeof systemScope | null = engine.context.lexicalScope;
+  let scope: typeof systemScope | null =
+    kind === 'globals'
+      ? (baselineScope as typeof systemScope)
+      : engine.context.lexicalScope;
   while (scope !== null && scope !== undefined && scope !== systemScope) {
+    if (kind === 'locals' && scope === baselineScope) break;
     for (const [name, def] of scope.bindings)
       if (!seen.has(name)) seen.set(name, def);
     scope = scope.parent;
@@ -262,8 +284,11 @@ function handleCommand(cmd: WorkerCommand): void {
       started = true;
       break;
     case 'breakpoints':
-      breakpointLines.clear();
-      for (const line of cmd.lines) breakpointLines.add(line);
+      breakpoints.clear();
+      for (const spec of cmd.breakpoints) breakpoints.set(spec.line, spec);
+      break;
+    case 'exception-filters':
+      breakOnErrorValues = cmd.errorValues;
       break;
     case 'continue':
       stepMode = undefined;
@@ -280,10 +305,10 @@ function handleCommand(cmd: WorkerCommand): void {
       throw new TerminatedError();
     case 'variables': {
       const variables = withServicing(() => {
-        if (cmd.ref === GLOBALS_REF)
-          return collectBindings().map(([name, def]) =>
-            definitionVariable(name, def)
-          );
+        if (cmd.ref === GLOBALS_REF || cmd.ref === LOCALS_REF)
+          return collectBindings(
+            cmd.ref === LOCALS_REF ? 'locals' : 'globals'
+          ).map(([name, def]) => definitionVariable(name, def));
         const expr = handleTable.get(cmd.ref);
         return expr === undefined ? [] : childVariables(expr);
       });
@@ -317,7 +342,7 @@ function doEvaluate(cmd: {
     if (cmd.context === 'hover') {
       const name = cmd.expression.trim();
       const def = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
-        ? collectBindings().find(([n]) => n === name)?.[1]
+        ? collectBindings('all').find(([n]) => n === name)?.[1]
         : undefined;
       const expr =
         def !== undefined && 'value' in def ? def.value.value : undefined;
@@ -460,12 +485,96 @@ function currentRelativeDepth(): number {
   return Math.max(0, engine.contextStack.length - baseDepth);
 }
 
-// ── The statement hook (body-level pause points) ──────────────────────────
+// ── Breakpoint semantics (shared by hook and top-level checks) ────────────
+
+/**
+ * Resolve a hit breakpoint: a logpoint prints (never stops); a conditional
+ * breakpoint evaluates its condition in the paused scope and stops only on
+ * `True` (a condition that errors stops, conservatively, with a warning).
+ */
+function breakpointVerdict(bp: BreakpointSpec, line: number): 'stop' | 'skip' {
+  if (bp.logMessage !== undefined) {
+    emitLogpoint(bp.logMessage, line);
+    return 'skip';
+  }
+  const condition = bp.condition?.trim();
+  if (condition === undefined || condition === '') return 'stop';
+  try {
+    const result = withServicing(() =>
+      executeEpsil(engine, condition, {
+        url: '(breakpoint condition)',
+        parseLatex,
+      })
+    );
+    if (result.diagnostics.some((x) => x.severity === 'error')) {
+      output(
+        'stderr',
+        `breakpoint condition "${condition}" has errors; stopping\n`,
+        line
+      );
+      return 'stop';
+    }
+    return isSymbol(result.value) && result.value.symbol === 'True'
+      ? 'stop'
+      : 'skip';
+  } catch (error) {
+    output(
+      'stderr',
+      `breakpoint condition "${condition}" failed (${
+        error instanceof Error ? error.message : String(error)
+      }); stopping\n`,
+      line
+    );
+    return 'stop';
+  }
+}
+
+/** Print a logpoint message: `{expr}` parts evaluate in the live scope. */
+function emitLogpoint(message: string, line: number): void {
+  const text = message.replace(/\{([^{}]+)\}/g, (match, expression) => {
+    try {
+      const result = withServicing(() =>
+        executeEpsil(engine, expression, {
+          url: '(logpoint)',
+          parseLatex,
+        })
+      );
+      return render(result.value, INLINE_VALUE_MAX);
+    } catch {
+      return match;
+    }
+  });
+  output('console', `${text}\n`, line);
+}
+
+// ── The statement hooks (body-level pause points) ─────────────────────────
+
+/** One exception pause per error "wave": set when pausing on an error
+ * value, cleared as soon as execution advances to another statement. */
+let exceptionHandled = false;
+
+/** The span of the last breakpoint stop. A statement STRICTLY nested inside
+ * it on the SAME line does not re-stop (an `if` and its branch's return
+ * value share a line; stopping on both reads as a double-stop) — while a
+ * re-entry of the same statement (a loop iteration: identical span) does. */
+let lastBreakpointStop:
+  | { line: number; start: number; end: number }
+  | undefined;
+
+function suppressedByLastStop(line: number, start: number, end: number): boolean {
+  return (
+    lastBreakpointStop !== undefined &&
+    line === lastBreakpointStop.line &&
+    start > lastBreakpointStop.start &&
+    end <= lastBreakpointStop.end
+  );
+}
 
 function statementHook(raw: unknown): void {
   if (servicing) return;
   const stmt = raw as BoxedExpression;
   drainCommands();
+  exceptionHandled = false;
 
   // A bare Block statement never stops: its own statements fire next (the
   // loop-lowering wrapper starts on the same line as its first statement —
@@ -488,14 +597,46 @@ function statementHook(raw: unknown): void {
   let reason: string | undefined;
   if (pauseRequested) reason = 'pause';
   else if (config.noDebug) return;
-  else if (breakpointLines.has(line)) reason = 'breakpoint';
-  else if (stepMode === 'in') reason = 'step';
-  else if (stepMode === 'over' && depth <= stepDepth) reason = 'step';
-  else if (stepMode === 'out' && depth < stepDepth) reason = 'step';
+  else {
+    const bp = breakpoints.get(line);
+    if (
+      bp !== undefined &&
+      !suppressedByLastStop(line, offsets[0], offsets[1]) &&
+      breakpointVerdict(bp, line) === 'stop'
+    ) {
+      reason = 'breakpoint';
+      lastBreakpointStop = { line, start: offsets[0], end: offsets[1] };
+    } else if (stepMode === 'in') reason = 'step';
+    else if (stepMode === 'over' && depth <= stepDepth) reason = 'step';
+    else if (stepMode === 'out' && depth < stepDepth) reason = 'step';
+  }
   if (reason === undefined) return;
 
   stepMode = undefined;
   pauseAt(reason, line, false);
+}
+
+/** Post-statement: pause when a statement evaluated to an error value and
+ * the "Error Values" exception filter is on. */
+function statementResultHook(rawStmt: unknown, rawResult: unknown): void {
+  if (servicing || !breakOnErrorValues || config.noDebug) return;
+  if (exceptionHandled) return;
+  const result = rawResult as BoxedExpression;
+  // Deep error check (`.errors` walks the value) — only paid when the user
+  // enabled the Error Values filter; an error nested in a partial result
+  // (`Add(x, Error(…))`) still pauses.
+  if (result.errors.length === 0) return;
+  const stmt = rawStmt as BoxedExpression;
+  // A Block's error is its inner statement's, which already fired.
+  if (stmt.operator === 'Block') return;
+  const offsets = stmt.sourceOffsets;
+  if (offsets === undefined) return;
+  drainCommands();
+  const line = lineOfOffset(offsets[0]);
+  output('stderr', `${result.toString()}\n`, line);
+  exceptionHandled = true;
+  stepMode = undefined;
+  pauseAt('exception', line, false);
 }
 
 // ── Program setup ─────────────────────────────────────────────────────────
@@ -522,10 +663,12 @@ function collectBreakpointableLines(ast: MathJsonExpression): number[] {
 }
 
 /** Record the source span of every `Function` literal, named from the
- * enclosing `DefineFunction` where there is one (`function f(…) {…}` and the
- * `f(x) = …` sugar both parse to `DefineFunction(f, Function(…))`). Frames
- * are named by span containment — the engine has no user-facing name for a
- * lambda at application time. */
+ * enclosing definition where there is one: `function f(…) {…}` and the
+ * `f(x) = …` sugar (both `DefineFunction`), and `let g = (x) |-> …`
+ * (a `Declare`/`Assign` whose value is a lambda — the name threads through
+ * the value's `Dictionary`/`KeyValuePair` wrappers). Frames are named by
+ * span containment — the engine has no user-facing name for a lambda at
+ * application time. */
 function collectFunctionSpans(): void {
   functionSpans = [];
   const walk = (node: MathJsonExpression, name: string | undefined): void => {
@@ -541,11 +684,17 @@ function collectFunctionSpans(): void {
       for (const child of operands(node)) walk(child, undefined);
       return;
     }
-    if (op === 'DefineFunction') {
+    if (op === 'DefineFunction' || op === 'Declare' || op === 'Assign') {
       const ops = [...operands(node)];
       const definedName = symbol(ops[0]) ?? undefined;
-      for (const child of ops)
-        walk(child, operator(child) === 'Function' ? definedName : undefined);
+      walk(ops[0], undefined);
+      for (const child of ops.slice(1)) walk(child, definedName);
+      return;
+    }
+    // The declared value sits inside `Dictionary`/`KeyValuePair` wrappers;
+    // the name rides through them to a directly-assigned lambda.
+    if (op === 'Dictionary' || op === 'KeyValuePair') {
+      for (const child of operands(node)) walk(child, name);
       return;
     }
     for (const child of operands(node)) walk(child, undefined);
@@ -554,7 +703,7 @@ function collectFunctionSpans(): void {
 }
 
 function output(
-  category: 'stdout' | 'stderr',
+  category: 'stdout' | 'stderr' | 'console',
   text: string,
   line?: number
 ): void {
@@ -616,12 +765,15 @@ function main(): void {
 
 function run(): void {
   baseDepth = engine.contextStack.length;
+  baselineScope = engine.context.lexicalScope;
   setDebugStatementHook(statementHook);
+  setDebugStatementResultHook(statementResultHook);
   try {
     let lastValue: BoxedExpression | undefined;
     for (topIndex = 0; topIndex < statements.length; topIndex++) {
       const stmt = statements[topIndex];
       hookStack = [];
+      exceptionHandled = false;
       drainCommands();
 
       // Top-level pause points (mirrors the Tier 1 loop).
@@ -630,8 +782,9 @@ function run(): void {
       else if (config.noDebug) reason = undefined;
       else if (topIndex === 0 && config.stopOnEntry) reason = 'entry';
       else if (
-        breakpointLines.has(stmt.line) &&
-        (topIndex === 0 || statements[topIndex - 1].line !== stmt.line)
+        breakpoints.has(stmt.line) &&
+        (topIndex === 0 || statements[topIndex - 1].line !== stmt.line) &&
+        breakpointVerdict(breakpoints.get(stmt.line)!, stmt.line) === 'stop'
       )
         reason = 'breakpoint';
       else if (stepMode !== undefined) reason = 'step';
@@ -651,6 +804,7 @@ function run(): void {
       output('stdout', `${render(lastValue, CONSOLE_VALUE_MAX)}\n`);
   } finally {
     setDebugStatementHook(undefined);
+    setDebugStatementResultHook(undefined);
   }
 }
 
@@ -682,6 +836,13 @@ function executeTopLevel(stmt: StatementInfo): BoxedExpression {
       `${basename(config.program)}:${stmt.line}: ${errors[0].toString()}\n`,
       stmt.line
     );
+    // The exception filter also covers a top-level statement whose value is
+    // an error — unless a body statement already paused for this wave.
+    if (breakOnErrorValues && !config.noDebug && !exceptionHandled) {
+      exceptionHandled = true;
+      stepMode = undefined;
+      pauseAt('exception', stmt.line, true);
+    }
   }
   return value;
 }

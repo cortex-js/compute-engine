@@ -35,3 +35,25 @@ export function setDebugStatementHook(
 ): void {
   debugStatementHook = hook;
 }
+
+/**
+ * Fired AFTER a source-mapped statement evaluates, with its result. The
+ * debugger's "break on error value" exception filter is built on this:
+ * Epsil's runtime problems are `["Error", …]` VALUES, never throws, so
+ * "break on exception" means pausing when a statement produced one. Same
+ * contract as {@linkcode DebugStatementHook}: synchronous, may block,
+ * consumer handles re-entrancy.
+ */
+export type DebugStatementResultHook = (
+  statement: unknown,
+  result: unknown
+) => void;
+
+export let debugStatementResultHook: DebugStatementResultHook | undefined =
+  undefined;
+
+export function setDebugStatementResultHook(
+  hook: DebugStatementResultHook | undefined
+): void {
+  debugStatementResultHook = hook;
+}

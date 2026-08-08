@@ -82,7 +82,12 @@ import {
   loosenMintedConstructor,
   mintTypeConstructor,
 } from './type-constructors.js';
-import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isString,
+  isSymbol,
+} from './boxed-expression/type-guards.js';
 import { paramsAreScalar } from './boxed-expression/boxed-function.js';
 import {
   functionLiteralDeclaredEffects,
@@ -1909,12 +1914,11 @@ function assignValueAsValue(
  * type's same-name function replaces the minted identity constructor at
  * canonicalization so later statements validate against the real signature. */
 /**
- * The plain-structure serialization of `get json`, with each function node's
- * (and symbol's) `sourceOffsets` kept, in the object form the Epsil parser
- * itself emits — so re-boxing preserves the debugger's statement-level pause
- * points. Number/string atoms delegate to `.json` unchanged (a bare NUMBER
- * literal statement loses its position; statement anchors are function
- * expressions and symbols).
+ * The plain-structure serialization of `get json`, with each node's
+ * `sourceOffsets` kept, in the object form the Epsil parser itself emits —
+ * so re-boxing preserves the debugger's statement-level pause points
+ * (function statements, and the bare symbol/number/string statements that
+ * are Epsil's idiomatic return values).
  *
  * Deliberately NOT `toMathJson()`: that is the display serializer, whose
  * function shorthand rewrites a `Function` literal (collapsing its parameter
@@ -1925,6 +1929,20 @@ function jsonWithSourceOffsets(expr: Expression): MathJsonExpression {
   if (isSymbol(expr)) {
     return sourceOffsets !== undefined
       ? { sym: expr.symbol, sourceOffsets }
+      : expr.json;
+  }
+  if (isNumber(expr)) {
+    const json = expr.json;
+    if (sourceOffsets === undefined) return json;
+    if (typeof json === 'number')
+      return { num: String(json), sourceOffsets };
+    if (typeof json === 'object' && json !== null && 'num' in json)
+      return { ...json, sourceOffsets };
+    return json; // composite numeric form (e.g. ['Complex', …])
+  }
+  if (isString(expr)) {
+    return sourceOffsets !== undefined
+      ? { str: expr.string, sourceOffsets }
       : expr.json;
   }
   if (!isFunction(expr)) return expr.json;

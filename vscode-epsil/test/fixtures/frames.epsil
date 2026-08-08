@@ -1,0 +1,13 @@
+function outer(n) {
+  let m = inner(n) + 1
+  m
+}
+function inner(k) {
+  let r = k * 10
+  r + fact(2)
+}
+function fact(n) {
+  if n <= 1 { 1 }
+  else { n * fact(n - 1) }
+}
+outer(4)

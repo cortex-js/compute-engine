@@ -12,7 +12,10 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
-import { setDebugStatementHook } from '../../src/common/debug-hook';
+import {
+  setDebugStatementHook,
+  setDebugStatementResultHook,
+} from '../../src/common/debug-hook';
 
 let ce: ComputeEngine;
 
@@ -20,7 +23,10 @@ beforeAll(() => {
   ce = new ComputeEngine();
 });
 
-afterEach(() => setDebugStatementHook(undefined));
+afterEach(() => {
+  setDebugStatementHook(undefined);
+  setDebugStatementResultHook(undefined);
+});
 
 /** Evaluate an Epsil program statement-by-statement (the executeEpsil
  * contract) and return the spans the hook fired for. */
@@ -75,6 +81,9 @@ test('recursive function bodies fire (knot-tying re-box keeps offsets)', () => {
   );
   expect(fired.filter((s) => s.startsWith('if n <= 1'))).toHaveLength(3);
   expect(fired.filter((s) => s.startsWith('n * rfact'))).toHaveLength(2);
+  // The base case's bare NUMBER statement fires too — the knot-tying
+  // re-box serialization keeps atom offsets (numbers, strings, symbols).
+  expect(fired).toContain('1');
 });
 
 test('a bare-symbol return statement fires', () => {
@@ -93,6 +102,32 @@ test('a cleared hook fires nothing', () => {
   setDebugStatementHook(undefined);
   for (const stmt of (ast as any).fn.slice(1)) ce.box(stmt).evaluate();
   expect(count).toBe(0);
+});
+
+test('result hook fires with each source-mapped statement result', () => {
+  // The debugger's "break on error value" filter is built on this hook: it
+  // receives each statement's evaluated RESULT (the worker inspects it for
+  // error values). Pinned with an ordinary program — an invalid statement
+  // (a literal `Error` node) makes its Block invalid, which short-circuits
+  // evaluation before the sequencer runs, so error-shaped programs cannot
+  // exercise the hook directly; the adapter's end-to-end suite covers the
+  // top-level error pause.
+  const seen: string[] = [];
+  setDebugStatementResultHook((stmt, result) => {
+    seen.push(String(result));
+  });
+  try {
+    const src = 'function rh1(n) {\n  let t = n + 1\n  t * 2\n}\nrh1(3)';
+    const [ast] = parseEpsil(src, undefined, {
+      typeNames: ce._typeResolver.names,
+    });
+    for (const stmt of (ast as any).fn.slice(1)) ce.box(stmt).evaluate();
+  } finally {
+    setDebugStatementResultHook(undefined);
+  }
+  // `let t = n + 1` result (Nothing) and `t * 2` result (8), in order.
+  expect(seen[seen.length - 1]).toEqual('8');
+  expect(seen).toHaveLength(2);
 });
 
 test('engine-internal evaluation (no source offsets) does not fire', () => {
