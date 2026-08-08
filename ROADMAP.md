@@ -177,11 +177,6 @@ ours — 202/69 — and they corrected it in review. Use 82/25.)
   though `.evaluate()` yields a compilable closed form (`D(x^2,x).evaluate()` →
   `2x`). Lowering it here retires the pre-pass for _every_ consumer instead of
   each writing its own. _In progress 2026-07-30._
-- **Scalar arithmetic over a list-valued operand** (~4 states / 11 members):
-  string-mapped broadcastable heads (`Sign`, `Arctan2`, `Hypot`, `Sinc`) fail
-  closed where function-mapped ones (`Sin`, `Abs`, `Floor`, `Ln`) broadcast. _In
-  progress 2026-07-30._
-
 - **Multi-clause user functions** (feature-parity note, 2026-08-02, no corpus
   sizing yet): the §8 guard chain compiles on the **JavaScript target only**.
   The interval, GLSL/WGSL and Python targets decline the whole function (fail

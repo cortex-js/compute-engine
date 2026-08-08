@@ -240,6 +240,27 @@
 
 ### Improvements
 
+- **Element-wise (broadcast) failures are now self-diagnosing.** A user
+  function with scalar parameters is automatically applied element-wise over
+  an indexed-collection argument; when that fired unexpectedly, the resulting
+  per-element failures gave no hint a broadcast was in flight — the
+  motivating symptom read `Condition must evaluate to "True" or "False"`
+  with nothing tying it to a mapping. An error produced inside a broadcast
+  element now carries an `["ErrorBroadcast", name, index, length]` entry in
+  its `ErrorTrace` breadcrumb, rendered as
+  `(while applying 'skipWs' element-wise over 4 elements (element 2))`; an
+  error **thrown** out of an element (a non-boolean `if` condition, say) has
+  the same context appended to its message. Every failing element is
+  annotated with its own index. Errors that never went through a broadcast
+  are byte-identical to before, successful broadcasts pay nothing, and Epsil
+  `runtime-error` diagnostics report the context too.
+
+- **The Epsil debugger's variables pane marks broadcast behavior on function
+  signatures**: `(n: number) -> number [elementwise]` versus
+  `(xs: list<number>) -> integer [binds whole]`, so the derived vectorization
+  behavior is visible before anything runs. A function-typed (callback)
+  parameter does not suppress the marker, matching the eligibility rule.
+
 - **Membership in a value collection now types the tested function
   parameter.** `Element(c, digits)` — Epsil `c in digits` — inside a function
   body narrows a not-yet-typed parameter to the collection's element type
@@ -290,6 +311,23 @@
   `Loop`/`Comprehension` `Element` clause now narrows an as-yet-untyped symbol
   to `collection`, matching what `Length(cs)` and `cs[i]` already did. Scalar
   parameters are unaffected — `f(x) = x * 2` still broadcasts over a list.
+
+- **A function forward-declared with the bare `function` wildcard
+  (`ce.declare('clean', 'function')`) now participates in parameter
+  collection-inference.** Previously a caller such as
+  `proc(cs) = clean(cs) + 1` learned nothing from `clean` in **either**
+  definition order: the wildcard declaration carries no parameter types, and
+  assigning a function literal deliberately leaves the declared type alone
+  (so re-assignment at a different arity stays legal), leaving no signature
+  to narrow from. The application site now reads the assigned literal's own
+  signature — for argument narrowing and for the application's result type,
+  which used to be broadcast-typed (`list<unknown^3>`) where the value was a
+  scalar — and a caller canonicalized while the callee is still a bare
+  wildcard registers for re-derivation, so the later assignment repairs it:
+  `proc([10, 20, 30])` answers `11` instead of broadcasting into
+  `[proc(10), proc(20), proc(30)]`. The wildcard remains a widening:
+  re-assignment at a different arity or parameter type still works, and
+  applications are still not validated against the assigned signature.
 
 - **Compiled string comparisons fail closed instead of returning wrong
   values.** The JavaScript compile target is numeric at heart: `Equal` and
@@ -353,6 +391,48 @@
   are numeric there — `IndexOf` in every shape (including a tuple needle in a
   point list) and all-string collection equality, both of which lower to
   Python's own structural comparison and are faithful.
+
+- **Compiled `IndexOf`'s element test is now EXACT and bool-aware, like the
+  interpreter.** `IndexOf([1, 2], True)` ran to `1` on both the JavaScript and
+  Python targets, where the interpreter's structural element test answers `0`
+  (and symmetrically, `IndexOf([True], 1)` ran to `1`): Python's `True == 1`
+  is `True`, and `Math.abs(true - 1)` is `0`. Both targets now compare
+  bool-ness first — Python through a new `_ce_indexof`/`_ce_same` runtime
+  adapter, JavaScript through a strict `===` in the emitted element test. This
+  is a runtime adapter, not a compile-time gate, so boolean `IndexOf` keeps
+  compiling instead of declining. Both element tests also dropped their numeric
+  TOLERANCE leaf: the interpreter's number `.isSame()` is exact, so
+  `IndexOf([0], 5e-11)` and `IndexOf([0.30000000000000004], 0.3)` answer `0`,
+  where the compiled forms answered `1`. (The tolerance leaf came from a probe
+  artifact — `IndexOf([0.3], Add(0.1, 0.2))` agrees only because `Add(0.1, 0.2)`
+  evaluates to exactly `0.3` by exact decimal folding, so the element test never
+  saw a near-miss float. The residual: a needle *computed* to a near-miss f64 at
+  runtime is not found, which is the ordinary exactness loss of compiling to f64
+  arithmetic.) The adapters also FIND a `NaN` needle, as the interpreter's
+  structural element test does: `IndexOf([NaN, 3], NaN)` ran to `0` on both
+  targets (`nan == nan` is `False` in Python, and `Math.abs(NaN - NaN) <= tol`
+  is `false`) and now answers `1`. Otherwise unchanged: numbers still match
+  across `int`/`float`, a tuple needle is still found in a point list, and a
+  missing needle is still `0`. On the Python target an `np.ndarray` on either
+  side is now normalized to a nested list, so a caller-supplied `(n, 2)` point
+  matrix works instead of raising an ambiguous-truth-value error.
+
+- **Compiled Python orderings over two collections now reject a length
+  mismatch.** The interpreter answers `Error("incompatible-dimensions", …)` for
+  `Less([1, 2, 3], [1, 2])` *and* for `Less([1], [1, 2])`. NumPy only half
+  agreed: it raises on 3-vs-2, but silently BROADCASTS 1-vs-n
+  (`np.less([1], [1, 2])` → `[False, True]`) — a wrong answer behind a
+  `success: true`. The ordering ufuncs are now emitted through a `_ce_ord`
+  runtime shape guard that raises on any list-like-vs-list-like length
+  mismatch, the 1-vs-n case included. Scalar-vs-collection broadcasting is
+  unaffected.
+
+- **`compileLambda` (Python target) no longer emits references to undefined
+  runtime helpers.** It guarded only `_ce_bcast`; an `IndexOf` body, a
+  collection/tuple `Equal` body, or a collection ordering produced a lambda
+  referencing `_ce_indexof`/`_ce_eqcoll`/`_ce_ord`, which a bare lambda has no
+  place to define — a `NameError` at call time. All four now fail closed with a
+  message pointing at `compileFunction`.
 
 - **A destructuring `Declare` with a positional initial value now binds
   (tuple patterns).** `["Declare", ["Tuple", "x", "y"], "unknown",
