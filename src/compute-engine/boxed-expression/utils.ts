@@ -1237,7 +1237,14 @@ export function updateDef(
     // generation-keyed caches holding results computed against the definition
     // that is no longer installed.
     ce._generation += 1;
-    repairProvisionalDependents(ce, name);
+    // The definition installed just now is passed as `justInstalled` so a
+    // recursive body — which noted its OWN name while canonicalizing — is not
+    // re-derived against itself.
+    repairProvisionalDependents(
+      ce,
+      name,
+      mutableDef.operator ?? (callableValue ? installedValue : undefined)
+    );
   }
 }
 

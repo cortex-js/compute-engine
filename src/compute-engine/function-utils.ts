@@ -627,6 +627,42 @@ function installRebuiltLiteral(
   }
 }
 
+/** The name a dependent definition is installed under. Both definition classes
+ * are constructed with it (`_BoxedOperatorDefinition`,
+ * `_BoxedValueDefinition`), but it is not on the public definition interfaces,
+ * so read it defensively: a dependent with no readable name simply does not
+ * cascade. */
+function dependentName(def: ProvisionalDependent): string | undefined {
+  const name = (def as { name?: unknown }).name;
+  return typeof name === 'string' && name.length > 0 ? name : undefined;
+}
+
+/** How deep the `repairWave` recursion currently is. Depth 0 on entry marks
+ * the OUTERMOST wave: the one that owns the deferred queue below, because it
+ * is the only one that runs after every `REPAIRING` guard has been released. */
+let WAVE_DEPTH = 0;
+
+/** Dependents skipped because an enclosing wave already held them under the
+ * `REPAIRING` guard, with the name whose wave skipped them. Nothing else
+ * retriggers such a definition, so it would stay stale forever: with
+ * `outer(a,b) = middle(a) + base(b)`, `middle(a) = base(a)`, `outer`
+ * registered on `base` BEFORE `middle`, installing `base` rebuilds `outer`
+ * against middle's stale signature, and middle's cascade then finds `outer`
+ * guarded and skips it. Drained by the outermost wave. */
+let DEFERRED: { name: string; def: ProvisionalDependent }[] = [];
+
+/** Rebuilds already spent on each definition in the current top-level wave,
+ * reset when it ends. */
+let REBUILD_COUNTS: WeakMap<ProvisionalDependent, number> | undefined;
+
+/** Rebuilds allowed per definition per top-level wave. Two, because the
+ * sibling shape above needs exactly a second rebuild (once in the wave that
+ * skipped it, once from the drain) and nothing legitimately needs a third: a
+ * genuinely cyclic, evidence-free pair would otherwise re-defer each other
+ * without end. A definition that hits the cap stays REGISTERED, so a later
+ * definition of a name it waits on still retries it. */
+const MAX_REBUILDS_PER_WAVE = 2;
+
 /**
  * `name` just became callable: re-derive every definition whose body read
  * `name` as a multiplication operand, from the raw operands recorded at
@@ -638,7 +674,61 @@ function installRebuiltLiteral(
  */
 export function repairProvisionalDependents(
   ce: ComputeEngine,
-  name: string
+  name: string,
+  justInstalled?: ProvisionalDependent
+): void {
+  const outermost = WAVE_DEPTH === 0;
+  let firstError: { error: unknown } | undefined;
+  WAVE_DEPTH += 1;
+  try {
+    repairWave(ce, name, justInstalled);
+  } catch (error) {
+    firstError = { error };
+  } finally {
+    WAVE_DEPTH -= 1;
+  }
+
+  if (outermost) {
+    // Every guard this wave took is released by now, so a skipped dependent
+    // can be repaired. Each drained repair can itself skip (and defer) more,
+    // so loop until the queue is empty; `MAX_REBUILDS_PER_WAVE` is what
+    // bounds it. The waves fired from here are not outermost — they append to
+    // the queue this loop is draining rather than starting a drain of their
+    // own.
+    WAVE_DEPTH += 1;
+    try {
+      while (DEFERRED.length > 0) {
+        const batch = DEFERRED;
+        DEFERRED = [];
+        // The defs were re-registered when they were skipped, so firing the
+        // name once picks up every dependent that queued under it.
+        const fired = new Set<string>();
+        for (const entry of batch) {
+          if (fired.has(entry.name)) continue;
+          fired.add(entry.name);
+          try {
+            repairWave(ce, entry.name);
+          } catch (error) {
+            firstError ??= { error };
+          }
+        }
+      }
+    } finally {
+      WAVE_DEPTH -= 1;
+      DEFERRED = [];
+      REBUILD_COUNTS = undefined;
+    }
+  }
+
+  if (firstError !== undefined) throw firstError.error;
+}
+
+/** One re-derivation wave. See `repairProvisionalDependents`, which wraps it
+ * with the deferred-queue drain. */
+function repairWave(
+  ce: ComputeEngine,
+  name: string,
+  justInstalled?: ProvisionalDependent
 ): void {
   const defs = takeProvisionalDependents(ce, name);
   if (defs === undefined) return;
@@ -650,31 +740,106 @@ export function repairProvisionalDependents(
   // a later redefinition of `name` retries it; and the first error is rethrown
   // once the loop is done — a contract violation must still surface.
   let firstError: { error: unknown } | undefined;
-  for (const def of defs) {
-    if (REPAIRING.has(def)) continue;
-    const literal = dependentLiteral(def);
-    const info = provisionalLiteral(literal);
-    if (info === undefined || !info.heads.has(name)) continue;
-    REPAIRING.add(def);
-    try {
-      // Re-canonicalized in the scope the literal was built in: its free
-      // symbols must resolve exactly as they did then, except for the one that
-      // has since become a function.
-      const rebuilt = ce._inScope(info.scope, () =>
-        canonicalFunctionLiteralArguments(ce, info.ops)
-      );
-      // Installed even when the rebuilt literal is INVALID: a fresh parse made
-      // after `name` was defined produces exactly that invalid application, and
-      // fresh-parse parity is the contract. Keeping the stale product instead
-      // would silently answer a different question.
-      if (rebuilt !== undefined && rebuilt !== literal)
-        installRebuiltLiteral(ce, def, rebuilt);
-    } catch (error) {
-      firstError ??= { error };
-      registerProvisionalDependents(ce, literal, def);
-    } finally {
-      REPAIRING.delete(def);
+  // Every definition this wave puts under the `REPAIRING` guard, released
+  // together once the wave — INCLUDING the cascade below — is done. See the
+  // cascade comment for why the release cannot happen per-definition.
+  const guarded: ProvisionalDependent[] = [];
+  // The definitions this wave actually re-installed, with the name each is
+  // installed under. Collected during the loop and cascaded AFTER it (see
+  // below), not fired per-rebuild.
+  const cascade: { name: string; def: ProvisionalDependent }[] = [];
+  try {
+    for (const def of defs) {
+      if (REPAIRING.has(def)) {
+        // Mid-repair further up the stack, or held under the guard until its
+        // own wave's cascade finishes. Either way it must go BACK into the
+        // registry: `takeProvisionalDependents` has already removed it, and
+        // since the cascade keeps a definition guarded well after its own
+        // rebuild re-registered it, dropping it here would leave it waiting on
+        // nothing — permanently unrepairable by a later definition of `name`.
+        registerProvisionalDependents(ce, dependentLiteral(def), def);
+        // Re-registering alone does not retrigger it, so queue it for the
+        // drain the outermost wave runs once the guards are released.
+        if ((REBUILD_COUNTS?.get(def) ?? 0) < MAX_REBUILDS_PER_WAVE)
+          DEFERRED.push({ name, def });
+        continue;
+      }
+      // The definition just installed FOR `name` is dropped, not re-derived: it
+      // is a recursive body waiting on itself, and re-canonicalizing it against
+      // its own fresh definition cannot teach it anything (direct body evidence
+      // was already captured in flight). Dropping rather than re-registering is
+      // safe: a later redefinition of `name` registers fresh dependents.
+      if (def === justInstalled) continue;
+      const literal = dependentLiteral(def);
+      const info = provisionalLiteral(literal);
+      if (info === undefined || !info.heads.has(name)) continue;
+      const rebuilds = (REBUILD_COUNTS ??= new WeakMap());
+      const spent = rebuilds.get(def) ?? 0;
+      if (spent >= MAX_REBUILDS_PER_WAVE) {
+        // Out of budget for this top-level wave. Back into the registry, so a
+        // later definition still retries it.
+        registerProvisionalDependents(ce, literal, def);
+        continue;
+      }
+      rebuilds.set(def, spent + 1);
+      REPAIRING.add(def);
+      guarded.push(def);
+      try {
+        // Re-canonicalized in the scope the literal was built in: its free
+        // symbols must resolve exactly as they did then, except for the one that
+        // has since become a function.
+        const rebuilt = ce._inScope(info.scope, () =>
+          canonicalFunctionLiteralArguments(ce, info.ops)
+        );
+        // Installed even when the rebuilt literal is INVALID: a fresh parse made
+        // after `name` was defined produces exactly that invalid application, and
+        // fresh-parse parity is the contract. Keeping the stale product instead
+        // would silently answer a different question.
+        if (rebuilt !== undefined && rebuilt !== literal) {
+          installRebuiltLiteral(ce, def, rebuilt);
+          const installedName = dependentName(def);
+          if (installedName !== undefined)
+            cascade.push({ name: installedName, def });
+        }
+      } catch (error) {
+        firstError ??= { error };
+        registerProvisionalDependents(ce, literal, def);
+      }
     }
+
+    // A successful rebuild IS that definition's own name gaining a better
+    // definition — `middle` now takes a list — but `installRebuiltLiteral`
+    // mutates the definition in place (`def.update()` / `def.value = …`) and
+    // never passes through `updateDef`, the choke point that fires the repair.
+    // So fire it here, or a chain `outer → middle → inner` would leave `outer`
+    // stale once `inner` arrives.
+    //
+    // COLLECT-THEN-FIRE, breadth-wise: the cascade runs after the whole loop
+    // above, not inside it. In a diamond — `top` depending on `left` and
+    // `right`, both depending on `base` — installing `base` rebuilds `left`
+    // and `right` in this wave, and `top` is then rebuilt ONCE, against two
+    // already-current forwarders, instead of once per forwarder. Error
+    // isolation also stays per level: a cascaded wave that throws does not
+    // cost this wave its remaining siblings.
+    //
+    // Each rebuilt definition is passed as `justInstalled` so it is not
+    // re-derived against itself, exactly as on the `updateDef` route.
+    for (const entry of cascade) {
+      try {
+        repairProvisionalDependents(ce, entry.name, entry.def);
+      } catch (error) {
+        firstError ??= { error };
+      }
+    }
+  } finally {
+    // Released only now. A definition must stay guarded through the cascade of
+    // its OWN repair wave: that is what cuts a mutual forward reference. With
+    // `pa` and `pb` waiting on each other, repairing `pb` cascades to `pa`,
+    // whose cascade comes back to `pb` — still in `REPAIRING`, so it is skipped
+    // and the recursion bottoms out. Deleting per-definition inside the loop
+    // (as this did before the cascade existed) would make that cycle
+    // unbounded.
+    for (const def of guarded) REPAIRING.delete(def);
   }
   if (firstError !== undefined) throw firstError.error;
 }

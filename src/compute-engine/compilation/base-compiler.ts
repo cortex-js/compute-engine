@@ -2009,17 +2009,39 @@ export class BaseCompiler {
           );
         return axis.isAbsent(BaseCompiler.compileValueOperand(a, target));
       };
-      const eqFn = target.functions?.('Equal');
-      if (typeof eqFn !== 'function')
-        throw new Error(
-          `Equal: target '${target.language ?? 'unknown'}' has no equality ` +
-            `codegen for the guarded (Kleene) form. Fail closed (§3.F).`
+      // The inner (both-present) comparison. For operands whose stripped
+      // type is wholly STRING, the target's `Equal` codegen is the numeric
+      // tolerance kernel — silently `false` for any pair of present strings
+      // (`Math.abs("x" - "y")` is NaN), and now declined by the string gate.
+      // The faithful inner for strings is STRICT equality: the interpreter
+      // compares strings exactly (no tolerance), so `===` (`==` on word-chain
+      // targets, i.e. Python) is the interpreter's own semantics. Everything
+      // not wholly-string keeps the target's `Equal` codegen, with its gates.
+      const strippedOf = (a: Expression): Type =>
+        resolveTypeForCompilation(
+          stripMissingFromType(compilationType(a))
         );
-      const inner = eqFn(
-        args,
-        (e) => BaseCompiler.compileValueOperand(e, target),
-        target
-      );
+      const allString = args.every((a) => isSubtype(strippedOf(a), 'string'));
+      let inner: TargetSource;
+      if (allString) {
+        const [a, b] = args.map((e) =>
+          BaseCompiler.compileValueOperand(e, target)
+        );
+        inner =
+          target.chainOp === 'and' ? `(${a}) == (${b})` : `(${a}) === (${b})`;
+      } else {
+        const eqFn = target.functions?.('Equal');
+        if (typeof eqFn !== 'function')
+          throw new Error(
+            `Equal: target '${target.language ?? 'unknown'}' has no equality ` +
+              `codegen for the guarded (Kleene) form. Fail closed (§3.F).`
+          );
+        inner = eqFn(
+          args,
+          (e) => BaseCompiler.compileValueOperand(e, target),
+          target
+        );
+      }
       const nullLit = target.absence.object.nullLiteral;
       // A word-`chainOp` target (Python: `and`) spells logical-or `or` and the
       // conditional `X if C else Y`; a C-style target uses `||` and `C ? X : Y`.

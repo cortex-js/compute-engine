@@ -62,6 +62,10 @@ import { isNumber, isFunction, isSymbol } from './type-guards.js';
 import { symbolAtSite, replaceAtSite } from './binding-sites.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
 import { rebindToBindings } from './binders.js';
+import {
+  isProvisionalCaptureOpen,
+  noteProvisionalCall,
+} from './provisional-application.js';
 // Dynamic import to avoid circular dependency
 
 /**
@@ -811,7 +815,15 @@ function makeCanonicalFunction(
     // (a Sum index into its local scope) are deliberate and unaffected.
     if (ce._resolveOnlyDepth === 0)
       ce.declare(name, { type: 'function', inferred: true });
-    return new BoxedFunction(ce, name, flatten(semiCanonical(ce, ops)), {
+    const boxedOps = flatten(semiCanonical(ce, ops));
+    // Definition order must not change semantics. `name` has no definition
+    // yet, so the collection evidence its parameters would have narrowed onto
+    // an unknown symbol argument (`narrowArgsFromInferredSignature`) does not
+    // exist: note the call so the enclosing `Function` literal is re-derived
+    // once `name` is defined (`provisional-application.ts`).
+    if (isProvisionalCaptureOpen() && hasNarrowableArg(boxedOps))
+      noteProvisionalCall(name);
+    return new BoxedFunction(ce, name, boxedOps, {
       metadata,
       canonical: true,
     });
@@ -822,6 +834,16 @@ function makeCanonicalFunction(
     // We construct the function expression and will check its value
     // is a function literal when evaluating it.
     const boxedOps = flatten(semiCanonical(ce, ops));
+
+    // A function-typed value definition that was INFERRED is not a user
+    // constraint but a placeholder — typically the auto-declaration the
+    // no-def branch above made for an earlier occurrence of `name` in this
+    // very body. It carries no parameter types, so the same evidence loss
+    // applies: note the call (idempotent per literal).
+    if (def.value.inferredType && def.value.type.matches('function')) {
+      if (isProvisionalCaptureOpen() && hasNarrowableArg(boxedOps))
+        noteProvisionalCall(name);
+    }
 
     // If the symbol was declared with an explicit *function* signature (e.g.
     // `ce.declare('f', '(integer) -> integer')`), enforce the parameter types
@@ -954,6 +976,23 @@ function isCollectionOnlyType(t: Type): boolean {
 }
 
 /**
+ * True when at least one operand is a symbol `narrowArgsFromInferredSignature`
+ * could still write evidence onto: its type is INFERRED and still `unknown`.
+ * That is the only case a re-derivation of the enclosing `Function` literal
+ * could learn something from, so it gates the forward-reference noting
+ * (`noteProvisionalCall`) — a call with closed or already-typed arguments
+ * waits on nothing.
+ */
+function hasNarrowableArg(args: ReadonlyArray<Expression>): boolean {
+  return args.some(
+    (arg) =>
+      isSymbol(arg) &&
+      arg.valueDefinition?.inferredType &&
+      arg.type.type === 'unknown'
+  );
+}
+
+/**
  * A call to a user function whose signature was INFERRED skips argument
  * validation (currying and partial application are resolved by the lambda at
  * evaluation time). That skip also silenced the one inference side-channel the
@@ -1071,8 +1110,13 @@ function applyOperatorDefinition(
       return result;
     }
 
-    if (opDef.inferredSignature)
+    if (opDef.inferredSignature) {
+      // No forward-reference noting on this LAZY path, unlike the non-lazy one
+      // below: `xs` are raw, unbound operands, so they carry no binding a
+      // re-derivation could narrow (`hasNarrowableArg` reads
+      // `valueDefinition`) and there is nothing to wait on.
       narrowArgsFromInferredSignature(opDef.signature.type, xs);
+    }
     result = new BoxedFunction(
       ce,
       name,
@@ -1200,8 +1244,13 @@ function applyOperatorDefinition(
   // which handles currying and partial application. Collection evidence on
   // the callee's parameters still narrows unknown symbol arguments (see
   // `narrowArgsFromInferredSignature`).
-  if (opDef.inferredSignature)
+  if (opDef.inferredSignature) {
+    // As in the lazy path above: an inferred signature is a guess, so wait on
+    // a redefinition of `name` that could supersede it with real evidence.
+    if (isProvisionalCaptureOpen() && hasNarrowableArg(args))
+      noteProvisionalCall(name);
     narrowArgsFromInferredSignature(opDef.signature.type, args);
+  }
   const adjustedArgs = opDef.inferredSignature
     ? null
     : validateArguments(

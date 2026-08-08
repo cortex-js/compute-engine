@@ -381,6 +381,36 @@
     `any` (`Length(5)` stays symbolic); it now treats a not-yet-typed symbol
     operand as collection evidence, like an indexed read does.
 
+- **Collection evidence now survives definition order: a function defined
+  before its callee is re-derived when the callee arrives.** The narrowing
+  described above — a callee's collection parameter teaching the caller's
+  parameter — could only fire when the callee was already defined. Write the
+  caller first (`process(cs) = clean(cs) + 1` before
+  `clean(v: list<number>) = v[1]`) and `process` was canonicalized while
+  `clean` was still unknown: `cs` learned nothing, so
+  `process([10, 20, 30])` broadcast elementwise, handing `clean` one number
+  at a time — each call then failed against the declared `list<number>`
+  parameter, and the errored elements surfaced as inert
+  `[process(10), process(20), process(30)]`. Definition order changed
+  semantics, which the engine already refuses to accept for juxtaposition
+  (`g(t) := 2a(t)` written before `a` is defined re-reads as an application
+  when `a` arrives): the same repair machinery now covers forward-referenced
+  calls. While a function literal's body is canonicalized, a call whose
+  callee is undefined — or known only by a guessed signature — registers the
+  literal as a dependent of that name; when the name later gains a
+  definition (assigned a body, or merely declared with a signature), the
+  literal is re-derived from its raw operands and the parameter picks up the
+  evidence, so the caller binds the collection whole and answers `11`.
+  Helpers can now be written below their callers, and mutually recursive
+  pairs work in either order. A *scalar* callee defined later leaves the
+  caller vectorizing, exactly as if it had been defined first, and a
+  self-recursive function skips the pointless re-derivation of itself.
+  Chains repair transitively: re-deriving a forwarder is that forwarder's own
+  name gaining a definition, so `A → B → C` written in that order all bind
+  correctly once `C` arrives — including diamonds, where the apex is rebuilt
+  once, after every forwarder below it is current — and mutually recursive
+  forward references terminate instead of chasing each other.
+
 - **A `while` loop inside a zero-argument function now terminates.**
   `function f() { let j = 1; while j < 3 { j = j + 1 }; j }` hit the
   iteration limit: the nullary apply path skipped the sweep of stale

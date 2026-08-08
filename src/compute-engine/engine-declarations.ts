@@ -488,7 +488,9 @@ export function setSymbolValue(
     // multiplication operand (`boxed-expression/provisional-application.ts`).
     if (def.value.type.matches('function')) {
       registerProvisionalDependents(ce, value, def.value);
-      repairProvisionalDependents(ce, id);
+      // `def.value` is what was just installed for `id`: a recursive literal
+      // waits on its own name, and must not be re-derived against itself.
+      repairProvisionalDependents(ce, id, def.value);
     }
     return;
   }

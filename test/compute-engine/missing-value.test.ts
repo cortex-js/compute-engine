@@ -857,6 +857,21 @@ describe('P3 — compile discharge (§3.F)', () => {
     const r = compile(e.box(['Equal', 's', 't']), { to: 'javascript' });
     // The object hole (Missing) lowers to the target null; the guard stays.
     expect(r.code).toMatch(/undefined/);
+    // The PRESENT side must be strict string equality, not the numeric
+    // tolerance kernel: `Math.abs("x" - "y")` is NaN, so the tolerance form
+    // answered `false` for every pair of present strings — the guard pinned
+    // above only ever protected the absent side. (This is what the string
+    // fail-closed gate rejects; the wholly-string guarded form is the one
+    // faithful inner, so it is emitted directly.)
+    expect(r.code).toMatch(/===/);
+    expect(r.code).not.toMatch(/Math\.abs/);
+    const run = r.run as unknown as (vars: {
+      s: string | undefined;
+      t: string | undefined;
+    }) => boolean | undefined;
+    expect(run({ s: 'x', t: 'x' })).toBe(true);
+    expect(run({ s: 'x', t: 'y' })).toBe(false);
+    expect(run({ s: undefined, t: 'x' })).toBeUndefined();
   });
 
   test('a Missing-free Equal is NOT pessimized (no guard)', () => {

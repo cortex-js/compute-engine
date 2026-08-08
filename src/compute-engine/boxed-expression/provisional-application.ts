@@ -25,6 +25,15 @@
  * away by later canonicalization (`a(t) + a(2t)` collapses to `3at`), so there
  * is no node left to rewrite.
  *
+ * A second provenance kind shares this registry: a FORWARD-REFERENCED CALL
+ * (`noteProvisionalCall`, from `box.ts`). `process(cs) := clean(cs) + 1`
+ * written before `clean` exists canonicalizes the application blind, so the
+ * collection evidence `clean`'s parameters would have narrowed onto `cs`
+ * (`narrowArgsFromInferredSignature`) is lost and `process` broadcasts over a
+ * list argument. Both kinds mean the same thing to the repair: *re-derive this
+ * literal when `name`'s definition state changes* — when it becomes callable,
+ * or when its inferred signature is superseded by a real one.
+ *
  * This module holds only registries and the hook: the repair itself needs
  * `canonicalFunctionLiteralArguments` (`function-utils.ts`), which
  * `boxed-expression/utils.ts` cannot import (`utils.ts →
@@ -88,12 +97,30 @@ export function endProvisionalCapture(): ReadonlySet<string> | undefined {
   return frame;
 }
 
+/** True when a `Function` literal body is being canonicalized, so a note would
+ * actually be collected. A hot-path guard for callers that would otherwise
+ * compute the inputs of a noting call that is a no-op. */
+export function isProvisionalCaptureOpen(): boolean {
+  return FRAMES.length > 0;
+}
+
 /** Record that `name` was read as a multiplication operand where an
  * application was also possible. */
 export function noteProvisionalApplication(name: string): void {
   const depth = FRAMES.length;
   if (depth === 0) return;
   (FRAMES[depth - 1] ??= new Set()).add(name);
+}
+
+/** Record that `name` was APPLIED while it had no definition (or only a
+ * guessed one), so the argument-narrowing side-channel had nothing to read.
+ * The same registry and the same repair as `noteProvisionalApplication`: the
+ * two differ only in provenance. Idempotent per frame, so a callee reached
+ * through both channels in one body is recorded once. A no-op outside a
+ * `Function` literal body — a top-level expression re-canonicalizes naturally
+ * and needs no repair. */
+export function noteProvisionalCall(name: string): void {
+  noteProvisionalApplication(name);
 }
 
 //
@@ -199,7 +226,11 @@ export function takeProvisionalDependents(
 // 3/ The repair hook
 //
 
-type RepairFn = (ce: IComputeEngine, name: string) => void;
+type RepairFn = (
+  ce: IComputeEngine,
+  name: string,
+  justInstalled?: ProvisionalDependent
+) => void;
 
 let _repair: RepairFn | undefined;
 
@@ -208,11 +239,18 @@ export function _setProvisionalRepair(fn: RepairFn): void {
 }
 
 /** `name` just gained an operator definition: re-derive every definition whose
- * body read it as a multiplication operand. */
+ * body read it provisionally.
+ *
+ * `justInstalled` is the definition the caller has just installed for `name`,
+ * when there is one. A RECURSIVE body notes its own name (the self-call sees
+ * no definition yet), so without this the freshly built definition would
+ * re-derive itself on install — a full re-canonicalization that can learn
+ * nothing, since self-call narrowing is circular by construction. */
 export function repairProvisionalDependents(
   ce: IComputeEngine,
-  name: string
+  name: string,
+  justInstalled?: ProvisionalDependent
 ): void {
   if (DEPENDENTS.get(ce)?.has(name) !== true) return;
-  _repair?.(ce, name);
+  _repair?.(ce, name, justInstalled);
 }
