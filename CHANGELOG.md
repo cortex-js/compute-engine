@@ -299,6 +299,51 @@
   loud runtime `TypeError` rather than a silent value, and its `IndexOf` is
   genuinely correct.
 
+- **The broadcast route no longer miscompiles string comparisons, and
+  whole-array string equality fails closed.** Two stragglers of the
+  string-comparison class above reached the emitter through different doors:
+  a mixed ordering over a collection (`Less("a", [1, 2])`) broadcast to
+  `[false, false]` via `_SYS.bcast` before any gate ran, and whole-array
+  equality (`Equal(["a","b"], ["a","b"])`) compiled to `false` because
+  `_SYS.eq`'s per-element tolerance test makes equal strings unequal — the
+  gate tested *operands*, and neither operand is a string scalar. The string
+  gates are now element-aware ("participants": scalar operands and the
+  provable element types of collection operands), and the string-evidence
+  test is **recursive**: nested string lists (`[["a"]] == [["a"]]`),
+  heterogeneous literals (`["a", 1] == ["a", 1]`), a symbol typed
+  `broadcastable<string>` or `list<string>` in an ordering, and — via the
+  same walk — whole-value equality over `dictionary`/`record`/`tuple`-typed
+  symbols (whose element types reach `string`) all previously compiled to
+  wrong booleans and now fail closed. Admission is deliberately narrower
+  than decline: only *flat* all-string orderings keep compiling (their
+  interpreter parity is pinned); nested all-string shapes decline. Numeric
+  shapes keep byte-identical codegen. (The Python target has the same
+  broadcast-route defect — `np.less("a", [1, 2])` — recorded as a known open
+  hole, not yet fixed.)
+
+- **A destructuring `Declare` with a positional initial value now binds
+  (tuple patterns).** `["Declare", ["Tuple", "x", "y"], "unknown",
+  ["Tuple", 3, 4]]` — the positional-value spelling the `Declare` contract
+  documents and the scalar path already honors — silently declared nothing
+  on the tuple path, which only read the trailing-attributes dictionary. The
+  two forms now share one value resolution. A positional *type* on a tuple
+  pattern, previously a silent no-op on this dead path, is now applied per
+  bound name and surfaces an `incompatible-type` error value when it doesn't
+  fit — loud over silent, and **atomic**: every leaf is validated against
+  the type before any binding is installed, so a failure on the second leaf
+  no longer leaves the first one declared. (No surface route emits either
+  spelling: the Epsil parser uses the dictionary form.)
+
+- **A destructuring assignment is now atomic too.** `(x, y) := (7, 4.5)` with
+  both targets declared `integer` used to write `x` and then fail on `y`,
+  leaving the tuple half-assigned; the same happened when a later target was a
+  constant. Every leaf is now validated against its target's existing binding
+  — declared type, constness — before the first write, using the very check the
+  write itself performs, so the diagnostic is unchanged and a rejected pattern
+  leaves every target at its OLD value. (Failures raised deeper inside the
+  install machinery — function-literal reconciliation, effect contracts — stay
+  sequential.)
+
 - **A destructuring declare or assign whose right-hand side is a
   tuple-valued expression now compiles (JavaScript target).**
   `let (v, j) = parseValue(cs, i)` and the state-threading idiom

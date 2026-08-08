@@ -88,15 +88,20 @@ import {
   defineFunctionClause,
   loosenForClauseDefinition,
 } from '../multi-clause.js';
-import { assignValueAsOperatorDef } from '../engine-declarations.js';
+import {
+  assertAssignable,
+  assignValueAsOperatorDef,
+} from '../engine-declarations.js';
 import { errorValue } from '../boxed-expression/error-value.js';
 import {
   effectContractErrorValue,
   functionLiteralSignatureType,
   isEffectContractError,
+  matchesDeclaredTypeAxes,
   signatureEffects,
 } from '../boxed-expression/effects-inference.js';
 import {
+  declaredTypeError,
   isTypeCompatibilityError,
   typeCompatibilityErrorValue,
 } from '../boxed-expression/type-compatibility-error.js';
@@ -588,10 +593,17 @@ function collectTuplePattern(
  * including one nested under a sibling that would have bound — writes nothing
  * at all.
  *
+ * An optional `validateOne` extends that fail-fast to failures a match cannot
+ * see: it runs over EVERY collected position — read-only, before the first
+ * write — so a leaf it rejects also leaves zero bindings installed. The
+ * destructuring `let` uses it to hold each leaf value to a positional declared
+ * type; the destructuring assignment uses it to hold each leaf to its target's
+ * EXISTING binding (`assertAssignable`).
+ *
  * A `bindOne` that itself fails is a different matter: a `const` target or a
- * declared-type violation is discovered only by attempting the write, so
- * earlier positions in the same pattern have already been written and stay
- * written. The walk stops at the first such position.
+ * declared-type violation `validateOne` did not pre-check is discovered only by
+ * attempting the write, so earlier positions in the same pattern have already
+ * been written and stay written. The walk stops at the first such position.
  *
  * Returns `null` when every position bound, otherwise the `Error` value.
  */
@@ -599,11 +611,18 @@ function bindTuplePattern(
   ce: ComputeEngine,
   pattern: Expression,
   v: Expression,
-  bindOne: (name: string, value: Expression) => Expression | null
+  bindOne: (name: string, value: Expression) => Expression | null,
+  validateOne?: (name: string, value: Expression) => Expression | null
 ): Expression | null {
   const pairs: [name: string, value: Expression][] = [];
   const err = collectTuplePattern(ce, pattern, v, pairs);
   if (err) return err;
+  if (validateOne) {
+    for (const [name, value] of pairs) {
+      const e = validateOne(name, value);
+      if (e) return e;
+    }
+  }
   for (const [name, value] of pairs) {
     const e = bindOne(name, value);
     if (e) return e;
@@ -1883,23 +1902,52 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // The RHS is evaluated ONCE, up front, before any target is written —
         // that is what makes the swap `(a, b) := (b, a)` mean what it reads.
         //
+        // The write is ATOMIC, like the destructuring `let`'s: every leaf is
+        // pre-validated against its target's existing binding (`assertAssignable`
+        // — a `const` target, a value that does not fit a declared type) in a
+        // read-only pass over the whole pattern, so a rejection on a LATER leaf
+        // no longer leaves an earlier one written. Assignment failure preserves
+        // the prior values (unlike `let`, where the names stay unbound).
+        //
         if (isFunction(op1, 'Tuple')) {
           const val = op2.evaluate();
-          const err = bindTuplePattern(ce, op1, val, (name, el) => {
-            // As in the scalar path below: a violated effect contract or a
-            // declared-type mismatch is not installed and surfaces as an
-            // error VALUE, even though the host `ce.assign` throws.
-            try {
-              ce.assign(name, el);
-            } catch (e) {
-              if (isEffectContractError(e))
-                return effectContractErrorValue(ce, e);
-              if (isTypeCompatibilityError(e))
-                return typeCompatibilityErrorValue(ce, e);
-              throw e;
+          const err = bindTuplePattern(
+            ce,
+            op1,
+            val,
+            (name, el) => {
+              // As in the scalar path below: a violated effect contract or a
+              // declared-type mismatch is not installed and surfaces as an
+              // error VALUE, even though the host `ce.assign` throws. Still
+              // reached for the residuals `assertAssignable` leaves to the
+              // install (a function literal, an operator-slot target).
+              try {
+                ce.assign(name, el);
+              } catch (e) {
+                if (isEffectContractError(e))
+                  return effectContractErrorValue(ce, e);
+                if (isTypeCompatibilityError(e))
+                  return typeCompatibilityErrorValue(ce, e);
+                throw e;
+              }
+              return null;
+            },
+            (name, el) => {
+              try {
+                assertAssignable(ce, name, el);
+              } catch (e) {
+                if (isEffectContractError(e))
+                  return effectContractErrorValue(ce, e);
+                if (isTypeCompatibilityError(e))
+                  return typeCompatibilityErrorValue(ce, e);
+                // Any other rejection — the `const` target's plain `Error` —
+                // propagates exactly as the sequential write's did, but now
+                // before any target was written.
+                throw e;
+              }
+              return null;
             }
-            return null;
-          });
+          );
           return err ?? val;
         }
 
@@ -2164,23 +2212,100 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           }
         };
 
+        // Would declaring `symbolName` with `boundValue` be rejected by the
+        // positional type? Answered WITHOUT writing anything, so a
+        // destructuring pattern can validate every leaf before it declares the
+        // first one.
+        //
+        // The verdict is the one both `declareOne` branches ultimately reach —
+        // the per-axis `matchesDeclaredTypeAxes` (the fresh branch through the
+        // value-definition constructor, the upgrade branch through
+        // `ce.assign`) — with the same arguments and the same error value, so
+        // the diagnostic is unchanged: same code, same blamed name.
+        const validateOne = (
+          symbolName: string,
+          boundValue: Expression
+        ): Expression | null => {
+          if (!hasType) return null;
+          const declaredType = ce.type(type!);
+          // Both install branches skip the check for an unknown declared type
+          // — and `"unknown"` is exactly the filler the positional-value form
+          // puts in the type slot when there is no annotation, so this is the
+          // untyped path.
+          if (declaredType.isUnknown) return null;
+          // A `Function` literal is RECONCILED against a declared signature
+          // before being checked (`ce.declare()` ascribes the declared return
+          // type onto a literal that lacks one). Checking it here, ahead of
+          // that, could reject a value the install path accepts, so leave
+          // literals to the install path.
+          if (isFunction(boundValue, 'Function')) return null;
+          if (
+            matchesDeclaredTypeAxes(
+              ce,
+              boundValue.type,
+              declaredType,
+              effectsDeclared,
+              boundValue,
+              symbolName
+            )
+          )
+            return null;
+          return typeCompatibilityErrorValue(
+            ce,
+            declaredTypeError(symbolName, boundValue, declaredType)
+          );
+        };
+
         //
         // `Declare((x, y), {value -> t})` — a destructuring declaration
         // (`let (x, y) = t`). The pattern is a raw Tuple of symbols (`_`
         // skips a position) or nested tuple patterns — irrefutable in FORM;
-        // a runtime shape mismatch is an Error value. Requires a value; a
-        // type annotation is not supported. Each name declares in the
-        // current scope (constant for `const`); evaluates to the tuple
-        // value.
+        // a runtime shape mismatch is an Error value. Requires a value. Each
+        // name declares in the current scope (constant for `const`);
+        // evaluates to the tuple value.
+        //
+        // The value is the one resolved above — the POSITIONAL operand
+        // (`Declare((x, y), "unknown", t)`) or the attributes `value`, with
+        // the same precedence as for a symbol name. The two forms read the
+        // operands through the single resolution above so they cannot drift:
+        // the positional value used to be invisible here, and the
+        // declaration silently bound nothing.
+        //
+        // A positional type is passed through to each name, as it is for a
+        // symbol name (`declareOne` closes over it). The Epsil surface has no
+        // spelling for it — a `:` annotation on a destructuring `let` is a
+        // parse diagnostic, and `"unknown"` is the no-annotation filler the
+        // positional value form needs in the type slot.
         //
         if (isFunction(ops[0], 'Tuple')) {
-          if (hasType || !hasValue) return undefined;
-          return (
-            bindTuplePattern(ce, ops[0], value!, (name, el) => {
-              declareOne(name, el);
-              return null;
-            }) ?? value!
-          );
+          if (!hasValue) return undefined;
+          // A per-name failure surfaces as an error value, exactly as it does
+          // for a symbol name below — but it must not leave the pattern half
+          // declared: a leaf value that does not fit the positional type is
+          // rejected in a read-only pre-pass over EVERY position (see
+          // `bindTuplePattern`), so nothing is installed, exactly as for a
+          // shape mismatch. Without it,
+          // `Declare((x, y), "integer", (3, 4.5))` bound `x` and then errored
+          // on `y`.
+          try {
+            return (
+              bindTuplePattern(
+                ce,
+                ops[0],
+                value!,
+                (name, el) => {
+                  declareOne(name, el);
+                  return null;
+                },
+                validateOne
+              ) ?? value!
+            );
+          } catch (e) {
+            if (isEffectContractError(e)) return effectContractErrorValue(ce, e);
+            if (isTypeCompatibilityError(e))
+              return typeCompatibilityErrorValue(ce, e);
+            throw e;
+          }
         }
 
         // As in `Assign`: the declared operand is a NAME held raw, so read it

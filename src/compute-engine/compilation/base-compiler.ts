@@ -3,7 +3,7 @@ import type {
   FunctionInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isOperatorDef } from '../boxed-expression/utils.js';
+import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import { lookupApplicable } from '../function-utils.js';
 import {
@@ -24,7 +24,8 @@ import {
 import { isSubtype } from '../../common/type/subtype.js';
 import { parseType } from '../../common/type/parse.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
-import type { Type } from '../../common/type/types.js';
+import type { Type, TypeReference } from '../../common/type/types.js';
+import { declarationOf } from '../../common/type/reference.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { normalizeIndexingSet } from '../library/utils.js';
 import {
@@ -171,6 +172,230 @@ export function compilationType(expr: Expression): Type {
 export function isProvablyStringOperand(x: Expression): boolean {
   if (isString(x)) return true;
   const t = resolveTypeForCompilation(x.type.type);
+  return t !== 'never' && isSubtype(t, 'string');
+}
+
+/**
+ * True when ANY leaf type reachable from `t` is provably string: `t` itself,
+ * the element type of a collection (recursively — `list<list<string>>` carries
+ * evidence), or a member of a union (`list<string | number>` carries evidence
+ * even though the widened element type is not wholly string).
+ *
+ * Only positive evidence counts, exactly as in `isProvablyStringOperand`:
+ * `unknown`/`any` is not evidence (`collectionElementType` reports `any` for a
+ * bare `list`, and it must not gate numeric plot shapes), and neither is
+ * `never` — the element type of the empty literal `[]`.
+ *
+ * A `dictionary`/`record` is walked through its VALUE types only. Its
+ * `collectionElementType` is the synthesized entry `tuple<string, V>`, whose
+ * first cell is the ALWAYS-string KEY — not a value any comparison compares —
+ * so going through it reported string evidence for every keyed type, including
+ * `dictionary<integer>`. (Those shapes still decline, on the honest
+ * aggregate gate — see `unfaithfulComparisonAggregate`.)
+ *
+ * The walk is UNBOUNDED in depth: returning `false` early is the ADMITTING
+ * direction, so a depth cutoff was an admission hole — a nesting deeper than
+ * the bound reopened exactly the wrong-boolean miscompile this predicate
+ * exists to prevent. Termination is structural instead (every step peels a
+ * finite type), plus a cycle guard for the one non-structural step: a
+ * `reference` unfolds to its definition, so a recursive alias
+ * (`type json = list<json> | integer`) would descend forever. The guard is the
+ * repo's standard one for a `.def`-following walker — remember the reference
+ * DECLARATION records (`declarationOf`, stable per name and unaffected by the
+ * re-application a parameterized unfold rebuilds) along the CURRENT PATH, and
+ * stop on a repeat. The set is copied on descent so a reference visited in one
+ * branch cannot suppress evidence in a sibling, and is allocated only once a
+ * reference is actually met — the numeric fast path allocates nothing.
+ */
+function typeHasStringEvidence(
+  t: Type,
+  visited?: ReadonlySet<TypeReference>
+): boolean {
+  if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
+    const decl = declarationOf(t);
+    if (visited?.has(decl)) return false;
+    visited = new Set(visited).add(decl);
+  }
+  const r = resolveTypeForCompilation(t);
+  if (r === 'never') return false;
+  if (isSubtype(r, 'string')) return true;
+  if (typeof r !== 'string') {
+    // A union member that is provably string is evidence even when its siblings
+    // are not: the run-time value could be that member.
+    if (r.kind === 'union')
+      return r.types.some((x) => typeHasStringEvidence(x, visited));
+    // The keyed aggregates: their VALUES, never the synthesized string key.
+    if (r.kind === 'dictionary')
+      return typeHasStringEvidence(r.values, visited);
+    if (r.kind === 'record')
+      return Object.values(r.elements).some((x) =>
+        typeHasStringEvidence(x, visited)
+      );
+  }
+  const elt = collectionElementType(r);
+  if (elt === undefined) return false;
+  return typeHasStringEvidence(elt, visited);
+}
+
+/**
+ * The aggregate KINDS whose whole-value comparison neither the `_SYS.eq`/
+ * `_SYS.neq` tolerance kernel nor `_SYS.bcast` can reproduce faithfully —
+ * returned by name for the diagnostic, or `null` when the participant is
+ * comparable. See `assertComparableAggregate` (javascript-target.ts) for the
+ * evidence.
+ *
+ * Keyed collections (`dictionary`, `record`) have no positional JS-array
+ * lowering at all, and a heterogeneous fixed-arity `tuple` binds ATOMICALLY in
+ * the interpreter while both kernels treat its JS array as a collection to map
+ * over. A union member counts: the run-time value could BE it.
+ *
+ * The two kinds are searched to DIFFERENT depths, and the asymmetry is
+ * load-bearing:
+ *
+ *  - a KEYED aggregate counts at any depth (`list<dictionary<integer>>` too).
+ *    Those shapes were all declining before, because the string-evidence walk
+ *    read their synthesized `tuple<string, V>` entry as string evidence; with
+ *    that synthetic key no longer counted (`typeHasStringEvidence`), this is
+ *    what keeps them closed — the same set of shapes, an honest reason.
+ *  - a `tuple` counts only as the participant ITSELF (through unions). A tuple
+ *    NESTED in an indexed collection is the settled point-list lowering
+ *    (`list<tuple<number, number>>`), which compiles today and must keep
+ *    compiling; whether the whole-list comparison of one agrees with
+ *    interpretation is a separate, unverified question, not this gate's.
+ */
+export function unfaithfulComparisonAggregate(
+  x: Expression
+): 'dictionary' | 'record' | 'tuple' | null {
+  // Same cycle guard as `typeHasStringEvidence` — a recursive alias
+  // (`type json = … | dictionary<json>`) is reached again through its own body.
+  const walk = (
+    t: Type,
+    top: boolean,
+    visited?: ReadonlySet<TypeReference>
+  ): 'dictionary' | 'record' | 'tuple' | null => {
+    if (
+      typeof t === 'object' &&
+      t.kind === 'reference' &&
+      t.def !== undefined
+    ) {
+      const decl = declarationOf(t);
+      if (visited?.has(decl)) return null;
+      visited = new Set(visited).add(decl);
+    }
+    const r = resolveTypeForCompilation(t);
+    if (typeof r === 'string') {
+      if (r === 'dictionary' || r === 'record') return r;
+      return top && r === 'tuple' ? r : null;
+    }
+    if (r.kind === 'dictionary' || r.kind === 'record') return r.kind;
+    if (r.kind === 'tuple') return top ? 'tuple' : null;
+    // A union stays at the SAME level: each member is an alternative value of
+    // this participant, not an element of it.
+    if (r.kind === 'union') {
+      for (const m of r.types) {
+        const found = walk(m, top, visited);
+        if (found !== null) return found;
+      }
+      return null;
+    }
+    const elt = collectionElementType(r);
+    if (elt === undefined) return null;
+    return walk(elt, false, visited);
+  };
+  return walk(x.type.type, true);
+}
+
+/**
+ * True when a comparison PARTICIPANT is provably tuple-typed — a `Tuple`
+ * literal, or a symbol/application whose static type is a tuple (through a
+ * union only when EVERY member is one).
+ *
+ * This is the ADMISSION side of the aggregate gate's tuple case, and it exists
+ * for the EQUALITY family alone (see `compileJSEquality`): tuple-vs-tuple
+ * `Equal`/`NotEqual` lowers to `_SYS.eq`/`_SYS.neq`, whose array-vs-array
+ * branch is whole-value equality — the same answer the interpreter's atomic
+ * point comparison gives, at equal AND unequal arity (a length mismatch is
+ * `false`, and the interpreter answers `False` too). It was verified faithful
+ * before `unfaithfulComparisonAggregate` existed, and the gate declining it was
+ * over-broad; point equality (`p == q` over `tuple<number, number>`) is the
+ * realistic consumer.
+ *
+ * Deliberately narrower than "not `unfaithfulComparisonAggregate`":
+ *  - EVERY participant must qualify, so the mixed shapes the gate was written
+ *    for keep declining — `Equal(Tuple(1,2), 1)` ran element-wise to
+ *    `[true, false]` and `Equal(Tuple(1,2), List(1,2))` to `true`, where the
+ *    interpreter answers `False` to both;
+ *  - a union member that is NOT a tuple disqualifies: the run-time value could
+ *    be the shape the kernel gets wrong;
+ *  - the ORDERINGS never consult it. `Less(Tuple, Tuple)` was declining before
+ *    this gate existed (the interpreter leaves it inert) and stays closed.
+ */
+export function isProvablyTupleParticipant(x: Expression): boolean {
+  // Same cycle guard as `unfaithfulComparisonAggregate` — but note `false` is
+  // the DECLINING direction here, so stopping on a repeat is conservative.
+  const walk = (t: Type, visited?: ReadonlySet<TypeReference>): boolean => {
+    if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
+      const decl = declarationOf(t);
+      if (visited?.has(decl)) return false;
+      visited = new Set(visited).add(decl);
+    }
+    const r = resolveTypeForCompilation(t);
+    if (typeof r === 'string') return r === 'tuple';
+    if (r.kind === 'tuple') return true;
+    if (r.kind === 'union') return r.types.every((m) => walk(m, visited));
+    return false;
+  };
+  return walk(x.type.type);
+}
+
+/**
+ * String evidence for a COMPARISON PARTICIPANT — the value the scalar
+ * comparison actually compares, which for a broadcast source is its ELEMENT,
+ * not the array.
+ *
+ * `isProvablyStringOperand` alone is blind to this: `_SYS.bcast` hands ELEMENTS
+ * to the scalar closure, and `_SYS.eq`/`_SYS.neq` compare a list against a
+ * scalar element-wise, so a `list<string>` operand puts strings on the numeric
+ * comparison path even though the operand's own type is not a subtype of
+ * `string`. That blind spot is what let `Less("a", [1, 2])` compile to
+ * `[false, false]` and `Equal(["a"], ["a"])` to `false`.
+ *
+ * The walk is RECURSIVE over the type structure (`typeHasStringEvidence`),
+ * because the numeric lowerings reach nested and mixed elements just as
+ * silently: `Equal([["a"]], [["a"]])` ran to `false` (one peel yields
+ * `list<string>`, not `string`) and `Equal(["a", 1], ["a", 1])` ran to `false`
+ * (the widened element type `number | string` is not wholly string), both where
+ * the interpreter answers `True`.
+ *
+ * This predicate is the DECLINE trigger (the `some` side of the mixed rule).
+ * The keep-compiling `every` side uses the narrower
+ * `isFlatAllStringComparisonParticipant` — see there.
+ */
+export function isProvablyStringComparisonParticipant(
+  x: Expression
+): boolean {
+  if (isProvablyStringOperand(x)) return true;
+  return typeHasStringEvidence(compilationType(x));
+}
+
+/**
+ * The ADMISSION side of the mixed-string ordering rule: a participant whose
+ * compared value is WHOLLY string, at most one collection layer deep — a
+ * string operand, or a collection whose element type is a subtype of `string`.
+ *
+ * Deliberately NOT the recursive `isProvablyStringComparisonParticipant`: the
+ * only all-string shapes verified to agree with interpretation are the flat
+ * ones (`Less("a", ["x","y"])`, `Less(["a","b"], ["a","c"])`, pinned in
+ * `compile-string-fail-closed.test.ts`). Parity for a NESTED all-string
+ * ordering is unverified, so `every` must reject it and the head fails closed.
+ */
+export function isFlatAllStringComparisonParticipant(
+  x: Expression
+): boolean {
+  if (isProvablyStringOperand(x)) return true;
+  const elt = collectionElementType(compilationType(x));
+  if (elt === undefined) return false;
+  const t = resolveTypeForCompilation(elt);
   return t !== 'never' && isSubtype(t, 'string');
 }
 
@@ -1234,11 +1459,19 @@ export class BaseCompiler {
           // targets keep their existing lowering. `isSubtype`, not `.matches`,
           // so an `unknown`-typed operand is never itself string EVIDENCE (plot
           // comparisons with inferred parameters keep byte-identical output).
+          //
+          // Tested per PARTICIPANT, not per operand, and with the same pair of
+          // predicates as the broadcast gate below: an operand that is a
+          // broadcast SOURCE puts its elements on the scalar path, so a
+          // `broadcastable<string>`-typed operand alongside a number is mixed
+          // even though the operand's own type is not a subtype of `string`
+          // (`Less(1, L)` compiled to `[false, false]` where the interpreter
+          // leaves both comparisons inert).
           const orderingOverString =
             target.language === 'javascript' &&
             isRelationalOperator(h) &&
-            args.some(isProvablyStringOperand) &&
-            !args.every(isProvablyStringOperand);
+            args.some(isProvablyStringComparisonParticipant) &&
+            !args.every(isFlatAllStringComparisonParticipant);
           // Compile as an operator (only for non-collection arguments)
           if (
             args.every((x) => !x.isCollection) &&
@@ -2177,6 +2410,66 @@ export class BaseCompiler {
         )
       )
         return null;
+
+      // Past this point a `_SYS.bcast` WILL be emitted for this head, so the
+      // gates on the JavaScript ordering codegen apply here too — over
+      // PARTICIPANTS rather than operands, because the scalar closure below
+      // sees elements, not arrays.
+      //
+      // First, an AGGREGATE participant: a keyed collection has no positional
+      // JS-array lowering, so the scalar closure would be handed whole objects.
+      // (These shapes were declining through the string test below, which used
+      // to read a dictionary's synthesized `tuple<string, V>` entry as string
+      // evidence — see `unfaithfulComparisonAggregate`. A NESTED tuple is
+      // untouched: a point list keeps broadcasting exactly as before.)
+      if (BaseCompiler.ORDERING_HEADS.has(h)) {
+        for (const a of args) {
+          const aggregate = unfaithfulComparisonAggregate(a);
+          if (aggregate !== null)
+            throw new Error(
+              `${h}: cannot compile — an element-wise ordering over a ` +
+                `${aggregate} participant. It has no positional JavaScript ` +
+                `lowering the broadcast closure could compare, so the result ` +
+                `would silently disagree with interpretation. ` +
+                `Fail closed (D6) — the interpreter evaluates it.`
+            );
+        }
+      }
+
+      // …then the string rule of `assertNoMixedStringOrdering`
+      // (javascript-target.ts). The operand-level
+      // test never saw this shape: `Less("a", [1, 2])` compiled to
+      // `[false, false]` while the interpreter leaves BOTH comparisons INERT
+      // (`["a" < 1, "a" < 2]`) — and inert is not `false`.
+      //
+      // ALL-string still compiles, verified against interpretation:
+      // `Less("a", ["x","y"])` → `[true, true]` and
+      // `Less(["a","b"], ["a","c"])` → `[false, true]` both agree, because the
+      // emitted `<` is the same raw JavaScript `<` the interpreter uses on
+      // strings (`compare.ts`). Pinned in `compile-string-fail-closed.test.ts`.
+      // Only those FLAT all-string shapes are admitted — a nested one
+      // (`list<list<string>>`) has no verified parity, so the `every` side is
+      // the narrower `isFlatAllStringComparisonParticipant`.
+      //
+      // `Equal`/`NotEqual` cannot reach this point — they return `null` above
+      // and are gated by `assertNoStringOperand` on their own codegen — so only
+      // the ORDERINGS are tested in both gates here.
+      if (
+        BaseCompiler.ORDERING_HEADS.has(h) &&
+        args.some(isProvablyStringComparisonParticipant) &&
+        !args.every(isFlatAllStringComparisonParticipant)
+      )
+        throw new Error(
+          `${h}: cannot compile — an element-wise ordering that mixes string ` +
+            `evidence with a participant that is not provably a string. The ` +
+            `interpreter leaves such a comparison symbolic (\`Less("a", [1, 2])\` ` +
+            `broadcasts to two INERT comparisons), whereas the emitted ` +
+            `JavaScript \`<\` coerces and answers a plausible-looking ` +
+            `\`false\` for each element. An ordering whose participants are ALL ` +
+            `provably strings does compile — the interpreter compares strings ` +
+            `with the same \`<\`. Fail closed (D6) — the interpreter ` +
+            `evaluates it.`
+        );
     }
 
     // A user `operators` override that lowers the head to a *function call*
@@ -2443,6 +2736,36 @@ export class BaseCompiler {
   }
 
   /**
+   * The type SPEC of a `Declare`, as the source string the interpreter parses
+   * — the positional `Declare(sym, type, …)` operand, else the attributes
+   * `type` key, following the same precedence as `declareValueOperand`.
+   * `undefined` when the declaration states no type at all.
+   *
+   * The spec reaches the handler RAW (a `{ str }` in the positional slot, a
+   * type-name symbol in the attributes form), so both spellings are read.
+   */
+  private static declareTypeOperand(
+    ops: ReadonlyArray<Expression>
+  ): Expression | undefined {
+    let rest = ops.slice(1);
+    let attrsType: Expression | undefined;
+    const last = rest[rest.length - 1];
+    if (last !== undefined && isDictionary(last)) {
+      attrsType = last.get('type');
+      rest = rest.slice(0, -1);
+    }
+    return rest[0] ?? attrsType;
+  }
+
+  /** The declared-type spelling of a raw `Declare` type operand, or `undefined`
+   * when it is neither a string nor a symbol. */
+  private static declaredTypeSource(t: Expression): string | undefined {
+    if (isString(t)) return t.string;
+    if (isSymbol(t)) return t.symbol;
+    return undefined;
+  }
+
+  /**
    * Lower a destructuring pattern whose value is tuple-VALUED but not a
    * literal `Tuple` — the state-threading idiom `(n, j) := parseDigits(cs, j)`
    * — into ONE temporary holding the whole tuple plus a positional read per
@@ -2487,7 +2810,8 @@ export class BaseCompiler {
     pattern: Expression & FunctionInterface,
     v: Expression | undefined,
     target: CompileTarget<Expression>,
-    kind: 'declaration' | 'assignment'
+    kind: 'declaration' | 'assignment',
+    enforcedLocals?: ReadonlySet<string>
   ): { binds: Expression[]; writes: Expression[] } | null {
     if (v === undefined) return null;
     if (target.language !== 'javascript') return null;
@@ -2496,6 +2820,14 @@ export class BaseCompiler {
     const t = compilationType(v);
     if (typeof t === 'string' || t.kind !== 'tuple') return null;
     if (t.elements.length !== pattern.nops) return null;
+
+    // Every target is checked BEFORE anything is emitted — and before a
+    // temporary is minted — so a rejection on a later leaf leaves nothing
+    // behind: the same all-or-nothing discipline the interpreter's pre-pass
+    // has.
+    if (kind === 'assignment')
+      for (const p of pattern.ops)
+        BaseCompiler.assertLeafAssignable(p, enforcedLocals);
 
     const ce = pattern.engine;
     const temp = BaseCompiler.typedTemp(
@@ -2520,6 +2852,204 @@ export class BaseCompiler {
       );
     }
     return { binds, writes };
+  }
+
+  /**
+   * Fail closed (D6) when a destructuring-assignment TARGET carries an
+   * enforcement the compiled per-leaf write cannot reproduce.
+   *
+   * The interpreter's destructuring `Assign` is ATOMIC: every leaf is validated
+   * against its target's existing binding (`assertAssignable`) in a read-only
+   * pass, and one rejection leaves the WHOLE pattern unwritten. The lowering
+   * here is a sequence of plain per-leaf writes with no such validation, so a
+   * pattern the interpreter refuses outright ran to completion compiled:
+   * `(x, y) := (7, 4.5)` over `x, y: integer` wrote both (compiled `704.5`
+   * against the interpreter's `102`, where neither target moved), and a `const`
+   * target was silently overwritten where the interpreter throws.
+   *
+   * Reproducing the check would mean emitting a run-time type test per leaf and
+   * an all-or-nothing commit — a whole tier, not a gate — so the shapes that
+   * need it fail closed instead.
+   *
+   * An UNTYPED / inferred-type target keeps compiling byte-identically: nothing
+   * is enforced there, so the sequence of writes IS the interpreter's outcome.
+   * That is the state-threading idiom `(v, j) := step(j)`, which this must not
+   * disturb.
+   */
+  /**
+   * The enforced-target frames of the lexically enclosing statement lists
+   * (`compileBlock`), innermost last — the only route by which a destructuring
+   * assign nested in a LOOP BODY can see the enclosing block's declarations,
+   * since `compileLoopBody` is handed the body's statements alone. An emitted
+   * user-function body enters its own annotated PARAMETERS the same way
+   * (`withEnforcedParams`), which is the only route to a declaration that
+   * lives on the lambda literal rather than in an installed scope.
+   *
+   * Managed exactly like `_localComplex`/`_localVector`: pushed before the
+   * statements are compiled, popped in the same `finally`.
+   */
+  private static _enforcedTargets: ReadonlySet<string>[] = [];
+
+  private static assertLeafAssignable(
+    p: Expression,
+    enforcedLocals: ReadonlySet<string> | undefined
+  ): void {
+    if (!isSymbol(p) || p.symbol === '_') return;
+    const name = p.symbol;
+    // A BLOCK-LOCAL target: its `Declare` is held, so nothing is installed and
+    // the lookup below finds no definition (or an unrelated ambient one). The
+    // enclosing statement list is the only place its declaration is visible;
+    // `compileBlock` harvests it (`enforcedLocalTargets`) and either passes it
+    // in (a statement at its own level) or pushes it (a nested loop body).
+    if (
+      enforcedLocals?.has(name) ||
+      BaseCompiler._enforcedTargets.some((f) => f.has(name))
+    )
+      throw new Error(
+        `Cannot compile a destructuring assignment: the target '${name}' is ` +
+          `declared as a constant or with a declared type (a block-local ` +
+          `declaration, or an annotated parameter), and ` +
+          `the compiled per-leaf write can enforce neither. The interpreter ` +
+          `validates every leaf before writing any, and rejects the whole ` +
+          `assignment when one does not fit. ` +
+          `Fail closed (D6) — the interpreter evaluates it.`
+      );
+    // A target declared in an ENCLOSING, already-installed scope (a typed
+    // function parameter, an `ce.declare`d symbol). The pattern leaves are
+    // boxed structurally — the canonical `Assign` deliberately leaves them
+    // unresolved — so the definition is read from the engine rather than off
+    // the symbol, with a lookup that declares nothing.
+    const def = p.engine.lookupDefinition(name);
+    if (def === undefined || !isValueDef(def)) return;
+    const value = def.value;
+    if (value.isConstant)
+      throw new Error(
+        `Cannot compile a destructuring assignment: cannot assign to the ` +
+          `constant '${name}'. The interpreter rejects the whole ` +
+          `assignment; the compiled per-leaf writes have no such check. ` +
+          `Fail closed (D6) — the interpreter evaluates it.`
+      );
+    if (!value.inferredType && !value.type.isUnknown)
+      throw new Error(
+        `Cannot compile a destructuring assignment: the compiled write cannot ` +
+          `enforce the declared type of '${name}' ` +
+          `('${value.type.toString()}'). The interpreter validates every leaf ` +
+          `before writing any, and rejects the whole assignment when one does ` +
+          `not fit. Fail closed (D6) — the interpreter evaluates it.`
+      );
+  }
+
+  /**
+   * The names a statement list declares with an enforcement the compiled
+   * per-leaf destructuring write cannot reproduce: `const`, or a declared type
+   * other than the `"unknown"` filler.
+   *
+   * Read straight off the `Declare` statements, because a block-local
+   * declaration is HELD — nothing is installed at compile time, so
+   * `assertLeafAssignable`'s definition lookup cannot see it. Mirrors the
+   * interpreter's own operand reading (`Declare`'s evaluate handler): the
+   * positional type is `ops[1]` once a trailing attributes dictionary is set
+   * aside, and it wins over the dictionary's `type`; `constant` is a dictionary
+   * key.
+   */
+  private static enforcedLocalTargets(
+    args: ReadonlyArray<Expression>
+  ): ReadonlySet<string> {
+    const out = new Set<string>();
+    for (const arg of args) {
+      if (!isFunction(arg, 'Declare')) continue;
+      const sym = arg.ops[0];
+      if (!isSymbol(sym)) continue;
+      const rest = arg.ops.slice(1);
+      let attrType: Expression | undefined;
+      let attrConstant: Expression | undefined;
+      const last = rest[rest.length - 1];
+      if (last !== undefined && isDictionary(last)) {
+        attrType = last.get('type');
+        attrConstant = last.get('constant');
+        rest.pop();
+      }
+      const typeSource = rest[0] ?? attrType;
+      // An unrecognized type spelling counts as enforced: declining is the
+      // safe direction.
+      if (
+        typeSource !== undefined &&
+        BaseCompiler.declaredTypeSource(typeSource) !== 'unknown'
+      )
+        out.add(sym.symbol);
+      if (
+        attrConstant !== undefined &&
+        !(isSymbol(attrConstant) && attrConstant.symbol === 'False')
+      )
+        out.add(sym.symbol);
+    }
+    return out;
+  }
+
+  /**
+   * The PARAMETERS of a function literal that carry a type annotation — the
+   * third source of enforced destructuring targets, alongside the installed
+   * definitions `assertLeafAssignable` looks up and the block-local `Declare`s
+   * `enforcedLocalTargets` harvests.
+   *
+   * A parameter's declared type lives on the literal's parameter operands
+   * (`Typed(x, "integer")`), in a scope that is NOT installed while the body
+   * is compiled: the lookup finds no definition and the body has no `Declare`
+   * for it, so `(x, y) := (7, 4.5)` over `f(x: integer, y: integer)` wrote
+   * both leaves compiled where the interpreter — validating every leaf first —
+   * refuses the whole assignment and leaves the parameters at their argument
+   * values.
+   *
+   * An UNANNOTATED parameter (a bare symbol operand) is not enforced: nothing
+   * constrains it, so the sequence of per-leaf writes IS the interpreter's
+   * outcome, and the state-threading idiom `(v, j) := step(j)` keeps compiling.
+   */
+  private static enforcedParamTargets(
+    literal: Expression & FunctionInterface
+  ): ReadonlySet<string> {
+    const out = new Set<string>();
+    for (const p of literal.ops.slice(1)) {
+      if (!isFunction(p, 'Typed')) continue;
+      const sym = p.ops[0];
+      const typeSource = p.ops[1];
+      if (!isSymbol(sym) || typeSource === undefined) continue;
+      // An unrecognized type spelling counts as enforced: declining is the
+      // safe direction (as in `enforcedLocalTargets`).
+      if (BaseCompiler.declaredTypeSource(typeSource) !== 'unknown')
+        out.add(sym.symbol);
+    }
+    return out;
+  }
+
+  /**
+   * Run `fn` — the compilation of `literal`'s BODY as an emitted definition —
+   * with that literal's annotated parameters as the enforced-target frames.
+   *
+   * The enclosing frames are REPLACED, not stacked on (the `isolate` case of
+   * `withLocalShapeFrame`): an emitted definition is a module-level function,
+   * not a block lexically nested in the requesting one, so a same-named typed
+   * local at the call site must not make this body decline.
+   *
+   * Public for the DIRECT lambda-compile route (`compileToTarget`'s
+   * `Function`-literal branch in javascript-target.ts, the `calling: 'lambda'`
+   * convention), which compiles a literal's body without going through
+   * `emitFunctionLiteralDefinition` and must wrap it the same way — otherwise
+   * a destructuring assign onto a typed parameter miscompiles there while the
+   * emitted-definition route declines.
+   */
+  static withEnforcedParams<T>(
+    literal: Expression & FunctionInterface,
+    fn: () => T
+  ): T {
+    const saved = BaseCompiler._enforcedTargets;
+    BaseCompiler._enforcedTargets = [
+      BaseCompiler.enforcedParamTargets(literal),
+    ];
+    try {
+      return fn();
+    } finally {
+      BaseCompiler._enforcedTargets = saved;
+    }
   }
 
   /**
@@ -2566,6 +3096,28 @@ export class BaseCompiler {
   ): ReadonlyArray<Expression> | null {
     if (!isFunction(arg, 'Declare') || !isFunction(arg.ops[0], 'Tuple'))
       return null;
+    // A STATED type applies to every leaf: the interpreter validates each leaf
+    // value against it in a read-only pre-pass and rejects the whole pattern
+    // atomically when one does not fit. Both lowerings below rewrite each leaf
+    // as `Declare(name, "unknown", value)`, dropping the type entirely — so
+    // `Declare((x, y), "integer", (3, 4.5))` bound BOTH names where the
+    // interpreter binds neither. Nothing to enforce it with here, so fail
+    // closed. `"unknown"` is the no-annotation filler the positional-value
+    // form must put in the type slot, and the Epsil surface emits nothing else
+    // (a `:` annotation on a destructuring `let` is a parse diagnostic), so the
+    // idiomatic path is untouched.
+    const declaredType = BaseCompiler.declareTypeOperand(arg.ops);
+    if (
+      declaredType !== undefined &&
+      BaseCompiler.declaredTypeSource(declaredType) !== 'unknown'
+    )
+      throw new Error(
+        `Cannot compile a destructuring declaration that states a type ` +
+          `('${declaredType.toString()}'): the per-leaf lowering cannot ` +
+          `enforce it, and the interpreter rejects the whole pattern when a ` +
+          `leaf value does not fit. ` +
+          `Fail closed (D6) — the interpreter evaluates it.`
+      );
     const ce = arg.engine;
     const out: Expression[] = [];
     const walk = (pattern: Expression, v: Expression | undefined): void => {
@@ -2655,7 +3207,8 @@ export class BaseCompiler {
    */
   static desugarPatternAssign(
     arg: Expression,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    enforcedLocals?: ReadonlySet<string>
   ): ReadonlyArray<Expression> | null {
     if (!isFunction(arg, 'Assign') || !isFunction(arg.ops[0], 'Tuple'))
       return null;
@@ -2677,7 +3230,8 @@ export class BaseCompiler {
           pattern,
           v,
           target,
-          'assignment'
+          'assignment',
+          enforcedLocals
         );
         if (viaTemp !== null) {
           binds.push(...viaTemp.binds);
@@ -2710,6 +3264,10 @@ export class BaseCompiler {
             `Cannot compile a destructuring assignment: a pattern position ` +
               `is not a symbol. Fail closed (D6).`
           );
+        // A target the compiled write cannot hold to its declaration (a
+        // constant, a declared non-inferred type) fails closed. The throw
+        // discards the whole desugar, so no partially-lowered pattern escapes.
+        BaseCompiler.assertLeafAssignable(p, enforcedLocals);
         // Every leaf is read into a temporary before ANY target is written —
         // including a `_` leaf, whose element is still evaluated for effect.
         //
@@ -2768,6 +3326,21 @@ export class BaseCompiler {
     node?: Expression,
     valueUsed = true
   ): TargetSource {
+    // A block-local `Declare` is HELD, so a target's constness / declared type
+    // is visible ONLY in this statement list. Harvest it up front: the
+    // destructuring-assign desugar below fails closed on such a target (the
+    // compiled per-leaf write enforces neither, where the interpreter's
+    // destructuring `Assign` validates every leaf before writing any), and a
+    // destructuring assign inside a nested LOOP BODY needs it too — that route
+    // (`compileLoopBody`) sees only the body's statements, so the set is also
+    // pushed for the compilation of the statements below.
+    //
+    // Harvested BEFORE the desugars, which only add `Declare(name, "unknown",
+    // …)` statements — never an enforced one.
+    const enforcedLocals = args.some((a) => isFunction(a, 'Declare'))
+      ? BaseCompiler.enforcedLocalTargets(args)
+      : undefined;
+
     // Desugar destructuring declares first, so the locals collection and the
     // inference below see only plain scalar declares. As with the assigns
     // below, a value-position one is left alone and fails closed: the rewrite
@@ -2803,7 +3376,9 @@ export class BaseCompiler {
       args = args.flatMap((a, i) =>
         valueUsed && i === n - 1
           ? [a]
-          : (BaseCompiler.desugarPatternAssign(a, target) ?? [a])
+          : (BaseCompiler.desugarPatternAssign(a, target, enforcedLocals) ?? [
+              a,
+            ])
       );
     }
 
@@ -2917,6 +3492,12 @@ export class BaseCompiler {
     // so a later local's RHS that merely references an earlier one (`q ⩴ p`)
     // resolves the width through the frame (Defect C).
     BaseCompiler._localVector.push(vectorFrame);
+    // The enforced-target frame, so a destructuring assign in a nested LOOP
+    // BODY still sees this block's declarations (see `enforcedLocals` above).
+    // Only a non-empty frame is pushed, so the common block costs nothing.
+    const pushedEnforced =
+      enforcedLocals !== undefined && enforcedLocals.size > 0;
+    if (pushedEnforced) BaseCompiler._enforcedTargets.push(enforcedLocals!);
     try {
       for (const arg of args) {
         if (isFunction(arg, 'Declare') && isSymbol(arg.ops[0])) {
@@ -3054,6 +3635,7 @@ export class BaseCompiler {
     } finally {
       BaseCompiler._popLocalComplex();
       BaseCompiler._localVector.pop();
+      if (pushedEnforced) BaseCompiler._enforcedTargets.pop();
     }
   }
 
@@ -5317,14 +5899,16 @@ export class BaseCompiler {
         if (lowering) {
           registry.defs.set(
             name,
-            lowering.define({
-              id: h,
-              name,
-              params,
-              body: bodyExpr,
-              literal,
-              target: bodyTarget,
-            })
+            BaseCompiler.withEnforcedParams(literal, () =>
+              lowering.define({
+                id: h,
+                name,
+                params,
+                body: bodyExpr,
+                literal,
+                target: bodyTarget,
+              })
+            )
           );
           return name;
         }
@@ -5333,11 +5917,10 @@ export class BaseCompiler {
         // is not part of the root tree — but the same naming counter, so temp
         // names never collide across the artifact. Duplication inside a called
         // definition is therefore recovered once, in the emitted function.
-        const body = BaseCompiler.withNestedCseHarvest(
-          bodyExpr,
-          bodyTarget,
-          params,
-          () => BaseCompiler.compile(bodyExpr, bodyTarget)
+        const body = BaseCompiler.withEnforcedParams(literal, () =>
+          BaseCompiler.withNestedCseHarvest(bodyExpr, bodyTarget, params, () =>
+            BaseCompiler.compile(bodyExpr, bodyTarget)
+          )
         );
         registry.defs.set(
           name,
@@ -5577,11 +6160,10 @@ export class BaseCompiler {
         // A recursive clause body references `h` while `name` is in
         // `compiling`, so the self-call emits `name` — bound by the time any
         // call runs, since every def executes in the preamble first.
-        const compiled = BaseCompiler.withNestedCseHarvest(
-          bodyExpr,
-          bodyTarget,
-          params,
-          () => BaseCompiler.compile(bodyExpr, bodyTarget)
+        const compiled = BaseCompiler.withEnforcedParams(plans[i].literal, () =>
+          BaseCompiler.withNestedCseHarvest(bodyExpr, bodyTarget, params, () =>
+            BaseCompiler.compile(bodyExpr, bodyTarget)
+          )
         );
         const body = coerce ? coerce(bodyExpr, compiled) : compiled;
         registry.defs.set(

@@ -96,6 +96,252 @@ describe('Declare with a Tuple pattern', () => {
 });
 
 //
+// The POSITIONAL value form — `Declare(pattern, type, value)`, the same
+// `(symbol, type?, value?, attributes?)` signature a symbol name uses, with
+// `"unknown"` as the no-annotation filler in the type slot. The tuple path
+// used to read the value ONLY from the attributes dictionary, so a positional
+// value declared nothing at all and the statement silently evaluated to
+// `Declare(…)` — while the compiler (which reads either shape) computed the
+// right answer. Both forms now go through ONE operand resolution.
+//
+describe('Declare with a Tuple pattern: the positional value operand', () => {
+  test('a positional tuple value binds each component (box route)', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Block',
+        ['Declare', ['Tuple', 'x', 'y'], { str: 'unknown' }, ['Tuple', 3, 4]],
+        ['Add', ['Multiply', 10, 'x'], 'y'],
+      ])
+      .evaluate();
+    expect(r.isSame(34)).toBe(true);
+  });
+
+  test('the declaration evaluates to the tuple value', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Declare', ['Tuple', 'x', 'y'], { str: 'unknown' }, ['Tuple', 3, 4]])
+      .evaluate();
+    expect(r.toString()).toBe('(3, 4)');
+    expect(ce.parse('10x + y').evaluate().isSame(34)).toBe(true);
+  });
+
+  test('a positional symbol value resolves to its tuple before splicing', () => {
+    const ce = new ComputeEngine();
+    ce.assign('p', ce.box(['Tuple', 3, 4]));
+    ce.box(['Declare', ['Tuple', 'x', 'y'], { str: 'unknown' }, 'p']).evaluate();
+    expect(ce.parse('10x + y').evaluate().isSame(34)).toBe(true);
+  });
+
+  test('nested patterns and `_` wildcards, positionally', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Block',
+        [
+          'Declare',
+          ['Tuple', ['Tuple', 'a', 'b'], '_', 'c'],
+          { str: 'unknown' },
+          ['Tuple', ['Tuple', 1, 2], 99, 5],
+        ],
+        ['Add', 'a', 'b', 'c'],
+      ])
+      .evaluate();
+    expect(r.isSame(8)).toBe(true);
+  });
+
+  test('a positional shape mismatch still fails fast', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Declare',
+        ['Tuple', 'x', 'y', 'z'],
+        { str: 'unknown' },
+        ['Tuple', 1, 2],
+      ])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('incompatible-type');
+    // Nothing was declared: the whole pattern is matched before any write.
+    expect(ce.symbol('x').evaluate().symbol).toBe('x');
+  });
+
+  test('a positional non-tuple value is an error value', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Declare', ['Tuple', 'x', 'y'], { str: 'unknown' }, 5])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('incompatible-type');
+  });
+
+  test('a positional value wins over an attributes `value` (as for a symbol)', () => {
+    // The precedence the scalar path already has: `Declare(a, "unknown", 5,
+    // {value -> 99})` binds 5.
+    const scalar = new ComputeEngine();
+    expect(
+      scalar
+        .box([
+          'Declare',
+          'a',
+          { str: 'unknown' },
+          5,
+          ['Dictionary', ['KeyValuePair', 'value', 99]],
+        ])
+        .evaluate()
+        .isSame(5)
+    ).toBe(true);
+
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Block',
+        [
+          'Declare',
+          ['Tuple', 'x', 'y'],
+          { str: 'unknown' },
+          ['Tuple', 3, 4],
+          ['Dictionary', ['KeyValuePair', 'value', ['Tuple', 7, 8]]],
+        ],
+        ['Add', ['Multiply', 10, 'x'], 'y'],
+      ])
+      .evaluate();
+    expect(r.isSame(34)).toBe(true);
+  });
+
+  test('the `constant` attribute still applies with a positional value', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'Declare',
+      ['Tuple', 'x', 'y'],
+      { str: 'unknown' },
+      ['Tuple', 3, 4],
+      ['Dictionary', ['KeyValuePair', 'constant', 'True']],
+    ]).evaluate();
+    expect(() => ce.box(['Assign', 'x', 9]).evaluate()).toThrow();
+    expect(ce.symbol('x').evaluate().isSame(3)).toBe(true);
+  });
+
+  test('a scalar positional declaration is unchanged', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['Block', ['Declare', 'a', { str: 'unknown' }, 5], ['Add', 'a', 1]])
+      .evaluate();
+    expect(r.isSame(6)).toBe(true);
+  });
+
+  test('a type in the type slot applies to each name (PINNED, not endorsed)', () => {
+    // No route emits this — the Epsil surface rejects a `:` annotation on a
+    // destructuring `let`, and `"unknown"` is the filler the positional form
+    // needs. Recorded so a change is deliberate: the type reaches every bound
+    // name, exactly as it does for a symbol name, so a type describing the
+    // WHOLE tuple is an error value (not a silently-skipped declaration).
+    const ok = new ComputeEngine();
+    ok.box([
+      'Declare',
+      ['Tuple', 'x', 'y'],
+      { str: 'integer' },
+      ['Tuple', 3, 4],
+    ]).evaluate();
+    expect(ok.symbol('x').type.toString()).toBe('integer');
+
+    const bad = new ComputeEngine();
+    const r = bad
+      .box([
+        'Declare',
+        ['Tuple', 'x', 'y'],
+        { str: 'tuple<integer, integer>' },
+        ['Tuple', 3, 4],
+      ])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('incompatible-type');
+  });
+
+  test('a leaf that does not fit the type declares NOTHING (second leaf)', () => {
+    // The declared type applies to each name, so `4.5` fails at `y`. That
+    // failure is found before anything is written: `x` must not be left bound
+    // — the same fail-fast a shape mismatch has always had.
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Declare',
+        ['Tuple', 'x', 'y'],
+        { str: 'integer' },
+        ['Tuple', 3, 4.5],
+      ])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('incompatible-type');
+    // The blamed name is the offending one, not the first one.
+    expect(r.toString()).toContain('"y"');
+    expect(ce.box('x').evaluate().symbol).toBe('x');
+    expect(ce.box('y').evaluate().symbol).toBe('y');
+  });
+
+  test('a leaf that does not fit the type declares NOTHING (first leaf)', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Declare',
+        ['Tuple', 'x', 'y'],
+        { str: 'integer' },
+        ['Tuple', 3.5, 4],
+      ])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('"x"');
+    expect(ce.box('x').evaluate().symbol).toBe('x');
+    expect(ce.box('y').evaluate().symbol).toBe('y');
+  });
+
+  test('a failing leaf NESTED under bound siblings declares nothing', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Declare',
+        ['Tuple', 'a', ['Tuple', 'b', 'c']],
+        { str: 'integer' },
+        ['Tuple', 1, ['Tuple', 2, 3.5]],
+      ])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('"c"');
+    expect(ce.box('a').evaluate().symbol).toBe('a');
+    expect(ce.box('b').evaluate().symbol).toBe('b');
+    expect(ce.box('c').evaluate().symbol).toBe('c');
+  });
+
+  test('every leaf fitting the type binds them all', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'Declare',
+        ['Tuple', 'x', 'y'],
+        { str: 'integer' },
+        ['Tuple', 3, 4],
+      ])
+      .evaluate();
+    expect(r.toString()).toBe('(3, 4)');
+    expect(ce.box('x').evaluate().isSame(3)).toBe(true);
+    expect(ce.box('y').evaluate().isSame(4)).toBe(true);
+    expect(ce.symbol('x').type.toString()).toBe('integer');
+    expect(ce.symbol('y').type.toString()).toBe('integer');
+  });
+
+  test('the Epsil surface route (dictionary form) still binds', () => {
+    // `let (a, b) = (1, 2)` emits the trailing-attributes shape; the surface
+    // language must be unaffected by the positional-form fix.
+    const {
+      executeEpsil,
+    } = require('../../src/epsil/execute-epsil');
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let (a, b) = (1, 2)');
+    expect(ce.parse('10a + b').evaluate().isSame(12)).toBe(true);
+  });
+});
+
+//
 // `Assign` with a `Tuple` pattern in the target position — the engine form
 // behind Epsil destructuring assignments (`(x, y) := t`). Same pattern
 // grammar as the declaration form, but it WRITES existing bindings, so the
@@ -197,12 +443,111 @@ describe('Assign with a Tuple pattern', () => {
       .evaluate();
     expect(r.isValid).toBe(false);
     expect(r.toString()).toContain('incompatible-type');
-    // PINNED, not endorsed: a per-target write failure is discovered only by
-    // attempting the write, so the earlier position stays written. Unlike a
-    // shape mismatch (above), this is NOT atomic. Whether a destructuring
-    // assignment should roll back here is an open language-semantics
-    // question; this records today's behavior so a change is deliberate.
-    expect(ce.symbol('x').evaluate().isSame(99)).toBe(true);
+    // ATOMIC, like a shape mismatch (above): every leaf is validated against
+    // its target's existing binding before the first write, so `x` keeps its
+    // OLD value. (Assignment failure preserves prior values — unlike the
+    // destructuring `let`, where the names simply stay unbound.) This test used
+    // to pin the opposite: `x` was already 99 by the time `y` was rejected.
+    expect(ce.symbol('x').evaluate().isSame(1)).toBe(true);
+  });
+
+  test('a second-leaf type failure blames it and preserves the first', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'integer');
+    ce.declare('y', 'integer');
+    ce.assign('x', 1);
+    ce.assign('y', 2);
+    const r = ce
+      .box(['Assign', ['Tuple', 'x', 'y'], ['Tuple', 7, 4.5]])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    // The BLAMED name is the offending leaf, not the first one — the same
+    // diagnostic the sequential write produced.
+    expect(r.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "integer", "finite_real"), "y")'
+    );
+    expect(ce.symbol('x').evaluate().isSame(1)).toBe(true);
+    expect(ce.symbol('y').evaluate().isSame(2)).toBe(true);
+  });
+
+  test('a FIRST-leaf type failure preserves both targets', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'integer');
+    ce.declare('y', 'integer');
+    ce.assign('x', 1);
+    ce.assign('y', 2);
+    const r = ce
+      .box(['Assign', ['Tuple', 'x', 'y'], ['Tuple', 4.5, 7]])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('"x"');
+    expect(ce.symbol('x').evaluate().isSame(1)).toBe(true);
+    expect(ce.symbol('y').evaluate().isSame(2)).toBe(true);
+  });
+
+  test('a nested pattern with a failing inner leaf preserves every target', () => {
+    const ce = new ComputeEngine();
+    for (const n of ['a', 'b', 'c']) {
+      ce.declare(n, 'integer');
+      ce.assign(n, 0);
+    }
+    const r = ce
+      .box([
+        'Assign',
+        ['Tuple', 'a', ['Tuple', 'b', 'c']],
+        ['Tuple', 1, ['Tuple', 2, 3.5]],
+      ])
+      .evaluate();
+    expect(r.isValid).toBe(false);
+    expect(r.toString()).toContain('"c"');
+    expect(ce.symbol('a').evaluate().isSame(0)).toBe(true);
+    expect(ce.symbol('b').evaluate().isSame(0)).toBe(true);
+    expect(ce.symbol('c').evaluate().isSame(0)).toBe(true);
+  });
+
+  test('a `const` target in second position writes nothing', () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', 1);
+    ce.declare('b', { value: 2, isConstant: true });
+    // A constant target is rejected by a THROW on the host route, exactly as
+    // the scalar `b := 20` is — the pre-pass does not change the channel, only
+    // the timing.
+    expect(() =>
+      ce.box(['Assign', ['Tuple', 'a', 'b'], ['Tuple', 10, 20]]).evaluate()
+    ).toThrow('Cannot assign a value to the constant "b"');
+    expect(ce.symbol('a').evaluate().isSame(1)).toBe(true);
+    expect(ce.symbol('b').evaluate().isSame(2)).toBe(true);
+  });
+
+  test('the success path and the swap are unaffected by the pre-pass', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'integer');
+    ce.declare('y', 'integer');
+    ce.assign('x', 1);
+    ce.assign('y', 2);
+    const r = ce
+      .box(['Assign', ['Tuple', 'x', 'y'], ['Tuple', 'y', 'x']])
+      .evaluate();
+    expect(r.toString()).toBe('(2, 1)');
+    expect(ce.symbol('x').evaluate().isSame(2)).toBe(true);
+    expect(ce.symbol('y').evaluate().isSame(1)).toBe(true);
+  });
+
+  test('the Epsil route: a rejected leaf leaves the first target alone', () => {
+    const {
+      executeEpsil,
+    } = require('../../src/epsil/execute-epsil');
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      'let x: integer = 1\nlet y: integer = 2\n(x, y) := (7, 4.5)'
+    );
+    // The failing statement is the LAST one, so the runtime error is the
+    // program's value (not a diagnostic).
+    expect(r.value.isValid).toBe(false);
+    expect(r.value.toString()).toContain('incompatible-type');
+    expect(ce.symbol('x').evaluate().isSame(1)).toBe(true);
+    expect(ce.symbol('y').evaluate().isSame(2)).toBe(true);
   });
 
   test('it is a `scope` effect, typed by the RHS', () => {

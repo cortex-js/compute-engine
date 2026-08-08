@@ -1,5 +1,6 @@
 import type {
   Expression,
+  FunctionInterface,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
@@ -133,8 +134,11 @@ import { checkDeadline } from '../../common/interruptible.js';
 
 import {
   BaseCompiler,
-  isProvablyStringOperand,
+  isFlatAllStringComparisonParticipant,
+  isProvablyStringComparisonParticipant,
+  isProvablyTupleParticipant,
   pointHasBroadcastComponent,
+  unfaithfulComparisonAggregate,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import type {
@@ -185,18 +189,78 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
  *
  * The ORDERINGS are governed by the narrower `assertNoMixedStringOrdering`:
  * they emit a raw `<`, which the interpreter agrees with for strings.
+ *
+ * Evidence is tested per PARTICIPANT, not per operand: the `_SYS.eq`/`_SYS.neq`
+ * runtime dispatch compares a list against a scalar ELEMENT-WISE and two lists
+ * with the same tolerance test, so a `list<string>` operand puts strings on the
+ * numeric path even though its own type is not a subtype of `string`. That hole
+ * let `Equal(["a"], ["a"])` compile to `false` where the interpreter answers
+ * `True`.
  */
 function assertNoStringOperand(
   kind: string,
   args: ReadonlyArray<Expression>
 ): void {
-  if (args.some(isProvablyStringOperand))
+  if (args.some(isProvablyStringComparisonParticipant))
     throw new Error(
       `${kind}: cannot compile — string-valued operands are not supported by ` +
         `this target (the lowering is numeric: a tolerance test on the ` +
         `difference, which is NaN for strings). ` +
         `Fail closed (D6) — the interpreter evaluates it.`
     );
+}
+
+/**
+ * Fail closed (D6) when a COMPARISON participant is an aggregate whose
+ * whole-value comparison neither kernel can reproduce — a `dictionary`, a
+ * `record`, or a `tuple` (`unfaithfulComparisonAggregate`).
+ *
+ * The interpreter compares such an aggregate as ONE value; both compiled
+ * kernels see its JavaScript representation as something to look inside:
+ *
+ *  - `_SYS.eq`/`_SYS.neq` reduce to the numeric tolerance test, which for two
+ *    EQUAL `dictionary<integer>` / `record<…>` values is `Math.abs(obj - obj)`
+ *    → `NaN <= tol` → `false`, where the interpreter answers `True`;
+ *  - a `tuple` lowers to a JS array, so `Equal(Tuple(1, 2), 1)` ran ELEMENT-WISE
+ *    to `[true, false]` and `Equal(Tuple(1, 2), List(1, 2))` to `true`, where
+ *    the interpreter answers `False` to both (a point binds atomically);
+ *  - `IndexOf`'s element test is the same tolerance test, so a tuple needle was
+ *    never found — `IndexOf([[1,2],[3,4]], Tuple(3,4))` ran to `0` against the
+ *    interpreter's `2`.
+ *
+ * These shapes were declining ALREADY, but for the wrong reason: the
+ * string-evidence walk read the synthesized `tuple<string, V>` dictionary/record
+ * entry — the always-string KEY — as string evidence, so `Equal(d1, d2)` over
+ * `dictionary<integer>` reported "string-valued operands" with no string in
+ * sight. With that key no longer counted, this gate is what keeps them closed,
+ * and it says why.
+ *
+ * The ORDERINGS reach it too (via `compileJSCollectionBoolean`), where it
+ * precedes the broader "no element-wise runtime dispatch" refusal that had been
+ * catching the same shapes.
+ *
+ * ONE carve-out, applied by the caller and not here: a BINARY `Equal`/`NotEqual`
+ * whose EVERY participant is provably tuple-typed skips this gate — see
+ * `compileJSEquality` and `isProvablyTupleParticipant`. The orderings and
+ * `IndexOf` never take it.
+ */
+function assertComparableAggregate(
+  kind: string,
+  args: ReadonlyArray<Expression>
+): void {
+  for (const a of args) {
+    const aggregate = unfaithfulComparisonAggregate(a);
+    if (aggregate === null) continue;
+    throw new Error(
+      `${kind}: cannot compile — a ${aggregate} participant. The interpreter ` +
+        `compares it as ONE value, whereas the compiled kernels look inside ` +
+        `its JavaScript representation: the numeric tolerance test answers ` +
+        `\`false\` for two EQUAL dictionaries or records (\`Math.abs(obj - ` +
+        `obj)\` is NaN), and a tuple's JS array is mapped over element-wise ` +
+        `(\`Equal(Tuple(1, 2), 1)\` → \`[true, false]\`) where a point binds ` +
+        `atomically. Fail closed (D6) — the interpreter evaluates it.`
+    );
+  }
 }
 
 /**
@@ -218,10 +282,19 @@ function assertNoStringOperand(
  *
  * Chained (n-ary) orderings follow the same rule: `every`/`some` range over all
  * the operands, so an all-string chain compiles and any other declines.
+ *
+ * Evidence is tested per PARTICIPANT, like `assertNoStringOperand`: this handler
+ * broadcasts a collection operand element-wise (`_SYS.bcast`), so a
+ * `list<string>` / `broadcastable<string>` operand puts strings on the emitted
+ * `<` even though its own type is not a subtype of `string` — the hole that let
+ * `Less(1, L)` (`L: broadcastable<string>`) compile to `[false, false]` where
+ * the interpreter leaves both comparisons inert. The ADMISSION side stays the
+ * narrower flat test, so only the verified all-string shapes keep compiling.
  */
 function isMixedStringOrdering(args: ReadonlyArray<Expression>): boolean {
   return (
-    args.some(isProvablyStringOperand) && !args.every(isProvablyStringOperand)
+    args.some(isProvablyStringComparisonParticipant) &&
+    !args.every(isFlatAllStringComparisonParticipant)
   );
 }
 
@@ -262,6 +335,26 @@ function compileJSEquality(
   // Ahead of BOTH lowerings below: the `_SYS.eq`/`_SYS.neq` runtime dispatch
   // compares scalars tolerantly too, so a string operand is as wrong there as
   // on the scalar tolerance path.
+  //
+  // The one carve-out in the aggregate gate (maintainer-ruled): a BINARY
+  // equality whose EVERY participant is provably tuple-typed
+  // (`isProvablyTupleParticipant`) keeps the `_SYS.eq`/`_SYS.neq` lowering it
+  // had before the gate existed. Its array-vs-array branch is whole-value
+  // equality, which is exactly the interpreter's atomic point comparison — at
+  // equal arity and at unequal arity (a length mismatch is `false`, and so is
+  // the interpreter's answer). Only the MIXED shapes were wrong, and those
+  // still decline: one non-tuple participant and `every` fails. The CHAINED
+  // (n-ary) form is excluded — it keeps failing closed here, as it does below.
+  //
+  // Gate ORDER is load-bearing: `assertNoStringOperand` runs unconditionally
+  // AFTER this, so a tuple with a string component
+  // (`Equal(Tuple(1, "a"), Tuple(1, "a"))`) still declines on string evidence —
+  // `typeHasStringEvidence` peels the tuple to the union `integer | string`.
+  // The tolerance test is NaN on that component, so `_SYS.eq` would answer
+  // `false` where the interpreter answers `True`.
+  const tupleEquality =
+    args.length === 2 && args.every(isProvablyTupleParticipant);
+  if (!tupleEquality) assertComparableAggregate(kind, args);
   assertNoStringOperand(kind, args);
   // Equality over a (possibly-)collection operand: a raw `Math.abs(a - b)`
   // over a list silently coerces (`[1,2,3] - 2` → NaN), so the scalar codegen
@@ -415,7 +508,14 @@ function compileJSCollectionBoolean(
   // collection one — `Less("a", [1, 2])` — which the interpreter answers with a
   // list of INERT comparisons, not the `[false, false]` a broadcast would give.
   // The connectives are not gated: they consume booleans, not strings.
-  if (kind in JS_ORDERING_OPERATORS) assertNoMixedStringOrdering(kind, args);
+  if (kind in JS_ORDERING_OPERATORS) {
+    // The aggregate gate first: it names the real reason (a dictionary/record/
+    // tuple participant), where the broad refusal at the bottom of this
+    // function would otherwise catch the same shapes under "no element-wise
+    // runtime dispatch".
+    assertComparableAggregate(kind, args);
+    assertNoMixedStringOrdering(kind, args);
+  }
   // SCALAR operands still lower normally. This handler is also reached from
   // INSIDE the `_SYS.bcast` closure that `BaseCompiler.tryCompileBroadcast`
   // emits for a provable array operand (`Not([True, False])` becomes
@@ -1473,7 +1573,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // The tolerance test below is numeric, so a string needle (or a provably
     // string ELEMENT type) makes every comparison `NaN <= tol` → 0 ("absent")
     // behind a `success: true`. Only PROVABLE string evidence gates: an
-    // unknown element type stays on the numeric path.
+    // unknown element type stays on the numeric path. An AGGREGATE needle is
+    // as invisible to it: `IndexOf([[1,2],[3,4]], Tuple(3,4))` ran to 0 where
+    // the interpreter answers 2.
+    assertComparableAggregate('IndexOf', [args[1]]);
     assertNoStringOperand('IndexOf', [args[1]]);
     const elt = collectionElementType(jsType(args[0]));
     if (elt !== undefined && elt !== 'never' && isSubtype(elt, 'string'))
@@ -5097,8 +5200,19 @@ function compileToTarget(
     // The lambda BODY is the bindable region here (the root region holds only
     // the `Function` node itself), pushed under the lambda's own target so any
     // temporaries land inside the emitted arrow function.
-    const body = BaseCompiler.compileCseRoot(expr, target, 0, () =>
-      BaseCompiler.compileOp(expr, 0, lambdaTarget, 0, args[0].canonical)
+    //
+    // Compile under the literal's enforced-parameter frame, exactly like the
+    // emitted-definition route (`emitFunctionLiteralDefinition`): a
+    // destructuring assign onto an ANNOTATED parameter must fail closed here
+    // too — without the frame, `(x: integer, y: integer) ↦ do { (x, y) :=
+    // (7, 4.5); … }` compiled and wrote both leaves where the interpreter
+    // atomically declines.
+    const body = BaseCompiler.withEnforcedParams(
+      expr as Expression & FunctionInterface,
+      () =>
+        BaseCompiler.compileCseRoot(expr, target, 0, () =>
+          BaseCompiler.compileOp(expr, 0, lambdaTarget, 0, args[0].canonical)
+        )
     );
     // A lambda body may call user-defined functions (`t ↦ f(t)`); emit their
     // definitions as a preamble inside the lambda's own body.

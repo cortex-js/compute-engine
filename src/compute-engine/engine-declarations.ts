@@ -56,6 +56,7 @@ import type {
   AssignValue,
   Expression,
   BoxedDefinition,
+  BoxedValueDefinition,
   DefinitionSearchResult,
   SymbolDefinition,
   IComputeEngine,
@@ -1816,8 +1817,12 @@ export function assignFn(
       ce._declareSymbolValue(id, { value });
       return ce;
     }
-    if (def.value.isConstant)
-      throw Error(`Cannot assign a value to the constant "${id}"`);
+    // The two rejections this install makes on sight of the existing
+    // definition and the new value — a constant target, a value that does not
+    // fit a DECLARED type — live in `assertAssignableValueDef` so the `Assign`
+    // operator's destructuring route can ask the same question WITHOUT writing
+    // (see `assertAssignable`).
+    assertAssignableValueDef(ce, id, def.value, value);
 
     // We have a value definition, update the inferred type...
     if (def.value.inferredType) {
@@ -1833,28 +1838,6 @@ export function assignFn(
       def.value.type = ce.type(
         typeof widened === 'object' && widened.kind === 'union' ? vt : widened
       );
-    } else if (!def.value.type.isUnknown) {
-      // ... or, when the type was DECLARED (not on the inferred track), hold
-      // the assigned value to it — the same per-axis check the
-      // declare-with-value route applies in the `_BoxedValueDefinition`
-      // constructor. Without it a declared type was a contract only at
-      // declaration time: `ce.declare('p', 'point')` followed by an assignment
-      // of a merely structurally-similar value silently installed a value the
-      // `Declare(p, "point", …)` spelling rejects. `matchesDeclaredTypeAxes`
-      // (rather than a bare `matches()`) keeps the effects axis judged by its
-      // own provenance, so a `{scope}`-inferred closure still fits a
-      // bare-specifier declared arrow.
-      if (
-        !matchesDeclaredTypeAxes(
-          ce,
-          value.type,
-          def.value.type,
-          def.value.effectsDeclared,
-          value,
-          id
-        )
-      )
-        throw declaredTypeError(id, value, def.value.type);
     }
 
     // ... and set the value
@@ -1884,6 +1867,92 @@ export function assignFn(
   }
 
   return ce;
+}
+
+/**
+ * The rejections the value-install branch of {@link assignFn} makes on sight of
+ * an existing value definition and the value being written: a `const` target,
+ * and a value that does not fit a DECLARED (non-inferred) type.
+ *
+ * Factored out of that branch — which is its only caller on the write path — so
+ * {@link assertAssignable} can ask the same question without writing anything.
+ * Both routes therefore raise the identical error: same class, same message,
+ * same blamed name.
+ */
+function assertAssignableValueDef(
+  ce: IComputeEngine,
+  id: string,
+  def: BoxedValueDefinition,
+  value: Expression
+): void {
+  if (def.isConstant)
+    throw Error(`Cannot assign a value to the constant "${id}"`);
+
+  // An INFERRED type widens to cover the value (see the caller): nothing to
+  // reject. When the type was DECLARED, hold the assigned value to it — the
+  // same per-axis check the declare-with-value route applies in the
+  // `_BoxedValueDefinition` constructor. Without it a declared type was a
+  // contract only at declaration time: `ce.declare('p', 'point')` followed by
+  // an assignment of a merely structurally-similar value silently installed a
+  // value the `Declare(p, "point", …)` spelling rejects.
+  // `matchesDeclaredTypeAxes` (rather than a bare `matches()`) keeps the
+  // effects axis judged by its own provenance, so a `{scope}`-inferred closure
+  // still fits a bare-specifier declared arrow.
+  if (def.inferredType || def.type.isUnknown) return;
+  if (
+    !matchesDeclaredTypeAxes(
+      ce,
+      value.type,
+      def.type,
+      def.effectsDeclared,
+      value,
+      id
+    )
+  )
+    throw declaredTypeError(id, value, def.type);
+}
+
+/**
+ * Would `ce.assign(id, value)` be rejected? Answered WITHOUT writing anything,
+ * so the `Assign` operator's destructuring route can validate every leaf of a
+ * pattern before it writes the first one (`(a, b) := (1, 2.5)` with `b:integer`
+ * must leave `a` alone). Throws exactly what the write would throw — the shared
+ * {@link assertAssignableValueDef} is the single source of the verdict, so the
+ * two cannot drift.
+ *
+ * Silent — the assignment is left to be attempted — for the cases whose
+ * verdict is only reached by running the install machinery. Each is a
+ * documented residual, mirroring the destructuring `let`'s pre-pass:
+ * - a name with NO prior definition (the assignment creates one; there is
+ *   nothing yet to conflict with);
+ * - an OPERATOR-slot target: the minted-constructor guard, the
+ *   declared-signature reconciliation and the builtin-shadowing choice all
+ *   live inside the install;
+ * - a value that installs as an operator DEFINITION rather than a value (a
+ *   `Function` literal, a wildcard-bearing body): function-literal
+ *   reconciliation and the effect-contract check happen there;
+ * - a target carrying a DECLARED function signature: the assigned value is
+ *   RECONCILED against it first (and `canonicalFunctionLiteral` lifts a
+ *   non-literal, so this covers a scalar too), so judging it here could reject
+ *   a value the install accepts.
+ */
+export function assertAssignable(
+  ce: IComputeEngine,
+  id: string,
+  value: Expression
+): void {
+  if (id === 'Nothing') return; // `assignFn` no-ops on it
+  const def = ce.lookupDefinition(id);
+  if (def === undefined || !isValueDef(def)) return;
+  const v = assignValueAsValue(ce, value);
+  if (v === undefined) return;
+  if (
+    !def.value.isConstant &&
+    !def.value.inferredType &&
+    hasFunctionSignature(def.value.type.type)
+  )
+    return;
+  assertAssignableValueDef(ce, id, def.value, v);
 }
 
 function assignValueAsValue(
