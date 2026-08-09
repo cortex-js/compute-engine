@@ -410,6 +410,43 @@
 
 ### Resolved Issues
 
+- **Membership queries on derived collections no longer answer a definite
+  `False` when the underlying membership is undecidable.** Nine collection
+  `contains` handlers (`Filter`, `Join`, `Append`, `Reverse`, `RotateLeft`,
+  `RotateRight`, `Cycle`, `CartesianProduct`, `PowerSet`) collapsed an
+  undecided sub-query into `false` — so `Element((1, x), {1, 2} × ys)` with
+  `ys` a symbolic set evaluated to `"False"` instead of staying symbolic.
+  All nine are now three-valued: a definite refutation still answers
+  `False` immediately, and only a genuinely undecidable membership is left
+  undecided. In the same pass, a `Filter` whose predicate returns a
+  non-boolean now reports the malformed predicate from a membership query
+  exactly as it does from iteration, counting, and emptiness — it was the
+  one silent facet.
+
+- **An element that fails a callback's declared parameter type is now loud
+  everywhere.** Previously it could surface as a nonsensical
+  `Filter predicate must return "True" or "False". Unknown symbol …`
+  message (which spell-checked the lambda's own parameter), be silently
+  swallowed by `TakeWhile`/`DropWhile` (an Error treated as an ordinary
+  "stop"), or be laundered into `NaN` by a fused `Map` pipeline doing
+  arithmetic on the Error value. All three paths now surface the element's
+  own `incompatible-type` error: stream operators emit it in the element's
+  place, scalar operators (`CountIf`, `Find`, `Position`, `IndexWhere`,
+  `Partition`) return it as their result, and fused pipelines propagate it
+  exactly like the unfused evaluator.
+
+- **Compiled collection callbacks no longer ignore parameter type
+  annotations.** On both the JavaScript and Python targets, a callback such
+  as `(n: integer) |-> n > 0` compiled to a plain function with the
+  annotation dropped, so compiled `Filter`/`Map`/`TakeWhile`/… could
+  silently produce different values than the interpreter on elements that
+  violate the annotation. Compilation now admits an annotated callback only
+  when the collection's element type provably satisfies the annotation —
+  the same rule the evaluator's fast paths use — and declines to compile
+  otherwise, so the interpreter's per-element errors are preserved. Applies
+  to inline and named callbacks across all collection operators, including
+  `Reduce`/`Scan` and `Tabulate`/`Fill`.
+
 - **An ordering such as `j <= Length(cs)` no longer declines to compile when
   the same local is also used as an index (`cs[j]`).** `At`'s index slot is
   typed `boolean | indexed_collection | number | string` (a gather index may
