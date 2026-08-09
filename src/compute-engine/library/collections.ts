@@ -238,6 +238,8 @@ const LENGTH_SIGNATURE = parseType('(any) -> integer');
 const COUNT_SIGNATURE = parseType('(collection, any?) -> integer');
 const ISEMPTY_SIGNATURE = parseType('(collection) -> boolean');
 const CONTAINS_SIGNATURE = parseType('(collection, element: any) -> boolean');
+const JOIN_SIGNATURE = parseType('(collection*) -> collection');
+const APPEND_SIGNATURE = parseType('(collection, value+) -> collection');
 
 // Validate the collection operand of a LAZY collection operator's canonical
 // handler — like `checkType(engine, op, type)` but fail-open: an operand whose
@@ -3384,6 +3386,35 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     ],
     complexity: 8200,
     signature: '(collection*) -> collection',
+    // Same-head flatten: `Join(Join(…inner), …outer)` → `Join(…inner, …outer)`
+    // (Change 2 of `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`).
+    // Exact by construction — the head is unchanged, so every operand keeps
+    // the position semantics it had (an inner `Join` is a collection operand
+    // being spliced; its own tuple operands stay atomic after the splice).
+    // See the `Append` handler below for the validation-ordering guard and for
+    // why there are NO cross-head (`Join`/`Append`) rewrites.
+    canonical: (ops, { engine: ce }) => {
+      // Run the framework's default flatten step (Sequence-splice + Nothing-
+      // drop) that this custom canonical handler would otherwise short-circuit.
+      ops = flatten(ops);
+      const args =
+        validateArguments(ce, ops, JOIN_SIGNATURE, false, false) ?? ops;
+      if (args.some((x) => !x.isValid)) return ce._fn('Join', args);
+
+      const source = args[0];
+      if (
+        source !== undefined &&
+        isFunction(source, 'Join') &&
+        source.isCanonical &&
+        // Defensive: a `Join` never types as a tuple (`joinResultType` returns
+        // a list/set/record/dictionary), but an atomic operand must never be
+        // spliced.
+        !isAtomicJoinOperand(source)
+      )
+        return ce._fn('Join', [...source.ops, ...args.slice(1)]);
+
+      return ce._fn('Join', args);
+    },
     type: joinResultType,
     collection: {
       isLazy: (_expr) => true,
@@ -3468,15 +3499,55 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
   },
 
-  // Mathematica `Append[collection, element]`: the collection with `element`
-  // added at the end. Lazy, like `Join` — it wraps its source rather than
-  // materializing, so appending to an infinite collection stays inert until
-  // forced. `element` is the second operand (not itself a collection).
+  // Mathematica `Append[collection, element]`: the collection with the trailing
+  // elements added at the end. Lazy, like `Join` — it wraps its source rather
+  // than materializing, so appending to an infinite collection stays inert
+  // until forced.
+  //
+  // VARIADIC (`docs/plans/2026-08-09-lazy-collection-evaluate-design.md`,
+  // Change 2 v3.1): `Append(c, v₁, …, vₖ)` appends each trailing operand as ONE
+  // element, in order. The binary MathJSON form `["Append", c, v]` is the k = 1
+  // case, so this is fully backward compatible. `value+`, not `scalar+`: an
+  // appended value is atomic whatever it is — a row appended to a matrix
+  // (`Append([[1,2],[3,4]], [5,6])` → 3 rows) and a point appended to a point
+  // list (`Append([(1,2)], (3,4))` → 2 points) are load-bearing behaviors.
   Append: {
-    description: ['Add an element to the end of a collection.'],
+    description: ['Add one or more elements to the end of a collection.'],
     complexity: 8200,
-    signature: '(collection, value) -> collection',
-    type: (ops) => joinResultType([ops[0]]),
+    signature: '(collection, value+) -> collection',
+    // Same-head flatten: `Append(Append(c, …vs), …ws)` → `Append(c, …vs, …ws)`,
+    // so an accumulator loop (`xs = Append(xs, v)`) builds a node of bounded
+    // DEPTH — every structural walker (serialization, hashing, `isSame`,
+    // `count`, type computation) then stays out of deep recursion.
+    //
+    // Same-head ONLY. The `Join`/`Append` cross-head rewrites of the v3 draft
+    // were refuted and must not be reintroduced: `Append` ENUMERATES a tuple
+    // source while `Join` holds a tuple operand ATOMIC (`Append((1,2),3)` has
+    // 3 elements, `Join((1,2),[3])` has 2), and a list-wrapper splice erases
+    // the `Nothing` marker that `Append`'s validation would flag.
+    //
+    // Validation ordering: the rewrite runs AFTER the framework's flatten and
+    // signature validation, so an operand that would fail validation (a
+    // `Nothing`/missing value, a non-collection source, an error marker)
+    // declines the rewrite and keeps today's error result on every route.
+    canonical: (ops, { engine: ce }) => {
+      // Run the framework's default flatten step (Sequence-splice + Nothing-
+      // drop) that this custom canonical handler would otherwise short-circuit.
+      ops = flatten(ops);
+      const args =
+        validateArguments(ce, ops, APPEND_SIGNATURE, false, false) ?? ops;
+      if (args.length < 2 || args.some((x) => !x.isValid))
+        return ce._fn('Append', args);
+
+      const source = args[0];
+      // The operands are already canonical, so an inner `Append` has itself
+      // been flattened: one level of splicing keeps the chain at depth 1.
+      if (isFunction(source, 'Append') && source.isCanonical && source.nops >= 2)
+        return ce._fn('Append', [...source.ops, ...args.slice(1)]);
+
+      return ce._fn('Append', args);
+    },
+    type: appendResultType,
     collection: {
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -3484,31 +3555,42 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const count = expr.op1.count;
         if (count === undefined) return undefined;
         if (!Number.isFinite(count)) return Infinity;
-        return count + 1;
+        return count + expr.nops - 1;
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
         return expr.op1.isFiniteCollection;
       },
-      isEmpty: (_expr) => false, // always contains at least the appended element
+      // With at least one appended value the result is never empty. The 1-ary
+      // identity form (`Append(c)`, valid in non-strict mode) has exactly the
+      // source's elements, so delegate — as `count`/`isFinite` do — rather
+      // than claiming non-empty for an empty source.
+      isEmpty: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.nops >= 2) return false;
+        return expr.op1?.isEmptyCollection;
+      },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
-        return expr.op1.contains(target) || expr.op2.isSame(target);
+        return (
+          expr.op1.contains(target) ||
+          expr.ops.slice(1).some((op) => op.isSame(target))
+        );
       },
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         const source = expr.op1.each();
-        let appended = false;
+        // Index into the trailing (appended) operands, yielded one at a time
+        // once the source is exhausted.
+        let appended = 1;
         return {
           next: () => {
             const { value, done } = source.next();
             if (!done) return { value, done: false };
-            // Source exhausted: yield the appended element once, then stop.
-            if (!appended) {
-              appended = true;
-              return { value: expr.op2, done: false };
-            }
+            // Source exhausted: yield each appended element once, in order.
+            if (appended < expr.nops)
+              return { value: expr.ops[appended++], done: false };
             return { value: undefined, done: true };
           },
         };
@@ -3520,12 +3602,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (typeof index !== 'number' || !isFunction(expr)) return undefined;
         const count = expr.op1.count;
         if (count === undefined || !Number.isFinite(count)) return undefined;
-        const total = count + 1;
+        const total = count + expr.nops - 1;
         // A negative index counts from the end of the appended collection.
         if (index < 0) index = total + index + 1;
         if (index < 1) return undefined;
         if (index <= count) return expr.op1.at(index);
-        if (index === total) return expr.op2;
+        if (index <= total) return expr.ops[index - count];
         return undefined;
       },
     },
@@ -4624,11 +4706,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      // One `op1.count` per level, threaded into the position guard — see
+      // `insertPositionOf`.
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (insertPosition(expr) === undefined) return undefined;
         const n = expr.op1.count;
-        if (n === undefined) return undefined;
+        if (n === undefined || insertPositionOf(expr, n) === undefined)
+          return undefined;
         return Number.isFinite(n) ? n + 1 : Infinity;
       },
       // A valid Insert always contains at least the inserted value.
@@ -4636,8 +4720,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         insertPosition(expr) === undefined ? undefined : false,
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (insertPosition(expr) === undefined) return undefined;
-        return expr.op1.isFiniteCollection;
+        const n = expr.op1.count;
+        if (n === undefined || insertPositionOf(expr, n) === undefined)
+          return undefined;
+        return Number.isFinite(n);
       },
       at: (
         expr: Expression,
@@ -4719,24 +4805,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      // One `op1.count` per level, threaded into the position guard — see
+      // `targetPositionOf`.
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (targetPosition(expr) === undefined) return undefined;
         const n = expr.op1.count;
-        if (n === undefined) return undefined;
+        if (n === undefined || targetPositionOf(expr, n) === undefined)
+          return undefined;
         return Number.isFinite(n) ? n - 1 : Infinity;
       },
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (targetPosition(expr) === undefined) return undefined;
         const n = expr.op1.count;
-        if (n === undefined) return undefined;
+        if (n === undefined || targetPositionOf(expr, n) === undefined)
+          return undefined;
         return Number.isFinite(n) ? n - 1 <= 0 : false;
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (targetPosition(expr) === undefined) return undefined;
-        return expr.op1.isFiniteCollection;
+        const n = expr.op1.count;
+        if (n === undefined || targetPositionOf(expr, n) === undefined)
+          return undefined;
+        return Number.isFinite(n);
       },
       at: (
         expr: Expression,
@@ -4808,22 +4898,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     collection: {
       isLazy: (_expr) => true,
+      // One `op1.count` per level, threaded into the position guard — see
+      // `targetPositionOf`.
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (targetPosition(expr) === undefined) return undefined;
-        return expr.op1.count;
+        const n = expr.op1.count;
+        if (n === undefined || targetPositionOf(expr, n) === undefined)
+          return undefined;
+        return n;
       },
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (targetPosition(expr) === undefined) return undefined;
         const n = expr.op1.count;
-        if (n === undefined) return undefined;
+        if (n === undefined || targetPositionOf(expr, n) === undefined)
+          return undefined;
         return Number.isFinite(n) ? n <= 0 : false;
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (targetPosition(expr) === undefined) return undefined;
-        return expr.op1.isFiniteCollection;
+        const n = expr.op1.count;
+        if (targetPositionOf(expr, n) === undefined) return undefined;
+        return Number.isFinite(n!);
       },
       at: (
         expr: Expression,
@@ -6593,6 +6688,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 // eager path.
 //
 
+// ONE source walk per level — why the `…Of` variants below exist.
+//
+// `insertPosition`/`targetPosition` need the source length for their range
+// check, and every `count`/`isEmpty`/`isFinite` caller needs it (or the
+// source's finiteness) immediately afterwards. Reading `expr.op1.count` a
+// SECOND time is free on a materialized list and catastrophic on a CHAINED
+// view: past `MAX_SIZE_EAGER_COLLECTION` the `evaluate` handlers decline and
+// `Insert(Insert(…))` stays symbolic, so each level's shape query ran the
+// whole source walk twice — cost(d) = 2·cost(d−1), i.e. 2^depth (measured:
+// `.count` on a depth-16 chain over a 110-element base took 7.8 ms, doubling
+// per level, and a 40-iteration accumulator loop took 214 s). Threading the
+// already-computed length through the `…Of` variants makes each level pay
+// exactly one source walk: O(depth).
+//
+// This is the "fix the compounding queries directly" half of the
+// conditional-handler over-threshold follow-up in
+// `docs/plans/2026-08-09-lazy-collection-evaluate-design.md` ("Affected
+// operator set"). The facets above consequently derive the source's
+// FINITENESS from the same `n` (`Number.isFinite(n)`) instead of asking
+// `op1.isFiniteCollection` — a second recursive walk that would restore the
+// doubling. The two agree wherever `n` is defined, which is exactly where the
+// position guard lets the facet answer at all.
+//
+
 /**
  * `Insert`: the 1-based position in the RESULT at which the value lands
  * (`gap + 1`, mirroring the eager arithmetic — a positive index ranges over
@@ -6601,8 +6720,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
  */
 function insertPosition(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
-  const n = expr.op1.count;
-  if (n === undefined) return undefined;
+  return insertPositionOf(expr, expr.op1.count);
+}
+
+/** {@link insertPosition} against an already-computed source length. */
+function insertPositionOf(
+  expr: Expression,
+  n: number | undefined
+): number | undefined {
+  if (n === undefined || !isFunction(expr)) return undefined;
   const index = toIntegerOperand(expr.op2);
   if (index === null || index === 0) return undefined;
   if (index > 0) {
@@ -6623,8 +6749,15 @@ function insertPosition(expr: Expression): number | undefined {
  */
 function targetPosition(expr: Expression): number | undefined {
   if (!isFunction(expr)) return undefined;
-  const n = expr.op1.count;
-  if (n === undefined) return undefined;
+  return targetPositionOf(expr, expr.op1.count);
+}
+
+/** {@link targetPosition} against an already-computed source length. */
+function targetPositionOf(
+  expr: Expression,
+  n: number | undefined
+): number | undefined {
+  if (n === undefined || !isFunction(expr)) return undefined;
   const index = toIntegerOperand(expr.op2);
   if (index === null || index === 0) return undefined;
   if (index > 0) {
@@ -7249,6 +7382,42 @@ function joinResultType(ops: ReadonlyArray<Expression>): Type {
   }
   if (eltTypes.length === 0) return 'list';
   return { kind: 'list', elements: widen(...eltTypes) };
+}
+
+/**
+ * The result type of a variadic `Append(c, v₁, …, vₖ)`.
+ *
+ * The source contributes its ELEMENT type; each trailing operand contributes
+ * its OWN type, because it becomes one element
+ * (`docs/plans/2026-08-09-lazy-collection-evaluate-design.md`, Q2.1). The
+ * binary handler used to be `joinResultType([ops[0]])`, which ignored the
+ * appended value's type entirely — so `Append([1,2], "x")` claimed
+ * `list<finite_integer>`. Folding the trailing types in fixes that, and makes
+ * the flattened form agree with the nested one it replaces.
+ *
+ * The source contribution is computed HERE rather than deferred to
+ * `joinResultType`, because that function applies `isAtomicJoinOperand`: a
+ * tuple operand of `Join` is one element, but `Append` ENUMERATES its source
+ * (`Append((1,2), 3)` has elements 1, 2, 3), so a tuple SOURCE must contribute
+ * the union of its member types, not `tuple<…>`. A trailing tuple is still
+ * atomic, so `Append([(1,2)], (3,4))` keeps `tuple<…>` as its element type.
+ */
+function appendResultType(ops: ReadonlyArray<Expression>): Type {
+  if (ops.length === 0) return 'list';
+  const source = ops[0].type.type;
+  // A record/dictionary/set source: nothing to narrow, keep today's answer.
+  if (ops[0].type.matches('record')) return 'record';
+  if (ops[0].type.matches('dictionary')) return 'dictionary';
+  if (ops[0].type.matches('set')) return 'set';
+  // A source whose element type is unknown: fall back to the bare `list`
+  // rather than narrowing to something the value may not satisfy.
+  const elements = collectionElementType(source);
+  if (elements === undefined) return 'list';
+  if (ops.length === 1) return { kind: 'list', elements };
+  return {
+    kind: 'list',
+    elements: widen(elements, ...ops.slice(1).map((op) => op.type.type)),
+  };
 }
 
 function defaultCollectionEq(a: Expression, b: Expression) {

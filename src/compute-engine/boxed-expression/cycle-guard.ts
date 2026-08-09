@@ -82,6 +82,25 @@ export const CycleQuery = {
 const _active = new Map<object, number>();
 
 /**
+ * How many guarded queries have failed closed (returned `CYCLE_DETECTED`)
+ * over the life of the process. Monotonic; only ever compared before and
+ * after a computation, to answer "did this computation consume a cycle edge?".
+ *
+ * A fail-closed answer is PROVISIONAL: it is the guard's "cannot determine"
+ * value, not the value the query settles on once the enclosing frame unwinds
+ * — the same query run outside the window can legitimately answer something
+ * else. A caller that memoizes its result must therefore not freeze a
+ * computation that consumed one (see the lazy-collection evaluate memo in
+ * `boxed-function.ts`).
+ */
+let _cycleDetections = 0;
+
+/** See {@link _cycleDetections}. */
+export function cycleDetectionCount(): number {
+  return _cycleDetections;
+}
+
+/**
  * Begin a guarded query of kind `kind` on `key` (the binding's definition).
  *
  * Returns `CYCLE_DETECTED` (a negative value) if a query of the same kind on
@@ -94,7 +113,10 @@ const _active = new Map<object, number>();
  */
 export function enterCycleQuery(key: object, kind: number): number {
   const flags = _active.get(key) ?? 0;
-  if ((flags & kind) !== 0) return CYCLE_DETECTED;
+  if ((flags & kind) !== 0) {
+    _cycleDetections += 1;
+    return CYCLE_DETECTED;
+  }
   _active.set(key, flags | kind);
   return flags;
 }
@@ -138,7 +160,10 @@ const _depths: Map<object, number>[] = [new Map()];
 export function enterCycleDepthQuery(key: object, kind: number): number {
   const depths = _depths[kind];
   const depth = depths.get(key) ?? 0;
-  if (depth >= MAX_CYCLE_DEPTH) return CYCLE_DETECTED;
+  if (depth >= MAX_CYCLE_DEPTH) {
+    _cycleDetections += 1;
+    return CYCLE_DETECTED;
+  }
   depths.set(key, depth + 1);
   return depth;
 }

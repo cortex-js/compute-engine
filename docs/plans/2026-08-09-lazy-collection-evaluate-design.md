@@ -1,6 +1,9 @@
 # Lazy Collection Evaluation — Depth, Not Size
 
-**Status**: DRAFT v3.1 (2026-08-09). Proposal; nothing implemented.
+**Status**: v3.2 (2026-08-09) — **Changes 1 and 2 IMPLEMENTED**; see
+"Implementation record" at the end for measured results, the three spec
+refinements made during implementation, and the open follow-ups. The
+body below is the reviewed spec, kept as ratified.
 v3.1 (author's amendment): Change 2 redesigned around a **variadic
 `Append`** — `(collection, value+) -> collection` — replacing v3's
 one-element-list wrappers; same-head flattening only, dropping the four
@@ -424,3 +427,173 @@ same hazard class.
    guard~~ (**shipped** — see "Adjacent bug"); the over-threshold
    `Insert`/`DeleteAt`/`ReplaceAt`/`ChunkBy` blowup (blocks
    `SetAt`-sugar loops past 100 elements); async parity.
+
+## Implementation record (2026-08-09, v3.2)
+
+Both changes landed the same day, implemented in parallel (Change 1 in
+`boxed-expression/boxed-function.ts` + `cycle-guard.ts`; Change 2 in
+`library/collections.ts` + both compile targets), each verified by a
+negative control (change disabled → its tests fail: 22/33 and 25/47).
+
+### Measured results
+
+M2 accumulator (`xs = Append(xs, i)`, evaluate+Assign per iteration,
+`npx tsx` on source):
+
+| n | before | after (both changes) |
+|---|---|---|
+| 100 | 150.7 ms | 13.4 ms |
+| 400 | 5352 ms | **42.4 ms** (≈126×) |
+| 1600 | — | 387.8 ms |
+
+Scaling 100→400 = 3.2×, 400→1600 = 9.1× (quadratic signature ≈16×) —
+**acceptance budget met** (sub-quadratic; combined n=400 is 1.12× the
+Change-1-only 37.7 ms). The chain canonicalizes to one node
+(`nops = 1601` at n=1600 — depth 1). M1 guard: warmed lazy-`Join`
+`at(mid)` at |a|=|b|=100 000 is 0.008–0.011 ms — no regression.
+Full-suite snapshot blast radius: **zero changed snapshots** (see suite
+counts in the session record; nothing `-u`'d).
+
+### Spec refinements made during implementation (all reviewed-in)
+
+1. **Priming is restricted to the generation-independent (constant+pure)
+   key.** Priming a generation-keyed `R` was observably wrong: in
+   `xs := Append(xs, 1)` the Assign's RHS produces an `R` that the
+   binding write then makes self-referential; priming froze `R ↦ R` and
+   changed `node.evaluate()` output vs baseline. The accumulator's `R`
+   is always constant+pure, so nothing of the O(n) result is lost.
+2. **The settled-gate consumes a second provisional channel**: the
+   symbol-binding cycle guard's fail-closed answers are as provisional
+   as the memo's own in-flight marker, and route-dependent
+   (`Append(xs,1)` self-referential answers differ evaluated directly
+   vs through the symbol). `cycle-guard.ts` now exposes a monotone
+   `cycleDetectionCount()`; a computation that observed a bump memoizes
+   neither direction. This is the spec's "settled without consuming a
+   provisional edge", made concrete.
+3. **Change 2 required compile-target fixes** the plan missed: both the
+   JS and Python `Append` lowerings read only `args[1]` and would have
+   silently dropped values 2..k of a flattened variadic node. Fixed in
+   both targets (`[...(c), v₁, v₂]` / `[*c, v₁, v₂]`).
+
+### Post-review hardening (same day, dual staged-diff review)
+
+A dual adversarial review of the staged implementation found and fixed:
+
+4. **The "generation-independent" key gained a `_semanticEpoch` axis.**
+   The constant+pure entry as first implemented was invalidated by
+   nothing — but `ce.precision`/`ce.angularUnit` run `_reset()`
+   precisely because stored numeric content goes stale (verified: a
+   memoized `N(1/3)` kept 20 digits after `precision = 60`). Both entry
+   kinds and the priming write now stamp and check `ce._semanticEpoch`
+   (bumped by `_reset()`, assume/forget, redefinition — never by value
+   writes, so the accumulator's O(n) is untouched).
+5. **The generation-gated key gained an ambient-scope identity axis.**
+   Re-pushing an already-populated scope bumps no counter, so a
+   top-level-memoized `Append(xs, 9)` served the outer `xs` inside the
+   re-entered scope (verified, order-dependent results). The gated entry
+   now also requires the fill-time `lexicalScope` object identity; no
+   global per-push generation bump (which would cold-start every
+   generation cache — scoped operators push per evaluation).
+6. **Retention: infinite `elementMemo` views are not memoized**
+   (`Iterate` — the memo would pin its ever-growing element cache for
+   the source node's lifetime).
+7. Smaller: 1-ary non-strict `Append` now reports `isEmpty` from its
+   source (was a `count === 0`/`isEmpty === false` contradiction, both
+   reviewers); compile targets emit the identity for it instead of
+   falling back; `appendResultType` no longer types tuple SOURCES
+   atomically (`Append((1,2), 3)` now `list<finite_integer>` — the
+   "source-side sharpening" follow-up below, done); the wall-clock
+   ratio test was dropped as CI-flaky (the deterministic identity test
+   pins the mechanism; perf ownership → `benchmarks/`).
+
+### Inventory as pinned (supersedes the doc's regex-derived counts)
+
+`test/compute-engine/lazy-collection-regimes.test.ts` derives regimes
+from the runtime definitions (47 operators with collection handlers):
+
+- **Change-1 set: 19** — the 16 listed plus `Permutations` and
+  `Combinations` (`library/combinatorics.ts`, genuinely memoized) and
+  `Tuple` (its `isLazy` answers `false` for every instance — membership
+  inert, pinned as such).
+- **def-lazy: 13** — the 9 listed plus `Comprehension`, `When`, `List`,
+  `Set` (`Interval` has the `lazy` flag but no `isLazy` handler).
+- **conditional-handler: 7** — the 4 listed plus `Partition`, `Repeat`,
+  `SlidingWindow` (same `MAX_SIZE_EAGER_COLLECTION` shape, same
+  exclusion by construction).
+
+### Q1.3 answered; the residual is elsewhere
+
+Per-iteration cost still grows slowly (58 → 225 µs from n=100 to
+n=1600). Measured: the memo key computation is NOT the driver (constant
+key: 40.3 → 37.9 ms at n=400), and removing `.evaluate()` makes the
+loop linear — the residual O(depth-ish) cost is in `ce.function`
+canonicalization (`getReferences`/`getSymbols`/binder rewriting) and
+`ce.assign`'s symbol scan. Follow-up territory (assign/canonicalization),
+not a defect of either change.
+
+### Behavior deltas to ratify (Change 2, both pinned in tests)
+
+1. `Append(c, Sequence(v₁, v₂))` — was an `unexpected-argument` error,
+   now splices to a valid 3-ary `Append`. Unavoidable with a `value+`
+   arity: the framework splices `Sequence` before any handler runs.
+2. Non-strict mode: `Append([1,2])` was padded with an `Error` operand
+   (count 3); with the rest-arg signature it stays 1-ary (count 2,
+   identity). Arguably an improvement; previously untested either way.
+
+### Follow-up CLOSED: the conditional-handler over-threshold blowup
+
+The follow-up named in "Affected operator set" and "Sequencing" item 5 —
+`Insert`/`DeleteAt`/`ReplaceAt`/`ChunkBy` (+ `Partition`/`Repeat`/
+`SlidingWindow`) past `MAX_SIZE_EAGER_COLLECTION`, which blocked
+`SetAt`-sugar loops — is **fixed**, on both axes the plan offered
+("either extend the memo … or fix the compounding queries directly").
+Both were needed; each was verified by a negative control.
+
+1. **The compounding queries** were a plain double recursion, not a
+   subtle one: `insertPosition`/`targetPosition` (`library/collections.ts`)
+   read `op1.count` for their index-range guard, and every
+   `count`/`isEmpty`/`isFinite` facet then read it AGAIN — cost(d) =
+   2·cost(d−1) on a chained view, i.e. **2^depth**. Threading the
+   already-computed length through new `insertPositionOf`/
+   `targetPositionOf` variants makes each level pay one source walk;
+   the facets derive finiteness from the same `n` rather than asking
+   `op1.isFiniteCollection` (a second recursive walk that would restore
+   the doubling). Measured on a depth-16 chain over a 110-element base:
+   `.count` 7.8 ms → 0.01 ms, `isFiniteCollection` 7.9 ms → 0.01 ms. At
+   depth 30 a shape query now costs 30–31 source `count` reads (pinned
+   with a read budget in the test, because the doubling is SYNCHRONOUS —
+   a jest timeout can never interrupt it).
+2. **The memo's `evaluate`-handler exclusion is removed**
+   (`_isMemoizableLazyCollection`). Those handlers are deterministic in
+   their operands, so under an unchanged (generation, epoch, scope) key a
+   re-run declines — or materializes — identically; consulting the memo
+   BEFORE the handler runs is therefore sound too, and keeps the diff to
+   one deleted condition. All other gates are unchanged (settled-only,
+   purity, epoch, scope identity, constant+pure vs generation-keyed dual
+   key, elementMemo/non-finite exclusion).
+
+Accumulator (`xs := Insert(xs, 1, i)`, evaluate+`Assign` per iteration,
+`npx tsx` on source): 40 iterations over a 90-element base took
+**213 851 ms** before (≈2× per iteration past 100 elements; the plan's
+round-2 measurement of ≈4× per +2 iterations, confirmed); after, 140
+iterations to a 230-element view take **255 ms** (418 ms with axis 1
+only — axis 2 is a further 1.6×). The regime inventory in
+`test/compute-engine/lazy-collection-regimes.test.ts` keeps all three
+regimes; conditional-handler is still distinct (its handler decides
+between materializing and falling through), it is simply no longer
+excluded from the memo.
+
+Not addressed, deliberately: `evaluate()` on an unevaluated depth-`d`
+chain is still O(d²) (each level runs its own O(d) shape queries) — the
+memo collapses the REPEAT cost to O(1), which is what the accumulator
+needs; a one-shot deep chain is not a measured workload.
+
+### New follow-ups from implementation
+
+- `Append`'s **source-side** type inference reuses
+  `isAtomicJoinOperand`, but an `Append` source is never atomic — fixing
+  it would sharpen `Append(tuple, …)` to `list<element>` instead of a
+  union. Small, worth a ruling.
+- `Join` flatten is position-0 only (per the spec table);
+  `Join(a, Join(b, c))` stays nested. Splicing at any position would
+  also be exact — extend if a real workload produces it.

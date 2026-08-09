@@ -137,6 +137,7 @@ import {
   sgn,
 } from './sgn.js';
 import { cachedValue, CachedValue } from './cache.js';
+import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
 import { isScalarType } from './function-literal.js';
@@ -165,6 +166,13 @@ let _evalTick = 0;
  * on `_effectsOf`. A computation that consumed one must not be frozen into
  * the memo. Monotonic; only ever compared before/after a computation. */
 let _effectsProvisionalReads = 0;
+
+/** The same protocol for the lazy-collection evaluate memo — see
+ * `_memoizedLazyCollectionValue()`. A re-entrant evaluate of a node whose
+ * memo is in flight (a self-referential binding, `xs := Append(xs, 1)`)
+ * bumps this, and neither the re-entrant computation nor the one it is
+ * nested in is frozen into the memo. */
+let _lazyValueProvisionalReads = 0;
 
 /**
  * A boxed function expression represent an expression composed of an operator
@@ -247,6 +255,32 @@ export class BoxedFunction
 
   /** Re-entrancy marker for `_effectsOf` — see the cycle note there. */
   private _effectsInFlight = false;
+
+  /** Re-entrancy marker for the lazy-collection evaluate memo — see
+   * `_memoizedLazyCollectionValue()`. */
+  private _lazyValueInFlight = false;
+
+  /** `ce._semanticEpoch` when the lazy-collection evaluate memo was filled,
+   * checked on EVERY entry (including the generation-independent one): the
+   * rare global events — `assume`/`forget`, operator/type redefinition, and
+   * above all a configuration change (`precision`/`angularUnit` run
+   * `_reset()`) — invalidate stored numeric content that is otherwise
+   * constant. `-1` is "never filled". Deliberately the epoch and not
+   * `_mutationGeneration`: value writes must NOT invalidate, or the
+   * accumulator loop below loses its O(n). Same axis, same reason as the
+   * element memo (`collection-element-memo.ts`). */
+  private _lazyValueEpoch = -1;
+
+  /** The ambient lexical scope a GENERATION-GATED lazy-collection memo entry
+   * was filled under. `ce._generation` alone does not characterize the
+   * resolution environment: re-pushing an already-populated scope bumps
+   * nothing (only `popScope` bumps), yet a non-constant symbol operand
+   * resolves by name through the ambient chain, so the same node means
+   * something else inside that scope. Identity is the right test — the same
+   * scope object re-pushed (a scoped operator re-pushing its `localScope`
+   * every evaluation) has the same bindings, so it correctly hits.
+   * Constant entries resolve nothing and do not consult this. */
+  private _lazyValueScope: Scope | undefined = undefined;
 
   /** The engine generation at which `_type` was last written or confirmed.
    * The cache KEY of `_type` (`undefined` for a pure constant, the generation
@@ -1502,7 +1536,226 @@ export class BoxedFunction
     // deadline (`engine._deadlineFrame`) if one is in effect.
     const canonical = this._canonicalToEvaluate();
     if (canonical) return canonical.evaluate(options);
+    if (this._isMemoizableLazyCollection(options))
+      return this._memoizedLazyCollectionValue(options);
     return this._computeValue(options)();
+  }
+
+  /**
+   * Is this node in the set Change 1 of
+   * `docs/plans/2026-08-09-lazy-collection-evaluate-design.md` memoizes — a
+   * lazy collection VIEW that reaches `_computeValue`'s generic operand walk
+   * (step 4) and rebuilds an equivalent node on every call?
+   *
+   * The conditions are the plan's: canonical, a lazy collection, and the
+   * definition NOT `lazy` (a def-lazy view — `Map`, `Filter`, … — has its
+   * operands held by `holdMap`, so there is no repeat walk to eliminate).
+   *
+   * **The `evaluate`-handler exclusion is gone** (the plan's named follow-up,
+   * "the over-threshold `Insert`/`DeleteAt`/`ReplaceAt`/`ChunkBy` blowup").
+   * The operators it excluded — `Insert`, `DeleteAt`, `ReplaceAt`, `ChunkBy`,
+   * `Partition`, `Repeat`, `SlidingWindow` — have handlers that merely DECLINE
+   * past `MAX_SIZE_EAGER_COLLECTION`, landing on the very step-4 rebuild this
+   * memo exists to stop repeating; an indexed-update loop past 100 elements
+   * was the workload left unfixed. Admitting them is sound under the SAME key,
+   * both when the handler declines and when it accepts: those handlers are
+   * deterministic functions of their (evaluated) operands, so under an
+   * unchanged (generation, epoch, scope) key a re-run would decline — or
+   * materialize — identically, and any change to an operand's VALUE bumps the
+   * generation and misses. That is also why the memo may be consulted BEFORE
+   * the handler runs rather than only on the declined path: same key, same
+   * verdict. (Impurity is excluded separately, by the purity gate in
+   * `_lazyCollectionMemoKey`; a per-instance `isLazy` handler that answers
+   * `false` — 2-ary `Repeat` — never reaches here at all.)
+   *
+   * Being a lazy view with an `evaluate` handler IS the conditional-handler
+   * regime, so no other operator class is swept in; the regime inventory is
+   * pinned in `test/compute-engine/lazy-collection-regimes.test.ts`.
+   *
+   * DEFAULT options only: `materialization` selects step 3 and
+   * `numericApproximation` step 3b, both of which return something other than
+   * the step-4 rebuild. Every non-default combination takes today's path,
+   * untouched and unmemoized.
+   *
+   * One further exclusion, for RETENTION (see the retention contract on
+   * `_memoizedLazyCollectionValue`): an operator with an `elementMemo`
+   * (`Iterate`) whose instance is not a FINITE collection. The memo pins the
+   * evaluated view forever, and that view's element cache grows with the
+   * deepest access ever made — unbounded for an infinite collection, and
+   * never released. Before the memo each `evaluate()` produced a transient
+   * result whose element cache died with it; keeping that property is worth
+   * more than memoizing an infinite view.
+   */
+  private _isMemoizableLazyCollection(
+    options?: Partial<EvaluateOptions>
+  ): boolean {
+    if ((options?.materialization ?? false) !== false) return false;
+    if ((options?.numericApproximation ?? false) !== false) return false;
+    if (!this.isCanonical) return false;
+    const def = this.operatorDefinition;
+    if (!def || def.lazy === true) return false;
+    if (!this.isLazyCollection) return false;
+    if (def.collection?.elementMemo === true && this.isFiniteCollection !== true)
+      return false;
+    return true;
+  }
+
+  /**
+   * The memoized fall-through evaluation of a lazy collection view (Change 1
+   * of `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`). The first
+   * `evaluate()` runs today's walk byte-for-byte — it is load-bearing: it is
+   * what resolves a symbol operand to its value and what performs an
+   * effectful operand's effects. Only the REPEAT walks are eliminated.
+   *
+   * **Dual key, and why the constant one is the whole point.** `Assign` bumps
+   * `ce._generation`, and an accumulator (`xs := Append(xs, v)` in a loop)
+   * assigns every iteration — a memo keyed only on the current generation is
+   * invalidated by the loop's own writes and never hits, leaving the loop
+   * quadratic. So, exactly the split `get type` uses: a node whose operands
+   * are all constant and which is pure gets a generation-INDEPENDENT entry
+   * (`generation: undefined`) — no value write can make it stale; everything
+   * else gets a generation-gated entry, so `Append(xs, y)` still re-resolves
+   * `y` after `y := …`. (`isConstant` on a function IS `ops.every(isConstant)
+   * && isPure`, so the two tests below are that conjunction, spelled to keep
+   * the purity gate explicit.)
+   *
+   * **Two axes the generation does not cover**, stamped alongside it:
+   * - `_lazyValueEpoch` (`ce._semanticEpoch`), checked on BOTH kinds of
+   *   entry. "Constant" means no value write can change it, not that nothing
+   *   can: `ce.precision = …` runs `_reset()` and purges caches precisely
+   *   because stored numeric content is now stale, and `assume`/`forget` and
+   *   redefinitions move meaning the same way. The epoch is deliberately NOT
+   *   bumped by value writes, so the accumulator's O(n) survives.
+   * - `_lazyValueScope` (the ambient lexical scope), checked on the
+   *   generation-gated entry only — the generation does not move when an
+   *   already-populated scope is re-pushed, but the symbol operands of a
+   *   non-constant entry resolve by name through that chain.
+   *
+   * **Retention.** A memo entry pins the evaluated view for the lifetime of
+   * the node — and a lazy view is not a small object: an operator with an
+   * `elementMemo` accumulates a per-instance element cache that grows with
+   * the deepest access ever made. For a finite collection that is bounded by
+   * the collection (and by `ELEMENT_MEMO_CAP`); for an INFINITE one it is
+   * bounded by nothing, so such nodes are excluded from the memo entirely —
+   * see `_isMemoizableLazyCollection`.
+   *
+   * **Purity gate.** An impure node is never memoized: `Append(xs, Random())`
+   * must re-draw on every `evaluate()`.
+   *
+   * **Both directions, one gate.** The result `R` of the walk is a freshly
+   * rebuilt node whose own memo is empty, and in an accumulator iteration
+   * *k*'s `op1` is iteration *k−1*'s RESULT — produced, never evaluated — so
+   * without priming `R`'s memo with `R` itself the loop stays O(n²).
+   * `evaluate` is idempotent there: `R`'s operands are already evaluated.
+   * Both writes share ONE gate — they happen only when the computation
+   * settled without consuming a provisional (re-entrant) edge; a provisional
+   * computation memoizes NEITHER direction, since self-priming a provisional
+   * `R` would freeze a wrong value harder than today's no-cache behavior.
+   *
+   * **NOT the shared `cachedValue()` helper**, for the reason spelled out on
+   * `_effects`: it stamps the generation BEFORE computing, so a re-entrant
+   * read returns the previous generation's value as fresh — and a
+   * self-referential binding (`xs := Append(xs, 1)`) is exactly the shape
+   * that re-enters. Mechanics follow `_effectsOf` instead: in-flight marker,
+   * stamp only AFTER a computation that consumed no provisional edge.
+   */
+  private _memoizedLazyCollectionValue(
+    options?: Partial<EvaluateOptions>
+  ): Expression {
+    // Read first, and without computing the key: whatever is in the slot was
+    // stamped with a key that is correct for it — an entry with no generation
+    // is one that no value write can invalidate, a generation-gated entry is
+    // valid for that generation and that resolution environment only. Both
+    // kinds expire at a semantic epoch change. This keeps the hot path (a
+    // re-read of an already-evaluated constant view) free of the
+    // purity/constancy walk.
+    const generation = this.engine._generation;
+    if (
+      this._value.value !== null &&
+      this._lazyValueEpoch === this.engine._semanticEpoch &&
+      (this._value.generation === undefined ||
+        (this._value.generation === generation &&
+          this._lazyValueScope === this.engine.context?.lexicalScope))
+    )
+      return this._value.value;
+
+    if (this._lazyValueInFlight) {
+      // A re-entrant evaluate of this very node. Take today's uncached path —
+      // unchanged behavior — and mark the pass so neither computation is
+      // frozen.
+      _lazyValueProvisionalReads += 1;
+      return this._computeValue(options)();
+    }
+
+    this._lazyValueInFlight = true;
+    const before = _lazyValueProvisionalReads;
+    const cyclesBefore = cycleDetectionCount();
+    let result: Expression;
+    try {
+      result = this._computeValue(options)();
+    } finally {
+      this._lazyValueInFlight = false;
+    }
+    // The settled-only gate, on BOTH provisional channels: this memo's own
+    // re-entrancy marker, and the symbol-binding cycle guard, whose
+    // fail-closed answers are provisional in exactly the same way. A
+    // self-referential binding (`xs := Append(xs, 1)`) travels the second
+    // one: evaluated through the symbol it answers `[1]` (the inner
+    // dereference fails closed), evaluated directly `[1, 1]` — freezing
+    // either as the node's value would make the answer depend on which
+    // route ran first.
+    if (
+      _lazyValueProvisionalReads !== before ||
+      cycleDetectionCount() !== cyclesBefore
+    )
+      return result;
+
+    const key = this._lazyCollectionMemoKey(generation);
+    if (key !== false) {
+      this._value.generation = key;
+      this._value.value = result;
+      // Sampled AFTER the walk, like the element memo's stamp: a bump the
+      // walk itself caused (signature inference) is absorbed rather than
+      // making the entry born stale.
+      this._lazyValueEpoch = this.engine._semanticEpoch;
+      this._lazyValueScope = this.engine.context?.lexicalScope;
+    }
+
+    // Prime the result's own memo with itself — but only with the
+    // generation-INDEPENDENT key. `R` was produced, never evaluated, so the
+    // priming asserts idempotence rather than observing it; that assertion is
+    // sound exactly when nothing can make `R` stale (its operands are all
+    // constant and it is pure), which is also the only case the accumulator
+    // needs. Priming a generation-keyed `R` would freeze a guess about a node
+    // whose value depends on mutable state — the self-referential binding
+    // `xs := Append(xs, 1)`, whose `R` is a live view of `xs` and does NOT
+    // evaluate to itself.
+    if (result !== this && result instanceof BoxedFunction) {
+      if (
+        result._value.value === null &&
+        result._isMemoizableLazyCollection(options) &&
+        result._lazyCollectionMemoKey(generation) === undefined
+      ) {
+        result._value.generation = undefined;
+        result._value.value = result;
+        // Same epoch axis as the write above; no scope stamp is needed for a
+        // constant entry, which resolves no symbol through the ambient chain.
+        result._lazyValueEpoch = this.engine._semanticEpoch;
+      }
+    }
+
+    return result;
+  }
+
+  /** The memo key of {@link _memoizedLazyCollectionValue}: `undefined` for a
+   * constant, pure node (no value write can make it stale — the epoch axis
+   * still applies), the generation otherwise, or `false` when the node is
+   * impure and must not be memoized at all. */
+  private _lazyCollectionMemoKey(
+    generation: number
+  ): number | undefined | false {
+    if (!this.isPure) return false;
+    return this._ops.every((x) => x.isConstant) ? undefined : generation;
   }
 
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {

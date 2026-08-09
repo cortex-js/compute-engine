@@ -1950,11 +1950,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `((_v, _n) => { _n = Math.round(_n); if (!(Number.isFinite(_n) && _n > 0)) return []; return Array.from({ length: _n }, () => _v); })(${compile(args[0])}, ${compile(args[1]!)})`;
   },
-  // Add one element at the end.
+  // Add one or more elements at the end. `Append` is variadic
+  // (`docs/plans/2026-08-09-lazy-collection-evaluate-design.md`, Change 2):
+  // every trailing operand becomes one element, in order.
   Append: (args, compile) => {
     const coll = collArg('Append', args[0], compile);
-    if (args[1] == null) throw new Error('Append: missing value');
-    return `[...(${coll}), ${compile(args[1])}]`;
+    // No trailing values: the 1-ary identity form (valid in non-strict mode).
+    // Emit the spread with zero appended values rather than throwing, which
+    // would silently fall back to the interpreter.
+    const values = args.slice(1).map((a) => compile(a));
+    return `[...(${coll})${values.map((v) => `, ${v}`).join('')}]`;
   },
   // All but the last element; an empty or singleton collection yields [].
   Most: (args, compile) =>

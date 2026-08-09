@@ -2034,10 +2034,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       .map((a, i) => `*${pyCollArg('Join', a, compile, i + 1)}`)
       .join(', ')}]`;
   },
+  // Variadic, like the interpreter and the JavaScript target
+  // (`docs/plans/2026-08-09-lazy-collection-evaluate-design.md`, Change 2).
   Append: (args, compile) => {
     const coll = pyCollArg('Append', args[0], compile);
-    if (args[1] == null) throw new Error('Append: missing value');
-    return `[*${coll}, ${compile(args[1])}]`;
+    // No trailing values: the 1-ary identity form (valid in non-strict mode).
+    const values = args.slice(1).map((a) => compile(a));
+    return `[*${coll}${values.map((v) => `, ${v}`).join('')}]`;
   },
   // DELIBERATE DIVERGENCE from the JavaScript target, which fails closed on a
   // string (or tuple) needle because its element test is the numeric tolerance
