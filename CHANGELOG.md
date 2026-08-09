@@ -62,6 +62,32 @@
 
 ### New Features
 
+- **Inline callback lambdas now infer their parameter type from the call
+  site.** An unannotated function literal passed directly as an argument is
+  re-derived with its parameter typed, exactly as if you had annotated it by
+  hand, in two situations: when the callee — user-defined functions
+  included — declares a concrete function-typed parameter
+  (`function apply2(f: (number) -> number, x) { f(x) }` types the `n` of
+  `apply2(n |-> n + 1, 3)` as `number`), and when the callback of `Map` or
+  `Filter` is applied to a collection whose element type is a provable
+  **composite** (a tuple or a nested collection). The headline win:
+  point-list predicates now compile without annotation —
+  `Filter(points, pt |-> pt == (0, 0))` with `points: list<tuple<number,
+  number>>` lowers to the same element-wise code as the hand-annotated
+  spelling, and the literal's signature reflects the element type
+  everywhere it is read.
+
+  The inference is per-application and behaves exactly like a hand-written
+  annotation, loud type errors included. It never touches a shared callback
+  (a lambda bound to a name keeps its own typing at every call site), never
+  overrides an explicit annotation, and does not fire for scalar or union
+  element types of `Map`/`Filter` — so scalar pipelines keep the Map-fusion
+  fast path, heterogeneous "errors are values" programs keep their
+  per-element behavior, and the vectorization default for evidence-free
+  lambdas is unchanged. Polymorphic (`forall`) callees are excluded until
+  generic instantiation lands; optional and variadic callback positions are
+  covered.
+
 - **JavaScript target: string equality now compiles.** Scalar
   `Equal`/`NotEqual` with a provably string participant — and no provably
   numeric one — lowers to a strict `===`/`!==`, the interpreter's own string
