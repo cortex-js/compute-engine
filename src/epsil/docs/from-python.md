@@ -82,7 +82,11 @@ let double = x |-> 2x
 | `collections.Counter(xs)` | `Tally(xs)` → a `(values, counts)` pair |
 
 Collections are **immutable values**. There is no in-place mutation: build a
-new collection and rebind the name.
+new collection and rebind the name. The values-are-immutable, bindings-are-not
+model is worth reading once in full — see
+[Values and bindings](/epsil/evaluation/#values-and-bindings) — because it also
+explains why a closure sees a later reassignment and why a function cannot
+modify its caller's variable.
 
 ```epsil
 let counts = DictionaryFrom(Zip(["apples", "figs"], [3, 1]))

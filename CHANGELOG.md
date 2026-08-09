@@ -938,6 +938,24 @@
   (`\mathrm{B}(-1, 2) = \tilde\infty`), the finite negative cases
   (`\mathrm{B}(-2, 2) = 1/2`) and float arguments are unchanged.
 
+- **A collection rebound to a `Map` over itself no longer overflows the
+  stack.** Assigning `xs` the value `Map(xs, f)` — the shape an accumulator
+  loop produces — made any later query throw a raw
+  `RangeError: Maximum call stack size exceeded` out of `evaluate()`, rather
+  than being absorbed as an `Error` value; a host calling `evaluate()`
+  directly saw a hard crash. The self-referential-binding guard was in place
+  and firing (`xs.value` reads `undefined`, as designed), but `Map` is the one
+  lazy collection operator that answers `isFinite`/`isEmpty` from its
+  **source** rather than its own iterator, and that path reached the stored
+  value through `evaluate()` instead of the guarded `value`. Each turn —
+  `isFinite` → source resolution → `evaluate()` → `isFiniteCollection` →
+  `isFinite` — completed its dereference before the next began, so the
+  existing cycle guard, which is released when the dereference returns, never
+  observed the re-entry. Such a source is now left unresolved, putting `Map`
+  on the same symbolic residual that `Filter` and every other lazy operator
+  already produced. Eager and broadcast sources (`Map(X - 1, f)`) still
+  resolve exactly as before.
+
 ## 0.102.0 _2026-08-05_
 
 ### New Features
