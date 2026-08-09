@@ -1,0 +1,35 @@
+
+/// ## Auto-Map
+
+
+1..oo |> Take(_, 10) |> Map(_, _^2) |> Sum
+
+// The following should be equivalent:
+// 1..oo |> Take(10) |> x |-> x^2 |> Sum
+// 1..oo |> Take(10) |> _^2 |> Sum
+
+// Note: 1/ The `Take` operator has an implicit `_` as its first argument, when compatible, 2/ when the rhs of `|>` is a lambda with a shape compatible with `Map(_, ...)` the `Map` is implicit. 3/ In that case the `_` is a marker for an implicit lambda argument (that might be ambiguous...)
+
+
+// $\sum_{i=1}^{10} i^2$
+
+
+
+/// ## Roman Numerals
+
+const n = 2026
+
+
+// @fixme: no `Replace`
+// n |> String(Repeat("I", _)) |> Replace("IIIII", "V") |> Replace("VIIII", "IX") |> Replace("IIII", "IV") |> Replace("VIV", "IX") |> Replace("VV", "X") |> Replace("XXXX", "XL") |> Replace("LXXXX", "XC") |> Replace("LL", "C") |> Replace("CCCC", "CD") |> Replace("DCCCC", "CM") |> Replace("DD", "M")
+
+// RangeOf(s, target)
+
+// StringMatch(s, regex | string) -> none | list<string>
+
+StringJoin(Repeat("I", 4)) 
+// -> should output "IIII", actual: ["I", "I", "I", "I"]
+
+String(Repeat("I", 4)) 
+// -> should output "IIII", actual: ["I", "I", "I", "I"]
+
