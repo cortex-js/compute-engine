@@ -176,8 +176,16 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
 
     // A Typed-annotated parameter of the operand function must still be treated
     // as bound (excluded from freeSymbols), matching the codegen path.
+    // The element type of the mapped source must be PROVABLE and must satisfy
+    // the annotation, or the callback-annotation gate declines the whole shape
+    // (`BaseCompiler.assertCallbackAnnotations`) — the compiled callback drops
+    // the `Typed` enforcement the interpreter performs per element. `a`/`b` are
+    // therefore declared `integer` here; that is orthogonal to what this test
+    // pins (the parameter is BOUND, not free).
     it('excludes a Typed-annotated parameter of the operand function from freeSymbols', () => {
       const ce = new ComputeEngine();
+      ce.declare('a', 'integer');
+      ce.declare('b', 'integer');
       ce.assign(
         'p',
         ce.box(['Function', ['Add', 'x', 'k'], ['Typed', 'x', 'integer']])

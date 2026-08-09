@@ -1647,6 +1647,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `Reduce: a custom combiner compiles only with an explicit ` +
             `initial value. Fail closed (D6).`
         );
+      // The combiner is `(accumulator, element)`: the accumulator's type is
+      // not provable here (it is the fold's own result), so an annotation on
+      // that position always declines.
+      BaseCompiler.assertCallbackAnnotations('Reduce', op, [
+        undefined,
+        BaseCompiler.collectionElementTypeOf(coll),
+      ]);
       combiner = customCombiner(op, compile, target);
     }
     if (combiner === undefined)
@@ -1827,38 +1834,38 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Map: multi-collection form is not compiled');
     const coll = collArg('Map', args[0], compile);
     if (args[1] == null) throw new Error('Map: missing mapping function');
-    return `((_f) => (${coll}).map((_x) => _f(_x)))(${compile(args[1])})`;
+    return `((_f) => (${coll}).map((_x) => _f(_x)))(${fnArg('Map', args[1], args[0], compile)})`;
   },
   Filter: (args, compile) => {
     const coll = collArg('Filter', args[0], compile);
     if (args[1] == null) throw new Error('Filter: missing predicate');
-    return `((_f) => (${coll}).filter((_x) => _f(_x)))(${compile(args[1])})`;
+    return `((_f) => (${coll}).filter((_x) => _f(_x)))(${fnArg('Filter', args[1], args[0], compile)})`;
   },
   // Number of elements satisfying the predicate.
   CountIf: (args, compile) => {
     const coll = collArg('CountIf', args[0], compile);
     if (args[1] == null) throw new Error('CountIf: missing predicate');
-    return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${compile(args[1])})`;
+    return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${fnArg('CountIf', args[1], args[0], compile)})`;
   },
   // First element satisfying the predicate; none → NaN (the interpreter's
   // `Nothing` projected onto a real target, matching `Last`).
   Find: (args, compile) => {
     const coll = collArg('Find', args[0], compile);
     if (args[1] == null) throw new Error('Find: missing predicate');
-    return `((_f) => ((${coll}).find((_x) => _f(_x)) ?? NaN))(${compile(args[1])})`;
+    return `((_f) => ((${coll}).find((_x) => _f(_x)) ?? NaN))(${fnArg('Find', args[1], args[0], compile)})`;
   },
   // 1-based index of the first element satisfying the predicate, or 0 if
   // none — `findIndex` is 0-based and returns -1, so `+ 1` maps both.
   IndexWhere: (args, compile) => {
     const coll = collArg('IndexWhere', args[0], compile);
     if (args[1] == null) throw new Error('IndexWhere: missing predicate');
-    return `((_f) => (${coll}).findIndex((_x) => _f(_x)) + 1)(${compile(args[1])})`;
+    return `((_f) => (${coll}).findIndex((_x) => _f(_x)) + 1)(${fnArg('IndexWhere', args[1], args[0], compile)})`;
   },
   // List of the 1-based indexes of the elements satisfying the predicate.
   Position: (args, compile) => {
     const coll = collArg('Position', args[0], compile);
     if (args[1] == null) throw new Error('Position: missing predicate');
-    return `((_f) => (${coll}).flatMap((_x, _i) => _f(_x) ? [_i + 1] : []))(${compile(args[1])})`;
+    return `((_f) => (${coll}).flatMap((_x, _i) => _f(_x) ? [_i + 1] : []))(${fnArg('Position', args[1], args[0], compile)})`;
   },
   // Apply the function to 1-based indexes: 1-D `Tabulate(f, n)` → list;
   // 2-D `Tabulate(f, m, n)` → m×n nested list with the first dimension
@@ -1887,6 +1894,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
             `in the interpreter. Fail closed (D6).`
         );
     }
+    // The emitted lowering passes 1-based integer indexes, so an annotated
+    // index parameter is admitted exactly when `integer` satisfies it.
+    BaseCompiler.assertCallbackAnnotations('Tabulate', args[0], [
+      'integer',
+      'integer',
+    ]);
     const f = compile(args[0]);
     const n = compile(args[1]);
     if (args.length === 2)
@@ -1906,6 +1919,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Fill: only the (function, (rows, cols)) form compiles. ` +
           `Fail closed (D6).`
       );
+    BaseCompiler.assertCallbackAnnotations('Fill', args[0], [
+      'integer',
+      'integer',
+    ]);
     const f = compile(args[0]);
     const rows = compile(dims.ops[0]);
     const cols = compile(dims.ops[1]);
@@ -2073,7 +2090,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       (isSymbol(arg) &&
         BaseCompiler.userFunctionLiteral(arg.engine, arg.symbol) !== undefined)
     )
-      return `((_f, _l) => { const _t = [], _u = []; for (const _x of _l) (_f(_x) ? _t : _u).push(_x); return [_t, _u]; })(${compile(arg)}, ${coll})`;
+      return `((_f, _l) => { const _t = [], _u = []; for (const _x of _l) (_f(_x) ? _t : _u).push(_x); return [_t, _u]; })(${fnArg('Partition', arg, args[0], compile)}, ${coll})`;
     throw new Error(
       `Partition: the second operand must be an integer or a function ` +
         `literal. Fail closed (D6).`
@@ -2117,7 +2134,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Any: only the predicate form compiles. Fail closed (D6).`
       );
-    return `((_f) => (${coll}).some((_x) => _f(_x)))(${compile(args[1])})`;
+    return `((_f) => (${coll}).some((_x) => _f(_x)))(${fnArg('Any', args[1], args[0], compile)})`;
   },
   All: (args, compile) => {
     const coll = collArg('All', args[0], compile);
@@ -2125,18 +2142,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `All: only the predicate form compiles. Fail closed (D6).`
       );
-    return `((_f) => (${coll}).every((_x) => _f(_x)))(${compile(args[1])})`;
+    return `((_f) => (${coll}).every((_x) => _f(_x)))(${fnArg('All', args[1], args[0], compile)})`;
   },
   // Longest prefix satisfying the predicate / the rest after that prefix.
   TakeWhile: (args, compile) => {
     const coll = collArg('TakeWhile', args[0], compile);
     if (args[1] == null) throw new Error('TakeWhile: missing predicate');
-    return `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? _l.slice() : _l.slice(0, _i); })(${compile(args[1])}, ${coll})`;
+    return `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? _l.slice() : _l.slice(0, _i); })(${fnArg('TakeWhile', args[1], args[0], compile)}, ${coll})`;
   },
   DropWhile: (args, compile) => {
     const coll = collArg('DropWhile', args[0], compile);
     if (args[1] == null) throw new Error('DropWhile: missing predicate');
-    return `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? [] : _l.slice(_i); })(${compile(args[1])}, ${coll})`;
+    return `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? [] : _l.slice(_i); })(${fnArg('DropWhile', args[1], args[0], compile)}, ${coll})`;
   },
   // Map + flatten one level. Native `flatMap` matches the interpreter for
   // both shapes: a collection-valued mapping is spliced, a scalar result is
@@ -2144,7 +2161,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   FlatMap: (args, compile) => {
     const coll = collArg('FlatMap', args[0], compile);
     if (args[1] == null) throw new Error('FlatMap: missing mapping function');
-    return `((_f) => (${coll}).flatMap((_x) => _f(_x)))(${compile(args[1])})`;
+    return `((_f) => (${coll}).flatMap((_x) => _f(_x)))(${fnArg('FlatMap', args[1], args[0], compile)})`;
   },
   // Running fold: the accumulator AFTER each element; the initial value is
   // not emitted. Without an initial value the first element seeds the
@@ -2160,8 +2177,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Scan: cannot compile — first operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
       );
+    const builtin = builtinCombiner(op);
+    // As `Reduce`: the combiner is `(accumulator, element)` and only the
+    // element's type is provable, so an annotated accumulator declines.
+    if (builtin === undefined)
+      BaseCompiler.assertCallbackAnnotations('Scan', op, [
+        undefined,
+        BaseCompiler.collectionElementTypeOf(coll),
+      ]);
     const combiner =
-      builtinCombiner(op) ??
+      builtin ??
       (isFunction(op, 'Function') || isSymbol(op)
         ? customCombiner(op, compile, target)
         : undefined);
@@ -5702,6 +5727,28 @@ function collArg(
         `is not an indexed collection (list/vector/range). Fail closed (D6).`
     );
   return compile(arg);
+}
+
+/**
+ * Compile an ELEMENT-consuming callback operand (a predicate, a mapping
+ * function), failing closed (D6) when a parameter annotation the emitted
+ * lowering cannot enforce is not provably satisfied by `source`'s element type
+ * — see `BaseCompiler.assertCallbackAnnotations`. `extraArgTypes` prefixes the
+ * element position for a combiner-shaped callback (`Reduce`/`Scan`, whose
+ * first parameter is the accumulator).
+ */
+function fnArg(
+  kind: string,
+  callback: Expression | undefined,
+  source: Expression | undefined,
+  compile: (expr: Expression) => string,
+  extraArgTypes: ReadonlyArray<Type | undefined> = []
+): string {
+  BaseCompiler.assertCallbackAnnotations(kind, callback, [
+    ...extraArgTypes,
+    BaseCompiler.collectionElementTypeOf(source),
+  ]);
+  return compile(callback!);
 }
 
 //

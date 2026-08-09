@@ -325,6 +325,24 @@ function predicateErrorValue(
 }
 
 /**
+ * Three-valued OR over membership sub-queries: `true` as soon as one operand
+ * definitely contains the target, `false` only when every operand definitely
+ * refutes it, `undefined` when at least one operand could not answer.
+ *
+ * `Array.prototype.some()` collapses an UNDECIDED sub-query (`undefined`) into
+ * a definite `false`, which is precisely the unsound answer
+ * `CollectionHandlers.contains` reserves `undefined` for.
+ */
+function kleeneAny(values: Iterable<boolean | undefined>): boolean | undefined {
+  let undecided = false;
+  for (const v of values) {
+    if (v === true) return true;
+    if (v === undefined) undecided = true;
+  }
+  return undecided ? undefined : false;
+}
+
+/**
  * A function operand written in the wrapper-free shorthand form
  * (`["Greater", "_", 5]` instead of `["Function", ["Greater", "_", 5]]`),
  * converted to a canonical function literal — or `undefined` when the operand
@@ -2733,16 +2751,35 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // True for that target. Note: query the source (`op1`), not `expr` —
         // `expr.contains()` would dispatch back into this handler.
         if (!isFunction(expr)) return false;
-        if (!(expr.op1.contains(target) ?? false)) return false;
+        // An UNDECIDED source membership must propagate as `undefined`: `??
+        // false` here asserted a definite "not a member" about a source that
+        // could not answer at all. A definite `false` still refutes.
+        const inSource = expr.op1.contains(target);
+        if (inSource !== true) return inSource === false ? false : undefined;
         const f = applicable(expr.op2);
         const applied = f([target]);
+        // Mirror the iterator's verdicts on the predicate result, so a query
+        // and a walk of the same `Filter` never disagree.
+        if (applied === undefined)
+          throw new Error(
+            `Invalid filter predicate. ${spellCheckMessage(expr.op2)}`
+          );
         if (sym(applied) === 'True') return true;
+        if (sym(applied) === 'False') return false;
         // An element-valued predicate failure (see `predicateErrorValue`)
         // leaves membership UNDECIDED: answering `false` would be an unsound
-        // definite answer about an element the predicate could not judge. Any
-        // other non-True result keeps the existing `false`.
+        // definite answer about an element the predicate could not judge.
         if (predicateErrorValue(applied)) return undefined;
-        return false;
+        // Any other non-boolean result is a malformed predicate. Report it the
+        // way every other Filter facet does — `each`/`count`/`isEmpty` all
+        // throw this exact message, as do the sibling predicate consumers
+        // (`Find`, `CountIf`, `Position`, `IndexWhere`, `Partition`) —
+        // instead of silently answering `false`.
+        throw new Error(
+          `Filter predicate must return "True" or "False". ${spellCheckMessage(
+            expr.op2
+          )}`
+        );
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -3466,8 +3503,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
-        return expr.ops.some((op) =>
-          isAtomicJoinOperand(op) ? op.isSame(target) : op.contains(target)
+        // Three-valued: an operand that cannot decide membership leaves the
+        // whole query undecided (`.some()` would report a definite `false`).
+        return kleeneAny(
+          expr.ops.map((op) =>
+            isAtomicJoinOperand(op) ? op.isSame(target) : op.contains(target)
+          )
         );
       },
       iterator: (expr) => {
@@ -3603,10 +3644,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
-        return (
-          expr.op1.contains(target) ||
-          expr.ops.slice(1).some((op) => op.isSame(target))
-        );
+        // An appended operand that matches settles the query; otherwise defer
+        // to the source, propagating its UNDECIDED answer (`||` turned an
+        // `undefined` source verdict into a definite `false`).
+        if (expr.ops.slice(1).some((op) => op.isSame(target))) return true;
+        return expr.op1.contains(target);
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -4653,7 +4695,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
-        return expr.op1.contains(target) ?? false;
+        // A permutation/repetition of the source: membership is exactly the
+        // source's, INCLUDING its undecided verdict (`?? false` claimed a
+        // definite "not a member" the source never gave).
+        return expr.op1.contains(target);
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -5019,7 +5064,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // every rotation.
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
-        return expr.op1.contains(target) ?? false;
+        // A permutation/repetition of the source: membership is exactly the
+        // source's, INCLUDING its undecided verdict (`?? false` claimed a
+        // definite "not a member" the source never gave).
+        return expr.op1.contains(target);
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -5087,7 +5135,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // every rotation.
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
-        return expr.op1.contains(target) ?? false;
+        // A permutation/repetition of the source: membership is exactly the
+        // source's, INCLUDING its undecided verdict (`?? false` claimed a
+        // definite "not a member" the source never gave).
+        return expr.op1.contains(target);
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -6423,7 +6474,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       contains: (expr, target) => {
         if (!isFunction(expr)) return false;
-        return expr.op1.contains(target) ?? false;
+        // A permutation/repetition of the source: membership is exactly the
+        // source's, INCLUDING its undecided verdict (`?? false` claimed a
+        // definite "not a member" the source never gave).
+        return expr.op1.contains(target);
       },
       iterator: (expr) => {
         if (!isFunction(expr))

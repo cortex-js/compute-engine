@@ -321,6 +321,168 @@ describe('Filter contains with an Error-valued predicate result', () => {
 });
 
 /**
+ * A `contains` handler answers with THREE values: `true`, `false`, and
+ * `undefined` for "membership cannot be determined" (`CollectionHandlers`,
+ * `types-definitions.ts`). Several handlers collapsed an undecided sub-query
+ * into a definite `false` — `?? false` on the source's own verdict, or an
+ * `Array.prototype.some()`/`||` over sub-queries — so
+ * `Element(x, Reverse(ys))` answered `False` for a source that had answered
+ * "I don't know".
+ */
+describe('contains propagates an undecided source verdict', () => {
+  /** A symbolic collection: declared, never assigned, so `contains` on it is
+   * undecided. */
+  const symbolicSource = (ce: ComputeEngine) => {
+    ce.declare('ys', 'list<number>');
+    return 'ys';
+  };
+
+  test('Filter over a symbolic source is undecided, not false', () => {
+    const ce = new ComputeEngine();
+    const ys = symbolicSource(ce);
+    const predicate = ['Function', ['Greater', 'k', 2], 'k'];
+    // The source itself cannot decide...
+    expect(ce.symbol('ys').contains(ce.symbol('x'))).toBe(undefined);
+    // ...so neither can the filter of it.
+    expect(ce.box(['Filter', ys, predicate]).contains(ce.symbol('x'))).toBe(
+      undefined
+    );
+    // ...and the `Element` query stays symbolic instead of answering False.
+    expect(
+      ce.box(['Element', 'x', ['Filter', ys, predicate]]).evaluate().operator
+    ).toBe('Element');
+  });
+
+  test('Filter over a definitely-refuting source still answers false', () => {
+    const ce = new ComputeEngine();
+    const predicate = ['Function', ['Greater', 'k', 2], 'k'];
+    const filtered = ce.box(['Filter', ['List', 1, 2, 3], predicate]);
+    // Not in the source at all: a DEFINITE `false` from the source.
+    expect(filtered.contains(ce.number(9))).toBe(false);
+    expect(
+      ce
+        .box(['Element', 9, ['Filter', ['List', 1, 2, 3], predicate]])
+        .evaluate().symbol
+    ).toBe('False');
+  });
+
+  // Reverse/RotateLeft/RotateRight are permutations of the source and Cycle
+  // repeats it, so each one's membership is EXACTLY the source's — including
+  // the source's undecided verdict (these all had `?? false`).
+  for (const [op, args] of [
+    ['Reverse', []],
+    ['RotateLeft', [2]],
+    ['RotateRight', [2]],
+    ['Cycle', []],
+  ] as const) {
+    test(`${op} propagates an undecided source verdict`, () => {
+      const ce = new ComputeEngine();
+      const ys = symbolicSource(ce);
+      expect(ce.box([op, ys, ...args]).contains(ce.symbol('x'))).toBe(
+        undefined
+      );
+      // A concrete source still decides both ways.
+      expect(
+        ce.box([op, ['List', 1, 2, 3], ...args]).contains(ce.number(2))
+      ).toBe(true);
+      expect(
+        ce.box([op, ['List', 1, 2, 3], ...args]).contains(ce.number(9))
+      ).toBe(false);
+    });
+  }
+
+  test('Join is a three-valued OR over its operands', () => {
+    const ce = new ComputeEngine();
+    const ys = symbolicSource(ce);
+    // One operand cannot decide: the whole query cannot either (`.some()`
+    // used to report a definite `false`).
+    expect(ce.box(['Join', ['List', 1, 2], ys]).contains(ce.symbol('x'))).toBe(
+      undefined
+    );
+    // ...unless another operand settles it affirmatively.
+    expect(ce.box(['Join', ['List', 1, 2], ys]).contains(ce.number(1))).toBe(
+      true
+    );
+    expect(
+      ce.box(['Join', ['List', 1, 2], ['List', 3]]).contains(ce.number(3))
+    ).toBe(true);
+    expect(
+      ce.box(['Join', ['List', 1, 2], ['List', 3]]).contains(ce.number(9))
+    ).toBe(false);
+  });
+
+  test('Append defers to the source when no appended operand matches', () => {
+    const ce = new ComputeEngine();
+    const ys = symbolicSource(ce);
+    // `op1.contains(target) || …` turned the source's `undefined` into
+    // `false`.
+    expect(ce.box(['Append', ys, 5]).contains(ce.symbol('x'))).toBe(undefined);
+    // An appended operand that matches settles the query outright.
+    expect(ce.box(['Append', ys, 5]).contains(ce.number(5))).toBe(true);
+    expect(ce.box(['Append', ['List', 1, 2], 5]).contains(ce.number(2))).toBe(
+      true
+    );
+    expect(ce.box(['Append', ['List', 1, 2], 5]).contains(ce.number(9))).toBe(
+      false
+    );
+  });
+});
+
+/**
+ * A genuinely non-boolean predicate result is a MALFORMED predicate, and every
+ * other `Filter` facet says so out loud: `each()`, `count`, `isEmptyCollection`
+ * and `isEqual` all throw `Filter predicate must return "True" or "False".`,
+ * as do the five sibling predicate consumers (`Find`, `CountIf`, `Position`,
+ * `IndexWhere`, `Partition`). Only `contains` answered `false` — a definite
+ * membership verdict derived from a predicate that never produced one.
+ *
+ * The throw surfaces where the loud siblings' does (out of `evaluate()`) and
+ * leaves boxing/canonicalization and the assumptions machinery untouched.
+ */
+describe('Filter contains with a non-boolean predicate result', () => {
+  /** `k ↦ k + 1` — well-formed as a function, useless as a predicate. */
+  const nonBoolean = ['Function', ['Add', 'k', 1], 'k'];
+  const filter = ['Filter', ['List', 1, 2, 3], nonBoolean];
+  const MESSAGE = 'Filter predicate must return "True" or "False"';
+
+  test('contains reports the malformed predicate instead of answering false', () => {
+    const ce = new ComputeEngine();
+    expect(() => ce.box(filter).contains(ce.number(2))).toThrow(MESSAGE);
+  });
+
+  test('the other Filter facets already reported it the same way', () => {
+    const ce = new ComputeEngine();
+    expect(() => ce.box(filter).count).toThrow(MESSAGE);
+    expect(() => ce.box(filter).isEmptyCollection).toThrow(MESSAGE);
+  });
+
+  test('an Element query surfaces it, as the sibling consumers do', () => {
+    const ce = new ComputeEngine();
+    expect(() => ce.box(['Element', 2, filter]).evaluate()).toThrow(MESSAGE);
+    expect(() => ce.box(['Contains', filter, 2]).evaluate()).toThrow(MESSAGE);
+  });
+
+  test('boxing and canonicalization are unaffected', () => {
+    const ce = new ComputeEngine();
+    // `contains` is not consulted while boxing, so the malformed predicate
+    // does not corrupt canonicalization.
+    expect(ce.box(['Element', 2, filter]).operator).toBe('Element');
+    expect(ce.box(['Element', 2, filter]).simplify().operator).toBe('Element');
+  });
+
+  test('a well-formed predicate is unaffected', () => {
+    const ce = new ComputeEngine();
+    const ok = ce.box([
+      'Filter',
+      ['List', 1, 2, 3],
+      ['Function', ['Greater', 'k', 2], 'k'],
+    ]);
+    expect(ok.contains(ce.number(3))).toBe(true);
+    expect(ok.contains(ce.number(1))).toBe(false);
+  });
+});
+
+/**
  * `color` is a concrete leaf primitive, so it is admitted by the element-type
  * gate of the per-application lambda-parameter inference: an inline callback
  * over a `list<color>` gets its parameter stamped `(c: color)`.

@@ -271,6 +271,34 @@ function evaluatePochhammer(
   return ce.function('Multiply', factors, { form: 'structural' });
 }
 
+/**
+ * Three-valued `Array.prototype.every()` over membership sub-queries: `false`
+ * as soon as one item definitely refutes (short-circuiting, as `every()`
+ * does), `undefined` when nothing refutes but at least one item could not be
+ * decided, `true` only when every item definitely holds.
+ *
+ * `items.every((x) => probe(x) ?? false)` collapses an UNDECIDED sub-query
+ * into a definite `false` — precisely the answer `CollectionHandlers.contains`
+ * reserves `undefined` for ("return `undefined` if the membership cannot be
+ * determined").
+ *
+ * NOTE: `library/collections.ts` has a `kleeneAny` dual and `library/sets.ts`
+ * a private `kleeneOr`/`kleeneAnd` pair. Consolidating the three copies of
+ * this idiom into a shared home is a refactor left for its own round.
+ */
+function kleeneEvery<T>(
+  items: ReadonlyArray<T>,
+  probe: (item: T, index: number) => boolean | undefined
+): boolean | undefined {
+  let undecided = false;
+  for (let i = 0; i < items.length; i++) {
+    const v = probe(items[i], i);
+    if (v === false) return false;
+    if (v === undefined) undecided = true;
+  }
+  return undecided ? undefined : true;
+}
+
 export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
   {
     Choose: {
@@ -379,9 +407,10 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           )
             return false;
           const xOps = x.ops;
-          return factors.every(
-            (factor, i) => factor.contains(xOps[i]) ?? false
-          );
+          // Three-valued: a factor that cannot decide its component leaves the
+          // tuple's membership undecided (`?? false` inside `every()` claimed a
+          // definite "not a member" no factor had given).
+          return kleeneEvery(factors, (factor, i) => factor.contains(xOps[i]));
         },
         count: (expr) => {
           if (!isFunction(expr)) return 0;
@@ -402,7 +431,9 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           if (!isFunction(expr)) return false;
           const base = expr.ops[0];
           if (!x.isCollection || !isFunction(x)) return false;
-          return x.ops.every((elem) => base.contains(elem) ?? false);
+          // Three-valued: a candidate element the base set cannot judge leaves
+          // the subset relation — and so the membership — undecided.
+          return kleeneEvery(x.ops, (elem) => base.contains(elem));
         },
         count: (expr) => {
           if (!isFunction(expr)) return 0;

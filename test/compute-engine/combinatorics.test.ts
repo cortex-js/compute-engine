@@ -190,3 +190,117 @@ describe('Exact Multinomial and BellNumber (REVIEW.md B22)', () => {
     expect(evalN(['BellNumber', 25])).toEqual('4638590332229999353');
   });
 });
+
+/**
+ * A `contains` handler is THREE-valued: `true`, `false`, and `undefined` for
+ * "membership cannot be determined" (`CollectionHandlers.contains`,
+ * `types-definitions.ts`). Both handlers probed their operands with
+ * `sub.contains(x) ?? false` inside an `every()`, which turned an operand's
+ * "I don't know" into a definite refutation — `Element((1,7), A × ys)`
+ * answered `False` for a `ys` that had never refuted anything.
+ *
+ * A definite refutation from ANY operand still wins (and still
+ * short-circuits): one factor missing its component is enough to rule the
+ * tuple out, whatever the other factors say.
+ */
+describe('CartesianProduct / PowerSet membership is three-valued', () => {
+  /** A symbolic set: declared, never assigned, so `contains` on it is
+   * undecided. */
+  const symbolicSet = (ce: ComputeEngine) => {
+    ce.declare('ys', 'set<number>');
+    return 'ys';
+  };
+
+  test('CartesianProduct is undecided when a factor cannot decide', () => {
+    const engine = new ComputeEngine();
+    const ys = symbolicSet(engine);
+    // The factor itself cannot decide...
+    expect(engine.symbol('ys').contains(engine.number(7))).toBe(undefined);
+    // ...so neither can the product.
+    const product = engine.box(['CartesianProduct', ['Set', 1, 2], ys]);
+    expect(product.contains(engine.box(['Tuple', 1, 7]))).toBe(undefined);
+    // ...and the `Element` query stays symbolic instead of answering False.
+    expect(
+      engine
+        .box([
+          'Element',
+          ['Tuple', 1, 7],
+          ['CartesianProduct', ['Set', 1, 2], ys],
+        ])
+        .evaluate().operator
+    ).toBe('Element');
+  });
+
+  test('CartesianProduct: a definite refutation by any factor wins', () => {
+    const engine = new ComputeEngine();
+    const ys = symbolicSet(engine);
+    // First component is definitely not in {1, 2}: the tuple is out, even
+    // though the second factor is undecided.
+    expect(
+      engine
+        .box(['CartesianProduct', ['Set', 1, 2], ys])
+        .contains(engine.box(['Tuple', 9, 7]))
+    ).toBe(false);
+  });
+
+  test('CartesianProduct decides concrete factors both ways', () => {
+    const engine = new ComputeEngine();
+    const product = engine.box([
+      'CartesianProduct',
+      ['Set', 1, 2],
+      ['Set', 3, 4],
+    ]);
+    expect(product.contains(engine.box(['Tuple', 1, 3]))).toBe(true);
+    expect(product.contains(engine.box(['Tuple', 1, 9]))).toBe(false);
+    expect(product.contains(engine.box(['Tuple', 9, 3]))).toBe(false);
+    expect(
+      engine
+        .box([
+          'Element',
+          ['Tuple', 1, 3],
+          ['CartesianProduct', ['Set', 1, 2], ['Set', 3, 4]],
+        ])
+        .evaluate().symbol
+    ).toBe('True');
+    expect(
+      engine
+        .box([
+          'Element',
+          ['Tuple', 1, 9],
+          ['CartesianProduct', ['Set', 1, 2], ['Set', 3, 4]],
+        ])
+        .evaluate().symbol
+    ).toBe('False');
+  });
+
+  test('PowerSet is undecided when the base set cannot judge an element', () => {
+    const engine = new ComputeEngine();
+    const ys = symbolicSet(engine);
+    expect(engine.box(['PowerSet', ys]).contains(engine.box(['Set', 1]))).toBe(
+      undefined
+    );
+    expect(
+      engine.box(['Element', ['Set', 1], ['PowerSet', ys]]).evaluate().operator
+    ).toBe('Element');
+  });
+
+  test('PowerSet decides a concrete base set both ways', () => {
+    const engine = new ComputeEngine();
+    const powerSet = engine.box(['PowerSet', ['Set', 1, 2, 3]]);
+    expect(powerSet.contains(engine.box(['Set', 1, 2]))).toBe(true);
+    // The empty set is a member of every power set (vacuously).
+    expect(powerSet.contains(engine.box(['Set']))).toBe(true);
+    // One element outside the base set refutes definitively.
+    expect(powerSet.contains(engine.box(['Set', 1, 9]))).toBe(false);
+    expect(
+      engine
+        .box(['Element', ['Set', 1, 2], ['PowerSet', ['Set', 1, 2, 3]]])
+        .evaluate().symbol
+    ).toBe('True');
+    expect(
+      engine
+        .box(['Element', ['Set', 1, 9], ['PowerSet', ['Set', 1, 2, 3]]])
+        .evaluate().symbol
+    ).toBe('False');
+  });
+});

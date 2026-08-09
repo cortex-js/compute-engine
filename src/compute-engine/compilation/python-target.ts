@@ -1220,8 +1220,15 @@ function pyIsNumericIndexOperand(e: Expression): boolean {
 function pyFnArg(
   kind: string,
   op: Expression | undefined,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  argTypes: ReadonlyArray<Type | undefined> = []
 ): string {
+  // A parameter ANNOTATION the emitted lambda cannot enforce fails closed
+  // (D6), exactly as on the JavaScript target — see
+  // `BaseCompiler.assertCallbackAnnotations`. Callers pass the provable type
+  // of the value each parameter position receives; an empty list means
+  // nothing is provable, so any annotation declines.
+  BaseCompiler.assertCallbackAnnotations(kind, op, argTypes);
   if (op && isFunction(op, 'Function')) return compile(op);
   if (op && isSymbol(op)) {
     const glyph = { Add: '+', Subtract: '-', Multiply: '*', Divide: '/' }[
@@ -2091,32 +2098,50 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length > 2)
       throw new Error('Map: multi-collection form is not compiled');
     if (args[1] == null) throw new Error('Map: missing mapping function');
-    return `(lambda _f: [_f(_x) for _x in ${coll}])(${pyFnArg('Map', args[1], compile)})`;
+    const fn = pyFnArg('Map', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f: [_f(_x) for _x in ${coll}])(${fn})`;
   },
   Filter: (args, compile) => {
     const coll = pyCollArg('Filter', args[0], compile);
     if (args[1] == null) throw new Error('Filter: missing predicate');
-    return `(lambda _f: [_x for _x in ${coll} if _f(_x)])(${pyFnArg('Filter', args[1], compile)})`;
+    const fn = pyFnArg('Filter', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f: [_x for _x in ${coll} if _f(_x)])(${fn})`;
   },
   CountIf: (args, compile) => {
     const coll = pyCollArg('CountIf', args[0], compile);
     if (args[1] == null) throw new Error('CountIf: missing predicate');
-    return `(lambda _f: sum(1 for _x in ${coll} if _f(_x)))(${pyFnArg('CountIf', args[1], compile)})`;
+    const fn = pyFnArg('CountIf', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f: sum(1 for _x in ${coll} if _f(_x)))(${fn})`;
   },
   Find: (args, compile) => {
     const coll = pyCollArg('Find', args[0], compile);
     if (args[1] == null) throw new Error('Find: missing predicate');
-    return `(lambda _f: next((_x for _x in ${coll} if _f(_x)), float('nan')))(${pyFnArg('Find', args[1], compile)})`;
+    const fn = pyFnArg('Find', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f: next((_x for _x in ${coll} if _f(_x)), float('nan')))(${fn})`;
   },
   IndexWhere: (args, compile) => {
     const coll = pyCollArg('IndexWhere', args[0], compile);
     if (args[1] == null) throw new Error('IndexWhere: missing predicate');
-    return `(lambda _f: next((_i + 1 for _i, _x in enumerate(${coll}) if _f(_x)), 0))(${pyFnArg('IndexWhere', args[1], compile)})`;
+    const fn = pyFnArg('IndexWhere', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f: next((_i + 1 for _i, _x in enumerate(${coll}) if _f(_x)), 0))(${fn})`;
   },
   Position: (args, compile) => {
     const coll = pyCollArg('Position', args[0], compile);
     if (args[1] == null) throw new Error('Position: missing predicate');
-    return `(lambda _f: [_i + 1 for _i, _x in enumerate(${coll}) if _f(_x)])(${pyFnArg('Position', args[1], compile)})`;
+    const fn = pyFnArg('Position', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f: [_i + 1 for _i, _x in enumerate(${coll}) if _f(_x)])(${fn})`;
   },
   Any: (args, compile) => {
     const coll = pyCollArg('Any', args[0], compile);
@@ -2124,7 +2149,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Any: only the predicate form compiles. Fail closed (D6).`
       );
-    return `(lambda _f: any(_f(_x) for _x in ${coll}))(${pyFnArg('Any', args[1], compile)})`;
+    const fn = pyFnArg('Any', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f: any(_f(_x) for _x in ${coll}))(${fn})`;
   },
   All: (args, compile) => {
     const coll = pyCollArg('All', args[0], compile);
@@ -2132,23 +2160,35 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `All: only the predicate form compiles. Fail closed (D6).`
       );
-    return `(lambda _f: all(_f(_x) for _x in ${coll}))(${pyFnArg('All', args[1], compile)})`;
+    const fn = pyFnArg('All', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f: all(_f(_x) for _x in ${coll}))(${fn})`;
   },
   TakeWhile: (args, compile) => {
     const coll = pyCollArg('TakeWhile', args[0], compile);
     if (args[1] == null) throw new Error('TakeWhile: missing predicate');
-    return `(lambda _f, _l: _l[:next((_i for _i, _x in enumerate(_l) if not _f(_x)), len(_l))])(${pyFnArg('TakeWhile', args[1], compile)}, ${coll})`;
+    const fn = pyFnArg('TakeWhile', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f, _l: _l[:next((_i for _i, _x in enumerate(_l) if not _f(_x)), len(_l))])(${fn}, ${coll})`;
   },
   DropWhile: (args, compile) => {
     const coll = pyCollArg('DropWhile', args[0], compile);
     if (args[1] == null) throw new Error('DropWhile: missing predicate');
-    return `(lambda _f, _l: _l[next((_i for _i, _x in enumerate(_l) if not _f(_x)), len(_l)):])(${pyFnArg('DropWhile', args[1], compile)}, ${coll})`;
+    const fn = pyFnArg('DropWhile', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f, _l: _l[next((_i for _i, _x in enumerate(_l) if not _f(_x)), len(_l)):])(${fn}, ${coll})`;
   },
   // A collection-valued mapping is spliced; a scalar result is kept as-is.
   FlatMap: (args, compile) => {
     const coll = pyCollArg('FlatMap', args[0], compile);
     if (args[1] == null) throw new Error('FlatMap: missing mapping function');
-    return `(lambda _f, _l: [_y for _x in _l for _y in (lambda _r: _r if isinstance(_r, list) else [_r])(_f(_x))])(${pyFnArg('FlatMap', args[1], compile)}, ${coll})`;
+    const fn = pyFnArg('FlatMap', args[1], compile, [
+      BaseCompiler.collectionElementTypeOf(args[0]),
+    ]);
+    return `(lambda _f, _l: [_y for _x in _l for _y in (lambda _r: _r if isinstance(_r, list) else [_r])(_f(_x))])(${fn}, ${coll})`;
   },
   // Fold. Built-in combiners use the native reductions; an empty collection
   // with no initial value yields nan (the interpreter's `Nothing`). A custom
@@ -2185,7 +2225,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           `Reduce: a custom combiner compiles only with an explicit ` +
             `initial value. Fail closed (D6).`
         );
-      return `__import__('functools').reduce(${pyFnArg('Reduce', op, compile)}, ${coll}, ${compile(init)})`;
+      // The combiner is `(accumulator, element)`: only the element's type is
+      // provable, so an annotated accumulator declines.
+      const fn = pyFnArg('Reduce', op, compile, [
+        undefined,
+        BaseCompiler.collectionElementTypeOf(args[0]),
+      ]);
+      return `__import__('functools').reduce(${fn}, ${coll}, ${compile(init)})`;
     }
     throw new Error(
       `Reduce: the combiner does not compile to a function on the Python ` +
@@ -2211,7 +2257,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const fn =
       builtin ??
       ((isFunction(op, 'Function') && op.nops - 1 === 2) || isSymbol(op)
-        ? pyFnArg('Scan', op, compile)
+        ? pyFnArg('Scan', op, compile, [
+            undefined,
+            BaseCompiler.collectionElementTypeOf(args[0]),
+          ])
         : undefined);
     if (fn === undefined)
       throw new Error(
@@ -2239,7 +2288,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
             `in the interpreter. Fail closed (D6).`
         );
     }
-    const f = pyFnArg('Tabulate', args[0], compile);
+    const f = pyFnArg('Tabulate', args[0], compile, ['integer', 'integer']);
     const n = compile(args[1]);
     if (args.length === 2)
       return `(lambda _f: [_f(_i + 1) for _i in range(max(0, round(${n})))])(${f})`;
@@ -2255,7 +2304,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         `Fill: only the (function, (rows, cols)) form compiles. ` +
           `Fail closed (D6).`
       );
-    const f = pyFnArg('Fill', args[0], compile);
+    const f = pyFnArg('Fill', args[0], compile, ['integer', 'integer']);
     const rows = compile(dims.ops[0]);
     const cols = compile(dims.ops[1]);
     return `(lambda _f: [[_f(_i + 1, _j + 1) for _j in range(max(0, round(${cols})))] for _i in range(max(0, round(${rows})))])(${f})`;

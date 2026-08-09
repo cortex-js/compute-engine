@@ -268,6 +268,24 @@ All conservative; each is a mechanical extension later if wanted:
 - **Shorthand callbacks** (`_ > 5`, non-`Function`-headed operands) lift
   after the hook and are not rebuilt.
 
+## Known limit: the standalone-lambda compile route (ruled 2026-08-10)
+
+Compiling an annotated function literal STANDALONE (`literal.compile()`,
+no call site) emits a bare JS/Python function with no runtime type check,
+so `run()` with a violating argument silently computes where the
+interpreter's `Apply` errors. Every in-engine route is enforced (call
+sites prove-or-decline via `assertCallbackAnnotations`; Map/Filter drains
+and the exact tier enforce or fail closed) — this route requires feeding
+violating values from the host side. Maintainer ruling: DEFERRED, with
+the direction fixed as check-emission — a per-primitive runtime-check
+table emitted as a prologue in the compiled function, with an explicit
+"unenforceable at runtime → decline to compile" rule (e.g. nominal types,
+`integer` vs `finite_integer` distinctions beyond machine
+representation). Declining all annotated standalone lambdas was rejected:
+with auto-stamping, that would disable standalone compilation for
+essentially every lambda over a typed collection (quadrature,
+`implicitCompile`, Epsil-compiled definitions).
+
 ## Acceptance
 
 - `Filter(points, pt |-> pt == (0, 0))` with `points: list<tuple<number,

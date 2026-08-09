@@ -27,6 +27,7 @@ import {
   widen,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { typeToString } from '../../common/type/serialize.js';
 import { parseType } from '../../common/type/parse.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import type { Type, TypeReference } from '../../common/type/types.js';
@@ -41,7 +42,10 @@ import {
   isDictionary,
 } from '../boxed-expression/type-guards.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
-import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  functionLiteralParameterName,
+  functionLiteralParameterType,
+} from '../boxed-expression/function-literal.js';
 import { multiClauseState } from '../multi-clause.js';
 import type { FunctionClause } from '../multi-clause.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
@@ -3264,6 +3268,94 @@ export class BaseCompiler {
       return fn();
     } finally {
       BaseCompiler._enforcedTargets = saved;
+    }
+  }
+
+  /**
+   * The PROVABLE element type of a collection operand, or `undefined` when
+   * there is no positive evidence (`unknown`/`any`/not a collection type).
+   *
+   * Mirrors `sourceElementType` in `library/map-broadcast-shape.ts`: only the
+   * COLLECTION layer is resolved (a collection spelled as a type reference has
+   * to be unfolded before its element type can be read), and the element type
+   * itself is returned unresolved so a NOMINAL element keeps its identity for
+   * the subtype question in {@link assertCallbackAnnotations}.
+   */
+  static collectionElementTypeOf(
+    source: Expression | undefined
+  ): Type | undefined {
+    if (source === undefined) return undefined;
+    const src = source.isCanonical ? source : source.canonical;
+    const elt = collectionElementType(resolveTypeForCompilation(src.type.type));
+    if (elt === undefined || elt === 'unknown' || elt === 'any') return undefined;
+    return elt;
+  }
+
+  /**
+   * Fail closed (D6) when a compiled CALLBACK carries a parameter annotation
+   * whose enforcement the emitted code would silently drop.
+   *
+   * Under the annotation-as-contract ruling
+   * (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ruling 2) an
+   * annotated parameter must error LOUDLY on an argument that does not fit:
+   * the interpreter applies the literal through `Apply`, which validates each
+   * argument against its `Typed` annotation and yields an `Error` VALUE in the
+   * element's place (`test/compute-engine/filter-predicate-errors.test.ts`).
+   * A compiled callback is a plain arrow/lambda — the annotation is not
+   * emitted at all — so `Filter(ds, (n: integer) ↦ n > 0)` over `[1.5, 2.5]`
+   * ran to `[1.5, 2.5]` where the interpreter answers two `Error`s. A compiled
+   * target has no Error VALUE to produce, so exact parity is out of reach; the
+   * invariant is the weaker one — never a silently wrong value.
+   *
+   * The gate is therefore the same one `lowerLevel` uses for the fused
+   * per-element bypass (`annotationSatisfiedBySource`): an annotation is
+   * admitted only when the argument type the lowering will feed that position
+   * PROVABLY satisfies it, so the enforcement cannot fire and the bypass is
+   * unobservable. Positive evidence only — an unprovable argument type
+   * (`undefined` here) declines, and so does an annotation NARROWER than the
+   * argument type. Declining throws, so `compile()` reports `success: false`
+   * and the interpreter — which does enforce — evaluates the expression.
+   *
+   * `argTypes[i]` is the provable type of the value the emitted lowering
+   * passes to parameter `i` (an element type, an index type, …), or
+   * `undefined` when nothing is provable there. A bare (unannotated) parameter
+   * is unconstrained and always passes.
+   */
+  static assertCallbackAnnotations(
+    kind: string,
+    callback: Expression | undefined,
+    argTypes: ReadonlyArray<Type | undefined>
+  ): void {
+    // A SYMBOL naming a user-defined function is checked on its literal: the
+    // emitted definition (`emitFunctionLiteralDefinition`) drops the
+    // annotation exactly as an inline arrow does, so `Filter(ds, p)` over
+    // `p = (n: integer) ↦ n > 0` had the same silent divergence.
+    const literal = isSymbol(callback)
+      ? BaseCompiler.userFunctionLiteral(callback.engine, callback.symbol)
+      : callback;
+    if (literal === undefined || !isFunction(literal, 'Function')) return;
+    const params = literal.ops.slice(1);
+    for (let i = 0; i < params.length; i++) {
+      const declared = functionLiteralParameterType(params[i]);
+      if (declared === undefined) continue;
+      const actual = argTypes[i];
+      // The subtype question is asked on the UNRESOLVED types: nominal opacity
+      // is a property of `isSubtype`, and resolving either side would erase it
+      // and admit a callback whose enforcement DOES fire — silently, since the
+      // compiled lowering has no enforcement at all.
+      if (actual !== undefined && isSubtype(actual, declared)) continue;
+      throw new Error(
+        `${kind}: the callback parameter ` +
+          `'${functionLiteralParameterName(params[i]) || `#${i + 1}`}' is ` +
+          `annotated '${typeToString(declared)}'` +
+          (actual === undefined
+            ? `, and the type of the value it receives is not provable`
+            : `, which the argument type '${typeToString(actual)}' does not ` +
+              `provably satisfy`) +
+          `. The compiled callback cannot enforce the annotation, and the ` +
+          `interpreter reports a per-element error when it does not hold. ` +
+          `Fail closed (D6) — the interpreter evaluates it.`
+      );
     }
   }
 
