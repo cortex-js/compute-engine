@@ -21,6 +21,7 @@ import { declaredTypeError } from './type-compatibility-error.js';
 import { isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
+import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -293,6 +294,12 @@ export class _BoxedValueDefinition
       throw new Error(`Cannot set value of constant "${this.name}"`);
     this._value = v;
     this._isSelfReferential = isSelfReferentialValue(this.name, v);
+    if (CACHE_STATS)
+      recordBump(
+        this._engine._ephemeralWriteDepth > 0
+          ? 'ephemeralValueWrite'
+          : 'valueWrite'
+      );
     this._engine._generation += 1;
     this._writeVersion += 1;
     // Ephemeral loop-index writes (big-op/comprehension index assigns) are

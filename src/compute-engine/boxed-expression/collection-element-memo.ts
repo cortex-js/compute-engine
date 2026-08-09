@@ -8,6 +8,7 @@ import type {
 
 import { isDictionary, isFunction, isSymbol } from './type-guards';
 import { isValueDef } from './utils';
+import { CACHE_STATS, recordCache } from '../../common/cache-stats';
 
 /**
  * Element memoization for lazy collection operators (Tycho item 126).
@@ -373,9 +374,15 @@ export function validElementMemo(
   expr: Expression
 ): { elements: ReadonlyArray<Expression>; complete: boolean } | undefined {
   const entry = elementMemoCaches.get(expr);
-  if (!entry) return undefined;
+  if (!entry) {
+    if (CACHE_STATS) recordCache('elementMemo', 'missCold');
+    return undefined;
+  }
   const ce = expr.engine;
-  if (entry.semanticEpoch !== ce._semanticEpoch) return undefined;
+  if (entry.semanticEpoch !== ce._semanticEpoch) {
+    if (CACHE_STATS) recordCache('elementMemo', 'missEpoch');
+    return undefined;
+  }
   // NO `_mutationGeneration` fast path here: an ephemeral loop-index write
   // bumps the index definition's `_writeVersion` but NOT
   // `_mutationGeneration`, so generation equality does NOT prove the
@@ -384,14 +391,23 @@ export function validElementMemo(
   // refill per iteration. Do not "optimize" it away.
   const depScope = depResolutionScope(expr);
   for (const d of entry.deps) {
-    if (d.occurrence.valueDefinition !== d.valueDef) return undefined;
-    if (d.valueDef._writeVersion !== d.version) return undefined;
+    if (d.occurrence.valueDefinition !== d.valueDef) {
+      if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
+      return undefined;
+    }
+    if (d.valueDef._writeVersion !== d.version) {
+      if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
+      return undefined;
+    }
     // Resolution axis: shadowing declarations bump no counter and touch no
     // tracked definition, but change what a walk computes (see
     // `ElementMemoDep.resolved`).
-    if (resolveDepBinding(ce, depScope, d.name) !== d.resolved)
+    if (resolveDepBinding(ce, depScope, d.name) !== d.resolved) {
+      if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
       return undefined;
+    }
   }
+  if (CACHE_STATS) recordCache('elementMemo', 'hit');
   return entry;
 }
 

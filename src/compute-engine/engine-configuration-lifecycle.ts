@@ -2,6 +2,7 @@ import {
   ConfigurationChangeTracker,
   type ConfigurationChangeListener,
 } from '../common/configuration-change.js';
+import { CACHE_STATS, recordBump } from '../common/cache-stats.js';
 
 type ResetHooks = {
   refreshNumericConstants: () => void;
@@ -21,6 +22,7 @@ export class EngineConfigurationLifecycle {
   }
 
   set generation(value: number) {
+    if (CACHE_STATS && value > this._generation) recordBump('generation');
     this._generation = value;
   }
 
@@ -29,6 +31,8 @@ export class EngineConfigurationLifecycle {
   }
 
   set mutationGeneration(value: number) {
+    if (CACHE_STATS && value > this._mutationGeneration)
+      recordBump('mutationGeneration');
     this._mutationGeneration = value;
   }
 
@@ -37,6 +41,8 @@ export class EngineConfigurationLifecycle {
   }
 
   set semanticEpoch(value: number) {
+    if (CACHE_STATS && value > this._semanticEpoch)
+      recordBump('semanticEpoch');
     this._semanticEpoch = value;
   }
 
@@ -49,6 +55,11 @@ export class EngineConfigurationLifecycle {
   }
 
   reset(hooks: ResetHooks): void {
+    if (CACHE_STATS) {
+      recordBump('generation');
+      recordBump('mutationGeneration');
+      recordBump('semanticEpoch');
+    }
     this._generation += 1;
     this._mutationGeneration += 1;
     this._semanticEpoch += 1;

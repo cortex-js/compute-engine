@@ -137,6 +137,11 @@ import {
   sgn,
 } from './sgn.js';
 import { cachedValue, CachedValue } from './cache.js';
+import {
+  CACHE_STATS,
+  recordCache,
+  instrumentedCachedValue,
+} from '../../common/cache-stats.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
@@ -173,6 +178,20 @@ let _effectsProvisionalReads = 0;
  * bumps this, and neither the re-entrant computation nor the one it is
  * nested in is frozen into the memo. */
 let _lazyValueProvisionalReads = 0;
+
+/** `CE_CACHE_STATS` only: is a recomputed effect channel the same answer as
+ * the entry it replaced? Structural equality over the `ComputedEffects`
+ * shapes (`'any'` | label array | co-finite `{not}` | `undefined`). */
+function sameComputedEffects(a: ComputedEffects, b: ComputedEffects): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  if (a === 'any' || b === 'any') return false;
+  const aLabels = Array.isArray(a) ? a : a.not;
+  const bLabels = Array.isArray(b) ? b : b.not;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (aLabels.length !== bLabels.length) return false;
+  return aLabels.every((x) => bLabels.includes(x));
+}
 
 /**
  * A boxed function expression represent an expression composed of an operator
@@ -493,10 +512,16 @@ export class BoxedFunction
    */
   _effectsOf(): ComputedEffects {
     const generation = this.engine._generation;
-    if (this._effects.generation === generation && this._effects.value !== null)
+    if (
+      this._effects.generation === generation &&
+      this._effects.value !== null
+    ) {
+      if (CACHE_STATS) recordCache('effects', 'hit');
       return this._effects.value;
+    }
 
     if (this._effectsInFlight) {
+      if (CACHE_STATS) recordCache('effects', 'declineCycle');
       _effectsProvisionalReads += 1;
       return 'any';
     }
@@ -504,11 +529,17 @@ export class BoxedFunction
     this._effectsInFlight = true;
     const before = _effectsProvisionalReads;
     try {
+      const prev = this._effects.value;
       const value = applicationEffects(this);
       if (_effectsProvisionalReads === before) {
+        if (CACHE_STATS) {
+          recordCache('effects', prev === null ? 'missCold' : 'missGeneration');
+          if (prev !== null && sameComputedEffects(prev, value))
+            recordCache('effects', 'missGenerationWasted');
+        }
         this._effects.generation = generation;
         this._effects.value = value;
-      }
+      } else if (CACHE_STATS) recordCache('effects', 'declineStore');
       return value;
     } finally {
       this._effectsInFlight = false;
@@ -962,10 +993,19 @@ export class BoxedFunction
       this._ops.every((x) => x.isConstant) && this.isPure
         ? undefined
         : this.engine._generation;
-    return cachedValue(this._sgn, gen, () => {
+    const compute = (): Sign | undefined => {
       if (!this.isValid || this.isNumber !== true) return undefined;
       return sgn(this);
-    });
+    };
+    if (CACHE_STATS)
+      return instrumentedCachedValue(
+        'sgn',
+        this._sgn,
+        gen,
+        compute,
+        (a, b) => a === b
+      );
+    return cachedValue(this._sgn, gen, compute);
   }
 
   get isNaN(): boolean | undefined {
@@ -1504,8 +1544,10 @@ export class BoxedFunction
     // key it was consulted with — which costs a purity projection and an
     // `isConstant` subtree walk — is necessarily the same one now. See
     // `_typeGeneration`.
-    if (this._typeGeneration === generation && this._type.value !== null)
+    if (this._typeGeneration === generation && this._type.value !== null) {
+      if (CACHE_STATS) recordCache('type', 'hitFastPath');
       return this._type.value ?? BoxedType.unknown;
+    }
 
     // `isConstant` is tested FIRST: it fails at the first free variable — the
     // overwhelmingly common case for a row being canonicalized — whereas
@@ -1517,12 +1559,20 @@ export class BoxedFunction
       this._ops.every((x) => x.isConstant) && this.isPure
         ? undefined
         : this.engine._generation;
+    const compute = (): BoxedType =>
+      new BoxedType(type(this), this.engine._typeResolver);
     const result =
-      cachedValue(
-        this._type,
-        gen,
-        () => new BoxedType(type(this), this.engine._typeResolver)
-      ) ?? BoxedType.unknown;
+      (CACHE_STATS
+        ? instrumentedCachedValue(
+            'type',
+            this._type,
+            gen,
+            compute,
+            // A wasted recompute is one that lands on the same type; BoxedType
+            // has no cheap identity, so compare the serialized form.
+            (a, b) => a?.toString() === b?.toString()
+          )
+        : cachedValue(this._type, gen, compute)) ?? BoxedType.unknown;
     // Record the generation OBSERVED ON ENTRY: a computation that bumped the
     // generation (signature inference does) must leave the fast path closed.
     this._typeGeneration = generation;
@@ -1697,9 +1747,16 @@ export class BoxedFunction
       // A re-entrant evaluate of this very node. Take today's uncached path —
       // unchanged behavior — and mark the pass so neither computation is
       // frozen.
+      if (CACHE_STATS) recordCache('lazyValue', 'declineCycle');
       _lazyValueProvisionalReads += 1;
       return this._computeValue(options)();
     }
+
+    // `CE_CACHE_STATS` only: the entry being replaced, for wasted-recompute
+    // detection after the store below.
+    const prevValue = CACHE_STATS ? this._value.value : null;
+    const prevGeneration = this._value.generation;
+    const prevEpoch = this._lazyValueEpoch;
 
     this._lazyValueInFlight = true;
     const before = _lazyValueProvisionalReads;
@@ -1721,10 +1778,25 @@ export class BoxedFunction
     if (
       _lazyValueProvisionalReads !== before ||
       cycleDetectionCount() !== cyclesBefore
-    )
+    ) {
+      if (CACHE_STATS) recordCache('lazyValue', 'declineStore');
       return result;
+    }
 
     this._storeLazyCollectionValue(result, generation, options);
+
+    // `CE_CACHE_STATS` only: the read above was classified `missGeneration`
+    // exactly when a same-epoch, generation-keyed entry was present; if the
+    // recompute reproduced it, the invalidation was spurious.
+    if (
+      CACHE_STATS &&
+      prevValue !== null &&
+      prevEpoch === this.engine._semanticEpoch &&
+      prevGeneration !== undefined &&
+      prevGeneration !== generation &&
+      result.isSame(prevValue)
+    )
+      recordCache('lazyValue', 'missGenerationWasted');
 
     return result;
   }
@@ -1743,8 +1815,22 @@ export class BoxedFunction
       (this._value.generation === undefined ||
         (this._value.generation === this.engine._generation &&
           this._lazyValueScope === this.engine.context?.lexicalScope))
-    )
+    ) {
+      if (CACHE_STATS)
+        recordCache(
+          'lazyValue',
+          this._value.generation === undefined ? 'hitConstant' : 'hit'
+        );
       return this._value.value;
+    }
+    if (CACHE_STATS) {
+      if (this._value.value === null) recordCache('lazyValue', 'missCold');
+      else if (this._lazyValueEpoch !== this.engine._semanticEpoch)
+        recordCache('lazyValue', 'missEpoch');
+      else if (this._value.generation !== this.engine._generation)
+        recordCache('lazyValue', 'missGeneration');
+      else recordCache('lazyValue', 'missScope');
+    }
     return undefined;
   }
 
@@ -1757,6 +1843,7 @@ export class BoxedFunction
     options?: Partial<EvaluateOptions>
   ): void {
     const key = this._lazyCollectionMemoKey(generation);
+    if (CACHE_STATS && key === false) recordCache('lazyValue', 'declineStore');
     if (key !== false) {
       this._value.generation = key;
       this._value.value = result;
@@ -1876,8 +1963,10 @@ export class BoxedFunction
     if (
       _lazyValueProvisionalReads !== before ||
       cycleDetectionCount() !== cyclesBefore
-    )
+    ) {
+      if (CACHE_STATS) recordCache('lazyValue', 'declineStore');
       return result;
+    }
 
     this._storeLazyCollectionValue(result, generation, options);
 
