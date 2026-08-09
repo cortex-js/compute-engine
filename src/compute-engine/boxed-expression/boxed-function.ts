@@ -282,6 +282,29 @@ export class BoxedFunction
    * Constant entries resolve nothing and do not consult this. */
   private _lazyValueScope: Scope | undefined = undefined;
 
+  /** The in-flight ASYNC computation of the lazy-collection evaluate memo,
+   * kept as the PROMISE so that concurrent `evaluateAsync()` calls on the same
+   * node await ONE walk instead of each running their own (the "Async"
+   * follow-up of
+   * `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`). Cleared when
+   * the computation settles, in both directions: an aborted or rejected walk
+   * memoizes neither direction and leaves the slot empty, so the next call
+   * recomputes.
+   *
+   * Deliberately a SEPARATE field from `_lazyValueInFlight` rather than an
+   * async flavor of it, for two reasons. (1) A synchronous `evaluate()`
+   * arriving while this is pending cannot await it, so it ignores the slot
+   * and computes; both computations write the same key with the same value
+   * (modulo the identity of the rebuilt node), and the last one to settle
+   * wins. (2) It is not a re-entrancy marker: re-entering this node from
+   * inside its own walk means going through a symbol binding, and a symbol's
+   * `evaluateAsync` is `Promise.resolve(this.evaluate())`
+   * (`abstract-boxed-expression.ts`) — the re-entrant read therefore lands on
+   * the SYNC path, where `_lazyValueInFlight` catches it. Handing the pending
+   * promise to a caller nested inside the very computation it is waiting for
+   * would deadlock; no such route exists. */
+  private _lazyValuePending: Promise<Expression> | undefined = undefined;
+
   /** The engine generation at which `_type` was last written or confirmed.
    * The cache KEY of `_type` (`undefined` for a pure constant, the generation
    * otherwise) costs a purity projection plus an `isConstant` subtree walk to
@@ -1575,7 +1598,10 @@ export class BoxedFunction
    * DEFAULT options only: `materialization` selects step 3 and
    * `numericApproximation` step 3b, both of which return something other than
    * the step-4 rebuild. Every non-default combination takes today's path,
-   * untouched and unmemoized.
+   * untouched and unmemoized. The same test gates the ASYNC entry point
+   * (`_memoizedLazyCollectionValueAsync`), which shares this memo — the two
+   * paths must agree on eligibility or one could serve the other an entry it
+   * would not have made itself.
    *
    * One further exclusion, for RETENTION (see the retention contract on
    * `_memoizedLazyCollectionValue`): an operator with an `elementMemo`
@@ -1662,22 +1688,10 @@ export class BoxedFunction
   private _memoizedLazyCollectionValue(
     options?: Partial<EvaluateOptions>
   ): Expression {
-    // Read first, and without computing the key: whatever is in the slot was
-    // stamped with a key that is correct for it — an entry with no generation
-    // is one that no value write can invalidate, a generation-gated entry is
-    // valid for that generation and that resolution environment only. Both
-    // kinds expire at a semantic epoch change. This keeps the hot path (a
-    // re-read of an already-evaluated constant view) free of the
-    // purity/constancy walk.
+    const hit = this._lazyCollectionMemoHit();
+    if (hit !== undefined) return hit;
+
     const generation = this.engine._generation;
-    if (
-      this._value.value !== null &&
-      this._lazyValueEpoch === this.engine._semanticEpoch &&
-      (this._value.generation === undefined ||
-        (this._value.generation === generation &&
-          this._lazyValueScope === this.engine.context?.lexicalScope))
-    )
-      return this._value.value;
 
     if (this._lazyValueInFlight) {
       // A re-entrant evaluate of this very node. Take today's uncached path —
@@ -1710,6 +1724,38 @@ export class BoxedFunction
     )
       return result;
 
+    this._storeLazyCollectionValue(result, generation, options);
+
+    return result;
+  }
+
+  /** The memo READ of {@link _memoizedLazyCollectionValue}, shared with its
+   * async twin. No key is computed: whatever is in the slot was stamped with
+   * a key that is correct for it — an entry with no generation is one that no
+   * value write can invalidate, a generation-gated entry is valid for that
+   * generation and that resolution environment only. Both kinds expire at a
+   * semantic epoch change. This keeps the hot path (a re-read of an
+   * already-evaluated constant view) free of the purity/constancy walk. */
+  private _lazyCollectionMemoHit(): Expression | undefined {
+    if (
+      this._value.value !== null &&
+      this._lazyValueEpoch === this.engine._semanticEpoch &&
+      (this._value.generation === undefined ||
+        (this._value.generation === this.engine._generation &&
+          this._lazyValueScope === this.engine.context?.lexicalScope))
+    )
+      return this._value.value;
+    return undefined;
+  }
+
+  /** The memo WRITE of {@link _memoizedLazyCollectionValue} — both directions
+   * — shared with its async twin. The caller has already cleared the
+   * settled-only gate; `generation` is the one observed BEFORE the walk. */
+  private _storeLazyCollectionValue(
+    result: Expression,
+    generation: number,
+    options?: Partial<EvaluateOptions>
+  ): void {
     const key = this._lazyCollectionMemoKey(generation);
     if (key !== false) {
       this._value.generation = key;
@@ -1743,8 +1789,6 @@ export class BoxedFunction
         result._lazyValueEpoch = this.engine._semanticEpoch;
       }
     }
-
-    return result;
   }
 
   /** The memo key of {@link _memoizedLazyCollectionValue}: `undefined` for a
@@ -1761,7 +1805,83 @@ export class BoxedFunction
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
     const canonical = this._canonicalToEvaluate();
     if (canonical) return canonical.evaluateAsync(options);
+    if (this._isMemoizableLazyCollection(options))
+      return this._memoizedLazyCollectionValueAsync(options);
     return this._computeValueAsync(options)();
+  }
+
+  /**
+   * The async twin of {@link _memoizedLazyCollectionValue} — the "Async"
+   * follow-up of
+   * `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`. It is the SAME
+   * memo, not a parallel one: a settled entry written by `evaluate()` is a
+   * valid async hit and vice versa, under the same eligibility test, the same
+   * dual key, and the same epoch/scope/settled/purity gates.
+   *
+   * What async adds:
+   * - **An in-flight promise slot.** Concurrent `evaluateAsync()` calls on the
+   *   same node share one walk. The slot must be installed BEFORE the walk
+   *   starts, not when the call returns: `_computeValueAsync`'s synchronous
+   *   prefix runs the whole operand walk whenever no operand actually
+   *   suspends, so a second caller in the same tick would otherwise start a
+   *   second walk. Hence the microtask hop.
+   * - **Cancellation.** An aborted or rejected computation (an `AbortSignal`
+   *   fired inside a handler, a `CancellationError`, any throw) memoizes
+   *   NEITHER direction — the write below is only reached by a fulfilled walk
+   *   — and clears the slot, so a later call recomputes. A canceled walk must
+   *   never poison the memo.
+   *
+   * The settled-only gate samples its two provisional channels across
+   * `await`s, so a cycle detected — or a provisional read taken — by ANY
+   * evaluation interleaved with this one also suppresses the write. That is
+   * fail-closed (no entry), never a wrong entry.
+   */
+  private _memoizedLazyCollectionValueAsync(
+    options?: Partial<EvaluateOptions>
+  ): Promise<Expression> {
+    const hit = this._lazyCollectionMemoHit();
+    if (hit !== undefined) return Promise.resolve(hit);
+
+    if (this._lazyValuePending !== undefined) return this._lazyValuePending;
+
+    const pending: Promise<Expression> = Promise.resolve()
+      .then(() => this._settledLazyCollectionValueAsync(options))
+      .finally(() => {
+        if (this._lazyValuePending === pending)
+          this._lazyValuePending = undefined;
+      });
+    this._lazyValuePending = pending;
+    return pending;
+  }
+
+  /** The walk + settled-only gate + memo write of
+   * {@link _memoizedLazyCollectionValueAsync}. Mirrors the sync body, minus
+   * the `_lazyValueInFlight` marker: a re-entrant read of this node arrives on
+   * the SYNC path (see `_lazyValuePending`), where that marker lives. */
+  private async _settledLazyCollectionValueAsync(
+    options?: Partial<EvaluateOptions>
+  ): Promise<Expression> {
+    // A synchronous `evaluate()` may have filled the memo while this
+    // computation waited for its microtask — it ignores the pending slot by
+    // design, and its entry is as valid here as one of our own.
+    const hit = this._lazyCollectionMemoHit();
+    if (hit !== undefined) return hit;
+
+    const generation = this.engine._generation;
+    const before = _lazyValueProvisionalReads;
+    const cyclesBefore = cycleDetectionCount();
+
+    const result = await this._computeValueAsync(options)();
+
+    if (
+      _lazyValueProvisionalReads !== before ||
+      cycleDetectionCount() !== cyclesBefore
+    )
+      return result;
+
+    this._storeLazyCollectionValue(result, generation, options);
+
+    return result;
   }
 
   /**
@@ -2882,9 +3002,27 @@ export class BoxedFunction
       }
 
       //
-      // 2c/ `.N()` of an already-evaluated lazy `Map` — mirrors the sync
-      // path's step 3b (the async path has no materialization step, so this
-      // runs unconditionally under `numericApproximation`).
+      // 2c/ Handle evaluation of lazy collections — mirrors the sync path's
+      // step 3 (the "Async" follow-up of
+      // `docs/plans/2026-08-09-lazy-collection-evaluate-design.md`: the async
+      // path had NO materialization step at all, so every `materialization`
+      // form silently returned the lazy view). All four forms — `false`,
+      // `true`, an integer, `[head, tail]` — now behave as they do
+      // synchronously. `materialize()` is shared rather than duplicated: it
+      // enumerates lazily and evaluates the few elements it keeps
+      // SYNCHRONOUSLY, so an element whose operator has an `evaluateAsync`
+      // handler but no `evaluate` one would not run it — the same divergence
+      // the `!def.evaluate` gate below already has, and no collection operator
+      // is in that shape today.
+      //
+      const materialization = options?.materialization ?? false;
+      if (materialization !== false && !def.evaluate && this.isLazyCollection)
+        return materialize(this, def, options);
+
+      //
+      // 2d/ `.N()` of an already-evaluated lazy `Map` — mirrors the sync
+      // path's step 3b. Runs after the materialization step above, so an
+      // explicit materialization still wins.
       //
       if (numericApproximation && !def.evaluate && this.isLazyCollection) {
         const nLazy = lazyMapNumericApproximation(this.engine, this);

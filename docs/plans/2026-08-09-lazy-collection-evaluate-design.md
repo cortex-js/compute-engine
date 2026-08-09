@@ -343,15 +343,31 @@ and re-scope Change 2 to a chunked representation.
   trailing operands; verify negative indexing and the lazy `isFinite`
   logic against the binary handlers' behavior.
 
-## Async
+## Async — follow-up CLOSED (2026-08-09)
 
-Sync-only, by scope. `_computeValueAsync` has **no** materialization
-step at all today (pre-existing asymmetry, not introduced here) and its
-own `holdMapAsync` walk. Blindly copying the memo in would interleave
-with in-flight async evaluations of the same node. **Follow-up item**,
-tracked separately: define async behavior for all four `materialization`
-forms, then port the memo with an in-flight-promise slot. Until then the
-async path keeps today's O(d) behavior — correct, just slower.
+*(Original scoping, kept for the record: sync-only; `_computeValueAsync`
+had no materialization step at all and its own `holdMapAsync` walk.)*
+
+**Shipped**: `evaluateAsync` participates in the SAME memo — shared
+entries in both directions (a settled sync entry answers an async call
+and vice versa), an in-flight-promise slot (`_lazyValuePending`,
+deliberately separate from the sync re-entrancy marker) so concurrent
+async evaluations of one node share a single walk, all gates carried
+over (settled-only across both provisional channels sampled across the
+awaits, purity, epoch, scope identity, dual key, elementMemo/non-finite
+exclusion), and one async-only rule: an aborted or rejected walk
+memoizes neither direction and clears the slot. `_computeValueAsync`
+now mirrors sync step 3 for all four `materialization` forms (shared
+`materialize()`; a per-element `materializeAsync` was judged out of
+minimal scope — no operator with collection handlers defines
+`evaluateAsync` today, verified programmatically and flagged in-code
+for whoever adds one). Sync-arrives-during-async: the sync call ignores
+the pending promise and computes; same keys and stamps, last write to
+settle wins (values equal modulo node identity). Async re-entry cannot
+deadlock: symbol `evaluateAsync` is `Promise.resolve(this.evaluate())`,
+so re-entrant reads land on the sync path's marker. Verified this
+session: async accumulator n=200 in 30 ms with per-iteration identity
+stability; cross-path and concurrent-async object identity.
 
 ## Adjacent bug — fixed separately (shipped 2026-08-09)
 
@@ -423,10 +439,11 @@ same hazard class.
 4. Measure both; only then decide whether anything further
    (width-indexed `at`, copy-on-write, chunked representation) is worth
    pursuing.
-5. Separately tracked follow-ups: ~~the `mapSource` self-reference
-   guard~~ (**shipped** — see "Adjacent bug"); the over-threshold
-   `Insert`/`DeleteAt`/`ReplaceAt`/`ChunkBy` blowup (blocks
-   `SetAt`-sugar loops past 100 elements); async parity.
+5. Separately tracked follow-ups — **all three now shipped
+   (2026-08-09)**: the `mapSource` self-reference guard (see "Adjacent
+   bug"); the over-threshold `Insert`/`DeleteAt`/`ReplaceAt`/`ChunkBy`
+   blowup (see "Follow-up CLOSED" — the `SetAt`-sugar path is
+   unblocked); async parity (see "Async — follow-up CLOSED").
 
 ## Implementation record (2026-08-09, v3.2)
 
@@ -531,14 +548,29 @@ canonicalization (`getReferences`/`getSymbols`/binder rewriting) and
 `ce.assign`'s symbol scan. Follow-up territory (assign/canonicalization),
 not a defect of either change.
 
-### Behavior deltas to ratify (Change 2, both pinned in tests)
+### Behavior deltas — RATIFIED (user ruling, 2026-08-09; all pinned in tests)
 
-1. `Append(c, Sequence(v₁, v₂))` — was an `unexpected-argument` error,
-   now splices to a valid 3-ary `Append`. Unavoidable with a `value+`
-   arity: the framework splices `Sequence` before any handler runs.
-2. Non-strict mode: `Append([1,2])` was padded with an `Error` operand
-   (count 3); with the rest-arg signature it stays 1-ary (count 2,
-   identity). Arguably an improvement; previously untested either way.
+1. **`Append(c, Sequence(v₁, v₂))` splices** to a valid variadic
+   `Append` (was an `unexpected-argument` error). Ruled correct:
+   `Sequence` is the engine-wide splice marker, flattened into every
+   variadic operator's argument list before any handler runs — the old
+   error was an artifact of the binary arity, not a design choice, and
+   `Sequence` cannot be an element, so no atomic-append reading is lost
+   (use `List`/`Tuple` for that).
+2. **Non-strict `Append(c)` is the identity** (was padded with an
+   `Error` operand — an invalid node that still enumerated 3 elements,
+   one an error object). Ruled correct: "append nothing" = identity is
+   the natural zero-values reading, and lenient mode's contract is to
+   make the best of what was given. Strict mode is unchanged
+   (`Error("missing")`, invalid — verified).
+3. **Repeated `evaluate()` of a memoized view returns the same object**,
+   not a value-identical fresh copy (all memoized views; visible for
+   below-threshold `Insert` because the memo is consulted before the
+   conditional handler). Ruled correct: expressions are immutable and
+   node-sharing is the engine's normal mode; `.isSame`/`.isEqual`/
+   serialization are indistinguishable, only host-side `===` can tell,
+   and freshness is directly at odds with the memo the perf results
+   rest on.
 
 ### Follow-up CLOSED: the conditional-handler over-threshold blowup
 

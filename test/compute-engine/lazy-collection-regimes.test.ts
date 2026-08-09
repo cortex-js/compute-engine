@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { CancellationError } from '../../src/common/interruptible';
 import type { Expression } from '../../src/math-json/types.ts';
 
 /** A boxed expression, as the engine hands it back. */
@@ -407,6 +408,230 @@ describe('lazy collection evaluate memo', () => {
 });
 
 //
+// Async parity — the "Async" follow-up of the plan
+// (`docs/plans/2026-08-09-lazy-collection-evaluate-design.md`), which left
+// `evaluateAsync` with no materialization step and no memo at all.
+//
+// `evaluateAsync` now consults the SAME memo under the same eligibility test,
+// key and gates: a settled sync entry is a valid async hit and vice versa.
+// What is async-only is the in-flight PROMISE slot (concurrent calls share one
+// walk) and the cancellation rule (an aborted or rejected walk memoizes
+// neither direction and clears the slot).
+//
+describe('lazy collection evaluate memo — async parity', () => {
+  test('each async iteration re-uses the previous result', async () => {
+    // The async twin of the accumulator identity test above, in the same real
+    // loop shape: the `Assign` between two iterations bumps `ce._generation`,
+    // so what keeps the loop sub-quadratic is that iteration k−1's RESULT is
+    // still a memo hit afterwards — i.e. it evaluates to ITSELF.
+    const ce = new ComputeEngine();
+    ce.assign('xs', ce.box(['List']));
+    let previous: BoxedExpr | undefined = undefined;
+    for (let i = 0; i < 20; i++) {
+      if (previous) expect(await previous.evaluateAsync()).toBe(previous);
+      const r = await ce
+        .function('Append', [ce.symbol('xs'), ce.number(i)])
+        .evaluateAsync();
+      ce.assign('xs', r);
+      previous = r;
+    }
+    expect(previous!.count).toBe(20);
+  });
+
+  test('a sync entry is an async hit, and an async entry a sync hit', async () => {
+    // ONE memo, not two: whichever path fills it, the other reads it.
+    const ce = new ComputeEngine();
+    const e = ce.box(['Append', ['List', 1, 2], 3]);
+    const sync = e.evaluate();
+    expect(await e.evaluateAsync()).toBe(sync);
+
+    const other = ce.box(['Append', ['List', 4, 5], 6]);
+    const async = await other.evaluateAsync();
+    expect(other.evaluate()).toBe(async);
+    // …and the async path primes the result the same way, which is what makes
+    // the accumulator above O(n).
+    expect(async.evaluate()).toBe(async);
+    expect(await async.evaluateAsync()).toBe(async);
+  });
+
+  test('concurrent evaluateAsync calls share one walk', async () => {
+    // The in-flight promise slot. Instrumented like the read-budget test
+    // below — an own-property shadow on the one test-owned node, nothing
+    // global: without the slot each caller runs its own operand walk,
+    // since the memo is only written when the first one settles.
+    const ce = new ComputeEngine();
+    const node = ce.box(['Append', ['List', 1, 2], 3]);
+    const original = (node as any)._computeValueAsync;
+    let walks = 0;
+    (node as any)._computeValueAsync = function (
+      this: unknown,
+      ...args: unknown[]
+    ) {
+      walks += 1;
+      return original.apply(this, args);
+    };
+    try {
+      const first = node.evaluateAsync();
+      const second = node.evaluateAsync();
+      const [a, b] = await Promise.all([first, second]);
+      expect(a).toBe(b);
+      expect(walks).toBe(1);
+    } finally {
+      delete (node as Record<string, unknown>)['_computeValueAsync'];
+    }
+  });
+
+  test('an aborted walk memoizes nothing and recomputes', async () => {
+    // The one async-only rule: a canceled walk must not poison the memo. The
+    // signal reaches only a handler that consults it (docs/TIMEOUT-MODEL.md
+    // §6.4), so the abort is raised where one actually can — an operand's
+    // `evaluateAsync` handler, exactly as `runAsync` raises it.
+    const ce = new ComputeEngine();
+    let cancel = true;
+    ce.declare('BoomAsync', {
+      signature: '() -> number',
+      evaluateAsync: async (_ops, options) => {
+        if (cancel && options.signal?.aborted)
+          throw new CancellationError({ cause: options.signal.reason });
+        return ce.number(42);
+      },
+    } as any);
+    const e = ce.box(['Append', ['List', 1, 2], ['BoomAsync']]);
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      e.evaluateAsync({ signal: controller.signal })
+    ).rejects.toThrow(CancellationError);
+
+    // Neither direction memoized, and the in-flight slot released.
+    expect((e as any)._value.value).toBeNull();
+    expect((e as any)._lazyValuePending).toBeUndefined();
+
+    // A later call recomputes — and now succeeds.
+    cancel = false;
+    const r = await e.evaluateAsync();
+    expect(r.at(3)?.re).toBe(42);
+    expect(await e.evaluateAsync()).toBe(r);
+  });
+
+  test('a rejected walk memoizes nothing either', async () => {
+    // Same rule for an ordinary throw: only a FULFILLED walk is memoized.
+    const ce = new ComputeEngine();
+    let fail = true;
+    ce.declare('BoomAsync2', {
+      signature: '() -> number',
+      evaluateAsync: async () => {
+        if (fail) throw new Error('boom');
+        return ce.number(7);
+      },
+    } as any);
+    const e = ce.box(['Append', ['List', 1], ['BoomAsync2']]);
+    await expect(e.evaluateAsync()).rejects.toThrow('boom');
+    expect((e as any)._value.value).toBeNull();
+    fail = false;
+    expect((await e.evaluateAsync()).at(2)?.re).toBe(7);
+  });
+
+  test('a symbol operand re-resolves after reassignment (generation)', async () => {
+    const ce = new ComputeEngine();
+    ce.assign('y', ce.number(5));
+    const e = ce.box(['Append', ['List', 1, 2], 'y']);
+    expect((await e.evaluateAsync()).at(3)?.re).toBe(5);
+    ce.assign('y', ce.number(7));
+    expect((await e.evaluateAsync()).at(3)?.re).toBe(7);
+  });
+
+  test('a constant view re-evaluates after a precision change (epoch)', async () => {
+    // The epoch axis, on the async path — same shape as the sync test above.
+    const ce = new ComputeEngine();
+    ce.precision = 20;
+    const e = ce.box(['Append', ['List', 1], ['N', ['Divide', 1, 3]]]);
+    const low = (await e.evaluateAsync()).at(2)!.toString();
+    expect(low).toBe('0.33333333333333333333');
+
+    ce.precision = 60;
+    const high = (
+      await ce.box(['Append', ['List', 1], ['N', ['Divide', 1, 3]]]).evaluateAsync()
+    )
+      .at(2)!
+      .toString();
+    expect(high.length).toBeGreaterThan(low.length);
+    expect((await e.evaluateAsync()).at(2)!.toString()).toBe(high);
+  });
+
+  test('a memoized view re-resolves inside a re-pushed populated scope', async () => {
+    // The ambient-scope axis, on the async path — same shape as the sync test.
+    const ce = new ComputeEngine();
+    ce.assign('xs', ce.box(['List', 1, 2]));
+    ce.pushScope();
+    ce.declare('xs', { type: 'collection', value: ce.box(['List', 7]) });
+    const saved = (ce as any).context.lexicalScope;
+    ce.popScope();
+
+    const e = ce.box(['Append', 'xs', 9]);
+    expect((await e.evaluateAsync()).toString()).toBe('[1,2,9]');
+
+    ce.pushScope(saved);
+    try {
+      expect((await e.evaluateAsync()).toString()).toBe('[7,9]');
+    } finally {
+      ce.popScope();
+    }
+    expect((await e.evaluateAsync()).toString()).toBe('[1,2,9]');
+  });
+
+  test('an impure operand re-draws on every async evaluate (purity)', async () => {
+    const ce = new ComputeEngine();
+    const e = ce.box(['Append', ['List', 1, 2], ['Random']]);
+    expect(await e.evaluateAsync()).not.toBe(await e.evaluateAsync());
+    const draws = new Set<number>();
+    for (let i = 0; i < 5; i++)
+      draws.add((await e.evaluateAsync()).at(3)?.re ?? 0);
+    expect(draws.size).toBeGreaterThan(1);
+  });
+
+  // The four `materialization` forms, which the async path did not implement
+  // at all: it now mirrors the sync step 3, so every form agrees.
+  test.each([
+    ['default (lazy)', undefined],
+    ['true', true],
+    ['an integer', 5],
+    ['a [head, tail] pair', [2, 2]],
+  ])('materialization: %s matches the sync result', async (_label, form) => {
+    const ce = new ComputeEngine();
+    const options = form === undefined ? {} : { materialization: form as any };
+    const sync = ce.box(['Append', ['Range', 1, 20], 99]).evaluate(options);
+    const async = await ce
+      .box(['Append', ['Range', 1, 20], 99])
+      .evaluateAsync(options);
+    expect(async.toString()).toBe(sync.toString());
+    expect(async.isLazyCollection).toBe(sync.isLazyCollection);
+    expect(async.operator).toBe(sync.operator);
+  });
+
+  test('a non-eligible node is unchanged by the memo', async () => {
+    // Spec: `evaluateAsync` on anything outside the memo's set behaves exactly
+    // as before — no entry written, same value as the sync path.
+    const ce = new ComputeEngine();
+    // A scalar function node that stays a function (`2+2` folds to a number,
+    // which has no memo slot at all).
+    ce.declare('u', 'number');
+    const scalar = ce.box(['Add', 'u', 1]);
+    expect((await scalar.evaluateAsync()).toString()).toBe(
+      scalar.evaluate().toString()
+    );
+    expect((scalar as any)._value.value).toBeNull();
+
+    // A def-lazy view (`Map`): outside the set by the `lazy` flag.
+    const map = ce.box(['Map', ['List', 1, 2, 3], ['Function', ['Add', '_', 1]]]);
+    const r = await map.evaluateAsync();
+    expect(r.toString()).toBe(map.evaluate().toString());
+    expect((map as any)._value.value).toBeNull();
+  });
+});
+
+//
 // The conditional-handler regime — the plan's "over-threshold blowup"
 // follow-up (docs/plans/2026-08-09-lazy-collection-evaluate-design.md,
 // "Affected operator set" / "Sequencing" item 5)
@@ -547,36 +772,46 @@ describe('conditional-handler accumulator loops', () => {
 
 describe('conditional-handler shape queries are linear in depth', () => {
   /** A canonical, UNEVALUATED `Insert` chain of the given depth over a
-   * `base`-element list literal. */
+   * `base`-element list literal. Returns the chain AND the base literal —
+   * the instrumentation point. */
   function insertChain(ce: ComputeEngine, base: number, depth: number) {
-    let xs = ce.function(
+    const baseList = ce.function(
       'List',
       Array.from({ length: base }, (_, i) => ce.number(i))
     );
+    let xs = baseList;
     for (let i = 0; i < depth; i++)
       xs = ce.function('Insert', [xs, ce.number(1), ce.number(100 + i)]);
-    return xs;
+    return { chain: xs, base: baseList };
   }
 
   /**
-   * Run `f` with `count` instrumented on the boxed-function prototype,
-   * returning how many times it was read. The budget is what makes the
-   * blowup FAIL rather than hang: the doubling is synchronous, so a jest
-   * timeout can never interrupt it — at depth 30 the old code needs 2^30
-   * source walks and simply never returns. Throwing at the budget aborts on
-   * the first few thousand reads instead.
+   * Run `f` counting reads of the BASE literal's `count`, failing past a
+   * budget. The instrumentation is an OWN accessor on the one test-owned
+   * node — nothing global is modified, so even a mid-test crash cannot
+   * leak into other tests (the `finally` restore is tidiness, not a
+   * correctness requirement). The base is the right probe point: every
+   * doubled path of an exponential recursion bottoms out at the base, so
+   * the old 2^depth behavior hits the budget within milliseconds, while
+   * the fixed linear behavior reads the base about once per query. The
+   * budget (not a jest timeout) is what makes the blowup FAIL rather than
+   * hang: the doubling is synchronous, so a timeout can never interrupt
+   * it — at depth 30 the old code needs 2^30 source walks and simply
+   * never returns.
    */
-  function countingReads(sample: BoxedExpr, f: () => void): number {
-    const proto = Object.getPrototypeOf(sample);
+  function countingBaseReads(base: BoxedExpr, f: () => void): number {
+    // The `count` getter lives on the boxed-function prototype; shadow it
+    // with an own accessor on this single instance.
+    const proto = Object.getPrototypeOf(base);
     const desc = Object.getOwnPropertyDescriptor(proto, 'count')!;
     const BUDGET = 2000;
     let reads = 0;
-    Object.defineProperty(proto, 'count', {
-      ...desc,
+    Object.defineProperty(base, 'count', {
+      configurable: true,
       get(this: unknown) {
         if (++reads > BUDGET)
           throw new Error(
-            `shape query blew up: over ${BUDGET} source \`count\` reads`
+            `shape query blew up: over ${BUDGET} base \`count\` reads`
           );
         return desc.get!.call(this);
       },
@@ -584,26 +819,32 @@ describe('conditional-handler shape queries are linear in depth', () => {
     try {
       f();
     } finally {
-      Object.defineProperty(proto, 'count', desc);
+      delete (base as Record<string, unknown>)['count'];
     }
     return reads;
   }
 
   test('count / isFiniteCollection on a depth-30 chain are O(depth)', () => {
     const ce = new ComputeEngine();
-    const chain = insertChain(ce, 110, 30);
+    const { chain, base } = insertChain(ce, 110, 30);
 
-    // ONE source `count` read per level (31 for count, 30 for the facets that
-    // bottom out at the list literal) — not 2^30. The bound is deliberately
-    // loose: what it separates is linear from exponential, not 31 from 40.
-    expect(countingReads(chain, () => expect(chain.count).toBe(140))).toBeLessThan(200);
+    // Linear behavior reads the base literal's `count` about once per
+    // query (only the innermost level touches it); the old exponential
+    // behavior reached it 2^30 times. The bound separates linear from
+    // exponential — it is deliberately far above 1 and far below the
+    // budget. The first probe also pins NON-VACUITY (≥ 1): if the own
+    // accessor ever stops shadowing the prototype getter, the counter
+    // stays 0 and this fails rather than passing an inert test.
+    const first = countingBaseReads(base, () => expect(chain.count).toBe(140));
+    expect(first).toBeGreaterThanOrEqual(1);
+    expect(first).toBeLessThan(50);
     expect(
-      countingReads(chain, () => expect(chain.isFiniteCollection).toBe(true))
-    ).toBeLessThan(200);
+      countingBaseReads(base, () => expect(chain.isFiniteCollection).toBe(true))
+    ).toBeLessThan(50);
     expect(
-      countingReads(chain, () => expect(chain.isEmptyCollection).toBe(false))
-    ).toBeLessThan(200);
-    expect(countingReads(chain, () => expect(chain.at(1)!.re).toBe(129))).toBeLessThan(200);
+      countingBaseReads(base, () => expect(chain.isEmptyCollection).toBe(false))
+    ).toBeLessThan(50);
+    expect(countingBaseReads(base, () => expect(chain.at(1)!.re).toBe(129))).toBeLessThan(50);
 
     // The evaluated view answers the same. (Evaluation itself is O(depth²) —
     // each level runs its own shape queries — which the memo then collapses
