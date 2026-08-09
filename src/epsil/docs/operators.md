@@ -32,9 +32,9 @@ spanning multiple lines without requiring a separator between expressions
 
 :::
 
-The implementation's source of truth for operator spelling, precedence, and
-associativity is `src/epsil/operators.ts`. Both the parser and serializer read
-that table. The reference table below mirrors it.
+The table below is the complete set of operators, with their spelling,
+precedence and associativity — if a symbol is not listed there, it is not an
+operator.
 
 ## Precedence
 
@@ -123,15 +123,39 @@ more useful to the author than silently ending the statement.
 
 ## Pipe: `|>` and `~>` {#pipe}
 
+`x |> f` is `f(x)`. Chained, it lets a sequence of transformations be read in
+the order they happen instead of inside-out:
+
+```epsil-live
+[3, 1, 2] |> Sort |> Reverse
+// ➔ [3, 2, 1]
+```
+
+A stage that takes more than one argument is written as a call, with `_` in the
+slot the piped value fills:
+
+```epsil-live
+1..10 |> Filter(_, n |-> n % 2 == 1) |> Map(_, n |-> n^2) |> Sum
+// ➔ 165
+```
+
+The `_` is not optional. `xs |> Map(f)` pipes `xs` into the one-argument call
+`Map(f)` and quietly yields a symbolic expression rather than a list.
+
 `|>` and `~>` are aliases for `Pipe` and sit at the **loosest** precedence
 tier, right below `Assign` — looser than arithmetic, relational, and boolean
-operators (Elixir-style):
+operators (Elixir-style). It is left-associative, so `a |> f |> g` is `g(f(a))`:
 
 ```epsil
 a + b |> f       // (a + b) |> f
 a || b |> f      // (a || b) |> f
 x = a |> f       // x = (a |> f)
 ```
+
+<ReadMore path="/epsil/control-flow/#pipelines">
+When to reach for a **pipeline** — and when a nested call or a named
+intermediate reads better.
+</ReadMore>
 
 ## Absence coalescing: `??` {#absence-coalescing}
 

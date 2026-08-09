@@ -54,6 +54,10 @@ function routeKey(route: string): string {
 }
 
 function headingSlug(heading: string): string {
+  // An explicit `{#anchor}` attribute wins, as it does in Docusaurus.
+  const explicit = heading.match(/\{#([^}\s]+)\}\s*$/);
+  if (explicit) return explicit[1];
+
   return heading
     .toLowerCase()
     .replace(/<[^>]+>/g, '')

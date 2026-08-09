@@ -19,6 +19,11 @@ let x = 5
 const c = 6.28
 ```
 
+Reach for `const` when the name stands for something fixed — a physical
+constant, a conversion factor, a lookup table — so that an accidental write is
+reported instead of quietly taking effect. Use `let` for anything that varies:
+accumulators, loop state, values you refine as you go.
+
 A type annotation also **implies** a declaration, even without a keyword:
 
 ```epsil
@@ -159,8 +164,9 @@ let y
 Without an annotation, the type is inferred from the initializer — `let x = 5`
 declares `x` as an `integer`.
 
-Constness is a property of the **binding**, not of the type, and it is enforced
-by the runtime rather than by a separate Epsil-side check. See
+Constness is a property of the **binding**, not of the type: `const` says that
+*this name* will not be written again, and says nothing about the value it
+holds — there is no such thing as a constant type. See
 [Declarations](/epsil/implementation/#declarations) for the underlying
 representation.
 

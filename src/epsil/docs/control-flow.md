@@ -40,6 +40,24 @@ value against that annotation.
 f(x: real) = x + 1
 ```
 
+### Which form to use
+
+The three spellings differ only in ergonomics, so pick by the shape of the
+body:
+
+- **Math style** (`f(x) = …`) for a formula that fits on one line. It is how
+  the definition would be written on paper, and it is the right default for
+  mathematical code.
+- **Block style** (`function f(x) { … }`) once the body needs more than an
+  expression — a local `let`, a `match`, a loop. It is also the only form that
+  carries a name *and* a multi-statement body.
+- **Anonymous** (`x |-> …`) when the function is an argument to another
+  function and a name would add nothing: `Map(xs, x |-> x^2)`.
+
+An anonymous function can have a multi-statement body too, by making that body
+a [`do` block](#do-block-expressions) — but at that point a named `function` is
+usually clearer.
+
 ### Effect specifiers
 
 A definition can state the effects that calling it may perform. The specifier
@@ -517,6 +535,42 @@ match 3 {
 
 Evaluating this expression yields `Error("match-no-case", 3)`.
 
+### `if`, `a if c else b`, or `match`? {#choosing-a-conditional}
+
+All three produce a value, so the choice is about what you are branching *on*.
+
+Branch on a **condition** — something that is true or false — with `if`. Use
+the block form when a branch needs more than one statement, and the
+[conditional expression](#the-conditional-expression-a-if-c-else-b) when both
+branches are single expressions and the braces are just noise:
+
+```epsil-live
+let n = -3
+"negative" if n < 0 else "zero" if n == 0 else "positive"
+// ➔ "negative"
+```
+
+Branch on the **shape** of a value — how it is built, and what is inside it —
+with `match`. It tests structure and binds the pieces in the same step, which
+an `if` chain cannot do without taking the value apart by hand:
+
+```epsil-live
+let v = [1, 2]
+match v {
+  [] => "empty"
+  [x] => "one item"
+  [_, ...] => "several items"
+}
+// ➔ "several items"
+```
+
+Two differences are worth remembering when the subject may be symbolic.
+`match` is **structural**: a symbolic `x` is not `0`, even though it might turn
+out to be zero, so it takes the wildcard case. And `match` is **total**: it
+always selects a case (or returns a `match-no-case` error), where an `if` on an
+undecidable condition can stay inert. When you want the semantic question —
+"is this actually zero?" — use `if`.
+
 ## Loops
 
 There is one loop keyword form for each of the two common shapes. Both are
@@ -544,6 +598,114 @@ value of `a in b`:
 ```epsil
 for x in a in b { x }
 ```
+
+## Pipelines
+
+`x |> f` means exactly `f(x)`. For a single call that is a wash — `Sqrt(2)`
+says it better than `2 |> Sqrt`. What the pipe buys you is **reading order**
+once several transformations are applied one after another.
+
+Here is the same computation — keep the passing scores, curve them, take the
+average — written three ways.
+
+Nested calls:
+
+```epsil-live
+let scores = [88, 42, 95, 61, 73]
+Mean(Map(Filter(scores, s |-> s >= 60), s |-> s + 5))
+// ➔ 337/4
+```
+
+Named intermediates:
+
+```epsil-live
+let scores = [88, 42, 95, 61, 73]
+let passing = Filter(scores, s |-> s >= 60)
+let curved = Map(passing, s |-> s + 5)
+Mean(curved)
+// ➔ 337/4
+```
+
+A pipeline:
+
+```epsil-live
+let scores = [88, 42, 95, 61, 73]
+scores |> Filter(_, s |-> s >= 60) |> Map(_, s |-> s + 5) |> Mean
+// ➔ 337/4
+```
+
+All three compute the same value. They differ in what the reader has to do.
+The nested form is written **inside-out**: to follow it you find `scores` in
+the middle and unwind outward, discovering only at the end that the last step
+is an average. The pipeline is written in the order the steps happen, and the
+subject comes first. The `let` version reads in that order too, at the price of
+naming two values that exist only to be handed to the next line.
+
+### The placeholder `_` {#pipe-placeholder}
+
+A stage that needs only the piped value is named bare:
+
+```epsil-live
+16 |> Sqrt |> N
+// ➔ 4
+```
+
+A stage that takes **more than one** argument is written as a call, with `_`
+marking the slot the piped value fills. It does not have to be the first
+argument:
+
+```epsil-live
+[3, 1, 2] |> Sort |> Take(_, 2)
+// ➔ [1, 2]
+```
+
+:::warning[The one trap]
+`xs |> Map(f)` does **not** partially apply `Map`. It pipes `xs` into the
+one-argument call `Map(f)`, which is not a computation Epsil knows how to
+perform — so the result is a symbolic `Map` expression, with no error to
+warn you. Whenever a stage is a call, write the `_`.
+
+```epsil
+[1, 2, 3] |> Map(_, n |-> n^2)      // ✅ [1, 4, 9]
+[1, 2, 3] |> Map(n |-> n^2)         // ❌ stays symbolic
+```
+
+:::
+
+### Choosing between a pipeline and a nested call
+
+Reach for a pipeline when:
+
+- there are **three or more** steps, and
+- each step consumes the whole result of the one before it, and
+- the intermediate values have no name worth inventing.
+
+Prefer a nested call when the expression is **mathematical** rather than a
+sequence of stages. `Sqrt(1 + x^2)` is how the formula is written on paper;
+`1 + x^2 |> Sqrt` is the same value spelled worse. One or two calls rarely
+benefit either way — `Mean(xs)` needs no pipe.
+
+Prefer named intermediates when a value is **used twice**, deserves a name that
+explains what it is, or is worth inspecting while you develop. A pipeline is a
+straight line: it cannot fork, so the moment a result feeds two places, give it
+a `let`.
+
+### Precedence
+
+`|>` sits at the loosest tier of all the computing operators, so a stage may be
+an arbitrary arithmetic or boolean expression without parentheses, and a
+pipeline is the whole right-hand side of an assignment:
+
+```epsil
+a + b |> f        // (a + b) |> f
+a || b |> f       // (a || b) |> f
+x = a |> f        // x = (a |> f)
+```
+
+It is left-associative, so `a |> f |> g` is `g(f(a))`, which is what reading it
+left to right suggests. `~>` is an alias for `|>`; the two are the same
+operator, and a program written back out uses `|>`. See
+[Operators](/epsil/operators/#pipe) for the table entry.
 
 ## Blocks
 
