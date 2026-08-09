@@ -109,11 +109,7 @@ describe('Sibling predicate consumers with an Error-valued result', () => {
       const ce = new ComputeEngine();
       expect(() =>
         ce
-          .box([
-            op,
-            ['List', 1, 2, 3],
-            ['Function', ['Add', 'k', 1], 'k'],
-          ])
+          .box([op, ['List', 1, 2, 3], ['Function', ['Add', 'k', 1], 'k']])
           .evaluate()
       ).toThrow('must return "True" or "False"');
     });
@@ -131,5 +127,235 @@ describe('Sibling predicate consumers with an Error-valued result', () => {
         .evaluate()
         .toString()
     ).toBe('2');
+  });
+});
+
+/**
+ * The While family stops (or stops dropping) at the first element the
+ * predicate does not answer `True` for. An Error-VALUED result used to be
+ * absorbed by that "not True" branch, so an undecidable element was
+ * indistinguishable from a legitimate `False`: `TakeWhile` silently truncated
+ * and `DropWhile` silently passed the element through as a value.
+ *
+ * Both now EMIT the element's `Error` in its place, as `Filter` does, at the
+ * boundary the predicate stopped at:
+ *  - `TakeWhile` emits it, then terminates (no later element can be in the
+ *    prefix);
+ *  - `DropWhile` emits it, then passes the rest of the source through (the
+ *    predicate is never applied past the first non-True element).
+ */
+const ERR =
+  'Error(ErrorCode("incompatible-type", "finite_integer", ' + '"finite_real"))';
+
+describe('While family with an Error-valued predicate result', () => {
+  test('TakeWhile emits the error, then stops', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'TakeWhile',
+          ['List', 1.5, 2.5],
+          annotatedPredicate('n', 'finite_integer'),
+        ])
+        .evaluate()
+        .toString()
+    ).toBe(`[${ERR}]`);
+  });
+
+  test('TakeWhile keeps the valid prefix before the error', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'TakeWhile',
+          ['List', 1, 2.5, 3, 4],
+          annotatedPredicate('n', 'finite_integer'),
+        ])
+        .evaluate()
+        .toString()
+    ).toBe(`[1,${ERR}]`);
+  });
+
+  test('TakeWhile reports the error prefix as non-empty, of length 1', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'TakeWhile',
+      ['List', 1.5, 2.5],
+      annotatedPredicate('n', 'finite_integer'),
+    ]);
+    expect(expr.isEmptyCollection).toBe(false);
+    expect(expr.count).toBe(1);
+  });
+
+  test('TakeWhile with a genuine False stop is unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'TakeWhile',
+          ['List', 1, 2, -3, 4],
+          ['Function', ['Greater', 'k', 0], 'k'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2]');
+    expect(
+      ce
+        .box([
+          'TakeWhile',
+          ['List', 1, 2, 3],
+          ['Function', ['Greater', 'k', 0], 'k'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,3]');
+  });
+
+  test('DropWhile emits the error in place, then passes the rest through', () => {
+    const ce = new ComputeEngine();
+    // The first element is already undecidable: the error stands in for it,
+    // and the remaining elements follow unfiltered.
+    expect(
+      ce
+        .box([
+          'DropWhile',
+          ['List', 1.5, 2.5],
+          annotatedPredicate('n', 'finite_integer'),
+        ])
+        .evaluate()
+        .toString()
+    ).toBe(`[${ERR},2.5]`);
+  });
+
+  test('DropWhile drops the valid True run before the error', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'DropWhile',
+          ['List', 1, 2.5, 3, 4],
+          annotatedPredicate('n', 'finite_integer'),
+        ])
+        .evaluate()
+        .toString()
+    ).toBe(`[${ERR},3,4]`);
+  });
+
+  test('DropWhile with a genuine False stop is unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'DropWhile',
+          ['List', 1, 2, -3, 4],
+          ['Function', ['Greater', 'k', 0], 'k'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[-3,4]');
+    expect(
+      ce
+        .box([
+          'DropWhile',
+          ['List', 1, 2, 3],
+          ['Function', ['Greater', 'k', 0], 'k'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[]');
+  });
+});
+
+/**
+ * `Filter`'s `contains` handler mapped every non-`True` predicate result to a
+ * definite `false`. For an Error-VALUED result that is an unsound answer: the
+ * predicate could not judge the element, so membership is UNDECIDED and the
+ * handler must decline by returning `undefined` (the documented "cannot be
+ * determined" signal of `CollectionHandlers.contains`).
+ */
+describe('Filter contains with an Error-valued predicate result', () => {
+  test('membership is undecided, not false', () => {
+    const ce = new ComputeEngine();
+    const filtered = ce.box([
+      'Filter',
+      ['List', 1.5, 2.5],
+      annotatedPredicate('n', 'finite_integer'),
+    ]);
+    expect(filtered.contains(ce.number(1.5))).toBe(undefined);
+    // ...and the `Element` query stays symbolic instead of answering False.
+    expect(
+      ce
+        .box([
+          'Element',
+          1.5,
+          [
+            'Filter',
+            ['List', 1.5, 2.5],
+            annotatedPredicate('n', 'finite_integer'),
+          ],
+        ])
+        .evaluate().operator
+    ).toBe('Element');
+  });
+
+  test('True and False answers are unchanged', () => {
+    const ce = new ComputeEngine();
+    const predicate = ['Function', ['Greater', 'k', 2], 'k'];
+    const filtered = ce.box(['Filter', ['List', 1, 2, 3], predicate]);
+    expect(filtered.contains(ce.number(3))).toBe(true);
+    // In the source, but rejected by the predicate.
+    expect(filtered.contains(ce.number(1))).toBe(false);
+    // Not in the source at all.
+    expect(filtered.contains(ce.number(9))).toBe(false);
+    expect(
+      ce
+        .box(['Element', 3, ['Filter', ['List', 1, 2, 3], predicate]])
+        .evaluate().symbol
+    ).toBe('True');
+    expect(
+      ce
+        .box(['Element', 1, ['Filter', ['List', 1, 2, 3], predicate]])
+        .evaluate().symbol
+    ).toBe('False');
+  });
+});
+
+/**
+ * `color` is a concrete leaf primitive, so it is admitted by the element-type
+ * gate of the per-application lambda-parameter inference: an inline callback
+ * over a `list<color>` gets its parameter stamped `(c: color)`.
+ */
+describe('color is an admissible inferred element type', () => {
+  /** A two-element `list<color>`, built through the public `Color` operator. */
+  const colorList = (ce: ComputeEngine) =>
+    ce.box(['List', ['Color', "'red'"], ['Color', "'blue'"]]).evaluate();
+
+  test('a Map callback over a color list is stamped (c: color)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('cs', colorList(ce));
+    const expr = ce.box([
+      'Map',
+      'cs',
+      ['Function', ['ColorToString', 'c'], 'c'],
+    ]);
+    expect(expr.ops[1].type.toString()).toBe('(c: color) -> string');
+    expect(expr.toMathJson()).toEqual([
+      'Map',
+      'cs',
+      ['Function', ['ColorToString', 'c'], ['Typed', 'c', "'color'"]],
+    ]);
+    expect(expr.evaluate().toString()).toBe('["#d7170b","#0d80f2"]');
+  });
+
+  test('a Filter callback over a color list is stamped and evaluates', () => {
+    const ce = new ComputeEngine();
+    ce.assign('cs', colorList(ce));
+    const expr = ce.box([
+      'Filter',
+      'cs',
+      ['Function', ['Equal', ['ColorToString', 'c'], "'#d7170b'"], 'c'],
+    ]);
+    expect(expr.ops[1].type.toString()).toBe('(c: color) -> boolean');
+    expect(expr.evaluate().count).toBe(1);
   });
 });

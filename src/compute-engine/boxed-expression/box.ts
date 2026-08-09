@@ -906,14 +906,20 @@ function isSpreadOperand(x: ExpressionInput): boolean {
 }
 
 /** The CONCRETE scalar primitives {@link admissibleElementType} admits: the
- * numeric types plus `boolean` and `string`. Every other primitive — the
- * abstract supertypes (`scalar`, `value`, `expression`, …), the bare composite
- * names (`'tuple'`, `'collection'`, …) and `unknown`/`any`/`never` — declines.
+ * numeric types plus `boolean`, `string` and `color`. Every other primitive —
+ * the abstract supertypes (`scalar`, `value`, `expression`, …), the bare
+ * composite names (`'tuple'`, `'collection'`, …) and `unknown`/`any`/`never` —
+ * declines.
+ *
+ * `color` is a leaf primitive with no subtypes of its own (it is not in
+ * `SCALAR_TYPES`, but only because `scalar` does not cover it), so the
+ * union-like exclusion rationale below does not apply to it.
  */
 const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
   ...NUMERIC_TYPES,
   'boolean',
   'string',
+  'color',
 ]);
 
 /**

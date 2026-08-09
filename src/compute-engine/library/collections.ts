@@ -2735,7 +2735,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return false;
         if (!(expr.op1.contains(target) ?? false)) return false;
         const f = applicable(expr.op2);
-        return sym(f([target])) === 'True';
+        const applied = f([target]);
+        if (sym(applied) === 'True') return true;
+        // An element-valued predicate failure (see `predicateErrorValue`)
+        // leaves membership UNDECIDED: answering `false` would be an unsound
+        // definite answer about an element the predicate could not judge. Any
+        // other non-True result keeps the existing `false`.
+        if (predicateErrorValue(applied)) return undefined;
+        return false;
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -3156,7 +3163,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (first.done) return true;
         const f = applicable(expr.op2);
         if (!f) return undefined;
-        return sym(f([first.value])) !== 'True';
+        const applied = f([first.value]);
+        if (sym(applied) === 'True') return false;
+        // An element-valued predicate failure is EMITTED by the iterator (see
+        // `predicateErrorValue`), so the prefix holds that one `Error` element
+        // and the result is not empty.
+        return predicateErrorValue(applied) === undefined;
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -3193,6 +3205,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             }
             if (sym(pred) === 'True') return { value, done: false };
             stopped = true;
+            // The predicate failed on this ELEMENT (e.g. its `Typed` parameter
+            // annotation rejected it): whether the element belongs to the
+            // prefix is UNDECIDED, and silently stopping would be
+            // indistinguishable from a legitimate `False`. Emit that `Error`
+            // value in the element's place — as `Filter`/`Map` do — then
+            // terminate: no later element can be in the prefix either.
+            const err = predicateErrorValue(pred);
+            if (err) return { value: err, done: false };
             return { value: undefined, done: true };
           },
         };
@@ -3274,8 +3294,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               const { value, done } = source.next();
               if (done) return { value: undefined, done: true };
               if (dropping) {
-                if (sym(f([value])) === 'True') continue;
+                const pred = f([value]);
+                if (sym(pred) === 'True') continue;
                 dropping = false;
+                // Mirror of `TakeWhile`: an element-valued predicate failure
+                // (see `predicateErrorValue`) leaves it UNDECIDED whether this
+                // element is still part of the dropped run, so including it
+                // silently as a value would be indistinguishable from a
+                // legitimate `False`. Emit the `Error` in the element's place;
+                // the rest of the source is not predicate-dependent (the
+                // predicate is never applied past the first non-True element)
+                // and passes through unchanged.
+                const err = predicateErrorValue(pred);
+                if (err) return { value: err, done: false };
               }
               return { value, done: false };
             }
