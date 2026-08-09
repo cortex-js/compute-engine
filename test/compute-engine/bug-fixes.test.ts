@@ -324,6 +324,56 @@ describe('Playground regressions', () => {
       ce.assign('a', ce.number(7));
       expect(ce.box('a').N().json).toEqual(7);
     });
+
+    // `Map` is the one lazy collection operator that delegates its shape
+    // predicates to its SOURCE (`mapSource`), so a self-referential binding
+    // reached the value through `evaluate()`/`_dereference` rather than the
+    // guarded `_value`: `isFinite` → `mapSource` → `evaluate()` →
+    // `isFiniteCollection` → `isFinite`, one frame deeper each turn. The
+    // dereference cycle guard could not see it — it is released before the
+    // caller queries the returned value, so every turn is a *completed*
+    // dereference. `mapSource` now declines to resolve a self-referential
+    // source, which puts `Map` on the same symbolic residual as `Filter`.
+    const selfRefMap = (ce: ComputeEngine) => {
+      ce.assign('xs', ce.box(['List', 1, 2, 3]));
+      ce.assign('xs', ce.box(['Map', 'xs', ['Function', ['Add', 'v', 1], 'v']]));
+    };
+
+    test('`xs := Map(xs, f)` stays symbolic instead of overflowing', () => {
+      const ce = new ComputeEngine();
+      selfRefMap(ce);
+      expect(() => ce.box(['Sum', 'xs']).evaluate()).not.toThrow();
+      expect(() => ce.box(['Length', 'xs']).evaluate()).not.toThrow();
+      expect(() => ce.box('xs').isFiniteCollection).not.toThrow();
+    });
+
+    test('a self-referential `Filter` behaves the same way', () => {
+      const ce = new ComputeEngine();
+      ce.assign('ys', ce.box(['List', 1, 2, 3]));
+      ce.assign('ys', ce.box(['Filter', 'ys', ['Function', ['Greater', 'v', 1], 'v']]));
+      expect(() => ce.box(['Sum', 'ys']).evaluate()).not.toThrow();
+    });
+
+    test('a non-self-referential `Map` source still resolves', () => {
+      const ce = new ComputeEngine();
+      ce.assign('as', ce.box(['List', 1, 2, 3]));
+      ce.assign('bs', ce.box(['Map', 'as', ['Function', ['Add', 'v', 1], 'v']]));
+      expect(ce.box(['Sum', 'bs']).evaluate().json).toEqual(9);
+    });
+
+    // The guard keys on the binding, not on `Map`: an eager or broadcast
+    // source must still be resolved by `mapSource` (its whole purpose).
+    test('`Map` over a broadcast source still resolves', () => {
+      const ce = new ComputeEngine();
+      ce.assign('X', ce.box(['List', 1, 2, 3]));
+      const expr = ce.box([
+        'Map',
+        ['Subtract', 'X', 1],
+        ['Function', ['Add', 'v', 1], 'v'],
+      ]);
+      expect(expr.isFiniteCollection).toBe(true);
+      expect(ce.box(['Sum', expr]).evaluate().json).toEqual(6);
+    });
   });
 
   // Parsing a call `f(S)` ran argument-type inference on `S`; when the callee

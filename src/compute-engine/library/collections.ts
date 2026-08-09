@@ -435,6 +435,19 @@ function iterateArgs(
 function mapSource(xs: Expression): Expression {
   if (xs.isCollection) return xs;
   if (!xs.type.matches('collection')) return xs;
+  // Guard: a self-referential binding (`xs := Map(xs, f)`) resolves to a value
+  // that mentions `xs`, and that value's own shape predicates route straight
+  // back here — `isFinite` → `mapSource` → `evaluate()` → `isFiniteCollection`
+  // → `isFinite`, one stack frame deeper each turn.
+  //
+  // `BoxedSymbol._value` already treats such a binding as unbound, but
+  // `evaluate()` reaches the stored value by the `_dereference` path instead,
+  // and that path's cycle guard is released before the CALLER queries the
+  // returned value — so each turn is a *completed* dereference and the guard
+  // never sees the re-entry. Leaving the source unresolved here is what every
+  // other lazy operator already does with a source it cannot resolve, and it
+  // puts `Map` on the same symbolic-residual behavior as `Filter`.
+  if (xs.valueDefinition?.isSelfReferential) return xs;
   const evaluated = xs.evaluate();
   return evaluated.isCollection ? evaluated : xs;
 }
