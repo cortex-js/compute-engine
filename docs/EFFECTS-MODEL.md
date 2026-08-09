@@ -1376,14 +1376,88 @@ disposition so the question is not re-litigated:**
   an error (nothing to write back into) while the declaration is fine.
 
   **Not yet ruled**: whether the parameter discipline is wanted at all.
-  Cost asymmetry worth pricing first — the effect specifier slot is
-  positionally isolated, so admitting a label can never change the parse
-  of an existing type string ("Grammar and AST"), whereas a parameter
-  mode keyword lives in full-type position and must be reserved: neither
-  `mutable` nor `inout` is in `RESERVED_WORDS` today
-  (`src/epsil/reserved-words.ts` — `var` is reserved-but-unused), so both
-  are legal identifiers and claiming either is a visible compat event.
-  Reserving the chosen word is cheap now and gets dearer later.
+  The cost asymmetry that framed this question — a parameter mode keyword
+  lives in full-type position and must be reserved, whereas the effect
+  specifier slot is positionally isolated and can admit a label without
+  ever changing the parse of an existing type string ("Grammar and AST")
+  — **no longer bears on the decision: both candidate words are already
+  reserved.** `mutable` and `inout` are in `RESERVED_WORDS`
+  (`src/epsil/reserved-words.ts`, both marked not-in-use and pointing
+  here; `var` likewise). Claiming either is therefore no longer a compat
+  event, and the naming question below is a pure readability trade with
+  no land-grab deadline attached. Do not re-price this.
+
+  **Implementing the optimization — two tiers, one guarantee** *(recorded
+  2026-08-09; scoping notes for the efficient-functional-update work, not
+  a ruling)*. The priority ruling above leaves the semantics fixed —
+  every update form is a rebinding — so all that remains is making the
+  rebuild cheap. The two execution tiers should do that by **different
+  mechanisms**, which is sound precisely because the optimization is
+  unobservable: they owe each other the same *guarantee* (an in-place
+  update fires only where no live reference can see it), not the same
+  machinery. Nothing here requires a semantic split or a behavioral
+  difference to test for.
+
+  - **Interpreted tier — dynamic, via reference counts.** In-place-iff-
+    unique, the `isKnownUniquelyReferenced` discipline. Note the
+    *direction*: the baseline here is already persistent, so this is not
+    "copy on write" but *elide the copy when unique* — opportunistic
+    destructive update, the Koka/Perceus and Clean/uniqueness-typing
+    lineage. Three scoping facts, each verified against the tree:
+    - **Which nodes carry a counter is narrower than "collection type."**
+      Most collection-typed values have no spine to mutate: probed,
+      `Append([1,2],3)` stays an `Append` node with `lazy=true`,
+      `Range(1,1000000)` reports `count=1000000` without materializing.
+      The gate is a *runtime representation* property (materialized
+      `List`/`Dictionary` spines), not a static type. Edge to state
+      explicitly rather than inherit: `string` is **not** `<: collection`
+      in this lattice, so a type-keyed gate silently excludes it, while
+      `dictionary`, `set`, `tuple` and `matrix` all are.
+    - **Only spine nodes along the mutation path need counters**, not
+      elements — an update rewrites a pointer slot and leaves the element
+      shared. That is what keeps the counted set small.
+    - **Maintaining the count is engine-wide and type-blind.** Every
+      retention site is a reference whatever its own type — bindings,
+      held operands, the per-node memo fields, rule captures, the
+      serializer boundary, and any parent's `_ops`. The error asymmetry
+      is the invariant to build against: a missed *decrement* costs an
+      optimization; a missed *increment* is silent unsoundness. Hence
+      increment-on-every-store, and unaccounted provenance ⇒ shared.
+      Representation note: `BoxedFunction._ops` is `private readonly`
+      today, so the materialized spine changes shape before any of this
+      is expressible.
+
+  - **Compiled tier — static, no counters.** This is the *favorable* case,
+    not the harder one: finding 3's "escape/alias analysis, which the
+    engine has nowhere" is a statement about the boxed-expression graph,
+    where retention is unbounded and invisible. A compiled artifact is a
+    closed world and the compiler sees every store. Two analyses carry
+    it: **last-use/liveness** (`xs = Append(xs, v)` with the old `xs` dead
+    after — the dominant idiom, decidable locally, linearity recovered
+    from liveness rather than declared in types) and **escape analysis**
+    (does the value reach a return, a closure capture, an outer binding,
+    or an unseen callee?). The call boundary is the weak spot — a callee
+    cannot know whether its argument is shared — with two exits:
+    monomorphize/inline (viable, since `ensureUserFunctionEmitted`
+    already emits bodies per artifact, closing the callee set) or put
+    uniqueness in the signature, which is the deferred parameter-mode
+    discussion above. Keep the tier's existing polarity: **prove
+    uniqueness or copy.** Payoff is JS/Python only — GLSL/WGSL have
+    fixed-size arrays and no dynamic collections.
+
+  - **Interaction with CSE — sequence this deliberately.** CSE
+    *manufactures* the aliasing a destructive-update pass must prove
+    absent: `2026-07-28-compile-cse-design.md` §5.3 binds repeated
+    non-scalar subtrees so every occurrence references **one shared
+    runtime object**, and its highest-value candidates are exactly the
+    `PointList`/`List` spines this optimization would target. That
+    design's landing gate — "no JS/interval helper mutates its input or
+    relies on input identity" — is the invariant in-place update
+    violates by definition. Resolution is available (run the uniqueness
+    analysis after CSE and treat every CSE temp as shared by
+    construction, or have CSE decline candidates a later pass wants to
+    mutate) but it must be chosen, not discovered; a cross-reference is
+    recorded at that §.
 
 Rejected as effects: **`diverge`/nontermination** (handled dynamically,
 `TIMEOUT-MODEL.md`; not inferable; no consumer); **GPU/target

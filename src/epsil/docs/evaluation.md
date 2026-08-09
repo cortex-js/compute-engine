@@ -43,6 +43,122 @@ N(Ln(2))
 
 evaluates to `0.6931471805599453…`.
 
+## Values and bindings
+
+Epsil keeps apart two things many languages blur together:
+
+- A **value** — a number, a string, a list, a dictionary, a function — is
+  **immutable**. Once it exists, nothing anywhere can change it.
+- A **binding** — the association between a name and a value — is the part
+  that changes. `let` introduces a binding you may reassign; `const` one you
+  may not. See [Declarations](/epsil/declarations/).
+
+Everything below follows from those two sentences.
+
+**There is no in-place modification.** A collection cannot be updated
+element by element:
+
+```epsil
+let xs = [1, 2, 3]
+xs[2] = 9
+// ➔ Error(ErrorCode("incompatible-type", "symbol", "number"))
+```
+
+Build the value you want and rebind the name:
+
+```epsil
+let xs = [1, 2, 3]
+xs = Join([xs[1]], [9], [xs[3]])
+xs
+// ➔ [1, 9, 3]
+```
+
+Operators never modify what you hand them — `Append`, `Sort`, `Join`,
+`Map`, `Filter` all return a **new** collection:
+
+```epsil
+let xs = [3, 1, 2]
+let ys = Sort(xs)
+(xs, ys)
+// ➔ ([3, 1, 2], [1, 2, 3])
+```
+
+**Reassigning one name never disturbs another.** Two names holding the same
+value are independent, because there is no way to reach a value *through* a
+name and alter it:
+
+```epsil
+let a = [1, 2, 3]
+let b = a
+a = [9, 9, 9]
+b
+// ➔ [1, 2, 3]
+```
+
+This is what makes a value safe to pass around: no function you call, and no
+name you assign to, can change a collection out from under you. There are no
+references, no aliasing and no object identity — two collections are the same
+when they have the same contents, and that is all `==` ever asks:
+
+```epsil
+[1, 2, 3] == [1, 2, 3]
+// ➔ True
+```
+
+**A parameter is a binding of its own.** A function may reassign its
+parameter; the caller's binding is untouched:
+
+```epsil
+function reset(v) {
+  v = 0
+  v
+}
+let n = 7
+let r = reset(n)
+(n, r)
+// ➔ (7, 0)
+```
+
+**A closure captures the binding, not a snapshot of its value.** This is the
+one place where the distinction is directly visible. A function that refers
+to an outer name reads that name's *current* value each time it runs:
+
+```epsil
+let x = 1
+f() = x
+x = 2
+f()
+// ➔ 2
+```
+
+Each call of an enclosing function creates fresh bindings, so closures made
+by separate calls have separate state, while closures made by the same call
+share it:
+
+```epsil
+function counter() {
+  let n = 0
+  function bump() { n = n + 1; n }
+  bump
+}
+let c1 = counter()
+let c2 = counter()
+(c1(), c1(), c2())
+// ➔ (1, 2, 1)
+```
+
+`c1` and `c2` count independently.
+
+Reach for `const` when a name should not move at all. Constness is a property
+of the *binding*, not of the value it holds — every value is immutable
+already — and writing to one yields an `Error` value rather than quietly
+taking effect:
+
+```epsil
+const c = 1
+c = 2
+```
+
 ## Collections: literals are values, pipelines are generators
 
 A collection **literal** — a list `[…]`, set `{…}`, tuple `(…)`, or

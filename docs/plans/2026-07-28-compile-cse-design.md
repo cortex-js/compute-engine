@@ -545,6 +545,34 @@ in-place mutation before enabling; a helper found mutating copies first
 (a pre-existing hazard for `vars`-backed collections regardless of CSE).
 Pinned by test (§8).
 
+**Forward hazard — efficient functional update (noted 2026-08-09).** The
+landing gate above is stated as an absolute ("no helper mutates its
+input"), and that phrasing will not survive the efficient-functional-
+update work sketched in `EFFECTS-MODEL.md` (the deferred-`mutable`
+disposition, "Implementing the optimization"). That work compiles
+`xs = Append(xs, v)` / `xs[i] = v` to an in-place update wherever the
+old value is provably dead — i.e. **a helper that mutates its input, by
+design** — and its highest-value targets are the same `PointList`/`List`
+spines that are CSE's highest-value candidates. The two optimizations
+are therefore in direct tension: CSE manufactures precisely the sharing
+that destructive update must prove absent.
+
+This is resolvable, and cheaply, provided it is *chosen* rather than
+discovered later as a miscompile. Either:
+
+1. the uniqueness analysis runs **after** CSE and treats every CSE temp
+   as shared by construction (a bound temp has ≥ 2 occurrences by
+   definition — that is the whole point of binding it), so a mutation
+   candidate reached through a temp simply copies; or
+2. CSE declines candidates that a later pass wants to mutate.
+
+(1) is the better default: it needs no new information at harvest time
+and keeps the two passes independent. Whichever is chosen, **§5.3's gate
+must be reworded** from "no helper mutates its input" to "no helper
+mutates its input except where uniqueness is proven, and CSE temps are
+never unique" — and the §8 pin updated to match. Until that work starts,
+the absolute form is correct and should stay as written.
+
 ### 5.4 Harvest boundary
 
 Harvest covers the root expression tree (post `rewriteAngularUnit`).
