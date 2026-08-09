@@ -12,6 +12,7 @@ import {
   BaseCompiler,
   isFlatAllStringComparisonParticipant,
   isMixedStringOrderingParticipants,
+  isNumericTupleParticipant,
   isProvablyStringComparisonParticipant,
   isProvablyTupleParticipant,
   unfaithfulComparisonAggregate,
@@ -151,40 +152,6 @@ function assertPyNoNestedTupleOrdering(
         `family admits point lists (whole-value \`_ce_eqcoll\`). ` +
         `Fail closed (D6) — the interpreter evaluates it.`
     );
-}
-
-/**
- * True when EVERY component of a provably-tuple participant is provably
- * NUMERIC, recursing into nested tuple components (a point of points qualifies)
- * and requiring every member of a union to qualify.
- *
- * The ADMISSION side of the tuple-equality carve-out, paired with
- * `isProvablyTupleParticipant` — see `compilePythonEquality`. Tuple-ness alone
- * is not enough on this target: `_ce_eqcoll`'s scalar leaf compares with Python
- * `==`, under which `True == 1`, so `Equal(Tuple(True), Tuple(1))` answered
- * `True` where the interpreter answers `False`. Anything but a provable number
- * — a boolean, a string, `unknown`, a union with a non-numeric member, or a
- * bare `tuple` with no component information at all — disqualifies, and the
- * aggregate gate then declines the head (fail closed).
- */
-function isNumericTupleParticipant(x: Expression): boolean {
-  const walk = (t: Type, visited?: ReadonlySet<TypeReference>): boolean => {
-    if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
-      const decl = declarationOf(t);
-      if (visited?.has(decl)) return false;
-      visited = new Set(visited).add(decl);
-    }
-    const r = resolveTypeForCompilation(t);
-    // A bare `tuple` carries no component information: nothing to prove numeric.
-    if (r === 'tuple' || r === 'never') return false;
-    if (typeof r !== 'string') {
-      if (r.kind === 'tuple')
-        return r.elements.every((e) => walk(e.type, visited));
-      if (r.kind === 'union') return r.types.every((m) => walk(m, visited));
-    }
-    return isSubtype(r, 'number');
-  };
-  return walk(x.type.type);
 }
 
 /**
@@ -1874,8 +1841,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // Matrix wraps List(List(...), ...) — compile as np.array for proper matrix ops
   Matrix: (args, compile) => `np.array(${compile(args[0])})`,
-  // Tuple compiles to a Python tuple
-  Tuple: (args, compile) => `(${args.map((x) => compile(x)).join(', ')})`,
+  // Tuple compiles to a Python tuple. The ARITY-1 form needs the trailing
+  // comma: `(True)` is a parenthesized SCALAR, not a 1-tuple, so `len(...)`
+  // raises and `_ce_eqcoll` would see a scalar where the interpreter has a
+  // point. `()` is already the empty tuple.
+  Tuple: (args, compile) => {
+    const parts = args.map((x) => compile(x));
+    if (parts.length === 1) return `(${parts[0]},)`;
+    return `(${parts.join(', ')})`;
+  },
   Sequence: (args, compile) => {
     // NumPy array
     return `np.array([${args.map((x) => compile(x)).join(', ')}])`;

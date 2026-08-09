@@ -135,6 +135,7 @@ import { checkDeadline } from '../../common/interruptible.js';
 import {
   BaseCompiler,
   isFlatAllStringComparisonParticipant,
+  isNumericTupleParticipant,
   isProvablyStringComparisonParticipant,
   isProvablyTupleParticipant,
   pointHasBroadcastComponent,
@@ -240,8 +241,9 @@ function assertNoStringOperand(
  * catching the same shapes.
  *
  * ONE carve-out, applied by the caller and not here: a BINARY `Equal`/`NotEqual`
- * whose EVERY participant is provably tuple-typed skips this gate — see
- * `compileJSEquality` and `isProvablyTupleParticipant`. The orderings and
+ * whose EVERY participant is provably tuple-typed with provably NUMERIC
+ * components skips this gate — see `compileJSEquality`,
+ * `isProvablyTupleParticipant` and `isNumericTupleParticipant`. The orderings and
  * `IndexOf` never take it.
  */
 function assertComparableAggregate(
@@ -338,7 +340,8 @@ function compileJSEquality(
   //
   // The one carve-out in the aggregate gate (maintainer-ruled): a BINARY
   // equality whose EVERY participant is provably tuple-typed
-  // (`isProvablyTupleParticipant`) keeps the `_SYS.eq`/`_SYS.neq` lowering it
+  // (`isProvablyTupleParticipant`) with provably NUMERIC components
+  // (`isNumericTupleParticipant`) keeps the `_SYS.eq`/`_SYS.neq` lowering it
   // had before the gate existed. Its array-vs-array branch is whole-value
   // equality, which is exactly the interpreter's atomic point comparison — at
   // equal arity and at unequal arity (a length mismatch is `false`, and so is
@@ -346,14 +349,24 @@ function compileJSEquality(
   // still decline: one non-tuple participant and `every` fails. The CHAINED
   // (n-ary) form is excluded — it keeps failing closed here, as it does below.
   //
+  // The numeric-component requirement mirrors the Python target's and closes
+  // that helper's numeric element leaf: its tolerance test coerces a boolean
+  // (`Math.abs(true - 1)` is 0), so `Equal(Tuple(True, 2), Tuple(1, 2))` ran to
+  // `true` and `NotEqual` of the same to `false`, against the interpreter's
+  // `False`/`True`. A boolean, `unknown` or otherwise non-numeric component now
+  // declines and the interpreter answers.
+  //
   // Gate ORDER is load-bearing: `assertNoStringOperand` runs unconditionally
-  // AFTER this, so a tuple with a string component
-  // (`Equal(Tuple(1, "a"), Tuple(1, "a"))`) still declines on string evidence —
-  // `typeHasStringEvidence` peels the tuple to the union `integer | string`.
-  // The tolerance test is NaN on that component, so `_SYS.eq` would answer
-  // `false` where the interpreter answers `True`.
+  // AFTER this, so a NON-tuple participant with string evidence still declines
+  // on it. A tuple with a string component
+  // (`Equal(Tuple(1, "a"), Tuple(1, "a"))`) is now caught one step earlier, by
+  // the numeric-component requirement — the tolerance test is NaN on that
+  // component, so `_SYS.eq` would answer `false` where the interpreter answers
+  // `True` either way.
   const tupleEquality =
-    args.length === 2 && args.every(isProvablyTupleParticipant);
+    args.length === 2 &&
+    args.every(isProvablyTupleParticipant) &&
+    args.every(isNumericTupleParticipant);
   if (!tupleEquality) assertComparableAggregate(kind, args);
   assertNoStringOperand(kind, args);
   // Equality over a (possibly-)collection operand: a raw `Math.abs(a - b)`

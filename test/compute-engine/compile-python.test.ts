@@ -512,6 +512,24 @@ describe('PYTHON TARGET', () => {
     });
   });
 
+  describe('Tuple emission', () => {
+    // A 1-tuple NEEDS the trailing comma: `(True)` is a parenthesized SCALAR,
+    // not a tuple, so `len(...)` raises and every consumer that treats the value
+    // as a point (`_ce_eqcoll`, indexing) sees the wrong kind. Executed parity
+    // for the singleton is pinned in `compile-python-parity.test.ts`
+    // (`tuple_singleton_bool` / `tuple_singleton_num`).
+    it('emits the trailing comma for a 1-tuple', () => {
+      expect(python.compile(ce.box(['Tuple', 'True'])).code).toBe('(True,)');
+      expect(python.compile(ce.box(['Tuple', 5])).code).toBe('(5,)');
+    });
+
+    it('emits the plain forms for arity 0 and 2+', () => {
+      expect(python.compile(ce.box(['Tuple'])).code).toBe('()');
+      expect(python.compile(ce.box(['Tuple', 1, 2])).code).toBe('(1, 2)');
+      expect(python.compile(ce.box(['Tuple', 1, 2, 3])).code).toBe('(1, 2, 3)');
+    });
+  });
+
   // Regressions for the WP-2.8 compilation P0 cluster (Python target side).
   describe('WP-2.8 P0 regressions', () => {
     it('parenthesizes a negative base under ** (P0-46)', () => {

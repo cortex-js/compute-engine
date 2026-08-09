@@ -777,6 +777,15 @@ const COLLECTION_CASES: Array<{ name: string; expr: any; expected: any }> = (() 
       expr: ['RowReduce', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]],
       expected: [[1, 0, -1], [0, 1, 2]],
     },
+    // A 1-tuple must emit `(x,)`, not `(x)` — the latter is a parenthesized
+    // SCALAR. These cases distinguish the two at run time: `_ser` maps a real
+    // tuple to a one-element list, whereas a scalar serializes to a bare
+    // bool/float and `expectDeepClose` fails the `Array.isArray` assertion.
+    { name: 'tuple_singleton_bool', expr: ['Tuple', 'True'], expected: [true] },
+    { name: 'tuple_singleton_num', expr: ['Tuple', 5], expected: [5] },
+    // …and `len()` over it, which raises `TypeError` on the scalar form.
+    { name: 'tuple_singleton_length', expr: ['Length', ['Tuple', 5]], expected: 1 },
+    { name: 'tuple_pair', expr: ['Tuple', 1, 2], expected: [1, 2] },
   ];
 })();
 

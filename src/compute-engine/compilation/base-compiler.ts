@@ -349,6 +349,42 @@ export function isProvablyTupleParticipant(x: Expression): boolean {
 }
 
 /**
+ * True when EVERY component of a provably-tuple participant is provably
+ * NUMERIC, recursing into nested tuple components (a point of points qualifies)
+ * and requiring every member of a union to qualify.
+ *
+ * The other half of the ADMISSION side of the tuple-equality carve-out, paired
+ * with `isProvablyTupleParticipant` — see `compileJSEquality` and
+ * `compilePythonEquality`. Tuple-ness alone is not enough on EITHER target,
+ * because the element leaf of the whole-value comparison is numeric and coerces
+ * a boolean: `_SYS.eq`'s tolerance test makes `Math.abs(true - 1)` zero, and
+ * Python's `==` makes `True == 1` true, so `Equal(Tuple(True, 2), Tuple(1, 2))`
+ * answered `True` where the interpreter answers `False`. Anything but a provable
+ * number — a boolean, a string, `unknown`, a union with a non-numeric member, or
+ * a bare `tuple` with no component information at all — disqualifies, and the
+ * aggregate gate then declines the head (fail closed).
+ */
+export function isNumericTupleParticipant(x: Expression): boolean {
+  const walk = (t: Type, visited?: ReadonlySet<TypeReference>): boolean => {
+    if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
+      const decl = declarationOf(t);
+      if (visited?.has(decl)) return false;
+      visited = new Set(visited).add(decl);
+    }
+    const r = resolveTypeForCompilation(t);
+    // A bare `tuple` carries no component information: nothing to prove numeric.
+    if (r === 'tuple' || r === 'never') return false;
+    if (typeof r !== 'string') {
+      if (r.kind === 'tuple')
+        return r.elements.every((e) => walk(e.type, visited));
+      if (r.kind === 'union') return r.types.every((m) => walk(m, visited));
+    }
+    return isSubtype(r, 'number');
+  };
+  return walk(x.type.type);
+}
+
+/**
  * String evidence for a COMPARISON PARTICIPANT — the value the scalar
  * comparison actually compares, which for a broadcast source is its ELEMENT,
  * not the array.

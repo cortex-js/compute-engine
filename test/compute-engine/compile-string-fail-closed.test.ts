@@ -480,7 +480,8 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
   // point comparison. Only the MIXED shapes were wrong (pinned above).
   //
   // The rule: for `Equal`/`NotEqual`, BINARY, when EVERY participant is provably
-  // tuple-typed (`isProvablyTupleParticipant`). Orderings never consult it.
+  // tuple-typed (`isProvablyTupleParticipant`) AND every tuple COMPONENT is
+  // provably numeric (`isNumericTupleParticipant`). Orderings never consult it.
 
   /** Compile with no fallback, assert success, and return the run result. */
   function runCompiled(expr: BoxedExpression, ...args: unknown[]): unknown {
@@ -570,12 +571,18 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     expect(r.error).toMatch(/tuple participant/);
   });
 
-  test('a tuple with a STRING component still declines — the string gate runs after', () => {
-    // Gate ORDER: the tuple admission only skips `assertComparableAggregate`;
-    // `assertNoStringOperand` runs unconditionally afterwards, and
-    // `typeHasStringEvidence` peels `tuple<integer, string>` to the union
-    // `integer | string`. `_SYS.eq`'s tolerance test is NaN on the string
-    // component, so it would answer `false` where the interpreter answers `True`.
+  test('a tuple with a STRING component still declines', () => {
+    // `_SYS.eq`'s tolerance test is NaN on the string component, so it would
+    // answer `false` where the interpreter answers `True`.
+    //
+    // The REASON moved with the numeric-component requirement: this used to be
+    // caught by `assertNoStringOperand` (which runs unconditionally AFTER the
+    // carve-out, and whose `typeHasStringEvidence` peels `tuple<integer, string>`
+    // to the union `integer | string`), and is now caught one step earlier by
+    // `isNumericTupleParticipant` — a string component is not a provable number.
+    // Same outcome (fail closed, interpreter answers); the string gate still runs
+    // afterwards for the non-tuple shapes. Python declines this shape on the same
+    // predicate, for the same reason.
     const T = ['Tuple', 1, { str: 'a' }];
     for (const [head, expected] of [
       ['Equal', '"True"'],
@@ -584,9 +591,75 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
       const expr = ce.box([head, T, T] as any);
       const r = compile(expr);
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/string-valued operands/);
+      expect(r.error).toMatch(/tuple participant/);
       expect(expr.evaluate().toString()).toBe(expected);
     }
+  });
+
+  test.each([
+    // [head, a, b, interpreter answer]
+    // `_SYS.eq`'s element leaf is the NUMERIC tolerance test, under which
+    // `Math.abs(true - 1)` is 0: these compiled and ran to `true`/`false`, the
+    // exact inverse of the interpreter, behind a `success: true`. Mirrors the
+    // Python target's boolean-component pins (`True == 1` there).
+    ['Equal', ['Tuple', 'True', 2], ['Tuple', 1, 2], '"False"'],
+    ['NotEqual', ['Tuple', 'True', 2], ['Tuple', 1, 2], '"True"'],
+    // Even the both-boolean shape declines: admission requires provable
+    // numbers, and the interpreter answers correctly on the fallback.
+    ['Equal', ['Tuple', 'True'], ['Tuple', 'True'], '"True"'],
+    ['NotEqual', ['Tuple', 'True'], ['Tuple', 'False'], '"True"'],
+  ] as const)(
+    'a tuple with a BOOLEAN component declines: %s over %j / %j',
+    (head, a, b, interpreted) => {
+      const expr = ce.box([head, a, b] as any);
+      const r = compile(expr);
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(/tuple participant/);
+      expect(expr.evaluate().toString()).toBe(interpreted);
+    }
+  );
+
+  test('boolean-component tuple SYMBOLS decline too', () => {
+    ce.declare('bt1', 'tuple<boolean>');
+    ce.declare('bt2', 'tuple<number>');
+    for (const head of ['Equal', 'NotEqual'] as const) {
+      const r = compile(ce.box([head, 'bt1', 'bt2'] as any));
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(/tuple participant/);
+    }
+  });
+
+  test('a bare `tuple` type and an `unknown` COMPONENT decline', () => {
+    // A bare `tuple` carries no component information, and `unknown` could be
+    // the boolean (or object) the numeric leaf gets wrong — nothing to prove
+    // numeric, so both fail closed.
+    ce.declare('bare1', 'tuple');
+    ce.declare('bare2', 'tuple');
+    ce.declare('uk1', 'tuple<unknown, number>');
+    ce.declare('uk2', 'tuple<number, number>');
+    for (const [a, b] of [
+      ['bare1', 'bare2'],
+      ['uk1', 'uk2'],
+    ] as const) {
+      const r = compile(ce.box(['Equal', a, b] as any));
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(/tuple participant/);
+    }
+  });
+
+  test('a NESTED all-numeric tuple is still admitted, with run parity', () => {
+    // The numeric-component walk recurses: a point of points qualifies.
+    const T = ['Tuple', ['Tuple', 1, 2], ['Tuple', 3, 4]];
+    const eq = ce.box(['Equal', T, T] as any);
+    expect(eq.evaluate().toString()).toBe('"True"');
+    expect(runCompiled(eq)).toBe(true);
+    const neq = ce.box([
+      'NotEqual',
+      T,
+      ['Tuple', ['Tuple', 1, 2], ['Tuple', 3, 5]],
+    ] as any);
+    expect(neq.evaluate().toString()).toBe('"True"');
+    expect(runCompiled(neq)).toBe(true);
   });
 
   test('a UNION participant with a non-tuple member declines', () => {
