@@ -52,6 +52,7 @@ import { sortOperands } from './order.js';
 import { validateArguments, checkNumericArgs } from './validate.js';
 import { overloadArms } from './overload.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { isWildcardFunctionType } from '../../common/type/utils.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
 import { isValueDef } from './utils.js';
@@ -840,7 +841,39 @@ function makeCanonicalFunction(
     // no-def branch above made for an earlier occurrence of `name` in this
     // very body. It carries no parameter types, so the same evidence loss
     // applies: note the call (idempotent per literal).
-    if (def.value.inferredType && def.value.type.matches('function')) {
+    //
+    // The bare `function` WILDCARD (`ce.declare('clean', 'function')`, the
+    // documented forward-declaration form) is the same situation reached by a
+    // different provenance: the author stated only "this is callable", so
+    // there are no parameter types to narrow from either — until something is
+    // assigned, at which point `setSymbolValue`/`updateDef` fire the repair
+    // and the re-canonicalization reads the signature below.
+    const wildcardCallee = isWildcardFunctionType(def.value.type.type);
+
+    // The narrowing sink for a wildcard-declared callee. The declared type is
+    // a widening that carries no parameter types, and it deliberately STAYS
+    // that way through assignment (narrowing it would turn a permissive
+    // forward declaration into an arity/parameter contract that a later
+    // re-assignment would have to satisfy). The assigned value's own type is
+    // the only signature there is, so read it here — the same collection-only
+    // evidence the operator path takes from `opDef.signature`.
+    //
+    // Runs BEFORE the noting below so the "assignment first, then caller"
+    // order resolves synchronously: the sink writes the evidence, the
+    // arguments stop being narrowable, and the caller does not register as a
+    // permanent dependent that every later re-assignment would re-derive. A
+    // SCALAR assignment writes nothing (scalar parameter types are not
+    // evidence), so those callers stay narrowable and do still park.
+    if (wildcardCallee) {
+      const assignedType = def.value.value?.type.type;
+      if (assignedType !== undefined)
+        narrowArgsFromInferredSignature(assignedType, boxedOps);
+    }
+
+    if (
+      wildcardCallee ||
+      (def.value.inferredType && def.value.type.matches('function'))
+    ) {
       if (isProvisionalCaptureOpen() && hasNarrowableArg(boxedOps))
         noteProvisionalCall(name);
     }

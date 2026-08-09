@@ -37,6 +37,9 @@ import {
   setDebugStatementResultHook,
 } from '../../src/common/debug-hook.js';
 import { typeToString } from '../../src/common/type/serialize.js';
+// Deep import of an `@internal` engine helper (the broadcast gate); the
+// matching cross-reference note lives at its definition in `boxed-function.ts`.
+import { paramsAreScalar } from '../../src/compute-engine/boxed-expression/boxed-function.js';
 import type { MathJsonExpression } from '../../src/math-json/types.js';
 import {
   operands,
@@ -203,6 +206,13 @@ function collectBindings(
  * recorded (`c in digits` ⇒ `c: string`; `cs[i]` ⇒ the index union), and
  * the parameter names to boot. Display-only — the engine's arrow type is
  * untouched.
+ *
+ * The signature also cannot show the lambda AUTO-BROADCAST, which is derived
+ * rather than written: a scalar-typed (or unannotated) parameter list makes
+ * the function map over an indexed collection argument, while a single
+ * collection-typed parameter binds the whole argument. That difference is what
+ * turns `f([1,2,3])` into three calls instead of one, so it is marked here
+ * with the same gate the broadcast arms use (`paramsAreScalar`).
  */
 function signatureDisplay(
   def: Extract<BoxedDefinition, { operator: unknown }>
@@ -210,7 +220,16 @@ function signatureDisplay(
   const opDef = def.operator;
   const fallback = String(opDef.signature ?? 'function');
   const lambda = opDef.lambda;
-  if (lambda === undefined || lambda.parameters.length === 0) return fallback;
+  if (lambda === undefined) return fallback;
+
+  const broadcast = paramsAreScalar(opDef)
+    ? ' [elementwise]'
+    : ' [binds whole]';
+
+  // A NULLARY lambda has no parameters to display, but it still broadcasts —
+  // `f() = 5; f([1,2,3])` evaluates to `[5,5,5]` — so it takes the marker too
+  // (`paramsAreScalar` of an empty parameter list is true).
+  if (lambda.parameters.length === 0) return `${fallback}${broadcast}`;
 
   const scope = lambda.body.localScope;
   const params = lambda.parameters.map(({ name, type }) => {
@@ -229,8 +248,8 @@ function signatureDisplay(
     st !== undefined && typeof st !== 'string' && st.kind === 'signature'
       ? st.result
       : undefined;
-  if (result === undefined) return fallback;
-  return `(${params.join(', ')}) -> ${typeToString(result)}`;
+  if (result === undefined) return `${fallback}${broadcast}`;
+  return `(${params.join(', ')}) -> ${typeToString(result)}${broadcast}`;
 }
 
 function definitionVariable(

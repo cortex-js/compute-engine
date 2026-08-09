@@ -88,6 +88,7 @@ import {
   broadcastShapedResultType,
   functionResult,
   isSignatureType,
+  isWildcardFunctionType,
   narrow,
   numericMissingSlot,
   staticCollectionDims,
@@ -119,7 +120,12 @@ import {
   isValueDef,
   normalizedUnknownsForSolve,
 } from './utils.js';
-import { errorValue, isCollectionHead } from './error-value.js';
+import {
+  broadcastContextMessage,
+  errorValue,
+  isCollectionHead,
+  withBroadcastFrame,
+} from './error-value.js';
 import { match } from './match.js';
 import { factor } from './factor.js';
 import { holdMap, holdMapAsync } from './hold.js';
@@ -2104,14 +2110,29 @@ export class BoxedFunction
         const items = zip(bops);
         if (items) {
           const results: Expression[] = [];
-          while (true) {
-            const { done, value } = items.next();
-            if (done) break;
-            results.push(
-              this.engine._fn(this.operator, value).evaluate(options)
+          // A THROWN element failure aborts the whole broadcast, so it cannot
+          // carry a breadcrumb — its message is enriched instead. One `try`
+          // around the loop, so a successful broadcast pays nothing.
+          try {
+            while (true) {
+              const { done, value } = items.next();
+              if (done) break;
+              results.push(
+                this.engine._fn(this.operator, value).evaluate(options)
+              );
+            }
+          } catch (e) {
+            throw withBroadcastThrowContext(
+              e,
+              this.operator,
+              bops,
+              results.length + 1
             );
           }
-          return this.engine._fn('List', results);
+          return this.engine._fn(
+            'List',
+            annotateBroadcastErrors(this.operator, results)
+          );
         }
       }
 
@@ -2237,16 +2258,32 @@ export class BoxedFunction
         const items = zip(tail);
         if (items) {
           const results: Expression[] = [];
-          while (true) {
-            const { done, value } = items.next();
-            if (done) break;
-            results.push(
-              this.engine._fn(this.operator, value).evaluate(options)
+          // Element-wise context, for the LAMBDA broadcast only (see step 2b):
+          // a builtin `broadcastable` operator keeps its historical errors.
+          try {
+            while (true) {
+              const { done, value } = items.next();
+              if (done) break;
+              results.push(
+                this.engine._fn(this.operator, value).evaluate(options)
+              );
+            }
+          } catch (e) {
+            if (!lambdaBroadcast) throw e;
+            throw withBroadcastThrowContext(
+              e,
+              this.operator,
+              tail,
+              results.length + 1
             );
           }
           // A broadcast always yields a `List`, even for a single-element
           // collection, so the value matches the `list<E>` broadcast type.
-          if (lambdaBroadcast) return this.engine._fn('List', results);
+          if (lambdaBroadcast)
+            return this.engine._fn(
+              'List',
+              annotateBroadcastErrors(this.operator, results)
+            );
           if (results.length > 0) return this.engine._fn('List', results);
         }
       }
@@ -2471,12 +2508,36 @@ export class BoxedFunction
           while (true) {
             const { done, value } = items.next();
             if (done) break;
+            // `Promise.all` cannot attribute a rejection to a slot, but each
+            // promise is created in a KNOWN one: enrich per element, where the
+            // index is still in hand. The outer handler below stays as a
+            // backstop and does not double-annotate (the enrichment is
+            // idempotent).
+            const index = results.length + 1;
             results.push(
-              this.engine._fn(this.operator, value).evaluateAsync(options)
+              this.engine
+                ._fn(this.operator, value)
+                .evaluateAsync(options)
+                .catch((e) => {
+                  throw withBroadcastThrowContext(
+                    e,
+                    this.operator,
+                    bops,
+                    index
+                  );
+                })
             );
           }
-          return Promise.all(results).then((resolved) =>
-            this.engine._fn('List', resolved)
+          // Element-wise context — mirrors the sync step 2b.
+          return Promise.all(results).then(
+            (resolved) =>
+              this.engine._fn(
+                'List',
+                annotateBroadcastErrors(this.operator, resolved)
+              ),
+            (e) => {
+              throw withBroadcastThrowContext(e, this.operator, bops);
+            }
           );
         }
       }
@@ -2579,14 +2640,40 @@ export class BoxedFunction
           while (true) {
             const { done, value } = items.next();
             if (done) break;
+            const p = this.engine
+              ._fn(this.operator, value)
+              .evaluateAsync(options);
+            // Per-element rejection context, for the LAMBDA broadcast only (a
+            // builtin `broadcastable` operator keeps its historical errors):
+            // `Promise.all` cannot attribute a rejection to a slot, but each
+            // promise is created in a KNOWN one. The outer handler below stays
+            // as a backstop and does not double-annotate.
+            const index = results.length + 1;
             results.push(
-              this.engine._fn(this.operator, value).evaluateAsync(options)
+              lambdaBroadcast
+                ? p.catch((e) => {
+                    throw withBroadcastThrowContext(
+                      e,
+                      this.operator,
+                      tail,
+                      index
+                    );
+                  })
+                : p
             );
           }
-          // A lambda broadcast always yields a `List` (mirroring step 2b).
+          // A lambda broadcast always yields a `List` (mirroring step 2b),
+          // and carries the element-wise context on its failures.
           if (lambdaBroadcast)
-            return Promise.all(results).then((resolved) =>
-              this.engine._fn('List', resolved)
+            return Promise.all(results).then(
+              (resolved) =>
+                this.engine._fn(
+                  'List',
+                  annotateBroadcastErrors(this.operator, resolved)
+                ),
+              (e) => {
+                throw withBroadcastThrowContext(e, this.operator, tail);
+              }
             );
           if (results.length > 0)
             return Promise.all(results).then((resolved) =>
@@ -2684,6 +2771,67 @@ export class BoxedFunction
  */
 function isBroadcastParticipant(op: Expression): boolean {
   return isFiniteIndexedCollection(op) && !isTuple(op);
+}
+
+/**
+ * Record the element-wise application on the errors a LAMBDA broadcast
+ * produced, so a failure that only happened because the argument was a
+ * collection says so (`while applying 'skipWs' element-wise over 4 elements
+ * (element 2)`). Returns `results` untouched when every element succeeded.
+ *
+ * Cost on the happy path is a single `isValid` read per element — the value
+ * the enclosing `_fn('List', …)` computes for each element anyway (it is
+ * memoized on the node), so a successful broadcast pays nothing extra.
+ */
+function annotateBroadcastErrors(
+  operator: string,
+  results: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (results.every((x) => x.isValid)) return results;
+  return results.map((x, i) =>
+    x.isValid
+      ? x
+      : withBroadcastFrame(x, {
+          operator,
+          index: i + 1,
+          length: results.length,
+        })
+  );
+}
+
+/** Errors that already carry an element-wise context (see
+ * `withBroadcastThrowContext`). */
+const BROADCAST_CONTEXTED = new WeakSet<Error>();
+
+/**
+ * Append the element-wise context to an error THROWN out of an element
+ * evaluation (`if` on a non-boolean, a cap breach, …). Such a failure never
+ * becomes an `Error` value — it aborts the whole broadcast — so the breadcrumb
+ * has nowhere to live and the message is enriched instead.
+ *
+ * The error object is returned as-is (message mutated in place) so its
+ * prototype survives: a `CancellationError` must keep answering to the
+ * cap-breach handling upstream, and its message is string-matched by hosts —
+ * so it is left alone entirely.
+ *
+ * Idempotent: the same error passing through a SECOND broadcast layer is
+ * returned untouched. The async arms wrap each element's promise (which knows
+ * its index) and still keep the outer `Promise.all` handler; a nested
+ * broadcast rethrows through the enclosing loop's `catch`. In both cases the
+ * innermost — most specific, index-carrying — context is the one kept.
+ */
+function withBroadcastThrowContext(
+  e: unknown,
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  index?: number
+): unknown {
+  if (!(e instanceof Error) || e.name === 'CancellationError') return e;
+  if (BROADCAST_CONTEXTED.has(e)) return e;
+  BROADCAST_CONTEXTED.add(e);
+  const length = ops.find(isBroadcastParticipant)?.count;
+  e.message = `${e.message} (${broadcastContextMessage(operator, length, index)})`;
+  return e;
 }
 
 /**
@@ -3364,9 +3512,17 @@ function type(expr: BoxedFunction): Type {
     // `paramsAreScalar` is false and the scalar result is preserved.
     // As at the operator-def site above: an overload set resolves to its
     // most-specific viable arm for the RESULT type (§6 of the overload design).
-    const sig =
-      resolvedArm(expr, expr.valueDefinition.type.type) ??
-      expr.valueDefinition.type.type;
+    // A bare `function` WILDCARD declaration carries no signature of its own —
+    // the assigned literal's type is the only one there is (the same source
+    // the narrowing sink in `box.ts` reads), so read it here; otherwise the
+    // wildcard's absent parameter types read as scalar and the application is
+    // broadcast-typed (`list<unknown^3>`) while the value is the scalar the
+    // literal computes.
+    const declaredType = expr.valueDefinition.type.type;
+    const sigSource = isWildcardFunctionType(declaredType)
+      ? (expr.valueDefinition.value?.type.type ?? declaredType)
+      : declaredType;
+    const sig = resolvedArm(expr, sigSource) ?? sigSource;
     // As on the operator-def route: a polytype arm is instantiated at the call
     // site so no open type escapes as the expression's `.type` (§4.2). The
     // solve sees the SAME `threadable` gate this route hands
@@ -3500,23 +3656,43 @@ function applyFunctionLiteral(
     const items = zip(ops);
     if (items) {
       const results: Expression[] = [];
-      while (true) {
-        const { done, value: zipped } = items.next();
-        if (done) break;
-        // A broadcast maps to the scalar LEAVES: when a zipped row is itself
-        // a broadcast-admitted collection (a rank≥2 source), re-dispatch
-        // through the operator name so this arm applies again, exactly as the
-        // operator-def routes do (steps 2/2b/4b re-enter `_computeValue` via
-        // `_fn(operator, …).evaluate()`). Applying the literal to the row
-        // directly would bind the whole row to a scalar parameter and stop at
-        // rank 1, disagreeing with the D10 leaf-rank typing.
-        results.push(
-          zipped.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))
-            ? expr.engine._fn(expr.operator, zipped).evaluate(options)
-            : apply(value, zipped, options)
+      // Element-wise context, exactly as at the operator-def lambda broadcast
+      // (step 2b): this arm applies a user function VALUE (the wildcard
+      // `ce.declare('f', 'function')` + assign route lands here rather than on
+      // an operator definition), so there is no builtin to shield. The context
+      // names the SYMBOL being applied — `applyFunctionLiteral` is only reached
+      // through a named value definition, so an anonymous literal never gets
+      // here. A THROWN element failure aborts the broadcast and cannot carry a
+      // breadcrumb, so its message is enriched instead.
+      try {
+        while (true) {
+          const { done, value: zipped } = items.next();
+          if (done) break;
+          // A broadcast maps to the scalar LEAVES: when a zipped row is itself
+          // a broadcast-admitted collection (a rank≥2 source), re-dispatch
+          // through the operator name so this arm applies again, exactly as the
+          // operator-def routes do (steps 2/2b/4b re-enter `_computeValue` via
+          // `_fn(operator, …).evaluate()`). Applying the literal to the row
+          // directly would bind the whole row to a scalar parameter and stop at
+          // rank 1, disagreeing with the D10 leaf-rank typing.
+          results.push(
+            zipped.some((x) => isFiniteIndexedCollection(x) && !isTuple(x))
+              ? expr.engine._fn(expr.operator, zipped).evaluate(options)
+              : apply(value, zipped, options)
+          );
+        }
+      } catch (e) {
+        throw withBroadcastThrowContext(
+          e,
+          expr.operator,
+          ops,
+          results.length + 1
         );
       }
-      return expr.engine._fn('List', results);
+      return expr.engine._fn(
+        'List',
+        annotateBroadcastErrors(expr.operator, results)
+      );
     }
   }
 
@@ -3603,6 +3779,10 @@ function resolvedArm(
  *
  * Conservative: unknown/any and non-signature types are treated as scalar,
  * which makes this a permissive default for inferred lambda signatures.
+ *
+ * NOTE: deep-imported by `vscode-epsil/src/debug-worker.ts` — moving or
+ * renaming this export must update that import (vscode-epsil has no test
+ * harness to catch the break).
  * @internal
  */
 export function paramsAreScalar(

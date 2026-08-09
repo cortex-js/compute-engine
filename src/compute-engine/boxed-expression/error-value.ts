@@ -208,3 +208,126 @@ function withErrorFrames(
     ce._fn('ErrorTrace', items, { canonical: false }),
   ]);
 }
+
+//
+// ─── Element-wise (broadcast) context ─────────────────────────────────────
+//
+// A user function with scalar parameters is auto-broadcast over an indexed
+// collection argument (the vectorization default). When that fires
+// unexpectedly, an element's failure reads as a bare error with no hint that
+// a broadcast was in flight. The context is recorded as an extra entry in the
+// SAME `ErrorTrace` breadcrumb (§2a):
+//
+//   ["ErrorBroadcast", "'skipWs'", index, length]
+//
+// A distinct head — not `ErrorFrame`, whose index means an ARGUMENT position.
+// Readers that only understand `ErrorFrame` skip it, so an error that never
+// went through a broadcast keeps its historical shape byte for byte.
+//
+
+/**
+ * One breadcrumb entry recording an ELEMENT-WISE application: the failure
+ * happened while `operator` was broadcast over a collection of `length`
+ * elements, at 1-based element `index` (collections are 1-indexed).
+ */
+export type BroadcastFrame = {
+  operator: string;
+  index: number;
+  length: number;
+};
+
+/** A human-readable rendering of a broadcast breadcrumb entry. Also used for
+ * the message of an error THROWN out of an element evaluation, which never
+ * becomes an `Error` value and so cannot carry a breadcrumb. */
+export function broadcastContextMessage(
+  operator: string,
+  length: number | undefined,
+  index?: number
+): string {
+  const over =
+    length === undefined
+      ? ''
+      : ` over ${length} element${length === 1 ? '' : 's'}`;
+  const at = index === undefined ? '' : ` (element ${index})`;
+  return `while applying '${operator}' element-wise${over}${at}`;
+}
+
+/** The broadcast entries of an `Error` value's breadcrumb, outermost
+ * broadcast last. Empty for an error that never went through one. */
+export function broadcastFrames(err: Expression): BroadcastFrame[] {
+  const trace = errorTrace(err);
+  if (trace === undefined) return [];
+  const frames: BroadcastFrame[] = [];
+  for (const f of trace.ops) {
+    if (!isFunction(f, 'ErrorBroadcast')) continue;
+    const operator = isString(f.op1) ? f.op1.string : undefined;
+    const index = isNumber(f.op2) ? f.op2.re : undefined;
+    const length = isNumber(f.ops[2]) ? f.ops[2].re : undefined;
+    if (
+      operator === undefined ||
+      !Number.isFinite(index) ||
+      !Number.isFinite(length)
+    )
+      continue;
+    frames.push({ operator, index: index!, length: length! });
+  }
+  return frames;
+}
+
+/**
+ * `expr` with `frame` recorded on the `Error` value(s) it carries.
+ *
+ * Only the invalid spine is rebuilt — `isValid` prunes at every level, and a
+ * valid `expr` is returned untouched — so a successful element pays nothing
+ * beyond the `isValid` test the surrounding `List` performs anyway. As in
+ * `firstEmbeddedError()`, collection literals are not descended into: an error
+ * in a nested collection belongs to an inner element (and an inner broadcast
+ * has already annotated it).
+ *
+ * The VALUE is unchanged: an error element stays an error element with the
+ * same code and `where`; only the breadcrumb grows.
+ */
+export function withBroadcastFrame(
+  expr: Expression,
+  frame: BroadcastFrame
+): Expression {
+  if (expr.isValid) return expr;
+  if (isFunction(expr, 'Error')) return withBroadcastTrace(expr, frame);
+  if (!isFunction(expr) || COLLECTION_OPERATORS.has(expr.operator)) return expr;
+  let changed = false;
+  const ops = expr.ops.map((op) => {
+    if (op.isValid) return op;
+    const rewritten = withBroadcastFrame(op, frame);
+    if (rewritten !== op) changed = true;
+    return rewritten;
+  });
+  if (!changed) return expr;
+  // Rebuilt non-canonically: this is a frozen invalid tree, and
+  // re-canonicalizing it would re-run validation on the error it carries.
+  return expr.engine._fn(expr.operator, ops, { canonical: false });
+}
+
+/** `err` with a broadcast entry appended to its breadcrumb. */
+function withBroadcastTrace(
+  err: Expression,
+  frame: BroadcastFrame
+): Expression {
+  const ce = err.engine;
+  const trace = errorTrace(err);
+  const items = [
+    ...(trace?.ops ?? []),
+    ce._fn(
+      'ErrorBroadcast',
+      [
+        ce.string(frame.operator),
+        ce.number(frame.index),
+        ce.number(frame.length),
+      ],
+      { canonical: false }
+    ),
+  ];
+  return ce._fn('Error', [
+    ...errorOpsWithoutTrace(err),
+    ce._fn('ErrorTrace', items, { canonical: false }),
+  ]);
+}

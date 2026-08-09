@@ -222,6 +222,26 @@ export function hasFunctionSignature(
 }
 
 /**
+ * True for the bare `function` WILDCARD — the type installed by
+ * `ce.declare('f', 'function')`, the documented forward-declaration form.
+ *
+ * It is a widening, not a contract: it promises callers only that the name is
+ * callable, and says nothing about arity, parameter types or return type. Code
+ * that needs a signature to reason with must therefore treat it as "no
+ * signature yet" and look elsewhere (typically at the assigned value's own
+ * type), rather than as a constraint to check against. {@link
+ * hasFunctionSignature} is true for it — it IS callable — so that predicate
+ * cannot make this distinction; see `assertFunctionLiteralArity`
+ * (`engine-declarations.ts`), which excludes the wildcard from arity checking
+ * for the same reason.
+ */
+export function isWildcardFunctionType(
+  type: Readonly<Type> | undefined
+): boolean {
+  return type === 'function';
+}
+
+/**
  * The fixed arity of a callable type: 1 for a unary function, 2 for a binary
  * one, or `undefined` when the arity is not statically a single fixed value —
  * a bare `function` type, a variadic or optional-argument signature, a

@@ -223,6 +223,11 @@ export function executeEpsil(
  * `["ErrorTrace", ["ErrorFrame", "'Ln'", 1], ["ErrorFrame", "'Add'", 2]]`,
  * innermost frame first. Read here from MathJSON rather than through an
  * engine helper: `src/epsil` never statically imports the engine.
+ *
+ * The same breadcrumb also carries `["ErrorBroadcast", "'f'", index, length]`
+ * entries — a user function with scalar parameters is auto-broadcast over a
+ * collection argument, and a failure inside one element is unreadable without
+ * saying so.
  */
 function errorFrameChain(error: MathJsonExpression): string {
   const ops = [...operands(error)];
@@ -230,6 +235,18 @@ function errorFrameChain(error: MathJsonExpression): string {
   if (trace === undefined || operator(trace) !== 'ErrorTrace') return '';
   const frames: string[] = [];
   for (const frame of operands(trace)) {
+    if (operator(frame) === 'ErrorBroadcast') {
+      const name = stringValue(operand(frame, 1));
+      const index = machineValue(operand(frame, 2));
+      const length = machineValue(operand(frame, 3));
+      if (name === null || index === null || length === null) continue;
+      frames.push(
+        `while applying ${name} element-wise over ${length} element${
+          length === 1 ? '' : 's'
+        } (element ${index})`
+      );
+      continue;
+    }
     if (operator(frame) !== 'ErrorFrame') continue;
     const name = stringValue(operand(frame, 1));
     const index = machineValue(operand(frame, 2));

@@ -657,3 +657,196 @@ describe('callee defined after caller', () => {
     }
   });
 });
+
+//
+// A callee forward-DECLARED with the bare `function` wildcard
+// (`ce.declare('clean', 'function')` — the documented forward-declaration
+// form, `doc/06-guide-augmenting.md`).
+//
+// The wildcard is a widening, not a contract: it says only "this name is
+// callable". It therefore installs a function-typed VALUE definition whose
+// type carries no parameter types, and — unlike the no-declaration case — it
+// STAYS that way when a literal is assigned (narrowing it would turn a
+// permissive forward declaration into an arity/parameter contract that every
+// later re-assignment would have to satisfy). Two consequences, both fixed
+// here:
+//
+//   * the callee had no reachable signature to narrow the caller's argument
+//     from, in ANY definition order — the value-def application branch now
+//     reads the ASSIGNED VALUE's own type (`box.ts`);
+//   * a caller canonicalized against the wildcard never registered in the
+//     provisional registry (the noting gate wanted an INFERRED type), so the
+//     later assignment repaired nothing.
+//
+// The full signatures below (result type included) rely on the wildcard-head
+// application typing reading the ASSIGNED value's signature
+// (`getFunctionResultType`, boxed-function.ts): a bare-`function` wildcard
+// promises nothing, so before that fix the application was broadcast-typed
+// (`clean([10,20,30])` typed `list<unknown^3>` while evaluating to `10`).
+//
+describe('wildcard-declared callees', () => {
+  /** `clean(v: list<number>) := v[1]`, as MathJSON. */
+  const listCallee = (ce: ComputeEngine) =>
+    ce.box([
+      'Function',
+      ['At', 'v', 1],
+      ['Typed', 'v', { str: 'list<number>' }],
+    ]);
+
+  /** `proc(cs) := clean(cs) + 1`, as MathJSON. */
+  const boxCaller = (ce: ComputeEngine) =>
+    ce.box(['Function', ['Add', ['clean', 'cs'], 1], 'cs']);
+
+  describe('caller first, then the assignment (the repair path)', () => {
+    test('box route', () => {
+      const ce = new ComputeEngine();
+      ce.declare('clean', 'function');
+      ce.assign('proc', boxCaller(ce));
+      // Nothing known yet: the wildcard has no parameter types. (Unlike the
+      // entirely UNdeclared callee above, it also pins the effects axis — the
+      // wildcard carries no effect specifier — so the caller's signature has
+      // no `any` effects marker.)
+      expect(signatureIn(ce, 'proc')).toBe(
+        '(unknown) -> broadcastable<number>'
+      );
+      ce.assign('clean', listCallee(ce));
+      expect(signatureIn(ce, 'proc')).toBe('(list<number>) -> number');
+      expect(
+        ce
+          .box(['proc', ['List', 10, 20, 30]])
+          .evaluate()
+          .toString()
+      ).toBe('11');
+    });
+
+    test('Epsil route', () => {
+      const ce = new ComputeEngine();
+      ce.declare('clean', 'function');
+      executeEpsil(ce, 'function proc(cs) { clean(cs) + 1 }');
+      expect(signatureIn(ce, 'proc')).toBe(
+        '(unknown) -> broadcastable<number>'
+      );
+      executeEpsil(ce, 'function clean(v: list<number>) { v[1] }');
+      expect(signatureIn(ce, 'proc')).toBe('(list<number>) -> number');
+      expect(executeEpsil(ce, 'proc([10,20,30])').value?.toString()).toBe('11');
+    });
+
+    test('an ANNOTATED caller parameter is unaffected', () => {
+      const ce = new ComputeEngine();
+      ce.declare('clean', 'function');
+      executeEpsil(ce, 'function proc(cs: list<number>) { clean(cs) + 1 }');
+      executeEpsil(ce, 'function clean(v: list<number>) { v[1] }');
+      expect(executeEpsil(ce, 'proc([10,20,30])').value?.toString()).toBe('11');
+    });
+  });
+
+  describe('assignment first, then the caller (no repair needed)', () => {
+    // The registry pins below are the point of "no repair needed": the
+    // narrowing sink runs BEFORE the noting decision, so an argument that was
+    // narrowed synchronously is no longer narrowable and the caller does NOT
+    // register as a dependent. Were it to register, it would stay parked
+    // forever and every later re-assignment of `clean` would re-derive an
+    // already-correct literal.
+    test('box route', () => {
+      const ce = new ComputeEngine();
+      ce.declare('clean', 'function');
+      ce.assign('clean', listCallee(ce));
+      ce.assign('proc', boxCaller(ce));
+      expect(signatureIn(ce, 'proc')).toBe('(list<number>) -> number');
+      expect(
+        ce
+          .box(['proc', ['List', 10, 20, 30]])
+          .evaluate()
+          .toString()
+      ).toBe('11');
+      expect(takeProvisionalDependents(ce, 'clean')).toBeUndefined();
+    });
+
+    test('Epsil route', () => {
+      const ce = new ComputeEngine();
+      ce.declare('clean', 'function');
+      executeEpsil(ce, 'function clean(v: list<number>) { v[1] }');
+      executeEpsil(ce, 'function proc(cs) { clean(cs) + 1 }');
+      expect(signatureIn(ce, 'proc')).toBe('(list<number>) -> number');
+      expect(executeEpsil(ce, 'proc([10,20,30])').value?.toString()).toBe('11');
+      expect(takeProvisionalDependents(ce, 'clean')).toBeUndefined();
+    });
+  });
+
+  //
+  // The negatives. Everything the wildcard's permissiveness buys must survive:
+  // no new validation, no contract created by the first assignment, and the
+  // vectorization default when the assigned literal is scalar.
+  //
+
+  test('a CONCRETE declared signature still validates its arguments', () => {
+    // The wildcard branch must not have loosened the neighbouring
+    // explicit-signature check. Canonical pin for this behavior:
+    // `application-validation-regressions.test.ts`.
+    const ce = new ComputeEngine();
+    ce.declare('gsig', '(integer) -> integer');
+    expect(ce.box(['gsig', 0.5]).isValid).toBe(false);
+    expect(ce.box(['gsig', { str: 'a' }]).isValid).toBe(false);
+    expect(ce.box(['gsig', 3]).isValid).toBe(true);
+  });
+
+  test('re-assigning a wildcard-declared symbol stays unconstrained', () => {
+    // The declared type is left as the wildcard on purpose: had the first
+    // assignment narrowed it, the arity and parameter types of that literal
+    // would have become a contract and the re-assignments below would throw.
+    const ce = new ComputeEngine();
+    ce.declare('rw', 'function');
+    ce.assign('rw', ce.box(['Function', ['Multiply', 2, 'u'], 'u']));
+    expect(ce.box(['rw', 4]).evaluate().toString()).toBe('8');
+    // ...a different parameter TYPE...
+    ce.assign('rw', listCallee(ce));
+    expect(
+      ce
+        .box(['rw', ['List', 7, 8]])
+        .evaluate()
+        .toString()
+    ).toBe('7');
+    // ...and a different ARITY.
+    ce.assign('rw', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b']));
+    expect(ce.box(['rw', 3, 4]).evaluate().toString()).toBe('7');
+  });
+
+  test('a SCALAR literal assigned to the wildcard leaves the caller broadcasting', () => {
+    const ce = new ComputeEngine();
+    ce.declare('twice', 'function');
+    executeEpsil(ce, 'function bproc(cs) { twice(cs) + 1 }');
+    executeEpsil(ce, 'function twice(v) { 2 * v }');
+    expect(signatureIn(ce, 'bproc')).toMatch(/^\(unknown\)/);
+    expect(executeEpsil(ce, 'bproc([10,20,30])').value?.toString()).toBe(
+      '[21,41,61]'
+    );
+  });
+
+  test('a caller re-derived against a SCALAR assignment still waits', () => {
+    // The rebuilt literal re-registers on the wildcard callee, so replacing
+    // the scalar body with a collection-consuming one retries it.
+    const ce = new ComputeEngine();
+    ce.declare('clean', 'function');
+    ce.assign('proc', boxCaller(ce));
+    ce.assign('clean', ce.box(['Function', ['Multiply', 2, 'v'], 'v']));
+    expect(signatureIn(ce, 'proc')).toMatch(/^\(unknown\)/);
+    ce.assign('clean', listCallee(ce));
+    expect(signatureIn(ce, 'proc')).toBe('(list<number>) -> number');
+  });
+
+  test('a wildcard callee that is never assigned is left alone', () => {
+    const ce = new ComputeEngine();
+    ce.declare('never2', 'function');
+    executeEpsil(ce, 'function nproc(cs) { never2(cs) + 1 }');
+    expect(signatureIn(ce, 'nproc')).toBe('(unknown) -> broadcastable<number>');
+    // No error, and the vectorization default holds: the call broadcasts and
+    // the unresolved applications surface inert.
+    expect(executeEpsil(ce, 'nproc([1,2,3])').value?.toString()).toBe(
+      '[1 + never2(1),1 + never2(2),1 + never2(3)]'
+    );
+    // The caller IS parked on `never2` — exactly as it is for an entirely
+    // UNdeclared callee (the no-def channel notes the same way), so the
+    // registry holds one pending entry rather than none.
+    expect(takeProvisionalDependents(ce, 'never2')).toHaveLength(1);
+  });
+});

@@ -13,7 +13,11 @@ import {
   roundMeasurementForDisplay,
 } from '../numerics/strings.js';
 import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
-import { errorOpsWithoutTrace } from './error-value.js';
+import {
+  broadcastContextMessage,
+  broadcastFrames,
+  errorOpsWithoutTrace,
+} from './error-value.js';
 
 /** Helper type for expressions known to be function expressions (in operator/function callbacks) */
 type FnExpr = Expression & FunctionInterface;
@@ -628,13 +632,22 @@ const FUNCTIONS: Record<
     // via `.ops`/`errorFrames()`; it is deliberately not rendered — an error
     // reads the same whether or not it bubbled.
     const ops = errorOpsWithoutTrace(expr);
-    if (ops.length === 1) return `Error(${serialize(ops[0])})`;
-    if (ops.length === 2) {
-      if (isString(ops[0]))
-        return `Error("${ops[0].string}", ${serialize(ops[1])})`;
-      return `Error(${serialize(ops[0])}, ${serialize(ops[1])})`;
-    }
-    return `Error(${ops.map((x) => serialize(x)).join(', ')})`;
+    // …with ONE exception: an element-wise (broadcast) entry is not provenance
+    // but the reason the error exists at all — a lambda auto-broadcast over a
+    // collection argument is otherwise invisible, and the failure it produces
+    // is unreadable without it. Rendered in the `where` position.
+    // Built as a list of already-serialized arguments rather than a pre-comma'd
+    // suffix, so an empty operand list cannot produce a leading `Error(, …)`.
+    const parts: string[] =
+      ops.length === 2 && isString(ops[0])
+        ? [`"${ops[0].string}"`, serialize(ops[1])]
+        : ops.map((x) => serialize(x));
+    parts.push(
+      ...broadcastFrames(expr).map(
+        (f) => `"${broadcastContextMessage(f.operator, f.length, f.index)}"`
+      )
+    );
+    return `Error(${parts.join(', ')})`;
   },
   LatexString: (expr_: Expression) => {
     const expr = expr_ as FnExpr;
