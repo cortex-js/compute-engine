@@ -5,6 +5,7 @@ import {
   resolveTypeForCompilation as resolveType,
 } from '../common/type/utils.js';
 import { isSubtype } from '../common/type/subtype.js';
+import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
 import { Expression, CollectionHandlers } from './global-types.js';
@@ -791,14 +792,33 @@ export function broadcastOverIndexedCollections(
  * until it resolves — the ROADMAP "broadcast semantics residue").
  * `strictLengths: false` is for pairing callers only (`PointList`, via
  * `broadcastOverIndexedCollections`), whose shortest-zip is their contract.
+ *
+ * `callee` is the one-rank ARREST hook for a DECLARED `broadcastable<T>`
+ * parameter (`docs/plans/2026-08-08-broadcastable-param-semantics.md`, rule 2):
+ * the body becomes `Apply(⟨literal⟩, …)` instead of `operator(…)`, and `Apply`
+ * binds every argument WHOLE — so a nested-collection element is passed to the
+ * function intact instead of re-entering the broadcast gate by name and
+ * descending another rank. Without it a lazified declared broadcast would
+ * disagree with the eager one purely because of the source's SIZE.
+ *
+ * `paramTypes` is the same declaration's rule 3, per element: the mapping
+ * function's parameter for operand `i` is DECLARED that type (`_1: number`),
+ * so the ordinary application check rejects a violating element loudly —
+ * eagerly at the `Map`'s own element evaluation, lazily at access. The check
+ * must live on the PARAMETER, not inside the body: an `incompatible-type`
+ * raised inside the spliced `Apply(…)` is swallowed by the surrounding
+ * application (it degrades to `NaN`/`Missing`), while a parameter violation
+ * surfaces as the element's value.
  */
 export function lazyBroadcastMap(
   ce: Expression['engine'],
   operator: string,
   ops: ReadonlyArray<Expression>,
-  isBroadcastOperand: (x: Expression) => boolean,
+  isBroadcastOperand: (x: Expression, i: number) => boolean,
   numericApproximation = false,
-  strictLengths = true
+  strictLengths = true,
+  callee?: Expression,
+  paramTypes?: (i: number) => Type | undefined
 ): Expression {
   if (strictLengths) {
     const mismatch = broadcastLengthMismatch(ce, ops);
@@ -807,22 +827,30 @@ export function lazyBroadcastMap(
   // Parameter names must not shadow a free symbol of a spliced (whole) operand
   // once the body is canonicalized in the function-literal scope.
   const avoid = new Set<string>();
-  for (const x of ops)
-    if (!isBroadcastOperand(x)) for (const s of x.symbols) avoid.add(s);
+  for (const [k, x] of ops.entries())
+    if (!isBroadcastOperand(x, k)) for (const s of x.symbols) avoid.add(s);
+  if (callee) for (const s of callee.symbols) avoid.add(s);
 
   const cols: Expression[] = [];
   const params: Expression[] = [];
   const bodyArgs: Expression[] = [];
   let i = 0;
-  for (const x of ops) {
-    if (isBroadcastOperand(x)) {
+  for (const [k, x] of ops.entries()) {
+    if (isBroadcastOperand(x, k)) {
       let name: string;
       do {
         i += 1;
         name = `_${i}`;
       } while (avoid.has(name));
       const p = ce.symbol(name, { canonical: false });
-      params.push(p);
+      const t = paramTypes?.(k);
+      params.push(
+        t === undefined
+          ? p
+          : ce._fn('Typed', [p, ce.string(typeToString(t))], {
+              canonical: false,
+            })
+      );
       bodyArgs.push(p);
       cols.push(x);
     } else {
@@ -830,7 +858,9 @@ export function lazyBroadcastMap(
     }
   }
 
-  let body = ce._fn(operator, bodyArgs, { canonical: false });
+  let body = callee
+    ? ce._fn('Apply', [callee, ...bodyArgs], { canonical: false })
+    : ce._fn(operator, bodyArgs, { canonical: false });
   // When a numeric approximation was requested (`.N()`), wrap each element's
   // body in `N(…)` so it floats on access — otherwise a lazy element would
   // evaluate EXACTLY (e.g. `Sin(Range(1,1e8)).N()` element 1 → symbolic
@@ -866,14 +896,19 @@ export function lazyBroadcastMapIfNeeded(
   ce: Expression['engine'],
   operator: string,
   ops: ReadonlyArray<Expression>,
-  isBroadcastOperand: (x: Expression) => boolean,
-  numericApproximation = false
+  isBroadcastOperand: (x: Expression, i: number) => boolean,
+  numericApproximation = false,
+  options?: {
+    strictLengths?: boolean;
+    callee?: Expression;
+    paramTypes?: (i: number) => Type | undefined;
+  }
 ): Expression | undefined {
   let minKnown = Infinity;
   let hasBroadcast = false;
   let hasUnknownOrInfinite = false;
-  for (const x of ops) {
-    if (!isBroadcastOperand(x)) continue;
+  for (const [k, x] of ops.entries()) {
+    if (!isBroadcastOperand(x, k)) continue;
     hasBroadcast = true;
     const c = x.count;
     if (
@@ -893,7 +928,10 @@ export function lazyBroadcastMapIfNeeded(
     operator,
     ops,
     isBroadcastOperand,
-    numericApproximation
+    numericApproximation,
+    options?.strictLengths ?? true,
+    options?.callee,
+    options?.paramTypes
   );
 }
 

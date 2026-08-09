@@ -2137,6 +2137,47 @@ export class BoxedFunction
       }
 
       //
+      // 2c/ Broadcast over the slots a DECLARED `broadcastable<T>` signature
+      // marks elementwise (Option A, ratified 2026-08-08 —
+      // docs/plans/2026-08-08-broadcastable-param-semantics.md). Step 2b above
+      // never reaches these: `paramsAreScalar` is false for such a signature
+      // (a `broadcastable<T>` is not a scalar type), by design — the gate here
+      // is the DECLARATION, per slot, not the absence of evidence. Rule 1
+      // (broadcast-wins): a collection argument maps even when `T` would admit
+      // it whole. Rule 2 (one rank down) lives in `declaredBroadcastElement`.
+      //
+      const declaredPlan = broadcastableParamSlots(def);
+      const declaredLiteral = declaredPlan && lambdaLiteralOf(def);
+      if (
+        declaredPlan &&
+        declaredLiteral &&
+        // Enter only when a MAPPABLE slot actually holds a collection. Testing
+        // "any operand is a collection" instead would evaluate the scalar
+        // lifts below for a broadcast `setupDeclaredBroadcast` then declines
+        // (no mapped slot), and the ordinary application in the tail would
+        // evaluate them a SECOND time: `f(Random(), L)` under
+        // `(broadcastable<number>, list<number>)` drew twice, against the
+        // evaluate-once ruling (2026-07-24).
+        someMappableCollection(this.ops!, declaredPlan, (x) =>
+          isFiniteIndexedCollection(x)
+        )
+      ) {
+        // Broadcast rulings (2026-07-24), as in steps 2/2b: lifted operands are
+        // evaluated ONCE, and the length check runs before the lazy form so the
+        // SIZE of a source never decides the semantics.
+        const mapped = declaredBroadcast(
+          this.engine,
+          this.operator,
+          declaredLiteral,
+          declaredPlan,
+          evaluateBroadcastLiftsOnce(this._ops!, options),
+          (x) => isFiniteIndexedCollection(x) && !isTuple(x),
+          options
+        );
+        if (mapped) return mapped;
+      }
+
+      //
       // 3/ Handle evaluation of lazy collections
       //
       if (materialization !== false && !def.evaluate && this.isLazyCollection)
@@ -2286,6 +2327,25 @@ export class BoxedFunction
             );
           if (results.length > 0) return this.engine._fn('List', results);
         }
+      }
+
+      //
+      // 4b-decl/ The post-evaluation twin of step 2c: a DECLARED
+      // `broadcastable<T>` slot whose argument only BECAME a finite indexed
+      // collection after evaluation (`f(lst(3))`). `tail` is already evaluated,
+      // so the purity half of the broadcast ruling does not apply here.
+      //
+      if (declaredPlan && declaredLiteral) {
+        const mapped = declaredBroadcast(
+          this.engine,
+          this.operator,
+          declaredLiteral,
+          declaredPlan,
+          tail,
+          isPostEvalBroadcastOperand,
+          options
+        );
+        if (mapped) return mapped;
       }
 
       //
@@ -2543,6 +2603,32 @@ export class BoxedFunction
       }
 
       //
+      // 2b-decl/ Broadcast over the slots a DECLARED `broadcastable<T>`
+      // signature marks elementwise — mirrors the sync step 2c.
+      //
+      const declaredPlan = broadcastableParamSlots(def);
+      const declaredLiteral = declaredPlan && lambdaLiteralOf(def);
+      if (
+        declaredPlan &&
+        declaredLiteral &&
+        // Evaluate-once, as in the sync step 2c — see the note there.
+        someMappableCollection(this.ops!, declaredPlan, (x) =>
+          isFiniteIndexedCollection(x)
+        )
+      ) {
+        const mapped = await declaredBroadcastAsync(
+          this.engine,
+          this.operator,
+          declaredLiteral,
+          declaredPlan,
+          await evaluateBroadcastLiftsOnceAsync(this._ops!, options),
+          (x) => isFiniteIndexedCollection(x) && !isTuple(x),
+          options
+        );
+        if (mapped) return mapped;
+      }
+
+      //
       // 2c/ `.N()` of an already-evaluated lazy `Map` — mirrors the sync
       // path's step 3b (the async path has no materialization step, so this
       // runs unconditionally under `numericApproximation`).
@@ -2680,6 +2766,23 @@ export class BoxedFunction
               this.engine._fn('List', resolved)
             );
         }
+      }
+
+      //
+      // 3b-decl/ The post-evaluation twin of step 2b-decl — mirrors the sync
+      // step 4b-decl.
+      //
+      if (declaredPlan && declaredLiteral) {
+        const mapped = await declaredBroadcastAsync(
+          this.engine,
+          this.operator,
+          declaredLiteral,
+          declaredPlan,
+          tail,
+          isPostEvalBroadcastOperand,
+          options
+        );
+        if (mapped) return mapped;
       }
 
       // 4/ Create a scope if needed
@@ -3139,6 +3242,13 @@ function type(expr: BoxedFunction): Type {
     const resolved = resolvedArm(expr, sig) ?? sig;
     let sigResult = functionResult(resolved) ?? 'unknown';
 
+    // The DECLARED `broadcastable<T>` slot plan of this definition (Option A,
+    // ratified 2026-08-08 — see `broadcastableParamSlots`). `undefined` for
+    // every built-in and every inferred lambda, and for an OVERLOAD set, whose
+    // evaluation and typing both stay on the pre-declaration path (a known gap,
+    // recorded in the plan doc's open rulings).
+    const declaredSlots = broadcastableParamSlots(def);
+
     // A polytype arm's declared result is OPEN (`functionResult` hands back
     // the pattern), and an open type must never escape as an expression's
     // `.type` (§4.2 ground invariant). Solve the arm at this call site and
@@ -3147,7 +3257,13 @@ function type(expr: BoxedFunction): Type {
     // bindings — for the same reason `resolvedArm` recomputes its policies.
     {
       const instantiated = instantiatedResultType(resolved, expr.ops, {
-        threadable: def.broadcastable,
+        // The SAME gate `box.ts` hands `validateArguments` (§4.5: validation
+        // and result typing solve one constraint problem) — per position when
+        // the signature declares `broadcastable<T>` slots.
+        threadable:
+          declaredSlots === undefined || def.broadcastable === true
+            ? def.broadcastable
+            : (i: number) => declaredSlots.at(i).mappable,
         stripMissing: (i) => def.stripsMissingAt(i),
         lazy: def.lazy,
       });
@@ -3246,7 +3362,15 @@ function type(expr: BoxedFunction): Type {
     // `broadcastElementType` (unwrapping it), the lambda arm deliberately does
     // not — `f := (x: number) -> list<number>` applied to `[1,2]` evaluates to
     // `[[1,1],[2,2]]` and must type `list<list<number>>`, not `vector<2>`.
-    if (def.broadcastable && !isLambdaDef(def)) {
+    // A DECLARED `broadcastable<T>` parameter is an elementwise contract too
+    // (Option A, ratified 2026-08-08 — Tycho defect 157(1)), so its application
+    // must type exactly like the inferred path: definite collection → `list<R>`
+    // (arm 1), possibly-collection → `broadcastable<R>` (arm 2). `broadcastable`
+    // is DERIVED from `paramsAreScalar`, which answers false for such a
+    // signature, so without this gate the DECLARED spelling typed strictly
+    // WEAKER (bare `unknown`) than the `(number)` one it is meant to refine.
+    // (`declaredSlots` is computed above, next to the arm resolution.)
+    if ((def.broadcastable || declaredSlots) && !isLambdaDef(def)) {
       // O(rank) candidate check — see the §D4.2 note at the sibling sites.
       const hasTensors = expr.ops.some((x) => candidateShape(x) !== null);
       // `Equal`/`NotEqual` over TWO OR MORE definite collections is
@@ -3316,10 +3440,14 @@ function type(expr: BoxedFunction): Type {
               sigResult.kind === 'union' &&
               sigResult.types.some((m) => isSubtype(m, 'collection'))));
         const broadcastingOps = expr.ops.filter(
-          (x) =>
-            (isFiniteIndexedCollection(x) && !isTuple(x)) ||
-            isBroadcastCollectionType(x) ||
-            (!deferToHandler && isFixedShapeCollection(x))
+          (x, i) =>
+            // Per-slot when the signature DECLARES `broadcastable<T>` slots: an
+            // operand a collection-typed slot binds WHOLE never lifts the
+            // result (the value path binds it whole too).
+            (declaredSlots === undefined || declaredSlots.at(i).mappable) &&
+            ((isFiniteIndexedCollection(x) && !isTuple(x)) ||
+              isBroadcastCollectionType(x) ||
+              (!deferToHandler && isFixedShapeCollection(x)))
         );
         if (broadcastingOps.length > 0) {
           // The wrapper below assumes `sigResult` is the SCALAR per-element
@@ -3387,7 +3515,13 @@ function type(expr: BoxedFunction): Type {
         // `broadcastElementType(sigResult)` unwraps an already-broadcastable
         // `sigResult` (Add/Multiply handlers compute their own broadcastable
         // type), keeping the arm idempotent — never `broadcastable<broadcastable<…>>`.
-        if (expr.ops.some((x) => isPossiblyCollectionTyped(x)))
+        if (
+          expr.ops.some(
+            (x, i) =>
+              (declaredSlots === undefined || declaredSlots.at(i).mappable) &&
+              isPossiblyCollectionTyped(x)
+          )
+        )
           return maybeAbsorb({
             kind: 'broadcastable',
             elements: broadcastElementType(sigResult),
@@ -3416,10 +3550,13 @@ function type(expr: BoxedFunction): Type {
     // via `paramsAreScalar`; tuples atomic, bound whole, never mapped). A
     // collection-typed PARAMETER makes `paramsAreScalar` false, so a lambda that
     // consumes a whole collection keeps its scalar result unchanged.
+    // A DECLARED `broadcastable<T>` slot enters here too (Option A): the
+    // declaration is the gate, in place of `paramsAreScalar`'s all-or-nothing
+    // inference verdict, and it lifts exactly the slots it marks.
     if (
       def instanceof _BoxedOperatorDefinition &&
       def._isLambda &&
-      paramsAreScalar(def)
+      (paramsAreScalar(def) || declaredSlots)
     ) {
       // A numeric-tuple argument binds WHOLE to a scalar parameter (atomic,
       // never mapped), then the body's own arithmetic broadcasts it
@@ -3452,16 +3589,19 @@ function type(expr: BoxedFunction): Type {
       // instead of `list<list<number>>`.
       {
         const mapped = expr.ops.filter(
-          (x) =>
-            (isFiniteIndexedCollection(x) && !isTuple(x)) ||
-            // Collection-TYPED operands too (Tycho item 73): `h(L+1)` /
-            // `h(2L)` — an unevaluated expression statically typed as a
-            // list/vector broadcasts through the lambda at runtime (the
-            // post-eval lambda-broadcast arm maps it element-wise), so the
-            // static type must be the lifted list as well, exactly as at
-            // the generic wrapper's arm 1.
-            isBroadcastCollectionType(x) ||
-            isFixedShapeCollection(x)
+          (x, i) =>
+            // Per-slot under a DECLARED `broadcastable<T>` signature: a
+            // collection-typed slot binds its argument whole and never lifts.
+            (declaredSlots === undefined || declaredSlots.at(i).mappable) &&
+            ((isFiniteIndexedCollection(x) && !isTuple(x)) ||
+              // Collection-TYPED operands too (Tycho item 73): `h(L+1)` /
+              // `h(2L)` — an unevaluated expression statically typed as a
+              // list/vector broadcasts through the lambda at runtime (the
+              // post-eval lambda-broadcast arm maps it element-wise), so the
+              // static type must be the lifted list as well, exactly as at
+              // the generic wrapper's arm 1.
+              isBroadcastCollectionType(x) ||
+              isFixedShapeCollection(x))
         );
         if (mapped.length > 0) {
           // D10 (§4.4, re-ruled 2026-08-04): `lambdaResult` is the PER-ELEMENT
@@ -3490,7 +3630,13 @@ function type(expr: BoxedFunction): Type {
           );
         }
       }
-      if (expr.ops.some((x) => isPossiblyCollectionTyped(x)))
+      if (
+        expr.ops.some(
+          (x, i) =>
+            (declaredSlots === undefined || declaredSlots.at(i).mappable) &&
+            isPossiblyCollectionTyped(x)
+        )
+      )
         return {
           kind: 'broadcastable',
           elements: lambdaResult,
@@ -3528,9 +3674,21 @@ function type(expr: BoxedFunction): Type {
     // solve sees the SAME `threadable` gate this route hands
     // `validateArguments` (`box.ts`), so validation and result typing solve one
     // constraint problem (§4.5).
-    const threadable = paramsAreScalar(sig);
+    // A DECLARED `broadcastable<T>` slot is threadable BY DECLARATION (Option
+    // A): `paramsAreScalar` answers false for it — that is the inference gate —
+    // so without this the declare-then-assign spelling typed strictly weaker
+    // than the plain-scalar one it refines, while the value path now maps.
+    const valueSlots = broadcastableParamSlots(sig);
+    const threadable = paramsAreScalar(sig) || valueSlots !== undefined;
     const sigResult =
-      instantiatedResultType(sig, expr.ops, { threadable }) ??
+      instantiatedResultType(sig, expr.ops, {
+        // Per position when the signature declares `broadcastable<T>` slots —
+        // the same gate `box.ts` hands `validateArguments` (§4.5).
+        threadable:
+          valueSlots === undefined || paramsAreScalar(sig)
+            ? threadable
+            : (i: number) => valueSlots.at(i).mappable,
+      }) ??
       functionResult(sig) ??
       'unknown';
     if (threadable) {
@@ -3549,16 +3707,19 @@ function type(expr: BoxedFunction): Type {
       // flattened by `broadcastElementType`.
       {
         const mapped = expr.ops.filter(
-          (x) =>
-            (isFiniteIndexedCollection(x) && !isTuple(x)) ||
-            // Collection-TYPED operands too (Tycho item 73): `h(L+1)` /
-            // `h(2L)` — an unevaluated expression statically typed as a
-            // list/vector broadcasts through the lambda at runtime (the
-            // post-eval lambda-broadcast arm maps it element-wise), so the
-            // static type must be the lifted list as well, exactly as at
-            // the generic wrapper's arm 1.
-            isBroadcastCollectionType(x) ||
-            isFixedShapeCollection(x)
+          (x, i) =>
+            // Per-slot under a DECLARED `broadcastable<T>` signature, as at the
+            // operator-def lambda site above.
+            (valueSlots === undefined || valueSlots.at(i).mappable) &&
+            ((isFiniteIndexedCollection(x) && !isTuple(x)) ||
+              // Collection-TYPED operands too (Tycho item 73): `h(L+1)` /
+              // `h(2L)` — an unevaluated expression statically typed as a
+              // list/vector broadcasts through the lambda at runtime (the
+              // post-eval lambda-broadcast arm maps it element-wise), so the
+              // static type must be the lifted list as well, exactly as at
+              // the generic wrapper's arm 1.
+              isBroadcastCollectionType(x) ||
+              isFixedShapeCollection(x))
         );
         // Shape-aware (§D6.1), as at the operator-def lambda site above —
         // including the collection-valued-result exception.
@@ -3578,7 +3739,13 @@ function type(expr: BoxedFunction): Type {
           );
         }
       }
-      if (expr.ops.some((x) => isPossiblyCollectionTyped(x)))
+      if (
+        expr.ops.some(
+          (x, i) =>
+            (valueSlots === undefined || valueSlots.at(i).mappable) &&
+            isPossiblyCollectionTyped(x)
+        )
+      )
         return {
           kind: 'broadcastable',
           elements: sigResult,
@@ -3694,6 +3861,27 @@ function applyFunctionLiteral(
         annotateBroadcastErrors(expr.operator, results)
       );
     }
+  }
+
+  // The declared-`broadcastable<T>` elementwise map (Option A) — the value-def
+  // twin of `_computeValue`'s step 2c. This is the route the
+  // declare-then-assign spelling takes (`ce.declare('f',
+  // '(broadcastable<value>) -> unknown')` then `ce.assign('f', x ↦ …)`), which
+  // resolves to a VALUE definition rather than an operator definition. Reached
+  // only when the broadcast above declined: `paramsAreScalar` is false for a
+  // `broadcastable<T>` signature by design.
+  const declaredPlan = broadcastableParamSlots(broadcastGateType);
+  if (declaredPlan) {
+    const mapped = declaredBroadcast(
+      expr.engine,
+      expr.operator,
+      value,
+      declaredPlan,
+      ops,
+      (x) => isFiniteIndexedCollection(x) && !isTuple(x),
+      options
+    );
+    if (mapped) return mapped;
   }
 
   // The value is a function literal. Apply the arguments to it, threading
@@ -3825,6 +4013,373 @@ export function paramsAreScalar(
     if (isSubtype(t, 'function')) return true;
     return isScalarType(t);
   });
+}
+
+/**
+ * One parameter slot's role in a DECLARED-`broadcastable<T>` application
+ * (`docs/plans/2026-08-08-broadcastable-param-semantics.md`).
+ *
+ * - `mappable`: a collection argument at this slot is MAPPED element-wise.
+ *   True for a declared `broadcastable<T>` slot (rule 1, broadcast-wins) and
+ *   for a plain SCALAR slot (which is what the inferred all-scalar route
+ *   already does). False for a collection-, tuple- or function-typed slot:
+ *   those consume their argument WHOLE.
+ * - `elements`: the type an ELEMENT mapped through this slot must satisfy —
+ *   the declared `T` for a `broadcastable<T>` slot, and the slot's own
+ *   declared type for a plain scalar sibling (an element mapped through it
+ *   binds to that parameter, so it must satisfy exactly what a whole argument
+ *   would have had to). This is the per-element contract rule 3 checks after
+ *   the one rank of descent. `undefined` only for a whole-bound slot, whose
+ *   argument `validateArguments` checks as usual.
+ * - `declared`: this slot was written `broadcastable<T>`. It is what puts the
+ *   whole signature on the declared-broadcast route; a scalar slot alone
+ *   never does (that is the INFERRED route's business, gated by
+ *   `paramsAreScalar`).
+ */
+type BroadcastSlot = {
+  mappable: boolean;
+  elements?: Type;
+  declared?: boolean;
+};
+
+/** The per-slot broadcast plan of a signature: `at(i)` describes argument
+ * position `i` (optional and variadic positions included). */
+export type BroadcastSlotPlan = { at: (i: number) => BroadcastSlot };
+
+const WHOLE_SLOT: BroadcastSlot = { mappable: false };
+
+/** Memoized per SIGNATURE TYPE object — the plan is a pure function of the
+ * declared signature, and definitions hold theirs for their lifetime, so the
+ * O(#params) walk runs once per declaration rather than once per application
+ * (§D4.2 hot-path contract). `null` records "no broadcastable slot", the
+ * overwhelmingly common answer. */
+const BROADCAST_SLOT_PLANS = new WeakMap<object, BroadcastSlotPlan | null>();
+
+/**
+ * The per-slot broadcast plan of `source`, or `undefined` when its signature
+ * declares NO `broadcastable<T>` parameter — which is every built-in and every
+ * inferred lambda signature, so every existing caller keeps its
+ * `paramsAreScalar` gate untouched and pays only this lookup.
+ *
+ * A DECLARED `broadcastable<T>` parameter is an elementwise contract (Option A,
+ * ratified 2026-08-08): the slot maps an indexed-collection argument even when
+ * `T` would admit the collection whole. `paramsAreScalar` answers `false` for
+ * such a signature (a `broadcastable<T>` is not a scalar type) and MUST keep
+ * doing so — that is the inference-driven gate, and the declaration-driven one
+ * is this plan.
+ * @internal
+ */
+export function broadcastableParamSlots(
+  source: BoxedOperatorDefinition | Type | undefined
+): BroadcastSlotPlan | undefined {
+  if (source === undefined) return undefined;
+  const sigType = isOperatorDefinition(source)
+    ? source.signature?.type
+    : source;
+  if (!sigType || typeof sigType === 'string') return undefined;
+  if (sigType.kind !== 'signature') return undefined;
+
+  const cached = BROADCAST_SLOT_PLANS.get(sigType);
+  if (cached !== undefined) return cached ?? undefined;
+
+  const slotOf = (t: Type): BroadcastSlot => {
+    const s = substituteDeclaredBounds(sigType.typeParams, t);
+    if (typeof s !== 'string' && s.kind === 'broadcastable')
+      return { mappable: true, elements: s.elements, declared: true };
+    // A function-typed slot is a higher-order callback: bind whole. Same
+    // reading as `paramsAreScalar`'s exemption — it never vetoes the OTHER
+    // slots, which per-slot gating gives for free.
+    if (isSubtype(s, 'function')) return WHOLE_SLOT;
+    // A plain SCALAR sibling is mapped too (that is what the inferred
+    // all-scalar route does), so it needs an element contract of its own: the
+    // element binds to THIS parameter, so it must satisfy the parameter's own
+    // declared type. Without it `(broadcastable<number>, number)` mapped a
+    // `list<string>` through the second slot unchecked into an untyped body.
+    return isScalarType(s) ? { mappable: true, elements: s } : WHOLE_SLOT;
+  };
+
+  const slots = [...(sigType.args ?? []), ...(sigType.optArgs ?? [])].map(
+    (arg) => slotOf(arg.type)
+  );
+  const rest = sigType.variadicArg
+    ? slotOf(sigType.variadicArg.type)
+    : WHOLE_SLOT;
+
+  // Only a DECLARED `broadcastable<T>` slot puts a signature on this route —
+  // an all-scalar signature keeps its `paramsAreScalar` gate untouched.
+  const plan =
+    slots.some((s) => s.declared) || rest.declared
+      ? { at: (i: number) => slots[i] ?? rest }
+      : null;
+  BROADCAST_SLOT_PLANS.set(sigType, plan);
+  return plan ?? undefined;
+}
+
+/**
+ * Does ANY arm of `source` DECLARE a `broadcastable<T>` parameter?
+ *
+ * An overload set (an intersection of signatures) has no single slot plan —
+ * `broadcastableParamSlots` declines it, because which arm a call binds is a
+ * per-call question this function does not answer — but a gate that must FAIL
+ * CLOSED still needs to know. That is the compile gate: whichever arm wins at
+ * run time, emitted scalar (or leaf-descending) code for a broadcastable arm
+ * is silently wrong, and silently wrong is forbidden (D6). Conservative by
+ * construction: one broadcastable arm speaks for the set.
+ * @internal
+ */
+export function declaresBroadcastableParam(
+  source: BoxedOperatorDefinition | Type | undefined
+): boolean {
+  if (source === undefined) return false;
+  if (broadcastableParamSlots(source) !== undefined) return true;
+  const sigType = isOperatorDefinition(source)
+    ? source.signature?.type
+    : source;
+  const arms = overloadArms(sigType);
+  return (
+    arms !== undefined &&
+    arms.some((arm) => broadcastableParamSlots(arm) !== undefined)
+  );
+}
+
+/**
+ * Does a MAPPABLE slot of `plan` hold a collection operand? The entry gate of
+ * the declared-broadcast arms: entering when only a WHOLE-bound slot holds one
+ * would evaluate the arms' scalar lifts for a map that then declines, and the
+ * ordinary application in the tail would evaluate them again (the evaluate-once
+ * ruling, `docs/BROADCAST-MODEL.md`).
+ */
+function someMappableCollection(
+  ops: ReadonlyArray<Expression>,
+  plan: BroadcastSlotPlan,
+  isCollection: (x: Expression) => boolean
+): boolean {
+  return ops.some(
+    (x, i) => plan.at(i).mappable && isCollection(x) && !isTuple(x)
+  );
+}
+
+/**
+ * Set up the DECLARED-`broadcastable<T>` element-wise map for one application
+ * (Option A). Returns:
+ * - `undefined` when NO slot maps — a scalar argument binds directly (rule 4)
+ *   and the caller falls through to ordinary application;
+ * - `{ value }` for a terminal result: the strict length-mismatch error
+ *   (`docs/BROADCAST-MODEL.md`) or the lazy `Map` form;
+ * - `{ rows, mapped, mask }` for the eager loop — `rows` yields full argument
+ *   rows (mapped slots take the element, every other slot is spliced whole,
+ *   i.e. lifted), `mapped` is the participating operands, for error context.
+ */
+function setupDeclaredBroadcast(
+  ce: Expression['engine'],
+  operator: string,
+  literal: Expression,
+  plan: BroadcastSlotPlan,
+  ops: ReadonlyArray<Expression>,
+  isBroadcastOperand: (x: Expression) => boolean,
+  numericApproximation: boolean
+):
+  | { value: Expression; rows?: undefined }
+  | {
+      value?: undefined;
+      rows: Iterator<Expression[]>;
+      mapped: Expression[];
+      mask: boolean[];
+    }
+  | undefined {
+  const mask = ops.map((x, i) => plan.at(i).mappable && isBroadcastOperand(x));
+  if (!mask.some((m) => m)) return undefined;
+
+  const mapped = ops.filter((_, i) => mask[i]);
+  // Strict length policy, over the MAPPED slots only: a collection bound whole
+  // at a non-mapped slot is not a broadcast participant and must not mismatch.
+  const mismatch = broadcastLengthMismatch(ce, mapped);
+  if (mismatch) return { value: mismatch };
+
+  const lazy = lazyBroadcastMapIfNeeded(
+    ce,
+    operator,
+    ops,
+    (_x, i) => mask[i],
+    numericApproximation,
+    // The mismatch check above already ran over the mapped slots; re-running it
+    // inside the funnel would see the whole-bound operands too. `callee` is the
+    // one-rank arrest (rule 2) — see `lazyBroadcastMap`.
+    //
+    // `paramTypes` carries rule 3 onto the lazy route: the map's parameter at
+    // a mapped slot is DECLARED the slot's element type, so applying the
+    // mapping function to a violating element produces the same loud
+    // `incompatible-type` the eager loop's `declaredBroadcastElement` produces
+    // — instead of silently re-broadcasting a nested element through the body.
+    // Semantics must not depend on the source's SIZE.
+    {
+      strictLengths: false,
+      callee: literal,
+      paramTypes: (i: number) => (mask[i] ? plan.at(i).elements : undefined),
+    }
+  );
+  if (lazy) return { value: lazy };
+
+  const inner = zip(mapped);
+  const rows: Iterator<Expression[]> = {
+    next() {
+      const { done, value } = inner.next();
+      if (done) return { done: true, value: undefined };
+      const row: Expression[] = [];
+      let k = 0;
+      for (let i = 0; i < ops.length; i++)
+        row.push(mask[i] ? value[k++] : ops[i]);
+      return { done: false, value: row };
+    },
+  };
+  return { rows, mapped, mask };
+}
+
+/**
+ * Run the DECLARED-`broadcastable<T>` element-wise map (Option A) for one
+ * application, or return `undefined` when no slot maps (the caller falls
+ * through to ordinary whole-argument application — rule 4).
+ *
+ * Shared by the pre- and post-evaluation arms of both `_computeValue` and
+ * `_computeValueAsync`; the arms differ only in which operands they hand over
+ * and which finiteness predicate admits them.
+ */
+function declaredBroadcast(
+  ce: Expression['engine'],
+  operator: string,
+  literal: Expression,
+  plan: BroadcastSlotPlan,
+  ops: ReadonlyArray<Expression>,
+  isBroadcastOperand: (x: Expression) => boolean,
+  options: Partial<EvaluateOptions> | undefined
+): Expression | undefined {
+  const setup = setupDeclaredBroadcast(
+    ce,
+    operator,
+    literal,
+    plan,
+    ops,
+    isBroadcastOperand,
+    options?.numericApproximation ?? false
+  );
+  if (!setup) return undefined;
+  if (setup.value) return setup.value;
+
+  const results: Expression[] = [];
+  // A THROWN element failure aborts the whole broadcast, so it cannot carry a
+  // breadcrumb — its message is enriched instead (as in step 2b).
+  try {
+    while (true) {
+      const { done, value } = setup.rows.next();
+      if (done) break;
+      results.push(
+        declaredBroadcastElement(ce, literal, plan, value, setup.mask).evaluate(
+          options
+        )
+      );
+    }
+  } catch (e) {
+    throw withBroadcastThrowContext(
+      e,
+      operator,
+      setup.mapped,
+      results.length + 1
+    );
+  }
+  return ce._fn('List', annotateBroadcastErrors(operator, results));
+}
+
+/** The asynchronous twin of {@link declaredBroadcast}. */
+async function declaredBroadcastAsync(
+  ce: Expression['engine'],
+  operator: string,
+  literal: Expression,
+  plan: BroadcastSlotPlan,
+  ops: ReadonlyArray<Expression>,
+  isBroadcastOperand: (x: Expression) => boolean,
+  options: Partial<EvaluateOptions> | undefined
+): Promise<Expression | undefined> {
+  const setup = setupDeclaredBroadcast(
+    ce,
+    operator,
+    literal,
+    plan,
+    ops,
+    isBroadcastOperand,
+    options?.numericApproximation ?? false
+  );
+  if (!setup) return undefined;
+  if (setup.value) return setup.value;
+
+  const results: Promise<Expression>[] = [];
+  while (true) {
+    const { done, value } = setup.rows.next();
+    if (done) break;
+    // As in the async step 2b: `Promise.all` cannot attribute a rejection to a
+    // slot, but each promise is created in a KNOWN one.
+    const index = results.length + 1;
+    results.push(
+      declaredBroadcastElement(ce, literal, plan, value, setup.mask)
+        .evaluateAsync(options)
+        .catch((e) => {
+          throw withBroadcastThrowContext(e, operator, setup.mapped, index);
+        })
+    );
+  }
+  return Promise.all(results).then(
+    (resolved) => ce._fn('List', annotateBroadcastErrors(operator, resolved)),
+    (e) => {
+      throw withBroadcastThrowContext(e, operator, setup.mapped);
+    }
+  );
+}
+
+/**
+ * The per-element application of a declared-`broadcastable<T>` map: the
+ * expression to evaluate for one row.
+ *
+ * ONE RANK DOWN (rule 2). The element binds to the parameter WHOLE, even when
+ * it is itself a collection — so this must NOT re-enter the application
+ * pipeline by name (`f(row)`), which would re-fire the very gate that produced
+ * this row and descend to the leaves, reproducing the unannotated default.
+ * `Apply(⟨literal⟩, …)` is the bind-whole route: its callee is an expression,
+ * not a symbol, so it never canonicalizes back to a named application.
+ *
+ * `T` CHECKS PER ELEMENT (rule 3). After the one rank of descent an element
+ * must satisfy the slot's declared element type; a violation becomes a loud
+ * `Error` value in that element's cell rather than a silent further descent
+ * (`broadcastable<T>` itself would admit the nested collection). Only a
+ * PROVABLE violation errors — an element of unknown type still binds, exactly
+ * as `validateArguments` defers a provisional type.
+ */
+function declaredBroadcastElement(
+  ce: Expression['engine'],
+  literal: Expression,
+  plan: BroadcastSlotPlan,
+  row: ReadonlyArray<Expression>,
+  mask: ReadonlyArray<boolean>
+): Expression {
+  for (let i = 0; i < row.length; i++) {
+    if (!mask[i]) continue;
+    const t = plan.at(i).elements;
+    if (t === undefined) continue;
+    const el = row[i];
+    if (el.type.isUnknown || el.type.matches(t)) continue;
+    return ce.typeError(t, el.type, el.toString());
+  }
+  return ce._fn('Apply', [literal, ...row]);
+}
+
+/** The function literal a declared-`broadcastable<T>` map applies per element,
+ * or `undefined` when this definition has no literal to bind against (a
+ * declared-but-unassigned operator: there is nothing to apply, so evaluation
+ * stays symbolic and only the TYPE reflects the map). */
+function lambdaLiteralOf(
+  def: BoxedOperatorDefinition | undefined
+): Expression | undefined {
+  return def instanceof _BoxedOperatorDefinition && def._isLambda
+    ? def._lambdaLiteral
+    : undefined;
 }
 
 /** True when this operator definition is backed by a user function literal

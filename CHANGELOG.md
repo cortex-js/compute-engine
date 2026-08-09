@@ -62,6 +62,37 @@
 
 ### New Features
 
+- **`broadcastable<T>` as a parameter declaration is now an elementwise
+  contract.** A parameter declared `broadcastable<T>` (e.g.
+  `ce.declare('f', '(broadcastable<number>) -> unknown')`, or an Epsil
+  `function f(x: broadcastable<number>) { … }`) maps an indexed-collection
+  argument element-wise — even when `T` would admit the collection whole
+  (`broadcastable<value>`: the collection arm wins) — and the map descends
+  exactly **one** rank: each element binds to the parameter whole, even a
+  nested collection, unlike the unannotated default, which descends to the
+  scalar leaves. `T` is checked per element (a violating element produces a
+  loud per-element error carrying the broadcast context, and its siblings
+  still evaluate), and a scalar argument binds directly with no list
+  wrapper. Applications now also **type** like the inferred path — a
+  definite collection argument gives `list<R>`, a possibly-collection
+  argument `broadcastable<R>`, a scalar `R` — where the declared spelling
+  previously typed the strictly weaker bare declared result (an explicitly
+  *more* precise declaration yielded strictly *less* type information). A
+  collection- or tuple-declared sibling slot still binds its argument
+  whole, and the strict length-mismatch policy applies across the mapped
+  slots only. The unannotated vectorization default is unchanged. Design
+  record: `docs/plans/2026-08-08-broadcastable-param-semantics.md`.
+
+- Compiling an application of a function with a declared `broadcastable<T>`
+  parameter over a possibly-collection argument fails closed with a
+  diagnostic (interpreted evaluation handles it) instead of emitting scalar
+  code that returned garbage on arrays — the compiled broadcast helper
+  recurses into nested arrays, which is exactly the leaf descent the
+  one-rank contract rules out. The decline is per slot: an argument at a
+  slot the declaration binds whole, an atomic tuple the element type admits,
+  and a provably scalar argument all still compile. A multi-clause function
+  with one broadcastable arm declines conservatively for the whole set.
+
 - **Epsil debugging support in the engine.** Two additions that let a
   debugger (such as the VS Code Epsil extension's DAP adapter) pause and
   inspect Epsil programs at statement granularity:

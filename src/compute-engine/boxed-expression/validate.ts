@@ -32,8 +32,10 @@ import {
 } from '../../common/type/instantiate.js';
 import {
   instantiatedParam,
+  isThreadableAt,
   polytypeArm,
   solveArm,
+  type Threadable,
 } from './generic-instantiation.js';
 import { FunctionSignature, Type } from '../../common/type/types.js';
 import type {
@@ -571,7 +573,11 @@ export function validateArguments(
   ops: ReadonlyArray<Expression>,
   signature: Type,
   lazy?: boolean,
-  threadable?: boolean,
+  /** Global (`opDef.broadcastable`, `paramsAreScalar`) or PER-POSITION: a
+   * declared `broadcastable<T>` signature threads only the slots it marks
+   * elementwise, so a sibling slot that binds its argument whole is validated
+   * as usual (`docs/plans/2026-08-08-broadcastable-param-semantics.md`). */
+  threadable?: Threadable,
   freshlyInferred?: ReadonlySet<BoxedValueDefinition>,
   /** Strip-before-validate (§3.B of the missing-value typing design): for a
    * position where this predicate returns `true`, an operand carrying a
@@ -855,7 +861,7 @@ export function validateArguments(
       result.push(op);
       continue;
     }
-    if (threadable && couldBeCollectionOperand(op)) {
+    if (isThreadableAt(threadable, idx) && couldBeCollectionOperand(op)) {
       result.push(op);
       continue;
     }
@@ -995,7 +1001,7 @@ export function validateArguments(
       i += 1;
       continue;
     }
-    if (threadable && couldBeCollectionOperand(op)) {
+    if (isThreadableAt(threadable, i) && couldBeCollectionOperand(op)) {
       result.push(op);
       i += 1;
       continue;
@@ -1092,7 +1098,8 @@ export function validateArguments(
         result.push(op);
         continue;
       }
-      if (threadable && couldBeCollectionOperand(op)) {
+      // The operand index is `i - 1` (already incremented at the loop top).
+      if (isThreadableAt(threadable, i - 1) && couldBeCollectionOperand(op)) {
         result.push(op);
         continue;
       }
@@ -1228,7 +1235,10 @@ export function validateArguments(
   for (const param of params) {
     const t = inferenceTypeAt(i, param);
     if (t !== undefined && !lazy && !deferredIdx.has(i))
-      if (!threadable || !couldBeCollectionOperand(finalOps[i]))
+      if (
+        !isThreadableAt(threadable, i) ||
+        !couldBeCollectionOperand(finalOps[i])
+      )
         finalOps[i].infer(t);
     i += 1;
   }
@@ -1236,7 +1246,10 @@ export function validateArguments(
     if (!finalOps[i]) break;
     const t = inferenceTypeAt(i, param);
     if (t !== undefined && !lazy && !deferredIdx.has(i))
-      if (!threadable || !couldBeCollectionOperand(finalOps[i]))
+      if (
+        !isThreadableAt(threadable, i) ||
+        !couldBeCollectionOperand(finalOps[i])
+      )
         finalOps[i].infer(t);
     i += 1;
   }
@@ -1244,7 +1257,8 @@ export function validateArguments(
     for (const op of finalOps.slice(i)) {
       const t = inferenceTypeAt(i, varParam);
       if (t !== undefined && !lazy && !deferredIdx.has(i))
-        if (!threadable || !couldBeCollectionOperand(op)) op.infer(t);
+        if (!isThreadableAt(threadable, i) || !couldBeCollectionOperand(op))
+          op.infer(t);
       i += 1;
     }
   }

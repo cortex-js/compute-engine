@@ -67,11 +67,35 @@ export function substituteDeclaredBounds(
   return n === 0 ? t : substituteTypeVariables(t, bounds);
 }
 
+/**
+ * Threadability of a call: `true`/`false` globally (the legacy
+ * `opDef.broadcastable` flag, and `paramsAreScalar`'s all-or-nothing inference
+ * verdict), or a PER-POSITION answer.
+ *
+ * The per-position spelling is what a DECLARED `broadcastable<T>` signature
+ * needs (`docs/plans/2026-08-08-broadcastable-param-semantics.md`): such a
+ * signature maps a collection argument at the slots it marks elementwise, but
+ * a sibling slot declared `list<…>`/`tuple<…>` binds its argument WHOLE and
+ * must be validated as usual. A global `true` there admitted a collection at
+ * EVERY slot unchecked.
+ */
+export type Threadable = boolean | ((paramIndex: number) => boolean);
+
+/** Is position `i` threadable? The one place the two {@link Threadable}
+ * spellings are collapsed, so every gate reads them identically. */
+export function isThreadableAt(
+  threadable: Threadable | undefined,
+  i: number
+): boolean {
+  return typeof threadable === 'function' ? threadable(i) : threadable === true;
+}
+
 /** What the embedding knows about the call that the solver cannot see. */
 export interface ArmInferenceContext {
   /** The operator broadcasts (`threadable`): a collection operand is
-   * lift-admitted at a scalar parameter (D10). */
-  threadable?: boolean;
+   * lift-admitted at a scalar parameter (D10). Per-position for a declared
+   * `broadcastable<T>` signature — see {@link Threadable}. */
+  threadable?: Threadable;
   /** Strip-before-validate eligibility, per position. */
   stripMissing?: (index: number) => boolean;
   /** The operator is `lazy: true`. The whole mechanism is IDLE (§4.5): a lazy
@@ -149,7 +173,11 @@ export function solveArm(
         // ordinary broadcast wrap re-lifts the instantiated result. Admission
         // stays checked at the scalar base by the lift gate itself.
         const op = ops[i];
-        return !!ctx?.threadable && !!op && couldBeCollectionOperand(op);
+        return (
+          isThreadableAt(ctx?.threadable, i) &&
+          !!op &&
+          couldBeCollectionOperand(op)
+        );
       },
     }
   );

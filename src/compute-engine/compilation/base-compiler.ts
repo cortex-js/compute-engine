@@ -4,7 +4,12 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
-import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
+import {
+  broadcastableParamSlots,
+  declaresBroadcastableParam,
+  paramsAreScalar,
+  type BroadcastSlotPlan,
+} from '../boxed-expression/boxed-function.js';
 import { lookupApplicable } from '../function-utils.js';
 import {
   isFiniteIndexedCollection,
@@ -5687,6 +5692,21 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): TargetSource | undefined {
+    // Every argument PROVABLY not a collection (`number`/`boolean`/`string`-
+    // typed — a plain numeric call such as `f(2)`) can never broadcast at run
+    // time. Note the direction: this decides only where the answer is certain,
+    // so a type merely WIDER than the runtime value is treated as possibly a
+    // collection.
+    const provablyScalarArg = (a: Expression): boolean =>
+      a.type.matches('number') ||
+      a.type.matches('boolean') ||
+      a.type.matches('string');
+
+    // Fail closed (D6) BEFORE emission: whether the callee can be emitted at
+    // all is irrelevant to whether an emitted call would be sound, and the
+    // caller's generic "no lowering" message hides the real reason.
+    BaseCompiler.checkDeclaredBroadcast(engine, h, args, provablyScalarArg);
+
     const name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
     if (name === undefined) return undefined;
 
@@ -5746,21 +5766,14 @@ export class BaseCompiler {
     //   - a TUPLE argument is atomic (a point/vector), excluded from broadcast
     //     by the interpreter yet lowered to a JS array here — `bcast` would
     //     map over its components. Leave those on the direct-call path;
-    //   - every argument PROVABLY not a collection (`number`/`boolean`/
-    //     `string`-typed — a plain numeric call such as `f(2)`) can never
-    //     broadcast at run time, so the dispatch would be dead weight in the
-    //     hot path. Note the direction: this declines only where the answer is
-    //     certain, so a type merely WIDER than the runtime value still gets the
-    //     runtime dispatch.
+    //   - every argument PROVABLY not a collection (`provablyScalarArg`, at
+    //     the top of this function) can never broadcast at run time, so the
+    //     dispatch would be dead weight in the hot path.
     // The dispatch is `_SYS.bcastFn`, not `_SYS.bcast`: applying a function
     // literal to an EMPTY collection zips zero elements and answers `[]` in
     // the interpreter, where an empty operator position answers `Nothing`
     // (NaN). Everything else — mismatch → NaN, scalar reuse, nesting — is
     // shared.
-    const provablyScalarArg = (a: Expression): boolean =>
-      a.type.matches('number') ||
-      a.type.matches('boolean') ||
-      a.type.matches('string');
     if (
       target.language === 'javascript' &&
       args.length > 0 &&
@@ -5816,6 +5829,101 @@ export class BaseCompiler {
     const literal = def.value.value?.type?.type;
     if (literal === undefined) return true;
     return paramsAreScalar(literal);
+  }
+
+  /**
+   * Does the DECLARED signature of user-defined function `h` mark any
+   * parameter `broadcastable<T>` — in ANY overload arm? Same definition
+   * resolution as {@link userFunctionParamsAreScalar}; only the DECLARED type
+   * counts (the contract is a declaration, never an inference), so an
+   * unannotated literal answers `false` and every existing compilation is
+   * untouched.
+   */
+  private static userFunctionHasBroadcastableParam(
+    engine: ComputeEngine,
+    h: string
+  ): boolean {
+    const def = engine.lookupDefinition(h);
+    if (!def) return false;
+    if (isOperatorDef(def)) return declaresBroadcastableParam(def.operator);
+    if (!('value' in def) || def.value === undefined) return false;
+    return (
+      declaresBroadcastableParam(def.value.type?.type) ||
+      declaresBroadcastableParam(def.value.value?.type?.type)
+    );
+  }
+
+  /**
+   * The PER-SLOT broadcast plan of user-defined function `h`, or `undefined`
+   * when it declares no `broadcastable<T>` parameter — or when its type is an
+   * overload set, which has no single plan (see
+   * {@link declaresBroadcastableParam}).
+   */
+  private static userFunctionBroadcastPlan(
+    engine: ComputeEngine,
+    h: string
+  ): BroadcastSlotPlan | undefined {
+    const def = engine.lookupDefinition(h);
+    if (!def) return undefined;
+    if (isOperatorDef(def)) return broadcastableParamSlots(def.operator);
+    if (!('value' in def) || def.value === undefined) return undefined;
+    return (
+      broadcastableParamSlots(def.value.type?.type) ??
+      broadcastableParamSlots(def.value.value?.type?.type)
+    );
+  }
+
+  /**
+   * Fail closed (D6) rather than emit code for an application the DECLARED
+   * `broadcastable<T>` contract would evaluate element-wise.
+   *
+   * A declared `broadcastable<T>` parameter is an ELEMENTWISE contract that
+   * maps exactly ONE rank down (Option A, ratified 2026-08-08 —
+   * `docs/plans/2026-08-08-broadcastable-param-semantics.md`). Neither emitted
+   * form expresses it:
+   *   - a direct scalar call hands the callee the whole array (`_fn_g([1,2,3])`
+   *     computes the JS string `"1,2,31"` for `x + 1`);
+   *   - `_SYS.bcastFn` recurses into NESTED arrays — that is the unannotated
+   *     default's leaf descent, not the declaration's one rank — and is
+   *     all-or-nothing across arguments, so a sibling slot the declaration
+   *     binds WHOLE would be mapped too.
+   *
+   * PER SLOT, though: only an argument that could actually be MAPPED forces
+   * the decline. A collection at a slot the contract binds whole compiles
+   * exactly as it did before the declaration existed, and so does an atomic
+   * TUPLE the slot's element type ADMITS (tuples are never mapped — rule 4).
+   * A tuple the element type refutes is NOT exempt: the interpreter answers
+   * `incompatible-type` there, and no emitted form says that.
+   */
+  private static checkDeclaredBroadcast(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    provablyScalarArg: (a: Expression) => boolean
+  ): void {
+    if (args.length === 0) return;
+    const plan = BaseCompiler.userFunctionBroadcastPlan(engine, h);
+    const risky =
+      plan !== undefined
+        ? args.some((a, i) => {
+            const slot = plan.at(i);
+            if (!slot.mappable || provablyScalarArg(a)) return false;
+            // An atomic tuple binds whole — safe to emit, provided the slot's
+            // element contract actually admits it.
+            if (isTuple(a))
+              return !(
+                slot.elements === undefined || a.type.matches(slot.elements)
+              );
+            return true;
+          })
+        : // An OVERLOAD set has no single plan — which arm binds is a runtime
+          // question — so answer conservatively over the whole argument list.
+          BaseCompiler.userFunctionHasBroadcastableParam(engine, h) &&
+          !args.every(provablyScalarArg);
+    if (!risky) return;
+    throw new Error(
+      `${h}: cannot compile an application of a function with a declared \`broadcastable<T>\` parameter over a possibly-collection argument — the declaration maps ONE rank down and the compile targets map to the leaves. Fail closed (D6). Evaluate this expression with evaluate() instead, or declare the parameter as its element type.`
+    );
   }
 
   /**

@@ -44,7 +44,12 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { canonicalPower, canonicalRoot } from './arithmetic-power.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
-import { BoxedFunction, paramsAreScalar } from './boxed-function.js';
+import {
+  BoxedFunction,
+  broadcastableParamSlots,
+  paramsAreScalar,
+} from './boxed-function.js';
+import type { Threadable } from './generic-instantiation.js';
 import { BoxedString } from './boxed-string.js';
 import { BoxedDictionary } from './boxed-dictionary.js';
 import { canonicalForm } from './canonical.js';
@@ -760,6 +765,31 @@ function candidateParamsAt(valueType: Type, idx: number): Type[] {
   return result;
 }
 
+/**
+ * The `threadable` gate `validateArguments` must see for `sig`.
+ *
+ * `whenUndeclared` is the pre-existing signature-wide answer (the
+ * `opDef.broadcastable` flag, or `paramsAreScalar` on the value-definition
+ * route); it is returned unchanged for every signature that declares no
+ * `broadcastable<T>` parameter, which is every built-in and every inferred
+ * lambda.
+ *
+ * A signature that DOES declare one answers PER POSITION (Option A,
+ * `docs/plans/2026-08-08-broadcastable-param-semantics.md`): the slots the
+ * declaration maps elementwise admit a collection operand — the contract is
+ * checked per ELEMENT, where the elements exist — while a sibling slot that
+ * binds its argument WHOLE (`list<…>`, `tuple<…>`, a callback) is validated
+ * exactly as it would be without the declaration. A signature-wide `true`
+ * there admitted a collection at every slot unchecked.
+ */
+function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
+  const plan = broadcastableParamSlots(sig);
+  if (plan === undefined) return whenUndeclared;
+  // A `broadcastable: true` OPERATOR (an arithmetic builtin) threads
+  // everywhere it always did; the plan only ever adds slots.
+  return whenUndeclared ? true : (i: number) => plan.at(i).mappable;
+}
+
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
@@ -914,7 +944,19 @@ function makeCanonicalFunction(
         boxedOps,
         valueType,
         undefined,
-        paramsAreScalar(valueType)
+        // A DECLARED `broadcastable<T>` slot is threadable BY DECLARATION
+        // (Option A, 2026-08-08): the application MAPS a collection argument
+        // there, so the whole-argument check against `broadcastable<T>` is the
+        // wrong one — the contract is per ELEMENT, and it is checked where the
+        // elements exist (`declaredBroadcastElement`). Without this the
+        // declared spelling rejected a mixed-element list that the plain
+        // `(T)` spelling admits and diagnoses element by element.
+        //
+        // PER POSITION, not signature-wide: a sibling slot the declaration
+        // binds WHOLE (`list<…>`, `tuple<…>`, a callback) is validated as
+        // usual, or `(broadcastable<number>, list<string>)` would admit a
+        // `list<number>` at the second slot unchecked.
+        threadableGate(valueType, paramsAreScalar(valueType))
       );
       if (invalid) {
         // Only reject *closed* operands — literals and constant expressions
@@ -1160,7 +1202,9 @@ function applyOperatorDefinition(
             xs,
             opDef.signature.type,
             opDef.lazy,
-            opDef.broadcastable
+            // Declared-`broadcastable<T>` slots are threadable by declaration,
+            // per position — see the value-definition site above.
+            threadableGate(opDef.signature.type, opDef.broadcastable === true)
           ) ?? xs),
       { metadata, canonical: true, scope }
     );
@@ -1291,7 +1335,9 @@ function applyOperatorDefinition(
         args,
         opDef.signature.type,
         opDef.lazy,
-        opDef.broadcastable,
+        // Declared-`broadcastable<T>` slots are threadable by declaration, per
+        // position — see the value-definition site above.
+        threadableGate(opDef.signature.type, opDef.broadcastable === true),
         // The repair is enabled whenever a boxing operation is in progress
         // (matching the old always-present snapshot); an empty log means "no
         // fresh inference happened", not "repair disabled".

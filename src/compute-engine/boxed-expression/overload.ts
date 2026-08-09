@@ -6,7 +6,11 @@ import {
   substituteTypeVariables,
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
-import { solveArm } from './generic-instantiation.js';
+import {
+  isThreadableAt,
+  solveArm,
+  type Threadable,
+} from './generic-instantiation.js';
 import {
   broadcastableBaseMatches,
   narrowingPreservesEffects,
@@ -196,7 +200,9 @@ function isRepairableOperatorSymbol(
  */
 export interface AdmissionPolicies {
   lazy?: boolean;
-  threadable?: boolean;
+  /** Per-position for a declared `broadcastable<T>` signature — see
+   * {@link Threadable}. */
+  threadable?: Threadable;
   couldBeCollection?: (op: Expression) => boolean;
   /** Strip-before-validate eligibility, per operand index (§3.B). */
   stripMissing?: (index: number) => boolean;
@@ -246,7 +252,11 @@ function operandAdmits(
   // wrong" (§4.1).
   if (op.type.isUnknown || op.type.type === 'any') return true;
 
-  if (policies?.threadable && policies.couldBeCollection?.(op)) return true;
+  if (
+    isThreadableAt(policies?.threadable, index) &&
+    policies?.couldBeCollection?.(op)
+  )
+    return true;
   if (op.type.matches(param)) return true;
 
   // Value-component parameter: tri-state admission — MIRRORS the
