@@ -111,6 +111,11 @@ engine when you want an isolated program.
 
 ## Where to Go Next
 
+<ReadMore path="/epsil/tour/">
+Read **A Tour of Epsil** for a compact, example-led introduction to the
+language before diving into individual features.
+</ReadMore>
+
 <ReadMore path="/epsil/examples/">
 Study **complete programs** covering control flow, collections, symbolic
 calculus, linear algebra, strings, and reproducible randomness.

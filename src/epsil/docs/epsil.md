@@ -60,11 +60,19 @@ const answer = 42
 answer = 0
 ```
 
-## Start Here
+## Guide
+
+The guide explains the language through examples and decisions: not only what
+syntax means, but when a form is useful and why you might choose it.
+
+<ReadMore path="/epsil/tour/">
+Take **A Tour of Epsil** — a one-page, example-led introduction to exact
+math, functions, collections, control flow, and types.
+</ReadMore>
 
 <ReadMore path="/epsil/getting-started/">
-Follow the **five-minute getting-started guide** — try the REPL, run a source
-file, and embed Epsil in JavaScript.
+Follow **Getting Started** — install Epsil, try the REPL, run a source file,
+and embed the language in JavaScript.
 </ReadMore>
 
 <ReadMore path="/epsil/examples/">
@@ -86,6 +94,13 @@ Coming from **Mathematica**? Most of the mental model carries over; here is
 what changes.
 </ReadMore>
 
+<ReadMore path="/epsil/evaluation/">
+Understand **how Epsil evaluates** — exact values, mutable bindings, lazy
+collections, ordinary error values, and session scope.
+</ReadMore>
+
+## Tools and Integrations
+
 <ReadMore path="/epsil/for-agents/">
 Writing Epsil with an LLM? Give it the **language card for AI agents** — a
 condensed, machine-verified reference.
@@ -97,6 +112,9 @@ Connect ChatGPT, Claude, or another AI assistant to Epsil with the built-in
 </ReadMore>
 
 ## Language Reference
+
+The reference is organized by language feature. Use it when you know what you
+are looking for and need the complete rule, grammar, or edge case.
 
 <ReadMore path="/epsil/syntax/">
 Read more about the **formal syntax of Epsil** — statements, primaries,
@@ -116,7 +134,8 @@ calls and indexing.
 </ReadMore>
 
 <ReadMore path="/epsil/declarations/">
-**Declarations** — binding names with `let` and `const`.
+**Declarations** — names, `let`, `const`, destructuring, scopes, and named
+types.
 </ReadMore>
 
 <ReadMore path="/epsil/types/">
