@@ -2,6 +2,12 @@
 
 **Status**: DRAFT v5 (2026-07-31). Stages 0–2 implemented; Stages 3–4
 remain proposal (see "Migration and sequencing").
+v6 (2026-08-08) adds **no rulings and no roster change** — only one
+recorded disposition: **`mutable`** is examined and deferred (it collides
+with `scope` on all four metadata axes; the want it expresses is
+per-argument and belongs in type position, not on the arrow; admissible
+only if a confined-mutation `region` frame kind ever ships). See "Label
+admission".
 v5 folds in the round-3 dual review
 (`docs/scratch/EFFECTS-MODEL_SPEC_REVIEW-R3.md`, 16 findings — all 16
 rulings validated). Headline v5 rulings, each specified in its section:
@@ -1238,6 +1244,120 @@ views extend without redefinition.
   apart — until the `ce.effects` registry supplied a *per-surface*
   consumer, at which point the honest representation is one label per
   handler namespace (see "Host capabilities").
+
+**Examined and deferred (v6, 2026-08-08) — not a ruling, a recorded
+disposition so the question is not re-litigated:**
+
+- **`mutable`** (application may mutate the *contents* of a value, as
+  opposed to a binding) — **deferred; probably never a label.** Three
+  findings, in order of weight:
+
+  1. **It collides with `scope` on every metadata axis** — impurity yes,
+     observation/action *action*, no frame kind, internal (not
+     handler-backed). Consumers key on axis predicates, never label names
+     ("Label kinds"), so no derived view could tell the two apart: that is
+     criterion 1, and it is the `host` failure mode before the registry
+     rescued it. Nothing supplies an analogous per-surface consumer here.
+     `scope`'s own wording — "may mutate a scope that outlives the
+     application" — generalizes to *state* that outlives the application
+     at no cost to the lattice, and the v4 `write` → `scope` rename was
+     done to *remove* an ambiguity that re-splitting would reintroduce.
+  2. **The consumers that would want it need per-argument precision, and
+     a label is per-arrow.** The three candidates — copy-on-write /
+     in-place update, memo invalidation, and compile fail-closed — want
+     "may this callee mutate or retain **this** argument", "**which**
+     memos are now stale", and (per the standing rejection of
+     target-compilability) nothing new, respectively. An arrow-level set
+     answers none of them; it says only "mutates *something*". This is
+     the razor already applied to non-local *reads* under "Scope writes":
+     the precise channels exist per-expression, and **an arrow bit is
+     per-function and lossy**. The languages that make mutation sound put
+     it in **type position, not on the arrow** (Rust `&mut`, Swift
+     `inout`/`mutating`, linear types); `ST`'s soundness likewise comes
+     from the rank-2 type on `runST`, not from an effect tag.
+  3. **Inference could not back it.** `scope`'s confinement is a static
+     dominance condition on `Declare`; confinement for value mutation is
+     escape/alias analysis, which the engine has nowhere. The label would
+     be declare-only with a conservative inference fallback — admissible
+     under criterion 2, but buying markedly less than it appears to.
+
+  **The one path to admission**, should it ever open: a confined-mutation
+  *region* (a Clojure-transient / `ST`-style `Builder`) would give the
+  label a **frame kind** — delimiter `Builder`, kind `region`, discharge
+  `{mutable}` on exit, obligation protocol = the escape check — which is
+  structurally the `WithRandomSeed`/`random` shape and exactly the
+  distinguishing consumer criterion 1 demands. Frame kinds were
+  generalized to admit new kinds without redefining the axis, so this is
+  a supported extension rather than a special case. Precedent for
+  deferring on a missing mechanism: `time` (awaited `ce.effects.time`),
+  `async` (awaits `Fetch`).
+
+  **Note the likely resolution makes the label unnecessary.** If the
+  parameter discipline lands as copy-in/copy-out — the callee's write
+  rebinding the caller's *binding* on return, in-place update demoted to
+  an unobservable copy-on-write optimization — then the write is a
+  **binding** write and is already `{scope}`. That parameter mode is
+  invariant in its type (read *and* written: the ordinary in+out rule,
+  not a special case).
+
+  **The objection is to a semantics, not to a spelling** — the two were
+  conflated in an earlier draft of this note. What is unsound here is
+  **permission without uniqueness**: a mode meaning only "the callee may
+  write through this reference", with no guarantee the reference is
+  unaliased. Subexpression nodes are shared into multiple parents
+  (`t.op1 === list` and `t.op1 === t.op2` both hold today), so such a mode
+  lets a caller hand over a node aliased into five other expressions with
+  the checker's blessing — the array-covariance hole. Uniqueness is what
+  makes Rust's `&mut` sound, and it is not expressible in this rank-1
+  system without linearity. Copy-in/copy-out sidesteps the whole question
+  by never writing through anything.
+
+  **Open naming question — `inout` vs `mutable`, no ruling.** Both spell
+  the copy-in/copy-out mode; the trade is readability against
+  mispredicted aliasing. `inout` (Swift, Ada `in out`) names the
+  *parameter's mode* and already carries copy-in/copy-out in the wild.
+  `mutable` reads more plainly to some authors but is an adjective on the
+  *value*, and everywhere else it appears — OCaml `mutable` fields, Julia
+  `mutable struct`, C++ `mutable` — it means genuine in-place mutation
+  with aliases observing it. The discriminating case, which docs must
+  lead with under either spelling:
+
+  ```
+  let ys = xs
+  f(inout xs)   // or: f(mutable xs)
+  ys            // UNCHANGED — copy-in/copy-out never touches an alias
+  ```
+
+  A secondary, non-taste consequence: spelled as a *type qualifier*,
+  `mutable` grammatically invites `list<mutable point>`,
+  `let x: mutable list = …`, `-> mutable list` — all meaningless for what
+  is a passing mode rather than a type constructor, so the grammar would
+  have to reject a qualifier legal in exactly one position. `inout` does
+  not invite that generalization.
+
+  **Where the keyword goes.** The mode is part of `FunctionSignature` —
+  it is what the call boundary checks against and it must serialize in
+  the type string to survive the Tycho boundary — so the **declaration
+  side is not optional**. Whether a **call-site marker** is *also*
+  required is a separate ruling: Ada takes plain call syntax, Swift
+  requires `&x`, C# requires `ref`/`out` at both sites. **Lean: require
+  one.** A call that silently rebinds the caller's variable, spelled
+  identically to an ordinary call, is the largest available hole in the
+  language's "values are immutable, rebinding is explicit and visible"
+  promise — the reason C# made the call-site keyword mandatory.
+  Independently of that ruling, the **lvalue restriction is a call-site
+  rule**: the argument must be a binding, so `f(inout Append(ys, 1))` is
+  an error (nothing to write back into) while the declaration is fine.
+
+  **Not yet ruled**: whether the parameter discipline is wanted at all.
+  Cost asymmetry worth pricing first — the effect specifier slot is
+  positionally isolated, so admitting a label can never change the parse
+  of an existing type string ("Grammar and AST"), whereas a parameter
+  mode keyword lives in full-type position and must be reserved: neither
+  `mutable` nor `inout` is in `RESERVED_WORDS` today
+  (`src/epsil/reserved-words.ts` — `var` is reserved-but-unused), so both
+  are legal identifiers and claiming either is a visible compat event.
+  Reserving the chosen word is cheap now and gets dearer later.
 
 Rejected as effects: **`diverge`/nontermination** (handled dynamically,
 `TIMEOUT-MODEL.md`; not inferable; no consumer); **GPU/target
