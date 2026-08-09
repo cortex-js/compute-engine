@@ -10,10 +10,12 @@ import type {
 } from './types.js';
 import {
   BaseCompiler,
+  couldBeCollectionParticipant,
   isFlatAllStringComparisonParticipant,
   isMixedStringOrderingParticipants,
   isNumericTupleParticipant,
   isProvablyStringComparisonParticipant,
+  isProvablyStringOperand,
   isProvablyTupleParticipant,
   unfaithfulComparisonAggregate,
 } from './base-compiler.js';
@@ -179,6 +181,47 @@ function assertPyNoStringOperand(
 }
 
 /**
+ * The ADMISSION side of the SCALAR string-equality rule (tier 2, 2026-08-08) —
+ * the mirror of the JavaScript target's `isStringScalarEquality`, clause for
+ * clause; see there for the full rationale and the probe evidence.
+ *
+ * Python's `==` on `str` is exact structural comparison, which IS the
+ * interpreter's string semantics (`compare.ts`: `a.string === b.string`, no
+ * tolerance) — including the numeric-string trap (`"1" == 1.0` is `False` in
+ * Python, matching the interpreter, where the numeric `abs(a - b)` form raised
+ * `TypeError`). Cross-sort equality is total in the interpreter (`Equal("a", 1)`
+ * → `False`) and Python's `==` agrees, so a participant of unknown type opposite
+ * a provable string is admitted; a provably NUMERIC one is not (the tier-0 mixed
+ * ruling), nor is anything that may be a collection or an unfaithful aggregate.
+ *
+ * The same NFC residual applies as on JavaScript: the interpreter normalizes at
+ * boxing time, the emitted `==` compares the raw string the caller passed in.
+ *
+ * The collection disqualifier pairs `isPyCollectionOperand` (the SUBTYPE test,
+ * which also decides the `_ce_eqcoll` routing below) with the union-aware
+ * `couldBeCollectionParticipant`: a general union such as `string |
+ * list<string>` is not a subtype of `list`, so the subtype test alone admitted
+ * it and emitted a scalar `==` where the interpreter broadcasts element-wise —
+ * the JavaScript target had the identical hole. Such a participant now declines
+ * on `assertPyNoStringOperand` (fail closed, D6).
+ */
+function isPyStringScalarEquality(args: ReadonlyArray<Expression>): boolean {
+  if (args.length !== 2) return false;
+  if (!args.some(isProvablyStringOperand)) return false;
+  if (
+    args.some((a) => {
+      const t = resolveTypeForCompilation(a.type.type);
+      return t !== 'never' && isSubtype(t, 'number');
+    })
+  )
+    return false;
+  if (args.some((a) => unfaithfulComparisonAggregate(a) !== null)) return false;
+  return !args.some(
+    (a) => isPyCollectionOperand(a) || couldBeCollectionParticipant(a)
+  );
+}
+
+/**
  * Fail closed (D6) when an ORDERING (`Less`/`LessEqual`/`Greater`/
  * `GreaterEqual`) MIXES string evidence with a participant that is not provably
  * a FLAT string (`isMixedStringOrderingParticipants`, shared with the base
@@ -300,9 +343,16 @@ function compilePythonEquality(
     args.every(isProvablyTupleParticipant) &&
     args.every(isNumericTupleParticipant);
   if (!tupleEquality) assertPyComparableAggregate(kind, args);
+  const stringScalarEquality = isPyStringScalarEquality(args);
   const stringCollectionEquality =
     collCount >= 2 && args.every(isFlatAllStringComparisonParticipant);
-  if (!stringCollectionEquality) assertPyNoStringOperand(kind, args);
+  if (!stringScalarEquality && !stringCollectionEquality)
+    assertPyNoStringOperand(kind, args);
+  if (stringScalarEquality) {
+    // Structural, NOT the tolerance test — see `isPyStringScalarEquality`.
+    const op = kind === 'Equal' ? '==' : '!=';
+    return `((${compile(args[0])}) ${op} (${compile(args[1])}))`;
+  }
   if (collCount === 1)
     throw new Error(
       `${kind}: a single collection operand broadcasts element-wise in the ` +

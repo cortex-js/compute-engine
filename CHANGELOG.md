@@ -62,6 +62,32 @@
 
 ### New Features
 
+- **JavaScript target: string equality now compiles.** Scalar
+  `Equal`/`NotEqual` with a provably string participant — and no provably
+  numeric one — lowers to a strict `===`/`!==`, the interpreter's own string
+  semantics, instead of failing closed. All-string collection equality keeps
+  the `_SYS.eq`/`_SYS.neq` dispatch, whose scalar leaf gained a string
+  branch, so `Equal(["a","b"], ["a","b"])` is `True` and
+  `Equal(["a","b"], "a")` is the element-wise `[True, False]`. A mixed
+  provably-string/provably-number equality and the chained (n-ary) form
+  still fail closed. The Python target mirrors the scalar rule with a
+  structural `==`/`!=`. With this, character-scanner programs
+  (`skipWs(cs, i) = skipWs(cs, i+1) if i <= Length(cs) && isWs(cs[i]) else i`
+  over `Characters(text)`) compile end to end.
+
+- **JavaScript target: `Characters`, `GraphemeClusters` and `StringJoin` now
+  compile.** `Characters` segments UAX #29 grapheme clusters through the
+  same `Intl.Segmenter` the interpreter uses, so a combining sequence, a
+  ZWJ emoji or a flag is one element — matching interpretation element for
+  element (neither `[...s]` nor `split('')` is faithful; both are pinned as
+  counter-examples). `StringJoin` compiles the variadic all-string form and
+  the single string-collection form; shapes the interpreter leaves inert
+  fail closed. Known accepted divergence: compiled comparisons do not
+  Unicode-normalize a raw non-NFC string bound to a compiled parameter
+  (the interpreter stores every string in NFC; literals and
+  `Characters`/`StringJoin` results are normalized) — normalize at the host
+  boundary if you feed unnormalized user input into compiled predicates.
+
 - **`broadcastable<T>` as a parameter declaration is now an elementwise
   contract.** A parameter declared `broadcastable<T>` (e.g.
   `ce.declare('f', '(broadcastable<number>) -> unknown')`, or an Epsil

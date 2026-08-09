@@ -441,6 +441,50 @@ export function isFlatAllStringComparisonParticipant(
 }
 
 /**
+ * True when a comparison PARTICIPANT's static type ADMITS a collection at run
+ * time — not only when the whole type is one.
+ *
+ * `x.type.matches('collection')` (and Python's `isPyCollectionOperand`) answer
+ * the SUBTYPE question, so a general UNION with a collection arm slips through:
+ * `string | list<string>` is not a subtype of `collection`, yet the run-time
+ * value can be a list. That blind spot let the tier-2 scalar string-equality
+ * admission compile `Equal(uq, "a")` (`uq: string | list<string>`) to a scalar
+ * `((uq) === ("a"))` — a wrong SHAPE and a wrong value behind `success: true`,
+ * where the interpreter broadcasts element-wise to `["True", "False"]`. It is
+ * reachable from inferred unions too (`g(flag) = "a" if flag else [1,2,3]`).
+ *
+ * Only POSITIVE union evidence counts. A top type (`unknown`/`any`/`value`) is
+ * deliberately NOT a collection signal — that is "nothing is known", not "a
+ * collection is possible", and the settled admission rule for the string
+ * comparisons is "≥1 provably string AND none provably numeric", which keeps a
+ * bare-`unknown` participant admitted (the run-time-array residual there is the
+ * same accepted one the numeric fast path has). Targets pair this with their
+ * own possibly-collection test (`isPossiblyCollectionTypedJS`) for the
+ * `broadcastable<T>` / top-typed-application signals it does not cover.
+ *
+ * Same shape (and cycle guard) as the other participant walks here: a
+ * `reference` unfolds to its definition, and a recursive alias stops on a
+ * repeat — `false` is the ADMITTING direction only for a type that cannot be a
+ * collection, and a cycle means the union arm was already visited.
+ */
+export function couldBeCollectionParticipant(x: Expression): boolean {
+  const walk = (t: Type, visited?: ReadonlySet<TypeReference>): boolean => {
+    if (typeof t === 'object' && t.kind === 'reference' && t.def !== undefined) {
+      const decl = declarationOf(t);
+      if (visited?.has(decl)) return false;
+      visited = new Set(visited).add(decl);
+    }
+    const r = resolveTypeForCompilation(t);
+    if (r === 'unknown' || r === 'any' || r === 'value' || r === 'never')
+      return false;
+    if (typeof r !== 'string' && r.kind === 'union')
+      return r.types.some((m) => walk(m, visited));
+    return isSubtype(r, 'collection');
+  };
+  return walk(x.type.type);
+}
+
+/**
  * The MIXED-string ORDERING rule, shared by every site that must agree on it:
  * the two infix diverts below (`orderingOverString` for JavaScript,
  * `pyOrderingUnfaithful` for Python) and the Python target's ordering gate
@@ -2061,7 +2105,8 @@ export class BaseCompiler {
       return acc;
     }
 
-    // Kleene/IEEE `Equal` guarded lowering (§3.D, amended 2026-07-24).
+    // Kleene/IEEE `Equal`/`NotEqual` guarded lowering (§3.D, amended
+    // 2026-07-24; extended to `NotEqual` 2026-08-08).
     // Comparisons are IEEE over `NaN` and Kleene over the `Missing` symbol. For
     // a NUMERIC-domain operand a raw `==`/tolerant-compare already IS the IEEE
     // semantics (`NaN == NaN` is `false`), so no guard is emitted — the plain
@@ -2071,6 +2116,16 @@ export class BaseCompiler {
     // emit `isAbsent(a) || isAbsent(b) ? <object null> : <a == b>`. The absent
     // boolean is an OBJECT-domain value, so a target without the object axis
     // (GPU) fails closed.
+    //
+    // `NotEqual` is guarded on exactly the same terms, and for the same reason
+    // `Equal` is: the interpreter answers `Missing` for BOTH
+    // (`NotEqual(Missing, 1)` → `Missing`, pinned in `missing-value.test.ts`
+    // §P3). It was `Equal`-only while every string-bearing `NotEqual` failed
+    // closed on the string gate; once the tier-2 admissions started compiling
+    // `NotEqual(s, "x")` for `s: string | missing` (the literal supplies the
+    // string evidence, and the union is neither provably numeric nor a
+    // collection), the unguarded lowering emitted `undefined !== "x"` — a bare
+    // `true` where the interpreter answers `Missing`.
     const isObjectDomainMissing = (a: Expression): boolean => {
       const t = compilationType(a);
       if (!typeContainsMissing(t)) return false;
@@ -2078,7 +2133,7 @@ export class BaseCompiler {
       return !(stripped === 'never' || isSubtype(stripped, 'number'));
     };
     if (
-      h === 'Equal' &&
+      (h === 'Equal' || h === 'NotEqual') &&
       target.absence !== undefined &&
       args.length === 2 &&
       args.some(isObjectDomainMissing) &&
@@ -2086,19 +2141,15 @@ export class BaseCompiler {
     ) {
       if (target.absence.object === undefined)
         throw new Error(
-          `Equal: an absent (Kleene) boolean has no object representation on ` +
+          `${h}: an absent (Kleene) boolean has no object representation on ` +
             `target '${target.language ?? 'unknown'}'. Discharge the operands ` +
             `with 'Coalesce' first. Fail closed (§3.F).`
         );
       const guardOf = (a: Expression): TargetSource => {
-        const axis = BaseCompiler.absenceAxisForType(
-          a.type.type,
-          target,
-          'Equal'
-        );
+        const axis = BaseCompiler.absenceAxisForType(a.type.type, target, h);
         if (axis.isAbsent === undefined)
           throw new Error(
-            `Equal: target '${target.language ?? 'unknown'}' cannot test ` +
+            `${h}: target '${target.language ?? 'unknown'}' cannot test ` +
               `absence (no 'isAbsent' capability). Fail closed (§3.F).`
           );
         return axis.isAbsent(BaseCompiler.compileValueOperand(a, target));
@@ -2121,13 +2172,17 @@ export class BaseCompiler {
         const [a, b] = args.map((e) =>
           BaseCompiler.compileValueOperand(e, target)
         );
+        const pyOp = h === 'Equal' ? '==' : '!=';
+        const jsOp = h === 'Equal' ? '===' : '!==';
         inner =
-          target.chainOp === 'and' ? `(${a}) == (${b})` : `(${a}) === (${b})`;
+          target.chainOp === 'and'
+            ? `(${a}) ${pyOp} (${b})`
+            : `(${a}) ${jsOp} (${b})`;
       } else {
-        const eqFn = target.functions?.('Equal');
+        const eqFn = target.functions?.(h);
         if (typeof eqFn !== 'function')
           throw new Error(
-            `Equal: target '${target.language ?? 'unknown'}' has no equality ` +
+            `${h}: target '${target.language ?? 'unknown'}' has no equality ` +
               `codegen for the guarded (Kleene) form. Fail closed (§3.F).`
           );
         inner = eqFn(

@@ -27,10 +27,15 @@
  *    The adapter's `_ce_same` leaf also compares BOOL-ness first, so Python's
  *    `True == 1` does not find a boolean needle in a numeric haystack;
  *  - tuple-vs-tuple `Equal` (via `_ce_eqcoll`, whole-value equality);
- *  - all-string COLLECTION equality (via `_ce_eqcoll`) — a second deliberate
- *    divergence from the JavaScript target, whose `_SYS.eq` is numeric there.
- *    The four shapes in `compile-python-parity.test.ts`
- *    (`eq_coll_strings_*`, `eq_coll_numeric_strings*`) already pin it;
+ *  - all-string COLLECTION equality (via `_ce_eqcoll`). The four shapes in
+ *    `compile-python-parity.test.ts` (`eq_coll_strings_*`,
+ *    `eq_coll_numeric_strings*`) already pin it. Since tier 2 (2026-08-08) this
+ *    is NO LONGER a divergence from the JavaScript target: `_SYS.eq`'s scalar
+ *    leaf gained the same string branch;
+ *  - SCALAR string equality (tier 2, 2026-08-08) — a structural `==`/`!=`,
+ *    which is the interpreter's own string semantics. Mirrors the JavaScript
+ *    target's `===`. A MIXED string/number pair and the CHAINED form stay
+ *    closed on both targets;
  *  - `unknown`-typed comparisons, byte-identical (an `unknown` operand is never
  *    string evidence, or plot comparisons would stop compiling).
  *
@@ -44,6 +49,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -61,34 +67,138 @@ function code(expr: BoxedExpression): string {
   return python.compileFunction(expr, 'f', []);
 }
 
-describe('Python: EQUALITY fails closed on string evidence', () => {
-  test('Equal over two string literals declines', () => {
-    // The scalar lowering is `abs(("a") - ("a")) <= tol` — a `TypeError` on
-    // every Python, where the interpreter answers True.
-    expect(() => code(ce.box(['Equal', { str: 'a' }, { str: 'a' }]))).toThrow(
-      /Equal.*string-valued operands.*Fail closed \(D6\)/s
+describe('Python: SCALAR string equality is admitted (tier 2, 2026-08-08)', () => {
+  // The mirror of the JavaScript target's `===` admission. The scalar lowering
+  // used to be `abs(("a") - ("a")) <= tol` — a `TypeError` on every Python — so
+  // the shape was fully closed; Python's `==` on `str` is exact structural
+  // comparison, which IS the interpreter's string semantics. Executed parity
+  // for these shapes is in the `ADMITTED` battery at the bottom of this file.
+
+  test('Equal / NotEqual over two string literals emit a structural ==', () => {
+    expect(code(ce.box(['Equal', { str: 'a' }, { str: 'a' }]))).toContain(
+      '("a") == ("a")'
     );
-    expect(
-      ce
-        .box(['Equal', { str: 'a' }, { str: 'a' }])
-        .evaluate()
-        .toString()
-    ).toBe('"True"');
+    expect(code(ce.box(['NotEqual', { str: 'a' }, { str: 'b' }]))).toContain(
+      '("a") != ("b")'
+    );
+    // Never the numeric tolerance form.
+    expect(code(ce.box(['Equal', { str: 'a' }, { str: 'a' }]))).not.toContain(
+      'abs('
+    );
   });
 
-  test('NotEqual over two string literals declines', () => {
-    expect(() =>
-      code(ce.box(['NotEqual', { str: 'a' }, { str: 'b' }]))
-    ).toThrow(/NotEqual.*string-valued operands.*Fail closed \(D6\)/s);
-  });
-
-  test('Equal over a string-TYPED symbol declines', () => {
+  test('Equal over a string-TYPED symbol compiles', () => {
     ce.declare('s', 'string');
-    expect(() =>
+    expect(
       python.compileFunction(ce.box(['Equal', 's', { str: 'a' }]), 'f', ['s'])
+    ).toContain('(s) == ("a")');
+  });
+
+  test('a MIXED string/number equality still declines', () => {
+    // The tier-0 ruling, unchanged: probed, the interpreter answers `False`
+    // and Python's `==` would agree, but admitting the mixed shape is a
+    // separate decision.
+    for (const args of [
+      [{ str: 'a' }, 1],
+      [1, { str: 'a' }],
+    ]) {
+      expect(() => code(ce.box(['Equal', ...args] as any))).toThrow(
+        /Equal.*string-valued operands/s
+      );
+    }
+  });
+
+  test('the CHAINED (n-ary) string equality still declines', () => {
+    expect(() =>
+      code(ce.box(['Equal', { str: 'a' }, { str: 'a' }, { str: 'a' }]))
     ).toThrow(/Equal.*string-valued operands/s);
   });
+});
 
+describe('Python: a UNION arm that is a collection disqualifies the scalar ==', () => {
+  // REGRESSION (2026-08-08), the mirror of the JavaScript one:
+  // `isPyCollectionOperand` is a SUBTYPE test (`list` / `indexed_collection`),
+  // so a general UNION with a collection arm slipped through and
+  // `Equal(uq, "a")` over `string | list<string>` emitted the scalar
+  // `((uq) == ("a"))` — a bare `False` where the interpreter broadcasts
+  // element-wise. The gate now also consults `couldBeCollectionParticipant`.
+
+  test('a DECLARED `string | list<string>` participant declines, both heads', () => {
+    ce.declare('uq', 'string | list<string>');
+    for (const head of ['Equal', 'NotEqual'] as const) {
+      expect(() =>
+        python.compileFunction(ce.box([head, 'uq', { str: 'a' }] as any), 'f', [
+          'uq',
+        ])
+      ).toThrow(/string-valued operands/s);
+    }
+    // The interpreter, which the fallback reaches, broadcasts.
+    ce.assign('uq', ce.box(['List', { str: 'a' }, { str: 'b' }]));
+    expect(ce.box(['Equal', 'uq', { str: 'a' }]).evaluate().toString()).toBe(
+      '["True","False"]'
+    );
+  });
+
+  test('an INFERRED Epsil union with a collection arm declines too', () => {
+    executeEpsil(ce, 'gu(flag) = "a" if flag else [1,2,3]');
+    ce.declare('fl', 'boolean');
+    expect(ce.box(['gu', 'fl']).type.toString()).toMatch(/\|/);
+    expect(() =>
+      python.compileFunction(
+        ce.box(['Equal', ['gu', 'fl'], { str: 'a' }]),
+        'f',
+        ['fl']
+      )
+    ).toThrow(/string-valued operands/s);
+  });
+
+  test('the union gate does NOT narrow the settled bare-`unknown` admission', () => {
+    // Ruling (a), 2026-08-08 — only POSITIVE union evidence disqualifies.
+    ce.declare('anyq', 'unknown');
+    expect(
+      python.compileFunction(ce.box(['Equal', 'anyq', { str: 'a' }]), 'f', [
+        'anyq',
+      ])
+    ).toContain('(anyq) == ("a")');
+    ce.declare('sbq', 'string | boolean');
+    expect(
+      python.compileFunction(ce.box(['Equal', 'sbq', { str: 'a' }]), 'f', [
+        'sbq',
+      ])
+    ).toContain('(sbq) == ("a")');
+  });
+});
+
+describe('Python: NotEqual over `string | missing` keeps the Kleene guard', () => {
+  // REGRESSION (2026-08-08). The §3.F object-domain guard covered `Equal`
+  // only; with the tier-2 admission accepting `NotEqual(s, "x")` the emission
+  // became a bare `(s) != ("x")`, i.e. `True` for an absent `s`, where the
+  // interpreter answers `Missing`. Guarded on both heads now.
+
+  test('the interpreter is Kleene for both heads', () => {
+    expect(ce.box(['Equal', 'Missing', { str: 'x' }]).evaluate().symbol).toBe(
+      'Missing'
+    );
+    expect(
+      ce.box(['NotEqual', 'Missing', { str: 'x' }]).evaluate().symbol
+    ).toBe('Missing');
+  });
+
+  test('the emitted NotEqual is the None-guarded conditional, not a bare !=', () => {
+    ce.declare('s', 'string | missing');
+    const out = python.compileFunction(
+      ce.box(['NotEqual', 's', { str: 'x' }]),
+      'f',
+      ['s']
+    );
+    expect(out).toContain('None if');
+    expect(out).toContain('(s is None)');
+    expect(out).toContain('(s) != ("x")');
+    expect(out).not.toContain('abs(');
+  });
+});
+
+describe('Python: EQUALITY fails closed on string evidence', () => {
   test('Equal over a tuple with a string component declines', () => {
     // The carve-out requires every component to be provably NUMERIC, so a
     // string component does not take it at all and the AGGREGATE gate closes
@@ -604,6 +714,19 @@ const ADMITTED: Array<{ name: string; expr: any }> = [
       ['List', { str: 'a' }],
     ],
   },
+  // SCALAR string equality (tier 2): the structural `==`/`!=` admission. The
+  // numeric-string rows are the trap the tolerance form could never express —
+  // `"1"` and `"1.0"` are DIFFERENT strings, as the interpreter says.
+  { name: 'eq_str_equal', expr: ['Equal', { str: 'a' }, { str: 'a' }] },
+  { name: 'eq_str_unequal', expr: ['Equal', { str: 'a' }, { str: 'b' }] },
+  { name: 'neq_str_unequal', expr: ['NotEqual', { str: 'a' }, { str: 'b' }] },
+  { name: 'neq_str_equal', expr: ['NotEqual', { str: 'a' }, { str: 'a' }] },
+  { name: 'eq_str_empty', expr: ['Equal', { str: '' }, { str: '' }] },
+  {
+    name: 'eq_str_numeric_looking',
+    expr: ['Equal', { str: '1' }, { str: '1.0' }],
+  },
+  { name: 'eq_str_numeric_same', expr: ['Equal', { str: '1' }, { str: '1' }] },
 ];
 
 const describeMaybe = venvHasNumpy() ? describe : describe.skip;

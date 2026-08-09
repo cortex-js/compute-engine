@@ -134,9 +134,11 @@ import { checkDeadline } from '../../common/interruptible.js';
 
 import {
   BaseCompiler,
+  couldBeCollectionParticipant,
   isFlatAllStringComparisonParticipant,
   isNumericTupleParticipant,
   isProvablyStringComparisonParticipant,
+  isProvablyStringOperand,
   isProvablyTupleParticipant,
   pointHasBroadcastComponent,
   unfaithfulComparisonAggregate,
@@ -209,6 +211,106 @@ function assertNoStringOperand(
         `difference, which is NaN for strings). ` +
         `Fail closed (D6) — the interpreter evaluates it.`
     );
+}
+
+/**
+ * True when the operand's own type PROVES a number — the disqualifier for the
+ * scalar string-equality admission below. `unknown` is not proof (nothing is
+ * known), and neither is `never`.
+ */
+function isProvablyNumericOperand(x: Expression): boolean {
+  const t = jsType(x);
+  return t !== 'never' && isSubtype(t, 'number');
+}
+
+/**
+ * The ADMISSION side of the string-equality rule (tier 2, 2026-08-08): a BINARY
+ * `Equal`/`NotEqual` that lowers to a strict `===` / `!==` instead of declining
+ * on `assertNoStringOperand`.
+ *
+ * Strict equality is the interpreter's own string semantics: `compare.ts`
+ * compares two strings with `a.string === b.string`, with NO tolerance. It is
+ * the same inner the §3.F Kleene-guarded `string | missing` form already emits
+ * (`base-compiler.ts`, shipped 2026-08-08); this generalizes that precedent to
+ * the unguarded scalar case.
+ *
+ * The rule — every clause is load-bearing:
+ *
+ *  - **at least one participant is provably string**. Nothing without string
+ *    evidence changes: a plot equality (`x^2 + y^2 = 4`, `Equal(xq, 4)`) has
+ *    none, so it keeps the numeric tolerance codegen BYTE-IDENTICALLY. Every
+ *    shape this admits was DECLINING before, so no compiling shape moves.
+ *  - **no participant is provably a NUMBER**. Probed, `Equal("a", 1)` is
+ *    `False` in the interpreter (equality is total across sorts, unlike the
+ *    orderings, which stay inert) and `"a" === 1` agrees — but the mixed
+ *    string/number shape is ruled fail-closed for now, as in tier 0.
+ *  - **no participant may be a COLLECTION at run time**
+ *    (`couldBeCollectionParticipant`, which reads a UNION arm — a subtype test
+ *    such as `.matches('collection')` is blind to `string | list<string>`),
+ *    and none is an unfaithful aggregate: `Equal(["a","b"], "a")` broadcasts
+ *    element-wise in the interpreter, which a scalar `===` cannot express.
+ *    Those shapes go to the `_SYS.eq` route instead (see there), or fail
+ *    closed when they are not provably flat all-string.
+ *  - **BINARY only**. The chained form would need the impure-operand temp
+ *    binding the numeric path has, for no known consumer; it stays closed.
+ *
+ * An `unknown`-typed participant opposite a provable string IS admitted, and
+ * that is the deliberate widening over "both provably string": the realistic
+ * consumer is a character scanner whose predicate parameter is inferred
+ * (`isWs(c) = c == " " || c == "\t"` types `c` as `unknown`). It is faithful
+ * for every scalar run-time value — a string compares exactly, and a number,
+ * boolean or tuple answers `false`, which is the interpreter's `False`. The one
+ * residual is a run-time ARRAY in the `unknown` slot, where the interpreter
+ * broadcasts; that is the identical, settled hole the numeric fast path already
+ * has for a bare unknown symbol (`Equal(xq, 4)` → `Math.abs(xq - 4) <= tol`),
+ * not a new class.
+ *
+ * ACCEPTED RESIDUAL (flagged for ruling, 2026-08-08): the interpreter
+ * NFC-normalizes every string at boxing time (`BoxedString`), so it answers
+ * `True` for a decomposed/precomposed pair (`"é"` vs `"é"`), whereas
+ * the emitted `===` compares the raw UTF-16 the HOST passed in. String
+ * LITERALS are unaffected (they are boxed, hence NFC, before codegen), and
+ * `_SYS.chars` normalizes so `Characters(s)[i] == "é"` is faithful too — only a
+ * raw non-NFC string handed to a compiled parameter diverges. Closing it would
+ * mean a `.normalize()` on both sides of every comparison, in the hottest loop
+ * these lowerings exist for. The ORDERINGS shipped with the same residual (raw
+ * `<`), as did the §3.F guarded `===`.
+ */
+function isStringScalarEquality(args: ReadonlyArray<Expression>): boolean {
+  if (args.length !== 2) return false;
+  if (!args.some(isProvablyStringOperand)) return false;
+  if (args.some(isProvablyNumericOperand)) return false;
+  if (args.some((a) => unfaithfulComparisonAggregate(a) !== null)) return false;
+  return !args.some(
+    (a) => couldBeCollectionParticipant(a) || isPossiblyCollectionTypedJS(a)
+  );
+}
+
+/**
+ * The ADMISSION side of the string-COLLECTION equality rule (tier 2,
+ * 2026-08-08): a BINARY `Equal`/`NotEqual` whose every participant is a
+ * provably FLAT all-string value (`isFlatAllStringComparisonParticipant`) and
+ * at least one of which is a collection. It lowers to the `_SYS.eq`/`_SYS.neq`
+ * dispatch, whose scalar leaf now compares two strings with `===` (see
+ * `eqTensor`) — so both interpreter shapes come out right:
+ * `Equal(["a","b"], ["a","b"])` is the whole-collection `True`, and
+ * `Equal(["a","b"], "a")` the element-wise `[True, False]` (both probed).
+ *
+ * This is the JavaScript mirror of the Python target's `_ce_eqcoll` all-string
+ * admission, and closes a documented JS/Python divergence. The admission side
+ * is deliberately the same NARROW flat predicate Python uses: a MIXED
+ * (`list<string | number>`) or NESTED all-string participant fails closed even
+ * though the kernel was probed faithful on it, and a numeric participant
+ * (`Equal(["a","b"], 1)`) fails closed under the tier-0 mixed ruling.
+ */
+function isStringCollectionEquality(args: ReadonlyArray<Expression>): boolean {
+  return (
+    args.length === 2 &&
+    args.every(isFlatAllStringComparisonParticipant) &&
+    args.some(
+      (a) => couldBeCollectionParticipant(a) || isPossiblyCollectionTypedJS(a)
+    )
+  );
 }
 
 /**
@@ -368,7 +470,17 @@ function compileJSEquality(
     args.every(isProvablyTupleParticipant) &&
     args.every(isNumericTupleParticipant);
   if (!tupleEquality) assertComparableAggregate(kind, args);
-  assertNoStringOperand(kind, args);
+  // The two string carve-outs (tier 2, 2026-08-08) — see
+  // `isStringScalarEquality` and `isStringCollectionEquality` for the rules and
+  // the probe evidence. Everything else with string evidence still declines.
+  const stringScalar = isStringScalarEquality(args);
+  const stringCollection = !stringScalar && isStringCollectionEquality(args);
+  if (!stringScalar && !stringCollection) assertNoStringOperand(kind, args);
+  if (stringScalar) {
+    // Strict, NOT the tolerance test: the interpreter compares strings exactly.
+    const op = kind === 'Equal' ? '===' : '!==';
+    return `((${compile(args[0])}) ${op} (${compile(args[1])}))`;
+  }
   // Equality over a (possibly-)collection operand: a raw `Math.abs(a - b)`
   // over a list silently coerces (`[1,2,3] - 2` → NaN), so the scalar codegen
   // below would return a wrong boolean behind a `success: true`. The BINARY
@@ -1136,6 +1248,28 @@ function compileJSPointList(
 }
 
 /**
+ * Codegen shared by `Characters` and its synonym `GraphemeClusters` — see the
+ * `Characters` entry in `JAVASCRIPT_FUNCTIONS` for the semantics.
+ */
+function compileJSCharacters(
+  kind: string,
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string
+): string {
+  const arg = args[0];
+  if (arg === null || arg === undefined)
+    throw new Error(`${kind}: missing argument`);
+  if (args.length !== 1 || !isProvablyStringOperand(arg))
+    throw new Error(
+      `${kind}: cannot compile — the operand must be provably a string. The ` +
+        `interpreter leaves a non-string operand unevaluated (or reports an ` +
+        `\`incompatible-type\` error). ` +
+        `Fail closed (D6) — the interpreter evaluates it.`
+    );
+  return `_SYS.chars(${compile(arg)})`;
+}
+
+/**
  * JavaScript function implementations
  */
 const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
@@ -1573,6 +1707,64 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `[${args
       .map((a, i) => `...(${collArg('Join', a, compile, i + 1)})`)
       .join(', ')}]`;
+  },
+  // Split a string into a list of user-perceived characters. The interpreter
+  // segments GRAPHEME CLUSTERS (UAX #29 via `Intl.Segmenter`, `library/core.ts`
+  // `splitGraphemeClusters`) — NOT code points and NOT UTF-16 units, so neither
+  // `[...s]` nor `s.split('')` is faithful: probed, `Characters` answers 1
+  // element for a ZWJ family emoji and for a regional-indicator flag (5 and 2
+  // code points), and 1 for a decomposed `"e" + U+0301`. `_SYS.chars` runs the
+  // same segmenter. A non-string operand leaves the interpreter's `Characters`
+  // inert (or an `incompatible-type` error), so it fails closed (D6).
+  Characters: (args, compile) =>
+    compileJSCharacters('Characters', args, compile),
+  // Shipped synonym of `Characters` (v0.30), same interpreter handler.
+  GraphemeClusters: (args, compile) =>
+    compileJSCharacters('GraphemeClusters', args, compile),
+  // String concatenation. Two interpreter shapes compile (probed):
+  //  - VARIADIC, every operand a string — `StringJoin("a", "b")` → `"ab"`, and
+  //    the nullary form is the empty string;
+  //  - a SINGLE indexed collection of strings — `StringJoin(Characters(s))`.
+  // Everything else fails closed, because the interpreter leaves it
+  // UNEVALUATED rather than coercing: a non-string operand (`StringJoin("a", 1)`
+  // is an `incompatible-type` error, not `"a1"` — that is `String`, a different
+  // operator) and, notably, the MIXED arity form `StringJoin("a", ["b","c"])`,
+  // which stays inert even though every leaf is a string.
+  //
+  // The result is `.normalize()`d because the interpreter's `engine.string()`
+  // stores every string in Unicode NFC: joining `"e"` and `U+0301` yields the
+  // single precomposed `"é"` there, and a raw `+` would not.
+  StringJoin: (args, compile) => {
+    if (args.length === 0) return '""';
+    if (args.length === 1 && !isProvablyStringOperand(args[0])) {
+      const coll = args[0];
+      const elt = collectionElementType(jsType(coll));
+      // `never` is the element type of the EMPTY literal `[]`: no element can
+      // fail to be a string, and `[].join("")` is the interpreter's `""`.
+      if (
+        !isIndexedCollectionOperand(coll) ||
+        elt === undefined ||
+        (elt !== 'never' && !isSubtype(elt, 'string'))
+      )
+        throw new Error(
+          `StringJoin: cannot compile — the single-operand form requires an ` +
+            `indexed collection whose elements are provably strings ` +
+            `(\`list<string>\`); a non-string operand or element leaves the ` +
+            `interpreter's \`StringJoin\` unevaluated. ` +
+            `Fail closed (D6) — the interpreter evaluates it.`
+        );
+      return `((${compile(coll)}).join("").normalize())`;
+    }
+    if (!args.every(isProvablyStringOperand))
+      throw new Error(
+        `StringJoin: cannot compile — every operand of the variadic form must ` +
+          `be provably a string. The interpreter leaves the expression ` +
+          `UNEVALUATED on a non-string operand, and a collection operand ` +
+          `alongside another operand (\`StringJoin("a", ["b", "c"])\`) stays ` +
+          `inert too. Fail closed (D6) — the interpreter evaluates it.`
+      );
+    const parts = args.map((a) => `(${compile(a)})`).join(' + ');
+    return `((${parts}).normalize())`;
   },
   // 1-based index of the first element equal to `value`, or 0 if not found.
   // The element test is EXACT, matching the interpreter's `.isSame()`, which
@@ -3997,6 +4189,15 @@ function mulTensor(...args: BcastValue[]): BcastValue {
  *   equal (recursive, so matrices compare element-wise; a length mismatch or
  *   an element-shape mismatch is `false`) — collection equality, not a
  *   broadcast
+ *
+ * The scalar leaf has a STRING branch (tier 2, 2026-08-08): when either side is
+ * a string the comparison is a strict `===`, the interpreter's own string
+ * semantics (`compare.ts`, no tolerance). Without it the leaf fell through to
+ * `Math.hypot(NaN, …) <= tol` → `false`, so two EQUAL string lists answered
+ * `false`. It is the mirror of the Python target's `_ce_eqcoll` string leaf, and
+ * it is faithful for a MIXED leaf pair too (`Equal("a", 1)` is `False` in the
+ * interpreter, and `"a" === 1` is `false`) — though only the all-string shapes
+ * are ADMITTED at compile time (`isStringCollectionEquality`).
  */
 function eqTensor(
   a: unknown,
@@ -4013,6 +4214,7 @@ function eqTensor(
   }
   if (aArr) return a.map((x) => eqTensor(x, b, tol)) as (boolean | unknown[])[];
   if (bArr) return b.map((y) => eqTensor(a, y, tol)) as (boolean | unknown[])[];
+  if (typeof a === 'string' || typeof b === 'string') return a === b;
   const part = (v: unknown): { re: number; im: number } =>
     typeof v === 'object' && v !== null && 're' in v
       ? (v as { re: number; im: number })
@@ -4166,6 +4368,9 @@ function rref(m: number[][]): number[][] | number {
   return a;
 }
 
+/** Lazily built, then reused by every `_SYS.chars` call — see there. */
+let graphemeSegmenter: Intl.Segmenter | undefined = undefined;
+
 /**
  * Runtime helpers injected as `_SYS` into compiled JavaScript functions.
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
@@ -4213,6 +4418,21 @@ const SYS_HELPERS = {
   // collection at run time — see `select` and `compileJSSelection`.
   select,
   heaviside: (x: number) => (x < 0 ? 0 : x === 0 ? 0.5 : 1),
+  // `Characters`/`GraphemeClusters`: the interpreter's own decomposition —
+  // UAX #29 grapheme clusters via `Intl.Segmenter` (`splitGraphemeClusters` in
+  // `library/core.ts`), with the NFC normalization `engine.string()` applies to
+  // the input and to every element. Deliberately not `[...s]` (code points) nor
+  // `s.split('')` (UTF-16 units): both disagree with the interpreter on a
+  // combining sequence, a ZWJ emoji or a flag. The segmenter is built once —
+  // constructing one per call dominates the cost in a scanner loop.
+  chars: (s: unknown): string[] => {
+    if (typeof s !== 'string')
+      throw new Error('Characters: expected a string operand');
+    graphemeSegmenter ??= new Intl.Segmenter('en', { granularity: 'grapheme' });
+    return Array.from(graphemeSegmenter.segment(s.normalize()), (seg) =>
+      seg.segment.normalize()
+    );
+  },
   // NOTE: the random helpers (`drawNextRandomNumber`, `withRandomSeed`, the
   // `domain*` descriptor builders, `randomPick`/`randomChoice`/
   // `randomSample`/`shuffle`) are deliberately NOT defined here: they need the
