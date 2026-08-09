@@ -181,6 +181,49 @@ export function isProvablyStringOperand(x: Expression): boolean {
 }
 
 /**
+ * True when a type admits values of EVERY basic sort — a string AND a number
+ * AND a boolean AND an indexed collection — so "it could be a string" says no
+ * more than the top type does. Such a type is the ABSENCE of information, not
+ * evidence.
+ *
+ * `unknown` has never been string evidence (see `isProvablyStringOperand`), and
+ * this extends the same reading to the top type spelled as a UNION. The shape
+ * that forced it is not exotic: `At`'s index slot is
+ * `boolean | indexed_collection | number | string` (a gather index may itself
+ * be a collection or a dictionary key), so merely INDEXING with a local —
+ * `cs[j]` — types `j` with that union, and the numeric operators never narrow
+ * it back, because an operand that could be a collection is skipped by the
+ * threadable-operator inference (`validate.ts`, Tycho item 121). A plain
+ * `while j <= Length(cs)` next to such an index then declined as a "mixed
+ * string ordering" although neither operand is remotely a string — a whole
+ * class of ordinary scanner loops, on both targets.
+ *
+ * Deliberately requires all three disjoint scalar sorts AND a COLLECTION arm —
+ * the four-armed inference artifact exactly, and nothing narrower. The genuinely
+ * mixed unions keep failing closed: `number | string` (the shape a conditional
+ * returning either produces) is still evidence and still declines, as are
+ * `string | list<string>` and the DELIBERATE three-sort spelling
+ * `string | number | boolean`, which a user writes to mean "any of these three"
+ * — a real possibility of a string at run time, and a coercing `_.wq < 1` would
+ * be a wrong answer where the interpreter stays inert.
+ *
+ * A hand-written `boolean | indexed_collection | number | string` is exempt too.
+ * That is accepted: the artifact and the deliberate spelling are indistinguishable
+ * by construction, and a type that admits every scalar sort AND every indexed
+ * collection is the top type in all but name. It lands exactly where a bare
+ * `unknown` participant already lands — the accepted residual documented on
+ * `couldBeCollectionParticipant`.
+ */
+function carriesNoSortEvidence(t: Type): boolean {
+  return (
+    isSubtype('string', t) &&
+    isSubtype('number', t) &&
+    isSubtype('boolean', t) &&
+    isSubtype('indexed_collection', t)
+  );
+}
+
+/**
  * True when ANY leaf type reachable from `t` is provably string: `t` itself,
  * the element type of a collection (recursively — `list<list<string>>` carries
  * evidence), or a member of a union (`list<string | number>` carries evidence
@@ -223,6 +266,7 @@ function typeHasStringEvidence(
   }
   const r = resolveTypeForCompilation(t);
   if (r === 'never') return false;
+  if (carriesNoSortEvidence(r)) return false;
   if (isSubtype(r, 'string')) return true;
   if (typeof r !== 'string') {
     // A union member that is provably string is evidence even when its siblings
@@ -3739,10 +3783,59 @@ export class BaseCompiler {
       // statement-list level, so early-exit reachability and inter-statement
       // ordering never interact with CSE. Each statement's own value
       // expressions are separate, bindable child regions (§5.1(c)).
+      const stmts = args.filter((a) => !isSymbol(a, 'Nothing'));
       const result = BaseCompiler.withCseScope(node, -1, localTarget, () =>
-        args
-          .filter((a) => !isSymbol(a, 'Nothing'))
-          .flatMap((arg) => {
+        stmts
+          .flatMap((arg, i) => {
+            // An ELSE-LESS `If` in STATEMENT position. `if c { … }` with no
+            // else has no value — the interpreter answers `Nothing`, which is
+            // the erasure marker and deliberately has no lowering — so
+            // `compileExpr`'s conditional, which needs all three operands,
+            // threw `If: wrong number of arguments` on it. That closed every
+            // function body containing a plain guard statement (the
+            // `parseNumber` scanner in the Epsil examples: `if cs[j] == "-"
+            // { sign = -1 … }`), even though the statement's value is
+            // discarded here, which is exactly the position where an
+            // else-less `if` IS expressible. Emit the statement form the
+            // loop-body dispatcher already uses (`if (c) { … }`, no else).
+            //
+            // The LAST statement of a value-carrying block is NOT a statement
+            // position — its value is the block's — so an else-less `If`
+            // there keeps failing closed (D6).
+            //
+            // PLAIN JavaScript ONLY. Every other target stays fail-closed, and
+            // each for its own verified reason — the admission is deliberately
+            // the narrowest one, since admitting is the direction that
+            // miscompiles:
+            //
+            //  - PYTHON. `compilePythonStatements` does statement-form an
+            //    else-less `If` correctly, but it is reached ONLY from a loop
+            //    body: a plain function-body `Block` reaches THIS routine,
+            //    whose emission is C-like and a syntax error in Python. Routing
+            //    to the Python emission from here needs a target hook (the
+            //    `block` hook receives already-COMPILED statements), which is a
+            //    separate change. Until then the shape declines with `If: wrong
+            //    number of arguments` and falls back to the interpreter.
+            //  - INTERVAL JavaScript. `compileLoopBody` DOES emit syntactically
+            //    valid code here, but not correct code: its
+            //    `scalarConditionTarget` unwraps only a `_IA.point(…)` spelling
+            //    (the plain-number loop counter it was written for), so a
+            //    condition over a free variable or an interval-valued local
+            //    emits `0 < _.x` against an `{lo, hi}` OBJECT — always `false`.
+            //    Verified: the else-LESS shape answers `[1,1]` for `x = [3,3]`
+            //    where the else-ful `_IA.piecewise` lowering answers the
+            //    correct `[-1,-1]`. (The same defect already affects an
+            //    else-less `If` inside an interval LOOP body — pre-existing,
+            //    separate, and not to be widened here.)
+            //  - The GPU targets: their own statement model, plus the above.
+            if (
+              isFunction(arg, 'If') &&
+              arg.nops === 2 &&
+              !(valueUsed && i === stmts.length - 1) &&
+              (target.language === undefined ||
+                target.language === 'javascript')
+            )
+              return [BaseCompiler.compileLoopBody(arg, localTarget)];
             // For Declare, pass inferred type hint to the target hook
             if (
               isFunction(arg, 'Declare') &&

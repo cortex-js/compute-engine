@@ -1399,3 +1399,204 @@ describe('tier 2: end-to-end — a whitespace scanner compiles and runs', () => 
     }
   });
 });
+
+// -----------------------------------------------------------------------------
+// The ordering gate reads only its OWN participants — and a participant whose
+// type discriminates NOTHING is not evidence (2026-08-08).
+// -----------------------------------------------------------------------------
+
+describe('a wide index-slot union is not string evidence', () => {
+  // `At`'s index slot is `boolean | indexed_collection | number | string` (a
+  // gather index may be a collection, a dictionary key a string), so merely
+  // INDEXING with a local — `cs[j]` — types `j` with that union, and the
+  // numeric operators never narrow it back (an operand that could be a
+  // collection is skipped by the threadable-operator inference in
+  // `validate.ts`, Tycho item 121).
+  //
+  // The `string` arm then read as positive string EVIDENCE, so the wholly
+  // numeric `j <= Length(cs)` next door declined as a "mixed string ordering".
+  // A type that admits a string AND a number AND a boolean says no more than
+  // the top type does, and `unknown` has never been evidence — see
+  // `carriesNoSortEvidence` (base-compiler.ts).
+
+  test('a numeric ordering next to an index of the same local compiles', () => {
+    // The minimal mechanism: NO string comparison anywhere in this program.
+    // The `list<string>` is incidental — `cs[j]` alone does it.
+    executeEpsil(
+      ce,
+      'function scan(cs: list<string>, i: integer) -> integer {\n' +
+        'let j = i\nlet c = cs[j]\nwhile j <= Length(cs) { j = j + 1 }\nj }'
+    );
+    const call = ce.box(['scan', ['List', { str: 'a' }, { str: 'b' }], 1]);
+    expect(call.evaluate().re).toBe(3);
+    const r = compile(call, { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!()).toBe(3);
+  });
+
+  test('the WHILE-loop whitespace scanner compiles and runs (annotated predicate)', () => {
+    executeEpsil(
+      ce,
+      'isW(c: string | missing) = c == " "\n' +
+        'function w2(cs: list<string>, i: integer) -> integer {\n' +
+        'let j = i\nwhile j <= Length(cs) && isW(cs[j]) { j = j + 1 }\nj }'
+    );
+    const call = ce.box([
+      'w2',
+      ['List', { str: ' ' }, { str: ' ' }, { str: 'a' }],
+      1,
+    ]);
+    expect(call.evaluate().re).toBe(3);
+    const r = compile(call, { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!()).toBe(3);
+  });
+
+  test('…and with an UNANNOTATED predicate', () => {
+    executeEpsil(
+      ce,
+      'isV(c) = c == " "\n' +
+        'function w3(cs: list<string>, i: integer) -> integer {\n' +
+        'let j = i\nwhile j <= Length(cs) && isV(cs[j]) { j = j + 1 }\nj }'
+    );
+    for (const [text, expected] of [
+      ['  a', 3],
+      ['a', 1],
+      ['   ', 4],
+      ['', 1],
+    ] as const) {
+      const call = ce.box(['w3', ['Characters', { str: text }], 1]);
+      expect(call.evaluate().re).toBe(expected);
+      const r = compile(call, { fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.run!()).toBe(expected);
+    }
+  });
+
+  test('the `skipWs` of the Epsil examples compiles in its natural while-form', () => {
+    // Verbatim from `src/epsil/docs/examples.md` (the JSON-parser program).
+    executeEpsil(
+      ce,
+      'isWs(c: string | missing) = c == " " || c == "\\n" || c == "\\t" || c == "\\r"\n' +
+        'function skipWs(cs: list<string>, i: integer) -> integer {\n' +
+        '  let j = i\n' +
+        '  while j <= Length(cs) && isWs(cs[j]) { j = j + 1 }\n' +
+        '  j\n' +
+        '}'
+    );
+    const call = ce.box(['skipWs', ['Characters', { str: '  ab' }], 1]);
+    expect(call.evaluate().re).toBe(3);
+    const r = compile(call, { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!()).toBe(3);
+  });
+
+  test('the `parseDigits` loop condition compiles; only its IndexOf still closes it', () => {
+    // `parseDigits` (same program) is the tuple-returning digit scanner. Its
+    // guard `j <= Length(cs) && isDigit(cs[j])` is the shape fixed here, and it
+    // compiles — shown by the same body with the digit decode replaced. The
+    // real one still declines, on the SEPARATE and deliberate tier-0 closure of
+    // `IndexOf` over string evidence ("IndexOf with a string needle declines",
+    // above); relaxing that gate is its own decision.
+    executeEpsil(
+      ce,
+      'let digits = Characters("0123456789")\n' +
+        'isDigit(c: string | missing) = c in digits\n' +
+        'function countDigits(cs: list<string>, i: integer) -> tuple<integer, integer> {\n' +
+        '  let j = i\n  let n = 0\n' +
+        '  while j <= Length(cs) && isDigit(cs[j]) { n = n + 1\n j = j + 1 }\n' +
+        '  (n, j)\n}\n' +
+        'function parseDigits(cs: list<string>, i: integer) -> tuple<integer, integer> {\n' +
+        '  let j = i\n  let n = 0\n' +
+        '  while j <= Length(cs) && isDigit(cs[j]) {\n' +
+        '    n = 10 * n + IndexOf(digits, cs[j]) - 1\n    j = j + 1\n  }\n' +
+        '  (n, j)\n}'
+    );
+    const ok = compile(ce.box(['countDigits', ['Characters', { str: '12a' }], 1]), {
+      fallback: false,
+    });
+    expect(ok.success).toBe(true);
+    expect(ok.run!()).toEqual([2, 3]);
+
+    const closed = compile(ce.box(['parseDigits', ['Characters', { str: '12a' }], 1]));
+    expect(closed.success).toBe(false);
+    expect(closed.error).toMatch(/IndexOf: cannot compile/);
+    // …and the interpreter, which `compile()` falls back to, answers.
+    expect(
+      ce.box(['parseDigits', ['Characters', { str: '12a' }], 1]).evaluate().toString()
+    ).toBe('(12, 3)');
+  });
+
+  test('the DECLINES survive: only "no information at all" is exempt', () => {
+    // A union of exactly TWO sorts is a real possibility of a mixed pair, not
+    // an absence of information, so it keeps failing closed.
+    ce.declare('sn', 'number | string');
+    ce.declare('wq', 'boolean | indexed_collection | number | string');
+    for (const json of [
+      ['Less', { str: 'a' }, 1],
+      ['Less', 'sn', 1],
+      ['Less', { str: 'a' }, 'sn'],
+      // The wide union is exempt as a SOURCE of evidence only — opposite a
+      // real string it is still not a provably flat string, so the head
+      // declines exactly as an `unknown`-typed participant does.
+      ['Less', 'wq', { str: 'a' }],
+    ] as const) {
+      const r = compile(ce.box(json as any));
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(/mixes a string operand/);
+    }
+    // The broadcast-route gate is untouched.
+    expect(compile(ce.box(['Less', { str: 'a' }, ['List', 1, 2]])).success).toBe(
+      false
+    );
+  });
+
+  test('a user’s deliberate three-sort union is still evidence and declines', () => {
+    // The exemption is for the four-armed INFERENCE ARTIFACT (`At`'s index
+    // slot), which always carries an `indexed_collection` arm. A hand-written
+    // `string | number | boolean` is a real possibility of a string at run
+    // time: the interpreter leaves `wq < 1` INERT, whereas a compiled
+    // `_.wq < 1` would coerce and answer a plausible-looking boolean.
+    for (const type of [
+      'string | number | boolean',
+      // …and the same three sorts plus a non-collection arm.
+      'string | number | boolean | missing',
+    ] as const) {
+      ce = new ComputeEngine();
+      ce.declare('wq', type);
+      const expr = ce.box(['Less', 'wq', 1]);
+      const r = compile(expr);
+      expect(r.success).toBe(false);
+      expect(r.error).toMatch(/mixes a string operand/);
+      // The interpreter's answer: an inert comparison, not a boolean.
+      expect(expr.evaluate().operator).toBe('Less');
+    }
+  });
+
+  test('the four-sort At-shape union stays exempt, hand-written included', () => {
+    // The artifact and a deliberate spelling of it are indistinguishable by
+    // construction, so a hand-written one is exempt too — a type admitting
+    // every scalar sort AND every indexed collection is the top type in all
+    // but name, and `unknown` has never been evidence either.
+    ce.declare('wq4', 'boolean | indexed_collection | number | string');
+    const r = compile(ce.box(['Less', 'wq4', 1]), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.code).toMatchInlineSnapshot(`"_.wq4 < 1"`);
+  });
+
+  test('`Length` of a string list is an integer, and carries no evidence either way', () => {
+    // The negative control for the mechanism: an APPLICATION is typed by what
+    // it RETURNS, never by what it consumes. `Length(sl)` over a `list<string>`
+    // is an `integer`, so a numeric ordering against it compiles — and a
+    // STRING opposite it is still the mixed pair, which declines.
+    ce.declare('sl', 'list<string>');
+    expect(ce.box(['Length', 'sl']).type.toString()).toBe('integer');
+    const numeric = compile(ce.box(['Less', 1, ['Length', 'sl']]), {
+      fallback: false,
+    });
+    expect(numeric.success).toBe(true);
+    const mixed = compile(ce.box(['Less', { str: 'a' }, ['Length', 'sl']]));
+    expect(mixed.success).toBe(false);
+    expect(mixed.error).toMatch(/mixes a string operand/);
+  });
+});

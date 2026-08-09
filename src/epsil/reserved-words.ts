@@ -117,6 +117,7 @@ export const RESERVED_WORDS = new Set<string>([
   'in', // ACTIVE — membership operator and loop separator
   'Infinity', // LITERAL — numeric literal (+∞); `oo` is an input alias
   'inline', // Not in use
+  'inout', // Not in use — candidate parameter-mode keyword (EFFECTS-MODEL.md)
   'interface', // Not in use
   'internal', // Not in use
   'import', // Not in use
@@ -127,6 +128,7 @@ export const RESERVED_WORDS = new Set<string>([
   'loop', // Not in use
   'match', // ACTIVE — match-expression head (parser `parseMatch`)
   'module', // Not in use
+  'mutable', // Not in use — candidate parameter-mode keyword (EFFECTS-MODEL.md)
   'namespace', // Not in use
   'NaN', // LITERAL — numeric literal (Not a Number)
   'native', // Not in use

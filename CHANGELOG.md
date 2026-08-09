@@ -359,6 +359,29 @@
 
 ### Resolved Issues
 
+- **An ordering such as `j <= Length(cs)` no longer declines to compile when
+  the same local is also used as an index (`cs[j]`).** `At`'s index slot is
+  typed `boolean | indexed_collection | number | string` (a gather index may
+  be a collection, a dictionary key a string), which permanently widened the
+  local, and the `string` arm of that union was read as positive string
+  evidence by the mixed-string ordering gate. A type that admits a string
+  *and* a number *and* a boolean *and* an indexed collection — that exact
+  four-armed shape — says no more than the top type does, and is no longer
+  treated as evidence, so ordinary scanner loops
+  (`while j <= Length(cs) && isWs(cs[j]) { … }`) compile again, on both the
+  JavaScript and Python targets. A deliberately written union of scalar sorts
+  (`string | number | boolean`) is still evidence, and genuinely mixed shapes
+  (`Less("a", 1)`, a `number | string` participant, `Less("a", [1, 2])`) still
+  fail closed.
+
+- **An else-less `if` statement in a function body compiles (JavaScript
+  target).** `if cs[j] == "-" { sign = -1; j = j + 1 }` in statement position
+  lowers to a bare `if (…) { … }` instead of failing with
+  `If: wrong number of arguments`. Loop bodies already handled this; a plain
+  block's statements did not. An else-less `if` in *value* position still
+  fails closed — it has no value. The Python, interval-JavaScript and GPU
+  targets still decline the shape in a plain function body.
+
 - **Iterating over a function parameter now counts as collection evidence.** A
   parameter whose only use was `for c in cs` stayed untyped, so the lambda
   auto-broadcast mapped the function over the argument's elements instead of

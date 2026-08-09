@@ -1312,14 +1312,40 @@ disposition so the question is not re-litigated:**
   system without linearity. Copy-in/copy-out sidesteps the whole question
   by never writing through anything.
 
+  **Priority ruling (2026-08-08): the parameter mode is DEFERRED as
+  sugar.** It expresses nothing that returning a tuple does not already
+  express, and modified input arguments have a long field record of being
+  surprising; it is convenient, not enabling. The *capability* ask it was
+  standing in for is efficient functional update — `xs = Append(xs, x)`,
+  `xs[i] = v`, `ds.key = v` — every one of which is a **rebinding** form
+  needing no parameter mode, no new value semantics, and no effect label.
+  See the naming and uniqueness material below only if the mode is ever
+  revived.
+
   **Open naming question — `inout` vs `mutable`, no ruling.** Both spell
   the copy-in/copy-out mode; the trade is readability against
-  mispredicted aliasing. `inout` (Swift, Ada `in out`) names the
-  *parameter's mode* and already carries copy-in/copy-out in the wild.
-  `mutable` reads more plainly to some authors but is an adjective on the
-  *value*, and everywhere else it appears — OCaml `mutable` fields, Julia
-  `mutable struct`, C++ `mutable` — it means genuine in-place mutation
-  with aliases observing it. The discriminating case, which docs must
+  mispredicted aliasing. The survey (Julia, Scala, Rust, Swift, Ada, C#,
+  OCaml, C++, Pascal) splits by *which concept is being named*, and the
+  split is independent of any memory model:
+
+  | Concept | Vocabulary | Languages |
+  |---|---|---|
+  | Mutable **binding** | `mut` / `var` / `let` | Rust `let mut`, Scala `var`, Epsil `let` |
+  | Value mutability, **in the type** | adjective or distinct type | Julia `mutable struct`, Scala `mutable.Map`, Rust `&mut T`, OCaml, C++ |
+  | **Parameter mode** (property of a slot) | mode word | Ada `in out`, Swift `inout`, C# `ref`/`out`, Pascal `var` |
+
+  No surveyed language uses a mutability adjective for a parameter mode —
+  the third row is spelled with mode words everywhere. Two specific
+  hazards for `mutable`: Julia's `mutable struct` means in-place mutation
+  **with aliases observing it** (Julia can afford that because `===` is
+  address-based for mutables — a redefinition unavailable here, where
+  `isSame` must stay an unconditional equivalence relation to remain a
+  safe dedup key); and Rust's `fn f(mut xs: Vec<_>)` — the form that most
+  resembles `xs: mutable list` — is a **callee-local pattern binding**,
+  not part of the function's type, invisible to callers, propagating
+  nothing back. A reader carrying either prior mispredicts
+  copy-in/copy-out on the one axis that matters. `inout` carries no such
+  prior. The discriminating case, which docs must
   lead with under either spelling:
 
   ```
