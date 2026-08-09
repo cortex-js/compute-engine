@@ -1,10 +1,71 @@
 # Element-type inference for callback lambda parameters
 
-**Status: DESIGN — awaiting maintainer go-ahead. Nothing implemented.**
+**Status: RATIFIED 2026-08-08 — Option C chosen (per-application
+re-derivation at canonicalization of the call), generalized with a
+signature-driven trigger. See "Rulings" below. Implementation started
+2026-08-08.**
 
 2026-08-08. Follow-on to the 2026-08-07/08 compile-soundness rounds and the
 forward-ref re-derivation
 (`docs/plans/2026-08-07-forward-ref-inference-rederivation.md`).
+
+## Rulings (maintainer, 2026-08-08)
+
+The motivating goal shifted the choice from (B) to (C): the value sought is
+interpreter-visible inference — and specifically what the mechanism offers
+**user-defined functions**, not just the standard operators. Three rulings:
+
+1. **Trigger = signature-driven core + builtin metadata.** The core
+   mechanism triggers on ANY callee — user-defined included — whose
+   signature declares a concrete function-typed parameter (an arrow type
+   with concrete parameter types): an inline `Function` literal at that
+   position is rebuilt with its parameter annotated. The
+   `callbackElementOf` metadata exists only for builtins, whose callback
+   slots deliberately stay primitive `function` (generics-v1 pinned
+   ruling, `collection-callback-signatures.test.ts`); for those, the
+   element-of link supplies the type the signature cannot. When (D) lands,
+   the solver's `T` instantiation becomes a third trigger into the same
+   rebuild helper. (Review round: the trigger covers required, OPTIONAL,
+   and VARIADIC parameter positions — resolved per operand index with
+   `paramAt`'s consumption order — and a POLYMORPHIC callee signature
+   (non-empty `typeParams`) is skipped entirely: stamping an open type
+   variable is unsound, and generic instantiation is (D)'s job.)
+2. **Strictness = annotation-as-contract.** The rebuilt literal behaves
+   exactly like the hand-annotated spelling, loud errors included: a
+   heterogeneous list that today runs dynamically errors at the mismatching
+   element, and a retracted inferred collection type surfaces as a mismatch
+   error rather than silently widening. This settles the retraction
+   question, and (D) inherits the same semantics.
+3. **Builtin scope v1 = `Map` + `Filter` only.** Prove the mechanism and
+   measure the snapshot blast radius on the two highest-traffic operators;
+   extending the metadata is mechanical afterwards.
+
+4. **Builtin trigger fires on COMPOSITE element types only** (ruled
+   2026-08-08 after the first implementation round surfaced the fallout).
+   The `callbackElementOf` trigger annotates only when the provable element
+   type is a structured/composite type — a tuple or a collection kind —
+   never a scalar primitive and never a union. Rationale, from the
+   measured full-suite run: (a) an annotated parameter falls out of the
+   Map fusion / exact-compile fast paths (`map-broadcast-shape.ts` gates
+   on bare symbols), so scalar-element annotation turned the most common
+   `Map` spelling into a perf regression (13 test failures); (b) a UNION
+   element type poisons the whole application with a static type error at
+   canonicalization — not the intended "error at the mismatching element"
+   — breaking the published Epsil "errors are values" examples. The
+   motivating point-predicate case (`list<tuple<number, number>>`) is
+   fully served. Follow-up track (complementary, in order): teach the
+   fusion/exact-compile gate to accept an annotated parameter that matches
+   the element type, THEN widen the trigger to scalar element types.
+   Union admission stays out until per-element error semantics exist for
+   this route. The signature-driven trigger is NOT narrowed — a
+   user-declared arrow param is an explicit contract, whatever its types.
+
+Defaults carried from the open questions (not separately ruled):
+`Reduce`'s accumulator is out of v1 (with `Reduce` itself); any
+symbol-valued callback is treated as shared — no rebuild, no exceptions
+for single-use `let f = …`. The (B)-specific acceptance line "zero
+snapshot churn" is replaced by the standing policy: measure the blast
+radius on the full suite and surface it for review before landing.
 
 ## Problem
 
@@ -143,6 +204,27 @@ direction; not this change.
 3. **Named single-use literals** — a `let f = pt |-> …` used exactly once:
    v1 treats any symbol-valued callback as shared (no rebuild). Acceptable?
 
+## v1 scope exclusions (recorded at planning, 2026-08-08)
+
+All conservative; each is a mechanical extension later if wanted:
+
+- **Pre-canonicalized literal operands** (`ce.function('Filter', [xs,
+  canonicalLiteral])`) are not rebuilt — raw structure does not survive
+  canonicalization, and re-deriving a bound body in the call-site scope is
+  the closure-capture bug factory. The Epsil / `ce.box` / `ce.parse`
+  routes are the ratified surface.
+- **Multi-collection `Map(xs, ys, f)`** (callback last) — `{1: 0}` cannot
+  express it; the discriminator declines operand 1 (a collection) and the
+  form keeps today's behavior.
+- **Expected param types containing `broadcastable<T>`** are skipped: the
+  2026-08-08 broadcastable-param ruling makes that a callee-side
+  application contract; stamping it onto a literal would give it an
+  elementwise contract its author never wrote.
+- **Overload-set callees** are skipped (resolution happens after the hook
+  site and the annotation itself would feed resolution — circular).
+- **Shorthand callbacks** (`_ > 5`, non-`Function`-headed operands) lift
+  after the hook and are not rebuilt.
+
 ## Acceptance
 
 - `Filter(points, pt |-> pt == (0, 0))` with `points: list<tuple<number,
@@ -152,6 +234,12 @@ direction; not this change.
   captures correctly.
 - A SHARED named lambda used over two different-element collections keeps
   today's behavior on both (no cross-contamination) — the sharing pin.
+- A user-defined callee with a declared arrow param (`function apply2(f:
+  (number) -> number, x) { f(x) }`) annotates an inline literal argument —
+  Epsil and `ce.assign`/`ce.box` routes.
 - `Filter(xs, f)` where `xs`'s element type is unknown: byte-identical
-  codegen to today.
-- Full suite, zero snapshot churn (B touches no canonical forms).
+  canonical form and codegen to today.
+- The vectorization default holds: an evidence-free scalar lambda still
+  broadcasts.
+- Full suite: snapshot blast radius measured and surfaced for review
+  (supersedes B's "zero snapshot churn" line).

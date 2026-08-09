@@ -69,6 +69,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'scoped',
   'bindingSites',
   'broadcastable',
+  'callbackElementOf',
   'inspectsErrors',
   'missingBehavior',
   'missingStrip',
@@ -164,6 +165,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   wikidata?: string;
 
   broadcastable = false;
+
+  /** See {@link OperatorDefinitionFlags.callbackElementOf}: from a callback
+   * operand index to the sibling operand whose element type annotates the
+   * callback literal's parameter. */
+  callbackElementOf?: Record<number, number>;
+
   inspectsErrors = false;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
   missingStrip: 'all' | number[] = 'all';
@@ -430,6 +437,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     if (this.keywords) result.keywords = this.keywords;
     if (this.url) result.url = this.url;
     result.broadcastable = this.broadcastable;
+    if (this.callbackElementOf)
+      result.callbackElementOf = this.callbackElementOf;
     result.associative = this.associative;
     result.commutative = this.commutative;
     result.idempotent = this.idempotent;
@@ -581,6 +590,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.wikidata = def.wikidata ?? this.wikidata;
 
     this.broadcastable = def.broadcastable ?? this.broadcastable;
+    this.callbackElementOf = def.callbackElementOf ?? this.callbackElementOf;
     this.inspectsErrors = def.inspectsErrors ?? this.inspectsErrors;
     this.missingBehavior = def.missingBehavior ?? this.missingBehavior;
     this.missingStrip = def.missingStrip ?? this.missingStrip;

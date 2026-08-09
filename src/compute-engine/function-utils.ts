@@ -16,6 +16,7 @@ import type {
   BoxedValueDefinition,
   EvaluateOptions,
   Expression,
+  ExpressionInput,
   FunctionInterface,
   IComputeEngine as ComputeEngine,
   Scope,
@@ -273,6 +274,71 @@ export function canonicalFunctionLiteral(
   }
 
   return canonicalFunctionLiteralArguments(ce, [body, ...params]);
+}
+
+/**
+ * Rebuild an INLINE function-literal operand with its unannotated parameters
+ * wrapped in `["Typed", param, type]`, from the operand's RAW structure.
+ *
+ * This is the shared rewrite of the per-application element-type inference
+ * (`docs/plans/2026-08-08-lambda-param-element-inference.md`): a call site
+ * that knows what a callback's parameter will be bound to annotates the
+ * literal it passes, so the literal behaves EXACTLY like the hand-annotated
+ * spelling — the body scope declares the parameter with that type, every
+ * type-reading gate sees it, and a violated annotation is a loud error
+ * (ruling 2, "annotation-as-contract").
+ *
+ * Returns the rewritten RAW literal, or `undefined` when nothing is rewritten.
+ * The result is NEVER canonicalized here: the caller substitutes it into the
+ * operand array and the normal canonicalization
+ * (`canonicalFunctionLiteralArguments` and its §6.1 pre-declare mechanism)
+ * derives the body from raw structure, which is what preserves capture. A
+ * scope-graft of an already-bound body is the closure-capture bug factory.
+ *
+ * Declines, all v1 scope exclusions:
+ * - a SYMBOL operand (`Filter(xs, f)`) — a named literal may be SHARED, and
+ *   one application site must not retype it for every other. Deliberately
+ *   discriminated on the RAW operand: `canonicalFunctionLiteral` LIFTS a
+ *   symbol into a literal, so the canonical operand cannot tell the two
+ *   spellings apart;
+ * - a string, and any operand that is not `Function`-headed (the shorthand
+ *   `_ > 5` lifts to a literal only later);
+ * - an operand that is already CANONICAL — its raw structure is gone;
+ * - a literal with no explicit parameter list, and any parameter that is
+ *   already annotated (an author's annotation is never overwritten).
+ */
+export function annotateFunctionLiteralParams(
+  ce: ComputeEngine,
+  op: ExpressionInput,
+  paramTypes: ReadonlyArray<Type | undefined>
+): Expression | undefined {
+  const raw = ce.expr(op, { form: 'raw' });
+  if (raw.isCanonical) return undefined;
+  if (!isFunction(raw, 'Function')) return undefined;
+
+  const ops = raw.ops;
+  // `["Function", body]` has no explicit parameter list: its parameters, if
+  // any, are the anonymous wildcards the body mentions, which the shorthand
+  // path derives later.
+  if (ops.length < 2) return undefined;
+
+  let rewritten = false;
+  const params = ops.slice(1).map((param, i) => {
+    const t = paramTypes[i];
+    if (t === undefined) return param;
+    // Not a bare symbol: an already-annotated parameter, or an error.
+    if (!isSymbol(param)) return param;
+    rewritten = true;
+    // The same normalized spelling `normalizeTypedParameter` produces (a
+    // string type operand), so the rebuilt literal is indistinguishable from
+    // the hand-written one.
+    return ce._fn('Typed', [param, ce.string(typeToString(t))], {
+      canonical: false,
+    });
+  });
+  if (!rewritten) return undefined;
+
+  return ce._fn('Function', [ops[0], ...params], { canonical: false });
 }
 
 /**

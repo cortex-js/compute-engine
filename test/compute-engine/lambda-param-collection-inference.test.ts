@@ -30,6 +30,10 @@ import { takeProvisionalDependents } from '../../src/compute-engine/boxed-expres
 //    so validation contributes no inference; its canonical handler now treats
 //    `Length(x)` on a not-yet-typed symbol as collection evidence.
 //
+// The sibling mechanism — a CALL SITE annotating an inline callback literal's
+// parameter with the element type of the collection it is applied to — lives
+// in `lambda-param-element-inference.test.ts`.
+//
 // Also covered here: the nullary makeLambda path swept its stale
 // canonicalization bindings (a zero-arg function's `while` loop never
 // terminated), and the Kleene handling of `boolean | missing` conditions in

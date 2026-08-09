@@ -2308,6 +2308,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     lazy: true,
     signature: '(collection+, mapping: function) -> indexed_collection',
+    // The mapping function is applied to the ELEMENTS of the source
+    // collection: an inline literal at operand 1 gets its parameter annotated
+    // with the element type of operand 0 (only the single-collection form —
+    // in `Map(xs, ys, f)` operand 1 is a collection, which the rewrite
+    // declines).
+    callbackElementOf: { 1: 0 },
     // The mapped collection keeps the source's shape/indexed-ness, but its
     // elements are the lambda's RESULT type — not the source element type.
     // (If the input collection is indexed, the output collection is indexed.)
@@ -2605,6 +2611,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     lazy: true,
     signature: '(collection, predicate: function) -> collection',
+    // The predicate is applied to the ELEMENTS of the source collection: an
+    // inline literal at operand 1 gets its parameter annotated with the
+    // element type of operand 0.
+    callbackElementOf: { 1: 0 },
     // If the input collection is indexed, the output collection is indexed.
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {

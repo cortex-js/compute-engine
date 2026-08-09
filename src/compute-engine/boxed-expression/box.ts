@@ -55,13 +55,21 @@ import { BoxedDictionary } from './boxed-dictionary.js';
 import { canonicalForm } from './canonical.js';
 import { sortOperands } from './order.js';
 import { validateArguments, checkNumericArgs } from './validate.js';
-import { overloadArms } from './overload.js';
+import { overloadArms, paramAt } from './overload.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { isWildcardFunctionType } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  isWildcardFunctionType,
+  resolveTypeForCompilation as resolveType,
+} from '../../common/type/utils.js';
+import { typeToString } from '../../common/type/serialize.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
 import { isValueDef } from './utils.js';
-import { lookupApplicable } from '../function-utils.js';
+import {
+  annotateFunctionLiteralParams,
+  lookupApplicable,
+} from '../function-utils.js';
 import { canonicalNegate } from './negate.js';
 import { canonical } from './canonical-utils.js';
 import { isNumber, isFunction, isSymbol } from './type-guards.js';
@@ -790,6 +798,208 @@ function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
   return whenUndeclared ? true : (i: number) => plan.at(i).mappable;
 }
 
+/**
+ * The types to annotate an inline callback literal's parameters with, given
+ * the type DECLARED for the slot the literal occupies — or `undefined` when
+ * the slot is not a concrete arrow type and carries no information.
+ *
+ * The bare `function` primitive (what every built-in callback slot is declared
+ * as, by the generics-v1 pinned ruling) is a string type, so it declines here:
+ * those operators use the `callbackElementOf` metadata channel instead. A
+ * GENERIC arrow (`forall T. (T) -> boolean`) also declines — its quantified
+ * positions are not types a literal can be annotated with; instantiating them
+ * is design (D), a later trigger into the same rewrite.
+ */
+function declaredCallbackParamTypes(
+  t: Type
+): ReadonlyArray<Type | undefined> | undefined {
+  if (typeof t === 'string' || t.kind !== 'signature') return undefined;
+  if (t.typeParams !== undefined && t.typeParams.length > 0) return undefined;
+  const args = t.args;
+  if (args === undefined || args.length === 0) return undefined;
+  const types = args.map((arg) => concreteCallbackParamType(arg.type));
+  return types.some((x) => x !== undefined) ? types : undefined;
+}
+
+/** A declared callback-parameter type that is worth stamping on a literal, or
+ * `undefined`. Only positive evidence qualifies: `unknown`/`any` say nothing,
+ * and a `broadcastable<T>` slot is a callee-side APPLICATION contract
+ * (2026-08-08 broadcastable-param ruling) — stamping it on a literal would
+ * give it an elementwise contract its author never wrote. The containment test
+ * is on the SPELLING so a nested occurrence declines too; a false positive
+ * only means "no annotation", which is the safe direction. */
+function concreteCallbackParamType(t: Type): Type | undefined {
+  if (t === 'unknown' || t === 'any') return undefined;
+  if (typeToString(t).includes('broadcastable')) return undefined;
+  return t;
+}
+
+/**
+ * The SIGNATURE-driven trigger of the per-application element-type inference
+ * (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ruling 1): a
+ * callee whose signature declares a concrete arrow-typed parameter annotates
+ * an INLINE `Function` literal passed at that position with the declared
+ * parameter types. This is what the mechanism offers USER-DEFINED functions;
+ * no library signature qualifies (their callback slots are the primitive
+ * `function`).
+ *
+ * Runs before any operand is boxed and before any operand type is read, so the
+ * literal is canonicalized ONCE, already annotated — exactly as the
+ * hand-annotated spelling would be.
+ *
+ * An OVERLOAD set is skipped: resolution happens after this hook and the
+ * annotation would itself feed the resolution.
+ */
+function annotateCallbacksFromSignature(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<ExpressionInput>,
+  sigType: Type | undefined
+): ReadonlyArray<ExpressionInput> {
+  if (sigType === undefined || typeof sigType === 'string') return ops;
+  if (overloadArms(sigType) !== undefined) return ops;
+  if (sigType.kind !== 'signature') return ops;
+  // A POLYMORPHIC callee is skipped ENTIRELY: its parameter types mention the
+  // variables its own `forall` clause binds, and stamping `T` on a literal
+  // would leave it unresolved outside that scope (or capture an unrelated
+  // nominal type of the same name). Instantiating them is design (D).
+  if (sigType.typeParams !== undefined && sigType.typeParams.length > 0)
+    return ops;
+
+  let result: ExpressionInput[] | undefined;
+  for (let i = 0; i < ops.length; i++) {
+    // The parameter each SUPPLIED operand binds to: required, then optional,
+    // then variadic — `paramAt` mirrors `validateArguments`' consumption
+    // order, so a concrete arrow type in an optional or variadic position
+    // triggers exactly like a required one.
+    const param = paramAt(sigType, i);
+    if (param === undefined) break;
+    const paramTypes = declaredCallbackParamTypes(param);
+    if (paramTypes === undefined) continue;
+    const literal = annotateFunctionLiteralParams(ce, ops[i], paramTypes);
+    if (literal === undefined) continue;
+    result ??= [...ops];
+    result[i] = literal;
+  }
+  return result ?? ops;
+}
+
+/** The signature to read a callee's declared callback slots from, for a
+ * function-typed VALUE definition. A bare-`function` wildcard declaration
+ * carries no parameter types and deliberately stays that way through
+ * assignment, so the assigned value's own signature is the only one there is
+ * — the same source the narrowing sink below reads. */
+function calleeSignatureType(def: BoxedValueDefinition): Type | undefined {
+  if (isWildcardFunctionType(def.type.type)) return def.value?.type.type;
+  return def.type.type;
+}
+
+/** A `Spread` operand makes the final positional operands unknown until
+ * evaluation, so a positional callback rewrite cannot be trusted. Answered on
+ * the UNBOXED operand — the hook runs before anything is boxed. */
+function isSpreadOperand(x: ExpressionInput): boolean {
+  if (x instanceof _BoxedExpression) return x.operator === 'Spread';
+  if (Array.isArray(x)) return x[0] === 'Spread';
+  if (typeof x === 'object' && x !== null && 'fn' in x)
+    return (x as { fn: ReadonlyArray<unknown> }).fn[0] === 'Spread';
+  return false;
+}
+
+/**
+ * A COMPOSITE (structured) element type — a tuple or a collection kind. The
+ * admission gate of the builtin-metadata trigger (ruling 4, 2026-08-08).
+ *
+ * Answered on KINDS, never on spellings, so it is decided by the type AST and
+ * not by a name list. Three exclusions, each measured on the full suite:
+ *
+ * - a UNION (even of tuples) poisons the whole application with a static type
+ *   error at canonicalization instead of erroring at the mismatching element,
+ *   which is what broke the published Epsil "errors are values" examples;
+ * - a SCALAR primitive annotates the most common `Map` spelling, and an
+ *   annotated parameter falls out of the Map fusion / exact-compile fast paths
+ *   (`map-broadcast-shape.ts` gates on bare symbols) — a pure perf regression;
+ * - every other primitive (a string type name) declines with them: an
+ *   unparameterized `tuple`/`list` name carries no element structure, and
+ *   `unknown`/`any` are already excluded upstream.
+ *
+ * Follow-up track, in order: teach the fusion gate to accept an annotated
+ * parameter matching the element type, THEN widen this to scalars. The
+ * signature-driven trigger is deliberately NOT narrowed this way — a
+ * user-declared arrow parameter is an explicit contract, whatever its types.
+ */
+function isCompositeElementType(t: Type): boolean {
+  if (typeof t === 'string') return false;
+  switch (t.kind) {
+    case 'tuple':
+    case 'list':
+    case 'set':
+    case 'dictionary':
+    case 'record':
+    case 'collection':
+    case 'indexed_collection':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * The builtin-METADATA trigger of the per-application element-type inference
+ * (ruling 1 and 3: `Map` and `Filter` in v1). The operator declares "operand
+ * `cbIdx` is applied to the elements of operand `srcIdx`"
+ * ({@link OperatorDefinitionFlags.callbackElementOf}); the element type of the
+ * sibling, when provable, annotates the inline literal's single parameter.
+ *
+ * These operators are `lazy`, so their operands arrive RAW: the sibling's type
+ * is read from its CANONICAL form explicitly (a raw operand is unbound and
+ * would report nothing). The canonicalization is cached on the raw operand, so
+ * the handler's own `checkCollectionOperand` reuses it.
+ */
+function annotateCallbacksFromElementType(
+  ce: ComputeEngine,
+  xs: ReadonlyArray<Expression>,
+  opDef: BoxedOperatorDefinition
+): ReadonlyArray<Expression> {
+  const links = opDef.callbackElementOf;
+  if (links === undefined) return xs;
+  if (xs.some((x) => x.operator === 'Spread')) return xs;
+
+  let result: Expression[] | undefined;
+  for (const key of Object.keys(links)) {
+    const cbIdx = Number(key);
+    const cb = xs[cbIdx];
+    const src = xs[links[cbIdx]];
+    if (cb === undefined || src === undefined) continue;
+
+    // Discriminate the callback FIRST — cheap, and it declines the shared
+    // (symbol) and shorthand spellings before the sibling is canonicalized.
+    // Exactly one parameter: the element binds to it. (In the multi-collection
+    // `Map(xs, ys, f)` form operand 1 is a collection, which fails this.)
+    if (cb.isCanonical || !isFunction(cb, 'Function')) continue;
+    if (cb.nops !== 2 || !isSymbol(cb.ops[1])) continue;
+
+    // The sibling has to be canonicalized to read its type; hand the CANONICAL
+    // form onward so the handler's own `checkCollectionOperand` does not redo
+    // it (canonical-of-canonical is the identity there). Substituted whether or
+    // not the admission checks below decline — the work is already done.
+    const canonicalSrc = src.canonical;
+    if (canonicalSrc !== src) {
+      result ??= [...xs];
+      result[links[cbIdx]] = canonicalSrc;
+    }
+
+    const elt = collectionElementType(resolveType(canonicalSrc.type.type));
+    // Positive evidence only, and COMPOSITE evidence only (ruling 4).
+    if (elt === undefined || elt === 'unknown' || elt === 'any') continue;
+    if (!isCompositeElementType(resolveType(elt))) continue;
+
+    const literal = annotateFunctionLiteralParams(ce, cb, [elt]);
+    if (literal === undefined) continue;
+    result ??= [...xs];
+    result[cbIdx] = literal;
+  }
+  return result ?? xs;
+}
+
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
@@ -864,7 +1074,17 @@ function makeCanonicalFunction(
     // The symbol is declared, but as a value.
     // We construct the function expression and will check its value
     // is a function literal when evaluating it.
-    const boxedOps = flatten(semiCanonical(ce, ops));
+    //
+    // Before ANY operand is boxed: a declared arrow-typed parameter annotates
+    // an inline `Function` literal passed at that position (the
+    // signature-driven trigger), so the literal canonicalizes once, already
+    // annotated. Runs ahead of the wildcard narrowing sink below, preserving
+    // the documented sink-before-noting order.
+    const calleeOps = ops.some(isSpreadOperand)
+      ? ops
+      : annotateCallbacksFromSignature(ce, ops, calleeSignatureType(def.value));
+
+    const boxedOps = flatten(semiCanonical(ce, calleeOps));
 
     // A function-typed value definition that was INFERRED is not a user
     // constraint but a placeholder — typically the auto-declaration the
@@ -1161,10 +1381,22 @@ function applyOperatorDefinition(
 ): Expression {
   let result: Expression | null;
 
+  // Before ANY operand is boxed and before any operand type is read: a
+  // declared arrow-typed parameter annotates an inline `Function` literal
+  // passed at that position (the signature-driven trigger of
+  // `docs/plans/2026-08-08-lambda-param-element-inference.md`). Skipped when
+  // the caller supplied already-boxed operands (a binder's pre-phase) and when
+  // a `Spread` makes the positions uncertain.
+  if (rawOps === undefined && !ops.some(isSpreadOperand))
+    ops = annotateCallbacksFromSignature(ce, ops, opDef.signature.type);
+
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
-    const xs = rawOps ?? ops.map((x) => ce.expr(x, { form: 'raw' }));
+    let xs = rawOps ?? ops.map((x) => ce.expr(x, { form: 'raw' }));
     if (opDef.canonical) {
+      // The builtin-metadata trigger (`Map`/`Filter`): annotate an inline
+      // callback literal with the element type of its sibling collection.
+      xs = annotateCallbacksFromElementType(ce, xs, opDef);
       try {
         result = opDef.canonical(xs, { engine: ce, scope });
         if (result) return withSourceOffsets(result, metadata);
