@@ -5,7 +5,10 @@ import {
   _resetMapAutoCompileStats,
   mapAutoCompileRunner,
 } from '../../src/compute-engine/library/map-auto-compile';
-import { MIN_EXACT_COMPILE_COUNT } from '../../src/compute-engine/library/map-exact-proof';
+import {
+  MIN_EXACT_COMPILE_COUNT,
+  exactTierShape,
+} from '../../src/compute-engine/library/map-exact-proof';
 
 /**
  * The EXACT-mode auto-compilation tier for lazy-`Map` `evaluate()` drains
@@ -831,5 +834,199 @@ describe('exact Map compile — coexistence with the float tier', () => {
     const els = drain(ce.box(WITNESS).evaluate());
     expect(stats.attempts).toBe(0);
     expect(els[0].isSame(30)).toBe(true);
+  });
+});
+
+describe('exact Map compile — annotated parameters', () => {
+  /**
+   * Follow-up (1) of `docs/plans/2026-08-08-lambda-param-element-inference.md`:
+   * the broadcast-shape gate (`map-broadcast-shape.ts`, shared with Map
+   * fusion) admits an ANNOTATED mapping-function parameter when the source's
+   * element type provably satisfies the annotation, so such a literal reaches
+   * this tier exactly like a bare one. An annotation that is NOT provably
+   * satisfied keeps the decline, and with it the loud per-element error the
+   * unfused route raises.
+   */
+
+  /** `Map(Range(1, n), (x: T) ↦ body)` — `n` above the size floor. */
+  const annotatedMap = (
+    body: any,
+    type: string,
+    n = MIN_EXACT_COMPILE_COUNT
+  ) => ['Map', ['Range', 1, n], ['Function', body, ['Typed', '_1', type]]];
+
+  test('a matching annotation reaches the exact tier, with element parity', () => {
+    const ce = new ComputeEngine() as any;
+    const { compiled, snapshot } = parityDrain(
+      ce,
+      annotatedMap(['Multiply', '_1', 2], 'number')
+    );
+    expect(snapshot.attempts).toBe(1);
+    expect(snapshot.compiledHits).toBe(MIN_EXACT_COMPILE_COUNT);
+    expect(snapshot.elementFallbacks).toBe(0);
+    expect(compiled[0].isSame(2)).toBe(true);
+    expect(compiled[0].type.toString()).toBe('finite_integer');
+  });
+
+  test('the annotated and bare spellings compile to the same values', () => {
+    const ce = new ComputeEngine() as any;
+    const bare = drain(
+      ce
+        .box([
+          'Map',
+          ['Range', 1, MIN_EXACT_COMPILE_COUNT],
+          ['Function', ['Multiply', '_1', 2], '_1'],
+        ])
+        .evaluate()
+    );
+    _resetMapAutoCompileStats();
+    const typed = drain(
+      ce.box(annotatedMap(['Multiply', '_1', 2], 'number')).evaluate()
+    );
+    expect(stats.compiledHits).toBe(MIN_EXACT_COMPILE_COUNT);
+    expect(typed).toHaveLength(bare.length);
+    for (let i = 0; i < bare.length; i++)
+      expect(typed[i].isSame(bare[i])).toBe(true);
+  });
+
+  test('a WIDENING annotation is accepted (element integer, annotation number)', () => {
+    const ce = new ComputeEngine() as any;
+    const { snapshot } = parityDrain(
+      ce,
+      annotatedMap(['Add', '_1', 29], 'number')
+    );
+    expect(snapshot.compiledHits).toBe(MIN_EXACT_COMPILE_COUNT);
+  });
+
+  test('an `integer` annotation matching the Range element type is accepted', () => {
+    const ce = new ComputeEngine() as any;
+    const { snapshot } = parityDrain(
+      ce,
+      annotatedMap(['Add', '_1', 29], 'integer')
+    );
+    expect(snapshot.compiledHits).toBe(MIN_EXACT_COMPILE_COUNT);
+  });
+
+  test('a NARROWING annotation never attempts, and errors loudly', () => {
+    // The source's element type (`finite_real`) does not satisfy `integer`, so
+    // the gate declines: no compile attempt, and the unfused route raises the
+    // per-element mismatch error exactly as it does today.
+    const ce = new ComputeEngine() as any;
+    const src = ['List', ...Array.from({ length: 64 }, (_, i) => i + 0.5)];
+    const els = drain(
+      ce
+        .box([
+          'Map',
+          src,
+          ['Function', ['Add', '_1', 1], ['Typed', '_1', 'integer']],
+        ])
+        .evaluate()
+    );
+    expect(stats.attempts).toBe(0);
+    expect(els[0].toString()).toContain('incompatible-type');
+  });
+
+  test('an unprovable source element type never attempts', () => {
+    const ce = new ComputeEngine() as any;
+    // A source whose element type is `unknown`: no positive evidence, so the
+    // annotation cannot be discharged.
+    const m = ce.box([
+      'Map',
+      'noSuchSource',
+      ['Function', ['Add', '_1', 1], ['Typed', '_1', 'number']],
+    ]);
+    expect(m.op1.type.toString()).toBe('unknown');
+    drain(m.evaluate());
+    expect(stats.attempts).toBe(0);
+  });
+
+  test('Mod with a negative dividend keeps the FLOORED convention', () => {
+    // The landmine recorded by the exact-compile round: the JS `Mod` emission
+    // has a plain-`%` branch (TRUNCATED, sign follows the dividend) that a bare
+    // untyped parameter can never reach because it fails `isIntegerValued`. An
+    // `integer` annotation does make `isIntegerValued` true, so this pins that
+    // the branch still does not fire — it also requires `isNonNegative`, which
+    // no type annotation can supply (there is no non-negative numeric primitive
+    // type). Both halves of the range are checked against the interpreter.
+    const ce = new ComputeEngine() as any;
+    const { compiled, snapshot } = parityDrain(ce, [
+      'Map',
+      [
+        'Map',
+        ['Range', -50, 50],
+        ['Function', ['Subtract', '_1', 10], ['Typed', '_1', 'integer']],
+      ],
+      ['Function', ['Mod', '_2', 7], ['Typed', '_2', 'integer']],
+    ]);
+    expect(snapshot.attempts).toBe(2);
+    expect(snapshot.compiledHits).toBe(202);
+    // Floored: every element is in 0…6, including for negative dividends.
+    expect(
+      compiled.every((x: any) => x.re >= 0 && x.re <= 6 && x.isSame(x.re))
+    ).toBe(true);
+    expect(compiled[0].isSame((((-50 - 10) % 7) + 7) % 7)).toBe(true);
+  });
+});
+
+describe('exact Map compile — an annotated proof is REVALIDATED, not re-taken', () => {
+  /**
+   * Review follow-up (fix 3b): every annotated `Map` used to arm the proof
+   * memo's `dynamic` flag, so ANY `ce.assign` anywhere forced a full re-proof
+   * (a spine walk plus the type probe) on the next access — and each `at()` is
+   * its own micro-drain. The memo now records the source element-type keys the
+   * annotation was discharged against; a generation bump revalidates those and
+   * only a key that MOVED re-proves. A proof that read a symbol's VALUE keeps
+   * the old behavior: values cannot be revalidated this cheaply.
+   */
+
+  test('an unrelated assign keeps the memoized proof (same object back)', () => {
+    const ce = new ComputeEngine() as any;
+    ce.assign('unrelated', ce.box(0));
+    const m = ce.box([
+      'Map',
+      ['Range', 1, 1000],
+      ['Function', ['Add', 'x', 1], ['Typed', 'x', 'number']],
+    ]);
+    const first = exactTierShape(ce, m);
+    expect(first).toBeDefined();
+
+    ce.assign('unrelated', ce.box(42));
+    expect(exactTierShape(ce, m)).toBe(first);
+  });
+
+  test('a source type that MOVES re-proves and declines', () => {
+    const ce = new ComputeEngine() as any;
+    const ints = Array.from({ length: 80 }, (_, i) => i + 1);
+    ce.assign('xs', ce.box(['List', ...ints]));
+    const m = ce.box([
+      'Map',
+      'xs',
+      ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']],
+    ]);
+    expect(exactTierShape(ce, m)).toBeDefined();
+
+    ce.assign('xs', ce.box(['List', ...ints.map((i) => i + 0.5)]));
+    expect(exactTierShape(ce, m)).toBeUndefined();
+  });
+
+  test('a NESTED declined annotation re-asks like a single-level one', () => {
+    // Review follow-up (fix 4a): the annotation-presence check is taken at
+    // every level `proveSource` walks, so a nested level that declined on its
+    // source's TYPE is not memoized as a permanent negative.
+    const ce = new ComputeEngine() as any;
+    const m = ce.box([
+      'Map',
+      ['Map', 'ws', ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']]],
+      ['Function', ['Multiply', 'z', 2], 'z'],
+    ]);
+    // `ws` has no value: the inner level's annotation is not provably
+    // satisfied, so the proof declines.
+    expect(exactTierShape(ce, m)).toBeUndefined();
+
+    ce.assign(
+      'ws',
+      ce.box(['List', ...Array.from({ length: 80 }, (_, i) => i + 1)])
+    );
+    expect(exactTierShape(ce, m)).toBeDefined();
   });
 });

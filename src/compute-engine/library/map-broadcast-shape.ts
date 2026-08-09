@@ -4,7 +4,16 @@ import type {
   Scope,
 } from '../global-types.js';
 
+import type { Type } from '../../common/type/types.js';
+
 import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import { functionLiteralParameterType } from '../boxed-expression/function-literal.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import { typeToString } from '../../common/type/serialize.js';
+import {
+  collectionElementType,
+  resolveTypeForCompilation,
+} from '../../common/type/utils.js';
 
 /**
  * The *broadcast shape* of a single lazy-`Map` level — the structural gate
@@ -62,6 +71,18 @@ export interface LoweredLevel {
    * work was built for (`1 + Mod(Range(0,899) + 29, 900)`), which keeps the
    * original zero-scope-work path. */
   closureScope?: Scope;
+  /** A parameter ANNOTATION was admitted on the evidence of a source's element
+   * TYPE (see `annotationSatisfiedBySource`), so this outcome is not purely
+   * structural: an INFERRED source type can retract under a reassignment, and
+   * the admission — which stands in for the enforcement the lowered path
+   * bypasses — must then be re-asked.
+   *
+   * The consumers' memos do not key on this flag (a DECLINED annotation is
+   * just as impermanent, and produces no level to carry it): they record
+   * {@link sourceElementTypeKey} for every consulted `Map` that
+   * {@link hasAnnotatedParams}, and revalidate those keys on a new mutation
+   * generation. The flag reports the provenance of an admitted level. */
+  typeSensitive?: boolean;
 }
 
 /**
@@ -80,9 +101,107 @@ function isImpureHead(ce: ComputeEngine, body: Expression): boolean {
 }
 
 /**
+ * Is the ANNOTATION on a mapping-function parameter provably a no-op for the
+ * elements it will receive?
+ *
+ * The lowered/fused path evaluates the level's application directly, bypassing
+ * the per-application `Typed`-parameter enforcement the interpreter performs
+ * (`withEnforcedParams`). Under the annotation-as-contract ruling
+ * (`docs/plans/2026-08-08-lambda-param-element-inference.md`, ruling 2) an
+ * annotated literal must error LOUDLY on a violating element, so the gate may
+ * only accept an annotated parameter when that enforcement cannot fire: the
+ * source's element type is provable AND every element it claims already
+ * satisfies the annotation.
+ *
+ * Positive evidence only — an unprovable source element type
+ * (`undefined`/`unknown`/`any`) declines, and so does an annotation NARROWER
+ * than the element type (element `number` vs annotation `integer`): those keep
+ * today's behavior and fall back to the unfused path that raises the error.
+ */
+function annotationSatisfiedBySource(
+  param: Expression,
+  source: Expression | undefined
+): boolean {
+  const declared = functionLiteralParameterType(param);
+  if (declared === undefined) return false;
+  const elt = sourceElementType(source);
+  if (elt === undefined) return false;
+  // The subtype question is asked on the UNRESOLVED element and annotation
+  // types: NOMINAL opacity is a property of `isSubtype` (a nominal reference is
+  // deliberately not a subtype of its definition, `subtype.ts`), and resolving
+  // either side here would erase that identity and admit a level whose
+  // enforcement DOES fire — silently, since the lowered path bypasses it.
+  // `isSubtype` unfolds STRUCTURAL aliases (`{alias: true}`) on either side
+  // itself, so an alias annotation is still discharged.
+  return isSubtype(elt, declared);
+}
+
+/**
+ * The PROVABLE element type of a `Map` source operand, or `undefined` when
+ * there is no positive evidence (`unknown`/`any`/no collection type).
+ *
+ * Only the source's COLLECTION layer is resolved — a collection type spelled as
+ * a type reference has to be unfolded before its element type can be read — and
+ * the element type itself is returned as-is, so a nominal element keeps its
+ * identity for the subtype question above.
+ */
+function sourceElementType(source: Expression | undefined): Type | undefined {
+  if (source === undefined) return undefined;
+  // A raw (unbound) operand reports nothing: read the type from the canonical
+  // form, as the element-type inference hook does. Only reached for an
+  // annotated parameter (or its revalidation), so the common bare-parameter
+  // gate pays nothing.
+  const src = source.isCanonical ? source : source.canonical;
+  const elt = collectionElementType(resolveTypeForCompilation(src.type.type));
+  if (elt === undefined || elt === 'unknown' || elt === 'any') return undefined;
+  return elt;
+}
+
+/**
+ * A key over the ONE non-structural input {@link lowerLevel} reads: the element
+ * TYPE of each source of a `Map` whose mapping function carries an annotated
+ * parameter.
+ *
+ * The consumers' memos (`lowerMapSpine`, `exactTierShape`) record it alongside
+ * the outcome, so a later ask on a new mutation generation REVALIDATES instead
+ * of re-deriving: an unrelated `ce.assign` leaves every key untouched and the
+ * memoized outcome stands, while a source type that actually moved changes its
+ * key and forces the full walk (which then admits, or declines and errors
+ * loudly, on the new evidence). Each `at()` access is its own micro-drain, so
+ * that difference is the whole cost of the annotated spelling on the random-
+ * access route.
+ */
+export function sourceElementTypeKey(expr: Expression): string {
+  if (!isFunction(expr, 'Map') || expr.nops < 2) return '';
+  let key = '';
+  for (const source of expr.ops.slice(0, -1)) {
+    const elt = sourceElementType(source);
+    key += (elt === undefined ? '?' : typeToString(elt)) + '|';
+  }
+  return key;
+}
+
+/**
+ * Does `expr`'s mapping function carry an ANNOTATED parameter? A cheap
+ * syntactic test, asked by the consumers at EVERY level they consult to decide
+ * whether that level's outcome needs a {@link sourceElementTypeKey} recorded:
+ * an annotation makes the outcome of {@link lowerLevel} depend on the source's
+ * TYPE, and neither verdict is permanent — assigning the source a value whose
+ * element type satisfies the annotation admits a level that declined, and a
+ * retraction revokes one that was admitted.
+ */
+export function hasAnnotatedParams(expr: Expression): boolean {
+  if (!isFunction(expr, 'Map') || expr.nops < 2) return false;
+  const fn = expr.ops[expr.nops - 1];
+  if (!isFunction(fn, 'Function')) return false;
+  return fn.ops.slice(1).some((p) => isFunction(p, 'Typed'));
+}
+
+/**
  * The structural gate (§4, R2). A level is lowerable iff it is a `Map` whose
  * mapping function is *broadcast-shaped*: a canonical `Function` literal with
- * bare (unannotated) parameters, one per source, whose body — after
+ * parameters that are bare symbols — or annotated symbols whose annotation the
+ * source's element type provably satisfies — one per source, whose body — after
  * unwrapping a single-statement `Block` and then an optional `N` marker — is
  * either a bare parameter symbol or a single function application each of
  * whose operands is a parameter symbol or a parameter-free subexpression, and
@@ -97,14 +216,25 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
   const fn = expr.ops[expr.nops - 1];
   if (!isFunction(fn, 'Function')) return undefined;
 
-  // The parameters must be BARE symbols (a `["Typed", …]` annotation is not
-  // a symbol, so annotated parameters fall out here), one per source.
+  // The parameters must be symbols, one per source. A `["Typed", …]`
+  // annotation is accepted — and treated as the bare inner symbol for
+  // everything downstream, so the lowered level is structurally identical to
+  // the bare-parameter case — only when the corresponding source's element type
+  // provably satisfies it (see `annotationSatisfiedBySource`); any other
+  // annotation declines the level.
   const params = fn.ops.slice(1);
   const sources = expr.ops.slice(0, -1);
   const arity = sources.length;
   if (params.length !== arity) return undefined;
   const names: string[] = [];
-  for (const p of params) {
+  let typeSensitive = false;
+  for (let i = 0; i < params.length; i++) {
+    let p = params[i];
+    if (isFunction(p, 'Typed')) {
+      if (!annotationSatisfiedBySource(p, sources[i])) return undefined;
+      typeSensitive = true;
+      p = p.op1;
+    }
     if (!isSymbol(p)) return undefined;
     const name = sym(p);
     if (name === undefined) return undefined;
@@ -148,8 +278,17 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
         napprox,
         arity,
         sources,
+        typeSensitive,
       };
-    return { expr, identity: true, slots: [index], napprox, arity, sources };
+    return {
+      expr,
+      identity: true,
+      slots: [index],
+      napprox,
+      arity,
+      sources,
+      typeSensitive,
+    };
   }
 
   if (!isFunction(body)) return undefined;
@@ -200,5 +339,6 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
     arity,
     sources,
     closureScope: needsClosureScope ? bodyScope : undefined,
+    typeSensitive,
   };
 }

@@ -60,6 +60,49 @@ interpreter-visible inference — and specifically what the mechanism offers
    this route. The signature-driven trigger is NOT narrowed — a
    user-declared arrow param is an explicit contract, whatever its types.
 
+   *Follow-up (1) DONE 2026-08-09*: `lowerLevel`
+   (`map-broadcast-shape.ts`) accepts a `Typed` parameter when the level
+   source's element type is a provable SUBTYPE of the annotation, then
+   treats it as bare downstream — enforcement is provably a no-op, so the
+   fused per-element bypass is unobservable. Narrowing/unprovable
+   annotations decline as before (the loud error survives). The fusion and
+   exact-proof memos re-ask the admission when it was type-sensitive
+   (without this, a retracting inferred source type kept a stale fused
+   spine — a silent enforcement bypass, found and pinned). The feared
+   plain-`%` Mod emission branch is NOT reachable via annotations
+   (`isNonNegative` has no type-level source; pinned by probe tests in
+   both map suites).
+
+   *Follow-up (2) DONE 2026-08-09*: the builtin trigger's admission gate
+   (`admissibleElementType`, née `isCompositeElementType`, box.ts) now also
+   admits scalar primitive element types. Still excluded: unions (one
+   annotation cannot express per-element errors — the "errors are values"
+   breakage), `unknown`/`any` (no positive evidence), and `never` (an
+   empty collection's element type — stamping it would make `Filter([],…)`
+   a canonicalization-time type error). Bounded numeric type nodes
+   (`integer<1..10>`) and value-literal types still decline — widening is
+   a one-line switch addition if wanted. Blast radius, measured: one
+   inline snapshot in `collections.test.ts`, strictly more precise.
+
+   *Adversarial review round (2026-08-09), post-widening.* Four
+   independent attack agents; five confirmed findings, all fixed:
+   nominal-type erasure in the fusion admission proof (subtype check now
+   runs on unresolved types); Error-element laundering to NaN through
+   fused levels (fused runner now bubbles Error elements, matching the
+   unfused invoke path); the primitive admission was too wide — now a
+   concrete whitelist (`NUMERIC_TYPES` + `boolean` + `string`; abstract
+   supertypes `scalar`/`value`/`expression`/`symbol`/`missing` decline);
+   `at()`-route re-ask storms (admission revalidates against the recorded
+   source element type instead of re-deriving per access); Filter and its
+   predicate siblings surface an Error-valued predicate result per
+   element instead of a spell-check message. One exposure RATIFIED as-is
+   by the maintainer (2026-08-09): a RETAINED lazy expression keeps its
+   inferred parameter annotation, so re-evaluating it after the source
+   retracts to a wider element type errors per-element — identical to
+   hand-annotation; fresh canonicalizations re-infer. The same ruling
+   covers string-element collections with numeric bodies poisoning at
+   canonicalization instead of staying symbolic.
+
 Defaults carried from the open questions (not separately ruled):
 `Reduce`'s accumulator is out of v1 (with `Reduce` itself); any
 symbol-valued callback is treated as shared — no rebuild, no exceptions

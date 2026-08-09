@@ -80,13 +80,38 @@
   The inference is per-application and behaves exactly like a hand-written
   annotation, loud type errors included. It never touches a shared callback
   (a lambda bound to a name keeps its own typing at every call site), never
-  overrides an explicit annotation, and does not fire for scalar or union
-  element types of `Map`/`Filter` — so scalar pipelines keep the Map-fusion
-  fast path, heterogeneous "errors are values" programs keep their
-  per-element behavior, and the vectorization default for evidence-free
-  lambdas is unchanged. Polymorphic (`forall`) callees are excluded until
-  generic instantiation lands; optional and variadic callback positions are
-  covered.
+  overrides an explicit annotation, and does not fire for union element
+  types of `Map`/`Filter` — heterogeneous "errors are values" programs keep
+  their per-element behavior, and the vectorization default for
+  evidence-free lambdas is unchanged. Polymorphic (`forall`) callees are
+  excluded until generic instantiation lands; optional and variadic
+  callback positions are covered.
+
+- **Annotated lambda parameters no longer disable the Map fast paths.** The
+  Map-fusion and exact-compile gates previously required bare (unannotated)
+  parameters, so the hand-annotated spelling of a mapping function paid an
+  interpretation penalty. The gates now accept an annotated parameter
+  whenever the source collection's element type provably satisfies the
+  annotation — the per-element type check is a no-op in that case, so the
+  fused drain is unobservable — and still fall back to the enforcing path
+  (loud error included) when the annotation is narrower than the elements
+  or the source type is unknown. With this, the element-type inference
+  above extends to scalar element types too: `Map(Range(1, 200),
+  x |-> Mod(x, 7))` infers `x: integer`, keeps fusion, and still compiles
+  through the exact tier. A fused result is also re-validated when an
+  inferred source type changes, so a collection that retracts to a wider
+  element type raises the annotation error instead of reusing a stale
+  fused pipeline.
+
+  One consequence of the annotation contract to be aware of: an expression
+  you *retain* (a lazy `Map`/`Filter` you hold and re-evaluate) keeps the
+  parameter type it inferred when it was created. If the source collection
+  is later reassigned to elements of a wider type (an inferred
+  `list<integer>` becomes floats), re-evaluating the retained expression
+  reports a per-element `incompatible-type` error — exactly as the
+  hand-annotated spelling would — rather than silently adapting. Boxing
+  the expression afresh after the reassignment infers the new element type
+  and evaluates normally.
 
 - **JavaScript target: string equality now compiles.** Scalar
   `Equal`/`NotEqual` with a provably string participant — and no provably

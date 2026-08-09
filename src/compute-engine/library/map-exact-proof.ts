@@ -8,7 +8,11 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { lowerLevel } from './map-broadcast-shape.js';
+import {
+  hasAnnotatedParams,
+  lowerLevel,
+  sourceElementTypeKey,
+} from './map-broadcast-shape.js';
 import type { LoweredLevel, Slot } from './map-broadcast-shape.js';
 
 /**
@@ -288,8 +292,14 @@ function listBounds(x: Expression): SourceBounds | undefined {
 interface ProofContext {
   ce: ComputeEngine;
   /** The proof consulted a symbol's VALUE, so the outcome is not purely
-   * structural and must be revalidated when the engine mutates. */
+   * structural and must be re-derived when the engine mutates. */
   dynamic: boolean;
+  /** The `Map` instances the proof walked whose mapping function carries an
+   * ANNOTATED parameter. Their source element TYPES are the only other
+   * non-structural input, and — unlike a value — a type can be REVALIDATED
+   * cheaply, so these are recorded separately from `dynamic` (see
+   * {@link ExactProofMemo}). */
+  typeExprs: Expression[];
   depth: number;
 }
 
@@ -301,6 +311,10 @@ function proveSource(
   if (isFunction(x, 'List')) return listBounds(x);
   if (isFunction(x, 'Map')) {
     if (ctx.depth >= MAX_SPINE_DEPTH) return undefined;
+    // Recorded BEFORE the lowering is asked, so a nested annotated level that
+    // DECLINES arms the type revalidation too — its decline is no more
+    // permanent than an admission (the source's type can improve).
+    if (hasAnnotatedParams(x)) ctx.typeExprs.push(x);
     const level = lowerLevel(x);
     if (level === undefined) return undefined;
     ctx.depth++;
@@ -461,16 +475,32 @@ function proveLevel(
 interface ExactProofMemo {
   /** Absent when the instance is not exact-tier eligible. */
   shape?: ExactTierShape;
-  /** The proof read a symbol's value: recheck when the engine mutates. */
+  /** The proof read a symbol's value: RE-PROVE when the engine mutates. */
   dynamic: boolean;
-  /** `ce._mutationGeneration` at proof time (only consulted when
-   * `dynamic`). */
+  /** The annotated `Map` instances the proof walked, and the concatenated
+   * source element-type keys they had at proof time. A mutation generation
+   * that leaves the keys unchanged reuses the memo — only a source type that
+   * actually MOVED re-proves. Empty when no annotation took part. */
+  typeExprs: Expression[];
+  typeKey: string;
+  /** `ce._mutationGeneration` at proof time (only consulted when `dynamic` or
+   * `typeExprs` is non-empty). */
   generation: number;
+}
+
+/** The recorded keys of `typeExprs`, recomputed. */
+function typeKeyOf(typeExprs: ReadonlyArray<Expression>): string {
+  let key = '';
+  for (const x of typeExprs) key += sourceElementTypeKey(x) + ';';
+  return key;
 }
 
 /** Keyed on the drained `Map` instance — canonical expressions are
  * structurally immutable, so a purely structural outcome never needs
- * invalidating (the same argument as the `lowerMapSpine` memo). */
+ * invalidating (the same argument as the `lowerMapSpine` memo). The two
+ * non-structural axes are handled separately: a VALUE the proof read
+ * (`dynamic`) re-proves on any mutation generation, a source element TYPE an
+ * annotation was discharged against (`typeExprs`/`typeKey`) is revalidated. */
 const exactProofMemo = new WeakMap<Expression, ExactProofMemo>();
 
 /**
@@ -487,14 +517,33 @@ export function exactTierShape(
   expr: Expression
 ): ExactTierShape | undefined {
   const memo = exactProofMemo.get(expr);
-  if (
-    memo !== undefined &&
-    (!memo.dynamic || memo.generation === ce._mutationGeneration)
-  )
-    return memo.shape;
+  if (memo !== undefined) {
+    if (!memo.dynamic && memo.typeExprs.length === 0) return memo.shape;
+    if (memo.generation === ce._mutationGeneration) return memo.shape;
+    // A new generation. A VALUE-dependent proof has to be re-taken (the bounds
+    // it propagated came from the values). A purely TYPE-dependent one only
+    // has to have its types revalidated: recomputing the keys is a type read
+    // per source, against a full walk + type probe, and every unrelated
+    // `ce.assign` lands here (any assignment bumps the generation).
+    if (!memo.dynamic && typeKeyOf(memo.typeExprs) === memo.typeKey) {
+      memo.generation = ce._mutationGeneration;
+      return memo.shape;
+    }
+  }
 
+  // A parameter ANNOTATION makes the lowering read a source's TYPE, which an
+  // inferred collection type can retract (or acquire): the proof memo records
+  // the types it read so the next mutation generation revalidates them.
+  // Collected syntactically, before the lowering is asked, so a DECLINED
+  // annotation — at this level or at any nested one (`proveSource`) — arms the
+  // revalidation too.
+  const ctx: ProofContext = {
+    ce,
+    dynamic: false,
+    typeExprs: hasAnnotatedParams(expr) ? [expr] : [],
+    depth: 0,
+  };
   const level = isFunction(expr, 'Map') ? lowerLevel(expr) : undefined;
-  const ctx: ProofContext = { ce, dynamic: false, depth: 0 };
   const sources: SourceBounds[] = [];
   const proof =
     level === undefined ? undefined : proveLevel(ctx, level, sources);
@@ -510,6 +559,8 @@ export function exactTierShape(
   exactProofMemo.set(expr, {
     shape,
     dynamic: ctx.dynamic,
+    typeExprs: ctx.typeExprs,
+    typeKey: typeKeyOf(ctx.typeExprs),
     generation: ce._mutationGeneration,
   });
   return shape;

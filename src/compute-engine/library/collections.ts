@@ -296,6 +296,33 @@ function isPredicateShorthand(op: Expression): boolean {
 }
 
 /**
+ * The `Error` VALUE carried by a predicate result, or `undefined` when the
+ * result is not error-valued.
+ *
+ * A predicate applied to an element can fail on the ELEMENT rather than on the
+ * predicate itself: the callback parameter's `Typed` annotation (installed by
+ * `callbackElementOf`) rejects an element whose type was retracted, and
+ * `applicable()` returns `["Apply", fn, ["Error", …]]` instead of `True`/
+ * `False`. That is not a malformed predicate, so reporting
+ * `predicate must return "True" or "False"` — with a spell-check hint that
+ * absurdly reports on the lambda's own parameter — is wrong. `Map` surfaces
+ * the per-element `Error` value in that situation; the predicate consumers use
+ * this helper to do the same (into the output stream for `Filter`, as the
+ * operator's result for the scalar-valued ones).
+ *
+ * Only reached once a result is known to be neither `True` nor `False`, so a
+ * genuine non-boolean predicate result (`x ↦ 5`) still gets the original
+ * message.
+ */
+function predicateErrorValue(
+  pred: Expression | undefined
+): Expression | undefined {
+  if (pred === undefined || pred.isValid) return undefined;
+  if (pred.operator === 'Error') return pred;
+  return pred.errors[0];
+}
+
+/**
  * A function operand written in the wrapper-free shorthand form
  * (`["Greater", "_", 5]` instead of `["Function", ["Greater", "_", 5]]`),
  * converted to a canonical function literal — or `undefined` when the operand
@@ -2724,6 +2751,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               }
               if (sym(pred) === 'True') return { value, done: false };
               if (sym(pred) !== 'False') {
+                // The predicate failed on this ELEMENT (e.g. its `Typed`
+                // parameter annotation rejected it): emit that `Error` value
+                // in the element's place, as `Map` does, instead of throwing
+                // a message about the predicate.
+                const err = predicateErrorValue(pred);
+                if (err) return { value: err, done: false };
                 throw new Error(
                   `Filter predicate must return "True" or "False". ${spellCheckMessage(
                     expr.op2
@@ -4986,17 +5019,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Zero;
+      // An element-valued predicate failure (see `predicateErrorValue`) is
+      // reported as the operator's result. Collected here rather than thrown:
+      // stop the walk (by reporting a match) and return the error below.
+      const predErrors: Expression[] = [];
       const index =
         xs.indexWhere((x) => {
-          const pred = sym(f([x]));
+          const applied = f([x]);
+          const pred = sym(applied);
           if (pred === 'True') return true;
           if (pred === 'False') return false;
+          const err = predicateErrorValue(applied);
+          if (err) {
+            predErrors.push(err);
+            return true;
+          }
           throw new Error(
             `Filter predicate must return "True" or "False". ${spellCheckMessage(
               fn
             )}`
           );
         }) ?? undefined;
+      if (predErrors.length > 0) return predErrors[0];
       return ce.number(index ?? 0);
     },
   },
@@ -5019,9 +5063,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const f = applicable(fn);
       if (!f) return ce.Nothing;
       for (const item of xs.each()) {
-        const pred = sym(f([item]));
+        const applied = f([item]);
+        const pred = sym(applied);
         if (pred === 'False') continue;
         if (pred === 'True') return item;
+        // See `predicateErrorValue`: an element-valued predicate failure is
+        // surfaced as the operator's result.
+        const err = predicateErrorValue(applied);
+        if (err) return err;
         throw new Error(
           `Filter predicate must return "True" or "False". ${spellCheckMessage(
             fn
@@ -5047,15 +5096,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (xs.isFiniteCollection !== true) return undefined;
       let count = 0;
       for (const item of xs.each()) {
-        const pred = sym(f([item]));
+        const applied = f([item]);
+        const pred = sym(applied);
         if (pred === 'False') continue;
         if (pred === 'True') count++;
-        else
+        else {
+          // See `predicateErrorValue`: an element-valued predicate failure is
+          // surfaced as the operator's result.
+          const err = predicateErrorValue(applied);
+          if (err) return err;
           throw new Error(
             `Filter predicate must return "True" or "False". ${spellCheckMessage(
               fn
             )}`
           );
+        }
       }
       return ce.number(count);
     },
@@ -5078,14 +5133,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const indices: Expression[] = [];
       let index = 1;
       for (const item of xs.each()) {
-        const pred = sym(f([item]));
+        const applied = f([item]);
+        const pred = sym(applied);
         if (pred === 'True') indices.push(ce.number(index));
-        else if (pred !== 'False')
+        else if (pred !== 'False') {
+          // See `predicateErrorValue`: an element-valued predicate failure is
+          // surfaced as the operator's result.
+          const err = predicateErrorValue(applied);
+          if (err) return err;
           throw new Error(
             `Filter predicate must return "True" or "False". ${spellCheckMessage(
               fn
             )}`
           );
+        }
         index++;
       }
       return ce.function('List', indices);
@@ -5696,27 +5757,33 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const pred = sym(applied);
         if (pred === 'True') trueGroup.push(item);
         else if (pred === 'False') falseGroup.push(item);
-        else if (
-          applied === undefined ||
-          applied.type.isUnknown ||
-          applied.type.matches('boolean')
-        )
-          // An UNDECIDED predicate, in either of its two shapes: unresolved —
-          // a symbol declared `function` with no value applies to a symbolic
-          // `g(x)` typed `unknown` — or resolved but not decidable yet, an
-          // unevaluated relation already typed `boolean` (`x |-> x > n` with
-          // `n` free, which is neither `True` nor `False`). Both are undecided,
-          // not wrong: stay unevaluated, mirroring `If`, which reserves its
-          // throw for a condition that is not boolean at all. The throw below
-          // keeps the case the spell-check hint was written for: a predicate
-          // that resolves to a concrete non-boolean (`x |-> x + 1`).
-          return undefined;
-        else
+        else {
+          // An element-valued predicate failure (see `predicateErrorValue`) is
+          // an error, not an undecided predicate: surface it as the operator's
+          // result before the "undecided" arm below can swallow it.
+          const err = predicateErrorValue(applied);
+          if (err) return err;
+          if (
+            applied === undefined ||
+            applied.type.isUnknown ||
+            applied.type.matches('boolean')
+          )
+            // An UNDECIDED predicate, in either of its two shapes: unresolved —
+            // a symbol declared `function` with no value applies to a symbolic
+            // `g(x)` typed `unknown` — or resolved but not decidable yet, an
+            // unevaluated relation already typed `boolean` (`x |-> x > n` with
+            // `n` free, which is neither `True` nor `False`). Both are undecided,
+            // not wrong: stay unevaluated, mirroring `If`, which reserves its
+            // throw for a condition that is not boolean at all. The throw below
+            // keeps the case the spell-check hint was written for: a predicate
+            // that resolves to a concrete non-boolean (`x |-> x + 1`).
+            return undefined;
           throw new Error(
             `Partition predicate must return "True" or "False". ${spellCheckMessage(
               arg
             )}`
           );
+        }
       }
 
       return ce.function('List', [

@@ -3,6 +3,11 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { lowerLevel } from '../../src/compute-engine/library/map-broadcast-shape';
+import { lowerMapSpine } from '../../src/compute-engine/library/map-lowering';
+import {
+  _mapAutoCompileStats as stats,
+  _resetMapAutoCompileStats,
+} from '../../src/compute-engine/library/map-auto-compile';
 
 //
 // Per-application element-type inference for callback lambda parameters
@@ -197,41 +202,88 @@ describe('the sharing pin: a symbol-valued callback is never rebuilt', () => {
   });
 });
 
-describe('composite element types only (ruling 4)', () => {
-  // The builtin metadata trigger fires only when the provable element type is
-  // STRUCTURED — a tuple or a collection kind. A scalar or a union element
-  // type leaves the literal alone, byte-identically to the pre-mechanism
-  // canonical form. (The signature-driven trigger is NOT narrowed this way.)
+describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
+  // The builtin metadata trigger fires on a CONCRETE element type — a numeric
+  // primitive, `boolean`, `string`, or a parameterized structured kind.
+  // Excluded: a UNION, the union-like ABSTRACT supertypes (`scalar`, `value`,
+  // `expression`, …), a BARE composite name (`tuple`, `collection`, …) and the
+  // no-information `unknown`/`any`/`never`. Concrete-scalar admission was
+  // blocked until the fusion/exact-compile gate learned to accept a satisfied
+  // annotation (follow-up 1, `annotationSatisfiedBySource`).
 
   test.each([
     ['Filter', ['Function', ['Greater', 'n', 1], 'n'], ['Less', 1, 'n']],
     ['Map', ['Function', ['Multiply', 'n', 2], 'n'], ['Multiply', 2, 'n']],
   ])(
-    '%s over a list<integer> leaves the parameter unannotated',
+    '%s over a list<integer> annotates the parameter',
     (op, literal, canonicalBody) => {
-      // The fusion-preservation guard: an annotated parameter falls out of the
-      // Map fusion / exact-compile fast paths (`map-broadcast-shape.ts` gates
-      // on BARE symbols), so the most common `Map`/`Filter` spelling must keep
-      // its bare parameter.
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
       const expr = ce.box([op, 'cs', literal] as any);
       expect(expr.toMathJson()).toEqual([
         op,
         'cs',
-        ['Function', canonicalBody, 'n'],
+        ['Function', canonicalBody, ['Typed', 'n', "'integer'"]],
       ]);
     }
   );
 
-  test('a Map over a scalar Range still lowers to a fusion spine', () => {
+  test('a string element type annotates too', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Filter',
+      ['Characters', { str: 'abc' }],
+      ['Function', ['Equal', 'c', { str: 'a' }], 'c'],
+    ]);
+    expect(expr.ops[1].type.toString()).toBe('(c: string) -> boolean');
+    expect(expr.evaluate().toString()).toBe('["a"]');
+  });
+
+  test('a scalar Map is annotated AND still fuses (follow-up 1)', () => {
+    // The whole point of sequencing follow-up (1) before this widening: the
+    // annotation is present, and the fusion / exact-compile fast paths accept
+    // it because the source's element type provably satisfies it.
     const ce = new ComputeEngine();
     const m = ce.box([
       'Map',
       ['Range', 1, 200],
       ['Function', ['Mod', '_1', 7], '_1'],
     ]);
-    expect(lowerLevel(m)).toBeDefined();
+    expect(m.toMathJson()).toEqual([
+      'Map',
+      ['Range', 1, 200],
+      ['Function', ['Mod', '_1', 7], ['Typed', '_1', "'integer'"]],
+    ]);
+    const level = lowerLevel(m);
+    expect(level).toBeDefined();
+    // Admitted on the evidence of the source's element TYPE, so the level is
+    // type-sensitive rather than purely structural.
+    expect(level!.typeSensitive).toBe(true);
+    expect(lowerMapSpine(m)).toBeDefined();
+
+    // The exact tier still hits, and the values are unchanged.
+    _resetMapAutoCompileStats();
+    const els = [...m.each()].map((x) => x.re);
+    expect(stats.compiledHits).toBe(200);
+    expect(els.slice(0, 8)).toEqual([1, 2, 3, 4, 5, 6, 0, 1]);
+  });
+
+  test('an EMPTY collection (element type `never`) is not evidence', () => {
+    // `never` is the bottom: stamping it would make every element a violation
+    // and turn `Filter([], …)` into a type error.
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Filter',
+      ['List'],
+      ['Function', ['Greater', 'x', 1], 'x'],
+    ]);
+    expect(expr.toMathJson()).toEqual([
+      'Filter',
+      ['List'],
+      ['Function', ['Less', 1, 'x'], 'x'],
+    ]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.evaluate().toString()).toBe('[]');
   });
 
   test('a UNION element type is not evidence: errors stay values', () => {
@@ -245,6 +297,59 @@ describe('composite element types only (ruling 4)', () => {
     );
     expect(diagnostics).toEqual([]);
     expect(value?.toString()).toBe('[4,2i,NaN,9]');
+  });
+
+  test('an ABSTRACT supertype (`scalar`) is not evidence', () => {
+    // `scalar` is union-like (number | boolean | string), so stamping it
+    // poisons the whole application at canonicalization exactly as a
+    // written-out union does — even when every element is fine.
+    const ce = new ComputeEngine();
+    const { value, diagnostics } = executeEpsil(
+      ce,
+      'let vs: list<scalar> = [1, 2, 3]\nMap(vs, x |-> x + 1)'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value?.toString()).toBe('[2,3,4]');
+  });
+
+  test('`expression` elements are not evidence: the body stays symbolic', () => {
+    const ce = new ComputeEngine();
+    ce.declare('es', 'list<expression>');
+    ce.assign(
+      'es',
+      ce.box(['List', ['Add', 'q', 2], ['Add', ['Multiply', 2, 'q'], 1]])
+    );
+    const expr = ce.box(['Map', 'es', ['Function', ['Multiply', 'x', 2], 'x']]);
+    expect(expr.toMathJson()).toEqual([
+      'Map',
+      'es',
+      ['Function', ['Multiply', 2, 'x'], 'x'],
+    ]);
+    expect(expr.evaluate().toString()).toBe('[2q + 4,4q + 2]');
+  });
+
+  test('`value` elements are not evidence either', () => {
+    const ce = new ComputeEngine();
+    ce.declare('vs', 'list<value>');
+    const expr = ce.box(['Map', 'vs', ['Function', ['Add', 'x', 1], 'x']]);
+    expect(expr.toMathJson()).toEqual([
+      'Map',
+      'vs',
+      ['Function', ['Add', 'x', 1], 'x'],
+    ]);
+  });
+
+  test('a BARE composite name is not evidence: `list<tuple>` declines', () => {
+    // Positive structural evidence requires a parameterized node: `tuple`
+    // says only "some tuple, of some arity, of some element types".
+    const ce = new ComputeEngine();
+    ce.declare('ts', 'list<tuple>');
+    const expr = ce.box(['Map', 'ts', ['Function', ['Length', 't'], 't']]);
+    expect(expr.toMathJson()).toEqual([
+      'Map',
+      'ts',
+      ['Function', ['Length', 't'], 't'],
+    ]);
   });
 
   test('a nested collection element type IS composite', () => {

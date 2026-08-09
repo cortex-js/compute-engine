@@ -1430,15 +1430,19 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
   test('Map element type reflects the lambda result, not the source', () => {
     // Regression: `Map(Range(1,3), k |-> k + i)` must NOT be typed with the
     // source element type (integer). Its element type is the lambda's result
-    // type (a complex-capable `number`), which keeps it out of the real-only
-    // compiled fast path.
+    // type, which keeps it out of the real-only compiled fast path.
+    //
+    // Since the 2026-08-09 widening of the callback element-type inference to
+    // scalar element types, `k` is annotated `integer` (Range's element type),
+    // so the body types `complex` rather than the looser `number` — strictly
+    // more precise, and still not real.
     const m: Expression = [
       'Map',
       ['Range', 1, 3],
       ['Function', ['Add', 'k', 'ImaginaryUnit'], 'k'],
     ];
     expect(engine.box(m).type.toString()).toMatchInlineSnapshot(
-      `indexed_collection<number>`
+      `indexed_collection<complex>`
     );
   });
 

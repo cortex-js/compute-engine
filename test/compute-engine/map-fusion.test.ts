@@ -132,7 +132,10 @@ describe('Map fusion — the structural gate (R2)', () => {
 
     // The `.N()`-rewrap route (an already-evaluated lazy Map).
     const rewrapped = innerBody(
-      ce.box(['Add', ['Range', 1, 200], 29]).evaluate().N()
+      ce
+        .box(['Add', ['Range', 1, 200], 29])
+        .evaluate()
+        .N()
     );
     expect(rewrapped.isCanonical).toBe(true);
     expect(rewrapped.operatorDefinition).toBeDefined();
@@ -154,7 +157,7 @@ describe('Map fusion — the structural gate (R2)', () => {
     expect(spine.levels[0].slots).toEqual([0, 1]);
   });
 
-  test('non-broadcast shapes are declined (deep body, annotated parameter)', () => {
+  test('non-broadcast shapes are declined (deep body, unsatisfied annotation)', () => {
     const deep = ce.box([
       'Map',
       ['Range', 1, 150],
@@ -162,10 +165,14 @@ describe('Map fusion — the structural gate (R2)', () => {
     ]);
     expect(lowerMapSpine(deep)).toBeUndefined();
 
+    // An annotation the source's element type does NOT satisfy keeps the
+    // original decline (the element type is `finite_real`, the annotation
+    // `integer`). A SATISFIED annotation is admitted — see the
+    // "annotated parameters" block below.
     const typed = ce.box([
       'Map',
-      ['Range', 1, 5],
-      ['Function', ['Add', '_1', 1], ['Typed', '_1', 'number']],
+      ['List', 1, 2.5, 3],
+      ['Function', ['Add', '_1', 1], ['Typed', '_1', 'integer']],
     ]);
     expect(lowerMapSpine(typed)).toBeUndefined();
   });
@@ -484,8 +491,15 @@ describe('Map fusion — level-failure semantics per route (R3)', () => {
 
   const spineOf = () => lowerMapSpine(ce.box(WITNESS as any).evaluate())!;
   /** An invalid element: the strict-mode input gate declines on it, exactly as
-   * `makeLambda` step 2 does. */
-  const invalid = () => ce.box(['Sqrt', 1, 2, 3]);
+   * `makeLambda` step 2 does.
+   *
+   * It has to be invalid WITHOUT yielding an error to bubble — `errorValue`
+   * does not descend into collection values, so a list with an invalid element
+   * is exactly that case, and it is the one `invoke`'s strict gate exists for.
+   * An element that DOES carry an error (`Sqrt(1, 2, 3)`) takes the
+   * error-propagation route instead, on both the fused and the general path —
+   * see the "Error elements" block below. */
+  const invalid = () => ce.box(['List', 1, ['Sqrt', 1, 2, 3]]);
 
   test('marker mode substitutes the FAILING level marker and continues', () => {
     const spine = spineOf();
@@ -634,5 +648,436 @@ describe('Map fusion: closed-over variables', () => {
     expect(spine!.levels.some((l) => l.closureScope !== undefined)).toBe(true);
     // A top-level binding resolved on both paths; it must keep doing so.
     expect(expr.evaluate().toString()).toBe('[10,20]');
+  });
+});
+
+describe('Map fusion: annotated parameters', () => {
+  /**
+   * Follow-up (1) of `docs/plans/2026-08-08-lambda-param-element-inference.md`
+   * (ruling 4): the structural gate accepts an ANNOTATED mapping-function
+   * parameter when the source's element type provably satisfies the
+   * annotation.
+   *
+   * The admission is exactly as wide as the no-op argument allows. The lowered
+   * path evaluates the level's application directly, bypassing the
+   * per-application `Typed`-parameter enforcement; under annotation-as-contract
+   * (ruling 2) an annotated literal must still error LOUDLY on a violating
+   * element, so an annotation that is not provably satisfied keeps today's
+   * decline and its loud error.
+   */
+
+  const annotated = (ce: ComputeEngine, src: any, type: string): any =>
+    ce.box([
+      'Map',
+      src,
+      ['Function', ['Add', 'x', 1], ['Typed', 'x', type]],
+    ] as any);
+
+  test('a matching annotation fuses, with value parity against the bare spelling', () => {
+    const ce = new ComputeEngine();
+    const typed = annotated(ce, ['Range', 1, 200], 'number');
+    const bare = ce.box([
+      'Map',
+      ['Range', 1, 200],
+      ['Function', ['Add', 'x', 1], 'x'],
+    ] as any);
+
+    const spine = lowerMapSpine(typed);
+    expect(spine).toBeDefined();
+    expect(spine!.levels.map((l) => l.op)).toEqual(['Add']);
+    // Downstream the level is structurally identical to the bare-parameter
+    // case: the parameter is recorded as its bare inner symbol (slot 0).
+    expect(spine!.levels[0].slots?.[0]).toBe(0);
+    expect(spine!.levels[0].arity).toBe(1);
+
+    expect(drainRe(typed.evaluate())).toEqual(drainRe(bare.evaluate()));
+    expect(typed.evaluate().toString()).toBe(bare.evaluate().toString());
+  });
+
+  test('a WIDENING annotation is accepted (element finite_integer, annotation number)', () => {
+    const ce = new ComputeEngine();
+    const m = annotated(ce, ['List', 1, 2, 3], 'number');
+    expect(m.op1.type.toString()).toBe('vector<finite_integer^3>');
+    expect(lowerMapSpine(m)).toBeDefined();
+    expect(m.evaluate().toString()).toBe('[2,3,4]');
+  });
+
+  test('a NARROWING annotation declines, and the loud error is preserved', () => {
+    const ce = new ComputeEngine();
+    const m = annotated(ce, ['List', 1, 2.5, 3], 'integer');
+    expect(lowerMapSpine(m)).toBeUndefined();
+    // Exactly what the unfused route has always produced for a violating
+    // element: an error value at the mismatching element, not a silent result.
+    expect(m.evaluate().toString()).toBe(
+      '[2,Error(ErrorCode("incompatible-type", "integer", "finite_real")),4]'
+    );
+  });
+
+  test('an unprovable source element type declines', () => {
+    const ce = new ComputeEngine();
+    const m = annotated(ce, 'unknownSource', 'number');
+    expect(m.op1.type.toString()).toBe('unknown');
+    expect(lowerMapSpine(m)).toBeUndefined();
+  });
+
+  test('the admission is re-asked when the source type moves', () => {
+    // The admission stands in for the enforcement the lowered path bypasses,
+    // so — unlike every other outcome of the gate — it is not purely
+    // structural and must not be memoized: an INFERRED element type retracts
+    // under a reassignment, and the very next drain must decline and error.
+    const ce = new ComputeEngine();
+    ce.assign('xs', ce.box(['List', 1, 2, 3]));
+    const m = ce.box([
+      'Map',
+      'xs',
+      ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']],
+    ] as any);
+    expect(lowerMapSpine(m)).toBeDefined();
+    expect([...m.each()].map((x: any) => x.toString())).toEqual([
+      '2',
+      '3',
+      '4',
+    ]);
+
+    ce.assign('xs', ce.box(['List', 1, 2.5, 3]));
+    expect(lowerMapSpine(m)).toBeUndefined();
+    expect([...m.each()].map((x: any) => x.toString()).join(',')).toContain(
+      'incompatible-type'
+    );
+  });
+
+  test('an annotated literal with a closed-over variable resolves it', () => {
+    // Mirrors the "closed-over variables" block: the escaping lazy `Map` must
+    // resolve `k` through the recorded `closureScope`, annotation or not.
+    const ce = new ComputeEngine();
+    ce.assign(
+      'f',
+      ce.box([
+        'Function',
+        [
+          'Map',
+          ['List', 1, 2],
+          ['Function', ['Add', 'x', 'k'], ['Typed', 'x', 'number']],
+        ],
+        'k',
+      ]) as any
+    );
+    expect(ce.box(['f', 100]).evaluate().toString()).toBe('[101,102]');
+  });
+
+  test('a stacked spine of annotated levels resolves the capture at every level', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'f',
+      ce.box([
+        'Function',
+        [
+          'Map',
+          [
+            'Map',
+            ['List', 1, 2],
+            ['Function', ['Add', 'x', 'k'], ['Typed', 'x', 'number']],
+          ],
+          ['Function', ['Multiply', 'y', 'k'], ['Typed', 'y', 'number']],
+        ],
+        'k',
+      ]) as any
+    );
+    expect(ce.box(['f', 10]).evaluate().toString()).toBe('[110,120]');
+  });
+
+  test('Mod with a negative dividend is identical under an integer annotation', () => {
+    // The exact-compile landmine: the JS `Mod` emission has a plain-`%` branch
+    // (truncated, not floored) that a bare untyped parameter can never reach.
+    // An `integer` annotation makes `isIntegerValued` true, so this pins that
+    // the branch STILL does not fire — it also requires `isNonNegative`, which
+    // no type annotation can supply.
+    const ce = new ComputeEngine();
+    const typed = ce.box([
+      'Map',
+      ['Range', -50, 50],
+      ['Function', ['Mod', 'x', 7], ['Typed', 'x', 'integer']],
+    ] as any);
+    const bare = ce.box([
+      'Map',
+      ['Range', -50, 50],
+      ['Function', ['Mod', 'x', 7], 'x'],
+    ] as any);
+    expect(lowerMapSpine(typed)).toBeDefined();
+    // Floored convention: the sign follows the divisor, so every element is in
+    // 0…6 even for the negative half of the range.
+    const values = drainRe(typed.evaluate());
+    expect(values).toEqual(
+      Array.from({ length: 101 }, (_, i) => (((i - 50) % 7) + 7) % 7)
+    );
+    expect(values).toEqual(drainRe(bare.evaluate()));
+  });
+});
+
+describe('Map fusion: nominal annotations are not erased', () => {
+  /**
+   * Review follow-up (fix 1): the admission proof asks its subtype question on
+   * the UNRESOLVED element and annotation types. Resolving them first unfolds
+   * NOMINAL references, and nominal opacity is deliberately an `isSubtype`
+   * property — so a resolved comparison admitted levels whose per-application
+   * enforcement DOES fire, and the fused route then answered `False` where the
+   * unfused route errors.
+   */
+
+  /** The unfused spelling of the same level: a two-statement `Block` body,
+   * which the structural gate declines. */
+  const unfused = (ce: ComputeEngine, src: any, body: any, param: any): any =>
+    ce.box(['Map', src, ['Function', ['Block', 0, body], param]] as any);
+
+  test('a NOMINAL annotation over structural elements declines and errors', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('pointT', 'tuple<number, number>');
+    const src = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
+    const body = ['Equal', 'p', ['pointT', 1, 2]];
+    const param = ['Typed', 'p', 'pointT'];
+    const m = ce.box(['Map', src, ['Function', body, param]] as any);
+
+    expect(lowerMapSpine(m)).toBeUndefined();
+    // Byte-identical to the enforcing (unfused) route: a per-element
+    // incompatible-type error, NOT a silent `["False","False"]`.
+    expect(m.evaluate().toString()).toBe(
+      unfused(ce, src, body, param).evaluate().toString()
+    );
+    expect(m.evaluate().toString()).toContain('incompatible-type');
+  });
+
+  test('a STRUCTURAL annotation over nominal elements declines and errors', () => {
+    // The mirror direction: erasing the nominal identity on the SOURCE side is
+    // just as unsound.
+    const ce = new ComputeEngine();
+    ce.declareType('pointT', 'tuple<number, number>');
+    ce.assign(
+      'ps',
+      ce.box(['List', ['pointT', 1, 2], ['pointT', 3, 4]] as any)
+    );
+    expect(ce.box('ps').type.toString()).toBe('list<pointT^2>');
+
+    const body = ['Equal', 'p', ['Tuple', 1, 2]];
+    const param = ['Typed', 'p', 'tuple<number, number>'];
+    const m = ce.box(['Map', 'ps', ['Function', body, param]] as any);
+
+    expect(lowerMapSpine(m)).toBeUndefined();
+    expect(m.evaluate().toString()).toBe(
+      unfused(ce, 'ps', body, param).evaluate().toString()
+    );
+    expect(m.evaluate().toString()).toContain('incompatible-type');
+  });
+
+  test('a NOMINAL annotation matching nominal elements is admitted', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('pointT', 'tuple<number, number>');
+    ce.assign(
+      'ps',
+      ce.box(['List', ['pointT', 1, 2], ['pointT', 3, 4]] as any)
+    );
+    const m = ce.box([
+      'Map',
+      'ps',
+      ['Function', ['Equal', 'p', ['pointT', 1, 2]], ['Typed', 'p', 'pointT']],
+    ] as any);
+    expect(lowerMapSpine(m)).toBeDefined();
+    expect(m.evaluate().toString()).toBe('["True","False"]');
+  });
+
+  test('a STRUCTURAL ALIAS annotation is still admitted', () => {
+    // `isSubtype` unfolds an `{alias: true}` reference itself, so dropping the
+    // pre-resolution does not narrow the admission for alias types.
+    const ce = new ComputeEngine();
+    ce.declareType('idT', 'integer', { alias: true });
+    const m = ce.box([
+      'Map',
+      ['List', 1, 2, 3],
+      ['Function', ['Add', 'p', 1], ['Typed', 'p', 'idT']],
+    ] as any);
+    expect(lowerMapSpine(m)).toBeDefined();
+    expect(m.evaluate().toString()).toBe('[2,3,4]');
+  });
+});
+
+describe('Map fusion: Error elements bubble, they are not laundered', () => {
+  /**
+   * Review follow-up (fix 2): a fused level evaluated its application on an
+   * element that WAS an error (an inner enforcing level's per-element
+   * diagnostic), turning it into `NaN`. `invoke` step 2 returns such an
+   * argument verbatim and never runs the body, so the fused route now mirrors
+   * it — fused ≡ unfused is the fusion contract, and the drift was silent.
+   */
+
+  /** `Map(Map(cs, y ↦ y + 1), z ↦ z * 2)` — both levels lower. The parameters
+   * are AUTO-STAMPED from `cs`'s element type at box time, so reassigning `cs`
+   * to a list with a `finite_real` element makes the inner level error on it. */
+  const stack = (ce: ComputeEngine, outerBody: any): any =>
+    ce.box([
+      'Map',
+      ['Map', 'cs', ['Function', ['Add', 'y', 1], 'y']],
+      ['Function', outerBody, 'z'],
+    ] as any);
+
+  test('the auto-stamped shape propagates the error on each() and at()', () => {
+    const ce = new ComputeEngine();
+    ce.assign('cs', ce.box(['List', 1, 2, 3] as any));
+    const fused = stack(ce, ['Multiply', 'z', 2]);
+    // The declining spelling of the same outer level (two-statement Block).
+    const general = stack(ce, ['Block', 0, ['Multiply', 'z', 2]]);
+    expect(lowerMapSpine(fused)).toBeDefined();
+    expect(lowerMapSpine(general)).toBeUndefined();
+    expect([...fused.each()].map((x: any) => x.toString())).toEqual([
+      '4',
+      '6',
+      '8',
+    ]);
+
+    ce.assign('cs', ce.box(['List', 1, 2.5, 3] as any));
+    const drained = [...fused.each()].map((x: any) => x.toString());
+    expect(drained[1]).toContain('incompatible-type');
+    expect(drained[1]).not.toContain('NaN');
+    expect(drained).toEqual([...general.each()].map((x: any) => x.toString()));
+    // The `at()` route returns the error too — it is the element's VALUE, not
+    // a level failure, so it must not short-circuit the access.
+    expect(fused.at(2)!.toString()).toBe(general.at(2)!.toString());
+    expect(fused.at(2)!.toString()).toContain('incompatible-type');
+    expect(fused.at(1)!.toString()).toBe('4');
+  });
+
+  test('the hand-annotated shape propagates the error too', () => {
+    const ce = new ComputeEngine();
+    ce.assign('cs', ce.box(['List', 1, 2, 3] as any));
+    const fused = ce.box([
+      'Map',
+      ['Map', 'cs', ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']]],
+      ['Function', ['Multiply', 'z', 2], 'z'],
+    ] as any);
+    expect(lowerMapSpine(fused)).toBeDefined();
+    expect(drainRe(fused)).toEqual([4, 6, 8]);
+
+    ce.assign('cs', ce.box(['List', 1, 2.5, 3] as any));
+    const drained = [...fused.each()].map((x: any) => x.toString());
+    expect(drained[1]).toContain('incompatible-type');
+    expect(drained[1]).not.toContain('NaN');
+    expect(drained[0]).toBe('4');
+    expect(drained[2]).toBe('8');
+  });
+
+  test('a BARE-parameter level passes an error element through unchanged', () => {
+    // No annotation anywhere in this level: the pre-existing bare-param
+    // behavior (NaN) changes too, deliberately — the unfused route has always
+    // returned the error verbatim.
+    const ce = new ComputeEngine();
+    ce.assign('cs', ce.box(['List', 1, 2, 3] as any));
+    const errors = ce
+      .box([
+        'Map',
+        ['Map', 'cs', ['Function', ['Add', 'y', 1], 'y']],
+        ['Function', ['Multiply', 'z', 2], 'z'],
+      ] as any)
+      .evaluate();
+    ce.assign('cs', ce.box(['List', 1, 2.5, 3] as any));
+    // A materialized list carrying an Error element.
+    const src = errors.evaluate();
+    expect(src.toString()).toContain('incompatible-type');
+
+    // A source declared `unknown` leaves the mapping parameter BARE (there is
+    // no element type to stamp it with).
+    ce.declare('us', 'unknown');
+    ce.assign('us', src);
+    const fused = ce.box([
+      'Map',
+      'us',
+      ['Function', ['Multiply', 'w', 3], 'w'],
+    ] as any);
+    const general = ce.box([
+      'Map',
+      'us',
+      ['Function', ['Block', 0, ['Multiply', 'w', 3]], 'w'],
+    ] as any);
+    expect(fused.ops[1].json).toEqual([
+      'Function',
+      ['Block', ['Multiply', 3, 'w']],
+      'w',
+    ]);
+    expect(lowerMapSpine(fused)).toBeDefined();
+
+    const drained = [...fused.each()].map((x: any) => x.toString());
+    expect(drained[1]).toContain('incompatible-type');
+    expect(drained[1]).not.toContain('NaN');
+    expect(drained).toEqual([...general.each()].map((x: any) => x.toString()));
+    expect(fused.at(2)!.toString()).toBe(general.at(2)!.toString());
+  });
+});
+
+describe('Map fusion: an annotated spine is REVALIDATED, not re-derived', () => {
+  /**
+   * Review follow-up (fix 3a): a type-sensitive spine used to bypass the memo
+   * entirely, so every `at()` — each of which is its own micro-drain —
+   * re-walked the whole spine. The memo now records the source element-type
+   * keys the admission read; a new mutation generation revalidates those keys
+   * and only re-derives when one MOVED.
+   */
+
+  test('an unrelated assign keeps the memoized spine (same object back)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('unrelated', ce.box(0));
+    const m = ce.box([
+      'Map',
+      ['Range', 1, 1000],
+      ['Function', ['Add', 'x', 1], ['Typed', 'x', 'number']],
+    ] as any);
+    const first = lowerMapSpine(m);
+    expect(first).toBeDefined();
+
+    ce.assign('unrelated', ce.box(42));
+    // The admission's evidence — `Range(1, 1000)`'s element type — did not
+    // move, so the walk is not repeated.
+    expect(lowerMapSpine(m)).toBe(first);
+  });
+
+  test('a source type that MOVES still retracts the admission', () => {
+    // The revalidation must not turn the memo permanent: this is the pin the
+    // whole admission rests on.
+    const ce = new ComputeEngine();
+    ce.assign('xs', ce.box(['List', 1, 2, 3] as any));
+    const m = ce.box([
+      'Map',
+      'xs',
+      ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']],
+    ] as any);
+    const first = lowerMapSpine(m);
+    expect(first).toBeDefined();
+    ce.assign('unrelated', ce.box(1));
+    expect(lowerMapSpine(m)).toBe(first);
+
+    ce.assign('xs', ce.box(['List', 1, 2.5, 3] as any));
+    expect(lowerMapSpine(m)).toBeUndefined();
+    expect(
+      [...(m as any).each()].map((x: any) => x.toString()).join(',')
+    ).toContain('incompatible-type');
+  });
+
+  test('a NESTED declined annotation re-asks like a single-level one', () => {
+    // Review follow-up (fix 4a): the annotation-presence check is taken at
+    // EVERY level the walk consults, not just the outermost, so a nested level
+    // that declined on its source's type is not memoized permanently. Here the
+    // OUTER level's own evidence never moves (the inner `Map`'s element type is
+    // `integer` either way) — only the inner level's does.
+    const ce = new ComputeEngine();
+    const m = ce.box([
+      'Map',
+      ['Map', 'ws', ['Function', ['Add', 'y', 1], ['Typed', 'y', 'integer']]],
+      ['Function', ['Multiply', 'z', 2], 'z'],
+    ] as any);
+    // `ws` has no value: its element type is unprovable, so the inner level
+    // declines and the spine stops there.
+    expect(lowerMapSpine(m)!.levels).toHaveLength(1);
+    expect(lowerMapSpine(m)!.bases.map((b) => b.operator)).toEqual(['Map']);
+
+    ce.assign('ws', ce.box(['List', 1, 2, 3] as any));
+    // The inner annotation is now satisfied: the spine extends.
+    expect(lowerMapSpine(m)!.levels).toHaveLength(2);
+    expect(drainRe(m)).toEqual([4, 6, 8]);
   });
 });

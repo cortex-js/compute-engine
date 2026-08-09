@@ -57,6 +57,7 @@ import { sortOperands } from './order.js';
 import { validateArguments, checkNumericArgs } from './validate.js';
 import { overloadArms, paramAt } from './overload.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { NUMERIC_TYPES } from '../../common/type/primitive.js';
 import {
   collectionElementType,
   isWildcardFunctionType,
@@ -904,30 +905,59 @@ function isSpreadOperand(x: ExpressionInput): boolean {
   return false;
 }
 
+/** The CONCRETE scalar primitives {@link admissibleElementType} admits: the
+ * numeric types plus `boolean` and `string`. Every other primitive — the
+ * abstract supertypes (`scalar`, `value`, `expression`, …), the bare composite
+ * names (`'tuple'`, `'collection'`, …) and `unknown`/`any`/`never` — declines.
+ */
+const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
+  ...NUMERIC_TYPES,
+  'boolean',
+  'string',
+]);
+
 /**
- * A COMPOSITE (structured) element type — a tuple or a collection kind. The
- * admission gate of the builtin-metadata trigger (ruling 4, 2026-08-08).
+ * The admission gate of the builtin-metadata trigger (ruling 4, widened
+ * 2026-08-09): an element type this mechanism will stamp on a callback
+ * parameter.
  *
- * Answered on KINDS, never on spellings, so it is decided by the type AST and
- * not by a name list. Three exclusions, each measured on the full suite:
+ * Admits a CONCRETE type — a concrete scalar primitive (a numeric type,
+ * `boolean` or `string`) or a parameterized structured kind (a tuple or a
+ * collection node). Rejects everything that is not evidence about a single
+ * element:
  *
- * - a UNION (even of tuples) poisons the whole application with a static type
- *   error at canonicalization instead of erroring at the mismatching element,
- *   which is what broke the published Epsil "errors are values" examples;
- * - a SCALAR primitive annotates the most common `Map` spelling, and an
- *   annotated parameter falls out of the Map fusion / exact-compile fast paths
- *   (`map-broadcast-shape.ts` gates on bare symbols) — a pure perf regression;
- * - every other primitive (a string type name) declines with them: an
- *   unparameterized `tuple`/`list` name carries no element structure, and
- *   `unknown`/`any` are already excluded upstream.
+ * - a UNION (even of tuples). One annotation cannot express "each element
+ *   satisfies its own arm": stamping the union makes a body that is valid for
+ *   SOME arms fail once, at canonicalization, for the whole application —
+ *   where the un-annotated program errors per element, which is the published
+ *   Epsil "errors are values" behavior. Union admission waits on per-element
+ *   error semantics for this route.
+ * - an ABSTRACT supertype — `scalar`, `value`, `expression`, `symbol`,
+ *   `missing`, … These are union-like (`scalar` covers number, boolean and
+ *   string), so stamping one poisons the whole application at
+ *   canonicalization exactly as a written-out union does, even when every
+ *   element is fine.
+ * - a BARE composite NAME (`'tuple'`, `'list'`, `'collection'`, …): positive
+ *   structural evidence requires a parameterized node, not a name that says
+ *   only "some tuple, of some arity, of some element types".
+ * - `unknown`/`any` (already excluded upstream) and `never`: the top and the
+ *   bottom say nothing about an element. `never` is the element type of an
+ *   EMPTY literal collection, and stamping it would make `Filter([], …)` a
+ *   type error.
+ * - every other kind — a signature, a type variable, a negation: not a type a
+ *   literal's parameter can be annotated with here.
  *
- * Follow-up track, in order: teach the fusion gate to accept an annotated
- * parameter matching the element type, THEN widen this to scalars. The
- * signature-driven trigger is deliberately NOT narrowed this way — a
+ * Scalar admission is safe since follow-up (1): the Map fusion / exact-compile
+ * gate now accepts an annotated parameter whose annotation the source's
+ * element type provably satisfies (`annotationSatisfiedBySource` in
+ * `map-broadcast-shape.ts`), so the fast paths survive the annotation instead
+ * of falling out of it.
+ *
+ * The signature-driven trigger is deliberately NOT gated this way — a
  * user-declared arrow parameter is an explicit contract, whatever its types.
  */
-function isCompositeElementType(t: Type): boolean {
-  if (typeof t === 'string') return false;
+function admissibleElementType(t: Type): boolean {
+  if (typeof t === 'string') return ADMISSIBLE_ELEMENT_PRIMITIVES.has(t);
   switch (t.kind) {
     case 'tuple':
     case 'list':
@@ -988,9 +1018,9 @@ function annotateCallbacksFromElementType(
     }
 
     const elt = collectionElementType(resolveType(canonicalSrc.type.type));
-    // Positive evidence only, and COMPOSITE evidence only (ruling 4).
-    if (elt === undefined || elt === 'unknown' || elt === 'any') continue;
-    if (!isCompositeElementType(resolveType(elt))) continue;
+    // Positive, concrete, single-element evidence only (ruling 4).
+    if (elt === undefined) continue;
+    if (!admissibleElementType(resolveType(elt))) continue;
 
     const literal = annotateFunctionLiteralParams(ce, cb, [elt]);
     if (literal === undefined) continue;
