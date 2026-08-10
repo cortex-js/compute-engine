@@ -443,11 +443,19 @@ describe('Parser: list range ellipsis', () => {
       expect(JSON.stringify(result)).toContain('ContinuationPlaceholder');
     });
 
-    // Negative: a non-numeric offset (`+x`) is not a numeric progression → List.
-    test('non-numeric offset stays a placeholder List', () => {
-      const result = parse('[m+n, m+n+x, ..., m+n+60]');
-      expect(operatorOf(result)).toBe('List');
-      expect(JSON.stringify(result)).toContain('ContinuationPlaceholder');
+    // FLIPPED (user ruling 2026-08-10, Tycho item 134): a SYMBOLIC offset is
+    // still a progression — `[m+n, m+n+x, ..., m+n+60]` steps by `x`. The rule
+    // it used to follow ("offsets must be numeric") contradicted the sibling
+    // pass one describe-block down, which has emitted symbolic steps since
+    // item 117. What still stays a List is an anchor pair that is not ONE
+    // family — see the differing-bases test above.
+    test('a non-numeric offset is a symbolic step', () => {
+      expect(parse('[m+n, m+n+x, ..., m+n+60]')).toEqual([
+        'Range',
+        ['Add', 'm', 'n'],
+        ['Add', 'm', 'n', 60],
+        'x',
+      ]);
     });
 
     // Negative: a non-arithmetic offset progression (0, 15, 31, …) → List.
@@ -505,6 +513,61 @@ describe('Parser: list range ellipsis', () => {
       expect(e.evaluate().toString()).toBe('[4,6,8,10,12,14,16,18]');
       eng.assign('a', 3);
       expect(e.evaluate().toString()).toBe('[6,9,12,15,18,21,24,27]');
+    });
+
+    // Tycho item 134 / D-17. A SYMBOLIC first anchor fuses, and nothing about
+    // the symbol's value is consulted — the parser cannot read one, and a
+    // value read here would be frozen into the document's parse. Both anchors
+    // and the step stay expressions, so re-assigning the constant re-evaluates
+    // the range.
+    describe('symbolic first anchor over a bound constant (item 134)', () => {
+      const engineWithD = (v: number): ComputeEngine => {
+        const eng = new ComputeEngine();
+        eng.assign('d_iskdensity', v);
+        return eng;
+      };
+      const WITNESS = '[1+4/d_{iskdensity}, 1+8/d_{iskdensity}...5]';
+
+      test('the D-17 witness fuses to a 500-element range', () => {
+        const e = engineWithD(500).parse(WITNESS);
+        expect(operatorOf(e.json)).toBe('Range');
+        const v = e.evaluate();
+        expect(v.count).toBe(500);
+        expect(v.at(1)!.toString()).toBe('1.008');
+        expect(v.at(500)!.toString()).toBe('5');
+      });
+
+      test('the slash and \\frac spellings agree', () => {
+        const eng = engineWithD(500);
+        expect(eng.parse(WITNESS).json).toEqual(
+          eng.parse(
+            '[1+\\frac{4}{d_{iskdensity}}, 1+\\frac{8}{d_{iskdensity}}...5]'
+          ).json
+        );
+      });
+
+      test('nothing is baked: re-assigning the constant re-ranges', () => {
+        const eng = engineWithD(500);
+        const e = eng.parse(WITNESS);
+        expect(e.evaluate().count).toBe(500);
+        eng.assign('d_iskdensity', 250);
+        expect(e.evaluate().count).toBe(250);
+        expect(e.evaluate().at(1)!.toString()).toBe('1.016');
+        eng.assign('d_iskdensity', 100);
+        expect(e.evaluate().count).toBe(100);
+      });
+
+      test('an anchor pair that is not one family still stays a List', () => {
+        // Drops `n`, picks up `k`: the "step" would be `k+15-n`.
+        expect(operatorOf(parse('[m+n, m+k+15, ..., m+n+60]'))).toBe('List');
+      });
+
+      test('an application at ANY depth still stays a List', () => {
+        expect(operatorOf(parse('[f(1), f(2), \\ldots, f(n)]'))).toBe('List');
+        expect(operatorOf(parse('[1+f(1), 1+f(2), \\ldots, 1+f(n)]'))).toBe(
+          'List'
+        );
+      });
     });
 
     test('`[0, \\frac{1}{1.5}...4]` (float-denominator fraction) fuses', () => {
@@ -648,10 +711,14 @@ describe('Parser: list range ellipsis', () => {
     });
 
     // Negative (item 47): non-numeric offset stays a placeholder List.
-    test('`[m+n, m+n+x, ..., m+n+60]` stays a placeholder List', () => {
-      const result = parse('[m+n, m+n+x, ..., m+n+60]');
-      expect(operatorOf(result)).toBe('List');
-      expect(JSON.stringify(result)).toContain('ContinuationPlaceholder');
+    // FLIPPED with its sibling above (user ruling 2026-08-10).
+    test('`[m+n, m+n+x, ..., m+n+60]` is a symbolic-step Range', () => {
+      expect(parse('[m+n, m+n+x, ..., m+n+60]')).toEqual([
+        'Range',
+        ['Add', 'm', 'n'],
+        ['Add', 'm', 'n', 60],
+        'x',
+      ]);
     });
 
     // Negative: the application shape is excluded at EVERY level of the

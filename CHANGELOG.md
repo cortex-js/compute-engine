@@ -16,6 +16,29 @@
   floor, but parentheses are not reachable by precedence, so the constraint
   cost the anchor without buying anything.
 
+- **A two-sample range fuses over a SYMBOLIC first anchor.**
+  `[1+\frac{4}{d}, 1+\frac{8}{d}...5]` with `d := 500` is a 500-element
+  `Range`, where it was a 2-element `List` — the gate required the first anchor
+  to be numerically KNOWN, so any anchor built from a document constant fell
+  through. Nothing about the symbol's value is consulted (the parser cannot
+  read one, and a value read there would be frozen into the document's parse):
+  both anchors and the step are emitted as expressions, so re-assigning the
+  constant re-evaluates the range.
+
+  Two consequences for shapes that used to stay a placeholder `List`. A
+  symbolic OFFSET is now a step — `[m+n, m+n+x, ..., m+n+60]` steps by `x`,
+  matching the symbolic steps this pass has emitted over a numeric anchor since
+  0.100.0. And where the second anchor is the first with terms appended, the
+  step is those terms rather than `s1 - s0`, so it reads `x` instead of
+  `m - m + n - n + x`.
+
+  What still stays a `List`: bare symbols (`[x_1, x_2, ..., x_n]`), a function
+  application at ANY depth (`[f(1), f(2), ...]` and `[1+f(1), 1+f(2), ...]` —
+  previously this fell out of the numeric reduction's recursion and is now a
+  stated rule), and an anchor pair that is not one family, i.e. where the first
+  anchor mentions a symbol the second does not (`[m+n, m+k+15, ..., m+n+60]`,
+  whose "step" `k+15-n` is fabricated from two unrelated bases).
+
 ### Issues Resolved
 
 - **A `Range` step built over an assigned symbol no longer freezes its value.**

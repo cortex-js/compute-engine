@@ -3829,6 +3829,42 @@ function isArithmeticSampleShape(expr: MathJsonExpression): boolean {
 }
 
 /**
+ * Is EVERY node of this raw sample an arithmetic shape — numbers, symbols,
+ * `Delimiter` grouping, and the heads of `ARITHMETIC_SAMPLE_OPERATORS`, with
+ * no function application anywhere?
+ *
+ * `isArithmeticSampleShape` judges the ROOT only. That was sufficient while a
+ * symbolic anchor had to pass `numericSampleValue`, whose recursion re-applied
+ * the root check at every level and so rejected a buried application on the
+ * way; once an anchor may be symbolic there is no such walk, and
+ * `[1+f(1), 1+f(2), ..., 1+f(n)]` — an `Add` at the root, an application one
+ * level down — would read as a progression. This states the depth-wise rule
+ * directly instead of inheriting it from a numeric reduction.
+ */
+function isArithmeticSampleTree(expr: MathJsonExpression): boolean {
+  if (machineValue(expr) !== null) return true;
+  if (symbol(expr) !== null) return true;
+  const h = operator(expr);
+  if (h === null) return false;
+  // Grouping is transparent: `(2-\frac{2}{d})\pi` is a product, not a call.
+  if (h !== 'Delimiter') {
+    if (!ARITHMETIC_SAMPLE_OPERATORS.has(h)) return false;
+    if (!isArithmeticSampleShape(expr)) return false;
+  }
+  return operands(expr).every(isArithmeticSampleTree);
+}
+
+/** Every symbol occurring anywhere in a raw sample. */
+function rawSampleSymbols(expr: MathJsonExpression, into: Set<string>): void {
+  const sym = symbol(expr);
+  if (sym !== null) {
+    into.add(sym);
+    return;
+  }
+  for (const op of operands(expr)) rawSampleSymbols(op, into);
+}
+
+/**
  * The value of a raw parse-time sample that is numerically KNOWN: a numeric
  * literal, or a pure arithmetic composition of numeric literals (`2+1`,
  * `1-0.1`, `2\cdot 2`, `1+0.008`). Returns `null` as soon as any leaf is a
@@ -3888,21 +3924,31 @@ function numericSampleValue(expr: MathJsonExpression): number | null {
  * baked at parse time — the same discipline the `(coefficient · symbol)` path
  * above already follows for `[2a, 3a...9a]` → `Range(2a, 9a, a)`.
  *
- * Two deliberate gates: the FIRST sample must be numerically known (see
- * `numericSampleValue` — a symbolic first anchor is the ambiguous-progression
- * territory the additive-base pass adjudicates), and the second must be an
- * arithmetic COMPOUND shape so generic-sequence notation stays a placeholder
- * List (see `ARITHMETIC_SAMPLE_OPERATORS`).
+ * A SYMBOLIC first anchor is admitted too, which is what carries Tycho item
+ * 134's D-17 witness (`[1+\frac{4}{d}, 1+\frac{8}{d}...5]`, `d` a bound
+ * document constant). Nothing about the symbol's VALUE is consulted — the
+ * parser could not read one anyway, and a value read here would be baked into
+ * the parse. Both anchors and the step are emitted as EXPRESSIONS, so a later
+ * re-assignment of `d` re-evaluates the range instead of replaying the
+ * spacing it had when the document was parsed.
  *
- * The first gate is what still blocks Tycho item 134's D-17 witness
- * (`[1+\frac{4}{d}, 1+\frac{8}{d}...5]` with `d` a bound document constant),
- * and it is NOT an oversight that can be relaxed here: the parser sees
- * declarations but never values (`Parser.resolveSymbol` answers a type), and
- * declaration presence carries no signal because parsing AUTO-DECLARES a free
- * symbol. So `d` and the `m`, `n`, `k` of `[m+n, m+k+15, ...]` are
- * indistinguishable at this layer, and admitting one admits the generic
- * sequence notation the pins below protect. Resolving it needs a ruling, not
- * a wider gate — see the item-134 thread.
+ * Three gates decide whether two anchors are one progression:
+ *
+ * 1. **Arithmetic shape at the root**, so `[x_1, x_2, ..., x_n]` — bare
+ *    symbols, generic-sequence notation — stays a placeholder List.
+ * 2. **No function application at ANY depth** (`isArithmeticSampleTree`).
+ *    `[f(1), f(2), ...]` is sequence notation, and so is `[1+f(1), 1+f(2),
+ *    ...]`, whose application hides one level below an `Add`. While the first
+ *    anchor had to be numerically known this fell out of `numericSampleValue`'s
+ *    recursion; with a symbolic anchor there is no such walk, so the rule is
+ *    stated directly.
+ * 3. **The first anchor introduces no symbol the second one lacks.** A
+ *    progression may gain a variable (`[m+n, m+n+x, ..., m+n+60]` steps by
+ *    `x`) but may not ABANDON one: `[m+n, m+k+15, ..., m+n+60]` drops `n` and
+ *    picks up `k`, so its "step" `k+15-n` is fabricated from two unrelated
+ *    families rather than read off one. This is the cheap structural stand-in
+ *    for "the shared part cancels", available on raw MathJSON with no
+ *    simplifier.
  */
 function tryTwoSampleSymbolicRange(
   samples: readonly MathJsonExpression[],
@@ -3910,11 +3956,53 @@ function tryTwoSampleSymbolicRange(
 ): MathJsonExpression | null {
   if (samples.length !== 2) return null;
   const [s0, s1] = samples;
-  const start = numericSampleValue(s0);
-  if (start === null) return null;
   if (!isArithmeticSampleShape(s1)) return null;
-  const step: MathJsonExpression = start === 0 ? s1 : ['Subtract', s1, s0];
+  const start = numericSampleValue(s0);
+  if (start === null) {
+    // Gate 1 (root shape) — `numericSampleValue` supplied it for the numeric
+    // anchors, so it is only needed on this arm.
+    if (!isArithmeticSampleShape(s0)) return null;
+    // Gate 2: no application at any depth, in EITHER anchor.
+    if (!isArithmeticSampleTree(s0) || !isArithmeticSampleTree(s1)) return null;
+    // Gate 3: the first anchor abandons no symbol.
+    const before = new Set<string>();
+    const after = new Set<string>();
+    rawSampleSymbols(s0, before);
+    rawSampleSymbols(s1, after);
+    for (const name of before) if (!after.has(name)) return null;
+  }
+  // `start === 0` lets the step be `s1` itself rather than `s1 - 0`; it is an
+  // exactness-preserving shortcut for the numeric arm and simply does not
+  // apply to a symbolic anchor.
+  const step: MathJsonExpression =
+    start === 0 ? s1 : (addedTerms(s0, s1) ?? ['Subtract', s1, s0]);
   return ['Range', s0, endExpr, step];
+}
+
+/**
+ * When `s1` is `s0` with terms APPENDED — `m+n` → `m+n+x` — the step is just
+ * those terms.
+ *
+ * `Subtract(s1, s0)` is equally correct but canonicalizes to
+ * `m - m + n - n + x`: the shared base does not cancel until `simplify()`, and
+ * a `Range` carries its step into every consumer that reads it. This is the
+ * two-sample echo of what `tryInferAdditiveBaseRange` already does for numeric
+ * offsets, and it fires only on an exact operand-by-operand prefix, so an
+ * anchor pair that merely resembles one (`1+\frac{4}{d}` → `1+\frac{8}{d}`,
+ * whose second operand differs) falls through to the subtraction.
+ */
+function addedTerms(
+  s0: MathJsonExpression,
+  s1: MathJsonExpression
+): MathJsonExpression | null {
+  if (operator(s0) !== 'Add' || operator(s1) !== 'Add') return null;
+  const before = operands(s0);
+  const after = operands(s1);
+  if (after.length <= before.length) return null;
+  for (let i = 0; i < before.length; i++)
+    if (JSON.stringify(before[i]) !== JSON.stringify(after[i])) return null;
+  const rest = after.slice(before.length);
+  return rest.length === 1 ? rest[0] : (['Add', ...rest] as MathJsonExpression);
 }
 
 /**
