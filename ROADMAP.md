@@ -1845,6 +1845,51 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 
 ### Symbolic-evaluation performance
 
+#### P-BOX. Generic boxing is ~1.2× slower across 0.100.1 → 0.103.2 (filed 2026-08-10)
+
+**Open, unattributed, and uniform — which is what makes it worth a bisect.**
+Measured while answering Tycho item 162 work-item (e) ("did anything regress
+since 0.100.1"). Same machine, PUBLISHED 0.100.1 against PUBLISHED 0.103.2,
+`benchmarks/effects-registration.ts` at `ROUNDS=9` warm medians, three
+interleaved repetitions:
+
+| metric | 0.100.1 | 0.103.2 | ratio |
+| --- | --- | --- | --- |
+| registration (120 fns) | 18.3 / 19.7 / 21.8 ms | 21.9 / 23.4 / 25.1 ms | 1.15–1.20× |
+| re-registration (120 fns) | 14.1 / 14.8 / 18.2 ms | 15.9 / 17.6 / 23.0 ms | 1.13–1.26× |
+| composition rows (40) | 3.7 ms | 4.5 ms | ~1.22× |
+| `WithRandomSeed` rows (40) | 0.8 ms | 1.0 ms | ~1.25× |
+| **box microloop (ms/iter)** | **0.0113 / 0.0130 / 0.0136** | **0.0138 / 0.0158 / 0.0183** | **1.22–1.35×** |
+
+**The last row is the finding.** That microloop exists in the benchmark
+specifically so a generic-boxing regression can be told apart from one in the
+effect channel — and it moved by the SAME ratio as every other line. So this is
+not the registration path, not the effects path, and not the item-139 mechanism
+(which was fixed in 0.100.1 and is confirmed absent from Tycho's 0.103.1
+profile): it is uniform per-box cost accumulated across three releases of
+feature work.
+
+Consequences and what to do:
+
+- **It is nobody's filed defect.** Tycho did not report it — it fell out of a
+  question they asked about their own convert time — so it has no external
+  pressure behind it and will not surface on its own. Recorded here because a
+  commitment to own it was made in their `COMPUTE_ENGINE.md` item 162 (e).
+- **1.2× does NOT explain item 162.** Their state converts in 14.9 s against a
+  12 s deadline; this factor is worth ~2–3 s of that at most, and their
+  attribution puts 60 % of the run in their own classification pipeline.
+- **It should be cheap to bisect.** The releases between are few (0.100.1 →
+  0.101.0 → 0.102.x → 0.103.x), the benchmark is self-contained, and the canary
+  isolates the axis: install each published version side by side and run
+  `benchmarks/effects-registration.ts` against it (the harness used for the
+  table above adapts the import to `@cortex-js/compute-engine`). A per-release
+  curve would say whether this is one change or steady accretion — and those
+  are different problems.
+- **Caveat on the numbers:** medians are stable and the ratio is consistent
+  across all five metrics and three repetitions, but the max column is noisy
+  (60–80 ms outliers on a 20 ms median). Trust the ratio, not the absolute ms.
+
+
 #### P0. `.N()` over nested user-function applications is exponential (filed 2026-07-26)
 
 **Open, unfixed, and the largest known evaluation cliff.** `.N()` on a chain of

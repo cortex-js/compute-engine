@@ -954,6 +954,15 @@ function staticPointArity(t: Type): number | undefined {
     const inner = t.dimensions![t.dimensions!.length - 1];
     return inner > 0 ? inner : undefined;
   }
+  // NOTE: a rank-1 numeric list is deliberately NOT a point here. `PointX`,
+  // `PointY` and `PointZ` element-INDEX such a list (`isPointLike` is false for
+  // its scalar elements, so `pointComponentAt` falls to `componentAt`), which
+  // is why `PointX([3, 4])` is `3` — element one, not an x-coordinate that
+  // happens to agree. `PointZ([7, 8])` is therefore an out-of-range element
+  // access carrying the position-preserving marker, exactly like
+  // `Third([7, 8])`, and not the item-138 dimension error. Pinned in
+  // `tycho-items-130-138.test.ts` ("a 2-element numeric list is NOT a point
+  // here").
   const elt = collectionElementType(t);
   if (elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple')
     return elt.elements?.length;
