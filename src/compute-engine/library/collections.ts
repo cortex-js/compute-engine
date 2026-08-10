@@ -1855,9 +1855,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const foldable = step.symbols.every((name) => {
         const def = ce.lookupDefinition(name);
         return (
-          def !== undefined &&
-          'value' in def &&
-          def.value?.isConstant === true
+          def !== undefined && 'value' in def && def.value?.isConstant === true
         );
       });
       return ce._fn('Range', [

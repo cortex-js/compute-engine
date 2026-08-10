@@ -129,9 +129,7 @@ function transposedType(
  * collection such as a `Range`, have a TYPE but no operands, which is the case
  * `innerProductType` declines on.
  */
-function rank1Components(
-  x: Expression
-): ReadonlyArray<Expression> | undefined {
+function rank1Components(x: Expression): ReadonlyArray<Expression> | undefined {
   if (!isFunction(x)) return undefined;
   if (!isTuple(x) && x.operator !== 'List') return undefined;
   const ops = x.ops;

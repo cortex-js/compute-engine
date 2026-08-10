@@ -110,8 +110,7 @@ export function lowerMapSpine(expr: Expression): LoweredSpine | undefined {
   const memo = spineMemo.get(expr);
   if (memo !== undefined) {
     if (memo.typeExprs.length === 0) return memo.spine ?? undefined;
-    if (memo.generation === ce._semanticVersion)
-      return memo.spine ?? undefined;
+    if (memo.generation === ce._semanticVersion) return memo.spine ?? undefined;
     // A new generation: revalidate the TYPES the outcome was derived from
     // rather than the outcome itself. Unchanged — the common case, since any
     // `ce.assign` anywhere bumps the generation — the memo stands.
