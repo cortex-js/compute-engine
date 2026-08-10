@@ -5217,6 +5217,17 @@ export class BaseCompiler {
    * Call this ONLY on the indexed form's body, never on the no-index
    * collection-reduce form (`Sum(collection)`), whose body is legitimately a
    * collection.
+   *
+   * The same argument applies to a body that is provably NOT a number at all —
+   * a `string`, a `record`/`dictionary`, a function value (Tycho item 121).
+   * `Add`/`Multiply` reject such an operand at BOX time (canonicalization
+   * replaces it with an `Error(incompatible-type)` node, and
+   * `BaseCompiler.compile`'s `isValid` guard then declines), but a big-op body
+   * stays raw, so nothing re-ran that check before the emitters wrote a bare
+   * `+`/`*` over it: `Σ_{i=0}^{2} "ab"` compiled to `("ab") + ("ab") + ("ab")`
+   * and RAN to `"ababab"` behind `success: true` — including under
+   * `realOnly: true`, whose overload is typed to return a `number`. Declining
+   * is what the callers want (they fall back to expansion / the interpreter).
    */
   static assertScalarBigOpBody(kind: string, body: Expression): void {
     if (body.type.matches('list') || body.type.matches('indexed_collection'))
@@ -5225,6 +5236,49 @@ export class BaseCompiler {
           `element access through the ${kind} (At(${kind}(…), k) → ` +
           `${kind}(At(…, k))) or evaluate instead. Fail closed (D6).`
       );
+    if (BaseCompiler.isProvablyNonNumericBigOpBody(body))
+      throw new Error(
+        `${kind}: a body of type '${body.type.toString()}' does not compile — ` +
+          `the accumulation is numeric (a bare '+'/'*'), which for a ` +
+          `non-numeric body silently produces a string or an object rather ` +
+          `than a number. Fail closed (D6) — evaluate it instead.`
+      );
+  }
+
+  /**
+   * Positive evidence that a big-op body can NEVER produce a number, so the
+   * scalar accumulation arm would emit a numerically meaningless `+`/`*`.
+   *
+   * Deliberately narrow — this is a DECLINE predicate, so every uncertainty
+   * resolves to `false` (compile it):
+   *
+   * - `couldMatch('number')` covers the wide types on its own: `unknown`,
+   *   `any`, `expression` and any union carrying a numeric arm all answer
+   *   `true` and are admitted. Only a type with no numeric inhabitant at all
+   *   reaches the rest.
+   * - `boolean` is EXEMPT. It is not a number, but `+` over booleans is
+   *   numerically faithful on the numeric targets (JS/Python coerce to 0/1),
+   *   which is the counting idiom `Σ_i (x_i > 0)` — compiled it answers `2`
+   *   where the interpreter only manages a symbolic `2·True + 2·False`.
+   *   Declining it would remove a working lowering to fix nothing.
+   * - `broadcastable<T>` is EXEMPT: it spans scalar and collection, so such a
+   *   body is routinely a plain scalar at run time (a wide-declared helper
+   *   application in a shader body). The JS target routes it through the
+   *   `_SYS.bcast` fold before it ever gets here; the GPU/Python/interval
+   *   targets rely on it staying admitted.
+   *
+   * What is left is the filed class: `string`, `symbol`, `nothing`,
+   * `record`/`dictionary`, and function types. Collections are handled by the
+   * caller's own branch, which has an actionable message.
+   */
+  private static isProvablyNonNumericBigOpBody(body: Expression): boolean {
+    const t = body.type;
+    if (t.couldMatch('number')) return false;
+    if (t.matches('boolean')) return false;
+    const resolved = compilationType(body);
+    if (typeof resolved !== 'string' && resolved.kind === 'broadcastable')
+      return false;
+    return true;
   }
 
   /**

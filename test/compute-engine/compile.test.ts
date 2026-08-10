@@ -1377,14 +1377,37 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(r.run!()).toBe(6);
   });
 
-  it('the \\sum_{i=d}^{d} d control (canonicalizes to Reduce) compiles and runs to 6', () => {
+  it('the \\sum_{i=d}^{d} d control fails closed on its list-valued BOUNDS', () => {
+    // `d` is `[1, 2, 3]`, so the indexing set reads `i = [1,2,3] … [1,2,3]`:
+    // ill-typed bounds. Both routes now say so. This used to answer 6 on both
+    // routes because a collection-valued BODY was rewritten to
+    // `Reduce(d, Add, 0)` before anything looked at the indexing set — the
+    // rewrite that also made `Σ_{k=0}^{2} [k, 2]` answer `k + 2` (Tycho item
+    // 121). The genuine `Reduce` control is the test above.
     const e = mkEngine();
     e.assign('d', e.parse('[1, 2, 3]').evaluate());
-    const r = compile(e.parse('\\sum_{i=d}^{d}d', { strict: false }), {
-      fallback: false,
-    })!;
+    const expr = e.parse('\\sum_{i=d}^{d}d', { strict: false });
+    expect(expr.isValid).toBe(false);
+    expect(expr.evaluate().toString()).toMatch(/incompatible-type/);
+    // `fallback: false` surfaces the decline as a throw; with the fallback on
+    // it is `success: false` plus an interpreter-backed `run()`.
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /Cannot compile invalid expression/
+    );
+    expect(compile(expr, { fallback: true })?.success).toBe(false);
+  });
+
+  it('an INDEXED Sum over a collection-valued body accumulates element-wise', () => {
+    // The indexing set survives canonicalization, and the literal-list body
+    // agrees with the list-valued CALL spelling (which always worked).
+    const e = mkEngine();
+    const expr = e.parse('\\sum_{k=0}^{2}\\lbrack k,2\\rbrack', {
+      strict: false,
+    });
+    expect(expr.evaluate().toString()).toEqual('[3,6]');
+    const r = compile(expr, { fallback: false })!;
     expect(r.success).toBe(true);
-    expect(r.run!()).toBe(6);
+    expect(r.run!()).toEqual([3, 6]);
   });
 
   it('Reduce compiles Multiply/Min/Max folds', () => {

@@ -1811,7 +1811,16 @@ export function canonicalBigop(
   if (typeof bodyType !== 'string' && bodyType.kind === 'signature')
     body = ce.typeError('number', body.type, body);
 
-  if (body.isCollection) {
+  // The no-index COLLECTION-REDUCE form: `Sum([1, 2, 3])` is the sum of the
+  // collection's elements. Gated on there being no indexing set — an INDEXED
+  // big op over a collection-valued body (`Σ_{k=0}^{2} [k, 2]`) is a different
+  // operator entirely: it iterates the index and accumulates element-wise
+  // (`[0+1+2, 2+2+2]`). Rewriting THAT to `Reduce` silently DISCARDED the
+  // indexing set, so `Σ_{k=0}^{2} [k, 2]` answered `k + 2` — the range gone,
+  // the bound index leaking out free (Tycho item 121, witness check 5: it is
+  // what let a Sum body reach the emitters with its index unbound, hence
+  // `NaN + "ab"`).
+  if (indexes.length === 0 && body.isCollection) {
     if (bigOp === 'Sum') return ce.expr(['Reduce', body, 'Add', 0]);
 
     return ce.expr(['Reduce', body, 'Multiply', 1]);
@@ -1956,9 +1965,18 @@ export function* reduceBigOp<T>(
 ): Generator<
   T | typeof NON_ENUMERABLE_DOMAIN | typeof NON_ENUMERABLE_BOUNDS | undefined
 > {
-  // If the body is a collection, reduce it
-  // i.e. Sum({1, 2, 3}) = 6
-  if (body.isCollection) {
+  // If the body is a collection AND there is no indexing set, reduce it
+  // i.e. Sum({1, 2, 3}) = 6.
+  //
+  // With an indexing set the operator is the INDEXED form and the collection
+  // is its summand, accumulated element-wise once per index value
+  // (`Σ_{k=0}^{2} [k, 2]` = `[3, 6]`) — the loop below already does that, and
+  // does it today for a body that is a list-valued CALL (`Σ_{k} a(k)`, whose
+  // `isCollection` is false before evaluation). Reducing here instead
+  // discarded the indexing set and left the index free, so the literal-body
+  // spelling answered `k + 2` where the call spelling answered `[3, 6]`
+  // (Tycho item 121).
+  if (indexes.length === 0 && body.isCollection) {
     const collection = body.evaluate();
     // A collection whose iterator declines (e.g. symbolic elements or
     // bounds) would fold to the bare initial value: keep it symbolic.

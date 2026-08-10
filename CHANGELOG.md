@@ -41,6 +41,28 @@
 
 ### Issues Resolved
 
+- **An indexed `Sum`/`Product` no longer discards its indexing set when the
+  body is a collection.** `\sum_{k=0}^{2}[k, 2]` canonicalized to
+  `Reduce([k, 2], Add, 0)` and answered `k + 2` — the range gone and the bound
+  index leaking out free. The collection-reduce rewrite is the meaning of the
+  NO-INDEX form (`Sum([1, 2, 3])` is still `6`); with an indexing set the
+  operator iterates and accumulates element-wise, so that expression is now
+  `[3, 6]`, matching the list-valued CALL spelling (`\sum_{k=0}^{2}a(k)`),
+  which always took the index loop. Compiled and interpreted results agree.
+
+- **A `Sum`/`Product` body that cannot accumulate numerically now fails the
+  compile instead of emitting a bare `+`.** `\sum_{i=0}^{2}\text{ab}` compiled
+  to `("ab") + ("ab") + ("ab")` and ran to the string `"ababab"` behind
+  `success: true` — including under `realOnly: true`, whose overload is typed
+  to return a `number`. `Add`/`Multiply` reject such an operand at box time,
+  but a big-op body stays raw, so nothing re-ran that check before the
+  emitters saw it. Both lowerings (unrolled and looped), `Product`, and every
+  target now decline. The decline needs positive evidence, so wide and
+  `unknown` bodies are unaffected; `boolean` bodies keep compiling (the
+  counting idiom `\sum_k (x_k > 0)`, where `+` over booleans is numerically
+  faithful), as do `broadcastable<T>` bodies, which are routinely scalar at
+  run time.
+
 - **A `Range` step built over an assigned symbol no longer freezes its value.**
   `[2a, 3a...9a]` with `a := 2` canonicalized to `Range(2a, 9a, 2)` — the step
   folded to a literal while the bounds stayed symbolic. Re-assigning `a := 3`

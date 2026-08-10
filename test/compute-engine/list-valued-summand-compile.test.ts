@@ -80,3 +80,88 @@ describe('list-valued function applications keep their signature under numeric u
     expect(aCompiled[1]).toBeCloseTo(ay, 10);
   });
 });
+
+// Tycho item 121, residue re-filed 2026-08-10 with a standalone witness
+// (`Σ_{i=0}^{2} "ab"`). Two independent mechanisms let a big op ship a
+// non-number behind `success: true`:
+//
+//  1. `Add`/`Multiply` reject a non-numeric operand at BOX time — the operand
+//     is replaced by an `Error(incompatible-type)` node and the compiler's
+//     `isValid` guard declines. A big-op BODY stays raw, so nothing re-ran
+//     that check before the emitters wrote a bare `+`/`*` over it.
+//  2. `canonicalBigop`/`reduceBigOp` rewrote ANY collection-valued body to the
+//     no-index collection-reduce form (`Reduce(body, Add, 0)`), discarding the
+//     indexing set — which is how a body reached the emitters with its index
+//     unbound.
+describe('big-op bodies that cannot accumulate numerically (item 121 residue)', () => {
+  // `fallback: true` is the shape the consumers use: the throw is converted
+  // to `success: false` plus an interpreter-backed `run()`.
+  const jsCompile = (ce: ComputeEngine, expr: any, opts: any = {}) =>
+    compile(expr, { fallback: true, ...opts });
+
+  test('a string-valued body DECLINES instead of emitting JS `+`', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Sum', { str: 'ab' }, ['Limits', 'i', 0, 2]]);
+    // The type checker already knows: the interpreter says so.
+    expect(expr.evaluate().toString()).toMatch(/incompatible-type/);
+    const r = jsCompile(ce, expr);
+    expect(r?.success ?? false).toBe(false);
+  });
+
+  test('both Sum lowerings and Product decline (unrolled, looped, Product)', () => {
+    const ce = new ComputeEngine();
+    for (const latex of [
+      '\\sum_{i=0}^{2}\\text{ab}', // unrolled: constant bounds
+      '\\sum_{i=0}^{n}\\text{ab}', // looped: symbolic upper bound
+      '\\prod_{i=0}^{2}\\text{ab}',
+    ]) {
+      const r = jsCompile(ce, ce.parse(latex, { strict: false }));
+      expect(r?.success ?? false).toBe(false);
+    }
+  });
+
+  test('`realOnly: true` never returns a non-number', () => {
+    // The overload is typed `compile(expr, {realOnly: true}):
+    // CompilationResult<T, number>`; it used to return the string "ababab".
+    const ce = new ComputeEngine();
+    const r = jsCompile(ce, ce.box(['Sum', { str: 'ab' }, ['Limits', 'i', 0, 2]]), {
+      realOnly: true,
+    });
+    expect(r?.success ?? false).toBe(false);
+  });
+
+  test('numerically-accumulable bodies are NOT declined', () => {
+    const ce = new ComputeEngine();
+    // Wide/unknown types stay admitted — the decline needs positive evidence.
+    const wide = jsCompile(ce, ce.parse('\\sum_{i=0}^{2}q', { strict: false }));
+    expect(wide?.success).toBe(true);
+    // Booleans coerce to 0/1 on the numeric targets: the counting idiom.
+    const counting = jsCompile(
+      ce,
+      ce.parse('\\sum_{k=0}^{3}\\left(k>1\\right)', { strict: false })
+    );
+    expect(counting?.success).toBe(true);
+    expect(counting!.run!({})).toBe(2);
+  });
+
+  test('an indexed Sum keeps its indexing set over a collection-valued body', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Sum', ['List', 'k', 2], ['Limits', 'k', 0, 2]]);
+    // Was `Reduce(List(k, 2), Add, 0)` — the range gone, `k` leaking out free.
+    expect(expr.operator).toEqual('Sum');
+    expect(expr.evaluate().toString()).toEqual('[3,6]');
+    // The literal-list body now agrees with the list-valued CALL spelling,
+    // which took the index loop all along.
+    const ce2 = new ComputeEngine();
+    ce2.parse('a(t)\\coloneq\\lbrack t,2t\\rbrack', { strict: false }).evaluate();
+    expect(
+      ce2.parse('\\sum_{k=0}^{2}a(k)', { strict: false }).evaluate().toString()
+    ).toEqual('[3,6]');
+  });
+
+  test('the no-index collection-reduce form is unchanged', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Sum', ['List', 1, 2, 3]]).evaluate().re).toEqual(6);
+    expect(ce.box(['Product', ['List', 1, 2, 3, 4]]).evaluate().re).toEqual(24);
+  });
+});
