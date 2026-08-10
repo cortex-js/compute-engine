@@ -2427,8 +2427,31 @@ function compilePointSwizzle(
 ): string {
   const t = gpuType(arg);
   const idx = comp === 'x' ? 0 : comp === 'y' ? 1 : 2;
-  const isSinglePoint = typeof t !== 'string' && t.kind === 'tuple';
-  if (!isSinglePoint && arg.type.matches('indexed_collection')) {
+  // The two spellings of a SINGLE point, each stating its own arity: a tuple,
+  // and the flat numeric list a data import produces. `[3, 4]` lowers to
+  // `vec2(3.0, 4.0)` here — a genuine `vecN`, so `.x` is a valid swizzle on it
+  // — and the interpreter likewise reads such a list as one point rather than
+  // a list of points (`PointX([3,4])` is `3`). Treating every indexed
+  // collection as a point LIST declined it, so the flat spelling could not
+  // reach a shader while the tuple spelling compiled.
+  //
+  // Width is bounded at 4 and the elements must be scalar numbers: a longer or
+  // nested list is an array or a matrix, which has no swizzle.
+  const pointArity =
+    typeof t !== 'string'
+      ? t.kind === 'tuple'
+        ? t.elements.length
+        : t.kind === 'list' &&
+            t.dimensions?.length === 1 &&
+            t.dimensions[0] >= 2 &&
+            t.dimensions[0] <= 4 &&
+            t.elements !== undefined &&
+            isSubtype(t.elements, 'number')
+          ? t.dimensions[0]
+          : undefined
+      : undefined;
+
+  if (pointArity === undefined && arg.type.matches('indexed_collection')) {
     const projected = compilePointListProjection(arg, idx, compile, target);
     if (typeof projected === 'string') return projected;
     throw new Error(
@@ -2437,14 +2460,13 @@ function compilePointSwizzle(
         `Fail closed.`
     );
   }
-  // A parameterized tuple type states the point arity, so an out-of-range
-  // coordinate is a static error: `p.z` on a `vec2` is invalid shader source.
-  // Symmetric with the list route's arity decline in
-  // `compilePointListProjection`. An unparameterized `tuple` states no arity
-  // and keeps the emission.
-  if (isSinglePoint && t.elements.length <= idx)
+  // A stated point arity makes an out-of-range coordinate a static error:
+  // `p.z` on a `vec2` is invalid shader source. Symmetric with the list
+  // route's arity decline in `compilePointListProjection`. An unparameterized
+  // `tuple` states no arity and keeps the emission.
+  if (pointArity !== undefined && pointArity <= idx)
     throw new Error(
-      `Point${comp.toUpperCase()}: the point has arity ${t.elements.length} ` +
+      `Point${comp.toUpperCase()}: the point has arity ${pointArity} ` +
         `— no ${['first', 'second', 'third'][idx]} coordinate. ` +
         `Fail closed (D6).`
     );

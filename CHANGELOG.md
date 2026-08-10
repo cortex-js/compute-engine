@@ -41,6 +41,34 @@
 
 ### Issues Resolved
 
+- **A declared signature's PARAMETER types now reach the function it is
+  assigned to.** Reconciliation ascribed a declaration's result onto the stored
+  literal but dropped its parameters, so `declare L : (list<real>) -> list<real>`
+  with `L(a) := a + 1` stored a literal typing `(unknown) -> list<real>` and the
+  parameter fell back to usage inference, which read the body as scalar
+  arithmetic. The two halves of a compiled call then disagreed: the call site
+  consulted the DECLARED type and passed the list whole, while the emitted body
+  was scalar code, so `L([3, 4])` ran `[3,4] + 1` and returned the **string**
+  `"3,41"` behind `success: true` — including under `realOnly: true`, which
+  promises a number. `L(a) := |a|` degraded to `NaN` the same way, making the
+  declared spelling worse than the undeclared one.
+
+  Two knock-on gains: `Length(a)`, `Map(a, …)` and `Sum(Map(a, …))` over a
+  declared list parameter now compile on the JavaScript target, where they
+  previously declined on every target; and a declared list parameter no longer
+  needs the `vector<n>` spelling to compile at all.
+
+  Scope is deliberately narrow. Only NON-SCALAR parameters are ascribed — that
+  is precisely the disagreement, since only a parameter that binds its argument
+  whole can be handed a value scalar-compiled code cannot read. A scalar
+  parameter is left alone (ascribing one re-canonicalizes the body against a
+  narrower type and changed how a tuple argument broadcasts), as is
+  `broadcastable<T>`, which is a declaration contract with its own enforcement,
+  and any parameter the author annotated or whose type mentions a quantified
+  variable. The multi-clause route is unchanged: a clause is checked as an arm
+  of the declared signature, and stamping the general parameter types onto it
+  would make that check vacuous.
+
 - **A function parameter passed to `PointX`/`PointY`/`PointZ` (or the `.x`/
   `.y`/`.z` spelling) now infers as non-scalar, so a list argument is applied
   instead of broadcast.** `g(a) := PointX(a)` answered `[g(3), g(4)]` for
@@ -54,6 +82,16 @@
 
   `Norm` is deliberately unchanged: `Norm(-5)` is `5`, so a signature excluding
   scalars would be false and its parameter stays unlifted.
+
+- **A point accessor over a flat point compiles on the shader targets.**
+  `PointX([3, 4])` declined with "a list of points has no GPU lowering" while
+  `PointX((3, 4))` compiled to `vec2(3.0, 4.0).x` — the GPU lowering read every
+  indexed collection as a list of points, so the flat `list<number>` spelling a
+  data import produces could not reach a shader. A numeric list of width 2–4 IS
+  a `vecN` there, so it now swizzles exactly like the tuple spelling, and gains
+  that spelling's static arity check (`PointZ([1, 2])` is a typed error rather
+  than a decline). A list too wide for a `vecN` lowers to an array and still
+  declines, as does a genuine list of points, in either spelling.
 
 - **A point accessor over a flat list types the scalar it returns.**
   `PointX([3, 4])` is the coordinate `3` but typed `vector<2>`: the result type

@@ -71,8 +71,10 @@ import {
 } from './boxed-expression/utils.js';
 import { canonicalFunctionLiteral, lookup } from './function-utils.js';
 import {
+  provisionalLiteral,
   registerProvisionalDependents,
   repairProvisionalDependents,
+  setProvisionalLiteral,
 } from './boxed-expression/provisional-application.js';
 import {
   checkTypeConstructorNamespace,
@@ -93,6 +95,7 @@ import {
   functionLiteralDeclaredSignature,
   functionLiteralParameters,
   functionLiteralReturnType,
+  isScalarType,
   mentionsQuantifiedVariable,
 } from './boxed-expression/function-literal.js';
 import { typeToString } from '../common/type/serialize.js';
@@ -1366,7 +1369,11 @@ export function declareFn(
         );
         const reconciled = reconcileFunctionLiteralReturn(
           ce,
-          def.value as Expression,
+          ascribeDeclaredParameterTypes(
+            ce,
+            def.value as Expression,
+            declaredType
+          ),
           declaredType
         );
         assertDeclaredEffects(id, reconciled, declaredType, effectsDeclared);
@@ -1580,7 +1587,7 @@ export function assignFn(
 
       const reconciled = reconcileFunctionLiteralReturn(
         ce,
-        literal,
+        ascribeDeclaredParameterTypes(ce, literal, declaredType.type),
         declaredType.type
       );
       // The effects axis is judged by its own provenance: a bare specifier is
@@ -1714,7 +1721,7 @@ export function assignFn(
 
         const reconciled = reconcileFunctionLiteralReturn(
           ce,
-          literal,
+          ascribeDeclaredParameterTypes(ce, literal, declaredType.type),
           declaredType.type
         );
         // The effects axis is judged by its own provenance. The operator
@@ -2325,6 +2332,111 @@ export function reconcileFunctionLiteralReturn(
     ...literal.ops.slice(1).map((p) => p.json),
   ]);
   return isFunction(rebuilt, 'Function') ? rebuilt : literal;
+}
+
+/**
+ * §6.3 declared-signature reconciliation, PARAMETER half — the mirror of
+ * {@link reconcileFunctionLiteralReturn}, which ascribes only the result.
+ *
+ * The declaration is authoritative for parameters for the same reason it is for
+ * the return type, and without this the two halves of a compiled call disagreed
+ * about what a parameter IS. `declare L : (list<real>) -> list<real>` with
+ * `L(a) := a + 1` stored a literal typing `(unknown) -> list<real>` — the result
+ * ascribed, the parameter dropped — so the parameter fell back to usage
+ * inference, which reads `a + 1` as scalar arithmetic and infers `number`. The
+ * CALL SITE then read the DECLARED signature (`userFunctionParamsAreScalar`),
+ * saw a collection parameter and passed the list WHOLE, while the emitted BODY
+ * had been compiled as scalar code: `_fn_L([3, 4])` evaluated `[3,4] + 1` and
+ * returned the string `"3,41"` behind `success: true` — and under
+ * `realOnly: true`, which promises a number. `|a|` degraded to `NaN` the same
+ * way. Ascribing the parameters makes the literal self-describing, and both
+ * halves then read the same type (Tycho item 116).
+ *
+ * Deliberately NOT applied on the multi-clause route: a clause is checked as an
+ * ARM of the declared signature (`assertClauseFitsDeclared`), and stamping the
+ * general signature's parameter types onto a clause would make that check
+ * vacuous. Clause parameters are narrowed by construction.
+ *
+ * Skips, each leaving the literal untouched: an author-annotated parameter (the
+ * author's ascription always wins, as it does for the return type), a
+ * non-symbol parameter operand (nothing to annotate), a parameter whose
+ * declared type mentions a quantified variable (§2.4/G4 — nothing ground to
+ * ascribe), and `unknown`/`any`, which state nothing and would merely flip the
+ * literal to "annotated".
+ */
+export function ascribeDeclaredParameterTypes(
+  ce: IComputeEngine,
+  literal: Expression,
+  declaredType: Type
+): Expression {
+  if (!isFunction(literal, 'Function')) return literal;
+  if (typeof declaredType !== 'object' || declaredType.kind !== 'signature')
+    return literal;
+  // A polytype ascribes its whole clause through `ascribeDeclaredPolytype`.
+  if (isPolymorphicType(declaredType)) return literal;
+
+  const args = declaredType.args;
+  if (args === undefined || args.length === 0) return literal;
+  // An optional or variadic signature is not a valid declaration for a
+  // fixed-arity literal at all — `assertFunctionLiteralArity` rejects it
+  // upstream. Bail rather than mis-align a positional ascription.
+  if ((declaredType.optArgs?.length ?? 0) > 0) return literal;
+  if (declaredType.variadicArg !== undefined) return literal;
+
+  const params = literal.ops.slice(1);
+  if (params.length !== args.length) return literal;
+
+  let changed = false;
+  const rebuilt = params.map((p, i) => {
+    if (isFunction(p, 'Typed')) return p.json;
+    if (!isSymbol(p)) return p.json;
+    const t = args[i].type;
+    if (t === 'unknown' || t === 'any') return p.json;
+    if (mentionsQuantifiedVariable(t, declaredType)) return p.json;
+    // Only a NON-SCALAR parameter is ascribed. The disagreement this repairs
+    // is `paramsAreScalar`-shaped: the call site consults the DECLARED type to
+    // decide whether to pass a collection argument whole, so only a parameter
+    // that binds whole can be handed a value the scalar-compiled body cannot
+    // read. Stamping a scalar type buys nothing and is not inert — it
+    // re-canonicalizes the body against a narrower parameter, which changed
+    // how a tuple argument broadcasts through `x ↦ 2x`.
+    if (isScalarType(t)) return p.json;
+    // `broadcastable<T>` is not a parameter type to stamp: it is a
+    // DECLARATION-level contract with its own assignment enforcement (ratified
+    // 2026-08-08, item 157), and ascribing it onto the literal made a
+    // consuming body satisfy a broadcastable slot that must be rejected.
+    if (typeof t === 'object' && t.kind === 'broadcastable') return p.json;
+    changed = true;
+    return ['Typed', p.json, `'${returnTypeText(t)}'`] as MathJsonExpression;
+  });
+  if (!changed) return literal;
+
+  // Rebuild from JSON, so the body is canonicalized AFRESH with the ascribed
+  // parameters in place — that re-binding is the entire point: the body's
+  // parameter references have to pick up the declared type. Handing the
+  // already-canonical body object through instead leaves them bound at
+  // whatever the pre-ascription inference chose, and the emitted code stays
+  // scalar.
+  const rebuiltLiteral = ce.box(['Function', literal.ops[0].json, ...rebuilt]);
+  if (!isFunction(rebuiltLiteral, 'Function')) return literal;
+
+  // A fresh body object orphans the literal's PROVISIONAL reading — a
+  // juxtaposition frozen as multiplication, or a forward-referenced call —
+  // which is recorded in a WeakMap keyed on the literal and body OBJECTS
+  // (`provisional-application.ts`). `canonicalFunctionLiteral` carries that
+  // record across a re-canonicalization only when it is handed the same body
+  // object, which the JSON round-trip defeats, so it is re-attached here.
+  // Without it the definition never registered as a dependent and the
+  // forward-reference repair silently stopped firing: `g := t ↦ 2a(t)`
+  // declared before `a(t) := t²` answered `6a` instead of `18`.
+  const provisional =
+    provisionalLiteral(literal) ?? provisionalLiteral(literal.ops[0]);
+  if (provisional !== undefined) {
+    setProvisionalLiteral(rebuiltLiteral, provisional);
+    if (rebuiltLiteral.ops[0] !== undefined)
+      setProvisionalLiteral(rebuiltLiteral.ops[0], provisional);
+  }
+  return rebuiltLiteral;
 }
 
 /**

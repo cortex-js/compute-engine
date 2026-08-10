@@ -463,3 +463,49 @@ describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
     ).toThrow(/no room for the aggregate/);
   });
 });
+
+describe('GPU point swizzle — the FLAT point spelling (Tycho item 116)', () => {
+  // A coordinate accessor treated EVERY indexed collection as a list of
+  // points, so the flat `list<number>` spelling a data import produces could
+  // not reach a shader while the tuple spelling compiled — even though it
+  // lowers to a genuine `vec2` and the interpreter reads it as ONE point
+  // (`PointX([3,4])` is `3`, not `[PointX(3), PointX(4)]`).
+  const glsl = (e: any) => new GLSLTarget().compile(e).code;
+  const eng = () => new ComputeEngine();
+
+  it('a flat 2-list swizzles exactly like the tuple spelling', () => {
+    const ce = eng();
+    const flat = glsl(ce.box(['PointX', ['List', 3, 4]]));
+    const tuple = glsl(ce.box(['PointX', ['Tuple', 3, 4]]));
+    expect(flat).toBe(tuple);
+    expect(flat).toContain('.x');
+  });
+
+  it('every coordinate of a flat point compiles', () => {
+    const ce = eng();
+    expect(glsl(ce.box(['PointY', ['List', 3, 4]]))).toContain('.y');
+    expect(glsl(ce.box(['PointZ', ['List', 1, 2, 3]]))).toContain('.z');
+  });
+
+  it('the flat spelling gains the tuple spelling’s static arity check', () => {
+    expect(() => glsl(eng().box(['PointZ', ['List', 1, 2]]))).toThrow(
+      /the point has arity 2 — no third coordinate/
+    );
+  });
+
+  it('a list too wide for a vecN is not a point, and still declines', () => {
+    // `[1,2,3,4,5]` lowers to a GLSL array, which has no swizzle.
+    expect(() =>
+      glsl(eng().box(['PointX', ['List', 1, 2, 3, 4, 5]]))
+    ).toThrow(/no GPU lowering/);
+  });
+
+  it('a genuine list of points still declines, both spellings', () => {
+    const ce = eng();
+    for (const arg of [
+      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+      ['List', ['List', 10, 11], ['List', 20, 21]],
+    ])
+      expect(() => glsl(ce.box(['PointX', arg]))).toThrow(/no GPU lowering/);
+  });
+});

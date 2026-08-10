@@ -454,6 +454,105 @@ describe('(e) point-accessor RESULT typing follows the runtime dispatch', () => 
   });
 });
 
+/**
+ * (f) The DECLARATION half (item 116's matrix residues, 2026-08-10). §6.3
+ * reconciliation ascribed a declared signature's RESULT onto the literal but
+ * dropped its PARAMETERS, so the two halves of a compiled call disagreed: the
+ * call site read the DECLARED type and passed a collection argument whole,
+ * while the body had been compiled as scalar code from a usage-inferred
+ * `number`. `ascribeDeclaredParameterTypes` closes it.
+ *
+ * Scope is deliberately narrow — NON-SCALAR, non-`broadcastable` parameters
+ * only. That is exactly the `paramsAreScalar`-shaped disagreement; ascribing a
+ * scalar re-canonicalizes the body against a narrower parameter and changed
+ * unrelated broadcast behavior, and `broadcastable<T>` is a declaration
+ * contract with its own enforcement.
+ */
+describe('(f) a declared NON-SCALAR parameter reaches the compiled body', () => {
+  const declaredJs = (sig: string, body: any, call: any) => {
+    const ce = new ComputeEngine();
+    ce.declare('L', sig as any);
+    ce.box(['Assign', 'L', ['Function', body, 'a']]).evaluate();
+    return { ce, r: jsCompile(ce, ce.box(call)) };
+  };
+
+  test('a broadcast body no longer compiles to STRING CONCATENATION', () => {
+    // `_fn_L([3,4])` ran `[3,4] + 1` — JS string coercion — behind
+    // `success: true`, and returned it under `realOnly: true` too.
+    for (const sig of [
+      '(list<real>) -> list<real>',
+      '(vector<2>) -> vector<2>',
+    ]) {
+      const { r } = declaredJs(sig, ['Add', 'a', 1], ['L', ['List', 3, 4]]);
+      expect(r.success).toBe(true);
+      const v = r.run!();
+      expect(typeof v).not.toBe('string');
+      expect(v).toEqual([4, 5]);
+    }
+  });
+
+  test('declaring no longer makes the compiled value WORSE', () => {
+    // `|a|` compiled to `Math.abs([3,4])` → NaN → JSON null when declared,
+    // while the UNdeclared spelling was correct.
+    const { r } = declaredJs(
+      '(vector<2>) -> vector<2>',
+      ['Abs', 'a'],
+      ['L', ['List', 3, 4]]
+    );
+    expect(r.success).toBe(true);
+    expect(r.run!()).toEqual([3, 4]);
+  });
+
+  test('the declared parameter type lands on the stored literal', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', '(list<real>) -> list<real>');
+    ce.box(['Assign', 'L', ['Function', ['Add', 'a', 1], 'a']]).evaluate();
+    const stored = (ce.lookupDefinition('L') as any)?.value?.value;
+    // Was `(unknown) -> list<real>`: the result ascribed, the parameter lost.
+    expect(stored.type.toString()).toBe('(a: list<real>) -> list<real>');
+  });
+
+  test('Length/Map over a declared list parameter now js-compiles', () => {
+    // The filing called these a hard floor: they declined on BOTH targets
+    // because the body was compiled against a scalar parameter.
+    for (const [body, want] of [
+      [['Length', 'a'], 2],
+      [['Map', 'a', ['Function', ['Power', 'w', 2], 'w']], [9, 16]],
+    ] as [any, any][]) {
+      const sig = Array.isArray(want)
+        ? '(list<real>) -> list<real>'
+        : '(list<real>) -> real';
+      const { r } = declaredJs(sig, body, ['L', ['List', 3, 4]]);
+      expect(r.success).toBe(true);
+      expect(r.run!()).toEqual(want);
+    }
+  });
+
+  test('a forward-referenced callee is still repaired across the rebuild', () => {
+    // The ascription rebuilds the literal, and the provisional reading that
+    // drives forward-reference repair is keyed on the literal/body OBJECTS.
+    // Without re-attaching it, `g(3)` answered `6a` instead of `18`.
+    const ce = new ComputeEngine();
+    // A NON-SCALAR declared parameter, so the ascription actually rebuilds.
+    ce.declare('g', '(list<real>) -> list<real>');
+    ce.assign('g', ce.parse('t \\mapsto 2a(t)'));
+    ce.parse('a(t)\\coloneq t^2').evaluate();
+    // `2a(t)` froze as the product `2·a·t` while `a` was undefined; the repair
+    // re-derives it as an application once `a` arrives.
+    expect(ce.parse('g([3])').evaluate().toString()).toBe('[18]');
+  });
+
+  test('a SCALAR declared parameter is deliberately NOT ascribed', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(number) -> number');
+    ce.assign('g', ce.parse('x \\mapsto 2x'));
+    const stored = (ce.lookupDefinition('g') as any)?.value?.value;
+    expect(stored.type.toString()).toBe('(unknown) -> number');
+    // and a tuple argument still broadcasts componentwise, staying a Tuple
+    expect(ce.parse('g((1,2))').evaluate().json).toEqual(['Tuple', 2, 4]);
+  });
+});
+
 describe('non-regressions', () => {
   test('a non-point collection still element-indexes, like First/Second', () => {
     // `isPointLike` keeps the First/Second/Third fallback for a collection
