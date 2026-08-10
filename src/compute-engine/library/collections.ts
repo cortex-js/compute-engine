@@ -1015,6 +1015,19 @@ function pointArityError(
   );
 }
 
+// Does a coordinate accessor BROADCAST over `xs` (its elements are points), or
+// element-INDEX it like First/Second/Third? The type-level counterpart of the
+// decision `pointComponentAt` makes at run time, peeked exactly the same way —
+// the FIRST element only, so a large lazy collection is never materialized —
+// and falling back to the declared element type for an empty collection, as it
+// does. `undefined` when the operand is not a finite collection, where the
+// decision cannot be made without evaluating it.
+function collectionBroadcastsPoints(xs: Expression): boolean | undefined {
+  if (xs.isFiniteCollection !== true) return undefined;
+  for (const e of xs.each()) return isPointLike(e);
+  return hasPointElementType(xs);
+}
+
 // Result type of a point-component accessor: a single point yields the
 // coordinate type; a collection of points broadcasts to a collection of
 // coordinates.
@@ -1056,6 +1069,14 @@ function pointComponentType(xs: Expression, position: number): Type {
   // with numeric elements), so use `number` — honest for the geometric point
   // case, and it keeps the result an (honest) collection type, not a scalar.
   if (xs.type.matches('indexed_collection')) {
+    // Only a collection whose elements are POINTS broadcasts. One whose
+    // elements are scalars element-indexes like First/Second/Third, so the
+    // result is a single COMPONENT — the flat point spelling `PointX([3, 4])`
+    // included, which `pointComponentAt` answers with the scalar `3`. Reading
+    // the decision off the static type alone claimed the broadcast arm for
+    // every indexed collection, typing that `vector<2>`.
+    if (collectionBroadcastsPoints(xs) === false)
+      return componentResultType(xs, position);
     // A rank ≥ 2 numeric tensor is a list of coordinate ROWS: projecting a
     // coordinate drops the inner dimension (`matrix<3x2>` → `vector<3>`).
     // `mapResultType` alone keeps every dimension, so it reported the SOURCE
@@ -1072,6 +1093,12 @@ function pointComponentType(xs: Expression, position: number): Type {
       };
     return mapResultType(t, 'number');
   }
+  // A NON-INDEXED collection of points broadcasts too — `pointComponentAt`
+  // peeks it through `each()` for exactly that reason (a Set of points was
+  // once misread as empty). It answers an eager `List` of coordinates, so the
+  // result is a list regardless of the source's own collection kind.
+  if (collectionBroadcastsPoints(xs) === true)
+    return { kind: 'list', elements: 'number' };
   // Non-point-collection fallback follows the First/… row.
   return componentResultType(xs, position);
 }
@@ -4703,11 +4730,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // the coordinate; on a list of points they broadcast, returning the list of
   // coordinates (Desmos semantics). Distinct from First/Second/Third, which
   // index a collection — see `pointComponentAt`.
+  //
+  // The parameter is the union of the two shapes the accessors read: a POINT
+  // (`tuple`, or the flat `list<number>` spelling a data import produces) and
+  // a COLLECTION — of points, which broadcasts, or of anything else, which
+  // element-indexes like First/Second/Third (`PointX(["a","b"])` → `"a"`, the
+  // documented fallback in `isPointLike`). Non-indexed collections are in: a
+  // Set of points broadcasts. Deliberately NOT `any`: a scalar or a string is
+  // already rejected at run time, and `any` contributes no type evidence, so a
+  // function parameter used as `PointX(a)` inferred nothing and its list
+  // argument broadcast element-wise instead of binding whole (Tycho item 116).
+  // `Distance` was narrowed away from `value`/`any` for the same reason.
   PointX: {
     description:
       'The x-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
-    signature: '(any) -> any',
+    signature: '(xs: collection | tuple) -> any',
     type: ([xs]) => pointComponentType(xs, 1),
     evaluate: ([xs], { engine: ce, numericApproximation }) =>
       pointComponentAt(xs, 1, ce, numericApproximation ?? false),
@@ -4717,7 +4755,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'The y-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
-    signature: '(any) -> any',
+    signature: '(xs: collection | tuple) -> any',
     type: ([xs]) => pointComponentType(xs, 2),
     evaluate: ([xs], { engine: ce, numericApproximation }) =>
       pointComponentAt(xs, 2, ce, numericApproximation ?? false),
@@ -4727,7 +4765,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description:
       'The z-coordinate of a point, broadcasting over a list of points.',
     complexity: 8200,
-    signature: '(any) -> any',
+    signature: '(xs: collection | tuple) -> any',
     // A point with no z-coordinate is a DIMENSION mismatch, not an absent
     // slot (item 138 clarified ask — see `pointArityError`). When the operand
     // type statically proves 2-D, report it here, at type-check time, so the

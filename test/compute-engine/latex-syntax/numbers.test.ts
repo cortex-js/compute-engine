@@ -247,7 +247,12 @@ describe('PARSING OF NUMBER', () => {
 
     test('Dot before a letter stays member access', () => {
       // `1.x` is member access (parses to PointX(1)), NOT `1` then `.x`.
-      expect(parse('1.x')).toMatchInlineSnapshot(`["PointX", 1]`);
+      // Read RAW: a scalar receiver is an `incompatible-type` error at
+      // canonicalization since 2026-08-10 (`PointX` no longer declares `any`
+      // — Tycho item 116), which would bury the lexing this test is about.
+      expect(ce.parse('1.x', { form: 'raw' })).toMatchInlineSnapshot(
+        `["PointX", 1]`
+      );
       // `1.\operatorname{count}` is member access, not a trailing-dot number.
       expect(parse('1.\\operatorname{count}')).toMatchInlineSnapshot(
         `["Length", 1]`

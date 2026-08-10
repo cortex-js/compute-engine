@@ -357,7 +357,120 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
   });
 });
 
+/**
+ * (d) The POINT-ACCESSOR half of the same ask (item 116's remaining CE ask,
+ * 2026-08-10): a parameter passed to a point-family operator contributes the
+ * same evidence `At` does. Evidence comes from the callee's DECLARED parameter
+ * type, filtered by `inferredCollectionParameterType` — which rejects `any`
+ * and `value`. `Distance` already had a narrow union (items 130/138); the
+ * accessors declared `(any) -> any` and so contributed nothing, leaving a list
+ * argument to broadcast into per-element nonsense (`[null,null]` compiled).
+ *
+ * `Norm` is deliberately NOT narrowed: `Norm(-5)` is `5` (the scalar branch is
+ * explicit in its evaluate handler), so a signature excluding scalars would be
+ * a lie and its parameter cannot be lifted. Pinned at the bottom.
+ */
+describe('(d) inference: a point-accessor body infers a non-scalar parameter', () => {
+  test('PointX(a): a list argument APPLIES, it does not broadcast', () => {
+    const ce = new ComputeEngine();
+    ce.box(['Assign', 'g', ['Function', ['PointX', 'a'], 'a']]).evaluate();
+    expect(ce.box('g').type.toString()).toBe('(collection | tuple) -> unknown');
+    // Before the fix: `[g(3), g(4)]`, and `[null,null]` once compiled.
+    expect(ce.box(['g', ['List', 3, 4]]).evaluate().toString()).toBe('3');
+    const r = jsCompile(ce, ce.box(['g', ['List', 3, 4]]));
+    expect(r.success).toBe(true);
+    expect(r.run!()).toBe(3);
+  });
+
+  test('PointX(a) + PointY(a): both accessors agree on the parameter', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'h',
+      ['Function', ['Add', ['PointX', 'a'], ['PointY', 'a']], 'a'],
+    ]).evaluate();
+    expect(ce.box(['h', ['List', 3, 4]]).evaluate().toString()).toBe('7');
+  });
+
+  test('the filed witness: a Distance-consuming body (already fixed by 130/138)', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'p',
+      [
+        'Function',
+        [
+          'Divide',
+          ['Subtract', 'b', 'c'],
+          ['Power', ['Distance', 'c', 'b'], 3],
+        ],
+        'c',
+        'b',
+      ],
+    ]).evaluate();
+    expect(
+      ce.box(['p', ['List', 0, 0], ['List', 3, 4]]).N().toString()
+    ).toBe('[0.024,0.032]');
+  });
+});
+
+describe('(e) point-accessor RESULT typing follows the runtime dispatch', () => {
+  // `pointComponentType` read broadcast-vs-index off the static type alone,
+  // while `pointComponentAt` peeks the first element. They disagreed on every
+  // indexed collection of scalars: `PointX([3,4])` is the scalar `3` but typed
+  // `vector<2>`. Harmless on JS (`_SYS.bcast` masked it) but it emitted a
+  // spurious broadcast wrapper and read wrong to every static consumer.
+  const ce = new ComputeEngine();
+
+  test('the flat point spelling types a SCALAR', () => {
+    const e = ce.box(['PointX', ['List', 3, 4]]);
+    expect(e.type.toString()).toBe('number');
+    expect(e.evaluate().toString()).toBe('3');
+  });
+
+  test('a list of points still types a LIST (broadcast)', () => {
+    const e = ce.box([
+      'PointX',
+      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+    ]);
+    expect(e.type.toString()).toBe('vector<2>');
+    expect(e.evaluate().toString()).toBe('[1,3]');
+  });
+
+  test('the list-of-rows spelling still broadcasts (item 138)', () => {
+    const e = ce.box([
+      'PointX',
+      ['List', ['List', 10, 11], ['List', 20, 21]],
+    ]);
+    expect(e.evaluate().toString()).toBe('[10,20]');
+  });
+
+  test('a SET of points broadcasts, and types the list it returns', () => {
+    // Non-indexed, so it never reached the broadcast arm of the type handler
+    // and was typed as an element access while the VALUE was a list.
+    const e = ce.box(['PointX', ['Set', ['Tuple', 1, 2], ['Tuple', 3, 4]]]);
+    expect(e.type.toString()).toBe('list<number>');
+    expect(e.evaluate().toString()).toBe('[1,3]');
+  });
+});
+
 describe('non-regressions', () => {
+  test('a non-point collection still element-indexes, like First/Second', () => {
+    // `isPointLike` keeps the First/Second/Third fallback for a collection
+    // whose elements are not points — the narrowed signature must not reject
+    // it, so the parameter is `collection | tuple`, not a point-shaped union.
+    const ce = new ComputeEngine();
+    const e = ce.box(['PointX', ['List', { str: 'a' }, { str: 'b' }]]);
+    expect(e.evaluate().toString()).toBe('"a"');
+  });
+
+  test('Norm keeps its scalar branch, so its parameter stays unlifted', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Norm', -5]).evaluate().toString()).toBe('5');
+    ce.box(['Assign', 'n', ['Function', ['Norm', 'a'], 'a']]).evaluate();
+    expect(ce.box('n').type.toString()).toBe('(unknown) -> number');
+  });
+
   test('a SCALAR-bodied function still broadcasts over a list argument', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'g', ['Function', ['Multiply', 2, 'x'], 'x']]).evaluate();

@@ -8,6 +8,11 @@ function parse(latex: string): Expression {
   return ce.parse(latex).json;
 }
 
+/** The parse mapping alone, without canonical validation of the operand. */
+function rawParse(latex: string): Expression {
+  return ce.parse(latex, { form: 'raw' }).json;
+}
+
 describe('Parser: component access', () => {
   describe('bare-letter members (x, y, z)', () => {
     test('p.x → PointX(p)', () => {
@@ -77,12 +82,20 @@ describe('Parser: component access', () => {
   });
 
   describe('disambiguation from decimal', () => {
+    // These two probe the LEXER: `1.x` is member access, not the number `1.`
+    // followed by `x`. The receiver has to be a number for the ambiguity to
+    // exist at all, so it cannot be re-based onto a point the way `p.z` above
+    // was. Since 2026-08-10 a scalar receiver is an `incompatible-type` error
+    // at canonicalization (`PointX` no longer declares `any` — Tycho item
+    // 116), which would hide the parse mapping under test. `PointX(1)` was
+    // never VALID; the rejection just moved from evaluate to canonicalization.
+    // Read the raw parse, which is the mapping these tests are about.
     test('1.x → PointX(1) (integer terminator)', () => {
-      expect(parse('1.x')).toEqual(['PointX', 1]);
+      expect(rawParse('1.x')).toEqual(['PointX', 1]);
     });
 
     test('1.5.x → PointX(1.5)', () => {
-      expect(parse('1.5.x')).toEqual(['PointX', 1.5]);
+      expect(rawParse('1.5.x')).toEqual(['PointX', 1.5]);
     });
 
     test('1.5 alone stays as 1.5', () => {

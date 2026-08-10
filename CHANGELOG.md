@@ -41,6 +41,29 @@
 
 ### Issues Resolved
 
+- **A function parameter passed to `PointX`/`PointY`/`PointZ` (or the `.x`/
+  `.y`/`.z` spelling) now infers as non-scalar, so a list argument is applied
+  instead of broadcast.** `g(a) := PointX(a)` answered `[g(3), g(4)]` for
+  `g([3,4])` — per-element nonsense that compiled to `[null, null]` behind
+  `success: true` — where it now answers `3`. Parameter evidence comes from the
+  callee's declared parameter type, and these accessors declared `(any) -> any`,
+  which contributes none; they now declare `(collection | tuple) -> any`. That
+  is what they already accepted: a scalar or a string was rejected at run time
+  before, so the rejection has only moved earlier, to canonicalization.
+  `Distance` was narrowed the same way, and for the same reason, in 0.100.1.
+
+  `Norm` is deliberately unchanged: `Norm(-5)` is `5`, so a signature excluding
+  scalars would be false and its parameter stays unlifted.
+
+- **A point accessor over a flat list types the scalar it returns.**
+  `PointX([3, 4])` is the coordinate `3` but typed `vector<2>`: the result type
+  read broadcast-vs-index off the static type alone, while evaluation peeks the
+  first element to decide, so the two disagreed on every indexed collection of
+  scalars. Values were already correct — the JS target's runtime shape dispatch
+  absorbed the mismatch — but it emitted a needless broadcast wrapper, and a
+  non-indexed source (a `Set` of points) had the mirror-image defect, typing an
+  element access while returning a list.
+
 - **An indexed `Sum`/`Product` no longer discards its indexing set when the
   body is a collection.** `\sum_{k=0}^{2}[k, 2]` canonicalized to
   `Reduce([k, 2], Add, 0)` and answered `k + 2` — the range gone and the bound
