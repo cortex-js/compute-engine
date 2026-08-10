@@ -89,6 +89,78 @@ current scores and next rungs (per-rung history in `docs/rubi/RUBI.md` §5).
 
 ## Remaining work
 
+### Contextual callback typing residue (Design D landed 2026-08-09)
+
+The `callback<S>` conversion of the 15 collection operators
+(`docs/plans/2026-08-09-design-d-generic-callback-signatures.md`) closed
+with these items open. Items marked RULED-DEFERRED have a maintainer
+decision on record; the rest are recorded here so they are not
+rediscovered from the outside.
+
+**Deferred by ruling (each names what unblocks it):**
+
+- **`Map`'s honest signature spelling** — the declared
+  `(collection<T>, mapping: callback<(T) -> U>, collection*)` misorders
+  the zip form's callback-last convention; the type system cannot spell
+  required-after-variadic. RULED-DEFERRED 2026-08-09 (spec §9 item 5b,
+  with the two candidate fixes: suffix-parameter support, or flipping
+  `Map` to callback-first). Unblocked by: choosing one.
+- **Standalone-lambda runtime check emission** — `literal.compile()`
+  then `run(violatingValue)` silently computes where the interpreter
+  errors; every in-engine route is enforced. RULED-DEFERRED 2026-08-09
+  with the direction fixed (per-primitive check-emission table +
+  "unenforceable → decline"); see the "Known limit" section of
+  `docs/plans/2026-08-08-lambda-param-element-inference.md`.
+- **`FlatMap`'s `evaluate` materializes on the SOURCE's finiteness
+  alone** — it retains the optimistic assumption its `isFinite` facet
+  dropped (2026-08-09); re-gating on `expr.isFiniteCollection` would
+  make every unprovable-callback `FlatMap` stay symbolic. Needs a
+  ruling before changing.
+- **Phase 4: comparator slots** (`Sort`, `ChunkBy`, …) — whether they
+  convert to `callback<(T, T) -> …>` at all (spec §9 item 6).
+- **Seeded-fold accumulator stamping** — deliberately never stamped
+  (spec §12.1: stamping it breaks type-changing accumulators, probed);
+  re-opening needs a bound (`forall T, U: value.`) and a re-ruling.
+
+**Known limits, recorded in spec §9b, no action unless demanded:**
+binder-route (`rawOps`) applications skip the contextual stamp
+(unreachable today — tripwire comment at the gate); `callback<S>`'s
+parameter-position-only intent is unenforced (other positions behave as
+`function`); a union of two DIFFERENT `callback<S>` members resolves
+first-seen; undeclared source symbols infer `collection<unknown>` (the
+standing polytype behavior).
+
+**Cleanups, previously tracked nowhere (opened here 2026-08-09):**
+
+- **Cross-operator asymmetries on degenerate inputs** (pre-existing,
+  surfaced by the conversion's parity sweeps): a valueless-source
+  `Filter`/`TakeWhile` answers `Set()` while siblings stay inert or
+  answer defaults; `CountIf`/`Find` THROW a raw `Error` whose message
+  names *Filter*; `Any(xs, 5)` thunk-lifts the non-function where
+  `CountIf(xs, 5)` errors. One convention, applied family-wide.
+- **Kleene-logic helper triplication**: `kleeneAny` (collections.ts),
+  `kleeneOr`/`kleeneAnd` (sets.ts), `kleeneEvery` (combinatorics.ts) —
+  consolidate into one shared home.
+- **The `Signature` operator is inert on the box/parse routes** for
+  every operator (`lazy: true` with no `canonical` handler — the
+  documented held-operand trap); only the `ce.function` route works.
+- **`FlatMap` has no `count` facet**, so `Length(FlatMap(…))` is inert
+  even when the result is provably finite (a count requires applying
+  the callback per element — needs a design, not a one-liner).
+- **Nested `Map`/`Filter` canonicalization is superlinear in depth**
+  (measured 2026-08-09: 10→20 levels ≈ 2.65× on both the current and
+  the pre-conversion path — pre-existing, cause unidentified).
+- **The signature-driven trigger's positional pairing has no arity
+  guard** (the contextual-solve route gained one 2026-08-09): a
+  wrong-arity literal at a plain-arrow or ground-`callback<S>` slot of
+  a user-declared signature can still take a partial stamp.
+- **`src/math-json/OPERATORS.json` is stale for `Map`** (generated;
+  regeneration will emit the contextual signature strings — the
+  documented-surface policy — and should be run on the next doc cycle).
+- **Bounded numeric element types** (`integer<1..10>`) and value-literal
+  types still decline the stamp admission gate (`admissibleElementType`)
+  — a one-line widening if ever wanted.
+
 ### Broadcast semantics residue (element-wise lowering landed 2026-07-26)
 
 The element-wise compiled lowering shipped, and with it the two interpreter

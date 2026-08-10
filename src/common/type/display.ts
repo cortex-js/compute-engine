@@ -9,7 +9,7 @@ import { typeToString } from './serialize.js';
 import type { FunctionSignature, Type } from './types.js';
 
 /**
- * The GROUND display form of a type (Design D, R-D5, ruled 2026-08-10).
+ * The GROUND display form of a type (Design D, R-D5, ruled 2026-08-09).
  *
  * A converted operator's declared signature is a polytype over a contextual
  * callback slot — `forall T. (collection<T>, predicate: callback<(T) ->

@@ -22,7 +22,7 @@ import type { FunctionSignature, Type } from '../../src/common/type/types';
 /**
  * # Design D — the `callback<S>` contract, phases 0 through 3
  *
- * `docs/plans/2026-08-10-design-d-generic-callback-signatures.md`. §4 states
+ * `docs/plans/2026-08-09-design-d-generic-callback-signatures.md`. §4 states
  * the constructor's contract as five independently testable clauses; §10 is
  * the acceptance list, starting with `CountIf` (phase 0, eager) and `Filter`
  * (phase 0b, lazy) and ending with `Map`'s two clauses (phase 3), which is
@@ -855,7 +855,7 @@ describe('phase 1: route parity (box / Epsil / LaTeX)', () => {
 //
 // ── §8 phase 2 — the multi-arm operators: Reduce / Scan / Fold / Partition ───
 //
-// The R-D4 (resolve-then-stamp, ruled 2026-08-10) phase. Two granularities,
+// The R-D4 (resolve-then-stamp, ruled 2026-08-09) phase. Two granularities,
 // both implemented and both exercised below:
 //
 // - ARM — `resolveContextualArm` (overload.ts) picks the single arity-viable
@@ -1580,7 +1580,7 @@ describe('phase 2: route parity (box / Epsil / LaTeX)', () => {
 });
 
 //
-// ── Adversarial-review round (2026-08-10) ────────────────────────────────────
+// ── Adversarial-review round (2026-08-09) ────────────────────────────────────
 //
 // Coverage the first implementation pass left open, plus regressions for the
 // three erasure/display holes the review found.
@@ -1676,7 +1676,7 @@ describe('clause 1: the erasure is DEEP in argument validation', () => {
 });
 
 describe('R-D5: runtime signature display is the GROUND form', () => {
-  // Ruled 2026-08-10. A converted operator prints exactly its pre-conversion
+  // Ruled 2026-08-09. A converted operator prints exactly its pre-conversion
   // signature — `callback<S>` erased to `function`, the `forall` variables at
   // their ground skeleton — because neither carries admission information.
   const COUNT_IF = '(collection, predicate: function) -> integer';
@@ -1971,7 +1971,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
 });
 
 //
-// ── Adversarial-review round 2 (2026-08-10) ─────────────────────────────────
+// ── Adversarial-review round 2 (2026-08-09) ─────────────────────────────────
 //
 // Conformance the first review round found missing: the effects marker at a
 // converted slot, the GROUND `callback<S>` stamp, route parity for the

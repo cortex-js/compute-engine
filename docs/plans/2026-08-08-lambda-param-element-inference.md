@@ -60,7 +60,7 @@ interpreter-visible inference — and specifically what the mechanism offers
    this route. The signature-driven trigger is NOT narrowed — a
    user-declared arrow param is an explicit contract, whatever its types.
 
-   *Union exclusion RULED PERMANENT (2026-08-10, on the design
+   *Union exclusion RULED PERMANENT (2026-08-09, on the design
    exploration's evidence).* The ruled per-element union semantics —
    "each element evaluates under its arm; a mismatch errors at that
    element only" — is what the UNANNOTATED path already computes:
@@ -420,7 +420,7 @@ All conservative; each is a mechanical extension later if wanted:
 - **Shorthand callbacks** (`_ > 5`, non-`Function`-headed operands) lift
   after the hook and are not rebuilt.
 
-## Known limit: the standalone-lambda compile route (ruled 2026-08-10)
+## Known limit: the standalone-lambda compile route (ruled 2026-08-09)
 
 Compiling an annotated function literal STANDALONE (`literal.compile()`,
 no call site) emits a bare JS/Python function with no runtime type check,

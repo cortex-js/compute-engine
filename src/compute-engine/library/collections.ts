@@ -410,7 +410,7 @@ function canonicalFunctionSlot(
 }
 
 /**
- * Design D §5 step 4 (R-D2′, ruled 2026-08-10): the RESULT type a callback
+ * Design D §5 step 4 (R-D2′, ruled 2026-08-09): the RESULT type a callback
  * OPERAND contributes.
  *
  * Contract clause 3 in one function: only the operand's RESULT position is

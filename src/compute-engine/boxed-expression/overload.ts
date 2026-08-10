@@ -126,7 +126,7 @@ export function overloadArms(
 export { paramAt };
 
 /**
- * **R-D4 — resolve-then-stamp** (ruled 2026-08-10), at ARM granularity: the
+ * **R-D4 — resolve-then-stamp** (ruled 2026-08-09), at ARM granularity: the
  * single arm of an overload set that a Design D contextual stamp runs against,
  * or `undefined` when the application does not resolve to exactly one.
  *

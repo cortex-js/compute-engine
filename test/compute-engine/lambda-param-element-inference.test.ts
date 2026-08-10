@@ -37,7 +37,7 @@ import {
 //     follow-ups (4) and (5) to a `'last'` key, per-parameter sources and
 //     `null` for "no source"). Design D moved the element-of link into the
 //     signature and the metadata was deleted outright with its last consumer
-//     (`Map`, phase 3, 2026-08-10) — so the pins below describe the
+//     (`Map`, phase 3, 2026-08-09) — so the pins below describe the
 //     signature-driven behavior, and the two spellings agree everywhere except
 //     the deliberately-flipped multi-collection `Map` form (§6 revision 4).
 //
@@ -149,7 +149,7 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
   });
 
   test('the multi-collection Map(xs, ys, f) form is NOT annotated', () => {
-    // FLIPPED by Design D §6 REVISION 4 (2026-08-10): `Map`'s variadic clause
+    // FLIPPED by Design D §6 REVISION 4 (2026-08-09): `Map`'s variadic clause
     // declares no contextual callback slot and never stamps. Follow-up (5) had
     // flipped this pin the other way with the interim `{ last: 'preceding' }`
     // metadata; the re-ruling gives that annotation up deliberately — the
@@ -328,7 +328,7 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
   });
 });
 
-// FLIPPED WHOLESALE by Design D §6 REVISION 4 (2026-08-10). Follow-up (5) was
+// FLIPPED WHOLESALE by Design D §6 REVISION 4 (2026-08-09). Follow-up (5) was
 // the interim `{ last: 'preceding' }` metadata spelling — parameter k stamped
 // from operand k, over every operand before the callback. The re-ruling gives
 // that up: `Map`'s multi-collection clause declares no contextual callback

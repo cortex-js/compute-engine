@@ -1,6 +1,6 @@
 # Design D — Generic contextual callback types
 
-**Status: revision 4 (2026-08-10) — PHASES 0, 0b, 1, 2 AND 3 ALL
+**Status: revision 4 (2026-08-09) — PHASES 0, 0b, 1, 2 AND 3 ALL
 IMPLEMENTED. Rulings made: §6 single shared `T`, RE-RULED rev 4
 (variadic `Map` clause is NOT stamped — R-D3/R-D6 retired); §4
 contract; R-D2′ (both inline and named contribute result inference);
@@ -30,11 +30,11 @@ The element-type inference track gave inline callback lambdas their
 parameter types through two triggers: a signature-driven trigger and the
 `callbackElementOf` metadata on 15 builtin collection operators. The
 metadata's shape (`{1: 0}`, `'last'`, `'preceding'`, arrays, `null`)
-was judged too convoluted (maintainer, 2026-08-10). The element-of link
+was judged too convoluted (maintainer, 2026-08-09). The element-of link
 belongs in the signature; this design moves it there without changing
 any admission or evaluation behavior that is ratified today.
 
-## 2. Evidence base (probed 2026-08-10; maintainer review probes marked ★)
+## 2. Evidence base (probed 2026-08-09; maintainer review probes marked ★)
 
 - **The eager solver already instantiates from data operands.** A
   `forall T. (collection<T>, (T) -> boolean) -> list<T>` callee applied
@@ -167,7 +167,7 @@ route):
 Steps 2 and 4 are the genuinely new solver surface; the design does not
 call this "the existing solver".
 
-## 6. Variadic operators (RE-RULED 2026-08-10, revision 4: the variadic form is NOT stamped)
+## 6. Variadic operators (RE-RULED 2026-08-09, revision 4: the variadic form is NOT stamped)
 
 **Maintainer ruling (supersedes the rev-1 shared-`T` variadic stamping
 and retires R-D3/R-D6 as previously drafted):** `Map` becomes TWO
@@ -276,20 +276,20 @@ conversions land and is reviewed per phase, not absorbed silently.
 
 ## 9. Open questions (rulings needed)
 
-1. **R-D2′ — inference contribution. RULED 2026-08-10: BOTH inline and
+1. **R-D2′ — inference contribution. RULED 2026-08-09: BOTH inline and
    named callbacks contribute** result-side constraints (a rebuilt
    literal's result type, or a named callback's declared result type,
    flows into `U`). Strictly inference-only, never admission — a
    mismatched named callback still enters and behaves dynamically.
-2. **R-D3 — RETIRED 2026-08-10** by the §6 re-ruling: the variadic
+2. **R-D3 — RETIRED 2026-08-09** by the §6 re-ruling: the variadic
    clause keeps today's validation verbatim, so no consumption-model
    extension exists to rule on.
-3. **R-D4 — RULED 2026-08-10: resolve-then-stamp.** Overload resolution
+3. **R-D4 — RULED 2026-08-09: resolve-then-stamp.** Overload resolution
    runs first (library clauses are disjoint by arity/type); the stamp
    runs against the RESOLVED clause's `callback<S>`. User-defined
    overload sets keep the existing conservative skip. Also required by
    the `Pipe` consumer (§11) and `Map`'s two-clause shape (§6).
-4. **R-D5 — user-facing DISPLAY of `callback<S>` only. RULED 2026-08-10:
+4. **R-D5 — user-facing DISPLAY of `callback<S>` only. RULED 2026-08-09:
    runtime display erases to the GROUND form; documentation shows the
    contextual form.** (Rev 3 had already resolved the former conflation —
    `.matches` behavior and internal serialization are fixed by §4's
@@ -312,7 +312,7 @@ conversions land and is reviewed per phase, not absorbed silently.
    the scope listing (`engine-scope.ts`),
    `BoxedOperatorDefinition.toJSON`, and a boxed symbol's `.type`. VALUE
    definitions are covered too (added in the adversarial-review round,
-   2026-08-10): a function-typed VALUE declared with a `callback<S>`
+   2026-08-09): a function-typed VALUE declared with a `callback<S>`
    carries the constructor legitimately (clause 5), and both display
    surfaces that split on the definition kind — `BoxedSymbol.type` and
    `engine-scope.ts`'s `defToString` — used to show the raw
@@ -323,7 +323,7 @@ conversions land and is reviewed per phase, not absorbed silently.
    `typeToString` and `typeToDedupKey` are untouched, so clause 5's
    round-tripping and de-duplication still see `forall`/`callback<>`.
 
-   THE SEAM IS STRINGIFICATION (revised 2026-08-11, review round A). The
+   THE SEAM IS STRINGIFICATION (revised 2026-08-09, review round A). The
    projected AST is never boxed and never reaches a subtype query.
    `BoxedSymbol.type` returns the FAITHFUL type — the definition's own
    `Type` object — carrying the ground string as a print-time override
@@ -352,9 +352,9 @@ conversions land and is reviewed per phase, not absorbed silently.
    This also means the §8 churn expectation "operator-SIGNATURE display
    is expected to change where conversions land" is now VOID for the
    runtime surfaces: they do not change at all.
-5. **R-D6 — RETIRED 2026-08-10** by the §6 re-ruling: it existed only
+5. **R-D6 — RETIRED 2026-08-09** by the §6 re-ruling: it existed only
    to stamp the variadic arrow, and the variadic clause never stamps.
-5b. **Map spelling — RULED 2026-08-11: stays as staged for now** (the
+5b. **Map spelling — RULED 2026-08-09: stays as staged for now** (the
    loose `(collection<T>, mapping: callback<(T) -> U>, collection*)`).
    Context, for future readers: the maintainer's review established that
    the PRE-conversion signature string `(collection+, mapping: function)`
@@ -385,7 +385,7 @@ does not rediscover it as a bug:
   scan: it does not resolve a type reference, so a slot written as a name
   standing for `callback<S>` would be admitted exactly right (the subtype
   layer unfolds the reference, and clause-1 erasure applies) yet decline
-  the contextual stamp. Probed 2026-08-10, no such slot is constructible
+  the contextual stamp. Probed 2026-08-09, no such slot is constructible
   today: a generic ALIAS is expanded eagerly at build time, so
   `type MyPred<S> = callback<(S) -> boolean>` at
   `forall T. (collection<T>, MyPred<T>) -> integer` stamps identically to
@@ -408,7 +408,7 @@ does not rediscover it as a bug:
   `callback<S>` members of one union are mutually admission-identical too,
   and there the first-seen one still wins.
 - **"Legal as a signature PARAMETER" is a statement of INTENT, not an
-  enforced rule** (recorded 2026-08-10, adversarial-review round). Nothing
+  enforced rule** (recorded 2026-08-09, adversarial-review round). Nothing
   rejects a `callback<S>` written in a result type, a value's declared type
   or a collection's element type; adding enforcement is unruled and was
   deliberately NOT done. In any such position the constructor simply behaves
@@ -462,7 +462,7 @@ does not rediscover it as a bug:
 - Full suite per phase: zero expression-serialization churn;
   signature-display deltas enumerated and reviewed.
 
-## 11. Future consumer: `Pipe` (recorded 2026-08-10, maintainer intent)
+## 11. Future consumer: `Pipe` (recorded 2026-08-09, maintainer intent)
 
 The maintainer's target: `xs |> x |-> x^2` should mean
 `Map(xs, x |-> x^2)` — the RHS lambda's parameter matched to `xs`'s
@@ -507,7 +507,7 @@ historical quirk that `|> Map(f)`-style spellings were inert in the
 Cortex-era docs). Those get their own small design note when the work
 starts.
 
-## 12. Phase-2 addendum (implemented 2026-08-10): the four conversions as built
+## 12. Phase-2 addendum (implemented 2026-08-09): the four conversions as built
 
 Phase 2 converted `Reduce`, `Scan`, `Fold` and `Partition` and deleted
 their `callbackElementOf` entries; only `Map`'s remains, for phase 3.
@@ -601,7 +601,7 @@ One consequence, recorded: `type-variables-collections.test.ts` reads
 so that expectation was updated and paired with a new assertion that the
 DISPLAYED signature is byte-identical to its pre-conversion string.
 
-## 13. Phase-3 addendum (implemented 2026-08-10): `Map`, and the deletion
+## 13. Phase-3 addendum (implemented 2026-08-09): `Map`, and the deletion
 
 Phase 3 converted `Map` and deleted the `callbackElementOf` mechanism
 outright. Two decisions need recording: how `Map`'s two clauses are

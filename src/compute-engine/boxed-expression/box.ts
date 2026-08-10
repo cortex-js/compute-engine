@@ -888,7 +888,7 @@ function annotateCallbacksFromSignature(
   if (sigType === undefined || typeof sigType === 'string') return ops;
   const arms = overloadArms(sigType);
   if (arms !== undefined) {
-    // R-D4 (§9, ruled 2026-08-10): resolve the arm FIRST, then stamp against
+    // R-D4 (§9, ruled 2026-08-09): resolve the arm FIRST, then stamp against
     // the resolved one alone. A set no arm of which declares a contextual slot
     // — every user-defined overload set — resolves to nothing and keeps the
     // ratified conservative skip.
@@ -948,7 +948,7 @@ function annotateFromDeclaredParams(
 }
 
 /**
- * The CONTEXTUAL-CALLBACK trigger (Design D, `docs/plans/2026-08-10-design-d-
+ * The CONTEXTUAL-CALLBACK trigger (Design D, `docs/plans/2026-08-09-design-d-
  * generic-callback-signatures.md` §5): a POLYMORPHIC callee with a
  * `callback<S>` slot annotates an INLINE `Function` literal at that slot with
  * `S`'s parameter types, instantiated from the sibling operands.
@@ -1178,7 +1178,7 @@ const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
  * collection node). Rejects everything that is not evidence about a single
  * element:
  *
- * - a UNION (even of tuples) — PERMANENTLY (ruled 2026-08-10). One
+ * - a UNION (even of tuples) — PERMANENTLY (ruled 2026-08-09). One
  *   annotation cannot express "each element satisfies its own arm":
  *   stamping the union makes a body that is valid for SOME arms fail once,
  *   at canonicalization, for the whole application — where the

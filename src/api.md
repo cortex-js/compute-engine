@@ -15272,7 +15272,7 @@ A **contextual callback** parameter type, spelled `callback<(T) -> boolean>`.
 It is the primitive `function` for every admission and subtyping decision,
 and carries — for CONTEXTUAL TYPING only — the signature `S` an INLINE
 `Function` literal at that slot is stamped with
-(`docs/plans/2026-08-10-design-d-generic-callback-signatures.md` §4). Its
+(`docs/plans/2026-08-09-design-d-generic-callback-signatures.md` §4). Its
 five-clause contract:
 
 1. **Ordinary admission and subtyping see only `function`.** Every subtype

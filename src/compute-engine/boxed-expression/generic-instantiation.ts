@@ -226,7 +226,7 @@ export interface ContextualCallbackPlan {
 
 /**
  * The `callback<S>` a PARAMETER SLOT offers a contextual stamp — R-D4
- * (resolve-then-stamp, ruled 2026-08-10) at SLOT granularity, the companion of
+ * (resolve-then-stamp, ruled 2026-08-09) at SLOT granularity, the companion of
  * {@link resolveContextualArm}'s arm granularity.
  *
  * A slot spelled `callback<S>` is its own answer. A UNION slot resolves first:
