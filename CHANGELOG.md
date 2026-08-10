@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+### Issues Resolved
+
+- **A point whose component is itself an inner product now compiles on the GPU
+  targets.** `Dot((Dot((x, y, z), (1, 2, 3)), 0), (1, 2))` — a 2-D point
+  product one of whose components is a 3-D one, the shape a gradient-noise
+  field has — emitted correct GLSL and was then rejected by the shape gate that
+  had just produced it: `dot(vec2(dot(vec3(x, y, z), vec3(1.0, 2.0, 3.0)), 0.0),
+  vec2(1.0, 2.0))` declined with "no room for the aggregate `vec3` value
+  standing in each slot". The gate scanned a vector constructor's argument text
+  for an aggregate constructor **anywhere** in it, so it could not tell a
+  `vec3` standing in a slot from one consumed by an enclosing `dot()`. What
+  stands in a slot is now judged after the scalar-reducing builtins (`dot`,
+  `length`, `distance`, `determinant`, `any`, `all` — each returns a scalar
+  whatever its argument shapes) are taken out of the source. The composition
+  nests to any depth, works with the reduced component under arithmetic
+  (`vec2(dot(…) + 1.0, 0.0)`), and holds on both GLSL and WGSL. An aggregate
+  genuinely standing in a slot — `Hypot` over two point operands, emitting
+  `length(vec2(vec2(x, y), vec2(1.0, 2.0)))` — still fails closed with the same
+  diagnostic.
+
 ## 0.103.0 _2026-08-09_
 
 ### Breaking Changes

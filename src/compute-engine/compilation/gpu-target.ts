@@ -1351,8 +1351,69 @@ function gpuHelperIsScalarOnly(name: string, preamble: string): boolean {
 }
 
 /**
- * A VECTOR constructor in `code` whose own arguments contain another aggregate
- * constructor — `length(vec2(vec3(…), vec3(…)))`, `length(vec2(float[1](3.0),
+ * The shader builtins that REDUCE an aggregate argument to a scalar result —
+ * a fact of both languages' specifications, in the same way the entries of
+ * `GPUShapeRules` are, not a list of CE heads. `dot`, `length` and `distance`
+ * are declared over the genType and return `float`/`f32`; `determinant` takes
+ * a `matN` and returns one scalar; `any` and `all` reduce a `bvecN` to a
+ * `bool`. Both languages spell all six the same way, so one table serves both.
+ *
+ * An aggregate CONSTRUCTOR standing inside one of these calls is consumed by
+ * it: what reaches the enclosing slot is the scalar the call returns, not the
+ * vector the constructor built.
+ */
+const GPU_SCALAR_REDUCING_BUILTINS = [
+  'dot',
+  'length',
+  'distance',
+  'determinant',
+  'any',
+  'all',
+] as const;
+
+/**
+ * `code` with every scalar-reducing builtin call (`GPU_SCALAR_REDUCING_BUILTINS`)
+ * replaced by a scalar literal — `dot(vec3(x, y, z), vec3(1.0, 2.0, 3.0)) + 1.0`
+ * becomes `0.0 + 1.0`.
+ *
+ * Used before scanning a slot's source for an aggregate value: a `vec3`
+ * constructor that is an ARGUMENT of `dot` is not a `vec3` standing in the
+ * slot, and reading it as one declines source the driver accepts (Tycho item
+ * 159: a point whose scalar component is itself an inner product). The
+ * outermost reduction is replaced first, so the constructors nested inside it
+ * go with it.
+ */
+function gpuWithoutScalarReductions(code: string): string {
+  const head = new RegExp(
+    `\\b(?:${GPU_SCALAR_REDUCING_BUILTINS.join('|')})\\s*\\(`,
+    'g'
+  );
+  let out = '';
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+  while ((m = head.exec(code)) !== null) {
+    let depth = 0;
+    let end = -1;
+    for (let i = m.index + m[0].length - 1; i < code.length; i++) {
+      if (code[i] === '(') depth++;
+      else if (code[i] === ')' && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+    // Unbalanced (a source shape this scanner does not understand): leave the
+    // remainder as it stands rather than guess at where the call ends.
+    if (end < 0) break;
+    out += code.slice(cursor, m.index) + '0.0';
+    cursor = end + 1;
+    head.lastIndex = cursor;
+  }
+  return out + code.slice(cursor);
+}
+
+/**
+ * A VECTOR constructor in `code` with another aggregate constructor STANDING IN
+ * one of its slots — `length(vec2(vec3(…), vec3(…)))`, `length(vec2(float[1](3.0),
  * 4.0))` — or `undefined` when there is none.
  *
  * Such a lowering RESHAPES its operands (it packs them into a vector) instead
@@ -1363,6 +1424,15 @@ function gpuHelperIsScalarOnly(name: string, preamble: string): boolean {
  * would mean. Only `vecN(` heads are scanned — a `matN(` constructor takes
  * `vecN` columns BY DESIGN, and the aggregate constructors are exempt from the
  * gate entirely (they build a shape rather than consume one).
+ *
+ * What stands in a slot is judged after the scalar-reducing calls are removed
+ * (`gpuWithoutScalarReductions`): `dot(vec2(dot(vec3(…), vec3(…)), 0.0),
+ * vec2(…))` — a 2-D inner product one of whose components is a 3-D one —
+ * packs a `float` and a `float` into its `vec2`, which is exactly what a
+ * `vec2` has room for. Every `vecN(` in the source is still visited, so an
+ * aggregate genuinely standing in a slot INSIDE a reduction
+ * (`dot(vec2(vec3(…), 0.0), …)`) is still caught by that constructor's own
+ * turn in the loop.
  */
 function gpuReshapesOperands(code: string): string | undefined {
   const ctor = /\b([iub]?vec[234][fhiu]?)\s*\(/g;
@@ -1372,7 +1442,9 @@ function gpuReshapesOperands(code: string): string | undefined {
     for (let i = m.index + m[0].length - 1; i < code.length; i++) {
       if (code[i] === '(') depth++;
       else if (code[i] === ')' && --depth === 0) {
-        const inner = code.slice(m.index + m[0].length, i);
+        const inner = gpuWithoutScalarReductions(
+          code.slice(m.index + m[0].length, i)
+        );
         const nested =
           /\b(?:[iub]?vec[234]|mat[234]|array\s*<|(?:float|f32)\s*\[)/.exec(
             inner

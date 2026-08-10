@@ -384,3 +384,82 @@ describe('Dot over points — compile targets (Tycho item 158)', () => {
     expect(r.code).toBe('np.dot((1, 2), (3, 4))');
   });
 });
+
+// Tycho item 159: a point whose SCALAR component is itself an inner product.
+// `Dot` reduces its `vecN` operands to a `float`, so the enclosing `vec2(…)`
+// constructor is handed two scalars — but the shape gate's `gpuReshapesOperands`
+// scanned the constructor's argument text for an aggregate constructor ANYWHERE,
+// found the inner `vec3(…)`, and declined the source it had just emitted
+// correctly. This is the gradient-noise shape: a 2-D point product whose
+// components are 3-D hash products.
+describe('Dot composed under Dot — GPU shape gate (Tycho item 159)', () => {
+  const ce = freshEngine();
+
+  const inner3 = ['Dot', ['PointList', 'x', 'y', 'z'], ['PointList', 1, 2, 3]];
+  const inner2 = ['Dot', ['PointList', 'x', 'y'], ['PointList', 1, 2]];
+  const nested = ['Dot', ['PointList', inner3, 0], ['PointList', 1, 2]];
+
+  it('glsl: a nested Dot in a point component compiles to native dot()', () => {
+    const r = new GLSLTarget().compile(ce.box(nested), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe(
+      'dot(vec2(dot(vec3(x, y, z), vec3(1.0, 2.0, 3.0)), 0.0), vec2(1.0, 2.0))'
+    );
+  });
+
+  it('wgsl: the same composition compiles', () => {
+    const r = new WGSLTarget().compile(ce.box(nested), { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe(
+      'dot(vec2f(dot(vec3f(x, y, z), vec3f(1.0, 2.0, 3.0)), 0.0), vec2f(1.0, 2.0))'
+    );
+  });
+
+  it('glsl: the composition nests to any depth', () => {
+    const r = new GLSLTarget().compile(
+      ce.box(['Dot', ['PointList', nested, 1], ['PointList', 3, 4]]),
+      { realOnly: true }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('dot(vec2(dot(vec2(dot(vec3(');
+  });
+
+  it('glsl: a reduced component under arithmetic compiles too', () => {
+    const r = new GLSLTarget().compile(
+      ce.box(['Dot', ['PointList', ['Add', inner2, 1], 0], ['PointList', 1, 2]]),
+      { realOnly: true }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toBe(
+      'dot(vec2(dot(vec2(x, y), vec2(1.0, 2.0)) + 1.0, 0.0), vec2(1.0, 2.0))'
+    );
+  });
+
+  it('the compiled value agrees with the interpreter', () => {
+    const eng = new ComputeEngine();
+    for (const [n, v] of [
+      ['x', 1],
+      ['y', 2],
+      ['z', 3],
+    ] as const)
+      eng.assign(n, v);
+    const expr = eng.box(nested);
+    // (1·1 + 2·2 + 3·3)·1 + 0·2 = 14
+    expect(expr.evaluate().toString()).toBe('14');
+    const r = new JavaScriptTarget().compile(expr, { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toBe(14);
+  });
+
+  it('an aggregate genuinely standing in a slot still fails closed', () => {
+    // The gate must not have been widened into blindness: `Hypot` over two
+    // vector operands still packs `vec2(vec2(…), vec2(…))`, which has no
+    // room for what stands in its slots.
+    expect(() =>
+      new GLSLTarget().compile(
+        ce.box(['Hypot', ['PointList', 'x', 'y'], ['PointList', 1, 2]]),
+        { realOnly: true }
+      )
+    ).toThrow(/no room for the aggregate/);
+  });
+});
