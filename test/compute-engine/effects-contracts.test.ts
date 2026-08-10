@@ -342,13 +342,32 @@ describe('1 — inline / assigned / opaque `{random}` callbacks', () => {
     it('a NON-function symbol operand contributes nothing', () => {
       // `Map(xs, k)` with `k := 5`: the binding resolves, and it is not
       // callable, so nothing is projected — the resolved-binding gate.
+      //
+      // `k` is declared `any` rather than left to infer `finite_integer` from
+      // the assignment: as of the 2026-08-09 callback-slot ruling, an operand
+      // whose declared type is PROVABLY not a function is rejected outright at
+      // every callback slot (`canonicalCallbackOperand`), which would make
+      // this an ill-typed program rather than a projection question. `any` is
+      // not provably disjoint from `function`, so the operand is still
+      // admitted and the gate below is the one under test.
       const ce = new ComputeEngine();
+      ce.declare('numericK1', 'any');
       ce.box(['Assign', 'numericK1', 5]).evaluate();
       expect(
         outerArrowEffects(
           ce.box(['Function', ['Map', ['List', 1, 2], 'numericK1'], 'xs'])
         )
       ).toBe(undefined);
+    });
+
+    it('…and a provably non-callable one is rejected before it gets there', () => {
+      // The companion to the above: the inferred `finite_integer` binding no
+      // longer reaches the projection at all.
+      const ce = new ComputeEngine();
+      ce.box(['Assign', 'numericK2', 5]).evaluate();
+      expect(
+        ce.box(['Map', ['List', 1, 2], 'numericK2']).errors[0]?.toString()
+      ).toBe('Error(ErrorCode("incompatible-type", "function", "integer"))');
     });
 
     it('the installed arrow is a construction-time SNAPSHOT; the runtime channel is the honest one', () => {

@@ -826,9 +826,7 @@ function threadableGate(sig: Type, whenUndeclared: boolean): Threadable {
  * admits BROADLY where the plain-arrow spelling narrows — the difference
  * between the two spellings is admission, never the stamp.
  */
-function declaredCallbackParamTypes(
-  t: Type
-): ReadonlyArray<Type | undefined> | undefined {
+function declaredCallbackParamTypes(t: Type): DeclaredCallbackSlot | undefined {
   const callback = contextualSlotCallback(t);
   const sig = callback?.signature ?? t;
   if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
@@ -844,8 +842,35 @@ function declaredCallbackParamTypes(
       ? concreteCallbackParamType(arg.type)
       : stampableParamType(arg.type)
   );
-  return types.some((x) => x !== undefined) ? types : undefined;
+  if (!types.some((x) => x !== undefined)) return undefined;
+  // The declared slot's CONSUMPTION arity: its required parameters, optionally
+  // through its optional ones, and unbounded when it declares a variadic tail.
+  // Only the required positions are stamped — an optional or variadic
+  // parameter's type is not read here — but a literal that supplies them is
+  // still correctly paired and must not be turned away.
+  //
+  // A `+` tail (`variadicMin === 1`) demands at least one occurrence, so it
+  // raises the MINIMUM too — the spelling `validateArguments` and the
+  // arity diagnostic both read (`sig.variadicMin ?? 0`). Without it a
+  // `(integer, string+)` slot admitted a unary literal and stamped it.
+  return {
+    types,
+    required: args.length + (sig.variadicMin ?? 0),
+    max:
+      sig.variadicArg !== undefined
+        ? Infinity
+        : args.length + (sig.optArgs?.length ?? 0),
+  };
 }
+
+/** A declared callback slot the signature-driven trigger will stamp: the
+ * parameter types to write, positionally, plus the literal arities that pair
+ * with them ({@link declaredCallbackParamTypes}). */
+type DeclaredCallbackSlot = {
+  types: ReadonlyArray<Type | undefined>;
+  required: number;
+  max: number;
+};
 
 /** A declared callback-parameter type that is worth stamping on a literal, or
  * `undefined`. Only positive evidence qualifies: `unknown`/`any` say nothing,
@@ -937,9 +962,24 @@ function annotateFromDeclaredParams(
     const param = paramAt(sig, i);
     if (param === undefined) break;
     if (contextualOnly && contextualSlotCallback(param) === undefined) continue;
-    const paramTypes = declaredCallbackParamTypes(param);
-    if (paramTypes === undefined) continue;
-    const literal = annotateFunctionLiteralParams(ce, ops[i], paramTypes);
+    const slot = declaredCallbackParamTypes(param);
+    if (slot === undefined) continue;
+    // The raw box is taken here rather than left to
+    // `annotateFunctionLiteralParams` (whose own discrimination is the same
+    // three tests) so that the ARITY GUARD below has the literal to measure.
+    const raw = inlineLiteral(ce, ops[i]);
+    if (raw === undefined) continue;
+    // ARITY GUARD, the contextual route's (§5 step 3) applied to this one: the
+    // stamp pairs the literal's parameters with the declared ones
+    // POSITIONALLY, so a literal of the wrong arity would take a PARTIAL stamp
+    // — a declared `(integer) -> boolean` slot annotating the `a` of
+    // `(a, b) |-> a > b` and leaving `b` bare. The whole stamp declines
+    // instead. Evaluation is unchanged either way (the arity error dominates);
+    // what this buys is that a declined application carries no half-written
+    // contract.
+    const arity = isFunction(raw) ? raw.nops - 1 : 0;
+    if (arity < slot.required || arity > slot.max) continue;
+    const literal = annotateFunctionLiteralParams(ce, raw, slot.types);
     if (literal === undefined) continue;
     result ??= [...ops];
     result[i] = literal;

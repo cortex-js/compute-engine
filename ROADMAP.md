@@ -130,33 +130,55 @@ parameter-position-only intent is unenforced (other positions behave as
 first-seen; undeclared source symbols infer `collection<unknown>` (the
 standing polytype behavior).
 
-**Cleanups, previously tracked nowhere (opened here 2026-08-09):**
+**Cleanups (opened here 2026-08-09; the first five CLOSED 2026-08-09):**
 
-- **Cross-operator asymmetries on degenerate inputs** (pre-existing,
-  surfaced by the conversion's parity sweeps): a valueless-source
-  `Filter`/`TakeWhile` answers `Set()` while siblings stay inert or
-  answer defaults; `CountIf`/`Find` THROW a raw `Error` whose message
-  names *Filter*; `Any(xs, 5)` thunk-lifts the non-function where
-  `CountIf(xs, 5)` errors. One convention, applied family-wide.
-- **Kleene-logic helper triplication**: `kleeneAny` (collections.ts),
-  `kleeneOr`/`kleeneAnd` (sets.ts), `kleeneEvery` (combinatorics.ts) —
-  consolidate into one shared home.
-- **The `Signature` operator is inert on the box/parse routes** for
-  every operator (`lazy: true` with no `canonical` handler — the
-  documented held-operand trap); only the `ce.function` route works.
+- ~~Cross-operator asymmetries on degenerate inputs~~ — CLOSED. Ruled
+  and applied family-wide: a source with no value leaves every operator
+  INERT (matching `Length`/`Total`/`Sort`, which always did), and a
+  PARAMETERLESS operand at a callback slot reports the declared slot's
+  `incompatible-type` everywhere instead of thunk-lifting on the lazy
+  half. Predicate errors now name their own operator. See
+  `isEnumerableSource` (collection-utils.ts) and
+  `canonicalCallbackOperand`/`predicateResultError` (collections.ts).
+- ~~Kleene-logic helper triplication~~ — CLOSED: one shared home,
+  `src/common/kleene.ts`.
+- ~~The `Signature` operator is inert on the box/parse routes~~ —
+  CLOSED: the name is resolved by lookup (read-only — canonicalizing
+  the held operand would DECLARE an unknown name).
+- ~~The signature-driven trigger's positional pairing has no arity
+  guard~~ — CLOSED: it declines the whole stamp, as the
+  contextual-solve route does.
+- ~~`src/math-json/OPERATORS.json` is stale for `Map`~~ — CLOSED:
+  regenerated (it was stale for 41 more operators, and missing three);
+  two generator arity defects fixed with it.
+- **A WRAPPER over a valueless source still answers as if empty**
+  (pre-existing, surfaced 2026-08-09 while closing the direct case):
+  `Filter(Take(xs, 2), p)` answers `[]` and `Any(Reverse(xs), p)`
+  `False` for a valueless `xs`, because the wrapper HAS collection
+  handlers — `isCollection` is `true` — while its own walk yields
+  nothing. The honest facets do propagate (`count` and
+  `isEmptyCollection` are both `undefined` all the way up), but reading
+  them from `isEnumerableSource` is **exponential**: measured at
+  exactly 2^(d+1) − 2 predicate calls over a depth-d `Filter` chain
+  (6/14/30/62/126/254 at depths 2–7), since each read re-enters the
+  next `isEmpty` down. Needs an O(1) propagating enumerability facet on
+  the collection handlers — a design, not a re-ordering.
+- **An eager IMPURE collection source is evaluated several times**
+  (pre-existing, measured 2026-08-09 during the above): counting
+  handler invocations over a 5-element source,
+  `Map(RandomShuffle(xs), f)` evaluates the shuffle **8** times,
+  `Filter(RandomShuffle(xs), p)` 5, `Any(…)` 2 — the
+  materialize-then-iterate path in `each()` re-evaluates a source that
+  has no collection handlers, once per facet query. Results stay
+  correct; the number of DRAWS consumed does not, so a seeded program
+  is not reproducible across these shapes. Needs the evaluated form to
+  be computed once and threaded through the facets.
 - **`FlatMap` has no `count` facet**, so `Length(FlatMap(…))` is inert
   even when the result is provably finite (a count requires applying
   the callback per element — needs a design, not a one-liner).
 - **Nested `Map`/`Filter` canonicalization is superlinear in depth**
   (measured 2026-08-09: 10→20 levels ≈ 2.65× on both the current and
   the pre-conversion path — pre-existing, cause unidentified).
-- **The signature-driven trigger's positional pairing has no arity
-  guard** (the contextual-solve route gained one 2026-08-09): a
-  wrong-arity literal at a plain-arrow or ground-`callback<S>` slot of
-  a user-declared signature can still take a partial stamp.
-- **`src/math-json/OPERATORS.json` is stale for `Map`** (generated;
-  regeneration will emit the contextual signature strings — the
-  documented-surface policy — and should be run on the next doc cycle).
 - **Bounded numeric element types** (`integer<1..10>`) and value-literal
   types still decline the stamp admission gate (`admissibleElementType`)
   — a one-line widening if ever wanted.

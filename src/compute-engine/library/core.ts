@@ -58,6 +58,7 @@ import { findRoot } from '../nonlinear-fit.js';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
   IComputeEngine as ComputeEngine,
+  BoxedOperatorDefinition,
   Expression,
   SymbolDefinition,
   SymbolDefinitions,
@@ -137,6 +138,32 @@ function isRefutablePipeTarget(f: Expression): boolean {
   return (
     isNumber(f) || isString(f) || isSymbol(f, 'True') || isSymbol(f, 'False')
   );
+}
+
+/**
+ * The operator definition an operand of `Signature` names, resolved on EVERY
+ * route.
+ *
+ * `Signature` is `lazy` and has no `canonical` handler, so its operand arrives
+ * UNBOUND on the `ce.box`/parse routes (the held-operand trap in CLAUDE.md):
+ * reading `.operatorDefinition` off it answers `undefined` there, and only the
+ * `ce.function` route — which boxes its arguments before the call — worked.
+ * The name is therefore looked up directly when the operand is an unbound
+ * symbol.
+ *
+ * `.canonical` would bind it too, but at the cost of a scope side effect: it
+ * DECLARES an unknown symbol, so `Signature(nosuchthing)` would leave a
+ * declaration behind. A lookup is read-only.
+ */
+function operatorDefinitionOfHeldSymbol(
+  ce: ComputeEngine,
+  x: Expression | undefined
+): BoxedOperatorDefinition | undefined {
+  if (x === undefined) return undefined;
+  if (x.operatorDefinition) return x.operatorDefinition;
+  if (!isSymbol(x)) return undefined;
+  const def = ce.lookupDefinition(x.symbol);
+  return def && 'operator' in def ? def.operator : undefined;
 }
 
 /** The symbol names named by a `HoldValues` subset spec: a single symbol,
@@ -3108,14 +3135,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(symbol) -> string | nothing',
       evaluate: ([x], { engine: ce }) => {
-        if (!x.operatorDefinition) return ce.Nothing;
+        const def = operatorDefinitionOfHeldSymbol(ce, x);
+        if (!def) return ce.Nothing;
 
         // R-D5: a runtime signature display is GROUND — a converted operator's
         // `forall`/`callback<S>` slot prints as the `function` slot it
         // converted from, since neither carries admission information.
-        return ce.string(
-          typeToDisplayString(x.operatorDefinition.signature.type)
-        );
+        return ce.string(typeToDisplayString(def.signature.type));
       },
     },
 

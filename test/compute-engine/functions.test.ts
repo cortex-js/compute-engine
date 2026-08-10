@@ -301,13 +301,20 @@ describe('Apply', () => {
     );
   });
 
-  // The constant-nullary shorthand contract is preserved (relied on by `Map`).
-  // This asymmetry with the stricter `Pipe` is deliberate.
-  test('a non-function literal operand is a constant nullary', () => {
+  // `Apply` keeps the constant-nullary shorthand contract. `Map` no longer
+  // shares it: a parameterless operand at a CALLBACK slot is rejected across
+  // the whole collection family (ruled 2026-08-09), which is what makes
+  // `Map(xs, 3)` agree with `Sort(xs, 3)` and `CountIf(xs, 3)` — all three
+  // used to disagree. `Apply(3, 5)` is not a callback slot: it is the explicit
+  // "apply this thing" operator, and applying a constant is its documented
+  // shorthand.
+  test('a non-function literal operand is a constant nullary for `Apply`', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Apply', 3, 5]).evaluate().toString()).toBe('3');
-    expect(ce.box(['Map', ['List', 1, 2], 3]).evaluate().toString()).toBe(
-      '[3,3]'
+    expect(
+      ce.box(['Map', ['List', 1, 2], 3]).errors[0]?.toString()
+    ).toBe(
+      'Error(ErrorCode("incompatible-type", "function", "finite_integer"))'
     );
   });
 });

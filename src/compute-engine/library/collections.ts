@@ -12,6 +12,7 @@ import {
   broadcastOverIndexedCollections,
   hasAccessibleComponents,
   isDeclaredScalarNumber,
+  isEnumerableSource,
   isFiniteIndexedCollection,
   isPossiblyCollectionTyped,
   isTuple,
@@ -23,9 +24,12 @@ import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
 // (collections → compile-expression → base-compiler → library/utils → collections)
+import { kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import { typeToString } from '../../common/type/serialize.js';
+import { isWildcard } from '../boxed-expression/pattern-utils.js';
 import {
   DictionaryType,
   ListType,
@@ -327,21 +331,20 @@ function predicateErrorValue(
 }
 
 /**
- * Three-valued OR over membership sub-queries: `true` as soon as one operand
- * definitely contains the target, `false` only when every operand definitely
- * refutes it, `undefined` when at least one operand could not answer.
+ * The error every predicate consumer throws when its predicate returns
+ * something that is neither `True` nor `False` and is not an element-valued
+ * failure ({@link predicateErrorValue}).
  *
- * `Array.prototype.some()` collapses an UNDECIDED sub-query (`undefined`) into
- * a definite `false`, which is precisely the unsound answer
- * `CollectionHandlers.contains` reserves `undefined` for.
+ * Named for the operator that CONSUMED the predicate. `Filter`'s message was
+ * copied verbatim into each sibling, so `CountIf(xs, x ↦ y)` reported a
+ * *Filter* predicate — an operator the user never wrote.
  */
-function kleeneAny(values: Iterable<boolean | undefined>): boolean | undefined {
-  let undecided = false;
-  for (const v of values) {
-    if (v === true) return true;
-    if (v === undefined) undecided = true;
-  }
-  return undecided ? undefined : false;
+function predicateResultError(operator: string, fn: Expression): Error {
+  return new Error(
+    `${operator} predicate must return "True" or "False". ${spellCheckMessage(
+      fn
+    )}`
+  );
 }
 
 /**
@@ -374,6 +377,75 @@ function shorthandFunctionOperand(
   // least one parameter (from a wildcard `_`/`_1`, or a free unknown).
   if (fn === undefined || !isFunction(fn, 'Function') || fn.nops < 2)
     return undefined;
+  return fn;
+}
+
+/**
+ * The canonical function literal for a higher-order operator's callback slot,
+ * or `undefined` when the operand is a plain VALUE that only a PARAMETERLESS
+ * lift could turn into a function (`Map(xs, 5)`, `Any(xs, True)`).
+ *
+ * `canonicalFunctionLiteral`'s shorthand path (its step 6) turns any operand
+ * into a literal: an operand contributing no wildcard and no free unknown
+ * becomes the constant `() ↦ 5`. That is what made `Map(xs, 5)` answer
+ * `[5, 5, 5]` and `Any(xs, 5)` carry a thunk, while the EAGER siblings —
+ * which route through {@link shorthandFunctionOperand} instead — reported
+ * `incompatible-type function/finite_integer` for the identical `Sort(xs, 5)`.
+ * Declining the lift here hands the operand to the signature validation the
+ * eager operators already use, so the whole family reports the same error
+ * (ruled 2026-08-09: a parameterless operand at a callback slot is never what
+ * the author meant). It is the same rule `canonicalFunctionLiteral` already
+ * applies to a STRING operand at its step 0, widened from that one type.
+ *
+ * An operand that is ALREADY function-typed is untouched: an explicitly
+ * written `["Function", 42]` is a deliberate nullary literal, not a value that
+ * had to be lifted, and a symbol keeps deferring to its (possibly later)
+ * definition.
+ */
+function canonicalCallbackOperand(
+  op: Expression | undefined
+): Expression | undefined {
+  if (op === undefined) return undefined;
+  const fn = canonicalFunctionLiteral(op);
+  // The operand a canonical handler REJECTS is replaced by the error, which is
+  // how such a handler reports one, so the diagnostic matches the eager
+  // operators' `validateArguments` verdict byte for byte.
+  const reject = (actual?: Type) =>
+    op.engine.error([
+      'incompatible-type',
+      'function',
+      typeToString(actual ?? op.type.type),
+    ]);
+  // A STRING is `canonicalFunctionLiteral`'s own step-0 exclusion, declined
+  // there for this very reason — reported here instead of leaving the
+  // application silently inert.
+  if (fn === undefined) return isString(op) ? reject() : undefined;
+  if (op.type.matches('function')) return fn;
+  // A SYMBOL is normally left to defer to its (possibly later) definition —
+  // that is `canonicalFunctionLiteral`'s step 2 and the forward-reference
+  // contract. One whose DECLARED type is already provably not a function
+  // (`Any(xs, True)`, a symbol declared `integer`) defers to nothing: the
+  // eager siblings reject it through `validateArguments`, and accepting it
+  // here produced `Map([1,2], True) → [True(1), True(2)]`.
+  //
+  // The type is read from the definition by NAME, not from `op.type`: the
+  // operand arrives raw here, where every symbol still reads `unknown`, and
+  // `.canonical` would answer at the cost of DECLARING an undeclared symbol.
+  // A symbol with no definition — the forward reference — is left alone.
+  // A WILDCARD (`_`, `_1`, a named `_x`) is never an ordinary symbol here: the
+  // bare `_` is the identity-function shorthand and the numbered ones are an
+  // enclosing shorthand's parameters. Whatever a scope happens to have bound
+  // to that name says nothing about the slot (`canonicalFunctionLiteral`
+  // excepts `_` at its step 2 for the same reason).
+  if (isSymbol(op) && !isWildcard(op)) {
+    const def = op.engine.lookupDefinition(op.symbol);
+    const declared = def && 'value' in def ? def.value.type.type : undefined;
+    if (declared !== undefined && provablyDisjoint(declared, 'function'))
+      return reject(declared);
+    return fn;
+  }
+  // `["Function", body, ...params]`: a lift with no parameter is a constant.
+  if (isFunction(fn, 'Function') && fn.nops < 2) return reject();
   return fn;
 }
 
@@ -2257,7 +2329,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // (`Count([True, False, True], True)`) has none and still counts as a
       // value.
       if (ops.length === 2 && isPredicateShorthand(ops[1])) {
-        const fn = canonicalFunctionLiteral(ops[1]);
+        const fn = canonicalCallbackOperand(ops[1]);
         if (fn) ops = [ops[0], fn];
       }
 
@@ -2365,7 +2437,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('Any', [collection]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!fn) return null;
       return engine._fn('Any', [collection, fn]);
     },
@@ -2390,7 +2462,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('All', [collection]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!fn) return null;
       return engine._fn('All', [collection, fn]);
     },
@@ -2482,13 +2554,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // identical to its historical behavior.
       if (ops.length <= 2) {
         const collection = checkCollectionOperand(engine, ops[0]);
-        const fn = canonicalFunctionLiteral(ops[1]);
+        const fn = canonicalCallbackOperand(ops[1]);
         if (!collection.isValid || !fn) return null;
 
         return engine._fn('Map', [collection, fn]);
       }
 
-      const fn = canonicalFunctionLiteral(ops[ops.length - 1]);
+      const fn = canonicalCallbackOperand(ops[ops.length - 1]);
       const collections = ops
         .slice(0, -1)
         .map((c) => checkCollectionOperand(engine, c));
@@ -2742,7 +2814,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!collection.isValid || !fn) return null;
 
       return engine._fn('Filter', [collection, fn]);
@@ -2771,6 +2843,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.op1.isEmptyCollection === true) return true;
+        // A source that cannot be enumerated leaves emptiness UNKNOWN: the
+        // walk below would find nothing and report a definite `true`, which is
+        // how `Filter(xs, p)` answered `[]` for a valueless `xs`.
+        if (!isEnumerableSource(expr.op1)) return undefined;
         try {
           for (const _ of expr.each()) return false;
           return true;
@@ -2838,11 +2914,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // throw this exact message, as do the sibling predicate consumers
         // (`Find`, `CountIf`, `Position`, `IndexWhere`, `Partition`) —
         // instead of silently answering `false`.
-        throw new Error(
-          `Filter predicate must return "True" or "False". ${spellCheckMessage(
-            expr.op2
-          )}`
-        );
+        throw predicateResultError('Filter', expr.op2);
       },
       iterator: (expr) => {
         if (!isFunction(expr))
@@ -2879,11 +2951,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                 // a message about the predicate.
                 const err = predicateErrorValue(pred);
                 if (err) return { value: err, done: false };
-                throw new Error(
-                  `Filter predicate must return "True" or "False". ${spellCheckMessage(
-                    expr.op2
-                  )}`
-                );
+                throw predicateResultError('Filter', expr.op2);
               }
             }
           },
@@ -2975,7 +3043,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'forall T. (collection<T>, reducer: callback<(unknown, T) -> unknown>, initial: value?) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!collection.isValid || !fn) return null;
 
       const initial = ops[2]?.canonical;
@@ -3117,7 +3185,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       'forall T. (reducer: callback<(unknown, T) -> unknown>, initial: value, collection<T>) -> value',
     canonical: (ops, { engine }) => {
-      const fn = canonicalFunctionLiteral(ops[0]);
+      const fn = canonicalCallbackOperand(ops[0]);
       const initial = ops[1]?.canonical;
       const collection = checkCollectionOperand(engine, ops[2]);
       if (!fn || !initial?.isValid || !collection.isValid) return null;
@@ -3152,7 +3220,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!collection.isValid || !fn) return null;
       // An initial value is optional, but when one is PROVIDED it must not be
       // silently dropped if invalid — otherwise `Scan(xs, f, Divide(1))` would
@@ -3302,7 +3370,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!collection.isValid || !fn) return null;
       return engine._fn('TakeWhile', [collection, fn]);
     },
@@ -3329,6 +3397,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.op1.isEmptyCollection === true) return true;
+        // See `Filter.isEmpty`: an unenumerable source leaves this unknown
+        // rather than reporting the empty walk as an empty prefix.
+        if (!isEnumerableSource(expr.op1)) return undefined;
         const first = expr.op1.each().next();
         if (first.done) return true;
         const f = applicable(expr.op2);
@@ -3433,7 +3504,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops) => ops[0].type,
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!collection.isValid || !fn) return null;
       return engine._fn('DropWhile', [collection, fn]);
     },
@@ -3527,7 +3598,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!collection.isValid || !fn) return null;
       return engine._fn('FlatMap', [collection, fn]);
     },
@@ -3678,7 +3749,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return false;
         // Three-valued: an operand that cannot decide membership leaves the
         // whole query undecided (`.some()` would report a definite `false`).
-        return kleeneAny(
+        return kleeneOr(
           expr.ops.map((op) =>
             isAtomicJoinOperand(op) ? op.isSame(target) : op.contains(target)
           )
@@ -5385,6 +5456,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Zero;
+      // A source that cannot be enumerated has no first match to index AND no
+      // grounds for the NOT-FOUND `0` — stay inert (see `isEnumerableSource`).
+      if (!isEnumerableSource(xs)) return undefined;
       // An element-valued predicate failure (see `predicateErrorValue`) is
       // reported as the operator's result. Collected here rather than thrown:
       // stop the walk (by reporting a match) and return the error below.
@@ -5400,11 +5474,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             predErrors.push(err);
             return true;
           }
-          throw new Error(
-            `Filter predicate must return "True" or "False". ${spellCheckMessage(
-              fn
-            )}`
-          );
+          throw predicateResultError('IndexWhere', fn);
         }) ?? undefined;
       if (predErrors.length > 0) return predErrors[0];
       return ce.number(index ?? 0);
@@ -5433,6 +5503,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Nothing;
+      // A source that cannot be enumerated has no first match to report AND no
+      // grounds for the NOT-FOUND `Nothing` — stay inert (see
+      // `isEnumerableSource`).
+      if (!isEnumerableSource(xs)) return undefined;
       for (const item of xs.each()) {
         const applied = f([item]);
         const pred = sym(applied);
@@ -5442,11 +5516,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // surfaced as the operator's result.
         const err = predicateErrorValue(applied);
         if (err) return err;
-        throw new Error(
-          `Filter predicate must return "True" or "False". ${spellCheckMessage(
-            fn
-          )}`
-        );
+        throw predicateResultError('Find', fn);
       }
       return ce.Nothing;
     },
@@ -5483,11 +5553,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // surfaced as the operator's result.
           const err = predicateErrorValue(applied);
           if (err) return err;
-          throw new Error(
-            `Filter predicate must return "True" or "False". ${spellCheckMessage(
-              fn
-            )}`
-          );
+          throw predicateResultError('CountIf', fn);
         }
       }
       return ce.number(count);
@@ -5523,11 +5589,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // surfaced as the operator's result.
           const err = predicateErrorValue(applied);
           if (err) return err;
-          throw new Error(
-            `Filter predicate must return "True" or "False". ${spellCheckMessage(
-              fn
-            )}`
-          );
+          throw predicateResultError('Position', fn);
         }
         index++;
       }
@@ -5592,7 +5654,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection, key: function) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!collection.isValid || !fn) return null;
       return engine._fn('MaxBy', [collection, fn]);
     },
@@ -5616,7 +5678,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection, key: function) -> value',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!collection.isValid || !fn) return null;
       return engine._fn('MinBy', [collection, fn]);
     },
@@ -5661,7 +5723,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('ArgMax', [collection]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!fn) return null;
       return engine._fn('ArgMax', [collection, fn]);
     },
@@ -5697,7 +5759,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       if (!collection.isValid) return null;
       if (ops[1] === undefined) return engine._fn('ArgMin', [collection]);
-      const fn = canonicalFunctionLiteral(ops[1]);
+      const fn = canonicalCallbackOperand(ops[1]);
       if (!fn) return null;
       return engine._fn('ArgMin', [collection, fn]);
     },
@@ -5796,7 +5858,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return parseType('indexed_collection<list>');
     },
     canonical: (ops, { engine }) => {
-      const fn = canonicalFunctionLiteral(ops[0]);
+      const fn = canonicalCallbackOperand(ops[0]);
       if (!fn) return null;
 
       if (!ops[2])
@@ -6169,11 +6231,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             // keeps the case the spell-check hint was written for: a predicate
             // that resolves to a concrete non-boolean (`x |-> x + 1`).
             return undefined;
-          throw new Error(
-            `Partition predicate must return "True" or "False". ${spellCheckMessage(
-              arg
-            )}`
-          );
+          throw predicateResultError('Partition', arg);
         }
       }
 
@@ -6518,7 +6576,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // honest statement of what is checkable here.
     signature: '(function, initial: any?) -> list',
     canonical: ([f, initialExpr], { engine }) => {
-      const fn = canonicalFunctionLiteral(f);
+      const fn = canonicalCallbackOperand(f);
       if (!fn) return null;
       const initial = initialExpr?.canonical;
       if (!initial) return engine._fn('Iterate', [fn]);
@@ -7137,6 +7195,10 @@ function evaluateQuantifier(
   ce: ComputeEngine
 ): Expression | undefined {
   const f = fn ? applicable(fn) : undefined;
+  // A source that cannot be enumerated decides nothing: the walk below would
+  // see no elements and fall to `defaultValue` — `Any(xs, p) → False`,
+  // `All(xs, p) → True` for a valueless `xs`. Stay inert instead.
+  if (!isEnumerableSource(collection)) return undefined;
   // `Any` short-circuits to True on the first True; `All` to False on the
   // first False. The complementary symbol ('False' for Any, 'True' for All) is
   // the "definite, keep going" result; anything else is undetermined.
@@ -7855,7 +7917,7 @@ function canonicalOptimumForm(
   if (!isFunction(f, 'Function')) return undefined;
   const d = domain.canonical;
   if (!d.type.matches('set')) return undefined;
-  const fn = canonicalFunctionLiteral(f);
+  const fn = canonicalCallbackOperand(f);
   if (!fn) return null;
   return engine._fn(operator, [fn, d]);
 }

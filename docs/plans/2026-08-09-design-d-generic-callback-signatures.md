@@ -308,7 +308,11 @@ conversions land and is reviewed per phase, not absorbed silently.
    that did not happen.
 
    The projection is `groundedDisplayType` (`src/common/type/display.ts`),
-   applied at the runtime display consumers: the `Signature` operator,
+   applied at the runtime display consumers: the `Signature` operator
+   (which, until the 2026-08-09 ROADMAP cleanup, answered `Nothing` for
+   EVERY operator on the `ce.box`/parse routes — `lazy: true` with no
+   `canonical` handler, so the name arrived unbound; it now resolves the
+   name by lookup, and the R-D5 pins cover all three routes),
    the scope listing (`engine-scope.ts`),
    `BoxedOperatorDefinition.toJSON`, and a boxed symbol's `.type`. VALUE
    definitions are covered too (added in the adversarial-review round,

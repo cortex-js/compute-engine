@@ -128,6 +128,7 @@
   "Collections": {
     "description": "Collection constructors and collection transforms.",
     "operators": [
+      "Adjoin",
       "All",
       "Any",
       "Append",
@@ -188,6 +189,7 @@
       "PointY",
       "PointZ",
       "Position",
+      "QuotientRing",
       "RandomShuffle",
       "Range",
       "RecordFrom",
@@ -599,6 +601,7 @@
       "Equal",
       "Greater",
       "GreaterEqual",
+      "IdenticallyEqual",
       "IsSame",
       "Less",
       "LessEqual",

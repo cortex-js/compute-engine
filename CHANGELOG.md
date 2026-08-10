@@ -2,6 +2,44 @@
 
 ### Breaking Changes
 
+- **A collection operator whose source has no value now stays inert, instead
+  of answering as if the source were empty.** `Filter` and `TakeWhile`
+  answered an empty collection, `Find` answered `Nothing`, `IndexWhere` `0`,
+  `Any` `False` and `All` `True` when handed a source they could not see into
+  — a symbol declared but never assigned, an undeclared symbol, or an
+  application of an unknown operator. Those answers were not conservative:
+  with `xs` declared `list<integer>` and unassigned, `Any(xs, x ↦ x > 2)`
+  answered `False`, and assigning `xs := [1, 5]` afterwards makes the same
+  expression `True`. The walk that produced them cannot tell "this collection
+  is empty" from "there was nothing here to walk". Every one of these now
+  behaves the way `Length`, `Total`, `Sort`, `Map`, `CountIf` and `Position`
+  always have on the same input, and answers normally as soon as the source
+  has a value. A genuinely empty collection still gets the definite answer.
+
+  This covers the source operand itself. A WRAPPER around a valueless source —
+  `Filter(Take(xs, 2), p)`, `Any(Reverse(xs), p)` — still answers as if the
+  collection were empty, because the wrapper does have collection handlers
+  while its own walk yields nothing. That case is unchanged by this release
+  and tracked in `ROADMAP.md`; it needs an O(1) propagating enumerability
+  facet on the collection handlers.
+
+- **A parameterless operand at a callback slot is now rejected across the
+  whole collection family.** `Map(xs, 5)` answered `[5, 5, 5]` and
+  `Any(xs, 5)` carried a constant thunk, while the identical `Sort(xs, 5)`
+  and `CountIf(xs, 5)` reported `incompatible-type function/finite_integer`.
+  The split was an artifact: the lazy operators routed their operand through
+  the shorthand path, which LIFTS a value with no wildcard and no free unknown
+  into the constant `() ↦ 5`, while the eager ones validated against the
+  declared slot. All of them now report the declared slot's error — for a
+  plain value, a string, and a symbol whose declared type is provably not a
+  function (`Map(xs, k)` with `k := 5`). What a `function` slot admits is
+  unchanged: named operators, `function`-typed symbols, wildcard shorthands
+  (`Map(xs, _)`), free-unknown shorthands (`Map(xs, q + 1)`), an explicitly
+  written nullary literal (`["Function", 42]`), and any symbol whose type is
+  not yet known — the forward reference — all still pass. `Apply(3, 5)` is
+  unaffected: it is not a callback slot, and applying a constant is its
+  documented shorthand.
+
 - **The Cortex language has been renamed Epsil.** The experimental scripting
   language previously called Cortex is now Epsil, and every public surface
   follows: the CLI binary is `epsil` (was `cortex`), the conventional source
@@ -61,6 +99,20 @@
   `=` to `:=` where it assigns.
 
 ### New Features
+
+- **`Dot` accepts numeric `Tuple`/`PointList` operands.** `Dot((1, 2),
+  (3, 4))` — and the equivalent `PointList` spelling — is now valid, typed
+  `number`, and evaluates to the inner product, matching the already-supported
+  `List` vectors; mixed `tuple · list` products work too. `Dot` is the
+  sanctioned representation of a point inner product (`tuple · tuple` has no
+  implicit product and remains an error), so the explicit operator now accepts
+  the operands the implicit one rejects. Point operands lower to the native
+  `dot()` builtin on the GLSL/WGSL compile targets (with the usual
+  operand-shape fail-closed guards: matching widths, `vec2`–`vec4` only) and
+  to `np.dot` on Python. Unequal fixed lengths report
+  `incompatible-dimensions`; a tuple operand that is not provably a fixed
+  numeric point (a symbolic point, a point list with a collection component)
+  stays symbolic.
 
 - **Inline callback lambdas now infer their parameter type from the call
   site.** An unannotated function literal passed directly as an argument is
@@ -358,6 +410,37 @@
 
 ### Improvements
 
+- **`Signature(op)` works on the `ce.box` and `ce.parse` routes.** The
+  operator holds its operand and had no `canonical` handler, so the name
+  arrived unbound and `Signature` answered `Nothing` for every operator unless
+  the caller went through `ce.function()`, which boxes its arguments first.
+  The name is now resolved by lookup — which also keeps the route read-only,
+  where canonicalizing the operand would have DECLARED an unknown name as a
+  side effect of asking about it.
+
+- **A malformed predicate is reported by the operator that consumed it.**
+  `CountIf`, `Find`, `IndexWhere` and `Position` all threw an error whose
+  message named *Filter*, an operator the user never wrote — `Filter`'s
+  message had been copied verbatim into each of them.
+
+- **The signature-driven callback stamp declines a wrong-arity literal
+  instead of half-annotating it.** A user signature declaring a concrete
+  arrow parameter (`(cb: (integer) -> boolean) -> boolean`) annotates an
+  inline literal passed there by pairing parameters positionally; given
+  `(a, b) ↦ a > b` it annotated `a` and left `b` bare. The whole stamp now
+  declines, as the contextual-`callback<S>` route already did. Evaluation is
+  unchanged either way — the arity error dominates — but a declined
+  application no longer carries a half-written contract. Optional and
+  variadic declared parameters widen the admissible arity accordingly.
+
+- **`src/math-json/OPERATORS.json` regenerated**, picking up the contextual
+  `callback<S>` signature strings, the variadic `Append`, and three operators
+  missing from it entirely (`Adjoin`, `IdenticallyEqual`, `QuotientRing`). Two
+  defects in the generator are fixed along the way: a `forall`-quantified
+  signature reported its arity as `"unknown"`, and the arity count split on
+  every comma — including those inside a parameter's own type, which made
+  `Fold` 4-ary.
+
 - **Element-wise (broadcast) failures are now self-diagnosing.** A user
   function with scalar parameters is automatically applied element-wise over
   an indexed-collection argument; when that fired unexpectedly, the resulting
@@ -419,6 +502,22 @@
   position.
 
 ### Resolved Issues
+
+- **`tuple · tuple` and `x / tuple` now reject consistently, regardless of
+  how precisely the element types are known.** The canonicalization guards
+  only counted *provably* numeric tuples, so a product (or a division) with a
+  `tuple<broadcastable<number>, …>` operand was accepted (typed `number`) and
+  the identical `incompatible-type` rejection surfaced only at evaluation —
+  making validity appear to depend on the order in which operand types were
+  refined (a more precise type turned an "accepted" expression into an
+  error). Both guards now count operands by tuple-ness, exactly like the
+  evaluation path: a tuple product with another tuple, or a tuple divisor,
+  never becomes valid under any element refinement. The LaTeX rendering of
+  these rejections now suggests `Dot` — the operator that does accept points
+  — instead of only reporting that a tuple is not a number. (`scalar +
+  tuple` with *unproven* elements deliberately stays symbolic with an honest
+  union type: per the retractable-evidence ruling, `Add` bakes its error only
+  when both the tuple and the scalar are proven.)
 
 - **A seedless `Reduce` now seeds with the collection's first element.**
   Without an initial value, `Reduce` folded from the `Nothing` sentinel, which

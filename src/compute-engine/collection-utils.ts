@@ -32,6 +32,71 @@ export function isFiniteIndexedCollection(col: Expression): boolean {
 }
 
 /**
+ * True when `xs`'s elements can actually be ENUMERATED — so that a walk of it
+ * that yields nothing means the collection is EMPTY, rather than that there
+ * was nothing to walk.
+ *
+ * `each()` answers with an empty sequence for a source it cannot see into: a
+ * symbol with no value (`ce.declare('xs', 'list<integer>')` and no assignment,
+ * or an undeclared symbol), and an application of an unknown operator
+ * (`f(x)`). Neither has collection handlers, and neither is distinguishable
+ * from an empty collection by the walk alone. Concluding from that walk is how
+ * `Filter(xs, p)` used to answer `[]`, `Any(xs, p)` `False`, `All(xs, p)`
+ * `True`, `Find(xs, p)` `Nothing` and `IndexWhere(xs, p)` `0` for such a
+ * source — answers a later `xs := [1, 5]` contradicts, and which the rest of
+ * the library (`Length`, `Total`, `Sort`, `Map`, `CountIf`, …) has always
+ * declined to give by staying inert.
+ *
+ * An EAGER collection operator (`Characters`, `UnicodeScalars`) has no
+ * collection handlers either until it is evaluated, but `each()` DOES walk it
+ * through the materialize-then-iterate path. The evaluated form is consulted
+ * for exactly that case — off the hot path, since a source that is already a
+ * collection answers on the first test.
+ *
+ * **On the discarded evaluation** (measured 2026-08-09, don't re-litigate):
+ * the fallback fires only for a source that is not already a collection, and
+ * only at the LEAF of a chain — an inner `Filter`/`Map`/`Take` answers `true`
+ * on the first test. Measured at nesting depth 6 over `Characters(400)`: 12
+ * calls, 2 fallbacks; it does not compound with depth. The evaluated form is
+ * also what the subsequent walk materializes, and the lazy-collection evaluate
+ * memo keeps that second pass cheap.
+ *
+ * **Why not the propagating signal.** `isEmptyCollection`/`count` are the
+ * HONEST facets — a valueless leaf reports `undefined` for both, and so does a
+ * wrapper over one (`Take(xs, 2)`, `Reverse(xs)`), where `isCollection`
+ * answers `true`. Testing them here would close the wrapper hole (see the
+ * ROADMAP follow-up) but is **exponential**: `Filter.isEmpty` would call this,
+ * which reads the source's `isEmptyCollection`, which is the inner
+ * `Filter.isEmpty`, which calls this again — measured at exactly 2^(d+1) − 2
+ * calls (6/14/30/62/126/254 at depths 2–7), the double-read shape-query class.
+ * The wrapper hole needs an O(1) propagating facet, not this predicate.
+ *
+ * **On evaluating an IMPURE source.** The fallback evaluates `xs` and throws
+ * the result away, so an eager IMPURE producer (`RandomShuffle`) runs one
+ * extra time. That is a pre-existing property of these paths rather than
+ * something this predicate introduced: counting handler invocations for a
+ * 5-element source, `Map(RandomShuffle(xs), f)` — which never reaches this
+ * function — evaluates the shuffle **8** times, `Filter(RandomShuffle(xs), p)`
+ * 5 (of which this contributes 1), `Any(…)` 2. The results stay correct (a
+ * filtered shuffle is still a filtered shuffle); what is not reproducible is
+ * the number of draws consumed. Tracked in `ROADMAP.md` as its own defect —
+ * fixing it here alone would not make the path reproducible.
+ *
+ * **Asymmetry with {@link isBroadcastableCollection}** — deliberate. That
+ * predicate has no such fallback because it answers a different question at a
+ * different place: it is consulted on operands that have ALREADY been
+ * evaluated (the broadcast gates run post-evaluation), and it fails CLOSED —
+ * a `false` means "do not broadcast", which leaves the expression symbolic.
+ * This one is consulted inside LAZY collection handlers, where the source may
+ * still be raw, and a wrong answer produces a definite wrong VALUE. Accuracy
+ * is worth an evaluation here and is not needed there.
+ */
+export function isEnumerableSource(xs: Expression): boolean {
+  // @fixme: we should have a better signal to indicate that `xs` is not a collection. Something `count` or `isCollection` would be suitable (they return undefined), but this appears to not be O(1)
+  return xs.isCollection === true || xs.evaluate().isCollection === true;
+}
+
+/**
  * A broadcast-eligible indexed-collection operand: an indexed collection that
  * is not a tuple (tuples carry point/vector semantics and stay atomic). Unlike
  * `isFiniteIndexedCollection`, this covers finite, unknown-length AND infinite
@@ -39,6 +104,12 @@ export function isFiniteIndexedCollection(col: Expression): boolean {
  * scalar-parameter lambda) broadcast over all of them; the known-finite vs.
  * unknown/infinite split (below) decides eager materialization vs. the lazy
  * `Map` form.
+ *
+ * Purely structural, with no evaluated-form fallback, where
+ * {@link isEnumerableSource} has one — see the note there. In short: every
+ * caller of this consults it on an already-evaluated operand, and a `false`
+ * answer only declines to broadcast (the expression stays symbolic), so an
+ * un-evaluated eager collection operand costs nothing here.
  */
 export function isBroadcastableCollection(x: Expression): boolean {
   return x.isIndexedCollection === true && !isTuple(x);

@@ -516,9 +516,18 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
     expect(out).toContain('2');
   });
 
-  it('the lazy slot stays inert for a non-function operand', () => {
+  // Was "the lazy slot stays inert for a non-function operand": a
+  // parameterless operand is now rejected at every callback slot, lazy and
+  // eager alike (ruled 2026-08-09 — see `canonicalCallbackOperand`). Admission
+  // through `callback<S>` is unchanged; what changed is that the operand never
+  // reaches it, having been replaced by the declared slot's own diagnostic.
+  it('the lazy slot rejects a non-function operand', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Filter', XS, 5]).isValid).toBe(true);
+    const e = ce.box(['Filter', XS, 5]);
+    expect(e.isValid).toBe(false);
+    expect(e.errors[0]?.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "function", "finite_integer"))'
+    );
   });
 });
 
@@ -600,6 +609,29 @@ describe('phase 1: the single-clause single-collection family converts', () => {
       );
     }
   );
+
+  // ROADMAP cleanup (2026-08-09): `Signature` is `lazy` with no `canonical`
+  // handler, so its operand arrived UNBOUND on the box and parse routes and
+  // `.operatorDefinition` read `undefined` there — EVERY operator answered
+  // `Nothing` unless the caller went through `ce.function`, which boxes its
+  // arguments first. The name is now resolved by LOOKUP, which also keeps the
+  // route free of the scope side effect `.canonical` would have had (it
+  // DECLARES an unknown symbol).
+  it.each(CONVERTED)('%s answers on the box and parse routes', (op, _d, g) => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Signature', op]).evaluate().string).toBe(g);
+    expect(
+      ce.parse(`\\mathrm{Signature}(\\mathrm{${op}})`).evaluate().string
+    ).toBe(g);
+  });
+
+  it('`Signature` of an unknown name is `Nothing`, and declares nothing', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Signature', 'nosuchoperator']).evaluate().symbol).toBe(
+      'Nothing'
+    );
+    expect(ce.lookupDefinition('nosuchoperator')).toBe(undefined);
+  });
 
   /** op, raw body, canonical body, evaluated result over `cs = [1,2,3]`. */
   const STAMPS: ReadonlyArray<[string, unknown, unknown, string]> = [
@@ -1361,15 +1393,19 @@ describe('phase 3: `Map` — the two clauses of §6 (revision 4)', () => {
     expect(ce.box(['Map', 'cs', 'p']).evaluate().toString()).toBe(
       '[p(1),p(2),p(3)]'
     );
-    // A non-function operand: the canonical handler declines and the
-    // expression stays inert, exactly as before the conversion (`Map` is lazy
-    // WITH a canonical handler, so argument validation never runs on it).
+    // A non-function operand: the canonical handler replaces it with the
+    // declared slot's diagnostic, the same one the EAGER siblings report
+    // through `validateArguments` (ruled 2026-08-09 — before that, `Map` alone
+    // stayed inert here because its canonical handler ran instead of argument
+    // validation).
     expect(
       ce
         .box(['Map', 'cs', { str: 'banana' }])
         .evaluate()
         .toString()
-    ).toBe('Map("cs", "banana")');
+    ).toBe(
+      'Map("cs", Error(ErrorCode("incompatible-type", "function", "string")))'
+    );
     // A union source still declines the stamp (the permanent union ruling).
     executeEpsil(ce, 'let mixed: list<integer|string> = [1,"a",2]');
     expect(

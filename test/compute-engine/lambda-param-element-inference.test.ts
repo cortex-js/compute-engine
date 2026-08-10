@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { applicable } from '../../src/compute-engine/function-utils';
@@ -1099,5 +1100,98 @@ describe('annotation-as-contract', () => {
     ]);
     expect(expr.isValid).toBe(false);
     expect(expr.toString()).toContain('incompatible-type');
+  });
+});
+
+/**
+ * # The signature-driven trigger's ARITY guard
+ *
+ * ROADMAP cleanup (2026-08-09). The contextual-solve route gained an arity
+ * guard when it shipped; this route — a MONOMORPHIC user signature declaring a
+ * plain arrow, or a ground `callback<S>` — did not. The stamp pairs the
+ * literal's parameters with the declared ones POSITIONALLY, so a literal of
+ * the wrong arity took a PARTIAL stamp: the first parameter annotated, the
+ * rest left bare, a half-written contract on an application that the arity
+ * error dominates anyway.
+ */
+describe('a wrong-arity literal takes no partial stamp', () => {
+  /** The `Typed` wrappers a stamp leaves on the literal at operand 0. */
+  function stampedParams(e: Expression): string {
+    return JSON.stringify((e.toMathJson() as any[])[1]);
+  }
+
+  test('a matching arity still stamps', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(cb: (integer) -> boolean) -> boolean');
+    expect(
+      stampedParams(ce.box(['g', ['Function', ['Greater', 'a', 2], 'a']]))
+    ).toBe('["Function",["Less",2,"a"],["Typed","a","\'integer\'"]]');
+  });
+
+  test('a WIDER literal declines the whole stamp', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(cb: (integer) -> boolean) -> boolean');
+    const e = ce.box(['g', ['Function', ['Greater', 'a', 'b'], 'a', 'b']]);
+    expect(stampedParams(e)).toBe('["Function",["Less","b","a"],"a","b"]');
+  });
+
+  test('an OPTIONAL parameter widens the admissible arity', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', '(cb: (integer, string?) -> boolean) -> boolean');
+    // Two parameters pair with `integer` then the optional `string`: in range.
+    expect(
+      stampedParams(
+        ce.box(['h', ['Function', ['Greater', 'a', 2], 'a', 'b']])
+      )
+    ).toBe('["Function",["Less",2,"a"],["Typed","a","\'integer\'"],"b"]');
+    // Three is past the optional one: out of range, no stamp at all.
+    expect(
+      stampedParams(
+        ce.box(['h', ['Function', ['Greater', 'a', 2], 'a', 'b', 'c']])
+      )
+    ).toBe('["Function",["Less",2,"a"],"a","b","c"]');
+  });
+
+  test('a VARIADIC declared tail admits any arity above the required one', () => {
+    const ce = new ComputeEngine();
+    ce.declare('k', '(cb: (integer, string*) -> boolean) -> boolean');
+    expect(
+      stampedParams(
+        ce.box(['k', ['Function', ['Greater', 'a', 2], 'a', 'b', 'c']])
+      )
+    ).toBe('["Function",["Less",2,"a"],["Typed","a","\'integer\'"],"b","c"]');
+    // `*` admits ZERO occurrences, so the bare required arity is in range.
+    expect(
+      stampedParams(ce.box(['k', ['Function', ['Greater', 'a', 2], 'a']]))
+    ).toBe('["Function",["Less",2,"a"],["Typed","a","\'integer\'"]]');
+  });
+
+  test('a `+` tail raises the MINIMUM arity, not just the maximum', () => {
+    // `variadicMin === 1`: the tail demands at least one occurrence, so a
+    // literal supplying only the fixed parameters is out of range and takes
+    // no stamp — the spelling `validateArguments` and the arity diagnostic
+    // both use.
+    const ce = new ComputeEngine();
+    ce.declare('v', '(cb: (integer, string+) -> boolean) -> boolean');
+    // Under-arity: the declared slot rejects the operand outright, so what
+    // survives is the diagnostic — never a half-annotated literal.
+    expect(
+      stampedParams(ce.box(['v', ['Function', ['Greater', 'a', 2], 'a']]))
+    ).not.toContain('Typed');
+    // Two parameters satisfy `integer` plus one `string`: in range, stamped.
+    expect(
+      stampedParams(ce.box(['v', ['Function', ['Greater', 'a', 2], 'a', 'b']]))
+    ).toBe('["Function",["Less",2,"a"],["Typed","a","\'integer\'"],"b"]');
+  });
+
+  test('a NARROWER literal declines too', () => {
+    // Here the declared slot rejects the operand outright, so the literal is
+    // replaced by the diagnostic — which is the point: whatever the
+    // application reports, it is never a half-annotated literal.
+    const ce = new ComputeEngine();
+    ce.declare('m', '(cb: (integer, integer) -> boolean) -> boolean');
+    expect(
+      stampedParams(ce.box(['m', ['Function', ['Greater', 'a', 2], 'a']]))
+    ).not.toContain('Typed');
   });
 });

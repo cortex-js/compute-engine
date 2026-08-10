@@ -2,6 +2,7 @@
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
 import { Complex } from 'complex-esm';
+import { kleeneAnd, kleeneNot, kleeneOr } from '../../common/kleene.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -92,40 +93,10 @@ function signedMembership(
   return undefined; // sign indeterminate
 }
 
-/**
- * Kleene three-valued OR: `true` as soon as any value is `true`, `false`
- * only when every value is `false`, `undefined` otherwise.
- *
- * Used by the `contains` handlers of compound sets (e.g. `Union`) so that an
- * indeterminate member test does not collapse to a definitive `false`
- * (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.2 invariant).
- */
-function kleeneOr(values: Iterable<boolean | undefined>): boolean | undefined {
-  let indeterminate = false;
-  for (const v of values) {
-    if (v === true) return true;
-    if (v === undefined) indeterminate = true;
-  }
-  return indeterminate ? undefined : false;
-}
-
-/**
- * Kleene three-valued AND: `false` as soon as any value is `false`, `true`
- * only when every value is `true`, `undefined` otherwise.
- */
-function kleeneAnd(values: Iterable<boolean | undefined>): boolean | undefined {
-  let indeterminate = false;
-  for (const v of values) {
-    if (v === false) return false;
-    if (v === undefined) indeterminate = true;
-  }
-  return indeterminate ? undefined : true;
-}
-
-/** Kleene three-valued NOT. */
-function kleeneNot(v: boolean | undefined): boolean | undefined {
-  return v === undefined ? undefined : !v;
-}
+// The `contains` handlers of compound sets (e.g. `Union`) combine their
+// sub-queries with the three-valued connectives of `common/kleene.ts`, so that
+// an indeterminate member test does not collapse to a definitive `false`
+// (docs/fungrim/FUNGRIM-PLAN-3-ASSUMPTIONS.md §5.2 invariant).
 
 // Note: the interval reading of ambiguous bracket pairs (`x \in [1, 5]`,
 // `(-\infty, 0) \cup (0, \infty)`) happens at the LaTeX boundary

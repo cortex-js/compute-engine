@@ -79,20 +79,49 @@ function arityFromSignature(sig: unknown): string {
   // An effect specifier may sit between the argument list and the arrow —
   // a space-separated word list (`(any) scope -> string`, or `any` for the
   // any-set; see `effectSetToString()` in common/type/effects.ts).
+  //
+  // A POLYMORPHIC signature (`forall T. (collection<T>, …) -> …`, the Design D
+  // spelling of every converted collection operator) binds its variables
+  // before the parameter list. The quantifier says nothing about arity, so it
+  // is stripped rather than parsed; without this every converted operator
+  // reported `"unknown"`.
   const match = sig
     .trim()
+    .replace(/^forall\s+[^.]*\.\s*/, '')
     .match(/^\((.*)\)\s*(?:[a-z_]+(?:\s+[a-z_]+)*\s*)?->/);
   if (!match) return 'unknown';
   const args = match[1].trim();
   if (args === '') return '0';
-  if (/(\*|\+)/.test(args)) return 'variadic';
-  if (args.includes('?')) return 'optional';
-  return String(
-    args
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean).length
-  );
+  // Split, and read the optional/variadic markers, at the TOP LEVEL only. A
+  // parameter type can carry commas and markers of its own —
+  // `reducer: callback<(unknown, T) -> unknown>` is ONE parameter, and a naive
+  // `split(',')` counted `Fold` as 4-ary.
+  const params = topLevelParams(args);
+  if (params.some((p) => /[*+]$/.test(p))) return 'variadic';
+  if (params.some((p) => p.endsWith('?'))) return 'optional';
+  return String(params.length);
+}
+
+/** `args` split on the commas that separate PARAMETERS — those outside any
+ * `(`, `<` or `[` group. The `>` of an ARROW (`->`) closes nothing: without
+ * that exclusion `callback<(unknown, T) -> unknown>` reads as unbalanced and
+ * every parameter after it merges into one. */
+function topLevelParams(args: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (let i = 0; i < args.length; i++) {
+    const c = args[i];
+    if (c === '(' || c === '<' || c === '[') depth++;
+    else if ((c === '>' && args[i - 1] !== '-') || c === ')' || c === ']')
+      depth--;
+    if (c === ',' && depth === 0) {
+      out.push(current.trim());
+      current = '';
+    } else current += c;
+  }
+  out.push(current.trim());
+  return out.filter(Boolean);
 }
 
 function asDescription(def: DefRecord): string | undefined {

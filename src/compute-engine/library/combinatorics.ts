@@ -9,6 +9,7 @@ import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { apply2 } from '../boxed-expression/apply.js';
 import { gamma, bigGamma, gammaln } from '../numerics/special-functions.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { kleeneEvery } from '../../common/kleene.js';
 
 /**
  * Above this many decimal digits, an exact combinatorial result (Fibonacci,
@@ -269,34 +270,6 @@ function evaluatePochhammer(
       ce.function('Add', [aExpr, ce.number(i)], { form: 'structural' })
     );
   return ce.function('Multiply', factors, { form: 'structural' });
-}
-
-/**
- * Three-valued `Array.prototype.every()` over membership sub-queries: `false`
- * as soon as one item definitely refutes (short-circuiting, as `every()`
- * does), `undefined` when nothing refutes but at least one item could not be
- * decided, `true` only when every item definitely holds.
- *
- * `items.every((x) => probe(x) ?? false)` collapses an UNDECIDED sub-query
- * into a definite `false` — precisely the answer `CollectionHandlers.contains`
- * reserves `undefined` for ("return `undefined` if the membership cannot be
- * determined").
- *
- * NOTE: `library/collections.ts` has a `kleeneAny` dual and `library/sets.ts`
- * a private `kleeneOr`/`kleeneAnd` pair. Consolidating the three copies of
- * this idiom into a shared home is a refactor left for its own round.
- */
-function kleeneEvery<T>(
-  items: ReadonlyArray<T>,
-  probe: (item: T, index: number) => boolean | undefined
-): boolean | undefined {
-  let undecided = false;
-  for (let i = 0; i < items.length; i++) {
-    const v = probe(items[i], i);
-    if (v === false) return false;
-    if (v === undefined) undecided = true;
-  }
-  return undecided ? undefined : true;
 }
 
 export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [

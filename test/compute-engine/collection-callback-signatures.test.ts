@@ -14,8 +14,12 @@ import { ComputeEngine } from '../../src/compute-engine';
  * — is not a documentation-only change: a signature parameter is checked
  * contravariantly, so it newly rejects three operand classes that work today.
  * The eager operators here validate their arguments, so such a narrowing bites
- * immediately; the lazy ones defer validation entirely and the bound would be
- * inert (a landmine for the day the lazy carve-out closes).
+ * immediately.
+ *
+ * The lazy operators used to defer validation entirely, which made any bound
+ * on their slot inert. That carve-out is closed for the operand class it hurt
+ * most — a PARAMETERLESS one (`Map(xs, 5)`) is now rejected there too, see
+ * below — while everything a `function` slot admits still reaches the handler.
  */
 
 const XS = ['List', 1, 2, 3, 4] as const;
@@ -76,11 +80,18 @@ describe('a callback whose result type is unknown is a valid operand', () => {
 });
 
 /**
- * The lazy/eager asymmetry: a `function` slot is only enforced on the operators
- * that do NOT hold their operands. This is the same carve-out that would leave
- * any bound on a lazy operator's held slot inert.
+ * A parameterless operand at a callback slot is rejected by the WHOLE family
+ * (ruled 2026-08-09, ROADMAP "Contextual callback typing residue").
+ *
+ * This used to be a lazy/eager asymmetry: the eager operators validated their
+ * operand against the declared `function` slot, while the lazy ones held
+ * theirs and routed it through `canonicalFunctionLiteral`, whose shorthand
+ * path LIFTED the value into the constant `() ↦ 5` — so `Sort(xs, 5)`
+ * reported `incompatible-type` while `Map(xs, 5)` answered `[5, 5, 5]`.
+ * `canonicalCallbackOperand` now declines the parameterless lift, and both
+ * halves report the same error.
  */
-describe('the `function` slot enforces only on the eager operators', () => {
+describe('a parameterless operand is rejected at every callback slot', () => {
   const eager = [
     'IndexWhere',
     'Find',
@@ -98,14 +109,24 @@ describe('the `function` slot enforces only on the eager operators', () => {
     'MinBy',
   ];
 
-  it.each(eager)('%s rejects a non-function operand', (op) => {
-    const ce = new ComputeEngine();
-    expect(ce.box([op, XS, 5]).isValid).toBe(false);
-  });
+  it.each([...eager, ...lazy])(
+    '%s rejects a non-function operand',
+    (op) => {
+      const ce = new ComputeEngine();
+      expect(ce.box([op, XS, 5]).isValid).toBe(false);
+    }
+  );
 
-  it.each(lazy)('%s holds its operand, so the slot is inert', (op) => {
+  // The diagnostic is the declared slot's, identical on both halves — the
+  // eager one from `validateArguments`, the lazy one from the operand the
+  // canonical handler replaced with it.
+  it.each([...eager, ...lazy])('%s reports incompatible-type', (op) => {
     const ce = new ComputeEngine();
-    expect(ce.box([op, XS, 5]).isValid).toBe(true);
+    expect(
+      ce.box([op, XS, 5]).errors[0]?.toString()
+    ).toBe(
+      'Error(ErrorCode("incompatible-type", "function", "finite_integer"))'
+    );
   });
 });
 
@@ -206,4 +227,116 @@ describe('`Iterate` declares the `function` primitive, not a signature', () => {
         .toString()
     ).toBe('[99,99,99]');
   });
+});
+
+/**
+ * # A VALUELESS source decides nothing
+ *
+ * ROADMAP cleanup (ruled 2026-08-09). `each()` yields an empty sequence for a
+ * source it cannot see into — a symbol with no value, an application of an
+ * unknown operator — which is indistinguishable from an empty collection's
+ * walk. Six operators concluded from that walk anyway: `Filter`/`TakeWhile`
+ * answered an empty collection, `Find` `Nothing`, `IndexWhere` `0`, `Any`
+ * `False` and `All` `True`. The rest of the library (`Length`, `Total`,
+ * `Sort`, `Map`, `CountIf`, `Position`, …) has always stayed inert on the same
+ * input, and those answers were not merely conservative — assigning the symbol
+ * afterwards contradicts them.
+ */
+describe('a valueless source leaves every operator inert', () => {
+  const P = ['Function', ['Greater', '_1', 2], '_1'] as const;
+
+  /** `xs` declared with a collection type but never assigned. */
+  function engineWithValuelessXs(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list<integer>');
+    return ce;
+  }
+
+  const OPS = [
+    'Filter',
+    'TakeWhile',
+    'DropWhile',
+    'Map',
+    'CountIf',
+    'Find',
+    'IndexWhere',
+    'Position',
+    'Any',
+    'All',
+    'FlatMap',
+  ];
+
+  it.each(OPS)('%s stays inert on a declared-but-unassigned source', (op) => {
+    const ce = engineWithValuelessXs();
+    expect(ce.box([op, 'xs', P]).evaluate().operator).toBe(op);
+  });
+
+  it.each(OPS)('%s stays inert on an UNDECLARED source', (op) => {
+    const ce = new ComputeEngine();
+    expect(ce.box([op, 'zz', P]).evaluate().operator).toBe(op);
+  });
+
+  it.each(OPS)('%s stays inert on an unknown application', (op) => {
+    const ce = new ComputeEngine();
+    expect(ce.box([op, ['f', 'x'], P]).evaluate().operator).toBe(op);
+  });
+
+  // What the inert answers used to assert, and why they were wrong: the same
+  // expressions answer differently once the source has a value.
+  it('the answers a value would give are not the ones inertness replaced', () => {
+    const ce = engineWithValuelessXs();
+    ce.assign('xs', ce.box(['List', 1, 5]));
+    expect(ce.box(['Any', 'xs', P]).evaluate().toString()).toBe('"True"');
+    expect(ce.box(['Filter', 'xs', P]).evaluate().toString()).toBe('[5]');
+    expect(ce.box(['IndexWhere', 'xs', P]).evaluate().toString()).toBe('2');
+  });
+
+  // The guard reads whether the source can be ENUMERATED, not whether it is
+  // already a collection: an EAGER collection operator has no collection
+  // handlers until it is evaluated, but `each()` materializes it.
+  it('an eager collection operator is still a valid source', () => {
+    const ce = new ComputeEngine();
+    const isA = ['Function', ['Equal', '_1', { str: 'a' }], '_1'];
+    const chars = ['Characters', { str: 'aab' }];
+    expect(ce.box(['Filter', chars, isA]).evaluate().toString()).toBe(
+      '["a","a"]'
+    );
+    expect(ce.box(['TakeWhile', chars, isA]).evaluate().toString()).toBe(
+      '["a","a"]'
+    );
+    expect(ce.box(['Any', chars, isA]).evaluate().toString()).toBe('"True"');
+  });
+
+  // A genuinely EMPTY collection still gets the definite answers.
+  it('an empty collection is not inert', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Filter', ['List'], P]).evaluate().toString()).toBe('[]');
+    expect(ce.box(['Any', ['List'], P]).evaluate().toString()).toBe('"False"');
+    expect(ce.box(['All', ['List'], P]).evaluate().toString()).toBe('"True"');
+    expect(ce.box(['Find', ['List'], P]).evaluate().toString()).toBe(
+      '"Nothing"'
+    );
+    expect(ce.box(['IndexWhere', ['List'], P]).evaluate().toString()).toBe('0');
+  });
+});
+
+/**
+ * # The predicate error names the operator that consumed it
+ *
+ * ROADMAP cleanup: `Filter`'s message was copied verbatim into each sibling,
+ * so `CountIf(xs, x ↦ y)` threw an error naming *Filter* — an operator the
+ * user never wrote.
+ */
+describe('a malformed predicate is reported by its own operator', () => {
+  const BAD = ['Function', 'y', '_1'] as const;
+
+  it.each(['CountIf', 'Find', 'IndexWhere', 'Position'])(
+    '%s names itself',
+    (op) => {
+      const ce = new ComputeEngine();
+      expect(() => ce.box([op, XS, BAD]).evaluate()).toThrow(
+        `${op} predicate must return`
+      );
+    }
+  );
 });
