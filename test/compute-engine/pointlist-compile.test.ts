@@ -295,3 +295,92 @@ describe('PointList evaluate path is unchanged', () => {
     expect(r.json).toEqual(['Tuple', 1, 2]);
   });
 });
+
+// Tycho item 158: `Dot` accepts fixed numeric `Tuple`/`PointList` operands
+// (the sanctioned spelling of the Desmos point inner product), and the GPU
+// targets lower it to the native `dot()` builtin. The lowering itself
+// predates the item — the `Dot: 'dot'` GPU table entry and the generic
+// operand-shape gate (`gpuCheckOperandShapes`) — but was unreachable for
+// tuples while validation rejected them; these tests pin the now-reachable
+// route on every target.
+describe('Dot over points — compile targets (Tycho item 158)', () => {
+  const ce = freshEngine();
+
+  it('glsl: Dot(Tuple, Tuple) emits the native dot() over vecN', () => {
+    const r = new GLSLTarget().compile(
+      ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 3, 4]]),
+      { realOnly: true }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('dot(vec2(x, y), vec2(3.0, 4.0))');
+  });
+
+  it('glsl: PointList operands emit identically to Tuple operands', () => {
+    const glsl = new GLSLTarget();
+    const viaPointList = glsl.compile(
+      ce.box(['Dot', ['PointList', 'x', 'y'], ['PointList', 3, 4]]),
+      { realOnly: true }
+    );
+    const viaTuple = glsl.compile(
+      ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 3, 4]]),
+      { realOnly: true }
+    );
+    expect(viaPointList.success).toBe(true);
+    expect(viaPointList.code).toBe(viaTuple.code);
+  });
+
+  it('glsl: point-typed symbol operands emit dot(p, q)', () => {
+    const eng = new ComputeEngine();
+    eng.declare('p', 'tuple<number, number>');
+    eng.declare('q', 'tuple<number, number>');
+    const r = new GLSLTarget().compile(eng.box(['Dot', 'p', 'q']), {
+      realOnly: true,
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('dot(p, q)');
+  });
+
+  it('glsl: mismatched vector widths fail closed', () => {
+    expect(() =>
+      new GLSLTarget().compile(
+        ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 1, 2, 3]]),
+        { realOnly: true }
+      )
+    ).toThrow(/different widths/);
+  });
+
+  it('glsl: a 5-component point fails closed (no vec5)', () => {
+    expect(() =>
+      new GLSLTarget().compile(
+        ce.box(['Dot', ['Tuple', 1, 2, 3, 4, 5], ['Tuple', 1, 2, 3, 4, 5]]),
+        { realOnly: true }
+      )
+    ).toThrow();
+  });
+
+  it('wgsl: Dot(Tuple, Tuple) emits dot() over vecNf', () => {
+    const r = new WGSLTarget().compile(
+      ce.box(['Dot', ['Tuple', 'x', 'y'], ['Tuple', 3, 4]]),
+      { realOnly: true }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('dot(vec2f(x, y), vec2f(3.0, 4.0))');
+  });
+
+  it('javascript: compiled Dot matches the interpreter', () => {
+    const expr = ce.box(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
+    const r = new JavaScriptTarget().compile(expr, { realOnly: true });
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toBe(11);
+    expect(expr.evaluate().toString()).toBe('11');
+  });
+
+  it('python: Dot(Tuple, Tuple) emits np.dot', () => {
+    const r = new PythonTarget().compile(
+      ce.box(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]]),
+      { realOnly: true }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('np.dot((1, 2), (3, 4))');
+  });
+});

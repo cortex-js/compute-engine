@@ -150,6 +150,59 @@ describe('POINT/TUPLE ARITHMETIC — T2 rejected operations', () => {
     expect(r.operator).toBe('Error');
     expect(errorCode(r)).toBe('incompatible-type');
   });
+
+  // Tycho item 158: the rejection must not depend on how precisely the
+  // element types are known. A `tuple<broadcastable<number>, …>` operand used
+  // to escape the canonicalization guard (its elements are not provable
+  // subtypes of `number`), so the SAME product was accepted before a type
+  // refinement and rejected after it — with the identical error merely
+  // deferred to evaluation. Counted by tuple-ness now, like `mulTuples`.
+  test('tuple · tuple rejects identically across element-type refinement', () => {
+    for (const type of ['broadcastable<number>', 'number', 'finite_number']) {
+      const ce = new ComputeEngine();
+      ce.pushScope();
+      ce.declare('u', { type });
+      ce.declare('v', { type });
+      const left = ce.box(['Add', ['PointList', 1, 2], ['Tuple', 0, 0]]);
+      const right = ce.box(['PointList', 'u', 'v']);
+      const product = ce.function('Multiply', [left, right]);
+      expect(product.isValid).toBe(false);
+      expect(errorCode(product)).toBe('incompatible-type');
+      ce.popScope();
+    }
+  });
+
+  // The LaTeX rendering of the no-implicit-product rejection points the user
+  // at the operator that DOES accept points. `Dot` only: `Cross` and
+  // `HadamardProduct` do not accept tuples, so suggesting them would bounce
+  // a point user into a second rejection.
+  test('tuple · tuple and tuple divisor errors suggest Dot in LaTeX', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('(1,2)\\cdot(3,4)').latex).toContain('\\mathrm{Dot}');
+    expect(ce.parse('1/(2,3)').latex).toContain('\\mathrm{Dot}');
+    // The scalar+tuple rejection is a different mistake (points DO add;
+    // there is no operator to suggest) — its rendering is unchanged.
+    expect(ce.parse('1+(2,3)').latex).not.toContain('\\mathrm{Dot}');
+  });
+
+  // Same class as the Multiply guard: a tuple divisor never divides, whatever
+  // its elements refine to, so the rejection must not wait for provable
+  // element numericity.
+  test('scalar / tuple rejects identically across element-type refinement', () => {
+    for (const type of ['broadcastable<number>', 'number', 'finite_number']) {
+      const ce = new ComputeEngine();
+      ce.pushScope();
+      ce.declare('u', { type });
+      ce.declare('v', { type });
+      const div = ce.function('Divide', [
+        ce.box(1),
+        ce.box(['PointList', 'u', 'v']),
+      ]);
+      expect(div.isValid).toBe(false);
+      expect(errorCode(div)).toBe('incompatible-type');
+      ce.popScope();
+    }
+  });
 });
 
 describe('POINT/TUPLE ARITHMETIC — T3 symbolic / typed tuples', () => {

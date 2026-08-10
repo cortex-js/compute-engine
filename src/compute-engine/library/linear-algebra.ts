@@ -10,7 +10,9 @@ import {
 import { totalDegree } from '../boxed-expression/polynomial-degree.js';
 import { checkArity } from '../boxed-expression/validate.js';
 import {
+  hasAccessibleComponents,
   isFiniteIndexedCollection,
+  isNumericTuple,
   isPointListValue,
   isTuple,
 } from '../collection-utils.js';
@@ -944,12 +946,57 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Dot product (vector inner product) or matrix product.',
       keywords: ['dot product', 'inner product', 'scalar product'],
       complexity: 8300,
-      signature: '(matrix|vector, matrix|vector) -> value',
+      // Numeric tuples (points/vectors in ℝⁿ, incl. `PointList` with scalar
+      // components) are accepted alongside vectors: `Dot` is the explicit
+      // spelling of the point inner product — `tuple · tuple` has no implicit
+      // product and is rejected at canonicalization (Tycho item 158). The
+      // type language has no variadic tuple, so the bare `tuple` param does
+      // the admission (the `Norm` pattern) and the handlers narrow.
+      signature: '(matrix|vector|tuple, matrix|vector|tuple) -> value',
+      // Two provable rank-1 numeric operands reduce to the inner product, a
+      // number. A `tuple` operand only counts when every element is provably
+      // numeric (`isNumericTuple`, strict): a point-list-shaped tuple (a
+      // collection component, or `broadcastable` elements that could refine
+      // to one) keeps the wide `value` — claiming `number` on retractable
+      // evidence is how item 158 happened to `Multiply`. A vector operand
+      // needs the explicit matrix exclusion: `matrix<T^(mxn)>` carries its
+      // shape in the DIMENSIONS, not the element type, so it subtypes
+      // `vector` (= `list<number>`) too.
+      type: ([a, b]) =>
+        a &&
+        b &&
+        [a, b].every(
+          (x) =>
+            isNumericTuple(x) ||
+            (isSubtype(x.type.type, 'vector') &&
+              !isSubtype(x.type.type, 'matrix'))
+        )
+          ? 'number'
+          : 'value',
       // `Dot` is Mathematica's `.`: it reduces to the inner product for two
       // vectors and to the matrix product otherwise — exactly what
       // `MatrixMultiply` already computes.
-      evaluate: (ops, { engine: ce }) =>
-        ce.function('MatrixMultiply', ops).evaluate(),
+      evaluate: (ops, { engine: ce }) => {
+        // Lower each fixed numeric tuple operand to its component vector;
+        // `MatrixMultiply` does not accept tuples (and supplies the
+        // `incompatible-dimensions` check on unequal lengths). A tuple
+        // operand that is not (yet) a provable numeric tuple with accessible
+        // components — a symbolic point, or a point list like `(-6, n)` with
+        // `n` a list — stays a symbolic `Dot`.
+        const lowered: Expression[] = [];
+        for (const op of ops) {
+          if (isTuple(op)) {
+            if (
+              !isFunction(op) ||
+              !hasAccessibleComponents(op) ||
+              !isNumericTuple(op)
+            )
+              return undefined;
+            lowered.push(ce.function('List', op.ops));
+          } else lowered.push(op);
+        }
+        return ce.function('MatrixMultiply', lowered).evaluate();
+      },
     },
 
     HadamardProduct: {

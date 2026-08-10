@@ -16,6 +16,7 @@ import {
   widen,
 } from '../common/type/utils.js';
 import { parseType, parseTypeParameterClause } from '../common/type/parse.js';
+import { CACHE_STATS, bumpShadowCallable } from '../common/cache-stats.js';
 import { isEffectSubset } from '../common/type/effects.js';
 import {
   freeTypeVariables,
@@ -940,7 +941,12 @@ export function declareType(
   // only ever happens on a declaration that fulfils a forward reference, so
   // `existing` is already truthy; the second disjunct is there so a future
   // unblocking route cannot silently skip the bump.
-  if (existing || settled.length > 0) ce._generation += 1;
+  if (existing || settled.length > 0) {
+    ce._generation += 1;
+    // Shadow 'callable' axis (CE_CACHE_STATS probe): variance settle is a
+    // binding-repair event in its predicate.
+    if (CACHE_STATS) bumpShadowCallable();
+  }
 }
 
 /**

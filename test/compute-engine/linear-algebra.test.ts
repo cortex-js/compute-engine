@@ -2640,6 +2640,60 @@ describe('Dot / Cross', () => {
       ce.expr(['Cross', ['List', 1, 2], ['List', 3, 4]]).evaluate().isValid
     ).toBe(false);
   });
+
+  // Tycho item 158: `Dot` is the sanctioned spelling for point inner
+  // products (`tuple · tuple` is rejected at canonicalization), so it must
+  // accept fixed numeric `Tuple`/`PointList` operands, typed `number`.
+  describe('numeric tuple / PointList operands (Tycho item 158)', () => {
+    it('accepts two numeric tuples, typed number', () => {
+      const e = ce.expr(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
+      expect(e.isValid).toBe(true);
+      expect(e.type.toString()).toBe('number');
+      expect(e.evaluate().toString()).toBe('11');
+    });
+
+    it('accepts two PointLists with scalar components', () => {
+      const e = ce.expr(['Dot', ['PointList', 1, 2], ['PointList', 3, 4]]);
+      expect(e.isValid).toBe(true);
+      expect(e.type.toString()).toBe('number');
+      expect(e.evaluate().toString()).toBe('11');
+    });
+
+    it('accepts a mixed tuple · list product', () => {
+      expect(
+        ce.expr(['Dot', ['Tuple', 1, 2], ['List', 3, 4]]).evaluate().toString()
+      ).toBe('11');
+    });
+
+    it('errors on unequal tuple lengths', () => {
+      const r = ce
+        .expr(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4, 5]])
+        .evaluate();
+      expect(r.operator).toBe('Error');
+    });
+
+    it('a symbolic tuple operand stays symbolic, then evaluates', () => {
+      const eng = new ComputeEngine();
+      eng.pushScope();
+      eng.declare('u', { type: 'broadcastable<number>' });
+      eng.declare('v', { type: 'broadcastable<number>' });
+      const d = eng.function('Dot', [
+        eng.box(['Tuple', 1, 2]),
+        eng.box(['PointList', 'u', 'v']),
+      ]);
+      expect(d.isValid).toBe(true);
+      expect(d.evaluate().operator).toBe('Dot');
+      eng.assign('u', 3);
+      eng.assign('v', 4);
+      expect(d.evaluate().toString()).toBe('11');
+      eng.popScope();
+    });
+
+    it('keeps the matrix product typed value (not number)', () => {
+      const e = ce.expr(['Dot', m, m]);
+      expect(e.type.toString()).toBe('value');
+    });
+  });
 });
 
 describe('MatrixRank', () => {

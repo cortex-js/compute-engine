@@ -1752,6 +1752,19 @@ export const DEFINITIONS_CORE: LatexDictionary = [
             operand(op1, 2)
           )}}`;
         }
+        // The bare-`'tuple'` actual type is the signature of the
+        // no-implicit-tuple-product rejections (`tuple · tuple`, a tuple
+        // divisor — arithmetic-mul-div.ts; validation-route errors carry the
+        // full type spelling instead). Tell the user the operator that DOES
+        // accept points, rather than only that a tuple is not a number.
+        // `Dot` only: `Cross`/`HadamardProduct` do not accept tuples, so
+        // suggesting them would bounce a point user into a second rejection.
+        if (
+          stringValue(operand(op1, 2)) === 'number' &&
+          stringValue(operand(op1, 3)) === 'tuple'
+        ) {
+          return `\\mathtip{\\error{${where}}}{\\text{points have no implicit product — use }\\mathrm{Dot}\\text{ for the inner product}}`;
+        }
         return `\\mathtip{\\error{${where}}}{\\in ${serializer.serialize(
           operand(op1, 3)
         )}\\notin ${serializer.serialize(operand(op1, 2))}}`;

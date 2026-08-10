@@ -7,6 +7,7 @@ import type {
   TypeReference,
 } from '../common/type/types.js';
 import { isSubtype, provablyDisjoint } from '../common/type/subtype.js';
+import { CACHE_STATS, bumpShadowCallable } from '../common/cache-stats.js';
 import { groundSkeleton } from '../common/type/instantiate.js';
 import { applyTypeReference, declarationOf } from '../common/type/reference.js';
 import { subtypingVarianceOf } from '../common/type/variance.js';
@@ -160,6 +161,9 @@ function removeMintedTypeConstructor(
   // the generation (a re-mint bumps it again through `ce.declare()`, but the
   // remove-only path — a body edited from a tuple to a record — would not).
   ce._generation += 1;
+  // Shadow 'callable' axis (CE_CACHE_STATS probe): a constructor (callable)
+  // binding was removed — binding-repair event.
+  if (CACHE_STATS) bumpShadowCallable();
 }
 
 /**

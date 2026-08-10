@@ -775,11 +775,14 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // Numeric tuples (points/vectors in ℝⁿ): `tuple / scalar` scales
   // component-wise; `scalar / tuple` and `tuple / tuple` are undefined.
   {
+    // A tuple divisor has no defined reciprocal (no implicit dot/cross).
+    // Counted by tuple-ness (`isTuple`), not provable element numericity:
+    // like the `Multiply` tuple·tuple guard (Tycho item 158), a divisor that
+    // is a tuple under ANY element refinement never divides, and the strict
+    // `isNumericTuple` merely deferred the identical rejection to evaluation.
+    if (isTuple(op2)) return ce.error(['incompatible-type', 'number', 'tuple']);
     const op1Tuple = isNumericTuple(op1);
-    const op2Tuple = isNumericTuple(op2);
-    if (op1Tuple || op2Tuple) {
-      // A tuple divisor has no defined reciprocal (no implicit dot/cross).
-      if (op2Tuple) return ce.error(['incompatible-type', 'number', 'tuple']);
+    if (op1Tuple) {
       // Strip trivial divisors: the generic a/1 rule below is unreachable
       // from this branch, and an inert Divide(tuple-typed, 1) sends the
       // pretty-JSON serializer into infinite recursion (Multiply →
@@ -1195,10 +1198,16 @@ export function canonicalMultiply(
     ops = flattenHoldingBarriers(ops, 'Multiply', false);
   else ops = flatten(ops, 'Multiply', false);
 
-  // Two or more numeric tuples (points/vectors) have no implicit product
-  // (dot/cross); reject `tuple · tuple` at canonicalization when provable.
-  // `scalar · tuple` is allowed and scales component-wise at evaluation.
-  if (ops.filter((x) => isNumericTuple(x)).length >= 2)
+  // Two or more tuples (points/vectors) have no implicit product (dot/cross);
+  // reject `tuple · tuple` at canonicalization. Counted by tuple-ness
+  // (`isTuple`, like `mulTuples` on the evaluation path), not provable element
+  // numericity: a `tuple<broadcastable<number>, …>` operand — whatever its
+  // elements refine to — still has no product with another tuple, and the
+  // narrower `isNumericTuple` deferred the identical rejection to evaluation,
+  // making validity depend on refinement order (Tycho item 158). Use `Dot`
+  // for the explicit inner product. `scalar · tuple` is allowed and scales
+  // component-wise at evaluation.
+  if (ops.filter((x) => isTuple(x)).length >= 2)
     return ce.error(['incompatible-type', 'number', 'tuple']);
 
   //

@@ -21,7 +21,11 @@ import { declaredTypeError } from './type-compatibility-error.js';
 import { isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
-import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
+import {
+  CACHE_STATS,
+  recordBump,
+  bumpShadowCallable,
+} from '../../common/cache-stats.js';
 
 /**
  * ### THEORY OF OPERATIONS
@@ -292,14 +296,35 @@ export class _BoxedValueDefinition
   set value(v: Expression | undefined) {
     if (this._isConstant)
       throw new Error(`Cannot set value of constant "${this.name}"`);
+    const prev = CACHE_STATS ? this._value : null;
     this._value = v;
     this._isSelfReferential = isSelfReferentialValue(this.name, v);
-    if (CACHE_STATS)
+    if (CACHE_STATS) {
       recordBump(
         this._engine._ephemeralWriteDepth > 0
           ? 'ephemeralValueWrite'
           : 'valueWrite'
       );
+      // Shadow 'callable' axis: a write is callable-relevant when either side
+      // is a function literal, contains one a level down (a callback list —
+      // the R1 shape), or the declared type carries a signature arm anywhere
+      // (deep: the '->' containment test, probe-quality only).
+      const callableish = (v0: Expression | null | undefined): boolean => {
+        if (v0 == null) return false;
+        const x = v0 as {
+          operator?: string;
+          ops?: ReadonlyArray<{ operator?: string }> | null;
+        };
+        if (x.operator === 'Function') return true;
+        return x.ops?.some((o) => o.operator === 'Function') ?? false;
+      };
+      if (
+        callableish(prev) ||
+        callableish(v) ||
+        (this._type != null && this._type.toString().includes('->'))
+      )
+        bumpShadowCallable();
+    }
     this._engine._generation += 1;
     this._writeVersion += 1;
     // Ephemeral loop-index writes (big-op/comprehension index assigns) are

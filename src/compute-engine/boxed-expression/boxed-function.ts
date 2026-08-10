@@ -141,6 +141,8 @@ import {
   CACHE_STATS,
   recordCache,
   instrumentedCachedValue,
+  shadowEffectsOnHit,
+  shadowEffectsOnRecompute,
 } from '../../common/cache-stats.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
@@ -516,7 +518,10 @@ export class BoxedFunction
       this._effects.generation === generation &&
       this._effects.value !== null
     ) {
-      if (CACHE_STATS) recordCache('effects', 'hit');
+      if (CACHE_STATS) {
+        recordCache('effects', 'hit');
+        shadowEffectsOnHit(this, this.engine.context?.lexicalScope);
+      }
       return this._effects.value;
     }
 
@@ -536,6 +541,13 @@ export class BoxedFunction
           recordCache('effects', prev === null ? 'missCold' : 'missGeneration');
           if (prev !== null && sameComputedEffects(prev, value))
             recordCache('effects', 'missGenerationWasted');
+          shadowEffectsOnRecompute(
+            this,
+            this.engine.context?.lexicalScope,
+            value,
+            sameComputedEffects as (a: unknown, b: unknown) => boolean,
+            this._operator
+          );
         }
         this._effects.generation = generation;
         this._effects.value = value;

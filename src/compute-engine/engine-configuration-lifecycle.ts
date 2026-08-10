@@ -2,7 +2,11 @@ import {
   ConfigurationChangeTracker,
   type ConfigurationChangeListener,
 } from '../common/configuration-change.js';
-import { CACHE_STATS, recordBump } from '../common/cache-stats.js';
+import {
+  CACHE_STATS,
+  recordBump,
+  bumpShadowCallable,
+} from '../common/cache-stats.js';
 
 type ResetHooks = {
   refreshNumericConstants: () => void;
@@ -41,8 +45,12 @@ export class EngineConfigurationLifecycle {
   }
 
   set semanticEpoch(value: number) {
-    if (CACHE_STATS && value > this._semanticEpoch)
+    if (CACHE_STATS && value > this._semanticEpoch) {
       recordBump('semanticEpoch');
+      // Shadow 'callable' axis: every epoch event (assumption, inference,
+      // redefine, config, dirty pop) is in its predicate.
+      bumpShadowCallable();
+    }
     this._semanticEpoch = value;
   }
 
@@ -59,6 +67,7 @@ export class EngineConfigurationLifecycle {
       recordBump('generation');
       recordBump('mutationGeneration');
       recordBump('semanticEpoch');
+      bumpShadowCallable();
     }
     this._generation += 1;
     this._mutationGeneration += 1;
