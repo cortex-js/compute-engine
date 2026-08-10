@@ -3003,10 +3003,13 @@ describe('Tycho item 143: Min/Max over a degraded-type Distance broadcast', () =
     expect(engineWith(null).box(['Distance', 'S', P]).type.toString()).toBe(
       'list<number>'
     );
-    // Point-to-point stays the scalar.
-    expect(
-      e.box(['Distance', ['List', 0, 0], ['List', 3, 4]]).type.toString()
-    ).toBe('number');
+    // Point-to-point stays the SCALAR — the property this pin is about. It is
+    // reported as the real it is (a distance is the norm of a difference), not
+    // the wide `number`, so the assertion is on scalar-ness rather than on the
+    // spelling.
+    const d = e.box(['Distance', ['List', 0, 0], ['List', 3, 4]]);
+    expect(d.type.toString()).toBe('finite_real');
+    expect(d.type.matches('collection')).toBe(false);
   });
 
   it('compiles Min/Max over the broadcast on all three declaration legs', () => {

@@ -229,10 +229,12 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Determinant', ['Dot', 'u', 'v']]);
     // Dot returns a scalar, so the outer Determinant(matrix) mismatches; the
-    // repair must not promote u/v — they carry Dot's own parameter typing.
+    // repair must not promote u/v — they carry Dot's own parameter typing,
+    // which admits a point as well as a vector or matrix (`Dot` is the
+    // sanctioned spelling of the point inner product, Tycho item 158).
     expect(e.isValid).toBe(false);
-    expect(sym(ce, 'u')).toBe('list<number> | matrix');
-    expect(sym(ce, 'v')).toBe('list<number> | matrix');
+    expect(sym(ce, 'u')).toBe('list<number> | matrix | tuple');
+    expect(sym(ce, 'v')).toBe('list<number> | matrix | tuple');
   });
 
   test('P8: Det(A·M) with declared M: matrix — no unnecessary promotion', () => {

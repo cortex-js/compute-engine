@@ -102,6 +102,7 @@ import {
   acceleratedInfiniteSum,
   acceleratedInfiniteProduct,
   pointNormType,
+  euclideanNormType,
 } from './utils.js';
 import { inferContinuationPattern } from '../symbolic/interpret.js';
 import {
@@ -3263,6 +3264,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // consumer (and the lowering) sees that both shapes are possible.
         if (pa === undefined || pb === undefined)
           return 'number | list<number>';
+        // Point-to-point: a distance is the norm of the difference, so it is
+        // real whatever the coordinates are — and `number` (which admits
+        // complex) is refused by every `real`-declared slot. Read off the
+        // coordinates both literal points expose; a point-TYPED symbol has
+        // none, and keeps the wide `number`.
+        if (isFunction(a) && isFunction(b))
+          return euclideanNormType([...a.ops, ...b.ops]);
         return 'number';
       },
       evaluate: ([a, b], { engine: ce, numericApproximation }) => {

@@ -9,6 +9,22 @@ function parse(latex: string): Expression {
 }
 
 /**
+ * What a division by a `Tuple` canonicalizes to since 0.103.0.
+ *
+ * A juxtaposition of a number and a SET (`n\mathbb{N}`, `nS`) has no product,
+ * so it reads as a `Tuple` — and the tuple-divisor guard now counts operands
+ * by tuple-ness at canonicalization instead of deferring the identical
+ * rejection to evaluation. Every "this is NOT a ring construction" pin below
+ * therefore lands here: the point each is making is that the quotient-ring
+ * hook does not fire, and the ordinary division it falls back to is what
+ * rejects.
+ */
+const TUPLE_DIVISOR_ERROR: Expression = [
+  'Error',
+  ['ErrorCode', "'incompatible-type'", "'number'", "'tuple'"],
+];
+
+/**
  * Serialize→reparse round-trip on the STRUCTURAL tier (`isSame`), the property
  * `docs/mathnet/scripts/check-roundtrip.ts` enforces.
  */
@@ -96,21 +112,24 @@ describe('QuotientRing — parsing', () => {
   test('the fraction form requires the SAME ring on both sides', () => {
     // No trailing ring: ordinary division.
     expect(parse('\\frac{\\Z}{n}')).toEqual(['Divide', 'Integers', 'n']);
-    // A DIFFERENT ring in the denominator: ordinary division.
-    expect(parse('\\frac{\\Z}{n\\R}')).toEqual([
-      'Divide',
-      'Integers',
-      ['Tuple', 'n', 'RealNumbers'],
-    ]);
-    // More than two factors in the denominator: ordinary division.
+    // A DIFFERENT ring in the denominator: NOT a quotient ring. The
+    // denominator's juxtaposition (a number beside a set) has no product, so
+    // it reads as a `Tuple` — and since 0.103.0 a tuple divisor is rejected at
+    // canonicalization rather than at evaluation (`tuple · tuple` / `x /
+    // tuple` count operands by tuple-ness). What this pin is about is that the
+    // quotient-ring reading does not fire; the rejection is the ordinary
+    // division's, not this hook's.
+    expect(parse('\\frac{\\Z}{n\\R}')).toEqual(TUPLE_DIVISOR_ERROR);
+    // More than two factors in the denominator: same — not a quotient ring.
     // Fresh engine: this parse infers a numeric type for `x` in the shared
     // engine, which would poison the `ℤ[x] : set<unknown>` pin below.
     const fresh = new ComputeEngine();
-    expect(fresh.parse('\\frac{\\Z}{n\\Z x}').json).toEqual([
-      'Divide',
-      'Integers',
-      ['Tuple', 'n', 'Integers', 'x'],
-    ]);
+    expect(fresh.parse('\\frac{\\Z}{n\\Z x}').json).toEqual(
+      TUPLE_DIVISOR_ERROR
+    );
+    // The contrast that gives the pin its teeth: the SAME ring on both sides
+    // does fire, and is not an error.
+    expect(parse('\\frac{\\Z}{n\\Z}')).toEqual(['QuotientRing', 'Integers', 'n']);
   });
 });
 
@@ -531,38 +550,30 @@ describe('Pins: notations that are NOT ring constructions', () => {
   test('the slash form is restricted to the four RING constants', () => {
     // `\mathbb{N}` is set-typed but is NOT a ring, so `\N/n\N` is plain
     // division — the same gate the canonical `At`/`Subscript` dispatch uses
-    // (`RING_CONSTANTS` in `latex-syntax/utils.ts`).
-    expect(parse('\\mathbb{N}/n\\mathbb{N}')).toEqual([
-      'Divide',
-      'NonNegativeIntegers',
-      ['Tuple', 'n', 'NonNegativeIntegers'],
+    // (`RING_CONSTANTS` in `latex-syntax/utils.ts`) — and plain division by
+    // the denominator's `Tuple` rejects (see `TUPLE_DIVISOR_ERROR`).
+    expect(parse('\\mathbb{N}/n\\mathbb{N}')).toEqual(TUPLE_DIVISOR_ERROR);
+    // A ring constant on both sides DOES fire, which is what makes the
+    // rejection above evidence about the gate rather than about division.
+    expect(parse('\\mathbb{Z}/n\\mathbb{Z}')).toEqual([
+      'QuotientRing',
+      'Integers',
+      'n',
     ]);
   });
 
   test('the slash form does not fire over an arbitrary set-typed symbol', () => {
     const engine = new ComputeEngine();
     engine.declare('S', 'set<integer>');
-    expect(engine.parse('S/nS').json).toEqual([
-      'Divide',
-      'S',
-      ['Tuple', 'n', 'S'],
-    ]);
+    expect(engine.parse('S/nS').json).toEqual(TUPLE_DIVISOR_ERROR);
   });
 
   test('the fraction form does not fire over an arbitrary set-typed symbol', () => {
     const engine = new ComputeEngine();
     engine.declare('S', 'set<integer>');
-    expect(engine.parse('\\frac{S}{nS}').json).toEqual([
-      'Divide',
-      'S',
-      ['Tuple', 'n', 'S'],
-    ]);
+    expect(engine.parse('\\frac{S}{nS}').json).toEqual(TUPLE_DIVISOR_ERROR);
     // `\mathbb{N}` is set-typed but is NOT a ring.
-    expect(parse('\\frac{\\N}{n\\N}')).toEqual([
-      'Divide',
-      'NonNegativeIntegers',
-      ['Tuple', 'n', 'NonNegativeIntegers'],
-    ]);
+    expect(parse('\\frac{\\N}{n\\N}')).toEqual(TUPLE_DIVISOR_ERROR);
   });
 
   test('ordinary fractions are untouched', () => {

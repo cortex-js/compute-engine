@@ -1,5 +1,52 @@
 ## 0.103.1 _2026-08-10_
 
+### Breaking Changes
+
+- **A point inner product is now typed as the sum it is, instead of a flat
+  `number`.** `Dot((1, 2), (3, 4))` reports `finite_integer` — exactly what
+  `1·3 + 2·4` reports — where it previously reported `number` for every
+  provably numeric pair. The component types carry through: real components
+  give `finite_real`, a complex one gives a complex result. The answer is taken
+  from the arithmetic handlers rather than restated, so it cannot drift from
+  the written-out form.
+
+  The old claim was not merely loose. `number` includes complex, so a point
+  inner product was rejected by every `real`-declared slot in the library:
+  `Hypot(Dot(p, p), Dot(q, q))` — real by construction — reported
+  `incompatible-type('real', 'number')`, as did `Degrees`, `Haversine` and
+  `PrimePi` over the same operand. Those compose now, and a genuinely complex
+  inner product is still refused there, loudly.
+
+  Nothing else about `Dot` moves: an operand whose components cannot be read
+  (a symbol declared `tuple<number, number>` or `vector<3>`) keeps the wide
+  `number`; a tuple that is not provably a fixed numeric point keeps `value`
+  (the rule against claiming a numeric result on retractable evidence);
+  unequal fixed lengths still report `incompatible-dimensions`; and the matrix
+  product is still `value`. Update any pin asserting the literal string
+  `number` on a fixed numeric `Dot`.
+
+- **A norm and a distance are now typed as the reals they are.**
+  `Norm((3, 4))`, `Abs((3, 4))`, `Norm([3, 4])` and `Distance((0, 0), (3, 4))`
+  report `finite_real` where they reported `number`, and `real` when a
+  component's finiteness is not provable. A norm is `√(Σ|xᵢ|²)`, which is real
+  whatever the components are — `‖(3+4i, 0)‖` is `5` — so the `number` claim
+  (which admits complex) was refused by the same `real`-declared slots as the
+  `Dot` claim above: `Hypot(‖p‖, ‖q‖)` did not typecheck.
+
+  The demotions follow the convention `Abs` already uses for the same question
+  one operand down: a *provably* NaN component gives `number` (only a literal
+  proves NaN, so a merely-unknown component does not demote), and so does a
+  provably non-finite one. No narrower tier than `finite_real` is claimed —
+  unlike `|·|` of a scalar, a norm does not preserve the integer or rational
+  tier, since `‖(1, 1)‖` is `√2`.
+
+  Unchanged: a point whose component carries a collection still reports
+  `list<number>` (it zips into one norm per element), a list of points still
+  broadcasts to `list<number>`, `Distance` over an undecidable operand still
+  reports `number | list<number>`, and an operand with no readable components
+  (a symbol declared `tuple<number, number>`, a matrix, whose elements are
+  rows) keeps the wide `number`.
+
 ### Issues Resolved
 
 - **A point whose component is itself an inner product now compiles on the GPU

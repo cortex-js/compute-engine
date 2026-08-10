@@ -31,7 +31,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { asRational, toInteger } from '../boxed-expression/numerics.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
-import { pointNormType } from './utils.js';
+import { euclideanNormType, pointNormType } from './utils.js';
 
 // Total number of elements (m·n) at or below which a constant matrix
 // constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`, and the vector
@@ -119,6 +119,60 @@ function transposedType(
     swapped[axis1 - 1],
   ];
   return { kind: 'list', elements: t.elements, dimensions: swapped };
+}
+
+/**
+ * The components of a rank-1 `Dot` operand — a point (`Tuple`/`PointList`/…)
+ * or a literal `List` vector — or `undefined` when there are none to read.
+ *
+ * A symbol declared `tuple<number, number>` or `vector<3>`, and a lazy
+ * collection such as a `Range`, have a TYPE but no operands, which is the case
+ * `innerProductType` declines on.
+ */
+function rank1Components(
+  x: Expression
+): ReadonlyArray<Expression> | undefined {
+  if (!isFunction(x)) return undefined;
+  if (!isTuple(x) && x.operator !== 'List') return undefined;
+  const ops = x.ops;
+  return ops.length > 0 ? ops : undefined;
+}
+
+/**
+ * The type of the inner product `Dot(a, b)`, or `undefined` when it cannot be
+ * sharpened past the caller's `number`.
+ *
+ * An inner product IS the sum of the component-wise products, so it is typed
+ * by asking the arithmetic handlers for the type of that sum rather than by
+ * restating their reasoning here. `Multiply`'s numeric ladder alone — the
+ * integer/real/rational chain, the imaginary-parity closure (`i·i` is real),
+ * the non-finite and NaN cases — is a hundred lines that a copy would drift
+ * from the moment either side moved.
+ *
+ * Without this the operator claimed a flat `number` for every provably numeric
+ * pair, which is strictly LOOSER than writing the same arithmetic out:
+ * `1·3 + 2·4` is `finite_integer` where `Dot((1, 2), (3, 4))` was `number`. The
+ * cost is not cosmetic — `number` includes complex, so no `real`-declared slot
+ * accepts it, and `Hypot(Dot(p, p), Dot(q, q))` reported `incompatible-type`
+ * on an expression that is real by construction.
+ *
+ * Built with `ce.function` rather than `mul()`/`add()`: those fold exact
+ * literal operands to machine floats, which is a value-level shortcut this
+ * type-level question has no use for.
+ */
+function innerProductType(
+  a: Expression,
+  b: Expression
+): Type | BoxedType | undefined {
+  const as = rank1Components(a);
+  const bs = rank1Components(b);
+  // Unequal lengths are `incompatible-dimensions`, reported by the evaluate
+  // handler; there is no inner product here to type.
+  if (as === undefined || bs === undefined || as.length !== bs.length)
+    return undefined;
+  const ce = a.engine;
+  const terms = as.map((x, i) => ce.function('Multiply', [x, bs[i]]));
+  return ce.function('Add', terms).type;
 }
 
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
@@ -962,17 +1016,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // needs the explicit matrix exclusion: `matrix<T^(mxn)>` carries its
       // shape in the DIMENSIONS, not the element type, so it subtypes
       // `vector` (= `list<number>`) too.
-      type: ([a, b]) =>
-        a &&
-        b &&
-        [a, b].every(
-          (x) =>
-            isNumericTuple(x) ||
-            (isSubtype(x.type.type, 'vector') &&
-              !isSubtype(x.type.type, 'matrix'))
+      //
+      // With the components in hand the claim sharpens from `number` to the
+      // type of the inner product written out (`innerProductType`).
+      type: ([a, b]) => {
+        if (
+          !a ||
+          !b ||
+          ![a, b].every(
+            (x) =>
+              isNumericTuple(x) ||
+              (isSubtype(x.type.type, 'vector') &&
+                !isSubtype(x.type.type, 'matrix'))
+          )
         )
-          ? 'number'
-          : 'value',
+          return 'value';
+        return innerProductType(a, b) ?? 'number';
+      },
       // `Dot` is Mathematica's `.`: it reduces to the inner product for two
       // vectors and to the matrix product otherwise — exactly what
       // `MatrixMultiply` already computes.
@@ -1505,12 +1565,19 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // per element — the honest type is then `list<number>` (Tycho item 74).
       // `isTuple` is type-based so tuple-typed symbols route too. A LIST of
       // points broadcasts to one norm per point (Tycho item 138).
-      type: ([x]) =>
-        x && isTuple(x)
-          ? pointNormType(x)
-          : x && isPointListValue(x)
-            ? { kind: 'list', elements: 'number' }
-            : 'number',
+      //
+      // Otherwise the norm is the real scalar `euclideanNormType` describes,
+      // read off the elements a literal vector exposes. A matrix's elements
+      // are rows, whose `isFinite` is `false`, so nested operands fall to the
+      // wide `number` — as does anything with no elements to read.
+      type: ([x]) => {
+        if (x && isTuple(x)) return pointNormType(x);
+        if (x && isPointListValue(x))
+          return { kind: 'list', elements: 'number' };
+        if (x && isFunction(x) && x.operator === 'List')
+          return euclideanNormType(x.ops);
+        return 'number';
+      },
       evaluate: (
         ops,
         { engine: ce, numericApproximation }

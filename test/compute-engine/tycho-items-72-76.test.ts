@@ -143,9 +143,14 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     expect(abs.evaluate().operator).toEqual('List');
   });
 
-  test('Norm of a plain point still types number', () => {
+  test('Norm of a plain point still types a SCALAR, not a list', () => {
     const norm = ce.box(['Norm', ['Tuple', 3, 4]]);
-    expect(norm.type.toString()).toEqual('number');
+    // The point of item 74 is the scalar/list split — a plain point must not
+    // pick up the `list<number>` a broadcasting component earns. The scalar is
+    // reported as the real it is (a norm is `√(Σ|xᵢ|²)`, real whatever the
+    // components are) rather than the wide `number`.
+    expect(norm.type.toString()).toEqual('finite_real');
+    expect(norm.type.matches('collection')).toBe(false);
     expect(norm.evaluate().re).toEqual(5);
   });
 

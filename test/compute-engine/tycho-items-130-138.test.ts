@@ -128,7 +128,11 @@ describe('DISTANCE broadcasts over a point list (Tycho item 130)', () => {
     expect(ce.box(['Distance', S_LISTS, P]).type.toString()).toBe(
       'list<number>'
     );
-    expect(ce.box(['Distance', P, P]).type.toString()).toBe('number');
+    // Point-to-point is the SCALAR — reported as the real it is (a distance
+    // is the norm of a difference), not the wide `number`.
+    const d = ce.box(['Distance', P, P]);
+    expect(d.type.toString()).toBe('finite_real');
+    expect(d.type.matches('collection')).toBe(false);
   });
 
   test('the scalar/string boundary stays rejected', () => {

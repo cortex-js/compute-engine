@@ -29,7 +29,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { isTuple } from '../collection-utils.js';
-import { pointNormType } from './utils.js';
+import { pointNormBroadcasts } from './utils.js';
 import {
   numericTypeHandler,
   elementaryFunctionType,
@@ -220,8 +220,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // a decided-but-wrong scalar (the Tycho item-44 class).
       type: ([x, y]) => {
         if (
-          (x && isTuple(x) && pointNormType(x) !== 'number') ||
-          (y && isTuple(y) && pointNormType(y) !== 'number')
+          (x && isTuple(x) && pointNormBroadcasts(x)) ||
+          (y && isTuple(y) && pointNormBroadcasts(y))
         )
           return 'list<number>';
         // A point with a non-finite component has a non-finite norm

@@ -22,31 +22,29 @@ import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import { isTuple } from '../collection-utils.js';
 
 /**
- * Result type of the Euclidean norm of a fixed-arity point (`Tuple`
- * operand of `Norm`/`Abs`): a scalar, unless a component carries a
- * broadcasting collection — `‖(x+[0.5,1], y)‖` zips into one norm per
- * element, so the honest type is `list<number>`, not `number` (Tycho
- * item 74: a `number`-typed expression evaluating to a `List` breaks
- * consumers that dispatch on the declared type).
+ * Does the norm of this point BROADCAST — i.e. does a component carry a
+ * collection that zips into one norm per element?
  *
- * A tuple-typed component is NOT a broadcasting collection (tuples are
- * indexed collections in the type lattice but bind atomically): the norm
- * of `((3,4), 12)` takes the inner point's norm and stays scalar.
+ * `‖(x+[0.5, 1], y)‖` is one norm per element, so the honest type is
+ * `list<number>`, not `number` (Tycho item 74: a `number`-typed expression
+ * evaluating to a `List` breaks consumers that dispatch on the declared type).
  *
- * A non-literal point (a tuple-TYPED symbol or parameter) has no operands
- * to walk — inspect its declared element types instead, so
- * `p: tuple<list<real>, real>` reports the same `list<number>` its
- * evaluation produces.
+ * A tuple-typed component is NOT a broadcasting collection (tuples are indexed
+ * collections in the type lattice but bind atomically): the norm of
+ * `((3,4), 12)` takes the inner point's norm and stays scalar.
+ *
+ * A non-literal point (a tuple-TYPED symbol or parameter) has no operands to
+ * walk — its declared element types are inspected instead, so
+ * `p: tuple<list<real>, real>` reports the same broadcast its evaluation
+ * produces.
  */
-export function pointNormType(point: Expression): string {
+export function pointNormBroadcasts(point: Expression): boolean {
   if (isFunction(point))
     return point.ops.some(
       (op) => op.type.matches('indexed_collection') && !isTuple(op)
-    )
-      ? 'list<number>'
-      : 'number';
+    );
   const t = point.type.type;
-  if (
+  return (
     typeof t !== 'string' &&
     t.kind === 'tuple' &&
     t.elements.some((el) => {
@@ -54,9 +52,60 @@ export function pointNormType(point: Expression): string {
       if (typeof et !== 'string' && et.kind === 'tuple') return false;
       return isSubtype(et, 'indexed_collection');
     })
-  )
-    return 'list<number>';
-  return 'number';
+  );
+}
+
+/**
+ * The result type of a Euclidean norm/distance over `components` — the scalar
+ * `√(Σ|xᵢ|²)`.
+ *
+ * **A norm is REAL whatever its components are**: `|z|²` is real for a complex
+ * `z`, so `‖(3+4i, 0)‖ = 5`. Claiming the wide `number` (which includes
+ * complex) instead is not merely imprecise — it is refused by every
+ * `real`-declared slot in the library, so `Hypot(‖p‖, ‖q‖)` reported
+ * `incompatible-type('real', 'number')` on a value real by construction.
+ *
+ * The two demotions follow the convention `absFunctionType` sets for the same
+ * question one operand down:
+ *
+ * - a **provably NaN** component makes the norm NaN, which is not `real` —
+ *   and only a literal can prove NaN, so a merely-unknown component does not
+ *   demote (`Abs(x)` with `x: number` is `real` for the same reason);
+ * - a **provably non-finite** component (`isFinite === false`) keeps the wide
+ *   `number`, matching what `Hypot`'s own handler already answers for that
+ *   case.
+ *
+ * A component that is not provably numeric at all — a matrix ROW, a string, an
+ * `unknown`-typed element — keeps `number` too, ahead of both: those have no
+ * norm for this claim to be about.
+ *
+ * `finite_real` is claimed only when EVERY component is provably finite. No
+ * narrower tier is: unlike `|·|` of a scalar, a norm does not preserve the
+ * integer or rational tier — `‖(1, 1)‖ = √2`.
+ */
+export function euclideanNormType(
+  components: ReadonlyArray<Expression>
+): string {
+  if (components.length === 0) return 'number';
+  // Every component must be provably numeric for "the norm is real" to be a
+  // claim about anything: a `Norm` operand is declared `value`, so a string or
+  // an `unknown`-typed element can stand here, and those have no norm to type.
+  if (!components.every((c) => c.type.matches('number'))) return 'number';
+  if (components.some((c) => isNumber(c) && c.isNaN)) return 'number';
+  if (components.some((c) => c.isFinite === false)) return 'number';
+  return components.every((c) => c.isFinite === true) ? 'finite_real' : 'real';
+}
+
+/**
+ * Result type of the Euclidean norm of a fixed-arity point (`Tuple` operand of
+ * `Norm`/`Abs`): the scalar norm type, unless the point broadcasts.
+ */
+export function pointNormType(point: Expression): string {
+  if (pointNormBroadcasts(point)) return 'list<number>';
+  // Only a literal point exposes the components the scalar claim is derived
+  // from; a tuple-TYPED symbol keeps the wide `number`.
+  if (!isFunction(point)) return 'number';
+  return euclideanNormType(point.ops);
 }
 
 /**

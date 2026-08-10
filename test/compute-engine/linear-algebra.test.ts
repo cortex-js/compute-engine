@@ -1561,6 +1561,60 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
   });
 });
 
+// A norm is `√(Σ|xᵢ|²)` — real whatever the components are, since `|z|²` is
+// real for a complex `z`. Typing it the wide `number` (which admits complex)
+// made it unusable in every `real`-declared slot: `Hypot(‖p‖, 1)` reported
+// `incompatible-type('real', 'number')` on a value real by construction.
+describe('Norm — result type is real', () => {
+  it('a fixed numeric point norms to a finite real', () => {
+    const eng = new ComputeEngine();
+    expect(eng.expr(['Norm', ['Tuple', 3, 4]]).type.toString()).toBe(
+      'finite_real'
+    );
+    expect(eng.expr(['Abs', ['Tuple', 3, 4]]).type.toString()).toBe(
+      'finite_real'
+    );
+    expect(eng.expr(['Norm', ['List', 3, 4]]).type.toString()).toBe(
+      'finite_real'
+    );
+  });
+
+  it('a COMPLEX component still norms to a real', () => {
+    const eng = new ComputeEngine();
+    eng.declare('z', 'complex');
+    // Finiteness is not provable for a bare `complex`, so `real`, not
+    // `finite_real` — but real either way, which is the point.
+    expect(eng.expr(['Norm', ['Tuple', 'z', 1]]).type.toString()).toBe('real');
+    expect(eng.expr(['Norm', ['Tuple', 'z', 1]]).evaluate().toString()).toBe(
+      'sqrt(|z|^2 + 1)'
+    );
+  });
+
+  it('composes into a `real`-declared slot', () => {
+    const eng = new ComputeEngine();
+    const e = eng.expr(['Hypot', ['Norm', ['Tuple', 3, 4]], 1]);
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().toString()).toBe('sqrt(26)');
+  });
+
+  it('the broadcast and unreadable-operand cases are unchanged', () => {
+    const eng = new ComputeEngine();
+    eng.declare('p', 'tuple<number, number>');
+    // A collection component zips into one norm per element (Tycho item 74).
+    expect(
+      eng.expr(['Norm', ['Tuple', ['List', 1, 2], 3]]).type.toString()
+    ).toBe('list<number>');
+    // No components to read.
+    expect(eng.expr(['Norm', 'p']).type.toString()).toBe('number');
+    // A matrix's elements are ROWS, not scalars.
+    expect(
+      eng
+        .expr(['Norm', ['List', ['List', 1, 2], ['List', 3, 4]]])
+        .type.toString()
+    ).toBe('number');
+  });
+});
+
 describe('Norm', () => {
   // Scalar norm (absolute value)
   it('should compute the norm of a scalar', () => {
@@ -2643,20 +2697,76 @@ describe('Dot / Cross', () => {
 
   // Tycho item 158: `Dot` is the sanctioned spelling for point inner
   // products (`tuple · tuple` is rejected at canonicalization), so it must
-  // accept fixed numeric `Tuple`/`PointList` operands, typed `number`.
+  // accept fixed numeric `Tuple`/`PointList` operands, typed numerically.
+  //
+  // The claim is the type of the inner product WRITTEN OUT — `Dot((1,2),(3,4))`
+  // is `finite_integer` exactly as `1·3 + 2·4` is. It was a flat `number`
+  // until the follow-up: `number` includes complex, so no `real`-declared
+  // operator (`Hypot`, `Haversine`, `Degrees`) accepted a point inner product.
   describe('numeric tuple / PointList operands (Tycho item 158)', () => {
-    it('accepts two numeric tuples, typed number', () => {
+    it('accepts two numeric tuples, typed as the written-out sum', () => {
       const e = ce.expr(['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
       expect(e.isValid).toBe(true);
-      expect(e.type.toString()).toBe('number');
+      expect(e.type.toString()).toBe('finite_integer');
+      expect(e.type.toString()).toBe(
+        ce.expr(['Add', ['Multiply', 1, 3], ['Multiply', 2, 4]]).type.toString()
+      );
       expect(e.evaluate().toString()).toBe('11');
     });
 
     it('accepts two PointLists with scalar components', () => {
       const e = ce.expr(['Dot', ['PointList', 1, 2], ['PointList', 3, 4]]);
       expect(e.isValid).toBe(true);
-      expect(e.type.toString()).toBe('number');
+      expect(e.type.toString()).toBe('finite_integer');
       expect(e.evaluate().toString()).toBe('11');
+    });
+
+    it('the element types carry through to the result type', () => {
+      const eng = new ComputeEngine();
+      eng.declare('r1', 'finite_real');
+      eng.declare('r2', 'finite_real');
+      eng.declare('z', 'complex');
+      expect(
+        eng
+          .expr(['Dot', ['Tuple', 'r1', 'r2'], ['Tuple', 1, 2]])
+          .type.toString()
+      ).toBe('finite_real');
+      // A complex component makes the sum complex — and whatever the
+      // arithmetic handlers answer for the written-out form is what `Dot`
+      // answers, which is the property worth pinning rather than the literal
+      // spelling of any one cell.
+      expect(
+        eng.expr(['Dot', ['Tuple', 'z', 'r2'], ['Tuple', 1, 2]]).type.toString()
+      ).toBe(
+        eng
+          .expr([
+            'Add',
+            ['Multiply', 'z', 1],
+            ['Multiply', 'r2', 2],
+          ])
+          .type.toString()
+      );
+    });
+
+    it('a real point inner product composes into a `real` slot', () => {
+      // `Hypot` is declared `(real, real) -> real`; the flat `number` claim
+      // made this `incompatible-type` on an expression real by construction.
+      const d = ['Dot', ['Tuple', 3, 4], ['Tuple', 3, 4]];
+      const e = ce.expr(['Hypot', d, d]);
+      expect(e.isValid).toBe(true);
+      expect(e.evaluate().toString()).toBe('25sqrt(2)');
+      // …and a complex one is still refused, loudly.
+      expect(
+        ce.expr(['Hypot', ['Dot', ['Tuple', 'i', 2], ['Tuple', 3, 4]], 1])
+          .isValid
+      ).toBe(false);
+    });
+
+    it('an operand with no readable components keeps the wide `number`', () => {
+      const eng = new ComputeEngine();
+      eng.declare('p', 'tuple<number, number>');
+      eng.declare('q', 'tuple<number, number>');
+      expect(eng.expr(['Dot', 'p', 'q']).type.toString()).toBe('number');
     });
 
     it('accepts a mixed tuple · list product', () => {
