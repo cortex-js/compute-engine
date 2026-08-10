@@ -14752,6 +14752,36 @@ Throws if `other` is a string that is not a valid type.
 
 <MemberCard>
 
+##### BoxedType.withDisplayString()
+
+```ts
+withDisplayString(display): BoxedType
+```
+
+A twin of this type that PRINTS as `display()` while remaining, in every
+other respect, byte-identical to this one — same `Type` object, same
+`isPolymorphic`, same subtype/`matches` answers.
+
+This is the whole seam of the R-D5 display projection (Design D §9 item 4):
+the projection is a property of the STRING a type shows a human, never of
+the type itself. Applying it to the `Type` instead — building a boxed type
+around the projected AST — made it semantics-visible: a callback-bearing
+overload set collapsed to `nothing` through `reduceType`, dropping the
+`forall` flipped `isPolymorphic` (and with it every `Ground <: Poly`
+answer), and re-validating the projected polytype could THROW out of a
+getter. Deferring to stringification makes all three impossible by
+construction.
+
+`display` is called at most once, on the first print.
+
+####### display
+
+() => `string`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### BoxedType.toString()
 
 ```ts
